@@ -7,6 +7,7 @@
 #include "app/debug_model.hpp"
 #include "backend/idebug_backend.hpp"
 #include "backend/dap_backend.hpp"
+#include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/source_panel.hpp"
@@ -21,6 +22,8 @@ struct AppConfig {
   std::vector<std::string> args;
   int attach_pid = 0;
   std::string attach_target;
+  bool use_connection_wizard = false;
+  std::string launch_directory;
 };
 
 class Application {
@@ -34,11 +37,16 @@ class Application {
   void submit_command(const UiCommand& command);
   void refresh_all_watches();
   void schedule_poll();
+  void apply_connection_and_start();
+  void open_connection_wizard();
+  void on_connection_complete(const ConnectionResult& result);
+  bool connection_config_complete() const;
 
   AppConfig config_;
   DebugModel model_;
   SourceViewState source_state_;
   FilePickerState file_picker_state_;
+  ConnectionWizardState connection_wizard_state_;
   MainLayoutState layout_state_;
 
   ThreadSafeQueue<UiCommand> command_queue_;

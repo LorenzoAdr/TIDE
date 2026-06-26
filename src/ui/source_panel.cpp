@@ -23,6 +23,7 @@ namespace {
 
 struct SourcePanelState {
   Box content_box;
+  Box gutter_box;
   int last_visible_lines = 1;
   uint64_t last_view_token = 0;
 };
@@ -157,7 +158,8 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
     const int start = view_state->scroll;
     const int end = std::min(total, start + visible);
 
-    Elements rows;
+    Elements gutter_rows;
+    Elements code_rows;
     for (int i = start; i < end; ++i) {
       const int line_no = i + 1;
       const bool is_current = line_no == model->active_line;
@@ -173,23 +175,30 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
         line_no_text = std::string(4 - line_no_text.size(), ' ') + line_no_text;
       }
 
-      Element row = hbox({text(gutter), text(line_no_text), text(" "),
-                          HighlightCppLine(view_state->lines[i])});
-
+      Element gutter_row = text(gutter);
       if (is_current) {
-        row = row | inverted;
+        gutter_row = gutter_row | inverted;
       } else if (is_bp) {
-        row = row | color(Color::Red);
+        gutter_row = gutter_row | color(Color::Red);
       }
+      gutter_rows.push_back(gutter_row);
 
-      rows.push_back(row);
+      Element code_row =
+          hbox({text(line_no_text), text(" "), HighlightCppLine(view_state->lines[i])});
+      if (is_current) {
+        code_row = code_row | inverted;
+      } else if (is_bp) {
+        code_row = code_row | color(Color::Red);
+      }
+      code_rows.push_back(code_row);
     }
 
-    if (rows.empty()) {
-      rows.push_back(text("(sin líneas)") | dim);
+    if (gutter_rows.empty()) {
+      gutter_rows.push_back(text("   ") | dim);
+      code_rows.push_back(text("(sin líneas)") | dim);
     }
 
-    const int rendered_lines = static_cast<int>(rows.size());
+    const int rendered_lines = static_cast<int>(code_rows.size());
 
     std::string title = "Código";
     if (!model->active_file.empty()) {
@@ -198,12 +207,14 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
       title = filename;
     }
 
-    Element code = vbox(std::move(rows)) | flex | reflect(panel_state->content_box) |
+    Element gutter =
+        vbox(std::move(gutter_rows)) | reflect(panel_state->gutter_box) | bgcolor(theme::CodeBg());
+    Element code = vbox(std::move(code_rows)) | flex | reflect(panel_state->content_box) |
                    bgcolor(theme::CodeBg());
     Element scrollbar =
         vertical_scrollbar(total, view_state->scroll, visible, rendered_lines);
 
-    return MakePanel(title, hbox({code | flex, scrollbar}), theme::CodeBg());
+    return MakePanel(title, hbox({gutter, code | flex, scrollbar}), theme::CodeBg());
   });
 
   return CatchEvent(renderer, [model, view_state, on_command, panel_state](
@@ -215,21 +226,22 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
         event.mouse().motion == Mouse::Pressed) {
       const auto& m = event.mouse();
-      if (!panel_state->content_box.Contain(m.x, m.y)) {
-        return false;
-      }
-
-      const int rel_y = m.y - panel_state->content_box.y_min;
-      const int rel_x = m.x - panel_state->content_box.x_min;
-      const int clicked_line = view_state->scroll + rel_y + 1;
-      if (clicked_line >= 1 && clicked_line <= total && !model->active_file.empty()) {
-        if (rel_x < 8) {
+      if (panel_state->gutter_box.Contain(m.x, m.y)) {
+        const int rel_y = m.y - panel_state->gutter_box.y_min;
+        const int clicked_line = view_state->scroll + rel_y + 1;
+        if (clicked_line >= 1 && clicked_line <= total && !model->active_file.empty()) {
           sync_breakpoints(model, clicked_line, on_command);
-        } else {
+          return true;
+        }
+      }
+      if (panel_state->content_box.Contain(m.x, m.y)) {
+        const int rel_y = m.y - panel_state->content_box.y_min;
+        const int clicked_line = view_state->scroll + rel_y + 1;
+        if (clicked_line >= 1 && clicked_line <= total) {
           model->active_line = clicked_line;
           model->view_token++;
+          return true;
         }
-        return true;
       }
       return false;
     }

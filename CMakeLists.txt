@@ -20,8 +20,10 @@ add_executable(tgdb
   src/ui/watches_panel.cpp
   src/ui/console_panel.cpp
   src/ui/file_picker.cpp
+  src/ui/connection_wizard.cpp
   src/util/cpp_highlight.cpp
   src/util/filesystem_tree.cpp
+  src/util/process_list.cpp
 )
 
 target_include_directories(tgdb PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

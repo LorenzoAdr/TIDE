@@ -84,6 +84,18 @@ void DapBackend::setup_session() {
     if (e.threadId.has_value()) {
       active_thread_id_ = static_cast<int>(*e.threadId);
     }
+
+    // Tras continue, GDB puede entregar tarde el StoppedEvent del attach/pausa
+    // inicial; ignorarlo evita que la UI vuelva a "Detenido: attach".
+    const bool believed_running = !inferior_stopped_.load(std::memory_order_acquire);
+    if (believed_running) {
+      if (expecting_interrupt_for_breakpoints_) {
+        expecting_interrupt_for_breakpoints_ = false;
+      } else if (e.reason == "attach" || e.reason == "pause") {
+        return;
+      }
+    }
+
     DebugEvent event;
     event.kind = DebugEventKind::kStopped;
     event.thread_id = active_thread_id_;
@@ -95,7 +107,13 @@ void DapBackend::setup_session() {
     }
     push_event(std::move(event));
 
-    inferior_stopped_ = true;
+    inferior_stopped_.store(true, std::memory_order_release);
+
+    if (breakpoints_pending_sync_) {
+      UiCommand sync;
+      sync.kind = UiCommandKind::kSyncBreakpoints;
+      commands_.push(sync);
+    }
 
     // No llamar session_->send() aquí: este handler corre en el hilo lector DAP
     // y provocaría deadlock. Delegar al worker.
@@ -106,7 +124,7 @@ void DapBackend::setup_session() {
   });
 
   session_->registerHandler([&](const dap::ContinuedEvent& e) {
-    inferior_stopped_ = false;
+    inferior_stopped_.store(false, std::memory_order_release);
     DebugEvent event;
     event.kind = DebugEventKind::kContinued;
     event.thread_id = static_cast<int>(e.threadId);
@@ -344,7 +362,6 @@ bool DapBackend::pause_inferior_locked() {
   pause.threadId = active_thread_id_ > 0 ? active_thread_id_ : 1;
   const auto pause_response = session_->send(pause).get();
   if (!pause_response.error) {
-    inferior_stopped_ = true;
     return true;
   }
 
@@ -352,22 +369,39 @@ bool DapBackend::pause_inferior_locked() {
   interrupt.expression = "interrupt";
   interrupt.context = "repl";
   const auto interrupt_response = session_->send(interrupt).get();
-  if (!interrupt_response.error) {
-    inferior_stopped_ = true;
-    return true;
-  }
-  return false;
+  return !interrupt_response.error;
+}
+
+bool DapBackend::request_interrupt_locked() {
+  return pause_inferior_locked();
+}
+
+void DapBackend::notify_stopped(const std::string& reason, int thread_id) {
+  inferior_stopped_.store(true, std::memory_order_release);
+  DebugEvent event;
+  event.kind = DebugEventKind::kStopped;
+  event.stop_reason = reason;
+  event.thread_id = thread_id > 0 ? thread_id : active_thread_id_;
+  push_event(std::move(event));
+}
+
+void DapBackend::notify_continued(int thread_id) {
+  inferior_stopped_.store(false, std::memory_order_release);
+  DebugEvent event;
+  event.kind = DebugEventKind::kContinued;
+  event.thread_id = thread_id > 0 ? thread_id : active_thread_id_;
+  push_event(std::move(event));
 }
 
 bool DapBackend::continue_inferior_locked() {
   dap::ContinueRequest request;
   request.threadId = active_thread_id_ > 0 ? active_thread_id_ : 1;
   const auto response = session_->send(request).get();
-  if (!response.error) {
-    inferior_stopped_ = false;
-    return true;
+  if (response.error) {
+    return false;
   }
-  return false;
+  notify_continued(request.threadId);
+  return true;
 }
 
 bool DapBackend::verify_inferior_attached_locked() {
@@ -395,9 +429,11 @@ void DapBackend::on_inferior_attached() {
     return;
   }
   pause_inferior_locked();
+  inferior_stopped_.store(true, std::memory_order_release);
   for (const auto& [file, lines] : breakpoints_by_file_) {
-    send_breakpoints_locked(file, lines, false);
+    send_breakpoints_locked(file, lines);
   }
+  notify_stopped("attach");
 }
 
 void DapBackend::flush_breakpoints() {
@@ -408,25 +444,34 @@ void DapBackend::flush_breakpoints() {
   if (!session_) {
     return;
   }
-  if (!inferior_stopped_) {
+  if (!inferior_stopped_.load(std::memory_order_acquire)) {
     pause_inferior_locked();
   }
   for (const auto& [file, lines] : breakpoints_by_file_) {
-    send_breakpoints_locked(file, lines, false);
+    send_breakpoints_locked(file, lines);
+  }
+}
+
+void DapBackend::apply_pending_breakpoints_locked() {
+  if (!inferior_stopped_.load(std::memory_order_acquire)) {
+    return;
+  }
+  for (const auto& [file, lines] : breakpoints_by_file_) {
+    send_breakpoints_locked(file, lines);
+  }
+  breakpoints_pending_sync_ = false;
+  const bool resume = resume_after_breakpoint_sync_;
+  resume_after_breakpoint_sync_ = false;
+  if (resume) {
+    continue_inferior_locked();
   }
 }
 
 void DapBackend::send_breakpoints_locked(const std::string& normalized_file,
-                                         const std::vector<int>& lines,
-                                         bool resume_if_was_running) {
-  const bool resume_after = resume_if_was_running && !inferior_stopped_;
-  if (!inferior_stopped_) {
-    if (!pause_inferior_locked()) {
-      push_error(
-          "setBreakpoints: no se pudo pausar el proceso (GDB exige estar "
-          "detenido)");
-      return;
-    }
+                                         const std::vector<int>& lines) {
+  if (!inferior_stopped_.load(std::memory_order_acquire)) {
+    push_error("setBreakpoints: el inferior no está detenido");
+    return;
   }
 
   dap::SetBreakpointsRequest request;
@@ -485,10 +530,6 @@ void DapBackend::send_breakpoints_locked(const std::string& normalized_file,
     }
   }
   push_event(std::move(event));
-
-  if (resume_after) {
-    continue_inferior_locked();
-  }
 }
 
 void DapBackend::update_breakpoints(const std::string& file,
@@ -508,7 +549,25 @@ void DapBackend::update_breakpoints(const std::string& file,
   if (!session_) {
     return;
   }
-  send_breakpoints_locked(normalized, lines);
+
+  if (inferior_stopped_.load(std::memory_order_acquire)) {
+    breakpoints_pending_sync_ = false;
+    resume_after_breakpoint_sync_ = false;
+    send_breakpoints_locked(normalized, lines);
+    return;
+  }
+
+  breakpoints_pending_sync_ = true;
+  resume_after_breakpoint_sync_ = true;
+  expecting_interrupt_for_breakpoints_ = true;
+  if (!request_interrupt_locked()) {
+    expecting_interrupt_for_breakpoints_ = false;
+    breakpoints_pending_sync_ = false;
+    resume_after_breakpoint_sync_ = false;
+    push_error(
+        "No se pudo interrumpir el proceso para instalar breakpoints. "
+        "Pausa manualmente (⏸) e inténtalo de nuevo.");
+  }
 }
 
 void DapBackend::ensure_configuration_done() {
@@ -527,6 +586,13 @@ void DapBackend::ensure_configuration_done() {
 void DapBackend::handle_command(const UiCommand& command) {
   if (command.kind == UiCommandKind::kSetBreakpoints) {
     update_breakpoints(command.breakpoint_file, command.breakpoint_lines);
+    return;
+  }
+  if (command.kind == UiCommandKind::kSyncBreakpoints) {
+    std::lock_guard<std::mutex> lock(session_mutex_);
+    if (session_) {
+      apply_pending_breakpoints_locked();
+    }
     return;
   }
   if (command.kind == UiCommandKind::kRefreshStack) {
@@ -606,17 +672,15 @@ void DapBackend::handle_command(const UiCommand& command) {
       break;
     }
     case UiCommandKind::kContinue: {
-      dap::ContinueRequest request;
-      request.threadId = command.thread_id > 0 ? command.thread_id
-                                               : active_thread_id_;
-      const auto response = session_->send(request).get();
-      if (response.error) {
-        push_error("continue falló: " + response.error.message);
+      if (!continue_inferior_locked()) {
+        push_error("continue falló");
       }
       break;
     }
     case UiCommandKind::kPause: {
-      if (!pause_inferior_locked()) {
+      if (pause_inferior_locked()) {
+        notify_stopped("pause");
+      } else {
         push_error("pause falló");
       }
       break;
@@ -689,6 +753,51 @@ void DapBackend::handle_command(const UiCommand& command) {
       push_event(std::move(event));
       break;
     }
+    case UiCommandKind::kSetWatchValue: {
+      dap::SetExpressionRequest request;
+      request.expression = command.expression;
+      request.value = command.assign_value;
+      if (command.frame_id >= 0) {
+        request.frameId = command.frame_id;
+      }
+      const auto response = session_->send(request).get();
+      if (response.error) {
+        dap::EvaluateRequest fallback;
+        fallback.expression =
+            "set variable " + command.expression + " = " + command.assign_value;
+        fallback.context = "repl";
+        if (command.frame_id >= 0) {
+          fallback.frameId = command.frame_id;
+        }
+        const auto fb = session_->send(fallback).get();
+        if (fb.error) {
+          DebugEvent event;
+          event.kind = DebugEventKind::kWatchUpdated;
+          event.watch_expression = command.expression;
+          event.watch_value = "[error] " + fb.error.message;
+          push_event(std::move(event));
+          break;
+        }
+        DebugEvent event;
+        event.kind = DebugEventKind::kWatchUpdated;
+        event.watch_expression = command.expression;
+        event.watch_value = command.assign_value;
+        push_event(std::move(event));
+      } else {
+        DebugEvent event;
+        event.kind = DebugEventKind::kWatchUpdated;
+        event.watch_expression = command.expression;
+        event.watch_value = response.response.value;
+        push_event(std::move(event));
+      }
+      if (command.frame_id >= 0) {
+        UiCommand refresh;
+        refresh.kind = UiCommandKind::kFetchVariables;
+        refresh.frame_id = command.frame_id;
+        commands_.push(refresh);
+      }
+      break;
+    }
     case UiCommandKind::kDisconnect: {
       dap::DisconnectRequest request;
       request.terminateDebuggee = true;
@@ -700,7 +809,7 @@ void DapBackend::handle_command(const UiCommand& command) {
       request.terminateDebuggee = false;
       session_->send(request).get();
       inferior_attached_ = false;
-      inferior_stopped_ = false;
+      inferior_stopped_.store(false, std::memory_order_release);
       break;
     }
     default:

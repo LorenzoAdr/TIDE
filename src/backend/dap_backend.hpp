@@ -41,9 +41,12 @@ class DapBackend : public IDebugBackend {
                                int parent_depth);
   void update_breakpoints(const std::string& file,
                           const std::vector<int>& lines);
+  void apply_pending_breakpoints_locked();
+  bool request_interrupt_locked();
+  void notify_stopped(const std::string& reason, int thread_id = -1);
+  void notify_continued(int thread_id = -1);
   void send_breakpoints_locked(const std::string& normalized_file,
-                               const std::vector<int>& lines,
-                               bool resume_if_was_running = true);
+                               const std::vector<int>& lines);
   void flush_breakpoints();
   bool pause_inferior_locked();
   bool continue_inferior_locked();
@@ -66,7 +69,10 @@ class DapBackend : public IDebugBackend {
   std::mutex session_mutex_;
   int active_thread_id_ = 1;
   bool inferior_attached_ = false;
-  bool inferior_stopped_ = true;
+  std::atomic<bool> inferior_stopped_{true};
+  bool expecting_interrupt_for_breakpoints_ = false;
+  bool breakpoints_pending_sync_ = false;
+  bool resume_after_breakpoint_sync_ = false;
   std::unordered_map<std::string, std::vector<int>> breakpoints_by_file_;
 };
 

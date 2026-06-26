@@ -9,6 +9,9 @@ namespace tgdb {
 
 using CommandCallback = std::function<void(const struct UiCommand&)>;
 
-ftxui::Component MakeConsolePanel(DebugModel* model, CommandCallback on_command);
+struct MainLayoutState;
+
+ftxui::Component MakeConsolePanel(DebugModel* model, CommandCallback on_command,
+                                  MainLayoutState* layout_state);
 
 }  // namespace tgdb

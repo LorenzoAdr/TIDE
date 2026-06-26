@@ -81,6 +81,8 @@ struct DebugModel {
   void remove_breakpoint(const std::string& file, int line);
   std::vector<int> enabled_breakpoint_lines(const std::string& file) const;
   void add_watch(const std::string& expression);
+  void remove_watch(int index);
+  void remove_watch(const std::string& expression);
 
   std::unordered_map<std::string, std::unordered_set<int>> disabled_breakpoints;
 };

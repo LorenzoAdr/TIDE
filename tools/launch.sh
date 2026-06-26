@@ -59,7 +59,7 @@ fi
 export TERM="${TERM:-xterm-256color}"
 
 if [[ $# -eq 0 ]]; then
-  exec "${TGDB}" --cwd "${ROOT}" "${HELLO}"
+  exec "${TGDB}" --cwd "${ROOT}"
 fi
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -118,7 +118,7 @@ while [[ $i -le $# ]]; do
 done
 
 if [[ -z "${PROGRAM}" ]]; then
-  die "falta el ejecutable (símbolos). Usa --help para ver ejemplos."
+  exec "${TGDB}" --cwd "${WORKSPACE}"
 fi
 
 if [[ -n "${ATTACH_PID}" && -n "${ATTACH_TARGET}" ]]; then

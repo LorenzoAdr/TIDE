@@ -37,10 +37,12 @@ enum class UiCommandKind {
   kStepOut,
   kEvaluate,
   kSetBreakpoints,
+  kSyncBreakpoints,
   kRefreshStack,
   kFetchVariables,
   kFetchVariableChildren,
   kAddWatch,
+  kSetWatchValue,
   kDisconnect,
   kDetach,
   kQuit,
@@ -52,6 +54,7 @@ struct UiCommand {
   AttachConfig attach;
   std::string expression;
   EvaluateContext evaluate_context = EvaluateContext::kRepl;
+  std::string assign_value;
   std::string breakpoint_file;
   std::vector<int> breakpoint_lines;
   int frame_id = -1;

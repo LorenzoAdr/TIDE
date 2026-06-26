@@ -9,6 +9,7 @@
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/screen_interactive.hpp"
+#include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/main_layout.hpp"
 
@@ -19,7 +20,6 @@ namespace tgdb {
 using namespace ftxui;
 
 Application::Application(AppConfig config) : config_(std::move(config)) {
-  namespace fs = std::filesystem;
   std::error_code ec;
 
   if (config_.workspace_root.empty()) {
@@ -32,15 +32,131 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
     config_.program = fs::absolute(config_.program, ec).string();
   }
 
-  if (config_.workspace_root.empty()) {
-    config_.workspace_root = fs::current_path().string();
-  }
   model_.workspace_root = config_.workspace_root;
   model_.program = config_.program;
   model_.program_args = config_.args;
-  model_.status_message = "Conectando con GDB DAP...";
+
+  connection_wizard_state_.launch_root = config_.launch_directory;
+  if (connection_wizard_state_.launch_root.empty()) {
+    connection_wizard_state_.launch_root = config_.workspace_root;
+  }
+
+  if (config_.use_connection_wizard) {
+    model_.status_message = "Configurar conexión...";
+    connection_wizard_state_.open = true;
+    connection_wizard_state_.reset();
+    if (!config_.program.empty()) {
+      connection_wizard_state_.selected_program = config_.program;
+      connection_wizard_state_.step = WizardStep::PickWorkspace;
+      connection_wizard_state_.browser_path =
+          connection_wizard_state_.launch_root;
+      connection_wizard_state_.browser_loaded_path.clear();
+      if (config_.mode == SessionMode::kAttach) {
+        connection_wizard_state_.mode = WizardMode::Attach;
+        connection_wizard_state_.mode_selected = 1;
+      } else {
+        connection_wizard_state_.mode = WizardMode::Launch;
+        connection_wizard_state_.mode_selected = 0;
+      }
+    }
+  } else {
+    model_.status_message = "Conectando con GDB DAP...";
+  }
 
   backend_ = std::make_unique<DapBackend>(command_queue_, event_queue_);
+}
+
+bool Application::connection_config_complete() const {
+  if (config_.program.empty()) {
+    return false;
+  }
+  if (config_.mode == SessionMode::kAttach) {
+    return config_.attach_pid > 0 || !config_.attach_target.empty();
+  }
+  return true;
+}
+
+void Application::apply_connection_and_start() {
+  if (!session_ready_ || debugging_started_) {
+    return;
+  }
+  if (!connection_config_complete()) {
+    return;
+  }
+
+  debugging_started_ = true;
+  model_.program = config_.program;
+  model_.workspace_root = config_.workspace_root;
+  model_.program_args = config_.args;
+
+  if (config_.mode == SessionMode::kAttach) {
+    UiCommand attach;
+    attach.kind = UiCommandKind::kAttach;
+    attach.attach.program = config_.program;
+    attach.attach.cwd = config_.workspace_root;
+    attach.attach.pid = config_.attach_pid;
+    attach.attach.target = config_.attach_target;
+    submit_command(attach);
+    if (config_.attach_pid > 0) {
+      model_.status_message =
+          "Adjuntando PID " + std::to_string(config_.attach_pid);
+    } else if (!config_.attach_target.empty()) {
+      model_.status_message = "Adjuntando " + config_.attach_target;
+    }
+  } else {
+    UiCommand launch;
+    launch.kind = UiCommandKind::kLaunch;
+    launch.launch.program = config_.program;
+    launch.launch.cwd = config_.workspace_root;
+    launch.launch.args = config_.args;
+    launch.launch.stop_at_main = true;
+    submit_command(launch);
+    model_.status_message = "Lanzando " + config_.program;
+  }
+}
+
+void Application::on_connection_complete(const ConnectionResult& result) {
+  config_.mode = result.mode;
+  config_.program = result.program;
+  config_.workspace_root = result.workspace_root;
+  config_.attach_pid = result.attach_pid;
+  config_.attach_target.clear();
+  config_.use_connection_wizard = false;
+
+  model_.program = config_.program;
+  model_.workspace_root = config_.workspace_root;
+  model_.program_args = config_.args;
+  model_.status_message = "Conectando con GDB DAP...";
+
+  apply_connection_and_start();
+}
+
+void Application::open_connection_wizard() {
+  if (connection_wizard_state_.open) {
+    return;
+  }
+
+  if (debugging_started_) {
+    if (config_.mode == SessionMode::kAttach) {
+      submit_command(UiCommand{UiCommandKind::kDetach});
+    } else {
+      submit_command(UiCommand{UiCommandKind::kDisconnect});
+    }
+    debugging_started_ = false;
+  }
+
+  model_.stack_frames.clear();
+  model_.locals.clear();
+  model_.variable_children.clear();
+  model_.watches.clear();
+  model_.breakpoints_by_file.clear();
+  model_.disabled_breakpoints.clear();
+  model_.console_output.clear();
+  model_.state = DebugState::kDisconnected;
+  model_.status_message = "Configurar conexión...";
+
+  connection_wizard_state_.reset();
+  connection_wizard_state_.open = true;
 }
 
 void Application::submit_command(const UiCommand& command) {
@@ -66,42 +182,23 @@ void Application::apply_event(const DebugEvent& event) {
     case DebugEventKind::kSessionReady:
       session_ready_ = true;
       model_.status_message = event.text;
-      if (debugging_started_) {
+      if (connection_wizard_state_.open || !connection_config_complete()) {
+        model_.status_message = connection_wizard_state_.open
+                                    ? "Configurar conexión..."
+                                    : model_.status_message;
         break;
       }
-      debugging_started_ = true;
-
-      if (config_.mode == SessionMode::kAttach) {
-        UiCommand attach;
-        attach.kind = UiCommandKind::kAttach;
-        attach.attach.program = config_.program;
-        attach.attach.cwd = config_.workspace_root;
-        attach.attach.pid = config_.attach_pid;
-        attach.attach.target = config_.attach_target;
-        submit_command(attach);
-        if (config_.attach_pid > 0) {
-          model_.status_message =
-              "Attach PID " + std::to_string(config_.attach_pid);
-        } else if (!config_.attach_target.empty()) {
-          model_.status_message = "Attach " + config_.attach_target;
-        }
-      } else if (!config_.program.empty()) {
-        UiCommand launch;
-        launch.kind = UiCommandKind::kLaunch;
-        launch.launch.program = config_.program;
-        launch.launch.cwd = config_.workspace_root;
-        launch.launch.args = config_.args;
-        launch.launch.stop_at_main = true;
-        submit_command(launch);
-        model_.status_message = "Lanzando " + config_.program;
-      }
+      apply_connection_and_start();
       break;
     case DebugEventKind::kOutput:
       model_.append_console(event.text);
       break;
     case DebugEventKind::kStopped:
       model_.set_stopped(event.thread_id, event.stop_reason);
-      if (event.stop_reason == "breakpoint") {
+      if (!event.text.empty() && event.stop_reason != "attach" &&
+          event.stop_reason != "pause") {
+        model_.append_console("[stopped] " + event.text);
+      } else if (event.stop_reason == "breakpoint") {
         model_.append_console("[stopped] breakpoint alcanzado");
       }
       refresh_all_watches();
@@ -111,6 +208,7 @@ void Application::apply_event(const DebugEvent& event) {
       break;
     case DebugEventKind::kTerminated:
       model_.set_terminated();
+      debugging_started_ = false;
       if (!event.text.empty()) {
         model_.status_message = event.text;
       }
@@ -155,9 +253,8 @@ void Application::apply_event(const DebugEvent& event) {
           if (lines.empty()) {
             model_.breakpoints_by_file.erase(bp.file);
           }
-          std::string msg =
-              "[breakpoint] no verificado: " + bp.file + ":" +
-              std::to_string(bp.line);
+          std::string msg = "[breakpoint] no verificado: " + bp.file + ":" +
+                            std::to_string(bp.line);
           if (!bp.message.empty()) {
             msg += " — " + bp.message;
           }
@@ -207,7 +304,16 @@ int Application::run() {
   auto with_picker =
       MakeFilePickerOverlay(layout, &model_, &file_picker_state_);
 
-  auto root = CatchEvent(with_picker, [this](const Event& event) {
+  auto with_wizard = MakeConnectionWizardOverlay(
+      with_picker, &connection_wizard_state_, &model_,
+      [this](const ConnectionResult& result) { on_connection_complete(result); },
+      [&screen] { screen.ExitLoopClosure()(); });
+
+  auto root = CatchEvent(with_wizard, [this](const Event& event) {
+    if (connection_wizard_state_.open) {
+      return false;
+    }
+
     UiCommand command;
     bool handled = true;
 
@@ -231,9 +337,13 @@ int Application::run() {
       submit_command(command);
       return true;
     }
-    if (event == Event::Special({24})) {  // Shift+F11 (terminal dependent)
+    if (event == Event::Special({24})) {
       command.kind = UiCommandKind::kStepOut;
       submit_command(command);
+      return true;
+    }
+    if (event == Event::F2) {
+      open_connection_wizard();
       return true;
     }
     if (event == Event::CtrlP) {
@@ -254,6 +364,10 @@ int Application::run() {
     }
     if (event == Event::CtrlT) {
       layout_state_.console_visible = !layout_state_.console_visible;
+      return true;
+    }
+    if (event == Event::Escape) {
+      layout_state_.text_input_focus = TextInputFocus::None;
       return true;
     }
 

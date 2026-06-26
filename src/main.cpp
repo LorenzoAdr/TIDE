@@ -7,8 +7,18 @@
 
 namespace {
 
+bool config_is_complete(const tgdb::AppConfig& config) {
+  if (config.program.empty()) {
+    return false;
+  }
+  if (config.mode == tgdb::SessionMode::kAttach) {
+    return config.attach_pid > 0 || !config.attach_target.empty();
+  }
+  return true;
+}
+
 void print_usage() {
-  std::cerr << "Uso: tgdb [opciones] <programa>\n"
+  std::cerr << "Uso: tgdb [opciones] [programa]\n"
             << "Opciones:\n"
             << "  --cwd <dir>         Directorio raíz del workspace\n"
             << "  --args <a>...       Argumentos del programa (después de --args)\n"
@@ -16,7 +26,10 @@ void print_usage() {
             << "  --target <host:puerto>  Adjuntar a gdbserver remoto\n"
             << "  -h, --help          Muestra esta ayuda\n"
             << "\n"
+            << "Sin argumentos abre el asistente de conexión.\n"
+            << "\n"
             << "Ejemplos:\n"
+            << "  tgdb\n"
             << "  tgdb ./build/hello\n"
             << "  tgdb --attach 12345 ./build/hello\n"
             << "  tgdb --target localhost:1234 ./build/hello\n";
@@ -26,6 +39,12 @@ void print_usage() {
 
 int main(int argc, char** argv) {
   tgdb::AppConfig config;
+
+  {
+    std::error_code ec;
+    config.launch_directory =
+        std::filesystem::absolute(std::filesystem::current_path(ec)).string();
+  }
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -61,39 +80,31 @@ int main(int argc, char** argv) {
     config.program = arg;
   }
 
-  if (config.program.empty()) {
-    std::cerr << "Error: debes indicar el ejecutable (símbolos de depuración).\n";
-    print_usage();
-    return 1;
-  }
-
-  if (config.mode == tgdb::SessionMode::kAttach && config.attach_pid <= 0 &&
-      config.attach_target.empty()) {
-    std::cerr << "Error: --attach requiere PID o --target host:puerto.\n";
-    return 1;
+  if (!config_is_complete(config)) {
+    config.use_connection_wizard = true;
   }
 
   std::error_code ec;
-  config.program = std::filesystem::absolute(config.program, ec).string();
+  if (!config.program.empty()) {
+    config.program = std::filesystem::absolute(config.program, ec).string();
+    if (!std::filesystem::exists(config.program)) {
+      std::cerr << "Error: programa no encontrado: " << config.program << "\n";
+      return 1;
+    }
+    if (!std::filesystem::is_regular_file(config.program)) {
+      std::cerr << "Error: el programa debe ser un archivo: " << config.program
+                << "\n";
+      return 1;
+    }
+  }
   if (!config.workspace_root.empty()) {
     config.workspace_root =
         std::filesystem::absolute(config.workspace_root, ec).string();
-  }
-
-  if (!std::filesystem::exists(config.program)) {
-    std::cerr << "Error: programa no encontrado: " << config.program << "\n";
-    return 1;
-  }
-  if (!std::filesystem::is_regular_file(config.program)) {
-    std::cerr << "Error: el programa debe ser un archivo: " << config.program
-              << "\n";
-    return 1;
-  }
-  if (!config.workspace_root.empty() &&
-      !std::filesystem::is_directory(config.workspace_root)) {
-    std::cerr << "Error: --cwd debe ser un directorio: "
-              << config.workspace_root << "\n";
-    return 1;
+    if (!std::filesystem::is_directory(config.workspace_root)) {
+      std::cerr << "Error: --cwd debe ser un directorio: "
+                << config.workspace_root << "\n";
+      return 1;
+    }
   }
 
   tgdb::Application app(std::move(config));
