@@ -51,8 +51,9 @@ class DapBackend : public IDebugBackend {
   bool pause_inferior_locked();
   bool continue_inferior_locked();
   void pause_inferior();
-  void on_inferior_attached();
+  void refresh_active_thread_locked();
   bool verify_inferior_attached_locked();
+  void on_inferior_attached();
   void push_event(DebugEvent event);
   void push_error(const std::string& message);
 
@@ -69,7 +70,7 @@ class DapBackend : public IDebugBackend {
   std::mutex session_mutex_;
   int active_thread_id_ = 1;
   bool inferior_attached_ = false;
-  std::atomic<bool> inferior_stopped_{true};
+  std::atomic<bool> inferior_stopped_{false};
   bool expecting_interrupt_for_breakpoints_ = false;
   bool breakpoints_pending_sync_ = false;
   bool resume_after_breakpoint_sync_ = false;

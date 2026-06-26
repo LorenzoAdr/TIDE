@@ -88,7 +88,7 @@ void DapBackend::setup_session() {
     // Tras continue, GDB puede entregar tarde el StoppedEvent del attach/pausa
     // inicial; ignorarlo evita que la UI vuelva a "Detenido: attach".
     const bool believed_running = !inferior_stopped_.load(std::memory_order_acquire);
-    if (believed_running) {
+    if (believed_running && inferior_attached_) {
       if (expecting_interrupt_for_breakpoints_) {
         expecting_interrupt_for_breakpoints_ = false;
       } else if (e.reason == "attach" || e.reason == "pause") {
@@ -212,7 +212,14 @@ void DapBackend::refresh_stack(int thread_id) {
     request.startFrame = 0;
     request.levels = 50;
 
-    const auto response = session_->send(request).get();
+    auto response = session_->send(request).get();
+    if (response.error &&
+        response.error.message.find("not stopped") != std::string::npos) {
+      if (pause_inferior_locked()) {
+        inferior_stopped_.store(true, std::memory_order_release);
+        response = session_->send(request).get();
+      }
+    }
     if (response.error) {
       push_error("stackTrace falló: " + response.error.message);
       return;
@@ -422,18 +429,52 @@ bool DapBackend::verify_inferior_attached_locked() {
   return false;
 }
 
+void DapBackend::refresh_active_thread_locked() {
+  dap::ThreadsRequest request;
+  const auto response = session_->send(request).get();
+  if (response.error || response.response.threads.empty()) {
+    return;
+  }
+  active_thread_id_ = static_cast<int>(response.response.threads.front().id);
+}
+
 void DapBackend::on_inferior_attached() {
   inferior_attached_ = true;
   std::lock_guard<std::mutex> lock(session_mutex_);
   if (!session_) {
     return;
   }
-  pause_inferior_locked();
+
+  refresh_active_thread_locked();
+
+  bool stopped = pause_inferior_locked();
+  if (!stopped) {
+    dap::EvaluateRequest interrupt;
+    interrupt.expression = "-exec interrupt";
+    interrupt.context = "repl";
+    const auto interrupt_response = session_->send(interrupt).get();
+    stopped = !interrupt_response.error;
+  }
+
+  if (!stopped) {
+    inferior_stopped_.store(false, std::memory_order_release);
+    push_error(
+        "El proceso sigue en ejecución tras attach. "
+        "Pausa manualmente (⏸) para inspeccionar el stack.");
+    notify_continued();
+    return;
+  }
+
   inferior_stopped_.store(true, std::memory_order_release);
   for (const auto& [file, lines] : breakpoints_by_file_) {
     send_breakpoints_locked(file, lines);
   }
   notify_stopped("attach");
+
+  UiCommand refresh;
+  refresh.kind = UiCommandKind::kRefreshStack;
+  refresh.thread_id = active_thread_id_;
+  commands_.push(refresh);
 }
 
 void DapBackend::flush_breakpoints() {
