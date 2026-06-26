@@ -32,7 +32,7 @@ class DapBackend : public IDebugBackend {
   void worker_main();
   void setup_session();
   bool initialize_session();
-  void ensure_configuration_done();
+  bool send_configuration_done();
   void handle_command(const UiCommand& command);
   void refresh_stack(int thread_id);
   void refresh_variables(int frame_id);

@@ -570,17 +570,15 @@ void DapBackend::update_breakpoints(const std::string& file,
   }
 }
 
-void DapBackend::ensure_configuration_done() {
-  if (configuration_done_) {
-    return;
-  }
+bool DapBackend::send_configuration_done() {
   dap::ConfigurationDoneRequest done;
   const auto done_response = session_->send(done).get();
   if (done_response.error) {
     push_error("configurationDone falló: " + done_response.error.message);
-    return;
+    return false;
   }
   configuration_done_ = true;
+  return true;
 }
 
 void DapBackend::handle_command(const UiCommand& command) {
@@ -625,11 +623,6 @@ void DapBackend::handle_command(const UiCommand& command) {
 
     switch (command.kind) {
     case UiCommandKind::kLaunch: {
-      ensure_configuration_done();
-      if (!configuration_done_) {
-        break;
-      }
-
       dap::GdbLaunchRequest launch;
       launch.program = command.launch.program;
       launch.cwd = command.launch.cwd;
@@ -638,7 +631,12 @@ void DapBackend::handle_command(const UiCommand& command) {
         launch.args = command.launch.args;
       }
 
-      const auto response = session_->send(launch).get();
+      // GDB DAP reciente difiere launch hasta configurationDone.
+      auto launch_future = session_->send(launch);
+      if (!send_configuration_done()) {
+        break;
+      }
+      const auto response = launch_future.get();
       if (response.error) {
         push_error("launch falló: " + response.error.message);
       } else {
@@ -647,11 +645,6 @@ void DapBackend::handle_command(const UiCommand& command) {
       break;
     }
     case UiCommandKind::kAttach: {
-      ensure_configuration_done();
-      if (!configuration_done_) {
-        break;
-      }
-
       dap::GdbAttachRequest attach;
       attach.program = command.attach.program;
       if (command.attach.pid > 0) {
@@ -661,7 +654,12 @@ void DapBackend::handle_command(const UiCommand& command) {
         attach.target = command.attach.target;
       }
 
-      const auto response = session_->send(attach).get();
+      // GDB DAP reciente difiere attach hasta configurationDone.
+      auto attach_future = session_->send(attach);
+      if (!send_configuration_done()) {
+        break;
+      }
+      const auto response = attach_future.get();
       if (response.error) {
         push_error("attach falló: " + response.error.message);
       } else if (!verify_inferior_attached_locked()) {
@@ -810,6 +808,7 @@ void DapBackend::handle_command(const UiCommand& command) {
       session_->send(request).get();
       inferior_attached_ = false;
       inferior_stopped_.store(false, std::memory_order_release);
+      configuration_done_ = false;
       break;
     }
     default:
