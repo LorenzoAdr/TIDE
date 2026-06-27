@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "ftxui/dom/elements.hpp"
+#include "vterm.h"
 
 struct VTerm;
 struct VTermScreen;
@@ -27,21 +28,18 @@ class TerminalEmulator {
 
   int rows() const { return rows_; }
   int cols() const { return cols_; }
-  bool dirty() const { return dirty_; }
-  void clear_dirty() { dirty_ = false; }
-
-  ftxui::Element render() const;
+  ftxui::Element render();
 
  private:
   static int damage_callback(VTermRect rect, void* user);
-  static int sb_pushline_callback(int cols, const struct VTermScreenCell* cells, void* user);
-  static int sb_popline_callback(int cols, struct VTermScreenCell* cells, void* user);
+  static int sb_pushline_callback(int cols, const VTermScreenCell* cells, void* user);
+  static int sb_popline_callback(int cols, VTermScreenCell* cells, void* user);
 
   void init_vterm(int rows, int cols);
   void destroy_vterm();
-  std::string cell_text(const struct VTermScreenCell& cell) const;
-  ftxui::Color cell_fg(const struct VTermScreenCell& cell) const;
-  ftxui::Color cell_bg(const struct VTermScreenCell& cell) const;
+  std::string cell_text(const VTermScreenCell& cell) const;
+  ftxui::Color cell_fg(const VTermScreenCell& cell) const;
+  ftxui::Color cell_bg(const VTermScreenCell& cell) const;
   ftxui::Element render_row(int row, int cursor_row, int cursor_col) const;
 
   VTerm* vt_ = nullptr;

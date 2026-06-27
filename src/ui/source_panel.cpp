@@ -11,6 +11,7 @@
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
+#include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/theme.hpp"
@@ -281,6 +282,15 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
     }
     if (event == Event::PageDown) {
       view_state->scroll = std::min(view_state->scroll + visible, max_scroll);
+      return true;
+    }
+    const int half_page = std::max(1, visible / 2);
+    if (event_is_ctrl_u(event)) {
+      view_state->scroll = std::max(0, view_state->scroll - half_page);
+      return true;
+    }
+    if (event_is_ctrl_d(event)) {
+      view_state->scroll = std::min(view_state->scroll + half_page, max_scroll);
       return true;
     }
     if (event.is_mouse() && event.mouse().motion == Mouse::Pressed) {

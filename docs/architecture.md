@@ -100,7 +100,9 @@ If clangd is unavailable, `RegexSymbolProvider` extracts symbols with regex heur
 
 ## Terminal
 
-`ShellSession` opens a PTY in the workspace directory. Output is drained into `DebugModel` shell buffer and rendered by `ConsolePanel` in IDE mode. The panel uses a terminal emulator layer for basic ANSI handling.
+## Integrated terminal
+
+`ShellSession` opens a PTY (`forkpty`) in the workspace directory and runs an interactive bash. Raw PTY output is fed into **libvterm** (`TerminalEmulator`), which maintains a full VT100/xterm screen grid (colors, cursor, scrollback). `ConsolePanel` renders that grid with FTXUI and forwards keystrokes to the PTY via `event_to_pty_bytes()`. Terminal size is synced to the panel dimensions with `TIOCSWINSZ`.
 
 In debug mode the same panel renders GDB console output and accepts GDB commands.
 
@@ -146,7 +148,7 @@ Overlays (stacked on top):
 | `src/lsp/` | LSP transport and client |
 | `src/symbols/` | Symbol providers (LSP + regex) |
 | `src/indexer/` | Workspace and symbol indexing |
-| `src/terminal/` | PTY shell session |
+| `src/terminal/` | PTY shell session, libvterm emulator, PTY key encoding |
 | `src/search/` | Workspace text search |
 | `src/util/` | Highlighting, paths, crash handler |
 

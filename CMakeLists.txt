@@ -63,14 +63,16 @@ add_executable(tgdb
   src/terminal/pty_input.cpp
 )
 
-target_include_directories(tgdb PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(tgdb PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
 
 target_link_libraries(tgdb PRIVATE
   ftxui::component
   ftxui::dom
   ftxui::screen
   cppdap
-  nlohmann_json::nlohmann_json
   libvterm
 )
 

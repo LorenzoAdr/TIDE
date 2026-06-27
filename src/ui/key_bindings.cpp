@@ -173,6 +173,59 @@ bool event_is_ctrl_g(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[27;5;71~");
 }
 
+bool event_is_ctrl_u(const ftxui::Event& event) {
+  return event == ftxui::Event::CtrlU ||
+         event == ftxui::Event::Special("\x1B[27;5;117~") ||
+         event == ftxui::Event::Special("\x1B[27;5;85~");
+}
+
+bool event_is_ctrl_d(const ftxui::Event& event) {
+  return event == ftxui::Event::CtrlD ||
+         event == ftxui::Event::Special("\x1B[27;5;100~") ||
+         event == ftxui::Event::Special("\x1B[27;5;68~");
+}
+
+bool event_is_ctrl_shift_d(const ftxui::Event& event) {
+  const int mods[] = {6};
+  return csi_key_any_modifier(event, mods, 1, 68) ||
+         csi_key_any_modifier(event, mods, 1, 100) ||
+         event == ftxui::Event::Special("\x1B[27;6;68~") ||
+         event == ftxui::Event::Special("\x1B[27;6;100~") ||
+         event == ftxui::Event::Special("\x1B[68;6u") ||
+         event == ftxui::Event::Special("\x1B[100;6u");
+}
+
+bool event_is_ctrl_backspace(const ftxui::Event& event) {
+  // Ctrl+W is the de-facto delete-word-backward in many terminals.
+  if (event == ftxui::Event::CtrlW) {
+    return true;
+  }
+  const int mods[] = {5, 6};
+  return csi_key_any_modifier(event, mods, 2, 8) ||
+         csi_key_any_modifier(event, mods, 2, 127) ||
+         event == ftxui::Event::Special("\x1B[27;5;8~") ||
+         event == ftxui::Event::Special("\x1B[27;5;127~") ||
+         event == ftxui::Event::Special("\x1B[27;6;8~") ||
+         event == ftxui::Event::Special("\x1B[27;6;127~") ||
+         event == ftxui::Event::Special("\x1B[8;5u") ||
+         event == ftxui::Event::Special("\x1B[127;5u") ||
+         event == ftxui::Event::Special("\x1B[8;6u") ||
+         event == ftxui::Event::Special("\x1B[127;6u");
+}
+
+bool event_is_ctrl_delete(const ftxui::Event& event) {
+  const int mods[] = {5, 6};
+  return csi_key_any_modifier(event, mods, 2, 3) ||
+         csi_key_any_modifier(event, mods, 2, 51) ||
+         event == ftxui::Event::Special("\x1B[3;5~") ||
+         event == ftxui::Event::Special("\x1B[27;5;3~") ||
+         event == ftxui::Event::Special("\x1B[27;6;3~") ||
+         event == ftxui::Event::Special("\x1B[3;5u") ||
+         event == ftxui::Event::Special("\x1B[51;5u") ||
+         event == ftxui::Event::Special("\x1B[3;6u") ||
+         event == ftxui::Event::Special("\x1B[51;6u");
+}
+
 bool event_is_ctrl_space(const ftxui::Event& event) {
   return event == ftxui::Event::Special("\x00") ||
          event == ftxui::Event::Special("\x1B[32;5u") ||
@@ -210,6 +263,15 @@ bool event_is_completion(const ftxui::Event& event) {
          event_is_alt_slash(event);
 }
 
+bool event_is_go_to_definition(const ftxui::Event& event) {
+  return event == ftxui::Event::F12 || event == ftxui::Event::Special("\x1B[24~");
+}
+
+bool event_is_go_to_declaration(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[24;2~") ||
+         event == ftxui::Event::Special("\x1B[24;6~");
+}
+
 bool editor_priority_key(const ftxui::Event& event) {
   return event == ftxui::Event::Escape || event_is_ctrl_z(event) || event_is_ctrl_c(event) ||
          event_is_ctrl_v(event) || event_is_ctrl_f(event) || event_is_ctrl_g(event) ||
@@ -222,8 +284,11 @@ bool editor_priority_key(const ftxui::Event& event) {
          event == ftxui::Event::Return || event == ftxui::Event::Tab ||
          event == ftxui::Event::Home || event == ftxui::Event::End ||
          event == ftxui::Event::PageUp || event == ftxui::Event::PageDown ||
-         event == ftxui::Event::CtrlD || event == ftxui::Event::CtrlS ||
-         event_is_ctrl_shift_l(event) || event_is_completion(event);
+         event_is_ctrl_u(event) || event_is_ctrl_d(event) ||
+         event_is_ctrl_shift_d(event) || event_is_ctrl_backspace(event) ||
+         event_is_ctrl_delete(event) || event == ftxui::Event::CtrlS ||
+         event_is_ctrl_shift_l(event) || event_is_completion(event) ||
+         event_is_go_to_definition(event) || event_is_go_to_declaration(event);
 }
 
 }  // namespace tgdb

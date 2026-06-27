@@ -258,6 +258,48 @@ void delete_at(EditorBuffer* buffer, int line, int col) {
   }
 }
 
+void delete_word_backward_at(EditorBuffer* buffer, int line, int col) {
+  if (buffer->lines.empty()) {
+    return;
+  }
+  line = std::max(0, std::min(line, static_cast<int>(buffer->lines.size()) - 1));
+  const int line_len = static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size());
+  col = std::max(0, std::min(col, line_len));
+
+  int start_line = line;
+  int start_col = word_left_col(*buffer, line, col);
+  if (start_col == col && col == 0 && line > 0) {
+    start_line = line - 1;
+    start_col = word_left_col(
+        *buffer, start_line,
+        static_cast<int>(buffer->lines[static_cast<std::size_t>(start_line)].size()));
+  }
+  if (start_line == line && start_col == col) {
+    return;
+  }
+  delete_range(buffer, start_line, start_col, line, col);
+}
+
+void delete_word_forward_at(EditorBuffer* buffer, int line, int col) {
+  if (buffer->lines.empty()) {
+    return;
+  }
+  line = std::max(0, std::min(line, static_cast<int>(buffer->lines.size()) - 1));
+  const int line_len = static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size());
+  col = std::max(0, std::min(col, line_len));
+
+  int end_line = line;
+  int end_col = word_right_col(*buffer, line, col);
+  if (end_col == col && col >= line_len && line + 1 < static_cast<int>(buffer->lines.size())) {
+    end_line = line + 1;
+    end_col = word_right_col(*buffer, end_line, 0);
+  }
+  if (end_line == line && end_col == col) {
+    return;
+  }
+  delete_range(buffer, line, col, end_line, end_col);
+}
+
 void newline_at(EditorBuffer* buffer, int line, int col) {
   auto& text = buffer->lines[static_cast<std::size_t>(line)];
   const std::string tail = text.substr(static_cast<std::size_t>(col));
@@ -347,6 +389,32 @@ void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines) {
   buffer->scroll = std::max(
       0, std::min(buffer->scroll,
                   max_scroll(static_cast<int>(buffer->lines.size()), visible_lines)));
+}
+
+void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lines) {
+  const int total = static_cast<int>(buffer->lines.size());
+  buffer->scroll = std::max(
+      0, std::min(buffer->scroll + delta_lines, max_scroll(total, visible_lines)));
+}
+
+void move_primary_half_page_up(EditorBuffer* buffer, int visible_lines, bool extend_selection) {
+  const int delta = std::max(1, visible_lines / 2);
+  if (!extend_selection) {
+    buffer->primary().collapse_to_head();
+  }
+  buffer->primary().head.line = std::max(0, buffer->primary().head.line - delta);
+  finish_move(buffer, extend_selection);
+}
+
+void move_primary_half_page_down(EditorBuffer* buffer, int visible_lines, bool extend_selection) {
+  const int delta = std::max(1, visible_lines / 2);
+  if (!extend_selection) {
+    buffer->primary().collapse_to_head();
+  }
+  buffer->primary().head.line =
+      std::min(buffer->primary().head.line + delta,
+               static_cast<int>(buffer->lines.size()) - 1);
+  finish_move(buffer, extend_selection);
 }
 
 void replace_word_at_cursor(EditorBuffer* buffer, const std::string& replacement) {
@@ -442,6 +510,26 @@ void delete_char(EditorBuffer* buffer) {
     delete_all_selections(buffer);
   } else {
     apply_to_all_cursors(buffer, delete_at);
+  }
+  mark_dirty(buffer);
+}
+
+void delete_word_backward(EditorBuffer* buffer) {
+  push_undo(buffer);
+  if (any_cursor_has_selection(*buffer)) {
+    delete_all_selections(buffer);
+  } else {
+    apply_to_all_cursors(buffer, delete_word_backward_at);
+  }
+  mark_dirty(buffer);
+}
+
+void delete_word_forward(EditorBuffer* buffer) {
+  push_undo(buffer);
+  if (any_cursor_has_selection(*buffer)) {
+    delete_all_selections(buffer);
+  } else {
+    apply_to_all_cursors(buffer, delete_word_forward_at);
   }
   mark_dirty(buffer);
 }

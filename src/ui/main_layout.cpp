@@ -277,7 +277,7 @@ std::string status_shortcuts(AppMode mode) {
   if (mode == AppMode::kDebug) {
     return "F1 atajos  F5 ▶  F10 step  Ctrl+B bp  F2 debug  F3 workspace  F8 outline  F7 buscar  Ctrl+P  Ctrl+T  Ctrl+Q salir ";
   }
-  return "F1 atajos  F2 debug  F3 workspace  F7 buscar  F8 outline  Ctrl+F  Ctrl+G  Ctrl+. completar  Ctrl+O  Ctrl+S  Ctrl+P  Ctrl+Q salir ";
+  return "F1 atajos  F2 debug  F3 workspace  F7 buscar  F8 outline  Ctrl+F  Ctrl+G  F12 definición  Ctrl+. completar  Ctrl+O  Ctrl+S  Ctrl+P  Ctrl+Q salir ";
 }
 
 }  // namespace

@@ -115,4 +115,59 @@ std::vector<SymbolInfo> LspSymbolProvider::workspace_symbols(const std::string& 
   return client_.workspace_symbols(workspace_root_, query);
 }
 
+bool LspSymbolProvider::supports_semantic_completion() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return use_lsp_;
+}
+
+std::vector<CompletionItem> LspSymbolProvider::completions_at(
+    const CompletionParams& params) {
+  if (params.path.empty()) {
+    return {};
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+
+  const std::string text =
+      params.text.empty() ? buffer_text_for_path(params.path) : params.text;
+  if (!text.empty()) {
+    client_.did_change(params.path, text);
+  }
+  return client_.completions_at(params.path, text, params.line, params.character);
+}
+
+bool LspSymbolProvider::supports_navigation() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return use_lsp_;
+}
+
+SourceLocation LspSymbolProvider::goto_definition(const NavigationParams& params) {
+  if (params.path.empty()) {
+    return {};
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+  const std::string text =
+      params.text.empty() ? buffer_text_for_path(params.path) : params.text;
+  return client_.goto_definition(params.path, text, params.line, params.character);
+}
+
+SourceLocation LspSymbolProvider::goto_declaration(const NavigationParams& params) {
+  if (params.path.empty()) {
+    return {};
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+  const std::string text =
+      params.text.empty() ? buffer_text_for_path(params.path) : params.text;
+  return client_.goto_declaration(params.path, text, params.line, params.character);
+}
+
 }  // namespace tgdb

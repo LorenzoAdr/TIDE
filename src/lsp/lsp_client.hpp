@@ -29,6 +29,13 @@ class LspClient {
   std::vector<SymbolInfo> document_symbols(const std::string& absolute_path);
   std::vector<SymbolInfo> workspace_symbols(const std::string& workspace_root,
                                             const std::string& query);
+  std::vector<CompletionItem> completions_at(const std::string& absolute_path,
+                                               const std::string& text, int line,
+                                               int character);
+  SourceLocation goto_definition(const std::string& absolute_path, const std::string& text,
+                                 int line, int character);
+  SourceLocation goto_declaration(const std::string& absolute_path, const std::string& text,
+                                  int line, int character);
 
  private:
   struct DocumentState {
@@ -47,6 +54,13 @@ class LspClient {
   static void flatten_symbols(const nlohmann::json& nodes, int depth,
                               const std::string& relative_file,
                               std::vector<SymbolInfo>* out);
+  static CompletionItem parse_completion_item(const nlohmann::json& item);
+  static std::string completion_label(const nlohmann::json& item);
+  static SymbolKind map_completion_kind(int kind);
+  static SourceLocation parse_location_result(const nlohmann::json& result);
+  static bool parse_single_location(const nlohmann::json& loc, SourceLocation* out);
+  SourceLocation request_location(const std::string& method, const std::string& absolute_path,
+                                  const std::string& text, int line, int character);
 
   LspTransport transport_;
   std::atomic<bool> ready_{false};

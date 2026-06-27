@@ -29,6 +29,7 @@ struct ConsolePanelState {
   std::string input;
   std::string input_placeholder = "Shell";
   Box panel_box;
+  Box content_box;
   Box history_box;
   Box terminal_box;
   Box input_box;
@@ -38,6 +39,14 @@ struct ConsolePanelState {
   bool follow_tail = true;
   int last_terminal_cols = 0;
   int last_terminal_rows = 0;
+  int pending_terminal_cols = 80;
+  int pending_terminal_rows = 24;
+  int applied_terminal_cols = 0;
+  int applied_terminal_rows = 0;
+  bool layout_measured = false;
+  bool shell_start_requested = false;
+  bool shell_start_failed = false;
+  std::string last_workspace_root;
 };
 
 void handle_gdb_command(const std::string& line, DebugModel* model, CommandCallback on_command) {
@@ -146,28 +155,107 @@ std::string console_placeholder(AppMode* app_mode) {
   return debug_console_mode(app_mode) ? "Comando GDB o -exec ..." : "";
 }
 
-void ensure_shell_running(ShellSession* shell, const std::string& workspace_root) {
-  if (shell != nullptr && !shell->running() && !workspace_root.empty()) {
-    shell->start(workspace_root);
+std::string console_panel_title(AppMode* app_mode, bool shell_running) {
+  if (debug_console_mode(app_mode)) {
+    return "GDB";
   }
+  if (shell_running) {
+    return "Terminal — escribe aquí (teclas al shell)";
+  }
+  return "Terminal";
 }
 
-std::string console_panel_title(AppMode* app_mode) {
-  return debug_console_mode(app_mode) ? "GDB" : "Terminal";
+constexpr int kMaxTermCols = 160;
+constexpr int kMaxTermRows = 48;
+
+int clamp_terminal_cols(int cols) {
+  return std::max(8, std::min(cols, kMaxTermCols));
 }
 
-void sync_terminal_size(ConsolePanelState* state, ShellSession* shell, const Box& box) {
-  if (state == nullptr || shell == nullptr) {
+int clamp_terminal_rows(int rows) {
+  return std::max(2, std::min(rows, kMaxTermRows));
+}
+
+bool terminal_box_valid(const Box& box) {
+  if (box.y_max <= box.y_min || box.x_max <= box.x_min) {
+    return false;
+  }
+  const int rows = box.y_max - box.y_min + 1;
+  const int cols = box.x_max - box.x_min + 1;
+  return rows >= 1 && cols >= 4;
+}
+
+void measure_terminal_layout(ConsolePanelState* state) {
+  if (state == nullptr) {
     return;
   }
-  const int cols = visible_column_count(box);
-  const int rows = visible_line_count(box);
-  if (cols == state->last_terminal_cols && rows == state->last_terminal_rows) {
+  if (!terminal_box_valid(state->content_box)) {
     return;
   }
-  state->last_terminal_cols = cols;
-  state->last_terminal_rows = rows;
-  shell->resize(cols, rows);
+  state->pending_terminal_cols = clamp_terminal_cols(visible_column_count(state->content_box));
+  state->pending_terminal_rows = clamp_terminal_rows(visible_line_count(state->content_box));
+  state->layout_measured = true;
+}
+
+void reset_terminal_session_state(ConsolePanelState* state, const std::string& workspace_root) {
+  if (state == nullptr) {
+    return;
+  }
+  if (state->last_workspace_root == workspace_root) {
+    return;
+  }
+  state->last_workspace_root = workspace_root;
+  state->shell_start_requested = false;
+  state->shell_start_failed = false;
+  state->applied_terminal_cols = 0;
+  state->applied_terminal_rows = 0;
+}
+
+void tick_terminal_shell(ConsolePanelState* state, ShellSession* shell, DebugModel* model) {
+  if (state == nullptr || shell == nullptr || model == nullptr) {
+    return;
+  }
+  if (model->workspace_root.empty()) {
+    return;
+  }
+
+  reset_terminal_session_state(state, model->workspace_root);
+
+  const int cols =
+      state->layout_measured ? state->pending_terminal_cols : state->pending_terminal_cols;
+  const int rows =
+      state->layout_measured ? state->pending_terminal_rows : state->pending_terminal_rows;
+
+  if (!shell->running()) {
+    if (shell->starting()) {
+      return;
+    }
+    if (shell->start_failed()) {
+      state->shell_start_failed = true;
+      return;
+    }
+    if (!state->shell_start_requested || state->shell_start_failed) {
+      return;
+    }
+    shell->request_start(model->workspace_root, cols, rows);
+    return;
+  }
+
+  state->shell_start_failed = false;
+  if (state->applied_terminal_cols == 0 && state->applied_terminal_rows == 0) {
+    state->applied_terminal_cols = cols;
+    state->applied_terminal_rows = rows;
+  }
+
+  if (!state->layout_measured) {
+    return;
+  }
+
+  if (cols != state->applied_terminal_cols || rows != state->applied_terminal_rows) {
+    shell->resize(cols, rows);
+    state->applied_terminal_cols = cols;
+    state->applied_terminal_rows = rows;
+  }
 }
 
 bool forward_pty_key(ShellSession* shell, const Event& event) {
@@ -197,33 +285,36 @@ void activate_console_input(MainLayoutState* layout_state, FocusManagerState* fo
 }
 
 void activate_shell_input(DebugModel* model, MainLayoutState* layout_state,
-                          FocusManagerState* focus, ShellSession* shell) {
+                          FocusManagerState* focus, ShellSession* shell,
+                          ConsolePanelState* state) {
   activate_console_input(layout_state, focus, nullptr);
-  if (model != nullptr) {
-    ensure_shell_running(shell, model->workspace_root);
+  if (state != nullptr) {
+    state->shell_start_requested = true;
+    state->shell_start_failed = false;
   }
-  if (shell != nullptr) {
-    shell->drain_output();
-  }
+  tick_terminal_shell(state, shell, model);
 }
 
-Element render_shell_terminal(ShellSession* shell, DebugModel* model,
-                              ConsolePanelState* state, MainLayoutState* layout_state) {
+Element render_shell_terminal(ShellSession* shell, DebugModel* model, ConsolePanelState* state) {
   if (model->workspace_root.empty()) {
     return text("(selecciona workspace con F3)") | color(theme::Muted()) | center | flex |
            bgcolor(theme::PanelBg());
   }
 
-  ensure_shell_running(shell, model->workspace_root);
-  shell->drain_output();
-
   if (shell == nullptr || !shell->running()) {
-    return text("(no se pudo iniciar el shell)") | color(theme::Muted()) | center | flex |
+    if (shell != nullptr && shell->starting()) {
+      return text("(iniciando terminal...)") | color(theme::Muted()) | center | flex |
+             bgcolor(theme::PanelBg());
+    }
+    if (state != nullptr && state->shell_start_failed) {
+      return text("(shell no disponible)") | color(theme::Muted()) | center | flex |
+             bgcolor(theme::PanelBg());
+    }
+    return text("(F4 o clic para abrir la terminal)") | color(theme::Muted()) | center | flex |
            bgcolor(theme::PanelBg());
   }
 
-  Element term = shell->terminal().render();
-  return term | reflect(state->terminal_box) | flex | bgcolor(theme::CodeBg());
+  return shell->render_terminal() | flex | bgcolor(theme::CodeBg());
 }
 
 }  // namespace
@@ -255,6 +346,16 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   auto wrapped = CatchEvent(component, [app_mode, model, shell, on_command, state,
                                         layout_state, focus, input_box](Event event) {
     const bool debug_mode = debug_console_mode(app_mode);
+
+    if (!debug_mode && event == Event::Custom) {
+      if (layout_state != nullptr && layout_state->terminal_start_requested) {
+        state->shell_start_requested = true;
+        state->shell_start_failed = false;
+      }
+      tick_terminal_shell(state.get(), shell, model);
+      return false;
+    }
+
     const int visible = state->last_visible_lines;
     const int total = static_cast<int>(model->console_output.size());
     const int max_first = max_first_visible(total, visible);
@@ -262,7 +363,6 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     if (console_input_active(layout_state) && !debug_mode && event_is_ctrl_c(event)) {
       if (shell != nullptr && shell->running()) {
         shell->send_interrupt();
-        shell->drain_output();
       }
       return true;
     }
@@ -277,8 +377,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
         event.mouse().motion == Mouse::Pressed) {
       const auto& m = event.mouse();
-      if (!debug_mode && state->terminal_box.Contain(m.x, m.y)) {
-        activate_shell_input(model, layout_state, focus, shell);
+      if (!debug_mode && state->content_box.Contain(m.x, m.y)) {
+        activate_shell_input(model, layout_state, focus, shell, state.get());
         return true;
       }
       if (debug_mode && state->input_box.Contain(m.x, m.y)) {
@@ -289,12 +389,12 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
     if (console_input_active(layout_state) && !debug_mode) {
       if (forward_pty_key(shell, event)) {
-        shell->drain_output();
         return true;
       }
-      if (!event.is_mouse()) {
+      if (event == Event::Escape) {
         return true;
       }
+      return false;
     }
 
     if (event == Event::Return && debug_mode) {
@@ -311,9 +411,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     }
 
     if (event == Event::Return && !debug_mode) {
-      activate_shell_input(model, layout_state, focus, shell);
+      activate_shell_input(model, layout_state, focus, shell, state.get());
       if (forward_pty_key(shell, event)) {
-        shell->drain_output();
+        return true;
       }
       return true;
     }
@@ -376,7 +476,6 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     if (event_is_ctrl_c(event)) {
       if (shell != nullptr && shell->running()) {
         shell->send_interrupt();
-        shell->drain_output();
       }
       return true;
     }
@@ -386,14 +485,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       }
       return true;
     }
-    if (forward_pty_key(shell, event)) {
-      shell->drain_output();
-      return true;
-    }
-    if (!event.is_mouse()) {
-      return true;
-    }
-    return false;
+    return forward_pty_key(shell, event);
   };
 
   if (layout_state != nullptr) {
@@ -408,22 +500,22 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     const bool debug_mode = debug_console_mode(app_mode);
 
     if (!debug_mode) {
-      int rows = visible_line_count(state->panel_box);
-      int cols = visible_column_count(state->panel_box);
-      if (rows <= 1 && state->panel_box.y_max > state->panel_box.y_min) {
-        rows = std::max(1, visible_line_count(state->panel_box) - 2);
+      if (layout_state != nullptr && layout_state->terminal_start_requested) {
+        state->shell_start_requested = true;
+        state->shell_start_failed = false;
       }
-      if (cols <= 1 && state->panel_box.x_max > state->panel_box.x_min) {
-        cols = std::max(1, visible_column_count(state->panel_box) - 2);
+      measure_terminal_layout(state.get());
+      tick_terminal_shell(state.get(), shell, model);
+      if (shell != nullptr && shell->running()) {
+        shell->drain_output(8192);
       }
-      state->last_visible_lines = rows;
-      state->terminal_box = state->panel_box;
-      sync_terminal_size(state.get(), shell, state->terminal_box);
-      shell->drain_output();
-
-      Element terminal_row = render_shell_terminal(shell, model, state.get(), layout_state);
-      return MakePanel(console_panel_title(app_mode),
-                       terminal_row | reflect(state->panel_box) | flex);
+      state->last_visible_lines =
+          state->layout_measured ? state->pending_terminal_rows : state->last_visible_lines;
+      state->terminal_box = state->content_box;
+      const bool shell_running = shell != nullptr && shell->running();
+      Element body = render_shell_terminal(shell, model, state.get());
+      return MakePanel(console_panel_title(app_mode, shell_running),
+                       body | reflect(state->content_box) | flex);
     }
 
     const std::vector<std::string>& terminal_lines = model->console_output;
@@ -479,7 +571,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     input_row = input_row | reflect(state->input_box);
 
     return MakePanel(
-        console_panel_title(app_mode),
+        console_panel_title(app_mode, false),
         vbox({history_row | flex, separator() | size(HEIGHT, EQUAL, 1), input_row}) |
             reflect(state->panel_box) | flex);
   });

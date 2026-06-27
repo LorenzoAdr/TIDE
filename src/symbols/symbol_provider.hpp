@@ -15,6 +15,39 @@ struct SymbolInfo {
   std::string file;  // ruta relativa al workspace (opcional)
 };
 
+struct CompletionItem {
+  std::string label;
+  std::string insert_text;
+  std::string detail;
+  SymbolKind kind = SymbolKind::kVariable;
+  std::string file;
+  bool has_replace_range = false;
+  int replace_line = 0;
+  int replace_start = 0;
+  int replace_end = 0;
+};
+
+struct CompletionParams {
+  std::string path;
+  std::string text;
+  int line = 0;
+  int character = 0;
+};
+
+struct SourceLocation {
+  std::string path;
+  int line = 0;
+  int character = 0;
+  bool valid = false;
+};
+
+struct NavigationParams {
+  std::string path;
+  std::string text;
+  int line = 0;
+  int character = 0;
+};
+
 class ISymbolProvider {
  public:
   virtual ~ISymbolProvider() = default;
@@ -25,6 +58,22 @@ class ISymbolProvider {
                                                       const std::string& query) {
     (void)workspace_root;
     (void)query;
+    return {};
+  }
+
+  virtual bool supports_semantic_completion() const { return false; }
+  virtual std::vector<CompletionItem> completions_at(const CompletionParams& params) {
+    (void)params;
+    return {};
+  }
+
+  virtual bool supports_navigation() const { return false; }
+  virtual SourceLocation goto_definition(const NavigationParams& params) {
+    (void)params;
+    return {};
+  }
+  virtual SourceLocation goto_declaration(const NavigationParams& params) {
+    (void)params;
     return {};
   }
 

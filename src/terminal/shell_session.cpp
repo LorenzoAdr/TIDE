@@ -1,7 +1,7 @@
 #include "terminal/shell_session.hpp"
 
-#include <cerrno>
 #include <chrono>
+#include <cerrno>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
@@ -27,6 +27,10 @@ ShellSession::~ShellSession() { stop(); }
 
 bool ShellSession::running() const { return running_.load(std::memory_order_acquire); }
 
+bool ShellSession::starting() const { return start_in_progress_.load(std::memory_order_acquire); }
+
+bool ShellSession::start_failed() const { return start_failed_.load(std::memory_order_acquire); }
+
 void ShellSession::apply_winsize() {
 #if defined(__linux__)
   if (master_fd_ < 0) {
@@ -39,22 +43,51 @@ void ShellSession::apply_winsize() {
 #endif
 }
 
-void ShellSession::start(const std::string& cwd) {
-  stop();
-
+void ShellSession::request_start(const std::string& cwd, int cols, int rows) {
+  if (running() || start_in_progress_.load(std::memory_order_acquire) || master_fd_ >= 0) {
+    return;
+  }
 #if !defined(__linux__)
+  start_failed_.store(true, std::memory_order_release);
   return;
 #else
   if (cwd.empty()) {
     return;
   }
 
-  terminal_.reset(rows_, cols_);
+  cols_ = std::max(1, cols);
+  rows_ = std::max(1, rows);
+  start_failed_.store(false, std::memory_order_release);
+  start_in_progress_.store(true, std::memory_order_release);
+  stop_requested_.store(false, std::memory_order_release);
+  output_chunks_.reset();
+
+  if (bootstrap_thread_ && bootstrap_thread_->joinable()) {
+    bootstrap_thread_->join();
+  }
+
+  bootstrap_thread_ = std::make_unique<std::thread>([this, cwd] { bootstrap_shell(cwd); });
+#endif
+}
+
+void ShellSession::bootstrap_shell(const std::string& cwd) {
+#if defined(__linux__)
+  {
+    std::lock_guard<std::mutex> lock(terminal_mutex_);
+    terminal_.reset(rows_, cols_);
+  }
+
+  if (stop_requested_.load(std::memory_order_acquire)) {
+    start_in_progress_.store(false, std::memory_order_release);
+    return;
+  }
 
   master_fd_ = -1;
   child_pid_ = forkpty(&master_fd_, nullptr, nullptr, nullptr);
   if (child_pid_ < 0) {
     master_fd_ = -1;
+    start_failed_.store(true, std::memory_order_release);
+    start_in_progress_.store(false, std::memory_order_release);
     return;
   }
 
@@ -68,7 +101,7 @@ void ShellSession::start(const std::string& cwd) {
     if (shell == nullptr || shell[0] == '\0') {
       shell = "/bin/bash";
     }
-    execlp(shell, shell, "-il", static_cast<char*>(nullptr));
+    execlp(shell, shell, "-i", static_cast<char*>(nullptr));
     _exit(127);
   }
 
@@ -79,8 +112,19 @@ void ShellSession::start(const std::string& cwd) {
     fcntl(master_fd_, F_SETFL, flags | O_NONBLOCK);
   }
 
-  stop_requested_.store(false, std::memory_order_release);
+  if (stop_requested_.load(std::memory_order_acquire)) {
+    close(master_fd_);
+    master_fd_ = -1;
+    kill(child_pid_, SIGHUP);
+    int status = 0;
+    waitpid(child_pid_, &status, 0);
+    child_pid_ = -1;
+    start_in_progress_.store(false, std::memory_order_release);
+    return;
+  }
+
   running_.store(true, std::memory_order_release);
+  start_in_progress_.store(false, std::memory_order_release);
   reader_thread_ = std::make_unique<std::thread>([this] { reader_loop(); });
 #endif
 }
@@ -88,6 +132,12 @@ void ShellSession::start(const std::string& cwd) {
 void ShellSession::stop() {
 #if defined(__linux__)
   stop_requested_.store(true, std::memory_order_release);
+  if (bootstrap_thread_ && bootstrap_thread_->joinable()) {
+    bootstrap_thread_->join();
+  }
+  bootstrap_thread_.reset();
+  start_in_progress_.store(false, std::memory_order_release);
+
   if (master_fd_ >= 0) {
     close(master_fd_);
     master_fd_ = -1;
@@ -104,6 +154,7 @@ void ShellSession::stop() {
   reader_thread_.reset();
 #endif
   running_.store(false, std::memory_order_release);
+  start_failed_.store(false, std::memory_order_release);
   output_chunks_.close();
   while (output_chunks_.try_pop().has_value()) {
   }
@@ -118,7 +169,10 @@ void ShellSession::resize(int cols, int rows) {
   }
   cols_ = cols;
   rows_ = rows;
-  terminal_.resize(cols_, rows_);
+  {
+    std::lock_guard<std::mutex> lock(terminal_mutex_);
+    terminal_.resize(cols_, rows_);
+  }
   apply_winsize();
 }
 
@@ -129,7 +183,7 @@ void ShellSession::write_raw(const std::string& data) {
   }
   const char* buf = data.c_str();
   std::size_t remaining = data.size();
-  int retries = 200;
+  int retries = 32;
   while (remaining > 0 && retries-- > 0) {
     const ssize_t written = write(master_fd_, buf, remaining);
     if (written > 0) {
@@ -141,8 +195,7 @@ void ShellSession::write_raw(const std::string& data) {
       break;
     }
     if (errno == EAGAIN || errno == EINTR) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      continue;
+      break;
     }
     break;
   }
@@ -195,10 +248,25 @@ void ShellSession::reader_loop() {
   running_.store(false, std::memory_order_release);
 }
 
-void ShellSession::drain_output() {
-  while (auto chunk = output_chunks_.try_pop()) {
+void ShellSession::drain_output(int max_bytes) {
+  if (max_bytes <= 0 || !running()) {
+    return;
+  }
+  int consumed = 0;
+  while (consumed < max_bytes) {
+    auto chunk = output_chunks_.try_pop();
+    if (!chunk) {
+      break;
+    }
+    consumed += static_cast<int>(chunk->size());
+    std::lock_guard<std::mutex> lock(terminal_mutex_);
     terminal_.feed(chunk->data(), chunk->size());
   }
+}
+
+ftxui::Element ShellSession::render_terminal() {
+  std::lock_guard<std::mutex> lock(terminal_mutex_);
+  return terminal_.render();
 }
 
 }  // namespace tgdb

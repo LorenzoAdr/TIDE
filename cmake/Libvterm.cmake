@@ -1,33 +1,22 @@
-include(FetchContent)
+set(LIBVTERM_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/libvterm)
 
-if(NOT CMAKE_C_COMPILE_OBJECT)
-  enable_language(C)
+if(NOT EXISTS ${LIBVTERM_SOURCE_DIR}/include/vterm.h)
+  message(FATAL_ERROR "libvterm not found at ${LIBVTERM_SOURCE_DIR}")
 endif()
 
-FetchContent_Declare(
-  libvterm
-  GIT_REPOSITORY https://github.com/neovim/libvterm.git
-  GIT_TAG v0.3.3
-  GIT_SHALLOW TRUE
+add_library(libvterm STATIC
+  ${LIBVTERM_SOURCE_DIR}/src/vterm.c
+  ${LIBVTERM_SOURCE_DIR}/src/screen.c
+  ${LIBVTERM_SOURCE_DIR}/src/state.c
+  ${LIBVTERM_SOURCE_DIR}/src/parser.c
+  ${LIBVTERM_SOURCE_DIR}/src/pen.c
+  ${LIBVTERM_SOURCE_DIR}/src/keyboard.c
+  ${LIBVTERM_SOURCE_DIR}/src/mouse.c
+  ${LIBVTERM_SOURCE_DIR}/src/unicode.c
+  ${LIBVTERM_SOURCE_DIR}/src/encoding.c
 )
 
-FetchContent_GetProperties(libvterm)
-if(NOT libvterm_POPULATED)
-  FetchContent_Populate(libvterm)
-
-  add_library(libvterm STATIC
-    ${libvterm_SOURCE_DIR}/src/vterm.c
-    ${libvterm_SOURCE_DIR}/src/screen.c
-    ${libvterm_SOURCE_DIR}/src/state.c
-    ${libvterm_SOURCE_DIR}/src/parser.c
-    ${libvterm_SOURCE_DIR}/src/pen.c
-    ${libvterm_SOURCE_DIR}/src/keyboard.c
-    ${libvterm_SOURCE_DIR}/src/mouse.c
-    ${libvterm_SOURCE_DIR}/src/unicode.c
-    ${libvterm_SOURCE_DIR}/src/encoding.c
-  )
-
-  target_include_directories(libvterm PUBLIC ${libvterm_SOURCE_DIR}/include)
-  target_include_directories(libvterm PRIVATE ${libvterm_SOURCE_DIR}/src)
-  target_compile_definitions(libvterm PRIVATE _DEFAULT_SOURCE)
-endif()
+target_include_directories(libvterm PUBLIC ${LIBVTERM_SOURCE_DIR}/include)
+target_include_directories(libvterm PRIVATE ${LIBVTERM_SOURCE_DIR}/src)
+target_compile_definitions(libvterm PRIVATE _DEFAULT_SOURCE)
+target_compile_options(libvterm PRIVATE -std=gnu99)

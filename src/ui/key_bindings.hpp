@@ -26,8 +26,15 @@ bool event_is_ctrl_f(const ftxui::Event& event);
 bool event_is_ctrl_shift_h(const ftxui::Event& event);
 bool event_is_ctrl_h(const ftxui::Event& event);
 bool event_is_ctrl_g(const ftxui::Event& event);
+bool event_is_ctrl_u(const ftxui::Event& event);
+bool event_is_ctrl_d(const ftxui::Event& event);
+bool event_is_ctrl_shift_d(const ftxui::Event& event);
+bool event_is_ctrl_backspace(const ftxui::Event& event);
+bool event_is_ctrl_delete(const ftxui::Event& event);
 bool event_is_ctrl_space(const ftxui::Event& event);
 bool event_is_completion(const ftxui::Event& event);
+bool event_is_go_to_definition(const ftxui::Event& event);
+bool event_is_go_to_declaration(const ftxui::Event& event);
 
 bool editor_priority_key(const ftxui::Event& event);
 

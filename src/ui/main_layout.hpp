@@ -42,6 +42,7 @@ using StopDebugCallback = std::function<void()>;
 
 struct MainLayoutState {
   bool console_visible = true;
+  bool terminal_start_requested = false;
   TextInputFocus text_input_focus = TextInputFocus::None;
   bool focus_sync_needed = false;
   RightSidebarState right_sidebar;

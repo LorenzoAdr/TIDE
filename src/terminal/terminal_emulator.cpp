@@ -1,6 +1,7 @@
 #include "terminal/terminal_emulator.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -38,33 +39,6 @@ std::string utf8_from_codepoint(uint32_t codepoint) {
     out.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
   }
   return out;
-}
-
-Color xterm_palette_color(int index) {
-  static const Color palette[] = {
-      Color::RGB(0, 0, 0),       Color::RGB(205, 0, 0),     Color::RGB(0, 205, 0),
-      Color::RGB(205, 205, 0),   Color::RGB(0, 0, 238),     Color::RGB(205, 0, 205),
-      Color::RGB(0, 205, 205),   Color::RGB(229, 229, 229), Color::RGB(127, 127, 127),
-      Color::RGB(255, 0, 0),     Color::RGB(0, 255, 0),     Color::RGB(255, 255, 0),
-      Color::RGB(92, 92, 255),   Color::RGB(255, 0, 255),   Color::RGB(0, 255, 255),
-      Color::RGB(255, 255, 255),
-  };
-  if (index >= 0 && index < 16) {
-    return palette[index];
-  }
-  if (index >= 232) {
-    const int level = index - 232;
-    const int gray = 8 + level * 10;
-    return Color::RGB(gray, gray, gray);
-  }
-  if (index >= 16 && index < 232) {
-    const int idx = index - 16;
-    const int r = (idx / 36) * 51;
-    const int g = ((idx / 6) % 6) * 51;
-    const int b = (idx % 6) * 51;
-    return Color::RGB(r, g, b);
-  }
-  return theme::Header();
 }
 
 }  // namespace
@@ -110,6 +84,7 @@ void TerminalEmulator::destroy_vterm() {
     screen_ = nullptr;
     state_ = nullptr;
   }
+  dirty_ = true;
 }
 
 void TerminalEmulator::reset(int rows, int cols) { init_vterm(rows, cols); }
@@ -192,88 +167,28 @@ int TerminalEmulator::sb_popline_callback(int cols, VTermScreenCell* cells, void
 }
 
 std::string TerminalEmulator::cell_text(const VTermScreenCell& cell) const {
-  if (cell.chars[0] == 0) {
-    return " ";
-  }
-  std::string out;
-  for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; ++i) {
-    out += utf8_from_codepoint(cell.chars[i]);
-  }
-  return out.empty() ? std::string(" ") : out;
+  (void)cell;
+  return " ";
 }
 
 Color TerminalEmulator::cell_fg(const VTermScreenCell& cell) const {
-  VTermColor color = cell.fg;
-  if (VTERM_COLOR_IS_DEFAULT_FG(&color)) {
-    return theme::Header();
-  }
-  if (VTERM_COLOR_IS_DEFAULT_BG(&color)) {
-    return theme::Header();
-  }
-  vterm_screen_convert_color_to_rgb(screen_, &color);
-  if (VTERM_COLOR_IS_INDEXED(&color)) {
-    return xterm_palette_color(color.indexed.idx);
-  }
-  return Color::RGB(color.rgb.red, color.rgb.green, color.rgb.blue);
+  (void)cell;
+  return theme::Header();
 }
 
 Color TerminalEmulator::cell_bg(const VTermScreenCell& cell) const {
-  VTermColor color = cell.bg;
-  if (VTERM_COLOR_IS_DEFAULT_BG(&color)) {
-    return theme::CodeBg();
-  }
-  if (VTERM_COLOR_IS_DEFAULT_FG(&color)) {
-    return theme::CodeBg();
-  }
-  vterm_screen_convert_color_to_rgb(screen_, &color);
-  if (VTERM_COLOR_IS_INDEXED(&color)) {
-    return xterm_palette_color(color.indexed.idx);
-  }
-  return Color::RGB(color.rgb.red, color.rgb.green, color.rgb.blue);
+  (void)cell;
+  return theme::CodeBg();
 }
 
 Element TerminalEmulator::render_row(int row, int cursor_row, int cursor_col) const {
-  Elements cells;
-  cells.reserve(static_cast<std::size_t>(cols_));
-
-  for (int col = 0; col < cols_;) {
-    VTermPos pos = {row, col};
-    VTermScreenCell cell = {};
-    vterm_screen_get_cell(screen_, pos, &cell);
-
-    const bool at_cursor = row == cursor_row && col == cursor_col;
-    const std::string glyph = cell_text(cell);
-    Color fg = cell_fg(cell);
-    Color bg = cell_bg(cell);
-
-    Element styled = text(glyph) | color(fg) | bgcolor(bg);
-    if (cell.attrs.bold) {
-      styled = styled | bold;
-    }
-    if (cell.attrs.italic) {
-      styled = styled | italic;
-    }
-    if (cell.attrs.underline) {
-      styled = styled | underlined;
-    }
-    if (cell.attrs.strike) {
-      styled = styled | strikethrough;
-    }
-    if (cell.attrs.reverse) {
-      styled = text(glyph) | color(bg) | bgcolor(fg);
-    }
-    if (at_cursor) {
-      styled = styled | inverted;
-    }
-    cells.push_back(std::move(styled));
-
-    col += cell.width > 0 ? cell.width : 1;
-  }
-
-  return hbox(std::move(cells));
+  (void)row;
+  (void)cursor_row;
+  (void)cursor_col;
+  return text("");
 }
 
-Element TerminalEmulator::render() const {
+Element TerminalEmulator::render() {
   if (screen_ == nullptr || state_ == nullptr) {
     return text("(terminal no disponible)") | color(theme::Muted());
   }
@@ -281,11 +196,56 @@ Element TerminalEmulator::render() const {
   VTermPos cursor = {};
   vterm_state_get_cursorpos(state_, &cursor);
 
+  std::vector<char> buffer(static_cast<std::size_t>(cols_) + 1);
   Elements rows;
   rows.reserve(static_cast<std::size_t>(rows_));
+
   for (int row = 0; row < rows_; ++row) {
-    rows.push_back(render_row(row, cursor.row, cursor.col));
+    const VTermRect rect = {row, row + 1, 0, cols_};
+    std::fill(buffer.begin(), buffer.end(), '\0');
+    vterm_screen_get_text(screen_, buffer.data(), buffer.size(), rect);
+
+    std::string line(buffer.data());
+    while (!line.empty() && line.back() == ' ') {
+      line.pop_back();
+    }
+
+    if (row == cursor.row) {
+      const int col = cursor.col;
+      if (col > static_cast<int>(line.size())) {
+        line.resize(static_cast<std::size_t>(col), ' ');
+      }
+      if (col >= 0 && col <= static_cast<int>(line.size())) {
+        char cursor_char = '_';
+        if (col < static_cast<int>(line.size())) {
+          cursor_char = line[static_cast<std::size_t>(col)];
+          if (cursor_char == ' ') {
+            cursor_char = '_';
+          }
+        }
+        const std::string before = line.substr(0, static_cast<std::size_t>(col));
+        const std::string after =
+            col < static_cast<int>(line.size()) ? line.substr(static_cast<std::size_t>(col) + 1)
+                                                : std::string();
+        rows.push_back(hbox({
+                           text(before.empty() ? "" : before) | color(theme::WatchInput()),
+                           text(std::string(1, cursor_char)) | color(theme::CodeBg()) |
+                               bgcolor(theme::WatchInput()) | bold,
+                           text(after) | color(theme::WatchInput()),
+                       }) |
+                       bgcolor(theme::CodeBg()));
+        continue;
+      }
+    }
+
+    if (line.empty()) {
+      rows.push_back(text(" ") | color(theme::CodeBg()) | bgcolor(theme::CodeBg()));
+    } else {
+      rows.push_back(text(line) | color(theme::WatchInput()) | bgcolor(theme::CodeBg()));
+    }
   }
+
+  dirty_ = false;
   return vbox(std::move(rows)) | bgcolor(theme::CodeBg());
 }
 

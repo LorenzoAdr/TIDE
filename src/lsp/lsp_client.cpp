@@ -117,15 +117,19 @@ std::string LspClient::find_compile_commands_dir(
 }
 
 bool LspClient::initialize(const std::string& workspace_root) {
-  nlohmann::json params = {
-      {"processId", static_cast<int>(getpid())},
-      {"rootUri", path_to_uri(workspace_root)},
-      {"capabilities",
-       {{"textDocument",
-         {{"documentSymbol", {{"hierarchicalDocumentSymbolSupport", true}}},
-          {"publishDiagnostics", nlohmann::json::object()}}},
-        {"workspace", {{"symbol", {{"resolveSupport", nlohmann::json::object()}}}}}}},
-      {"clientInfo", {{"name", "tgdb"}, {"version", "0.1.0"}}};
+  nlohmann::json params;
+  params["processId"] = static_cast<int>(getpid());
+  params["rootUri"] = path_to_uri(workspace_root);
+  params["capabilities"]["textDocument"]["documentSymbol"]["hierarchicalDocumentSymbolSupport"] =
+      true;
+  params["capabilities"]["textDocument"]["publishDiagnostics"] = nlohmann::json::object();
+  params["capabilities"]["textDocument"]["completion"]["completionItem"]["snippetSupport"] =
+      false;
+  params["capabilities"]["textDocument"]["definition"] = nlohmann::json::object();
+  params["capabilities"]["textDocument"]["declaration"] = nlohmann::json::object();
+  params["capabilities"]["workspace"]["symbol"]["resolveSupport"] = nlohmann::json::object();
+  params["clientInfo"]["name"] = "tgdb";
+  params["clientInfo"]["version"] = "0.1.0";
 
   nlohmann::json result;
   const int id = next_request_id_++;
@@ -428,6 +432,221 @@ std::vector<SymbolInfo> LspClient::workspace_symbols(const std::string& workspac
     symbols.push_back(std::move(info));
   }
   return symbols;
+}
+
+SymbolKind LspClient::map_completion_kind(int kind) {
+  switch (kind) {
+    case 3:
+      return SymbolKind::kNamespace;
+    case 5:
+    case 7:
+      return SymbolKind::kClass;
+    case 22:
+    case 23:
+      return SymbolKind::kStruct;
+    case 2:
+    case 6:
+      return SymbolKind::kMethod;
+    case 4:
+    case 12:
+      return SymbolKind::kFunction;
+    default:
+      return SymbolKind::kVariable;
+  }
+}
+
+std::string LspClient::completion_label(const nlohmann::json& item) {
+  if (!item.contains("label")) {
+    return {};
+  }
+  if (item["label"].is_string()) {
+    return item["label"].get<std::string>();
+  }
+  if (item["label"].is_object() && item["label"].contains("label")) {
+    return item["label"]["label"].get<std::string>();
+  }
+  return {};
+}
+
+CompletionItem LspClient::parse_completion_item(const nlohmann::json& item) {
+  CompletionItem out;
+  out.label = completion_label(item);
+  if (out.label.empty()) {
+    return out;
+  }
+
+  if (item.contains("kind")) {
+    out.kind = map_completion_kind(item["kind"].get<int>());
+  }
+  if (item.contains("detail") && item["detail"].is_string()) {
+    out.detail = item["detail"].get<std::string>();
+  }
+
+  if (item.contains("insertText") && item["insertText"].is_string()) {
+    out.insert_text = item["insertText"].get<std::string>();
+  } else if (item.contains("textEdit") && item["textEdit"].is_object()) {
+    const auto& edit = item["textEdit"];
+    if (edit.contains("newText") && edit["newText"].is_string()) {
+      out.insert_text = edit["newText"].get<std::string>();
+    }
+    if (edit.contains("range") && edit["range"].is_object()) {
+      const auto& range = edit["range"];
+      if (range.contains("start") && range.contains("end")) {
+        out.has_replace_range = true;
+        out.replace_line = range["start"]["line"].get<int>();
+        out.replace_start = range["start"]["character"].get<int>();
+        out.replace_end = range["end"]["character"].get<int>();
+      }
+    }
+  }
+
+  if (out.insert_text.empty()) {
+    out.insert_text = out.label;
+  }
+
+  return out;
+}
+
+std::vector<CompletionItem> LspClient::completions_at(const std::string& absolute_path,
+                                                        const std::string& text, int line,
+                                                        int character) {
+  if (!ready_.load() || absolute_path.empty()) {
+    return {};
+  }
+
+  if (!text.empty()) {
+    did_change(absolute_path, text);
+  }
+
+  const std::string uri = path_to_uri(absolute_path);
+  nlohmann::json params = {{"textDocument", {{"uri", uri}}},
+                           {"position", {{"line", line}, {"character", character}}},
+                           {"context", {{"triggerKind", 1}}}};
+
+  nlohmann::json result;
+  const int id = next_request_id_++;
+  if (!transport_.send_request(id, "textDocument/completion", std::move(params), 10000,
+                               &result)) {
+    return {};
+  }
+
+  nlohmann::json items;
+  if (result.is_array()) {
+    items = result;
+  } else if (result.is_object() && result.contains("items") && result["items"].is_array()) {
+    items = result["items"];
+  } else {
+    return {};
+  }
+
+  std::vector<CompletionItem> completions;
+  for (const auto& item : items) {
+    if (!item.is_object()) {
+      continue;
+    }
+    CompletionItem parsed = parse_completion_item(item);
+    if (parsed.label.empty()) {
+      continue;
+    }
+    completions.push_back(std::move(parsed));
+    if (completions.size() >= 200) {
+      break;
+    }
+  }
+  return completions;
+}
+
+bool LspClient::parse_single_location(const nlohmann::json& loc, SourceLocation* out) {
+  if (out == nullptr || !loc.is_object()) {
+    return false;
+  }
+
+  std::string uri;
+  const nlohmann::json* range = nullptr;
+  if (loc.contains("targetUri")) {
+    if (loc["targetUri"].is_string()) {
+      uri = loc["targetUri"].get<std::string>();
+    }
+    if (loc.contains("targetRange") && loc["targetRange"].is_object()) {
+      range = &loc["targetRange"];
+    }
+  } else {
+    if (loc.contains("uri") && loc["uri"].is_string()) {
+      uri = loc["uri"].get<std::string>();
+    }
+    if (loc.contains("range") && loc["range"].is_object()) {
+      range = &loc["range"];
+    }
+  }
+
+  if (uri.empty() || range == nullptr || !range->contains("start")) {
+    return false;
+  }
+
+  const auto& start = (*range)["start"];
+  if (!start.contains("line") || !start.contains("character")) {
+    return false;
+  }
+
+  out->path = uri_to_path(uri);
+  out->line = start["line"].get<int>();
+  out->character = start["character"].get<int>();
+  out->valid = !out->path.empty();
+  return out->valid;
+}
+
+SourceLocation LspClient::parse_location_result(const nlohmann::json& result) {
+  SourceLocation loc;
+  if (result.is_null()) {
+    return loc;
+  }
+  if (result.is_array()) {
+    for (const auto& entry : result) {
+      if (parse_single_location(entry, &loc)) {
+        return loc;
+      }
+    }
+    return loc;
+  }
+  parse_single_location(result, &loc);
+  return loc;
+}
+
+SourceLocation LspClient::request_location(const std::string& method,
+                                           const std::string& absolute_path,
+                                           const std::string& text, int line,
+                                           int character) {
+  SourceLocation loc;
+  if (!ready_.load() || absolute_path.empty()) {
+    return loc;
+  }
+
+  if (!text.empty()) {
+    did_change(absolute_path, text);
+  }
+
+  const std::string uri = path_to_uri(absolute_path);
+  nlohmann::json params = {{"textDocument", {{"uri", uri}}},
+                           {"position", {{"line", line}, {"character", character}}}};
+
+  nlohmann::json result;
+  const int id = next_request_id_++;
+  if (!transport_.send_request(id, method, std::move(params), 10000, &result)) {
+    return loc;
+  }
+  return parse_location_result(result);
+}
+
+SourceLocation LspClient::goto_definition(const std::string& absolute_path,
+                                          const std::string& text, int line,
+                                          int character) {
+  return request_location("textDocument/definition", absolute_path, text, line, character);
+}
+
+SourceLocation LspClient::goto_declaration(const std::string& absolute_path,
+                                           const std::string& text, int line,
+                                           int character) {
+  return request_location("textDocument/declaration", absolute_path, text, line, character);
 }
 
 }  // namespace tgdb

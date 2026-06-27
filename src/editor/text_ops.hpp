@@ -5,6 +5,11 @@
 namespace tgdb {
 
 void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines);
+void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lines);
+void move_primary_half_page_up(EditorBuffer* buffer, int visible_lines,
+                               bool extend_selection = false);
+void move_primary_half_page_down(EditorBuffer* buffer, int visible_lines,
+                                 bool extend_selection = false);
 
 void insert_char(EditorBuffer* buffer, char c);
 void replace_word_at_cursor(EditorBuffer* buffer, const std::string& replacement);
@@ -12,6 +17,8 @@ void replace_text_range(EditorBuffer* buffer, int line, int start_col, int end_c
                         const std::string& replacement);
 void backspace(EditorBuffer* buffer);
 void delete_char(EditorBuffer* buffer);
+void delete_word_backward(EditorBuffer* buffer);
+void delete_word_forward(EditorBuffer* buffer);
 void newline(EditorBuffer* buffer);
 void paste_at_primary(EditorBuffer* buffer, const std::string& text);
 bool undo_edit(EditorBuffer* buffer);

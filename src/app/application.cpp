@@ -107,7 +107,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
     workspace_wizard_state_.open = true;
     workspace_wizard_state_.reset();
     if (!config_.workspace_root.empty()) {
-      shell_session_.start(config_.workspace_root);
+      model_.workspace_root = config_.workspace_root;
     }
   } else {
     set_workspace(config_.workspace_root);
@@ -143,7 +143,7 @@ void Application::set_workspace(const std::string& workspace_root) {
   file_picker_state_.all_files.clear();
   shell_session_.stop();
   model_.console_output.clear();
-  shell_session_.start(absolute);
+  layout_state_.terminal_start_requested = false;
   if (symbol_provider_) {
     symbol_provider_->on_workspace_opened(absolute);
   }
@@ -229,7 +229,9 @@ void Application::exit_debug_mode() {
 
   app_mode_ = AppMode::kNormal;
   layout_state_.text_input_focus = TextInputFocus::None;
-  shell_session_.start(config_.workspace_root);
+  if (!config_.workspace_root.empty()) {
+    shell_session_.stop();
+  }
   set_workspace_status("Modo edición");
 }
 
@@ -445,7 +447,9 @@ void Application::apply_event(const DebugEvent& event) {
 }
 
 void Application::drain_events() {
-  shell_session_.drain_output();
+  if (shell_session_.running()) {
+    shell_session_.drain_output(4096);
+  }
   while (auto event = event_queue_.try_pop()) {
     apply_event(*event);
   }
@@ -506,6 +510,7 @@ bool Application::handle_focus_shortcuts(const Event& event) {
     focus_state_.region = FocusRegion::Terminal;
     layout_state_.console_visible = true;
     layout_state_.text_input_focus = TextInputFocus::Console;
+    layout_state_.terminal_start_requested = true;
     mark_focus_sync();
     return true;
   }
@@ -524,6 +529,7 @@ bool Application::handle_focus_shortcuts(const Event& event) {
       focus_state_.move_down();
       layout_state_.console_visible = true;
       layout_state_.text_input_focus = TextInputFocus::Console;
+      layout_state_.terminal_start_requested = true;
       mark_focus_sync();
       return true;
     }
@@ -664,8 +670,10 @@ int Application::run() {
           } else {
             shell_session_.write_raw("\x1b[Z");
           }
+          screen.Post(Event::Custom);
+          return true;
         }
-        return true;
+        return false;
       }
 
       if (event == Event::CtrlQ) {

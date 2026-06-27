@@ -16,12 +16,6 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 
-FetchContent_Declare(
-  json
-  URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
-
-FetchContent_MakeAvailable(ftxui cppdap json)
+FetchContent_MakeAvailable(ftxui cppdap)
 
 include(${CMAKE_CURRENT_LIST_DIR}/Libvterm.cmake)

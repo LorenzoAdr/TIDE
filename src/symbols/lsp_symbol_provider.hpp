@@ -20,6 +20,11 @@ class LspSymbolProvider : public ISymbolProvider {
   bool indexes_workspace_bulk() const override;
   std::vector<SymbolInfo> workspace_symbols(const std::string& workspace_root,
                                               const std::string& query) override;
+  bool supports_semantic_completion() const override;
+  std::vector<CompletionItem> completions_at(const CompletionParams& params) override;
+  bool supports_navigation() const override;
+  SourceLocation goto_definition(const NavigationParams& params) override;
+  SourceLocation goto_declaration(const NavigationParams& params) override;
 
   void on_workspace_opened(const std::string& root) override;
   void on_workspace_closed() override;

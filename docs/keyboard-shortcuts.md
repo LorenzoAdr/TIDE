@@ -32,7 +32,11 @@ Press **F1** inside tgdb to open the in-app shortcuts dialog (scrollable). This 
 | Ctrl+Z | Undo |
 | Ctrl+C | Copy selection |
 | Ctrl+V | Paste |
-| Ctrl+D | Select next match |
+| Ctrl+U | Half page up (moves cursor) |
+| Ctrl+D | Half page down (moves cursor) |
+| Ctrl+Backspace | Delete previous word |
+| Ctrl+Delete | Delete next word |
+| Ctrl+Shift+D | Select next match |
 | Ctrl+Shift+L | Select all matches |
 | Ctrl+. | Code completion (LSP) |
 | Ctrl+Space | Code completion (LSP) |
@@ -50,6 +54,8 @@ Press **F1** inside tgdb to open the in-app shortcuts dialog (scrollable). This 
 | F10 | Step over |
 | F11 | Step into |
 | Shift+F11 | Step out |
+| Ctrl+U | Scroll half page up |
+| Ctrl+D | Scroll half page down |
 | Ctrl+B | Toggle breakpoint on current line |
 | Click gutter | Toggle breakpoint |
 
