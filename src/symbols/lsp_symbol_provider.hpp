@@ -1,0 +1,43 @@
+#pragma once
+
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+
+#include "lsp/lsp_client.hpp"
+#include "symbols/regex_symbol_provider.hpp"
+#include "symbols/symbol_provider.hpp"
+
+namespace tgdb {
+
+class LspSymbolProvider : public ISymbolProvider {
+ public:
+  LspSymbolProvider();
+  ~LspSymbolProvider() override;
+
+  std::vector<SymbolInfo> symbols_for_file(const std::string& path) override;
+  bool indexes_workspace_bulk() const override;
+  std::vector<SymbolInfo> workspace_symbols(const std::string& workspace_root,
+                                              const std::string& query) override;
+
+  void on_workspace_opened(const std::string& root) override;
+  void on_workspace_closed() override;
+  void on_document_opened(const std::string& path, const std::string& text) override;
+  void on_document_changed(const std::string& path, const std::string& text) override;
+  void on_document_closed(const std::string& path) override;
+
+  bool lsp_active() const { return use_lsp_; }
+
+ private:
+  std::string buffer_text_for_path(const std::string& path) const;
+
+  mutable std::mutex mutex_;
+  LspClient client_;
+  RegexSymbolProvider fallback_;
+  bool use_lsp_ = false;
+  std::string workspace_root_;
+  std::unordered_map<std::string, std::string> open_buffers_;
+};
+
+}  // namespace tgdb

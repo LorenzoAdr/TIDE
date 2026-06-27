@@ -7,7 +7,11 @@
 #include "app/debug_model.hpp"
 #include "app/workspace_model.hpp"
 #include "ftxui/component/component_base.hpp"
+#include "ftxui/component/event.hpp"
 #include "symbols/symbol_provider.hpp"
+#include "terminal/shell_session.hpp"
+#include "indexer/symbol_workspace_indexer.hpp"
+#include "indexer/workspace_indexer.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/source_panel.hpp"
 
@@ -20,6 +24,18 @@ enum class TextInputFocus {
   Console,
   Watch,
   WatchInject,
+  EditorFind,
+  EditorGotoLine,
+  EditorCompletion,
+  SearchQuery,
+  SearchReplace,
+  SearchPath,
+  SearchExclude,
+};
+
+struct RightSidebarState {
+  int selected_tab = 0;
+  bool pending_focus_search = false;
 };
 
 using StopDebugCallback = std::function<void()>;
@@ -28,7 +44,18 @@ struct MainLayoutState {
   bool console_visible = true;
   TextInputFocus text_input_focus = TextInputFocus::None;
   bool focus_sync_needed = false;
+  RightSidebarState right_sidebar;
+  std::function<bool(const ftxui::Event&)> editor_key_handler;
+  std::function<bool(const ftxui::Event&)> console_key_handler;
+  std::function<bool(const ftxui::Event&)> search_key_handler;
 };
+
+inline bool is_search_input_focus(TextInputFocus focus) {
+  return focus == TextInputFocus::SearchQuery ||
+         focus == TextInputFocus::SearchReplace ||
+         focus == TextInputFocus::SearchPath ||
+         focus == TextInputFocus::SearchExclude;
+}
 
 ftxui::Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                                 WorkspaceModel* workspace, SourceViewState* source_state,
@@ -36,6 +63,9 @@ ftxui::Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                                 std::shared_ptr<ISymbolProvider> symbols,
                                 CommandCallback on_command,
                                 MainLayoutState* layout_state,
-                                StopDebugCallback on_stop_debug = {});
+                                StopDebugCallback on_stop_debug,
+                                ShellSession* shell,
+                                WorkspaceIndexer* indexer,
+                                SymbolWorkspaceIndexer* symbol_indexer);
 
 }  // namespace tgdb

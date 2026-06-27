@@ -3,6 +3,8 @@
 #include <fstream>
 #include <filesystem>
 
+#include "editor/undo_stack.hpp"
+
 namespace fs = std::filesystem;
 
 namespace tgdb {
@@ -10,10 +12,10 @@ namespace tgdb {
 bool WorkspaceModel::load_file(const std::string& absolute_path) {
   buffer.lines.clear();
   buffer.path = absolute_path;
-  buffer.cursor_line = 0;
-  buffer.cursor_col = 0;
+  buffer.reset_to_single_cursor(0, 0);
   buffer.scroll = 0;
   buffer.dirty = false;
+  clear_undo(&buffer);
 
   if (absolute_path.empty()) {
     buffer.lines.push_back("Abre un archivo del explorador o Ctrl+P.");
@@ -75,6 +77,7 @@ void WorkspaceModel::ensure_buffer() {
     load_file(active_file);
   } else if (buffer.lines.empty()) {
     buffer.lines.push_back("Abre un archivo del explorador o Ctrl+P.");
+    buffer.ensure_cursors();
   }
 }
 

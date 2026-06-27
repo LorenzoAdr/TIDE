@@ -13,7 +13,6 @@ struct FileTreeNode {
   std::vector<FileTreeNode> children;
 };
 
-std::vector<std::string> build_file_tree(const std::string& root);
-FileTreeNode build_file_tree_root(const std::string& root);
+FileTreeNode build_file_tree_from_paths(const std::vector<std::string>& relative_paths);
 
 }  // namespace tgdb

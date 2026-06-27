@@ -1,0 +1,11 @@
+#pragma once
+
+#include "editor/editor_state.hpp"
+
+namespace tgdb {
+
+void push_undo(EditorBuffer* buffer);
+bool undo(EditorBuffer* buffer);
+void clear_undo(EditorBuffer* buffer);
+
+}  // namespace tgdb

@@ -30,7 +30,7 @@ void print_usage() {
             << "  -h, --help          Muestra esta ayuda\n"
             << "\n"
             << "Sin argumentos abre el selector de workspace (modo IDE).\n"
-            << "F2 inicia depuración; F3 cambia el directorio de trabajo.\n"
+            << "F1 atajos de teclado; F2 inicia depuración; F3 cambia el directorio de trabajo.\n"
             << "\n"
             << "Ejemplos:\n"
             << "  tgdb\n"

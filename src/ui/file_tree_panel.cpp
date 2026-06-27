@@ -35,16 +35,37 @@ struct FlatEntry {
 struct FileTreePanelState {
   FileTreeNode root;
   std::vector<FlatEntry> flat;
+  std::vector<std::string> indexed_files;
   int selected = 0;
   std::string loaded_workspace;
   Box content_box;
 
-  void sync_workspace(DebugModel* model) {
-    if (model->workspace_root == loaded_workspace) {
+  void sync_index(const std::shared_ptr<const IndexSnapshot>& snapshot,
+                  const std::string& workspace_root) {
+    if (workspace_root.empty()) {
+      if (loaded_workspace.empty() && indexed_files.empty()) {
+        return;
+      }
+      loaded_workspace.clear();
+      indexed_files.clear();
+      root = FileTreeNode{};
+      root.expanded = true;
+      selected = 0;
+      rebuild_flat();
       return;
     }
-    loaded_workspace = model->workspace_root;
-    root = build_file_tree_root(loaded_workspace);
+
+    if (!snapshot || snapshot->workspace_root != workspace_root) {
+      return;
+    }
+
+    if (loaded_workspace == workspace_root && indexed_files == snapshot->files) {
+      return;
+    }
+
+    loaded_workspace = workspace_root;
+    indexed_files = snapshot->files;
+    root = build_file_tree_from_paths(snapshot->files);
     for (auto& child : root.children) {
       if (!child.is_file) {
         child.expanded = true;
@@ -91,7 +112,6 @@ struct FileTreePanelState {
       model->view_token++;
       if (workspace != nullptr) {
         workspace->load_file(absolute.string());
-        workspace->buffer.view_token++;
       }
       if (focus != nullptr) {
         focus->region = FocusRegion::Editor;
@@ -169,18 +189,27 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
 }  // namespace
 
 Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
-                            FocusManagerState* focus, CommandCallback on_command) {
+                            FocusManagerState* focus, WorkspaceIndexer* indexer,
+                            CommandCallback on_command) {
   (void)on_command;
   auto state = std::make_shared<FileTreePanelState>();
 
-  auto renderer = Renderer([model, focus, state] {
-    state->sync_workspace(model);
+  auto renderer = Renderer([model, focus, state, indexer] {
+    const bool scanning = indexer != nullptr && indexer->scanning();
+    state->sync_index(indexer != nullptr ? indexer->snapshot() : nullptr,
+                      model->workspace_root);
 
     Elements rows;
     if (state->flat.empty()) {
-      rows.push_back(text("(sin archivos fuente)") | color(theme::Muted()));
-      rows.push_back(text("workspace: " + model->workspace_root) |
-                     color(theme::Muted()));
+      if (scanning) {
+        rows.push_back(text("(indexando...)") | color(theme::Muted()));
+      } else {
+        rows.push_back(text("(sin archivos fuente)") | color(theme::Muted()));
+      }
+      if (!model->workspace_root.empty()) {
+        rows.push_back(text("workspace: " + model->workspace_root) |
+                       color(theme::Muted()));
+      }
     } else {
       for (int i = 0; i < static_cast<int>(state->flat.size()); ++i) {
         const auto& entry = state->flat[i];

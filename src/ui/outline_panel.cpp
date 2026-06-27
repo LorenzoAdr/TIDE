@@ -58,7 +58,7 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     auto content = vbox(std::move(rows)) | vscroll_indicator | frame | flex |
                    reflect(state->content_box) | bgcolor(theme::PanelBg());
-    return MakePanel("Outline", std::move(content));
+    return PanelBody(std::move(content));
   });
 
   return WrapFocusable(CatchEvent(renderer, [workspace, focus, state](Event event) {
@@ -71,9 +71,8 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
         if (row >= 0 && row < static_cast<int>(state->symbols.size())) {
           state->selected = row;
           const auto& sym = state->symbols[row];
-          workspace->buffer.cursor_line = std::max(0, sym.line - 1);
-          workspace->buffer.cursor_col = 0;
-          workspace->buffer.scroll = std::max(0, workspace->buffer.cursor_line - 2);
+          workspace->buffer.reset_to_single_cursor(std::max(0, sym.line - 1), 0);
+          workspace->buffer.scroll = std::max(0, workspace->buffer.primary_line() - 2);
           workspace->buffer.view_token++;
           focus->region = FocusRegion::Editor;
         }
@@ -99,9 +98,8 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     if (event == Event::Return) {
       const auto& sym = state->symbols[state->selected];
-      workspace->buffer.cursor_line = std::max(0, sym.line - 1);
-      workspace->buffer.cursor_col = 0;
-      workspace->buffer.scroll = std::max(0, workspace->buffer.cursor_line - 2);
+      workspace->buffer.reset_to_single_cursor(std::max(0, sym.line - 1), 0);
+      workspace->buffer.scroll = std::max(0, workspace->buffer.primary_line() - 2);
       workspace->buffer.view_token++;
       focus->region = FocusRegion::Editor;
       return true;

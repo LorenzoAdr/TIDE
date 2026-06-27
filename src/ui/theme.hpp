@@ -15,6 +15,8 @@ inline Color PanelBg() { return Color::RGB(28, 32, 42); }
 inline Color CodeBg() { return Color::RGB(0, 0, 0); }
 inline Color EditorLineHi() { return Color::RGB(26, 28, 36); }
 inline Color CursorCell() { return Color::RGB(90, 170, 255); }
+inline Color SelectionBg() { return Color::RGB(60, 70, 100); }
+inline Color FindMatchBg() { return Color::RGB(80, 70, 30); }
 inline Color TabActive() { return Color::RGB(55, 75, 110); }
 inline Color TabIdle() { return Color::RGB(38, 42, 52); }
 inline Color Header() { return Color::RGB(180, 200, 255); }

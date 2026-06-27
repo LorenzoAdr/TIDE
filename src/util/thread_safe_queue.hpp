@@ -47,6 +47,12 @@ class ThreadSafeQueue {
     cv_.notify_all();
   }
 
+  void reset() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    queue_ = {};
+    closed_ = false;
+  }
+
  private:
   std::mutex mutex_;
   std::condition_variable cv_;

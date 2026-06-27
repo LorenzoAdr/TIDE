@@ -7,14 +7,11 @@
 #include <thread>
 #include <vector>
 
-#include "indexer/trie.hpp"
-
 namespace tgdb {
 
 struct IndexSnapshot {
   std::string workspace_root;
   std::vector<std::string> files;
-  Trie trie;
 };
 
 class WorkspaceIndexer {
@@ -23,6 +20,9 @@ class WorkspaceIndexer {
   ~WorkspaceIndexer();
 
   void start_scan(const std::string& workspace_root);
+  void upsert_file(const std::string& workspace_root, const std::string& relative_file,
+                   const std::string& absolute_path);
+  void remove_file(const std::string& workspace_root, const std::string& relative_file);
   void stop();
   std::shared_ptr<const IndexSnapshot> snapshot() const;
   bool scanning() const;

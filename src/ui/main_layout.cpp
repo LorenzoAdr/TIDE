@@ -7,10 +7,13 @@
 #include "ftxui/component/component_options.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "terminal/shell_session.hpp"
 #include "ui/console_panel.hpp"
 #include "ui/editor_panel.hpp"
 #include "ui/file_tree_panel.hpp"
 #include "ui/outline_panel.hpp"
+#include "ui/right_sidebar_panel.hpp"
+#include "ui/search_panel.hpp"
 #include "ui/panel.hpp"
 #include "ui/source_panel.hpp"
 #include "ui/theme.hpp"
@@ -54,9 +57,24 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
     return;
   }
 
-  layout_state->text_input_focus =
-      focus->region == FocusRegion::Terminal ? TextInputFocus::Console
-                                             : TextInputFocus::None;
+  if (focus->region == FocusRegion::Terminal) {
+    layout_state->text_input_focus = TextInputFocus::Console;
+    return;
+  }
+
+  switch (layout_state->text_input_focus) {
+    case TextInputFocus::SearchQuery:
+    case TextInputFocus::SearchReplace:
+    case TextInputFocus::SearchPath:
+    case TextInputFocus::SearchExclude:
+      if (focus->region != FocusRegion::RightPanel) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
+      break;
+    default:
+      layout_state->text_input_focus = TextInputFocus::None;
+      break;
+  }
 }
 
 // Conmuta hijos según app_mode sin Container::Tab (Tab dentro de ResizableSplit
@@ -247,7 +265,9 @@ Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
         }
         if (event.is_mouse() && event.mouse().button == Mouse::Left &&
             event.mouse().motion == Mouse::Pressed) {
-          layout_state->text_input_focus = TextInputFocus::None;
+          if (!is_search_input_focus(layout_state->text_input_focus)) {
+            layout_state->text_input_focus = TextInputFocus::None;
+          }
         }
         return false;
       });
@@ -255,9 +275,9 @@ Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
 
 std::string status_shortcuts(AppMode mode) {
   if (mode == AppMode::kDebug) {
-    return "F5 ▶  F10 step  Ctrl+B bp  F2 debug  F3 workspace  Ctrl+A/E/O  Ctrl+P  Ctrl+T  Ctrl+Q salir ";
+    return "F1 atajos  F5 ▶  F10 step  Ctrl+B bp  F2 debug  F3 workspace  F8 outline  F7 buscar  Ctrl+P  Ctrl+T  Ctrl+Q salir ";
   }
-  return "F2 debug  F3 workspace  Ctrl+A/E/O  Ctrl+S  Ctrl+P  Ctrl+Q salir ";
+  return "F1 atajos  F2 debug  F3 workspace  F7 buscar  F8 outline  Ctrl+F  Ctrl+G  Ctrl+. completar  Ctrl+O  Ctrl+S  Ctrl+P  Ctrl+Q salir ";
 }
 
 }  // namespace
@@ -267,41 +287,41 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                          FocusManagerState* focus,
                          std::shared_ptr<ISymbolProvider> symbols,
                          CommandCallback on_command, MainLayoutState* layout_state,
-                         StopDebugCallback on_stop_debug) {
+                         StopDebugCallback on_stop_debug, ShellSession* shell,
+                         WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer) {
   auto split_state = std::make_shared<LayoutState>();
   auto focus_sync = std::make_shared<FocusSyncState>();
-  auto splits_initialized = std::make_shared<bool>(false);
+  split_state->left_width = 22;
+  split_state->right_width = 22;
+  split_state->bottom_height = 8;
 
-  auto file_tree = MakeFileTreePanel(model, workspace, focus, on_command);
-  auto editor = MakeEditorPanel(workspace, focus);
+  auto file_tree = MakeFileTreePanel(model, workspace, focus, indexer, on_command);
+  auto editor = MakeEditorPanel(workspace, focus, layout_state, symbols, indexer,
+                                symbol_indexer);
   auto source = MakeSourcePanel(model, source_state, on_command);
   auto center = MakeModeLayout(app_mode, editor, source);
 
   auto outline = MakeOutlinePanel(workspace, focus, symbols);
+  auto search = MakeSearchPanel(workspace, model, focus, layout_state, indexer,
+                                &layout_state->right_sidebar);
+  auto sidebar = MakeRightSidebarPanel(outline, search, &layout_state->right_sidebar,
+                                       layout_state);
   auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug);
   auto right_panel =
-      MakeRightPanel(app_mode, outline, watches, &split_state->outline_height);
+      MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height);
 
   auto explorer_and_center = MakeVSplitLeft(file_tree, center, &split_state->left_width);
   auto workspace_area =
       MakeVSplitRight(right_panel, explorer_and_center, &split_state->right_width);
   workspace_area = WrapClearInputFocus(std::move(workspace_area), layout_state);
 
-  auto console = MakeConsolePanel(model, on_command, layout_state);
+  auto console = MakeConsolePanel(app_mode, model, shell, on_command, layout_state, focus);
   auto with_console =
       MakeHSplitBottom(console, workspace_area, &split_state->bottom_height);
 
   auto with_focus_sync = CatchEvent(
       with_console,
-      [split_state, splits_initialized, app_mode, focus, layout_state, focus_sync](
-          Event event) {
-        if (event == Event::Custom && !*splits_initialized) {
-          split_state->left_width = 22;
-          split_state->right_width = 22;
-          split_state->bottom_height = 8;
-          *splits_initialized = true;
-        }
-
+      [split_state, app_mode, focus, layout_state, focus_sync](Event event) {
         if (event != Event::Custom) {
           return false;
         }

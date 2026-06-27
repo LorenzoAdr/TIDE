@@ -13,7 +13,11 @@
 #include "ftxui/component/screen_interactive.hpp"
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
+#include "ui/quit_confirm.hpp"
+#include "ui/symbol_picker.hpp"
+#include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
+#include "ui/terminal_keyboard.hpp"
 #include "ui/workspace_wizard.hpp"
 #include "util/crash_handler.hpp"
 
@@ -96,12 +100,15 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
   }
   workspace_wizard_state_.launch_root = connection_wizard_state_.browser.launch_root;
 
-  symbol_provider_ = std::make_shared<RegexSymbolProvider>();
+  symbol_provider_ = std::make_shared<LspSymbolProvider>();
 
   if (config_.use_workspace_wizard) {
     workspace_.status_message = "Selecciona un directorio de trabajo...";
     workspace_wizard_state_.open = true;
     workspace_wizard_state_.reset();
+    if (!config_.workspace_root.empty()) {
+      shell_session_.start(config_.workspace_root);
+    }
   } else {
     set_workspace(config_.workspace_root);
     if (config_.auto_debug && connection_config_complete()) {
@@ -113,6 +120,12 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 }
 
 Application::~Application() {
+  shell_session_.stop();
+  workspace_watcher_.stop();
+  if (symbol_provider_) {
+    symbol_provider_->on_workspace_closed();
+  }
+  symbol_indexer_.stop();
   indexer_.stop();
   if (backend_) {
     backend_->stop();
@@ -128,7 +141,15 @@ void Application::set_workspace(const std::string& workspace_root) {
   workspace_.status_message = "Workspace: " + fs::path(absolute).filename().string();
   file_picker_state_.indexed_root.clear();
   file_picker_state_.all_files.clear();
+  shell_session_.stop();
+  model_.console_output.clear();
+  shell_session_.start(absolute);
+  if (symbol_provider_) {
+    symbol_provider_->on_workspace_opened(absolute);
+  }
   indexer_.start_scan(absolute);
+  symbol_indexer_.start_scan(absolute, symbol_provider_, &indexer_);
+  workspace_watcher_.start(absolute);
 }
 
 void Application::on_workspace_complete(const std::string& workspace_root) {
@@ -207,6 +228,8 @@ void Application::exit_debug_mode() {
   model_.state = DebugState::kDisconnected;
 
   app_mode_ = AppMode::kNormal;
+  layout_state_.text_input_focus = TextInputFocus::None;
+  shell_session_.start(config_.workspace_root);
   set_workspace_status("Modo edición");
 }
 
@@ -225,12 +248,14 @@ void Application::apply_connection_and_start() {
 
   if (!workspace_.buffer.path.empty()) {
     model_.active_file = workspace_.buffer.path;
-    model_.active_line = workspace_.buffer.cursor_line + 1;
+    model_.active_line = workspace_.buffer.primary_line() + 1;
     model_.view_token++;
   }
 
   app_mode_ = AppMode::kDebug;
   layout_state_.focus_sync_needed = true;
+  shell_session_.stop();
+  model_.console_output.clear();
 
   if (config_.mode == SessionMode::kAttach) {
     UiCommand attach;
@@ -420,14 +445,32 @@ void Application::apply_event(const DebugEvent& event) {
 }
 
 void Application::drain_events() {
+  shell_session_.drain_output();
   while (auto event = event_queue_.try_pop()) {
     apply_event(*event);
   }
 }
 
+void Application::process_index_changes() {
+  if (workspace_.root.empty()) {
+    return;
+  }
+  for (const auto& change : workspace_watcher_.drain_changes()) {
+    if (change.kind == FileIndexChangeKind::Remove) {
+      indexer_.remove_file(workspace_.root, change.relative_path);
+      symbol_indexer_.remove_file(workspace_.root, change.relative_path);
+    } else {
+      indexer_.upsert_file(workspace_.root, change.relative_path, change.absolute_path);
+      symbol_indexer_.reindex_file(workspace_.root, change.relative_path,
+                                   change.absolute_path);
+    }
+  }
+}
+
 bool Application::any_modal_open() const {
   return workspace_wizard_state_.open || connection_wizard_state_.open ||
-         file_picker_state_.open;
+         file_picker_state_.open || symbol_picker_state_.open ||
+         shortcuts_modal_state_.open || quit_confirm_state_.open;
 }
 
 bool Application::handle_focus_shortcuts(const Event& event) {
@@ -444,8 +487,18 @@ bool Application::handle_focus_shortcuts(const Event& event) {
     mark_focus_sync();
     return true;
   }
-  if (event == Event::CtrlO) {
+  if (event_is_open_outline_panel(event)) {
     focus_state_.region = FocusRegion::RightPanel;
+    layout_state_.right_sidebar.selected_tab = 0;
+    layout_state_.text_input_focus = TextInputFocus::None;
+    mark_focus_sync();
+    return true;
+  }
+  if (event_is_open_search_panel(event)) {
+    focus_state_.region = FocusRegion::RightPanel;
+    layout_state_.right_sidebar.selected_tab = 1;
+    layout_state_.right_sidebar.pending_focus_search = true;
+    layout_state_.text_input_focus = TextInputFocus::SearchQuery;
     mark_focus_sync();
     return true;
   }
@@ -456,27 +509,29 @@ bool Application::handle_focus_shortcuts(const Event& event) {
     mark_focus_sync();
     return true;
   }
-  if (event_is_alt_left(event)) {
-    focus_state_.move_left();
-    mark_focus_sync();
-    return true;
-  }
-  if (event_is_alt_right(event)) {
-    focus_state_.move_right();
-    mark_focus_sync();
-    return true;
-  }
-  if (event_is_alt_down(event)) {
-    focus_state_.move_down();
-    layout_state_.console_visible = true;
-    layout_state_.text_input_focus = TextInputFocus::Console;
-    mark_focus_sync();
-    return true;
-  }
-  if (event_is_alt_up(event)) {
-    focus_state_.move_up();
-    mark_focus_sync();
-    return true;
+  if (focus_state_.region != FocusRegion::Editor) {
+    if (event_is_alt_left(event)) {
+      focus_state_.move_left();
+      mark_focus_sync();
+      return true;
+    }
+    if (event_is_alt_right(event)) {
+      focus_state_.move_right();
+      mark_focus_sync();
+      return true;
+    }
+    if (event_is_alt_down(event)) {
+      focus_state_.move_down();
+      layout_state_.console_visible = true;
+      layout_state_.text_input_focus = TextInputFocus::Console;
+      mark_focus_sync();
+      return true;
+    }
+    if (event_is_alt_up(event)) {
+      focus_state_.move_up();
+      mark_focus_sync();
+      return true;
+    }
   }
   return false;
 }
@@ -489,6 +544,11 @@ int Application::run() {
   const bool ui_smoke = std::getenv("TGDB_UI_SMOKE") != nullptr;
   auto screen = ui_smoke ? ScreenInteractive::TerminalOutput()
                          : ScreenInteractive::Fullscreen();
+  if (!ui_smoke) {
+    screen.ForceHandleCtrlC(false);
+    screen.ForceHandleCtrlZ(false);
+    enable_extended_key_reporting();
+  }
 
   std::unique_ptr<EventPoller> event_poller;
   if (!ui_smoke) {
@@ -510,7 +570,8 @@ int Application::run() {
   auto build_ui = [&]() {
     return MakeMainLayout(&app_mode_, &model_, &workspace_, &source_state_,
                           &focus_state_, symbol_provider_, on_command,
-                          &layout_state_, on_stop_debug);
+                          &layout_state_, on_stop_debug, &shell_session_, &indexer_,
+                          &symbol_indexer_);
   };
 
   auto layout = build_ui();
@@ -518,8 +579,11 @@ int Application::run() {
   auto with_picker = MakeFilePickerOverlay(
       layout, &model_, &workspace_, &file_picker_state_, &focus_state_, &indexer_);
 
+  auto with_symbol_picker = MakeSymbolPickerOverlay(
+      with_picker, &workspace_, &symbol_picker_state_, &focus_state_, symbol_provider_);
+
   auto with_debug_wizard = MakeConnectionWizardOverlay(
-      with_picker, &connection_wizard_state_, &model_,
+      with_symbol_picker, &connection_wizard_state_, &model_,
       [this](const ConnectionResult& result) { on_connection_complete(result); },
       [&screen] { screen.ExitLoopClosure()(); });
 
@@ -528,14 +592,35 @@ int Application::run() {
       [this](const std::string& root) { on_workspace_complete(root); },
       [&screen] { screen.ExitLoopClosure()(); });
 
-  auto root = CatchEvent(with_workspace_wizard, [this, &screen, on_command](const Event& event) {
+  auto with_shortcuts = MakeShortcutsModalOverlay(with_workspace_wizard,
+                                                  &shortcuts_modal_state_);
+
+  auto with_quit_confirm = MakeQuitConfirmOverlay(
+      with_shortcuts, &quit_confirm_state_, [this, &screen] {
+        submit_command(UiCommand{UiCommandKind::kQuit});
+        screen.ExitLoopClosure()();
+      });
+
+  auto root = CatchEvent(with_quit_confirm, [this, &screen, on_command](const Event& event) {
     try {
       if (event == Event::Custom) {
         if (!any_modal_open()) {
           apply_pending_connection();
         }
+        process_index_changes();
         drain_events();
         return false;
+      }
+
+      if (event == Event::F1) {
+        if (shortcuts_modal_state_.open) {
+          shortcuts_modal_state_.open = false;
+          shortcuts_modal_state_.first_visible = 0;
+        } else if (!any_modal_open()) {
+          shortcuts_modal_state_.open = true;
+          shortcuts_modal_state_.first_visible = 0;
+        }
+        return true;
       }
 
       if (any_modal_open()) {
@@ -547,16 +632,45 @@ int Application::run() {
         return true;
       }
 
-      if (event == Event::CtrlQ) {
-        submit_command(UiCommand{UiCommandKind::kQuit});
-        screen.ExitLoopClosure()();
+      // Intercept console keys before editor (FTXUI focus may still be on editor).
+      if (layout_state_.text_input_focus == TextInputFocus::Console &&
+          layout_state_.console_key_handler &&
+          layout_state_.console_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+      if (is_search_input_focus(layout_state_.text_input_focus) &&
+          layout_state_.search_key_handler &&
+          layout_state_.search_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+      if (focus_state_.region == FocusRegion::Editor &&
+          !is_search_input_focus(layout_state_.text_input_focus) &&
+          layout_state_.text_input_focus != TextInputFocus::EditorFind &&
+          layout_state_.text_input_focus != TextInputFocus::Console &&
+          layout_state_.editor_key_handler && layout_state_.editor_key_handler(event)) {
+        screen.Post(Event::Custom);
         return true;
       }
 
-      if (event == Event::Character('q') &&
-          focus_state_.region != FocusRegion::Editor) {
-        submit_command(UiCommand{UiCommandKind::kQuit});
-        screen.ExitLoopClosure()();
+      // Tab nunca cambia foco entre paneles; en terminal va al shell, en editor indenta.
+      if (event == Event::Tab || event == Event::TabReverse) {
+        if (app_mode_ == AppMode::kNormal &&
+            layout_state_.text_input_focus == TextInputFocus::Console &&
+            shell_session_.running()) {
+          if (event == Event::Tab) {
+            shell_session_.write_raw("\t");
+          } else {
+            shell_session_.write_raw("\x1b[Z");
+          }
+        }
+        return true;
+      }
+
+      if (event == Event::CtrlQ) {
+        quit_confirm_state_.open = true;
+        quit_confirm_state_.selected = 0;
         return true;
       }
 
@@ -614,11 +728,27 @@ int Application::run() {
         }
         return true;
       }
+      if (event == Event::CtrlO) {
+        if (symbol_picker_state_.open && !symbol_picker_state_.matches.empty()) {
+          symbol_picker_state_.selected =
+              (symbol_picker_state_.selected + 1) %
+              static_cast<int>(symbol_picker_state_.matches.size());
+          return true;
+        }
+        symbol_picker_state_.open = true;
+        symbol_picker_state_.query.clear();
+        symbol_picker_state_.selected = 0;
+        symbol_picker_state_.loaded_file.clear();
+        return true;
+      }
       if (event == Event::CtrlT) {
         layout_state_.console_visible = !layout_state_.console_visible;
         return true;
       }
       if (event == Event::Escape) {
+        if (focus_state_.region == FocusRegion::Editor) {
+          return false;
+        }
         layout_state_.text_input_focus = TextInputFocus::None;
         return true;
       }
@@ -633,6 +763,10 @@ int Application::run() {
   });
 
   screen.Loop(root);
+
+  if (!ui_smoke) {
+    disable_extended_key_reporting();
+  }
 
   if (backend_) {
     backend_->stop();

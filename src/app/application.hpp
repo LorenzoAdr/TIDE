@@ -10,10 +10,16 @@
 #include "app/workspace_model.hpp"
 #include "backend/idebug_backend.hpp"
 #include "backend/dap_backend.hpp"
+#include "indexer/symbol_workspace_indexer.hpp"
 #include "indexer/workspace_indexer.hpp"
-#include "symbols/regex_symbol_provider.hpp"
+#include "indexer/workspace_watcher.hpp"
+#include "symbols/lsp_symbol_provider.hpp"
+#include "terminal/shell_session.hpp"
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
+#include "ui/quit_confirm.hpp"
+#include "ui/shortcuts_modal.hpp"
+#include "ui/symbol_picker.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/source_panel.hpp"
@@ -42,6 +48,7 @@ class Application {
 
  private:
   void drain_events();
+  void process_index_changes();
   void apply_event(const DebugEvent& event);
   void submit_command(const UiCommand& command);
   void refresh_all_watches();
@@ -66,12 +73,18 @@ class Application {
   WorkspaceModel workspace_;
   SourceViewState source_state_;
   FilePickerState file_picker_state_;
+  SymbolPickerState symbol_picker_state_;
+  QuitConfirmState quit_confirm_state_;
+  ShortcutsModalState shortcuts_modal_state_;
+  ShellSession shell_session_;
   ConnectionWizardState connection_wizard_state_;
   WorkspaceWizardState workspace_wizard_state_;
   MainLayoutState layout_state_;
   FocusManagerState focus_state_;
   WorkspaceIndexer indexer_;
-  std::shared_ptr<RegexSymbolProvider> symbol_provider_;
+  SymbolWorkspaceIndexer symbol_indexer_;
+  WorkspaceWatcher workspace_watcher_;
+  std::shared_ptr<LspSymbolProvider> symbol_provider_;
 
   ThreadSafeQueue<UiCommand> command_queue_;
   ThreadSafeQueue<DebugEvent> event_queue_;

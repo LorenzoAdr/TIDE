@@ -9,8 +9,8 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ui/focus_manager.hpp"
+#include "ui/panel.hpp"
 #include "ui/theme.hpp"
-#include "util/filesystem_tree.hpp"
 
 namespace tgdb {
 
@@ -36,22 +36,14 @@ bool contains_insensitive(const std::string& haystack, const std::string& needle
 
 void FilePickerState::sync_index(const std::shared_ptr<const IndexSnapshot>& snapshot,
                                  const std::string& workspace_root) {
-  if (!snapshot) {
+  if (!snapshot || snapshot->workspace_root != workspace_root) {
     return;
   }
-  std::vector<std::string> files = snapshot->files;
-  if (files.empty() && !workspace_root.empty() &&
-      (snapshot->workspace_root.empty() ||
-       snapshot->workspace_root == workspace_root)) {
-    files = build_file_tree(workspace_root);
-  }
-  const std::string root =
-      snapshot->workspace_root.empty() ? workspace_root : snapshot->workspace_root;
-  if (indexed_root == root && all_files == files) {
+  if (indexed_root == workspace_root && all_files == snapshot->files) {
     return;
   }
-  indexed_root = root;
-  all_files = std::move(files);
+  indexed_root = workspace_root;
+  all_files = snapshot->files;
   refresh_matches();
 }
 
@@ -181,18 +173,19 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
           matches.push_back(row);
         }
         if (matches.empty()) {
-          matches.push_back(text("(sin coincidencias)") | color(theme::Muted()));
+          const bool scanning = indexer != nullptr && indexer->scanning();
+          matches.push_back(text(scanning ? "(indexando...)" : "(sin coincidencias)") |
+                            color(theme::Muted()));
         }
 
-        Element dialog = window(
+        Element dialog = ModalWindow(
             text("Buscar archivo") | color(theme::Accent()),
-            vbox({text(input_line) | bgcolor(theme::TabIdle()) | color(theme::WatchInput()),
+            vbox({ModalInputLine(input_line),
                   separator(),
                   vbox(std::move(matches)) | frame | vscroll_indicator |
-                      bgcolor(theme::PanelBg())}))
-            | bgcolor(theme::PanelBg());
+                      bgcolor(theme::PanelBg())}));
 
-        return dbox({base | bgcolor(theme::PanelBg()), std::move(dialog) | center});
+        return ScreenModalOverlay(std::move(base), std::move(dialog));
       });
 }
 

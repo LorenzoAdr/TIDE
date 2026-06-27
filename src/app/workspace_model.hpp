@@ -4,17 +4,9 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+#include "editor/editor_state.hpp"
 
-struct EditorBuffer {
-  std::string path;
-  std::vector<std::string> lines;
-  int cursor_line = 0;
-  int cursor_col = 0;
-  int scroll = 0;
-  bool dirty = false;
-  uint64_t view_token = 0;
-};
+namespace tgdb {
 
 struct WorkspaceModel {
   std::string root;

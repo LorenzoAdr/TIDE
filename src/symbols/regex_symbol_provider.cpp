@@ -171,6 +171,12 @@ std::vector<SymbolInfo> RegexSymbolProvider::symbols_for_file(
     if (!read_function_name(line, &name)) {
       continue;
     }
+    if (name == "if" || name == "for" || name == "while" || name == "switch" ||
+        name == "catch" || name == "return" || name == "sizeof" ||
+        name == "static_cast" || name == "dynamic_cast" ||
+        name == "reinterpret_cast" || name == "const_cast") {
+      continue;
+    }
 
     SymbolInfo info;
     info.kind = depth > 0 ? SymbolKind::kMethod : SymbolKind::kFunction;

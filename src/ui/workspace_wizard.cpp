@@ -6,6 +6,7 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "ui/panel.hpp"
 #include "ui/theme.hpp"
 
 namespace tgdb {
@@ -146,8 +147,7 @@ Component MakeWorkspaceWizardOverlay(Component main, WorkspaceWizardState* state
             | size(HEIGHT, GREATER_THAN, 12)
             | bgcolor(theme::PanelBg());
 
-        return dbox({base | bgcolor(theme::PanelBg()) | dim,
-                     std::move(dialog) | center});
+        return ScreenModalOverlay(std::move(base), std::move(dialog));
       });
 }
 
