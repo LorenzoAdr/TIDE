@@ -1,5 +1,6 @@
 #include "ui/main_layout.hpp"
 
+#include <algorithm>
 #include <memory>
 
 #include "ftxui/component/component.hpp"
@@ -68,11 +69,26 @@ class ModeLayout : public ComponentBase {
     Add(std::move(debug_child));
   }
 
-  Element OnRender() override { return VisibleChild()->Render(); }
+  Element OnRender() override {
+    Component child = VisibleChild();
+    if (!child) {
+      return text("");
+    }
+    return child->Render();
+  }
 
-  bool OnEvent(Event event) override { return VisibleChild()->OnEvent(std::move(event)); }
+  bool OnEvent(Event event) override {
+    Component child = VisibleChild();
+    if (!child) {
+      return false;
+    }
+    return child->OnEvent(std::move(event));
+  }
 
-  bool Focusable() const override { return VisibleChild()->Focusable(); }
+  bool Focusable() const override {
+    Component child = VisibleChild();
+    return child && child->Focusable();
+  }
 
   Component ActiveChild() override { return VisibleChild(); }
 
@@ -125,39 +141,55 @@ class RightPanelLayout : public ComponentBase {
 
   bool OnEvent(Event event) override {
     if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
-      if (ChildAt(1)->OnEvent(event)) {
+      if (ActiveChild() && ActiveChild()->OnEvent(event)) {
         return true;
       }
-      return ChildAt(0)->OnEvent(std::move(event));
+      return EventHandler(event);
     }
     return ChildAt(0)->OnEvent(std::move(event));
   }
 
-  bool Focusable() const override {
-    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
-      return children_[0]->Focusable() || children_[1]->Focusable();
-    }
-    return children_[0]->Focusable();
-  }
-
   Component ActiveChild() override {
-    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
-      if (Component watches = ChildAt(1); watches->Focused()) {
-        return watches->ActiveChild() ? watches->ActiveChild() : watches;
-      }
+    if (children_.empty()) {
+      return nullptr;
     }
-    return ChildAt(0)->ActiveChild() ? ChildAt(0)->ActiveChild() : ChildAt(0);
+    if (app_mode_ == nullptr || *app_mode_ != AppMode::kDebug) {
+      return ChildAt(0);
+    }
+    const int index =
+        std::max(0, std::min(active_child_, static_cast<int>(children_.size()) - 1));
+    return children_[static_cast<std::size_t>(index)];
   }
 
   void SetActiveChild(ComponentBase* child) override {
-    if (Component active = ActiveChild()) {
-      active->SetActiveChild(child);
+    for (std::size_t i = 0; i < children_.size(); ++i) {
+      if (children_[i].get() == child) {
+        active_child_ = static_cast<int>(i);
+        return;
+      }
     }
   }
 
  private:
+  bool EventHandler(Event event) {
+    if (event == Event::ArrowDown || event == Event::Character('j')) {
+      if (active_child_ + 1 < static_cast<int>(children_.size())) {
+        ++active_child_;
+        return true;
+      }
+    }
+    if (event == Event::ArrowUp || event == Event::Character('k')) {
+      if (active_child_ > 0) {
+        --active_child_;
+        return true;
+      }
+    }
+    return false;
+  }
+
   AppMode* app_mode_;
   int* outline_height_;
+  int active_child_ = 0;
 };
 
 Component MakeRightPanel(AppMode* app_mode, Component outline, Component watches,
