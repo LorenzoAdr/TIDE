@@ -2,7 +2,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <thread>
 
 #include "backend/idebug_backend.hpp"
@@ -12,12 +14,63 @@
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/main_layout.hpp"
+#include "ui/workspace_wizard.hpp"
+#include "util/crash_handler.hpp"
 
 namespace fs = std::filesystem;
 
 namespace tgdb {
 
 using namespace ftxui;
+
+namespace {
+
+bool event_is_alt_left(const Event& event) {
+  return event == Event::Special("\x1B[1;3D");
+}
+
+bool event_is_alt_right(const Event& event) {
+  return event == Event::Special("\x1B[1;3C");
+}
+
+bool event_is_alt_up(const Event& event) {
+  return event == Event::Special("\x1B[1;3A");
+}
+
+bool event_is_alt_down(const Event& event) {
+  return event == Event::Special("\x1B[1;3B");
+}
+
+class EventPoller {
+ public:
+  explicit EventPoller(ScreenInteractive* screen) : screen_(screen) {
+    thread_ = std::thread([this] {
+      while (running_.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (screen_ != nullptr) {
+          screen_->Post(Event::Custom);
+        }
+      }
+    });
+  }
+
+  ~EventPoller() {
+    running_.store(false, std::memory_order_release);
+    if (thread_.joinable()) {
+      thread_.join();
+    }
+  }
+
+  EventPoller(const EventPoller&) = delete;
+  EventPoller& operator=(const EventPoller&) = delete;
+
+ private:
+  ScreenInteractive* screen_;
+  std::atomic<bool> running_{true};
+  std::thread thread_;
+};
+
+}  // namespace
 
 Application::Application(AppConfig config) : config_(std::move(config)) {
   std::error_code ec;
@@ -35,35 +88,67 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
   model_.workspace_root = config_.workspace_root;
   model_.program = config_.program;
   model_.program_args = config_.args;
+  workspace_.root = config_.workspace_root;
 
-  connection_wizard_state_.launch_root = config_.launch_directory;
-  if (connection_wizard_state_.launch_root.empty()) {
-    connection_wizard_state_.launch_root = config_.workspace_root;
+  connection_wizard_state_.browser.launch_root = config_.launch_directory;
+  if (connection_wizard_state_.browser.launch_root.empty()) {
+    connection_wizard_state_.browser.launch_root = config_.workspace_root;
   }
+  workspace_wizard_state_.launch_root = connection_wizard_state_.browser.launch_root;
 
-  if (config_.use_connection_wizard) {
-    model_.status_message = "Configurar conexión...";
-    connection_wizard_state_.open = true;
-    connection_wizard_state_.reset();
-    if (!config_.program.empty()) {
-      connection_wizard_state_.selected_program = config_.program;
-      connection_wizard_state_.step = WizardStep::PickWorkspace;
-      connection_wizard_state_.browser_path =
-          connection_wizard_state_.launch_root;
-      connection_wizard_state_.browser_loaded_path.clear();
-      if (config_.mode == SessionMode::kAttach) {
-        connection_wizard_state_.mode = WizardMode::Attach;
-        connection_wizard_state_.mode_selected = 1;
-      } else {
-        connection_wizard_state_.mode = WizardMode::Launch;
-        connection_wizard_state_.mode_selected = 0;
-      }
-    }
+  symbol_provider_ = std::make_shared<RegexSymbolProvider>();
+
+  if (config_.use_workspace_wizard) {
+    workspace_.status_message = "Selecciona un directorio de trabajo...";
+    workspace_wizard_state_.open = true;
+    workspace_wizard_state_.reset();
   } else {
-    model_.status_message = "Conectando con GDB DAP...";
+    set_workspace(config_.workspace_root);
+    if (config_.auto_debug && connection_config_complete()) {
+      app_mode_ = AppMode::kDebug;
+    }
   }
 
   backend_ = std::make_unique<DapBackend>(command_queue_, event_queue_);
+}
+
+Application::~Application() {
+  indexer_.stop();
+  if (backend_) {
+    backend_->stop();
+  }
+}
+
+void Application::set_workspace(const std::string& workspace_root) {
+  std::error_code ec;
+  const auto absolute = fs::absolute(workspace_root, ec).string();
+  config_.workspace_root = absolute;
+  model_.workspace_root = absolute;
+  workspace_.root = absolute;
+  workspace_.status_message = "Workspace: " + fs::path(absolute).filename().string();
+  file_picker_state_.indexed_root.clear();
+  file_picker_state_.all_files.clear();
+  indexer_.start_scan(absolute);
+}
+
+void Application::on_workspace_complete(const std::string& workspace_root) {
+  set_workspace(workspace_root);
+  config_.use_workspace_wizard = false;
+  workspace_wizard_state_.open = false;
+}
+
+void Application::open_workspace_wizard() {
+  if (workspace_wizard_state_.open || connection_wizard_state_.open) {
+    return;
+  }
+  if (debugging_started_) {
+    exit_debug_mode();
+  }
+  workspace_wizard_state_.launch_root =
+      workspace_.root.empty() ? connection_wizard_state_.browser.launch_root
+                              : workspace_.root;
+  workspace_wizard_state_.reset();
+  workspace_wizard_state_.open = true;
 }
 
 bool Application::connection_config_complete() const {
@@ -74,6 +159,55 @@ bool Application::connection_config_complete() const {
     return config_.attach_pid > 0 || !config_.attach_target.empty();
   }
   return true;
+}
+
+void Application::ensure_backend_started() {
+  if (backend_started_) {
+    return;
+  }
+  backend_->start();
+  backend_started_ = true;
+}
+
+void Application::enter_debug_mode() {
+  if (workspace_.buffer.dirty) {
+    model_.status_message = "Guarda los cambios (Ctrl+S) antes de depurar.";
+    workspace_.status_message = model_.status_message;
+    return;
+  }
+  app_mode_ = AppMode::kDebug;
+  model_.status_message = "Modo depuración";
+}
+
+void Application::exit_debug_mode() {
+  if (debugging_started_) {
+    if (config_.mode == SessionMode::kAttach) {
+      submit_command(UiCommand{UiCommandKind::kDetach});
+    } else {
+      submit_command(UiCommand{UiCommandKind::kDisconnect});
+    }
+    debugging_started_ = false;
+    session_ready_ = false;
+  }
+  if (backend_started_) {
+    backend_->stop();
+    backend_started_ = false;
+    backend_ = std::make_unique<DapBackend>(command_queue_, event_queue_);
+  }
+
+  model_.stack_frames.clear();
+  model_.locals.clear();
+  model_.variable_children.clear();
+  model_.watches.clear();
+  model_.breakpoints_by_file.clear();
+  model_.disabled_breakpoints.clear();
+  model_.console_output.clear();
+  model_.state = DebugState::kDisconnected;
+
+  app_mode_ = AppMode::kNormal;
+  pending_debug_mode_ = false;
+  workspace_.status_message = "Modo edición";
+  model_.status_message = workspace_.status_message;
 }
 
 void Application::apply_connection_and_start() {
@@ -88,6 +222,18 @@ void Application::apply_connection_and_start() {
   model_.program = config_.program;
   model_.workspace_root = config_.workspace_root;
   model_.program_args = config_.args;
+
+  if (!workspace_.buffer.path.empty()) {
+    model_.active_file = workspace_.buffer.path;
+    model_.active_line = workspace_.buffer.cursor_line + 1;
+    model_.view_token++;
+  }
+
+  if (app_mode_ != AppMode::kDebug) {
+    pending_debug_mode_ = true;
+  } else {
+    layout_state_.focus_sync_needed = true;
+  }
 
   if (config_.mode == SessionMode::kAttach) {
     UiCommand attach;
@@ -116,51 +262,60 @@ void Application::apply_connection_and_start() {
 }
 
 void Application::on_connection_complete(const ConnectionResult& result) {
+  pending_connection_ = result;
+}
+
+void Application::apply_pending_connection() {
+  if (!pending_connection_.has_value()) {
+    return;
+  }
+
+  const ConnectionResult result = *pending_connection_;
+  pending_connection_.reset();
+
   config_.mode = result.mode;
   config_.program = result.program;
-  config_.workspace_root = result.workspace_root;
   config_.attach_pid = result.attach_pid;
   config_.attach_target.clear();
-  config_.use_connection_wizard = false;
 
   model_.program = config_.program;
-  model_.workspace_root = config_.workspace_root;
   model_.program_args = config_.args;
-  model_.status_message = "Conectando con GDB DAP...";
 
-  apply_connection_and_start();
+  if (workspace_.buffer.dirty) {
+    model_.status_message = "Guarda los cambios (Ctrl+S) antes de depurar.";
+    workspace_.status_message = model_.status_message;
+    return;
+  }
+
+  model_.status_message = "Conectando con GDB DAP...";
+  ensure_backend_started();
 }
 
 void Application::open_connection_wizard() {
-  if (connection_wizard_state_.open) {
+  if (connection_wizard_state_.open || workspace_wizard_state_.open) {
     return;
   }
 
   if (debugging_started_) {
-    if (config_.mode == SessionMode::kAttach) {
-      submit_command(UiCommand{UiCommandKind::kDetach});
-    } else {
-      submit_command(UiCommand{UiCommandKind::kDisconnect});
-    }
-    debugging_started_ = false;
+    exit_debug_mode();
+  } else if (app_mode_ == AppMode::kDebug) {
+    app_mode_ = AppMode::kNormal;
   }
 
-  model_.stack_frames.clear();
-  model_.locals.clear();
-  model_.variable_children.clear();
-  model_.watches.clear();
-  model_.breakpoints_by_file.clear();
-  model_.disabled_breakpoints.clear();
-  model_.console_output.clear();
-  model_.state = DebugState::kDisconnected;
-  model_.status_message = "Configurar conexión...";
-
+  connection_wizard_state_.workspace_root = workspace_.root;
+  connection_wizard_state_.browser.launch_root =
+      connection_wizard_state_.browser.launch_root.empty()
+          ? workspace_.root
+          : connection_wizard_state_.browser.launch_root;
   connection_wizard_state_.reset();
   connection_wizard_state_.open = true;
+  model_.status_message = "Configurar depuración...";
 }
 
 void Application::submit_command(const UiCommand& command) {
-  backend_->submit(command);
+  if (backend_started_) {
+    backend_->submit(command);
+  }
 }
 
 void Application::refresh_all_watches() {
@@ -183,9 +338,6 @@ void Application::apply_event(const DebugEvent& event) {
       session_ready_ = true;
       model_.status_message = event.text;
       if (connection_wizard_state_.open || !connection_config_complete()) {
-        model_.status_message = connection_wizard_state_.open
-                                    ? "Configurar conexión..."
-                                    : model_.status_message;
         break;
       }
       apply_connection_and_start();
@@ -219,6 +371,7 @@ void Application::apply_event(const DebugEvent& event) {
         model_.selected_frame = 0;
         model_.active_file = model_.stack_frames.front().file;
         model_.active_line = model_.stack_frames.front().line;
+        model_.view_token++;
       }
       break;
     case DebugEventKind::kVariablesUpdated:
@@ -277,113 +430,229 @@ void Application::drain_events() {
   }
 }
 
-void Application::schedule_poll() {
-  // Polling is wired from run() via screen.Post.
+void Application::apply_pending_debug_mode() {
+  if (!pending_debug_mode_) {
+    return;
+  }
+  pending_debug_mode_ = false;
+  app_mode_ = AppMode::kDebug;
+  layout_state_.focus_sync_needed = true;
+}
+
+bool Application::any_modal_open() const {
+  return workspace_wizard_state_.open || connection_wizard_state_.open ||
+         file_picker_state_.open;
+}
+
+bool Application::handle_focus_shortcuts(const Event& event) {
+  auto mark_focus_sync = [this] { layout_state_.focus_sync_needed = true; };
+
+  if (event == Event::CtrlA) {
+    focus_state_.region = FocusRegion::Explorer;
+    mark_focus_sync();
+    return true;
+  }
+  if (event == Event::CtrlE) {
+    focus_state_.region = FocusRegion::Editor;
+    layout_state_.text_input_focus = TextInputFocus::None;
+    mark_focus_sync();
+    return true;
+  }
+  if (event == Event::CtrlO) {
+    focus_state_.region = FocusRegion::RightPanel;
+    mark_focus_sync();
+    return true;
+  }
+  if (event == Event::F4) {
+    focus_state_.region = FocusRegion::Terminal;
+    layout_state_.console_visible = true;
+    layout_state_.text_input_focus = TextInputFocus::Console;
+    mark_focus_sync();
+    return true;
+  }
+  if (event_is_alt_left(event)) {
+    focus_state_.move_left();
+    mark_focus_sync();
+    return true;
+  }
+  if (event_is_alt_right(event)) {
+    focus_state_.move_right();
+    mark_focus_sync();
+    return true;
+  }
+  if (event_is_alt_down(event)) {
+    focus_state_.move_down();
+    layout_state_.console_visible = true;
+    layout_state_.text_input_focus = TextInputFocus::Console;
+    mark_focus_sync();
+    return true;
+  }
+  if (event_is_alt_up(event)) {
+    focus_state_.move_up();
+    mark_focus_sync();
+    return true;
+  }
+  return false;
 }
 
 int Application::run() {
-  backend_->start();
+  if (config_.auto_debug && connection_config_complete() && !config_.use_workspace_wizard) {
+    ensure_backend_started();
+  }
 
-  auto screen = ScreenInteractive::Fullscreen();
-  std::atomic<bool> poll_events{true};
-  std::thread event_poller([&screen, &poll_events] {
-    while (poll_events.load()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      screen.Post(Event::Custom);
-    }
-  });
+  const bool ui_smoke = std::getenv("TGDB_UI_SMOKE") != nullptr;
+  auto screen = ui_smoke ? ScreenInteractive::TerminalOutput()
+                         : ScreenInteractive::Fullscreen();
+
+  std::unique_ptr<EventPoller> event_poller;
+  if (!ui_smoke) {
+    event_poller = std::make_unique<EventPoller>(&screen);
+  } else {
+    auto exit_loop = screen.ExitLoopClosure();
+    std::thread([exit_loop] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(150));
+      exit_loop();
+    }).detach();
+  }
 
   CommandCallback on_command = [this](const UiCommand& command) {
     submit_command(command);
   };
 
-  auto layout = MakeMainLayout(
-      &model_, &source_state_, on_command, &layout_state_,
-      [this] { drain_events(); });
+  StopDebugCallback on_stop_debug = [this] { exit_debug_mode(); };
 
-  auto with_picker =
-      MakeFilePickerOverlay(layout, &model_, &file_picker_state_);
+  auto build_ui = [&]() {
+    return MakeMainLayout(&app_mode_, &model_, &workspace_, &source_state_,
+                          &focus_state_, symbol_provider_, on_command,
+                          &layout_state_, on_stop_debug);
+  };
 
-  auto with_wizard = MakeConnectionWizardOverlay(
+  auto layout = build_ui();
+
+  auto with_picker = MakeFilePickerOverlay(
+      layout, &model_, &workspace_, &file_picker_state_, &focus_state_, &indexer_);
+
+  auto with_debug_wizard = MakeConnectionWizardOverlay(
       with_picker, &connection_wizard_state_, &model_,
       [this](const ConnectionResult& result) { on_connection_complete(result); },
       [&screen] { screen.ExitLoopClosure()(); });
 
-  auto root = CatchEvent(with_wizard, [this](const Event& event) {
-    if (connection_wizard_state_.open) {
-      return false;
-    }
+  auto with_workspace_wizard = MakeWorkspaceWizardOverlay(
+      with_debug_wizard, &workspace_wizard_state_,
+      [this](const std::string& root) { on_workspace_complete(root); },
+      [&screen] { screen.ExitLoopClosure()(); });
 
-    UiCommand command;
-    bool handled = true;
+  auto root = CatchEvent(with_workspace_wizard, [this, &screen, on_command](const Event& event) {
+    try {
+      if (event == Event::Custom) {
+        if (!any_modal_open()) {
+          apply_pending_connection();
+        }
+        drain_events();
+        apply_pending_debug_mode();
+        return false;
+      }
 
-    if (event == Event::Character('q')) {
-      command.kind = UiCommandKind::kQuit;
-      submit_command(command);
-      return true;
-    }
-    if (event == Event::F5) {
-      command.kind = UiCommandKind::kContinue;
-      submit_command(command);
-      return true;
-    }
-    if (event == Event::F10) {
-      command.kind = UiCommandKind::kNext;
-      submit_command(command);
-      return true;
-    }
-    if (event == Event::F11) {
-      command.kind = UiCommandKind::kStepIn;
-      submit_command(command);
-      return true;
-    }
-    if (event == Event::Special({24})) {
-      command.kind = UiCommandKind::kStepOut;
-      submit_command(command);
-      return true;
-    }
-    if (event == Event::F2) {
-      open_connection_wizard();
-      return true;
-    }
-    if (event == Event::CtrlP) {
-      if (file_picker_state_.open && !file_picker_state_.matches.empty()) {
-        file_picker_state_.selected =
-            (file_picker_state_.selected + 1) %
-            static_cast<int>(file_picker_state_.matches.size());
+      if (any_modal_open()) {
+        return false;
+      }
+
+      if (handle_focus_shortcuts(event)) {
+        screen.Post(Event::Custom);
         return true;
       }
-      file_picker_state_.open = !file_picker_state_.open;
-      if (file_picker_state_.open) {
-        file_picker_state_.query.clear();
-        file_picker_state_.selected = 0;
-        file_picker_state_.ensure_indexed(model_.workspace_root);
-        file_picker_state_.refresh_matches();
-      }
-      return true;
-    }
-    if (event == Event::CtrlT) {
-      layout_state_.console_visible = !layout_state_.console_visible;
-      return true;
-    }
-    if (event == Event::Escape) {
-      layout_state_.text_input_focus = TextInputFocus::None;
-      return true;
-    }
 
-    handled = false;
-    return handled;
+      if (event == Event::CtrlQ) {
+        submit_command(UiCommand{UiCommandKind::kQuit});
+        screen.ExitLoopClosure()();
+        return true;
+      }
+
+      if (event == Event::Character('q') &&
+          focus_state_.region != FocusRegion::Editor) {
+        submit_command(UiCommand{UiCommandKind::kQuit});
+        screen.ExitLoopClosure()();
+        return true;
+      }
+
+      if (app_mode_ == AppMode::kDebug) {
+        UiCommand command;
+        if (event == Event::CtrlB) {
+          if (!model_.active_file.empty() && model_.active_line > 0) {
+            ToggleBreakpointAtLine(&model_, model_.active_line, on_command);
+          }
+          return true;
+        }
+        if (event == Event::F5) {
+          command.kind = UiCommandKind::kContinue;
+          submit_command(command);
+          return true;
+        }
+        if (event == Event::F10) {
+          command.kind = UiCommandKind::kNext;
+          submit_command(command);
+          return true;
+        }
+        if (event == Event::F11) {
+          command.kind = UiCommandKind::kStepIn;
+          submit_command(command);
+          return true;
+        }
+        if (event == Event::Special({24})) {
+          command.kind = UiCommandKind::kStepOut;
+          submit_command(command);
+          return true;
+        }
+      }
+
+      if (event == Event::F2) {
+        open_connection_wizard();
+        return true;
+      }
+      if (event == Event::F3) {
+        open_workspace_wizard();
+        return true;
+      }
+      if (event == Event::CtrlP) {
+        if (file_picker_state_.open && !file_picker_state_.matches.empty()) {
+          file_picker_state_.selected =
+              (file_picker_state_.selected + 1) %
+              static_cast<int>(file_picker_state_.matches.size());
+          return true;
+        }
+        file_picker_state_.open = !file_picker_state_.open;
+        if (file_picker_state_.open) {
+          file_picker_state_.query.clear();
+          file_picker_state_.selected = 0;
+          file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
+          file_picker_state_.refresh_matches();
+        }
+        return true;
+      }
+      if (event == Event::CtrlT) {
+        layout_state_.console_visible = !layout_state_.console_visible;
+        return true;
+      }
+      if (event == Event::Escape) {
+        layout_state_.text_input_focus = TextInputFocus::None;
+        return true;
+      }
+
+      return false;
+    } catch (const std::exception& e) {
+      model_.append_console(std::string("[crash] ") + e.what());
+      model_.status_message = std::string("Error: ") + e.what();
+      print_current_backtrace(e.what());
+      return true;
+    }
   });
 
   screen.Loop(root);
 
-  poll_events = false;
-  if (event_poller.joinable()) {
-    event_poller.join();
+  if (backend_) {
+    backend_->stop();
+    backend_started_ = false;
   }
-
-  submit_command(UiCommand{UiCommandKind::kDisconnect});
-  backend_->stop();
   return 0;
 }
 

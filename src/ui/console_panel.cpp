@@ -32,7 +32,7 @@ struct ConsolePanelState {
 
 void handle_console_command(const std::string& line, DebugModel* model,
                             CommandCallback on_command) {
-  if (line.empty()) {
+  if (line.empty() || !on_command) {
     return;
   }
 

@@ -15,7 +15,7 @@ class GdbProcess {
   GdbProcess& operator=(const GdbProcess&) = delete;
 
   bool start();
-  void stop();
+  void stop(bool force = false);
 
   std::shared_ptr<dap::Reader> reader() const { return reader_; }
   std::shared_ptr<dap::Writer> writer() const { return writer_; }

@@ -3,6 +3,7 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <signal.h>
 #include <unistd.h>
 
 #include <sys/types.h>
@@ -136,7 +137,7 @@ bool GdbProcess::start() {
   return true;
 }
 
-void GdbProcess::stop() {
+void GdbProcess::stop(bool force) {
   if (!running_) {
     return;
   }
@@ -150,16 +151,21 @@ void GdbProcess::stop() {
 
   if (child_pid_ > 0) {
     int status = 0;
-    for (int i = 0; i < 20; ++i) {
-      const pid_t result = waitpid(child_pid_, &status, WNOHANG);
-      if (result == child_pid_ || result < 0) {
-        break;
-      }
-      usleep(100000);
-    }
-    if (waitpid(child_pid_, &status, WNOHANG) == 0) {
-      kill(child_pid_, SIGTERM);
+    if (force) {
+      kill(child_pid_, SIGKILL);
       waitpid(child_pid_, &status, 0);
+    } else {
+      for (int i = 0; i < 20; ++i) {
+        const pid_t result = waitpid(child_pid_, &status, WNOHANG);
+        if (result == child_pid_ || result < 0) {
+          break;
+        }
+        usleep(100000);
+      }
+      if (waitpid(child_pid_, &status, WNOHANG) == 0) {
+        kill(child_pid_, SIGTERM);
+        waitpid(child_pid_, &status, 0);
+      }
     }
     child_pid_ = -1;
   }

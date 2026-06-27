@@ -8,6 +8,7 @@
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "ui/focus_manager.hpp"
 #include "ui/theme.hpp"
 #include "util/filesystem_tree.hpp"
 
@@ -33,11 +34,24 @@ bool contains_insensitive(const std::string& haystack, const std::string& needle
 
 }  // namespace
 
-void FilePickerState::ensure_indexed(const std::string& workspace_root) {
-  if (!all_files.empty()) {
+void FilePickerState::sync_index(const std::shared_ptr<const IndexSnapshot>& snapshot,
+                                 const std::string& workspace_root) {
+  if (!snapshot) {
     return;
   }
-  all_files = build_file_tree(workspace_root);
+  std::vector<std::string> files = snapshot->files;
+  if (files.empty() && !workspace_root.empty() &&
+      (snapshot->workspace_root.empty() ||
+       snapshot->workspace_root == workspace_root)) {
+    files = build_file_tree(workspace_root);
+  }
+  const std::string root =
+      snapshot->workspace_root.empty() ? workspace_root : snapshot->workspace_root;
+  if (indexed_root == root && all_files == files) {
+    return;
+  }
+  indexed_root = root;
+  all_files = std::move(files);
   refresh_matches();
 }
 
@@ -53,16 +67,25 @@ void FilePickerState::refresh_matches() {
   }
 }
 
-void FilePickerState::open_file(DebugModel* model, int index) {
+void FilePickerState::open_file(DebugModel* model, WorkspaceModel* workspace,
+                                FocusManagerState* focus, int index) {
   if (matches.empty()) {
     return;
   }
   index = std::max(0, std::min(index, static_cast<int>(matches.size()) - 1));
   std::error_code ec;
-  model->active_file = std::filesystem::absolute(
+  const auto absolute = std::filesystem::absolute(
       std::filesystem::path(model->workspace_root) / matches[index], ec);
+  model->active_file = absolute.string();
   model->active_line = 0;
   model->view_token++;
+  if (workspace != nullptr) {
+    workspace->load_file(absolute.string());
+    workspace->buffer.view_token++;
+  }
+  if (focus != nullptr) {
+    focus->region = FocusRegion::Editor;
+  }
   open = false;
   query.clear();
   selected = 0;
@@ -70,14 +93,16 @@ void FilePickerState::open_file(DebugModel* model, int index) {
 }
 
 Component MakeFilePickerOverlay(Component main, DebugModel* model,
-                                FilePickerState* state) {
+                                WorkspaceModel* workspace, FilePickerState* state,
+                                FocusManagerState* focus, WorkspaceIndexer* indexer) {
   return Renderer(
-      CatchEvent(main, [model, state](Event event) {
+      CatchEvent(main, [model, workspace, state, focus, indexer](Event event) {
         if (!state->open) {
           return false;
         }
 
-        state->ensure_indexed(model->workspace_root);
+        state->sync_index(indexer != nullptr ? indexer->snapshot() : nullptr,
+                          model->workspace_root);
 
         if (event == Event::Escape) {
           state->open = false;
@@ -87,7 +112,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
           return true;
         }
         if (event == Event::Return) {
-          state->open_file(model, state->selected);
+          state->open_file(model, workspace, focus, state->selected);
           return true;
         }
         if (event == Event::ArrowDown) {
@@ -104,8 +129,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
         if (event == Event::CtrlP) {
           if (!state->matches.empty()) {
             state->selected =
-                (state->selected + 1) %
-                static_cast<int>(state->matches.size());
+                (state->selected + 1) % static_cast<int>(state->matches.size());
           }
           return true;
         }
@@ -119,8 +143,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
         }
         if (event.is_character()) {
           const std::string ch = event.character();
-          if (ch.size() == 1 &&
-              static_cast<unsigned char>(ch[0]) >= 32 &&
+          if (ch.size() == 1 && static_cast<unsigned char>(ch[0]) >= 32 &&
               static_cast<unsigned char>(ch[0]) < 127) {
             state->query += ch;
             state->selected = 0;
@@ -130,13 +153,14 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
         }
         return true;
       }),
-      [main, model, state] {
+      [main, model, state, indexer] {
         Element base = main->Render();
         if (!state->open) {
           return base;
         }
 
-        state->ensure_indexed(model->workspace_root);
+        state->sync_index(indexer != nullptr ? indexer->snapshot() : nullptr,
+                          model->workspace_root);
         state->refresh_matches();
 
         std::string input_line = state->query;

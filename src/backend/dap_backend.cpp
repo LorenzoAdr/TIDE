@@ -47,11 +47,21 @@ void DapBackend::stop() {
     return;
   }
   commands_.close();
+
+  // Mata GDB de inmediato para desbloquear session_->send(...).get() en attach.
+  if (gdb_) {
+    gdb_->stop(true);
+  }
+  {
+    std::lock_guard<std::mutex> lock(session_mutex_);
+    session_.reset();
+  }
+
   if (worker_.joinable()) {
     worker_.join();
   }
+
   gdb_.reset();
-  session_.reset();
 }
 
 void DapBackend::submit(const UiCommand& command) {
@@ -655,52 +665,72 @@ void DapBackend::handle_command(const UiCommand& command) {
     return;
   }
 
-  bool inferior_started = false;
-  {
-    std::lock_guard<std::mutex> lock(session_mutex_);
+  if (command.kind == UiCommandKind::kLaunch) {
+    dap::GdbLaunchRequest launch;
+    launch.program = command.launch.program;
+    launch.cwd = command.launch.cwd;
+    launch.stopAtBeginningOfMainSubprogram =
+        dap::boolean(command.launch.stop_at_main);
+    if (!command.launch.args.empty()) {
+      launch.args = command.launch.args;
+    }
+
+    std::unique_lock<std::mutex> lock(session_mutex_);
     if (!session_) {
       return;
     }
+    auto launch_future = session_->send(launch);
+    if (!send_configuration_done()) {
+      return;
+    }
+    lock.unlock();
 
-    switch (command.kind) {
-    case UiCommandKind::kLaunch: {
-      dap::GdbLaunchRequest launch;
-      launch.program = command.launch.program;
-      launch.cwd = command.launch.cwd;
-      launch.stopAtBeginningOfMainSubprogram = dap::boolean(command.launch.stop_at_main);
-      if (!command.launch.args.empty()) {
-        launch.args = command.launch.args;
+    const auto response = launch_future.get();
+    bool inferior_started = false;
+    {
+      std::lock_guard<std::mutex> lock(session_mutex_);
+      if (!session_) {
+        return;
       }
-
-      // GDB DAP reciente difiere launch hasta configurationDone.
-      auto launch_future = session_->send(launch);
-      if (!send_configuration_done()) {
-        break;
-      }
-      const auto response = launch_future.get();
       if (response.error) {
         push_error("launch falló: " + response.error.message);
       } else {
         inferior_started = true;
       }
-      break;
     }
-    case UiCommandKind::kAttach: {
-      dap::GdbAttachRequest attach;
-      attach.program = command.attach.program;
-      if (command.attach.pid > 0) {
-        attach.pid = command.attach.pid;
-      }
-      if (!command.attach.target.empty()) {
-        attach.target = command.attach.target;
-      }
+    if (inferior_started) {
+      on_inferior_attached();
+    }
+    return;
+  }
 
-      // GDB DAP reciente difiere attach hasta configurationDone.
-      auto attach_future = session_->send(attach);
-      if (!send_configuration_done()) {
-        break;
+  if (command.kind == UiCommandKind::kAttach) {
+    dap::GdbAttachRequest attach;
+    attach.program = command.attach.program;
+    if (command.attach.pid > 0) {
+      attach.pid = command.attach.pid;
+    }
+    if (!command.attach.target.empty()) {
+      attach.target = command.attach.target;
+    }
+
+    std::unique_lock<std::mutex> lock(session_mutex_);
+    if (!session_) {
+      return;
+    }
+    auto attach_future = session_->send(attach);
+    if (!send_configuration_done()) {
+      return;
+    }
+    lock.unlock();
+
+    const auto response = attach_future.get();
+    bool inferior_started = false;
+    {
+      std::lock_guard<std::mutex> lock(session_mutex_);
+      if (!session_) {
+        return;
       }
-      const auto response = attach_future.get();
       if (response.error) {
         push_error("attach falló: " + response.error.message);
       } else if (!verify_inferior_attached_locked()) {
@@ -708,8 +738,20 @@ void DapBackend::handle_command(const UiCommand& command) {
       } else {
         inferior_started = true;
       }
-      break;
     }
+    if (inferior_started) {
+      on_inferior_attached();
+    }
+    return;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(session_mutex_);
+    if (!session_) {
+      return;
+    }
+
+    switch (command.kind) {
     case UiCommandKind::kContinue: {
       if (!continue_inferior_locked()) {
         push_error("continue falló");
@@ -856,10 +898,6 @@ void DapBackend::handle_command(const UiCommand& command) {
       break;
   }
   }
-
-  if (inferior_started) {
-    on_inferior_attached();
-  }
 }
 
 void DapBackend::worker_main() {
@@ -884,7 +922,7 @@ void DapBackend::worker_main() {
     return;
   }
 
-  while (running_) {
+  while (running_.load(std::memory_order_acquire)) {
     auto command = commands_.wait_pop();
     if (!command.has_value()) {
       break;
@@ -892,16 +930,22 @@ void DapBackend::worker_main() {
     if (command->kind == UiCommandKind::kQuit) {
       break;
     }
+    if (!running_.load(std::memory_order_acquire)) {
+      break;
+    }
     handle_command(*command);
   }
 
-  if (session_) {
+  if (session_ && gdb_ && gdb_->running()) {
     dap::DisconnectRequest disconnect;
     disconnect.terminateDebuggee = true;
     session_->send(disconnect).get();
   }
-  gdb_->stop();
+  if (gdb_) {
+    gdb_->stop();
+  }
   session_.reset();
+  gdb_.reset();
 }
 
 }  // namespace tgdb

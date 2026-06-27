@@ -6,6 +6,7 @@
 
 namespace tgdb {
 
-ftxui::Element HighlightCppLine(const std::string& line);
+ftxui::Element HighlightCppLine(const std::string& line, int cursor_col = -1,
+                                ftxui::Decorator cursor_style = {});
 
 }  // namespace tgdb

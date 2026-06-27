@@ -16,6 +16,8 @@ struct SourceViewState {
   int scroll = 0;
 };
 
+void ToggleBreakpointAtLine(DebugModel* model, int line, CommandCallback on_command);
+
 ftxui::Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
                                  CommandCallback on_command);
 

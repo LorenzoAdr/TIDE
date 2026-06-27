@@ -1,0 +1,105 @@
+#include "ui/path_browser.hpp"
+
+#include <algorithm>
+#include <filesystem>
+
+namespace fs = std::filesystem;
+
+namespace tgdb {
+
+std::string canonical_browser_root(const std::string& path) {
+  if (path.empty()) {
+    std::error_code ec;
+    return fs::current_path(ec).string();
+  }
+  std::error_code ec;
+  const auto canonical = fs::weakly_canonical(fs::path(path), ec);
+  return ec ? path : canonical.string();
+}
+
+bool is_regular_file_path(const std::string& path) {
+  std::error_code ec;
+  return fs::is_regular_file(path, ec);
+}
+
+bool is_directory_path(const std::string& path) {
+  std::error_code ec;
+  return fs::is_directory(path, ec);
+}
+
+void PathBrowserState::reset(const std::string& start_path) {
+  browser_path = canonical_browser_root(start_path);
+  browser_loaded_path.clear();
+  entries.clear();
+  selected = 0;
+  browser_list_start = 0;
+}
+
+void PathBrowserState::reload_browser_entries(bool reset_selection) {
+  entries.clear();
+  if (reset_selection) {
+    selected = 0;
+    browser_list_start = 0;
+  }
+  std::error_code ec;
+  fs::path current(browser_path);
+  if (!fs::exists(current, ec)) {
+    browser_path = canonical_browser_root(launch_root);
+    current = fs::path(browser_path);
+  }
+  browser_path = fs::weakly_canonical(current, ec).string();
+  if (ec) {
+    browser_path = current.string();
+  }
+  browser_loaded_path = browser_path;
+
+  if (current.has_parent_path()) {
+    BrowserEntry parent;
+    parent.name = "..";
+    parent.path = current.parent_path().string();
+    parent.is_directory = true;
+    parent.is_parent = true;
+    entries.push_back(std::move(parent));
+  }
+
+  std::vector<BrowserEntry> dirs;
+  std::vector<BrowserEntry> files;
+  for (const auto& entry : fs::directory_iterator(current, ec)) {
+    if (ec) {
+      break;
+    }
+    BrowserEntry row;
+    row.name = entry.path().filename().string();
+    if (row.name.empty() || row.name[0] == '.') {
+      continue;
+    }
+    row.path = entry.path().string();
+    if (entry.is_directory(ec)) {
+      row.is_directory = true;
+      dirs.push_back(std::move(row));
+    } else if (entry.is_regular_file(ec)) {
+      row.is_directory = false;
+      files.push_back(std::move(row));
+    }
+  }
+
+  auto by_name = [](const BrowserEntry& a, const BrowserEntry& b) {
+    return a.name < b.name;
+  };
+  std::sort(dirs.begin(), dirs.end(), by_name);
+  std::sort(files.begin(), files.end(), by_name);
+  entries.insert(entries.end(), dirs.begin(), dirs.end());
+  entries.insert(entries.end(), files.begin(), files.end());
+
+  selected = std::max(
+      0, std::min(selected, std::max(0, static_cast<int>(entries.size()) - 1)));
+}
+
+void PathBrowserState::ensure_browser_entries() {
+  if (browser_loaded_path == browser_path && !entries.empty()) {
+    return;
+  }
+  reload_browser_entries(true);
+}
+
+}  // namespace tgdb

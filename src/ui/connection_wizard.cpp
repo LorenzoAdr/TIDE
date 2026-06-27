@@ -1,7 +1,6 @@
 #include "ui/connection_wizard.hpp"
 
 #include <algorithm>
-#include <cstdlib>
 #include <filesystem>
 #include <memory>
 
@@ -18,24 +17,12 @@ namespace fs = std::filesystem;
 
 namespace {
 
-std::string canonical_browser_root(const std::string& path) {
-  if (path.empty()) {
-    std::error_code ec;
-    return fs::current_path(ec).string();
-  }
-  std::error_code ec;
-  const auto canonical = fs::weakly_canonical(fs::path(path), ec);
-  return ec ? path : canonical.string();
-}
-
 std::string step_title(WizardStep step) {
   switch (step) {
     case WizardStep::ChooseMode:
       return "Conectar depurador";
     case WizardStep::PickBinary:
       return "Elegir ejecutable";
-    case WizardStep::PickWorkspace:
-      return "Elegir directorio de fuentes";
     case WizardStep::PickProcess:
       return "Elegir proceso (PID)";
   }
@@ -46,121 +33,18 @@ std::string mode_label(WizardMode mode) {
   return mode == WizardMode::Launch ? "Launch" : "Attach";
 }
 
-bool is_regular_file_path(const std::string& path) {
-  std::error_code ec;
-  return fs::is_regular_file(path, ec);
-}
-
-bool is_directory_path(const std::string& path) {
-  std::error_code ec;
-  return fs::is_directory(path, ec);
-}
-
-void activate_browser_row(ConnectionWizardState* state) {
-  if (state->entries.empty()) {
-    return;
-  }
-  const auto& row = state->entries[state->selected];
-  if (row.is_directory) {
-    state->browser_path = row.path;
-    state->reload_browser_entries(true);
-    return;
-  }
-  if (state->step == WizardStep::PickBinary && is_regular_file_path(row.path)) {
-    state->selected_program = row.path;
-    state->step = WizardStep::PickWorkspace;
-    state->browser_path = fs::path(row.path).parent_path().string();
-    if (state->browser_path.empty()) {
-      state->browser_path = canonical_browser_root(state->launch_root);
-    }
-    state->reload_browser_entries(true);
-  }
-}
-
 }  // namespace
 
 void ConnectionWizardState::reset() {
   step = WizardStep::ChooseMode;
   mode = WizardMode::Attach;
   mode_selected = 0;
-  browser_path = canonical_browser_root(launch_root);
-  browser_loaded_path.clear();
-  entries.clear();
-  selected = 0;
-  browser_list_start = 0;
+  browser.reset(workspace_root.empty() ? browser.launch_root : workspace_root);
   selected_program.clear();
-  selected_workspace.clear();
   process_query.clear();
   all_processes.clear();
   process_matches.clear();
   process_selected = 0;
-}
-
-void ConnectionWizardState::reload_browser_entries(bool reset_selection) {
-  entries.clear();
-  if (reset_selection) {
-    selected = 0;
-    browser_list_start = 0;
-  }
-  std::error_code ec;
-  fs::path current(browser_path);
-  if (!fs::exists(current, ec)) {
-    browser_path = canonical_browser_root(launch_root);
-    current = fs::path(browser_path);
-  }
-  browser_path = fs::weakly_canonical(current, ec).string();
-  if (ec) {
-    browser_path = current.string();
-  }
-  browser_loaded_path = browser_path;
-
-  if (current.has_parent_path()) {
-    BrowserEntry parent;
-    parent.name = "..";
-    parent.path = current.parent_path().string();
-    parent.is_directory = true;
-    parent.is_parent = true;
-    entries.push_back(std::move(parent));
-  }
-
-  std::vector<BrowserEntry> dirs;
-  std::vector<BrowserEntry> files;
-  for (const auto& entry : fs::directory_iterator(current, ec)) {
-    if (ec) {
-      break;
-    }
-    BrowserEntry row;
-    row.name = entry.path().filename().string();
-    if (row.name.empty() || row.name[0] == '.') {
-      continue;
-    }
-    row.path = entry.path().string();
-    if (entry.is_directory(ec)) {
-      row.is_directory = true;
-      dirs.push_back(std::move(row));
-    } else if (entry.is_regular_file(ec)) {
-      row.is_directory = false;
-      files.push_back(std::move(row));
-    }
-  }
-
-  auto by_name = [](const BrowserEntry& a, const BrowserEntry& b) {
-    return a.name < b.name;
-  };
-  std::sort(dirs.begin(), dirs.end(), by_name);
-  std::sort(files.begin(), files.end(), by_name);
-  entries.insert(entries.end(), dirs.begin(), dirs.end());
-  entries.insert(entries.end(), files.begin(), files.end());
-
-  selected = std::max(
-      0, std::min(selected, std::max(0, static_cast<int>(entries.size()) - 1)));
-}
-
-void ConnectionWizardState::ensure_browser_entries() {
-  if (browser_loaded_path == browser_path && !entries.empty()) {
-    return;
-  }
-  reload_browser_entries(true);
 }
 
 void ConnectionWizardState::refresh_process_matches() {
@@ -169,8 +53,7 @@ void ConnectionWizardState::refresh_process_matches() {
   }
   process_matches = filter_processes(all_processes, process_query);
   if (process_selected >= static_cast<int>(process_matches.size())) {
-    process_selected =
-        std::max(0, static_cast<int>(process_matches.size()) - 1);
+    process_selected = std::max(0, static_cast<int>(process_matches.size()) - 1);
   }
 }
 
@@ -186,35 +69,30 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
 
         auto finish = [&](const ConnectionResult& result) {
           state->open = false;
-          on_complete(result);
+          if (on_complete) {
+            on_complete(result);
+          }
         };
 
         auto go_back = [&]() {
           switch (state->step) {
             case WizardStep::ChooseMode:
-              if (on_request_quit) {
-                on_request_quit();
-              }
+              state->open = false;
               break;
             case WizardStep::PickBinary:
               state->step = WizardStep::ChooseMode;
               break;
-            case WizardStep::PickWorkspace:
-              state->step = WizardStep::PickBinary;
-              state->browser_path = canonical_browser_root(state->launch_root);
-              state->browser_loaded_path.clear();
-              state->reload_browser_entries(true);
-              break;
             case WizardStep::PickProcess:
-              state->step = WizardStep::PickWorkspace;
+              state->step = WizardStep::PickBinary;
               if (!state->selected_program.empty()) {
-                state->browser_path =
+                state->browser.browser_path =
                     fs::path(state->selected_program).parent_path().string();
               } else {
-                state->browser_path = canonical_browser_root(state->launch_root);
+                state->browser.browser_path =
+                    canonical_browser_root(state->browser.launch_root);
               }
-              state->browser_loaded_path.clear();
-              state->reload_browser_entries(true);
+              state->browser.browser_loaded_path.clear();
+              state->browser.reload_browser_entries(true);
               break;
           }
         };
@@ -226,9 +104,7 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
 
         if (state->step == WizardStep::ChooseMode) {
           if (event == Event::Character('q')) {
-            if (on_request_quit) {
-              on_request_quit();
-            }
+            state->open = false;
             return true;
           }
           if (event == Event::Character('1')) {
@@ -253,72 +129,95 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
             state->mode =
                 state->mode_selected == 0 ? WizardMode::Launch : WizardMode::Attach;
             state->step = WizardStep::PickBinary;
-            state->browser_path = canonical_browser_root(state->launch_root);
-            state->reload_browser_entries(true);
+            state->browser.browser_path =
+                canonical_browser_root(state->workspace_root.empty()
+                                           ? state->browser.launch_root
+                                           : state->workspace_root);
+            state->browser.reload_browser_entries(true);
             return true;
           }
           return true;
         }
 
-        if (state->step == WizardStep::PickBinary ||
-            state->step == WizardStep::PickWorkspace) {
-          state->ensure_browser_entries();
-
-          if (state->step == WizardStep::PickWorkspace &&
-              (event == Event::Character('a') || event == Event::Character('A'))) {
-            if (!is_directory_path(state->browser_path)) {
-              return true;
-            }
-            state->selected_workspace = state->browser_path;
-            if (state->mode == WizardMode::Launch) {
-              ConnectionResult result;
-              result.mode = SessionMode::kLaunch;
-              result.program = state->selected_program;
-              result.workspace_root = state->selected_workspace;
-              finish(result);
-            } else {
-              state->step = WizardStep::PickProcess;
-              state->all_processes.clear();
-              state->process_query.clear();
-              state->process_selected = 0;
-              state->refresh_process_matches();
-            }
-            return true;
-          }
+        if (state->step == WizardStep::PickBinary) {
+          state->browser.ensure_browser_entries();
 
           if (event == Event::ArrowDown || event == Event::Character('j')) {
-            state->selected = std::min(
-                state->selected + 1,
-                std::max(0, static_cast<int>(state->entries.size()) - 1));
+            state->browser.selected = std::min(
+                state->browser.selected + 1,
+                std::max(0, static_cast<int>(state->browser.entries.size()) - 1));
             return true;
           }
           if (event == Event::ArrowUp || event == Event::Character('k')) {
-            state->selected = std::max(0, state->selected - 1);
+            state->browser.selected = std::max(0, state->browser.selected - 1);
             return true;
           }
           if (event == Event::PageDown) {
-            state->selected = std::min(
-                state->selected + 12,
-                std::max(0, static_cast<int>(state->entries.size()) - 1));
+            state->browser.selected = std::min(
+                state->browser.selected + 12,
+                std::max(0, static_cast<int>(state->browser.entries.size()) - 1));
             return true;
           }
           if (event == Event::PageUp) {
-            state->selected = std::max(0, state->selected - 12);
+            state->browser.selected = std::max(0, state->browser.selected - 12);
             return true;
           }
           if (event == Event::Return) {
-            activate_browser_row(state);
+            if (state->browser.entries.empty()) {
+              return true;
+            }
+            const auto& row = state->browser.entries[state->browser.selected];
+            if (row.is_directory) {
+              state->browser.browser_path = row.path;
+              state->browser.reload_browser_entries(true);
+              return true;
+            }
+            if (is_regular_file_path(row.path)) {
+              state->selected_program = row.path;
+              if (state->mode == WizardMode::Launch) {
+                ConnectionResult result;
+                result.mode = SessionMode::kLaunch;
+                result.program = state->selected_program;
+                result.workspace_root = state->workspace_root;
+                finish(result);
+              } else {
+                state->step = WizardStep::PickProcess;
+                state->all_processes.clear();
+                state->process_query.clear();
+                state->process_selected = 0;
+                state->refresh_process_matches();
+              }
+            }
             return true;
           }
           if (event.is_mouse() && event.mouse().button == Mouse::Left &&
               event.mouse().motion == Mouse::Pressed) {
             const auto& m = event.mouse();
-            if (state->browser_list_box.Contain(m.x, m.y)) {
-              const int row =
-                  state->browser_list_start + (m.y - state->browser_list_box.y_min);
-              if (row >= 0 && row < static_cast<int>(state->entries.size())) {
-                state->selected = row;
-                activate_browser_row(state);
+            if (state->browser.browser_list_box.Contain(m.x, m.y)) {
+              const int row = state->browser.browser_list_start +
+                              (m.y - state->browser.browser_list_box.y_min);
+              if (row >= 0 && row < static_cast<int>(state->browser.entries.size())) {
+                state->browser.selected = row;
+                const auto& entry = state->browser.entries[row];
+                if (entry.is_directory) {
+                  state->browser.browser_path = entry.path;
+                  state->browser.reload_browser_entries(true);
+                } else if (is_regular_file_path(entry.path)) {
+                  state->selected_program = entry.path;
+                  if (state->mode == WizardMode::Launch) {
+                    ConnectionResult result;
+                    result.mode = SessionMode::kLaunch;
+                    result.program = state->selected_program;
+                    result.workspace_root = state->workspace_root;
+                    finish(result);
+                  } else {
+                    state->step = WizardStep::PickProcess;
+                    state->all_processes.clear();
+                    state->process_query.clear();
+                    state->process_selected = 0;
+                    state->refresh_process_matches();
+                  }
+                }
               }
               return true;
             }
@@ -345,12 +244,11 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
             if (state->process_matches.empty()) {
               return true;
             }
-            const auto& proc =
-                state->process_matches[state->process_selected];
+            const auto& proc = state->process_matches[state->process_selected];
             ConnectionResult result;
             result.mode = SessionMode::kAttach;
             result.program = state->selected_program;
-            result.workspace_root = state->selected_workspace;
+            result.workspace_root = state->workspace_root;
             result.attach_pid = proc.pid;
             finish(result);
             return true;
@@ -365,8 +263,7 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           }
           if (event.is_character()) {
             const std::string ch = event.character();
-            if (ch.size() == 1 &&
-                static_cast<unsigned char>(ch[0]) >= 32 &&
+            if (ch.size() == 1 && static_cast<unsigned char>(ch[0]) >= 32 &&
                 static_cast<unsigned char>(ch[0]) < 127) {
               state->process_query += ch;
               state->process_selected = 0;
@@ -401,29 +298,30 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
             attach_row = attach_row | inverted | bold;
           }
           body = {launch_row, attach_row};
-          help = "1/2 o j/k  Enter  Esc/q salir";
-        } else if (state->step == WizardStep::PickBinary ||
-                   state->step == WizardStep::PickWorkspace) {
-          state->ensure_browser_entries();
-          body.push_back(text(state->browser_path) | color(theme::Muted()));
+          help = "1/2 o j/k  Enter  Esc cancelar";
+        } else if (state->step == WizardStep::PickBinary) {
+          state->browser.ensure_browser_entries();
+          body.push_back(text("workspace: " + state->workspace_root) |
+                         color(theme::Muted()));
+          body.push_back(text(state->browser.browser_path) | color(theme::Muted()));
           body.push_back(separator());
           const int max_rows = 12;
-          state->browser_list_start = std::max(
-              0, std::min(state->selected,
-                          std::max(0, static_cast<int>(state->entries.size()) -
+          state->browser.browser_list_start = std::max(
+              0, std::min(state->browser.selected,
+                          std::max(0, static_cast<int>(state->browser.entries.size()) -
                                             max_rows)));
-          const int start = state->browser_list_start;
+          const int start = state->browser.browser_list_start;
           const int end =
-              std::min(static_cast<int>(state->entries.size()), start + max_rows);
+              std::min(static_cast<int>(state->browser.entries.size()), start + max_rows);
           Elements list_rows;
           for (int i = start; i < end; ++i) {
-            const auto& row = state->entries[i];
+            const auto& row = state->browser.entries[i];
             std::string prefix = row.is_directory ? "[dir] " : "      ";
             Element line = text(prefix + row.name);
             if (row.is_directory) {
               line = line | color(theme::Accent());
             }
-            if (i == state->selected) {
+            if (i == state->browser.selected) {
               line = line | inverted | bold;
             }
             list_rows.push_back(line);
@@ -431,18 +329,20 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           if (list_rows.empty()) {
             list_rows.push_back(text("(vacío)") | color(theme::Muted()));
           }
-          body.push_back(vbox(std::move(list_rows)) | reflect(state->browser_list_box));
-          if (state->step == WizardStep::PickBinary) {
-            help = "j/k  Enter archivo  clic  Esc atrás";
-          } else {
-            help = "j/k  Enter carpeta  a=usar carpeta  clic  Esc atrás";
-          }
+          body.push_back(vbox(std::move(list_rows)) |
+                         reflect(state->browser.browser_list_box));
+          help = "j/k  Enter ejecutable  clic  Esc atrás";
         } else if (state->step == WizardStep::PickProcess) {
           state->refresh_process_matches();
+          body.push_back(text("workspace: " + state->workspace_root) |
+                         color(theme::Muted()));
+          if (!state->selected_program.empty()) {
+            body.push_back(text("binario: " + state->selected_program) |
+                           color(theme::Muted()));
+          }
           std::string query_line = state->process_query;
           query_line.push_back('_');
-          body.push_back(text("buscar: " + query_line) |
-                         color(theme::WatchInput()));
+          body.push_back(text("buscar: " + query_line) | color(theme::WatchInput()));
           body.push_back(separator());
           const int max_rows = 10;
           const int start = std::max(
@@ -471,19 +371,6 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
             body.push_back(text("(sin coincidencias)") | color(theme::Muted()));
           }
           help = "escribe para filtrar  j/k  Enter  Esc atrás";
-        }
-
-        if (!state->selected_program.empty() &&
-            state->step != WizardStep::ChooseMode) {
-          body.insert(body.begin(),
-                      text("binario: " + state->selected_program) |
-                          color(theme::Muted()));
-        }
-        if (!state->selected_workspace.empty() &&
-            state->step == WizardStep::PickProcess) {
-          body.insert(body.begin(),
-                      text("workspace: " + state->selected_workspace) |
-                          color(theme::Muted()));
         }
 
         Element dialog = window(

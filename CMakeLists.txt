@@ -11,17 +11,28 @@ add_executable(tgdb
   src/main.cpp
   src/app/application.cpp
   src/app/debug_model.cpp
+  src/app/workspace_model.cpp
   src/backend/dap_backend.cpp
   src/dap/gdb_launcher.cpp
   src/dap/gdb_protocol.cpp
   src/ui/main_layout.cpp
   src/ui/file_tree_panel.cpp
   src/ui/source_panel.cpp
+  src/ui/editor_panel.cpp
+  src/ui/outline_panel.cpp
   src/ui/watches_panel.cpp
   src/ui/console_panel.cpp
   src/ui/file_picker.cpp
   src/ui/connection_wizard.cpp
+  src/ui/workspace_wizard.cpp
+  src/ui/path_browser.cpp
+  src/ui/focus_manager.cpp
+  src/ui/focusable_component.cpp
+  src/indexer/trie.cpp
+  src/indexer/workspace_indexer.cpp
+  src/symbols/regex_symbol_provider.cpp
   src/util/cpp_highlight.cpp
+  src/util/crash_handler.cpp
   src/util/filesystem_tree.cpp
   src/util/process_list.cpp
 )
@@ -34,6 +45,10 @@ target_link_libraries(tgdb PRIVATE
   ftxui::screen
   cppdap
 )
+
+if(UNIX)
+  target_link_options(tgdb PRIVATE -rdynamic)
+endif()
 
 add_executable(hello examples/hello.cpp)
 target_compile_options(hello PRIVATE -g -O0)

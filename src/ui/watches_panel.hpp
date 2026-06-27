@@ -12,6 +12,7 @@ using CommandCallback = std::function<void(const struct UiCommand&)>;
 struct MainLayoutState;
 
 ftxui::Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
-                                  MainLayoutState* layout_state);
+                                  MainLayoutState* layout_state,
+                                  const std::function<void()>& on_stop_debug = {});
 
 }  // namespace tgdb

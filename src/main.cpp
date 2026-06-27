@@ -1,9 +1,12 @@
 #include "app/application.hpp"
 
+#include <exception>
 #include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
+
+#include "util/crash_handler.hpp"
 
 namespace {
 
@@ -26,13 +29,14 @@ void print_usage() {
             << "  --target <host:puerto>  Adjuntar a gdbserver remoto\n"
             << "  -h, --help          Muestra esta ayuda\n"
             << "\n"
-            << "Sin argumentos abre el asistente de conexión.\n"
+            << "Sin argumentos abre el selector de workspace (modo IDE).\n"
+            << "F2 inicia depuración; F3 cambia el directorio de trabajo.\n"
             << "\n"
             << "Ejemplos:\n"
             << "  tgdb\n"
+            << "  tgdb --cwd ./proyecto\n"
             << "  tgdb ./build/hello\n"
-            << "  tgdb --attach 12345 ./build/hello\n"
-            << "  tgdb --target localhost:1234 ./build/hello\n";
+            << "  tgdb --attach 12345 ./build/hello\n";
 }
 
 }  // namespace
@@ -54,6 +58,7 @@ int main(int argc, char** argv) {
     }
     if (arg == "--cwd" && i + 1 < argc) {
       config.workspace_root = argv[++i];
+      config.use_workspace_wizard = false;
       continue;
     }
     if (arg == "--attach" && i + 1 < argc) {
@@ -80,8 +85,15 @@ int main(int argc, char** argv) {
     config.program = arg;
   }
 
-  if (!config_is_complete(config)) {
-    config.use_connection_wizard = true;
+  if (config.workspace_root.empty() && config.program.empty()) {
+    config.use_workspace_wizard = true;
+  } else if (!config.workspace_root.empty() && config.program.empty()) {
+    config.use_workspace_wizard = false;
+  }
+
+  if (config_is_complete(config)) {
+    config.use_workspace_wizard = false;
+    config.auto_debug = true;
   }
 
   std::error_code ec;
@@ -107,6 +119,18 @@ int main(int argc, char** argv) {
     }
   }
 
-  tgdb::Application app(std::move(config));
-  return app.run();
+  tgdb::install_crash_handlers();
+
+  try {
+    tgdb::Application app(std::move(config));
+    return app.run();
+  } catch (const std::exception& e) {
+    std::cerr << "Error fatal: " << e.what() << '\n';
+    tgdb::print_current_backtrace(e.what());
+    return 1;
+  } catch (...) {
+    std::cerr << "Error fatal desconocido\n";
+    tgdb::print_current_backtrace("unknown");
+    return 1;
+  }
 }

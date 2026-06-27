@@ -59,7 +59,7 @@ fi
 export TERM="${TERM:-xterm-256color}"
 
 if [[ $# -eq 0 ]]; then
-  exec "${TGDB}" --cwd "${ROOT}"
+  exec "${TGDB}"
 fi
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then

@@ -12,6 +12,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
 #include "ui/panel.hpp"
+#include "ui/focusable_component.hpp"
 #include "ui/theme.hpp"
 #include "util/cpp_highlight.hpp"
 
@@ -51,26 +52,20 @@ void load_source_file(const std::string& path, std::vector<std::string>* lines) 
 }
 
 void sync_breakpoints(DebugModel* model, int line, CommandCallback on_command) {
-  if (model->active_file.empty() || line <= 0) {
-    return;
+  ToggleBreakpointAtLine(model, line, on_command);
+}
+
+int line_number_width(int total_lines) {
+  const int digits = std::max(1, static_cast<int>(std::to_string(total_lines).size()));
+  return digits + 2;
+}
+
+std::string format_line_number(int line_no, int width) {
+  std::string text = std::to_string(line_no);
+  if (static_cast<int>(text.size()) < width) {
+    text = std::string(static_cast<std::size_t>(width - text.size()), ' ') + text;
   }
-  std::error_code ec;
-  const auto normalized =
-      std::filesystem::weakly_canonical(model->active_file, ec);
-  if (!ec) {
-    model->active_file = normalized.string();
-  }
-
-  model->toggle_breakpoint(model->active_file, line);
-
-  std::vector<int> lines;
-  lines = model->enabled_breakpoint_lines(model->active_file);
-
-  UiCommand command;
-  command.kind = UiCommandKind::kSetBreakpoints;
-  command.breakpoint_file = model->active_file;
-  command.breakpoint_lines = std::move(lines);
-  on_command(command);
+  return text;
 }
 
 int visible_line_count(const Box& box) {
@@ -133,6 +128,25 @@ Element vertical_scrollbar(int total_lines, int scroll, int visible_lines,
 
 }  // namespace
 
+void ToggleBreakpointAtLine(DebugModel* model, int line, CommandCallback on_command) {
+  if (!on_command || model->active_file.empty() || line <= 0) {
+    return;
+  }
+  std::error_code ec;
+  const auto normalized = std::filesystem::weakly_canonical(model->active_file, ec);
+  if (!ec) {
+    model->active_file = normalized.string();
+  }
+
+  model->toggle_breakpoint(model->active_file, line);
+
+  UiCommand command;
+  command.kind = UiCommandKind::kSetBreakpoints;
+  command.breakpoint_file = model->active_file;
+  command.breakpoint_lines = model->enabled_breakpoint_lines(model->active_file);
+  on_command(command);
+}
+
 Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
                           CommandCallback on_command) {
   auto loaded_file = std::make_shared<std::string>();
@@ -158,6 +172,8 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
     const int start = view_state->scroll;
     const int end = std::min(total, start + visible);
 
+    const int gutter_w = line_number_width(total);
+
     Elements gutter_rows;
     Elements code_rows;
     for (int i = start; i < end; ++i) {
@@ -165,26 +181,28 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
       const bool is_current = line_no == model->active_line;
       const bool is_bp = model->has_breakpoint(model->active_file, line_no);
 
-      std::string gutter = is_bp ? " ● " : "   ";
+      std::string marker = " ";
       if (is_current) {
-        gutter = " ► ";
+        marker = "►";
+      } else if (is_bp) {
+        marker = "●";
       }
 
-      std::string line_no_text = std::to_string(line_no);
-      if (line_no_text.size() < 4) {
-        line_no_text = std::string(4 - line_no_text.size(), ' ') + line_no_text;
+      Element marker_el = text(marker);
+      if (is_current) {
+        marker_el = marker_el | bold;
+      } else if (is_bp) {
+        marker_el = marker_el | color(Color::Red);
       }
 
-      Element gutter_row = text(gutter);
+      Element gutter_row =
+          hbox({marker_el, text(format_line_number(line_no, gutter_w))}) | color(theme::Muted());
       if (is_current) {
         gutter_row = gutter_row | inverted;
-      } else if (is_bp) {
-        gutter_row = gutter_row | color(Color::Red);
       }
       gutter_rows.push_back(gutter_row);
 
-      Element code_row =
-          hbox({text(line_no_text), text(" "), HighlightCppLine(view_state->lines[i])});
+      Element code_row = HighlightCppLine(view_state->lines[i]);
       if (is_current) {
         code_row = code_row | inverted;
       } else if (is_bp) {
@@ -194,7 +212,7 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
     }
 
     if (gutter_rows.empty()) {
-      gutter_rows.push_back(text("   ") | dim);
+      gutter_rows.push_back(text(" ") | dim);
       code_rows.push_back(text("(sin líneas)") | dim);
     }
 
@@ -214,11 +232,13 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
     Element scrollbar =
         vertical_scrollbar(total, view_state->scroll, visible, rendered_lines);
 
-    return MakePanel(title, hbox({gutter, code | flex, scrollbar}), theme::CodeBg());
+    return MakePanel(title, hbox({gutter, separator() | color(theme::AccentDim()), code | flex,
+                                  scrollbar}),
+                     theme::CodeBg());
   });
 
-  return CatchEvent(renderer, [model, view_state, on_command, panel_state](
-                                  Event event) {
+  return WrapFocusable(CatchEvent(renderer, [model, view_state, on_command, panel_state](
+                                               Event event) {
     const int total = static_cast<int>(view_state->lines.size());
     const int visible = panel_state->last_visible_lines;
     const int max_scroll = max_scroll_offset(total, visible);
@@ -246,7 +266,7 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
       return false;
     }
 
-    if (event == Event::Character(' ')) {
+    if (event == Event::CtrlB || event == Event::Character(' ')) {
       if (!model->active_file.empty() && model->active_line > 0) {
         sync_breakpoints(model, model->active_line, on_command);
         return true;
@@ -282,7 +302,7 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
     }
 
     return false;
-  });
+  }));
 }
 
 }  // namespace tgdb

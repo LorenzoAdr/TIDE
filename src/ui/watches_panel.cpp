@@ -19,6 +19,7 @@
 #include "ftxui/screen/box.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
+#include "ui/focusable_component.hpp"
 #include "ui/theme.hpp"
 
 namespace tgdb {
@@ -131,7 +132,7 @@ void assign_watch_frame(UiCommand* command, DebugModel* model) {
 void submit_watch_inject(WatchesPanelState* state, DebugModel* model,
                          MainLayoutState* layout_state,
                          CommandCallback on_command) {
-  if (!state->inject_mode || model->watches.empty()) {
+  if (!on_command || !state->inject_mode || model->watches.empty()) {
     return;
   }
   state->watch_selected = std::max(
@@ -149,7 +150,7 @@ void submit_watch_inject(WatchesPanelState* state, DebugModel* model,
 
 void submit_watch(const std::string& expression, DebugModel* model,
                   CommandCallback on_command) {
-  if (expression.empty()) {
+  if (expression.empty() || !on_command) {
     return;
   }
   model->add_watch(expression);
@@ -162,6 +163,9 @@ void submit_watch(const std::string& expression, DebugModel* model,
 
 void sync_breakpoints_file(DebugModel* model, const std::string& file,
                            CommandCallback on_command) {
+  if (!on_command) {
+    return;
+  }
   UiCommand command;
   command.kind = UiCommandKind::kSetBreakpoints;
   command.breakpoint_file = file;
@@ -260,6 +264,10 @@ void toggle_expand(DebugModel* model, WatchesPanelState* state, int index,
   state->expanded_expressions.insert(row.expression);
   const auto cached = model->variable_children.find(row.expression);
   if (cached == model->variable_children.end()) {
+    if (!on_command) {
+      rebuild_flat_variables(model, state);
+      return;
+    }
     UiCommand command;
     command.kind = UiCommandKind::kFetchVariableChildren;
     command.variables_reference = row.variables_reference;
@@ -382,17 +390,23 @@ bool handle_toolbar_mouse(WatchesPanelState* state, DebugModel* model,
                           const Mouse& mouse, MainLayoutState* layout_state,
                           const std::function<void()>& send_continue,
                           const std::function<void()>& send_pause,
-                          const std::function<void()>& send_detach) {
+                          const std::function<void()>& send_stop) {
   if (state->play_box.Contain(mouse.x, mouse.y)) {
     if (model->state == DebugState::kRunning) {
-      send_pause();
+      if (send_pause) {
+        send_pause();
+      }
     } else if (model->state == DebugState::kStopped) {
-      send_continue();
+      if (send_continue) {
+        send_continue();
+      }
     }
     return true;
   }
   if (state->stop_box.Contain(mouse.x, mouse.y)) {
-    send_detach();
+    if (send_stop) {
+      send_stop();
+    }
     return true;
   }
   return switch_tab_from_mouse(state, mouse.x, mouse.y, layout_state);
@@ -401,7 +415,8 @@ bool handle_toolbar_mouse(WatchesPanelState* state, DebugModel* model,
 }  // namespace
 
 Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
-                           MainLayoutState* layout_state) {
+                           MainLayoutState* layout_state,
+                           const std::function<void()>& on_stop_debug) {
   auto state = std::make_shared<WatchesPanelState>();
   InputOption input_opt = InputOption::Default();
   input_opt.multiline = false;
@@ -416,7 +431,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
   auto inputs = Container::Vertical({inject_maybe, expr_maybe});
 
   auto select_frame = [model, on_command](int index) {
-    if (model->stack_frames.empty()) {
+    if (!on_command || model->stack_frames.empty()) {
       return;
     }
     index = std::max(0, std::min(index, static_cast<int>(model->stack_frames.size()) - 1));
@@ -432,25 +447,31 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
   };
 
   auto send_continue = [on_command] {
+    if (!on_command) {
+      return;
+    }
     UiCommand command;
     command.kind = UiCommandKind::kContinue;
     on_command(command);
   };
 
   auto send_pause = [on_command] {
+    if (!on_command) {
+      return;
+    }
     UiCommand command;
     command.kind = UiCommandKind::kPause;
     on_command(command);
   };
 
-  auto send_detach = [on_command] {
-    UiCommand command;
-    command.kind = UiCommandKind::kDetach;
-    on_command(command);
+  auto send_stop = [on_stop_debug] {
+    if (on_stop_debug) {
+      on_stop_debug();
+    }
   };
 
   auto handler = [model, state, layout_state, select_frame, on_command, send_continue,
-                  send_pause, send_detach, expr_input, inject_input](Event event) {
+                  send_pause, send_stop, expr_input, inject_input](Event event) {
     if (event == Event::Escape) {
       if (state->inject_mode) {
         cancel_watch_inject(state.get(), layout_state);
@@ -478,7 +499,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
         event.mouse().motion == Mouse::Pressed) {
       if (handle_toolbar_mouse(state.get(), model, event.mouse(), layout_state,
-                               send_continue, send_pause, send_detach)) {
+                               send_continue, send_pause, send_stop)) {
         return true;
       }
     }
@@ -708,7 +729,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     return false;
   };
 
-  return CatchEvent(
+  return WrapFocusable(CatchEvent(
       Renderer(inputs, [model, state, expr_input, inject_input, layout_state] {
     if (state->inject_mode && layout_state &&
         layout_state->text_input_focus != TextInputFocus::WatchInject) {
@@ -888,7 +909,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         "Depuración",
         vbox({toolbar, content | bgcolor(theme::PanelBg()) | flex}));
       }),
-      handler);
+      handler));
 }
 
 }  // namespace tgdb

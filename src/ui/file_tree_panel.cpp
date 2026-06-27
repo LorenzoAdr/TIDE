@@ -12,6 +12,8 @@
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
+#include "ui/focusable_component.hpp"
+#include "ui/focus_manager.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
 #include "util/filesystem_tree.hpp"
@@ -43,6 +45,11 @@ struct FileTreePanelState {
     }
     loaded_workspace = model->workspace_root;
     root = build_file_tree_root(loaded_workspace);
+    for (auto& child : root.children) {
+      if (!child.is_file) {
+        child.expanded = true;
+      }
+    }
     selected = 0;
     rebuild_flat();
   }
@@ -69,17 +76,26 @@ struct FileTreePanelState {
     }
   }
 
-  void activate(DebugModel* model, int index) {
+  void activate(DebugModel* model, WorkspaceModel* workspace, FocusManagerState* focus,
+                int index) {
     if (index < 0 || index >= static_cast<int>(flat.size())) {
       return;
     }
     const auto& entry = flat[index];
     if (entry.is_file) {
       std::error_code ec;
-      model->active_file = std::filesystem::absolute(
+      const auto absolute = std::filesystem::absolute(
           std::filesystem::path(model->workspace_root) / entry.relative_path, ec);
+      model->active_file = absolute.string();
       model->active_line = 0;
       model->view_token++;
+      if (workspace != nullptr) {
+        workspace->load_file(absolute.string());
+        workspace->buffer.view_token++;
+      }
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Editor;
+      }
       return;
     }
     if (entry.folder != nullptr) {
@@ -89,7 +105,29 @@ struct FileTreePanelState {
   }
 };
 
-bool handle_navigation(FileTreePanelState* state, DebugModel* model, Event event) {
+bool handle_navigation(FileTreePanelState* state, DebugModel* model,
+                       WorkspaceModel* workspace, FocusManagerState* focus,
+                       Event event) {
+  if (event.is_mouse() && event.mouse().button == Mouse::Left &&
+      event.mouse().motion == Mouse::Pressed) {
+    const auto& m = event.mouse();
+    if (state->content_box.Contain(m.x, m.y)) {
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Explorer;
+      }
+      const int row = m.y - state->content_box.y_min;
+      if (row >= 0 && row < static_cast<int>(state->flat.size())) {
+        state->selected = row;
+        state->activate(model, workspace, focus, row);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  if (focus != nullptr && focus->region != FocusRegion::Explorer) {
+    return false;
+  }
   if (state->flat.empty()) {
     return false;
   }
@@ -104,7 +142,7 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model, Event event
     return true;
   }
   if (event == Event::Return) {
-    state->activate(model, state->selected);
+    state->activate(model, workspace, focus, state->selected);
     return true;
   }
   if (event == Event::ArrowRight) {
@@ -125,30 +163,17 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model, Event event
     }
     return false;
   }
-  if (event.is_mouse() && event.mouse().button == Mouse::Left &&
-      event.mouse().motion == Mouse::Pressed) {
-    const auto& m = event.mouse();
-    if (!state->content_box.Contain(m.x, m.y)) {
-      return false;
-    }
-    const int row = m.y - state->content_box.y_min;
-    if (row >= 0 && row < static_cast<int>(state->flat.size())) {
-      state->selected = row;
-      state->activate(model, row);
-      return true;
-    }
-    return false;
-  }
   return false;
 }
 
 }  // namespace
 
-Component MakeFileTreePanel(DebugModel* model, CommandCallback on_command) {
+Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
+                            FocusManagerState* focus, CommandCallback on_command) {
   (void)on_command;
   auto state = std::make_shared<FileTreePanelState>();
 
-  auto renderer = Renderer([model, state] {
+  auto renderer = Renderer([model, focus, state] {
     state->sync_workspace(model);
 
     Elements rows;
@@ -177,7 +202,7 @@ Component MakeFileTreePanel(DebugModel* model, CommandCallback on_command) {
         } else {
           row = row | color(theme::Header());
         }
-        if (selected) {
+        if (selected && (focus == nullptr || focus->region == FocusRegion::Explorer)) {
           row = row | inverted | bold;
         }
         rows.push_back(row);
@@ -191,9 +216,9 @@ Component MakeFileTreePanel(DebugModel* model, CommandCallback on_command) {
     return MakePanel("Explorador", std::move(content));
   });
 
-  return CatchEvent(renderer, [model, state](Event event) {
-    return handle_navigation(state.get(), model, event);
-  });
+  return WrapFocusable(CatchEvent(renderer, [model, workspace, focus, state](Event event) {
+    return handle_navigation(state.get(), model, workspace, focus, event);
+  }));
 }
 
 }  // namespace tgdb

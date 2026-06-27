@@ -16,7 +16,7 @@ void allow_external_debugger() {
   if (prctl(PR_SET_PTRACER, -1) != 0) {
     std::cerr << "aviso: no se pudo permitir attach externo (prctl): "
               << std::strerror(errno) << "\n"
-              << "  prueba: sudo sysctl kernel.yama.ptrace_scope=0\n"
+              << "  prueba: sudosss sysctl kernel.yama.ptrace_scope=0\n"
               << "  o usa: ./tools/launch.sh ./build/hello\n";
   }
 }
@@ -53,7 +53,7 @@ int main() {
 
     std::cout << "[" << counter << "] x=" << x << " y=" << y
               << " sum=" << sum << " acc=" << acc << std::endl;
-
+    std::cout << "prueba";
     sleep(1);
   }
 
