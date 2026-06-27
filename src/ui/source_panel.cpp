@@ -51,10 +51,6 @@ void load_source_file(const std::string& path, std::vector<std::string>* lines) 
   }
 }
 
-void sync_breakpoints(DebugModel* model, int line, CommandCallback on_command) {
-  ToggleBreakpointAtLine(model, line, on_command);
-}
-
 int line_number_width(int total_lines) {
   const int digits = std::max(1, static_cast<int>(std::to_string(total_lines).size()));
   return digits + 2;
@@ -250,7 +246,7 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
         const int rel_y = m.y - panel_state->gutter_box.y_min;
         const int clicked_line = view_state->scroll + rel_y + 1;
         if (clicked_line >= 1 && clicked_line <= total && !model->active_file.empty()) {
-          sync_breakpoints(model, clicked_line, on_command);
+          ToggleBreakpointAtLine(model, clicked_line, on_command);
           return true;
         }
       }
@@ -268,7 +264,7 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
 
     if (event == Event::CtrlB || event == Event::Character(' ')) {
       if (!model->active_file.empty() && model->active_line > 0) {
-        sync_breakpoints(model, model->active_line, on_command);
+        ToggleBreakpointAtLine(model, model->active_line, on_command);
         return true;
       }
       return false;

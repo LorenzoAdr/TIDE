@@ -52,7 +52,6 @@ class Application {
   void apply_pending_connection();
   void on_workspace_complete(const std::string& workspace_root);
   void set_workspace(const std::string& workspace_root);
-  void enter_debug_mode();
   void exit_debug_mode();
   bool connection_config_complete() const;
   void ensure_backend_started();

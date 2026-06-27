@@ -646,7 +646,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           }
         }
       }
-      return true;
+      return false;
     }
 
     if (state->selected_tab == 2) {
@@ -673,7 +673,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           }
         }
       }
-      return true;
+      return false;
     }
 
     if (state->selected_tab == 3) {
@@ -723,7 +723,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           }
         }
       }
-      return true;
+      return false;
     }
 
     return false;

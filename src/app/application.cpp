@@ -169,16 +169,6 @@ void Application::ensure_backend_started() {
   backend_started_ = true;
 }
 
-void Application::enter_debug_mode() {
-  if (workspace_.buffer.dirty) {
-    model_.status_message = "Guarda los cambios (Ctrl+S) antes de depurar.";
-    workspace_.status_message = model_.status_message;
-    return;
-  }
-  app_mode_ = AppMode::kDebug;
-  model_.status_message = "Modo depuración";
-}
-
 void Application::exit_debug_mode() {
   if (debugging_started_) {
     if (config_.mode == SessionMode::kAttach) {
@@ -270,6 +260,12 @@ void Application::apply_pending_connection() {
     return;
   }
 
+  if (workspace_.buffer.dirty) {
+    model_.status_message = "Guarda los cambios (Ctrl+S) antes de depurar.";
+    workspace_.status_message = model_.status_message;
+    return;
+  }
+
   const ConnectionResult result = *pending_connection_;
   pending_connection_.reset();
 
@@ -280,12 +276,6 @@ void Application::apply_pending_connection() {
 
   model_.program = config_.program;
   model_.program_args = config_.args;
-
-  if (workspace_.buffer.dirty) {
-    model_.status_message = "Guarda los cambios (Ctrl+S) antes de depurar.";
-    workspace_.status_message = model_.status_message;
-    return;
-  }
 
   model_.status_message = "Conectando con GDB DAP...";
   ensure_backend_started();

@@ -42,15 +42,12 @@ class DapBackend : public IDebugBackend {
   void update_breakpoints(const std::string& file,
                           const std::vector<int>& lines);
   void apply_pending_breakpoints_locked();
-  bool request_interrupt_locked();
   void notify_stopped(const std::string& reason, int thread_id = -1);
   void notify_continued(int thread_id = -1);
   void send_breakpoints_locked(const std::string& normalized_file,
                                const std::vector<int>& lines);
-  void flush_breakpoints();
   bool pause_inferior_locked();
   bool continue_inferior_locked();
-  void pause_inferior();
   void refresh_active_thread_locked();
   bool verify_inferior_attached_locked();
   void on_inferior_attached();
@@ -62,8 +59,6 @@ class DapBackend : public IDebugBackend {
 
   std::thread worker_;
   std::atomic<bool> running_{false};
-  std::atomic<bool> initialized_{false};
-  std::atomic<bool> configuration_done_{false};
 
   std::unique_ptr<GdbProcess> gdb_;
   std::unique_ptr<dap::Session> session_;

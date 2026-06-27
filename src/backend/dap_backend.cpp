@@ -83,7 +83,6 @@ void DapBackend::setup_session() {
   session_ = dap::Session::create();
 
   session_->registerHandler([&](const dap::InitializedEvent&) {
-    initialized_ = true;
     DebugEvent event;
     event.kind = DebugEventKind::kSessionReady;
     event.text = "GDB DAP listo";
@@ -366,14 +365,6 @@ void DapBackend::fetch_variable_children(int variables_reference,
   push_event(std::move(event));
 }
 
-void DapBackend::pause_inferior() {
-  std::lock_guard<std::mutex> lock(session_mutex_);
-  if (!session_) {
-    return;
-  }
-  pause_inferior_locked();
-}
-
 bool DapBackend::pause_inferior_locked() {
   dap::PauseRequest pause;
   pause.threadId = active_thread_id_ > 0 ? active_thread_id_ : 1;
@@ -387,10 +378,6 @@ bool DapBackend::pause_inferior_locked() {
   interrupt.context = "repl";
   const auto interrupt_response = session_->send(interrupt).get();
   return !interrupt_response.error;
-}
-
-bool DapBackend::request_interrupt_locked() {
-  return pause_inferior_locked();
 }
 
 void DapBackend::notify_stopped(const std::string& reason, int thread_id) {
@@ -485,22 +472,6 @@ void DapBackend::on_inferior_attached() {
   refresh.kind = UiCommandKind::kRefreshStack;
   refresh.thread_id = active_thread_id_;
   commands_.push(refresh);
-}
-
-void DapBackend::flush_breakpoints() {
-  if (!inferior_attached_) {
-    return;
-  }
-  std::lock_guard<std::mutex> lock(session_mutex_);
-  if (!session_) {
-    return;
-  }
-  if (!inferior_stopped_.load(std::memory_order_acquire)) {
-    pause_inferior_locked();
-  }
-  for (const auto& [file, lines] : breakpoints_by_file_) {
-    send_breakpoints_locked(file, lines);
-  }
 }
 
 void DapBackend::apply_pending_breakpoints_locked() {
@@ -611,7 +582,7 @@ void DapBackend::update_breakpoints(const std::string& file,
   breakpoints_pending_sync_ = true;
   resume_after_breakpoint_sync_ = true;
   expecting_interrupt_for_breakpoints_ = true;
-  if (!request_interrupt_locked()) {
+  if (!pause_inferior_locked()) {
     expecting_interrupt_for_breakpoints_ = false;
     breakpoints_pending_sync_ = false;
     resume_after_breakpoint_sync_ = false;
@@ -628,7 +599,6 @@ bool DapBackend::send_configuration_done() {
     push_error("configurationDone falló: " + done_response.error.message);
     return false;
   }
-  configuration_done_ = true;
   return true;
 }
 
@@ -891,7 +861,6 @@ void DapBackend::handle_command(const UiCommand& command) {
       session_->send(request).get();
       inferior_attached_ = false;
       inferior_stopped_.store(false, std::memory_order_release);
-      configuration_done_ = false;
       break;
     }
     default:
