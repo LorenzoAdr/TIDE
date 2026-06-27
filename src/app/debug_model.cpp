@@ -3,20 +3,9 @@
 #include <algorithm>
 #include <filesystem>
 
+#include "util/path_normalize.hpp"
+
 namespace tgdb {
-
-namespace {
-
-std::string normalize_breakpoint_file(const std::string& file) {
-  if (file.empty()) {
-    return file;
-  }
-  std::error_code ec;
-  const auto canonical = std::filesystem::weakly_canonical(file, ec);
-  return ec ? file : canonical.string();
-}
-
-}  // namespace
 
 void DebugModel::append_console(const std::string& line) {
   console_output.push_back(line);
@@ -72,7 +61,7 @@ void DebugModel::set_terminated() {
 }
 
 void DebugModel::toggle_breakpoint(const std::string& file, int line) {
-  const std::string key = normalize_breakpoint_file(file);
+  const std::string key = normalize_path(file);
 
   auto& lines = breakpoints_by_file[key];
   if (lines.count(line) > 0) {
@@ -86,7 +75,7 @@ void DebugModel::toggle_breakpoint(const std::string& file, int line) {
 }
 
 bool DebugModel::has_breakpoint(const std::string& file, int line) const {
-  const auto it = breakpoints_by_file.find(normalize_breakpoint_file(file));
+  const auto it = breakpoints_by_file.find(normalize_path(file));
   if (it == breakpoints_by_file.end()) {
     return false;
   }
@@ -97,7 +86,7 @@ bool DebugModel::is_breakpoint_enabled(const std::string& file, int line) const 
   if (!has_breakpoint(file, line)) {
     return false;
   }
-  const auto key = normalize_breakpoint_file(file);
+  const auto key = normalize_path(file);
   const auto it = disabled_breakpoints.find(key);
   if (it == disabled_breakpoints.end()) {
     return true;
@@ -110,7 +99,7 @@ void DebugModel::set_breakpoint_enabled(const std::string& file, int line,
   if (!has_breakpoint(file, line)) {
     return;
   }
-  const std::string key = normalize_breakpoint_file(file);
+  const std::string key = normalize_path(file);
   if (enabled) {
     auto it = disabled_breakpoints.find(key);
     if (it != disabled_breakpoints.end()) {
@@ -120,12 +109,12 @@ void DebugModel::set_breakpoint_enabled(const std::string& file, int line,
       }
     }
   } else {
-    disabled_breakpoints[normalize_breakpoint_file(file)].insert(line);
+    disabled_breakpoints[normalize_path(file)].insert(line);
   }
 }
 
 void DebugModel::remove_breakpoint(const std::string& file, int line) {
-  const std::string key = normalize_breakpoint_file(file);
+  const std::string key = normalize_path(file);
   auto it = breakpoints_by_file.find(key);
   if (it == breakpoints_by_file.end()) {
     return;
@@ -146,7 +135,7 @@ void DebugModel::remove_breakpoint(const std::string& file, int line) {
 std::vector<int> DebugModel::enabled_breakpoint_lines(
     const std::string& file) const {
   std::vector<int> lines;
-  const std::string key = normalize_breakpoint_file(file);
+  const std::string key = normalize_path(file);
   const auto it = breakpoints_by_file.find(key);
   if (it == breakpoints_by_file.end()) {
     return lines;

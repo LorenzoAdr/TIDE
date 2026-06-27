@@ -34,6 +34,7 @@ add_executable(tgdb
   src/util/cpp_highlight.cpp
   src/util/crash_handler.cpp
   src/util/filesystem_tree.cpp
+  src/util/path_normalize.cpp
   src/util/process_list.cpp
 )
 

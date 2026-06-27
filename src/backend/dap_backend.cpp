@@ -6,26 +6,9 @@
 #include "dap/gdb_protocol.hpp"
 #include "dap/protocol.h"
 #include "dap/session.h"
+#include "util/path_normalize.hpp"
 
 namespace tgdb {
-
-namespace {
-
-std::string normalize_source_path(const std::string& path) {
-  if (path.empty()) {
-    return path;
-  }
-  namespace fs = std::filesystem;
-  std::error_code ec;
-  const auto absolute = fs::absolute(path, ec);
-  if (ec) {
-    return path;
-  }
-  const auto canonical = fs::weakly_canonical(absolute, ec);
-  return ec ? absolute.string() : canonical.string();
-}
-
-}  // namespace
 
 DapBackend::DapBackend(ThreadSafeQueue<UiCommand>& commands,
                        ThreadSafeQueue<DebugEvent>& events)
@@ -556,7 +539,7 @@ void DapBackend::send_breakpoints_locked(const std::string& normalized_file,
 
 void DapBackend::update_breakpoints(const std::string& file,
                                     const std::vector<int>& lines) {
-  const std::string normalized = normalize_source_path(file);
+  const std::string normalized = normalize_path(file);
   if (lines.empty()) {
     breakpoints_by_file_.erase(normalized);
   } else {

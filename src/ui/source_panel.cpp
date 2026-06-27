@@ -15,6 +15,7 @@
 #include "ui/focusable_component.hpp"
 #include "ui/theme.hpp"
 #include "util/cpp_highlight.hpp"
+#include "util/path_normalize.hpp"
 
 namespace tgdb {
 
@@ -128,11 +129,7 @@ void ToggleBreakpointAtLine(DebugModel* model, int line, CommandCallback on_comm
   if (!on_command || model->active_file.empty() || line <= 0) {
     return;
   }
-  std::error_code ec;
-  const auto normalized = std::filesystem::weakly_canonical(model->active_file, ec);
-  if (!ec) {
-    model->active_file = normalized.string();
-  }
+  model->active_file = normalize_path(model->active_file);
 
   model->toggle_breakpoint(model->active_file, line);
 

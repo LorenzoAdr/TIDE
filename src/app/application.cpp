@@ -169,6 +169,18 @@ void Application::ensure_backend_started() {
   backend_started_ = true;
 }
 
+void Application::set_status(const std::string& message) {
+  model_.status_message = message;
+  workspace_.status_message = message;
+}
+
+void Application::set_workspace_status(const std::string& message) {
+  workspace_.status_message = message;
+  if (app_mode_ == AppMode::kNormal) {
+    model_.status_message = message;
+  }
+}
+
 void Application::exit_debug_mode() {
   if (debugging_started_) {
     if (config_.mode == SessionMode::kAttach) {
@@ -195,9 +207,7 @@ void Application::exit_debug_mode() {
   model_.state = DebugState::kDisconnected;
 
   app_mode_ = AppMode::kNormal;
-  pending_debug_mode_ = false;
-  workspace_.status_message = "Modo edición";
-  model_.status_message = workspace_.status_message;
+  set_workspace_status("Modo edición");
 }
 
 void Application::apply_connection_and_start() {
@@ -219,11 +229,8 @@ void Application::apply_connection_and_start() {
     model_.view_token++;
   }
 
-  if (app_mode_ != AppMode::kDebug) {
-    pending_debug_mode_ = true;
-  } else {
-    layout_state_.focus_sync_needed = true;
-  }
+  app_mode_ = AppMode::kDebug;
+  layout_state_.focus_sync_needed = true;
 
   if (config_.mode == SessionMode::kAttach) {
     UiCommand attach;
@@ -234,10 +241,9 @@ void Application::apply_connection_and_start() {
     attach.attach.target = config_.attach_target;
     submit_command(attach);
     if (config_.attach_pid > 0) {
-      model_.status_message =
-          "Adjuntando PID " + std::to_string(config_.attach_pid);
+      set_status("Adjuntando PID " + std::to_string(config_.attach_pid));
     } else if (!config_.attach_target.empty()) {
-      model_.status_message = "Adjuntando " + config_.attach_target;
+      set_status("Adjuntando " + config_.attach_target);
     }
   } else {
     UiCommand launch;
@@ -247,7 +253,7 @@ void Application::apply_connection_and_start() {
     launch.launch.args = config_.args;
     launch.launch.stop_at_main = true;
     submit_command(launch);
-    model_.status_message = "Lanzando " + config_.program;
+    set_status("Lanzando " + config_.program);
   }
 }
 
@@ -261,8 +267,7 @@ void Application::apply_pending_connection() {
   }
 
   if (workspace_.buffer.dirty) {
-    model_.status_message = "Guarda los cambios (Ctrl+S) antes de depurar.";
-    workspace_.status_message = model_.status_message;
+    set_status("Guarda los cambios (Ctrl+S) antes de depurar.");
     return;
   }
 
@@ -277,7 +282,7 @@ void Application::apply_pending_connection() {
   model_.program = config_.program;
   model_.program_args = config_.args;
 
-  model_.status_message = "Conectando con GDB DAP...";
+  set_status("Conectando con GDB DAP...");
   ensure_backend_started();
 }
 
@@ -299,7 +304,7 @@ void Application::open_connection_wizard() {
           : connection_wizard_state_.browser.launch_root;
   connection_wizard_state_.reset();
   connection_wizard_state_.open = true;
-  model_.status_message = "Configurar depuración...";
+  set_status("Configurar depuración...");
 }
 
 void Application::submit_command(const UiCommand& command) {
@@ -420,15 +425,6 @@ void Application::drain_events() {
   }
 }
 
-void Application::apply_pending_debug_mode() {
-  if (!pending_debug_mode_) {
-    return;
-  }
-  pending_debug_mode_ = false;
-  app_mode_ = AppMode::kDebug;
-  layout_state_.focus_sync_needed = true;
-}
-
 bool Application::any_modal_open() const {
   return workspace_wizard_state_.open || connection_wizard_state_.open ||
          file_picker_state_.open;
@@ -539,7 +535,6 @@ int Application::run() {
           apply_pending_connection();
         }
         drain_events();
-        apply_pending_debug_mode();
         return false;
       }
 
@@ -631,7 +626,7 @@ int Application::run() {
       return false;
     } catch (const std::exception& e) {
       model_.append_console(std::string("[crash] ") + e.what());
-      model_.status_message = std::string("Error: ") + e.what();
+      set_status(std::string("Error: ") + e.what());
       print_current_backtrace(e.what());
       return true;
     }

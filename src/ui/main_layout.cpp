@@ -101,6 +101,71 @@ Component MakeModeLayout(AppMode* app_mode, Component normal_child, Component de
   return Make<ModeLayout>(app_mode, std::move(normal_child), std::move(debug_child));
 }
 
+// Panel derecho: un solo outline; en debug muestra watches debajo.
+class RightPanelLayout : public ComponentBase {
+ public:
+  RightPanelLayout(AppMode* app_mode, Component outline, Component watches,
+                   int* outline_height)
+      : app_mode_(app_mode), outline_height_(outline_height) {
+    Add(std::move(outline));
+    Add(std::move(watches));
+  }
+
+  Element OnRender() override {
+    if (app_mode_ == nullptr || *app_mode_ != AppMode::kDebug) {
+      return ChildAt(0)->Render();
+    }
+    return vbox({
+               ChildAt(0)->Render() | size(HEIGHT, EQUAL, *outline_height_),
+               separator(),
+               ChildAt(1)->Render() | yflex,
+           }) |
+           flex;
+  }
+
+  bool OnEvent(Event event) override {
+    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
+      if (ChildAt(1)->OnEvent(event)) {
+        return true;
+      }
+      return ChildAt(0)->OnEvent(std::move(event));
+    }
+    return ChildAt(0)->OnEvent(std::move(event));
+  }
+
+  bool Focusable() const override {
+    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
+      return children_[0]->Focusable() || children_[1]->Focusable();
+    }
+    return children_[0]->Focusable();
+  }
+
+  Component ActiveChild() override {
+    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
+      if (Component watches = ChildAt(1); watches->Focused()) {
+        return watches->ActiveChild() ? watches->ActiveChild() : watches;
+      }
+    }
+    return ChildAt(0)->ActiveChild() ? ChildAt(0)->ActiveChild() : ChildAt(0);
+  }
+
+  void SetActiveChild(ComponentBase* child) override {
+    if (Component active = ActiveChild()) {
+      active->SetActiveChild(child);
+    }
+  }
+
+ private:
+  AppMode* app_mode_;
+  int* outline_height_;
+};
+
+Component MakeRightPanel(AppMode* app_mode, Component outline, Component watches,
+                         int* outline_height) {
+  return Make<RightPanelLayout>(app_mode, std::move(outline), std::move(watches),
+                                outline_height);
+}
+
 Component MakeVSplitLeft(Component main, Component back, int* main_size) {
   ResizableSplitOption options;
   options.main = std::move(main);
@@ -181,11 +246,9 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto center = MakeModeLayout(app_mode, editor, source);
 
   auto outline = MakeOutlinePanel(workspace, focus, symbols);
-  auto outline_debug = MakeOutlinePanel(workspace, focus, symbols);
   auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug);
-  auto right_debug =
-      MakeHSplitTop(outline_debug, watches, &split_state->outline_height);
-  auto right_panel = MakeModeLayout(app_mode, outline, right_debug);
+  auto right_panel =
+      MakeRightPanel(app_mode, outline, watches, &split_state->outline_height);
 
   auto explorer_and_center = MakeVSplitLeft(file_tree, center, &split_state->left_width);
   auto workspace_area =

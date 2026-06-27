@@ -57,7 +57,8 @@ class Application {
   void ensure_backend_started();
   bool handle_focus_shortcuts(const ftxui::Event& event);
   bool any_modal_open() const;
-  void apply_pending_debug_mode();
+  void set_status(const std::string& message);
+  void set_workspace_status(const std::string& message);
 
   AppConfig config_;
   AppMode app_mode_ = AppMode::kNormal;
@@ -78,7 +79,6 @@ class Application {
   bool session_ready_ = false;
   bool debugging_started_ = false;
   bool backend_started_ = false;
-  bool pending_debug_mode_ = false;
   std::optional<ConnectionResult> pending_connection_;
 };
 
