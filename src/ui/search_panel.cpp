@@ -181,7 +181,7 @@ void run_replace_all(SearchPanelState* state, DebugModel* model, WorkspaceIndexe
       std::error_code ec;
       const auto absolute = fs::weakly_canonical(fs::path(opts.workspace_root) / rel, ec);
       if (!ec && absolute.string() == workspace->buffer.path) {
-        workspace->load_file(workspace->buffer.path);
+        workspace->open_file(workspace->buffer.path);
         break;
       }
     }
@@ -206,11 +206,9 @@ void open_result(SearchPanelState* state, WorkspaceModel* workspace, DebugModel*
     const auto absolute =
         fs::weakly_canonical(fs::path(model->workspace_root) / hit.file, ec);
     if (!ec) {
-      workspace->load_file(absolute.string());
-      workspace->buffer.reset_to_single_cursor(std::max(0, hit.line - 1),
-                                               std::max(0, hit.col - 1));
-      workspace->buffer.scroll = std::max(0, workspace->buffer.primary_line() - 2);
-      workspace->buffer.view_token++;
+      workspace->record_cursor_jump();
+      workspace->open_file_at(absolute.string(), std::max(0, hit.line - 1),
+                              std::max(0, hit.col - 1));
     }
   }
   if (focus != nullptr) {

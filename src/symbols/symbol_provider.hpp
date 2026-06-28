@@ -1,9 +1,12 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
 #include "lsp/semantic_tokens.hpp"
+#include "lsp/diagnostics.hpp"
+#include "symbols/hover_info.hpp"
 
 namespace tgdb {
 
@@ -103,6 +106,20 @@ class ISymbolProvider {
     (void)path;
     return {};
   }
+
+  virtual bool supports_hover() const { return false; }
+  virtual HoverInfo hover_at(const HoverParams& params) {
+    (void)params;
+    return {};
+  }
+
+  virtual bool supports_diagnostics() const { return false; }
+  virtual uint64_t diagnostics_revision() const { return 0; }
+  virtual DocumentDiagnostics diagnostics_for_file(const std::string& path) {
+    (void)path;
+    return {};
+  }
+  virtual std::vector<DocumentDiagnostics> workspace_diagnostics() { return {}; }
 };
 
 }  // namespace tgdb

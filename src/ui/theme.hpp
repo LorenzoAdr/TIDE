@@ -17,6 +17,7 @@ inline Color EditorLineHi() { return Color::RGB(26, 28, 36); }
 inline Color CursorCell() { return Color::RGB(90, 170, 255); }
 inline Color SelectionBg() { return Color::RGB(60, 70, 100); }
 inline Color FindMatchBg() { return Color::RGB(80, 70, 30); }
+inline Color BracketMatchBg() { return Color::RGB(45, 70, 55); }
 inline Color TabActive() { return Color::RGB(55, 75, 110); }
 inline Color TabIdle() { return Color::RGB(38, 42, 52); }
 inline Color Header() { return Color::RGB(180, 200, 255); }
@@ -24,6 +25,8 @@ inline Color Muted() { return Color::RGB(130, 140, 160); }
 inline Color WatchInput() { return Color::RGB(200, 230, 255); }
 inline Color BpActive() { return Color::RGB(255, 120, 120); }
 inline Color BpDisabled() { return Color::RGB(100, 100, 110); }
+inline Color Error() { return Color::RGB(255, 100, 100); }
+inline Color Warning() { return Color::RGB(255, 200, 80); }
 inline Color StackFrame() { return Color::RGB(170, 210, 255); }
 inline Color StatusBar() { return Color::RGB(35, 45, 65); }
 

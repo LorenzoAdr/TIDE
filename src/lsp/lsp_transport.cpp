@@ -134,6 +134,18 @@ void LspTransport::reader_loop() {
     }
 
     if (!json.contains("id") || json["id"].is_null()) {
+      if (json.contains("method") && json["method"].is_string()) {
+        const std::string method = json["method"].get<std::string>();
+        nlohmann::json params = json.contains("params") ? json["params"] : nlohmann::json::object();
+        NotificationHandler handler;
+        {
+          std::lock_guard<std::mutex> lock(handler_mutex_);
+          handler = notification_handler_;
+        }
+        if (handler) {
+          handler(method, params);
+        }
+      }
       continue;
     }
 
@@ -191,6 +203,11 @@ bool LspTransport::send_request(int id, const std::string& method, nlohmann::jso
   }
   *out = response["result"];
   return true;
+}
+
+void LspTransport::set_notification_handler(NotificationHandler handler) {
+  std::lock_guard<std::mutex> lock(handler_mutex_);
+  notification_handler_ = std::move(handler);
 }
 
 void LspTransport::send_notification(const std::string& method, nlohmann::json params) {

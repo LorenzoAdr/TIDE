@@ -85,7 +85,8 @@ Breakpoints are tracked per normalized file path in `DebugModel`. When the user 
 
 1. On workspace open, tries to spawn `clangd` (`CLANGD_PATH` or `PATH`)
 2. Sends `textDocument/didOpen`, `didChange`, `didClose` for editor buffers
-3. Queries `documentSymbol` and completion
+3. Queries `documentSymbol`, completion, hover, semantic tokens
+4. Receives `textDocument/publishDiagnostics` for live errors/warnings (clangd)
 
 If clangd is unavailable, `RegexSymbolProvider` extracts symbols with regex heuristics.
 

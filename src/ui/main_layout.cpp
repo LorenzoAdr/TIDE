@@ -7,6 +7,7 @@
 #include "ftxui/component/component_options.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "lsp/diagnostics.hpp"
 #include "terminal/shell_session.hpp"
 #include "ui/console_panel.hpp"
 #include "ui/editor_panel.hpp"
@@ -30,6 +31,9 @@ struct LayoutState {
   int right_width = 22;
   int bottom_height = 8;
   int outline_height = 12;
+  uint64_t last_diag_revision = 0;
+  int diag_errors = 0;
+  int diag_warnings = 0;
 };
 
 struct FocusSyncState {
@@ -345,7 +349,7 @@ std::string status_shortcuts(AppMode mode) {
   if (mode == AppMode::kDebug) {
     return "F1 atajos  F5 ▶  F10 step  Ctrl+B bp  F2 debug  F3 workspace  F8 outline  F7 buscar  Ctrl+P  Ctrl+T  Ctrl+Q salir ";
   }
-  return "F1 atajos  F2 debug  F3 workspace  F7 buscar  F8 outline  Ctrl+F  Ctrl+G  F12 definición  Ctrl+. completar  Ctrl+O  Ctrl+S  Ctrl+P  Ctrl+Q salir ";
+  return "F1 atajos  F2 debug  F3 workspace  F7 buscar  F8 outline  F9 problemas  Ctrl+F  Ctrl+G  F12 definición  Ctrl+. completar  Ctrl+O  Ctrl+S  Ctrl+P  Ctrl+Q salir ";
 }
 
 }  // namespace
@@ -363,7 +367,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   split_state->right_width = 22;
   split_state->bottom_height = 8;
 
-  auto file_tree = MakeFileTreePanel(model, workspace, focus, indexer, on_command);
+  auto file_tree = MakeFileTreePanel(model, workspace, focus, indexer, on_command,
+                                     layout_state);
   auto editor = MakeEditorPanel(workspace, focus, layout_state, symbols, indexer,
                                 symbol_indexer);
   auto source = MakeSourcePanel(model, source_state, on_command, focus, layout_state);
@@ -422,6 +427,30 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     if (app_mode != nullptr && *app_mode == AppMode::kNormal && workspace != nullptr &&
         !workspace->status_message.empty()) {
       status_msg = workspace->status_message;
+    }
+
+    if (symbols && symbols->supports_diagnostics() && layout_state != nullptr &&
+        !layout_state->diagnostics_panel_visible) {
+      const uint64_t revision = symbols->diagnostics_revision();
+      if (revision != split_state->last_diag_revision) {
+        split_state->last_diag_revision = revision;
+        count_workspace_diagnostics(symbols->workspace_diagnostics(),
+                                    &split_state->diag_errors, &split_state->diag_warnings);
+      }
+      if (split_state->diag_errors > 0 || split_state->diag_warnings > 0) {
+        status_msg += "  │ ";
+        if (split_state->diag_errors > 0) {
+          status_msg += std::to_string(split_state->diag_errors) +
+                        (split_state->diag_errors == 1 ? " error" : " errores");
+        }
+        if (split_state->diag_warnings > 0) {
+          if (split_state->diag_errors > 0) {
+            status_msg += ", ";
+          }
+          status_msg += std::to_string(split_state->diag_warnings) +
+                        (split_state->diag_warnings == 1 ? " aviso" : " avisos");
+        }
+      }
     }
 
     std::string focus_label;

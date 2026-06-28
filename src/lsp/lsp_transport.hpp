@@ -26,6 +26,10 @@ class LspTransport {
                     int timeout_ms, nlohmann::json* out);
   void send_notification(const std::string& method, nlohmann::json params);
 
+  using NotificationHandler =
+      std::function<void(const std::string& method, const nlohmann::json& params)>;
+  void set_notification_handler(NotificationHandler handler);
+
  private:
   bool write_message(const std::string& payload);
   std::optional<std::string> read_message();
@@ -41,6 +45,9 @@ class LspTransport {
   std::condition_variable pending_cv_;
   std::unordered_map<int, nlohmann::json> pending_responses_;
   int next_id_ = 1;
+
+  std::mutex handler_mutex_;
+  NotificationHandler notification_handler_;
 };
 
 }  // namespace tgdb

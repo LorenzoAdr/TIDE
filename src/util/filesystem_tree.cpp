@@ -76,7 +76,7 @@ FileTreeNode build_file_tree_from_paths(const std::vector<std::string>& relative
   FileTreeNode tree_root;
   tree_root.name = "";
   tree_root.is_file = false;
-  tree_root.expanded = true;
+  tree_root.expanded = false;
 
   for (const auto& path : relative_paths) {
     insert_path(&tree_root, path);

@@ -31,6 +31,17 @@ bool alt_letter(const ftxui::Event& event, char lower, char upper) {
          (input[1] == lower || input[1] == upper);
 }
 
+bool input_has_shift_token(const std::string& input) {
+  return input.find("[1;2") != std::string::npos || input.find(";2u") != std::string::npos ||
+         input.find(";2~") != std::string::npos || input.find("57417") != std::string::npos ||
+         input.find("57418") != std::string::npos;
+}
+
+bool input_has_shift_release_token(const std::string& input) {
+  return input.find("57417;2u") != std::string::npos ||
+         input.find("57418;2u") != std::string::npos;
+}
+
 }  // namespace
 
 bool event_is_ctrl_shift_l(const ftxui::Event& event) {
@@ -61,6 +72,14 @@ bool event_is_shift_down(const ftxui::Event& event) {
   return event == ftxui::Event::Special("\x1B[1;2B") ||
          event == ftxui::Event::Special("\x1B[1;3B") ||
          event == ftxui::Event::Special("\x1B[1;4B");
+}
+
+bool event_is_alt_left(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;3D");
+}
+
+bool event_is_alt_right(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;3C");
 }
 
 bool event_is_ctrl_shift_up(const ftxui::Event& event) {
@@ -208,10 +227,17 @@ bool event_is_ctrl_i(const ftxui::Event& event) {
 }
 
 bool event_is_shift_key_press(const ftxui::Event& event) {
-  return event == ftxui::Event::Special("\x1B[57417u") ||
-         event == ftxui::Event::Special("\x1B[57417;1u") ||
-         event == ftxui::Event::Special("\x1B[57418u") ||
-         event == ftxui::Event::Special("\x1B[57418;1u");
+  if (event == ftxui::Event::Special("\x1B[57417u") ||
+      event == ftxui::Event::Special("\x1B[57417;1u") ||
+      event == ftxui::Event::Special("\x1B[57418u") ||
+      event == ftxui::Event::Special("\x1B[57418;1u")) {
+    return true;
+  }
+  const std::string& input = event.input();
+  return input.find("57417;1u") != std::string::npos ||
+         input.find("57418;1u") != std::string::npos ||
+         input.find("57417u") != std::string::npos ||
+         input.find("57418u") != std::string::npos;
 }
 
 bool event_is_shift_key_release(const ftxui::Event& event) {
@@ -334,6 +360,21 @@ bool event_has_shift_modifier(const ftxui::Event& event) {
          event_is_ctrl_shift_o(event);
 }
 
+bool event_input_has_shift_modifier(const ftxui::Event& event) {
+  if (event_has_shift_modifier(event) || event_is_shift_key_press(event) ||
+      event == ftxui::Event::TabReverse) {
+    return true;
+  }
+  return input_has_shift_token(event.input());
+}
+
+bool event_input_has_shift_release(const ftxui::Event& event) {
+  if (event_is_shift_key_release(event)) {
+    return true;
+  }
+  return input_has_shift_release_token(event.input());
+}
+
 bool event_has_ctrl_modifier(const ftxui::Event& event) {
   if (event_is_plain_tab(event)) {
     return false;
@@ -370,7 +411,8 @@ bool editor_priority_key(const ftxui::Event& event) {
          event_is_ctrl_shift_d(event) || event_is_ctrl_backspace(event) ||
          event_is_ctrl_delete(event) || event == ftxui::Event::CtrlS ||
          event_is_ctrl_shift_l(event) || event_is_completion(event) ||
-         event_is_go_to_definition(event) || event_is_go_to_declaration(event);
+         event_is_go_to_definition(event) || event_is_go_to_declaration(event) ||
+         event_is_alt_left(event) || event_is_alt_right(event);
 }
 
 }  // namespace tgdb

@@ -20,9 +20,23 @@ namespace {
 struct OutlinePanelState {
   std::vector<SymbolInfo> symbols;
   std::string loaded_file;
+  bool symbols_fetch_pending = false;
   int selected = 0;
   Box content_box;
 };
+
+void fetch_outline_symbols(OutlinePanelState* state, ISymbolProvider* symbols,
+                           WorkspaceModel* workspace) {
+  if (state == nullptr || symbols == nullptr || !state->symbols_fetch_pending ||
+      state->loaded_file.empty()) {
+    return;
+  }
+  state->symbols_fetch_pending = false;
+  state->symbols = symbols->symbols_for_file(state->loaded_file);
+  if (workspace != nullptr) {
+    workspace->buffer.view_token++;
+  }
+}
 
 }  // namespace
 
@@ -31,17 +45,26 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
                            MainLayoutState* layout_state) {
   auto state = std::make_shared<OutlinePanelState>();
 
-  auto renderer = Renderer([workspace, focus, state, symbols] {
+  if (layout_state != nullptr) {
+    layout_state->outline_tick_callback = [state, symbols, workspace]() {
+      fetch_outline_symbols(state.get(), symbols.get(), workspace);
+    };
+  }
+
+  auto renderer = Renderer([workspace, focus, state] {
     const std::string path =
         workspace->buffer.path.empty() ? workspace->active_file : workspace->buffer.path;
     if (path != state->loaded_file) {
       state->loaded_file = path;
-      state->symbols = symbols ? symbols->symbols_for_file(path) : std::vector<SymbolInfo>{};
+      state->symbols.clear();
+      state->symbols_fetch_pending = !path.empty();
       state->selected = 0;
     }
 
     Elements rows;
-    if (state->symbols.empty()) {
+    if (state->symbols_fetch_pending && state->symbols.empty()) {
+      rows.push_back(text("(cargando…)") | color(theme::Muted()));
+    } else if (state->symbols.empty()) {
       rows.push_back(text("(sin símbolos)") | color(theme::Muted()));
     } else {
       for (int i = 0; i < static_cast<int>(state->symbols.size()); ++i) {
@@ -81,6 +104,7 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
         if (row >= 0 && row < static_cast<int>(state->symbols.size())) {
           state->selected = row;
           const auto& sym = state->symbols[row];
+          workspace->record_cursor_jump();
           workspace->buffer.reset_to_single_cursor(std::max(0, sym.line - 1), 0);
           workspace->buffer.scroll = std::max(0, workspace->buffer.primary_line() - 2);
           workspace->buffer.view_token++;
@@ -108,6 +132,7 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     if (event == Event::Return) {
       const auto& sym = state->symbols[state->selected];
+      workspace->record_cursor_jump();
       workspace->buffer.reset_to_single_cursor(std::max(0, sym.line - 1), 0);
       workspace->buffer.scroll = std::max(0, workspace->buffer.primary_line() - 2);
       workspace->buffer.view_token++;

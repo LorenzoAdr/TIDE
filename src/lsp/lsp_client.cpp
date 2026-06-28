@@ -136,6 +136,7 @@ bool LspClient::initialize(const std::string& workspace_root) {
       true;
   params["capabilities"]["textDocument"]["definition"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["declaration"] = nlohmann::json::object();
+  params["capabilities"]["textDocument"]["hover"] = {{"contentFormat", {"plaintext", "markdown"}}};
   params["capabilities"]["textDocument"]["semanticTokens"] = {
       {"requests", {{"range", false}, {"full", {{"delta", false}}}}},
       {"tokenTypes",
@@ -169,6 +170,10 @@ bool LspClient::start(const std::string& workspace_root) {
   if (workspace_root.empty()) {
     return false;
   }
+  transport_.set_notification_handler([this](const std::string& method,
+                                             const nlohmann::json& params) {
+    on_lsp_notification(method, params);
+  });
   if (!spawn_clangd(workspace_root)) {
     stop();
     return false;
@@ -220,6 +225,8 @@ void LspClient::stop() {
   symbol_cache_.clear();
   semantic_token_cache_.clear();
   semantic_token_attempts_.clear();
+  diagnostics_.clear();
+  diagnostics_revision_.store(0, std::memory_order_release);
   semantic_token_types_.clear();
   semantic_tokens_supported_ = false;
   workspace_root_.clear();
@@ -362,6 +369,7 @@ void LspClient::did_close(const std::string& absolute_path) {
     documents_.erase(it);
     invalidate_cache(key);
     invalidate_semantic_tokens(key);
+    diagnostics_.erase(key);
   }
 
   nlohmann::json params = {{"textDocument", {{"uri", uri}}}};
@@ -755,6 +763,100 @@ SourceLocation LspClient::goto_declaration(const std::string& absolute_path,
   return request_location("textDocument/declaration", absolute_path, text, line, character);
 }
 
+std::string LspClient::strip_markdown(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+  bool in_code = false;
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    const char c = text[i];
+    if (c == '`') {
+      in_code = !in_code;
+      continue;
+    }
+    if (!in_code && c == '*' && i + 1 < text.size() && text[i + 1] == '*') {
+      i += 1;
+      continue;
+    }
+    if (!in_code && c == '*' ) {
+      continue;
+    }
+    out.push_back(c);
+  }
+  return out;
+}
+
+void LspClient::append_hover_content(const nlohmann::json& content, HoverInfo* out) {
+  if (out == nullptr) {
+    return;
+  }
+  if (content.is_string()) {
+    const std::string raw = content.get<std::string>();
+    if (out->title.empty()) {
+      out->title = strip_markdown(raw);
+    } else {
+      out->body_lines.push_back(strip_markdown(raw));
+    }
+    return;
+  }
+  if (content.is_object()) {
+    std::string value;
+    if (content.contains("value") && content["value"].is_string()) {
+      value = content["value"].get<std::string>();
+    }
+    if (value.empty()) {
+      return;
+    }
+    const std::string plain = strip_markdown(value);
+    if (out->title.empty()) {
+      out->title = plain;
+    } else {
+      out->body_lines.push_back(plain);
+    }
+    return;
+  }
+  if (content.is_array()) {
+    for (const auto& item : content) {
+      append_hover_content(item, out);
+    }
+  }
+}
+
+HoverInfo LspClient::parse_hover_result(const nlohmann::json& result) {
+  HoverInfo info;
+  if (result.is_null()) {
+    return info;
+  }
+  if (!result.is_object() || !result.contains("contents")) {
+    return info;
+  }
+  append_hover_content(result["contents"], &info);
+  info.valid = !info.title.empty() || !info.body_lines.empty();
+  return info;
+}
+
+HoverInfo LspClient::hover(const std::string& absolute_path, const std::string& text,
+                           int line, int character) {
+  HoverInfo info;
+  if (!ready_.load() || absolute_path.empty()) {
+    return info;
+  }
+
+  if (!text.empty()) {
+    did_change(absolute_path, text);
+  }
+
+  const std::string uri = path_to_uri(absolute_path);
+  nlohmann::json params = {{"textDocument", {{"uri", uri}}},
+                           {"position", {{"line", line}, {"character", character}}}};
+
+  nlohmann::json result;
+  const int id = next_request_id_++;
+  if (!transport_.send_request(id, "textDocument/hover", std::move(params), 5000, &result)) {
+    return info;
+  }
+  return parse_hover_result(result);
+}
+
 SemanticTokenDocument LspClient::decode_semantic_tokens(
     const nlohmann::json& result, const std::vector<std::string>& token_types) {
   SemanticTokenDocument doc;
@@ -913,6 +1015,106 @@ SemanticTokenDocument LspClient::semantic_tokens_for_file(const std::string& abs
     return {};
   }
   return it->second;
+}
+
+Diagnostic LspClient::parse_diagnostic(const nlohmann::json& item) {
+  Diagnostic diag;
+  if (!item.is_object()) {
+    return diag;
+  }
+  if (item.contains("message") && item["message"].is_string()) {
+    diag.message = item["message"].get<std::string>();
+  }
+  if (item.contains("source") && item["source"].is_string()) {
+    diag.source = item["source"].get<std::string>();
+  }
+  if (item.contains("severity") && item["severity"].is_number_integer()) {
+    const int sev = item["severity"].get<int>();
+    if (sev >= 1 && sev <= 4) {
+      diag.severity = static_cast<DiagnosticSeverity>(sev);
+    }
+  }
+  if (item.contains("range") && item["range"].is_object()) {
+    const auto& range = item["range"];
+    if (range.contains("start") && range["start"].is_object()) {
+      const auto& start = range["start"];
+      if (start.contains("line")) {
+        diag.line = start["line"].get<int>();
+      }
+      if (start.contains("character")) {
+        diag.start_col = start["character"].get<int>();
+      }
+    }
+    if (range.contains("end") && range["end"].is_object()) {
+      const auto& end = range["end"];
+      if (end.contains("character")) {
+        diag.end_col = end["character"].get<int>();
+      }
+    }
+  }
+  if (diag.end_col <= diag.start_col) {
+    diag.end_col = diag.start_col + 1;
+  }
+  return diag;
+}
+
+DocumentDiagnostics LspClient::parse_publish_diagnostics(const nlohmann::json& params) {
+  DocumentDiagnostics doc;
+  if (!params.is_object() || !params.contains("uri") || !params["uri"].is_string()) {
+    return doc;
+  }
+  doc.path = uri_to_path(params["uri"].get<std::string>());
+  doc.path = normalize_lsp_path(doc.path);
+  if (!params.contains("diagnostics") || !params["diagnostics"].is_array()) {
+    return doc;
+  }
+  for (const auto& item : params["diagnostics"]) {
+    Diagnostic parsed = parse_diagnostic(item);
+    if (!parsed.message.empty()) {
+      doc.items.push_back(std::move(parsed));
+    }
+  }
+  return doc;
+}
+
+void LspClient::on_lsp_notification(const std::string& method, const nlohmann::json& params) {
+  if (method != "textDocument/publishDiagnostics") {
+    return;
+  }
+  DocumentDiagnostics doc = parse_publish_diagnostics(params);
+  if (doc.path.empty()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (doc.items.empty()) {
+    diagnostics_.erase(doc.path);
+  } else {
+    diagnostics_[doc.path] = std::move(doc);
+  }
+  diagnostics_revision_.fetch_add(1, std::memory_order_release);
+}
+
+DocumentDiagnostics LspClient::diagnostics_for_file(const std::string& absolute_path) {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return {};
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = diagnostics_.find(key);
+  if (it == diagnostics_.end()) {
+    return {};
+  }
+  return it->second;
+}
+
+std::vector<DocumentDiagnostics> LspClient::all_diagnostics() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  std::vector<DocumentDiagnostics> out;
+  out.reserve(diagnostics_.size());
+  for (const auto& entry : diagnostics_) {
+    out.push_back(entry.second);
+  }
+  return out;
 }
 
 }  // namespace tgdb

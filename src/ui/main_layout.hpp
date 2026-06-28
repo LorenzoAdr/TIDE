@@ -48,7 +48,10 @@ struct ConsolePanelTabs {
 
 struct MainLayoutState {
   bool console_visible = true;
+  bool diagnostics_panel_visible = false;
+  int diagnostics_panel_height = 6;
   bool terminal_start_requested = true;
+  bool request_ui_tick = false;
   ConsolePanelTabs console_tabs;
   TextInputFocus text_input_focus = TextInputFocus::None;
   bool focus_sync_needed = false;
@@ -56,10 +59,16 @@ struct MainLayoutState {
   int right_panel_active_section = 0;  // 0 = outline/búsqueda, 1 = depuración
   RightSidebarState right_sidebar;
   std::function<bool(const ftxui::Event&)> editor_key_handler;
+  std::function<bool(const ftxui::Event&)> editor_mouse_handler;
+  std::function<bool(const ftxui::Event&)> editor_chrome_mouse_handler;
+  std::function<void(ftxui::Event&)> editor_modifier_handler;
+  std::function<void()> editor_tick_callback;
+  std::function<void()> outline_tick_callback;
   std::function<bool(const ftxui::Event&)> console_key_handler;
   std::function<bool(const ftxui::Event&)> search_key_handler;
   std::function<void()> terminal_tick_callback;
   std::function<int()> terminal_width;
+  std::function<void()> schedule_ui_tick;
 };
 
 inline bool is_search_input_focus(TextInputFocus focus) {

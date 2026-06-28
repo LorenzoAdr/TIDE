@@ -14,9 +14,49 @@ int max_scroll(int total, int visible) { return std::max(0, total - visible); }
 
 void mark_dirty(EditorBuffer* buffer) { buffer->dirty = true; }
 
-bool is_word_char(char c) {
+bool is_identifier_char(char c) {
   const unsigned char u = static_cast<unsigned char>(c);
   return std::isalnum(u) || c == '_';
+}
+
+void identifier_bounds_at(const EditorBuffer& buffer, int line, int col, int* start_col,
+                          int* end_col) {
+  if (line < 0 || line >= static_cast<int>(buffer.lines.size())) {
+    *start_col = 0;
+    *end_col = 0;
+    return;
+  }
+  const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
+  const int len = static_cast<int>(text.size());
+  col = std::max(0, std::min(col, len));
+
+  int pos = col;
+  if (pos < len && !is_identifier_char(text[static_cast<std::size_t>(pos)])) {
+    int left = pos;
+    while (left > 0 && !is_identifier_char(text[static_cast<std::size_t>(left - 1)])) {
+      --left;
+    }
+    if (left > 0 && is_identifier_char(text[static_cast<std::size_t>(left - 1)])) {
+      pos = left;
+    } else {
+      int right = pos;
+      while (right < len && !is_identifier_char(text[static_cast<std::size_t>(right)])) {
+        ++right;
+      }
+      pos = right;
+    }
+  }
+
+  int start = pos;
+  while (start > 0 && is_identifier_char(text[static_cast<std::size_t>(start - 1)])) {
+    --start;
+  }
+  int end = pos;
+  while (end < len && is_identifier_char(text[static_cast<std::size_t>(end)])) {
+    ++end;
+  }
+  *start_col = start;
+  *end_col = end;
 }
 
 int word_left_col(const EditorBuffer& buffer, int line, int col) {
@@ -25,11 +65,20 @@ int word_left_col(const EditorBuffer& buffer, int line, int col) {
   }
   const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
   col = std::max(0, std::min(col, static_cast<int>(text.size())));
+
   int pos = col;
-  while (pos > 0 && !is_word_char(text[static_cast<std::size_t>(pos - 1)])) {
+  if (pos > 0 && is_identifier_char(text[static_cast<std::size_t>(pos - 1)])) {
+    while (pos > 0 && is_identifier_char(text[static_cast<std::size_t>(pos - 1)])) {
+      --pos;
+    }
+    return pos;
+  }
+
+  pos = col;
+  while (pos > 0 && !is_identifier_char(text[static_cast<std::size_t>(pos - 1)])) {
     --pos;
   }
-  while (pos > 0 && is_word_char(text[static_cast<std::size_t>(pos - 1)])) {
+  while (pos > 0 && is_identifier_char(text[static_cast<std::size_t>(pos - 1)])) {
     --pos;
   }
   return pos;
@@ -42,11 +91,16 @@ int word_right_col(const EditorBuffer& buffer, int line, int col) {
   const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
   const int len = static_cast<int>(text.size());
   col = std::max(0, std::min(col, len));
+
   int pos = col;
-  while (pos < len && is_word_char(text[static_cast<std::size_t>(pos)])) {
-    ++pos;
+  if (pos < len && is_identifier_char(text[static_cast<std::size_t>(pos)])) {
+    while (pos < len && is_identifier_char(text[static_cast<std::size_t>(pos)])) {
+      ++pos;
+    }
+    return pos;
   }
-  while (pos < len && !is_word_char(text[static_cast<std::size_t>(pos)])) {
+
+  while (pos < len && !is_identifier_char(text[static_cast<std::size_t>(pos)])) {
     ++pos;
   }
   return pos;
@@ -181,6 +235,23 @@ void insert_char_at(EditorBuffer* buffer, int line, int col, char c) {
     }
     if (cursor.anchor.line == line && cursor.anchor.col >= col) {
       ++cursor.anchor.col;
+    }
+  }
+}
+
+void insert_string_at(EditorBuffer* buffer, int line, int col, const std::string& text) {
+  if (text.empty()) {
+    return;
+  }
+  auto& line_text = buffer->lines[static_cast<std::size_t>(line)];
+  line_text.insert(static_cast<std::size_t>(col), text);
+  const int delta = static_cast<int>(text.size());
+  for (auto& cursor : buffer->cursors) {
+    if (cursor.head.line == line && cursor.head.col >= col) {
+      cursor.head.col += delta;
+    }
+    if (cursor.anchor.line == line && cursor.anchor.col >= col) {
+      cursor.anchor.col += delta;
     }
   }
 }
@@ -525,6 +596,47 @@ void insert_char(EditorBuffer* buffer, char c) {
   mark_dirty(buffer);
 }
 
+void insert_tab_stop(EditorBuffer* buffer, int tab_size) {
+  if (tab_size <= 0) {
+    tab_size = 4;
+  }
+  push_undo(buffer);
+  clamp_all_cursors(buffer);
+  if (any_cursor_has_selection(*buffer)) {
+    delete_all_selections(buffer);
+  } else {
+    for (auto& cursor : buffer->cursors) {
+      cursor.collapse_to_head();
+    }
+  }
+
+  std::vector<CursorPos> positions;
+  positions.reserve(buffer->cursors.size());
+  for (const auto& cursor : buffer->cursors) {
+    positions.push_back(cursor.head);
+  }
+  std::sort(positions.begin(), positions.end(), [](const CursorPos& a, const CursorPos& b) {
+    if (a.line != b.line) {
+      return a.line > b.line;
+    }
+    return a.col > b.col;
+  });
+
+  for (const auto& pos : positions) {
+    const int count = tab_size - (pos.col % tab_size);
+    if (count <= 0 || count > tab_size) {
+      continue;
+    }
+    insert_string_at(buffer, pos.line, pos.col, std::string(static_cast<std::size_t>(count), ' '));
+  }
+  for (auto& cursor : buffer->cursors) {
+    cursor.collapse_to_head();
+  }
+  clamp_all_cursors(buffer);
+  merge_overlapping_cursors(buffer);
+  mark_dirty(buffer);
+}
+
 void backspace(EditorBuffer* buffer) {
   push_undo(buffer);
   if (any_cursor_has_selection(*buffer)) {
@@ -606,11 +718,12 @@ void clear_primary_selection(EditorBuffer* buffer) {
 }
 
 void select_word_at(EditorBuffer* buffer, int line, int col) {
-  buffer->reset_to_single_cursor(line, col);
-  const int left = word_left_col(*buffer, line, col);
-  const int right = word_right_col(*buffer, line, col);
-  buffer->primary().anchor = {line, left};
-  buffer->primary().head = {line, right};
+  int start = 0;
+  int end = 0;
+  identifier_bounds_at(*buffer, line, col, &start, &end);
+  buffer->reset_to_single_cursor(line, start);
+  buffer->primary().anchor = {line, start};
+  buffer->primary().head = {line, end};
   clamp_all_cursors(buffer);
 }
 

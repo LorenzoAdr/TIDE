@@ -2,7 +2,12 @@
 
 #include <cctype>
 #include <fstream>
+#include <sstream>
 #include <string>
+
+#include "editor/editor_context.hpp"
+#include "editor/editor_state.hpp"
+#include "editor/text_search.hpp"
 
 namespace tgdb {
 
@@ -186,6 +191,52 @@ std::vector<SymbolInfo> RegexSymbolProvider::symbols_for_file(
     symbols.push_back(std::move(info));
   }
   return symbols;
+}
+
+bool RegexSymbolProvider::supports_hover() const {
+  return true;
+}
+
+HoverInfo RegexSymbolProvider::hover_at(const HoverParams& params) {
+  HoverInfo info;
+  if (params.path.empty() || params.text.empty()) {
+    return info;
+  }
+
+  std::istringstream input(params.text);
+  std::vector<std::string> lines;
+  std::string line;
+  while (std::getline(input, line)) {
+    lines.push_back(line);
+  }
+  if (lines.empty()) {
+    return info;
+  }
+
+  EditorBuffer buffer;
+  buffer.lines = lines;
+  buffer.path = params.path;
+  MultiCursor cursor;
+  cursor.head = {params.line, params.character};
+  const std::string word = word_at_cursor(buffer, cursor);
+  if (word.empty()) {
+    return info;
+  }
+
+  info.title = word;
+  const auto symbols = symbols_for_file(params.path);
+  for (const SymbolInfo* sym :
+       scope_chain_at_line(symbols, params.line)) {
+    if (sym->name.find(word) != std::string::npos) {
+      info.body_lines.push_back(sym->name + " (L" + std::to_string(sym->line) + ")");
+    }
+  }
+  if (info.body_lines.empty()) {
+    info.body_lines.push_back("L" + std::to_string(params.line + 1) + ":" +
+                              std::to_string(params.character + 1));
+  }
+  info.valid = true;
+  return info;
 }
 
 }  // namespace tgdb

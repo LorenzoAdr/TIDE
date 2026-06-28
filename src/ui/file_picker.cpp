@@ -72,8 +72,7 @@ void FilePickerState::open_file(DebugModel* model, WorkspaceModel* workspace,
   model->active_line = 0;
   model->view_token++;
   if (workspace != nullptr) {
-    workspace->load_file(absolute.string());
-    workspace->buffer.view_token++;
+    workspace->open_file(absolute.string());
   }
   if (focus != nullptr) {
     focus->region = FocusRegion::Editor;

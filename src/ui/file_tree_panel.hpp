@@ -8,6 +8,7 @@
 #include "ftxui/component/component_base.hpp"
 #include "indexer/workspace_indexer.hpp"
 #include "ui/focus_manager.hpp"
+#include "ui/main_layout.hpp"
 
 namespace tgdb {
 
@@ -16,6 +17,7 @@ using CommandCallback = std::function<void(const struct UiCommand&)>;
 ftxui::Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
                                    FocusManagerState* focus,
                                    WorkspaceIndexer* indexer,
-                                   CommandCallback on_command);
+                                   CommandCallback on_command,
+                                   MainLayoutState* layout_state);
 
 }  // namespace tgdb

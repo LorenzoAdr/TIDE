@@ -15,6 +15,7 @@
 #include "ui/panel.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/main_layout.hpp"
+#include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
 #include "util/cpp_highlight.hpp"
 #include "util/path_normalize.hpp"
@@ -28,6 +29,10 @@ namespace {
 struct SourcePanelState {
   Box content_box;
   Box gutter_box;
+  Box scrollbar_box;
+  ScrollbarLayout scrollbar_layout;
+  bool scrollbar_dragging = false;
+  int scrollbar_drag_offset = 0;
   int last_visible_lines = 1;
   uint64_t last_view_token = 0;
 };
@@ -95,34 +100,82 @@ void scroll_to_line(SourceViewState* view_state, int line, int visible_lines) {
   }
 }
 
-Element vertical_scrollbar(int total_lines, int scroll, int visible_lines,
-                           int bar_height) {
-  Elements track;
-  if (bar_height <= 0) {
-    return text("");
+bool handle_source_scrollbar_mouse(SourceViewState* view_state, SourcePanelState* panel,
+                                   FocusManagerState* focus, MainLayoutState* layout_state,
+                                   const Mouse& m, int total, int visible) {
+  if (view_state == nullptr || panel == nullptr || !panel->scrollbar_layout.scrollable) {
+    return false;
   }
 
-  if (total_lines <= visible_lines) {
-    for (int i = 0; i < bar_height; ++i) {
-      track.push_back(text("│") | color(theme::Muted()));
+  const int max_scroll = max_scroll_offset(total, visible);
+  const bool in_bar = panel->scrollbar_box.Contain(m.x, m.y);
+
+  if (panel->scrollbar_dragging) {
+    if (m.button == Mouse::Left && m.motion == Mouse::Released) {
+      panel->scrollbar_dragging = false;
+      return true;
     }
-    return vbox(std::move(track));
+    if (m.button == Mouse::Left && m.motion == Mouse::Moved) {
+      const int local_y = m.y - panel->scrollbar_box.y_min;
+      const int thumb_top = local_y - panel->scrollbar_drag_offset;
+      view_state->scroll =
+          std::max(0, std::min(scroll_for_thumb_top(panel->scrollbar_layout, thumb_top),
+                               max_scroll));
+      return true;
+    }
   }
 
-  const int thumb_height =
-      std::max(1, visible_lines * bar_height / total_lines);
-  const int max_scroll = total_lines - visible_lines;
-  const int thumb_y =
-      max_scroll > 0 ? (scroll * (bar_height - thumb_height)) / max_scroll : 0;
+  if (!in_bar) {
+    return false;
+  }
 
-  for (int i = 0; i < bar_height; ++i) {
-    if (i >= thumb_y && i < thumb_y + thumb_height) {
-      track.push_back(text("┃") | color(theme::Accent()));
+  if (m.button == Mouse::WheelUp) {
+    view_state->scroll = std::max(0, view_state->scroll - 3);
+    return true;
+  }
+  if (m.button == Mouse::WheelDown) {
+    view_state->scroll = std::min(view_state->scroll + 3, max_scroll);
+    return true;
+  }
+
+  if (m.button != Mouse::Left) {
+    return false;
+  }
+
+  if (m.motion == Mouse::Pressed) {
+    if (focus != nullptr) {
+      focus->region = FocusRegion::Editor;
+    }
+    if (layout_state != nullptr) {
+      layout_state->text_input_focus = TextInputFocus::None;
+      layout_state->right_panel_active_section = 0;
+      layout_state->focus_sync_needed = true;
+    }
+    const int local_y = m.y - panel->scrollbar_box.y_min;
+    if (scrollbar_thumb_hit(panel->scrollbar_layout, panel->scrollbar_box, m.x, m.y)) {
+      panel->scrollbar_dragging = true;
+      panel->scrollbar_drag_offset = local_y - panel->scrollbar_layout.thumb_y;
     } else {
-      track.push_back(text("│") | color(theme::Muted()));
+      const int thumb_top = local_y - panel->scrollbar_layout.thumb_height / 2;
+      view_state->scroll =
+          std::max(0, std::min(scroll_for_thumb_top(panel->scrollbar_layout, thumb_top),
+                               max_scroll));
+      panel->scrollbar_dragging = true;
+      panel->scrollbar_drag_offset = panel->scrollbar_layout.thumb_height / 2;
     }
+    return true;
   }
-  return vbox(std::move(track));
+
+  if (m.motion == Mouse::Moved && panel->scrollbar_dragging) {
+    const int local_y = m.y - panel->scrollbar_box.y_min;
+    const int thumb_top = local_y - panel->scrollbar_drag_offset;
+    view_state->scroll =
+        std::max(0, std::min(scroll_for_thumb_top(panel->scrollbar_layout, thumb_top),
+                             max_scroll));
+    return true;
+  }
+
+  return false;
 }
 
 }  // namespace
@@ -225,8 +278,10 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
         vbox(std::move(gutter_rows)) | reflect(panel_state->gutter_box) | bgcolor(theme::CodeBg());
     Element code = vbox(std::move(code_rows)) | flex | reflect(panel_state->content_box) |
                    bgcolor(theme::CodeBg());
-    Element scrollbar =
-        vertical_scrollbar(total, view_state->scroll, visible, rendered_lines);
+    Element scrollbar = vertical_scrollbar(total, view_state->scroll, visible, rendered_lines) |
+                        reflect(panel_state->scrollbar_box);
+    panel_state->scrollbar_layout =
+        compute_scrollbar_layout(total, view_state->scroll, visible, rendered_lines);
 
     return MakePanel(title, hbox({gutter, separator() | color(theme::AccentDim()), code | flex,
                                   scrollbar}),
@@ -235,8 +290,16 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
 
   return WrapFocusable(CatchEvent(renderer, [model, view_state, on_command, panel_state, focus,
                                                layout_state](Event event) {
+    const int total = static_cast<int>(view_state->lines.size());
+    const int visible = panel_state->last_visible_lines;
+    const int max_scroll = max_scroll_offset(total, visible);
+
     if (event.is_mouse()) {
       const auto& m = event.mouse();
+      if (handle_source_scrollbar_mouse(view_state, panel_state.get(), focus, layout_state, m,
+                                        total, visible)) {
+        return true;
+      }
       if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
         const bool in_gutter = panel_state->gutter_box.Contain(m.x, m.y);
         const bool in_code = panel_state->content_box.Contain(m.x, m.y);
@@ -254,10 +317,6 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
     } else if (focus != nullptr && focus->region == FocusRegion::RightPanel) {
       return false;
     }
-
-    const int total = static_cast<int>(view_state->lines.size());
-    const int visible = panel_state->last_visible_lines;
-    const int max_scroll = max_scroll_offset(total, visible);
 
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
         event.mouse().motion == Mouse::Pressed) {

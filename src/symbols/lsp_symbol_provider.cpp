@@ -24,6 +24,15 @@ std::string read_file_text(const std::string& path) {
 
 }  // namespace
 
+void LspSymbolProvider::refresh_diagnostics_cache_locked() const {
+  const uint64_t revision = client_.diagnostics_revision();
+  if (revision == cached_diag_revision_) {
+    return;
+  }
+  cached_diagnostics_ = client_.all_diagnostics();
+  cached_diag_revision_ = revision;
+}
+
 LspSymbolProvider::LspSymbolProvider() = default;
 
 LspSymbolProvider::~LspSymbolProvider() {
@@ -44,6 +53,8 @@ void LspSymbolProvider::on_workspace_closed() {
   use_lsp_ = false;
   workspace_root_.clear();
   open_buffers_.clear();
+  cached_diag_revision_ = 0;
+  cached_diagnostics_.clear();
 }
 
 void LspSymbolProvider::on_document_opened(const std::string& path, const std::string& text) {
@@ -97,11 +108,16 @@ std::vector<SymbolInfo> LspSymbolProvider::symbols_for_file(const std::string& p
     return {};
   }
 
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (use_lsp_) {
+  bool use_lsp = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    use_lsp = use_lsp_;
+  }
+
+  if (use_lsp) {
     const std::string text = buffer_text_for_path(path);
     if (!text.empty()) {
-      client_.did_open(path, text);
+      on_document_opened(path, text);
     }
     auto symbols = client_.document_symbols(path);
     if (!symbols.empty()) {
@@ -207,6 +223,67 @@ SemanticTokenDocument LspSymbolProvider::semantic_tokens_for_file(const std::str
     return {};
   }
   return client_.semantic_tokens_for_file(path);
+}
+
+bool LspSymbolProvider::supports_hover() const {
+  return true;
+}
+
+HoverInfo LspSymbolProvider::hover_at(const HoverParams& params) {
+  if (params.path.empty()) {
+    return {};
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (use_lsp_) {
+    const std::string text =
+        params.text.empty() ? buffer_text_for_path(params.path) : params.text;
+    HoverInfo info =
+        client_.hover(params.path, text, params.line, params.character);
+    if (info.valid) {
+      return info;
+    }
+  }
+  return fallback_.hover_at(params);
+}
+
+bool LspSymbolProvider::supports_diagnostics() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return use_lsp_;
+}
+
+uint64_t LspSymbolProvider::diagnostics_revision() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return 0;
+  }
+  return client_.diagnostics_revision();
+}
+
+DocumentDiagnostics LspSymbolProvider::diagnostics_for_file(const std::string& path) {
+  if (path.empty()) {
+    return {};
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+  refresh_diagnostics_cache_locked();
+  const std::string key = normalize_lsp_path(path);
+  for (const auto& doc : cached_diagnostics_) {
+    if (doc.path == key) {
+      return doc;
+    }
+  }
+  return {};
+}
+
+std::vector<DocumentDiagnostics> LspSymbolProvider::workspace_diagnostics() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+  refresh_diagnostics_cache_locked();
+  return cached_diagnostics_;
 }
 
 }  // namespace tgdb

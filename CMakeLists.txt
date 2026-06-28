@@ -12,6 +12,7 @@ add_executable(tgdb
   src/app/application.cpp
   src/app/debug_model.cpp
   src/app/workspace_model.cpp
+  src/app/editor_tabs.cpp
   src/backend/dap_backend.cpp
   src/dap/gdb_launcher.cpp
   src/dap/gdb_protocol.cpp
@@ -19,6 +20,8 @@ add_executable(tgdb
   src/ui/file_tree_panel.cpp
   src/ui/source_panel.cpp
   src/ui/editor_panel.cpp
+  src/ui/editor_tab_bar.cpp
+  src/ui/diagnostics_panel.cpp
   src/ui/outline_panel.cpp
   src/ui/search_panel.cpp
   src/ui/right_sidebar_panel.cpp
@@ -42,6 +45,7 @@ add_executable(tgdb
   src/lsp/lsp_uri.cpp
   src/lsp/lsp_transport.cpp
   src/lsp/lsp_client.cpp
+  src/lsp/diagnostics.cpp
   src/symbols/lsp_symbol_provider.cpp
   src/symbols/completion_snippet.cpp
   src/symbols/local_scope_completions.cpp
@@ -50,12 +54,15 @@ add_executable(tgdb
   src/symbols/regex_symbol_provider.cpp
   src/symbols/symbol_utils.cpp
   src/editor/editor_state.cpp
+  src/editor/cursor_history.cpp
   src/editor/text_ops.cpp
   src/editor/text_search.cpp
   src/editor/editor_find_state.cpp
   src/editor/undo_stack.cpp
   src/editor/clipboard.cpp
   src/editor/editor_render.cpp
+  src/editor/editor_context.cpp
+  src/editor/bracket_match.cpp
   src/util/cpp_highlight.cpp
   src/util/crash_handler.cpp
   src/util/filesystem_tree.cpp
@@ -94,3 +101,10 @@ add_executable(text_ops_test
   src/editor/clipboard.cpp
 )
 target_include_directories(text_ops_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(bracket_match_test
+  tests/bracket_match_test.cpp
+  src/editor/editor_state.cpp
+  src/editor/bracket_match.cpp
+)
+target_include_directories(bracket_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

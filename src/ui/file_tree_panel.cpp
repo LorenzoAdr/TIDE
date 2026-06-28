@@ -49,7 +49,7 @@ struct FileTreePanelState {
       loaded_workspace.clear();
       indexed_files.clear();
       root = FileTreeNode{};
-      root.expanded = true;
+      root.expanded = false;
       selected = 0;
       rebuild_flat();
       return;
@@ -66,11 +66,6 @@ struct FileTreePanelState {
     loaded_workspace = workspace_root;
     indexed_files = snapshot->files;
     root = build_file_tree_from_paths(snapshot->files);
-    for (auto& child : root.children) {
-      if (!child.is_file) {
-        child.expanded = true;
-      }
-    }
     selected = 0;
     rebuild_flat();
   }
@@ -98,7 +93,7 @@ struct FileTreePanelState {
   }
 
   void activate(DebugModel* model, WorkspaceModel* workspace, FocusManagerState* focus,
-                int index) {
+                MainLayoutState* layout_state, int index) {
     if (index < 0 || index >= static_cast<int>(flat.size())) {
       return;
     }
@@ -111,7 +106,10 @@ struct FileTreePanelState {
       model->active_line = 0;
       model->view_token++;
       if (workspace != nullptr) {
-        workspace->load_file(absolute.string());
+        workspace->open_file(absolute.string());
+      }
+      if (layout_state != nullptr) {
+        layout_state->request_ui_tick = true;
       }
       if (focus != nullptr) {
         focus->region = FocusRegion::Editor;
@@ -127,7 +125,7 @@ struct FileTreePanelState {
 
 bool handle_navigation(FileTreePanelState* state, DebugModel* model,
                        WorkspaceModel* workspace, FocusManagerState* focus,
-                       Event event) {
+                       MainLayoutState* layout_state, Event event) {
   if (event.is_mouse() && event.mouse().button == Mouse::Left &&
       event.mouse().motion == Mouse::Pressed) {
     const auto& m = event.mouse();
@@ -138,7 +136,7 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
       const int row = m.y - state->content_box.y_min;
       if (row >= 0 && row < static_cast<int>(state->flat.size())) {
         state->selected = row;
-        state->activate(model, workspace, focus, row);
+        state->activate(model, workspace, focus, layout_state, row);
       }
       return true;
     }
@@ -162,7 +160,7 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
     return true;
   }
   if (event == Event::Return) {
-    state->activate(model, workspace, focus, state->selected);
+    state->activate(model, workspace, focus, layout_state, state->selected);
     return true;
   }
   if (event == Event::ArrowRight) {
@@ -190,7 +188,7 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
 
 Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
                             FocusManagerState* focus, WorkspaceIndexer* indexer,
-                            CommandCallback on_command) {
+                            CommandCallback on_command, MainLayoutState* layout_state) {
   (void)on_command;
   auto state = std::make_shared<FileTreePanelState>();
 
@@ -245,8 +243,8 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
     return MakePanel("Explorador", std::move(content));
   });
 
-  return WrapFocusable(CatchEvent(renderer, [model, workspace, focus, state](Event event) {
-    return handle_navigation(state.get(), model, workspace, focus, event);
+  return WrapFocusable(CatchEvent(renderer, [model, workspace, focus, state, layout_state](Event event) {
+    return handle_navigation(state.get(), model, workspace, focus, layout_state, event);
   }));
 }
 

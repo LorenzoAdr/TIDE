@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -10,6 +11,8 @@
 
 #include "lsp/lsp_transport.hpp"
 #include "lsp/semantic_tokens.hpp"
+#include "lsp/diagnostics.hpp"
+#include "symbols/hover_info.hpp"
 #include "symbols/symbol_provider.hpp"
 
 namespace tgdb {
@@ -40,6 +43,13 @@ class LspClient {
 
   SemanticTokenDocument semantic_tokens_for_file(const std::string& absolute_path);
   bool ensure_semantic_tokens(const std::string& absolute_path);
+
+  HoverInfo hover(const std::string& absolute_path, const std::string& text, int line,
+                  int character);
+
+  DocumentDiagnostics diagnostics_for_file(const std::string& absolute_path);
+  std::vector<DocumentDiagnostics> all_diagnostics() const;
+  uint64_t diagnostics_revision() const { return diagnostics_revision_.load(); }
 
  private:
   struct DocumentState {
@@ -75,6 +85,12 @@ class LspClient {
   static SymbolKind map_completion_kind(int kind);
   static SourceLocation parse_location_result(const nlohmann::json& result);
   static bool parse_single_location(const nlohmann::json& loc, SourceLocation* out);
+  static HoverInfo parse_hover_result(const nlohmann::json& result);
+  static void append_hover_content(const nlohmann::json& content, HoverInfo* out);
+  static std::string strip_markdown(const std::string& text);
+  void on_lsp_notification(const std::string& method, const nlohmann::json& params);
+  static Diagnostic parse_diagnostic(const nlohmann::json& item);
+  static DocumentDiagnostics parse_publish_diagnostics(const nlohmann::json& params);
   SourceLocation request_location(const std::string& method, const std::string& absolute_path,
                                   const std::string& text, int line, int character);
 
@@ -85,11 +101,13 @@ class LspClient {
   int stdout_read_fd_ = -1;
   std::string workspace_root_;
 
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::unordered_map<std::string, DocumentState> documents_;
   std::unordered_map<std::string, std::vector<SymbolInfo>> symbol_cache_;
   std::unordered_map<std::string, SemanticTokenDocument> semantic_token_cache_;
   std::unordered_map<std::string, SemanticTokenAttempt> semantic_token_attempts_;
+  std::unordered_map<std::string, DocumentDiagnostics> diagnostics_;
+  std::atomic<uint64_t> diagnostics_revision_{0};
   std::vector<std::string> semantic_token_types_;
   bool semantic_tokens_supported_ = false;
   int next_request_id_ = 1;

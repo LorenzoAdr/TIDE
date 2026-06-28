@@ -30,6 +30,14 @@ class LspSymbolProvider : public ISymbolProvider {
   bool ensure_semantic_tokens(const std::string& path) override;
   SemanticTokenDocument semantic_tokens_for_file(const std::string& path) override;
 
+  bool supports_hover() const override;
+  HoverInfo hover_at(const HoverParams& params) override;
+
+  bool supports_diagnostics() const override;
+  uint64_t diagnostics_revision() const override;
+  DocumentDiagnostics diagnostics_for_file(const std::string& path) override;
+  std::vector<DocumentDiagnostics> workspace_diagnostics() override;
+
   void on_workspace_opened(const std::string& root) override;
   void on_workspace_closed() override;
   void on_document_opened(const std::string& path, const std::string& text) override;
@@ -40,6 +48,7 @@ class LspSymbolProvider : public ISymbolProvider {
 
  private:
   std::string buffer_text_for_path(const std::string& path) const;
+  void refresh_diagnostics_cache_locked() const;
 
   mutable std::mutex mutex_;
   LspClient client_;
@@ -47,6 +56,8 @@ class LspSymbolProvider : public ISymbolProvider {
   bool use_lsp_ = false;
   std::string workspace_root_;
   std::unordered_map<std::string, std::string> open_buffers_;
+  mutable uint64_t cached_diag_revision_ = 0;
+  mutable std::vector<DocumentDiagnostics> cached_diagnostics_;
 };
 
 }  // namespace tgdb

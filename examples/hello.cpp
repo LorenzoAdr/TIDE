@@ -47,7 +47,7 @@ int main() {
   while (true) {
     ++counter;
     x = counter * 3;
-    y = x + 7;
+    y = x + 7;  
     const int sum = x + y;
     const int acc = accumulate(counter % 20);
 

@@ -159,6 +159,7 @@ tgdb [options] [program]
 | Quick open | Fuzzy file picker (**Ctrl+P**) |
 | Go to symbol | Workspace-wide symbol search (**Ctrl+O**) |
 | Completion | LSP completion when clangd is available (**Ctrl+.** / **Ctrl+Space** / **F6**) |
+| Problems | Live clangd diagnostics (**F9** or **Problemas** button in editor bar); gutter markers `!` / `W` |
 | Terminal | Embedded shell running in the workspace directory |
 
 ### Debug mode features
@@ -203,8 +204,11 @@ Attaching to your own processes usually works without this.
 ### Outline / completion empty
 
 1. Ensure `clangd` is installed and on `PATH` (or set `CLANGD_PATH`)
-2. Generate `compile_commands.json` (e.g. `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`)
-3. Reopen the workspace (**F3**)
+2. Ensure `compile_commands.json` exists in the workspace root or `build/`
+
+### Problems panel empty
+
+Diagnostics require clangd. They update as you edit (clangd debounces analysis). Only files opened in the editor receive diagnostics. Linker errors and unopened translation units may not appear until those files are opened.
 
 ### File tree missing files
 

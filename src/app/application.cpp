@@ -10,6 +10,7 @@
 
 #include "backend/idebug_backend.hpp"
 #include "ftxui/component/component.hpp"
+#include "ftxui/component/component_base.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/screen_interactive.hpp"
 #include "ui/connection_wizard.hpp"
@@ -19,7 +20,6 @@
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/terminal_keyboard.hpp"
-#include "ui/workspace_wizard.hpp"
 #include "util/crash_handler.hpp"
 
 namespace fs = std::filesystem;
@@ -29,14 +29,6 @@ namespace tgdb {
 using namespace ftxui;
 
 namespace {
-
-bool event_is_alt_left(const Event& event) {
-  return event == Event::Special("\x1B[1;3D");
-}
-
-bool event_is_alt_right(const Event& event) {
-  return event == Event::Special("\x1B[1;3C");
-}
 
 bool event_is_alt_up(const Event& event) {
   return event == Event::Special("\x1B[1;3A");
@@ -74,6 +66,39 @@ class EventPoller {
   std::atomic<bool> running_{true};
   std::thread thread_;
 };
+
+// FTXUI CatchEvent invoca el handler antes que el hijo; RequestUiTickGuard en el
+// handler se destruía con request_ui_tick aún en false. Este wrapper postea Custom
+// después de que todo el árbol haya procesado el evento.
+class UiTickPostWrapper : public ComponentBase {
+ public:
+  UiTickPostWrapper(MainLayoutState* layout, ScreenInteractive* screen)
+      : layout_(layout), screen_(screen) {}
+
+  bool OnEvent(Event event) override {
+    const bool handled = ComponentBase::OnEvent(std::move(event));
+    post_pending_tick();
+    return handled;
+  }
+
+ private:
+  void post_pending_tick() {
+    if (layout_ == nullptr || screen_ == nullptr || !layout_->request_ui_tick) {
+      return;
+    }
+    layout_->request_ui_tick = false;
+    screen_->Post(Event::Custom);
+  }
+
+  MainLayoutState* layout_;
+  ScreenInteractive* screen_;
+};
+
+Component WrapUiTickPost(Component child, MainLayoutState* layout, ScreenInteractive* screen) {
+  auto wrapper = Make<UiTickPostWrapper>(layout, screen);
+  wrapper->Add(std::move(child));
+  return wrapper;
+}
 
 }  // namespace
 
@@ -150,6 +175,8 @@ void Application::set_workspace(const std::string& workspace_root) {
   config_.workspace_root = absolute;
   model_.workspace_root = absolute;
   workspace_.root = absolute;
+  workspace_.cursor_history.clear();
+  workspace_.clear_tabs();
   workspace_.status_message = "Workspace: " + fs::path(absolute).filename().string();
   file_picker_state_.indexed_root.clear();
   file_picker_state_.all_files.clear();
@@ -641,6 +668,12 @@ int Application::run() {
         if (layout_state_.console_visible && layout_state_.terminal_tick_callback) {
           layout_state_.terminal_tick_callback();
         }
+        if (layout_state_.editor_tick_callback) {
+          layout_state_.editor_tick_callback();
+        }
+        if (layout_state_.outline_tick_callback) {
+          layout_state_.outline_tick_callback();
+        }
         return false;
       }
 
@@ -657,6 +690,18 @@ int Application::run() {
 
       if (any_modal_open()) {
         return false;
+      }
+
+      if (layout_state_.editor_modifier_handler) {
+        Event mod_event = event;
+        layout_state_.editor_modifier_handler(mod_event);
+      }
+
+      if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
+          layout_state_.editor_chrome_mouse_handler &&
+          layout_state_.editor_chrome_mouse_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
       }
 
       if (handle_focus_shortcuts(event)) {
@@ -684,6 +729,18 @@ int Application::run() {
         return true;
       }
       if (focus_state_.region == FocusRegion::Editor &&
+          app_mode_ == AppMode::kNormal &&
+          !is_search_input_focus(layout_state_.text_input_focus) &&
+          !is_watch_input_focus(layout_state_.text_input_focus) &&
+          layout_state_.text_input_focus != TextInputFocus::EditorFind &&
+          layout_state_.text_input_focus != TextInputFocus::Console &&
+          event.is_mouse() && layout_state_.editor_mouse_handler &&
+          layout_state_.editor_mouse_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+      if (focus_state_.region == FocusRegion::Editor &&
+          app_mode_ == AppMode::kNormal &&
           !is_search_input_focus(layout_state_.text_input_focus) &&
           !is_watch_input_focus(layout_state_.text_input_focus) &&
           layout_state_.text_input_focus != TextInputFocus::EditorFind &&
@@ -786,6 +843,10 @@ int Application::run() {
         symbol_picker_state_.loaded_file.clear();
         return true;
       }
+      if (event == Event::F9) {
+        layout_state_.diagnostics_panel_visible = !layout_state_.diagnostics_panel_visible;
+        return true;
+      }
       if (event == Event::CtrlT) {
         layout_state_.console_visible = !layout_state_.console_visible;
         return true;
@@ -807,7 +868,9 @@ int Application::run() {
     }
   });
 
-  screen.Loop(root);
+  layout_state_.schedule_ui_tick = [&screen]() { screen.Post(Event::Custom); };
+
+  screen.Loop(WrapUiTickPost(root, &layout_state_, &screen));
 
   if (!ui_smoke) {
     disable_extended_key_reporting();

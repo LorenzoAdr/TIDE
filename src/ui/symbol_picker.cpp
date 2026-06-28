@@ -62,6 +62,7 @@ void SymbolPickerState::jump_to_selected(WorkspaceModel* workspace, FocusManager
   }
   selected = std::max(0, std::min(selected, static_cast<int>(matches.size()) - 1));
   const auto& sym = matches[static_cast<std::size_t>(selected)];
+  workspace->record_cursor_jump();
   workspace->buffer.reset_to_single_cursor(std::max(0, sym.line - 1), 0);
   workspace->buffer.scroll = std::max(0, workspace->buffer.primary_line() - 2);
   workspace->buffer.view_token++;
