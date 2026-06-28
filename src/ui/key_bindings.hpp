@@ -27,6 +27,7 @@ bool event_is_ctrl_shift_h(const ftxui::Event& event);
 bool event_is_ctrl_h(const ftxui::Event& event);
 bool event_is_ctrl_g(const ftxui::Event& event);
 bool event_is_ctrl_u(const ftxui::Event& event);
+bool event_is_ctrl_i(const ftxui::Event& event);
 bool event_is_ctrl_d(const ftxui::Event& event);
 bool event_is_ctrl_shift_d(const ftxui::Event& event);
 bool event_is_ctrl_backspace(const ftxui::Event& event);

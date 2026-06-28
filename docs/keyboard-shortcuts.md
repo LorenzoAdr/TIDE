@@ -9,7 +9,7 @@ Press **F1** inside tgdb to open the in-app shortcuts dialog (scrollable). This 
 | F1 | Keyboard shortcuts dialog |
 | F2 | Debug connection wizard / stop debug session |
 | F3 | Change workspace directory |
-| F4 | Focus terminal |
+| F4 | Focus terminal tab (shell) |
 | F7 | Open workspace search panel |
 | F8 | Open outline panel |
 | Ctrl+P | Quick open (file picker) |
@@ -33,10 +33,11 @@ Press **F1** inside tgdb to open the in-app shortcuts dialog (scrollable). This 
 | Ctrl+C | Copy selection |
 | Ctrl+V | Paste |
 | Ctrl+U | Half page up (moves cursor) |
-| Ctrl+D | Half page down (moves cursor) |
+| Ctrl+I | Half page down (moves cursor) |
 | Ctrl+Backspace | Delete previous word |
 | Ctrl+Delete | Delete next word |
-| Ctrl+Shift+D | Select next match |
+| Ctrl+D | Select next match (multi-cursor) |
+| Ctrl+Shift+D | Select next match (multi-cursor) |
 | Ctrl+Shift+L | Select all matches |
 | Ctrl+. | Code completion (LSP) |
 | Ctrl+Space | Code completion (LSP) |
@@ -55,7 +56,7 @@ Press **F1** inside tgdb to open the in-app shortcuts dialog (scrollable). This 
 | F11 | Step into |
 | Shift+F11 | Step out |
 | Ctrl+U | Scroll half page up |
-| Ctrl+D | Scroll half page down |
+| Ctrl+I | Scroll half page down |
 | Ctrl+B | Toggle breakpoint on current line |
 | Click gutter | Toggle breakpoint |
 
@@ -72,6 +73,15 @@ In the GDB console, type native GDB commands or `watch <expression>` to add a wa
 | x / d | Delete watch or breakpoint |
 
 ## Integrated terminal
+
+In normal mode the bottom panel is the embedded shell. In debug mode it has two tabs:
+
+| Tab | Content |
+|-----|---------|
+| Terminal | Same bash shell as in IDE mode (F4 to focus) |
+| GDB | DAP console output and command input (auto-selected on attach/launch) |
+
+Switch tabs by clicking the tab bar. With the bottom panel focused, `1` / `2` select Terminal / GDB.
 
 | Key | Action |
 |-----|--------|

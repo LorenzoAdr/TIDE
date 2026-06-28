@@ -65,6 +65,7 @@ class DapBackend : public IDebugBackend {
   std::mutex session_mutex_;
   int active_thread_id_ = 1;
   bool inferior_attached_ = false;
+  bool inferior_launched_ = false;
   std::atomic<bool> inferior_stopped_{false};
   bool expecting_interrupt_for_breakpoints_ = false;
   bool breakpoints_pending_sync_ = false;

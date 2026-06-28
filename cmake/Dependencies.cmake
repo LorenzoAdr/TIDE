@@ -17,5 +17,3 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(ftxui cppdap)
-
-include(${CMAKE_CURRENT_LIST_DIR}/Libvterm.cmake)

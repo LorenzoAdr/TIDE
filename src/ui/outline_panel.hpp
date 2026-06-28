@@ -6,10 +6,12 @@
 #include "ftxui/component/component_base.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/focus_manager.hpp"
+#include "ui/main_layout.hpp"
 
 namespace tgdb {
 
 ftxui::Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
-                                  std::shared_ptr<ISymbolProvider> symbols);
+                                  std::shared_ptr<ISymbolProvider> symbols,
+                                  MainLayoutState* layout_state);
 
 }  // namespace tgdb

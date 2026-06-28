@@ -16,6 +16,8 @@
 #include "ftxui/component/component.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "symbols/symbol_provider.hpp"
+#include "symbols/completion_snippet.hpp"
+#include "symbols/local_scope_completions.hpp"
 #include "symbols/symbol_utils.hpp"
 #include "ftxui/component/component_options.hpp"
 #include "ftxui/component/event.hpp"
@@ -104,6 +106,25 @@ struct CompletionState {
     return item;
   }
 
+  void merge_local_scope_items(WorkspaceModel* workspace) {
+    if (workspace == nullptr) {
+      return;
+    }
+    const std::string path =
+        workspace->buffer.path.empty() ? workspace->active_file : workspace->buffer.path;
+    if (path.empty()) {
+      return;
+    }
+    workspace->buffer.ensure_cursors();
+    CompletionParams params;
+    params.path = path;
+    params.text = buffer_text(workspace->buffer);
+    params.line = workspace->buffer.primary_line();
+    params.character = workspace->buffer.primary_col();
+    merge_completion_items(&all_items,
+                           local_scope_completions(params.text, params.line, params.character));
+  }
+
   void refresh_matches() {
     matches.clear();
     constexpr int kMaxMatches = 200;
@@ -137,9 +158,11 @@ struct CompletionState {
 
     if (symbols && symbols->supports_semantic_completion() && !path.empty()) {
       const std::string completion_key =
-          path + "|completion|" + std::to_string(line) + "|" + std::to_string(col);
+          path + "|completion|" + std::to_string(line) + "|" + std::to_string(col) + "|" +
+          std::to_string(workspace->buffer.view_token);
       if (fetch_key == completion_key && !all_items.empty()) {
         semantic_mode = true;
+        merge_local_scope_items(workspace);
         refresh_matches();
         return;
       }
@@ -153,6 +176,14 @@ struct CompletionState {
         fetch_key = completion_key;
         all_items = std::move(items);
         semantic_mode = true;
+        merge_local_scope_items(workspace);
+        refresh_matches();
+        return;
+      }
+      merge_local_scope_items(workspace);
+      if (!all_items.empty()) {
+        fetch_key = completion_key;
+        semantic_mode = false;
         refresh_matches();
         return;
       }
@@ -164,6 +195,7 @@ struct CompletionState {
       const std::string key = workspace_root + "|lsp|" + query + "|" + path;
       if (fetch_key == key && !all_items.empty()) {
         workspace_index = true;
+        merge_local_scope_items(workspace);
         refresh_matches();
         return;
       }
@@ -183,6 +215,7 @@ struct CompletionState {
         }
         refresh_matches();
       }
+      merge_local_scope_items(workspace);
       return;
     }
 
@@ -194,6 +227,7 @@ struct CompletionState {
           const std::string key = workspace_root + "|workspace";
           if (fetch_key == key && !all_items.empty()) {
             workspace_index = true;
+            merge_local_scope_items(workspace);
             refresh_matches();
             return;
           }
@@ -204,8 +238,9 @@ struct CompletionState {
               all_items.push_back(from_indexed(sym));
             }
             workspace_index = true;
-            refresh_matches();
           }
+          merge_local_scope_items(workspace);
+          refresh_matches();
           return;
         }
       }
@@ -213,6 +248,8 @@ struct CompletionState {
 
     const std::string key = workspace_root + "|" + path;
     if (fetch_key == key) {
+      merge_local_scope_items(workspace);
+      refresh_matches();
       return;
     }
     fetch_key = key;
@@ -223,6 +260,7 @@ struct CompletionState {
         all_items.push_back(from_symbol(sym));
       }
     }
+    merge_local_scope_items(workspace);
     refresh_matches();
   }
 
@@ -498,6 +536,13 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
 
   if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
     focus->region = FocusRegion::Editor;
+    if (layout_state != nullptr) {
+      if (find == nullptr || !find->open) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
+      layout_state->right_panel_active_section = 0;
+      layout_state->focus_sync_needed = true;
+    }
     if (find != nullptr && find->open) {
       close_find_bar(find);
       if (layout_state != nullptr) {
@@ -614,14 +659,32 @@ bool accept_completion(CompletionState* completion, EditorBuffer* buffer,
   completion->selected =
       std::max(0, std::min(completion->selected, static_cast<int>(completion->matches.size()) - 1));
   const auto& item = completion->matches[static_cast<std::size_t>(completion->selected)];
-  const std::string insert =
+  const std::string raw_insert =
       item.insert_text.empty() ? symbol_insert_name(item.label) : item.insert_text;
-  if (item.has_replace_range) {
-    replace_text_range(buffer, item.replace_line, item.replace_start, item.replace_end, insert);
+
+  const int repl_line =
+      item.has_replace_range ? item.replace_line : completion->replace_line;
+  const int repl_start =
+      item.has_replace_range ? item.replace_start : completion->replace_start;
+  const int repl_end = item.has_replace_range ? item.replace_end : completion->replace_end;
+
+  const bool callable =
+      item.kind == SymbolKind::kFunction || item.kind == SymbolKind::kMethod;
+
+  SnippetResult snippet;
+  if (item.insert_format == InsertTextFormat::kSnippet) {
+    snippet = expand_snippet(raw_insert);
+  } else if (callable) {
+    snippet = finalize_function_call_insert(
+        raw_insert, item.detail.empty() ? item.label : item.detail, true);
   } else {
-    replace_text_range(buffer, completion->replace_line, completion->replace_start,
-                       completion->replace_end, insert);
+    snippet.text = raw_insert;
+    snippet.caret_col = static_cast<int>(raw_insert.size());
   }
+
+  replace_text_range_with_caret(buffer, repl_line, repl_start, repl_end, snippet.text,
+                                snippet.caret_line_offset, snippet.caret_col,
+                                snippet.sel_start_col, snippet.sel_end_col);
   ensure_scroll_visible(buffer, visible_lines);
   if (symbols && workspace != nullptr && !workspace->buffer.path.empty()) {
     symbols->on_document_changed(workspace->buffer.path, buffer_text(*buffer));
@@ -773,12 +836,12 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     ensure_scroll_visible(buffer, visible_lines);
     return true;
   }
-  if (event_is_ctrl_d(event)) {
+  if (event_is_ctrl_i(event)) {
     move_primary_half_page_down(buffer, visible_lines);
     ensure_scroll_visible(buffer, visible_lines);
     return true;
   }
-  if (event_is_ctrl_shift_d(event)) {
+  if (event_is_ctrl_d(event) || event_is_ctrl_shift_d(event)) {
     add_next_selection_match(buffer, visible_lines);
     return true;
   }
@@ -1110,6 +1173,18 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       buffer.scroll = std::max(0, buffer.primary_line() - 2);
     }
 
+    const SemanticTokenDocument* semantic_tokens = nullptr;
+    SemanticTokenDocument semantic_doc;
+    if (symbols && symbols->supports_semantic_highlight() && !buffer.path.empty()) {
+      if (symbols->ensure_semantic_tokens(buffer.path)) {
+        buffer.view_token++;
+      }
+      semantic_doc = symbols->semantic_tokens_for_file(buffer.path);
+      if (semantic_doc.ready) {
+        semantic_tokens = &semantic_doc;
+      }
+    }
+
     if (buffer.view_token != panel_state->last_view_token) {
       panel_state->last_view_token = buffer.view_token;
       if (find_state->open) {
@@ -1142,7 +1217,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                             row_bg);
 
       code_rows.push_back(RenderEditorLine(buffer.lines[static_cast<std::size_t>(i)], i, buffer,
-                                           editor_focused, find_matches));
+                                           editor_focused, find_matches, semantic_tokens));
     }
     if (code_rows.empty()) {
       gutter_rows.push_back(text(format_line_number(1, gutter_w)) | color(theme::Muted()) |

@@ -43,6 +43,9 @@ add_executable(tgdb
   src/lsp/lsp_transport.cpp
   src/lsp/lsp_client.cpp
   src/symbols/lsp_symbol_provider.cpp
+  src/symbols/completion_snippet.cpp
+  src/symbols/local_scope_completions.cpp
+  src/util/syntax_highlight.cpp
   src/search/workspace_search.cpp
   src/symbols/regex_symbol_provider.cpp
   src/symbols/symbol_utils.cpp
@@ -59,7 +62,7 @@ add_executable(tgdb
   src/util/path_normalize.cpp
   src/util/process_list.cpp
   src/terminal/shell_session.cpp
-  src/terminal/terminal_emulator.cpp
+  src/terminal/raw_pty_screen.cpp
   src/terminal/pty_input.cpp
 )
 
@@ -73,7 +76,6 @@ target_link_libraries(tgdb PRIVATE
   ftxui::dom
   ftxui::screen
   cppdap
-  libvterm
 )
 
 if(UNIX)

@@ -1,5 +1,6 @@
 #include "util/cpp_highlight.hpp"
 
+#include "ui/theme.hpp"
 #include <cctype>
 #include <string>
 #include <unordered_set>
@@ -94,8 +95,8 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
   while (i < n) {
     if (line[i] == '/' && i + 1 < n && line[i + 1] == '/') {
       append_plain(&current, &plain_start, i, &parts, cursor_col, show_cursor, cursor_style);
-      emit_segment(&parts, line.substr(i), color(Color::Green), static_cast<int>(i), cursor_col,
-                   show_cursor, cursor_style);
+      emit_segment(&parts, line.substr(i), color(theme::SyntaxComment()) | dim,
+                   static_cast<int>(i), cursor_col, show_cursor, cursor_style);
       break;
     }
 
@@ -111,7 +112,7 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
       if (j < n) {
         ++j;
       }
-      emit_segment(&parts, line.substr(i, j - i), color(Color::Yellow), static_cast<int>(i),
+      emit_segment(&parts, line.substr(i, j - i), color(theme::SyntaxString()), static_cast<int>(i),
                    cursor_col, show_cursor, cursor_style);
       i = j;
       continue;
@@ -129,7 +130,7 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
       if (j < n) {
         ++j;
       }
-      emit_segment(&parts, line.substr(i, j - i), color(Color::Yellow), static_cast<int>(i),
+      emit_segment(&parts, line.substr(i, j - i), color(theme::SyntaxString()), static_cast<int>(i),
                    cursor_col, show_cursor, cursor_style);
       i = j;
       continue;
@@ -137,7 +138,7 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
 
     if (line[i] == '#') {
       append_plain(&current, &plain_start, i, &parts, cursor_col, show_cursor, cursor_style);
-      emit_segment(&parts, line.substr(i), color(Color::Cyan), static_cast<int>(i), cursor_col,
+      emit_segment(&parts, line.substr(i), color(theme::SyntaxMacro()), static_cast<int>(i), cursor_col,
                    show_cursor, cursor_style);
       break;
     }
@@ -152,7 +153,7 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
               line[j] == 'x' || line[j] == 'X')) {
         ++j;
       }
-      emit_segment(&parts, line.substr(i, j - i), color(Color::Magenta), static_cast<int>(i),
+      emit_segment(&parts, line.substr(i, j - i), color(theme::SyntaxNumber()), static_cast<int>(i),
                    cursor_col, show_cursor, cursor_style);
       i = j;
       continue;
@@ -165,8 +166,9 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
         ++j;
       }
       const std::string word = line.substr(i, j - i);
-      const Decorator style =
-          cpp_keywords().count(word) > 0 ? color(Color::Blue) | bold : Decorator{};
+      const Decorator style = cpp_keywords().count(word) > 0
+                                  ? color(theme::SyntaxKeyword()) | bold
+                                  : color(theme::SyntaxDefault());
       emit_segment(&parts, word, style, static_cast<int>(i), cursor_col, show_cursor,
                    cursor_style);
       i = j;

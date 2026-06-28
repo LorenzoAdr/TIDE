@@ -12,7 +12,7 @@ Two application modes share the same layout; only the center and bottom panels c
 | Mode | Center panel | Bottom panel |
 |------|--------------|--------------|
 | **IDE** (default) | Text editor | Integrated terminal (shell) |
-| **Debug** | Source view with PC and breakpoints | GDB console |
+| **Debug** | Source view with PC and breakpoints | Terminal + GDB tabs |
 
 Press **F2** to open the debug connection wizard from IDE mode. When a debug session is active, press **F2** again or use the stop control in the debug panel to return to the editor.
 

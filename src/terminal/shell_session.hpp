@@ -6,8 +6,7 @@
 #include <string>
 #include <thread>
 
-#include "ftxui/dom/elements.hpp"
-#include "terminal/terminal_emulator.hpp"
+#include "terminal/raw_pty_screen.hpp"
 #include "util/thread_safe_queue.hpp"
 
 namespace tgdb {
@@ -31,17 +30,22 @@ class ShellSession {
   void send_interrupt();
   void resize(int cols, int rows);
 
+  bool consume_output_pending();
+  std::string display_text();
+  std::vector<TerminalStyledRow> display_styled_rows();
+
   void drain_output(int max_bytes = 4096);
-  ftxui::Element render_terminal();
+  int drain_output_bytes(int max_bytes = 4096);
+  std::size_t pending_output_chunks() const;
+  std::string screen_text();
 
  private:
   void bootstrap_shell(const std::string& cwd);
   void reader_loop();
-  void append_bytes(const char* data, std::size_t size);
   void apply_winsize();
 
-  TerminalEmulator terminal_;
-  std::mutex terminal_mutex_;
+  RawPtyScreen terminal_;
+  mutable std::mutex terminal_mutex_;
   int cols_ = 80;
   int rows_ = 24;
   std::atomic<bool> running_{false};
@@ -50,9 +54,11 @@ class ShellSession {
   std::atomic<bool> stop_requested_{false};
   int master_fd_ = -1;
   pid_t child_pid_ = -1;
-  std::unique_ptr<std::thread> bootstrap_thread_;
   std::unique_ptr<std::thread> reader_thread_;
   ThreadSafeQueue<std::string> output_chunks_;
+  std::string display_text_;
+  std::vector<TerminalStyledRow> display_styled_rows_;
+  std::atomic<bool> output_pending_{false};
 };
 
 }  // namespace tgdb

@@ -28,6 +28,11 @@ class ThreadSafeQueue {
     return item;
   }
 
+  std::size_t size() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return queue_.size();
+  }
+
   std::optional<T> wait_pop() {
     std::unique_lock<std::mutex> lock(mutex_);
     cv_.wait(lock, [this] { return !queue_.empty() || closed_; });
@@ -54,7 +59,7 @@ class ThreadSafeQueue {
   }
 
  private:
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::condition_variable cv_;
   std::queue<T> queue_;
   bool closed_ = false;

@@ -1,10 +1,12 @@
 #include "terminal/shell_session.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cerrno>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <sstream>
 #include <thread>
 #include <vector>
 
@@ -61,12 +63,13 @@ void ShellSession::request_start(const std::string& cwd, int cols, int rows) {
   start_in_progress_.store(true, std::memory_order_release);
   stop_requested_.store(false, std::memory_order_release);
   output_chunks_.reset();
-
-  if (bootstrap_thread_ && bootstrap_thread_->joinable()) {
-    bootstrap_thread_->join();
+  {
+    std::lock_guard<std::mutex> lock(terminal_mutex_);
+    display_text_.clear();
+    display_styled_rows_.clear();
   }
 
-  bootstrap_thread_ = std::make_unique<std::thread>([this, cwd] { bootstrap_shell(cwd); });
+  std::thread([this, cwd] { bootstrap_shell(cwd); }).detach();
 #endif
 }
 
@@ -132,10 +135,6 @@ void ShellSession::bootstrap_shell(const std::string& cwd) {
 void ShellSession::stop() {
 #if defined(__linux__)
   stop_requested_.store(true, std::memory_order_release);
-  if (bootstrap_thread_ && bootstrap_thread_->joinable()) {
-    bootstrap_thread_->join();
-  }
-  bootstrap_thread_.reset();
   start_in_progress_.store(false, std::memory_order_release);
 
   if (master_fd_ >= 0) {
@@ -159,6 +158,25 @@ void ShellSession::stop() {
   while (output_chunks_.try_pop().has_value()) {
   }
   output_chunks_.reset();
+  {
+    std::lock_guard<std::mutex> lock(terminal_mutex_);
+    display_text_.clear();
+    display_styled_rows_.clear();
+  }
+}
+
+bool ShellSession::consume_output_pending() {
+  return output_pending_.exchange(false, std::memory_order_acquire);
+}
+
+std::string ShellSession::display_text() {
+  std::lock_guard<std::mutex> lock(terminal_mutex_);
+  return display_text_;
+}
+
+std::vector<TerminalStyledRow> ShellSession::display_styled_rows() {
+  std::lock_guard<std::mutex> lock(terminal_mutex_);
+  return display_styled_rows_;
 }
 
 void ShellSession::resize(int cols, int rows) {
@@ -216,13 +234,6 @@ void ShellSession::send_interrupt() {
 #endif
 }
 
-void ShellSession::append_bytes(const char* data, std::size_t size) {
-  if (size == 0) {
-    return;
-  }
-  output_chunks_.push(std::string(data, size));
-}
-
 void ShellSession::reader_loop() {
 #if defined(__linux__)
   std::vector<char> buffer(4096);
@@ -232,7 +243,9 @@ void ShellSession::reader_loop() {
     }
     const ssize_t bytes = read(master_fd_, buffer.data(), buffer.size());
     if (bytes > 0) {
-      append_bytes(buffer.data(), static_cast<std::size_t>(bytes));
+      output_chunks_.push(
+          std::string(buffer.data(), static_cast<std::size_t>(bytes)));
+      output_pending_.store(true, std::memory_order_release);
       continue;
     }
     if (bytes == 0) {
@@ -249,8 +262,12 @@ void ShellSession::reader_loop() {
 }
 
 void ShellSession::drain_output(int max_bytes) {
-  if (max_bytes <= 0 || !running()) {
-    return;
+  (void)drain_output_bytes(max_bytes);
+}
+
+int ShellSession::drain_output_bytes(int max_bytes) {
+  if (max_bytes <= 0) {
+    return 0;
   }
   int consumed = 0;
   while (consumed < max_bytes) {
@@ -259,14 +276,24 @@ void ShellSession::drain_output(int max_bytes) {
       break;
     }
     consumed += static_cast<int>(chunk->size());
-    std::lock_guard<std::mutex> lock(terminal_mutex_);
-    terminal_.feed(chunk->data(), chunk->size());
+    {
+      std::lock_guard<std::mutex> lock(terminal_mutex_);
+      terminal_.feed(chunk->data(), chunk->size());
+    }
   }
+  if (consumed > 0) {
+    std::lock_guard<std::mutex> lock(terminal_mutex_);
+    display_text_ = terminal_.text();
+    display_styled_rows_ = terminal_.styled_rows();
+  }
+  return consumed;
 }
 
-ftxui::Element ShellSession::render_terminal() {
+std::size_t ShellSession::pending_output_chunks() const { return output_chunks_.size(); }
+
+std::string ShellSession::screen_text() {
   std::lock_guard<std::mutex> lock(terminal_mutex_);
-  return terminal_.render();
+  return terminal_.text();
 }
 
 }  // namespace tgdb

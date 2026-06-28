@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include "lsp/lsp_transport.hpp"
+#include "lsp/semantic_tokens.hpp"
 #include "symbols/symbol_provider.hpp"
 
 namespace tgdb {
@@ -37,6 +38,9 @@ class LspClient {
   SourceLocation goto_declaration(const std::string& absolute_path, const std::string& text,
                                   int line, int character);
 
+  SemanticTokenDocument semantic_tokens_for_file(const std::string& absolute_path);
+  bool ensure_semantic_tokens(const std::string& absolute_path);
+
  private:
   struct DocumentState {
     std::string uri;
@@ -44,10 +48,22 @@ class LspClient {
     int version = 0;
   };
 
+  struct SemanticTokenAttempt {
+    int count = 0;
+    int64_t last_ms = 0;
+  };
+
   bool spawn_clangd(const std::string& workspace_root);
   bool initialize(const std::string& workspace_root);
   std::string find_compile_commands_dir(const std::string& workspace_root) const;
   void invalidate_cache(const std::string& absolute_path);
+  void invalidate_semantic_tokens(const std::string& absolute_path);
+  bool refresh_semantic_tokens(const std::string& absolute_path);
+  static int64_t steady_now_ms();
+  static SemanticTokenDocument decode_semantic_tokens(const nlohmann::json& result,
+                                                      const std::vector<std::string>& token_types);
+  static std::vector<std::string> default_semantic_token_types();
+  void load_semantic_legend(const nlohmann::json& initialize_result);
 
   static SymbolKind map_lsp_kind(int kind);
   static std::string kind_prefix(SymbolKind kind);
@@ -72,6 +88,10 @@ class LspClient {
   std::mutex mutex_;
   std::unordered_map<std::string, DocumentState> documents_;
   std::unordered_map<std::string, std::vector<SymbolInfo>> symbol_cache_;
+  std::unordered_map<std::string, SemanticTokenDocument> semantic_token_cache_;
+  std::unordered_map<std::string, SemanticTokenAttempt> semantic_token_attempts_;
+  std::vector<std::string> semantic_token_types_;
+  bool semantic_tokens_supported_ = false;
   int next_request_id_ = 1;
 };
 

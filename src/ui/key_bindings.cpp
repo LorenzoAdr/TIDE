@@ -179,6 +179,12 @@ bool event_is_ctrl_u(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[27;5;85~");
 }
 
+bool event_is_ctrl_i(const ftxui::Event& event) {
+  return event == ftxui::Event::CtrlI ||
+         event == ftxui::Event::Special("\x1B[27;5;105~") ||
+         event == ftxui::Event::Special("\x1B[27;5;73~");
+}
+
 bool event_is_ctrl_d(const ftxui::Event& event) {
   return event == ftxui::Event::CtrlD ||
          event == ftxui::Event::Special("\x1B[27;5;100~") ||
@@ -284,7 +290,7 @@ bool editor_priority_key(const ftxui::Event& event) {
          event == ftxui::Event::Return || event == ftxui::Event::Tab ||
          event == ftxui::Event::Home || event == ftxui::Event::End ||
          event == ftxui::Event::PageUp || event == ftxui::Event::PageDown ||
-         event_is_ctrl_u(event) || event_is_ctrl_d(event) ||
+         event_is_ctrl_u(event) || event_is_ctrl_i(event) || event_is_ctrl_d(event) ||
          event_is_ctrl_shift_d(event) || event_is_ctrl_backspace(event) ||
          event_is_ctrl_delete(event) || event == ftxui::Event::CtrlS ||
          event_is_ctrl_shift_l(event) || event_is_completion(event) ||

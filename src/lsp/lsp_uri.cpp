@@ -95,4 +95,13 @@ std::string language_id_for_path(const std::string& path) {
   return "plaintext";
 }
 
+std::string normalize_lsp_path(const std::string& path) {
+  if (path.empty()) {
+    return {};
+  }
+  std::error_code ec;
+  const auto canonical = fs::weakly_canonical(fs::path(path), ec);
+  return ec ? path : canonical.string();
+}
+
 }  // namespace tgdb

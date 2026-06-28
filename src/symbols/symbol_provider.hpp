@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "lsp/semantic_tokens.hpp"
+
 namespace tgdb {
 
 enum class SymbolKind { kNamespace, kClass, kStruct, kFunction, kMethod, kVariable };
@@ -15,6 +17,8 @@ struct SymbolInfo {
   std::string file;  // ruta relativa al workspace (opcional)
 };
 
+enum class InsertTextFormat { kPlain = 1, kSnippet = 2 };
+
 struct CompletionItem {
   std::string label;
   std::string insert_text;
@@ -25,6 +29,7 @@ struct CompletionItem {
   int replace_line = 0;
   int replace_start = 0;
   int replace_end = 0;
+  InsertTextFormat insert_format = InsertTextFormat::kPlain;
 };
 
 struct CompletionParams {
@@ -88,6 +93,16 @@ class ISymbolProvider {
     (void)text;
   }
   virtual void on_document_closed(const std::string& path) { (void)path; }
+
+  virtual bool supports_semantic_highlight() const { return false; }
+  virtual bool ensure_semantic_tokens(const std::string& path) {
+    (void)path;
+    return false;
+  }
+  virtual SemanticTokenDocument semantic_tokens_for_file(const std::string& path) {
+    (void)path;
+    return {};
+  }
 };
 
 }  // namespace tgdb

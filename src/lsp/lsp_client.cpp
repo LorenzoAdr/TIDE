@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdlib>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -11,6 +12,9 @@
 #include <unistd.h>
 
 #include "lsp/lsp_uri.hpp"
+#include "indexer/index_rules.hpp"
+
+#include <chrono>
 
 namespace fs = std::filesystem;
 
@@ -74,11 +78,16 @@ bool LspClient::spawn_clangd(const std::string& workspace_root) {
   if (pid == 0) {
     dup2(stdin_pipe[0], STDIN_FILENO);
     dup2(stdout_pipe[1], STDOUT_FILENO);
-    dup2(stdout_pipe[1], STDERR_FILENO);
     ::close(stdin_pipe[0]);
     ::close(stdin_pipe[1]);
     ::close(stdout_pipe[0]);
     ::close(stdout_pipe[1]);
+
+    const int devnull = ::open("/dev/null", O_WRONLY);
+    if (devnull >= 0) {
+      dup2(devnull, STDERR_FILENO);
+      ::close(devnull);
+    }
 
     if (!compile_dir.empty()) {
       std::string arg = "--compile-commands-dir=" + compile_dir;
@@ -124,9 +133,17 @@ bool LspClient::initialize(const std::string& workspace_root) {
       true;
   params["capabilities"]["textDocument"]["publishDiagnostics"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["completion"]["completionItem"]["snippetSupport"] =
-      false;
+      true;
   params["capabilities"]["textDocument"]["definition"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["declaration"] = nlohmann::json::object();
+  params["capabilities"]["textDocument"]["semanticTokens"] = {
+      {"requests", {{"range", false}, {"full", {{"delta", false}}}}},
+      {"tokenTypes",
+       {"namespace", "type",      "class",   "enum",       "interface", "struct",
+        "typeParameter", "parameter", "variable", "property", "enumMember", "event",
+        "function",      "method",    "macro",  "keyword",    "modifier",   "comment",
+        "string",        "number",    "regexp", "operator",   "decorator"}},
+      {"formats", nlohmann::json::array({"relative"})}};
   params["capabilities"]["workspace"]["symbol"]["resolveSupport"] = nlohmann::json::object();
   params["clientInfo"]["name"] = "tgdb";
   params["clientInfo"]["version"] = "0.1.0";
@@ -137,6 +154,12 @@ bool LspClient::initialize(const std::string& workspace_root) {
     return false;
   }
 
+  load_semantic_legend(result);
+  if (result.contains("capabilities") && result["capabilities"].is_object()) {
+    const auto& caps = result["capabilities"];
+    semantic_tokens_supported_ =
+        caps.contains("semanticTokensProvider") && caps["semanticTokensProvider"].is_object();
+  }
   transport_.send_notification("initialized", nlohmann::json::object());
   return true;
 }
@@ -195,11 +218,60 @@ void LspClient::stop() {
   std::lock_guard<std::mutex> lock(mutex_);
   documents_.clear();
   symbol_cache_.clear();
+  semantic_token_cache_.clear();
+  semantic_token_attempts_.clear();
+  semantic_token_types_.clear();
+  semantic_tokens_supported_ = false;
   workspace_root_.clear();
 }
 
+int64_t LspClient::steady_now_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
 void LspClient::invalidate_cache(const std::string& absolute_path) {
-  symbol_cache_.erase(absolute_path);
+  const std::string key = normalize_lsp_path(absolute_path);
+  symbol_cache_.erase(key);
+}
+
+void LspClient::invalidate_semantic_tokens(const std::string& absolute_path) {
+  const std::string key = normalize_lsp_path(absolute_path);
+  semantic_token_cache_.erase(key);
+  semantic_token_attempts_.erase(key);
+}
+
+std::vector<std::string> LspClient::default_semantic_token_types() {
+  return {"namespace", "type",      "class",   "enum",       "interface", "struct",
+          "typeParameter", "parameter", "variable", "property", "enumMember", "event",
+          "function",      "method",    "macro",  "keyword",    "modifier",   "comment",
+          "string",        "number",    "regexp", "operator",   "decorator"};
+}
+
+void LspClient::load_semantic_legend(const nlohmann::json& initialize_result) {
+  semantic_token_types_ = default_semantic_token_types();
+  if (!initialize_result.contains("capabilities")) {
+    return;
+  }
+  const auto& caps = initialize_result["capabilities"];
+  if (!caps.contains("semanticTokensProvider")) {
+    return;
+  }
+  const auto& provider = caps["semanticTokensProvider"];
+  if (!provider.contains("legend") || !provider["legend"].contains("tokenTypes") ||
+      !provider["legend"]["tokenTypes"].is_array()) {
+    return;
+  }
+  semantic_token_types_.clear();
+  for (const auto& token_type : provider["legend"]["tokenTypes"]) {
+    if (token_type.is_string()) {
+      semantic_token_types_.push_back(token_type.get<std::string>());
+    }
+  }
+  if (semantic_token_types_.empty()) {
+    semantic_token_types_ = default_semantic_token_types();
+  }
 }
 
 void LspClient::did_open(const std::string& absolute_path, const std::string& text) {
@@ -207,21 +279,27 @@ void LspClient::did_open(const std::string& absolute_path, const std::string& te
     return;
   }
 
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return;
+  }
+
   DocumentState doc;
-  doc.uri = path_to_uri(absolute_path);
+  doc.uri = path_to_uri(key);
   doc.text = text;
   doc.version = 1;
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    documents_[absolute_path] = doc;
-    invalidate_cache(absolute_path);
+    documents_[key] = doc;
+    invalidate_cache(key);
+    invalidate_semantic_tokens(key);
   }
 
   nlohmann::json params = {
       {"textDocument",
        {{"uri", doc.uri},
-        {"languageId", language_id_for_path(absolute_path)},
+        {"languageId", language_id_for_path(key)},
         {"version", doc.version},
         {"text", doc.text}}}};
   transport_.send_notification("textDocument/didOpen", std::move(params));
@@ -232,10 +310,15 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
     return;
   }
 
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return;
+  }
+
   DocumentState doc;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = documents_.find(absolute_path);
+    auto it = documents_.find(key);
     if (it == documents_.end()) {
       did_open(absolute_path, text);
       return;
@@ -243,7 +326,8 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
     it->second.text = text;
     it->second.version += 1;
     doc = it->second;
-    invalidate_cache(absolute_path);
+    invalidate_cache(key);
+    invalidate_semantic_tokens(key);
   }
 
   nlohmann::json params = {
@@ -257,16 +341,22 @@ void LspClient::did_close(const std::string& absolute_path) {
     return;
   }
 
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return;
+  }
+
   std::string uri;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    const auto it = documents_.find(absolute_path);
+    const auto it = documents_.find(key);
     if (it == documents_.end()) {
       return;
     }
     uri = it->second.uri;
     documents_.erase(it);
-    invalidate_cache(absolute_path);
+    invalidate_cache(key);
+    invalidate_semantic_tokens(key);
   }
 
   nlohmann::json params = {{"textDocument", {{"uri", uri}}}};
@@ -482,6 +572,12 @@ CompletionItem LspClient::parse_completion_item(const nlohmann::json& item) {
     out.detail = item["detail"].get<std::string>();
   }
 
+  if (item.contains("insertTextFormat") && item["insertTextFormat"].is_number_integer()) {
+    const int format = item["insertTextFormat"].get<int>();
+    out.insert_format =
+        format == 2 ? InsertTextFormat::kSnippet : InsertTextFormat::kPlain;
+  }
+
   if (item.contains("insertText") && item["insertText"].is_string()) {
     out.insert_text = item["insertText"].get<std::string>();
   } else if (item.contains("textEdit") && item["textEdit"].is_object()) {
@@ -647,6 +743,166 @@ SourceLocation LspClient::goto_declaration(const std::string& absolute_path,
                                            const std::string& text, int line,
                                            int character) {
   return request_location("textDocument/declaration", absolute_path, text, line, character);
+}
+
+SemanticTokenDocument LspClient::decode_semantic_tokens(
+    const nlohmann::json& result, const std::vector<std::string>& token_types) {
+  SemanticTokenDocument doc;
+  doc.token_types = token_types;
+  if (!result.is_object() || !result.contains("data") || !result["data"].is_array()) {
+    return doc;
+  }
+
+  const auto& data = result["data"];
+  if (data.empty() || data.size() % 5 != 0) {
+    return doc;
+  }
+
+  int line = 0;
+  int start = 0;
+  int max_line = 0;
+
+  for (std::size_t i = 0; i < data.size(); i += 5) {
+    if (!data[i].is_number_integer() || !data[i + 1].is_number_integer() ||
+        !data[i + 2].is_number_integer() || !data[i + 3].is_number_integer() ||
+        !data[i + 4].is_number_integer()) {
+      continue;
+    }
+
+    const int delta_line = data[i].get<int>();
+    const int delta_start = data[i + 1].get<int>();
+    line += delta_line;
+    if (delta_line == 0) {
+      start += delta_start;
+    } else {
+      start = delta_start;
+    }
+    const int length = data[i + 2].get<int>();
+    if (length <= 0) {
+      continue;
+    }
+
+    SemanticTokenSpan span;
+    span.start_col = start;
+    span.length = length;
+    span.type = data[i + 3].get<int>();
+    span.modifiers = data[i + 4].get<int>();
+
+    if (line >= max_line) {
+      doc.lines.resize(static_cast<std::size_t>(line + 1));
+      max_line = line + 1;
+    }
+    doc.lines[static_cast<std::size_t>(line)].push_back(span);
+  }
+
+  doc.ready = !doc.lines.empty();
+  return doc;
+}
+
+bool LspClient::refresh_semantic_tokens(const std::string& absolute_path) {
+  if (!ready_.load() || absolute_path.empty() || !is_indexed_source_path(absolute_path) ||
+      !semantic_tokens_supported_) {
+    return false;
+  }
+
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return false;
+  }
+
+  std::string uri;
+  std::vector<std::string> token_types;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = documents_.find(key);
+    if (it == documents_.end()) {
+      return false;
+    }
+    uri = it->second.uri;
+    token_types = semantic_token_types_;
+    if (token_types.empty()) {
+      token_types = default_semantic_token_types();
+    }
+  }
+
+  nlohmann::json params = {{"textDocument", {{"uri", uri}}}};
+  nlohmann::json result;
+  const int id = next_request_id_++;
+  if (!transport_.send_request(id, "textDocument/semanticTokens/full", std::move(params), 5000,
+                               &result)) {
+    return false;
+  }
+
+  SemanticTokenDocument decoded = decode_semantic_tokens(result, token_types);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (decoded.ready) {
+      semantic_token_cache_[key] = std::move(decoded);
+      return true;
+    }
+    semantic_token_cache_.erase(key);
+  }
+  return false;
+}
+
+bool LspClient::ensure_semantic_tokens(const std::string& absolute_path) {
+  if (!ready_.load() || absolute_path.empty() || !is_indexed_source_path(absolute_path) ||
+      !semantic_tokens_supported_) {
+    return false;
+  }
+
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return false;
+  }
+
+  bool should_fetch = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto cached = semantic_token_cache_.find(key);
+    if (cached != semantic_token_cache_.end() && cached->second.ready) {
+      return false;
+    }
+
+    if (documents_.find(key) == documents_.end()) {
+      return false;
+    }
+
+    SemanticTokenAttempt& attempt = semantic_token_attempts_[key];
+    const int64_t now = steady_now_ms();
+    constexpr int kMaxAttempts = 30;
+    constexpr int64_t kRetryIntervalMs = 200;
+    if (attempt.count >= kMaxAttempts) {
+      return false;
+    }
+    if (attempt.count > 0 && now - attempt.last_ms < kRetryIntervalMs) {
+      return false;
+    }
+
+    attempt.count += 1;
+    attempt.last_ms = now;
+    should_fetch = true;
+  }
+
+  if (!should_fetch) {
+    return false;
+  }
+
+  const bool fetched = refresh_semantic_tokens(key);
+  return fetched;
+}
+
+SemanticTokenDocument LspClient::semantic_tokens_for_file(const std::string& absolute_path) {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return {};
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = semantic_token_cache_.find(key);
+  if (it == semantic_token_cache_.end()) {
+    return {};
+  }
+  return it->second;
 }
 
 }  // namespace tgdb

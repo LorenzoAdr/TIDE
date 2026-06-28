@@ -27,7 +27,8 @@ struct OutlinePanelState {
 }  // namespace
 
 Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
-                           std::shared_ptr<ISymbolProvider> symbols) {
+                           std::shared_ptr<ISymbolProvider> symbols,
+                           MainLayoutState* layout_state) {
   auto state = std::make_shared<OutlinePanelState>();
 
   auto renderer = Renderer([workspace, focus, state, symbols] {
@@ -61,11 +62,20 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
     return PanelBody(std::move(content));
   });
 
-  return WrapFocusable(CatchEvent(renderer, [workspace, focus, state](Event event) {
+  return WrapFocusable(CatchEvent(renderer, [workspace, focus, state, layout_state](Event event) {
+    if (layout_state != nullptr &&
+        (is_watch_input_focus(layout_state->text_input_focus) ||
+         layout_state->right_panel_active_section == 1)) {
+      return false;
+    }
+
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
         event.mouse().motion == Mouse::Pressed) {
       const auto& m = event.mouse();
       if (state->content_box.Contain(m.x, m.y)) {
+        if (layout_state != nullptr) {
+          layout_state->right_panel_active_section = 0;
+        }
         focus->region = FocusRegion::RightPanel;
         const int row = m.y - state->content_box.y_min;
         if (row >= 0 && row < static_cast<int>(state->symbols.size())) {

@@ -33,7 +33,7 @@ enum class AppMode { kNormal, kDebug };
 | Mode | Center panel | Bottom panel | Shell |
 |------|--------------|--------------|-------|
 | `kNormal` | `EditorPanel` | Integrated terminal (`ShellSession`) | Running |
-| `kDebug` | `SourcePanel` | GDB console | Stopped |
+| `kDebug` | `SourcePanel` | Tabbed: Terminal + GDB console | Running |
 
 `ModeLayout` switches the center panel without destroying layout geometry. The right panel adds a watches/stack section below the outline in debug mode.
 
@@ -98,13 +98,56 @@ If clangd is unavailable, `RegexSymbolProvider` extracts symbols with regex heur
 | `WorkspaceWatcher` | Filesystem watcher; triggers re-index on changes |
 | `index_rules` | Skip rules for dirs (`build`, `.git`, …) and file extensions |
 
-## Terminal
-
 ## Integrated terminal
 
-`ShellSession` opens a PTY (`forkpty`) in the workspace directory and runs an interactive bash. Raw PTY output is fed into **libvterm** (`TerminalEmulator`), which maintains a full VT100/xterm screen grid (colors, cursor, scrollback). `ConsolePanel` renders that grid with FTXUI and forwards keystrokes to the PTY via `event_to_pty_bytes()`. Terminal size is synced to the panel dimensions with `TIOCSWINSZ`.
+In `kNormal` mode the bottom panel hosts a real interactive shell (bash) over a PTY. In `kDebug` mode the same panel offers **Terminal** and **GDB** tabs; the shell keeps running while you debug.
 
-In debug mode the same panel renders GDB console output and accepts GDB commands.
+```
+┌──────────────────────────────────────────────────────────────┐
+│  UI thread (FTXUI)                                           │
+│  Application::Custom tick ──► ConsolePanel::terminal_tick    │
+│       │                              │                       │
+│       │                              ▼                       │
+│       │                    refresh_terminal_view()           │
+│       │                              │                       │
+│       ▼                              ▼                       │
+│  ShellSession ◄── keystrokes ── event_to_pty_bytes()         │
+│       │                                                      │
+│  output_chunks_ (ThreadSafeQueue)                            │
+└───────┼──────────────────────────────────────────────────────┘
+        │ reader thread
+        ▼
+   forkpty ──► bash (cwd = workspace root)
+```
+
+### `ShellSession`
+
+- Spawns `bash` via `forkpty` in the workspace directory (Linux only).
+- A background **reader thread** reads PTY output and enqueues byte chunks in `output_chunks_`; it never touches FTXUI or the screen buffer directly.
+- On the UI thread, `drain_output_bytes()` dequeues chunks and feeds them into `RawPtyScreen`.
+- `resize()` syncs terminal dimensions to the panel via `TIOCSWINSZ`.
+- `write_raw()` / `send_interrupt()` forward input to the PTY master fd.
+
+### `RawPtyScreen`
+
+Lightweight in-process screen buffer (no external terminal library). Parses enough of the PTY byte stream for interactive bash:
+
+- Cursor motion: `\n`, `\r`, backspace, clear line / clear to EOL
+- ANSI CSI sequences (cursor positioning, erase)
+- SGR color attributes (foreground/background RGB and common indexed colors)
+
+Exposes `text()` and `styled_rows()` for FTXUI rendering. Kept on the UI thread only; guarded by `terminal_mutex_` inside `ShellSession`.
+
+### `ConsolePanel`
+
+- **Autostart**: when a workspace is loaded, `Application::request_terminal_autostart()` sets `console_visible` and `terminal_start_requested`. The panel calls `ShellSession::request_start()` on the next tick.
+- **Tabs (debug mode)**: the bottom panel shows **Terminal** and **GDB** tabs. Entering debug (attach/launch) switches to the GDB tab automatically; the shell keeps running in the background. F4 focuses the Terminal tab.
+- **Tick**: registered as `MainLayoutState::terminal_tick_callback` and invoked from the root `CatchEvent` on every `Event::Custom` (FTXUI does not deliver `Custom` to unfocused components).
+- **Refresh**: drains the output queue, updates cached styled rows, and re-renders.
+- **Render**: builds a `vbox` of `hbox` spans — FTXUI `text()` ignores `\n`, so each terminal row is a separate element with per-span colors.
+- **Input**: when focus is `FocusRegion::Terminal` and the Terminal tab is active, keystrokes are encoded by `event_to_pty_bytes()` (`pty_input.cpp`) and written to the PTY. F4 focuses the Terminal tab.
+
+In debug mode the GDB tab renders `DebugModel::console_output` with a GDB command input line (DAP evaluate). The Terminal tab shows the same embedded shell as in normal mode.
 
 ## UI composition
 
@@ -148,7 +191,7 @@ Overlays (stacked on top):
 | `src/lsp/` | LSP transport and client |
 | `src/symbols/` | Symbol providers (LSP + regex) |
 | `src/indexer/` | Workspace and symbol indexing |
-| `src/terminal/` | PTY shell session, libvterm emulator, PTY key encoding |
+| `src/terminal/` | PTY shell session, `RawPtyScreen`, PTY key encoding |
 | `src/search/` | Workspace text search |
 | `src/util/` | Highlighting, paths, crash handler |
 

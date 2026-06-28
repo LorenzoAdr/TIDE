@@ -58,6 +58,10 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
   }
 
   if (focus->region == FocusRegion::Terminal) {
+    if (mode == AppMode::kDebug &&
+        layout_state->console_tabs.selected_tab == ConsolePanelTabs::kDebug) {
+      return;
+    }
     layout_state->text_input_focus = TextInputFocus::Console;
     return;
   }
@@ -67,6 +71,12 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
     case TextInputFocus::SearchReplace:
     case TextInputFocus::SearchPath:
     case TextInputFocus::SearchExclude:
+      if (focus->region != FocusRegion::RightPanel) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
+      break;
+    case TextInputFocus::Watch:
+    case TextInputFocus::WatchInject:
       if (focus->region != FocusRegion::RightPanel) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
@@ -139,8 +149,8 @@ Component MakeModeLayout(AppMode* app_mode, Component normal_child, Component de
 class RightPanelLayout : public ComponentBase {
  public:
   RightPanelLayout(AppMode* app_mode, Component outline, Component watches,
-                   int* outline_height)
-      : app_mode_(app_mode), outline_height_(outline_height) {
+                   int* outline_height, MainLayoutState* layout_state)
+      : app_mode_(app_mode), outline_height_(outline_height), layout_state_(layout_state) {
     Add(std::move(outline));
     Add(std::move(watches));
   }
@@ -159,12 +169,62 @@ class RightPanelLayout : public ComponentBase {
 
   bool OnEvent(Event event) override {
     if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
-      if (ActiveChild() && ActiveChild()->OnEvent(event)) {
+      Component sidebar = ChildAt(0);
+      Component watches = ChildAt(1);
+      const bool watch_input =
+          layout_state_ != nullptr &&
+          is_watch_input_focus(layout_state_->text_input_focus);
+
+      if (event.is_mouse()) {
+        if (watches && watches->OnEvent(event)) {
+          return true;
+        }
+        if (sidebar && sidebar->OnEvent(event)) {
+          if (layout_state_ != nullptr) {
+            layout_state_->right_panel_active_section = 0;
+          }
+          return true;
+        }
+        return false;
+      }
+
+      if (watch_input) {
+        if (watches && watches->OnEvent(event)) {
+          return true;
+        }
+        return false;
+      }
+
+      if (layout_state_ != nullptr && layout_state_->right_panel_active_section == 1) {
+        if (watches && watches->OnEvent(event)) {
+          return true;
+        }
+        if (sidebar && sidebar->OnEvent(event)) {
+          return true;
+        }
+        return false;
+      }
+
+      if (sidebar && sidebar->OnEvent(event)) {
         return true;
       }
-      return EventHandler(event);
+      if (watches && watches->OnEvent(event)) {
+        return true;
+      }
+      return false;
     }
     return ChildAt(0)->OnEvent(std::move(event));
+  }
+
+  bool Focusable() const override {
+    if (children_.empty()) {
+      return false;
+    }
+    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
+      return (children_.size() > 0 && children_[0] && children_[0]->Focusable()) ||
+             (children_.size() > 1 && children_[1] && children_[1]->Focusable());
+    }
+    return children_[0] && children_[0]->Focusable();
   }
 
   Component ActiveChild() override {
@@ -174,46 +234,53 @@ class RightPanelLayout : public ComponentBase {
     if (app_mode_ == nullptr || *app_mode_ != AppMode::kDebug) {
       return ChildAt(0);
     }
-    const int index =
-        std::max(0, std::min(active_child_, static_cast<int>(children_.size()) - 1));
-    return children_[static_cast<std::size_t>(index)];
+    if (layout_state_ != nullptr &&
+        (layout_state_->right_panel_active_section == 1 ||
+         is_watch_input_focus(layout_state_->text_input_focus))) {
+      return ChildAt(1);
+    }
+    return ChildAt(0);
   }
 
   void SetActiveChild(ComponentBase* child) override {
+    if (children_.empty()) {
+      return;
+    }
+    if (child == nullptr) {
+      return;
+    }
     for (std::size_t i = 0; i < children_.size(); ++i) {
       if (children_[i].get() == child) {
-        active_child_ = static_cast<int>(i);
+        if (layout_state_ != nullptr) {
+          layout_state_->right_panel_active_section = static_cast<int>(i);
+        }
         return;
+      }
+    }
+    Component active = ActiveChild();
+    if (active) {
+      active->SetActiveChild(child);
+      for (std::size_t i = 0; i < children_.size(); ++i) {
+        if (children_[i].get() == active.get()) {
+          if (layout_state_ != nullptr) {
+            layout_state_->right_panel_active_section = static_cast<int>(i);
+          }
+          return;
+        }
       }
     }
   }
 
  private:
-  bool EventHandler(Event event) {
-    if (event == Event::ArrowDown || event == Event::Character('j')) {
-      if (active_child_ + 1 < static_cast<int>(children_.size())) {
-        ++active_child_;
-        return true;
-      }
-    }
-    if (event == Event::ArrowUp || event == Event::Character('k')) {
-      if (active_child_ > 0) {
-        --active_child_;
-        return true;
-      }
-    }
-    return false;
-  }
-
   AppMode* app_mode_;
   int* outline_height_;
-  int active_child_ = 0;
+  MainLayoutState* layout_state_;
 };
 
 Component MakeRightPanel(AppMode* app_mode, Component outline, Component watches,
-                         int* outline_height) {
+                         int* outline_height, MainLayoutState* layout_state) {
   return Make<RightPanelLayout>(app_mode, std::move(outline), std::move(watches),
-                                outline_height);
+                                outline_height, layout_state);
 }
 
 Component MakeVSplitLeft(Component main, Component back, int* main_size) {
@@ -265,7 +332,8 @@ Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
         }
         if (event.is_mouse() && event.mouse().button == Mouse::Left &&
             event.mouse().motion == Mouse::Pressed) {
-          if (!is_search_input_focus(layout_state->text_input_focus)) {
+          if (!is_search_input_focus(layout_state->text_input_focus) &&
+              !is_watch_input_focus(layout_state->text_input_focus)) {
             layout_state->text_input_focus = TextInputFocus::None;
           }
         }
@@ -298,24 +366,26 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto file_tree = MakeFileTreePanel(model, workspace, focus, indexer, on_command);
   auto editor = MakeEditorPanel(workspace, focus, layout_state, symbols, indexer,
                                 symbol_indexer);
-  auto source = MakeSourcePanel(model, source_state, on_command);
+  auto source = MakeSourcePanel(model, source_state, on_command, focus, layout_state);
   auto center = MakeModeLayout(app_mode, editor, source);
 
-  auto outline = MakeOutlinePanel(workspace, focus, symbols);
+  auto outline = MakeOutlinePanel(workspace, focus, symbols, layout_state);
   auto search = MakeSearchPanel(workspace, model, focus, layout_state, indexer,
                                 &layout_state->right_sidebar);
   auto sidebar = MakeRightSidebarPanel(outline, search, &layout_state->right_sidebar,
                                        layout_state);
-  auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug);
+  auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug, focus);
   auto right_panel =
-      MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height);
+      MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height, layout_state);
 
   auto explorer_and_center = MakeVSplitLeft(file_tree, center, &split_state->left_width);
   auto workspace_area =
       MakeVSplitRight(right_panel, explorer_and_center, &split_state->right_width);
   workspace_area = WrapClearInputFocus(std::move(workspace_area), layout_state);
+  auto workspace_only = workspace_area;
 
-  auto console = MakeConsolePanel(app_mode, model, shell, on_command, layout_state, focus);
+  auto console = MakeConsolePanel(app_mode, model, shell, on_command, layout_state, focus,
+                                  &split_state->bottom_height);
   auto with_console =
       MakeHSplitBottom(console, workspace_area, &split_state->bottom_height);
 
@@ -344,10 +414,9 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
         return false;
       });
 
-  return Renderer(with_focus_sync, [app_mode, model, workspace, focus, with_focus_sync,
-                                    workspace_area, layout_state] {
+  return Renderer(with_focus_sync, [=] {
     Element main = layout_state->console_visible ? with_focus_sync->Render()
-                                                 : workspace_area->Render();
+                                               : workspace_only->Render();
 
     std::string status_msg = model->status_message;
     if (app_mode != nullptr && *app_mode == AppMode::kNormal && workspace != nullptr &&

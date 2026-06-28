@@ -66,6 +66,7 @@ class Application {
   bool any_modal_open() const;
   void set_status(const std::string& message);
   void set_workspace_status(const std::string& message);
+  void request_terminal_autostart();
 
   AppConfig config_;
   AppMode app_mode_ = AppMode::kNormal;

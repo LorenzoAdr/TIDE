@@ -20,6 +20,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
 #include "ui/focusable_component.hpp"
+#include "ui/focus_manager.hpp"
 #include "ui/theme.hpp"
 
 namespace tgdb {
@@ -48,6 +49,7 @@ struct BreakpointRow {
 
 struct WatchesPanelState {
   int selected_tab = 0;
+  bool interaction_active = false;
   std::array<std::string, kTabCount> tab_titles = {"Wtch", "Var", "Bt", "Bkts"};
   std::string expr_input;
   std::string inject_input;
@@ -416,7 +418,8 @@ bool handle_toolbar_mouse(WatchesPanelState* state, DebugModel* model,
 
 Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
                            MainLayoutState* layout_state,
-                           const std::function<void()>& on_stop_debug) {
+                           const std::function<void()>& on_stop_debug,
+                           FocusManagerState* focus) {
   auto state = std::make_shared<WatchesPanelState>();
   InputOption input_opt = InputOption::Default();
   input_opt.multiline = false;
@@ -470,13 +473,32 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     }
   };
 
-  auto handler = [model, state, layout_state, select_frame, on_command, send_continue,
+  auto handler = [model, state, layout_state, focus, select_frame, on_command, send_continue,
                   send_pause, send_stop, expr_input, inject_input](Event event) {
+    const auto mark_watches_focus = [&]() {
+      state->interaction_active = true;
+      if (layout_state != nullptr) {
+        layout_state->right_panel_active_section = 1;
+      }
+      if (focus != nullptr) {
+        focus->region = FocusRegion::RightPanel;
+      }
+    };
+
+    if (event == Event::Custom) {
+      if (layout_state != nullptr && layout_state->pending_watches_focus) {
+        layout_state->pending_watches_focus = false;
+        mark_watches_focus();
+      }
+      return false;
+    }
+
     if (event == Event::Escape) {
       if (state->inject_mode) {
         cancel_watch_inject(state.get(), layout_state);
         return true;
       }
+      state->interaction_active = false;
       if (layout_state) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
@@ -484,15 +506,19 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     }
 
     if (event == Event::Character('1')) {
+      mark_watches_focus();
       return switch_tab(state.get(), 0, layout_state);
     }
     if (event == Event::Character('2')) {
+      mark_watches_focus();
       return switch_tab(state.get(), 1, layout_state);
     }
     if (event == Event::Character('3')) {
+      mark_watches_focus();
       return switch_tab(state.get(), 2, layout_state);
     }
     if (event == Event::Character('4')) {
+      mark_watches_focus();
       return switch_tab(state.get(), 3, layout_state);
     }
 
@@ -500,15 +526,23 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         event.mouse().motion == Mouse::Pressed) {
       if (handle_toolbar_mouse(state.get(), model, event.mouse(), layout_state,
                                send_continue, send_pause, send_stop)) {
+        mark_watches_focus();
         return true;
       }
     }
+
+    const auto owns_watches_navigation = [&]() {
+      return state->interaction_active ||
+             watch_input_active(layout_state, state->selected_tab) ||
+             watch_inject_active(layout_state, state->selected_tab);
+    };
 
     if (state->selected_tab == 0) {
       if (event.is_mouse() && event.mouse().button == Mouse::Left &&
           event.mouse().motion == Mouse::Pressed) {
         const auto& m = event.mouse();
         if (state->watch_inject_box.Contain(m.x, m.y) && state->inject_mode) {
+          mark_watches_focus();
           if (layout_state) {
             layout_state->text_input_focus = TextInputFocus::WatchInject;
           }
@@ -516,6 +550,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           return false;
         }
         if (state->watch_input_box.Contain(m.x, m.y)) {
+          mark_watches_focus();
           cancel_watch_inject(state.get(), layout_state);
           if (layout_state) {
             layout_state->text_input_focus = TextInputFocus::Watch;
@@ -524,6 +559,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           return false;
         }
         if (state->watches_box.Contain(m.x, m.y)) {
+          mark_watches_focus();
           const int row = m.y - state->watches_box.y_min;
           if (row >= 0 && row < static_cast<int>(model->watches.size())) {
             if (is_double_click(row, &state->last_watch_click_row,
@@ -560,6 +596,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
 
       if (event == Event::Character('e') || event == Event::Character('=')) {
         if (model->state == DebugState::kStopped && !model->watches.empty()) {
+          mark_watches_focus();
           start_watch_inject(state.get(), model, layout_state);
           inject_input->TakeFocus();
           return true;
@@ -568,6 +605,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
       }
 
       if (event == Event::Return) {
+        mark_watches_focus();
         if (model->state == DebugState::kStopped && !model->watches.empty()) {
           start_watch_inject(state.get(), model, layout_state);
           inject_input->TakeFocus();
@@ -582,17 +620,26 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
       }
 
       if (event == Event::ArrowDown || event == Event::Character('j')) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
         state->watch_selected = std::min(
             state->watch_selected + 1,
             std::max(0, static_cast<int>(model->watches.size()) - 1));
         return true;
       }
       if (event == Event::ArrowUp || event == Event::Character('k')) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
         state->watch_selected = std::max(0, state->watch_selected - 1);
         return true;
       }
       if (event == Event::Delete || event == Event::Character('x') ||
           event == Event::Character('d')) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
         remove_selected_watch(state.get(), model);
         return true;
       }
@@ -603,16 +650,25 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
       rebuild_flat_variables(model, state.get());
 
       if (event == Event::ArrowDown || event == Event::Character('j')) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
         state->flat_selected = std::min(
             state->flat_selected + 1,
             std::max(0, static_cast<int>(state->flat_variables.size()) - 1));
         return true;
       }
       if (event == Event::ArrowUp || event == Event::Character('k')) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
         state->flat_selected = std::max(0, state->flat_selected - 1);
         return true;
       }
       if (event == Event::ArrowRight) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
         toggle_expand(model, state.get(), state->flat_selected, on_command);
         return true;
       }
@@ -628,10 +684,12 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         return false;
       }
       if (event == Event::Character('w') || event == Event::Character('a')) {
+        mark_watches_focus();
         add_flat_as_watch(state.get(), model, on_command);
         return true;
       }
       if (event == Event::Return) {
+        mark_watches_focus();
         add_flat_as_watch(state.get(), model, on_command);
         return true;
       }
@@ -639,6 +697,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           event.mouse().motion == Mouse::Pressed) {
         const auto& m = event.mouse();
         if (state->variables_box.Contain(m.x, m.y)) {
+          mark_watches_focus();
           const int row = m.y - state->variables_box.y_min;
           if (row >= 0 && row < static_cast<int>(state->flat_variables.size())) {
             state->flat_selected = row;
@@ -651,14 +710,21 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
 
     if (state->selected_tab == 2) {
       if (event == Event::ArrowDown || event == Event::Character('j')) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
         select_frame(model->selected_frame + 1);
         return true;
       }
       if (event == Event::ArrowUp || event == Event::Character('k')) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
         select_frame(model->selected_frame - 1);
         return true;
       }
       if (event == Event::Return) {
+        mark_watches_focus();
         select_frame(model->selected_frame);
         return true;
       }
@@ -666,6 +732,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           event.mouse().motion == Mouse::Pressed) {
         const auto& m = event.mouse();
         if (state->stack_box.Contain(m.x, m.y)) {
+          mark_watches_focus();
           const int row = m.y - state->stack_box.y_min;
           if (row >= 0 && row < static_cast<int>(model->stack_frames.size())) {
             select_frame(row);
@@ -679,21 +746,31 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     if (state->selected_tab == 3) {
       rebuild_breakpoint_rows(model, state.get());
       if (event == Event::ArrowDown || event == Event::Character('j')) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
         state->bp_selected = std::min(
             state->bp_selected + 1,
             std::max(0, static_cast<int>(state->breakpoint_rows.size()) - 1));
         return true;
       }
       if (event == Event::ArrowUp || event == Event::Character('k')) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
         state->bp_selected = std::max(0, state->bp_selected - 1);
         return true;
       }
       if (event == Event::Return || event == Event::Character(' ')) {
+        mark_watches_focus();
         toggle_breakpoint_enabled(state.get(), model, on_command);
         return true;
       }
       if (event == Event::Delete || event == Event::Character('x') ||
           event == Event::Character('d')) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
         remove_selected_breakpoint(state.get(), model, on_command);
         return true;
       }
@@ -701,6 +778,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           event.mouse().motion == Mouse::Pressed) {
         const auto& m = event.mouse();
         if (state->breakpoints_box.Contain(m.x, m.y)) {
+          mark_watches_focus();
           const int row = m.y - state->breakpoints_box.y_min;
           if (row >= 0 &&
               row < static_cast<int>(state->breakpoint_rows.size())) {
@@ -730,7 +808,10 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
   };
 
   return WrapFocusable(CatchEvent(
-      Renderer(inputs, [model, state, expr_input, inject_input, layout_state] {
+      Renderer(inputs, [model, state, expr_input, inject_input, layout_state, focus] {
+    if (focus != nullptr && focus->region != FocusRegion::RightPanel) {
+      state->interaction_active = false;
+    }
     if (state->inject_mode && layout_state &&
         layout_state->text_input_focus != TextInputFocus::WatchInject) {
       state->inject_mode = false;

@@ -15,6 +15,9 @@ void insert_char(EditorBuffer* buffer, char c);
 void replace_word_at_cursor(EditorBuffer* buffer, const std::string& replacement);
 void replace_text_range(EditorBuffer* buffer, int line, int start_col, int end_col,
                         const std::string& replacement);
+void replace_text_range_with_caret(EditorBuffer* buffer, int line, int start_col, int end_col,
+                                   const std::string& replacement, int caret_line_offset,
+                                   int caret_col, int sel_start_col = -1, int sel_end_col = -1);
 void backspace(EditorBuffer* buffer);
 void delete_char(EditorBuffer* buffer);
 void delete_word_backward(EditorBuffer* buffer);

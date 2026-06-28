@@ -14,6 +14,7 @@
 #include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
 #include "ui/focusable_component.hpp"
+#include "ui/main_layout.hpp"
 #include "ui/theme.hpp"
 #include "util/cpp_highlight.hpp"
 #include "util/path_normalize.hpp"
@@ -142,7 +143,8 @@ void ToggleBreakpointAtLine(DebugModel* model, int line, CommandCallback on_comm
 }
 
 Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
-                          CommandCallback on_command) {
+                          CommandCallback on_command, FocusManagerState* focus,
+                          MainLayoutState* layout_state) {
   auto loaded_file = std::make_shared<std::string>();
   auto panel_state = std::make_shared<SourcePanelState>();
 
@@ -231,8 +233,28 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
                      theme::CodeBg());
   });
 
-  return WrapFocusable(CatchEvent(renderer, [model, view_state, on_command, panel_state](
-                                               Event event) {
+  return WrapFocusable(CatchEvent(renderer, [model, view_state, on_command, panel_state, focus,
+                                               layout_state](Event event) {
+    if (event.is_mouse()) {
+      const auto& m = event.mouse();
+      if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+        const bool in_gutter = panel_state->gutter_box.Contain(m.x, m.y);
+        const bool in_code = panel_state->content_box.Contain(m.x, m.y);
+        if (in_gutter || in_code) {
+          if (focus != nullptr) {
+            focus->region = FocusRegion::Editor;
+          }
+          if (layout_state != nullptr) {
+            layout_state->text_input_focus = TextInputFocus::None;
+            layout_state->right_panel_active_section = 0;
+            layout_state->focus_sync_needed = true;
+          }
+        }
+      }
+    } else if (focus != nullptr && focus->region == FocusRegion::RightPanel) {
+      return false;
+    }
+
     const int total = static_cast<int>(view_state->lines.size());
     const int visible = panel_state->last_visible_lines;
     const int max_scroll = max_scroll_offset(total, visible);
@@ -289,7 +311,7 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
       view_state->scroll = std::max(0, view_state->scroll - half_page);
       return true;
     }
-    if (event_is_ctrl_d(event)) {
+    if (event_is_ctrl_i(event)) {
       view_state->scroll = std::min(view_state->scroll + half_page, max_scroll);
       return true;
     }

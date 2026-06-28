@@ -31,17 +31,16 @@ void DapBackend::stop() {
   }
   commands_.close();
 
-  // Mata GDB de inmediato para desbloquear session_->send(...).get() en attach.
+  if (worker_.joinable()) {
+    worker_.join();
+  }
+
   if (gdb_) {
     gdb_->stop(true);
   }
   {
     std::lock_guard<std::mutex> lock(session_mutex_);
     session_.reset();
-  }
-
-  if (worker_.joinable()) {
-    worker_.join();
   }
 
   gdb_.reset();
@@ -652,6 +651,7 @@ void DapBackend::handle_command(const UiCommand& command) {
       }
     }
     if (inferior_started) {
+      inferior_launched_ = true;
       on_inferior_attached();
     }
     return;
@@ -677,22 +677,23 @@ void DapBackend::handle_command(const UiCommand& command) {
     }
     lock.unlock();
 
-    const auto response = attach_future.get();
-    bool inferior_started = false;
+    const auto attach_response = attach_future.get();
+    bool attach_started = false;
     {
       std::lock_guard<std::mutex> lock(session_mutex_);
       if (!session_) {
         return;
       }
-      if (response.error) {
-        push_error("attach falló: " + response.error.message);
+      if (attach_response.error) {
+        push_error("attach falló: " + attach_response.error.message);
       } else if (!verify_inferior_attached_locked()) {
         // ptrace bloqueado: GDB DAP devuelve attach OK pero sin inferior real.
       } else {
-        inferior_started = true;
+        attach_started = true;
       }
     }
-    if (inferior_started) {
+    if (attach_started) {
+      inferior_launched_ = false;
       on_inferior_attached();
     }
     return;
@@ -836,6 +837,7 @@ void DapBackend::handle_command(const UiCommand& command) {
       dap::DisconnectRequest request;
       request.terminateDebuggee = true;
       session_->send(request).get();
+      inferior_attached_ = false;
       break;
     }
     case UiCommandKind::kDetach: {
@@ -874,7 +876,7 @@ void DapBackend::worker_main() {
     return;
   }
 
-  while (running_.load(std::memory_order_acquire)) {
+  while (true) {
     auto command = commands_.wait_pop();
     if (!command.has_value()) {
       break;
@@ -882,16 +884,14 @@ void DapBackend::worker_main() {
     if (command->kind == UiCommandKind::kQuit) {
       break;
     }
-    if (!running_.load(std::memory_order_acquire)) {
-      break;
-    }
     handle_command(*command);
   }
 
-  if (session_ && gdb_ && gdb_->running()) {
+  if (session_ && gdb_ && gdb_->running() && inferior_attached_) {
     dap::DisconnectRequest disconnect;
-    disconnect.terminateDebuggee = true;
+    disconnect.terminateDebuggee = inferior_launched_;
     session_->send(disconnect).get();
+    inferior_attached_ = false;
   }
   if (gdb_) {
     gdb_->stop();

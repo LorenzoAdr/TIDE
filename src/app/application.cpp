@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <sstream>
 #include <thread>
 
 #include "backend/idebug_backend.hpp"
@@ -113,6 +114,9 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
     set_workspace(config_.workspace_root);
     if (config_.auto_debug && connection_config_complete()) {
       app_mode_ = AppMode::kDebug;
+      layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kDebug;
+      layout_state_.console_visible = true;
+      layout_state_.terminal_start_requested = true;
     }
   }
 
@@ -132,6 +136,14 @@ Application::~Application() {
   }
 }
 
+void Application::request_terminal_autostart() {
+  if (model_.workspace_root.empty()) {
+    return;
+  }
+  layout_state_.console_visible = true;
+  layout_state_.terminal_start_requested = true;
+}
+
 void Application::set_workspace(const std::string& workspace_root) {
   std::error_code ec;
   const auto absolute = fs::absolute(workspace_root, ec).string();
@@ -143,7 +155,7 @@ void Application::set_workspace(const std::string& workspace_root) {
   file_picker_state_.all_files.clear();
   shell_session_.stop();
   model_.console_output.clear();
-  layout_state_.terminal_start_requested = false;
+  request_terminal_autostart();
   if (symbol_provider_) {
     symbol_provider_->on_workspace_opened(absolute);
   }
@@ -229,10 +241,9 @@ void Application::exit_debug_mode() {
 
   app_mode_ = AppMode::kNormal;
   layout_state_.text_input_focus = TextInputFocus::None;
-  if (!config_.workspace_root.empty()) {
-    shell_session_.stop();
-  }
+  layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
   set_workspace_status("Modo edición");
+  request_terminal_autostart();
 }
 
 void Application::apply_connection_and_start() {
@@ -255,8 +266,14 @@ void Application::apply_connection_and_start() {
   }
 
   app_mode_ = AppMode::kDebug;
+  focus_state_.region = FocusRegion::RightPanel;
+  layout_state_.text_input_focus = TextInputFocus::None;
+  layout_state_.right_panel_active_section = 1;
+  layout_state_.pending_watches_focus = true;
   layout_state_.focus_sync_needed = true;
-  shell_session_.stop();
+  layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kDebug;
+  layout_state_.console_visible = true;
+  layout_state_.terminal_start_requested = true;
   model_.console_output.clear();
 
   if (config_.mode == SessionMode::kAttach) {
@@ -322,6 +339,7 @@ void Application::open_connection_wizard() {
     exit_debug_mode();
   } else if (app_mode_ == AppMode::kDebug) {
     app_mode_ = AppMode::kNormal;
+    layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
   }
 
   connection_wizard_state_.workspace_root = workspace_.root;
@@ -447,9 +465,6 @@ void Application::apply_event(const DebugEvent& event) {
 }
 
 void Application::drain_events() {
-  if (shell_session_.running()) {
-    shell_session_.drain_output(4096);
-  }
   while (auto event = event_queue_.try_pop()) {
     apply_event(*event);
   }
@@ -494,6 +509,7 @@ bool Application::handle_focus_shortcuts(const Event& event) {
   if (event_is_open_outline_panel(event)) {
     focus_state_.region = FocusRegion::RightPanel;
     layout_state_.right_sidebar.selected_tab = 0;
+    layout_state_.right_panel_active_section = 0;
     layout_state_.text_input_focus = TextInputFocus::None;
     mark_focus_sync();
     return true;
@@ -501,6 +517,7 @@ bool Application::handle_focus_shortcuts(const Event& event) {
   if (event_is_open_search_panel(event)) {
     focus_state_.region = FocusRegion::RightPanel;
     layout_state_.right_sidebar.selected_tab = 1;
+    layout_state_.right_panel_active_section = 0;
     layout_state_.right_sidebar.pending_focus_search = true;
     layout_state_.text_input_focus = TextInputFocus::SearchQuery;
     mark_focus_sync();
@@ -509,6 +526,7 @@ bool Application::handle_focus_shortcuts(const Event& event) {
   if (event == Event::F4) {
     focus_state_.region = FocusRegion::Terminal;
     layout_state_.console_visible = true;
+    layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
     layout_state_.text_input_focus = TextInputFocus::Console;
     layout_state_.terminal_start_requested = true;
     mark_focus_sync();
@@ -528,8 +546,11 @@ bool Application::handle_focus_shortcuts(const Event& event) {
     if (event_is_alt_down(event)) {
       focus_state_.move_down();
       layout_state_.console_visible = true;
-      layout_state_.text_input_focus = TextInputFocus::Console;
       layout_state_.terminal_start_requested = true;
+      if (app_mode_ != AppMode::kDebug ||
+          layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal) {
+        layout_state_.text_input_focus = TextInputFocus::Console;
+      }
       mark_focus_sync();
       return true;
     }
@@ -582,6 +603,8 @@ int Application::run() {
 
   auto layout = build_ui();
 
+  layout_state_.terminal_width = [&screen]() { return screen.dimx(); };
+
   auto with_picker = MakeFilePickerOverlay(
       layout, &model_, &workspace_, &file_picker_state_, &focus_state_, &indexer_);
 
@@ -615,6 +638,9 @@ int Application::run() {
         }
         process_index_changes();
         drain_events();
+        if (layout_state_.console_visible && layout_state_.terminal_tick_callback) {
+          layout_state_.terminal_tick_callback();
+        }
         return false;
       }
 
@@ -639,7 +665,13 @@ int Application::run() {
       }
 
       // Intercept console keys before editor (FTXUI focus may still be on editor).
-      if (layout_state_.text_input_focus == TextInputFocus::Console &&
+      const bool terminal_tab =
+          app_mode_ != AppMode::kDebug ||
+          layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal;
+      const bool shell_terminal_focus =
+          terminal_tab && focus_state_.region == FocusRegion::Terminal &&
+          shell_session_.running();
+      if ((layout_state_.text_input_focus == TextInputFocus::Console || shell_terminal_focus) &&
           layout_state_.console_key_handler &&
           layout_state_.console_key_handler(event)) {
         screen.Post(Event::Custom);
@@ -653,6 +685,7 @@ int Application::run() {
       }
       if (focus_state_.region == FocusRegion::Editor &&
           !is_search_input_focus(layout_state_.text_input_focus) &&
+          !is_watch_input_focus(layout_state_.text_input_focus) &&
           layout_state_.text_input_focus != TextInputFocus::EditorFind &&
           layout_state_.text_input_focus != TextInputFocus::Console &&
           layout_state_.editor_key_handler && layout_state_.editor_key_handler(event)) {
@@ -662,8 +695,12 @@ int Application::run() {
 
       // Tab nunca cambia foco entre paneles; en terminal va al shell, en editor indenta.
       if (event == Event::Tab || event == Event::TabReverse) {
-        if (app_mode_ == AppMode::kNormal &&
-            layout_state_.text_input_focus == TextInputFocus::Console &&
+        const bool terminal_tab =
+            app_mode_ != AppMode::kDebug ||
+            layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal;
+        if (terminal_tab &&
+            (layout_state_.text_input_focus == TextInputFocus::Console ||
+             (focus_state_.region == FocusRegion::Terminal && shell_session_.running())) &&
             shell_session_.running()) {
           if (event == Event::Tab) {
             shell_session_.write_raw("\t");

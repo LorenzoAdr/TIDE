@@ -27,4 +27,18 @@ inline Color BpDisabled() { return Color::RGB(100, 100, 110); }
 inline Color StackFrame() { return Color::RGB(170, 210, 255); }
 inline Color StatusBar() { return Color::RGB(35, 45, 65); }
 
+inline Color SyntaxDefault() { return Color::RGB(220, 223, 228); }
+inline Color SyntaxComment() { return Color::RGB(106, 153, 85); }
+inline Color SyntaxString() { return Color::RGB(206, 145, 120); }
+inline Color SyntaxNumber() { return Color::RGB(181, 206, 168); }
+inline Color SyntaxKeyword() { return Color::RGB(198, 120, 221); }
+inline Color SyntaxType() { return Color::RGB(78, 201, 176); }
+inline Color SyntaxFunction() { return Color::RGB(220, 220, 170); }
+inline Color SyntaxVariable() { return Color::RGB(156, 220, 254); }
+inline Color SyntaxParameter() { return Color::RGB(156, 200, 254); }
+inline Color SyntaxProperty() { return Color::RGB(156, 220, 200); }
+inline Color SyntaxMacro() { return Color::RGB(205, 170, 255); }
+inline Color SyntaxNamespace() { return Color::RGB(130, 170, 255); }
+inline Color SyntaxOperator() { return Color::RGB(180, 180, 210); }
+
 }  // namespace tgdb::theme

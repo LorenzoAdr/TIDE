@@ -460,6 +460,37 @@ void replace_text_range(EditorBuffer* buffer, int line, int start_col, int end_c
   mark_dirty(buffer);
 }
 
+void replace_text_range_with_caret(EditorBuffer* buffer, int line, int start_col, int end_col,
+                                   const std::string& replacement, int caret_line_offset,
+                                   int caret_col, int sel_start_col, int sel_end_col) {
+  if (replacement.empty()) {
+    return;
+  }
+  push_undo(buffer);
+  exit_multi_cursor_mode(buffer);
+  if (any_cursor_has_selection(*buffer)) {
+    delete_all_selections(buffer);
+  }
+
+  delete_range(buffer, line, start_col, line, end_col);
+
+  auto& text = buffer->lines[static_cast<std::size_t>(line)];
+  start_col = std::max(0, std::min(start_col, static_cast<int>(text.size())));
+  text.insert(static_cast<std::size_t>(start_col), replacement);
+
+  const int caret_line = line + caret_line_offset;
+  const int caret_col_base = caret_line_offset == 0 ? start_col : 0;
+  const int abs_caret_col = caret_col_base + caret_col;
+
+  buffer->reset_to_single_cursor(caret_line, abs_caret_col);
+  if (sel_start_col >= 0 && sel_end_col > sel_start_col) {
+    buffer->primary().anchor = {caret_line, caret_col_base + sel_start_col};
+    buffer->primary().head = {caret_line, caret_col_base + sel_end_col};
+  }
+  clamp_all_cursors(buffer);
+  mark_dirty(buffer);
+}
+
 void insert_char(EditorBuffer* buffer, char c) {
   push_undo(buffer);
   clamp_all_cursors(buffer);

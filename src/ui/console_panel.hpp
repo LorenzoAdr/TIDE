@@ -17,6 +17,6 @@ struct MainLayoutState;
 ftxui::Component MakeConsolePanel(AppMode* app_mode, DebugModel* model,
                                   ShellSession* shell, CommandCallback on_command,
                                   MainLayoutState* layout_state,
-                                  FocusManagerState* focus);
+                                  FocusManagerState* focus, int* bottom_height);
 
 }  // namespace tgdb

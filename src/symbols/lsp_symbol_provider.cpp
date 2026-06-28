@@ -1,5 +1,7 @@
 #include "symbols/lsp_symbol_provider.hpp"
 
+#include "symbols/local_scope_completions.hpp"
+
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -45,22 +47,26 @@ void LspSymbolProvider::on_workspace_closed() {
 }
 
 void LspSymbolProvider::on_document_opened(const std::string& path, const std::string& text) {
-  std::lock_guard<std::mutex> lock(mutex_);
   if (path.empty()) {
     return;
   }
-  open_buffers_[path] = text;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    open_buffers_[path] = text;
+  }
   if (use_lsp_) {
     client_.did_open(path, text);
   }
 }
 
 void LspSymbolProvider::on_document_changed(const std::string& path, const std::string& text) {
-  std::lock_guard<std::mutex> lock(mutex_);
   if (path.empty()) {
     return;
   }
-  open_buffers_[path] = text;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    open_buffers_[path] = text;
+  }
   if (use_lsp_) {
     client_.did_change(path, text);
   }
@@ -136,7 +142,9 @@ std::vector<CompletionItem> LspSymbolProvider::completions_at(
   if (!text.empty()) {
     client_.did_change(params.path, text);
   }
-  return client_.completions_at(params.path, text, params.line, params.character);
+  auto items = client_.completions_at(params.path, text, params.line, params.character);
+  merge_completion_items(&items, local_scope_completions(text, params.line, params.character));
+  return items;
 }
 
 bool LspSymbolProvider::supports_navigation() const {
@@ -168,6 +176,37 @@ SourceLocation LspSymbolProvider::goto_declaration(const NavigationParams& param
   const std::string text =
       params.text.empty() ? buffer_text_for_path(params.path) : params.text;
   return client_.goto_declaration(params.path, text, params.line, params.character);
+}
+
+bool LspSymbolProvider::supports_semantic_highlight() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return use_lsp_;
+}
+
+bool LspSymbolProvider::ensure_semantic_tokens(const std::string& path) {
+  if (path.empty()) {
+    return false;
+  }
+  bool active = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    active = use_lsp_;
+  }
+  if (!active) {
+    return false;
+  }
+  return client_.ensure_semantic_tokens(path);
+}
+
+SemanticTokenDocument LspSymbolProvider::semantic_tokens_for_file(const std::string& path) {
+  if (path.empty()) {
+    return {};
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+  return client_.semantic_tokens_for_file(path);
 }
 
 }  // namespace tgdb

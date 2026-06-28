@@ -5,6 +5,7 @@
 #include "editor/editor_state.hpp"
 #include "editor/text_search.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "lsp/semantic_tokens.hpp"
 
 namespace tgdb {
 
@@ -23,6 +24,7 @@ void collect_line_decorations(int line_index, const EditorBuffer& buffer, bool e
 
 ftxui::Element RenderEditorLine(const std::string& line, int line_index,
                                const EditorBuffer& buffer, bool editor_focused,
-                               const std::vector<TextMatch>* find_matches = nullptr);
+                               const std::vector<TextMatch>* find_matches = nullptr,
+                               const SemanticTokenDocument* semantic_tokens = nullptr);
 
 }  // namespace tgdb

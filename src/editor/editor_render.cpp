@@ -6,6 +6,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ui/theme.hpp"
 #include "util/cpp_highlight.hpp"
+#include "util/syntax_highlight.hpp"
 
 namespace tgdb {
 
@@ -132,14 +133,16 @@ void collect_line_decorations(int line_index, const EditorBuffer& buffer, bool e
 }
 
 Element RenderEditorLine(const std::string& line, int line_index, const EditorBuffer& buffer,
-                         bool editor_focused, const std::vector<TextMatch>* find_matches) {
+                         bool editor_focused, const std::vector<TextMatch>* find_matches,
+                         const SemanticTokenDocument* semantic_tokens) {
   const bool is_primary_line = line_index == buffer.primary_line();
   const Decorator line_bg =
       is_primary_line ? bgcolor(theme::EditorLineHi()) : bgcolor(theme::CodeBg());
 
   if (!line_needs_rich_decorations(line_index, buffer, find_matches) || !editor_focused) {
     if (!editor_focused || line_index != buffer.primary_line()) {
-      Element content = line.empty() ? text(" ") : HighlightCppLine(line);
+      Element content =
+          line.empty() ? text(" ") : HighlightCodeLine(line, line_index, semantic_tokens);
       return content | line_bg;
     }
     const int col = buffer.primary_col();
@@ -149,12 +152,12 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
     if (line.empty() || clamped >= static_cast<int>(line.size())) {
       Elements parts;
       if (!line.empty()) {
-        parts.push_back(HighlightCppLine(line));
+        parts.push_back(HighlightCodeLine(line, line_index, semantic_tokens));
       }
       parts.push_back(text(" ") | cursor_cell);
       return hbox(std::move(parts)) | line_bg;
     }
-    return HighlightCppLine(line, clamped, cursor_cell) | line_bg;
+    return HighlightCodeLine(line, line_index, semantic_tokens, clamped, cursor_cell) | line_bg;
   }
 
   std::vector<EditorDecoration> decorations;
@@ -180,8 +183,18 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
     const std::string segment = line.substr(static_cast<std::size_t>(prev),
                                             static_cast<std::size_t>(bp - prev));
     const EditorDecoration* chosen = decoration_at(decorations, prev);
+    const int segment_cursor =
+        (line_index == buffer.primary_line() && buffer.primary_col() >= prev &&
+         buffer.primary_col() < bp)
+            ? buffer.primary_col()
+            : -1;
+    const Decorator cursor_cell =
+        bgcolor(theme::CursorCell()) | color(Color::Black) | bold;
     parts.push_back(apply_decoration(
-        segment.empty() ? text(" ") : HighlightCppLine(segment), chosen));
+        segment.empty() ? text(" ")
+                        : HighlightCodeLine(segment, line_index, semantic_tokens, segment_cursor,
+                                            cursor_cell, prev),
+        chosen));
     prev = bp;
   }
 
