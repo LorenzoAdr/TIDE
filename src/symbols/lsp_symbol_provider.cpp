@@ -1,6 +1,6 @@
 #include "symbols/lsp_symbol_provider.hpp"
 
-#include "symbols/local_scope_completions.hpp"
+#include "lsp/lsp_uri.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -137,14 +137,14 @@ std::vector<CompletionItem> LspSymbolProvider::completions_at(
     return {};
   }
 
-  const std::string text =
-      params.text.empty() ? buffer_text_for_path(params.path) : params.text;
-  if (!text.empty()) {
-    client_.did_change(params.path, text);
+  const std::string key = normalize_lsp_path(params.path);
+  if (key.empty()) {
+    return {};
   }
-  auto items = client_.completions_at(params.path, text, params.line, params.character);
-  merge_completion_items(&items, local_scope_completions(text, params.line, params.character));
-  return items;
+
+  const std::string text =
+      params.text.empty() ? buffer_text_for_path(key) : params.text;
+  return client_.completions_at(key, text, params.line, params.character);
 }
 
 bool LspSymbolProvider::supports_navigation() const {

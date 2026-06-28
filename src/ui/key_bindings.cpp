@@ -137,6 +137,14 @@ bool event_is_ctrl_right(const ftxui::Event& event) {
   return event == ftxui::Event::ArrowRightCtrl;
 }
 
+bool event_is_ctrl_shift_left(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;6D");
+}
+
+bool event_is_ctrl_shift_right(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;6C");
+}
+
 bool event_is_ctrl_c(const ftxui::Event& event) {
   return event == ftxui::Event::CtrlC ||
          event == ftxui::Event::Special("\x1B[27;5;99~") ||
@@ -179,10 +187,48 @@ bool event_is_ctrl_u(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[27;5;85~");
 }
 
+bool event_is_plain_tab(const ftxui::Event& event) {
+  return event == ftxui::Event::Tab || event == ftxui::Event::CtrlI;
+}
+
 bool event_is_ctrl_i(const ftxui::Event& event) {
-  return event == ftxui::Event::CtrlI ||
+  // Plain Tab/CtrlI (\t) is handled separately using keyboard_control state.
+  if (event_is_plain_tab(event)) {
+    return false;
+  }
+  const int mods[] = {5};
+  return csi_key_any_modifier(event, mods, 1, 9) ||
+         csi_key_any_modifier(event, mods, 1, 105) ||
+         csi_key_any_modifier(event, mods, 1, 73) ||
          event == ftxui::Event::Special("\x1B[27;5;105~") ||
-         event == ftxui::Event::Special("\x1B[27;5;73~");
+         event == ftxui::Event::Special("\x1B[27;5;73~") ||
+         event == ftxui::Event::Special("\x1B[9;5u") ||
+         event == ftxui::Event::Special("\x1B[105;5u") ||
+         event == ftxui::Event::Special("\x1B[73;5u");
+}
+
+bool event_is_shift_key_press(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[57417u") ||
+         event == ftxui::Event::Special("\x1B[57417;1u") ||
+         event == ftxui::Event::Special("\x1B[57418u") ||
+         event == ftxui::Event::Special("\x1B[57418;1u");
+}
+
+bool event_is_shift_key_release(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[57417;2u") ||
+         event == ftxui::Event::Special("\x1B[57418;2u");
+}
+
+bool event_is_ctrl_key_press(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[57442u") ||
+         event == ftxui::Event::Special("\x1B[57442;1u") ||
+         event == ftxui::Event::Special("\x1B[57443u") ||
+         event == ftxui::Event::Special("\x1B[57443;1u");
+}
+
+bool event_is_ctrl_key_release(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[57442;2u") ||
+         event == ftxui::Event::Special("\x1B[57443;2u");
 }
 
 bool event_is_ctrl_d(const ftxui::Event& event) {
@@ -278,11 +324,41 @@ bool event_is_go_to_declaration(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[24;6~");
 }
 
+bool event_has_shift_modifier(const ftxui::Event& event) {
+  return event_is_shift_key_press(event) || event_is_shift_left(event) ||
+         event_is_shift_right(event) || event_is_shift_up(event) ||
+         event_is_shift_down(event) || event_is_ctrl_shift_left(event) ||
+         event_is_ctrl_shift_right(event) || event_is_ctrl_shift_up(event) ||
+         event_is_ctrl_shift_down(event) || event_is_ctrl_shift_d(event) ||
+         event_is_ctrl_shift_l(event) || event_is_ctrl_shift_h(event) ||
+         event_is_ctrl_shift_o(event);
+}
+
+bool event_has_ctrl_modifier(const ftxui::Event& event) {
+  if (event_is_plain_tab(event)) {
+    return false;
+  }
+  return event_is_ctrl_key_press(event) || event_is_ctrl_c(event) ||
+         event_is_ctrl_v(event) || event_is_ctrl_z(event) || event_is_ctrl_f(event) ||
+         event_is_ctrl_g(event) || event_is_ctrl_u(event) || event_is_ctrl_d(event) ||
+         event_is_ctrl_shift_d(event) || event_is_ctrl_backspace(event) ||
+         event_is_ctrl_delete(event) || event_is_ctrl_space(event) ||
+         event_is_ctrl_left(event) || event_is_ctrl_right(event) ||
+         event_is_ctrl_shift_left(event) || event_is_ctrl_shift_right(event) ||
+         event_is_ctrl_shift_up(event) || event_is_ctrl_shift_down(event) ||
+         event_is_ctrl_shift_l(event) || event_is_ctrl_shift_h(event) ||
+         event_is_ctrl_shift_o(event) || event_is_ctrl_h(event) ||
+         event == ftxui::Event::CtrlS || event == ftxui::Event::CtrlQ ||
+         event == ftxui::Event::CtrlB || event == ftxui::Event::CtrlW ||
+         event_is_ctrl_i(event);
+}
+
 bool editor_priority_key(const ftxui::Event& event) {
   return event == ftxui::Event::Escape || event_is_ctrl_z(event) || event_is_ctrl_c(event) ||
          event_is_ctrl_v(event) || event_is_ctrl_f(event) || event_is_ctrl_g(event) ||
          event_is_shift_left(event) || event_is_shift_right(event) || event_is_shift_up(event) ||
          event_is_shift_down(event) || event_is_ctrl_left(event) || event_is_ctrl_right(event) ||
+         event_is_ctrl_shift_left(event) || event_is_ctrl_shift_right(event) ||
          event_is_ctrl_shift_up(event) || event_is_ctrl_shift_down(event) ||
          event == ftxui::Event::ArrowLeft || event == ftxui::Event::ArrowRight ||
          event == ftxui::Event::ArrowUp || event == ftxui::Event::ArrowDown ||

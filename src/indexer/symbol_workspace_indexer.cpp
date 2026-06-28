@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <thread>
 
+#include "symbols/regex_symbol_provider.hpp"
+
 namespace fs = std::filesystem;
 
 namespace tgdb {
@@ -150,16 +152,8 @@ bool SymbolWorkspaceIndexer::scanning() const {
 void SymbolWorkspaceIndexer::worker_main(std::string workspace_root,
                                          std::shared_ptr<ISymbolProvider> provider,
                                          WorkspaceIndexer* file_indexer) {
-  if (provider != nullptr && !provider->indexes_workspace_bulk()) {
-    auto snap = std::make_shared<SymbolIndexSnapshot>();
-    snap->workspace_root = workspace_root;
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      snapshot_ = snap;
-    }
-    running_ = false;
-    return;
-  }
+  RegexSymbolProvider regex_provider;
+  const bool use_regex_bulk = provider != nullptr && !provider->indexes_workspace_bulk();
 
   std::vector<std::string> files;
   if (file_indexer != nullptr) {
@@ -185,7 +179,20 @@ void SymbolWorkspaceIndexer::worker_main(std::string workspace_root,
       running_ = false;
       return;
     }
-    auto entries = symbols_for_relative_file(provider, workspace_root, rel);
+    std::vector<IndexedSymbol> entries;
+    if (use_regex_bulk) {
+      const auto absolute = (fs::path(workspace_root) / rel).string();
+      for (const auto& sym : regex_provider.symbols_for_file(absolute)) {
+        IndexedSymbol entry;
+        entry.display_name = sym.name;
+        entry.kind = sym.kind;
+        entry.line = sym.line;
+        entry.file = sym.file.empty() ? rel : sym.file;
+        entries.push_back(std::move(entry));
+      }
+    } else {
+      entries = symbols_for_relative_file(provider, workspace_root, rel);
+    }
     snap->symbols.insert(snap->symbols.end(), entries.begin(), entries.end());
   }
 

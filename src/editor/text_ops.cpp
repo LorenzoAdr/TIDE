@@ -605,6 +605,15 @@ void clear_primary_selection(EditorBuffer* buffer) {
   buffer->primary().collapse_to_head();
 }
 
+void select_word_at(EditorBuffer* buffer, int line, int col) {
+  buffer->reset_to_single_cursor(line, col);
+  const int left = word_left_col(*buffer, line, col);
+  const int right = word_right_col(*buffer, line, col);
+  buffer->primary().anchor = {line, left};
+  buffer->primary().head = {line, right};
+  clamp_all_cursors(buffer);
+}
+
 void move_primary_left(EditorBuffer* buffer, bool extend_selection) {
   if (!extend_selection) {
     buffer->primary().collapse_to_head();

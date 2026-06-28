@@ -1,6 +1,7 @@
 #include "ui/editor_panel.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
@@ -20,8 +21,10 @@
 #include "symbols/local_scope_completions.hpp"
 #include "symbols/symbol_utils.hpp"
 #include "ftxui/component/component_options.hpp"
+#include "ftxui/component/captured_mouse.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
+#include "ftxui/component/screen_interactive.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
 #include "ui/focusable_component.hpp"
@@ -51,7 +54,74 @@ struct EditorPanelState {
   Box gutter_box;
   uint64_t last_view_token = 0;
   std::string last_path;
+  bool mouse_selecting = false;
+  CapturedMouse captured_mouse;
+  int last_click_line = -1;
+  int last_click_col = -1;
+  int64_t last_click_ms = 0;
+  bool keyboard_shift = false;
+  bool keyboard_control = false;
+  int64_t last_ctrl_activity_ms = 0;
 };
+
+constexpr int kDoubleClickMs = 400;
+constexpr int kCtrlTabWindowMs = 250;
+
+int64_t steady_now_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+bool is_double_click(const EditorPanelState& panel, int line, int col, int64_t now_ms) {
+  if (panel.last_click_line != line) {
+    return false;
+  }
+  if (std::abs(panel.last_click_col - col) > 1) {
+    return false;
+  }
+  return now_ms - panel.last_click_ms <= kDoubleClickMs;
+}
+
+void update_editor_modifiers(EditorPanelState* panel, Event& event) {
+  if (panel == nullptr) {
+    return;
+  }
+  if (event.is_mouse()) {
+    const auto& m = event.mouse();
+    if (m.shift) {
+      panel->keyboard_shift = true;
+    }
+    if (m.control) {
+      panel->keyboard_control = true;
+    }
+    return;
+  }
+
+  if (event_is_shift_key_release(event)) {
+    panel->keyboard_shift = false;
+  } else if (event_has_shift_modifier(event)) {
+    panel->keyboard_shift = true;
+  } else if (event == Event::ArrowLeft || event == Event::ArrowRight ||
+             event == Event::ArrowUp || event == Event::ArrowDown) {
+    panel->keyboard_shift = false;
+  }
+
+  if (event_is_ctrl_key_release(event)) {
+    panel->keyboard_control = false;
+  } else if (event_has_ctrl_modifier(event)) {
+    panel->keyboard_control = true;
+    panel->last_ctrl_activity_ms = steady_now_ms();
+  } else if (event.is_character()) {
+    const std::string ch = event.character();
+    if (ch.size() == 1) {
+      const unsigned char c = static_cast<unsigned char>(ch[0]);
+      if (c >= 32 && c < 127) {
+        panel->keyboard_control = false;
+      }
+    }
+  }
+}
 
 struct GotoLineState {
   bool open = false;
@@ -129,8 +199,7 @@ struct CompletionState {
     matches.clear();
     constexpr int kMaxMatches = 200;
     for (const auto& item : all_items) {
-      const std::string filter_text =
-          semantic_mode ? item.label : symbol_insert_name(item.label);
+      const std::string filter_text = symbol_insert_name(item.label);
       if (prefix_match(filter_text, query)) {
         matches.push_back(item);
         if (static_cast<int>(matches.size()) >= kMaxMatches) {
@@ -155,111 +224,66 @@ struct CompletionState {
 
     index_scanning = symbol_indexer != nullptr && symbol_indexer->scanning();
     workspace_index = false;
-
-    if (symbols && symbols->supports_semantic_completion() && !path.empty()) {
-      const std::string completion_key =
-          path + "|completion|" + std::to_string(line) + "|" + std::to_string(col) + "|" +
-          std::to_string(workspace->buffer.view_token);
-      if (fetch_key == completion_key && !all_items.empty()) {
-        semantic_mode = true;
-        merge_local_scope_items(workspace);
-        refresh_matches();
-        return;
-      }
-      CompletionParams params;
-      params.path = path;
-      params.text = buffer_text(workspace->buffer);
-      params.line = line;
-      params.character = col;
-      auto items = symbols->completions_at(params);
-      if (!items.empty()) {
-        fetch_key = completion_key;
-        all_items = std::move(items);
-        semantic_mode = true;
-        merge_local_scope_items(workspace);
-        refresh_matches();
-        return;
-      }
-      merge_local_scope_items(workspace);
-      if (!all_items.empty()) {
-        fetch_key = completion_key;
-        semantic_mode = false;
-        refresh_matches();
-        return;
-      }
-    }
-
     semantic_mode = false;
 
-    if (symbols && !symbols->indexes_workspace_bulk() && !workspace_root.empty()) {
-      const std::string key = workspace_root + "|lsp|" + query + "|" + path;
-      if (fetch_key == key && !all_items.empty()) {
-        workspace_index = true;
-        merge_local_scope_items(workspace);
-        refresh_matches();
-        return;
-      }
-      if (fetch_key != key) {
-        fetch_key = key;
-        workspace_index = true;
-        index_scanning = false;
-        all_items.clear();
-        if (query.empty() && !path.empty()) {
-          for (const auto& sym : symbols->symbols_for_file(path)) {
-            all_items.push_back(from_symbol(sym));
-          }
-        } else {
-          for (const auto& sym : symbols->workspace_symbols(workspace_root, query)) {
-            all_items.push_back(from_symbol(sym));
-          }
-        }
-        refresh_matches();
-      }
+    const std::string sync_key =
+        path + "|sync|" + std::to_string(line) + "|" + std::to_string(col) + "|" +
+        std::to_string(workspace->buffer.view_token);
+    if (fetch_key == sync_key && !all_items.empty()) {
       merge_local_scope_items(workspace);
+      refresh_matches();
       return;
     }
+
+    fetch_key = sync_key;
+    all_items.clear();
 
     if (symbol_indexer != nullptr && !workspace_root.empty()) {
       const auto snap = symbol_indexer->snapshot();
       if (snap && snap->workspace_root == workspace_root) {
         index_scanning = symbol_indexer->scanning();
-        if (!snap->symbols.empty() || !index_scanning) {
-          const std::string key = workspace_root + "|workspace";
-          if (fetch_key == key && !all_items.empty()) {
-            workspace_index = true;
-            merge_local_scope_items(workspace);
-            refresh_matches();
-            return;
+        if (!snap->symbols.empty()) {
+          workspace_index = true;
+          for (const auto& sym : snap->symbols) {
+            all_items.push_back(from_indexed(sym));
           }
-          if (fetch_key != key) {
-            fetch_key = key;
-            all_items.clear();
-            for (const auto& sym : snap->symbols) {
-              all_items.push_back(from_indexed(sym));
-            }
-            workspace_index = true;
-          }
-          merge_local_scope_items(workspace);
-          refresh_matches();
-          return;
         }
       }
     }
 
-    const std::string key = workspace_root + "|" + path;
-    if (fetch_key == key) {
-      merge_local_scope_items(workspace);
-      refresh_matches();
-      return;
+    if (all_items.empty() && symbols && !symbols->indexes_workspace_bulk() &&
+        !workspace_root.empty()) {
+      workspace_index = true;
+      auto syms = symbols->workspace_symbols(workspace_root, query);
+      if (syms.empty() && !path.empty()) {
+        syms = symbols->symbols_for_file(path);
+      }
+      for (const auto& sym : syms) {
+        all_items.push_back(from_symbol(sym));
+      }
     }
-    fetch_key = key;
-    workspace_index = false;
-    all_items.clear();
-    if (symbols && !path.empty()) {
+
+    if (all_items.empty() && symbols && !path.empty()) {
       for (const auto& sym : symbols->symbols_for_file(path)) {
         all_items.push_back(from_symbol(sym));
       }
     }
+
+    if (symbols && symbols->supports_semantic_completion() && !path.empty()) {
+      CompletionParams params;
+      params.path = path;
+      params.text = buffer_text(workspace->buffer);
+      params.line = line;
+      params.character = col;
+      auto lsp_items = symbols->completions_at(params);
+      if (!lsp_items.empty()) {
+        semantic_mode = true;
+        std::vector<CompletionItem> merged = std::move(lsp_items);
+        merge_completion_items(&merged, all_items);
+        all_items = std::move(merged);
+      }
+    }
+
     merge_local_scope_items(workspace);
     refresh_matches();
   }
@@ -506,22 +530,101 @@ bool handle_editor_escape(EditorBuffer* buffer, EditorFindState* find,
   return true;
 }
 
+CursorPos mouse_to_cursor(const Mouse& m, const EditorPanelState& panel, const EditorBuffer& buffer,
+                          int visible_lines) {
+  const bool in_code = panel.code_box.Contain(m.x, m.y);
+  const bool in_gutter = panel.gutter_box.Contain(m.x, m.y);
+
+  int row = 0;
+  if (in_code) {
+    row = m.y - panel.code_box.y_min;
+  } else if (in_gutter) {
+    row = m.y - panel.gutter_box.y_min;
+  } else if (m.y < panel.code_box.y_min) {
+    row = 0;
+  } else if (m.y > panel.code_box.y_max) {
+    row = visible_lines - 1;
+  } else {
+    row = m.y - panel.code_box.y_min;
+  }
+
+  const int max_line = std::max(0, static_cast<int>(buffer.lines.size()) - 1);
+  const int line = std::max(0, std::min(buffer.scroll + row, max_line));
+
+  int col = 0;
+  if (in_code) {
+    col = std::max(0, m.x - panel.code_box.x_min);
+    const int line_len = static_cast<int>(buffer.lines[static_cast<std::size_t>(line)].size());
+    col = std::min(col, line_len);
+  } else if (m.x >= panel.code_box.x_min) {
+    col = static_cast<int>(buffer.lines[static_cast<std::size_t>(line)].size());
+  }
+
+  return {line, col};
+}
+
+void autoscroll_on_drag(EditorBuffer* buffer, const Mouse& m, const EditorPanelState& panel,
+                        int visible_lines) {
+  if (m.y < panel.code_box.y_min && buffer->scroll > 0) {
+    scroll_view_by_lines(buffer, -1, visible_lines);
+  } else if (m.y > panel.code_box.y_max) {
+    scroll_view_by_lines(buffer, 1, visible_lines);
+  }
+}
+
+void begin_mouse_selection(EditorPanelState* panel, Event event) {
+  panel->mouse_selecting = true;
+  panel->captured_mouse.reset();
+  if (event.screen_ != nullptr) {
+    panel->captured_mouse = event.screen_->CaptureMouse();
+  }
+}
+
+void end_mouse_selection(EditorPanelState* panel) {
+  panel->mouse_selecting = false;
+  panel->captured_mouse.reset();
+}
+
+void apply_mouse_drag_head(EditorBuffer* buffer, const Mouse& m, const EditorPanelState& panel,
+                           int visible_lines) {
+  autoscroll_on_drag(buffer, m, panel, visible_lines);
+  const CursorPos pos = mouse_to_cursor(m, panel, *buffer, visible_lines);
+  buffer->primary().head = pos;
+  clamp_all_cursors(buffer);
+  ensure_scroll_visible(buffer, visible_lines);
+}
+
 bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
                          EditorFindState* find, MainLayoutState* layout_state,
-                         const EditorPanelState& panel,
+                         EditorPanelState* panel,
                          const std::shared_ptr<ISymbolProvider>& symbols, Event event,
                          int visible_lines) {
   if (!event.is_mouse()) {
     return false;
   }
 
+  update_editor_modifiers(panel, event);
+
   EditorBuffer* buffer = &workspace->buffer;
   buffer->ensure_cursors();
 
   const auto& m = event.mouse();
-  const bool in_code = panel.code_box.Contain(m.x, m.y);
-  const bool in_gutter = panel.gutter_box.Contain(m.x, m.y);
-  if (!in_code && !in_gutter) {
+  const bool in_code = panel->code_box.Contain(m.x, m.y);
+  const bool in_gutter = panel->gutter_box.Contain(m.x, m.y);
+  const bool in_editor = in_code || in_gutter;
+
+  if (m.button == Mouse::Left && m.motion == Mouse::Moved && panel->mouse_selecting) {
+    apply_mouse_drag_head(buffer, m, *panel, visible_lines);
+    return true;
+  }
+
+  if (m.button == Mouse::Left && m.motion == Mouse::Released && panel->mouse_selecting) {
+    apply_mouse_drag_head(buffer, m, *panel, visible_lines);
+    end_mouse_selection(panel);
+    return true;
+  }
+
+  if (!in_editor) {
     return false;
   }
 
@@ -549,26 +652,47 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
         layout_state->text_input_focus = TextInputFocus::None;
       }
     }
-    const int row = m.y - (in_gutter ? panel.gutter_box.y_min : panel.code_box.y_min);
-    const int line =
-        std::max(0, std::min(buffer->scroll + row,
-                             static_cast<int>(buffer->lines.size()) - 1));
-    int col = buffer->primary_col();
-    if (in_code) {
-      col = std::max(0, m.x - panel.code_box.x_min);
-      const int line_len = static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size());
-      col = std::min(col, line_len);
-    }
+
+    const CursorPos pos = mouse_to_cursor(m, *panel, *buffer, visible_lines);
+    const bool shift_click = m.shift || panel->keyboard_shift;
 
     if (m.control && symbols != nullptr && symbols->supports_navigation() &&
         !buffer->path.empty()) {
-      const bool declaration = m.shift;
-      if (try_go_to_symbol(workspace, symbols, line, col, declaration, visible_lines)) {
+      const bool declaration = shift_click;
+      if (try_go_to_symbol(workspace, symbols, pos.line, pos.col, declaration, visible_lines)) {
         return true;
       }
     }
 
-    buffer->reset_to_single_cursor(line, col);
+    const int64_t now_ms = steady_now_ms();
+    const bool double_click =
+        in_code && !shift_click && !m.control && is_double_click(*panel, pos.line, pos.col, now_ms);
+    panel->last_click_line = pos.line;
+    panel->last_click_col = pos.col;
+    panel->last_click_ms = now_ms;
+
+    if (double_click) {
+      select_word_at(buffer, pos.line, pos.col);
+      ensure_scroll_visible(buffer, visible_lines);
+      return true;
+    }
+
+    if (shift_click) {
+      end_mouse_selection(panel);
+      if (buffer->multi_cursor_active()) {
+        exit_multi_cursor_mode(buffer);
+      }
+      const CursorPos anchor =
+          buffer->primary().has_selection() ? buffer->primary().anchor : buffer->primary().head;
+      buffer->primary().anchor = anchor;
+      buffer->primary().head = pos;
+      clamp_all_cursors(buffer);
+      ensure_scroll_visible(buffer, visible_lines);
+      return true;
+    }
+
+    buffer->reset_to_single_cursor(pos.line, pos.col);
+    begin_mouse_selection(panel, event);
     ensure_scroll_visible(buffer, visible_lines);
     return true;
   }
@@ -757,7 +881,7 @@ bool handle_completion_keys(CompletionState* completion, WorkspaceModel* workspa
 
 bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
                         EditorFindState* find, GotoLineState* goto_state,
-                        CompletionState* completion,
+                        CompletionState* completion, EditorPanelState* panel,
                         const std::shared_ptr<ISymbolProvider>& symbols,
                         WorkspaceIndexer* file_indexer,
                         SymbolWorkspaceIndexer* symbol_indexer,
@@ -836,6 +960,20 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     ensure_scroll_visible(buffer, visible_lines);
     return true;
   }
+  if (event == Event::Tab || event_is_plain_tab(event)) {
+    const bool ctrl_tab =
+        panel != nullptr &&
+        (panel->keyboard_control ||
+         (panel->last_ctrl_activity_ms > 0 &&
+          steady_now_ms() - panel->last_ctrl_activity_ms <= kCtrlTabWindowMs));
+    if (ctrl_tab) {
+      move_primary_half_page_down(buffer, visible_lines);
+    } else {
+      insert_char(buffer, '\t');
+    }
+    ensure_scroll_visible(buffer, visible_lines);
+    return true;
+  }
   if (event_is_ctrl_i(event)) {
     move_primary_half_page_down(buffer, visible_lines);
     ensure_scroll_visible(buffer, visible_lines);
@@ -874,8 +1012,19 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   const bool extend = event_is_shift_left(event) || event_is_shift_right(event) ||
-                      event_is_shift_up(event) || event_is_shift_down(event);
+                      event_is_shift_up(event) || event_is_shift_down(event) ||
+                      event_is_ctrl_shift_left(event) || event_is_ctrl_shift_right(event);
 
+  if (event_is_ctrl_left(event) || event_is_ctrl_shift_left(event)) {
+    move_primary_word_left(buffer, extend);
+    ensure_scroll_visible(buffer, visible_lines);
+    return true;
+  }
+  if (event_is_ctrl_right(event) || event_is_ctrl_shift_right(event)) {
+    move_primary_word_right(buffer, extend);
+    ensure_scroll_visible(buffer, visible_lines);
+    return true;
+  }
   if (event == Event::ArrowLeft || event_is_shift_left(event)) {
     move_primary_left(buffer, extend);
     ensure_scroll_visible(buffer, visible_lines);
@@ -883,16 +1032,6 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event == Event::ArrowRight || event_is_shift_right(event)) {
     move_primary_right(buffer, extend);
-    ensure_scroll_visible(buffer, visible_lines);
-    return true;
-  }
-  if (event_is_ctrl_left(event)) {
-    move_primary_word_left(buffer, extend);
-    ensure_scroll_visible(buffer, visible_lines);
-    return true;
-  }
-  if (event_is_ctrl_right(event)) {
-    move_primary_word_right(buffer, extend);
     ensure_scroll_visible(buffer, visible_lines);
     return true;
   }
@@ -970,11 +1109,6 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event == Event::Return) {
     newline(buffer);
-    ensure_scroll_visible(buffer, visible_lines);
-    return true;
-  }
-  if (event == Event::Tab) {
-    insert_char(buffer, '\t');
     ensure_scroll_visible(buffer, visible_lines);
     return true;
   }
@@ -1263,6 +1397,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     EditorBuffer* buffer = &workspace->buffer;
     const int visible = visible_line_count(panel_state->code_box);
 
+    update_editor_modifiers(panel_state.get(), event);
+
     if (find_state->open && event == Event::Escape) {
       close_find_bar(find_state.get());
       if (layout_state != nullptr) {
@@ -1280,8 +1416,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       return true;
     }
     return handle_editor_keys(workspace, focus, find_state.get(), goto_state.get(),
-                              completion_state.get(), symbols, file_indexer, symbol_indexer,
-                              layout_state, event, visible);
+                              completion_state.get(), panel_state.get(), symbols, file_indexer,
+                              symbol_indexer, layout_state, event, visible);
   };
 
   if (layout_state != nullptr) {
@@ -1292,7 +1428,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                           find_state, layout_state, symbols](Event event) {
     workspace->ensure_buffer();
     const int visible = visible_line_count(panel_state->code_box);
-    if (handle_editor_mouse(workspace, focus, find_state.get(), layout_state, *panel_state,
+    update_editor_modifiers(panel_state.get(), event);
+    if (handle_editor_mouse(workspace, focus, find_state.get(), layout_state, panel_state.get(),
                             symbols, event, visible)) {
       return true;
     }

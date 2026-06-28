@@ -316,18 +316,23 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
   }
 
   DocumentState doc;
+  bool open_new = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = documents_.find(key);
     if (it == documents_.end()) {
-      did_open(absolute_path, text);
-      return;
+      open_new = true;
+    } else {
+      it->second.text = text;
+      it->second.version += 1;
+      doc = it->second;
+      invalidate_cache(key);
+      invalidate_semantic_tokens(key);
     }
-    it->second.text = text;
-    it->second.version += 1;
-    doc = it->second;
-    invalidate_cache(key);
-    invalidate_semantic_tokens(key);
+  }
+  if (open_new) {
+    did_open(absolute_path, text);
+    return;
   }
 
   nlohmann::json params = {
@@ -610,11 +615,16 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
     return {};
   }
 
-  if (!text.empty()) {
-    did_change(absolute_path, text);
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return {};
   }
 
-  const std::string uri = path_to_uri(absolute_path);
+  if (!text.empty()) {
+    did_change(key, text);
+  }
+
+  const std::string uri = path_to_uri(key);
   nlohmann::json params = {{"textDocument", {{"uri", uri}}},
                            {"position", {{"line", line}, {"character", character}}},
                            {"context", {{"triggerKind", 1}}}};

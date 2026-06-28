@@ -38,6 +38,7 @@ void move_primary_word_left(EditorBuffer* buffer, bool extend_selection = false)
 void move_primary_word_right(EditorBuffer* buffer, bool extend_selection = false);
 
 void clear_primary_selection(EditorBuffer* buffer);
+void select_word_at(EditorBuffer* buffer, int line, int col);
 
 void extend_block_selection_vertical(EditorBuffer* buffer, int direction);
 void goto_buffer_line(EditorBuffer* buffer, int line_one_based, int visible_lines);
