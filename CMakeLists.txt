@@ -21,6 +21,7 @@ add_executable(tgdb
   src/ui/source_panel.cpp
   src/ui/editor_panel.cpp
   src/ui/editor_tab_bar.cpp
+  src/ui/context_menu.cpp
   src/ui/diagnostics_panel.cpp
   src/ui/outline_panel.cpp
   src/ui/search_panel.cpp

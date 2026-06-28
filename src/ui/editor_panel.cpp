@@ -32,6 +32,7 @@
 #include "ftxui/screen/box.hpp"
 #include "ui/editor_tab_bar.hpp"
 #include "ui/focusable_component.hpp"
+#include "ui/context_menu.hpp"
 #include "ui/diagnostics_panel.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
@@ -1324,6 +1325,25 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
 
+  if (m.button == Mouse::Right && m.motion == Mouse::Pressed && in_code) {
+    focus->region = FocusRegion::Editor;
+    const CursorPos pos = mouse_to_cursor(m, *panel, *buffer, visible_lines);
+    buffer->reset_to_single_cursor(pos.line, pos.col);
+    MultiCursor cursor = buffer->primary();
+    cursor.head = pos;
+    int start_col = 0;
+    int end_col = 0;
+    ident_range_at_cursor(*buffer, cursor, &start_col, &end_col);
+    const std::string symbol = word_at_cursor(*buffer, cursor);
+    if (!symbol.empty() && layout_state != nullptr) {
+      context_menu_open_editor_symbol(&layout_state->context_menu, m.x, m.y, pos.line, pos.col,
+                                      start_col, end_col, symbol);
+      end_mouse_selection(panel);
+      return true;
+    }
+    return false;
+  }
+
   if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
     focus->region = FocusRegion::Editor;
     if (layout_state != nullptr) {
@@ -2284,6 +2304,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     layout_state->editor_mouse_handler = dispatch_editor_mouse;
     layout_state->editor_chrome_mouse_handler = dispatch_editor_chrome_mouse;
     layout_state->editor_modifier_handler = dispatch_editor_modifiers;
+    layout_state->editor_visible_line_count = [panel_state]() {
+      return visible_line_count(panel_state->code_box);
+    };
     layout_state->editor_tick_callback = [workspace, panel_state, symbols]() {
       editor_hover_tick(workspace, panel_state.get(), symbols);
       if (symbols && workspace != nullptr) {

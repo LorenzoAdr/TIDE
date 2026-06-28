@@ -13,6 +13,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
 #include "ui/focusable_component.hpp"
+#include "ui/context_menu.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
@@ -72,21 +73,22 @@ struct FileTreePanelState {
 
   void rebuild_flat() {
     flat.clear();
-    std::function<void(FileTreeNode&, int)> walk;
-    walk = [&](FileTreeNode& node, int depth) {
+    std::function<void(FileTreeNode&, int, const std::string&)> walk;
+    walk = [&](FileTreeNode& node, int depth, const std::string& parent_path) {
       for (auto& child : node.children) {
+        const std::string child_path =
+            parent_path.empty() ? child.name : parent_path + "/" + child.name;
         if (child.is_file) {
-          flat.push_back(
-              {depth, child.name, child.relative_path, true, nullptr});
+          flat.push_back({depth, child.name, child.relative_path, true, nullptr});
         } else {
-          flat.push_back({depth, child.name, "", false, &child});
+          flat.push_back({depth, child.name, child_path, false, &child});
           if (child.expanded) {
-            walk(child, depth + 1);
+            walk(child, depth + 1, child_path);
           }
         }
       }
     };
-    walk(root, 0);
+    walk(root, 0, "");
     if (selected >= static_cast<int>(flat.size())) {
       selected = std::max(0, static_cast<int>(flat.size()) - 1);
     }
@@ -123,24 +125,61 @@ struct FileTreePanelState {
   }
 };
 
+bool handle_explorer_context_menu(FileTreePanelState* state, DebugModel* model,
+                                  WorkspaceModel* workspace, FocusManagerState* focus,
+                                  MainLayoutState* layout_state, Event event) {
+  if (!event.is_mouse() || event.mouse().button != Mouse::Right ||
+      event.mouse().motion != Mouse::Pressed) {
+    return false;
+  }
+  const auto& m = event.mouse();
+  if (!state->content_box.Contain(m.x, m.y)) {
+    return false;
+  }
+  const int row = m.y - state->content_box.y_min;
+  if (row < 0 || row >= static_cast<int>(state->flat.size())) {
+    return false;
+  }
+  state->selected = row;
+  const auto& entry = state->flat[row];
+  if (focus != nullptr) {
+    focus->region = FocusRegion::Explorer;
+  }
+  std::error_code ec;
+  const auto absolute = std::filesystem::weakly_canonical(
+      std::filesystem::path(model->workspace_root) / entry.relative_path, ec);
+  if (ec || layout_state == nullptr) {
+    return true;
+  }
+  if (entry.is_file) {
+    context_menu_open_file(&layout_state->context_menu, m.x, m.y, absolute.string(),
+                           entry.relative_path);
+  } else {
+    context_menu_open_folder(&layout_state->context_menu, m.x, m.y, absolute.string(),
+                             entry.relative_path);
+  }
+  return true;
+}
+
 bool handle_navigation(FileTreePanelState* state, DebugModel* model,
                        WorkspaceModel* workspace, FocusManagerState* focus,
                        MainLayoutState* layout_state, Event event) {
   if (event.is_mouse() && event.mouse().button == Mouse::Left &&
       event.mouse().motion == Mouse::Pressed) {
     const auto& m = event.mouse();
-    if (state->content_box.Contain(m.x, m.y)) {
-      if (focus != nullptr) {
-        focus->region = FocusRegion::Explorer;
-      }
-      const int row = m.y - state->content_box.y_min;
-      if (row >= 0 && row < static_cast<int>(state->flat.size())) {
-        state->selected = row;
-        state->activate(model, workspace, focus, layout_state, row);
-      }
-      return true;
+    if (!state->content_box.Contain(m.x, m.y)) {
+      return false;
     }
-    return false;
+    const int row = m.y - state->content_box.y_min;
+    if (row < 0 || row >= static_cast<int>(state->flat.size())) {
+      return false;
+    }
+    if (focus != nullptr) {
+      focus->region = FocusRegion::Explorer;
+    }
+    state->selected = row;
+    state->activate(model, workspace, focus, layout_state, row);
+    return true;
   }
 
   if (focus != nullptr && focus->region != FocusRegion::Explorer) {
@@ -242,6 +281,14 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
     auto content = vbox({list | bgcolor(theme::PanelBg())});
     return MakePanel("Explorador", std::move(content));
   });
+
+  if (layout_state != nullptr) {
+    layout_state->explorer_context_handler =
+        [state, model, workspace, focus, layout_state](const Event& event) {
+          return handle_explorer_context_menu(state.get(), model, workspace, focus, layout_state,
+                                              event);
+        };
+  }
 
   return WrapFocusable(CatchEvent(renderer, [model, workspace, focus, state, layout_state](Event event) {
     return handle_navigation(state.get(), model, workspace, focus, layout_state, event);

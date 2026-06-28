@@ -13,6 +13,7 @@
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/screen_interactive.hpp"
+#include "ui/context_menu.hpp"
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/quit_confirm.hpp"
@@ -516,7 +517,8 @@ void Application::process_index_changes() {
 bool Application::any_modal_open() const {
   return workspace_wizard_state_.open || connection_wizard_state_.open ||
          file_picker_state_.open || symbol_picker_state_.open ||
-         shortcuts_modal_state_.open || quit_confirm_state_.open;
+         shortcuts_modal_state_.open || quit_confirm_state_.open ||
+         context_menu_active(&layout_state_.context_menu);
 }
 
 bool Application::handle_focus_shortcuts(const Event& event) {
@@ -657,7 +659,17 @@ int Application::run() {
         screen.ExitLoopClosure()();
       });
 
-  auto root = CatchEvent(with_quit_confirm, [this, &screen, on_command](const Event& event) {
+  auto with_context_menu = MakeContextMenuOverlay(
+      with_quit_confirm, &layout_state_.context_menu, &workspace_, &model_, &focus_state_,
+      &layout_state_, symbol_provider_, &indexer_, &symbol_indexer_,
+      [this]() {
+        if (layout_state_.editor_visible_line_count) {
+          return layout_state_.editor_visible_line_count();
+        }
+        return 24;
+      });
+
+  auto root = CatchEvent(with_context_menu, [this, &screen, on_command](const Event& event) {
     try {
       if (event == Event::Custom) {
         if (!any_modal_open()) {
@@ -695,6 +707,13 @@ int Application::run() {
       if (layout_state_.editor_modifier_handler) {
         Event mod_event = event;
         layout_state_.editor_modifier_handler(mod_event);
+      }
+
+      if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
+          layout_state_.explorer_context_handler &&
+          layout_state_.explorer_context_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
       }
 
       if (app_mode_ == AppMode::kNormal && event.is_mouse() &&

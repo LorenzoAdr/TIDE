@@ -263,6 +263,14 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
 
   auto handler = [state, workspace, model, focus, layout_state, indexer, sidebar, query_input,
                   replace_input, path_input, exclude_input, activate_field](Event event) {
+    if (event == Event::Custom && sidebar != nullptr && sidebar->pending_search_setup) {
+      state->query = sidebar->pending_search_query;
+      state->path_filter = sidebar->pending_search_path_filter;
+      sidebar->pending_search_setup = false;
+      sidebar->pending_search_query.clear();
+      sidebar->pending_search_path_filter.clear();
+      run_search(state.get(), model, indexer);
+    }
     if (event == Event::Custom && sidebar != nullptr && sidebar->pending_focus_search) {
       sidebar->pending_focus_search = false;
       activate_field(TextInputFocus::SearchQuery, query_input);

@@ -13,6 +13,7 @@
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "indexer/workspace_indexer.hpp"
 #include "ui/focus_manager.hpp"
+#include "ui/context_menu.hpp"
 #include "ui/source_panel.hpp"
 
 namespace tgdb {
@@ -36,6 +37,9 @@ enum class TextInputFocus {
 struct RightSidebarState {
   int selected_tab = 0;
   bool pending_focus_search = false;
+  bool pending_search_setup = false;
+  std::string pending_search_query;
+  std::string pending_search_path_filter;
 };
 
 using StopDebugCallback = std::function<void()>;
@@ -58,11 +62,14 @@ struct MainLayoutState {
   bool pending_watches_focus = false;
   int right_panel_active_section = 0;  // 0 = outline/búsqueda, 1 = depuración
   RightSidebarState right_sidebar;
+  ContextMenuState context_menu;
   std::function<bool(const ftxui::Event&)> editor_key_handler;
   std::function<bool(const ftxui::Event&)> editor_mouse_handler;
   std::function<bool(const ftxui::Event&)> editor_chrome_mouse_handler;
+  std::function<bool(const ftxui::Event&)> explorer_context_handler;
   std::function<void(ftxui::Event&)> editor_modifier_handler;
   std::function<void()> editor_tick_callback;
+  std::function<int()> editor_visible_line_count;
   std::function<void()> outline_tick_callback;
   std::function<bool(const ftxui::Event&)> console_key_handler;
   std::function<bool(const ftxui::Event&)> search_key_handler;
