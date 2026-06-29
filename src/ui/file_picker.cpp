@@ -50,7 +50,8 @@ void FilePickerState::sync_index(const std::shared_ptr<const IndexSnapshot>& sna
 void FilePickerState::refresh_matches() {
   matches.clear();
   for (const auto& path : all_files) {
-    if (contains_insensitive(path, query)) {
+    const std::string filename = std::filesystem::path(path).filename().string();
+    if (contains_insensitive(filename, query)) {
       matches.push_back(path);
     }
   }
