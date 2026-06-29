@@ -20,7 +20,7 @@ namespace tgdb {
 
 struct MainLayoutState;
 
-enum class ContextMenuKind { File, Folder, EditorSymbol };
+enum class ContextMenuKind { File, Folder, EditorSymbol, EditorBackground };
 
 struct ContextMenuState {
   bool open = false;
@@ -53,13 +53,19 @@ bool context_menu_active(const ContextMenuState* state);
 void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state = nullptr);
 
 void context_menu_open_file(ContextMenuState* state, int x, int y,
-                            const std::string& absolute_path, const std::string& relative_path);
+                            const std::string& absolute_path, const std::string& relative_path,
+                            bool show_format = false);
 
 void context_menu_open_folder(ContextMenuState* state, int x, int y,
                               const std::string& absolute_path, const std::string& relative_path);
 
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
-                                     int sym_start, int sym_end, const std::string& symbol);
+                                     int sym_start, int sym_end, const std::string& symbol,
+                                     bool show_call_hierarchy);
+
+void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
+                                         const std::string& absolute_path, int line, int col,
+                                         bool show_call_hierarchy);
 
 bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace,
                               DebugModel* model, FocusManagerState* focus,

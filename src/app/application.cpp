@@ -589,7 +589,7 @@ bool Application::handle_focus_shortcuts(const Event& event) {
       return true;
     }
     focus_state_.region = FocusRegion::RightPanel;
-    layout_state_.right_sidebar.selected_tab = 1;
+    layout_state_.right_sidebar.selected_tab = RightSidebarTabs::kSearch;
     layout_state_.right_panel_active_section = 0;
     layout_state_.right_sidebar.pending_focus_search = true;
     layout_state_.text_input_focus = TextInputFocus::SearchQuery;
@@ -749,6 +749,10 @@ int Application::run() {
         if (layout_state_.outline_tick_callback) {
           layout_state_.outline_tick_callback();
         }
+        if (layout_state_.right_sidebar.pending_call_hierarchy &&
+            layout_state_.call_hierarchy_key_handler) {
+          layout_state_.call_hierarchy_key_handler(event);
+        }
         return false;
       }
 
@@ -784,8 +788,8 @@ int Application::run() {
       }
 
       if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
-          layout_state_.explorer_context_handler &&
-          layout_state_.explorer_context_handler(event)) {
+          layout_state_.explorer_mouse_handler &&
+          layout_state_.explorer_mouse_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
@@ -839,6 +843,13 @@ int Application::run() {
       if (is_search_input_focus(layout_state_.text_input_focus) &&
           layout_state_.search_key_handler &&
           layout_state_.search_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+      if (focus_state_.region == FocusRegion::RightPanel &&
+          layout_state_.right_sidebar.selected_tab == RightSidebarTabs::kCallHierarchy &&
+          layout_state_.call_hierarchy_key_handler &&
+          layout_state_.call_hierarchy_key_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }

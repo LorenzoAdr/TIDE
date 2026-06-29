@@ -20,10 +20,11 @@ using namespace ftxui;
 
 namespace {
 
-constexpr int kTabCount = 2;
+constexpr int kTabCount = RightSidebarTabs::kCount;
 
-constexpr std::array<std::string_view, kTabCount> kTabIds = {press_id::kSidebarTabOutline,
-                                                             press_id::kSidebarTabSearch};
+constexpr std::array<std::string_view, kTabCount> kTabIds = {
+    press_id::kSidebarTabOutline, press_id::kSidebarTabSearch,
+    press_id::kSidebarTabCallHierarchy};
 
 bool switch_tab(RightSidebarState* state, int tab, MainLayoutState* layout_state) {
   if (state == nullptr || tab < 0 || tab >= kTabCount) {
@@ -38,7 +39,7 @@ bool switch_tab(RightSidebarState* state, int tab, MainLayoutState* layout_state
     case TextInputFocus::SearchReplace:
     case TextInputFocus::SearchPath:
     case TextInputFocus::SearchExclude:
-      if (tab != 1) {
+      if (tab != RightSidebarTabs::kSearch) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
       break;
@@ -56,23 +57,25 @@ bool handle_sidebar_tab_hover(MainLayoutState* layout_state,
   return update_panel_hover(
       layout_state, mouse.x, mouse.y,
       {{press_id::kSidebarTabOutline, &tab_boxes[0]},
-       {press_id::kSidebarTabSearch, &tab_boxes[1]}},
+       {press_id::kSidebarTabSearch, &tab_boxes[1]},
+       {press_id::kSidebarTabCallHierarchy, &tab_boxes[2]}},
       press_id::is_sidebar_tab_hover);
 }
 
 class RightSidebarLayout : public ComponentBase {
  public:
-  RightSidebarLayout(Component outline, Component search, RightSidebarState* state,
-                     MainLayoutState* layout_state)
+  RightSidebarLayout(Component outline, Component search, Component call_hierarchy,
+                     RightSidebarState* state, MainLayoutState* layout_state)
       : state_(state), layout_state_(layout_state) {
     tab_boxes_.fill(Box{});
     Add(std::move(outline));
     Add(std::move(search));
+    Add(std::move(call_hierarchy));
   }
 
   Element OnRender() override {
     Elements tab_row;
-    const std::array<std::string, kTabCount> titles = {"Outline", "Buscar"};
+    const std::array<std::string, kTabCount> titles = {"Outline", "Buscar", "Jerarquía"};
     for (int i = 0; i < kTabCount; ++i) {
       const bool selected = state_ != nullptr && state_->selected_tab == i;
       tab_row.push_back(MakeTabButton(
@@ -100,11 +103,15 @@ class RightSidebarLayout : public ComponentBase {
 
     if (event == Event::Character('1')) {
       trigger_press(layout_state_, press_id::kSidebarTabOutline);
-      return switch_tab(state_, 0, layout_state_);
+      return switch_tab(state_, RightSidebarTabs::kOutline, layout_state_);
     }
     if (event == Event::Character('2')) {
       trigger_press(layout_state_, press_id::kSidebarTabSearch);
-      return switch_tab(state_, 1, layout_state_);
+      return switch_tab(state_, RightSidebarTabs::kSearch, layout_state_);
+    }
+    if (event == Event::Character('3')) {
+      trigger_press(layout_state_, press_id::kSidebarTabCallHierarchy);
+      return switch_tab(state_, RightSidebarTabs::kCallHierarchy, layout_state_);
     }
 
     if (event.is_mouse() && event.mouse().motion == Mouse::Moved) {
@@ -161,10 +168,10 @@ class RightSidebarLayout : public ComponentBase {
 
 }  // namespace
 
-Component MakeRightSidebarPanel(Component outline, Component search, RightSidebarState* state,
-                                MainLayoutState* layout_state) {
-  return WrapFocusable(Make<RightSidebarLayout>(std::move(outline), std::move(search), state,
-                                                layout_state));
+Component MakeRightSidebarPanel(Component outline, Component search, Component call_hierarchy,
+                                RightSidebarState* state, MainLayoutState* layout_state) {
+  return WrapFocusable(Make<RightSidebarLayout>(std::move(outline), std::move(search),
+                                                std::move(call_hierarchy), state, layout_state));
 }
 
 }  // namespace tgdb

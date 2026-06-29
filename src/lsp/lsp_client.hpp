@@ -10,8 +10,10 @@
 #include <nlohmann/json.hpp>
 
 #include "lsp/lsp_transport.hpp"
+#include "lsp/lsp_text_edits.hpp"
 #include "lsp/semantic_tokens.hpp"
 #include "lsp/diagnostics.hpp"
+#include "symbols/call_hierarchy.hpp"
 #include "symbols/hover_info.hpp"
 #include "symbols/symbol_provider.hpp"
 
@@ -50,6 +52,19 @@ class LspClient {
 
   HoverInfo hover(const std::string& absolute_path, const std::string& text, int line,
                   int character);
+
+  std::optional<std::string> format_document(const std::string& absolute_path,
+                                             const std::string& text);
+
+  std::vector<LspFileEdits> rename_symbol(const std::string& absolute_path,
+                                          const std::string& text, int line, int character,
+                                          const std::string& new_name);
+
+  std::vector<CallHierarchyItem> prepare_call_hierarchy(const std::string& absolute_path,
+                                                        const std::string& text, int line,
+                                                        int character);
+  std::vector<CallHierarchyItem> incoming_calls(const CallHierarchyItem& item);
+  std::vector<CallHierarchyItem> outgoing_calls(const CallHierarchyItem& item);
 
   DocumentDiagnostics diagnostics_for_file(const std::string& absolute_path);
   std::vector<DocumentDiagnostics> all_diagnostics() const;

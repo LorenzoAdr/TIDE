@@ -6,6 +6,7 @@
 namespace tgdb {
 
 ftxui::Component MakeRightSidebarPanel(ftxui::Component outline, ftxui::Component search,
-                                     RightSidebarState* state, MainLayoutState* layout_state);
+                                     ftxui::Component call_hierarchy, RightSidebarState* state,
+                                     MainLayoutState* layout_state);
 
 }  // namespace tgdb

@@ -82,9 +82,10 @@ Element highlight_semantic_segment(const std::string& segment, const SemanticTok
 Element highlight_semantic_line(const std::string& line,
                                 const std::vector<SemanticTokenSpan>& spans,
                                 const std::vector<std::string>& types, int cursor_col,
-                                Decorator cursor_style, int col_offset) {
+                                Decorator cursor_style, int col_offset,
+                                CppHighlightContext* ctx) {
   if (spans.empty()) {
-    return HighlightCppLine(line, cursor_col, cursor_style);
+    return HighlightCppLine(line, cursor_col, cursor_style, col_offset, ctx);
   }
 
   Elements parts;
@@ -104,7 +105,7 @@ Element highlight_semantic_line(const std::string& line,
                                             static_cast<std::size_t>(gap_end - gap_start));
         const int gap_cursor =
             (cursor_col >= col && cursor_col < span.start_col) ? cursor_col - col : -1;
-        parts.push_back(HighlightCppLine(gap, gap_cursor, cursor_style));
+        parts.push_back(HighlightCppLine(gap, gap_cursor, cursor_style, col, ctx));
       }
       col = span.start_col;
     }
@@ -128,11 +129,11 @@ Element highlight_semantic_line(const std::string& line,
   if (col < segment_end) {
     const std::string tail = line.substr(static_cast<std::size_t>(col - col_offset));
     const int tail_cursor = cursor_col >= col ? cursor_col - col : -1;
-    parts.push_back(HighlightCppLine(tail, tail_cursor, cursor_style));
+    parts.push_back(HighlightCppLine(tail, tail_cursor, cursor_style, col, ctx));
   }
 
   if (parts.empty()) {
-    return HighlightCppLine(line, cursor_col, cursor_style);
+    return HighlightCppLine(line, cursor_col, cursor_style, col_offset, ctx);
   }
   return hbox(std::move(parts));
 }
@@ -155,21 +156,25 @@ std::vector<SemanticTokenSpan> spans_for_segment(const std::vector<SemanticToken
 
 Element HighlightCodeLine(const std::string& line, int line_index,
                           const SemanticTokenDocument* semantic_tokens, int cursor_col,
-                          Decorator cursor_style, int col_offset) {
+                          Decorator cursor_style, int col_offset, CppHighlightContext* ctx) {
+  if (ctx != nullptr && ctx->in_block_comment) {
+    return HighlightCppLine(line, cursor_col, cursor_style, col_offset, ctx);
+  }
+
   if (semantic_tokens == nullptr || !semantic_tokens->ready ||
       line_index < 0 ||
       line_index >= static_cast<int>(semantic_tokens->lines.size())) {
-    return HighlightCppLine(line, cursor_col, cursor_style);
+    return HighlightCppLine(line, cursor_col, cursor_style, col_offset, ctx);
   }
 
   const auto& line_spans = semantic_tokens->lines[static_cast<std::size_t>(line_index)];
   const auto spans = spans_for_segment(line_spans, col_offset, static_cast<int>(line.size()));
   if (spans.empty()) {
-    return HighlightCppLine(line, cursor_col, cursor_style);
+    return HighlightCppLine(line, cursor_col, cursor_style, col_offset, ctx);
   }
 
   return highlight_semantic_line(line, spans, semantic_tokens->token_types, cursor_col, cursor_style,
-                                 col_offset);
+                                 col_offset, ctx);
 }
 
 }  // namespace tgdb

@@ -9,6 +9,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "lsp/diagnostics.hpp"
 #include "lsp/semantic_tokens.hpp"
+#include "util/cpp_highlight.hpp"
 
 namespace tgdb {
 
@@ -57,6 +58,7 @@ ftxui::Element RenderEditorLine(const std::string& line, int line_index,
                                const std::string* diagnostic_suffix = nullptr,
                                const std::vector<Diagnostic>* suffix_diagnostics = nullptr,
                                const EditorSymbolPress* symbol_press = nullptr,
-                               bool show_caret = true);
+                               bool show_caret = true, int scroll_col = 0, int view_width = -1,
+                               CppHighlightContext* highlight_ctx = nullptr);
 
 }  // namespace tgdb

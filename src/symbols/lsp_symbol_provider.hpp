@@ -46,6 +46,17 @@ class LspSymbolProvider : public ISymbolProvider {
   DocumentDiagnostics diagnostics_for_file(const std::string& path) override;
   std::vector<DocumentDiagnostics> workspace_diagnostics() override;
 
+  bool supports_formatting() const override;
+  std::optional<std::string> format_document(const FormatParams& params) override;
+
+  bool supports_rename() const override;
+  std::vector<LspFileEdits> rename_symbol(const RenameParams& params) override;
+
+  bool supports_call_hierarchy() const override;
+  std::vector<CallHierarchyItem> prepare_call_hierarchy(const CallHierarchyParams& params) override;
+  std::vector<CallHierarchyItem> incoming_calls(const CallHierarchyItem& item) override;
+  std::vector<CallHierarchyItem> outgoing_calls(const CallHierarchyItem& item) override;
+
   void on_workspace_opened(const std::string& root) override;
   void on_workspace_closed() override;
   void on_document_opened(const std::string& path, const std::string& text) override;

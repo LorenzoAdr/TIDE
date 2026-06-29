@@ -483,4 +483,99 @@ std::vector<DocumentDiagnostics> LspSymbolProvider::workspace_diagnostics() {
   return cached_diagnostics_;
 }
 
+bool LspSymbolProvider::supports_formatting() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return use_lsp_ && client_.ready();
+}
+
+std::optional<std::string> LspSymbolProvider::format_document(const FormatParams& params) {
+  if (params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
+    return std::nullopt;
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return std::nullopt;
+  }
+
+  const std::string key = normalize_lsp_path(params.path);
+  if (key.empty()) {
+    return std::nullopt;
+  }
+
+  const std::string text =
+      params.text.empty() ? buffer_text_for_path(key) : params.text;
+  return client_.format_document(key, text);
+}
+
+bool LspSymbolProvider::supports_rename() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return use_lsp_ && client_.ready();
+}
+
+std::vector<LspFileEdits> LspSymbolProvider::rename_symbol(const RenameParams& params) {
+  if (params.path.empty() || params.new_name.empty() ||
+      !is_lsp_trackable_path(params.path, params.text)) {
+    return {};
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+
+  const std::string key = normalize_lsp_path(params.path);
+  if (key.empty()) {
+    return {};
+  }
+
+  const std::string text =
+      params.text.empty() ? buffer_text_for_path(key) : params.text;
+  return client_.rename_symbol(key, text, params.line, params.character, params.new_name);
+}
+
+bool LspSymbolProvider::supports_call_hierarchy() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return use_lsp_ && client_.ready();
+}
+
+std::vector<CallHierarchyItem> LspSymbolProvider::prepare_call_hierarchy(
+    const CallHierarchyParams& params) {
+  if (params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
+    return {};
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+
+  const std::string key = normalize_lsp_path(params.path);
+  if (key.empty()) {
+    return {};
+  }
+
+  const std::string text =
+      params.text.empty() ? buffer_text_for_path(key) : params.text;
+  return client_.prepare_call_hierarchy(key, text, params.line, params.character);
+}
+
+std::vector<CallHierarchyItem> LspSymbolProvider::incoming_calls(
+    const CallHierarchyItem& item) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+  return client_.incoming_calls(item);
+}
+
+std::vector<CallHierarchyItem> LspSymbolProvider::outgoing_calls(
+    const CallHierarchyItem& item) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+  return client_.outgoing_calls(item);
+}
+
 }  // namespace tgdb

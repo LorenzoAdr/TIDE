@@ -13,6 +13,7 @@
 #include "editor/editor_context.hpp"
 #include "editor/editor_find_state.hpp"
 #include "editor/editor_render.hpp"
+#include "util/cpp_highlight.hpp"
 #include "lsp/diagnostics.hpp"
 #include "editor/editor_state.hpp"
 #include "editor/text_ops.hpp"
@@ -126,6 +127,10 @@ struct EditorPanelState {
   SemanticTokenDocument cached_semantic_tokens;
   std::string cached_semantic_path;
   uint64_t last_semantic_highlight_revision = 0;
+  int code_width_chars = 80;
+  std::vector<bool> block_comment_line_starts;
+  uint64_t block_comment_token = 0;
+  std::size_t block_comment_line_count = 0;
   std::unordered_map<int, std::vector<Diagnostic>> diagnostics_by_line;
   uint64_t diagnostics_by_line_revision = 0;
   std::string diagnostics_by_line_path;
@@ -217,6 +222,24 @@ void rebuild_breadcrumb_hits(const Box& box, const std::vector<BreadcrumbItem>& 
       x += 3;
     }
   }
+}
+
+void rebuild_block_comment_cache(EditorPanelState* panel, const EditorBuffer& buffer) {
+  if (panel == nullptr) {
+    return;
+  }
+  if (panel->block_comment_token == buffer.view_token &&
+      panel->block_comment_line_count == buffer.lines.size()) {
+    return;
+  }
+  panel->block_comment_line_starts.assign(buffer.lines.size(), false);
+  CppHighlightContext ctx;
+  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
+    panel->block_comment_line_starts[i] = ctx.in_block_comment;
+    advance_cpp_highlight_context(buffer.lines[i], &ctx);
+  }
+  panel->block_comment_token = buffer.view_token;
+  panel->block_comment_line_count = buffer.lines.size();
 }
 
 const std::vector<SymbolInfo>& cached_file_symbols(EditorPanelState* panel,
@@ -503,7 +526,7 @@ bool handle_breadcrumb_click(WorkspaceModel* workspace, FocusManagerState* focus
       workspace->buffer.scroll = std::max(0, hit.line - 2);
       workspace->buffer.view_token++;
       claim_editor_focus(focus, layout_state);
-      ensure_scroll_visible(&workspace->buffer, visible_lines);
+      ensure_scroll_visible(&workspace->buffer, visible_lines, panel->code_width_chars);
       return true;
     }
   }
@@ -1525,7 +1548,7 @@ CursorPos mouse_to_cursor(const Mouse& m, const EditorPanelState& panel, const E
 
   int col = 0;
   if (in_code) {
-    col = std::max(0, m.x - panel.code_box.x_min);
+    col = std::max(0, m.x - panel.code_box.x_min + buffer.scroll_col);
     const int line_len = static_cast<int>(buffer.lines[static_cast<std::size_t>(line)].size());
     col = std::min(col, line_len);
   } else if (m.x >= panel.code_box.x_min) {
@@ -1536,11 +1559,16 @@ CursorPos mouse_to_cursor(const Mouse& m, const EditorPanelState& panel, const E
 }
 
 void autoscroll_on_drag(EditorBuffer* buffer, const Mouse& m, const EditorPanelState& panel,
-                        int visible_lines) {
+                        int visible_lines, int code_width) {
   if (m.y < panel.code_box.y_min && buffer->scroll > 0) {
     scroll_view_by_lines(buffer, -1, visible_lines);
   } else if (m.y > panel.code_box.y_max) {
     scroll_view_by_lines(buffer, 1, visible_lines);
+  }
+  if (code_width > 0 && m.x < panel.code_box.x_min) {
+    scroll_view_by_columns(buffer, -3, code_width);
+  } else if (code_width > 0 && m.x > panel.code_box.x_max) {
+    scroll_view_by_columns(buffer, 3, code_width);
   }
 }
 
@@ -1565,12 +1593,12 @@ void end_mouse_selection(EditorPanelState* panel) {
 }
 
 void apply_mouse_drag_head(EditorBuffer* buffer, const Mouse& m, const EditorPanelState& panel,
-                           int visible_lines) {
-  autoscroll_on_drag(buffer, m, panel, visible_lines);
+                           int visible_lines, int code_width) {
+  autoscroll_on_drag(buffer, m, panel, visible_lines, code_width);
   const CursorPos pos = mouse_to_cursor(m, panel, *buffer, visible_lines);
   buffer->primary().head = pos;
   clamp_all_cursors(buffer);
-  ensure_scroll_visible(buffer, visible_lines);
+  ensure_scroll_visible(buffer, visible_lines, code_width);
 }
 
 bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
@@ -1594,12 +1622,12 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
 
   if (m.button == Mouse::Left && m.motion == Mouse::Moved && panel->mouse_selecting) {
     ensure_mouse_capture(panel, event);
-    apply_mouse_drag_head(buffer, m, *panel, visible_lines);
+    apply_mouse_drag_head(buffer, m, *panel, visible_lines, panel->code_width_chars);
     return true;
   }
 
   if (m.button == Mouse::Left && m.motion == Mouse::Released && panel->mouse_selecting) {
-    apply_mouse_drag_head(buffer, m, *panel, visible_lines);
+    apply_mouse_drag_head(buffer, m, *panel, visible_lines, panel->code_width_chars);
     end_mouse_selection(panel);
     return true;
   }
@@ -1616,12 +1644,23 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     return false;
   }
 
-  if (m.button == Mouse::WheelUp) {
+  if (m.button == Mouse::WheelLeft || (m.shift && m.button == Mouse::WheelUp)) {
+    scroll_view_by_columns(buffer, -3, panel->code_width_chars);
+    clear_hover_state(&panel->hover);
+    return true;
+  }
+  if (m.button == Mouse::WheelRight || (m.shift && m.button == Mouse::WheelDown)) {
+    scroll_view_by_columns(buffer, 3, panel->code_width_chars);
+    clear_hover_state(&panel->hover);
+    return true;
+  }
+
+  if (m.button == Mouse::WheelUp && !m.shift) {
     scroll_view_by_lines(buffer, -3, visible_lines);
     clear_hover_state(&panel->hover);
     return true;
   }
-  if (m.button == Mouse::WheelDown) {
+  if (m.button == Mouse::WheelDown && !m.shift) {
     scroll_view_by_lines(buffer, 3, visible_lines);
     clear_hover_state(&panel->hover);
     return true;
@@ -1638,8 +1677,20 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     ident_range_at_cursor(*buffer, cursor, &start_col, &end_col);
     const std::string symbol = word_at_cursor(*buffer, cursor);
     if (!symbol.empty() && layout_state != nullptr) {
+      const bool show_call_hierarchy =
+          symbols != nullptr && symbols->supports_call_hierarchy() &&
+          is_lsp_trackable_path(buffer->path);
       context_menu_open_editor_symbol(&layout_state->context_menu, m.x, m.y, pos.line, pos.col,
-                                      start_col, end_col, symbol);
+                                      start_col, end_col, symbol, show_call_hierarchy);
+      end_mouse_selection(panel);
+      return true;
+    }
+    if (layout_state != nullptr && !buffer->path.empty() &&
+        is_lsp_trackable_path(buffer->path)) {
+      const bool show_call_hierarchy =
+          symbols != nullptr && symbols->supports_call_hierarchy();
+      context_menu_open_editor_background(&layout_state->context_menu, m.x, m.y, buffer->path,
+                                          pos.line, pos.col, show_call_hierarchy);
       end_mouse_selection(panel);
       return true;
     }
@@ -1678,7 +1729,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     if (double_click) {
       select_word_at(buffer, pos.line, pos.col);
       save_shift_extend_anchor(panel, *buffer);
-      ensure_scroll_visible(buffer, visible_lines);
+      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       return true;
     }
 
@@ -1713,7 +1764,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       buffer->primary().anchor = anchor;
       buffer->primary().head = pos;
       clamp_all_cursors(buffer);
-      ensure_scroll_visible(buffer, visible_lines);
+      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       buffer->dirty = true;
       buffer->view_token++;
       disarm_extend_click(panel);
@@ -1727,7 +1778,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     save_shift_extend_anchor(panel, *buffer);
     disarm_extend_click(panel);
     begin_mouse_selection(panel, event);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
   }
 
@@ -1847,7 +1898,7 @@ bool accept_completion(CompletionState* completion, EditorBuffer* buffer,
   replace_text_range_with_caret(buffer, repl_line, repl_start, repl_end, snippet.text,
                                 snippet.caret_line_offset, snippet.caret_col,
                                 snippet.sel_start_col, snippet.sel_end_col);
-  ensure_scroll_visible(buffer, visible_lines);
+  ensure_scroll_visible(buffer, visible_lines, -1);
   if (symbols && workspace != nullptr && !workspace->buffer.path.empty()) {
     symbols->on_document_changed(workspace->buffer.path, buffer_text(*buffer));
   }
@@ -1999,7 +2050,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event_is_ctrl_z(event)) {
     undo_edit(buffer);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
   }
   if (event_is_ctrl_c(event)) {
@@ -2008,24 +2059,24 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event_is_ctrl_v(event)) {
     paste_text(buffer, editor_clipboard());
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     save_shift_extend_anchor(panel, *buffer);
     return true;
   }
   if (event_is_ctrl_u(event)) {
     move_primary_half_page_up(buffer, visible_lines);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
   }
   if (event == Event::Tab) {
     insert_tab_stop(buffer, 4);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     buffer->view_token++;
     return true;
   }
   if (event_is_ctrl_i(event)) {
     move_primary_half_page_down(buffer, visible_lines);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
   }
   if (event_is_ctrl_d(event) || event_is_ctrl_shift_d(event)) {
@@ -2034,7 +2085,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event_is_ctrl_shift_l(event)) {
     select_all_matches(buffer);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
   }
   if (event == Event::CtrlS) {
@@ -2066,47 +2117,47 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
 
   if (event_is_ctrl_left(event) || event_is_ctrl_shift_left(event)) {
     move_primary_word_left(buffer, extend);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     finish_editor_move(panel, buffer, extend);
     return true;
   }
   if (event_is_ctrl_right(event) || event_is_ctrl_shift_right(event)) {
     move_primary_word_right(buffer, extend);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     finish_editor_move(panel, buffer, extend);
     return true;
   }
   if (event == Event::ArrowLeft || event_is_shift_left(event)) {
     move_primary_left(buffer, extend);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     finish_editor_move(panel, buffer, extend);
     return true;
   }
   if (event == Event::ArrowRight || event_is_shift_right(event)) {
     move_primary_right(buffer, extend);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     finish_editor_move(panel, buffer, extend);
     return true;
   }
   if (event_is_ctrl_shift_up(event)) {
     extend_block_selection_vertical(buffer, -1);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
   }
   if (event_is_ctrl_shift_down(event)) {
     extend_block_selection_vertical(buffer, 1);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
   }
   if (event == Event::ArrowUp || event_is_shift_up(event)) {
     move_primary_up(buffer, extend);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     finish_editor_move(panel, buffer, extend);
     return true;
   }
   if (event == Event::ArrowDown || event_is_shift_down(event)) {
     move_primary_down(buffer, extend);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     finish_editor_move(panel, buffer, extend);
     return true;
   }
@@ -2122,7 +2173,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event_is_ctrl_backspace(event)) {
     delete_word_backward(buffer);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     if (completion != nullptr && completion->open && completion->live_mode) {
       update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
                              buffer);
@@ -2131,7 +2182,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event_is_ctrl_delete(event)) {
     delete_word_forward(buffer);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     if (completion != nullptr && completion->open && completion->live_mode) {
       update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
                              buffer);
@@ -2140,7 +2191,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event == Event::Backspace) {
     backspace(buffer);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     if (symbols && !buffer->path.empty()) {
       symbols->on_document_changed(buffer->path, buffer_text(*buffer));
     }
@@ -2153,7 +2204,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event == Event::Delete) {
     delete_char(buffer);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     if (symbols && !buffer->path.empty()) {
       symbols->on_document_changed(buffer->path, buffer_text(*buffer));
     }
@@ -2166,18 +2217,18 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event == Event::Return) {
     newline(buffer);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     save_shift_extend_anchor(panel, *buffer);
     return true;
   }
   if (event == Event::PageDown) {
     move_primary_page_down(buffer, visible_lines, false);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
   }
   if (event == Event::PageUp) {
     move_primary_page_up(buffer, visible_lines, false);
-    ensure_scroll_visible(buffer, visible_lines);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
   }
   if (event.is_character()) {
@@ -2186,7 +2237,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
         static_cast<unsigned char>(ch[0]) < 127) {
       const char typed = ch[0];
       insert_char(buffer, typed);
-      ensure_scroll_visible(buffer, visible_lines);
+      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       save_shift_extend_anchor(panel, *buffer);
       if (symbols && !buffer->path.empty()) {
         symbols->on_document_changed(buffer->path, buffer_text(*buffer));
@@ -2387,6 +2438,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->cached_symbols_path.clear();
       panel_state->cached_semantic_path.clear();
       panel_state->last_semantic_highlight_revision = 0;
+      buffer.scroll_col = 0;
       panel_state->document_open_pending = !buffer.path.empty();
       panel_state->pending_document_open_path = buffer.path;
       if (layout_state != nullptr && layout_state->schedule_ui_tick) {
@@ -2458,6 +2510,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         panel_state->code_box.x_max > panel_state->code_box.x_min
             ? panel_state->code_box.x_max - panel_state->code_box.x_min + 1
             : 80;
+    panel_state->code_width_chars = code_width;
+
+    rebuild_block_comment_cache(panel_state.get(), buffer);
 
     track_editor_scroll(panel_state.get(), start, layout_state);
     rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
@@ -2476,6 +2531,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     Elements gutter_rows;
     Elements code_rows;
+    bool in_block_comment = false;
+    if (start < static_cast<int>(panel_state->block_comment_line_starts.size())) {
+      in_block_comment = panel_state->block_comment_line_starts[static_cast<std::size_t>(start)];
+    }
     for (int i = start; i < end; ++i) {
       const bool is_primary = (i == buffer.primary_line());
       const Decorator row_bg =
@@ -2524,10 +2583,17 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         }
       }
 
+      CppHighlightContext highlight_ctx;
+      highlight_ctx.in_block_comment = in_block_comment;
+
       code_rows.push_back(RenderEditorLine(display_line, i, buffer,
                                            editor_focused, find_matches, semantic_tokens,
                                            &bracket, nullptr, suffix_ptr, suffix_color_ptr,
-                                           &symbol_press, show_caret));
+                                           &symbol_press, show_caret, buffer.scroll_col,
+                                           code_width, &highlight_ctx) |
+                            xflex_shrink);
+
+      in_block_comment = block_comment_state_after_line(display_line, in_block_comment);
     }
     if (code_rows.empty()) {
       gutter_rows.push_back(text(format_line_number(1, gutter_w)) | color(theme::Muted()) |

@@ -13,4 +13,6 @@ ftxui::Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
                                  FocusManagerState* focus, MainLayoutState* layout_state,
                                  WorkspaceIndexer* indexer, RightSidebarState* sidebar);
 
+void clear_search_input_focus(MainLayoutState* layout_state);
+
 }  // namespace tgdb

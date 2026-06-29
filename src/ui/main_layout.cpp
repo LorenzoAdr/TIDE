@@ -12,6 +12,7 @@
 #include "ui/console_panel.hpp"
 #include "ui/editor_panel.hpp"
 #include "ui/file_tree_panel.hpp"
+#include "ui/call_hierarchy_panel.hpp"
 #include "ui/outline_panel.hpp"
 #include "ui/right_sidebar_panel.hpp"
 #include "ui/search_panel.hpp"
@@ -384,8 +385,10 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto outline = MakeOutlinePanel(workspace, focus, symbols, layout_state);
   auto search = MakeSearchPanel(workspace, model, focus, layout_state, indexer,
                                 &layout_state->right_sidebar);
-  auto sidebar = MakeRightSidebarPanel(outline, search, &layout_state->right_sidebar,
-                                       layout_state);
+  auto call_hierarchy =
+      MakeCallHierarchyPanel(workspace, focus, layout_state, &layout_state->right_sidebar, symbols);
+  auto sidebar = MakeRightSidebarPanel(outline, search, call_hierarchy,
+                                       &layout_state->right_sidebar, layout_state);
   auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug, focus);
   auto right_panel =
       MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height, layout_state);

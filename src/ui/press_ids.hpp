@@ -11,6 +11,7 @@ constexpr std::string_view kConsoleTabTerminal = "console.tab.terminal";
 constexpr std::string_view kConsoleTabGdb = "console.tab.gdb";
 constexpr std::string_view kSidebarTabOutline = "sidebar.tab.outline";
 constexpr std::string_view kSidebarTabSearch = "sidebar.tab.search";
+constexpr std::string_view kSidebarTabCallHierarchy = "sidebar.tab.call_hierarchy";
 constexpr std::string_view kEditorProblems = "editor.problems";
 constexpr std::string_view kEditorTabOverflow = "editor.tab.overflow";
 constexpr std::string_view kQuitYes = "quit.yes";
@@ -99,7 +100,8 @@ inline bool is_console_tab_hover(std::string_view id) {
 }
 
 inline bool is_sidebar_tab_hover(std::string_view id) {
-  return id == kSidebarTabOutline || id == kSidebarTabSearch;
+  return id == kSidebarTabOutline || id == kSidebarTabSearch ||
+         id == kSidebarTabCallHierarchy;
 }
 
 inline bool is_quit_hover(std::string_view id) {

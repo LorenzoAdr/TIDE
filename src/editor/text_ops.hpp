@@ -4,8 +4,10 @@
 
 namespace tgdb {
 
-void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines);
+void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines, int code_width = -1);
+void ensure_scroll_centered(EditorBuffer* buffer, int visible_lines, int code_width = -1);
 void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lines);
+void scroll_view_by_columns(EditorBuffer* buffer, int delta_columns, int code_width);
 void move_primary_half_page_up(EditorBuffer* buffer, int visible_lines,
                                bool extend_selection = false);
 void move_primary_half_page_down(EditorBuffer* buffer, int visible_lines,

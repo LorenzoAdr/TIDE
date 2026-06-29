@@ -15,6 +15,7 @@
 #include "terminal/shell_session.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "indexer/workspace_indexer.hpp"
+#include "ui/call_hierarchy_view.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/clickable_interaction.hpp"
 #include "ui/context_menu.hpp"
@@ -40,12 +41,24 @@ enum class TextInputFocus {
   SearchExclude,
 };
 
+struct RightSidebarTabs {
+  static constexpr int kOutline = 0;
+  static constexpr int kSearch = 1;
+  static constexpr int kCallHierarchy = 2;
+  static constexpr int kCount = 3;
+};
+
 struct RightSidebarState {
   int selected_tab = 0;
   bool pending_focus_search = false;
   bool pending_search_setup = false;
   std::string pending_search_query;
   std::string pending_search_path_filter;
+  bool pending_call_hierarchy = false;
+  int pending_call_hierarchy_line = 0;
+  int pending_call_hierarchy_col = 0;
+  std::string pending_call_hierarchy_symbol;
+  CallHierarchyViewState call_hierarchy;
 };
 
 using StopDebugCallback = std::function<void()>;
@@ -90,7 +103,7 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> editor_key_handler;
   std::function<bool(const ftxui::Event&)> editor_mouse_handler;
   std::function<bool(const ftxui::Event&)> editor_chrome_mouse_handler;
-  std::function<bool(const ftxui::Event&)> explorer_context_handler;
+  std::function<bool(const ftxui::Event&)> explorer_mouse_handler;
   std::function<void(ftxui::Event&)> editor_modifier_handler;
   std::function<void()> editor_tick_callback;
   std::function<int()> editor_visible_line_count;
@@ -98,6 +111,7 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> console_key_handler;
   std::function<bool(const ftxui::Event&)> console_mouse_handler;
   std::function<bool(const ftxui::Event&)> search_key_handler;
+  std::function<bool(const ftxui::Event&)> call_hierarchy_key_handler;
   std::function<void()> terminal_tick_callback;
   std::function<int()> terminal_width;
   std::function<void()> schedule_ui_tick;

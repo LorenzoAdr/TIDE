@@ -84,20 +84,130 @@ void append_plain(std::string* current, int* plain_start, std::size_t index, Ele
   *plain_start = static_cast<int>(index);
 }
 
-Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorator cursor_style) {
+const Decorator kCommentStyle = color(theme::SyntaxComment()) | dim;
+
+void skip_string(const std::string& line, std::size_t* i) {
+  const std::size_t n = line.size();
+  if ((*i) >= n || line[*i] != '"') {
+    return;
+  }
+  ++(*i);
+  while (*i < n && line[*i] != '"') {
+    if (line[*i] == '\\' && *i + 1 < n) {
+      ++(*i);
+    }
+    ++(*i);
+  }
+  if (*i < n) {
+    ++(*i);
+  }
+}
+
+void skip_char_literal(const std::string& line, std::size_t* i) {
+  const std::size_t n = line.size();
+  if ((*i) >= n || line[*i] != '\'') {
+    return;
+  }
+  ++(*i);
+  while (*i < n && line[*i] != '\'') {
+    if (line[*i] == '\\' && *i + 1 < n) {
+      ++(*i);
+    }
+    ++(*i);
+  }
+  if (*i < n) {
+    ++(*i);
+  }
+}
+
+bool scan_block_comment_state(const std::string& line, bool in_block) {
+  std::size_t i = 0;
+  const std::size_t n = line.size();
+  while (i < n) {
+    if (in_block) {
+      const std::size_t close = line.find("*/", i);
+      if (close == std::string::npos) {
+        return true;
+      }
+      in_block = false;
+      i = close + 2;
+      continue;
+    }
+
+    if (line[i] == '"') {
+      skip_string(line, &i);
+      continue;
+    }
+    if (line[i] == '\'') {
+      skip_char_literal(line, &i);
+      continue;
+    }
+    if (line[i] == '/' && i + 1 < n) {
+      if (line[i + 1] == '/') {
+        return false;
+      }
+      if (line[i + 1] == '*') {
+        const std::size_t close = line.find("*/", i + 2);
+        if (close == std::string::npos) {
+          return true;
+        }
+        i = close + 2;
+        continue;
+      }
+    }
+    ++i;
+  }
+  return in_block;
+}
+
+Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorator cursor_style,
+                                int col_offset, bool in_block_comment) {
   const bool show_cursor = cursor_col >= 0 && static_cast<bool>(cursor_style);
   Elements parts;
   std::string current;
-  int plain_start = 0;
+  int plain_start = col_offset;
   const std::size_t n = line.size();
   std::size_t i = 0;
+  bool in_block = in_block_comment;
 
   while (i < n) {
+    if (in_block) {
+      append_plain(&current, &plain_start, i, &parts, cursor_col, show_cursor, cursor_style);
+      const std::size_t close = line.find("*/", i);
+      if (close == std::string::npos) {
+        emit_segment(&parts, line.substr(i), kCommentStyle, static_cast<int>(col_offset + i),
+                     cursor_col, show_cursor, cursor_style);
+        in_block = true;
+        i = n;
+        break;
+      }
+      emit_segment(&parts, line.substr(i, close + 2 - i), kCommentStyle,
+                   static_cast<int>(col_offset + i), cursor_col, show_cursor, cursor_style);
+      in_block = false;
+      i = close + 2;
+      continue;
+    }
+
     if (line[i] == '/' && i + 1 < n && line[i + 1] == '/') {
       append_plain(&current, &plain_start, i, &parts, cursor_col, show_cursor, cursor_style);
-      emit_segment(&parts, line.substr(i), color(theme::SyntaxComment()) | dim,
-                   static_cast<int>(i), cursor_col, show_cursor, cursor_style);
+      emit_segment(&parts, line.substr(i), kCommentStyle, static_cast<int>(col_offset + i),
+                   cursor_col, show_cursor, cursor_style);
       break;
+    }
+
+    if (line[i] == '/' && i + 1 < n && line[i + 1] == '*') {
+      append_plain(&current, &plain_start, i, &parts, cursor_col, show_cursor, cursor_style);
+      const std::size_t close = line.find("*/", i + 2);
+      if (close == std::string::npos) {
+        emit_segment(&parts, line.substr(i), kCommentStyle, static_cast<int>(col_offset + i),
+                     cursor_col, show_cursor, cursor_style);
+        in_block = true;
+        break;
+      }
+      emit_segment(&parts, line.substr(i, close + 2 - i), kCommentStyle,
+                   static_cast<int>(col_offset + i), cursor_col, show_cursor, cursor_style);
+      i = close + 2;
+      continue;
     }
 
     if (line[i] == '"') {
@@ -112,8 +222,8 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
       if (j < n) {
         ++j;
       }
-      emit_segment(&parts, line.substr(i, j - i), color(theme::SyntaxString()), static_cast<int>(i),
-                   cursor_col, show_cursor, cursor_style);
+      emit_segment(&parts, line.substr(i, j - i), color(theme::SyntaxString()),
+                     static_cast<int>(col_offset + i), cursor_col, show_cursor, cursor_style);
       i = j;
       continue;
     }
@@ -130,16 +240,16 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
       if (j < n) {
         ++j;
       }
-      emit_segment(&parts, line.substr(i, j - i), color(theme::SyntaxString()), static_cast<int>(i),
-                   cursor_col, show_cursor, cursor_style);
+      emit_segment(&parts, line.substr(i, j - i), color(theme::SyntaxString()),
+                   static_cast<int>(col_offset + i), cursor_col, show_cursor, cursor_style);
       i = j;
       continue;
     }
 
     if (line[i] == '#') {
       append_plain(&current, &plain_start, i, &parts, cursor_col, show_cursor, cursor_style);
-      emit_segment(&parts, line.substr(i), color(theme::SyntaxMacro()), static_cast<int>(i), cursor_col,
-                   show_cursor, cursor_style);
+      emit_segment(&parts, line.substr(i), color(theme::SyntaxMacro()),
+                   static_cast<int>(col_offset + i), cursor_col, show_cursor, cursor_style);
       break;
     }
 
@@ -153,8 +263,8 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
               line[j] == 'x' || line[j] == 'X')) {
         ++j;
       }
-      emit_segment(&parts, line.substr(i, j - i), color(theme::SyntaxNumber()), static_cast<int>(i),
-                   cursor_col, show_cursor, cursor_style);
+      emit_segment(&parts, line.substr(i, j - i), color(theme::SyntaxNumber()),
+                   static_cast<int>(col_offset + i), cursor_col, show_cursor, cursor_style);
       i = j;
       continue;
     }
@@ -169,14 +279,14 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
       const Decorator style = cpp_keywords().count(word) > 0
                                   ? color(theme::SyntaxKeyword()) | bold
                                   : color(theme::SyntaxDefault());
-      emit_segment(&parts, word, style, static_cast<int>(i), cursor_col, show_cursor,
+      emit_segment(&parts, word, style, static_cast<int>(col_offset + i), cursor_col, show_cursor,
                    cursor_style);
       i = j;
       continue;
     }
 
     if (current.empty()) {
-      plain_start = static_cast<int>(i);
+      plain_start = static_cast<int>(col_offset + i);
     }
     current.push_back(line[i]);
     ++i;
@@ -186,13 +296,27 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
   if (parts.empty()) {
     return text("");
   }
+  (void)in_block;
   return hbox(std::move(parts));
 }
 
 }  // namespace
 
-Element HighlightCppLine(const std::string& line, int cursor_col, Decorator cursor_style) {
-  return highlight_cpp_line_impl(line, cursor_col, cursor_style);
+void advance_cpp_highlight_context(const std::string& line, CppHighlightContext* ctx) {
+  if (ctx == nullptr) {
+    return;
+  }
+  ctx->in_block_comment = scan_block_comment_state(line, ctx->in_block_comment);
+}
+
+bool block_comment_state_after_line(const std::string& line, bool in_block_comment) {
+  return scan_block_comment_state(line, in_block_comment);
+}
+
+Element HighlightCppLine(const std::string& line, int cursor_col, Decorator cursor_style,
+                         int col_offset, CppHighlightContext* ctx) {
+  const bool in_block = ctx != nullptr && ctx->in_block_comment;
+  return highlight_cpp_line_impl(line, cursor_col, cursor_style, col_offset, in_block);
 }
 
 }  // namespace tgdb

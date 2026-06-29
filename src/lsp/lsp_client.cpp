@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <signal.h>
 #include <sys/types.h>
@@ -122,6 +123,9 @@ bool LspClient::initialize(const std::string& workspace_root) {
   params["capabilities"]["textDocument"]["definition"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["declaration"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["hover"] = {{"contentFormat", {"plaintext", "markdown"}}};
+  params["capabilities"]["textDocument"]["formatting"] = nlohmann::json::object();
+  params["capabilities"]["textDocument"]["rename"] = {{"prepareSupport", true}};
+  params["capabilities"]["callHierarchy"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["semanticTokens"] = {
       {"requests", {{"range", false}, {"full", {{"delta", false}}}}},
       {"tokenTypes",
@@ -892,6 +896,234 @@ HoverInfo LspClient::hover(const std::string& absolute_path, const std::string& 
     return info;
   }
   return parse_hover_result(result);
+}
+
+std::optional<std::string> LspClient::format_document(const std::string& absolute_path,
+                                                      const std::string& text) {
+  if (!ready_.load() || absolute_path.empty() ||
+      !is_lsp_trackable_path(absolute_path, text)) {
+    return std::nullopt;
+  }
+
+  if (!text.empty()) {
+    did_open(absolute_path, text);
+  }
+
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return std::nullopt;
+  }
+
+  const std::string uri = path_to_uri(key);
+  nlohmann::json params = {{"textDocument", {{"uri", uri}}},
+                           {"options", {{"tabSize", 4}, {"insertSpaces", true}}}};
+
+  nlohmann::json result;
+  const int id = next_request_id_++;
+  if (!transport_.send_request(id, "textDocument/formatting", std::move(params), 30000,
+                               &result)) {
+    return std::nullopt;
+  }
+
+  if (result.is_null()) {
+    return text;
+  }
+  if (!result.is_array()) {
+    return std::nullopt;
+  }
+
+  const std::vector<LspTextEdit> edits = parse_lsp_text_edits(result);
+  if (edits.empty()) {
+    return text;
+  }
+  return apply_lsp_text_edits(text, edits);
+}
+
+std::vector<LspFileEdits> LspClient::rename_symbol(const std::string& absolute_path,
+                                                   const std::string& text, int line,
+                                                   int character, const std::string& new_name) {
+  if (!ready_.load() || absolute_path.empty() || new_name.empty() ||
+      !is_lsp_trackable_path(absolute_path, text)) {
+    return {};
+  }
+
+  if (!text.empty()) {
+    did_open(absolute_path, text);
+  }
+
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return {};
+  }
+
+  const std::string uri = path_to_uri(key);
+  nlohmann::json params = {{"textDocument", {{"uri", uri}}},
+                           {"position", {{"line", line}, {"character", character}}},
+                           {"newName", new_name}};
+
+  nlohmann::json result;
+  const int id = next_request_id_++;
+  if (!transport_.send_request(id, "textDocument/rename", std::move(params), 30000, &result)) {
+    return {};
+  }
+
+  if (result.is_null()) {
+    return {};
+  }
+  return parse_workspace_edit(result);
+}
+
+namespace {
+
+CallHierarchyItem parse_call_hierarchy_item(const nlohmann::json& item) {
+  CallHierarchyItem out;
+  if (!item.is_object()) {
+    return out;
+  }
+  if (item.contains("name") && item["name"].is_string()) {
+    out.name = item["name"].get<std::string>();
+  }
+  if (item.contains("detail") && item["detail"].is_string()) {
+    out.detail = item["detail"].get<std::string>();
+  }
+  if (item.contains("uri") && item["uri"].is_string()) {
+    out.path = normalize_lsp_path(uri_to_path(item["uri"].get<std::string>()));
+  }
+  const nlohmann::json* range = nullptr;
+  if (item.contains("selectionRange") && item["selectionRange"].is_object()) {
+    range = &item["selectionRange"];
+  } else if (item.contains("range") && item["range"].is_object()) {
+    range = &item["range"];
+  }
+  if (range != nullptr && range->contains("start") && (*range)["start"].is_object()) {
+    const auto& start = (*range)["start"];
+    if (start.contains("line")) {
+      out.line = start["line"].get<int>();
+    }
+    if (start.contains("character")) {
+      out.character = start["character"].get<int>();
+    }
+  }
+  out.lsp_payload = item;
+  out.valid = !out.path.empty() && !out.name.empty();
+  return out;
+}
+
+std::vector<CallHierarchyItem> parse_call_hierarchy_items(const nlohmann::json& result) {
+  std::vector<CallHierarchyItem> items;
+  if (result.is_null()) {
+    return items;
+  }
+  if (result.is_array()) {
+    for (const auto& entry : result) {
+      CallHierarchyItem item = parse_call_hierarchy_item(entry);
+      if (item.valid) {
+        items.push_back(std::move(item));
+      }
+    }
+    return items;
+  }
+  CallHierarchyItem item = parse_call_hierarchy_item(result);
+  if (item.valid) {
+    items.push_back(std::move(item));
+  }
+  return items;
+}
+
+std::vector<CallHierarchyItem> parse_call_hierarchy_relations(const nlohmann::json& result,
+                                                              const char* field) {
+  std::vector<CallHierarchyItem> items;
+  if (!result.is_array()) {
+    return items;
+  }
+  for (const auto& entry : result) {
+    if (!entry.is_object() || !entry.contains(field)) {
+      continue;
+    }
+    CallHierarchyItem item = parse_call_hierarchy_item(entry[field]);
+    if (!item.valid) {
+      continue;
+    }
+    if (entry.contains("fromRanges") && entry["fromRanges"].is_array() &&
+        !entry["fromRanges"].empty()) {
+      const nlohmann::json& range = entry["fromRanges"][0];
+      if (range.is_object() && range.contains("start") && range["start"].is_object()) {
+        const auto& start = range["start"];
+        if (start.contains("line")) {
+          item.call_site_line = start["line"].get<int>();
+        }
+        if (start.contains("character")) {
+          item.call_site_character = start["character"].get<int>();
+        }
+        item.has_call_site = true;
+      }
+    }
+    items.push_back(std::move(item));
+  }
+  return items;
+}
+
+}  // namespace
+
+std::vector<CallHierarchyItem> LspClient::prepare_call_hierarchy(const std::string& absolute_path,
+                                                                 const std::string& text,
+                                                                 int line, int character) {
+  if (!ready_.load() || absolute_path.empty() ||
+      !is_lsp_trackable_path(absolute_path, text)) {
+    return {};
+  }
+
+  if (!text.empty()) {
+    did_open(absolute_path, text);
+  }
+
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return {};
+  }
+
+  const std::string uri = path_to_uri(key);
+  nlohmann::json params = {{"textDocument", {{"uri", uri}}},
+                           {"position", {{"line", line}, {"character", character}}}};
+
+  nlohmann::json result;
+  const int id = next_request_id_++;
+  if (!transport_.send_request(id, "textDocument/prepareCallHierarchy", std::move(params), 15000,
+                               &result)) {
+    return {};
+  }
+  const auto items = parse_call_hierarchy_items(result);
+  return items;
+}
+
+std::vector<CallHierarchyItem> LspClient::incoming_calls(const CallHierarchyItem& item) {
+  if (!ready_.load() || !item.valid || item.lsp_payload.is_null()) {
+    return {};
+  }
+
+  nlohmann::json params = {{"item", item.lsp_payload}};
+  nlohmann::json result;
+  const int id = next_request_id_++;
+  if (!transport_.send_request(id, "callHierarchy/incomingCalls", std::move(params), 15000,
+                               &result)) {
+    return {};
+  }
+  return parse_call_hierarchy_relations(result, "from");
+}
+
+std::vector<CallHierarchyItem> LspClient::outgoing_calls(const CallHierarchyItem& item) {
+  if (!ready_.load() || !item.valid || item.lsp_payload.is_null()) {
+    return {};
+  }
+
+  nlohmann::json params = {{"item", item.lsp_payload}};
+  nlohmann::json result;
+  const int id = next_request_id_++;
+  if (!transport_.send_request(id, "callHierarchy/outgoingCalls", std::move(params), 15000,
+                               &result)) {
+    return {};
+  }
+  return parse_call_hierarchy_relations(result, "to");
 }
 
 SemanticTokenDocument LspClient::decode_semantic_tokens(

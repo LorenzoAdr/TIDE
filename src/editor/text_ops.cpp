@@ -450,7 +450,7 @@ void finish_move(EditorBuffer* buffer, bool extend_selection) {
 
 }  // namespace
 
-void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines) {
+void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines, int code_width) {
   const int primary = buffer->primary_line();
   if (primary < buffer->scroll) {
     buffer->scroll = primary;
@@ -460,6 +460,59 @@ void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines) {
   buffer->scroll = std::max(
       0, std::min(buffer->scroll,
                   max_scroll(static_cast<int>(buffer->lines.size()), visible_lines)));
+
+  if (code_width <= 0) {
+    return;
+  }
+  const int col = buffer->primary_col();
+  constexpr int kMargin = 8;
+  if (col < buffer->scroll_col + kMargin) {
+    buffer->scroll_col = std::max(0, col - kMargin);
+  } else if (col >= buffer->scroll_col + code_width - kMargin) {
+    buffer->scroll_col = std::max(0, col - code_width + kMargin + 1);
+  }
+  const int line_len =
+      static_cast<int>(buffer->lines[static_cast<std::size_t>(primary)].size());
+  const int max_scroll_col = std::max(0, line_len - code_width + 1);
+  buffer->scroll_col = std::min(buffer->scroll_col, max_scroll_col);
+}
+
+void ensure_scroll_centered(EditorBuffer* buffer, int visible_lines, int code_width) {
+  const int primary = buffer->primary_line();
+  const int half = std::max(0, visible_lines / 2);
+  buffer->scroll = std::max(0, primary - half);
+  buffer->scroll = std::max(
+      0, std::min(buffer->scroll,
+                  max_scroll(static_cast<int>(buffer->lines.size()), visible_lines)));
+
+  if (code_width <= 0) {
+    return;
+  }
+  const int col = buffer->primary_col();
+  constexpr int kMargin = 8;
+  if (col < buffer->scroll_col + kMargin) {
+    buffer->scroll_col = std::max(0, col - kMargin);
+  } else if (col >= buffer->scroll_col + code_width - kMargin) {
+    buffer->scroll_col = std::max(0, col - code_width + kMargin + 1);
+  }
+  const int line_len =
+      static_cast<int>(buffer->lines[static_cast<std::size_t>(primary)].size());
+  const int max_scroll_col = std::max(0, line_len - code_width + 1);
+  buffer->scroll_col = std::min(buffer->scroll_col, max_scroll_col);
+}
+
+void scroll_view_by_columns(EditorBuffer* buffer, int delta_columns, int code_width) {
+  if (code_width <= 0) {
+    buffer->scroll_col = std::max(0, buffer->scroll_col + delta_columns);
+    return;
+  }
+  int max_len = 0;
+  for (const auto& line : buffer->lines) {
+    max_len = std::max(max_len, static_cast<int>(line.size()));
+  }
+  const int max_scroll_col = std::max(0, max_len - code_width + 1);
+  buffer->scroll_col =
+      std::max(0, std::min(buffer->scroll_col + delta_columns, max_scroll_col));
 }
 
 void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lines) {

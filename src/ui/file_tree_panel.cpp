@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "backend/idebug_backend.hpp"
+#include "indexer/index_rules.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
@@ -369,12 +370,19 @@ bool handle_explorer_context_menu(FileTreePanelState* state, DebugModel* model,
   }
   if (entry.is_file) {
     context_menu_open_file(&layout_state->context_menu, m.x, m.y, absolute.string(),
-                           entry.relative_path);
+                           entry.relative_path, is_lsp_trackable_path(absolute.string()));
   } else {
     context_menu_open_folder(&layout_state->context_menu, m.x, m.y, absolute.string(),
                              entry.relative_path);
   }
   return true;
+}
+
+bool mouse_over_explorer(const FileTreePanelState* state, int x, int y) {
+  if (state == nullptr) {
+    return false;
+  }
+  return state->content_box.Contain(x, y) || state->scrollbar_box.Contain(x, y);
 }
 
 bool update_explorer_hover(FileTreePanelState* state, MainLayoutState* layout_state, int x,
@@ -495,6 +503,22 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
   return false;
 }
 
+bool handle_explorer_mouse(FileTreePanelState* state, DebugModel* model,
+                           WorkspaceModel* workspace, FocusManagerState* focus,
+                           MainLayoutState* layout_state, Event event) {
+  if (state == nullptr || !event.is_mouse()) {
+    return false;
+  }
+  const auto& m = event.mouse();
+  if (!mouse_over_explorer(state, m.x, m.y)) {
+    return false;
+  }
+  if (m.button == Mouse::Right && m.motion == Mouse::Pressed) {
+    return handle_explorer_context_menu(state, model, workspace, focus, layout_state, event);
+  }
+  return handle_navigation(state, model, workspace, focus, layout_state, event);
+}
+
 }  // namespace
 
 Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
@@ -596,14 +620,17 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
   });
 
   if (layout_state != nullptr) {
-    layout_state->explorer_context_handler =
+    layout_state->explorer_mouse_handler =
         [state, model, workspace, focus, layout_state](const Event& event) {
-          return handle_explorer_context_menu(state.get(), model, workspace, focus, layout_state,
-                                              event);
+          return handle_explorer_mouse(state.get(), model, workspace, focus, layout_state,
+                                       event);
         };
   }
 
   return WrapFocusable(CatchEvent(renderer, [model, workspace, focus, state, layout_state](Event event) {
+    if (event.is_mouse() && mouse_over_explorer(state.get(), event.mouse().x, event.mouse().y)) {
+      return false;
+    }
     return handle_navigation(state.get(), model, workspace, focus, layout_state, event);
   }));
 }

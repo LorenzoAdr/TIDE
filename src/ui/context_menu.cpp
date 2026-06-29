@@ -1,14 +1,20 @@
+#include "ui/call_hierarchy_view.hpp"
 #include "ui/context_menu.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 
 #include "editor/text_ops.hpp"
 #include "editor/text_search.hpp"
+#include "editor/undo_stack.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "indexer/index_rules.hpp"
+#include "lsp/lsp_text_edits.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/clickable.hpp"
 #include "ui/editor_panel.hpp"
@@ -83,6 +89,117 @@ NavigationParams navigation_params_at(WorkspaceModel* workspace, int line, int c
   return params;
 }
 
+std::string buffer_document_text(const EditorBuffer& buffer) {
+  std::string text;
+  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
+    if (i > 0) {
+      text.push_back('\n');
+    }
+    text += buffer.lines[i];
+  }
+  return text;
+}
+
+void apply_document_text_to_buffer(EditorBuffer* buffer, const std::string& text) {
+  if (buffer == nullptr) {
+    return;
+  }
+  buffer->lines = lines_from_document_text(text);
+  if (buffer->lines.empty()) {
+    buffer->lines.push_back("");
+  }
+  buffer->reset_to_single_cursor(0, 0);
+  buffer->dirty = true;
+  clear_undo(buffer);
+  buffer->view_token++;
+}
+
+bool read_file_text(const std::string& absolute_path, std::string* text_out) {
+  if (text_out == nullptr || absolute_path.empty()) {
+    return false;
+  }
+  std::ifstream input(absolute_path);
+  if (!input) {
+    return false;
+  }
+  std::ostringstream ss;
+  ss << input.rdbuf();
+  *text_out = ss.str();
+  return true;
+}
+
+bool write_file_text(const std::string& absolute_path, const std::string& text) {
+  if (absolute_path.empty()) {
+    return false;
+  }
+  std::ofstream output(absolute_path, std::ios::trunc | std::ios::binary);
+  if (!output) {
+    return false;
+  }
+  output << text;
+  return static_cast<bool>(output);
+}
+
+bool format_file_at_path(WorkspaceModel* workspace, MainLayoutState* layout_state,
+                         const std::shared_ptr<ISymbolProvider>& symbols,
+                         const std::string& absolute_path) {
+  if (workspace == nullptr || absolute_path.empty()) {
+    return false;
+  }
+  if (layout_state != nullptr && layout_state->app_settings != nullptr &&
+      !layout_state->app_settings->lsp_enabled) {
+    workspace->status_message = "LSP desactivado en configuración";
+    return false;
+  }
+  if (symbols == nullptr || !symbols->supports_formatting()) {
+    workspace->status_message = "Formateo no disponible (clangd inactivo)";
+    return false;
+  }
+  if (!is_lsp_trackable_path(absolute_path)) {
+    workspace->status_message = "Archivo no compatible con clang-format";
+    return false;
+  }
+
+  workspace->flush_active_tab();
+  const std::string path = normalize_path(absolute_path);
+  const int tab = workspace->find_tab(path);
+
+  std::string text;
+  if (tab >= 0) {
+    text = buffer_document_text(workspace->tabs[static_cast<std::size_t>(tab)].buffer);
+  } else if (!read_file_text(path, &text)) {
+    workspace->status_message = "No se pudo leer: " + fs::path(path).filename().string();
+    return false;
+  }
+
+  const std::optional<std::string> formatted =
+      symbols->format_document(FormatParams{path, text});
+  if (!formatted.has_value()) {
+    workspace->status_message = "Error al formatear con clangd";
+    return false;
+  }
+  if (*formatted == text) {
+    workspace->status_message =
+        "Sin cambios: " + fs::path(path).filename().string();
+    return true;
+  }
+
+  if (tab >= 0) {
+    EditorBuffer& tab_buffer = workspace->tabs[static_cast<std::size_t>(tab)].buffer;
+    apply_document_text_to_buffer(&tab_buffer, *formatted);
+    if (tab == workspace->active_tab) {
+      workspace->load_active_tab_into_buffer();
+    }
+    symbols->on_document_changed(path, *formatted);
+  } else if (!write_file_text(path, *formatted)) {
+    workspace->status_message = "No se pudo guardar: " + fs::path(path).filename().string();
+    return false;
+  }
+
+  workspace->status_message = "Formateado: " + fs::path(path).filename().string();
+  return true;
+}
+
 bool navigate_to_location(WorkspaceModel* workspace, MainLayoutState* layout_state,
                           const SourceLocation& loc, int visible_lines) {
   if (workspace == nullptr || !loc.valid || loc.path.empty()) {
@@ -121,32 +238,95 @@ bool go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
   return true;
 }
 
-void rename_identifier_in_buffer(EditorBuffer* buffer, const std::string& old_name,
-                                 const std::string& new_name) {
-  if (buffer == nullptr || old_name.empty() || old_name == new_name) {
-    return;
+bool rename_symbol_with_lsp(ContextMenuState* state, WorkspaceModel* workspace,
+                            MainLayoutState* layout_state,
+                            const std::shared_ptr<ISymbolProvider>& symbols, DebugModel* model,
+                            SymbolWorkspaceIndexer* symbol_indexer, const std::string& new_name) {
+  if (state == nullptr || workspace == nullptr) {
+    return false;
   }
-  for (std::size_t line_idx = 0; line_idx < buffer->lines.size(); ++line_idx) {
-    std::string& line = buffer->lines[line_idx];
-    std::size_t pos = 0;
-    while (pos <= line.size()) {
-      const auto found = line.find(old_name, pos);
-      if (found == std::string::npos) {
-        break;
-      }
-      const bool start_ok = found == 0 || !is_ident_char(line[found - 1]);
-      const bool end_ok = found + old_name.size() >= line.size() ||
-                          !is_ident_char(line[found + old_name.size()]);
-      if (start_ok && end_ok) {
-        line.replace(found, old_name.size(), new_name);
-        pos = found + new_name.size();
-        buffer->dirty = true;
-      } else {
-        pos = found + 1;
+  if (layout_state != nullptr && layout_state->app_settings != nullptr &&
+      !layout_state->app_settings->lsp_enabled) {
+    workspace->status_message = "LSP desactivado en configuración";
+    return false;
+  }
+  if (symbols == nullptr || !symbols->supports_rename()) {
+    workspace->status_message = "Renombrado no disponible (clangd inactivo)";
+    return false;
+  }
+
+  workspace->ensure_buffer();
+  const NavigationParams nav =
+      navigation_params_at(workspace, state->editor_line, state->editor_col);
+  if (nav.path.empty()) {
+    workspace->status_message = "No hay archivo activo para renombrar";
+    return false;
+  }
+
+  RenameParams params;
+  params.path = nav.path;
+  params.text = nav.text;
+  params.line = state->editor_line;
+  params.character = state->editor_col;
+  params.new_name = new_name;
+
+  const std::vector<LspFileEdits> file_edits = symbols->rename_symbol(params);
+  if (file_edits.empty()) {
+    workspace->status_message = "clangd no pudo renombrar el símbolo";
+    return false;
+  }
+
+  workspace->flush_active_tab();
+  int changed_files = 0;
+  for (const LspFileEdits& file_edit : file_edits) {
+    const std::string path = normalize_path(file_edit.path);
+    const int tab = workspace->find_tab(path);
+
+    std::string text;
+    if (tab >= 0) {
+      text = buffer_document_text(workspace->tabs[static_cast<std::size_t>(tab)].buffer);
+    } else if (!read_file_text(path, &text)) {
+      workspace->status_message =
+          "No se pudo leer: " + fs::path(path).filename().string();
+      return false;
+    }
+
+    const std::string updated = apply_lsp_text_edits(text, file_edit.edits);
+    if (updated == text) {
+      continue;
+    }
+
+    if (tab >= 0) {
+      apply_document_text_to_buffer(&workspace->tabs[static_cast<std::size_t>(tab)].buffer,
+                                    updated);
+      symbols->on_document_changed(path, updated);
+    } else if (!write_file_text(path, updated)) {
+      workspace->status_message =
+          "No se pudo guardar: " + fs::path(path).filename().string();
+      return false;
+    }
+
+    if (symbol_indexer != nullptr && model != nullptr && !model->workspace_root.empty()) {
+      std::error_code ec;
+      const auto relative = fs::relative(path, model->workspace_root, ec);
+      if (!ec) {
+        symbol_indexer->reindex_file(model->workspace_root, relative.generic_string(), path);
       }
     }
+    ++changed_files;
   }
-  buffer->view_token++;
+
+  if (changed_files == 0) {
+    workspace->status_message = "Sin cambios al renombrar";
+    return false;
+  }
+
+  if (workspace->active_tab >= 0) {
+    workspace->load_active_tab_into_buffer();
+  }
+  workspace->status_message = "Renombrado: " + state->symbol_name + " → " + new_name + " (" +
+                              std::to_string(changed_files) + " archivo(s))";
+  return true;
 }
 
 void close_tabs_for_path(WorkspaceModel* workspace, const std::string& absolute_path) {
@@ -161,12 +341,27 @@ void close_tabs_for_path(WorkspaceModel* workspace, const std::string& absolute_
   }
 }
 
+void focus_call_hierarchy(MainLayoutState* layout_state, int line, int col,
+                          const std::string& symbol) {
+  if (layout_state == nullptr) {
+    return;
+  }
+  layout_state->right_sidebar.selected_tab = RightSidebarTabs::kCallHierarchy;
+  layout_state->right_panel_active_section = 0;
+  layout_state->right_sidebar.pending_call_hierarchy = true;
+  layout_state->right_sidebar.pending_call_hierarchy_line = line;
+  layout_state->right_sidebar.pending_call_hierarchy_col = col;
+  layout_state->right_sidebar.pending_call_hierarchy_symbol = symbol;
+  layout_state->text_input_focus = TextInputFocus::None;
+  layout_state->request_ui_tick = true;
+}
+
 void focus_search_with_filter(MainLayoutState* layout_state, const std::string& query,
                               const std::string& path_filter) {
   if (layout_state == nullptr) {
     return;
   }
-  layout_state->right_sidebar.selected_tab = 1;
+  layout_state->right_sidebar.selected_tab = RightSidebarTabs::kSearch;
   layout_state->right_panel_active_section = 0;
   layout_state->right_sidebar.pending_search_setup = true;
   layout_state->right_sidebar.pending_search_query = query;
@@ -385,6 +580,14 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
+  if (action_id == "call_hierarchy") {
+    focus_call_hierarchy(layout_state, state->editor_line, state->editor_col, state->symbol_name);
+    if (focus != nullptr) {
+      focus->region = FocusRegion::RightPanel;
+    }
+    return true;
+  }
+
   if (action_id == "find_references") {
     focus_search_with_filter(layout_state, state->symbol_name, std::string{});
     if (focus != nullptr) {
@@ -393,11 +596,32 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
+  if (action_id == "format_file") {
+    const std::string path = state->absolute_path.empty()
+                                 ? (workspace != nullptr ? workspace->active_file : std::string{})
+                                 : state->absolute_path;
+    if (path.empty()) {
+      if (workspace != nullptr) {
+        workspace->status_message = "No hay archivo para formatear";
+      }
+      return true;
+    }
+    format_file_at_path(workspace, layout_state, symbols, path);
+    if (focus != nullptr &&
+        (state->kind == ContextMenuKind::EditorBackground ||
+         state->kind == ContextMenuKind::EditorSymbol)) {
+      focus->region = FocusRegion::Editor;
+    }
+    return true;
+  }
+
   return false;
 }
 
 bool commit_rename(ContextMenuState* state, WorkspaceModel* workspace, DebugModel* model,
-                   WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer) {
+                   FocusManagerState* focus, MainLayoutState* layout_state,
+                   const std::shared_ptr<ISymbolProvider>& symbols, WorkspaceIndexer* indexer,
+                   SymbolWorkspaceIndexer* symbol_indexer) {
   if (state == nullptr) {
     return false;
   }
@@ -410,13 +634,12 @@ bool commit_rename(ContextMenuState* state, WorkspaceModel* workspace, DebugMode
   }
 
   if (state->kind == ContextMenuKind::EditorSymbol) {
-    if (workspace != nullptr) {
-      workspace->ensure_buffer();
-      rename_identifier_in_buffer(&workspace->buffer, state->symbol_name, new_name);
-      workspace->flush_active_tab();
-      workspace->status_message = "Renombrado: " + state->symbol_name + " → " + new_name;
+    const bool ok = rename_symbol_with_lsp(state, workspace, layout_state, symbols, model,
+                                           symbol_indexer, new_name);
+    if (ok && focus != nullptr) {
+      focus->region = FocusRegion::Editor;
     }
-    return true;
+    return ok;
   }
 
   const bool is_dir = state->kind == ContextMenuKind::Folder;
@@ -457,7 +680,8 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
 }
 
 void context_menu_open_file(ContextMenuState* state, int x, int y,
-                            const std::string& absolute_path, const std::string& relative_path) {
+                            const std::string& absolute_path, const std::string& relative_path,
+                            bool show_format) {
   if (state == nullptr) {
     return;
   }
@@ -469,6 +693,14 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
   state->anchor_y = y;
   state->absolute_path = absolute_path;
   state->relative_path = relative_path;
+  if (show_format) {
+    set_items(state, ContextMenuKind::File,
+              {{"Abrir archivo", "open_file"},
+               {"Formatear archivo", "format_file"},
+               {"Renombrar archivo", "rename_file"},
+               {"Borrar archivo", "delete_file"}});
+    return;
+  }
   set_items(state, ContextMenuKind::File,
             {{"Abrir archivo", "open_file"},
              {"Renombrar archivo", "rename_file"},
@@ -494,7 +726,8 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
 }
 
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
-                                     int sym_start, int sym_end, const std::string& symbol) {
+                                     int sym_start, int sym_end, const std::string& symbol,
+                                     bool show_call_hierarchy) {
   if (state == nullptr || symbol.empty()) {
     return;
   }
@@ -509,11 +742,46 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
   state->editor_sym_start = sym_start;
   state->editor_sym_end = sym_end;
   state->symbol_name = symbol;
+  if (show_call_hierarchy) {
+    set_items(state, ContextMenuKind::EditorSymbol,
+              {{"Ir a definición", "go_definition"},
+               {"Ir a implementación", "go_implementation"},
+               {"Jerarquía de llamadas", "call_hierarchy"},
+               {"Renombrar", "rename_symbol"},
+               {"Encontrar referencias", "find_references"}});
+    return;
+  }
   set_items(state, ContextMenuKind::EditorSymbol,
             {{"Ir a definición", "go_definition"},
              {"Ir a implementación", "go_implementation"},
              {"Renombrar", "rename_symbol"},
              {"Encontrar referencias", "find_references"}});
+}
+
+void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
+                                         const std::string& absolute_path, int line, int col,
+                                         bool show_call_hierarchy) {
+  if (state == nullptr || absolute_path.empty()) {
+    return;
+  }
+  state->open = true;
+  state->rename_open = false;
+  state->delete_confirm_open = false;
+  state->rename_skip_return = false;
+  state->anchor_x = x;
+  state->anchor_y = y;
+  state->absolute_path = absolute_path;
+  state->relative_path.clear();
+  state->editor_line = line;
+  state->editor_col = col;
+  state->symbol_name.clear();
+  if (show_call_hierarchy) {
+    set_items(state, ContextMenuKind::EditorBackground,
+              {{"Jerarquía de llamadas", "call_hierarchy"},
+               {"Formatear archivo", "format_file"}});
+    return;
+  }
+  set_items(state, ContextMenuKind::EditorBackground, {{"Formatear archivo", "format_file"}});
 }
 
 Element render_delete_confirm_modal(const ContextMenuState* state) {
@@ -679,7 +947,8 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
         state->rename_skip_return = false;
         return true;
       }
-      if (commit_rename(state, workspace, model, indexer, symbol_indexer)) {
+      if (commit_rename(state, workspace, model, focus, layout_state, symbols, indexer,
+                        symbol_indexer)) {
         context_menu_close(state, layout_state);
         if (layout_state != nullptr) {
           layout_state->request_ui_tick = true;

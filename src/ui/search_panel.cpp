@@ -261,7 +261,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       return false;
     }
 
-    if (sidebar == nullptr || sidebar->selected_tab != 1) {
+    if (sidebar == nullptr || sidebar->selected_tab != RightSidebarTabs::kSearch) {
       return false;
     }
 
@@ -392,8 +392,9 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
                                                     : TextInputFocus::None;
 
         Element form = vbox({
-            render_search_field("Buscar", state->query, "buscar...", active == TextInputFocus::SearchQuery,
-                                query_row, &state->query_box),
+            render_search_field("Buscar", state->query, "buscar...",
+                                active == TextInputFocus::SearchQuery, query_row,
+                                &state->query_box),
             render_search_field("Reempl", state->replace, "reemplazar...",
                                 active == TextInputFocus::SearchReplace, replace_row,
                                 &state->replace_box),

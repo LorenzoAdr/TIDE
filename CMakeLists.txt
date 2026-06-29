@@ -23,6 +23,8 @@ add_executable(tgdb
   src/ui/editor_panel.cpp
   src/ui/editor_tab_bar.cpp
   src/ui/context_menu.cpp
+  src/ui/call_hierarchy_panel.cpp
+  src/ui/call_hierarchy_view.cpp
   src/ui/diagnostics_panel.cpp
   src/ui/outline_panel.cpp
   src/ui/search_panel.cpp
@@ -49,6 +51,7 @@ add_executable(tgdb
   src/indexer/workspace_watcher.cpp
   src/lsp/lsp_uri.cpp
   src/lsp/lsp_transport.cpp
+  src/lsp/lsp_text_edits.cpp
   src/lsp/lsp_client.cpp
   src/lsp/diagnostics.cpp
   src/symbols/lsp_symbol_provider.cpp

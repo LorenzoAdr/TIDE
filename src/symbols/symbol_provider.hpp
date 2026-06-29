@@ -1,11 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "lsp/lsp_text_edits.hpp"
 #include "lsp/semantic_tokens.hpp"
 #include "lsp/diagnostics.hpp"
+#include "symbols/call_hierarchy.hpp"
 #include "symbols/hover_info.hpp"
 
 namespace tgdb {
@@ -40,6 +43,19 @@ struct CompletionParams {
   std::string text;
   int line = 0;
   int character = 0;
+};
+
+struct FormatParams {
+  std::string path;
+  std::string text;
+};
+
+struct RenameParams {
+  std::string path;
+  std::string text;
+  int line = 0;
+  int character = 0;
+  std::string new_name;
 };
 
 struct SourceLocation {
@@ -128,6 +144,32 @@ class ISymbolProvider {
     return {};
   }
   virtual std::vector<DocumentDiagnostics> workspace_diagnostics() { return {}; }
+
+  virtual bool supports_formatting() const { return false; }
+  virtual std::optional<std::string> format_document(const FormatParams& params) {
+    (void)params;
+    return std::nullopt;
+  }
+
+  virtual bool supports_rename() const { return false; }
+  virtual std::vector<LspFileEdits> rename_symbol(const RenameParams& params) {
+    (void)params;
+    return {};
+  }
+
+  virtual bool supports_call_hierarchy() const { return false; }
+  virtual std::vector<CallHierarchyItem> prepare_call_hierarchy(const CallHierarchyParams& params) {
+    (void)params;
+    return {};
+  }
+  virtual std::vector<CallHierarchyItem> incoming_calls(const CallHierarchyItem& item) {
+    (void)item;
+    return {};
+  }
+  virtual std::vector<CallHierarchyItem> outgoing_calls(const CallHierarchyItem& item) {
+    (void)item;
+    return {};
+  }
 };
 
 }  // namespace tgdb
