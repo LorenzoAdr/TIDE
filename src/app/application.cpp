@@ -18,6 +18,7 @@
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/quit_confirm.hpp"
+#include "ui/settings_modal.hpp"
 #include "ui/symbol_picker.hpp"
 #include "ui/cursor_blink.hpp"
 #include "ui/key_bindings.hpp"
@@ -135,6 +136,9 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
   workspace_wizard_state_.launch_root = connection_wizard_state_.browser.launch_root;
 
   symbol_provider_ = std::make_shared<LspSymbolProvider>();
+  app_settings_ = AppSettings::load();
+  layout_state_.app_settings = &app_settings_;
+  symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
   debug_available_ = gdb_supports_dap();
 
   if (config_.use_workspace_wizard) {
@@ -537,8 +541,16 @@ void Application::process_index_changes() {
 bool Application::any_modal_open() const {
   return workspace_wizard_state_.open || connection_wizard_state_.open ||
          file_picker_state_.open || symbol_picker_state_.open ||
-         shortcuts_modal_state_.open || quit_confirm_state_.open ||
-         context_menu_active(&layout_state_.context_menu);
+         shortcuts_modal_state_.open || settings_modal_state_.open ||
+         quit_confirm_state_.open || context_menu_active(&layout_state_.context_menu);
+}
+
+void Application::apply_app_settings() {
+  if (symbol_provider_) {
+    symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
+  }
+  workspace_.buffer.view_token++;
+  layout_state_.request_ui_tick = true;
 }
 
 bool Application::handle_focus_shortcuts(const Event& event) {
@@ -674,8 +686,12 @@ int Application::run() {
   auto with_shortcuts = MakeShortcutsModalOverlay(with_workspace_wizard,
                                                   &shortcuts_modal_state_);
 
+  SettingsApplyCallback on_settings_apply = [this](const AppSettings&) { apply_app_settings(); };
+  auto with_settings = MakeSettingsModalOverlay(with_shortcuts, &settings_modal_state_,
+                                                &app_settings_, on_settings_apply);
+
   auto with_quit_confirm = MakeQuitConfirmOverlay(
-      with_shortcuts, &quit_confirm_state_, &layout_state_, [this, &screen] {
+      with_settings, &quit_confirm_state_, &layout_state_, [this, &screen] {
         submit_command(UiCommand{UiCommandKind::kQuit});
         screen.ExitLoopClosure()();
       });
@@ -719,6 +735,17 @@ int Application::run() {
         } else if (!any_modal_open()) {
           shortcuts_modal_state_.open = true;
           shortcuts_modal_state_.first_visible = 0;
+        }
+        return true;
+      }
+
+      if (app_mode_ == AppMode::kNormal && event == Event::F10) {
+        if (settings_modal_state_.open) {
+          close_settings_modal(
+              &settings_modal_state_, &app_settings_,
+              [this](const AppSettings&) { apply_app_settings(); });
+        } else if (!any_modal_open()) {
+          open_settings_modal(&settings_modal_state_, app_settings_);
         }
         return true;
       }

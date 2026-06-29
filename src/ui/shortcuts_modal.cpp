@@ -40,6 +40,7 @@ const std::vector<ShortcutSection>& shortcut_sections() {
            {"F7", "Panel de búsqueda en workspace"},
            {"F8", "Panel outline (símbolos del archivo)"},
            {"F9", "Mostrar / ocultar panel de problemas (clangd)"},
+           {"F10", "Configuración (modo normal)"},
            {"Ctrl+P", "Abrir archivo rápido"},
            {"Ctrl+O", "Ir a símbolo"},
            {"Ctrl+T", "Mostrar / ocultar panel inferior"},

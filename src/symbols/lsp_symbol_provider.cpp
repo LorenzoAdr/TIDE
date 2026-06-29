@@ -40,22 +40,60 @@ LspSymbolProvider::~LspSymbolProvider() {
   on_workspace_closed();
 }
 
+void LspSymbolProvider::start_lsp_locked() {
+  if (!lsp_enabled_ || workspace_root_.empty()) {
+    use_lsp_ = false;
+    return;
+  }
+  use_lsp_ = client_.start(workspace_root_);
+}
+
+void LspSymbolProvider::stop_lsp_locked() {
+  client_.stop();
+  use_lsp_ = false;
+  cached_diag_revision_ = 0;
+  cached_diagnostics_.clear();
+}
+
+void LspSymbolProvider::set_lsp_enabled(bool enabled) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (lsp_enabled_ == enabled) {
+    return;
+  }
+  lsp_enabled_ = enabled;
+  if (!enabled) {
+    stop_lsp_locked();
+    return;
+  }
+  start_lsp_locked();
+  if (!use_lsp_) {
+    return;
+  }
+  for (const auto& entry : open_buffers_) {
+    if (is_lsp_trackable_path(entry.first, entry.second)) {
+      client_.did_open(entry.first, entry.second);
+    }
+  }
+}
+
+bool LspSymbolProvider::lsp_enabled() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return lsp_enabled_;
+}
+
 void LspSymbolProvider::on_workspace_opened(const std::string& root) {
   std::lock_guard<std::mutex> lock(mutex_);
-  client_.stop();
+  stop_lsp_locked();
   open_buffers_.clear();
   workspace_root_ = root;
-  use_lsp_ = client_.start(root);
+  start_lsp_locked();
 }
 
 void LspSymbolProvider::on_workspace_closed() {
   std::lock_guard<std::mutex> lock(mutex_);
-  client_.stop();
-  use_lsp_ = false;
+  stop_lsp_locked();
   workspace_root_.clear();
   open_buffers_.clear();
-  cached_diag_revision_ = 0;
-  cached_diagnostics_.clear();
 }
 
 void LspSymbolProvider::on_document_opened(const std::string& path, const std::string& text) {

@@ -46,13 +46,19 @@ class LspSymbolProvider : public ISymbolProvider {
 
   bool lsp_active() const { return use_lsp_; }
 
+  void set_lsp_enabled(bool enabled);
+  bool lsp_enabled() const;
+
  private:
   std::string buffer_text_for_path(const std::string& path) const;
   void refresh_diagnostics_cache_locked() const;
+  void start_lsp_locked();
+  void stop_lsp_locked();
 
   mutable std::mutex mutex_;
   LspClient client_;
   RegexSymbolProvider fallback_;
+  bool lsp_enabled_ = true;
   bool use_lsp_ = false;
   std::string workspace_root_;
   std::unordered_map<std::string, std::string> open_buffers_;

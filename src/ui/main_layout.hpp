@@ -6,6 +6,7 @@
 #include <string>
 
 #include "app/app_mode.hpp"
+#include "app/app_settings.hpp"
 #include "app/debug_model.hpp"
 #include "app/workspace_model.hpp"
 #include "ftxui/component/component_base.hpp"
@@ -61,6 +62,7 @@ struct MainLayoutState {
   int diagnostics_panel_height = 6;
   bool terminal_start_requested = true;
   bool request_ui_tick = false;
+  AppSettings* app_settings = nullptr;
   ConsolePanelTabs console_tabs;
   TextInputFocus text_input_focus = TextInputFocus::None;
   bool focus_sync_needed = false;

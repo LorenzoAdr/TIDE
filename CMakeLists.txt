@@ -10,6 +10,7 @@ include(cmake/Dependencies.cmake)
 add_executable(tgdb
   src/main.cpp
   src/app/application.cpp
+  src/app/app_settings.cpp
   src/app/debug_model.cpp
   src/app/workspace_model.cpp
   src/app/editor_tabs.cpp
@@ -32,6 +33,7 @@ add_executable(tgdb
   src/ui/symbol_picker.cpp
   src/ui/quit_confirm.cpp
   src/ui/shortcuts_modal.cpp
+  src/ui/settings_modal.cpp
   src/ui/connection_wizard.cpp
   src/ui/workspace_wizard.cpp
   src/ui/path_browser.cpp

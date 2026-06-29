@@ -2385,7 +2385,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
       std::string suffix_storage;
       const std::string* suffix_ptr = nullptr;
-      if (line_diag_ptr != nullptr && !line_diag_ptr->empty()) {
+      const bool show_suffixes =
+          layout_state == nullptr || layout_state->app_settings == nullptr ||
+          layout_state->app_settings->show_diagnostic_suffixes;
+      if (show_suffixes && line_diag_ptr != nullptr && !line_diag_ptr->empty()) {
         const int max_suffix = code_width - static_cast<int>(display_line.size()) - 2;
         suffix_storage = build_diagnostic_suffix(*line_diag_ptr, max_suffix);
         if (!suffix_storage.empty()) {

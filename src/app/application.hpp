@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "app/app_mode.hpp"
+#include "app/app_settings.hpp"
 #include "app/debug_model.hpp"
 #include "app/workspace_model.hpp"
 #include "backend/idebug_backend.hpp"
@@ -18,6 +19,7 @@
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/quit_confirm.hpp"
+#include "ui/settings_modal.hpp"
 #include "ui/shortcuts_modal.hpp"
 #include "ui/symbol_picker.hpp"
 #include "ui/focus_manager.hpp"
@@ -65,6 +67,7 @@ class Application {
   void ensure_backend_started();
   bool handle_focus_shortcuts(const ftxui::Event& event);
   bool any_modal_open() const;
+  void apply_app_settings();
   void set_status(const std::string& message);
   void set_workspace_status(const std::string& message);
   void request_terminal_autostart();
@@ -78,6 +81,8 @@ class Application {
   SymbolPickerState symbol_picker_state_;
   QuitConfirmState quit_confirm_state_;
   ShortcutsModalState shortcuts_modal_state_;
+  SettingsModalState settings_modal_state_;
+  AppSettings app_settings_;
   ShellSession shell_session_;
   ConnectionWizardState connection_wizard_state_;
   WorkspaceWizardState workspace_wizard_state_;
