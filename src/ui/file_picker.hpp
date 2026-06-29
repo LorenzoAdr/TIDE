@@ -22,7 +22,7 @@ struct FilePickerState {
 
   void sync_index(const std::shared_ptr<const IndexSnapshot>& snapshot,
                   const std::string& workspace_root);
-  void refresh_matches();
+  void refresh_matches(const WorkspaceModel* workspace = nullptr);
   void open_file(DebugModel* model, WorkspaceModel* workspace,
                  FocusManagerState* focus, int index);
 };

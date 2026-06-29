@@ -437,35 +437,55 @@ void LspClient::flatten_symbols(const nlohmann::json& nodes, int depth,
   }
 }
 
+bool LspClient::has_cached_document_symbols(const std::string& absolute_path) const {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  return symbol_cache_.find(key) != symbol_cache_.end();
+}
+
+std::optional<std::vector<SymbolInfo>> LspClient::cached_document_symbols(
+    const std::string& absolute_path) const {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return std::nullopt;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = symbol_cache_.find(key);
+  if (it == symbol_cache_.end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+
 std::vector<SymbolInfo> LspClient::document_symbols(const std::string& absolute_path) {
   if (!ready_.load() || absolute_path.empty() || !is_indexed_source_path(absolute_path)) {
     return {};
   }
 
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    const auto cached = symbol_cache_.find(absolute_path);
-    if (cached != symbol_cache_.end()) {
-      return cached->second;
-    }
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (auto cached = cached_document_symbols(key)) {
+    return *cached;
   }
 
   std::string text;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    const auto it = documents_.find(absolute_path);
+    const auto it = documents_.find(key);
     if (it != documents_.end()) {
       text = it->second.text;
     }
   }
   if (text.empty()) {
-    text = read_file_text(absolute_path);
+    text = read_file_text(key);
   }
   if (!text.empty()) {
-    did_open(absolute_path, text);
+    did_open(key, text);
   }
 
-  const std::string uri = path_to_uri(absolute_path);
+  const std::string uri = path_to_uri(key);
   nlohmann::json params = {{"textDocument", {{"uri", uri}}}};
   nlohmann::json result;
   const int id = next_request_id_++;
@@ -474,12 +494,12 @@ std::vector<SymbolInfo> LspClient::document_symbols(const std::string& absolute_
     return {};
   }
 
-  const std::string relative_file = relative_to_workspace(workspace_root_, absolute_path);
+  const std::string relative_file = relative_to_workspace(workspace_root_, key);
   std::vector<SymbolInfo> symbols;
   flatten_symbols(result, 0, relative_file, &symbols);
 
   std::lock_guard<std::mutex> lock(mutex_);
-  symbol_cache_[absolute_path] = symbols;
+  symbol_cache_[key] = symbols;
   return symbols;
 }
 
@@ -1006,6 +1026,16 @@ SemanticTokenDocument LspClient::semantic_tokens_for_file(const std::string& abs
     return {};
   }
   return it->second;
+}
+
+bool LspClient::has_ready_semantic_tokens(const std::string& absolute_path) const {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = semantic_token_cache_.find(key);
+  return it != semantic_token_cache_.end() && it->second.ready;
 }
 
 Diagnostic LspClient::parse_diagnostic(const nlohmann::json& item) {

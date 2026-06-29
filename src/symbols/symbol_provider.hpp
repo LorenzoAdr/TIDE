@@ -61,6 +61,12 @@ class ISymbolProvider {
   virtual ~ISymbolProvider() = default;
   virtual std::vector<SymbolInfo> symbols_for_file(const std::string& path) = 0;
 
+  virtual bool symbols_lsp_pending(const std::string& path) const {
+    (void)path;
+    return false;
+  }
+  virtual bool drain_async_results() { return false; }
+
   virtual bool indexes_workspace_bulk() const { return true; }
   virtual std::vector<SymbolInfo> workspace_symbols(const std::string& workspace_root,
                                                       const std::string& query) {

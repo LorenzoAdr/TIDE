@@ -12,6 +12,8 @@ struct SettingsModalState {
   int selected = 0;
   bool draft_lsp_enabled = true;
   bool draft_show_diagnostic_suffixes = true;
+  bool draft_sticky_scroll_enabled = true;
+  bool draft_secondary_panel_enabled = true;
 };
 
 using SettingsApplyCallback = std::function<void(const AppSettings&)>;

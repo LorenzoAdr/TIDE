@@ -125,6 +125,12 @@ struct EditorPanelState {
   std::unordered_map<int, std::vector<Diagnostic>> diagnostics_by_line;
   uint64_t diagnostics_by_line_revision = 0;
   std::string diagnostics_by_line_path;
+  std::unordered_map<int, std::string> diagnostic_suffix_by_line;
+  int diagnostic_suffix_code_width = 0;
+  uint64_t diagnostic_suffix_view_token = 0;
+  uint64_t diagnostic_suffix_revision = 0;
+  int last_render_scroll = 0;
+  int64_t last_scroll_change_ms = 0;
   bool document_open_pending = false;
   std::string pending_document_open_path;
   struct SourceSymbolFlash {
@@ -150,6 +156,7 @@ void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState*
 constexpr int kDoubleClickMs = 400;
 constexpr int kShiftClickWindowMs = 3000;
 constexpr int kHoverDelayMs = 500;
+constexpr int kSuffixScrollSettleMs = 150;
 
 CursorPos mouse_to_cursor(const Mouse& m, const EditorPanelState& panel, const EditorBuffer& buffer,
                           int visible_lines);
@@ -228,8 +235,10 @@ void ensure_file_symbols(EditorPanelState* panel, ISymbolProvider* symbols,
   if (panel == nullptr || symbols == nullptr || path.empty() || !panel->symbols_fetch_pending) {
     return;
   }
-  panel->symbols_fetch_pending = false;
   panel->cached_symbols = symbols->symbols_for_file(path);
+  if (!symbols->symbols_lsp_pending(path)) {
+    panel->symbols_fetch_pending = false;
+  }
 }
 
 void rebuild_diagnostics_by_line(EditorPanelState* panel, const DocumentDiagnostics& doc,
@@ -244,8 +253,72 @@ void rebuild_diagnostics_by_line(EditorPanelState* panel, const DocumentDiagnost
   panel->diagnostics_by_line_path = doc.path;
   panel->diagnostics_by_line_revision = revision;
   panel->diagnostics_by_line.clear();
+  panel->diagnostic_suffix_by_line.clear();
+  panel->diagnostic_suffix_code_width = 0;
+  panel->diagnostic_suffix_view_token = 0;
+  panel->diagnostic_suffix_revision = 0;
   for (const auto& item : doc.items) {
     panel->diagnostics_by_line[item.line].push_back(item);
+  }
+}
+
+void rebuild_diagnostic_suffix_cache(EditorPanelState* panel, const EditorBuffer& buffer,
+                                     int code_width, uint64_t revision) {
+  if (panel == nullptr || code_width <= 0) {
+    return;
+  }
+  if (panel->diagnostic_suffix_code_width == code_width &&
+      panel->diagnostic_suffix_view_token == buffer.view_token &&
+      panel->diagnostic_suffix_revision == revision) {
+    return;
+  }
+  panel->diagnostic_suffix_code_width = code_width;
+  panel->diagnostic_suffix_view_token = buffer.view_token;
+  panel->diagnostic_suffix_revision = revision;
+  panel->diagnostic_suffix_by_line.clear();
+  for (const auto& entry : panel->diagnostics_by_line) {
+    const int line = entry.first;
+    if (line < 0 || line >= static_cast<int>(buffer.lines.size())) {
+      continue;
+    }
+    const int max_suffix =
+        code_width - static_cast<int>(buffer.lines[static_cast<std::size_t>(line)].size()) - 2;
+    const std::string suffix = build_diagnostic_suffix(entry.second, max_suffix);
+    if (!suffix.empty()) {
+      panel->diagnostic_suffix_by_line[line] = suffix;
+    }
+  }
+}
+
+bool scroll_suffixes_settled(const EditorPanelState& panel) {
+  return steady_now_ms() - panel.last_scroll_change_ms >= kSuffixScrollSettleMs;
+}
+
+bool show_diagnostic_suffix_on_line(const EditorPanelState& panel, int line,
+                                    const EditorBuffer& buffer, bool suffixes_enabled) {
+  if (!suffixes_enabled) {
+    return false;
+  }
+  if (panel.diagnostic_suffix_by_line.find(line) == panel.diagnostic_suffix_by_line.end()) {
+    return false;
+  }
+  if (scroll_suffixes_settled(panel)) {
+    return true;
+  }
+  return line == buffer.primary_line();
+}
+
+void track_editor_scroll(EditorPanelState* panel, int scroll, MainLayoutState* layout_state) {
+  if (panel == nullptr) {
+    return;
+  }
+  if (scroll == panel->last_render_scroll) {
+    return;
+  }
+  panel->last_render_scroll = scroll;
+  panel->last_scroll_change_ms = steady_now_ms();
+  if (layout_state != nullptr && layout_state->schedule_ui_tick) {
+    layout_state->schedule_ui_tick();
   }
 }
 
@@ -258,6 +331,23 @@ const std::vector<Diagnostic>* diagnostics_for_editor_line(EditorPanelState* pan
     return nullptr;
   }
   return &it->second;
+}
+
+char line_diagnostic_marker_from_map(EditorPanelState* panel, int line) {
+  const std::vector<Diagnostic>* items = diagnostics_for_editor_line(panel, line);
+  if (items == nullptr || items->empty()) {
+    return '\0';
+  }
+  bool warning = false;
+  for (const auto& item : *items) {
+    if (item.severity == DiagnosticSeverity::kError) {
+      return '!';
+    }
+    if (item.severity == DiagnosticSeverity::kWarning) {
+      warning = true;
+    }
+  }
+  return warning ? 'W' : '\0';
 }
 
 const BracketPairHighlight& cached_bracket_highlight(EditorPanelState* panel,
@@ -2336,7 +2426,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const std::vector<SymbolInfo>& file_symbols =
         cached_file_symbols(panel_state.get(), buffer.path, symbols.get());
     const std::vector<StickyLine> sticky_lines =
-        sticky_lines_for_scroll(file_symbols, buffer.lines, start, 3);
+        layout_state != nullptr && layout_state->app_settings != nullptr &&
+                layout_state->app_settings->sticky_scroll_enabled
+            ? sticky_lines_for_scroll(file_symbols, buffer.lines, start, 3)
+            : std::vector<StickyLine>{};
 
     DocumentDiagnostics file_diag;
     if (symbols && symbols->supports_diagnostics() && !buffer.path.empty() &&
@@ -2354,6 +2447,18 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             ? panel_state->code_box.x_max - panel_state->code_box.x_min + 1
             : 80;
 
+    track_editor_scroll(panel_state.get(), start, layout_state);
+    rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
+                                    panel_state->cached_file_diag_revision);
+
+    const bool suffixes_enabled =
+        layout_state == nullptr || layout_state->app_settings == nullptr ||
+        layout_state->app_settings->show_diagnostic_suffixes;
+    if (!scroll_suffixes_settled(*panel_state) && layout_state != nullptr &&
+        layout_state->schedule_ui_tick) {
+      layout_state->schedule_ui_tick();
+    }
+
     const bool show_caret =
         !panel_state->mouse_selecting && !buffer.primary().has_selection();
 
@@ -2365,7 +2470,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           is_primary ? bgcolor(theme::EditorLineHi()) : bgcolor(theme::CodeBg());
 
       if (gutter_markers) {
-        const char marker = line_diagnostic_marker(i, file_diag);
+        const char marker = line_diagnostic_marker_from_map(panel_state.get(), i);
         std::string gutter_text(1, marker == '\0' ? ' ' : marker);
         gutter_text += format_line_number(i + 1, gutter_w);
         Color gutter_color = theme::Muted();
@@ -2380,19 +2485,15 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                               row_bg);
       }
 
-      const std::vector<Diagnostic>* line_diag_ptr = diagnostics_for_editor_line(panel_state.get(), i);
       const std::string& display_line = buffer.lines[static_cast<std::size_t>(i)];
 
-      std::string suffix_storage;
       const std::string* suffix_ptr = nullptr;
-      const bool show_suffixes =
-          layout_state == nullptr || layout_state->app_settings == nullptr ||
-          layout_state->app_settings->show_diagnostic_suffixes;
-      if (show_suffixes && line_diag_ptr != nullptr && !line_diag_ptr->empty()) {
-        const int max_suffix = code_width - static_cast<int>(display_line.size()) - 2;
-        suffix_storage = build_diagnostic_suffix(*line_diag_ptr, max_suffix);
-        if (!suffix_storage.empty()) {
-          suffix_ptr = &suffix_storage;
+      const std::vector<Diagnostic>* suffix_color_ptr = nullptr;
+      if (show_diagnostic_suffix_on_line(*panel_state, i, buffer, suffixes_enabled)) {
+        const auto suffix_it = panel_state->diagnostic_suffix_by_line.find(i);
+        if (suffix_it != panel_state->diagnostic_suffix_by_line.end()) {
+          suffix_ptr = &suffix_it->second;
+          suffix_color_ptr = diagnostics_for_editor_line(panel_state.get(), i);
         }
       }
 
@@ -2413,8 +2514,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
       code_rows.push_back(RenderEditorLine(display_line, i, buffer,
                                            editor_focused, find_matches, semantic_tokens,
-                                           &bracket, line_diag_ptr, suffix_ptr, &symbol_press,
-                                           show_caret));
+                                           &bracket, nullptr, suffix_ptr, suffix_color_ptr,
+                                           &symbol_press, show_caret));
     }
     if (code_rows.empty()) {
       gutter_rows.push_back(text(format_line_number(1, gutter_w)) | color(theme::Muted()) |
@@ -2596,13 +2697,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           }
           if (panel_state->symbols_fetch_pending) {
             ensure_file_symbols(panel_state.get(), symbols.get(), path);
-            workspace->buffer.view_token++;
           }
           if (symbols->supports_semantic_highlight()) {
-            const bool sem_ok = symbols->ensure_semantic_tokens(path);
-            if (sem_ok) {
-              workspace->buffer.view_token++;
-            }
+            symbols->ensure_semantic_tokens(path);
           }
           sync_diagnostic_cache(panel_state.get(), symbols.get(), path);
         }

@@ -79,8 +79,11 @@ void fetch_outline_symbols(OutlinePanelState* state, ISymbolProvider* symbols,
       state->loaded_file.empty()) {
     return;
   }
-  state->symbols_fetch_pending = false;
   state->symbols = symbols->symbols_for_file(state->loaded_file);
+  if (symbols->symbols_lsp_pending(state->loaded_file)) {
+    return;
+  }
+  state->symbols_fetch_pending = false;
   if (workspace != nullptr) {
     workspace->buffer.view_token++;
   }

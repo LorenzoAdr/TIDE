@@ -549,6 +549,12 @@ void Application::apply_app_settings() {
   if (symbol_provider_) {
     symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
   }
+  if (!app_settings_.secondary_panel_enabled &&
+      focus_state_.region == FocusRegion::RightPanel) {
+    focus_state_.region = FocusRegion::Editor;
+    layout_state_.text_input_focus = TextInputFocus::None;
+    layout_state_.focus_sync_needed = true;
+  }
   workspace_.buffer.view_token++;
   layout_state_.request_ui_tick = true;
 }
@@ -568,6 +574,9 @@ bool Application::handle_focus_shortcuts(const Event& event) {
     return true;
   }
   if (event_is_open_outline_panel(event)) {
+    if (!app_settings_.secondary_panel_enabled) {
+      return true;
+    }
     focus_state_.region = FocusRegion::RightPanel;
     layout_state_.right_sidebar.selected_tab = 0;
     layout_state_.right_panel_active_section = 0;
@@ -576,6 +585,9 @@ bool Application::handle_focus_shortcuts(const Event& event) {
     return true;
   }
   if (event_is_open_search_panel(event)) {
+    if (!app_settings_.secondary_panel_enabled) {
+      return true;
+    }
     focus_state_.region = FocusRegion::RightPanel;
     layout_state_.right_sidebar.selected_tab = 1;
     layout_state_.right_panel_active_section = 0;
@@ -595,11 +607,20 @@ bool Application::handle_focus_shortcuts(const Event& event) {
   }
   if (focus_state_.region != FocusRegion::Editor) {
     if (event_is_alt_left(event)) {
-      focus_state_.move_left();
+      if (focus_state_.region == FocusRegion::RightPanel &&
+          !app_settings_.secondary_panel_enabled) {
+        focus_state_.region = FocusRegion::Editor;
+      } else {
+        focus_state_.move_left();
+      }
       mark_focus_sync();
       return true;
     }
     if (event_is_alt_right(event)) {
+      if (focus_state_.region == FocusRegion::Editor &&
+          !app_settings_.secondary_panel_enabled) {
+        return true;
+      }
       focus_state_.move_right();
       mark_focus_sync();
       return true;
@@ -718,6 +739,9 @@ int Application::run() {
         layout_state_.clickable.tick();
         if (layout_state_.console_visible && layout_state_.terminal_tick_callback) {
           layout_state_.terminal_tick_callback();
+        }
+        if (symbol_provider_ && symbol_provider_->drain_async_results()) {
+          workspace_.buffer.view_token++;
         }
         if (layout_state_.editor_tick_callback) {
           layout_state_.editor_tick_callback();
@@ -914,7 +938,7 @@ int Application::run() {
           file_picker_state_.query.clear();
           file_picker_state_.selected = 0;
           file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
-          file_picker_state_.refresh_matches();
+          file_picker_state_.refresh_matches(&workspace_);
         }
         return true;
       }

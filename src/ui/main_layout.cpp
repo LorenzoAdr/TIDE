@@ -395,11 +395,15 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       MakeVSplitRight(right_panel, explorer_and_center, &split_state->right_width);
   workspace_area = WrapClearInputFocus(std::move(workspace_area), layout_state);
   auto workspace_only = workspace_area;
+  auto workspace_no_secondary =
+      WrapClearInputFocus(explorer_and_center, layout_state);
 
   auto console = MakeConsolePanel(app_mode, model, shell, on_command, layout_state, focus,
                                   &split_state->bottom_height);
   auto with_console =
       MakeHSplitBottom(console, workspace_area, &split_state->bottom_height);
+  auto with_console_no_secondary =
+      MakeHSplitBottom(console, workspace_no_secondary, &split_state->bottom_height);
 
   auto with_focus_sync = CatchEvent(
       with_console,
@@ -427,8 +431,17 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       });
 
   return Renderer(with_focus_sync, [=] {
-    Element main = layout_state->console_visible ? with_focus_sync->Render()
-                                               : workspace_only->Render();
+    const bool show_secondary =
+        layout_state == nullptr || layout_state->app_settings == nullptr ||
+        layout_state->app_settings->secondary_panel_enabled;
+    Element main;
+    if (layout_state != nullptr && layout_state->console_visible) {
+      main = show_secondary ? with_focus_sync->Render()
+                            : with_console_no_secondary->Render();
+    } else {
+      main = show_secondary ? workspace_only->Render()
+                            : workspace_no_secondary->Render();
+    }
 
     std::string status_msg = model->status_message;
     if (app_mode != nullptr && *app_mode == AppMode::kNormal && workspace != nullptr &&

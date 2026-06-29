@@ -17,7 +17,9 @@ namespace {
 
 constexpr int kLsp = 0;
 constexpr int kDiagnosticSuffixes = 1;
-constexpr int kOptionCount = 2;
+constexpr int kStickyScroll = 2;
+constexpr int kSecondaryPanel = 3;
+constexpr int kOptionCount = 4;
 
 struct SettingsOption {
   const char* label;
@@ -30,6 +32,10 @@ const std::vector<SettingsOption>& settings_options() {
        "Outline, completado, diagnósticos y resaltado semántico vía clangd"},
       {"Sufijos de avisos en el código",
        "Muestra mensajes cortos de clangd al final de cada línea"},
+      {"Sticky scroll en el editor",
+       "Muestra encabezados de ámbito fijos al hacer scroll en el código"},
+      {"Panel secundario (outline / búsqueda)",
+       "Muestra la tercera columna con outline y búsqueda en el workspace"},
   };
   return options;
 }
@@ -47,6 +53,10 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_lsp_enabled;
     case kDiagnosticSuffixes:
       return state->draft_show_diagnostic_suffixes;
+    case kStickyScroll:
+      return state->draft_sticky_scroll_enabled;
+    case kSecondaryPanel:
+      return state->draft_secondary_panel_enabled;
     default:
       return false;
   }
@@ -62,6 +72,12 @@ void toggle_option(SettingsModalState* state, int index) {
       break;
     case kDiagnosticSuffixes:
       state->draft_show_diagnostic_suffixes = !state->draft_show_diagnostic_suffixes;
+      break;
+    case kStickyScroll:
+      state->draft_sticky_scroll_enabled = !state->draft_sticky_scroll_enabled;
+      break;
+    case kSecondaryPanel:
+      state->draft_secondary_panel_enabled = !state->draft_secondary_panel_enabled;
       break;
     default:
       break;
@@ -110,6 +126,8 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings)
   state->selected = 0;
   state->draft_lsp_enabled = settings.lsp_enabled;
   state->draft_show_diagnostic_suffixes = settings.show_diagnostic_suffixes;
+  state->draft_sticky_scroll_enabled = settings.sticky_scroll_enabled;
+  state->draft_secondary_panel_enabled = settings.secondary_panel_enabled;
 }
 
 void close_settings_modal(SettingsModalState* state, AppSettings* settings,
@@ -119,6 +137,8 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   }
   settings->lsp_enabled = state->draft_lsp_enabled;
   settings->show_diagnostic_suffixes = state->draft_show_diagnostic_suffixes;
+  settings->sticky_scroll_enabled = state->draft_sticky_scroll_enabled;
+  settings->secondary_panel_enabled = state->draft_secondary_panel_enabled;
   settings->save();
   if (on_apply) {
     on_apply(*settings);

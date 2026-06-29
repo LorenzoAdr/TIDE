@@ -1,5 +1,6 @@
 #include "app/workspace_model.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <filesystem>
 
@@ -88,10 +89,48 @@ void WorkspaceModel::load_active_tab_into_buffer() {
 
 void WorkspaceModel::clear_tabs() {
   tabs.clear();
+  tab_mru.clear();
   active_tab = -1;
   set_welcome_buffer(&buffer);
   active_file.clear();
   cursor_history.clear();
+}
+
+void WorkspaceModel::touch_tab_mru(const std::string& absolute_path) {
+  if (absolute_path.empty()) {
+    return;
+  }
+  const std::string path = normalize_path(absolute_path);
+  tab_mru.erase(std::remove(tab_mru.begin(), tab_mru.end(), path), tab_mru.end());
+  tab_mru.insert(tab_mru.begin(), path);
+}
+
+void WorkspaceModel::remove_tab_mru(const std::string& absolute_path) {
+  if (absolute_path.empty()) {
+    return;
+  }
+  const std::string path = normalize_path(absolute_path);
+  tab_mru.erase(std::remove(tab_mru.begin(), tab_mru.end(), path), tab_mru.end());
+}
+
+std::vector<std::string> WorkspaceModel::open_tabs_mru_excluding_active() const {
+  std::vector<std::string> result;
+  const std::string current = normalize_path(active_file);
+  for (const std::string& path : tab_mru) {
+    if (path != current) {
+      result.push_back(path);
+    }
+  }
+  for (const EditorTab& tab : tabs) {
+    const std::string path = normalize_path(tab.path);
+    if (path == current) {
+      continue;
+    }
+    if (std::find(result.begin(), result.end(), path) == result.end()) {
+      result.push_back(path);
+    }
+  }
+  return result;
 }
 
 int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path) {
@@ -139,6 +178,7 @@ void WorkspaceModel::switch_to_tab(int index) {
   flush_active_tab();
   active_tab = index;
   load_active_tab_into_buffer();
+  touch_tab_mru(active_file);
 }
 
 bool WorkspaceModel::close_tab(int index) {
@@ -146,7 +186,9 @@ bool WorkspaceModel::close_tab(int index) {
     return false;
   }
   flush_active_tab();
+  const std::string closed_path = tabs[static_cast<std::size_t>(index)].path;
   tabs.erase(tabs.begin() + static_cast<std::ptrdiff_t>(index));
+  remove_tab_mru(closed_path);
   if (tabs.empty()) {
     active_tab = -1;
     load_active_tab_into_buffer();

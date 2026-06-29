@@ -371,6 +371,7 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
                          const BracketPairHighlight* bracket,
                          const std::vector<Diagnostic>* line_diagnostics,
                          const std::string* diagnostic_suffix,
+                         const std::vector<Diagnostic>* suffix_diagnostics,
                          const EditorSymbolPress* symbol_press, bool show_caret) {
   const Decorator line_bg =
       line_index == buffer.primary_line() ? bgcolor(theme::EditorLineHi())
@@ -389,7 +390,9 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
            : render_simple_line(line, line_index, buffer, editor_focused, semantic_tokens,
                                 syntax_highlight, line_bg, show_caret);
 
-  return wrap_with_suffix(std::move(content), line_bg, diagnostic_suffix, line_diagnostics);
+  const std::vector<Diagnostic>* suffix_color =
+      suffix_diagnostics != nullptr ? suffix_diagnostics : line_diagnostics;
+  return wrap_with_suffix(std::move(content), line_bg, diagnostic_suffix, suffix_color);
 }
 
 }  // namespace tgdb

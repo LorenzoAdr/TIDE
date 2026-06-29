@@ -1,13 +1,17 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "lsp/lsp_client.hpp"
 #include "symbols/regex_symbol_provider.hpp"
 #include "symbols/symbol_provider.hpp"
+#include "util/thread_safe_queue.hpp"
 
 namespace tgdb {
 
@@ -17,6 +21,8 @@ class LspSymbolProvider : public ISymbolProvider {
   ~LspSymbolProvider() override;
 
   std::vector<SymbolInfo> symbols_for_file(const std::string& path) override;
+  bool symbols_lsp_pending(const std::string& path) const override;
+  bool drain_async_results() override;
   bool indexes_workspace_bulk() const override;
   std::vector<SymbolInfo> workspace_symbols(const std::string& workspace_root,
                                               const std::string& query) override;
@@ -50,10 +56,28 @@ class LspSymbolProvider : public ISymbolProvider {
   bool lsp_enabled() const;
 
  private:
+  enum class AsyncJobKind { DocumentSymbols, SemanticTokens };
+
+  struct AsyncJob {
+    AsyncJobKind kind;
+    std::string path;
+  };
+
+  struct AsyncResult {
+    AsyncJobKind kind;
+    std::string path;
+  };
+
   std::string buffer_text_for_path(const std::string& path) const;
   void refresh_diagnostics_cache_locked() const;
   void start_lsp_locked();
   void stop_lsp_locked();
+  void start_async_worker_locked();
+  void stop_async_worker_locked();
+  void async_worker_main();
+  void enqueue_document_symbols_locked(const std::string& path);
+  void enqueue_semantic_tokens_locked(const std::string& path);
+  bool symbols_lsp_pending_locked(const std::string& path) const;
 
   mutable std::mutex mutex_;
   LspClient client_;
@@ -64,6 +88,14 @@ class LspSymbolProvider : public ISymbolProvider {
   std::unordered_map<std::string, std::string> open_buffers_;
   mutable uint64_t cached_diag_revision_ = 0;
   mutable std::vector<DocumentDiagnostics> cached_diagnostics_;
+
+  ThreadSafeQueue<AsyncJob> async_jobs_;
+  ThreadSafeQueue<AsyncResult> async_results_;
+  std::thread async_worker_;
+  std::atomic<bool> async_stop_{false};
+  mutable std::mutex inflight_mutex_;
+  std::unordered_set<std::string> inflight_symbols_;
+  std::unordered_set<std::string> inflight_semantic_;
 };
 
 }  // namespace tgdb

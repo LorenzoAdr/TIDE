@@ -1,8 +1,8 @@
 #pragma once
 
 #include <atomic>
-#include <atomic>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -31,6 +31,9 @@ class LspClient {
   void did_close(const std::string& absolute_path);
 
   std::vector<SymbolInfo> document_symbols(const std::string& absolute_path);
+  bool has_cached_document_symbols(const std::string& absolute_path) const;
+  std::optional<std::vector<SymbolInfo>> cached_document_symbols(
+      const std::string& absolute_path) const;
   std::vector<SymbolInfo> workspace_symbols(const std::string& workspace_root,
                                             const std::string& query);
   std::vector<CompletionItem> completions_at(const std::string& absolute_path,
@@ -42,6 +45,7 @@ class LspClient {
                                   int line, int character);
 
   SemanticTokenDocument semantic_tokens_for_file(const std::string& absolute_path);
+  bool has_ready_semantic_tokens(const std::string& absolute_path) const;
   bool ensure_semantic_tokens(const std::string& absolute_path);
 
   HoverInfo hover(const std::string& absolute_path, const std::string& text, int line,

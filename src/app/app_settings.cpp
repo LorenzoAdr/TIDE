@@ -47,6 +47,14 @@ AppSettings AppSettings::load() {
         doc["show_diagnostic_suffixes"].is_boolean()) {
       settings.show_diagnostic_suffixes = doc["show_diagnostic_suffixes"].get<bool>();
     }
+    if (doc.contains("sticky_scroll_enabled") &&
+        doc["sticky_scroll_enabled"].is_boolean()) {
+      settings.sticky_scroll_enabled = doc["sticky_scroll_enabled"].get<bool>();
+    }
+    if (doc.contains("secondary_panel_enabled") &&
+        doc["secondary_panel_enabled"].is_boolean()) {
+      settings.secondary_panel_enabled = doc["secondary_panel_enabled"].get<bool>();
+    }
   } catch (...) {
     return AppSettings{};
   }
@@ -65,6 +73,8 @@ bool AppSettings::save() const {
   nlohmann::json doc;
   doc["lsp_enabled"] = lsp_enabled;
   doc["show_diagnostic_suffixes"] = show_diagnostic_suffixes;
+  doc["sticky_scroll_enabled"] = sticky_scroll_enabled;
+  doc["secondary_panel_enabled"] = secondary_panel_enabled;
 
   std::ofstream output(path);
   if (!output) {

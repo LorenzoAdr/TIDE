@@ -55,6 +55,7 @@ ftxui::Element RenderEditorLine(const std::string& line, int line_index,
                                const BracketPairHighlight* bracket = nullptr,
                                const std::vector<Diagnostic>* line_diagnostics = nullptr,
                                const std::string* diagnostic_suffix = nullptr,
+                               const std::vector<Diagnostic>* suffix_diagnostics = nullptr,
                                const EditorSymbolPress* symbol_press = nullptr,
                                bool show_caret = true);
 
