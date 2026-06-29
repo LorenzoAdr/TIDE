@@ -47,12 +47,12 @@ LspSymbolProvider::~LspSymbolProvider() {
   on_workspace_closed();
 }
 
-void LspSymbolProvider::start_lsp_locked() {
+void LspSymbolProvider::start_lsp_locked(const std::string& compile_commands_dir) {
   if (!lsp_enabled_ || workspace_root_.empty()) {
     use_lsp_ = false;
     return;
   }
-  use_lsp_ = client_.start(workspace_root_);
+  use_lsp_ = client_.start(workspace_root_, compile_commands_dir);
   if (use_lsp_) {
     start_async_worker_locked();
   }
@@ -224,7 +224,7 @@ void LspSymbolProvider::set_lsp_enabled(bool enabled) {
     stop_lsp_locked();
     return;
   }
-  start_lsp_locked();
+  start_lsp_locked(compile_commands_dir_);
   if (!use_lsp_) {
     return;
   }
@@ -240,12 +240,14 @@ bool LspSymbolProvider::lsp_enabled() const {
   return lsp_enabled_;
 }
 
-void LspSymbolProvider::on_workspace_opened(const std::string& root) {
+void LspSymbolProvider::on_workspace_opened(const std::string& root,
+                                            const std::string& compile_commands_dir) {
   std::lock_guard<std::mutex> lock(mutex_);
   stop_lsp_locked();
   open_buffers_.clear();
   workspace_root_ = root;
-  start_lsp_locked();
+  compile_commands_dir_ = compile_commands_dir;
+  start_lsp_locked(compile_commands_dir_);
 }
 
 void LspSymbolProvider::on_workspace_closed() {

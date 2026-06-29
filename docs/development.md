@@ -26,15 +26,35 @@ ln -sf build/compile_commands.json .
 
 | Script | Purpose |
 |--------|---------|
-| `tools/compile.sh` | Configure, build, verify GDB DAP, check outputs |
+| `tools/compile.sh` | Interactive bundle wizard (default), configure, build |
 | `tools/launch.sh` | Run `tgdb` with sensible defaults and path resolution |
+
+`compile.sh` without arguments opens a TUI to choose embedded components (clangd). Use `-y` to skip the wizard and reuse `.bundle-config`.
+
+```bash
+./tools/compile.sh                      # TUI: choose bundles
+./tools/compile.sh -y                   # reuse .bundle-config
+./tools/compile.sh --bundle-clangd      # embed official clangd (Linux x86_64)
+./tools/compile.sh --no-bundle-clangd   # slim binary (~53 MB)
+./tools/compile.sh --bundle-gdb         # embed gdb-static Full
+./tools/compile.sh --help
+```
+
+When `TGDB_BUNDLE_CLANGD=ON`, the build downloads the official [clangd/clangd](https://github.com/clangd/clangd/releases) Linux x86_64 release, strips it, compresses it, and embeds it in `tgdb` (+~35 MB compressed, ~87 MB total). At runtime the blob is extracted once to `$XDG_CACHE_HOME/tgdb/bundled/clangd-<version>/`.
+
+When `TGDB_BUNDLE_GDB=ON`, the build downloads [gdb-static Full](https://github.com/guyush1/gdb-static/releases) (x86_64, musl, Python+DAP baked in), verifies static linking and DAP, compresses it, and embeds it (+~25–40 MB compressed). Runtime extraction: `$XDG_CACHE_HOME/tgdb/bundled/gdb-<version>/`.
+
+Build-time tools (when bundling): `curl` or `wget`, `zstd`, `objcopy`, `sha256sum`; for clangd also `unzip`, `strip`, `ldd`.
 
 Environment variables:
 
 | Variable | Effect |
 |----------|--------|
 | `JOBS` | Parallel build jobs for `compile.sh` (default: `nproc`) |
-| `CLANGD_PATH` | Path to clangd binary |
+| `CLANGD_PATH` | Override path to clangd binary (highest priority) |
+| `GDB_PATH` | Override path to gdb binary (highest priority) |
+| `TGDB_FORCE_BUNDLED_CLANGD` | `1` = use only embedded clangd; `0` = allow `PATH` fallback |
+| `TGDB_FORCE_BUNDLED_GDB` | `1` = use only embedded gdb; `0` = allow `PATH` fallback |
 | `TGDB_UI_SMOKE` | Headless UI smoke test (exits quickly, no fullscreen) |
 
 ### Running tests

@@ -19,7 +19,21 @@ constexpr int kLsp = 0;
 constexpr int kDiagnosticSuffixes = 1;
 constexpr int kStickyScroll = 2;
 constexpr int kSecondaryPanel = 3;
-constexpr int kOptionCount = 4;
+constexpr int kBaseOptions = 4;
+
+#ifdef TGDB_HAS_BUNDLED_CLANGD
+constexpr int kForceBundledClangd = kBaseOptions;
+constexpr int kAfterClangd = kBaseOptions + 1;
+#else
+constexpr int kAfterClangd = kBaseOptions;
+#endif
+
+#ifdef TGDB_HAS_BUNDLED_GDB
+constexpr int kForceBundledGdb = kAfterClangd;
+constexpr int kOptionCount = kAfterClangd + 1;
+#else
+constexpr int kOptionCount = kAfterClangd;
+#endif
 
 struct SettingsOption {
   const char* label;
@@ -36,6 +50,14 @@ const std::vector<SettingsOption>& settings_options() {
        "Muestra encabezados de ámbito fijos al hacer scroll en el código"},
       {"Panel secundario (outline / búsqueda)",
        "Muestra la tercera columna con outline y búsqueda en el workspace"},
+#ifdef TGDB_HAS_BUNDLED_CLANGD
+      {"Forzar clangd embebido",
+       "Usa solo el clangd del binario (ignora clangd en PATH salvo CLANGD_PATH)"},
+#endif
+#ifdef TGDB_HAS_BUNDLED_GDB
+      {"Forzar gdb embebido",
+       "Usa solo el gdb del binario (ignora gdb en PATH salvo GDB_PATH)"},
+#endif
   };
   return options;
 }
@@ -57,6 +79,14 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_sticky_scroll_enabled;
     case kSecondaryPanel:
       return state->draft_secondary_panel_enabled;
+#ifdef TGDB_HAS_BUNDLED_CLANGD
+    case kForceBundledClangd:
+      return state->draft_force_bundled_clangd;
+#endif
+#ifdef TGDB_HAS_BUNDLED_GDB
+    case kForceBundledGdb:
+      return state->draft_force_bundled_gdb;
+#endif
     default:
       return false;
   }
@@ -79,6 +109,16 @@ void toggle_option(SettingsModalState* state, int index) {
     case kSecondaryPanel:
       state->draft_secondary_panel_enabled = !state->draft_secondary_panel_enabled;
       break;
+#ifdef TGDB_HAS_BUNDLED_CLANGD
+    case kForceBundledClangd:
+      state->draft_force_bundled_clangd = !state->draft_force_bundled_clangd;
+      break;
+#endif
+#ifdef TGDB_HAS_BUNDLED_GDB
+    case kForceBundledGdb:
+      state->draft_force_bundled_gdb = !state->draft_force_bundled_gdb;
+      break;
+#endif
     default:
       break;
   }
@@ -128,6 +168,8 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings)
   state->draft_show_diagnostic_suffixes = settings.show_diagnostic_suffixes;
   state->draft_sticky_scroll_enabled = settings.sticky_scroll_enabled;
   state->draft_secondary_panel_enabled = settings.secondary_panel_enabled;
+  state->draft_force_bundled_clangd = settings.force_bundled_clangd;
+  state->draft_force_bundled_gdb = settings.force_bundled_gdb;
 }
 
 void close_settings_modal(SettingsModalState* state, AppSettings* settings,
@@ -139,6 +181,8 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->show_diagnostic_suffixes = state->draft_show_diagnostic_suffixes;
   settings->sticky_scroll_enabled = state->draft_sticky_scroll_enabled;
   settings->secondary_panel_enabled = state->draft_secondary_panel_enabled;
+  settings->force_bundled_clangd = state->draft_force_bundled_clangd;
+  settings->force_bundled_gdb = state->draft_force_bundled_gdb;
   settings->save();
   if (on_apply) {
     on_apply(*settings);

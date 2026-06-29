@@ -34,10 +34,19 @@ gdb -i=dap -ex quit
 
 ### Optional (recommended)
 
-- **clangd** on `PATH`, or set `CLANGD_PATH` to the binary
+- **clangd** for LSP (outline, completion, diagnostics). Options:
+  - Build with embedded clangd: `./tools/compile.sh` and check *Incluir clangd en el binario* (~87 MB `tgdb`, portable; needs glibc ≥ 2.18)
+  - System install: `clangd` on `PATH`, or set `CLANGD_PATH`
+- **gdb** for debugging (GDB 14+ with DAP). Options:
+  - Build with embedded gdb-static Full: `./tools/compile.sh` and check *Incluir gdb-static Full* (~115–125 MB with clangd+gdb; fully static, no system Python)
+  - System install: `gdb` on `PATH` with `gdb -i=dap -ex quit` working, or set `GDB_PATH`
 - **`compile_commands.json`** in the workspace root or under `build/` — gives clangd accurate include paths and enables reliable outline, completion, and go-to-symbol
 
 Without clangd, outline and completion fall back to regex-based symbol extraction from source files.
+
+When built with embedded clangd, open **F10 → Configuración** to toggle *Forzar clangd embebido* (skip system `clangd` on `PATH`). Override at runtime with `TGDB_FORCE_BUNDLED_CLANGD=1|0`.
+
+When built with embedded gdb-static, use **F10 → Configuración → Forzar gdb embebido** to prefer the bundled debugger over `gdb` on `PATH` (unless `GDB_PATH` is set). Override at runtime with `TGDB_FORCE_BUNDLED_GDB=1|0`.
 
 ## Installation
 

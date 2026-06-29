@@ -834,6 +834,25 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     return false;
   };
 
+  if (layout_state != nullptr) {
+    layout_state->watches_mouse_handler =
+        [state, layout_state, model, send_continue, send_pause, send_stop](Event event) {
+          if (!event.is_mouse()) {
+            return false;
+          }
+          const Mouse& m = event.mouse();
+          if (m.motion == Mouse::Moved) {
+            handle_watches_hover(state.get(), layout_state, m);
+            return layout_state->request_ui_tick;
+          }
+          if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+            return handle_toolbar_mouse(state.get(), model, m, layout_state, send_continue,
+                                        send_pause, send_stop);
+          }
+          return false;
+        };
+  }
+
   return WrapFocusable(CatchEvent(
       Renderer(inputs, [model, state, expr_input, inject_input, layout_state, focus] {
     if (focus != nullptr && focus->region != FocusRegion::RightPanel) {

@@ -982,6 +982,21 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   if (layout_state != nullptr) {
     layout_state->console_key_handler = dispatch_console_keys;
     layout_state->console_mouse_handler = dispatch_console_mouse;
+    layout_state->console_debug_mouse_handler =
+        [app_mode, state, layout_state, focus](Event event) {
+          if (!debug_console_mode(app_mode) || !event.is_mouse()) {
+            return false;
+          }
+          const Mouse& m = event.mouse();
+          if (m.motion == Mouse::Moved) {
+            handle_console_tab_hover(state.get(), layout_state, m);
+            return layout_state->request_ui_tick;
+          }
+          if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+            return switch_console_tab_from_mouse(state.get(), layout_state, focus, m.x, m.y);
+          }
+          return false;
+        };
     layout_state->terminal_tick_callback = [app_mode, model, shell, state, layout_state, focus,
                                             bottom_height] {
       if (layout_state->terminal_start_requested) {

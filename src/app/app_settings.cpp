@@ -27,6 +27,12 @@ std::string AppSettings::config_path() {
 
 AppSettings AppSettings::load() {
   AppSettings settings;
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_CLANGD
+  settings.force_bundled_clangd = true;
+#endif
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_GDB
+  settings.force_bundled_gdb = true;
+#endif
   const std::string path = config_path();
   if (path.empty()) {
     return settings;
@@ -55,6 +61,12 @@ AppSettings AppSettings::load() {
         doc["secondary_panel_enabled"].is_boolean()) {
       settings.secondary_panel_enabled = doc["secondary_panel_enabled"].get<bool>();
     }
+    if (doc.contains("force_bundled_clangd") && doc["force_bundled_clangd"].is_boolean()) {
+      settings.force_bundled_clangd = doc["force_bundled_clangd"].get<bool>();
+    }
+    if (doc.contains("force_bundled_gdb") && doc["force_bundled_gdb"].is_boolean()) {
+      settings.force_bundled_gdb = doc["force_bundled_gdb"].get<bool>();
+    }
   } catch (...) {
     return AppSettings{};
   }
@@ -75,6 +87,8 @@ bool AppSettings::save() const {
   doc["show_diagnostic_suffixes"] = show_diagnostic_suffixes;
   doc["sticky_scroll_enabled"] = sticky_scroll_enabled;
   doc["secondary_panel_enabled"] = secondary_panel_enabled;
+  doc["force_bundled_clangd"] = force_bundled_clangd;
+  doc["force_bundled_gdb"] = force_bundled_gdb;
 
   std::ofstream output(path);
   if (!output) {

@@ -26,6 +26,8 @@
 #include "ui/press_ids.hpp"
 #include "ui/terminal_keyboard.hpp"
 #include "util/crash_handler.hpp"
+#include "util/bundled_tools.hpp"
+#include "util/compile_commands_setup.hpp"
 
 namespace fs = std::filesystem;
 
@@ -138,6 +140,12 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
   symbol_provider_ = std::make_shared<LspSymbolProvider>();
   app_settings_ = AppSettings::load();
   layout_state_.app_settings = &app_settings_;
+  if (has_bundled_clangd()) {
+    set_runtime_force_bundled_clangd(app_settings_.force_bundled_clangd);
+  }
+  if (has_bundled_gdb()) {
+    set_runtime_force_bundled_gdb(app_settings_.force_bundled_gdb);
+  }
   symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
   debug_available_ = gdb_supports_dap();
 
@@ -205,7 +213,19 @@ void Application::set_workspace(const std::string& workspace_root) {
   model_.console_output.clear();
   request_terminal_autostart();
   if (symbol_provider_) {
-    symbol_provider_->on_workspace_opened(absolute);
+    std::string compile_dir = ensure_compile_commands_for_clangd(absolute);
+    if (compile_dir.empty()) {
+      std::error_code cmake_ec;
+      if (fs::is_regular_file(fs::path(absolute) / "CMakeLists.txt", cmake_ec)) {
+        workspace_.status_message += " | sin compile_commands (cmake falló)";
+      } else {
+        workspace_.status_message += " | sin compile_commands.json";
+      }
+    } else if (has_bundled_clangd()) {
+      // Warm up extraction before clangd spawn so LSP startup is faster.
+      (void)resolve_clangd();
+    }
+    symbol_provider_->on_workspace_opened(absolute, compile_dir);
   }
   indexer_.start_scan(absolute);
   symbol_indexer_.start_scan(absolute, symbol_provider_, &indexer_);
@@ -546,6 +566,13 @@ bool Application::any_modal_open() const {
 }
 
 void Application::apply_app_settings() {
+  if (has_bundled_clangd()) {
+    set_runtime_force_bundled_clangd(app_settings_.force_bundled_clangd);
+  }
+  if (has_bundled_gdb()) {
+    set_runtime_force_bundled_gdb(app_settings_.force_bundled_gdb);
+    debug_available_ = gdb_supports_dap();
+  }
   if (symbol_provider_) {
     symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
   }
@@ -812,6 +839,27 @@ int Application::run() {
         return true;
       }
 
+      if (app_mode_ == AppMode::kDebug && event.is_mouse()) {
+        bool handled = false;
+        if (layout_state_.source_mouse_handler &&
+            layout_state_.source_mouse_handler(event)) {
+          handled = true;
+        }
+        if (layout_state_.watches_mouse_handler &&
+            layout_state_.watches_mouse_handler(event)) {
+          handled = true;
+        }
+        if (layout_state_.console_debug_mouse_handler &&
+            layout_state_.console_debug_mouse_handler(event)) {
+          handled = true;
+        }
+        if (handled || layout_state_.request_ui_tick) {
+          screen.Post(Event::Custom);
+          layout_state_.focus_sync_needed = true;
+          return handled;
+        }
+      }
+
       if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
           layout_state_.editor_mouse_handler &&
           layout_state_.editor_mouse_handler(event)) {
@@ -857,6 +905,13 @@ int Application::run() {
           focus_state_.region == FocusRegion::Editor &&
           app_mode_ == AppMode::kNormal && layout_state_.editor_key_handler &&
           layout_state_.editor_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+      if (app_mode_ == AppMode::kDebug && focus_state_.region == FocusRegion::Editor &&
+          !is_watch_input_focus(layout_state_.text_input_focus) &&
+          layout_state_.text_input_focus != TextInputFocus::Console &&
+          layout_state_.source_key_handler && layout_state_.source_key_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }

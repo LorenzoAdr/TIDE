@@ -24,7 +24,8 @@ class LspClient {
   LspClient();
   ~LspClient();
 
-  bool start(const std::string& workspace_root);
+  bool start(const std::string& workspace_root,
+             const std::string& compile_commands_dir = {});
   void stop();
   bool ready() const { return ready_.load(); }
 

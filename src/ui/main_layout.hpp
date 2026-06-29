@@ -103,6 +103,10 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> editor_key_handler;
   std::function<bool(const ftxui::Event&)> editor_mouse_handler;
   std::function<bool(const ftxui::Event&)> editor_chrome_mouse_handler;
+  std::function<bool(const ftxui::Event&)> source_mouse_handler;
+  std::function<bool(const ftxui::Event&)> source_key_handler;
+  std::function<bool(const ftxui::Event&)> watches_mouse_handler;
+  std::function<bool(const ftxui::Event&)> console_debug_mouse_handler;
   std::function<bool(const ftxui::Event&)> explorer_mouse_handler;
   std::function<void(ftxui::Event&)> editor_modifier_handler;
   std::function<void()> editor_tick_callback;

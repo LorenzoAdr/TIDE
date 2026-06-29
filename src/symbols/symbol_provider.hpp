@@ -109,7 +109,11 @@ class ISymbolProvider {
     return {};
   }
 
-  virtual void on_workspace_opened(const std::string& root) { (void)root; }
+  virtual void on_workspace_opened(const std::string& root,
+                                   const std::string& compile_commands_dir = {}) {
+    (void)root;
+    (void)compile_commands_dir;
+  }
   virtual void on_workspace_closed() {}
   virtual void on_document_opened(const std::string& path, const std::string& text) {
     (void)path;

@@ -1,12 +1,13 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "dap/io.h"
 
 namespace tgdb {
 
-// Comprueba si gdb en PATH soporta el intérprete DAP (GDB 14+).
+bool gdb_supports_dap_at(const std::string& gdb_path);
 bool gdb_supports_dap();
 
 class GdbProcess {

@@ -11,7 +11,7 @@ Launch with no arguments to open a workspace and edit code. Press **F2** to star
 ./tools/launch.sh
 ```
 
-Requires Linux, CMake 3.20+, C++17, and GDB 14+ with DAP. Optional: `clangd` for outline and completion.
+Requires Linux, CMake 3.20+, C++17. Optional: embedded or system **GDB 14+ with DAP** for debugging; embedded or system **clangd** for outline and completion. Build with `./tools/compile.sh` to choose bundled tools.
 
 ```bash
 gdb -i=dap -ex quit   # verify DAP support

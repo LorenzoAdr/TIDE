@@ -76,6 +76,7 @@ add_executable(tgdb
   src/util/filesystem_tree.cpp
   src/util/path_normalize.cpp
   src/util/compile_commands_setup.cpp
+  src/util/bundled_tools.cpp
   src/util/process_list.cpp
   src/terminal/shell_session.cpp
   src/terminal/raw_pty_screen.cpp
@@ -97,6 +98,17 @@ target_link_libraries(tgdb PRIVATE
 if(UNIX)
   target_link_options(tgdb PRIVATE -rdynamic)
 endif()
+
+include(cmake/BundleOptions.cmake)
+if(TGDB_BUNDLE_CLANGD)
+  include(cmake/BundleClangd.cmake)
+endif()
+if(TGDB_BUNDLE_GDB)
+  include(cmake/BundleGdb.cmake)
+endif()
+
+add_executable(tgdb-bundle-wizard tools/bundle_wizard/main.cpp)
+target_link_libraries(tgdb-bundle-wizard PRIVATE ftxui::component ftxui::dom ftxui::screen)
 
 add_executable(hello examples/hello.cpp)
 target_compile_options(hello PRIVATE -g -O0)

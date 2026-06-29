@@ -1,5 +1,7 @@
 #include "dap/gdb_launcher.hpp"
 
+#include "util/bundled_tools.hpp"
+
 #include <array>
 #include <cerrno>
 #include <cstring>
@@ -77,9 +79,11 @@ class FdWriter : public dap::Writer {
   int fd_;
 };
 
-}  // namespace
+bool probe_dap(const std::string& gdb_path) {
+  if (gdb_path.empty()) {
+    return false;
+  }
 
-bool gdb_supports_dap() {
   const pid_t pid = fork();
   if (pid < 0) {
     return false;
@@ -97,14 +101,14 @@ bool gdb_supports_dap() {
     }
 
     std::array<const char*, 6> argv = {
-        "gdb",
+        gdb_path.c_str(),
         "--quiet",
         "-i=dap",
         "-ex",
         "quit",
         nullptr,
     };
-    execvp("gdb", const_cast<char* const*>(argv.data()));
+    execv(gdb_path.c_str(), const_cast<char* const*>(argv.data()));
     _exit(127);
   }
 
@@ -113,6 +117,17 @@ bool gdb_supports_dap() {
     return false;
   }
   return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+}  // namespace
+
+bool gdb_supports_dap_at(const std::string& gdb_path) { return probe_dap(gdb_path); }
+
+bool gdb_supports_dap() {
+  if (const auto gdb = resolve_gdb(); gdb.has_value()) {
+    return gdb_supports_dap_at(gdb->binary_path);
+  }
+  return false;
 }
 
 GdbProcess::GdbProcess() = default;
@@ -126,12 +141,18 @@ bool GdbProcess::start() {
     return true;
   }
 
+  const auto gdb = resolve_gdb();
+  if (!gdb.has_value()) {
+    return false;
+  }
+
   int stdin_pipe[2] = {-1, -1};
   int stdout_pipe[2] = {-1, -1};
   if (pipe(stdin_pipe) != 0 || pipe(stdout_pipe) != 0) {
     return false;
   }
 
+  const std::string gdb_path = gdb->binary_path;
   const pid_t pid = fork();
   if (pid < 0) {
     ::close(stdin_pipe[0]);
@@ -151,13 +172,13 @@ bool GdbProcess::start() {
     ::close(stdout_pipe[0]);
     ::close(stdout_pipe[1]);
 
-    std::array<const char*, 5> argv = {
-        "gdb",
+    std::array<const char*, 4> argv = {
+        gdb_path.c_str(),
         "--quiet",
         "--interpreter=dap",
         nullptr,
     };
-    execvp("gdb", const_cast<char* const*>(argv.data()));
+    execv(gdb_path.c_str(), const_cast<char* const*>(argv.data()));
     _exit(127);
   }
 

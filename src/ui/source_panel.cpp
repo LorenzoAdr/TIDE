@@ -206,6 +206,117 @@ bool handle_source_scrollbar_mouse(SourceViewState* view_state, SourcePanelState
   return false;
 }
 
+bool source_panel_contains_mouse(const SourcePanelState& panel, const Mouse& m) {
+  return panel.gutter_box.Contain(m.x, m.y) || panel.content_box.Contain(m.x, m.y) ||
+         panel.scrollbar_box.Contain(m.x, m.y);
+}
+
+bool handle_source_panel_event(DebugModel* model, SourceViewState* view_state,
+                               SourcePanelState* panel_state, CommandCallback on_command,
+                               FocusManagerState* focus, MainLayoutState* layout_state,
+                               Event event) {
+  if (model == nullptr || view_state == nullptr || panel_state == nullptr) {
+    return false;
+  }
+
+  const int total = static_cast<int>(view_state->lines.size());
+  const int visible = panel_state->last_visible_lines;
+  const int max_scroll = max_scroll_offset(total, visible);
+
+  if (event.is_mouse()) {
+    const auto& m = event.mouse();
+    if (handle_source_scrollbar_mouse(view_state, panel_state, focus, layout_state, m, total,
+                                      visible)) {
+      return true;
+    }
+    if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+      const bool in_gutter = panel_state->gutter_box.Contain(m.x, m.y);
+      const bool in_code = panel_state->content_box.Contain(m.x, m.y);
+      if (in_gutter || in_code) {
+        if (focus != nullptr) {
+          focus->region = FocusRegion::Editor;
+        }
+        if (layout_state != nullptr) {
+          layout_state->text_input_focus = TextInputFocus::None;
+          layout_state->right_panel_active_section = 0;
+          layout_state->focus_sync_needed = true;
+        }
+      }
+    }
+  } else if (focus != nullptr && focus->region == FocusRegion::RightPanel) {
+    return false;
+  }
+
+  if (event.is_mouse() && event.mouse().button == Mouse::Left &&
+      event.mouse().motion == Mouse::Pressed) {
+    const auto& m = event.mouse();
+    if (panel_state->gutter_box.Contain(m.x, m.y)) {
+      const int rel_y = m.y - panel_state->gutter_box.y_min;
+      const int clicked_line = view_state->scroll + rel_y + 1;
+      if (clicked_line >= 1 && clicked_line <= total && !model->active_file.empty()) {
+        ToggleBreakpointAtLine(model, clicked_line, on_command);
+        return true;
+      }
+    }
+    if (panel_state->content_box.Contain(m.x, m.y)) {
+      const int rel_y = m.y - panel_state->content_box.y_min;
+      const int clicked_line = view_state->scroll + rel_y + 1;
+      if (clicked_line >= 1 && clicked_line <= total) {
+        model->active_line = clicked_line;
+        model->view_token++;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  if (event == Event::CtrlB || event == Event::Character(' ')) {
+    if (!model->active_file.empty() && model->active_line > 0) {
+      ToggleBreakpointAtLine(model, model->active_line, on_command);
+      return true;
+    }
+    return false;
+  }
+
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    view_state->scroll = std::max(0, view_state->scroll - 1);
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    view_state->scroll = std::min(view_state->scroll + 1, max_scroll);
+    return true;
+  }
+  if (event == Event::PageUp) {
+    view_state->scroll = std::max(0, view_state->scroll - visible);
+    return true;
+  }
+  if (event == Event::PageDown) {
+    view_state->scroll = std::min(view_state->scroll + visible, max_scroll);
+    return true;
+  }
+  const int half_page = std::max(1, visible / 2);
+  if (event_is_ctrl_u(event)) {
+    view_state->scroll = std::max(0, view_state->scroll - half_page);
+    return true;
+  }
+  if (event_is_ctrl_i(event)) {
+    view_state->scroll = std::min(view_state->scroll + half_page, max_scroll);
+    return true;
+  }
+  if (event.is_mouse() && event.mouse().motion == Mouse::Pressed) {
+    if (event.mouse().button == Mouse::WheelUp) {
+      view_state->scroll = std::max(0, view_state->scroll - 3);
+      return true;
+    }
+    if (event.mouse().button == Mouse::WheelDown) {
+      view_state->scroll = std::min(view_state->scroll + 3, max_scroll);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 }  // namespace
 
 void ToggleBreakpointAtLine(DebugModel* model, int line, CommandCallback on_command) {
@@ -322,104 +433,44 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
                      theme::CodeBg());
   });
 
+  auto dispatch_source_mouse = [model, view_state, on_command, panel_state, focus,
+                                layout_state](Event event) {
+    if (!event.is_mouse()) {
+      return false;
+    }
+    const Mouse& m = event.mouse();
+    if (m.motion == Mouse::Moved) {
+      handle_source_scrollbar_mouse(view_state, panel_state.get(), focus, layout_state, m,
+                                    static_cast<int>(view_state->lines.size()),
+                                    panel_state->last_visible_lines);
+      if (!source_panel_contains_mouse(*panel_state, m) && !panel_state->scrollbar_dragging) {
+        return layout_state != nullptr && layout_state->request_ui_tick;
+      }
+    } else if (!source_panel_contains_mouse(*panel_state, m) && !panel_state->scrollbar_dragging) {
+      return false;
+    }
+    return handle_source_panel_event(model, view_state, panel_state.get(), on_command, focus,
+                                     layout_state, event);
+  };
+
+  auto dispatch_source_keys = [model, view_state, on_command, panel_state, focus,
+                               layout_state](Event event) {
+    if (event.is_mouse()) {
+      return false;
+    }
+    return handle_source_panel_event(model, view_state, panel_state.get(), on_command, focus,
+                                     layout_state, event);
+  };
+
+  if (layout_state != nullptr) {
+    layout_state->source_mouse_handler = dispatch_source_mouse;
+    layout_state->source_key_handler = dispatch_source_keys;
+  }
+
   return WrapFocusable(CatchEvent(renderer, [model, view_state, on_command, panel_state, focus,
                                                layout_state](Event event) {
-    const int total = static_cast<int>(view_state->lines.size());
-    const int visible = panel_state->last_visible_lines;
-    const int max_scroll = max_scroll_offset(total, visible);
-
-    if (event.is_mouse()) {
-      const auto& m = event.mouse();
-      if (handle_source_scrollbar_mouse(view_state, panel_state.get(), focus, layout_state, m,
-                                        total, visible)) {
-        return true;
-      }
-      if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
-        const bool in_gutter = panel_state->gutter_box.Contain(m.x, m.y);
-        const bool in_code = panel_state->content_box.Contain(m.x, m.y);
-        if (in_gutter || in_code) {
-          if (focus != nullptr) {
-            focus->region = FocusRegion::Editor;
-          }
-          if (layout_state != nullptr) {
-            layout_state->text_input_focus = TextInputFocus::None;
-            layout_state->right_panel_active_section = 0;
-            layout_state->focus_sync_needed = true;
-          }
-        }
-      }
-    } else if (focus != nullptr && focus->region == FocusRegion::RightPanel) {
-      return false;
-    }
-
-    if (event.is_mouse() && event.mouse().button == Mouse::Left &&
-        event.mouse().motion == Mouse::Pressed) {
-      const auto& m = event.mouse();
-      if (panel_state->gutter_box.Contain(m.x, m.y)) {
-        const int rel_y = m.y - panel_state->gutter_box.y_min;
-        const int clicked_line = view_state->scroll + rel_y + 1;
-        if (clicked_line >= 1 && clicked_line <= total && !model->active_file.empty()) {
-          ToggleBreakpointAtLine(model, clicked_line, on_command);
-          return true;
-        }
-      }
-      if (panel_state->content_box.Contain(m.x, m.y)) {
-        const int rel_y = m.y - panel_state->content_box.y_min;
-        const int clicked_line = view_state->scroll + rel_y + 1;
-        if (clicked_line >= 1 && clicked_line <= total) {
-          model->active_line = clicked_line;
-          model->view_token++;
-          return true;
-        }
-      }
-      return false;
-    }
-
-    if (event == Event::CtrlB || event == Event::Character(' ')) {
-      if (!model->active_file.empty() && model->active_line > 0) {
-        ToggleBreakpointAtLine(model, model->active_line, on_command);
-        return true;
-      }
-      return false;
-    }
-
-    if (event == Event::ArrowUp || event == Event::Character('k')) {
-      view_state->scroll = std::max(0, view_state->scroll - 1);
-      return true;
-    }
-    if (event == Event::ArrowDown || event == Event::Character('j')) {
-      view_state->scroll = std::min(view_state->scroll + 1, max_scroll);
-      return true;
-    }
-    if (event == Event::PageUp) {
-      view_state->scroll = std::max(0, view_state->scroll - visible);
-      return true;
-    }
-    if (event == Event::PageDown) {
-      view_state->scroll = std::min(view_state->scroll + visible, max_scroll);
-      return true;
-    }
-    const int half_page = std::max(1, visible / 2);
-    if (event_is_ctrl_u(event)) {
-      view_state->scroll = std::max(0, view_state->scroll - half_page);
-      return true;
-    }
-    if (event_is_ctrl_i(event)) {
-      view_state->scroll = std::min(view_state->scroll + half_page, max_scroll);
-      return true;
-    }
-    if (event.is_mouse() && event.mouse().motion == Mouse::Pressed) {
-      if (event.mouse().button == Mouse::WheelUp) {
-        view_state->scroll = std::max(0, view_state->scroll - 3);
-        return true;
-      }
-      if (event.mouse().button == Mouse::WheelDown) {
-        view_state->scroll = std::min(view_state->scroll + 3, max_scroll);
-        return true;
-      }
-    }
-
-    return false;
+    return handle_source_panel_event(model, view_state, panel_state.get(), on_command, focus,
+                                     layout_state, event);
   }));
 }
 

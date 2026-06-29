@@ -57,7 +57,8 @@ class LspSymbolProvider : public ISymbolProvider {
   std::vector<CallHierarchyItem> incoming_calls(const CallHierarchyItem& item) override;
   std::vector<CallHierarchyItem> outgoing_calls(const CallHierarchyItem& item) override;
 
-  void on_workspace_opened(const std::string& root) override;
+  void on_workspace_opened(const std::string& root,
+                           const std::string& compile_commands_dir = {}) override;
   void on_workspace_closed() override;
   void on_document_opened(const std::string& path, const std::string& text) override;
   void on_document_changed(const std::string& path, const std::string& text) override;
@@ -83,7 +84,7 @@ class LspSymbolProvider : public ISymbolProvider {
 
   std::string buffer_text_for_path(const std::string& path) const;
   void refresh_diagnostics_cache_locked() const;
-  void start_lsp_locked();
+  void start_lsp_locked(const std::string& compile_commands_dir);
   void stop_lsp_locked();
   void start_async_worker_locked();
   void stop_async_worker_locked();
@@ -100,6 +101,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool lsp_enabled_ = true;
   bool use_lsp_ = false;
   std::string workspace_root_;
+  std::string compile_commands_dir_;
   std::unordered_map<std::string, std::string> open_buffers_;
   mutable uint64_t cached_diag_revision_ = 0;
   mutable std::vector<DocumentDiagnostics> cached_diagnostics_;

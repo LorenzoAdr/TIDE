@@ -1,5 +1,8 @@
 build/
 .cursor/
+.cache/
+.bundle-config
+third_party/bundled/
 compile_commands.json
 *.o
 *.a

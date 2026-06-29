@@ -1,6 +1,6 @@
 #include "lsp/lsp_client.hpp"
 
-#include <array>
+#include <vector>
 #include <cstdlib>
 #include <fcntl.h>
 #include <filesystem>
@@ -14,6 +14,7 @@
 
 #include "lsp/lsp_uri.hpp"
 #include "indexer/index_rules.hpp"
+#include "util/bundled_tools.hpp"
 #include "util/compile_commands_setup.hpp"
 
 #include <chrono>
@@ -55,7 +56,20 @@ LspClient::~LspClient() {
   stop();
 }
 
+namespace {
+
+constexpr const char* kClangdQueryDriver =
+    "/usr/bin/gcc*,/usr/bin/g++,/usr/bin/c++*,/usr/bin/clang*,"
+    "/usr/local/bin/gcc*,/usr/local/bin/g++,/usr/local/bin/c++*,/usr/local/bin/clang*";
+
+}  // namespace
+
 bool LspClient::spawn_clangd(const std::string& compile_commands_dir) {
+  const auto location = resolve_clangd();
+  if (!location.has_value()) {
+    return false;
+  }
+
   int stdin_pipe[2] = {-1, -1};
   int stdout_pipe[2] = {-1, -1};
   if (pipe(stdin_pipe) != 0 || pipe(stdout_pipe) != 0) {
@@ -63,10 +77,17 @@ bool LspClient::spawn_clangd(const std::string& compile_commands_dir) {
   }
 
   const std::string& compile_dir = compile_commands_dir;
-  const char* clangd_bin = std::getenv("CLANGD_PATH");
-  if (clangd_bin == nullptr || clangd_bin[0] == '\0') {
-    clangd_bin = "clangd";
+  const std::string& clangd_bin = location->binary_path;
+  std::string resource_arg;
+  if (!location->resource_dir.empty()) {
+    resource_arg = "--resource-dir=" + location->resource_dir;
   }
+  std::string compile_arg;
+  if (!compile_dir.empty()) {
+    compile_arg = "--compile-commands-dir=" + compile_dir;
+  }
+  const std::string query_driver_arg =
+      std::string("--query-driver=") + kClangdQueryDriver;
 
   const pid_t pid = fork();
   if (pid < 0) {
@@ -91,15 +112,24 @@ bool LspClient::spawn_clangd(const std::string& compile_commands_dir) {
       ::close(devnull);
     }
 
-    if (!compile_dir.empty()) {
-      std::string arg = "--compile-commands-dir=" + compile_dir;
-      std::array<char*, 3> argv = {const_cast<char*>(clangd_bin),
-                                   const_cast<char*>(arg.c_str()), nullptr};
-      execvp(clangd_bin, argv.data());
-    } else {
-      std::array<char*, 2> argv = {const_cast<char*>(clangd_bin), nullptr};
-      execvp(clangd_bin, argv.data());
+    std::vector<std::string> args_strings;
+    args_strings.push_back(clangd_bin);
+    if (!resource_arg.empty()) {
+      args_strings.push_back(resource_arg);
     }
+    if (!compile_arg.empty()) {
+      args_strings.push_back(compile_arg);
+    }
+    args_strings.push_back(query_driver_arg);
+
+    std::vector<char*> argv;
+    argv.reserve(args_strings.size() + 1);
+    for (auto& arg : args_strings) {
+      argv.push_back(arg.data());
+    }
+    argv.push_back(nullptr);
+
+    execv(clangd_bin.c_str(), argv.data());
     _exit(127);
   }
 
@@ -154,7 +184,8 @@ bool LspClient::initialize(const std::string& workspace_root) {
   return true;
 }
 
-bool LspClient::start(const std::string& workspace_root) {
+bool LspClient::start(const std::string& workspace_root,
+                      const std::string& compile_commands_dir) {
   stop();
   if (workspace_root.empty()) {
     return false;
@@ -163,7 +194,10 @@ bool LspClient::start(const std::string& workspace_root) {
                                              const nlohmann::json& params) {
     on_lsp_notification(method, params);
   });
-  const std::string compile_dir = ensure_compile_commands_for_clangd(workspace_root);
+  std::string compile_dir = compile_commands_dir;
+  if (compile_dir.empty()) {
+    compile_dir = ensure_compile_commands_for_clangd(workspace_root);
+  }
   if (!spawn_clangd(compile_dir)) {
     stop();
     return false;
