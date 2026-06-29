@@ -19,6 +19,8 @@
 #include "ui/focus_manager.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
+#include "ui/clickable.hpp"
+#include "ui/press_ids.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
 
@@ -183,14 +185,9 @@ bool debug_tab_active(AppMode* app_mode, MainLayoutState* layout_state) {
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kDebug;
 }
 
-Element make_tab_button(const std::string& label, bool selected, Box* box) {
-  Element tab = text(" " + label + " ") | center | size(HEIGHT, EQUAL, 1);
-  if (selected) {
-    tab = tab | bold | color(theme::Header()) | bgcolor(theme::TabActive());
-  } else {
-    tab = tab | color(theme::Muted()) | bgcolor(theme::TabIdle());
-  }
-  return tab | flex | reflect(*box);
+Element make_tab_button(const std::string& label, bool selected, bool hovered, bool pressed,
+                        Box* box) {
+  return MakeTabButton(label, selected, hovered, pressed, box);
 }
 
 bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
@@ -225,10 +222,25 @@ bool switch_console_tab_from_mouse(ConsolePanelState* state, MainLayoutState* la
   }
   for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kDebug; ++i) {
     if (state->tab_boxes[static_cast<std::size_t>(i)].Contain(mouse_x, mouse_y)) {
+      const std::string_view tab_id =
+          i == ConsolePanelTabs::kTerminal ? press_id::kConsoleTabTerminal : press_id::kConsoleTabGdb;
+      trigger_press(layout_state, tab_id);
       return switch_console_tab(state, layout_state, focus, i);
     }
   }
   return false;
+}
+
+bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_state,
+                                const Mouse& mouse) {
+  if (state == nullptr || layout_state == nullptr || mouse.motion != Mouse::Moved) {
+    return false;
+  }
+  return update_panel_hover(
+      layout_state, mouse.x, mouse.y,
+      {{press_id::kConsoleTabTerminal, &state->tab_boxes[ConsolePanelTabs::kTerminal]},
+       {press_id::kConsoleTabGdb, &state->tab_boxes[ConsolePanelTabs::kDebug]}},
+      press_id::is_console_tab_hover);
 }
 
 std::string console_placeholder(AppMode* /*app_mode*/) {
@@ -575,6 +587,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         (event == Event::Character('1') || event == Event::Character('2'))) {
       const int tab = event == Event::Character('1') ? ConsolePanelTabs::kTerminal
                                                      : ConsolePanelTabs::kDebug;
+      trigger_press(layout_state,
+                    tab == ConsolePanelTabs::kTerminal ? press_id::kConsoleTabTerminal
+                                                       : press_id::kConsoleTabGdb);
       switch_console_tab(state.get(), layout_state, focus, tab);
       if (tab == ConsolePanelTabs::kTerminal) {
         activate_shell_input(model, layout_state, focus, shell, state.get());
@@ -597,6 +612,11 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         layout_state->text_input_focus = TextInputFocus::None;
       }
       return true;
+    }
+
+    if (event.is_mouse() && event.mouse().motion == Mouse::Moved) {
+      handle_console_tab_hover(state.get(), layout_state, event.mouse());
+      return false;
     }
 
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
@@ -775,10 +795,18 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     const int selected_tab = layout_state != nullptr ? layout_state->console_tabs.selected_tab
                                                      : ConsolePanelTabs::kTerminal;
     Elements tab_row;
-    tab_row.push_back(make_tab_button("Terminal", selected_tab == ConsolePanelTabs::kTerminal,
-                                      &state->tab_boxes[ConsolePanelTabs::kTerminal]));
-    tab_row.push_back(make_tab_button("GDB", selected_tab == ConsolePanelTabs::kDebug,
-                                      &state->tab_boxes[ConsolePanelTabs::kDebug]));
+    tab_row.push_back(make_tab_button(
+        "Terminal", selected_tab == ConsolePanelTabs::kTerminal,
+        layout_state != nullptr &&
+            layout_state->clickable.is_hovered(press_id::kConsoleTabTerminal),
+        layout_state != nullptr &&
+            layout_state->clickable.is_pressed(press_id::kConsoleTabTerminal),
+        &state->tab_boxes[ConsolePanelTabs::kTerminal]));
+    tab_row.push_back(make_tab_button(
+        "GDB", selected_tab == ConsolePanelTabs::kDebug,
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabGdb),
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabGdb),
+        &state->tab_boxes[ConsolePanelTabs::kDebug]));
 
     Element body;
     if (selected_tab == ConsolePanelTabs::kTerminal) {

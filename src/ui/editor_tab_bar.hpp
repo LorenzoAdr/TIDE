@@ -6,6 +6,7 @@
 #include "app/workspace_model.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
+#include "ftxui/screen/box.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 
@@ -30,12 +31,18 @@ struct EditorTabBarState {
   int bar_width_chars = 80;
 };
 
-ftxui::Element make_editor_tab_bar(WorkspaceModel* workspace, EditorTabBarState* state);
+ftxui::Element make_editor_tab_bar(WorkspaceModel* workspace, EditorTabBarState* state,
+                                   MainLayoutState* layout_state = nullptr);
 
 ftxui::Element make_tabs_overflow_modal(WorkspaceModel* workspace, EditorTabBarState* state);
 
 bool handle_tab_bar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
-                          EditorTabBarState* state, const ftxui::Mouse& m);
+                          EditorTabBarState* state, const ftxui::Mouse& m,
+                          MainLayoutState* layout_state = nullptr);
+
+bool update_editor_chrome_hover(WorkspaceModel* workspace, EditorTabBarState* state,
+                                MainLayoutState* layout_state, const ftxui::Box& problems_box, int x,
+                                int y);
 
 bool handle_tabs_overflow_keys(WorkspaceModel* workspace, FocusManagerState* focus,
                                EditorTabBarState* state, const ftxui::Event& event);

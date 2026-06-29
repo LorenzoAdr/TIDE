@@ -39,6 +39,7 @@ add_executable(tgdb
   src/ui/key_bindings.cpp
   src/ui/terminal_keyboard.cpp
   src/ui/focusable_component.cpp
+  src/ui/clickable_interaction.cpp
   src/indexer/workspace_indexer.cpp
   src/indexer/symbol_workspace_indexer.cpp
   src/indexer/index_rules.cpp

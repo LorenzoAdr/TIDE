@@ -19,6 +19,8 @@ inline Color SelectionBg() { return Color::RGB(60, 70, 100); }
 inline Color FindMatchBg() { return Color::RGB(80, 70, 30); }
 inline Color BracketMatchBg() { return Color::RGB(45, 70, 55); }
 inline Color TabActive() { return Color::RGB(55, 75, 110); }
+inline Color TabHover() { return Color::RGB(48, 58, 72); }
+inline Color TabPressed() { return Color::RGB(70, 95, 130); }
 inline Color TabIdle() { return Color::RGB(38, 42, 52); }
 inline Color Header() { return Color::RGB(180, 200, 255); }
 inline Color Muted() { return Color::RGB(130, 140, 160); }

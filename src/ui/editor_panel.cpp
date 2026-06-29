@@ -30,7 +30,9 @@
 #include "ftxui/component/screen_interactive.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
+#include "ui/clickable.hpp"
 #include "ui/editor_tab_bar.hpp"
+#include "ui/press_ids.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/diagnostics_panel.hpp"
@@ -147,6 +149,21 @@ void clear_hover_state(EditorHoverState* hover) {
   hover->col = -1;
   hover->fetch_key.clear();
   hover->info = {};
+}
+
+void claim_editor_focus(FocusManagerState* focus, MainLayoutState* layout_state) {
+  if (focus != nullptr) {
+    focus->region = FocusRegion::Editor;
+  }
+  if (layout_state != nullptr) {
+    layout_state->text_input_focus = TextInputFocus::None;
+    layout_state->focus_sync_needed = true;
+    layout_state->right_panel_active_section = 0;
+  }
+}
+
+bool editor_mouse_targets_code(const EditorPanelState& panel, int x, int y) {
+  return panel.code_box.Contain(x, y) || panel.gutter_box.Contain(x, y);
 }
 
 void rebuild_breadcrumb_hits(const Box& box, const std::vector<BreadcrumbItem>& crumbs,
@@ -345,13 +362,15 @@ bool handle_problems_button_click(MainLayoutState* layout_state, EditorPanelStat
   if (panel->problems_button_box.IsEmpty() || !panel->problems_button_box.Contain(m.x, m.y)) {
     return false;
   }
+  trigger_press(layout_state, press_id::kEditorProblems);
   layout_state->diagnostics_panel_visible = !layout_state->diagnostics_panel_visible;
   layout_state->request_ui_tick = true;
   return true;
 }
 
 bool handle_breadcrumb_click(WorkspaceModel* workspace, FocusManagerState* focus,
-                             EditorPanelState* panel, const Mouse& m, int visible_lines) {
+                             MainLayoutState* layout_state, EditorPanelState* panel, const Mouse& m,
+                             int visible_lines) {
   if (workspace == nullptr || panel == nullptr || m.button != Mouse::Left ||
       m.motion != Mouse::Pressed) {
     return false;
@@ -368,9 +387,7 @@ bool handle_breadcrumb_click(WorkspaceModel* workspace, FocusManagerState* focus
       workspace->buffer.reset_to_single_cursor(hit.line, 0);
       workspace->buffer.scroll = std::max(0, hit.line - 2);
       workspace->buffer.view_token++;
-      if (focus != nullptr) {
-        focus->region = FocusRegion::Editor;
-      }
+      claim_editor_focus(focus, layout_state);
       ensure_scroll_visible(&workspace->buffer, visible_lines);
       return true;
     }
@@ -396,7 +413,8 @@ bool apply_scrollbar_drag(WorkspaceModel* workspace, EditorPanelState* panel, in
 }
 
 bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
-                            EditorPanelState* panel, const Mouse& m, int visible_lines) {
+                            MainLayoutState* layout_state, EditorPanelState* panel, const Mouse& m,
+                            int visible_lines) {
   if (panel == nullptr || !panel->scrollbar_layout.scrollable) {
     return false;
   }
@@ -435,9 +453,7 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.motion == Mouse::Pressed) {
-    if (focus != nullptr) {
-      focus->region = FocusRegion::Editor;
-    }
+    claim_editor_focus(focus, layout_state);
     const int local_y = m.y - panel->scrollbar_box.y_min;
     if (scrollbar_thumb_hit(panel->scrollbar_layout, panel->scrollbar_box, m.x, m.y)) {
       panel->scrollbar_dragging = true;
@@ -469,7 +485,12 @@ bool handle_editor_chrome_mouse(WorkspaceModel* workspace, FocusManagerState* fo
     return false;
   }
   const auto& m = event.mouse();
-  if (handle_tab_bar_mouse(workspace, focus, tab_bar, m)) {
+  if (m.motion == Mouse::Moved) {
+    update_editor_chrome_hover(workspace, tab_bar, layout_state, panel->problems_button_box, m.x,
+                               m.y);
+  }
+  if (handle_tab_bar_mouse(workspace, focus, tab_bar, m, layout_state)) {
+    claim_editor_focus(focus, layout_state);
     if (layout_state != nullptr) {
       layout_state->request_ui_tick = true;
     }
@@ -478,10 +499,10 @@ bool handle_editor_chrome_mouse(WorkspaceModel* workspace, FocusManagerState* fo
   if (handle_problems_button_click(layout_state, panel, m)) {
     return true;
   }
-  if (handle_breadcrumb_click(workspace, focus, panel, m, visible_lines)) {
+  if (handle_breadcrumb_click(workspace, focus, layout_state, panel, m, visible_lines)) {
     return true;
   }
-  if (handle_scrollbar_mouse(workspace, focus, panel, m, visible_lines)) {
+  if (handle_scrollbar_mouse(workspace, focus, layout_state, panel, m, visible_lines)) {
     return true;
   }
 
@@ -627,8 +648,19 @@ Element make_breadcrumb_bar(const std::vector<BreadcrumbItem>& crumbs,
   } else if (problem_warnings > 0) {
     problems_color = theme::Warning();
   }
-  Element problems_btn =
-      text(problems_label) | color(problems_color) | reflect(panel_state->problems_button_box);
+  Element problems_btn = text(problems_label) | color(problems_color);
+  const bool problems_hovered =
+      layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kEditorProblems);
+  const bool problems_pressed =
+      layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kEditorProblems);
+  if (problems_pressed) {
+    problems_btn = problems_btn | bold | inverted | bgcolor(theme::TabPressed());
+  } else if (problems_hovered) {
+    problems_btn = problems_btn | bold | bgcolor(theme::TabHover());
+  } else if (layout_state != nullptr && layout_state->diagnostics_panel_visible) {
+    problems_btn = problems_btn | bgcolor(theme::TabActive());
+  }
+  problems_btn = problems_btn | reflect(panel_state->problems_button_box);
 
   Element bar = hbox({
                   text(" "),
@@ -1326,7 +1358,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.button == Mouse::Right && m.motion == Mouse::Pressed && in_code) {
-    focus->region = FocusRegion::Editor;
+    claim_editor_focus(focus, layout_state);
     const CursorPos pos = mouse_to_cursor(m, *panel, *buffer, visible_lines);
     buffer->reset_to_single_cursor(pos.line, pos.col);
     MultiCursor cursor = buffer->primary();
@@ -1345,15 +1377,8 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
-    focus->region = FocusRegion::Editor;
-    if (layout_state != nullptr) {
-      if (find == nullptr || !find->open) {
-        layout_state->text_input_focus = TextInputFocus::None;
-      }
-      layout_state->right_panel_active_section = 0;
-      layout_state->focus_sync_needed = true;
-    }
-    if (find != nullptr && find->open) {
+    claim_editor_focus(focus, layout_state);
+    if (layout_state != nullptr && find != nullptr && find->open) {
       close_find_bar(find);
       if (layout_state != nullptr) {
         layout_state->text_input_focus = TextInputFocus::None;
@@ -2213,7 +2238,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         build_breadcrumbs(file_label, file_symbols, buffer.primary_line());
     Element title = make_breadcrumb_bar(crumbs, buffer, *find_state, panel_state.get(), symbols,
                                         layout_state);
-    Element tab_bar = make_editor_tab_bar(workspace, tab_bar_state.get());
+    Element tab_bar = make_editor_tab_bar(workspace, tab_bar_state.get(), layout_state);
     Element editor = editor_stack->Render() | flex;
     if (layout_state != nullptr && layout_state->diagnostics_panel_visible) {
       return vbox({std::move(tab_bar), std::move(title), editor | yflex,
@@ -2280,6 +2305,21 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (dispatch_editor_chrome_mouse(event)) {
       return true;
     }
+
+    if (event.is_mouse()) {
+      const auto& m = event.mouse();
+      if (!editor_mouse_targets_code(*panel_state, m.x, m.y)) {
+        return false;
+      }
+      claim_editor_focus(focus, layout_state);
+      workspace->ensure_buffer();
+      const int visible = visible_line_count(panel_state->code_box);
+      update_editor_modifiers(panel_state.get(), event);
+      return handle_editor_mouse(workspace, focus, find_state.get(), layout_state,
+                                 panel_state.get(), diagnostic_state.get(), symbols, event,
+                                 visible);
+    }
+
     if (layout_state != nullptr &&
         layout_state->text_input_focus == TextInputFocus::Console) {
       return false;

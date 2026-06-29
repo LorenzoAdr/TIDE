@@ -20,6 +20,7 @@
 #include "ui/symbol_picker.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
+#include "ui/press_ids.hpp"
 #include "ui/terminal_keyboard.hpp"
 #include "util/crash_handler.hpp"
 
@@ -654,7 +655,7 @@ int Application::run() {
                                                   &shortcuts_modal_state_);
 
   auto with_quit_confirm = MakeQuitConfirmOverlay(
-      with_shortcuts, &quit_confirm_state_, [this, &screen] {
+      with_shortcuts, &quit_confirm_state_, &layout_state_, [this, &screen] {
         submit_command(UiCommand{UiCommandKind::kQuit});
         screen.ExitLoopClosure()();
       });
@@ -677,6 +678,7 @@ int Application::run() {
         }
         process_index_changes();
         drain_events();
+        layout_state_.clickable.tick();
         if (layout_state_.console_visible && layout_state_.terminal_tick_callback) {
           layout_state_.terminal_tick_callback();
         }
@@ -728,6 +730,14 @@ int Application::run() {
         return true;
       }
 
+      if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
+          layout_state_.editor_mouse_handler &&
+          layout_state_.editor_mouse_handler(event)) {
+        screen.Post(Event::Custom);
+        layout_state_.focus_sync_needed = true;
+        return true;
+      }
+
       // Intercept console keys before editor (FTXUI focus may still be on editor).
       const bool terminal_tab =
           app_mode_ != AppMode::kDebug ||
@@ -744,17 +754,6 @@ int Application::run() {
       if (is_search_input_focus(layout_state_.text_input_focus) &&
           layout_state_.search_key_handler &&
           layout_state_.search_key_handler(event)) {
-        screen.Post(Event::Custom);
-        return true;
-      }
-      if (focus_state_.region == FocusRegion::Editor &&
-          app_mode_ == AppMode::kNormal &&
-          !is_search_input_focus(layout_state_.text_input_focus) &&
-          !is_watch_input_focus(layout_state_.text_input_focus) &&
-          layout_state_.text_input_focus != TextInputFocus::EditorFind &&
-          layout_state_.text_input_focus != TextInputFocus::Console &&
-          event.is_mouse() && layout_state_.editor_mouse_handler &&
-          layout_state_.editor_mouse_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
@@ -806,6 +805,8 @@ int Application::run() {
         if (event == Event::F5) {
           command.kind = UiCommandKind::kContinue;
           submit_command(command);
+          layout_state_.clickable.trigger_press(press_id::kWatchesPlay);
+          layout_state_.request_ui_tick = true;
           return true;
         }
         if (event == Event::F10) {

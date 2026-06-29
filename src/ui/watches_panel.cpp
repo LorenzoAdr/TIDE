@@ -21,7 +21,8 @@
 #include "ui/panel.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/focus_manager.hpp"
-#include "ui/theme.hpp"
+#include "ui/press_ids.hpp"
+#include "ui/clickable.hpp"
 
 namespace tgdb {
 
@@ -307,11 +308,65 @@ bool switch_tab(WatchesPanelState* state, int tab, MainLayoutState* layout_state
 }
 
 bool switch_tab_from_mouse(WatchesPanelState* state, int mouse_x, int mouse_y,
-                           MainLayoutState* layout_state) {
+                           MainLayoutState* layout_state, int* out_tab = nullptr) {
   for (int i = 0; i < kTabCount; ++i) {
     if (state->tab_boxes[i].Contain(mouse_x, mouse_y)) {
+      if (out_tab != nullptr) {
+        *out_tab = i;
+      }
       return switch_tab(state, i, layout_state);
     }
+  }
+  return false;
+}
+
+bool handle_watches_hover(WatchesPanelState* state, MainLayoutState* layout_state,
+                          const Mouse& mouse) {
+  if (state == nullptr || layout_state == nullptr || mouse.motion != Mouse::Moved) {
+    return false;
+  }
+  return update_panel_hover(
+      layout_state, mouse.x, mouse.y,
+      {{press_id::kWatchesPlay, &state->play_box},
+       {press_id::kWatchesStop, &state->stop_box},
+       {press_id::kWatchesTab0, &state->tab_boxes[0]},
+       {press_id::kWatchesTab1, &state->tab_boxes[1]},
+       {press_id::kWatchesTab2, &state->tab_boxes[2]},
+       {press_id::kWatchesTab3, &state->tab_boxes[3]}},
+      press_id::is_watches_hover);
+}
+
+bool handle_toolbar_mouse(WatchesPanelState* state, DebugModel* model,
+                          const Mouse& mouse, MainLayoutState* layout_state,
+                          const std::function<void()>& send_continue,
+                          const std::function<void()>& send_pause,
+                          const std::function<void()>& send_stop) {
+  if (state->play_box.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kWatchesPlay);
+    if (model->state == DebugState::kRunning) {
+      if (send_pause) {
+        send_pause();
+      }
+    } else if (model->state == DebugState::kStopped) {
+      if (send_continue) {
+        send_continue();
+      }
+    }
+    return true;
+  }
+  if (state->stop_box.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kWatchesStop);
+    if (send_stop) {
+      send_stop();
+    }
+    return true;
+  }
+  int tab = -1;
+  if (switch_tab_from_mouse(state, mouse.x, mouse.y, layout_state, &tab)) {
+    if (tab >= 0) {
+      trigger_press(layout_state, press_id::watches_tab_id(tab));
+    }
+    return true;
   }
   return false;
 }
@@ -376,42 +431,6 @@ void remove_selected_watch(WatchesPanelState* state, DebugModel* model) {
     state->watch_selected =
         std::max(0, static_cast<int>(model->watches.size()) - 1);
   }
-}
-
-Element make_tab_button(const std::string& label, bool selected, Box* box) {
-  Element tab = text(" " + label + " ") | center | size(HEIGHT, EQUAL, 1);
-  if (selected) {
-    tab = tab | bold | color(theme::Header()) | bgcolor(theme::TabActive());
-  } else {
-    tab = tab | color(theme::Muted()) | bgcolor(theme::TabIdle());
-  }
-  return tab | flex | reflect(*box);
-}
-
-bool handle_toolbar_mouse(WatchesPanelState* state, DebugModel* model,
-                          const Mouse& mouse, MainLayoutState* layout_state,
-                          const std::function<void()>& send_continue,
-                          const std::function<void()>& send_pause,
-                          const std::function<void()>& send_stop) {
-  if (state->play_box.Contain(mouse.x, mouse.y)) {
-    if (model->state == DebugState::kRunning) {
-      if (send_pause) {
-        send_pause();
-      }
-    } else if (model->state == DebugState::kStopped) {
-      if (send_continue) {
-        send_continue();
-      }
-    }
-    return true;
-  }
-  if (state->stop_box.Contain(mouse.x, mouse.y)) {
-    if (send_stop) {
-      send_stop();
-    }
-    return true;
-  }
-  return switch_tab_from_mouse(state, mouse.x, mouse.y, layout_state);
 }
 
 }  // namespace
@@ -507,19 +526,28 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
 
     if (event == Event::Character('1')) {
       mark_watches_focus();
+      trigger_press(layout_state, press_id::kWatchesTab0);
       return switch_tab(state.get(), 0, layout_state);
     }
     if (event == Event::Character('2')) {
       mark_watches_focus();
+      trigger_press(layout_state, press_id::kWatchesTab1);
       return switch_tab(state.get(), 1, layout_state);
     }
     if (event == Event::Character('3')) {
       mark_watches_focus();
+      trigger_press(layout_state, press_id::kWatchesTab2);
       return switch_tab(state.get(), 2, layout_state);
     }
     if (event == Event::Character('4')) {
       mark_watches_focus();
+      trigger_press(layout_state, press_id::kWatchesTab3);
       return switch_tab(state.get(), 3, layout_state);
+    }
+
+    if (event.is_mouse() && event.mouse().motion == Mouse::Moved) {
+      handle_watches_hover(state.get(), layout_state, event.mouse());
+      return false;
     }
 
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
@@ -822,28 +850,43 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
 
     const bool running = model->state == DebugState::kRunning;
     const bool stopped = model->state == DebugState::kStopped;
+    const bool play_disabled = !running && !stopped;
 
-    Element play_btn;
+    Element play_content;
     if (running) {
-      play_btn = text(" ⏸ ") | bold | color(theme::Pause()) | bgcolor(theme::TabIdle()) |
-                 center | size(WIDTH, EQUAL, 5);
+      play_content = text(" ⏸ ") | bold | color(theme::Pause());
     } else if (stopped) {
-      play_btn = text(" ▶ ") | bold | color(theme::Play()) | bgcolor(theme::TabIdle()) |
-                 center | size(WIDTH, EQUAL, 5);
+      play_content = text(" ▶ ") | bold | color(theme::Play());
     } else {
-      play_btn = text(" ▶ ") | dim | bgcolor(theme::TabIdle()) | center | size(WIDTH, EQUAL, 5);
+      play_content = text(" ▶ ");
     }
-    Element stop_btn = text(" ⏹ ") | bold | color(theme::Stop()) | bgcolor(theme::TabIdle()) |
-                       center | size(WIDTH, EQUAL, 5);
+    Element play_btn = MakeToolbarButton(
+        std::move(play_content),
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kWatchesPlay),
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kWatchesPlay),
+        play_disabled, &state->play_box) |
+                       size(WIDTH, EQUAL, 5);
+
+    Element stop_btn = MakeToolbarButton(
+        text(" ⏹ ") | bold | color(theme::Stop()),
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kWatchesStop),
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kWatchesStop),
+        false, &state->stop_box) |
+                       size(WIDTH, EQUAL, 5);
 
     Elements tab_row;
     for (int i = 0; i < kTabCount; ++i) {
-      tab_row.push_back(
-          make_tab_button(state->tab_titles[i], i == state->selected_tab, &state->tab_boxes[i]));
+      const bool selected = i == state->selected_tab;
+      const std::string_view tab_id = press_id::watches_tab_id(i);
+      tab_row.push_back(MakeTabButton(
+          state->tab_titles[i], selected,
+          layout_state != nullptr && layout_state->clickable.is_hovered(tab_id),
+          layout_state != nullptr && layout_state->clickable.is_pressed(tab_id),
+          &state->tab_boxes[i]));
     }
 
     Element toolbar = vbox({
-        hbox({play_btn | reflect(state->play_box), stop_btn | reflect(state->stop_box)}),
+        hbox({std::move(play_btn), std::move(stop_btn)}),
         hbox(std::move(tab_row)),
         separator(),
     });

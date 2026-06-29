@@ -1,0 +1,122 @@
+#pragma once
+
+#include <functional>
+#include <initializer_list>
+#include <optional>
+#include <string_view>
+
+#include "ftxui/dom/elements.hpp"
+#include "ftxui/screen/box.hpp"
+#include "ui/clickable_interaction.hpp"
+#include "ui/main_layout.hpp"
+#include "ui/theme.hpp"
+
+namespace tgdb {
+
+using namespace ftxui;
+
+struct HoverTarget {
+  std::string_view id;
+  const Box* box = nullptr;
+};
+
+struct ClickableState {
+  bool selected = false;
+  bool hovered = false;
+  bool pressed = false;
+  bool disabled = false;
+};
+
+inline std::optional<std::string_view> hit_test_hover(int x, int y,
+                                                      std::initializer_list<HoverTarget> targets) {
+  for (const HoverTarget& target : targets) {
+    if (target.box != nullptr && !target.box->IsEmpty() && target.box->Contain(x, y)) {
+      return target.id;
+    }
+  }
+  return std::nullopt;
+}
+
+inline void trigger_press(MainLayoutState* layout, std::string_view id) {
+  if (layout == nullptr || id.empty()) {
+    return;
+  }
+  layout->clickable.trigger_press(id);
+  layout->request_ui_tick = true;
+}
+
+inline void trigger_press(MainLayoutState* layout, const std::string& id) {
+  trigger_press(layout, std::string_view(id));
+}
+
+inline bool update_panel_hover(MainLayoutState* layout, int x, int y,
+                               std::initializer_list<HoverTarget> targets,
+                               const std::function<bool(std::string_view)>& owns_hover) {
+  if (layout == nullptr) {
+    return false;
+  }
+
+  const auto hit = hit_test_hover(x, y, targets);
+  if (hit.has_value()) {
+    if (layout->clickable.hovered_id() != *hit) {
+      layout->clickable.set_hover(*hit);
+      layout->request_ui_tick = true;
+      return true;
+    }
+    return false;
+  }
+
+  const std::string_view before = layout->clickable.hovered_id();
+  layout->clickable.clear_hover_if(owns_hover);
+  if (layout->clickable.hovered_id() != before) {
+    layout->request_ui_tick = true;
+    return true;
+  }
+  return false;
+}
+
+inline Element StyleClickable(Element base, ClickableState state) {
+  if (state.disabled) {
+    return base | dim;
+  }
+  if (state.pressed) {
+    return base | bold | inverted | bgcolor(theme::TabPressed());
+  }
+  if (state.hovered) {
+    const Color bg = state.selected ? theme::TabActive() : theme::TabHover();
+    return base | bold | color(theme::Header()) | bgcolor(bg);
+  }
+  if (state.selected) {
+    return base | bold | color(theme::Header()) | bgcolor(theme::TabActive());
+  }
+  return base | color(theme::Muted()) | bgcolor(theme::TabIdle());
+}
+
+inline Element MakeTabButton(const std::string& label, bool selected, bool hovered, bool pressed,
+                             Box* box) {
+  Element tab = text(" " + label + " ") | center | size(HEIGHT, EQUAL, 1);
+  tab = StyleClickable(std::move(tab), {selected, hovered, pressed, false});
+  return tab | flex | reflect(*box);
+}
+
+inline Element MakeToolbarButton(Element content, bool hovered, bool pressed, bool disabled,
+                                 Box* box) {
+  Element btn = std::move(content) | center;
+  if (disabled) {
+    btn = btn | dim | bgcolor(theme::TabIdle());
+  } else if (pressed) {
+    btn = btn | bold | inverted | bgcolor(theme::TabPressed());
+  } else if (hovered) {
+    btn = btn | bold | bgcolor(theme::TabHover());
+  } else {
+    btn = btn | bgcolor(theme::TabIdle());
+  }
+  return btn | reflect(*box);
+}
+
+inline bool interaction_active(const MainLayoutState* layout, std::string_view id) {
+  return layout != nullptr &&
+         (layout->clickable.is_hovered(id) || layout->clickable.is_pressed(id));
+}
+
+}  // namespace tgdb

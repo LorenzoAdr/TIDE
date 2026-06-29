@@ -13,6 +13,7 @@
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "indexer/workspace_indexer.hpp"
 #include "ui/focus_manager.hpp"
+#include "ui/clickable_interaction.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/source_panel.hpp"
 
@@ -63,6 +64,7 @@ struct MainLayoutState {
   int right_panel_active_section = 0;  // 0 = outline/búsqueda, 1 = depuración
   RightSidebarState right_sidebar;
   ContextMenuState context_menu;
+  ClickableInteractionTracker clickable;
   std::function<bool(const ftxui::Event&)> editor_key_handler;
   std::function<bool(const ftxui::Event&)> editor_mouse_handler;
   std::function<bool(const ftxui::Event&)> editor_chrome_mouse_handler;
