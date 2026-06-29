@@ -3,6 +3,7 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
 
@@ -77,6 +78,42 @@ class FdWriter : public dap::Writer {
 };
 
 }  // namespace
+
+bool gdb_supports_dap() {
+  const pid_t pid = fork();
+  if (pid < 0) {
+    return false;
+  }
+
+  if (pid == 0) {
+    const int devnull = ::open("/dev/null", O_RDWR);
+    if (devnull >= 0) {
+      dup2(devnull, STDIN_FILENO);
+      dup2(devnull, STDOUT_FILENO);
+      dup2(devnull, STDERR_FILENO);
+      if (devnull > STDERR_FILENO) {
+        ::close(devnull);
+      }
+    }
+
+    std::array<const char*, 6> argv = {
+        "gdb",
+        "--quiet",
+        "-i=dap",
+        "-ex",
+        "quit",
+        nullptr,
+    };
+    execvp("gdb", const_cast<char* const*>(argv.data()));
+    _exit(127);
+  }
+
+  int status = 0;
+  if (waitpid(pid, &status, 0) < 0) {
+    return false;
+  }
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
 
 GdbProcess::GdbProcess() = default;
 

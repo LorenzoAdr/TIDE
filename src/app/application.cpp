@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "backend/idebug_backend.hpp"
+#include "dap/gdb_launcher.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/component/event.hpp"
@@ -134,6 +135,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
   workspace_wizard_state_.launch_root = connection_wizard_state_.browser.launch_root;
 
   symbol_provider_ = std::make_shared<LspSymbolProvider>();
+  debug_available_ = gdb_supports_dap();
 
   if (config_.use_workspace_wizard) {
     workspace_.status_message = "Selecciona un directorio de trabajo...";
@@ -148,10 +150,15 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
       workspace_.open_file(config_.initial_file);
     }
     if (config_.auto_debug && connection_config_complete()) {
-      app_mode_ = AppMode::kDebug;
-      layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kDebug;
-      layout_state_.console_visible = true;
-      layout_state_.terminal_start_requested = true;
+      if (debug_available_) {
+        app_mode_ = AppMode::kDebug;
+        layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kDebug;
+        layout_state_.console_visible = true;
+        layout_state_.terminal_start_requested = true;
+      } else {
+        set_workspace_status(
+            "Depuración no disponible (GDB 14+ con DAP requerido)");
+      }
     }
   }
 
@@ -232,7 +239,7 @@ bool Application::connection_config_complete() const {
 }
 
 void Application::ensure_backend_started() {
-  if (backend_started_) {
+  if (backend_started_ || !debug_available_) {
     return;
   }
   backend_->start();
@@ -369,6 +376,10 @@ void Application::apply_pending_connection() {
 
 void Application::open_connection_wizard() {
   if (connection_wizard_state_.open || workspace_wizard_state_.open) {
+    return;
+  }
+  if (!debug_available_) {
+    set_status("Depuración no disponible: GDB 14+ con DAP requerido");
     return;
   }
 
@@ -602,7 +613,8 @@ bool Application::handle_focus_shortcuts(const Event& event) {
 }
 
 int Application::run() {
-  if (config_.auto_debug && connection_config_complete() && !config_.use_workspace_wizard) {
+  if (config_.auto_debug && connection_config_complete() && !config_.use_workspace_wizard &&
+      debug_available_) {
     ensure_backend_started();
   }
 

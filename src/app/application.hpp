@@ -94,6 +94,7 @@ class Application {
   bool session_ready_ = false;
   bool debugging_started_ = false;
   bool backend_started_ = false;
+  bool debug_available_ = false;
   std::optional<ConnectionResult> pending_connection_;
 };
 

@@ -81,11 +81,9 @@ if [[ ! -x "${TGDB}" ]]; then
 fi
 
 if ! command -v gdb >/dev/null 2>&1; then
-  die "gdb no está instalado"
-fi
-
-if ! gdb -i=dap -ex quit >/dev/null 2>&1; then
-  die "GDB no soporta DAP (gdb -i=dap)"
+  printf '[launch] aviso: gdb no está instalado; el IDE arrancará sin depuración\n' >&2
+elif ! gdb -i=dap -ex quit >/dev/null 2>&1; then
+  printf '[launch] aviso: GDB no soporta DAP (gdb -i=dap); el IDE arrancará sin depuración\n' >&2
 fi
 
 export TERM="${TERM:-xterm-256color}"

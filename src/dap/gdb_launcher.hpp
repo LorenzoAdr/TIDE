@@ -6,6 +6,9 @@
 
 namespace tgdb {
 
+// Comprueba si gdb en PATH soporta el intérprete DAP (GDB 14+).
+bool gdb_supports_dap();
+
 class GdbProcess {
  public:
   GdbProcess();

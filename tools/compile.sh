@@ -20,9 +20,13 @@ check_command() {
   fi
 }
 
-check_gdb_dap() {
+warn_gdb_dap() {
+  if ! command -v gdb >/dev/null 2>&1; then
+    log "aviso: gdb no está instalado; la depuración quedará deshabilitada"
+    return
+  fi
   if ! gdb -i=dap -ex quit >/dev/null 2>&1; then
-    die "GDB no soporta DAP. Necesitas GDB 14+ con Python (prueba: gdb -i=dap -ex quit)"
+    log "aviso: GDB no soporta DAP (prueba: gdb -i=dap -ex quit); la depuración quedará deshabilitada"
   fi
 }
 
@@ -30,8 +34,7 @@ log "proyecto: ${ROOT}"
 log "comprobando dependencias..."
 check_command cmake
 check_command g++
-check_command gdb
-check_gdb_dap
+warn_gdb_dap
 
 log "configurando CMake..."
 cmake -S "${ROOT}" -B "${BUILD_DIR}"
