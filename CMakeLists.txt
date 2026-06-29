@@ -70,6 +70,7 @@ add_executable(tgdb
   src/util/crash_handler.cpp
   src/util/filesystem_tree.cpp
   src/util/path_normalize.cpp
+  src/util/compile_commands_setup.cpp
   src/util/process_list.cpp
   src/terminal/shell_session.cpp
   src/terminal/raw_pty_screen.cpp

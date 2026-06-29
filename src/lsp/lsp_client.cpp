@@ -13,6 +13,7 @@
 
 #include "lsp/lsp_uri.hpp"
 #include "indexer/index_rules.hpp"
+#include "util/compile_commands_setup.hpp"
 
 #include <chrono>
 
@@ -53,14 +54,14 @@ LspClient::~LspClient() {
   stop();
 }
 
-bool LspClient::spawn_clangd(const std::string& workspace_root) {
+bool LspClient::spawn_clangd(const std::string& compile_commands_dir) {
   int stdin_pipe[2] = {-1, -1};
   int stdout_pipe[2] = {-1, -1};
   if (pipe(stdin_pipe) != 0 || pipe(stdout_pipe) != 0) {
     return false;
   }
 
-  const std::string compile_dir = find_compile_commands_dir(workspace_root);
+  const std::string& compile_dir = compile_commands_dir;
   const char* clangd_bin = std::getenv("CLANGD_PATH");
   if (clangd_bin == nullptr || clangd_bin[0] == '\0') {
     clangd_bin = "clangd";
@@ -107,22 +108,6 @@ bool LspClient::spawn_clangd(const std::string& workspace_root) {
   stdin_write_fd_ = stdin_pipe[1];
   stdout_read_fd_ = stdout_pipe[0];
   return transport_.start(stdin_write_fd_, stdout_read_fd_);
-}
-
-std::string LspClient::find_compile_commands_dir(
-    const std::string& workspace_root) const {
-  const fs::path root(workspace_root);
-  const fs::path candidates[] = {root / "compile_commands.json",
-                                 root / "build" / "compile_commands.json",
-                                 root / "cmake-build-debug" / "compile_commands.json",
-                                 root / "cmake-build-release" / "compile_commands.json"};
-  for (const auto& candidate : candidates) {
-    std::error_code ec;
-    if (fs::is_regular_file(candidate, ec)) {
-      return candidate.parent_path().string();
-    }
-  }
-  return {};
 }
 
 bool LspClient::initialize(const std::string& workspace_root) {
@@ -174,7 +159,8 @@ bool LspClient::start(const std::string& workspace_root) {
                                              const nlohmann::json& params) {
     on_lsp_notification(method, params);
   });
-  if (!spawn_clangd(workspace_root)) {
+  const std::string compile_dir = ensure_compile_commands_for_clangd(workspace_root);
+  if (!spawn_clangd(compile_dir)) {
     stop();
     return false;
   }

@@ -63,9 +63,8 @@ class LspClient {
     int64_t last_ms = 0;
   };
 
-  bool spawn_clangd(const std::string& workspace_root);
+  bool spawn_clangd(const std::string& compile_commands_dir);
   bool initialize(const std::string& workspace_root);
-  std::string find_compile_commands_dir(const std::string& workspace_root) const;
   void invalidate_cache(const std::string& absolute_path);
   void invalidate_semantic_tokens(const std::string& absolute_path);
   bool refresh_semantic_tokens(const std::string& absolute_path);
