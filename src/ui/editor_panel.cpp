@@ -122,6 +122,10 @@ struct EditorPanelState {
   int gutter_scroll_start = 0;
   int gutter_visible_rows = 0;
   bool symbols_fetch_pending = false;
+  uint64_t last_document_symbols_revision = 0;
+  SemanticTokenDocument cached_semantic_tokens;
+  std::string cached_semantic_path;
+  uint64_t last_semantic_highlight_revision = 0;
   std::unordered_map<int, std::vector<Diagnostic>> diagnostics_by_line;
   uint64_t diagnostics_by_line_revision = 0;
   std::string diagnostics_by_line_path;
@@ -2381,6 +2385,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (buffer.path != panel_state->last_path) {
       panel_state->last_path = buffer.path;
       panel_state->cached_symbols_path.clear();
+      panel_state->cached_semantic_path.clear();
+      panel_state->last_semantic_highlight_revision = 0;
       panel_state->document_open_pending = !buffer.path.empty();
       panel_state->pending_document_open_path = buffer.path;
       if (layout_state != nullptr && layout_state->schedule_ui_tick) {
@@ -2390,12 +2396,18 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     }
 
     const SemanticTokenDocument* semantic_tokens = nullptr;
-    SemanticTokenDocument semantic_doc;
     if (symbols && symbols->supports_semantic_highlight() && !buffer.path.empty() &&
         is_indexed_source_path(buffer.path)) {
-      semantic_doc = symbols->semantic_tokens_for_file(buffer.path);
-      if (semantic_doc.ready) {
-        semantic_tokens = &semantic_doc;
+      const uint64_t semantic_rev = symbols->semantic_highlight_revision();
+      if (panel_state->cached_semantic_path != buffer.path ||
+          semantic_rev != panel_state->last_semantic_highlight_revision) {
+        panel_state->cached_semantic_path = buffer.path;
+        panel_state->last_semantic_highlight_revision = semantic_rev;
+        panel_state->cached_semantic_tokens =
+            symbols->semantic_tokens_for_file(buffer.path);
+      }
+      if (panel_state->cached_semantic_tokens.ready) {
+        semantic_tokens = &panel_state->cached_semantic_tokens;
       }
     }
 
@@ -2696,6 +2708,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                         buffer_text(workspace->buffer));
           }
           if (panel_state->symbols_fetch_pending) {
+            ensure_file_symbols(panel_state.get(), symbols.get(), path);
+          }
+          const uint64_t sym_rev = symbols->document_symbols_revision();
+          if (sym_rev != panel_state->last_document_symbols_revision) {
+            panel_state->last_document_symbols_revision = sym_rev;
+            panel_state->symbols_fetch_pending = true;
             ensure_file_symbols(panel_state.get(), symbols.get(), path);
           }
           if (symbols->supports_semantic_highlight()) {

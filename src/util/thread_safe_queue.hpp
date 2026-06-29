@@ -18,6 +18,20 @@ class ThreadSafeQueue {
     cv_.notify_one();
   }
 
+  void push_front(T item) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      std::queue<T> reordered;
+      reordered.push(std::move(item));
+      while (!queue_.empty()) {
+        reordered.push(std::move(queue_.front()));
+        queue_.pop();
+      }
+      queue_.swap(reordered);
+    }
+    cv_.notify_one();
+  }
+
   std::optional<T> try_pop() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (queue_.empty()) {

@@ -23,6 +23,8 @@ class LspSymbolProvider : public ISymbolProvider {
   std::vector<SymbolInfo> symbols_for_file(const std::string& path) override;
   bool symbols_lsp_pending(const std::string& path) const override;
   bool drain_async_results() override;
+  uint64_t semantic_highlight_revision() const override;
+  uint64_t document_symbols_revision() const override;
   bool indexes_workspace_bulk() const override;
   std::vector<SymbolInfo> workspace_symbols(const std::string& workspace_root,
                                               const std::string& query) override;
@@ -75,9 +77,11 @@ class LspSymbolProvider : public ISymbolProvider {
   void start_async_worker_locked();
   void stop_async_worker_locked();
   void async_worker_main();
-  void enqueue_document_symbols_locked(const std::string& path);
+  void enqueue_document_symbols_locked(const std::string& path, bool force = false);
   void enqueue_semantic_tokens_locked(const std::string& path);
   bool symbols_lsp_pending_locked(const std::string& path) const;
+  void tick_content_refresh_locked();
+  static int64_t steady_now_ms();
 
   mutable std::mutex mutex_;
   LspClient client_;
@@ -96,6 +100,9 @@ class LspSymbolProvider : public ISymbolProvider {
   mutable std::mutex inflight_mutex_;
   std::unordered_set<std::string> inflight_symbols_;
   std::unordered_set<std::string> inflight_semantic_;
+  std::unordered_map<std::string, int64_t> pending_content_refresh_;
+  std::atomic<uint64_t> semantic_highlight_revision_{0};
+  std::atomic<uint64_t> document_symbols_revision_{0};
 };
 
 }  // namespace tgdb

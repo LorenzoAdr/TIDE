@@ -16,6 +16,7 @@ struct SemanticTokenDocument {
   std::vector<std::string> token_types;
   std::vector<std::vector<SemanticTokenSpan>> lines;
   bool ready = false;
+  uint64_t source_generation = 0;
 };
 
 }  // namespace tgdb

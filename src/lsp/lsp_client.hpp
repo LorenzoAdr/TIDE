@@ -60,7 +60,10 @@ class LspClient {
     std::string uri;
     std::string text;
     int version = 0;
+    uint64_t generation = 0;
   };
+
+  uint64_t document_generation(const std::string& absolute_path) const;
 
   struct SemanticTokenAttempt {
     int count = 0;

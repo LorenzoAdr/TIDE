@@ -741,7 +741,7 @@ int Application::run() {
           layout_state_.terminal_tick_callback();
         }
         if (symbol_provider_ && symbol_provider_->drain_async_results()) {
-          workspace_.buffer.view_token++;
+          layout_state_.request_ui_tick = true;
         }
         if (layout_state_.editor_tick_callback) {
           layout_state_.editor_tick_callback();

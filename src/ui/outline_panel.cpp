@@ -36,6 +36,7 @@ struct OutlinePanelState {
   std::vector<SymbolInfo> symbols;
   std::string loaded_file;
   bool symbols_fetch_pending = false;
+  uint64_t last_document_symbols_revision = 0;
   int selected = 0;
   int list_scroll = 0;
   int last_visible_lines = 1;
@@ -74,7 +75,7 @@ struct OutlinePanelState {
 };
 
 void fetch_outline_symbols(OutlinePanelState* state, ISymbolProvider* symbols,
-                           WorkspaceModel* workspace) {
+                           WorkspaceModel* workspace, MainLayoutState* layout_state) {
   if (state == nullptr || symbols == nullptr || !state->symbols_fetch_pending ||
       state->loaded_file.empty()) {
     return;
@@ -84,8 +85,8 @@ void fetch_outline_symbols(OutlinePanelState* state, ISymbolProvider* symbols,
     return;
   }
   state->symbols_fetch_pending = false;
-  if (workspace != nullptr) {
-    workspace->buffer.view_token++;
+  if (layout_state != nullptr) {
+    layout_state->request_ui_tick = true;
   }
 }
 
@@ -210,8 +211,15 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
   auto state = std::make_shared<OutlinePanelState>();
 
   if (layout_state != nullptr) {
-    layout_state->outline_tick_callback = [state, symbols, workspace]() {
-      fetch_outline_symbols(state.get(), symbols.get(), workspace);
+    layout_state->outline_tick_callback = [state, symbols, workspace, layout_state]() {
+      const uint64_t sym_rev = symbols->document_symbols_revision();
+      if (sym_rev != state->last_document_symbols_revision) {
+        state->last_document_symbols_revision = sym_rev;
+        if (!state->loaded_file.empty()) {
+          state->symbols_fetch_pending = true;
+        }
+      }
+      fetch_outline_symbols(state.get(), symbols.get(), workspace, layout_state);
     };
   }
 

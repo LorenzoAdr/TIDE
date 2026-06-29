@@ -279,24 +279,46 @@ void LspClient::did_open(const std::string& absolute_path, const std::string& te
   }
 
   DocumentState doc;
-  doc.uri = path_to_uri(key);
-  doc.text = text;
-  doc.version = 1;
-
+  bool notify_open = false;
+  bool notify_change = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    documents_[key] = doc;
-    invalidate_cache(key);
-    invalidate_semantic_tokens(key);
+    const auto it = documents_.find(key);
+    if (it != documents_.end()) {
+      if (it->second.text == text) {
+        return;
+      }
+      it->second.text = text;
+      it->second.version += 1;
+      it->second.generation += 1;
+      doc = it->second;
+      notify_change = true;
+    } else {
+      doc.uri = path_to_uri(key);
+      doc.text = text;
+      doc.version = 1;
+      doc.generation = 1;
+      documents_[key] = doc;
+      invalidate_cache(key);
+      invalidate_semantic_tokens(key);
+      notify_open = true;
+    }
   }
 
-  nlohmann::json params = {
-      {"textDocument",
-       {{"uri", doc.uri},
-        {"languageId", language_id_for_path(key)},
-        {"version", doc.version},
-        {"text", doc.text}}}};
-  transport_.send_notification("textDocument/didOpen", std::move(params));
+  if (notify_open) {
+    nlohmann::json params = {
+        {"textDocument",
+         {{"uri", doc.uri},
+          {"languageId", language_id_for_path(key)},
+          {"version", doc.version},
+          {"text", doc.text}}}};
+    transport_.send_notification("textDocument/didOpen", std::move(params));
+  } else if (notify_change) {
+    nlohmann::json params = {
+        {"textDocument", {{"uri", doc.uri}, {"version", doc.version}}},
+        {"contentChanges", nlohmann::json::array({{{"text", doc.text}}})}};
+    transport_.send_notification("textDocument/didChange", std::move(params));
+  }
 }
 
 void LspClient::did_change(const std::string& absolute_path, const std::string& text) {
@@ -314,15 +336,16 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
   bool open_new = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = documents_.find(key);
+    const auto it = documents_.find(key);
     if (it == documents_.end()) {
       open_new = true;
+    } else if (it->second.text == text) {
+      return;
     } else {
       it->second.text = text;
       it->second.version += 1;
+      it->second.generation += 1;
       doc = it->second;
-      invalidate_cache(key);
-      invalidate_semantic_tokens(key);
     }
   }
   if (open_new) {
@@ -471,17 +494,20 @@ std::vector<SymbolInfo> LspClient::document_symbols(const std::string& absolute_
   }
 
   std::string text;
+  bool need_open = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto it = documents_.find(key);
     if (it != documents_.end()) {
       text = it->second.text;
+    } else {
+      need_open = true;
     }
   }
   if (text.empty()) {
     text = read_file_text(key);
   }
-  if (!text.empty()) {
+  if (need_open && !text.empty()) {
     did_open(key, text);
   }
 
@@ -935,6 +961,7 @@ bool LspClient::refresh_semantic_tokens(const std::string& absolute_path) {
 
   std::string uri;
   std::vector<std::string> token_types;
+  uint64_t generation = 0;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto it = documents_.find(key);
@@ -942,6 +969,7 @@ bool LspClient::refresh_semantic_tokens(const std::string& absolute_path) {
       return false;
     }
     uri = it->second.uri;
+    generation = it->second.generation;
     token_types = semantic_token_types_;
     if (token_types.empty()) {
       token_types = default_semantic_token_types();
@@ -960,7 +988,9 @@ bool LspClient::refresh_semantic_tokens(const std::string& absolute_path) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (decoded.ready) {
+      decoded.source_generation = generation;
       semantic_token_cache_[key] = std::move(decoded);
+      semantic_token_attempts_.erase(key);
       return true;
     }
     semantic_token_cache_.erase(key);
@@ -982,12 +1012,13 @@ bool LspClient::ensure_semantic_tokens(const std::string& absolute_path) {
   bool should_fetch = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    const auto cached = semantic_token_cache_.find(key);
-    if (cached != semantic_token_cache_.end() && cached->second.ready) {
+    const auto doc_it = documents_.find(key);
+    if (doc_it == documents_.end()) {
       return false;
     }
-
-    if (documents_.find(key) == documents_.end()) {
+    const auto cached = semantic_token_cache_.find(key);
+    if (cached != semantic_token_cache_.end() && cached->second.ready &&
+        cached->second.source_generation == doc_it->second.generation) {
       return false;
     }
 
@@ -1034,8 +1065,26 @@ bool LspClient::has_ready_semantic_tokens(const std::string& absolute_path) cons
     return false;
   }
   std::lock_guard<std::mutex> lock(mutex_);
+  const auto doc_it = documents_.find(key);
+  if (doc_it == documents_.end()) {
+    return false;
+  }
   const auto it = semantic_token_cache_.find(key);
-  return it != semantic_token_cache_.end() && it->second.ready;
+  return it != semantic_token_cache_.end() && it->second.ready &&
+         it->second.source_generation == doc_it->second.generation;
+}
+
+uint64_t LspClient::document_generation(const std::string& absolute_path) const {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return 0;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = documents_.find(key);
+  if (it == documents_.end()) {
+    return 0;
+  }
+  return it->second.generation;
 }
 
 Diagnostic LspClient::parse_diagnostic(const nlohmann::json& item) {
