@@ -42,6 +42,7 @@ inline std::string_view watches_tab_id(int index) {
 
 constexpr std::string_view kEditorScrollbar = "scrollbar.editor";
 constexpr std::string_view kSourceScrollbar = "scrollbar.source";
+constexpr std::string_view kTerminalScrollbar = "scrollbar.terminal";
 
 inline std::string explorer_row(int index) {
   return "explorer.row." + std::to_string(index);
@@ -79,6 +80,11 @@ inline std::string editor_tab_close(int index) {
   return "editor.tab_close." + std::to_string(index);
 }
 
+inline std::string editor_symbol(int line, int start_col, int end_col) {
+  return "editor.symbol." + std::to_string(line) + "." + std::to_string(start_col) + "." +
+         std::to_string(end_col);
+}
+
 inline bool is_editor_chrome_hover(std::string_view id) {
   return id == kEditorProblems || id == kEditorTabOverflow || id.rfind("editor.tab.", 0) == 0 ||
          id.rfind("editor.tab_close.", 0) == 0;
@@ -113,7 +119,7 @@ inline bool is_context_menu_hover(std::string_view id) {
 }
 
 inline bool is_scrollbar_hover(std::string_view id) {
-  return id == kEditorScrollbar || id == kSourceScrollbar;
+  return id == kEditorScrollbar || id == kSourceScrollbar || id == kTerminalScrollbar;
 }
 
 inline bool is_f2_hover(std::string_view id) {

@@ -297,10 +297,12 @@ void RawPtyScreen::clear_to_end_of_line() {
   cache_valid_ = false;
 }
 
+constexpr int kMaxScrollbackLines = 10000;
+
 void RawPtyScreen::trim_lines() {
-  if (static_cast<int>(lines_.size()) > rows_ - 1) {
+  if (static_cast<int>(lines_.size()) > kMaxScrollbackLines) {
     lines_.erase(lines_.begin(),
-                 lines_.end() - static_cast<std::ptrdiff_t>(rows_ - 1));
+                 lines_.end() - static_cast<std::ptrdiff_t>(kMaxScrollbackLines));
   }
 }
 
@@ -345,6 +347,14 @@ void RawPtyScreen::feed(const char* data, std::size_t len) {
   cache_valid_ = false;
 }
 
+std::vector<TerminalStyledRow> RawPtyScreen::build_all_rows() const {
+  std::vector<TerminalStyledRow> all;
+  all.reserve(lines_.size() + 1);
+  all.insert(all.end(), lines_.begin(), lines_.end());
+  all.push_back(spans_from_cells(current_cells_));
+  return all;
+}
+
 std::vector<TerminalStyledRow> RawPtyScreen::build_visible_rows() const {
   std::vector<TerminalStyledRow> visible;
   visible.reserve(static_cast<std::size_t>(rows_));
@@ -367,10 +377,8 @@ std::vector<TerminalStyledRow> RawPtyScreen::build_visible_rows() const {
   return visible;
 }
 
-std::string RawPtyScreen::text() const {
-  if (cache_valid_) {
-    return cached_text_;
-  }
+void RawPtyScreen::rebuild_cache() const {
+  cached_styled_rows_ = build_all_rows();
 
   const std::vector<TerminalStyledRow> visible = build_visible_rows();
   std::string result;
@@ -390,15 +398,20 @@ std::string RawPtyScreen::text() const {
     }
   }
 
-  cached_text_ = result;
-  cached_styled_rows_ = visible;
+  cached_text_ = std::move(result);
   cache_valid_ = true;
+}
+
+std::string RawPtyScreen::text() const {
+  if (!cache_valid_) {
+    rebuild_cache();
+  }
   return cached_text_;
 }
 
 std::vector<TerminalStyledRow> RawPtyScreen::styled_rows() const {
   if (!cache_valid_) {
-    (void)text();
+    rebuild_cache();
   }
   return cached_styled_rows_;
 }

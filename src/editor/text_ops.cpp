@@ -694,16 +694,16 @@ void paste_at_primary(EditorBuffer* buffer, const std::string& text) {
     return;
   }
   push_undo(buffer);
-  exit_multi_cursor_mode(buffer);
+  clamp_all_cursors(buffer);
   if (any_cursor_has_selection(*buffer)) {
     delete_all_selections(buffer);
   }
+  exit_multi_cursor_mode(buffer);
   for (char c : text) {
     if (c == '\n') {
       apply_to_all_cursors(buffer, newline_at);
     } else {
       insert_char_at(buffer, buffer->primary().head.line, buffer->primary().head.col, c);
-      buffer->primary().head.col += 1;
       buffer->primary().anchor = buffer->primary().head;
     }
   }

@@ -739,6 +739,12 @@ int Application::run() {
         return true;
       }
 
+      if (layout_state_.console_visible && layout_state_.console_mouse_handler &&
+          layout_state_.console_mouse_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+
       if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
           layout_state_.editor_mouse_handler &&
           layout_state_.editor_mouse_handler(event)) {
@@ -760,9 +766,23 @@ int Application::run() {
         screen.Post(Event::Custom);
         return true;
       }
+      if (app_mode_ == AppMode::kNormal && event_is_ctrl_f(event) &&
+          focus_state_.region == FocusRegion::Editor &&
+          layout_state_.editor_key_handler &&
+          layout_state_.editor_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
       if (is_search_input_focus(layout_state_.text_input_focus) &&
           layout_state_.search_key_handler &&
           layout_state_.search_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+      if (layout_state_.text_input_focus == TextInputFocus::EditorFind &&
+          focus_state_.region == FocusRegion::Editor &&
+          app_mode_ == AppMode::kNormal && layout_state_.editor_key_handler &&
+          layout_state_.editor_key_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }

@@ -29,7 +29,8 @@ class RawPtyScreen {
   int rows() const { return rows_; }
   int cols() const { return cols_; }
   int cursor_col() const { return cursor_col_; }
-  int cursor_row() const { return rows_ - 1; }
+  int cursor_row() const { return static_cast<int>(lines_.size()); }
+  int total_rows() const { return static_cast<int>(lines_.size()) + 1; }
   std::string text() const;
   std::vector<TerminalStyledRow> styled_rows() const;
 
@@ -53,7 +54,9 @@ class RawPtyScreen {
   void ensure_current_width();
   void reset_sgr();
   TerminalStyledRow spans_from_cells(const std::vector<ScreenCell>& cells) const;
+  std::vector<TerminalStyledRow> build_all_rows() const;
   std::vector<TerminalStyledRow> build_visible_rows() const;
+  void rebuild_cache() const;
 
   int rows_ = 24;
   int cols_ = 80;

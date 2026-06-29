@@ -24,6 +24,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/panel.hpp"
 #include "ui/text_input_style.hpp"
+#include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
 
 namespace tgdb {
@@ -39,6 +40,13 @@ struct ConsolePanelState {
   Box content_box;
   Box history_box;
   Box terminal_box;
+  Box terminal_scrollbar_box;
+  ScrollbarLayout terminal_scrollbar_layout;
+  bool terminal_scrollbar_dragging = false;
+  int terminal_scrollbar_drag_offset = 0;
+  int terminal_first_visible = 0;
+  int terminal_last_visible_lines = 1;
+  bool terminal_follow_tail = true;
   Box input_box;
   int last_visible_lines = 1;
   int first_visible = 0;
@@ -126,33 +134,162 @@ void clamp_scroll(ConsolePanelState* state, int total_lines, int visible_lines) 
       0, std::min(state->first_visible, max_first_visible(total_lines, visible_lines)));
 }
 
-Element vertical_scrollbar(int total_lines, int first_visible, int visible_lines,
-                           int bar_height) {
-  Elements track;
-  if (bar_height <= 0) {
-    return text("");
+void clamp_terminal_scroll(ConsolePanelState* state, int total_lines, int visible_lines) {
+  state->terminal_first_visible = std::max(
+      0, std::min(state->terminal_first_visible, max_first_visible(total_lines, visible_lines)));
+}
+
+void scroll_terminal_to_tail(ConsolePanelState* state, int total_lines, int visible_lines) {
+  state->terminal_first_visible = max_first_visible(total_lines, visible_lines);
+  state->terminal_follow_tail = true;
+}
+
+void scroll_terminal_by_lines(ConsolePanelState* state, int delta, int total_lines,
+                              int visible_lines) {
+  const int max_first = max_first_visible(total_lines, visible_lines);
+  state->terminal_first_visible =
+      std::max(0, std::min(state->terminal_first_visible + delta, max_first));
+  state->terminal_follow_tail = state->terminal_first_visible >= max_first;
+}
+
+int terminal_viewport_lines(const ConsolePanelState* state, int fallback_height) {
+  if (state == nullptr) {
+    return std::max(1, fallback_height);
+  }
+  int visible = visible_line_count(state->terminal_box);
+  if (visible <= 1) {
+    visible = visible_line_count(state->content_box);
+  }
+  if (visible <= 1 && state->panel_box.y_max > state->panel_box.y_min) {
+    visible = std::max(1, visible_line_count(state->panel_box) - 2);
+  }
+  if (visible <= 1) {
+    visible = std::max(1, fallback_height);
+  }
+  return visible;
+}
+
+bool handle_terminal_scroll_keys(ConsolePanelState* state, const Event& event) {
+  if (state == nullptr || !state->shell_ui_active) {
+    return false;
+  }
+  const int total = static_cast<int>(state->terminal_styled_rows.size());
+  const int visible = state->terminal_last_visible_lines;
+  if (event == Event::PageUp) {
+    scroll_terminal_by_lines(state, -visible, total, visible);
+    return true;
+  }
+  if (event == Event::PageDown) {
+    scroll_terminal_by_lines(state, visible, total, visible);
+    return true;
+  }
+  if (event == Event::Home) {
+    state->terminal_first_visible = 0;
+    state->terminal_follow_tail = false;
+    return true;
+  }
+  if (event == Event::End) {
+    scroll_terminal_to_tail(state, total, visible);
+    return true;
+  }
+  return false;
+}
+
+bool apply_terminal_scrollbar_drag(ConsolePanelState* state, int mouse_y, int total_lines,
+                                   int visible_lines) {
+  if (state == nullptr || !state->terminal_scrollbar_layout.scrollable) {
+    return false;
+  }
+  const int local_y = mouse_y - state->terminal_scrollbar_box.y_min;
+  const int thumb_top = local_y - state->terminal_scrollbar_drag_offset;
+  const int new_scroll = scroll_for_thumb_top(state->terminal_scrollbar_layout, thumb_top);
+  if (state->terminal_first_visible != new_scroll) {
+    state->terminal_first_visible = new_scroll;
+    const int max_first = max_first_visible(total_lines, visible_lines);
+    state->terminal_follow_tail = state->terminal_first_visible >= max_first;
+  }
+  return true;
+}
+
+bool handle_terminal_scroll_mouse(ConsolePanelState* state, MainLayoutState* layout_state,
+                                  const Mouse& m, int total_lines, int visible_lines) {
+  if (state == nullptr || total_lines <= 0) {
+    return false;
   }
 
-  if (total_lines <= visible_lines) {
-    for (int i = 0; i < bar_height; ++i) {
-      track.push_back(text("│") | color(theme::Muted()));
+  const bool in_bar = state->terminal_scrollbar_box.Contain(m.x, m.y);
+  const bool in_body = state->terminal_box.Contain(m.x, m.y) ||
+                       state->content_box.Contain(m.x, m.y);
+
+  if (m.motion == Mouse::Moved) {
+    if (layout_state != nullptr) {
+      const std::string_view before = layout_state->clickable.hovered_id();
+      if (in_bar || state->terminal_scrollbar_dragging) {
+        layout_state->clickable.set_hover(press_id::kTerminalScrollbar);
+      } else {
+        layout_state->clickable.clear_hover_if([&](std::string_view id) {
+          return id == press_id::kTerminalScrollbar;
+        });
+      }
+      if (layout_state->clickable.hovered_id() != before) {
+        layout_state->request_ui_tick = true;
+      }
     }
-    return vbox(std::move(track));
+    if (state->terminal_scrollbar_dragging) {
+      return apply_terminal_scrollbar_drag(state, m.y, total_lines, visible_lines);
+    }
+    return in_bar;
   }
 
-  const int thumb_height = std::max(1, visible_lines * bar_height / total_lines);
-  const int max_first = total_lines - visible_lines;
-  const int thumb_y =
-      max_first > 0 ? (first_visible * (bar_height - thumb_height)) / max_first : 0;
+  if (state->terminal_scrollbar_dragging) {
+    if (m.button == Mouse::Left && m.motion == Mouse::Released) {
+      state->terminal_scrollbar_dragging = false;
+      return true;
+    }
+    if (m.button == Mouse::Left) {
+      return apply_terminal_scrollbar_drag(state, m.y, total_lines, visible_lines);
+    }
+  }
 
-  for (int i = 0; i < bar_height; ++i) {
-    if (i >= thumb_y && i < thumb_y + thumb_height) {
-      track.push_back(text("┃") | color(theme::Accent()));
+  if (in_body || in_bar) {
+    if (m.button == Mouse::WheelUp) {
+      scroll_terminal_by_lines(state, -3, total_lines, visible_lines);
+      return true;
+    }
+    if (m.button == Mouse::WheelDown) {
+      scroll_terminal_by_lines(state, 3, total_lines, visible_lines);
+      return true;
+    }
+  }
+
+  if (!in_bar) {
+    return false;
+  }
+
+  if (m.button != Mouse::Left) {
+    return false;
+  }
+
+  if (m.motion == Mouse::Pressed) {
+    trigger_press(layout_state, press_id::kTerminalScrollbar);
+    const int local_y = m.y - state->terminal_scrollbar_box.y_min;
+    if (scrollbar_thumb_hit(state->terminal_scrollbar_layout, state->terminal_scrollbar_box, m.x,
+                            m.y)) {
+      state->terminal_scrollbar_dragging = true;
+      state->terminal_scrollbar_drag_offset = local_y - state->terminal_scrollbar_layout.thumb_y;
     } else {
-      track.push_back(text("│") | color(theme::Muted()));
+      const int thumb_top = local_y - state->terminal_scrollbar_layout.thumb_height / 2;
+      state->terminal_first_visible =
+          scroll_for_thumb_top(state->terminal_scrollbar_layout, thumb_top);
+      state->terminal_scrollbar_dragging = true;
+      state->terminal_scrollbar_drag_offset = state->terminal_scrollbar_layout.thumb_height / 2;
+      const int max_first = max_first_visible(total_lines, visible_lines);
+      state->terminal_follow_tail = state->terminal_first_visible >= max_first;
     }
+    return true;
   }
-  return vbox(std::move(track));
+
+  return false;
 }
 
 bool console_input_active(MainLayoutState* layout_state) {
@@ -330,12 +467,14 @@ Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool sh
   return hbox(std::move(parts)) | size(HEIGHT, EQUAL, 1);
 }
 
-Element render_terminal_styled(const std::vector<TerminalStyledRow>& rows, int cursor_row,
-                               int cursor_col, bool show_cursor) {
+Element render_terminal_styled(const std::vector<TerminalStyledRow>& rows, int first_visible,
+                               int visible_count, int cursor_row, int cursor_col,
+                               bool show_cursor) {
   Elements lines;
-  for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
-    const int line_cursor =
-        show_cursor && row == cursor_row ? cursor_col : -1;
+  const int total = static_cast<int>(rows.size());
+  const int end = std::min(total, first_visible + visible_count);
+  for (int row = first_visible; row < end; ++row) {
+    const int line_cursor = show_cursor && row == cursor_row ? cursor_col : -1;
     lines.push_back(render_styled_line(rows[static_cast<std::size_t>(row)], line_cursor,
                                        show_cursor && row == cursor_row));
   }
@@ -359,6 +498,9 @@ void reset_terminal_session_state(ConsolePanelState* state, const std::string& w
   state->terminal_view_valid = false;
   state->terminal_styled_rows.clear();
   state->shell_ui_active = false;
+  state->terminal_first_visible = 0;
+  state->terminal_follow_tail = true;
+  state->terminal_scrollbar_dragging = false;
   state->applied_terminal_cols = 0;
   state->applied_terminal_rows = 0;
 }
@@ -436,8 +578,14 @@ void refresh_terminal_view(ShellSession* shell, ConsolePanelState* state) {
   if (drained == 0 && text == state->terminal_text && state->terminal_view_valid) {
     return;
   }
+  const int old_total = static_cast<int>(state->terminal_styled_rows.size());
   state->terminal_text = text;
   state->terminal_styled_rows = shell->display_styled_rows();
+  const int new_total = static_cast<int>(state->terminal_styled_rows.size());
+  if (new_total > old_total && state->terminal_follow_tail) {
+    scroll_terminal_to_tail(state, new_total, state->terminal_last_visible_lines);
+  }
+  clamp_terminal_scroll(state, new_total, state->terminal_last_visible_lines);
   state->terminal_view_valid = true;
 }
 
@@ -535,7 +683,8 @@ Element render_gdb_console(ConsolePanelState* state, DebugModel* model, AppMode*
 }
 
 Element render_shell_terminal(ConsolePanelState* state, DebugModel* model, ShellSession* shell,
-                              FocusManagerState* focus) {
+                              FocusManagerState* focus, MainLayoutState* layout_state,
+                              int viewport_height) {
   if (model->workspace_root.empty()) {
     return render_terminal_body(text("(selecciona workspace con F3)") | color(theme::Muted()));
   }
@@ -551,10 +700,38 @@ Element render_shell_terminal(ConsolePanelState* state, DebugModel* model, Shell
   }
 
   if (state->terminal_view_valid && !state->terminal_styled_rows.empty()) {
-    const bool show_cursor = shell_terminal_input_active(focus, shell);
+    const int total = static_cast<int>(state->terminal_styled_rows.size());
+    const int visible = terminal_viewport_lines(state, viewport_height);
+    state->terminal_last_visible_lines = visible;
+    if (state->terminal_follow_tail) {
+      scroll_terminal_to_tail(state, total, visible);
+    }
+    clamp_terminal_scroll(state, total, visible);
+
+    const bool at_tail = state->terminal_follow_tail;
+    const bool show_cursor = shell_terminal_input_active(focus, shell) && at_tail;
     const int cursor_row = show_cursor && shell != nullptr ? shell->cursor_row() : -1;
     const int cursor_col = show_cursor && shell != nullptr ? shell->cursor_col() : -1;
-    return render_terminal_styled(state->terminal_styled_rows, cursor_row, cursor_col, show_cursor);
+
+    const int rendered_lines = std::min(visible, total - state->terminal_first_visible);
+    Element content = render_terminal_styled(state->terminal_styled_rows, state->terminal_first_visible,
+                                             visible, cursor_row, cursor_col, show_cursor);
+
+    const bool scroll_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kTerminalScrollbar);
+    const bool scroll_active = state->terminal_scrollbar_dragging ||
+                               (layout_state != nullptr &&
+                                layout_state->clickable.is_pressed(press_id::kTerminalScrollbar));
+    state->terminal_scrollbar_layout =
+        compute_scrollbar_layout(total, state->terminal_first_visible, visible, rendered_lines);
+    Element scrollbar =
+        vertical_scrollbar(total, state->terminal_first_visible, visible, rendered_lines,
+                         scroll_hovered, scroll_active) |
+        reflect(state->terminal_scrollbar_box);
+
+    return hbox({std::move(content) | flex | reflect(state->terminal_box), std::move(scrollbar)}) |
+           bgcolor(theme::CodeBg());
   }
   return render_terminal_body(text("...") | color(theme::Muted()));
 }
@@ -634,6 +811,19 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     if (event.is_mouse() && event.mouse().motion == Mouse::Moved) {
       handle_console_tab_hover(state.get(), layout_state, event.mouse());
       return false;
+    }
+
+    if (on_terminal_tab && state->shell_ui_active && event.is_mouse()) {
+      const int term_total = static_cast<int>(state->terminal_styled_rows.size());
+      const int term_visible = state->terminal_last_visible_lines;
+      if (handle_terminal_scroll_mouse(state.get(), layout_state, event.mouse(), term_total,
+                                       term_visible)) {
+        return true;
+      }
+    }
+
+    if (on_terminal_tab && state->shell_ui_active && handle_terminal_scroll_keys(state.get(), event)) {
+      return true;
     }
 
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
@@ -750,9 +940,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     return false;
   });
 
-  auto dispatch_console_keys = [app_mode, layout_state, focus, shell](Event event) -> bool {
+  auto dispatch_console_keys = [app_mode, layout_state, focus, shell, state](Event event) -> bool {
     if (!terminal_tab_active(app_mode, layout_state)) {
       return false;
+    }
+    if (state->shell_ui_active && terminal_pty_input_active(layout_state, focus, shell) &&
+        handle_terminal_scroll_keys(state.get(), event)) {
+      return true;
     }
     if (!terminal_pty_input_active(layout_state, focus, shell)) {
       return false;
@@ -772,8 +966,22 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     return forward_pty_key(shell, event);
   };
 
+  auto dispatch_console_mouse = [app_mode, layout_state, state](Event event) -> bool {
+    if (!event.is_mouse() || !terminal_tab_active(app_mode, layout_state)) {
+      return false;
+    }
+    if (!state->shell_ui_active) {
+      return false;
+    }
+    const int term_total = static_cast<int>(state->terminal_styled_rows.size());
+    const int term_visible = state->terminal_last_visible_lines;
+    return handle_terminal_scroll_mouse(state.get(), layout_state, event.mouse(), term_total,
+                                        term_visible);
+  };
+
   if (layout_state != nullptr) {
     layout_state->console_key_handler = dispatch_console_keys;
+    layout_state->console_mouse_handler = dispatch_console_mouse;
     layout_state->terminal_tick_callback = [app_mode, model, shell, state, layout_state, focus,
                                             bottom_height] {
       if (layout_state->terminal_start_requested) {
@@ -805,8 +1013,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
     if (!debug_mode) {
       const int body_height = std::max(1, panel_height - 1);
-      Element body =
-          render_shell_terminal(state.get(), model, shell, focus) | reflect(state->content_box);
+      Element body = render_shell_terminal(state.get(), model, shell, focus, layout_state,
+                                           body_height) |
+                     reflect(state->content_box);
       return make_terminal_panel("Terminal", std::move(body), body_height);
     }
 
@@ -827,9 +1036,10 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         &state->tab_boxes[ConsolePanelTabs::kDebug]));
 
     Element body;
+    const int body_height = std::max(1, panel_height - 2);
     if (selected_tab == ConsolePanelTabs::kTerminal) {
-      body = render_shell_terminal(state.get(), model, shell, focus) | reflect(state->content_box) |
-             flex;
+      body = render_shell_terminal(state.get(), model, shell, focus, layout_state, body_height) |
+             reflect(state->content_box) | flex;
     } else {
       body = render_gdb_console(state.get(), model, app_mode, layout_state, input_box);
     }

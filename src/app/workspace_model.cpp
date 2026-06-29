@@ -70,7 +70,6 @@ void WorkspaceModel::flush_active_tab() {
     return;
   }
   tabs[static_cast<std::size_t>(active_tab)].buffer = buffer;
-  tabs[static_cast<std::size_t>(active_tab)].cursor_history = cursor_history;
 }
 
 void WorkspaceModel::load_active_tab_into_buffer() {
@@ -83,7 +82,6 @@ void WorkspaceModel::load_active_tab_into_buffer() {
   }
   const EditorTab& tab = tabs[static_cast<std::size_t>(active_tab)];
   buffer = tab.buffer;
-  cursor_history = tab.cursor_history;
   active_file = tab.path;
   buffer.view_token++;
 }

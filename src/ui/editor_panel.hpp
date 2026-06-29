@@ -18,4 +18,7 @@ ftxui::Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* f
                                  WorkspaceIndexer* file_indexer,
                                  SymbolWorkspaceIndexer* symbol_indexer);
 
+void flash_symbol_at_buffer_pos(WorkspaceModel* workspace, MainLayoutState* layout_state,
+                                int line, int col, int visible_lines);
+
 }  // namespace tgdb

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "editor/clipboard.hpp"
 #include "editor/editor_state.hpp"
 #include "editor/text_ops.hpp"
 #include "editor/text_search.hpp"
@@ -81,6 +82,30 @@ void test_word_left() {
   check(buffer.primary_col() == 4, "word left to bar");
 }
 
+void test_copy_selection() {
+  auto buffer = make_buffer({"hello world"});
+  buffer.primary().anchor = {0, 0};
+  buffer.primary().head = {0, 5};
+  check(tgdb::copy_selection(&buffer), "copy succeeds");
+  check(tgdb::editor_clipboard() == "hello", "full selection copied");
+}
+
+void test_paste_at_end_of_line() {
+  auto buffer = make_buffer({"hello"});
+  buffer.reset_to_single_cursor(0, 5);
+  tgdb::paste_at_primary(&buffer, "abc");
+  check(buffer.lines[0] == "helloabc", "paste full text at end of line");
+  check(buffer.primary_col() == 8, "cursor after pasted text");
+}
+
+void test_paste_replaces_selection() {
+  auto buffer = make_buffer({"hello world"});
+  buffer.primary().anchor = {0, 6};
+  buffer.primary().head = {0, 11};
+  tgdb::paste_at_primary(&buffer, "tgdb");
+  check(buffer.lines[0] == "hello tgdb", "selection replaced by paste");
+}
+
 }  // namespace
 
 int main() {
@@ -91,5 +116,8 @@ int main() {
   test_backspace_multi();
   test_replace_selection_on_type();
   test_word_left();
+  test_copy_selection();
+  test_paste_at_end_of_line();
+  test_paste_replaces_selection();
   return 0;
 }

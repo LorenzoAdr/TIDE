@@ -1,7 +1,9 @@
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <memory>
+#include <string>
 
 #include "app/app_mode.hpp"
 #include "app/debug_model.hpp"
@@ -15,7 +17,9 @@
 #include "ui/focus_manager.hpp"
 #include "ui/clickable_interaction.hpp"
 #include "ui/context_menu.hpp"
+#include "ui/press_ids.hpp"
 #include "ui/source_panel.hpp"
+#include "util/path_normalize.hpp"
 
 namespace tgdb {
 
@@ -65,6 +69,22 @@ struct MainLayoutState {
   RightSidebarState right_sidebar;
   ContextMenuState context_menu;
   ClickableInteractionTracker clickable;
+  struct EditorSymbolPress {
+    std::string path;
+    int line = -1;
+    int start_col = 0;
+    int end_col = 0;
+    int render_row = -1;
+    std::chrono::steady_clock::time_point visible_until{};
+  };
+  EditorSymbolPress editor_symbol_press;
+  struct PendingEditorNavigation {
+    SourceLocation loc;
+    std::chrono::steady_clock::time_point execute_after{};
+    std::chrono::steady_clock::time_point deadline{};
+    bool active = false;
+  };
+  PendingEditorNavigation pending_editor_navigation;
   std::function<bool(const ftxui::Event&)> editor_key_handler;
   std::function<bool(const ftxui::Event&)> editor_mouse_handler;
   std::function<bool(const ftxui::Event&)> editor_chrome_mouse_handler;
@@ -74,6 +94,7 @@ struct MainLayoutState {
   std::function<int()> editor_visible_line_count;
   std::function<void()> outline_tick_callback;
   std::function<bool(const ftxui::Event&)> console_key_handler;
+  std::function<bool(const ftxui::Event&)> console_mouse_handler;
   std::function<bool(const ftxui::Event&)> search_key_handler;
   std::function<void()> terminal_tick_callback;
   std::function<int()> terminal_width;
@@ -89,6 +110,71 @@ inline bool is_search_input_focus(TextInputFocus focus) {
 
 inline bool is_watch_input_focus(TextInputFocus focus) {
   return focus == TextInputFocus::Watch || focus == TextInputFocus::WatchInject;
+}
+
+inline bool editor_symbol_press_visible(const MainLayoutState* layout_state) {
+  if (layout_state == nullptr) {
+    return false;
+  }
+  const auto& press = layout_state->editor_symbol_press;
+  if (press.line < 0 || press.end_col <= press.start_col) {
+    return false;
+  }
+  return std::chrono::steady_clock::now() < press.visible_until;
+}
+
+inline void clear_editor_symbol_press(MainLayoutState* layout_state) {
+  if (layout_state == nullptr) {
+    return;
+  }
+  layout_state->editor_symbol_press.line = -1;
+}
+
+inline void request_editor_symbol_press(MainLayoutState* layout_state, const std::string& path,
+                                      int line, int start_col, int end_col, int render_row = -1) {
+  if (layout_state == nullptr || path.empty() || line < 0 || end_col <= start_col) {
+    return;
+  }
+  layout_state->editor_symbol_press = {
+      path, line, start_col, end_col, render_row,
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(500)};
+  layout_state->clickable.trigger_press(press_id::editor_symbol(line, start_col, end_col),
+                                        std::chrono::milliseconds(500));
+}
+
+inline void schedule_editor_navigation(MainLayoutState* layout_state, const SourceLocation& loc) {
+  if (layout_state == nullptr || !loc.valid || loc.path.empty()) {
+    return;
+  }
+  const auto now = std::chrono::steady_clock::now();
+  layout_state->pending_editor_navigation.loc = loc;
+  layout_state->pending_editor_navigation.execute_after = now + std::chrono::milliseconds(350);
+  layout_state->pending_editor_navigation.deadline = now + std::chrono::milliseconds(600);
+  layout_state->pending_editor_navigation.active = true;
+}
+
+inline bool tick_pending_editor_navigation(
+    MainLayoutState* layout_state,
+    const std::function<void(const SourceLocation&)>& navigate) {
+  if (layout_state == nullptr || !layout_state->pending_editor_navigation.active) {
+    return false;
+  }
+  const auto now = std::chrono::steady_clock::now();
+  if (now > layout_state->pending_editor_navigation.deadline) {
+    const SourceLocation loc = layout_state->pending_editor_navigation.loc;
+    layout_state->pending_editor_navigation.active = false;
+    navigate(loc);
+    clear_editor_symbol_press(layout_state);
+    return true;
+  }
+  if (now < layout_state->pending_editor_navigation.execute_after) {
+    return false;
+  }
+  const SourceLocation loc = layout_state->pending_editor_navigation.loc;
+  layout_state->pending_editor_navigation.active = false;
+  navigate(loc);
+  clear_editor_symbol_press(layout_state);
+  return true;
 }
 
 ftxui::Component MakeMainLayout(AppMode* app_mode, DebugModel* model,

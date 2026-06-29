@@ -23,14 +23,24 @@ struct EditorDecoration {
     Selection,
     PrimaryCaret,
     SecondaryCaret,
+    PressFlash,
   } kind = Kind::Selection;
 };
+
+struct EditorSymbolPress {
+  int start_col = 0;
+  int end_col = 0;
+  bool active = false;
+};
+
+void collect_press_decorations(int line_index, const EditorSymbolPress& press,
+                               std::vector<EditorDecoration>* out);
 
 void collect_find_decorations(int line_index, const std::vector<TextMatch>& matches,
                               std::vector<EditorDecoration>* out);
 
 void collect_line_decorations(int line_index, const EditorBuffer& buffer, bool editor_focused,
-                              std::vector<EditorDecoration>* out);
+                              bool show_caret, std::vector<EditorDecoration>* out);
 
 void collect_bracket_decorations(int line_index, const BracketPairHighlight& bracket,
                                  std::vector<EditorDecoration>* out);
@@ -44,6 +54,8 @@ ftxui::Element RenderEditorLine(const std::string& line, int line_index,
                                const SemanticTokenDocument* semantic_tokens = nullptr,
                                const BracketPairHighlight* bracket = nullptr,
                                const std::vector<Diagnostic>* line_diagnostics = nullptr,
-                               const std::string* diagnostic_suffix = nullptr);
+                               const std::string* diagnostic_suffix = nullptr,
+                               const EditorSymbolPress* symbol_press = nullptr,
+                               bool show_caret = true);
 
 }  // namespace tgdb

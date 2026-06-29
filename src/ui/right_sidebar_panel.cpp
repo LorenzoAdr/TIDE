@@ -150,14 +150,7 @@ class RightSidebarLayout : public ComponentBase {
   }
 
   void SetActiveChild(ComponentBase* child) override {
-    for (std::size_t i = 0; i < children_.size(); ++i) {
-      if (children_[i].get() == child) {
-        if (state_ != nullptr) {
-          state_->selected_tab = static_cast<int>(i);
-        }
-        return;
-      }
-    }
+    (void)child;
   }
 
  private:

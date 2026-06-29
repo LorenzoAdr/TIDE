@@ -228,6 +228,39 @@ struct FileTreePanelState {
     }
     return row;
   }
+
+  bool press_row(MainLayoutState* layout_state, int row) {
+    if (layout_state == nullptr || row < 0 || row >= static_cast<int>(flat.size())) {
+      return false;
+    }
+    selected = row;
+    center_row(row);
+    trigger_press(layout_state, press_id::explorer_row(row));
+    return true;
+  }
+
+  bool press_file(MainLayoutState* layout_state, const std::string& workspace_root,
+                  const std::string& absolute_path) {
+    if (layout_state == nullptr || workspace_root.empty() || absolute_path.empty()) {
+      return false;
+    }
+    const std::string normalized = normalize_path(absolute_path);
+    const std::string rel = relative_path_in_workspace(workspace_root, normalized);
+    if (rel.empty()) {
+      return false;
+    }
+    if (expand_relative_path(&root, rel)) {
+      rebuild_flat();
+    }
+    for (int i = 0; i < static_cast<int>(flat.size()); ++i) {
+      if (flat[static_cast<std::size_t>(i)].is_file &&
+          flat[static_cast<std::size_t>(i)].relative_path == rel) {
+        last_revealed_path = normalized;
+        return press_row(layout_state, i);
+      }
+    }
+    return false;
+  }
 };
 
 bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState* layout_state,

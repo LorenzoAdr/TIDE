@@ -85,6 +85,13 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
         layout_state->text_input_focus = TextInputFocus::None;
       }
       break;
+    case TextInputFocus::EditorFind:
+    case TextInputFocus::EditorGotoLine:
+    case TextInputFocus::EditorCompletion:
+      if (focus->region != FocusRegion::Editor) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
+      break;
     default:
       layout_state->text_input_focus = TextInputFocus::None;
       break;
@@ -347,9 +354,9 @@ Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
 
 std::string status_shortcuts(AppMode mode) {
   if (mode == AppMode::kDebug) {
-    return "F1 atajos  F5 ▶  F10 step  Ctrl+B bp  F2 debug  F3 workspace  F8 outline  F7 buscar  Ctrl+P  Ctrl+T  Ctrl+Q salir ";
+    return "F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into";
   }
-  return "F1 atajos  F2 debug  F3 workspace  F7 buscar  F8 outline  F9 problemas  Ctrl+F  Ctrl+G  F12 definición  Ctrl+. completar  Ctrl+O  Ctrl+S  Ctrl+P  Ctrl+Q salir ";
+  return "F1 atajos  F2 debug  F3 workspace  F4 terminal  F7 buscar  F8 outline  F9 problemas";
 }
 
 }  // namespace

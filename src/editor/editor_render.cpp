@@ -35,7 +35,11 @@ bool line_has_diagnostics(const std::vector<Diagnostic>* line_diagnostics) {
 bool line_needs_rich_decorations(int line_index, const EditorBuffer& buffer,
                                  const std::vector<TextMatch>* find_matches,
                                  const BracketPairHighlight* bracket,
-                                 const std::vector<Diagnostic>* line_diagnostics) {
+                                 const std::vector<Diagnostic>* line_diagnostics,
+                                 const EditorSymbolPress* symbol_press) {
+  if (symbol_press != nullptr && symbol_press->active) {
+    return true;
+  }
   if (line_has_diagnostics(line_diagnostics)) {
     return true;
   }
@@ -85,6 +89,9 @@ const EditorDecoration* decoration_at(const std::vector<EditorDecoration>& decor
       case EditorDecoration::Kind::SecondaryCaret:
         priority = 6;
         break;
+      case EditorDecoration::Kind::PressFlash:
+        priority = 8;
+        break;
       case EditorDecoration::Kind::PrimaryCaret:
         priority = 7;
         break;
@@ -122,6 +129,8 @@ Element apply_decoration(Element element, const EditorDecoration* deco) {
         return element;
       }
       return element | inverted | bold;
+    case EditorDecoration::Kind::PressFlash:
+      return element | bold | inverted | bgcolor(theme::TabPressed());
   }
   return element;
 }
@@ -183,9 +192,10 @@ Element render_line_content(const std::string& line, int line_index,
 
 Element render_simple_line(const std::string& line, int line_index, const EditorBuffer& buffer,
                            bool editor_focused, const SemanticTokenDocument* semantic_tokens,
-                           bool syntax_highlight, const Decorator& line_bg) {
+                           bool syntax_highlight, const Decorator& line_bg, bool show_caret) {
   (void)line_bg;
-  if (!editor_focused || line_index != buffer.primary_line()) {
+  if (!editor_focused || line_index != buffer.primary_line() || !show_caret ||
+      buffer.primary().has_selection()) {
     return render_line_content(line, line_index, semantic_tokens, syntax_highlight);
   }
   const int col = buffer.primary_col();
@@ -212,8 +222,12 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
                          bool editor_focused, const std::vector<TextMatch>* find_matches,
                          const SemanticTokenDocument* semantic_tokens, bool syntax_highlight,
                          const BracketPairHighlight* bracket,
-                         const std::vector<Diagnostic>* line_diagnostics) {
+                         const std::vector<Diagnostic>* line_diagnostics,
+                         const EditorSymbolPress* symbol_press, bool show_caret) {
   std::vector<EditorDecoration> decorations;
+  if (symbol_press != nullptr && symbol_press->active) {
+    collect_press_decorations(line_index, *symbol_press, &decorations);
+  }
   if (line_diagnostics != nullptr) {
     collect_diagnostic_decorations(line_index, *line_diagnostics, &decorations);
   }
@@ -223,7 +237,7 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
   if (bracket != nullptr) {
     collect_bracket_decorations(line_index, *bracket, &decorations);
   }
-  collect_line_decorations(line_index, buffer, editor_focused, &decorations);
+  collect_line_decorations(line_index, buffer, editor_focused, show_caret, &decorations);
 
   std::set<int> breakpoints;
   breakpoints.insert(0);
@@ -242,16 +256,23 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
     const std::string segment = line.substr(static_cast<std::size_t>(prev),
                                             static_cast<std::size_t>(bp - prev));
     const EditorDecoration* chosen = decoration_at(decorations, prev);
-    const int segment_cursor =
-        (editor_focused && line_index == buffer.primary_line() && buffer.primary_col() >= prev &&
-         buffer.primary_col() < bp)
-            ? cursor_blink::effective_col(buffer.primary_col())
-            : -1;
+    const bool caret_on_line =
+        show_caret && editor_focused && line_index == buffer.primary_line() &&
+        !buffer.primary().has_selection();
+    int segment_cursor = -1;
+    if (caret_on_line && buffer.primary_col() >= prev && buffer.primary_col() < bp) {
+      if (syntax_highlight) {
+        segment_cursor = cursor_blink::effective_col(buffer.primary_col());
+      } else {
+        segment_cursor = cursor_blink::effective_col(buffer.primary_col() - prev);
+      }
+    }
+    const int col_offset = syntax_highlight ? prev : 0;
     const Decorator cursor_cell = cursor_blink::cell_decorator();
     parts.push_back(apply_decoration(
         segment.empty() ? text(" ")
                         : render_line_content(segment, line_index, semantic_tokens, syntax_highlight,
-                                              segment_cursor, cursor_cell, prev),
+                                              segment_cursor, cursor_cell, col_offset),
         chosen));
     prev = bp;
   }
@@ -274,7 +295,7 @@ void collect_find_decorations(int line_index, const std::vector<TextMatch>& matc
 }
 
 void collect_line_decorations(int line_index, const EditorBuffer& buffer, bool editor_focused,
-                              std::vector<EditorDecoration>* out) {
+                              bool show_caret, std::vector<EditorDecoration>* out) {
   if (!editor_focused) {
     return;
   }
@@ -296,7 +317,7 @@ void collect_line_decorations(int line_index, const EditorBuffer& buffer, bool e
         }
       }
     }
-    if (cursor.head.line == line_index) {
+    if (show_caret && !cursor.has_selection() && cursor.head.line == line_index) {
       const auto kind = (i == 0) ? EditorDecoration::Kind::PrimaryCaret
                                  : EditorDecoration::Kind::SecondaryCaret;
       const int col = cursor.head.col;
@@ -336,12 +357,21 @@ void collect_diagnostic_decorations(int line_index, const std::vector<Diagnostic
   }
 }
 
+void collect_press_decorations(int line_index, const EditorSymbolPress& press,
+                               std::vector<EditorDecoration>* out) {
+  if (out == nullptr || !press.active) {
+    return;
+  }
+  out->push_back({press.start_col, press.end_col, EditorDecoration::Kind::PressFlash});
+}
+
 Element RenderEditorLine(const std::string& line, int line_index, const EditorBuffer& buffer,
                          bool editor_focused, const std::vector<TextMatch>* find_matches,
                          const SemanticTokenDocument* semantic_tokens,
                          const BracketPairHighlight* bracket,
                          const std::vector<Diagnostic>* line_diagnostics,
-                         const std::string* diagnostic_suffix) {
+                         const std::string* diagnostic_suffix,
+                         const EditorSymbolPress* symbol_press, bool show_caret) {
   const Decorator line_bg =
       line_index == buffer.primary_line() ? bgcolor(theme::EditorLineHi())
                                           : bgcolor(theme::CodeBg());
@@ -349,14 +379,15 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
   const bool syntax_highlight =
       !buffer.path.empty() && is_indexed_source_path(buffer.path);
 
-  const bool rich =
-      line_needs_rich_decorations(line_index, buffer, find_matches, bracket, line_diagnostics);
+  const bool rich = line_needs_rich_decorations(line_index, buffer, find_matches, bracket,
+                                                line_diagnostics, symbol_press);
 
   Element content =
       rich ? render_rich_line(line, line_index, buffer, editor_focused, find_matches,
-                              semantic_tokens, syntax_highlight, bracket, line_diagnostics)
+                              semantic_tokens, syntax_highlight, bracket, line_diagnostics,
+                              symbol_press, show_caret)
            : render_simple_line(line, line_index, buffer, editor_focused, semantic_tokens,
-                                syntax_highlight, line_bg);
+                                syntax_highlight, line_bg, show_caret);
 
   return wrap_with_suffix(std::move(content), line_bg, diagnostic_suffix, line_diagnostics);
 }

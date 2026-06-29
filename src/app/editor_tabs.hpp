@@ -3,7 +3,6 @@
 #include <string>
 #include <vector>
 
-#include "editor/cursor_history.hpp"
 #include "editor/editor_state.hpp"
 
 namespace tgdb {
@@ -11,7 +10,6 @@ namespace tgdb {
 struct EditorTab {
   std::string path;
   EditorBuffer buffer;
-  CursorHistory cursor_history;
 };
 
 struct TabVisibleRange {

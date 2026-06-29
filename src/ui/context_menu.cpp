@@ -11,6 +11,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/clickable.hpp"
+#include "ui/editor_panel.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
@@ -82,8 +83,8 @@ NavigationParams navigation_params_at(WorkspaceModel* workspace, int line, int c
   return params;
 }
 
-bool navigate_to_location(WorkspaceModel* workspace, const SourceLocation& loc,
-                          int visible_lines) {
+bool navigate_to_location(WorkspaceModel* workspace, MainLayoutState* layout_state,
+                          const SourceLocation& loc, int visible_lines) {
   if (workspace == nullptr || !loc.valid || loc.path.empty()) {
     return false;
   }
@@ -96,8 +97,9 @@ bool navigate_to_location(WorkspaceModel* workspace, const SourceLocation& loc,
   return true;
 }
 
-bool go_to_symbol(WorkspaceModel* workspace, const std::shared_ptr<ISymbolProvider>& symbols,
-                  int line, int col, bool declaration, int visible_lines) {
+bool go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
+                  const std::shared_ptr<ISymbolProvider>& symbols, int line, int col,
+                  bool declaration, int visible_lines) {
   if (workspace == nullptr || symbols == nullptr || !symbols->supports_navigation()) {
     return false;
   }
@@ -114,7 +116,9 @@ bool go_to_symbol(WorkspaceModel* workspace, const std::shared_ptr<ISymbolProvid
     workspace->status_message = declaration ? "Sin declaración LSP" : "Sin definición LSP";
     return false;
   }
-  return navigate_to_location(workspace, loc, visible_lines);
+  flash_symbol_at_buffer_pos(workspace, layout_state, line, col, visible_lines);
+  schedule_editor_navigation(layout_state, loc);
+  return true;
 }
 
 void rename_identifier_in_buffer(EditorBuffer* buffer, const std::string& old_name,
@@ -355,7 +359,7 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
       workspace->ensure_buffer();
       workspace->buffer.reset_to_single_cursor(state->editor_line, state->editor_col);
     }
-    go_to_symbol(workspace, symbols, state->editor_line, state->editor_col, false,
+    go_to_symbol(workspace, layout_state, symbols, state->editor_line, state->editor_col, false,
                  editor_visible_lines);
     if (focus != nullptr) {
       focus->region = FocusRegion::Editor;
@@ -368,7 +372,7 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
       workspace->ensure_buffer();
       workspace->buffer.reset_to_single_cursor(state->editor_line, state->editor_col);
     }
-    go_to_symbol(workspace, symbols, state->editor_line, state->editor_col, true,
+    go_to_symbol(workspace, layout_state, symbols, state->editor_line, state->editor_col, true,
                  editor_visible_lines);
     if (focus != nullptr) {
       focus->region = FocusRegion::Editor;

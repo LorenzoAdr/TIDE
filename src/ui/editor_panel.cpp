@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <unordered_map>
 
 #include "editor/bracket_match.hpp"
@@ -41,6 +42,7 @@
 #include "ui/panel.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/text_input_style.hpp"
+#include "util/path_normalize.hpp"
 
 namespace tgdb {
 
@@ -125,7 +127,25 @@ struct EditorPanelState {
   std::string diagnostics_by_line_path;
   bool document_open_pending = false;
   std::string pending_document_open_path;
+  struct SourceSymbolFlash {
+    int line = -1;
+    int start_col = 0;
+    int end_col = 0;
+    std::chrono::steady_clock::time_point until{};
+
+    bool active() const {
+      return line >= 0 && end_col > start_col &&
+             std::chrono::steady_clock::now() < until;
+    }
+
+    void clear() { line = -1; }
+  };
+  SourceSymbolFlash source_flash;
 };
+
+void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState* layout_state,
+                                     EditorPanelState* panel_state, int line, int col,
+                                     int visible_lines);
 
 constexpr int kDoubleClickMs = 400;
 constexpr int kShiftClickWindowMs = 3000;
@@ -1086,8 +1106,8 @@ NavigationParams navigation_params_at(WorkspaceModel* workspace, int line, int c
   return params;
 }
 
-bool navigate_to_location(WorkspaceModel* workspace, const SourceLocation& loc,
-                          int visible_lines) {
+bool navigate_to_location(WorkspaceModel* workspace, MainLayoutState* layout_state,
+                          const SourceLocation& loc, int visible_lines) {
   if (workspace == nullptr || !loc.valid || loc.path.empty()) {
     return false;
   }
@@ -1100,7 +1120,13 @@ bool navigate_to_location(WorkspaceModel* workspace, const SourceLocation& loc,
   return true;
 }
 
-bool try_go_to_symbol(WorkspaceModel* workspace,
+void flash_symbol_at_cursor(WorkspaceModel* workspace, MainLayoutState* layout_state,
+                            EditorPanelState* panel_state, int line, int col, int visible_lines) {
+  flash_symbol_at_buffer_pos_impl(workspace, layout_state, panel_state, line, col, visible_lines);
+}
+
+bool try_go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
+                      EditorPanelState* panel_state,
                       const std::shared_ptr<ISymbolProvider>& symbols, int line, int col,
                       bool declaration, int visible_lines) {
   if (workspace == nullptr || symbols == nullptr || !symbols->supports_navigation()) {
@@ -1119,7 +1145,9 @@ bool try_go_to_symbol(WorkspaceModel* workspace,
     workspace->status_message = declaration ? "Sin declaración LSP" : "Sin definición LSP";
     return false;
   }
-  return navigate_to_location(workspace, loc, visible_lines);
+  flash_symbol_at_cursor(workspace, layout_state, panel_state, line, col, visible_lines);
+  schedule_editor_navigation(layout_state, loc);
+  return true;
 }
 
 void prepare_completion_at_cursor(CompletionState* completion, EditorBuffer* buffer) {
@@ -1176,12 +1204,80 @@ int line_number_width(int total_lines) {
   return digits + 1;
 }
 
+int editor_render_visible_lines(const EditorPanelState& panel, MainLayoutState* layout_state) {
+  if (!panel.code_box.IsEmpty()) {
+    return visible_line_count(panel.code_box);
+  }
+  if (layout_state != nullptr && layout_state->editor_visible_line_count) {
+    return std::max(layout_state->editor_visible_line_count(), 1);
+  }
+  return 24;
+}
+
 std::string format_line_number(int line_no, int width) {
   std::string text = std::to_string(line_no);
   if (static_cast<int>(text.size()) < width) {
     text = std::string(static_cast<std::size_t>(width - text.size()), ' ') + text;
   }
   return text;
+}
+
+Element render_source_flash_line(const std::string& line, int start_col, int end_col,
+                                 const Decorator& row_bg) {
+  const int len = static_cast<int>(line.size());
+  const int start = std::max(0, std::min(start_col, len));
+  const int end = std::max(start, std::min(end_col, len));
+  const std::string prefix = line.substr(0, static_cast<std::size_t>(start));
+  const std::string symbol =
+      line.substr(static_cast<std::size_t>(start), static_cast<std::size_t>(end - start));
+  const std::string suffix = line.substr(static_cast<std::size_t>(end));
+  Elements parts;
+  parts.push_back(text(prefix.empty() ? " " : prefix));
+  if (!symbol.empty()) {
+    parts.push_back(text(symbol) | bold | inverted | bgcolor(theme::TabPressed()));
+  }
+  if (!suffix.empty()) {
+    parts.push_back(text(suffix));
+  }
+  return hbox(std::move(parts)) | row_bg;
+}
+
+std::optional<Element> try_make_editor_symbol_flash_overlay(MainLayoutState* layout_state,
+                                                            const EditorBuffer& buffer,
+                                                            const EditorPanelState& panel) {
+  if (layout_state == nullptr) {
+    return std::nullopt;
+  }
+  if (!editor_symbol_press_visible(layout_state)) {
+    return std::nullopt;
+  }
+  const auto& press = layout_state->editor_symbol_press;
+  if (press.line < 0 || press.line >= static_cast<int>(buffer.lines.size())) {
+    return std::nullopt;
+  }
+  const int row =
+      press.render_row >= 0 ? press.render_row : press.line - buffer.scroll;
+  if (row < 0) {
+    return std::nullopt;
+  }
+  const std::string& line = buffer.lines[static_cast<std::size_t>(press.line)];
+  if (press.start_col < 0 || press.end_col > static_cast<int>(line.size()) ||
+      press.end_col <= press.start_col) {
+    return std::nullopt;
+  }
+  const std::string segment = line.substr(static_cast<std::size_t>(press.start_col),
+                                          static_cast<std::size_t>(press.end_col - press.start_col));
+  const int total = static_cast<int>(buffer.lines.size());
+  const int gutter_w = line_number_width(total);
+  const int x_pad = gutter_w + 2 + press.start_col;
+  const int y_pad = row;
+
+  Element flash = text(segment) | bold | inverted | bgcolor(theme::TabPressed());
+  return dbox({text(""),
+               vbox({filler() | size(HEIGHT, EQUAL, y_pad),
+                     hbox({filler() | size(WIDTH, EQUAL, x_pad), std::move(flash), filler()}),
+                     filler()}) |
+                     flex});
 }
 
 bool find_input_active(MainLayoutState* layout_state, const EditorFindState& find) {
@@ -1200,16 +1296,74 @@ bool completion_input_active(MainLayoutState* layout_state, bool completion_open
 }
 
 void activate_find(EditorFindState* find, EditorBuffer* buffer, MainLayoutState* layout_state,
-                   Component find_input) {
+                   FocusManagerState* focus) {
   if (!find->open) {
     open_find_bar(find, buffer);
   } else {
     find->refresh_matches(*buffer);
+    find->cursor_pos = static_cast<int>(find->query.size());
+  }
+  if (focus != nullptr) {
+    focus->region = FocusRegion::Editor;
   }
   if (layout_state != nullptr) {
     layout_state->text_input_focus = TextInputFocus::EditorFind;
+    layout_state->focus_sync_needed = true;
   }
-  find_input->TakeFocus();
+}
+
+bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, EditorBuffer* buffer,
+                      Event event, int visible_lines) {
+  if (find == nullptr || !find->open) {
+    return false;
+  }
+
+  if (event == Event::Escape) {
+    close_find_bar(find);
+    if (layout_state != nullptr) {
+      layout_state->text_input_focus = TextInputFocus::None;
+    }
+    return true;
+  }
+  if (event == Event::Return) {
+    find->refresh_matches(*buffer);
+    find->jump_to_next_match(buffer, visible_lines);
+    return true;
+  }
+  if (event == Event::Backspace) {
+    if (find->cursor_pos > 0 && find->cursor_pos <= static_cast<int>(find->query.size())) {
+      find->query.erase(static_cast<std::size_t>(find->cursor_pos - 1), 1);
+      --find->cursor_pos;
+      find->refresh_matches(*buffer);
+    }
+    return true;
+  }
+  if (event == Event::Delete) {
+    if (find->cursor_pos >= 0 && find->cursor_pos < static_cast<int>(find->query.size())) {
+      find->query.erase(static_cast<std::size_t>(find->cursor_pos), 1);
+      find->refresh_matches(*buffer);
+    }
+    return true;
+  }
+  if (event == Event::ArrowLeft) {
+    find->cursor_pos = std::max(0, find->cursor_pos - 1);
+    return true;
+  }
+  if (event == Event::ArrowRight) {
+    find->cursor_pos =
+        std::min(static_cast<int>(find->query.size()), find->cursor_pos + 1);
+    return true;
+  }
+  if (event.is_character()) {
+    const std::string ch = event.character();
+    if (!ch.empty() && ch[0] >= 32 && ch[0] != 127) {
+      find->query.insert(static_cast<std::size_t>(find->cursor_pos), ch);
+      find->cursor_pos += static_cast<int>(ch.size());
+      find->refresh_matches(*buffer);
+    }
+    return true;
+  }
+  return true;
 }
 
 bool handle_editor_escape(EditorBuffer* buffer, EditorFindState* find,
@@ -1437,14 +1591,16 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     if (m.control && symbols != nullptr && symbols->supports_navigation() &&
         !buffer->path.empty()) {
       disarm_extend_click(panel);
-      if (try_go_to_symbol(workspace, symbols, pos.line, pos.col, false, visible_lines)) {
+      if (try_go_to_symbol(workspace, layout_state, panel, symbols, pos.line, pos.col, false,
+                         visible_lines)) {
         return true;
       }
     }
 
     if (shift_click && m.control && symbols != nullptr &&
         symbols->supports_navigation() && !buffer->path.empty()) {
-      if (try_go_to_symbol(workspace, symbols, pos.line, pos.col, true, visible_lines)) {
+      if (try_go_to_symbol(workspace, layout_state, panel, symbols, pos.line, pos.col, true,
+                         visible_lines)) {
         return true;
       }
     }
@@ -1728,13 +1884,13 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (event_is_go_to_definition(event)) {
-    try_go_to_symbol(workspace, symbols, buffer->primary_line(), buffer->primary_col(), false,
-                     visible_lines);
+    try_go_to_symbol(workspace, layout_state, panel, symbols, buffer->primary_line(), buffer->primary_col(),
+                     false, visible_lines);
     return true;
   }
   if (event_is_go_to_declaration(event)) {
-    try_go_to_symbol(workspace, symbols, buffer->primary_line(), buffer->primary_col(), true,
-                     visible_lines);
+    try_go_to_symbol(workspace, layout_state, panel, symbols, buffer->primary_line(), buffer->primary_col(),
+                     true, visible_lines);
     return true;
   }
   if (event_is_ctrl_g(event)) {
@@ -2022,7 +2178,45 @@ Element make_goto_line_overlay(const GotoLineState& goto_state) {
   return CenteredModal(std::move(dialog));
 }
 
+void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState* layout_state,
+                                     EditorPanelState* panel_state, int line, int col,
+                                     int visible_lines) {
+  if (workspace == nullptr || layout_state == nullptr) {
+    return;
+  }
+  workspace->ensure_buffer();
+  const std::string& path =
+      workspace->buffer.path.empty() ? workspace->active_file : workspace->buffer.path;
+  if (path.empty()) {
+    return;
+  }
+  EditorBuffer& buffer = workspace->buffer;
+  MultiCursor cursor;
+  cursor.head = {line, col};
+  cursor.anchor = {line, col};
+  int start_col = 0;
+  int end_col = 0;
+  if (ident_range_at_cursor(buffer, cursor, &start_col, &end_col)) {
+    const int render_row = line - buffer.scroll;
+    request_editor_symbol_press(layout_state, normalize_path(path), line, start_col, end_col,
+                                render_row);
+    if (panel_state != nullptr) {
+      panel_state->source_flash.line = line;
+      panel_state->source_flash.start_col = start_col;
+      panel_state->source_flash.end_col = end_col;
+      panel_state->source_flash.until =
+          std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    }
+    buffer.view_token++;
+  }
+}
+
 }  // namespace
+
+void flash_symbol_at_buffer_pos(WorkspaceModel* workspace, MainLayoutState* layout_state, int line,
+                                int col, int visible_lines) {
+  flash_symbol_at_buffer_pos_impl(workspace, layout_state, nullptr, line, col, visible_lines);
+}
 
 Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                           MainLayoutState* layout_state,
@@ -2036,21 +2230,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
   auto completion_state = std::make_shared<CompletionState>();
   auto diagnostic_state = std::make_shared<DiagnosticModalState>();
 
-  InputOption find_input_opt = MakeBlinkInputOption(&find_state->query, "Buscar...");
-  auto find_input = Input(find_input_opt);
-
-  auto find_row = Container::Horizontal({
-      find_input | flex,
-      Renderer([find_state] {
-        return text(" (" + std::to_string(find_state->matches.size()) + ") Enter Esc ") |
-               color(theme::Muted());
-      }),
-  });
-  auto find_row_active = Maybe(find_row, [find_state] { return find_state->open; });
-
-  auto modal_overlay = Renderer([find_row_active, find_state, goto_state, completion_state,
+  auto modal_overlay = Renderer([find_state, goto_state, completion_state,
                                  diagnostic_state, workspace, symbols, symbol_indexer,
-                                 panel_state, tab_bar_state] {
+                                 panel_state, tab_bar_state, layout_state] {
     if (tab_bar_state->overflow_open) {
       return make_tabs_overflow_modal(workspace, tab_bar_state.get());
     }
@@ -2069,17 +2251,33 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (goto_state->open) {
       return make_goto_line_overlay(*goto_state);
     }
+    if (layout_state != nullptr && !completion_state->open && !diagnostic_state->open) {
+      workspace->ensure_buffer();
+      if (auto flash_overlay = try_make_editor_symbol_flash_overlay(
+              layout_state, workspace->buffer, *panel_state)) {
+        return *flash_overlay;
+      }
+      if (editor_symbol_press_visible(layout_state)) {
+        return text("");
+      }
+    }
     if (!find_state->open && !completion_state->open && !diagnostic_state->open) {
       return make_hover_tooltip(panel_state->hover, panel_state->code_box);
     }
     if (!find_state->open) {
       return text("");
     }
+    const bool find_focused = layout_state != nullptr &&
+                              layout_state->text_input_focus == TextInputFocus::EditorFind;
+    Element find_row =
+        hbox({text(" Buscar: ") | color(theme::Muted()),
+              RenderBlinkInputLine(find_state->query, find_state->cursor_pos, find_focused) | flex,
+              text(" (" + std::to_string(find_state->matches.size()) + ") Enter Esc ") |
+                  color(theme::Muted())}) |
+        border | bgcolor(theme::PanelBg()) | size(WIDTH, GREATER_THAN, 34) | size(HEIGHT, EQUAL, 3);
     return dbox({text(""),
                  vbox({
-                     hbox({filler(),
-                           find_row_active->Render() | border | bgcolor(theme::PanelBg()) |
-                               size(WIDTH, GREATER_THAN, 34) | size(HEIGHT, EQUAL, 3)}),
+                     hbox({filler(), std::move(find_row)}),
                      filler(),
                  }) |
                      flex});
@@ -2156,6 +2354,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             ? panel_state->code_box.x_max - panel_state->code_box.x_min + 1
             : 80;
 
+    const bool show_caret =
+        !panel_state->mouse_selecting && !buffer.primary().has_selection();
+
     Elements gutter_rows;
     Elements code_rows;
     for (int i = start; i < end; ++i) {
@@ -2192,9 +2393,25 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         }
       }
 
+      const auto& sf = panel_state->source_flash;
+      if (sf.active() && sf.line == i) {
+        code_rows.push_back(
+            render_source_flash_line(display_line, sf.start_col, sf.end_col, row_bg));
+        continue;
+      }
+
+      EditorSymbolPress symbol_press;
+      if (layout_state != nullptr && layout_state->editor_symbol_press.line == i) {
+        const auto& press = layout_state->editor_symbol_press;
+        if (editor_symbol_press_visible(layout_state)) {
+          symbol_press = {press.start_col, press.end_col, true};
+        }
+      }
+
       code_rows.push_back(RenderEditorLine(display_line, i, buffer,
                                            editor_focused, find_matches, semantic_tokens,
-                                           &bracket, line_diag_ptr, suffix_ptr));
+                                           &bracket, line_diag_ptr, suffix_ptr, &symbol_press,
+                                           show_caret));
     }
     if (code_rows.empty()) {
       gutter_rows.push_back(text(format_line_number(1, gutter_w)) | color(theme::Muted()) |
@@ -2275,7 +2492,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
   auto dispatch_editor_keys = [workspace, focus, panel_state, tab_bar_state, find_state,
                                goto_state, completion_state, diagnostic_state, symbols,
-                               file_indexer, symbol_indexer, layout_state, find_input](Event event) {
+                               file_indexer, symbol_indexer, layout_state](Event event) {
     if (tab_bar_state->overflow_open &&
         handle_tabs_overflow_keys(workspace, focus, tab_bar_state.get(), event)) {
       return true;
@@ -2291,21 +2508,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     EditorBuffer* buffer = &workspace->buffer;
     const int visible = visible_line_count(panel_state->code_box);
 
-    if (find_state->open && event == Event::Escape) {
-      close_find_bar(find_state.get());
-      if (layout_state != nullptr) {
-        layout_state->text_input_focus = TextInputFocus::None;
-      }
-      return true;
-    }
-    if (find_input_active(layout_state, *find_state) && event == Event::Return) {
-      find_state->refresh_matches(*buffer);
-      workspace->record_cursor_jump();
-      find_state->jump_to_next_match(buffer, visible);
+    if (find_input_active(layout_state, *find_state) &&
+        handle_find_keys(find_state.get(), layout_state, buffer, event, visible)) {
       return true;
     }
     if (event_is_ctrl_f(event)) {
-      activate_find(find_state.get(), buffer, layout_state, find_input);
+      activate_find(find_state.get(), buffer, layout_state, focus);
       return true;
     }
     return handle_editor_keys(workspace, focus, find_state.get(), goto_state.get(),
@@ -2367,7 +2575,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     layout_state->editor_visible_line_count = [panel_state]() {
       return visible_line_count(panel_state->code_box);
     };
-    layout_state->editor_tick_callback = [workspace, panel_state, symbols]() {
+    layout_state->editor_tick_callback = [workspace, panel_state, symbols, layout_state]() {
+      const int visible = visible_line_count(panel_state->code_box);
+      tick_pending_editor_navigation(layout_state, [&](const SourceLocation& loc) {
+        navigate_to_location(workspace, layout_state, loc, visible);
+        panel_state->source_flash.clear();
+      });
       editor_hover_tick(workspace, panel_state.get(), symbols);
       if (symbols && workspace != nullptr) {
         workspace->ensure_buffer();

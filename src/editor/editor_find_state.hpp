@@ -11,6 +11,7 @@ namespace tgdb {
 struct EditorFindState {
   bool open = false;
   std::string query;
+  int cursor_pos = 0;
   std::vector<TextMatch> matches;
 
   void refresh_matches(const EditorBuffer& buffer);
