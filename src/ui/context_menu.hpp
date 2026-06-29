@@ -50,7 +50,7 @@ struct ContextMenuState {
 
 bool context_menu_active(const ContextMenuState* state);
 
-void context_menu_close(ContextMenuState* state);
+void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state = nullptr);
 
 void context_menu_open_file(ContextMenuState* state, int x, int y,
                             const std::string& absolute_path, const std::string& relative_path);
@@ -68,7 +68,8 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
                               WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
                               int editor_visible_lines, const ftxui::Event& event);
 
-bool handle_context_menu_mouse(ContextMenuState* state, const ftxui::Mouse& mouse, int* clicked_row);
+bool handle_context_menu_mouse(ContextMenuState* state, MainLayoutState* layout_state,
+                               const ftxui::Mouse& mouse, int* clicked_row);
 
 ftxui::Component MakeContextMenuOverlay(
     ftxui::Component main, ContextMenuState* state, WorkspaceModel* workspace,

@@ -23,6 +23,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/clickable.hpp"
+#include "ui/text_input_style.hpp"
 
 namespace tgdb {
 
@@ -440,10 +441,8 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
                            const std::function<void()>& on_stop_debug,
                            FocusManagerState* focus) {
   auto state = std::make_shared<WatchesPanelState>();
-  InputOption input_opt = InputOption::Default();
-  input_opt.multiline = false;
-  auto expr_input = Input(&state->expr_input, "expresión", input_opt);
-  auto inject_input = Input(&state->inject_input, "nuevo valor", input_opt);
+  auto expr_input = Input(MakeBlinkInputOption(&state->expr_input, "expresión"));
+  auto inject_input = Input(MakeBlinkInputOption(&state->inject_input, "nuevo valor"));
   auto expr_maybe = Maybe(expr_input, [layout_state, state] {
     return watch_input_active(layout_state, state->selected_tab);
   });

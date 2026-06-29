@@ -10,8 +10,10 @@
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "symbols/symbol_provider.hpp"
+#include "ui/clickable.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
+#include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
 #include "util/path_normalize.hpp"
 
@@ -433,7 +435,7 @@ bool context_menu_active(const ContextMenuState* state) {
   return state != nullptr && (state->open || state->rename_open || state->delete_confirm_open);
 }
 
-void context_menu_close(ContextMenuState* state) {
+void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) {
   if (state == nullptr) {
     return;
   }
@@ -444,6 +446,10 @@ void context_menu_close(ContextMenuState* state) {
   state->rename_input.clear();
   state->selected = 0;
   state->row_boxes.clear();
+  if (layout_state != nullptr) {
+    layout_state->clickable.clear_hover_if(press_id::is_context_menu_hover);
+    layout_state->request_ui_tick = true;
+  }
 }
 
 void context_menu_open_file(ContextMenuState* state, int x, int y,
@@ -534,7 +540,8 @@ Element render_rename_modal(ContextMenuState* state) {
   return CenteredModal(std::move(dialog));
 }
 
-Element render_context_menu_overlay(ContextMenuState* state, Element base) {
+Element render_context_menu_overlay(ContextMenuState* state, MainLayoutState* layout_state,
+                                    Element base) {
   if (state == nullptr) {
     return text("");
   }
@@ -554,11 +561,14 @@ Element render_context_menu_overlay(ContextMenuState* state, Element base) {
   Elements rows;
   state->row_boxes.resize(state->labels.size());
   for (int i = 0; i < static_cast<int>(state->labels.size()); ++i) {
+    const std::string row_id = press_id::context_menu_row(i);
+    const bool hovered =
+        layout_state != nullptr && layout_state->clickable.is_hovered(row_id);
+    const bool pressed =
+        layout_state != nullptr && layout_state->clickable.is_pressed(row_id);
     Element row = text(" " + state->labels[static_cast<std::size_t>(i)] + " ") |
                   color(theme::Header()) | bgcolor(theme::PanelBg());
-    if (i == state->selected) {
-      row = row | inverted | bold;
-    }
+    row = StyleListRow(std::move(row), i == state->selected, hovered, pressed);
     rows.push_back(row | reflect(state->row_boxes[static_cast<std::size_t>(i)]));
   }
 
@@ -574,7 +584,32 @@ Element render_context_menu_overlay(ContextMenuState* state, Element base) {
                    flex});
 }
 
-bool handle_context_menu_mouse(ContextMenuState* state, const Mouse& m, int* clicked_row) {
+bool handle_context_menu_hover(ContextMenuState* state, MainLayoutState* layout_state,
+                               const Mouse& m) {
+  if (state == nullptr || layout_state == nullptr || !state->open || state->rename_open ||
+      state->delete_confirm_open || m.motion != Mouse::Moved) {
+    return false;
+  }
+  const std::string_view before = layout_state->clickable.hovered_id();
+  if (!state->menu_box.Contain(m.x, m.y)) {
+    layout_state->clickable.clear_hover_if(press_id::is_context_menu_hover);
+  } else {
+    const int row = row_index_at(*state, m.x, m.y);
+    if (row >= 0) {
+      layout_state->clickable.set_hover(press_id::context_menu_row(row));
+    } else {
+      layout_state->clickable.clear_hover_if(press_id::is_context_menu_hover);
+    }
+  }
+  if (layout_state->clickable.hovered_id() != before) {
+    layout_state->request_ui_tick = true;
+    return true;
+  }
+  return false;
+}
+
+bool handle_context_menu_mouse(ContextMenuState* state, MainLayoutState* layout_state,
+                               const Mouse& m, int* clicked_row) {
   if (clicked_row != nullptr) {
     *clicked_row = -1;
   }
@@ -587,7 +622,7 @@ bool handle_context_menu_mouse(ContextMenuState* state, const Mouse& m, int* cli
   }
 
   if (!state->menu_box.Contain(m.x, m.y)) {
-    context_menu_close(state);
+    context_menu_close(state, layout_state);
     return false;
   }
 
@@ -595,6 +630,7 @@ bool handle_context_menu_mouse(ContextMenuState* state, const Mouse& m, int* cli
   if (row < 0) {
     return true;
   }
+  trigger_press(layout_state, press_id::context_menu_row(row));
   state->selected = row;
   if (clicked_row != nullptr) {
     *clicked_row = row;
@@ -614,13 +650,13 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
 
   if (state->delete_confirm_open) {
     if (event == Event::Escape) {
-      context_menu_close(state);
+      context_menu_close(state, layout_state);
       return true;
     }
     if (event == Event::Return) {
       delete_path(workspace, model, indexer, symbol_indexer, state->absolute_path,
                   state->relative_path, false);
-      context_menu_close(state);
+      context_menu_close(state, layout_state);
       if (layout_state != nullptr) {
         layout_state->request_ui_tick = true;
       }
@@ -631,7 +667,7 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
 
   if (state->rename_open) {
     if (event == Event::Escape) {
-      context_menu_close(state);
+      context_menu_close(state, layout_state);
       return true;
     }
     if (event == Event::Return) {
@@ -640,7 +676,7 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
         return true;
       }
       if (commit_rename(state, workspace, model, indexer, symbol_indexer)) {
-        context_menu_close(state);
+        context_menu_close(state, layout_state);
         if (layout_state != nullptr) {
           layout_state->request_ui_tick = true;
         }
@@ -666,7 +702,7 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
   }
 
   if (event == Event::Escape) {
-    context_menu_close(state);
+    context_menu_close(state, layout_state);
     return true;
   }
   if (event == Event::ArrowDown || event == Event::Character('j')) {
@@ -679,11 +715,12 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
   }
   if (event == Event::Return) {
     if (state->selected >= 0 && state->selected < static_cast<int>(state->action_ids.size())) {
+      trigger_press(layout_state, press_id::context_menu_row(state->selected));
       execute_action(state, state->action_ids[static_cast<std::size_t>(state->selected)], workspace,
                      model, focus, layout_state, symbols, indexer, symbol_indexer,
                      editor_visible_lines);
       if (!state->rename_open && !state->delete_confirm_open) {
-        context_menu_close(state);
+        context_menu_close(state, layout_state);
       }
       if (layout_state != nullptr) {
         layout_state->request_ui_tick = true;
@@ -709,7 +746,7 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
     execute_action(state, state->action_ids[static_cast<std::size_t>(row)], workspace, model,
                    focus, layout_state, symbols, indexer, symbol_indexer, visible);
     if (!state->rename_open && !state->delete_confirm_open) {
-      context_menu_close(state);
+      context_menu_close(state, layout_state);
     }
     if (layout_state != nullptr) {
       layout_state->request_ui_tick = true;
@@ -721,8 +758,12 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
       return false;
     }
     if (event.is_mouse()) {
+      if (event.mouse().motion == Mouse::Moved) {
+        handle_context_menu_hover(state, layout_state, event.mouse());
+        return true;
+      }
       int clicked_row = -1;
-      if (handle_context_menu_mouse(state, event.mouse(), &clicked_row)) {
+      if (handle_context_menu_mouse(state, layout_state, event.mouse(), &clicked_row)) {
         if (clicked_row >= 0) {
           run_selected_action(clicked_row);
         }
@@ -735,12 +776,12 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
   };
 
   return Renderer(CatchEvent(main, handler),
-                  [main, state] {
+                  [main, state, layout_state] {
                     Element base = main->Render();
                     if (state == nullptr || !context_menu_active(state)) {
                       return base;
                     }
-                    Element overlay = render_context_menu_overlay(state, base);
+                    Element overlay = render_context_menu_overlay(state, layout_state, base);
                     if (state->rename_open || state->delete_confirm_open) {
                       return overlay;
                     }

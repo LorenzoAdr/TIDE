@@ -179,6 +179,16 @@ std::vector<TerminalStyledRow> ShellSession::display_styled_rows() {
   return display_styled_rows_;
 }
 
+int ShellSession::cursor_col() {
+  std::lock_guard<std::mutex> lock(terminal_mutex_);
+  return terminal_.cursor_col();
+}
+
+int ShellSession::cursor_row() {
+  std::lock_guard<std::mutex> lock(terminal_mutex_);
+  return terminal_.cursor_row();
+}
+
 void ShellSession::resize(int cols, int rows) {
   cols = std::max(1, cols);
   rows = std::max(1, rows);

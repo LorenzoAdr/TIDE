@@ -18,6 +18,7 @@
 #include "editor/text_search.hpp"
 #include "ftxui/component/component.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
+#include "indexer/index_rules.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "symbols/hover_info.hpp"
 #include "symbols/completion_snippet.hpp"
@@ -39,7 +40,7 @@
 #include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
 #include "ui/scroll_bar.hpp"
-#include "ui/theme.hpp"
+#include "ui/text_input_style.hpp"
 
 namespace tgdb {
 
@@ -273,7 +274,7 @@ void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
   count_workspace_diagnostics(docs, &panel->problem_errors, &panel->problem_warnings);
   panel->cached_file_diag = {};
   panel->cached_file_diag_revision = 0;
-  if (!path.empty()) {
+  if (!path.empty() && is_lsp_trackable_path(path)) {
     panel->cached_file_diag = symbols->diagnostics_for_file(path);
     panel->cached_file_diag_revision = revision;
   }
@@ -284,7 +285,7 @@ const DocumentDiagnostics& cached_file_diagnostics(EditorPanelState* panel,
                                                    const std::string& path) {
   static const DocumentDiagnostics kEmpty;
   if (panel == nullptr || symbols == nullptr || !symbols->supports_diagnostics() ||
-      path.empty()) {
+      path.empty() || !is_lsp_trackable_path(path)) {
     return kEmpty;
   }
   const uint64_t revision = symbols->diagnostics_revision();
@@ -421,6 +422,26 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
 
   const bool in_bar = panel->scrollbar_box.Contain(m.x, m.y);
 
+  if (m.motion == Mouse::Moved) {
+    if (layout_state != nullptr) {
+      const std::string_view before = layout_state->clickable.hovered_id();
+      if (in_bar || panel->scrollbar_dragging) {
+        layout_state->clickable.set_hover(press_id::kEditorScrollbar);
+      } else {
+        layout_state->clickable.clear_hover_if([&](std::string_view id) {
+          return id == press_id::kEditorScrollbar;
+        });
+      }
+      if (layout_state->clickable.hovered_id() != before) {
+        layout_state->request_ui_tick = true;
+      }
+    }
+    if (panel->scrollbar_dragging) {
+      return apply_scrollbar_drag(workspace, panel, m.y, visible_lines);
+    }
+    return in_bar;
+  }
+
   if (panel->scrollbar_dragging) {
     if (m.button == Mouse::Left && m.motion == Mouse::Released) {
       panel->scrollbar_dragging = false;
@@ -454,6 +475,7 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
 
   if (m.motion == Mouse::Pressed) {
     claim_editor_focus(focus, layout_state);
+    trigger_press(layout_state, press_id::kEditorScrollbar);
     const int local_y = m.y - panel->scrollbar_box.y_min;
     if (scrollbar_thumb_hit(panel->scrollbar_layout, panel->scrollbar_box, m.x, m.y)) {
       panel->scrollbar_dragging = true;
@@ -2014,19 +2036,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
   auto completion_state = std::make_shared<CompletionState>();
   auto diagnostic_state = std::make_shared<DiagnosticModalState>();
 
-  InputOption find_input_opt = InputOption::Default();
-  find_input_opt.multiline = false;
-  find_input_opt.transform = [](InputState state) {
-    state.element |= bgcolor(theme::CodeBg()) | color(theme::WatchInput());
-    if (state.is_placeholder) {
-      state.element |= dim;
-    }
-    if (state.focused) {
-      state.element |= inverted;
-    }
-    return state.element;
-  };
-  auto find_input = Input(&find_state->query, "Buscar...", find_input_opt);
+  InputOption find_input_opt = MakeBlinkInputOption(&find_state->query, "Buscar...");
+  auto find_input = Input(find_input_opt);
 
   auto find_row = Container::Horizontal({
       find_input | flex,
@@ -2092,7 +2103,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     const SemanticTokenDocument* semantic_tokens = nullptr;
     SemanticTokenDocument semantic_doc;
-    if (symbols && symbols->supports_semantic_highlight() && !buffer.path.empty()) {
+    if (symbols && symbols->supports_semantic_highlight() && !buffer.path.empty() &&
+        is_indexed_source_path(buffer.path)) {
       semantic_doc = symbols->semantic_tokens_for_file(buffer.path);
       if (semantic_doc.ready) {
         semantic_tokens = &semantic_doc;
@@ -2129,7 +2141,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         sticky_lines_for_scroll(file_symbols, buffer.lines, start, 3);
 
     DocumentDiagnostics file_diag;
-    if (symbols && symbols->supports_diagnostics() && !buffer.path.empty()) {
+    if (symbols && symbols->supports_diagnostics() && !buffer.path.empty() &&
+        is_lsp_trackable_path(buffer.path)) {
       file_diag = cached_file_diagnostics(panel_state.get(), symbols.get(), buffer.path);
       rebuild_diagnostics_by_line(panel_state.get(), file_diag,
                                   panel_state->cached_file_diag_revision);
@@ -2195,8 +2208,16 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                      bgcolor(theme::CodeBg());
     Element code = vbox(std::move(code_rows)) | flex | reflect(panel_state->code_box) |
                    bgcolor(theme::CodeBg());
-    Element scrollbar = vertical_scrollbar(total, buffer.scroll, visible, rendered_lines) |
-                        reflect(panel_state->scrollbar_box);
+    const bool scroll_hovered =
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kEditorScrollbar);
+    const bool scroll_active =
+        panel_state->scrollbar_dragging ||
+        (layout_state != nullptr &&
+         layout_state->clickable.is_pressed(press_id::kEditorScrollbar));
+    Element scrollbar =
+        vertical_scrollbar(total, buffer.scroll, visible, rendered_lines, scroll_hovered,
+                           scroll_active) |
+        reflect(panel_state->scrollbar_box);
     panel_state->scrollbar_layout =
         compute_scrollbar_layout(total, buffer.scroll, visible, rendered_lines);
     Element editor_body =
@@ -2311,7 +2332,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       if (!editor_mouse_targets_code(*panel_state, m.x, m.y)) {
         return false;
       }
-      claim_editor_focus(focus, layout_state);
       workspace->ensure_buffer();
       const int visible = visible_line_count(panel_state->code_box);
       update_editor_modifiers(panel_state.get(), event);

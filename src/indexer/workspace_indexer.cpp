@@ -24,10 +24,10 @@ void scan_dir(const fs::path& root, const fs::path& current,
         continue;
       }
       scan_dir(root, entry.path(), out);
-    } else if (entry.is_regular_file(ec) && is_indexed_source_path(entry.path().string())) {
+    } else if (entry.is_regular_file(ec)) {
       std::error_code rel_ec;
       const auto rel = fs::relative(entry.path(), root, rel_ec);
-      if (!rel_ec) {
+      if (!rel_ec && should_list_workspace_path(rel.generic_string())) {
         out->push_back(rel.generic_string());
       }
     }
@@ -100,7 +100,7 @@ void WorkspaceIndexer::worker_main(std::string workspace_root) {
 void WorkspaceIndexer::upsert_file(const std::string& workspace_root,
                                    const std::string& relative_file,
                                    const std::string& absolute_path) {
-  if (!should_index_relative_path(relative_file)) {
+  if (!should_list_workspace_path(relative_file)) {
     remove_file(workspace_root, relative_file);
     return;
   }

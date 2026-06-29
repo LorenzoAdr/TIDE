@@ -20,8 +20,55 @@ bool config_is_complete(const tgdb::AppConfig& config) {
   return true;
 }
 
+bool path_is_existing_directory(const std::string& path) {
+  std::error_code ec;
+  return std::filesystem::is_directory(std::filesystem::status(path, ec));
+}
+
+bool path_is_existing_regular_file(const std::string& path) {
+  std::error_code ec;
+  return std::filesystem::is_regular_file(std::filesystem::status(path, ec));
+}
+
+bool path_looks_like_source_or_text(const std::filesystem::path& path) {
+  static const char* kExtensions[] = {
+      ".cpp", ".cxx", ".cc",  ".c",   ".h",   ".hpp", ".hxx", ".hh",  ".inl",
+      ".md",  ".txt", ".json", ".yaml", ".yml", ".xml", ".cmake", ".toml",
+      ".rs",  ".py",  ".sh",   ".bash", ".s",   ".asm", ".vert", ".frag", ".glsl",
+  };
+  const std::string ext = path.extension().string();
+  for (const char* candidate : kExtensions) {
+    if (ext == candidate) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool path_is_executable_file(const std::string& path) {
+  std::error_code ec;
+  const auto perms = std::filesystem::status(path, ec).permissions();
+  if (ec) {
+    return false;
+  }
+  using std::filesystem::perms;
+  const auto executable =
+      perms::owner_exec | perms::group_exec | perms::others_exec;
+  return (perms & executable) != perms::none;
+}
+
+bool path_is_ide_open_file(const std::string& path) {
+  if (!path_is_existing_regular_file(path)) {
+    return false;
+  }
+  if (path_looks_like_source_or_text(std::filesystem::path(path))) {
+    return true;
+  }
+  return !path_is_executable_file(path);
+}
+
 void print_usage() {
-  std::cerr << "Uso: tgdb [opciones] [programa]\n"
+  std::cerr << "Uso: tgdb [opciones] [<dir>|<archivo>|<programa>]\n"
             << "Opciones:\n"
             << "  --cwd <dir>         Directorio raíz del workspace\n"
             << "  --args <a>...       Argumentos del programa (después de --args)\n"
@@ -30,10 +77,13 @@ void print_usage() {
             << "  -h, --help          Muestra esta ayuda\n"
             << "\n"
             << "Sin argumentos abre el selector de workspace (modo IDE).\n"
+            << "Un directorio abre el workspace; un archivo abre su carpeta con el archivo cargado.\n"
             << "F1 atajos de teclado; F2 inicia depuración; F3 cambia el directorio de trabajo.\n"
             << "\n"
             << "Ejemplos:\n"
             << "  tgdb\n"
+            << "  tgdb .\n"
+            << "  tgdb src/main.cpp\n"
             << "  tgdb --cwd ./proyecto\n"
             << "  tgdb ./build/hello\n"
             << "  tgdb --attach 12345 ./build/hello\n";
@@ -82,12 +132,35 @@ int main(int argc, char** argv) {
       print_usage();
       return 1;
     }
+    if (path_is_existing_directory(arg)) {
+      config.workspace_root = arg;
+      config.use_workspace_wizard = false;
+      continue;
+    }
+    if (path_is_ide_open_file(arg)) {
+      if (!config.initial_file.empty()) {
+        std::cerr << "Error: demasiados argumentos posicionales\n";
+        print_usage();
+        return 1;
+      }
+      config.initial_file = arg;
+      config.use_workspace_wizard = false;
+      continue;
+    }
+    if (!config.program.empty()) {
+      std::cerr << "Error: demasiados argumentos posicionales\n";
+      print_usage();
+      return 1;
+    }
     config.program = arg;
   }
 
-  if (config.workspace_root.empty() && config.program.empty()) {
+  if (config.workspace_root.empty() && config.program.empty() &&
+      config.initial_file.empty()) {
     config.use_workspace_wizard = true;
   } else if (!config.workspace_root.empty() && config.program.empty()) {
+    config.use_workspace_wizard = false;
+  } else if (!config.initial_file.empty()) {
     config.use_workspace_wizard = false;
   }
 
@@ -107,6 +180,24 @@ int main(int argc, char** argv) {
       std::cerr << "Error: el programa debe ser un archivo: " << config.program
                 << "\n";
       return 1;
+    }
+  }
+  if (!config.initial_file.empty()) {
+    config.initial_file =
+        std::filesystem::absolute(config.initial_file, ec).string();
+    if (!std::filesystem::exists(config.initial_file)) {
+      std::cerr << "Error: archivo no encontrado: " << config.initial_file
+                << "\n";
+      return 1;
+    }
+    if (!std::filesystem::is_regular_file(config.initial_file)) {
+      std::cerr << "Error: debe ser un archivo: " << config.initial_file
+                << "\n";
+      return 1;
+    }
+    if (config.workspace_root.empty()) {
+      config.workspace_root =
+          std::filesystem::path(config.initial_file).parent_path().string();
     }
   }
   if (!config.workspace_root.empty()) {

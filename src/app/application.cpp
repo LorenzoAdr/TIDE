@@ -18,6 +18,7 @@
 #include "ui/file_picker.hpp"
 #include "ui/quit_confirm.hpp"
 #include "ui/symbol_picker.hpp"
+#include "ui/cursor_blink.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/press_ids.hpp"
@@ -117,6 +118,10 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
     config_.program = fs::absolute(config_.program, ec).string();
   }
 
+  if (!config_.initial_file.empty()) {
+    config_.initial_file = fs::absolute(config_.initial_file, ec).string();
+  }
+
   model_.workspace_root = config_.workspace_root;
   model_.program = config_.program;
   model_.program_args = config_.args;
@@ -139,6 +144,9 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
     }
   } else {
     set_workspace(config_.workspace_root);
+    if (!config_.initial_file.empty()) {
+      workspace_.open_file(config_.initial_file);
+    }
     if (config_.auto_debug && connection_config_complete()) {
       app_mode_ = AppMode::kDebug;
       layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kDebug;
@@ -642,12 +650,12 @@ int Application::run() {
       with_picker, &workspace_, &symbol_picker_state_, &focus_state_, symbol_provider_);
 
   auto with_debug_wizard = MakeConnectionWizardOverlay(
-      with_symbol_picker, &connection_wizard_state_, &model_,
+      with_symbol_picker, &connection_wizard_state_, &model_, &layout_state_,
       [this](const ConnectionResult& result) { on_connection_complete(result); },
       [&screen] { screen.ExitLoopClosure()(); });
 
   auto with_workspace_wizard = MakeWorkspaceWizardOverlay(
-      with_debug_wizard, &workspace_wizard_state_,
+      with_debug_wizard, &workspace_wizard_state_, &layout_state_,
       [this](const std::string& root) { on_workspace_complete(root); },
       [&screen] { screen.ExitLoopClosure()(); });
 
@@ -678,6 +686,7 @@ int Application::run() {
         }
         process_index_changes();
         drain_events();
+        cursor_blink::tick();
         layout_state_.clickable.tick();
         if (layout_state_.console_visible && layout_state_.terminal_tick_callback) {
           layout_state_.terminal_tick_callback();

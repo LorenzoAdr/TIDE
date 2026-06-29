@@ -56,7 +56,8 @@ inline bool scrollbar_thumb_hit(const ScrollbarLayout& layout, const Box& box, i
   return local_y >= layout.thumb_y && local_y < layout.thumb_y + layout.thumb_height;
 }
 
-inline Element vertical_scrollbar(int total_lines, int scroll, int visible_lines, int bar_height) {
+inline Element vertical_scrollbar(int total_lines, int scroll, int visible_lines, int bar_height,
+                                  bool hovered = false, bool active = false) {
   Elements track;
   if (bar_height <= 0) {
     return text("");
@@ -71,11 +72,23 @@ inline Element vertical_scrollbar(int total_lines, int scroll, int visible_lines
     return vbox(std::move(track));
   }
 
+  const Color track_color = hovered || active ? theme::TabHover() : Color::Default;
+  const Color thumb_color = active ? theme::TabPressed() : theme::Accent();
+
   for (int i = 0; i < bar_height; ++i) {
-    if (i >= layout.thumb_y && i < layout.thumb_y + layout.thumb_height) {
-      track.push_back(text("┃") | color(theme::Accent()));
+    const bool in_thumb = i >= layout.thumb_y && i < layout.thumb_y + layout.thumb_height;
+    if (in_thumb) {
+      Element thumb = text("┃") | color(thumb_color);
+      if (active) {
+        thumb = thumb | bold | inverted;
+      }
+      track.push_back(std::move(thumb));
     } else {
-      track.push_back(text("│") | color(theme::Muted()));
+      Element line = text("│") | color(theme::Muted());
+      if (hovered || active) {
+        line = line | bgcolor(track_color);
+      }
+      track.push_back(std::move(line));
     }
   }
   return vbox(std::move(track));

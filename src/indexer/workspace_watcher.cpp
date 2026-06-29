@@ -141,7 +141,7 @@ struct WorkspaceWatcher::Impl {
           continue;
         }
 
-        if (!should_index_relative_path(rel_str)) {
+        if (!should_list_workspace_path(rel_str)) {
           continue;
         }
 

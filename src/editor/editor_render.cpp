@@ -4,6 +4,8 @@
 #include <set>
 
 #include "ftxui/dom/elements.hpp"
+#include "indexer/index_rules.hpp"
+#include "ui/cursor_blink.hpp"
 #include "ui/theme.hpp"
 #include "util/cpp_highlight.hpp"
 #include "util/syntax_highlight.hpp"
@@ -111,8 +113,14 @@ Element apply_decoration(Element element, const EditorDecoration* deco) {
     case EditorDecoration::Kind::Selection:
       return element | bgcolor(theme::SelectionBg());
     case EditorDecoration::Kind::PrimaryCaret:
-      return element | bgcolor(theme::CursorCell()) | color(Color::Black) | bold;
+      if (!cursor_blink::visible()) {
+        return element;
+      }
+      return element | cursor_blink::cell_decorator();
     case EditorDecoration::Kind::SecondaryCaret:
+      if (!cursor_blink::visible()) {
+        return element;
+      }
       return element | inverted | bold;
   }
   return element;
@@ -147,31 +155,62 @@ Element wrap_with_suffix(Element line_content, const Decorator& line_bg,
          line_bg;
 }
 
+Element render_line_content(const std::string& line, int line_index,
+                            const SemanticTokenDocument* semantic_tokens, bool syntax_highlight,
+                            int cursor_col = -1, Decorator cursor_style = {},
+                            int col_offset = 0) {
+  if (!syntax_highlight) {
+    if (cursor_col < 0 || !cursor_style || !cursor_blink::visible()) {
+      return line.empty() ? text(" ") : text(line);
+    }
+    const int clamped = std::max(0, std::min(cursor_col, static_cast<int>(line.size())));
+    Elements parts;
+    if (clamped > 0) {
+      parts.push_back(text(line.substr(0, static_cast<std::size_t>(clamped))));
+    }
+    const std::string cursor_char =
+        clamped < static_cast<int>(line.size())
+            ? line.substr(static_cast<std::size_t>(clamped), 1)
+            : " ";
+    parts.push_back(text(cursor_char) | cursor_style);
+    if (clamped + 1 < static_cast<int>(line.size())) {
+      parts.push_back(text(line.substr(static_cast<std::size_t>(clamped + 1))));
+    }
+    return hbox(std::move(parts));
+  }
+  return HighlightCodeLine(line, line_index, semantic_tokens, cursor_col, cursor_style, col_offset);
+}
+
 Element render_simple_line(const std::string& line, int line_index, const EditorBuffer& buffer,
                            bool editor_focused, const SemanticTokenDocument* semantic_tokens,
-                           const Decorator& line_bg) {
+                           bool syntax_highlight, const Decorator& line_bg) {
+  (void)line_bg;
   if (!editor_focused || line_index != buffer.primary_line()) {
-    Element content =
-        line.empty() ? text(" ") : HighlightCodeLine(line, line_index, semantic_tokens);
-    return content;
+    return render_line_content(line, line_index, semantic_tokens, syntax_highlight);
   }
   const int col = buffer.primary_col();
-  const Decorator cursor_cell = bgcolor(theme::CursorCell()) | color(Color::Black) | bold;
+  const Decorator cursor_cell = cursor_blink::cell_decorator();
   const int clamped = std::max(0, std::min(col, static_cast<int>(line.size())));
+  const int draw_col = cursor_blink::effective_col(clamped);
   if (line.empty() || clamped >= static_cast<int>(line.size())) {
     Elements parts;
     if (!line.empty()) {
-      parts.push_back(HighlightCodeLine(line, line_index, semantic_tokens));
+      parts.push_back(render_line_content(line, line_index, semantic_tokens, syntax_highlight));
     }
-    parts.push_back(text(" ") | cursor_cell);
+    if (cursor_blink::visible()) {
+      parts.push_back(text(" ") | cursor_cell);
+    } else {
+      parts.push_back(text(" "));
+    }
     return hbox(std::move(parts));
   }
-  return HighlightCodeLine(line, line_index, semantic_tokens, clamped, cursor_cell);
+  return render_line_content(line, line_index, semantic_tokens, syntax_highlight, draw_col,
+                             cursor_cell);
 }
 
 Element render_rich_line(const std::string& line, int line_index, const EditorBuffer& buffer,
                          bool editor_focused, const std::vector<TextMatch>* find_matches,
-                         const SemanticTokenDocument* semantic_tokens,
+                         const SemanticTokenDocument* semantic_tokens, bool syntax_highlight,
                          const BracketPairHighlight* bracket,
                          const std::vector<Diagnostic>* line_diagnostics) {
   std::vector<EditorDecoration> decorations;
@@ -206,13 +245,13 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
     const int segment_cursor =
         (editor_focused && line_index == buffer.primary_line() && buffer.primary_col() >= prev &&
          buffer.primary_col() < bp)
-            ? buffer.primary_col()
+            ? cursor_blink::effective_col(buffer.primary_col())
             : -1;
-    const Decorator cursor_cell = bgcolor(theme::CursorCell()) | color(Color::Black) | bold;
+    const Decorator cursor_cell = cursor_blink::cell_decorator();
     parts.push_back(apply_decoration(
         segment.empty() ? text(" ")
-                        : HighlightCodeLine(segment, line_index, semantic_tokens, segment_cursor,
-                                            cursor_cell, prev),
+                        : render_line_content(segment, line_index, semantic_tokens, syntax_highlight,
+                                              segment_cursor, cursor_cell, prev),
         chosen));
     prev = bp;
   }
@@ -307,13 +346,17 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
       line_index == buffer.primary_line() ? bgcolor(theme::EditorLineHi())
                                           : bgcolor(theme::CodeBg());
 
+  const bool syntax_highlight =
+      !buffer.path.empty() && is_indexed_source_path(buffer.path);
+
   const bool rich =
       line_needs_rich_decorations(line_index, buffer, find_matches, bracket, line_diagnostics);
 
   Element content =
       rich ? render_rich_line(line, line_index, buffer, editor_focused, find_matches,
-                              semantic_tokens, bracket, line_diagnostics)
-           : render_simple_line(line, line_index, buffer, editor_focused, semantic_tokens, line_bg);
+                              semantic_tokens, syntax_highlight, bracket, line_diagnostics)
+           : render_simple_line(line, line_index, buffer, editor_focused, semantic_tokens,
+                                syntax_highlight, line_bg);
 
   return wrap_with_suffix(std::move(content), line_bg, diagnostic_suffix, line_diagnostics);
 }

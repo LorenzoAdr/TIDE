@@ -3,6 +3,7 @@
 #include <string>
 
 #include "ftxui/dom/elements.hpp"
+#include "ui/cursor_blink.hpp"
 #include "ui/theme.hpp"
 
 namespace tgdb {
@@ -47,12 +48,20 @@ inline Element ModalWindow(Element title, Element content) {
 }
 
 inline Element ModalInputLine(const std::string& text_line) {
-  Element row = hbox({
-                    text(" " + text_line) | color(theme::WatchInput()),
-                    filler(),
-                }) |
-                bgcolor(theme::TabIdle()) | size(HEIGHT, EQUAL, 1) | flex;
-  // clear_under solo en esta fila (caja acotada), no en toda la pantalla.
+  std::string content = text_line;
+  const bool has_cursor = !content.empty() && content.back() == '_';
+  if (has_cursor) {
+    content.pop_back();
+  }
+
+  Elements parts;
+  parts.push_back(text(" " + content) | color(theme::WatchInput()));
+  if (has_cursor && cursor_blink::visible()) {
+    parts.push_back(text(" ") | cursor_blink::cell_decorator());
+  }
+
+  Element row = hbox({hbox(std::move(parts)), filler()}) | flex;
+  row = row | bgcolor(theme::TabIdle()) | size(HEIGHT, EQUAL, 1);
   return clear_under(std::move(row));
 }
 

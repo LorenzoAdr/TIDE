@@ -15,6 +15,8 @@
 #include "ui/panel.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/main_layout.hpp"
+#include "ui/clickable.hpp"
+#include "ui/press_ids.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
 #include "util/cpp_highlight.hpp"
@@ -110,6 +112,31 @@ bool handle_source_scrollbar_mouse(SourceViewState* view_state, SourcePanelState
   const int max_scroll = max_scroll_offset(total, visible);
   const bool in_bar = panel->scrollbar_box.Contain(m.x, m.y);
 
+  if (m.motion == Mouse::Moved) {
+    if (layout_state != nullptr) {
+      const std::string_view before = layout_state->clickable.hovered_id();
+      if (in_bar || panel->scrollbar_dragging) {
+        layout_state->clickable.set_hover(press_id::kSourceScrollbar);
+      } else {
+        layout_state->clickable.clear_hover_if([&](std::string_view id) {
+          return id == press_id::kSourceScrollbar;
+        });
+      }
+      if (layout_state->clickable.hovered_id() != before) {
+        layout_state->request_ui_tick = true;
+      }
+    }
+    if (panel->scrollbar_dragging) {
+      const int local_y = m.y - panel->scrollbar_box.y_min;
+      const int thumb_top = local_y - panel->scrollbar_drag_offset;
+      view_state->scroll =
+          std::max(0, std::min(scroll_for_thumb_top(panel->scrollbar_layout, thumb_top),
+                               max_scroll));
+      return true;
+    }
+    return in_bar;
+  }
+
   if (panel->scrollbar_dragging) {
     if (m.button == Mouse::Left && m.motion == Mouse::Released) {
       panel->scrollbar_dragging = false;
@@ -151,6 +178,7 @@ bool handle_source_scrollbar_mouse(SourceViewState* view_state, SourcePanelState
       layout_state->right_panel_active_section = 0;
       layout_state->focus_sync_needed = true;
     }
+    trigger_press(layout_state, press_id::kSourceScrollbar);
     const int local_y = m.y - panel->scrollbar_box.y_min;
     if (scrollbar_thumb_hit(panel->scrollbar_layout, panel->scrollbar_box, m.x, m.y)) {
       panel->scrollbar_dragging = true;
@@ -201,7 +229,7 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
   auto loaded_file = std::make_shared<std::string>();
   auto panel_state = std::make_shared<SourcePanelState>();
 
-  auto renderer = Renderer([model, view_state, loaded_file, panel_state] {
+  auto renderer = Renderer([model, view_state, loaded_file, panel_state, layout_state] {
     if (*loaded_file != model->active_file) {
       *loaded_file = model->active_file;
       load_source_file(*loaded_file, &view_state->lines);
@@ -278,8 +306,14 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
         vbox(std::move(gutter_rows)) | reflect(panel_state->gutter_box) | bgcolor(theme::CodeBg());
     Element code = vbox(std::move(code_rows)) | flex | reflect(panel_state->content_box) |
                    bgcolor(theme::CodeBg());
-    Element scrollbar = vertical_scrollbar(total, view_state->scroll, visible, rendered_lines) |
-                        reflect(panel_state->scrollbar_box);
+    Element scrollbar =
+        vertical_scrollbar(total, view_state->scroll, visible, rendered_lines,
+                           layout_state != nullptr &&
+                               layout_state->clickable.is_hovered(press_id::kSourceScrollbar),
+                           panel_state->scrollbar_dragging ||
+                               (layout_state != nullptr &&
+                                layout_state->clickable.is_pressed(press_id::kSourceScrollbar))) |
+        reflect(panel_state->scrollbar_box);
     panel_state->scrollbar_layout =
         compute_scrollbar_layout(total, view_state->scroll, visible, rendered_lines);
 

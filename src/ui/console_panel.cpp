@@ -20,8 +20,10 @@
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/clickable.hpp"
+#include "ui/cursor_blink.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/panel.hpp"
+#include "ui/text_input_style.hpp"
 #include "ui/theme.hpp"
 
 namespace tgdb {
@@ -295,24 +297,47 @@ Element render_terminal_body(Element content) {
   return std::move(content) | bgcolor(theme::CodeBg());
 }
 
-Element render_styled_line(const TerminalStyledRow& row) {
+Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool show_cursor) {
+  const Decorator cursor_cell = cursor_blink::cell_decorator();
+  const bool draw_cursor = show_cursor && cursor_blink::visible();
+
   Elements parts;
+  int col = 0;
+  bool cursor_placed = false;
   for (const TerminalStyledSpan& span : row) {
     if (span.text.empty()) {
       continue;
     }
-    parts.push_back(text(span.text) | color(span.fg) | bgcolor(span.bg));
+    for (char ch : span.text) {
+      Element cell = text(std::string(1, ch));
+      if (draw_cursor && cursor_col >= 0 && col == cursor_col) {
+        cell = cell | cursor_cell;
+        cursor_placed = true;
+      } else {
+        cell = cell | color(span.fg) | bgcolor(span.bg);
+      }
+      parts.push_back(std::move(cell));
+      ++col;
+    }
+  }
+  if (draw_cursor && cursor_col >= 0 && !cursor_placed) {
+    parts.push_back(text(" ") | cursor_cell);
   }
   if (parts.empty()) {
-    parts.push_back(text(" ") | color(theme::WatchInput()));
+    parts.push_back(text(" ") | (draw_cursor && cursor_col >= 0 ? cursor_cell
+                                                                 : color(theme::WatchInput())));
   }
   return hbox(std::move(parts)) | size(HEIGHT, EQUAL, 1);
 }
 
-Element render_terminal_styled(const std::vector<TerminalStyledRow>& rows) {
+Element render_terminal_styled(const std::vector<TerminalStyledRow>& rows, int cursor_row,
+                               int cursor_col, bool show_cursor) {
   Elements lines;
-  for (const TerminalStyledRow& row : rows) {
-    lines.push_back(render_styled_line(row));
+  for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
+    const int line_cursor =
+        show_cursor && row == cursor_row ? cursor_col : -1;
+    lines.push_back(render_styled_line(rows[static_cast<std::size_t>(row)], line_cursor,
+                                       show_cursor && row == cursor_row));
   }
   if (lines.empty()) {
     lines.push_back(text(" ") | size(HEIGHT, EQUAL, 1) | color(theme::WatchInput()));
@@ -509,7 +534,8 @@ Element render_gdb_console(ConsolePanelState* state, DebugModel* model, AppMode*
   return vbox({history_row | flex, separator() | size(HEIGHT, EQUAL, 1), input_row}) | flex;
 }
 
-Element render_shell_terminal(ConsolePanelState* state, DebugModel* model) {
+Element render_shell_terminal(ConsolePanelState* state, DebugModel* model, ShellSession* shell,
+                              FocusManagerState* focus) {
   if (model->workspace_root.empty()) {
     return render_terminal_body(text("(selecciona workspace con F3)") | color(theme::Muted()));
   }
@@ -525,7 +551,10 @@ Element render_shell_terminal(ConsolePanelState* state, DebugModel* model) {
   }
 
   if (state->terminal_view_valid && !state->terminal_styled_rows.empty()) {
-    return render_terminal_styled(state->terminal_styled_rows);
+    const bool show_cursor = shell_terminal_input_active(focus, shell);
+    const int cursor_row = show_cursor && shell != nullptr ? shell->cursor_row() : -1;
+    const int cursor_col = show_cursor && shell != nullptr ? shell->cursor_col() : -1;
+    return render_terminal_styled(state->terminal_styled_rows, cursor_row, cursor_col, show_cursor);
   }
   return render_terminal_body(text("...") | color(theme::Muted()));
 }
@@ -547,19 +576,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
                            CommandCallback on_command, MainLayoutState* layout_state,
                            FocusManagerState* focus, int* bottom_height) {
   auto state = std::make_shared<ConsolePanelState>();
-  InputOption input_opt = InputOption::Default();
-  input_opt.multiline = false;
-  input_opt.transform = [](InputState input_state) {
-    input_state.element |= bgcolor(theme::CodeBg()) | color(theme::WatchInput());
-    if (input_state.is_placeholder) {
-      input_state.element |= dim;
-    }
-    if (input_state.focused) {
-      input_state.element |= inverted;
-    }
-    return input_state.element;
-  };
-  auto input_box = Input(&state->input, &state->input_placeholder, input_opt);
+  auto input_box = Input(MakeBlinkInputOption(&state->input, &state->input_placeholder));
   auto input_maybe = Maybe(
       input_box, [app_mode, layout_state] {
         return debug_tab_active(app_mode, layout_state) && console_input_active(layout_state);
@@ -777,8 +794,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     };
   }
 
-  return Renderer(wrapped, [app_mode, model, input_box, input_maybe, state, layout_state,
-                            bottom_height] {
+  return Renderer(wrapped, [app_mode, model, shell, focus, input_box, input_maybe, state,
+                            layout_state, bottom_height] {
     state->input_placeholder = console_placeholder(app_mode);
     (void)input_maybe;
 
@@ -788,7 +805,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
     if (!debug_mode) {
       const int body_height = std::max(1, panel_height - 1);
-      Element body = render_shell_terminal(state.get(), model) | reflect(state->content_box);
+      Element body =
+          render_shell_terminal(state.get(), model, shell, focus) | reflect(state->content_box);
       return make_terminal_panel("Terminal", std::move(body), body_height);
     }
 
@@ -810,7 +828,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
     Element body;
     if (selected_tab == ConsolePanelTabs::kTerminal) {
-      body = render_shell_terminal(state.get(), model) | reflect(state->content_box) | flex;
+      body = render_shell_terminal(state.get(), model, shell, focus) | reflect(state->content_box) |
+             flex;
     } else {
       body = render_gdb_console(state.get(), model, app_mode, layout_state, input_box);
     }

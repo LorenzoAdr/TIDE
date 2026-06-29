@@ -282,7 +282,8 @@ void LspClient::load_semantic_legend(const nlohmann::json& initialize_result) {
 }
 
 void LspClient::did_open(const std::string& absolute_path, const std::string& text) {
-  if (!ready_.load() || absolute_path.empty()) {
+  if (!ready_.load() || absolute_path.empty() ||
+      !is_lsp_trackable_path(absolute_path, text)) {
     return;
   }
 
@@ -313,7 +314,8 @@ void LspClient::did_open(const std::string& absolute_path, const std::string& te
 }
 
 void LspClient::did_change(const std::string& absolute_path, const std::string& text) {
-  if (!ready_.load() || absolute_path.empty()) {
+  if (!ready_.load() || absolute_path.empty() ||
+      !is_lsp_trackable_path(absolute_path, text)) {
     return;
   }
 
@@ -450,7 +452,7 @@ void LspClient::flatten_symbols(const nlohmann::json& nodes, int depth,
 }
 
 std::vector<SymbolInfo> LspClient::document_symbols(const std::string& absolute_path) {
-  if (!ready_.load() || absolute_path.empty()) {
+  if (!ready_.load() || absolute_path.empty() || !is_indexed_source_path(absolute_path)) {
     return {};
   }
 
@@ -619,7 +621,8 @@ CompletionItem LspClient::parse_completion_item(const nlohmann::json& item) {
 std::vector<CompletionItem> LspClient::completions_at(const std::string& absolute_path,
                                                         const std::string& text, int line,
                                                         int character) {
-  if (!ready_.load() || absolute_path.empty()) {
+  if (!ready_.load() || absolute_path.empty() ||
+      !is_lsp_trackable_path(absolute_path, text)) {
     return {};
   }
 
@@ -731,7 +734,8 @@ SourceLocation LspClient::request_location(const std::string& method,
                                            const std::string& text, int line,
                                            int character) {
   SourceLocation loc;
-  if (!ready_.load() || absolute_path.empty()) {
+  if (!ready_.load() || absolute_path.empty() ||
+      !is_lsp_trackable_path(absolute_path, text)) {
     return loc;
   }
 
@@ -837,7 +841,8 @@ HoverInfo LspClient::parse_hover_result(const nlohmann::json& result) {
 HoverInfo LspClient::hover(const std::string& absolute_path, const std::string& text,
                            int line, int character) {
   HoverInfo info;
-  if (!ready_.load() || absolute_path.empty()) {
+  if (!ready_.load() || absolute_path.empty() ||
+      !is_lsp_trackable_path(absolute_path, text)) {
     return info;
   }
 
@@ -912,7 +917,7 @@ SemanticTokenDocument LspClient::decode_semantic_tokens(
 }
 
 bool LspClient::refresh_semantic_tokens(const std::string& absolute_path) {
-  if (!ready_.load() || absolute_path.empty() || !is_indexed_source_path(absolute_path) ||
+  if (!ready_.load() || absolute_path.empty() || !is_lsp_trackable_path(absolute_path) ||
       !semantic_tokens_supported_) {
     return false;
   }
@@ -958,7 +963,7 @@ bool LspClient::refresh_semantic_tokens(const std::string& absolute_path) {
 }
 
 bool LspClient::ensure_semantic_tokens(const std::string& absolute_path) {
-  if (!ready_.load() || absolute_path.empty() || !is_indexed_source_path(absolute_path) ||
+  if (!ready_.load() || absolute_path.empty() || !is_lsp_trackable_path(absolute_path) ||
       !semantic_tokens_supported_) {
     return false;
   }
@@ -1082,7 +1087,7 @@ void LspClient::on_lsp_notification(const std::string& method, const nlohmann::j
     return;
   }
   DocumentDiagnostics doc = parse_publish_diagnostics(params);
-  if (doc.path.empty()) {
+  if (doc.path.empty() || !is_lsp_trackable_path(doc.path)) {
     return;
   }
   std::lock_guard<std::mutex> lock(mutex_);
@@ -1096,7 +1101,7 @@ void LspClient::on_lsp_notification(const std::string& method, const nlohmann::j
 
 DocumentDiagnostics LspClient::diagnostics_for_file(const std::string& absolute_path) {
   const std::string key = normalize_lsp_path(absolute_path);
-  if (key.empty()) {
+  if (key.empty() || !is_lsp_trackable_path(key)) {
     return {};
   }
   std::lock_guard<std::mutex> lock(mutex_);
@@ -1112,7 +1117,9 @@ std::vector<DocumentDiagnostics> LspClient::all_diagnostics() const {
   std::vector<DocumentDiagnostics> out;
   out.reserve(diagnostics_.size());
   for (const auto& entry : diagnostics_) {
-    out.push_back(entry.second);
+    if (is_lsp_trackable_path(entry.first)) {
+      out.push_back(entry.second);
+    }
   }
   return out;
 }

@@ -32,6 +32,7 @@ struct AppConfig {
   SessionMode mode = SessionMode::kLaunch;
   std::string program;
   std::string workspace_root;
+  std::string initial_file;
   std::vector<std::string> args;
   int attach_pid = 0;
   std::string attach_target;

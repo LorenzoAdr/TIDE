@@ -1,5 +1,6 @@
 #include "symbols/lsp_symbol_provider.hpp"
 
+#include "indexer/index_rules.hpp"
 #include "lsp/lsp_uri.hpp"
 
 #include <filesystem>
@@ -65,7 +66,7 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
     std::lock_guard<std::mutex> lock(mutex_);
     open_buffers_[path] = text;
   }
-  if (use_lsp_) {
+  if (use_lsp_ && is_lsp_trackable_path(path, text)) {
     client_.did_open(path, text);
   }
 }
@@ -78,7 +79,7 @@ void LspSymbolProvider::on_document_changed(const std::string& path, const std::
     std::lock_guard<std::mutex> lock(mutex_);
     open_buffers_[path] = text;
   }
-  if (use_lsp_) {
+  if (use_lsp_ && is_lsp_trackable_path(path, text)) {
     client_.did_change(path, text);
   }
 }
@@ -114,9 +115,9 @@ std::vector<SymbolInfo> LspSymbolProvider::symbols_for_file(const std::string& p
     use_lsp = use_lsp_;
   }
 
-  if (use_lsp) {
+  if (use_lsp && is_indexed_source_path(path)) {
     const std::string text = buffer_text_for_path(path);
-    if (!text.empty()) {
+    if (!text.empty() && is_lsp_trackable_path(path, text)) {
       on_document_opened(path, text);
     }
     auto symbols = client_.document_symbols(path);
@@ -144,7 +145,7 @@ bool LspSymbolProvider::supports_semantic_completion() const {
 
 std::vector<CompletionItem> LspSymbolProvider::completions_at(
     const CompletionParams& params) {
-  if (params.path.empty()) {
+  if (params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
     return {};
   }
 
@@ -169,7 +170,7 @@ bool LspSymbolProvider::supports_navigation() const {
 }
 
 SourceLocation LspSymbolProvider::goto_definition(const NavigationParams& params) {
-  if (params.path.empty()) {
+  if (params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
     return {};
   }
   std::lock_guard<std::mutex> lock(mutex_);
@@ -182,7 +183,7 @@ SourceLocation LspSymbolProvider::goto_definition(const NavigationParams& params
 }
 
 SourceLocation LspSymbolProvider::goto_declaration(const NavigationParams& params) {
-  if (params.path.empty()) {
+  if (params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
     return {};
   }
   std::lock_guard<std::mutex> lock(mutex_);
@@ -200,7 +201,7 @@ bool LspSymbolProvider::supports_semantic_highlight() const {
 }
 
 bool LspSymbolProvider::ensure_semantic_tokens(const std::string& path) {
-  if (path.empty()) {
+  if (path.empty() || !is_lsp_trackable_path(path)) {
     return false;
   }
   bool active = false;
@@ -215,7 +216,7 @@ bool LspSymbolProvider::ensure_semantic_tokens(const std::string& path) {
 }
 
 SemanticTokenDocument LspSymbolProvider::semantic_tokens_for_file(const std::string& path) {
-  if (path.empty()) {
+  if (path.empty() || !is_lsp_trackable_path(path)) {
     return {};
   }
   std::lock_guard<std::mutex> lock(mutex_);
@@ -234,7 +235,7 @@ HoverInfo LspSymbolProvider::hover_at(const HoverParams& params) {
     return {};
   }
   std::lock_guard<std::mutex> lock(mutex_);
-  if (use_lsp_) {
+  if (use_lsp_ && is_lsp_trackable_path(params.path, params.text)) {
     const std::string text =
         params.text.empty() ? buffer_text_for_path(params.path) : params.text;
     HoverInfo info =
@@ -260,7 +261,7 @@ uint64_t LspSymbolProvider::diagnostics_revision() const {
 }
 
 DocumentDiagnostics LspSymbolProvider::diagnostics_for_file(const std::string& path) {
-  if (path.empty()) {
+  if (path.empty() || !is_lsp_trackable_path(path)) {
     return {};
   }
   std::lock_guard<std::mutex> lock(mutex_);

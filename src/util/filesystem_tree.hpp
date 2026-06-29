@@ -15,4 +15,8 @@ struct FileTreeNode {
 
 FileTreeNode build_file_tree_from_paths(const std::vector<std::string>& relative_paths);
 
+// Expande carpetas ancestras de relative_path (path relativo con '/').
+// Devuelve true si el archivo existe en el árbol.
+bool expand_relative_path(FileTreeNode* root, const std::string& relative_path);
+
 }  // namespace tgdb

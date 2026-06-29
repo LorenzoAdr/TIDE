@@ -6,6 +6,7 @@
 #include <thread>
 
 #include "symbols/regex_symbol_provider.hpp"
+#include "indexer/index_rules.hpp"
 
 namespace fs = std::filesystem;
 
@@ -63,6 +64,9 @@ void SymbolWorkspaceIndexer::start_scan(const std::string& workspace_root,
 void SymbolWorkspaceIndexer::reindex_file(const std::string& workspace_root,
                                           const std::string& relative_file,
                                           const std::string& absolute_path) {
+  if (!is_indexed_source_path(relative_file)) {
+    return;
+  }
   std::shared_ptr<ISymbolProvider> provider;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -178,6 +182,9 @@ void SymbolWorkspaceIndexer::worker_main(std::string workspace_root,
     if (stop_requested_) {
       running_ = false;
       return;
+    }
+    if (!is_indexed_source_path(rel)) {
+      continue;
     }
     std::vector<IndexedSymbol> entries;
     if (use_regex_bulk) {

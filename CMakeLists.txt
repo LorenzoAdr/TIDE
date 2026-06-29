@@ -40,6 +40,7 @@ add_executable(tgdb
   src/ui/terminal_keyboard.cpp
   src/ui/focusable_component.cpp
   src/ui/clickable_interaction.cpp
+  src/ui/cursor_blink.cpp
   src/indexer/workspace_indexer.cpp
   src/indexer/symbol_workspace_indexer.cpp
   src/indexer/index_rules.cpp

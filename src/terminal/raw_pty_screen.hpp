@@ -28,6 +28,8 @@ class RawPtyScreen {
 
   int rows() const { return rows_; }
   int cols() const { return cols_; }
+  int cursor_col() const { return cursor_col_; }
+  int cursor_row() const { return rows_ - 1; }
   std::string text() const;
   std::vector<TerminalStyledRow> styled_rows() const;
 

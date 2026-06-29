@@ -15,6 +15,7 @@
 #include "search/workspace_search.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/panel.hpp"
+#include "ui/text_input_style.hpp"
 #include "ui/theme.hpp"
 
 namespace tgdb {
@@ -24,22 +25,6 @@ using namespace ftxui;
 namespace {
 
 constexpr int kResultVisualRows = 2;
-
-InputOption make_search_input_opt() {
-  InputOption opt = InputOption::Default();
-  opt.multiline = false;
-  opt.transform = [](InputState state) {
-    state.element |= bgcolor(theme::CodeBg()) | color(theme::WatchInput());
-    if (state.is_placeholder) {
-      state.element |= dim;
-    }
-    if (state.focused) {
-      state.element |= inverted;
-    }
-    return state.element;
-  };
-  return opt;
-}
 
 Element highlight_preview(const std::string& line, const std::string& needle, bool selected) {
   const std::string indent = "   ";
@@ -220,12 +205,11 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
                           FocusManagerState* focus, MainLayoutState* layout_state,
                           WorkspaceIndexer* indexer, RightSidebarState* sidebar) {
   auto state = std::make_shared<SearchPanelState>();
-  const InputOption input_opt = make_search_input_opt();
 
-  auto query_input = Input(&state->query, "buscar...", input_opt);
-  auto replace_input = Input(&state->replace, "reemplazar...", input_opt);
-  auto path_input = Input(&state->path_filter, "todo el workspace", input_opt);
-  auto exclude_input = Input(&state->exclude_pattern, "p. ej. *.h", input_opt);
+  auto query_input = Input(MakeBlinkInputOption(&state->query, "buscar..."));
+  auto replace_input = Input(MakeBlinkInputOption(&state->replace, "reemplazar..."));
+  auto path_input = Input(MakeBlinkInputOption(&state->path_filter, "todo el workspace"));
+  auto exclude_input = Input(MakeBlinkInputOption(&state->exclude_pattern, "p. ej. *.h"));
 
   auto query_row = make_input_row(query_input);
   auto replace_row = make_input_row(replace_input);

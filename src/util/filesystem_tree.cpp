@@ -86,4 +86,45 @@ FileTreeNode build_file_tree_from_paths(const std::vector<std::string>& relative
   return tree_root;
 }
 
+FileTreeNode* find_folder_child(FileTreeNode* parent, const std::string& name) {
+  if (parent == nullptr) {
+    return nullptr;
+  }
+  for (auto& child : parent->children) {
+    if (!child.is_file && child.name == name) {
+      return &child;
+    }
+  }
+  return nullptr;
+}
+
+bool expand_relative_path(FileTreeNode* root, const std::string& relative_path) {
+  if (root == nullptr || relative_path.empty()) {
+    return false;
+  }
+
+  FileTreeNode* node = root;
+  std::size_t start = 0;
+  while (start <= relative_path.size()) {
+    const std::size_t slash = relative_path.find('/', start);
+    if (slash == std::string::npos) {
+      for (const auto& child : node->children) {
+        if (child.is_file && child.relative_path == relative_path) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    const std::string part = relative_path.substr(start, slash - start);
+    node = find_folder_child(node, part);
+    if (node == nullptr) {
+      return false;
+    }
+    node->expanded = true;
+    start = slash + 1;
+  }
+  return false;
+}
+
 }  // namespace tgdb

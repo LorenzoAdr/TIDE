@@ -75,6 +75,29 @@ inline bool update_panel_hover(MainLayoutState* layout, int x, int y,
   return false;
 }
 
+inline std::optional<int> local_row_in_box(const Box& box, int x, int y) {
+  if (box.IsEmpty() || !box.Contain(x, y)) {
+    return std::nullopt;
+  }
+  return y - box.y_min;
+}
+
+inline Element StyleListRow(Element row, bool selected, bool hovered, bool pressed) {
+  if (pressed) {
+    return row | bold | inverted | bgcolor(theme::TabPressed());
+  }
+  if (hovered) {
+    if (selected) {
+      return row | bold | inverted | bgcolor(theme::TabActive());
+    }
+    return row | bold | bgcolor(theme::TabHover());
+  }
+  if (selected) {
+    return row | inverted | bold;
+  }
+  return row;
+}
+
 inline Element StyleClickable(Element base, ClickableState state) {
   if (state.disabled) {
     return base | dim;

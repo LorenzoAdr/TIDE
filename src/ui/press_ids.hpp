@@ -40,6 +40,37 @@ inline std::string_view watches_tab_id(int index) {
   }
 }
 
+constexpr std::string_view kEditorScrollbar = "scrollbar.editor";
+constexpr std::string_view kSourceScrollbar = "scrollbar.source";
+
+inline std::string explorer_row(int index) {
+  return "explorer.row." + std::to_string(index);
+}
+
+inline std::string outline_row(int index) {
+  return "outline.row." + std::to_string(index);
+}
+
+inline std::string context_menu_row(int index) {
+  return "context_menu.row." + std::to_string(index);
+}
+
+inline std::string f2_mode(int index) {
+  return "f2.mode." + std::to_string(index);
+}
+
+inline std::string f2_browser_row(int index) {
+  return "f2.browser." + std::to_string(index);
+}
+
+inline std::string f2_process_row(int index) {
+  return "f2.process." + std::to_string(index);
+}
+
+inline std::string f3_browser_row(int index) {
+  return "f3.browser." + std::to_string(index);
+}
+
 inline std::string editor_tab(int index) {
   return "editor.tab." + std::to_string(index);
 }
@@ -67,6 +98,30 @@ inline bool is_sidebar_tab_hover(std::string_view id) {
 
 inline bool is_quit_hover(std::string_view id) {
   return id == kQuitYes || id == kQuitNo;
+}
+
+inline bool is_explorer_hover(std::string_view id) {
+  return id.rfind("explorer.row.", 0) == 0;
+}
+
+inline bool is_outline_hover(std::string_view id) {
+  return id.rfind("outline.row.", 0) == 0;
+}
+
+inline bool is_context_menu_hover(std::string_view id) {
+  return id.rfind("context_menu.row.", 0) == 0;
+}
+
+inline bool is_scrollbar_hover(std::string_view id) {
+  return id == kEditorScrollbar || id == kSourceScrollbar;
+}
+
+inline bool is_f2_hover(std::string_view id) {
+  return id.rfind("f2.", 0) == 0;
+}
+
+inline bool is_f3_hover(std::string_view id) {
+  return id.rfind("f3.", 0) == 0;
 }
 
 }  // namespace tgdb::press_id

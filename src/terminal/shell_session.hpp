@@ -33,6 +33,8 @@ class ShellSession {
   bool consume_output_pending();
   std::string display_text();
   std::vector<TerminalStyledRow> display_styled_rows();
+  int cursor_col();
+  int cursor_row();
 
   void drain_output(int max_bytes = 4096);
   int drain_output_bytes(int max_bytes = 4096);

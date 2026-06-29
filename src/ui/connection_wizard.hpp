@@ -7,6 +7,8 @@
 #include "app/debug_model.hpp"
 #include "backend/idebug_backend.hpp"
 #include "ftxui/component/component_base.hpp"
+#include "ftxui/screen/box.hpp"
+#include "ui/main_layout.hpp"
 #include "ui/path_browser.hpp"
 #include "util/process_list.hpp"
 
@@ -38,6 +40,11 @@ struct ConnectionWizardState {
   std::vector<ProcessEntry> all_processes;
   std::vector<ProcessEntry> process_matches;
   int process_selected = 0;
+  int process_list_start = 0;
+
+  ftxui::Box launch_mode_box;
+  ftxui::Box attach_mode_box;
+  ftxui::Box process_list_box;
 
   void reset();
   void refresh_process_matches();
@@ -47,7 +54,7 @@ using ConnectionCompleteCallback = std::function<void(const ConnectionResult&)>;
 
 ftxui::Component MakeConnectionWizardOverlay(
     ftxui::Component main, ConnectionWizardState* state, DebugModel* model,
-    ConnectionCompleteCallback on_complete,
+    MainLayoutState* layout_state, ConnectionCompleteCallback on_complete,
     std::function<void()> on_request_quit = {});
 
 }  // namespace tgdb
