@@ -37,7 +37,7 @@ const std::vector<ShortcutSection>& shortcut_sections() {
            {"F2", "Asistente de depuración / detener sesión"},
            {"F3", "Cambiar directorio de trabajo"},
            {"F4", "Pestaña Terminal (shell)"},
-           {"F5", "Pestaña Rendimiento (FPS, RAM, CPU)"},
+           {"F5", "Página Git (status, commit, ramas)"},
            {"F7", "Panel de búsqueda en workspace"},
            {"F8", "Panel outline (símbolos del archivo)"},
            {"F9", "Mostrar / ocultar panel de problemas (clangd)"},
@@ -107,14 +107,25 @@ const std::vector<ShortcutSection>& shortcut_sections() {
        {
            {"Enter / clic", "Escribir en la shell"},
            {"Tab", "Enviar tabulación a la shell"},
+           {"Alt+← / →", "Cambiar pestaña inferior (Terminal / GDB / Rendimiento)"},
            {"1", "Pestaña Terminal"},
            {"2", "Pestaña Rendimiento (modo normal) o GDB (depuración)"},
        }},
       {"Rendimiento",
        {
-           {"F5", "Abrir pestaña Rendimiento (modo normal)"},
+           {"Clic", "Pestaña Rendimiento en panel inferior"},
            {"j / k", "Desplazar lista de hilos"},
            {"1 / 2 / 3", "Pestañas inferiores (Terminal / GDB* / Rendimiento)"},
+       }},
+      {"Git",
+       {
+           {"F5", "Abrir / cerrar página Git"},
+           {"1 / 2 / 3", "Pestañas: status / log / ramas"},
+           {"s / u", "Stage / unstage archivo seleccionado"},
+           {"p / P", "Push / pull"},
+           {"c", "Enfocar mensaje de commit"},
+           {"Enter", "Confirmar commit"},
+           {"Esc / Ctrl+E", "Volver al editor"},
        }},
   };
   return sections;

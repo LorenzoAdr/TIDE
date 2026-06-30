@@ -28,6 +28,7 @@ add_executable(tgdb
   src/ui/call_hierarchy_view.cpp
   src/ui/diagnostics_panel.cpp
   src/ui/performance_panel.cpp
+  src/ui/git_panel.cpp
   src/ui/outline_panel.cpp
   src/ui/search_panel.cpp
   src/ui/right_sidebar_panel.cpp
@@ -90,6 +91,11 @@ add_executable(tgdb
   src/util/bundled_tools.cpp
   src/util/process_list.cpp
   src/util/system_stats.cpp
+  src/git/git_command.cpp
+  src/git/git_status.cpp
+  src/git/git_diff.cpp
+  src/git/git_log.cpp
+  src/git/git_service.cpp
   src/terminal/shell_session.cpp
   src/terminal/raw_pty_screen.cpp
   src/terminal/pty_input.cpp

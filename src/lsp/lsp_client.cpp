@@ -128,9 +128,10 @@ bool LspClient::spawn_clangd(const std::string& compile_commands_dir,
     }
     args_strings.emplace_back("-j=2");
     if (background_index) {
+      args_strings.emplace_back("--background-index=true");
       args_strings.emplace_back("--background-index-priority=low");
     } else {
-      args_strings.emplace_back("--background-index=0");
+      args_strings.emplace_back("--background-index=false");
     }
 
     std::vector<char*> argv;
@@ -285,6 +286,11 @@ void LspClient::invalidate_semantic_tokens(const std::string& absolute_path) {
   const std::string key = normalize_lsp_path(absolute_path);
   semantic_token_cache_.erase(key);
   semantic_token_attempts_.erase(key);
+}
+
+void LspClient::invalidate_semantic_tokens_for_file(const std::string& absolute_path) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  invalidate_semantic_tokens(absolute_path);
 }
 
 std::vector<std::string> LspClient::default_semantic_token_types() {

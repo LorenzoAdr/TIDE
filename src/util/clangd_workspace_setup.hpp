@@ -4,7 +4,7 @@
 
 namespace tgdb {
 
-// Writes or removes the workspace .clangd file from extra include paths (recursive).
+// Writes or removes the workspace .clangd file (background index + extra include paths).
 void apply_clangd_workspace_config(const std::string& workspace_root,
                                    const WorkspaceConfig& config);
 

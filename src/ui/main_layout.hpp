@@ -21,6 +21,7 @@
 #include "ui/clickable_interaction.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/press_ids.hpp"
+#include "git/git_service.hpp"
 #include "util/system_stats.hpp"
 #include "ui/source_panel.hpp"
 #include "util/path_normalize.hpp"
@@ -74,6 +75,7 @@ struct ConsolePanelTabs {
 
 struct MainLayoutState {
   bool console_visible = true;
+  bool git_page_visible = false;
   bool diagnostics_panel_visible = false;
   int diagnostics_panel_height = 6;
   bool terminal_start_requested = true;
@@ -121,10 +123,13 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> split_mouse_handler;
   std::function<bool(const ftxui::Event&)> search_key_handler;
   std::function<bool(const ftxui::Event&)> call_hierarchy_key_handler;
+  std::function<bool(const ftxui::Event&)> git_key_handler;
+  std::function<bool(const ftxui::Event&)> git_mouse_handler;
   std::function<void()> terminal_tick_callback;
   std::function<int()> terminal_width;
   std::function<int()> terminal_height;
   std::function<void()> schedule_ui_tick;
+  std::function<void(const std::string& path)> on_file_saved;
   PerformanceSampler performance_sampler;
 };
 
@@ -214,6 +219,8 @@ ftxui::Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                                 ShellSession* shell,
                                 WorkspaceIndexer* indexer,
                                 SymbolWorkspaceIndexer* symbol_indexer,
-                                ShellLaunchConfigProvider shell_launch_config);
+                                ShellLaunchConfigProvider shell_launch_config,
+                                GitService* git_service,
+                                struct GitPanelState* git_panel_state);
 
 }  // namespace tgdb

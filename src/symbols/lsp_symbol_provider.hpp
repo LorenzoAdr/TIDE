@@ -62,6 +62,7 @@ class LspSymbolProvider : public ISymbolProvider {
   void on_workspace_closed() override;
   void on_document_opened(const std::string& path, const std::string& text) override;
   void on_document_changed(const std::string& path, const std::string& text) override;
+  void on_document_saved(const std::string& path) override;
   void on_document_closed(const std::string& path) override;
 
   bool lsp_active() const { return use_lsp_; }

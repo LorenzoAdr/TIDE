@@ -348,6 +348,28 @@ void LspSymbolProvider::on_document_changed(const std::string& path, const std::
   }
 }
 
+void LspSymbolProvider::on_document_saved(const std::string& path) {
+  if (path.empty()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_ || !is_lsp_trackable_path(path)) {
+    return;
+  }
+  const std::string key = normalize_lsp_path(path);
+  if (key.empty()) {
+    return;
+  }
+  const auto buffer_it = open_buffers_.find(path);
+  if (buffer_it != open_buffers_.end()) {
+    client_.did_change(path, buffer_it->second);
+  }
+  client_.invalidate_semantic_tokens_for_file(path);
+  pending_content_refresh_.erase(key);
+  semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
+  enqueue_semantic_tokens_locked(key);
+}
+
 void LspSymbolProvider::on_document_closed(const std::string& path) {
   std::lock_guard<std::mutex> lock(mutex_);
   open_buffers_.erase(path);

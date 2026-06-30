@@ -1,3 +1,4 @@
+#include "ui/git_panel.hpp"
 #include "ui/main_layout.hpp"
 
 #include <algorithm>
@@ -173,6 +174,67 @@ class ModeLayout : public ComponentBase {
 
 Component MakeModeLayout(AppMode* app_mode, Component normal_child, Component debug_child) {
   return Make<ModeLayout>(app_mode, std::move(normal_child), std::move(debug_child));
+}
+
+// Overlay Git: ambos hijos en el árbol FTXUI (reflect() y Draw requieren Component->Render()
+// desde OnRender, no desde un Renderer huérfano de un solo argumento).
+class GitOverlayLayout : public ComponentBase {
+ public:
+  GitOverlayLayout(MainLayoutState* layout_state, Component main_child, Component git_child)
+      : layout_state_(layout_state) {
+    Add(std::move(main_child));
+    Add(std::move(git_child));
+  }
+
+  Element OnRender() override {
+    if (children_.empty()) {
+      return text("");
+    }
+    if (layout_state_ != nullptr && layout_state_->git_page_visible && children_.size() > 1) {
+      Element git = children_[1]->Render();
+      // Pantalla Git sin dibujar el workspace debajo (evita dbox + doble DOM en Draw).
+      return git | flex | bgcolor(theme::PanelBg());
+    }
+    return children_.front()->Render();
+  }
+
+  bool OnEvent(Event event) override {
+    if (children_.empty()) {
+      return false;
+    }
+    if (layout_state_ != nullptr && layout_state_->git_page_visible && children_.size() > 1) {
+      return children_[1]->OnEvent(std::move(event));
+    }
+    return children_.front()->OnEvent(std::move(event));
+  }
+
+  bool Focusable() const override {
+    if (layout_state_ != nullptr && layout_state_->git_page_visible && children_.size() > 1) {
+      return children_[1]->Focusable();
+    }
+    return !children_.empty() && children_.front()->Focusable();
+  }
+
+  Component ActiveChild() override {
+    if (layout_state_ != nullptr && layout_state_->git_page_visible && children_.size() > 1) {
+      return children_[1];
+    }
+    return children_.empty() ? nullptr : children_.front();
+  }
+
+  void SetActiveChild(ComponentBase* child) override {
+    if (Component active = ActiveChild()) {
+      active->SetActiveChild(child);
+    }
+  }
+
+ private:
+  MainLayoutState* layout_state_;
+};
+
+Component MakeGitOverlayLayout(MainLayoutState* layout_state, Component main_child,
+                               Component git_child) {
+  return Make<GitOverlayLayout>(layout_state, std::move(main_child), std::move(git_child));
 }
 
 // Panel derecho: un solo outline; en debug muestra watches debajo.
@@ -395,7 +457,7 @@ std::string status_shortcuts(AppMode mode) {
   if (mode == AppMode::kDebug) {
     return "F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into  3 rendimiento";
   }
-  return "F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 rendimiento  F7 buscar  F8 outline  F9 problemas";
+  return "F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 git  F7 buscar  F8 outline  F9 problemas";
 }
 
 std::string buffer_text(const EditorBuffer& buffer) {
@@ -550,7 +612,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                          CommandCallback on_command, MainLayoutState* layout_state,
                          StopDebugCallback on_stop_debug, ShellSession* shell,
                          WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
-                         ShellLaunchConfigProvider shell_launch_config) {
+                         ShellLaunchConfigProvider shell_launch_config, GitService* git_service,
+                         GitPanelState* git_panel_state) {
   auto split_state = std::make_shared<LayoutState>();
   auto focus_sync = std::make_shared<FocusSyncState>();
   split_state->left_width = 22;
@@ -560,9 +623,11 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto file_tree = MakeFileTreePanel(model, workspace, focus, indexer, on_command,
                                      layout_state);
   auto editor = MakeEditorPanel(workspace, focus, layout_state, symbols, indexer,
-                                symbol_indexer);
+                                symbol_indexer, git_service);
   auto source = MakeSourcePanel(model, source_state, on_command, focus, layout_state);
   auto center = MakeModeLayout(app_mode, editor, source);
+
+  auto git_panel = MakeGitPanel(git_service, git_panel_state, layout_state, focus);
 
   auto outline = MakeOutlinePanel(workspace, focus, symbols, layout_state);
   auto search = MakeSearchPanel(workspace, model, focus, layout_state, indexer,
@@ -630,13 +695,15 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     };
   }
 
-  return Renderer(with_focus_sync, [=] {
+  auto layout_root = Renderer(with_focus_sync, [=] {
     const bool show_secondary =
         layout_state == nullptr || layout_state->app_settings == nullptr ||
         layout_state->app_settings->secondary_panel_enabled;
     split_state->show_right_split = show_secondary;
     split_state->show_bottom_split =
         layout_state != nullptr && layout_state->console_visible;
+    const bool git_page_visible =
+        layout_state != nullptr && layout_state->git_page_visible;
     Element main;
     if (layout_state != nullptr && layout_state->console_visible) {
       main = show_secondary ? with_focus_sync->Render()
@@ -652,7 +719,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       status_msg = workspace->status_message;
     }
 
-    if (symbols && symbols->supports_diagnostics() && layout_state != nullptr &&
+    if (!git_page_visible && symbols && symbols->supports_diagnostics() && layout_state != nullptr &&
         !layout_state->diagnostics_panel_visible && workspace != nullptr) {
       workspace->ensure_buffer();
       const uint64_t revision = symbols->diagnostics_revision();
@@ -713,6 +780,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
 
     return vbox({main | flex | bgcolor(theme::PanelBg()), status});
   });
+
+  return MakeGitOverlayLayout(layout_state, layout_root, git_panel);
 }
 
 }  // namespace tgdb

@@ -20,4 +20,7 @@ ftxui::Component MakeConsolePanel(AppMode* app_mode, DebugModel* model,
                                   FocusManagerState* focus, int* bottom_height,
                                   ShellLaunchConfigProvider shell_launch_config);
 
+bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, int delta,
+                       AppMode* app_mode);
+
 }  // namespace tgdb

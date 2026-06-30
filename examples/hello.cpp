@@ -13,13 +13,17 @@ namespace {
 #endif
 
 
+
 int accumulate (int n) {
   int total = 0;
   for (int i = 1; i <= n; ++i) {
     total += i; 
   }
   return total;
+
+
 }
+
 void allow_external_debugger() {
   if (prctl(PR_SET_PTRACER, -1) != 0) {
     std::cerr << "aviso: no se pudo permitir attach externo (prctl): "
@@ -27,6 +31,9 @@ void allow_external_debugger() {
               << "  prueba: sudosss sysctl kernel.yama.ptrace_scope=0\n"
               << "  o usa: ./tools/launch.sh ./build/hello\n";
   }
+
+
+
 
 accumulate(0);
 }
@@ -53,6 +60,10 @@ int main() {
   int counter = 0;
   int x = 10;
   int y = 20;
+
+
+
+
 
   while (true) {
     ++counter;

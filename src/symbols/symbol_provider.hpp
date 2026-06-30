@@ -124,6 +124,7 @@ class ISymbolProvider {
     (void)path;
     (void)text;
   }
+  virtual void on_document_saved(const std::string& path) { (void)path; }
   virtual void on_document_closed(const std::string& path) { (void)path; }
 
   virtual bool supports_semantic_highlight() const { return false; }

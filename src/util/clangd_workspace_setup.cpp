@@ -11,7 +11,7 @@ namespace tgdb {
 
 namespace {
 
-constexpr const char* kClangdMarker = "# tgdb: extra include paths (auto-generated)";
+constexpr const char* kClangdMarker = "# tgdb: workspace config (auto-generated)";
 
 bool path_is_directory(const std::string& path) {
   std::error_code ec;
@@ -79,24 +79,34 @@ void apply_clangd_workspace_config(const std::string& workspace_root,
   }
 
   const fs::path clangd_path = fs::path(workspace_root) / ".clangd";
-  if (config.clangd_extra_include_paths.empty()) {
+  const bool skip_background = !config.clangd_background_index;
+  const std::vector<std::string> include_flags =
+      config.clangd_extra_include_paths.empty()
+          ? std::vector<std::string>{}
+          : expand_recursive_include_flags(config.clangd_extra_include_paths);
+  const bool needs_file = skip_background || !include_flags.empty();
+
+  if (!needs_file) {
     remove_tgdb_clangd_file(clangd_path);
     return;
   }
 
-  const std::vector<std::string> flags =
-      expand_recursive_include_flags(config.clangd_extra_include_paths);
-  if (flags.empty()) {
-    remove_tgdb_clangd_file(clangd_path);
+  std::error_code ec;
+  if (fs::is_regular_file(clangd_path, ec) &&
+      !clangd_file_is_tgdb_managed(clangd_path.string())) {
     return;
   }
 
   std::ostringstream out;
   out << kClangdMarker << '\n';
-  out << "CompileFlags:\n";
-  out << "  Add:\n";
-  for (const auto& flag : flags) {
-    out << "    - " << flag << '\n';
+  if (skip_background) {
+    out << "Index:\n  Background: Skip\n";
+  }
+  if (!include_flags.empty()) {
+    out << "CompileFlags:\n  Add:\n";
+    for (const auto& flag : include_flags) {
+      out << "    - " << flag << '\n';
+    }
   }
 
   std::ofstream output(clangd_path);

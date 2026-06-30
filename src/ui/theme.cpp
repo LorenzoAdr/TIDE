@@ -32,6 +32,7 @@ struct Palette {
   Color bp_disabled;
   Color error;
   Color warning;
+  Color success;
   Color stack_frame;
   Color status_bar;
   Color syntax_default;
@@ -57,8 +58,8 @@ const Palette kDarkPalette{
     Color::RGB(55, 75, 110),     Color::RGB(48, 58, 72),     Color::RGB(70, 95, 130),
     Color::RGB(38, 42, 52),      Color::RGB(180, 200, 255),  Color::RGB(130, 140, 160),
     Color::RGB(200, 230, 255),   Color::RGB(255, 120, 120),  Color::RGB(100, 100, 110),
-    Color::RGB(255, 100, 100),   Color::RGB(255, 200, 80),   Color::RGB(170, 210, 255),
-    Color::RGB(35, 45, 65),      Color::RGB(220, 223, 228),  Color::RGB(106, 153, 85),
+    Color::RGB(255, 100, 100),   Color::RGB(255, 200, 80),   Color::RGB(80, 220, 120),
+    Color::RGB(170, 210, 255),   Color::RGB(35, 45, 65),      Color::RGB(220, 223, 228),  Color::RGB(106, 153, 85),
     Color::RGB(206, 145, 120),   Color::RGB(181, 206, 168),  Color::RGB(198, 120, 221),
     Color::RGB(78, 201, 176),    Color::RGB(220, 220, 170),  Color::RGB(156, 220, 254),
     Color::RGB(156, 200, 254),   Color::RGB(156, 220, 200),  Color::RGB(205, 170, 255),
@@ -73,8 +74,8 @@ const Palette kLightPalette{
     Color::RGB(210, 225, 245),   Color::RGB(225, 230, 240),  Color::RGB(190, 210, 235),
     Color::RGB(220, 224, 232),   Color::RGB(30, 40, 60),     Color::RGB(100, 110, 130),
     Color::RGB(20, 50, 90),      Color::RGB(200, 40, 40),     Color::RGB(160, 160, 170),
-    Color::RGB(200, 40, 40),     Color::RGB(180, 100, 0),    Color::RGB(0, 80, 180),
-    Color::RGB(230, 235, 245),   Color::RGB(36, 41, 46),     Color::RGB(0, 128, 0),
+    Color::RGB(200, 40, 40),     Color::RGB(180, 100, 0),    Color::RGB(0, 140, 60),
+    Color::RGB(0, 80, 180),      Color::RGB(230, 235, 245),   Color::RGB(36, 41, 46),     Color::RGB(0, 128, 0),
     Color::RGB(163, 21, 21),     Color::RGB(9, 134, 88),     Color::RGB(175, 0, 157),
     Color::RGB(0, 120, 100),     Color::RGB(121, 94, 38),    Color::RGB(0, 16, 128),
     Color::RGB(0, 90, 120),      Color::RGB(0, 100, 80),     Color::RGB(130, 50, 180),
@@ -130,6 +131,7 @@ Color BpActive() { return current_palette().bp_active; }
 Color BpDisabled() { return current_palette().bp_disabled; }
 Color Error() { return current_palette().error; }
 Color Warning() { return current_palette().warning; }
+Color Success() { return current_palette().success; }
 Color StackFrame() { return current_palette().stack_frame; }
 Color StatusBar() { return current_palette().status_bar; }
 Color SyntaxDefault() { return current_palette().syntax_default; }

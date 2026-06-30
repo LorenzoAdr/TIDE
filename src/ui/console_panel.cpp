@@ -896,6 +896,42 @@ ShellLaunchConfig current_shell_launch(const ShellLaunchConfigProvider& provider
 
 }  // namespace
 
+bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, int delta,
+                       AppMode* app_mode) {
+  if (layout_state == nullptr || delta == 0) {
+    return false;
+  }
+  const bool debug_mode = app_mode != nullptr && *app_mode == AppMode::kDebug;
+  int tab = layout_state->console_tabs.selected_tab;
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    tab += delta;
+    if (tab < ConsolePanelTabs::kTerminal) {
+      tab = ConsolePanelTabs::kPerformance;
+    }
+    if (tab > ConsolePanelTabs::kPerformance) {
+      tab = ConsolePanelTabs::kTerminal;
+    }
+    if (!debug_mode && tab == ConsolePanelTabs::kDebug) {
+      continue;
+    }
+    break;
+  }
+  if (tab == layout_state->console_tabs.selected_tab) {
+    return false;
+  }
+  layout_state->console_tabs.selected_tab = tab;
+  layout_state->focus_sync_needed = true;
+  if (tab == ConsolePanelTabs::kTerminal) {
+    layout_state->text_input_focus = TextInputFocus::Console;
+    if (focus != nullptr) {
+      focus->region = FocusRegion::Terminal;
+    }
+  } else if (layout_state->text_input_focus == TextInputFocus::Console) {
+    layout_state->text_input_focus = TextInputFocus::None;
+  }
+  return true;
+}
+
 Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* shell,
                            CommandCallback on_command, MainLayoutState* layout_state,
                            FocusManagerState* focus, int* bottom_height,

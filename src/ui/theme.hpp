@@ -37,6 +37,7 @@ Color BpActive();
 Color BpDisabled();
 Color Error();
 Color Warning();
+Color Success();
 Color StackFrame();
 Color StatusBar();
 

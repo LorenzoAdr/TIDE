@@ -17,7 +17,9 @@
 #include "ftxui/component/screen_interactive.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/connection_wizard.hpp"
+#include "ui/console_panel.hpp"
 #include "ui/file_picker.hpp"
+#include "ui/git_panel.hpp"
 #include "ui/quit_confirm.hpp"
 #include "ui/open_file_confirm.hpp"
 #include "ui/settings_modal.hpp"
@@ -64,7 +66,7 @@ class EventPoller {
           if (layout_ != nullptr) {
             layout_->ui_heartbeat.store(true, std::memory_order_release);
           }
-          screen_->Post(Event::Custom);
+          screen_->PostEvent(Event::Custom);
         }
       }
     });
@@ -107,7 +109,7 @@ class UiTickPostWrapper : public ComponentBase {
       return;
     }
     layout_->request_ui_tick = false;
-    screen_->Post(Event::Custom);
+    screen_->PostEvent(Event::Custom);
   }
 
   MainLayoutState* layout_;
@@ -225,6 +227,19 @@ void Application::restart_lsp_for_workspace() {
   }
 }
 
+void Application::sync_symbol_workspace_indexer() {
+  if (workspace_.root.empty()) {
+    symbol_indexer_.stop();
+    return;
+  }
+  // With LSP on, bulk regex indexing scans the whole tree and duplicates clangd work.
+  if (app_settings_.lsp_enabled) {
+    symbol_indexer_.stop();
+    return;
+  }
+  symbol_indexer_.start_scan(workspace_.root, symbol_provider_, &indexer_);
+}
+
 void Application::apply_workspace_settings(const WorkspaceConfig& config) {
   workspace_config_ = config;
   theme::set_mode(workspace_config_.theme);
@@ -236,6 +251,7 @@ void Application::apply_workspace_settings(const WorkspaceConfig& config) {
   shell_session_.stop();
   request_terminal_autostart();
   restart_lsp_for_workspace();
+  sync_symbol_workspace_indexer();
   workspace_.buffer.view_token++;
   layout_state_.request_ui_tick = true;
 }
@@ -248,6 +264,7 @@ void Application::set_workspace(const std::string& workspace_root) {
   workspace_.root = absolute;
   workspace_.cursor_history.clear();
   workspace_.clear_tabs();
+  layout_state_.git_page_visible = false;
   workspace_.status_message = "Workspace: " + fs::path(absolute).filename().string();
   file_picker_state_.indexed_root.clear();
   file_picker_state_.all_files.clear();
@@ -279,8 +296,9 @@ void Application::set_workspace(const std::string& workspace_root) {
     symbol_provider_->on_workspace_opened(absolute, setup.compile_dir);
   }
   indexer_.start_scan(absolute);
-  symbol_indexer_.start_scan(absolute, symbol_provider_, &indexer_);
+  sync_symbol_workspace_indexer();
   workspace_watcher_.start(absolute);
+  git_service_.open(absolute);
 }
 
 void Application::on_workspace_complete(const std::string& workspace_root) {
@@ -628,6 +646,7 @@ void Application::apply_app_settings() {
   if (symbol_provider_) {
     symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
   }
+  sync_symbol_workspace_indexer();
   if (!app_settings_.secondary_panel_enabled &&
       focus_state_.region == FocusRegion::RightPanel) {
     focus_state_.region = FocusRegion::Editor;
@@ -685,6 +704,18 @@ bool Application::handle_focus_shortcuts(const Event& event) {
     return true;
   }
   if (focus_state_.region != FocusRegion::Editor) {
+    if (focus_state_.region == FocusRegion::Terminal) {
+      if (event_is_alt_left(event)) {
+        cycle_console_tab(&layout_state_, &focus_state_, -1, &app_mode_);
+        layout_state_.focus_sync_needed = true;
+        return true;
+      }
+      if (event_is_alt_right(event)) {
+        cycle_console_tab(&layout_state_, &focus_state_, 1, &app_mode_);
+        layout_state_.focus_sync_needed = true;
+        return true;
+      }
+    }
     if (event_is_alt_left(event)) {
       if (focus_state_.region == FocusRegion::RightPanel &&
           !app_settings_.secondary_panel_enabled) {
@@ -768,13 +799,22 @@ int Application::run() {
     return MakeMainLayout(&app_mode_, &model_, &workspace_, &source_state_,
                           &focus_state_, symbol_provider_, on_command,
                           &layout_state_, on_stop_debug, &shell_session_, &indexer_,
-                          &symbol_indexer_, shell_launch_config);
+                          &symbol_indexer_, shell_launch_config, &git_service_,
+                          &git_panel_state_);
   };
 
   auto layout = build_ui();
 
   layout_state_.terminal_width = [&screen]() { return screen.dimx(); };
   layout_state_.terminal_height = [&screen]() { return screen.dimy(); };
+  layout_state_.on_file_saved = [this](const std::string& path) {
+    git_service_.invalidate(path);
+    if (symbol_provider_) {
+      symbol_provider_->on_document_saved(path);
+    }
+    layout_state_.request_ui_tick = true;
+  };
+  git_service_.set_update_callback([this] { layout_state_.request_ui_tick = true; });
 
   auto with_picker = MakeFilePickerOverlay(
       layout, &model_, &workspace_, &file_picker_state_, &focus_state_, &indexer_);
@@ -844,8 +884,12 @@ int Application::run() {
         if (symbol_provider_ && symbol_provider_->drain_async_results()) {
           layout_state_.request_ui_tick = true;
         }
-        if (layout_state_.editor_tick_callback) {
+        if (layout_state_.editor_tick_callback && !layout_state_.git_page_visible) {
           layout_state_.editor_tick_callback();
+        }
+        git_service_.tick();
+        if (layout_state_.git_page_visible) {
+          GitPanelEnsureSelectedDiff(&git_service_, &git_panel_state_);
         }
         if (layout_state_.outline_tick_callback) {
           layout_state_.outline_tick_callback();
@@ -891,6 +935,26 @@ int Application::run() {
         return false;
       }
 
+      if (layout_state_.git_page_visible && app_mode_ == AppMode::kNormal) {
+        if (layout_state_.git_mouse_handler && event.is_mouse() &&
+            layout_state_.git_mouse_handler(event)) {
+          layout_state_.request_ui_tick = true;
+          return true;
+        }
+        if (!event.is_mouse() && layout_state_.git_key_handler &&
+            layout_state_.git_key_handler(event)) {
+          layout_state_.request_ui_tick = true;
+          return true;
+        }
+        if (handle_focus_shortcuts(event)) {
+          return true;
+        }
+        if (!event.is_mouse() && event != Event::F5 && event != Event::F4 &&
+            event != Event::CtrlT && event != Event::F1 && event != Event::CtrlQ) {
+          return false;
+        }
+      }
+
       if (layout_state_.editor_modifier_handler) {
         Event mod_event = event;
         layout_state_.editor_modifier_handler(mod_event);
@@ -902,14 +966,22 @@ int Application::run() {
         return true;
       }
 
-      if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
+      if (layout_state_.git_page_visible && app_mode_ == AppMode::kNormal && event.is_mouse()) {
+        if (layout_state_.git_mouse_handler && layout_state_.git_mouse_handler(event)) {
+          layout_state_.request_ui_tick = true;
+          return true;
+        }
+      } else if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
           layout_state_.explorer_mouse_handler &&
           layout_state_.explorer_mouse_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
 
-      if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
+      if (layout_state_.git_page_visible && app_mode_ == AppMode::kNormal &&
+          event.is_mouse() && layout_state_.editor_chrome_mouse_handler) {
+        // Git page activa: no enviar clics al editor oculto.
+      } else if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
           layout_state_.editor_chrome_mouse_handler &&
           layout_state_.editor_chrome_mouse_handler(event)) {
         screen.Post(Event::Custom);
@@ -1078,11 +1150,24 @@ int Application::run() {
         return true;
       }
       if (app_mode_ != AppMode::kDebug && event == Event::F5) {
-        focus_state_.region = FocusRegion::Terminal;
-        layout_state_.console_visible = true;
-        layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kPerformance;
-        layout_state_.text_input_focus = TextInputFocus::None;
-        layout_state_.focus_sync_needed = true;
+        if (!layout_state_.git_page_visible) {
+          screen.Post([this] {
+            layout_state_.git_page_visible = true;
+            focus_state_.region = FocusRegion::Editor;
+            git_service_.refresh_status();
+            git_panel_state_.selected_tab = GitPanelState::kTabStatus;
+            git_panel_state_.selected_file = 0;
+            layout_state_.text_input_focus = TextInputFocus::None;
+            layout_state_.focus_sync_needed = true;
+            layout_state_.request_ui_tick = true;
+          });
+        } else {
+          layout_state_.git_page_visible = false;
+          focus_state_.region = FocusRegion::Editor;
+          layout_state_.text_input_focus = TextInputFocus::None;
+          layout_state_.focus_sync_needed = true;
+          layout_state_.request_ui_tick = true;
+        }
         return true;
       }
       if (event == Event::CtrlP) {

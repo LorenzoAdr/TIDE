@@ -7,9 +7,11 @@
 #include <filesystem>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "editor/bracket_match.hpp"
 #include "editor/clipboard.hpp"
+#include "git/git_service.hpp"
 #include "editor/editor_context.hpp"
 #include "editor/editor_find_state.hpp"
 #include "editor/editor_render.hpp"
@@ -86,6 +88,14 @@ struct DiagnosticModalState {
   std::vector<Diagnostic> items;
 };
 
+struct GitHistoryModalState {
+  bool open = false;
+  int line = 0;
+  std::string path;
+  std::string previous_content;
+  std::string current_content;
+};
+
 struct EditorPanelState {
   Box code_box;
   Box gutter_box;
@@ -140,6 +150,12 @@ struct EditorPanelState {
   int diagnostic_suffix_code_width = 0;
   uint64_t diagnostic_suffix_view_token = 0;
   uint64_t diagnostic_suffix_revision = 0;
+  std::unordered_set<int> git_changed_lines;
+  std::unordered_map<int, std::string> git_previous_by_line;
+  std::string git_cache_path;
+  uint64_t git_cache_revision = 0;
+  uint64_t git_lines_fingerprint = 0;
+  uint64_t git_head_fingerprint = 0;
   int last_render_scroll = 0;
   int64_t last_scroll_change_ms = 0;
   bool document_open_pending = false;
@@ -377,6 +393,106 @@ char line_diagnostic_marker_from_map(EditorPanelState* panel, int line) {
     }
   }
   return warning ? 'W' : '\0';
+}
+
+bool git_line_changed(EditorPanelState* panel, int line) {
+  return panel != nullptr && panel->git_changed_lines.count(line) > 0;
+}
+
+char line_gutter_marker(EditorPanelState* panel, int line) {
+  const char diag = line_diagnostic_marker_from_map(panel, line);
+  if (diag == '!') {
+    return '!';
+  }
+  if (git_line_changed(panel, line)) {
+    return 'G';
+  }
+  if (diag == 'W') {
+    return 'W';
+  }
+  return '\0';
+}
+
+uint64_t fingerprint_lines(const std::vector<std::string>& lines) {
+  uint64_t hash = 14695981039346656037ull;
+  for (const auto& line : lines) {
+    for (unsigned char ch : line) {
+      hash ^= ch;
+      hash *= 1099511628211ull;
+    }
+    hash ^= '\n';
+    hash *= 1099511628211ull;
+  }
+  hash ^= static_cast<uint64_t>(lines.size());
+  return hash;
+}
+
+void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer& buffer) {
+  if (panel == nullptr || git == nullptr || !git->is_repo() || buffer.path.empty()) {
+    if (panel != nullptr) {
+      panel->git_changed_lines.clear();
+      panel->git_previous_by_line.clear();
+      panel->git_cache_path.clear();
+      panel->git_lines_fingerprint = 0;
+      panel->git_head_fingerprint = 0;
+    }
+    return;
+  }
+
+  const uint64_t revision = git->cache_revision();
+  if (buffer.path != panel->git_cache_path) {
+    panel->git_cache_path = buffer.path;
+    panel->git_cache_revision = 0;
+    panel->git_lines_fingerprint = 0;
+    panel->git_head_fingerprint = 0;
+    panel->git_changed_lines.clear();
+    panel->git_previous_by_line.clear();
+    git->refresh_file_head(buffer.path);
+  }
+
+  const GitFileDiff diff = git->file_diff(buffer.path);
+  if (diff.untracked) {
+    panel->git_changed_lines.clear();
+    panel->git_previous_by_line.clear();
+    for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
+      panel->git_changed_lines.insert(static_cast<int>(i));
+    }
+    panel->git_cache_revision = revision;
+    return;
+  }
+
+  if (diff.head_lines.empty()) {
+    if (revision != panel->git_cache_revision) {
+      panel->git_cache_revision = revision;
+      git->refresh_file_head(buffer.path);
+      if (!git->has_file_diff_text(buffer.path)) {
+        git->refresh_file_diff(buffer.path);
+      }
+    }
+    panel->git_changed_lines.clear();
+    panel->git_previous_by_line.clear();
+    panel->git_lines_fingerprint = 0;
+    panel->git_head_fingerprint = 0;
+    for (const auto& [line_no, change] : diff.line_changes) {
+      (void)change;
+      panel->git_changed_lines.insert(line_no);
+    }
+    return;
+  }
+
+  const uint64_t lines_fp = fingerprint_lines(buffer.lines);
+  const uint64_t head_fp = fingerprint_lines(diff.head_lines);
+  if (lines_fp != panel->git_lines_fingerprint || head_fp != panel->git_head_fingerprint) {
+    panel->git_lines_fingerprint = lines_fp;
+    panel->git_head_fingerprint = head_fp;
+    const LineDiffResult line_diff = compute_line_diff(diff.head_lines, buffer.lines);
+    panel->git_changed_lines = line_diff.changed_new_lines;
+    panel->git_previous_by_line.clear();
+    for (const auto& [line, content] : line_diff.previous_content_by_new_line) {
+      panel->git_previous_by_line[line] = content;
+    }
+  }
+  panel->git_cache_revision = revision;
 }
 
 const BracketPairHighlight& cached_bracket_highlight(EditorPanelState* panel,
@@ -733,6 +849,63 @@ Color diagnostic_severity_color(DiagnosticSeverity severity) {
   }
 }
 
+Element make_git_history_modal(const GitHistoryModalState& state) {
+  if (!state.open) {
+    return text("");
+  }
+
+  Elements rows;
+  rows.push_back(text(" Línea " + std::to_string(state.line + 1)) | color(theme::Success()) | bold);
+  rows.push_back(separator() | color(theme::AccentDim()));
+  rows.push_back(text(" Antes (HEAD):") | color(theme::Muted()) | bold);
+  rows.push_back(paragraphAlignLeft(" " + (state.previous_content.empty() ? "(vacío)"
+                                                                    : state.previous_content)) |
+                 color(theme::Header()));
+  rows.push_back(text(""));
+  rows.push_back(text(" Ahora:") | color(theme::Muted()) | bold);
+  rows.push_back(paragraphAlignLeft(" " + (state.current_content.empty() ? "(vacío)"
+                                                                     : state.current_content)) |
+                 color(theme::Header()));
+  rows.push_back(text(""));
+  rows.push_back(text(" Esc cerrar") | color(theme::Muted()));
+
+  Element dialog = ModalWindow(
+      text("Historial Git") | color(theme::Success()),
+      vbox(std::move(rows)) | size(WIDTH, GREATER_THAN, 40) | size(HEIGHT, LESS_THAN, 18));
+  return CenteredModal(std::move(dialog));
+}
+
+bool handle_git_gutter_click(EditorPanelState* panel, GitHistoryModalState* modal,
+                             GitService* git, const EditorBuffer& buffer, const Mouse& m) {
+  if (panel == nullptr || modal == nullptr || git == nullptr || m.button != Mouse::Left ||
+      m.motion != Mouse::Pressed || !panel->gutter_box.Contain(m.x, m.y)) {
+    return false;
+  }
+  const int row = m.y - panel->gutter_box.y_min;
+  if (row < 0 || row >= panel->gutter_visible_rows) {
+    return false;
+  }
+  const int line = panel->gutter_scroll_start + row;
+  if (!git_line_changed(panel, line)) {
+    return false;
+  }
+  modal->open = true;
+  modal->line = line;
+  modal->path = buffer.path;
+  const auto prev_it = panel->git_previous_by_line.find(line);
+  if (prev_it != panel->git_previous_by_line.end()) {
+    modal->previous_content = prev_it->second;
+  } else {
+    modal->previous_content = git->previous_line_content(buffer.path, line);
+  }
+  if (line >= 0 && static_cast<std::size_t>(line) < buffer.lines.size()) {
+    modal->current_content = buffer.lines[static_cast<std::size_t>(line)];
+  } else {
+    modal->current_content.clear();
+  }
+  return true;
+}
+
 bool handle_gutter_marker_click(EditorPanelState* panel, DiagnosticModalState* modal,
                                 const DocumentDiagnostics& file_diag, const Mouse& m) {
   if (panel == nullptr || modal == nullptr || m.button != Mouse::Left ||
@@ -744,8 +917,8 @@ bool handle_gutter_marker_click(EditorPanelState* panel, DiagnosticModalState* m
     return false;
   }
   const int line = panel->gutter_scroll_start + row;
-  const char marker = line_diagnostic_marker(line, file_diag);
-  if (marker == '\0') {
+  const char marker = line_gutter_marker(panel, line);
+  if (marker == '\0' || marker == 'G') {
     return false;
   }
   modal->open = true;
@@ -1536,10 +1709,15 @@ bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, Edit
 bool handle_editor_escape(EditorBuffer* buffer, EditorFindState* find,
                           MainLayoutState* layout_state, bool* goto_open,
                           CompletionState* completion, EditorPanelState* panel,
-                          DiagnosticModalState* diagnostic_modal) {
+                          DiagnosticModalState* diagnostic_modal,
+                          GitHistoryModalState* git_modal) {
   if (panel != nullptr) {
     disarm_extend_click(panel);
     end_mouse_selection(panel);
+  }
+  if (git_modal != nullptr && git_modal->open) {
+    git_modal->open = false;
+    return true;
   }
   if (diagnostic_modal != nullptr && diagnostic_modal->open) {
     diagnostic_modal->open = false;
@@ -1654,6 +1832,7 @@ void apply_mouse_drag_head(EditorBuffer* buffer, const Mouse& m, const EditorPan
 bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
                          EditorFindState* find, MainLayoutState* layout_state,
                          EditorPanelState* panel, DiagnosticModalState* diagnostic_modal,
+                         GitHistoryModalState* git_modal, GitService* git,
                          const std::shared_ptr<ISymbolProvider>& symbols, Event event,
                          int visible_lines) {
   if (!event.is_mouse()) {
@@ -1753,6 +1932,14 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       close_find_bar(find);
       if (layout_state != nullptr) {
         layout_state->text_input_focus = TextInputFocus::None;
+      }
+    }
+
+    if (in_gutter && git_modal != nullptr && git != nullptr && git->is_repo() &&
+        !buffer->path.empty()) {
+      if (handle_git_gutter_click(panel, git_modal, git, *buffer, m)) {
+        end_mouse_selection(panel);
+        return true;
       }
     }
 
@@ -2022,6 +2209,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
                         EditorFindState* find, GotoLineState* goto_state,
                         CompletionState* completion, EditorPanelState* panel,
                         DiagnosticModalState* diagnostic_modal,
+                        GitHistoryModalState* git_modal,
                         const std::shared_ptr<ISymbolProvider>& symbols,
                         WorkspaceIndexer* file_indexer,
                         SymbolWorkspaceIndexer* symbol_indexer,
@@ -2072,7 +2260,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event == Event::Escape) {
     return handle_editor_escape(buffer, find, layout_state,
                                 goto_state != nullptr ? &goto_state->open : nullptr, completion,
-                                panel, diagnostic_modal);
+                                panel, diagnostic_modal, git_modal);
   }
   if (event_is_completion(event)) {
     open_completion(completion, workspace, symbols, symbol_indexer, buffer, find, layout_state);
@@ -2141,6 +2329,9 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event == Event::CtrlS) {
     workspace->save_buffer();
     if (!workspace->root.empty() && !workspace->buffer.path.empty()) {
+      if (layout_state != nullptr && layout_state->on_file_saved) {
+        layout_state->on_file_saved(workspace->buffer.path);
+      }
       std::error_code ec;
       const auto rel = std::filesystem::relative(
           std::filesystem::path(workspace->buffer.path),
@@ -2417,19 +2608,24 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                           MainLayoutState* layout_state,
                           std::shared_ptr<ISymbolProvider> symbols,
                           WorkspaceIndexer* file_indexer,
-                          SymbolWorkspaceIndexer* symbol_indexer) {
+                          SymbolWorkspaceIndexer* symbol_indexer,
+                          GitService* git_service) {
   auto panel_state = std::make_shared<EditorPanelState>();
   auto tab_bar_state = std::make_shared<EditorTabBarState>();
   auto find_state = std::make_shared<EditorFindState>();
   auto goto_state = std::make_shared<GotoLineState>();
   auto completion_state = std::make_shared<CompletionState>();
   auto diagnostic_state = std::make_shared<DiagnosticModalState>();
+  auto git_history_state = std::make_shared<GitHistoryModalState>();
 
   auto modal_overlay = Renderer([find_state, goto_state, completion_state,
-                                 diagnostic_state, workspace, symbols, symbol_indexer,
-                                 panel_state, tab_bar_state, layout_state] {
+                                 diagnostic_state, git_history_state, workspace, symbols,
+                                 symbol_indexer, panel_state, tab_bar_state, layout_state] {
     if (tab_bar_state->overflow_open) {
       return make_tabs_overflow_modal(workspace, tab_bar_state.get());
+    }
+    if (git_history_state->open) {
+      return make_git_history_modal(*git_history_state);
     }
     if (diagnostic_state->open) {
       return make_diagnostic_modal(*diagnostic_state);
@@ -2446,7 +2642,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (goto_state->open) {
       return make_goto_line_overlay(*goto_state);
     }
-    if (layout_state != nullptr && !completion_state->open && !diagnostic_state->open) {
+    if (layout_state != nullptr && !completion_state->open && !diagnostic_state->open &&
+        !git_history_state->open) {
       workspace->ensure_buffer();
       if (auto flash_overlay = try_make_editor_symbol_flash_overlay(
               layout_state, workspace->buffer, *panel_state)) {
@@ -2456,7 +2653,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         return text("");
       }
     }
-    if (!find_state->open && !completion_state->open && !diagnostic_state->open) {
+    if (!find_state->open && !completion_state->open && !diagnostic_state->open &&
+        !git_history_state->open) {
       return make_hover_tooltip(panel_state->hover, panel_state->code_box);
     }
     if (!find_state->open) {
@@ -2478,7 +2676,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                      flex});
   });
 
-  auto code_view = Renderer([workspace, focus, panel_state, find_state, symbols, layout_state] {
+  auto code_view = Renderer([workspace, focus, panel_state, find_state, symbols, layout_state,
+                             git_service] {
     workspace->ensure_buffer();
     EditorBuffer& buffer = workspace->buffer;
     buffer.ensure_cursors();
@@ -2552,7 +2751,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       rebuild_diagnostics_by_line(panel_state.get(), file_diag,
                                   panel_state->cached_file_diag_revision);
     }
-    const bool gutter_markers = !file_diag.items.empty();
+    if (git_service != nullptr && git_service->is_repo() && !buffer.path.empty()) {
+      sync_git_cache(panel_state.get(), git_service, buffer);
+    }
+    const bool has_git_markers =
+        git_service != nullptr && git_service->is_repo() && !panel_state->git_changed_lines.empty();
+    const bool gutter_markers = !file_diag.items.empty() || has_git_markers;
     panel_state->gutter_scroll_start = start;
     panel_state->gutter_visible_rows = std::max(0, end - start);
 
@@ -2586,12 +2790,14 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           is_primary ? bgcolor(theme::EditorLineHi()) : bgcolor(theme::CodeBg());
 
       if (gutter_markers) {
-        const char marker = line_diagnostic_marker_from_map(panel_state.get(), i);
+        const char marker = line_gutter_marker(panel_state.get(), i);
         std::string gutter_text(1, marker == '\0' ? ' ' : marker);
         gutter_text += format_line_number(i + 1, gutter_w);
         Color gutter_color = theme::Muted();
         if (marker == '!') {
           gutter_color = theme::Error();
+        } else if (marker == 'G') {
+          gutter_color = theme::Success();
         } else if (marker == 'W') {
           gutter_color = theme::Warning();
         }
@@ -2720,8 +2926,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
   });
 
   auto dispatch_editor_keys = [workspace, focus, panel_state, tab_bar_state, find_state,
-                               goto_state, completion_state, diagnostic_state, symbols,
-                               file_indexer, symbol_indexer, layout_state](Event event) {
+                               goto_state, completion_state, diagnostic_state, git_history_state,
+                               symbols, file_indexer, symbol_indexer, layout_state](Event event) {
     if (tab_bar_state->overflow_open &&
         handle_tabs_overflow_keys(workspace, focus, tab_bar_state.get(), event)) {
       return true;
@@ -2747,7 +2953,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     return handle_editor_keys(workspace, focus, find_state.get(), goto_state.get(),
                               completion_state.get(), panel_state.get(), diagnostic_state.get(),
-                              symbols, file_indexer, symbol_indexer, layout_state, event, visible);
+                              git_history_state.get(), symbols, file_indexer, symbol_indexer,
+                              layout_state, event, visible);
   };
 
   auto dispatch_editor_chrome_mouse = [workspace, focus, panel_state, tab_bar_state,
@@ -2759,7 +2966,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
   };
 
   auto dispatch_editor_mouse = [workspace, focus, panel_state, find_state, diagnostic_state,
-                                  layout_state, symbols, dispatch_editor_chrome_mouse](Event event) {
+                                  git_history_state, git_service, layout_state, symbols,
+                                  dispatch_editor_chrome_mouse](Event event) {
     if (dispatch_editor_chrome_mouse(event)) {
       return true;
     }
@@ -2773,8 +2981,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       const int visible = visible_line_count(panel_state->code_box);
       update_editor_modifiers(panel_state.get(), event);
       return handle_editor_mouse(workspace, focus, find_state.get(), layout_state,
-                                 panel_state.get(), diagnostic_state.get(), symbols, event,
-                                 visible);
+                                 panel_state.get(), diagnostic_state.get(),
+                                 git_history_state.get(), git_service, symbols, event, visible);
     }
 
     if (layout_state != nullptr &&
@@ -2788,8 +2996,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const int visible = visible_line_count(panel_state->code_box);
     update_editor_modifiers(panel_state.get(), event);
     return handle_editor_mouse(workspace, focus, find_state.get(), layout_state,
-                               panel_state.get(), diagnostic_state.get(), symbols, event,
-                               visible);
+                               panel_state.get(), diagnostic_state.get(),
+                               git_history_state.get(), git_service, symbols, event, visible);
   };
 
   auto dispatch_editor_modifiers = [panel_state](Event event) {
@@ -2805,7 +3013,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       return visible_line_count(panel_state->code_box);
     };
     layout_state->editor_tick_callback = [workspace, panel_state, symbols, layout_state,
-                                          file_indexer]() {
+                                          file_indexer, git_service]() {
       const int visible = visible_line_count(panel_state->code_box);
       tick_pending_editor_navigation(layout_state, [&](const SourceLocation& loc) {
         navigate_to_location(workspace, layout_state, loc, visible);
@@ -2836,6 +3044,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           }
           sync_diagnostic_cache(panel_state.get(), symbols.get(), workspace, file_indexer);
         }
+      }
+      if (git_service != nullptr && git_service->is_repo() &&
+          (layout_state == nullptr || !layout_state->git_page_visible)) {
+        workspace->ensure_buffer();
+        const EditorBuffer& buf = workspace->buffer;
+        sync_git_cache(panel_state.get(), git_service, buf);
       }
     };
   }

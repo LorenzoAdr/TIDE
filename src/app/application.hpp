@@ -24,7 +24,8 @@
 #include "ui/settings_modal.hpp"
 #include "ui/shortcuts_modal.hpp"
 #include "ui/symbol_picker.hpp"
-#include "ui/focus_manager.hpp"
+#include "git/git_service.hpp"
+#include "ui/git_panel.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/source_panel.hpp"
 #include "ui/workspace_wizard.hpp"
@@ -72,6 +73,7 @@ class Application {
   void apply_app_settings();
   void apply_workspace_settings(const WorkspaceConfig& config);
   void restart_lsp_for_workspace();
+  void sync_symbol_workspace_indexer();
   void set_status(const std::string& message);
   void set_workspace_status(const std::string& message);
   void request_terminal_autostart();
@@ -94,6 +96,8 @@ class Application {
   WorkspaceWizardState workspace_wizard_state_;
   MainLayoutState layout_state_;
   FocusManagerState focus_state_;
+  GitService git_service_;
+  GitPanelState git_panel_state_;
   WorkspaceIndexer indexer_;
   SymbolWorkspaceIndexer symbol_indexer_;
   WorkspaceWatcher workspace_watcher_;
