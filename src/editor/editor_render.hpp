@@ -59,6 +59,7 @@ ftxui::Element RenderEditorLine(const std::string& line, int line_index,
                                const std::vector<Diagnostic>* suffix_diagnostics = nullptr,
                                const EditorSymbolPress* symbol_press = nullptr,
                                bool show_caret = true, int scroll_col = 0, int view_width = -1,
-                               CppHighlightContext* highlight_ctx = nullptr);
+                               CppHighlightContext* highlight_ctx = nullptr,
+                               bool sticky_scroll_line = false);
 
 }  // namespace tgdb

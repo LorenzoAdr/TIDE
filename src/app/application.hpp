@@ -7,6 +7,7 @@
 
 #include "app/app_mode.hpp"
 #include "app/app_settings.hpp"
+#include "app/workspace_config.hpp"
 #include "app/debug_model.hpp"
 #include "app/workspace_model.hpp"
 #include "backend/idebug_backend.hpp"
@@ -68,6 +69,8 @@ class Application {
   bool handle_focus_shortcuts(const ftxui::Event& event);
   bool any_modal_open() const;
   void apply_app_settings();
+  void apply_workspace_settings(const WorkspaceConfig& config);
+  void restart_lsp_for_workspace();
   void set_status(const std::string& message);
   void set_workspace_status(const std::string& message);
   void request_terminal_autostart();
@@ -83,6 +86,7 @@ class Application {
   ShortcutsModalState shortcuts_modal_state_;
   SettingsModalState settings_modal_state_;
   AppSettings app_settings_;
+  WorkspaceConfig workspace_config_;
   ShellSession shell_session_;
   ConnectionWizardState connection_wizard_state_;
   WorkspaceWizardState workspace_wizard_state_;

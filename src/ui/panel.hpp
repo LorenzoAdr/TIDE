@@ -65,7 +65,27 @@ inline Element ModalInputLine(const std::string& text_line) {
   return clear_under(std::move(row));
 }
 
-// Un único carácter: separador de resize (sin borde de window duplicado).
+// Separador de resize con feedback visual sutil al pasar el ratón o arrastrar.
+inline Element SplitSeparatorVertical(bool hovered, bool dragging, Box* box) {
+  Color line_color = theme::Muted();
+  if (dragging) {
+    line_color = theme::Accent();
+  } else if (hovered) {
+    line_color = theme::AccentDim();
+  }
+  return separatorCharacter("│") | color(line_color) | bgcolor(theme::PanelBg()) | reflect(*box);
+}
+
+inline Element SplitSeparatorHorizontal(bool hovered, bool dragging, Box* box) {
+  Color line_color = theme::Muted();
+  if (dragging) {
+    line_color = theme::Accent();
+  } else if (hovered) {
+    line_color = theme::AccentDim();
+  }
+  return separatorCharacter("─") | color(line_color) | bgcolor(theme::PanelBg()) | reflect(*box);
+}
+
 inline Element SplitSeparatorVertical() {
   return separatorCharacter("│") | color(theme::AccentDim()) | bgcolor(theme::PanelBg());
 }

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "app/workspace_config.hpp"
 #include "app/debug_model.hpp"
 #include "app/workspace_model.hpp"
 #include "ftxui/component/component_base.hpp"
@@ -44,6 +45,9 @@ struct ContextMenuState {
   bool rename_open = false;
   bool rename_skip_return = false;
   bool delete_confirm_open = false;
+  bool indexer_paths_open = false;
+  int indexer_paths_scroll = 0;
+  std::vector<std::string> indexer_paths_lines;
   std::string rename_input;
   std::vector<ftxui::Box> row_boxes;
 };
@@ -72,7 +76,8 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
                               MainLayoutState* layout_state,
                               const std::shared_ptr<ISymbolProvider>& symbols,
                               WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
-                              int editor_visible_lines, const ftxui::Event& event);
+                              const WorkspaceConfig* workspace_config, int editor_visible_lines,
+                              const ftxui::Event& event);
 
 bool handle_context_menu_mouse(ContextMenuState* state, MainLayoutState* layout_state,
                                const ftxui::Mouse& mouse, int* clicked_row);
@@ -81,6 +86,7 @@ ftxui::Component MakeContextMenuOverlay(
     ftxui::Component main, ContextMenuState* state, WorkspaceModel* workspace,
     DebugModel* model, FocusManagerState* focus, MainLayoutState* layout_state,
     const std::shared_ptr<ISymbolProvider>& symbols, WorkspaceIndexer* indexer,
-    SymbolWorkspaceIndexer* symbol_indexer, std::function<int()> editor_visible_lines);
+    SymbolWorkspaceIndexer* symbol_indexer, const WorkspaceConfig* workspace_config,
+    std::function<int()> editor_visible_lines);
 
 }  // namespace tgdb

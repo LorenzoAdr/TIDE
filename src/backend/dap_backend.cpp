@@ -7,6 +7,7 @@
 #include "dap/protocol.h"
 #include "dap/session.h"
 #include "util/path_normalize.hpp"
+#include "util/thread_name.hpp"
 
 namespace tgdb {
 
@@ -22,7 +23,10 @@ void DapBackend::start() {
   if (running_.exchange(true)) {
     return;
   }
-  worker_ = std::thread([this] { worker_main(); });
+  worker_ = std::thread([this] {
+    set_current_thread_name("dap-wrk");
+    worker_main();
+  });
 }
 
 void DapBackend::stop() {

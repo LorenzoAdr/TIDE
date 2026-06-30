@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -11,6 +12,17 @@
 
 namespace tgdb {
 
+struct ShellLaunchConfig {
+  std::string host_cwd;
+  std::string docker_container;
+  std::string docker_cwd;
+  std::string docker_shell = "/bin/bash";
+
+  bool uses_docker() const { return !docker_container.empty(); }
+};
+
+using ShellLaunchConfigProvider = std::function<ShellLaunchConfig()>;
+
 class ShellSession {
  public:
   ShellSession();
@@ -19,7 +31,7 @@ class ShellSession {
   ShellSession(const ShellSession&) = delete;
   ShellSession& operator=(const ShellSession&) = delete;
 
-  void request_start(const std::string& cwd, int cols, int rows);
+  void request_start(const ShellLaunchConfig& config, int cols, int rows);
   void stop();
   bool running() const;
   bool starting() const;
@@ -42,7 +54,7 @@ class ShellSession {
   std::string screen_text();
 
  private:
-  void bootstrap_shell(const std::string& cwd);
+  void bootstrap_shell(const ShellLaunchConfig& config);
   void reader_loop();
   void apply_winsize();
 

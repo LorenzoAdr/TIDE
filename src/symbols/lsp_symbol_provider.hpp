@@ -65,9 +65,11 @@ class LspSymbolProvider : public ISymbolProvider {
   void on_document_closed(const std::string& path) override;
 
   bool lsp_active() const { return use_lsp_; }
+  bool lsp_loading() const override;
 
   void set_lsp_enabled(bool enabled);
   bool lsp_enabled() const;
+  void set_workspace_clangd_options(bool use_gcc_query_driver, bool background_index);
 
  private:
   enum class AsyncJobKind { DocumentSymbols, SemanticTokens };
@@ -84,7 +86,10 @@ class LspSymbolProvider : public ISymbolProvider {
 
   std::string buffer_text_for_path(const std::string& path) const;
   void refresh_diagnostics_cache_locked() const;
-  void start_lsp_locked(const std::string& compile_commands_dir);
+  void start_lsp_async(const std::string& compile_commands_dir);
+  void finish_lsp_start_locked(bool ok);
+  void join_startup_thread();
+  void stop_lsp();
   void stop_lsp_locked();
   void start_async_worker_locked();
   void stop_async_worker_locked();
@@ -99,6 +104,8 @@ class LspSymbolProvider : public ISymbolProvider {
   LspClient client_;
   RegexSymbolProvider fallback_;
   bool lsp_enabled_ = true;
+  bool use_gcc_query_driver_ = true;
+  bool use_background_index_ = false;
   bool use_lsp_ = false;
   std::string workspace_root_;
   std::string compile_commands_dir_;
@@ -109,6 +116,8 @@ class LspSymbolProvider : public ISymbolProvider {
   ThreadSafeQueue<AsyncJob> async_jobs_;
   ThreadSafeQueue<AsyncResult> async_results_;
   std::thread async_worker_;
+  std::thread lsp_startup_thread_;
+  std::atomic<bool> lsp_starting_{false};
   std::atomic<bool> async_stop_{false};
   mutable std::mutex inflight_mutex_;
   std::unordered_set<std::string> inflight_symbols_;

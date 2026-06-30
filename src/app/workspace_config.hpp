@@ -1,0 +1,49 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "ui/theme.hpp"
+
+namespace tgdb {
+
+enum class CompileCommandsMode {
+  kAuto,
+  kHost,
+  kRemap,
+  kDockerSync,
+};
+
+struct PathMapping {
+  std::string from;
+  std::string to;
+};
+
+struct CompileCommandsSettings {
+  CompileCommandsMode mode = CompileCommandsMode::kAuto;
+  std::string source_path = "build/compile_commands.json";
+  std::string docker_container;
+  std::string docker_compile_commands_path;
+  bool docker_detect_mounts = true;
+  std::vector<PathMapping> path_mappings;
+};
+
+struct WorkspaceConfig {
+  std::vector<std::string> clangd_extra_include_paths;
+  bool clangd_use_gcc_query_driver = true;
+  bool clangd_background_index = false;
+  theme::ThemeMode theme = theme::ThemeMode::kDark;
+  CompileCommandsSettings compile_commands;
+
+  static std::string config_dir(const std::string& workspace_root);
+  static std::string private_dir(const std::string& workspace_root);
+  static std::string config_path(const std::string& workspace_root);
+  static std::string private_compile_commands_path(const std::string& workspace_root);
+  static WorkspaceConfig load(const std::string& workspace_root);
+  bool save(const std::string& workspace_root) const;
+};
+
+std::string compile_commands_mode_name(CompileCommandsMode mode);
+CompileCommandsMode parse_compile_commands_mode(const std::string& value);
+
+}  // namespace tgdb

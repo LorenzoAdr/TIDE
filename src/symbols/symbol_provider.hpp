@@ -82,6 +82,7 @@ class ISymbolProvider {
     return false;
   }
   virtual bool drain_async_results() { return false; }
+  virtual bool lsp_loading() const { return false; }
   virtual uint64_t semantic_highlight_revision() const { return 0; }
   virtual uint64_t document_symbols_revision() const { return 0; }
 

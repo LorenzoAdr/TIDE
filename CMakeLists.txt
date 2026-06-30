@@ -11,6 +11,7 @@ add_executable(tgdb
   src/main.cpp
   src/app/application.cpp
   src/app/app_settings.cpp
+  src/app/workspace_config.cpp
   src/app/debug_model.cpp
   src/app/workspace_model.cpp
   src/app/editor_tabs.cpp
@@ -26,6 +27,7 @@ add_executable(tgdb
   src/ui/call_hierarchy_panel.cpp
   src/ui/call_hierarchy_view.cpp
   src/ui/diagnostics_panel.cpp
+  src/ui/performance_panel.cpp
   src/ui/outline_panel.cpp
   src/ui/search_panel.cpp
   src/ui/right_sidebar_panel.cpp
@@ -36,6 +38,7 @@ add_executable(tgdb
   src/ui/quit_confirm.cpp
   src/ui/shortcuts_modal.cpp
   src/ui/settings_modal.cpp
+  src/ui/theme.cpp
   src/ui/connection_wizard.cpp
   src/ui/workspace_wizard.cpp
   src/ui/path_browser.cpp
@@ -45,6 +48,7 @@ add_executable(tgdb
   src/ui/focusable_component.cpp
   src/ui/clickable_interaction.cpp
   src/ui/cursor_blink.cpp
+  src/ui/spinner.cpp
   src/indexer/workspace_indexer.cpp
   src/indexer/symbol_workspace_indexer.cpp
   src/indexer/index_rules.cpp
@@ -74,10 +78,16 @@ add_executable(tgdb
   src/util/cpp_highlight.cpp
   src/util/crash_handler.cpp
   src/util/filesystem_tree.cpp
+  src/util/include_tree.cpp
   src/util/path_normalize.cpp
   src/util/compile_commands_setup.cpp
+  src/util/compile_commands_remap.cpp
+  src/util/compile_commands_lookup.cpp
+  src/util/docker_shell.cpp
+  src/util/clangd_workspace_setup.cpp
   src/util/bundled_tools.cpp
   src/util/process_list.cpp
+  src/util/system_stats.cpp
   src/terminal/shell_session.cpp
   src/terminal/raw_pty_screen.cpp
   src/terminal/pty_input.cpp

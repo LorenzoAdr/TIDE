@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -20,6 +21,7 @@
 #include "ui/clickable_interaction.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/press_ids.hpp"
+#include "util/system_stats.hpp"
 #include "ui/source_panel.hpp"
 #include "util/path_normalize.hpp"
 
@@ -66,6 +68,7 @@ using StopDebugCallback = std::function<void()>;
 struct ConsolePanelTabs {
   static constexpr int kTerminal = 0;
   static constexpr int kDebug = 1;
+  static constexpr int kPerformance = 2;
   int selected_tab = kTerminal;
 };
 
@@ -75,6 +78,7 @@ struct MainLayoutState {
   int diagnostics_panel_height = 6;
   bool terminal_start_requested = true;
   bool request_ui_tick = false;
+  std::atomic<bool> ui_heartbeat{false};
   AppSettings* app_settings = nullptr;
   ConsolePanelTabs console_tabs;
   TextInputFocus text_input_focus = TextInputFocus::None;
@@ -114,11 +118,14 @@ struct MainLayoutState {
   std::function<void()> outline_tick_callback;
   std::function<bool(const ftxui::Event&)> console_key_handler;
   std::function<bool(const ftxui::Event&)> console_mouse_handler;
+  std::function<bool(const ftxui::Event&)> split_mouse_handler;
   std::function<bool(const ftxui::Event&)> search_key_handler;
   std::function<bool(const ftxui::Event&)> call_hierarchy_key_handler;
   std::function<void()> terminal_tick_callback;
   std::function<int()> terminal_width;
+  std::function<int()> terminal_height;
   std::function<void()> schedule_ui_tick;
+  PerformanceSampler performance_sampler;
 };
 
 inline bool is_search_input_focus(TextInputFocus focus) {
@@ -206,6 +213,7 @@ ftxui::Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                                 StopDebugCallback on_stop_debug,
                                 ShellSession* shell,
                                 WorkspaceIndexer* indexer,
-                                SymbolWorkspaceIndexer* symbol_indexer);
+                                SymbolWorkspaceIndexer* symbol_indexer,
+                                ShellLaunchConfigProvider shell_launch_config);
 
 }  // namespace tgdb

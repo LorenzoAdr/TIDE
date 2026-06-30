@@ -37,6 +37,7 @@ const std::vector<ShortcutSection>& shortcut_sections() {
            {"F2", "Asistente de depuración / detener sesión"},
            {"F3", "Cambiar directorio de trabajo"},
            {"F4", "Pestaña Terminal (shell)"},
+           {"F5", "Pestaña Rendimiento (FPS, RAM, CPU)"},
            {"F7", "Panel de búsqueda en workspace"},
            {"F8", "Panel outline (símbolos del archivo)"},
            {"F9", "Mostrar / ocultar panel de problemas (clangd)"},
@@ -92,6 +93,7 @@ const std::vector<ShortcutSection>& shortcut_sections() {
            {"Clic gutter", "Alternar breakpoint"},
            {"Consola GDB", "Comandos GDB o watch <expr>"},
            {"1 / 2", "Pestañas inferior: Terminal / GDB"},
+           {"3", "Pestaña Rendimiento (solo en depuración)"},
        }},
       {"Panel de depuración (derecha)",
        {
@@ -105,6 +107,14 @@ const std::vector<ShortcutSection>& shortcut_sections() {
        {
            {"Enter / clic", "Escribir en la shell"},
            {"Tab", "Enviar tabulación a la shell"},
+           {"1", "Pestaña Terminal"},
+           {"2", "Pestaña Rendimiento (modo normal) o GDB (depuración)"},
+       }},
+      {"Rendimiento",
+       {
+           {"F5", "Abrir pestaña Rendimiento (modo normal)"},
+           {"j / k", "Desplazar lista de hilos"},
+           {"1 / 2 / 3", "Pestañas inferiores (Terminal / GDB* / Rendimiento)"},
        }},
   };
   return sections;

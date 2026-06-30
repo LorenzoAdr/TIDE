@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "util/thread_name.hpp"
+
 #include "indexer/index_rules.hpp"
 
 namespace fs = std::filesystem;
@@ -183,7 +185,10 @@ void WorkspaceWatcher::start(const std::string& workspace_root) {
   impl_->workspace_root = workspace_root;
   impl_->stop_requested = false;
   impl_->running = true;
-  impl_->worker = std::thread([this] { impl_->worker_main(); });
+  impl_->worker = std::thread([this] {
+    set_current_thread_name("idx-watch");
+    impl_->worker_main();
+  });
 }
 
 void WorkspaceWatcher::stop() {

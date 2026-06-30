@@ -11,6 +11,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
 #include "lsp/diagnostics.hpp"
+#include "editor/editor_state.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
@@ -76,8 +77,31 @@ std::string display_path(const std::string& absolute, const std::string& workspa
   return fs::path(absolute).filename().string();
 }
 
+std::string buffer_text(const EditorBuffer& buffer) {
+  std::string text;
+  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
+    if (i > 0) {
+      text.push_back('\n');
+    }
+    text += buffer.lines[i];
+  }
+  return text;
+}
+
+std::vector<std::string> workspace_relative_files(WorkspaceIndexer* indexer) {
+  if (indexer == nullptr) {
+    return {};
+  }
+  const auto snapshot = indexer->snapshot();
+  if (!snapshot) {
+    return {};
+  }
+  return snapshot->files;
+}
+
 std::vector<DiagnosticRow> build_rows(WorkspaceModel* workspace,
-                                      const std::shared_ptr<ISymbolProvider>& symbols) {
+                                      const std::shared_ptr<ISymbolProvider>& symbols,
+                                      WorkspaceIndexer* indexer) {
   std::vector<DiagnosticRow> rows;
   if (!symbols || !symbols->supports_diagnostics()) {
     return rows;
@@ -86,8 +110,18 @@ std::vector<DiagnosticRow> build_rows(WorkspaceModel* workspace,
   const std::string active =
       workspace != nullptr && !workspace->buffer.path.empty() ? workspace->buffer.path
                                                               : std::string{};
+  if (active.empty()) {
+    return rows;
+  }
 
-  for (const auto& doc : symbols->workspace_diagnostics()) {
+  const std::string workspace_root = workspace != nullptr ? workspace->root : std::string{};
+  const std::string active_text =
+      workspace != nullptr ? buffer_text(workspace->buffer) : std::string{};
+  const auto docs = diagnostics_for_translation_unit(
+      symbols->workspace_diagnostics(), active, workspace_root,
+      workspace_relative_files(indexer), active_text);
+
+  for (const auto& doc : docs) {
     for (const auto& item : doc.items) {
       DiagnosticRow row;
       row.path = doc.path;
@@ -131,15 +165,18 @@ void navigate_to_diagnostic(WorkspaceModel* workspace, const DiagnosticRow& row)
 
 Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                  std::shared_ptr<ISymbolProvider> symbols,
-                                 MainLayoutState* layout_state) {
+                                 MainLayoutState* layout_state, WorkspaceIndexer* indexer) {
   auto state = std::make_shared<DiagnosticsPanelState>();
 
-  auto renderer = Renderer([workspace, state, symbols, layout_state] {
+  auto renderer = Renderer([workspace, state, symbols, layout_state, indexer] {
     if (symbols && symbols->supports_diagnostics()) {
       const uint64_t revision = symbols->diagnostics_revision();
-      if (revision != state->rows_revision) {
-        state->rows = build_rows(workspace, symbols);
-        state->rows_revision = revision;
+      const uint64_t view_token =
+          workspace != nullptr ? workspace->buffer.view_token : static_cast<uint64_t>(0);
+      const uint64_t cache_key = revision ^ (view_token << 1);
+      if (cache_key != state->rows_revision) {
+        state->rows = build_rows(workspace, symbols, indexer);
+        state->rows_revision = cache_key;
         if (state->selected >= static_cast<int>(state->rows.size())) {
           state->selected = std::max(0, static_cast<int>(state->rows.size()) - 1);
         }

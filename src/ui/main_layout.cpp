@@ -33,8 +33,22 @@ struct LayoutState {
   int bottom_height = 8;
   int outline_height = 12;
   uint64_t last_diag_revision = 0;
+  uint64_t last_diag_view_token = 0;
+  std::string last_diag_path;
   int diag_errors = 0;
   int diag_warnings = 0;
+  Box left_sep_box;
+  Box right_sep_box;
+  Box bottom_sep_box;
+  bool left_sep_hovered = false;
+  bool right_sep_hovered = false;
+  bool bottom_sep_hovered = false;
+  bool split_dragging = false;
+  int split_drag_kind = 0;  // 1=left, 2=right, 3=bottom
+  int split_drag_start_pos = 0;
+  int split_drag_start_size = 0;
+  bool show_right_split = true;
+  bool show_bottom_split = true;
 };
 
 struct FocusSyncState {
@@ -65,6 +79,10 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
   if (focus->region == FocusRegion::Terminal) {
     if (mode == AppMode::kDebug &&
         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kDebug) {
+      return;
+    }
+    if (layout_state->console_tabs.selected_tab == ConsolePanelTabs::kPerformance) {
+      layout_state->text_input_focus = TextInputFocus::None;
       return;
     }
     layout_state->text_input_focus = TextInputFocus::Console;
@@ -295,43 +313,63 @@ Component MakeRightPanel(AppMode* app_mode, Component outline, Component watches
                                 outline_height, layout_state);
 }
 
-Component MakeVSplitLeft(Component main, Component back, int* main_size) {
+Component MakeVSplitLeft(Component main, Component back, int* main_size,
+                         std::shared_ptr<LayoutState> split_state) {
   ResizableSplitOption options;
   options.main = std::move(main);
   options.back = std::move(back);
   options.direction = Direction::Left;
   options.main_size = main_size;
-  options.separator_func = [] { return SplitSeparatorVertical(); };
+  options.separator_func = [split_state]() {
+    const bool dragging = split_state->split_dragging && split_state->split_drag_kind == 1;
+    return SplitSeparatorVertical(split_state->left_sep_hovered, dragging,
+                                  &split_state->left_sep_box);
+  };
   return ResizableSplit(std::move(options));
 }
 
-Component MakeVSplitRight(Component main, Component back, int* main_size) {
+Component MakeVSplitRight(Component main, Component back, int* main_size,
+                          std::shared_ptr<LayoutState> split_state) {
   ResizableSplitOption options;
   options.main = std::move(main);
   options.back = std::move(back);
   options.direction = Direction::Right;
   options.main_size = main_size;
-  options.separator_func = [] { return SplitSeparatorVertical(); };
+  options.separator_func = [split_state]() {
+    const bool dragging = split_state->split_dragging && split_state->split_drag_kind == 2;
+    return SplitSeparatorVertical(split_state->right_sep_hovered, dragging,
+                                  &split_state->right_sep_box);
+  };
   return ResizableSplit(std::move(options));
 }
 
-Component MakeHSplitBottom(Component main, Component back, int* main_size) {
+Component MakeHSplitBottom(Component main, Component back, int* main_size,
+                             std::shared_ptr<LayoutState> split_state) {
   ResizableSplitOption options;
   options.main = std::move(main);
   options.back = std::move(back);
   options.direction = Direction::Down;
   options.main_size = main_size;
-  options.separator_func = [] { return SplitSeparatorHorizontal(); };
+  options.separator_func = [split_state]() {
+    const bool dragging = split_state->split_dragging && split_state->split_drag_kind == 3;
+    return SplitSeparatorHorizontal(split_state->bottom_sep_hovered, dragging,
+                                   &split_state->bottom_sep_box);
+  };
   return ResizableSplit(std::move(options));
 }
 
-Component MakeHSplitTop(Component main, Component back, int* main_size) {
+Component MakeHSplitTop(Component main, Component back, int* main_size,
+                          std::shared_ptr<LayoutState> split_state) {
   ResizableSplitOption options;
   options.main = std::move(main);
   options.back = std::move(back);
   options.direction = Direction::Up;
   options.main_size = main_size;
-  options.separator_func = [] { return SplitSeparatorHorizontal(); };
+  options.separator_func = [split_state]() {
+    const bool dragging = split_state->split_dragging && split_state->split_drag_kind == 3;
+    return SplitSeparatorHorizontal(split_state->bottom_sep_hovered, dragging,
+                                   &split_state->bottom_sep_box);
+  };
   return ResizableSplit(std::move(options));
 }
 
@@ -355,9 +393,152 @@ Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
 
 std::string status_shortcuts(AppMode mode) {
   if (mode == AppMode::kDebug) {
-    return "F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into";
+    return "F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into  3 rendimiento";
   }
-  return "F1 atajos  F2 debug  F3 workspace  F4 terminal  F7 buscar  F8 outline  F9 problemas";
+  return "F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 rendimiento  F7 buscar  F8 outline  F9 problemas";
+}
+
+std::string buffer_text(const EditorBuffer& buffer) {
+  std::string text;
+  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
+    if (i > 0) {
+      text.push_back('\n');
+    }
+    text += buffer.lines[i];
+  }
+  return text;
+}
+
+constexpr int kMinSplitPanelWidth = 12;
+constexpr int kMinCenterWidth = 24;
+constexpr int kMinBottomHeight = 3;
+
+bool box_hit(const Box& box, int x, int y, int padding = 1) {
+  if (box.IsEmpty()) {
+    return false;
+  }
+  return x >= box.x_min - padding && x <= box.x_max + padding && y >= box.y_min - padding &&
+         y <= box.y_max + padding;
+}
+
+// Separador horizontal (terminal): solo padding hacia arriba para no tapar las pestañas.
+bool box_hit_bottom_sep(const Box& box, int x, int y) {
+  if (box.IsEmpty()) {
+    return false;
+  }
+  constexpr int kPaddingAbove = 1;
+  return x >= box.x_min && x <= box.x_max && y >= box.y_min - kPaddingAbove &&
+         y <= box.y_max;
+}
+
+bool update_split_hover(LayoutState* state, int x, int y) {
+  if (state == nullptr) {
+    return false;
+  }
+  bool changed = false;
+  const auto set_hover = [&](bool* hovered, const Box& box) {
+    const bool next = box_hit(box, x, y);
+    if (*hovered != next) {
+      *hovered = next;
+      changed = true;
+    }
+  };
+  set_hover(&state->left_sep_hovered, state->left_sep_box);
+  if (state->show_right_split) {
+    set_hover(&state->right_sep_hovered, state->right_sep_box);
+  } else {
+    state->right_sep_hovered = false;
+  }
+  if (state->show_bottom_split) {
+    set_hover(&state->bottom_sep_hovered, state->bottom_sep_box);
+  } else {
+    state->bottom_sep_hovered = false;
+  }
+  return changed;
+}
+
+void apply_split_drag(LayoutState* state, int x, int y, int screen_w, int screen_h) {
+  if (state == nullptr || !state->split_dragging) {
+    return;
+  }
+  switch (state->split_drag_kind) {
+    case 1: {
+      const int max_left = std::max(kMinSplitPanelWidth,
+                                    screen_w - state->right_width - kMinCenterWidth - 2);
+      const int delta = x - state->split_drag_start_pos;
+      state->left_width =
+          std::max(kMinSplitPanelWidth, std::min(state->split_drag_start_size + delta, max_left));
+      break;
+    }
+    case 2: {
+      const int max_right = std::max(kMinSplitPanelWidth,
+                                     screen_w - state->left_width - kMinCenterWidth - 2);
+      const int delta = state->split_drag_start_pos - x;
+      state->right_width =
+          std::max(kMinSplitPanelWidth, std::min(state->split_drag_start_size + delta, max_right));
+      break;
+    }
+    case 3: {
+      const int max_bottom = std::max(kMinBottomHeight, screen_h / 2);
+      const int delta = state->split_drag_start_pos - y;
+      state->bottom_height =
+          std::max(kMinBottomHeight, std::min(state->split_drag_start_size + delta, max_bottom));
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+bool handle_split_mouse(LayoutState* state, Event event, int screen_w, int screen_h) {
+  if (state == nullptr || !event.is_mouse()) {
+    return false;
+  }
+  Mouse& mouse = event.mouse();
+
+  if (state->split_dragging) {
+    if (mouse.button == Mouse::Left && mouse.motion == Mouse::Released) {
+      state->split_dragging = false;
+      state->split_drag_kind = 0;
+      return true;
+    }
+    if (mouse.motion == Mouse::Moved) {
+      apply_split_drag(state, mouse.x, mouse.y, screen_w, screen_h);
+      return true;
+    }
+    return true;
+  }
+
+  if (mouse.motion == Mouse::Moved) {
+    return update_split_hover(state, mouse.x, mouse.y);
+  }
+
+  if (mouse.button != Mouse::Left || mouse.motion != Mouse::Pressed) {
+    return false;
+  }
+
+  if (box_hit(state->left_sep_box, mouse.x, mouse.y)) {
+    state->split_dragging = true;
+    state->split_drag_kind = 1;
+    state->split_drag_start_pos = mouse.x;
+    state->split_drag_start_size = state->left_width;
+    return true;
+  }
+  if (state->show_right_split && box_hit(state->right_sep_box, mouse.x, mouse.y)) {
+    state->split_dragging = true;
+    state->split_drag_kind = 2;
+    state->split_drag_start_pos = mouse.x;
+    state->split_drag_start_size = state->right_width;
+    return true;
+  }
+  if (state->show_bottom_split && box_hit_bottom_sep(state->bottom_sep_box, mouse.x, mouse.y)) {
+    state->split_dragging = true;
+    state->split_drag_kind = 3;
+    state->split_drag_start_pos = mouse.y;
+    state->split_drag_start_size = state->bottom_height;
+    return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -368,7 +549,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                          std::shared_ptr<ISymbolProvider> symbols,
                          CommandCallback on_command, MainLayoutState* layout_state,
                          StopDebugCallback on_stop_debug, ShellSession* shell,
-                         WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer) {
+                         WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
+                         ShellLaunchConfigProvider shell_launch_config) {
   auto split_state = std::make_shared<LayoutState>();
   auto focus_sync = std::make_shared<FocusSyncState>();
   split_state->left_width = 22;
@@ -393,20 +575,21 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto right_panel =
       MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height, layout_state);
 
-  auto explorer_and_center = MakeVSplitLeft(file_tree, center, &split_state->left_width);
+  auto explorer_and_center =
+      MakeVSplitLeft(file_tree, center, &split_state->left_width, split_state);
   auto workspace_area =
-      MakeVSplitRight(right_panel, explorer_and_center, &split_state->right_width);
+      MakeVSplitRight(right_panel, explorer_and_center, &split_state->right_width, split_state);
   workspace_area = WrapClearInputFocus(std::move(workspace_area), layout_state);
   auto workspace_only = workspace_area;
   auto workspace_no_secondary =
       WrapClearInputFocus(explorer_and_center, layout_state);
 
   auto console = MakeConsolePanel(app_mode, model, shell, on_command, layout_state, focus,
-                                  &split_state->bottom_height);
+                                  &split_state->bottom_height, shell_launch_config);
   auto with_console =
-      MakeHSplitBottom(console, workspace_area, &split_state->bottom_height);
+      MakeHSplitBottom(console, workspace_area, &split_state->bottom_height, split_state);
   auto with_console_no_secondary =
-      MakeHSplitBottom(console, workspace_no_secondary, &split_state->bottom_height);
+      MakeHSplitBottom(console, workspace_no_secondary, &split_state->bottom_height, split_state);
 
   auto with_focus_sync = CatchEvent(
       with_console,
@@ -433,10 +616,27 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
         return false;
       });
 
+  if (layout_state != nullptr) {
+    layout_state->split_mouse_handler = [split_state, layout_state](Event event) {
+      const int screen_w =
+          layout_state != nullptr && layout_state->terminal_width
+              ? layout_state->terminal_width()
+              : 80;
+      const int screen_h =
+          layout_state != nullptr && layout_state->terminal_height
+              ? layout_state->terminal_height()
+              : 24;
+      return handle_split_mouse(split_state.get(), event, screen_w, screen_h);
+    };
+  }
+
   return Renderer(with_focus_sync, [=] {
     const bool show_secondary =
         layout_state == nullptr || layout_state->app_settings == nullptr ||
         layout_state->app_settings->secondary_panel_enabled;
+    split_state->show_right_split = show_secondary;
+    split_state->show_bottom_split =
+        layout_state != nullptr && layout_state->console_visible;
     Element main;
     if (layout_state != nullptr && layout_state->console_visible) {
       main = show_secondary ? with_focus_sync->Render()
@@ -453,12 +653,33 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     }
 
     if (symbols && symbols->supports_diagnostics() && layout_state != nullptr &&
-        !layout_state->diagnostics_panel_visible) {
+        !layout_state->diagnostics_panel_visible && workspace != nullptr) {
+      workspace->ensure_buffer();
       const uint64_t revision = symbols->diagnostics_revision();
-      if (revision != split_state->last_diag_revision) {
+      const uint64_t view_token = workspace->buffer.view_token;
+      const std::string& active_path = workspace->buffer.path;
+      if (revision != split_state->last_diag_revision ||
+          view_token != split_state->last_diag_view_token ||
+          active_path != split_state->last_diag_path) {
         split_state->last_diag_revision = revision;
-        count_workspace_diagnostics(symbols->workspace_diagnostics(),
-                                    &split_state->diag_errors, &split_state->diag_warnings);
+        split_state->last_diag_view_token = view_token;
+        split_state->last_diag_path = active_path;
+        split_state->diag_errors = 0;
+        split_state->diag_warnings = 0;
+        if (!active_path.empty()) {
+          std::vector<std::string> workspace_files;
+          if (indexer != nullptr) {
+            const auto snapshot = indexer->snapshot();
+            if (snapshot) {
+              workspace_files = snapshot->files;
+            }
+          }
+          const auto docs = diagnostics_for_translation_unit(
+              symbols->workspace_diagnostics(), active_path, workspace->root, workspace_files,
+              buffer_text(workspace->buffer));
+          count_workspace_diagnostics(docs, &split_state->diag_errors,
+                                      &split_state->diag_warnings);
+        }
       }
       if (split_state->diag_errors > 0 || split_state->diag_warnings > 0) {
         status_msg += "  │ ";

@@ -1,0 +1,287 @@
+#include "ui/performance_panel.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <memory>
+#include <sstream>
+#include <string>
+
+#include "ftxui/component/component.hpp"
+#include "ftxui/component/event.hpp"
+#include "ftxui/dom/elements.hpp"
+#include "ftxui/screen/box.hpp"
+#include "ui/theme.hpp"
+
+namespace tgdb {
+
+using namespace ftxui;
+
+namespace {
+
+int visible_height(int height) {
+  return std::max(4, height);
+}
+
+int visible_width(int width) {
+  return std::max(20, width);
+}
+
+std::string format_mib(std::size_t kb) {
+  std::ostringstream stream;
+  stream << std::fixed << std::setprecision(1) << (static_cast<double>(kb) / 1024.0) << " MiB";
+  return stream.str();
+}
+
+std::string format_percent(double value) {
+  std::ostringstream stream;
+  stream << std::fixed << std::setprecision(1) << value << "%";
+  return stream.str();
+}
+
+std::string format_fps(double fps) {
+  std::ostringstream stream;
+  stream << std::fixed << std::setprecision(1) << fps;
+  return stream.str();
+}
+
+std::string summarize_lsp_workers(const std::vector<ThreadSample>& workers) {
+  bool has_clangd = false;
+  std::vector<std::string> names;
+  for (const ThreadSample& worker : workers) {
+    if (worker.is_child_process) {
+      if (worker.comm == "clangd" || worker.comm.rfind("clangd", 0) == 0) {
+        has_clangd = true;
+      }
+      continue;
+    }
+    if (worker.comm.rfind("lsp-", 0) == 0) {
+      names.push_back(worker.comm);
+    }
+  }
+  if (!has_clangd && names.empty()) {
+    return "";
+  }
+  std::ostringstream out;
+  out << "  ·  LSP:";
+  if (has_clangd) {
+    out << " clangd";
+  }
+  for (const std::string& name : names) {
+    out << " " << name;
+  }
+  return out.str();
+}
+
+Color usage_color(double ratio) {
+  if (ratio >= 0.85) {
+    return theme::Error();
+  }
+  if (ratio >= 0.60) {
+    return theme::Warning();
+  }
+  return theme::Accent();
+}
+
+Element render_usage_bar(double ratio, int width) {
+  ratio = std::clamp(ratio, 0.0, 1.0);
+  const int filled = static_cast<int>(std::lround(ratio * static_cast<double>(width)));
+  std::string bar;
+  bar.reserve(static_cast<std::size_t>(width));
+  for (int i = 0; i < width; ++i) {
+    bar += (i < filled ? "█" : "░");
+  }
+  return text(bar) | color(usage_color(ratio));
+}
+
+Element render_labeled_bar(const std::string& label, double used_kb, double total_kb, int bar_width) {
+  const double ratio = total_kb > 0.0 ? used_kb / total_kb : 0.0;
+  std::ostringstream value;
+  value << format_mib(static_cast<std::size_t>(used_kb)) << " / " << format_mib(static_cast<std::size_t>(total_kb))
+        << "  " << format_percent(ratio * 100.0);
+  return hbox({
+      text(label) | size(WIDTH, EQUAL, 10) | color(theme::Muted()),
+      render_usage_bar(ratio, bar_width) | size(WIDTH, EQUAL, bar_width),
+      text(" ") | size(WIDTH, EQUAL, 1),
+      text(value.str()) | color(theme::Header()),
+  });
+}
+
+Element render_core_grid(const std::vector<CpuCoreSample>& cores, int core_count,
+                         double total_percent, int panel_width) {
+  if (cores.empty()) {
+    return text("  (sin datos de núcleos)") | color(theme::Muted());
+  }
+
+  const int columns = std::clamp(panel_width / 18, 1, 4);
+  const int mini_bar = std::max(4, (panel_width / columns) - 10);
+  Elements rows;
+
+  std::ostringstream header;
+  header << "CPU " << core_count << " núcleos  ·  total " << format_percent(total_percent);
+  rows.push_back(text(header.str()) | color(theme::Muted()));
+
+  for (std::size_t i = 0; i < cores.size(); i += static_cast<std::size_t>(columns)) {
+    Elements cells;
+    for (int col = 0; col < columns; ++col) {
+      const std::size_t index = i + static_cast<std::size_t>(col);
+      if (index >= cores.size()) {
+        break;
+      }
+      const CpuCoreSample& core = cores[index];
+      const int core_id = static_cast<int>(index);
+      const double ratio = std::clamp(core.usage_percent / 100.0, 0.0, 1.0);
+      std::ostringstream label;
+      label << "C" << core_id;
+      cells.push_back(hbox({
+          text(label.str()) | size(WIDTH, EQUAL, 3) | color(theme::Muted()),
+          render_usage_bar(ratio, mini_bar),
+          text(format_percent(core.usage_percent)) | size(WIDTH, EQUAL, 6) | color(theme::Header()),
+      }));
+    }
+    rows.push_back(hbox(std::move(cells)));
+  }
+  return vbox(std::move(rows));
+}
+
+Element render_process_section(const PerformanceSnapshot& snapshot, int body_height,
+                             int panel_width, PerformancePanelState* state) {
+  (void)panel_width;
+  Elements lines;
+
+  std::ostringstream summary;
+  summary << "FPS " << format_fps(snapshot.fps) << "  ·  RAM "
+          << format_mib(snapshot.process.rss_kb) << "  ·  CPU "
+          << format_percent(snapshot.process.cpu_percent) << "  ·  Hilos "
+          << snapshot.process.thread_count << summarize_lsp_workers(snapshot.process.threads);
+  lines.push_back(text(summary.str()) | color(theme::Header()));
+
+  constexpr int kHeaderLines = 2;
+  const int table_height = std::max(1, body_height - kHeaderLines);
+  const int total_threads = static_cast<int>(snapshot.process.threads.size());
+  const int max_scroll = std::max(0, total_threads - table_height);
+  state->thread_scroll = std::clamp(state->thread_scroll, 0, max_scroll);
+
+  lines.push_back(hbox({
+      text("TID/PID") | size(WIDTH, EQUAL, 8) | color(theme::Muted()) | bold,
+      text("nombre") | size(WIDTH, EQUAL, 14) | color(theme::Muted()) | bold,
+      text("CPU%") | size(WIDTH, EQUAL, 7) | color(theme::Muted()) | bold,
+      text("RAM") | color(theme::Muted()) | bold,
+  }));
+
+  const int start = state->thread_scroll;
+  const int end = std::min(total_threads, start + table_height);
+  if (total_threads == 0) {
+    lines.push_back(text("  (sin datos — j/k para desplazar cuando aparezcan)") |
+                    color(theme::Muted()));
+  } else {
+    for (int i = start; i < end; ++i) {
+      const ThreadSample& thread = snapshot.process.threads[static_cast<std::size_t>(i)];
+      std::string name = thread.comm;
+      if (thread.is_child_process) {
+        name += " [proc]";
+        if (thread.child_thread_count > 0) {
+          name += " " + std::to_string(thread.child_thread_count) + "th";
+        }
+      }
+      if (name.size() > 14) {
+        name = name.substr(0, 14);
+      }
+      std::string ram = thread.is_child_process ? format_mib(thread.rss_kb) : "-";
+      lines.push_back(hbox({
+          text(std::to_string(thread.tid)) | size(WIDTH, EQUAL, 8) | color(theme::Header()),
+          text(name) | size(WIDTH, EQUAL, 14) |
+              color(thread.is_child_process ? theme::Warning() : theme::Muted()),
+          text(format_percent(thread.cpu_percent)) | size(WIDTH, EQUAL, 7) | color(theme::Accent()),
+          text(ram) | color(theme::Header()),
+      }));
+    }
+  }
+
+  return vbox(std::move(lines)) | flex;
+}
+
+Element render_system_section(const PerformanceSnapshot& snapshot, int body_height, int panel_width) {
+  if (!snapshot.system.available) {
+    return text("Estadísticas del sistema no disponibles en esta plataforma.") |
+           color(theme::Muted());
+  }
+
+  Elements lines;
+  lines.push_back(render_core_grid(snapshot.system.cores, snapshot.system.core_count,
+                                   snapshot.system.cpu_total_percent, panel_width));
+
+  const int used_lines = 2 + (snapshot.system.core_count + 3) / 4;
+  if (body_height > used_lines + 3) {
+    lines.push_back(separator() | color(theme::AccentDim()));
+    lines.push_back(render_labeled_bar("RAM", static_cast<double>(snapshot.system.mem_used_kb),
+                                       static_cast<double>(snapshot.system.mem_total_kb),
+                                       std::max(8, panel_width / 3)));
+    if (snapshot.system.swap_total_kb > 0) {
+      lines.push_back(render_labeled_bar("Swap", static_cast<double>(snapshot.system.swap_used_kb),
+                                         static_cast<double>(snapshot.system.swap_total_kb),
+                                         std::max(8, panel_width / 3)));
+    }
+  }
+
+  return vbox(std::move(lines)) | flex;
+}
+
+}  // namespace
+
+Element RenderPerformancePanel(PerformanceSampler* sampler, PerformancePanelState* state,
+                               int width, int height) {
+  const int total_height = visible_height(height);
+  const int panel_width = visible_width(width);
+
+  PerformanceSnapshot snapshot;
+  if (sampler != nullptr) {
+    snapshot = sampler->snapshot();
+  }
+
+  constexpr int kMinHeightForSystem = 12;
+  const bool show_system = total_height >= kMinHeightForSystem;
+  const int process_height =
+      show_system ? std::max(4, (total_height * 2) / 3) : std::max(3, total_height - 1);
+
+  Element process_body =
+      render_process_section(snapshot, process_height, panel_width, state);
+
+  Elements layout;
+  layout.push_back(text(" tgdb ") | bold | color(theme::Accent()) | bgcolor(theme::TabIdle()) |
+                   size(HEIGHT, EQUAL, 1));
+  layout.push_back(process_body | size(HEIGHT, EQUAL, process_height) | bgcolor(theme::PanelBg()));
+
+  if (show_system) {
+    const int system_height = std::max(2, total_height - process_height - 2);
+    Element system_body =
+        render_system_section(snapshot, system_height, panel_width);
+    layout.push_back(separator() | color(theme::AccentDim()) | size(HEIGHT, EQUAL, 1));
+    layout.push_back(text(" Sistema ") | bold | color(theme::Accent()) | bgcolor(theme::TabIdle()) |
+                     size(HEIGHT, EQUAL, 1));
+    layout.push_back(system_body | size(HEIGHT, EQUAL, system_height) | bgcolor(theme::PanelBg()));
+  }
+
+  return vbox(std::move(layout)) | flex | bgcolor(theme::PanelBg());
+}
+
+Component MakePerformancePanel(PerformanceSampler* sampler,
+                               std::shared_ptr<PerformancePanelState> state) {
+  return CatchEvent(Renderer([] { return text(""); }), [sampler, state](const Event& event) {
+    if (state == nullptr) {
+      return false;
+    }
+    if (event == Event::Character('j') || event == Event::ArrowDown) {
+      state->thread_scroll += 1;
+      return true;
+    }
+    if (event == Event::Character('k') || event == Event::ArrowUp) {
+      state->thread_scroll = std::max(0, state->thread_scroll - 1);
+      return true;
+    }
+    (void)sampler;
+    return false;
+  });
+}
+
+}  // namespace tgdb

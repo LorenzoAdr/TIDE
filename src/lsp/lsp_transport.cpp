@@ -4,6 +4,8 @@
 #include <cstring>
 #include <unistd.h>
 
+#include "util/thread_name.hpp"
+
 namespace tgdb {
 
 LspTransport::~LspTransport() {
@@ -18,7 +20,10 @@ bool LspTransport::start(int stdin_write_fd, int stdout_read_fd) {
   stdin_fd_ = stdin_write_fd;
   stdout_fd_ = stdout_read_fd;
   running_ = true;
-  reader_ = std::thread([this] { reader_loop(); });
+  reader_ = std::thread([this] {
+    set_current_thread_name("lsp-read");
+    reader_loop();
+  });
   return true;
 }
 

@@ -1,5 +1,8 @@
 #include "lsp/diagnostics.hpp"
 
+#include "lsp/lsp_uri.hpp"
+#include "util/include_tree.hpp"
+
 namespace tgdb {
 
 int count_errors(const DocumentDiagnostics& doc) {
@@ -38,6 +41,37 @@ void count_workspace_diagnostics(const std::vector<DocumentDiagnostics>& docs, i
       *warnings += count_warnings(doc);
     }
   }
+}
+
+std::vector<DocumentDiagnostics> filter_diagnostics_by_paths(
+    const std::vector<DocumentDiagnostics>& docs,
+    const std::unordered_set<std::string>& allowed_paths) {
+  if (allowed_paths.empty()) {
+    return {};
+  }
+  std::vector<DocumentDiagnostics> out;
+  out.reserve(docs.size());
+  for (const auto& doc : docs) {
+    const std::string key = normalize_lsp_path(doc.path);
+    if (allowed_paths.find(key) == allowed_paths.end()) {
+      continue;
+    }
+    out.push_back(doc);
+  }
+  return out;
+}
+
+std::vector<DocumentDiagnostics> diagnostics_for_translation_unit(
+    const std::vector<DocumentDiagnostics>& all, const std::string& active_file,
+    const std::string& workspace_root,
+    const std::vector<std::string>& workspace_relative_files,
+    const std::string& active_file_text_override) {
+  if (active_file.empty()) {
+    return {};
+  }
+  const auto allowed = build_include_tree(active_file, workspace_root, workspace_relative_files,
+                                          active_file_text_override);
+  return filter_diagnostics_by_paths(all, allowed);
 }
 
 std::vector<Diagnostic> diagnostics_on_line(const DocumentDiagnostics& doc, int line) {

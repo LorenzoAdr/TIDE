@@ -15,7 +15,8 @@
 #include "lsp/lsp_uri.hpp"
 #include "indexer/index_rules.hpp"
 #include "util/bundled_tools.hpp"
-#include "util/compile_commands_setup.hpp"
+#include "app/workspace_config.hpp"
+#include "util/compile_commands_remap.hpp"
 
 #include <chrono>
 
@@ -64,7 +65,9 @@ constexpr const char* kClangdQueryDriver =
 
 }  // namespace
 
-bool LspClient::spawn_clangd(const std::string& compile_commands_dir) {
+bool LspClient::spawn_clangd(const std::string& compile_commands_dir,
+                             const bool use_gcc_query_driver,
+                             const bool background_index) {
   const auto location = resolve_clangd();
   if (!location.has_value()) {
     return false;
@@ -120,7 +123,15 @@ bool LspClient::spawn_clangd(const std::string& compile_commands_dir) {
     if (!compile_arg.empty()) {
       args_strings.push_back(compile_arg);
     }
-    args_strings.push_back(query_driver_arg);
+    if (use_gcc_query_driver) {
+      args_strings.push_back(query_driver_arg);
+    }
+    args_strings.emplace_back("-j=2");
+    if (background_index) {
+      args_strings.emplace_back("--background-index-priority=low");
+    } else {
+      args_strings.emplace_back("--background-index=0");
+    }
 
     std::vector<char*> argv;
     argv.reserve(args_strings.size() + 1);
@@ -185,7 +196,8 @@ bool LspClient::initialize(const std::string& workspace_root) {
 }
 
 bool LspClient::start(const std::string& workspace_root,
-                      const std::string& compile_commands_dir) {
+                      const std::string& compile_commands_dir,
+                      const bool use_gcc_query_driver, const bool background_index) {
   stop();
   if (workspace_root.empty()) {
     return false;
@@ -196,9 +208,11 @@ bool LspClient::start(const std::string& workspace_root,
   });
   std::string compile_dir = compile_commands_dir;
   if (compile_dir.empty()) {
-    compile_dir = ensure_compile_commands_for_clangd(workspace_root);
+    WorkspaceConfig default_config;
+    const auto setup = ensure_compile_commands_for_clangd(workspace_root, default_config);
+    compile_dir = setup.compile_dir;
   }
-  if (!spawn_clangd(compile_dir)) {
+  if (!spawn_clangd(compile_dir, use_gcc_query_driver, background_index)) {
     stop();
     return false;
   }
@@ -1290,8 +1304,8 @@ bool LspClient::ensure_semantic_tokens(const std::string& absolute_path) {
 
     SemanticTokenAttempt& attempt = semantic_token_attempts_[key];
     const int64_t now = steady_now_ms();
-    constexpr int kMaxAttempts = 30;
-    constexpr int64_t kRetryIntervalMs = 200;
+    constexpr int kMaxAttempts = 5;
+    constexpr int64_t kRetryIntervalMs = 500;
     if (attempt.count >= kMaxAttempts) {
       return false;
     }

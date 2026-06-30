@@ -421,11 +421,13 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
                          const std::string* diagnostic_suffix,
                          const std::vector<Diagnostic>* suffix_diagnostics,
                          const EditorSymbolPress* symbol_press, bool show_caret, int scroll_col,
-                         int view_width, CppHighlightContext* highlight_ctx) {
+                         int view_width, CppHighlightContext* highlight_ctx,
+                         bool sticky_scroll_line) {
   const std::string view_line = slice_line_for_view(line, scroll_col, view_width);
-  const Decorator line_bg =
-      line_index == buffer.primary_line() ? bgcolor(theme::EditorLineHi())
-                                          : bgcolor(theme::CodeBg());
+  const Decorator line_bg = sticky_scroll_line
+                                ? bgcolor(theme::TabIdle())
+                                : (line_index == buffer.primary_line() ? bgcolor(theme::EditorLineHi())
+                                                                       : bgcolor(theme::CodeBg()));
 
   const bool syntax_highlight =
       !buffer.path.empty() && is_indexed_source_path(buffer.path);

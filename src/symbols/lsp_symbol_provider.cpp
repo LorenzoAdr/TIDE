@@ -8,6 +8,8 @@
 #include <fstream>
 #include <sstream>
 
+#include "util/thread_name.hpp"
+
 namespace fs = std::filesystem;
 
 namespace tgdb {
@@ -47,15 +49,60 @@ LspSymbolProvider::~LspSymbolProvider() {
   on_workspace_closed();
 }
 
-void LspSymbolProvider::start_lsp_locked(const std::string& compile_commands_dir) {
-  if (!lsp_enabled_ || workspace_root_.empty()) {
-    use_lsp_ = false;
+void LspSymbolProvider::join_startup_thread() {
+  if (lsp_startup_thread_.joinable()) {
+    lsp_startup_thread_.join();
+  }
+  lsp_starting_.store(false, std::memory_order_release);
+}
+
+void LspSymbolProvider::finish_lsp_start_locked(bool ok) {
+  use_lsp_ = ok;
+  if (!ok) {
     return;
   }
-  use_lsp_ = client_.start(workspace_root_, compile_commands_dir);
-  if (use_lsp_) {
-    start_async_worker_locked();
+  start_async_worker_locked();
+  for (const auto& entry : open_buffers_) {
+    if (is_lsp_trackable_path(entry.first, entry.second)) {
+      client_.did_open(entry.first, entry.second);
+    }
   }
+}
+
+void LspSymbolProvider::start_lsp_async(const std::string& compile_commands_dir) {
+  join_startup_thread();
+
+  std::string root;
+  std::string compile_dir;
+  bool gcc_query = true;
+  bool background_index = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!compile_commands_dir.empty()) {
+      compile_commands_dir_ = compile_commands_dir;
+    }
+    if (!lsp_enabled_ || workspace_root_.empty()) {
+      use_lsp_ = false;
+      return;
+    }
+    root = workspace_root_;
+    compile_dir = compile_commands_dir_.empty() ? compile_commands_dir : compile_commands_dir_;
+    gcc_query = use_gcc_query_driver_;
+    background_index = use_background_index_;
+  }
+
+  lsp_starting_.store(true, std::memory_order_release);
+  lsp_startup_thread_ = std::thread([this, root, compile_dir, gcc_query, background_index] {
+    set_current_thread_name("lsp-start");
+    const bool ok = client_.start(root, compile_dir, gcc_query, background_index);
+    std::lock_guard<std::mutex> lock(mutex_);
+    lsp_starting_.store(false, std::memory_order_release);
+    finish_lsp_start_locked(ok);
+  });
+}
+
+bool LspSymbolProvider::lsp_loading() const {
+  return lsp_starting_.load(std::memory_order_acquire);
 }
 
 void LspSymbolProvider::stop_lsp_locked() {
@@ -64,6 +111,12 @@ void LspSymbolProvider::stop_lsp_locked() {
   use_lsp_ = false;
   cached_diag_revision_ = 0;
   cached_diagnostics_.clear();
+}
+
+void LspSymbolProvider::stop_lsp() {
+  join_startup_thread();
+  std::lock_guard<std::mutex> lock(mutex_);
+  stop_lsp_locked();
 }
 
 void LspSymbolProvider::start_async_worker_locked() {
@@ -76,7 +129,10 @@ void LspSymbolProvider::start_async_worker_locked() {
     inflight_symbols_.clear();
     inflight_semantic_.clear();
   }
-  async_worker_ = std::thread([this] { async_worker_main(); });
+  async_worker_ = std::thread([this] {
+    set_current_thread_name("lsp-async");
+    async_worker_main();
+  });
 }
 
 void LspSymbolProvider::stop_async_worker_locked() {
@@ -215,24 +271,22 @@ void LspSymbolProvider::tick_content_refresh_locked() {
 }
 
 void LspSymbolProvider::set_lsp_enabled(bool enabled) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (lsp_enabled_ == enabled) {
-    return;
-  }
-  lsp_enabled_ = enabled;
-  if (!enabled) {
-    stop_lsp_locked();
-    return;
-  }
-  start_lsp_locked(compile_commands_dir_);
-  if (!use_lsp_) {
-    return;
-  }
-  for (const auto& entry : open_buffers_) {
-    if (is_lsp_trackable_path(entry.first, entry.second)) {
-      client_.did_open(entry.first, entry.second);
+  bool start_after = false;
+  std::string compile_dir;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (lsp_enabled_ == enabled) {
+      return;
     }
+    lsp_enabled_ = enabled;
+    compile_dir = compile_commands_dir_;
+    start_after = enabled;
   }
+  if (!enabled) {
+    stop_lsp();
+    return;
+  }
+  start_lsp_async(compile_dir);
 }
 
 bool LspSymbolProvider::lsp_enabled() const {
@@ -240,19 +294,28 @@ bool LspSymbolProvider::lsp_enabled() const {
   return lsp_enabled_;
 }
 
+void LspSymbolProvider::set_workspace_clangd_options(const bool use_gcc_query_driver,
+                                                     const bool background_index) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  use_gcc_query_driver_ = use_gcc_query_driver;
+  use_background_index_ = background_index;
+}
+
 void LspSymbolProvider::on_workspace_opened(const std::string& root,
                                             const std::string& compile_commands_dir) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  stop_lsp_locked();
-  open_buffers_.clear();
-  workspace_root_ = root;
-  compile_commands_dir_ = compile_commands_dir;
-  start_lsp_locked(compile_commands_dir_);
+  stop_lsp();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    open_buffers_.clear();
+    workspace_root_ = root;
+    compile_commands_dir_ = compile_commands_dir;
+  }
+  start_lsp_async(compile_commands_dir);
 }
 
 void LspSymbolProvider::on_workspace_closed() {
+  stop_lsp();
   std::lock_guard<std::mutex> lock(mutex_);
-  stop_lsp_locked();
   workspace_root_.clear();
   open_buffers_.clear();
 }
@@ -407,6 +470,9 @@ bool LspSymbolProvider::ensure_semantic_tokens(const std::string& path) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!use_lsp_) {
     return false;
+  }
+  if (client_.has_ready_semantic_tokens(path)) {
+    return true;
   }
   tick_content_refresh_locked();
   enqueue_semantic_tokens_locked(normalize_lsp_path(path));

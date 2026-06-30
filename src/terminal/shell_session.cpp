@@ -10,6 +10,8 @@
 #include <thread>
 #include <vector>
 
+#include "util/thread_name.hpp"
+
 #if defined(__unix__) || defined(__linux__)
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -45,7 +47,7 @@ void ShellSession::apply_winsize() {
 #endif
 }
 
-void ShellSession::request_start(const std::string& cwd, int cols, int rows) {
+void ShellSession::request_start(const ShellLaunchConfig& config, int cols, int rows) {
   if (running() || start_in_progress_.load(std::memory_order_acquire) || master_fd_ >= 0) {
     return;
   }
@@ -53,7 +55,7 @@ void ShellSession::request_start(const std::string& cwd, int cols, int rows) {
   start_failed_.store(true, std::memory_order_release);
   return;
 #else
-  if (cwd.empty()) {
+  if (!config.uses_docker() && config.host_cwd.empty()) {
     return;
   }
 
@@ -69,11 +71,14 @@ void ShellSession::request_start(const std::string& cwd, int cols, int rows) {
     display_styled_rows_.clear();
   }
 
-  std::thread([this, cwd] { bootstrap_shell(cwd); }).detach();
+  std::thread([this, config] {
+    set_current_thread_name("shell-boot");
+    bootstrap_shell(config);
+  }).detach();
 #endif
 }
 
-void ShellSession::bootstrap_shell(const std::string& cwd) {
+void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
 #if defined(__linux__)
   {
     std::lock_guard<std::mutex> lock(terminal_mutex_);
@@ -95,11 +100,39 @@ void ShellSession::bootstrap_shell(const std::string& cwd) {
   }
 
   if (child_pid_ == 0) {
-    if (chdir(cwd.c_str()) != 0) {
-      _exit(127);
-    }
     setenv("TERM", "xterm-256color", 1);
     setenv("COLORTERM", "truecolor", 1);
+
+    if (config.uses_docker()) {
+      std::vector<std::string> args;
+      args.emplace_back("docker");
+      args.emplace_back("exec");
+      args.emplace_back("-i");
+      if (!config.docker_cwd.empty()) {
+        args.emplace_back("-w");
+        args.emplace_back(config.docker_cwd);
+      }
+      args.emplace_back("-e");
+      args.emplace_back("TERM=xterm-256color");
+      args.emplace_back(config.docker_container);
+      const std::string& shell_bin =
+          config.docker_shell.empty() ? "/bin/bash" : config.docker_shell;
+      args.emplace_back(shell_bin);
+      args.emplace_back("-i");
+
+      std::vector<char*> argv;
+      argv.reserve(args.size() + 1);
+      for (auto& arg : args) {
+        argv.push_back(arg.data());
+      }
+      argv.push_back(nullptr);
+      execvp("docker", argv.data());
+      _exit(127);
+    }
+
+    if (chdir(config.host_cwd.c_str()) != 0) {
+      _exit(127);
+    }
     const char* shell = std::getenv("SHELL");
     if (shell == nullptr || shell[0] == '\0') {
       shell = "/bin/bash";
@@ -128,7 +161,10 @@ void ShellSession::bootstrap_shell(const std::string& cwd) {
 
   running_.store(true, std::memory_order_release);
   start_in_progress_.store(false, std::memory_order_release);
-  reader_thread_ = std::make_unique<std::thread>([this] { reader_loop(); });
+  reader_thread_ = std::make_unique<std::thread>([this] {
+    set_current_thread_name("shell-read");
+    reader_loop();
+  });
 #endif
 }
 

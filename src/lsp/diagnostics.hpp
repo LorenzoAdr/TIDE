@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace tgdb {
@@ -25,6 +26,16 @@ int count_errors(const DocumentDiagnostics& doc);
 int count_warnings(const DocumentDiagnostics& doc);
 void count_workspace_diagnostics(const std::vector<DocumentDiagnostics>& docs, int* errors,
                                  int* warnings);
+
+std::vector<DocumentDiagnostics> filter_diagnostics_by_paths(
+    const std::vector<DocumentDiagnostics>& docs,
+    const std::unordered_set<std::string>& allowed_paths);
+
+std::vector<DocumentDiagnostics> diagnostics_for_translation_unit(
+    const std::vector<DocumentDiagnostics>& all, const std::string& active_file,
+    const std::string& workspace_root,
+    const std::vector<std::string>& workspace_relative_files,
+    const std::string& active_file_text_override = {});
 
 std::vector<Diagnostic> diagnostics_on_line(const DocumentDiagnostics& doc, int line);
 std::string diagnostic_severity_label(DiagnosticSeverity severity);

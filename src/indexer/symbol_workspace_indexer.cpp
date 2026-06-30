@@ -7,6 +7,7 @@
 
 #include "symbols/regex_symbol_provider.hpp"
 #include "indexer/index_rules.hpp"
+#include "util/thread_name.hpp"
 
 namespace fs = std::filesystem;
 
@@ -57,6 +58,7 @@ void SymbolWorkspaceIndexer::start_scan(const std::string& workspace_root,
     snapshot_ = snap;
   }
   worker_ = std::thread([this, workspace_root, provider, file_indexer] {
+    set_current_thread_name("idx-syms");
     worker_main(workspace_root, provider, file_indexer);
   });
 }

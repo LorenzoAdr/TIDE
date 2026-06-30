@@ -4,6 +4,7 @@
 #include <filesystem>
 
 #include "indexer/index_rules.hpp"
+#include "util/thread_name.hpp"
 
 namespace fs = std::filesystem;
 
@@ -66,7 +67,10 @@ void WorkspaceIndexer::start_scan(const std::string& workspace_root) {
     std::lock_guard<std::mutex> lock(mutex_);
     snapshot_ = snap;
   }
-  worker_ = std::thread([this, workspace_root] { worker_main(workspace_root); });
+  worker_ = std::thread([this, workspace_root] {
+    set_current_thread_name("idx-files");
+    worker_main(workspace_root);
+  });
 }
 
 void WorkspaceIndexer::stop() {

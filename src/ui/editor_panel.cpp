@@ -43,7 +43,8 @@
 #include "ui/panel.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/text_input_style.hpp"
-#include "util/path_normalize.hpp"
+#include "ui/spinner.hpp"
+#include "ui/theme.hpp"
 
 namespace tgdb {
 
@@ -116,6 +117,7 @@ struct EditorPanelState {
   int bracket_cache_col = -1;
   BracketPairHighlight bracket_cache;
   uint64_t last_diag_revision = 0;
+  std::string last_diag_path;
   int problem_errors = 0;
   int problem_warnings = 0;
   DocumentDiagnostics cached_file_diag;
@@ -398,16 +400,39 @@ const BracketPairHighlight& cached_bracket_highlight(EditorPanelState* panel,
 }
 
 void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
-                           const std::string& path) {
+                           WorkspaceModel* workspace, WorkspaceIndexer* indexer) {
   if (panel == nullptr || symbols == nullptr || !symbols->supports_diagnostics()) {
     return;
   }
   const uint64_t revision = symbols->diagnostics_revision();
-  if (revision == panel->last_diag_revision) {
+  const std::string path =
+      workspace != nullptr && !workspace->buffer.path.empty() ? workspace->buffer.path
+                                                                : std::string{};
+  const uint64_t view_token =
+      workspace != nullptr ? workspace->buffer.view_token : static_cast<uint64_t>(0);
+  const uint64_t cache_key = revision ^ (view_token << 1);
+  if (cache_key == panel->last_diag_revision && panel->last_diag_path == path) {
     return;
   }
-  panel->last_diag_revision = revision;
-  const auto docs = symbols->workspace_diagnostics();
+  panel->last_diag_revision = cache_key;
+  panel->last_diag_path = path;
+
+  std::vector<std::string> workspace_files;
+  if (indexer != nullptr) {
+    const auto snapshot = indexer->snapshot();
+    if (snapshot) {
+      workspace_files = snapshot->files;
+    }
+  }
+
+  const std::string workspace_root = workspace != nullptr ? workspace->root : std::string{};
+  const std::string active_text =
+      workspace != nullptr ? buffer_text(workspace->buffer) : std::string{};
+  const auto docs = path.empty()
+                        ? std::vector<DocumentDiagnostics>{}
+                        : diagnostics_for_translation_unit(
+                              symbols->workspace_diagnostics(), path, workspace_root,
+                              workspace_files, active_text);
   count_workspace_diagnostics(docs, &panel->problem_errors, &panel->problem_warnings);
   panel->cached_file_diag = {};
   panel->cached_file_diag_revision = 0;
@@ -821,11 +846,20 @@ Element make_breadcrumb_bar(const std::vector<BreadcrumbItem>& crumbs,
   }
   problems_btn = problems_btn | reflect(panel_state->problems_button_box);
 
+  Elements problems_row;
+  const bool clangd_loading =
+      layout_state != nullptr && layout_state->app_settings != nullptr &&
+      layout_state->app_settings->lsp_enabled && symbols != nullptr && symbols->lsp_loading();
+  if (clangd_loading) {
+    problems_row.push_back(text(" " + spinner::glyph()) | color(theme::Muted()));
+  }
+  problems_row.push_back(problems_btn);
+
   Element bar = hbox({
                   text(" "),
                   hbox(std::move(segments)),
                   text(meta) | color(theme::Muted()),
-                  problems_btn,
+                  hbox(std::move(problems_row)),
               }) |
               size(HEIGHT, EQUAL, 1) | bgcolor(theme::TabIdle()) |
               reflect(panel_state->breadcrumb_box);
@@ -869,14 +903,30 @@ Element make_hover_tooltip(const EditorHoverState& hover, const Box& code_box) {
                    flex});
 }
 
-Element make_sticky_overlay(const std::vector<StickyLine>& sticky_lines, int gutter_width) {
+Element make_sticky_overlay(const std::vector<StickyLine>& sticky_lines, int gutter_width,
+                            const EditorBuffer& buffer,
+                            const SemanticTokenDocument* semantic_tokens, int code_width,
+                            const std::vector<bool>& block_comment_line_starts) {
   if (sticky_lines.empty()) {
     return text("");
   }
   Elements rows;
   for (const StickyLine& sticky : sticky_lines) {
     const std::string indent(static_cast<std::size_t>(sticky.depth * 2), ' ');
-    rows.push_back(text(indent + sticky.text) | color(theme::Muted()) | bgcolor(theme::TabIdle()));
+    const std::string& display_line =
+        buffer.lines[static_cast<std::size_t>(sticky.source_line)];
+
+    CppHighlightContext highlight_ctx;
+    if (sticky.source_line >= 0 &&
+        sticky.source_line < static_cast<int>(block_comment_line_starts.size())) {
+      highlight_ctx.in_block_comment =
+          block_comment_line_starts[static_cast<std::size_t>(sticky.source_line)];
+    }
+
+    Element line = RenderEditorLine(display_line, sticky.source_line, buffer, false, nullptr,
+                                  semantic_tokens, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                  false, 0, code_width, &highlight_ctx, true);
+    rows.push_back(hbox({text(indent) | bgcolor(theme::TabIdle()), line | flex}) | clear_under);
   }
   const int sticky_h = static_cast<int>(rows.size());
   return dbox({text(""),
@@ -2521,11 +2571,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool suffixes_enabled =
         layout_state == nullptr || layout_state->app_settings == nullptr ||
         layout_state->app_settings->show_diagnostic_suffixes;
-    if (!scroll_suffixes_settled(*panel_state) && layout_state != nullptr &&
-        layout_state->schedule_ui_tick) {
-      layout_state->schedule_ui_tick();
-    }
-
     const bool show_caret =
         !panel_state->mouse_selecting && !buffer.primary().has_selection();
 
@@ -2626,7 +2671,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (sticky_lines.empty()) {
       return body;
     }
-    return dbox({std::move(body), make_sticky_overlay(sticky_lines, gutter_w)});
+    return dbox({std::move(body),
+                 make_sticky_overlay(sticky_lines, gutter_w, buffer, semantic_tokens, code_width,
+                                     panel_state->block_comment_line_starts)});
   });
 
   // En Stacked, el primer hijo se dibuja encima (FTXUI invierte el dbox interno).
@@ -2636,7 +2683,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
   });
 
   auto diagnostics_panel =
-      MakeDiagnosticsPanel(workspace, focus, symbols, layout_state);
+      MakeDiagnosticsPanel(workspace, focus, symbols, layout_state, file_indexer);
 
   // Sin Container::Vertical+Maybe: con muchas líneas el layout DOM de FTXUI se bloqueaba.
   auto panel = Renderer(editor_stack, [workspace, find_state, editor_stack, panel_state,
@@ -2757,7 +2804,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     layout_state->editor_visible_line_count = [panel_state]() {
       return visible_line_count(panel_state->code_box);
     };
-    layout_state->editor_tick_callback = [workspace, panel_state, symbols, layout_state]() {
+    layout_state->editor_tick_callback = [workspace, panel_state, symbols, layout_state,
+                                          file_indexer]() {
       const int visible = visible_line_count(panel_state->code_box);
       tick_pending_editor_navigation(layout_state, [&](const SourceLocation& loc) {
         navigate_to_location(workspace, layout_state, loc, visible);
@@ -2782,10 +2830,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             panel_state->symbols_fetch_pending = true;
             ensure_file_symbols(panel_state.get(), symbols.get(), path);
           }
-          if (symbols->supports_semantic_highlight()) {
+          if (symbols->supports_semantic_highlight() &&
+              !symbols->semantic_tokens_for_file(path).ready) {
             symbols->ensure_semantic_tokens(path);
           }
-          sync_diagnostic_cache(panel_state.get(), symbols.get(), path);
+          sync_diagnostic_cache(panel_state.get(), symbols.get(), workspace, file_indexer);
         }
       }
     };

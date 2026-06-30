@@ -22,6 +22,7 @@
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
+#include "util/compile_commands_lookup.hpp"
 #include "util/path_normalize.hpp"
 
 namespace tgdb {
@@ -498,6 +499,27 @@ void open_rename_prompt(ContextMenuState* state, const std::string& initial) {
   state->rename_input = initial;
 }
 
+void open_indexer_paths_modal(ContextMenuState* state, const std::string& workspace_root,
+                              const WorkspaceConfig* workspace_config) {
+  if (state == nullptr) {
+    return;
+  }
+  state->open = false;
+  state->rename_open = false;
+  state->delete_confirm_open = false;
+  state->indexer_paths_open = true;
+  state->indexer_paths_scroll = 0;
+  state->indexer_paths_lines.clear();
+  if (workspace_config != nullptr && !workspace_root.empty()) {
+    const FileIndexerPaths paths =
+        lookup_file_indexer_paths(workspace_root, *workspace_config, state->absolute_path);
+    state->indexer_paths_lines = paths.display_lines;
+  } else {
+    state->indexer_paths_lines.push_back("Rutas de indexación (clangd)");
+    state->indexer_paths_lines.push_back("(sin workspace configurado)");
+  }
+}
+
 void open_delete_confirm(ContextMenuState* state) {
   if (state == nullptr) {
     return;
@@ -511,7 +533,7 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
                     WorkspaceModel* workspace, DebugModel* model, FocusManagerState* focus,
                     MainLayoutState* layout_state, const std::shared_ptr<ISymbolProvider>& symbols,
                     WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
-                    int editor_visible_lines) {
+                    const WorkspaceConfig* workspace_config, int editor_visible_lines) {
   if (state == nullptr) {
     return false;
   }
@@ -523,6 +545,13 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     if (focus != nullptr) {
       focus->region = FocusRegion::Editor;
     }
+    return true;
+  }
+
+  if (action_id == "show_indexer_paths") {
+    const std::string workspace_root =
+        model != nullptr ? model->workspace_root : (workspace != nullptr ? workspace->root : "");
+    open_indexer_paths_modal(state, workspace_root, workspace_config);
     return true;
   }
 
@@ -659,7 +688,8 @@ int row_index_at(const ContextMenuState& state, int x, int y) {
 }  // namespace
 
 bool context_menu_active(const ContextMenuState* state) {
-  return state != nullptr && (state->open || state->rename_open || state->delete_confirm_open);
+  return state != nullptr && (state->open || state->rename_open || state->delete_confirm_open ||
+                              state->indexer_paths_open);
 }
 
 void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) {
@@ -669,6 +699,9 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
   state->open = false;
   state->rename_open = false;
   state->delete_confirm_open = false;
+  state->indexer_paths_open = false;
+  state->indexer_paths_scroll = 0;
+  state->indexer_paths_lines.clear();
   state->rename_skip_return = false;
   state->rename_input.clear();
   state->selected = 0;
@@ -688,6 +721,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
   state->open = true;
   state->rename_open = false;
   state->delete_confirm_open = false;
+  state->indexer_paths_open = false;
   state->rename_skip_return = false;
   state->anchor_x = x;
   state->anchor_y = y;
@@ -696,6 +730,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
   if (show_format) {
     set_items(state, ContextMenuKind::File,
               {{"Abrir archivo", "open_file"},
+               {"Rutas del indexer", "show_indexer_paths"},
                {"Formatear archivo", "format_file"},
                {"Renombrar archivo", "rename_file"},
                {"Borrar archivo", "delete_file"}});
@@ -703,6 +738,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
   }
   set_items(state, ContextMenuKind::File,
             {{"Abrir archivo", "open_file"},
+             {"Rutas del indexer", "show_indexer_paths"},
              {"Renombrar archivo", "rename_file"},
              {"Borrar archivo", "delete_file"}});
 }
@@ -784,6 +820,39 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
   set_items(state, ContextMenuKind::EditorBackground, {{"Formatear archivo", "format_file"}});
 }
 
+Element render_indexer_paths_modal(ContextMenuState* state) {
+  if (state == nullptr || !state->indexer_paths_open) {
+    return text("");
+  }
+  constexpr int kVisibleLines = 18;
+  const int total = static_cast<int>(state->indexer_paths_lines.size());
+  const int max_scroll = std::max(0, total - kVisibleLines);
+  state->indexer_paths_scroll = std::max(0, std::min(state->indexer_paths_scroll, max_scroll));
+
+  Elements rows;
+  const int start = state->indexer_paths_scroll;
+  const int end = std::min(total, start + kVisibleLines);
+  if (total == 0) {
+    rows.push_back(text(" (sin datos) ") | color(theme::Muted()));
+  } else {
+    for (int i = start; i < end; ++i) {
+      const std::string& line = state->indexer_paths_lines[static_cast<std::size_t>(i)];
+      const bool section = !line.empty() && line.rfind("  ", 0) != 0 && line.find(':') == std::string::npos;
+      rows.push_back(text(" " + line + " ") |
+                     color(section ? theme::Accent() : theme::Header()) | bold);
+    }
+  }
+
+  Element dialog = ModalWindow(
+      text("Rutas del indexer") | color(theme::Accent()),
+      vbox({
+          vbox(std::move(rows)) | bgcolor(theme::PanelBg()),
+          separator() | color(theme::AccentDim()),
+          text(" j/k scroll  Esc cerrar") | color(theme::Muted()),
+      }));
+  return CenteredModal(std::move(dialog));
+}
+
 Element render_delete_confirm_modal(const ContextMenuState* state) {
   if (state == nullptr || !state->delete_confirm_open) {
     return text("");
@@ -816,6 +885,10 @@ Element render_context_menu_overlay(ContextMenuState* state, MainLayoutState* la
                                     Element base) {
   if (state == nullptr) {
     return text("");
+  }
+
+  if (state->indexer_paths_open) {
+    return ScreenModalOverlay(std::move(base), render_indexer_paths_modal(state));
   }
 
   if (state->delete_confirm_open) {
@@ -859,7 +932,7 @@ Element render_context_menu_overlay(ContextMenuState* state, MainLayoutState* la
 bool handle_context_menu_hover(ContextMenuState* state, MainLayoutState* layout_state,
                                const Mouse& m) {
   if (state == nullptr || layout_state == nullptr || !state->open || state->rename_open ||
-      state->delete_confirm_open || m.motion != Mouse::Moved) {
+      state->delete_confirm_open || state->indexer_paths_open || m.motion != Mouse::Moved) {
     return false;
   }
   const std::string_view before = layout_state->clickable.hovered_id();
@@ -885,7 +958,8 @@ bool handle_context_menu_mouse(ContextMenuState* state, MainLayoutState* layout_
   if (clicked_row != nullptr) {
     *clicked_row = -1;
   }
-  if (state == nullptr || !state->open || state->rename_open || state->delete_confirm_open) {
+  if (state == nullptr || !state->open || state->rename_open || state->delete_confirm_open ||
+      state->indexer_paths_open) {
     return false;
   }
 
@@ -915,9 +989,37 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
                               MainLayoutState* layout_state,
                               const std::shared_ptr<ISymbolProvider>& symbols,
                               WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
-                              int editor_visible_lines, const Event& event) {
+                              const WorkspaceConfig* workspace_config, int editor_visible_lines,
+                              const Event& event) {
   if (state == nullptr || !context_menu_active(state)) {
     return false;
+  }
+
+  if (state->indexer_paths_open) {
+    if (event == Event::Escape) {
+      context_menu_close(state, layout_state);
+      return true;
+    }
+    constexpr int kVisibleLines = 18;
+    const int total = static_cast<int>(state->indexer_paths_lines.size());
+    const int max_scroll = std::max(0, total - kVisibleLines);
+    if (event == Event::ArrowDown || event == Event::Character('j')) {
+      state->indexer_paths_scroll = std::min(state->indexer_paths_scroll + 1, max_scroll);
+      return true;
+    }
+    if (event == Event::ArrowUp || event == Event::Character('k')) {
+      state->indexer_paths_scroll = std::max(0, state->indexer_paths_scroll - 1);
+      return true;
+    }
+    if (event == Event::PageDown) {
+      state->indexer_paths_scroll = std::min(state->indexer_paths_scroll + kVisibleLines, max_scroll);
+      return true;
+    }
+    if (event == Event::PageUp) {
+      state->indexer_paths_scroll = std::max(0, state->indexer_paths_scroll - kVisibleLines);
+      return true;
+    }
+    return true;
   }
 
   if (state->delete_confirm_open) {
@@ -990,9 +1092,9 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
     if (state->selected >= 0 && state->selected < static_cast<int>(state->action_ids.size())) {
       trigger_press(layout_state, press_id::context_menu_row(state->selected));
       execute_action(state, state->action_ids[static_cast<std::size_t>(state->selected)], workspace,
-                     model, focus, layout_state, symbols, indexer, symbol_indexer,
+                     model, focus, layout_state, symbols, indexer, symbol_indexer, workspace_config,
                      editor_visible_lines);
-      if (!state->rename_open && !state->delete_confirm_open) {
+      if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open) {
         context_menu_close(state, layout_state);
       }
       if (layout_state != nullptr) {
@@ -1010,6 +1112,7 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
                                  const std::shared_ptr<ISymbolProvider>& symbols,
                                  WorkspaceIndexer* indexer,
                                  SymbolWorkspaceIndexer* symbol_indexer,
+                                 const WorkspaceConfig* workspace_config,
                                  std::function<int()> editor_visible_lines) {
   auto run_selected_action = [=](int row) {
     if (state == nullptr || row < 0 || row >= static_cast<int>(state->action_ids.size())) {
@@ -1017,8 +1120,9 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
     }
     const int visible = editor_visible_lines ? editor_visible_lines() : 24;
     execute_action(state, state->action_ids[static_cast<std::size_t>(row)], workspace, model,
-                   focus, layout_state, symbols, indexer, symbol_indexer, visible);
-    if (!state->rename_open && !state->delete_confirm_open) {
+                   focus, layout_state, symbols, indexer, symbol_indexer, workspace_config,
+                   visible);
+    if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open) {
       context_menu_close(state, layout_state);
     }
     if (layout_state != nullptr) {
@@ -1045,7 +1149,7 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
     }
     const int visible = editor_visible_lines ? editor_visible_lines() : 24;
     return handle_context_menu_keys(state, workspace, model, focus, layout_state, symbols, indexer,
-                                    symbol_indexer, visible, event);
+                                    symbol_indexer, workspace_config, visible, event);
   };
 
   return Renderer(CatchEvent(main, handler),
@@ -1055,7 +1159,7 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
                       return base;
                     }
                     Element overlay = render_context_menu_overlay(state, layout_state, base);
-                    if (state->rename_open || state->delete_confirm_open) {
+                    if (state->rename_open || state->delete_confirm_open || state->indexer_paths_open) {
                       return overlay;
                     }
                     return dbox({std::move(base), std::move(overlay)});

@@ -4,6 +4,7 @@ build/
 .bundle-config
 third_party/bundled/
 compile_commands.json
+.tgdb/
 *.o
 *.a
 .DS_Store

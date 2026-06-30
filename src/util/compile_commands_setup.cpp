@@ -117,7 +117,7 @@ std::string find_compile_commands_dir(const std::string& workspace_root) {
   return {};
 }
 
-std::string ensure_compile_commands_for_clangd(const std::string& workspace_root) {
+std::string ensure_host_compile_commands_dir(const std::string& workspace_root) {
   if (workspace_root.empty()) {
     return {};
   }

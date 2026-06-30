@@ -23,6 +23,7 @@
 #include "ui/cursor_blink.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/panel.hpp"
+#include "ui/performance_panel.hpp"
 #include "ui/text_input_style.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
@@ -61,13 +62,15 @@ struct ConsolePanelState {
   bool layout_measured = false;
   bool shell_start_requested = false;
   bool shell_start_failed = false;
+  bool shell_launch_uses_docker = false;
+  std::string shell_docker_container;
   bool terminal_resize_applied = false;
   bool terminal_view_valid = false;
   bool shell_ui_active = false;
   std::string terminal_text;
   std::vector<TerminalStyledRow> terminal_styled_rows;
   std::string last_workspace_root;
-  std::array<Box, 2> tab_boxes;
+  std::array<Box, 3> tab_boxes;
 };
 
 void handle_gdb_command(const std::string& line, DebugModel* model, CommandCallback on_command) {
@@ -311,12 +314,42 @@ bool debug_console_mode(AppMode* app_mode) {
   return app_mode != nullptr && *app_mode == AppMode::kDebug;
 }
 
-bool terminal_tab_active(AppMode* app_mode, MainLayoutState* layout_state) {
-  if (!debug_console_mode(app_mode)) {
+bool terminal_tab_active(AppMode* /*app_mode*/, MainLayoutState* layout_state) {
+  if (layout_state == nullptr) {
     return true;
   }
+  return layout_state->console_tabs.selected_tab == ConsolePanelTabs::kTerminal;
+}
+
+bool performance_tab_active(AppMode* /*app_mode*/, MainLayoutState* layout_state) {
   return layout_state != nullptr &&
-         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kTerminal;
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kPerformance;
+}
+
+std::string_view console_tab_press_id(int tab) {
+  switch (tab) {
+    case ConsolePanelTabs::kTerminal:
+      return press_id::kConsoleTabTerminal;
+    case ConsolePanelTabs::kDebug:
+      return press_id::kConsoleTabGdb;
+    case ConsolePanelTabs::kPerformance:
+      return press_id::kConsoleTabPerformance;
+    default:
+      return press_id::kConsoleTabTerminal;
+  }
+}
+
+int console_tab_from_digit(Event event, bool debug_mode) {
+  if (event == Event::Character('1')) {
+    return ConsolePanelTabs::kTerminal;
+  }
+  if (event == Event::Character('2')) {
+    return debug_mode ? ConsolePanelTabs::kDebug : ConsolePanelTabs::kPerformance;
+  }
+  if (debug_mode && event == Event::Character('3')) {
+    return ConsolePanelTabs::kPerformance;
+  }
+  return -1;
 }
 
 bool debug_tab_active(AppMode* app_mode, MainLayoutState* layout_state) {
@@ -329,10 +362,20 @@ Element make_tab_button(const std::string& label, bool selected, bool hovered, b
   return MakeTabButton(label, selected, hovered, pressed, box);
 }
 
+void activate_console_input(MainLayoutState* layout_state, FocusManagerState* focus,
+                            Component input_box);
+
+void activate_shell_input(DebugModel* model, MainLayoutState* layout_state,
+                          FocusManagerState* focus, ShellSession* shell,
+                          ConsolePanelState* state, const ShellLaunchConfig& launch_config);
+
+bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_state,
+                              AppMode* app_mode, const Mouse& mouse);
+
 bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
                         FocusManagerState* focus, int tab) {
   if (layout_state == nullptr || tab < ConsolePanelTabs::kTerminal ||
-      tab > ConsolePanelTabs::kDebug) {
+      tab > ConsolePanelTabs::kPerformance) {
     return false;
   }
   if (layout_state->console_tabs.selected_tab == tab) {
@@ -354,31 +397,114 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
   return true;
 }
 
-bool switch_console_tab_from_mouse(ConsolePanelState* state, MainLayoutState* layout_state,
-                                   FocusManagerState* focus, int mouse_x, int mouse_y) {
+bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_state,
+                              FocusManagerState* focus, AppMode* app_mode, DebugModel* model,
+                              ShellSession* shell, Component input_box,
+                              const ShellLaunchConfig& launch_config, int mouse_x, int mouse_y) {
   if (state == nullptr) {
     return false;
   }
-  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kDebug; ++i) {
-    if (state->tab_boxes[static_cast<std::size_t>(i)].Contain(mouse_x, mouse_y)) {
-      const std::string_view tab_id =
-          i == ConsolePanelTabs::kTerminal ? press_id::kConsoleTabTerminal : press_id::kConsoleTabGdb;
-      trigger_press(layout_state, tab_id);
-      return switch_console_tab(state, layout_state, focus, i);
+  const bool debug_mode = debug_console_mode(app_mode);
+  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kPerformance; ++i) {
+    if (i == ConsolePanelTabs::kDebug && !debug_mode) {
+      continue;
     }
+    if (!state->tab_boxes[static_cast<std::size_t>(i)].Contain(mouse_x, mouse_y)) {
+      continue;
+    }
+    trigger_press(layout_state, console_tab_press_id(i));
+    switch_console_tab(state, layout_state, focus, i);
+    if (i == ConsolePanelTabs::kTerminal) {
+      activate_shell_input(model, layout_state, focus, shell, state, launch_config);
+    } else if (i == ConsolePanelTabs::kDebug) {
+      activate_console_input(layout_state, focus, input_box);
+    } else if (layout_state != nullptr) {
+      layout_state->text_input_focus = TextInputFocus::None;
+    }
+    return true;
+  }
+  return false;
+}
+
+bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layout_state,
+                                FocusManagerState* focus, AppMode* app_mode, DebugModel* model,
+                                ShellSession* shell, Component input_box,
+                                const ShellLaunchConfig& launch_config, Event event) {
+  if (state == nullptr || layout_state == nullptr || !event.is_mouse()) {
+    return false;
+  }
+  Mouse& m = event.mouse();
+  const bool on_terminal_tab = terminal_tab_active(app_mode, layout_state);
+  const bool on_debug_tab = debug_tab_active(app_mode, layout_state);
+
+  if (m.motion == Mouse::Moved) {
+    if (handle_console_tab_hover(state, layout_state, app_mode, m)) {
+      layout_state->request_ui_tick = true;
+      return true;
+    }
+    return false;
+  }
+
+  if (!state->panel_box.Contain(m.x, m.y)) {
+    return false;
+  }
+
+  if (on_terminal_tab && state->shell_ui_active) {
+    const int term_total = static_cast<int>(state->terminal_styled_rows.size());
+    const int term_visible = state->terminal_last_visible_lines;
+    if (handle_terminal_scroll_mouse(state, layout_state, m, term_total, term_visible)) {
+      return true;
+    }
+  }
+
+  if (m.button != Mouse::Left || m.motion != Mouse::Pressed) {
+    return false;
+  }
+
+  if (handle_console_tab_click(state, layout_state, focus, app_mode, model, shell, input_box,
+                               launch_config, m.x, m.y)) {
+    layout_state->focus_sync_needed = true;
+    return true;
+  }
+  if (on_debug_tab && state->history_box.Contain(m.x, m.y)) {
+    layout_state->text_input_focus = TextInputFocus::None;
+    layout_state->focus_sync_needed = true;
+    if (focus != nullptr) {
+      focus->region = FocusRegion::Terminal;
+    }
+    return true;
+  }
+  if (on_terminal_tab && state->content_box.Contain(m.x, m.y)) {
+    activate_shell_input(model, layout_state, focus, shell, state, launch_config);
+    layout_state->focus_sync_needed = true;
+    return true;
+  }
+  if (on_debug_tab && state->input_box.Contain(m.x, m.y)) {
+    activate_console_input(layout_state, focus, input_box);
+    layout_state->focus_sync_needed = true;
+    return true;
   }
   return false;
 }
 
 bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_state,
-                                const Mouse& mouse) {
+                              AppMode* app_mode, const Mouse& mouse) {
   if (state == nullptr || layout_state == nullptr || mouse.motion != Mouse::Moved) {
     return false;
+  }
+  const bool debug_mode = debug_console_mode(app_mode);
+  if (debug_mode) {
+    return update_panel_hover(
+        layout_state, mouse.x, mouse.y,
+        {{press_id::kConsoleTabTerminal, &state->tab_boxes[ConsolePanelTabs::kTerminal]},
+         {press_id::kConsoleTabGdb, &state->tab_boxes[ConsolePanelTabs::kDebug]},
+         {press_id::kConsoleTabPerformance, &state->tab_boxes[ConsolePanelTabs::kPerformance]}},
+        press_id::is_console_tab_hover);
   }
   return update_panel_hover(
       layout_state, mouse.x, mouse.y,
       {{press_id::kConsoleTabTerminal, &state->tab_boxes[ConsolePanelTabs::kTerminal]},
-       {press_id::kConsoleTabGdb, &state->tab_boxes[ConsolePanelTabs::kDebug]}},
+       {press_id::kConsoleTabPerformance, &state->tab_boxes[ConsolePanelTabs::kPerformance]}},
       press_id::is_console_tab_hover);
 }
 
@@ -494,6 +620,8 @@ void reset_terminal_session_state(ConsolePanelState* state, const std::string& w
   state->last_workspace_root = workspace_root;
   state->shell_start_requested = false;
   state->shell_start_failed = false;
+  state->shell_launch_uses_docker = false;
+  state->shell_docker_container.clear();
   state->terminal_resize_applied = false;
   state->terminal_view_valid = false;
   state->terminal_styled_rows.clear();
@@ -505,15 +633,16 @@ void reset_terminal_session_state(ConsolePanelState* state, const std::string& w
   state->applied_terminal_rows = 0;
 }
 
-void tick_terminal_shell(ConsolePanelState* state, ShellSession* shell, DebugModel* model) {
-  if (state == nullptr || shell == nullptr || model == nullptr) {
+void tick_terminal_shell(ConsolePanelState* state, ShellSession* shell,
+                       const ShellLaunchConfig& launch_config) {
+  if (state == nullptr || shell == nullptr) {
     return;
   }
-  if (model->workspace_root.empty()) {
+  if (launch_config.host_cwd.empty()) {
     return;
   }
 
-  reset_terminal_session_state(state, model->workspace_root);
+  reset_terminal_session_state(state, launch_config.host_cwd);
 
   const int cols =
       state->layout_measured ? state->pending_terminal_cols : state->pending_terminal_cols;
@@ -532,7 +661,9 @@ void tick_terminal_shell(ConsolePanelState* state, ShellSession* shell, DebugMod
     if (!state->shell_start_requested || state->shell_start_failed) {
       return;
     }
-    shell->request_start(model->workspace_root, cols, rows);
+    state->shell_launch_uses_docker = launch_config.uses_docker();
+    state->shell_docker_container = launch_config.docker_container;
+    shell->request_start(launch_config, cols, rows);
     return;
   }
 
@@ -617,13 +748,13 @@ void activate_console_input(MainLayoutState* layout_state, FocusManagerState* fo
 
 void activate_shell_input(DebugModel* model, MainLayoutState* layout_state,
                           FocusManagerState* focus, ShellSession* shell,
-                          ConsolePanelState* state) {
+                          ConsolePanelState* state, const ShellLaunchConfig& launch_config) {
   activate_console_input(layout_state, focus, nullptr);
   if (state != nullptr) {
     state->shell_start_requested = true;
     state->shell_start_failed = false;
   }
-  tick_terminal_shell(state, shell, model);
+  tick_terminal_shell(state, shell, launch_config);
 }
 
 Element render_gdb_console(ConsolePanelState* state, DebugModel* model, AppMode* app_mode,
@@ -692,9 +823,13 @@ Element render_shell_terminal(ConsolePanelState* state, DebugModel* model, Shell
   if (state == nullptr || !state->shell_ui_active) {
     std::string message = "(F4 o clic para abrir la terminal)";
     if (state != nullptr && state->shell_start_failed) {
-      message = "(shell no disponible)";
+      message = state->shell_launch_uses_docker
+                    ? "(docker exec falló: " + state->shell_docker_container + ")"
+                    : "(shell no disponible)";
     } else if (state != nullptr && state->shell_start_requested) {
-      message = "(iniciando terminal...)";
+      message = state->shell_launch_uses_docker
+                    ? "(conectando a docker: " + state->shell_docker_container + "...)"
+                    : "(iniciando terminal...)";
     }
     return render_terminal_body(text(message) | color(theme::Muted()));
   }
@@ -747,22 +882,40 @@ bool debug_console_keys_active(AppMode* app_mode, FocusManagerState* focus,
   return focus != nullptr && focus->region == FocusRegion::Terminal;
 }
 
+ShellLaunchConfig current_shell_launch(const ShellLaunchConfigProvider& provider,
+                                       DebugModel* model) {
+  if (provider) {
+    return provider();
+  }
+  ShellLaunchConfig fallback;
+  if (model != nullptr) {
+    fallback.host_cwd = model->workspace_root;
+  }
+  return fallback;
+}
+
 }  // namespace
 
 Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* shell,
                            CommandCallback on_command, MainLayoutState* layout_state,
-                           FocusManagerState* focus, int* bottom_height) {
+                           FocusManagerState* focus, int* bottom_height,
+                           ShellLaunchConfigProvider shell_launch_config) {
   auto state = std::make_shared<ConsolePanelState>();
+  auto perf_state = std::make_shared<PerformancePanelState>();
+  PerformanceSampler* sampler =
+      layout_state != nullptr ? &layout_state->performance_sampler : nullptr;
+  auto performance_panel = MakePerformancePanel(sampler, perf_state);
   auto input_box = Input(MakeBlinkInputOption(&state->input, &state->input_placeholder));
   auto input_maybe = Maybe(
       input_box, [app_mode, layout_state] {
         return debug_tab_active(app_mode, layout_state) && console_input_active(layout_state);
       });
 
-  auto component = Container::Vertical({input_maybe});
+  auto component = Container::Vertical({input_maybe, performance_panel});
 
   auto wrapped = CatchEvent(component, [app_mode, model, shell, on_command, state,
-                                        layout_state, focus, input_box](Event event) {
+                                        layout_state, focus, input_box,
+                                        shell_launch_config](Event event) {
     const bool on_terminal_tab = terminal_tab_active(app_mode, layout_state);
     const bool on_debug_tab = debug_tab_active(app_mode, layout_state);
 
@@ -777,17 +930,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     const int total = static_cast<int>(model->console_output.size());
     const int max_first = max_first_visible(total, visible);
 
-    if (debug_console_mode(app_mode) &&
-        (event == Event::Character('1') || event == Event::Character('2'))) {
-      const int tab = event == Event::Character('1') ? ConsolePanelTabs::kTerminal
-                                                     : ConsolePanelTabs::kDebug;
-      trigger_press(layout_state,
-                    tab == ConsolePanelTabs::kTerminal ? press_id::kConsoleTabTerminal
-                                                       : press_id::kConsoleTabGdb);
+    if (const int tab = console_tab_from_digit(event, debug_console_mode(app_mode)); tab >= 0) {
+      trigger_press(layout_state, console_tab_press_id(tab));
       switch_console_tab(state.get(), layout_state, focus, tab);
       if (tab == ConsolePanelTabs::kTerminal) {
-        activate_shell_input(model, layout_state, focus, shell, state.get());
-      } else {
+        activate_shell_input(model, layout_state, focus, shell, state.get(),
+                             current_shell_launch(shell_launch_config, model));
+      } else if (tab == ConsolePanelTabs::kDebug) {
         activate_console_input(layout_state, focus, input_box);
       }
       return true;
@@ -808,54 +957,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       return true;
     }
 
-    if (event.is_mouse() && event.mouse().motion == Mouse::Moved) {
-      handle_console_tab_hover(state.get(), layout_state, event.mouse());
-      return false;
-    }
-
-    if (on_terminal_tab && state->shell_ui_active && event.is_mouse()) {
-      const int term_total = static_cast<int>(state->terminal_styled_rows.size());
-      const int term_visible = state->terminal_last_visible_lines;
-      if (handle_terminal_scroll_mouse(state.get(), layout_state, event.mouse(), term_total,
-                                       term_visible)) {
-        return true;
-      }
-    }
-
     if (on_terminal_tab && state->shell_ui_active && handle_terminal_scroll_keys(state.get(), event)) {
       return true;
-    }
-
-    if (event.is_mouse() && event.mouse().button == Mouse::Left &&
-        event.mouse().motion == Mouse::Pressed) {
-      const auto& m = event.mouse();
-      if (debug_console_mode(app_mode) &&
-          switch_console_tab_from_mouse(state.get(), layout_state, focus, m.x, m.y)) {
-        if (layout_state->console_tabs.selected_tab == ConsolePanelTabs::kDebug) {
-          activate_console_input(layout_state, focus, input_box);
-        } else {
-          activate_shell_input(model, layout_state, focus, shell, state.get());
-        }
-        return true;
-      }
-      if (on_debug_tab && state->history_box.Contain(m.x, m.y)) {
-        if (layout_state != nullptr) {
-          layout_state->text_input_focus = TextInputFocus::None;
-          layout_state->focus_sync_needed = true;
-        }
-        if (focus != nullptr) {
-          focus->region = FocusRegion::Terminal;
-        }
-        return true;
-      }
-      if (on_terminal_tab && state->content_box.Contain(m.x, m.y)) {
-        activate_shell_input(model, layout_state, focus, shell, state.get());
-        return true;
-      }
-      if (on_debug_tab && state->input_box.Contain(m.x, m.y)) {
-        activate_console_input(layout_state, focus, input_box);
-        return false;
-      }
     }
 
     if (terminal_pty_input_active(layout_state, focus, shell) && on_terminal_tab) {
@@ -885,7 +988,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     }
 
     if (event == Event::Return && on_terminal_tab) {
-      activate_shell_input(model, layout_state, focus, shell, state.get());
+      activate_shell_input(model, layout_state, focus, shell, state.get(),
+                           current_shell_launch(shell_launch_config, model));
       if (forward_pty_key(shell, event)) {
         return true;
       }
@@ -966,39 +1070,19 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     return forward_pty_key(shell, event);
   };
 
-  auto dispatch_console_mouse = [app_mode, layout_state, state](Event event) -> bool {
-    if (!event.is_mouse() || !terminal_tab_active(app_mode, layout_state)) {
-      return false;
-    }
-    if (!state->shell_ui_active) {
-      return false;
-    }
-    const int term_total = static_cast<int>(state->terminal_styled_rows.size());
-    const int term_visible = state->terminal_last_visible_lines;
-    return handle_terminal_scroll_mouse(state.get(), layout_state, event.mouse(), term_total,
-                                        term_visible);
+  auto dispatch_console_mouse = [app_mode, layout_state, focus, model, shell, state, input_box,
+                                 shell_launch_config](Event event) -> bool {
+    return handle_console_panel_mouse(
+        state.get(), layout_state, focus, app_mode, model, shell, input_box,
+        current_shell_launch(shell_launch_config, model), event);
   };
 
   if (layout_state != nullptr) {
     layout_state->console_key_handler = dispatch_console_keys;
     layout_state->console_mouse_handler = dispatch_console_mouse;
-    layout_state->console_debug_mouse_handler =
-        [app_mode, state, layout_state, focus](Event event) {
-          if (!debug_console_mode(app_mode) || !event.is_mouse()) {
-            return false;
-          }
-          const Mouse& m = event.mouse();
-          if (m.motion == Mouse::Moved) {
-            handle_console_tab_hover(state.get(), layout_state, m);
-            return layout_state->request_ui_tick;
-          }
-          if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
-            return switch_console_tab_from_mouse(state.get(), layout_state, focus, m.x, m.y);
-          }
-          return false;
-        };
+    layout_state->console_debug_mouse_handler = dispatch_console_mouse;
     layout_state->terminal_tick_callback = [app_mode, model, shell, state, layout_state, focus,
-                                            bottom_height] {
+                                            bottom_height, shell_launch_config] {
       if (layout_state->terminal_start_requested) {
         state->shell_start_requested = true;
         state->shell_start_failed = false;
@@ -1009,33 +1093,33 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       }
       const int panel_height =
           bottom_height != nullptr && *bottom_height > 1 ? *bottom_height : 8;
-      const int layout_height =
-          debug_console_mode(app_mode) ? std::max(2, panel_height - 1) : panel_height;
+      const int layout_height = std::max(2, panel_height - 2);
+      if (!terminal_tab_active(app_mode, layout_state)) {
+        return;
+      }
       update_terminal_layout(state.get(), layout_height, layout_state);
-      tick_terminal_shell(state.get(), shell, model);
+      tick_terminal_shell(state.get(), shell,
+                          current_shell_launch(shell_launch_config, model));
       refresh_terminal_view(shell, state.get());
     };
   }
 
   return Renderer(wrapped, [app_mode, model, shell, focus, input_box, input_maybe, state,
-                            layout_state, bottom_height] {
+                            layout_state, bottom_height, perf_state, sampler] {
     state->input_placeholder = console_placeholder(app_mode);
     (void)input_maybe;
+    (void)input_box;
 
     const bool debug_mode = debug_console_mode(app_mode);
     const int panel_height =
         bottom_height != nullptr && *bottom_height > 1 ? *bottom_height : 8;
-
-    if (!debug_mode) {
-      const int body_height = std::max(1, panel_height - 1);
-      Element body = render_shell_terminal(state.get(), model, shell, focus, layout_state,
-                                           body_height) |
-                     reflect(state->content_box);
-      return make_terminal_panel("Terminal", std::move(body), body_height);
-    }
-
     const int selected_tab = layout_state != nullptr ? layout_state->console_tabs.selected_tab
                                                      : ConsolePanelTabs::kTerminal;
+    const int body_height = std::max(1, panel_height - 2);
+    const int panel_width = state->panel_box.x_max >= state->panel_box.x_min
+                                ? state->panel_box.x_max - state->panel_box.x_min + 1
+                                : 80;
+
     Elements tab_row;
     tab_row.push_back(make_tab_button(
         "Terminal", selected_tab == ConsolePanelTabs::kTerminal,
@@ -1044,19 +1128,29 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         layout_state != nullptr &&
             layout_state->clickable.is_pressed(press_id::kConsoleTabTerminal),
         &state->tab_boxes[ConsolePanelTabs::kTerminal]));
+    if (debug_mode) {
+      tab_row.push_back(make_tab_button(
+          "GDB", selected_tab == ConsolePanelTabs::kDebug,
+          layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabGdb),
+          layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabGdb),
+          &state->tab_boxes[ConsolePanelTabs::kDebug]));
+    }
     tab_row.push_back(make_tab_button(
-        "GDB", selected_tab == ConsolePanelTabs::kDebug,
-        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabGdb),
-        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabGdb),
-        &state->tab_boxes[ConsolePanelTabs::kDebug]));
+        "Rendimiento", selected_tab == ConsolePanelTabs::kPerformance,
+        layout_state != nullptr &&
+            layout_state->clickable.is_hovered(press_id::kConsoleTabPerformance),
+        layout_state != nullptr &&
+            layout_state->clickable.is_pressed(press_id::kConsoleTabPerformance),
+        &state->tab_boxes[ConsolePanelTabs::kPerformance]));
 
     Element body;
-    const int body_height = std::max(1, panel_height - 2);
     if (selected_tab == ConsolePanelTabs::kTerminal) {
       body = render_shell_terminal(state.get(), model, shell, focus, layout_state, body_height) |
              reflect(state->content_box) | flex;
-    } else {
+    } else if (selected_tab == ConsolePanelTabs::kDebug) {
       body = render_gdb_console(state.get(), model, app_mode, layout_state, input_box);
+    } else {
+      body = RenderPerformancePanel(sampler, perf_state.get(), panel_width, body_height) | flex;
     }
 
     return vbox({

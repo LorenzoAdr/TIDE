@@ -25,7 +25,8 @@ class LspClient {
   ~LspClient();
 
   bool start(const std::string& workspace_root,
-             const std::string& compile_commands_dir = {});
+             const std::string& compile_commands_dir = {},
+             bool use_gcc_query_driver = true, bool background_index = false);
   void stop();
   bool ready() const { return ready_.load(); }
 
@@ -86,7 +87,8 @@ class LspClient {
     int64_t last_ms = 0;
   };
 
-  bool spawn_clangd(const std::string& compile_commands_dir);
+  bool spawn_clangd(const std::string& compile_commands_dir, bool use_gcc_query_driver,
+                    bool background_index);
   bool initialize(const std::string& workspace_root);
   void invalidate_cache(const std::string& absolute_path);
   void invalidate_semantic_tokens(const std::string& absolute_path);
