@@ -19,6 +19,7 @@
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/quit_confirm.hpp"
+#include "ui/open_file_confirm.hpp"
 #include "ui/settings_modal.hpp"
 #include "ui/theme.hpp"
 #include "ui/symbol_picker.hpp"
@@ -160,6 +161,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
   }
   symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
   debug_available_ = gdb_supports_dap();
+  workspace_.open_file_confirm = &open_file_confirm_state_;
 
   if (config_.use_workspace_wizard) {
     workspace_.status_message = "Selecciona un directorio de trabajo...";
@@ -611,7 +613,8 @@ bool Application::any_modal_open() const {
   return workspace_wizard_state_.open || connection_wizard_state_.open ||
          file_picker_state_.open || symbol_picker_state_.open ||
          shortcuts_modal_state_.open || settings_modal_state_.open ||
-         quit_confirm_state_.open || context_menu_active(&layout_state_.context_menu);
+         quit_confirm_state_.open || open_file_confirm_state_.is_open() ||
+         context_menu_active(&layout_state_.context_menu);
 }
 
 void Application::apply_app_settings() {
@@ -805,8 +808,18 @@ int Application::run() {
         screen.ExitLoopClosure()();
       });
 
+  workspace_.open_file_confirm = &open_file_confirm_state_;
+  auto with_open_file_confirm = MakeOpenFileConfirmOverlay(
+      with_quit_confirm, &open_file_confirm_state_, &layout_state_, &workspace_,
+      [this](const std::string& path, int line, int col) {
+        model_.active_file = path;
+        model_.active_line = line + 1;
+        model_.view_token++;
+        layout_state_.request_ui_tick = true;
+      });
+
   auto with_context_menu = MakeContextMenuOverlay(
-      with_quit_confirm, &layout_state_.context_menu, &workspace_, &model_, &focus_state_,
+      with_open_file_confirm, &layout_state_.context_menu, &workspace_, &model_, &focus_state_,
       &layout_state_, symbol_provider_, &indexer_, &symbol_indexer_, &workspace_config_,
       [this]() {
         if (layout_state_.editor_visible_line_count) {

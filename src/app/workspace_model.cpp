@@ -5,6 +5,8 @@
 #include <filesystem>
 
 #include "editor/undo_stack.hpp"
+#include "ui/open_file_confirm.hpp"
+#include "util/file_open_policy.hpp"
 #include "util/path_normalize.hpp"
 
 namespace fs = std::filesystem;
@@ -141,6 +143,41 @@ int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path) {
   return static_cast<int>(tabs.size()) - 1;
 }
 
+bool WorkspaceModel::check_open_guard(const std::string& absolute_path) {
+  if (open_file_confirm == nullptr) {
+    return true;
+  }
+
+  const FileOpenAssessment assessment = assess_file_open(absolute_path);
+  if (assessment.kind == FileOpenKind::Binary) {
+    const std::string name = fs::path(absolute_path).filename().string();
+    open_file_confirm->show_binary_warning(absolute_path, name);
+    status_message = "Archivo binario, no se puede abrir: " + name;
+    return false;
+  }
+  if (assessment.kind == FileOpenKind::Large) {
+    open_file_confirm->request_large_confirm(absolute_path, assessment.size_bytes);
+    if (pending_open_at_.active) {
+      open_file_confirm->line = pending_open_at_.line;
+      open_file_confirm->col = pending_open_at_.col;
+      open_file_confirm->has_position = true;
+    }
+    return false;
+  }
+  return true;
+}
+
+bool WorkspaceModel::open_file_impl(const std::string& absolute_path) {
+  if (absolute_path.empty()) {
+    return false;
+  }
+  flush_active_tab();
+  const std::string path = normalize_path(absolute_path);
+  const int index = open_new_tab_from_disk(path);
+  switch_to_tab(index);
+  return true;
+}
+
 bool WorkspaceModel::open_file(const std::string& absolute_path) {
   if (absolute_path.empty()) {
     return false;
@@ -152,13 +189,36 @@ bool WorkspaceModel::open_file(const std::string& absolute_path) {
     switch_to_tab(existing);
     return true;
   }
-  const int index = open_new_tab_from_disk(path);
-  switch_to_tab(index);
+  if (!check_open_guard(path)) {
+    return false;
+  }
+  return open_file_impl(absolute_path);
+}
+
+bool WorkspaceModel::open_file_confirmed(const std::string& absolute_path) {
+  return open_file_impl(absolute_path);
+}
+
+bool WorkspaceModel::open_file_at_impl(const std::string& absolute_path, int line, int col) {
+  if (!open_file_impl(absolute_path)) {
+    return false;
+  }
+  buffer.reset_to_single_cursor(line, col);
+  buffer.scroll = std::max(0, line - 2);
+  buffer.view_token++;
+  flush_active_tab();
   return true;
 }
 
+bool WorkspaceModel::open_file_at_confirmed(const std::string& absolute_path, int line, int col) {
+  return open_file_at_impl(absolute_path, line, col);
+}
+
 bool WorkspaceModel::open_file_at(const std::string& absolute_path, int line, int col) {
-  if (!open_file(absolute_path)) {
+  pending_open_at_ = {line, col, true};
+  const bool opened = open_file(absolute_path);
+  pending_open_at_.active = false;
+  if (!opened) {
     return false;
   }
   buffer.reset_to_single_cursor(line, col);

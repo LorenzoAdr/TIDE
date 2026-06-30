@@ -198,12 +198,14 @@ struct FileTreePanelState {
     if (entry.is_file) {
       std::error_code ec;
       const auto absolute = fs::absolute(fs::path(model->workspace_root) / entry.relative_path, ec);
+      if (workspace != nullptr) {
+        if (!workspace->open_file(absolute.string())) {
+          return;
+        }
+      }
       model->active_file = absolute.string();
       model->active_line = 0;
       model->view_token++;
-      if (workspace != nullptr) {
-        workspace->open_file(absolute.string());
-      }
       if (layout_state != nullptr) {
         layout_state->request_ui_tick = true;
       }

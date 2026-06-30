@@ -10,6 +10,8 @@
 
 namespace tgdb {
 
+struct OpenFileConfirmState;
+
 struct WorkspaceModel {
   std::string root;
   std::string active_file;
@@ -19,6 +21,7 @@ struct WorkspaceModel {
   std::vector<std::string> tab_mru;
   int active_tab = -1;
   std::string status_message = "Selecciona un workspace";
+  OpenFileConfirmState* open_file_confirm = nullptr;
 
   std::vector<std::string> open_tabs_mru_excluding_active() const;
 
@@ -27,6 +30,8 @@ struct WorkspaceModel {
 
   bool open_file(const std::string& absolute_path);
   bool open_file_at(const std::string& absolute_path, int line, int col);
+  bool open_file_confirmed(const std::string& absolute_path);
+  bool open_file_at_confirmed(const std::string& absolute_path, int line, int col);
   void switch_to_tab(int index);
   bool close_tab(int index);
   void move_tab(int from, int to);
@@ -42,11 +47,23 @@ struct WorkspaceModel {
   bool navigate_cursor_forward(int visible_lines);
 
  private:
+  struct PendingOpenAt {
+    int line = 0;
+    int col = 0;
+    bool active = false;
+  };
+
+  bool open_file_impl(const std::string& absolute_path);
+  bool open_file_at_impl(const std::string& absolute_path, int line, int col);
+  bool check_open_guard(const std::string& absolute_path);
+
   static bool load_buffer_from_disk(EditorBuffer* buffer, const std::string& absolute_path);
   static std::string normalize_path(const std::string& path);
   int open_new_tab_from_disk(const std::string& absolute_path);
   void touch_tab_mru(const std::string& absolute_path);
   void remove_tab_mru(const std::string& absolute_path);
+
+  PendingOpenAt pending_open_at_;
 };
 
 }  // namespace tgdb

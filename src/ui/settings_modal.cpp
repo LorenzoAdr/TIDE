@@ -39,8 +39,9 @@ constexpr int kGlobalOptionCount = kAfterClangd;
 #endif
 
 constexpr int kWorkspaceGccQueryDriver = kGlobalOptionCount;
-constexpr int kWorkspaceIncludePaths = kGlobalOptionCount + 1;
-constexpr int kWorkspaceCompileCommands = kGlobalOptionCount + 2;
+constexpr int kWorkspaceBackgroundIndex = kGlobalOptionCount + 1;
+constexpr int kWorkspaceIncludePaths = kGlobalOptionCount + 2;
+constexpr int kWorkspaceCompileCommands = kGlobalOptionCount + 3;
 
 constexpr int kCompileMode = 0;
 constexpr int kCompileDetectMounts = 1;
@@ -50,7 +51,7 @@ constexpr int kCompileCommandsRowCount = 4;
 
 int main_option_count(const SettingsModalState* state) {
   if (state != nullptr && state->has_workspace) {
-    return kGlobalOptionCount + 3;
+    return kGlobalOptionCount + 4;
   }
   return kGlobalOptionCount;
 }
@@ -180,6 +181,8 @@ bool option_checked(const SettingsModalState* state, int index) {
 #endif
     case kWorkspaceGccQueryDriver:
       return state->draft_clangd_use_gcc_query_driver;
+    case kWorkspaceBackgroundIndex:
+      return state->draft_clangd_background_index;
     default:
       return false;
   }
@@ -220,6 +223,9 @@ void toggle_option(SettingsModalState* state, int index) {
 #endif
     case kWorkspaceGccQueryDriver:
       state->draft_clangd_use_gcc_query_driver = !state->draft_clangd_use_gcc_query_driver;
+      break;
+    case kWorkspaceBackgroundIndex:
+      state->draft_clangd_background_index = !state->draft_clangd_background_index;
       break;
     default:
       break;
@@ -667,6 +673,23 @@ Element render_main_settings(const SettingsModalState* state) {
     }
 
     {
+      const bool selected = state->selected == kWorkspaceBackgroundIndex;
+      const bool checked = state->draft_clangd_background_index;
+      Element title =
+          text(checkbox_label(checked, "Indexado completo con clangd (background-index)")) |
+          color(selected ? theme::Accent() : theme::Header()) | bold;
+      if (selected) {
+        title = title | inverted;
+      }
+      rows.push_back(title);
+      rows.push_back(
+          text("    Indexa todo el proyecto vía compile_commands (más RAM/CPU; mejor "
+               "autocompletado global). Desactivado: solo archivos abiertos") |
+          color(theme::Muted()));
+      rows.push_back(text(""));
+    }
+
+    {
       const bool selected = state->selected == kWorkspaceIncludePaths;
       const std::size_t count = state->draft_clangd_extra_include_paths.size();
       const std::string label =
@@ -856,6 +879,7 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->workspace_root = workspace_root;
   state->has_workspace = !workspace_root.empty();
   state->draft_clangd_use_gcc_query_driver = workspace_config.clangd_use_gcc_query_driver;
+  state->draft_clangd_background_index = workspace_config.clangd_background_index;
   state->draft_clangd_extra_include_paths = workspace_config.clangd_extra_include_paths;
   state->draft_compile_commands = workspace_config.compile_commands;
   state->path_browser.launch_root = workspace_root.empty() ? canonical_browser_root("")
@@ -882,6 +906,7 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   if (state->has_workspace && on_workspace_apply) {
     WorkspaceConfig workspace;
     workspace.clangd_use_gcc_query_driver = state->draft_clangd_use_gcc_query_driver;
+    workspace.clangd_background_index = state->draft_clangd_background_index;
     workspace.clangd_extra_include_paths = state->draft_clangd_extra_include_paths;
     workspace.compile_commands = state->draft_compile_commands;
     workspace.theme = state->draft_theme;

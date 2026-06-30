@@ -40,6 +40,7 @@ struct SettingsModalState {
   bool draft_force_bundled_clangd = false;
   bool draft_force_bundled_gdb = false;
   bool draft_clangd_use_gcc_query_driver = true;
+  bool draft_clangd_background_index = false;
   theme::ThemeMode draft_theme = theme::ThemeMode::kDark;
   CompileCommandsSettings draft_compile_commands;
   std::vector<std::string> draft_clangd_extra_include_paths;

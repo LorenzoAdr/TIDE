@@ -180,11 +180,6 @@ void open_result(SearchPanelState* state, WorkspaceModel* workspace, DebugModel*
   }
   index = std::max(0, std::min(index, static_cast<int>(state->results.size()) - 1));
   const auto& hit = state->results[static_cast<std::size_t>(index)];
-  if (model != nullptr) {
-    model->active_file = hit.file;
-    model->active_line = hit.line;
-    model->view_token++;
-  }
   if (workspace != nullptr && model != nullptr && !model->workspace_root.empty()) {
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -192,9 +187,16 @@ void open_result(SearchPanelState* state, WorkspaceModel* workspace, DebugModel*
         fs::weakly_canonical(fs::path(model->workspace_root) / hit.file, ec);
     if (!ec) {
       workspace->record_cursor_jump();
-      workspace->open_file_at(absolute.string(), std::max(0, hit.line - 1),
-                              std::max(0, hit.col - 1));
+      if (!workspace->open_file_at(absolute.string(), std::max(0, hit.line - 1),
+                                   std::max(0, hit.col - 1))) {
+        return;
+      }
     }
+  }
+  if (model != nullptr) {
+    model->active_file = hit.file;
+    model->active_line = hit.line;
+    model->view_token++;
   }
   if (focus != nullptr) {
     focus->region = FocusRegion::Editor;

@@ -20,6 +20,7 @@
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/quit_confirm.hpp"
+#include "ui/open_file_confirm.hpp"
 #include "ui/settings_modal.hpp"
 #include "ui/shortcuts_modal.hpp"
 #include "ui/symbol_picker.hpp"
@@ -83,6 +84,7 @@ class Application {
   FilePickerState file_picker_state_;
   SymbolPickerState symbol_picker_state_;
   QuitConfirmState quit_confirm_state_;
+  OpenFileConfirmState open_file_confirm_state_;
   ShortcutsModalState shortcuts_modal_state_;
   SettingsModalState settings_modal_state_;
   AppSettings app_settings_;

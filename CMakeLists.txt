@@ -36,6 +36,7 @@ add_executable(tgdb
   src/ui/file_picker.cpp
   src/ui/symbol_picker.cpp
   src/ui/quit_confirm.cpp
+  src/ui/open_file_confirm.cpp
   src/ui/shortcuts_modal.cpp
   src/ui/settings_modal.cpp
   src/ui/theme.cpp
@@ -80,6 +81,7 @@ add_executable(tgdb
   src/util/filesystem_tree.cpp
   src/util/include_tree.cpp
   src/util/path_normalize.cpp
+  src/util/file_open_policy.cpp
   src/util/compile_commands_setup.cpp
   src/util/compile_commands_remap.cpp
   src/util/compile_commands_lookup.cpp

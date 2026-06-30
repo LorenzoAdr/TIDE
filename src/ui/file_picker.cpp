@@ -103,12 +103,14 @@ void FilePickerState::open_file(DebugModel* model, WorkspaceModel* workspace,
   std::error_code ec;
   const auto absolute =
       picker_absolute_path(matches[static_cast<std::size_t>(index)], model->workspace_root);
+  if (workspace != nullptr) {
+    if (!workspace->open_file(absolute.string())) {
+      return;
+    }
+  }
   model->active_file = absolute.string();
   model->active_line = 0;
   model->view_token++;
-  if (workspace != nullptr) {
-    workspace->open_file(absolute.string());
-  }
   if (focus != nullptr) {
     focus->region = FocusRegion::Editor;
   }
