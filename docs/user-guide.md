@@ -42,6 +42,8 @@ gdb -i=dap -ex quit
   - System install: `gdb` on `PATH` with `gdb -i=dap -ex quit` working, or set `GDB_PATH`
 - **`compile_commands.json`** in the workspace root or under `build/` — gives clangd accurate include paths and enables reliable outline, completion, and go-to-symbol
 
+For **Makefile-only** projects, tgdb detects build environments automatically (host variants, env scripts, Docker) and generates `compile_commands.json` in `.tgdb/environments/` using `bear`, `compiledb`, or a built-in compiler wrapper. No manual setup is required; LSP refreshes silently when the active build environment changes.
+
 Without clangd, outline and completion fall back to regex-based symbol extraction from source files.
 
 When built with embedded clangd, open **F10 → Configuración** to toggle *Forzar clangd embebido* (skip system `clangd` on `PATH`). Override at runtime with `TGDB_FORCE_BUNDLED_CLANGD=1|0`.

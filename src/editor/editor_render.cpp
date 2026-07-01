@@ -8,6 +8,7 @@
 #include "ui/cursor_blink.hpp"
 #include "ui/theme.hpp"
 #include "util/cpp_highlight.hpp"
+#include "util/build_file_highlight.hpp"
 #include "util/syntax_highlight.hpp"
 
 namespace tgdb {
@@ -206,7 +207,12 @@ Element wrap_with_suffix(Element line_content, const Decorator& line_bg,
 Element render_line_content(const std::string& line, int line_index,
                             const SemanticTokenDocument* semantic_tokens, bool syntax_highlight,
                             int cursor_col = -1, Decorator cursor_style = {},
-                            int col_offset = 0, CppHighlightContext* highlight_ctx = nullptr) {
+                            int col_offset = 0, CppHighlightContext* highlight_ctx = nullptr,
+                            BuildFileKind build_file_kind = BuildFileKind::kNone) {
+  if (build_file_kind != BuildFileKind::kNone) {
+    const int draw_col = cursor_col >= 0 ? cursor_col - col_offset : -1;
+    return HighlightBuildFileLine(build_file_kind, line, draw_col, cursor_style);
+  }
   if (!syntax_highlight) {
     if (cursor_col < 0 || !cursor_style || !cursor_blink::visible()) {
       return line.empty() ? text(" ") : text(line);
@@ -233,13 +239,14 @@ Element render_line_content(const std::string& line, int line_index,
 Element render_simple_line(const std::string& line, int line_index, const EditorBuffer& buffer,
                            bool editor_focused, const SemanticTokenDocument* semantic_tokens,
                            bool syntax_highlight, const Decorator& line_bg, bool show_caret,
-                           int scroll_col, CppHighlightContext* highlight_ctx) {
+                           int scroll_col, CppHighlightContext* highlight_ctx,
+                           BuildFileKind build_file_kind) {
   (void)line_bg;
   (void)scroll_col;
   if (!editor_focused || line_index != buffer.primary_line() || !show_caret ||
       buffer.primary().has_selection()) {
     return render_line_content(line, line_index, semantic_tokens, syntax_highlight, -1, {}, 0,
-                               highlight_ctx);
+                               highlight_ctx, build_file_kind);
   }
   const int col = shift_col(buffer.primary_col(), scroll_col);
   const Decorator cursor_cell = cursor_blink::cell_decorator();
@@ -249,7 +256,7 @@ Element render_simple_line(const std::string& line, int line_index, const Editor
     Elements parts;
     if (!line.empty()) {
       parts.push_back(render_line_content(line, line_index, semantic_tokens, syntax_highlight, -1,
-                                          {}, scroll_col, highlight_ctx));
+                                          {}, scroll_col, highlight_ctx, build_file_kind));
     }
     if (cursor_blink::visible()) {
       parts.push_back(text(" ") | cursor_cell);
@@ -259,7 +266,7 @@ Element render_simple_line(const std::string& line, int line_index, const Editor
     return hbox(std::move(parts));
   }
   return render_line_content(line, line_index, semantic_tokens, syntax_highlight, draw_col,
-                             cursor_cell, scroll_col, highlight_ctx);
+                             cursor_cell, scroll_col, highlight_ctx, build_file_kind);
 }
 
 Element render_rich_line(const std::string& line, int line_index, const EditorBuffer& buffer,
@@ -424,13 +431,19 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
                          int view_width, CppHighlightContext* highlight_ctx,
                          bool sticky_scroll_line) {
   const std::string view_line = slice_line_for_view(line, scroll_col, view_width);
-  const Decorator line_bg = sticky_scroll_line
-                                ? bgcolor(theme::TabIdle())
-                                : (line_index == buffer.primary_line() ? bgcolor(theme::EditorLineHi())
-                                                                       : bgcolor(theme::CodeBg()));
+  const BuildFileKind build_file_kind = detect_build_file_kind(buffer.path);
+  const bool is_build_file = build_file_kind != BuildFileKind::kNone;
+  const bool use_warm_line_bg = build_file_kind == BuildFileKind::kMakefile;
+  const Decorator line_bg =
+      sticky_scroll_line
+          ? bgcolor(theme::TabIdle())
+          : (line_index == buffer.primary_line()
+                 ? bgcolor(theme::EditorLineHi())
+                 : (use_warm_line_bg ? bgcolor(theme::BuildFileLineBg())
+                                     : bgcolor(theme::CodeBg())));
 
   const bool syntax_highlight =
-      !buffer.path.empty() && is_indexed_source_path(buffer.path);
+      !buffer.path.empty() && is_indexed_source_path(buffer.path) && !is_build_file;
 
   bool rich = line_needs_rich_decorations(line_index, buffer, find_matches, bracket,
                                           line_diagnostics, symbol_press);
@@ -443,7 +456,8 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
                               semantic_tokens, syntax_highlight, bracket, line_diagnostics,
                               symbol_press, show_caret, scroll_col, view_width, highlight_ctx)
            : render_simple_line(view_line, line_index, buffer, editor_focused, semantic_tokens,
-                                syntax_highlight, line_bg, show_caret, scroll_col, highlight_ctx);
+                                syntax_highlight, line_bg, show_caret, scroll_col, highlight_ctx,
+                                build_file_kind);
 
   const std::vector<Diagnostic>* suffix_color =
       suffix_diagnostics != nullptr ? suffix_diagnostics : line_diagnostics;

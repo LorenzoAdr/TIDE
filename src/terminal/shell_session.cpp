@@ -6,6 +6,8 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -24,6 +26,36 @@
 #endif
 
 namespace tgdb {
+
+namespace {
+
+std::string write_terminal_init_script(const ShellLaunchConfig& config) {
+  if (config.env_vars.empty() && config.setup_scripts.empty()) {
+    return {};
+  }
+  const std::filesystem::path init_path =
+      std::filesystem::path(config.host_cwd) / ".tgdb" / "terminal_init.sh";
+  std::error_code ec;
+  std::filesystem::create_directories(init_path.parent_path(), ec);
+  std::ofstream output(init_path);
+  if (!output) {
+    return {};
+  }
+  output << "#!/bin/bash\n";
+  output << "# tgdb: terminal environment (auto-generated)\n";
+  for (const auto& entry : config.env_vars) {
+    output << "export " << entry.first << '=' << '\'' << entry.second << '\'' << '\n';
+  }
+  for (const auto& script : config.setup_scripts) {
+    output << "set -a\n";
+    output << "source " << script << " >/dev/null 2>&1 || true\n";
+    output << "set +a\n";
+  }
+  output << "cd " << config.host_cwd << " 2>/dev/null || true\n";
+  return init_path.string();
+}
+
+}  // namespace
 
 ShellSession::ShellSession() = default;
 
@@ -114,6 +146,10 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
       }
       args.emplace_back("-e");
       args.emplace_back("TERM=xterm-256color");
+      for (const auto& entry : config.env_vars) {
+        args.emplace_back("-e");
+        args.emplace_back(entry.first + "=" + entry.second);
+      }
       args.emplace_back(config.docker_container);
       const std::string& shell_bin =
           config.docker_shell.empty() ? "/bin/bash" : config.docker_shell;
@@ -133,9 +169,17 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
     if (chdir(config.host_cwd.c_str()) != 0) {
       _exit(127);
     }
+    for (const auto& entry : config.env_vars) {
+      setenv(entry.first.c_str(), entry.second.c_str(), 1);
+    }
+    const std::string init_script = write_terminal_init_script(config);
     const char* shell = std::getenv("SHELL");
     if (shell == nullptr || shell[0] == '\0') {
       shell = "/bin/bash";
+    }
+    if (!init_script.empty()) {
+      setenv("BASH_ENV", init_script.c_str(), 1);
+      setenv("ENV", init_script.c_str(), 1);
     }
     execlp(shell, shell, "-i", static_cast<char*>(nullptr));
     _exit(127);

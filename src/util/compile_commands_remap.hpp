@@ -12,7 +12,10 @@ struct CompileCommandsSetupResult {
   std::string status_note;
 };
 
-std::vector<PathMapping> detect_docker_mount_mappings(const std::string& container_name);
+std::vector<PathMapping> detect_docker_mount_mappings(const std::string& container_name,
+                                                     bool force_refresh = false);
+
+void invalidate_docker_mount_cache();
 
 std::vector<std::string> list_running_docker_containers();
 

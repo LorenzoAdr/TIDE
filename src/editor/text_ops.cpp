@@ -190,42 +190,6 @@ bool any_cursor_has_selection(const EditorBuffer& buffer) {
   return false;
 }
 
-void delete_all_selections(EditorBuffer* buffer) {
-  clamp_all_cursors(buffer);
-  std::vector<std::size_t> indices;
-  indices.reserve(buffer->cursors.size());
-  for (std::size_t i = 0; i < buffer->cursors.size(); ++i) {
-    if (buffer->cursors[i].has_selection()) {
-      indices.push_back(i);
-    }
-  }
-  if (indices.empty()) {
-    return;
-  }
-
-  std::sort(indices.begin(), indices.end(), [&](std::size_t a, std::size_t b) {
-    const auto& ca = buffer->cursors[a];
-    const auto& cb = buffer->cursors[b];
-    if (ca.head.line != cb.head.line) {
-      return ca.head.line > cb.head.line;
-    }
-    return ca.head.col > cb.head.col;
-  });
-
-  for (std::size_t idx : indices) {
-    auto& cursor = buffer->cursors[idx];
-    int start_line = 0;
-    int start_col = 0;
-    int end_line = 0;
-    int end_col = 0;
-    cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
-    delete_range(buffer, start_line, start_col, end_line, end_col);
-    cursor.set_pos(start_line, start_col);
-  }
-  clamp_all_cursors(buffer);
-  merge_overlapping_cursors(buffer);
-}
-
 void insert_char_at(EditorBuffer* buffer, int line, int col, char c) {
   auto& text = buffer->lines[static_cast<std::size_t>(line)];
   text.insert(static_cast<std::size_t>(col), 1, c);
@@ -431,24 +395,64 @@ void apply_to_all_cursors(EditorBuffer* buffer,
 }
 
 void clamp_head_col(EditorBuffer* buffer) {
-  auto& head = buffer->primary().head;
   if (buffer->lines.empty()) {
     return;
   }
-  head.line = std::max(0, std::min(head.line, static_cast<int>(buffer->lines.size()) - 1));
-  const int len = static_cast<int>(buffer->lines[static_cast<std::size_t>(head.line)].size());
-  head.col = std::max(0, std::min(head.col, len));
+  for (auto& cursor : buffer->cursors) {
+    auto& head = cursor.head;
+    head.line = std::max(0, std::min(head.line, static_cast<int>(buffer->lines.size()) - 1));
+    const int len = static_cast<int>(buffer->lines[static_cast<std::size_t>(head.line)].size());
+    head.col = std::max(0, std::min(head.col, len));
+  }
 }
 
 void finish_move(EditorBuffer* buffer, bool extend_selection) {
   clamp_head_col(buffer);
   if (!extend_selection) {
-    buffer->primary().anchor = buffer->primary().head;
+    for (auto& cursor : buffer->cursors) {
+      cursor.anchor = cursor.head;
+    }
   }
   clamp_all_cursors(buffer);
 }
 
 }  // namespace
+
+void delete_all_selections(EditorBuffer* buffer) {
+  clamp_all_cursors(buffer);
+  std::vector<std::size_t> indices;
+  indices.reserve(buffer->cursors.size());
+  for (std::size_t i = 0; i < buffer->cursors.size(); ++i) {
+    if (buffer->cursors[i].has_selection()) {
+      indices.push_back(i);
+    }
+  }
+  if (indices.empty()) {
+    return;
+  }
+
+  std::sort(indices.begin(), indices.end(), [&](std::size_t a, std::size_t b) {
+    const auto& ca = buffer->cursors[a];
+    const auto& cb = buffer->cursors[b];
+    if (ca.head.line != cb.head.line) {
+      return ca.head.line > cb.head.line;
+    }
+    return ca.head.col > cb.head.col;
+  });
+
+  for (std::size_t idx : indices) {
+    auto& cursor = buffer->cursors[idx];
+    int start_line = 0;
+    int start_col = 0;
+    int end_line = 0;
+    int end_col = 0;
+    cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
+    delete_range(buffer, start_line, start_col, end_line, end_col);
+    cursor.set_pos(start_line, start_col);
+  }
+  clamp_all_cursors(buffer);
+  merge_overlapping_cursors(buffer);
+}
 
 void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines, int code_width) {
   const int primary = buffer->primary_line();
@@ -523,21 +527,24 @@ void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lin
 
 void move_primary_half_page_up(EditorBuffer* buffer, int visible_lines, bool extend_selection) {
   const int delta = std::max(1, visible_lines / 2);
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
+    }
+    cursor.head.line = std::max(0, cursor.head.line - delta);
   }
-  buffer->primary().head.line = std::max(0, buffer->primary().head.line - delta);
   finish_move(buffer, extend_selection);
 }
 
 void move_primary_half_page_down(EditorBuffer* buffer, int visible_lines, bool extend_selection) {
   const int delta = std::max(1, visible_lines / 2);
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
+    }
+    cursor.head.line =
+        std::min(cursor.head.line + delta, static_cast<int>(buffer->lines.size()) - 1);
   }
-  buffer->primary().head.line =
-      std::min(buffer->primary().head.line + delta,
-               static_cast<int>(buffer->lines.size()) - 1);
   finish_move(buffer, extend_selection);
 }
 
@@ -780,121 +787,191 @@ void select_word_at(EditorBuffer* buffer, int line, int col) {
   clamp_all_cursors(buffer);
 }
 
-void move_primary_left(EditorBuffer* buffer, bool extend_selection) {
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
+void select_words_range(EditorBuffer* buffer, int anchor_line, int anchor_col, int head_line,
+                        int head_col) {
+  int anchor_start = 0;
+  int anchor_end = 0;
+  int head_start = 0;
+  int head_end = 0;
+  identifier_bounds_at(*buffer, anchor_line, anchor_col, &anchor_start, &anchor_end);
+  identifier_bounds_at(*buffer, head_line, head_col, &head_start, &head_end);
+
+  CursorPos start{anchor_line, anchor_start};
+  CursorPos end{head_line, head_end};
+  if (head_line < anchor_line || (head_line == anchor_line && head_col < anchor_col)) {
+    start = {head_line, head_start};
+    end = {anchor_line, anchor_end};
   }
-  auto& head = buffer->primary().head;
-  if (head.col > 0) {
-    --head.col;
-  } else if (head.line > 0) {
-    --head.line;
-    head.col = static_cast<int>(buffer->lines[static_cast<std::size_t>(head.line)].size());
+
+  buffer->reset_to_single_cursor(start.line, start.col);
+  buffer->primary().anchor = start;
+  buffer->primary().head = end;
+  clamp_all_cursors(buffer);
+}
+
+void select_line_at(EditorBuffer* buffer, int line) {
+  if (buffer->lines.empty()) {
+    return;
+  }
+  line = std::max(0, std::min(line, static_cast<int>(buffer->lines.size()) - 1));
+  const int len = static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size());
+  buffer->reset_to_single_cursor(line, 0);
+  buffer->primary().anchor = {line, 0};
+  buffer->primary().head = {line, len};
+  clamp_all_cursors(buffer);
+}
+
+void select_lines_range(EditorBuffer* buffer, int anchor_line, int head_line) {
+  if (buffer->lines.empty()) {
+    return;
+  }
+  const int max_line = static_cast<int>(buffer->lines.size()) - 1;
+  anchor_line = std::max(0, std::min(anchor_line, max_line));
+  head_line = std::max(0, std::min(head_line, max_line));
+  const int lo = std::min(anchor_line, head_line);
+  const int hi = std::max(anchor_line, head_line);
+  const int head_col =
+      static_cast<int>(buffer->lines[static_cast<std::size_t>(hi)].size());
+  buffer->reset_to_single_cursor(lo, 0);
+  buffer->primary().anchor = {lo, 0};
+  buffer->primary().head = {hi, head_col};
+  clamp_all_cursors(buffer);
+}
+
+void move_primary_left(EditorBuffer* buffer, bool extend_selection) {
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
+    }
+    auto& head = cursor.head;
+    if (head.col > 0) {
+      --head.col;
+    } else if (head.line > 0) {
+      --head.line;
+      head.col = static_cast<int>(buffer->lines[static_cast<std::size_t>(head.line)].size());
+    }
   }
   finish_move(buffer, extend_selection);
 }
 
 void move_primary_right(EditorBuffer* buffer, bool extend_selection) {
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
-  }
-  auto& head = buffer->primary().head;
-  const int len = static_cast<int>(buffer->lines[static_cast<std::size_t>(head.line)].size());
-  if (head.col < len) {
-    ++head.col;
-  } else if (head.line + 1 < static_cast<int>(buffer->lines.size())) {
-    ++head.line;
-    head.col = 0;
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
+    }
+    auto& head = cursor.head;
+    const int len = static_cast<int>(buffer->lines[static_cast<std::size_t>(head.line)].size());
+    if (head.col < len) {
+      ++head.col;
+    } else if (head.line + 1 < static_cast<int>(buffer->lines.size())) {
+      ++head.line;
+      head.col = 0;
+    }
   }
   finish_move(buffer, extend_selection);
 }
 
 void move_primary_up(EditorBuffer* buffer, bool extend_selection) {
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
-  }
-  auto& head = buffer->primary().head;
-  if (head.line > 0) {
-    --head.line;
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
+    }
+    auto& head = cursor.head;
+    if (head.line > 0) {
+      --head.line;
+    }
   }
   finish_move(buffer, extend_selection);
 }
 
 void move_primary_down(EditorBuffer* buffer, bool extend_selection) {
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
-  }
-  auto& head = buffer->primary().head;
-  if (head.line + 1 < static_cast<int>(buffer->lines.size())) {
-    ++head.line;
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
+    }
+    auto& head = cursor.head;
+    if (head.line + 1 < static_cast<int>(buffer->lines.size())) {
+      ++head.line;
+    }
   }
   finish_move(buffer, extend_selection);
 }
 
 void move_primary_home(EditorBuffer* buffer, bool extend_selection) {
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
+    }
+    cursor.head.col = 0;
   }
-  buffer->primary().head.col = 0;
   finish_move(buffer, extend_selection);
 }
 
 void move_primary_end(EditorBuffer* buffer, bool extend_selection) {
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
+    }
+    const int line = cursor.head.line;
+    cursor.head.col = static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size());
   }
-  const int line = buffer->primary().head.line;
-  buffer->primary().head.col =
-      static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size());
   finish_move(buffer, extend_selection);
 }
 
 void move_primary_page_up(EditorBuffer* buffer, int visible_lines, bool extend_selection) {
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
+    }
+    cursor.head.line = std::max(0, cursor.head.line - visible_lines);
   }
-  buffer->primary().head.line = std::max(0, buffer->primary().head.line - visible_lines);
   finish_move(buffer, extend_selection);
 }
 
 void move_primary_page_down(EditorBuffer* buffer, int visible_lines, bool extend_selection) {
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
+    }
+    cursor.head.line =
+        std::min(cursor.head.line + visible_lines,
+                 static_cast<int>(buffer->lines.size()) - 1);
   }
-  buffer->primary().head.line =
-      std::min(buffer->primary().head.line + visible_lines,
-               static_cast<int>(buffer->lines.size()) - 1);
   finish_move(buffer, extend_selection);
 }
 
 void move_primary_word_left(EditorBuffer* buffer, bool extend_selection) {
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
-  }
-  auto& head = buffer->primary().head;
-  if (head.col > 0 || head.line > 0) {
-    if (head.col == 0) {
-      --head.line;
-      head.col = static_cast<int>(buffer->lines[static_cast<std::size_t>(head.line)].size());
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
     }
-    head.col = word_left_col(*buffer, head.line, head.col);
+    auto& head = cursor.head;
+    if (head.col > 0 || head.line > 0) {
+      if (head.col == 0) {
+        --head.line;
+        head.col = static_cast<int>(buffer->lines[static_cast<std::size_t>(head.line)].size());
+      }
+      head.col = word_left_col(*buffer, head.line, head.col);
+    }
   }
   finish_move(buffer, extend_selection);
 }
 
 void move_primary_word_right(EditorBuffer* buffer, bool extend_selection) {
-  if (!extend_selection) {
-    buffer->primary().collapse_to_head();
-  }
-  auto& head = buffer->primary().head;
-  const int line_len =
-      static_cast<int>(buffer->lines[static_cast<std::size_t>(head.line)].size());
-  if (head.col < line_len || head.line + 1 < static_cast<int>(buffer->lines.size())) {
-    if (head.col >= line_len) {
-      ++head.line;
-      head.col = 0;
+  for (auto& cursor : buffer->cursors) {
+    if (!extend_selection) {
+      cursor.collapse_to_head();
     }
-    head.col = word_right_col(*buffer, head.line, head.col);
+    auto& head = cursor.head;
+    const int line_len =
+        static_cast<int>(buffer->lines[static_cast<std::size_t>(head.line)].size());
+    if (head.col < line_len || head.line + 1 < static_cast<int>(buffer->lines.size())) {
+      if (head.col >= line_len) {
+        ++head.line;
+        head.col = 0;
+      }
+      head.col = word_right_col(*buffer, head.line, head.col);
+    }
   }
   finish_move(buffer, extend_selection);
 }

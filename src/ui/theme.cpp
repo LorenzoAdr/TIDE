@@ -48,6 +48,8 @@ struct Palette {
   Color syntax_macro;
   Color syntax_namespace;
   Color syntax_operator;
+  Color build_file_line_bg;
+  Color build_file_keyword;
 };
 
 const Palette kDarkPalette{
@@ -64,6 +66,7 @@ const Palette kDarkPalette{
     Color::RGB(78, 201, 176),    Color::RGB(220, 220, 170),  Color::RGB(156, 220, 254),
     Color::RGB(156, 200, 254),   Color::RGB(156, 220, 200),  Color::RGB(205, 170, 255),
     Color::RGB(130, 170, 255),   Color::RGB(180, 180, 210),
+    Color::RGB(38, 34, 28),      Color::RGB(220, 175, 110),
 };
 
 const Palette kLightPalette{
@@ -80,6 +83,7 @@ const Palette kLightPalette{
     Color::RGB(0, 120, 100),     Color::RGB(121, 94, 38),    Color::RGB(0, 16, 128),
     Color::RGB(0, 90, 120),      Color::RGB(0, 100, 80),     Color::RGB(130, 50, 180),
     Color::RGB(0, 70, 160),      Color::RGB(60, 60, 90),
+    Color::RGB(252, 246, 236),   Color::RGB(150, 90, 30),
 };
 
 ThemeMode g_mode = ThemeMode::kDark;
@@ -147,5 +151,7 @@ Color SyntaxProperty() { return current_palette().syntax_property; }
 Color SyntaxMacro() { return current_palette().syntax_macro; }
 Color SyntaxNamespace() { return current_palette().syntax_namespace; }
 Color SyntaxOperator() { return current_palette().syntax_operator; }
+Color BuildFileLineBg() { return current_palette().build_file_line_bg; }
+Color BuildFileKeyword() { return current_palette().build_file_keyword; }
 
 }  // namespace tgdb::theme

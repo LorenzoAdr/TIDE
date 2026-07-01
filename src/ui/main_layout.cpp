@@ -86,7 +86,9 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
       layout_state->text_input_focus = TextInputFocus::None;
       return;
     }
-    layout_state->text_input_focus = TextInputFocus::Console;
+    if (layout_state->console_tabs.selected_tab == ConsolePanelTabs::kTerminal) {
+      layout_state->text_input_focus = TextInputFocus::Console;
+    }
     return;
   }
 
@@ -94,8 +96,9 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
     case TextInputFocus::SearchQuery:
     case TextInputFocus::SearchReplace:
     case TextInputFocus::SearchPath:
+    case TextInputFocus::SearchInclude:
     case TextInputFocus::SearchExclude:
-      if (focus->region != FocusRegion::RightPanel) {
+      if (focus->region != FocusRegion::Terminal || !search_tab_active(layout_state)) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
       break;
@@ -455,7 +458,7 @@ Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
 
 std::string status_shortcuts(AppMode mode) {
   if (mode == AppMode::kDebug) {
-    return "F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into  3 rendimiento";
+    return "F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into";
   }
   return "F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 git  F7 buscar  F8 outline  F9 problemas";
 }
@@ -475,12 +478,22 @@ constexpr int kMinSplitPanelWidth = 12;
 constexpr int kMinCenterWidth = 24;
 constexpr int kMinBottomHeight = 3;
 
-bool box_hit(const Box& box, int x, int y, int padding = 1) {
+bool box_hit_left_sep(const Box& box, int x, int y) {
   if (box.IsEmpty()) {
     return false;
   }
-  return x >= box.x_min - padding && x <= box.x_max + padding && y >= box.y_min - padding &&
-         y <= box.y_max + padding;
+  // Padding solo hacia el panel izquierdo; no invadir la scrollbar del panel derecho.
+  constexpr int kPadLeft = 1;
+  return x >= box.x_min - kPadLeft && x <= box.x_max && y >= box.y_min && y <= box.y_max;
+}
+
+bool box_hit_right_sep(const Box& box, int x, int y) {
+  if (box.IsEmpty()) {
+    return false;
+  }
+  // Padding solo hacia el panel derecho; no invadir la scrollbar del editor (panel izquierdo).
+  constexpr int kPadRight = 1;
+  return x >= box.x_min && x <= box.x_max + kPadRight && y >= box.y_min && y <= box.y_max;
 }
 
 // Separador horizontal (terminal): solo padding hacia arriba para no tapar las pestañas.
@@ -498,21 +511,32 @@ bool update_split_hover(LayoutState* state, int x, int y) {
     return false;
   }
   bool changed = false;
-  const auto set_hover = [&](bool* hovered, const Box& box) {
-    const bool next = box_hit(box, x, y);
+  const auto set_left = [&](bool* hovered) {
+    const bool next = box_hit_left_sep(state->left_sep_box, x, y);
     if (*hovered != next) {
       *hovered = next;
       changed = true;
     }
   };
-  set_hover(&state->left_sep_hovered, state->left_sep_box);
+  const auto set_right = [&](bool* hovered) {
+    const bool next = box_hit_right_sep(state->right_sep_box, x, y);
+    if (*hovered != next) {
+      *hovered = next;
+      changed = true;
+    }
+  };
+  set_left(&state->left_sep_hovered);
   if (state->show_right_split) {
-    set_hover(&state->right_sep_hovered, state->right_sep_box);
+    set_right(&state->right_sep_hovered);
   } else {
     state->right_sep_hovered = false;
   }
   if (state->show_bottom_split) {
-    set_hover(&state->bottom_sep_hovered, state->bottom_sep_box);
+    const bool next = box_hit_bottom_sep(state->bottom_sep_box, x, y);
+    if (state->bottom_sep_hovered != next) {
+      state->bottom_sep_hovered = next;
+      changed = true;
+    }
   } else {
     state->bottom_sep_hovered = false;
   }
@@ -552,7 +576,8 @@ void apply_split_drag(LayoutState* state, int x, int y, int screen_w, int screen
   }
 }
 
-bool handle_split_mouse(LayoutState* state, Event event, int screen_w, int screen_h) {
+bool handle_split_mouse(LayoutState* state, MainLayoutState* layout_state, Event event,
+                        int screen_w, int screen_h) {
   if (state == nullptr || !event.is_mouse()) {
     return false;
   }
@@ -572,21 +597,24 @@ bool handle_split_mouse(LayoutState* state, Event event, int screen_w, int scree
   }
 
   if (mouse.motion == Mouse::Moved) {
-    return update_split_hover(state, mouse.x, mouse.y);
+    if (update_split_hover(state, mouse.x, mouse.y) && layout_state != nullptr) {
+      layout_state->request_ui_tick = true;
+    }
+    return false;
   }
 
   if (mouse.button != Mouse::Left || mouse.motion != Mouse::Pressed) {
     return false;
   }
 
-  if (box_hit(state->left_sep_box, mouse.x, mouse.y)) {
+  if (box_hit_left_sep(state->left_sep_box, mouse.x, mouse.y)) {
     state->split_dragging = true;
     state->split_drag_kind = 1;
     state->split_drag_start_pos = mouse.x;
     state->split_drag_start_size = state->left_width;
     return true;
   }
-  if (state->show_right_split && box_hit(state->right_sep_box, mouse.x, mouse.y)) {
+  if (state->show_right_split && box_hit_right_sep(state->right_sep_box, mouse.x, mouse.y)) {
     state->split_dragging = true;
     state->split_drag_kind = 2;
     state->split_drag_start_pos = mouse.x;
@@ -630,12 +658,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto git_panel = MakeGitPanel(git_service, git_panel_state, layout_state, focus);
 
   auto outline = MakeOutlinePanel(workspace, focus, symbols, layout_state);
-  auto search = MakeSearchPanel(workspace, model, focus, layout_state, indexer,
-                                &layout_state->right_sidebar);
-  auto call_hierarchy =
-      MakeCallHierarchyPanel(workspace, focus, layout_state, &layout_state->right_sidebar, symbols);
-  auto sidebar = MakeRightSidebarPanel(outline, search, call_hierarchy,
-                                       &layout_state->right_sidebar, layout_state);
+  auto sidebar = MakeRightSidebarPanel(outline, layout_state);
   auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug, focus);
   auto right_panel =
       MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height, layout_state);
@@ -650,7 +673,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       WrapClearInputFocus(explorer_and_center, layout_state);
 
   auto console = MakeConsolePanel(app_mode, model, shell, on_command, layout_state, focus,
-                                  &split_state->bottom_height, shell_launch_config);
+                                  &split_state->bottom_height, shell_launch_config, workspace,
+                                  symbols, indexer, &layout_state->right_sidebar);
   auto with_console =
       MakeHSplitBottom(console, workspace_area, &split_state->bottom_height, split_state);
   auto with_console_no_secondary =
@@ -691,7 +715,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
           layout_state != nullptr && layout_state->terminal_height
               ? layout_state->terminal_height()
               : 24;
-      return handle_split_mouse(split_state.get(), event, screen_w, screen_h);
+      return handle_split_mouse(split_state.get(), layout_state, event, screen_w, screen_h);
     };
   }
 
@@ -720,7 +744,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     }
 
     if (!git_page_visible && symbols && symbols->supports_diagnostics() && layout_state != nullptr &&
-        !layout_state->diagnostics_panel_visible && workspace != nullptr) {
+        !problems_tab_active(layout_state) && workspace != nullptr) {
       workspace->ensure_buffer();
       const uint64_t revision = symbols->diagnostics_revision();
       const uint64_t view_token = workspace->buffer.view_token;

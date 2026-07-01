@@ -35,6 +35,18 @@ extern const unsigned char _binary_gdb_blob_zst_end[];
 }
 #endif
 
+#ifdef TGDB_HAS_BUNDLED_RG
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB)
+#include <zstd.h>
+#endif
+#include "bundled_rg_manifest.hpp"
+
+extern "C" {
+extern const unsigned char _binary_rg_blob_zst_start[];
+extern const unsigned char _binary_rg_blob_zst_end[];
+}
+#endif
+
 namespace fs = std::filesystem;
 
 namespace tgdb {
@@ -43,6 +55,7 @@ namespace {
 
 std::optional<bool> g_runtime_force_bundled_clangd;
 std::optional<bool> g_runtime_force_bundled_gdb;
+std::optional<bool> g_runtime_force_bundled_rg;
 
 std::string trim_ascii(std::string value) {
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
@@ -134,7 +147,7 @@ std::optional<std::string> gdb_from_env() {
   return std::string(raw);
 }
 
-#if defined(TGDB_HAS_BUNDLED_CLANGD) || defined(TGDB_HAS_BUNDLED_GDB)
+#if defined(TGDB_HAS_BUNDLED_CLANGD) || defined(TGDB_HAS_BUNDLED_GDB) || defined(TGDB_HAS_BUNDLED_RG)
 std::optional<std::vector<unsigned char>> decompress_zstd_blob(const unsigned char* start,
                                                                  const unsigned char* end) {
   const std::size_t compressed_size = static_cast<std::size_t>(end - start);
@@ -176,6 +189,36 @@ std::optional<std::string> find_clangd_on_path() {
     }
   }
   return std::nullopt;
+}
+
+std::optional<std::string> find_rg_on_path() {
+  const char* path_env = std::getenv("PATH");
+  if (path_env == nullptr || path_env[0] == '\0') {
+    return std::nullopt;
+  }
+  std::stringstream stream(path_env);
+  std::string dir;
+  while (std::getline(stream, dir, ':')) {
+    if (dir.empty()) {
+      continue;
+    }
+    const fs::path candidate = fs::path(dir) / "rg";
+    if (is_executable_file(candidate.string())) {
+      return candidate.string();
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> rg_from_env() {
+  const char* raw = std::getenv("RG_PATH");
+  if (raw == nullptr || raw[0] == '\0') {
+    return std::nullopt;
+  }
+  if (!is_executable_file(raw)) {
+    return std::nullopt;
+  }
+  return std::string(raw);
 }
 
 std::optional<std::string> clangd_from_env() {
@@ -396,6 +439,52 @@ std::optional<GdbLocation> resolve_bundled_gdb() {
 }
 #endif
 
+#ifdef TGDB_HAS_BUNDLED_RG
+std::optional<RgLocation> resolve_bundled_rg() {
+  const fs::path install_root = fs::path(bundled_cache_root()) / ("rg-" TGDB_BUNDLED_RG_VERSION);
+  const fs::path binary_path = install_root / "bin" / "rg";
+  const fs::path marker = install_root / ".installed";
+  const std::string expected_marker = std::string(TGDB_BUNDLED_RG_BLOB_SHA256) + "\n";
+
+  if (is_executable_file(binary_path.string()) && read_text_file(marker) == expected_marker) {
+    return RgLocation{binary_path.string(), RgLocation::Source::Bundled};
+  }
+
+  const auto tar_data = decompress_zstd_blob(_binary_rg_blob_zst_start, _binary_rg_blob_zst_end);
+  if (!tar_data.has_value()) {
+    return std::nullopt;
+  }
+
+  const fs::path temp_root = install_root.string() + ".tmp";
+  std::error_code ec;
+  fs::remove_all(temp_root, ec);
+  fs::create_directories(temp_root, ec);
+
+  if (!extract_tar_to_directory(*tar_data, temp_root)) {
+    fs::remove_all(temp_root, ec);
+    return std::nullopt;
+  }
+
+  if (!is_executable_file((temp_root / "bin" / "rg").string())) {
+    fs::remove_all(temp_root, ec);
+    return std::nullopt;
+  }
+
+  fs::remove_all(install_root, ec);
+  fs::rename(temp_root, install_root, ec);
+  if (ec) {
+    fs::remove_all(temp_root, ec);
+    return std::nullopt;
+  }
+
+  if (!write_text_file(marker, expected_marker)) {
+    return std::nullopt;
+  }
+
+  return RgLocation{binary_path.string(), RgLocation::Source::Bundled};
+}
+#endif
+
 }  // namespace
 
 bool has_bundled_clangd() {
@@ -480,6 +569,50 @@ std::optional<GdbLocation> resolve_gdb() {
   if (!should_force_bundled_gdb()) {
     if (const auto path_bin = find_gdb_on_path(); path_bin.has_value()) {
       return GdbLocation{*path_bin, GdbLocation::Source::SystemPath};
+    }
+  }
+
+  return std::nullopt;
+}
+
+bool has_bundled_rg() {
+#ifdef TGDB_HAS_BUNDLED_RG
+  return true;
+#else
+  return false;
+#endif
+}
+
+void set_runtime_force_bundled_rg(bool value) { g_runtime_force_bundled_rg = value; }
+
+bool should_force_bundled_rg() {
+  if (const auto env = parse_env_bool("TGDB_FORCE_BUNDLED_RG"); env.has_value()) {
+    return *env;
+  }
+  if (g_runtime_force_bundled_rg.has_value()) {
+    return *g_runtime_force_bundled_rg;
+  }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_RG
+  return true;
+#else
+  return false;
+#endif
+}
+
+std::optional<RgLocation> resolve_rg() {
+  if (const auto env_path = rg_from_env(); env_path.has_value()) {
+    return RgLocation{*env_path, RgLocation::Source::Env};
+  }
+
+#ifdef TGDB_HAS_BUNDLED_RG
+  if (const auto bundled = resolve_bundled_rg(); bundled.has_value()) {
+    return bundled;
+  }
+#endif
+
+  if (!should_force_bundled_rg()) {
+    if (const auto path_bin = find_rg_on_path(); path_bin.has_value()) {
+      return RgLocation{*path_bin, RgLocation::Source::SystemPath};
     }
   }
 

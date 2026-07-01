@@ -73,7 +73,8 @@ inline Element SplitSeparatorVertical(bool hovered, bool dragging, Box* box) {
   } else if (hovered) {
     line_color = theme::AccentDim();
   }
-  return separatorCharacter("│") | color(line_color) | bgcolor(theme::PanelBg()) | reflect(*box);
+  return separatorCharacter("│") | color(line_color) | bgcolor(theme::PanelBg()) |
+         size(WIDTH, EQUAL, 1) | reflect(*box);
 }
 
 inline Element SplitSeparatorHorizontal(bool hovered, bool dragging, Box* box) {

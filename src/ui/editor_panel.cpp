@@ -40,7 +40,6 @@
 #include "ui/press_ids.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/context_menu.hpp"
-#include "ui/diagnostics_panel.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
 #include "ui/scroll_bar.hpp"
@@ -112,6 +111,13 @@ struct EditorPanelState {
   int last_click_line = -1;
   int last_click_col = -1;
   int64_t last_click_ms = 0;
+  int last_click_count = 0;
+  bool line_select_drag = false;
+  int line_select_anchor = -1;
+  int line_select_commit_line = -1;
+  bool word_select_drag = false;
+  int word_select_anchor_line = -1;
+  int word_select_anchor_col = -1;
   bool keyboard_shift = false;
   int64_t last_shift_activity_ms = 0;
   bool extend_click_armed = false;
@@ -642,7 +648,13 @@ bool handle_problems_button_click(MainLayoutState* layout_state, EditorPanelStat
     return false;
   }
   trigger_press(layout_state, press_id::kEditorProblems);
-  layout_state->diagnostics_panel_visible = !layout_state->diagnostics_panel_visible;
+  layout_state->console_visible = true;
+  if (layout_state->console_tabs.selected_tab == ConsolePanelTabs::kProblems) {
+    layout_state->console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
+  } else {
+    layout_state->console_tabs.selected_tab = ConsolePanelTabs::kProblems;
+  }
+  layout_state->focus_sync_needed = true;
   layout_state->request_ui_tick = true;
   return true;
 }
@@ -998,7 +1010,7 @@ Element make_breadcrumb_bar(const std::vector<BreadcrumbItem>& crumbs,
     problems_label += " (" + std::to_string(problem_warnings) + "w)";
   }
   Color problems_color = theme::Muted();
-  if (layout_state != nullptr && layout_state->diagnostics_panel_visible) {
+  if (layout_state != nullptr && problems_tab_active(layout_state)) {
     problems_color = theme::Accent();
   } else if (problem_errors > 0) {
     problems_color = theme::Error();
@@ -1014,7 +1026,7 @@ Element make_breadcrumb_bar(const std::vector<BreadcrumbItem>& crumbs,
     problems_btn = problems_btn | bold | inverted | bgcolor(theme::TabPressed());
   } else if (problems_hovered) {
     problems_btn = problems_btn | bold | bgcolor(theme::TabHover());
-  } else if (layout_state != nullptr && layout_state->diagnostics_panel_visible) {
+  } else if (layout_state != nullptr && problems_tab_active(layout_state)) {
     problems_btn = problems_btn | bgcolor(theme::TabActive());
   }
   problems_btn = problems_btn | reflect(panel_state->problems_button_box);
@@ -1110,7 +1122,7 @@ Element make_sticky_overlay(const std::vector<StickyLine>& sticky_lines, int gut
                    flex | size(HEIGHT, EQUAL, sticky_h)});
 }
 
-bool is_double_click(const EditorPanelState& panel, int line, int col, int64_t now_ms) {
+bool is_same_click_spot(const EditorPanelState& panel, int line, int col, int64_t now_ms) {
   if (panel.last_click_line != line) {
     return false;
   }
@@ -1118,6 +1130,14 @@ bool is_double_click(const EditorPanelState& panel, int line, int col, int64_t n
     return false;
   }
   return now_ms - panel.last_click_ms <= kDoubleClickMs;
+}
+
+bool is_double_click(const EditorPanelState& panel, int line, int col, int64_t now_ms) {
+  return is_same_click_spot(panel, line, col, now_ms) && panel.last_click_count == 1;
+}
+
+bool is_triple_click(const EditorPanelState& panel, int line, int col, int64_t now_ms) {
+  return is_same_click_spot(panel, line, col, now_ms) && panel.last_click_count >= 2;
 }
 
 bool sgr_mouse_button_field(const Event& event, int* button_out) {
@@ -1520,6 +1540,9 @@ void update_live_completion(CompletionState* completion, WorkspaceModel* workspa
   completion->open = true;
   completion->live_mode = true;
   completion->sync_symbols(workspace, symbols, symbol_indexer);
+  if (completion->matches.empty()) {
+    completion->close(layout_state);
+  }
 }
 
 void maybe_open_live_completion(CompletionState* completion, WorkspaceModel* workspace,
@@ -1817,7 +1840,40 @@ void ensure_mouse_capture(EditorPanelState* panel, Event event) {
 
 void end_mouse_selection(EditorPanelState* panel) {
   panel->mouse_selecting = false;
+  panel->line_select_drag = false;
+  panel->line_select_anchor = -1;
+  panel->word_select_drag = false;
+  panel->word_select_anchor_line = -1;
+  panel->word_select_anchor_col = -1;
   panel->captured_mouse.reset();
+}
+
+void clear_line_select_commit(EditorPanelState* panel) {
+  if (panel == nullptr) {
+    return;
+  }
+  panel->line_select_commit_line = -1;
+}
+
+void apply_mouse_drag_word_select(EditorBuffer* buffer, EditorPanelState* panel,
+                                  const CursorPos& pos, int visible_lines, int code_width) {
+  if (panel == nullptr || panel->word_select_anchor_line < 0) {
+    return;
+  }
+  select_words_range(buffer, panel->word_select_anchor_line, panel->word_select_anchor_col,
+                     pos.line, pos.col);
+  clamp_all_cursors(buffer);
+  ensure_scroll_visible(buffer, visible_lines, code_width);
+}
+
+void apply_mouse_drag_line_select(EditorBuffer* buffer, EditorPanelState* panel,
+                                  const CursorPos& pos, int visible_lines, int code_width) {
+  if (panel == nullptr || panel->line_select_anchor < 0) {
+    return;
+  }
+  select_lines_range(buffer, panel->line_select_anchor, pos.line);
+  clamp_all_cursors(buffer);
+  ensure_scroll_visible(buffer, visible_lines, code_width);
 }
 
 void apply_mouse_drag_head(EditorBuffer* buffer, const Mouse& m, const EditorPanelState& panel,
@@ -1849,14 +1905,39 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   const bool in_gutter = panel->gutter_box.Contain(m.x, m.y);
   const bool in_editor = in_code || in_gutter;
 
+  if (m.button == Mouse::Left && m.motion == Mouse::Released &&
+      panel->line_select_commit_line >= 0) {
+    if (panel->line_select_anchor >= 0) {
+      const CursorPos pos = mouse_to_cursor(m, *panel, *buffer, visible_lines);
+      select_lines_range(buffer, panel->line_select_anchor, pos.line);
+    } else {
+      select_line_at(buffer, panel->line_select_commit_line);
+    }
+    clear_line_select_commit(panel);
+    end_mouse_selection(panel);
+    return true;
+  }
+
   if (m.button == Mouse::Left && m.motion == Mouse::Moved && panel->mouse_selecting) {
     ensure_mouse_capture(panel, event);
-    apply_mouse_drag_head(buffer, m, *panel, visible_lines, panel->code_width_chars);
+    if (panel->line_select_drag) {
+      autoscroll_on_drag(buffer, m, *panel, visible_lines, panel->code_width_chars);
+      const CursorPos pos = mouse_to_cursor(m, *panel, *buffer, visible_lines);
+      apply_mouse_drag_line_select(buffer, panel, pos, visible_lines, panel->code_width_chars);
+    } else if (panel->word_select_drag) {
+      autoscroll_on_drag(buffer, m, *panel, visible_lines, panel->code_width_chars);
+      const CursorPos pos = mouse_to_cursor(m, *panel, *buffer, visible_lines);
+      apply_mouse_drag_word_select(buffer, panel, pos, visible_lines, panel->code_width_chars);
+    } else {
+      apply_mouse_drag_head(buffer, m, *panel, visible_lines, panel->code_width_chars);
+    }
     return true;
   }
 
   if (m.button == Mouse::Left && m.motion == Mouse::Released && panel->mouse_selecting) {
-    apply_mouse_drag_head(buffer, m, *panel, visible_lines, panel->code_width_chars);
+    if (!panel->line_select_drag && !panel->word_select_drag) {
+      apply_mouse_drag_head(buffer, m, *panel, visible_lines, panel->code_width_chars);
+    }
     end_mouse_selection(panel);
     return true;
   }
@@ -1957,15 +2038,37 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool shift_click = shift_extend_click(*panel, m, event);
 
     const int64_t now_ms = steady_now_ms();
+    const bool same_spot = is_same_click_spot(*panel, pos.line, pos.col, now_ms);
+    const int click_count = same_spot ? panel->last_click_count + 1 : 1;
+    const bool triple_click =
+        in_code && !shift_click && !m.control && is_triple_click(*panel, pos.line, pos.col, now_ms);
     const bool double_click =
-        in_code && !shift_click && !m.control && is_double_click(*panel, pos.line, pos.col, now_ms);
+        in_code && !shift_click && !m.control && click_count == 2;
     panel->last_click_line = pos.line;
     panel->last_click_col = pos.col;
     panel->last_click_ms = now_ms;
+    panel->last_click_count = click_count;
+
+    if (triple_click) {
+      select_line_at(buffer, pos.line);
+      panel->line_select_drag = true;
+      panel->line_select_anchor = pos.line;
+      panel->line_select_commit_line = pos.line;
+      save_shift_extend_anchor(panel, *buffer);
+      begin_mouse_selection(panel, event);
+      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+      return true;
+    }
+
+    clear_line_select_commit(panel);
 
     if (double_click) {
       select_word_at(buffer, pos.line, pos.col);
+      panel->word_select_drag = true;
+      panel->word_select_anchor_line = buffer->primary().anchor.line;
+      panel->word_select_anchor_col = buffer->primary().anchor.col;
       save_shift_extend_anchor(panel, *buffer);
+      begin_mouse_selection(panel, event);
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       return true;
     }
@@ -2295,6 +2398,12 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     copy_selection(buffer);
     return true;
   }
+  if (event_is_ctrl_x(event)) {
+    cut_selection(buffer);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+    save_shift_extend_anchor(panel, *buffer);
+    return true;
+  }
   if (event_is_ctrl_v(event)) {
     paste_text(buffer, editor_clipboard());
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
@@ -2354,7 +2463,8 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
 
   const bool extend = event_is_shift_left(event) || event_is_shift_right(event) ||
                       event_is_shift_up(event) || event_is_shift_down(event) ||
-                      event_is_ctrl_shift_left(event) || event_is_ctrl_shift_right(event);
+                      event_is_ctrl_shift_left(event) || event_is_ctrl_shift_right(event) ||
+                      event_is_shift_home(event) || event_is_shift_end(event);
 
   if (event_is_ctrl_left(event) || event_is_ctrl_shift_left(event)) {
     move_primary_word_left(buffer, extend);
@@ -2402,14 +2512,14 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     finish_editor_move(panel, buffer, extend);
     return true;
   }
-  if (event == Event::Home) {
-    move_primary_home(buffer, false);
-    finish_editor_move(panel, buffer, false);
+  if (event == Event::Home || event_is_shift_home(event)) {
+    move_primary_home(buffer, event_is_shift_home(event));
+    finish_editor_move(panel, buffer, event_is_shift_home(event));
     return true;
   }
-  if (event == Event::End) {
-    move_primary_end(buffer, false);
-    finish_editor_move(panel, buffer, false);
+  if (event == Event::End || event_is_shift_end(event)) {
+    move_primary_end(buffer, event_is_shift_end(event));
+    finish_editor_move(panel, buffer, event_is_shift_end(event));
     return true;
   }
   if (event_is_ctrl_backspace(event)) {
@@ -2495,7 +2605,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
 Element make_completion_overlay(const CompletionState& completion_state,
                                 const EditorBuffer& buffer, int gutter_width,
                                 int visible_lines) {
-  if (!completion_state.open) {
+  if (!completion_state.open || completion_state.matches.empty()) {
     return text("");
   }
 
@@ -2524,12 +2634,6 @@ Element make_completion_overlay(const CompletionState& completion_state,
       row = row | bgcolor(theme::CodeBg());
     }
     rows.push_back(row);
-  }
-  if (rows.empty()) {
-    const char* msg = completion_state.index_scanning && completion_state.workspace_index
-                          ? " indexando…"
-                          : completion_state.live_mode ? " …" : " —";
-    rows.push_back(text(msg) | color(theme::Muted()) | bgcolor(theme::CodeBg()));
   }
 
   const int popup_rows = static_cast<int>(rows.size());
@@ -2888,13 +2992,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       code_view | flex,
   });
 
-  auto diagnostics_panel =
-      MakeDiagnosticsPanel(workspace, focus, symbols, layout_state, file_indexer);
-
   // Sin Container::Vertical+Maybe: con muchas líneas el layout DOM de FTXUI se bloqueaba.
   auto panel = Renderer(editor_stack, [workspace, find_state, editor_stack, panel_state,
-                                       tab_bar_state, symbols, layout_state,
-                                       diagnostics_panel] {
+                                       tab_bar_state, symbols, layout_state] {
     workspace->ensure_buffer();
     if (tab_bar_state->bar_box.x_max > tab_bar_state->bar_box.x_min) {
       tab_bar_state->bar_width_chars =
@@ -2913,14 +3013,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                         layout_state);
     Element tab_bar = make_editor_tab_bar(workspace, tab_bar_state.get(), layout_state);
     Element editor = editor_stack->Render() | flex;
-    if (layout_state != nullptr && layout_state->diagnostics_panel_visible) {
-      return vbox({std::move(tab_bar), std::move(title), editor | yflex,
-                     diagnostics_panel->Render() | size(HEIGHT, EQUAL,
-                                                        layout_state->diagnostics_panel_height)}) |
-             flex | bgcolor(theme::CodeBg());
-    }
-    // Misma forma que MakePanel (título + cuerpo) pero con fila de tabs encima; sin flex/filler
-    // anidados extra en tabs/breadcrumb que cuelgan FTXUI al abrir archivos.
     return vbox({std::move(tab_bar), std::move(title), PanelBody(std::move(editor), theme::CodeBg())}) |
            flex | bgcolor(theme::CodeBg());
   });
@@ -3056,11 +3148,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
   return WrapFocusable(CatchEvent(panel, [dispatch_editor_keys, dispatch_editor_mouse, workspace,
                                           focus, panel_state, tab_bar_state, find_state,
-                                          layout_state, symbols, diagnostics_panel](Event event) {
-    if (layout_state != nullptr && layout_state->diagnostics_panel_visible &&
-        diagnostics_panel->OnEvent(event)) {
-      return true;
-    }
+                                          layout_state, symbols](Event event) {
     if (tab_bar_state->overflow_open &&
         handle_tabs_overflow_keys(workspace, focus, tab_bar_state.get(), event)) {
       return true;

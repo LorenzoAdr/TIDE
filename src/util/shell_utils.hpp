@@ -1,0 +1,11 @@
+#pragma once
+
+#include <string>
+
+namespace tgdb {
+
+std::string shell_quote(const std::string& value);
+std::string run_shell_capture(const std::string& command, int timeout_seconds = 0);
+bool command_exists(const std::string& command);
+
+}  // namespace tgdb

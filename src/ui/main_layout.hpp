@@ -41,18 +41,11 @@ enum class TextInputFocus {
   SearchQuery,
   SearchReplace,
   SearchPath,
+  SearchInclude,
   SearchExclude,
 };
 
-struct RightSidebarTabs {
-  static constexpr int kOutline = 0;
-  static constexpr int kSearch = 1;
-  static constexpr int kCallHierarchy = 2;
-  static constexpr int kCount = 3;
-};
-
 struct RightSidebarState {
-  int selected_tab = 0;
   bool pending_focus_search = false;
   bool pending_search_setup = false;
   std::string pending_search_query;
@@ -70,6 +63,9 @@ struct ConsolePanelTabs {
   static constexpr int kTerminal = 0;
   static constexpr int kDebug = 1;
   static constexpr int kPerformance = 2;
+  static constexpr int kProblems = 3;
+  static constexpr int kSearch = 4;
+  static constexpr int kCallHierarchy = 5;
   int selected_tab = kTerminal;
 };
 
@@ -123,6 +119,7 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> split_mouse_handler;
   std::function<bool(const ftxui::Event&)> search_key_handler;
   std::function<bool(const ftxui::Event&)> call_hierarchy_key_handler;
+  std::function<bool(const ftxui::Event&)> problems_key_handler;
   std::function<bool(const ftxui::Event&)> git_key_handler;
   std::function<bool(const ftxui::Event&)> git_mouse_handler;
   std::function<void()> terminal_tick_callback;
@@ -133,10 +130,32 @@ struct MainLayoutState {
   PerformanceSampler performance_sampler;
 };
 
+inline bool problems_tab_active(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kProblems;
+}
+
+inline bool search_tab_active(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kSearch;
+}
+
+inline bool call_hierarchy_tab_active(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kCallHierarchy;
+}
+
+inline bool console_panel_tab_active(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->console_tabs.selected_tab != ConsolePanelTabs::kTerminal &&
+         layout_state->console_tabs.selected_tab != ConsolePanelTabs::kDebug;
+}
+
 inline bool is_search_input_focus(TextInputFocus focus) {
   return focus == TextInputFocus::SearchQuery ||
          focus == TextInputFocus::SearchReplace ||
          focus == TextInputFocus::SearchPath ||
+         focus == TextInputFocus::SearchInclude ||
          focus == TextInputFocus::SearchExclude;
 }
 

@@ -34,6 +34,7 @@ struct DiagnosticRow {
 struct DiagnosticsPanelState {
   std::vector<DiagnosticRow> rows;
   int selected = 0;
+  int first_visible = 0;
   Box content_box;
   uint64_t rows_revision = 0;
 };
@@ -161,6 +162,24 @@ void navigate_to_diagnostic(WorkspaceModel* workspace, const DiagnosticRow& row)
       std::to_string(row.character + 1);
 }
 
+int visible_line_count(const Box& box) {
+  if (box.y_max < box.y_min) {
+    return 1;
+  }
+  return std::max(1, box.y_max - box.y_min + 1);
+}
+
+void clamp_scroll(DiagnosticsPanelState* state, int visible_lines) {
+  const int total = static_cast<int>(state->rows.size());
+  const int max_first = std::max(0, total - visible_lines);
+  state->first_visible = std::max(0, std::min(state->first_visible, max_first));
+  if (state->selected < state->first_visible) {
+    state->first_visible = state->selected;
+  } else if (state->selected >= state->first_visible + visible_lines) {
+    state->first_visible = state->selected - visible_lines + 1;
+  }
+}
+
 }  // namespace
 
 Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* focus,
@@ -186,6 +205,9 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       state->rows_revision = 0;
     }
 
+    const int visible = visible_line_count(state->content_box);
+    clamp_scroll(state.get(), visible);
+
     Elements rows;
     if (!symbols || !symbols->supports_diagnostics()) {
       rows.push_back(text(" (requiere clangd) ") | color(theme::Muted()));
@@ -193,7 +215,8 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       rows.push_back(text(" (sin problemas) ") | color(theme::Muted()));
     } else {
       const std::string workspace_root = workspace != nullptr ? workspace->root : std::string{};
-      for (int i = 0; i < static_cast<int>(state->rows.size()); ++i) {
+      const int end = std::min(static_cast<int>(state->rows.size()), state->first_visible + visible);
+      for (int i = state->first_visible; i < end; ++i) {
         const auto& row = state->rows[static_cast<std::size_t>(i)];
         const std::string loc = display_path(row.path, workspace_root) + ":" +
                                 std::to_string(row.line + 1) + " ";
@@ -209,52 +232,36 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       }
     }
 
-    const int err = [&] {
-      int n = 0;
-      for (const auto& row : state->rows) {
-        if (row.severity == DiagnosticSeverity::kError) {
-          ++n;
-        }
-      }
-      return n;
-    }();
-    const int warn = static_cast<int>(state->rows.size()) - err;
-
-    std::string title = "Problemas";
-    if (!state->rows.empty()) {
-      title += " (" + std::to_string(err);
-      if (warn > 0) {
-        title += "+" + std::to_string(warn) + "w";
-      }
-      title += ")";
-    }
-
-    auto content = vbox(std::move(rows)) | vscroll_indicator | frame | flex |
-                   reflect(state->content_box) | bgcolor(theme::PanelBg());
-    Element panel = MakePanel(title, std::move(content));
-    if (layout_state != nullptr && layout_state->diagnostics_panel_visible) {
-      panel = panel | size(HEIGHT, EQUAL, layout_state->diagnostics_panel_height);
-    }
-    return panel;
+    return vbox(std::move(rows)) | vscroll_indicator | frame | flex |
+           reflect(state->content_box) | bgcolor(theme::PanelBg());
   });
 
-  return WrapFocusable(CatchEvent(renderer, [workspace, focus, state, layout_state](Event event) {
-    if (layout_state == nullptr || !layout_state->diagnostics_panel_visible) {
+  auto handler = [workspace, focus, state, layout_state](Event event) {
+    if (layout_state == nullptr || !problems_tab_active(layout_state)) {
       return false;
     }
 
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
         event.mouse().motion == Mouse::Pressed) {
       const auto& m = event.mouse();
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
       if (!state->content_box.Contain(m.x, m.y)) {
         return false;
       }
-      const int row = m.y - state->content_box.y_min;
+      const int visible = visible_line_count(state->content_box);
+      const int visual_row = m.y - state->content_box.y_min;
+      const int row = visual_row + state->first_visible;
       if (row >= 0 && row < static_cast<int>(state->rows.size())) {
         state->selected = row;
+        clamp_scroll(state.get(), visible);
         navigate_to_diagnostic(workspace, state->rows[static_cast<std::size_t>(row)]);
         if (focus != nullptr) {
           focus->region = FocusRegion::Editor;
+        }
+        if (layout_state != nullptr) {
+          layout_state->request_ui_tick = true;
         }
         return true;
       }
@@ -265,13 +272,16 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       return false;
     }
 
+    const int visible = visible_line_count(state->content_box);
     if (event == Event::ArrowDown || event == Event::Character('j')) {
       state->selected =
           std::min(state->selected + 1, static_cast<int>(state->rows.size()) - 1);
+      clamp_scroll(state.get(), visible);
       return true;
     }
     if (event == Event::ArrowUp || event == Event::Character('k')) {
       state->selected = std::max(0, state->selected - 1);
+      clamp_scroll(state.get(), visible);
       return true;
     }
     if (event == Event::Return) {
@@ -281,8 +291,25 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       }
       return true;
     }
+    if (event == Event::PageDown) {
+      state->selected =
+          std::min(state->selected + visible, static_cast<int>(state->rows.size()) - 1);
+      clamp_scroll(state.get(), visible);
+      return true;
+    }
+    if (event == Event::PageUp) {
+      state->selected = std::max(0, state->selected - visible);
+      clamp_scroll(state.get(), visible);
+      return true;
+    }
     return false;
-  }));
+  };
+
+  if (layout_state != nullptr) {
+    layout_state->problems_key_handler = handler;
+  }
+
+  return WrapFocusable(CatchEvent(renderer, handler));
 }
 
 }  // namespace tgdb

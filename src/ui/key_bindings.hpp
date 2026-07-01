@@ -4,6 +4,9 @@
 
 namespace tgdb {
 
+bool event_is_shift_home(const ftxui::Event& event);
+bool event_is_shift_end(const ftxui::Event& event);
+
 bool event_is_ctrl_shift_l(const ftxui::Event& event);
 
 bool event_is_shift_left(const ftxui::Event& event);
@@ -26,6 +29,7 @@ bool event_is_ctrl_shift_right(const ftxui::Event& event);
 bool event_is_ctrl_c(const ftxui::Event& event);
 bool event_is_ctrl_z(const ftxui::Event& event);
 bool event_is_ctrl_v(const ftxui::Event& event);
+bool event_is_ctrl_x(const ftxui::Event& event);
 bool event_is_ctrl_f(const ftxui::Event& event);
 bool event_is_ctrl_shift_h(const ftxui::Event& event);
 bool event_is_ctrl_h(const ftxui::Event& event);

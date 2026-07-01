@@ -17,6 +17,7 @@ struct WorkspaceSearchOptions {
   std::vector<std::string> files;
   std::string needle;
   std::string path_filter;
+  std::string include_pattern;
   std::string exclude_pattern;
 };
 
@@ -28,6 +29,8 @@ struct WorkspaceReplaceResult {
 bool glob_match(const std::string& pattern, const std::string& text);
 
 bool file_excluded(const std::string& relative_path, const std::string& exclude_pattern);
+
+bool file_included(const std::string& relative_path, const std::string& include_pattern);
 
 bool file_in_search_path(const std::string& relative_path, const std::string& path_filter);
 

@@ -1,6 +1,7 @@
 #include "editor/clipboard.hpp"
 
 #include "editor/text_ops.hpp"
+#include "editor/undo_stack.hpp"
 
 namespace tgdb {
 
@@ -56,6 +57,22 @@ bool copy_selection(EditorBuffer* buffer) {
     return false;
   }
   editor_clipboard() = text;
+  return true;
+}
+
+bool cut_selection(EditorBuffer* buffer) {
+  if (buffer == nullptr) {
+    return false;
+  }
+  const std::string text = extract_selection_text(*buffer, buffer->primary());
+  if (text.empty()) {
+    return false;
+  }
+  editor_clipboard() = text;
+  push_undo(buffer);
+  delete_all_selections(buffer);
+  buffer->dirty = true;
+  buffer->view_token++;
   return true;
 }
 

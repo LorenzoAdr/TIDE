@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 
+#include "build/build_environment_service.hpp"
 #include "util/compile_commands_remap.hpp"
 
 namespace tgdb {
@@ -57,13 +59,29 @@ ShellLaunchConfig resolve_shell_launch_config(const std::string& workspace_root,
                                               const WorkspaceConfig& config) {
   ShellLaunchConfig launch;
   launch.host_cwd = workspace_root;
-  launch.docker_container = config.compile_commands.docker_container;
+
+  const BuildEnvironment& active =
+      global_build_environment_service().active_environment();
+  if (!active.docker_container.empty()) {
+    launch.docker_container = active.docker_container;
+  } else {
+    launch.docker_container = config.compile_commands.docker_container;
+  }
+  if (!active.working_dir.empty()) {
+    launch.host_cwd = active.working_dir;
+  }
+  launch.env_vars = active.env_vars;
+  launch.setup_scripts = active.setup_scripts;
+
   if (launch.docker_container.empty()) {
     return launch;
   }
 
   const std::vector<PathMapping> mappings = terminal_mount_mappings(config);
-  launch.docker_cwd = host_path_to_container_path(workspace_root, mappings);
+  launch.docker_cwd = host_path_to_container_path(launch.host_cwd, mappings);
+  if (launch.docker_cwd.empty()) {
+    launch.docker_cwd = host_path_to_container_path(workspace_root, mappings);
+  }
   if (launch.docker_cwd.empty()) {
     launch.docker_cwd = "/workspace";
   }

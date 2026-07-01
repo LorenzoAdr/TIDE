@@ -18,18 +18,28 @@ using namespace ftxui;
 
 namespace {
 
-std::string to_lower(std::string value) {
-  for (char& c : value) {
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  }
-  return value;
-}
-
 bool contains_insensitive(const std::string& haystack, const std::string& needle) {
   if (needle.empty()) {
     return true;
   }
-  return to_lower(haystack).find(to_lower(needle)) != std::string::npos;
+  if (haystack.size() < needle.size()) {
+    return false;
+  }
+  const std::size_t limit = haystack.size() - needle.size() + 1;
+  for (std::size_t i = 0; i < limit; ++i) {
+    bool match = true;
+    for (std::size_t j = 0; j < needle.size(); ++j) {
+      if (std::tolower(static_cast<unsigned char>(haystack[i + j])) !=
+          std::tolower(static_cast<unsigned char>(needle[j]))) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      return true;
+    }
+  }
+  return false;
 }
 
 std::string picker_display_path(const std::string& path, const std::string& workspace_root) {
@@ -67,14 +77,20 @@ void FilePickerState::sync_index(const std::shared_ptr<const IndexSnapshot>& sna
   if (!snapshot || snapshot->workspace_root != workspace_root) {
     return;
   }
-  if (indexed_root == workspace_root && all_files == snapshot->files) {
+  if (indexed_root == workspace_root && index_snapshot.get() == snapshot.get()) {
     return;
   }
   indexed_root = workspace_root;
+  index_snapshot = snapshot;
   all_files = snapshot->files;
+  matches_dirty = true;
 }
 
 void FilePickerState::refresh_matches(const WorkspaceModel* workspace) {
+  if (!matches_dirty) {
+    return;
+  }
+  matches_dirty = false;
   matches.clear();
   if (query.empty() && workspace != nullptr) {
     matches = workspace->open_tabs_mru_excluding_active();
@@ -92,6 +108,10 @@ void FilePickerState::refresh_matches(const WorkspaceModel* workspace) {
   if (selected >= static_cast<int>(matches.size())) {
     selected = std::max(0, static_cast<int>(matches.size()) - 1);
   }
+}
+
+void FilePickerState::mark_matches_dirty() {
+  matches_dirty = true;
 }
 
 void FilePickerState::open_file(DebugModel* model, WorkspaceModel* workspace,
@@ -117,6 +137,7 @@ void FilePickerState::open_file(DebugModel* model, WorkspaceModel* workspace,
   open = false;
   query.clear();
   selected = 0;
+  mark_matches_dirty();
   refresh_matches(workspace);
 }
 
@@ -136,6 +157,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
           state->open = false;
           state->query.clear();
           state->selected = 0;
+          state->mark_matches_dirty();
           state->refresh_matches(workspace);
           return true;
         }
@@ -165,6 +187,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
           if (!state->query.empty()) {
             state->query.pop_back();
             state->selected = 0;
+            state->mark_matches_dirty();
             state->refresh_matches(workspace);
           }
           return true;
@@ -175,6 +198,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
               static_cast<unsigned char>(ch[0]) < 127) {
             state->query += ch;
             state->selected = 0;
+            state->mark_matches_dirty();
             state->refresh_matches(workspace);
           }
           return true;

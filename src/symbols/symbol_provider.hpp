@@ -19,6 +19,7 @@ struct SymbolInfo {
   std::string name;
   SymbolKind kind = SymbolKind::kFunction;
   int line = 0;
+  int end_line = 0;  // 1-based inclusive; 0 = inferir del siguiente símbolo
   int depth = 0;
   std::string file;  // ruta relativa al workspace (opcional)
 };

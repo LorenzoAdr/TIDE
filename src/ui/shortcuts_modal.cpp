@@ -59,6 +59,7 @@ const std::vector<ShortcutSection>& shortcut_sections() {
            {"Ctrl+G", "Ir a línea"},
            {"Ctrl+Z", "Deshacer"},
            {"Ctrl+C", "Copiar selección"},
+           {"Ctrl+X", "Cortar selección"},
            {"Ctrl+V", "Pegar"},
            {"Ctrl+U", "Media página arriba (cursor + scroll)"},
            {"Ctrl+I", "Media página abajo (cursor + scroll)"},

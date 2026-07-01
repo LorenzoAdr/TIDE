@@ -502,13 +502,17 @@ void LspClient::flatten_symbols(const nlohmann::json& nodes, int depth,
     info.name = kind_prefix(info.kind) + info.name;
     info.depth = depth;
     info.file = relative_file;
-    if (node.contains("location") && node["location"].contains("range") &&
-        node["location"]["range"].contains("start") &&
-        node["location"]["range"]["start"].contains("line")) {
-      info.line = node["location"]["range"]["start"]["line"].get<int>() + 1;
-    } else if (node.contains("range") && node["range"].contains("start") &&
-               node["range"]["start"].contains("line")) {
-      info.line = node["range"]["start"]["line"].get<int>() + 1;
+    const nlohmann::json* range = nullptr;
+    if (node.contains("location") && node["location"].contains("range")) {
+      range = &node["location"]["range"];
+    } else if (node.contains("range")) {
+      range = &node["range"];
+    }
+    if (range != nullptr && range->contains("start") && (*range)["start"].contains("line")) {
+      info.line = (*range)["start"]["line"].get<int>() + 1;
+    }
+    if (range != nullptr && range->contains("end") && (*range)["end"].contains("line")) {
+      info.end_line = (*range)["end"]["line"].get<int>() + 1;
     }
     out->push_back(std::move(info));
 

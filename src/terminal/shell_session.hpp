@@ -2,10 +2,12 @@
 
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "terminal/raw_pty_screen.hpp"
 #include "util/thread_safe_queue.hpp"
@@ -17,6 +19,8 @@ struct ShellLaunchConfig {
   std::string docker_container;
   std::string docker_cwd;
   std::string docker_shell = "/bin/bash";
+  std::map<std::string, std::string> env_vars;
+  std::vector<std::string> setup_scripts;
 
   bool uses_docker() const { return !docker_container.empty(); }
 };

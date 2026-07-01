@@ -55,6 +55,9 @@ Color SyntaxMacro();
 Color SyntaxNamespace();
 Color SyntaxOperator();
 
+Color BuildFileLineBg();
+Color BuildFileKeyword();
+
 ThemeMode parse_theme_name(const std::string& name);
 const char* theme_name(ThemeMode mode);
 

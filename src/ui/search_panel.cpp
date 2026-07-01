@@ -12,7 +12,9 @@
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
+#include "indexer/workspace_indexer.hpp"
 #include "search/workspace_search.hpp"
+#include "search/workspace_search_runner.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/panel.hpp"
 #include "ui/text_input_style.hpp"
@@ -24,51 +26,14 @@ using namespace ftxui;
 
 namespace {
 
-constexpr int kResultVisualRows = 2;
-
-Element highlight_preview(const std::string& line, const std::string& needle, bool selected) {
-  const std::string indent = "   ";
-  if (needle.empty()) {
-    Element row = text(indent + line) | color(theme::Header());
-    if (selected) {
-      row = row | inverted;
-    }
-    return row;
-  }
-
-  Elements parts;
-  parts.push_back(text(indent));
-  std::size_t pos = 0;
-  while (pos <= line.size()) {
-    const auto found = line.find(needle, pos);
-    if (found == std::string::npos) {
-      parts.push_back(text(line.substr(pos)) | color(theme::Header()));
-      break;
-    }
-    if (found > pos) {
-      parts.push_back(text(line.substr(pos, found - pos)) | color(theme::Header()));
-    }
-    parts.push_back(text(needle) | color(theme::Stop()) | bold);
-    pos = found + needle.size();
-  }
-
-  Element row = hbox(std::move(parts));
-  if (selected) {
-    row = row | inverted;
-  }
-  return row;
-}
-
-Component make_input_row(Component input) {
-  return Container::Horizontal({std::move(input) | flex});
-}
+constexpr int kLabelWidth = 8;
 
 Element render_search_field(const std::string& label, const std::string& value,
-                            const std::string& placeholder, bool active, Component row,
+                            const std::string& placeholder, bool active, Component input,
                             Box* box) {
   Element field;
   if (active) {
-    field = row->Render() | flex | border | bgcolor(theme::PanelBg()) | size(HEIGHT, EQUAL, 3);
+    field = input->Render() | flex | border | bgcolor(theme::PanelBg());
   } else {
     const std::string& preview = value.empty() ? placeholder : value;
     field = ModalInputLine(preview) | flex;
@@ -78,11 +43,17 @@ Element render_search_field(const std::string& label, const std::string& value,
   }
 
   return hbox({
-             text(" " + label + " ") | color(theme::Muted()) |
-                 size(WIDTH, EQUAL, static_cast<int>(label.size()) + 2),
+             text(label) | color(theme::Muted()) | size(WIDTH, EQUAL, kLabelWidth),
              std::move(field) | flex | reflect(*box),
          }) |
-         size(HEIGHT, EQUAL, active ? 3 : 1);
+         flex;
+}
+
+int visible_line_count(const Box& box) {
+  if (box.y_max < box.y_min) {
+    return 1;
+  }
+  return std::max(1, box.y_max - box.y_min + 1);
 }
 
 }  // namespace
@@ -91,17 +62,41 @@ struct SearchPanelState {
   std::string query;
   std::string replace;
   std::string path_filter;
+  std::string include_pattern;
   std::string exclude_pattern;
   std::vector<WorkspaceSearchResult> results;
   int selected = 0;
+  int first_visible = 0;
+  int last_visible_lines = 1;
   Box results_box;
   Box query_box;
   Box replace_box;
   Box path_box;
+  Box include_box;
   Box exclude_box;
   std::string status;
   int result_count = 0;
+  WorkspaceSearchRunner runner;
+  uint64_t search_generation = 0;
 };
+
+namespace {
+
+void clamp_search_scroll(SearchPanelState* state, int visible_lines) {
+  if (state == nullptr) {
+    return;
+  }
+  const int total = static_cast<int>(state->results.size());
+  const int max_first = std::max(0, total - visible_lines);
+  state->first_visible = std::max(0, std::min(state->first_visible, max_first));
+  if (state->selected < state->first_visible) {
+    state->first_visible = state->selected;
+  } else if (state->selected >= state->first_visible + visible_lines) {
+    state->first_visible = state->selected - visible_lines + 1;
+  }
+}
+
+}  // namespace
 
 void clear_search_input_focus(MainLayoutState* layout_state) {
   if (layout_state == nullptr) {
@@ -112,13 +107,22 @@ void clear_search_input_focus(MainLayoutState* layout_state) {
   }
 }
 
-WorkspaceSearchOptions build_options(SearchPanelState* state, DebugModel* model,
-                                     WorkspaceIndexer* indexer) {
+WorkspaceSearchOptions build_options(SearchPanelState* state, WorkspaceModel* workspace,
+                                     DebugModel* model, WorkspaceIndexer* indexer) {
   WorkspaceSearchOptions opts;
   opts.needle = state->query;
   opts.path_filter = state->path_filter;
+  opts.include_pattern = state->include_pattern;
   opts.exclude_pattern = state->exclude_pattern;
-  opts.workspace_root = model != nullptr ? model->workspace_root : std::string{};
+  if (model != nullptr && !model->workspace_root.empty()) {
+    opts.workspace_root = model->workspace_root;
+  } else if (workspace != nullptr && !workspace->root.empty()) {
+    opts.workspace_root = workspace->root;
+  }
+  if (!opts.workspace_root.empty()) {
+    std::error_code ec;
+    opts.workspace_root = std::filesystem::absolute(opts.workspace_root, ec).string();
+  }
   if (indexer != nullptr) {
     if (auto snap = indexer->snapshot()) {
       if (snap->workspace_root == opts.workspace_root) {
@@ -126,37 +130,96 @@ WorkspaceSearchOptions build_options(SearchPanelState* state, DebugModel* model,
       }
     }
   }
+  if (opts.files.empty() && !opts.workspace_root.empty()) {
+    opts.files = scan_workspace_files(opts.workspace_root);
+  }
   return opts;
 }
 
-void run_search(SearchPanelState* state, DebugModel* model, WorkspaceIndexer* indexer) {
+void apply_search_results(SearchPanelState* state, std::vector<WorkspaceSearchResult> results,
+                          bool cancelled, int files_scanned, bool used_rg) {
+  if (state == nullptr) {
+    return;
+  }
+  state->results = std::move(results);
+  state->result_count = static_cast<int>(state->results.size());
+  state->selected = 0;
+  state->first_visible = 0;
+  const std::string backend = used_rg ? " [rg]" : " [interno]";
+  if (state->results.empty()) {
+    if (cancelled) {
+      state->status = "Búsqueda cancelada";
+    } else if (state->query.empty()) {
+      state->status = "Introduce un texto para buscar";
+    } else {
+      state->status = "Sin coincidencias" + backend;
+    }
+  } else {
+    state->status = std::to_string(state->result_count) + " coincidencia(s)" + backend;
+    if (state->result_count >= 2000) {
+      state->status += " (límite alcanzado)";
+    }
+  }
+  if (files_scanned > 0 && state->results.empty() && !cancelled && !state->query.empty()) {
+    state->status += " en " + std::to_string(files_scanned) + " archivo(s)";
+  }
+}
+
+bool poll_search_results(SearchPanelState* state, MainLayoutState* layout_state) {
+  if (state == nullptr) {
+    return false;
+  }
+  std::vector<WorkspaceSearchResult> results;
+  bool cancelled = false;
+  int files_scanned = 0;
+  bool used_rg = false;
+  if (!state->runner.poll(&results, &cancelled, &files_scanned, &used_rg)) {
+    return false;
+  }
+  apply_search_results(state, std::move(results), cancelled, files_scanned, used_rg);
+  if (layout_state != nullptr) {
+    layout_state->request_ui_tick = true;
+  }
+  return true;
+}
+
+void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* model,
+                WorkspaceIndexer* indexer, MainLayoutState* layout_state) {
   if (state->query.empty()) {
+    state->runner.cancel();
     state->results.clear();
     state->selected = 0;
     state->result_count = 0;
     state->status = "Introduce un texto para buscar";
     return;
   }
-  const auto opts = build_options(state, model, indexer);
-  state->results = search_workspace(opts);
-  state->result_count = static_cast<int>(state->results.size());
+  const auto opts = build_options(state, workspace, model, indexer);
+  if (opts.workspace_root.empty()) {
+    state->status = "Sin workspace abierto";
+    return;
+  }
+  state->status = "Buscando…";
+  state->results.clear();
   state->selected = 0;
-  if (state->results.empty()) {
-    state->status = "Sin coincidencias";
-  } else {
-    state->status = std::to_string(state->result_count) + " coincidencia(s)";
+  state->first_visible = 0;
+  state->result_count = 0;
+  ++state->search_generation;
+  state->runner.start(opts);
+  if (layout_state != nullptr) {
+    layout_state->request_ui_tick = true;
   }
 }
 
-void run_replace_all(SearchPanelState* state, DebugModel* model, WorkspaceIndexer* indexer,
-                     WorkspaceModel* workspace) {
+void run_replace_all(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* model,
+                     WorkspaceIndexer* indexer, MainLayoutState* layout_state) {
   if (state->query.empty() || state->replace.empty()) {
     state->status = "Necesitas texto de búsqueda y reemplazo";
     return;
   }
-  const auto opts = build_options(state, model, indexer);
+  state->runner.cancel();
+  const auto opts = build_options(state, workspace, model, indexer);
   const auto result = replace_in_workspace(opts, state->replace);
-  run_search(state, model, indexer);
+  run_search(state, workspace, model, indexer, layout_state);
   state->status = "Reemplazadas " + std::to_string(result.replacements) +
                   " en " + std::to_string(result.files_modified) + " archivo(s)";
 
@@ -211,63 +274,80 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
   auto query_input = Input(MakeBlinkInputOption(&state->query, "buscar..."));
   auto replace_input = Input(MakeBlinkInputOption(&state->replace, "reemplazar..."));
   auto path_input = Input(MakeBlinkInputOption(&state->path_filter, "todo el workspace"));
+  auto include_input = Input(MakeBlinkInputOption(&state->include_pattern, "p. ej. *.cpp"));
   auto exclude_input = Input(MakeBlinkInputOption(&state->exclude_pattern, "p. ej. *.h"));
 
-  auto query_row = make_input_row(query_input);
-  auto replace_row = make_input_row(replace_input);
-  auto path_row = make_input_row(path_input);
-  auto exclude_row = make_input_row(exclude_input);
-
-  auto query_active = Maybe(query_row, [layout_state] {
-    return layout_state &&
-           layout_state->text_input_focus == TextInputFocus::SearchQuery;
-  });
-  auto replace_active = Maybe(replace_row, [layout_state] {
-    return layout_state &&
-           layout_state->text_input_focus == TextInputFocus::SearchReplace;
-  });
-  auto path_active = Maybe(path_row, [layout_state] {
-    return layout_state && layout_state->text_input_focus == TextInputFocus::SearchPath;
-  });
-  auto exclude_active = Maybe(exclude_row, [layout_state] {
-    return layout_state &&
-           layout_state->text_input_focus == TextInputFocus::SearchExclude;
-  });
-
-  auto input_layers = Container::Vertical(
-      {query_active, replace_active, path_active, exclude_active});
+  auto input_layers = Container::Horizontal(
+      {query_input | flex, replace_input | flex, path_input | flex, include_input | flex,
+       exclude_input | flex});
 
   auto activate_field = [layout_state, focus](TextInputFocus field, Component input) {
     if (focus != nullptr) {
-      focus->region = FocusRegion::RightPanel;
+      focus->region = FocusRegion::Terminal;
     }
-    if (layout_state) {
+    if (layout_state != nullptr) {
       layout_state->text_input_focus = field;
     }
     input->TakeFocus();
   };
 
+  auto active_search_input = [layout_state, query_input, replace_input, path_input, include_input,
+                              exclude_input]() -> Component {
+    if (layout_state == nullptr) {
+      return query_input;
+    }
+    switch (layout_state->text_input_focus) {
+      case TextInputFocus::SearchReplace:
+        return replace_input;
+      case TextInputFocus::SearchPath:
+        return path_input;
+      case TextInputFocus::SearchInclude:
+        return include_input;
+      case TextInputFocus::SearchExclude:
+        return exclude_input;
+      default:
+        return query_input;
+    }
+  };
+
+  auto forward_input_event = [active_search_input](Event event) {
+    const Component input = active_search_input();
+    return input != nullptr && input->OnEvent(event);
+  };
+
   auto handler = [state, workspace, model, focus, layout_state, indexer, sidebar, query_input,
-                  replace_input, path_input, exclude_input, activate_field](Event event) {
+                  replace_input, path_input, include_input, exclude_input, activate_field,
+                  forward_input_event](Event event) {
+    if (event == Event::Custom) {
+      poll_search_results(state.get(), layout_state);
+      if (state->runner.running() && layout_state != nullptr) {
+        layout_state->request_ui_tick = true;
+      }
+    }
     if (event == Event::Custom && sidebar != nullptr && sidebar->pending_search_setup) {
       state->query = sidebar->pending_search_query;
       state->path_filter = sidebar->pending_search_path_filter;
       sidebar->pending_search_setup = false;
       sidebar->pending_search_query.clear();
       sidebar->pending_search_path_filter.clear();
-      run_search(state.get(), model, indexer);
+      run_search(state.get(), workspace, model, indexer, layout_state);
     }
     if (event == Event::Custom && sidebar != nullptr && sidebar->pending_focus_search) {
       sidebar->pending_focus_search = false;
       activate_field(TextInputFocus::SearchQuery, query_input);
-      return false;
+      return true;
     }
 
-    if (sidebar == nullptr || sidebar->selected_tab != RightSidebarTabs::kSearch) {
+    if (!search_tab_active(layout_state)) {
       return false;
     }
 
     if (event == Event::Escape) {
+      if (state->runner.running()) {
+        state->runner.cancel();
+        state->status = "Cancelando…";
+        return true;
+      }
       clear_search_input_focus(layout_state);
       return true;
     }
@@ -275,37 +355,70 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
         event.mouse().motion == Mouse::Pressed) {
       const auto& m = event.mouse();
-      focus->region = FocusRegion::RightPanel;
+      focus->region = FocusRegion::Terminal;
       if (state->query_box.Contain(m.x, m.y)) {
         activate_field(TextInputFocus::SearchQuery, query_input);
-        return false;
+        return true;
       }
       if (state->replace_box.Contain(m.x, m.y)) {
         activate_field(TextInputFocus::SearchReplace, replace_input);
-        return false;
+        return true;
       }
       if (state->path_box.Contain(m.x, m.y)) {
         activate_field(TextInputFocus::SearchPath, path_input);
-        return false;
+        return true;
+      }
+      if (state->include_box.Contain(m.x, m.y)) {
+        activate_field(TextInputFocus::SearchInclude, include_input);
+        return true;
       }
       if (state->exclude_box.Contain(m.x, m.y)) {
         activate_field(TextInputFocus::SearchExclude, exclude_input);
-        return false;
+        return true;
       }
       if (state->results_box.Contain(m.x, m.y)) {
         clear_search_input_focus(layout_state);
+        const int visible = state->last_visible_lines;
         const int visual_row = m.y - state->results_box.y_min;
-        const int result_index = visual_row / kResultVisualRows;
-        if (result_index >= 0 && result_index < static_cast<int>(state->results.size())) {
-          state->selected = result_index;
-          open_result(state.get(), workspace, model, focus, result_index);
+        const int row = visual_row + state->first_visible;
+        if (row >= 0 && row < static_cast<int>(state->results.size())) {
+          state->selected = row;
+          clamp_search_scroll(state.get(), visible);
+          open_result(state.get(), workspace, model, focus, row);
         }
         return true;
       }
       return false;
     }
 
-    if (focus->region != FocusRegion::RightPanel &&
+    if (event.is_mouse() && state->results_box.Contain(event.mouse().x, event.mouse().y)) {
+      const auto& m = event.mouse();
+      const int total = static_cast<int>(state->results.size());
+      const int visible = state->last_visible_lines;
+      const int max_scroll = std::max(0, total - visible);
+      if (m.button == Mouse::WheelUp) {
+        state->first_visible = std::max(0, state->first_visible - 3);
+        if (layout_state != nullptr) {
+          layout_state->request_ui_tick = true;
+        }
+        return true;
+      }
+      if (m.button == Mouse::WheelDown) {
+        state->first_visible = std::min(state->first_visible + 3, max_scroll);
+        if (layout_state != nullptr) {
+          layout_state->request_ui_tick = true;
+        }
+        return true;
+      }
+    }
+
+    if (event.is_mouse() && event.mouse().motion == Mouse::Moved &&
+        state->results_box.Contain(event.mouse().x, event.mouse().y)) {
+      focus->region = FocusRegion::Terminal;
+      clear_search_input_focus(layout_state);
+    }
+
+    if (focus->region != FocusRegion::Terminal &&
         !is_search_input_focus(layout_state != nullptr ? layout_state->text_input_focus
                                                        : TextInputFocus::None)) {
       return false;
@@ -324,7 +437,13 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
             activate_field(TextInputFocus::SearchPath, path_input);
             break;
           case TextInputFocus::SearchPath:
+            activate_field(TextInputFocus::SearchInclude, include_input);
+            break;
+          case TextInputFocus::SearchInclude:
             activate_field(TextInputFocus::SearchExclude, exclude_input);
+            break;
+          case TextInputFocus::SearchExclude:
+            activate_field(TextInputFocus::SearchQuery, query_input);
             break;
           default:
             activate_field(TextInputFocus::SearchQuery, query_input);
@@ -333,15 +452,20 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         return true;
       }
       if (event == Event::Return) {
-        run_search(state.get(), model, indexer);
+        run_search(state.get(), workspace, model, indexer, layout_state);
         clear_search_input_focus(layout_state);
         return true;
       }
       if (event == Event::Character('r') || event == Event::Character('R')) {
         if (!state->replace.empty()) {
-          run_replace_all(state.get(), model, indexer, workspace);
+          run_replace_all(state.get(), workspace, model, indexer, layout_state);
           return true;
         }
+      }
+      if (event.is_character() || event == Event::Backspace || event == Event::Delete ||
+          event == Event::ArrowLeft || event == Event::ArrowRight || event == Event::Home ||
+          event == Event::End) {
+        return forward_input_event(event);
       }
       return false;
     }
@@ -351,13 +475,13 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         open_result(state.get(), workspace, model, focus, state->selected);
         return true;
       }
-      run_search(state.get(), model, indexer);
+      run_search(state.get(), workspace, model, indexer, layout_state);
       activate_field(TextInputFocus::SearchQuery, query_input);
       return true;
     }
     if (event == Event::Character('r') || event == Event::Character('R')) {
       if (!state->replace.empty()) {
-        run_replace_all(state.get(), model, indexer, workspace);
+        run_replace_all(state.get(), workspace, model, indexer, layout_state);
         return true;
       }
       return false;
@@ -371,13 +495,34 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       if (!state->results.empty()) {
         state->selected =
             std::min(state->selected + 1, static_cast<int>(state->results.size()) - 1);
+        clamp_search_scroll(state.get(), state->last_visible_lines);
         return true;
       }
       return false;
     }
     if (event == Event::ArrowUp || event == Event::Character('k')) {
       state->selected = std::max(0, state->selected - 1);
+      clamp_search_scroll(state.get(), state->last_visible_lines);
       return true;
+    }
+    if (event == Event::PageDown) {
+      if (!state->results.empty()) {
+        const int visible = state->last_visible_lines;
+        state->selected =
+            std::min(state->selected + visible, static_cast<int>(state->results.size()) - 1);
+        clamp_search_scroll(state.get(), visible);
+        return true;
+      }
+      return false;
+    }
+    if (event == Event::PageUp) {
+      if (!state->results.empty()) {
+        const int visible = state->last_visible_lines;
+        state->selected = std::max(0, state->selected - visible);
+        clamp_search_scroll(state.get(), visible);
+        return true;
+      }
+      return false;
     }
 
     return false;
@@ -388,47 +533,77 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
   }
 
   return WrapFocusable(CatchEvent(
-      Renderer(input_layers, [state, layout_state, query_row, replace_row, path_row, exclude_row,
-                              focus] {
+      Renderer(input_layers, [state, layout_state, query_input, replace_input, path_input,
+                              include_input, exclude_input, focus] {
         const auto active = layout_state != nullptr ? layout_state->text_input_focus
                                                     : TextInputFocus::None;
 
+        const std::string status_suffix =
+            state->runner.running()
+                ? "  (buscando… Esc: cancelar)"
+                : (state->replace.empty() ? "  Enter: buscar"
+                                          : "  Enter: buscar  R: reemplazar");
+
         Element form = vbox({
-            render_search_field("Buscar", state->query, "buscar...",
-                                active == TextInputFocus::SearchQuery, query_row,
-                                &state->query_box),
-            render_search_field("Reempl", state->replace, "reemplazar...",
-                                active == TextInputFocus::SearchReplace, replace_row,
-                                &state->replace_box),
-            render_search_field("Ruta", state->path_filter, "todo el workspace",
-                                active == TextInputFocus::SearchPath, path_row, &state->path_box),
-            render_search_field("Excl", state->exclude_pattern, "p. ej. *.h",
-                                active == TextInputFocus::SearchExclude, exclude_row,
-                                &state->exclude_box),
+            hbox({
+                render_search_field("Buscar", state->query, "buscar...", active == TextInputFocus::SearchQuery,
+                                    query_input, &state->query_box),
+                render_search_field("Reempl", state->replace, "reemplazar...",
+                                    active == TextInputFocus::SearchReplace, replace_input,
+                                    &state->replace_box),
+                render_search_field("Ruta", state->path_filter, "todo el workspace",
+                                    active == TextInputFocus::SearchPath, path_input,
+                                    &state->path_box),
+                render_search_field("Incl", state->include_pattern, "p. ej. *.cpp",
+                                    active == TextInputFocus::SearchInclude, include_input,
+                                    &state->include_box),
+                render_search_field("Excl", state->exclude_pattern, "p. ej. *.h",
+                                    active == TextInputFocus::SearchExclude, exclude_input,
+                                    &state->exclude_box),
+            }),
             separator(),
-            text(" " + state->status +
-                 (state->replace.empty() ? "  Enter: buscar" : "  Enter: buscar  R: reemplazar")) |
-                color(theme::Muted()) | size(HEIGHT, EQUAL, 1),
+            text(" " + state->status + status_suffix) | color(theme::Muted()) |
+                size(HEIGHT, EQUAL, 1),
         });
 
         Elements rows;
         if (state->results.empty() && state->query.empty()) {
           rows.push_back(text("(sin resultados)") | color(theme::Muted()));
         } else if (state->results.empty()) {
-          rows.push_back(text("(sin coincidencias)") | color(theme::Muted()));
+          rows.push_back(text(state->runner.running() ? "(buscando…)" : "(sin coincidencias)") |
+                         color(theme::Muted()));
         } else {
-          for (int i = 0; i < static_cast<int>(state->results.size()); ++i) {
+          const int visible = visible_line_count(state->results_box);
+          state->last_visible_lines = visible;
+          clamp_search_scroll(state.get(), visible);
+          const int total = static_cast<int>(state->results.size());
+          const int end = std::min(total, state->first_visible + visible);
+          for (int i = state->first_visible; i < end; ++i) {
             const auto& hit = state->results[static_cast<std::size_t>(i)];
-            const std::string location = hit.file + ":" + std::to_string(hit.line);
+            const std::string location = hit.file + ":" + std::to_string(hit.line) + " ";
             const bool selected =
-                i == state->selected && focus->region == FocusRegion::RightPanel;
+                i == state->selected && focus->region == FocusRegion::Terminal;
 
-            Element file_line = text(" " + location) | color(theme::Accent());
-            if (selected) {
-              file_line = file_line | inverted | bold;
+            Elements parts;
+            parts.push_back(text(" " + location) | color(theme::Accent()));
+            std::size_t pos = 0;
+            while (pos <= hit.preview.size()) {
+              const auto found = hit.preview.find(state->query, pos);
+              if (found == std::string::npos) {
+                parts.push_back(text(hit.preview.substr(pos)) | color(theme::Header()));
+                break;
+              }
+              if (found > pos) {
+                parts.push_back(text(hit.preview.substr(pos, found - pos)) | color(theme::Header()));
+              }
+              parts.push_back(text(state->query) | color(theme::Stop()) | bold);
+              pos = found + state->query.size();
             }
-            Element preview_line = highlight_preview(hit.preview, state->query, selected);
-            rows.push_back(vbox({std::move(file_line), std::move(preview_line)}));
+            Element row = hbox(std::move(parts));
+            if (selected) {
+              row = row | inverted | bold;
+            }
+            rows.push_back(std::move(row));
           }
         }
 

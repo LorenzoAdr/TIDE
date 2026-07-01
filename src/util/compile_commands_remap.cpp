@@ -5,12 +5,14 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
 #include "util/compile_commands_setup.hpp"
+#include "build/build_environment_service.hpp"
 
 namespace fs = std::filesystem;
 
@@ -19,6 +21,13 @@ namespace tgdb {
 namespace {
 
 constexpr const char* kPrivateCompileCommandsFile = "compile_commands.json";
+constexpr int kDockerCommandTimeoutSeconds = 5;
+constexpr int kDockerExecTimeoutSeconds = 10;
+
+std::mutex docker_mount_cache_mutex;
+std::string docker_mount_cache_container;
+std::vector<PathMapping> docker_mount_cache;
+bool docker_mount_cache_valid = false;
 
 std::string shell_quote(const std::string& value) {
   std::string quoted = "'";
@@ -33,10 +42,14 @@ std::string shell_quote(const std::string& value) {
   return quoted;
 }
 
-std::string run_shell_capture(const std::string& command) {
+std::string run_shell_capture(const std::string& command, int timeout_seconds = 0) {
+  std::string wrapped = command;
+  if (timeout_seconds > 0) {
+    wrapped = "timeout --foreground " + std::to_string(timeout_seconds) + "s " + command;
+  }
   std::array<char, 4096> buffer{};
   std::string output;
-  FILE* pipe = popen(command.c_str(), "r");
+  FILE* pipe = popen(wrapped.c_str(), "r");
   if (pipe == nullptr) {
     return {};
   }
@@ -206,7 +219,7 @@ std::optional<std::string> read_compile_commands_from_docker(
   }
   const std::string command = "docker exec " + shell_quote(container) + " cat " +
                               shell_quote(path_in_container) + " 2>/dev/null";
-  const std::string output = run_shell_capture(command);
+  const std::string output = run_shell_capture(command, kDockerExecTimeoutSeconds);
   if (output.empty()) {
     return std::nullopt;
   }
@@ -318,9 +331,16 @@ CompileCommandsSetupResult try_remapped_compile_commands(const std::string& work
 
 }  // namespace
 
+void invalidate_docker_mount_cache() {
+  std::lock_guard<std::mutex> lock(docker_mount_cache_mutex);
+  docker_mount_cache_valid = false;
+  docker_mount_cache_container.clear();
+  docker_mount_cache.clear();
+}
+
 std::vector<std::string> list_running_docker_containers() {
-  const std::string output =
-      run_shell_capture("docker ps --format '{{.Names}}' 2>/dev/null");
+  const std::string output = run_shell_capture("docker ps --format '{{.Names}}' 2>/dev/null",
+                                               kDockerCommandTimeoutSeconds);
   std::vector<std::string> names;
   std::istringstream stream(output);
   std::string line;
@@ -335,47 +355,59 @@ std::vector<std::string> list_running_docker_containers() {
   return names;
 }
 
-std::vector<PathMapping> detect_docker_mount_mappings(const std::string& container_name) {
-  std::vector<PathMapping> mappings;
+std::vector<PathMapping> detect_docker_mount_mappings(const std::string& container_name,
+                                                     const bool force_refresh) {
   if (container_name.empty()) {
-    return mappings;
-  }
-
-  const std::string command =
-      "docker inspect -f '{{json .Mounts}}' " + shell_quote(container_name) + " 2>/dev/null";
-  const std::string output = run_shell_capture(command);
-  if (output.empty()) {
-    return mappings;
-  }
-
-  try {
-    const nlohmann::json mounts = nlohmann::json::parse(output);
-    if (!mounts.is_array()) {
-      return mappings;
-    }
-    for (const auto& mount : mounts) {
-      if (!mount.is_object() || !mount.contains("Type") || !mount["Type"].is_string()) {
-        continue;
-      }
-      if (mount["Type"].get<std::string>() != "bind") {
-        continue;
-      }
-      if (!mount.contains("Source") || !mount["Source"].is_string() || !mount.contains("Destination") ||
-          !mount["Destination"].is_string()) {
-        continue;
-      }
-      PathMapping mapping;
-      mapping.from = canonical_path_string(mount["Destination"].get<std::string>());
-      mapping.to = canonical_path_string(mount["Source"].get<std::string>());
-      if (!mapping.from.empty() && !mapping.to.empty()) {
-        mappings.push_back(std::move(mapping));
-      }
-    }
-  } catch (...) {
     return {};
   }
 
-  return normalized_mappings(std::move(mappings));
+  if (!force_refresh) {
+    std::lock_guard<std::mutex> lock(docker_mount_cache_mutex);
+    if (docker_mount_cache_valid && docker_mount_cache_container == container_name) {
+      return docker_mount_cache;
+    }
+  }
+
+  std::vector<PathMapping> mappings;
+  const std::string command = "docker inspect -f '{{json .Mounts}}' " +
+                              shell_quote(container_name) + " 2>/dev/null";
+  const std::string output = run_shell_capture(command, kDockerCommandTimeoutSeconds);
+  if (!output.empty()) {
+    try {
+      const nlohmann::json mounts = nlohmann::json::parse(output);
+      if (mounts.is_array()) {
+        for (const auto& mount : mounts) {
+          if (!mount.is_object() || !mount.contains("Type") || !mount["Type"].is_string()) {
+            continue;
+          }
+          if (mount["Type"].get<std::string>() != "bind") {
+            continue;
+          }
+          if (!mount.contains("Source") || !mount["Source"].is_string() ||
+              !mount.contains("Destination") || !mount["Destination"].is_string()) {
+            continue;
+          }
+          PathMapping mapping;
+          mapping.from = canonical_path_string(mount["Destination"].get<std::string>());
+          mapping.to = canonical_path_string(mount["Source"].get<std::string>());
+          if (!mapping.from.empty() && !mapping.to.empty()) {
+            mappings.push_back(std::move(mapping));
+          }
+        }
+      }
+    } catch (...) {
+      mappings.clear();
+    }
+  }
+
+  mappings = normalized_mappings(std::move(mappings));
+  {
+    std::lock_guard<std::mutex> lock(docker_mount_cache_mutex);
+    docker_mount_cache_container = container_name;
+    docker_mount_cache = mappings;
+    docker_mount_cache_valid = true;
+  }
+  return mappings;
 }
 
 std::string container_path_for_host_path(const std::string& host_path,
@@ -420,6 +452,12 @@ CompileCommandsSetupResult ensure_compile_commands_for_clangd(
         return result;
       }
     }
+  }
+
+  const auto build_env_result =
+      global_build_environment_service().resolve_compile_commands(workspace_root, config);
+  if (!build_env_result.compile_dir.empty()) {
+    return build_env_result;
   }
 
   result.compile_dir = ensure_host_compile_commands_dir(workspace_root);

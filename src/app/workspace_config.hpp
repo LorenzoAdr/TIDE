@@ -1,8 +1,10 @@
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 
+#include "build/build_environment.hpp"
 #include "ui/theme.hpp"
 
 namespace tgdb {
@@ -34,6 +36,7 @@ struct WorkspaceConfig {
   bool clangd_background_index = false;
   theme::ThemeMode theme = theme::ThemeMode::kDark;
   CompileCommandsSettings compile_commands;
+  BuildEnvironmentSettings build_environments;
 
   static std::string config_dir(const std::string& workspace_root);
   static std::string private_dir(const std::string& workspace_root);

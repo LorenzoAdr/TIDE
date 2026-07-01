@@ -16,13 +16,16 @@ struct FilePickerState {
   bool open = false;
   std::string query;
   std::string indexed_root;
+  std::shared_ptr<const IndexSnapshot> index_snapshot;
   std::vector<std::string> all_files;
   std::vector<std::string> matches;
   int selected = 0;
+  bool matches_dirty = true;
 
   void sync_index(const std::shared_ptr<const IndexSnapshot>& snapshot,
                   const std::string& workspace_root);
   void refresh_matches(const WorkspaceModel* workspace = nullptr);
+  void mark_matches_dirty();
   void open_file(DebugModel* model, WorkspaceModel* workspace,
                  FocusManagerState* focus, int index);
 };

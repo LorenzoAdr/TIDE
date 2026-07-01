@@ -10,6 +10,9 @@ constexpr std::string_view kWatchesStop = "watches.stop";
 constexpr std::string_view kConsoleTabTerminal = "console.tab.terminal";
 constexpr std::string_view kConsoleTabGdb = "console.tab.gdb";
 constexpr std::string_view kConsoleTabPerformance = "console.tab.performance";
+constexpr std::string_view kConsoleTabProblems = "console.tab.problems";
+constexpr std::string_view kConsoleTabSearch = "console.tab.search";
+constexpr std::string_view kConsoleTabCallHierarchy = "console.tab.call_hierarchy";
 constexpr std::string_view kSidebarTabOutline = "sidebar.tab.outline";
 constexpr std::string_view kSidebarTabSearch = "sidebar.tab.search";
 constexpr std::string_view kSidebarTabCallHierarchy = "sidebar.tab.call_hierarchy";
@@ -99,7 +102,8 @@ inline bool is_watches_hover(std::string_view id) {
 }
 
 inline bool is_console_tab_hover(std::string_view id) {
-  return id == kConsoleTabTerminal || id == kConsoleTabGdb || id == kConsoleTabPerformance;
+  return id == kConsoleTabTerminal || id == kConsoleTabGdb || id == kConsoleTabPerformance ||
+         id == kConsoleTabProblems || id == kConsoleTabSearch || id == kConsoleTabCallHierarchy;
 }
 
 inline bool is_sidebar_tab_hover(std::string_view id) {
@@ -133,6 +137,14 @@ inline bool is_scrollbar_hover(std::string_view id) {
 
 inline bool is_f2_hover(std::string_view id) {
   return id.rfind("f2.", 0) == 0;
+}
+
+inline std::string call_hierarchy_seg(int node_index) {
+  return "call_hierarchy.seg." + std::to_string(node_index);
+}
+
+inline bool is_call_hierarchy_hover(std::string_view id) {
+  return id.rfind("call_hierarchy.seg.", 0) == 0;
 }
 
 inline bool is_f3_hover(std::string_view id) {

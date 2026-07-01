@@ -347,13 +347,15 @@ void focus_call_hierarchy(MainLayoutState* layout_state, int line, int col,
   if (layout_state == nullptr) {
     return;
   }
-  layout_state->right_sidebar.selected_tab = RightSidebarTabs::kCallHierarchy;
+  layout_state->console_visible = true;
+  layout_state->console_tabs.selected_tab = ConsolePanelTabs::kCallHierarchy;
   layout_state->right_panel_active_section = 0;
   layout_state->right_sidebar.pending_call_hierarchy = true;
   layout_state->right_sidebar.pending_call_hierarchy_line = line;
   layout_state->right_sidebar.pending_call_hierarchy_col = col;
   layout_state->right_sidebar.pending_call_hierarchy_symbol = symbol;
   layout_state->text_input_focus = TextInputFocus::None;
+  layout_state->focus_sync_needed = true;
   layout_state->request_ui_tick = true;
 }
 
@@ -362,13 +364,15 @@ void focus_search_with_filter(MainLayoutState* layout_state, const std::string& 
   if (layout_state == nullptr) {
     return;
   }
-  layout_state->right_sidebar.selected_tab = RightSidebarTabs::kSearch;
+  layout_state->console_visible = true;
+  layout_state->console_tabs.selected_tab = ConsolePanelTabs::kSearch;
   layout_state->right_panel_active_section = 0;
   layout_state->right_sidebar.pending_search_setup = true;
   layout_state->right_sidebar.pending_search_query = query;
   layout_state->right_sidebar.pending_search_path_filter = path_filter;
   layout_state->right_sidebar.pending_focus_search = true;
   layout_state->text_input_focus = TextInputFocus::SearchQuery;
+  layout_state->focus_sync_needed = true;
   layout_state->request_ui_tick = true;
 }
 

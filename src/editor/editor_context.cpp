@@ -1,6 +1,7 @@
 #include "editor/editor_context.hpp"
 
 #include <algorithm>
+#include <climits>
 
 namespace tgdb {
 
@@ -12,6 +13,19 @@ bool is_scope_kind(SymbolKind kind) {
          kind == SymbolKind::kMethod;
 }
 
+int symbol_end_line(const std::vector<SymbolInfo>& symbols, std::size_t index) {
+  const SymbolInfo& sym = symbols[index];
+  if (sym.end_line > 0) {
+    return sym.end_line;
+  }
+  for (std::size_t j = index + 1; j < symbols.size(); ++j) {
+    if (symbols[j].depth <= sym.depth) {
+      return std::max(sym.line, symbols[j].line - 1);
+    }
+  }
+  return INT_MAX;
+}
+
 }  // namespace
 
 std::vector<const SymbolInfo*> scope_chain_at_line(
@@ -19,14 +33,18 @@ std::vector<const SymbolInfo*> scope_chain_at_line(
   const int line_1 = line_0based + 1;
   std::vector<const SymbolInfo*> chain;
 
-  for (const auto& sym : symbols) {
+  for (std::size_t i = 0; i < symbols.size(); ++i) {
+    const SymbolInfo& sym = symbols[i];
     if (sym.line > line_1) {
       break;
     }
     while (!chain.empty() && chain.back()->depth >= sym.depth) {
       chain.pop_back();
     }
-    chain.push_back(&sym);
+    const int end = symbol_end_line(symbols, i);
+    if (line_1 <= end) {
+      chain.push_back(&sym);
+    }
   }
 
   return chain;

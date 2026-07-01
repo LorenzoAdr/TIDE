@@ -43,6 +43,7 @@ int accumulate2 (int n) {
   for (int i = 1; i <= n; ++i) {
     total += i; 
   }
+    total += 1;
   return total;
 }
 
@@ -50,6 +51,13 @@ int accumulate2 (int n) {
 
 int main() {
   allow_external_debugger();
+
+
+
+
+
+
+
 
   const pid_t pid = getpid();
   std::cout << "hello PID " << pid << "\n"
@@ -65,7 +73,7 @@ int main() {
 
 
 
-  while (true) {
+  while (true) { 
     ++counter;
     x = counter * 3;
     y = x + 7;  

@@ -6,11 +6,15 @@
 #include <fstream>
 #include <sstream>
 
+#include "indexer/index_rules.hpp"
+
 namespace fs = std::filesystem;
 
 namespace tgdb {
 
 namespace {
+
+constexpr int kMaxResults = 2000;
 
 std::string trim_preview(const std::string& line) {
   const auto start = line.find_first_not_of(" \t");
@@ -96,6 +100,25 @@ bool glob_match(const std::string& pattern, const std::string& text) {
   return pi == pattern.size();
 }
 
+bool file_included(const std::string& relative_path, const std::string& include_pattern) {
+  const std::string trimmed = normalize_filter(include_pattern);
+  if (trimmed.empty()) {
+    return true;
+  }
+
+  const auto basename = fs::path(relative_path).filename().string();
+  for (const auto& pattern : split_patterns(trimmed)) {
+    const std::string p = normalize_filter(pattern);
+    if (p.empty()) {
+      continue;
+    }
+    if (glob_match(p, relative_path) || glob_match(p, basename)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool file_excluded(const std::string& relative_path, const std::string& exclude_pattern) {
   const std::string trimmed = normalize_filter(exclude_pattern);
   if (trimmed.empty()) {
@@ -141,7 +164,13 @@ std::vector<WorkspaceSearchResult> search_workspace(const WorkspaceSearchOptions
     if (!file_in_search_path(rel, opts.path_filter)) {
       continue;
     }
+    if (!file_included(rel, opts.include_pattern)) {
+      continue;
+    }
     if (file_excluded(rel, opts.exclude_pattern)) {
+      continue;
+    }
+    if (is_probably_binary_path(rel)) {
       continue;
     }
 
@@ -151,7 +180,7 @@ std::vector<WorkspaceSearchResult> search_workspace(const WorkspaceSearchOptions
       continue;
     }
 
-    std::ifstream input(absolute);
+    std::ifstream input(absolute, std::ios::binary);
     if (!input) {
       continue;
     }
@@ -159,11 +188,17 @@ std::vector<WorkspaceSearchResult> search_workspace(const WorkspaceSearchOptions
     std::string line;
     int line_num = 0;
     while (std::getline(input, line)) {
+      if (line_num == 0 && text_looks_binary(line)) {
+        break;
+      }
       ++line_num;
       std::size_t pos = 0;
       while ((pos = line.find(opts.needle, pos)) != std::string::npos) {
         results.push_back(
             {rel, line_num, static_cast<int>(pos) + 1, trim_preview(line)});
+        if (results.size() >= static_cast<std::size_t>(kMaxResults)) {
+          return results;
+        }
         pos += opts.needle.size();
       }
     }
@@ -180,6 +215,9 @@ WorkspaceReplaceResult replace_in_workspace(const WorkspaceSearchOptions& opts,
 
   for (const auto& rel : opts.files) {
     if (!file_in_search_path(rel, opts.path_filter)) {
+      continue;
+    }
+    if (!file_included(rel, opts.include_pattern)) {
       continue;
     }
     if (file_excluded(rel, opts.exclude_pattern)) {

@@ -28,6 +28,7 @@ void delete_word_forward(EditorBuffer* buffer);
 void newline(EditorBuffer* buffer);
 void paste_at_primary(EditorBuffer* buffer, const std::string& text);
 bool undo_edit(EditorBuffer* buffer);
+void delete_all_selections(EditorBuffer* buffer);
 
 void move_primary_left(EditorBuffer* buffer, bool extend_selection = false);
 void move_primary_right(EditorBuffer* buffer, bool extend_selection = false);
@@ -42,6 +43,10 @@ void move_primary_word_right(EditorBuffer* buffer, bool extend_selection = false
 
 void clear_primary_selection(EditorBuffer* buffer);
 void select_word_at(EditorBuffer* buffer, int line, int col);
+void select_words_range(EditorBuffer* buffer, int anchor_line, int anchor_col, int head_line,
+                        int head_col);
+void select_line_at(EditorBuffer* buffer, int line);
+void select_lines_range(EditorBuffer* buffer, int anchor_line, int head_line);
 
 void extend_block_selection_vertical(EditorBuffer* buffer, int direction);
 void goto_buffer_line(EditorBuffer* buffer, int line_one_based, int visible_lines);

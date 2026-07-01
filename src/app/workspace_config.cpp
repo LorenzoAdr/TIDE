@@ -62,6 +62,79 @@ void parse_compile_commands_settings(const nlohmann::json& doc,
   }
 }
 
+void parse_env_vars_object(const nlohmann::json& doc, std::map<std::string, std::string>* out) {
+  if (out == nullptr || !doc.is_object()) {
+    return;
+  }
+  for (const auto& entry : doc.items()) {
+    if (entry.value().is_string()) {
+      (*out)[entry.key()] = entry.value().get<std::string>();
+    }
+  }
+}
+
+BuildEnvironmentProfile parse_build_environment_profile(const nlohmann::json& doc) {
+  BuildEnvironmentProfile profile;
+  if (!doc.is_object()) {
+    return profile;
+  }
+  if (doc.contains("id") && doc["id"].is_string()) {
+    profile.id = doc["id"].get<std::string>();
+  }
+  if (doc.contains("label") && doc["label"].is_string()) {
+    profile.label = doc["label"].get<std::string>();
+  }
+  if (doc.contains("working_dir") && doc["working_dir"].is_string()) {
+    profile.working_dir = doc["working_dir"].get<std::string>();
+  }
+  if (doc.contains("make_command") && doc["make_command"].is_string()) {
+    profile.make_command = doc["make_command"].get<std::string>();
+  }
+  if (doc.contains("setup_scripts") && doc["setup_scripts"].is_array()) {
+    for (const auto& entry : doc["setup_scripts"]) {
+      if (entry.is_string()) {
+        profile.setup_scripts.push_back(entry.get<std::string>());
+      }
+    }
+  }
+  if (doc.contains("env_vars")) {
+    parse_env_vars_object(doc["env_vars"], &profile.env_vars);
+  }
+  if (doc.contains("docker_container") && doc["docker_container"].is_string()) {
+    profile.docker_container = doc["docker_container"].get<std::string>();
+  }
+  if (doc.contains("marker_paths") && doc["marker_paths"].is_array()) {
+    for (const auto& entry : doc["marker_paths"]) {
+      if (entry.is_string()) {
+        profile.marker_paths.push_back(entry.get<std::string>());
+      }
+    }
+  }
+  return profile;
+}
+
+void parse_build_environment_settings(const nlohmann::json& doc,
+                                      BuildEnvironmentSettings* settings) {
+  if (settings == nullptr || !doc.is_object()) {
+    return;
+  }
+  if (doc.contains("active_environment_id") && doc["active_environment_id"].is_string()) {
+    settings->active_environment_id = doc["active_environment_id"].get<std::string>();
+  }
+  if (doc.contains("make_intercept_tool") && doc["make_intercept_tool"].is_string()) {
+    settings->make_intercept_tool =
+        parse_make_intercept_tool(doc["make_intercept_tool"].get<std::string>());
+  }
+  if (doc.contains("make_default_target") && doc["make_default_target"].is_string()) {
+    settings->make_default_target = doc["make_default_target"].get<std::string>();
+  }
+  if (doc.contains("profiles") && doc["profiles"].is_array()) {
+    for (const auto& entry : doc["profiles"]) {
+      settings->profiles.push_back(parse_build_environment_profile(entry));
+    }
+  }
+}
+
 void migrate_legacy_config(const fs::path& workspace_root) {
   const fs::path legacy = workspace_root / kLegacyConfigFile;
   const fs::path config_dir = workspace_root / kConfigDir;
@@ -176,6 +249,9 @@ WorkspaceConfig WorkspaceConfig::load(const std::string& workspace_root) {
     if (doc.contains("compile_commands")) {
       parse_compile_commands_settings(doc["compile_commands"], &config.compile_commands);
     }
+    if (doc.contains("build_environments")) {
+      parse_build_environment_settings(doc["build_environments"], &config.build_environments);
+    }
   } catch (...) {
     return WorkspaceConfig{};
   }
@@ -195,6 +271,24 @@ bool WorkspaceConfig::save(const std::string& workspace_root) const {
     mappings.push_back({{"from", mapping.from}, {"to", mapping.to}});
   }
 
+  nlohmann::json profiles = nlohmann::json::array();
+  for (const auto& profile : build_environments.profiles) {
+    nlohmann::json env_vars = nlohmann::json::object();
+    for (const auto& entry : profile.env_vars) {
+      env_vars[entry.first] = entry.second;
+    }
+    profiles.push_back({
+        {"id", profile.id},
+        {"label", profile.label},
+        {"working_dir", profile.working_dir},
+        {"make_command", profile.make_command},
+        {"setup_scripts", profile.setup_scripts},
+        {"env_vars", std::move(env_vars)},
+        {"docker_container", profile.docker_container},
+        {"marker_paths", profile.marker_paths},
+    });
+  }
+
   nlohmann::json doc;
   doc["clangd_extra_include_paths"] = clangd_extra_include_paths;
   doc["clangd_use_gcc_query_driver"] = clangd_use_gcc_query_driver;
@@ -207,6 +301,12 @@ bool WorkspaceConfig::save(const std::string& workspace_root) const {
       {"docker_compile_commands_path", compile_commands.docker_compile_commands_path},
       {"docker_detect_mounts", compile_commands.docker_detect_mounts},
       {"path_mappings", std::move(mappings)},
+  };
+  doc["build_environments"] = {
+      {"active_environment_id", build_environments.active_environment_id},
+      {"make_intercept_tool", make_intercept_tool_name(build_environments.make_intercept_tool)},
+      {"make_default_target", build_environments.make_default_target},
+      {"profiles", std::move(profiles)},
   };
 
   std::ofstream output(config_path(workspace_root));

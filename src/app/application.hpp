@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -8,6 +9,7 @@
 #include "app/app_mode.hpp"
 #include "app/app_settings.hpp"
 #include "app/workspace_config.hpp"
+#include "build/build_artifact_watcher.hpp"
 #include "app/debug_model.hpp"
 #include "app/workspace_model.hpp"
 #include "backend/idebug_backend.hpp"
@@ -77,6 +79,10 @@ class Application {
   void set_status(const std::string& message);
   void set_workspace_status(const std::string& message);
   void request_terminal_autostart();
+  void rebuild_shell_launch_config();
+  void setup_build_environment_watching();
+  void process_build_environment_updates();
+  void schedule_debounced_lsp_restart();
 
   AppConfig config_;
   AppMode app_mode_ = AppMode::kNormal;
@@ -91,6 +97,7 @@ class Application {
   SettingsModalState settings_modal_state_;
   AppSettings app_settings_;
   WorkspaceConfig workspace_config_;
+  ShellLaunchConfig cached_shell_launch_config_;
   ShellSession shell_session_;
   ConnectionWizardState connection_wizard_state_;
   WorkspaceWizardState workspace_wizard_state_;
@@ -101,7 +108,12 @@ class Application {
   WorkspaceIndexer indexer_;
   SymbolWorkspaceIndexer symbol_indexer_;
   WorkspaceWatcher workspace_watcher_;
+  BuildArtifactWatcher build_artifact_watcher_;
   std::shared_ptr<LspSymbolProvider> symbol_provider_;
+
+  std::chrono::steady_clock::time_point lsp_restart_deadline_{};
+  bool pending_lsp_restart_ = false;
+  std::string last_lsp_environment_fingerprint_;
 
   ThreadSafeQueue<UiCommand> command_queue_;
   ThreadSafeQueue<DebugEvent> event_queue_;

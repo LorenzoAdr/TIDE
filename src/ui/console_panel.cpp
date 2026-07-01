@@ -23,6 +23,12 @@
 #include "ui/cursor_blink.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/panel.hpp"
+#include "app/workspace_model.hpp"
+#include "indexer/workspace_indexer.hpp"
+#include "symbols/symbol_provider.hpp"
+#include "ui/call_hierarchy_panel.hpp"
+#include "ui/diagnostics_panel.hpp"
+#include "ui/search_panel.hpp"
 #include "ui/performance_panel.hpp"
 #include "ui/text_input_style.hpp"
 #include "ui/scroll_bar.hpp"
@@ -70,7 +76,7 @@ struct ConsolePanelState {
   std::string terminal_text;
   std::vector<TerminalStyledRow> terminal_styled_rows;
   std::string last_workspace_root;
-  std::array<Box, 3> tab_boxes;
+  std::array<Box, 6> tab_boxes;
 };
 
 void handle_gdb_command(const std::string& line, DebugModel* model, CommandCallback on_command) {
@@ -326,6 +332,19 @@ bool performance_tab_active(AppMode* /*app_mode*/, MainLayoutState* layout_state
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kPerformance;
 }
 
+bool problems_tab_active_console(AppMode* /*app_mode*/, MainLayoutState* layout_state) {
+  return layout_state != nullptr &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kProblems;
+}
+
+bool search_tab_active_console(AppMode* /*app_mode*/, MainLayoutState* layout_state) {
+  return search_tab_active(layout_state);
+}
+
+bool call_hierarchy_tab_active_console(AppMode* /*app_mode*/, MainLayoutState* layout_state) {
+  return call_hierarchy_tab_active(layout_state);
+}
+
 std::string_view console_tab_press_id(int tab) {
   switch (tab) {
     case ConsolePanelTabs::kTerminal:
@@ -334,6 +353,12 @@ std::string_view console_tab_press_id(int tab) {
       return press_id::kConsoleTabGdb;
     case ConsolePanelTabs::kPerformance:
       return press_id::kConsoleTabPerformance;
+    case ConsolePanelTabs::kProblems:
+      return press_id::kConsoleTabProblems;
+    case ConsolePanelTabs::kSearch:
+      return press_id::kConsoleTabSearch;
+    case ConsolePanelTabs::kCallHierarchy:
+      return press_id::kConsoleTabCallHierarchy;
     default:
       return press_id::kConsoleTabTerminal;
   }
@@ -346,8 +371,11 @@ int console_tab_from_digit(Event event, bool debug_mode) {
   if (event == Event::Character('2')) {
     return debug_mode ? ConsolePanelTabs::kDebug : ConsolePanelTabs::kPerformance;
   }
-  if (debug_mode && event == Event::Character('3')) {
-    return ConsolePanelTabs::kPerformance;
+  if (event == Event::Character('3')) {
+    return debug_mode ? ConsolePanelTabs::kPerformance : ConsolePanelTabs::kProblems;
+  }
+  if (debug_mode && event == Event::Character('4')) {
+    return ConsolePanelTabs::kProblems;
   }
   return -1;
 }
@@ -375,7 +403,7 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
 bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
                         FocusManagerState* focus, int tab) {
   if (layout_state == nullptr || tab < ConsolePanelTabs::kTerminal ||
-      tab > ConsolePanelTabs::kPerformance) {
+      tab > ConsolePanelTabs::kCallHierarchy) {
     return false;
   }
   if (layout_state->console_tabs.selected_tab == tab) {
@@ -383,6 +411,7 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
   }
   layout_state->console_tabs.selected_tab = tab;
   layout_state->focus_sync_needed = true;
+  layout_state->request_ui_tick = true;
   if (tab == ConsolePanelTabs::kTerminal) {
     layout_state->text_input_focus = TextInputFocus::Console;
     if (focus != nullptr) {
@@ -391,8 +420,25 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
     if (state != nullptr) {
       state->terminal_resize_applied = false;
     }
-  } else if (layout_state->text_input_focus == TextInputFocus::Console) {
-    layout_state->text_input_focus = TextInputFocus::None;
+  } else {
+    if (layout_state->text_input_focus == TextInputFocus::Console) {
+      layout_state->text_input_focus = TextInputFocus::None;
+    }
+    if (tab == ConsolePanelTabs::kSearch) {
+      layout_state->right_sidebar.pending_focus_search = true;
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+    } else if (tab == ConsolePanelTabs::kCallHierarchy) {
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      if (is_search_input_focus(layout_state->text_input_focus)) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
+    } else if (is_search_input_focus(layout_state->text_input_focus)) {
+      layout_state->text_input_focus = TextInputFocus::None;
+    }
   }
   return true;
 }
@@ -405,7 +451,7 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
     return false;
   }
   const bool debug_mode = debug_console_mode(app_mode);
-  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kPerformance; ++i) {
+  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kCallHierarchy; ++i) {
     if (i == ConsolePanelTabs::kDebug && !debug_mode) {
       continue;
     }
@@ -419,7 +465,7 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
     } else if (i == ConsolePanelTabs::kDebug) {
       activate_console_input(layout_state, focus, input_box);
     } else if (layout_state != nullptr) {
-      layout_state->text_input_focus = TextInputFocus::None;
+      layout_state->request_ui_tick = true;
     }
     return true;
   }
@@ -498,13 +544,21 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
         layout_state, mouse.x, mouse.y,
         {{press_id::kConsoleTabTerminal, &state->tab_boxes[ConsolePanelTabs::kTerminal]},
          {press_id::kConsoleTabGdb, &state->tab_boxes[ConsolePanelTabs::kDebug]},
-         {press_id::kConsoleTabPerformance, &state->tab_boxes[ConsolePanelTabs::kPerformance]}},
+         {press_id::kConsoleTabPerformance, &state->tab_boxes[ConsolePanelTabs::kPerformance]},
+         {press_id::kConsoleTabProblems, &state->tab_boxes[ConsolePanelTabs::kProblems]},
+         {press_id::kConsoleTabSearch, &state->tab_boxes[ConsolePanelTabs::kSearch]},
+         {press_id::kConsoleTabCallHierarchy,
+          &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]}},
         press_id::is_console_tab_hover);
   }
   return update_panel_hover(
       layout_state, mouse.x, mouse.y,
       {{press_id::kConsoleTabTerminal, &state->tab_boxes[ConsolePanelTabs::kTerminal]},
-       {press_id::kConsoleTabPerformance, &state->tab_boxes[ConsolePanelTabs::kPerformance]}},
+       {press_id::kConsoleTabPerformance, &state->tab_boxes[ConsolePanelTabs::kPerformance]},
+       {press_id::kConsoleTabProblems, &state->tab_boxes[ConsolePanelTabs::kProblems]},
+       {press_id::kConsoleTabSearch, &state->tab_boxes[ConsolePanelTabs::kSearch]},
+       {press_id::kConsoleTabCallHierarchy,
+        &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]}},
       press_id::is_console_tab_hover);
 }
 
@@ -903,12 +957,12 @@ bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, 
   }
   const bool debug_mode = app_mode != nullptr && *app_mode == AppMode::kDebug;
   int tab = layout_state->console_tabs.selected_tab;
-  for (int attempt = 0; attempt < 4; ++attempt) {
+  for (int attempt = 0; attempt < 8; ++attempt) {
     tab += delta;
     if (tab < ConsolePanelTabs::kTerminal) {
-      tab = ConsolePanelTabs::kPerformance;
+      tab = ConsolePanelTabs::kCallHierarchy;
     }
-    if (tab > ConsolePanelTabs::kPerformance) {
+    if (tab > ConsolePanelTabs::kCallHierarchy) {
       tab = ConsolePanelTabs::kTerminal;
     }
     if (!debug_mode && tab == ConsolePanelTabs::kDebug) {
@@ -919,39 +973,57 @@ bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, 
   if (tab == layout_state->console_tabs.selected_tab) {
     return false;
   }
-  layout_state->console_tabs.selected_tab = tab;
-  layout_state->focus_sync_needed = true;
-  if (tab == ConsolePanelTabs::kTerminal) {
-    layout_state->text_input_focus = TextInputFocus::Console;
-    if (focus != nullptr) {
-      focus->region = FocusRegion::Terminal;
-    }
-  } else if (layout_state->text_input_focus == TextInputFocus::Console) {
-    layout_state->text_input_focus = TextInputFocus::None;
-  }
-  return true;
+  return switch_console_tab(nullptr, layout_state, focus, tab);
 }
 
 Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* shell,
                            CommandCallback on_command, MainLayoutState* layout_state,
                            FocusManagerState* focus, int* bottom_height,
-                           ShellLaunchConfigProvider shell_launch_config) {
+                           ShellLaunchConfigProvider shell_launch_config,
+                           WorkspaceModel* workspace,
+                           std::shared_ptr<ISymbolProvider> symbols,
+                           WorkspaceIndexer* indexer,
+                           RightSidebarState* sidebar) {
   auto state = std::make_shared<ConsolePanelState>();
   auto perf_state = std::make_shared<PerformancePanelState>();
   PerformanceSampler* sampler =
       layout_state != nullptr ? &layout_state->performance_sampler : nullptr;
   auto performance_panel = MakePerformancePanel(sampler, perf_state);
+  auto diagnostics_panel =
+      MakeDiagnosticsPanel(workspace, focus, symbols, layout_state, indexer);
+  auto search_panel =
+      MakeSearchPanel(workspace, model, focus, layout_state, indexer, sidebar);
+  auto call_hierarchy_panel =
+      MakeCallHierarchyPanel(workspace, focus, layout_state, sidebar, symbols);
   auto input_box = Input(MakeBlinkInputOption(&state->input, &state->input_placeholder));
   auto input_maybe = Maybe(
       input_box, [app_mode, layout_state] {
         return debug_tab_active(app_mode, layout_state) && console_input_active(layout_state);
       });
 
-  auto component = Container::Vertical({input_maybe, performance_panel});
+  auto component = Container::Vertical(
+      {input_maybe, performance_panel, diagnostics_panel, search_panel, call_hierarchy_panel});
 
   auto wrapped = CatchEvent(component, [app_mode, model, shell, on_command, state,
                                         layout_state, focus, input_box,
-                                        shell_launch_config](Event event) {
+                                        shell_launch_config, diagnostics_panel, search_panel,
+                                        call_hierarchy_panel](Event event) {
+    if (problems_tab_active_console(app_mode, layout_state) &&
+        diagnostics_panel->OnEvent(event)) {
+      return true;
+    }
+    if (search_tab_active_console(app_mode, layout_state) && search_panel->OnEvent(event)) {
+      return true;
+    }
+    if (call_hierarchy_tab_active_console(app_mode, layout_state)) {
+      if (event == Event::Custom) {
+        return true;
+      }
+      if (call_hierarchy_panel->OnEvent(event)) {
+        return true;
+      }
+    }
+
     const bool on_terminal_tab = terminal_tab_active(app_mode, layout_state);
     const bool on_debug_tab = debug_tab_active(app_mode, layout_state);
 
@@ -1107,7 +1179,26 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   };
 
   auto dispatch_console_mouse = [app_mode, layout_state, focus, model, shell, state, input_box,
-                                 shell_launch_config](Event event) -> bool {
+                                 shell_launch_config, diagnostics_panel, search_panel,
+                                 call_hierarchy_panel](Event event) -> bool {
+    if (event.is_mouse()) {
+      if (problems_tab_active_console(app_mode, layout_state) &&
+          layout_state != nullptr && layout_state->problems_key_handler &&
+          layout_state->problems_key_handler(event)) {
+        return true;
+      }
+      if (problems_tab_active_console(app_mode, layout_state) &&
+          diagnostics_panel->OnEvent(event)) {
+        return true;
+      }
+      if (search_tab_active_console(app_mode, layout_state) && search_panel->OnEvent(event)) {
+        return true;
+      }
+      if (call_hierarchy_tab_active_console(app_mode, layout_state) &&
+          call_hierarchy_panel->OnEvent(event)) {
+        return true;
+      }
+    }
     return handle_console_panel_mouse(
         state.get(), layout_state, focus, app_mode, model, shell, input_box,
         current_shell_launch(shell_launch_config, model), event);
@@ -1141,7 +1232,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   }
 
   return Renderer(wrapped, [app_mode, model, shell, focus, input_box, input_maybe, state,
-                            layout_state, bottom_height, perf_state, sampler] {
+                            layout_state, bottom_height, perf_state, sampler, diagnostics_panel,
+                            search_panel, call_hierarchy_panel] {
     state->input_placeholder = console_placeholder(app_mode);
     (void)input_maybe;
     (void)input_box;
@@ -1178,6 +1270,25 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         layout_state != nullptr &&
             layout_state->clickable.is_pressed(press_id::kConsoleTabPerformance),
         &state->tab_boxes[ConsolePanelTabs::kPerformance]));
+    tab_row.push_back(make_tab_button(
+        "Problemas", selected_tab == ConsolePanelTabs::kProblems,
+        layout_state != nullptr &&
+            layout_state->clickable.is_hovered(press_id::kConsoleTabProblems),
+        layout_state != nullptr &&
+            layout_state->clickable.is_pressed(press_id::kConsoleTabProblems),
+        &state->tab_boxes[ConsolePanelTabs::kProblems]));
+    tab_row.push_back(make_tab_button(
+        "Buscar", selected_tab == ConsolePanelTabs::kSearch,
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabSearch),
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabSearch),
+        &state->tab_boxes[ConsolePanelTabs::kSearch]));
+    tab_row.push_back(make_tab_button(
+        "Jerarquía", selected_tab == ConsolePanelTabs::kCallHierarchy,
+        layout_state != nullptr &&
+            layout_state->clickable.is_hovered(press_id::kConsoleTabCallHierarchy),
+        layout_state != nullptr &&
+            layout_state->clickable.is_pressed(press_id::kConsoleTabCallHierarchy),
+        &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]));
 
     Element body;
     if (selected_tab == ConsolePanelTabs::kTerminal) {
@@ -1185,8 +1296,14 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
              reflect(state->content_box) | flex;
     } else if (selected_tab == ConsolePanelTabs::kDebug) {
       body = render_gdb_console(state.get(), model, app_mode, layout_state, input_box);
-    } else {
+    } else if (selected_tab == ConsolePanelTabs::kPerformance) {
       body = RenderPerformancePanel(sampler, perf_state.get(), panel_width, body_height) | flex;
+    } else if (selected_tab == ConsolePanelTabs::kProblems) {
+      body = diagnostics_panel->Render() | flex;
+    } else if (selected_tab == ConsolePanelTabs::kSearch) {
+      body = search_panel->Render() | flex;
+    } else {
+      body = call_hierarchy_panel->Render() | flex;
     }
 
     return vbox({

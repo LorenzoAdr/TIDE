@@ -244,16 +244,55 @@ bool try_prepare_enclosing_call_hierarchy(const std::shared_ptr<ISymbolProvider>
   return true;
 }
 
+void append_leaf_rows(const CallHierarchyViewState& view, int node_index,
+                      std::vector<int>* rows, std::vector<uint8_t>* visited) {
+  if (view.nodes.empty() || node_index < 0 ||
+      node_index >= static_cast<int>(view.nodes.size()) || rows == nullptr ||
+      visited == nullptr) {
+    return;
+  }
+  if ((*visited)[static_cast<std::size_t>(node_index)] != 0) {
+    return;
+  }
+  (*visited)[static_cast<std::size_t>(node_index)] = 1;
+
+  const CallHierarchyTreeNode& node = view.nodes[static_cast<std::size_t>(node_index)];
+  if (node.children.empty()) {
+    if (node_index > 0) {
+      rows->push_back(node_index);
+    }
+    return;
+  }
+  for (int child : node.children) {
+    append_leaf_rows(view, child, rows, visited);
+  }
+}
+
+void append_visible_rows(const CallHierarchyViewState& view, int node_index,
+                         std::vector<int>* rows, std::vector<uint8_t>* visited) {
+  if (view.nodes.empty() || node_index < 0 ||
+      node_index >= static_cast<int>(view.nodes.size()) || rows == nullptr ||
+      visited == nullptr) {
+    return;
+  }
+  if ((*visited)[static_cast<std::size_t>(node_index)] != 0) {
+    return;
+  }
+  (*visited)[static_cast<std::size_t>(node_index)] = 1;
+  rows->push_back(node_index);
+  for (int child : view.nodes[static_cast<std::size_t>(node_index)].children) {
+    append_visible_rows(view, child, rows, visited);
+  }
+}
+
 void append_visible_rows(const CallHierarchyViewState& view, int node_index,
                          std::vector<int>* rows) {
   if (view.nodes.empty() || node_index < 0 ||
       node_index >= static_cast<int>(view.nodes.size()) || rows == nullptr) {
     return;
   }
-  rows->push_back(node_index);
-  for (int child : view.nodes[static_cast<std::size_t>(node_index)].children) {
-    append_visible_rows(view, child, rows);
-  }
+  std::vector<uint8_t> visited(view.nodes.size(), 0);
+  append_visible_rows(view, node_index, rows, &visited);
 }
 
 std::string hierarchy_node_key(const CallHierarchyItem& item) {
@@ -284,10 +323,10 @@ void update_hierarchy_status(CallHierarchyViewState* view) {
   if (view == nullptr || view->nodes.empty()) {
     return;
   }
-  const int count = static_cast<int>(view->nodes[0].children.size());
-  view->status = view->selected_tab == 0
-                     ? std::to_string(count) + " llamada(s) entrante(s)"
-                     : std::to_string(count) + " llamada(s) saliente(s)";
+  std::vector<int> leaves;
+  std::vector<uint8_t> visited(view->nodes.size(), 0);
+  append_leaf_rows(*view, 0, &leaves, &visited);
+  view->status = std::to_string(leaves.size()) + " llamada(s) entrante(s)";
 }
 
 void load_node_children(CallHierarchyViewState* view, int node_index,
@@ -302,9 +341,7 @@ void load_node_children(CallHierarchyViewState* view, int node_index,
     return;
   }
 
-  const std::vector<CallHierarchyItem> items =
-      view->selected_tab == 0 ? symbols->incoming_calls(node.item)
-                              : symbols->outgoing_calls(node.item);
+  const std::vector<CallHierarchyItem> items = symbols->incoming_calls(node.item);
   std::vector<int> new_children;
   new_children.reserve(items.size());
   const int parent_depth = node.depth;
@@ -318,7 +355,7 @@ void load_node_children(CallHierarchyViewState* view, int node_index,
     child.depth = parent_depth + 1;
     child.parent = node_index;
     child.has_children = true;
-    assign_node_navigation(&child, item, parent_path, view->selected_tab);
+    assign_node_navigation(&child, item, parent_path, 0);
     view->nodes.push_back(std::move(child));
     new_children.push_back(static_cast<int>(view->nodes.size()) - 1);
   }
@@ -380,7 +417,8 @@ std::vector<int> call_hierarchy_visible_rows(const CallHierarchyViewState& view)
   if (!view.active || view.nodes.empty()) {
     return rows;
   }
-  append_visible_rows(view, 0, &rows);
+  std::vector<uint8_t> visited(view.nodes.size(), 0);
+  append_leaf_rows(view, 0, &rows, &visited);
   return rows;
 }
 
@@ -406,6 +444,49 @@ std::string call_hierarchy_node_location(const CallHierarchyTreeNode& node) {
   std::string label = fs::path(path).filename().string();
   label += ":" + std::to_string(line + 1) + ":" + std::to_string(character + 1);
   return label;
+}
+
+std::string call_hierarchy_node_chain(const CallHierarchyViewState& view, int node_index) {
+  if (node_index < 0 || node_index >= static_cast<int>(view.nodes.size())) {
+    return {};
+  }
+  std::vector<std::string> names;
+  int current = node_index;
+  while (current >= 0) {
+    const auto& node = view.nodes[static_cast<std::size_t>(current)];
+    std::string label = node.item.name;
+    if (!node.item.detail.empty()) {
+      label += " (" + node.item.detail + ")";
+    }
+    names.push_back(std::move(label));
+    current = node.parent;
+  }
+  std::reverse(names.begin(), names.end());
+  std::string chain;
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    if (i > 0) {
+      chain += " -> ";
+    }
+    chain += names[i];
+  }
+  return chain;
+}
+
+std::vector<int> call_hierarchy_chain_indices(const CallHierarchyViewState& view, int node_index) {
+  std::vector<int> indices;
+  if (node_index < 0 || node_index >= static_cast<int>(view.nodes.size())) {
+    return indices;
+  }
+  std::vector<uint8_t> visited(view.nodes.size(), 0);
+  int current = node_index;
+  while (current >= 0 && current < static_cast<int>(view.nodes.size()) &&
+         visited[static_cast<std::size_t>(current)] == 0) {
+    visited[static_cast<std::size_t>(current)] = 1;
+    indices.push_back(current);
+    current = view.nodes[static_cast<std::size_t>(current)].parent;
+  }
+  std::reverse(indices.begin(), indices.end());
+  return indices;
 }
 
 bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* workspace,
@@ -474,8 +555,8 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
   }
   view->root_label = label;
 
-  sidebar->selected_tab = RightSidebarTabs::kCallHierarchy;
-  layout_state->right_sidebar.selected_tab = RightSidebarTabs::kCallHierarchy;
+  layout_state->console_visible = true;
+  layout_state->console_tabs.selected_tab = ConsolePanelTabs::kCallHierarchy;
   layout_state->right_panel_active_section = 0;
   layout_state->text_input_focus = TextInputFocus::None;
   if (layout_state != nullptr) {

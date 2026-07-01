@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <sstream>
 #include <thread>
@@ -36,6 +35,8 @@
 #include "util/thread_name.hpp"
 #include "util/docker_shell.hpp"
 #include "util/clangd_workspace_setup.hpp"
+#include "build/build_environment.hpp"
+#include "build/build_environment_service.hpp"
 #include "app/workspace_config.hpp"
 
 namespace fs = std::filesystem;
@@ -194,6 +195,8 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 }
 
 Application::~Application() {
+  build_artifact_watcher_.stop();
+  global_build_environment_service().shutdown();
   shell_session_.stop();
   workspace_watcher_.stop();
   if (symbol_provider_) {
@@ -212,6 +215,73 @@ void Application::request_terminal_autostart() {
   }
   layout_state_.console_visible = true;
   layout_state_.terminal_start_requested = true;
+}
+
+void Application::rebuild_shell_launch_config() {
+  cached_shell_launch_config_.host_cwd = workspace_.root;
+  cached_shell_launch_config_.docker_container.clear();
+  cached_shell_launch_config_.docker_cwd.clear();
+  cached_shell_launch_config_.env_vars.clear();
+  cached_shell_launch_config_.setup_scripts.clear();
+  if (workspace_.root.empty()) {
+    return;
+  }
+  cached_shell_launch_config_ = resolve_shell_launch_config(workspace_.root, workspace_config_);
+}
+
+void Application::setup_build_environment_watching() {
+  build_artifact_watcher_.stop();
+  if (workspace_.root.empty()) {
+    return;
+  }
+
+  const BuildEnvironment& active =
+      global_build_environment_service().active_environment();
+  std::vector<std::string> watch_dirs = active.marker_paths;
+  if (!active.working_dir.empty()) {
+    watch_dirs.push_back(active.working_dir);
+  }
+
+  global_build_environment_service().set_environment_changed_callback([this] {
+    schedule_debounced_lsp_restart();
+  });
+
+  build_artifact_watcher_.set_change_callback([this] {
+    if (workspace_.root.empty()) {
+      return;
+    }
+    EnvironmentSelectionHints hints;
+    hints.active_file_path = workspace_.buffer.path.empty() ? workspace_.active_file
+                                                            : workspace_.buffer.path;
+    global_build_environment_service().notify_artifacts_changed(workspace_.root,
+                                                                workspace_config_, hints);
+    schedule_debounced_lsp_restart();
+  });
+  build_artifact_watcher_.start(workspace_.root, watch_dirs);
+}
+
+void Application::schedule_debounced_lsp_restart() {
+  pending_lsp_restart_ = true;
+  lsp_restart_deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+}
+
+void Application::process_build_environment_updates() {
+  if (!pending_lsp_restart_) {
+    return;
+  }
+  if (std::chrono::steady_clock::now() < lsp_restart_deadline_) {
+    return;
+  }
+  pending_lsp_restart_ = false;
+
+  const std::string fingerprint =
+      global_build_environment_service().active_environment_fingerprint();
+  if (!fingerprint.empty() && fingerprint == last_lsp_environment_fingerprint_) {
+    return;
+  }
+  last_lsp_environment_fingerprint_ = fingerprint;
+  rebuild_shell_launch_config();
+  restart_lsp_for_workspace();
 }
 
 void Application::restart_lsp_for_workspace() {
@@ -247,10 +317,13 @@ void Application::apply_workspace_settings(const WorkspaceConfig& config) {
     return;
   }
   workspace_config_.save(workspace_.root);
+  invalidate_docker_mount_cache();
+  rebuild_shell_launch_config();
   apply_clangd_workspace_config(workspace_.root, workspace_config_);
   shell_session_.stop();
   request_terminal_autostart();
   restart_lsp_for_workspace();
+  setup_build_environment_watching();
   sync_symbol_workspace_indexer();
   workspace_.buffer.view_token++;
   layout_state_.request_ui_tick = true;
@@ -273,6 +346,8 @@ void Application::set_workspace(const std::string& workspace_root) {
   request_terminal_autostart();
   workspace_config_ = WorkspaceConfig::load(absolute);
   theme::set_mode(workspace_config_.theme);
+  invalidate_docker_mount_cache();
+  rebuild_shell_launch_config();
   apply_clangd_workspace_config(absolute, workspace_config_);
   if (symbol_provider_) {
     const auto setup = ensure_compile_commands_for_clangd(absolute, workspace_config_);
@@ -280,6 +355,9 @@ void Application::set_workspace(const std::string& workspace_root) {
       std::error_code cmake_ec;
       if (fs::is_regular_file(fs::path(absolute) / "CMakeLists.txt", cmake_ec)) {
         workspace_.status_message += " | sin compile_commands (cmake falló)";
+      } else if (detect_build_system_kind(absolute) == BuildSystemKind::kMakefile ||
+                 detect_build_system_kind(absolute) == BuildSystemKind::kHybrid) {
+        workspace_.status_message += " | generando entorno make";
       } else {
         workspace_.status_message += " | sin compile_commands.json";
       }
@@ -294,6 +372,9 @@ void Application::set_workspace(const std::string& workspace_root) {
     symbol_provider_->set_workspace_clangd_options(workspace_config_.clangd_use_gcc_query_driver,
                                                  workspace_config_.clangd_background_index);
     symbol_provider_->on_workspace_opened(absolute, setup.compile_dir);
+    last_lsp_environment_fingerprint_ =
+        global_build_environment_service().active_environment_fingerprint();
+    setup_build_environment_watching();
   }
   indexer_.start_scan(absolute);
   sync_symbol_workspace_indexer();
@@ -676,19 +757,15 @@ bool Application::handle_focus_shortcuts(const Event& event) {
       return true;
     }
     focus_state_.region = FocusRegion::RightPanel;
-    layout_state_.right_sidebar.selected_tab = 0;
     layout_state_.right_panel_active_section = 0;
     layout_state_.text_input_focus = TextInputFocus::None;
     mark_focus_sync();
     return true;
   }
   if (event_is_open_search_panel(event)) {
-    if (!app_settings_.secondary_panel_enabled) {
-      return true;
-    }
-    focus_state_.region = FocusRegion::RightPanel;
-    layout_state_.right_sidebar.selected_tab = RightSidebarTabs::kSearch;
-    layout_state_.right_panel_active_section = 0;
+    layout_state_.console_visible = true;
+    layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kSearch;
+    focus_state_.region = FocusRegion::Terminal;
     layout_state_.right_sidebar.pending_focus_search = true;
     layout_state_.text_input_focus = TextInputFocus::SearchQuery;
     mark_focus_sync();
@@ -787,12 +864,7 @@ int Application::run() {
   StopDebugCallback on_stop_debug = [this] { exit_debug_mode(); };
 
   ShellLaunchConfigProvider shell_launch_config = [this]() {
-    ShellLaunchConfig launch;
-    launch.host_cwd = workspace_.root;
-    if (workspace_.root.empty()) {
-      return launch;
-    }
-    return resolve_shell_launch_config(workspace_.root, workspace_config_);
+    return cached_shell_launch_config_;
   };
 
   auto build_ui = [&]() {
@@ -870,11 +942,12 @@ int Application::run() {
 
   auto root = CatchEvent(with_context_menu, [this, &screen, on_command](const Event& event) {
     try {
-      if (event == Event::Custom) {
+        if (event == Event::Custom) {
         if (!any_modal_open()) {
           apply_pending_connection();
         }
         process_index_changes();
+        process_build_environment_updates();
         drain_events();
         cursor_blink::tick();
         layout_state_.clickable.tick();
@@ -900,9 +973,19 @@ int Application::run() {
         if (layout_state_.ui_heartbeat.exchange(false, std::memory_order_acquire)) {
           layout_state_.performance_sampler.on_frame(sample_perf);
         }
+        bool swallow_call_hierarchy_custom = false;
         if (layout_state_.right_sidebar.pending_call_hierarchy &&
             layout_state_.call_hierarchy_key_handler) {
           layout_state_.call_hierarchy_key_handler(event);
+          swallow_call_hierarchy_custom = true;
+        }
+        if ((search_tab_active(&layout_state_) ||
+             is_search_input_focus(layout_state_.text_input_focus)) &&
+            layout_state_.search_key_handler) {
+          layout_state_.search_key_handler(event);
+        }
+        if (swallow_call_hierarchy_custom) {
+          return true;
         }
         return false;
       }
@@ -993,6 +1076,14 @@ int Application::run() {
         return true;
       }
 
+      if (layout_state_.console_visible && event.is_mouse() &&
+          problems_tab_active(&layout_state_) && layout_state_.problems_key_handler &&
+          layout_state_.problems_key_handler(event)) {
+        screen.Post(Event::Custom);
+        layout_state_.focus_sync_needed = true;
+        return true;
+      }
+
       if (layout_state_.console_visible && layout_state_.console_mouse_handler &&
           layout_state_.console_mouse_handler(event)) {
         screen.Post(Event::Custom);
@@ -1045,16 +1136,21 @@ int Application::run() {
         screen.Post(Event::Custom);
         return true;
       }
-      if (is_search_input_focus(layout_state_.text_input_focus) &&
+      if ((is_search_input_focus(layout_state_.text_input_focus) ||
+           search_tab_active(&layout_state_)) &&
           layout_state_.search_key_handler &&
           layout_state_.search_key_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
-      if (focus_state_.region == FocusRegion::RightPanel &&
-          layout_state_.right_sidebar.selected_tab == RightSidebarTabs::kCallHierarchy &&
+      if (call_hierarchy_tab_active(&layout_state_) &&
           layout_state_.call_hierarchy_key_handler &&
           layout_state_.call_hierarchy_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+      if (problems_tab_active(&layout_state_) && layout_state_.problems_key_handler &&
+          layout_state_.problems_key_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
@@ -1182,6 +1278,7 @@ int Application::run() {
           file_picker_state_.query.clear();
           file_picker_state_.selected = 0;
           file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
+          file_picker_state_.mark_matches_dirty();
           file_picker_state_.refresh_matches(&workspace_);
         }
         return true;
@@ -1200,7 +1297,14 @@ int Application::run() {
         return true;
       }
       if (event == Event::F9) {
-        layout_state_.diagnostics_panel_visible = !layout_state_.diagnostics_panel_visible;
+        if (!layout_state_.console_visible) {
+          layout_state_.console_visible = true;
+        } else if (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kProblems) {
+          layout_state_.console_visible = false;
+          return true;
+        }
+        layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kProblems;
+        layout_state_.focus_sync_needed = true;
         return true;
       }
       if (event == Event::CtrlT) {

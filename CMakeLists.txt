@@ -64,7 +64,10 @@ add_executable(tgdb
   src/symbols/completion_snippet.cpp
   src/symbols/local_scope_completions.cpp
   src/util/syntax_highlight.cpp
+  src/util/build_file_highlight.cpp
   src/search/workspace_search.cpp
+  src/search/workspace_search_runner.cpp
+  src/search/workspace_search_rg.cpp
   src/symbols/regex_symbol_provider.cpp
   src/symbols/symbol_utils.cpp
   src/editor/editor_state.cpp
@@ -86,8 +89,18 @@ add_executable(tgdb
   src/util/compile_commands_setup.cpp
   src/util/compile_commands_remap.cpp
   src/util/compile_commands_lookup.cpp
+  src/util/shell_utils.cpp
   src/util/docker_shell.cpp
   src/util/clangd_workspace_setup.cpp
+  src/build/build_environment.cpp
+  src/build/build_environment_state.cpp
+  src/build/make_qp_parser.cpp
+  src/build/build_environment_detector.cpp
+  src/build/docker_environment_detector.cpp
+  src/build/build_environment_selector.cpp
+  src/build/compile_commands_generator.cpp
+  src/build/build_environment_service.cpp
+  src/build/build_artifact_watcher.cpp
   src/util/bundled_tools.cpp
   src/util/process_list.cpp
   src/util/system_stats.cpp
@@ -124,6 +137,9 @@ endif()
 if(TGDB_BUNDLE_GDB)
   include(cmake/BundleGdb.cmake)
 endif()
+if(TGDB_BUNDLE_RG)
+  include(cmake/BundleRg.cmake)
+endif()
 
 add_executable(tgdb-bundle-wizard tools/bundle_wizard/main.cpp)
 target_link_libraries(tgdb-bundle-wizard PRIVATE ftxui::component ftxui::dom ftxui::screen)
@@ -147,3 +163,11 @@ add_executable(bracket_match_test
   src/editor/bracket_match.cpp
 )
 target_include_directories(bracket_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(build_environment_test
+  tests/build_environment_test.cpp
+  src/build/build_environment.cpp
+  src/build/make_qp_parser.cpp
+  src/build/build_environment_selector.cpp
+)
+target_include_directories(build_environment_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

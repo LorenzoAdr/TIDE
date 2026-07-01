@@ -121,6 +121,7 @@ void cycle_docker_container(SettingsModalState* state) {
       static_cast<int>(state->docker_container_names.size());
   state->draft_compile_commands.docker_container =
       state->docker_container_names[static_cast<std::size_t>(state->docker_container_selected)];
+  invalidate_docker_mount_cache();
 }
 
 struct SettingsOption {
@@ -430,8 +431,8 @@ void detect_docker_mounts_into_settings(SettingsModalState* state) {
   if (state == nullptr || state->draft_compile_commands.docker_container.empty()) {
     return;
   }
-  const auto detected =
-      detect_docker_mount_mappings(state->draft_compile_commands.docker_container);
+  const auto detected = detect_docker_mount_mappings(
+      state->draft_compile_commands.docker_container, true);
   for (const auto& mapping : detected) {
     const auto duplicate = std::find_if(
         state->draft_compile_commands.path_mappings.begin(),

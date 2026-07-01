@@ -74,6 +74,17 @@ bool event_is_shift_down(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[1;4B");
 }
 
+bool event_is_shift_home(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;2H") ||
+         event == ftxui::Event::Special("\x1B[27;2;1~");
+}
+
+bool event_is_shift_end(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;2F") ||
+         event == ftxui::Event::Special("\x1B[27;2;4~") ||
+         event == ftxui::Event::Special("\x1B[1;5~");
+}
+
 bool event_is_alt_left(const ftxui::Event& event) {
   return event == ftxui::Event::Special("\x1B[1;3D");
 }
@@ -180,6 +191,12 @@ bool event_is_ctrl_v(const ftxui::Event& event) {
   return event == ftxui::Event::CtrlV ||
          event == ftxui::Event::Special("\x1B[27;5;118~") ||
          event == ftxui::Event::Special("\x1B[27;5;86~");
+}
+
+bool event_is_ctrl_x(const ftxui::Event& event) {
+  return event == ftxui::Event::CtrlX ||
+         event == ftxui::Event::Special("\x1B[27;5;120~") ||
+         event == ftxui::Event::Special("\x1B[27;5;88~");
 }
 
 bool event_is_ctrl_h(const ftxui::Event& event) {
@@ -357,7 +374,8 @@ bool event_has_shift_modifier(const ftxui::Event& event) {
          event_is_ctrl_shift_right(event) || event_is_ctrl_shift_up(event) ||
          event_is_ctrl_shift_down(event) || event_is_ctrl_shift_d(event) ||
          event_is_ctrl_shift_l(event) || event_is_ctrl_shift_h(event) ||
-         event_is_ctrl_shift_o(event);
+         event_is_ctrl_shift_o(event) || event_is_shift_home(event) ||
+         event_is_shift_end(event);
 }
 
 bool event_input_has_shift_modifier(const ftxui::Event& event) {
@@ -380,7 +398,7 @@ bool event_has_ctrl_modifier(const ftxui::Event& event) {
     return false;
   }
   return event_is_ctrl_key_press(event) || event_is_ctrl_c(event) ||
-         event_is_ctrl_v(event) || event_is_ctrl_z(event) || event_is_ctrl_f(event) ||
+         event_is_ctrl_v(event) || event_is_ctrl_x(event) || event_is_ctrl_z(event) || event_is_ctrl_f(event) ||
          event_is_ctrl_g(event) || event_is_ctrl_u(event) || event_is_ctrl_d(event) ||
          event_is_ctrl_shift_d(event) || event_is_ctrl_backspace(event) ||
          event_is_ctrl_delete(event) || event_is_ctrl_space(event) ||
@@ -396,7 +414,7 @@ bool event_has_ctrl_modifier(const ftxui::Event& event) {
 
 bool editor_priority_key(const ftxui::Event& event) {
   return event == ftxui::Event::Escape || event_is_ctrl_z(event) || event_is_ctrl_c(event) ||
-         event_is_ctrl_v(event) || event_is_ctrl_f(event) || event_is_ctrl_g(event) ||
+         event_is_ctrl_v(event) || event_is_ctrl_x(event) || event_is_ctrl_f(event) || event_is_ctrl_g(event) ||
          event_is_shift_left(event) || event_is_shift_right(event) || event_is_shift_up(event) ||
          event_is_shift_down(event) || event_is_ctrl_left(event) || event_is_ctrl_right(event) ||
          event_is_ctrl_shift_left(event) || event_is_ctrl_shift_right(event) ||
@@ -406,6 +424,7 @@ bool editor_priority_key(const ftxui::Event& event) {
          event == ftxui::Event::Backspace || event == ftxui::Event::Delete ||
          event == ftxui::Event::Return || event == ftxui::Event::Tab ||
          event == ftxui::Event::Home || event == ftxui::Event::End ||
+         event_is_shift_home(event) || event_is_shift_end(event) ||
          event == ftxui::Event::PageUp || event == ftxui::Event::PageDown ||
          event_is_ctrl_u(event) || event_is_ctrl_i(event) || event_is_ctrl_d(event) ||
          event_is_ctrl_shift_d(event) || event_is_ctrl_backspace(event) ||

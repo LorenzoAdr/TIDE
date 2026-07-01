@@ -52,5 +52,7 @@ void navigate_to_call_hierarchy_node(WorkspaceModel* workspace, FocusManagerStat
                                      const CallHierarchyTreeNode& node);
 
 std::string call_hierarchy_node_location(const CallHierarchyTreeNode& node);
+std::string call_hierarchy_node_chain(const CallHierarchyViewState& view, int node_index);
+std::vector<int> call_hierarchy_chain_indices(const CallHierarchyViewState& view, int node_index);
 
 }  // namespace tgdb
