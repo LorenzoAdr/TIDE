@@ -12,6 +12,7 @@
 #include <thread>
 #include <vector>
 
+#include "util/shell_utils.hpp"
 #include "util/thread_name.hpp"
 
 #if defined(__unix__) || defined(__linux__)
@@ -29,8 +30,10 @@ namespace tgdb {
 
 namespace {
 
+constexpr const char* kIntegratedShell = "/bin/bash";
+
 std::string write_terminal_init_script(const ShellLaunchConfig& config) {
-  if (config.env_vars.empty() && config.setup_scripts.empty()) {
+  if (config.host_cwd.empty()) {
     return {};
   }
   const std::filesystem::path init_path =
@@ -42,17 +45,27 @@ std::string write_terminal_init_script(const ShellLaunchConfig& config) {
     return {};
   }
   output << "#!/bin/bash\n";
-  output << "# tgdb: terminal environment (auto-generated)\n";
+  output << "# tgdb: integrated terminal (auto-generated)\n";
+  output << "export PATH=\"${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}\"\n";
   for (const auto& entry : config.env_vars) {
-    output << "export " << entry.first << '=' << '\'' << entry.second << '\'' << '\n';
+    output << "export " << entry.first << '=' << shell_quote(entry.second) << '\n';
   }
   for (const auto& script : config.setup_scripts) {
     output << "set -a\n";
-    output << "source " << script << " >/dev/null 2>&1 || true\n";
+    output << "source " << shell_quote(script) << " >/dev/null 2>&1 || true\n";
     output << "set +a\n";
   }
-  output << "cd " << config.host_cwd << " 2>/dev/null || true\n";
+  output << "cd " << shell_quote(config.host_cwd) << " 2>/dev/null || true\n";
   return init_path.string();
+}
+
+void exec_interactive_shell(const std::string& shell_bin, const std::string& init_script) {
+  const char* argv0 = "bash";
+  if (!init_script.empty()) {
+    execlp(shell_bin.c_str(), argv0, "--rcfile", init_script.c_str(), "-i",
+           static_cast<char*>(nullptr));
+  }
+  execlp(shell_bin.c_str(), argv0, "-l", "-i", static_cast<char*>(nullptr));
 }
 
 }  // namespace
@@ -80,9 +93,14 @@ void ShellSession::apply_winsize() {
 }
 
 void ShellSession::request_start(const ShellLaunchConfig& config, int cols, int rows) {
-  if (running() || start_in_progress_.load(std::memory_order_acquire) || master_fd_ >= 0) {
+  if (running() || start_in_progress_.load(std::memory_order_acquire)) {
     return;
   }
+#if defined(__linux__)
+  if (master_fd_ >= 0 || child_pid_ > 0) {
+    stop();
+  }
+#endif
 #if !defined(__linux__)
   start_failed_.store(true, std::memory_order_release);
   return;
@@ -112,6 +130,9 @@ void ShellSession::request_start(const ShellLaunchConfig& config, int cols, int 
 
 void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
 #if defined(__linux__)
+  const std::string init_script = write_terminal_init_script(config);
+  const std::string shell_bin = kIntegratedShell;
+
   {
     std::lock_guard<std::mutex> lock(terminal_mutex_);
     terminal_.reset(rows_, cols_);
@@ -153,10 +174,16 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
         args.emplace_back(entry.first + "=" + entry.second);
       }
       args.emplace_back(config.docker_container);
-      const std::string& shell_bin =
-          config.docker_shell.empty() ? "/bin/bash" : config.docker_shell;
       args.emplace_back(shell_bin);
-      args.emplace_back("-i");
+      if (!init_script.empty() && !config.docker_cwd.empty()) {
+        const std::string container_init = config.docker_cwd + "/.tgdb/terminal_init.sh";
+        args.emplace_back("--rcfile");
+        args.emplace_back(container_init);
+        args.emplace_back("-i");
+      } else {
+        args.emplace_back("-l");
+        args.emplace_back("-i");
+      }
 
       std::vector<char*> argv;
       argv.reserve(args.size() + 1);
@@ -174,16 +201,7 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
     for (const auto& entry : config.env_vars) {
       setenv(entry.first.c_str(), entry.second.c_str(), 1);
     }
-    const std::string init_script = write_terminal_init_script(config);
-    const char* shell = std::getenv("SHELL");
-    if (shell == nullptr || shell[0] == '\0') {
-      shell = "/bin/bash";
-    }
-    if (!init_script.empty()) {
-      setenv("BASH_ENV", init_script.c_str(), 1);
-      setenv("ENV", init_script.c_str(), 1);
-    }
-    execlp(shell, shell, "-i", static_cast<char*>(nullptr));
+    exec_interactive_shell(shell_bin, init_script);
     _exit(127);
   }
 
@@ -201,6 +219,18 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
     int status = 0;
     waitpid(child_pid_, &status, 0);
     child_pid_ = -1;
+    start_in_progress_.store(false, std::memory_order_release);
+    return;
+  }
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  int status = 0;
+  const pid_t exited = waitpid(child_pid_, &status, WNOHANG);
+  if (exited == child_pid_) {
+    close(master_fd_);
+    master_fd_ = -1;
+    child_pid_ = -1;
+    start_failed_.store(true, std::memory_order_release);
     start_in_progress_.store(false, std::memory_order_release);
     return;
   }
@@ -348,6 +378,16 @@ void ShellSession::reader_loop() {
       continue;
     }
     break;
+  }
+
+  if (master_fd_ >= 0) {
+    close(master_fd_);
+    master_fd_ = -1;
+  }
+  if (child_pid_ > 0) {
+    int status = 0;
+    waitpid(child_pid_, &status, WNOHANG);
+    child_pid_ = -1;
   }
 #endif
   running_.store(false, std::memory_order_release);

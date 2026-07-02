@@ -194,11 +194,11 @@ void fetch_outline_symbols(OutlinePanelState* state, ISymbolProvider* symbols,
     return;
   }
   state->symbols = symbols->symbols_for_file(state->loaded_file);
+  state->rebuild_display_rows();
+  state->symbols_fetch_pending = false;
   if (symbols->symbols_lsp_pending(state->loaded_file)) {
     return;
   }
-  state->symbols_fetch_pending = false;
-  state->rebuild_display_rows();
   if (state->selected >= state->display_row_count()) {
     state->selected = std::max(0, state->display_row_count() - 1);
   }

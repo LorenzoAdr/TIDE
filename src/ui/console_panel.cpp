@@ -938,7 +938,8 @@ Element render_shell_terminal(ConsolePanelState* state, DebugModel* model, Shell
       message = state->shell_launch_uses_docker
                     ? "(docker exec falló: " + state->shell_docker_container + ")"
                     : "(shell no disponible)";
-    } else if (state != nullptr && state->shell_start_requested) {
+    } else if (state != nullptr && state->shell_start_requested && shell != nullptr &&
+               shell->starting()) {
       message = state->shell_launch_uses_docker
                     ? "(conectando a docker: " + state->shell_docker_container + "...)"
                     : "(iniciando terminal...)";

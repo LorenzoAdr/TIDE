@@ -39,6 +39,9 @@ class LspSymbolProvider : public ISymbolProvider {
   SemanticTokenDocument semantic_tokens_for_file(const std::string& path) override;
 
   bool supports_hover() const override;
+  bool hover_uses_async_fetch() const override;
+  void request_hover(const HoverParams& params, const std::string& cache_key) override;
+  std::optional<HoverInfo> poll_hover(const std::string& cache_key) override;
   HoverInfo hover_at(const HoverParams& params) override;
 
   bool supports_diagnostics() const override;
@@ -78,11 +81,13 @@ class LspSymbolProvider : public ISymbolProvider {
   void set_workspace_clangd_options(bool use_gcc_query_driver, bool background_index);
 
  private:
-  enum class AsyncJobKind { DocumentSymbols, SemanticTokens };
+  enum class AsyncJobKind { DocumentSymbols, SemanticTokens, Hover };
 
   struct AsyncJob {
     AsyncJobKind kind;
     std::string path;
+    std::string hover_key;
+    HoverParams hover_params;
   };
 
   struct AsyncResult {
@@ -131,6 +136,8 @@ class LspSymbolProvider : public ISymbolProvider {
   mutable std::mutex inflight_mutex_;
   std::unordered_set<std::string> inflight_symbols_;
   std::unordered_set<std::string> inflight_semantic_;
+  std::unordered_set<std::string> inflight_hover_;
+  std::unordered_map<std::string, HoverInfo> hover_cache_;
   std::unordered_map<std::string, int64_t> pending_content_refresh_;
   std::unordered_map<std::string, int64_t> pending_did_change_;
   std::atomic<uint64_t> semantic_highlight_revision_{0};

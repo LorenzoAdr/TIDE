@@ -111,6 +111,7 @@ void LspSymbolProvider::stop_lsp_locked() {
   use_lsp_ = false;
   cached_diag_revision_ = 0;
   cached_diagnostics_.clear();
+  hover_cache_.clear();
 }
 
 void LspSymbolProvider::stop_lsp() {
@@ -128,6 +129,7 @@ void LspSymbolProvider::start_async_worker_locked() {
     std::lock_guard<std::mutex> lock(inflight_mutex_);
     inflight_symbols_.clear();
     inflight_semantic_.clear();
+    inflight_hover_.clear();
   }
   async_worker_ = std::thread([this] {
     set_current_thread_name("lsp-async");
@@ -147,6 +149,7 @@ void LspSymbolProvider::stop_async_worker_locked() {
     std::lock_guard<std::mutex> lock(inflight_mutex_);
     inflight_symbols_.clear();
     inflight_semantic_.clear();
+    inflight_hover_.clear();
   }
 }
 
@@ -191,12 +194,22 @@ void LspSymbolProvider::async_worker_main() {
       break;
     }
 
+    bool run_job = false;
     {
       std::lock_guard<std::mutex> lock(mutex_);
+      run_job = use_lsp_ && client_.ready();
+    }
+
+    if (run_job) {
       if (job->kind == AsyncJobKind::DocumentSymbols) {
         client_.document_symbols(job->path);
-      } else {
+      } else if (job->kind == AsyncJobKind::SemanticTokens) {
         client_.ensure_semantic_tokens(job->path);
+      } else {
+        const HoverInfo info = client_.hover(job->hover_params.path, job->hover_params.text,
+                                           job->hover_params.line, job->hover_params.character);
+        std::lock_guard<std::mutex> lock(mutex_);
+        hover_cache_[job->hover_key] = info;
       }
     }
 
@@ -205,14 +218,21 @@ void LspSymbolProvider::async_worker_main() {
         std::lock_guard<std::mutex> lock(inflight_mutex_);
         inflight_symbols_.erase(job->path);
       }
-    } else {
+    } else if (job->kind == AsyncJobKind::SemanticTokens) {
       {
         std::lock_guard<std::mutex> lock(inflight_mutex_);
         inflight_semantic_.erase(job->path);
       }
+    } else {
+      {
+        std::lock_guard<std::mutex> lock(inflight_mutex_);
+        inflight_hover_.erase(job->hover_key);
+      }
     }
 
-    async_results_.push({job->kind, job->path});
+    if (run_job) {
+      async_results_.push({job->kind, job->path});
+    }
   }
 }
 
@@ -585,19 +605,64 @@ bool LspSymbolProvider::supports_hover() const {
   return true;
 }
 
+bool LspSymbolProvider::hover_uses_async_fetch() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return use_lsp_;
+}
+
+void LspSymbolProvider::request_hover(const HoverParams& params, const std::string& cache_key) {
+  if (params.path.empty() || cache_key.empty() ||
+      !is_lsp_trackable_path(params.path, params.text)) {
+    return;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_) {
+      return;
+    }
+    if (hover_cache_.find(cache_key) != hover_cache_.end()) {
+      return;
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(inflight_mutex_);
+    if (inflight_hover_.count(cache_key) > 0) {
+      return;
+    }
+    inflight_hover_.insert(cache_key);
+  }
+
+  AsyncJob job;
+  job.kind = AsyncJobKind::Hover;
+  job.path = normalize_lsp_path(params.path);
+  job.hover_key = cache_key;
+  job.hover_params = params;
+  async_jobs_.push(std::move(job));
+}
+
+std::optional<HoverInfo> LspSymbolProvider::poll_hover(const std::string& cache_key) {
+  if (cache_key.empty()) {
+    return std::nullopt;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = hover_cache_.find(cache_key);
+  if (it == hover_cache_.end()) {
+    return std::nullopt;
+  }
+  HoverInfo info = it->second;
+  hover_cache_.erase(it);
+  return info;
+}
+
 HoverInfo LspSymbolProvider::hover_at(const HoverParams& params) {
   if (params.path.empty()) {
     return {};
   }
   std::lock_guard<std::mutex> lock(mutex_);
   if (use_lsp_ && is_lsp_trackable_path(params.path, params.text)) {
-    const std::string text =
-        params.text.empty() ? buffer_text_for_path(params.path) : params.text;
-    HoverInfo info =
-        client_.hover(params.path, text, params.line, params.character);
-    if (info.valid) {
-      return info;
-    }
+    return {};
   }
   return fallback_.hover_at(params);
 }

@@ -141,6 +141,15 @@ class ISymbolProvider {
   }
 
   virtual bool supports_hover() const { return false; }
+  virtual bool hover_uses_async_fetch() const { return false; }
+  virtual void request_hover(const HoverParams& params, const std::string& cache_key) {
+    (void)params;
+    (void)cache_key;
+  }
+  virtual std::optional<HoverInfo> poll_hover(const std::string& cache_key) {
+    (void)cache_key;
+    return std::nullopt;
+  }
   virtual HoverInfo hover_at(const HoverParams& params) {
     (void)params;
     return {};

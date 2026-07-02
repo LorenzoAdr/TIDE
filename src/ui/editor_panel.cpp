@@ -151,6 +151,8 @@ struct EditorPanelState {
   int gutter_visible_rows = 0;
   bool symbols_fetch_pending = false;
   uint64_t last_document_symbols_revision = 0;
+  bool semantic_tokens_enqueue_pending = false;
+  uint64_t last_semantic_highlight_revision_tick = 0;
   SemanticTokenDocument cached_semantic_tokens;
   std::string cached_semantic_path;
   uint64_t last_semantic_highlight_revision = 0;
@@ -301,9 +303,7 @@ void ensure_file_symbols(EditorPanelState* panel, ISymbolProvider* symbols,
     return;
   }
   panel->cached_symbols = symbols->symbols_for_file(path);
-  if (!symbols->symbols_lsp_pending(path)) {
-    panel->symbols_fetch_pending = false;
-  }
+  panel->symbols_fetch_pending = false;
 }
 
 void rebuild_diagnostics_by_line(EditorPanelState* panel, const DocumentDiagnostics& doc,
@@ -660,6 +660,13 @@ void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
   if (hover.fetch_key == key) {
     if (hover.info.valid) {
       hover.visible = true;
+      return;
+    }
+    if (symbols->hover_uses_async_fetch()) {
+      if (const auto polled = symbols->poll_hover(key)) {
+        hover.info = *polled;
+        hover.visible = polled->valid;
+      }
     }
     return;
   }
@@ -669,6 +676,11 @@ void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
   params.text = buffer_text(buffer);
   params.line = hover.line;
   params.character = hover.col;
+  if (symbols->hover_uses_async_fetch()) {
+    symbols->request_hover(params, key);
+    hover.fetch_key = key;
+    return;
+  }
   hover.info = symbols->hover_at(params);
   hover.fetch_key = key;
   hover.visible = hover.info.valid;
@@ -2764,12 +2776,17 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     EditorBuffer& buffer = workspace->buffer;
     buffer.ensure_cursors();
 
-    if (buffer.path != panel_state->last_path) {
+    const bool path_changed = buffer.path != panel_state->last_path;
+
+    if (path_changed) {
       panel_state->last_path = buffer.path;
       panel_state->cached_symbols_path.clear();
       panel_state->cached_semantic_path.clear();
       panel_state->last_semantic_highlight_revision = 0;
+      panel_state->semantic_tokens_enqueue_pending = !buffer.path.empty();
+      panel_state->last_semantic_highlight_revision_tick = 0;
       buffer.scroll_col = 0;
+      clear_hover_state(&panel_state->hover);
       panel_state->document_open_pending = !buffer.path.empty();
       panel_state->pending_document_open_path = buffer.path;
       if (layout_state != nullptr && layout_state->schedule_ui_tick) {
@@ -3126,9 +3143,18 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             panel_state->symbols_fetch_pending = true;
             ensure_file_symbols(panel_state.get(), symbols.get(), path);
           }
-          if (symbols->supports_semantic_highlight() &&
-              !symbols->semantic_tokens_for_file(path).ready) {
-            symbols->ensure_semantic_tokens(path);
+          if (symbols->supports_semantic_highlight() && !path.empty()) {
+            const uint64_t sem_rev = symbols->semantic_highlight_revision();
+            if (sem_rev != panel_state->last_semantic_highlight_revision_tick) {
+              panel_state->last_semantic_highlight_revision_tick = sem_rev;
+              if (!symbols->semantic_tokens_for_file(path).ready) {
+                panel_state->semantic_tokens_enqueue_pending = true;
+              }
+            }
+            if (panel_state->semantic_tokens_enqueue_pending) {
+              symbols->ensure_semantic_tokens(path);
+              panel_state->semantic_tokens_enqueue_pending = false;
+            }
           }
           sync_diagnostic_cache(panel_state.get(), symbols.get(), workspace, file_indexer);
         }
