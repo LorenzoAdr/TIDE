@@ -79,7 +79,7 @@ void print_usage() {
             << "\n"
             << "Sin argumentos abre la pantalla de inicio TUIDE (modo IDE).\n"
             << "Un directorio abre el workspace; un archivo abre su carpeta con el archivo cargado.\n"
-            << "F1 abrir archivo externo; Alt+F1 atajos; F2 depuración; F3 directorio de trabajo.\n"
+            << "F1 abrir archivo externo; Alt+F1/Shift+F1 atajos; F2 depuración; F3 directorio de trabajo.\n"
             << "\n"
             << "Ejemplos:\n"
             << "  tgdb\n"

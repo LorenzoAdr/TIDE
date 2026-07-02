@@ -13,6 +13,8 @@ constexpr std::string_view kConsoleTabPerformance = "console.tab.performance";
 constexpr std::string_view kConsoleTabProblems = "console.tab.problems";
 constexpr std::string_view kConsoleTabSearch = "console.tab.search";
 constexpr std::string_view kConsoleTabCallHierarchy = "console.tab.call_hierarchy";
+constexpr std::string_view kSidebarHide = "sidebar.hide";
+constexpr std::string_view kConsoleHide = "console.hide";
 constexpr std::string_view kSidebarTabOutline = "sidebar.tab.outline";
 constexpr std::string_view kSidebarTabSearch = "sidebar.tab.search";
 constexpr std::string_view kSidebarTabCallHierarchy = "sidebar.tab.call_hierarchy";
@@ -111,6 +113,10 @@ inline bool is_watches_hover(std::string_view id) {
 inline bool is_console_tab_hover(std::string_view id) {
   return id == kConsoleTabTerminal || id == kConsoleTabGdb || id == kConsoleTabPerformance ||
          id == kConsoleTabProblems || id == kConsoleTabSearch || id == kConsoleTabCallHierarchy;
+}
+
+inline bool is_console_header_hover(std::string_view id) {
+  return is_console_tab_hover(id) || id == kConsoleHide;
 }
 
 inline bool is_sidebar_tab_hover(std::string_view id) {

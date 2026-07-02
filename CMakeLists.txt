@@ -78,6 +78,8 @@ add_executable(tgdb
   src/editor/cursor_history.cpp
   src/editor/text_ops.cpp
   src/editor/text_search.cpp
+  src/editor/selection_occurrence_runner.cpp
+  src/editor/find_match_runner.cpp
   src/editor/editor_find_state.cpp
   src/editor/undo_stack.cpp
   src/editor/clipboard.cpp

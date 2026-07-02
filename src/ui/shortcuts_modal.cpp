@@ -35,7 +35,7 @@ const std::vector<ShortcutSection>& shortcut_sections() {
       {"General",
        {
            {"F1", "Abrir archivo externo (explorador de archivos)"},
-           {"Alt+F1", "Atajos de teclado (este diálogo)"},
+           {"Alt+F1 / Shift+F1", "Atajos de teclado (este diálogo)"},
            {"F2", "Asistente de depuración / detener sesión"},
            {"F3", "Cambiar directorio de trabajo"},
            {"F4", "Pestaña Terminal (shell)"},
@@ -61,7 +61,7 @@ const std::vector<ShortcutSection>& shortcut_sections() {
            {"Ctrl+Alt+F / Ctrl+Shift+F", "Buscar selección en workspace"},
            {"Ctrl+G", "Ir a línea"},
            {"Ctrl+Z", "Deshacer"},
-           {"Ctrl+Shift+Z / Ctrl+Y", "Rehacer"},
+           {"Ctrl+Alt+Z / Ctrl+Shift+Z / Ctrl+Y", "Rehacer"},
            {"Ctrl+C", "Copiar selección"},
            {"Ctrl+X", "Cortar selección"},
            {"Ctrl+V", "Pegar"},
@@ -69,8 +69,7 @@ const std::vector<ShortcutSection>& shortcut_sections() {
            {"Ctrl+I", "Media página abajo (cursor + scroll)"},
            {"Ctrl+Backspace", "Borrar palabra anterior"},
            {"Ctrl+Delete", "Borrar palabra siguiente"},
-           {"Ctrl+D", "Seleccionar siguiente coincidencia (multicursor)"},
-           {"Ctrl+Shift+D", "Seleccionar siguiente coincidencia (multicursor)"},
+           {"Ctrl+D / Ctrl+Alt+D / Ctrl+Shift+D", "Seleccionar siguiente coincidencia (multicursor)"},
            {"Ctrl+Alt+L / Ctrl+Shift+L", "Seleccionar todas las coincidencias (multicursor)"},
            {"Ctrl+.", "Completar código (LSP)"},
            {"Ctrl+Espacio", "Completar código (LSP)"},
@@ -78,14 +77,14 @@ const std::vector<ShortcutSection>& shortcut_sections() {
            {"Al escribir", "Autocompletado automático (identificadores)"},
            {"F12", "Ir a definición (LSP)"},
            {"Alt+← / →", "Posición anterior / siguiente del cursor"},
-           {"Shift+F12", "Ir a declaración (LSP)"},
+           {"Shift+F12 / Ctrl+Alt+F12 / Ctrl+Shift+F12", "Ir a declaración (LSP)"},
            {"Alt+clic", "Seleccionar entre cursor y clic"},
            {"Ctrl+clic", "Ir a definición (LSP)"},
-           {"Ctrl+Shift+clic", "Ir a declaración (LSP)"},
+           {"Ctrl+Alt+clic / Ctrl+Shift+clic", "Ir a declaración (LSP)"},
            {"Tab", "Indentar (no cambia panel)"},
            {"Shift+flechas", "Extender selección"},
            {"Ctrl+flechas", "Mover por palabras"},
-           {"Ctrl+Shift+↑/↓", "Selección en bloque vertical"},
+           {"Ctrl+Alt+↑/↓ / Ctrl+Shift+↑/↓", "Selección en bloque vertical"},
        }},
       {"Depuración",
        {
@@ -173,7 +172,7 @@ bool handle_scroll_keys(ShortcutsModalState* state, Event event, int total_rows)
     return false;
   }
 
-  if (event == Event::Escape || event_is_alt_f1(event)) {
+  if (event == Event::Escape || event_is_open_shortcuts_modal(event)) {
     state->open = false;
     state->first_visible = 0;
     return true;
@@ -238,7 +237,7 @@ Component MakeShortcutsModalOverlay(Component main, ShortcutsModalState* state) 
 
         const int total = static_cast<int>(rows->size());
         const bool can_scroll = total > kVisibleRows;
-        std::string footer = "Alt+F1 / Esc cerrar";
+        std::string footer = "Alt+F1 / Shift+F1 / Esc cerrar";
         if (can_scroll) {
           footer += "  ↑↓ j/k scroll  PgUp/PgDn  Home/End";
         }

@@ -30,22 +30,24 @@ Press **F1** inside tgdb to open the in-app shortcuts dialog (scrollable). This 
 | Ctrl+F | Find in file |
 | Ctrl+G | Go to line |
 | Ctrl+Z | Undo |
+| Ctrl+Alt+Z / Ctrl+Shift+Z / Ctrl+Y | Redo |
 | Ctrl+C | Copy selection |
 | Ctrl+V | Paste |
 | Ctrl+U | Half page up (moves cursor) |
 | Ctrl+I | Half page down (moves cursor) |
 | Ctrl+Backspace | Delete previous word |
 | Ctrl+Delete | Delete next word |
-| Ctrl+D | Select next match (multi-cursor) |
-| Ctrl+Shift+D | Select next match (multi-cursor) |
-| Ctrl+Shift+L | Select all matches |
+| Ctrl+D / Ctrl+Alt+D / Ctrl+Shift+D | Select next match (multi-cursor) |
+| Ctrl+Alt+L / Ctrl+Shift+L | Select all matches |
+| Ctrl+Alt+F / Ctrl+Shift+F | Search selection in workspace |
 | Ctrl+. | Code completion (LSP) |
 | Ctrl+Space | Code completion (LSP) |
 | F6 | Code completion (LSP) |
 | Tab | Indent (does not cycle panel focus) |
 | Shift+arrows | Extend selection |
 | Ctrl+arrows | Move by word |
-| Ctrl+Shift+↑/↓ | Block selection (vertical) |
+| Ctrl+Alt+↑/↓ / Ctrl+Shift+↑/↓ | Block selection (vertical) |
+| Ctrl+Alt+click / Ctrl+Shift+click | Go to declaration (LSP) |
 
 ## Debug
 

@@ -78,6 +78,7 @@ struct ConsolePanelState {
   std::vector<TerminalStyledRow> terminal_styled_rows;
   std::string last_workspace_root;
   std::array<Box, 6> tab_boxes;
+  Box hide_box;
 };
 
 void handle_gdb_command(const std::string& line, DebugModel* model, CommandCallback on_command) {
@@ -539,6 +540,14 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
     return false;
   }
 
+  if (m.button == Mouse::Left && m.motion == Mouse::Pressed &&
+      state->hide_box.Contain(m.x, m.y)) {
+    trigger_press(layout_state, press_id::kConsoleHide);
+    layout_state->console_visible = false;
+    layout_state->request_ui_tick = true;
+    return true;
+  }
+
   if (on_terminal_tab && state->shell_ui_active) {
     const int term_total = static_cast<int>(state->terminal_styled_rows.size());
     const int term_visible = state->terminal_last_visible_lines;
@@ -592,8 +601,9 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
          {press_id::kConsoleTabProblems, &state->tab_boxes[ConsolePanelTabs::kProblems]},
          {press_id::kConsoleTabSearch, &state->tab_boxes[ConsolePanelTabs::kSearch]},
          {press_id::kConsoleTabCallHierarchy,
-          &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]}},
-        press_id::is_console_tab_hover);
+          &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
+         {press_id::kConsoleHide, &state->hide_box}},
+        press_id::is_console_header_hover);
   }
   return update_panel_hover(
       layout_state, mouse.x, mouse.y,
@@ -602,8 +612,9 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
        {press_id::kConsoleTabProblems, &state->tab_boxes[ConsolePanelTabs::kProblems]},
        {press_id::kConsoleTabSearch, &state->tab_boxes[ConsolePanelTabs::kSearch]},
        {press_id::kConsoleTabCallHierarchy,
-        &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]}},
-      press_id::is_console_tab_hover);
+        &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
+       {press_id::kConsoleHide, &state->hide_box}},
+      press_id::is_console_header_hover);
 }
 
 std::string console_placeholder(AppMode* /*app_mode*/) {
@@ -1406,6 +1417,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
             layout_state->clickable.is_pressed(press_id::kConsoleTabCallHierarchy),
         &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]));
 
+    const bool hide_hovered =
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleHide);
+    const bool hide_pressed =
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleHide);
+    Element hide_btn = MakeToolbarButton(text(" × ") | color(theme::Muted()), hide_hovered,
+                                         hide_pressed, false, &state->hide_box);
+
     Element body;
     if (selected_tab == ConsolePanelTabs::kTerminal) {
       body = render_shell_terminal(state.get(), model, shell, focus, layout_state, body_height,
@@ -1424,7 +1442,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     }
 
     return vbox({
-               hbox(std::move(tab_row)),
+               hbox({hbox(std::move(tab_row)), filler(),
+                     hide_btn | size(WIDTH, EQUAL, 3)}) |
+                   size(HEIGHT, EQUAL, 1) | bgcolor(theme::TabIdle()),
                separator() | size(HEIGHT, EQUAL, 1),
                std::move(body) | flex,
            }) |

@@ -44,6 +44,17 @@ bool input_has_shift_release_token(const std::string& input) {
 
 }  // namespace
 
+bool event_is_ctrl_alt_l(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return event == ftxui::Event::CtrlAltL ||
+         csi_key_any_modifier(event, mods, 1, 76) ||
+         csi_key_any_modifier(event, mods, 1, 108) ||
+         event == ftxui::Event::Special("\x1B[27;7;76~") ||
+         event == ftxui::Event::Special("\x1B[27;7;108~") ||
+         event == ftxui::Event::Special("\x1B[76;7u") ||
+         event == ftxui::Event::Special("\x1B[108;7u");
+}
+
 bool event_is_ctrl_shift_l(const ftxui::Event& event) {
   const int mods[] = {6};
   return csi_key_any_modifier(event, mods, 1, 76) ||
@@ -52,16 +63,6 @@ bool event_is_ctrl_shift_l(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[27;6;108~") ||
          event == ftxui::Event::Special("\x1B[76;6u") ||
          event == ftxui::Event::Special("\x1B[108;6u");
-}
-
-bool event_is_ctrl_alt_l(const ftxui::Event& event) {
-  const int mods[] = {7};
-  return csi_key_any_modifier(event, mods, 1, 76) ||
-         csi_key_any_modifier(event, mods, 1, 108) ||
-         event == ftxui::Event::Special("\x1B[27;7;76~") ||
-         event == ftxui::Event::Special("\x1B[27;7;108~") ||
-         event == ftxui::Event::Special("\x1B[76;7u") ||
-         event == ftxui::Event::Special("\x1B[108;7u");
 }
 
 bool event_is_alt_f1(const ftxui::Event& event) {
@@ -73,7 +74,42 @@ bool event_is_alt_f1(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[11;3~") ||
          event == ftxui::Event::Special("\x1B[11;3u") ||
          event == ftxui::Event::Special("\x1B[80;3u") ||
-         event == ftxui::Event::Special("\x1B[112;3u");
+         event == ftxui::Event::Special("\x1B[112;3u") ||
+         event == ftxui::Event::Special("\x1B[27;3;11~") ||
+         event == ftxui::Event::Special("\x1B[27;3;112~") ||
+         // Konsole (linux.keytab): F1 = ESC [[ A, Alt+F1 = ESC + F1
+         event == ftxui::Event::Special("\x1B\x1B[[A") ||
+         // xterm SS3 / CSI: Alt+F1 = ESC + F1 sequence
+         event == ftxui::Event::Special("\x1B\x1BOP") ||
+         event == ftxui::Event::Special("\x1B\x1B[11~");
+}
+
+bool event_is_shift_f1(const ftxui::Event& event) {
+  const int mods[] = {2};
+  return csi_key_any_modifier(event, mods, 1, 11) ||
+         csi_key_any_modifier(event, mods, 1, 80) ||
+         csi_key_any_modifier(event, mods, 1, 112) ||
+         event == ftxui::Event::Special("\x1B[1;2P") ||
+         event == ftxui::Event::Special("\x1B[11;2~") ||
+         event == ftxui::Event::Special("\x1B[25;2~") ||
+         event == ftxui::Event::Special("\x1B[11;2u") ||
+         event == ftxui::Event::Special("\x1B[80;2u") ||
+         event == ftxui::Event::Special("\x1B[112;2u") ||
+         event == ftxui::Event::Special("\x1B[27;2;11~") ||
+         event == ftxui::Event::Special("\x1B[27;2;112~");
+}
+
+bool event_is_open_shortcuts_modal(const ftxui::Event& event) {
+  return event_is_alt_f1(event) || event_is_shift_f1(event);
+}
+
+bool event_is_f1(const ftxui::Event& event) {
+  if (event_is_open_shortcuts_modal(event)) {
+    return false;
+  }
+  return event == ftxui::Event::F1 || event == ftxui::Event::Special("\x1BOP") ||
+         event == ftxui::Event::Special("\x1B[11~") ||
+         event == ftxui::Event::Special("\x1B[[A");
 }
 
 bool event_is_shift_left(const ftxui::Event& event) {
@@ -119,12 +155,31 @@ bool event_is_alt_right(const ftxui::Event& event) {
   return event == ftxui::Event::Special("\x1B[1;3C");
 }
 
+bool event_is_ctrl_alt_up(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;7A");
+}
+
+bool event_is_ctrl_alt_down(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;7B");
+}
+
 bool event_is_ctrl_shift_up(const ftxui::Event& event) {
   return event == ftxui::Event::Special("\x1B[1;6A");
 }
 
 bool event_is_ctrl_shift_down(const ftxui::Event& event) {
   return event == ftxui::Event::Special("\x1B[1;6B");
+}
+
+bool event_is_ctrl_alt_o(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return event == ftxui::Event::CtrlAltO ||
+         csi_key_any_modifier(event, mods, 1, 79) ||
+         csi_key_any_modifier(event, mods, 1, 111) ||
+         event == ftxui::Event::Special("\x1B[27;7;79~") ||
+         event == ftxui::Event::Special("\x1B[27;7;111~") ||
+         event == ftxui::Event::Special("\x1B[79;7u") ||
+         event == ftxui::Event::Special("\x1B[111;7u");
 }
 
 bool event_is_ctrl_shift_o(const ftxui::Event& event) {
@@ -165,6 +220,17 @@ bool event_is_alt_o(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[79;3u");
 }
 
+bool event_is_ctrl_alt_h(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return event == ftxui::Event::CtrlAltH ||
+         csi_key_any_modifier(event, mods, 1, 72) ||
+         csi_key_any_modifier(event, mods, 1, 104) ||
+         event == ftxui::Event::Special("\x1B[27;7;72~") ||
+         event == ftxui::Event::Special("\x1B[27;7;104~") ||
+         event == ftxui::Event::Special("\x1B[72;7u") ||
+         event == ftxui::Event::Special("\x1B[104;7u");
+}
+
 bool event_is_ctrl_shift_h(const ftxui::Event& event) {
   const int mods[] = {6};
   return csi_key_any_modifier(event, mods, 1, 72) ||
@@ -177,12 +243,13 @@ bool event_is_ctrl_shift_h(const ftxui::Event& event) {
 
 bool event_is_open_search_panel(const ftxui::Event& event) {
   return event == ftxui::Event::F7 || event_is_ctrl_h_csi(event) ||
-         event_is_ctrl_shift_h(event) || event_is_alt_h(event);
+         event_is_ctrl_alt_h(event) || event_is_ctrl_shift_h(event) ||
+         event_is_alt_h(event);
 }
 
 bool event_is_open_outline_panel(const ftxui::Event& event) {
-  return event == ftxui::Event::F8 || event_is_ctrl_shift_o(event) ||
-         event_is_alt_o(event);
+  return event == ftxui::Event::F8 || event_is_ctrl_alt_o(event) ||
+         event_is_ctrl_shift_o(event) || event_is_alt_o(event);
 }
 
 bool event_is_ctrl_left(const ftxui::Event& event) {
@@ -191,6 +258,14 @@ bool event_is_ctrl_left(const ftxui::Event& event) {
 
 bool event_is_ctrl_right(const ftxui::Event& event) {
   return event == ftxui::Event::ArrowRightCtrl;
+}
+
+bool event_is_ctrl_alt_left(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;7D");
+}
+
+bool event_is_ctrl_alt_right(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;7C");
 }
 
 bool event_is_ctrl_shift_left(const ftxui::Event& event) {
@@ -213,10 +288,26 @@ bool event_is_ctrl_z(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[27;5;90~");
 }
 
+bool event_is_ctrl_alt_z(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return event == ftxui::Event::CtrlAltZ ||
+         csi_key_any_modifier(event, mods, 1, 122) ||
+         csi_key_any_modifier(event, mods, 1, 90) ||
+         event == ftxui::Event::Special("\x1B[27;7;122~") ||
+         event == ftxui::Event::Special("\x1B[27;7;90~") ||
+         event == ftxui::Event::Special("\x1B[122;7u") ||
+         event == ftxui::Event::Special("\x1B[90;7u");
+}
+
 bool event_is_ctrl_shift_z(const ftxui::Event& event) {
+  const int mods[] = {6};
   return (event == ftxui::Event::CtrlZ && event_input_has_shift_modifier(event)) ||
+         csi_key_any_modifier(event, mods, 1, 122) ||
+         csi_key_any_modifier(event, mods, 1, 90) ||
          event == ftxui::Event::Special("\x1B[27;6;122~") ||
-         event == ftxui::Event::Special("\x1B[27;6;90~");
+         event == ftxui::Event::Special("\x1B[27;6;90~") ||
+         event == ftxui::Event::Special("\x1B[122;6u") ||
+         event == ftxui::Event::Special("\x1B[90;6u");
 }
 
 bool event_is_ctrl_y(const ftxui::Event& event) {
@@ -249,6 +340,17 @@ bool event_is_ctrl_f(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[27;5;70~");
 }
 
+bool event_is_ctrl_alt_f(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return event == ftxui::Event::CtrlAltF ||
+         csi_key_any_modifier(event, mods, 1, 70) ||
+         csi_key_any_modifier(event, mods, 1, 102) ||
+         event == ftxui::Event::Special("\x1B[27;7;70~") ||
+         event == ftxui::Event::Special("\x1B[27;7;102~") ||
+         event == ftxui::Event::Special("\x1B[70;7u") ||
+         event == ftxui::Event::Special("\x1B[104;7u");
+}
+
 bool event_is_ctrl_shift_f(const ftxui::Event& event) {
   const int mods[] = {6};
   return (event == ftxui::Event::CtrlF && event_input_has_shift_modifier(event)) ||
@@ -258,16 +360,6 @@ bool event_is_ctrl_shift_f(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[27;6;102~") ||
          event == ftxui::Event::Special("\x1B[70;6u") ||
          event == ftxui::Event::Special("\x1B[104;6u");
-}
-
-bool event_is_ctrl_alt_f(const ftxui::Event& event) {
-  const int mods[] = {7};
-  return csi_key_any_modifier(event, mods, 1, 70) ||
-         csi_key_any_modifier(event, mods, 1, 102) ||
-         event == ftxui::Event::Special("\x1B[27;7;70~") ||
-         event == ftxui::Event::Special("\x1B[27;7;102~") ||
-         event == ftxui::Event::Special("\x1B[70;7u") ||
-         event == ftxui::Event::Special("\x1B[104;7u");
 }
 
 bool event_is_workspace_search_with_selection(const ftxui::Event& event) {
@@ -341,6 +433,17 @@ bool event_is_ctrl_d(const ftxui::Event& event) {
   return event == ftxui::Event::CtrlD ||
          event == ftxui::Event::Special("\x1B[27;5;100~") ||
          event == ftxui::Event::Special("\x1B[27;5;68~");
+}
+
+bool event_is_ctrl_alt_d(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return event == ftxui::Event::CtrlAltD ||
+         csi_key_any_modifier(event, mods, 1, 68) ||
+         csi_key_any_modifier(event, mods, 1, 100) ||
+         event == ftxui::Event::Special("\x1B[27;7;68~") ||
+         event == ftxui::Event::Special("\x1B[27;7;100~") ||
+         event == ftxui::Event::Special("\x1B[68;7u") ||
+         event == ftxui::Event::Special("\x1B[100;7u");
 }
 
 bool event_is_ctrl_shift_d(const ftxui::Event& event) {
@@ -427,6 +530,7 @@ bool event_is_go_to_definition(const ftxui::Event& event) {
 
 bool event_is_go_to_declaration(const ftxui::Event& event) {
   return event == ftxui::Event::Special("\x1B[24;2~") ||
+         event == ftxui::Event::Special("\x1B[24;7~") ||
          event == ftxui::Event::Special("\x1B[24;6~");
 }
 
@@ -463,14 +567,21 @@ bool event_has_ctrl_modifier(const ftxui::Event& event) {
   return event_is_ctrl_key_press(event) || event_is_ctrl_c(event) ||
          event_is_ctrl_v(event) || event_is_ctrl_x(event) || event_is_ctrl_z(event) || event_is_ctrl_f(event) ||
          event_is_ctrl_g(event) || event_is_ctrl_u(event) || event_is_ctrl_d(event) ||
-         event_is_ctrl_shift_d(event) || event_is_ctrl_backspace(event) ||
+         event_is_ctrl_alt_d(event) || event_is_ctrl_shift_d(event) ||
+         event_is_ctrl_backspace(event) ||
          event_is_ctrl_delete(event) || event_is_ctrl_space(event) ||
          event_is_ctrl_left(event) || event_is_ctrl_right(event) ||
+         event_is_ctrl_alt_left(event) || event_is_ctrl_alt_right(event) ||
          event_is_ctrl_shift_left(event) || event_is_ctrl_shift_right(event) ||
+         event_is_ctrl_alt_up(event) || event_is_ctrl_alt_down(event) ||
          event_is_ctrl_shift_up(event) || event_is_ctrl_shift_down(event) ||
-         event_is_ctrl_shift_l(event) || event_is_ctrl_alt_l(event) ||
-         event_is_ctrl_shift_h(event) || event_is_ctrl_shift_o(event) ||
-         event_is_ctrl_h(event) || event == ftxui::Event::CtrlS ||
+         event_is_ctrl_alt_l(event) || event_is_ctrl_shift_l(event) ||
+         event_is_ctrl_alt_h(event) || event_is_ctrl_shift_h(event) ||
+         event_is_ctrl_alt_o(event) || event_is_ctrl_shift_o(event) ||
+         event_is_ctrl_alt_z(event) || event_is_ctrl_shift_z(event) ||
+         event_is_ctrl_alt_f(event) || event_is_ctrl_shift_f(event) ||
+         event_is_ctrl_h(event) ||
+         event == ftxui::Event::CtrlS ||
          event == ftxui::Event::CtrlQ ||
          event == ftxui::Event::CtrlB || event == ftxui::Event::CtrlW ||
          event_is_ctrl_i(event);
@@ -481,7 +592,9 @@ bool editor_priority_key(const ftxui::Event& event) {
          event_is_ctrl_v(event) || event_is_ctrl_x(event) || event_is_ctrl_f(event) || event_is_ctrl_g(event) ||
          event_is_shift_left(event) || event_is_shift_right(event) || event_is_shift_up(event) ||
          event_is_shift_down(event) || event_is_ctrl_left(event) || event_is_ctrl_right(event) ||
+         event_is_ctrl_alt_left(event) || event_is_ctrl_alt_right(event) ||
          event_is_ctrl_shift_left(event) || event_is_ctrl_shift_right(event) ||
+         event_is_ctrl_alt_up(event) || event_is_ctrl_alt_down(event) ||
          event_is_ctrl_shift_up(event) || event_is_ctrl_shift_down(event) ||
          event == ftxui::Event::ArrowLeft || event == ftxui::Event::ArrowRight ||
          event == ftxui::Event::ArrowUp || event == ftxui::Event::ArrowDown ||
@@ -491,9 +604,10 @@ bool editor_priority_key(const ftxui::Event& event) {
          event_is_shift_home(event) || event_is_shift_end(event) ||
          event == ftxui::Event::PageUp || event == ftxui::Event::PageDown ||
          event_is_ctrl_u(event) || event_is_ctrl_i(event) || event_is_ctrl_d(event) ||
-         event_is_ctrl_shift_d(event) || event_is_ctrl_backspace(event) ||
+         event_is_ctrl_alt_d(event) || event_is_ctrl_shift_d(event) ||
+         event_is_ctrl_backspace(event) ||
          event_is_ctrl_delete(event) || event == ftxui::Event::CtrlS ||
-         event_is_ctrl_shift_l(event) || event_is_ctrl_alt_l(event) ||
+         event_is_ctrl_alt_l(event) || event_is_ctrl_shift_l(event) ||
          event_is_completion(event) || event_is_go_to_definition(event) ||
          event_is_go_to_declaration(event) ||
          event_is_alt_left(event) || event_is_alt_right(event);

@@ -35,7 +35,6 @@ struct LayoutState {
   int bottom_height = 8;
   int outline_height = 12;
   uint64_t last_diag_revision = 0;
-  uint64_t last_diag_view_token = 0;
   std::string last_diag_path;
   int diag_errors = 0;
   int diag_warnings = 0;
@@ -459,12 +458,12 @@ Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
 
 std::string status_shortcuts(AppMode mode, bool welcome_visible) {
   if (welcome_visible) {
-    return "F1 archivo  Alt+F1 atajos  F2 depurar  F3 workspace";
+    return "F1 archivo  Alt+F1/Shift+F1 atajos  F2 depurar  F3 workspace";
   }
   if (mode == AppMode::kDebug) {
-    return "F1 externo  Alt+F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into";
+    return "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into";
   }
-  return "F1 externo  Alt+F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 git  F7 buscar  F8 outline  F9 problemas";
+  return "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 git  F7 buscar  F8 outline  F9 problemas";
 }
 
 std::string buffer_text(const EditorBuffer& buffer) {
@@ -762,13 +761,10 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
         !problems_tab_active(layout_state) && workspace != nullptr) {
       workspace->ensure_buffer();
       const uint64_t revision = symbols->diagnostics_revision();
-      const uint64_t view_token = workspace->buffer.view_token;
       const std::string& active_path = workspace->buffer.path;
       if (revision != split_state->last_diag_revision ||
-          view_token != split_state->last_diag_view_token ||
           active_path != split_state->last_diag_path) {
         split_state->last_diag_revision = revision;
-        split_state->last_diag_view_token = view_token;
         split_state->last_diag_path = active_path;
         split_state->diag_errors = 0;
         split_state->diag_warnings = 0;

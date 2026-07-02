@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -29,7 +31,17 @@ bool find_next_match(const EditorBuffer& buffer, const std::string& needle,
 
 std::vector<TextMatch> find_all_matches(const EditorBuffer& buffer, const std::string& needle);
 
+std::vector<TextMatch> find_all_matches_in_lines(const std::vector<std::string>& lines,
+                                                 const std::string& needle,
+                                                 const std::atomic<uint64_t>* active_request_id,
+                                                 uint64_t request_id);
+
 std::vector<TextMatch> find_selection_occurrences(const EditorBuffer& buffer);
+
+std::vector<TextMatch> find_occurrences_in_lines(const std::vector<std::string>& lines,
+                                                 const std::string& needle, bool whole_word,
+                                                 const std::atomic<uint64_t>* active_request_id,
+                                                 uint64_t request_id);
 
 bool match_occupied(const TextMatch& match, const EditorBuffer& buffer);
 

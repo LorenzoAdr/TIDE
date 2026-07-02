@@ -181,6 +181,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
   symbol_provider_ = std::make_shared<LspSymbolProvider>();
   app_settings_ = AppSettings::load();
   layout_state_.app_settings = &app_settings_;
+  layout_state_.apply_app_settings_callback = [this] { apply_app_settings(); };
   if (has_bundled_clangd()) {
     set_runtime_force_bundled_clangd(app_settings_.force_bundled_clangd);
   }
@@ -1097,7 +1098,7 @@ int Application::run() {
         return false;
       }
 
-      if (event == Event::F1) {
+      if (event_is_f1(event)) {
         if (external_file_wizard_state_.open) {
           external_file_wizard_state_.open = false;
         } else if (!any_modal_open()) {
@@ -1107,7 +1108,7 @@ int Application::run() {
         return true;
       }
 
-      if (event_is_alt_f1(event)) {
+      if (event_is_open_shortcuts_modal(event)) {
         if (shortcuts_modal_state_.open) {
           shortcuts_modal_state_.open = false;
           shortcuts_modal_state_.first_visible = 0;
@@ -1151,7 +1152,8 @@ int Application::run() {
         if (handle_focus_shortcuts(event)) {
           return true;
         }
-        if (!event.is_mouse() && event != Event::F1 && !event_is_alt_f1(event) &&
+        if (!event.is_mouse() && !event_is_f1(event) &&
+            !event_is_open_shortcuts_modal(event) &&
             event != Event::F2 && event != Event::F3 && event != Event::CtrlQ) {
           return false;
         }
@@ -1172,7 +1174,8 @@ int Application::run() {
           return true;
         }
         if (!event.is_mouse() && event != Event::F5 && event != Event::F4 &&
-            event != Event::CtrlT && event != Event::F1 && !event_is_alt_f1(event) &&
+            event != Event::CtrlT && !event_is_f1(event) &&
+            !event_is_open_shortcuts_modal(event) &&
             event != Event::CtrlQ) {
           return false;
         }

@@ -117,7 +117,7 @@ Element render_welcome_screen(WelcomeScreenState* state, MainLayoutState* layout
                                    layout_state, press_id::kWelcomeWorkspace));
   body.push_back(text(""));
   body.push_back(
-      centered_row(text("Alt+F1 atajos de teclado") | color(theme::Muted())));
+      centered_row(text("Alt+F1 / Shift+F1 atajos de teclado") | color(theme::Muted())));
 
   Element inner = vbox(std::move(body));
   const std::string hline(46, '-');

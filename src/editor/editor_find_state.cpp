@@ -4,19 +4,96 @@
 
 namespace tgdb {
 
-void EditorFindState::refresh_matches(const EditorBuffer& buffer) {
+namespace {
+
+FindMatchKey find_match_key_from(const EditorBuffer& buffer, const std::string& query) {
+  FindMatchKey key;
+  key.query = query;
+  key.path = buffer.path;
+  key.view_token = buffer.view_token;
+  return key;
+}
+
+}  // namespace
+
+void EditorFindState::cancel_matches() {
+  runner_.cancel();
+  inflight_id_ = 0;
+}
+
+void EditorFindState::reset_search_state() {
   matches.clear();
+  committed_key_ = {};
+  cancel_matches();
+}
+
+void EditorFindState::request_matches(const EditorBuffer& buffer) {
+  const FindMatchKey key = find_match_key_from(buffer, query);
+  if (key == committed_key_) {
+    return;
+  }
+
+  committed_key_ = key;
+  matches.clear();
+  cancel_matches();
+
   if (query.empty()) {
     return;
   }
-  matches = find_all_matches(buffer, query);
+
+  const uint64_t request_id = ++request_counter_;
+  runner_.start(request_id, key, buffer.lines, query);
+  inflight_id_ = request_id;
+}
+
+bool EditorFindState::tick_matches(const EditorBuffer& buffer) {
+  if (!open) {
+    return false;
+  }
+
+  bool updated = false;
+  if (inflight_id_ != 0) {
+    const FindMatchKey current = find_match_key_from(buffer, query);
+    std::vector<TextMatch> ready;
+    if (runner_.poll(inflight_id_, current, &ready)) {
+      inflight_id_ = 0;
+      matches = std::move(ready);
+      updated = true;
+    }
+  }
+
+  request_matches(buffer);
+  return updated || inflight_id_ != 0;
+}
+
+bool EditorFindState::matches_inflight() const {
+  return inflight_id_ != 0;
 }
 
 bool EditorFindState::jump_to_next_match(EditorBuffer* buffer, int visible_lines) {
-  if (query.empty()) {
+  if (buffer == nullptr || query.empty()) {
     return false;
   }
-  refresh_matches(*buffer);
+
+  const FindMatchKey current = find_match_key_from(*buffer, query);
+  if (inflight_id_ != 0) {
+    std::vector<TextMatch> ready;
+    if (runner_.poll(inflight_id_, current, &ready)) {
+      inflight_id_ = 0;
+      matches = std::move(ready);
+    }
+  }
+
+  if (matches.empty() && current != committed_key_) {
+    request_matches(*buffer);
+  }
+
+  if (matches.empty()) {
+    matches = find_all_matches(*buffer, query);
+    committed_key_ = current;
+    cancel_matches();
+  }
+
   if (matches.empty()) {
     return false;
   }
@@ -50,14 +127,23 @@ bool EditorFindState::jump_to_next_match(EditorBuffer* buffer, int visible_lines
 }
 
 void open_find_bar(EditorFindState* find, EditorBuffer* buffer) {
+  if (find == nullptr) {
+    return;
+  }
   find->cursor_pos = 0;
   find->open = true;
-  find->refresh_matches(*buffer);
+  if (buffer != nullptr) {
+    find->request_matches(*buffer);
+  }
 }
 
 void close_find_bar(EditorFindState* find) {
+  if (find == nullptr) {
+    return;
+  }
   find->open = false;
-  find->matches.clear();
+  find->query.clear();
+  find->reset_search_state();
 }
 
 }  // namespace tgdb

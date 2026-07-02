@@ -153,13 +153,19 @@ bool find_next_match(const EditorBuffer& buffer, const std::string& needle,
   return false;
 }
 
-std::vector<TextMatch> find_all_matches(const EditorBuffer& buffer, const std::string& needle) {
+std::vector<TextMatch> find_all_matches_in_lines(const std::vector<std::string>& lines,
+                                                 const std::string& needle,
+                                                 const std::atomic<uint64_t>* active_request_id,
+                                                 uint64_t request_id) {
   std::vector<TextMatch> out;
   if (needle.empty()) {
     return out;
   }
-  for (int line = 0; line < static_cast<int>(buffer.lines.size()); ++line) {
-    const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
+  for (int line = 0; line < static_cast<int>(lines.size()); ++line) {
+    if (active_request_id != nullptr && active_request_id->load() != request_id) {
+      return {};
+    }
+    const std::string& text = lines[static_cast<std::size_t>(line)];
     std::size_t start = 0;
     while (start <= text.size()) {
       const auto pos = text.find(needle, start);
@@ -173,6 +179,10 @@ std::vector<TextMatch> find_all_matches(const EditorBuffer& buffer, const std::s
   return out;
 }
 
+std::vector<TextMatch> find_all_matches(const EditorBuffer& buffer, const std::string& needle) {
+  return find_all_matches_in_lines(buffer.lines, needle, nullptr, 0);
+}
+
 namespace {
 
 constexpr std::size_t kMaxOccurrenceMatches = 512;
@@ -184,12 +194,17 @@ bool needle_is_identifier(const std::string& needle) {
          });
 }
 
-std::vector<TextMatch> find_bounded_matches(const EditorBuffer& buffer, const std::string& needle,
-                                            bool whole_word) {
+std::vector<TextMatch> find_bounded_matches_in_lines(const std::vector<std::string>& lines,
+                                                     const std::string& needle, bool whole_word,
+                                                     const std::atomic<uint64_t>* active_request_id,
+                                                     uint64_t request_id) {
   std::vector<TextMatch> out;
   out.reserve(32);
-  for (int line = 0; line < static_cast<int>(buffer.lines.size()); ++line) {
-    const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
+  for (int line = 0; line < static_cast<int>(lines.size()); ++line) {
+    if (active_request_id != nullptr && active_request_id->load() != request_id) {
+      return {};
+    }
+    const std::string& text = lines[static_cast<std::size_t>(line)];
     std::size_t start = 0;
     while (start <= text.size()) {
       const auto pos = text.find(needle, start);
@@ -216,7 +231,33 @@ std::vector<TextMatch> find_bounded_matches(const EditorBuffer& buffer, const st
   return out;
 }
 
+std::vector<TextMatch> find_bounded_matches(const EditorBuffer& buffer, const std::string& needle,
+                                            bool whole_word) {
+  return find_bounded_matches_in_lines(buffer.lines, needle, whole_word, nullptr, 0);
+}
+
 }  // namespace
+
+std::vector<TextMatch> find_occurrences_in_lines(const std::vector<std::string>& lines,
+                                                 const std::string& needle, bool whole_word,
+                                                 const std::atomic<uint64_t>* active_request_id,
+                                                 uint64_t request_id) {
+  constexpr std::size_t kMaxNeedle = 256;
+  if (needle.size() < 2 || needle.size() > kMaxNeedle) {
+    return {};
+  }
+  if (std::all_of(needle.begin(), needle.end(),
+                  [](unsigned char c) { return std::isspace(static_cast<unsigned char>(c)); })) {
+    return {};
+  }
+
+  const std::vector<TextMatch> matches =
+      find_bounded_matches_in_lines(lines, needle, whole_word, active_request_id, request_id);
+  if (matches.size() < 2) {
+    return {};
+  }
+  return matches;
+}
 
 std::vector<TextMatch> find_selection_occurrences(const EditorBuffer& buffer) {
   if (buffer.cursors.size() != 1) {

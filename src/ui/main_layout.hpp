@@ -81,6 +81,7 @@ struct MainLayoutState {
   bool request_ui_tick = false;
   std::atomic<bool> ui_heartbeat{false};
   AppSettings* app_settings = nullptr;
+  std::function<void()> apply_app_settings_callback;
   ConsolePanelTabs console_tabs;
   TextInputFocus text_input_focus = TextInputFocus::None;
   bool focus_sync_needed = false;
