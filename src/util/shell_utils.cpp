@@ -37,6 +37,27 @@ std::string run_shell_capture(const std::string& command, const int timeout_seco
   return output;
 }
 
+bool run_shell_stdin(const std::string& command, const std::string& stdin_data,
+                     const int timeout_seconds) {
+  std::string wrapped = command;
+  if (timeout_seconds > 0) {
+    wrapped = "timeout --foreground " + std::to_string(timeout_seconds) + "s " + command;
+  }
+  FILE* pipe = popen(wrapped.c_str(), "w");
+  if (pipe == nullptr) {
+    return false;
+  }
+  if (!stdin_data.empty()) {
+    const std::size_t written =
+        std::fwrite(stdin_data.data(), 1, stdin_data.size(), pipe);
+    if (written != stdin_data.size()) {
+      pclose(pipe);
+      return false;
+    }
+  }
+  return pclose(pipe) != -1;
+}
+
 bool command_exists(const std::string& command) {
   if (command.empty()) {
     return false;

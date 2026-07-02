@@ -2425,7 +2425,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (event_is_ctrl_v(event)) {
-    paste_text(buffer, editor_clipboard());
+    paste_text(buffer, read_clipboard_for_paste());
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     save_shift_extend_anchor(panel, *buffer);
     notify_editor_buffer_changed(workspace, symbols);

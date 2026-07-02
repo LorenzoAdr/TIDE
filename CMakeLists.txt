@@ -90,6 +90,7 @@ add_executable(tgdb
   src/util/compile_commands_remap.cpp
   src/util/compile_commands_lookup.cpp
   src/util/shell_utils.cpp
+  src/util/system_clipboard.cpp
   src/util/docker_shell.cpp
   src/util/clangd_workspace_setup.cpp
   src/build/build_environment.cpp
@@ -160,6 +161,8 @@ add_executable(text_ops_test
   src/editor/text_search.cpp
   src/editor/undo_stack.cpp
   src/editor/clipboard.cpp
+  src/util/shell_utils.cpp
+  src/util/system_clipboard.cpp
 )
 target_include_directories(text_ops_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 

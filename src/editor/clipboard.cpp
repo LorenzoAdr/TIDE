@@ -2,12 +2,27 @@
 
 #include "editor/text_ops.hpp"
 #include "editor/undo_stack.hpp"
+#include "util/system_clipboard.hpp"
 
 namespace tgdb {
 
 std::string& editor_clipboard() {
   static std::string clipboard;
   return clipboard;
+}
+
+void publish_clipboard_text(const std::string& text) {
+  editor_clipboard() = text;
+  set_system_clipboard(text);
+}
+
+std::string read_clipboard_for_paste() {
+  const std::string system = get_system_clipboard();
+  if (!system.empty()) {
+    editor_clipboard() = system;
+    return system;
+  }
+  return editor_clipboard();
 }
 
 std::string extract_selection_text(const EditorBuffer& buffer, const MultiCursor& cursor) {
@@ -56,7 +71,7 @@ bool copy_selection(EditorBuffer* buffer) {
   if (text.empty()) {
     return false;
   }
-  editor_clipboard() = text;
+  publish_clipboard_text(text);
   return true;
 }
 
@@ -68,7 +83,7 @@ bool cut_selection(EditorBuffer* buffer) {
   if (text.empty()) {
     return false;
   }
-  editor_clipboard() = text;
+  publish_clipboard_text(text);
   push_undo(buffer);
   delete_all_selections(buffer);
   buffer->dirty = true;

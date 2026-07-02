@@ -7,6 +7,7 @@
 namespace tgdb {
 
 std::string& editor_clipboard();
+std::string read_clipboard_for_paste();
 std::string extract_selection_text(const EditorBuffer& buffer, const MultiCursor& cursor);
 bool copy_selection(EditorBuffer* buffer);
 bool cut_selection(EditorBuffer* buffer);
