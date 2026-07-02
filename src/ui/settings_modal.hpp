@@ -48,7 +48,8 @@ struct SettingsModalState {
   int ui_colors_selected = 0;
   bool ui_colors_editing = false;
   int ui_colors_edit_row = -1;
-  std::string ui_colors_hex_buffer;
+  int ui_colors_palette_selected = 0;
+  std::optional<theme::ColorRgb> ui_colors_edit_original;
   CompileCommandsSettings draft_compile_commands;
   std::vector<std::string> draft_clangd_extra_include_paths;
   std::vector<std::string> docker_container_names;

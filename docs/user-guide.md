@@ -64,7 +64,7 @@ Open **F10 → Configuración → Colores de interfaz** (with a workspace open) 
 
 Customizable roles: panel background, code background, general text, titles/active tabs, folders/outline, files/inactive tabs. **clangd syntax highlighting colors are unchanged.**
 
-In the colors subpanel: **p** or **Enter** on the preset row cycles presets; **Enter** on a color row edits hex (`#RRGGBB`).
+In the colors subpanel: **p** or **Enter** on the preset row cycles presets; **Enter** on a color row opens a visual palette (↑↓←→ to pick, Enter to confirm).
 
 ## Installation
 

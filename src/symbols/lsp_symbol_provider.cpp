@@ -270,6 +270,76 @@ void LspSymbolProvider::tick_content_refresh_locked() {
   }
 }
 
+void LspSymbolProvider::flush_pending_did_change_for_key_locked(const std::string& key) {
+  if (!use_lsp_ || key.empty()) {
+    return;
+  }
+  pending_did_change_.erase(key);
+  std::string path_to_send;
+  std::string text_to_send;
+  for (const auto& entry : open_buffers_) {
+    if (normalize_lsp_path(entry.first) == key) {
+      path_to_send = entry.first;
+      text_to_send = entry.second;
+      break;
+    }
+  }
+  if (path_to_send.empty() || !is_lsp_trackable_path(path_to_send, text_to_send)) {
+    return;
+  }
+  client_.did_change(path_to_send, text_to_send);
+  pending_content_refresh_[key] = steady_now_ms();
+}
+
+void LspSymbolProvider::flush_all_pending_did_change_locked() {
+  if (!use_lsp_ || pending_did_change_.empty()) {
+    return;
+  }
+  std::vector<std::string> keys;
+  keys.reserve(pending_did_change_.size());
+  for (const auto& entry : pending_did_change_) {
+    keys.push_back(entry.first);
+  }
+  for (const std::string& key : keys) {
+    flush_pending_did_change_for_key_locked(key);
+  }
+}
+
+void LspSymbolProvider::tick_pending_did_change_locked() {
+  if (!use_lsp_ || pending_did_change_.empty()) {
+    return;
+  }
+  const int64_t now = steady_now_ms();
+  constexpr int64_t kDebounceMs = 1000;
+  std::vector<std::string> due;
+  for (const auto& entry : pending_did_change_) {
+    if (now - entry.second >= kDebounceMs) {
+      due.push_back(entry.first);
+    }
+  }
+  for (const std::string& key : due) {
+    flush_pending_did_change_for_key_locked(key);
+  }
+}
+
+void LspSymbolProvider::tick_debounced_updates() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  tick_pending_did_change_locked();
+  tick_content_refresh_locked();
+}
+
+void LspSymbolProvider::flush_document_sync(const std::string& path) {
+  if (path.empty()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const std::string key = normalize_lsp_path(path);
+  if (key.empty()) {
+    return;
+  }
+  flush_pending_did_change_for_key_locked(key);
+}
+
 void LspSymbolProvider::set_lsp_enabled(bool enabled) {
   bool start_after = false;
   std::string compile_dir;
@@ -324,11 +394,14 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
   if (path.empty()) {
     return;
   }
+  bool notify_open = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    flush_all_pending_did_change_locked();
     open_buffers_[path] = text;
+    notify_open = use_lsp_ && is_lsp_trackable_path(path, text);
   }
-  if (use_lsp_ && is_lsp_trackable_path(path, text)) {
+  if (notify_open) {
     client_.did_open(path, text);
   }
 }
@@ -339,12 +412,12 @@ void LspSymbolProvider::on_document_changed(const std::string& path, const std::
   }
   std::lock_guard<std::mutex> lock(mutex_);
   open_buffers_[path] = text;
-  if (use_lsp_ && is_lsp_trackable_path(path, text)) {
-    client_.did_change(path, text);
-    const std::string key = normalize_lsp_path(path);
-    if (!key.empty()) {
-      pending_content_refresh_[key] = steady_now_ms();
-    }
+  if (!use_lsp_ || !is_lsp_trackable_path(path, text)) {
+    return;
+  }
+  const std::string key = normalize_lsp_path(path);
+  if (!key.empty()) {
+    pending_did_change_[key] = steady_now_ms();
   }
 }
 
@@ -360,10 +433,7 @@ void LspSymbolProvider::on_document_saved(const std::string& path) {
   if (key.empty()) {
     return;
   }
-  const auto buffer_it = open_buffers_.find(path);
-  if (buffer_it != open_buffers_.end()) {
-    client_.did_change(path, buffer_it->second);
-  }
+  flush_pending_did_change_for_key_locked(key);
   client_.invalidate_semantic_tokens_for_file(path);
   pending_content_refresh_.erase(key);
   semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
@@ -496,7 +566,6 @@ bool LspSymbolProvider::ensure_semantic_tokens(const std::string& path) {
   if (client_.has_ready_semantic_tokens(path)) {
     return true;
   }
-  tick_content_refresh_locked();
   enqueue_semantic_tokens_locked(normalize_lsp_path(path));
   return false;
 }

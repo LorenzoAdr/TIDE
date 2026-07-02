@@ -64,6 +64,8 @@ class LspSymbolProvider : public ISymbolProvider {
   void on_document_changed(const std::string& path, const std::string& text) override;
   void on_document_saved(const std::string& path) override;
   void on_document_closed(const std::string& path) override;
+  void tick_debounced_updates() override;
+  void flush_document_sync(const std::string& path) override;
 
   bool lsp_active() const { return use_lsp_; }
   bool lsp_loading() const override;
@@ -99,6 +101,9 @@ class LspSymbolProvider : public ISymbolProvider {
   void enqueue_semantic_tokens_locked(const std::string& path);
   bool symbols_lsp_pending_locked(const std::string& path) const;
   void tick_content_refresh_locked();
+  void tick_pending_did_change_locked();
+  void flush_pending_did_change_for_key_locked(const std::string& key);
+  void flush_all_pending_did_change_locked();
   static int64_t steady_now_ms();
 
   mutable std::mutex mutex_;
@@ -124,6 +129,7 @@ class LspSymbolProvider : public ISymbolProvider {
   std::unordered_set<std::string> inflight_symbols_;
   std::unordered_set<std::string> inflight_semantic_;
   std::unordered_map<std::string, int64_t> pending_content_refresh_;
+  std::unordered_map<std::string, int64_t> pending_did_change_;
   std::atomic<uint64_t> semantic_highlight_revision_{0};
   std::atomic<uint64_t> document_symbols_revision_{0};
 };

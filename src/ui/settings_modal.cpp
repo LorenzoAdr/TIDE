@@ -1,7 +1,7 @@
 #include "ui/settings_modal.hpp"
 
 #include <algorithm>
-#include <cctype>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -53,6 +53,28 @@ constexpr int kUiColorsTitle = 4;
 constexpr int kUiColorsDirectory = 5;
 constexpr int kUiColorsFile = 6;
 constexpr int kUiColorsRowCount = 7;
+
+constexpr int kPaletteCols = 8;
+constexpr std::array<theme::ColorRgb, 40> kUIColorPalette = {{
+    theme::ColorRgb{0, 0, 0},       theme::ColorRgb{30, 30, 30},    theme::ColorRgb{45, 45, 48},
+    theme::ColorRgb{60, 60, 60},    theme::ColorRgb{28, 32, 42},    theme::ColorRgb{38, 42, 52},
+    theme::ColorRgb{26, 28, 36},    theme::ColorRgb{20, 20, 20},
+    theme::ColorRgb{255, 255, 255}, theme::ColorRgb{250, 249, 245}, theme::ColorRgb{236, 234, 228},
+    theme::ColorRgb{245, 245, 248}, theme::ColorRgb{235, 238, 245}, theme::ColorRgb{252, 246, 236},
+    theme::ColorRgb{230, 230, 230}, theme::ColorRgb{220, 220, 220},
+    theme::ColorRgb{90, 170, 255},  theme::ColorRgb{0, 102, 204},   theme::ColorRgb{156, 220, 254},
+    theme::ColorRgb{0, 90, 158},    theme::ColorRgb{79, 193, 255},  theme::ColorRgb{86, 156, 214},
+    theme::ColorRgb{75, 110, 175},  theme::ColorRgb{100, 149, 237},
+    theme::ColorRgb{212, 212, 212}, theme::ColorRgb{180, 200, 255}, theme::ColorRgb{204, 204, 204},
+    theme::ColorRgb{30, 40, 60},    theme::ColorRgb{43, 43, 40},    theme::ColorRgb{220, 223, 228},
+    theme::ColorRgb{58, 58, 58},    theme::ColorRgb{133, 133, 133},
+    theme::ColorRgb{133, 133, 133}, theme::ColorRgb{100, 110, 130}, theme::ColorRgb{112, 112, 104},
+    theme::ColorRgb{130, 140, 160}, theme::ColorRgb{96, 96, 96},    theme::ColorRgb{80, 80, 80},
+    theme::ColorRgb{106, 153, 85},  theme::ColorRgb{206, 145, 120},
+}};
+
+constexpr int kPaletteCount = static_cast<int>(kUIColorPalette.size());
+constexpr int kPaletteRows = (kPaletteCount + kPaletteCols - 1) / kPaletteCols;
 
 constexpr int kCompileMode = 0;
 constexpr int kCompileDetectMounts = 1;
@@ -400,7 +422,8 @@ void open_ui_colors_panel(SettingsModalState* state) {
   state->ui_colors_selected = 0;
   state->ui_colors_editing = false;
   state->ui_colors_edit_row = -1;
-  state->ui_colors_hex_buffer.clear();
+  state->ui_colors_palette_selected = 0;
+  state->ui_colors_edit_original.reset();
 }
 
 std::optional<theme::ColorRgb>* mutable_ui_color_field(SettingsModalState* state, int row) {
@@ -422,6 +445,36 @@ std::optional<theme::ColorRgb>* mutable_ui_color_field(SettingsModalState* state
       return &state->draft_ui_colors.file;
     default:
       return nullptr;
+  }
+}
+
+int find_palette_index(const theme::ColorRgb& color) {
+  int best_index = 0;
+  int best_distance = 1 << 30;
+  for (int i = 0; i < kPaletteCount; ++i) {
+    const theme::ColorRgb& candidate = kUIColorPalette[static_cast<std::size_t>(i)];
+    const int dr = static_cast<int>(candidate.r) - static_cast<int>(color.r);
+    const int dg = static_cast<int>(candidate.g) - static_cast<int>(color.g);
+    const int db = static_cast<int>(candidate.b) - static_cast<int>(color.b);
+    const int distance = dr * dr + dg * dg + db * db;
+    if (distance < best_distance) {
+      best_distance = distance;
+      best_index = i;
+    }
+  }
+  return best_index;
+}
+
+void apply_palette_selection(SettingsModalState* state) {
+  if (state == nullptr || !state->ui_colors_editing) {
+    return;
+  }
+  const theme::ColorRgb& chosen =
+      kUIColorPalette[static_cast<std::size_t>(state->ui_colors_palette_selected)];
+  if (auto* field = mutable_ui_color_field(state, state->ui_colors_edit_row)) {
+    *field = chosen;
+    state->draft_ui_colors_preset = theme::UiColorPreset::kCustom;
+    apply_draft_ui_colors(state);
   }
 }
 
@@ -467,9 +520,14 @@ void begin_ui_color_edit(SettingsModalState* state, int row) {
   ensure_draft_ui_colors_complete(state);
   state->ui_colors_editing = true;
   state->ui_colors_edit_row = row;
-  state->ui_colors_hex_buffer = ui_color_row_value(state, row);
-  if (state->ui_colors_hex_buffer.empty() || state->ui_colors_hex_buffer == "—") {
-    state->ui_colors_hex_buffer = "#";
+  if (auto* field = mutable_ui_color_field(state, row)) {
+    if (field->has_value()) {
+      state->ui_colors_edit_original = **field;
+      state->ui_colors_palette_selected = find_palette_index(**field);
+    } else {
+      state->ui_colors_edit_original.reset();
+      state->ui_colors_palette_selected = 0;
+    }
   }
 }
 
@@ -477,18 +535,10 @@ bool commit_ui_color_edit(SettingsModalState* state) {
   if (state == nullptr || !state->ui_colors_editing) {
     return false;
   }
-  theme::ColorRgb rgb;
-  if (!theme::parse_hex_color(state->ui_colors_hex_buffer, &rgb)) {
-    return false;
-  }
-  if (auto* field = mutable_ui_color_field(state, state->ui_colors_edit_row)) {
-    *field = rgb;
-    state->draft_ui_colors_preset = theme::UiColorPreset::kCustom;
-    apply_draft_ui_colors(state);
-  }
+  apply_palette_selection(state);
   state->ui_colors_editing = false;
   state->ui_colors_edit_row = -1;
-  state->ui_colors_hex_buffer.clear();
+  state->ui_colors_edit_original.reset();
   return true;
 }
 
@@ -496,9 +546,32 @@ void cancel_ui_color_edit(SettingsModalState* state) {
   if (state == nullptr) {
     return;
   }
+  if (state->ui_colors_editing && state->ui_colors_edit_original.has_value()) {
+    if (auto* field = mutable_ui_color_field(state, state->ui_colors_edit_row)) {
+      *field = *state->ui_colors_edit_original;
+      apply_draft_ui_colors(state);
+    }
+  }
   state->ui_colors_editing = false;
   state->ui_colors_edit_row = -1;
-  state->ui_colors_hex_buffer.clear();
+  state->ui_colors_edit_original.reset();
+}
+
+void move_palette_selection(SettingsModalState* state, int delta_row, int delta_col) {
+  if (state == nullptr || !state->ui_colors_editing) {
+    return;
+  }
+  const int row = state->ui_colors_palette_selected / kPaletteCols;
+  const int col = state->ui_colors_palette_selected % kPaletteCols;
+  const int next_row = std::max(0, std::min(kPaletteRows - 1, row + delta_row));
+  const int next_col = std::max(0, std::min(kPaletteCols - 1, col + delta_col));
+  int next_index = next_row * kPaletteCols + next_col;
+  next_index = std::max(0, std::min(kPaletteCount - 1, next_index));
+  if (next_index == state->ui_colors_palette_selected) {
+    return;
+  }
+  state->ui_colors_palette_selected = next_index;
+  apply_palette_selection(state);
 }
 
 void clamp_ui_colors_selection(SettingsModalState* state) {
@@ -520,31 +593,23 @@ bool handle_ui_colors_keys(SettingsModalState* state, Event event) {
       return true;
     }
     if (event == Event::Return) {
-      if (!commit_ui_color_edit(state)) {
-        return true;
-      }
+      commit_ui_color_edit(state);
       return true;
     }
-    if (event == Event::Backspace) {
-      if (state->ui_colors_hex_buffer.size() > 1) {
-        state->ui_colors_hex_buffer.pop_back();
-      }
+    if (event == Event::ArrowLeft || event == Event::Character('h')) {
+      move_palette_selection(state, 0, -1);
       return true;
     }
-    if (event.is_character()) {
-      const char ch = event.character()[0];
-      if (state->ui_colors_hex_buffer.size() >= 7) {
-        return true;
-      }
-      if (state->ui_colors_hex_buffer.empty()) {
-        if (ch == '#') {
-          state->ui_colors_hex_buffer = "#";
-        }
-        return true;
-      }
-      if (std::isxdigit(static_cast<unsigned char>(ch)) != 0) {
-        state->ui_colors_hex_buffer.push_back(ch);
-      }
+    if (event == Event::ArrowRight || event == Event::Character('l')) {
+      move_palette_selection(state, 0, 1);
+      return true;
+    }
+    if (event == Event::ArrowUp || event == Event::Character('k')) {
+      move_palette_selection(state, -1, 0);
+      return true;
+    }
+    if (event == Event::ArrowDown || event == Event::Character('j')) {
+      move_palette_selection(state, 1, 0);
       return true;
     }
     return true;
@@ -582,10 +647,36 @@ Element render_ui_colors_panel(const SettingsModalState* state) {
   rows.push_back(separator());
 
   if (state->ui_colors_editing) {
-    rows.push_back(text("Editar " + ui_color_row_label(state->ui_colors_edit_row)) |
+    rows.push_back(text("Elegir " + ui_color_row_label(state->ui_colors_edit_row)) |
                    color(theme::Accent()) | bold);
-    rows.push_back(text(state->ui_colors_hex_buffer + "_") | color(theme::Header()) | bold);
-    rows.push_back(text("Enter confirmar  Esc cancelar") | color(theme::Muted()));
+    const theme::ColorRgb& current =
+        kUIColorPalette[static_cast<std::size_t>(state->ui_colors_palette_selected)];
+    rows.push_back(text("Seleccionado: " + theme::format_hex_color(current)) |
+                   color(theme::Header()) | bold);
+
+    for (int row = 0; row < kPaletteRows; ++row) {
+      Elements cells;
+      for (int col = 0; col < kPaletteCols; ++col) {
+        const int index = row * kPaletteCols + col;
+        if (index >= kPaletteCount) {
+          break;
+        }
+        const theme::ColorRgb& swatch =
+            kUIColorPalette[static_cast<std::size_t>(index)];
+        const bool selected = index == state->ui_colors_palette_selected;
+        const Color ftxui_color = Color::RGB(swatch.r, swatch.g, swatch.b);
+        Element cell = text(" ██ ") | color(ftxui_color) | bgcolor(ftxui_color);
+        if (selected) {
+          cell = cell | inverted | bold;
+        }
+        cells.push_back(cell);
+      }
+      rows.push_back(hbox(std::move(cells)));
+    }
+
+    rows.push_back(separator());
+    rows.push_back(text("↑↓←→ elegir color   Enter confirmar   Esc cancelar") |
+                   color(theme::Muted()));
     return vbox(std::move(rows));
   }
 
@@ -602,7 +693,7 @@ Element render_ui_colors_panel(const SettingsModalState* state) {
   }
 
   rows.push_back(separator());
-  rows.push_back(text("p/Enter preset: siguiente   Enter fila: editar hex   Esc volver") |
+  rows.push_back(text("p/Enter preset: siguiente   Enter fila: elegir color   Esc volver") |
                  color(theme::Muted()));
   return vbox(std::move(rows));
 }

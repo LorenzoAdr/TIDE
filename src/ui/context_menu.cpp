@@ -192,6 +192,7 @@ bool format_file_at_path(WorkspaceModel* workspace, MainLayoutState* layout_stat
       workspace->load_active_tab_into_buffer();
     }
     symbols->on_document_changed(path, *formatted);
+    symbols->flush_document_sync(path);
   } else if (!write_file_text(path, *formatted)) {
     workspace->status_message = "No se pudo guardar: " + fs::path(path).filename().string();
     return false;
@@ -301,6 +302,7 @@ bool rename_symbol_with_lsp(ContextMenuState* state, WorkspaceModel* workspace,
       apply_document_text_to_buffer(&workspace->tabs[static_cast<std::size_t>(tab)].buffer,
                                     updated);
       symbols->on_document_changed(path, updated);
+      symbols->flush_document_sync(path);
     } else if (!write_file_text(path, updated)) {
       workspace->status_message =
           "No se pudo guardar: " + fs::path(path).filename().string();
