@@ -162,7 +162,8 @@ Element render_chain_row(const CallHierarchyViewState& hierarchy, int visible_ro
         layout_state != nullptr && layout_state->clickable.is_hovered(seg_id);
     const bool pressed =
         layout_state != nullptr && layout_state->clickable.is_pressed(seg_id);
-    Element segment = text(label) | color(theme::Header());
+    const auto& seg_node = hierarchy.nodes[static_cast<std::size_t>(seg_index)];
+    Element segment = text(label) | color(theme::ColorForSymbolKind(seg_node.item.kind));
     segment = StyleClickable(std::move(segment), {false, hovered, pressed, false});
     parts.push_back(std::move(segment));
 
@@ -307,8 +308,11 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
           rows.push_back(text("(sin jerarquía activa) — clic derecho en el editor") |
                          color(theme::Muted()));
         } else {
+          const Color root_color = hierarchy->nodes.empty()
+                                       ? theme::SyntaxFunction()
+                                       : theme::ColorForSymbolKind(hierarchy->nodes.front().item.kind);
           header = vbox({
-              text(" " + hierarchy->root_label) | color(theme::Accent()) | bold,
+              text(" " + hierarchy->root_label) | color(root_color) | bold,
               separator(),
               text(" " + hierarchy->status + "  clic: ir al método  Esc: limpiar") |
                   color(theme::Muted()) | size(HEIGHT, EQUAL, 1),

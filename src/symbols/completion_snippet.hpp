@@ -13,7 +13,9 @@ struct SnippetResult {
 };
 
 SnippetResult expand_snippet(const std::string& snippet);
+SnippetResult adjust_snippet_for_existing_open_paren(const std::string& raw_snippet);
 SnippetResult finalize_function_call_insert(const std::string& insert_text, const std::string& detail,
-                                            bool is_callable);
+                                            bool is_callable, bool paren_already_there = false);
+bool has_char_at(const std::string& line, int col, char expected);
 
 }  // namespace tgdb

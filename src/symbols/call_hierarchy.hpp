@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "symbols/symbol_kind.hpp"
+
 namespace tgdb {
 
 struct CallHierarchyItem {
@@ -13,6 +15,7 @@ struct CallHierarchyItem {
   std::string path;
   int line = 0;
   int character = 0;
+  SymbolKind kind = SymbolKind::kFunction;
   bool has_call_site = false;
   int call_site_line = 0;
   int call_site_character = 0;

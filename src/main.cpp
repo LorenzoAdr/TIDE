@@ -1,5 +1,6 @@
 #include "app/application.hpp"
 
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <iostream>
@@ -92,6 +93,13 @@ void print_usage() {
 }  // namespace
 
 int main(int argc, char** argv) {
+#if !defined(_WIN32)
+  setenv("COLORTERM", "truecolor", 1);
+  if (std::getenv("TERM") == nullptr) {
+    setenv("TERM", "xterm-256color", 1);
+  }
+#endif
+
   tgdb::AppConfig config;
 
   {

@@ -87,6 +87,7 @@ elif ! gdb -i=dap -ex quit >/dev/null 2>&1; then
 fi
 
 export TERM="${TERM:-xterm-256color}"
+export COLORTERM="${COLORTERM:-truecolor}"
 
 if [[ $# -eq 0 ]]; then
   exec "${TGDB}"

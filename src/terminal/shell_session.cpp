@@ -146,6 +146,8 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
       }
       args.emplace_back("-e");
       args.emplace_back("TERM=xterm-256color");
+      args.emplace_back("-e");
+      args.emplace_back("COLORTERM=truecolor");
       for (const auto& entry : config.env_vars) {
         args.emplace_back("-e");
         args.emplace_back(entry.first + "=" + entry.second);
@@ -279,7 +281,7 @@ void ShellSession::resize(int cols, int rows) {
   rows_ = rows;
   {
     std::lock_guard<std::mutex> lock(terminal_mutex_);
-    terminal_.resize(cols_, rows_);
+    terminal_.resize(rows_, cols_);
   }
   apply_winsize();
 }

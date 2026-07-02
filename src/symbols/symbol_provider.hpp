@@ -9,11 +9,11 @@
 #include "lsp/semantic_tokens.hpp"
 #include "lsp/diagnostics.hpp"
 #include "symbols/call_hierarchy.hpp"
+#include "symbols/code_action.hpp"
 #include "symbols/hover_info.hpp"
+#include "symbols/symbol_kind.hpp"
 
 namespace tgdb {
-
-enum class SymbolKind { kNamespace, kClass, kStruct, kFunction, kMethod, kVariable };
 
 struct SymbolInfo {
   std::string name;
@@ -162,6 +162,12 @@ class ISymbolProvider {
 
   virtual bool supports_rename() const { return false; }
   virtual std::vector<LspFileEdits> rename_symbol(const RenameParams& params) {
+    (void)params;
+    return {};
+  }
+
+  virtual bool supports_code_actions() const { return false; }
+  virtual std::vector<CodeActionItem> code_actions_for_diagnostic(const CodeActionParams& params) {
     (void)params;
     return {};
   }

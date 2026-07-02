@@ -52,6 +52,9 @@ class LspSymbolProvider : public ISymbolProvider {
   bool supports_rename() const override;
   std::vector<LspFileEdits> rename_symbol(const RenameParams& params) override;
 
+  bool supports_code_actions() const override;
+  std::vector<CodeActionItem> code_actions_for_diagnostic(const CodeActionParams& params) override;
+
   bool supports_call_hierarchy() const override;
   std::vector<CallHierarchyItem> prepare_call_hierarchy(const CallHierarchyParams& params) override;
   std::vector<CallHierarchyItem> incoming_calls(const CallHierarchyItem& item) override;

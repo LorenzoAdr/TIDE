@@ -9,6 +9,7 @@
 #include "app/app_mode.hpp"
 #include "app/app_settings.hpp"
 #include "app/workspace_config.hpp"
+#include "app/workspace_session.hpp"
 #include "build/build_artifact_watcher.hpp"
 #include "app/debug_model.hpp"
 #include "app/workspace_model.hpp"
@@ -74,6 +75,8 @@ class Application {
   bool any_modal_open() const;
   void apply_app_settings();
   void apply_workspace_settings(const WorkspaceConfig& config);
+  void save_workspace_session();
+  void restore_workspace_session();
   void restart_lsp_for_workspace();
   void sync_symbol_workspace_indexer();
   void set_status(const std::string& message);

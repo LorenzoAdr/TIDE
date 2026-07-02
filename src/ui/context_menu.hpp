@@ -21,7 +21,7 @@ namespace tgdb {
 
 struct MainLayoutState;
 
-enum class ContextMenuKind { File, Folder, EditorSymbol, EditorBackground };
+enum class ContextMenuKind { File, Folder, EditorSymbol, EditorBackground, Problem };
 
 struct ContextMenuState {
   bool open = false;
@@ -42,6 +42,12 @@ struct ContextMenuState {
   int editor_sym_end = 0;
   std::string symbol_name;
 
+  std::string problem_path;
+  int problem_line = 0;
+  int problem_start_col = 0;
+  int problem_end_col = 0;
+  std::string problem_message;
+
   bool rename_open = false;
   bool rename_skip_return = false;
   bool delete_confirm_open = false;
@@ -55,6 +61,9 @@ struct ContextMenuState {
 bool context_menu_active(const ContextMenuState* state);
 
 void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state = nullptr);
+
+void focus_search_with_filter(MainLayoutState* layout_state, const std::string& query,
+                              const std::string& path_filter);
 
 void context_menu_open_file(ContextMenuState* state, int x, int y,
                             const std::string& absolute_path, const std::string& relative_path,
@@ -70,6 +79,10 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
 void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
                                          const std::string& absolute_path, int line, int col,
                                          bool show_call_hierarchy);
+
+void context_menu_open_problem(ContextMenuState* state, int x, int y, const std::string& path,
+                               int line, int start_col, int end_col, const std::string& message,
+                               bool lsp_available);
 
 bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace,
                               DebugModel* model, FocusManagerState* focus,

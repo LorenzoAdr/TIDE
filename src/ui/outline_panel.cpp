@@ -1,7 +1,10 @@
 #include "ui/outline_panel.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <memory>
+#include <optional>
+#include <utility>
 
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
@@ -32,8 +35,53 @@ int max_scroll_offset(int total_lines, int visible_lines) {
   return std::max(0, total_lines - visible_lines);
 }
 
+std::pair<std::string, std::string> split_kind_prefix(const std::string& name) {
+  static const char* const prefixes[] = {"ns ", "C ", "S ", "M ", "v ", "f "};
+  for (const char* prefix : prefixes) {
+    const std::size_t len = std::strlen(prefix);
+    if (name.size() >= len && name.compare(0, len, prefix) == 0) {
+      return {prefix, name.substr(len)};
+    }
+  }
+  return {"", name};
+}
+
+std::optional<std::pair<std::string, std::string>> split_scope_name(const std::string& body) {
+  const auto pos = body.rfind("::");
+  if (pos == std::string::npos) {
+    return std::nullopt;
+  }
+  return std::make_pair(body.substr(0, pos), body.substr(pos + 2));
+}
+
+int count_consecutive_scope(const std::vector<SymbolInfo>& symbols, int start,
+                            const std::string& scope) {
+  int count = 0;
+  for (int i = start; i < static_cast<int>(symbols.size()); ++i) {
+    const auto [kind_prefix, body] = split_kind_prefix(symbols[static_cast<std::size_t>(i)].name);
+    (void)kind_prefix;
+    const auto split = split_scope_name(body);
+    if (!split || split->first != scope) {
+      break;
+    }
+    ++count;
+  }
+  return count;
+}
+
+enum class OutlineRowKind { Scope, Symbol };
+
+struct OutlineDisplayRow {
+  OutlineRowKind kind = OutlineRowKind::Symbol;
+  int symbol_index = -1;
+  std::string label;
+  int indent = 0;
+  SymbolKind color_kind = SymbolKind::kFunction;
+};
+
 struct OutlinePanelState {
   std::vector<SymbolInfo> symbols;
+  std::vector<OutlineDisplayRow> display_rows;
   std::string loaded_file;
   bool symbols_fetch_pending = false;
   uint64_t last_document_symbols_revision = 0;
@@ -46,10 +94,75 @@ struct OutlinePanelState {
   bool scrollbar_dragging = false;
   int scrollbar_drag_offset = 0;
 
+  void rebuild_display_rows() {
+    display_rows.clear();
+    std::string active_scope;
+    bool scope_header_shown = false;
+
+    for (int i = 0; i < static_cast<int>(symbols.size()); ++i) {
+      const auto& sym = symbols[static_cast<std::size_t>(i)];
+      const auto [kind_prefix, body] = split_kind_prefix(sym.name);
+      const auto scope_split = split_scope_name(body);
+      const int base_indent = sym.depth * 2;
+
+      if (!scope_split) {
+        active_scope.clear();
+        scope_header_shown = false;
+        display_rows.push_back(
+            {OutlineRowKind::Symbol, i, sym.name, base_indent, sym.kind});
+        continue;
+      }
+
+      const std::string& scope = scope_split->first;
+      const std::string short_label = kind_prefix + scope_split->second;
+
+      if (scope != active_scope) {
+        active_scope = scope;
+        scope_header_shown = false;
+        if (count_consecutive_scope(symbols, i, scope) >= 2) {
+          display_rows.push_back({OutlineRowKind::Scope,
+                                  -1,
+                                  kind_prefix + scope + ":",
+                                  base_indent,
+                                  SymbolKind::kNamespace});
+          scope_header_shown = true;
+        }
+      }
+
+      if (scope_header_shown) {
+        display_rows.push_back(
+            {OutlineRowKind::Symbol, i, short_label, base_indent + 2, sym.kind});
+      } else {
+        display_rows.push_back(
+            {OutlineRowKind::Symbol, i, sym.name, base_indent, sym.kind});
+      }
+    }
+  }
+
+  int display_row_count() const { return static_cast<int>(display_rows.size()); }
+
+  int nearest_symbol_row(int from, int direction) const {
+    if (display_rows.empty()) {
+      return 0;
+    }
+    int row = from;
+    for (;;) {
+      row += direction;
+      if (row < 0) {
+        return 0;
+      }
+      if (row >= display_row_count()) {
+        return display_row_count() - 1;
+      }
+      if (display_rows[static_cast<std::size_t>(row)].kind == OutlineRowKind::Symbol) {
+        return row;
+      }
+    }
+  }
+
   void clamp_scroll() {
     const int visible = visible_line_count(content_box);
-    list_scroll = std::max(0, std::min(list_scroll, max_scroll_offset(static_cast<int>(symbols.size()),
-                                                                      visible)));
+    list_scroll = std::max(0, std::min(list_scroll, max_scroll_offset(display_row_count(), visible)));
   }
 
   void scroll_row_into_view(int row) {
@@ -67,7 +180,7 @@ struct OutlinePanelState {
       return std::nullopt;
     }
     const int row = list_scroll + (y - content_box.y_min);
-    if (row < 0 || row >= static_cast<int>(symbols.size())) {
+    if (row < 0 || row >= display_row_count()) {
       return std::nullopt;
     }
     return row;
@@ -85,6 +198,14 @@ void fetch_outline_symbols(OutlinePanelState* state, ISymbolProvider* symbols,
     return;
   }
   state->symbols_fetch_pending = false;
+  state->rebuild_display_rows();
+  if (state->selected >= state->display_row_count()) {
+    state->selected = std::max(0, state->display_row_count() - 1);
+  }
+  if (!state->display_rows.empty() &&
+      state->display_rows[static_cast<std::size_t>(state->selected)].kind == OutlineRowKind::Scope) {
+    state->selected = state->nearest_symbol_row(state->selected, 1);
+  }
   if (layout_state != nullptr) {
     layout_state->request_ui_tick = true;
   }
@@ -229,12 +350,13 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (path != state->loaded_file) {
       state->loaded_file = path;
       state->symbols.clear();
+      state->display_rows.clear();
       state->symbols_fetch_pending = !path.empty();
       state->selected = 0;
       state->list_scroll = 0;
     }
 
-    const int total = static_cast<int>(state->symbols.size());
+    const int total = state->display_row_count();
     const int visible = visible_line_count(state->content_box);
     state->last_visible_lines = visible;
     state->clamp_scroll();
@@ -249,18 +371,23 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
       rows.push_back(text("(sin símbolos)") | color(theme::Muted()));
     } else {
       for (int i = start; i < end; ++i) {
-        const auto& sym = state->symbols[static_cast<std::size_t>(i)];
-        std::string indent(static_cast<std::size_t>(sym.depth * 2), ' ');
-        Element row = text(indent + sym.name) | color(theme::DirectoryText());
+        const auto& row = state->display_rows[static_cast<std::size_t>(i)];
+        std::string indent(static_cast<std::size_t>(row.indent), ' ');
+        const bool is_scope = row.kind == OutlineRowKind::Scope;
+        Element line = text(indent + row.label) | color(theme::ColorForSymbolKind(row.color_kind));
+        if (is_scope) {
+          line = line | dim;
+        }
         const bool selected =
-            i == state->selected && focus->region == FocusRegion::RightPanel;
+            i == state->selected && focus->region == FocusRegion::RightPanel &&
+            !is_scope;
         const std::string row_id = press_id::outline_row(i);
         const bool hovered =
             layout_state != nullptr && layout_state->clickable.is_hovered(row_id);
         const bool pressed =
             layout_state != nullptr && layout_state->clickable.is_pressed(row_id);
-        row = StyleListRow(std::move(row), selected, hovered, pressed);
-        rows.push_back(row);
+        line = StyleListRow(std::move(line), selected, hovered, pressed);
+        rows.push_back(std::move(line));
       }
     }
 
@@ -289,7 +416,7 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
       return false;
     }
 
-    const int total = static_cast<int>(state->symbols.size());
+    const int total = state->display_row_count();
     const int visible = state->last_visible_lines;
     const int max_scroll = max_scroll_offset(total, visible);
 
@@ -326,33 +453,44 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
       }
       focus->region = FocusRegion::RightPanel;
       trigger_press(layout_state, press_id::outline_row(*row));
+      const auto& display_row = state->display_rows[static_cast<std::size_t>(*row)];
+      if (display_row.kind != OutlineRowKind::Symbol || display_row.symbol_index < 0) {
+        state->selected = state->nearest_symbol_row(*row, 1);
+        state->scroll_row_into_view(state->selected);
+        return true;
+      }
       state->selected = *row;
       state->scroll_row_into_view(*row);
-      jump_to_symbol(workspace, focus, state->symbols[static_cast<std::size_t>(*row)]);
+      jump_to_symbol(workspace, focus,
+                     state->symbols[static_cast<std::size_t>(display_row.symbol_index)]);
       return true;
     }
 
     if (focus->region != FocusRegion::RightPanel) {
       return false;
     }
-    if (state->symbols.empty()) {
+    if (state->display_rows.empty()) {
       return false;
     }
     if (event == Event::ArrowDown || event == Event::Character('j')) {
-      state->selected = std::min(state->selected + 1,
-                                 static_cast<int>(state->symbols.size()) - 1);
+      state->selected = state->nearest_symbol_row(state->selected, 1);
       state->scroll_row_into_view(state->selected);
       return true;
     }
     if (event == Event::ArrowUp || event == Event::Character('k')) {
-      state->selected = std::max(0, state->selected - 1);
+      state->selected = state->nearest_symbol_row(state->selected, -1);
       state->scroll_row_into_view(state->selected);
       return true;
     }
     if (event == Event::Return) {
+      const auto& display_row =
+          state->display_rows[static_cast<std::size_t>(state->selected)];
+      if (display_row.kind != OutlineRowKind::Symbol || display_row.symbol_index < 0) {
+        return true;
+      }
       trigger_press(layout_state, press_id::outline_row(state->selected));
       jump_to_symbol(workspace, focus,
-                     state->symbols[static_cast<std::size_t>(state->selected)]);
+                     state->symbols[static_cast<std::size_t>(display_row.symbol_index)]);
       return true;
     }
     if (event == Event::PageUp) {

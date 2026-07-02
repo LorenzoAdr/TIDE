@@ -14,6 +14,7 @@
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/screen_interactive.hpp"
+#include "editor/text_search.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/connection_wizard.hpp"
 #include "ui/console_panel.hpp"
@@ -29,6 +30,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/terminal_keyboard.hpp"
+#include "ui/terminal_display.hpp"
 #include "util/crash_handler.hpp"
 #include "util/bundled_tools.hpp"
 #include "util/compile_commands_remap.hpp"
@@ -38,6 +40,7 @@
 #include "build/build_environment.hpp"
 #include "build/build_environment_service.hpp"
 #include "app/workspace_config.hpp"
+#include "app/workspace_session.hpp"
 
 namespace fs = std::filesystem;
 
@@ -53,6 +56,21 @@ bool event_is_alt_up(const Event& event) {
 
 bool event_is_alt_down(const Event& event) {
   return event == Event::Special("\x1B[1;3B");
+}
+
+void force_immediate_repaint(MainLayoutState* layout, ScreenInteractive* screen) {
+  if (layout != nullptr) {
+    layout->request_ui_tick = true;
+  }
+  if (screen == nullptr) {
+    return;
+  }
+  screen->PostEvent(Event::Custom);
+  nudge_terminal_repaint();
+  screen->Post([screen] {
+    screen->PostEvent(Event::Custom);
+    nudge_terminal_repaint();
+  });
 }
 
 class EventPoller {
@@ -111,6 +129,13 @@ class UiTickPostWrapper : public ComponentBase {
     }
     layout_->request_ui_tick = false;
     screen_->PostEvent(Event::Custom);
+    nudge_terminal_repaint();
+    screen_->Post([this] {
+      if (screen_ != nullptr) {
+        screen_->PostEvent(Event::Custom);
+        nudge_terminal_repaint();
+      }
+    });
   }
 
   MainLayoutState* layout_;
@@ -195,6 +220,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 }
 
 Application::~Application() {
+  save_workspace_session();
   build_artifact_watcher_.stop();
   global_build_environment_service().shutdown();
   shell_session_.stop();
@@ -330,7 +356,47 @@ void Application::apply_workspace_settings(const WorkspaceConfig& config) {
   layout_state_.request_ui_tick = true;
 }
 
+void Application::save_workspace_session() {
+  if (workspace_.root.empty()) {
+    return;
+  }
+  workspace_.flush_active_tab();
+  WorkspaceSession session;
+  session.open_tabs.reserve(workspace_.tabs.size());
+  for (const auto& tab : workspace_.tabs) {
+    if (!tab.path.empty()) {
+      session.open_tabs.push_back(tab.path);
+    }
+  }
+  if (workspace_.active_tab >= 0 &&
+      workspace_.active_tab < static_cast<int>(workspace_.tabs.size())) {
+    session.active_tab_path = workspace_.tabs[static_cast<std::size_t>(workspace_.active_tab)].path;
+  }
+  session.save(workspace_.root);
+}
+
+void Application::restore_workspace_session() {
+  if (workspace_.root.empty()) {
+    return;
+  }
+  const WorkspaceSession session = WorkspaceSession::load(workspace_.root);
+  if (session.open_tabs.empty()) {
+    return;
+  }
+  for (const auto& path : session.open_tabs) {
+    std::error_code ec;
+    if (!fs::is_regular_file(fs::path(path), ec)) {
+      continue;
+    }
+    workspace_.open_file(path);
+  }
+  if (!session.active_tab_path.empty()) {
+    workspace_.open_file(session.active_tab_path);
+  }
+}
+
 void Application::set_workspace(const std::string& workspace_root) {
+  save_workspace_session();
   std::error_code ec;
   const auto absolute = fs::absolute(workspace_root, ec).string();
   config_.workspace_root = absolute;
@@ -382,6 +448,7 @@ void Application::set_workspace(const std::string& workspace_root) {
   sync_symbol_workspace_indexer();
   workspace_watcher_.start(absolute);
   git_service_.open(absolute);
+  restore_workspace_session();
 }
 
 void Application::on_workspace_complete(const std::string& workspace_root) {
@@ -918,6 +985,7 @@ int Application::run() {
 
   auto with_quit_confirm = MakeQuitConfirmOverlay(
       with_settings, &quit_confirm_state_, &layout_state_, [this, &screen] {
+        save_workspace_session();
         submit_command(UiCommand{UiCommandKind::kQuit});
         screen.ExitLoopClosure()();
       });
@@ -1132,6 +1200,17 @@ int Application::run() {
         screen.Post(Event::Custom);
         return true;
       }
+      if (app_mode_ == AppMode::kNormal && event_is_workspace_search_with_selection(event) &&
+          focus_state_.region == FocusRegion::Editor) {
+        workspace_.ensure_buffer();
+        const std::string needle =
+            selection_text(workspace_.buffer, workspace_.buffer.primary());
+        if (!needle.empty()) {
+          focus_search_with_filter(&layout_state_, needle, "");
+          screen.Post(Event::Custom);
+          return true;
+        }
+      }
       if (app_mode_ == AppMode::kNormal && event_is_ctrl_f(event) &&
           focus_state_.region == FocusRegion::Editor &&
           layout_state_.editor_key_handler &&
@@ -1295,7 +1374,7 @@ int Application::run() {
           file_picker_state_.mark_matches_dirty();
           file_picker_state_.refresh_matches(&workspace_);
         }
-        layout_state_.request_ui_tick = true;
+        force_immediate_repaint(&layout_state_, &screen);
         return true;
       }
       if (event == Event::CtrlO) {
@@ -1310,7 +1389,7 @@ int Application::run() {
         symbol_picker_state_.query.clear();
         symbol_picker_state_.selected = 0;
         symbol_picker_state_.loaded_file.clear();
-        layout_state_.request_ui_tick = true;
+        force_immediate_repaint(&layout_state_, &screen);
         return true;
       }
       if (event == Event::F9) {

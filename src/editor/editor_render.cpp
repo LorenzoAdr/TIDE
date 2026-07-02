@@ -68,12 +68,26 @@ bool line_has_find_matches(int line_index, const std::vector<TextMatch>* find_ma
   return false;
 }
 
+bool line_has_selection_occurrences(int line_index,
+                                    const std::vector<TextMatch>* selection_occurrences) {
+  if (selection_occurrences == nullptr) {
+    return false;
+  }
+  for (const auto& match : *selection_occurrences) {
+    if (match.line == line_index) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool line_has_diagnostics(const std::vector<Diagnostic>* line_diagnostics) {
   return line_diagnostics != nullptr && !line_diagnostics->empty();
 }
 
 bool line_needs_rich_decorations(int line_index, const EditorBuffer& buffer,
                                  const std::vector<TextMatch>* find_matches,
+                                 const std::vector<TextMatch>* selection_occurrences,
                                  const BracketPairHighlight* bracket,
                                  const std::vector<Diagnostic>* line_diagnostics,
                                  const EditorSymbolPress* symbol_press) {
@@ -89,6 +103,9 @@ bool line_needs_rich_decorations(int line_index, const EditorBuffer& buffer,
     }
   }
   if (line_has_find_matches(line_index, find_matches)) {
+    return true;
+  }
+  if (line_has_selection_occurrences(line_index, selection_occurrences)) {
     return true;
   }
   if (buffer.cursors.size() <= 1) {
@@ -112,6 +129,9 @@ const EditorDecoration* decoration_at(const std::vector<EditorDecoration>& decor
     int priority = 0;
     switch (deco.kind) {
       case EditorDecoration::Kind::FindMatch:
+        priority = 1;
+        break;
+      case EditorDecoration::Kind::SelectionOccurrence:
         priority = 1;
         break;
       case EditorDecoration::Kind::DiagnosticWarning:
@@ -151,6 +171,8 @@ Element apply_decoration(Element element, const EditorDecoration* deco) {
   switch (deco->kind) {
     case EditorDecoration::Kind::FindMatch:
       return element | bgcolor(theme::FindMatchBg());
+    case EditorDecoration::Kind::SelectionOccurrence:
+      return element | bgcolor(theme::SelectionOccurrenceBg());
     case EditorDecoration::Kind::DiagnosticWarning:
       return element | color(theme::Warning()) | underlined;
     case EditorDecoration::Kind::DiagnosticError:
@@ -271,6 +293,7 @@ Element render_simple_line(const std::string& line, int line_index, const Editor
 
 Element render_rich_line(const std::string& line, int line_index, const EditorBuffer& buffer,
                          bool editor_focused, const std::vector<TextMatch>* find_matches,
+                         const std::vector<TextMatch>* selection_occurrences,
                          const SemanticTokenDocument* semantic_tokens, bool syntax_highlight,
                          const BracketPairHighlight* bracket,
                          const std::vector<Diagnostic>* line_diagnostics,
@@ -285,6 +308,9 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
   }
   if (find_matches != nullptr) {
     collect_find_decorations(line_index, *find_matches, &decorations);
+  }
+  if (selection_occurrences != nullptr) {
+    collect_selection_occurrence_decorations(line_index, *selection_occurrences, &decorations);
   }
   if (bracket != nullptr) {
     collect_bracket_decorations(line_index, *bracket, &decorations);
@@ -345,6 +371,16 @@ void collect_find_decorations(int line_index, const std::vector<TextMatch>& matc
   for (const auto& match : matches) {
     if (match.line == line_index && match.length > 0) {
       out->push_back({match.col, match.col + match.length, EditorDecoration::Kind::FindMatch});
+    }
+  }
+}
+
+void collect_selection_occurrence_decorations(int line_index, const std::vector<TextMatch>& matches,
+                                              std::vector<EditorDecoration>* out) {
+  for (const auto& match : matches) {
+    if (match.line == line_index && match.length > 0) {
+      out->push_back(
+          {match.col, match.col + match.length, EditorDecoration::Kind::SelectionOccurrence});
     }
   }
 }
@@ -422,6 +458,7 @@ void collect_press_decorations(int line_index, const EditorSymbolPress& press,
 
 Element RenderEditorLine(const std::string& line, int line_index, const EditorBuffer& buffer,
                          bool editor_focused, const std::vector<TextMatch>* find_matches,
+                         const std::vector<TextMatch>* selection_occurrences,
                          const SemanticTokenDocument* semantic_tokens,
                          const BracketPairHighlight* bracket,
                          const std::vector<Diagnostic>* line_diagnostics,
@@ -445,16 +482,17 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
   const bool syntax_highlight =
       !buffer.path.empty() && is_indexed_source_path(buffer.path) && !is_build_file;
 
-  bool rich = line_needs_rich_decorations(line_index, buffer, find_matches, bracket,
-                                          line_diagnostics, symbol_press);
+  bool rich = line_needs_rich_decorations(line_index, buffer, find_matches, selection_occurrences,
+                                          bracket, line_diagnostics, symbol_press);
   if (highlight_ctx != nullptr && highlight_ctx->in_block_comment) {
     rich = false;
   }
 
   Element content =
       rich ? render_rich_line(view_line, line_index, buffer, editor_focused, find_matches,
-                              semantic_tokens, syntax_highlight, bracket, line_diagnostics,
-                              symbol_press, show_caret, scroll_col, view_width, highlight_ctx)
+                              selection_occurrences, semantic_tokens, syntax_highlight, bracket,
+                              line_diagnostics, symbol_press, show_caret, scroll_col, view_width,
+                              highlight_ctx)
            : render_simple_line(view_line, line_index, buffer, editor_focused, semantic_tokens,
                                 syntax_highlight, line_bg, show_caret, scroll_col, highlight_ctx,
                                 build_file_kind);

@@ -132,11 +132,6 @@ struct EditorPanelState {
   bool word_select_drag = false;
   int word_select_anchor_line = -1;
   int word_select_anchor_col = -1;
-  bool keyboard_shift = false;
-  int64_t last_shift_activity_ms = 0;
-  bool extend_click_armed = false;
-  CursorPos shift_extend_anchor;
-  bool shift_extend_anchor_valid = false;
   std::vector<BreadcrumbHit> breadcrumb_hits;
   std::vector<BreadcrumbItem> breadcrumbs;
   std::vector<SymbolInfo> cached_symbols;
@@ -180,6 +175,12 @@ struct EditorPanelState {
   int64_t last_scroll_change_ms = 0;
   bool document_open_pending = false;
   std::string pending_document_open_path;
+  std::vector<TextMatch> selection_occurrence_matches;
+  int selection_occurrence_sl = -1;
+  int selection_occurrence_sc = -1;
+  int selection_occurrence_el = -1;
+  int selection_occurrence_ec = -1;
+  std::string selection_occurrence_path;
   struct SourceSymbolFlash {
     int line = -1;
     int start_col = 0;
@@ -201,7 +202,6 @@ void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState*
                                      int visible_lines);
 
 constexpr int kDoubleClickMs = 400;
-constexpr int kShiftClickWindowMs = 3000;
 constexpr int kHoverDelayMs = 500;
 constexpr int kSuffixScrollSettleMs = 150;
 
@@ -533,6 +533,47 @@ const BracketPairHighlight& cached_bracket_highlight(EditorPanelState* panel,
   panel->bracket_cache_col = col;
   panel->bracket_cache = find_bracket_pair_highlight(buffer, line, col);
   return panel->bracket_cache;
+}
+
+void refresh_selection_occurrence_matches(EditorPanelState* panel, const EditorBuffer& buffer) {
+  if (panel == nullptr) {
+    return;
+  }
+
+  int start_line = -1;
+  int start_col = 0;
+  int end_line = 0;
+  int end_col = 0;
+  if (buffer.cursors.size() == 1 && buffer.primary().has_selection()) {
+    buffer.primary().normalized_range(&start_line, &start_col, &end_line, &end_col);
+  }
+
+  if (start_line == panel->selection_occurrence_sl &&
+      start_col == panel->selection_occurrence_sc && end_line == panel->selection_occurrence_el &&
+      end_col == panel->selection_occurrence_ec &&
+      buffer.path == panel->selection_occurrence_path) {
+    return;
+  }
+
+  panel->selection_occurrence_sl = start_line;
+  panel->selection_occurrence_sc = start_col;
+  panel->selection_occurrence_el = end_line;
+  panel->selection_occurrence_ec = end_col;
+  panel->selection_occurrence_path = buffer.path;
+  panel->selection_occurrence_matches = find_selection_occurrences(buffer);
+}
+
+const std::vector<TextMatch>* selection_occurrence_matches_for(EditorPanelState* panel,
+                                                               const EditorBuffer& buffer,
+                                                               bool find_bar_open) {
+  if (panel == nullptr || find_bar_open) {
+    return nullptr;
+  }
+  refresh_selection_occurrence_matches(panel, buffer);
+  if (panel->selection_occurrence_matches.empty()) {
+    return nullptr;
+  }
+  return &panel->selection_occurrence_matches;
 }
 
 void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
@@ -1122,7 +1163,7 @@ Element make_sticky_overlay(const std::vector<StickyLine>& sticky_lines, int gut
           block_comment_line_starts[static_cast<std::size_t>(sticky.source_line)];
     }
 
-    Element line = RenderEditorLine(display_line, sticky.source_line, buffer, false, nullptr,
+    Element line = RenderEditorLine(display_line, sticky.source_line, buffer, false, nullptr, nullptr,
                                   semantic_tokens, nullptr, nullptr, nullptr, nullptr, nullptr,
                                   false, 0, code_width, &highlight_ctx, true);
     rows.push_back(hbox({text(indent) | bgcolor(theme::TabIdle()), line | flex}) | clear_under);
@@ -1184,86 +1225,8 @@ bool sgr_mouse_has_shift(const Event& event) {
   return (button & 4) != 0;
 }
 
-bool sgr_mouse_has_meta(const Event& event) {
-  int button = 0;
-  if (!sgr_mouse_button_field(event, &button)) {
-    return false;
-  }
-  return (button & 8) != 0;
-}
-
-void arm_extend_click(EditorPanelState* panel) {
-  if (panel == nullptr) {
-    return;
-  }
-  panel->extend_click_armed = true;
-  panel->keyboard_shift = true;
-  panel->last_shift_activity_ms = steady_now_ms();
-}
-
-void disarm_extend_click(EditorPanelState* panel) {
-  if (panel == nullptr) {
-    return;
-  }
-  panel->extend_click_armed = false;
-  panel->keyboard_shift = false;
-  panel->last_shift_activity_ms = 0;
-}
-
-void update_editor_modifiers(EditorPanelState* panel, Event& event) {
-  if (panel == nullptr) {
-    return;
-  }
-  if (event.is_mouse()) {
-    const auto& m = event.mouse();
-    if (m.shift || m.meta || sgr_mouse_has_shift(event)) {
-      panel->keyboard_shift = true;
-      panel->last_shift_activity_ms = steady_now_ms();
-    }
-    return;
-  }
-
-  if (event_input_has_shift_release(event) || event_is_shift_key_release(event)) {
-    panel->keyboard_shift = false;
-  } else if (event_input_has_shift_modifier(event) || event_is_shift_key_press(event)) {
-    arm_extend_click(panel);
-  }
-}
-
-bool shift_extend_click(const EditorPanelState& panel, const Mouse& m, const Event& event) {
-  if (m.control && !m.shift && !sgr_mouse_has_shift(event)) {
-    return false;
-  }
-  if (m.shift || m.meta || panel.keyboard_shift || sgr_mouse_has_shift(event) ||
-      sgr_mouse_has_meta(event)) {
-    return true;
-  }
-  if (panel.last_shift_activity_ms > 0 &&
-      steady_now_ms() - panel.last_shift_activity_ms <= kShiftClickWindowMs) {
-    return true;
-  }
-  return false;
-}
-
-void save_shift_extend_anchor(EditorPanelState* panel, const EditorBuffer& buffer) {
-  if (panel == nullptr) {
-    return;
-  }
-  panel->shift_extend_anchor = buffer.primary().head;
-  panel->shift_extend_anchor_valid = true;
-}
-
-void finish_editor_move(EditorPanelState* panel, EditorBuffer* buffer, bool extend_selection) {
-  if (extend_selection) {
-    arm_extend_click(panel);
-    if (buffer != nullptr && buffer->primary().has_selection()) {
-      panel->shift_extend_anchor = buffer->primary().anchor;
-      panel->shift_extend_anchor_valid = true;
-    }
-  } else {
-    save_shift_extend_anchor(panel, *buffer);
-    disarm_extend_click(panel);
-  }
+bool mouse_shift_active(const Mouse& m, const Event& event) {
+  return m.shift || sgr_mouse_has_shift(event);
 }
 
 struct GotoLineState {
@@ -1749,7 +1712,6 @@ bool handle_editor_escape(EditorBuffer* buffer, EditorFindState* find,
                           DiagnosticModalState* diagnostic_modal,
                           GitHistoryModalState* git_modal) {
   if (panel != nullptr) {
-    disarm_extend_click(panel);
     end_mouse_selection(panel);
   }
   if (git_modal != nullptr && git_modal->open) {
@@ -1910,8 +1872,6 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     return false;
   }
 
-  update_editor_modifiers(panel, event);
-
   EditorBuffer* buffer = &workspace->buffer;
   buffer->ensure_cursors();
 
@@ -2053,7 +2013,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     }
 
     const CursorPos pos = mouse_to_cursor(m, *panel, *buffer, visible_lines);
-    const bool shift_click = shift_extend_click(*panel, m, event);
+    const bool shift_click = mouse_shift_active(m, event);
 
     const int64_t now_ms = steady_now_ms();
     const bool same_spot = is_same_click_spot(*panel, pos.line, pos.col, now_ms);
@@ -2072,7 +2032,6 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       panel->line_select_drag = true;
       panel->line_select_anchor = pos.line;
       panel->line_select_commit_line = pos.line;
-      save_shift_extend_anchor(panel, *buffer);
       begin_mouse_selection(panel, event);
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       return true;
@@ -2085,7 +2044,6 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       panel->word_select_drag = true;
       panel->word_select_anchor_line = buffer->primary().anchor.line;
       panel->word_select_anchor_col = buffer->primary().anchor.col;
-      save_shift_extend_anchor(panel, *buffer);
       begin_mouse_selection(panel, event);
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       return true;
@@ -2093,7 +2051,6 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
 
     if (m.control && symbols != nullptr && symbols->supports_navigation() &&
         !buffer->path.empty()) {
-      disarm_extend_click(panel);
       if (try_go_to_symbol(workspace, layout_state, panel, symbols, pos.line, pos.col, false,
                          visible_lines)) {
         return true;
@@ -2109,23 +2066,17 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     }
 
     if (shift_click) {
-      end_mouse_selection(panel);
       if (buffer->multi_cursor_active()) {
         exit_multi_cursor_mode(buffer);
       }
-      const CursorPos anchor =
-          buffer->primary().has_selection()
-              ? buffer->primary().anchor
-              : (panel->shift_extend_anchor_valid ? panel->shift_extend_anchor
-                                                  : buffer->primary().head);
+      const CursorPos anchor = buffer->primary().has_selection() ? buffer->primary().anchor
+                                                                 : buffer->primary().head;
       buffer->reset_to_single_cursor(anchor.line, anchor.col);
       buffer->primary().anchor = anchor;
       buffer->primary().head = pos;
       clamp_all_cursors(buffer);
+      begin_mouse_selection(panel, event);
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-      buffer->dirty = true;
-      notify_editor_buffer_changed(workspace, symbols);
-      disarm_extend_click(panel);
       return true;
     }
 
@@ -2133,8 +2084,6 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       workspace->record_cursor_jump();
     }
     buffer->reset_to_single_cursor(pos.line, pos.col);
-    save_shift_extend_anchor(panel, *buffer);
-    disarm_extend_click(panel);
     begin_mouse_selection(panel, event);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
@@ -2239,15 +2188,28 @@ bool accept_completion(CompletionState* completion, EditorBuffer* buffer,
       item.has_replace_range ? item.replace_start : completion->replace_start;
   const int repl_end = item.has_replace_range ? item.replace_end : completion->replace_end;
 
+  bool paren_already_there = false;
+  if (repl_line >= 0 && repl_line < static_cast<int>(buffer->lines.size())) {
+    paren_already_there = has_char_at(buffer->lines[static_cast<std::size_t>(repl_line)], repl_end,
+                                      '(');
+  }
+
   const bool callable =
       item.kind == SymbolKind::kFunction || item.kind == SymbolKind::kMethod;
 
+  const bool treat_as_snippet =
+      item.insert_format == InsertTextFormat::kSnippet ||
+      raw_insert.find('$') != std::string::npos;
+
   SnippetResult snippet;
-  if (item.insert_format == InsertTextFormat::kSnippet) {
+  if (treat_as_snippet) {
     snippet = expand_snippet(raw_insert);
+    if (paren_already_there) {
+      snippet = adjust_snippet_for_existing_open_paren(raw_insert);
+    }
   } else if (callable) {
     snippet = finalize_function_call_insert(
-        raw_insert, item.detail.empty() ? item.label : item.detail, true);
+        raw_insert, item.detail.empty() ? item.label : item.detail, true, paren_already_there);
   } else {
     snippet.text = raw_insert;
     snippet.caret_col = static_cast<int>(raw_insert.size());
@@ -2348,14 +2310,12 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
 
   if (event_is_alt_left(event)) {
     if (workspace->navigate_cursor_back(visible_lines)) {
-      save_shift_extend_anchor(panel, *buffer);
       return true;
     }
     return false;
   }
   if (event_is_alt_right(event)) {
     if (workspace->navigate_cursor_forward(visible_lines)) {
-      save_shift_extend_anchor(panel, *buffer);
       return true;
     }
     return false;
@@ -2407,7 +2367,14 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     return true;
   }
-  if (event_is_ctrl_z(event)) {
+  if (event_is_ctrl_shift_z(event) || event_is_ctrl_y(event)) {
+    if (redo_edit(buffer)) {
+      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+      notify_editor_buffer_changed(workspace, symbols);
+    }
+    return true;
+  }
+  if (event_is_ctrl_z(event) && !event_input_has_shift_modifier(event)) {
     undo_edit(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     notify_editor_buffer_changed(workspace, symbols);
@@ -2420,14 +2387,12 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event_is_ctrl_x(event)) {
     cut_selection(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    save_shift_extend_anchor(panel, *buffer);
     notify_editor_buffer_changed(workspace, symbols);
     return true;
   }
   if (event_is_ctrl_v(event)) {
     paste_text(buffer, read_clipboard_for_paste());
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    save_shift_extend_anchor(panel, *buffer);
     notify_editor_buffer_changed(workspace, symbols);
     return true;
   }
@@ -2487,25 +2452,21 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event_is_ctrl_left(event) || event_is_ctrl_shift_left(event)) {
     move_primary_word_left(buffer, extend);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    finish_editor_move(panel, buffer, extend);
     return true;
   }
   if (event_is_ctrl_right(event) || event_is_ctrl_shift_right(event)) {
     move_primary_word_right(buffer, extend);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    finish_editor_move(panel, buffer, extend);
     return true;
   }
   if (event == Event::ArrowLeft || event_is_shift_left(event)) {
     move_primary_left(buffer, extend);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    finish_editor_move(panel, buffer, extend);
     return true;
   }
   if (event == Event::ArrowRight || event_is_shift_right(event)) {
     move_primary_right(buffer, extend);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    finish_editor_move(panel, buffer, extend);
     return true;
   }
   if (event_is_ctrl_shift_up(event)) {
@@ -2521,23 +2482,19 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event == Event::ArrowUp || event_is_shift_up(event)) {
     move_primary_up(buffer, extend);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    finish_editor_move(panel, buffer, extend);
     return true;
   }
   if (event == Event::ArrowDown || event_is_shift_down(event)) {
     move_primary_down(buffer, extend);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    finish_editor_move(panel, buffer, extend);
     return true;
   }
   if (event == Event::Home || event_is_shift_home(event)) {
     move_primary_home(buffer, event_is_shift_home(event));
-    finish_editor_move(panel, buffer, event_is_shift_home(event));
     return true;
   }
   if (event == Event::End || event_is_shift_end(event)) {
     move_primary_end(buffer, event_is_shift_end(event));
-    finish_editor_move(panel, buffer, event_is_shift_end(event));
     return true;
   }
   if (event_is_ctrl_backspace(event)) {
@@ -2583,7 +2540,6 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event == Event::Return) {
     newline(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    save_shift_extend_anchor(panel, *buffer);
     notify_editor_buffer_changed(workspace, symbols);
     return true;
   }
@@ -2604,7 +2560,6 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
       const char typed = ch[0];
       insert_char(buffer, typed);
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-      save_shift_extend_anchor(panel, *buffer);
       notify_editor_buffer_changed(workspace, symbols);
       maybe_open_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
                                  buffer, typed);
@@ -2859,6 +2814,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool editor_focused = focus->region == FocusRegion::Editor;
     const std::vector<TextMatch>* find_matches =
         find_state->open && !find_state->matches.empty() ? &find_state->matches : nullptr;
+    const std::vector<TextMatch>* selection_occurrences =
+        selection_occurrence_matches_for(panel_state.get(), buffer, find_state->open);
 
     const BracketPairHighlight& bracket =
         cached_bracket_highlight(panel_state.get(), buffer, editor_focused);
@@ -2965,7 +2922,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       highlight_ctx.in_block_comment = in_block_comment;
 
       code_rows.push_back(RenderEditorLine(display_line, i, buffer,
-                                           editor_focused, find_matches, semantic_tokens,
+                                           editor_focused, find_matches, selection_occurrences,
+                                           semantic_tokens,
                                            &bracket, nullptr, suffix_ptr, suffix_color_ptr,
                                            &symbol_press, show_caret, buffer.scroll_col,
                                            code_width, &highlight_ctx) |
@@ -3036,8 +2994,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                         layout_state);
     Element tab_bar = make_editor_tab_bar(workspace, tab_bar_state.get(), layout_state);
     Element editor = editor_stack->Render() | flex;
-    return vbox({std::move(tab_bar), std::move(title), PanelBody(std::move(editor), theme::CodeBg())}) |
-           flex | bgcolor(theme::CodeBg());
+    Element chrome =
+        vbox({std::move(tab_bar), std::move(title), PanelBody(std::move(editor), theme::CodeBg())});
+    Element tooltip = make_tab_hover_tooltip(workspace, tab_bar_state.get());
+    return dbox({std::move(chrome), std::move(tooltip)}) | flex | bgcolor(theme::CodeBg());
   });
 
   auto dispatch_editor_keys = [workspace, focus, panel_state, tab_bar_state, find_state,
@@ -3108,7 +3068,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       }
       workspace->ensure_buffer();
       const int visible = visible_line_count(panel_state->code_box);
-      update_editor_modifiers(panel_state.get(), event);
       return handle_editor_mouse(workspace, focus, find_state.get(), completion_state.get(),
                                  layout_state,
                                  panel_state.get(), diagnostic_state.get(),
@@ -3124,16 +3083,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     workspace->ensure_buffer();
     const int visible = visible_line_count(panel_state->code_box);
-    update_editor_modifiers(panel_state.get(), event);
     return handle_editor_mouse(workspace, focus, find_state.get(), completion_state.get(),
                                layout_state,
                                panel_state.get(), diagnostic_state.get(),
                                git_history_state.get(), git_service, symbols, event, visible);
   };
 
-  auto dispatch_editor_modifiers = [panel_state](Event event) {
-    update_editor_modifiers(panel_state.get(), event);
-  };
+  auto dispatch_editor_modifiers = [](Event& /*event*/) {};
 
   if (layout_state != nullptr) {
     layout_state->editor_key_handler = dispatch_editor_keys;

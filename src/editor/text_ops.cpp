@@ -803,6 +803,8 @@ void paste_at_primary(EditorBuffer* buffer, const std::string& text) {
 
 bool undo_edit(EditorBuffer* buffer) { return undo(buffer); }
 
+bool redo_edit(EditorBuffer* buffer) { return redo(buffer); }
+
 void clear_primary_selection(EditorBuffer* buffer) {
   buffer->primary().collapse_to_head();
 }

@@ -12,6 +12,7 @@ add_executable(tgdb
   src/app/application.cpp
   src/app/app_settings.cpp
   src/app/workspace_config.cpp
+  src/app/workspace_session.cpp
   src/app/debug_model.cpp
   src/app/workspace_model.cpp
   src/app/editor_tabs.cpp
@@ -47,6 +48,7 @@ add_executable(tgdb
   src/ui/focus_manager.cpp
   src/ui/key_bindings.cpp
   src/ui/terminal_keyboard.cpp
+  src/ui/terminal_display.cpp
   src/ui/focusable_component.cpp
   src/ui/clickable_interaction.cpp
   src/ui/cursor_blink.cpp

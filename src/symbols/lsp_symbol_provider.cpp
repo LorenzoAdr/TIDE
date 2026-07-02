@@ -693,6 +693,32 @@ std::vector<LspFileEdits> LspSymbolProvider::rename_symbol(const RenameParams& p
   return client_.rename_symbol(key, text, params.line, params.character, params.new_name);
 }
 
+bool LspSymbolProvider::supports_code_actions() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return use_lsp_ && client_.ready();
+}
+
+std::vector<CodeActionItem> LspSymbolProvider::code_actions_for_diagnostic(
+    const CodeActionParams& params) {
+  if (params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
+    return {};
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+
+  const std::string key = normalize_lsp_path(params.path);
+  if (key.empty()) {
+    return {};
+  }
+
+  const std::string text =
+      params.text.empty() ? buffer_text_for_path(key) : params.text;
+  return client_.code_actions(params);
+}
+
 bool LspSymbolProvider::supports_call_hierarchy() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return use_lsp_ && client_.ready();

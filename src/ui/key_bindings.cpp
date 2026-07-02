@@ -187,6 +187,18 @@ bool event_is_ctrl_z(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[27;5;90~");
 }
 
+bool event_is_ctrl_shift_z(const ftxui::Event& event) {
+  return (event == ftxui::Event::CtrlZ && event_input_has_shift_modifier(event)) ||
+         event == ftxui::Event::Special("\x1B[27;6;122~") ||
+         event == ftxui::Event::Special("\x1B[27;6;90~");
+}
+
+bool event_is_ctrl_y(const ftxui::Event& event) {
+  return event == ftxui::Event::CtrlY ||
+         event == ftxui::Event::Special("\x1B[27;5;121~") ||
+         event == ftxui::Event::Special("\x1B[27;5;89~");
+}
+
 bool event_is_ctrl_v(const ftxui::Event& event) {
   return event == ftxui::Event::CtrlV ||
          event == ftxui::Event::Special("\x1B[27;5;118~") ||
@@ -209,6 +221,31 @@ bool event_is_ctrl_f(const ftxui::Event& event) {
   return event == ftxui::Event::CtrlF ||
          event == ftxui::Event::Special("\x1B[27;5;102~") ||
          event == ftxui::Event::Special("\x1B[27;5;70~");
+}
+
+bool event_is_ctrl_shift_f(const ftxui::Event& event) {
+  const int mods[] = {6};
+  return (event == ftxui::Event::CtrlF && event_input_has_shift_modifier(event)) ||
+         csi_key_any_modifier(event, mods, 1, 70) ||
+         csi_key_any_modifier(event, mods, 1, 102) ||
+         event == ftxui::Event::Special("\x1B[27;6;70~") ||
+         event == ftxui::Event::Special("\x1B[27;6;102~") ||
+         event == ftxui::Event::Special("\x1B[70;6u") ||
+         event == ftxui::Event::Special("\x1B[104;6u");
+}
+
+bool event_is_ctrl_alt_f(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return csi_key_any_modifier(event, mods, 1, 70) ||
+         csi_key_any_modifier(event, mods, 1, 102) ||
+         event == ftxui::Event::Special("\x1B[27;7;70~") ||
+         event == ftxui::Event::Special("\x1B[27;7;102~") ||
+         event == ftxui::Event::Special("\x1B[70;7u") ||
+         event == ftxui::Event::Special("\x1B[104;7u");
+}
+
+bool event_is_workspace_search_with_selection(const ftxui::Event& event) {
+  return event_is_ctrl_alt_f(event) || event_is_ctrl_shift_f(event);
 }
 
 bool event_is_ctrl_g(const ftxui::Event& event) {

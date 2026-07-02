@@ -167,6 +167,10 @@ bool LspClient::initialize(const std::string& workspace_root) {
   params["capabilities"]["textDocument"]["hover"] = {{"contentFormat", {"plaintext", "markdown"}}};
   params["capabilities"]["textDocument"]["formatting"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["rename"] = {{"prepareSupport", true}};
+  params["capabilities"]["textDocument"]["codeAction"] = {
+      {"codeActionLiteralSupport",
+       {{"codeActionKind",
+         {{"valueSet", nlohmann::json::array({"quickfix", "refactor", "source"})}}}}}};
   params["capabilities"]["callHierarchy"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["semanticTokens"] = {
       {"requests", {{"range", false}, {"full", {{"delta", false}}}}},
@@ -694,6 +698,12 @@ CompletionItem LspClient::parse_completion_item(const nlohmann::json& item) {
     if (edit.contains("newText") && edit["newText"].is_string()) {
       out.insert_text = edit["newText"].get<std::string>();
     }
+    if (out.insert_format == InsertTextFormat::kPlain && edit.contains("insertTextFormat") &&
+        edit["insertTextFormat"].is_number_integer()) {
+      const int format = edit["insertTextFormat"].get<int>();
+      out.insert_format =
+          format == 2 ? InsertTextFormat::kSnippet : InsertTextFormat::kPlain;
+    }
     if (edit.contains("range") && edit["range"].is_object()) {
       const auto& range = edit["range"];
       if (range.contains("start") && range.contains("end")) {
@@ -707,6 +717,11 @@ CompletionItem LspClient::parse_completion_item(const nlohmann::json& item) {
 
   if (out.insert_text.empty()) {
     out.insert_text = out.label;
+  }
+
+  if (out.insert_format == InsertTextFormat::kPlain &&
+      out.insert_text.find('$') != std::string::npos) {
+    out.insert_format = InsertTextFormat::kSnippet;
   }
 
   return out;
@@ -1033,8 +1048,155 @@ std::vector<LspFileEdits> LspClient::rename_symbol(const std::string& absolute_p
 
 namespace {
 
+nlohmann::json lsp_diagnostic_json(const Diagnostic& diag) {
+  nlohmann::json out;
+  out["range"] = {{"start", {{"line", diag.line}, {"character", diag.start_col}}},
+                  {"end", {{"line", diag.line}, {"character", diag.end_col}}}};
+  out["severity"] = static_cast<int>(diag.severity);
+  out["message"] = diag.message;
+  if (!diag.source.empty()) {
+    out["source"] = diag.source;
+  }
+  return out;
+}
+
+std::vector<LspFileEdits> workspace_edit_from_json(const nlohmann::json& edit_json) {
+  if (edit_json.is_null()) {
+    return {};
+  }
+  return parse_workspace_edit(edit_json);
+}
+
+std::vector<LspFileEdits> edits_from_code_action(const nlohmann::json& action) {
+  if (!action.is_object()) {
+    return {};
+  }
+  if (action.contains("edit")) {
+    return workspace_edit_from_json(action["edit"]);
+  }
+  if (action.contains("workspaceEdit")) {
+    return workspace_edit_from_json(action["workspaceEdit"]);
+  }
+  return {};
+}
+
+CodeActionItem parse_code_action_item(const nlohmann::json& item) {
+  CodeActionItem out;
+  if (!item.is_object()) {
+    return out;
+  }
+  if (item.contains("title") && item["title"].is_string()) {
+    out.title = item["title"].get<std::string>();
+  }
+  if (item.contains("kind") && item["kind"].is_string()) {
+    out.kind = item["kind"].get<std::string>();
+  }
+  out.lsp_payload = item;
+  out.file_edits = edits_from_code_action(item);
+  return out;
+}
+
+}  // namespace
+
+std::vector<CodeActionItem> LspClient::code_actions(const CodeActionParams& params) {
+  if (!ready_.load() || params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
+    return {};
+  }
+
+  if (!params.text.empty()) {
+    did_open(params.path, params.text);
+  }
+
+  const std::string key = normalize_lsp_path(params.path);
+  if (key.empty()) {
+    return {};
+  }
+
+  const std::string uri = path_to_uri(key);
+  nlohmann::json request = {
+      {"textDocument", {{"uri", uri}}},
+      {"range",
+       {{"start", {{"line", params.line}, {"character", params.start_col}}},
+        {"end", {{"line", params.line}, {"character", params.end_col}}}}},
+      {"context",
+       {{"diagnostics", nlohmann::json::array({lsp_diagnostic_json(params.diagnostic)})},
+        {"only", nlohmann::json::array({"quickfix"})}}}};
+
+  nlohmann::json result;
+  const int id = next_request_id_++;
+  if (!transport_.send_request(id, "textDocument/codeAction", std::move(request), 15000, &result)) {
+    return {};
+  }
+
+  std::vector<CodeActionItem> items;
+  if (result.is_null()) {
+    return items;
+  }
+  if (!result.is_array()) {
+    if (result.is_object()) {
+      items.push_back(parse_code_action_item(result));
+    }
+    return items;
+  }
+
+  for (const auto& entry : result) {
+    CodeActionItem item = parse_code_action_item(entry);
+    if (!item.title.empty()) {
+      items.push_back(std::move(item));
+    }
+  }
+
+  for (CodeActionItem& item : items) {
+    if (!item.file_edits.empty()) {
+      continue;
+    }
+    if (item.lsp_payload.contains("command")) {
+      continue;
+    }
+    item.file_edits = resolve_code_action_edits(item.lsp_payload);
+  }
+  return items;
+}
+
+std::vector<LspFileEdits> LspClient::resolve_code_action_edits(const nlohmann::json& action) {
+  if (!ready_.load() || action.is_null() || !action.is_object()) {
+    return {};
+  }
+
+  nlohmann::json result;
+  const int id = next_request_id_++;
+  if (!transport_.send_request(id, "codeAction/resolve", action, 15000, &result)) {
+    return {};
+  }
+  return edits_from_code_action(result);
+}
+
+namespace {
+
+SymbolKind symbol_kind_from_lsp(int kind) {
+  switch (kind) {
+    case 3:
+      return SymbolKind::kNamespace;
+    case 5:
+      return SymbolKind::kClass;
+    case 23:
+      return SymbolKind::kStruct;
+    case 6:
+    case 9:
+      return SymbolKind::kMethod;
+    case 12:
+      return SymbolKind::kFunction;
+    case 8:
+    case 13:
+    case 22:
+    default:
+      return SymbolKind::kVariable;
+  }
+}
+
 CallHierarchyItem parse_call_hierarchy_item(const nlohmann::json& item) {
   CallHierarchyItem out;
+  out.kind = SymbolKind::kFunction;
   if (!item.is_object()) {
     return out;
   }
@@ -1061,6 +1223,9 @@ CallHierarchyItem parse_call_hierarchy_item(const nlohmann::json& item) {
     if (start.contains("character")) {
       out.character = start["character"].get<int>();
     }
+  }
+  if (item.contains("kind") && item["kind"].is_number_integer()) {
+    out.kind = symbol_kind_from_lsp(item["kind"].get<int>());
   }
   out.lsp_payload = item;
   out.valid = !out.path.empty() && !out.name.empty();

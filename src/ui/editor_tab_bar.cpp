@@ -279,6 +279,33 @@ bool handle_tab_bar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   return false;
 }
 
+Element make_tab_hover_tooltip(WorkspaceModel* workspace, const EditorTabBarState* state) {
+  if (workspace == nullptr || state == nullptr || state->hover_tab_index < 0) {
+    return text("");
+  }
+  if (state->hover_tab_index >= static_cast<int>(workspace->tabs.size())) {
+    return text("");
+  }
+  const std::string& path = workspace->tabs[static_cast<std::size_t>(state->hover_tab_index)].path;
+  if (path.empty() || state->bar_box.IsEmpty()) {
+    return text("");
+  }
+
+  const std::string filename = std::filesystem::path(path).filename().string();
+  Element popup =
+      vbox({text(" " + filename) | bold | color(theme::TitleText()),
+            text(" " + path) | color(theme::Muted())}) |
+      border | bgcolor(theme::PanelBg());
+
+  const int rel_x = std::max(0, state->hover_x - state->bar_box.x_min + 1);
+  const int y_below = state->bar_box.y_max - state->bar_box.y_min + 1;
+  return dbox({text(""),
+               vbox({filler() | size(HEIGHT, EQUAL, y_below),
+                     hbox({filler() | size(WIDTH, EQUAL, rel_x), popup | clear_under, filler()}),
+                     filler()}) |
+                   flex});
+}
+
 bool update_editor_chrome_hover(WorkspaceModel* workspace, EditorTabBarState* state,
                                 MainLayoutState* layout_state, const Box& problems_box, int x,
                                 int y) {
@@ -288,11 +315,23 @@ bool update_editor_chrome_hover(WorkspaceModel* workspace, EditorTabBarState* st
   const std::string_view before = layout_state->clickable.hovered_id();
   TabBarHit hit;
   if (state != nullptr && lookup_tab_hit(state, workspace, x, y, &hit)) {
+    if (hit.kind == TabBarHitKind::Tab) {
+      state->hover_tab_index = hit.tab_index;
+      state->hover_x = x;
+      state->hover_y = y;
+    } else {
+      state->hover_tab_index = -1;
+    }
     layout_state->clickable.set_hover(hover_id_for_hit(hit));
-  } else if (!problems_box.IsEmpty() && problems_box.Contain(x, y)) {
-    layout_state->clickable.set_hover(press_id::kEditorProblems);
   } else {
-    layout_state->clickable.clear_hover_if(press_id::is_editor_chrome_hover);
+    if (state != nullptr) {
+      state->hover_tab_index = -1;
+    }
+    if (!problems_box.IsEmpty() && problems_box.Contain(x, y)) {
+      layout_state->clickable.set_hover(press_id::kEditorProblems);
+    } else {
+      layout_state->clickable.clear_hover_if(press_id::is_editor_chrome_hover);
+    }
   }
   if (layout_state->clickable.hovered_id() != before) {
     layout_state->request_ui_tick = true;

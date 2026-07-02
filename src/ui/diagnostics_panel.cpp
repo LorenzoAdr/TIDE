@@ -15,6 +15,7 @@
 #include "editor/editor_state.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/focusable_component.hpp"
+#include "ui/context_menu.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
 
@@ -29,6 +30,7 @@ struct DiagnosticRow {
   std::string path;
   int line = 0;
   int character = 0;
+  int end_col = 0;
   std::string message;
   DiagnosticSeverity severity = DiagnosticSeverity::kError;
 };
@@ -130,6 +132,7 @@ std::vector<DiagnosticRow> build_rows(WorkspaceModel* workspace,
       row.path = doc.path;
       row.line = item.line;
       row.character = item.start_col;
+      row.end_col = item.end_col;
       row.message = item.message;
       row.severity = item.severity;
       rows.push_back(std::move(row));
@@ -312,9 +315,39 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
            reflect(state->content_box) | bgcolor(theme::PanelBg());
   });
 
-  auto handler = [workspace, focus, state, layout_state](Event event) {
+  auto handler = [workspace, focus, state, layout_state, symbols](Event event) {
     if (layout_state == nullptr || !problems_tab_active(layout_state)) {
       return false;
+    }
+
+    if (event.is_mouse()) {
+      const auto& m = event.mouse();
+      if (m.button == Mouse::Right && m.motion == Mouse::Pressed) {
+        if (!state->content_box.Contain(m.x, m.y)) {
+          return false;
+        }
+        if (focus != nullptr) {
+          focus->region = FocusRegion::Terminal;
+        }
+        const int visible = visible_line_count(state->content_box);
+        const int visual_row = m.y - state->content_box.y_min;
+        const int row = state->first_visible + (visual_row / kLinesPerProblem);
+        if (row < 0 || row >= static_cast<int>(state->rows.size())) {
+          return false;
+        }
+        state->selected = row;
+        clamp_scroll(state.get(), visible);
+        const DiagnosticRow& diag = state->rows[static_cast<std::size_t>(row)];
+        const bool lsp_available =
+            symbols != nullptr && symbols->supports_code_actions() &&
+            (layout_state->app_settings == nullptr || layout_state->app_settings->lsp_enabled);
+        context_menu_open_problem(&layout_state->context_menu, m.x, m.y, diag.path, diag.line,
+                                  diag.character, diag.end_col, diag.message, lsp_available);
+        if (layout_state != nullptr) {
+          layout_state->request_ui_tick = true;
+        }
+        return true;
+      }
     }
 
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&

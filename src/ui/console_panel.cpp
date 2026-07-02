@@ -136,6 +136,7 @@ int max_first_visible(int total_lines, int visible_lines) {
 bool terminal_box_valid(const Box& box);
 bool terminal_body_contains(const ConsolePanelState* state, int x, int y);
 int measure_terminal_cols(const ConsolePanelState* state, int panel_width);
+int measure_terminal_rows(int viewport_height);
 void update_terminal_layout(ConsolePanelState* state, int panel_height, int panel_width,
                             MainLayoutState* layout_state);
 
@@ -167,9 +168,12 @@ void scroll_terminal_by_lines(ConsolePanelState* state, int delta, int total_lin
   state->terminal_follow_tail = state->terminal_first_visible >= max_first;
 }
 
-int terminal_viewport_lines(const ConsolePanelState* state, int fallback_height) {
+int terminal_viewport_lines(const ConsolePanelState* state, int viewport_height) {
+  if (viewport_height > 0) {
+    return viewport_height;
+  }
   if (state == nullptr) {
-    return std::max(1, fallback_height);
+    return 1;
   }
   int visible = visible_line_count(state->terminal_box);
   if (visible <= 1) {
@@ -178,10 +182,7 @@ int terminal_viewport_lines(const ConsolePanelState* state, int fallback_height)
   if (visible <= 1 && state->panel_box.y_max > state->panel_box.y_min) {
     visible = std::max(1, visible_line_count(state->panel_box) - 2);
   }
-  if (visible <= 1) {
-    visible = std::max(1, fallback_height);
-  }
-  return visible;
+  return std::max(1, visible);
 }
 
 bool handle_terminal_scroll_keys(ConsolePanelState* state, const Event& event) {
@@ -579,7 +580,8 @@ std::string console_placeholder(AppMode* /*app_mode*/) {
 }
 
 constexpr int kMaxTermCols = 160;
-constexpr int kMaxTermRows = 48;
+constexpr int kMaxTermRows = 512;
+constexpr int kTerminalScrollbarWidth = 1;
 
 int clamp_terminal_cols(int cols) {
   return std::max(8, std::min(cols, kMaxTermCols));
@@ -587,6 +589,19 @@ int clamp_terminal_cols(int cols) {
 
 int clamp_terminal_rows(int rows) {
   return std::max(2, std::min(rows, kMaxTermRows));
+}
+
+int measure_terminal_cols(const ConsolePanelState* state, int panel_width) {
+  int cols = panel_width;
+  if (state != nullptr && terminal_box_valid(state->panel_box)) {
+    cols = visible_column_count(state->panel_box);
+  }
+  cols -= kTerminalScrollbarWidth;
+  return clamp_terminal_cols(std::max(8, cols));
+}
+
+int measure_terminal_rows(int viewport_height) {
+  return clamp_terminal_rows(std::max(2, viewport_height));
 }
 
 bool terminal_box_valid(const Box& box) {
@@ -609,23 +624,12 @@ bool terminal_body_contains(const ConsolePanelState* state, int x, int y) {
   return y >= body_top && y <= state->panel_box.y_max;
 }
 
-int measure_terminal_cols(const ConsolePanelState* state, int panel_width) {
-  if (state != nullptr && terminal_box_valid(state->terminal_box)) {
-    return clamp_terminal_cols(visible_column_count(state->terminal_box));
-  }
-  int cols = panel_width;
-  if (state != nullptr && terminal_box_valid(state->panel_box)) {
-    cols = visible_column_count(state->panel_box);
-  }
-  return clamp_terminal_cols(std::max(8, cols - 1));
-}
-
 void update_terminal_layout(ConsolePanelState* state, int panel_height, int panel_width,
                             MainLayoutState* /*layout_state*/) {
-  if (state == nullptr || panel_height <= 1) {
+  if (state == nullptr || panel_height <= 0) {
     return;
   }
-  const int rows = clamp_terminal_rows(std::max(1, panel_height - 1));
+  const int rows = measure_terminal_rows(panel_height);
   const int cols = measure_terminal_cols(state, panel_width);
   const bool size_changed =
       rows != state->pending_terminal_rows || cols != state->pending_terminal_cols;
@@ -688,7 +692,11 @@ Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool sh
     parts.push_back(text(" ") | (draw_cursor && cursor_col >= 0 ? cursor_cell
                                                                  : color(theme::WatchInput())));
   }
-  return hbox(std::move(parts)) | size(HEIGHT, EQUAL, 1);
+  Element line = hbox(std::move(parts));
+  if (max_cols > 0) {
+    line = line | size(WIDTH, EQUAL, max_cols);
+  }
+  return line | size(HEIGHT, EQUAL, 1);
 }
 
 Element render_terminal_styled(const std::vector<TerminalStyledRow>& rows, int first_visible,
@@ -943,7 +951,7 @@ Element render_shell_terminal(ConsolePanelState* state, DebugModel* model, Shell
   if (!state->terminal_styled_rows.empty()) {
     const int total = static_cast<int>(state->terminal_styled_rows.size());
     const int visible = terminal_viewport_lines(state, viewport_height);
-    const int display_cols = measure_terminal_cols(state, panel_width);
+    const int display_cols = state->pending_terminal_cols;
     state->terminal_last_visible_lines = visible;
     if (state->terminal_follow_tail) {
       scroll_terminal_to_tail(state, total, visible);

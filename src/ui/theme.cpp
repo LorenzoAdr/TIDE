@@ -377,6 +377,11 @@ Color EditorLineHi() {
 Color CursorCell() { return current_palette().cursor_cell; }
 Color SelectionBg() { return current_palette().selection_bg; }
 Color FindMatchBg() { return current_palette().find_match_bg; }
+Color SelectionOccurrenceBg() {
+  const ColorRgb code = effective_code_bg_rgb();
+  const ColorRgb tint = g_mode == ThemeMode::kLight ? rgb(210, 225, 245) : rgb(55, 75, 110);
+  return from_rgb(blend(code, tint, 0.45f));
+}
 Color BracketMatchBg() { return current_palette().bracket_match_bg; }
 
 Color TabIdle() {
@@ -457,6 +462,23 @@ Color SyntaxProperty() { return current_palette().syntax_property; }
 Color SyntaxMacro() { return current_palette().syntax_macro; }
 Color SyntaxNamespace() { return current_palette().syntax_namespace; }
 Color SyntaxOperator() { return current_palette().syntax_operator; }
+
+Color ColorForSymbolKind(SymbolKind kind) {
+  switch (kind) {
+    case SymbolKind::kNamespace:
+      return SyntaxNamespace();
+    case SymbolKind::kClass:
+    case SymbolKind::kStruct:
+      return SyntaxType();
+    case SymbolKind::kFunction:
+    case SymbolKind::kMethod:
+      return SyntaxFunction();
+    case SymbolKind::kVariable:
+      return SyntaxVariable();
+  }
+  return SyntaxDefault();
+}
+
 Color BuildFileLineBg() { return current_palette().build_file_line_bg; }
 Color BuildFileKeyword() { return current_palette().build_file_keyword; }
 

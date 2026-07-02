@@ -56,8 +56,10 @@ const std::vector<ShortcutSection>& shortcut_sections() {
        {
            {"Ctrl+S", "Guardar archivo"},
            {"Ctrl+F", "Buscar en archivo"},
+           {"Ctrl+Alt+F / Ctrl+Shift+F", "Buscar selección en workspace"},
            {"Ctrl+G", "Ir a línea"},
            {"Ctrl+Z", "Deshacer"},
+           {"Ctrl+Shift+Z / Ctrl+Y", "Rehacer"},
            {"Ctrl+C", "Copiar selección"},
            {"Ctrl+X", "Cortar selección"},
            {"Ctrl+V", "Pegar"},

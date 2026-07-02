@@ -72,6 +72,12 @@ ShellLaunchConfig resolve_shell_launch_config(const std::string& workspace_root,
   }
   launch.env_vars = active.env_vars;
   launch.setup_scripts = active.setup_scripts;
+  if (launch.env_vars.find("COLORTERM") == launch.env_vars.end()) {
+    launch.env_vars["COLORTERM"] = "truecolor";
+  }
+  if (launch.env_vars.find("TERM") == launch.env_vars.end()) {
+    launch.env_vars["TERM"] = "xterm-256color";
+  }
 
   if (launch.docker_container.empty()) {
     return launch;

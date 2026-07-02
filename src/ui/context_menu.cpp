@@ -15,6 +15,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "indexer/index_rules.hpp"
 #include "lsp/lsp_text_edits.hpp"
+#include "symbols/code_action.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/clickable.hpp"
 #include "ui/editor_panel.hpp"
@@ -101,6 +102,9 @@ std::string buffer_document_text(const EditorBuffer& buffer) {
   return text;
 }
 
+bool read_file_text(const std::string& absolute_path, std::string* text_out);
+bool write_file_text(const std::string& absolute_path, const std::string& text);
+
 void apply_document_text_to_buffer(EditorBuffer* buffer, const std::string& text) {
   if (buffer == nullptr) {
     return;
@@ -113,6 +117,96 @@ void apply_document_text_to_buffer(EditorBuffer* buffer, const std::string& text
   buffer->dirty = true;
   clear_undo(buffer);
   buffer->view_token++;
+}
+
+void reload_buffer_text(EditorBuffer* buffer, const std::string& text, int line, int col) {
+  if (buffer == nullptr) {
+    return;
+  }
+  buffer->lines = lines_from_document_text(text);
+  if (buffer->lines.empty()) {
+    buffer->lines.push_back("");
+  }
+  line = std::max(0, std::min(line, static_cast<int>(buffer->lines.size()) - 1));
+  col = std::max(0, std::min(col, static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size())));
+  buffer->reset_to_single_cursor(line, col);
+  buffer->dirty = true;
+  buffer->view_token++;
+}
+
+bool apply_workspace_file_edits(WorkspaceModel* workspace, DebugModel* model,
+                                const std::shared_ptr<ISymbolProvider>& symbols,
+                                SymbolWorkspaceIndexer* symbol_indexer,
+                                const std::vector<LspFileEdits>& file_edits,
+                                const std::string& navigation_path, int navigation_line,
+                                int navigation_col, std::string* status_message) {
+  if (workspace == nullptr || file_edits.empty()) {
+    return false;
+  }
+
+  workspace->flush_active_tab();
+  int changed_files = 0;
+  for (const LspFileEdits& file_edit : file_edits) {
+    const std::string path = normalize_path(file_edit.path);
+    const int tab = workspace->find_tab(path);
+
+    std::string text;
+    if (tab >= 0) {
+      text = buffer_document_text(workspace->tabs[static_cast<std::size_t>(tab)].buffer);
+    } else if (!read_file_text(path, &text)) {
+      if (status_message != nullptr) {
+        *status_message = "No se pudo leer: " + fs::path(path).filename().string();
+      }
+      return false;
+    }
+
+    const std::string updated = apply_lsp_text_edits(text, file_edit.edits);
+    if (updated == text) {
+      continue;
+    }
+
+    if (tab >= 0) {
+      EditorBuffer& tab_buffer = workspace->tabs[static_cast<std::size_t>(tab)].buffer;
+      push_undo(&tab_buffer);
+      const int target_line = normalize_path(path) == normalize_path(navigation_path)
+                                  ? navigation_line
+                                  : tab_buffer.primary_line();
+      const int target_col = normalize_path(path) == normalize_path(navigation_path)
+                                 ? navigation_col
+                                 : tab_buffer.primary_col();
+      reload_buffer_text(&tab_buffer, updated, target_line, target_col);
+      if (symbols != nullptr) {
+        symbols->on_document_changed(path, updated);
+        symbols->flush_document_sync(path);
+      }
+    } else if (!write_file_text(path, updated)) {
+      if (status_message != nullptr) {
+        *status_message = "No se pudo guardar: " + fs::path(path).filename().string();
+      }
+      return false;
+    }
+
+    if (symbol_indexer != nullptr && model != nullptr && !model->workspace_root.empty()) {
+      std::error_code ec;
+      const auto relative = fs::relative(path, model->workspace_root, ec);
+      if (!ec) {
+        symbol_indexer->reindex_file(model->workspace_root, relative.generic_string(), path);
+      }
+    }
+    ++changed_files;
+  }
+
+  if (changed_files == 0) {
+    if (status_message != nullptr) {
+      *status_message = "Sin cambios al aplicar";
+    }
+    return false;
+  }
+
+  if (workspace->active_tab >= 0) {
+    workspace->load_active_tab_into_buffer();
+  }
+  return true;
 }
 
 bool read_file_text(const std::string& absolute_path, std::string* text_out) {
@@ -278,57 +372,86 @@ bool rename_symbol_with_lsp(ContextMenuState* state, WorkspaceModel* workspace,
     return false;
   }
 
-  workspace->flush_active_tab();
-  int changed_files = 0;
-  for (const LspFileEdits& file_edit : file_edits) {
-    const std::string path = normalize_path(file_edit.path);
-    const int tab = workspace->find_tab(path);
-
-    std::string text;
-    if (tab >= 0) {
-      text = buffer_document_text(workspace->tabs[static_cast<std::size_t>(tab)].buffer);
-    } else if (!read_file_text(path, &text)) {
-      workspace->status_message =
-          "No se pudo leer: " + fs::path(path).filename().string();
-      return false;
-    }
-
-    const std::string updated = apply_lsp_text_edits(text, file_edit.edits);
-    if (updated == text) {
-      continue;
-    }
-
-    if (tab >= 0) {
-      apply_document_text_to_buffer(&workspace->tabs[static_cast<std::size_t>(tab)].buffer,
-                                    updated);
-      symbols->on_document_changed(path, updated);
-      symbols->flush_document_sync(path);
-    } else if (!write_file_text(path, updated)) {
-      workspace->status_message =
-          "No se pudo guardar: " + fs::path(path).filename().string();
-      return false;
-    }
-
-    if (symbol_indexer != nullptr && model != nullptr && !model->workspace_root.empty()) {
-      std::error_code ec;
-      const auto relative = fs::relative(path, model->workspace_root, ec);
-      if (!ec) {
-        symbol_indexer->reindex_file(model->workspace_root, relative.generic_string(), path);
-      }
-    }
-    ++changed_files;
-  }
-
-  if (changed_files == 0) {
-    workspace->status_message = "Sin cambios al renombrar";
+  std::string status;
+  if (!apply_workspace_file_edits(workspace, model, symbols, symbol_indexer, file_edits, nav.path,
+                                  state->editor_line, state->editor_col, &status)) {
+    workspace->status_message =
+        status.empty() ? "clangd no pudo renombrar el símbolo" : status;
     return false;
   }
 
-  if (workspace->active_tab >= 0) {
-    workspace->load_active_tab_into_buffer();
-  }
   workspace->status_message = "Renombrado: " + state->symbol_name + " → " + new_name + " (" +
-                              std::to_string(changed_files) + " archivo(s))";
+                              std::to_string(file_edits.size()) + " archivo(s))";
+  return true;
+}
+
+bool apply_problem_quick_fix(ContextMenuState* state, WorkspaceModel* workspace,
+                             DebugModel* model, MainLayoutState* layout_state,
+                             const std::shared_ptr<ISymbolProvider>& symbols,
+                             SymbolWorkspaceIndexer* symbol_indexer) {
+  if (state == nullptr || workspace == nullptr) {
+    return false;
+  }
+  if (layout_state != nullptr && layout_state->app_settings != nullptr &&
+      !layout_state->app_settings->lsp_enabled) {
+    workspace->status_message = "LSP desactivado en configuración";
+    return false;
+  }
+  if (symbols == nullptr || !symbols->supports_code_actions()) {
+    workspace->status_message = "Fix no disponible (clangd inactivo)";
+    return false;
+  }
+
+  const std::string path = state->problem_path;
+  if (path.empty()) {
+    workspace->status_message = "No hay archivo para el problema";
+    return false;
+  }
+
+  std::string text;
+  const int tab = workspace->find_tab(path);
+  if (tab >= 0) {
+    text = buffer_document_text(workspace->tabs[static_cast<std::size_t>(tab)].buffer);
+  } else if (!read_file_text(path, &text)) {
+    workspace->status_message = "No se pudo leer: " + fs::path(path).filename().string();
+    return false;
+  }
+
+  CodeActionParams params;
+  params.path = path;
+  params.text = text;
+  params.line = state->problem_line;
+  params.start_col = state->problem_start_col;
+  params.end_col = state->problem_end_col;
+  params.diagnostic.line = state->problem_line;
+  params.diagnostic.start_col = state->problem_start_col;
+  params.diagnostic.end_col = state->problem_end_col;
+  params.diagnostic.message = state->problem_message;
+  params.diagnostic.source = "clang";
+  params.diagnostic.severity = DiagnosticSeverity::kError;
+
+  const std::vector<CodeActionItem> actions = symbols->code_actions_for_diagnostic(params);
+  const CodeActionItem* chosen = nullptr;
+  for (const CodeActionItem& action : actions) {
+    if (!action.file_edits.empty()) {
+      chosen = &action;
+      break;
+    }
+  }
+  if (chosen == nullptr) {
+    workspace->status_message = "clangd no ofrece fix para este problema";
+    return false;
+  }
+
+  std::string status;
+  if (!apply_workspace_file_edits(workspace, model, symbols, symbol_indexer, chosen->file_edits, path,
+                                  state->problem_line, state->problem_start_col, &status)) {
+    workspace->status_message = status.empty() ? "No se pudo aplicar el fix" : status;
+    return false;
+  }
+
+  workspace->status_message =
+      "Fix aplicado: " + (chosen->title.empty() ? std::string("quickfix") : chosen->title);
   return true;
 }
 
@@ -357,23 +480,6 @@ void focus_call_hierarchy(MainLayoutState* layout_state, int line, int col,
   layout_state->right_sidebar.pending_call_hierarchy_col = col;
   layout_state->right_sidebar.pending_call_hierarchy_symbol = symbol;
   layout_state->text_input_focus = TextInputFocus::None;
-  layout_state->focus_sync_needed = true;
-  layout_state->request_ui_tick = true;
-}
-
-void focus_search_with_filter(MainLayoutState* layout_state, const std::string& query,
-                              const std::string& path_filter) {
-  if (layout_state == nullptr) {
-    return;
-  }
-  layout_state->console_visible = true;
-  layout_state->console_tabs.selected_tab = ConsolePanelTabs::kSearch;
-  layout_state->right_panel_active_section = 0;
-  layout_state->right_sidebar.pending_search_setup = true;
-  layout_state->right_sidebar.pending_search_query = query;
-  layout_state->right_sidebar.pending_search_path_filter = path_filter;
-  layout_state->right_sidebar.pending_focus_search = true;
-  layout_state->text_input_focus = TextInputFocus::SearchQuery;
   layout_state->focus_sync_needed = true;
   layout_state->request_ui_tick = true;
 }
@@ -650,6 +756,14 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
+  if (action_id == "apply_fix") {
+    apply_problem_quick_fix(state, workspace, model, layout_state, symbols, symbol_indexer);
+    if (focus != nullptr) {
+      focus->region = FocusRegion::Editor;
+    }
+    return true;
+  }
+
   return false;
 }
 
@@ -692,6 +806,23 @@ int row_index_at(const ContextMenuState& state, int x, int y) {
 }
 
 }  // namespace
+
+void focus_search_with_filter(MainLayoutState* layout_state, const std::string& query,
+                              const std::string& path_filter) {
+  if (layout_state == nullptr) {
+    return;
+  }
+  layout_state->console_visible = true;
+  layout_state->console_tabs.selected_tab = ConsolePanelTabs::kSearch;
+  layout_state->right_panel_active_section = 0;
+  layout_state->right_sidebar.pending_search_setup = true;
+  layout_state->right_sidebar.pending_search_query = query;
+  layout_state->right_sidebar.pending_search_path_filter = path_filter;
+  layout_state->right_sidebar.pending_focus_search = true;
+  layout_state->text_input_focus = TextInputFocus::SearchQuery;
+  layout_state->focus_sync_needed = true;
+  layout_state->request_ui_tick = true;
+}
 
 bool context_menu_active(const ContextMenuState* state) {
   return state != nullptr && (state->open || state->rename_open || state->delete_confirm_open ||
@@ -824,6 +955,26 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
     return;
   }
   set_items(state, ContextMenuKind::EditorBackground, {{"Formatear archivo", "format_file"}});
+}
+
+void context_menu_open_problem(ContextMenuState* state, int x, int y, const std::string& path,
+                               int line, int start_col, int end_col, const std::string& message,
+                               bool lsp_available) {
+  if (state == nullptr || path.empty() || !lsp_available) {
+    return;
+  }
+  state->open = true;
+  state->rename_open = false;
+  state->delete_confirm_open = false;
+  state->rename_skip_return = false;
+  state->anchor_x = x;
+  state->anchor_y = y;
+  state->problem_path = path;
+  state->problem_line = line;
+  state->problem_start_col = start_col;
+  state->problem_end_col = end_col;
+  state->problem_message = message;
+  set_items(state, ContextMenuKind::Problem, {{"Aplicar fix", "apply_fix"}});
 }
 
 Element render_indexer_paths_modal(ContextMenuState* state) {

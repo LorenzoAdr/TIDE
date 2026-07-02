@@ -4,6 +4,7 @@
 #include <string>
 
 #include "ftxui/dom/elements.hpp"
+#include "symbols/symbol_kind.hpp"
 
 namespace tgdb::theme {
 
@@ -66,6 +67,7 @@ Color EditorLineHi();
 Color CursorCell();
 Color SelectionBg();
 Color FindMatchBg();
+Color SelectionOccurrenceBg();
 Color BracketMatchBg();
 Color TabActive();
 Color TabHover();
@@ -101,6 +103,8 @@ Color SyntaxProperty();
 Color SyntaxMacro();
 Color SyntaxNamespace();
 Color SyntaxOperator();
+
+Color ColorForSymbolKind(SymbolKind kind);
 
 Color BuildFileLineBg();
 Color BuildFileKeyword();

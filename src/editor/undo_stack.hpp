@@ -6,6 +6,7 @@ namespace tgdb {
 
 void push_undo(EditorBuffer* buffer);
 bool undo(EditorBuffer* buffer);
+bool redo(EditorBuffer* buffer);
 void clear_undo(EditorBuffer* buffer);
 
 }  // namespace tgdb

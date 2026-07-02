@@ -14,6 +14,7 @@
 #include "lsp/semantic_tokens.hpp"
 #include "lsp/diagnostics.hpp"
 #include "symbols/call_hierarchy.hpp"
+#include "symbols/code_action.hpp"
 #include "symbols/hover_info.hpp"
 #include "symbols/symbol_provider.hpp"
 
@@ -62,6 +63,9 @@ class LspClient {
   std::vector<LspFileEdits> rename_symbol(const std::string& absolute_path,
                                           const std::string& text, int line, int character,
                                           const std::string& new_name);
+
+  std::vector<CodeActionItem> code_actions(const CodeActionParams& params);
+  std::vector<LspFileEdits> resolve_code_action_edits(const nlohmann::json& action);
 
   std::vector<CallHierarchyItem> prepare_call_hierarchy(const std::string& absolute_path,
                                                         const std::string& text, int line,

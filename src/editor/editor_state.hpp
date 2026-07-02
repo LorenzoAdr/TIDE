@@ -50,6 +50,7 @@ struct EditorBuffer {
   std::vector<std::string> lines;
   std::vector<MultiCursor> cursors;
   std::vector<EditorSnapshot> undo_stack;
+  std::vector<EditorSnapshot> redo_stack;
   int scroll = 0;
   int scroll_col = 0;
   bool dirty = false;

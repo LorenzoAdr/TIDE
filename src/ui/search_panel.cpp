@@ -60,6 +60,7 @@ int visible_line_count(const Box& box) {
 
 struct SearchPanelState {
   std::string query;
+  std::string committed_query;
   std::string replace;
   std::string path_filter;
   std::string include_pattern;
@@ -187,12 +188,14 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
                 WorkspaceIndexer* indexer, MainLayoutState* layout_state) {
   if (state->query.empty()) {
     state->runner.cancel();
+    state->committed_query.clear();
     state->results.clear();
     state->selected = 0;
     state->result_count = 0;
     state->status = "Introduce un texto para buscar";
     return;
   }
+  state->committed_query = state->query;
   const auto opts = build_options(state, workspace, model, indexer);
   if (opts.workspace_root.empty()) {
     state->status = "Sin workspace abierto";
@@ -465,7 +468,12 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       if (event.is_character() || event == Event::Backspace || event == Event::Delete ||
           event == Event::ArrowLeft || event == Event::ArrowRight || event == Event::Home ||
           event == Event::End) {
-        return forward_input_event(event);
+        const bool handled = forward_input_event(event);
+        if (handled && state->query != state->committed_query && state->runner.running()) {
+          state->runner.cancel();
+          state->status = "Enter: buscar";
+        }
+        return handled;
       }
       return false;
     }
@@ -541,8 +549,10 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         const std::string status_suffix =
             state->runner.running()
                 ? "  (buscando… Esc: cancelar)"
-                : (state->replace.empty() ? "  Enter: buscar"
-                                          : "  Enter: buscar  R: reemplazar");
+                : (state->query != state->committed_query
+                       ? "  (Enter: buscar)"
+                       : (state->replace.empty() ? "  Enter: buscar"
+                                                 : "  Enter: buscar  R: reemplazar"));
 
         Element form = vbox({
             hbox({
@@ -587,8 +597,9 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
             Elements parts;
             parts.push_back(text(" " + location) | color(theme::Accent()));
             std::size_t pos = 0;
+            const std::string& highlight = state->committed_query;
             while (pos <= hit.preview.size()) {
-              const auto found = hit.preview.find(state->query, pos);
+              const auto found = highlight.empty() ? std::string::npos : hit.preview.find(highlight, pos);
               if (found == std::string::npos) {
                 parts.push_back(text(hit.preview.substr(pos)) | color(theme::Header()));
                 break;
@@ -596,8 +607,8 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
               if (found > pos) {
                 parts.push_back(text(hit.preview.substr(pos, found - pos)) | color(theme::Header()));
               }
-              parts.push_back(text(state->query) | color(theme::Stop()) | bold);
-              pos = found + state->query.size();
+              parts.push_back(text(highlight) | color(theme::Stop()) | bold);
+              pos = found + highlight.size();
             }
             Element row = hbox(std::move(parts));
             if (selected) {

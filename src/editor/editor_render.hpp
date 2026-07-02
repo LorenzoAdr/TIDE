@@ -18,6 +18,7 @@ struct EditorDecoration {
   int end_col = 0;
   enum class Kind {
     FindMatch,
+    SelectionOccurrence,
     DiagnosticWarning,
     DiagnosticError,
     MatchingBracket,
@@ -40,6 +41,10 @@ void collect_press_decorations(int line_index, const EditorSymbolPress& press,
 void collect_find_decorations(int line_index, const std::vector<TextMatch>& matches,
                               std::vector<EditorDecoration>* out);
 
+void collect_selection_occurrence_decorations(int line_index,
+                                              const std::vector<TextMatch>& matches,
+                                              std::vector<EditorDecoration>* out);
+
 void collect_line_decorations(int line_index, const EditorBuffer& buffer, bool editor_focused,
                               bool show_caret, std::vector<EditorDecoration>* out);
 
@@ -52,6 +57,7 @@ void collect_diagnostic_decorations(int line_index, const std::vector<Diagnostic
 ftxui::Element RenderEditorLine(const std::string& line, int line_index,
                                const EditorBuffer& buffer, bool editor_focused,
                                const std::vector<TextMatch>* find_matches = nullptr,
+                               const std::vector<TextMatch>* selection_occurrences = nullptr,
                                const SemanticTokenDocument* semantic_tokens = nullptr,
                                const BracketPairHighlight* bracket = nullptr,
                                const std::vector<Diagnostic>* line_diagnostics = nullptr,

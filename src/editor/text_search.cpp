@@ -173,6 +173,41 @@ std::vector<TextMatch> find_all_matches(const EditorBuffer& buffer, const std::s
   return out;
 }
 
+std::vector<TextMatch> find_selection_occurrences(const EditorBuffer& buffer) {
+  if (buffer.cursors.size() != 1) {
+    return {};
+  }
+  const MultiCursor& cursor = buffer.primary();
+  if (!cursor.has_selection()) {
+    return {};
+  }
+
+  int start_line = 0;
+  int start_col = 0;
+  int end_line = 0;
+  int end_col = 0;
+  cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
+  if (start_line != end_line) {
+    return {};
+  }
+
+  const std::string needle = selection_text(buffer, cursor);
+  constexpr std::size_t kMaxNeedle = 256;
+  if (needle.size() < 2 || needle.size() > kMaxNeedle) {
+    return {};
+  }
+  if (std::all_of(needle.begin(), needle.end(),
+                  [](unsigned char c) { return std::isspace(static_cast<unsigned char>(c)); })) {
+    return {};
+  }
+
+  const std::vector<TextMatch> matches = find_all_matches(buffer, needle);
+  if (matches.size() < 2) {
+    return {};
+  }
+  return matches;
+}
+
 bool match_occupied(const TextMatch& match, const EditorBuffer& buffer) {
   for (const auto& cursor : buffer.cursors) {
     if (!cursor.has_selection()) {

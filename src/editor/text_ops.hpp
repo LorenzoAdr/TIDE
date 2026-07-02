@@ -28,6 +28,7 @@ void delete_word_forward(EditorBuffer* buffer);
 void newline(EditorBuffer* buffer);
 void paste_at_primary(EditorBuffer* buffer, const std::string& text);
 bool undo_edit(EditorBuffer* buffer);
+bool redo_edit(EditorBuffer* buffer);
 void delete_all_selections(EditorBuffer* buffer);
 
 void move_primary_left(EditorBuffer* buffer, bool extend_selection = false);
