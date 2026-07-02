@@ -1,6 +1,5 @@
 #include "editor/editor_find_state.hpp"
 
-#include "editor/clipboard.hpp"
 #include "editor/text_ops.hpp"
 
 namespace tgdb {
@@ -51,10 +50,7 @@ bool EditorFindState::jump_to_next_match(EditorBuffer* buffer, int visible_lines
 }
 
 void open_find_bar(EditorFindState* find, EditorBuffer* buffer) {
-  if (find->query.empty()) {
-    find->query = extract_selection_text(*buffer, buffer->primary());
-  }
-  find->cursor_pos = static_cast<int>(find->query.size());
+  find->cursor_pos = 0;
   find->open = true;
   find->refresh_matches(*buffer);
 }

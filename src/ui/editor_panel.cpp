@@ -43,6 +43,7 @@
 #include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
 #include "ui/scroll_bar.hpp"
+#include "ui/overview_ruler.hpp"
 #include "ui/text_input_style.hpp"
 #include "ui/spinner.hpp"
 #include "ui/theme.hpp"
@@ -115,7 +116,9 @@ struct EditorPanelState {
   Box breadcrumb_box;
   Box problems_button_box;
   Box scrollbar_box;
+  Box overview_ruler_box;
   ScrollbarLayout scrollbar_layout;
+  OverviewRulerLayout overview_ruler_layout;
   bool scrollbar_dragging = false;
   int scrollbar_drag_offset = 0;
   uint64_t last_view_token = 0;
@@ -712,8 +715,8 @@ void track_hover_mouse(EditorPanelState* panel, const Mouse& m, const EditorBuff
   panel->hover.info = {};
 }
 
-bool handle_problems_button_click(MainLayoutState* layout_state, EditorPanelState* panel,
-                                  const Mouse& m) {
+bool handle_problems_button_click(MainLayoutState* layout_state, FocusManagerState* focus,
+                                  EditorPanelState* panel, const Mouse& m) {
   if (layout_state == nullptr || panel == nullptr || m.button != Mouse::Left ||
       m.motion != Mouse::Pressed) {
     return false;
@@ -727,6 +730,9 @@ bool handle_problems_button_click(MainLayoutState* layout_state, EditorPanelStat
     layout_state->console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
   } else {
     layout_state->console_tabs.selected_tab = ConsolePanelTabs::kProblems;
+    if (focus != nullptr) {
+      focus->region = FocusRegion::Terminal;
+    }
   }
   layout_state->focus_sync_needed = true;
   layout_state->request_ui_tick = true;
@@ -758,6 +764,60 @@ bool handle_breadcrumb_click(WorkspaceModel* workspace, FocusManagerState* focus
     }
   }
   return false;
+}
+
+void navigate_editor_to_line(WorkspaceModel* workspace, EditorPanelState* panel, int line,
+                             int visible_lines) {
+  if (workspace == nullptr || panel == nullptr) {
+    return;
+  }
+  workspace->ensure_buffer();
+  EditorBuffer* buffer = &workspace->buffer;
+  if (buffer->lines.empty()) {
+    return;
+  }
+  line = std::max(0, std::min(line, static_cast<int>(buffer->lines.size()) - 1));
+  buffer->reset_to_single_cursor(line, 0);
+  buffer->scroll = std::max(0, line - visible_lines / 3);
+  buffer->view_token++;
+  clear_hover_state(&panel->hover);
+  ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+}
+
+bool handle_overview_ruler_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
+                                 MainLayoutState* layout_state, EditorPanelState* panel,
+                                 const Mouse& m, int visible_lines) {
+  if (panel == nullptr || panel->overview_ruler_layout.bar_height <= 0) {
+    return false;
+  }
+
+  const bool in_ruler = overview_ruler_contains(panel->overview_ruler_box, m.x, m.y);
+  if (!in_ruler) {
+    return false;
+  }
+
+  if (m.button == Mouse::WheelUp) {
+    workspace->ensure_buffer();
+    scroll_view_by_lines(&workspace->buffer, -3, visible_lines);
+    clear_hover_state(&panel->hover);
+    return true;
+  }
+  if (m.button == Mouse::WheelDown) {
+    workspace->ensure_buffer();
+    scroll_view_by_lines(&workspace->buffer, 3, visible_lines);
+    clear_hover_state(&panel->hover);
+    return true;
+  }
+
+  if (m.button != Mouse::Left || m.motion != Mouse::Pressed) {
+    return false;
+  }
+
+  claim_editor_focus(focus, layout_state);
+  const int local_y = m.y - panel->overview_ruler_box.y_min;
+  const int line = overview_ruler_line_for_y(panel->overview_ruler_layout, local_y);
+  navigate_editor_to_line(workspace, panel, line, visible_lines);
+  return true;
 }
 
 bool apply_scrollbar_drag(WorkspaceModel* workspace, EditorPanelState* panel, int mouse_y,
@@ -882,10 +942,13 @@ bool handle_editor_chrome_mouse(WorkspaceModel* workspace, FocusManagerState* fo
     }
     return true;
   }
-  if (handle_problems_button_click(layout_state, panel, m)) {
+  if (handle_problems_button_click(layout_state, focus, panel, m)) {
     return true;
   }
   if (handle_breadcrumb_click(workspace, focus, layout_state, panel, m, visible_lines)) {
+    return true;
+  }
+  if (handle_overview_ruler_mouse(workspace, focus, layout_state, panel, m, visible_lines)) {
     return true;
   }
   if (handle_scrollbar_mouse(workspace, focus, layout_state, panel, m, visible_lines)) {
@@ -1244,8 +1307,20 @@ bool sgr_mouse_has_shift(const Event& event) {
   return (button & 4) != 0;
 }
 
+bool sgr_mouse_has_meta(const Event& event) {
+  int button = 0;
+  if (!sgr_mouse_button_field(event, &button)) {
+    return false;
+  }
+  return (button & 8) != 0;
+}
+
 bool mouse_shift_active(const Mouse& m, const Event& event) {
   return m.shift || sgr_mouse_has_shift(event);
+}
+
+bool mouse_alt_active(const Mouse& m, const Event& event) {
+  return m.meta || sgr_mouse_has_meta(event);
 }
 
 struct GotoLineState {
@@ -1492,11 +1567,7 @@ bool try_go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
   if (params.path.empty()) {
     return false;
   }
-  SourceLocation loc = declaration ? symbols->goto_declaration(params)
-                                   : symbols->goto_definition(params);
-  if (!loc.valid && !declaration) {
-    loc = symbols->goto_declaration(params);
-  }
+  SourceLocation loc = resolve_symbol_navigation(*symbols, params, declaration);
   if (!loc.valid) {
     workspace->status_message = declaration ? "Sin declaración LSP" : "Sin definición LSP";
     return false;
@@ -1656,12 +1727,11 @@ bool completion_input_active(MainLayoutState* layout_state, bool completion_open
 
 void activate_find(EditorFindState* find, EditorBuffer* buffer, MainLayoutState* layout_state,
                    FocusManagerState* focus) {
-  if (!find->open) {
-    open_find_bar(find, buffer);
-  } else {
-    find->refresh_matches(*buffer);
-    find->cursor_pos = static_cast<int>(find->query.size());
-  }
+  find->query.clear();
+  find->cursor_pos = 0;
+  find->matches.clear();
+  find->open = true;
+  find->refresh_matches(*buffer);
   if (focus != nullptr) {
     focus->region = FocusRegion::Editor;
   }
@@ -1670,6 +1740,27 @@ void activate_find(EditorFindState* find, EditorBuffer* buffer, MainLayoutState*
     layout_state->focus_sync_needed = true;
   }
 }
+
+namespace {
+
+std::string sanitize_find_paste(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+  for (const char ch : text) {
+    if (ch == '\n' || ch == '\r' || ch == '\t') {
+      if (!out.empty() && out.back() != ' ') {
+        out.push_back(' ');
+      }
+      continue;
+    }
+    if (static_cast<unsigned char>(ch) >= 32 && ch != 127) {
+      out.push_back(ch);
+    }
+  }
+  return out;
+}
+
+}  // namespace
 
 bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, EditorBuffer* buffer,
                       Event event, int visible_lines) {
@@ -1711,6 +1802,15 @@ bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, Edit
   if (event == Event::ArrowRight) {
     find->cursor_pos =
         std::min(static_cast<int>(find->query.size()), find->cursor_pos + 1);
+    return true;
+  }
+  if (event_is_ctrl_v(event)) {
+    const std::string pasted = sanitize_find_paste(read_clipboard_for_paste());
+    if (!pasted.empty()) {
+      find->query.insert(static_cast<std::size_t>(find->cursor_pos), pasted);
+      find->cursor_pos += static_cast<int>(pasted.size());
+      find->refresh_matches(*buffer);
+    }
     return true;
   }
   if (event.is_character()) {
@@ -2033,14 +2133,16 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
 
     const CursorPos pos = mouse_to_cursor(m, *panel, *buffer, visible_lines);
     const bool shift_click = mouse_shift_active(m, event);
+    const bool alt_click = mouse_alt_active(m, event);
 
     const int64_t now_ms = steady_now_ms();
     const bool same_spot = is_same_click_spot(*panel, pos.line, pos.col, now_ms);
     const int click_count = same_spot ? panel->last_click_count + 1 : 1;
     const bool triple_click =
-        in_code && !shift_click && !m.control && is_triple_click(*panel, pos.line, pos.col, now_ms);
+        in_code && !shift_click && !alt_click && !m.control &&
+        is_triple_click(*panel, pos.line, pos.col, now_ms);
     const bool double_click =
-        in_code && !shift_click && !m.control && click_count == 2;
+        in_code && !shift_click && !alt_click && !m.control && click_count == 2;
     panel->last_click_line = pos.line;
     panel->last_click_col = pos.col;
     panel->last_click_ms = now_ms;
@@ -2090,6 +2192,20 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       }
       const CursorPos anchor = buffer->primary().has_selection() ? buffer->primary().anchor
                                                                  : buffer->primary().head;
+      buffer->reset_to_single_cursor(anchor.line, anchor.col);
+      buffer->primary().anchor = anchor;
+      buffer->primary().head = pos;
+      clamp_all_cursors(buffer);
+      begin_mouse_selection(panel, event);
+      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+      return true;
+    }
+
+    if (alt_click) {
+      if (buffer->multi_cursor_active()) {
+        exit_multi_cursor_mode(buffer);
+      }
+      const CursorPos anchor = buffer->primary().head;
       buffer->reset_to_single_cursor(anchor.line, anchor.col);
       buffer->primary().anchor = anchor;
       buffer->primary().head = pos;
@@ -2234,9 +2350,13 @@ bool accept_completion(CompletionState* completion, EditorBuffer* buffer,
     snippet.caret_col = static_cast<int>(raw_insert.size());
   }
 
-  replace_text_range_with_caret(buffer, repl_line, repl_start, repl_end, snippet.text,
-                                snippet.caret_line_offset, snippet.caret_col,
-                                snippet.sel_start_col, snippet.sel_end_col);
+  if (buffer->multi_cursor_active()) {
+    apply_completion_at_all_cursors(buffer, snippet);
+  } else {
+    replace_text_range_with_caret(buffer, repl_line, repl_start, repl_end, snippet.text,
+                                  snippet.caret_line_offset, snippet.caret_col,
+                                  snippet.sel_start_col, snippet.sel_end_col);
+  }
   ensure_scroll_visible(buffer, visible_lines, -1);
   if (workspace != nullptr && symbols != nullptr) {
     notify_editor_buffer_changed(workspace, symbols);
@@ -2435,7 +2555,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     add_next_selection_match(buffer, visible_lines);
     return true;
   }
-  if (event_is_ctrl_shift_l(event)) {
+  if (event_is_ctrl_alt_l(event) || event_is_ctrl_shift_l(event)) {
     select_all_matches(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
@@ -2973,14 +3093,40 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         panel_state->scrollbar_dragging ||
         (layout_state != nullptr &&
          layout_state->clickable.is_pressed(press_id::kEditorScrollbar));
+    const bool overview_ruler_enabled =
+        layout_state == nullptr || layout_state->app_settings == nullptr ||
+        layout_state->app_settings->overview_ruler_enabled;
     Element scrollbar =
         vertical_scrollbar(total, buffer.scroll, visible, rendered_lines, scroll_hovered,
                            scroll_active) |
         reflect(panel_state->scrollbar_box);
     panel_state->scrollbar_layout =
         compute_scrollbar_layout(total, buffer.scroll, visible, rendered_lines);
-    Element editor_body =
-        hbox({gutter, separator() | color(theme::AccentDim()), code | flex, scrollbar});
+
+    Elements editor_columns = {gutter, separator() | color(theme::AccentDim()), code | flex};
+    if (overview_ruler_enabled) {
+      OverviewRulerInput ruler_input;
+      ruler_input.total_lines = total;
+      ruler_input.scroll = buffer.scroll;
+      ruler_input.visible_lines = visible;
+      ruler_input.diagnostics_by_line = &panel_state->diagnostics_by_line;
+      ruler_input.git_changed_lines = &panel_state->git_changed_lines;
+      if (find_state->open && !find_state->matches.empty()) {
+        ruler_input.text_matches = &find_state->matches;
+      } else {
+        ruler_input.text_matches =
+            selection_occurrence_matches_for(panel_state.get(), buffer, find_state->open);
+      }
+      Element overview_ruler =
+          vertical_overview_ruler(ruler_input, rendered_lines,
+                                  &panel_state->overview_ruler_layout) |
+          reflect(panel_state->overview_ruler_box);
+      editor_columns.push_back(std::move(overview_ruler));
+    } else {
+      panel_state->overview_ruler_layout = {};
+    }
+    editor_columns.push_back(std::move(scrollbar));
+    Element editor_body = hbox(std::move(editor_columns));
 
     Element body = std::move(editor_body) | frame | flex | bgcolor(theme::CodeBg());
     if (sticky_lines.empty()) {

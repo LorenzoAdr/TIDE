@@ -44,6 +44,8 @@ add_executable(tgdb
   src/ui/theme.cpp
   src/ui/connection_wizard.cpp
   src/ui/workspace_wizard.cpp
+  src/ui/welcome_screen.cpp
+  src/ui/external_file_wizard.cpp
   src/ui/path_browser.cpp
   src/ui/focus_manager.cpp
   src/ui/key_bindings.cpp

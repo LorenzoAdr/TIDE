@@ -37,6 +37,7 @@ struct SettingsModalState {
   bool draft_lsp_enabled = true;
   bool draft_show_diagnostic_suffixes = true;
   bool draft_sticky_scroll_enabled = true;
+  bool draft_overview_ruler_enabled = true;
   bool draft_secondary_panel_enabled = true;
   bool draft_force_bundled_clangd = false;
   bool draft_force_bundled_gdb = false;

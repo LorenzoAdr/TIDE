@@ -39,6 +39,7 @@ struct DiagnosticsPanelState {
   std::vector<DiagnosticRow> rows;
   int selected = 0;
   int first_visible = 0;
+  int last_visible_lines = 1;
   Box content_box;
   uint64_t rows_revision = 0;
 };
@@ -292,6 +293,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
     }
 
     const int visible = visible_line_count(state->content_box);
+    state->last_visible_lines = visible;
     const int panel_width = panel_content_width(state->content_box);
     clamp_scroll(state.get(), visible);
 
@@ -322,6 +324,26 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
 
     if (event.is_mouse()) {
       const auto& m = event.mouse();
+      if (state->content_box.Contain(m.x, m.y) &&
+          (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown)) {
+        if (focus != nullptr) {
+          focus->region = FocusRegion::Terminal;
+        }
+        const int visible = visible_line_count(state->content_box);
+        const int visible_rows = visible_problem_count(visible);
+        const int total = static_cast<int>(state->rows.size());
+        const int max_first = std::max(0, total - visible_rows);
+        if (m.button == Mouse::WheelUp) {
+          state->first_visible = std::max(0, state->first_visible - 1);
+        } else {
+          state->first_visible = std::min(state->first_visible + 1, max_first);
+        }
+        clamp_scroll(state.get(), visible);
+        if (layout_state != nullptr) {
+          layout_state->request_ui_tick = true;
+        }
+        return true;
+      }
       if (m.button == Mouse::Right && m.motion == Mouse::Pressed) {
         if (!state->content_box.Contain(m.x, m.y)) {
           return false;
@@ -379,10 +401,6 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
 
     if (layout_state != nullptr &&
         is_editor_chrome_input_focus(layout_state->text_input_focus)) {
-      return false;
-    }
-
-    if (focus != nullptr && focus->region != FocusRegion::Terminal) {
       return false;
     }
 

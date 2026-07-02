@@ -8,6 +8,8 @@ bool event_is_shift_home(const ftxui::Event& event);
 bool event_is_shift_end(const ftxui::Event& event);
 
 bool event_is_ctrl_shift_l(const ftxui::Event& event);
+bool event_is_ctrl_alt_l(const ftxui::Event& event);
+bool event_is_alt_f1(const ftxui::Event& event);
 
 bool event_is_shift_left(const ftxui::Event& event);
 bool event_is_shift_right(const ftxui::Event& event);

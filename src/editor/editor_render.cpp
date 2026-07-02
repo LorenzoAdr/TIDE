@@ -298,7 +298,8 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
                          const BracketPairHighlight* bracket,
                          const std::vector<Diagnostic>* line_diagnostics,
                          const EditorSymbolPress* symbol_press, bool show_caret, int scroll_col,
-                         int view_width, CppHighlightContext* highlight_ctx) {
+                         int view_width, CppHighlightContext* highlight_ctx,
+                         BuildFileKind build_file_kind) {
   std::vector<EditorDecoration> decorations;
   if (symbol_press != nullptr && symbol_press->active) {
     collect_press_decorations(line_index, *symbol_press, &decorations);
@@ -347,13 +348,15 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
         segment_cursor = cursor_blink::effective_col(buffer.primary_col() - (prev + scroll_col));
       }
     }
+    const bool use_build_highlight = build_file_kind != BuildFileKind::kNone;
     const int col_offset = syntax_highlight ? prev + scroll_col : 0;
     const Decorator cursor_cell = cursor_blink::cell_decorator();
     parts.push_back(apply_decoration(
         segment.empty() ? text(" ")
-                        : render_line_content(segment, line_index, semantic_tokens, syntax_highlight,
+                        : render_line_content(segment, line_index, semantic_tokens,
+                                              syntax_highlight && !use_build_highlight,
                                               segment_cursor, cursor_cell, col_offset,
-                                              highlight_ctx),
+                                              highlight_ctx, build_file_kind),
         chosen));
     prev = bp;
   }
@@ -492,7 +495,7 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
       rich ? render_rich_line(view_line, line_index, buffer, editor_focused, find_matches,
                               selection_occurrences, semantic_tokens, syntax_highlight, bracket,
                               line_diagnostics, symbol_press, show_caret, scroll_col, view_width,
-                              highlight_ctx)
+                              highlight_ctx, build_file_kind)
            : render_simple_line(view_line, line_index, buffer, editor_focused, semantic_tokens,
                                 syntax_highlight, line_bg, show_caret, scroll_col, highlight_ctx,
                                 build_file_kind);

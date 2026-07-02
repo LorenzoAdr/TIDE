@@ -57,10 +57,13 @@ class ShellSession {
   std::size_t pending_output_chunks() const;
   std::string screen_text();
 
+  void set_output_notify(std::function<void()> callback);
+
  private:
   void bootstrap_shell(const ShellLaunchConfig& config);
   void reader_loop();
   void apply_winsize();
+  void notify_output();
 
   RawPtyScreen terminal_;
   mutable std::mutex terminal_mutex_;
@@ -77,6 +80,8 @@ class ShellSession {
   std::string display_text_;
   std::vector<TerminalStyledRow> display_styled_rows_;
   std::atomic<bool> output_pending_{false};
+  std::mutex notify_mutex_;
+  std::function<void()> output_notify_;
 };
 
 }  // namespace tgdb

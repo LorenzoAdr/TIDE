@@ -21,6 +21,7 @@
 #include "ui/source_panel.hpp"
 #include "ui/theme.hpp"
 #include "ui/watches_panel.hpp"
+#include "ui/welcome_screen.hpp"
 
 namespace tgdb {
 
@@ -456,11 +457,14 @@ Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
       });
 }
 
-std::string status_shortcuts(AppMode mode) {
-  if (mode == AppMode::kDebug) {
-    return "F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into";
+std::string status_shortcuts(AppMode mode, bool welcome_visible) {
+  if (welcome_visible) {
+    return "F1 archivo  Alt+F1 atajos  F2 depurar  F3 workspace";
   }
-  return "F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 git  F7 buscar  F8 outline  F9 problemas";
+  if (mode == AppMode::kDebug) {
+    return "F1 externo  Alt+F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into";
+  }
+  return "F1 externo  Alt+F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 git  F7 buscar  F8 outline  F9 problemas";
 }
 
 std::string buffer_text(const EditorBuffer& buffer) {
@@ -641,7 +645,10 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                          StopDebugCallback on_stop_debug, ShellSession* shell,
                          WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
                          ShellLaunchConfigProvider shell_launch_config, GitService* git_service,
-                         GitPanelState* git_panel_state) {
+                         GitPanelState* git_panel_state, WelcomeScreenState* welcome_state,
+                         std::function<void()> on_welcome_external_file,
+                         std::function<void()> on_welcome_debug,
+                         std::function<void()> on_welcome_workspace) {
   auto split_state = std::make_shared<LayoutState>();
   auto focus_sync = std::make_shared<FocusSyncState>();
   split_state->left_width = 22;
@@ -656,6 +663,10 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto center = MakeModeLayout(app_mode, editor, source);
 
   auto git_panel = MakeGitPanel(git_service, git_panel_state, layout_state, focus);
+
+  auto welcome_screen =
+      MakeWelcomeScreen(layout_state, welcome_state, on_welcome_external_file, on_welcome_debug,
+                        on_welcome_workspace);
 
   auto outline = MakeOutlinePanel(workspace, focus, symbols, layout_state);
   auto sidebar = MakeRightSidebarPanel(outline, layout_state);
@@ -728,8 +739,12 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
         layout_state != nullptr && layout_state->console_visible;
     const bool git_page_visible =
         layout_state != nullptr && layout_state->git_page_visible;
+    const bool welcome_visible =
+        layout_state != nullptr && layout_state->welcome_visible;
     Element main;
-    if (layout_state != nullptr && layout_state->console_visible) {
+    if (welcome_visible) {
+      main = welcome_screen->Render() | flex | bgcolor(theme::PanelBg());
+    } else if (layout_state != nullptr && layout_state->console_visible) {
       main = show_secondary ? with_focus_sync->Render()
                             : with_console_no_secondary->Render();
     } else {
@@ -799,7 +814,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
         text(" tide ") | bold | color(theme::Accent()),
         text(" │ "),
         text(focus_label + status_msg) | flex | color(theme::Header()),
-        text(status_shortcuts(mode)) | color(theme::Muted()),
+        text(status_shortcuts(mode, welcome_visible)) | color(theme::Muted()),
     }) | bgcolor(theme::StatusBar());
 
     return vbox({main | flex | bgcolor(theme::PanelBg()), status});

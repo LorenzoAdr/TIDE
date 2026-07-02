@@ -5,6 +5,7 @@
 
 #include "editor/text_search.hpp"
 #include "editor/undo_stack.hpp"
+#include "symbols/completion_snippet.hpp"
 
 namespace tgdb {
 
@@ -634,6 +635,67 @@ void replace_text_range_with_caret(EditorBuffer* buffer, int line, int start_col
     buffer->primary().head = {caret_line, caret_col_base + sel_end_col};
   }
   clamp_all_cursors(buffer);
+  mark_dirty(buffer);
+}
+
+void apply_completion_at_all_cursors(EditorBuffer* buffer, const SnippetResult& snippet) {
+  if (snippet.text.empty()) {
+    return;
+  }
+  push_undo(buffer);
+  clamp_all_cursors(buffer);
+  if (any_cursor_has_selection(*buffer)) {
+    delete_all_selections(buffer);
+  }
+  for (auto& cursor : buffer->cursors) {
+    cursor.collapse_to_head();
+  }
+
+  struct Site {
+    int line = 0;
+    int start_col = 0;
+    int end_col = 0;
+    std::size_t cursor_index = 0;
+  };
+  std::vector<Site> sites;
+  sites.reserve(buffer->cursors.size());
+  for (std::size_t i = 0; i < buffer->cursors.size(); ++i) {
+    Site site;
+    site.line = buffer->cursors[i].head.line;
+    ident_range_at_cursor(*buffer, buffer->cursors[i], &site.start_col, &site.end_col);
+    site.cursor_index = i;
+    sites.push_back(site);
+  }
+  std::sort(sites.begin(), sites.end(), [](const Site& a, const Site& b) {
+    if (a.line != b.line) {
+      return a.line > b.line;
+    }
+    return a.start_col > b.start_col;
+  });
+
+  for (const auto& site : sites) {
+    delete_range(buffer, site.line, site.start_col, site.line, site.end_col);
+    int col = site.start_col;
+    if (site.line >= 0 && site.line < static_cast<int>(buffer->lines.size())) {
+      col = std::max(0, std::min(col, static_cast<int>(buffer->lines[site.line].size())));
+    }
+    insert_string_at(buffer, site.line, col, snippet.text);
+    const int caret_line = site.line + snippet.caret_line_offset;
+    const int caret_base = snippet.caret_line_offset == 0 ? col : 0;
+    buffer->cursors[site.cursor_index].head = {caret_line, caret_base + snippet.caret_col};
+    buffer->cursors[site.cursor_index].anchor = buffer->cursors[site.cursor_index].head;
+  }
+
+  if (snippet.sel_start_col >= 0 && snippet.sel_end_col > snippet.sel_start_col) {
+    MultiCursor& primary = buffer->primary();
+    const int caret_base =
+        snippet.caret_line_offset == 0 ? primary.head.col - snippet.caret_col : 0;
+    primary.anchor = {primary.head.line, caret_base + snippet.sel_start_col};
+    primary.head = {primary.head.line, caret_base + snippet.sel_end_col};
+  }
+
+  clamp_all_cursors(buffer);
+  merge_overlapping_cursors(buffer);
   mark_dirty(buffer);
 }
 

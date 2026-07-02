@@ -35,6 +35,10 @@ const std::unordered_set<std::string>& keywords_for(BuildFileKind kind) {
       "if", "then", "elif", "else", "fi", "for", "do", "done", "while",
       "case", "esac", "function", "export", "local", "return", "source",
   };
+  static const std::unordered_set<std::string> kYaml = {
+      "true", "false", "null", "True", "False", "Null", "NULL",
+      "yes", "no", "on", "off", "Yes", "No", "ON", "OFF",
+  };
   switch (kind) {
     case BuildFileKind::kMakefile:
       return kMakefile;
@@ -42,6 +46,8 @@ const std::unordered_set<std::string>& keywords_for(BuildFileKind kind) {
       return kCMake;
     case BuildFileKind::kShell:
       return kShell;
+    case BuildFileKind::kYaml:
+      return kYaml;
     case BuildFileKind::kNone:
       break;
   }
@@ -99,6 +105,9 @@ BuildFileKind detect_build_file_kind(const std::string& path) {
     return BuildFileKind::kCMake;
   }
   const auto ext = std::filesystem::path(path).extension().string();
+  if (ext == ".yaml" || ext == ".yml") {
+    return BuildFileKind::kYaml;
+  }
   if (ext == ".sh" || ext == ".bash" || ext == ".zsh" || filename == ".bashrc" ||
       filename == ".profile") {
     return BuildFileKind::kShell;
@@ -122,6 +131,7 @@ Element HighlightBuildFileLine(BuildFileKind kind, const std::string& line, int 
   const Decorator string_style = color(theme::SyntaxString());
   const Decorator keyword_style = color(theme::BuildFileKeyword()) | bold;
   const Decorator target_style = color(theme::SyntaxFunction());
+  const Decorator key_style = color(theme::SyntaxProperty());
   const auto& keywords = keywords_for(kind);
 
   Elements parts;
@@ -155,6 +165,14 @@ Element HighlightBuildFileLine(BuildFileKind kind, const std::string& line, int 
       Decorator style = default_style;
       if (keywords.count(word) > 0) {
         style = keyword_style;
+      } else if (kind == BuildFileKind::kYaml) {
+        std::size_t k = j;
+        while (k < line.size() && line[k] == ' ') {
+          ++k;
+        }
+        if (k < line.size() && line[k] == ':') {
+          style = key_style;
+        }
       } else if (kind == BuildFileKind::kMakefile) {
         const auto colon = line.find(':', j);
         if (colon != std::string::npos && line_has_make_target(line, colon) &&

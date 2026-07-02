@@ -6,6 +6,7 @@
 #include "editor/clipboard.hpp"
 #include "editor/editor_state.hpp"
 #include "editor/text_ops.hpp"
+#include "symbols/completion_snippet.hpp"
 #include "editor/text_search.hpp"
 
 namespace {
@@ -121,6 +122,24 @@ void test_paste_multi_cursor() {
   check(buffer.cursors[2].head.col == 11, "third cursor after paste");
 }
 
+void test_completion_multi_cursor() {
+  auto buffer = make_buffer({"foo foo foo"});
+  buffer.cursors = {
+      {{0, 0}, {0, 0}},
+      {{0, 4}, {0, 4}},
+      {{0, 8}, {0, 8}},
+  };
+  tgdb::SnippetResult snippet;
+  snippet.text = "baz";
+  snippet.caret_col = 3;
+  tgdb::apply_completion_at_all_cursors(&buffer, snippet);
+  check(buffer.lines[0] == "baz baz baz", "completion at three positions");
+  check(buffer.cursors.size() == 3, "still three cursors");
+  check(buffer.cursors[0].head.col == 3, "first cursor after completion");
+  check(buffer.cursors[1].head.col == 7, "second cursor after completion");
+  check(buffer.cursors[2].head.col == 11, "third cursor after completion");
+}
+
 }  // namespace
 
 int main() {
@@ -135,5 +154,6 @@ int main() {
   test_paste_at_end_of_line();
   test_paste_replaces_selection();
   test_paste_multi_cursor();
+  test_completion_multi_cursor();
   return 0;
 }

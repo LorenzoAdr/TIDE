@@ -32,6 +32,7 @@
 #include "ui/performance_panel.hpp"
 #include "ui/text_input_style.hpp"
 #include "ui/scroll_bar.hpp"
+#include "ui/terminal_display.hpp"
 #include "ui/theme.hpp"
 
 namespace tgdb {
@@ -158,6 +159,29 @@ void clamp_terminal_scroll(ConsolePanelState* state, int total_lines, int visibl
 void scroll_terminal_to_tail(ConsolePanelState* state, int total_lines, int visible_lines) {
   state->terminal_first_visible = max_first_visible(total_lines, visible_lines);
   state->terminal_follow_tail = true;
+}
+
+void follow_terminal_on_input(ConsolePanelState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->terminal_follow_tail = true;
+  const int total = static_cast<int>(state->terminal_styled_rows.size());
+  const int visible = std::max(1, state->terminal_last_visible_lines);
+  if (total > 0) {
+    scroll_terminal_to_tail(state, total, visible);
+  }
+}
+
+void request_terminal_repaint(MainLayoutState* layout_state) {
+  if (layout_state != nullptr && layout_state->terminal_wake_callback) {
+    layout_state->terminal_wake_callback();
+    return;
+  }
+  if (layout_state != nullptr) {
+    layout_state->request_ui_tick = true;
+  }
+  nudge_terminal_repaint();
 }
 
 void scroll_terminal_by_lines(ConsolePanelState* state, int delta, int total_lines,
@@ -449,6 +473,13 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
       if (is_search_input_focus(layout_state->text_input_focus)) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
+    } else if (tab == ConsolePanelTabs::kProblems) {
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      if (is_search_input_focus(layout_state->text_input_focus)) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
     } else if (is_search_input_focus(layout_state->text_input_focus)) {
       layout_state->text_input_focus = TextInputFocus::None;
     }
@@ -657,7 +688,7 @@ Element render_terminal_body(Element content) {
 Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool show_cursor,
                            int max_cols) {
   const Decorator cursor_cell = cursor_blink::cell_decorator();
-  const bool draw_cursor = show_cursor && cursor_blink::visible();
+  const bool draw_cursor = show_cursor;
 
   Elements parts;
   int col = 0;
@@ -818,18 +849,18 @@ void refresh_terminal_view(ShellSession* shell, ConsolePanelState* state) {
   if (drained == 0 && text == state->terminal_text && state->terminal_view_valid) {
     return;
   }
-  const int old_total = static_cast<int>(state->terminal_styled_rows.size());
   state->terminal_text = text;
   state->terminal_styled_rows = shell->display_styled_rows();
   const int new_total = static_cast<int>(state->terminal_styled_rows.size());
-  if (new_total > old_total && state->terminal_follow_tail) {
+  if (state->terminal_follow_tail) {
     scroll_terminal_to_tail(state, new_total, state->terminal_last_visible_lines);
   }
   clamp_terminal_scroll(state, new_total, state->terminal_last_visible_lines);
   state->terminal_view_valid = true;
 }
 
-bool forward_pty_key(ShellSession* shell, const Event& event) {
+bool forward_pty_key(ShellSession* shell, const Event& event, ConsolePanelState* state,
+                     MainLayoutState* layout_state) {
   if (shell == nullptr || !shell->running()) {
     return false;
   }
@@ -841,6 +872,8 @@ bool forward_pty_key(ShellSession* shell, const Event& event) {
     return false;
   }
   shell->write_raw(*bytes);
+  follow_terminal_on_input(state);
+  request_terminal_repaint(layout_state);
   return true;
 }
 
@@ -1140,7 +1173,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     }
 
     if (terminal_pty_input_active(layout_state, focus, shell) && on_terminal_tab) {
-      if (forward_pty_key(shell, event)) {
+      if (forward_pty_key(shell, event, state.get(), layout_state)) {
         return true;
       }
       if (event == Event::Escape) {
@@ -1168,7 +1201,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     if (event == Event::Return && on_terminal_tab) {
       activate_shell_input(model, layout_state, focus, shell, state.get(),
                            current_shell_launch(shell_launch_config, model));
-      if (forward_pty_key(shell, event)) {
+      if (forward_pty_key(shell, event, state.get(), layout_state)) {
         return true;
       }
       return true;
@@ -1248,7 +1281,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       }
       return true;
     }
-    return forward_pty_key(shell, event);
+    return forward_pty_key(shell, event, state.get(), layout_state);
   };
 
   auto dispatch_console_mouse = [app_mode, layout_state, focus, model, shell, state, input_box,
@@ -1281,6 +1314,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     layout_state->console_key_handler = dispatch_console_keys;
     layout_state->console_mouse_handler = dispatch_console_mouse;
     layout_state->console_debug_mouse_handler = dispatch_console_mouse;
+    layout_state->terminal_follow_input_callback = [state, layout_state]() {
+      follow_terminal_on_input(state.get());
+      request_terminal_repaint(layout_state);
+    };
+    if (shell != nullptr) {
+      shell->set_output_notify([layout_state]() { request_terminal_repaint(layout_state); });
+    }
     layout_state->terminal_tick_callback = [app_mode, model, shell, state, layout_state, focus,
                                             bottom_height, shell_launch_config] {
       if (layout_state->terminal_start_requested) {

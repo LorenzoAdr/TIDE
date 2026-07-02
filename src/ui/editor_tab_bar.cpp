@@ -20,6 +20,9 @@ namespace {
 std::string tab_label(const EditorTab& tab, int max_len) {
   std::string name = tab.path.empty() ? "Sin título"
                                       : std::filesystem::path(tab.path).filename().string();
+  if (tab.external) {
+    name = "+" + name;
+  }
   if (tab.buffer.dirty) {
     name += "*";
   }

@@ -45,9 +45,35 @@ bool input_has_shift_release_token(const std::string& input) {
 }  // namespace
 
 bool event_is_ctrl_shift_l(const ftxui::Event& event) {
-  return event == ftxui::Event::Special("\x1B[27;6;76~") ||
+  const int mods[] = {6};
+  return csi_key_any_modifier(event, mods, 1, 76) ||
+         csi_key_any_modifier(event, mods, 1, 108) ||
+         event == ftxui::Event::Special("\x1B[27;6;76~") ||
          event == ftxui::Event::Special("\x1B[27;6;108~") ||
-         event == ftxui::Event::Special("\x1B[27;5;76~");
+         event == ftxui::Event::Special("\x1B[76;6u") ||
+         event == ftxui::Event::Special("\x1B[108;6u");
+}
+
+bool event_is_ctrl_alt_l(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return csi_key_any_modifier(event, mods, 1, 76) ||
+         csi_key_any_modifier(event, mods, 1, 108) ||
+         event == ftxui::Event::Special("\x1B[27;7;76~") ||
+         event == ftxui::Event::Special("\x1B[27;7;108~") ||
+         event == ftxui::Event::Special("\x1B[76;7u") ||
+         event == ftxui::Event::Special("\x1B[108;7u");
+}
+
+bool event_is_alt_f1(const ftxui::Event& event) {
+  const int mods[] = {3};
+  return csi_key_any_modifier(event, mods, 1, 11) ||
+         csi_key_any_modifier(event, mods, 1, 80) ||
+         csi_key_any_modifier(event, mods, 1, 112) ||
+         event == ftxui::Event::Special("\x1B[1;3P") ||
+         event == ftxui::Event::Special("\x1B[11;3~") ||
+         event == ftxui::Event::Special("\x1B[11;3u") ||
+         event == ftxui::Event::Special("\x1B[80;3u") ||
+         event == ftxui::Event::Special("\x1B[112;3u");
 }
 
 bool event_is_shift_left(const ftxui::Event& event) {
@@ -442,9 +468,10 @@ bool event_has_ctrl_modifier(const ftxui::Event& event) {
          event_is_ctrl_left(event) || event_is_ctrl_right(event) ||
          event_is_ctrl_shift_left(event) || event_is_ctrl_shift_right(event) ||
          event_is_ctrl_shift_up(event) || event_is_ctrl_shift_down(event) ||
-         event_is_ctrl_shift_l(event) || event_is_ctrl_shift_h(event) ||
-         event_is_ctrl_shift_o(event) || event_is_ctrl_h(event) ||
-         event == ftxui::Event::CtrlS || event == ftxui::Event::CtrlQ ||
+         event_is_ctrl_shift_l(event) || event_is_ctrl_alt_l(event) ||
+         event_is_ctrl_shift_h(event) || event_is_ctrl_shift_o(event) ||
+         event_is_ctrl_h(event) || event == ftxui::Event::CtrlS ||
+         event == ftxui::Event::CtrlQ ||
          event == ftxui::Event::CtrlB || event == ftxui::Event::CtrlW ||
          event_is_ctrl_i(event);
 }
@@ -466,8 +493,9 @@ bool editor_priority_key(const ftxui::Event& event) {
          event_is_ctrl_u(event) || event_is_ctrl_i(event) || event_is_ctrl_d(event) ||
          event_is_ctrl_shift_d(event) || event_is_ctrl_backspace(event) ||
          event_is_ctrl_delete(event) || event == ftxui::Event::CtrlS ||
-         event_is_ctrl_shift_l(event) || event_is_completion(event) ||
-         event_is_go_to_definition(event) || event_is_go_to_declaration(event) ||
+         event_is_ctrl_shift_l(event) || event_is_ctrl_alt_l(event) ||
+         event_is_completion(event) || event_is_go_to_definition(event) ||
+         event_is_go_to_declaration(event) ||
          event_is_alt_left(event) || event_is_alt_right(event);
 }
 

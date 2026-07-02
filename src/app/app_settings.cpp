@@ -57,6 +57,10 @@ AppSettings AppSettings::load() {
         doc["sticky_scroll_enabled"].is_boolean()) {
       settings.sticky_scroll_enabled = doc["sticky_scroll_enabled"].get<bool>();
     }
+    if (doc.contains("overview_ruler_enabled") &&
+        doc["overview_ruler_enabled"].is_boolean()) {
+      settings.overview_ruler_enabled = doc["overview_ruler_enabled"].get<bool>();
+    }
     if (doc.contains("secondary_panel_enabled") &&
         doc["secondary_panel_enabled"].is_boolean()) {
       settings.secondary_panel_enabled = doc["secondary_panel_enabled"].get<bool>();
@@ -86,6 +90,7 @@ bool AppSettings::save() const {
   doc["lsp_enabled"] = lsp_enabled;
   doc["show_diagnostic_suffixes"] = show_diagnostic_suffixes;
   doc["sticky_scroll_enabled"] = sticky_scroll_enabled;
+  doc["overview_ruler_enabled"] = overview_ruler_enabled;
   doc["secondary_panel_enabled"] = secondary_panel_enabled;
   doc["force_bundled_clangd"] = force_bundled_clangd;
   doc["force_bundled_gdb"] = force_bundled_gdb;

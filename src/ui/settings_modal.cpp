@@ -22,8 +22,9 @@ constexpr int kTheme = 0;
 constexpr int kLsp = 1;
 constexpr int kDiagnosticSuffixes = 2;
 constexpr int kStickyScroll = 3;
-constexpr int kSecondaryPanel = 4;
-constexpr int kBaseOptions = 5;
+constexpr int kOverviewRuler = 4;
+constexpr int kSecondaryPanel = 5;
+constexpr int kBaseOptions = 6;
 
 #ifdef TGDB_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -172,6 +173,8 @@ const std::vector<SettingsOption>& global_settings_options() {
        "Muestra mensajes cortos de clangd al final de cada línea"},
       {"Sticky scroll en el editor",
        "Muestra encabezados de ámbito fijos al hacer scroll en el código"},
+      {"Franja de marcas junto al scroll",
+       "Muestra errores, avisos y cambios git en una columna junto al scrollbar"},
       {"Panel secundario (outline / búsqueda)",
        "Muestra la tercera columna con outline y búsqueda en el workspace"},
 #ifdef TGDB_HAS_BUNDLED_CLANGD
@@ -203,6 +206,8 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_show_diagnostic_suffixes;
     case kStickyScroll:
       return state->draft_sticky_scroll_enabled;
+    case kOverviewRuler:
+      return state->draft_overview_ruler_enabled;
     case kSecondaryPanel:
       return state->draft_secondary_panel_enabled;
 #ifdef TGDB_HAS_BUNDLED_CLANGD
@@ -242,6 +247,9 @@ void toggle_option(SettingsModalState* state, int index) {
       break;
     case kStickyScroll:
       state->draft_sticky_scroll_enabled = !state->draft_sticky_scroll_enabled;
+      break;
+    case kOverviewRuler:
+      state->draft_overview_ruler_enabled = !state->draft_overview_ruler_enabled;
       break;
     case kSecondaryPanel:
       state->draft_secondary_panel_enabled = !state->draft_secondary_panel_enabled;
@@ -1276,6 +1284,7 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_lsp_enabled = settings.lsp_enabled;
   state->draft_show_diagnostic_suffixes = settings.show_diagnostic_suffixes;
   state->draft_sticky_scroll_enabled = settings.sticky_scroll_enabled;
+  state->draft_overview_ruler_enabled = settings.overview_ruler_enabled;
   state->draft_secondary_panel_enabled = settings.secondary_panel_enabled;
   state->draft_force_bundled_clangd = settings.force_bundled_clangd;
   state->draft_force_bundled_gdb = settings.force_bundled_gdb;
@@ -1312,6 +1321,7 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->lsp_enabled = state->draft_lsp_enabled;
   settings->show_diagnostic_suffixes = state->draft_show_diagnostic_suffixes;
   settings->sticky_scroll_enabled = state->draft_sticky_scroll_enabled;
+  settings->overview_ruler_enabled = state->draft_overview_ruler_enabled;
   settings->secondary_panel_enabled = state->draft_secondary_panel_enabled;
   settings->force_bundled_clangd = state->draft_force_bundled_clangd;
   settings->force_bundled_gdb = state->draft_force_bundled_gdb;

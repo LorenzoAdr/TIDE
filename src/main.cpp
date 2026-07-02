@@ -77,9 +77,9 @@ void print_usage() {
             << "  --target <host:puerto>  Adjuntar a gdbserver remoto\n"
             << "  -h, --help          Muestra esta ayuda\n"
             << "\n"
-            << "Sin argumentos abre el selector de workspace (modo IDE).\n"
+            << "Sin argumentos abre la pantalla de inicio TUIDE (modo IDE).\n"
             << "Un directorio abre el workspace; un archivo abre su carpeta con el archivo cargado.\n"
-            << "F1 atajos de teclado; F2 inicia depuración; F3 cambia el directorio de trabajo.\n"
+            << "F1 abrir archivo externo; Alt+F1 atajos; F2 depuración; F3 directorio de trabajo.\n"
             << "\n"
             << "Ejemplos:\n"
             << "  tgdb\n"
@@ -116,7 +116,7 @@ int main(int argc, char** argv) {
     }
     if (arg == "--cwd" && i + 1 < argc) {
       config.workspace_root = argv[++i];
-      config.use_workspace_wizard = false;
+      config.show_welcome_screen = false;
       continue;
     }
     if (arg == "--attach" && i + 1 < argc) {
@@ -142,7 +142,7 @@ int main(int argc, char** argv) {
     }
     if (path_is_existing_directory(arg)) {
       config.workspace_root = arg;
-      config.use_workspace_wizard = false;
+      config.show_welcome_screen = false;
       continue;
     }
     if (path_is_ide_open_file(arg)) {
@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
         return 1;
       }
       config.initial_file = arg;
-      config.use_workspace_wizard = false;
+      config.show_welcome_screen = false;
       continue;
     }
     if (!config.program.empty()) {
@@ -165,15 +165,15 @@ int main(int argc, char** argv) {
 
   if (config.workspace_root.empty() && config.program.empty() &&
       config.initial_file.empty()) {
-    config.use_workspace_wizard = true;
+    config.show_welcome_screen = true;
   } else if (!config.workspace_root.empty() && config.program.empty()) {
-    config.use_workspace_wizard = false;
+    config.show_welcome_screen = false;
   } else if (!config.initial_file.empty()) {
-    config.use_workspace_wizard = false;
+    config.show_welcome_screen = false;
   }
 
   if (config_is_complete(config)) {
-    config.use_workspace_wizard = false;
+    config.show_welcome_screen = false;
     config.auto_debug = true;
   }
 

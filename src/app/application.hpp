@@ -32,6 +32,8 @@
 #include "ui/main_layout.hpp"
 #include "ui/source_panel.hpp"
 #include "ui/workspace_wizard.hpp"
+#include "ui/welcome_screen.hpp"
+#include "ui/external_file_wizard.hpp"
 #include "util/thread_safe_queue.hpp"
 
 namespace tgdb {
@@ -44,7 +46,7 @@ struct AppConfig {
   std::vector<std::string> args;
   int attach_pid = 0;
   std::string attach_target;
-  bool use_workspace_wizard = true;
+  bool show_welcome_screen = false;
   bool auto_debug = false;
   std::string launch_directory;
 };
@@ -62,8 +64,10 @@ class Application {
   void submit_command(const UiCommand& command);
   void refresh_all_watches();
   void apply_connection_and_start();
+  void dismiss_welcome_screen();
   void open_connection_wizard();
   void open_workspace_wizard();
+  void open_external_file_wizard();
   void on_connection_complete(const ConnectionResult& result);
   void apply_pending_connection();
   void on_workspace_complete(const std::string& workspace_root);
@@ -104,6 +108,8 @@ class Application {
   ShellSession shell_session_;
   ConnectionWizardState connection_wizard_state_;
   WorkspaceWizardState workspace_wizard_state_;
+  WelcomeScreenState welcome_screen_state_;
+  ExternalFileWizardState external_file_wizard_state_;
   MainLayoutState layout_state_;
   FocusManagerState focus_state_;
   GitService git_service_;
@@ -125,6 +131,7 @@ class Application {
   bool debugging_started_ = false;
   bool backend_started_ = false;
   bool debug_available_ = false;
+  bool workspace_initialized_ = false;
   std::optional<ConnectionResult> pending_connection_;
 };
 

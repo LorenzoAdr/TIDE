@@ -4,6 +4,8 @@
 
 namespace tgdb {
 
+struct SnippetResult;
+
 void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines, int code_width = -1);
 void ensure_scroll_centered(EditorBuffer* buffer, int visible_lines, int code_width = -1);
 void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lines);
@@ -20,7 +22,8 @@ void replace_text_range(EditorBuffer* buffer, int line, int start_col, int end_c
                         const std::string& replacement);
 void replace_text_range_with_caret(EditorBuffer* buffer, int line, int start_col, int end_col,
                                    const std::string& replacement, int caret_line_offset,
-                                   int caret_col, int sel_start_col = -1, int sel_end_col = -1);
+                                   int caret_col, int sel_start_col, int sel_end_col);
+void apply_completion_at_all_cursors(EditorBuffer* buffer, const SnippetResult& snippet);
 void backspace(EditorBuffer* buffer);
 void delete_char(EditorBuffer* buffer);
 void delete_word_backward(EditorBuffer* buffer);

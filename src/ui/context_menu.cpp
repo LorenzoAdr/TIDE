@@ -320,11 +320,7 @@ bool go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
   if (params.path.empty()) {
     return false;
   }
-  SourceLocation loc =
-      declaration ? symbols->goto_declaration(params) : symbols->goto_definition(params);
-  if (!loc.valid && !declaration) {
-    loc = symbols->goto_declaration(params);
-  }
+  SourceLocation loc = resolve_symbol_navigation(*symbols, params, declaration);
   if (!loc.valid) {
     workspace->status_message = declaration ? "Sin declaración LSP" : "Sin definición LSP";
     return false;

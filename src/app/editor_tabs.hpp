@@ -10,6 +10,7 @@ namespace tgdb {
 struct EditorTab {
   std::string path;
   EditorBuffer buffer;
+  bool external = false;
 };
 
 struct TabVisibleRange {

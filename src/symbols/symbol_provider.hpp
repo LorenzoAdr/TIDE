@@ -13,6 +13,8 @@
 #include "symbols/hover_info.hpp"
 #include "symbols/symbol_kind.hpp"
 
+#include "util/path_normalize.hpp"
+
 namespace tgdb {
 
 struct SymbolInfo {
@@ -195,5 +197,30 @@ class ISymbolProvider {
     return {};
   }
 };
+
+inline bool navigation_at_same_spot(const SourceLocation& loc, const NavigationParams& params) {
+  if (!loc.valid || params.path.empty()) {
+    return false;
+  }
+  return normalize_path(loc.path) == normalize_path(params.path) && loc.line == params.line &&
+         loc.character == params.character;
+}
+
+inline SourceLocation resolve_symbol_navigation(ISymbolProvider& symbols,
+                                                const NavigationParams& params,
+                                                bool declaration) {
+  SourceLocation primary =
+      declaration ? symbols.goto_declaration(params) : symbols.goto_definition(params);
+  SourceLocation alternate =
+      declaration ? symbols.goto_definition(params) : symbols.goto_declaration(params);
+  if (!primary.valid) {
+    return alternate;
+  }
+  if (navigation_at_same_spot(primary, params) && alternate.valid &&
+      !navigation_at_same_spot(alternate, params)) {
+    return alternate;
+  }
+  return primary;
+}
 
 }  // namespace tgdb

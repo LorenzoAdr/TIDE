@@ -191,13 +191,12 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
   debug_available_ = gdb_supports_dap();
   workspace_.open_file_confirm = &open_file_confirm_state_;
 
-  if (config_.use_workspace_wizard) {
-    workspace_.status_message = "Selecciona un directorio de trabajo...";
-    workspace_wizard_state_.open = true;
-    workspace_wizard_state_.reset();
-    if (!config_.workspace_root.empty()) {
-      model_.workspace_root = config_.workspace_root;
-    }
+  if (config_.show_welcome_screen) {
+    layout_state_.welcome_visible = true;
+    layout_state_.console_visible = false;
+    layout_state_.terminal_start_requested = false;
+    workspace_.status_message = "Bienvenido a TUIDE";
+    workspace_.clear_tabs();
   } else {
     set_workspace(config_.workspace_root);
     if (!config_.initial_file.empty()) {
@@ -395,7 +394,19 @@ void Application::restore_workspace_session() {
   }
 }
 
+void Application::dismiss_welcome_screen() {
+  if (!layout_state_.welcome_visible) {
+    return;
+  }
+  layout_state_.welcome_visible = false;
+  layout_state_.console_visible = true;
+  layout_state_.terminal_start_requested = true;
+  layout_state_.request_ui_tick = true;
+}
+
 void Application::set_workspace(const std::string& workspace_root) {
+  dismiss_welcome_screen();
+  workspace_initialized_ = true;
   save_workspace_session();
   std::error_code ec;
   const auto absolute = fs::absolute(workspace_root, ec).string();
@@ -453,8 +464,19 @@ void Application::set_workspace(const std::string& workspace_root) {
 
 void Application::on_workspace_complete(const std::string& workspace_root) {
   set_workspace(workspace_root);
-  config_.use_workspace_wizard = false;
+  config_.show_welcome_screen = false;
   workspace_wizard_state_.open = false;
+}
+
+void Application::open_external_file_wizard() {
+  if (external_file_wizard_state_.open || workspace_wizard_state_.open ||
+      connection_wizard_state_.open) {
+    return;
+  }
+  external_file_wizard_state_.launch_root =
+      workspace_.root.empty() ? connection_wizard_state_.browser.launch_root : workspace_.root;
+  external_file_wizard_state_.reset();
+  external_file_wizard_state_.open = true;
 }
 
 void Application::open_workspace_wizard() {
@@ -542,6 +564,8 @@ void Application::apply_connection_and_start() {
   }
 
   debugging_started_ = true;
+  dismiss_welcome_screen();
+  workspace_initialized_ = true;
   model_.program = config_.program;
   model_.workspace_root = config_.workspace_root;
   model_.program_args = config_.args;
@@ -778,7 +802,8 @@ void Application::process_index_changes() {
 }
 
 bool Application::any_modal_open() const {
-  return workspace_wizard_state_.open || connection_wizard_state_.open ||
+  return workspace_wizard_state_.open || external_file_wizard_state_.open ||
+         connection_wizard_state_.open ||
          file_picker_state_.open || symbol_picker_state_.open ||
          shortcuts_modal_state_.open || settings_modal_state_.open ||
          quit_confirm_state_.open || open_file_confirm_state_.is_open() ||
@@ -901,7 +926,7 @@ bool Application::handle_focus_shortcuts(const Event& event) {
 }
 
 int Application::run() {
-  if (config_.auto_debug && connection_config_complete() && !config_.use_workspace_wizard &&
+  if (config_.auto_debug && connection_config_complete() && !config_.show_welcome_screen &&
       debug_available_) {
     ensure_backend_started();
   }
@@ -941,7 +966,10 @@ int Application::run() {
                           &focus_state_, symbol_provider_, on_command,
                           &layout_state_, on_stop_debug, &shell_session_, &indexer_,
                           &symbol_indexer_, shell_launch_config, &git_service_,
-                          &git_panel_state_);
+                          &git_panel_state_, &welcome_screen_state_,
+                          [this] { open_external_file_wizard(); },
+                          [this] { open_connection_wizard(); },
+                          [this] { open_workspace_wizard(); });
   };
 
   auto layout = build_ui();
@@ -973,7 +1001,15 @@ int Application::run() {
       [this](const std::string& root) { on_workspace_complete(root); },
       [&screen] { screen.ExitLoopClosure()(); });
 
-  auto with_shortcuts = MakeShortcutsModalOverlay(with_workspace_wizard,
+  auto with_external_file_wizard = MakeExternalFileWizardOverlay(
+      with_workspace_wizard, &external_file_wizard_state_, &layout_state_,
+      [this](const std::string& path) {
+        dismiss_welcome_screen();
+        workspace_.open_external_file(path);
+        layout_state_.request_ui_tick = true;
+      });
+
+  auto with_shortcuts = MakeShortcutsModalOverlay(with_external_file_wizard,
                                                   &shortcuts_modal_state_);
 
   SettingsApplyCallback on_settings_apply = [this](const AppSettings&) { apply_app_settings(); };
@@ -1027,7 +1063,8 @@ int Application::run() {
         if (symbol_provider_ && symbol_provider_->drain_async_results()) {
           layout_state_.request_ui_tick = true;
         }
-        if (layout_state_.editor_tick_callback && !layout_state_.git_page_visible) {
+        if (layout_state_.editor_tick_callback && !layout_state_.git_page_visible &&
+            !layout_state_.welcome_visible) {
           layout_state_.editor_tick_callback();
         }
         git_service_.tick();
@@ -1061,6 +1098,16 @@ int Application::run() {
       }
 
       if (event == Event::F1) {
+        if (external_file_wizard_state_.open) {
+          external_file_wizard_state_.open = false;
+        } else if (!any_modal_open()) {
+          open_external_file_wizard();
+        }
+        layout_state_.request_ui_tick = true;
+        return true;
+      }
+
+      if (event_is_alt_f1(event)) {
         if (shortcuts_modal_state_.open) {
           shortcuts_modal_state_.open = false;
           shortcuts_modal_state_.first_visible = 0;
@@ -1089,6 +1136,27 @@ int Application::run() {
         return false;
       }
 
+      if (layout_state_.welcome_visible && app_mode_ == AppMode::kNormal) {
+        Event welcome_event = event;
+        if (layout_state_.welcome_mouse_handler && event.is_mouse() &&
+            layout_state_.welcome_mouse_handler(welcome_event)) {
+          layout_state_.request_ui_tick = true;
+          return true;
+        }
+        if (!event.is_mouse() && layout_state_.welcome_key_handler &&
+            layout_state_.welcome_key_handler(welcome_event)) {
+          layout_state_.request_ui_tick = true;
+          return true;
+        }
+        if (handle_focus_shortcuts(event)) {
+          return true;
+        }
+        if (!event.is_mouse() && event != Event::F1 && !event_is_alt_f1(event) &&
+            event != Event::F2 && event != Event::F3 && event != Event::CtrlQ) {
+          return false;
+        }
+      }
+
       if (layout_state_.git_page_visible && app_mode_ == AppMode::kNormal) {
         if (layout_state_.git_mouse_handler && event.is_mouse() &&
             layout_state_.git_mouse_handler(event)) {
@@ -1104,7 +1172,8 @@ int Application::run() {
           return true;
         }
         if (!event.is_mouse() && event != Event::F5 && event != Event::F4 &&
-            event != Event::CtrlT && event != Event::F1 && event != Event::CtrlQ) {
+            event != Event::CtrlT && event != Event::F1 && !event_is_alt_f1(event) &&
+            event != Event::CtrlQ) {
           return false;
         }
       }
@@ -1125,9 +1194,9 @@ int Application::run() {
           layout_state_.request_ui_tick = true;
           return true;
         }
-      } else if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
-          layout_state_.explorer_mouse_handler &&
-          layout_state_.explorer_mouse_handler(event)) {
+      } else if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible &&
+                 event.is_mouse() && layout_state_.explorer_mouse_handler &&
+                 layout_state_.explorer_mouse_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
@@ -1135,9 +1204,9 @@ int Application::run() {
       if (layout_state_.git_page_visible && app_mode_ == AppMode::kNormal &&
           event.is_mouse() && layout_state_.editor_chrome_mouse_handler) {
         // Git page activa: no enviar clics al editor oculto.
-      } else if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
-          layout_state_.editor_chrome_mouse_handler &&
-          layout_state_.editor_chrome_mouse_handler(event)) {
+      } else if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible &&
+                 event.is_mouse() && layout_state_.editor_chrome_mouse_handler &&
+                 layout_state_.editor_chrome_mouse_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
@@ -1179,8 +1248,8 @@ int Application::run() {
         }
       }
 
-      if (app_mode_ == AppMode::kNormal && event.is_mouse() &&
-          layout_state_.editor_mouse_handler &&
+      if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible &&
+          event.is_mouse() && layout_state_.editor_mouse_handler &&
           layout_state_.editor_mouse_handler(event)) {
         screen.Post(Event::Custom);
         layout_state_.focus_sync_needed = true;
@@ -1245,7 +1314,6 @@ int Application::run() {
         return true;
       }
       if (problems_tab_active(&layout_state_) &&
-          focus_state_.region == FocusRegion::Terminal &&
           !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
           layout_state_.problems_key_handler &&
           layout_state_.problems_key_handler(event)) {
@@ -1283,6 +1351,9 @@ int Application::run() {
             shell_session_.write_raw("\t");
           } else {
             shell_session_.write_raw("\x1b[Z");
+          }
+          if (layout_state_.terminal_follow_input_callback) {
+            layout_state_.terminal_follow_input_callback();
           }
           screen.Post(Event::Custom);
           return true;
@@ -1425,6 +1496,15 @@ int Application::run() {
   });
 
   layout_state_.schedule_ui_tick = [this]() { layout_state_.request_ui_tick = true; };
+  layout_state_.terminal_wake_callback = [this, &screen]() {
+    layout_state_.request_ui_tick = true;
+    screen.PostEvent(Event::Custom);
+    nudge_terminal_repaint();
+    screen.Post([this, &screen] {
+      screen.PostEvent(Event::Custom);
+      nudge_terminal_repaint();
+    });
+  };
 
   screen.Loop(WrapUiTickPost(root, &layout_state_, &screen));
 

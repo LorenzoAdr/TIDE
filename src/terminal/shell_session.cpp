@@ -368,6 +368,7 @@ void ShellSession::reader_loop() {
       output_chunks_.push(
           std::string(buffer.data(), static_cast<std::size_t>(bytes)));
       output_pending_.store(true, std::memory_order_release);
+      notify_output();
       continue;
     }
     if (bytes == 0) {
@@ -422,6 +423,22 @@ int ShellSession::drain_output_bytes(int max_bytes) {
 }
 
 std::size_t ShellSession::pending_output_chunks() const { return output_chunks_.size(); }
+
+void ShellSession::set_output_notify(std::function<void()> callback) {
+  std::lock_guard<std::mutex> lock(notify_mutex_);
+  output_notify_ = std::move(callback);
+}
+
+void ShellSession::notify_output() {
+  std::function<void()> callback;
+  {
+    std::lock_guard<std::mutex> lock(notify_mutex_);
+    callback = output_notify_;
+  }
+  if (callback) {
+    callback();
+  }
+}
 
 std::string ShellSession::screen_text() {
   std::lock_guard<std::mutex> lock(terminal_mutex_);

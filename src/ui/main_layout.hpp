@@ -28,6 +28,8 @@
 
 namespace tgdb {
 
+struct WelcomeScreenState;
+
 using CommandCallback = std::function<void(const struct UiCommand&)>;
 
 enum class TextInputFocus {
@@ -71,6 +73,7 @@ struct ConsolePanelTabs {
 
 struct MainLayoutState {
   bool console_visible = true;
+  bool welcome_visible = false;
   bool git_page_visible = false;
   bool diagnostics_panel_visible = false;
   int diagnostics_panel_height = 6;
@@ -122,8 +125,12 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> problems_key_handler;
   std::function<bool(const ftxui::Event&)> git_key_handler;
   std::function<bool(const ftxui::Event&)> git_mouse_handler;
+  std::function<bool(ftxui::Event&)> welcome_key_handler;
+  std::function<bool(ftxui::Event&)> welcome_mouse_handler;
   bool editor_completion_open = false;
   std::function<void()> terminal_tick_callback;
+  std::function<void()> terminal_follow_input_callback;
+  std::function<void()> terminal_wake_callback;
   std::function<int()> terminal_width;
   std::function<int()> terminal_height;
   std::function<void()> schedule_ui_tick;
@@ -246,6 +253,10 @@ ftxui::Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                                 SymbolWorkspaceIndexer* symbol_indexer,
                                 ShellLaunchConfigProvider shell_launch_config,
                                 GitService* git_service,
-                                struct GitPanelState* git_panel_state);
+                                struct GitPanelState* git_panel_state,
+                                WelcomeScreenState* welcome_state,
+                                std::function<void()> on_welcome_external_file,
+                                std::function<void()> on_welcome_debug,
+                                std::function<void()> on_welcome_workspace);
 
 }  // namespace tgdb

@@ -332,11 +332,15 @@ void add_next_selection_match(EditorBuffer* buffer, int visible_lines) {
 void select_all_matches(EditorBuffer* buffer) {
   buffer->ensure_cursors();
   const std::string needle = search_needle(*buffer);
-  if (needle.empty()) {
+  if (needle.empty() || needle.find('\n') != std::string::npos) {
     return;
   }
 
-  const auto matches = find_all_matches(*buffer, needle);
+  std::vector<TextMatch> matches =
+      find_bounded_matches(*buffer, needle, needle_is_identifier(needle));
+  if (matches.empty()) {
+    matches = find_all_matches(*buffer, needle);
+  }
   if (matches.empty()) {
     return;
   }

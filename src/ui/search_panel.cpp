@@ -397,7 +397,8 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     if (event.is_mouse() && state->results_box.Contain(event.mouse().x, event.mouse().y)) {
       const auto& m = event.mouse();
       const int total = static_cast<int>(state->results.size());
-      const int visible = state->last_visible_lines;
+      const int visible = visible_line_count(state->results_box);
+      state->last_visible_lines = visible;
       const int max_scroll = std::max(0, total - visible);
       if (m.button == Mouse::WheelUp) {
         state->first_visible = std::max(0, state->first_visible - 3);
@@ -419,12 +420,6 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         state->results_box.Contain(event.mouse().x, event.mouse().y)) {
       focus->region = FocusRegion::Terminal;
       clear_search_input_focus(layout_state);
-    }
-
-    if (focus->region != FocusRegion::Terminal &&
-        !is_search_input_focus(layout_state != nullptr ? layout_state->text_input_focus
-                                                       : TextInputFocus::None)) {
-      return false;
     }
 
     const bool in_input =

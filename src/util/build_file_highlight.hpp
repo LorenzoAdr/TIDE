@@ -11,6 +11,7 @@ enum class BuildFileKind {
   kMakefile,
   kCMake,
   kShell,
+  kYaml,
 };
 
 BuildFileKind detect_build_file_kind(const std::string& path);

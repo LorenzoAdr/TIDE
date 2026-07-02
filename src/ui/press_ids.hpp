@@ -22,6 +22,9 @@ constexpr std::string_view kQuitYes = "quit.yes";
 constexpr std::string_view kQuitNo = "quit.no";
 constexpr std::string_view kOpenFileYes = "open_file.yes";
 constexpr std::string_view kOpenFileNo = "open_file.no";
+constexpr std::string_view kWelcomeExternalFile = "welcome.external_file";
+constexpr std::string_view kWelcomeDebug = "welcome.debug";
+constexpr std::string_view kWelcomeWorkspace = "welcome.workspace";
 
 constexpr std::string_view kWatchesTab0 = "watches.tab.0";
 constexpr std::string_view kWatchesTab1 = "watches.tab.1";
@@ -77,6 +80,10 @@ inline std::string f2_process_row(int index) {
 
 inline std::string f3_browser_row(int index) {
   return "f3.browser." + std::to_string(index);
+}
+
+inline std::string f1_browser_row(int index) {
+  return "f1.browser." + std::to_string(index);
 }
 
 inline std::string editor_tab(int index) {
@@ -149,6 +156,14 @@ inline bool is_call_hierarchy_hover(std::string_view id) {
 
 inline bool is_f3_hover(std::string_view id) {
   return id.rfind("f3.", 0) == 0;
+}
+
+inline bool is_f1_hover(std::string_view id) {
+  return id.rfind("f1.", 0) == 0;
+}
+
+inline bool is_welcome_hover(std::string_view id) {
+  return id == kWelcomeExternalFile || id == kWelcomeDebug || id == kWelcomeWorkspace;
 }
 
 }  // namespace tgdb::press_id

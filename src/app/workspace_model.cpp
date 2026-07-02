@@ -21,7 +21,7 @@ void set_welcome_buffer(EditorBuffer* buffer) {
   buffer->reset_to_single_cursor(0, 0);
   buffer->scroll = 0;
   buffer->dirty = false;
-  buffer->lines.push_back("Abre un archivo del explorador o Ctrl+P.");
+  buffer->lines.push_back("");
   clear_undo(buffer);
 }
 
@@ -47,7 +47,7 @@ bool WorkspaceModel::load_buffer_from_disk(EditorBuffer* buffer,
   clear_undo(buffer);
 
   if (absolute_path.empty()) {
-    buffer->lines.push_back("Abre un archivo del explorador o Ctrl+P.");
+    buffer->lines.push_back("");
     return false;
   }
 
@@ -135,12 +135,29 @@ std::vector<std::string> WorkspaceModel::open_tabs_mru_excluding_active() const 
   return result;
 }
 
-int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path) {
+int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path, bool external) {
   EditorTab tab;
   tab.path = absolute_path;
+  tab.external = external;
   load_buffer_from_disk(&tab.buffer, absolute_path);
   tabs.push_back(std::move(tab));
   return static_cast<int>(tabs.size()) - 1;
+}
+
+bool WorkspaceModel::is_path_in_workspace(const std::string& workspace_root,
+                                          const std::string& absolute_path) {
+  if (workspace_root.empty() || absolute_path.empty()) {
+    return false;
+  }
+  std::error_code ec;
+  const std::string root = normalize_path(workspace_root);
+  const std::string path = normalize_path(absolute_path);
+  const auto rel = fs::relative(fs::path(path), fs::path(root), ec);
+  if (ec || rel.empty()) {
+    return false;
+  }
+  const std::string rel_str = rel.generic_string();
+  return rel_str != ".." && rel_str.rfind("../", 0) != 0;
 }
 
 bool WorkspaceModel::check_open_guard(const std::string& absolute_path) {
@@ -173,8 +190,31 @@ bool WorkspaceModel::open_file_impl(const std::string& absolute_path) {
   }
   flush_active_tab();
   const std::string path = normalize_path(absolute_path);
-  const int index = open_new_tab_from_disk(path);
+  const int index = open_new_tab_from_disk(path, false);
   switch_to_tab(index);
+  return true;
+}
+
+bool WorkspaceModel::open_external_file(const std::string& absolute_path) {
+  if (absolute_path.empty()) {
+    return false;
+  }
+  flush_active_tab();
+  const std::string path = normalize_path(absolute_path);
+  if (!root.empty() && is_path_in_workspace(root, path)) {
+    return open_file(path);
+  }
+  const int existing = find_tab(path);
+  if (existing >= 0) {
+    switch_to_tab(existing);
+    return true;
+  }
+  if (!check_open_guard(path)) {
+    return false;
+  }
+  const int index = open_new_tab_from_disk(path, true);
+  switch_to_tab(index);
+  status_message = "Externo: " + fs::path(path).filename().string();
   return true;
 }
 

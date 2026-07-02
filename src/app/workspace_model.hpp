@@ -29,6 +29,7 @@ struct WorkspaceModel {
   void load_active_tab_into_buffer();
 
   bool open_file(const std::string& absolute_path);
+  bool open_external_file(const std::string& absolute_path);
   bool open_file_at(const std::string& absolute_path, int line, int col);
   bool open_file_confirmed(const std::string& absolute_path);
   bool open_file_at_confirmed(const std::string& absolute_path, int line, int col);
@@ -59,7 +60,9 @@ struct WorkspaceModel {
 
   static bool load_buffer_from_disk(EditorBuffer* buffer, const std::string& absolute_path);
   static std::string normalize_path(const std::string& path);
-  int open_new_tab_from_disk(const std::string& absolute_path);
+  static bool is_path_in_workspace(const std::string& workspace_root,
+                                   const std::string& absolute_path);
+  int open_new_tab_from_disk(const std::string& absolute_path, bool external);
   void touch_tab_mru(const std::string& absolute_path);
   void remove_tab_mru(const std::string& absolute_path);
 
