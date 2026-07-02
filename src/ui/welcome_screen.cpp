@@ -128,10 +128,16 @@ Element render_welcome_screen(WelcomeScreenState* state, MainLayoutState* layout
                     text("╰" + hline + "╯") | color(theme::AccentDim()),
                 });
 
+  Element author = vbox({
+      text("Lorenzo Arias del Real") | color(theme::Muted()),
+      text("lorenzo.adr@proton.me") | color(theme::Muted()),
+  });
+
   return vbox({
              filler(),
              centered_row(std::move(framed)),
              filler(),
+             hbox({filler(), std::move(author), text("  ")}),
          }) |
          flex | bgcolor(theme::PanelBg());
 }

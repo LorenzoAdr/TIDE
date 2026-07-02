@@ -10,6 +10,8 @@
 #include "indexer/workspace_indexer.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/focus_manager.hpp"
+#include "ui/git_panel.hpp"
+#include "git/git_service.hpp"
 #include "terminal/shell_session.hpp"
 
 namespace tgdb {
@@ -27,9 +29,12 @@ ftxui::Component MakeConsolePanel(AppMode* app_mode, DebugModel* model,
                                   WorkspaceModel* workspace,
                                   std::shared_ptr<ISymbolProvider> symbols,
                                   WorkspaceIndexer* indexer,
-                                  RightSidebarState* sidebar);
+                                  RightSidebarState* sidebar,
+                                  GitService* git_service,
+                                  GitPanelState* git_panel_state);
 
 bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, int delta,
-                       AppMode* app_mode);
+                       AppMode* app_mode, GitService* git = nullptr,
+                       GitPanelState* git_state = nullptr);
 
 }  // namespace tgdb

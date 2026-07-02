@@ -4,12 +4,14 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
-#include <optional>
+#include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <system_error>
 #include <vector>
 
-#include "backend/idebug_backend.hpp"
+#include "git/git_service.hpp"
+#include "git/git_status.hpp"
 #include "indexer/index_rules.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
@@ -51,6 +53,86 @@ int visible_line_count(const Box& box) {
 
 int max_scroll_offset(int total_lines, int visible_lines) {
   return std::max(0, total_lines - visible_lines);
+}
+
+struct GitExplorerMarks {
+  std::unordered_map<std::string, GitStatusEntry> files;
+  std::unordered_set<std::string> dirty_folders;
+};
+
+GitExplorerMarks build_git_explorer_marks(const GitService* git) {
+  GitExplorerMarks marks;
+  if (git == nullptr || !git->is_repo()) {
+    return marks;
+  }
+  for (const GitStatusEntry& entry : git->status().entries) {
+    marks.files[entry.path] = entry;
+    std::string prefix;
+    for (char ch : entry.path) {
+      if (ch == '/') {
+        marks.dirty_folders.insert(prefix);
+      }
+      prefix.push_back(ch);
+    }
+    const auto slash = entry.path.find_last_of('/');
+    if (slash != std::string::npos) {
+      marks.dirty_folders.insert(entry.path.substr(0, slash));
+    }
+  }
+  return marks;
+}
+
+std::string git_status_badge(const GitStatusEntry& entry) {
+  std::string badge;
+  if (entry.staged != GitFileStatus::kUnmodified) {
+    switch (entry.staged) {
+      case GitFileStatus::kModified:
+        badge += "M";
+        break;
+      case GitFileStatus::kAdded:
+        badge += "A";
+        break;
+      case GitFileStatus::kDeleted:
+        badge += "D";
+        break;
+      case GitFileStatus::kRenamed:
+        badge += "R";
+        break;
+      default:
+        badge += "?";
+        break;
+    }
+  }
+  if (entry.unstaged != GitFileStatus::kUnmodified) {
+    switch (entry.unstaged) {
+      case GitFileStatus::kModified:
+        badge += "M";
+        break;
+      case GitFileStatus::kAdded:
+        badge += "A";
+        break;
+      case GitFileStatus::kDeleted:
+        badge += "D";
+        break;
+      case GitFileStatus::kUntracked:
+        badge += "?";
+        break;
+      default:
+        badge += ".";
+        break;
+    }
+  }
+  return badge;
+}
+
+Color git_status_color(const GitStatusEntry& entry) {
+  if (entry.unstaged == GitFileStatus::kUntracked) {
+    return theme::Warning();
+  }
+  if (entry.staged != GitFileStatus::kUnmodified) {
+    return theme::Success();
+  }
+  return theme::Accent();
 }
 
 std::string relative_path_in_workspace(const std::string& workspace_root,
@@ -525,12 +607,14 @@ bool handle_explorer_mouse(FileTreePanelState* state, DebugModel* model,
 
 Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
                             FocusManagerState* focus, WorkspaceIndexer* indexer,
-                            CommandCallback on_command, MainLayoutState* layout_state) {
+                            CommandCallback on_command, MainLayoutState* layout_state,
+                            GitService* git_service) {
   (void)on_command;
   auto state = std::make_shared<FileTreePanelState>();
 
-  auto renderer = Renderer([model, workspace, focus, state, indexer, layout_state] {
+  auto renderer = Renderer([model, workspace, focus, state, indexer, layout_state, git_service] {
     const bool scanning = indexer != nullptr && indexer->scanning();
+    const GitExplorerMarks git_marks = build_git_explorer_marks(git_service);
     state->sync_index(indexer != nullptr ? indexer->snapshot() : nullptr,
                       model->workspace_root);
 
@@ -593,9 +677,25 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
 
         Element row = text(indent + prefix + entry.label);
         if (entry.is_file) {
-          row = row | color(theme::FileText());
+          const auto git_it = git_marks.files.find(entry.relative_path);
+          if (git_it != git_marks.files.end()) {
+            const std::string badge = git_status_badge(git_it->second);
+            row = hbox({
+                text(indent + prefix) | color(theme::FileText()),
+                text(badge) | color(git_status_color(git_it->second)) | bold,
+                text(" " + entry.label) | color(theme::FileText()),
+            });
+          } else {
+            row = row | color(theme::FileText());
+          }
         } else {
           row = row | color(theme::DirectoryText());
+          if (git_marks.dirty_folders.count(entry.relative_path) > 0) {
+            row = hbox({
+                std::move(row) | flex,
+                text(" ●") | color(theme::Warning()),
+            });
+          }
         }
         row = StyleListRow(std::move(row), selected, hovered, pressed);
         rows.push_back(row);

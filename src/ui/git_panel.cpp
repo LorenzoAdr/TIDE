@@ -144,6 +144,95 @@ void clamp_selection(GitPanelState* state, int count) {
   }
 }
 
+int* active_list_scroll(GitPanelState* state) {
+  if (state == nullptr) {
+    return nullptr;
+  }
+  if (state->selected_tab == GitPanelState::kTabLog) {
+    return &state->log_scroll;
+  }
+  if (state->selected_tab == GitPanelState::kTabBranches) {
+    return &state->branch_scroll;
+  }
+  return &state->file_scroll;
+}
+
+void scroll_selection_into_view(GitPanelState* state, int count, int visible) {
+  if (state == nullptr || visible <= 0) {
+    return;
+  }
+  int* scroll = active_list_scroll(state);
+  if (scroll == nullptr) {
+    return;
+  }
+  if (state->selected_file < *scroll) {
+    *scroll = state->selected_file;
+  } else if (state->selected_file >= *scroll + visible) {
+    *scroll = state->selected_file - visible + 1;
+  }
+  *scroll = std::max(0, std::min(*scroll, std::max(0, count - visible)));
+}
+
+int count_diff_lines(const std::string& diff_text) {
+  if (diff_text.empty()) {
+    return 0;
+  }
+  int lines = 1;
+  for (char ch : diff_text) {
+    if (ch == '\n') {
+      ++lines;
+    }
+  }
+  return lines;
+}
+
+void clamp_diff_scroll(GitPanelState* state, int diff_lines, int visible) {
+  if (state == nullptr || visible <= 0) {
+    return;
+  }
+  state->diff_scroll = std::max(0, std::min(state->diff_scroll, std::max(0, diff_lines - visible)));
+}
+
+bool scroll_git_list(GitPanelState* state, int delta, int count, int visible) {
+  if (state == nullptr || delta == 0) {
+    return false;
+  }
+  int* scroll = active_list_scroll(state);
+  if (scroll == nullptr) {
+    return false;
+  }
+  const int max_scroll = std::max(0, count - visible);
+  const int next = std::max(0, std::min(*scroll + delta, max_scroll));
+  if (next == *scroll) {
+    return false;
+  }
+  *scroll = next;
+  return true;
+}
+
+bool scroll_git_diff(GitPanelState* state, int delta, int diff_lines, int visible) {
+  if (state == nullptr || delta == 0) {
+    return false;
+  }
+  const int max_scroll = std::max(0, diff_lines - visible);
+  const int next = std::max(0, std::min(state->diff_scroll + delta, max_scroll));
+  if (next == state->diff_scroll) {
+    return false;
+  }
+  state->diff_scroll = next;
+  return true;
+}
+
+void reset_diff_scroll_for_path(GitPanelState* state, const std::string& path) {
+  if (state == nullptr) {
+    return;
+  }
+  if (path != state->last_diff_path) {
+    state->last_diff_path = path;
+    state->diff_scroll = 0;
+  }
+}
+
 void ensure_selected_diff(GitService* git, GitPanelState* state) {
   if (git == nullptr || state == nullptr || state->selected_tab != GitPanelState::kTabStatus) {
     return;
@@ -154,6 +243,7 @@ void ensure_selected_diff(GitService* git, GitPanelState* state) {
     return;
   }
   const std::string& path = entries[static_cast<std::size_t>(state->selected_file)].path;
+  reset_diff_scroll_for_path(state, path);
   if (!git->has_file_diff_text(path)) {
     git->refresh_file_diff(path);
   }
@@ -168,6 +258,8 @@ void select_tab(GitPanelState* state, GitService* git, int tab) {
   state->file_scroll = 0;
   state->log_scroll = 0;
   state->branch_scroll = 0;
+  state->diff_scroll = 0;
+  state->last_diff_path.clear();
   if (git == nullptr) {
     return;
   }
@@ -255,19 +347,28 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
 
   if (state->selected_tab == GitPanelState::kTabStatus) {
     const int count = static_cast<int>(git->status().entries.size());
-    if (event == Event::ArrowUp) {
-      if (state->selected_file > 0) {
-        --state->selected_file;
-      }
+    const int visible = state->last_list_visible;
+    if ((event == Event::ArrowUp || event == Event::Character('k')) && state->selected_file > 0) {
+      --state->selected_file;
+      scroll_selection_into_view(state, count, visible);
       ensure_selected_diff(git, state);
       return true;
     }
-    if (event == Event::ArrowDown) {
-      if (count > 0) {
-        state->selected_file = std::min(state->selected_file + 1, count - 1);
-      }
+    if ((event == Event::ArrowDown || event == Event::Character('j')) && count > 0) {
+      state->selected_file = std::min(state->selected_file + 1, count - 1);
+      scroll_selection_into_view(state, count, visible);
       ensure_selected_diff(git, state);
       return true;
+    }
+    if (!state->commit_input_focus) {
+      if (event == Event::PageUp) {
+        scroll_git_list(state, -visible, count, visible);
+        return true;
+      }
+      if (event == Event::PageDown) {
+        scroll_git_list(state, visible, count, visible);
+        return true;
+      }
     }
     if (event == Event::Character('s')) {
       stage_selected(git, state, layout_state);
@@ -331,22 +432,44 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
     }
   } else if (state->selected_tab == GitPanelState::kTabLog) {
     const int count = static_cast<int>(git->log_entries().size());
-    if (event == Event::ArrowUp && state->selected_file > 0) {
+    const int visible = state->last_list_visible;
+    if ((event == Event::ArrowUp || event == Event::Character('k')) && state->selected_file > 0) {
       --state->selected_file;
+      scroll_selection_into_view(state, count, visible);
       return true;
     }
-    if (event == Event::ArrowDown && count > 0) {
+    if ((event == Event::ArrowDown || event == Event::Character('j')) && count > 0) {
       state->selected_file = std::min(state->selected_file + 1, count - 1);
+      scroll_selection_into_view(state, count, visible);
+      return true;
+    }
+    if (event == Event::PageUp) {
+      scroll_git_list(state, -visible, count, visible);
+      return true;
+    }
+    if (event == Event::PageDown) {
+      scroll_git_list(state, visible, count, visible);
       return true;
     }
   } else if (state->selected_tab == GitPanelState::kTabBranches) {
     const int count = static_cast<int>(git->branches().size());
-    if (event == Event::ArrowUp && state->selected_file > 0) {
+    const int visible = state->last_list_visible;
+    if ((event == Event::ArrowUp || event == Event::Character('k')) && state->selected_file > 0) {
       --state->selected_file;
+      scroll_selection_into_view(state, count, visible);
       return true;
     }
-    if (event == Event::ArrowDown && count > 0) {
+    if ((event == Event::ArrowDown || event == Event::Character('j')) && count > 0) {
       state->selected_file = std::min(state->selected_file + 1, count - 1);
+      scroll_selection_into_view(state, count, visible);
+      return true;
+    }
+    if (event == Event::PageUp) {
+      scroll_git_list(state, -visible, count, visible);
+      return true;
+    }
+    if (event == Event::PageDown) {
+      scroll_git_list(state, visible, count, visible);
       return true;
     }
     if (event == Event::Return) {
@@ -366,15 +489,12 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
     }
   }
 
-  if (event == Event::Escape || event == Event::CtrlE) {
-    if (layout_state != nullptr) {
-      layout_state->git_page_visible = false;
-      layout_state->focus_sync_needed = true;
+  if (event == Event::Escape) {
+    if (state->commit_input_focus) {
+      state->commit_input_focus = false;
+      return true;
     }
-    if (focus != nullptr) {
-      focus->region = FocusRegion::Editor;
-    }
-    return true;
+    return false;
   }
 
   return false;
@@ -409,7 +529,33 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
   }
 
   if (focus != nullptr) {
-    focus->region = FocusRegion::Editor;
+    focus->region = FocusRegion::Terminal;
+  }
+
+  if (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) {
+    const int wheel_delta = m.button == Mouse::WheelUp ? -3 : 3;
+    if (state->file_list_box.Contain(m.x, m.y)) {
+      int count = 0;
+      if (state->selected_tab == GitPanelState::kTabStatus) {
+        count = static_cast<int>(git->status().entries.size());
+      } else if (state->selected_tab == GitPanelState::kTabLog) {
+        count = static_cast<int>(git->log_entries().size());
+      } else {
+        count = static_cast<int>(git->branches().size());
+      }
+      scroll_git_list(state, wheel_delta, count, state->last_list_visible);
+      return true;
+    }
+    if (state->selected_tab == GitPanelState::kTabStatus && state->diff_box.Contain(m.x, m.y)) {
+      const auto& entries = git->status().entries;
+      if (state->selected_file >= 0 && state->selected_file < static_cast<int>(entries.size())) {
+        const std::string diff =
+            git->file_diff_text(entries[static_cast<std::size_t>(state->selected_file)].path);
+        scroll_git_diff(state, wheel_delta, count_diff_lines(diff), state->last_diff_visible);
+      }
+      return true;
+    }
+    return false;
   }
 
   if (m.button != Mouse::Left || m.motion != Mouse::Pressed) {
@@ -448,6 +594,7 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     }
     if (index >= 0 && index < count) {
       state->selected_file = index;
+      scroll_selection_into_view(state, count, state->last_list_visible);
       ensure_selected_diff(git, state);
     }
     return true;
@@ -504,8 +651,26 @@ void GitPanelEnsureSelectedDiff(GitService* git, GitPanelState* state) {
   ensure_selected_diff(git, state);
 }
 
+void GitPanelActivate(GitService* git, GitPanelState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->selected_tab = GitPanelState::kTabStatus;
+  state->selected_file = 0;
+  state->file_scroll = 0;
+  state->log_scroll = 0;
+  state->branch_scroll = 0;
+  state->diff_scroll = 0;
+  state->last_diff_path.clear();
+  state->commit_input_focus = false;
+  if (git != nullptr) {
+    git->refresh_status();
+    GitPanelEnsureSelectedDiff(git, state);
+  }
+}
+
 Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
-                       FocusManagerState* focus) {
+                       FocusManagerState* focus, int* content_height) {
   auto dispatch_keys = [git, state, layout_state, focus](Event event) {
     return handle_git_keys(git, state, layout_state, focus, event);
   };
@@ -518,25 +683,30 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
     layout_state->git_mouse_handler = dispatch_mouse;
   }
 
-  auto panel = Renderer([git, state, layout_state] {
+  auto panel = Renderer([git, state, layout_state, content_height] {
     if (git == nullptr || state == nullptr) {
       return text(" Git no disponible") | color(theme::Muted()) | flex;
     }
 
+    const int body_height =
+        content_height != nullptr && *content_height > 0 ? *content_height : 18;
+    const int list_visible = std::max(1, body_height - 2);
+    const int diff_visible = std::max(1, body_height - 4);
+    state->last_list_visible = list_visible;
+    state->last_diff_visible = diff_visible;
+
     const GitRepoInfo repo = git->repo_info();
     if (!repo.valid) {
       return vbox({
-                 text(" Git") | bold | color(theme::Success()),
-                 separator(),
                  text(" " + (repo.last_error.empty() ? "No es un repositorio git"
-                                                      : repo.last_error)) |
+                                                    : repo.last_error)) |
                      color(theme::Muted()),
              }) |
              flex | bgcolor(theme::PanelBg()) | reflect(state->panel_box);
     }
 
     std::ostringstream header;
-    header << " Git  " << repo.branch;
+    header << repo.branch;
     const GitStatusSnapshot status = git->status();
     if (status.staged_count > 0 || status.unstaged_count > 0 || status.untracked_count > 0) {
       header << "  ●";
@@ -560,23 +730,24 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
     const bool hover0 = interaction_active(layout_state, kGitTab0);
     const bool hover1 = interaction_active(layout_state, kGitTab1);
     const bool hover2 = interaction_active(layout_state, kGitTab2);
-  const bool press0 =
-      layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitTab0));
-  const bool press1 =
-      layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitTab1));
-  const bool press2 =
-      layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitTab2));
+    const bool press0 =
+        layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitTab0));
+    const bool press1 =
+        layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitTab1));
+    const bool press2 =
+        layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitTab2));
 
     Element tabs = hbox({
+        text(header.str()) | bold | color(theme::Success()),
+        filler(),
         MakeTabButton("1 Status", state->selected_tab == GitPanelState::kTabStatus, hover0, press0,
                       &state->tab_boxes[0]),
         MakeTabButton("2 Log", state->selected_tab == GitPanelState::kTabLog, hover1, press1,
                       &state->tab_boxes[1]),
         MakeTabButton("3 Branches", state->selected_tab == GitPanelState::kTabBranches, hover2,
                       press2, &state->tab_boxes[2]),
-        filler(),
-        state->operation_pending ? text(spinner::glyph()) | color(theme::Accent()) : text(""),
-        text(" F5/Esc salir") | color(theme::Muted()),
+        state->operation_pending ? text(" " + std::string(spinner::glyph())) | color(theme::Accent())
+                               : text(""),
     });
 
     Elements left_rows;
@@ -589,7 +760,9 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
       if (entries.empty()) {
         left_rows.push_back(text(" (working tree limpio)") | color(theme::Muted()));
       }
-      const int visible = 20;
+      const int visible = list_visible;
+      clamp_selection(state, static_cast<int>(entries.size()));
+      scroll_selection_into_view(state, static_cast<int>(entries.size()), visible);
       const int end = std::min(static_cast<int>(entries.size()), state->file_scroll + visible);
       for (int i = state->file_scroll; i < end; ++i) {
         const auto& entry = entries[static_cast<std::size_t>(i)];
@@ -606,7 +779,9 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
         center_rows.push_back(separator() | color(theme::AccentDim()));
         const std::string diff = git->file_diff_text(path);
         const bool loading = diff.empty() && git->busy();
-        center_rows.push_back(render_diff_lines(diff, loading, 0, 18));
+        const int diff_lines = count_diff_lines(diff);
+        clamp_diff_scroll(state, diff_lines, diff_visible);
+        center_rows.push_back(render_diff_lines(diff, loading, state->diff_scroll, diff_visible));
       } else {
         center_rows.push_back(text(" Selecciona un archivo") | color(theme::Muted()));
       }
@@ -638,7 +813,9 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
     } else if (state->selected_tab == GitPanelState::kTabLog) {
       const auto commits = git->log_entries();
       clamp_selection(state, static_cast<int>(commits.size()));
-      const int visible = 22;
+      const int visible = list_visible;
+      clamp_selection(state, static_cast<int>(commits.size()));
+      scroll_selection_into_view(state, static_cast<int>(commits.size()), visible);
       const int end = std::min(static_cast<int>(commits.size()), state->log_scroll + visible);
       for (int i = state->log_scroll; i < end; ++i) {
         const auto& entry = commits[static_cast<std::size_t>(i)];
@@ -654,7 +831,9 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
     } else {
       const auto branches = git->branches();
       clamp_selection(state, static_cast<int>(branches.size()));
-      const int visible = 22;
+      const int visible = list_visible;
+      clamp_selection(state, static_cast<int>(branches.size()));
+      scroll_selection_into_view(state, static_cast<int>(branches.size()), visible);
       const int end =
           std::min(static_cast<int>(branches.size()), state->branch_scroll + visible);
       for (int i = state->branch_scroll; i < end; ++i) {
@@ -682,14 +861,14 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
         vbox(std::move(left_rows)) | reflect(state->file_list_box) |
             size(WIDTH, EQUAL, kFileListWidth) | bgcolor(theme::CodeBg()) | border,
         separator(),
-        vbox(std::move(center_rows)) | flex | bgcolor(theme::CodeBg()) | border,
+        vbox(std::move(center_rows)) | reflect(state->diff_box) | flex | bgcolor(theme::CodeBg()) |
+            border,
         separator(),
         vbox(std::move(action_rows)) | size(WIDTH, EQUAL, kActionWidth) | bgcolor(theme::PanelBg()) |
             border,
     });
 
     Element result = vbox({
-               text(header.str()) | bold | color(theme::Success()),
                tabs | size(HEIGHT, EQUAL, 1),
                separator(),
                std::move(body) | flex,

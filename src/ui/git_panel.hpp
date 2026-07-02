@@ -22,6 +22,10 @@ struct GitPanelState {
   int file_scroll = 0;
   int log_scroll = 0;
   int branch_scroll = 0;
+  int diff_scroll = 0;
+  int last_list_visible = 1;
+  int last_diff_visible = 1;
+  std::string last_diff_path;
   std::string commit_message;
   int commit_cursor = 0;
   std::string status_message;
@@ -32,6 +36,7 @@ struct GitPanelState {
   ftxui::Box panel_box;
   std::array<ftxui::Box, 3> tab_boxes{};
   ftxui::Box file_list_box;
+  ftxui::Box diff_box;
   ftxui::Box stage_box;
   ftxui::Box unstage_box;
   ftxui::Box push_box;
@@ -40,8 +45,10 @@ struct GitPanelState {
 };
 
 ftxui::Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
-                              FocusManagerState* focus);
+                              FocusManagerState* focus, int* content_height = nullptr);
 
 void GitPanelEnsureSelectedDiff(GitService* git, GitPanelState* state);
+
+void GitPanelActivate(GitService* git, GitPanelState* state);
 
 }  // namespace tgdb

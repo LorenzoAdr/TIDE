@@ -68,13 +68,13 @@ struct ConsolePanelTabs {
   static constexpr int kProblems = 3;
   static constexpr int kSearch = 4;
   static constexpr int kCallHierarchy = 5;
+  static constexpr int kGit = 6;
   int selected_tab = kTerminal;
 };
 
 struct MainLayoutState {
   bool console_visible = true;
   bool welcome_visible = false;
-  bool git_page_visible = false;
   bool diagnostics_panel_visible = false;
   int diagnostics_panel_height = 6;
   bool terminal_start_requested = true;
@@ -152,6 +152,11 @@ inline bool search_tab_active(const MainLayoutState* layout_state) {
 inline bool call_hierarchy_tab_active(const MainLayoutState* layout_state) {
   return layout_state != nullptr && layout_state->console_visible &&
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kCallHierarchy;
+}
+
+inline bool git_tab_active(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kGit;
 }
 
 inline bool console_panel_tab_active(const MainLayoutState* layout_state) {

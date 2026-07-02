@@ -3441,8 +3441,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           sync_diagnostic_cache(panel_state.get(), symbols.get(), workspace, file_indexer);
         }
       }
-      if (git_service != nullptr && git_service->is_repo() &&
-          (layout_state == nullptr || !layout_state->git_page_visible)) {
+      if (git_service != nullptr && git_service->is_repo()) {
         workspace->ensure_buffer();
         const EditorBuffer& buf = workspace->buffer;
         const bool settled = editor_content_settled(*panel_state);

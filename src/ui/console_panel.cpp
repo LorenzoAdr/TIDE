@@ -28,6 +28,7 @@
 #include "symbols/symbol_provider.hpp"
 #include "ui/call_hierarchy_panel.hpp"
 #include "ui/diagnostics_panel.hpp"
+#include "ui/git_panel.hpp"
 #include "ui/search_panel.hpp"
 #include "ui/performance_panel.hpp"
 #include "ui/text_input_style.hpp"
@@ -64,6 +65,7 @@ struct ConsolePanelState {
   int last_terminal_rows = 0;
   int pending_terminal_cols = 80;
   int pending_terminal_rows = 24;
+  int git_body_height = 8;
   int applied_terminal_cols = 0;
   int applied_terminal_rows = 0;
   bool layout_measured = false;
@@ -77,7 +79,7 @@ struct ConsolePanelState {
   std::string terminal_text;
   std::vector<TerminalStyledRow> terminal_styled_rows;
   std::string last_workspace_root;
-  std::array<Box, 6> tab_boxes;
+  std::array<Box, 7> tab_boxes;
   Box hide_box;
 };
 
@@ -376,6 +378,10 @@ bool call_hierarchy_tab_active_console(AppMode* /*app_mode*/, MainLayoutState* l
   return call_hierarchy_tab_active(layout_state);
 }
 
+bool git_tab_active_console(AppMode* /*app_mode*/, MainLayoutState* layout_state) {
+  return git_tab_active(layout_state);
+}
+
 std::string_view console_tab_press_id(int tab) {
   switch (tab) {
     case ConsolePanelTabs::kTerminal:
@@ -390,6 +396,8 @@ std::string_view console_tab_press_id(int tab) {
       return press_id::kConsoleTabSearch;
     case ConsolePanelTabs::kCallHierarchy:
       return press_id::kConsoleTabCallHierarchy;
+    case ConsolePanelTabs::kGit:
+      return press_id::kConsoleTabGit;
     default:
       return press_id::kConsoleTabTerminal;
   }
@@ -432,9 +440,10 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
                               AppMode* app_mode, const Mouse& mouse);
 
 bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
-                        FocusManagerState* focus, int tab) {
+                        FocusManagerState* focus, int tab, GitService* git,
+                        GitPanelState* git_state) {
   if (layout_state == nullptr || tab < ConsolePanelTabs::kTerminal ||
-      tab > ConsolePanelTabs::kCallHierarchy) {
+      tab > ConsolePanelTabs::kGit) {
     return false;
   }
   if (layout_state->console_tabs.selected_tab == tab) {
@@ -481,8 +490,18 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
       if (is_search_input_focus(layout_state->text_input_focus)) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
+    } else if (tab == ConsolePanelTabs::kGit) {
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      if (is_search_input_focus(layout_state->text_input_focus)) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
     } else if (is_search_input_focus(layout_state->text_input_focus)) {
       layout_state->text_input_focus = TextInputFocus::None;
+    }
+    if (tab == ConsolePanelTabs::kGit && git != nullptr && git_state != nullptr) {
+      GitPanelActivate(git, git_state);
     }
   }
   return true;
@@ -491,12 +510,13 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
 bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_state,
                               FocusManagerState* focus, AppMode* app_mode, DebugModel* model,
                               ShellSession* shell, Component input_box,
-                              const ShellLaunchConfig& launch_config, int mouse_x, int mouse_y) {
+                              const ShellLaunchConfig& launch_config, int mouse_x, int mouse_y,
+                              GitService* git, GitPanelState* git_state) {
   if (state == nullptr) {
     return false;
   }
   const bool debug_mode = debug_console_mode(app_mode);
-  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kCallHierarchy; ++i) {
+  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kGit; ++i) {
     if (i == ConsolePanelTabs::kDebug && !debug_mode) {
       continue;
     }
@@ -504,7 +524,7 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
       continue;
     }
     trigger_press(layout_state, console_tab_press_id(i));
-    switch_console_tab(state, layout_state, focus, i);
+    switch_console_tab(state, layout_state, focus, i, git, git_state);
     if (i == ConsolePanelTabs::kTerminal) {
       activate_shell_input(model, layout_state, focus, shell, state, launch_config);
     } else if (i == ConsolePanelTabs::kDebug) {
@@ -520,7 +540,8 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
 bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layout_state,
                                 FocusManagerState* focus, AppMode* app_mode, DebugModel* model,
                                 ShellSession* shell, Component input_box,
-                                const ShellLaunchConfig& launch_config, Event event) {
+                                const ShellLaunchConfig& launch_config, Event event,
+                                GitService* git, GitPanelState* git_state) {
   if (state == nullptr || layout_state == nullptr || !event.is_mouse()) {
     return false;
   }
@@ -561,7 +582,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
   }
 
   if (handle_console_tab_click(state, layout_state, focus, app_mode, model, shell, input_box,
-                               launch_config, m.x, m.y)) {
+                               launch_config, m.x, m.y, git, git_state)) {
     layout_state->focus_sync_needed = true;
     return true;
   }
@@ -602,6 +623,7 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
          {press_id::kConsoleTabSearch, &state->tab_boxes[ConsolePanelTabs::kSearch]},
          {press_id::kConsoleTabCallHierarchy,
           &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
+         {press_id::kConsoleTabGit, &state->tab_boxes[ConsolePanelTabs::kGit]},
          {press_id::kConsoleHide, &state->hide_box}},
         press_id::is_console_header_hover);
   }
@@ -613,6 +635,7 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
        {press_id::kConsoleTabSearch, &state->tab_boxes[ConsolePanelTabs::kSearch]},
        {press_id::kConsoleTabCallHierarchy,
         &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
+       {press_id::kConsoleTabGit, &state->tab_boxes[ConsolePanelTabs::kGit]},
        {press_id::kConsoleHide, &state->hide_box}},
       press_id::is_console_header_hover);
 }
@@ -1058,18 +1081,18 @@ ShellLaunchConfig current_shell_launch(const ShellLaunchConfigProvider& provider
 }  // namespace
 
 bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, int delta,
-                       AppMode* app_mode) {
+                       AppMode* app_mode, GitService* git, GitPanelState* git_state) {
   if (layout_state == nullptr || delta == 0) {
     return false;
   }
   const bool debug_mode = app_mode != nullptr && *app_mode == AppMode::kDebug;
   int tab = layout_state->console_tabs.selected_tab;
-  for (int attempt = 0; attempt < 8; ++attempt) {
+  for (int attempt = 0; attempt < 10; ++attempt) {
     tab += delta;
     if (tab < ConsolePanelTabs::kTerminal) {
-      tab = ConsolePanelTabs::kCallHierarchy;
+      tab = ConsolePanelTabs::kGit;
     }
-    if (tab > ConsolePanelTabs::kCallHierarchy) {
+    if (tab > ConsolePanelTabs::kGit) {
       tab = ConsolePanelTabs::kTerminal;
     }
     if (!debug_mode && tab == ConsolePanelTabs::kDebug) {
@@ -1080,7 +1103,7 @@ bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, 
   if (tab == layout_state->console_tabs.selected_tab) {
     return false;
   }
-  return switch_console_tab(nullptr, layout_state, focus, tab);
+  return switch_console_tab(nullptr, layout_state, focus, tab, git, git_state);
 }
 
 Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* shell,
@@ -1090,7 +1113,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
                            WorkspaceModel* workspace,
                            std::shared_ptr<ISymbolProvider> symbols,
                            WorkspaceIndexer* indexer,
-                           RightSidebarState* sidebar) {
+                           RightSidebarState* sidebar,
+                           GitService* git_service,
+                           GitPanelState* git_panel_state) {
   auto state = std::make_shared<ConsolePanelState>();
   auto perf_state = std::make_shared<PerformancePanelState>();
   PerformanceSampler* sampler =
@@ -1102,6 +1127,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       MakeSearchPanel(workspace, model, focus, layout_state, indexer, sidebar);
   auto call_hierarchy_panel =
       MakeCallHierarchyPanel(workspace, focus, layout_state, sidebar, symbols);
+  auto git_panel =
+      MakeGitPanel(git_service, git_panel_state, layout_state, focus, &state->git_body_height);
   auto input_box = Input(MakeBlinkInputOption(&state->input, &state->input_placeholder));
   auto input_maybe = Maybe(
       input_box, [app_mode, layout_state] {
@@ -1109,12 +1136,14 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       });
 
   auto component = Container::Vertical(
-      {input_maybe, performance_panel, diagnostics_panel, search_panel, call_hierarchy_panel});
+      {input_maybe, performance_panel, diagnostics_panel, search_panel, call_hierarchy_panel,
+       git_panel});
 
   auto wrapped = CatchEvent(component, [app_mode, model, shell, on_command, state,
                                         layout_state, focus, input_box,
                                         shell_launch_config, diagnostics_panel, search_panel,
-                                        call_hierarchy_panel](Event event) {
+                                        call_hierarchy_panel, git_panel, git_service,
+                                        git_panel_state](Event event) {
     const bool editor_chrome_input =
         layout_state != nullptr &&
         is_editor_chrome_input_focus(layout_state->text_input_focus);
@@ -1131,6 +1160,11 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         return true;
       }
       if (call_hierarchy_panel->OnEvent(event)) {
+        return true;
+      }
+    }
+    if (git_tab_active_console(app_mode, layout_state) && !editor_chrome_input) {
+      if (git_panel->OnEvent(event)) {
         return true;
       }
     }
@@ -1151,7 +1185,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
     if (const int tab = console_tab_from_digit(event, debug_console_mode(app_mode)); tab >= 0) {
       trigger_press(layout_state, console_tab_press_id(tab));
-      switch_console_tab(state.get(), layout_state, focus, tab);
+      switch_console_tab(state.get(), layout_state, focus, tab, git_service, git_panel_state);
       if (tab == ConsolePanelTabs::kTerminal) {
         activate_shell_input(model, layout_state, focus, shell, state.get(),
                              current_shell_launch(shell_launch_config, model));
@@ -1297,7 +1331,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
   auto dispatch_console_mouse = [app_mode, layout_state, focus, model, shell, state, input_box,
                                  shell_launch_config, diagnostics_panel, search_panel,
-                                 call_hierarchy_panel](Event event) -> bool {
+                                 call_hierarchy_panel, git_panel, git_service,
+                                 git_panel_state](Event event) -> bool {
     if (event.is_mouse()) {
       if (problems_tab_active_console(app_mode, layout_state) &&
           layout_state != nullptr && layout_state->problems_key_handler &&
@@ -1315,10 +1350,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
           call_hierarchy_panel->OnEvent(event)) {
         return true;
       }
+      if (git_tab_active_console(app_mode, layout_state) && git_panel->OnEvent(event)) {
+        return true;
+      }
     }
     return handle_console_panel_mouse(
         state.get(), layout_state, focus, app_mode, model, shell, input_box,
-        current_shell_launch(shell_launch_config, model), event);
+        current_shell_launch(shell_launch_config, model), event, git_service, git_panel_state);
   };
 
   if (layout_state != nullptr) {
@@ -1360,7 +1398,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
   return Renderer(wrapped, [app_mode, model, shell, focus, input_box, input_maybe, state,
                             layout_state, bottom_height, perf_state, sampler, diagnostics_panel,
-                            search_panel, call_hierarchy_panel] {
+                            search_panel, call_hierarchy_panel, git_panel] {
     state->input_placeholder = console_placeholder(app_mode);
     (void)input_maybe;
     (void)input_box;
@@ -1371,6 +1409,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     const int selected_tab = layout_state != nullptr ? layout_state->console_tabs.selected_tab
                                                      : ConsolePanelTabs::kTerminal;
     const int body_height = std::max(1, panel_height - 2);
+    state->git_body_height = std::max(1, body_height - 2);
     const int panel_width = state->panel_box.x_max >= state->panel_box.x_min
                                 ? state->panel_box.x_max - state->panel_box.x_min + 1
                                 : 80;
@@ -1416,6 +1455,11 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         layout_state != nullptr &&
             layout_state->clickable.is_pressed(press_id::kConsoleTabCallHierarchy),
         &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]));
+    tab_row.push_back(make_tab_button(
+        "Git", selected_tab == ConsolePanelTabs::kGit,
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabGit),
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabGit),
+        &state->tab_boxes[ConsolePanelTabs::kGit]));
 
     const bool hide_hovered =
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleHide);
@@ -1437,6 +1481,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       body = diagnostics_panel->Render() | flex;
     } else if (selected_tab == ConsolePanelTabs::kSearch) {
       body = search_panel->Render() | flex;
+    } else if (selected_tab == ConsolePanelTabs::kGit) {
+      body = git_panel->Render() | flex;
     } else {
       body = call_hierarchy_panel->Render() | flex;
     }

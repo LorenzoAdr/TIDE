@@ -416,7 +416,6 @@ void Application::set_workspace(const std::string& workspace_root) {
   workspace_.root = absolute;
   workspace_.cursor_history.clear();
   workspace_.clear_tabs();
-  layout_state_.git_page_visible = false;
   workspace_.status_message = "Workspace: " + fs::path(absolute).filename().string();
   file_picker_state_.indexed_root.clear();
   file_picker_state_.all_files.clear();
@@ -878,12 +877,14 @@ bool Application::handle_focus_shortcuts(const Event& event) {
   if (focus_state_.region != FocusRegion::Editor) {
     if (focus_state_.region == FocusRegion::Terminal) {
       if (event_is_alt_left(event)) {
-        cycle_console_tab(&layout_state_, &focus_state_, -1, &app_mode_);
+        cycle_console_tab(&layout_state_, &focus_state_, -1, &app_mode_, &git_service_,
+                          &git_panel_state_);
         layout_state_.focus_sync_needed = true;
         return true;
       }
       if (event_is_alt_right(event)) {
-        cycle_console_tab(&layout_state_, &focus_state_, 1, &app_mode_);
+        cycle_console_tab(&layout_state_, &focus_state_, 1, &app_mode_, &git_service_,
+                          &git_panel_state_);
         layout_state_.focus_sync_needed = true;
         return true;
       }
@@ -1064,12 +1065,11 @@ int Application::run() {
         if (symbol_provider_ && symbol_provider_->drain_async_results()) {
           layout_state_.request_ui_tick = true;
         }
-        if (layout_state_.editor_tick_callback && !layout_state_.git_page_visible &&
-            !layout_state_.welcome_visible) {
+        if (layout_state_.editor_tick_callback && !layout_state_.welcome_visible) {
           layout_state_.editor_tick_callback();
         }
         git_service_.tick();
-        if (layout_state_.git_page_visible) {
+        if (git_tab_active(&layout_state_)) {
           GitPanelEnsureSelectedDiff(&git_service_, &git_panel_state_);
         }
         if (layout_state_.outline_tick_callback) {
@@ -1159,28 +1159,6 @@ int Application::run() {
         }
       }
 
-      if (layout_state_.git_page_visible && app_mode_ == AppMode::kNormal) {
-        if (layout_state_.git_mouse_handler && event.is_mouse() &&
-            layout_state_.git_mouse_handler(event)) {
-          layout_state_.request_ui_tick = true;
-          return true;
-        }
-        if (!event.is_mouse() && layout_state_.git_key_handler &&
-            layout_state_.git_key_handler(event)) {
-          layout_state_.request_ui_tick = true;
-          return true;
-        }
-        if (handle_focus_shortcuts(event)) {
-          return true;
-        }
-        if (!event.is_mouse() && event != Event::F5 && event != Event::F4 &&
-            event != Event::CtrlT && !event_is_f1(event) &&
-            !event_is_open_shortcuts_modal(event) &&
-            event != Event::CtrlQ) {
-          return false;
-        }
-      }
-
       if (layout_state_.editor_modifier_handler) {
         Event mod_event = event;
         layout_state_.editor_modifier_handler(mod_event);
@@ -1192,22 +1170,14 @@ int Application::run() {
         return true;
       }
 
-      if (layout_state_.git_page_visible && app_mode_ == AppMode::kNormal && event.is_mouse()) {
-        if (layout_state_.git_mouse_handler && layout_state_.git_mouse_handler(event)) {
-          layout_state_.request_ui_tick = true;
-          return true;
-        }
-      } else if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible &&
+      if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible &&
                  event.is_mouse() && layout_state_.explorer_mouse_handler &&
                  layout_state_.explorer_mouse_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
 
-      if (layout_state_.git_page_visible && app_mode_ == AppMode::kNormal &&
-          event.is_mouse() && layout_state_.editor_chrome_mouse_handler) {
-        // Git page activa: no enviar clics al editor oculto.
-      } else if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible &&
+      if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible &&
                  event.is_mouse() && layout_state_.editor_chrome_mouse_handler &&
                  layout_state_.editor_chrome_mouse_handler(event)) {
         screen.Post(Event::Custom);
@@ -1216,6 +1186,14 @@ int Application::run() {
 
       if (handle_focus_shortcuts(event)) {
         screen.Post(Event::Custom);
+        return true;
+      }
+
+      if (layout_state_.console_visible && event.is_mouse() &&
+          git_tab_active(&layout_state_) && layout_state_.git_mouse_handler &&
+          layout_state_.git_mouse_handler(event)) {
+        screen.Post(Event::Custom);
+        layout_state_.focus_sync_needed = true;
         return true;
       }
 
@@ -1323,6 +1301,13 @@ int Application::run() {
         screen.Post(Event::Custom);
         return true;
       }
+      if (git_tab_active(&layout_state_) &&
+          !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
+          layout_state_.git_key_handler &&
+          layout_state_.git_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
       if (app_mode_ == AppMode::kDebug && focus_state_.region == FocusRegion::Editor &&
           !is_watch_input_focus(layout_state_.text_input_focus) &&
           layout_state_.text_input_focus != TextInputFocus::Console &&
@@ -1412,24 +1397,19 @@ int Application::run() {
         return true;
       }
       if (app_mode_ != AppMode::kDebug && event == Event::F5) {
-        if (!layout_state_.git_page_visible) {
-          screen.Post([this] {
-            layout_state_.git_page_visible = true;
-            focus_state_.region = FocusRegion::Editor;
-            git_service_.refresh_status();
-            git_panel_state_.selected_tab = GitPanelState::kTabStatus;
-            git_panel_state_.selected_file = 0;
-            layout_state_.text_input_focus = TextInputFocus::None;
-            layout_state_.focus_sync_needed = true;
-            layout_state_.request_ui_tick = true;
-          });
-        } else {
-          layout_state_.git_page_visible = false;
-          focus_state_.region = FocusRegion::Editor;
-          layout_state_.text_input_focus = TextInputFocus::None;
+        if (!layout_state_.console_visible) {
+          layout_state_.console_visible = true;
+        } else if (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kGit) {
+          layout_state_.console_visible = false;
           layout_state_.focus_sync_needed = true;
-          layout_state_.request_ui_tick = true;
+          return true;
         }
+        layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kGit;
+        GitPanelActivate(&git_service_, &git_panel_state_);
+        focus_state_.region = FocusRegion::Terminal;
+        layout_state_.text_input_focus = TextInputFocus::None;
+        layout_state_.focus_sync_needed = true;
+        layout_state_.request_ui_tick = true;
         return true;
       }
       if (event == Event::CtrlP) {

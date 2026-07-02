@@ -18,6 +18,7 @@ ftxui::Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
                                    FocusManagerState* focus,
                                    WorkspaceIndexer* indexer,
                                    CommandCallback on_command,
-                                   MainLayoutState* layout_state);
+                                   MainLayoutState* layout_state,
+                                   GitService* git_service);
 
 }  // namespace tgdb
