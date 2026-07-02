@@ -173,6 +173,51 @@ std::vector<TextMatch> find_all_matches(const EditorBuffer& buffer, const std::s
   return out;
 }
 
+namespace {
+
+constexpr std::size_t kMaxOccurrenceMatches = 512;
+
+bool needle_is_identifier(const std::string& needle) {
+  return !needle.empty() && is_ident_start(needle[0]) &&
+         std::all_of(needle.begin(), needle.end(), [](unsigned char c) {
+           return is_ident_char(static_cast<char>(c));
+         });
+}
+
+std::vector<TextMatch> find_bounded_matches(const EditorBuffer& buffer, const std::string& needle,
+                                            bool whole_word) {
+  std::vector<TextMatch> out;
+  out.reserve(32);
+  for (int line = 0; line < static_cast<int>(buffer.lines.size()); ++line) {
+    const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
+    std::size_t start = 0;
+    while (start <= text.size()) {
+      const auto pos = text.find(needle, start);
+      if (pos == std::string::npos) {
+        break;
+      }
+      if (whole_word) {
+        const bool before_ok = pos == 0 || !is_ident_char(text[pos - 1]);
+        const std::size_t after_pos = pos + needle.size();
+        const bool after_ok =
+            after_pos >= text.size() || !is_ident_char(text[static_cast<std::size_t>(after_pos)]);
+        if (!before_ok || !after_ok) {
+          start = pos + 1;
+          continue;
+        }
+      }
+      out.push_back({line, static_cast<int>(pos), static_cast<int>(needle.size())});
+      if (out.size() >= kMaxOccurrenceMatches) {
+        return {};
+      }
+      start = pos + needle.size();
+    }
+  }
+  return out;
+}
+
+}  // namespace
+
 std::vector<TextMatch> find_selection_occurrences(const EditorBuffer& buffer) {
   if (buffer.cursors.size() != 1) {
     return {};
@@ -201,7 +246,8 @@ std::vector<TextMatch> find_selection_occurrences(const EditorBuffer& buffer) {
     return {};
   }
 
-  const std::vector<TextMatch> matches = find_all_matches(buffer, needle);
+  const std::vector<TextMatch> matches =
+      find_bounded_matches(buffer, needle, needle_is_identifier(needle));
   if (matches.size() < 2) {
     return {};
   }

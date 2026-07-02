@@ -563,13 +563,20 @@ void refresh_selection_occurrence_matches(EditorPanelState* panel, const EditorB
   panel->selection_occurrence_matches = find_selection_occurrences(buffer);
 }
 
+void tick_selection_occurrence_matches(EditorPanelState* panel, const EditorBuffer& buffer) {
+  if (panel == nullptr || panel->mouse_selecting) {
+    return;
+  }
+  refresh_selection_occurrence_matches(panel, buffer);
+}
+
 const std::vector<TextMatch>* selection_occurrence_matches_for(EditorPanelState* panel,
                                                                const EditorBuffer& buffer,
                                                                bool find_bar_open) {
+  (void)buffer;
   if (panel == nullptr || find_bar_open) {
     return nullptr;
   }
-  refresh_selection_occurrence_matches(panel, buffer);
   if (panel->selection_occurrence_matches.empty()) {
     return nullptr;
   }
@@ -3124,8 +3131,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         panel_state->source_flash.clear();
       });
       editor_hover_tick(workspace, panel_state.get(), symbols);
+      workspace->ensure_buffer();
+      tick_selection_occurrence_matches(panel_state.get(), workspace->buffer);
       if (symbols && workspace != nullptr) {
-        workspace->ensure_buffer();
         const std::string& path = workspace->buffer.path;
         if (!path.empty()) {
           if (panel_state->document_open_pending && symbols) {
