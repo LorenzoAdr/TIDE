@@ -42,7 +42,8 @@ bool is_ident_char(char c) {
 }
 
 void emit_segment(Elements* out, const std::string& segment, Decorator style, int global_offset,
-                  int cursor_col, bool show_cursor, Decorator cursor_style) {
+                  int cursor_col, bool show_cursor, Decorator cursor_style,
+                  bool keyword_token = false) {
   if (segment.empty()) {
     return;
   }
@@ -70,7 +71,12 @@ void emit_segment(Elements* out, const std::string& segment, Decorator style, in
   };
 
   emit_part(segment.substr(0, static_cast<std::size_t>(rel)));
-  out->push_back(text(segment.substr(static_cast<std::size_t>(rel), 1)) | cursor_style);
+  Element cursor_cell = text(segment.substr(static_cast<std::size_t>(rel), 1));
+  if (keyword_token) {
+    out->push_back(cursor_cell | inverted | bold);
+  } else {
+    out->push_back(cursor_cell | cursor_style);
+  }
   emit_part(segment.substr(static_cast<std::size_t>(rel + 1)));
 }
 
@@ -276,11 +282,11 @@ Element highlight_cpp_line_impl(const std::string& line, int cursor_col, Decorat
         ++j;
       }
       const std::string word = line.substr(i, j - i);
-      const Decorator style = cpp_keywords().count(word) > 0
-                                  ? color(theme::SyntaxKeyword()) | bold
-                                  : color(theme::SyntaxDefault());
+      const bool is_keyword = cpp_keywords().count(word) > 0;
+      const Decorator style = is_keyword ? color(theme::SyntaxKeyword()) | bold
+                                         : color(theme::SyntaxDefault());
       emit_segment(&parts, word, style, static_cast<int>(col_offset + i), cursor_col, show_cursor,
-                   cursor_style);
+                   cursor_style, is_keyword);
       i = j;
       continue;
     }

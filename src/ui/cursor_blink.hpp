@@ -7,6 +7,7 @@ namespace tgdb::cursor_blink {
 
 void tick();
 bool visible();
+void show();
 
 inline ftxui::Decorator cell_decorator() {
   return ftxui::bgcolor(theme::CursorCell()) | ftxui::color(ftxui::Color::Black) | ftxui::bold;

@@ -315,7 +315,32 @@ bool bracket_in_code(const EditorBuffer& buffer, TextPos bracket_pos) {
   return false;
 }
 
+bool cursor_position_in_code(const EditorBuffer& buffer, int line, int col) {
+  if (buffer.lines.empty() || line < 0 || col < 0) {
+    return false;
+  }
+  const TextPos target{line, col};
+  LexMode mode = LexMode::Code;
+  TextPos pos{0, 0};
+  pos = normalize_forward(buffer, pos);
+  while (pos.line >= 0) {
+    if (pos.line > target.line || (pos.line == target.line && pos.col >= target.col)) {
+      return mode == LexMode::Code;
+    }
+    pos = skip_literal_forward(buffer, pos, &mode);
+    if (pos.line < 0) {
+      break;
+    }
+    pos = advance(buffer, pos);
+  }
+  return mode == LexMode::Code;
+}
+
 }  // namespace
+
+bool cursor_in_code(const EditorBuffer& buffer, int line, int col) {
+  return cursor_position_in_code(buffer, line, col);
+}
 
 BracketPairHighlight find_bracket_pair_highlight(const EditorBuffer& buffer, int line, int col) {
   BracketPairHighlight result;

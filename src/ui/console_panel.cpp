@@ -913,6 +913,7 @@ bool forward_pty_key(ShellSession* shell, const Event& event, ConsolePanelState*
 
 void activate_console_input(MainLayoutState* layout_state, FocusManagerState* focus,
                             Component input_box) {
+  cursor_blink::show();
   if (layout_state) {
     layout_state->text_input_focus = TextInputFocus::Console;
     layout_state->focus_sync_needed = true;
@@ -1148,14 +1149,17 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         layout_state != nullptr &&
         is_editor_chrome_input_focus(layout_state->text_input_focus);
     if (problems_tab_active_console(app_mode, layout_state) && !editor_chrome_input &&
+        (focus == nullptr || focus->region == FocusRegion::Terminal) &&
         diagnostics_panel->OnEvent(event)) {
       return true;
     }
     if (search_tab_active_console(app_mode, layout_state) && !editor_chrome_input &&
+        (focus == nullptr || focus->region == FocusRegion::Terminal) &&
         search_panel->OnEvent(event)) {
       return true;
     }
-    if (call_hierarchy_tab_active_console(app_mode, layout_state) && !editor_chrome_input) {
+    if (call_hierarchy_tab_active_console(app_mode, layout_state) && !editor_chrome_input &&
+        (focus == nullptr || focus->region == FocusRegion::Terminal)) {
       if (event == Event::Custom) {
         return true;
       }
@@ -1163,7 +1167,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         return true;
       }
     }
-    if (git_tab_active_console(app_mode, layout_state) && !editor_chrome_input) {
+    if (git_tab_active_console(app_mode, layout_state) && !editor_chrome_input &&
+        (focus == nullptr || focus->region == FocusRegion::Terminal)) {
       if (git_panel->OnEvent(event)) {
         return true;
       }
@@ -1253,6 +1258,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     }
 
     if (console_input_active(layout_state) && on_debug_tab) {
+      if (!event.is_mouse() && event != Event::Custom) {
+        cursor_blink::show();
+      }
       return false;
     }
 

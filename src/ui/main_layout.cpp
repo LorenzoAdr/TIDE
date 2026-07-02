@@ -34,6 +34,7 @@ struct LayoutState {
   int right_width = 22;
   int bottom_height = 8;
   int outline_height = 12;
+  int editor_left_width = 40;
   uint64_t last_diag_revision = 0;
   std::string last_diag_path;
   int diag_errors = 0;
@@ -41,15 +42,18 @@ struct LayoutState {
   Box left_sep_box;
   Box right_sep_box;
   Box bottom_sep_box;
+  Box editor_center_sep_box;
   bool left_sep_hovered = false;
   bool right_sep_hovered = false;
   bool bottom_sep_hovered = false;
+  bool editor_center_sep_hovered = false;
   bool split_dragging = false;
-  int split_drag_kind = 0;  // 1=left, 2=right, 3=bottom
+  int split_drag_kind = 0;  // 1=left, 2=right, 3=bottom, 4=editor center
   int split_drag_start_pos = 0;
   int split_drag_start_size = 0;
   bool show_right_split = true;
   bool show_bottom_split = true;
+  bool show_editor_center_split = false;
 };
 
 struct FocusSyncState {
@@ -111,7 +115,7 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
     case TextInputFocus::EditorFind:
     case TextInputFocus::EditorGotoLine:
     case TextInputFocus::EditorCompletion:
-      if (focus->region != FocusRegion::Editor) {
+      if (!is_editor_focus_region(focus->region)) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
       break;
@@ -179,6 +183,95 @@ Component MakeModeLayout(AppMode* app_mode, Component normal_child, Component de
   return Make<ModeLayout>(app_mode, std::move(normal_child), std::move(debug_child));
 }
 
+class EditorCenterLayout : public ComponentBase {
+ public:
+  EditorCenterLayout(AppMode* app_mode, Component primary_editor, Component secondary_editor,
+                     Component source_panel, WorkspaceModel* secondary_workspace,
+                     std::shared_ptr<LayoutState> split_state)
+      : app_mode_(app_mode),
+        secondary_workspace_(secondary_workspace),
+        split_state_(std::move(split_state)) {
+    Add(std::move(primary_editor));
+    Add(std::move(secondary_editor));
+    Add(std::move(source_panel));
+  }
+
+  Element OnRender() override {
+    if (children_.size() < 3) {
+      return text("");
+    }
+    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
+      return children_[2]->Render() | flex;
+    }
+    const bool split =
+        secondary_workspace_ != nullptr && !secondary_workspace_->tabs.empty();
+    if (split_state_ != nullptr) {
+      split_state_->show_editor_center_split = split;
+    }
+    if (!split) {
+      return children_[0]->Render() | flex;
+    }
+    const bool dragging =
+        split_state_ != nullptr && split_state_->split_dragging &&
+        split_state_->split_drag_kind == 4;
+    Element sep = SplitSeparatorVertical(
+        split_state_ != nullptr && split_state_->editor_center_sep_hovered, dragging,
+        split_state_ != nullptr ? &split_state_->editor_center_sep_box : nullptr);
+    return hbox({
+               children_[0]->Render() | size(WIDTH, EQUAL, split_state_->editor_left_width),
+               sep,
+               children_[1]->Render() | flex,
+           }) |
+           flex;
+  }
+
+  bool OnEvent(Event event) override {
+    if (children_.size() < 3) {
+      return false;
+    }
+    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
+      return children_[2]->OnEvent(std::move(event));
+    }
+    const bool split =
+        secondary_workspace_ != nullptr && !secondary_workspace_->tabs.empty();
+    if (!split) {
+      return children_[0]->OnEvent(std::move(event));
+    }
+    if (children_[0]->OnEvent(event)) {
+      return true;
+    }
+    return children_[1]->OnEvent(std::move(event));
+  }
+
+  bool Focusable() const override { return true; }
+
+  Component ActiveChild() override {
+    if (children_.empty()) {
+      return nullptr;
+    }
+    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug && children_.size() > 2) {
+      return children_[2];
+    }
+    const bool split =
+        secondary_workspace_ != nullptr && !secondary_workspace_->tabs.empty();
+    return split ? children_[1] : children_[0];
+  }
+
+ private:
+  AppMode* app_mode_;
+  WorkspaceModel* secondary_workspace_;
+  std::shared_ptr<LayoutState> split_state_;
+};
+
+Component MakeEditorCenterLayout(AppMode* app_mode, Component primary_editor,
+                                 Component secondary_editor, Component source_panel,
+                                 WorkspaceModel* secondary_workspace,
+                                 std::shared_ptr<LayoutState> split_state) {
+  return Make<EditorCenterLayout>(app_mode, std::move(primary_editor), std::move(secondary_editor),
+                                    std::move(source_panel), secondary_workspace,
+                                    std::move(split_state));
+}
+
 // Panel derecho: un solo outline; en debug muestra watches debajo.
 class RightPanelLayout : public ComponentBase {
  public:
@@ -190,8 +283,12 @@ class RightPanelLayout : public ComponentBase {
   }
 
   Element OnRender() override {
-    if (app_mode_ == nullptr || *app_mode_ != AppMode::kDebug) {
-      return ChildAt(0)->Render();
+    if (children_.empty()) {
+      return text("");
+    }
+    const bool debug = app_mode_ != nullptr && *app_mode_ == AppMode::kDebug;
+    if (!debug || children_.size() < 2) {
+      return ChildAt(0)->Render() | flex;
     }
     return vbox({
                ChildAt(0)->Render() | size(HEIGHT, EQUAL, *outline_height_),
@@ -202,7 +299,11 @@ class RightPanelLayout : public ComponentBase {
   }
 
   bool OnEvent(Event event) override {
-    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
+    if (children_.size() < 2) {
+      return ChildAt(0)->OnEvent(std::move(event));
+    }
+    const bool debug = app_mode_ != nullptr && *app_mode_ == AppMode::kDebug;
+    if (debug) {
       Component sidebar = ChildAt(0);
       Component watches = ChildAt(1);
       const bool watch_input =
@@ -247,25 +348,28 @@ class RightPanelLayout : public ComponentBase {
       }
       return false;
     }
-    return ChildAt(0)->OnEvent(std::move(event));
+
+    return ChildAt(0) && ChildAt(0)->OnEvent(std::move(event));
   }
 
   bool Focusable() const override {
     if (children_.empty()) {
       return false;
     }
-    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
+    const bool debug = app_mode_ != nullptr && *app_mode_ == AppMode::kDebug;
+    if (debug) {
       return (children_.size() > 0 && children_[0] && children_[0]->Focusable()) ||
              (children_.size() > 1 && children_[1] && children_[1]->Focusable());
     }
-    return children_[0] && children_[0]->Focusable();
+    return children_.size() > 0 && children_[0] && children_[0]->Focusable();
   }
 
   Component ActiveChild() override {
     if (children_.empty()) {
       return nullptr;
     }
-    if (app_mode_ == nullptr || *app_mode_ != AppMode::kDebug) {
+    const bool debug = app_mode_ != nullptr && *app_mode_ == AppMode::kDebug;
+    if (!debug) {
       return ChildAt(0);
     }
     if (layout_state_ != nullptr &&
@@ -482,6 +586,15 @@ bool update_split_hover(LayoutState* state, int x, int y) {
   } else {
     state->bottom_sep_hovered = false;
   }
+  if (state->show_editor_center_split) {
+    const bool next = box_hit_right_sep(state->editor_center_sep_box, x, y);
+    if (state->editor_center_sep_hovered != next) {
+      state->editor_center_sep_hovered = next;
+      changed = true;
+    }
+  } else {
+    state->editor_center_sep_hovered = false;
+  }
   return changed;
 }
 
@@ -511,6 +624,16 @@ void apply_split_drag(LayoutState* state, int x, int y, int screen_w, int screen
       const int delta = state->split_drag_start_pos - y;
       state->bottom_height =
           std::max(kMinBottomHeight, std::min(state->split_drag_start_size + delta, max_bottom));
+      break;
+    }
+    case 4: {
+      const int center_w = std::max(kMinCenterWidth,
+                                    screen_w - state->left_width - state->right_width - 2);
+      const int max_left =
+          std::max(kMinSplitPanelWidth, center_w - kMinSplitPanelWidth - 1);
+      const int delta = x - state->split_drag_start_pos;
+      state->editor_left_width = std::max(
+          kMinSplitPanelWidth, std::min(state->split_drag_start_size + delta, max_left));
       break;
     }
     default:
@@ -570,13 +693,22 @@ bool handle_split_mouse(LayoutState* state, MainLayoutState* layout_state, Event
     state->split_drag_start_size = state->bottom_height;
     return true;
   }
+  if (state->show_editor_center_split &&
+      box_hit_right_sep(state->editor_center_sep_box, mouse.x, mouse.y)) {
+    state->split_dragging = true;
+    state->split_drag_kind = 4;
+    state->split_drag_start_pos = mouse.x;
+    state->split_drag_start_size = state->editor_left_width;
+    return true;
+  }
   return false;
 }
 
 }  // namespace
 
 Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
-                         WorkspaceModel* workspace, SourceViewState* source_state,
+                         WorkspaceModel* workspace, WorkspaceModel* secondary_workspace,
+                         SourceViewState* source_state,
                          FocusManagerState* focus,
                          std::shared_ptr<ISymbolProvider> symbols,
                          CommandCallback on_command, MainLayoutState* layout_state,
@@ -593,12 +725,25 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   split_state->right_width = 22;
   split_state->bottom_height = 8;
 
+  if (focus != nullptr) {
+    focus->secondary_editor_visible = [secondary_workspace]() {
+      return secondary_workspace != nullptr && !secondary_workspace->tabs.empty();
+    };
+  }
+
   auto file_tree = MakeFileTreePanel(model, workspace, focus, indexer, on_command,
                                      layout_state, git_service);
-  auto editor = MakeEditorPanel(workspace, focus, layout_state, symbols, indexer,
-                                symbol_indexer, git_service);
+  auto editor_primary =
+      MakeEditorPanel(workspace, focus, layout_state, symbols, indexer, symbol_indexer, git_service,
+                      FocusRegion::Editor, model, on_command,
+                      layout_state != nullptr ? &layout_state->primary_editor : nullptr);
+  auto editor_secondary = MakeEditorPanel(
+      secondary_workspace, focus, layout_state, symbols, indexer, symbol_indexer, git_service,
+      FocusRegion::SecondaryEditor, model, on_command,
+      layout_state != nullptr ? &layout_state->secondary_editor : nullptr);
   auto source = MakeSourcePanel(model, source_state, on_command, focus, layout_state);
-  auto center = MakeModeLayout(app_mode, editor, source);
+  auto center = MakeEditorCenterLayout(app_mode, editor_primary, editor_secondary, source,
+                                       secondary_workspace, split_state);
 
   auto welcome_screen =
       MakeWelcomeScreen(layout_state, welcome_state, on_welcome_external_file, on_welcome_debug,
@@ -606,7 +751,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
 
   auto outline = MakeOutlinePanel(workspace, focus, symbols, layout_state);
   auto sidebar = MakeRightSidebarPanel(outline, layout_state);
-  auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug, focus);
+  auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug, focus, app_mode);
   auto right_panel =
       MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height, layout_state);
 

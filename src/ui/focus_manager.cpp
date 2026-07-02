@@ -2,12 +2,19 @@
 
 namespace tgdb {
 
+bool FocusManagerState::secondary_visible() const {
+  return secondary_editor_visible && secondary_editor_visible();
+}
+
 void FocusManagerState::cycle_forward() {
   switch (region) {
     case FocusRegion::Explorer:
       region = FocusRegion::Editor;
       break;
     case FocusRegion::Editor:
+      region = secondary_visible() ? FocusRegion::SecondaryEditor : FocusRegion::RightPanel;
+      break;
+    case FocusRegion::SecondaryEditor:
       region = FocusRegion::RightPanel;
       break;
     case FocusRegion::RightPanel:
@@ -27,8 +34,11 @@ void FocusManagerState::cycle_backward() {
     case FocusRegion::Editor:
       region = FocusRegion::Explorer;
       break;
-    case FocusRegion::RightPanel:
+    case FocusRegion::SecondaryEditor:
       region = FocusRegion::Editor;
+      break;
+    case FocusRegion::RightPanel:
+      region = secondary_visible() ? FocusRegion::SecondaryEditor : FocusRegion::Editor;
       break;
     case FocusRegion::Terminal:
       region = FocusRegion::RightPanel;
@@ -39,13 +49,17 @@ void FocusManagerState::cycle_backward() {
 void FocusManagerState::move_left() {
   if (region == FocusRegion::Editor) {
     region = FocusRegion::Explorer;
-  } else if (region == FocusRegion::RightPanel) {
+  } else if (region == FocusRegion::SecondaryEditor) {
     region = FocusRegion::Editor;
+  } else if (region == FocusRegion::RightPanel) {
+    region = secondary_visible() ? FocusRegion::SecondaryEditor : FocusRegion::Editor;
   }
 }
 
 void FocusManagerState::move_right() {
   if (region == FocusRegion::Editor) {
+    region = secondary_visible() ? FocusRegion::SecondaryEditor : FocusRegion::RightPanel;
+  } else if (region == FocusRegion::SecondaryEditor) {
     region = FocusRegion::RightPanel;
   } else if (region == FocusRegion::Explorer) {
     region = FocusRegion::Editor;
@@ -68,6 +82,8 @@ const char* FocusManagerState::region_label() const {
       return "Explorador";
     case FocusRegion::Editor:
       return "Editor";
+    case FocusRegion::SecondaryEditor:
+      return "Editor 2";
     case FocusRegion::RightPanel:
       return "Outline";
     case FocusRegion::Terminal:

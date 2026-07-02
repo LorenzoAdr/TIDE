@@ -61,6 +61,15 @@ struct RightSidebarState {
 
 using StopDebugCallback = std::function<void()>;
 
+struct EditorPanelHandlers {
+  std::function<bool(const ftxui::Event&)> key_handler;
+  std::function<bool(const ftxui::Event&)> mouse_handler;
+  std::function<bool(const ftxui::Event&)> chrome_mouse_handler;
+  std::function<void(ftxui::Event&)> modifier_handler;
+  std::function<void()> tick_callback;
+  std::function<int()> visible_line_count;
+};
+
 struct ConsolePanelTabs {
   static constexpr int kTerminal = 0;
   static constexpr int kDebug = 1;
@@ -106,17 +115,13 @@ struct MainLayoutState {
     bool active = false;
   };
   PendingEditorNavigation pending_editor_navigation;
-  std::function<bool(const ftxui::Event&)> editor_key_handler;
-  std::function<bool(const ftxui::Event&)> editor_mouse_handler;
-  std::function<bool(const ftxui::Event&)> editor_chrome_mouse_handler;
+  EditorPanelHandlers primary_editor;
+  EditorPanelHandlers secondary_editor;
   std::function<bool(const ftxui::Event&)> source_mouse_handler;
   std::function<bool(const ftxui::Event&)> source_key_handler;
   std::function<bool(const ftxui::Event&)> watches_mouse_handler;
   std::function<bool(const ftxui::Event&)> console_debug_mouse_handler;
   std::function<bool(const ftxui::Event&)> explorer_mouse_handler;
-  std::function<void(ftxui::Event&)> editor_modifier_handler;
-  std::function<void()> editor_tick_callback;
-  std::function<int()> editor_visible_line_count;
   std::function<void()> outline_tick_callback;
   std::function<bool(const ftxui::Event&)> console_key_handler;
   std::function<bool(const ftxui::Event&)> console_mouse_handler;
@@ -247,8 +252,26 @@ inline bool tick_pending_editor_navigation(
   return true;
 }
 
+inline EditorPanelHandlers& editor_handlers_for(MainLayoutState* layout_state,
+                                                FocusRegion region) {
+  if (layout_state != nullptr && region == FocusRegion::SecondaryEditor) {
+    return layout_state->secondary_editor;
+  }
+  if (layout_state != nullptr) {
+    return layout_state->primary_editor;
+  }
+  static EditorPanelHandlers empty;
+  return empty;
+}
+
+inline const EditorPanelHandlers& editor_handlers_for(const MainLayoutState* layout_state,
+                                                      FocusRegion region) {
+  return editor_handlers_for(const_cast<MainLayoutState*>(layout_state), region);
+}
+
 ftxui::Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
-                                WorkspaceModel* workspace, SourceViewState* source_state,
+                                WorkspaceModel* workspace, WorkspaceModel* secondary_workspace,
+                                SourceViewState* source_state,
                                 FocusManagerState* focus,
                                 std::shared_ptr<ISymbolProvider> symbols,
                                 CommandCallback on_command,

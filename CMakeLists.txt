@@ -68,6 +68,7 @@ add_executable(tgdb
   src/symbols/completion_snippet.cpp
   src/symbols/local_scope_completions.cpp
   src/util/syntax_highlight.cpp
+  src/util/clang_format_config.cpp
   src/util/build_file_highlight.cpp
   src/search/workspace_search.cpp
   src/search/workspace_search_runner.cpp
@@ -95,6 +96,7 @@ add_executable(tgdb
   src/util/compile_commands_setup.cpp
   src/util/compile_commands_remap.cpp
   src/util/compile_commands_lookup.cpp
+  src/util/shell_args.cpp
   src/util/shell_utils.cpp
   src/util/system_clipboard.cpp
   src/util/docker_shell.cpp

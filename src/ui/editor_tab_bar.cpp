@@ -222,7 +222,7 @@ Element make_tabs_overflow_modal(WorkspaceModel* workspace, EditorTabBarState* s
 
 bool handle_tab_bar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
                           EditorTabBarState* state, const Mouse& m,
-                          MainLayoutState* layout_state) {
+                          MainLayoutState* layout_state, FocusRegion panel_focus) {
   if (workspace == nullptr || state == nullptr) {
     return false;
   }
@@ -255,7 +255,7 @@ bool handle_tab_bar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (focus != nullptr) {
-    focus->region = FocusRegion::Editor;
+    focus->region = panel_focus;
   }
   if (hit.kind == TabBarHitKind::Overflow) {
     trigger_press(layout_state, press_id::kEditorTabOverflow);
@@ -344,7 +344,8 @@ bool update_editor_chrome_hover(WorkspaceModel* workspace, EditorTabBarState* st
 }
 
 bool handle_tabs_overflow_keys(WorkspaceModel* workspace, FocusManagerState* focus,
-                               EditorTabBarState* state, const Event& event) {
+                               EditorTabBarState* state, const Event& event,
+                               FocusRegion panel_focus) {
   if (workspace == nullptr || state == nullptr || !state->overflow_open) {
     return false;
   }
@@ -369,7 +370,7 @@ bool handle_tabs_overflow_keys(WorkspaceModel* workspace, FocusManagerState* foc
     workspace->switch_to_tab(state->overflow_selected);
     state->overflow_open = false;
     if (focus != nullptr) {
-      focus->region = FocusRegion::Editor;
+      focus->region = panel_focus;
     }
     return true;
   }

@@ -13,4 +13,6 @@ DAP_IMPLEMENT_STRUCT_TYPEINFO_EXT(GdbAttachRequest, AttachRequest, "attach",
                                   DAP_FIELD(pid, "pid"),
                                   DAP_FIELD(target, "target"));
 
+DAP_IMPLEMENT_STRUCT_TYPEINFO(GdbTerminatedEvent, "terminated");
+
 }  // namespace dap

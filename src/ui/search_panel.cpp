@@ -15,6 +15,7 @@
 #include "indexer/workspace_indexer.hpp"
 #include "search/workspace_search.hpp"
 #include "search/workspace_search_runner.hpp"
+#include "ui/cursor_blink.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/panel.hpp"
 #include "ui/text_input_style.hpp"
@@ -464,9 +465,12 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
           event == Event::ArrowLeft || event == Event::ArrowRight || event == Event::Home ||
           event == Event::End) {
         const bool handled = forward_input_event(event);
-        if (handled && state->query != state->committed_query && state->runner.running()) {
-          state->runner.cancel();
-          state->status = "Enter: buscar";
+        if (handled) {
+          cursor_blink::show();
+          if (state->query != state->committed_query && state->runner.running()) {
+            state->runner.cancel();
+            state->status = "Enter: buscar";
+          }
         }
         return handled;
       }

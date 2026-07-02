@@ -42,13 +42,15 @@ ftxui::Element make_tab_hover_tooltip(WorkspaceModel* workspace, const EditorTab
 
 bool handle_tab_bar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
                           EditorTabBarState* state, const ftxui::Mouse& m,
-                          MainLayoutState* layout_state = nullptr);
+                          MainLayoutState* layout_state = nullptr,
+                          FocusRegion panel_focus = FocusRegion::Editor);
 
 bool update_editor_chrome_hover(WorkspaceModel* workspace, EditorTabBarState* state,
                                 MainLayoutState* layout_state, const ftxui::Box& problems_box, int x,
                                 int y);
 
 bool handle_tabs_overflow_keys(WorkspaceModel* workspace, FocusManagerState* focus,
-                               EditorTabBarState* state, const ftxui::Event& event);
+                               EditorTabBarState* state, const ftxui::Event& event,
+                               FocusRegion panel_focus = FocusRegion::Editor);
 
 }  // namespace tgdb

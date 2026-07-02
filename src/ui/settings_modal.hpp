@@ -8,11 +8,14 @@
 #include "app/workspace_config.hpp"
 #include "ftxui/component/component_base.hpp"
 #include "ui/path_browser.hpp"
+#include "util/clang_format_config.hpp"
 
 namespace tgdb {
 
 enum class SettingsPanel {
-  kMain,
+  kGeneral,
+  kWorkspace,
+  kFormat,
   kIncludePaths,
   kCompileCommands,
   kPathMappings,
@@ -27,7 +30,7 @@ enum class PathBrowserPurpose {
 
 struct SettingsModalState {
   bool open = false;
-  SettingsPanel panel = SettingsPanel::kMain;
+  SettingsPanel panel = SettingsPanel::kGeneral;
   PathBrowserPurpose path_browser_purpose = PathBrowserPurpose::kIncludePath;
   int selected = 0;
   int include_path_selected = 0;
@@ -53,6 +56,8 @@ struct SettingsModalState {
   std::optional<theme::ColorRgb> ui_colors_edit_original;
   CompileCommandsSettings draft_compile_commands;
   std::vector<std::string> draft_clangd_extra_include_paths;
+  ClangFormatConfig draft_clang_format;
+  bool clang_format_file_exists = false;
   std::vector<std::string> docker_container_names;
   PathBrowserState path_browser;
   bool has_workspace = false;
@@ -61,16 +66,19 @@ struct SettingsModalState {
 
 using SettingsApplyCallback = std::function<void(const AppSettings&)>;
 using WorkspaceSettingsApplyCallback = std::function<void(const WorkspaceConfig&)>;
+using ClangFormatApplyCallback = std::function<void(const ClangFormatConfig&)>;
 
 ftxui::Component MakeSettingsModalOverlay(ftxui::Component main, SettingsModalState* state,
                                           AppSettings* settings, SettingsApplyCallback on_apply,
-                                          WorkspaceSettingsApplyCallback on_workspace_apply);
+                                          WorkspaceSettingsApplyCallback on_workspace_apply,
+                                          ClangFormatApplyCallback on_clang_format_apply = {});
 
 void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
                          const std::string& workspace_root,
                          const WorkspaceConfig& workspace_config);
 void close_settings_modal(SettingsModalState* state, AppSettings* settings,
                           SettingsApplyCallback on_apply,
-                          WorkspaceSettingsApplyCallback on_workspace_apply);
+                          WorkspaceSettingsApplyCallback on_workspace_apply,
+                          ClangFormatApplyCallback on_clang_format_apply = {});
 
 }  // namespace tgdb

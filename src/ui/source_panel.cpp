@@ -319,19 +319,29 @@ bool handle_source_panel_event(DebugModel* model, SourceViewState* view_state,
 
 }  // namespace
 
-void ToggleBreakpointAtLine(DebugModel* model, int line, CommandCallback on_command) {
-  if (!on_command || model->active_file.empty() || line <= 0) {
+void ToggleBreakpointAtFile(DebugModel* model, const std::string& file, int line,
+                            CommandCallback on_command) {
+  if (model == nullptr || file.empty() || line <= 0) {
     return;
   }
-  model->active_file = normalize_path(model->active_file);
+  const std::string normalized = normalize_path(file);
+  model->toggle_breakpoint(normalized, line);
 
-  model->toggle_breakpoint(model->active_file, line);
-
+  if (!on_command) {
+    return;
+  }
   UiCommand command;
   command.kind = UiCommandKind::kSetBreakpoints;
-  command.breakpoint_file = model->active_file;
-  command.breakpoint_lines = model->enabled_breakpoint_lines(model->active_file);
+  command.breakpoint_file = normalized;
+  command.breakpoint_lines = model->enabled_breakpoint_lines(normalized);
   on_command(command);
+}
+
+void ToggleBreakpointAtLine(DebugModel* model, int line, CommandCallback on_command) {
+  if (model == nullptr || model->active_file.empty() || line <= 0) {
+    return;
+  }
+  ToggleBreakpointAtFile(model, model->active_file, line, on_command);
 }
 
 Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,

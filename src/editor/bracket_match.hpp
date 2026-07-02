@@ -14,4 +14,7 @@ struct BracketPairHighlight {
 
 BracketPairHighlight find_bracket_pair_highlight(const EditorBuffer& buffer, int line, int col);
 
+// True when the cursor sits in normal code (not in a comment or string literal).
+bool cursor_in_code(const EditorBuffer& buffer, int line, int col);
+
 }  // namespace tgdb

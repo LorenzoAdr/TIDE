@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -14,7 +15,7 @@
 
 namespace tgdb {
 
-enum class WizardStep { ChooseMode, PickBinary, PickProcess };
+enum class WizardStep { ChooseMode, PickBinary, PickArgs, PickProcess };
 
 enum class WizardMode { Launch, Attach };
 
@@ -22,6 +23,8 @@ struct ConnectionResult {
   SessionMode mode = SessionMode::kLaunch;
   std::string program;
   std::string workspace_root;
+  std::vector<std::string> args;
+  std::string args_line;
   int attach_pid = 0;
 };
 
@@ -35,6 +38,10 @@ struct ConnectionWizardState {
   PathBrowserState browser;
 
   std::string selected_program;
+  std::string launch_cwd;
+  std::string args_line;
+  std::vector<std::string> args_completion_matches;
+  std::map<std::string, std::string> launch_args_by_program;
 
   std::string process_query;
   std::vector<ProcessEntry> all_processes;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -68,6 +69,7 @@ class Application {
   void open_connection_wizard();
   void open_workspace_wizard();
   void open_external_file_wizard();
+  void sync_model_breakpoints_to_backend();
   void on_connection_complete(const ConnectionResult& result);
   void apply_pending_connection();
   void on_workspace_complete(const std::string& workspace_root);
@@ -81,6 +83,7 @@ class Application {
   void apply_workspace_settings(const WorkspaceConfig& config);
   void save_workspace_session();
   void restore_workspace_session();
+  std::string launch_cwd_for_program(const std::string& program) const;
   void restart_lsp_for_workspace();
   void sync_symbol_workspace_indexer();
   void set_status(const std::string& message);
@@ -95,6 +98,7 @@ class Application {
   AppMode app_mode_ = AppMode::kNormal;
   DebugModel model_;
   WorkspaceModel workspace_;
+  WorkspaceModel secondary_workspace_;
   SourceViewState source_state_;
   FilePickerState file_picker_state_;
   SymbolPickerState symbol_picker_state_;
@@ -132,6 +136,7 @@ class Application {
   bool backend_started_ = false;
   bool debug_available_ = false;
   bool workspace_initialized_ = false;
+  std::map<std::string, std::string> workspace_launch_args_;
   std::optional<ConnectionResult> pending_connection_;
 };
 

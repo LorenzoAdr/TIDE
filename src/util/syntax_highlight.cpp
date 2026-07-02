@@ -57,22 +57,38 @@ Decorator style_for_token_type(const std::vector<std::string>& types, int type_i
 
 Element highlight_semantic_segment(const std::string& segment, const SemanticTokenSpan& span,
                                    const std::vector<std::string>& types, int line_cursor_col,
-                                   Decorator cursor_style) {
+                                   Decorator cursor_style, int col_offset) {
   const Decorator style = style_for_token_type(types, span.type);
   if (line_cursor_col < 0 || !cursor_style) {
     return text(segment) | style;
   }
 
-  const int rel = line_cursor_col - span.start_col;
-  if (rel < 0 || rel >= span.length) {
+  const int span_view_start = span.start_col - col_offset;
+  const int rel = line_cursor_col - span_view_start;
+  if (rel < 0 || rel >= static_cast<int>(segment.size())) {
     return text(segment) | style;
   }
+
+  std::string token_name;
+  if (span.type >= 0 && span.type < static_cast<int>(types.size())) {
+    token_name = types[static_cast<std::size_t>(span.type)];
+  }
+  const bool inverted_cursor = token_name == "keyword" || token_name == "modifier" ||
+                               token_name == "type" || token_name == "class" ||
+                               token_name == "struct" || token_name == "enum";
 
   Elements parts;
   if (rel > 0) {
     parts.push_back(text(segment.substr(0, static_cast<std::size_t>(rel))) | style);
   }
-  parts.push_back(text(segment.substr(static_cast<std::size_t>(rel), 1)) | cursor_style);
+  Element cursor_cell =
+      text(segment.substr(static_cast<std::size_t>(rel), 1));
+  if (inverted_cursor) {
+    cursor_cell = cursor_cell | inverted | bold;
+  } else {
+    cursor_cell = cursor_cell | cursor_style;
+  }
+  parts.push_back(std::move(cursor_cell));
   if (rel + 1 < static_cast<int>(segment.size())) {
     parts.push_back(text(segment.substr(static_cast<std::size_t>(rel + 1))) | style);
   }
@@ -103,8 +119,11 @@ Element highlight_semantic_line(const std::string& line,
       if (gap_end > gap_start) {
         const std::string gap = line.substr(static_cast<std::size_t>(gap_start),
                                             static_cast<std::size_t>(gap_end - gap_start));
-        const int gap_cursor =
-            (cursor_col >= col && cursor_col < span.start_col) ? cursor_col - col : -1;
+        const int gap_view_start = col - col_offset;
+        const int gap_view_end = span.start_col - col_offset;
+        const int gap_cursor = (cursor_col >= gap_view_start && cursor_col < gap_view_end)
+                                   ? col_offset + cursor_col
+                                   : -1;
         parts.push_back(HighlightCppLine(gap, gap_cursor, cursor_style, col, ctx));
       }
       col = span.start_col;
@@ -122,18 +141,21 @@ Element highlight_semantic_line(const std::string& line,
     SemanticTokenSpan clipped = span;
     clipped.start_col = slice_start;
     clipped.length = slice_end - slice_start;
-    parts.push_back(highlight_semantic_segment(segment, clipped, types, cursor_col, cursor_style));
+    parts.push_back(
+        highlight_semantic_segment(segment, clipped, types, cursor_col, cursor_style, col_offset));
     col = slice_end;
   }
 
   if (col < segment_end) {
     const std::string tail = line.substr(static_cast<std::size_t>(col - col_offset));
-    const int tail_cursor = cursor_col >= col ? cursor_col - col : -1;
+    const int tail_view_start = col - col_offset;
+    const int tail_cursor = cursor_col >= tail_view_start ? col_offset + cursor_col : -1;
     parts.push_back(HighlightCppLine(tail, tail_cursor, cursor_style, col, ctx));
   }
 
   if (parts.empty()) {
-    return HighlightCppLine(line, cursor_col, cursor_style, col_offset, ctx);
+    const int abs_cursor = cursor_col >= 0 ? cursor_col + col_offset : -1;
+    return HighlightCppLine(line, abs_cursor, cursor_style, col_offset, ctx);
   }
   return hbox(std::move(parts));
 }
@@ -170,7 +192,8 @@ Element HighlightCodeLine(const std::string& line, int line_index,
   const auto& line_spans = semantic_tokens->lines[static_cast<std::size_t>(line_index)];
   const auto spans = spans_for_segment(line_spans, col_offset, static_cast<int>(line.size()));
   if (spans.empty()) {
-    return HighlightCppLine(line, cursor_col, cursor_style, col_offset, ctx);
+    const int abs_cursor = cursor_col >= 0 ? cursor_col + col_offset : -1;
+    return HighlightCppLine(line, abs_cursor, cursor_style, col_offset, ctx);
   }
 
   return highlight_semantic_line(line, spans, semantic_tokens->token_types, cursor_col, cursor_style,

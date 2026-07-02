@@ -3,9 +3,13 @@
 #include <algorithm>
 #include <cctype>
 
+#include "editor/bracket_match.hpp"
 #include "editor/text_search.hpp"
 #include "editor/undo_stack.hpp"
 #include "symbols/completion_snippet.hpp"
+#include "ui/cursor_blink.hpp"
+
+#include "util/clang_format_config.hpp"
 
 namespace tgdb {
 
@@ -13,7 +17,10 @@ namespace {
 
 int max_scroll(int total, int visible) { return std::max(0, total - visible); }
 
-void mark_dirty(EditorBuffer* buffer) { buffer->dirty = true; }
+void mark_dirty(EditorBuffer* buffer) {
+  buffer->dirty = true;
+  cursor_blink::show();
+}
 
 bool is_identifier_char(char c) {
   const unsigned char u = static_cast<unsigned char>(c);
@@ -191,6 +198,116 @@ bool any_cursor_has_selection(const EditorBuffer& buffer) {
   return false;
 }
 
+char closing_for_open_char(char open) {
+  switch (open) {
+    case '(':
+      return ')';
+    case '[':
+      return ']';
+    case '{':
+      return '}';
+    case '"':
+      return '"';
+    case '\'':
+      return '\'';
+    default:
+      return '\0';
+  }
+}
+
+bool is_auto_pair_closer(char c) {
+  return c == ')' || c == ']' || c == '}' || c == '"' || c == '\'';
+}
+
+void advance_cursors_at(EditorBuffer* buffer, int line, int col) {
+  for (auto& cursor : buffer->cursors) {
+    if (cursor.head.line == line && cursor.head.col == col) {
+      ++cursor.head.col;
+    }
+    if (cursor.anchor.line == line && cursor.anchor.col == col) {
+      ++cursor.anchor.col;
+    }
+  }
+}
+
+void place_cursors_between_pair(EditorBuffer* buffer, int line, int col, int pair_len) {
+  const int after_pair = col + pair_len;
+  const int between = col + pair_len / 2;
+  for (auto& cursor : buffer->cursors) {
+    if (cursor.head.line == line && cursor.head.col == after_pair) {
+      cursor.head.col = between;
+    }
+    if (cursor.anchor.line == line && cursor.anchor.col == after_pair) {
+      cursor.anchor.col = between;
+    }
+  }
+}
+
+void insert_char_at(EditorBuffer* buffer, int line, int col, char c);
+void insert_string_at(EditorBuffer* buffer, int line, int col, const std::string& text);
+
+bool wrap_selection_with_pair(EditorBuffer* buffer, MultiCursor* cursor, char open) {
+  if (cursor == nullptr || !cursor->has_selection()) {
+    return false;
+  }
+
+  const char close = closing_for_open_char(open);
+  if (close == '\0') {
+    return false;
+  }
+
+  int start_line = 0;
+  int start_col = 0;
+  int end_line = 0;
+  int end_col = 0;
+  cursor->normalized_range(&start_line, &start_col, &end_line, &end_col);
+  if (!cursor_in_code(*buffer, start_line, start_col)) {
+    return false;
+  }
+
+  insert_char_at(buffer, start_line, start_col, open);
+
+  int close_line = end_line;
+  int close_col = end_col;
+  if (start_line == end_line) {
+    close_col += 1;
+  }
+
+  insert_char_at(buffer, close_line, close_col, close);
+  cursor->set_pos(close_line, close_col + 1);
+  return true;
+}
+
+void insert_char_at_with_pairs(EditorBuffer* buffer, int line, int col, char c) {
+  if (!cursor_in_code(*buffer, line, col)) {
+    insert_char_at(buffer, line, col, c);
+    return;
+  }
+
+  const std::string& line_text = buffer->lines[static_cast<std::size_t>(line)];
+  const char next =
+      col < static_cast<int>(line_text.size()) ? line_text[static_cast<std::size_t>(col)] : '\0';
+
+  if (is_auto_pair_closer(c) && next == c) {
+    advance_cursors_at(buffer, line, col);
+    return;
+  }
+
+  const char close = closing_for_open_char(c);
+  if (close != '\0') {
+    if (next == close) {
+      insert_char_at(buffer, line, col, c);
+      return;
+    }
+    const std::string pair = std::string(1, c) + close;
+    insert_string_at(buffer, line, col, pair);
+    place_cursors_between_pair(buffer, line, col, static_cast<int>(pair.size()));
+    return;
+  }
+
+  insert_char_at(buffer, line, col, c);
+}
+
 void insert_char_at(EditorBuffer* buffer, int line, int col, char c) {
   auto& text = buffer->lines[static_cast<std::size_t>(line)];
   text.insert(static_cast<std::size_t>(col), 1, c);
@@ -336,20 +453,49 @@ void delete_word_forward_at(EditorBuffer* buffer, int line, int col) {
   delete_range(buffer, line, col, end_line, end_col);
 }
 
-void newline_at(EditorBuffer* buffer, int line, int col) {
+int smart_indent_size() { return std::max(1, editor_indent::width()); }
+
+std::string leading_whitespace(const std::string& line) {
+  std::size_t end = 0;
+  while (end < line.size() && (line[end] == ' ' || line[end] == '\t')) {
+    ++end;
+  }
+  return line.substr(0, end);
+}
+
+bool open_brace_before_col(const std::string& line, int col) {
+  const int limit = std::min(col, static_cast<int>(line.size()));
+  int i = limit - 1;
+  while (i >= 0 && std::isspace(static_cast<unsigned char>(line[static_cast<std::size_t>(i)]))) {
+    --i;
+  }
+  return i >= 0 && line[static_cast<std::size_t>(i)] == '{';
+}
+
+std::string smart_newline_indent(const std::string& line, int col) {
+  std::string indent = leading_whitespace(line);
+  if (open_brace_before_col(line, col)) {
+    indent.append(static_cast<std::size_t>(smart_indent_size()), ' ');
+  }
+  return indent;
+}
+
+void newline_at(EditorBuffer* buffer, int line, int col, bool smart_indent) {
   auto& text = buffer->lines[static_cast<std::size_t>(line)];
   const std::string tail = text.substr(static_cast<std::size_t>(col));
   text.erase(static_cast<std::size_t>(col));
-  buffer->lines.insert(buffer->lines.begin() + line + 1, tail);
+  const std::string indent = smart_indent ? smart_newline_indent(text, col) : std::string{};
+  const int indent_len = static_cast<int>(indent.size());
+  buffer->lines.insert(buffer->lines.begin() + line + 1, indent + tail);
 
   for (auto& cursor : buffer->cursors) {
     if (cursor.head.line == line) {
       if (cursor.head.col > col) {
         cursor.head.line = line + 1;
-        cursor.head.col -= col;
+        cursor.head.col = indent_len + (cursor.head.col - col);
       } else if (cursor.head.col == col) {
         cursor.head.line = line + 1;
-        cursor.head.col = 0;
+        cursor.head.col = indent_len;
       }
     } else if (cursor.head.line > line) {
       ++cursor.head.line;
@@ -358,15 +504,19 @@ void newline_at(EditorBuffer* buffer, int line, int col) {
     if (cursor.anchor.line == line) {
       if (cursor.anchor.col > col) {
         cursor.anchor.line = line + 1;
-        cursor.anchor.col -= col;
+        cursor.anchor.col = indent_len + (cursor.anchor.col - col);
       } else if (cursor.anchor.col == col) {
         cursor.anchor.line = line + 1;
-        cursor.anchor.col = 0;
+        cursor.anchor.col = indent_len;
       }
     } else if (cursor.anchor.line > line) {
       ++cursor.anchor.line;
     }
   }
+}
+
+void newline_at(EditorBuffer* buffer, int line, int col) {
+  newline_at(buffer, line, col, true);
 }
 
 void apply_to_all_cursors(EditorBuffer* buffer,
@@ -415,6 +565,7 @@ void finish_move(EditorBuffer* buffer, bool extend_selection) {
     }
   }
   clamp_all_cursors(buffer);
+  cursor_blink::show();
 }
 
 void paste_string_at(EditorBuffer* buffer, int line, int col, const std::string& text) {
@@ -422,7 +573,7 @@ void paste_string_at(EditorBuffer* buffer, int line, int col, const std::string&
   int cur_col = col;
   for (char c : text) {
     if (c == '\n') {
-      newline_at(buffer, cur_line, cur_col);
+      newline_at(buffer, cur_line, cur_col, false);
       ++cur_line;
       cur_col = 0;
     } else {
@@ -702,6 +853,59 @@ void apply_completion_at_all_cursors(EditorBuffer* buffer, const SnippetResult& 
 void insert_char(EditorBuffer* buffer, char c) {
   push_undo(buffer);
   clamp_all_cursors(buffer);
+
+  if (closing_for_open_char(c) != '\0' && any_cursor_has_selection(*buffer)) {
+    std::vector<std::size_t> indices;
+    indices.reserve(buffer->cursors.size());
+    for (std::size_t i = 0; i < buffer->cursors.size(); ++i) {
+      if (buffer->cursors[i].has_selection()) {
+        indices.push_back(i);
+      }
+    }
+
+    std::sort(indices.begin(), indices.end(), [&](std::size_t a, std::size_t b) {
+      const auto& ca = buffer->cursors[a];
+      const auto& cb = buffer->cursors[b];
+      int end_line_a = 0;
+      int end_col_a = 0;
+      int end_line_b = 0;
+      int end_col_b = 0;
+      int start_line_a = 0;
+      int start_col_a = 0;
+      int start_line_b = 0;
+      int start_col_b = 0;
+      ca.normalized_range(&start_line_a, &start_col_a, &end_line_a, &end_col_a);
+      cb.normalized_range(&start_line_b, &start_col_b, &end_line_b, &end_col_b);
+      if (end_line_a != end_line_b) {
+        return end_line_a > end_line_b;
+      }
+      return end_col_a > end_col_b;
+    });
+
+    for (std::size_t idx : indices) {
+      auto& cursor = buffer->cursors[idx];
+      if (wrap_selection_with_pair(buffer, &cursor, c)) {
+        continue;
+      }
+      int start_line = 0;
+      int start_col = 0;
+      int end_line = 0;
+      int end_col = 0;
+      cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
+      delete_range(buffer, start_line, start_col, end_line, end_col);
+      cursor.set_pos(start_line, start_col);
+      insert_char_at_with_pairs(buffer, start_line, start_col, c);
+    }
+
+    for (auto& cursor : buffer->cursors) {
+      cursor.collapse_to_head();
+    }
+    clamp_all_cursors(buffer);
+    merge_overlapping_cursors(buffer);
+    mark_dirty(buffer);
+    return;
+  }
+
   if (any_cursor_has_selection(*buffer)) {
     delete_all_selections(buffer);
   } else {
@@ -723,7 +927,7 @@ void insert_char(EditorBuffer* buffer, char c) {
   });
 
   for (const auto& pos : positions) {
-    insert_char_at(buffer, pos.line, pos.col, c);
+    insert_char_at_with_pairs(buffer, pos.line, pos.col, c);
   }
   for (auto& cursor : buffer->cursors) {
     cursor.collapse_to_head();
@@ -735,7 +939,7 @@ void insert_char(EditorBuffer* buffer, char c) {
 
 void insert_tab_stop(EditorBuffer* buffer, int tab_size) {
   if (tab_size <= 0) {
-    tab_size = 4;
+    tab_size = editor_indent::width();
   }
   push_undo(buffer);
   clamp_all_cursors(buffer);
@@ -760,6 +964,10 @@ void insert_tab_stop(EditorBuffer* buffer, int tab_size) {
   });
 
   for (const auto& pos : positions) {
+    if (editor_indent::use_tab_char()) {
+      insert_string_at(buffer, pos.line, pos.col, "\t");
+      continue;
+    }
     const int count = tab_size - (pos.col % tab_size);
     if (count <= 0 || count > tab_size) {
       continue;
@@ -1123,6 +1331,7 @@ void extend_block_selection_vertical(EditorBuffer* buffer, int direction) {
   }
   clamp_all_cursors(buffer);
   merge_overlapping_cursors(buffer);
+  cursor_blink::show();
 }
 
 void goto_buffer_line(EditorBuffer* buffer, int line_one_based, int visible_lines) {

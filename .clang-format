@@ -1,0 +1,12 @@
+BasedOnStyle: true
+IndentWidth: 2
+TabWidth: 2
+UseTab: true
+ColumnLimit: 80
+BreakBeforeBraces: true
+PointerAlignment: true
+ReferenceAlignment: true
+SortIncludes: true
+IncludeBlocks: true
+IndentCaseLabels: false
+AllowShortFunctionsOnASingleLine: true

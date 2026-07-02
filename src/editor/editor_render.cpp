@@ -336,26 +336,13 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
     const std::string segment = line.substr(static_cast<std::size_t>(prev),
                                             static_cast<std::size_t>(bp - prev));
     const EditorDecoration* chosen = decoration_at(decorations, prev);
-    const bool caret_on_line =
-        show_caret && editor_focused && line_index == buffer.primary_line() &&
-        !buffer.primary().has_selection();
-    int segment_cursor = -1;
-    if (caret_on_line && buffer.primary_col() >= prev + scroll_col &&
-        buffer.primary_col() < bp + scroll_col) {
-      if (syntax_highlight) {
-        segment_cursor = cursor_blink::effective_col(shift_col(buffer.primary_col(), scroll_col));
-      } else {
-        segment_cursor = cursor_blink::effective_col(buffer.primary_col() - (prev + scroll_col));
-      }
-    }
     const bool use_build_highlight = build_file_kind != BuildFileKind::kNone;
     const int col_offset = syntax_highlight ? prev + scroll_col : 0;
-    const Decorator cursor_cell = cursor_blink::cell_decorator();
+    const bool highlight_segment = syntax_highlight && !use_build_highlight;
     parts.push_back(apply_decoration(
         segment.empty() ? text(" ")
                         : render_line_content(segment, line_index, semantic_tokens,
-                                              syntax_highlight && !use_build_highlight,
-                                              segment_cursor, cursor_cell, col_offset,
+                                              highlight_segment, -1, {}, col_offset,
                                               highlight_ctx, build_file_kind),
         chosen));
     prev = bp;

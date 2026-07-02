@@ -67,7 +67,7 @@ void focus_search_with_filter(MainLayoutState* layout_state, const std::string& 
 
 void context_menu_open_file(ContextMenuState* state, int x, int y,
                             const std::string& absolute_path, const std::string& relative_path,
-                            bool show_format = false);
+                            bool show_format = false, bool show_secondary_open = true);
 
 void context_menu_open_folder(ContextMenuState* state, int x, int y,
                               const std::string& absolute_path, const std::string& relative_path);
@@ -85,8 +85,8 @@ void context_menu_open_problem(ContextMenuState* state, int x, int y, const std:
                                bool lsp_available);
 
 bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace,
-                              DebugModel* model, FocusManagerState* focus,
-                              MainLayoutState* layout_state,
+                              WorkspaceModel* secondary_workspace, DebugModel* model,
+                              FocusManagerState* focus, MainLayoutState* layout_state,
                               const std::shared_ptr<ISymbolProvider>& symbols,
                               WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
                               const WorkspaceConfig* workspace_config, int editor_visible_lines,
@@ -97,9 +97,9 @@ bool handle_context_menu_mouse(ContextMenuState* state, MainLayoutState* layout_
 
 ftxui::Component MakeContextMenuOverlay(
     ftxui::Component main, ContextMenuState* state, WorkspaceModel* workspace,
-    DebugModel* model, FocusManagerState* focus, MainLayoutState* layout_state,
-    const std::shared_ptr<ISymbolProvider>& symbols, WorkspaceIndexer* indexer,
-    SymbolWorkspaceIndexer* symbol_indexer, const WorkspaceConfig* workspace_config,
-    std::function<int()> editor_visible_lines);
+    WorkspaceModel* secondary_workspace, DebugModel* model, FocusManagerState* focus,
+    MainLayoutState* layout_state, const std::shared_ptr<ISymbolProvider>& symbols,
+    WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
+    const WorkspaceConfig* workspace_config, std::function<int()> editor_visible_lines);
 
 }  // namespace tgdb

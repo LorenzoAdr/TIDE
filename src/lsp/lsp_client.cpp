@@ -16,6 +16,7 @@
 #include "indexer/index_rules.hpp"
 #include "util/bundled_tools.hpp"
 #include "app/workspace_config.hpp"
+#include "util/clang_format_config.hpp"
 #include "util/compile_commands_remap.hpp"
 
 #include <chrono>
@@ -988,8 +989,10 @@ std::optional<std::string> LspClient::format_document(const std::string& absolut
   }
 
   const std::string uri = path_to_uri(key);
+  const int tab_size = std::max(1, editor_indent::width());
   nlohmann::json params = {{"textDocument", {{"uri", uri}}},
-                           {"options", {{"tabSize", 4}, {"insertSpaces", true}}}};
+                           {"options", {{"tabSize", tab_size},
+                                        {"insertSpaces", !editor_indent::use_tab_char()}}}};
 
   nlohmann::json result;
   const int id = next_request_id_++;

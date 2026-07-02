@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
+#include "util/clang_format_config.hpp"
 #include "util/compile_commands_remap.hpp"
 
 namespace tgdb {
@@ -40,11 +42,25 @@ constexpr int kGlobalOptionCount = kAfterClangd + 1;
 constexpr int kGlobalOptionCount = kAfterClangd;
 #endif
 
-constexpr int kWorkspaceGccQueryDriver = kGlobalOptionCount;
-constexpr int kWorkspaceBackgroundIndex = kGlobalOptionCount + 1;
-constexpr int kWorkspaceIncludePaths = kGlobalOptionCount + 2;
-constexpr int kWorkspaceCompileCommands = kGlobalOptionCount + 3;
-constexpr int kWorkspaceUiColors = kGlobalOptionCount + 4;
+constexpr int kWorkspaceGccQueryDriver = 0;
+constexpr int kWorkspaceBackgroundIndex = 1;
+constexpr int kWorkspaceIncludePaths = 2;
+constexpr int kWorkspaceCompileCommands = 3;
+constexpr int kWorkspaceUiColors = 4;
+constexpr int kWorkspaceOptionCount = 5;
+
+constexpr int kFormatBasedOnStyle = 0;
+constexpr int kFormatIndentWidth = 1;
+constexpr int kFormatUseTab = 2;
+constexpr int kFormatTabWidth = 3;
+constexpr int kFormatColumnLimit = 4;
+constexpr int kFormatBreakBeforeBraces = 5;
+constexpr int kFormatPointerAlignment = 6;
+constexpr int kFormatSortIncludes = 7;
+constexpr int kFormatIncludeBlocks = 8;
+constexpr int kFormatIndentCaseLabels = 9;
+constexpr int kFormatShortFunctions = 10;
+constexpr int kFormatOptionCount = 11;
 
 constexpr int kUiColorsPreset = 0;
 constexpr int kUiColorsPanelBg = 1;
@@ -83,11 +99,59 @@ constexpr int kCompileDockerContainer = 2;
 constexpr int kCompilePathMappings = 3;
 constexpr int kCompileCommandsRowCount = 4;
 
-int main_option_count(const SettingsModalState* state) {
+bool is_top_level_panel(SettingsPanel panel) {
+  return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kWorkspace ||
+         panel == SettingsPanel::kFormat;
+}
+
+int top_level_panel_count(const SettingsModalState* state) {
   if (state != nullptr && state->has_workspace) {
-    return kGlobalOptionCount + 5;
+    return 3;
   }
-  return kGlobalOptionCount;
+  return 1;
+}
+
+SettingsPanel top_level_panel_at(const SettingsModalState* state, int index) {
+  if (index <= 0) {
+    return SettingsPanel::kGeneral;
+  }
+  if (state != nullptr && state->has_workspace) {
+    if (index == 1) {
+      return SettingsPanel::kWorkspace;
+    }
+    return SettingsPanel::kFormat;
+  }
+  return SettingsPanel::kGeneral;
+}
+
+int top_level_panel_index(const SettingsModalState* state, SettingsPanel panel) {
+  switch (panel) {
+    case SettingsPanel::kGeneral:
+      return 0;
+    case SettingsPanel::kWorkspace:
+      return state != nullptr && state->has_workspace ? 1 : 0;
+    case SettingsPanel::kFormat:
+      return state != nullptr && state->has_workspace ? 2 : 0;
+    default:
+      return 0;
+  }
+}
+
+void cycle_top_level_panel(SettingsModalState* state, int delta) {
+  if (state == nullptr || !is_top_level_panel(state->panel)) {
+    return;
+  }
+  const int count = top_level_panel_count(state);
+  if (count <= 1) {
+    return;
+  }
+  int index = top_level_panel_index(state, state->panel) + delta;
+  while (index < 0) {
+    index += count;
+  }
+  index %= count;
+  state->panel = top_level_panel_at(state, index);
+  state->selected = 0;
 }
 
 std::string compile_commands_mode_label(CompileCommandsMode mode) {
@@ -218,10 +282,6 @@ bool option_checked(const SettingsModalState* state, int index) {
     case kForceBundledGdb:
       return state->draft_force_bundled_gdb;
 #endif
-    case kWorkspaceGccQueryDriver:
-      return state->draft_clangd_use_gcc_query_driver;
-    case kWorkspaceBackgroundIndex:
-      return state->draft_clangd_background_index;
     default:
       return false;
   }
@@ -264,6 +324,16 @@ void toggle_option(SettingsModalState* state, int index) {
       state->draft_force_bundled_gdb = !state->draft_force_bundled_gdb;
       break;
 #endif
+    default:
+      break;
+  }
+}
+
+void toggle_workspace_option(SettingsModalState* state, int index) {
+  if (state == nullptr) {
+    return;
+  }
+  switch (index) {
     case kWorkspaceGccQueryDriver:
       state->draft_clangd_use_gcc_query_driver = !state->draft_clangd_use_gcc_query_driver;
       break;
@@ -275,12 +345,87 @@ void toggle_option(SettingsModalState* state, int index) {
   }
 }
 
-void clamp_main_selection(SettingsModalState* state) {
+void toggle_format_option(SettingsModalState* state, int index) {
   if (state == nullptr) {
     return;
   }
-  const int count = main_option_count(state);
-  state->selected = std::max(0, std::min(state->selected, count - 1));
+  switch (index) {
+    case kFormatBasedOnStyle:
+      cycle_clang_based_on_style(&state->draft_clang_format);
+      break;
+    case kFormatIndentWidth:
+      cycle_clang_indent_width(&state->draft_clang_format);
+      break;
+    case kFormatUseTab:
+      cycle_clang_use_tab(&state->draft_clang_format);
+      break;
+    case kFormatTabWidth:
+      cycle_clang_tab_width(&state->draft_clang_format);
+      break;
+    case kFormatColumnLimit:
+      cycle_clang_column_limit(&state->draft_clang_format);
+      break;
+    case kFormatBreakBeforeBraces:
+      cycle_clang_break_before_braces(&state->draft_clang_format);
+      break;
+    case kFormatPointerAlignment:
+      cycle_clang_pointer_alignment(&state->draft_clang_format);
+      break;
+    case kFormatSortIncludes:
+      state->draft_clang_format.sort_includes = !state->draft_clang_format.sort_includes;
+      break;
+    case kFormatIncludeBlocks:
+      cycle_clang_include_blocks(&state->draft_clang_format);
+      break;
+    case kFormatIndentCaseLabels:
+      state->draft_clang_format.indent_case_labels = !state->draft_clang_format.indent_case_labels;
+      break;
+    case kFormatShortFunctions:
+      cycle_clang_short_functions(&state->draft_clang_format);
+      break;
+    default:
+      break;
+  }
+}
+
+void clamp_general_selection(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->selected = std::max(0, std::min(state->selected, kGlobalOptionCount - 1));
+}
+
+void clamp_workspace_selection(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->selected = std::max(0, std::min(state->selected, kWorkspaceOptionCount - 1));
+}
+
+void clamp_format_selection(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->selected = std::max(0, std::min(state->selected, kFormatOptionCount - 1));
+}
+
+void clamp_top_level_selection(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  switch (state->panel) {
+    case SettingsPanel::kGeneral:
+      clamp_general_selection(state);
+      break;
+    case SettingsPanel::kWorkspace:
+      clamp_workspace_selection(state);
+      break;
+    case SettingsPanel::kFormat:
+      clamp_format_selection(state);
+      break;
+    default:
+      break;
+  }
 }
 
 void clamp_include_path_selection(SettingsModalState* state) {
@@ -758,51 +903,130 @@ void delete_selected_include_path(SettingsModalState* state) {
   clamp_include_path_selection(state);
 }
 
-bool handle_main_settings_keys(SettingsModalState* state, Event event) {
+bool handle_top_level_tab_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr || !is_top_level_panel(state->panel)) {
+    return false;
+  }
+  if (top_level_panel_count(state) <= 1) {
+    return false;
+  }
+  if (event == Event::Tab) {
+    cycle_top_level_panel(state, 1);
+    return true;
+  }
+  if (event == Event::TabReverse) {
+    cycle_top_level_panel(state, -1);
+    return true;
+  }
+  if (event == Event::ArrowRight || event == Event::Character('l')) {
+    cycle_top_level_panel(state, 1);
+    return true;
+  }
+  if (event == Event::ArrowLeft || event == Event::Character('h')) {
+    cycle_top_level_panel(state, -1);
+    return true;
+  }
+  return false;
+}
+
+bool handle_general_settings_keys(SettingsModalState* state, Event event) {
   if (state == nullptr) {
     return false;
+  }
+  if (handle_top_level_tab_keys(state, event)) {
+    return true;
   }
 
   if (event == Event::ArrowDown || event == Event::Character('j')) {
     state->selected += 1;
-    clamp_main_selection(state);
+    clamp_general_selection(state);
     return true;
   }
   if (event == Event::ArrowUp || event == Event::Character('k')) {
     state->selected -= 1;
-    clamp_main_selection(state);
+    clamp_general_selection(state);
+    return true;
+  }
+  if (event == Event::Return || event == Event::Character(' ')) {
+    toggle_option(state, state->selected);
+    return true;
+  }
+  return true;
+}
+
+bool handle_workspace_settings_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr) {
+    return false;
+  }
+  if (handle_top_level_tab_keys(state, event)) {
+    return true;
+  }
+
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    state->selected += 1;
+    clamp_workspace_selection(state);
+    return true;
+  }
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    state->selected -= 1;
+    clamp_workspace_selection(state);
     return true;
   }
   if (event == Event::Return) {
-    if (state->has_workspace && state->selected == kWorkspaceIncludePaths) {
+    if (state->selected == kWorkspaceIncludePaths) {
       open_include_paths_panel(state);
       return true;
     }
-    if (state->has_workspace && state->selected == kWorkspaceCompileCommands) {
+    if (state->selected == kWorkspaceCompileCommands) {
       open_compile_commands_panel(state);
       return true;
     }
-    if (state->has_workspace && state->selected == kWorkspaceUiColors) {
+    if (state->selected == kWorkspaceUiColors) {
       open_ui_colors_panel(state);
       return true;
     }
-    toggle_option(state, state->selected);
+    toggle_workspace_option(state, state->selected);
     return true;
   }
   if (event == Event::Character(' ')) {
-    if (state->has_workspace && state->selected == kWorkspaceIncludePaths) {
+    if (state->selected == kWorkspaceIncludePaths) {
       open_include_paths_panel(state);
       return true;
     }
-    if (state->has_workspace && state->selected == kWorkspaceCompileCommands) {
+    if (state->selected == kWorkspaceCompileCommands) {
       open_compile_commands_panel(state);
       return true;
     }
-    if (state->has_workspace && state->selected == kWorkspaceUiColors) {
+    if (state->selected == kWorkspaceUiColors) {
       open_ui_colors_panel(state);
       return true;
     }
-    toggle_option(state, state->selected);
+    toggle_workspace_option(state, state->selected);
+    return true;
+  }
+  return true;
+}
+
+bool handle_format_settings_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr) {
+    return false;
+  }
+  if (handle_top_level_tab_keys(state, event)) {
+    return true;
+  }
+
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    state->selected += 1;
+    clamp_format_selection(state);
+    return true;
+  }
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    state->selected -= 1;
+    clamp_format_selection(state);
+    return true;
+  }
+  if (event == Event::Return || event == Event::Character(' ')) {
+    toggle_format_option(state, state->selected);
     return true;
   }
   return true;
@@ -847,7 +1071,7 @@ bool handle_compile_commands_keys(SettingsModalState* state, Event event) {
   }
 
   if (event == Event::Escape) {
-    state->panel = SettingsPanel::kMain;
+    state->panel = SettingsPanel::kWorkspace;
     return true;
   }
   if (event == Event::ArrowDown || event == Event::Character('j')) {
@@ -931,7 +1155,7 @@ bool handle_include_paths_keys(SettingsModalState* state, Event event) {
   }
 
   if (event == Event::Escape) {
-    state->panel = SettingsPanel::kMain;
+    state->panel = SettingsPanel::kWorkspace;
     return true;
   }
   if (event == Event::Character('a') || event == Event::Character('A')) {
@@ -1015,8 +1239,12 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
   }
 
   switch (state->panel) {
-    case SettingsPanel::kMain:
-      return handle_main_settings_keys(state, event);
+    case SettingsPanel::kGeneral:
+      return handle_general_settings_keys(state, event);
+    case SettingsPanel::kWorkspace:
+      return handle_workspace_settings_keys(state, event);
+    case SettingsPanel::kFormat:
+      return handle_format_settings_keys(state, event);
     case SettingsPanel::kIncludePaths:
       return handle_include_paths_keys(state, event);
     case SettingsPanel::kCompileCommands:
@@ -1031,8 +1259,41 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
   return true;
 }
 
-Element render_main_settings(const SettingsModalState* state) {
+std::string format_column_limit_label(int column_limit) {
+  if (column_limit <= 0) {
+    return "sin límite";
+  }
+  return std::to_string(column_limit);
+}
+
+Element render_top_level_tabs(const SettingsModalState* state) {
+  if (state == nullptr || !state->has_workspace) {
+    return text("");
+  }
+
+  const auto render_tab = [&](SettingsPanel panel, const char* label) {
+    const bool active = state->panel == panel;
+    Element tab = text(std::string(active ? "▸ " : "  ") + label) |
+                    color(active ? theme::Accent() : theme::Muted()) | bold;
+    if (active) {
+      tab = tab | underlined;
+    }
+    return tab;
+  };
+
+  return hbox({render_tab(SettingsPanel::kGeneral, "General"), text("  "),
+               render_tab(SettingsPanel::kWorkspace, "Workspace"), text("  "),
+               render_tab(SettingsPanel::kFormat, "Formato")});
+}
+
+Element render_general_settings(const SettingsModalState* state) {
   Elements rows;
+  if (state->has_workspace) {
+    rows.push_back(render_top_level_tabs(state));
+    rows.push_back(separator() | color(theme::AccentDim()));
+    rows.push_back(text(""));
+  }
+
   const auto& options = global_settings_options();
   for (int i = 0; i < kGlobalOptionCount; ++i) {
     const auto& option = options[static_cast<std::size_t>(i)];
@@ -1049,93 +1310,141 @@ Element render_main_settings(const SettingsModalState* state) {
     rows.push_back(text(""));
   }
 
-  if (state->has_workspace) {
-    rows.push_back(separator() | color(theme::AccentDim()));
-    rows.push_back(text("Workspace") | color(theme::Accent()) | bold);
+  if (!rows.empty()) {
+    rows.pop_back();
+  }
+  return vbox(std::move(rows));
+}
+
+Element render_workspace_settings(const SettingsModalState* state) {
+  Elements rows;
+  rows.push_back(render_top_level_tabs(state));
+  rows.push_back(separator() | color(theme::AccentDim()));
+  rows.push_back(text(""));
+
+  {
+    const bool selected = state->selected == kWorkspaceGccQueryDriver;
+    const bool checked = state->draft_clangd_use_gcc_query_driver;
+    Element title =
+        text(checkbox_label(checked, "Consultar compilador GCC (query-driver)")) |
+        color(selected ? theme::Accent() : theme::Header()) | bold;
+    if (selected) {
+      title = title | inverted;
+    }
+    rows.push_back(title);
+    rows.push_back(
+        text("    Pide a clangd los includes del sistema vía gcc/g++ cuando compile_commands "
+             "no los cubre") |
+        color(theme::Muted()));
     rows.push_back(text(""));
+  }
 
-    {
-      const bool selected = state->selected == kWorkspaceGccQueryDriver;
-      const bool checked = state->draft_clangd_use_gcc_query_driver;
-      Element title =
-          text(checkbox_label(checked, "Consultar compilador GCC (query-driver)")) |
-          color(selected ? theme::Accent() : theme::Header()) | bold;
-      if (selected) {
-        title = title | inverted;
-      }
-      rows.push_back(title);
-      rows.push_back(
-          text("    Pide a clangd los includes del sistema vía gcc/g++ cuando compile_commands "
-               "no los cubre") |
-          color(theme::Muted()));
-      rows.push_back(text(""));
+  {
+    const bool selected = state->selected == kWorkspaceBackgroundIndex;
+    const bool checked = state->draft_clangd_background_index;
+    Element title =
+        text(checkbox_label(checked, "Indexado completo con clangd (background-index)")) |
+        color(selected ? theme::Accent() : theme::Header()) | bold;
+    if (selected) {
+      title = title | inverted;
     }
+    rows.push_back(title);
+    rows.push_back(
+        text("    Indexa todo el proyecto vía compile_commands (más RAM/CPU; mejor "
+             "autocompletado global). Desactivado: solo archivos abiertos") |
+        color(theme::Muted()));
+    rows.push_back(text(""));
+  }
 
-    {
-      const bool selected = state->selected == kWorkspaceBackgroundIndex;
-      const bool checked = state->draft_clangd_background_index;
-      Element title =
-          text(checkbox_label(checked, "Indexado completo con clangd (background-index)")) |
-          color(selected ? theme::Accent() : theme::Header()) | bold;
-      if (selected) {
-        title = title | inverted;
-      }
-      rows.push_back(title);
-      rows.push_back(
-          text("    Indexa todo el proyecto vía compile_commands (más RAM/CPU; mejor "
-               "autocompletado global). Desactivado: solo archivos abiertos") |
-          color(theme::Muted()));
-      rows.push_back(text(""));
+  {
+    const bool selected = state->selected == kWorkspaceIncludePaths;
+    const std::size_t count = state->draft_clangd_extra_include_paths.size();
+    const std::string label = "> Rutas include extra de clangd (" + std::to_string(count) + ")";
+    Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
+    if (selected) {
+      title = title | inverted;
     }
+    rows.push_back(title);
+    rows.push_back(text("    Enter: gestionar rutas (recursivas) además de compile_commands") |
+                   color(theme::Muted()));
+    rows.push_back(text(""));
+  }
 
-    {
-      const bool selected = state->selected == kWorkspaceIncludePaths;
-      const std::size_t count = state->draft_clangd_extra_include_paths.size();
-      const std::string label =
-          "> Rutas include extra de clangd (" + std::to_string(count) + ")";
-      Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
-      if (selected) {
-        title = title | inverted;
-      }
-      rows.push_back(title);
-      rows.push_back(text("    Enter: gestionar rutas (recursivas) además de compile_commands") |
-                     color(theme::Muted()));
-      rows.push_back(text(""));
+  {
+    const bool selected = state->selected == kWorkspaceCompileCommands;
+    const std::string label = std::string("> compile_commands (") +
+                              compile_commands_mode_label(state->draft_compile_commands.mode) +
+                              ")";
+    Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
+    if (selected) {
+      title = title | inverted;
     }
+    rows.push_back(title);
+    rows.push_back(text("    Enter: Docker/remap → .tgdb/compile_commands.json para clangd") |
+                   color(theme::Muted()));
+    rows.push_back(text(""));
+  }
 
-    {
-      const bool selected = state->selected == kWorkspaceCompileCommands;
-      const std::string label = std::string("> compile_commands (") +
-                                compile_commands_mode_label(state->draft_compile_commands.mode) +
-                                ")";
-      Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
-      if (selected) {
-        title = title | inverted;
-      }
-      rows.push_back(title);
-      rows.push_back(text("    Enter: Docker/remap → .tgdb/compile_commands.json para clangd") |
-                     color(theme::Muted()));
-      rows.push_back(text(""));
+  {
+    const bool selected = state->selected == kWorkspaceUiColors;
+    const std::string label = std::string("> Colores de interfaz (") +
+                              theme::ui_color_preset_label(state->draft_ui_colors_preset) + ")";
+    Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
+    if (selected) {
+      title = title | inverted;
     }
-
-    {
-      const bool selected = state->selected == kWorkspaceUiColors;
-      const std::string label = std::string("> Colores de interfaz (") +
-                                theme::ui_color_preset_label(state->draft_ui_colors_preset) + ")";
-      Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
-      if (selected) {
-        title = title | inverted;
-      }
-      rows.push_back(title);
-      rows.push_back(text("    Enter: presets y colores de fondo/texto de la interfaz") |
-                     color(theme::Muted()));
-      rows.push_back(text(""));
-    }
+    rows.push_back(title);
+    rows.push_back(text("    Enter: presets y colores de fondo/texto de la interfaz") |
+                   color(theme::Muted()));
+    rows.push_back(text(""));
   }
 
   if (!rows.empty()) {
     rows.pop_back();
   }
+  return vbox(std::move(rows));
+}
+
+Element render_format_settings(const SettingsModalState* state) {
+  Elements rows;
+  rows.push_back(render_top_level_tabs(state));
+  rows.push_back(separator() | color(theme::AccentDim()));
+  rows.push_back(text(""));
+
+  const std::string file_note =
+      state->clang_format_file_exists ? "Archivo existente en el workspace"
+                                    : "Se creará .clang-format al guardar (valores por defecto)";
+  rows.push_back(text(file_note) | color(theme::Muted()));
+  rows.push_back(text(""));
+
+  const auto& config = state->draft_clang_format;
+  const auto row = [&](int index, const std::string& label, const std::string& value) {
+    const bool selected = index == state->selected;
+    Element line = text(label + value) | color(selected ? theme::Accent() : theme::Header()) | bold;
+    if (selected) {
+      line = line | inverted;
+    }
+    rows.push_back(line);
+  };
+
+  row(kFormatBasedOnStyle, "Estilo base: ",
+      clang_based_on_style_name(config.based_on_style));
+  row(kFormatIndentWidth, "Ancho de indentación: ", std::to_string(config.indent_width));
+  row(kFormatUseTab, "Usar tabulador: ", clang_use_tab_name(config.use_tab));
+  row(kFormatTabWidth, "Ancho de tab: ", std::to_string(config.tab_width));
+  row(kFormatColumnLimit, "Límite de columna: ", format_column_limit_label(config.column_limit));
+  row(kFormatBreakBeforeBraces, "Llaves: ",
+      clang_break_before_braces_name(config.break_before_braces));
+  row(kFormatPointerAlignment, "Alineación de punteros: ",
+      clang_pointer_alignment_name(config.pointer_alignment));
+  row(kFormatSortIncludes, checkbox_label(config.sort_includes, "Ordenar includes"), "");
+  row(kFormatIncludeBlocks, "Bloques de includes: ",
+      clang_include_blocks_name(config.include_blocks));
+  row(kFormatIndentCaseLabels, checkbox_label(config.indent_case_labels, "Indentar case labels"),
+      "");
+  row(kFormatShortFunctions, "Funciones cortas en una línea: ",
+      clang_short_functions_name(config.allow_short_functions_on_a_single_line));
+
   return vbox(std::move(rows));
 }
 
@@ -1276,7 +1585,7 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
     return;
   }
   state->open = true;
-  state->panel = SettingsPanel::kMain;
+  state->panel = SettingsPanel::kGeneral;
   state->selected = 0;
   state->include_path_selected = 0;
   state->compile_commands_selected = 0;
@@ -1310,11 +1619,21 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_compile_commands = workspace_config.compile_commands;
   state->path_browser.launch_root = workspace_root.empty() ? canonical_browser_root("")
                                                              : workspace_root;
+  if (state->has_workspace) {
+    const std::string format_path = clang_format_path(workspace_root);
+    state->clang_format_file_exists =
+        !format_path.empty() && std::ifstream(format_path).good();
+    state->draft_clang_format = load_clang_format(workspace_root);
+  } else {
+    state->clang_format_file_exists = false;
+    state->draft_clang_format = default_clang_format_config();
+  }
 }
 
 void close_settings_modal(SettingsModalState* state, AppSettings* settings,
                           SettingsApplyCallback on_apply,
-                          WorkspaceSettingsApplyCallback on_workspace_apply) {
+                          WorkspaceSettingsApplyCallback on_workspace_apply,
+                          ClangFormatApplyCallback on_clang_format_apply) {
   if (state == nullptr || settings == nullptr) {
     return;
   }
@@ -1345,8 +1664,15 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
     theme::set_ui_overrides(state->draft_ui_colors);
   }
 
+  if (state->has_workspace) {
+    save_clang_format(state->workspace_root, state->draft_clang_format);
+    if (on_clang_format_apply) {
+      on_clang_format_apply(state->draft_clang_format);
+    }
+  }
+
   state->open = false;
-  state->panel = SettingsPanel::kMain;
+  state->panel = SettingsPanel::kGeneral;
   state->selected = 0;
   state->include_path_selected = 0;
   state->compile_commands_selected = 0;
@@ -1355,9 +1681,11 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
 
 Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
                                  AppSettings* settings, SettingsApplyCallback on_apply,
-                                 WorkspaceSettingsApplyCallback on_workspace_apply) {
+                                 WorkspaceSettingsApplyCallback on_workspace_apply,
+                                 ClangFormatApplyCallback on_clang_format_apply) {
   return Renderer(
-      CatchEvent(main, [state, settings, on_apply, on_workspace_apply](Event event) {
+      CatchEvent(main, [state, settings, on_apply, on_workspace_apply,
+                        on_clang_format_apply](Event event) {
         if (state == nullptr || !state->open) {
           return false;
         }
@@ -1374,10 +1702,13 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
             case SettingsPanel::kIncludePaths:
             case SettingsPanel::kCompileCommands:
             case SettingsPanel::kUiColors:
-              state->panel = SettingsPanel::kMain;
+              state->panel = SettingsPanel::kWorkspace;
               return true;
-            case SettingsPanel::kMain:
-              close_settings_modal(state, settings, on_apply, on_workspace_apply);
+            case SettingsPanel::kGeneral:
+            case SettingsPanel::kWorkspace:
+            case SettingsPanel::kFormat:
+              close_settings_modal(state, settings, on_apply, on_workspace_apply,
+                                   on_clang_format_apply);
               return true;
           }
         }
@@ -1389,7 +1720,7 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
           return base;
         }
 
-        clamp_main_selection(state);
+        clamp_top_level_selection(state);
         clamp_include_path_selection(state);
         clamp_compile_commands_selection(state);
         clamp_mapping_selection(state);
@@ -1397,10 +1728,23 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
 
         Element body;
         std::string title = "Configuración";
-        std::string footer = "↑↓ j/k  Espacio/Enter alternar   F10/Esc cerrar y guardar";
+        std::string footer;
+        if (is_top_level_panel(state->panel)) {
+          footer = state->has_workspace
+                       ? "←→ h/l Tab cambiar pestaña   ↑↓ j/k   Espacio/Enter alternar   "
+                         "F10/Esc cerrar y guardar"
+                       : "↑↓ j/k  Espacio/Enter alternar   F10/Esc cerrar y guardar";
+        }
         switch (state->panel) {
-          case SettingsPanel::kMain:
-            body = render_main_settings(state);
+          case SettingsPanel::kGeneral:
+            body = render_general_settings(state);
+            break;
+          case SettingsPanel::kWorkspace:
+            body = render_workspace_settings(state);
+            break;
+          case SettingsPanel::kFormat:
+            title = "Formato (.clang-format)";
+            body = render_format_settings(state);
             break;
           case SettingsPanel::kIncludePaths:
             title = "Rutas include de clangd";
@@ -1440,6 +1784,10 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
             config_note += "  |  ";
           }
           config_note += "Workspace: " + workspace_path;
+          const std::string format_path = clang_format_path(state->workspace_root);
+          if (!format_path.empty()) {
+            config_note += "  |  .clang-format: " + format_path;
+          }
         }
         if (config_note.empty()) {
           config_note = "HOME no definido; la configuración global no se guardará en disco";

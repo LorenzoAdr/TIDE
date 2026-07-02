@@ -22,4 +22,10 @@ struct GdbAttachRequest : public AttachRequest {
 
 DAP_DECLARE_STRUCT_TYPEINFO(GdbAttachRequest);
 
+// GDB suele emitir "terminated" sin body; el TerminatedEvent estándar de cppdap
+// falla al deserializar el campo opcional restart desde un body ausente.
+struct GdbTerminatedEvent : public Event {};
+
+DAP_DECLARE_STRUCT_TYPEINFO(GdbTerminatedEvent);
+
 }  // namespace dap

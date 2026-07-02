@@ -20,34 +20,38 @@ struct SelectionOccurrenceKey {
   std::string path;
   uint64_t view_token = 0;
 
-  bool operator==(const SelectionOccurrenceKey& other) const {
+  bool operator==(const SelectionOccurrenceKey &other) const {
     return start_line == other.start_line && start_col == other.start_col &&
-           end_line == other.end_line && end_col == other.end_col && path == other.path &&
-           view_token == other.view_token;
+           end_line == other.end_line && end_col == other.end_col &&
+           path == other.path && view_token == other.view_token;
   }
 
-  bool operator!=(const SelectionOccurrenceKey& other) const { return !(*this == other); }
+  bool operator!=(const SelectionOccurrenceKey &other) const {
+    return !(*this == other);
+  }
 };
 
 class SelectionOccurrenceRunner {
- public:
+public:
   SelectionOccurrenceRunner();
   ~SelectionOccurrenceRunner();
 
-  SelectionOccurrenceRunner(const SelectionOccurrenceRunner&) = delete;
-  SelectionOccurrenceRunner& operator=(const SelectionOccurrenceRunner&) = delete;
+  SelectionOccurrenceRunner(const SelectionOccurrenceRunner &) = delete;
+  SelectionOccurrenceRunner &
+  operator=(const SelectionOccurrenceRunner &) = delete;
 
-  void start(uint64_t request_id, SelectionOccurrenceKey key, std::vector<std::string> lines,
-             std::string needle, bool whole_word);
+  void start(uint64_t request_id, SelectionOccurrenceKey key,
+             std::vector<std::string> lines, std::string needle,
+             bool whole_word);
 
   void cancel();
 
   bool running() const;
 
-  bool poll(uint64_t request_id, const SelectionOccurrenceKey& key,
-            std::vector<TextMatch>* matches);
+  bool poll(uint64_t request_id, const SelectionOccurrenceKey &key,
+            std::vector<TextMatch> *matches);
 
- private:
+private:
   struct Job {
     uint64_t request_id = 0;
     SelectionOccurrenceKey key;
@@ -78,4 +82,4 @@ class SelectionOccurrenceRunner {
   Result ready_result_;
 };
 
-}  // namespace tgdb
+} // namespace tgdb

@@ -1,5 +1,7 @@
 #include "editor/undo_stack.hpp"
 
+#include "ui/cursor_blink.hpp"
+
 namespace tgdb {
 
 namespace {
@@ -38,6 +40,7 @@ bool undo(EditorBuffer* buffer) {
   buffer->cursors = snapshot.cursors;
   buffer->ensure_cursors();
   buffer->dirty = true;
+  cursor_blink::show();
   return true;
 }
 
@@ -53,6 +56,7 @@ bool redo(EditorBuffer* buffer) {
   buffer->cursors = snapshot.cursors;
   buffer->ensure_cursors();
   buffer->dirty = true;
+  cursor_blink::show();
   return true;
 }
 

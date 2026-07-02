@@ -8,6 +8,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ui/clickable.hpp"
 #include "ui/cursor_blink.hpp"
+#include "ui/cursor_blink.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
@@ -331,6 +332,9 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
   if (state == nullptr || git == nullptr || !git->is_repo()) {
     return false;
   }
+  if (focus != nullptr && focus->region != FocusRegion::Terminal) {
+    return false;
+  }
 
   if (event == Event::Character('1')) {
     select_tab(state, git, GitPanelState::kTabStatus);
@@ -402,9 +406,11 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
     }
     if (event == Event::Character('c')) {
       state->commit_input_focus = true;
+      cursor_blink::show();
       return true;
     }
     if (state->commit_input_focus) {
+      cursor_blink::show();
       if (event == Event::Return) {
         commit_message(git, state, layout_state);
         return true;
@@ -638,6 +644,7 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     if (state->commit_box.Contain(m.x, m.y)) {
       trigger_press(layout_state, std::string_view(kGitCommit));
       state->commit_input_focus = true;
+      cursor_blink::show();
       return true;
     }
   }

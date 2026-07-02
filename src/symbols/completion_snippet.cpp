@@ -160,11 +160,69 @@ void apply_tab_stop_choice(SnippetResult* result, const std::vector<TabStop>& st
   }
 }
 
+std::string base_name_before_paren(const std::string& text) {
+  const std::size_t open = text.find('(');
+  if (open == std::string::npos) {
+    return text;
+  }
+  return text.substr(0, open);
+}
+
+bool call_parens_are_empty(const std::string& text) {
+  const std::size_t open = text.find('(');
+  if (open == std::string::npos) {
+    return false;
+  }
+  const std::size_t close = find_matching_close_paren(text, open);
+  if (close == std::string::npos) {
+    return false;
+  }
+  const std::string inside = trim_copy(text.substr(open + 1, close - open - 1));
+  if (inside.empty()) {
+    return true;
+  }
+  return inside == "$0" || inside == "${0}" || inside == "${0:}";
+}
+
 }  // namespace
 
 bool has_char_at(const std::string& line, int col, char expected) {
   return col >= 0 && col < static_cast<int>(line.size()) &&
          line[static_cast<std::size_t>(col)] == expected;
+}
+
+bool completion_insert_is_empty_call(const std::string& insert_text) {
+  const std::size_t open = insert_text.find('(');
+  if (open == std::string::npos) {
+    return false;
+  }
+  std::size_t depth = 0;
+  std::size_t close = std::string::npos;
+  for (std::size_t i = open; i < insert_text.size(); ++i) {
+    if (insert_text[i] == '(') {
+      ++depth;
+    } else if (insert_text[i] == ')') {
+      --depth;
+      if (depth == 0) {
+        close = i;
+        break;
+      }
+    }
+  }
+  if (close == std::string::npos) {
+    return false;
+  }
+  std::string inside = insert_text.substr(open + 1, close - open - 1);
+  while (!inside.empty() && std::isspace(static_cast<unsigned char>(inside.front()))) {
+    inside.erase(inside.begin());
+  }
+  while (!inside.empty() && std::isspace(static_cast<unsigned char>(inside.back()))) {
+    inside.pop_back();
+  }
+  if (inside.empty()) {
+    return true;
+  }
+  return inside == "$0" || inside == "${0}" || inside == "${0:}";
 }
 
 SnippetResult expand_snippet(const std::string& snippet) {
@@ -306,6 +364,31 @@ SnippetResult finalize_function_call_insert(const std::string& insert_text,
     return result;
   }
 
+  const std::string& signature = detail.empty() ? insert_text : detail;
+  const std::string arg_snippet = build_argument_snippet_body(signature);
+  const bool has_parens = insert_text.find('(') != std::string::npos;
+  const bool empty_parens = has_parens && call_parens_are_empty(insert_text);
+  const std::string base = has_parens ? base_name_before_paren(insert_text) : insert_text;
+
+  if (!has_parens || empty_parens) {
+    if (paren_already_there) {
+      if (arg_snippet.empty()) {
+        result.text = base;
+        result.caret_col = static_cast<int>(base.size()) + 1;
+        return result;
+      }
+      return adjust_snippet_for_existing_open_paren(base + "(" + arg_snippet + ")");
+    }
+
+    if (arg_snippet.empty()) {
+      result.text = base + "()";
+      result.caret_col = static_cast<int>(result.text.size()) - 1;
+      return result;
+    }
+
+    return expand_snippet(base + "(" + arg_snippet + ")");
+  }
+
   if (insert_text.find('$') != std::string::npos) {
     SnippetResult expanded = expand_snippet(insert_text);
     if (paren_already_there) {
@@ -314,28 +397,7 @@ SnippetResult finalize_function_call_insert(const std::string& insert_text,
     return expanded;
   }
 
-  if (insert_text.find('(') != std::string::npos) {
-    return result;
-  }
-
-  const std::string& signature = detail.empty() ? insert_text : detail;
-  const std::string arg_snippet = build_argument_snippet_body(signature);
-
-  if (paren_already_there) {
-    if (arg_snippet.empty()) {
-      result.caret_col = static_cast<int>(insert_text.size()) + 1;
-      return result;
-    }
-    return adjust_snippet_for_existing_open_paren(insert_text + "(" + arg_snippet + ")");
-  }
-
-  if (arg_snippet.empty()) {
-    result.text = insert_text + "()";
-    result.caret_col = static_cast<int>(result.text.size()) - 1;
-    return result;
-  }
-
-  return expand_snippet(insert_text + "(" + arg_snippet + ")");
+  return result;
 }
 
 }  // namespace tgdb

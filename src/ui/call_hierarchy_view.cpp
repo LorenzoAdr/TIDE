@@ -580,8 +580,8 @@ void navigate_to_call_hierarchy_node(WorkspaceModel* workspace, FocusManagerStat
     return;
   }
   int visible_lines = 24;
-  if (layout_state != nullptr && layout_state->editor_visible_line_count) {
-    visible_lines = std::max(1, layout_state->editor_visible_line_count());
+  if (layout_state != nullptr && layout_state->primary_editor.visible_line_count) {
+    visible_lines = std::max(1, layout_state->primary_editor.visible_line_count());
   }
   workspace->record_cursor_jump();
   workspace->open_file_at(path, line, character);

@@ -87,7 +87,10 @@ void DapBackend::setup_session() {
       if (expecting_interrupt_for_breakpoints_) {
         expecting_interrupt_for_breakpoints_ = false;
       } else if (e.reason == "attach" || e.reason == "pause") {
-        return;
+        if (!expecting_stop_after_pause_) {
+          return;
+        }
+        expecting_stop_after_pause_ = false;
       }
     }
 
@@ -126,9 +129,23 @@ void DapBackend::setup_session() {
     push_event(std::move(event));
   });
 
-  session_->registerHandler([&](const dap::TerminatedEvent&) {
+  session_->registerHandler([&](const dap::ExitedEvent& e) {
+    inferior_attached_ = false;
+    inferior_launched_ = false;
+    inferior_stopped_.store(false, std::memory_order_release);
+    last_exit_code_ = static_cast<int>(e.exitCode);
+  });
+
+  session_->registerHandler([&](const dap::GdbTerminatedEvent&) {
+    inferior_attached_ = false;
+    inferior_launched_ = false;
+    inferior_stopped_.store(false, std::memory_order_release);
     DebugEvent event;
     event.kind = DebugEventKind::kTerminated;
+    if (last_exit_code_ >= 0) {
+      event.text = "Proceso finalizado (código " + std::to_string(last_exit_code_) + ")";
+      last_exit_code_ = -1;
+    }
     push_event(std::move(event));
   });
 
@@ -161,7 +178,6 @@ void DapBackend::setup_session() {
   session_->registerHandler([&](const dap::ThreadEvent& e) {
     active_thread_id_ = static_cast<int>(e.threadId);
   });
-  session_->registerHandler([&](const dap::ExitedEvent&) {});
 
   // GDB envía estos eventos durante launch/attach; ignorarlos evita ruido en consola.
   session_->registerHandler([&](const dap::ModuleEvent&) {});
@@ -216,6 +232,9 @@ void DapBackend::refresh_stack(int thread_id) {
       }
     }
     if (response.error) {
+      if (response.error.message.find("not stopped") != std::string::npos) {
+        return;
+      }
       push_error("stackTrace falló: " + response.error.message);
       return;
     }
@@ -388,6 +407,11 @@ bool DapBackend::continue_inferior_locked() {
   request.threadId = active_thread_id_ > 0 ? active_thread_id_ : 1;
   const auto response = session_->send(request).get();
   if (response.error) {
+    // GDB responde notStopped si el inferior ya está en ejecución.
+    if (response.error.message.find("notStopped") != std::string::npos) {
+      notify_continued(request.threadId);
+      return true;
+    }
     return false;
   }
   notify_continued(request.threadId);
@@ -421,6 +445,24 @@ void DapBackend::refresh_active_thread_locked() {
   active_thread_id_ = static_cast<int>(response.response.threads.front().id);
 }
 
+void DapBackend::on_inferior_launched() {
+  inferior_attached_ = true;
+  std::lock_guard<std::mutex> lock(session_mutex_);
+  if (!session_) {
+    return;
+  }
+
+  refresh_active_thread_locked();
+
+  if (inferior_stopped_.load(std::memory_order_acquire)) {
+    for (const auto& [file, lines] : breakpoints_by_file_) {
+      send_breakpoints_locked(file, lines);
+    }
+  } else if (!breakpoints_by_file_.empty()) {
+    breakpoints_pending_sync_ = true;
+  }
+}
+
 void DapBackend::on_inferior_attached() {
   inferior_attached_ = true;
   std::lock_guard<std::mutex> lock(session_mutex_);
@@ -430,6 +472,7 @@ void DapBackend::on_inferior_attached() {
 
   refresh_active_thread_locked();
 
+  expecting_stop_after_pause_ = true;
   bool stopped = pause_inferior_locked();
   if (!stopped) {
     dap::EvaluateRequest interrupt;
@@ -438,8 +481,8 @@ void DapBackend::on_inferior_attached() {
     const auto interrupt_response = session_->send(interrupt).get();
     stopped = !interrupt_response.error;
   }
-
   if (!stopped) {
+    expecting_stop_after_pause_ = false;
     inferior_stopped_.store(false, std::memory_order_release);
     push_error(
         "El proceso sigue en ejecución tras attach. "
@@ -453,11 +496,6 @@ void DapBackend::on_inferior_attached() {
     send_breakpoints_locked(file, lines);
   }
   notify_stopped("attach");
-
-  UiCommand refresh;
-  refresh.kind = UiCommandKind::kRefreshStack;
-  refresh.thread_id = active_thread_id_;
-  commands_.push(refresh);
 }
 
 void DapBackend::apply_pending_breakpoints_locked() {
@@ -656,7 +694,7 @@ void DapBackend::handle_command(const UiCommand& command) {
     }
     if (inferior_started) {
       inferior_launched_ = true;
-      on_inferior_attached();
+      on_inferior_launched();
     }
     return;
   }
@@ -711,8 +749,11 @@ void DapBackend::handle_command(const UiCommand& command) {
 
     switch (command.kind) {
     case UiCommandKind::kContinue: {
+      if (!inferior_attached_) {
+        break;
+      }
       if (!continue_inferior_locked()) {
-        push_error("continue falló");
+        push_error("continue falló: el inferior no está detenido o ya finalizó");
       }
       break;
     }

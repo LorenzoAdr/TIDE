@@ -41,13 +41,15 @@
 #include "ui/press_ids.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/context_menu.hpp"
+#include "ui/cursor_blink.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/overview_ruler.hpp"
 #include "ui/text_input_style.hpp"
 #include "ui/spinner.hpp"
-#include "ui/theme.hpp"
+#include "ui/source_panel.hpp"
+#include "util/path_normalize.hpp"
 
 namespace tgdb {
 
@@ -120,6 +122,7 @@ struct GitHistoryModalState {
 };
 
 struct EditorPanelState {
+  FocusRegion panel_focus = FocusRegion::Editor;
   Box code_box;
   Box gutter_box;
   Box breadcrumb_box;
@@ -259,9 +262,10 @@ void clear_hover_state(EditorHoverState* hover) {
   hover->info = {};
 }
 
-void claim_editor_focus(FocusManagerState* focus, MainLayoutState* layout_state) {
+void claim_editor_focus(FocusManagerState* focus, MainLayoutState* layout_state,
+                        FocusRegion panel_focus) {
   if (focus != nullptr) {
-    focus->region = FocusRegion::Editor;
+    focus->region = panel_focus;
   }
   if (layout_state != nullptr) {
     layout_state->text_input_focus = TextInputFocus::None;
@@ -889,7 +893,7 @@ bool handle_breadcrumb_click(WorkspaceModel* workspace, FocusManagerState* focus
       workspace->buffer.reset_to_single_cursor(hit.line, 0);
       workspace->buffer.scroll = std::max(0, hit.line - 2);
       workspace->buffer.view_token++;
-      claim_editor_focus(focus, layout_state);
+      claim_editor_focus(focus, layout_state, panel->panel_focus);
       ensure_scroll_visible(&workspace->buffer, visible_lines, panel->code_width_chars);
       return true;
     }
@@ -944,7 +948,7 @@ bool handle_overview_ruler_mouse(WorkspaceModel* workspace, FocusManagerState* f
     return false;
   }
 
-  claim_editor_focus(focus, layout_state);
+  claim_editor_focus(focus, layout_state, panel->panel_focus);
   const int local_y = m.y - panel->overview_ruler_box.y_min;
   const int line = overview_ruler_line_for_y(panel->overview_ruler_layout, local_y);
   navigate_editor_to_line(workspace, panel, line, visible_lines);
@@ -1029,7 +1033,7 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.motion == Mouse::Pressed) {
-    claim_editor_focus(focus, layout_state);
+    claim_editor_focus(focus, layout_state, panel->panel_focus);
     trigger_press(layout_state, press_id::kEditorScrollbar);
     const int local_y = m.y - panel->scrollbar_box.y_min;
     if (scrollbar_thumb_hit(panel->scrollbar_layout, panel->scrollbar_box, m.x, m.y)) {
@@ -1066,8 +1070,8 @@ bool handle_editor_chrome_mouse(WorkspaceModel* workspace, FocusManagerState* fo
     update_editor_chrome_hover(workspace, tab_bar, layout_state, panel->problems_button_box, m.x,
                                m.y);
   }
-  if (handle_tab_bar_mouse(workspace, focus, tab_bar, m, layout_state)) {
-    claim_editor_focus(focus, layout_state);
+  if (handle_tab_bar_mouse(workspace, focus, tab_bar, m, layout_state, panel->panel_focus)) {
+    claim_editor_focus(focus, layout_state, panel->panel_focus);
     if (layout_state != nullptr) {
       layout_state->request_ui_tick = true;
     }
@@ -1648,6 +1652,13 @@ bool is_ident_char(char c) {
   return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
 }
 
+bool completion_allowed_at_cursor(EditorBuffer& buffer) {
+  buffer.ensure_cursors();
+  const int line = buffer.primary_line();
+  const int col = buffer.primary_col();
+  return cursor_in_code(buffer, line, col);
+}
+
 NavigationParams navigation_params_for_buffer(WorkspaceModel* workspace) {
   NavigationParams params;
   if (workspace == nullptr) {
@@ -1728,6 +1739,10 @@ void update_live_completion(CompletionState* completion, WorkspaceModel* workspa
       buffer->path.empty()) {
     return;
   }
+  if (!completion_allowed_at_cursor(*buffer)) {
+    completion->close(layout_state);
+    return;
+  }
 
   prepare_completion_at_cursor(completion, buffer);
   if (completion->prefix.empty()) {
@@ -1748,7 +1763,8 @@ void maybe_open_live_completion(CompletionState* completion, WorkspaceModel* wor
                                 SymbolWorkspaceIndexer* symbol_indexer,
                                 MainLayoutState* layout_state, EditorBuffer* buffer,
                                 char typed) {
-  if (!is_ident_char(typed) || symbols == nullptr || buffer->path.empty()) {
+  if (!is_ident_char(typed) || symbols == nullptr || buffer->path.empty() ||
+      !completion_allowed_at_cursor(*buffer)) {
     if (completion != nullptr && completion->open && completion->live_mode) {
       completion->close(layout_state);
     }
@@ -1769,8 +1785,8 @@ int editor_render_visible_lines(const EditorPanelState& panel, MainLayoutState* 
   if (!panel.code_box.IsEmpty()) {
     return visible_line_count(panel.code_box);
   }
-  if (layout_state != nullptr && layout_state->editor_visible_line_count) {
-    return std::max(layout_state->editor_visible_line_count(), 1);
+  if (layout_state != nullptr && layout_state->primary_editor.visible_line_count) {
+    return std::max(layout_state->primary_editor.visible_line_count(), 1);
   }
   return 24;
 }
@@ -1857,14 +1873,14 @@ bool completion_input_active(MainLayoutState* layout_state, bool completion_open
 }
 
 void activate_find(EditorFindState* find, EditorBuffer* buffer, MainLayoutState* layout_state,
-                   FocusManagerState* focus) {
+                   FocusManagerState* focus, FocusRegion panel_focus) {
   find->query.clear();
   find->cursor_pos = 0;
   find->reset_search_state();
   find->open = true;
   find->request_matches(*buffer);
   if (focus != nullptr) {
-    focus->region = FocusRegion::Editor;
+    focus->region = panel_focus;
   }
   if (layout_state != nullptr) {
     layout_state->text_input_focus = TextInputFocus::EditorFind;
@@ -1916,6 +1932,7 @@ bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, Edit
       --find->cursor_pos;
       find->request_matches(*buffer);
     }
+    cursor_blink::show();
     return true;
   }
   if (event == Event::Delete) {
@@ -1923,15 +1940,18 @@ bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, Edit
       find->query.erase(static_cast<std::size_t>(find->cursor_pos), 1);
       find->request_matches(*buffer);
     }
+    cursor_blink::show();
     return true;
   }
   if (event == Event::ArrowLeft) {
     find->cursor_pos = std::max(0, find->cursor_pos - 1);
+    cursor_blink::show();
     return true;
   }
   if (event == Event::ArrowRight) {
     find->cursor_pos =
         std::min(static_cast<int>(find->query.size()), find->cursor_pos + 1);
+    cursor_blink::show();
     return true;
   }
   if (event_is_ctrl_v(event)) {
@@ -1941,6 +1961,7 @@ bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, Edit
       find->cursor_pos += static_cast<int>(pasted.size());
       find->request_matches(*buffer);
     }
+    cursor_blink::show();
     return true;
   }
   if (event.is_character()) {
@@ -1950,6 +1971,7 @@ bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, Edit
       find->cursor_pos += static_cast<int>(ch.size());
       find->request_matches(*buffer);
     }
+    cursor_blink::show();
     return true;
   }
   return true;
@@ -2107,6 +2129,7 @@ void apply_mouse_drag_head(EditorBuffer* buffer, const Mouse& m, const EditorPan
   const CursorPos pos = mouse_to_cursor(m, panel, *buffer, visible_lines);
   buffer->primary().head = pos;
   clamp_all_cursors(buffer);
+  cursor_blink::show();
   ensure_scroll_visible(buffer, visible_lines, code_width);
 }
 
@@ -2115,8 +2138,8 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
                          MainLayoutState* layout_state,
                          EditorPanelState* panel, DiagnosticModalState* diagnostic_modal,
                          GitHistoryModalState* git_modal, GitService* git,
-                         const std::shared_ptr<ISymbolProvider>& symbols, Event event,
-                         int visible_lines) {
+                         const std::shared_ptr<ISymbolProvider>& symbols, DebugModel* debug_model,
+                         CommandCallback on_command, Event event, int visible_lines) {
   if (!event.is_mouse()) {
     return false;
   }
@@ -2201,7 +2224,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.button == Mouse::Right && m.motion == Mouse::Pressed && in_code) {
-    claim_editor_focus(focus, layout_state);
+    claim_editor_focus(focus, layout_state, panel->panel_focus);
     const CursorPos pos = mouse_to_cursor(m, *panel, *buffer, visible_lines);
     buffer->reset_to_single_cursor(pos.line, pos.col);
     MultiCursor cursor = buffer->primary();
@@ -2232,7 +2255,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
-    claim_editor_focus(focus, layout_state);
+    claim_editor_focus(focus, layout_state, panel->panel_focus);
     if (layout_state != nullptr && find != nullptr && find->open) {
       close_find_bar(find);
       if (layout_state != nullptr) {
@@ -2241,6 +2264,19 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     if (completion != nullptr && completion->open) {
       completion->close(layout_state);
+    }
+
+    if (in_gutter && debug_model != nullptr && on_command && !buffer->path.empty()) {
+      const int row = m.y - panel->gutter_box.y_min;
+      if (row >= 0 && row < panel->gutter_visible_rows) {
+        const int line = panel->gutter_scroll_start + row + 1;
+        ToggleBreakpointAtFile(debug_model, buffer->path, line, on_command);
+        if (layout_state != nullptr) {
+          layout_state->request_ui_tick = true;
+        }
+        end_mouse_selection(panel);
+        return true;
+      }
     }
 
     if (in_gutter && git_modal != nullptr && git != nullptr && git->is_repo() &&
@@ -2394,6 +2430,7 @@ bool handle_goto_line_keys(GotoLineState* goto_state, MainLayoutState* layout_st
     if (!goto_state->query.empty()) {
       goto_state->query.pop_back();
     }
+    cursor_blink::show();
     return true;
   }
   if (event.is_character()) {
@@ -2401,6 +2438,7 @@ bool handle_goto_line_keys(GotoLineState* goto_state, MainLayoutState* layout_st
     if (ch.size() == 1 && std::isdigit(static_cast<unsigned char>(ch[0]))) {
       goto_state->query += ch;
     }
+    cursor_blink::show();
     return true;
   }
   return true;
@@ -2411,6 +2449,9 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
                      SymbolWorkspaceIndexer* symbol_indexer, EditorBuffer* buffer,
                      EditorFindState* find, MainLayoutState* layout_state) {
   if (completion == nullptr) {
+    return;
+  }
+  if (!completion_allowed_at_cursor(*buffer)) {
     return;
   }
   if (find != nullptr && find->open) {
@@ -2462,19 +2503,21 @@ bool accept_completion(CompletionState* completion, EditorBuffer* buffer,
   const bool callable =
       item.kind == SymbolKind::kFunction || item.kind == SymbolKind::kMethod;
 
+  const std::string signature = item.detail.empty() ? item.label : item.detail;
   const bool treat_as_snippet =
       item.insert_format == InsertTextFormat::kSnippet ||
       raw_insert.find('$') != std::string::npos;
+  const bool empty_callable_snippet =
+      callable && treat_as_snippet && completion_insert_is_empty_call(raw_insert);
 
   SnippetResult snippet;
-  if (treat_as_snippet) {
+  if (callable && (!treat_as_snippet || empty_callable_snippet)) {
+    snippet = finalize_function_call_insert(raw_insert, signature, true, paren_already_there);
+  } else if (treat_as_snippet) {
     snippet = expand_snippet(raw_insert);
     if (paren_already_there) {
       snippet = adjust_snippet_for_existing_open_paren(raw_insert);
     }
-  } else if (callable) {
-    snippet = finalize_function_call_insert(
-        raw_insert, item.detail.empty() ? item.label : item.detail, true, paren_already_there);
   } else {
     snippet.text = raw_insert;
     snippet.caret_col = static_cast<int>(raw_insert.size());
@@ -2566,8 +2609,9 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
                         const std::shared_ptr<ISymbolProvider>& symbols,
                         WorkspaceIndexer* file_indexer,
                         SymbolWorkspaceIndexer* symbol_indexer,
-                        MainLayoutState* layout_state, Event event, int visible_lines) {
-  if (focus->region != FocusRegion::Editor) {
+                        MainLayoutState* layout_state, DebugModel* debug_model,
+                        CommandCallback on_command, Event event, int visible_lines) {
+  if (focus->region != panel->panel_focus) {
     return false;
   }
   if (find != nullptr && find_input_active(layout_state, *find)) {
@@ -2612,6 +2656,13 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return handle_editor_escape(buffer, find, layout_state,
                                 goto_state != nullptr ? &goto_state->open : nullptr, completion,
                                 panel, diagnostic_modal, git_modal);
+  }
+  if (event == Event::CtrlB && debug_model != nullptr && on_command && !buffer->path.empty()) {
+    ToggleBreakpointAtFile(debug_model, buffer->path, buffer->primary_line() + 1, on_command);
+    if (layout_state != nullptr) {
+      layout_state->request_ui_tick = true;
+    }
+    return true;
   }
   if (event_is_completion(event)) {
     open_completion(completion, workspace, symbols, symbol_indexer, buffer, find, layout_state);
@@ -2672,7 +2723,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (event == Event::Tab) {
-    insert_tab_stop(buffer, 4);
+    insert_tab_stop(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     notify_editor_buffer_changed(workspace, panel, symbols);
     return true;
@@ -2953,8 +3004,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                           std::shared_ptr<ISymbolProvider> symbols,
                           WorkspaceIndexer* file_indexer,
                           SymbolWorkspaceIndexer* symbol_indexer,
-                          GitService* git_service) {
+                          GitService* git_service, FocusRegion panel_focus,
+                          DebugModel* debug_model, CommandCallback on_command,
+                          EditorPanelHandlers* handlers) {
   auto panel_state = std::make_shared<EditorPanelState>();
+  panel_state->panel_focus = panel_focus;
   auto tab_bar_state = std::make_shared<EditorTabBarState>();
   auto find_state = std::make_shared<EditorFindState>();
   auto goto_state = std::make_shared<GotoLineState>();
@@ -2969,7 +3023,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (layout_state != nullptr) {
       layout_state->editor_completion_open = completion_state->open;
     }
-    if (completion_state->open && focus != nullptr && focus->region != FocusRegion::Editor) {
+    if (completion_state->open && focus != nullptr &&
+        focus->region != panel_state->panel_focus) {
       completion_state->close(layout_state);
       if (layout_state != nullptr) {
         layout_state->editor_completion_open = false;
@@ -3032,7 +3087,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
   });
 
   auto code_view = Renderer([workspace, focus, panel_state, find_state, symbols, layout_state,
-                             git_service] {
+                             git_service, debug_model] {
     workspace->ensure_buffer();
     EditorBuffer& buffer = workspace->buffer;
     buffer.ensure_cursors();
@@ -3083,7 +3138,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const int start = buffer.scroll;
     const int end = std::min(total, start + visible);
     const int gutter_w = line_number_width(total);
-    const bool editor_focused = focus->region == FocusRegion::Editor;
+    const bool editor_focused = focus->region == panel_state->panel_focus;
     const std::vector<TextMatch>* find_matches =
         find_state->open && !find_state->matches.empty() ? &find_state->matches : nullptr;
     const std::vector<TextMatch>* selection_occurrences =
@@ -3109,7 +3164,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     const bool has_git_markers =
         git_service != nullptr && git_service->is_repo() && !panel_state->git_changed_lines.empty();
-    const bool gutter_markers = !file_diag.items.empty() || has_git_markers;
+    const bool has_breakpoint_markers =
+        debug_model != nullptr && !buffer.path.empty();
+    const bool gutter_markers =
+        has_breakpoint_markers || !file_diag.items.empty() || has_git_markers;
     panel_state->gutter_scroll_start = start;
     panel_state->gutter_visible_rows = std::max(0, end - start);
 
@@ -3141,11 +3199,26 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           is_primary ? bgcolor(theme::EditorLineHi()) : bgcolor(theme::CodeBg());
 
       if (gutter_markers) {
-        const char marker = line_gutter_marker(panel_state.get(), i);
-        std::string gutter_text(1, marker == '\0' ? ' ' : marker);
+        char marker = ' ';
+        if (has_breakpoint_markers &&
+            debug_model->has_breakpoint(normalize_path(buffer.path), i + 1)) {
+          marker = '\0';  // rendered as bullet below
+        } else {
+          marker = line_gutter_marker(panel_state.get(), i);
+        }
+        std::string gutter_text;
+        if (has_breakpoint_markers &&
+            debug_model->has_breakpoint(normalize_path(buffer.path), i + 1)) {
+          gutter_text = "●";
+        } else {
+          gutter_text.assign(1, marker == '\0' ? ' ' : marker);
+        }
         gutter_text += format_line_number(i + 1, gutter_w);
         Color gutter_color = theme::Muted();
-        if (marker == '!') {
+        if (has_breakpoint_markers &&
+            debug_model->has_breakpoint(normalize_path(buffer.path), i + 1)) {
+          gutter_color = Color::Red;
+        } else if (marker == '!') {
           gutter_color = theme::Error();
         } else if (marker == 'G') {
           gutter_color = theme::Success();
@@ -3295,9 +3368,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
   auto dispatch_editor_keys = [workspace, focus, panel_state, tab_bar_state, find_state,
                                goto_state, completion_state, diagnostic_state, git_history_state,
-                               symbols, file_indexer, symbol_indexer, layout_state](Event event) {
+                               symbols, file_indexer, symbol_indexer, layout_state, debug_model,
+                               on_command, panel_focus](Event event) {
     if (tab_bar_state->overflow_open &&
-        handle_tabs_overflow_keys(workspace, focus, tab_bar_state.get(), event)) {
+        handle_tabs_overflow_keys(workspace, focus, tab_bar_state.get(), event, panel_focus)) {
       return true;
     }
     if (layout_state != nullptr &&
@@ -3311,7 +3385,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (completion_state->open && event == Event::Escape) {
       completion_state->close(layout_state);
       if (focus != nullptr) {
-        focus->region = FocusRegion::Editor;
+        focus->region = panel_focus;
       }
       if (layout_state != nullptr) {
         layout_state->editor_completion_open = false;
@@ -3322,21 +3396,21 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (find_input_active(layout_state, *find_state) &&
         handle_find_keys(find_state.get(), layout_state, buffer, event, visible)) {
       if (focus != nullptr) {
-        focus->region = FocusRegion::Editor;
+        focus->region = panel_focus;
       }
       return true;
     }
-    if (focus->region != FocusRegion::Editor) {
+    if (focus->region != panel_focus) {
       return false;
     }
     if (event_is_ctrl_f(event)) {
-      activate_find(find_state.get(), buffer, layout_state, focus);
+      activate_find(find_state.get(), buffer, layout_state, focus, panel_focus);
       return true;
     }
     return handle_editor_keys(workspace, focus, find_state.get(), goto_state.get(),
                               completion_state.get(), panel_state.get(), diagnostic_state.get(),
                               git_history_state.get(), symbols, file_indexer, symbol_indexer,
-                              layout_state, event, visible);
+                              layout_state, debug_model, on_command, event, visible);
   };
 
   auto dispatch_editor_chrome_mouse = [workspace, focus, panel_state, tab_bar_state,
@@ -3349,7 +3423,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
   auto dispatch_editor_mouse = [workspace, focus, panel_state, find_state, completion_state,
                                   diagnostic_state, git_history_state, git_service, layout_state,
-                                  symbols, dispatch_editor_chrome_mouse](Event event) {
+                                  symbols, debug_model, on_command, dispatch_editor_chrome_mouse,
+                                  panel_focus](Event event) {
     if (dispatch_editor_chrome_mouse(event)) {
       return true;
     }
@@ -3364,14 +3439,15 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       return handle_editor_mouse(workspace, focus, find_state.get(), completion_state.get(),
                                  layout_state,
                                  panel_state.get(), diagnostic_state.get(),
-                                 git_history_state.get(), git_service, symbols, event, visible);
+                                 git_history_state.get(), git_service, symbols, debug_model,
+                                 on_command, event, visible);
     }
 
     if (layout_state != nullptr &&
         layout_state->text_input_focus == TextInputFocus::Console) {
       return false;
     }
-    if (focus->region != FocusRegion::Editor) {
+    if (focus->region != panel_focus) {
       return false;
     }
     workspace->ensure_buffer();
@@ -3379,21 +3455,29 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     return handle_editor_mouse(workspace, focus, find_state.get(), completion_state.get(),
                                layout_state,
                                panel_state.get(), diagnostic_state.get(),
-                               git_history_state.get(), git_service, symbols, event, visible);
+                               git_history_state.get(), git_service, symbols, debug_model,
+                               on_command, event, visible);
   };
 
   auto dispatch_editor_modifiers = [](Event& /*event*/) {};
 
-  if (layout_state != nullptr) {
-    layout_state->editor_key_handler = dispatch_editor_keys;
-    layout_state->editor_mouse_handler = dispatch_editor_mouse;
-    layout_state->editor_chrome_mouse_handler = dispatch_editor_chrome_mouse;
-    layout_state->editor_modifier_handler = dispatch_editor_modifiers;
-    layout_state->editor_visible_line_count = [panel_state]() {
+  if (handlers != nullptr) {
+    handlers->key_handler = dispatch_editor_keys;
+    handlers->mouse_handler = dispatch_editor_mouse;
+    handlers->chrome_mouse_handler = dispatch_editor_chrome_mouse;
+    handlers->modifier_handler = dispatch_editor_modifiers;
+    handlers->visible_line_count = [panel_state]() {
       return visible_line_count(panel_state->code_box);
     };
-    layout_state->editor_tick_callback = [workspace, panel_state, find_state, symbols, layout_state,
-                                          file_indexer, git_service]() {
+    handlers->tick_callback = [workspace, panel_state, find_state, symbols, layout_state,
+                               file_indexer, git_service, focus, panel_focus]() {
+      if (panel_focus == FocusRegion::SecondaryEditor && workspace->tabs.empty() &&
+          focus != nullptr && focus->region == FocusRegion::SecondaryEditor) {
+        focus->region = FocusRegion::Editor;
+        if (layout_state != nullptr) {
+          layout_state->focus_sync_needed = true;
+        }
+      }
       const int visible = visible_line_count(panel_state->code_box);
       tick_pending_editor_navigation(layout_state, [&](const SourceLocation& loc) {
         navigate_to_location(workspace, layout_state, loc, visible);
@@ -3456,9 +3540,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
   return WrapFocusable(CatchEvent(panel, [dispatch_editor_keys, dispatch_editor_mouse, workspace,
                                           focus, panel_state, tab_bar_state, find_state,
-                                          layout_state, symbols](Event event) {
+                                          layout_state, symbols, panel_focus](Event event) {
     if (tab_bar_state->overflow_open &&
-        handle_tabs_overflow_keys(workspace, focus, tab_bar_state.get(), event)) {
+        handle_tabs_overflow_keys(workspace, focus, tab_bar_state.get(), event, panel_focus)) {
       return true;
     }
     if (dispatch_editor_mouse(event)) {

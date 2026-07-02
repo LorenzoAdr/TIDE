@@ -13,7 +13,7 @@ LspTransport::~LspTransport() {
 }
 
 bool LspTransport::start(int stdin_write_fd, int stdout_read_fd) {
-  stop();
+  stop();  
   if (stdin_write_fd < 0 || stdout_read_fd < 0) {
     return false;
   }
@@ -25,6 +25,8 @@ bool LspTransport::start(int stdin_write_fd, int stdout_read_fd) {
     reader_loop();
   });
   return true;
+
+
 }
 
 void LspTransport::stop() {

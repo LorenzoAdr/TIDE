@@ -12,6 +12,8 @@
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
+#include "util/path_normalize.hpp"
+#include "util/shell_args.hpp"
 
 namespace tgdb {
 
@@ -26,6 +28,8 @@ std::string step_title(WizardStep step) {
       return "Conectar depurador";
     case WizardStep::PickBinary:
       return "Elegir ejecutable";
+    case WizardStep::PickArgs:
+      return "Argumentos de lanzamiento";
     case WizardStep::PickProcess:
       return "Elegir proceso (PID)";
   }
@@ -104,6 +108,34 @@ bool update_f2_process_hover(ConnectionWizardState* state, MainLayoutState* layo
   return false;
 }
 
+void refresh_args_completion(ConnectionWizardState* state);
+
+void begin_pick_args(ConnectionWizardState* state) {
+  if (state == nullptr || state->selected_program.empty()) {
+    return;
+  }
+  std::error_code ec;
+  state->launch_cwd =
+      fs::weakly_canonical(fs::path(state->selected_program).parent_path(), ec).string();
+  if (ec || state->launch_cwd.empty()) {
+    state->launch_cwd = fs::path(state->selected_program).parent_path().string();
+  }
+  const std::string program_key = normalize_path(state->selected_program);
+  const auto saved = state->launch_args_by_program.find(program_key);
+  state->args_line = saved != state->launch_args_by_program.end() ? saved->second : "";
+  state->args_completion_matches.clear();
+  state->step = WizardStep::PickArgs;
+  refresh_args_completion(state);
+}
+
+void refresh_args_completion(ConnectionWizardState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->args_completion_matches =
+      path_completions(state->launch_cwd, last_shell_token(state->args_line));
+}
+
 void activate_browser_row(ConnectionWizardState* state, MainLayoutState* layout_state, int row,
                           const std::function<void(const ConnectionResult&)>& finish) {
   if (row < 0 || row >= static_cast<int>(state->browser.entries.size())) {
@@ -122,11 +154,7 @@ void activate_browser_row(ConnectionWizardState* state, MainLayoutState* layout_
   }
   state->selected_program = entry.path;
   if (state->mode == WizardMode::Launch) {
-    ConnectionResult result;
-    result.mode = SessionMode::kLaunch;
-    result.program = state->selected_program;
-    result.workspace_root = state->workspace_root;
-    finish(result);
+    begin_pick_args(state);
   } else {
     state->step = WizardStep::PickProcess;
     state->all_processes.clear();
@@ -144,6 +172,9 @@ void ConnectionWizardState::reset() {
   mode_selected = 0;
   browser.reset(workspace_root.empty() ? browser.launch_root : workspace_root);
   selected_program.clear();
+  launch_cwd.clear();
+  args_line.clear();
+  args_completion_matches.clear();
   process_query.clear();
   all_processes.clear();
   process_matches.clear();
@@ -184,6 +215,17 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
               break;
             case WizardStep::PickBinary:
               state->step = WizardStep::ChooseMode;
+              break;
+            case WizardStep::PickArgs:
+              state->step = WizardStep::PickBinary;
+              state->args_line.clear();
+              state->args_completion_matches.clear();
+              if (!state->selected_program.empty()) {
+                state->browser.browser_path =
+                    fs::path(state->selected_program).parent_path().string();
+              }
+              state->browser.browser_loaded_path.clear();
+              state->browser.reload_browser_entries(true);
               break;
             case WizardStep::PickProcess:
               state->step = WizardStep::PickBinary;
@@ -309,6 +351,44 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
               activate_browser_row(state, layout_state, row, finish);
               return true;
             }
+          }
+          return true;
+        }
+
+        if (state->step == WizardStep::PickArgs) {
+          if (event == Event::Return) {
+            ConnectionResult result;
+            result.mode = SessionMode::kLaunch;
+            result.program = state->selected_program;
+            result.workspace_root = state->workspace_root;
+            result.args_line = state->args_line;
+            result.args = split_shell_args(state->args_line);
+            finish(result);
+            return true;
+          }
+          if (event == Event::Tab || event == Event::CtrlI) {
+            if (apply_path_tab_completion(&state->args_line, state->launch_cwd)) {
+              refresh_args_completion(state);
+            } else {
+              refresh_args_completion(state);
+            }
+            return true;
+          }
+          if (event == Event::Backspace) {
+            if (!state->args_line.empty()) {
+              state->args_line.pop_back();
+              refresh_args_completion(state);
+            }
+            return true;
+          }
+          if (event.is_character()) {
+            const std::string ch = event.character();
+            if (ch.size() == 1 && static_cast<unsigned char>(ch[0]) >= 32 &&
+                static_cast<unsigned char>(ch[0]) < 127) {
+              state->args_line += ch;
+              refresh_args_completion(state);
+            }
+            return true;
           }
           return true;
         }
@@ -450,6 +530,26 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           body.push_back(vbox(std::move(list_rows)) |
                          reflect(state->browser.browser_list_box));
           help = "j/k  Enter ejecutable  clic  Esc atrás";
+        } else if (state->step == WizardStep::PickArgs) {
+          body.push_back(text("ejecutable: " + state->selected_program) |
+                         color(theme::Muted()));
+          body.push_back(text("cwd: " + state->launch_cwd) | color(theme::Muted()));
+          std::string query_line = state->args_line;
+          query_line.push_back('_');
+          body.push_back(text("argumentos: " + query_line) | color(theme::WatchInput()));
+          if (!state->args_completion_matches.empty()) {
+            body.push_back(separator());
+            const int max_rows = 6;
+            const int shown = std::min(max_rows, static_cast<int>(state->args_completion_matches.size()));
+            for (int i = 0; i < shown; ++i) {
+              body.push_back(text("  " + state->args_completion_matches[static_cast<std::size_t>(i)]) |
+                             color(theme::Muted()));
+            }
+            if (static_cast<int>(state->args_completion_matches.size()) > max_rows) {
+              body.push_back(text("  ...") | color(theme::Muted()));
+            }
+          }
+          help = "Enter lanzar  Tab autocompletar ruta  Esc atrás";
         } else if (state->step == WizardStep::PickProcess) {
           state->refresh_process_matches();
           body.push_back(text("workspace: " + state->workspace_root) |

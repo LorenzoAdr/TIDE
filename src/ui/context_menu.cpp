@@ -638,12 +638,23 @@ void open_delete_confirm(ContextMenuState* state) {
 }
 
 bool execute_action(ContextMenuState* state, const std::string& action_id,
-                    WorkspaceModel* workspace, DebugModel* model, FocusManagerState* focus,
-                    MainLayoutState* layout_state, const std::shared_ptr<ISymbolProvider>& symbols,
-                    WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
-                    const WorkspaceConfig* workspace_config, int editor_visible_lines) {
+                    WorkspaceModel* workspace, WorkspaceModel* secondary_workspace,
+                    DebugModel* model, FocusManagerState* focus, MainLayoutState* layout_state,
+                    const std::shared_ptr<ISymbolProvider>& symbols, WorkspaceIndexer* indexer,
+                    SymbolWorkspaceIndexer* symbol_indexer, const WorkspaceConfig* workspace_config,
+                    int editor_visible_lines) {
   if (state == nullptr) {
     return false;
+  }
+
+  if (action_id == "open_file_secondary") {
+    if (secondary_workspace != nullptr) {
+      secondary_workspace->open_file(state->absolute_path);
+    }
+    if (focus != nullptr) {
+      focus->region = FocusRegion::SecondaryEditor;
+    }
+    return true;
   }
 
   if (action_id == "open_file") {
@@ -847,7 +858,7 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
 
 void context_menu_open_file(ContextMenuState* state, int x, int y,
                             const std::string& absolute_path, const std::string& relative_path,
-                            bool show_format) {
+                            bool show_format, bool show_secondary_open) {
   if (state == nullptr) {
     return;
   }
@@ -861,10 +872,29 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
   state->absolute_path = absolute_path;
   state->relative_path = relative_path;
   if (show_format) {
+    if (show_secondary_open) {
+      set_items(state, ContextMenuKind::File,
+                {{"Abrir en panel secundario", "open_file_secondary"},
+                 {"Abrir archivo", "open_file"},
+                 {"Rutas del indexer", "show_indexer_paths"},
+                 {"Formatear archivo", "format_file"},
+                 {"Renombrar archivo", "rename_file"},
+                 {"Borrar archivo", "delete_file"}});
+    } else {
+      set_items(state, ContextMenuKind::File,
+                {{"Abrir archivo", "open_file"},
+                 {"Rutas del indexer", "show_indexer_paths"},
+                 {"Formatear archivo", "format_file"},
+                 {"Renombrar archivo", "rename_file"},
+                 {"Borrar archivo", "delete_file"}});
+    }
+    return;
+  }
+  if (show_secondary_open) {
     set_items(state, ContextMenuKind::File,
-              {{"Abrir archivo", "open_file"},
+              {{"Abrir en panel secundario", "open_file_secondary"},
+               {"Abrir archivo", "open_file"},
                {"Rutas del indexer", "show_indexer_paths"},
-               {"Formatear archivo", "format_file"},
                {"Renombrar archivo", "rename_file"},
                {"Borrar archivo", "delete_file"}});
     return;
@@ -1138,8 +1168,8 @@ bool handle_context_menu_mouse(ContextMenuState* state, MainLayoutState* layout_
 }
 
 bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace,
-                              DebugModel* model, FocusManagerState* focus,
-                              MainLayoutState* layout_state,
+                              WorkspaceModel* secondary_workspace, DebugModel* model,
+                              FocusManagerState* focus, MainLayoutState* layout_state,
                               const std::shared_ptr<ISymbolProvider>& symbols,
                               WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
                               const WorkspaceConfig* workspace_config, int editor_visible_lines,
@@ -1245,8 +1275,8 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
     if (state->selected >= 0 && state->selected < static_cast<int>(state->action_ids.size())) {
       trigger_press(layout_state, press_id::context_menu_row(state->selected));
       execute_action(state, state->action_ids[static_cast<std::size_t>(state->selected)], workspace,
-                     model, focus, layout_state, symbols, indexer, symbol_indexer, workspace_config,
-                     editor_visible_lines);
+                     secondary_workspace, model, focus, layout_state, symbols, indexer,
+                     symbol_indexer, workspace_config, editor_visible_lines);
       if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open) {
         context_menu_close(state, layout_state);
       }
@@ -1260,8 +1290,8 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
 }
 
 Component MakeContextMenuOverlay(Component main, ContextMenuState* state, WorkspaceModel* workspace,
-                                 DebugModel* model, FocusManagerState* focus,
-                                 MainLayoutState* layout_state,
+                                 WorkspaceModel* secondary_workspace, DebugModel* model,
+                                 FocusManagerState* focus, MainLayoutState* layout_state,
                                  const std::shared_ptr<ISymbolProvider>& symbols,
                                  WorkspaceIndexer* indexer,
                                  SymbolWorkspaceIndexer* symbol_indexer,
@@ -1272,9 +1302,9 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
       return;
     }
     const int visible = editor_visible_lines ? editor_visible_lines() : 24;
-    execute_action(state, state->action_ids[static_cast<std::size_t>(row)], workspace, model,
-                   focus, layout_state, symbols, indexer, symbol_indexer, workspace_config,
-                   visible);
+    execute_action(state, state->action_ids[static_cast<std::size_t>(row)], workspace,
+                   secondary_workspace, model, focus, layout_state, symbols, indexer,
+                   symbol_indexer, workspace_config, visible);
     if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open) {
       context_menu_close(state, layout_state);
     }
@@ -1301,8 +1331,9 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
       }
     }
     const int visible = editor_visible_lines ? editor_visible_lines() : 24;
-    return handle_context_menu_keys(state, workspace, model, focus, layout_state, symbols, indexer,
-                                    symbol_indexer, workspace_config, visible, event);
+    return handle_context_menu_keys(state, workspace, secondary_workspace, model, focus,
+                                    layout_state, symbols, indexer, symbol_indexer,
+                                    workspace_config, visible, event);
   };
 
   return Renderer(CatchEvent(main, handler),

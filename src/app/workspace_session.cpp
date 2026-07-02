@@ -50,6 +50,16 @@ WorkspaceSession WorkspaceSession::load(const std::string& workspace_root) {
     if (doc.contains("active_tab_path") && doc["active_tab_path"].is_string()) {
       session.active_tab_path = doc["active_tab_path"].get<std::string>();
     }
+    if (doc.contains("launch_args") && doc["launch_args"].is_object()) {
+      for (const auto& [key, value] : doc["launch_args"].items()) {
+        if (!key.empty() && value.is_string()) {
+          const std::string args_line = value.get<std::string>();
+          if (!args_line.empty()) {
+            session.launch_args[key] = args_line;
+          }
+        }
+      }
+    }
   } catch (...) {
     return WorkspaceSession{};
   }
@@ -67,6 +77,9 @@ bool WorkspaceSession::save(const std::string& workspace_root) const {
   nlohmann::json doc;
   doc["open_tabs"] = open_tabs;
   doc["active_tab_path"] = active_tab_path;
+  if (!launch_args.empty()) {
+    doc["launch_args"] = launch_args;
+  }
 
   std::ofstream output(session_path(workspace_root));
   if (!output) {

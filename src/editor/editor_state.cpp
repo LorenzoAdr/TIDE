@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "ui/cursor_blink.hpp"
+
 namespace tgdb {
 
 void MultiCursor::normalized_range(int* start_line, int* start_col, int* end_line,
@@ -29,12 +31,14 @@ int EditorBuffer::primary_col() const {
 void EditorBuffer::set_primary(int line, int col) {
   ensure_cursors();
   cursors.front().set_pos(line, col);
+  cursor_blink::show();
 }
 
 void EditorBuffer::reset_to_single_cursor(int line, int col) {
   cursors.clear();
   cursors.push_back({});
   cursors.front().set_pos(line, col);
+  cursor_blink::show();
 }
 
 void EditorBuffer::ensure_cursors() {
