@@ -1,6 +1,7 @@
 #include "ui/settings_modal.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,16 @@ constexpr int kWorkspaceGccQueryDriver = kGlobalOptionCount;
 constexpr int kWorkspaceBackgroundIndex = kGlobalOptionCount + 1;
 constexpr int kWorkspaceIncludePaths = kGlobalOptionCount + 2;
 constexpr int kWorkspaceCompileCommands = kGlobalOptionCount + 3;
+constexpr int kWorkspaceUiColors = kGlobalOptionCount + 4;
+
+constexpr int kUiColorsPreset = 0;
+constexpr int kUiColorsPanelBg = 1;
+constexpr int kUiColorsCodeBg = 2;
+constexpr int kUiColorsText = 3;
+constexpr int kUiColorsTitle = 4;
+constexpr int kUiColorsDirectory = 5;
+constexpr int kUiColorsFile = 6;
+constexpr int kUiColorsRowCount = 7;
 
 constexpr int kCompileMode = 0;
 constexpr int kCompileDetectMounts = 1;
@@ -51,7 +62,7 @@ constexpr int kCompileCommandsRowCount = 4;
 
 int main_option_count(const SettingsModalState* state) {
   if (state != nullptr && state->has_workspace) {
-    return kGlobalOptionCount + 4;
+    return kGlobalOptionCount + 5;
   }
   return kGlobalOptionCount;
 }
@@ -198,6 +209,7 @@ void toggle_option(SettingsModalState* state, int index) {
       state->draft_theme = state->draft_theme == theme::ThemeMode::kLight
                                ? theme::ThemeMode::kDark
                                : theme::ThemeMode::kLight;
+      state->draft_ui_colors_preset = theme::UiColorPreset::kCustom;
       theme::set_mode(state->draft_theme);
       break;
     case kLsp:
@@ -318,6 +330,283 @@ void open_path_browser_panel(SettingsModalState* state, PathBrowserPurpose purpo
   state->panel = SettingsPanel::kPathBrowser;
 }
 
+void apply_draft_ui_colors(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  theme::set_mode(state->draft_theme);
+  theme::set_ui_overrides(state->draft_ui_colors);
+}
+
+void ensure_draft_ui_colors_complete(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  apply_draft_ui_colors(state);
+  const theme::UiColorOverrides snapshot = theme::snapshot_effective_ui_colors();
+  auto fill = [&](std::optional<theme::ColorRgb>& slot, const std::optional<theme::ColorRgb>& value) {
+    if (!slot && value) {
+      slot = *value;
+    }
+  };
+  fill(state->draft_ui_colors.panel_bg, snapshot.panel_bg);
+  fill(state->draft_ui_colors.code_bg, snapshot.code_bg);
+  fill(state->draft_ui_colors.text, snapshot.text);
+  fill(state->draft_ui_colors.title, snapshot.title);
+  fill(state->draft_ui_colors.directory, snapshot.directory);
+  fill(state->draft_ui_colors.file, snapshot.file);
+}
+
+void apply_ui_color_preset(SettingsModalState* state, theme::UiColorPreset preset) {
+  if (state == nullptr) {
+    return;
+  }
+  state->draft_ui_colors_preset = preset;
+  state->draft_ui_colors = theme::overrides_for_preset(preset);
+  state->draft_theme = theme::theme_mode_for_preset(preset);
+  apply_draft_ui_colors(state);
+}
+
+void cycle_ui_color_preset(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  theme::UiColorPreset next = theme::UiColorPreset::kDarkClassic;
+  switch (state->draft_ui_colors_preset) {
+    case theme::UiColorPreset::kDarkClassic:
+      next = theme::UiColorPreset::kDarkSoft;
+      break;
+    case theme::UiColorPreset::kDarkSoft:
+      next = theme::UiColorPreset::kLightClassic;
+      break;
+    case theme::UiColorPreset::kLightClassic:
+      next = theme::UiColorPreset::kLightPaper;
+      break;
+    case theme::UiColorPreset::kLightPaper:
+    case theme::UiColorPreset::kCustom:
+    default:
+      next = theme::UiColorPreset::kDarkClassic;
+      break;
+  }
+  apply_ui_color_preset(state, next);
+}
+
+void open_ui_colors_panel(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  ensure_draft_ui_colors_complete(state);
+  state->panel = SettingsPanel::kUiColors;
+  state->ui_colors_selected = 0;
+  state->ui_colors_editing = false;
+  state->ui_colors_edit_row = -1;
+  state->ui_colors_hex_buffer.clear();
+}
+
+std::optional<theme::ColorRgb>* mutable_ui_color_field(SettingsModalState* state, int row) {
+  if (state == nullptr) {
+    return nullptr;
+  }
+  switch (row) {
+    case kUiColorsPanelBg:
+      return &state->draft_ui_colors.panel_bg;
+    case kUiColorsCodeBg:
+      return &state->draft_ui_colors.code_bg;
+    case kUiColorsText:
+      return &state->draft_ui_colors.text;
+    case kUiColorsTitle:
+      return &state->draft_ui_colors.title;
+    case kUiColorsDirectory:
+      return &state->draft_ui_colors.directory;
+    case kUiColorsFile:
+      return &state->draft_ui_colors.file;
+    default:
+      return nullptr;
+  }
+}
+
+std::string ui_color_row_label(int row) {
+  switch (row) {
+    case kUiColorsPreset:
+      return "Preset";
+    case kUiColorsPanelBg:
+      return "Fondo general";
+    case kUiColorsCodeBg:
+      return "Fondo código";
+    case kUiColorsText:
+      return "Texto general";
+    case kUiColorsTitle:
+      return "Títulos y pestañas activas";
+    case kUiColorsDirectory:
+      return "Carpetas y outline";
+    case kUiColorsFile:
+      return "Archivos y pestañas inactivas";
+    default:
+      return {};
+  }
+}
+
+std::string ui_color_row_value(const SettingsModalState* state, int row) {
+  if (state == nullptr) {
+    return {};
+  }
+  if (row == kUiColorsPreset) {
+    return theme::ui_color_preset_label(state->draft_ui_colors_preset);
+  }
+  const auto* field = mutable_ui_color_field(const_cast<SettingsModalState*>(state), row);
+  if (field != nullptr && field->has_value()) {
+    return theme::format_hex_color(**field);
+  }
+  return "—";
+}
+
+void begin_ui_color_edit(SettingsModalState* state, int row) {
+  if (state == nullptr) {
+    return;
+  }
+  ensure_draft_ui_colors_complete(state);
+  state->ui_colors_editing = true;
+  state->ui_colors_edit_row = row;
+  state->ui_colors_hex_buffer = ui_color_row_value(state, row);
+  if (state->ui_colors_hex_buffer.empty() || state->ui_colors_hex_buffer == "—") {
+    state->ui_colors_hex_buffer = "#";
+  }
+}
+
+bool commit_ui_color_edit(SettingsModalState* state) {
+  if (state == nullptr || !state->ui_colors_editing) {
+    return false;
+  }
+  theme::ColorRgb rgb;
+  if (!theme::parse_hex_color(state->ui_colors_hex_buffer, &rgb)) {
+    return false;
+  }
+  if (auto* field = mutable_ui_color_field(state, state->ui_colors_edit_row)) {
+    *field = rgb;
+    state->draft_ui_colors_preset = theme::UiColorPreset::kCustom;
+    apply_draft_ui_colors(state);
+  }
+  state->ui_colors_editing = false;
+  state->ui_colors_edit_row = -1;
+  state->ui_colors_hex_buffer.clear();
+  return true;
+}
+
+void cancel_ui_color_edit(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->ui_colors_editing = false;
+  state->ui_colors_edit_row = -1;
+  state->ui_colors_hex_buffer.clear();
+}
+
+void clamp_ui_colors_selection(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->ui_colors_selected =
+      std::max(0, std::min(state->ui_colors_selected, kUiColorsRowCount - 1));
+}
+
+bool handle_ui_colors_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr) {
+    return false;
+  }
+
+  if (state->ui_colors_editing) {
+    if (event == Event::Escape) {
+      cancel_ui_color_edit(state);
+      return true;
+    }
+    if (event == Event::Return) {
+      if (!commit_ui_color_edit(state)) {
+        return true;
+      }
+      return true;
+    }
+    if (event == Event::Backspace) {
+      if (state->ui_colors_hex_buffer.size() > 1) {
+        state->ui_colors_hex_buffer.pop_back();
+      }
+      return true;
+    }
+    if (event.is_character()) {
+      const char ch = event.character()[0];
+      if (state->ui_colors_hex_buffer.size() >= 7) {
+        return true;
+      }
+      if (state->ui_colors_hex_buffer.empty()) {
+        if (ch == '#') {
+          state->ui_colors_hex_buffer = "#";
+        }
+        return true;
+      }
+      if (std::isxdigit(static_cast<unsigned char>(ch)) != 0) {
+        state->ui_colors_hex_buffer.push_back(ch);
+      }
+      return true;
+    }
+    return true;
+  }
+
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    state->ui_colors_selected += 1;
+    clamp_ui_colors_selection(state);
+    return true;
+  }
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    state->ui_colors_selected -= 1;
+    clamp_ui_colors_selection(state);
+    return true;
+  }
+  if (event == Event::Character('p') || event == Event::Character('P')) {
+    cycle_ui_color_preset(state);
+    return true;
+  }
+  if (event == Event::Return || event == Event::Character(' ')) {
+    if (state->ui_colors_selected == kUiColorsPreset) {
+      cycle_ui_color_preset(state);
+      return true;
+    }
+    begin_ui_color_edit(state, state->ui_colors_selected);
+    return true;
+  }
+  return true;
+}
+
+Element render_ui_colors_panel(const SettingsModalState* state) {
+  Elements rows;
+  rows.push_back(text("Colores de interfaz") | color(theme::Accent()) | bold);
+  rows.push_back(text("Los colores de sintaxis clangd no cambian") | color(theme::Muted()));
+  rows.push_back(separator());
+
+  if (state->ui_colors_editing) {
+    rows.push_back(text("Editar " + ui_color_row_label(state->ui_colors_edit_row)) |
+                   color(theme::Accent()) | bold);
+    rows.push_back(text(state->ui_colors_hex_buffer + "_") | color(theme::Header()) | bold);
+    rows.push_back(text("Enter confirmar  Esc cancelar") | color(theme::Muted()));
+    return vbox(std::move(rows));
+  }
+
+  for (int i = 0; i < kUiColorsRowCount; ++i) {
+    const bool selected = i == state->ui_colors_selected;
+    const std::string label = ui_color_row_label(i);
+    const std::string value = ui_color_row_value(state, i);
+    Element row_el = text(label + ": " + value) | color(selected ? theme::Accent() : theme::Header()) |
+                     bold;
+    if (selected) {
+      row_el = row_el | inverted;
+    }
+    rows.push_back(row_el);
+  }
+
+  rows.push_back(separator());
+  rows.push_back(text("p/Enter preset: siguiente   Enter fila: editar hex   Esc volver") |
+                 color(theme::Muted()));
+  return vbox(std::move(rows));
+}
+
 void confirm_path_browser_selection(SettingsModalState* state) {
   if (state == nullptr || !is_directory_path(state->path_browser.browser_path)) {
     return;
@@ -394,6 +683,10 @@ bool handle_main_settings_keys(SettingsModalState* state, Event event) {
       open_compile_commands_panel(state);
       return true;
     }
+    if (state->has_workspace && state->selected == kWorkspaceUiColors) {
+      open_ui_colors_panel(state);
+      return true;
+    }
     toggle_option(state, state->selected);
     return true;
   }
@@ -404,6 +697,10 @@ bool handle_main_settings_keys(SettingsModalState* state, Event event) {
     }
     if (state->has_workspace && state->selected == kWorkspaceCompileCommands) {
       open_compile_commands_panel(state);
+      return true;
+    }
+    if (state->has_workspace && state->selected == kWorkspaceUiColors) {
+      open_ui_colors_panel(state);
       return true;
     }
     toggle_option(state, state->selected);
@@ -629,6 +926,8 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
       return handle_path_mappings_keys(state, event);
     case SettingsPanel::kPathBrowser:
       return handle_path_browser_keys(state, event);
+    case SettingsPanel::kUiColors:
+      return handle_ui_colors_keys(state, event);
   }
   return true;
 }
@@ -716,6 +1015,20 @@ Element render_main_settings(const SettingsModalState* state) {
       }
       rows.push_back(title);
       rows.push_back(text("    Enter: Docker/remap → .tgdb/compile_commands.json para clangd") |
+                     color(theme::Muted()));
+      rows.push_back(text(""));
+    }
+
+    {
+      const bool selected = state->selected == kWorkspaceUiColors;
+      const std::string label = std::string("> Colores de interfaz (") +
+                                theme::ui_color_preset_label(state->draft_ui_colors_preset) + ")";
+      Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
+      if (selected) {
+        title = title | inverted;
+      }
+      rows.push_back(title);
+      rows.push_back(text("    Enter: presets y colores de fondo/texto de la interfaz") |
                      color(theme::Muted()));
       rows.push_back(text(""));
     }
@@ -876,9 +1189,21 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_force_bundled_clangd = settings.force_bundled_clangd;
   state->draft_force_bundled_gdb = settings.force_bundled_gdb;
   state->draft_theme = workspace_config.theme;
-  theme::set_mode(state->draft_theme);
   state->workspace_root = workspace_root;
   state->has_workspace = !workspace_root.empty();
+  if (state->has_workspace) {
+    state->draft_ui_colors_preset = workspace_config.ui_colors_preset;
+    if (!workspace_config.ui_colors.empty()) {
+      state->draft_ui_colors = workspace_config.ui_colors;
+    } else if (workspace_config.ui_colors_preset != theme::UiColorPreset::kCustom) {
+      state->draft_ui_colors = theme::overrides_for_preset(workspace_config.ui_colors_preset);
+    } else {
+      state->draft_ui_colors = theme::overrides_for_preset(theme::UiColorPreset::kDarkClassic);
+    }
+    apply_draft_ui_colors(state);
+  } else {
+    theme::set_mode(state->draft_theme);
+  }
   state->draft_clangd_use_gcc_query_driver = workspace_config.clangd_use_gcc_query_driver;
   state->draft_clangd_background_index = workspace_config.clangd_background_index;
   state->draft_clangd_extra_include_paths = workspace_config.clangd_extra_include_paths;
@@ -911,9 +1236,12 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
     workspace.clangd_extra_include_paths = state->draft_clangd_extra_include_paths;
     workspace.compile_commands = state->draft_compile_commands;
     workspace.theme = state->draft_theme;
+    workspace.ui_colors_preset = state->draft_ui_colors_preset;
+    workspace.ui_colors = state->draft_ui_colors;
     on_workspace_apply(workspace);
   } else {
     theme::set_mode(state->draft_theme);
+    theme::set_ui_overrides(state->draft_ui_colors);
   }
 
   state->open = false;
@@ -944,6 +1272,7 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
               return true;
             case SettingsPanel::kIncludePaths:
             case SettingsPanel::kCompileCommands:
+            case SettingsPanel::kUiColors:
               state->panel = SettingsPanel::kMain;
               return true;
             case SettingsPanel::kMain:
@@ -963,6 +1292,7 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         clamp_include_path_selection(state);
         clamp_compile_commands_selection(state);
         clamp_mapping_selection(state);
+        clamp_ui_colors_selection(state);
 
         Element body;
         std::string title = "Configuración";
@@ -990,6 +1320,11 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
             title = "Seleccionar directorio";
             footer = "";
             body = render_path_browser_panel(state);
+            break;
+          case SettingsPanel::kUiColors:
+            title = "Colores de interfaz";
+            footer = "";
+            body = render_ui_colors_panel(state);
             break;
         }
 

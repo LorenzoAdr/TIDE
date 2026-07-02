@@ -154,6 +154,49 @@ void migrate_legacy_config(const fs::path& workspace_root) {
   }
 }
 
+void parse_ui_colors_settings(const nlohmann::json& doc, theme::UiColorOverrides* overrides) {
+  if (overrides == nullptr || !doc.is_object()) {
+    return;
+  }
+  auto parse_channel = [&](const char* key) -> std::optional<theme::ColorRgb> {
+    if (!doc.contains(key)) {
+      return std::nullopt;
+    }
+    if (doc[key].is_null()) {
+      return std::nullopt;
+    }
+    if (doc[key].is_string()) {
+      theme::ColorRgb rgb;
+      if (theme::parse_hex_color(doc[key].get<std::string>(), &rgb)) {
+        return rgb;
+      }
+    }
+    return std::nullopt;
+  };
+  overrides->panel_bg = parse_channel("panel_bg");
+  overrides->code_bg = parse_channel("code_bg");
+  overrides->text = parse_channel("text");
+  overrides->title = parse_channel("title");
+  overrides->directory = parse_channel("directory");
+  overrides->file = parse_channel("file");
+}
+
+nlohmann::json serialize_ui_colors(const theme::UiColorOverrides& overrides) {
+  nlohmann::json doc = nlohmann::json::object();
+  auto write = [&](const char* key, const std::optional<theme::ColorRgb>& value) {
+    if (value) {
+      doc[key] = theme::format_hex_color(*value);
+    }
+  };
+  write("panel_bg", overrides.panel_bg);
+  write("code_bg", overrides.code_bg);
+  write("text", overrides.text);
+  write("title", overrides.title);
+  write("directory", overrides.directory);
+  write("file", overrides.file);
+  return doc;
+}
+
 }  // namespace
 
 std::string compile_commands_mode_name(const CompileCommandsMode mode) {
@@ -246,6 +289,13 @@ WorkspaceConfig WorkspaceConfig::load(const std::string& workspace_root) {
     if (doc.contains("theme") && doc["theme"].is_string()) {
       config.theme = theme::parse_theme_name(doc["theme"].get<std::string>());
     }
+    if (doc.contains("ui_colors_preset") && doc["ui_colors_preset"].is_string()) {
+      config.ui_colors_preset =
+          theme::parse_ui_color_preset(doc["ui_colors_preset"].get<std::string>());
+    }
+    if (doc.contains("ui_colors")) {
+      parse_ui_colors_settings(doc["ui_colors"], &config.ui_colors);
+    }
     if (doc.contains("compile_commands")) {
       parse_compile_commands_settings(doc["compile_commands"], &config.compile_commands);
     }
@@ -294,6 +344,8 @@ bool WorkspaceConfig::save(const std::string& workspace_root) const {
   doc["clangd_use_gcc_query_driver"] = clangd_use_gcc_query_driver;
   doc["clangd_background_index"] = clangd_background_index;
   doc["theme"] = theme::theme_name(theme);
+  doc["ui_colors_preset"] = theme::ui_color_preset_name(ui_colors_preset);
+  doc["ui_colors"] = serialize_ui_colors(ui_colors);
   doc["compile_commands"] = {
       {"mode", compile_commands_mode_name(compile_commands.mode)},
       {"source_path", compile_commands.source_path},

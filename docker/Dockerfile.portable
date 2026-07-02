@@ -1,0 +1,35 @@
+# Build environment for portable tgdb binaries (glibc ~2.31 on Ubuntu 20.04).
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    gnupg \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# CMake 3.20+ (project requirement; Ubuntu 20.04 ships 3.16).
+RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc \
+    | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg \
+    && echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ focal main' \
+    > /etc/apt/sources.list.d/kitware.list
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    binutils \
+    build-essential \
+    cmake \
+    git \
+    ninja-build \
+    unzip \
+    zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# Default build invoked by tools/build-portable.sh
+CMD ["./tools/compile.sh", "-y", \
+     "--bundle-clangd", "--force-bundled-clangd", \
+     "--bundle-gdb", "--force-bundled-gdb"]

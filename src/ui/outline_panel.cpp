@@ -251,7 +251,7 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
       for (int i = start; i < end; ++i) {
         const auto& sym = state->symbols[static_cast<std::size_t>(i)];
         std::string indent(static_cast<std::size_t>(sym.depth * 2), ' ');
-        Element row = text(indent + sym.name) | color(theme::Header());
+        Element row = text(indent + sym.name) | color(theme::DirectoryText());
         const bool selected =
             i == state->selected && focus->region == FocusRegion::RightPanel;
         const std::string row_id = press_id::outline_row(i);

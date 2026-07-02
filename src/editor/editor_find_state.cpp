@@ -23,18 +23,29 @@ bool EditorFindState::jump_to_next_match(EditorBuffer* buffer, int visible_lines
   }
 
   CursorPos from = buffer->primary().head;
-  ++from.col;
+  if (buffer->primary().has_selection()) {
+    int start_line = 0;
+    int start_col = 0;
+    int end_line = 0;
+    int end_col = 0;
+    buffer->primary().normalized_range(&start_line, &start_col, &end_line, &end_col);
+    from = {end_line, end_col};
+  }
 
-  TextMatch next;
-  if (!find_next_match(*buffer, query, from, &next, nullptr)) {
-    if (!find_next_match(*buffer, query, {0, 0}, &next, nullptr)) {
-      return false;
+  for (const TextMatch& match : matches) {
+    if (match.line > from.line || (match.line == from.line && match.col >= from.col)) {
+      buffer->reset_to_single_cursor(match.line, match.col);
+      buffer->primary().anchor = {match.line, match.col};
+      buffer->primary().head = {match.line, match.col + match.length};
+      ensure_scroll_visible(buffer, visible_lines);
+      return true;
     }
   }
 
-  buffer->reset_to_single_cursor(next.line, next.col);
-  buffer->primary().anchor = {next.line, next.col};
-  buffer->primary().head = {next.line, next.col + next.length};
+  const TextMatch& first = matches.front();
+  buffer->reset_to_single_cursor(first.line, first.col);
+  buffer->primary().anchor = {first.line, first.col};
+  buffer->primary().head = {first.line, first.col + first.length};
   ensure_scroll_visible(buffer, visible_lines);
   return true;
 }

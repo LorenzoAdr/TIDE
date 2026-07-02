@@ -1,6 +1,7 @@
 #include "ui/diagnostics_panel.hpp"
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <system_error>
@@ -12,6 +13,7 @@
 #include "ftxui/screen/box.hpp"
 #include "lsp/diagnostics.hpp"
 #include "editor/editor_state.hpp"
+#include "ui/focus_manager.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
@@ -169,14 +171,95 @@ int visible_line_count(const Box& box) {
   return std::max(1, box.y_max - box.y_min + 1);
 }
 
-void clamp_scroll(DiagnosticsPanelState* state, int visible_lines) {
+constexpr int kLinesPerProblem = 2;
+
+int panel_content_width(const Box& box) {
+  if (box.x_max < box.x_min) {
+    return 80;
+  }
+  return std::max(1, box.x_max - box.x_min + 1);
+}
+
+int visible_problem_count(int visible_terminal_lines) {
+  return std::max(1, (visible_terminal_lines + kLinesPerProblem - 1) / kLinesPerProblem);
+}
+
+std::string format_problem_line(const DiagnosticRow& row, const std::string& workspace_root) {
+  const std::string loc =
+      display_path(row.path, workspace_root) + ":" + std::to_string(row.line + 1) + " ";
+  const char marker = severity_marker(row.severity);
+  return " " + std::string(1, marker) + " " + loc + row.message;
+}
+
+std::array<std::string, kLinesPerProblem> wrap_problem_line(const std::string& text,
+                                                            int max_width) {
+  std::array<std::string, kLinesPerProblem> lines = {"", ""};
+  if (text.empty() || max_width <= 0) {
+    lines[0] = text;
+    return lines;
+  }
+  if (static_cast<int>(text.size()) <= max_width) {
+    lines[0] = text;
+    return lines;
+  }
+
+  size_t break_at = static_cast<size_t>(max_width);
+  const size_t space = text.rfind(' ', break_at);
+  if (space != std::string::npos && space > 0) {
+    break_at = space;
+  }
+  lines[0] = text.substr(0, break_at);
+
+  std::string rest = text.substr(break_at);
+  while (!rest.empty() && rest.front() == ' ') {
+    rest.erase(rest.begin());
+  }
+  if (rest.empty()) {
+    return lines;
+  }
+
+  if (static_cast<int>(rest.size()) <= max_width) {
+    lines[1] = rest;
+    return lines;
+  }
+
+  if (max_width <= 3) {
+    lines[1] = "...";
+    return lines;
+  }
+
+  size_t second_break = static_cast<size_t>(max_width - 3);
+  const size_t second_space = rest.rfind(' ', second_break);
+  if (second_space != std::string::npos && second_space > 0) {
+    second_break = second_space;
+  }
+  lines[1] = rest.substr(0, second_break) + "...";
+  return lines;
+}
+
+Element make_problem_row_element(const DiagnosticRow& row, const std::string& workspace_root,
+                                 int panel_width, bool selected) {
+  const auto wrapped = wrap_problem_line(format_problem_line(row, workspace_root), panel_width);
+  Element first = text(wrapped[0]) | size(HEIGHT, EQUAL, 1);
+  Element second = text(wrapped[1]) | size(HEIGHT, EQUAL, 1);
+  Element row_el = vbox({std::move(first), std::move(second)});
+  if (selected) {
+    row_el = row_el | inverted | bold;
+  } else {
+    row_el = row_el | color(severity_color(row.severity));
+  }
+  return row_el;
+}
+
+void clamp_scroll(DiagnosticsPanelState* state, int visible_terminal_lines) {
   const int total = static_cast<int>(state->rows.size());
-  const int max_first = std::max(0, total - visible_lines);
+  const int visible_rows = visible_problem_count(visible_terminal_lines);
+  const int max_first = std::max(0, total - visible_rows);
   state->first_visible = std::max(0, std::min(state->first_visible, max_first));
   if (state->selected < state->first_visible) {
     state->first_visible = state->selected;
-  } else if (state->selected >= state->first_visible + visible_lines) {
-    state->first_visible = state->selected - visible_lines + 1;
+  } else if (state->selected >= state->first_visible + visible_rows) {
+    state->first_visible = state->selected - visible_rows + 1;
   }
 }
 
@@ -206,6 +289,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
     }
 
     const int visible = visible_line_count(state->content_box);
+    const int panel_width = panel_content_width(state->content_box);
     clamp_scroll(state.get(), visible);
 
     Elements rows;
@@ -215,20 +299,12 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       rows.push_back(text(" (sin problemas) ") | color(theme::Muted()));
     } else {
       const std::string workspace_root = workspace != nullptr ? workspace->root : std::string{};
-      const int end = std::min(static_cast<int>(state->rows.size()), state->first_visible + visible);
+      const int visible_rows = visible_problem_count(visible);
+      const int end =
+          std::min(static_cast<int>(state->rows.size()), state->first_visible + visible_rows);
       for (int i = state->first_visible; i < end; ++i) {
         const auto& row = state->rows[static_cast<std::size_t>(i)];
-        const std::string loc = display_path(row.path, workspace_root) + ":" +
-                                std::to_string(row.line + 1) + " ";
-        const char marker = severity_marker(row.severity);
-        std::string line = std::string(1, marker) + " " + loc + row.message;
-        Element el = text(" " + line);
-        if (i == state->selected) {
-          el = el | inverted | bold;
-        } else {
-          el = el | color(severity_color(row.severity));
-        }
-        rows.push_back(std::move(el));
+        rows.push_back(make_problem_row_element(row, workspace_root, panel_width, i == state->selected));
       }
     }
 
@@ -252,7 +328,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       }
       const int visible = visible_line_count(state->content_box);
       const int visual_row = m.y - state->content_box.y_min;
-      const int row = visual_row + state->first_visible;
+      const int row = state->first_visible + (visual_row / kLinesPerProblem);
       if (row >= 0 && row < static_cast<int>(state->rows.size())) {
         state->selected = row;
         clamp_scroll(state.get(), visible);
@@ -268,11 +344,21 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       return false;
     }
 
+    if (layout_state != nullptr &&
+        is_editor_chrome_input_focus(layout_state->text_input_focus)) {
+      return false;
+    }
+
+    if (focus != nullptr && focus->region != FocusRegion::Terminal) {
+      return false;
+    }
+
     if (state->rows.empty()) {
       return false;
     }
 
     const int visible = visible_line_count(state->content_box);
+    const int visible_rows = visible_problem_count(visible);
     if (event == Event::ArrowDown || event == Event::Character('j')) {
       state->selected =
           std::min(state->selected + 1, static_cast<int>(state->rows.size()) - 1);
@@ -293,12 +379,12 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
     }
     if (event == Event::PageDown) {
       state->selected =
-          std::min(state->selected + visible, static_cast<int>(state->rows.size()) - 1);
+          std::min(state->selected + visible_rows, static_cast<int>(state->rows.size()) - 1);
       clamp_scroll(state.get(), visible);
       return true;
     }
     if (event == Event::PageUp) {
-      state->selected = std::max(0, state->selected - visible);
+      state->selected = std::max(0, state->selected - visible_rows);
       clamp_scroll(state.get(), visible);
       return true;
     }

@@ -130,6 +130,12 @@ if(UNIX)
   target_link_options(tgdb PRIVATE -rdynamic)
 endif()
 
+option(TGDB_STATIC_LIBSTDCXX
+       "Link libstdc++ and libgcc statically (reduces runtime libstdc++.so dependency)" OFF)
+if(TGDB_STATIC_LIBSTDCXX)
+  target_link_options(tgdb PRIVATE -static-libstdc++ -static-libgcc)
+endif()
+
 include(cmake/BundleOptions.cmake)
 if(TGDB_BUNDLE_CLANGD)
   include(cmake/BundleClangd.cmake)

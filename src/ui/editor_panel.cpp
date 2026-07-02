@@ -1886,7 +1886,8 @@ void apply_mouse_drag_head(EditorBuffer* buffer, const Mouse& m, const EditorPan
 }
 
 bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
-                         EditorFindState* find, MainLayoutState* layout_state,
+                         EditorFindState* find, CompletionState* completion,
+                         MainLayoutState* layout_state,
                          EditorPanelState* panel, DiagnosticModalState* diagnostic_modal,
                          GitHistoryModalState* git_modal, GitService* git,
                          const std::shared_ptr<ISymbolProvider>& symbols, Event event,
@@ -2014,6 +2015,9 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       if (layout_state != nullptr) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
+    }
+    if (completion != nullptr && completion->open) {
+      completion->close(layout_state);
     }
 
     if (in_gutter && git_modal != nullptr && git != nullptr && git->is_repo() &&
@@ -2724,7 +2728,18 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
   auto modal_overlay = Renderer([find_state, goto_state, completion_state,
                                  diagnostic_state, git_history_state, workspace, symbols,
-                                 symbol_indexer, panel_state, tab_bar_state, layout_state] {
+                                 symbol_indexer, panel_state, tab_bar_state, layout_state,
+                                 focus] {
+    if (layout_state != nullptr) {
+      layout_state->editor_completion_open = completion_state->open;
+    }
+    if (completion_state->open && focus != nullptr && focus->region != FocusRegion::Editor) {
+      completion_state->close(layout_state);
+      if (layout_state != nullptr) {
+        layout_state->editor_completion_open = false;
+      }
+      return text("");
+    }
     if (tab_bar_state->overflow_open) {
       return make_tabs_overflow_modal(workspace, tab_bar_state.get());
     }
@@ -3028,16 +3043,30 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         layout_state->text_input_focus == TextInputFocus::Console) {
       return false;
     }
-    if (focus->region != FocusRegion::Editor) {
-      return false;
-    }
     workspace->ensure_buffer();
     EditorBuffer* buffer = &workspace->buffer;
     const int visible = visible_line_count(panel_state->code_box);
 
+    if (completion_state->open && event == Event::Escape) {
+      completion_state->close(layout_state);
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Editor;
+      }
+      if (layout_state != nullptr) {
+        layout_state->editor_completion_open = false;
+      }
+      return true;
+    }
+
     if (find_input_active(layout_state, *find_state) &&
         handle_find_keys(find_state.get(), layout_state, buffer, event, visible)) {
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Editor;
+      }
       return true;
+    }
+    if (focus->region != FocusRegion::Editor) {
+      return false;
     }
     if (event_is_ctrl_f(event)) {
       activate_find(find_state.get(), buffer, layout_state, focus);
@@ -3057,9 +3086,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                       layout_state, event, visible);
   };
 
-  auto dispatch_editor_mouse = [workspace, focus, panel_state, find_state, diagnostic_state,
-                                  git_history_state, git_service, layout_state, symbols,
-                                  dispatch_editor_chrome_mouse](Event event) {
+  auto dispatch_editor_mouse = [workspace, focus, panel_state, find_state, completion_state,
+                                  diagnostic_state, git_history_state, git_service, layout_state,
+                                  symbols, dispatch_editor_chrome_mouse](Event event) {
     if (dispatch_editor_chrome_mouse(event)) {
       return true;
     }
@@ -3072,7 +3101,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       workspace->ensure_buffer();
       const int visible = visible_line_count(panel_state->code_box);
       update_editor_modifiers(panel_state.get(), event);
-      return handle_editor_mouse(workspace, focus, find_state.get(), layout_state,
+      return handle_editor_mouse(workspace, focus, find_state.get(), completion_state.get(),
+                                 layout_state,
                                  panel_state.get(), diagnostic_state.get(),
                                  git_history_state.get(), git_service, symbols, event, visible);
     }
@@ -3087,7 +3117,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     workspace->ensure_buffer();
     const int visible = visible_line_count(panel_state->code_box);
     update_editor_modifiers(panel_state.get(), event);
-    return handle_editor_mouse(workspace, focus, find_state.get(), layout_state,
+    return handle_editor_mouse(workspace, focus, find_state.get(), completion_state.get(),
+                               layout_state,
                                panel_state.get(), diagnostic_state.get(),
                                git_history_state.get(), git_service, symbols, event, visible);
   };

@@ -11,7 +11,7 @@ namespace tgdb {
 using namespace ftxui;
 
 inline Element PanelTitle(const std::string& title) {
-  return hbox({text(" " + title + " ") | bold | color(theme::Accent()),
+  return hbox({text(" " + title + " ") | bold | color(theme::TitleText()),
                text("") | flex}) |
          size(HEIGHT, EQUAL, 1) | bgcolor(theme::TabIdle());
 }
@@ -39,7 +39,7 @@ inline Element ScreenModalOverlay(Element base, Element dialog) {
 inline Element ModalWindow(Element title, Element content) {
   return vbox({
              hbox({text(" "), std::move(title), filler()}) |
-                 bgcolor(theme::TabIdle()) | color(theme::Accent()) | bold |
+                 bgcolor(theme::TabIdle()) | color(theme::TitleText()) | bold |
                  size(HEIGHT, EQUAL, 1),
              separator() | color(theme::AccentDim()) | bgcolor(theme::PanelBg()),
              std::move(content) | bgcolor(theme::PanelBg()),

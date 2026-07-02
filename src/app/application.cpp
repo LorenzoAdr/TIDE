@@ -313,6 +313,7 @@ void Application::sync_symbol_workspace_indexer() {
 void Application::apply_workspace_settings(const WorkspaceConfig& config) {
   workspace_config_ = config;
   theme::set_mode(workspace_config_.theme);
+  theme::set_ui_overrides(workspace_config_.ui_colors);
   if (workspace_.root.empty()) {
     return;
   }
@@ -346,6 +347,7 @@ void Application::set_workspace(const std::string& workspace_root) {
   request_terminal_autostart();
   workspace_config_ = WorkspaceConfig::load(absolute);
   theme::set_mode(workspace_config_.theme);
+  theme::set_ui_overrides(workspace_config_.ui_colors);
   invalidate_docker_mount_cache();
   rebuild_shell_launch_config();
   apply_clangd_workspace_config(absolute, workspace_config_);
@@ -998,6 +1000,7 @@ int Application::run() {
           shortcuts_modal_state_.open = true;
           shortcuts_modal_state_.first_visible = 0;
         }
+        layout_state_.request_ui_tick = true;
         return true;
       }
 
@@ -1136,6 +1139,19 @@ int Application::run() {
         screen.Post(Event::Custom);
         return true;
       }
+      if (app_mode_ == AppMode::kNormal && layout_state_.editor_completion_open &&
+          event == Event::Escape && layout_state_.editor_key_handler &&
+          layout_state_.editor_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+      if (app_mode_ == AppMode::kNormal &&
+          is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
+          layout_state_.editor_key_handler &&
+          layout_state_.editor_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
       if ((is_search_input_focus(layout_state_.text_input_focus) ||
            search_tab_active(&layout_state_)) &&
           layout_state_.search_key_handler &&
@@ -1149,15 +1165,11 @@ int Application::run() {
         screen.Post(Event::Custom);
         return true;
       }
-      if (problems_tab_active(&layout_state_) && layout_state_.problems_key_handler &&
+      if (problems_tab_active(&layout_state_) &&
+          focus_state_.region == FocusRegion::Terminal &&
+          !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
+          layout_state_.problems_key_handler &&
           layout_state_.problems_key_handler(event)) {
-        screen.Post(Event::Custom);
-        return true;
-      }
-      if (layout_state_.text_input_focus == TextInputFocus::EditorFind &&
-          focus_state_.region == FocusRegion::Editor &&
-          app_mode_ == AppMode::kNormal && layout_state_.editor_key_handler &&
-          layout_state_.editor_key_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
@@ -1172,7 +1184,7 @@ int Application::run() {
           app_mode_ == AppMode::kNormal &&
           !is_search_input_focus(layout_state_.text_input_focus) &&
           !is_watch_input_focus(layout_state_.text_input_focus) &&
-          layout_state_.text_input_focus != TextInputFocus::EditorFind &&
+          !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
           layout_state_.text_input_focus != TextInputFocus::Console &&
           layout_state_.editor_key_handler && layout_state_.editor_key_handler(event)) {
         screen.Post(Event::Custom);
@@ -1202,6 +1214,7 @@ int Application::run() {
       if (event == Event::CtrlQ) {
         quit_confirm_state_.open = true;
         quit_confirm_state_.selected = 0;
+        layout_state_.request_ui_tick = true;
         return true;
       }
 
@@ -1271,6 +1284,7 @@ int Application::run() {
           file_picker_state_.selected =
               (file_picker_state_.selected + 1) %
               static_cast<int>(file_picker_state_.matches.size());
+          layout_state_.request_ui_tick = true;
           return true;
         }
         file_picker_state_.open = !file_picker_state_.open;
@@ -1281,6 +1295,7 @@ int Application::run() {
           file_picker_state_.mark_matches_dirty();
           file_picker_state_.refresh_matches(&workspace_);
         }
+        layout_state_.request_ui_tick = true;
         return true;
       }
       if (event == Event::CtrlO) {
@@ -1288,12 +1303,14 @@ int Application::run() {
           symbol_picker_state_.selected =
               (symbol_picker_state_.selected + 1) %
               static_cast<int>(symbol_picker_state_.matches.size());
+          layout_state_.request_ui_tick = true;
           return true;
         }
         symbol_picker_state_.open = true;
         symbol_picker_state_.query.clear();
         symbol_picker_state_.selected = 0;
         symbol_picker_state_.loaded_file.clear();
+        layout_state_.request_ui_tick = true;
         return true;
       }
       if (event == Event::F9) {

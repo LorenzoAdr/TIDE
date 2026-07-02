@@ -107,12 +107,12 @@ inline Element StyleClickable(Element base, ClickableState state) {
   }
   if (state.hovered) {
     const Color bg = state.selected ? theme::TabActive() : theme::TabHover();
-    return base | bold | color(theme::Header()) | bgcolor(bg);
+    return base | bold | color(theme::TitleText()) | bgcolor(bg);
   }
   if (state.selected) {
-    return base | bold | color(theme::Header()) | bgcolor(theme::TabActive());
+    return base | bold | color(theme::TitleText()) | bgcolor(theme::TabActive());
   }
-  return base | color(theme::Muted()) | bgcolor(theme::TabIdle());
+  return base | color(theme::FileText()) | bgcolor(theme::TabIdle());
 }
 
 inline Element MakeTabButton(const std::string& label, bool selected, bool hovered, bool pressed,

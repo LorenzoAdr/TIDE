@@ -122,6 +122,7 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> problems_key_handler;
   std::function<bool(const ftxui::Event&)> git_key_handler;
   std::function<bool(const ftxui::Event&)> git_mouse_handler;
+  bool editor_completion_open = false;
   std::function<void()> terminal_tick_callback;
   std::function<int()> terminal_width;
   std::function<int()> terminal_height;
@@ -161,6 +162,11 @@ inline bool is_search_input_focus(TextInputFocus focus) {
 
 inline bool is_watch_input_focus(TextInputFocus focus) {
   return focus == TextInputFocus::Watch || focus == TextInputFocus::WatchInject;
+}
+
+inline bool is_editor_chrome_input_focus(TextInputFocus focus) {
+  return focus == TextInputFocus::EditorFind || focus == TextInputFocus::EditorGotoLine ||
+         focus == TextInputFocus::EditorCompletion;
 }
 
 inline bool editor_symbol_press_visible(const MainLayoutState* layout_state) {

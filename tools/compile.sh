@@ -10,6 +10,7 @@ BUNDLE_CLANGD=0
 BUNDLE_CLANGD_FORCE=0
 BUNDLE_GDB=0
 BUNDLE_GDB_FORCE=0
+STATIC_LIBSTDCXX=0
 INTERACTIVE=1
 SKIP_WIZARD=0
 
@@ -39,10 +40,12 @@ Opciones:
   --no-bundle-gdb            No embeber gdb
   --force-bundled-gdb        Forzar gdb embebido en runtime (requiere bundle)
   --no-force-bundled-gdb     Permitir fallback a gdb en PATH
+  --static-libstdc++         Enlazar libstdc++/libgcc estáticamente (menos deps en runtime)
   -h, --help                 Mostrar esta ayuda
 
 Variables de entorno:
-  JOBS   Hilos para cmake --build (default: nproc)
+  JOBS              Hilos para cmake --build (default: nproc)
+  CMAKE_BUILD_TYPE  Tipo de build CMake (ej. Release)
 EOF
 }
 
@@ -102,6 +105,17 @@ run_wizard() {
     die "asistente cancelado"
   fi
   load_bundle_config
+}
+
+cmake_extra_args() {
+  local args=()
+  if [[ -n "${CMAKE_BUILD_TYPE:-}" ]]; then
+    args+=(-DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
+  fi
+  if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
+    args+=(-DTGDB_STATIC_LIBSTDCXX=ON)
+  fi
+  printf '%s\n' "${args[@]}"
 }
 
 cmake_bundle_args() {
@@ -188,6 +202,10 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE=0
       shift
       ;;
+    --static-libstdc++)
+      STATIC_LIBSTDCXX=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -205,9 +223,12 @@ check_command g++
 
 if [[ "${SKIP_WIZARD}" == "0" ]]; then
   log "configurando CMake (paso inicial)..."
+  mapfile -t CMAKE_EXTRA_ARGS < <(cmake_extra_args)
+  # shellcheck disable=SC2068
   cmake -S "${ROOT}" -B "${BUILD_DIR}" \
     -DTGDB_BUNDLE_CLANGD=OFF -DTGDB_FORCE_BUNDLED_CLANGD=OFF \
-    -DTGDB_BUNDLE_GDB=OFF -DTGDB_FORCE_BUNDLED_GDB=OFF
+    -DTGDB_BUNDLE_GDB=OFF -DTGDB_FORCE_BUNDLED_GDB=OFF \
+    ${CMAKE_EXTRA_ARGS[@]}
   log "compilando asistente de bundles..."
   cmake --build "${BUILD_DIR}" --target tgdb-bundle-wizard -j "${JOBS}"
   run_wizard
@@ -221,10 +242,11 @@ fi
 warn_gdb_dap
 
 mapfile -t CMAKE_BUNDLE_ARGS < <(cmake_bundle_args)
+mapfile -t CMAKE_EXTRA_ARGS < <(cmake_extra_args)
 
 log "configurando CMake..."
 # shellcheck disable=SC2068
-cmake -S "${ROOT}" -B "${BUILD_DIR}" ${CMAKE_BUNDLE_ARGS[@]}
+cmake -S "${ROOT}" -B "${BUILD_DIR}" ${CMAKE_BUNDLE_ARGS[@]} ${CMAKE_EXTRA_ARGS[@]}
 
 log "compilando (${JOBS} hilos)..."
 cmake --build "${BUILD_DIR}" -j "${JOBS}"
@@ -249,6 +271,9 @@ if [[ "${BUNDLE_GDB}" == "1" ]]; then
   log "  gdb embebido: sí (force=${BUNDLE_GDB_FORCE})"
 else
   log "  gdb embebido: no"
+fi
+if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
+  log "  libstdc++ estático: sí"
 fi
 log ""
 log "lanza con: ${ROOT}/tools/launch.sh"

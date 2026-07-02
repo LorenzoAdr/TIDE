@@ -416,6 +416,21 @@ void finish_move(EditorBuffer* buffer, bool extend_selection) {
   clamp_all_cursors(buffer);
 }
 
+void paste_string_at(EditorBuffer* buffer, int line, int col, const std::string& text) {
+  int cur_line = line;
+  int cur_col = col;
+  for (char c : text) {
+    if (c == '\n') {
+      newline_at(buffer, cur_line, cur_col);
+      ++cur_line;
+      cur_col = 0;
+    } else {
+      insert_char_at(buffer, cur_line, cur_col, c);
+      ++cur_col;
+    }
+  }
+}
+
 }  // namespace
 
 void delete_all_selections(EditorBuffer* buffer) {
@@ -757,17 +772,32 @@ void paste_at_primary(EditorBuffer* buffer, const std::string& text) {
   clamp_all_cursors(buffer);
   if (any_cursor_has_selection(*buffer)) {
     delete_all_selections(buffer);
-  }
-  exit_multi_cursor_mode(buffer);
-  for (char c : text) {
-    if (c == '\n') {
-      apply_to_all_cursors(buffer, newline_at);
-    } else {
-      insert_char_at(buffer, buffer->primary().head.line, buffer->primary().head.col, c);
-      buffer->primary().anchor = buffer->primary().head;
+  } else {
+    for (auto& cursor : buffer->cursors) {
+      cursor.collapse_to_head();
     }
   }
+
+  std::vector<CursorPos> positions;
+  positions.reserve(buffer->cursors.size());
+  for (const auto& cursor : buffer->cursors) {
+    positions.push_back(cursor.head);
+  }
+  std::sort(positions.begin(), positions.end(), [](const CursorPos& a, const CursorPos& b) {
+    if (a.line != b.line) {
+      return a.line > b.line;
+    }
+    return a.col > b.col;
+  });
+
+  for (const auto& pos : positions) {
+    paste_string_at(buffer, pos.line, pos.col, text);
+  }
+  for (auto& cursor : buffer->cursors) {
+    cursor.collapse_to_head();
+  }
   clamp_all_cursors(buffer);
+  merge_overlapping_cursors(buffer);
   mark_dirty(buffer);
 }
 

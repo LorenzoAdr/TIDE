@@ -6,7 +6,33 @@ namespace tgdb {
 
 using namespace ftxui;
 
+namespace {
+
+bool looks_like_terminal_mouse_report(const std::string& bytes) {
+  if (bytes.size() < 4) {
+    return false;
+  }
+  std::size_t i = 0;
+  if (bytes[i] == '\x1b') {
+    ++i;
+  }
+  if (i + 2 >= bytes.size() || bytes[i] != '[' || bytes[i + 1] != '<') {
+    return false;
+  }
+  const char last = bytes.back();
+  return last == 'M' || last == 'm';
+}
+
+}  // namespace
+
 std::optional<std::string> event_to_pty_bytes(const Event& event) {
+  if (event.is_mouse()) {
+    return std::nullopt;
+  }
+  const std::string raw = event.input();
+  if (!raw.empty() && looks_like_terminal_mouse_report(raw)) {
+    return std::nullopt;
+  }
   if (event == Event::Return) {
     return std::string("\r");
   }
@@ -133,6 +159,9 @@ std::optional<std::string> event_to_pty_bytes(const Event& event) {
   if (event.is_character()) {
     const std::string ch = event.character();
     if (!ch.empty()) {
+      if (looks_like_terminal_mouse_report(ch)) {
+        return std::nullopt;
+      }
       return ch;
     }
   }

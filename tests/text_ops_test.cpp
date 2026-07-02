@@ -106,6 +106,21 @@ void test_paste_replaces_selection() {
   check(buffer.lines[0] == "hello tgdb", "selection replaced by paste");
 }
 
+void test_paste_multi_cursor() {
+  auto buffer = make_buffer({"foo foo foo"});
+  buffer.cursors = {
+      {{0, 0}, {0, 3}},
+      {{0, 4}, {0, 7}},
+      {{0, 8}, {0, 11}},
+  };
+  tgdb::paste_at_primary(&buffer, "bar");
+  check(buffer.lines[0] == "bar bar bar", "paste replaces all selections");
+  check(buffer.cursors.size() == 3, "multi-cursor preserved");
+  check(buffer.cursors[0].head.col == 3, "first cursor after paste");
+  check(buffer.cursors[1].head.col == 7, "second cursor after paste");
+  check(buffer.cursors[2].head.col == 11, "third cursor after paste");
+}
+
 }  // namespace
 
 int main() {
@@ -119,5 +134,6 @@ int main() {
   test_copy_selection();
   test_paste_at_end_of_line();
   test_paste_replaces_selection();
+  test_paste_multi_cursor();
   return 0;
 }

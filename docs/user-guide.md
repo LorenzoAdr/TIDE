@@ -35,10 +35,11 @@ gdb -i=dap -ex quit
 ### Optional (recommended)
 
 - **clangd** for LSP (outline, completion, diagnostics). Options:
-  - Build with embedded clangd: `./tools/compile.sh` and check *Incluir clangd en el binario* (~87 MB `tgdb`, portable; needs glibc ≥ 2.18)
+  - Build with embedded clangd: `./tools/compile.sh` and check *Incluir clangd en el binario* (~87 MB `tgdb`; embedded clangd needs **glibc ≥ 2.18**)
+  - Portable full pack for older hosts: `./tools/build-portable.sh` (targets **glibc ~2.31** on Ubuntu 20.04; use `--bionic` for ~2.27)
   - System install: `clangd` on `PATH`, or set `CLANGD_PATH`
 - **gdb** for debugging (GDB 14+ with DAP). Options:
-  - Build with embedded gdb-static Full: `./tools/compile.sh` and check *Incluir gdb-static Full* (~115–125 MB with clangd+gdb; fully static, no system Python)
+  - Build with embedded gdb-static Full: `./tools/compile.sh` and check *Incluir gdb-static Full* (~115–125 MB with clangd+gdb; gdb is musl-static, no system Python)
   - System install: `gdb` on `PATH` with `gdb -i=dap -ex quit` working, or set `GDB_PATH`
 - **`compile_commands.json`** in the workspace root or under `build/` — gives clangd accurate include paths and enables reliable outline, completion, and go-to-symbol
 
@@ -49,6 +50,21 @@ Without clangd, outline and completion fall back to regex-based symbol extractio
 When built with embedded clangd, open **F10 → Configuración** to toggle *Forzar clangd embebido* (skip system `clangd` on `PATH`). Override at runtime with `TGDB_FORCE_BUNDLED_CLANGD=1|0`.
 
 When built with embedded gdb-static, use **F10 → Configuración → Forzar gdb embebido** to prefer the bundled debugger over `gdb` on `PATH` (unless `GDB_PATH` is set). Override at runtime with `TGDB_FORCE_BUNDLED_GDB=1|0`.
+
+### Interface colors (per workspace)
+
+Open **F10 → Configuración → Colores de interfaz** (with a workspace open) to pick a preset or tune individual colors. Settings are saved in `.tgdb/config.json` under `ui_colors_preset` and `ui_colors`.
+
+| Preset | Use case |
+|--------|----------|
+| **Oscuro clásico** | Default dark theme |
+| **Oscuro suave** | WSL, MobaXterm, terminals that crush dark grays to black |
+| **Claro clásico** | Default light theme |
+| **Claro papel** | Light theme with warm, less glaring backgrounds |
+
+Customizable roles: panel background, code background, general text, titles/active tabs, folders/outline, files/inactive tabs. **clangd syntax highlighting colors are unchanged.**
+
+In the colors subpanel: **p** or **Enter** on the preset row cycles presets; **Enter** on a color row edits hex (`#RRGGBB`).
 
 ## Installation
 

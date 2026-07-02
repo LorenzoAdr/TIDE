@@ -593,9 +593,9 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
 
         Element row = text(indent + prefix + entry.label);
         if (entry.is_file) {
-          row = row | color(theme::Muted());
+          row = row | color(theme::FileText());
         } else {
-          row = row | color(theme::Header());
+          row = row | color(theme::DirectoryText());
         }
         row = StyleListRow(std::move(row), selected, hovered, pressed);
         rows.push_back(row);

@@ -27,6 +27,8 @@ ln -sf build/compile_commands.json .
 | Script | Purpose |
 |--------|---------|
 | `tools/compile.sh` | Interactive bundle wizard (default), configure, build |
+| `tools/build-portable.sh` | Full pack build inside Docker (old glibc baseline) |
+| `tools/verify-glibc.sh` | Report max GLIBC/GLIBCXX symbols and `ldd` deps |
 | `tools/launch.sh` | Run `tgdb` with sensible defaults and path resolution |
 
 `compile.sh` without arguments opens a TUI to choose embedded components (clangd). Use `-y` to skip the wizard and reuse `.bundle-config`.
@@ -45,6 +47,31 @@ When `TGDB_BUNDLE_CLANGD=ON`, the build downloads the official [clangd/clangd](h
 When `TGDB_BUNDLE_GDB=ON`, the build downloads [gdb-static Full](https://github.com/guyush1/gdb-static/releases) (x86_64, musl, Python+DAP baked in), verifies static linking and DAP, compresses it, and embeds it (+~25–40 MB compressed). Runtime extraction: `$XDG_CACHE_HOME/tgdb/bundled/gdb-<version>/`.
 
 Build-time tools (when bundling): `curl` or `wget`, `zstd`, `objcopy`, `sha256sum`; for clangd also `unzip`, `strip`, `ldd`.
+
+### Portable build (legacy glibc)
+
+Building on a modern host (e.g. Ubuntu 24.04) pins `tgdb` to a recent glibc (e.g. `GLIBC_2.38`). To ship a binary that runs on older distros, use the Docker-based portable build:
+
+```bash
+./tools/build-portable.sh                      # Ubuntu 20.04, glibc ~2.31 baseline
+./tools/build-portable.sh --static-libstdc++   # also link libstdc++/libgcc statically
+./tools/build-portable.sh --bionic             # Ubuntu 18.04, glibc ~2.27 (optional)
+./tools/verify-glibc.sh build/tgdb             # inspect symbols/deps only
+```
+
+Output lands in `dist/tgdb-x86_64-glibc<version>[-static-libstdc++]` plus `dist/portable-report.txt`.
+
+Runtime requirements for the **full pack** (embedded clangd + gdb):
+
+| Component | Dynamic deps at runtime | Typical glibc floor |
+|-----------|------------------------|---------------------|
+| `tgdb` | `libc`, `libm`, optional `libstdc++`/`libgcc_s` | Set by Docker image (~2.31 focal, ~2.27 bionic) |
+| Embedded clangd | `libc`, `libm`, `libpthread`, `librt`, `libdl` | **≥ 2.18** (official LLVM release) |
+| Embedded gdb-static | none (musl static) | none |
+
+`--static-libstdc++` (also available in `compile.sh`) removes the `libstdc++.so.6` runtime dependency from `tgdb`; glibc is still required from the host.
+
+Requires Docker. The script reuses `tools/compile.sh` inside the container with all bundles enabled.
 
 Environment variables:
 
@@ -93,6 +120,8 @@ tgdb/
 │   └── text_ops_test.cpp
 └── tools/
     ├── compile.sh
+    ├── build-portable.sh
+    ├── verify-glibc.sh
     └── launch.sh
 ```
 

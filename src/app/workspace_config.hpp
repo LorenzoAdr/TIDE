@@ -35,6 +35,8 @@ struct WorkspaceConfig {
   bool clangd_use_gcc_query_driver = true;
   bool clangd_background_index = false;
   theme::ThemeMode theme = theme::ThemeMode::kDark;
+  theme::UiColorPreset ui_colors_preset = theme::UiColorPreset::kDarkClassic;
+  theme::UiColorOverrides ui_colors;
   CompileCommandsSettings compile_commands;
   BuildEnvironmentSettings build_environments;
 

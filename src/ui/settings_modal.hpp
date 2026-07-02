@@ -17,6 +17,7 @@ enum class SettingsPanel {
   kCompileCommands,
   kPathMappings,
   kPathBrowser,
+  kUiColors,
 };
 
 enum class PathBrowserPurpose {
@@ -42,6 +43,12 @@ struct SettingsModalState {
   bool draft_clangd_use_gcc_query_driver = true;
   bool draft_clangd_background_index = false;
   theme::ThemeMode draft_theme = theme::ThemeMode::kDark;
+  theme::UiColorPreset draft_ui_colors_preset = theme::UiColorPreset::kDarkClassic;
+  theme::UiColorOverrides draft_ui_colors;
+  int ui_colors_selected = 0;
+  bool ui_colors_editing = false;
+  int ui_colors_edit_row = -1;
+  std::string ui_colors_hex_buffer;
   CompileCommandsSettings draft_compile_commands;
   std::vector<std::string> draft_clangd_extra_include_paths;
   std::vector<std::string> docker_container_names;

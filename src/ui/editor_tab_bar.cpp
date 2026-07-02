@@ -138,7 +138,7 @@ Element make_editor_tab_bar(WorkspaceModel* workspace, EditorTabBarState* state,
 
   if (visible.has_overflow) {
     const std::string overflow_label = "+" + std::to_string(visible.hidden_count);
-    Element cell = text(" " + overflow_label + " ") | color(theme::Accent());
+    Element cell = text(" " + overflow_label + " ") | color(theme::TitleText());
     if (state->overflow_open) {
       cell = cell | inverted;
     }
@@ -170,7 +170,7 @@ Element make_editor_tab_bar(WorkspaceModel* workspace, EditorTabBarState* state,
       tab_cell = tab_cell | dim;
     }
     if (state->dragging && state->drag_target == i && state->drag_tab != i) {
-      tab_cell = tab_cell | color(theme::Accent()) | bold;
+      tab_cell = tab_cell | color(theme::TitleText()) | bold;
     }
     cells.push_back(hbox({std::move(tab_cell), std::move(close_cell)}));
   }
@@ -197,9 +197,9 @@ Element make_tabs_overflow_modal(WorkspaceModel* workspace, EditorTabBarState* s
       if (tab.buffer.dirty) {
         line += " *";
       }
-      Element row = text(" " + line) | color(theme::Header());
+      Element row = text(" " + line) | color(theme::FileText());
       if (i == workspace->active_tab) {
-        row = row | bold | color(theme::Accent());
+        row = row | bold | color(theme::TitleText());
       }
       if (i == state->overflow_selected) {
         row = row | inverted | bgcolor(theme::EditorLineHi());
