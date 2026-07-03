@@ -68,7 +68,6 @@ add_executable(tgdb
   src/lsp/diagnostics.cpp
   src/symbols/lsp_symbol_provider.cpp
   src/symbols/completion_snippet.cpp
-  src/symbols/local_scope_completions.cpp
   src/util/syntax_highlight.cpp
   src/util/clang_format_config.cpp
   src/util/build_file_highlight.cpp
@@ -81,6 +80,7 @@ add_executable(tgdb
   src/editor/cursor_history.cpp
   src/editor/text_ops.cpp
   src/editor/line_comment.cpp
+  src/editor/indent_guides.cpp
   src/editor/text_search.cpp
   src/editor/selection_occurrence_runner.cpp
   src/editor/find_match_runner.cpp
@@ -92,6 +92,7 @@ add_executable(tgdb
   src/editor/bracket_match.cpp
   src/util/cpp_highlight.cpp
   src/util/crash_handler.cpp
+  src/util/monitor_log.cpp
   src/util/filesystem_tree.cpp
   src/util/include_tree.cpp
   src/util/path_normalize.cpp
@@ -171,6 +172,7 @@ add_executable(text_ops_test
   src/editor/editor_state.cpp
   src/editor/text_ops.cpp
   src/editor/line_comment.cpp
+  src/editor/indent_guides.cpp
   src/editor/text_search.cpp
   src/editor/undo_stack.cpp
   src/editor/clipboard.cpp
@@ -197,3 +199,9 @@ add_executable(build_environment_test
   src/build/build_environment_selector.cpp
 )
 target_include_directories(build_environment_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(git_diff_test
+  tests/git_diff_test.cpp
+  src/git/git_diff.cpp
+)
+target_include_directories(git_diff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

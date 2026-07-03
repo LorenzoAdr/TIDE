@@ -17,7 +17,7 @@ int symbol_end_line(const std::vector<SymbolInfo>& symbols, std::size_t index) {
   const SymbolInfo& sym = symbols[index];
   if (sym.end_line > 0) {
     return sym.end_line;
-  }
+  } 
   for (std::size_t j = index + 1; j < symbols.size(); ++j) {
     if (symbols[j].depth <= sym.depth) {
       return std::max(sym.line, symbols[j].line - 1);
@@ -54,8 +54,11 @@ std::vector<BreadcrumbItem> build_breadcrumbs(const std::string& file_label,
                                               const std::vector<SymbolInfo>& symbols,
                                               int cursor_line_0based) {
   std::vector<BreadcrumbItem> crumbs;
+  
+  
+  
+  
   crumbs.push_back({file_label, 0});
-
   for (const SymbolInfo* sym : scope_chain_at_line(symbols, cursor_line_0based)) {
     if (!is_scope_kind(sym->kind)) {
       continue;
@@ -64,14 +67,16 @@ std::vector<BreadcrumbItem> build_breadcrumbs(const std::string& file_label,
   }
 
   return crumbs;
+  
 }
+   
 
 std::string truncate_line_preview(const std::string& line, int max_cols) {
   if (max_cols <= 0) {
     return line;
   }
   if (static_cast<int>(line.size()) <= max_cols) {
-    return line;
+    return line;   
   }
   if (max_cols <= 3) {
     return line.substr(0, static_cast<std::size_t>(max_cols));

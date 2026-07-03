@@ -2,8 +2,10 @@
 
 #include <chrono>
 #include <cstring>
+#include <sstream>
 #include <unistd.h>
 
+#include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
 
 namespace tgdb {
@@ -170,6 +172,10 @@ bool LspTransport::send_request(int id, const std::string& method, nlohmann::jso
     return false;
   }
 
+  std::ostringstream scope_name;
+  scope_name << "send_request method=" << method << " id=" << id;
+  monitor_log::MonitorScope request_scope("lsp", scope_name.str());
+
   nlohmann::json request = {{"jsonrpc", "2.0"},
                             {"id", id},
                             {"method", method},
@@ -181,6 +187,7 @@ bool LspTransport::send_request(int id, const std::string& method, nlohmann::jso
   }
 
   if (!write_message(request.dump())) {
+    TGDB_MON("lsp", "send_request write_failed method=" + method);
     return false;
   }
 
@@ -189,6 +196,7 @@ bool LspTransport::send_request(int id, const std::string& method, nlohmann::jso
                         std::chrono::milliseconds(timeout_ms);
   while (pending_responses_.find(id) == pending_responses_.end() && running_.load()) {
     if (pending_cv_.wait_until(lock, deadline) == std::cv_status::timeout) {
+      TGDB_MON("lsp", "send_request timeout method=" + method + " id=" + std::to_string(id));
       return false;
     }
   }
@@ -203,6 +211,7 @@ bool LspTransport::send_request(int id, const std::string& method, nlohmann::jso
   lock.unlock();
 
   if (response.contains("error")) {
+    TGDB_MON("lsp", "send_request error method=" + method + " id=" + std::to_string(id));
     return false;
   }
   if (!response.contains("result")) {

@@ -16,9 +16,12 @@ namespace {
 
 int accumulate (int n) {
   int total = 0;
+  
   for (int i = 1; i <= n; ++i) {
     total += i; 
   }
+  
+  
   return total;
 
 
@@ -57,8 +60,6 @@ int main() {
 
 
 
-
-
   const pid_t pid = getpid();
   std::cout << "hello PID " << pid << "\n"
             << "Adjunta con: ./tools/launch.sh --attach " << pid
@@ -70,7 +71,8 @@ int main() {
   int y = 20;
 
 
-
+accumulate(2);
+allow_external_debugger();
 
 
   while (true) { 
@@ -79,6 +81,7 @@ int main() {
     y = x + 7;  
     const int sum = x + y;
     const int acc = accumulate(counter % 20);
+    
 
     std::cout << "[" << counter << "] x=" << x << " y=" << y
               << " sum=" << sum << " acc=" << acc << std::endl;

@@ -36,6 +36,7 @@
 #include "ui/scroll_bar.hpp"
 #include "ui/terminal_display.hpp"
 #include "ui/theme.hpp"
+#include "util/monitor_log.hpp"
 
 namespace tgdb {
 
@@ -883,6 +884,7 @@ void refresh_terminal_view(ShellSession* shell, ConsolePanelState* state) {
   if (shell == nullptr || state == nullptr) {
     return;
   }
+  TGDB_MON_SCOPE("shell", "refresh_terminal_view");
   state->shell_ui_active = shell->running();
   if (!state->shell_ui_active) {
     state->terminal_view_valid = false;
@@ -893,6 +895,9 @@ void refresh_terminal_view(ShellSession* shell, ConsolePanelState* state) {
   int drained = 0;
   while (shell->pending_output_chunks() > 0) {
     drained += shell->drain_output_bytes(8192);
+  }
+  if (drained > 0) {
+    TGDB_MON("shell", "terminal drained_bytes=" + std::to_string(drained));
   }
   const std::string text = shell->display_text();
   if (text.empty() && drained == 0 && !pending && queue_before == 0) {

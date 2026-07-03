@@ -989,10 +989,12 @@ std::optional<std::string> LspClient::format_document(const std::string& absolut
   }
 
   const std::string uri = path_to_uri(key);
-  const int tab_size = std::max(1, editor_indent::width());
+  const ClangFormatConfig style = load_clang_format_for_file(key, workspace_root_);
+  const int tab_size = std::max(1, style.indent_width);
+  const bool insert_spaces = !style.uses_tab_char();
   nlohmann::json params = {{"textDocument", {{"uri", uri}}},
                            {"options", {{"tabSize", tab_size},
-                                        {"insertSpaces", !editor_indent::use_tab_char()}}}};
+                                        {"insertSpaces", insert_spaces}}}};
 
   nlohmann::json result;
   const int id = next_request_id_++;

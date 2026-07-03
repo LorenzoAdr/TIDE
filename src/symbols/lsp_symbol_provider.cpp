@@ -9,6 +9,7 @@
 #include <sstream>
 
 #include "util/thread_name.hpp"
+#include "util/monitor_log.hpp"
 
 namespace fs = std::filesystem;
 
@@ -112,6 +113,7 @@ void LspSymbolProvider::stop_lsp_locked() {
   cached_diag_revision_ = 0;
   cached_diagnostics_.clear();
   hover_cache_.clear();
+  completion_cache_.clear();
 }
 
 void LspSymbolProvider::stop_lsp() {
@@ -130,6 +132,7 @@ void LspSymbolProvider::start_async_worker_locked() {
     inflight_symbols_.clear();
     inflight_semantic_.clear();
     inflight_hover_.clear();
+    inflight_completion_.clear();
   }
   async_worker_ = std::thread([this] {
     set_current_thread_name("lsp-async");
@@ -194,6 +197,18 @@ void LspSymbolProvider::async_worker_main() {
       break;
     }
 
+    std::ostringstream job_name;
+    if (job->kind == AsyncJobKind::DocumentSymbols) {
+      job_name << "async.document_symbols path=" << job->path;
+    } else if (job->kind == AsyncJobKind::SemanticTokens) {
+      job_name << "async.semantic_tokens path=" << job->path;
+    } else if (job->kind == AsyncJobKind::Completion) {
+      job_name << "async.completion path=" << job->completion_params.path;
+    } else {
+      job_name << "async.hover path=" << job->hover_params.path;
+    }
+    monitor_log::MonitorScope job_scope("lsp", job_name.str());
+
     bool run_job = false;
     {
       std::lock_guard<std::mutex> lock(mutex_);
@@ -205,6 +220,17 @@ void LspSymbolProvider::async_worker_main() {
         client_.document_symbols(job->path);
       } else if (job->kind == AsyncJobKind::SemanticTokens) {
         client_.ensure_semantic_tokens(job->path);
+      } else if (job->kind == AsyncJobKind::Completion) {
+        const CompletionParams& params = job->completion_params;
+        const std::string key = normalize_lsp_path(params.path);
+        std::vector<CompletionItem> items;
+        if (!key.empty()) {
+          const std::string text =
+              params.text.empty() ? buffer_text_for_path(key) : params.text;
+          items = client_.completions_at(key, text, params.line, params.character);
+        }
+        std::lock_guard<std::mutex> lock(mutex_);
+        completion_cache_[job->completion_key] = std::move(items);
       } else {
         const HoverInfo info = client_.hover(job->hover_params.path, job->hover_params.text,
                                            job->hover_params.line, job->hover_params.character);
@@ -222,6 +248,11 @@ void LspSymbolProvider::async_worker_main() {
       {
         std::lock_guard<std::mutex> lock(inflight_mutex_);
         inflight_semantic_.erase(job->path);
+      }
+    } else if (job->kind == AsyncJobKind::Completion) {
+      {
+        std::lock_guard<std::mutex> lock(inflight_mutex_);
+        inflight_completion_.erase(job->completion_key);
       }
     } else {
       {
@@ -254,13 +285,18 @@ bool LspSymbolProvider::symbols_lsp_pending(const std::string& path) const {
 
 bool LspSymbolProvider::drain_async_results() {
   bool updated = false;
+  int drained = 0;
   while (auto result = async_results_.try_pop()) {
     updated = true;
+    ++drained;
     if (result->kind == AsyncJobKind::SemanticTokens) {
       semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
     } else {
       document_symbols_revision_.fetch_add(1, std::memory_order_relaxed);
     }
+  }
+  if (drained > 0) {
+    TGDB_MON("lsp", "drain_async_results count=" + std::to_string(drained));
   }
   return updated;
 }
@@ -537,6 +573,59 @@ std::vector<CompletionItem> LspSymbolProvider::completions_at(
   const std::string text =
       params.text.empty() ? buffer_text_for_path(key) : params.text;
   return client_.completions_at(key, text, params.line, params.character);
+}
+
+bool LspSymbolProvider::completion_uses_async_fetch() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return use_lsp_;
+}
+
+void LspSymbolProvider::request_completion(const CompletionParams& params,
+                                           const std::string& cache_key) {
+  if (params.path.empty() || cache_key.empty() ||
+      !is_lsp_trackable_path(params.path, params.text)) {
+    return;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_) {
+      return;
+    }
+    if (completion_cache_.find(cache_key) != completion_cache_.end()) {
+      return;
+    }
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(inflight_mutex_);
+    if (inflight_completion_.count(cache_key) > 0) {
+      return;
+    }
+    inflight_completion_.insert(cache_key);
+  }
+
+  AsyncJob job;
+  job.kind = AsyncJobKind::Completion;
+  job.path = normalize_lsp_path(params.path);
+  job.completion_key = cache_key;
+  job.completion_params = params;
+  async_jobs_.push(std::move(job));
+}
+
+std::optional<std::vector<CompletionItem>> LspSymbolProvider::poll_completion(
+    const std::string& cache_key) {
+  if (cache_key.empty()) {
+    return std::nullopt;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = completion_cache_.find(cache_key);
+  if (it == completion_cache_.end()) {
+    return std::nullopt;
+  }
+  std::vector<CompletionItem> items = it->second;
+  completion_cache_.erase(it);
+  return items;
 }
 
 bool LspSymbolProvider::supports_navigation() const {

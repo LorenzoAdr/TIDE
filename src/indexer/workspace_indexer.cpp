@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <sstream>
 
 #include "indexer/index_rules.hpp"
+#include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
 
 namespace fs = std::filesystem;
@@ -91,9 +93,11 @@ bool WorkspaceIndexer::scanning() const {
 }
 
 void WorkspaceIndexer::worker_main(std::string workspace_root) {
+  TGDB_MON_SCOPE("idx", "workspace_indexer.scan");
   auto snap = std::make_shared<IndexSnapshot>();
   snap->workspace_root = workspace_root;
   snap->files = scan_workspace_files(workspace_root);
+  TGDB_MON("idx", "workspace_indexer.files=" + std::to_string(snap->files.size()));
   {
     std::lock_guard<std::mutex> lock(mutex_);
     snapshot_ = snap;

@@ -8,6 +8,7 @@
 #include "indexer/index_rules.hpp"
 #include "search/workspace_search_rg.hpp"
 #include "util/bundled_tools.hpp"
+#include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
 
 namespace fs = std::filesystem;
@@ -167,6 +168,7 @@ void WorkspaceSearchRunner::search_inprocess(uint64_t generation,
 }
 
 void WorkspaceSearchRunner::worker_main(uint64_t generation, WorkspaceSearchOptions opts) {
+  TGDB_MON_SCOPE("idx", "workspace_search");
   std::vector<WorkspaceSearchResult> results;
   int files_scanned = 0;
   bool cancelled = false;

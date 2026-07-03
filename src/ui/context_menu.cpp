@@ -24,6 +24,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
 #include "util/compile_commands_lookup.hpp"
+#include "util/clang_format_config.hpp"
 #include "util/path_normalize.hpp"
 
 namespace tgdb {
@@ -253,6 +254,17 @@ bool format_file_at_path(WorkspaceModel* workspace, MainLayoutState* layout_stat
   if (!is_lsp_trackable_path(absolute_path)) {
     workspace->status_message = "Archivo no compatible con clang-format";
     return false;
+  }
+
+  if (!workspace->root.empty()) {
+    const ClangFormatConfig* active =
+        layout_state != nullptr ? layout_state->workspace_clang_format : nullptr;
+    sync_clang_format_file_for_formatting(workspace->root, active);
+  } else {
+    const std::string format_root = clang_format_root_for_file(absolute_path);
+    if (!format_root.empty()) {
+      save_clang_format(format_root, load_clang_format_from_disk(format_root));
+    }
   }
 
   workspace->flush_active_tab();

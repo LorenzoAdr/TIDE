@@ -28,6 +28,10 @@ enum class PathBrowserPurpose {
   kMappingHostPath,
 };
 
+using SettingsApplyCallback = std::function<void(const AppSettings&)>;
+using WorkspaceSettingsApplyCallback = std::function<void(const WorkspaceConfig&)>;
+using ClangFormatApplyCallback = std::function<void(const ClangFormatConfig&)>;
+
 struct SettingsModalState {
   bool open = false;
   SettingsPanel panel = SettingsPanel::kGeneral;
@@ -38,12 +42,15 @@ struct SettingsModalState {
   int mapping_selected = 0;
   int docker_container_selected = 0;
   bool draft_lsp_enabled = true;
+  bool draft_live_lsp_completion_enabled = true;
   bool draft_show_diagnostic_suffixes = true;
   bool draft_sticky_scroll_enabled = true;
+  bool draft_indent_guides_enabled = true;
   bool draft_overview_ruler_enabled = true;
   bool draft_secondary_panel_enabled = true;
   bool draft_force_bundled_clangd = false;
   bool draft_force_bundled_gdb = false;
+  bool draft_monitor_enabled = false;
   bool draft_clangd_use_gcc_query_driver = true;
   bool draft_clangd_background_index = false;
   theme::ThemeMode draft_theme = theme::ThemeMode::kDark;
@@ -58,15 +65,12 @@ struct SettingsModalState {
   std::vector<std::string> draft_clangd_extra_include_paths;
   ClangFormatConfig draft_clang_format;
   bool clang_format_file_exists = false;
+  ClangFormatApplyCallback clang_format_changed_callback;
   std::vector<std::string> docker_container_names;
   PathBrowserState path_browser;
   bool has_workspace = false;
   std::string workspace_root;
 };
-
-using SettingsApplyCallback = std::function<void(const AppSettings&)>;
-using WorkspaceSettingsApplyCallback = std::function<void(const WorkspaceConfig&)>;
-using ClangFormatApplyCallback = std::function<void(const ClangFormatConfig&)>;
 
 ftxui::Component MakeSettingsModalOverlay(ftxui::Component main, SettingsModalState* state,
                                           AppSettings* settings, SettingsApplyCallback on_apply,

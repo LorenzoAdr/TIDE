@@ -22,11 +22,14 @@ namespace {
 
 constexpr int kTheme = 0;
 constexpr int kLsp = 1;
-constexpr int kDiagnosticSuffixes = 2;
-constexpr int kStickyScroll = 3;
-constexpr int kOverviewRuler = 4;
-constexpr int kSecondaryPanel = 5;
-constexpr int kBaseOptions = 6;
+constexpr int kLiveLspCompletion = 2;
+constexpr int kDiagnosticSuffixes = 3;
+constexpr int kStickyScroll = 4;
+constexpr int kIndentGuides = 5;
+constexpr int kOverviewRuler = 6;
+constexpr int kSecondaryPanel = 7;
+constexpr int kMonitor = 8;
+constexpr int kBaseOptions = 9;
 
 #ifdef TGDB_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -233,14 +236,20 @@ const std::vector<SettingsOption>& global_settings_options() {
        "Interfaz con fondos claros (se guarda en .tgdb/config.json del workspace)"},
       {"clangd / LSP activo",
        "Outline, completado, diagnósticos y resaltado semántico vía clangd"},
+      {"Autocompletado clang al escribir",
+       "Sugerencias de clangd mientras escribes (asíncrono; Ctrl+Espacio siempre disponible)"},
       {"Sufijos de avisos en el código",
        "Muestra mensajes cortos de clangd al final de cada línea"},
       {"Sticky scroll en el editor",
        "Muestra encabezados de ámbito fijos al hacer scroll en el código"},
+      {"Guías de indentación en el editor",
+       "Líneas verticales sutiles en el sangrado para alinear bloques de código"},
       {"Franja de marcas junto al scroll",
        "Muestra errores, avisos y cambios git en una columna junto al scrollbar"},
       {"Panel secundario (outline / búsqueda)",
        "Muestra la tercera columna con outline y búsqueda en el workspace"},
+      {"Monitor interno (log circular)",
+       "Registra llamadas internas en ~/.config/tgdb/monitor.log (~1 s). Impacto en rendimiento"},
 #ifdef TGDB_HAS_BUNDLED_CLANGD
       {"Forzar clangd embebido",
        "Usa solo el clangd del binario (ignora clangd en PATH salvo CLANGD_PATH)"},
@@ -266,14 +275,20 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_theme == theme::ThemeMode::kLight;
     case kLsp:
       return state->draft_lsp_enabled;
+    case kLiveLspCompletion:
+      return state->draft_live_lsp_completion_enabled;
     case kDiagnosticSuffixes:
       return state->draft_show_diagnostic_suffixes;
     case kStickyScroll:
       return state->draft_sticky_scroll_enabled;
+    case kIndentGuides:
+      return state->draft_indent_guides_enabled;
     case kOverviewRuler:
       return state->draft_overview_ruler_enabled;
     case kSecondaryPanel:
       return state->draft_secondary_panel_enabled;
+    case kMonitor:
+      return state->draft_monitor_enabled;
 #ifdef TGDB_HAS_BUNDLED_CLANGD
     case kForceBundledClangd:
       return state->draft_force_bundled_clangd;
@@ -302,17 +317,26 @@ void toggle_option(SettingsModalState* state, int index) {
     case kLsp:
       state->draft_lsp_enabled = !state->draft_lsp_enabled;
       break;
+    case kLiveLspCompletion:
+      state->draft_live_lsp_completion_enabled = !state->draft_live_lsp_completion_enabled;
+      break;
     case kDiagnosticSuffixes:
       state->draft_show_diagnostic_suffixes = !state->draft_show_diagnostic_suffixes;
       break;
     case kStickyScroll:
       state->draft_sticky_scroll_enabled = !state->draft_sticky_scroll_enabled;
       break;
+    case kIndentGuides:
+      state->draft_indent_guides_enabled = !state->draft_indent_guides_enabled;
+      break;
     case kOverviewRuler:
       state->draft_overview_ruler_enabled = !state->draft_overview_ruler_enabled;
       break;
     case kSecondaryPanel:
       state->draft_secondary_panel_enabled = !state->draft_secondary_panel_enabled;
+      break;
+    case kMonitor:
+      state->draft_monitor_enabled = !state->draft_monitor_enabled;
       break;
 #ifdef TGDB_HAS_BUNDLED_CLANGD
     case kForceBundledClangd:
@@ -385,6 +409,15 @@ void toggle_format_option(SettingsModalState* state, int index) {
       break;
     default:
       break;
+  }
+  normalize_clang_format_config(&state->draft_clang_format);
+  editor_indent::apply(state->draft_clang_format);
+  if (state->has_workspace && !state->workspace_root.empty()) {
+    save_clang_format(state->workspace_root, state->draft_clang_format);
+    state->clang_format_file_exists = true;
+    if (state->clang_format_changed_callback) {
+      state->clang_format_changed_callback(state->draft_clang_format);
+    }
   }
 }
 
@@ -1591,12 +1624,15 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->compile_commands_selected = 0;
   state->mapping_selected = 0;
   state->draft_lsp_enabled = settings.lsp_enabled;
+  state->draft_live_lsp_completion_enabled = settings.live_lsp_completion_enabled;
   state->draft_show_diagnostic_suffixes = settings.show_diagnostic_suffixes;
   state->draft_sticky_scroll_enabled = settings.sticky_scroll_enabled;
+  state->draft_indent_guides_enabled = settings.indent_guides_enabled;
   state->draft_overview_ruler_enabled = settings.overview_ruler_enabled;
   state->draft_secondary_panel_enabled = settings.secondary_panel_enabled;
   state->draft_force_bundled_clangd = settings.force_bundled_clangd;
   state->draft_force_bundled_gdb = settings.force_bundled_gdb;
+  state->draft_monitor_enabled = settings.monitor_enabled;
   state->draft_theme = workspace_config.theme;
   state->workspace_root = workspace_root;
   state->has_workspace = !workspace_root.empty();
@@ -1638,12 +1674,15 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
     return;
   }
   settings->lsp_enabled = state->draft_lsp_enabled;
+  settings->live_lsp_completion_enabled = state->draft_live_lsp_completion_enabled;
   settings->show_diagnostic_suffixes = state->draft_show_diagnostic_suffixes;
   settings->sticky_scroll_enabled = state->draft_sticky_scroll_enabled;
+  settings->indent_guides_enabled = state->draft_indent_guides_enabled;
   settings->overview_ruler_enabled = state->draft_overview_ruler_enabled;
   settings->secondary_panel_enabled = state->draft_secondary_panel_enabled;
   settings->force_bundled_clangd = state->draft_force_bundled_clangd;
   settings->force_bundled_gdb = state->draft_force_bundled_gdb;
+  settings->monitor_enabled = state->draft_monitor_enabled;
   settings->save();
   if (on_apply) {
     on_apply(*settings);
@@ -1683,6 +1722,9 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
                                  AppSettings* settings, SettingsApplyCallback on_apply,
                                  WorkspaceSettingsApplyCallback on_workspace_apply,
                                  ClangFormatApplyCallback on_clang_format_apply) {
+  if (state != nullptr) {
+    state->clang_format_changed_callback = on_clang_format_apply;
+  }
   return Renderer(
       CatchEvent(main, [state, settings, on_apply, on_workspace_apply,
                         on_clang_format_apply](Event event) {

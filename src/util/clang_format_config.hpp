@@ -71,9 +71,15 @@ struct ClangFormatConfig {
   bool uses_tab_char() const;
 };
 
+int default_indent_width_for_style(ClangBasedOnStyle style);
+void normalize_clang_format_config(ClangFormatConfig* config);
+
 namespace editor_indent {
 
+// Espacios por nivel de indentación (Tab con espacios, smart-indent).
 int width();
+// Ancho visual de un carácter tabulador en el editor.
+int tab_display_width();
 bool use_tab_char();
 void apply(const ClangFormatConfig& config);
 
@@ -82,8 +88,14 @@ void apply(const ClangFormatConfig& config);
 ClangFormatConfig default_clang_format_config();
 
 std::string clang_format_path(const std::string& workspace_root);
+std::string clang_format_root_for_file(const std::string& absolute_path);
+ClangFormatConfig load_clang_format_for_file(const std::string& absolute_path,
+                                            const std::string& workspace_root);
+ClangFormatConfig load_clang_format_from_disk(const std::string& workspace_root);
 ClangFormatConfig load_clang_format(const std::string& workspace_root);
 bool save_clang_format(const std::string& workspace_root, const ClangFormatConfig& config);
+bool sync_clang_format_file_for_formatting(const std::string& workspace_root,
+                                           const ClangFormatConfig* active_config = nullptr);
 
 const char* clang_based_on_style_name(ClangBasedOnStyle style);
 const char* clang_use_tab_name(ClangUseTab value);

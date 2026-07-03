@@ -30,6 +30,10 @@ class LspSymbolProvider : public ISymbolProvider {
                                               const std::string& query) override;
   bool supports_semantic_completion() const override;
   std::vector<CompletionItem> completions_at(const CompletionParams& params) override;
+  bool completion_uses_async_fetch() const override;
+  void request_completion(const CompletionParams& params, const std::string& cache_key) override;
+  std::optional<std::vector<CompletionItem>> poll_completion(
+      const std::string& cache_key) override;
   bool supports_navigation() const override;
   SourceLocation goto_definition(const NavigationParams& params) override;
   SourceLocation goto_declaration(const NavigationParams& params) override;
@@ -81,13 +85,15 @@ class LspSymbolProvider : public ISymbolProvider {
   void set_workspace_clangd_options(bool use_gcc_query_driver, bool background_index);
 
  private:
-  enum class AsyncJobKind { DocumentSymbols, SemanticTokens, Hover };
+  enum class AsyncJobKind { DocumentSymbols, SemanticTokens, Hover, Completion };
 
   struct AsyncJob {
     AsyncJobKind kind;
     std::string path;
     std::string hover_key;
     HoverParams hover_params;
+    std::string completion_key;
+    CompletionParams completion_params;
   };
 
   struct AsyncResult {
@@ -137,7 +143,9 @@ class LspSymbolProvider : public ISymbolProvider {
   std::unordered_set<std::string> inflight_symbols_;
   std::unordered_set<std::string> inflight_semantic_;
   std::unordered_set<std::string> inflight_hover_;
+  std::unordered_set<std::string> inflight_completion_;
   std::unordered_map<std::string, HoverInfo> hover_cache_;
+  std::unordered_map<std::string, std::vector<CompletionItem>> completion_cache_;
   std::unordered_map<std::string, int64_t> pending_content_refresh_;
   std::unordered_map<std::string, int64_t> pending_did_change_;
   std::atomic<uint64_t> semantic_highlight_revision_{0};

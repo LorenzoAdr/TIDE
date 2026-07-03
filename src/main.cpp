@@ -7,12 +7,12 @@
 #include <string>
 #include <vector>
 
-#include "util/crash_handler.hpp"
 #include "util/core_analyzer_support.hpp"
+#include "util/crash_handler.hpp"
 
 namespace {
 
-bool config_is_complete(const tgdb::AppConfig& config) {
+bool config_is_complete(const tgdb::AppConfig &config) {
   if (config.program.empty()) {
     return false;
   }
@@ -22,27 +22,28 @@ bool config_is_complete(const tgdb::AppConfig& config) {
   if (config.mode == tgdb::SessionMode::kCore) {
     return !config.core_path.empty();
   }
-  return true;
+  return true;   
 }
 
-bool path_is_existing_directory(const std::string& path) {
+bool path_is_existing_directory(const std::string &path) {
   std::error_code ec;
   return std::filesystem::is_directory(std::filesystem::status(path, ec));
 }
 
-bool path_is_existing_regular_file(const std::string& path) {
+bool path_is_existing_regular_file(const std::string &path) {
   std::error_code ec;
   return std::filesystem::is_regular_file(std::filesystem::status(path, ec));
 }
 
-bool path_looks_like_source_or_text(const std::filesystem::path& path) {
-  static const char* kExtensions[] = {
-      ".cpp", ".cxx", ".cc",  ".c",   ".h",   ".hpp", ".hxx", ".hh",  ".inl",
-      ".md",  ".txt", ".json", ".yaml", ".yml", ".xml", ".cmake", ".toml",
-      ".rs",  ".py",  ".sh",   ".bash", ".s",   ".asm", ".vert", ".frag", ".glsl",
+bool path_looks_like_source_or_text(const std::filesystem::path &path) {
+  static const char *kExtensions[] = {
+      ".cpp", ".cxx",   ".cc",   ".c",    ".h",    ".hpp",  ".hxx",
+      ".hh",  ".inl",   ".md",   ".txt",  ".json", ".yaml", ".yml",
+      ".xml", ".cmake", ".toml", ".rs",   ".py",   ".sh",   ".bash",
+      ".s",   ".asm",   ".vert", ".frag", ".glsl",
   };
   const std::string ext = path.extension().string();
-  for (const char* candidate : kExtensions) {
+  for (const char *candidate : kExtensions) {
     if (ext == candidate) {
       return true;
     }
@@ -50,7 +51,7 @@ bool path_looks_like_source_or_text(const std::filesystem::path& path) {
   return false;
 }
 
-bool path_is_executable_file(const std::string& path) {
+bool path_is_executable_file(const std::string &path) {
   std::error_code ec;
   const auto perms = std::filesystem::status(path, ec).permissions();
   if (ec) {
@@ -62,7 +63,7 @@ bool path_is_executable_file(const std::string& path) {
   return (perms & executable) != perms::none;
 }
 
-bool path_is_ide_open_file(const std::string& path) {
+bool path_is_ide_open_file(const std::string &path) {
   if (!path_is_existing_regular_file(path)) {
     return false;
   }
@@ -73,32 +74,35 @@ bool path_is_ide_open_file(const std::string& path) {
 }
 
 void print_usage() {
-  std::cerr << "Uso: tgdb [opciones] [<dir>|<archivo>|<programa>]\n"
-            << "Opciones:\n"
-            << "  --cwd <dir>         Directorio raíz del workspace\n"
-            << "  --args <a>...       Argumentos del programa (después de --args)\n"
-            << "  --attach <pid>      Adjuntar a un proceso en ejecución\n"
-            << "  --target <host:puerto>  Adjuntar a gdbserver remoto\n"
-            << "  --core <archivo>    Cargar core dump post-mortem\n"
-            << "  --core-analyzer     Usar pestaña Core Analyzer (con --core)\n"
-            << "  -h, --help          Muestra esta ayuda\n"
-            << "\n"
-            << "Sin argumentos abre la pantalla de inicio TUIDE (modo IDE).\n"
-            << "Un directorio abre el workspace; un archivo abre su carpeta con el archivo cargado.\n"
-            << "F1 abrir archivo externo; Alt+F1/Shift+F1 atajos; F2 depuración; F3 directorio de trabajo.\n"
-            << "\n"
-            << "Ejemplos:\n"
-            << "  tgdb\n"
-            << "  tgdb .\n"
-            << "  tgdb src/main.cpp\n"
-            << "  tgdb --cwd ./proyecto\n"
-            << "  tgdb ./build/hello\n"
-            << "  tgdb --attach 12345 ./build/hello\n";
+  std::cerr
+      << "Uso: tgdb [opciones] [<dir>|<archivo>|<programa>]\n"
+      << "Opciones:\n"
+      << "  --cwd <dir>         Directorio raiz del workspace\n"
+      << "  --args <a>...       Argumentos del programa (despues de --args)\n"
+      << "  --attach <pid>      Adjuntar a un proceso en ejecucion\n"
+      << "  --target <host:puerto>  Adjuntar a gdbserver remoto\n"
+      << "  --core <archivo>    Cargar core dump post-mortem\n"
+      << "  --core-analyzer     Usar pestana Core Analyzer (con --core)\n"
+      << "  -h, --help          Muestra esta ayuda\n"
+      << "\n"
+      << "Sin argumentos abre la pantalla de inicio TUIDE (modo IDE).\n"
+      << "Un directorio abre el workspace; un archivo abre su carpeta con el "
+         "archivo cargado.\n"
+      << "F1 abrir archivo externo; Alt+F1/Shift+F1 atajos; F2 depuracion; F3"
+         " directorio de trabajo.\n"
+      << "\n"
+      << "Ejemplos:\n"
+      << "  tgdb\n"
+      << "  tgdb .\n"
+      << "  tgdb src/main.cpp\n"
+      << "  tgdb --cwd ./proyecto\n"
+      << "  tgdb ./build/hello\n"
+      << "  tgdb --attach 12345 ./build/hello\n";
 }
 
-}  // namespace
+} // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
 #if !defined(_WIN32)
   setenv("COLORTERM", "truecolor", 1);
   if (std::getenv("TERM") == nullptr) {
@@ -214,7 +218,8 @@ int main(int argc, char** argv) {
   }
   if (config.core_analysis == tgdb::CoreAnalysisMode::kCoreAnalyzer &&
       !tgdb::core_analyzer_supported()) {
-    std::cerr << "Error: esta build no incluye Core Analyzer (omitir --core-analyzer)\n";
+    std::cerr << "Error: esta build no incluye Core Analyzer (omitir "
+                 "--core-analyzer)\n";
     return 1;
   }
   if (!config.initial_file.empty()) {
@@ -250,7 +255,7 @@ int main(int argc, char** argv) {
   try {
     tgdb::Application app(std::move(config));
     return app.run();
-  } catch (const std::exception& e) {
+  } catch (const std::exception &e) {
     std::cerr << "Error fatal: " << e.what() << '\n';
     tgdb::print_current_backtrace(e.what());
     return 1;

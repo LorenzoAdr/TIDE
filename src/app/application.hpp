@@ -110,6 +110,7 @@ class Application {
   SettingsModalState settings_modal_state_;
   AppSettings app_settings_;
   WorkspaceConfig workspace_config_;
+  ClangFormatConfig clang_format_config_;
   ShellLaunchConfig cached_shell_launch_config_;
   ShellSession shell_session_;
   ConnectionWizardState connection_wizard_state_;

@@ -69,7 +69,13 @@ GitFileDiff parse_unified_diff(const std::string& path, const std::string& diff_
     if (!in_hunk || line.empty()) {
       continue;
     }
+    if (line.rfind("\\ No newline at end of file", 0) == 0) {
+      continue;
+    }
     const char prefix = line[0];
+    if (prefix != ' ' && prefix != '-' && prefix != '+') {
+      continue;
+    }
     const std::string content = line.size() > 1 ? line.substr(1) : std::string{};
     if (prefix == ' ') {
       pending_removed.clear();
@@ -103,9 +109,7 @@ LineDiffResult compute_line_diff(const std::vector<std::string>& head,
       continue;
     }
     if (j + 1 < head.size() && current[i] == head[j + 1]) {
-      const int line = static_cast<int>(i);
-      result.changed_new_lines.insert(line);
-      ++i;
+      ++j;
       continue;
     }
     if (i + 1 < current.size() && current[i + 1] == head[j]) {

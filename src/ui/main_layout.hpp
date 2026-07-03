@@ -24,6 +24,7 @@
 #include "git/git_service.hpp"
 #include "util/system_stats.hpp"
 #include "ui/source_panel.hpp"
+#include "util/clang_format_config.hpp"
 #include "util/path_normalize.hpp"
 
 namespace tgdb {
@@ -91,6 +92,7 @@ struct MainLayoutState {
   bool request_ui_tick = false;
   std::atomic<bool> ui_heartbeat{false};
   AppSettings* app_settings = nullptr;
+  ClangFormatConfig* workspace_clang_format = nullptr;
   std::function<void()> apply_app_settings_callback;
   ConsolePanelTabs console_tabs;
   bool core_analyzer_search_focus = false;
@@ -137,6 +139,7 @@ struct MainLayoutState {
   std::function<bool(ftxui::Event&)> welcome_key_handler;
   std::function<bool(ftxui::Event&)> welcome_mouse_handler;
   bool editor_completion_open = false;
+  bool editor_ctrl_modifier_held = false;
   std::function<void()> terminal_tick_callback;
   std::function<void()> terminal_follow_input_callback;
   std::function<void()> terminal_wake_callback;

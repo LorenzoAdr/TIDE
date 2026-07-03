@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "util/shell_utils.hpp"
+#include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
 
 #if defined(__unix__) || defined(__linux__)
@@ -365,6 +366,7 @@ void ShellSession::reader_loop() {
     }
     const ssize_t bytes = read(master_fd_, buffer.data(), buffer.size());
     if (bytes > 0) {
+      TGDB_MON("shell", "pty_read bytes=" + std::to_string(bytes));
       output_chunks_.push(
           std::string(buffer.data(), static_cast<std::size_t>(bytes)));
       output_pending_.store(true, std::memory_order_release);

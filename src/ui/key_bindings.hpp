@@ -61,6 +61,7 @@ bool event_is_ctrl_backspace(const ftxui::Event& event);
 bool event_is_ctrl_delete(const ftxui::Event& event);
 bool event_is_ctrl_space(const ftxui::Event& event);
 bool event_is_completion(const ftxui::Event& event);
+bool event_is_completion_trigger(const ftxui::Event& event, bool ctrl_modifier_held);
 bool event_is_go_to_definition(const ftxui::Event& event);
 bool event_is_go_to_declaration(const ftxui::Event& event);
 

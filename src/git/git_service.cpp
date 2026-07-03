@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "git/git_command.hpp"
+#include "util/monitor_log.hpp"
 #include "util/path_normalize.hpp"
 
 namespace fs = std::filesystem;
@@ -61,6 +62,7 @@ void GitService::worker_main() {
       queue_.pop_front();
     }
     if (task) {
+      TGDB_MON_SCOPE("git", "worker_task");
       task();
     }
     pending_tasks_.fetch_sub(1);
@@ -206,8 +208,12 @@ void GitService::invalidate(const std::string& path) {
       file_diff_texts_.clear();
     } else {
       rel = repo_relative_path_unlocked(path);
-      file_diffs_.erase(rel);
       file_diff_texts_.erase(rel);
+      const auto it = file_diffs_.find(rel);
+      if (it != file_diffs_.end()) {
+        it->second.line_changes.clear();
+        it->second.previous_content_by_line.clear();
+      }
     }
   }
   if (root.empty()) {
@@ -271,6 +277,7 @@ void GitService::refresh_file_diff(const std::string& path, bool force) {
   }
   enqueue([this, root, rel]() {
     load_file_diff_text(root, rel);
+    load_file_head(root, rel);
     {
       std::lock_guard<std::mutex> lock(mutex_);
       inflight_diffs_.erase(rel);
@@ -528,6 +535,7 @@ void GitService::pull(CompletionCallback on_done) {
 }
 
 void GitService::tick() {
+  TGDB_MON_SCOPE("git", "tick");
   std::deque<std::function<void()>> completions;
   {
     std::lock_guard<std::mutex> lock(completion_mutex_);

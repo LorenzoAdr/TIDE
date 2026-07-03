@@ -4,8 +4,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
-#include <iomanip>
 #include <memory>
 #include <sstream>
 #include <thread>
@@ -21,6 +19,7 @@
 #include "ui/connection_wizard.hpp"
 #include "ui/core_analyzer_panel.hpp"
 #include "util/core_analyzer_support.hpp"
+#include "util/monitor_log.hpp"
 #include "ui/source_panel.hpp"
 #include "ui/console_panel.hpp"
 #include "ui/file_picker.hpp"
@@ -63,64 +62,6 @@ bool event_is_alt_up(const Event& event) {
 bool event_is_alt_down(const Event& event) {
   return event == Event::Special("\x1B[1;3B");
 }
-
-// #region agent log
-std::string debug_bytes_hex(const std::string& bytes) {
-  std::ostringstream oss;
-  for (unsigned char byte : bytes) {
-    if (oss.tellp() > 0) {
-      oss << ' ';
-    }
-    oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
-  }
-  return oss.str();
-}
-
-bool debug_is_space_event(const Event& event) {
-  return event.is_character() && event.character() == " ";
-}
-
-bool debug_ctrl_space_candidate(const Event& event) {
-  if (event.is_mouse() || event == Event::Custom) {
-    return false;
-  }
-  if (event_is_ctrl_space(event) || event_is_completion(event) || debug_is_space_event(event)) {
-    return true;
-  }
-  const std::string& input = event.input();
-  if (input.find('\x00') != std::string::npos) {
-    return true;
-  }
-  if (input.find("\x1B[") != std::string::npos &&
-      (input.find("32") != std::string::npos || input.find(";5") != std::string::npos)) {
-    return true;
-  }
-  if (!input.empty()) {
-    const unsigned char first = static_cast<unsigned char>(input[0]);
-    if (first < 32 && first != '\t' && first != '\n' && first != '\r') {
-      return true;
-    }
-  }
-  if (event_is_ctrl_key_press(event) || event_is_ctrl_key_release(event)) {
-    return true;
-  }
-  return false;
-}
-
-void debug_agent_log(const char* hypothesis_id, const char* location, const char* message,
-                     const std::string& data_json) {
-  std::ofstream out("/home/lorenzo/workspace/tgdb/.cursor/debug-4e0960.log", std::ios::app);
-  if (!out) {
-    return;
-  }
-  const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-                             std::chrono::system_clock::now().time_since_epoch())
-                             .count();
-  out << "{\"sessionId\":\"4e0960\",\"hypothesisId\":\"" << hypothesis_id
-      << "\",\"location\":\"" << location << "\",\"message\":\"" << message << "\",\"data\":"
-      << data_json << ",\"timestamp\":" << timestamp << "}\n";
-}
-// #endregion
 
 void force_immediate_repaint(MainLayoutState* layout, ScreenInteractive* screen) {
   if (layout != nullptr) {
@@ -245,6 +186,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
   symbol_provider_ = std::make_shared<LspSymbolProvider>();
   app_settings_ = AppSettings::load();
   layout_state_.app_settings = &app_settings_;
+  layout_state_.workspace_clang_format = &clang_format_config_;
   layout_state_.apply_app_settings_callback = [this] { apply_app_settings(); };
   if (has_bundled_clangd()) {
     set_runtime_force_bundled_clangd(app_settings_.force_bundled_clangd);
@@ -253,6 +195,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
     set_runtime_force_bundled_gdb(app_settings_.force_bundled_gdb);
   }
   symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
+  monitor_log::set_enabled(app_settings_.monitor_enabled);
   debug_available_ = gdb_supports_dap();
   workspace_.open_file_confirm = &open_file_confirm_state_;
   secondary_workspace_.open_file_confirm = &open_file_confirm_state_;
@@ -494,7 +437,15 @@ void Application::set_workspace(const std::string& workspace_root) {
   workspace_config_ = WorkspaceConfig::load(absolute);
   theme::set_mode(workspace_config_.theme);
   theme::set_ui_overrides(workspace_config_.ui_colors);
-  (void)load_clang_format(absolute);
+  const ClangFormatConfig format_config = load_clang_format(absolute);
+  clang_format_config_ = format_config;
+  {
+    const std::string format_path = clang_format_path(absolute);
+    std::error_code format_ec;
+    if (!format_path.empty() && !fs::is_regular_file(format_path, format_ec)) {
+      save_clang_format(absolute, format_config);
+    }
+  }
   invalidate_docker_mount_cache();
   rebuild_shell_launch_config();
   apply_clangd_workspace_config(absolute, workspace_config_);
@@ -975,6 +926,7 @@ void Application::apply_app_settings() {
   if (symbol_provider_) {
     symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
   }
+  monitor_log::set_enabled(app_settings_.monitor_enabled);
   sync_symbol_workspace_indexer();
   if (!app_settings_.secondary_panel_enabled &&
       focus_state_.region == FocusRegion::RightPanel) {
@@ -1176,8 +1128,11 @@ int Application::run() {
   SettingsApplyCallback on_settings_apply = [this](const AppSettings&) { apply_app_settings(); };
   WorkspaceSettingsApplyCallback on_workspace_apply =
       [this](const WorkspaceConfig& config) { apply_workspace_settings(config); };
-  ClangFormatApplyCallback on_clang_format_apply = [this](const ClangFormatConfig&) {
+  ClangFormatApplyCallback on_clang_format_apply = [this](const ClangFormatConfig& config) {
+    clang_format_config_ = config;
+    editor_indent::apply(config);
     workspace_.buffer.view_token++;
+    secondary_workspace_.buffer.view_token++;
     layout_state_.request_ui_tick = true;
   };
   auto with_settings = MakeSettingsModalOverlay(with_shortcuts, &settings_modal_state_,
@@ -1217,37 +1172,59 @@ int Application::run() {
   auto root = CatchEvent(with_context_menu, [this, &screen, on_command](const Event& event) {
     try {
         if (event == Event::Custom) {
+        monitor_log::heartbeat();
         if (!any_modal_open()) {
+          TGDB_MON_SCOPE("ui", "tick.apply_pending_connection");
           apply_pending_connection();
         }
-        process_index_changes();
-        process_build_environment_updates();
-        drain_events();
+        {
+          TGDB_MON_SCOPE("ui", "tick.process_index_changes");
+          process_index_changes();
+        }
+        {
+          TGDB_MON_SCOPE("ui", "tick.process_build_environment_updates");
+          process_build_environment_updates();
+        }
+        {
+          TGDB_MON_SCOPE("ui", "tick.drain_events");
+          drain_events();
+        }
         cursor_blink::tick();
         layout_state_.clickable.tick();
         if (layout_state_.console_visible && layout_state_.terminal_tick_callback) {
+          TGDB_MON_SCOPE("ui", "tick.terminal");
           layout_state_.terminal_tick_callback();
         }
-        if (symbol_provider_ && symbol_provider_->drain_async_results()) {
-          layout_state_.request_ui_tick = true;
+        if (symbol_provider_) {
+          TGDB_MON_SCOPE("ui", "tick.drain_async_results");
+          if (symbol_provider_->drain_async_results()) {
+            layout_state_.request_ui_tick = true;
+          }
         }
         if (layout_state_.primary_editor.tick_callback && !layout_state_.welcome_visible) {
+          TGDB_MON_SCOPE("ui", "tick.primary_editor");
           layout_state_.primary_editor.tick_callback();
         }
         if (layout_state_.secondary_editor.tick_callback && !layout_state_.welcome_visible) {
+          TGDB_MON_SCOPE("ui", "tick.secondary_editor");
           layout_state_.secondary_editor.tick_callback();
         }
-        git_service_.tick();
+        {
+          TGDB_MON_SCOPE("ui", "tick.git");
+          git_service_.tick();
+        }
         if (git_tab_active(&layout_state_)) {
           GitPanelEnsureSelectedDiff(&git_service_, &git_panel_state_);
         }
         if (layout_state_.outline_tick_callback) {
+          TGDB_MON_SCOPE("ui", "tick.outline");
           layout_state_.outline_tick_callback();
         }
         const bool sample_perf =
             layout_state_.console_visible &&
             layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kPerformance;
         if (layout_state_.ui_heartbeat.exchange(false, std::memory_order_acquire)) {
+          TGDB_MON_SCOPE("ui", "tick.performance_sampler");
           layout_state_.performance_sampler.on_frame(sample_perf);
         }
         bool swallow_call_hierarchy_custom = false;
@@ -1267,22 +1244,11 @@ int Application::run() {
         return false;
       }
 
-      // #region agent log
-      if (debug_ctrl_space_candidate(event)) {
-        const std::string& input = event.input();
-        std::ostringstream data;
-        data << "{\"input_hex\":\"" << debug_bytes_hex(input) << "\",\"input_len\":" << input.size()
-             << ",\"is_ctrl_space\":" << (event_is_ctrl_space(event) ? "true" : "false")
-             << ",\"is_completion\":" << (event_is_completion(event) ? "true" : "false")
-             << ",\"is_space\":" << (debug_is_space_event(event) ? "true" : "false")
-             << ",\"focus_region\":\"" << focus_state_.region_label() << "\""
-             << ",\"any_modal\":" << (any_modal_open() ? "true" : "false")
-             << ",\"welcome\":" << (layout_state_.welcome_visible ? "true" : "false")
-             << ",\"editor_focus\":"
-             << (is_editor_focus_region(focus_state_.region) ? "true" : "false") << "}";
-        debug_agent_log("A", "application.cpp:root", "ctrl_space_candidate", data.str());
+      if (!event.is_character() && !event.is_mouse()) {
+        std::ostringstream key_msg;
+        key_msg << "key event=" << event.input() << " focus=" << focus_state_.region_label();
+        TGDB_MON("ui", key_msg.str());
       }
-      // #endregion
 
       if (event_is_f1(event)) {
         if (external_file_wizard_state_.open) {
@@ -1538,16 +1504,9 @@ int Application::run() {
           !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
           layout_state_.text_input_focus != TextInputFocus::Console &&
           active_editor_handlers.key_handler) {
-        // #region agent log
-        if (event_is_completion(event) || event_is_ctrl_space(event)) {
-          std::ostringstream data;
-          data << "{\"dispatching_to_editor\":true}";
-          debug_agent_log("C", "application.cpp:editor_dispatch", "before_key_handler",
-                          data.str());
-        }
-        // #endregion
         if (active_editor_handlers.key_handler(event)) {
-          screen.Post(Event::Custom);
+          layout_state_.request_ui_tick = true;
+          screen.PostEvent(Event::Custom);
           return true;
         }
       }
@@ -1569,7 +1528,18 @@ int Application::run() {
           if (layout_state_.terminal_follow_input_callback) {
             layout_state_.terminal_follow_input_callback();
           }
-          screen.Post(Event::Custom);
+          force_immediate_repaint(&layout_state_, &screen);
+          return true;
+        }
+        if (is_editor_focus_region(focus_state_.region) && app_mode_ == AppMode::kNormal &&
+            layout_state_.text_input_focus != TextInputFocus::Console &&
+            !is_search_input_focus(layout_state_.text_input_focus) &&
+            !is_watch_input_focus(layout_state_.text_input_focus) &&
+            !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
+            active_editor_handlers.key_handler &&
+            active_editor_handlers.key_handler(event)) {
+          layout_state_.request_ui_tick = true;
+          screen.PostEvent(Event::Custom);
           return true;
         }
         return false;

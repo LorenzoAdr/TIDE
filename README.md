@@ -7,7 +7,7 @@
    ╚═╝    ╚═════╝ ╚═╝╚═════╝ ╚══════╝
 ```
 
-# tgdb
+# tgdb 
 
 Terminal IDE for C++ with an integrated Visual Studio–style debugger. Built with [FTXUI](https://github.com/ArthurSonzogni/FTXUI), connected to GDB through the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) (`gdb -i=dap`).
 

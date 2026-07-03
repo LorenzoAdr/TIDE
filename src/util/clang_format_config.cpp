@@ -269,6 +269,34 @@ void write_line(std::ostream& out, const std::string& key, bool value) {
 
 }  // namespace
 
+int default_indent_width_for_style(ClangBasedOnStyle style) {
+  switch (style) {
+    case ClangBasedOnStyle::kChromium:
+    case ClangBasedOnStyle::kWebKit:
+    case ClangBasedOnStyle::kMicrosoft:
+      return 4;
+    case ClangBasedOnStyle::kLLVM:
+    case ClangBasedOnStyle::kGoogle:
+    case ClangBasedOnStyle::kMozilla:
+    case ClangBasedOnStyle::kGNU:
+    case ClangBasedOnStyle::kCustom:
+      return 2;
+  }
+  return 2;
+}
+
+void normalize_clang_format_config(ClangFormatConfig* config) {
+  if (config == nullptr) {
+    return;
+  }
+  config->indent_width = std::max(1, config->indent_width);
+  if (!config->uses_tab_char() || config->tab_width <= 0) {
+    config->tab_width = config->indent_width;
+  } else {
+    config->tab_width = std::max(1, config->tab_width);
+  }
+}
+
 int ClangFormatConfig::effective_tab_width() const {
   return uses_tab_char() ? std::max(1, tab_width) : std::max(1, indent_width);
 }
@@ -281,23 +309,32 @@ namespace editor_indent {
 
 namespace {
 
-int g_width = 4;
+int g_indent_width = 4;
+int g_tab_display_width = 4;
 bool g_use_tab = false;
 
 }  // namespace
 
-int width() { return g_width; }
+int width() { return g_indent_width; }
+
+int tab_display_width() { return g_tab_display_width; }
 
 bool use_tab_char() { return g_use_tab; }
 
 void apply(const ClangFormatConfig& config) {
-  g_width = config.effective_tab_width();
+  g_indent_width = std::max(1, config.indent_width);
+  g_tab_display_width = std::max(1, config.tab_width);
   g_use_tab = config.uses_tab_char();
 }
 
 }  // namespace editor_indent
 
-ClangFormatConfig default_clang_format_config() { return ClangFormatConfig{}; }
+ClangFormatConfig default_clang_format_config() {
+  ClangFormatConfig config;
+  config.indent_width = default_indent_width_for_style(config.based_on_style);
+  config.tab_width = config.indent_width;
+  return config;
+}
 
 std::string clang_format_path(const std::string& workspace_root) {
   if (workspace_root.empty()) {
@@ -306,19 +343,53 @@ std::string clang_format_path(const std::string& workspace_root) {
   return (fs::path(workspace_root) / ".clang-format").string();
 }
 
-ClangFormatConfig load_clang_format(const std::string& workspace_root) {
+std::string clang_format_root_for_file(const std::string& absolute_path) {
+  if (absolute_path.empty()) {
+    return {};
+  }
+  fs::path dir = fs::path(absolute_path).parent_path();
+  std::error_code ec;
+  while (!dir.empty()) {
+    if (fs::is_regular_file(dir / ".clang-format", ec)) {
+      return dir.string();
+    }
+    const fs::path parent = dir.parent_path();
+    if (parent == dir) {
+      break;
+    }
+    dir = parent;
+  }
+  return {};
+}
+
+ClangFormatConfig load_clang_format_for_file(const std::string& absolute_path,
+                                             const std::string& workspace_root) {
+  const std::string from_file = clang_format_root_for_file(absolute_path);
+  if (!from_file.empty()) {
+    return load_clang_format_from_disk(from_file);
+  }
+  if (!workspace_root.empty()) {
+    return load_clang_format_from_disk(workspace_root);
+  }
+  return default_clang_format_config();
+}
+
+ClangFormatConfig load_clang_format_from_disk(const std::string& workspace_root) {
   ClangFormatConfig config = default_clang_format_config();
   const std::string path = clang_format_path(workspace_root);
   if (path.empty()) {
+    normalize_clang_format_config(&config);
     return config;
   }
 
   std::ifstream input(path);
   if (!input.is_open()) {
+    normalize_clang_format_config(&config);
     return config;
   }
 
   std::string line;
+  bool indent_width_explicit = false;
   while (std::getline(input, line)) {
     const std::string trimmed = trim(line);
     if (trimmed.empty() || trimmed[0] == '#') {
@@ -337,17 +408,52 @@ ClangFormatConfig load_clang_format(const std::string& workspace_root) {
     const std::string key = trim(trimmed.substr(0, colon));
     const std::string value = trim(trimmed.substr(colon + 1));
     if (is_managed_key(key)) {
+      if (key == "IndentWidth") {
+        indent_width_explicit = true;
+      }
       apply_key_value(&config, key, value);
     } else {
       config.preserved_lines.push_back(line);
     }
   }
 
-  if (config.tab_width <= 0) {
-    config.tab_width = config.indent_width;
+  if (!indent_width_explicit) {
+    config.indent_width = default_indent_width_for_style(config.based_on_style);
   }
+  normalize_clang_format_config(&config);
+  return config;
+}
+
+ClangFormatConfig load_clang_format(const std::string& workspace_root) {
+  ClangFormatConfig config = load_clang_format_from_disk(workspace_root);
   editor_indent::apply(config);
   return config;
+}
+
+bool sync_clang_format_file_for_formatting(const std::string& workspace_root,
+                                           const ClangFormatConfig* active_config) {
+  if (workspace_root.empty()) {
+    return false;
+  }
+
+  ClangFormatConfig config =
+      active_config != nullptr ? *active_config : load_clang_format_from_disk(workspace_root);
+
+  if (active_config == nullptr) {
+    config.indent_width = std::max(1, editor_indent::width());
+    if (!editor_indent::use_tab_char()) {
+      config.use_tab = ClangUseTab::kNever;
+      config.tab_width = config.indent_width;
+    } else {
+      if (config.use_tab == ClangUseTab::kNever) {
+        config.use_tab = ClangUseTab::kForIndentation;
+      }
+      config.tab_width = std::max(1, editor_indent::tab_display_width());
+    }
+  }
+
+  normalize_clang_format_config(&config);
+  return save_clang_format(workspace_root, config);
 }
 
 bool save_clang_format(const std::string& workspace_root, const ClangFormatConfig& config) {
@@ -355,6 +461,9 @@ bool save_clang_format(const std::string& workspace_root, const ClangFormatConfi
   if (path.empty()) {
     return false;
   }
+
+  ClangFormatConfig normalized = config;
+  normalize_clang_format_config(&normalized);
 
   std::error_code ec;
   fs::create_directories(fs::path(path).parent_path(), ec);
@@ -364,30 +473,33 @@ bool save_clang_format(const std::string& workspace_root, const ClangFormatConfi
     return false;
   }
 
-  if (config.based_on_style != ClangBasedOnStyle::kCustom) {
-    write_line(output, "BasedOnStyle", clang_based_on_style_name(config.based_on_style));
+  if (normalized.based_on_style != ClangBasedOnStyle::kCustom) {
+    write_line(output, "BasedOnStyle", clang_based_on_style_name(normalized.based_on_style));
   }
-  write_line(output, "IndentWidth", config.indent_width);
-  write_line(output, "TabWidth", config.tab_width);
-  write_line(output, "UseTab", clang_use_tab_name(config.use_tab));
-  write_line(output, "ColumnLimit", config.column_limit);
-  write_line(output, "BreakBeforeBraces", clang_break_before_braces_name(config.break_before_braces));
-  write_line(output, "PointerAlignment", clang_pointer_alignment_name(config.pointer_alignment));
-  write_line(output, "ReferenceAlignment", clang_pointer_alignment_name(config.reference_alignment));
-  write_line(output, "SortIncludes", config.sort_includes);
-  write_line(output, "IncludeBlocks", clang_include_blocks_name(config.include_blocks));
-  write_line(output, "IndentCaseLabels", config.indent_case_labels);
+  write_line(output, "IndentWidth", normalized.indent_width);
+  write_line(output, "TabWidth", normalized.tab_width);
+  write_line(output, "UseTab", clang_use_tab_name(normalized.use_tab));
+  write_line(output, "ColumnLimit", normalized.column_limit);
+  write_line(output, "BreakBeforeBraces",
+             clang_break_before_braces_name(normalized.break_before_braces));
+  write_line(output, "PointerAlignment",
+             clang_pointer_alignment_name(normalized.pointer_alignment));
+  write_line(output, "ReferenceAlignment",
+             clang_pointer_alignment_name(normalized.reference_alignment));
+  write_line(output, "SortIncludes", normalized.sort_includes);
+  write_line(output, "IncludeBlocks", clang_include_blocks_name(normalized.include_blocks));
+  write_line(output, "IndentCaseLabels", normalized.indent_case_labels);
   write_line(output, "AllowShortFunctionsOnASingleLine",
-             clang_short_functions_name(config.allow_short_functions_on_a_single_line));
+             clang_short_functions_name(normalized.allow_short_functions_on_a_single_line));
 
-  if (!config.preserved_lines.empty()) {
+  if (!normalized.preserved_lines.empty()) {
     output << '\n';
-    for (const std::string& preserved : config.preserved_lines) {
+    for (const std::string& preserved : normalized.preserved_lines) {
       output << preserved << '\n';
     }
   }
 
-  editor_indent::apply(config);
+  editor_indent::apply(normalized);
   return true;
 }
 
@@ -567,6 +679,9 @@ void cycle_clang_tab_width(ClangFormatConfig* config) {
     default:
       config->tab_width = 2;
       break;
+  }
+  if (config->use_tab == ClangUseTab::kNever) {
+    config->indent_width = config->tab_width;
   }
 }
 

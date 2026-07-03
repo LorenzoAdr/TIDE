@@ -7,6 +7,7 @@
 
 #include "symbols/regex_symbol_provider.hpp"
 #include "indexer/index_rules.hpp"
+#include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
 
 namespace fs = std::filesystem;
@@ -158,6 +159,7 @@ bool SymbolWorkspaceIndexer::scanning() const {
 void SymbolWorkspaceIndexer::worker_main(std::string workspace_root,
                                          std::shared_ptr<ISymbolProvider> provider,
                                          WorkspaceIndexer* file_indexer) {
+  TGDB_MON_SCOPE("idx", "symbol_workspace_indexer.scan");
   RegexSymbolProvider regex_provider;
   const bool use_regex_bulk = provider != nullptr && !provider->indexes_workspace_bulk();
 

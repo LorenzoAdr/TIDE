@@ -3,12 +3,14 @@
 #include <algorithm>
 #include <set>
 
+#include "editor/indent_guides.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "indexer/index_rules.hpp"
 #include "ui/cursor_blink_ui.hpp"
 #include "ui/theme.hpp"
 #include "util/cpp_highlight.hpp"
 #include "util/build_file_highlight.hpp"
+#include "util/clang_format_config.hpp"
 #include "util/syntax_highlight.hpp"
 
 namespace tgdb {
@@ -262,15 +264,15 @@ Element render_simple_line(const std::string& line, int line_index, const Editor
                            bool editor_focused, const SemanticTokenDocument* semantic_tokens,
                            bool syntax_highlight, const Decorator& line_bg, bool show_caret,
                            int scroll_col, CppHighlightContext* highlight_ctx,
-                           BuildFileKind build_file_kind) {
+                           BuildFileKind build_file_kind, int guide_prefix_bytes = 0) {
   (void)line_bg;
-  (void)scroll_col;
+  const int effective_scroll_col = scroll_col + guide_prefix_bytes;
   if (!editor_focused || line_index != buffer.primary_line() || !show_caret ||
       buffer.primary().has_selection()) {
-    return render_line_content(line, line_index, semantic_tokens, syntax_highlight, -1, {}, 0,
-                               highlight_ctx, build_file_kind);
+    return render_line_content(line, line_index, semantic_tokens, syntax_highlight, -1, {},
+                               effective_scroll_col, highlight_ctx, build_file_kind);
   }
-  const int col = shift_col(buffer.primary_col(), scroll_col);
+  const int col = shift_col(buffer.primary_col(), effective_scroll_col);
   const Decorator cursor_cell = cursor_blink::cell_decorator();
   const int clamped = std::max(0, std::min(col, static_cast<int>(line.size())));
   const int draw_col = cursor_blink::effective_col(clamped);
@@ -278,7 +280,8 @@ Element render_simple_line(const std::string& line, int line_index, const Editor
     Elements parts;
     if (!line.empty()) {
       parts.push_back(render_line_content(line, line_index, semantic_tokens, syntax_highlight, -1,
-                                          {}, scroll_col, highlight_ctx, build_file_kind));
+                                          {}, effective_scroll_col, highlight_ctx,
+                                          build_file_kind));
     }
     if (cursor_blink::visible()) {
       parts.push_back(text(" ") | cursor_cell);
@@ -288,7 +291,7 @@ Element render_simple_line(const std::string& line, int line_index, const Editor
     return hbox(std::move(parts));
   }
   return render_line_content(line, line_index, semantic_tokens, syntax_highlight, draw_col,
-                             cursor_cell, scroll_col, highlight_ctx, build_file_kind);
+                             cursor_cell, effective_scroll_col, highlight_ctx, build_file_kind);
 }
 
 Element render_rich_line(const std::string& line, int line_index, const EditorBuffer& buffer,
@@ -299,7 +302,8 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
                          const std::vector<Diagnostic>* line_diagnostics,
                          const EditorSymbolPress* symbol_press, bool show_caret, int scroll_col,
                          int view_width, CppHighlightContext* highlight_ctx,
-                         BuildFileKind build_file_kind) {
+                         BuildFileKind build_file_kind, int guide_prefix_bytes = 0) {
+  const int effective_scroll_col = scroll_col + guide_prefix_bytes;
   std::vector<EditorDecoration> decorations;
   if (symbol_press != nullptr && symbol_press->active) {
     collect_press_decorations(line_index, *symbol_press, &decorations);
@@ -317,7 +321,7 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
     collect_bracket_decorations(line_index, *bracket, &decorations);
   }
   collect_line_decorations(line_index, buffer, editor_focused, show_caret, &decorations);
-  shift_decorations(&decorations, scroll_col, view_width);
+  shift_decorations(&decorations, effective_scroll_col, view_width);
 
   std::set<int> breakpoints;
   breakpoints.insert(0);
@@ -337,7 +341,7 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
                                             static_cast<std::size_t>(bp - prev));
     const EditorDecoration* chosen = decoration_at(decorations, prev);
     const bool use_build_highlight = build_file_kind != BuildFileKind::kNone;
-    const int col_offset = syntax_highlight ? prev + scroll_col : 0;
+    const int col_offset = syntax_highlight ? prev + effective_scroll_col : 0;
     const bool highlight_segment = syntax_highlight && !use_build_highlight;
     parts.push_back(apply_decoration(
         segment.empty() ? text(" ")
@@ -456,8 +460,18 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
                          const std::vector<Diagnostic>* suffix_diagnostics,
                          const EditorSymbolPress* symbol_press, bool show_caret, int scroll_col,
                          int view_width, CppHighlightContext* highlight_ctx,
-                         bool sticky_scroll_line) {
+                         bool sticky_scroll_line, bool indent_guides_enabled,
+                         int indent_guide_depth, bool defer_rich_decorations) {
   const std::string view_line = slice_line_for_view(line, scroll_col, view_width);
+  const int tab_size = std::max(1, editor_indent::width());
+  IndentGuideSplit guide_split;
+  if (indent_guides_enabled && indent_guide_depth > 0) {
+    guide_split = split_indent_guide_prefix(view_line, tab_size, indent_guide_depth);
+  }
+
+  const std::string& body_line =
+      guide_split.prefix_byte_length > 0 ? guide_split.suffix : view_line;
+  const int guide_prefix_bytes = guide_split.prefix_byte_length;
   const BuildFileKind build_file_kind = detect_build_file_kind(buffer.path);
   const bool is_build_file = build_file_kind != BuildFileKind::kNone;
   const bool use_warm_line_bg = build_file_kind == BuildFileKind::kMakefile;
@@ -472,20 +486,37 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
   const bool syntax_highlight =
       !buffer.path.empty() && is_indexed_source_path(buffer.path) && !is_build_file;
 
-  bool rich = line_needs_rich_decorations(line_index, buffer, find_matches, selection_occurrences,
-                                          bracket, line_diagnostics, symbol_press);
+  bool rich =
+      !defer_rich_decorations &&
+      line_needs_rich_decorations(line_index, buffer, find_matches, selection_occurrences, bracket,
+                                  line_diagnostics, symbol_press);
   if (highlight_ctx != nullptr && highlight_ctx->in_block_comment) {
     rich = false;
   }
 
   Element content =
-      rich ? render_rich_line(view_line, line_index, buffer, editor_focused, find_matches,
+      rich ? render_rich_line(body_line, line_index, buffer, editor_focused, find_matches,
                               selection_occurrences, semantic_tokens, syntax_highlight, bracket,
                               line_diagnostics, symbol_press, show_caret, scroll_col, view_width,
-                              highlight_ctx, build_file_kind)
-           : render_simple_line(view_line, line_index, buffer, editor_focused, semantic_tokens,
+                              highlight_ctx, build_file_kind, guide_prefix_bytes)
+           : render_simple_line(body_line, line_index, buffer, editor_focused, semantic_tokens,
                                 syntax_highlight, line_bg, show_caret, scroll_col, highlight_ctx,
-                                build_file_kind);
+                                build_file_kind, guide_prefix_bytes);
+
+  if (guide_prefix_bytes > 0) {
+    Element guide = text(guide_split.guide_text) | color(theme::AccentDim());
+    if (body_line.empty()) {
+      content = std::move(guide);
+    } else {
+      content = hbox({std::move(guide), std::move(content)});
+    }
+  } else if (indent_guides_enabled && indent_guide_depth > 0 && view_line.empty()) {
+    const std::string blank_guides =
+        build_blank_line_guides(tab_size, indent_guide_depth, view_width);
+    if (!blank_guides.empty()) {
+      content = text(blank_guides) | color(theme::AccentDim());
+    }
+  }
 
   const std::vector<Diagnostic>* suffix_color =
       suffix_diagnostics != nullptr ? suffix_diagnostics : line_diagnostics;

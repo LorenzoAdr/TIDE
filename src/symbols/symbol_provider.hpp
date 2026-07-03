@@ -102,6 +102,16 @@ class ISymbolProvider {
     (void)params;
     return {};
   }
+  virtual bool completion_uses_async_fetch() const { return false; }
+  virtual void request_completion(const CompletionParams& params, const std::string& cache_key) {
+    (void)params;
+    (void)cache_key;
+  }
+  virtual std::optional<std::vector<CompletionItem>> poll_completion(
+      const std::string& cache_key) {
+    (void)cache_key;
+    return std::nullopt;
+  }
 
   virtual bool supports_navigation() const { return false; }
   virtual SourceLocation goto_definition(const NavigationParams& params) {

@@ -17,8 +17,8 @@ using namespace ftxui;
 
 enum class OverviewMark {
   kNone = 0,
-  kFind = 1,
-  kGit = 2,
+  kGit = 1,
+  kFind = 2,
   kWarning = 3,
   kError = 4,
 };
@@ -36,6 +36,7 @@ struct OverviewRulerInput {
   int visible_lines = 0;
   const std::unordered_map<int, std::vector<Diagnostic>>* diagnostics_by_line = nullptr;
   const std::unordered_set<int>* git_changed_lines = nullptr;
+  bool git_untracked_all = false;
   const std::vector<TextMatch>* text_matches = nullptr;
 };
 
@@ -59,13 +60,17 @@ inline OverviewMark overview_mark_for_line(const OverviewRulerInput& input, int 
     }
   }
 
-  if (input.git_changed_lines != nullptr &&
-      input.git_changed_lines->count(line) > 0) {
+  if (warning) {
+    return OverviewMark::kWarning;
+  }
+
+  if (input.git_untracked_all) {
     return OverviewMark::kGit;
   }
 
-  if (warning) {
-    return OverviewMark::kWarning;
+  if (input.git_changed_lines != nullptr &&
+      input.git_changed_lines->count(line) > 0) {
+    return OverviewMark::kGit;
   }
 
   return OverviewMark::kNone;
@@ -130,15 +135,43 @@ inline std::vector<OverviewMark> build_overview_buckets(const OverviewRulerInput
     return buckets;
   }
 
-  for (int line = 0; line < input.total_lines; ++line) {
-    const OverviewMark mark = overview_mark_for_line(input, line);
-    overview_ruler_place_mark(buckets, line, mark, bar_height, input.total_lines);
+  // Lowest priority first; higher-priority marks replace lower ones in each bucket.
+  if (input.git_untracked_all) {
+    for (auto& bucket : buckets) {
+      bucket = OverviewMark::kGit;
+    }
+  }
+  if (input.git_changed_lines != nullptr) {
+    for (int line : *input.git_changed_lines) {
+      overview_ruler_place_mark(buckets, line, OverviewMark::kGit, bar_height, input.total_lines);
+    }
   }
 
   if (input.text_matches != nullptr) {
     for (const auto& match : *input.text_matches) {
       overview_ruler_place_mark(buckets, match.line, OverviewMark::kFind, bar_height,
                                 input.total_lines);
+    }
+  }
+
+  if (input.diagnostics_by_line != nullptr) {
+    for (const auto& [line, diags] : *input.diagnostics_by_line) {
+      bool warning = false;
+      for (const auto& item : diags) {
+        if (item.severity == DiagnosticSeverity::kError) {
+          overview_ruler_place_mark(buckets, line, OverviewMark::kError, bar_height,
+                                    input.total_lines);
+          warning = false;
+          break;
+        }
+        if (item.severity == DiagnosticSeverity::kWarning) {
+          warning = true;
+        }
+      }
+      if (warning) {
+        overview_ruler_place_mark(buckets, line, OverviewMark::kWarning, bar_height,
+                                  input.total_lines);
+      }
     }
   }
 

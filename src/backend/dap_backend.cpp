@@ -1,15 +1,67 @@
 #include "backend/dap_backend.hpp"
 
 #include <filesystem>
+#include <sstream>
 #include <utility>
 
 #include "dap/gdb_protocol.hpp"
 #include "dap/protocol.h"
 #include "dap/session.h"
 #include "util/path_normalize.hpp"
+#include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
 
 namespace tgdb {
+
+namespace {
+
+const char* ui_command_kind_name(UiCommandKind kind) {
+  switch (kind) {
+    case UiCommandKind::kConnect:
+      return "connect";
+    case UiCommandKind::kLaunch:
+      return "launch";
+    case UiCommandKind::kAttach:
+      return "attach";
+    case UiCommandKind::kLoadCore:
+      return "load_core";
+    case UiCommandKind::kContinue:
+      return "continue";
+    case UiCommandKind::kPause:
+      return "pause";
+    case UiCommandKind::kNext:
+      return "next";
+    case UiCommandKind::kStepIn:
+      return "step_in";
+    case UiCommandKind::kStepOut:
+      return "step_out";
+    case UiCommandKind::kEvaluate:
+      return "evaluate";
+    case UiCommandKind::kSetBreakpoints:
+      return "set_breakpoints";
+    case UiCommandKind::kSyncBreakpoints:
+      return "sync_breakpoints";
+    case UiCommandKind::kRefreshStack:
+      return "refresh_stack";
+    case UiCommandKind::kFetchVariables:
+      return "fetch_variables";
+    case UiCommandKind::kFetchVariableChildren:
+      return "fetch_variable_children";
+    case UiCommandKind::kAddWatch:
+      return "add_watch";
+    case UiCommandKind::kSetWatchValue:
+      return "set_watch_value";
+    case UiCommandKind::kDisconnect:
+      return "disconnect";
+    case UiCommandKind::kDetach:
+      return "detach";
+    case UiCommandKind::kQuit:
+      return "quit";
+  }
+  return "unknown";
+}
+
+}  // namespace
 
 DapBackend::DapBackend(ThreadSafeQueue<UiCommand>& commands,
                        ThreadSafeQueue<DebugEvent>& events)
@@ -665,6 +717,10 @@ void DapBackend::on_inferior_core_loaded() {
 }
 
 void DapBackend::handle_command(const UiCommand& command) {
+  std::ostringstream scope_name;
+  scope_name << "handle_command kind=" << ui_command_kind_name(command.kind);
+  monitor_log::MonitorScope command_scope("dap", scope_name.str());
+
   if (command.kind == UiCommandKind::kSetBreakpoints) {
     update_breakpoints(command.breakpoint_file, command.breakpoint_lines);
     return;

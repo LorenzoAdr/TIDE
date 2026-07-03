@@ -494,11 +494,19 @@ bool event_is_ctrl_delete(const ftxui::Event& event) {
 }
 
 bool event_is_ctrl_space(const ftxui::Event& event) {
+  const std::string& input = event.input();
+  if (input == "\x00" || input == "\0") {
+    return true;
+  }
   return event == ftxui::Event::Special("\x00") ||
          event == ftxui::Event::Special("\x1B[32;5u") ||
+         event == ftxui::Event::Special("\x1B[32;6u") ||
          event == ftxui::Event::Special("\x1B[0;5;32~") ||
+         event == ftxui::Event::Special("\x1B[0;6;32~") ||
          event == ftxui::Event::Special("\x1B[27;5;32~") ||
-         event == ftxui::Event::Special("\x1B[27;5;32;5~");
+         event == ftxui::Event::Special("\x1B[27;6;32~") ||
+         event == ftxui::Event::Special("\x1B[27;5;32;5~") ||
+         event == ftxui::Event::Special("\x1B[32;5;1~");
 }
 
 bool event_is_ctrl_period(const ftxui::Event& event) {
@@ -528,6 +536,18 @@ bool event_is_completion(const ftxui::Event& event) {
   return event == ftxui::Event::F6 || event_is_ctrl_space(event) ||
          event_is_ctrl_period(event) || event_is_alt_period(event) ||
          event_is_alt_slash(event);
+}
+
+bool event_is_completion_trigger(const ftxui::Event& event, bool ctrl_modifier_held) {
+  if (event_is_completion(event)) {
+    return true;
+  }
+  if (ctrl_modifier_held && event.is_character() && event.character() == " ") {
+    return true;
+  }
+  const std::string& input = event.input();
+  return input.find("32;5") != std::string::npos || input.find("27;5;32") != std::string::npos ||
+         input.find("57442") != std::string::npos && input.find("32") != std::string::npos;
 }
 
 bool event_is_go_to_definition(const ftxui::Event& event) {
