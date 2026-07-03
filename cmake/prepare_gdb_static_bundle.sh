@@ -2,7 +2,7 @@
 set -euo pipefail
 
 die() {
-  printf 'prepare_gdb_bundle: error: %s\n' "$*" >&2
+  printf 'prepare_gdb_static_bundle: error: %s\n' "$*" >&2
   exit 1
 }
 
@@ -90,7 +90,9 @@ cat > "${TGDB_GDB_MANIFEST_PATH}" <<EOF
 {
   "version": "${TGDB_GDB_VERSION}",
   "blob_sha256": "${blob_sha}",
-  "binary_sha256": "${bin_sha}"
+  "binary_sha256": "${bin_sha}",
+  "core_analyzer": false,
+  "bundle_kind": "static"
 }
 EOF
 
@@ -99,6 +101,7 @@ cat > "${TGDB_GDB_MANIFEST_HPP}" <<EOF
 #define TGDB_BUNDLED_GDB_VERSION "${TGDB_GDB_VERSION}"
 #define TGDB_BUNDLED_GDB_BLOB_SHA256 "${blob_sha}"
 #define TGDB_BUNDLED_GDB_BINARY_SHA256 "${bin_sha}"
+#define TGDB_BUNDLED_GDB_HAS_CORE_ANALYZER 0
 EOF
 
 blob_dir="$(dirname "${TGDB_GDB_BLOB_OBJ}")"
@@ -109,4 +112,4 @@ blob_dir="$(dirname "${TGDB_GDB_BLOB_OBJ}")"
     "$(basename "${TGDB_GDB_ZST_PATH}")" "$(basename "${TGDB_GDB_BLOB_OBJ}")"
 )
 
-printf 'gdb bundle listo: %s (%s bytes)\n' "${TGDB_GDB_ZST_PATH}" "$(wc -c < "${TGDB_GDB_ZST_PATH}")"
+printf 'gdb-static bundle listo: %s (%s bytes)\n' "${TGDB_GDB_ZST_PATH}" "$(wc -c < "${TGDB_GDB_ZST_PATH}")"

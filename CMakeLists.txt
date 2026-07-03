@@ -35,6 +35,8 @@ add_executable(tgdb
   src/ui/right_sidebar_panel.cpp
   src/ui/watches_panel.cpp
   src/ui/console_panel.cpp
+  src/ui/core_analyzer_panel.cpp
+  src/core_analyzer/output_parser.cpp
   src/ui/file_picker.cpp
   src/ui/symbol_picker.cpp
   src/ui/quit_confirm.cpp
@@ -111,6 +113,7 @@ add_executable(tgdb
   src/build/build_environment_service.cpp
   src/build/build_artifact_watcher.cpp
   src/util/bundled_tools.cpp
+  src/util/core_analyzer_support.cpp
   src/util/process_list.cpp
   src/util/system_stats.cpp
   src/git/git_command.cpp
@@ -169,6 +172,9 @@ add_executable(text_ops_test
   src/editor/text_search.cpp
   src/editor/undo_stack.cpp
   src/editor/clipboard.cpp
+  src/editor/bracket_match.cpp
+  src/ui/cursor_blink.cpp
+  src/util/clang_format_config.cpp
   src/util/shell_utils.cpp
   src/util/system_clipboard.cpp
 )
@@ -178,6 +184,7 @@ add_executable(bracket_match_test
   tests/bracket_match_test.cpp
   src/editor/editor_state.cpp
   src/editor/bracket_match.cpp
+  src/ui/cursor_blink.cpp
 )
 target_include_directories(bracket_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 

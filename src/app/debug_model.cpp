@@ -18,6 +18,17 @@ void DebugModel::append_console(const std::string& line) {
   }
 }
 
+void DebugModel::append_core_analyzer_log(const std::string& line) {
+  core_analyzer_log.push_back(line);
+  constexpr std::size_t kMaxLines = 5000;
+  if (core_analyzer_log.size() > kMaxLines) {
+    core_analyzer_log.erase(
+        core_analyzer_log.begin(),
+        core_analyzer_log.begin() +
+            static_cast<std::ptrdiff_t>(core_analyzer_log.size() - kMaxLines));
+  }
+}
+
 namespace {
 
 std::string format_stop_reason(const std::string& reason) {

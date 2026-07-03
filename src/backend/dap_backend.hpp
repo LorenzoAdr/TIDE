@@ -52,6 +52,8 @@ class DapBackend : public IDebugBackend {
   bool verify_inferior_attached_locked();
   void on_inferior_launched();
   void on_inferior_attached();
+  void on_inferior_core_loaded();
+  bool exec_repl_locked(const std::string& gdb_command, bool emit_output = true);
   void push_event(DebugEvent event);
   void push_error(const std::string& message);
 
@@ -73,6 +75,7 @@ class DapBackend : public IDebugBackend {
   bool resume_after_breakpoint_sync_ = false;
   bool expecting_stop_after_pause_ = false;
   int last_exit_code_ = -1;
+  bool configuration_done_ = false;
   std::unordered_map<std::string, std::vector<int>> breakpoints_by_file_;
 };
 

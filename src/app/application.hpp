@@ -47,6 +47,8 @@ struct AppConfig {
   std::vector<std::string> args;
   int attach_pid = 0;
   std::string attach_target;
+  std::string core_path;
+  CoreAnalysisMode core_analysis = CoreAnalysisMode::kGdbOnly;
   bool show_welcome_screen = false;
   bool auto_debug = false;
   std::string launch_directory;

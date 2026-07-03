@@ -4,9 +4,30 @@
 #include <string>
 #include <vector>
 
-#include "app/debug_model.hpp"
-
 namespace tgdb {
+
+struct StackFrameInfo {
+  int id = 0;
+  std::string name;
+  std::string file;
+  int line = 0;
+};
+
+struct VariableInfo {
+  std::string name;
+  std::string expression;
+  std::string value;
+  std::string type;
+  int variables_reference = 0;
+  int depth = 0;
+};
+
+struct BreakpointInfo {
+  std::string file;
+  int line = 0;
+  bool verified = false;
+  std::string message;
+};
 
 struct LaunchConfig {
   std::string program;
@@ -22,14 +43,24 @@ struct AttachConfig {
   std::string target;
 };
 
-enum class SessionMode { kLaunch, kAttach };
+enum class CoreAnalysisMode { kGdbOnly, kCoreAnalyzer };
 
-enum class EvaluateContext { kRepl, kWatch };
+struct CoreConfig {
+  std::string program;
+  std::string core_path;
+  std::string cwd;
+  CoreAnalysisMode analysis = CoreAnalysisMode::kGdbOnly;
+};
+
+enum class SessionMode { kLaunch, kAttach, kCore };
+
+enum class EvaluateContext { kRepl, kWatch, kCoreAnalyzer };
 
 enum class UiCommandKind {
   kConnect,
   kLaunch,
   kAttach,
+  kLoadCore,
   kContinue,
   kPause,
   kNext,
@@ -52,6 +83,7 @@ struct UiCommand {
   UiCommandKind kind = UiCommandKind::kQuit;
   LaunchConfig launch;
   AttachConfig attach;
+  CoreConfig core;
   std::string expression;
   EvaluateContext evaluate_context = EvaluateContext::kRepl;
   std::string assign_value;
@@ -73,6 +105,7 @@ enum class DebugEventKind {
   kStackUpdated,
   kVariablesUpdated,
   kEvaluateResult,
+  kCoreAnalyzerResult,
   kWatchUpdated,
   kVariableChildrenUpdated,
   kError,

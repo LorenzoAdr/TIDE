@@ -8,11 +8,14 @@ JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 
 BUNDLE_CLANGD=0
 BUNDLE_CLANGD_FORCE=0
+GDB_BUNDLE_KIND=none
 BUNDLE_GDB=0
 BUNDLE_GDB_FORCE=0
+BUILD_GDB_CA=0
 STATIC_LIBSTDCXX=0
 INTERACTIVE=1
 SKIP_WIZARD=0
+CLI_OVERRIDES_BUNDLE=0
 
 log() {
   printf '[compile] %s\n' "$*"
@@ -36,8 +39,11 @@ Opciones:
   --no-bundle-clangd         No embeber clangd
   --force-bundled-clangd     Forzar clangd embebido en runtime (requiere bundle)
   --no-force-bundled-clangd  Permitir fallback a clangd en PATH
-  --bundle-gdb               Embeber gdb-static Full
+  --bundle-gdb               Embeber gdb (tipo según .bundle-config o static)
+  --bundle-gdb-static        Embeber gdb-static (musl, sin Core Analyzer)
+  --bundle-gdb-ca            Embeber gdb + Core Analyzer
   --no-bundle-gdb            No embeber gdb
+  --build-gdb-ca             Compilar gdb+CA si falta tarball (solo --bundle-gdb-ca)
   --force-bundled-gdb        Forzar gdb embebido en runtime (requiere bundle)
   --no-force-bundled-gdb     Permitir fallback a gdb en PATH
   --static-libstdc++         Enlazar libstdc++/libgcc estáticamente (menos deps en runtime)
@@ -55,7 +61,17 @@ check_command() {
   fi
 }
 
+sync_gdb_bundle_flags() {
+  if [[ "${GDB_BUNDLE_KIND}" != "none" ]]; then
+    BUNDLE_GDB=1
+  else
+    BUNDLE_GDB=0
+    BUNDLE_GDB_FORCE=0
+  fi
+}
+
 warn_gdb_dap() {
+  sync_gdb_bundle_flags
   if [[ "${BUNDLE_GDB}" == "1" ]]; then
     return
   fi
@@ -68,32 +84,107 @@ warn_gdb_dap() {
   fi
 }
 
+gdb_static_tarball_path() {
+  printf '%s/third_party/bundled/cache/v16.3-static-gdb-static-full-x86_64.tar.gz' "${ROOT}"
+}
+
+gdb_ca_tarball_path() {
+  printf '%s/third_party/bundled/cache/gdb-ca-16.3-ca.tar.gz' "${ROOT}"
+}
+
+check_gdb_ca_build_deps() {
+  local missing=()
+  if ! echo '#include <gmp.h>' | gcc -E - >/dev/null 2>&1; then
+    missing+=("libgmp-dev")
+  fi
+  if ! echo '#include <mpfr.h>' | gcc -E - >/dev/null 2>&1; then
+    missing+=("libmpfr-dev")
+  fi
+  if ! echo '#include <mpc.h>' | gcc -E - >/dev/null 2>&1; then
+    missing+=("libmpc-dev")
+  fi
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    die "faltan paquetes para compilar gdb+Core Analyzer: ${missing[*]}. Instala con: sudo apt install ${missing[*]}"
+  fi
+}
+
+ensure_gdb_ca_tarball() {
+  sync_gdb_bundle_flags
+  if [[ "${GDB_BUNDLE_KIND}" != "core_analyzer" ]]; then
+    return 0
+  fi
+
+  local tarball
+  tarball="$(gdb_ca_tarball_path)"
+  if [[ -f "${tarball}" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$(dirname "${tarball}")"
+
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    log "tarball gdb+Core Analyzer no encontrado: ${tarball}"
+    log "generando con docker/Dockerfile.gdb-ca (puede tardar 30+ min)..."
+    if docker build -f "${ROOT}/docker/Dockerfile.gdb-ca" -t tgdb-gdb-ca "${ROOT}"; then
+      docker run --rm tgdb-gdb-ca > "${tarball}"
+      log "tarball generado: ${tarball}"
+      return 0
+    fi
+    log "aviso: build docker falló; intentando compilación nativa..."
+  elif command -v docker >/dev/null 2>&1; then
+    log "aviso: docker sin permisos; omitiendo build en contenedor"
+  fi
+
+  if [[ "${BUILD_GDB_CA}" != "1" ]]; then
+    log "tarball gdb+Core Analyzer no encontrado: ${tarball}"
+    log "activando compilación nativa de gdb+Core Analyzer (puede tardar 30+ min)..."
+    BUILD_GDB_CA=1
+  fi
+  check_gdb_ca_build_deps
+}
+
 load_bundle_config() {
   BUNDLE_CLANGD=0
   BUNDLE_CLANGD_FORCE=0
+  GDB_BUNDLE_KIND=none
   BUNDLE_GDB=0
   BUNDLE_GDB_FORCE=0
   if [[ ! -f "${CONFIG_FILE}" ]]; then
     return
   fi
+  local legacy_bundle_gdb=0
   while IFS= read -r line || [[ -n "${line}" ]]; do
     case "${line}" in
       BUNDLE_CLANGD=1) BUNDLE_CLANGD=1 ;;
       BUNDLE_CLANGD=0) BUNDLE_CLANGD=0 ;;
       BUNDLE_CLANGD_FORCE=1) BUNDLE_CLANGD_FORCE=1 ;;
       BUNDLE_CLANGD_FORCE=0) BUNDLE_CLANGD_FORCE=0 ;;
-      BUNDLE_GDB=1) BUNDLE_GDB=1 ;;
-      BUNDLE_GDB=0) BUNDLE_GDB=0 ;;
+      GDB_BUNDLE_KIND=static) GDB_BUNDLE_KIND=static ;;
+      GDB_BUNDLE_KIND=core_analyzer) GDB_BUNDLE_KIND=core_analyzer ;;
+      GDB_BUNDLE_KIND=none) GDB_BUNDLE_KIND=none ;;
+      BUNDLE_GDB=1) legacy_bundle_gdb=1 ;;
+      BUNDLE_GDB=0) legacy_bundle_gdb=0 ;;
       BUNDLE_GDB_FORCE=1) BUNDLE_GDB_FORCE=1 ;;
       BUNDLE_GDB_FORCE=0) BUNDLE_GDB_FORCE=0 ;;
     esac
   done < "${CONFIG_FILE}"
+  if [[ "${GDB_BUNDLE_KIND}" == "none" && "${legacy_bundle_gdb}" == "1" ]]; then
+    GDB_BUNDLE_KIND=static
+  fi
+  sync_gdb_bundle_flags
+  # Migrar configs antiguas sin GDB_BUNDLE_KIND explícito.
+  if [[ "${legacy_bundle_gdb}" == "1" ]] && ! grep -q '^GDB_BUNDLE_KIND=' "${CONFIG_FILE}" 2>/dev/null; then
+    save_bundle_config
+    log "migrado .bundle-config: GDB_BUNDLE_KIND=static (gdb embebido legacy)"
+  fi
 }
 
 save_bundle_config() {
+  sync_gdb_bundle_flags
   cat > "${CONFIG_FILE}" <<EOF
 BUNDLE_CLANGD=${BUNDLE_CLANGD}
 BUNDLE_CLANGD_FORCE=${BUNDLE_CLANGD_FORCE}
+GDB_BUNDLE_KIND=${GDB_BUNDLE_KIND}
 BUNDLE_GDB=${BUNDLE_GDB}
 BUNDLE_GDB_FORCE=${BUNDLE_GDB_FORCE}
 EOF
@@ -131,7 +222,16 @@ cmake_bundle_args() {
     args+=(-DTGDB_BUNDLE_CLANGD=OFF -DTGDB_FORCE_BUNDLED_CLANGD=OFF)
   fi
   if [[ "${BUNDLE_GDB}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_GDB=ON)
+    args+=(-DTGDB_BUNDLE_GDB=ON -DTGDB_GDB_BUNDLE_KIND="${GDB_BUNDLE_KIND}")
+    if [[ "${GDB_BUNDLE_KIND}" == "core_analyzer" ]]; then
+      if [[ "${BUILD_GDB_CA}" == "1" ]] || [[ ! -f "$(gdb_ca_tarball_path)" ]]; then
+        args+=(-DTGDB_BUILD_GDB_CA=ON)
+      else
+        args+=(-DTGDB_BUILD_GDB_CA=OFF)
+      fi
+    else
+      args+=(-DTGDB_BUILD_GDB_CA=OFF)
+    fi
     if [[ "${BUNDLE_GDB_FORCE}" == "1" ]]; then
       args+=(-DTGDB_FORCE_BUNDLED_GDB=ON)
     else
@@ -151,12 +251,14 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --bundle-clangd)
+      CLI_OVERRIDES_BUNDLE=1
       BUNDLE_CLANGD=1
       SKIP_WIZARD=1
       INTERACTIVE=0
       shift
       ;;
     --no-bundle-clangd)
+      CLI_OVERRIDES_BUNDLE=1
       BUNDLE_CLANGD=0
       BUNDLE_CLANGD_FORCE=0
       SKIP_WIZARD=1
@@ -164,6 +266,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --force-bundled-clangd)
+      CLI_OVERRIDES_BUNDLE=1
       BUNDLE_CLANGD_FORCE=1
       BUNDLE_CLANGD=1
       SKIP_WIZARD=1
@@ -171,32 +274,61 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --no-force-bundled-clangd)
+      CLI_OVERRIDES_BUNDLE=1
       BUNDLE_CLANGD_FORCE=0
       SKIP_WIZARD=1
       INTERACTIVE=0
       shift
       ;;
     --bundle-gdb)
-      BUNDLE_GDB=1
+      CLI_OVERRIDES_BUNDLE=1
+      GDB_BUNDLE_KIND=static
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --bundle-gdb-static)
+      CLI_OVERRIDES_BUNDLE=1
+      GDB_BUNDLE_KIND=static
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --bundle-gdb-ca)
+      CLI_OVERRIDES_BUNDLE=1
+      GDB_BUNDLE_KIND=core_analyzer
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --build-gdb-ca)
+      CLI_OVERRIDES_BUNDLE=1
+      BUILD_GDB_CA=1
+      GDB_BUNDLE_KIND=core_analyzer
       SKIP_WIZARD=1
       INTERACTIVE=0
       shift
       ;;
     --no-bundle-gdb)
-      BUNDLE_GDB=0
+      CLI_OVERRIDES_BUNDLE=1
+      GDB_BUNDLE_KIND=none
       BUNDLE_GDB_FORCE=0
       SKIP_WIZARD=1
       INTERACTIVE=0
       shift
       ;;
     --force-bundled-gdb)
+      CLI_OVERRIDES_BUNDLE=1
       BUNDLE_GDB_FORCE=1
-      BUNDLE_GDB=1
+      if [[ "${GDB_BUNDLE_KIND}" == "none" ]]; then
+        GDB_BUNDLE_KIND=static
+      fi
       SKIP_WIZARD=1
       INTERACTIVE=0
       shift
       ;;
     --no-force-bundled-gdb)
+      CLI_OVERRIDES_BUNDLE=1
       BUNDLE_GDB_FORCE=0
       SKIP_WIZARD=1
       INTERACTIVE=0
@@ -234,17 +366,31 @@ if [[ "${SKIP_WIZARD}" == "0" ]]; then
   run_wizard
   save_bundle_config
 else
-  if [[ "${INTERACTIVE}" == "0" && "${BUNDLE_CLANGD}" == "0" && "${BUNDLE_CLANGD_FORCE}" == "0" && "${BUNDLE_GDB}" == "0" && "${BUNDLE_GDB_FORCE}" == "0" ]]; then
+  if [[ "${SKIP_WIZARD}" == "1" && "${CLI_OVERRIDES_BUNDLE}" == "0" ]]; then
     load_bundle_config
   fi
 fi
 
+sync_gdb_bundle_flags
+
 warn_gdb_dap
+ensure_gdb_ca_tarball
 
 mapfile -t CMAKE_BUNDLE_ARGS < <(cmake_bundle_args)
 mapfile -t CMAKE_EXTRA_ARGS < <(cmake_extra_args)
 
 log "configurando CMake..."
+if [[ "${BUNDLE_GDB}" == "1" ]]; then
+  log "gdb embebido: ${GDB_BUNDLE_KIND}"
+  if [[ "${GDB_BUNDLE_KIND}" == "static" ]]; then
+    log "  tarball: $(gdb_static_tarball_path)"
+    if [[ -f "$(gdb_static_tarball_path)" ]]; then
+      log "  (caché encontrada; no compila gdb)"
+    else
+      log "  (descargará gdb-static de GitHub)"
+    fi
+  fi
+fi
 # shellcheck disable=SC2068
 cmake -S "${ROOT}" -B "${BUILD_DIR}" ${CMAKE_BUNDLE_ARGS[@]} ${CMAKE_EXTRA_ARGS[@]}
 
@@ -268,7 +414,7 @@ else
   log "  clangd embebido: no"
 fi
 if [[ "${BUNDLE_GDB}" == "1" ]]; then
-  log "  gdb embebido: sí (force=${BUNDLE_GDB_FORCE})"
+  log "  gdb embebido: ${GDB_BUNDLE_KIND} (force=${BUNDLE_GDB_FORCE})"
 else
   log "  gdb embebido: no"
 fi

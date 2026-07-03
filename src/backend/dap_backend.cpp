@@ -617,13 +617,51 @@ void DapBackend::update_breakpoints(const std::string& file,
 }
 
 bool DapBackend::send_configuration_done() {
+  if (configuration_done_) {
+    return true;
+  }
   dap::ConfigurationDoneRequest done;
   const auto done_response = session_->send(done).get();
   if (done_response.error) {
     push_error("configurationDone falló: " + done_response.error.message);
     return false;
   }
+  configuration_done_ = true;
   return true;
+}
+
+bool DapBackend::exec_repl_locked(const std::string& gdb_command, bool emit_output) {
+  dap::EvaluateRequest request;
+  request.expression = gdb_command;
+  request.context = "repl";
+  const auto response = session_->send(request).get();
+  if (response.error) {
+    push_error("GDB: " + response.error.message);
+    return false;
+  }
+  if (emit_output && !response.response.result.empty()) {
+    DebugEvent event;
+    event.kind = DebugEventKind::kOutput;
+    event.text = response.response.result;
+    push_event(std::move(event));
+  }
+  return true;
+}
+
+void DapBackend::on_inferior_core_loaded() {
+  inferior_attached_ = true;
+  inferior_launched_ = false;
+  inferior_stopped_.store(true, std::memory_order_release);
+  std::lock_guard<std::mutex> lock(session_mutex_);
+  if (!session_) {
+    return;
+  }
+  refresh_active_thread_locked();
+  notify_stopped("core");
+  UiCommand refresh;
+  refresh.kind = UiCommandKind::kRefreshStack;
+  refresh.thread_id = active_thread_id_;
+  commands_.push(refresh);
 }
 
 void DapBackend::handle_command(const UiCommand& command) {
@@ -741,6 +779,37 @@ void DapBackend::handle_command(const UiCommand& command) {
     return;
   }
 
+  if (command.kind == UiCommandKind::kLoadCore) {
+    bool loaded = false;
+    {
+      std::lock_guard<std::mutex> lock(session_mutex_);
+      if (!session_) {
+        return;
+      }
+      if (!send_configuration_done()) {
+        return;
+      }
+
+      if (!command.core.program.empty()) {
+        if (!exec_repl_locked("-exec file " + command.core.program)) {
+          return;
+        }
+      }
+      if (command.core.core_path.empty()) {
+        push_error("core-file: ruta vacía");
+        return;
+      }
+      if (!exec_repl_locked("-exec core-file " + command.core.core_path)) {
+        return;
+      }
+      loaded = true;
+    }
+    if (loaded) {
+      on_inferior_core_loaded();
+    }
+    return;
+  }
+
   {
     std::lock_guard<std::mutex> lock(session_mutex_);
     if (!session_) {
@@ -816,6 +885,11 @@ void DapBackend::handle_command(const UiCommand& command) {
           event.watch_expression = command.expression;
           event.watch_value = "[error] " + response.error.message;
           push_event(std::move(event));
+        } else if (command.evaluate_context == EvaluateContext::kCoreAnalyzer) {
+          DebugEvent event;
+          event.kind = DebugEventKind::kCoreAnalyzerResult;
+          event.text = "[error] " + response.error.message;
+          push_event(std::move(event));
         } else {
           push_error("evaluate falló: " + response.error.message);
         }
@@ -826,6 +900,9 @@ void DapBackend::handle_command(const UiCommand& command) {
         event.kind = DebugEventKind::kWatchUpdated;
         event.watch_expression = command.expression;
         event.watch_value = response.response.result;
+      } else if (command.evaluate_context == EvaluateContext::kCoreAnalyzer) {
+        event.kind = DebugEventKind::kCoreAnalyzerResult;
+        event.text = response.response.result;
       } else {
         event.kind = DebugEventKind::kEvaluateResult;
         event.text = response.response.result;

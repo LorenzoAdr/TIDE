@@ -15,9 +15,16 @@
 
 namespace tgdb {
 
-enum class WizardStep { ChooseMode, PickBinary, PickArgs, PickProcess };
+enum class WizardStep {
+  ChooseMode,
+  PickBinary,
+  PickArgs,
+  PickProcess,
+  PickCoreFile,
+  ChooseCoreBackend,
+};
 
-enum class WizardMode { Launch, Attach };
+enum class WizardMode { Launch, Attach, LoadCore };
 
 struct ConnectionResult {
   SessionMode mode = SessionMode::kLaunch;
@@ -26,6 +33,8 @@ struct ConnectionResult {
   std::vector<std::string> args;
   std::string args_line;
   int attach_pid = 0;
+  std::string core_path;
+  CoreAnalysisMode core_analysis = CoreAnalysisMode::kGdbOnly;
 };
 
 struct ConnectionWizardState {
@@ -33,11 +42,13 @@ struct ConnectionWizardState {
   WizardStep step = WizardStep::ChooseMode;
   WizardMode mode = WizardMode::Attach;
   int mode_selected = 0;
+  int core_backend_selected = 0;
 
   std::string workspace_root;
   PathBrowserState browser;
 
   std::string selected_program;
+  std::string selected_core_path;
   std::string launch_cwd;
   std::string args_line;
   std::vector<std::string> args_completion_matches;
@@ -51,6 +62,9 @@ struct ConnectionWizardState {
 
   ftxui::Box launch_mode_box;
   ftxui::Box attach_mode_box;
+  ftxui::Box core_mode_box;
+  ftxui::Box gdb_backend_box;
+  ftxui::Box ca_backend_box;
   ftxui::Box process_list_box;
 
   void reset();

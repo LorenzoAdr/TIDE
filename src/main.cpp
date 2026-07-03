@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "util/crash_handler.hpp"
+#include "util/core_analyzer_support.hpp"
 
 namespace {
 
@@ -17,6 +18,9 @@ bool config_is_complete(const tgdb::AppConfig& config) {
   }
   if (config.mode == tgdb::SessionMode::kAttach) {
     return config.attach_pid > 0 || !config.attach_target.empty();
+  }
+  if (config.mode == tgdb::SessionMode::kCore) {
+    return !config.core_path.empty();
   }
   return true;
 }
@@ -75,6 +79,8 @@ void print_usage() {
             << "  --args <a>...       Argumentos del programa (después de --args)\n"
             << "  --attach <pid>      Adjuntar a un proceso en ejecución\n"
             << "  --target <host:puerto>  Adjuntar a gdbserver remoto\n"
+            << "  --core <archivo>    Cargar core dump post-mortem\n"
+            << "  --core-analyzer     Usar pestaña Core Analyzer (con --core)\n"
             << "  -h, --help          Muestra esta ayuda\n"
             << "\n"
             << "Sin argumentos abre la pantalla de inicio TUIDE (modo IDE).\n"
@@ -127,6 +133,15 @@ int main(int argc, char** argv) {
     if (arg == "--target" && i + 1 < argc) {
       config.mode = tgdb::SessionMode::kAttach;
       config.attach_target = argv[++i];
+      continue;
+    }
+    if (arg == "--core" && i + 1 < argc) {
+      config.mode = tgdb::SessionMode::kCore;
+      config.core_path = argv[++i];
+      continue;
+    }
+    if (arg == "--core-analyzer") {
+      config.core_analysis = tgdb::CoreAnalysisMode::kCoreAnalyzer;
       continue;
     }
     if (arg == "--args") {
@@ -189,6 +204,18 @@ int main(int argc, char** argv) {
                 << "\n";
       return 1;
     }
+  }
+  if (!config.core_path.empty()) {
+    config.core_path = std::filesystem::absolute(config.core_path, ec).string();
+    if (!std::filesystem::exists(config.core_path)) {
+      std::cerr << "Error: core no encontrado: " << config.core_path << "\n";
+      return 1;
+    }
+  }
+  if (config.core_analysis == tgdb::CoreAnalysisMode::kCoreAnalyzer &&
+      !tgdb::core_analyzer_supported()) {
+    std::cerr << "Error: esta build no incluye Core Analyzer (omitir --core-analyzer)\n";
+    return 1;
   }
   if (!config.initial_file.empty()) {
     config.initial_file =

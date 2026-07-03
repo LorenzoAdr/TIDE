@@ -2,6 +2,7 @@
 #include "ui/main_layout.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <memory>
 
 #include "ftxui/component/component.hpp"
@@ -838,6 +839,12 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     if (app_mode != nullptr && *app_mode == AppMode::kNormal && workspace != nullptr &&
         !workspace->status_message.empty()) {
       status_msg = workspace->status_message;
+    }
+    if (model->is_post_mortem && !model->core_path.empty()) {
+      const auto core_name = std::filesystem::path(model->core_path).filename().string();
+      const char* mode_label =
+          model->core_analysis_mode == CoreAnalysisMode::kCoreAnalyzer ? "CA" : "GDB";
+      status_msg += "  │ Core: " + core_name + " (" + mode_label + ")";
     }
 
     if (!git_tab_open && symbols && symbols->supports_diagnostics() && layout_state != nullptr &&

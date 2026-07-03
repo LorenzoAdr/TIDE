@@ -20,13 +20,14 @@
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/clickable.hpp"
-#include "ui/cursor_blink.hpp"
+#include "ui/cursor_blink_ui.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/panel.hpp"
 #include "app/workspace_model.hpp"
 #include "indexer/workspace_indexer.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/call_hierarchy_panel.hpp"
+#include "ui/core_analyzer_panel.hpp"
 #include "ui/diagnostics_panel.hpp"
 #include "ui/git_panel.hpp"
 #include "ui/search_panel.hpp"
@@ -79,7 +80,7 @@ struct ConsolePanelState {
   std::string terminal_text;
   std::vector<TerminalStyledRow> terminal_styled_rows;
   std::string last_workspace_root;
-  std::array<Box, 7> tab_boxes;
+  std::array<Box, 8> tab_boxes;
   Box hide_box;
 };
 
@@ -378,6 +379,16 @@ bool call_hierarchy_tab_active_console(AppMode* /*app_mode*/, MainLayoutState* l
   return call_hierarchy_tab_active(layout_state);
 }
 
+bool core_analyzer_tab_visible(AppMode* app_mode, MainLayoutState* layout_state) {
+  return debug_console_mode(app_mode) && layout_state != nullptr &&
+         layout_state->show_core_analyzer_tab;
+}
+
+bool core_analyzer_tab_active(AppMode* app_mode, MainLayoutState* layout_state) {
+  return core_analyzer_tab_visible(app_mode, layout_state) && layout_state != nullptr &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kCoreAnalyzer;
+}
+
 bool git_tab_active_console(AppMode* /*app_mode*/, MainLayoutState* layout_state) {
   return git_tab_active(layout_state);
 }
@@ -398,6 +409,8 @@ std::string_view console_tab_press_id(int tab) {
       return press_id::kConsoleTabCallHierarchy;
     case ConsolePanelTabs::kGit:
       return press_id::kConsoleTabGit;
+    case ConsolePanelTabs::kCoreAnalyzer:
+      return press_id::kConsoleTabCoreAnalyzer;
     default:
       return press_id::kConsoleTabTerminal;
   }
@@ -443,7 +456,7 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
                         FocusManagerState* focus, int tab, GitService* git,
                         GitPanelState* git_state) {
   if (layout_state == nullptr || tab < ConsolePanelTabs::kTerminal ||
-      tab > ConsolePanelTabs::kGit) {
+      tab > ConsolePanelTabs::kCoreAnalyzer) {
     return false;
   }
   if (layout_state->console_tabs.selected_tab == tab) {
@@ -490,6 +503,11 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
       if (is_search_input_focus(layout_state->text_input_focus)) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
+    } else if (tab == ConsolePanelTabs::kCoreAnalyzer) {
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      layout_state->text_input_focus = TextInputFocus::Console;
     } else if (tab == ConsolePanelTabs::kGit) {
       if (focus != nullptr) {
         focus->region = FocusRegion::Terminal;
@@ -516,8 +534,12 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
     return false;
   }
   const bool debug_mode = debug_console_mode(app_mode);
-  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kGit; ++i) {
+  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kCoreAnalyzer; ++i) {
     if (i == ConsolePanelTabs::kDebug && !debug_mode) {
+      continue;
+    }
+    if (i == ConsolePanelTabs::kCoreAnalyzer &&
+        !core_analyzer_tab_visible(app_mode, layout_state)) {
       continue;
     }
     if (!state->tab_boxes[static_cast<std::size_t>(i)].Contain(mouse_x, mouse_y)) {
@@ -528,6 +550,8 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
     if (i == ConsolePanelTabs::kTerminal) {
       activate_shell_input(model, layout_state, focus, shell, state, launch_config);
     } else if (i == ConsolePanelTabs::kDebug) {
+      activate_console_input(layout_state, focus, input_box);
+    } else if (i == ConsolePanelTabs::kCoreAnalyzer) {
       activate_console_input(layout_state, focus, input_box);
     } else if (layout_state != nullptr) {
       layout_state->request_ui_tick = true;
@@ -1091,12 +1115,16 @@ bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, 
   for (int attempt = 0; attempt < 10; ++attempt) {
     tab += delta;
     if (tab < ConsolePanelTabs::kTerminal) {
-      tab = ConsolePanelTabs::kGit;
+      tab = ConsolePanelTabs::kCoreAnalyzer;
     }
-    if (tab > ConsolePanelTabs::kGit) {
+    if (tab > ConsolePanelTabs::kCoreAnalyzer) {
       tab = ConsolePanelTabs::kTerminal;
     }
     if (!debug_mode && tab == ConsolePanelTabs::kDebug) {
+      continue;
+    }
+    if (tab == ConsolePanelTabs::kCoreAnalyzer && layout_state != nullptr &&
+        !layout_state->show_core_analyzer_tab) {
       continue;
     }
     break;
@@ -1130,6 +1158,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       MakeCallHierarchyPanel(workspace, focus, layout_state, sidebar, symbols);
   auto git_panel =
       MakeGitPanel(git_service, git_panel_state, layout_state, focus, &state->git_body_height);
+  auto core_analyzer_panel =
+      MakeCoreAnalyzerPanel(model, on_command, layout_state, focus);
   auto input_box = Input(MakeBlinkInputOption(&state->input, &state->input_placeholder));
   auto input_maybe = Maybe(
       input_box, [app_mode, layout_state] {
@@ -1138,13 +1168,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
   auto component = Container::Vertical(
       {input_maybe, performance_panel, diagnostics_panel, search_panel, call_hierarchy_panel,
-       git_panel});
+       git_panel, core_analyzer_panel});
 
   auto wrapped = CatchEvent(component, [app_mode, model, shell, on_command, state,
                                         layout_state, focus, input_box,
                                         shell_launch_config, diagnostics_panel, search_panel,
                                         call_hierarchy_panel, git_panel, git_service,
-                                        git_panel_state](Event event) {
+                                        git_panel_state, core_analyzer_panel](Event event) {
     const bool editor_chrome_input =
         layout_state != nullptr &&
         is_editor_chrome_input_focus(layout_state->text_input_focus);
@@ -1170,6 +1200,12 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     if (git_tab_active_console(app_mode, layout_state) && !editor_chrome_input &&
         (focus == nullptr || focus->region == FocusRegion::Terminal)) {
       if (git_panel->OnEvent(event)) {
+        return true;
+      }
+    }
+    if (core_analyzer_tab_active(app_mode, layout_state) && !editor_chrome_input &&
+        (focus == nullptr || focus->region == FocusRegion::Terminal)) {
+      if (core_analyzer_panel->OnEvent(event)) {
         return true;
       }
     }
@@ -1406,7 +1442,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
   return Renderer(wrapped, [app_mode, model, shell, focus, input_box, input_maybe, state,
                             layout_state, bottom_height, perf_state, sampler, diagnostics_panel,
-                            search_panel, call_hierarchy_panel, git_panel] {
+                            search_panel, call_hierarchy_panel, git_panel, core_analyzer_panel] {
     state->input_placeholder = console_placeholder(app_mode);
     (void)input_maybe;
     (void)input_box;
@@ -1436,6 +1472,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
           layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabGdb),
           layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabGdb),
           &state->tab_boxes[ConsolePanelTabs::kDebug]));
+      if (layout_state != nullptr && layout_state->show_core_analyzer_tab) {
+        tab_row.push_back(make_tab_button(
+            "CoreAn", selected_tab == ConsolePanelTabs::kCoreAnalyzer,
+            layout_state->clickable.is_hovered(press_id::kConsoleTabCoreAnalyzer),
+            layout_state->clickable.is_pressed(press_id::kConsoleTabCoreAnalyzer),
+            &state->tab_boxes[ConsolePanelTabs::kCoreAnalyzer]));
+      }
     }
     tab_row.push_back(make_tab_button(
         "Rendimiento", selected_tab == ConsolePanelTabs::kPerformance,
@@ -1483,6 +1526,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
              flex;
     } else if (selected_tab == ConsolePanelTabs::kDebug) {
       body = render_gdb_console(state.get(), model, app_mode, layout_state, input_box);
+    } else if (selected_tab == ConsolePanelTabs::kCoreAnalyzer) {
+      body = core_analyzer_panel->Render() | flex;
     } else if (selected_tab == ConsolePanelTabs::kPerformance) {
       body = RenderPerformancePanel(sampler, perf_state.get(), panel_width, body_height) | flex;
     } else if (selected_tab == ConsolePanelTabs::kProblems) {

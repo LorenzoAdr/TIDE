@@ -3,7 +3,7 @@
 #include <string>
 
 #include "ftxui/dom/elements.hpp"
-#include "ui/cursor_blink.hpp"
+#include "ui/cursor_blink_ui.hpp"
 #include "ui/theme.hpp"
 
 namespace tgdb {

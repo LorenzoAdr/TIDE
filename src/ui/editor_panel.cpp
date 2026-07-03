@@ -5,7 +5,10 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <optional>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -58,6 +61,33 @@ using namespace ftxui;
 namespace {
 
 struct EditorPanelState;
+
+// #region agent log
+std::string editor_debug_bytes_hex(const std::string& bytes) {
+  std::ostringstream oss;
+  for (unsigned char byte : bytes) {
+    if (oss.tellp() > 0) {
+      oss << ' ';
+    }
+    oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
+  }
+  return oss.str();
+}
+
+void editor_debug_agent_log(const char* hypothesis_id, const char* location, const char* message,
+                            const std::string& data_json) {
+  std::ofstream out("/home/lorenzo/workspace/tgdb/.cursor/debug-4e0960.log", std::ios::app);
+  if (!out) {
+    return;
+  }
+  const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::system_clock::now().time_since_epoch())
+                             .count();
+  out << "{\"sessionId\":\"4e0960\",\"hypothesisId\":\"" << hypothesis_id
+      << "\",\"location\":\"" << location << "\",\"message\":\"" << message << "\",\"data\":"
+      << data_json << ",\"timestamp\":" << timestamp << "}\n";
+}
+// #endregion
 
 std::string buffer_text(const EditorBuffer& buffer) {
   std::string text;
@@ -189,8 +219,6 @@ struct EditorPanelState {
   std::unordered_map<int, std::string> git_previous_by_line;
   std::string git_cache_path;
   uint64_t git_cache_revision = 0;
-  uint64_t git_lines_fingerprint = 0;
-  uint64_t git_head_fingerprint = 0;
   int last_render_scroll = 0;
   int64_t last_scroll_change_ms = 0;
   bool document_open_pending = false;
@@ -515,29 +543,32 @@ char line_gutter_marker(EditorPanelState* panel, int line) {
   return '\0';
 }
 
-uint64_t fingerprint_lines(const std::vector<std::string>& lines) {
-  uint64_t hash = 14695981039346656037ull;
-  for (const auto& line : lines) {
-    for (unsigned char ch : line) {
-      hash ^= ch;
-      hash *= 1099511628211ull;
+void apply_git_diff_to_panel(EditorPanelState* panel, const GitFileDiff& diff,
+                             const std::vector<std::string>& buffer_lines) {
+  panel->git_changed_lines.clear();
+  panel->git_previous_by_line.clear();
+  if (diff.untracked) {
+    for (std::size_t i = 0; i < buffer_lines.size(); ++i) {
+      panel->git_changed_lines.insert(static_cast<int>(i));
     }
-    hash ^= '\n';
-    hash *= 1099511628211ull;
+    return;
   }
-  hash ^= static_cast<uint64_t>(lines.size());
-  return hash;
+  for (const auto& [line_no, change] : diff.line_changes) {
+    (void)change;
+    panel->git_changed_lines.insert(line_no);
+  }
+  for (const auto& [line_no, content] : diff.previous_content_by_line) {
+    panel->git_previous_by_line[line_no] = content;
+  }
 }
 
-void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer& buffer,
-                    bool content_settled) {
+void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer& buffer) {
   if (panel == nullptr || git == nullptr || !git->is_repo() || buffer.path.empty()) {
     if (panel != nullptr) {
       panel->git_changed_lines.clear();
       panel->git_previous_by_line.clear();
       panel->git_cache_path.clear();
-      panel->git_lines_fingerprint = 0;
-      panel->git_head_fingerprint = 0;
+      panel->git_cache_revision = 0;
     }
     return;
   }
@@ -546,61 +577,19 @@ void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer
   if (buffer.path != panel->git_cache_path) {
     panel->git_cache_path = buffer.path;
     panel->git_cache_revision = 0;
-    panel->git_lines_fingerprint = 0;
-    panel->git_head_fingerprint = 0;
     panel->git_changed_lines.clear();
     panel->git_previous_by_line.clear();
-    git->refresh_file_head(buffer.path);
+    git->refresh_file_diff(buffer.path);
   }
 
-  const GitFileDiff diff = git->file_diff(buffer.path);
-  if (diff.untracked) {
-    panel->git_changed_lines.clear();
-    panel->git_previous_by_line.clear();
-    for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
-      panel->git_changed_lines.insert(static_cast<int>(i));
-    }
+  if (revision != panel->git_cache_revision) {
     panel->git_cache_revision = revision;
-    return;
-  }
-
-  if (diff.head_lines.empty()) {
-    if (revision != panel->git_cache_revision) {
-      panel->git_cache_revision = revision;
-      git->refresh_file_head(buffer.path);
-      if (!git->has_file_diff_text(buffer.path)) {
-        git->refresh_file_diff(buffer.path);
-      }
-    }
-    panel->git_changed_lines.clear();
-    panel->git_previous_by_line.clear();
-    panel->git_lines_fingerprint = 0;
-    panel->git_head_fingerprint = 0;
-    for (const auto& [line_no, change] : diff.line_changes) {
-      (void)change;
-      panel->git_changed_lines.insert(line_no);
-    }
-    return;
-  }
-
-  if (!content_settled) {
-    panel->git_cache_revision = revision;
-    return;
-  }
-
-  const uint64_t lines_fp = fingerprint_lines(buffer.lines);
-  const uint64_t head_fp = fingerprint_lines(diff.head_lines);
-  if (lines_fp != panel->git_lines_fingerprint || head_fp != panel->git_head_fingerprint) {
-    panel->git_lines_fingerprint = lines_fp;
-    panel->git_head_fingerprint = head_fp;
-    const LineDiffResult line_diff = compute_line_diff(diff.head_lines, buffer.lines);
-    panel->git_changed_lines = line_diff.changed_new_lines;
-    panel->git_previous_by_line.clear();
-    for (const auto& [line, content] : line_diff.previous_content_by_new_line) {
-      panel->git_previous_by_line[line] = content;
+    if (!git->has_file_diff_text(buffer.path)) {
+      git->refresh_file_diff(buffer.path);
     }
   }
-  panel->git_cache_revision = revision;
+
+  apply_git_diff_to_panel(panel, git->file_diff(buffer.path), buffer.lines);
 }
 
 const BracketPairHighlight& cached_bracket_highlight(EditorPanelState* panel,
@@ -2448,6 +2437,15 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
                      const std::shared_ptr<ISymbolProvider>& symbols,
                      SymbolWorkspaceIndexer* symbol_indexer, EditorBuffer* buffer,
                      EditorFindState* find, MainLayoutState* layout_state) {
+  // #region agent log
+  {
+    const bool allowed = completion_allowed_at_cursor(*buffer);
+    std::ostringstream data;
+    data << "{\"allowed\":" << (allowed ? "true" : "false")
+         << ",\"has_symbols\":" << (symbols != nullptr ? "true" : "false") << "}";
+    editor_debug_agent_log("D", "editor_panel.cpp:open_completion", "enter", data.str());
+  }
+  // #endregion
   if (completion == nullptr) {
     return;
   }
@@ -2665,6 +2663,16 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (event_is_completion(event)) {
+    // #region agent log
+    {
+      const std::string& input = event.input();
+      std::ostringstream data;
+      data << "{\"input_hex\":\"" << editor_debug_bytes_hex(input)
+           << "\",\"is_ctrl_space\":" << (event_is_ctrl_space(event) ? "true" : "false") << "}";
+      editor_debug_agent_log("D", "editor_panel.cpp:handle_editor_keys", "completion_shortcut",
+                             data.str());
+    }
+    // #endregion
     open_completion(completion, workspace, symbols, symbol_indexer, buffer, find, layout_state);
     return true;
   }
@@ -3529,7 +3537,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         workspace->ensure_buffer();
         const EditorBuffer& buf = workspace->buffer;
         const bool settled = editor_content_settled(*panel_state);
-        sync_git_cache(panel_state.get(), git_service, buf, settled);
+        sync_git_cache(panel_state.get(), git_service, buf);
         if (!settled || panel_state->lsp_sync_pending ||
             panel_state->block_comment_token != buf.view_token) {
           layout_state->request_ui_tick = true;

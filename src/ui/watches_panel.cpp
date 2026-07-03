@@ -348,7 +348,7 @@ bool handle_toolbar_mouse(WatchesPanelState* state, DebugModel* model,
       if (send_pause) {
         send_pause();
       }
-    } else if (model->state == DebugState::kStopped) {
+    } else if (model->state == DebugState::kStopped && !model->is_post_mortem) {
       if (send_continue) {
         send_continue();
       }
@@ -926,13 +926,16 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
 
     const bool running = model->state == DebugState::kRunning;
     const bool stopped = model->state == DebugState::kStopped;
-    const bool play_disabled = !running && !stopped;
+    const bool play_disabled =
+        (!running && !stopped) || (stopped && model->is_post_mortem);
 
     Element play_content;
     if (running) {
       play_content = text(" ⏸ ") | bold | color(theme::Pause());
-    } else if (stopped) {
+    } else if (stopped && !model->is_post_mortem) {
       play_content = text(" ▶ ") | bold | color(theme::Play());
+    } else if (stopped && model->is_post_mortem) {
+      play_content = text(" ▶ ") | color(theme::Muted());
     } else {
       play_content = text(" ▶ ");
     }

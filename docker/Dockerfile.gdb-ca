@@ -1,0 +1,25 @@
+# Reproducible build of GDB + Core Analyzer for tgdb bundling.
+FROM ubuntu:24.04
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    build-essential \
+    curl \
+    git \
+    python3-dev \
+    texinfo \
+    libncurses-dev \
+    libreadline-dev \
+    zlib1g-dev \
+    libgmp-dev \
+    libmpfr-dev \
+    libmpc-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY cmake/build_gdb_core_analyzer.sh /build/build_gdb_core_analyzer.sh
+RUN chmod +x /build/build_gdb_core_analyzer.sh
+
+ENV TGDB_GDB_CA_GDB_VERSION=16.3
+RUN /build/build_gdb_core_analyzer.sh /build/gdb-ca.tar.gz
+
+CMD ["cat", "/build/gdb-ca.tar.gz"]

@@ -78,6 +78,7 @@ struct ConsolePanelTabs {
   static constexpr int kSearch = 4;
   static constexpr int kCallHierarchy = 5;
   static constexpr int kGit = 6;
+  static constexpr int kCoreAnalyzer = 7;
   int selected_tab = kTerminal;
 };
 
@@ -92,6 +93,8 @@ struct MainLayoutState {
   AppSettings* app_settings = nullptr;
   std::function<void()> apply_app_settings_callback;
   ConsolePanelTabs console_tabs;
+  bool core_analyzer_search_focus = false;
+  bool show_core_analyzer_tab = false;
   TextInputFocus text_input_focus = TextInputFocus::None;
   bool focus_sync_needed = false;
   bool pending_watches_focus = false;

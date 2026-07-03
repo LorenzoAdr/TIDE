@@ -6,34 +6,21 @@
 #include <unordered_set>
 #include <vector>
 
+#include "backend/idebug_backend.hpp"
+
 namespace tgdb {
 
-struct StackFrameInfo {
-  int id = 0;
-  std::string name;
-  std::string file;
-  int line = 0;
-};
-
-struct VariableInfo {
-  std::string name;
-  std::string expression;
-  std::string value;
-  std::string type;
-  int variables_reference = 0;
-  int depth = 0;
+struct CoreAnalyzerInstance {
+  std::string address_hex;
+  std::uintptr_t address = 0;
+  std::size_t size = 0;
+  std::string type_name;
+  std::string reference_summary;
 };
 
 struct WatchEntry {
   std::string expression;
   std::string value;
-};
-
-struct BreakpointInfo {
-  std::string file;
-  int line = 0;
-  bool verified = false;
-  std::string message;
 };
 
 enum class DebugState {
@@ -61,6 +48,15 @@ struct DebugModel {
   std::unordered_map<std::string, std::vector<VariableInfo>> variable_children;
   std::vector<WatchEntry> watches;
   std::vector<std::string> console_output;
+  std::vector<std::string> core_analyzer_log;
+
+  SessionMode session_mode = SessionMode::kLaunch;
+  CoreAnalysisMode core_analysis_mode = CoreAnalysisMode::kGdbOnly;
+  std::string core_path;
+  bool is_post_mortem = false;
+  std::string core_analyzer_search_query;
+  std::vector<CoreAnalyzerInstance> core_analyzer_instances;
+  int core_analyzer_selected_instance = -1;
 
   std::unordered_map<std::string, std::unordered_set<int>> breakpoints_by_file;
 
@@ -71,6 +67,7 @@ struct DebugModel {
   uint64_t view_token = 0;
 
   void append_console(const std::string& line);
+  void append_core_analyzer_log(const std::string& line);
   void set_stopped(int thread_id, const std::string& reason);
   void set_running();
   void set_terminated();

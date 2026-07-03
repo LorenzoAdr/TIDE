@@ -12,6 +12,7 @@
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
+#include "util/core_analyzer_support.hpp"
 #include "util/path_normalize.hpp"
 #include "util/shell_args.hpp"
 
@@ -32,12 +33,24 @@ std::string step_title(WizardStep step) {
       return "Argumentos de lanzamiento";
     case WizardStep::PickProcess:
       return "Elegir proceso (PID)";
+    case WizardStep::PickCoreFile:
+      return "Elegir core dump";
+    case WizardStep::ChooseCoreBackend:
+      return "Modo de análisis";
   }
   return "Conectar";
 }
 
 std::string mode_label(WizardMode mode) {
-  return mode == WizardMode::Launch ? "Launch" : "Attach";
+  switch (mode) {
+    case WizardMode::Launch:
+      return "Launch";
+    case WizardMode::Attach:
+      return "Attach";
+    case WizardMode::LoadCore:
+      return "Core";
+  }
+  return "Debug";
 }
 
 bool update_f2_mode_hover(ConnectionWizardState* state, MainLayoutState* layout_state, int x,
@@ -50,6 +63,8 @@ bool update_f2_mode_hover(ConnectionWizardState* state, MainLayoutState* layout_
     layout_state->clickable.set_hover(press_id::f2_mode(0));
   } else if (state->attach_mode_box.Contain(x, y)) {
     layout_state->clickable.set_hover(press_id::f2_mode(1));
+  } else if (state->core_mode_box.Contain(x, y)) {
+    layout_state->clickable.set_hover(press_id::f2_mode(2));
   } else {
     layout_state->clickable.clear_hover_if(press_id::is_f2_hover);
   }
@@ -155,6 +170,11 @@ void activate_browser_row(ConnectionWizardState* state, MainLayoutState* layout_
   state->selected_program = entry.path;
   if (state->mode == WizardMode::Launch) {
     begin_pick_args(state);
+  } else if (state->mode == WizardMode::LoadCore) {
+    state->step = WizardStep::PickCoreFile;
+    state->browser.browser_path =
+        fs::path(entry.path).parent_path().string();
+    state->browser.reload_browser_entries(true);
   } else {
     state->step = WizardStep::PickProcess;
     state->all_processes.clear();
@@ -172,6 +192,8 @@ void ConnectionWizardState::reset() {
   mode_selected = 0;
   browser.reset(workspace_root.empty() ? browser.launch_root : workspace_root);
   selected_program.clear();
+  selected_core_path.clear();
+  core_backend_selected = 0;
   launch_cwd.clear();
   args_line.clear();
   args_completion_matches.clear();
@@ -208,6 +230,25 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           }
         };
 
+        auto finish_core_load = [&](CoreAnalysisMode analysis) {
+          ConnectionResult result;
+          result.mode = SessionMode::kCore;
+          result.program = state->selected_program;
+          result.workspace_root = state->workspace_root;
+          result.core_path = state->selected_core_path;
+          result.core_analysis = analysis;
+          finish(result);
+        };
+
+        auto after_core_file_picked = [&]() {
+          if (core_analyzer_supported()) {
+            state->step = WizardStep::ChooseCoreBackend;
+            state->core_backend_selected = 0;
+          } else {
+            finish_core_load(CoreAnalysisMode::kGdbOnly);
+          }
+        };
+
         auto go_back = [&]() {
           switch (state->step) {
             case WizardStep::ChooseMode:
@@ -238,6 +279,19 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
               }
               state->browser.browser_loaded_path.clear();
               state->browser.reload_browser_entries(true);
+              break;
+            case WizardStep::PickCoreFile:
+              state->step = WizardStep::PickBinary;
+              state->selected_core_path.clear();
+              if (!state->selected_program.empty()) {
+                state->browser.browser_path =
+                    fs::path(state->selected_program).parent_path().string();
+              }
+              state->browser.browser_loaded_path.clear();
+              state->browser.reload_browser_entries(true);
+              break;
+            case WizardStep::ChooseCoreBackend:
+              state->step = WizardStep::PickCoreFile;
               break;
           }
         };
@@ -271,20 +325,29 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
             state->mode = WizardMode::Attach;
             state->mode_selected = 1;
           }
+          if (event == Event::Character('3')) {
+            state->mode = WizardMode::LoadCore;
+            state->mode_selected = 2;
+          }
           if (event == Event::ArrowDown || event == Event::Character('j')) {
-            state->mode_selected = 1;
-            state->mode = WizardMode::Attach;
+            state->mode_selected = std::min(2, state->mode_selected + 1);
+            state->mode = state->mode_selected == 0   ? WizardMode::Launch
+                          : state->mode_selected == 1 ? WizardMode::Attach
+                                                      : WizardMode::LoadCore;
             return true;
           }
           if (event == Event::ArrowUp || event == Event::Character('k')) {
-            state->mode_selected = 0;
-            state->mode = WizardMode::Launch;
+            state->mode_selected = std::max(0, state->mode_selected - 1);
+            state->mode = state->mode_selected == 0   ? WizardMode::Launch
+                          : state->mode_selected == 1 ? WizardMode::Attach
+                                                      : WizardMode::LoadCore;
             return true;
           }
           if (event == Event::Return) {
             trigger_press(layout_state, press_id::f2_mode(state->mode_selected));
-            state->mode =
-                state->mode_selected == 0 ? WizardMode::Launch : WizardMode::Attach;
+            state->mode = state->mode_selected == 0   ? WizardMode::Launch
+                          : state->mode_selected == 1 ? WizardMode::Attach
+                                                      : WizardMode::LoadCore;
             state->step = WizardStep::PickBinary;
             state->browser.browser_path =
                 canonical_browser_root(state->workspace_root.empty()
@@ -306,6 +369,97 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
               state->mode_selected = 1;
               state->mode = WizardMode::Attach;
               trigger_press(layout_state, press_id::f2_mode(1));
+              return true;
+            }
+            if (state->core_mode_box.Contain(m.x, m.y)) {
+              state->mode_selected = 2;
+              state->mode = WizardMode::LoadCore;
+              trigger_press(layout_state, press_id::f2_mode(2));
+              return true;
+            }
+          }
+          return true;
+        }
+
+        if (state->step == WizardStep::PickCoreFile) {
+          state->browser.ensure_browser_entries();
+
+          if (event == Event::ArrowDown || event == Event::Character('j')) {
+            state->browser.selected = std::min(
+                state->browser.selected + 1,
+                std::max(0, static_cast<int>(state->browser.entries.size()) - 1));
+            return true;
+          }
+          if (event == Event::ArrowUp || event == Event::Character('k')) {
+            state->browser.selected = std::max(0, state->browser.selected - 1);
+            return true;
+          }
+          if (event == Event::Return) {
+            if (state->browser.entries.empty()) {
+              return true;
+            }
+            const auto& entry =
+                state->browser.entries[static_cast<std::size_t>(state->browser.selected)];
+            if (entry.is_directory || !is_regular_file_path(entry.path)) {
+              return true;
+            }
+            state->selected_core_path = entry.path;
+            after_core_file_picked();
+            return true;
+          }
+          if (event.is_mouse() && event.mouse().button == Mouse::Left &&
+              event.mouse().motion == Mouse::Pressed) {
+            const auto& m = event.mouse();
+            if (state->browser.browser_list_box.Contain(m.x, m.y)) {
+              const int row = state->browser.browser_list_start +
+                              (m.y - state->browser.browser_list_box.y_min);
+              if (row >= 0 && row < static_cast<int>(state->browser.entries.size())) {
+                const auto& entry = state->browser.entries[static_cast<std::size_t>(row)];
+                if (!entry.is_directory && is_regular_file_path(entry.path)) {
+                  state->selected_core_path = entry.path;
+                  after_core_file_picked();
+                }
+              }
+              return true;
+            }
+          }
+          return true;
+        }
+
+        if (state->step == WizardStep::ChooseCoreBackend) {
+          if (event == Event::Character('1')) {
+            state->core_backend_selected = 0;
+          }
+          if (event == Event::Character('2') && core_analyzer_supported()) {
+            state->core_backend_selected = 1;
+          }
+          if (event == Event::ArrowDown || event == Event::Character('j')) {
+            if (core_analyzer_supported()) {
+              state->core_backend_selected = 1;
+            }
+            return true;
+          }
+          if (event == Event::ArrowUp || event == Event::Character('k')) {
+            state->core_backend_selected = 0;
+            return true;
+          }
+          if (event == Event::Return) {
+            const CoreAnalysisMode analysis =
+                state->core_backend_selected == 1 && core_analyzer_supported()
+                    ? CoreAnalysisMode::kCoreAnalyzer
+                    : CoreAnalysisMode::kGdbOnly;
+            finish_core_load(analysis);
+            return true;
+          }
+          if (event.is_mouse() && event.mouse().button == Mouse::Left &&
+              event.mouse().motion == Mouse::Pressed) {
+            const auto& m = event.mouse();
+            if (state->gdb_backend_box.Contain(m.x, m.y)) {
+              state->core_backend_selected = 0;
+              return true;
+            }
+            if (core_analyzer_supported() && state->ca_backend_box.Contain(m.x, m.y)) {
+              state->core_backend_selected = 1;
               return true;
             }
           }
@@ -480,19 +634,31 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
               layout_state != nullptr && layout_state->clickable.is_hovered(press_id::f2_mode(0));
           const bool attach_hovered =
               layout_state != nullptr && layout_state->clickable.is_hovered(press_id::f2_mode(1));
+          const bool core_hovered =
+              layout_state != nullptr && layout_state->clickable.is_hovered(press_id::f2_mode(2));
           const bool launch_pressed =
               layout_state != nullptr && layout_state->clickable.is_pressed(press_id::f2_mode(0));
           const bool attach_pressed =
               layout_state != nullptr && layout_state->clickable.is_pressed(press_id::f2_mode(1));
+          const bool core_pressed =
+              layout_state != nullptr && layout_state->clickable.is_pressed(press_id::f2_mode(2));
           Element launch_row = StyleListRow(
               text(" 1  Launch — lanzar ejecutable") | color(theme::Header()), launch_sel,
               launch_hovered, launch_pressed);
           Element attach_row = StyleListRow(
               text(" 2  Attach — adjuntar a proceso en ejecución") | color(theme::Header()),
-              !launch_sel, attach_hovered, attach_pressed);
+              state->mode_selected == 1, attach_hovered, attach_pressed);
+          const std::string core_label =
+              core_analyzer_supported()
+                  ? " 3  Cargar core — post-mortem (GDB / Core Analyzer)"
+                  : " 3  Cargar core — post-mortem (GDB)";
+          Element core_row = StyleListRow(
+              text(core_label) | color(theme::Header()),
+              state->mode_selected == 2, core_hovered, core_pressed);
           body = {launch_row | reflect(state->launch_mode_box),
-                  attach_row | reflect(state->attach_mode_box)};
-          help = "1/2 o j/k  Enter  clic  Esc cancelar";
+                  attach_row | reflect(state->attach_mode_box),
+                  core_row | reflect(state->core_mode_box)};
+          help = "1/2/3 o j/k  Enter  clic  Esc cancelar";
         } else if (state->step == WizardStep::PickBinary) {
           state->browser.ensure_browser_entries();
           body.push_back(text("workspace: " + state->workspace_root) |
@@ -596,6 +762,66 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           }
           body.push_back(vbox(std::move(process_rows)) | reflect(state->process_list_box));
           help = "escribe para filtrar  j/k  Enter  clic  Esc atrás";
+        } else if (state->step == WizardStep::PickCoreFile) {
+          state->browser.ensure_browser_entries();
+          body.push_back(text("ejecutable: " + state->selected_program) |
+                         color(theme::Muted()));
+          body.push_back(text("core: " + state->browser.browser_path) | color(theme::Muted()));
+          body.push_back(separator());
+          const int max_rows = 12;
+          state->browser.browser_list_start = std::max(
+              0, std::min(state->browser.selected,
+                          std::max(0, static_cast<int>(state->browser.entries.size()) -
+                                            max_rows)));
+          const int start = state->browser.browser_list_start;
+          const int end =
+              std::min(static_cast<int>(state->browser.entries.size()), start + max_rows);
+          Elements list_rows;
+          for (int i = start; i < end; ++i) {
+            const auto& row = state->browser.entries[i];
+            std::string prefix = row.is_directory ? "[dir] " : "      ";
+            const std::string row_id = press_id::f2_browser_row(i);
+            const bool selected = i == state->browser.selected;
+            const bool hovered =
+                layout_state != nullptr && layout_state->clickable.is_hovered(row_id);
+            const bool pressed =
+                layout_state != nullptr && layout_state->clickable.is_pressed(row_id);
+            Element line = text(prefix + row.name);
+            if (row.is_directory) {
+              line = line | color(theme::Accent());
+            }
+            line = StyleListRow(std::move(line), selected, hovered, pressed);
+            list_rows.push_back(line);
+          }
+          if (list_rows.empty()) {
+            list_rows.push_back(text("(vacío)") | color(theme::Muted()));
+          }
+          body.push_back(vbox(std::move(list_rows)) |
+                         reflect(state->browser.browser_list_box));
+          help = "j/k  Enter archivo core  clic  Esc atrás";
+        } else if (state->step == WizardStep::ChooseCoreBackend) {
+          body.push_back(text("ejecutable: " + state->selected_program) |
+                         color(theme::Muted()));
+          body.push_back(text("core: " + state->selected_core_path) | color(theme::Muted()));
+          body.push_back(separator());
+          const bool gdb_sel = state->core_backend_selected == 0;
+          Element gdb_row = StyleListRow(
+              text(" 1  GDB post-mortem — depuración clásica") | color(theme::Header()), gdb_sel,
+              false, false);
+          Element ca_row;
+          if (core_analyzer_supported()) {
+            ca_row = StyleListRow(
+                text(" 2  Core Analyzer — terminal CA + buscador de clases") |
+                    color(theme::Header()),
+                !gdb_sel, false, false);
+            body = {gdb_row | reflect(state->gdb_backend_box),
+                    ca_row | reflect(state->ca_backend_box)};
+            help = "1/2 o j/k  Enter  Esc atrás";
+          } else {
+            body = {gdb_row | reflect(state->gdb_backend_box),
+                    text(" Core Analyzer no disponible en esta build") | color(theme::Muted())};
+            help = "Enter  Esc atrás";
+          }
         }
 
         Element dialog = window(

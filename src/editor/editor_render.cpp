@@ -5,7 +5,7 @@
 
 #include "ftxui/dom/elements.hpp"
 #include "indexer/index_rules.hpp"
-#include "ui/cursor_blink.hpp"
+#include "ui/cursor_blink_ui.hpp"
 #include "ui/theme.hpp"
 #include "util/cpp_highlight.hpp"
 #include "util/build_file_highlight.hpp"

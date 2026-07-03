@@ -38,13 +38,34 @@ ln -sf build/compile_commands.json .
 ./tools/compile.sh -y                   # reuse .bundle-config
 ./tools/compile.sh --bundle-clangd      # embed official clangd (Linux x86_64)
 ./tools/compile.sh --no-bundle-clangd   # slim binary (~53 MB)
-./tools/compile.sh --bundle-gdb         # embed gdb-static Full
+./tools/compile.sh --bundle-gdb         # embed gdb + Core Analyzer
 ./tools/compile.sh --help
 ```
 
 When `TGDB_BUNDLE_CLANGD=ON`, the build downloads the official [clangd/clangd](https://github.com/clangd/clangd/releases) Linux x86_64 release, strips it, compresses it, and embeds it in `tgdb` (+~35 MB compressed, ~87 MB total). At runtime the blob is extracted once to `$XDG_CACHE_HOME/tgdb/bundled/clangd-<version>/`.
 
-When `TGDB_BUNDLE_GDB=ON`, the build downloads [gdb-static Full](https://github.com/guyush1/gdb-static/releases) (x86_64, musl, Python+DAP baked in), verifies static linking and DAP, compresses it, and embeds it (+~25–40 MB compressed). Runtime extraction: `$XDG_CACHE_HOME/tgdb/bundled/gdb-<version>/`.
+When `TGDB_BUNDLE_GDB=ON`, choose the bundled gdb kind at compile time:
+
+| `TGDB_GDB_BUNDLE_KIND` | Runtime | Core Analyzer UI |
+|------------------------|---------|------------------|
+| `static` | gdb-static (musl, no deps) | disabled |
+| `core_analyzer` | GDB 16.3 + CA (dynamic deps) | enabled |
+
+Use `./tools/compile.sh` (TUI wizard) or flags:
+
+```bash
+./tools/compile.sh --bundle-gdb-static -y   # portable gdb, no CA
+./tools/compile.sh --bundle-gdb-ca -y       # gdb + Core Analyzer
+./tools/compile.sh --no-bundle-gdb -y       # system gdb on PATH
+```
+
+Static bundle downloads [gdb-static Full](https://github.com/guyush1/gdb-static/releases). Core Analyzer bundle uses a cached tarball or `-DTGDB_BUILD_GDB_CA=ON` / `docker/Dockerfile.gdb-ca`. Runtime extraction: `$XDG_CACHE_HOME/tgdb/bundled/gdb-<version>/`.
+
+Native gdb+CA build requires dev packages (Debian/Ubuntu):
+
+```bash
+sudo apt install libgmp-dev libmpfr-dev libmpc-dev
+```
 
 Build-time tools (when bundling): `curl` or `wget`, `zstd`, `objcopy`, `sha256sum`; for clangd also `unzip`, `strip`, `ldd`.
 
@@ -68,6 +89,7 @@ Runtime requirements for the **full pack** (embedded clangd + gdb):
 | `tgdb` | `libc`, `libm`, optional `libstdc++`/`libgcc_s` | Set by Docker image (~2.31 focal, ~2.27 bionic) |
 | Embedded clangd | `libc`, `libm`, `libpthread`, `librt`, `libdl` | **≥ 2.18** (official LLVM release) |
 | Embedded gdb-static | none (musl static) | none |
+| Embedded gdb + Core Analyzer | depends on build | varies |
 
 `--static-libstdc++` (also available in `compile.sh`) removes the `libstdc++.so.6` runtime dependency from `tgdb`; glibc is still required from the host.
 
