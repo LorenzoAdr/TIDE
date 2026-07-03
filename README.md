@@ -1,3 +1,12 @@
+```
+████████╗██╗   ██╗██╗██████╗ ███████╗
+╚══██╔══╝██║   ██║██║██╔══██╗██╔════╝
+   ██║   ██║   ██║██║██║  ██║█████╗
+   ██║   ██║   ██║██║██║  ██║██╔══╝
+   ██║   ╚██████╔╝██║██████╔╝███████╗
+   ╚═╝    ╚═════╝ ╚═╝╚═════╝ ╚══════╝
+```
+
 # tgdb
 
 Terminal IDE for C++ with an integrated Visual Studio–style debugger. Built with [FTXUI](https://github.com/ArthurSonzogni/FTXUI), connected to GDB through the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) (`gdb -i=dap`).
@@ -56,3 +65,9 @@ Press **F1** inside tgdb for the in-app shortcuts dialog.
 | Bottom | Terminal | GDB console |
 
 See the [user guide](docs/user-guide.md) for details on panels, shortcuts, and workflows.
+
+## License
+
+Copyright © 2026 Lorenzo Arias del Real ([lorenzo.adr@proton.me](mailto:lorenzo.adr@proton.me))
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).

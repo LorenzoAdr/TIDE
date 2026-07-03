@@ -1,6 +1,17 @@
+```
+████████╗██╗   ██╗██╗██████╗ ███████╗
+╚══██╔══╝██║   ██║██║██╔══██╗██╔════╝
+   ██║   ██║   ██║██║██║  ██║█████╗
+   ██║   ██║   ██║██║██║  ██║██╔══╝
+   ██║   ╚██████╔╝██║██████╔╝███████╗
+   ╚═╝    ╚═════╝ ╚═╝╚═════╝ ╚══════╝
+```
+
 # tgdb documentation
 
 Terminal IDE for C++ with an integrated debugger. This folder contains the full project documentation.
+
+**Author:** Lorenzo Arias del Real · [lorenzo.adr@proton.me](mailto:lorenzo.adr@proton.me) · [Apache License 2.0](../LICENSE)
 
 ## Contents
 
