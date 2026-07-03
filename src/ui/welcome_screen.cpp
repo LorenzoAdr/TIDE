@@ -132,8 +132,6 @@ Element render_welcome_screen(WelcomeScreenState* state, MainLayoutState* layout
                 });
 
   Element footer = vbox({
-      render_welcome_logo(),
-      text(""),
       text("Lorenzo Arias del Real") | color(theme::Muted()),
       text("lorenzo.adr@proton.me") | color(theme::Muted()),
       text("Apache License 2.0") | color(theme::Muted()),
