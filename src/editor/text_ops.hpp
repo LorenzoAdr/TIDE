@@ -1,5 +1,6 @@
 #pragma once
 
+#include "editor/line_comment.hpp"
 #include "editor/editor_state.hpp"
 
 namespace tgdb {
@@ -54,5 +55,8 @@ void select_lines_range(EditorBuffer* buffer, int anchor_line, int head_line);
 
 void extend_block_selection_vertical(EditorBuffer* buffer, int direction);
 void goto_buffer_line(EditorBuffer* buffer, int line_one_based, int visible_lines);
+
+void comment_lines(EditorBuffer* buffer, const LineCommentStyle& style);
+void uncomment_lines(EditorBuffer* buffer, const LineCommentStyle& style);
 
 }  // namespace tgdb

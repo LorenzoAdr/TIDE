@@ -63,6 +63,8 @@ const std::vector<ShortcutSection>& shortcut_sections() {
            {"Ctrl+Z", "Deshacer"},
            {"Ctrl+Alt+Z / Ctrl+Shift+Z / Ctrl+Y", "Rehacer"},
            {"Ctrl+C", "Copiar selección"},
+           {"Ctrl+K Ctrl+C", "Comentar línea(s) (prefijo según tipo de archivo)"},
+           {"Ctrl+K Ctrl+U", "Quitar comentario de línea(s)"},
            {"Ctrl+X", "Cortar selección"},
            {"Ctrl+V", "Pegar"},
            {"Ctrl+U", "Media página arriba (cursor + scroll)"},

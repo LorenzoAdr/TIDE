@@ -4,6 +4,7 @@
 #include <cctype>
 
 #include "editor/bracket_match.hpp"
+#include "editor/line_comment.hpp"
 #include "editor/text_search.hpp"
 #include "editor/undo_stack.hpp"
 #include "symbols/completion_snippet.hpp"
@@ -1345,6 +1346,122 @@ void goto_buffer_line(EditorBuffer* buffer, int line_one_based, int visible_line
     buffer->scroll = std::max(0, line - visible_lines / 2);
   }
   ensure_scroll_visible(buffer, visible_lines);
+}
+
+void adjust_cursors_after_line_edit(EditorBuffer* buffer, int line, int col, int delta) {
+  if (delta == 0) {
+    return;
+  }
+  for (auto& cursor : buffer->cursors) {
+    if (cursor.head.line == line && cursor.head.col >= col) {
+      cursor.head.col += delta;
+    }
+    if (cursor.anchor.line == line && cursor.anchor.col >= col) {
+      cursor.anchor.col += delta;
+    }
+  }
+}
+
+void collect_affected_lines(const EditorBuffer& buffer, std::vector<int>* lines) {
+  if (lines == nullptr) {
+    return;
+  }
+  lines->clear();
+  std::vector<int> unique;
+  unique.reserve(buffer.cursors.size());
+  for (const auto& cursor : buffer.cursors) {
+    int start_line = 0;
+    int start_col = 0;
+    int end_line = 0;
+    int end_col = 0;
+    if (cursor.has_selection()) {
+      cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
+    } else {
+      start_line = cursor.head.line;
+      end_line = cursor.head.line;
+    }
+    for (int line = start_line; line <= end_line; ++line) {
+      unique.push_back(line);
+    }
+  }
+  std::sort(unique.begin(), unique.end());
+  unique.erase(std::unique(unique.begin(), unique.end()), unique.end());
+  *lines = std::move(unique);
+}
+
+std::size_t comment_insert_column(const std::string& line) {
+  std::size_t index = 0;
+  while (index < line.size() && std::isspace(static_cast<unsigned char>(line[index]))) {
+    ++index;
+  }
+  return index;
+}
+
+void comment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
+  if (buffer == nullptr || buffer->lines.empty()) {
+    return;
+  }
+
+  std::vector<int> lines;
+  collect_affected_lines(*buffer, &lines);
+  if (lines.empty()) {
+    return;
+  }
+
+  push_undo(buffer);
+  for (int line_index : lines) {
+    if (line_index < 0 || line_index >= static_cast<int>(buffer->lines.size())) {
+      continue;
+    }
+    std::string& line = buffer->lines[static_cast<std::size_t>(line_index)];
+    const std::size_t insert_col = comment_insert_column(line);
+    const std::string before = line;
+    comment_line_text(&line, style);
+    if (line != before) {
+      const int delta = static_cast<int>(line.size()) - static_cast<int>(before.size());
+      adjust_cursors_after_line_edit(buffer, line_index, static_cast<int>(insert_col), delta);
+    }
+  }
+
+  for (auto& cursor : buffer->cursors) {
+    cursor.collapse_to_head();
+  }
+  clamp_all_cursors(buffer);
+  merge_overlapping_cursors(buffer);
+  mark_dirty(buffer);
+}
+
+void uncomment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
+  if (buffer == nullptr || buffer->lines.empty()) {
+    return;
+  }
+
+  std::vector<int> lines;
+  collect_affected_lines(*buffer, &lines);
+  if (lines.empty()) {
+    return;
+  }
+
+  push_undo(buffer);
+  for (int line_index : lines) {
+    if (line_index < 0 || line_index >= static_cast<int>(buffer->lines.size())) {
+      continue;
+    }
+    std::string& line = buffer->lines[static_cast<std::size_t>(line_index)];
+    const std::size_t insert_col = comment_insert_column(line);
+    const std::string before = line;
+    if (uncomment_line_text(&line, style)) {
+      const int delta = static_cast<int>(line.size()) - static_cast<int>(before.size());
+      adjust_cursors_after_line_edit(buffer, line_index, static_cast<int>(insert_col), delta);
+    }
+  }
+
+  for (auto& cursor : buffer->cursors) {
+    cursor.collapse_to_head();
+  }
+  clamp_all_cursors(buffer);
+  merge_overlapping_cursors(buffer);
+  mark_dirty(buffer);
 }
 
 }  // namespace tgdb

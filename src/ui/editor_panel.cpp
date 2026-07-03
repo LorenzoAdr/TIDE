@@ -22,6 +22,7 @@
 #include "util/cpp_highlight.hpp"
 #include "lsp/diagnostics.hpp"
 #include "editor/editor_state.hpp"
+#include "editor/line_comment.hpp"
 #include "editor/text_ops.hpp"
 #include "editor/text_search.hpp"
 #include "ftxui/component/component.hpp"
@@ -242,6 +243,7 @@ struct EditorPanelState {
     void clear() { line = -1; }
   };
   SourceSymbolFlash source_flash;
+  bool chord_k_pending = false;
 };
 
 void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState* layout_state,
@@ -2651,6 +2653,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (event == Event::Escape) {
+    panel->chord_k_pending = false;
     return handle_editor_escape(buffer, find, layout_state,
                                 goto_state != nullptr ? &goto_state->open : nullptr, completion,
                                 panel, diagnostic_modal, git_modal);
@@ -2707,6 +2710,29 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     undo_edit(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     notify_editor_buffer_changed(workspace, panel, symbols);
+    return true;
+  }
+  if (panel->chord_k_pending) {
+    if (event_is_ctrl_c(event)) {
+      panel->chord_k_pending = false;
+      const LineCommentStyle style = line_comment_style_for_path(buffer->path);
+      comment_lines(buffer, style);
+      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+      notify_editor_buffer_changed(workspace, panel, symbols);
+      return true;
+    }
+    if (event_is_ctrl_u(event)) {
+      panel->chord_k_pending = false;
+      const LineCommentStyle style = line_comment_style_for_path(buffer->path);
+      uncomment_lines(buffer, style);
+      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+      notify_editor_buffer_changed(workspace, panel, symbols);
+      return true;
+    }
+    panel->chord_k_pending = false;
+  }
+  if (event_is_ctrl_k(event)) {
+    panel->chord_k_pending = true;
     return true;
   }
   if (event_is_ctrl_c(event)) {

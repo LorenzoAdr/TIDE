@@ -32,6 +32,8 @@ Press **F1** inside tgdb to open the in-app shortcuts dialog (scrollable). This 
 | Ctrl+Z | Undo |
 | Ctrl+Alt+Z / Ctrl+Shift+Z / Ctrl+Y | Redo |
 | Ctrl+C | Copy selection |
+| Ctrl+K Ctrl+C | Toggle line comment (file-type prefix) |
+| Ctrl+K Ctrl+U | Remove line comment |
 | Ctrl+V | Paste |
 | Ctrl+U | Half page up (moves cursor) |
 | Ctrl+I | Half page down (moves cursor) |

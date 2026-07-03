@@ -51,6 +51,7 @@ bool event_is_ctrl_alt_h(const ftxui::Event& event);
 bool event_is_ctrl_shift_h(const ftxui::Event& event);
 bool event_is_ctrl_h(const ftxui::Event& event);
 bool event_is_ctrl_g(const ftxui::Event& event);
+bool event_is_ctrl_k(const ftxui::Event& event);
 bool event_is_ctrl_u(const ftxui::Event& event);
 bool event_is_ctrl_i(const ftxui::Event& event);
 bool event_is_ctrl_d(const ftxui::Event& event);

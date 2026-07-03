@@ -372,6 +372,12 @@ bool event_is_ctrl_g(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[27;5;71~");
 }
 
+bool event_is_ctrl_k(const ftxui::Event& event) {
+  return event == ftxui::Event::CtrlK ||
+         event == ftxui::Event::Special("\x1B[27;5;107~") ||
+         event == ftxui::Event::Special("\x1B[27;5;75~");
+}
+
 bool event_is_ctrl_u(const ftxui::Event& event) {
   return event == ftxui::Event::CtrlU ||
          event == ftxui::Event::Special("\x1B[27;5;117~") ||

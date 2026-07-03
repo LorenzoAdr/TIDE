@@ -80,6 +80,7 @@ add_executable(tgdb
   src/editor/editor_state.cpp
   src/editor/cursor_history.cpp
   src/editor/text_ops.cpp
+  src/editor/line_comment.cpp
   src/editor/text_search.cpp
   src/editor/selection_occurrence_runner.cpp
   src/editor/find_match_runner.cpp
@@ -169,6 +170,7 @@ add_executable(text_ops_test
   tests/text_ops_test.cpp
   src/editor/editor_state.cpp
   src/editor/text_ops.cpp
+  src/editor/line_comment.cpp
   src/editor/text_search.cpp
   src/editor/undo_stack.cpp
   src/editor/clipboard.cpp
