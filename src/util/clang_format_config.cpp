@@ -121,16 +121,19 @@ ClangBasedOnStyle parse_based_on_style(const std::string& value) {
 }
 
 ClangUseTab parse_use_tab(const std::string& value) {
-  if (value == "Never") {
+  std::string lower = value;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  if (lower == "false" || lower == "never") {
     return ClangUseTab::kNever;
   }
-  if (value == "ForIndentation") {
+  if (lower == "true" || lower == "forindentation") {
     return ClangUseTab::kForIndentation;
   }
-  if (value == "ForContinuationAndIndentation") {
+  if (lower == "forcontinuationandindentation") {
     return ClangUseTab::kForContinuationAndIndentation;
   }
-  if (value == "Always") {
+  if (lower == "always") {
     return ClangUseTab::kAlways;
   }
   return ClangUseTab::kNever;
@@ -256,6 +259,12 @@ void apply_key_value(ClangFormatConfig* config, const std::string& key,
 }
 
 void write_line(std::ostream& out, const std::string& key, const std::string& value) {
+  out << key << ": " << value << '\n';
+}
+
+// Debe ir antes que la sobrecarga bool: un const char* no nulo se convierte implícitamente
+// a bool y acabaría escribiendo "true" en lugar del nombre del enum.
+void write_line(std::ostream& out, const std::string& key, const char* value) {
   out << key << ": " << value << '\n';
 }
 

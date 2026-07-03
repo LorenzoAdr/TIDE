@@ -938,7 +938,7 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
 
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
                                      int sym_start, int sym_end, const std::string& symbol,
-                                     bool show_call_hierarchy) {
+                                     const std::string& absolute_path, bool show_call_hierarchy) {
   if (state == nullptr || symbol.empty()) {
     return;
   }
@@ -948,18 +948,39 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
   state->rename_skip_return = false;
   state->anchor_x = x;
   state->anchor_y = y;
+  state->absolute_path = absolute_path;
   state->editor_line = line;
   state->editor_col = col;
   state->editor_sym_start = sym_start;
   state->editor_sym_end = sym_end;
   state->symbol_name = symbol;
+  const bool show_format = is_lsp_trackable_path(absolute_path);
   if (show_call_hierarchy) {
+    if (show_format) {
+      set_items(state, ContextMenuKind::EditorSymbol,
+                {{"Ir a definición", "go_definition"},
+                 {"Ir a implementación", "go_implementation"},
+                 {"Jerarquía de llamadas", "call_hierarchy"},
+                 {"Renombrar", "rename_symbol"},
+                 {"Encontrar referencias", "find_references"},
+                 {"Formatear archivo", "format_file"}});
+    } else {
+      set_items(state, ContextMenuKind::EditorSymbol,
+                {{"Ir a definición", "go_definition"},
+                 {"Ir a implementación", "go_implementation"},
+                 {"Jerarquía de llamadas", "call_hierarchy"},
+                 {"Renombrar", "rename_symbol"},
+                 {"Encontrar referencias", "find_references"}});
+    }
+    return;
+  }
+  if (show_format) {
     set_items(state, ContextMenuKind::EditorSymbol,
               {{"Ir a definición", "go_definition"},
                {"Ir a implementación", "go_implementation"},
-               {"Jerarquía de llamadas", "call_hierarchy"},
                {"Renombrar", "rename_symbol"},
-               {"Encontrar referencias", "find_references"}});
+               {"Encontrar referencias", "find_references"},
+               {"Formatear archivo", "format_file"}});
     return;
   }
   set_items(state, ContextMenuKind::EditorSymbol,

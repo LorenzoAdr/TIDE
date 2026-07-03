@@ -74,7 +74,7 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
 
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
                                      int sym_start, int sym_end, const std::string& symbol,
-                                     bool show_call_hierarchy);
+                                     const std::string& absolute_path, bool show_call_hierarchy);
 
 void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
                                          const std::string& absolute_path, int line, int col,

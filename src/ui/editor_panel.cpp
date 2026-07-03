@@ -2479,7 +2479,8 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
           symbols != nullptr && symbols->supports_call_hierarchy() &&
           is_lsp_trackable_path(buffer->path);
       context_menu_open_editor_symbol(&layout_state->context_menu, m.x, m.y, pos.line, pos.col,
-                                      start_col, end_col, symbol, show_call_hierarchy);
+                                      start_col, end_col, symbol, buffer->path,
+                                      show_call_hierarchy);
       end_mouse_selection(panel);
       return true;
     }
