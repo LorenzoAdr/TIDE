@@ -37,6 +37,14 @@ Element centered_row(Element row) {
   return hbox({filler(), std::move(row), filler()});
 }
 
+Element render_welcome_logo() {
+  Elements logo_rows;
+  for (const auto& line : welcome_logo_lines()) {
+    logo_rows.push_back(text(line.text) | color(line.color) | bold);
+  }
+  return vbox(std::move(logo_rows));
+}
+
 Element render_action_row(const std::string& label, Box* box, MainLayoutState* layout,
                           std::string_view id) {
   const bool hovered = layout != nullptr && layout->clickable.is_hovered(id);
@@ -96,13 +104,8 @@ bool handle_welcome_mouse(WelcomeScreenState* state, MainLayoutState* layout_sta
 }
 
 Element render_welcome_screen(WelcomeScreenState* state, MainLayoutState* layout_state) {
-  Elements logo_rows;
-  for (const auto& line : welcome_logo_lines()) {
-    logo_rows.push_back(text(line.text) | color(line.color) | bold);
-  }
-
   Elements body;
-  body.push_back(vbox(std::move(logo_rows)));
+  body.push_back(render_welcome_logo());
   body.push_back(text(""));
   body.push_back(
       centered_row(text("depura y edita desde la terminal") | color(theme::Muted())));
@@ -128,16 +131,19 @@ Element render_welcome_screen(WelcomeScreenState* state, MainLayoutState* layout
                     text("╰" + hline + "╯") | color(theme::AccentDim()),
                 });
 
-  Element author = vbox({
+  Element footer = vbox({
+      render_welcome_logo(),
+      text(""),
       text("Lorenzo Arias del Real") | color(theme::Muted()),
       text("lorenzo.adr@proton.me") | color(theme::Muted()),
+      text("Apache License 2.0") | color(theme::Muted()),
   });
 
   return vbox({
              filler(),
              centered_row(std::move(framed)),
              filler(),
-             hbox({filler(), std::move(author), text("  ")}),
+             hbox({filler(), std::move(footer), text("  ")}),
          }) |
          flex | bgcolor(theme::PanelBg());
 }
