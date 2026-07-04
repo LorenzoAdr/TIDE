@@ -1,4 +1,4 @@
-							#include <cerrno>
+#include <cerrno>
 #include <cstring>
 #include <iostream>
 #include <sys/prctl.h>
@@ -12,82 +12,73 @@ namespace {
 #define PR_SET_PTRACER 0x59616d61
 #endif
 
+struct prueba {
+int prubea2;
+int prueba2;
+
+	
+};
 
 
-int accumulate (int n) {
-  int total = 0;
-  
-  for (int i = 1; i <= n; ++i) {
-    total += i; 
-  }
-  
-  
-  return total;
+int accumulate(int n) {
+	int total = 0;
 
+	for (int i = 1; i <= n; ++i) {
+		total += i;
+	}
 
+	return total;
 }
 
 void allow_external_debugger() {
-  if (prctl(PR_SET_PTRACER, -1) != 0) {
-    std::cerr << "aviso: no se pudo permitir attach externo (prctl): "
-              << std::strerror(errno) << "\n"
-              << "  prueba: sudosss sysctl kernel.yama.ptrace_scope=0\n"
-              << "  o usa: ./tools/launch.sh ./build/hello\n";
-  }
+	if (prctl(PR_SET_PTRACER, -1) != 0) {
+		std::cerr << "aviso: no se pudo permitir attach externo (prctl): " << std::strerror(errno)
+		          << "\n"
+		          << "  prueba: sudosss sysctl kernel.yama.ptrace_scope=0\n"
+		          << "  o usa: ./tools/launch.sh ./build/hello\n";
+	}
 
-
-
-
-accumulate(0);
+	accumulate(0);
 }
 
-int accumulate2 (int n) {
-  int total = 0;
-  for (int i = 1; i <= n; ++i) {
-    total += i; 
-  }
-    total += 1;
-  return total;
+int accumulate2(int n) {
+	int total = 0;
+	for (int i = 1; i <= n; ++i) {
+		total += i;
+	}
+	total += 1;
+	return total;
 }
 
-}  // namespace
+} // namespace
 
 int main() {
-  allow_external_debugger();
+	allow_external_debugger();
 
+	const pid_t pid = getpid();
+	std::cout << "hello PID " << pid << "\n"
+	          << "Adjunta con: ./tools/launch.sh --attach " << pid << " ./build/hello\n"
+	          << std::flush;
 
+	int counter = 0;
+	int x = 10;
+	int y = 20;
 
+	accumulate(2);
+	allow_external_debugger();
 
+	while (true) {
+		++counter;
+		x = counter * 3;
+		y = x + 7;
+		const int sum = x + y;
+		const int acc = accumulate(counter % 20);
 
+		std::cout << "[" << counter << "] x=" << x << " y=" << y << " sum=" << sum << " acc=" << acc
+		          << std::endl;
+		std::cout << "prueba";
+		sleep(1);
+	}
 
-  const pid_t pid = getpid();
-  std::cout << "hello PID " << pid << "\n"
-            << "Adjunta con: ./tools/launch.sh --attach " << pid
-            << " ./build/hello\n"
-            << std::flush;
-
-  int counter = 0;
-  int x = 10;
-  int y = 20;
-
-
-accumulate(2);
-allow_external_debugger();
-
-
-  while (true) { 
-    ++counter;
-    x = counter * 3;
-    y = x + 7;  
-    const int sum = x + y;
-    const int acc = accumulate(counter % 20);
-    
-
-    std::cout << "[" << counter << "] x=" << x << " y=" << y
-              << " sum=" << sum << " acc=" << acc << std::endl;
-    std::cout << "prueba";
-    sleep(1);
-  }
-
-  return 0;
+	return 0;
 }

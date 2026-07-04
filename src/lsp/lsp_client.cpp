@@ -15,6 +15,7 @@
 #include "lsp/lsp_uri.hpp"
 #include "indexer/index_rules.hpp"
 #include "util/bundled_tools.hpp"
+
 #include "app/workspace_config.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/compile_commands_remap.hpp"
@@ -66,7 +67,8 @@ constexpr const char* kClangdQueryDriver =
 
 }  // namespace
 
-bool LspClient::spawn_clangd(const std::string& compile_commands_dir,
+bool LspClient::spawn_clangd(const std::string& workspace_root,
+                             const std::string& compile_commands_dir,
                              const bool use_gcc_query_driver,
                              const bool background_index) {
   const auto location = resolve_clangd();
@@ -103,6 +105,11 @@ bool LspClient::spawn_clangd(const std::string& compile_commands_dir,
   }
 
   if (pid == 0) {
+    // Do not use child_die_with_parent() here: fork from the lsp-start thread plus
+    // PR_SET_PDEATHSIG inherited by clangd after exec causes immediate SIGTERM.
+    if (!workspace_root.empty()) {
+      ::chdir(workspace_root.c_str());
+    }
     dup2(stdin_pipe[0], STDIN_FILENO);
     dup2(stdout_pipe[1], STDOUT_FILENO);
     ::close(stdin_pipe[0]);
@@ -186,8 +193,7 @@ bool LspClient::initialize(const std::string& workspace_root) {
   params["clientInfo"]["version"] = "0.1.0";
 
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "initialize", std::move(params), 15000, &result)) {
+  if (!send_lsp_request("initialize", std::move(params), 15000, &result)) {
     return false;
   }
 
@@ -197,13 +203,14 @@ bool LspClient::initialize(const std::string& workspace_root) {
     semantic_tokens_supported_ =
         caps.contains("semanticTokensProvider") && caps["semanticTokensProvider"].is_object();
   }
-  transport_.send_notification("initialized", nlohmann::json::object());
+  send_lsp_notification("initialized", nlohmann::json::object());
   return true;
 }
 
 bool LspClient::start(const std::string& workspace_root,
                       const std::string& compile_commands_dir,
                       const bool use_gcc_query_driver, const bool background_index) {
+  intentionally_stopping_.store(false, std::memory_order_release);
   stop();
   if (workspace_root.empty()) {
     return false;
@@ -218,26 +225,28 @@ bool LspClient::start(const std::string& workspace_root,
     const auto setup = ensure_compile_commands_for_clangd(workspace_root, default_config);
     compile_dir = setup.compile_dir;
   }
-  if (!spawn_clangd(compile_dir, use_gcc_query_driver, background_index)) {
+  if (!spawn_clangd(workspace_root, compile_dir, use_gcc_query_driver, background_index)) {
     stop();
     return false;
   }
+  transport_.set_reader_eof_handler([this] { on_transport_reader_eof(); });
   workspace_root_ = workspace_root;
   if (!initialize(workspace_root)) {
     stop();
     return false;
   }
   ready_ = true;
+  intentionally_stopping_.store(false, std::memory_order_release);
   return true;
 }
 
 void LspClient::stop() {
+  intentionally_stopping_.store(true, std::memory_order_release);
   ready_ = false;
 
-  if (child_pid_ > 0) {
-    transport_.send_notification("exit", nlohmann::json::object());
+  if (child_pid_ > 0 && stdin_write_fd_ >= 0) {
+    send_lsp_notification("exit", nlohmann::json::object());
   }
-  transport_.stop();
 
   if (stdin_write_fd_ >= 0) {
     ::close(stdin_write_fd_);
@@ -247,6 +256,8 @@ void LspClient::stop() {
     ::close(stdout_read_fd_);
     stdout_read_fd_ = -1;
   }
+
+  transport_.stop();
 
   if (child_pid_ > 0) {
     int status = 0;
@@ -264,6 +275,8 @@ void LspClient::stop() {
     child_pid_ = -1;
   }
 
+  next_request_id_ = 1;
+
   std::lock_guard<std::mutex> lock(mutex_);
   documents_.clear();
   symbol_cache_.clear();
@@ -280,6 +293,37 @@ int64_t LspClient::steady_now_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
              std::chrono::steady_clock::now().time_since_epoch())
       .count();
+}
+
+bool LspClient::send_lsp_request(const std::string& method, nlohmann::json params, int timeout_ms,
+                                   nlohmann::json* out) {
+  std::lock_guard<std::mutex> lock(transport_io_mutex_);
+  const int id = next_request_id_++;
+  return transport_.send_request(id, method, std::move(params), timeout_ms, out);
+}
+
+void LspClient::send_lsp_notification(const std::string& method, nlohmann::json params) {
+  std::lock_guard<std::mutex> lock(transport_io_mutex_);
+  transport_.send_notification(method, std::move(params));
+}
+
+bool LspClient::transport_running() const {
+  return transport_.is_running();
+}
+
+bool LspClient::clangd_process_alive() const {
+  return child_pid_ > 0 && kill(child_pid_, 0) == 0;
+}
+
+void LspClient::on_transport_reader_eof() {
+  ready_ = false;
+  if (child_pid_ > 0) {
+    int status = 0;
+    const pid_t result = waitpid(child_pid_, &status, WNOHANG);
+    if (result == child_pid_) {
+      child_pid_ = -1;
+    }
+  }
 }
 
 void LspClient::invalidate_cache(const std::string& absolute_path) {
@@ -375,12 +419,12 @@ void LspClient::did_open(const std::string& absolute_path, const std::string& te
           {"languageId", language_id_for_path(key)},
           {"version", doc.version},
           {"text", doc.text}}}};
-    transport_.send_notification("textDocument/didOpen", std::move(params));
+    send_lsp_notification("textDocument/didOpen", std::move(params));
   } else if (notify_change) {
     nlohmann::json params = {
         {"textDocument", {{"uri", doc.uri}, {"version", doc.version}}},
         {"contentChanges", nlohmann::json::array({{{"text", doc.text}}})}};
-    transport_.send_notification("textDocument/didChange", std::move(params));
+    send_lsp_notification("textDocument/didChange", std::move(params));
   }
 }
 
@@ -419,7 +463,7 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
   nlohmann::json params = {
       {"textDocument", {{"uri", doc.uri}, {"version", doc.version}}},
       {"contentChanges", nlohmann::json::array({{{"text", doc.text}}})}};
-  transport_.send_notification("textDocument/didChange", std::move(params));
+  send_lsp_notification("textDocument/didChange", std::move(params));
 }
 
 void LspClient::did_close(const std::string& absolute_path) {
@@ -447,7 +491,7 @@ void LspClient::did_close(const std::string& absolute_path) {
   }
 
   nlohmann::json params = {{"textDocument", {{"uri", uri}}}};
-  transport_.send_notification("textDocument/didClose", std::move(params));
+  send_lsp_notification("textDocument/didClose", std::move(params));
 }
 
 SymbolKind LspClient::map_lsp_kind(int kind) {
@@ -581,9 +625,7 @@ std::vector<SymbolInfo> LspClient::document_symbols(const std::string& absolute_
   const std::string uri = path_to_uri(key);
   nlohmann::json params = {{"textDocument", {{"uri", uri}}}};
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "textDocument/documentSymbol", std::move(params), 10000,
-                               &result)) {
+  if (!send_lsp_request("textDocument/documentSymbol", std::move(params), 10000, &result)) {
     return {};
   }
 
@@ -605,8 +647,7 @@ std::vector<SymbolInfo> LspClient::workspace_symbols(const std::string& workspac
 
   nlohmann::json params = {{"query", query.empty() ? "a" : query}};
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "workspace/symbol", std::move(params), 10000, &result)) {
+  if (!send_lsp_request("workspace/symbol", std::move(params), 10000, &result)) {
     return {};
   }
 
@@ -751,9 +792,7 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
                            {"context", {{"triggerKind", 1}}}};
 
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "textDocument/completion", std::move(params), 10000,
-                               &result)) {
+  if (!send_lsp_request("textDocument/completion", std::move(params), 10000, &result)) {
     return {};
   }
 
@@ -858,8 +897,7 @@ SourceLocation LspClient::request_location(const std::string& method,
                            {"position", {{"line", line}, {"character", character}}}};
 
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, method, std::move(params), 10000, &result)) {
+  if (!send_lsp_request(method, std::move(params), 10000, &result)) {
     return loc;
   }
   return parse_location_result(result);
@@ -965,8 +1003,7 @@ HoverInfo LspClient::hover(const std::string& absolute_path, const std::string& 
                            {"position", {{"line", line}, {"character", character}}}};
 
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "textDocument/hover", std::move(params), 5000, &result)) {
+  if (!send_lsp_request("textDocument/hover", std::move(params), 5000, &result)) {
     return info;
   }
   return parse_hover_result(result);
@@ -997,9 +1034,7 @@ std::optional<std::string> LspClient::format_document(const std::string& absolut
                                         {"insertSpaces", insert_spaces}}}};
 
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "textDocument/formatting", std::move(params), 30000,
-                               &result)) {
+  if (!send_lsp_request("textDocument/formatting", std::move(params), 30000, &result)) {
     return std::nullopt;
   }
 
@@ -1040,8 +1075,7 @@ std::vector<LspFileEdits> LspClient::rename_symbol(const std::string& absolute_p
                            {"newName", new_name}};
 
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "textDocument/rename", std::move(params), 30000, &result)) {
+  if (!send_lsp_request("textDocument/rename", std::move(params), 30000, &result)) {
     return {};
   }
 
@@ -1128,8 +1162,7 @@ std::vector<CodeActionItem> LspClient::code_actions(const CodeActionParams& para
         {"only", nlohmann::json::array({"quickfix"})}}}};
 
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "textDocument/codeAction", std::move(request), 15000, &result)) {
+  if (!send_lsp_request("textDocument/codeAction", std::move(request), 15000, &result)) {
     return {};
   }
 
@@ -1169,8 +1202,7 @@ std::vector<LspFileEdits> LspClient::resolve_code_action_edits(const nlohmann::j
   }
 
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "codeAction/resolve", action, 15000, &result)) {
+  if (!send_lsp_request("codeAction/resolve", action, 15000, &result)) {
     return {};
   }
   return edits_from_code_action(result);
@@ -1315,9 +1347,7 @@ std::vector<CallHierarchyItem> LspClient::prepare_call_hierarchy(const std::stri
                            {"position", {{"line", line}, {"character", character}}}};
 
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "textDocument/prepareCallHierarchy", std::move(params), 15000,
-                               &result)) {
+  if (!send_lsp_request("textDocument/prepareCallHierarchy", std::move(params), 15000, &result)) {
     return {};
   }
   const auto items = parse_call_hierarchy_items(result);
@@ -1331,9 +1361,7 @@ std::vector<CallHierarchyItem> LspClient::incoming_calls(const CallHierarchyItem
 
   nlohmann::json params = {{"item", item.lsp_payload}};
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "callHierarchy/incomingCalls", std::move(params), 15000,
-                               &result)) {
+  if (!send_lsp_request("callHierarchy/incomingCalls", std::move(params), 15000, &result)) {
     return {};
   }
   return parse_call_hierarchy_relations(result, "from");
@@ -1346,9 +1374,7 @@ std::vector<CallHierarchyItem> LspClient::outgoing_calls(const CallHierarchyItem
 
   nlohmann::json params = {{"item", item.lsp_payload}};
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "callHierarchy/outgoingCalls", std::move(params), 15000,
-                               &result)) {
+  if (!send_lsp_request("callHierarchy/outgoingCalls", std::move(params), 15000, &result)) {
     return {};
   }
   return parse_call_hierarchy_relations(result, "to");
@@ -1438,9 +1464,7 @@ bool LspClient::refresh_semantic_tokens(const std::string& absolute_path) {
 
   nlohmann::json params = {{"textDocument", {{"uri", uri}}}};
   nlohmann::json result;
-  const int id = next_request_id_++;
-  if (!transport_.send_request(id, "textDocument/semanticTokens/full", std::move(params), 5000,
-                               &result)) {
+  if (!send_lsp_request("textDocument/semanticTokens/full", std::move(params), 30000, &result)) {
     return false;
   }
 
@@ -1484,8 +1508,8 @@ bool LspClient::ensure_semantic_tokens(const std::string& absolute_path) {
 
     SemanticTokenAttempt& attempt = semantic_token_attempts_[key];
     const int64_t now = steady_now_ms();
-    constexpr int kMaxAttempts = 5;
-    constexpr int64_t kRetryIntervalMs = 500;
+    constexpr int kMaxAttempts = 30;
+    constexpr int64_t kRetryIntervalMs = 1000;
     if (attempt.count >= kMaxAttempts) {
       return false;
     }
@@ -1503,6 +1527,8 @@ bool LspClient::ensure_semantic_tokens(const std::string& absolute_path) {
   }
 
   const bool fetched = refresh_semantic_tokens(key);
+  if (!fetched) {
+  }
   return fetched;
 }
 

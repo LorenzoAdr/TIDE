@@ -31,7 +31,10 @@ const std::unordered_set<std::string>& binary_extensions() {
 
 }  // namespace
 
-bool should_skip_dir_name(const std::string& name) {
+bool should_skip_dir_name(const std::string& name, const IndexFilterOptions& options) {
+  if (options.show_all_files) {
+    return name.empty() || name == "." || name == "..";
+  }
   if (name.empty() || name[0] == '.') {
     return true;
   }
@@ -46,20 +49,25 @@ bool is_indexed_source_path(const std::string& path) {
          ext == ".hpp" || ext == ".c";
 }
 
-bool should_list_workspace_path(const std::string& relative_path) {
+bool should_list_workspace_path(const std::string& relative_path,
+                                const IndexFilterOptions& options) {
   if (relative_path.empty()) {
     return false;
   }
+  if (options.show_all_files) {
+    return true;
+  }
   for (const auto& part : fs::path(relative_path)) {
-    if (should_skip_dir_name(part.string())) {
+    if (should_skip_dir_name(part.string(), options)) {
       return false;
     }
   }
   return true;
 }
 
-bool should_index_relative_path(const std::string& relative_path) {
-  if (!should_list_workspace_path(relative_path)) {
+bool should_index_relative_path(const std::string& relative_path,
+                                const IndexFilterOptions& options) {
+  if (!should_list_workspace_path(relative_path, options)) {
     return false;
   }
   return is_indexed_source_path(relative_path);

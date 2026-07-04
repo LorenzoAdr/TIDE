@@ -67,7 +67,8 @@ void focus_search_with_filter(MainLayoutState* layout_state, const std::string& 
 
 void context_menu_open_file(ContextMenuState* state, int x, int y,
                             const std::string& absolute_path, const std::string& relative_path,
-                            bool show_format = false, bool show_secondary_open = true);
+                            bool show_format = false, bool show_secondary_open = true,
+                            bool show_analyze_symbols = false);
 
 void context_menu_open_folder(ContextMenuState* state, int x, int y,
                               const std::string& absolute_path, const std::string& relative_path);

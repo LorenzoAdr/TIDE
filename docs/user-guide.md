@@ -77,6 +77,20 @@ Customizable roles: panel background, code background, general text, titles/acti
 
 In the colors subpanel: **p** or **Enter** on the preset row cycles presets; **Enter** on a color row opens a visual palette (↑↓←→ to pick, Enter to confirm).
 
+### Iconos en la interfaz
+
+El outline, el autocompletado y el explorador de archivos muestran iconos por tipo de símbolo o archivo (método, clase, `.cpp`, `CMakeLists.txt`, etc.). Con una **Nerd Font** en la terminal se usan glifos visuales; sin ella, cada icono tiene un fallback ASCII (`M`, `++`, `cm`, `>` para carpetas, etc.).
+
+En **F10 → Configuración → General**, la opción **Iconos Nerd Font** cicla entre:
+
+| Modo | Comportamiento |
+|------|----------------|
+| **Auto** | ASCII por defecto; iconos Nerd solo si la terminal suele tener Nerd Font (kitty, wezterm, alacritty, foot, ghostty, etc.) o si defines `TGDB_NERD_FONT=1` |
+| **Siempre** | Siempre intenta glifos Nerd |
+| **Nunca** | Siempre ASCII (recomendado en Konsole y terminales sin Nerd Font) |
+
+Variable de entorno (tiene prioridad sobre el ajuste guardado): `TGDB_ICONS=auto|always|never`. Para forzar Nerd en Auto con cualquier terminal: `TGDB_NERD_FONT=1`.
+
 ## Installation
 
 ```bash

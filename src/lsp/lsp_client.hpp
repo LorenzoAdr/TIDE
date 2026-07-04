@@ -30,6 +30,9 @@ class LspClient {
              bool use_gcc_query_driver = true, bool background_index = false);
   void stop();
   bool ready() const { return ready_.load(); }
+  bool transport_running() const;
+  bool clangd_process_alive() const;
+  bool semantic_tokens_supported() const { return semantic_tokens_supported_; }
 
   void did_open(const std::string& absolute_path, const std::string& text);
   void did_change(const std::string& absolute_path, const std::string& text);
@@ -92,8 +95,8 @@ class LspClient {
     int64_t last_ms = 0;
   };
 
-  bool spawn_clangd(const std::string& compile_commands_dir, bool use_gcc_query_driver,
-                    bool background_index);
+  bool spawn_clangd(const std::string& workspace_root, const std::string& compile_commands_dir,
+                    bool use_gcc_query_driver, bool background_index);
   bool initialize(const std::string& workspace_root);
   void invalidate_cache(const std::string& absolute_path);
   void invalidate_semantic_tokens(const std::string& absolute_path);
@@ -123,8 +126,15 @@ class LspClient {
   SourceLocation request_location(const std::string& method, const std::string& absolute_path,
                                   const std::string& text, int line, int character);
 
+  bool send_lsp_request(const std::string& method, nlohmann::json params, int timeout_ms,
+                        nlohmann::json* out);
+  void send_lsp_notification(const std::string& method, nlohmann::json params);
+  void on_transport_reader_eof();
+
   LspTransport transport_;
+  std::mutex transport_io_mutex_;
   std::atomic<bool> ready_{false};
+  std::atomic<bool> intentionally_stopping_{false};
   pid_t child_pid_ = -1;
   int stdin_write_fd_ = -1;
   int stdout_read_fd_ = -1;

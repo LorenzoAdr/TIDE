@@ -1,5 +1,7 @@
 #include "util/compile_commands_setup.hpp"
 
+#include "util/child_process_guard.hpp"
+
 #include <array>
 #include <cstdlib>
 #include <fcntl.h>
@@ -31,6 +33,7 @@ bool run_cmake_configure(const fs::path& source_dir, const fs::path& build_dir) 
     return false;
   }
   if (pid == 0) {
+    child_die_with_parent();
     const int devnull = ::open("/dev/null", O_WRONLY);
     if (devnull >= 0) {
       dup2(devnull, STDOUT_FILENO);

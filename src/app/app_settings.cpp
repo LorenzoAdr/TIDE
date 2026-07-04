@@ -81,6 +81,20 @@ AppSettings AppSettings::load() {
     if (doc.contains("monitor_enabled") && doc["monitor_enabled"].is_boolean()) {
       settings.monitor_enabled = doc["monitor_enabled"].get<bool>();
     }
+    if (doc.contains("show_all_workspace_files") &&
+        doc["show_all_workspace_files"].is_boolean()) {
+      settings.show_all_workspace_files = doc["show_all_workspace_files"].get<bool>();
+    }
+    if (doc.contains("icon_mode") && doc["icon_mode"].is_string()) {
+      const std::string mode = doc["icon_mode"].get<std::string>();
+      if (mode == "always") {
+        settings.icon_mode = IconMode::Always;
+      } else if (mode == "never") {
+        settings.icon_mode = IconMode::Never;
+      } else {
+        settings.icon_mode = IconMode::Auto;
+      }
+    }
   } catch (...) {
     return AppSettings{};
   }
@@ -107,6 +121,19 @@ bool AppSettings::save() const {
   doc["force_bundled_clangd"] = force_bundled_clangd;
   doc["force_bundled_gdb"] = force_bundled_gdb;
   doc["monitor_enabled"] = monitor_enabled;
+  doc["show_all_workspace_files"] = show_all_workspace_files;
+  switch (icon_mode) {
+    case IconMode::Always:
+      doc["icon_mode"] = "always";
+      break;
+    case IconMode::Never:
+      doc["icon_mode"] = "never";
+      break;
+    case IconMode::Auto:
+    default:
+      doc["icon_mode"] = "auto";
+      break;
+  }
 
   std::ofstream output(path);
   if (!output) {

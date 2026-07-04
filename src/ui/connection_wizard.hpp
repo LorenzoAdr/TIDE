@@ -24,7 +24,7 @@ enum class WizardStep {
   ChooseCoreBackend,
 };
 
-enum class WizardMode { Launch, Attach, LoadCore };
+enum class WizardMode { Launch, Attach, LoadCore, AnalyzeSymbols };
 
 struct ConnectionResult {
   SessionMode mode = SessionMode::kLaunch;
@@ -63,6 +63,7 @@ struct ConnectionWizardState {
   ftxui::Box launch_mode_box;
   ftxui::Box attach_mode_box;
   ftxui::Box core_mode_box;
+  ftxui::Box symbols_mode_box;
   ftxui::Box gdb_backend_box;
   ftxui::Box ca_backend_box;
   ftxui::Box process_list_box;

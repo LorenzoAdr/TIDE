@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "ui/glyphs.hpp"
+
 namespace tgdb {
 
 struct AppSettings {
@@ -15,6 +17,8 @@ struct AppSettings {
   bool force_bundled_clangd = false;
   bool force_bundled_gdb = false;
   bool monitor_enabled = false;
+  bool show_all_workspace_files = false;
+  IconMode icon_mode = IconMode::Auto;
 
   static AppSettings load();
   bool save() const;

@@ -507,7 +507,7 @@ std::string status_shortcuts(AppMode mode, bool welcome_visible) {
   if (mode == AppMode::kDebug) {
     return "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into";
   }
-  return "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 git  F7 buscar  F8 outline  F9 problemas";
+  return "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 git  F7 buscar  F8 outline  F9 problemas  Ctrl+Shift+S símbolos";
 }
 
 std::string buffer_text(const EditorBuffer& buffer) {
@@ -767,8 +767,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
 
   auto console = MakeConsolePanel(app_mode, model, shell, on_command, layout_state, focus,
                                   &split_state->bottom_height, shell_launch_config, workspace,
-                                  symbols, indexer, &layout_state->right_sidebar, git_service,
-                                  git_panel_state);
+                                  symbols, indexer, symbol_indexer, &layout_state->right_sidebar,
+                                  git_service, git_panel_state);
   auto with_console =
       MakeHSplitBottom(console, workspace_area, &split_state->bottom_height, split_state);
   auto with_console_no_secondary =

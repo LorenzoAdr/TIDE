@@ -246,6 +246,7 @@ void place_cursors_between_pair(EditorBuffer* buffer, int line, int col, int pai
 
 void insert_char_at(EditorBuffer* buffer, int line, int col, char c);
 void insert_string_at(EditorBuffer* buffer, int line, int col, const std::string& text);
+void newline_at(EditorBuffer* buffer, int line, int col, bool smart_indent);
 
 bool wrap_selection_with_pair(EditorBuffer* buffer, MultiCursor* cursor, char open) {
   if (cursor == nullptr || !cursor->has_selection()) {
@@ -336,6 +337,36 @@ void insert_string_at(EditorBuffer* buffer, int line, int col, const std::string
     if (cursor.anchor.line == line && cursor.anchor.col >= col) {
       cursor.anchor.col += delta;
     }
+  }
+}
+
+void insert_multiline_text_at(EditorBuffer* buffer, int line, int col, const std::string& text) {
+  if (text.empty()) {
+    return;
+  }
+  if (text.find('\n') == std::string::npos) {
+    insert_string_at(buffer, line, col, text);
+    return;
+  }
+
+  int cur_line = line;
+  int cur_col = col;
+  std::size_t pos = 0;
+  while (pos < text.size()) {
+    const std::size_t next = text.find('\n', pos);
+    const std::string part =
+        next == std::string::npos ? text.substr(pos) : text.substr(pos, next - pos);
+    if (!part.empty()) {
+      insert_string_at(buffer, cur_line, cur_col, part);
+      cur_col += static_cast<int>(part.size());
+    }
+    if (next == std::string::npos) {
+      break;
+    }
+    newline_at(buffer, cur_line, cur_col, false);
+    cur_line++;
+    cur_col = 0;
+    pos = next + 1;
   }
 }
 
@@ -676,6 +707,7 @@ void ensure_scroll_centered(EditorBuffer* buffer, int visible_lines, int code_wi
 void scroll_view_by_columns(EditorBuffer* buffer, int delta_columns, int code_width) {
   if (code_width <= 0) {
     buffer->scroll_col = std::max(0, buffer->scroll_col + delta_columns);
+    buffer->view_token++;
     return;
   }
   int max_len = 0;
@@ -685,6 +717,7 @@ void scroll_view_by_columns(EditorBuffer* buffer, int delta_columns, int code_wi
   const int max_scroll_col = std::max(0, max_len - code_width + 1);
   buffer->scroll_col =
       std::max(0, std::min(buffer->scroll_col + delta_columns, max_scroll_col));
+  buffer->view_token++;
 }
 
 void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lines) {
@@ -775,7 +808,11 @@ void replace_text_range_with_caret(EditorBuffer* buffer, int line, int start_col
 
   auto& text = buffer->lines[static_cast<std::size_t>(line)];
   start_col = std::max(0, std::min(start_col, static_cast<int>(text.size())));
-  text.insert(static_cast<std::size_t>(start_col), replacement);
+  if (replacement.find('\n') != std::string::npos) {
+    insert_multiline_text_at(buffer, line, start_col, replacement);
+  } else {
+    text.insert(static_cast<std::size_t>(start_col), replacement);
+  }
 
   const int caret_line = line + caret_line_offset;
   const int caret_col_base = caret_line_offset == 0 ? start_col : 0;
@@ -831,7 +868,7 @@ void apply_completion_at_all_cursors(EditorBuffer* buffer, const SnippetResult& 
     if (site.line >= 0 && site.line < static_cast<int>(buffer->lines.size())) {
       col = std::max(0, std::min(col, static_cast<int>(buffer->lines[site.line].size())));
     }
-    insert_string_at(buffer, site.line, col, snippet.text);
+    insert_multiline_text_at(buffer, site.line, col, snippet.text);
     const int caret_line = site.line + snippet.caret_line_offset;
     const int caret_base = snippet.caret_line_offset == 0 ? col : 0;
     buffer->cursors[site.cursor_index].head = {caret_line, caret_base + snippet.caret_col};

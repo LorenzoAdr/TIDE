@@ -108,6 +108,8 @@ class LspSymbolProvider : public ISymbolProvider {
   void join_startup_thread();
   void stop_lsp();
   void stop_lsp_locked();
+  void restart_lsp_after_transport_failure();
+  void process_pending_transport_restart();
   void start_async_worker_locked();
   void stop_async_worker_locked();
   void async_worker_main();
@@ -150,6 +152,9 @@ class LspSymbolProvider : public ISymbolProvider {
   std::unordered_map<std::string, int64_t> pending_did_change_;
   std::atomic<uint64_t> semantic_highlight_revision_{0};
   std::atomic<uint64_t> document_symbols_revision_{0};
+  std::atomic<bool> pending_transport_restart_{false};
+  int64_t last_lsp_failure_restart_ms_ = 0;
+  int64_t lsp_ready_since_ms_ = 0;
 };
 
 }  // namespace tgdb

@@ -41,6 +41,7 @@ void add_directory_watch(int fd, const fs::path& dir,
 }
 
 void scan_directories(int fd, const fs::path& root, const fs::path& current,
+                      const IndexFilterOptions& options,
                       std::unordered_map<int, fs::path>* watch_dirs,
                       std::vector<FileIndexChange>* pending) {
   add_directory_watch(fd, current, watch_dirs, pending);
@@ -53,10 +54,10 @@ void scan_directories(int fd, const fs::path& root, const fs::path& current,
       continue;
     }
     const auto name = entry.path().filename().string();
-    if (should_skip_dir_name(name)) {
+    if (should_skip_dir_name(name, options)) {
       continue;
     }
-    scan_directories(fd, root, entry.path(), watch_dirs, pending);
+    scan_directories(fd, root, entry.path(), options, watch_dirs, pending);
   }
 }
 
@@ -66,6 +67,7 @@ void scan_directories(int fd, const fs::path& root, const fs::path& current,
 
 struct WorkspaceWatcher::Impl {
   std::string workspace_root;
+  IndexFilterOptions filter_options;
   std::thread worker;
   std::atomic<bool> running{false};
   std::atomic<bool> stop_requested{false};
@@ -94,7 +96,7 @@ struct WorkspaceWatcher::Impl {
 
     std::unordered_map<int, fs::path> watch_dirs;
     const fs::path root(workspace_root);
-    scan_directories(inotify_fd, root, root, &watch_dirs, &pending);
+    scan_directories(inotify_fd, root, root, filter_options, &watch_dirs, &pending);
 
     std::vector<char> buffer(64 * 1024);
     while (!stop_requested.load()) {
@@ -137,13 +139,13 @@ struct WorkspaceWatcher::Impl {
 
         if (event->mask & IN_ISDIR) {
           if ((event->mask & (IN_CREATE | IN_MOVED_TO)) &&
-              !should_skip_dir_name(event->name)) {
+              !should_skip_dir_name(event->name, filter_options)) {
             add_directory_watch(inotify_fd, entry_path, &watch_dirs, &pending);
           }
           continue;
         }
 
-        if (!should_list_workspace_path(rel_str)) {
+        if (!should_list_workspace_path(rel_str, filter_options)) {
           continue;
         }
 
@@ -177,12 +179,14 @@ WorkspaceWatcher::~WorkspaceWatcher() {
   stop();
 }
 
-void WorkspaceWatcher::start(const std::string& workspace_root) {
+void WorkspaceWatcher::start(const std::string& workspace_root,
+                               const IndexFilterOptions& filter_options) {
   stop();
   if (workspace_root.empty()) {
     return;
   }
   impl_->workspace_root = workspace_root;
+  impl_->filter_options = filter_options;
   impl_->stop_requested = false;
   impl_->running = true;
   impl_->worker = std::thread([this] {

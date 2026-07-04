@@ -1,3 +1,4 @@
+#include "ui/binary_symbols_panel.hpp"
 #include "ui/call_hierarchy_view.hpp"
 #include "ui/context_menu.hpp"
 
@@ -679,6 +680,14 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
+  if (action_id == "analyze_symbols") {
+    request_binary_symbols_panel(layout_state, state->absolute_path);
+    if (focus != nullptr) {
+      focus->region = FocusRegion::Terminal;
+    }
+    return true;
+  }
+
   if (action_id == "show_indexer_paths") {
     const std::string workspace_root =
         model != nullptr ? model->workspace_root : (workspace != nullptr ? workspace->root : "");
@@ -870,7 +879,7 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
 
 void context_menu_open_file(ContextMenuState* state, int x, int y,
                             const std::string& absolute_path, const std::string& relative_path,
-                            bool show_format, bool show_secondary_open) {
+                            bool show_format, bool show_secondary_open, bool show_analyze_symbols) {
   if (state == nullptr) {
     return;
   }
@@ -883,6 +892,44 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
   state->anchor_y = y;
   state->absolute_path = absolute_path;
   state->relative_path = relative_path;
+  if (show_analyze_symbols) {
+    if (show_format) {
+      if (show_secondary_open) {
+        set_items(state, ContextMenuKind::File,
+                  {{"Analizar símbolos", "analyze_symbols"},
+                   {"Abrir en panel secundario", "open_file_secondary"},
+                   {"Abrir archivo", "open_file"},
+                   {"Rutas del indexer", "show_indexer_paths"},
+                   {"Formatear archivo", "format_file"},
+                   {"Renombrar archivo", "rename_file"},
+                   {"Borrar archivo", "delete_file"}});
+      } else {
+        set_items(state, ContextMenuKind::File,
+                  {{"Analizar símbolos", "analyze_symbols"},
+                   {"Abrir archivo", "open_file"},
+                   {"Rutas del indexer", "show_indexer_paths"},
+                   {"Formatear archivo", "format_file"},
+                   {"Renombrar archivo", "rename_file"},
+                   {"Borrar archivo", "delete_file"}});
+      }
+    } else if (show_secondary_open) {
+      set_items(state, ContextMenuKind::File,
+                {{"Analizar símbolos", "analyze_symbols"},
+                 {"Abrir en panel secundario", "open_file_secondary"},
+                 {"Abrir archivo", "open_file"},
+                 {"Rutas del indexer", "show_indexer_paths"},
+                 {"Renombrar archivo", "rename_file"},
+                 {"Borrar archivo", "delete_file"}});
+    } else {
+      set_items(state, ContextMenuKind::File,
+                {{"Analizar símbolos", "analyze_symbols"},
+                 {"Abrir archivo", "open_file"},
+                 {"Rutas del indexer", "show_indexer_paths"},
+                 {"Renombrar archivo", "rename_file"},
+                 {"Borrar archivo", "delete_file"}});
+    }
+    return;
+  }
   if (show_format) {
     if (show_secondary_open) {
       set_items(state, ContextMenuKind::File,

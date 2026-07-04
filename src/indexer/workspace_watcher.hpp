@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "indexer/index_rules.hpp"
+
 namespace tgdb {
 
 enum class FileIndexChangeKind { Upsert, Remove };
@@ -19,7 +21,8 @@ class WorkspaceWatcher {
   WorkspaceWatcher();
   ~WorkspaceWatcher();
 
-  void start(const std::string& workspace_root);
+  void start(const std::string& workspace_root,
+             const IndexFilterOptions& filter_options = {});
   void stop();
   std::vector<FileIndexChange> drain_changes();
 

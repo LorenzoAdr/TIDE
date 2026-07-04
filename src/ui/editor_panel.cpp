@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -12,6 +13,7 @@
 
 #include "editor/bracket_match.hpp"
 #include "editor/clipboard.hpp"
+#include "editor/code_snippets.hpp"
 #include "git/git_diff.hpp"
 #include "git/git_service.hpp"
 #include "editor/editor_context.hpp"
@@ -21,6 +23,8 @@
 #include "editor/selection_occurrence_runner.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/cpp_highlight.hpp"
+#include "util/csv_viewer.hpp"
+#include "util/tabular_file.hpp"
 #include "util/monitor_log.hpp"
 #include "lsp/diagnostics.hpp"
 #include "editor/editor_state.hpp"
@@ -47,6 +51,7 @@
 #include "ui/focusable_component.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/cursor_blink.hpp"
+#include "ui/glyphs.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
 #include "ui/scroll_bar.hpp"
@@ -133,11 +138,15 @@ struct EditorPanelState {
   Box breadcrumb_box;
   Box problems_button_box;
   Box scrollbar_box;
+  Box h_scrollbar_box;
   Box overview_ruler_box;
   ScrollbarLayout scrollbar_layout;
+  HorizontalScrollbarLayout h_scrollbar_layout;
   OverviewRulerLayout overview_ruler_layout;
   bool scrollbar_dragging = false;
+  bool h_scrollbar_dragging = false;
   int scrollbar_drag_offset = 0;
+  int h_scrollbar_drag_offset = 0;
   uint64_t last_view_token = 0;
   std::string last_path;
   bool mouse_selecting = false;
@@ -225,6 +234,14 @@ struct EditorPanelState {
   };
   SourceSymbolFlash source_flash;
   bool chord_k_pending = false;
+  std::string tabular_layout_path;
+  TabularDelimiter tabular_delimiter = TabularDelimiter::kComma;
+  TabularTableLayout tabular_layout;
+  int tabular_layout_line_count = 0;
+  std::unique_ptr<TabularFileStore> tabular_store;
+  int64_t last_tabular_index_tick_ms = 0;
+  bool tabular_scroll_locked = false;
+  int tabular_scroll_limit = 0;
 };
 
 void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState* layout_state,
@@ -421,7 +438,8 @@ const std::vector<SymbolInfo>& cached_file_symbols(EditorPanelState* panel,
   if (path != panel->cached_symbols_path) {
     panel->cached_symbols_path = path;
     panel->cached_symbols.clear();
-    panel->symbols_fetch_pending = !path.empty() && symbols != nullptr;
+    panel->symbols_fetch_pending =
+        !path.empty() && symbols != nullptr && !is_tabular_path(path);
   }
   return panel->cached_symbols;
 }
@@ -429,6 +447,11 @@ const std::vector<SymbolInfo>& cached_file_symbols(EditorPanelState* panel,
 void ensure_file_symbols(EditorPanelState* panel, ISymbolProvider* symbols,
                          const std::string& path) {
   if (panel == nullptr || symbols == nullptr || path.empty() || !panel->symbols_fetch_pending) {
+    return;
+  }
+  if (is_tabular_path(path)) {
+    panel->cached_symbols.clear();
+    panel->symbols_fetch_pending = false;
     return;
   }
   panel->cached_symbols = symbols->symbols_for_file(path);
@@ -978,6 +1001,23 @@ void navigate_editor_to_line(WorkspaceModel* workspace, EditorPanelState* panel,
   ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
 }
 
+bool tabular_view_ready(EditorPanelState* panel, const EditorBuffer& buffer);
+bool scroll_tabular_lines(WorkspaceModel* workspace, EditorPanelState* panel, int delta_lines,
+                            int visible_lines);
+void scroll_tabular_columns(EditorBuffer* buffer, EditorPanelState* panel, int delta_columns,
+                            int code_width);
+int tabular_total_content_width(EditorPanelState* panel);
+int tabular_max_scroll_col(EditorPanelState* panel, int code_width);
+int editor_horizontal_content_width(const EditorBuffer& buffer, int code_width);
+int editor_horizontal_max_scroll_col(const EditorBuffer& buffer, int code_width);
+Element attach_horizontal_scrollbar(Element code, int total_content_width, int scroll_col,
+                                    int code_width, bool hovered, bool active,
+                                    EditorPanelState* panel);
+int tabular_data_visible_lines(int visible_lines);
+int tabular_max_allowed_scroll(EditorPanelState* panel, int visible_lines);
+void clamp_tabular_scroll(EditorPanelState* panel, EditorBuffer* buffer, int visible_lines);
+void maybe_request_tabular_chunk(EditorPanelState* panel, EditorBuffer* buffer, int visible_lines);
+
 bool handle_overview_ruler_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
                                  MainLayoutState* layout_state, EditorPanelState* panel,
                                  const Mouse& m, int visible_lines) {
@@ -991,12 +1031,20 @@ bool handle_overview_ruler_mouse(WorkspaceModel* workspace, FocusManagerState* f
   }
 
   if (m.button == Mouse::WheelUp) {
+    if (scroll_tabular_lines(workspace, panel, -3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     workspace->ensure_buffer();
     scroll_view_by_lines(&workspace->buffer, -3, visible_lines);
     clear_hover_state(&panel->hover);
     return true;
   }
   if (m.button == Mouse::WheelDown) {
+    if (scroll_tabular_lines(workspace, panel, 3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     workspace->ensure_buffer();
     scroll_view_by_lines(&workspace->buffer, 3, visible_lines);
     clear_hover_state(&panel->hover);
@@ -1023,10 +1071,16 @@ bool apply_scrollbar_drag(WorkspaceModel* workspace, EditorPanelState* panel, in
   EditorBuffer* buffer = &workspace->buffer;
   const int local_y = mouse_y - panel->scrollbar_box.y_min;
   const int thumb_top = local_y - panel->scrollbar_drag_offset;
-  const int new_scroll = scroll_for_thumb_top(panel->scrollbar_layout, thumb_top);
+  int new_scroll = scroll_for_thumb_top(panel->scrollbar_layout, thumb_top);
+  if (tabular_view_ready(panel, *buffer)) {
+    new_scroll = std::min(new_scroll, tabular_max_allowed_scroll(panel, visible_lines));
+  }
   if (buffer->scroll != new_scroll) {
     buffer->scroll = new_scroll;
     clear_hover_state(&panel->hover);
+    if (tabular_view_ready(panel, *buffer)) {
+      maybe_request_tabular_chunk(panel, buffer, visible_lines);
+    }
   }
   return true;
 }
@@ -1063,6 +1117,7 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   if (panel->scrollbar_dragging) {
     if (m.button == Mouse::Left && m.motion == Mouse::Released) {
       panel->scrollbar_dragging = false;
+      panel->tabular_scroll_locked = false;
       return true;
     }
     if (m.button == Mouse::Left && m.motion == Mouse::Moved) {
@@ -1075,12 +1130,20 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.button == Mouse::WheelUp) {
+    if (scroll_tabular_lines(workspace, panel, -3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     workspace->ensure_buffer();
     scroll_view_by_lines(&workspace->buffer, -3, visible_lines);
     clear_hover_state(&panel->hover);
     return true;
   }
   if (m.button == Mouse::WheelDown) {
+    if (scroll_tabular_lines(workspace, panel, 3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     workspace->ensure_buffer();
     scroll_view_by_lines(&workspace->buffer, 3, visible_lines);
     clear_hover_state(&panel->hover);
@@ -1102,8 +1165,14 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       const int thumb_top =
           local_y - panel->scrollbar_layout.thumb_height / 2;
       workspace->ensure_buffer();
-      workspace->buffer.scroll =
-          scroll_for_thumb_top(panel->scrollbar_layout, thumb_top);
+      int new_scroll = scroll_for_thumb_top(panel->scrollbar_layout, thumb_top);
+      if (tabular_view_ready(panel, workspace->buffer)) {
+        new_scroll = std::min(new_scroll, tabular_max_allowed_scroll(panel, visible_lines));
+      }
+      workspace->buffer.scroll = new_scroll;
+      if (tabular_view_ready(panel, workspace->buffer)) {
+        maybe_request_tabular_chunk(panel, &workspace->buffer, visible_lines);
+      }
       panel->scrollbar_dragging = true;
       panel->scrollbar_drag_offset = panel->scrollbar_layout.thumb_height / 2;
       clear_hover_state(&panel->hover);
@@ -1113,6 +1182,135 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
 
   if (m.motion == Mouse::Moved && panel->scrollbar_dragging) {
     return apply_scrollbar_drag(workspace, panel, m.y, visible_lines);
+  }
+
+  return false;
+}
+
+bool apply_h_scrollbar_drag(WorkspaceModel* workspace, EditorPanelState* panel, int mouse_x) {
+  if (workspace == nullptr || panel == nullptr || !panel->h_scrollbar_layout.scrollable) {
+    return false;
+  }
+  workspace->ensure_buffer();
+  EditorBuffer* buffer = &workspace->buffer;
+  const int code_width = panel->code_width_chars;
+  const int local_x = mouse_x - panel->h_scrollbar_box.x_min;
+  const int thumb_left = local_x - panel->h_scrollbar_drag_offset;
+  int new_scroll_col = scroll_for_thumb_left(panel->h_scrollbar_layout, thumb_left);
+  if (tabular_view_ready(panel, *buffer)) {
+    new_scroll_col = std::min(new_scroll_col, tabular_max_scroll_col(panel, code_width));
+  } else {
+    new_scroll_col = std::min(new_scroll_col, editor_horizontal_max_scroll_col(*buffer, code_width));
+  }
+  if (buffer->scroll_col != new_scroll_col) {
+    buffer->scroll_col = new_scroll_col;
+    buffer->view_token++;
+    clear_hover_state(&panel->hover);
+  }
+  return true;
+}
+
+bool handle_horizontal_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
+                                     MainLayoutState* layout_state, EditorPanelState* panel,
+                                     const Mouse& m) {
+  if (panel == nullptr || !panel->h_scrollbar_layout.scrollable) {
+    return false;
+  }
+
+  const bool in_bar = panel->h_scrollbar_box.Contain(m.x, m.y);
+
+  if (m.motion == Mouse::Moved) {
+    if (layout_state != nullptr) {
+      const std::string_view before = layout_state->clickable.hovered_id();
+      if (in_bar || panel->h_scrollbar_dragging) {
+        layout_state->clickable.set_hover(press_id::kEditorHorizontalScrollbar);
+      } else {
+        layout_state->clickable.clear_hover_if([&](std::string_view id) {
+          return id == press_id::kEditorHorizontalScrollbar;
+        });
+      }
+      if (layout_state->clickable.hovered_id() != before) {
+        layout_state->request_ui_tick = true;
+      }
+    }
+    if (panel->h_scrollbar_dragging) {
+      return apply_h_scrollbar_drag(workspace, panel, m.x);
+    }
+    return in_bar;
+  }
+
+  if (panel->h_scrollbar_dragging) {
+    if (m.button == Mouse::Left && m.motion == Mouse::Released) {
+      panel->h_scrollbar_dragging = false;
+      return true;
+    }
+    if (m.button == Mouse::Left && m.motion == Mouse::Moved) {
+      return apply_h_scrollbar_drag(workspace, panel, m.x);
+    }
+  }
+
+  if (!in_bar) {
+    return false;
+  }
+
+  if (m.button == Mouse::WheelLeft || (m.shift && m.button == Mouse::WheelUp)) {
+    workspace->ensure_buffer();
+    EditorBuffer* buffer = &workspace->buffer;
+    if (tabular_view_ready(panel, *buffer)) {
+      scroll_tabular_columns(buffer, panel, -3, panel->code_width_chars);
+    } else {
+      scroll_view_by_columns(buffer, -3, panel->code_width_chars);
+    }
+    clear_hover_state(&panel->hover);
+    return true;
+  }
+  if (m.button == Mouse::WheelRight || (m.shift && m.button == Mouse::WheelDown)) {
+    workspace->ensure_buffer();
+    EditorBuffer* buffer = &workspace->buffer;
+    if (tabular_view_ready(panel, *buffer)) {
+      scroll_tabular_columns(buffer, panel, 3, panel->code_width_chars);
+    } else {
+      scroll_view_by_columns(buffer, 3, panel->code_width_chars);
+    }
+    clear_hover_state(&panel->hover);
+    return true;
+  }
+
+  if (m.button != Mouse::Left) {
+    return false;
+  }
+
+  if (m.motion == Mouse::Pressed) {
+    claim_editor_focus(focus, layout_state, panel->panel_focus);
+    trigger_press(layout_state, press_id::kEditorHorizontalScrollbar);
+    const int local_x = m.x - panel->h_scrollbar_box.x_min;
+    workspace->ensure_buffer();
+    EditorBuffer* buffer = &workspace->buffer;
+    const int code_width = panel->code_width_chars;
+    if (horizontal_scrollbar_thumb_hit(panel->h_scrollbar_layout, panel->h_scrollbar_box, m.x,
+                                       m.y)) {
+      panel->h_scrollbar_dragging = true;
+      panel->h_scrollbar_drag_offset = local_x - panel->h_scrollbar_layout.thumb_x;
+    } else {
+      const int thumb_left = local_x - panel->h_scrollbar_layout.thumb_width / 2;
+      int new_scroll_col = scroll_for_thumb_left(panel->h_scrollbar_layout, thumb_left);
+      if (tabular_view_ready(panel, *buffer)) {
+        new_scroll_col = std::min(new_scroll_col, tabular_max_scroll_col(panel, code_width));
+      } else {
+        new_scroll_col =
+            std::min(new_scroll_col, editor_horizontal_max_scroll_col(*buffer, code_width));
+      }
+      buffer->scroll_col = new_scroll_col;
+      buffer->view_token++;
+      panel->h_scrollbar_dragging = true;
+      panel->h_scrollbar_drag_offset = panel->h_scrollbar_layout.thumb_width / 2;
+      clear_hover_state(&panel->hover);
+    }
+    return true;
+  }
+
+  if (m.motion == Mouse::Moved && panel->h_scrollbar_dragging) {
+    return apply_h_scrollbar_drag(workspace, panel, m.x);
   }
 
   return false;
@@ -1128,6 +1326,9 @@ bool handle_editor_chrome_mouse(WorkspaceModel* workspace, FocusManagerState* fo
   if (m.motion == Mouse::Moved) {
     update_editor_chrome_hover(workspace, tab_bar, layout_state, panel->problems_button_box, m.x,
                                m.y);
+    if (tab_bar != nullptr && tab_bar->bar_box.Contain(m.x, m.y)) {
+      return true;
+    }
   }
   if (handle_tab_bar_mouse(workspace, focus, tab_bar, m, layout_state, panel->panel_focus)) {
     claim_editor_focus(focus, layout_state, panel->panel_focus);
@@ -1146,6 +1347,9 @@ bool handle_editor_chrome_mouse(WorkspaceModel* workspace, FocusManagerState* fo
     return true;
   }
   if (handle_scrollbar_mouse(workspace, focus, layout_state, panel, m, visible_lines)) {
+    return true;
+  }
+  if (handle_horizontal_scrollbar_mouse(workspace, focus, layout_state, panel, m)) {
     return true;
   }
 
@@ -1545,6 +1749,7 @@ struct CompletionState {
   int64_t lsp_last_request_ms = 0;
   std::string lsp_resolved_query;
   std::vector<CompletionItem> lsp_items;
+  std::vector<CompletionItem> snippet_items;
   std::vector<CompletionItem> all_items;
   std::vector<CompletionItem> matches;
   int selected = 0;
@@ -1588,7 +1793,13 @@ struct CompletionState {
         break;
       }
     }
-    semantic_mode = !source.empty();
+    for (const auto& item : snippet_items) {
+      consider(item);
+      if (static_cast<int>(matches.size()) >= kMaxMatches) {
+        break;
+      }
+    }
+    semantic_mode = !source.empty() || !snippet_items.empty();
     if (selected >= static_cast<int>(matches.size())) {
       selected = std::max(0, static_cast<int>(matches.size()) - 1);
     }
@@ -1609,6 +1820,11 @@ struct CompletionState {
 
     if (!allow_lsp || symbols == nullptr || !symbols->supports_semantic_completion() ||
         path.empty()) {
+      if (!path.empty() && is_indexed_source_path(path)) {
+        snippet_items = structure_snippet_completions(query);
+      } else {
+        snippet_items.clear();
+      }
       refresh_matches();
       return;
     }
@@ -1627,6 +1843,12 @@ struct CompletionState {
       semantic_mode = !all_items.empty();
     }
 
+    if (!path.empty() && is_indexed_source_path(path)) {
+      snippet_items = structure_snippet_completions(query);
+    } else {
+      snippet_items.clear();
+    }
+
     refresh_matches();
   }
 
@@ -1643,6 +1865,7 @@ struct CompletionState {
     lsp_last_request_ms = 0;
     lsp_resolved_query.clear();
     lsp_items.clear();
+    snippet_items.clear();
     all_items.clear();
     matches.clear();
     semantic_mode = false;
@@ -1661,6 +1884,154 @@ int visible_line_count(const Box& box) {
 }
 
 int max_scroll(int total, int visible) { return std::max(0, total - visible); }
+
+int code_width_from_box(const Box& box, int fallback) {
+  if (box.x_max > box.x_min) {
+    return box.x_max - box.x_min + 1;
+  }
+  return std::max(1, fallback);
+}
+
+int tabular_data_visible_lines(int visible_lines) {
+  return std::max(1, visible_lines - 1);
+}
+
+int tabular_max_allowed_scroll(EditorPanelState* panel, int visible_lines) {
+  if (panel == nullptr || panel->tabular_store == nullptr || !panel->tabular_store->ready()) {
+    return 0;
+  }
+  const int data_total = panel->tabular_store->max_data_total();
+  const int data_visible = tabular_data_visible_lines(visible_lines);
+  int allowed = max_scroll(data_total, data_visible);
+  if (panel->tabular_scroll_locked || panel->tabular_store->loading_more()) {
+    allowed = std::min(allowed, panel->tabular_scroll_limit);
+  }
+  return allowed;
+}
+
+void clamp_tabular_scroll(EditorPanelState* panel, EditorBuffer* buffer, int visible_lines) {
+  if (panel == nullptr || buffer == nullptr || panel->tabular_store == nullptr ||
+      !panel->tabular_store->ready()) {
+    return;
+  }
+  const int allowed = tabular_max_allowed_scroll(panel, visible_lines);
+  buffer->scroll = std::max(0, std::min(buffer->scroll, allowed));
+}
+
+void maybe_request_tabular_chunk(EditorPanelState* panel, EditorBuffer* buffer, int visible_lines) {
+  if (panel == nullptr || buffer == nullptr || panel->tabular_store == nullptr ||
+      !panel->tabular_store->ready()) {
+    return;
+  }
+  TabularFileStore* store = panel->tabular_store.get();
+  if (!store->has_more() || store->loading_more() || panel->tabular_scroll_locked) {
+    return;
+  }
+  const int data_visible = tabular_data_visible_lines(visible_lines);
+  const int data_total = store->max_data_total();
+  if (buffer->scroll < max_scroll(data_total, data_visible)) {
+    return;
+  }
+  if (store->request_load_at_end(buffer->scroll, data_visible)) {
+    panel->tabular_scroll_locked = true;
+    panel->tabular_scroll_limit = buffer->scroll;
+  }
+}
+
+bool tabular_view_ready(EditorPanelState* panel, const EditorBuffer& buffer) {
+  return is_tabular_path(buffer.path) && panel != nullptr && panel->tabular_store != nullptr &&
+         panel->tabular_store->ready();
+}
+
+bool scroll_tabular_lines(WorkspaceModel* workspace, EditorPanelState* panel, int delta_lines,
+                          int visible_lines) {
+  if (workspace == nullptr || !tabular_view_ready(panel, workspace->buffer)) {
+    return false;
+  }
+  workspace->ensure_buffer();
+  EditorBuffer* buffer = &workspace->buffer;
+  const int data_total = panel->tabular_store->max_data_total();
+  const int data_visible = tabular_data_visible_lines(visible_lines);
+  buffer->scroll =
+      std::max(0, std::min(buffer->scroll + delta_lines, max_scroll(data_total, data_visible)));
+  clamp_tabular_scroll(panel, buffer, visible_lines);
+  maybe_request_tabular_chunk(panel, buffer, visible_lines);
+  buffer->view_token++;
+  return true;
+}
+
+int tabular_total_content_width(EditorPanelState* panel) {
+  if (panel == nullptr || panel->tabular_store == nullptr || !panel->tabular_store->ready()) {
+    return 0;
+  }
+  const TabularTableLayout& layout = panel->tabular_store->layout();
+  int total_width = tabular_row_width(layout);
+  const std::string header_line = panel->tabular_store->row_at(0);
+  if (!header_line.empty()) {
+    const auto header_cells =
+        parse_tabular_row(header_line, panel->tabular_store->delimiter());
+    total_width = std::max(total_width, tabular_row_width_for_cells(header_cells, layout));
+  }
+  return total_width;
+}
+
+int tabular_max_scroll_col(EditorPanelState* panel, int code_width) {
+  return std::max(0, tabular_total_content_width(panel) - std::max(1, code_width));
+}
+
+void clamp_tabular_scroll_col(EditorBuffer* buffer, EditorPanelState* panel, int code_width) {
+  if (buffer == nullptr || panel == nullptr) {
+    return;
+  }
+  buffer->scroll_col = std::min(buffer->scroll_col, tabular_max_scroll_col(panel, code_width));
+}
+
+void scroll_tabular_columns(EditorBuffer* buffer, EditorPanelState* panel, int delta_columns,
+                            int code_width) {
+  if (buffer == nullptr || panel == nullptr || panel->tabular_store == nullptr ||
+      !panel->tabular_store->ready()) {
+    return;
+  }
+  const int max_scroll_col = tabular_max_scroll_col(panel, code_width);
+  buffer->scroll_col =
+      std::max(0, std::min(buffer->scroll_col + delta_columns, max_scroll_col));
+  buffer->view_token++;
+}
+
+int editor_horizontal_content_width(const EditorBuffer& buffer, int code_width) {
+  int max_len = 0;
+  for (const auto& line : buffer.lines) {
+    max_len = std::max(max_len, static_cast<int>(line.size()));
+  }
+  const int max_scroll_col = std::max(0, max_len - code_width + 1);
+  if (max_scroll_col <= 0) {
+    return code_width;
+  }
+  return max_scroll_col + code_width;
+}
+
+int editor_horizontal_max_scroll_col(const EditorBuffer& buffer, int code_width) {
+  int max_len = 0;
+  for (const auto& line : buffer.lines) {
+    max_len = std::max(max_len, static_cast<int>(line.size()));
+  }
+  return std::max(0, max_len - code_width + 1);
+}
+
+Element attach_horizontal_scrollbar(Element code, int total_content_width, int scroll_col,
+                                    int code_width, bool hovered, bool active,
+                                    EditorPanelState* panel) {
+  panel->h_scrollbar_layout = compute_horizontal_scrollbar_layout(total_content_width, scroll_col,
+                                                                 code_width, code_width);
+  if (!panel->h_scrollbar_layout.scrollable) {
+    panel->h_scrollbar_layout = {};
+    return code | flex;
+  }
+  Element h_bar =
+      horizontal_scrollbar(total_content_width, scroll_col, code_width, code_width, hovered, active);
+  Element h_track = std::move(h_bar) | reflect(panel->h_scrollbar_box) | bgcolor(theme::CodeBg());
+  return vbox({std::move(code) | flex, std::move(h_track) | size(HEIGHT, EQUAL, 1)}) | flex;
+}
 
 bool is_ident_char(char c) {
   return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
@@ -1947,6 +2318,11 @@ void update_live_completion(CompletionState* completion, WorkspaceModel* workspa
 
   completion->open = true;
   completion->live_mode = true;
+  if (!buffer->path.empty() && is_indexed_source_path(buffer->path)) {
+    completion->snippet_items = structure_snippet_completions(completion->query);
+  } else {
+    completion->snippet_items.clear();
+  }
   completion->refresh_matches();
   schedule_live_lsp_fetch(completion, workspace, layout_state);
   maybe_close_live_completion(completion, layout_state, symbols, buffer->path);
@@ -1957,6 +2333,25 @@ void maybe_open_live_completion(CompletionState* completion, WorkspaceModel* wor
                                 SymbolWorkspaceIndexer* symbol_indexer,
                                 MainLayoutState* layout_state, EditorBuffer* buffer,
                                 char typed) {
+  const bool cpp_file = !buffer->path.empty() && is_indexed_source_path(buffer->path);
+  buffer->ensure_cursors();
+  const std::string prefix = word_at_cursor(*buffer, buffer->primary());
+  const bool snippet_live = cpp_file && structure_snippet_prefix_active(prefix);
+
+  if (snippet_live) {
+    if (!is_ident_char(typed) || !completion_allowed_at_cursor(*buffer)) {
+      if (completion != nullptr && completion->open && completion->live_mode) {
+        completion->close(layout_state);
+      }
+      return;
+    }
+    if (completion != nullptr && completion->open && !completion->live_mode) {
+      return;
+    }
+    update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state, buffer);
+    return;
+  }
+
   if (layout_state != nullptr && layout_state->app_settings != nullptr &&
       !layout_state->app_settings->live_lsp_completion_enabled) {
     if (completion != nullptr && completion->open && completion->live_mode) {
@@ -2442,22 +2837,40 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.button == Mouse::WheelLeft || (m.shift && m.button == Mouse::WheelUp)) {
+    if (tabular_view_ready(panel, *buffer)) {
+      scroll_tabular_columns(buffer, panel, -3, panel->code_width_chars);
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     scroll_view_by_columns(buffer, -3, panel->code_width_chars);
     clear_hover_state(&panel->hover);
     return true;
   }
   if (m.button == Mouse::WheelRight || (m.shift && m.button == Mouse::WheelDown)) {
+    if (tabular_view_ready(panel, *buffer)) {
+      scroll_tabular_columns(buffer, panel, 3, panel->code_width_chars);
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     scroll_view_by_columns(buffer, 3, panel->code_width_chars);
     clear_hover_state(&panel->hover);
     return true;
   }
 
   if (m.button == Mouse::WheelUp && !m.shift) {
+    if (scroll_tabular_lines(workspace, panel, -3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     scroll_view_by_lines(buffer, -3, visible_lines);
     clear_hover_state(&panel->hover);
     return true;
   }
   if (m.button == Mouse::WheelDown && !m.shift) {
+    if (scroll_tabular_lines(workspace, panel, 3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     scroll_view_by_lines(buffer, 3, visible_lines);
     clear_hover_state(&panel->hover);
     return true;
@@ -2718,6 +3131,7 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
   completion->lsp_items.clear();
   completion->lsp_resolved_query.clear();
   completion->all_items.clear();
+  completion->snippet_items.clear();
   completion->matches.clear();
   completion->semantic_mode = false;
   completion->sync_symbols(workspace, symbols, symbol_indexer, true);
@@ -2892,6 +3306,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   workspace->ensure_buffer();
   EditorBuffer* buffer = &workspace->buffer;
   buffer->ensure_cursors();
+  const bool tabular_view = is_tabular_path(buffer->path);
 
   if (event_is_alt_left(event)) {
     if (workspace->navigate_cursor_back(visible_lines)) {
@@ -3074,6 +3489,55 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
                       event_is_ctrl_shift_left(event) || event_is_ctrl_shift_right(event) ||
                       event_is_shift_home(event) || event_is_shift_end(event);
 
+  if (tabular_view && panel != nullptr && panel->tabular_store != nullptr &&
+      panel->tabular_store->ready()) {
+    const int data_total = panel->tabular_store->max_data_total();
+    const int data_visible = tabular_data_visible_lines(visible_lines);
+    const auto scroll_data = [&](int delta) {
+      buffer->scroll = std::max(
+          0, std::min(buffer->scroll + delta, max_scroll(data_total, data_visible)));
+      clamp_tabular_scroll(panel, buffer, visible_lines);
+      maybe_request_tabular_chunk(panel, buffer, visible_lines);
+      buffer->view_token++;
+      return true;
+    };
+    const auto scroll_cols = [&](int delta) {
+      scroll_tabular_columns(buffer, panel, delta, panel->code_width_chars);
+      return true;
+    };
+    if (event == Event::ArrowLeft || event_is_shift_left(event) || event_is_ctrl_left(event) ||
+        event_is_ctrl_alt_left(event) || event_is_ctrl_shift_left(event)) {
+      return scroll_cols(-10);
+    }
+    if (event == Event::ArrowRight || event_is_shift_right(event) || event_is_ctrl_right(event) ||
+        event_is_ctrl_alt_right(event) || event_is_ctrl_shift_right(event)) {
+      return scroll_cols(10);
+    }
+    if (event == Event::ArrowDown || event_is_shift_down(event)) {
+      return scroll_data(1);
+    }
+    if (event == Event::ArrowUp || event_is_shift_up(event)) {
+      return scroll_data(-1);
+    }
+    if (event == Event::PageDown) {
+      return scroll_data(data_visible);
+    }
+    if (event == Event::PageUp) {
+      return scroll_data(-data_visible);
+    }
+    if (event == Event::Home || event_is_shift_home(event)) {
+      buffer->scroll = 0;
+      buffer->view_token++;
+      return true;
+    }
+    if (event == Event::End || event_is_shift_end(event)) {
+      buffer->scroll = tabular_max_allowed_scroll(panel, visible_lines);
+      maybe_request_tabular_chunk(panel, buffer, visible_lines);
+      buffer->view_token++;
+      return true;
+    }
+  }
+
   if (event_is_ctrl_left(event) || event_is_ctrl_alt_left(event) ||
       event_is_ctrl_shift_left(event)) {
     move_primary_word_left(buffer, extend);
@@ -3097,11 +3561,17 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (event_is_ctrl_alt_up(event) || event_is_ctrl_shift_up(event)) {
+    if (tabular_view) {
+      return true;
+    }
     extend_block_selection_vertical(buffer, -1);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
   }
   if (event_is_ctrl_alt_down(event) || event_is_ctrl_shift_down(event)) {
+    if (tabular_view) {
+      return true;
+    }
     extend_block_selection_vertical(buffer, 1);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
@@ -3123,6 +3593,13 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event == Event::End || event_is_shift_end(event)) {
     move_primary_end(buffer, event_is_shift_end(event));
     return true;
+  }
+  if (tabular_view) {
+    if (event == Event::Backspace || event == Event::Delete || event == Event::Return ||
+        event_is_ctrl_backspace(event) || event_is_ctrl_delete(event) || event.is_character()) {
+      workspace->status_message = "Vista tabular CSV/TSV (solo lectura)";
+      return true;
+    }
   }
   if (event_is_ctrl_backspace(event)) {
     delete_word_backward(buffer);
@@ -3203,7 +3680,8 @@ Element make_completion_overlay(const CompletionState& completion_state,
   if (!completion_state.open || completion_state.matches.empty()) {
     return text("");
   }
-  if (live_completion_awaiting_lsp(&completion_state, layout_state, symbols, buffer.path)) {
+  if (live_completion_awaiting_lsp(&completion_state, layout_state, symbols, buffer.path) &&
+      completion_state.snippet_items.empty()) {
     return text("");
   }
 
@@ -3217,11 +3695,20 @@ Element make_completion_overlay(const CompletionState& completion_state,
   Elements rows;
   for (int i = start; i < end; ++i) {
     const auto& item = completion_state.matches[static_cast<std::size_t>(i)];
-    std::string label = item.label;
+    const std::string icon = symbol_kind_glyph(item.kind);
+    const std::string name = strip_symbol_kind_prefix(item.label);
+    const Color kind_color = theme::ColorForSymbolKind(item.kind);
+    Element label_row = hbox({
+        text(" " + icon + " ") | color(kind_color),
+        text(name) | color(theme::Header()),
+    });
     if (!item.detail.empty()) {
-      label += "  " + item.detail;
+      label_row = hbox({
+          label_row,
+          text("  " + item.detail) | color(theme::Muted()),
+      });
     }
-    Element row = text(" " + label) | color(theme::Header());
+    Element row = label_row;
     if (i == completion_state.selected) {
       row = row | inverted | bgcolor(theme::EditorLineHi());
     } else {
@@ -3402,16 +3889,48 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->cached_symbols_path.clear();
       panel_state->cached_semantic_path.clear();
       panel_state->last_semantic_highlight_revision = 0;
-      panel_state->semantic_tokens_enqueue_pending = !buffer.path.empty();
+      panel_state->semantic_tokens_enqueue_pending =
+          !buffer.path.empty() && !is_tabular_path(buffer.path);
       panel_state->last_semantic_highlight_revision_tick = 0;
       buffer.scroll_col = 0;
+      panel_state->h_scrollbar_dragging = false;
+      panel_state->h_scrollbar_layout = {};
       clear_hover_state(&panel_state->hover);
       panel_state->document_open_pending = !buffer.path.empty();
       panel_state->pending_document_open_path = buffer.path;
+      panel_state->tabular_layout_path.clear();
+      panel_state->tabular_layout_line_count = 0;
+      panel_state->tabular_store.reset();
+      panel_state->tabular_scroll_locked = false;
+      panel_state->tabular_scroll_limit = 0;
+      if (is_tabular_path(buffer.path)) {
+        panel_state->tabular_store = std::make_unique<TabularFileStore>();
+        panel_state->tabular_store->open_async(buffer.path);
+      }
       if (layout_state != nullptr && layout_state->schedule_ui_tick) {
         layout_state->schedule_ui_tick();
       }
       buffer.scroll = std::max(0, buffer.primary_line() - 2);
+    }
+
+    const int total = static_cast<int>(buffer.lines.size());
+    const bool tabular_view = is_tabular_path(buffer.path);
+    TabularFileStore* tabular_store =
+        tabular_view ? panel_state->tabular_store.get() : nullptr;
+    const bool tabular_ready = tabular_store != nullptr && tabular_store->ready();
+    const bool tabular_indexing = tabular_store != nullptr && tabular_store->indexing();
+
+    if (tabular_view && tabular_store != nullptr) {
+      if (layout_state != nullptr && layout_state->schedule_ui_tick) {
+        const int64_t now = steady_now_ms();
+        if (tabular_indexing || tabular_store->loading_more() ||
+            (tabular_ready && tabular_store->has_more())) {
+          if (now - panel_state->last_tabular_index_tick_ms >= 200) {
+            panel_state->last_tabular_index_tick_ms = now;
+            layout_state->schedule_ui_tick();
+          }
+        }
+      }
     }
 
     if (buffer.view_token != panel_state->last_view_token) {
@@ -3425,15 +3944,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     const SemanticTokenDocument* semantic_tokens = nullptr;
     if (symbols && symbols->supports_semantic_highlight() && indexed_cpp) {
-      if (!typing_burst) {
-        const uint64_t semantic_rev = symbols->semantic_highlight_revision();
-        if (panel_state->cached_semantic_path != buffer.path ||
-            semantic_rev != panel_state->last_semantic_highlight_revision) {
-          panel_state->cached_semantic_path = buffer.path;
-          panel_state->last_semantic_highlight_revision = semantic_rev;
-          panel_state->cached_semantic_tokens =
-              symbols->semantic_tokens_for_file(buffer.path);
-        }
+      const uint64_t semantic_rev = symbols->semantic_highlight_revision();
+      if (panel_state->cached_semantic_path != buffer.path ||
+          semantic_rev != panel_state->last_semantic_highlight_revision) {
+        panel_state->cached_semantic_path = buffer.path;
+        panel_state->last_semantic_highlight_revision = semantic_rev;
+        panel_state->cached_semantic_tokens =
+            symbols->semantic_tokens_for_file(buffer.path);
       }
       if (panel_state->cached_semantic_tokens.ready) {
         semantic_tokens = &panel_state->cached_semantic_tokens;
@@ -3442,11 +3959,122 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     const int visible = visible_line_count(panel_state->code_box);
 
-    const int total = static_cast<int>(buffer.lines.size());
     const int start = buffer.scroll;
     const int end = std::min(total, start + visible);
     const int gutter_w = line_number_width(total);
     const bool editor_focused = focus->region == panel_state->panel_focus;
+
+    if (tabular_view && tabular_store != nullptr) {
+      Elements gutter_rows;
+      Elements code_rows;
+      const Decorator row_bg = bgcolor(theme::CodeBg());
+      const Decorator header_bg = bgcolor(theme::TabIdle());
+
+      if (tabular_indexing) {
+        gutter_rows.push_back(text(format_line_number(1, 4)) | color(theme::Muted()) | row_bg);
+        code_rows.push_back(text("Indexando archivo tabular…") | color(theme::Muted()) | row_bg);
+      } else if (!tabular_ready) {
+        gutter_rows.push_back(text(format_line_number(1, 4)) | color(theme::Muted()) | row_bg);
+        const std::string message =
+            tabular_store->error_message().empty()
+                ? "No se pudo abrir el archivo tabular"
+                : tabular_store->error_message();
+        code_rows.push_back(text(message) | color(theme::Error()) | row_bg);
+      } else {
+        const int file_rows = tabular_store->row_count();
+        const int data_total = tabular_store->max_data_total();
+        const int data_visible = tabular_data_visible_lines(visible);
+        clamp_tabular_scroll(panel_state.get(), &buffer, visible);
+        tabular_store->ensure_viewport(buffer.scroll, data_visible);
+        maybe_request_tabular_chunk(panel_state.get(), &buffer, visible);
+
+        const int data_scroll = std::max(0, std::min(buffer.scroll, max_scroll(data_total, 1)));
+        const TabularTableLayout& layout = tabular_store->layout();
+        const TabularDelimiter delimiter = tabular_store->delimiter();
+        const int gutter_w = line_number_width(std::max(file_rows, 1));
+        const int code_width =
+            code_width_from_box(panel_state->code_box, panel_state->code_width_chars);
+        panel_state->code_width_chars = code_width;
+        clamp_tabular_scroll_col(&buffer, panel_state.get(), code_width);
+
+        const std::string header_line = tabular_store->row_at(0);
+        const auto header_cells = parse_tabular_row(header_line, delimiter);
+        gutter_rows.push_back(text(format_line_number(1, gutter_w)) | color(theme::Muted()) |
+                              header_bg);
+        code_rows.push_back(render_tabular_row_viewport(header_cells, layout, true,
+                                                        buffer.scroll_col, code_width) |
+                            size(WIDTH, EQUAL, code_width) | xflex_shrink | header_bg);
+
+        const int data_end = std::min(data_total, data_scroll + data_visible);
+        for (int data_index = data_scroll; data_index < data_end; ++data_index) {
+          const int row_index = data_index + 1;
+          const std::string line = tabular_store->row_at(row_index);
+          const auto cells = parse_tabular_row(line, delimiter);
+          gutter_rows.push_back(text(format_line_number(row_index + 1, gutter_w)) |
+                              color(theme::Muted()) | row_bg);
+          code_rows.push_back(render_tabular_row_viewport(cells, layout, false, buffer.scroll_col,
+                                                          code_width) |
+                              size(WIDTH, EQUAL, code_width) | xflex_shrink | row_bg);
+        }
+
+        if (tabular_store->loading_more()) {
+          gutter_rows.push_back(text(format_line_number(data_end + 2, gutter_w)) |
+                              color(theme::Muted()) | row_bg);
+          code_rows.push_back(text("Cargando más filas…") | color(theme::Muted()) | row_bg);
+        } else if (code_rows.size() == 1) {
+          gutter_rows.push_back(text(format_line_number(2, gutter_w)) | color(theme::Muted()) |
+                                row_bg);
+          code_rows.push_back(text("(sin filas de datos)") | color(theme::Muted()) | row_bg);
+        }
+
+        const int rendered_lines = static_cast<int>(code_rows.size());
+        Element gutter = vbox(std::move(gutter_rows)) | reflect(panel_state->gutter_box) |
+                         bgcolor(theme::CodeBg());
+        Element code = vbox(std::move(code_rows)) | flex | reflect(panel_state->code_box) |
+                       bgcolor(theme::CodeBg());
+        const bool scroll_hovered =
+            layout_state != nullptr &&
+            layout_state->clickable.is_hovered(press_id::kEditorScrollbar);
+        const bool scroll_active =
+            panel_state->scrollbar_dragging ||
+            (layout_state != nullptr &&
+             layout_state->clickable.is_pressed(press_id::kEditorScrollbar));
+        Element scrollbar =
+            vertical_scrollbar(data_total, data_scroll, data_visible, rendered_lines,
+                               scroll_hovered, scroll_active) |
+            reflect(panel_state->scrollbar_box);
+        panel_state->scrollbar_layout =
+            compute_scrollbar_layout(data_total, data_scroll, data_visible, rendered_lines);
+        const bool h_scroll_hovered =
+            layout_state != nullptr &&
+            layout_state->clickable.is_hovered(press_id::kEditorHorizontalScrollbar);
+        const bool h_scroll_active =
+            panel_state->h_scrollbar_dragging ||
+            (layout_state != nullptr &&
+             layout_state->clickable.is_pressed(press_id::kEditorHorizontalScrollbar));
+        const int total_content_width = tabular_total_content_width(panel_state.get());
+        Element code_column = attach_horizontal_scrollbar(
+            std::move(code), total_content_width, buffer.scroll_col, code_width, h_scroll_hovered,
+            h_scroll_active, panel_state.get());
+        return hbox({gutter, separator() | color(theme::AccentDim()), std::move(code_column),
+                     scrollbar}) |
+               flex;
+      }
+
+      const int rendered_lines = static_cast<int>(code_rows.size());
+      Element gutter = vbox(std::move(gutter_rows)) | reflect(panel_state->gutter_box) |
+                       bgcolor(theme::CodeBg());
+      Element code = vbox(std::move(code_rows)) | flex | reflect(panel_state->code_box) |
+                     bgcolor(theme::CodeBg());
+      Element scrollbar =
+          vertical_scrollbar(1, 0, 1, rendered_lines, false, false) |
+          reflect(panel_state->scrollbar_box);
+      panel_state->scrollbar_layout = compute_scrollbar_layout(1, 0, 1, rendered_lines);
+      panel_state->h_scrollbar_layout = {};
+      return hbox({gutter, separator() | color(theme::AccentDim()), code | flex, scrollbar}) |
+             flex;
+    }
+
     const std::vector<TextMatch>* find_matches =
         find_state->open && !find_state->matches.empty() ? &find_state->matches : nullptr;
     const std::vector<TextMatch>* selection_occurrences =
@@ -3485,9 +4113,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     panel_state->gutter_visible_rows = std::max(0, end - start);
 
     const int code_width =
-        panel_state->code_box.x_max > panel_state->code_box.x_min
-            ? panel_state->code_box.x_max - panel_state->code_box.x_min + 1
-            : 80;
+        code_width_from_box(panel_state->code_box, panel_state->code_width_chars);
     panel_state->code_width_chars = code_width;
 
     track_editor_scroll(panel_state.get(), start, layout_state);
@@ -3624,7 +4250,20 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     panel_state->scrollbar_layout =
         compute_scrollbar_layout(total, buffer.scroll, visible, rendered_lines);
 
-    Elements editor_columns = {gutter, separator() | color(theme::AccentDim()), code | flex};
+    const bool h_scroll_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kEditorHorizontalScrollbar);
+    const bool h_scroll_active =
+        panel_state->h_scrollbar_dragging ||
+        (layout_state != nullptr &&
+         layout_state->clickable.is_pressed(press_id::kEditorHorizontalScrollbar));
+    const int total_content_width = editor_horizontal_content_width(buffer, code_width);
+    Element code_column = attach_horizontal_scrollbar(
+        std::move(code), total_content_width, buffer.scroll_col, code_width, h_scroll_hovered,
+        h_scroll_active, panel_state.get());
+
+    Elements editor_columns = {gutter, separator() | color(theme::AccentDim()),
+                               std::move(code_column)};
     if (overview_ruler_enabled) {
       OverviewRulerInput ruler_input;
       ruler_input.total_lines = total;
@@ -3841,8 +4480,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         if (!path.empty()) {
           if (panel_state->document_open_pending && symbols) {
             panel_state->document_open_pending = false;
-            symbols->on_document_opened(panel_state->pending_document_open_path,
-                                        buffer_text(workspace->buffer));
+            if (!is_tabular_path(panel_state->pending_document_open_path)) {
+              symbols->on_document_opened(panel_state->pending_document_open_path,
+                                          buffer_text(workspace->buffer));
+            }
           }
           symbols->tick_debounced_updates();
           if (panel_state->symbols_fetch_pending) {
@@ -3851,10 +4492,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           const uint64_t sym_rev = symbols->document_symbols_revision();
           if (sym_rev != panel_state->last_document_symbols_revision) {
             panel_state->last_document_symbols_revision = sym_rev;
-            panel_state->symbols_fetch_pending = true;
+            if (!is_tabular_path(path)) {
+              panel_state->symbols_fetch_pending = true;
+            }
             ensure_file_symbols(panel_state.get(), symbols.get(), path);
           }
-          if (symbols->supports_semantic_highlight() && !path.empty()) {
+          if (symbols->supports_semantic_highlight() && !path.empty() &&
+              !is_tabular_path(path)) {
             const uint64_t sem_rev = symbols->semantic_highlight_revision();
             if (sem_rev != panel_state->last_semantic_highlight_revision_tick) {
               panel_state->last_semantic_highlight_revision_tick = sem_rev;
@@ -3863,8 +4507,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
               }
             }
             if (panel_state->semantic_tokens_enqueue_pending) {
-              symbols->ensure_semantic_tokens(path);
-              panel_state->semantic_tokens_enqueue_pending = false;
+              const bool ready = symbols->ensure_semantic_tokens(path);
+              if (ready || symbols->semantic_tokens_for_file(path).ready) {
+                panel_state->semantic_tokens_enqueue_pending = false;
+              } else if (!symbols->lsp_loading() && !symbols->supports_semantic_highlight()) {
+                panel_state->semantic_tokens_enqueue_pending = false;
+              }
             }
           }
           sync_diagnostic_cache(panel_state.get(), symbols.get(), workspace, file_indexer);

@@ -15,6 +15,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "util/child_process_guard.hpp"
+
 namespace fs = std::filesystem;
 
 namespace tgdb {
@@ -206,6 +208,7 @@ bool search_workspace_rg(const WorkspaceSearchOptions& opts, const std::string& 
   }
 
   if (pid == 0) {
+    child_die_with_parent();
     close(pipefd[0]);
     dup2(pipefd[1], STDOUT_FILENO);
     close(pipefd[1]);

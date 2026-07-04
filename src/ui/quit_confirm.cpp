@@ -44,11 +44,12 @@ bool update_quit_hover(QuitConfirmState* state, MainLayoutState* layout_state, i
 }  // namespace
 
 Component MakeQuitConfirmOverlay(Component main, QuitConfirmState* state,
-                                 MainLayoutState* layout_state,
+                                 MainLayoutState* layout_state, ShutdownState* shutdown_state,
                                  std::function<void()> on_confirm) {
   return Renderer(
-      CatchEvent(main, [state, layout_state, on_confirm](Event event) {
-        if (state == nullptr || !state->open) {
+      CatchEvent(main, [state, layout_state, shutdown_state, on_confirm](Event event) {
+        if (state == nullptr || !state->open ||
+            (shutdown_state != nullptr && shutdown_state->is_active())) {
           return false;
         }
 
@@ -63,6 +64,10 @@ Component MakeQuitConfirmOverlay(Component main, QuitConfirmState* state,
           if (state->yes_box.Contain(m.x, m.y)) {
             state->selected = kYes;
             trigger_press(layout_state, press_id::kQuitYes);
+            state->open = false;
+            if (on_confirm) {
+              on_confirm();
+            }
             return true;
           }
           if (state->no_box.Contain(m.x, m.y)) {
@@ -109,7 +114,10 @@ Component MakeQuitConfirmOverlay(Component main, QuitConfirmState* state,
         }
         return true;
       }),
-      [main, state, layout_state] {
+      [main, state, layout_state, shutdown_state] {
+        if (shutdown_state != nullptr && shutdown_state->is_active()) {
+          return main->Render();
+        }
         Element base = main->Render();
         if (state == nullptr || !state->open) {
           return base;

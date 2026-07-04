@@ -2,6 +2,8 @@
 
 #include "util/bundled_tools.hpp"
 
+#include "util/child_process_guard.hpp"
+
 #include <array>
 #include <cerrno>
 #include <cstring>
@@ -90,6 +92,7 @@ bool probe_dap(const std::string& gdb_path) {
   }
 
   if (pid == 0) {
+    child_die_with_parent();
     const int devnull = ::open("/dev/null", O_RDWR);
     if (devnull >= 0) {
       dup2(devnull, STDIN_FILENO);
@@ -163,6 +166,7 @@ bool GdbProcess::start() {
   }
 
   if (pid == 0) {
+    child_die_with_parent();
     dup2(stdin_pipe[0], STDIN_FILENO);
     dup2(stdout_pipe[1], STDOUT_FILENO);
     dup2(stdout_pipe[1], STDERR_FILENO);

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <sstream>
 #include <thread>
@@ -25,11 +26,14 @@
 #include "ui/file_picker.hpp"
 #include "ui/git_panel.hpp"
 #include "ui/quit_confirm.hpp"
+#include "ui/shutdown_overlay.hpp"
 #include "ui/open_file_confirm.hpp"
 #include "ui/settings_modal.hpp"
 #include "ui/theme.hpp"
+#include "ui/glyphs.hpp"
 #include "ui/symbol_picker.hpp"
 #include "ui/cursor_blink.hpp"
+#include "ui/binary_symbols_panel.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/press_ids.hpp"
@@ -71,17 +75,14 @@ void force_immediate_repaint(MainLayoutState* layout, ScreenInteractive* screen)
     return;
   }
   screen->PostEvent(Event::Custom);
-  nudge_terminal_repaint();
-  screen->Post([screen] {
-    screen->PostEvent(Event::Custom);
-    nudge_terminal_repaint();
-  });
 }
 
 class EventPoller {
  public:
-  explicit EventPoller(ScreenInteractive* screen, MainLayoutState* layout)
-      : screen_(screen), layout_(layout) {
+  using MainThreadTask = std::function<void()>;
+
+  EventPoller(ScreenInteractive* screen, MainLayoutState* layout, MainThreadTask on_main_thread)
+      : screen_(screen), layout_(layout), on_main_thread_(std::move(on_main_thread)) {
     thread_ = std::thread([this] {
       set_current_thread_name("ui-poller");
       while (running_.load(std::memory_order_acquire)) {
@@ -89,6 +90,9 @@ class EventPoller {
         if (screen_ != nullptr) {
           if (layout_ != nullptr) {
             layout_->ui_heartbeat.store(true, std::memory_order_release);
+          }
+          if (on_main_thread_) {
+            screen_->Post(on_main_thread_);
           }
           screen_->PostEvent(Event::Custom);
         }
@@ -109,6 +113,7 @@ class EventPoller {
  private:
   ScreenInteractive* screen_;
   MainLayoutState* layout_;
+  MainThreadTask on_main_thread_;
   std::atomic<bool> running_{true};
   std::thread thread_;
 };
@@ -123,7 +128,11 @@ class UiTickPostWrapper : public ComponentBase {
 
   bool OnEvent(Event event) override {
     const bool handled = ComponentBase::OnEvent(std::move(event));
-    post_pending_tick();
+    // Never chain Custom→Custom: each tick that sets request_ui_tick would otherwise
+    // enqueue another Custom in the same RunOnce drain loop and starve keyboard input.
+    if (event != Event::Custom) {
+      post_pending_tick();
+    }
     return handled;
   }
 
@@ -134,13 +143,6 @@ class UiTickPostWrapper : public ComponentBase {
     }
     layout_->request_ui_tick = false;
     screen_->PostEvent(Event::Custom);
-    nudge_terminal_repaint();
-    screen_->Post([this] {
-      if (screen_ != nullptr) {
-        screen_->PostEvent(Event::Custom);
-        nudge_terminal_repaint();
-      }
-    });
   }
 
   MainLayoutState* layout_;
@@ -185,6 +187,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 
   symbol_provider_ = std::make_shared<LspSymbolProvider>();
   app_settings_ = AppSettings::load();
+  configure_glyphs(resolve_icon_mode(app_settings_.icon_mode));
   layout_state_.app_settings = &app_settings_;
   layout_state_.workspace_clang_format = &clang_format_config_;
   layout_state_.apply_app_settings_callback = [this] { apply_app_settings(); };
@@ -199,6 +202,16 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
   debug_available_ = gdb_supports_dap();
   workspace_.open_file_confirm = &open_file_confirm_state_;
   secondary_workspace_.open_file_confirm = &open_file_confirm_state_;
+  const auto wire_ui_tasks = [this](WorkspaceModel* workspace) {
+    if (workspace == nullptr) {
+      return;
+    }
+    workspace->enqueue_ui_task = [this](WorkspaceModel::UiTask task) {
+      enqueue_ui_task(std::move(task));
+    };
+  };
+  wire_ui_tasks(&workspace_);
+  wire_ui_tasks(&secondary_workspace_);
 
   if (config_.show_welcome_screen) {
     layout_state_.welcome_visible = true;
@@ -228,6 +241,16 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 }
 
 Application::~Application() {
+  if (shutdown_thread_.joinable()) {
+    shutdown_thread_.join();
+  }
+  if (shutdown_performed_) {
+    return;
+  }
+  stop_all_subprocesses();
+}
+
+void Application::stop_all_subprocesses() {
   save_workspace_session();
   build_artifact_watcher_.stop();
   global_build_environment_service().shutdown();
@@ -290,6 +313,9 @@ void Application::setup_build_environment_watching() {
     global_build_environment_service().notify_artifacts_changed(workspace_.root,
                                                                 workspace_config_, hints);
     schedule_debounced_lsp_restart();
+    if (!model_.program.empty()) {
+      refresh_binary_symbols_if_matches(&layout_state_, model_.program);
+    }
   });
   build_artifact_watcher_.start(workspace_.root, watch_dirs);
 }
@@ -344,6 +370,46 @@ void Application::sync_symbol_workspace_indexer() {
   symbol_indexer_.start_scan(workspace_.root, symbol_provider_, &indexer_);
 }
 
+IndexFilterOptions Application::index_filter_options() const {
+  IndexFilterOptions options;
+  options.show_all_files = app_settings_.show_all_workspace_files;
+  return options;
+}
+
+void Application::restart_workspace_indexing() {
+  if (workspace_.root.empty()) {
+    return;
+  }
+  const IndexFilterOptions options = index_filter_options();
+  indexer_.start_scan(workspace_.root, options);
+  workspace_watcher_.stop();
+  workspace_watcher_.start(workspace_.root, options);
+}
+
+void Application::enqueue_ui_task(std::function<void()> task) {
+  if (!task) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(ui_task_mutex_);
+    ui_tasks_.push_back(std::move(task));
+  }
+  layout_state_.request_ui_tick = true;
+}
+
+void Application::drain_ui_tasks() {
+  std::deque<std::function<void()>> tasks;
+  {
+    std::lock_guard<std::mutex> lock(ui_task_mutex_);
+    tasks.swap(ui_tasks_);
+  }
+  for (auto& task : tasks) {
+    if (task) {
+      task();
+    }
+  }
+}
+
 void Application::apply_workspace_settings(const WorkspaceConfig& config) {
   workspace_config_ = config;
   theme::set_mode(workspace_config_.theme);
@@ -382,6 +448,119 @@ void Application::save_workspace_session() {
   }
   session.launch_args = workspace_launch_args_;
   session.save(workspace_.root);
+}
+
+void Application::begin_shutdown(ScreenInteractive* screen) {
+  if (shutdown_state_.is_active()) {
+    return;
+  }
+  quit_confirm_state_.open = false;
+  shutdown_state_.begin(7);
+  shutdown_step_index_ = 0;
+  shutdown_state_.set_current("Guardando sesión…");
+  layout_state_.request_ui_tick = true;
+  if (screen != nullptr) {
+    screen->Post([this, screen] {
+      force_immediate_repaint(&layout_state_, screen);
+      screen->Post([this, screen] {
+        force_immediate_repaint(&layout_state_, screen);
+        screen->Post([this, screen] {
+          schedule_next_shutdown_step(screen);
+        });
+      });
+    });
+  }
+}
+
+void Application::schedule_next_shutdown_step(ScreenInteractive* screen) {
+  if (!shutdown_state_.is_active() || shutdown_state_.is_complete()) {
+    return;
+  }
+  if (shutdown_thread_.joinable()) {
+    shutdown_thread_.join();
+  }
+
+  shutdown_thread_ = std::thread([this, screen] {
+    set_current_thread_name("shutdown");
+    tick_shutdown();
+    if (screen == nullptr) {
+      return;
+    }
+    screen->Post([this, screen] {
+      force_immediate_repaint(&layout_state_, screen);
+      if (shutdown_state_.is_complete()) {
+        screen->Post([screen] {
+          screen->ExitLoopClosure()();
+        });
+        return;
+      }
+      screen->Post([this, screen] {
+        schedule_next_shutdown_step(screen);
+      });
+    });
+  });
+}
+
+void Application::tick_shutdown() {
+  struct ShutdownStep {
+    const char* label;
+    std::function<void()> run;
+  };
+
+  const std::vector<ShutdownStep> steps = {
+      {"Guardando sesión…",
+       [this] { save_workspace_session(); }},
+      {"Cerrando depuración…",
+       [this] {
+         if (backend_started_) {
+           submit_command(UiCommand{UiCommandKind::kQuit});
+         }
+         if (backend_) {
+           backend_->stop();
+           backend_started_ = false;
+         }
+       }},
+      {"Cerrando terminal…", [this] { shell_session_.stop(); }},
+      {"Cerrando clangd…",
+       [this] {
+         if (symbol_provider_) {
+           symbol_provider_->on_workspace_closed();
+         }
+       }},
+      {"Parando indexadores…",
+       [this] {
+         symbol_indexer_.stop();
+         indexer_.stop();
+       }},
+      {"Parando vigilancia de archivos…",
+       [this] {
+         workspace_watcher_.stop();
+         build_artifact_watcher_.stop();
+       }},
+      {"Parando entorno de compilación…",
+       [this] { global_build_environment_service().shutdown(); }},
+  };
+
+  if (shutdown_step_index_ >= static_cast<int>(steps.size())) {
+    if (!shutdown_state_.is_complete()) {
+      shutdown_state_.mark_complete();
+      shutdown_performed_ = true;
+    }
+    return;
+  }
+
+  const auto& step = steps[static_cast<std::size_t>(shutdown_step_index_)];
+  step.run();
+  shutdown_state_.complete_step(step.label);
+  ++shutdown_step_index_;
+
+  if (shutdown_step_index_ < static_cast<int>(steps.size())) {
+    shutdown_state_.set_current(steps[static_cast<std::size_t>(shutdown_step_index_)].label);
+  } else {
+    shutdown_state_.mark_complete();
+    shutdown_performed_ = true;
+  }
+  layout_state_.request_ui_tick = true;
 }
 
 void Application::restore_workspace_session() {
@@ -476,17 +655,34 @@ void Application::set_workspace(const std::string& workspace_root) {
         global_build_environment_service().active_environment_fingerprint();
     setup_build_environment_watching();
   }
-  indexer_.start_scan(absolute);
+  indexer_.start_scan(absolute, index_filter_options());
   sync_symbol_workspace_indexer();
-  workspace_watcher_.start(absolute);
+  workspace_watcher_.start(absolute, index_filter_options());
   git_service_.open(absolute);
   restore_workspace_session();
 }
 
-void Application::on_workspace_complete(const std::string& workspace_root) {
-  set_workspace(workspace_root);
-  config_.show_welcome_screen = false;
+void Application::on_workspace_complete(const std::string& workspace_root,
+                                        ScreenInteractive* /*screen*/) {
   workspace_wizard_state_.open = false;
+  pending_workspace_load_ = workspace_root;
+}
+
+void Application::process_pending_workspace_load() {
+  if (!pending_workspace_load_.has_value()) {
+    return;
+  }
+  const std::string root = std::move(*pending_workspace_load_);
+  pending_workspace_load_.reset();
+  set_workspace(root);
+  config_.show_welcome_screen = false;
+  focus_state_.region =
+      workspace_.tabs.empty() ? FocusRegion::Explorer : FocusRegion::Editor;
+  layout_state_.text_input_focus = TextInputFocus::None;
+  layout_state_.focus_sync_needed = true;
+  // No autostart shell here: bash PTY output + repaint nudges starve the UI event loop.
+  layout_state_.terminal_start_requested = false;
+  layout_state_.request_ui_tick = true;
 }
 
 void Application::open_external_file_wizard() {
@@ -654,6 +850,9 @@ void Application::apply_connection_and_start() {
   layout_state_.console_visible = true;
   layout_state_.terminal_start_requested = true;
   model_.console_output.clear();
+  if (!config_.program.empty()) {
+    request_binary_symbols_panel(&layout_state_, config_.program, {}, NmBindingFilter::kAll, false);
+  }
 
   sync_model_breakpoints_to_backend();
 
@@ -927,7 +1126,9 @@ void Application::apply_app_settings() {
     symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
   }
   monitor_log::set_enabled(app_settings_.monitor_enabled);
+  configure_glyphs(resolve_icon_mode(app_settings_.icon_mode));
   sync_symbol_workspace_indexer();
+  restart_workspace_indexing();
   if (!app_settings_.secondary_panel_enabled &&
       focus_state_.region == FocusRegion::RightPanel) {
     focus_state_.region = FocusRegion::Editor;
@@ -973,6 +1174,18 @@ bool Application::handle_focus_shortcuts(const Event& event) {
     focus_state_.region = FocusRegion::Terminal;
     layout_state_.right_sidebar.pending_focus_search = true;
     layout_state_.text_input_focus = TextInputFocus::SearchQuery;
+    mark_focus_sync();
+    return true;
+  }
+  if (event_is_open_binary_symbols_panel(event)) {
+    layout_state_.console_visible = true;
+    layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kBinarySymbols;
+    focus_state_.region = FocusRegion::Terminal;
+    if (!model_.program.empty()) {
+      request_binary_symbols_panel(&layout_state_, model_.program);
+    } else {
+      request_binary_symbols_panel(&layout_state_, std::string{});
+    }
     mark_focus_sync();
     return true;
   }
@@ -1055,7 +1268,12 @@ int Application::run() {
 
   std::unique_ptr<EventPoller> event_poller;
   if (!ui_smoke) {
-    event_poller = std::make_unique<EventPoller>(&screen, &layout_state_);
+    event_poller = std::make_unique<EventPoller>(
+        &screen, &layout_state_, [this]() {
+          if (pending_workspace_load_.has_value()) {
+            process_pending_workspace_load();
+          }
+        });
   } else {
     auto exit_loop = screen.ExitLoopClosure();
     std::thread([exit_loop] {
@@ -1111,7 +1329,7 @@ int Application::run() {
 
   auto with_workspace_wizard = MakeWorkspaceWizardOverlay(
       with_debug_wizard, &workspace_wizard_state_, &layout_state_,
-      [this](const std::string& root) { on_workspace_complete(root); },
+      [this, &screen](const std::string& root) { on_workspace_complete(root, &screen); },
       [&screen] { screen.ExitLoopClosure()(); });
 
   auto with_external_file_wizard = MakeExternalFileWizardOverlay(
@@ -1140,10 +1358,8 @@ int Application::run() {
                                                 on_workspace_apply, on_clang_format_apply);
 
   auto with_quit_confirm = MakeQuitConfirmOverlay(
-      with_settings, &quit_confirm_state_, &layout_state_, [this, &screen] {
-        save_workspace_session();
-        submit_command(UiCommand{UiCommandKind::kQuit});
-        screen.ExitLoopClosure()();
+      with_settings, &quit_confirm_state_, &layout_state_, &shutdown_state_, [this, &screen] {
+        begin_shutdown(&screen);
       });
 
   workspace_.open_file_confirm = &open_file_confirm_state_;
@@ -1169,8 +1385,16 @@ int Application::run() {
         return 24;
       });
 
-  auto root = CatchEvent(with_context_menu, [this, &screen, on_command](const Event& event) {
+  auto inner_root = CatchEvent(with_context_menu, [this, &screen, on_command](const Event& event) {
     try {
+      if (shutdown_state_.is_active()) {
+        if (event == Event::Custom) {
+          cursor_blink::tick();
+          layout_state_.clickable.tick();
+        }
+        return true;
+      }
+
         if (event == Event::Custom) {
         monitor_log::heartbeat();
         if (!any_modal_open()) {
@@ -1198,7 +1422,8 @@ int Application::run() {
         if (symbol_provider_) {
           TGDB_MON_SCOPE("ui", "tick.drain_async_results");
           if (symbol_provider_->drain_async_results()) {
-            layout_state_.request_ui_tick = true;
+            workspace_.buffer.view_token++;
+            secondary_workspace_.buffer.view_token++;
           }
         }
         if (layout_state_.primary_editor.tick_callback && !layout_state_.welcome_visible) {
@@ -1213,6 +1438,7 @@ int Application::run() {
           TGDB_MON_SCOPE("ui", "tick.git");
           git_service_.tick();
         }
+        drain_ui_tasks();
         if (git_tab_active(&layout_state_)) {
           GitPanelEnsureSelectedDiff(&git_service_, &git_panel_state_);
         }
@@ -1237,6 +1463,15 @@ int Application::run() {
              is_search_input_focus(layout_state_.text_input_focus)) &&
             layout_state_.search_key_handler) {
           layout_state_.search_key_handler(event);
+        }
+        if (binary_symbols_tab_active(&layout_state_) &&
+            layout_state_.binary_symbols_key_handler) {
+          layout_state_.binary_symbols_key_handler(event);
+        } else if (layout_state_.binary_symbols_key_handler &&
+                   (layout_state_.binary_symbols_pending.open_tab ||
+                    !layout_state_.binary_symbols_pending.binary_path.empty() ||
+                    layout_state_.binary_symbols_pending.refresh)) {
+          layout_state_.binary_symbols_key_handler(event);
         }
         if (swallow_call_hierarchy_custom) {
           return true;
@@ -1483,6 +1718,14 @@ int Application::run() {
         screen.Post(Event::Custom);
         return true;
       }
+      if ((is_binary_symbols_input_focus(layout_state_.text_input_focus) ||
+           binary_symbols_tab_active(&layout_state_)) &&
+          !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
+          layout_state_.binary_symbols_key_handler &&
+          layout_state_.binary_symbols_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
       if (git_tab_active(&layout_state_) &&
           focus_state_.region == FocusRegion::Terminal &&
           !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
@@ -1517,6 +1760,8 @@ int Application::run() {
             app_mode_ != AppMode::kDebug ||
             layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal;
         if (terminal_tab &&
+            layout_state_.console_tabs.selected_tab != ConsolePanelTabs::kBinarySymbols &&
+            layout_state_.console_tabs.selected_tab != ConsolePanelTabs::kSearch &&
             (layout_state_.text_input_focus == TextInputFocus::Console ||
              (focus_state_.region == FocusRegion::Terminal && shell_session_.running())) &&
             shell_session_.running()) {
@@ -1684,15 +1929,17 @@ int Application::run() {
     }
   });
 
+  auto root = Renderer(inner_root, [this, inner_root] {
+    if (shutdown_state_.is_active()) {
+      return RenderShutdownFullScreen(shutdown_state_.snapshot());
+    }
+    return inner_root->Render();
+  });
+
   layout_state_.schedule_ui_tick = [this]() { layout_state_.request_ui_tick = true; };
   layout_state_.terminal_wake_callback = [this, &screen]() {
     layout_state_.request_ui_tick = true;
     screen.PostEvent(Event::Custom);
-    nudge_terminal_repaint();
-    screen.Post([this, &screen] {
-      screen.PostEvent(Event::Custom);
-      nudge_terminal_repaint();
-    });
   };
 
   screen.Loop(WrapUiTickPost(root, &layout_state_, &screen));
@@ -1701,7 +1948,11 @@ int Application::run() {
     disable_extended_key_reporting();
   }
 
-  if (backend_) {
+  if (shutdown_thread_.joinable()) {
+    shutdown_thread_.join();
+  }
+
+  if (backend_ && !shutdown_performed_) {
     backend_->stop();
     backend_started_ = false;
   }

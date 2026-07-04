@@ -13,6 +13,7 @@
 #include "ftxui/screen/box.hpp"
 #include "ui/clickable.hpp"
 #include "ui/focusable_component.hpp"
+#include "ui/glyphs.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/scroll_bar.hpp"
@@ -374,7 +375,11 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
         const auto& row = state->display_rows[static_cast<std::size_t>(i)];
         std::string indent(static_cast<std::size_t>(row.indent), ' ');
         const bool is_scope = row.kind == OutlineRowKind::Scope;
-        Element line = text(indent + row.label) | color(theme::ColorForSymbolKind(row.color_kind));
+        const std::string body = strip_symbol_kind_prefix(row.label);
+        const std::string icon = symbol_kind_glyph(row.color_kind);
+        const Color kind_color = theme::ColorForSymbolKind(row.color_kind);
+        Element line =
+            hbox({text(indent + icon + " ") | color(kind_color), text(body) | color(kind_color)});
         if (is_scope) {
           line = line | dim;
         }

@@ -1,3 +1,4 @@
+#include "ui/binary_symbols_panel.hpp"
 #include "ui/connection_wizard.hpp"
 
 #include <algorithm>
@@ -13,6 +14,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
 #include "util/core_analyzer_support.hpp"
+#include "util/nm_reader.hpp"
 #include "util/path_normalize.hpp"
 #include "util/shell_args.hpp"
 
@@ -23,12 +25,13 @@ namespace fs = std::filesystem;
 
 namespace {
 
-std::string step_title(WizardStep step) {
+std::string step_title(WizardStep step, WizardMode mode) {
   switch (step) {
     case WizardStep::ChooseMode:
       return "Conectar depurador";
     case WizardStep::PickBinary:
-      return "Elegir ejecutable";
+      return mode == WizardMode::AnalyzeSymbols ? "Elegir binario (nm)"
+                                                : "Elegir ejecutable";
     case WizardStep::PickArgs:
       return "Argumentos de lanzamiento";
     case WizardStep::PickProcess:
@@ -49,6 +52,8 @@ std::string mode_label(WizardMode mode) {
       return "Attach";
     case WizardMode::LoadCore:
       return "Core";
+    case WizardMode::AnalyzeSymbols:
+      return "Símbolos";
   }
   return "Debug";
 }
@@ -65,6 +70,8 @@ bool update_f2_mode_hover(ConnectionWizardState* state, MainLayoutState* layout_
     layout_state->clickable.set_hover(press_id::f2_mode(1));
   } else if (state->core_mode_box.Contain(x, y)) {
     layout_state->clickable.set_hover(press_id::f2_mode(2));
+  } else if (state->symbols_mode_box.Contain(x, y)) {
+    layout_state->clickable.set_hover(press_id::f2_mode(3));
   } else {
     layout_state->clickable.clear_hover_if(press_id::is_f2_hover);
   }
@@ -151,6 +158,19 @@ void refresh_args_completion(ConnectionWizardState* state) {
       path_completions(state->launch_cwd, last_shell_token(state->args_line));
 }
 
+WizardMode mode_from_selected(int selected) {
+  switch (selected) {
+    case 0:
+      return WizardMode::Launch;
+    case 1:
+      return WizardMode::Attach;
+    case 2:
+      return WizardMode::LoadCore;
+    default:
+      return WizardMode::AnalyzeSymbols;
+  }
+}
+
 void activate_browser_row(ConnectionWizardState* state, MainLayoutState* layout_state, int row,
                           const std::function<void(const ConnectionResult&)>& finish) {
   if (row < 0 || row >= static_cast<int>(state->browser.entries.size())) {
@@ -165,6 +185,14 @@ void activate_browser_row(ConnectionWizardState* state, MainLayoutState* layout_
     return;
   }
   if (!is_regular_file_path(entry.path)) {
+    return;
+  }
+  if (state->mode == WizardMode::AnalyzeSymbols) {
+    if (!is_nm_analyzable_path(entry.path)) {
+      return;
+    }
+    request_binary_symbols_panel(layout_state, entry.path);
+    state->open = false;
     return;
   }
   state->selected_program = entry.path;
@@ -329,25 +357,23 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
             state->mode = WizardMode::LoadCore;
             state->mode_selected = 2;
           }
+          if (event == Event::Character('4')) {
+            state->mode = WizardMode::AnalyzeSymbols;
+            state->mode_selected = 3;
+          }
           if (event == Event::ArrowDown || event == Event::Character('j')) {
-            state->mode_selected = std::min(2, state->mode_selected + 1);
-            state->mode = state->mode_selected == 0   ? WizardMode::Launch
-                          : state->mode_selected == 1 ? WizardMode::Attach
-                                                      : WizardMode::LoadCore;
+            state->mode_selected = std::min(3, state->mode_selected + 1);
+            state->mode = mode_from_selected(state->mode_selected);
             return true;
           }
           if (event == Event::ArrowUp || event == Event::Character('k')) {
             state->mode_selected = std::max(0, state->mode_selected - 1);
-            state->mode = state->mode_selected == 0   ? WizardMode::Launch
-                          : state->mode_selected == 1 ? WizardMode::Attach
-                                                      : WizardMode::LoadCore;
+            state->mode = mode_from_selected(state->mode_selected);
             return true;
           }
           if (event == Event::Return) {
             trigger_press(layout_state, press_id::f2_mode(state->mode_selected));
-            state->mode = state->mode_selected == 0   ? WizardMode::Launch
-                          : state->mode_selected == 1 ? WizardMode::Attach
-                                                      : WizardMode::LoadCore;
+            state->mode = mode_from_selected(state->mode_selected);
             state->step = WizardStep::PickBinary;
             state->browser.browser_path =
                 canonical_browser_root(state->workspace_root.empty()
@@ -375,6 +401,12 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
               state->mode_selected = 2;
               state->mode = WizardMode::LoadCore;
               trigger_press(layout_state, press_id::f2_mode(2));
+              return true;
+            }
+            if (state->symbols_mode_box.Contain(m.x, m.y)) {
+              state->mode_selected = 3;
+              state->mode = WizardMode::AnalyzeSymbols;
+              trigger_press(layout_state, press_id::f2_mode(3));
               return true;
             }
           }
@@ -636,12 +668,16 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
               layout_state != nullptr && layout_state->clickable.is_hovered(press_id::f2_mode(1));
           const bool core_hovered =
               layout_state != nullptr && layout_state->clickable.is_hovered(press_id::f2_mode(2));
+          const bool symbols_hovered =
+              layout_state != nullptr && layout_state->clickable.is_hovered(press_id::f2_mode(3));
           const bool launch_pressed =
               layout_state != nullptr && layout_state->clickable.is_pressed(press_id::f2_mode(0));
           const bool attach_pressed =
               layout_state != nullptr && layout_state->clickable.is_pressed(press_id::f2_mode(1));
           const bool core_pressed =
               layout_state != nullptr && layout_state->clickable.is_pressed(press_id::f2_mode(2));
+          const bool symbols_pressed =
+              layout_state != nullptr && layout_state->clickable.is_pressed(press_id::f2_mode(3));
           Element launch_row = StyleListRow(
               text(" 1  Launch — lanzar ejecutable") | color(theme::Header()), launch_sel,
               launch_hovered, launch_pressed);
@@ -655,10 +691,14 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           Element core_row = StyleListRow(
               text(core_label) | color(theme::Header()),
               state->mode_selected == 2, core_hovered, core_pressed);
+          Element symbols_row = StyleListRow(
+              text(" 4  Analizar símbolos — explorar binario (nm)") | color(theme::Header()),
+              state->mode_selected == 3, symbols_hovered, symbols_pressed);
           body = {launch_row | reflect(state->launch_mode_box),
                   attach_row | reflect(state->attach_mode_box),
-                  core_row | reflect(state->core_mode_box)};
-          help = "1/2/3 o j/k  Enter  clic  Esc cancelar";
+                  core_row | reflect(state->core_mode_box),
+                  symbols_row | reflect(state->symbols_mode_box)};
+          help = "1/2/3/4 o j/k  Enter  clic  Esc cancelar";
         } else if (state->step == WizardStep::PickBinary) {
           state->browser.ensure_browser_entries();
           body.push_back(text("workspace: " + state->workspace_root) |
@@ -695,7 +735,9 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           }
           body.push_back(vbox(std::move(list_rows)) |
                          reflect(state->browser.browser_list_box));
-          help = "j/k  Enter ejecutable  clic  Esc atrás";
+          help = state->mode == WizardMode::AnalyzeSymbols
+                     ? "j/k  Enter binario ELF/ar (.o .a .so)  clic  Esc atrás"
+                     : "j/k  Enter ejecutable  clic  Esc atrás";
         } else if (state->step == WizardStep::PickArgs) {
           body.push_back(text("ejecutable: " + state->selected_program) |
                          color(theme::Muted()));
@@ -825,7 +867,7 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
         }
 
         Element dialog = window(
-            text(step_title(state->step) + "  [" + mode_label(state->mode) + "]") |
+            text(step_title(state->step, state->mode) + "  [" + mode_label(state->mode) + "]") |
                 color(theme::Accent()),
             vbox({
                 vbox(std::move(body)) | flex | bgcolor(theme::PanelBg()),

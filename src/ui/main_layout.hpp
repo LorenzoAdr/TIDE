@@ -25,6 +25,7 @@
 #include "util/system_stats.hpp"
 #include "ui/source_panel.hpp"
 #include "util/clang_format_config.hpp"
+#include "util/nm_reader.hpp"
 #include "util/path_normalize.hpp"
 
 namespace tgdb {
@@ -46,6 +47,7 @@ enum class TextInputFocus {
   SearchPath,
   SearchInclude,
   SearchExclude,
+  BinarySymbolsFilter,
 };
 
 struct RightSidebarState {
@@ -80,7 +82,17 @@ struct ConsolePanelTabs {
   static constexpr int kCallHierarchy = 5;
   static constexpr int kGit = 6;
   static constexpr int kCoreAnalyzer = 7;
+  static constexpr int kBinarySymbols = 8;
   int selected_tab = kTerminal;
+};
+
+struct BinarySymbolsPending {
+  bool open_tab = false;
+  bool refresh = false;
+  std::string binary_path;
+  std::string name_filter;
+  NmBindingFilter binding_filter = NmBindingFilter::kAll;
+  std::string select_symbol_name;
 };
 
 struct MainLayoutState {
@@ -95,6 +107,7 @@ struct MainLayoutState {
   ClangFormatConfig* workspace_clang_format = nullptr;
   std::function<void()> apply_app_settings_callback;
   ConsolePanelTabs console_tabs;
+  BinarySymbolsPending binary_symbols_pending;
   bool core_analyzer_search_focus = false;
   bool show_core_analyzer_tab = false;
   TextInputFocus text_input_focus = TextInputFocus::None;
@@ -136,6 +149,7 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> problems_key_handler;
   std::function<bool(const ftxui::Event&)> git_key_handler;
   std::function<bool(const ftxui::Event&)> git_mouse_handler;
+  std::function<bool(const ftxui::Event&)> binary_symbols_key_handler;
   std::function<bool(ftxui::Event&)> welcome_key_handler;
   std::function<bool(ftxui::Event&)> welcome_mouse_handler;
   bool editor_completion_open = false;
@@ -170,6 +184,11 @@ inline bool git_tab_active(const MainLayoutState* layout_state) {
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kGit;
 }
 
+inline bool binary_symbols_tab_active(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kBinarySymbols;
+}
+
 inline bool console_panel_tab_active(const MainLayoutState* layout_state) {
   return layout_state != nullptr && layout_state->console_visible &&
          layout_state->console_tabs.selected_tab != ConsolePanelTabs::kTerminal &&
@@ -182,6 +201,10 @@ inline bool is_search_input_focus(TextInputFocus focus) {
          focus == TextInputFocus::SearchPath ||
          focus == TextInputFocus::SearchInclude ||
          focus == TextInputFocus::SearchExclude;
+}
+
+inline bool is_binary_symbols_input_focus(TextInputFocus focus) {
+  return focus == TextInputFocus::BinarySymbolsFilter;
 }
 
 inline bool is_watch_input_focus(TextInputFocus focus) {

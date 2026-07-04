@@ -15,6 +15,7 @@ constexpr std::string_view kConsoleTabSearch = "console.tab.search";
 constexpr std::string_view kConsoleTabCallHierarchy = "console.tab.call_hierarchy";
 constexpr std::string_view kConsoleTabGit = "console.tab.git";
 constexpr std::string_view kConsoleTabCoreAnalyzer = "console.tab.core_analyzer";
+constexpr std::string_view kConsoleTabBinarySymbols = "console.tab.binary_symbols";
 constexpr std::string_view kSidebarHide = "sidebar.hide";
 constexpr std::string_view kConsoleHide = "console.hide";
 constexpr std::string_view kSidebarTabOutline = "sidebar.tab.outline";
@@ -55,6 +56,7 @@ inline std::string_view watches_tab_id(int index) {
 }
 
 constexpr std::string_view kEditorScrollbar = "scrollbar.editor";
+constexpr std::string_view kEditorHorizontalScrollbar = "scrollbar.editor.horizontal";
 constexpr std::string_view kSourceScrollbar = "scrollbar.source";
 constexpr std::string_view kTerminalScrollbar = "scrollbar.terminal";
 
@@ -104,8 +106,9 @@ inline std::string editor_symbol(int line, int start_col, int end_col) {
 }
 
 inline bool is_editor_chrome_hover(std::string_view id) {
-  return id == kEditorProblems || id == kEditorTabOverflow || id.rfind("editor.tab.", 0) == 0 ||
-         id.rfind("editor.tab_close.", 0) == 0;
+  return id == kEditorProblems || id == kEditorTabOverflow ||
+         id.rfind("editor.tab_close.", 0) == 0 ||
+         (id.rfind("editor.tab.", 0) == 0 && id.rfind("editor.tab_close.", 0) != 0);
 }
 
 inline bool is_watches_hover(std::string_view id) {
@@ -115,7 +118,8 @@ inline bool is_watches_hover(std::string_view id) {
 inline bool is_console_tab_hover(std::string_view id) {
   return id == kConsoleTabTerminal || id == kConsoleTabGdb || id == kConsoleTabPerformance ||
          id == kConsoleTabProblems || id == kConsoleTabSearch || id == kConsoleTabCallHierarchy ||
-         id == kConsoleTabGit || id == kConsoleTabCoreAnalyzer;
+         id == kConsoleTabGit || id == kConsoleTabCoreAnalyzer ||
+         id == kConsoleTabBinarySymbols;
 }
 
 inline bool is_console_header_hover(std::string_view id) {
@@ -148,7 +152,8 @@ inline bool is_context_menu_hover(std::string_view id) {
 }
 
 inline bool is_scrollbar_hover(std::string_view id) {
-  return id == kEditorScrollbar || id == kSourceScrollbar || id == kTerminalScrollbar;
+  return id == kEditorScrollbar || id == kEditorHorizontalScrollbar || id == kSourceScrollbar ||
+         id == kTerminalScrollbar;
 }
 
 inline bool is_f2_hover(std::string_view id) {

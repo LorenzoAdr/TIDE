@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <string>
@@ -13,6 +14,7 @@
 #include "git/git_service.hpp"
 #include "git/git_status.hpp"
 #include "indexer/index_rules.hpp"
+#include "util/nm_reader.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
@@ -22,6 +24,7 @@
 #include "ui/clickable.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/focus_manager.hpp"
+#include "ui/glyphs.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/scroll_bar.hpp"
@@ -133,6 +136,18 @@ Color git_status_color(const GitStatusEntry& entry) {
     return theme::Success();
   }
   return theme::Accent();
+}
+
+std::optional<Color> file_git_status_dot(const GitStatusEntry& entry) {
+  if (entry.unstaged == GitFileStatus::kUntracked) {
+    return theme::Warning();
+  }
+  if (entry.staged != GitFileStatus::kUnmodified ||
+      (entry.unstaged != GitFileStatus::kUnmodified &&
+       entry.unstaged != GitFileStatus::kUntracked)) {
+    return theme::Success();
+  }
+  return std::nullopt;
 }
 
 std::string relative_path_in_workspace(const std::string& workspace_root,
@@ -453,8 +468,10 @@ bool handle_explorer_context_menu(FileTreePanelState* state, DebugModel* model,
     return true;
   }
   if (entry.is_file) {
+    const bool trackable = is_lsp_trackable_path(absolute.string());
+    const bool binary = is_nm_analyzable_path(absolute.string());
     context_menu_open_file(&layout_state->context_menu, m.x, m.y, absolute.string(),
-                           entry.relative_path, is_lsp_trackable_path(absolute.string()));
+                           entry.relative_path, trackable, true, binary);
   } else {
     context_menu_open_folder(&layout_state->context_menu, m.x, m.y, absolute.string(),
                              entry.relative_path);
@@ -666,34 +683,25 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
             layout_state != nullptr && layout_state->clickable.is_pressed(row_id);
 
         std::string indent(static_cast<std::size_t>(entry.depth * 2), ' ');
-        std::string prefix;
-        if (entry.is_file) {
-          prefix = "  ";
-        } else if (entry.folder != nullptr && entry.folder->expanded) {
-          prefix = "v ";
-        } else {
-          prefix = "> ";
-        }
+        const std::string icon =
+            entry.is_file ? file_glyph_display(entry.label)
+                          : folder_glyph(entry.folder != nullptr && entry.folder->expanded);
 
-        Element row = text(indent + prefix + entry.label);
+        Element row;
         if (entry.is_file) {
+          row = text(indent + icon + " " + entry.label) | color(theme::FileText());
           const auto git_it = git_marks.files.find(entry.relative_path);
           if (git_it != git_marks.files.end()) {
-            const std::string badge = git_status_badge(git_it->second);
-            row = hbox({
-                text(indent + prefix) | color(theme::FileText()),
-                text(badge) | color(git_status_color(git_it->second)) | bold,
-                text(" " + entry.label) | color(theme::FileText()),
-            });
-          } else {
-            row = row | color(theme::FileText());
+            if (const std::optional<Color> dot = file_git_status_dot(git_it->second)) {
+              row = hbox({std::move(row) | flex, text(" ●") | color(*dot)});
+            }
           }
         } else {
-          row = row | color(theme::DirectoryText());
+          row = text(indent + icon + " " + entry.label) | color(theme::DirectoryText());
           if (git_marks.dirty_folders.count(entry.relative_path) > 0) {
             row = hbox({
                 std::move(row) | flex,
-                text(" ●") | color(theme::Warning()),
+                text(" ●") | color(theme::Success()),
             });
           }
         }

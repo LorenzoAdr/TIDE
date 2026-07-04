@@ -14,7 +14,7 @@ namespace tgdb {
 
 namespace {
 
-void scan_dir(const fs::path& root, const fs::path& current,
+void scan_dir(const fs::path& root, const fs::path& current, const IndexFilterOptions& options,
               std::vector<std::string>* out) {
   std::error_code ec;
   for (const auto& entry : fs::directory_iterator(current, ec)) {
@@ -23,14 +23,14 @@ void scan_dir(const fs::path& root, const fs::path& current,
     }
     const auto name = entry.path().filename().string();
     if (entry.is_directory(ec)) {
-      if (should_skip_dir_name(name)) {
+      if (should_skip_dir_name(name, options)) {
         continue;
       }
-      scan_dir(root, entry.path(), out);
+      scan_dir(root, entry.path(), options, out);
     } else if (entry.is_regular_file(ec)) {
       std::error_code rel_ec;
       const auto rel = fs::relative(entry.path(), root, rel_ec);
-      if (!rel_ec && should_list_workspace_path(rel.generic_string())) {
+      if (!rel_ec && should_list_workspace_path(rel.generic_string(), options)) {
         out->push_back(rel.generic_string());
       }
     }
@@ -39,14 +39,15 @@ void scan_dir(const fs::path& root, const fs::path& current,
 
 }  // namespace
 
-std::vector<std::string> scan_workspace_files(const std::string& workspace_root) {
+std::vector<std::string> scan_workspace_files(const std::string& workspace_root,
+                                                const IndexFilterOptions& filter_options) {
   std::vector<std::string> files;
   std::error_code ec;
   const fs::path root(workspace_root);
   if (!fs::is_directory(root, ec)) {
     return files;
   }
-  scan_dir(root, root, &files);
+  scan_dir(root, root, filter_options, &files);
   std::sort(files.begin(), files.end());
   return files;
 }
@@ -59,19 +60,21 @@ WorkspaceIndexer::~WorkspaceIndexer() {
   stop();
 }
 
-void WorkspaceIndexer::start_scan(const std::string& workspace_root) {
+void WorkspaceIndexer::start_scan(const std::string& workspace_root,
+                                  const IndexFilterOptions& filter_options) {
   stop();
   stop_requested_ = false;
   running_ = true;
   {
     auto snap = std::make_shared<IndexSnapshot>();
     snap->workspace_root = workspace_root;
+    snap->filter_options = filter_options;
     std::lock_guard<std::mutex> lock(mutex_);
     snapshot_ = snap;
   }
-  worker_ = std::thread([this, workspace_root] {
+  worker_ = std::thread([this, workspace_root, filter_options] {
     set_current_thread_name("idx-files");
-    worker_main(workspace_root);
+    worker_main(workspace_root, filter_options);
   });
 }
 
@@ -92,11 +95,13 @@ bool WorkspaceIndexer::scanning() const {
   return running_.load();
 }
 
-void WorkspaceIndexer::worker_main(std::string workspace_root) {
+void WorkspaceIndexer::worker_main(std::string workspace_root,
+                                     IndexFilterOptions filter_options) {
   TGDB_MON_SCOPE("idx", "workspace_indexer.scan");
   auto snap = std::make_shared<IndexSnapshot>();
   snap->workspace_root = workspace_root;
-  snap->files = scan_workspace_files(workspace_root);
+  snap->filter_options = filter_options;
+  snap->files = scan_workspace_files(workspace_root, filter_options);
   TGDB_MON("idx", "workspace_indexer.files=" + std::to_string(snap->files.size()));
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -108,7 +113,14 @@ void WorkspaceIndexer::worker_main(std::string workspace_root) {
 void WorkspaceIndexer::upsert_file(const std::string& workspace_root,
                                    const std::string& relative_file,
                                    const std::string& absolute_path) {
-  if (!should_list_workspace_path(relative_file)) {
+  IndexFilterOptions options;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (snapshot_) {
+      options = snapshot_->filter_options;
+    }
+  }
+  if (!should_list_workspace_path(relative_file, options)) {
     remove_file(workspace_root, relative_file);
     return;
   }
@@ -125,6 +137,7 @@ void WorkspaceIndexer::upsert_file(const std::string& workspace_root,
       return;
     }
     updated->workspace_root = workspace_root;
+    updated->filter_options = snapshot_->filter_options;
     updated->files = snapshot_->files;
   }
 
@@ -150,6 +163,7 @@ void WorkspaceIndexer::remove_file(const std::string& workspace_root,
       return;
     }
     updated->workspace_root = workspace_root;
+    updated->filter_options = snapshot_->filter_options;
     updated->files = snapshot_->files;
   }
 

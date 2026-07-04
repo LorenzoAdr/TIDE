@@ -27,6 +27,7 @@
 #include "indexer/workspace_indexer.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/call_hierarchy_panel.hpp"
+#include "ui/binary_symbols_panel.hpp"
 #include "ui/core_analyzer_panel.hpp"
 #include "ui/diagnostics_panel.hpp"
 #include "ui/git_panel.hpp"
@@ -81,7 +82,7 @@ struct ConsolePanelState {
   std::string terminal_text;
   std::vector<TerminalStyledRow> terminal_styled_rows;
   std::string last_workspace_root;
-  std::array<Box, 8> tab_boxes;
+  std::array<Box, 9> tab_boxes;
   Box hide_box;
 };
 
@@ -394,6 +395,10 @@ bool git_tab_active_console(AppMode* /*app_mode*/, MainLayoutState* layout_state
   return git_tab_active(layout_state);
 }
 
+bool binary_symbols_tab_active_console(AppMode* /*app_mode*/, MainLayoutState* layout_state) {
+  return binary_symbols_tab_active(layout_state);
+}
+
 std::string_view console_tab_press_id(int tab) {
   switch (tab) {
     case ConsolePanelTabs::kTerminal:
@@ -412,6 +417,8 @@ std::string_view console_tab_press_id(int tab) {
       return press_id::kConsoleTabGit;
     case ConsolePanelTabs::kCoreAnalyzer:
       return press_id::kConsoleTabCoreAnalyzer;
+    case ConsolePanelTabs::kBinarySymbols:
+      return press_id::kConsoleTabBinarySymbols;
     default:
       return press_id::kConsoleTabTerminal;
   }
@@ -457,7 +464,7 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
                         FocusManagerState* focus, int tab, GitService* git,
                         GitPanelState* git_state) {
   if (layout_state == nullptr || tab < ConsolePanelTabs::kTerminal ||
-      tab > ConsolePanelTabs::kCoreAnalyzer) {
+      tab > ConsolePanelTabs::kBinarySymbols) {
     return false;
   }
   if (layout_state->console_tabs.selected_tab == tab) {
@@ -516,6 +523,13 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
       if (is_search_input_focus(layout_state->text_input_focus)) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
+    } else if (tab == ConsolePanelTabs::kBinarySymbols) {
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      if (is_search_input_focus(layout_state->text_input_focus)) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
     } else if (is_search_input_focus(layout_state->text_input_focus)) {
       layout_state->text_input_focus = TextInputFocus::None;
     }
@@ -535,7 +549,7 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
     return false;
   }
   const bool debug_mode = debug_console_mode(app_mode);
-  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kCoreAnalyzer; ++i) {
+  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kBinarySymbols; ++i) {
     if (i == ConsolePanelTabs::kDebug && !debug_mode) {
       continue;
     }
@@ -649,6 +663,8 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
          {press_id::kConsoleTabCallHierarchy,
           &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
          {press_id::kConsoleTabGit, &state->tab_boxes[ConsolePanelTabs::kGit]},
+         {press_id::kConsoleTabBinarySymbols,
+          &state->tab_boxes[ConsolePanelTabs::kBinarySymbols]},
          {press_id::kConsoleHide, &state->hide_box}},
         press_id::is_console_header_hover);
   }
@@ -661,6 +677,8 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
        {press_id::kConsoleTabCallHierarchy,
         &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
        {press_id::kConsoleTabGit, &state->tab_boxes[ConsolePanelTabs::kGit]},
+       {press_id::kConsoleTabBinarySymbols,
+        &state->tab_boxes[ConsolePanelTabs::kBinarySymbols]},
        {press_id::kConsoleHide, &state->hide_box}},
       press_id::is_console_header_hover);
 }
@@ -1120,9 +1138,9 @@ bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, 
   for (int attempt = 0; attempt < 10; ++attempt) {
     tab += delta;
     if (tab < ConsolePanelTabs::kTerminal) {
-      tab = ConsolePanelTabs::kCoreAnalyzer;
+      tab = ConsolePanelTabs::kBinarySymbols;
     }
-    if (tab > ConsolePanelTabs::kCoreAnalyzer) {
+    if (tab > ConsolePanelTabs::kBinarySymbols) {
       tab = ConsolePanelTabs::kTerminal;
     }
     if (!debug_mode && tab == ConsolePanelTabs::kDebug) {
@@ -1147,6 +1165,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
                            WorkspaceModel* workspace,
                            std::shared_ptr<ISymbolProvider> symbols,
                            WorkspaceIndexer* indexer,
+                           SymbolWorkspaceIndexer* symbol_indexer,
                            RightSidebarState* sidebar,
                            GitService* git_service,
                            GitPanelState* git_panel_state) {
@@ -1165,6 +1184,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       MakeGitPanel(git_service, git_panel_state, layout_state, focus, &state->git_body_height);
   auto core_analyzer_panel =
       MakeCoreAnalyzerPanel(model, on_command, layout_state, focus);
+  auto binary_symbols_panel =
+      MakeBinarySymbolsPanel(workspace, model, focus, layout_state, symbols, symbol_indexer,
+                             indexer, shell);
   auto input_box = Input(MakeBlinkInputOption(&state->input, &state->input_placeholder));
   auto input_maybe = Maybe(
       input_box, [app_mode, layout_state] {
@@ -1173,13 +1195,14 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
   auto component = Container::Vertical(
       {input_maybe, performance_panel, diagnostics_panel, search_panel, call_hierarchy_panel,
-       git_panel, core_analyzer_panel});
+       git_panel, core_analyzer_panel, binary_symbols_panel});
 
   auto wrapped = CatchEvent(component, [app_mode, model, shell, on_command, state,
                                         layout_state, focus, input_box,
                                         shell_launch_config, diagnostics_panel, search_panel,
                                         call_hierarchy_panel, git_panel, git_service,
-                                        git_panel_state, core_analyzer_panel](Event event) {
+                                        git_panel_state, core_analyzer_panel,
+                                        binary_symbols_panel](Event event) {
     const bool editor_chrome_input =
         layout_state != nullptr &&
         is_editor_chrome_input_focus(layout_state->text_input_focus);
@@ -1211,6 +1234,11 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     if (core_analyzer_tab_active(app_mode, layout_state) && !editor_chrome_input &&
         (focus == nullptr || focus->region == FocusRegion::Terminal)) {
       if (core_analyzer_panel->OnEvent(event)) {
+        return true;
+      }
+    }
+    if (binary_symbols_tab_active_console(app_mode, layout_state) && !editor_chrome_input) {
+      if (binary_symbols_panel->OnEvent(event)) {
         return true;
       }
     }
@@ -1380,8 +1408,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
   auto dispatch_console_mouse = [app_mode, layout_state, focus, model, shell, state, input_box,
                                  shell_launch_config, diagnostics_panel, search_panel,
-                                 call_hierarchy_panel, git_panel, git_service,
-                                 git_panel_state](Event event) -> bool {
+                                 call_hierarchy_panel,                                  git_panel, git_service,
+                                 git_panel_state, binary_symbols_panel](Event event) -> bool {
     if (event.is_mouse()) {
       if (problems_tab_active_console(app_mode, layout_state) &&
           layout_state != nullptr && layout_state->problems_key_handler &&
@@ -1400,6 +1428,10 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         return true;
       }
       if (git_tab_active_console(app_mode, layout_state) && git_panel->OnEvent(event)) {
+        return true;
+      }
+      if (binary_symbols_tab_active_console(app_mode, layout_state) &&
+          binary_symbols_panel->OnEvent(event)) {
         return true;
       }
     }
@@ -1447,7 +1479,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
   return Renderer(wrapped, [app_mode, model, shell, focus, input_box, input_maybe, state,
                             layout_state, bottom_height, perf_state, sampler, diagnostics_panel,
-                            search_panel, call_hierarchy_panel, git_panel, core_analyzer_panel] {
+                            search_panel, call_hierarchy_panel, git_panel, core_analyzer_panel,
+                            binary_symbols_panel] {
     state->input_placeholder = console_placeholder(app_mode);
     (void)input_maybe;
     (void)input_box;
@@ -1516,6 +1549,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabGit),
         layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabGit),
         &state->tab_boxes[ConsolePanelTabs::kGit]));
+    tab_row.push_back(make_tab_button(
+        "Símbolos", selected_tab == ConsolePanelTabs::kBinarySymbols,
+        layout_state != nullptr &&
+            layout_state->clickable.is_hovered(press_id::kConsoleTabBinarySymbols),
+        layout_state != nullptr &&
+            layout_state->clickable.is_pressed(press_id::kConsoleTabBinarySymbols),
+        &state->tab_boxes[ConsolePanelTabs::kBinarySymbols]));
 
     const bool hide_hovered =
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleHide);
@@ -1541,6 +1581,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       body = search_panel->Render() | flex;
     } else if (selected_tab == ConsolePanelTabs::kGit) {
       body = git_panel->Render() | flex;
+    } else if (selected_tab == ConsolePanelTabs::kBinarySymbols) {
+      body = binary_symbols_panel->Render() | flex;
     } else {
       body = call_hierarchy_panel->Render() | flex;
     }

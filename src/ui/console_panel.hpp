@@ -7,6 +7,7 @@
 #include "app/debug_model.hpp"
 #include "app/workspace_model.hpp"
 #include "ftxui/component/component_base.hpp"
+#include "indexer/symbol_workspace_indexer.hpp"
 #include "indexer/workspace_indexer.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/focus_manager.hpp"
@@ -29,6 +30,7 @@ ftxui::Component MakeConsolePanel(AppMode* app_mode, DebugModel* model,
                                   WorkspaceModel* workspace,
                                   std::shared_ptr<ISymbolProvider> symbols,
                                   WorkspaceIndexer* indexer,
+                                  SymbolWorkspaceIndexer* symbol_indexer,
                                   RightSidebarState* sidebar,
                                   GitService* git_service,
                                   GitPanelState* git_panel_state);

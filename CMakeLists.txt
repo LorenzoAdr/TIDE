@@ -36,10 +36,12 @@ add_executable(tgdb
   src/ui/watches_panel.cpp
   src/ui/console_panel.cpp
   src/ui/core_analyzer_panel.cpp
+  src/ui/binary_symbols_panel.cpp
   src/core_analyzer/output_parser.cpp
   src/ui/file_picker.cpp
   src/ui/symbol_picker.cpp
   src/ui/quit_confirm.cpp
+  src/ui/shutdown_overlay.cpp
   src/ui/open_file_confirm.cpp
   src/ui/shortcuts_modal.cpp
   src/ui/settings_modal.cpp
@@ -57,6 +59,7 @@ add_executable(tgdb
   src/ui/clickable_interaction.cpp
   src/ui/cursor_blink.cpp
   src/ui/spinner.cpp
+  src/ui/glyphs.cpp
   src/indexer/workspace_indexer.cpp
   src/indexer/symbol_workspace_indexer.cpp
   src/indexer/index_rules.cpp
@@ -71,10 +74,16 @@ add_executable(tgdb
   src/util/syntax_highlight.cpp
   src/util/clang_format_config.cpp
   src/util/build_file_highlight.cpp
+  src/util/csv_viewer.cpp
+  src/util/nm_reader.cpp
+  src/util/nm_reader_runner.cpp
+  src/util/tabular_file.cpp
+  src/util/external_viewer.cpp
   src/search/workspace_search.cpp
   src/search/workspace_search_runner.cpp
   src/search/workspace_search_rg.cpp
   src/symbols/regex_symbol_provider.cpp
+  src/symbols/source_symbol_resolver.cpp
   src/symbols/symbol_utils.cpp
   src/editor/editor_state.cpp
   src/editor/cursor_history.cpp
@@ -90,8 +99,10 @@ add_executable(tgdb
   src/editor/editor_render.cpp
   src/editor/editor_context.cpp
   src/editor/bracket_match.cpp
+  src/editor/code_snippets.cpp
   src/util/cpp_highlight.cpp
   src/util/crash_handler.cpp
+  src/util/child_process_guard.cpp
   src/util/monitor_log.cpp
   src/util/filesystem_tree.cpp
   src/util/include_tree.cpp
@@ -199,6 +210,55 @@ add_executable(build_environment_test
   src/build/build_environment_selector.cpp
 )
 target_include_directories(build_environment_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(csv_index_test
+  tests/csv_index_test.cpp
+  src/indexer/index_rules.cpp
+  src/util/csv_viewer.cpp
+  src/editor/code_snippets.cpp
+  src/ui/theme.cpp
+)
+target_include_directories(csv_index_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+target_link_libraries(csv_index_test PRIVATE ftxui::dom)
+
+add_executable(external_viewer_test
+  tests/external_viewer_test.cpp
+  src/util/external_viewer.cpp
+  src/util/shell_utils.cpp
+  src/util/monitor_log.cpp
+)
+target_include_directories(external_viewer_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(tabular_file_test
+  tests/tabular_file_test.cpp
+  src/util/tabular_file.cpp
+  src/util/csv_viewer.cpp
+  src/ui/theme.cpp
+)
+target_include_directories(tabular_file_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+target_link_libraries(tabular_file_test PRIVATE ftxui::dom)
+
+add_executable(glyphs_test
+  tests/glyphs_test.cpp
+  src/ui/glyphs.cpp
+)
+target_include_directories(glyphs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(nm_reader_test
+  tests/nm_reader_test.cpp
+  src/util/nm_reader.cpp
+  src/util/shell_utils.cpp
+)
+target_include_directories(nm_reader_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_executable(git_diff_test
   tests/git_diff_test.cpp

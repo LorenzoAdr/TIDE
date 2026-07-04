@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,8 @@ struct WorkspaceModel {
   int active_tab = -1;
   std::string status_message = "Selecciona un workspace";
   OpenFileConfirmState* open_file_confirm = nullptr;
+  using UiTask = std::function<void()>;
+  std::function<void(UiTask)> enqueue_ui_task;
 
   std::vector<std::string> open_tabs_mru_excluding_active() const;
 
@@ -57,6 +60,7 @@ struct WorkspaceModel {
   bool open_file_impl(const std::string& absolute_path);
   bool open_file_at_impl(const std::string& absolute_path, int line, int col);
   bool check_open_guard(const std::string& absolute_path);
+  bool try_open_external_pdf(const std::string& absolute_path);
 
   static bool load_buffer_from_disk(EditorBuffer* buffer, const std::string& absolute_path);
   static std::string normalize_path(const std::string& path);

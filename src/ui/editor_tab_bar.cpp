@@ -17,7 +17,7 @@ using namespace ftxui;
 
 namespace {
 
-std::string tab_label(const EditorTab& tab, int max_len) {
+std::string tab_label(const EditorTab& tab) {
   std::string name = tab.path.empty() ? "Sin título"
                                       : std::filesystem::path(tab.path).filename().string();
   if (tab.external) {
@@ -26,10 +26,18 @@ std::string tab_label(const EditorTab& tab, int max_len) {
   if (tab.buffer.dirty) {
     name += "*";
   }
-  if (static_cast<int>(name.size()) > max_len) {
-    name = name.substr(0, static_cast<std::size_t>(max_len - 1)) + "…";
+  if (static_cast<int>(name.size()) > kEditorTabLabelMaxLen) {
+    name = name.substr(0, static_cast<std::size_t>(kEditorTabLabelMaxLen - 1)) + "…";
   }
   return name;
+}
+
+std::string format_tab_label_area(const EditorTab& tab) {
+  std::string area = " " + tab_label(tab);
+  if (static_cast<int>(area.size()) < kEditorTabLabelAreaWidth) {
+    area.append(static_cast<std::size_t>(kEditorTabLabelAreaWidth - area.size()), ' ');
+  }
+  return area;
 }
 
 bool lookup_tab_hit(EditorTabBarState* state, WorkspaceModel* workspace, int x, int y,
@@ -40,44 +48,32 @@ bool lookup_tab_hit(EditorTabBarState* state, WorkspaceModel* workspace, int x, 
   if (state->bar_box.IsEmpty() || !state->bar_box.Contain(x, y)) {
     return false;
   }
-
-  workspace->flush_active_tab();
-  const int tab_count = static_cast<int>(workspace->tabs.size());
-  if (tab_count == 0) {
+  if (!state->layout_valid) {
     return false;
   }
 
-  const int bar_width = std::max(20, state->bar_width_chars);
-  const TabVisibleRange visible =
-      compute_visible_tab_range(tab_count, workspace->active_tab, bar_width);
-
   int cx = state->bar_box.x_min;
 
-  if (visible.has_overflow) {
-    const std::string overflow_label = "+" + std::to_string(visible.hidden_count);
-    const int w = static_cast<int>(overflow_label.size()) + 2;
-    if (x >= cx && x <= cx + w - 1) {
+  if (state->layout_visible.has_overflow) {
+    if (x >= cx && x <= cx + state->layout_overflow_width - 1) {
       *out = {TabBarHitKind::Overflow, -1, Box{}};
       return true;
     }
-    cx += w;
+    cx += state->layout_overflow_width;
   }
 
-  for (int i = visible.start; i < visible.end; ++i) {
-    const auto& tab = workspace->tabs[static_cast<std::size_t>(i)];
-    const std::string label = tab_label(tab, 12);
-    const int tab_w = static_cast<int>(label.size()) + 1;
-    const int close_w = 2;
-    if (x >= cx && x <= cx + tab_w - 1) {
-      *out = {TabBarHitKind::Tab, i, Box{}};
+  for (int i = state->layout_visible.start; i < state->layout_visible.end; ++i) {
+    const int tab_start = cx;
+    const int tab_end = tab_start + kEditorTabCellWidth - 1;
+    if (x >= tab_start && x <= tab_end) {
+      if (x >= tab_start + kEditorTabLabelAreaWidth) {
+        *out = {TabBarHitKind::Close, i, Box{}};
+      } else {
+        *out = {TabBarHitKind::Tab, i, Box{}};
+      }
       return true;
     }
-    cx += tab_w;
-    if (x >= cx && x <= cx + close_w - 1) {
-      *out = {TabBarHitKind::Close, i, Box{}};
-      return true;
-    }
-    cx += close_w;
+    cx += kEditorTabCellWidth;
   }
   return false;
 }
@@ -93,6 +89,24 @@ int tab_index_at(EditorTabBarState* state, WorkspaceModel* workspace, int x, int
 Element style_tab_cell(Element cell, bool active, bool hovered, bool pressed) {
   ClickableState state{active, hovered, pressed, false};
   return StyleClickable(std::move(cell), state);
+}
+
+Element style_tab_close_cell(Element cell, bool active, bool hovered, bool pressed) {
+  Color fg = theme::Muted();
+  if (hovered || pressed) {
+    fg = theme::Error();
+  }
+  cell = cell | color(fg);
+  if (pressed) {
+    return cell | bold | inverted | bgcolor(theme::TabPressed());
+  }
+  if (hovered) {
+    return cell | bold | bgcolor(theme::TabHover());
+  }
+  if (active) {
+    return cell | bgcolor(theme::TabActive());
+  }
+  return cell | bgcolor(theme::TabIdle());
 }
 
 std::string hover_id_for_hit(const TabBarHit& hit) {
@@ -126,6 +140,7 @@ Element make_editor_tab_bar(WorkspaceModel* workspace, EditorTabBarState* state,
   workspace->flush_active_tab();
   const int tab_count = static_cast<int>(workspace->tabs.size());
   if (tab_count == 0) {
+    state->layout_valid = false;
     return text(" ") | size(HEIGHT, EQUAL, 1) | bgcolor(theme::TabIdle()) |
            reflect(state->bar_box);
   }
@@ -134,14 +149,21 @@ Element make_editor_tab_bar(WorkspaceModel* workspace, EditorTabBarState* state,
   const TabVisibleRange visible =
       compute_visible_tab_range(tab_count, workspace->active_tab, bar_width);
 
+  state->layout_visible = visible;
+  state->layout_overflow_width = visible.has_overflow ? kEditorTabOverflowWidth : 0;
+  state->layout_bar_width = bar_width;
+  state->layout_tab_count = tab_count;
+  state->layout_active_tab = workspace->active_tab;
+  state->layout_valid = true;
+
   Elements cells;
 
   const ClickableInteractionTracker* clickable =
       layout_state != nullptr ? &layout_state->clickable : nullptr;
 
   if (visible.has_overflow) {
-    const std::string overflow_label = "+" + std::to_string(visible.hidden_count);
-    Element cell = text(" " + overflow_label + " ") | color(theme::TitleText());
+    Element cell = text(format_editor_tab_overflow_button(visible.hidden_count)) |
+                   color(theme::TitleText());
     if (state->overflow_open) {
       cell = cell | inverted;
     }
@@ -156,19 +178,18 @@ Element make_editor_tab_bar(WorkspaceModel* workspace, EditorTabBarState* state,
   for (int i = visible.start; i < visible.end; ++i) {
     const auto& tab = workspace->tabs[static_cast<std::size_t>(i)];
     const bool active = i == workspace->active_tab;
-    const std::string label = tab_label(tab, 12);
     const std::string tab_id = press_id::editor_tab(i);
     const std::string close_id = press_id::editor_tab_close(i);
 
-    Element tab_cell = text(" " + label);
-    Element close_cell = text(" x");
+    Element tab_cell = text(format_tab_label_area(tab));
+    Element close_cell = text(" × ");
     const bool tab_hovered = clickable != nullptr && clickable->is_hovered(tab_id);
     const bool tab_pressed = clickable != nullptr && clickable->is_pressed(tab_id);
-    const bool close_hovered = clickable != nullptr && clickable->is_hovered(close_id);
     const bool close_pressed = clickable != nullptr && clickable->is_pressed(close_id);
+    const bool close_hovered = state->hover_close_tab_index == i || close_pressed;
 
     tab_cell = style_tab_cell(std::move(tab_cell), active, tab_hovered, tab_pressed);
-    close_cell = style_tab_cell(std::move(close_cell), active, close_hovered, close_pressed);
+    close_cell = style_tab_close_cell(std::move(close_cell), active, close_hovered, close_pressed);
     if (state->dragging && state->drag_tab == i) {
       tab_cell = tab_cell | dim;
     }
@@ -316,27 +337,35 @@ bool update_editor_chrome_hover(WorkspaceModel* workspace, EditorTabBarState* st
     return false;
   }
   const std::string_view before = layout_state->clickable.hovered_id();
+  const int before_close = state != nullptr ? state->hover_close_tab_index : -1;
   TabBarHit hit;
   if (state != nullptr && lookup_tab_hit(state, workspace, x, y, &hit)) {
-    if (hit.kind == TabBarHitKind::Tab) {
+    state->hover_x = x;
+    state->hover_y = y;
+    if (hit.kind == TabBarHitKind::Close) {
+      state->hover_close_tab_index = hit.tab_index;
+      state->hover_tab_index = -1;
+    } else if (hit.kind == TabBarHitKind::Tab) {
+      state->hover_close_tab_index = -1;
       state->hover_tab_index = hit.tab_index;
-      state->hover_x = x;
-      state->hover_y = y;
     } else {
+      state->hover_close_tab_index = -1;
       state->hover_tab_index = -1;
     }
     layout_state->clickable.set_hover(hover_id_for_hit(hit));
   } else {
     if (state != nullptr) {
       state->hover_tab_index = -1;
+      state->hover_close_tab_index = -1;
     }
     if (!problems_box.IsEmpty() && problems_box.Contain(x, y)) {
       layout_state->clickable.set_hover(press_id::kEditorProblems);
-    } else {
-      layout_state->clickable.clear_hover_if(press_id::is_editor_chrome_hover);
     }
+    // No limpiar hover de chrome aquí: el handler del otro editor puede haberlo
+    // establecido ya en este mismo evento de ratón.
   }
-  if (layout_state->clickable.hovered_id() != before) {
+  if (layout_state->clickable.hovered_id() != before ||
+      (state != nullptr && state->hover_close_tab_index != before_close)) {
     layout_state->request_ui_tick = true;
     return true;
   }

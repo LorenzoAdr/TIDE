@@ -252,6 +252,13 @@ bool event_is_open_outline_panel(const ftxui::Event& event) {
          event_is_ctrl_shift_o(event) || event_is_alt_o(event);
 }
 
+bool event_is_open_binary_symbols_panel(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[83;6u") ||
+         event == ftxui::Event::Special("\x1B[115;6u") ||
+         event == ftxui::Event::Special("\x1B[27;6;83~") ||
+         event == ftxui::Event::Special("\x1B[27;6;115~");
+}
+
 bool event_is_ctrl_left(const ftxui::Event& event) {
   return event == ftxui::Event::ArrowLeftCtrl;
 }

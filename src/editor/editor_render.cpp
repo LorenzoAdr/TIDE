@@ -32,6 +32,27 @@ std::string slice_line_for_view(const std::string& line, int scroll_col, int vie
 
 int shift_col(int col, int scroll_col) { return col - scroll_col; }
 
+Element render_primary_caret_tail(const EditorBuffer& buffer, int line_index, bool editor_focused,
+                                  bool show_caret, int scroll_col, int guide_visual_cols) {
+  if (!editor_focused || line_index != buffer.primary_line() || !show_caret ||
+      buffer.primary().has_selection()) {
+    return text(" ");
+  }
+  const int caret_vis = std::max(0, shift_col(buffer.primary_col(), scroll_col));
+  const int tail_vis = std::max(0, caret_vis - guide_visual_cols);
+  std::string pad(static_cast<std::size_t>(tail_vis), ' ');
+  Elements parts;
+  if (!pad.empty()) {
+    parts.push_back(text(pad));
+  }
+  if (cursor_blink::visible()) {
+    parts.push_back(text(" ") | cursor_blink::cell_decorator());
+  } else {
+    parts.push_back(text(" "));
+  }
+  return parts.empty() ? text(" ") : hbox(std::move(parts));
+}
+
 bool col_in_view(int col, int scroll_col, int view_width) {
   if (view_width <= 0) {
     return col >= scroll_col;
@@ -506,7 +527,9 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
   if (guide_prefix_bytes > 0) {
     Element guide = text(guide_split.guide_text) | color(theme::AccentDim());
     if (body_line.empty()) {
-      content = std::move(guide);
+      content = hbox({std::move(guide),
+                      render_primary_caret_tail(buffer, line_index, editor_focused, show_caret,
+                                                scroll_col, guide_split.prefix_visual_width)});
     } else {
       content = hbox({std::move(guide), std::move(content)});
     }
@@ -514,7 +537,10 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
     const std::string blank_guides =
         build_blank_line_guides(tab_size, indent_guide_depth, view_width);
     if (!blank_guides.empty()) {
-      content = text(blank_guides) | color(theme::AccentDim());
+      const int guide_width = indent_guide_depth * tab_size;
+      content = hbox({text(blank_guides) | color(theme::AccentDim()),
+                      render_primary_caret_tail(buffer, line_index, editor_focused, show_caret,
+                                                scroll_col, guide_width)});
     }
   }
 

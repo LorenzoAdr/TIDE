@@ -51,6 +51,8 @@ struct SettingsModalState {
   bool draft_force_bundled_clangd = false;
   bool draft_force_bundled_gdb = false;
   bool draft_monitor_enabled = false;
+  bool draft_show_all_workspace_files = false;
+  IconMode draft_icon_mode = IconMode::Auto;
   bool draft_clangd_use_gcc_query_driver = true;
   bool draft_clangd_background_index = false;
   theme::ThemeMode draft_theme = theme::ThemeMode::kDark;

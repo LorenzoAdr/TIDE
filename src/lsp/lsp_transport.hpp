@@ -29,10 +29,15 @@ class LspTransport {
   using NotificationHandler =
       std::function<void(const std::string& method, const nlohmann::json& params)>;
   void set_notification_handler(NotificationHandler handler);
+  void set_reader_eof_handler(std::function<void()> handler);
+
+  bool is_running() const { return running_.load(); }
 
  private:
+  enum class ReadFailKind { None, Eof, Malformed };
+
   bool write_message(const std::string& payload);
-  std::optional<std::string> read_message();
+  std::optional<std::string> read_message(ReadFailKind* fail_kind = nullptr);
   void reader_loop();
 
   int stdin_fd_ = -1;
@@ -48,6 +53,8 @@ class LspTransport {
 
   std::mutex handler_mutex_;
   NotificationHandler notification_handler_;
+  std::mutex eof_handler_mutex_;
+  std::function<void()> reader_eof_handler_;
 };
 
 }  // namespace tgdb

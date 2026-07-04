@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "util/shell_utils.hpp"
+#include "util/child_process_guard.hpp"
 #include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
 
@@ -154,6 +155,7 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
   }
 
   if (child_pid_ == 0) {
+    child_die_with_parent();
     setenv("TERM", "xterm-256color", 1);
     setenv("COLORTERM", "truecolor", 1);
 

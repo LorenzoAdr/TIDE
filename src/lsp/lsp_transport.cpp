@@ -15,7 +15,7 @@ LspTransport::~LspTransport() {
 }
 
 bool LspTransport::start(int stdin_write_fd, int stdout_read_fd) {
-  stop();  
+  stop();
   if (stdin_write_fd < 0 || stdout_read_fd < 0) {
     return false;
   }
@@ -63,8 +63,14 @@ bool LspTransport::write_message(const std::string& payload) {
          static_cast<ssize_t>(payload.size());
 }
 
-std::optional<std::string> LspTransport::read_message() {
+std::optional<std::string> LspTransport::read_message(ReadFailKind* fail_kind) {
+  if (fail_kind != nullptr) {
+    *fail_kind = ReadFailKind::None;
+  }
   if (stdout_fd_ < 0) {
+    if (fail_kind != nullptr) {
+      *fail_kind = ReadFailKind::Eof;
+    }
     return std::nullopt;
   }
 
@@ -73,6 +79,9 @@ std::optional<std::string> LspTransport::read_message() {
   while (running_.load()) {
     const ssize_t n = ::read(stdout_fd_, &ch, 1);
     if (n <= 0) {
+      if (fail_kind != nullptr) {
+        *fail_kind = ReadFailKind::Eof;
+      }
       return std::nullopt;
     }
     header.push_back(ch);
@@ -80,10 +89,21 @@ std::optional<std::string> LspTransport::read_message() {
       break;
     }
     if (header.size() > 8192) {
+      if (fail_kind != nullptr) {
+        *fail_kind = ReadFailKind::Malformed;
+      }
       return std::nullopt;
     }
   }
 
+  if (!running_.load()) {
+    if (fail_kind != nullptr) {
+      *fail_kind = ReadFailKind::Eof;
+    }
+    return std::nullopt;
+  }
+
+  bool has_content_length = false;
   std::size_t content_length = 0;
   std::size_t pos = 0;
   while (pos < header.size()) {
@@ -103,12 +123,27 @@ std::optional<std::string> LspTransport::read_message() {
       value.erase(value.begin());
     }
     if (key == "Content-Length") {
-      content_length = static_cast<std::size_t>(std::stoul(value));
+      try {
+        content_length = static_cast<std::size_t>(std::stoul(value));
+        has_content_length = true;
+      } catch (...) {
+        if (fail_kind != nullptr) {
+          *fail_kind = ReadFailKind::Malformed;
+        }
+        return std::nullopt;
+      }
     }
   }
 
-  if (content_length == 0) {
+  if (!has_content_length) {
+    if (fail_kind != nullptr) {
+      *fail_kind = ReadFailKind::Malformed;
+    }
     return std::nullopt;
+  }
+
+  if (content_length == 0) {
+    return std::string{};
   }
 
   std::string body;
@@ -118,6 +153,9 @@ std::optional<std::string> LspTransport::read_message() {
     const ssize_t n = ::read(stdout_fd_, body.data() + read_total,
                              content_length - read_total);
     if (n <= 0) {
+      if (fail_kind != nullptr) {
+        *fail_kind = ReadFailKind::Eof;
+      }
       return std::nullopt;
     }
     read_total += static_cast<std::size_t>(n);
@@ -127,17 +165,31 @@ std::optional<std::string> LspTransport::read_message() {
 
 void LspTransport::reader_loop() {
   while (running_.load()) {
-    auto message = read_message();
+    ReadFailKind fail_kind = ReadFailKind::None;
+    auto message = read_message(&fail_kind);
     if (!message) {
+      if (fail_kind == ReadFailKind::Malformed) {
+        continue;
+      }
       if (running_.load()) {
+        std::function<void()> eof_handler;
+        {
+          std::lock_guard<std::mutex> lock(eof_handler_mutex_);
+          eof_handler = reader_eof_handler_;
+        }
+        if (eof_handler) {
+          eof_handler();
+        }
         running_ = false;
       }
       break;
     }
 
+    std::string payload = message->empty() ? "{}" : *message;
+
     nlohmann::json json;
     try {
-      json = nlohmann::json::parse(*message);
+      json = nlohmann::json::parse(payload);
     } catch (...) {
       continue;
     }
@@ -158,9 +210,24 @@ void LspTransport::reader_loop() {
       continue;
     }
 
-    const int id = json["id"].get<int>();
+    int response_id = 0;
+    try {
+      const auto& id_json = json["id"];
+      if (id_json.is_number_integer()) {
+        response_id = id_json.get<int>();
+      } else if (id_json.is_number_unsigned()) {
+        response_id = static_cast<int>(id_json.get<unsigned>());
+      } else if (id_json.is_number_float()) {
+        response_id = static_cast<int>(id_json.get<double>());
+      } else {
+        continue;
+      }
+    } catch (...) {
+      continue;
+    }
+
     std::lock_guard<std::mutex> lock(pending_mutex_);
-    pending_responses_[id] = std::move(json);
+    pending_responses_[response_id] = std::move(json);
     pending_cv_.notify_all();
   }
   pending_cv_.notify_all();
@@ -224,6 +291,11 @@ bool LspTransport::send_request(int id, const std::string& method, nlohmann::jso
 void LspTransport::set_notification_handler(NotificationHandler handler) {
   std::lock_guard<std::mutex> lock(handler_mutex_);
   notification_handler_ = std::move(handler);
+}
+
+void LspTransport::set_reader_eof_handler(std::function<void()> handler) {
+  std::lock_guard<std::mutex> lock(eof_handler_mutex_);
+  reader_eof_handler_ = std::move(handler);
 }
 
 void LspTransport::send_notification(const std::string& method, nlohmann::json params) {

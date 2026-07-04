@@ -8,6 +8,7 @@
 #include "editor/editor_context.hpp"
 #include "editor/editor_state.hpp"
 #include "editor/text_search.hpp"
+#include "util/csv_viewer.hpp"
 
 namespace tgdb {
 
@@ -132,7 +133,7 @@ bool read_function_name(const std::string& line, std::string* name) {
 std::vector<SymbolInfo> RegexSymbolProvider::symbols_for_file(
     const std::string& path) {
   std::vector<SymbolInfo> symbols;
-  if (path.empty()) {
+  if (path.empty() || is_tabular_path(path)) {
     return symbols;
   }
 

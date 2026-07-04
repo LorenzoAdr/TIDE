@@ -26,6 +26,7 @@ bool event_is_ctrl_shift_up(const ftxui::Event& event);
 bool event_is_ctrl_shift_down(const ftxui::Event& event);
 bool event_is_open_search_panel(const ftxui::Event& event);
 bool event_is_open_outline_panel(const ftxui::Event& event);
+bool event_is_open_binary_symbols_panel(const ftxui::Event& event);
 
 bool event_is_ctrl_alt_o(const ftxui::Event& event);
 bool event_is_ctrl_shift_o(const ftxui::Event& event);

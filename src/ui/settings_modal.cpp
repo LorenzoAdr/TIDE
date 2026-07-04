@@ -10,6 +10,7 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ui/panel.hpp"
+#include "ui/glyphs.hpp"
 #include "ui/theme.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/compile_commands_remap.hpp"
@@ -28,8 +29,10 @@ constexpr int kStickyScroll = 4;
 constexpr int kIndentGuides = 5;
 constexpr int kOverviewRuler = 6;
 constexpr int kSecondaryPanel = 7;
-constexpr int kMonitor = 8;
-constexpr int kBaseOptions = 9;
+constexpr int kShowAllFiles = 8;
+constexpr int kMonitor = 9;
+constexpr int kIcons = 10;
+constexpr int kBaseOptions = 11;
 
 #ifdef TGDB_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -248,8 +251,12 @@ const std::vector<SettingsOption>& global_settings_options() {
        "Muestra errores, avisos y cambios git en una columna junto al scrollbar"},
       {"Panel secundario (outline / búsqueda)",
        "Muestra la tercera columna con outline y búsqueda en el workspace"},
+      {"Mostrar todos los archivos del workspace",
+       "Incluye carpetas ocultas (.git, .tgdb), archivos en gitignore y directorios de build"},
       {"Monitor interno (log circular)",
        "Registra llamadas internas en ~/.config/tgdb/monitor.log (~1 s). Impacto en rendimiento"},
+      {"Iconos Nerd Font (Auto / Siempre / Nunca)",
+       "Iconos visuales en outline, autocompletado y explorador; Auto solo en terminales con Nerd Font probable (kitty, wezterm, etc.) o TGDB_NERD_FONT=1"},
 #ifdef TGDB_HAS_BUNDLED_CLANGD
       {"Forzar clangd embebido",
        "Usa solo el clangd del binario (ignora clangd en PATH salvo CLANGD_PATH)"},
@@ -264,6 +271,22 @@ const std::vector<SettingsOption>& global_settings_options() {
 
 std::string checkbox_label(bool checked, const std::string& text) {
   return std::string(checked ? "[x] " : "[ ] ") + text;
+}
+
+const char* icon_mode_label(IconMode mode) {
+  switch (mode) {
+    case IconMode::Always:
+      return "Siempre";
+    case IconMode::Never:
+      return "Nunca";
+    case IconMode::Auto:
+    default:
+      return "Auto";
+  }
+}
+
+std::string icon_mode_option_label(IconMode mode, const std::string& text) {
+  return std::string("[") + icon_mode_label(mode) + "] " + text;
 }
 
 bool option_checked(const SettingsModalState* state, int index) {
@@ -287,8 +310,12 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_overview_ruler_enabled;
     case kSecondaryPanel:
       return state->draft_secondary_panel_enabled;
+    case kShowAllFiles:
+      return state->draft_show_all_workspace_files;
     case kMonitor:
       return state->draft_monitor_enabled;
+    case kIcons:
+      return state->draft_icon_mode == IconMode::Always;
 #ifdef TGDB_HAS_BUNDLED_CLANGD
     case kForceBundledClangd:
       return state->draft_force_bundled_clangd;
@@ -335,8 +362,26 @@ void toggle_option(SettingsModalState* state, int index) {
     case kSecondaryPanel:
       state->draft_secondary_panel_enabled = !state->draft_secondary_panel_enabled;
       break;
+    case kShowAllFiles:
+      state->draft_show_all_workspace_files = !state->draft_show_all_workspace_files;
+      break;
     case kMonitor:
       state->draft_monitor_enabled = !state->draft_monitor_enabled;
+      break;
+    case kIcons:
+      switch (state->draft_icon_mode) {
+        case IconMode::Auto:
+          state->draft_icon_mode = IconMode::Always;
+          break;
+        case IconMode::Always:
+          state->draft_icon_mode = IconMode::Never;
+          break;
+        case IconMode::Never:
+        default:
+          state->draft_icon_mode = IconMode::Auto;
+          break;
+      }
+      configure_glyphs(resolve_icon_mode(state->draft_icon_mode));
       break;
 #ifdef TGDB_HAS_BUNDLED_CLANGD
     case kForceBundledClangd:
@@ -1333,8 +1378,14 @@ Element render_general_settings(const SettingsModalState* state) {
     const bool selected = i == state->selected;
     const bool checked = option_checked(state, i);
 
-    Element title = text(checkbox_label(checked, option.label)) |
-                    color(selected ? theme::Accent() : theme::Header()) | bold;
+    Element title;
+    if (i == kIcons) {
+      title = text(icon_mode_option_label(state->draft_icon_mode, option.label)) |
+              color(selected ? theme::Accent() : theme::Header()) | bold;
+    } else {
+      title = text(checkbox_label(checked, option.label)) |
+              color(selected ? theme::Accent() : theme::Header()) | bold;
+    }
     if (selected) {
       title = title | inverted;
     }
@@ -1630,9 +1681,11 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_indent_guides_enabled = settings.indent_guides_enabled;
   state->draft_overview_ruler_enabled = settings.overview_ruler_enabled;
   state->draft_secondary_panel_enabled = settings.secondary_panel_enabled;
+  state->draft_show_all_workspace_files = settings.show_all_workspace_files;
   state->draft_force_bundled_clangd = settings.force_bundled_clangd;
   state->draft_force_bundled_gdb = settings.force_bundled_gdb;
   state->draft_monitor_enabled = settings.monitor_enabled;
+  state->draft_icon_mode = settings.icon_mode;
   state->draft_theme = workspace_config.theme;
   state->workspace_root = workspace_root;
   state->has_workspace = !workspace_root.empty();
@@ -1680,9 +1733,11 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->indent_guides_enabled = state->draft_indent_guides_enabled;
   settings->overview_ruler_enabled = state->draft_overview_ruler_enabled;
   settings->secondary_panel_enabled = state->draft_secondary_panel_enabled;
+  settings->show_all_workspace_files = state->draft_show_all_workspace_files;
   settings->force_bundled_clangd = state->draft_force_bundled_clangd;
   settings->force_bundled_gdb = state->draft_force_bundled_gdb;
   settings->monitor_enabled = state->draft_monitor_enabled;
+  settings->icon_mode = state->draft_icon_mode;
   settings->save();
   if (on_apply) {
     on_apply(*settings);

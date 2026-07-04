@@ -22,6 +22,12 @@ struct TabBarHit {
 struct EditorTabBarState {
   ftxui::Box bar_box;
   std::vector<TabBarHit> hits;
+  TabVisibleRange layout_visible{};
+  int layout_overflow_width = 0;
+  int layout_bar_width = 0;
+  int layout_tab_count = 0;
+  int layout_active_tab = 0;
+  bool layout_valid = false;
   bool overflow_open = false;
   int overflow_selected = 0;
   bool dragging = false;
@@ -29,6 +35,7 @@ struct EditorTabBarState {
   int drag_target = -1;
   int bar_width_chars = 80;
   int hover_tab_index = -1;
+  int hover_close_tab_index = -1;
   int hover_x = 0;
   int hover_y = 0;
 };

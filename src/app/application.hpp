@@ -1,10 +1,14 @@
 #pragma once
 
 #include <chrono>
+#include <deque>
+#include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "app/app_mode.hpp"
@@ -24,6 +28,7 @@
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/quit_confirm.hpp"
+#include "ui/shutdown_overlay.hpp"
 #include "ui/open_file_confirm.hpp"
 #include "ui/settings_modal.hpp"
 #include "ui/shortcuts_modal.hpp"
@@ -36,6 +41,10 @@
 #include "ui/welcome_screen.hpp"
 #include "ui/external_file_wizard.hpp"
 #include "util/thread_safe_queue.hpp"
+
+namespace ftxui {
+class ScreenInteractive;
+}
 
 namespace tgdb {
 
@@ -74,7 +83,8 @@ class Application {
   void sync_model_breakpoints_to_backend();
   void on_connection_complete(const ConnectionResult& result);
   void apply_pending_connection();
-  void on_workspace_complete(const std::string& workspace_root);
+  void on_workspace_complete(const std::string& workspace_root,
+                             ftxui::ScreenInteractive* screen);
   void set_workspace(const std::string& workspace_root);
   void exit_debug_mode();
   bool connection_config_complete() const;
@@ -95,6 +105,15 @@ class Application {
   void setup_build_environment_watching();
   void process_build_environment_updates();
   void schedule_debounced_lsp_restart();
+  IndexFilterOptions index_filter_options() const;
+  void restart_workspace_indexing();
+  void enqueue_ui_task(std::function<void()> task);
+  void drain_ui_tasks();
+  void process_pending_workspace_load();
+  void begin_shutdown(ftxui::ScreenInteractive* screen);
+  void schedule_next_shutdown_step(ftxui::ScreenInteractive* screen);
+  void tick_shutdown();
+  void stop_all_subprocesses();
 
   AppConfig config_;
   AppMode app_mode_ = AppMode::kNormal;
@@ -105,6 +124,10 @@ class Application {
   FilePickerState file_picker_state_;
   SymbolPickerState symbol_picker_state_;
   QuitConfirmState quit_confirm_state_;
+  ShutdownState shutdown_state_;
+  std::thread shutdown_thread_;
+  int shutdown_step_index_ = 0;
+  bool shutdown_performed_ = false;
   OpenFileConfirmState open_file_confirm_state_;
   ShortcutsModalState shortcuts_modal_state_;
   SettingsModalState settings_modal_state_;
@@ -141,6 +164,9 @@ class Application {
   bool workspace_initialized_ = false;
   std::map<std::string, std::string> workspace_launch_args_;
   std::optional<ConnectionResult> pending_connection_;
+  std::optional<std::string> pending_workspace_load_;
+  mutable std::mutex ui_task_mutex_;
+  std::deque<std::function<void()>> ui_tasks_;
 };
 
 }  // namespace tgdb

@@ -6,7 +6,9 @@
 
 #include "editor/undo_stack.hpp"
 #include "ui/open_file_confirm.hpp"
+#include "util/external_viewer.hpp"
 #include "util/file_open_policy.hpp"
+#include "util/csv_viewer.hpp"
 #include "util/path_normalize.hpp"
 
 namespace fs = std::filesystem;
@@ -23,6 +25,16 @@ void set_welcome_buffer(EditorBuffer* buffer) {
   buffer->dirty = false;
   buffer->lines.push_back("");
   clear_undo(buffer);
+}
+
+bool load_tabular_placeholder(EditorBuffer* buffer, const std::string& absolute_path) {
+  if (buffer == nullptr) {
+    return false;
+  }
+  set_welcome_buffer(buffer);
+  buffer->path = absolute_path;
+  buffer->view_token++;
+  return true;
 }
 
 }  // namespace
@@ -139,7 +151,11 @@ int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path, boo
   EditorTab tab;
   tab.path = absolute_path;
   tab.external = external;
-  load_buffer_from_disk(&tab.buffer, absolute_path);
+  if (is_tabular_path(absolute_path)) {
+    load_tabular_placeholder(&tab.buffer, absolute_path);
+  } else {
+    load_buffer_from_disk(&tab.buffer, absolute_path);
+  }
   tabs.push_back(std::move(tab));
   return static_cast<int>(tabs.size()) - 1;
 }
@@ -160,7 +176,35 @@ bool WorkspaceModel::is_path_in_workspace(const std::string& workspace_root,
   return rel_str != ".." && rel_str.rfind("../", 0) != 0;
 }
 
+bool WorkspaceModel::try_open_external_pdf(const std::string& absolute_path) {
+  if (!is_pdf_path(absolute_path)) {
+    return false;
+  }
+
+  std::error_code ec;
+  if (!fs::is_regular_file(absolute_path, ec)) {
+    status_message = "PDF no encontrado: " + fs::path(absolute_path).filename().string();
+    return true;
+  }
+
+  const std::string name = fs::path(absolute_path).filename().string();
+  status_message = "Abriendo " + name + " con evince…";
+
+  launch_pdf_viewer_async(absolute_path, [this](const PdfLaunchResult& result) {
+    if (!enqueue_ui_task) {
+      return;
+    }
+    enqueue_ui_task([this, result]() {
+      status_message = result.ok ? result.message : ("PDF: " + result.message);
+    });
+  });
+  return true;
+}
+
 bool WorkspaceModel::check_open_guard(const std::string& absolute_path) {
+  if (is_tabular_path(absolute_path)) {
+    return true;
+  }
   if (open_file_confirm == nullptr) {
     return true;
   }
@@ -201,6 +245,9 @@ bool WorkspaceModel::open_external_file(const std::string& absolute_path) {
   }
   flush_active_tab();
   const std::string path = normalize_path(absolute_path);
+  if (try_open_external_pdf(path)) {
+    return true;
+  }
   if (!root.empty() && is_path_in_workspace(root, path)) {
     return open_file(path);
   }
@@ -224,6 +271,9 @@ bool WorkspaceModel::open_file(const std::string& absolute_path) {
   }
   flush_active_tab();
   const std::string path = normalize_path(absolute_path);
+  if (try_open_external_pdf(path)) {
+    return true;
+  }
   const int existing = find_tab(path);
   if (existing >= 0) {
     switch_to_tab(existing);
