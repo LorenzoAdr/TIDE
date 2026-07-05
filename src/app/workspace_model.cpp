@@ -110,6 +110,20 @@ void WorkspaceModel::clear_tabs() {
   cursor_history.clear();
 }
 
+std::vector<std::string> WorkspaceModel::dirty_open_paths() const {
+  std::vector<std::string> paths;
+  for (const auto& tab : tabs) {
+    if (tab.buffer.dirty && !tab.path.empty()) {
+      paths.push_back(tab.path);
+    }
+  }
+  if (active_tab < 0 && buffer.dirty && !buffer.path.empty() &&
+      std::find(paths.begin(), paths.end(), buffer.path) == paths.end()) {
+    paths.push_back(buffer.path);
+  }
+  return paths;
+}
+
 void WorkspaceModel::touch_tab_mru(const std::string& absolute_path) {
   if (absolute_path.empty()) {
     return;

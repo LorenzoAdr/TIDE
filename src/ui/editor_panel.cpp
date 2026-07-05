@@ -306,7 +306,7 @@ void sync_guide_tracker_cache(EditorPanelState* panel, const EditorBuffer& buffe
 }
 
 CursorPos mouse_to_cursor(const Mouse& m, const EditorPanelState& panel, const EditorBuffer& buffer,
-                          int visible_lines, bool indent_guides_enabled = false);
+                          int visible_lines);
 void end_mouse_selection(EditorPanelState* panel);
 
 void clear_hover_state(EditorHoverState* hover) {
@@ -913,12 +913,12 @@ void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
 }
 
 void track_hover_mouse(EditorPanelState* panel, const Mouse& m, const EditorBuffer& buffer,
-                       int visible_lines, bool indent_guides_enabled) {
+                       int visible_lines) {
   if (panel == nullptr) {
     return;
   }
   const CursorPos pos =
-      mouse_to_cursor(m, *panel, buffer, visible_lines, indent_guides_enabled);
+      mouse_to_cursor(m, *panel, buffer, visible_lines);
   if (pos.line == panel->hover.line && pos.col == panel->hover.col) {
     return;
   }
@@ -1354,13 +1354,10 @@ bool handle_editor_chrome_mouse(WorkspaceModel* workspace, FocusManagerState* fo
   }
 
   workspace->ensure_buffer();
-  const bool indent_guides_enabled =
-      layout_state != nullptr && layout_state->app_settings != nullptr &&
-      layout_state->app_settings->indent_guides_enabled;
   const bool in_code = panel->code_box.Contain(m.x, m.y);
   if (m.motion == Mouse::Moved) {
     if (in_code && !panel->mouse_selecting) {
-      track_hover_mouse(panel, m, workspace->buffer, visible_lines, indent_guides_enabled);
+      track_hover_mouse(panel, m, workspace->buffer, visible_lines);
     } else if (!in_code && !panel->breadcrumb_box.Contain(m.x, m.y) &&
                (tab_bar == nullptr || !tab_bar->bar_box.Contain(m.x, m.y))) {
       clear_hover_state(&panel->hover);
@@ -2632,7 +2629,7 @@ bool handle_editor_escape(EditorBuffer* buffer, EditorFindState* find,
 }
 
 CursorPos mouse_to_cursor(const Mouse& m, const EditorPanelState& panel, const EditorBuffer& buffer,
-                          int visible_lines, bool indent_guides_enabled) {
+                          int visible_lines) {
   const bool in_code = panel.code_box.Contain(m.x, m.y);
   const bool in_gutter = panel.gutter_box.Contain(m.x, m.y);
 
@@ -2658,19 +2655,7 @@ CursorPos mouse_to_cursor(const Mouse& m, const EditorPanelState& panel, const E
     const std::string& line_text = buffer.lines[static_cast<std::size_t>(line)];
     const int scroll_visual =
         byte_index_to_visual_column(line_text, buffer.scroll_col, tab_size);
-    int visual_col = std::max(0, m.x - panel.code_box.x_min + scroll_visual);
-
-    if (indent_guides_enabled) {
-      const std::string view_line =
-          buffer.scroll_col < static_cast<int>(line_text.size())
-              ? line_text.substr(static_cast<std::size_t>(buffer.scroll_col))
-              : std::string{};
-      const int guide_depth =
-          indent_guide_depth_for_line(buffer.lines, line, std::max(1, editor_indent::width()));
-      const IndentGuideSplit guide_split =
-          split_indent_guide_prefix(view_line, tab_size, guide_depth);
-      visual_col = std::max(0, visual_col - guide_split.prefix_visual_width);
-    }
+    const int visual_col = std::max(0, m.x - panel.code_box.x_min + scroll_visual);
 
     col = visual_column_to_byte_index(line_text, visual_col, tab_size);
     col = std::min(col, static_cast<int>(line_text.size()));
@@ -2749,10 +2734,10 @@ void apply_mouse_drag_line_select(EditorBuffer* buffer, EditorPanelState* panel,
 }
 
 void apply_mouse_drag_head(EditorBuffer* buffer, const Mouse& m, const EditorPanelState& panel,
-                           int visible_lines, int code_width, bool indent_guides_enabled) {
+                           int visible_lines, int code_width) {
   autoscroll_on_drag(buffer, m, panel, visible_lines, code_width);
   const CursorPos pos =
-      mouse_to_cursor(m, panel, *buffer, visible_lines, indent_guides_enabled);
+      mouse_to_cursor(m, panel, *buffer, visible_lines);
   buffer->primary().head = pos;
   clamp_all_cursors(buffer);
   cursor_blink::show();
@@ -2773,10 +2758,6 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   EditorBuffer* buffer = &workspace->buffer;
   buffer->ensure_cursors();
 
-  const bool indent_guides_enabled =
-      layout_state != nullptr && layout_state->app_settings != nullptr &&
-      layout_state->app_settings->indent_guides_enabled;
-
   const auto& m = event.mouse();
   const bool in_code = panel->code_box.Contain(m.x, m.y);
   const bool in_gutter = panel->gutter_box.Contain(m.x, m.y);
@@ -2786,7 +2767,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       panel->line_select_commit_line >= 0) {
     if (panel->line_select_anchor >= 0) {
       const CursorPos pos =
-          mouse_to_cursor(m, *panel, *buffer, visible_lines, indent_guides_enabled);
+          mouse_to_cursor(m, *panel, *buffer, visible_lines);
       select_lines_range(buffer, panel->line_select_anchor, pos.line);
     } else {
       select_line_at(buffer, panel->line_select_commit_line);
@@ -2801,24 +2782,22 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     if (panel->line_select_drag) {
       autoscroll_on_drag(buffer, m, *panel, visible_lines, panel->code_width_chars);
       const CursorPos pos =
-          mouse_to_cursor(m, *panel, *buffer, visible_lines, indent_guides_enabled);
+          mouse_to_cursor(m, *panel, *buffer, visible_lines);
       apply_mouse_drag_line_select(buffer, panel, pos, visible_lines, panel->code_width_chars);
     } else if (panel->word_select_drag) {
       autoscroll_on_drag(buffer, m, *panel, visible_lines, panel->code_width_chars);
       const CursorPos pos =
-          mouse_to_cursor(m, *panel, *buffer, visible_lines, indent_guides_enabled);
+          mouse_to_cursor(m, *panel, *buffer, visible_lines);
       apply_mouse_drag_word_select(buffer, panel, pos, visible_lines, panel->code_width_chars);
     } else {
-      apply_mouse_drag_head(buffer, m, *panel, visible_lines, panel->code_width_chars,
-                            indent_guides_enabled);
+      apply_mouse_drag_head(buffer, m, *panel, visible_lines, panel->code_width_chars);
     }
     return true;
   }
 
   if (m.button == Mouse::Left && m.motion == Mouse::Released && panel->mouse_selecting) {
     if (!panel->line_select_drag && !panel->word_select_drag) {
-      apply_mouse_drag_head(buffer, m, *panel, visible_lines, panel->code_width_chars,
-                            indent_guides_enabled);
+      apply_mouse_drag_head(buffer, m, *panel, visible_lines, panel->code_width_chars);
     }
     end_mouse_selection(panel);
     return true;
@@ -2832,7 +2811,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.motion == Mouse::Moved && in_code && !panel->mouse_selecting) {
-    track_hover_mouse(panel, m, *buffer, visible_lines, indent_guides_enabled);
+    track_hover_mouse(panel, m, *buffer, visible_lines);
     return false;
   }
 
@@ -2879,7 +2858,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   if (m.button == Mouse::Right && m.motion == Mouse::Pressed && in_code) {
     claim_editor_focus(focus, layout_state, panel->panel_focus);
     const CursorPos pos =
-        mouse_to_cursor(m, *panel, *buffer, visible_lines, indent_guides_enabled);
+        mouse_to_cursor(m, *panel, *buffer, visible_lines);
     buffer->reset_to_single_cursor(pos.line, pos.col);
     MultiCursor cursor = buffer->primary();
     cursor.head = pos;
@@ -2953,7 +2932,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     }
 
     const CursorPos pos =
-        mouse_to_cursor(m, *panel, *buffer, visible_lines, indent_guides_enabled);
+        mouse_to_cursor(m, *panel, *buffer, visible_lines);
     const bool shift_click = mouse_shift_active(m, event);
     const bool alt_click = mouse_alt_active(m, event);
 

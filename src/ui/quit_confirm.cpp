@@ -19,6 +19,15 @@ namespace {
 constexpr int kYes = 0;
 constexpr int kNo = 1;
 
+void close_quit_confirm(QuitConfirmState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->open = false;
+  state->selected = kYes;
+  state->unsaved_paths.clear();
+}
+
 Element render_choice(const char* label, bool selected, bool hovered, bool pressed, Box* box) {
   Element row = text(label) | color(theme::Header());
   if (pressed) {
@@ -64,7 +73,7 @@ Component MakeQuitConfirmOverlay(Component main, QuitConfirmState* state,
           if (state->yes_box.Contain(m.x, m.y)) {
             state->selected = kYes;
             trigger_press(layout_state, press_id::kQuitYes);
-            state->open = false;
+            close_quit_confirm(state);
             if (on_confirm) {
               on_confirm();
             }
@@ -73,26 +82,25 @@ Component MakeQuitConfirmOverlay(Component main, QuitConfirmState* state,
           if (state->no_box.Contain(m.x, m.y)) {
             state->selected = kNo;
             trigger_press(layout_state, press_id::kQuitNo);
+            close_quit_confirm(state);
             return true;
           }
         }
 
         if (event == Event::Escape) {
-          state->open = false;
-          state->selected = kYes;
+          close_quit_confirm(state);
           return true;
         }
         if (event == Event::Return) {
           if (state->selected == kYes) {
             trigger_press(layout_state, press_id::kQuitYes);
-            state->open = false;
+            close_quit_confirm(state);
             if (on_confirm) {
               on_confirm();
             }
           } else {
             trigger_press(layout_state, press_id::kQuitNo);
-            state->open = false;
-            state->selected = kYes;
+            close_quit_confirm(state);
           }
           return true;
         }
@@ -132,20 +140,29 @@ Component MakeQuitConfirmOverlay(Component main, QuitConfirmState* state,
         const bool no_pressed =
             layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kQuitNo);
 
-        Element dialog = ModalWindow(
-            text("Confirmar salida") | color(theme::Accent()),
-            vbox({
-                text("¿Salir de tide?") | color(theme::Header()),
-                separator(),
-                hbox({
-                    render_choice(" Sí ", state->selected == kYes, yes_hovered, yes_pressed,
-                                  &state->yes_box),
-                    text("  "),
-                    render_choice(" No ", state->selected == kNo, no_hovered, no_pressed,
-                                  &state->no_box),
-                }),
-                text("Enter confirmar  Esc cancelar") | color(theme::Muted()),
-            }));
+        Elements body;
+        if (state->unsaved_paths.empty()) {
+          body.push_back(text("¿Salir de tide?") | color(theme::Header()));
+        } else {
+          body.push_back(text("Tienes archivos modificados sin guardar:") | color(theme::Header()));
+          Elements file_rows;
+          for (const auto& path : state->unsaved_paths) {
+            file_rows.push_back(text(" " + path + " ") | color(theme::Muted()));
+          }
+          body.push_back(vbox(std::move(file_rows)) | size(HEIGHT, LESS_THAN, 10));
+          body.push_back(text("Si sales, se perderán los cambios.") | color(theme::Header()));
+        }
+        body.push_back(separator());
+        body.push_back(hbox({
+            render_choice(" Sí ", state->selected == kYes, yes_hovered, yes_pressed,
+                          &state->yes_box),
+            text("  "),
+            render_choice(" No ", state->selected == kNo, no_hovered, no_pressed, &state->no_box),
+        }));
+        body.push_back(text("Enter confirmar  Esc cancelar") | color(theme::Muted()));
+
+        Element dialog = ModalWindow(text("Confirmar salida") | color(theme::Accent()),
+                                     vbox(std::move(body)));
 
         return ScreenModalOverlay(std::move(base), std::move(dialog));
       });

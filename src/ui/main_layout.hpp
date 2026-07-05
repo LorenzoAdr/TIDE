@@ -89,6 +89,7 @@ struct ConsolePanelTabs {
 struct BinarySymbolsPending {
   bool open_tab = false;
   bool refresh = false;
+  uint64_t start_after_paint = 0;
   std::string binary_path;
   std::string name_filter;
   NmBindingFilter binding_filter = NmBindingFilter::kAll;
@@ -103,6 +104,8 @@ struct MainLayoutState {
   bool terminal_start_requested = true;
   bool request_ui_tick = false;
   std::atomic<bool> ui_heartbeat{false};
+  uint64_t ui_custom_tick = 0;
+  uint64_t ui_paint_count = 0;
   AppSettings* app_settings = nullptr;
   ClangFormatConfig* workspace_clang_format = nullptr;
   std::function<void()> apply_app_settings_callback;
@@ -187,6 +190,11 @@ inline bool git_tab_active(const MainLayoutState* layout_state) {
 inline bool binary_symbols_tab_active(const MainLayoutState* layout_state) {
   return layout_state != nullptr && layout_state->console_visible &&
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kBinarySymbols;
+}
+
+inline bool binary_symbols_request_pending(const MainLayoutState* layout_state) {
+  return layout_state != nullptr &&
+         !layout_state->binary_symbols_pending.binary_path.empty();
 }
 
 inline bool console_panel_tab_active(const MainLayoutState* layout_state) {

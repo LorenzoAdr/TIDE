@@ -1237,7 +1237,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         return true;
       }
     }
-    if (binary_symbols_tab_active_console(app_mode, layout_state) && !editor_chrome_input) {
+    if (binary_symbols_tab_active_console(app_mode, layout_state) && !editor_chrome_input &&
+        event != Event::Custom) {
       if (binary_symbols_panel->OnEvent(event)) {
         return true;
       }

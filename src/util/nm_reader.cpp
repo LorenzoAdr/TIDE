@@ -381,7 +381,7 @@ NmReadResult read_binary_symbols(const std::string& binary_path) {
   }
 
   const std::string command =
-      shell_quote("nm") + " --demangle --print-size --line-numbers " + shell_quote(binary_path);
+      shell_quote("nm") + " --demangle --print-size " + shell_quote(binary_path);
   const std::string output = run_shell_capture(command, 120);
   if (output.empty()) {
     result.error = "nm no devolvió salida (¿está instalado?)";

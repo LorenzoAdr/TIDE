@@ -191,8 +191,8 @@ void activate_browser_row(ConnectionWizardState* state, MainLayoutState* layout_
     if (!is_nm_analyzable_path(entry.path)) {
       return;
     }
-    request_binary_symbols_panel(layout_state, entry.path);
     state->open = false;
+    request_binary_symbols_panel(layout_state, entry.path);
     return;
   }
   state->selected_program = entry.path;
@@ -653,7 +653,7 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
       }),
       [main, state, model, layout_state] {
         Element base = main->Render();
-        if (!state->open) {
+        if (!state->open || binary_symbols_request_pending(layout_state)) {
           return base;
         }
 

@@ -1,5 +1,8 @@
 #include "util/nm_reader_runner.hpp"
 
+#include <sstream>
+#include <thread>
+
 #include "util/thread_name.hpp"
 
 namespace tgdb {

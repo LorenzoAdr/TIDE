@@ -1,6 +1,8 @@
 #pragma once
 
 #include <functional>
+#include <string>
+#include <vector>
 
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/screen/box.hpp"
@@ -12,6 +14,7 @@ namespace tgdb {
 struct QuitConfirmState {
   bool open = false;
   int selected = 0;  // 0 = Sí, 1 = No
+  std::vector<std::string> unsaved_paths;
   ftxui::Box yes_box;
   ftxui::Box no_box;
 };

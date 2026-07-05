@@ -1,5 +1,6 @@
 #include "app/application.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -455,6 +456,7 @@ void Application::begin_shutdown(ScreenInteractive* screen) {
     return;
   }
   quit_confirm_state_.open = false;
+  quit_confirm_state_.unsaved_paths.clear();
   shutdown_state_.begin(7);
   shutdown_step_index_ = 0;
   shutdown_state_.set_current("Guardando sesión…");
@@ -1396,6 +1398,7 @@ int Application::run() {
       }
 
         if (event == Event::Custom) {
+        ++layout_state_.ui_custom_tick;
         monitor_log::heartbeat();
         if (!any_modal_open()) {
           TGDB_MON_SCOPE("ui", "tick.apply_pending_connection");
@@ -1464,13 +1467,11 @@ int Application::run() {
             layout_state_.search_key_handler) {
           layout_state_.search_key_handler(event);
         }
-        if (binary_symbols_tab_active(&layout_state_) &&
-            layout_state_.binary_symbols_key_handler) {
-          layout_state_.binary_symbols_key_handler(event);
-        } else if (layout_state_.binary_symbols_key_handler &&
-                   (layout_state_.binary_symbols_pending.open_tab ||
-                    !layout_state_.binary_symbols_pending.binary_path.empty() ||
-                    layout_state_.binary_symbols_pending.refresh)) {
+        if (layout_state_.binary_symbols_key_handler &&
+            (binary_symbols_tab_active(&layout_state_) ||
+             layout_state_.binary_symbols_pending.open_tab ||
+             !layout_state_.binary_symbols_pending.binary_path.empty() ||
+             layout_state_.binary_symbols_pending.refresh)) {
           layout_state_.binary_symbols_key_handler(event);
         }
         if (swallow_call_hierarchy_custom) {
@@ -1791,8 +1792,21 @@ int Application::run() {
       }
 
       if (event == Event::CtrlQ) {
+        workspace_.flush_active_tab();
+        secondary_workspace_.flush_active_tab();
+        quit_confirm_state_.unsaved_paths.clear();
+        for (const auto& path : workspace_.dirty_open_paths()) {
+          quit_confirm_state_.unsaved_paths.push_back(path);
+        }
+        for (const auto& path : secondary_workspace_.dirty_open_paths()) {
+          if (std::find(quit_confirm_state_.unsaved_paths.begin(),
+                        quit_confirm_state_.unsaved_paths.end(),
+                        path) == quit_confirm_state_.unsaved_paths.end()) {
+            quit_confirm_state_.unsaved_paths.push_back(path);
+          }
+        }
         quit_confirm_state_.open = true;
-        quit_confirm_state_.selected = 0;
+        quit_confirm_state_.selected = quit_confirm_state_.unsaved_paths.empty() ? 0 : 1;
         layout_state_.request_ui_tick = true;
         return true;
       }

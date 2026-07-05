@@ -46,6 +46,7 @@ struct WorkspaceModel {
   void open_relative(const std::string& relative_path);
   void ensure_buffer();
   void clear_tabs();
+  std::vector<std::string> dirty_open_paths() const;
   void record_cursor_jump();
   bool navigate_cursor_back(int visible_lines);
   bool navigate_cursor_forward(int visible_lines);

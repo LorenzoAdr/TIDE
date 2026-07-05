@@ -7,6 +7,7 @@
 #include <numeric>
 #include <optional>
 #include <sstream>
+#include <thread>
 
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
@@ -146,7 +147,27 @@ struct BinarySymbolsPanelState {
   std::size_t last_shell_output_size = 0;
   bool pending_shell_scan = false;
   std::string pending_select_name;
+  uint64_t last_custom_tick_processed = 0;
 };
+
+bool symbols_panel_loading(const BinarySymbolsPanelState& state,
+                           const MainLayoutState* layout_state) {
+  if (state.loading) {
+    return true;
+  }
+  return binary_symbols_request_pending(layout_state);
+}
+
+std::string symbols_panel_binary_path(const BinarySymbolsPanelState& state,
+                                      const MainLayoutState* layout_state) {
+  if (!state.binary_path.empty()) {
+    return state.binary_path;
+  }
+  if (layout_state != nullptr && !layout_state->binary_symbols_pending.binary_path.empty()) {
+    return layout_state->binary_symbols_pending.binary_path;
+  }
+  return {};
+}
 
 int visible_line_count(const Box& box) {
   if (box.y_max < box.y_min) {
@@ -389,12 +410,24 @@ void apply_pending_request(BinarySymbolsPanelState* state, MainLayoutState* layo
     layout_state->focus_sync_needed = true;
   }
 
+  bool started_analysis = false;
   if (has_new_binary) {
+    if (pending.start_after_paint == 0) {
+      pending.start_after_paint = layout_state->ui_paint_count + 1;
+      pending.open_tab = false;
+      return;
+    }
+    if (layout_state->ui_paint_count < pending.start_after_paint) {
+      pending.open_tab = false;
+      return;
+    }
+    pending.start_after_paint = 0;
     start_analysis(state, layout_state, target_path);
+    started_analysis = true;
     pending.refresh = false;
   }
 
-  bool schedule_filter = has_new_binary;
+  bool schedule_filter = started_analysis;
   if (!pending.name_filter.empty()) {
     state->filter_query = pending.name_filter;
     state->applied_name_filter = pending.name_filter;
@@ -416,7 +449,9 @@ void apply_pending_request(BinarySymbolsPanelState* state, MainLayoutState* layo
   }
 
   pending.open_tab = false;
-  pending.binary_path.clear();
+  if (started_analysis) {
+    pending.binary_path.clear();
+  }
 }
 
 bool poll_runner(BinarySymbolsPanelState* state, MainLayoutState* layout_state) {
@@ -671,6 +706,10 @@ void tick_binary_symbols_panel(BinarySymbolsPanelState* state, MainLayoutState* 
   if (state == nullptr || layout_state == nullptr) {
     return;
   }
+  if (state->last_custom_tick_processed == layout_state->ui_custom_tick) {
+    return;
+  }
+  state->last_custom_tick_processed = layout_state->ui_custom_tick;
   apply_pending_request(state, layout_state, model);
   poll_runner(state, layout_state);
   poll_filter_runner(state, layout_state);
@@ -709,6 +748,7 @@ void request_binary_symbols_panel(MainLayoutState* layout_state, const std::stri
   }
   if (!binary_path.empty()) {
     pending.binary_path = binary_path;
+    pending.start_after_paint = 0;
   }
   if (!name_filter.empty()) {
     pending.name_filter = name_filter;
@@ -727,6 +767,7 @@ void refresh_binary_symbols_if_matches(MainLayoutState* layout_state,
   }
   layout_state->binary_symbols_pending.refresh = true;
   layout_state->binary_symbols_pending.binary_path = binary_path;
+  layout_state->binary_symbols_pending.start_after_paint = 0;
   layout_state->binary_symbols_pending.open_tab = false;
   layout_state->request_ui_tick = true;
 }
@@ -909,6 +950,13 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
       return true;
     }
 
+    if (event == Event::Escape && binary_symbols_request_pending(layout_state)) {
+      layout_state->binary_symbols_pending = {};
+      state->status = "Análisis cancelado";
+      layout_state->request_ui_tick = true;
+      return true;
+    }
+
     if (event == Event::Tab) {
       apply_binding_filter(state.get(), layout_state, cycle_binding_filter(state->binding_filter));
       return true;
@@ -979,16 +1027,22 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
         Element filter_field =
             render_name_filter_field(*state, filter_active, *filter_input_option);
 
-        const std::string header_path = state->binary_path.empty()
-                                            ? "(sin binario)"
-                                            : fs::path(state->binary_path).filename().string();
+        const std::string header_path = symbols_panel_binary_path(*state, layout_state);
+        const std::string header_display =
+            header_path.empty() ? "(sin binario)" : fs::path(header_path).filename().string();
+        const bool show_loading = symbols_panel_loading(*state, layout_state);
         std::string loading_suffix;
-        if (state->loading) {
+        if (show_loading) {
           loading_suffix = "  [cargando… Esc: cancelar]";
         } else if (state->filtering) {
           loading_suffix = "  [filtrando…]";
         }
-        const std::string header = "Binario: " + header_path + "  |  " + state->status +
+        std::string status_text = state->status;
+        if (binary_symbols_request_pending(layout_state) && !header_display.empty() &&
+            header_display != "(sin binario)") {
+          status_text = "Analizando " + header_display + "...";
+        }
+        const std::string header = "Binario: " + header_display + "  |  " + status_text +
                                    loading_suffix;
 
         Elements binding_labels;
@@ -1010,7 +1064,7 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
             text("  Enter: aplicar nombre  clic/Tab/1-7: estado  /: nombre") | color(theme::Muted()));
 
         Elements rows;
-        if (state->loading && (state->symbols == nullptr || state->symbols->empty())) {
+        if (show_loading && (state->symbols == nullptr || state->symbols->empty())) {
           rows.push_back(text(" Ejecutando nm en segundo plano... ") | color(theme::Muted()));
         } else if (state->filtering && state->filtered_indices.empty()) {
           rows.push_back(text(" Filtrando símbolos... ") | color(theme::Muted()));

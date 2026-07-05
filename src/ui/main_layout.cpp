@@ -814,6 +814,9 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   }
 
   auto layout_root = Renderer(with_focus_sync, [=] {
+    if (layout_state != nullptr) {
+      ++layout_state->ui_paint_count;
+    }
     const bool show_secondary =
         layout_state == nullptr || layout_state->app_settings == nullptr ||
         layout_state->app_settings->secondary_panel_enabled;
