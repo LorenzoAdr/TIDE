@@ -39,6 +39,11 @@ class GitService {
   void refresh_file_head(const std::string& path);
   void refresh_log();
   void refresh_branches();
+  void refresh_log_search(const std::string& query);
+  void refresh_file_timeline(const std::string& path);
+  void refresh_timeline_diff(const std::string& path, const std::string& commit_hash);
+  void refresh_commit_files(const std::string& commit_hash);
+  void refresh_graph();
 
   void set_update_callback(std::function<void()> callback);
   uint64_t cache_revision() const;
@@ -50,7 +55,18 @@ class GitService {
   GitStatusSnapshot status() const;
   GitFileDiff file_diff(const std::string& absolute_path) const;
   std::vector<GitCommitEntry> log_entries() const;
+  std::vector<GitCommitEntry> log_search_results() const;
+  bool log_search_ready(const std::string& query) const;
   std::vector<GitBranchEntry> branches() const;
+  std::vector<GitCommitEntry> file_timeline(const std::string& absolute_path) const;
+  std::string timeline_diff_text(const std::string& absolute_path,
+                                 const std::string& commit_hash) const;
+  bool has_timeline_diff_text(const std::string& absolute_path,
+                              const std::string& commit_hash) const;
+  std::vector<GitCommitFileEntry> commit_files(const std::string& commit_hash) const;
+  bool has_commit_files(const std::string& commit_hash) const;
+  std::vector<std::string> graph_lines() const;
+  bool graph_loaded() const;
   std::string file_diff_text(const std::string& absolute_path) const;
   std::string previous_line_content(const std::string& absolute_path, int line) const;
   bool busy() const;
@@ -77,7 +93,18 @@ class GitService {
   void load_file_diff_text(const std::string& root, const std::string& rel);
   void load_file_head(const std::string& root, const std::string& rel);
   void load_log(const std::string& root);
+  void load_log_search(const std::string& root, const std::string& query);
   void load_branches(const std::string& root);
+  void load_file_timeline(const std::string& root, const std::string& rel);
+  void load_timeline_diff(const std::string& root, const std::string& rel,
+                          const std::string& commit_hash);
+  void load_commit_files(const std::string& root, const std::string& commit_hash);
+  void load_graph(const std::string& root);
+  bool commit_files_cached_unlocked(const std::string& commit_hash) const;
+  std::string timeline_diff_key_unlocked(const std::string& rel,
+                                         const std::string& commit_hash) const;
+  bool timeline_diff_cached_unlocked(const std::string& rel,
+                                     const std::string& commit_hash) const;
   void notify_updated();
   void run_on_ui_thread(std::function<void()> task);
   void dispatch_completion(CompletionCallback on_done, bool success, const std::string& message);
@@ -94,7 +121,20 @@ class GitService {
   std::map<std::string, GitFileDiff> file_diffs_;
   std::map<std::string, std::string> file_diff_texts_;
   std::vector<GitCommitEntry> log_entries_;
+  std::string log_search_query_;
+  std::vector<GitCommitEntry> log_search_results_;
+  std::unordered_set<std::string> inflight_log_searches_;
   std::vector<GitBranchEntry> branches_;
+  std::string timeline_path_;
+  std::vector<GitCommitEntry> file_timeline_;
+  std::map<std::string, std::string> timeline_diff_texts_;
+  std::map<std::string, std::vector<GitCommitFileEntry>> commit_files_;
+  std::vector<std::string> graph_lines_;
+  bool graph_loaded_ = false;
+  std::unordered_set<std::string> inflight_timelines_;
+  std::unordered_set<std::string> inflight_timeline_diffs_;
+  std::unordered_set<std::string> inflight_commit_files_;
+  std::atomic<bool> inflight_graph_{false};
   std::function<void()> update_callback_;
   std::mutex completion_mutex_;
   std::deque<std::function<void()>> pending_completions_;

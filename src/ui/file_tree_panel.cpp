@@ -172,6 +172,8 @@ struct FileTreePanelState {
   int list_scroll = 0;
   std::string loaded_workspace;
   std::string last_revealed_path;
+  Box panel_box;
+  Box hide_box;
   Box content_box;
   Box scrollbar_box;
   ScrollbarLayout scrollbar_layout;
@@ -484,7 +486,44 @@ bool mouse_over_explorer(const FileTreePanelState* state, int x, int y) {
   if (state == nullptr) {
     return false;
   }
+  if (state->panel_box.Contain(x, y)) {
+    return true;
+  }
   return state->content_box.Contain(x, y) || state->scrollbar_box.Contain(x, y);
+}
+
+void hide_explorer_panel(MainLayoutState* layout_state, FocusManagerState* focus) {
+  if (layout_state == nullptr || !layout_state->explorer_visible) {
+    return;
+  }
+  layout_state->explorer_visible = false;
+  if (focus != nullptr && focus->region == FocusRegion::Explorer) {
+    focus->region = FocusRegion::Editor;
+    layout_state->focus_sync_needed = true;
+  }
+  layout_state->text_input_focus = TextInputFocus::None;
+  layout_state->request_ui_tick = true;
+}
+
+bool handle_explorer_header_mouse(FileTreePanelState* state, MainLayoutState* layout_state,
+                                  FocusManagerState* focus, const Mouse& mouse) {
+  if (state == nullptr || layout_state == nullptr) {
+    return false;
+  }
+  if (mouse.motion == Mouse::Moved) {
+    return update_panel_hover(
+        layout_state, mouse.x, mouse.y, {{press_id::kExplorerHide, &state->hide_box}},
+        [](std::string_view id) { return id == press_id::kExplorerHide; });
+  }
+  if (mouse.button != Mouse::Left || mouse.motion != Mouse::Pressed) {
+    return false;
+  }
+  if (!state->hide_box.Contain(mouse.x, mouse.y)) {
+    return false;
+  }
+  trigger_press(layout_state, press_id::kExplorerHide);
+  hide_explorer_panel(layout_state, focus);
+  return true;
 }
 
 bool update_explorer_hover(FileTreePanelState* state, MainLayoutState* layout_state, int x,
@@ -612,6 +651,9 @@ bool handle_explorer_mouse(FileTreePanelState* state, DebugModel* model,
     return false;
   }
   const auto& m = event.mouse();
+  if (handle_explorer_header_mouse(state, layout_state, focus, m)) {
+    return true;
+  }
   if (!mouse_over_explorer(state, m.x, m.y)) {
     return false;
   }
@@ -727,7 +769,27 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
         reflect(state->scrollbar_box);
 
     auto content = vbox({hbox({list | flex, scrollbar}) | flex | bgcolor(theme::PanelBg())});
-    return MakePanel(i18n::tr("panel.explorer.title"), std::move(content));
+
+    const bool hide_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kExplorerHide);
+    const bool hide_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kExplorerHide);
+    Element hide_btn = MakeToolbarButton(
+        text(i18n::tr("console.hide_panel")) | color(theme::Muted()),
+        hide_hovered, hide_pressed, false, &state->hide_box);
+
+    return vbox({
+               hbox({
+                   text(i18n::tr("panel.explorer.title")) | color(theme::Accent()) | bold,
+                   filler(),
+                   hide_btn | size(WIDTH, EQUAL, 3),
+               }) | size(HEIGHT, EQUAL, 1) | bgcolor(theme::TabIdle()) | reflect(state->panel_box),
+               separator(),
+               std::move(content) | flex,
+           }) |
+           flex | bgcolor(theme::PanelBg());
   });
 
   if (layout_state != nullptr) {

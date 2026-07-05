@@ -16,12 +16,15 @@
 #include "indexer/workspace_indexer.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/focus_manager.hpp"
+#include "ui/path_browser.hpp"
 
 namespace tgdb {
 
 struct MainLayoutState;
 
 enum class ContextMenuKind { File, Folder, EditorSymbol, EditorBackground, Problem };
+
+enum class NamePromptKind { Rename, CreateFile, CreateFolder };
 
 struct ContextMenuState {
   bool open = false;
@@ -50,8 +53,12 @@ struct ContextMenuState {
 
   bool rename_open = false;
   bool rename_skip_return = false;
+  NamePromptKind name_prompt_kind = NamePromptKind::Rename;
   bool delete_confirm_open = false;
   bool indexer_paths_open = false;
+  bool move_browser_open = false;
+  bool move_is_dir = false;
+  PathBrowserState move_browser;
   int indexer_paths_scroll = 0;
   std::vector<std::string> indexer_paths_lines;
   std::string rename_input;

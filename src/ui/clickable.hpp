@@ -137,6 +137,23 @@ inline Element MakeToolbarButton(Element content, bool hovered, bool pressed, bo
   return btn | reflect(*box);
 }
 
+struct SplitToolbarButtonBoxes {
+  Box main;
+  Box arrow;
+};
+
+inline Element MakeSplitToolbarButton(Element main_content, Element arrow_content,
+                                      bool main_hovered, bool main_pressed, bool arrow_hovered,
+                                      bool arrow_pressed, bool disabled,
+                                      SplitToolbarButtonBoxes* boxes) {
+  return hbox({
+      MakeToolbarButton(std::move(main_content), main_hovered, main_pressed, disabled,
+                        &boxes->main),
+      MakeToolbarButton(std::move(arrow_content), arrow_hovered, arrow_pressed, disabled,
+                        &boxes->arrow),
+  });
+}
+
 inline bool interaction_active(const MainLayoutState* layout, std::string_view id) {
   return layout != nullptr &&
          (layout->clickable.is_hovered(id) || layout->clickable.is_pressed(id));

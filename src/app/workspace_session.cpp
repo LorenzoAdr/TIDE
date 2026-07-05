@@ -53,12 +53,15 @@ WorkspaceSession WorkspaceSession::load(const std::string& workspace_root) {
     if (doc.contains("launch_args") && doc["launch_args"].is_object()) {
       for (const auto& [key, value] : doc["launch_args"].items()) {
         if (!key.empty() && value.is_string()) {
-          const std::string args_line = value.get<std::string>();
-          if (!args_line.empty()) {
-            session.launch_args[key] = args_line;
-          }
+          session.launch_args[key] = value.get<std::string>();
         }
       }
+    }
+    if (doc.contains("last_launch_program") && doc["last_launch_program"].is_string()) {
+      session.last_launch_program = doc["last_launch_program"].get<std::string>();
+    }
+    if (doc.contains("last_attach_program") && doc["last_attach_program"].is_string()) {
+      session.last_attach_program = doc["last_attach_program"].get<std::string>();
     }
   } catch (...) {
     return WorkspaceSession{};
@@ -79,6 +82,12 @@ bool WorkspaceSession::save(const std::string& workspace_root) const {
   doc["active_tab_path"] = active_tab_path;
   if (!launch_args.empty()) {
     doc["launch_args"] = launch_args;
+  }
+  if (!last_launch_program.empty()) {
+    doc["last_launch_program"] = last_launch_program;
+  }
+  if (!last_attach_program.empty()) {
+    doc["last_attach_program"] = last_attach_program;
   }
 
   std::ofstream output(session_path(workspace_root));

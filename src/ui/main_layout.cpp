@@ -1,5 +1,6 @@
 #include "ui/git_panel.hpp"
 #include "ui/main_layout.hpp"
+#include "ui/status_layout_popover.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -15,6 +16,7 @@
 #include "ui/editor_panel.hpp"
 #include "ui/file_tree_panel.hpp"
 #include "ui/call_hierarchy_panel.hpp"
+#include "ui/clickable.hpp"
 #include "ui/outline_panel.hpp"
 #include "ui/right_sidebar_panel.hpp"
 #include "ui/search_panel.hpp"
@@ -24,6 +26,7 @@
 #include "ui/watches_panel.hpp"
 #include "ui/welcome_screen.hpp"
 #include "i18n/tr.hpp"
+#include "util/bundled_tools.hpp"
 
 namespace tgdb {
 
@@ -53,6 +56,7 @@ struct LayoutState {
   int split_drag_kind = 0;  // 1=left, 2=right, 3=bottom, 4=editor center
   int split_drag_start_pos = 0;
   int split_drag_start_size = 0;
+  bool show_left_split = true;
   bool show_right_split = true;
   bool show_bottom_split = true;
   bool show_editor_center_split = false;
@@ -501,16 +505,6 @@ Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
       });
 }
 
-std::string status_shortcuts(AppMode mode, bool welcome_visible) {
-  if (welcome_visible) {
-    return i18n::tr("status.shortcuts.welcome");
-  }
-  if (mode == AppMode::kDebug) {
-    return i18n::tr("status.shortcuts.debug");
-  }
-  return i18n::tr("status.shortcuts.normal");
-}
-
 std::string buffer_text(const EditorBuffer& buffer) {
   std::string text;
   for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
@@ -520,6 +514,119 @@ std::string buffer_text(const EditorBuffer& buffer) {
     text += buffer.lines[i];
   }
   return text;
+}
+
+struct StatusBarUiState {
+  Box index_box;
+  SplitToolbarButtonBoxes launch_btn;
+  SplitToolbarButtonBoxes debug_btn;
+  Box layout_box;
+  Box settings_box;
+  Box shortcuts_box;
+};
+
+bool index_clangd_ready(const MainLayoutState* layout_state) {
+  if (!resolve_clangd().has_value()) {
+    return false;
+  }
+  if (layout_state != nullptr && layout_state->app_settings != nullptr &&
+      !layout_state->app_settings->lsp_enabled) {
+    return false;
+  }
+  return true;
+}
+
+bool status_bar_hover_id(std::string_view id) {
+  return id == press_id::kStatusIndex || id == press_id::kStatusLaunch ||
+         id == press_id::kStatusLaunchQuick || id == press_id::kStatusDebug ||
+         id == press_id::kStatusDebugQuick || id == press_id::kStatusLayout ||
+         id == press_id::kStatusSettings || id == press_id::kStatusShortcuts;
+}
+
+bool handle_status_bar_mouse(StatusBarUiState* state, MainLayoutState* layout_state,
+                             Event event) {
+  if (state == nullptr || layout_state == nullptr || !event.is_mouse()) {
+    return false;
+  }
+  const Mouse& mouse = event.mouse();
+  if (layout_state->status_layout_popover.open) {
+    if (HandleStatusLayoutPopoverMouse(&layout_state->status_layout_popover, layout_state,
+                                       state->layout_box, event)) {
+      return true;
+    }
+  }
+  if (mouse.motion == Mouse::Moved) {
+    return update_panel_hover(
+        layout_state, mouse.x, mouse.y,
+        {{press_id::kStatusIndex, &state->index_box},
+         {press_id::kStatusLaunch, &state->launch_btn.main},
+         {press_id::kStatusLaunchQuick, &state->launch_btn.arrow},
+         {press_id::kStatusDebug, &state->debug_btn.main},
+         {press_id::kStatusDebugQuick, &state->debug_btn.arrow},
+         {press_id::kStatusLayout, &state->layout_box},
+         {press_id::kStatusSettings, &state->settings_box},
+         {press_id::kStatusShortcuts, &state->shortcuts_box}},
+        status_bar_hover_id);
+  }
+  if (mouse.button != Mouse::Left || mouse.motion != Mouse::Pressed) {
+    return false;
+  }
+  if (state->index_box.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kStatusIndex);
+    if (layout_state->status_reindex_project) {
+      layout_state->status_reindex_project();
+    }
+    return true;
+  }
+  if (state->launch_btn.main.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kStatusLaunch);
+    if (layout_state->status_open_launch) {
+      layout_state->status_open_launch();
+    }
+    return true;
+  }
+  if (state->launch_btn.arrow.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kStatusLaunchQuick);
+    if (layout_state->status_quick_launch) {
+      layout_state->status_quick_launch();
+    }
+    return true;
+  }
+  if (state->debug_btn.main.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kStatusDebug);
+    if (layout_state->status_open_debug) {
+      layout_state->status_open_debug();
+    }
+    return true;
+  }
+  if (state->debug_btn.arrow.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kStatusDebugQuick);
+    if (layout_state->status_quick_debug) {
+      layout_state->status_quick_debug();
+    }
+    return true;
+  }
+  if (state->layout_box.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kStatusLayout);
+    layout_state->status_layout_popover.open = !layout_state->status_layout_popover.open;
+    layout_state->request_ui_tick = true;
+    return true;
+  }
+  if (state->settings_box.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kStatusSettings);
+    if (layout_state->status_open_settings) {
+      layout_state->status_open_settings();
+    }
+    return true;
+  }
+  if (state->shortcuts_box.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kStatusShortcuts);
+    if (layout_state->status_open_shortcuts) {
+      layout_state->status_open_shortcuts();
+    }
+    return true;
+  }
+  return false;
 }
 
 constexpr int kMinSplitPanelWidth = 12;
@@ -573,7 +680,11 @@ bool update_split_hover(LayoutState* state, int x, int y) {
       changed = true;
     }
   };
-  set_left(&state->left_sep_hovered);
+  if (state->show_left_split) {
+    set_left(&state->left_sep_hovered);
+  } else {
+    state->left_sep_hovered = false;
+  }
   if (state->show_right_split) {
     set_right(&state->right_sep_hovered);
   } else {
@@ -606,16 +717,18 @@ void apply_split_drag(LayoutState* state, int x, int y, int screen_w, int screen
   }
   switch (state->split_drag_kind) {
     case 1: {
+      const int right_w = state->show_right_split ? state->right_width : 0;
       const int max_left = std::max(kMinSplitPanelWidth,
-                                    screen_w - state->right_width - kMinCenterWidth - 2);
+                                    screen_w - right_w - kMinCenterWidth - 2);
       const int delta = x - state->split_drag_start_pos;
       state->left_width =
           std::max(kMinSplitPanelWidth, std::min(state->split_drag_start_size + delta, max_left));
       break;
     }
     case 2: {
+      const int left_w = state->show_left_split ? state->left_width : 0;
       const int max_right = std::max(kMinSplitPanelWidth,
-                                     screen_w - state->left_width - kMinCenterWidth - 2);
+                                     screen_w - left_w - kMinCenterWidth - 2);
       const int delta = state->split_drag_start_pos - x;
       state->right_width =
           std::max(kMinSplitPanelWidth, std::min(state->split_drag_start_size + delta, max_right));
@@ -674,7 +787,7 @@ bool handle_split_mouse(LayoutState* state, MainLayoutState* layout_state, Event
     return false;
   }
 
-  if (box_hit_left_sep(state->left_sep_box, mouse.x, mouse.y)) {
+  if (state->show_left_split && box_hit_left_sep(state->left_sep_box, mouse.x, mouse.y)) {
     state->split_dragging = true;
     state->split_drag_kind = 1;
     state->split_drag_start_pos = mouse.x;
@@ -759,24 +872,64 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
 
   auto explorer_and_center =
       MakeVSplitLeft(file_tree, center, &split_state->left_width, split_state);
-  auto workspace_area =
+  auto workspace_lr =
       MakeVSplitRight(right_panel, explorer_and_center, &split_state->right_width, split_state);
-  workspace_area = WrapClearInputFocus(std::move(workspace_area), layout_state);
-  auto workspace_only = workspace_area;
-  auto workspace_no_secondary =
+  workspace_lr = WrapClearInputFocus(std::move(workspace_lr), layout_state);
+  auto workspace_l =
       WrapClearInputFocus(explorer_and_center, layout_state);
+  auto workspace_r =
+      WrapClearInputFocus(MakeVSplitRight(right_panel, center, &split_state->right_width, split_state),
+                          layout_state);
+  auto workspace_none = WrapClearInputFocus(center, layout_state);
+
+  auto workspace_picker = Renderer([=] {
+    const bool show_left =
+        layout_state != nullptr && layout_state->explorer_visible;
+    const bool show_secondary =
+        layout_state == nullptr || layout_state->app_settings == nullptr ||
+        layout_state->app_settings->secondary_panel_enabled;
+    split_state->show_left_split = show_left;
+    split_state->show_right_split = show_secondary;
+
+    if (show_left && show_secondary) {
+      return workspace_lr->Render() | flex | bgcolor(theme::PanelBg());
+    }
+    if (show_left) {
+      return workspace_l->Render() | flex | bgcolor(theme::PanelBg());
+    }
+    if (show_secondary) {
+      return workspace_r->Render() | flex | bgcolor(theme::PanelBg());
+    }
+    return workspace_none->Render() | flex | bgcolor(theme::PanelBg());
+  });
 
   auto console = MakeConsolePanel(app_mode, model, shell, on_command, layout_state, focus,
                                   &split_state->bottom_height, shell_launch_config, workspace,
                                   symbols, indexer, symbol_indexer, &layout_state->right_sidebar,
                                   git_service, git_panel_state);
   auto with_console =
-      MakeHSplitBottom(console, workspace_area, &split_state->bottom_height, split_state);
-  auto with_console_no_secondary =
-      MakeHSplitBottom(console, workspace_no_secondary, &split_state->bottom_height, split_state);
+      MakeHSplitBottom(console, workspace_picker, &split_state->bottom_height, split_state);
+
+  auto welcome_screen_renderer = Renderer([welcome_screen] {
+    return welcome_screen->Render() | flex | bgcolor(theme::PanelBg());
+  });
+
+  auto body = Renderer([=] {
+    const bool welcome_visible =
+        layout_state != nullptr && layout_state->welcome_visible;
+    split_state->show_bottom_split =
+        layout_state != nullptr && layout_state->console_visible;
+    if (welcome_visible) {
+      return welcome_screen_renderer->Render();
+    }
+    if (layout_state != nullptr && layout_state->console_visible) {
+      return with_console->Render() | flex | bgcolor(theme::PanelBg());
+    }
+    return workspace_picker->Render();
+  });
 
   auto with_focus_sync = CatchEvent(
-      with_console,
+      body,
       [split_state, app_mode, focus, layout_state, focus_sync](Event event) {
         if (event != Event::Custom) {
           return false;
@@ -814,30 +967,21 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     };
   }
 
+  auto status_ui = std::make_shared<StatusBarUiState>();
+  if (layout_state != nullptr) {
+    layout_state->status_bar_mouse_handler =
+        [status_ui, layout_state](Event event) {
+          return handle_status_bar_mouse(status_ui.get(), layout_state, event);
+        };
+  }
+
   auto layout_root = Renderer(with_focus_sync, [=] {
     if (layout_state != nullptr) {
       ++layout_state->ui_paint_count;
     }
-    const bool show_secondary =
-        layout_state == nullptr || layout_state->app_settings == nullptr ||
-        layout_state->app_settings->secondary_panel_enabled;
-    split_state->show_right_split = show_secondary;
-    split_state->show_bottom_split =
-        layout_state != nullptr && layout_state->console_visible;
     const bool git_tab_open =
         layout_state != nullptr && git_tab_active(layout_state);
-    const bool welcome_visible =
-        layout_state != nullptr && layout_state->welcome_visible;
-    Element main;
-    if (welcome_visible) {
-      main = welcome_screen->Render() | flex | bgcolor(theme::PanelBg());
-    } else if (layout_state != nullptr && layout_state->console_visible) {
-      main = show_secondary ? with_focus_sync->Render()
-                            : with_console_no_secondary->Render();
-    } else {
-      main = show_secondary ? workspace_only->Render()
-                            : workspace_no_secondary->Render();
-    }
+    Element main = with_focus_sync->Render() | flex | bgcolor(theme::PanelBg());
 
     const bool editor_focus =
         focus != nullptr && is_editor_focus_region(focus->region);
@@ -935,17 +1079,105 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       focus_status = text(focus_label) | color(theme::Header());
     }
 
-    const AppMode mode = app_mode != nullptr ? *app_mode : AppMode::kNormal;
+    const bool index_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kStatusIndex);
+    const bool index_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kStatusIndex);
+    const bool launch_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kStatusLaunch);
+    const bool launch_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kStatusLaunch);
+    const bool launch_quick_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kStatusLaunchQuick);
+    const bool launch_quick_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kStatusLaunchQuick);
+    const bool debug_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kStatusDebug);
+    const bool debug_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kStatusDebug);
+    const bool debug_quick_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kStatusDebugQuick);
+    const bool debug_quick_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kStatusDebugQuick);
+    const bool layout_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kStatusLayout);
+    const bool layout_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kStatusLayout);
+    const bool settings_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kStatusSettings);
+    const bool settings_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kStatusSettings);
+    const bool shortcuts_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kStatusShortcuts);
+    const bool shortcuts_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kStatusShortcuts);
+
+    const auto muted = [](Element content) { return std::move(content) | color(theme::Muted()); };
+    const bool clangd_ready = index_clangd_ready(layout_state);
+    Element index_label =
+        text(i18n::tr("status.button.index")) |
+        color(clangd_ready ? theme::Muted() : theme::Error());
+    if (!clangd_ready) {
+      index_label = index_label | bold;
+    }
+    Element index_btn = MakeToolbarButton(
+        std::move(index_label), index_hovered, index_pressed, false, &status_ui->index_box);
+    Element launch_btn = MakeSplitToolbarButton(
+        muted(text(i18n::tr("status.button.launch"))),
+        muted(text(i18n::tr("status.button.quick"))), launch_hovered, launch_pressed,
+        launch_quick_hovered, launch_quick_pressed, false, &status_ui->launch_btn);
+    Element debug_btn = MakeSplitToolbarButton(
+        muted(text(i18n::tr("status.button.debug"))),
+        muted(text(i18n::tr("status.button.quick"))), debug_hovered, debug_pressed,
+        debug_quick_hovered, debug_quick_pressed, false, &status_ui->debug_btn);
+    const bool layout_active =
+        layout_state != nullptr && layout_state->status_layout_popover.open;
+    Element layout_btn = MakeToolbarButton(
+        text(i18n::tr("status.button.layout")) | color(theme::Muted()) |
+            (layout_active ? bold : nothing),
+        layout_hovered, layout_pressed, false, &status_ui->layout_box);
+    Element settings_btn = MakeToolbarButton(
+        text(i18n::tr("status.button.settings")) | color(theme::Muted()),
+        settings_hovered, settings_pressed, false, &status_ui->settings_box);
+    Element shortcuts_btn = MakeToolbarButton(
+        text(i18n::tr("status.button.shortcuts")) | color(theme::Muted()),
+        shortcuts_hovered, shortcuts_pressed, false, &status_ui->shortcuts_box);
 
     Element status = hbox({
         text(i18n::tr("status.app_name")) | bold | color(theme::Accent()),
         text(i18n::tr("status.separator")),
         focus_status,
         text(status_msg) | flex | color(theme::Header()),
-        text(status_shortcuts(mode, welcome_visible)) | color(theme::Muted()),
+        index_btn,
+        launch_btn,
+        debug_btn,
+        layout_btn,
+        settings_btn,
+        shortcuts_btn,
     }) | bgcolor(theme::StatusBar());
 
-    return vbox({main | flex | bgcolor(theme::PanelBg()), status});
+    Element chrome = vbox({main | flex | bgcolor(theme::PanelBg()), status});
+    if (layout_state != nullptr && layout_state->status_layout_popover.open) {
+      chrome = RenderStatusLayoutPopoverOverlay(&layout_state->status_layout_popover, layout_state,
+                                                std::move(chrome), status_ui->layout_box);
+    }
+    return chrome;
   });
 
   return layout_root;

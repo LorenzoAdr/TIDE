@@ -407,7 +407,7 @@ void apply_pending_request(BinarySymbolsPanelState* state, MainLayoutState* layo
 
   const bool has_new_binary = !target_path.empty() &&
                               (pending.refresh || target_path != state->binary_path);
-  if (has_new_binary || pending.open_tab) {
+  if (pending.open_tab) {
     layout_state->console_visible = true;
     layout_state->console_tabs.selected_tab = ConsolePanelTabs::kBinarySymbols;
     layout_state->focus_sync_needed = true;
@@ -743,7 +743,7 @@ void request_binary_symbols_panel(MainLayoutState* layout_state, const std::stri
     return;
   }
   auto& pending = layout_state->binary_symbols_pending;
-  if (open_tab || !binary_path.empty()) {
+  if (open_tab) {
     pending.open_tab = true;
     layout_state->console_visible = true;
     layout_state->console_tabs.selected_tab = ConsolePanelTabs::kBinarySymbols;

@@ -22,6 +22,7 @@
 #include "ui/clickable_interaction.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/press_ids.hpp"
+#include "ui/status_layout_popover.hpp"
 #include "git/git_service.hpp"
 #include "util/system_stats.hpp"
 #include "ui/source_panel.hpp"
@@ -106,6 +107,7 @@ struct HelixIdeCallbacks {
 
 struct MainLayoutState {
   bool console_visible = true;
+  bool explorer_visible = true;
   bool welcome_visible = false;
   bool diagnostics_panel_visible = false;
   int diagnostics_panel_height = 6;
@@ -155,6 +157,19 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> watches_mouse_handler;
   std::function<bool(const ftxui::Event&)> console_debug_mouse_handler;
   std::function<bool(const ftxui::Event&)> explorer_mouse_handler;
+  std::function<bool(const ftxui::Event&)> sidebar_mouse_handler;
+  std::function<bool(const ftxui::Event&)> status_bar_mouse_handler;
+  std::function<void()> status_open_settings;
+  std::function<void()> status_open_shortcuts;
+  std::function<void()> status_reindex_project;
+  std::function<void()> status_open_launch;
+  std::function<void()> status_quick_launch;
+  std::function<void()> status_open_debug;
+  std::function<void()> status_quick_debug;
+  std::function<void(bool visible)> status_set_files_visible;
+  std::function<void(bool visible)> status_set_outline_visible;
+  std::function<void(bool visible)> status_set_terminal_visible;
+  StatusLayoutPopoverState status_layout_popover;
   std::function<void()> outline_tick_callback;
   std::function<bool(const ftxui::Event&)> console_key_handler;
   std::function<bool(const ftxui::Event&)> console_mouse_handler;

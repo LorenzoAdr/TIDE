@@ -59,6 +59,7 @@
 #include "ui/glyphs.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
+#include "ui/welcome_screen.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/overview_ruler.hpp"
 #include "ui/text_input_style.hpp"
@@ -224,20 +225,6 @@ struct EditorPanelState {
   SelectionOccurrenceRunner selection_occurrence_runner;
   uint64_t selection_occurrence_request_counter = 0;
   uint64_t selection_occurrence_inflight_id = 0;
-  struct SourceSymbolFlash {
-    int line = -1;
-    int start_col = 0;
-    int end_col = 0;
-    std::chrono::steady_clock::time_point until{};
-
-    bool active() const {
-      return line >= 0 && end_col > start_col &&
-             std::chrono::steady_clock::now() < until;
-    }
-
-    void clear() { line = -1; }
-  };
-  SourceSymbolFlash source_flash;
   bool chord_k_pending = false;
   HelixEditorState helix;
   std::string tabular_layout_path;
@@ -2532,64 +2519,6 @@ std::string format_line_number(int line_no, int width) {
   return text;
 }
 
-Element render_source_flash_line(const std::string& line, int start_col, int end_col,
-                                 const Decorator& row_bg) {
-  const int len = static_cast<int>(line.size());
-  const int start = std::max(0, std::min(start_col, len));
-  const int end = std::max(start, std::min(end_col, len));
-  const std::string prefix = line.substr(0, static_cast<std::size_t>(start));
-  const std::string symbol =
-      line.substr(static_cast<std::size_t>(start), static_cast<std::size_t>(end - start));
-  const std::string suffix = line.substr(static_cast<std::size_t>(end));
-  Elements parts;
-  parts.push_back(text(prefix.empty() ? " " : prefix));
-  if (!symbol.empty()) {
-    parts.push_back(text(symbol) | bold | inverted | bgcolor(theme::TabPressed()));
-  }
-  if (!suffix.empty()) {
-    parts.push_back(text(suffix));
-  }
-  return hbox(std::move(parts)) | row_bg;
-}
-
-std::optional<Element> try_make_editor_symbol_flash_overlay(MainLayoutState* layout_state,
-                                                            const EditorBuffer& buffer,
-                                                            const EditorPanelState& panel) {
-  if (layout_state == nullptr) {
-    return std::nullopt;
-  }
-  if (!editor_symbol_press_visible(layout_state)) {
-    return std::nullopt;
-  }
-  const auto& press = layout_state->editor_symbol_press;
-  if (press.line < 0 || press.line >= static_cast<int>(buffer.lines.size())) {
-    return std::nullopt;
-  }
-  const int row =
-      press.render_row >= 0 ? press.render_row : press.line - buffer.scroll;
-  if (row < 0) {
-    return std::nullopt;
-  }
-  const std::string& line = buffer.lines[static_cast<std::size_t>(press.line)];
-  if (press.start_col < 0 || press.end_col > static_cast<int>(line.size()) ||
-      press.end_col <= press.start_col) {
-    return std::nullopt;
-  }
-  const std::string segment = line.substr(static_cast<std::size_t>(press.start_col),
-                                          static_cast<std::size_t>(press.end_col - press.start_col));
-  const int total = static_cast<int>(buffer.lines.size());
-  const int gutter_w = line_number_width(total);
-  const int x_pad = gutter_w + 2 + press.start_col;
-  const int y_pad = row;
-
-  Element flash = text(segment) | bold | inverted | bgcolor(theme::TabPressed());
-  return dbox({text(""),
-               vbox({filler() | size(HEIGHT, EQUAL, y_pad),
-                     hbox({filler() | size(WIDTH, EQUAL, x_pad), std::move(flash), filler()}),
-                     filler()}) |
-                     flex});
-}
-
 bool find_input_active(MainLayoutState* layout_state, const EditorFindState& find) {
   return find.open && layout_state != nullptr &&
          layout_state->text_input_focus == TextInputFocus::EditorFind;
@@ -3711,7 +3640,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (helix_on) {
-    if (event_is_tide_global_shortcut(event) || event_is_ctrl_key_release(event)) {
+    if (event_is_tide_app_shortcut(event) || event_is_ctrl_key_release(event)) {
       return false;
     }
     HelixDispatchContext hctx =
@@ -3729,7 +3658,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     if (panel->helix.mode != HelixMode::kInsert) {
       sync_helix_layout_status(layout_state, &panel->helix, true);
-      if (event_has_ctrl_modifier(event) || event_is_tide_global_shortcut(event) ||
+      if (event_has_ctrl_modifier(event) || event_is_tide_app_shortcut(event) ||
           event_is_ctrl_key_release(event)) {
         return false;
       }
@@ -4056,13 +3985,6 @@ void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState*
     const int render_row = line - buffer.scroll;
     request_editor_symbol_press(layout_state, normalize_path(path), line, start_col, end_col,
                                 render_row);
-    if (panel_state != nullptr) {
-      panel_state->source_flash.line = line;
-      panel_state->source_flash.start_col = start_col;
-      panel_state->source_flash.end_col = end_col;
-      panel_state->source_flash.until =
-          std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
-    }
     buffer.view_token++;
   }
 }
@@ -4142,17 +4064,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (goto_state->open) {
       return make_goto_line_overlay(*goto_state);
     }
-    if (layout_state != nullptr && !completion_state->open && !diagnostic_state->open &&
-        !git_history_state->open) {
-      workspace->ensure_buffer();
-      if (auto flash_overlay = try_make_editor_symbol_flash_overlay(
-              layout_state, workspace->buffer, *panel_state)) {
-        return *flash_overlay;
-      }
-      if (editor_symbol_press_visible(layout_state)) {
-        return text("");
-      }
-    }
     if (!find_state->open && !completion_state->open && !diagnostic_state->open &&
         !git_history_state->open) {
       return make_hover_tooltip(panel_state->hover, panel_state->code_box);
@@ -4182,6 +4093,15 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     workspace->ensure_buffer();
     EditorBuffer& buffer = workspace->buffer;
     buffer.ensure_cursors();
+
+    if (buffer.path.empty()) {
+      return vbox({
+                 filler(),
+                 hbox({filler(), RenderTuideLogo(), filler()}),
+                 filler(),
+             }) |
+             flex | bgcolor(theme::CodeBg()) | reflect(panel_state->code_box);
+    }
 
     const bool path_changed = buffer.path != panel_state->last_path;
 
@@ -4500,13 +4420,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         }
       }
 
-      const auto& sf = panel_state->source_flash;
-      if (sf.active() && sf.line == i) {
-        code_rows.push_back(
-            render_source_flash_line(display_line, sf.start_col, sf.end_col, row_bg));
-        continue;
-      }
-
       EditorSymbolPress symbol_press;
       if (layout_state != nullptr && layout_state->editor_symbol_press.line == i) {
         const auto& press = layout_state->editor_symbol_press;
@@ -4791,7 +4704,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       const int visible = visible_line_count(panel_state->code_box);
       tick_pending_editor_navigation(layout_state, [&](const SourceLocation& loc) {
         navigate_to_location(workspace, layout_state, loc, visible);
-        panel_state->source_flash.clear();
       });
       editor_hover_tick(workspace, panel_state.get(), symbols);
       tick_block_comment_cache(panel_state.get(), workspace->buffer);

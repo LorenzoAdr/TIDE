@@ -11,21 +11,33 @@
 namespace tgdb {
 
 struct MainLayoutState;
+struct WorkspaceModel;
 
 struct GitPanelState {
   static constexpr int kTabStatus = 0;
   static constexpr int kTabLog = 1;
   static constexpr int kTabBranches = 2;
+  static constexpr int kTabTimeline = 3;
+  static constexpr int kTabGraph = 4;
 
   int selected_tab = kTabStatus;
   int selected_file = 0;
   int file_scroll = 0;
   int log_scroll = 0;
   int branch_scroll = 0;
+  int timeline_scroll = 0;
+  int graph_scroll = 0;
   int diff_scroll = 0;
   int last_list_visible = 1;
   int last_diff_visible = 1;
   std::string last_diff_path;
+  std::string timeline_file;
+  std::string last_timeline_commit;
+  std::string last_log_commit;
+  std::string log_search_query;
+  int log_search_cursor = 0;
+  bool log_search_focus = false;
+  std::string log_search_applied;
   std::string commit_message;
   int commit_cursor = 0;
   std::string status_message;
@@ -34,7 +46,7 @@ struct GitPanelState {
   std::string pending_diff_path;
 
   ftxui::Box panel_box;
-  std::array<ftxui::Box, 3> tab_boxes{};
+  std::array<ftxui::Box, 5> tab_boxes{};
   ftxui::Box file_list_box;
   ftxui::Box diff_box;
   ftxui::Box stage_box;
@@ -42,10 +54,12 @@ struct GitPanelState {
   ftxui::Box push_box;
   ftxui::Box pull_box;
   ftxui::Box commit_box;
+  ftxui::Box log_search_box;
 };
 
 ftxui::Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
-                              FocusManagerState* focus, int* content_height = nullptr);
+                              FocusManagerState* focus, WorkspaceModel* workspace,
+                              int* content_height = nullptr);
 
 void GitPanelEnsureSelectedDiff(GitService* git, GitPanelState* state);
 

@@ -649,6 +649,24 @@ bool event_is_tide_global_shortcut(const ftxui::Event& event) {
          event == ftxui::Event::CtrlB;
 }
 
+bool event_is_tide_app_shortcut(const ftxui::Event& event) {
+  if (event_is_tide_global_shortcut(event)) {
+    return true;
+  }
+  if (event_is_f1(event) || event_is_open_shortcuts_modal(event)) {
+    return true;
+  }
+  if (event_is_open_search_panel(event) || event_is_open_outline_panel(event) ||
+      event_is_open_binary_symbols_panel(event)) {
+    return true;
+  }
+  return event == ftxui::Event::F2 || event == ftxui::Event::F3 ||
+         event == ftxui::Event::F4 || event == ftxui::Event::F5 ||
+         event == ftxui::Event::F6 || event == ftxui::Event::F9 ||
+         event == ftxui::Event::F10 || event == ftxui::Event::F11 ||
+         event == ftxui::Event::Special({24});
+}
+
 bool editor_priority_key(const ftxui::Event& event) {
   return event == ftxui::Event::Escape || event_is_ctrl_z(event) || event_is_ctrl_c(event) ||
          event_is_ctrl_v(event) || event_is_ctrl_x(event) || event_is_ctrl_f(event) || event_is_ctrl_g(event) ||

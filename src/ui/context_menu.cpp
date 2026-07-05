@@ -58,6 +58,31 @@ bool is_valid_filename(const std::string& name) {
   return name.find('/') == std::string::npos && name.find('\\') == std::string::npos;
 }
 
+bool path_is_same_or_descendant(const fs::path& ancestor, const fs::path& path) {
+  std::error_code ec;
+  const auto a = fs::weakly_canonical(ancestor, ec);
+  if (ec) {
+    return false;
+  }
+  const auto p = fs::weakly_canonical(path, ec);
+  if (ec) {
+    return false;
+  }
+  const std::string a_str = a.string();
+  const std::string p_str = p.string();
+  if (a_str == p_str) {
+    return true;
+  }
+  if (p_str.size() <= a_str.size()) {
+    return false;
+  }
+  if (p_str.compare(0, a_str.size(), a_str) != 0) {
+    return false;
+  }
+  const char next = p_str[a_str.size()];
+  return next == '/' || next == '\\';
+}
+
 void set_items(ContextMenuState* state, ContextMenuKind kind,
                std::initializer_list<std::pair<std::string, const char*>> items) {
   if (state == nullptr) {
@@ -640,6 +665,149 @@ bool rename_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer*
   return true;
 }
 
+bool create_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer* indexer,
+                 SymbolWorkspaceIndexer* symbol_indexer, const std::string& parent_absolute,
+                 const std::string& parent_relative, const std::string& name, bool is_folder) {
+  if (parent_absolute.empty() || name.empty() || model == nullptr) {
+    return false;
+  }
+  const fs::path target = fs::path(parent_absolute) / name;
+  if (fs::exists(target)) {
+    if (workspace != nullptr) {
+      workspace->status_message = i18n::tr_fmt("status.already_exists", {name});
+    }
+    return false;
+  }
+
+  std::error_code ec;
+  if (is_folder) {
+    if (!fs::create_directory(target, ec) || ec) {
+      if (workspace != nullptr) {
+        workspace->status_message = i18n::tr_fmt("status.create_failed", {name});
+      }
+      return false;
+    }
+    if (workspace != nullptr) {
+      workspace->status_message = i18n::tr_fmt("status.created_folder", {name});
+    }
+    return true;
+  }
+
+  std::ofstream out(target);
+  if (!out) {
+    if (workspace != nullptr) {
+      workspace->status_message = i18n::tr_fmt("status.create_failed", {name});
+    }
+    return false;
+  }
+
+  const std::string new_relative =
+      parent_relative.empty() ? name : parent_relative + "/" + name;
+  if (indexer != nullptr) {
+    indexer->upsert_file(model->workspace_root, new_relative, target.string());
+    if (symbol_indexer != nullptr) {
+      symbol_indexer->reindex_file(model->workspace_root, new_relative, target.string());
+    }
+  }
+  if (workspace != nullptr) {
+    workspace->status_message = i18n::tr_fmt("status.created_file", {name});
+  }
+  return true;
+}
+
+bool move_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer* indexer,
+               SymbolWorkspaceIndexer* symbol_indexer, const std::string& absolute_path,
+               const std::string& relative_path, const std::string& dest_dir, bool is_dir) {
+  if (absolute_path.empty() || dest_dir.empty() || model == nullptr) {
+    return false;
+  }
+  const fs::path source(absolute_path);
+  const fs::path target = fs::path(dest_dir) / source.filename();
+  if (target == source) {
+    return true;
+  }
+  if (is_dir && path_is_same_or_descendant(source, fs::path(dest_dir))) {
+    if (workspace != nullptr) {
+      workspace->status_message = i18n::tr("status.cannot_move_into_self");
+    }
+    return false;
+  }
+  if (fs::exists(target)) {
+    if (workspace != nullptr) {
+      workspace->status_message =
+          i18n::tr_fmt("status.already_exists", {target.filename().string()});
+    }
+    return false;
+  }
+
+  std::error_code ec;
+  fs::rename(source, target, ec);
+  if (ec) {
+    if (workspace != nullptr) {
+      workspace->status_message = i18n::tr_fmt("status.move_failed", {ec.message()});
+    }
+    return false;
+  }
+
+  std::string new_relative;
+  const auto rel = fs::relative(target, fs::path(model->workspace_root), ec);
+  if (!ec) {
+    new_relative = rel.generic_string();
+  } else if (!relative_path.empty()) {
+    const std::string filename = source.filename().string();
+    std::error_code rel_ec;
+    const auto dest_rel =
+        fs::relative(fs::path(dest_dir), fs::path(model->workspace_root), rel_ec);
+    new_relative = rel_ec ? filename : (dest_rel / filename).generic_string();
+  } else {
+    new_relative = target.filename().string();
+  }
+
+  if (indexer != nullptr && !relative_path.empty()) {
+    if (is_dir) {
+      if (auto snap = indexer->snapshot()) {
+        for (const auto& file : snap->files) {
+          if (file.rfind(relative_path, 0) == 0) {
+            const std::string suffix = file.substr(relative_path.size());
+            const std::string updated = new_relative + suffix;
+            const fs::path updated_abs = fs::path(model->workspace_root) / updated;
+            indexer->remove_file(model->workspace_root, file);
+            indexer->upsert_file(model->workspace_root, updated, updated_abs.string());
+            if (symbol_indexer != nullptr) {
+              symbol_indexer->remove_file(model->workspace_root, file);
+              symbol_indexer->reindex_file(model->workspace_root, updated, updated_abs.string());
+            }
+          }
+        }
+      }
+    } else {
+      indexer->remove_file(model->workspace_root, relative_path);
+      indexer->upsert_file(model->workspace_root, new_relative, target.string());
+      if (symbol_indexer != nullptr) {
+        symbol_indexer->remove_file(model->workspace_root, relative_path);
+        symbol_indexer->reindex_file(model->workspace_root, new_relative, target.string());
+      }
+    }
+  }
+
+  if (workspace != nullptr) {
+    workspace->flush_active_tab();
+    for (auto& tab : workspace->tabs) {
+      if (normalize_path(tab.path) == normalize_path(absolute_path)) {
+        tab.path = target.string();
+        tab.buffer.path = target.string();
+      }
+    }
+    if (normalize_path(workspace->buffer.path) == normalize_path(absolute_path)) {
+      workspace->buffer.path = target.string();
+      workspace->active_file = target.string();
+    }
+    workspace->status_message = i18n::tr_fmt("status.moved", {source.filename().string()});
+    workspace->buffer.view_token++;
+  }
+  return true;
+}
+
 void open_rename_prompt(ContextMenuState* state, const std::string& initial) {
   if (state == nullptr) {
     return;
@@ -649,6 +817,40 @@ void open_rename_prompt(ContextMenuState* state, const std::string& initial) {
   state->rename_open = true;
   state->rename_skip_return = true;
   state->rename_input = initial;
+  state->name_prompt_kind = NamePromptKind::Rename;
+}
+
+void open_create_prompt(ContextMenuState* state, bool is_folder) {
+  if (state == nullptr) {
+    return;
+  }
+  state->open = false;
+  state->delete_confirm_open = false;
+  state->rename_open = true;
+  state->rename_skip_return = true;
+  state->rename_input.clear();
+  state->name_prompt_kind =
+      is_folder ? NamePromptKind::CreateFolder : NamePromptKind::CreateFile;
+}
+
+void open_move_browser(ContextMenuState* state, DebugModel* model) {
+  if (state == nullptr) {
+    return;
+  }
+  state->open = false;
+  state->move_browser_open = true;
+  state->move_is_dir = state->kind == ContextMenuKind::Folder;
+  const std::string root = model != nullptr ? model->workspace_root : "";
+  state->move_browser.launch_root =
+      root.empty() ? canonical_browser_root("") : canonical_browser_root(root);
+  std::string start = state->move_browser.launch_root;
+  if (!state->absolute_path.empty()) {
+    const fs::path parent = fs::path(state->absolute_path).parent_path();
+    if (!parent.empty()) {
+      start = parent.string();
+    }
+  }
+  state->move_browser.reset(start);
 }
 
 void open_indexer_paths_modal(ContextMenuState* state, const std::string& workspace_root,
@@ -738,6 +940,21 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
 
   if (action_id == "rename_folder") {
     open_rename_prompt(state, fs::path(state->absolute_path).filename().string());
+    return true;
+  }
+
+  if (action_id == "create_folder") {
+    open_create_prompt(state, true);
+    return true;
+  }
+
+  if (action_id == "create_file") {
+    open_create_prompt(state, false);
+    return true;
+  }
+
+  if (action_id == "move_to") {
+    open_move_browser(state, model);
     return true;
   }
 
@@ -850,6 +1067,13 @@ bool commit_rename(ContextMenuState* state, WorkspaceModel* workspace, DebugMode
     return ok;
   }
 
+  if (state->name_prompt_kind == NamePromptKind::CreateFile ||
+      state->name_prompt_kind == NamePromptKind::CreateFolder) {
+    return create_path(workspace, model, indexer, symbol_indexer, state->absolute_path,
+                       state->relative_path, new_name,
+                       state->name_prompt_kind == NamePromptKind::CreateFolder);
+  }
+
   const bool is_dir = state->kind == ContextMenuKind::Folder;
   return rename_path(workspace, model, indexer, symbol_indexer, state->absolute_path,
                      state->relative_path, new_name, is_dir);
@@ -887,7 +1111,7 @@ void focus_search_with_filter(MainLayoutState* layout_state, const std::string& 
 
 bool context_menu_active(const ContextMenuState* state) {
   return state != nullptr && (state->open || state->rename_open || state->delete_confirm_open ||
-                              state->indexer_paths_open);
+                              state->indexer_paths_open || state->move_browser_open);
 }
 
 void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) {
@@ -898,10 +1122,12 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
   state->rename_open = false;
   state->delete_confirm_open = false;
   state->indexer_paths_open = false;
+  state->move_browser_open = false;
   state->indexer_paths_scroll = 0;
   state->indexer_paths_lines.clear();
   state->rename_skip_return = false;
   state->rename_input.clear();
+  state->name_prompt_kind = NamePromptKind::Rename;
   state->selected = 0;
   state->row_boxes.clear();
   if (layout_state != nullptr) {
@@ -935,6 +1161,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
                    {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
                    {i18n::tr("context_menu.format_file"), "format_file"},
                    {i18n::tr("context_menu.rename_file"), "rename_file"},
+                   {i18n::tr("context_menu.move_to"), "move_to"},
                    {i18n::tr("context_menu.delete_file"), "delete_file"}});
       } else {
         set_items(state, ContextMenuKind::File,
@@ -943,6 +1170,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
                    {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
                    {i18n::tr("context_menu.format_file"), "format_file"},
                    {i18n::tr("context_menu.rename_file"), "rename_file"},
+                   {i18n::tr("context_menu.move_to"), "move_to"},
                    {i18n::tr("context_menu.delete_file"), "delete_file"}});
       }
     } else if (show_secondary_open) {
@@ -952,6 +1180,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
                  {i18n::tr("context_menu.open_file"), "open_file"},
                  {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
                  {i18n::tr("context_menu.rename_file"), "rename_file"},
+                 {i18n::tr("context_menu.move_to"), "move_to"},
                  {i18n::tr("context_menu.delete_file"), "delete_file"}});
     } else {
       set_items(state, ContextMenuKind::File,
@@ -959,6 +1188,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
                  {i18n::tr("context_menu.open_file"), "open_file"},
                  {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
                  {i18n::tr("context_menu.rename_file"), "rename_file"},
+                 {i18n::tr("context_menu.move_to"), "move_to"},
                  {i18n::tr("context_menu.delete_file"), "delete_file"}});
     }
     return;
@@ -971,6 +1201,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
                  {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
                  {i18n::tr("context_menu.format_file"), "format_file"},
                  {i18n::tr("context_menu.rename_file"), "rename_file"},
+                 {i18n::tr("context_menu.move_to"), "move_to"},
                  {i18n::tr("context_menu.delete_file"), "delete_file"}});
     } else {
       set_items(state, ContextMenuKind::File,
@@ -978,6 +1209,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
                  {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
                  {i18n::tr("context_menu.format_file"), "format_file"},
                  {i18n::tr("context_menu.rename_file"), "rename_file"},
+                 {i18n::tr("context_menu.move_to"), "move_to"},
                  {i18n::tr("context_menu.delete_file"), "delete_file"}});
     }
     return;
@@ -988,6 +1220,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
                {i18n::tr("context_menu.open_file"), "open_file"},
                {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
                {i18n::tr("context_menu.rename_file"), "rename_file"},
+               {i18n::tr("context_menu.move_to"), "move_to"},
                {i18n::tr("context_menu.delete_file"), "delete_file"}});
     return;
   }
@@ -995,6 +1228,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
             {{i18n::tr("context_menu.open_file"), "open_file"},
              {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
              {i18n::tr("context_menu.rename_file"), "rename_file"},
+             {i18n::tr("context_menu.move_to"), "move_to"},
              {i18n::tr("context_menu.delete_file"), "delete_file"}});
 }
 
@@ -1012,7 +1246,10 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
   state->absolute_path = absolute_path;
   state->relative_path = relative_path;
   set_items(state, ContextMenuKind::Folder,
-            {{i18n::tr("context_menu.rename_folder"), "rename_folder"},
+            {{i18n::tr("context_menu.create_folder"), "create_folder"},
+             {i18n::tr("context_menu.create_file"), "create_file"},
+             {i18n::tr("context_menu.move_to"), "move_to"},
+             {i18n::tr("context_menu.rename_folder"), "rename_folder"},
              {i18n::tr("context_menu.search_in_folder"), "search_in_folder"}});
 }
 
@@ -1168,15 +1405,103 @@ Element render_rename_modal(ContextMenuState* state) {
   }
   std::string line = state->rename_input;
   line.push_back('_');
-  const std::string title = state->kind == ContextMenuKind::EditorSymbol
-                                ? i18n::tr("context_menu.rename.symbol")
-                            : state->kind == ContextMenuKind::Folder
-                                ? i18n::tr("context_menu.rename.folder")
-                                : i18n::tr("context_menu.rename.file");
+  const std::string title =
+      state->name_prompt_kind == NamePromptKind::CreateFolder
+          ? i18n::tr("context_menu.create.folder")
+          : state->name_prompt_kind == NamePromptKind::CreateFile
+                ? i18n::tr("context_menu.create.file")
+          : state->kind == ContextMenuKind::EditorSymbol
+                ? i18n::tr("context_menu.rename.symbol")
+          : state->kind == ContextMenuKind::Folder ? i18n::tr("context_menu.rename.folder")
+                                                   : i18n::tr("context_menu.rename.file");
   Element dialog = ModalWindow(
       text(title) | color(theme::Accent()),
       vbox({ModalInputLine(line),
             text(i18n::tr("common.footer.confirm_esc")) | color(theme::Muted())}));
+  return CenteredModal(std::move(dialog));
+}
+
+void activate_move_browser_row(ContextMenuState* state, MainLayoutState* layout_state, int row) {
+  if (state == nullptr || row < 0 || row >= static_cast<int>(state->move_browser.entries.size())) {
+    return;
+  }
+  trigger_press(layout_state, press_id::f3_browser_row(row));
+  state->move_browser.selected = row;
+  const auto& entry = state->move_browser.entries[static_cast<std::size_t>(row)];
+  if (entry.is_directory) {
+    state->move_browser.browser_path = entry.path;
+    state->move_browser.reload_browser_entries(true);
+  }
+}
+
+bool update_move_browser_hover(ContextMenuState* state, MainLayoutState* layout_state, int x,
+                               int y) {
+  if (state == nullptr || layout_state == nullptr) {
+    return false;
+  }
+  const std::string_view before = layout_state->clickable.hovered_id();
+  const auto local = local_row_in_box(state->move_browser.browser_list_box, x, y);
+  if (local.has_value()) {
+    const int row = state->move_browser.browser_list_start + *local;
+    if (row >= 0 && row < static_cast<int>(state->move_browser.entries.size())) {
+      layout_state->clickable.set_hover(press_id::f3_browser_row(row));
+    } else {
+      layout_state->clickable.clear_hover_if(press_id::is_f3_hover);
+    }
+  } else {
+    layout_state->clickable.clear_hover_if(press_id::is_f3_hover);
+  }
+  if (layout_state->clickable.hovered_id() != before) {
+    layout_state->request_ui_tick = true;
+    return true;
+  }
+  return false;
+}
+
+Element render_move_browser_modal(ContextMenuState* state, MainLayoutState* layout_state) {
+  if (state == nullptr || !state->move_browser_open) {
+    return text("");
+  }
+  state->move_browser.ensure_browser_entries();
+
+  Elements body;
+  body.push_back(text(state->move_browser.browser_path) | color(theme::Muted()));
+  body.push_back(separator());
+
+  const int max_rows = 14;
+  state->move_browser.browser_list_start = std::max(
+      0, std::min(state->move_browser.selected,
+                  std::max(0, static_cast<int>(state->move_browser.entries.size()) - max_rows)));
+  const int start = state->move_browser.browser_list_start;
+  const int end = std::min(static_cast<int>(state->move_browser.entries.size()), start + max_rows);
+  Elements list_rows;
+  for (int i = start; i < end; ++i) {
+    const auto& row = state->move_browser.entries[static_cast<std::size_t>(i)];
+    std::string prefix = row.is_directory ? i18n::tr("common.browser.dir_prefix")
+                                          : i18n::tr("common.browser.file_indent");
+    const std::string row_id = press_id::f3_browser_row(i);
+    const bool selected = i == state->move_browser.selected;
+    const bool hovered = layout_state != nullptr && layout_state->clickable.is_hovered(row_id);
+    const bool pressed = layout_state != nullptr && layout_state->clickable.is_pressed(row_id);
+    Element line = text(prefix + row.name);
+    if (row.is_directory) {
+      line = line | color(theme::Accent());
+    }
+    line = StyleListRow(std::move(line), selected, hovered, pressed);
+    list_rows.push_back(line);
+  }
+  if (list_rows.empty()) {
+    list_rows.push_back(text(i18n::tr("common.empty")) | color(theme::Muted()));
+  }
+  body.push_back(vbox(std::move(list_rows)) | reflect(state->move_browser.browser_list_box));
+
+  Element dialog = ModalWindow(
+      text(i18n::tr("context_menu.move_browser.title")) | color(theme::Accent()),
+      vbox({
+          vbox(std::move(body)) | flex | bgcolor(theme::PanelBg()),
+          separator(),
+          text(i18n::tr("context_menu.move_browser.footer")) | color(theme::Muted()),
+      }));
   return CenteredModal(std::move(dialog));
 }
 
@@ -1188,6 +1513,10 @@ Element render_context_menu_overlay(ContextMenuState* state, MainLayoutState* la
 
   if (state->indexer_paths_open) {
     return ScreenModalOverlay(std::move(base), render_indexer_paths_modal(state));
+  }
+
+  if (state->move_browser_open) {
+    return ScreenModalOverlay(std::move(base), render_move_browser_modal(state, layout_state));
   }
 
   if (state->delete_confirm_open) {
@@ -1231,7 +1560,8 @@ Element render_context_menu_overlay(ContextMenuState* state, MainLayoutState* la
 bool handle_context_menu_hover(ContextMenuState* state, MainLayoutState* layout_state,
                                const Mouse& m) {
   if (state == nullptr || layout_state == nullptr || !state->open || state->rename_open ||
-      state->delete_confirm_open || state->indexer_paths_open || m.motion != Mouse::Moved) {
+      state->delete_confirm_open || state->indexer_paths_open || state->move_browser_open ||
+      m.motion != Mouse::Moved) {
     return false;
   }
   const std::string_view before = layout_state->clickable.hovered_id();
@@ -1258,7 +1588,7 @@ bool handle_context_menu_mouse(ContextMenuState* state, MainLayoutState* layout_
     *clicked_row = -1;
   }
   if (state == nullptr || !state->open || state->rename_open || state->delete_confirm_open ||
-      state->indexer_paths_open) {
+      state->indexer_paths_open || state->move_browser_open) {
     return false;
   }
 
@@ -1316,6 +1646,52 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
     }
     if (event == Event::PageUp) {
       state->indexer_paths_scroll = std::max(0, state->indexer_paths_scroll - kVisibleLines);
+      return true;
+    }
+    return true;
+  }
+
+  if (state->move_browser_open) {
+    state->move_browser.ensure_browser_entries();
+    if (event == Event::Escape) {
+      context_menu_close(state, layout_state);
+      return true;
+    }
+    if (event == Event::Character('a') || event == Event::Character('A')) {
+      if (is_directory_path(state->move_browser.browser_path)) {
+        if (move_path(workspace, model, indexer, symbol_indexer, state->absolute_path,
+                      state->relative_path, state->move_browser.browser_path,
+                      state->move_is_dir)) {
+          context_menu_close(state, layout_state);
+          if (layout_state != nullptr) {
+            layout_state->request_ui_tick = true;
+          }
+        }
+      }
+      return true;
+    }
+    if (event == Event::ArrowDown || event == Event::Character('j')) {
+      state->move_browser.selected = std::min(
+          state->move_browser.selected + 1,
+          std::max(0, static_cast<int>(state->move_browser.entries.size()) - 1));
+      return true;
+    }
+    if (event == Event::ArrowUp || event == Event::Character('k')) {
+      state->move_browser.selected = std::max(0, state->move_browser.selected - 1);
+      return true;
+    }
+    if (event == Event::PageDown) {
+      state->move_browser.selected = std::min(
+          state->move_browser.selected + 12,
+          std::max(0, static_cast<int>(state->move_browser.entries.size()) - 1));
+      return true;
+    }
+    if (event == Event::PageUp) {
+      state->move_browser.selected = std::max(0, state->move_browser.selected - 12);
+      return true;
+    }
+    if (event == Event::Return) {
+      activate_move_browser_row(state, layout_state, state->move_browser.selected);
       return true;
     }
     return true;
@@ -1393,7 +1769,8 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
       execute_action(state, state->action_ids[static_cast<std::size_t>(state->selected)], workspace,
                      secondary_workspace, model, focus, layout_state, symbols, indexer,
                      symbol_indexer, workspace_config, editor_visible_lines);
-      if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open) {
+      if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open &&
+          !state->move_browser_open) {
         context_menu_close(state, layout_state);
       }
       if (layout_state != nullptr) {
@@ -1421,7 +1798,8 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
     execute_action(state, state->action_ids[static_cast<std::size_t>(row)], workspace,
                    secondary_workspace, model, focus, layout_state, symbols, indexer,
                    symbol_indexer, workspace_config, visible);
-    if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open) {
+    if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open &&
+        !state->move_browser_open) {
       context_menu_close(state, layout_state);
     }
     if (layout_state != nullptr) {
@@ -1434,6 +1812,22 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
       return false;
     }
     if (event.is_mouse()) {
+      if (state->move_browser_open) {
+        const auto& m = event.mouse();
+        if (m.motion == Mouse::Moved) {
+          update_move_browser_hover(state, layout_state, m.x, m.y);
+          return true;
+        }
+        if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+          if (state->move_browser.browser_list_box.Contain(m.x, m.y)) {
+            const int row = state->move_browser.browser_list_start +
+                            (m.y - state->move_browser.browser_list_box.y_min);
+            activate_move_browser_row(state, layout_state, row);
+          }
+          return true;
+        }
+        return true;
+      }
       if (event.mouse().motion == Mouse::Moved) {
         handle_context_menu_hover(state, layout_state, event.mouse());
         return true;
@@ -1459,7 +1853,8 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
                       return base;
                     }
                     Element overlay = render_context_menu_overlay(state, layout_state, base);
-                    if (state->rename_open || state->delete_confirm_open || state->indexer_paths_open) {
+                    if (state->rename_open || state->delete_confirm_open ||
+                        state->indexer_paths_open || state->move_browser_open) {
                       return overlay;
                     }
                     return dbox({std::move(base), std::move(overlay)});

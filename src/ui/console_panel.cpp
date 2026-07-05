@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -38,6 +39,7 @@
 #include "ui/terminal_display.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
+#include "util/compiler_location.hpp"
 #include "util/monitor_log.hpp"
 
 namespace tgdb {
@@ -82,6 +84,16 @@ struct ConsolePanelState {
   bool shell_ui_active = false;
   std::string terminal_text;
   std::vector<TerminalStyledRow> terminal_styled_rows;
+  struct TerminalLinkHover {
+    int row = -1;
+    int span_start = 0;
+    int span_end = 0;
+
+    bool operator==(const TerminalLinkHover& other) const {
+      return row == other.row && span_start == other.span_start && span_end == other.span_end;
+    }
+  };
+  std::optional<TerminalLinkHover> terminal_link_hover;
   std::string last_workspace_root;
   std::array<Box, 9> tab_boxes;
   Box hide_box;
@@ -147,6 +159,108 @@ int measure_terminal_cols(const ConsolePanelState* state, int panel_width);
 int measure_terminal_rows(int viewport_height);
 void update_terminal_layout(ConsolePanelState* state, int panel_height, int panel_width,
                             MainLayoutState* layout_state);
+
+std::string terminal_row_text(const TerminalStyledRow& row) {
+  std::string text;
+  for (const TerminalStyledSpan& span : row) {
+    text += span.text;
+  }
+  return text;
+}
+
+std::optional<CompilerLocationMatch> terminal_row_link(const ConsolePanelState* state,
+                                                         int row_index) {
+  if (state == nullptr || row_index < 0 ||
+      row_index >= static_cast<int>(state->terminal_styled_rows.size())) {
+    return std::nullopt;
+  }
+  return find_compiler_location(terminal_row_text(state->terminal_styled_rows[static_cast<std::size_t>(row_index)]));
+}
+
+bool terminal_link_at_cell(const ConsolePanelState* state, int row_index, int col,
+                           CompilerLocationMatch* out) {
+  const auto link = terminal_row_link(state, row_index);
+  if (!link.has_value() || out == nullptr) {
+    return false;
+  }
+  if (col < link->span_start || col >= link->span_end) {
+    return false;
+  }
+  *out = *link;
+  return true;
+}
+
+bool update_terminal_link_hover(ConsolePanelState* state, MainLayoutState* layout_state, int x,
+                                int y) {
+  if (state == nullptr || !terminal_box_valid(state->terminal_box) ||
+      !state->terminal_box.Contain(x, y)) {
+    const bool had_hover = state != nullptr && state->terminal_link_hover.has_value();
+    if (state != nullptr) {
+      state->terminal_link_hover.reset();
+    }
+    if (layout_state != nullptr) {
+      layout_state->clickable.clear_hover_if(
+          [](std::string_view id) { return id == press_id::kTerminalLink; });
+    }
+    return had_hover;
+  }
+
+  const int visual_row = y - state->terminal_box.y_min;
+  const int row_index = state->terminal_first_visible + visual_row;
+  const int col = x - state->terminal_box.x_min;
+
+  CompilerLocationMatch match;
+  std::optional<ConsolePanelState::TerminalLinkHover> hover;
+  if (terminal_link_at_cell(state, row_index, col, &match)) {
+    hover = ConsolePanelState::TerminalLinkHover{row_index, match.span_start, match.span_end};
+  }
+
+  const bool changed =
+      hover.has_value() != state->terminal_link_hover.has_value() ||
+      (hover.has_value() &&
+       (hover->row != state->terminal_link_hover->row ||
+        hover->span_start != state->terminal_link_hover->span_start ||
+        hover->span_end != state->terminal_link_hover->span_end));
+  state->terminal_link_hover = hover;
+  if (layout_state != nullptr) {
+    if (hover.has_value()) {
+      layout_state->clickable.set_hover(press_id::kTerminalLink);
+    } else {
+      layout_state->clickable.clear_hover_if(
+          [](std::string_view id) { return id == press_id::kTerminalLink; });
+    }
+  }
+  return changed;
+}
+
+bool open_terminal_link(WorkspaceModel* workspace, DebugModel* model, FocusManagerState* focus,
+                        MainLayoutState* layout_state, const CompilerLocationMatch& match) {
+  if (workspace == nullptr || match.path.empty()) {
+    return false;
+  }
+  const std::string cwd = model != nullptr ? model->workspace_root : workspace->root;
+  const std::string resolved =
+      resolve_compiler_path(match.path, workspace->root, cwd);
+  workspace->record_cursor_jump();
+  const int line = std::max(0, match.line - 1);
+  const int col = match.column > 0 ? std::max(0, match.column - 1) : 0;
+  if (!workspace->open_file_at(resolved, line, col)) {
+    return false;
+  }
+  workspace->status_message =
+      i18n::tr_fmt("status.navigate",
+                   {std::filesystem::path(resolved).filename().string(), std::to_string(match.line),
+                    std::to_string(match.column > 0 ? match.column : 1)});
+  if (focus != nullptr) {
+    focus->region = FocusRegion::Editor;
+  }
+  if (layout_state != nullptr) {
+    layout_state->text_input_focus = TextInputFocus::None;
+    layout_state->focus_sync_needed = true;
+    layout_state->request_ui_tick = true;
+  }
+  return true;
+}
 
 void scroll_to_tail(ConsolePanelState* state, int total_lines, int visible_lines) {
   state->first_visible = max_first_visible(total_lines, visible_lines);
@@ -579,7 +693,7 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
 
 bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layout_state,
                                 FocusManagerState* focus, AppMode* app_mode, DebugModel* model,
-                                ShellSession* shell, Component input_box,
+                                WorkspaceModel* workspace, ShellSession* shell, Component input_box,
                                 const ShellLaunchConfig& launch_config, Event event,
                                 GitService* git, GitPanelState* git_state) {
   if (state == nullptr || layout_state == nullptr || !event.is_mouse()) {
@@ -590,9 +704,28 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
   const bool on_debug_tab = debug_tab_active(app_mode, layout_state);
 
   if (m.motion == Mouse::Moved) {
+    if (on_terminal_tab && state->shell_ui_active) {
+      if (update_terminal_link_hover(state, layout_state, m.x, m.y)) {
+        layout_state->request_ui_tick = true;
+      }
+    } else if (state->terminal_link_hover.has_value()) {
+      state->terminal_link_hover.reset();
+      if (layout_state != nullptr) {
+        layout_state->clickable.clear_hover_if(
+            [](std::string_view id) { return id == press_id::kTerminalLink; });
+        layout_state->request_ui_tick = true;
+      }
+    }
     if (handle_console_tab_hover(state, layout_state, app_mode, m)) {
       layout_state->request_ui_tick = true;
       return true;
+    }
+    if (on_terminal_tab && state->shell_ui_active) {
+      const int term_total = static_cast<int>(state->terminal_styled_rows.size());
+      const int term_visible = state->terminal_last_visible_lines;
+      if (handle_terminal_scroll_mouse(state, layout_state, m, term_total, term_visible)) {
+        return true;
+      }
     }
     return false;
   }
@@ -614,6 +747,19 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
     const int term_visible = state->terminal_last_visible_lines;
     if (handle_terminal_scroll_mouse(state, layout_state, m, term_total, term_visible)) {
       return true;
+    }
+    if (m.button == Mouse::Left && m.motion == Mouse::Pressed &&
+        terminal_body_contains(state, m.x, m.y)) {
+      const int visual_row = m.y - state->terminal_box.y_min;
+      const int row_index = state->terminal_first_visible + visual_row;
+      const int col = m.x - state->terminal_box.x_min;
+      CompilerLocationMatch match;
+      if (terminal_link_at_cell(state, row_index, col, &match)) {
+        trigger_press(layout_state, press_id::kTerminalLink);
+        if (open_terminal_link(workspace, model, focus, layout_state, match)) {
+          return true;
+        }
+      }
     }
   }
 
@@ -764,7 +910,8 @@ Element render_terminal_body(Element content) {
 }
 
 Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool show_cursor,
-                           int max_cols) {
+                           int max_cols, const std::optional<CompilerLocationMatch>& link,
+                           bool link_hovered) {
   const Decorator cursor_cell = cursor_blink::cell_decorator();
   const bool draw_cursor = show_cursor;
 
@@ -780,9 +927,16 @@ Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool sh
         break;
       }
       Element cell = text(std::string(1, ch));
+      const bool in_link =
+          link.has_value() && col >= link->span_start && col < link->span_end;
       if (draw_cursor && cursor_col >= 0 && col == cursor_col) {
         cell = cell | cursor_cell;
         cursor_placed = true;
+      } else if (in_link) {
+        cell = cell | color(theme::Accent()) | underlined;
+        if (link_hovered) {
+          cell = cell | bold;
+        }
       } else {
         cell = cell | color(span.fg) | bgcolor(span.bg);
       }
@@ -810,14 +964,21 @@ Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool sh
 
 Element render_terminal_styled(const std::vector<TerminalStyledRow>& rows, int first_visible,
                                int visible_count, int cursor_row, int cursor_col,
-                               bool show_cursor, int max_cols) {
+                               bool show_cursor, int max_cols,
+                               const ConsolePanelState* state) {
   Elements lines;
   const int total = static_cast<int>(rows.size());
   const int end = std::min(total, first_visible + visible_count);
   for (int row = first_visible; row < end; ++row) {
     const int line_cursor = show_cursor && row == cursor_row ? cursor_col : -1;
+    std::optional<CompilerLocationMatch> link = terminal_row_link(state, row);
+    const bool link_hovered = state != nullptr && state->terminal_link_hover.has_value() &&
+                              link.has_value() && state->terminal_link_hover->row == row &&
+                              state->terminal_link_hover->span_start == link->span_start &&
+                              state->terminal_link_hover->span_end == link->span_end;
     lines.push_back(render_styled_line(rows[static_cast<std::size_t>(row)], line_cursor,
-                                       show_cursor && row == cursor_row, max_cols));
+                                       show_cursor && row == cursor_row, max_cols, link,
+                                       link_hovered));
   }
   if (lines.empty()) {
     lines.push_back(text(" ") | size(HEIGHT, EQUAL, 1) | color(theme::WatchInput()));
@@ -1083,7 +1244,7 @@ Element render_shell_terminal(ConsolePanelState* state, DebugModel* model, Shell
     const int rendered_lines = std::min(visible, total - state->terminal_first_visible);
     Element content = render_terminal_styled(state->terminal_styled_rows, state->terminal_first_visible,
                                              visible, cursor_row, cursor_col, show_cursor,
-                                             display_cols);
+                                             display_cols, state);
 
     const bool scroll_hovered =
         layout_state != nullptr &&
@@ -1183,7 +1344,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   auto call_hierarchy_panel =
       MakeCallHierarchyPanel(workspace, focus, layout_state, sidebar, symbols);
   auto git_panel =
-      MakeGitPanel(git_service, git_panel_state, layout_state, focus, &state->git_body_height);
+      MakeGitPanel(git_service, git_panel_state, layout_state, focus, workspace, &state->git_body_height);
   auto core_analyzer_panel =
       MakeCoreAnalyzerPanel(model, on_command, layout_state, focus);
   auto binary_symbols_panel =
@@ -1413,7 +1574,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     return forward_pty_key(shell, event, state.get(), layout_state);
   };
 
-  auto dispatch_console_mouse = [app_mode, layout_state, focus, model, shell, state, input_box,
+  auto dispatch_console_mouse = [app_mode, layout_state, focus, model, workspace, shell, state, input_box,
                                  shell_launch_config, diagnostics_panel, search_panel,
                                  call_hierarchy_panel,                                  git_panel, git_service,
                                  git_panel_state, binary_symbols_panel](Event event) -> bool {
@@ -1443,7 +1604,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       }
     }
     return handle_console_panel_mouse(
-        state.get(), layout_state, focus, app_mode, model, shell, input_box,
+        state.get(), layout_state, focus, app_mode, model, workspace, shell, input_box,
         current_shell_launch(shell_launch_config, model), event, git_service, git_panel_state);
   };
 

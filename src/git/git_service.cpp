@@ -1,6 +1,9 @@
 #include "git/git_service.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
+#include <unordered_set>
 #include <utility>
 
 #include "git/git_command.hpp"
@@ -19,6 +22,57 @@ std::string trim_newline(std::string value) {
     value.pop_back();
   }
   return value;
+}
+
+std::string to_lower_ascii(std::string value) {
+  for (char& ch : value) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+  return value;
+}
+
+bool looks_like_hash_query(const std::string& query) {
+  if (query.size() < 4) {
+    return false;
+  }
+  for (char ch : query) {
+    if (!std::isxdigit(static_cast<unsigned char>(ch))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool commit_matches_query(const GitCommitEntry& entry, const std::string& query,
+                          const std::string& query_lower) {
+  if (entry.short_hash.size() >= query.size()) {
+    const std::string short_prefix =
+        to_lower_ascii(entry.short_hash.substr(0, query.size()));
+    if (short_prefix == query_lower) {
+      return true;
+    }
+  }
+  if (entry.hash.size() >= query.size()) {
+    const std::string hash_prefix = to_lower_ascii(entry.hash.substr(0, query.size()));
+    if (hash_prefix == query_lower) {
+      return true;
+    }
+  }
+  const std::string message_lower = to_lower_ascii(entry.message);
+  return message_lower.find(query_lower) != std::string::npos;
+}
+
+void merge_log_entries(std::vector<GitCommitEntry>* merged,
+                       const std::vector<GitCommitEntry>& entries,
+                       std::unordered_set<std::string>* seen) {
+  if (merged == nullptr || seen == nullptr) {
+    return;
+  }
+  for (const auto& entry : entries) {
+    if (seen->insert(entry.hash).second) {
+      merged->push_back(entry);
+    }
+  }
 }
 
 }  // namespace
@@ -133,6 +187,14 @@ void GitService::open(const std::string& workspace_root) {
     file_diff_texts_.clear();
     log_entries_.clear();
     branches_.clear();
+    log_search_query_.clear();
+    log_search_results_.clear();
+    timeline_path_.clear();
+    file_timeline_.clear();
+    timeline_diff_texts_.clear();
+    commit_files_.clear();
+    graph_lines_.clear();
+    graph_loaded_ = false;
     if (!root.empty()) {
       repo_info_.root = root;
     }
@@ -153,6 +215,14 @@ void GitService::close() {
     file_diff_texts_.clear();
     log_entries_.clear();
     branches_.clear();
+    log_search_query_.clear();
+    log_search_results_.clear();
+    timeline_path_.clear();
+    file_timeline_.clear();
+    timeline_diff_texts_.clear();
+    commit_files_.clear();
+    graph_lines_.clear();
+    graph_loaded_ = false;
   }
 }
 
@@ -207,6 +277,11 @@ void GitService::invalidate(const std::string& path) {
     if (path.empty()) {
       file_diffs_.clear();
       file_diff_texts_.clear();
+      commit_files_.clear();
+      graph_lines_.clear();
+      graph_loaded_ = false;
+      log_search_query_.clear();
+      log_search_results_.clear();
     } else {
       rel = repo_relative_path_unlocked(path);
       file_diff_texts_.erase(rel);
@@ -336,6 +411,39 @@ void GitService::refresh_log() {
   });
 }
 
+void GitService::refresh_log_search(const std::string& query) {
+  std::string root;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    root = workspace_root_;
+    if (query.empty()) {
+      log_search_query_.clear();
+      log_search_results_.clear();
+      return;
+    }
+    if (log_search_query_ == query) {
+      return;
+    }
+    if (inflight_log_searches_.count(query) > 0) {
+      return;
+    }
+    inflight_log_searches_.insert(query);
+  }
+  if (root.empty()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    inflight_log_searches_.erase(query);
+    return;
+  }
+  enqueue([this, root, query]() {
+    load_log_search(root, query);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      inflight_log_searches_.erase(query);
+    }
+    notify_updated();
+  });
+}
+
 void GitService::refresh_branches() {
   std::string root;
   {
@@ -347,6 +455,134 @@ void GitService::refresh_branches() {
   }
   enqueue([this, root]() {
     load_branches(root);
+    notify_updated();
+  });
+}
+
+void GitService::refresh_file_timeline(const std::string& path) {
+  if (path.empty()) {
+    return;
+  }
+  std::string root;
+  std::string rel;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    root = workspace_root_;
+    rel = repo_relative_path_unlocked(path);
+    if (rel.empty()) {
+      return;
+    }
+    if (timeline_path_ == rel) {
+      return;
+    }
+    if (inflight_timelines_.count(rel) > 0) {
+      return;
+    }
+    inflight_timelines_.insert(rel);
+  }
+  if (root.empty()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    inflight_timelines_.erase(rel);
+    return;
+  }
+  enqueue([this, root, rel]() {
+    load_file_timeline(root, rel);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      inflight_timelines_.erase(rel);
+    }
+    notify_updated();
+  });
+}
+
+void GitService::refresh_timeline_diff(const std::string& path, const std::string& commit_hash) {
+  if (path.empty() || commit_hash.empty()) {
+    return;
+  }
+  std::string root;
+  std::string rel;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    root = workspace_root_;
+    rel = repo_relative_path_unlocked(path);
+    if (rel.empty()) {
+      return;
+    }
+    if (timeline_diff_cached_unlocked(rel, commit_hash)) {
+      return;
+    }
+    const std::string key = timeline_diff_key_unlocked(rel, commit_hash);
+    if (inflight_timeline_diffs_.count(key) > 0) {
+      return;
+    }
+    inflight_timeline_diffs_.insert(key);
+  }
+  if (root.empty()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    inflight_timeline_diffs_.erase(timeline_diff_key_unlocked(rel, commit_hash));
+    return;
+  }
+  enqueue([this, root, rel, commit_hash]() {
+    load_timeline_diff(root, rel, commit_hash);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      inflight_timeline_diffs_.erase(timeline_diff_key_unlocked(rel, commit_hash));
+    }
+    notify_updated();
+  });
+}
+
+void GitService::refresh_commit_files(const std::string& commit_hash) {
+  if (commit_hash.empty()) {
+    return;
+  }
+  std::string root;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    root = workspace_root_;
+    if (commit_files_cached_unlocked(commit_hash)) {
+      return;
+    }
+    if (inflight_commit_files_.count(commit_hash) > 0) {
+      return;
+    }
+    inflight_commit_files_.insert(commit_hash);
+  }
+  if (root.empty()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    inflight_commit_files_.erase(commit_hash);
+    return;
+  }
+  enqueue([this, root, commit_hash]() {
+    load_commit_files(root, commit_hash);
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      inflight_commit_files_.erase(commit_hash);
+    }
+    notify_updated();
+  });
+}
+
+void GitService::refresh_graph() {
+  std::string root;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    root = workspace_root_;
+    if (graph_loaded_) {
+      return;
+    }
+    bool expected = false;
+    if (!inflight_graph_.compare_exchange_strong(expected, true)) {
+      return;
+    }
+  }
+  if (root.empty()) {
+    inflight_graph_.store(false);
+    return;
+  }
+  enqueue([this, root]() {
+    load_graph(root);
+    inflight_graph_.store(false);
     notify_updated();
   });
 }
@@ -385,9 +621,70 @@ std::vector<GitCommitEntry> GitService::log_entries() const {
   return log_entries_;
 }
 
+std::vector<GitCommitEntry> GitService::log_search_results() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return log_search_results_;
+}
+
+bool GitService::log_search_ready(const std::string& query) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return query.empty() || log_search_query_ == query;
+}
+
 std::vector<GitBranchEntry> GitService::branches() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return branches_;
+}
+
+std::vector<GitCommitEntry> GitService::file_timeline(const std::string& absolute_path) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const std::string rel = repo_relative_path_unlocked(absolute_path);
+  if (rel != timeline_path_) {
+    return {};
+  }
+  return file_timeline_;
+}
+
+std::string GitService::timeline_diff_text(const std::string& absolute_path,
+                                           const std::string& commit_hash) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const std::string rel = repo_relative_path_unlocked(absolute_path);
+  const auto it = timeline_diff_texts_.find(timeline_diff_key_unlocked(rel, commit_hash));
+  if (it != timeline_diff_texts_.end()) {
+    return it->second;
+  }
+  return {};
+}
+
+bool GitService::has_timeline_diff_text(const std::string& absolute_path,
+                                        const std::string& commit_hash) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const std::string rel = repo_relative_path_unlocked(absolute_path);
+  return timeline_diff_cached_unlocked(rel, commit_hash);
+}
+
+std::vector<GitCommitFileEntry> GitService::commit_files(const std::string& commit_hash) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = commit_files_.find(commit_hash);
+  if (it != commit_files_.end()) {
+    return it->second;
+  }
+  return {};
+}
+
+bool GitService::has_commit_files(const std::string& commit_hash) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return commit_files_cached_unlocked(commit_hash);
+}
+
+std::vector<std::string> GitService::graph_lines() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return graph_lines_;
+}
+
+bool GitService::graph_loaded() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return graph_loaded_;
 }
 
 std::string GitService::file_diff_text(const std::string& absolute_path) const {
@@ -680,14 +977,75 @@ void GitService::load_log(const std::string& root) {
     return;
   }
   const auto result =
-      run_git(root, {"log", "--oneline", "-n", "50", "--decorate=short"});
+      run_git(root, {"log", "-n", "50", "--decorate=short", "--format=%H|%h|%s"});
   std::lock_guard<std::mutex> lock(mutex_);
   if (workspace_root_ != root) {
     return;
   }
   if (result.success()) {
-    log_entries_ = parse_git_log_oneline(result.stdout_text);
+    log_entries_ = parse_git_log_list(result.stdout_text);
+    commit_files_.clear();
+    log_search_query_.clear();
+    log_search_results_.clear();
   }
+}
+
+void GitService::load_log_search(const std::string& root, const std::string& query) {
+  if (stop_.load() || query.empty()) {
+    return;
+  }
+
+  std::vector<GitCommitEntry> merged;
+  std::unordered_set<std::string> seen;
+  const std::string query_lower = to_lower_ascii(query);
+
+  const auto grep_result = run_git(
+      root, {"log", "-n", "200", "--format=%H|%h|%s", "--fixed-strings", "--grep=" + query, "-i"});
+  if (grep_result.success()) {
+    merge_log_entries(&merged, parse_git_log_list(grep_result.stdout_text), &seen);
+  }
+
+  if (looks_like_hash_query(query)) {
+    const auto rev_result =
+        run_git(root, {"log", "-n", "20", "--format=%H|%h|%s", "--all", query});
+    if (rev_result.success()) {
+      merge_log_entries(&merged, parse_git_log_list(rev_result.stdout_text), &seen);
+    }
+
+    const auto scan_result =
+        run_git(root, {"log", "-n", "500", "--format=%H|%h|%s", "--all"});
+    if (scan_result.success()) {
+      const auto scanned = parse_git_log_list(scan_result.stdout_text);
+      std::vector<GitCommitEntry> filtered;
+      filtered.reserve(scanned.size());
+      for (const auto& entry : scanned) {
+        if (commit_matches_query(entry, query, query_lower)) {
+          filtered.push_back(entry);
+        }
+      }
+      merge_log_entries(&merged, filtered, &seen);
+    }
+  } else {
+    const auto scan_result =
+        run_git(root, {"log", "-n", "500", "--format=%H|%h|%s", "--all"});
+    if (scan_result.success()) {
+      const auto scanned = parse_git_log_list(scan_result.stdout_text);
+      std::vector<GitCommitEntry> filtered;
+      for (const auto& entry : scanned) {
+        if (commit_matches_query(entry, query, query_lower)) {
+          filtered.push_back(entry);
+        }
+      }
+      merge_log_entries(&merged, filtered, &seen);
+    }
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (workspace_root_ != root) {
+    return;
+  }
+  log_search_query_ = query;
+  log_search_results_ = std::move(merged);
 }
 
 void GitService::load_branches(const std::string& root) {
@@ -701,6 +1059,88 @@ void GitService::load_branches(const std::string& root) {
   }
   if (result.success()) {
     branches_ = parse_git_branches(result.stdout_text);
+  }
+}
+
+std::string GitService::timeline_diff_key_unlocked(const std::string& rel,
+                                                  const std::string& commit_hash) const {
+  return rel + '\0' + commit_hash;
+}
+
+bool GitService::timeline_diff_cached_unlocked(const std::string& rel,
+                                               const std::string& commit_hash) const {
+  return timeline_diff_texts_.find(timeline_diff_key_unlocked(rel, commit_hash)) !=
+         timeline_diff_texts_.end();
+}
+
+void GitService::load_file_timeline(const std::string& root, const std::string& rel) {
+  if (stop_.load() || rel.empty()) {
+    return;
+  }
+  const auto result = run_git(
+      root, {"log", "--follow", "--format=%H|%h|%s|%an|%ar", "-n", "100", "--", rel});
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (workspace_root_ != root) {
+    return;
+  }
+  timeline_path_ = rel;
+  timeline_diff_texts_.clear();
+  if (result.success()) {
+    file_timeline_ = parse_git_log_timeline(result.stdout_text);
+  } else {
+    file_timeline_.clear();
+  }
+}
+
+void GitService::load_timeline_diff(const std::string& root, const std::string& rel,
+                                    const std::string& commit_hash) {
+  if (stop_.load() || rel.empty() || commit_hash.empty()) {
+    return;
+  }
+  const auto result = run_git(root, {"show", commit_hash, "--", rel});
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (workspace_root_ != root) {
+    return;
+  }
+  timeline_diff_texts_[timeline_diff_key_unlocked(rel, commit_hash)] = result.stdout_text;
+}
+
+bool GitService::commit_files_cached_unlocked(const std::string& commit_hash) const {
+  return commit_files_.find(commit_hash) != commit_files_.end();
+}
+
+void GitService::load_commit_files(const std::string& root, const std::string& commit_hash) {
+  if (stop_.load() || commit_hash.empty()) {
+    return;
+  }
+  const auto result =
+      run_git(root, {"diff-tree", "--no-commit-id", "--name-status", "-r", commit_hash});
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (workspace_root_ != root) {
+    return;
+  }
+  if (result.success()) {
+    commit_files_[commit_hash] = parse_commit_name_status(result.stdout_text);
+  } else {
+    commit_files_[commit_hash] = {};
+  }
+}
+
+void GitService::load_graph(const std::string& root) {
+  if (stop_.load()) {
+    return;
+  }
+  const auto result =
+      run_git(root, {"log", "--graph", "--oneline", "--all", "--decorate", "-n", "80"});
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (workspace_root_ != root) {
+    return;
+  }
+  graph_loaded_ = true;
+  if (result.success()) {
+    graph_lines_ = split_git_graph_lines(result.stdout_text);
+  } else {
+    graph_lines_.clear();
   }
 }
 

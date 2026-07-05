@@ -82,4 +82,7 @@ bool editor_priority_key(const ftxui::Event& event);
 
 bool event_is_tide_global_shortcut(const ftxui::Event& event);
 
+// App-level shortcuts that must not be consumed by Helix normal mode or prefix pending.
+bool event_is_tide_app_shortcut(const ftxui::Event& event);
+
 }  // namespace tgdb

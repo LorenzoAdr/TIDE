@@ -1197,7 +1197,7 @@ bool dispatch_helix_keys(const HelixDispatchContext& ctx, const ftxui::Event& ev
     return false;
   }
 
-  if (event_is_tide_global_shortcut(event) || event_is_ctrl_key_release(event)) {
+  if (event_is_tide_app_shortcut(event) || event_is_ctrl_key_release(event)) {
     return false;
   }
 
@@ -1285,6 +1285,9 @@ bool dispatch_helix_keys(const HelixDispatchContext& ctx, const ftxui::Event& ev
 
   const auto token = helix_key_token(event);
   if (!token.has_value()) {
+    if (event_is_tide_app_shortcut(event)) {
+      return false;
+    }
     if (ctx.helix->prefix_active()) {
       ctx.helix->clear_pending();
       return true;

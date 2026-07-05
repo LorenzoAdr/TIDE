@@ -78,7 +78,12 @@ class Application {
   void refresh_all_watches();
   void apply_connection_and_start();
   void dismiss_welcome_screen();
+  bool prepare_connection_wizard();
   void open_connection_wizard();
+  void open_launch_wizard();
+  void open_debug_wizard();
+  void quick_launch_last();
+  void quick_attach_last();
   void open_workspace_wizard();
   void open_external_file_wizard();
   void sync_model_breakpoints_to_backend();
@@ -111,6 +116,7 @@ class Application {
   void schedule_debounced_lsp_restart();
   IndexFilterOptions index_filter_options() const;
   void restart_workspace_indexing();
+  void reindex_project();
   void enqueue_ui_task(std::function<void()> task);
   void drain_ui_tasks();
   void process_pending_workspace_load();
@@ -167,6 +173,8 @@ class Application {
   bool debug_available_ = false;
   bool workspace_initialized_ = false;
   std::map<std::string, std::string> workspace_launch_args_;
+  std::string last_launch_program_;
+  std::string last_attach_program_;
   std::optional<ConnectionResult> pending_connection_;
   std::optional<std::string> pending_workspace_load_;
   mutable std::mutex ui_task_mutex_;

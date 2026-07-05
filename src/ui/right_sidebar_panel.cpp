@@ -95,6 +95,15 @@ Component MakeRightSidebarPanel(Component outline, MainLayoutState* layout_state
         return handle_sidebar_hide_mouse(state.get(), layout_state, event.mouse());
       });
 
+  if (layout_state != nullptr) {
+    layout_state->sidebar_mouse_handler = [state, layout_state](Event event) {
+      if (!event.is_mouse()) {
+        return false;
+      }
+      return handle_sidebar_hide_mouse(state.get(), layout_state, event.mouse());
+    };
+  }
+
   return WrapFocusable(std::move(panel));
 }
 

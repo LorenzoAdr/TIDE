@@ -11,6 +11,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "i18n/locale.hpp"
 #include "i18n/tr.hpp"
+#include "ui/clickable.hpp"
 #include "ui/panel.hpp"
 #include "ui/glyphs.hpp"
 #include "ui/scroll_bar.hpp"
@@ -30,7 +31,15 @@ struct SettingsBodyContent {
   Elements header;
   Elements rows;
   int focus_row = 0;
+  std::vector<std::pair<int, int>> click_targets;
 };
+
+void add_click_target(SettingsBodyContent* content, int index) {
+  if (content == nullptr) {
+    return;
+  }
+  content->click_targets.emplace_back(static_cast<int>(content->rows.size()), index);
+}
 
 void clamp_settings_body_scroll(SettingsModalState* state, int total_lines) {
   if (state == nullptr) {
@@ -63,6 +72,7 @@ Element render_settings_scroll_body(SettingsModalState* state, SettingsBodyConte
   }
 
   const int total = static_cast<int>(content.rows.size());
+  state->body_scroll_total = total;
   scroll_settings_body_to_row(state, content.focus_row, total);
   clamp_settings_body_scroll(state, total);
 
@@ -80,7 +90,8 @@ Element render_settings_scroll_body(SettingsModalState* state, SettingsBodyConte
     });
   }
   scrollable =
-      scrollable | size(HEIGHT, EQUAL, kSettingsBodyHeight) | bgcolor(theme::PanelBg());
+      scrollable | size(HEIGHT, EQUAL, kSettingsBodyHeight) | bgcolor(theme::PanelBg()) |
+      reflect(state->body_box);
 
   if (content.header.empty()) {
     return scrollable;
@@ -94,20 +105,24 @@ bool handle_settings_body_scroll_keys(SettingsModalState* state, Event event) {
   }
   if (event == Event::PageDown) {
     state->body_scroll += kSettingsBodyHeight;
+    clamp_settings_body_scroll(state, state->body_scroll_total);
     return true;
   }
   if (event == Event::PageUp) {
     state->body_scroll -= kSettingsBodyHeight;
+    clamp_settings_body_scroll(state, state->body_scroll_total);
     return true;
   }
   if (event.is_mouse()) {
     const auto& m = event.mouse();
     if (m.button == Mouse::WheelUp) {
       state->body_scroll -= 3;
+      clamp_settings_body_scroll(state, state->body_scroll_total);
       return true;
     }
     if (m.button == Mouse::WheelDown) {
       state->body_scroll += 3;
+      clamp_settings_body_scroll(state, state->body_scroll_total);
       return true;
     }
   }
@@ -1024,7 +1039,7 @@ bool handle_ui_colors_keys(SettingsModalState* state, Event event) {
   return true;
 }
 
-SettingsBodyContent build_ui_colors_panel(const SettingsModalState* state) {
+SettingsBodyContent build_ui_colors_panel(SettingsModalState* state) {
   SettingsBodyContent content;
   content.rows.push_back(text(i18n::tr("settings.title.ui_colors")) | color(theme::Accent()) | bold);
   content.rows.push_back(text(i18n::tr("settings.ui_colors.syntax_note")) | color(theme::Muted()));
@@ -1040,6 +1055,7 @@ SettingsBodyContent build_ui_colors_panel(const SettingsModalState* state) {
                                       {theme::format_hex_color(current)})) |
                    color(theme::Header()) | bold);
 
+    state->ui_palette_row_start = static_cast<int>(content.rows.size());
     for (int row = 0; row < kPaletteRows; ++row) {
       const int row_start = row * kPaletteCols;
       const int row_end = std::min(row_start + kPaletteCols, kPaletteCount);
@@ -1065,11 +1081,15 @@ SettingsBodyContent build_ui_colors_panel(const SettingsModalState* state) {
       }
       content.rows.push_back(hbox(std::move(cells)));
     }
+    state->ui_palette_row_count = kPaletteRows;
 
     content.rows.push_back(separator());
     content.rows.push_back(text(i18n::tr("settings.ui_colors.edit_footer")) | color(theme::Muted()));
     return content;
   }
+
+  state->ui_palette_row_start = -1;
+  state->ui_palette_row_count = 0;
 
   for (int i = 0; i < kUiColorsRowCount; ++i) {
     const bool selected = i == state->ui_colors_selected;
@@ -1082,6 +1102,7 @@ SettingsBodyContent build_ui_colors_panel(const SettingsModalState* state) {
       content.focus_row = static_cast<int>(content.rows.size());
       row_el = row_el | inverted;
     }
+    add_click_target(&content, i);
     content.rows.push_back(row_el);
   }
 
@@ -1166,6 +1187,197 @@ bool handle_top_level_tab_keys(SettingsModalState* state, Event event) {
     return true;
   }
   return false;
+}
+
+void activate_path_browser_row(SettingsModalState* state, int row);
+
+void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel) {
+  if (state == nullptr || !state->has_workspace || !is_top_level_panel(panel)) {
+    return;
+  }
+  state->panel = panel;
+  state->selected = 0;
+  state->body_scroll = 0;
+}
+
+void activate_general_option(SettingsModalState* state, int index) {
+  if (state == nullptr) {
+    return;
+  }
+  state->selected = index;
+  clamp_general_selection(state);
+  toggle_option(state, index);
+}
+
+void activate_workspace_option(SettingsModalState* state, int index) {
+  if (state == nullptr) {
+    return;
+  }
+  state->selected = index;
+  clamp_workspace_selection(state);
+  if (index == kWorkspaceIncludePaths) {
+    open_include_paths_panel(state);
+    return;
+  }
+  if (index == kWorkspaceCompileCommands) {
+    open_compile_commands_panel(state);
+    return;
+  }
+  if (index == kWorkspaceUiColors) {
+    open_ui_colors_panel(state);
+    return;
+  }
+  toggle_workspace_option(state, index);
+}
+
+void activate_format_option(SettingsModalState* state, int index) {
+  if (state == nullptr) {
+    return;
+  }
+  state->selected = index;
+  clamp_format_selection(state);
+  toggle_format_option(state, index);
+}
+
+void activate_compile_commands_option(SettingsModalState* state, int index) {
+  if (state == nullptr) {
+    return;
+  }
+  state->compile_commands_selected = index;
+  clamp_compile_commands_selection(state);
+  switch (index) {
+    case kCompileMode:
+      cycle_compile_commands_mode(state);
+      break;
+    case kCompileDetectMounts:
+      state->draft_compile_commands.docker_detect_mounts =
+          !state->draft_compile_commands.docker_detect_mounts;
+      break;
+    case kCompileDockerContainer:
+      cycle_docker_container(state);
+      break;
+    case kCompilePathMappings:
+      open_path_mappings_panel(state);
+      break;
+    default:
+      break;
+  }
+}
+
+void activate_settings_click(SettingsModalState* state, int index, int mouse_x) {
+  if (state == nullptr) {
+    return;
+  }
+  switch (state->panel) {
+    case SettingsPanel::kGeneral:
+      activate_general_option(state, index);
+      break;
+    case SettingsPanel::kWorkspace:
+      activate_workspace_option(state, index);
+      break;
+    case SettingsPanel::kFormat:
+      activate_format_option(state, index);
+      break;
+    case SettingsPanel::kIncludePaths:
+      state->include_path_selected = index;
+      clamp_include_path_selection(state);
+      break;
+    case SettingsPanel::kCompileCommands:
+      activate_compile_commands_option(state, index);
+      break;
+    case SettingsPanel::kPathMappings:
+      state->mapping_selected = index;
+      clamp_mapping_selection(state);
+      break;
+    case SettingsPanel::kPathBrowser:
+      state->path_browser.selected = index;
+      activate_path_browser_row(state, index);
+      break;
+    case SettingsPanel::kUiColors:
+      if (state->ui_colors_editing) {
+        break;
+      }
+      state->ui_colors_selected = index;
+      clamp_ui_colors_selection(state);
+      if (index == kUiColorsPreset) {
+        cycle_ui_color_preset(state);
+      } else {
+        begin_ui_color_edit(state, index);
+      }
+      break;
+  }
+  (void)mouse_x;
+}
+
+std::optional<int> find_click_target_index(const SettingsModalState* state, int absolute_row) {
+  if (state == nullptr || state->click_layout_panel != state->panel) {
+    return std::nullopt;
+  }
+  for (const auto& target : state->click_targets) {
+    if (target.row == absolute_row) {
+      return target.index;
+    }
+  }
+  return std::nullopt;
+}
+
+bool handle_settings_mouse(SettingsModalState* state, Event event) {
+  if (state == nullptr || !state->open || !event.is_mouse()) {
+    return false;
+  }
+  const Mouse& m = event.mouse();
+
+  if (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) {
+    return handle_settings_body_scroll_keys(state, event);
+  }
+  if (m.motion != Mouse::Pressed || m.button != Mouse::Left) {
+    return false;
+  }
+
+  if (state->has_workspace && is_top_level_panel(state->panel)) {
+    if (state->tab_general_box.Contain(m.x, m.y)) {
+      switch_top_level_tab(state, SettingsPanel::kGeneral);
+      return true;
+    }
+    if (state->tab_workspace_box.Contain(m.x, m.y)) {
+      switch_top_level_tab(state, SettingsPanel::kWorkspace);
+      return true;
+    }
+    if (state->tab_format_box.Contain(m.x, m.y)) {
+      switch_top_level_tab(state, SettingsPanel::kFormat);
+      return true;
+    }
+  }
+
+  if (state->body_box.IsEmpty() || !state->body_box.Contain(m.x, m.y)) {
+    return false;
+  }
+
+  const auto local = local_row_in_box(state->body_box, m.x, m.y);
+  if (!local.has_value()) {
+    return false;
+  }
+  const int absolute_row = *local + state->body_scroll;
+
+  if (state->panel == SettingsPanel::kUiColors && state->ui_colors_editing &&
+      state->ui_palette_row_start >= 0) {
+    const int rel = absolute_row - state->ui_palette_row_start;
+    if (rel >= 0 && rel < state->ui_palette_row_count) {
+      const int col = std::clamp((m.x - state->body_box.x_min) / 4, 0, kPaletteCols - 1);
+      const int palette_index = rel * kPaletteCols + col;
+      if (palette_index >= 0 && palette_index < kPaletteCount) {
+        state->ui_colors_palette_selected = palette_index;
+        return true;
+      }
+    }
+  }
+
+  const auto item = find_click_target_index(state, absolute_row);
+  if (!item.has_value()) {
+    return false;
+  }
+  activate_settings_click(state, *item, m.x);
+  return true;
 }
 
 bool handle_general_settings_keys(SettingsModalState* state, Event event) {
@@ -1473,6 +1685,10 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
     return false;
   }
 
+  if (event.is_mouse()) {
+    return handle_settings_mouse(state, event);
+  }
+
   if (handle_settings_body_scroll_keys(state, event)) {
     return true;
   }
@@ -1509,29 +1725,32 @@ std::string format_column_limit_label(int column_limit) {
   return std::to_string(column_limit);
 }
 
-Element render_top_level_tabs(const SettingsModalState* state) {
+Element render_top_level_tabs(SettingsModalState* state) {
   if (state == nullptr || !state->has_workspace) {
     return text("");
   }
 
-  const auto render_tab = [&](SettingsPanel panel, const char* label) {
+  const auto render_tab = [&](SettingsPanel panel, const char* label, Box* box) {
     const bool active = state->panel == panel;
     Element tab = text(std::string(active ? "▸ " : "  ") + label) |
-                    color(active ? theme::Accent() : theme::Muted()) | bold;
+                  color(active ? theme::Accent() : theme::Muted()) | bold;
     if (active) {
       tab = tab | underlined;
     }
-    return tab;
+    return tab | reflect(*box);
   };
 
-  return hbox({render_tab(SettingsPanel::kGeneral, i18n::tr("settings.tab.general").c_str()),
+  return hbox({render_tab(SettingsPanel::kGeneral, i18n::tr("settings.tab.general").c_str(),
+                          &state->tab_general_box),
                text("  "),
-               render_tab(SettingsPanel::kWorkspace, i18n::tr("settings.tab.workspace").c_str()),
+               render_tab(SettingsPanel::kWorkspace, i18n::tr("settings.tab.workspace").c_str(),
+                          &state->tab_workspace_box),
                text("  "),
-               render_tab(SettingsPanel::kFormat, i18n::tr("settings.tab.format").c_str())});
+               render_tab(SettingsPanel::kFormat, i18n::tr("settings.tab.format").c_str(),
+                          &state->tab_format_box)});
 }
 
-void append_top_level_tabs_header(SettingsBodyContent* content, const SettingsModalState* state) {
+void append_top_level_tabs_header(SettingsBodyContent* content, SettingsModalState* state) {
   if (content == nullptr || state == nullptr || !state->has_workspace) {
     return;
   }
@@ -1540,7 +1759,7 @@ void append_top_level_tabs_header(SettingsBodyContent* content, const SettingsMo
   content->header.push_back(text(""));
 }
 
-SettingsBodyContent build_general_settings(const SettingsModalState* state) {
+SettingsBodyContent build_general_settings(SettingsModalState* state) {
   SettingsBodyContent content;
   append_top_level_tabs_header(&content, state);
 
@@ -1565,6 +1784,7 @@ SettingsBodyContent build_general_settings(const SettingsModalState* state) {
       content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
+    add_click_target(&content, i);
     content.rows.push_back(title);
     content.rows.push_back(text("    " + option.description) | color(theme::Muted()));
     content.rows.push_back(text(""));
@@ -1576,7 +1796,7 @@ SettingsBodyContent build_general_settings(const SettingsModalState* state) {
   return content;
 }
 
-SettingsBodyContent build_workspace_settings(const SettingsModalState* state) {
+SettingsBodyContent build_workspace_settings(SettingsModalState* state) {
   SettingsBodyContent content;
   append_top_level_tabs_header(&content, state);
 
@@ -1590,6 +1810,7 @@ SettingsBodyContent build_workspace_settings(const SettingsModalState* state) {
       content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
+    add_click_target(&content, kWorkspaceGccQueryDriver);
     content.rows.push_back(title);
     content.rows.push_back(
         text("    " + i18n::tr("settings.workspace.gcc_query_driver.description")) |
@@ -1607,6 +1828,7 @@ SettingsBodyContent build_workspace_settings(const SettingsModalState* state) {
       content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
+    add_click_target(&content, kWorkspaceBackgroundIndex);
     content.rows.push_back(title);
     content.rows.push_back(
         text("    " + i18n::tr("settings.workspace.background_index.description")) |
@@ -1624,6 +1846,7 @@ SettingsBodyContent build_workspace_settings(const SettingsModalState* state) {
       content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
+    add_click_target(&content, kWorkspaceIncludePaths);
     content.rows.push_back(title);
     content.rows.push_back(text("    " + i18n::tr("settings.workspace.include_paths.description")) |
                    color(theme::Muted()));
@@ -1640,6 +1863,7 @@ SettingsBodyContent build_workspace_settings(const SettingsModalState* state) {
       content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
+    add_click_target(&content, kWorkspaceCompileCommands);
     content.rows.push_back(title);
     content.rows.push_back(text("    " + i18n::tr("settings.workspace.compile_commands.description")) |
                    color(theme::Muted()));
@@ -1656,6 +1880,7 @@ SettingsBodyContent build_workspace_settings(const SettingsModalState* state) {
       content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
+    add_click_target(&content, kWorkspaceUiColors);
     content.rows.push_back(title);
     content.rows.push_back(text("    " + i18n::tr("settings.workspace.ui_colors.description")) |
                    color(theme::Muted()));
@@ -1668,7 +1893,7 @@ SettingsBodyContent build_workspace_settings(const SettingsModalState* state) {
   return content;
 }
 
-SettingsBodyContent build_format_settings(const SettingsModalState* state) {
+SettingsBodyContent build_format_settings(SettingsModalState* state) {
   SettingsBodyContent content;
   append_top_level_tabs_header(&content, state);
 
@@ -1686,6 +1911,7 @@ SettingsBodyContent build_format_settings(const SettingsModalState* state) {
       content.focus_row = static_cast<int>(content.rows.size());
       line = line | inverted;
     }
+    add_click_target(&content, index);
     content.rows.push_back(line);
   };
 
@@ -1727,6 +1953,7 @@ SettingsBodyContent build_compile_commands_panel(const SettingsModalState* state
       content.focus_row = static_cast<int>(content.rows.size());
       line = line | inverted;
     }
+    add_click_target(&content, index);
     content.rows.push_back(line);
   };
 
@@ -1774,6 +2001,7 @@ SettingsBodyContent build_path_mappings_panel(const SettingsModalState* state) {
         content.focus_row = static_cast<int>(content.rows.size());
         row = row | inverted;
       }
+      add_click_target(&content, i);
       content.rows.push_back(row);
     }
   }
@@ -1797,6 +2025,7 @@ SettingsBodyContent build_include_paths_panel(const SettingsModalState* state) {
         content.focus_row = static_cast<int>(content.rows.size());
         line = line | inverted;
       }
+      add_click_target(&content, i);
       content.rows.push_back(line);
     }
   }
@@ -1833,6 +2062,7 @@ SettingsBodyContent build_path_browser_panel(SettingsModalState* state) {
         content.focus_row = static_cast<int>(content.rows.size());
         line = line | inverted;
       }
+      add_click_target(&content, i);
       content.rows.push_back(line);
     }
   }
@@ -2061,6 +2291,13 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         }
 
         const int scrollable_lines = static_cast<int>(content.rows.size());
+        state->click_layout_panel = state->panel;
+        state->click_targets.clear();
+        state->click_targets.reserve(content.click_targets.size());
+        for (const auto& [row, index] : content.click_targets) {
+          state->click_targets.push_back({row, index});
+        }
+
         Element body = render_settings_scroll_body(state, std::move(content));
 
         std::string config_note;
@@ -2099,6 +2336,10 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
 
         return ScreenModalOverlay(std::move(base), std::move(dialog));
       });
+}
+
+bool settings_modal_handle_mouse(SettingsModalState* state, Event event) {
+  return handle_settings_mouse(state, event);
 }
 
 }  // namespace tgdb

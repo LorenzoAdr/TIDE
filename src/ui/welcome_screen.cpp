@@ -17,13 +17,14 @@ using namespace ftxui;
 
 namespace {
 
-struct LogoLine {
-  std::string text;
-  Color color;
-};
+Element centered_row(Element row) {
+  return hbox({filler(), std::move(row), filler()});
+}
 
-const std::vector<LogoLine>& welcome_logo_lines() {
-  static const std::vector<LogoLine> lines = {
+}  // namespace
+
+Element RenderTuideLogo() {
+  static const std::vector<std::pair<std::string, Color>> lines = {
       {"████████╗██╗   ██╗██╗██████╗ ███████╗", theme::Accent()},
       {"╚══██╔══╝██║   ██║██║██╔══██╗██╔════╝", theme::TitleText()},
       {"   ██║   ██║   ██║██║██║  ██║█████╗  ", theme::Accent()},
@@ -31,20 +32,14 @@ const std::vector<LogoLine>& welcome_logo_lines() {
       {"   ██║   ╚██████╔╝██║██████╔╝███████╗", theme::Accent()},
       {"   ╚═╝    ╚═════╝ ╚═╝╚═════╝ ╚══════╝", theme::TitleText()},
   };
-  return lines;
-}
-
-Element centered_row(Element row) {
-  return hbox({filler(), std::move(row), filler()});
-}
-
-Element render_welcome_logo() {
   Elements logo_rows;
-  for (const auto& line : welcome_logo_lines()) {
-    logo_rows.push_back(text(line.text) | color(line.color) | bold);
+  for (const auto& line : lines) {
+    logo_rows.push_back(text(line.first) | color(line.second) | bold);
   }
   return vbox(std::move(logo_rows));
 }
+
+namespace {
 
 Element render_action_row(const std::string& label, Box* box, MainLayoutState* layout,
                           std::string_view id) {
@@ -106,7 +101,7 @@ bool handle_welcome_mouse(WelcomeScreenState* state, MainLayoutState* layout_sta
 
 Element render_welcome_screen(WelcomeScreenState* state, MainLayoutState* layout_state) {
   Elements body;
-  body.push_back(render_welcome_logo());
+  body.push_back(RenderTuideLogo());
   body.push_back(text(""));
   body.push_back(
       centered_row(text(i18n::tr("welcome.tagline")) | color(theme::Muted())));

@@ -32,6 +32,7 @@
 #include "ui/shutdown_overlay.hpp"
 #include "ui/open_file_confirm.hpp"
 #include "ui/settings_modal.hpp"
+#include "ui/status_layout_popover.hpp"
 #include "ui/theme.hpp"
 #include "ui/glyphs.hpp"
 #include "ui/symbol_picker.hpp"
@@ -53,6 +54,7 @@
 #include "app/workspace_config.hpp"
 #include "app/workspace_session.hpp"
 #include "util/path_normalize.hpp"
+#include "util/shell_args.hpp"
 
 namespace fs = std::filesystem;
 
@@ -402,6 +404,67 @@ void Application::restart_workspace_indexing() {
   workspace_watcher_.start(workspace_.root, options);
 }
 
+namespace {
+
+std::string editor_buffer_text(const EditorBuffer& buffer) {
+  std::string text;
+  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
+    if (i > 0) {
+      text.push_back('\n');
+    }
+    text += buffer.lines[i];
+  }
+  return text;
+}
+
+void reopen_workspace_documents(WorkspaceModel* workspace,
+                                const std::shared_ptr<ISymbolProvider>& symbols) {
+  if (workspace == nullptr || symbols == nullptr) {
+    return;
+  }
+  workspace->flush_active_tab();
+  for (const auto& tab : workspace->tabs) {
+    if (tab.path.empty()) {
+      continue;
+    }
+    symbols->on_document_opened(tab.path, editor_buffer_text(tab.buffer));
+  }
+}
+
+}  // namespace
+
+void Application::reindex_project() {
+  if (workspace_.root.empty()) {
+    set_workspace_status(i18n::tr("status.index_no_workspace"));
+    layout_state_.request_ui_tick = true;
+    return;
+  }
+  if (!resolve_clangd().has_value()) {
+    set_workspace_status(i18n::tr("status.index_no_clangd"));
+    layout_state_.request_ui_tick = true;
+    return;
+  }
+  if (!app_settings_.lsp_enabled) {
+    app_settings_.lsp_enabled = true;
+    app_settings_.save();
+    if (settings_modal_state_.open) {
+      settings_modal_state_.draft_lsp_enabled = true;
+    }
+    apply_app_settings();
+    set_workspace_status(i18n::tr("status.index_lsp_enabled"));
+    layout_state_.request_ui_tick = true;
+    return;
+  }
+  workspace_.flush_active_tab();
+  restart_lsp_for_workspace();
+  sync_symbol_workspace_indexer();
+  restart_workspace_indexing();
+  reopen_workspace_documents(&workspace_, symbol_provider_);
+  workspace_.buffer.view_token++;
+  set_workspace_status(i18n::tr("status.index_started"));
+  layout_state_.request_ui_tick = true;
+}
+
 void Application::enqueue_ui_task(std::function<void()> task) {
   if (!task) {
     return;
@@ -463,6 +526,8 @@ void Application::save_workspace_session() {
     session.active_tab_path = workspace_.tabs[static_cast<std::size_t>(workspace_.active_tab)].path;
   }
   session.launch_args = workspace_launch_args_;
+  session.last_launch_program = last_launch_program_;
+  session.last_attach_program = last_attach_program_;
   session.save(workspace_.root);
 }
 
@@ -585,6 +650,8 @@ void Application::restore_workspace_session() {
   }
   const WorkspaceSession session = WorkspaceSession::load(workspace_.root);
   workspace_launch_args_ = session.launch_args;
+  last_launch_program_ = session.last_launch_program;
+  last_attach_program_ = session.last_attach_program;
   if (session.open_tabs.empty()) {
     return;
   }
@@ -868,10 +935,9 @@ void Application::apply_connection_and_start() {
   }
 
   app_mode_ = AppMode::kDebug;
-  focus_state_.region = FocusRegion::RightPanel;
+  focus_state_.region = FocusRegion::Terminal;
   layout_state_.text_input_focus = TextInputFocus::None;
   layout_state_.right_panel_active_section = 1;
-  layout_state_.pending_watches_focus = true;
   layout_state_.focus_sync_needed = true;
   layout_state_.core_analyzer_search_focus = false;
   layout_state_.show_core_analyzer_tab =
@@ -961,6 +1027,10 @@ void Application::apply_pending_connection() {
 
   if (result.mode == SessionMode::kLaunch && !result.program.empty()) {
     workspace_launch_args_[normalize_path(result.program)] = result.args_line;
+    last_launch_program_ = result.program;
+    save_workspace_session();
+  } else if (result.mode == SessionMode::kAttach && !result.program.empty()) {
+    last_attach_program_ = result.program;
     save_workspace_session();
   }
 
@@ -972,12 +1042,21 @@ void Application::apply_pending_connection() {
 }
 
 void Application::open_connection_wizard() {
-  if (connection_wizard_state_.open || workspace_wizard_state_.open) {
+  if (!prepare_connection_wizard()) {
     return;
+  }
+  connection_wizard_state_.reset();
+  connection_wizard_state_.open = true;
+  set_status(i18n::tr("app.configure_debug"));
+}
+
+bool Application::prepare_connection_wizard() {
+  if (connection_wizard_state_.open || workspace_wizard_state_.open) {
+    return false;
   }
   if (!debug_available_) {
     set_status(i18n::tr("app.debug_unavailable_short"));
-    return;
+    return false;
   }
 
   if (debugging_started_) {
@@ -993,9 +1072,83 @@ void Application::open_connection_wizard() {
       connection_wizard_state_.browser.launch_root.empty()
           ? workspace_.root
           : connection_wizard_state_.browser.launch_root;
+  return true;
+}
+
+void Application::open_launch_wizard() {
+  if (!prepare_connection_wizard()) {
+    return;
+  }
   connection_wizard_state_.reset();
+  connection_wizard_state_.mode = WizardMode::Launch;
+  connection_wizard_state_.mode_selected = 0;
+  connection_wizard_state_.step = WizardStep::PickBinary;
   connection_wizard_state_.open = true;
   set_status(i18n::tr("app.configure_debug"));
+}
+
+void Application::open_debug_wizard() {
+  open_connection_wizard();
+}
+
+namespace {
+
+bool program_path_exists(const std::string& path) {
+  if (path.empty()) {
+    return false;
+  }
+  std::error_code ec;
+  return fs::is_regular_file(fs::path(path), ec);
+}
+
+}  // namespace
+
+void Application::quick_launch_last() {
+  if (!prepare_connection_wizard()) {
+    return;
+  }
+  if (!program_path_exists(last_launch_program_)) {
+    open_launch_wizard();
+    return;
+  }
+
+  ConnectionResult result;
+  result.mode = SessionMode::kLaunch;
+  result.program = last_launch_program_;
+  result.workspace_root =
+      workspace_.root.empty() ? config_.workspace_root : workspace_.root;
+  const std::string program_key = normalize_path(last_launch_program_);
+  const auto saved = workspace_launch_args_.find(program_key);
+  if (saved != workspace_launch_args_.end()) {
+    result.args_line = saved->second;
+    result.args = split_shell_args(saved->second);
+  }
+  on_connection_complete(result);
+  apply_pending_connection();
+  layout_state_.request_ui_tick = true;
+}
+
+void Application::quick_attach_last() {
+  if (!prepare_connection_wizard()) {
+    return;
+  }
+  if (!program_path_exists(last_attach_program_)) {
+    open_debug_wizard();
+    return;
+  }
+
+  connection_wizard_state_.reset();
+  connection_wizard_state_.mode = WizardMode::Attach;
+  connection_wizard_state_.mode_selected = 1;
+  connection_wizard_state_.step = WizardStep::PickProcess;
+  connection_wizard_state_.selected_program = last_attach_program_;
+  connection_wizard_state_.all_processes.clear();
+  connection_wizard_state_.process_query.clear();
+  connection_wizard_state_.process_selected = 0;
+  connection_wizard_state_.refresh_process_matches();
+  connection_wizard_state_.open = true;
+  set_status(i18n::tr("app.configure_debug"));
+  layout_state_.request_ui_tick = true;
 }
 
 void Application::submit_command(const UiCommand& command) {
@@ -1172,6 +1325,11 @@ void Application::apply_app_settings() {
     layout_state_.text_input_focus = TextInputFocus::None;
     layout_state_.focus_sync_needed = true;
   }
+  if (!layout_state_.explorer_visible && focus_state_.region == FocusRegion::Explorer) {
+    focus_state_.region = FocusRegion::Editor;
+    layout_state_.text_input_focus = TextInputFocus::None;
+    layout_state_.focus_sync_needed = true;
+  }
   if (focus_state_.region == FocusRegion::SecondaryEditor &&
       (!focus_state_.secondary_editor_visible || !focus_state_.secondary_editor_visible())) {
     focus_state_.region = FocusRegion::Editor;
@@ -1198,6 +1356,10 @@ bool Application::handle_focus_shortcuts(const Event& event) {
   auto mark_focus_sync = [this] { layout_state_.focus_sync_needed = true; };
 
   if (event == Event::CtrlA) {
+    if (!layout_state_.explorer_visible) {
+      layout_state_.explorer_visible = true;
+      layout_state_.request_ui_tick = true;
+    }
     focus_state_.region = FocusRegion::Explorer;
     mark_focus_sync();
     return true;
@@ -1210,7 +1372,9 @@ bool Application::handle_focus_shortcuts(const Event& event) {
   }
   if (event_is_open_outline_panel(event)) {
     if (!app_settings_.secondary_panel_enabled) {
-      return true;
+      app_settings_.secondary_panel_enabled = true;
+      app_settings_.save();
+      apply_app_settings();
     }
     focus_state_.region = FocusRegion::RightPanel;
     layout_state_.right_panel_active_section = 0;
@@ -1267,6 +1431,9 @@ bool Application::handle_focus_shortcuts(const Event& event) {
       if (focus_state_.region == FocusRegion::RightPanel &&
           !app_settings_.secondary_panel_enabled) {
         focus_state_.region = FocusRegion::Editor;
+      } else if (focus_state_.region == FocusRegion::Explorer &&
+                 !layout_state_.explorer_visible) {
+        focus_state_.region = FocusRegion::Editor;
       } else {
         focus_state_.move_left();
       }
@@ -1276,6 +1443,9 @@ bool Application::handle_focus_shortcuts(const Event& event) {
     if (event_is_alt_right(event)) {
       if (focus_state_.region == FocusRegion::Editor &&
           !app_settings_.secondary_panel_enabled) {
+        return true;
+      }
+      if (focus_state_.region == FocusRegion::Editor && !layout_state_.explorer_visible) {
         return true;
       }
       focus_state_.move_right();
@@ -1362,6 +1532,68 @@ int Application::run() {
     if (symbol_provider_) {
       symbol_provider_->on_document_saved(path);
     }
+    layout_state_.request_ui_tick = true;
+  };
+  layout_state_.status_open_settings = [this]() {
+    if (settings_modal_state_.open) {
+      close_settings_modal(
+          &settings_modal_state_, &app_settings_,
+          [this](const AppSettings&) { apply_app_settings(); },
+          [this](const WorkspaceConfig& config) { apply_workspace_settings(config); },
+          [this](const ClangFormatConfig&) {
+            workspace_.buffer.view_token++;
+            layout_state_.request_ui_tick = true;
+          });
+    } else if (!any_modal_open()) {
+      open_settings_modal(&settings_modal_state_, app_settings_, workspace_.root,
+                          workspace_config_);
+    }
+    layout_state_.request_ui_tick = true;
+  };
+  layout_state_.status_open_shortcuts = [this]() {
+    if (shortcuts_modal_state_.open) {
+      shortcuts_modal_state_.open = false;
+      shortcuts_modal_state_.first_visible = 0;
+    } else {
+      shortcuts_modal_state_.open = true;
+      shortcuts_modal_state_.first_visible = 0;
+    }
+    layout_state_.request_ui_tick = true;
+  };
+  layout_state_.status_open_launch = [this]() { open_launch_wizard(); };
+  layout_state_.status_reindex_project = [this]() { reindex_project(); };
+  layout_state_.status_quick_launch = [this]() { quick_launch_last(); };
+  layout_state_.status_open_debug = [this]() { open_debug_wizard(); };
+  layout_state_.status_quick_debug = [this]() { quick_attach_last(); };
+  layout_state_.status_set_files_visible = [this](bool visible) {
+    if (layout_state_.explorer_visible == visible) {
+      return;
+    }
+    layout_state_.explorer_visible = visible;
+    if (!visible && focus_state_.region == FocusRegion::Explorer) {
+      focus_state_.region = FocusRegion::Editor;
+      layout_state_.text_input_focus = TextInputFocus::None;
+    }
+    layout_state_.focus_sync_needed = true;
+    layout_state_.request_ui_tick = true;
+  };
+  layout_state_.status_set_outline_visible = [this](bool visible) {
+    if (app_settings_.secondary_panel_enabled == visible) {
+      return;
+    }
+    app_settings_.secondary_panel_enabled = visible;
+    app_settings_.save();
+    apply_app_settings();
+  };
+  layout_state_.status_set_terminal_visible = [this](bool visible) {
+    if (layout_state_.console_visible == visible) {
+      return;
+    }
+    layout_state_.console_visible = visible;
+    if (visible) {
+      layout_state_.terminal_start_requested = true;
+    }
+    layout_state_.focus_sync_needed = true;
     layout_state_.request_ui_tick = true;
   };
   layout_state_.helix_ide.open_quick_file = [this, &screen]() {
@@ -1647,6 +1879,29 @@ int Application::run() {
         return true;
       }
 
+      if (settings_modal_state_.open && event.is_mouse()) {
+        Event mouse_event = event;
+        if (settings_modal_handle_mouse(&settings_modal_state_, mouse_event)) {
+          layout_state_.request_ui_tick = true;
+          return true;
+        }
+      }
+
+      if (layout_state_.status_layout_popover.open) {
+        if (HandleStatusLayoutPopoverKeys(&layout_state_.status_layout_popover, event)) {
+          layout_state_.request_ui_tick = true;
+          return true;
+        }
+        if (event.is_mouse()) {
+          Event mouse_event = event;
+          if (layout_state_.status_bar_mouse_handler &&
+              layout_state_.status_bar_mouse_handler(mouse_event)) {
+            layout_state_.request_ui_tick = true;
+            return true;
+          }
+        }
+      }
+
       if (any_modal_open()) {
         return false;
       }
@@ -1691,6 +1946,19 @@ int Application::run() {
       if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible &&
                  event.is_mouse() && layout_state_.explorer_mouse_handler &&
                  layout_state_.explorer_mouse_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+
+      if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible &&
+                 event.is_mouse() && layout_state_.sidebar_mouse_handler &&
+                 layout_state_.sidebar_mouse_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+
+      if (event.is_mouse() && layout_state_.status_bar_mouse_handler &&
+          layout_state_.status_bar_mouse_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
@@ -1887,7 +2155,7 @@ int Application::run() {
       }
       if (layout_state_.editor_helix_prefix_pending && is_editor_focus_region(focus_state_.region) &&
           app_mode_ == AppMode::kNormal && !event_has_ctrl_modifier(event) &&
-          event != Event::CtrlP) {
+          event != Event::CtrlP && !event_is_tide_app_shortcut(event)) {
         return true;
       }
 

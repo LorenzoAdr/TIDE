@@ -539,10 +539,12 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
   const bool syntax_highlight =
       !buffer.path.empty() && is_indexed_source_path(buffer.path) && !is_build_file;
 
+  const bool press_active = symbol_press != nullptr && symbol_press->active;
   bool rich =
-      !defer_rich_decorations &&
-      line_needs_rich_decorations(line_index, buffer, find_matches, selection_occurrences, bracket,
-                                  line_diagnostics, symbol_press);
+      press_active ||
+      (!defer_rich_decorations &&
+       line_needs_rich_decorations(line_index, buffer, find_matches, selection_occurrences, bracket,
+                                   line_diagnostics, symbol_press));
   if (highlight_ctx != nullptr && highlight_ctx->in_block_comment) {
     rich = false;
   }

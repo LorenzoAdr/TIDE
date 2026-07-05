@@ -14,6 +14,8 @@ struct WelcomeScreenState {
   ftxui::Box workspace_action_box;
 };
 
+ftxui::Element RenderTuideLogo();
+
 ftxui::Component MakeWelcomeScreen(MainLayoutState* layout_state, WelcomeScreenState* state,
                                    std::function<void()> on_external_file,
                                    std::function<void()> on_debug,

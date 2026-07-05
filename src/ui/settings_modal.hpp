@@ -8,6 +8,7 @@
 #include "app/workspace_config.hpp"
 #include "i18n/locale.hpp"
 #include "ftxui/component/component_base.hpp"
+#include "ftxui/component/event.hpp"
 #include "ui/path_browser.hpp"
 #include "util/clang_format_config.hpp"
 
@@ -77,8 +78,24 @@ struct SettingsModalState {
   bool has_workspace = false;
   std::string workspace_root;
   int body_scroll = 0;
+  int body_scroll_total = 0;
   SettingsPanel body_scroll_panel = SettingsPanel::kGeneral;
+
+  ftxui::Box tab_general_box;
+  ftxui::Box tab_workspace_box;
+  ftxui::Box tab_format_box;
+  ftxui::Box body_box;
+  SettingsPanel click_layout_panel = SettingsPanel::kGeneral;
+  struct ClickTarget {
+    int row = -1;
+    int index = -1;
+  };
+  std::vector<ClickTarget> click_targets;
+  int ui_palette_row_start = -1;
+  int ui_palette_row_count = 0;
 };
+
+bool settings_modal_handle_mouse(SettingsModalState* state, ftxui::Event event);
 
 ftxui::Component MakeSettingsModalOverlay(ftxui::Component main, SettingsModalState* state,
                                           AppSettings* settings, SettingsApplyCallback on_apply,

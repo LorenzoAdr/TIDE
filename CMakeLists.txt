@@ -25,6 +25,7 @@ add_executable(tgdb
   src/dap/gdb_launcher.cpp
   src/dap/gdb_protocol.cpp
   src/ui/main_layout.cpp
+  src/ui/status_layout_popover.cpp
   src/ui/file_tree_panel.cpp
   src/ui/source_panel.cpp
   src/ui/editor_panel.cpp
@@ -83,6 +84,7 @@ add_executable(tgdb
   src/util/build_file_highlight.cpp
   src/util/csv_viewer.cpp
   src/util/nm_reader.cpp
+  src/util/compiler_location.cpp
   src/util/nm_reader_runner.cpp
   src/util/tabular_file.cpp
   src/util/external_viewer.cpp
@@ -315,6 +317,12 @@ add_executable(glyphs_test
   src/ui/glyphs.cpp
 )
 target_include_directories(glyphs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(compiler_location_test
+  tests/compiler_location_test.cpp
+  src/util/compiler_location.cpp
+)
+target_include_directories(compiler_location_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_executable(nm_reader_test
   tests/nm_reader_test.cpp

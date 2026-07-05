@@ -17,7 +17,19 @@ constexpr std::string_view kConsoleTabGit = "console.tab.git";
 constexpr std::string_view kConsoleTabCoreAnalyzer = "console.tab.core_analyzer";
 constexpr std::string_view kConsoleTabBinarySymbols = "console.tab.binary_symbols";
 constexpr std::string_view kSidebarHide = "sidebar.hide";
+constexpr std::string_view kExplorerHide = "explorer.hide";
 constexpr std::string_view kConsoleHide = "console.hide";
+constexpr std::string_view kStatusIndex = "status.index";
+constexpr std::string_view kStatusLaunch = "status.launch";
+constexpr std::string_view kStatusLaunchQuick = "status.launch.quick";
+constexpr std::string_view kStatusDebug = "status.debug";
+constexpr std::string_view kStatusDebugQuick = "status.debug.quick";
+constexpr std::string_view kStatusLayout = "status.layout";
+constexpr std::string_view kStatusLayoutFiles = "status.layout.files";
+constexpr std::string_view kStatusLayoutOutline = "status.layout.outline";
+constexpr std::string_view kStatusLayoutTerminal = "status.layout.terminal";
+constexpr std::string_view kStatusSettings = "status.settings";
+constexpr std::string_view kStatusShortcuts = "status.shortcuts";
 constexpr std::string_view kSidebarTabOutline = "sidebar.tab.outline";
 constexpr std::string_view kSidebarTabSearch = "sidebar.tab.search";
 constexpr std::string_view kSidebarTabCallHierarchy = "sidebar.tab.call_hierarchy";
@@ -59,6 +71,7 @@ constexpr std::string_view kEditorScrollbar = "scrollbar.editor";
 constexpr std::string_view kEditorHorizontalScrollbar = "scrollbar.editor.horizontal";
 constexpr std::string_view kSourceScrollbar = "scrollbar.source";
 constexpr std::string_view kTerminalScrollbar = "scrollbar.terminal";
+constexpr std::string_view kTerminalLink = "terminal.link";
 
 inline std::string explorer_row(int index) {
   return "explorer.row." + std::to_string(index);
@@ -153,7 +166,7 @@ inline bool is_context_menu_hover(std::string_view id) {
 
 inline bool is_scrollbar_hover(std::string_view id) {
   return id == kEditorScrollbar || id == kEditorHorizontalScrollbar || id == kSourceScrollbar ||
-         id == kTerminalScrollbar;
+         id == kTerminalScrollbar || id == kTerminalLink;
 }
 
 inline bool is_f2_hover(std::string_view id) {
