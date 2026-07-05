@@ -52,11 +52,23 @@ void select_words_range(EditorBuffer* buffer, int anchor_line, int anchor_col, i
                         int head_col);
 void select_line_at(EditorBuffer* buffer, int line);
 void select_lines_range(EditorBuffer* buffer, int anchor_line, int head_line);
+void extend_line_below(EditorBuffer* buffer);
+void split_selection_on_newlines(EditorBuffer* buffer);
+
+enum class CharFindKind {
+  kFind,
+  kTill,
+  kFindBack,
+  kTillBack,
+};
+
+bool char_find_on_line(EditorBuffer* buffer, CharFindKind kind, char target, bool extend_selection);
 
 void extend_block_selection_vertical(EditorBuffer* buffer, int direction);
 void goto_buffer_line(EditorBuffer* buffer, int line_one_based, int visible_lines);
 
 void comment_lines(EditorBuffer* buffer, const LineCommentStyle& style);
 void uncomment_lines(EditorBuffer* buffer, const LineCommentStyle& style);
+void toggle_comment_lines(EditorBuffer* buffer, const LineCommentStyle& style);
 
 }  // namespace tgdb

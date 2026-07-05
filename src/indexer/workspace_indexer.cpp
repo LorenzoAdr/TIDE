@@ -5,6 +5,7 @@
 #include <sstream>
 
 #include "indexer/index_rules.hpp"
+#include "util/fuzzy_match.hpp"
 #include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
 
@@ -38,6 +39,16 @@ void scan_dir(const fs::path& root, const fs::path& current, const IndexFilterOp
 }
 
 }  // namespace
+
+void rebuild_index_files_lower(IndexSnapshot* snapshot) {
+  if (snapshot == nullptr) {
+    return;
+  }
+  snapshot->files_lower.resize(snapshot->files.size());
+  for (std::size_t i = 0; i < snapshot->files.size(); ++i) {
+    snapshot->files_lower[i] = fuzzy_to_lower(snapshot->files[i]);
+  }
+}
 
 std::vector<std::string> scan_workspace_files(const std::string& workspace_root,
                                                 const IndexFilterOptions& filter_options) {
@@ -102,6 +113,7 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
   snap->workspace_root = workspace_root;
   snap->filter_options = filter_options;
   snap->files = scan_workspace_files(workspace_root, filter_options);
+  rebuild_index_files_lower(snap.get());
   TGDB_MON("idx", "workspace_indexer.files=" + std::to_string(snap->files.size()));
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -145,6 +157,7 @@ void WorkspaceIndexer::upsert_file(const std::string& workspace_root,
   files.erase(std::remove(files.begin(), files.end(), relative_file), files.end());
   files.push_back(relative_file);
   std::sort(files.begin(), files.end());
+  rebuild_index_files_lower(updated.get());
 
   std::lock_guard<std::mutex> lock(mutex_);
   snapshot_ = updated;
@@ -169,6 +182,7 @@ void WorkspaceIndexer::remove_file(const std::string& workspace_root,
 
   auto& files = updated->files;
   files.erase(std::remove(files.begin(), files.end(), relative_file), files.end());
+  rebuild_index_files_lower(updated.get());
 
   std::lock_guard<std::mutex> lock(mutex_);
   snapshot_ = updated;

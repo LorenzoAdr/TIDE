@@ -946,7 +946,7 @@ bool forward_pty_key(ShellSession* shell, const Event& event, ConsolePanelState*
   if (shell == nullptr || !shell->running()) {
     return false;
   }
-  if (event.is_mouse()) {
+  if (event.is_mouse() || event_is_tide_global_shortcut(event)) {
     return false;
   }
   const std::optional<std::string> bytes = event_to_pty_bytes(event);
@@ -1295,7 +1295,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     }
 
     if (terminal_pty_input_active(layout_state, focus, shell) && on_terminal_tab) {
-      if (forward_pty_key(shell, event, state.get(), layout_state)) {
+      if (!event_is_tide_global_shortcut(event) &&
+          forward_pty_key(shell, event, state.get(), layout_state)) {
         return true;
       }
       if (event == Event::Escape) {
@@ -1389,6 +1390,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       return true;
     }
     if (!terminal_pty_input_active(layout_state, focus, shell)) {
+      return false;
+    }
+    if (event_is_tide_global_shortcut(event)) {
       return false;
     }
     if (event_is_ctrl_c(event)) {

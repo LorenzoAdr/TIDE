@@ -36,7 +36,8 @@ constexpr int kShowAllFiles = 9;
 constexpr int kMonitor = 10;
 constexpr int kIcons = 11;
 constexpr int kHelixMode = 12;
-constexpr int kBaseOptions = 13;
+constexpr int kWorkspaceAutoDetect = 13;
+constexpr int kBaseOptions = 14;
 
 #ifdef TGDB_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -264,6 +265,8 @@ std::vector<SettingsOption> global_settings_options() {
        i18n::tr("settings.general.icons.description")},
       {i18n::tr("settings.general.helix_mode.label"),
        i18n::tr("settings.general.helix_mode.description")},
+      {i18n::tr("settings.general.workspace_auto_detect.label"),
+       i18n::tr("settings.general.workspace_auto_detect.description")},
 #ifdef TGDB_HAS_BUNDLED_CLANGD
       {i18n::tr("settings.general.force_bundled_clangd.label"),
        i18n::tr("settings.general.force_bundled_clangd.description")},
@@ -357,6 +360,8 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_secondary_panel_enabled;
     case kHelixMode:
       return state->draft_helix_mode_enabled;
+    case kWorkspaceAutoDetect:
+      return state->draft_workspace_auto_detect_enabled;
     case kShowAllFiles:
       return state->draft_show_all_workspace_files;
     case kMonitor:
@@ -414,6 +419,10 @@ void toggle_option(SettingsModalState* state, int index) {
       break;
     case kHelixMode:
       state->draft_helix_mode_enabled = !state->draft_helix_mode_enabled;
+      break;
+    case kWorkspaceAutoDetect:
+      state->draft_workspace_auto_detect_enabled =
+          !state->draft_workspace_auto_detect_enabled;
       break;
     case kShowAllFiles:
       state->draft_show_all_workspace_files = !state->draft_show_all_workspace_files;
@@ -1748,6 +1757,7 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_overview_ruler_enabled = settings.overview_ruler_enabled;
   state->draft_secondary_panel_enabled = settings.secondary_panel_enabled;
   state->draft_helix_mode_enabled = settings.helix_mode_enabled;
+  state->draft_workspace_auto_detect_enabled = settings.workspace_auto_detect_enabled;
   state->draft_show_all_workspace_files = settings.show_all_workspace_files;
   state->draft_force_bundled_clangd = settings.force_bundled_clangd;
   state->draft_force_bundled_gdb = settings.force_bundled_gdb;
@@ -1803,6 +1813,7 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->overview_ruler_enabled = state->draft_overview_ruler_enabled;
   settings->secondary_panel_enabled = state->draft_secondary_panel_enabled;
   settings->helix_mode_enabled = state->draft_helix_mode_enabled;
+  settings->workspace_auto_detect_enabled = state->draft_workspace_auto_detect_enabled;
   settings->show_all_workspace_files = state->draft_show_all_workspace_files;
   settings->force_bundled_clangd = state->draft_force_bundled_clangd;
   settings->force_bundled_gdb = state->draft_force_bundled_gdb;

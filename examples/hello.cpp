@@ -67,7 +67,7 @@ int main() {
 
 	accumulate(2);
 	allow_external_debugger();
-
+	
 	while (true) {
 		++counter;
 		x = counter * 3;

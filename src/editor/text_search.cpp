@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <optional>
+#include <regex>
 
 #include "editor/clipboard.hpp"
 #include "editor/text_ops.hpp"
@@ -236,6 +238,48 @@ std::vector<TextMatch> find_bounded_matches(const EditorBuffer& buffer, const st
   return find_bounded_matches_in_lines(buffer.lines, needle, whole_word, nullptr, 0);
 }
 
+bool match_within_range(const TextMatch& match, const TextRange& range) {
+  const CursorPos match_start{match.line, match.col};
+  const CursorPos match_end{match.line, match.col + match.length};
+  const CursorPos range_start{range.start_line, range.start_col};
+  const CursorPos range_end{range.end_line, range.end_col};
+  return !(match_start < range_start) && !(range_end < match_end);
+}
+
+std::vector<TextMatch> filter_matches_to_range(const std::vector<TextMatch>& matches,
+                                                const TextRange& range) {
+  std::vector<TextMatch> out;
+  out.reserve(matches.size());
+  for (const auto& match : matches) {
+    if (match_within_range(match, range)) {
+      out.push_back(match);
+    }
+  }
+  return out;
+}
+
+std::string needle_for_scoped_match(const EditorBuffer& buffer, const MultiCursor& cursor) {
+  MultiCursor probe = cursor;
+  probe.collapse_to_head();
+  std::string needle = word_at_cursor(buffer, probe);
+  if (!needle.empty()) {
+    return needle;
+  }
+  probe.head = cursor.anchor;
+  probe.collapse_to_head();
+  needle = word_at_cursor(buffer, probe);
+  if (!needle.empty()) {
+    return needle;
+  }
+  int start_line = 0;
+  int start_col = 0;
+  int end_line = 0;
+  int end_col = 0;
+  cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
+  probe.head = {start_line, start_col};
+  return word_at_cursor(buffer, probe);
+}
+
 }  // namespace
 
 std::vector<TextMatch> find_occurrences_in_lines(const std::vector<std::string>& lines,
@@ -370,9 +414,16 @@ void add_next_selection_match(EditorBuffer* buffer, int visible_lines) {
   ensure_scroll_visible(buffer, visible_lines);
 }
 
-void select_all_matches(EditorBuffer* buffer) {
+void select_all_matches(EditorBuffer* buffer, const TextRange* scope) {
   buffer->ensure_cursors();
-  const std::string needle = search_needle(*buffer);
+  const MultiCursor& primary = buffer->primary();
+
+  std::string needle;
+  if (scope != nullptr && primary.has_selection()) {
+    needle = needle_for_scoped_match(*buffer, primary);
+  } else {
+    needle = search_needle(*buffer);
+  }
   if (needle.empty() || needle.find('\n') != std::string::npos) {
     return;
   }
@@ -381,6 +432,9 @@ void select_all_matches(EditorBuffer* buffer) {
       find_bounded_matches(*buffer, needle, needle_is_identifier(needle));
   if (matches.empty()) {
     matches = find_all_matches(*buffer, needle);
+  }
+  if (scope != nullptr) {
+    matches = filter_matches_to_range(matches, *scope);
   }
   if (matches.empty()) {
     return;
@@ -394,6 +448,97 @@ void select_all_matches(EditorBuffer* buffer) {
     buffer->cursors.push_back(cursor);
   }
   merge_overlapping_cursors(buffer);
+}
+
+std::optional<std::regex> compile_search_regex(const std::string& pattern) {
+  if (pattern.empty()) {
+    return std::nullopt;
+  }
+  try {
+    return std::regex(pattern, std::regex::ECMAScript);
+  } catch (const std::regex_error&) {
+    return std::nullopt;
+  }
+}
+
+std::vector<TextMatch> find_regex_matches(const EditorBuffer& buffer, const std::regex& re,
+                                          const TextRange* scope) {
+  std::vector<TextMatch> matches;
+  if (buffer.lines.empty()) {
+    return matches;
+  }
+
+  TextRange bounds{};
+  if (scope != nullptr) {
+    bounds = *scope;
+  } else {
+    bounds.start_line = 0;
+    bounds.start_col = 0;
+    bounds.end_line = static_cast<int>(buffer.lines.size()) - 1;
+    bounds.end_col =
+        static_cast<int>(buffer.lines[static_cast<std::size_t>(bounds.end_line)].size());
+  }
+
+  const int max_line = static_cast<int>(buffer.lines.size()) - 1;
+  bounds.start_line = std::max(0, std::min(bounds.start_line, max_line));
+  bounds.end_line = std::max(0, std::min(bounds.end_line, max_line));
+  if (bounds.start_line > bounds.end_line) {
+    std::swap(bounds.start_line, bounds.end_line);
+  }
+
+  for (int line = bounds.start_line; line <= bounds.end_line; ++line) {
+    const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
+    const int line_start_col = line == bounds.start_line ? bounds.start_col : 0;
+    const int line_end_col =
+        line == bounds.end_line ? bounds.end_col : static_cast<int>(text.size());
+    if (line_start_col >= line_end_col) {
+      continue;
+    }
+    const std::string slice =
+        text.substr(static_cast<std::size_t>(line_start_col),
+                    static_cast<std::size_t>(line_end_col - line_start_col));
+
+    std::sregex_iterator it(slice.begin(), slice.end(), re);
+    const std::sregex_iterator end;
+    for (; it != end; ++it) {
+      const std::smatch& match = *it;
+      if (match.length() == 0) {
+        continue;
+      }
+      TextMatch found{line, line_start_col + static_cast<int>(match.position()),
+                      static_cast<int>(match.length())};
+      if (match_within_range(found, bounds)) {
+        matches.push_back(found);
+      }
+    }
+  }
+  return matches;
+}
+
+bool apply_regex_match_cursors(EditorBuffer* buffer, const std::string& pattern,
+                               const TextRange* scope) {
+  if (buffer == nullptr) {
+    return false;
+  }
+  const std::optional<std::regex> re = compile_search_regex(pattern);
+  if (!re.has_value()) {
+    return false;
+  }
+
+  std::vector<TextMatch> matches = find_regex_matches(*buffer, *re, scope);
+  if (matches.empty()) {
+    return false;
+  }
+
+  buffer->cursors.clear();
+  for (const auto& match : matches) {
+    MultiCursor cursor;
+    cursor.anchor = {match.line, match.col};
+    cursor.head = {match.line, match.col + match.length};
+    buffer->cursors.push_back(cursor);
+  }
+  merge_overlapping_cursors(buffer);
+  return true;
 }
 
 }  // namespace tgdb

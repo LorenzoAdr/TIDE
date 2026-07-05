@@ -14,13 +14,20 @@
 
 namespace tgdb {
 
+struct FilePickerMatch {
+  std::string path;
+  int score = 0;
+  std::vector<std::size_t> match_indices;
+};
+
 struct FilePickerState {
   bool open = false;
   std::string query;
   std::string indexed_root;
   std::shared_ptr<const IndexSnapshot> index_snapshot;
   std::vector<std::string> all_files;
-  std::vector<std::string> matches;
+  std::vector<std::string> all_files_lower;
+  std::vector<FilePickerMatch> matches;
   int selected = 0;
   bool matches_dirty = true;
   FilePickerPreview preview;

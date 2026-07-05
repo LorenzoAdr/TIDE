@@ -14,6 +14,7 @@
 #include "app/app_mode.hpp"
 #include "app/app_settings.hpp"
 #include "app/workspace_config.hpp"
+#include "app/workspace_detect.hpp"
 #include "app/workspace_session.hpp"
 #include "build/build_artifact_watcher.hpp"
 #include "app/debug_model.hpp"
@@ -85,7 +86,9 @@ class Application {
   void apply_pending_connection();
   void on_workspace_complete(const std::string& workspace_root,
                              ftxui::ScreenInteractive* screen);
-  void set_workspace(const std::string& workspace_root);
+  void set_workspace(const std::string& workspace_root,
+                     const WorkspaceDetectResult* detect = nullptr);
+  WorkspaceDetectResult resolve_workspace_for_anchor(const std::string& anchor) const;
   void exit_debug_mode();
   bool connection_config_complete() const;
   void ensure_backend_started();

@@ -14,6 +14,7 @@ namespace tgdb {
 struct IndexSnapshot {
   std::string workspace_root;
   std::vector<std::string> files;
+  std::vector<std::string> files_lower;
   IndexFilterOptions filter_options;
 };
 
@@ -43,5 +44,7 @@ class WorkspaceIndexer {
 
 std::vector<std::string> scan_workspace_files(const std::string& workspace_root,
                                                 const IndexFilterOptions& filter_options = {});
+
+void rebuild_index_files_lower(IndexSnapshot* snapshot);
 
 }  // namespace tgdb

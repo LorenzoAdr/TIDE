@@ -4,6 +4,7 @@
 #include <cctype>
 
 #include "editor/bracket_match.hpp"
+#include "editor/indent_guides.hpp"
 #include "editor/line_comment.hpp"
 #include "editor/text_search.hpp"
 #include "editor/undo_stack.hpp"
@@ -1178,6 +1179,168 @@ void select_lines_range(EditorBuffer* buffer, int anchor_line, int head_line) {
   clamp_all_cursors(buffer);
 }
 
+void extend_line_below(EditorBuffer* buffer) {
+  if (buffer == nullptr || buffer->lines.empty()) {
+    return;
+  }
+  buffer->ensure_cursors();
+  auto& cursor = buffer->primary();
+  const int max_line = static_cast<int>(buffer->lines.size()) - 1;
+  const int head_line = std::max(0, std::min(cursor.head.line, max_line));
+
+  auto line_end_col = [&](int line) {
+    return static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size());
+  };
+
+  if (cursor.has_selection()) {
+    int start_line = 0;
+    int start_col = 0;
+    int end_line = 0;
+    int end_col = 0;
+    cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
+    const bool line_wise =
+        start_col == 0 && end_col == line_end_col(end_line);
+    const bool head_at_range_end =
+        cursor.head.line == end_line && cursor.head.col == end_col;
+    if (line_wise && head_at_range_end && end_line < max_line) {
+      const int next_line = end_line + 1;
+      cursor.anchor = {start_line, 0};
+      cursor.head = {next_line, line_end_col(next_line)};
+      clamp_cursor(&cursor, *buffer);
+      return;
+    }
+  }
+
+  select_line_at(buffer, head_line);
+}
+
+void split_selection_on_newlines(EditorBuffer* buffer) {
+  if (buffer == nullptr || buffer->lines.empty()) {
+    return;
+  }
+  buffer->ensure_cursors();
+
+  const MultiCursor& primary = buffer->primary();
+  int start_line = primary.head.line;
+  int end_line = start_line;
+  if (primary.has_selection()) {
+    int start_col = 0;
+    int end_col = 0;
+    primary.normalized_range(&start_line, &start_col, &end_line, &end_col);
+  }
+
+  const int max_line = static_cast<int>(buffer->lines.size()) - 1;
+  start_line = std::max(0, std::min(start_line, max_line));
+  end_line = std::max(0, std::min(end_line, max_line));
+  if (start_line > end_line) {
+    std::swap(start_line, end_line);
+  }
+
+  buffer->cursors.clear();
+  for (int line = start_line; line <= end_line; ++line) {
+    MultiCursor cursor;
+    cursor.set_pos(line, 0);
+    buffer->cursors.push_back(cursor);
+  }
+  merge_overlapping_cursors(buffer);
+  cursor_blink::show();
+}
+
+namespace {
+
+int char_find_destination_col(const std::string& line, int from_col, CharFindKind kind, char target) {
+  const int len = static_cast<int>(line.size());
+  if (target == '\0') {
+    return -1;
+  }
+
+  const auto matches = [&](int col) {
+    return col >= 0 && col < len &&
+           static_cast<unsigned char>(line[static_cast<std::size_t>(col)]) ==
+               static_cast<unsigned char>(target);
+  };
+
+  switch (kind) {
+    case CharFindKind::kFind:
+      for (int col = std::max(0, from_col); col < len; ++col) {
+        if (matches(col)) {
+          return col;
+        }
+      }
+      return -1;
+    case CharFindKind::kTill:
+      for (int col = std::max(0, from_col); col < len; ++col) {
+        if (matches(col)) {
+          return std::max(0, col - 1);
+        }
+      }
+      return -1;
+    case CharFindKind::kFindBack:
+      for (int col = std::min(from_col, len > 0 ? len - 1 : 0); col >= 0; --col) {
+        if (matches(col)) {
+          return col;
+        }
+      }
+      return -1;
+    case CharFindKind::kTillBack:
+      for (int col = std::min(from_col, len > 0 ? len - 1 : 0); col >= 0; --col) {
+        if (matches(col)) {
+          return std::min(len, col + 1);
+        }
+      }
+      return -1;
+  }
+  return -1;
+}
+
+int char_find_search_from_col(int head_col, CharFindKind kind) {
+  switch (kind) {
+    case CharFindKind::kFind:
+    case CharFindKind::kTill:
+      return head_col + 1;
+    case CharFindKind::kFindBack:
+    case CharFindKind::kTillBack:
+      return head_col - 1;
+  }
+  return head_col;
+}
+
+}  // namespace
+
+bool char_find_on_line(EditorBuffer* buffer, CharFindKind kind, char target, bool extend_selection) {
+  if (buffer == nullptr || buffer->lines.empty() || target == '\0') {
+    return false;
+  }
+  buffer->ensure_cursors();
+  bool moved = false;
+
+  for (auto& cursor : buffer->cursors) {
+    const int line = std::max(0, std::min(cursor.head.line, static_cast<int>(buffer->lines.size()) - 1));
+    const std::string& text = buffer->lines[static_cast<std::size_t>(line)];
+    const int from_col = char_find_search_from_col(cursor.head.col, kind);
+    const int dest_col = char_find_destination_col(text, from_col, kind, target);
+    if (dest_col < 0) {
+      continue;
+    }
+    if (!extend_selection) {
+      cursor.collapse_to_head();
+    }
+    cursor.head.line = line;
+    cursor.head.col = dest_col;
+    if (!extend_selection) {
+      cursor.anchor = cursor.head;
+    }
+    moved = true;
+  }
+
+  if (!moved) {
+    return false;
+  }
+  clamp_all_cursors(buffer);
+  cursor_blink::show();
+  return true;
+}
+
 void move_primary_left(EditorBuffer* buffer, bool extend_selection) {
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
@@ -1211,30 +1374,39 @@ void move_primary_right(EditorBuffer* buffer, bool extend_selection) {
   finish_move(buffer, extend_selection);
 }
 
-void move_primary_up(EditorBuffer* buffer, bool extend_selection) {
+void move_primary_vertical(EditorBuffer* buffer, int line_delta, bool extend_selection) {
+  if (buffer->lines.empty()) {
+    return;
+  }
+  const int tab_size = std::max(1, editor_indent::tab_display_width());
+  const int last_line = static_cast<int>(buffer->lines.size()) - 1;
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
       cursor.collapse_to_head();
     }
     auto& head = cursor.head;
-    if (head.line > 0) {
-      --head.line;
-    }
+    const std::string& from_line = buffer->lines[static_cast<std::size_t>(head.line)];
+    const int desired_vis = byte_index_to_visual_column(from_line, head.col, tab_size);
+
+    head.line = std::max(0, std::min(head.line + line_delta, last_line));
+
+    const std::string& to_line = buffer->lines[static_cast<std::size_t>(head.line)];
+    const int line_bytes = static_cast<int>(to_line.size());
+    const int to_vis_len = byte_index_to_visual_column(to_line, line_bytes, tab_size);
+    const int max_vis_on_line = line_bytes > 0 ? std::max(0, to_vis_len - 1) : 0;
+    const int target_vis = std::min(desired_vis, max_vis_on_line);
+    head.col = visual_column_to_byte_index(to_line, target_vis, tab_size);
+    head.col = std::max(0, std::min(head.col, line_bytes));
   }
   finish_move(buffer, extend_selection);
 }
 
+void move_primary_up(EditorBuffer* buffer, bool extend_selection) {
+  move_primary_vertical(buffer, -1, extend_selection);
+}
+
 void move_primary_down(EditorBuffer* buffer, bool extend_selection) {
-  for (auto& cursor : buffer->cursors) {
-    if (!extend_selection) {
-      cursor.collapse_to_head();
-    }
-    auto& head = cursor.head;
-    if (head.line + 1 < static_cast<int>(buffer->lines.size())) {
-      ++head.line;
-    }
-  }
-  finish_move(buffer, extend_selection);
+  move_primary_vertical(buffer, 1, extend_selection);
 }
 
 void move_primary_home(EditorBuffer* buffer, bool extend_selection) {
@@ -1499,6 +1671,52 @@ void uncomment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
   clamp_all_cursors(buffer);
   merge_overlapping_cursors(buffer);
   mark_dirty(buffer);
+}
+
+namespace {
+
+bool line_has_content(const std::string& line) {
+  return line.find_first_not_of(" \t\r\n") != std::string::npos;
+}
+
+}  // namespace
+
+void toggle_comment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
+  if (buffer == nullptr || buffer->lines.empty()) {
+    return;
+  }
+
+  std::vector<int> lines;
+  collect_affected_lines(*buffer, &lines);
+  if (lines.empty()) {
+    return;
+  }
+
+  bool all_commented = true;
+  bool any_content = false;
+  for (int line_index : lines) {
+    if (line_index < 0 || line_index >= static_cast<int>(buffer->lines.size())) {
+      continue;
+    }
+    const std::string& line = buffer->lines[static_cast<std::size_t>(line_index)];
+    if (!line_has_content(line)) {
+      continue;
+    }
+    any_content = true;
+    if (!line_is_commented(line, style)) {
+      all_commented = false;
+      break;
+    }
+  }
+  if (!any_content) {
+    return;
+  }
+
+  if (all_commented) {
+    uncomment_lines(buffer, style);
+  } else {
+    comment_lines(buffer, style);
+  }
 }
 
 }  // namespace tgdb

@@ -32,13 +32,43 @@ std::string slice_line_for_view(const std::string& line, int scroll_col, int vie
 
 int shift_col(int col, int scroll_col) { return col - scroll_col; }
 
+int caret_visual_in_view(const std::string& line, int primary_col, int scroll_col, int tab_size) {
+  const int primary_vis = byte_index_to_visual_column(line, primary_col, tab_size);
+  const int scroll_vis = byte_index_to_visual_column(line, scroll_col, tab_size);
+  return std::max(0, primary_vis - scroll_vis);
+}
+
+Element render_guide_with_caret(const std::string& guide_text, int caret_vis_in_guide) {
+  if (caret_vis_in_guide < 0 || caret_vis_in_guide >= static_cast<int>(guide_text.size())) {
+    return text(guide_text) | color(theme::AccentDim());
+  }
+  Elements parts;
+  if (caret_vis_in_guide > 0) {
+    parts.push_back(text(guide_text.substr(0, static_cast<std::size_t>(caret_vis_in_guide))) |
+                    color(theme::AccentDim()));
+  }
+  if (cursor_blink::visible()) {
+    parts.push_back(text(" ") | cursor_blink::cell_decorator());
+  } else {
+    parts.push_back(text(" "));
+  }
+  if (caret_vis_in_guide + 1 < static_cast<int>(guide_text.size())) {
+    parts.push_back(
+        text(guide_text.substr(static_cast<std::size_t>(caret_vis_in_guide + 1))) |
+        color(theme::AccentDim()));
+  }
+  return hbox(std::move(parts));
+}
+
 Element render_primary_caret_tail(const EditorBuffer& buffer, int line_index, bool editor_focused,
-                                  bool show_caret, int scroll_col, int guide_visual_cols) {
+                                  bool show_caret, const std::string& line, int scroll_col,
+                                  int guide_visual_cols, int tab_size) {
   if (!editor_focused || line_index != buffer.primary_line() || !show_caret) {
     return text(" ");
   }
-  const int caret_vis = std::max(0, shift_col(buffer.primary_col(), scroll_col));
-  const int tail_vis = std::max(0, caret_vis - guide_visual_cols);
+  const int caret_vis_in_view =
+      caret_visual_in_view(line, buffer.primary_col(), scroll_col, tab_size);
+  const int tail_vis = std::max(0, caret_vis_in_view - guide_visual_cols);
   std::string pad(static_cast<std::size_t>(tail_vis), ' ');
   Elements parts;
   if (!pad.empty()) {
@@ -343,11 +373,15 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
   shift_decorations(&decorations, effective_scroll_col, view_width);
 
   std::set<int> breakpoints;
-  breakpoints.insert(0);
   breakpoints.insert(static_cast<int>(line.size()));
   for (const auto& deco : decorations) {
     breakpoints.insert(std::max(0, deco.start_col));
-    breakpoints.insert(std::max(0, std::min(deco.end_col, static_cast<int>(line.size()))));
+    if (deco.kind == EditorDecoration::Kind::PrimaryCaret ||
+        deco.kind == EditorDecoration::Kind::SecondaryCaret) {
+      breakpoints.insert(std::max(0, deco.end_col));
+    } else {
+      breakpoints.insert(std::max(0, std::min(deco.end_col, static_cast<int>(line.size()))));
+    }
   }
 
   Elements parts;
@@ -482,7 +516,7 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
                          bool sticky_scroll_line, bool indent_guides_enabled,
                          int indent_guide_depth, bool defer_rich_decorations) {
   const std::string view_line = slice_line_for_view(line, scroll_col, view_width);
-  const int tab_size = std::max(1, editor_indent::width());
+  const int tab_size = std::max(1, editor_indent::tab_display_width());
   IndentGuideSplit guide_split;
   if (indent_guides_enabled && indent_guide_depth > 0) {
     guide_split = split_indent_guide_prefix(view_line, tab_size, indent_guide_depth);
@@ -513,21 +547,39 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
     rich = false;
   }
 
+  const bool caret_on_primary =
+      show_caret && editor_focused && line_index == buffer.primary_line();
+  const int caret_vis_in_view =
+      caret_on_primary ? caret_visual_in_view(line, buffer.primary_col(), scroll_col, tab_size)
+                       : -1;
+  const bool caret_in_guide_prefix =
+      guide_prefix_bytes > 0 && caret_vis_in_view >= 0 &&
+      caret_vis_in_view < guide_split.prefix_visual_width;
+  const bool body_show_caret = show_caret && !caret_in_guide_prefix;
+
   Element content =
       rich ? render_rich_line(body_line, line_index, buffer, editor_focused, find_matches,
                               selection_occurrences, semantic_tokens, syntax_highlight, bracket,
-                              line_diagnostics, symbol_press, show_caret, scroll_col, view_width,
+                              line_diagnostics, symbol_press, body_show_caret, scroll_col, view_width,
                               highlight_ctx, build_file_kind, guide_prefix_bytes)
            : render_simple_line(body_line, line_index, buffer, editor_focused, semantic_tokens,
-                                syntax_highlight, line_bg, show_caret, scroll_col, highlight_ctx,
+                                syntax_highlight, line_bg, body_show_caret, scroll_col, highlight_ctx,
                                 build_file_kind, guide_prefix_bytes);
 
   if (guide_prefix_bytes > 0) {
-    Element guide = text(guide_split.guide_text) | color(theme::AccentDim());
+    Element guide =
+        caret_in_guide_prefix
+            ? render_guide_with_caret(guide_split.guide_text, caret_vis_in_view)
+            : text(guide_split.guide_text) | color(theme::AccentDim());
     if (body_line.empty()) {
-      content = hbox({std::move(guide),
-                      render_primary_caret_tail(buffer, line_index, editor_focused, show_caret,
-                                                scroll_col, guide_split.prefix_visual_width)});
+      if (caret_vis_in_view >= guide_split.prefix_visual_width) {
+        content = hbox({std::move(guide),
+                        render_primary_caret_tail(buffer, line_index, editor_focused, show_caret,
+                                                  line, scroll_col, guide_split.prefix_visual_width,
+                                                  tab_size)});
+      } else {
+        content = std::move(guide);
+      }
     } else {
       content = hbox({std::move(guide), std::move(content)});
     }
@@ -536,9 +588,17 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
         build_blank_line_guides(tab_size, indent_guide_depth, view_width);
     if (!blank_guides.empty()) {
       const int guide_width = indent_guide_depth * tab_size;
-      content = hbox({text(blank_guides) | color(theme::AccentDim()),
-                      render_primary_caret_tail(buffer, line_index, editor_focused, show_caret,
-                                                scroll_col, guide_width)});
+      Element guide =
+          caret_on_primary && caret_vis_in_view >= 0 && caret_vis_in_view < guide_width
+              ? render_guide_with_caret(blank_guides, caret_vis_in_view)
+              : text(blank_guides) | color(theme::AccentDim());
+      if (caret_on_primary && caret_vis_in_view >= guide_width) {
+        content = hbox({std::move(guide),
+                        render_primary_caret_tail(buffer, line_index, editor_focused, show_caret,
+                                                  line, scroll_col, guide_width, tab_size)});
+      } else {
+        content = std::move(guide);
+      }
     }
   }
 

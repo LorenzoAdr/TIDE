@@ -195,9 +195,8 @@ bool helix_goto_block_end(const HelixScopeNavContext& ctx) {
   if (ctx.buffer == nullptr) {
     return false;
   }
-  const BracketPairHighlight pair =
-      find_enclosing_bracket_pair(*ctx.buffer, ctx.buffer->primary_line(),
-                                  ctx.buffer->primary_col(), '{');
+  const BracketPairHighlight pair = find_enclosing_bracket_pair_for_block_nav(
+      *ctx.buffer, ctx.buffer->primary_line(), ctx.buffer->primary_col(), '{', false);
   if (!pair.valid) {
     return false;
   }
@@ -209,9 +208,8 @@ bool helix_goto_block_start(const HelixScopeNavContext& ctx) {
   if (ctx.buffer == nullptr) {
     return false;
   }
-  const BracketPairHighlight pair =
-      find_enclosing_bracket_pair(*ctx.buffer, ctx.buffer->primary_line(),
-                                  ctx.buffer->primary_col(), '{');
+  const BracketPairHighlight pair = find_enclosing_bracket_pair_for_block_nav(
+      *ctx.buffer, ctx.buffer->primary_line(), ctx.buffer->primary_col(), '{', true);
   if (!pair.valid) {
     return false;
   }

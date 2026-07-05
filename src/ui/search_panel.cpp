@@ -20,6 +20,7 @@
 #include "ui/panel.hpp"
 #include "ui/text_input_style.hpp"
 #include "ui/theme.hpp"
+#include "ui/key_bindings.hpp"
 #include "i18n/tr.hpp"
 
 namespace tgdb {
@@ -358,6 +359,10 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       return false;
     }
 
+    if (event_is_tide_global_shortcut(event)) {
+      return false;
+    }
+
     if (event == Event::Escape) {
       if (state->runner.running()) {
         state->runner.cancel();
@@ -467,12 +472,6 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         clear_search_input_focus(layout_state);
         return true;
       }
-      if (event == Event::Character('r') || event == Event::Character('R')) {
-        if (!state->replace.empty()) {
-          run_replace_all(state.get(), workspace, model, indexer, layout_state);
-          return true;
-        }
-      }
       if (event.is_character() || event == Event::Backspace || event == Event::Delete ||
           event == Event::ArrowLeft || event == Event::ArrowRight || event == Event::Home ||
           event == Event::End) {
@@ -498,7 +497,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       activate_field(TextInputFocus::SearchQuery, query_input);
       return true;
     }
-    if (event == Event::Character('r') || event == Event::Character('R')) {
+    if (event == Event::Character('r')) {
       if (!state->replace.empty()) {
         run_replace_all(state.get(), workspace, model, indexer, layout_state);
         return true;

@@ -90,6 +90,10 @@ AppSettings AppSettings::load() {
     if (doc.contains("helix_mode_enabled") && doc["helix_mode_enabled"].is_boolean()) {
       settings.helix_mode_enabled = doc["helix_mode_enabled"].get<bool>();
     }
+    if (doc.contains("workspace_auto_detect_enabled") &&
+        doc["workspace_auto_detect_enabled"].is_boolean()) {
+      settings.workspace_auto_detect_enabled = doc["workspace_auto_detect_enabled"].get<bool>();
+    }
     if (doc.contains("icon_mode") && doc["icon_mode"].is_string()) {
       const std::string mode = doc["icon_mode"].get<std::string>();
       if (mode == "always") {
@@ -131,6 +135,7 @@ bool AppSettings::save() const {
   doc["monitor_enabled"] = monitor_enabled;
   doc["show_all_workspace_files"] = show_all_workspace_files;
   doc["helix_mode_enabled"] = helix_mode_enabled;
+  doc["workspace_auto_detect_enabled"] = workspace_auto_detect_enabled;
   switch (icon_mode) {
     case IconMode::Always:
       doc["icon_mode"] = "always";

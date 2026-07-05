@@ -50,6 +50,7 @@ struct SettingsModalState {
   bool draft_overview_ruler_enabled = true;
   bool draft_secondary_panel_enabled = true;
   bool draft_helix_mode_enabled = false;
+  bool draft_workspace_auto_detect_enabled = true;
   bool draft_force_bundled_clangd = false;
   bool draft_force_bundled_gdb = false;
   bool draft_monitor_enabled = false;

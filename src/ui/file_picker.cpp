@@ -1,7 +1,6 @@
 #include "ui/file_picker.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <filesystem>
 #include <memory>
 #include <unordered_set>
@@ -17,6 +16,7 @@
 #include "util/cpp_highlight.hpp"
 #include "util/path_normalize.hpp"
 #include "util/build_file_highlight.hpp"
+#include "util/fuzzy_match.hpp"
 
 namespace tgdb {
 
@@ -24,35 +24,97 @@ using namespace ftxui;
 
 namespace {
 
-constexpr int kModalWidth = 100;
-constexpr int kLeftPaneWidth = 38;
+constexpr int kModalWidth = 120;
+constexpr int kLeftPaneWidth = 54;
 constexpr int kRightPaneWidth = kModalWidth - kLeftPaneWidth - 1;
 constexpr int kPaneHeight = 18;
 constexpr int kMaxMatchRows = kPaneHeight;
 constexpr int kMaxPreviewRows = kPaneHeight;
+constexpr int kMatchTextWidth = kLeftPaneWidth - 2;
+constexpr int kOpenTabScoreBonus = 1000;
 
-bool contains_insensitive(const std::string& haystack, const std::string& needle) {
-  if (needle.empty()) {
-    return true;
+Element render_fuzzy_chars(const std::string& segment, std::size_t label_offset,
+                           const std::unordered_set<std::size_t>& hits, Color base_color) {
+  Elements parts;
+  std::string run;
+  Color run_color = base_color;
+  auto flush = [&]() {
+    if (!run.empty()) {
+      parts.push_back(text(run) | color(run_color));
+      run.clear();
+    }
+  };
+  for (std::size_t i = 0; i < segment.size(); ++i) {
+    const std::size_t label_index = label_offset + i;
+    const Color want = hits.count(label_index) != 0 ? theme::Error() : base_color;
+    if (!run.empty() && want != run_color) {
+      flush();
+    }
+    run_color = want;
+    run.push_back(segment[i]);
   }
-  if (haystack.size() < needle.size()) {
-    return false;
+  flush();
+  return parts.size() == 1 ? parts[0] : hbox(std::move(parts));
+}
+
+Element render_fuzzy_path_label(const std::string& label,
+                                const std::vector<std::size_t>& indices, bool selected,
+                                int max_width) {
+  std::unordered_set<std::size_t> hits(indices.begin(), indices.end());
+
+  const std::size_t slash = label.find_last_of("/\\");
+  const bool has_dir = slash != std::string::npos;
+  const std::string filename = has_dir ? label.substr(slash + 1) : label;
+  const std::size_t filename_offset = has_dir ? slash + 1 : 0;
+
+  if (static_cast<int>(filename.size()) > max_width) {
+    const std::size_t visible_offset =
+        filename.size() - static_cast<std::size_t>(max_width);
+    Element row = render_fuzzy_chars(filename.substr(visible_offset),
+                                     filename_offset + visible_offset, hits, theme::Header());
+    if (selected) {
+      row = row | inverted | bold;
+    }
+    return row;
   }
-  const std::size_t limit = haystack.size() - needle.size() + 1;
-  for (std::size_t i = 0; i < limit; ++i) {
-    bool match = true;
-    for (std::size_t j = 0; j < needle.size(); ++j) {
-      if (std::tolower(static_cast<unsigned char>(haystack[i + j])) !=
-          std::tolower(static_cast<unsigned char>(needle[j]))) {
-        match = false;
-        break;
+
+  const std::string dirname = has_dir ? label.substr(0, slash + 1) : std::string{};
+  int dir_budget = max_width - static_cast<int>(filename.size());
+  if (dir_budget < 0) {
+    dir_budget = 0;
+  }
+
+  Elements row_parts;
+  if (has_dir && dir_budget > 0) {
+    std::string dir_visible = dirname;
+    std::size_t dir_label_offset = 0;
+    if (static_cast<int>(dirname.size()) > dir_budget) {
+      constexpr const char* kEllipsis = "…";
+      const int tail_budget = dir_budget - 1;
+      if (tail_budget <= 0) {
+        dir_visible = kEllipsis;
+        dir_label_offset = dirname.size();
+      } else {
+        std::string tail = dirname.substr(dirname.size() - static_cast<std::size_t>(tail_budget));
+        const auto sep = tail.find_first_of("/\\");
+        if (sep != std::string::npos) {
+          tail = tail.substr(sep + 1);
+        }
+        dir_visible = std::string(kEllipsis) + tail;
+        dir_label_offset = dirname.size() - tail.size();
       }
     }
-    if (match) {
-      return true;
-    }
+    row_parts.push_back(render_fuzzy_chars(dir_visible, dir_label_offset, hits, theme::Muted()));
   }
-  return false;
+
+  row_parts.push_back(
+      render_fuzzy_chars(filename, filename_offset, hits, theme::Header()));
+
+  Element row = row_parts.size() == 1 ? row_parts[0] : hbox(std::move(row_parts));
+  if (selected) {
+    row = row | inverted | bold;
+  }
+  return row;
 }
 
 std::string picker_display_path(const std::string& path, const std::string& workspace_root) {
@@ -89,7 +151,7 @@ std::string selected_absolute_path(const FilePickerState* state, const std::stri
   }
   const int index =
       std::max(0, std::min(state->selected, static_cast<int>(state->matches.size()) - 1));
-  return picker_absolute_path(state->matches[static_cast<std::size_t>(index)], workspace_root)
+  return picker_absolute_path(state->matches[static_cast<std::size_t>(index)].path, workspace_root)
       .string();
 }
 
@@ -181,6 +243,7 @@ void FilePickerState::sync_index(const std::shared_ptr<const IndexSnapshot>& sna
   indexed_root = workspace_root;
   index_snapshot = snapshot;
   all_files = snapshot->files;
+  all_files_lower = snapshot->files_lower;
   matches_dirty = true;
 }
 
@@ -191,44 +254,72 @@ void FilePickerState::refresh_matches(const WorkspaceModel* workspace) {
   matches_dirty = false;
   matches.clear();
   if (query.empty() && workspace != nullptr) {
-    matches = workspace->open_tabs_mru_excluding_active();
+    for (const std::string& path : workspace->open_tabs_mru_excluding_active()) {
+      matches.push_back({path, 0, {}});
+    }
     if (selected >= static_cast<int>(matches.size())) {
       selected = std::max(0, static_cast<int>(matches.size()) - 1);
     }
     return;
   }
 
-  const auto path_matches_query = [this](const std::string& path) {
-    const std::string filename = std::filesystem::path(path).filename().string();
-    return contains_insensitive(filename, query);
-  };
-
   const std::string& workspace_root =
       !indexed_root.empty() ? indexed_root
                             : (workspace != nullptr ? workspace->root : std::string{});
 
+  struct Candidate {
+    std::string path;
+    std::string label;
+    int score = 0;
+    std::vector<std::size_t> match_indices;
+  };
+  std::vector<Candidate> candidates;
   std::unordered_set<std::string> seen;
-  if (workspace != nullptr) {
-    for (const std::string& path : workspace->open_tabs_mru()) {
-      if (!path_matches_query(path)) {
-        continue;
-      }
-      matches.push_back(path);
-      seen.insert(normalize_path(path));
-    }
-  }
+  const std::string query_lower = fuzzy_to_lower(query);
 
-  for (const auto& path : all_files) {
-    if (!path_matches_query(path)) {
-      continue;
+  const auto try_add = [&](const std::string& path, std::string_view label,
+                           std::string_view label_lower, int bonus) {
+    const FuzzyMatchResult result = fuzzy_match_cached(label, label_lower, query_lower);
+    if (!result.matched) {
+      return;
     }
     const auto absolute = picker_absolute_path(path, workspace_root);
     const std::string normalized = normalize_path(absolute.string());
     if (seen.count(normalized) != 0) {
-      continue;
+      return;
     }
-    matches.push_back(path);
     seen.insert(normalized);
+    candidates.push_back({path, std::string(label), result.score + bonus, result.indices});
+  };
+
+  if (workspace != nullptr) {
+    for (const std::string& path : workspace->open_tabs_mru()) {
+      const std::string label = picker_display_path(path, workspace_root);
+      try_add(path, label, fuzzy_to_lower(label), kOpenTabScoreBonus);
+    }
+  }
+
+  for (std::size_t i = 0; i < all_files.size(); ++i) {
+    const std::string& path = all_files[i];
+    const std::string& label_lower =
+        i < all_files_lower.size() ? all_files_lower[i] : fuzzy_to_lower(path);
+    try_add(path, path, label_lower, 0);
+  }
+
+  std::sort(candidates.begin(), candidates.end(),
+            [](const Candidate& a, const Candidate& b) {
+              if (a.score != b.score) {
+                return a.score > b.score;
+              }
+              if (a.label.size() != b.label.size()) {
+                return a.label.size() < b.label.size();
+              }
+              return a.label < b.label;
+            });
+
+  matches.reserve(candidates.size());
+  for (const Candidate& candidate : candidates) {
+    matches.push_back({candidate.path, candidate.score, candidate.match_indices});
   }
   if (selected >= static_cast<int>(matches.size())) {
     selected = std::max(0, static_cast<int>(matches.size()) - 1);
@@ -296,7 +387,7 @@ void FilePickerState::open_file(DebugModel* model, WorkspaceModel* workspace,
   index = std::max(0, std::min(index, static_cast<int>(matches.size()) - 1));
   std::error_code ec;
   const auto absolute =
-      picker_absolute_path(matches[static_cast<std::size_t>(index)], model->workspace_root);
+      picker_absolute_path(matches[static_cast<std::size_t>(index)].path, model->workspace_root);
   if (workspace != nullptr) {
     if (!workspace->open_file(absolute.string())) {
       return;
@@ -422,14 +513,11 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
         const int end =
             std::min(static_cast<int>(state->matches.size()), start + kMaxMatchRows);
         for (int i = start; i < end; ++i) {
+          const auto& match = state->matches[static_cast<std::size_t>(i)];
           const std::string label =
-              picker_display_path(state->matches[static_cast<std::size_t>(i)],
-                                  model->workspace_root);
-          Element row = text(label) | color(theme::Header());
-          if (i == state->selected) {
-            row = row | inverted | bold;
-          }
-          matches.push_back(row);
+              picker_display_path(match.path, model->workspace_root);
+          matches.push_back(render_fuzzy_path_label(label, match.match_indices,
+                                                    i == state->selected, kMatchTextWidth));
         }
         if (matches.empty()) {
           const bool scanning = indexer != nullptr && indexer->scanning();

@@ -10,6 +10,7 @@
 #include "ui/cursor_blink.hpp"
 #include "ui/cursor_blink.hpp"
 #include "ui/focusable_component.hpp"
+#include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
 #include "ui/spinner.hpp"
@@ -337,6 +338,10 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
     return false;
   }
 
+  if (event_is_tide_global_shortcut(event)) {
+    return false;
+  }
+
   if (event == Event::Character('1')) {
     select_tab(state, git, GitPanelState::kTabStatus);
     return true;
@@ -375,6 +380,33 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
         return true;
       }
     }
+    if (state->commit_input_focus) {
+      cursor_blink::show();
+      if (event == Event::Return) {
+        commit_message(git, state, layout_state);
+        return true;
+      }
+      if (event == Event::Escape) {
+        state->commit_input_focus = false;
+        return true;
+      }
+      if (event == Event::Backspace) {
+        if (state->commit_cursor > 0 &&
+            state->commit_cursor <= static_cast<int>(state->commit_message.size())) {
+          state->commit_message.erase(static_cast<std::size_t>(state->commit_cursor - 1), 1);
+          --state->commit_cursor;
+        }
+        return true;
+      }
+      if (event.is_character()) {
+        const std::string ch = event.character();
+        if (!ch.empty() && ch[0] >= 32) {
+          state->commit_message.insert(static_cast<std::size_t>(state->commit_cursor), ch);
+          state->commit_cursor += static_cast<int>(ch.size());
+        }
+        return true;
+      }
+    }
     if (event == Event::Character('s')) {
       stage_selected(git, state, layout_state);
       return true;
@@ -409,33 +441,6 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
       state->commit_input_focus = true;
       cursor_blink::show();
       return true;
-    }
-    if (state->commit_input_focus) {
-      cursor_blink::show();
-      if (event == Event::Return) {
-        commit_message(git, state, layout_state);
-        return true;
-      }
-      if (event == Event::Escape) {
-        state->commit_input_focus = false;
-        return true;
-      }
-      if (event == Event::Backspace) {
-        if (state->commit_cursor > 0 &&
-            state->commit_cursor <= static_cast<int>(state->commit_message.size())) {
-          state->commit_message.erase(static_cast<std::size_t>(state->commit_cursor - 1), 1);
-          --state->commit_cursor;
-        }
-        return true;
-      }
-      if (event.is_character()) {
-        const std::string ch = event.character();
-        if (!ch.empty() && ch[0] >= 32) {
-          state->commit_message.insert(static_cast<std::size_t>(state->commit_cursor), ch);
-          state->commit_cursor += static_cast<int>(ch.size());
-        }
-        return true;
-      }
     }
   } else if (state->selected_tab == GitPanelState::kTabLog) {
     const int count = static_cast<int>(git->log_entries().size());

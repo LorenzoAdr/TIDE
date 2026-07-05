@@ -9,8 +9,10 @@
 #include "editor/helix/helix_key.hpp"
 #include "editor/helix/helix_keymap.hpp"
 #include "editor/helix/helix_scope_nav.hpp"
+#include "editor/helix/helix_textobjects.hpp"
 #include "editor/line_comment.hpp"
 #include "editor/text_ops.hpp"
+#include "editor/text_search.hpp"
 #include "editor/undo_stack.hpp"
 #include "ftxui/component/event.hpp"
 #include "ui/key_bindings.hpp"
@@ -48,6 +50,36 @@ bool run_scope_nav(const HelixDispatchContext& ctx, bool (*fn)(const HelixScopeN
   return true;
 }
 
+HelixTextObjectContext text_object_context(const HelixDispatchContext& ctx) {
+  HelixTextObjectContext tobj;
+  tobj.buffer = ctx.buffer;
+  tobj.symbols = ctx.symbols;
+  return tobj;
+}
+
+bool run_text_object(const HelixDispatchContext& ctx, bool (*fn)(const HelixTextObjectContext&)) {
+  if (fn == nullptr || ctx.buffer == nullptr) {
+    return false;
+  }
+  if (fn(text_object_context(ctx))) {
+    ensure_view(ctx);
+    notify(ctx);
+  }
+  return true;
+}
+
+bool run_text_object_quote(const HelixDispatchContext& ctx,
+                           bool (*fn)(const HelixTextObjectContext&, char), char quote_ch) {
+  if (fn == nullptr || ctx.buffer == nullptr) {
+    return false;
+  }
+  if (fn(text_object_context(ctx), quote_ch)) {
+    ensure_view(ctx);
+    notify(ctx);
+  }
+  return true;
+}
+
 void helix_enter_insert(HelixEditorState* helix, EditorBuffer* buffer, int col_offset) {
   if (helix == nullptr || buffer == nullptr) {
     return;
@@ -73,6 +105,17 @@ void collapse_cursors_for_fresh_extend(EditorBuffer* buffer) {
 void move_fresh_extend(EditorBuffer* buffer, void (*move_fn)(EditorBuffer*, bool)) {
   collapse_cursors_for_fresh_extend(buffer);
   move_fn(buffer, true);
+}
+
+void move_helix_navigation(EditorBuffer* buffer, void (*move_fn)(EditorBuffer*, bool)) {
+  if (buffer == nullptr) {
+    return;
+  }
+  if (buffer->multi_cursor_active()) {
+    move_fn(buffer, false);
+    return;
+  }
+  move_fresh_extend(buffer, move_fn);
 }
 
 void goto_buffer_line_fresh_extend(EditorBuffer* buffer, int line_one_based, int visible_lines,
@@ -163,6 +206,140 @@ void execute_command_buffer(const HelixDispatchContext& ctx) {
   }
 }
 
+bool capture_regex_scope(HelixEditorState* helix, EditorBuffer* buffer) {
+  if (helix == nullptr || buffer == nullptr) {
+    return false;
+  }
+  if (!buffer->primary().has_selection()) {
+    select_word_at(buffer, buffer->primary_line(), buffer->primary_col());
+  }
+  const MultiCursor& primary = buffer->primary();
+  if (!primary.has_selection()) {
+    helix->regex_scope_valid = false;
+    return true;
+  }
+  primary.normalized_range(&helix->regex_scope.start_line, &helix->regex_scope.start_col,
+                             &helix->regex_scope.end_line, &helix->regex_scope.end_col);
+  helix->regex_scope_valid = true;
+  return true;
+}
+
+void open_regex_prompt(HelixEditorState* helix, EditorBuffer* buffer,
+                       HelixRegexPromptKind kind) {
+  if (helix == nullptr) {
+    return;
+  }
+  helix->clear_pending();
+  helix->hint_visible = false;
+  helix->clear_command();
+  helix->clear_char_find_pending();
+  capture_regex_scope(helix, buffer);
+  helix->regex_prompt = kind;
+  helix->regex_prompt_buffer.clear();
+}
+
+CharFindKind to_char_find_kind(HelixCharFindKind kind) {
+  switch (kind) {
+    case HelixCharFindKind::kFind:
+      return CharFindKind::kFind;
+    case HelixCharFindKind::kTill:
+      return CharFindKind::kTill;
+    case HelixCharFindKind::kFindBack:
+      return CharFindKind::kFindBack;
+    case HelixCharFindKind::kTillBack:
+      return CharFindKind::kTillBack;
+    case HelixCharFindKind::kNone:
+    default:
+      return CharFindKind::kFind;
+  }
+}
+
+HelixCharFindKind reverse_char_find_kind(HelixCharFindKind kind) {
+  switch (kind) {
+    case HelixCharFindKind::kFind:
+      return HelixCharFindKind::kFindBack;
+    case HelixCharFindKind::kTill:
+      return HelixCharFindKind::kTillBack;
+    case HelixCharFindKind::kFindBack:
+      return HelixCharFindKind::kFind;
+    case HelixCharFindKind::kTillBack:
+      return HelixCharFindKind::kTill;
+    case HelixCharFindKind::kNone:
+    default:
+      return HelixCharFindKind::kNone;
+  }
+}
+
+bool begin_char_find(HelixEditorState* helix, HelixCharFindKind kind) {
+  if (helix == nullptr || kind == HelixCharFindKind::kNone) {
+    return false;
+  }
+  helix->clear_pending();
+  helix->clear_regex_prompt();
+  helix->char_find_pending = kind;
+  helix->hint_visible = true;
+  return true;
+}
+
+bool complete_char_find(const HelixDispatchContext& ctx, char ch) {
+  if (ctx.helix == nullptr || ctx.buffer == nullptr ||
+      ctx.helix->char_find_pending == HelixCharFindKind::kNone) {
+    return false;
+  }
+  const HelixCharFindKind kind = ctx.helix->char_find_pending;
+  ctx.helix->clear_char_find_pending();
+  ctx.helix->hint_visible = false;
+  const bool extend = ctx.helix->mode == HelixMode::kSelect;
+  if (!char_find_on_line(ctx.buffer, to_char_find_kind(kind), ch, extend)) {
+    return true;
+  }
+  ctx.helix->char_find_last = kind;
+  ctx.helix->char_find_char = ch;
+  ensure_view(ctx);
+  return true;
+}
+
+bool repeat_char_find(const HelixDispatchContext& ctx, bool reverse) {
+  if (ctx.helix == nullptr || ctx.buffer == nullptr ||
+      ctx.helix->char_find_last == HelixCharFindKind::kNone || ctx.helix->char_find_char == '\0') {
+    return false;
+  }
+  HelixCharFindKind kind = ctx.helix->char_find_last;
+  if (reverse) {
+    kind = reverse_char_find_kind(kind);
+  }
+  const bool extend = ctx.helix->mode == HelixMode::kSelect;
+  if (!char_find_on_line(ctx.buffer, to_char_find_kind(kind), ctx.helix->char_find_char, extend)) {
+    return false;
+  }
+  if (reverse) {
+    ctx.helix->char_find_last = kind;
+  }
+  ensure_view(ctx);
+  return true;
+}
+
+void execute_regex_prompt(const HelixDispatchContext& ctx) {
+  if (ctx.helix == nullptr || ctx.buffer == nullptr) {
+    return;
+  }
+  const HelixRegexPromptKind kind = ctx.helix->regex_prompt;
+  const std::string pattern = ctx.helix->regex_prompt_buffer;
+  const TextRange* scope = ctx.helix->regex_scope_valid ? &ctx.helix->regex_scope : nullptr;
+  ctx.helix->clear_regex_prompt();
+  if (pattern.empty()) {
+    return;
+  }
+  if (apply_regex_match_cursors(ctx.buffer, pattern, scope)) {
+    ctx.helix->mode = HelixMode::kNormal;
+    if (ctx.buffer != nullptr) {
+      ctx.buffer->view_token++;
+    }
+    notify(ctx);
+  }
+  ensure_view(ctx);
+}
+
 bool handle_command_mode_keys(const HelixDispatchContext& ctx, const ftxui::Event& event) {
   if (ctx.helix == nullptr || !ctx.helix->command_mode) {
     return false;
@@ -189,6 +366,32 @@ bool handle_command_mode_keys(const HelixDispatchContext& ctx, const ftxui::Even
   return true;
 }
 
+bool handle_regex_prompt_keys(const HelixDispatchContext& ctx, const ftxui::Event& event) {
+  if (ctx.helix == nullptr || ctx.helix->regex_prompt == HelixRegexPromptKind::kNone) {
+    return false;
+  }
+  if (event == ftxui::Event::Escape) {
+    ctx.helix->clear_regex_prompt();
+    return true;
+  }
+  if (event == ftxui::Event::Return) {
+    execute_regex_prompt(ctx);
+    return true;
+  }
+  if (event == ftxui::Event::Backspace) {
+    if (!ctx.helix->regex_prompt_buffer.empty()) {
+      ctx.helix->regex_prompt_buffer.pop_back();
+    }
+    return true;
+  }
+  char ch = '\0';
+  if (helix_event_is_printable(event, &ch)) {
+    ctx.helix->regex_prompt_buffer.push_back(ch);
+    return true;
+  }
+  return true;
+}
+
 bool accumulate_count_digit(HelixEditorState* helix, char digit) {
   if (helix == nullptr) {
     return false;
@@ -206,13 +409,13 @@ bool accumulate_count_digit(HelixEditorState* helix, char digit) {
   return true;
 }
 
-void select_paren(EditorBuffer* buffer, bool around) {
+void select_surround_pair(EditorBuffer* buffer, char open_ch, bool around) {
   if (buffer == nullptr) {
     return;
   }
   const int line = buffer->primary_line();
   const int col = buffer->primary_col();
-  const BracketPairHighlight pair = find_bracket_pair_highlight(*buffer, line, col);
+  const BracketPairHighlight pair = find_enclosing_bracket_pair(*buffer, line, col, open_ch);
   if (!pair.valid) {
     return;
   }
@@ -221,7 +424,7 @@ void select_paren(EditorBuffer* buffer, bool around) {
   }
   const std::string& open_line = buffer->lines[static_cast<std::size_t>(pair.line_a)];
   if (pair.col_a < 0 || pair.col_a >= static_cast<int>(open_line.size()) ||
-      open_line[static_cast<std::size_t>(pair.col_a)] != '(') {
+      open_line[static_cast<std::size_t>(pair.col_a)] != open_ch) {
     return;
   }
   if (around) {
@@ -230,9 +433,7 @@ void select_paren(EditorBuffer* buffer, bool around) {
     int end_col = pair.col_b + 1;
     if (pair.line_b >= 0 && pair.line_b < static_cast<int>(buffer->lines.size()) &&
         pair.col_b >= 0 &&
-        pair.col_b < static_cast<int>(buffer->lines[static_cast<std::size_t>(pair.line_b)].size()) &&
-        buffer->lines[static_cast<std::size_t>(pair.line_b)][static_cast<std::size_t>(pair.col_b)] ==
-            ')') {
+        pair.col_b < static_cast<int>(buffer->lines[static_cast<std::size_t>(pair.line_b)].size())) {
       end_col = pair.col_b + 1;
     }
     buffer->primary().head = {pair.line_b, end_col};
@@ -242,6 +443,49 @@ void select_paren(EditorBuffer* buffer, bool around) {
     buffer->primary().head = {pair.line_b, pair.col_b};
   }
   clamp_all_cursors(buffer);
+}
+
+void select_closest_surround_pair(EditorBuffer* buffer, bool around) {
+  if (buffer == nullptr) {
+    return;
+  }
+  const int line = buffer->primary_line();
+  const int col = buffer->primary_col();
+  const BracketPairHighlight pair = find_innermost_enclosing_pair(*buffer, line, col);
+  if (!pair.valid) {
+    return;
+  }
+  if (pair.line_a < 0 || pair.line_a >= static_cast<int>(buffer->lines.size())) {
+    return;
+  }
+  const std::string& open_line = buffer->lines[static_cast<std::size_t>(pair.line_a)];
+  if (pair.col_a < 0 || pair.col_a >= static_cast<int>(open_line.size())) {
+    return;
+  }
+  const char open_ch = open_line[static_cast<std::size_t>(pair.col_a)];
+  if (open_ch != '(' && open_ch != '[' && open_ch != '{') {
+    return;
+  }
+  if (around) {
+    buffer->reset_to_single_cursor(pair.line_a, pair.col_a);
+    buffer->primary().anchor = {pair.line_a, pair.col_a};
+    int end_col = pair.col_b + 1;
+    if (pair.line_b >= 0 && pair.line_b < static_cast<int>(buffer->lines.size()) &&
+        pair.col_b >= 0 &&
+        pair.col_b < static_cast<int>(buffer->lines[static_cast<std::size_t>(pair.line_b)].size())) {
+      end_col = pair.col_b + 1;
+    }
+    buffer->primary().head = {pair.line_b, end_col};
+  } else {
+    buffer->reset_to_single_cursor(pair.line_a, pair.col_a + 1);
+    buffer->primary().anchor = {pair.line_a, pair.col_a + 1};
+    buffer->primary().head = {pair.line_b, pair.col_b};
+  }
+  clamp_all_cursors(buffer);
+}
+
+void select_paren(EditorBuffer* buffer, bool around) {
+  select_surround_pair(buffer, '(', around);
 }
 
 void match_brackets(EditorBuffer* buffer) {
@@ -439,39 +683,39 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
 
   switch (command) {
     case HelixCommand::kMoveCharLeft:
-      move_fresh_extend(buffer, move_primary_left);
+      move_helix_navigation(buffer, move_primary_left);
       ensure_view(ctx);
       return true;
     case HelixCommand::kMoveCharRight:
-      move_fresh_extend(buffer, move_primary_right);
+      move_helix_navigation(buffer, move_primary_right);
       ensure_view(ctx);
       return true;
     case HelixCommand::kMoveLineUp:
-      move_fresh_extend(buffer, move_primary_up);
+      move_helix_navigation(buffer, move_primary_up);
       ensure_view(ctx);
       return true;
     case HelixCommand::kMoveLineDown:
-      move_fresh_extend(buffer, move_primary_down);
+      move_helix_navigation(buffer, move_primary_down);
       ensure_view(ctx);
       return true;
     case HelixCommand::kMoveWordForward:
-      move_fresh_extend(buffer, move_primary_word_right);
+      move_helix_navigation(buffer, move_primary_word_right);
       ensure_view(ctx);
       return true;
     case HelixCommand::kMoveWordBackward:
-      move_fresh_extend(buffer, move_primary_word_left);
+      move_helix_navigation(buffer, move_primary_word_left);
       ensure_view(ctx);
       return true;
     case HelixCommand::kMoveWordEnd:
-      move_fresh_extend(buffer, move_primary_word_right);
+      move_helix_navigation(buffer, move_primary_word_right);
       ensure_view(ctx);
       return true;
     case HelixCommand::kGotoLineStart:
-      move_fresh_extend(buffer, move_primary_home);
+      move_helix_navigation(buffer, move_primary_home);
       ensure_view(ctx);
       return true;
     case HelixCommand::kGotoLineEnd:
-      move_fresh_extend(buffer, move_primary_end);
+      move_helix_navigation(buffer, move_primary_end);
       ensure_view(ctx);
       return true;
     case HelixCommand::kPageUp:
@@ -598,6 +842,8 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
       helix->clear_pending();
       helix->clear_count();
       helix->clear_command();
+      helix->clear_regex_prompt();
+      helix->clear_char_find_pending();
       helix->help_open = false;
       return true;
     case HelixCommand::kSelectMode:
@@ -677,16 +923,34 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
       }
       return true;
     case HelixCommand::kSearchNext:
+      if (repeat_char_find(ctx, false)) {
+        return true;
+      }
       if (ctx.find != nullptr && !ctx.find->matches.empty()) {
         ctx.find->jump_to_next_match(buffer, ctx.visible_lines);
         ensure_view(ctx);
       }
       return true;
     case HelixCommand::kSearchPrev:
+      if (repeat_char_find(ctx, true)) {
+        return true;
+      }
       if (ctx.find != nullptr && !ctx.find->matches.empty()) {
         ctx.find->jump_to_next_match(buffer, ctx.visible_lines);
         ensure_view(ctx);
       }
+      return true;
+    case HelixCommand::kFindCharForward:
+      begin_char_find(helix, HelixCharFindKind::kFind);
+      return true;
+    case HelixCommand::kTillCharForward:
+      begin_char_find(helix, HelixCharFindKind::kTill);
+      return true;
+    case HelixCommand::kFindCharBackward:
+      begin_char_find(helix, HelixCharFindKind::kFindBack);
+      return true;
+    case HelixCommand::kTillCharBackward:
+      begin_char_find(helix, HelixCharFindKind::kTillBack);
       return true;
     case HelixCommand::kSelectAll:
       if (!buffer->lines.empty()) {
@@ -697,8 +961,14 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
       }
       ensure_view(ctx);
       return true;
+    case HelixCommand::kSelectAllMatches:
+      open_regex_prompt(helix, buffer, HelixRegexPromptKind::kSelect);
+      return true;
+    case HelixCommand::kSplitSelectionOnRegex:
+      open_regex_prompt(helix, buffer, HelixRegexPromptKind::kSplit);
+      return true;
     case HelixCommand::kExtendLineBelow:
-      select_line_at(buffer, buffer->primary_line());
+      extend_line_below(buffer);
       ensure_view(ctx);
       return true;
     case HelixCommand::kExtendLineBounds:
@@ -721,13 +991,11 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
       return true;
     case HelixCommand::kToggleComments: {
       const LineCommentStyle style = line_comment_style_for_path(buffer->path);
-      if (buffer->primary().has_selection()) {
-        comment_lines(buffer, style);
-      } else {
+      if (!buffer->primary().has_selection()) {
         select_line_at(buffer, buffer->primary_line());
-        comment_lines(buffer, style);
-        clear_primary_selection(buffer);
       }
+      toggle_comment_lines(buffer, style);
+      clear_primary_selection(buffer);
       ensure_view(ctx);
       notify(ctx);
       return true;
@@ -780,6 +1048,78 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
       helix->clear_pending();
       ensure_view(ctx);
       return true;
+    case HelixCommand::kSelectInnerBrace:
+      select_surround_pair(buffer, '{', false);
+      helix->clear_pending();
+      ensure_view(ctx);
+      return true;
+    case HelixCommand::kSelectAroundBrace:
+      select_surround_pair(buffer, '{', true);
+      helix->clear_pending();
+      ensure_view(ctx);
+      return true;
+    case HelixCommand::kSelectInnerSquare:
+      select_surround_pair(buffer, '[', false);
+      helix->clear_pending();
+      ensure_view(ctx);
+      return true;
+    case HelixCommand::kSelectAroundSquare:
+      select_surround_pair(buffer, '[', true);
+      helix->clear_pending();
+      ensure_view(ctx);
+      return true;
+    case HelixCommand::kSelectInnerSurround:
+      select_closest_surround_pair(buffer, false);
+      helix->clear_pending();
+      ensure_view(ctx);
+      return true;
+    case HelixCommand::kSelectAroundSurround:
+      select_closest_surround_pair(buffer, true);
+      helix->clear_pending();
+      ensure_view(ctx);
+      return true;
+    case HelixCommand::kSelectInnerFunction:
+      helix->clear_pending();
+      return run_text_object(ctx, helix_select_inner_function);
+    case HelixCommand::kSelectAroundFunction:
+      helix->clear_pending();
+      return run_text_object(ctx, helix_select_around_function);
+    case HelixCommand::kSelectInnerType:
+      helix->clear_pending();
+      return run_text_object(ctx, helix_select_inner_type);
+    case HelixCommand::kSelectAroundType:
+      helix->clear_pending();
+      return run_text_object(ctx, helix_select_around_type);
+    case HelixCommand::kSelectInnerArgument:
+      helix->clear_pending();
+      return run_text_object(ctx, helix_select_inner_argument);
+    case HelixCommand::kSelectAroundArgument:
+      helix->clear_pending();
+      return run_text_object(ctx, helix_select_around_argument);
+    case HelixCommand::kSelectInnerComment:
+      helix->clear_pending();
+      return run_text_object(ctx, helix_select_inner_comment);
+    case HelixCommand::kSelectAroundComment:
+      helix->clear_pending();
+      return run_text_object(ctx, helix_select_around_comment);
+    case HelixCommand::kSelectInnerDoubleQuote:
+      helix->clear_pending();
+      return run_text_object_quote(ctx, helix_select_inner_quote, '"');
+    case HelixCommand::kSelectAroundDoubleQuote:
+      helix->clear_pending();
+      return run_text_object_quote(ctx, helix_select_around_quote, '"');
+    case HelixCommand::kSelectInnerSingleQuote:
+      helix->clear_pending();
+      return run_text_object_quote(ctx, helix_select_inner_quote, '\'');
+    case HelixCommand::kSelectAroundSingleQuote:
+      helix->clear_pending();
+      return run_text_object_quote(ctx, helix_select_around_quote, '\'');
+    case HelixCommand::kSelectInnerBacktick:
+      helix->clear_pending();
+      return run_text_object_quote(ctx, helix_select_inner_quote, '`');
+    case HelixCommand::kSelectAroundBacktick:
+      helix->clear_pending();
+      return run_text_object_quote(ctx, helix_select_around_quote, '`');
     case HelixCommand::kMatchBrackets:
       match_brackets(buffer);
       helix->clear_pending();
@@ -840,6 +1180,12 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
     case HelixCommand::kGotoBlockStart:
       helix->clear_pending();
       return run_scope_nav(ctx, helix_goto_block_start);
+    case HelixCommand::kSplitSelectionOnNewline:
+      split_selection_on_newlines(buffer);
+      helix->mode = HelixMode::kNormal;
+      helix->clear_pending();
+      ensure_view(ctx);
+      return true;
     case HelixCommand::kNone:
     default:
       return false;
@@ -868,6 +1214,11 @@ bool dispatch_helix_keys(const HelixDispatchContext& ctx, const ftxui::Event& ev
     return true;
   }
 
+  if (handle_regex_prompt_keys(ctx, event)) {
+    sync_helix_layout_status(ctx.layout_state, ctx.helix, true);
+    return true;
+  }
+
   if (event == ftxui::Event::Escape) {
     if (ctx.helix->prefix_active()) {
       ctx.helix->clear_pending();
@@ -875,6 +1226,15 @@ bool dispatch_helix_keys(const HelixDispatchContext& ctx, const ftxui::Event& ev
     }
     if (ctx.helix->count > 0) {
       ctx.helix->clear_count();
+      return true;
+    }
+    if (ctx.helix->regex_prompt != HelixRegexPromptKind::kNone) {
+      ctx.helix->clear_regex_prompt();
+      return true;
+    }
+    if (ctx.helix->char_find_pending != HelixCharFindKind::kNone) {
+      ctx.helix->clear_char_find_pending();
+      ctx.helix->hint_visible = false;
       return true;
     }
     if (ctx.helix->mode != HelixMode::kNormal) {
@@ -887,12 +1247,27 @@ bool dispatch_helix_keys(const HelixDispatchContext& ctx, const ftxui::Event& ev
     return false;
   }
 
-  if (ctx.helix->mode == HelixMode::kInsert) {
+  if (event_is_alt_s(event) &&
+      (ctx.helix->mode == HelixMode::kNormal || ctx.helix->mode == HelixMode::kSelect)) {
+    ctx.helix->clear_pending();
+    ctx.helix->hint_visible = false;
+    const bool handled = execute_helix_command(ctx, HelixCommand::kSplitSelectionOnNewline);
+    sync_helix_layout_status(ctx.layout_state, ctx.helix, true);
+    return handled;
+  }
+
+  if ((ctx.helix->mode == HelixMode::kNormal || ctx.helix->mode == HelixMode::kSelect) &&
+      ctx.helix->char_find_pending != HelixCharFindKind::kNone) {
+    if (event == ftxui::Event::Escape) {
+      ctx.helix->clear_char_find_pending();
+      ctx.helix->hint_visible = false;
+      sync_helix_layout_status(ctx.layout_state, ctx.helix, true);
+      return true;
+    }
     char ch = '\0';
     if (helix_event_is_printable(event, &ch)) {
-      insert_char(ctx.buffer, ch);
-      ensure_view(ctx);
-      notify(ctx);
+      complete_char_find(ctx, ch);
+      sync_helix_layout_status(ctx.layout_state, ctx.helix, true);
       return true;
     }
   }
@@ -921,6 +1296,10 @@ bool dispatch_helix_keys(const HelixDispatchContext& ctx, const ftxui::Event& ev
       helix_lookup_key(ctx.helix->mode, ctx.helix->pending_keys, *token);
   if (lookup.kind == HelixKeyLookupResult::Kind::kNone) {
     const bool had_prefix = ctx.helix->prefix_active();
+    if (ctx.helix->char_find_pending != HelixCharFindKind::kNone) {
+      ctx.helix->clear_char_find_pending();
+      ctx.helix->hint_visible = false;
+    }
     ctx.helix->clear_pending();
     if (ctx.helix->mode != HelixMode::kInsert || had_prefix) {
       return true;
@@ -995,7 +1374,8 @@ void sync_helix_layout_status(MainLayoutState* layout_state, const HelixEditorSt
   layout_state->helix_status = snap;
   layout_state->editor_helix_prefix_pending =
       enabled && helix != nullptr &&
-      (helix->prefix_active() || helix->command_mode);
+      (helix->prefix_active() || helix->prompt_active() ||
+       helix->char_find_pending != HelixCharFindKind::kNone);
 }
 
 }  // namespace tgdb

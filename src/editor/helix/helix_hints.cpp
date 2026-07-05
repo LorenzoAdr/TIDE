@@ -29,6 +29,17 @@ Element hint_table(const std::vector<std::pair<std::string, std::string>>& entri
   return vbox(std::move(rows)) | border | bgcolor(theme::PanelBg()) | color(theme::Header());
 }
 
+Element bottom_prompt_overlay(Element panel) {
+  Element bar = std::move(panel) | size(HEIGHT, EQUAL, 3);
+  return dbox({
+      text(""),
+      vbox({
+          filler(),
+          hbox({filler(), std::move(bar)}),
+      }),
+  });
+}
+
 }  // namespace
 
 Element make_helix_hint_overlay(const HelixEditorState& helix) {
@@ -60,6 +71,8 @@ std::vector<std::pair<std::string, std::string>> helix_help_sections() {
   return {
       {"hjkl / flechas", i18n::tr("helix.help.move_highlight")},
       {"w / b / e", i18n::tr("helix.help.word_motion")},
+      {"f / t / F / T", i18n::tr("helix.help.char_find")},
+      {"n / N", i18n::tr("helix.help.char_find_repeat")},
       {"w + d / w + c", i18n::tr("helix.help.delete_change_selection")},
       {"5j / 3w", i18n::tr("helix.help.count_prefix")},
       {"i / a / o / O", i18n::tr("helix.help.insert_modes")},
@@ -73,10 +86,19 @@ std::vector<std::pair<std::string, std::string>> helix_help_sections() {
       {"g g / g e", i18n::tr("helix.help.file_bounds")},
       {"g g + g e", i18n::tr("helix.help.select_whole_file")},
       {"%", i18n::tr("helix.help.select_whole_file_percent")},
+      {"s", i18n::tr("helix.help.select_regex")},
+      {"S", i18n::tr("helix.help.split_selection_on_regex")},
+      {"Alt+s", i18n::tr("helix.help.split_selection_on_newline")},
+      {"Ctrl+D / Ctrl+Alt+L", i18n::tr("helix.help.tide_multicursor")},
       {"g d", i18n::tr("helix.help.goto_definition")},
       {"z u / z d", i18n::tr("helix.help.scroll")},
       {"m i w / m a w", i18n::tr("helix.help.text_objects_word")},
       {"m i ( / m a (", i18n::tr("helix.help.text_objects_paren")},
+      {"m i { / m a { / m i m", i18n::tr("helix.help.text_objects_surround")},
+      {"m i f / m a t", i18n::tr("helix.help.text_objects_lsp")},
+      {"m i a", i18n::tr("helix.help.text_objects_arg")},
+      {"m i c", i18n::tr("helix.help.text_objects_comment")},
+      {"m i \" / m i ' / m i `", i18n::tr("helix.help.text_objects_quote")},
       {"m m", i18n::tr("helix.help.match_brackets")},
       {"[ d / ] d", i18n::tr("helix.help.diagnostics")},
       {"[ f / ] f  [ t / ] t  [ p / ] p  [ } / ] }", i18n::tr("helix.help.scope_nav")},
@@ -95,10 +117,18 @@ Element make_helix_command_overlay(const HelixEditorState& helix) {
   }
   const std::string line = ":" + helix.command_buffer + "_";
   Element panel = hbox({text(line) | color(theme::Accent())}) | border | bgcolor(theme::PanelBg());
-  return vbox({
-      text(""),
-      hbox({filler(), panel}) | flex,
-  });
+  return bottom_prompt_overlay(std::move(panel));
+}
+
+Element make_helix_regex_prompt_overlay(const HelixEditorState& helix) {
+  if (helix.regex_prompt == HelixRegexPromptKind::kNone) {
+    return text("");
+  }
+  const char* prefix =
+      helix.regex_prompt == HelixRegexPromptKind::kSelect ? "s/" : "S/";
+  const std::string line = std::string(prefix) + helix.regex_prompt_buffer + "_";
+  Element panel = hbox({text(line) | color(theme::Accent())}) | border | bgcolor(theme::PanelBg());
+  return bottom_prompt_overlay(std::move(panel));
 }
 
 Element make_helix_help_overlay(const HelixEditorState& helix) {

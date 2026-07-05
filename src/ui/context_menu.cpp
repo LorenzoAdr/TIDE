@@ -874,9 +874,11 @@ void focus_search_with_filter(MainLayoutState* layout_state, const std::string& 
   layout_state->console_visible = true;
   layout_state->console_tabs.selected_tab = ConsolePanelTabs::kSearch;
   layout_state->right_panel_active_section = 0;
-  layout_state->right_sidebar.pending_search_setup = true;
-  layout_state->right_sidebar.pending_search_query = query;
-  layout_state->right_sidebar.pending_search_path_filter = path_filter;
+  if (!query.empty() || !path_filter.empty()) {
+    layout_state->right_sidebar.pending_search_setup = true;
+    layout_state->right_sidebar.pending_search_query = query;
+    layout_state->right_sidebar.pending_search_path_filter = path_filter;
+  }
   layout_state->right_sidebar.pending_focus_search = true;
   layout_state->text_input_focus = TextInputFocus::SearchQuery;
   layout_state->focus_sync_needed = true;

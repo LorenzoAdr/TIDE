@@ -226,7 +226,17 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
     workspace_.status_message = i18n::tr("workspace.welcome");
     workspace_.clear_tabs();
   } else {
-    set_workspace(config_.workspace_root);
+    std::string anchor = config_.workspace_root;
+    if (!config_.initial_file.empty()) {
+      anchor = fs::path(config_.initial_file).parent_path().string();
+    }
+    const WorkspaceDetectResult detected = resolve_workspace_for_anchor(anchor);
+    config_.workspace_root = detected.workspace_root;
+    model_.workspace_root = detected.workspace_root;
+    workspace_.root = detected.workspace_root;
+    const WorkspaceDetectResult* detect_ptr =
+        app_settings_.workspace_auto_detect_enabled ? &detected : nullptr;
+    set_workspace(detected.workspace_root, detect_ptr);
     if (!config_.initial_file.empty()) {
       workspace_.open_file(config_.initial_file);
     }
@@ -599,7 +609,8 @@ void Application::dismiss_welcome_screen() {
   layout_state_.request_ui_tick = true;
 }
 
-void Application::set_workspace(const std::string& workspace_root) {
+void Application::set_workspace(const std::string& workspace_root,
+                                  const WorkspaceDetectResult* detect) {
   dismiss_welcome_screen();
   workspace_initialized_ = true;
   save_workspace_session();
@@ -612,10 +623,17 @@ void Application::set_workspace(const std::string& workspace_root) {
   workspace_.clear_tabs();
   secondary_workspace_.root = absolute;
   secondary_workspace_.clear_tabs();
-  workspace_.status_message =
-      i18n::tr_fmt("workspace.open_prefix", {fs::path(absolute).filename().string()});
+  if (detect != nullptr && detect->marker_found) {
+    workspace_.status_message = i18n::tr_fmt(
+        "workspace.detected_from",
+        {fs::path(absolute).filename().string(), detect->marker});
+  } else {
+    workspace_.status_message =
+        i18n::tr_fmt("workspace.open_prefix", {fs::path(absolute).filename().string()});
+  }
   file_picker_state_.indexed_root.clear();
   file_picker_state_.all_files.clear();
+  file_picker_state_.all_files_lower.clear();
   shell_session_.stop();
   model_.console_output.clear();
   request_terminal_autostart();
@@ -668,6 +686,13 @@ void Application::set_workspace(const std::string& workspace_root) {
   restore_workspace_session();
 }
 
+WorkspaceDetectResult Application::resolve_workspace_for_anchor(const std::string& anchor) const {
+  if (app_settings_.workspace_auto_detect_enabled) {
+    return detect_workspace_root(anchor);
+  }
+  return detect_workspace_root(anchor, 0);
+}
+
 void Application::on_workspace_complete(const std::string& workspace_root,
                                         ScreenInteractive* /*screen*/) {
   workspace_wizard_state_.open = false;
@@ -678,9 +703,12 @@ void Application::process_pending_workspace_load() {
   if (!pending_workspace_load_.has_value()) {
     return;
   }
-  const std::string root = std::move(*pending_workspace_load_);
+  const std::string chosen = std::move(*pending_workspace_load_);
   pending_workspace_load_.reset();
-  set_workspace(root);
+  const WorkspaceDetectResult detected = resolve_workspace_for_anchor(chosen);
+  const WorkspaceDetectResult* detect_ptr =
+      app_settings_.workspace_auto_detect_enabled ? &detected : nullptr;
+  set_workspace(detected.workspace_root, detect_ptr);
   config_.show_welcome_screen = false;
   focus_state_.region =
       workspace_.tabs.empty() ? FocusRegion::Explorer : FocusRegion::Editor;
@@ -1350,6 +1378,9 @@ int Application::run() {
     symbol_picker_state_.query.clear();
     symbol_picker_state_.selected = 0;
     symbol_picker_state_.loaded_file.clear();
+    symbol_picker_state_.catalog_key.clear();
+    symbol_picker_state_.catalog.reset();
+    symbol_picker_state_.mark_matches_dirty();
     force_immediate_repaint(&layout_state_, &screen);
   };
   layout_state_.helix_ide.save_file = [this]() {
@@ -1391,12 +1422,14 @@ int Application::run() {
   git_service_.set_update_callback([this] { layout_state_.request_ui_tick = true; });
 
   file_picker_state_.set_preview_notify([this] { layout_state_.request_ui_tick = true; });
+  symbol_picker_state_.set_search_notify([this] { layout_state_.request_ui_tick = true; });
 
   auto with_picker = MakeFilePickerOverlay(
       layout, &model_, &workspace_, &file_picker_state_, &focus_state_, &indexer_);
 
   auto with_symbol_picker = MakeSymbolPickerOverlay(
-      with_picker, &workspace_, &symbol_picker_state_, &focus_state_, symbol_provider_);
+      with_picker, &workspace_, &symbol_picker_state_, &focus_state_, symbol_provider_,
+      &symbol_indexer_);
 
   auto with_debug_wizard = MakeConnectionWizardOverlay(
       with_symbol_picker, &connection_wizard_state_, &model_, &layout_state_,
@@ -1412,7 +1445,16 @@ int Application::run() {
       with_workspace_wizard, &external_file_wizard_state_, &layout_state_,
       [this](const std::string& path) {
         dismiss_welcome_screen();
-        workspace_.open_external_file(path);
+        if (!workspace_initialized_) {
+          const WorkspaceDetectResult detected =
+              resolve_workspace_for_anchor(fs::path(path).parent_path().string());
+          const WorkspaceDetectResult* detect_ptr =
+              app_settings_.workspace_auto_detect_enabled ? &detected : nullptr;
+          set_workspace(detected.workspace_root, detect_ptr);
+          workspace_.open_file(path);
+        } else {
+          workspace_.open_external_file(path);
+        }
         layout_state_.request_ui_tick = true;
       });
 
@@ -1738,6 +1780,7 @@ int Application::run() {
           terminal_tab && focus_state_.region == FocusRegion::Terminal &&
           shell_session_.running();
       if ((layout_state_.text_input_focus == TextInputFocus::Console || shell_terminal_focus) &&
+          !event_is_tide_global_shortcut(event) &&
           layout_state_.console_key_handler &&
           layout_state_.console_key_handler(event)) {
         screen.Post(Event::Custom);
@@ -1750,11 +1793,10 @@ int Application::run() {
         active_workspace.ensure_buffer();
         const std::string needle =
             selection_text(active_workspace.buffer, active_workspace.buffer.primary());
-        if (!needle.empty()) {
-          focus_search_with_filter(&layout_state_, needle, "");
-          screen.Post(Event::Custom);
-          return true;
-        }
+        focus_search_with_filter(&layout_state_, needle, "");
+        focus_state_.region = FocusRegion::Terminal;
+        screen.Post(Event::Custom);
+        return true;
       }
       const auto& active_editor_handlers =
           editor_handlers_for(&layout_state_, focus_state_.region);
@@ -1998,6 +2040,9 @@ int Application::run() {
         symbol_picker_state_.query.clear();
         symbol_picker_state_.selected = 0;
         symbol_picker_state_.loaded_file.clear();
+        symbol_picker_state_.catalog_key.clear();
+        symbol_picker_state_.catalog.reset();
+        symbol_picker_state_.mark_matches_dirty();
         force_immediate_repaint(&layout_state_, &screen);
         return true;
       }

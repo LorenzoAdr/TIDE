@@ -220,6 +220,13 @@ bool event_is_alt_o(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[79;3u");
 }
 
+bool event_is_alt_s(const ftxui::Event& event) {
+  return event == ftxui::Event::AltS || alt_letter(event, 's', 'S') ||
+         event == ftxui::Event::Special("\x1Bs") ||
+         event == ftxui::Event::Special("\x1B[115;3u") ||
+         event == ftxui::Event::Special("\x1B[83;3u");
+}
+
 bool event_is_ctrl_alt_h(const ftxui::Event& event) {
   const int mods[] = {7};
   return event == ftxui::Event::CtrlAltH ||

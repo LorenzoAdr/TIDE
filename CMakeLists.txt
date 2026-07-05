@@ -15,6 +15,7 @@ add_executable(tgdb
   src/i18n/tr.cpp
   src/i18n/strings_es.cpp
   src/i18n/strings_en.cpp
+  src/app/workspace_detect.cpp
   src/app/workspace_config.cpp
   src/app/workspace_session.cpp
   src/app/debug_model.cpp
@@ -45,6 +46,7 @@ add_executable(tgdb
   src/ui/file_picker.cpp
   src/ui/file_picker_preview.cpp
   src/ui/symbol_picker.cpp
+  src/ui/symbol_picker_match_runner.cpp
   src/ui/quit_confirm.cpp
   src/ui/shutdown_overlay.cpp
   src/ui/open_file_confirm.cpp
@@ -111,6 +113,7 @@ add_executable(tgdb
   src/editor/helix/helix_dispatch.cpp
   src/editor/helix/helix_hints.cpp
   src/editor/helix/helix_scope_nav.cpp
+  src/editor/helix/helix_textobjects.cpp
   src/util/cpp_highlight.cpp
   src/util/crash_handler.cpp
   src/util/child_process_guard.cpp
@@ -118,6 +121,7 @@ add_executable(tgdb
   src/util/filesystem_tree.cpp
   src/util/include_tree.cpp
   src/util/path_normalize.cpp
+  src/util/fuzzy_match.cpp
   src/util/file_open_policy.cpp
   src/util/compile_commands_setup.cpp
   src/util/compile_commands_remap.cpp
@@ -230,6 +234,32 @@ add_executable(build_environment_test
   src/build/build_environment_selector.cpp
 )
 target_include_directories(build_environment_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(workspace_detect_test
+  tests/workspace_detect_test.cpp
+  src/app/workspace_detect.cpp
+  src/build/build_environment.cpp
+  src/util/path_normalize.cpp
+)
+target_include_directories(workspace_detect_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(fuzzy_match_test
+  tests/fuzzy_match_test.cpp
+  src/util/fuzzy_match.cpp
+)
+target_include_directories(fuzzy_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(workspace_indexer_test
+  tests/workspace_indexer_test.cpp
+  src/indexer/workspace_indexer.cpp
+  src/indexer/index_rules.cpp
+  src/util/fuzzy_match.cpp
+  src/util/monitor_log.cpp
+)
+target_include_directories(workspace_indexer_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
 
 add_executable(csv_index_test
   tests/csv_index_test.cpp

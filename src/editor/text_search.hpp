@@ -15,6 +15,13 @@ struct TextMatch {
   int length = 0;
 };
 
+struct TextRange {
+  int start_line = 0;
+  int start_col = 0;
+  int end_line = 0;
+  int end_col = 0;
+};
+
 bool is_ident_char(char c);
 bool is_ident_start(char c);
 
@@ -46,6 +53,8 @@ std::vector<TextMatch> find_occurrences_in_lines(const std::vector<std::string>&
 bool match_occupied(const TextMatch& match, const EditorBuffer& buffer);
 
 void add_next_selection_match(EditorBuffer* buffer, int visible_lines);
-void select_all_matches(EditorBuffer* buffer);
+void select_all_matches(EditorBuffer* buffer, const TextRange* scope = nullptr);
+bool apply_regex_match_cursors(EditorBuffer* buffer, const std::string& pattern,
+                               const TextRange* scope);
 
 }  // namespace tgdb

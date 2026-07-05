@@ -3615,6 +3615,12 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
                                      symbols, visible_lines);
     if (dispatch_helix_keys(hctx, event)) {
       sync_helix_layout_status(layout_state, &panel->helix, true);
+      if (panel->helix.mode == HelixMode::kInsert && completion != nullptr &&
+          completion->open && completion->live_mode &&
+          (event == Event::Backspace || event == Event::Delete)) {
+        update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
+                               buffer);
+      }
       return true;
     }
     if (panel->helix.mode != HelixMode::kInsert) {
@@ -3977,6 +3983,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       }
       if (panel_state->helix.command_mode) {
         return make_helix_command_overlay(panel_state->helix);
+      }
+      if (panel_state->helix.regex_prompt != HelixRegexPromptKind::kNone) {
+        return make_helix_regex_prompt_overlay(panel_state->helix);
       }
       if (panel_state->helix.hint_visible && panel_state->helix.prefix_active()) {
         return make_helix_hint_overlay(panel_state->helix);

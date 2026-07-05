@@ -63,9 +63,29 @@ void build_match_trie(HelixKeyTrieNode* root) {
   auto& mi = bind(&m, "i");
   bind_cmd(&mi, "w", HelixCommand::kSelectInnerWord);
   bind_cmd(&mi, "(", HelixCommand::kSelectInnerParen);
+  bind_cmd(&mi, "{", HelixCommand::kSelectInnerBrace);
+  bind_cmd(&mi, "[", HelixCommand::kSelectInnerSquare);
+  bind_cmd(&mi, "m", HelixCommand::kSelectInnerSurround);
+  bind_cmd(&mi, "f", HelixCommand::kSelectInnerFunction);
+  bind_cmd(&mi, "t", HelixCommand::kSelectInnerType);
+  bind_cmd(&mi, "a", HelixCommand::kSelectInnerArgument);
+  bind_cmd(&mi, "c", HelixCommand::kSelectInnerComment);
+  bind_cmd(&mi, "\"", HelixCommand::kSelectInnerDoubleQuote);
+  bind_cmd(&mi, "'", HelixCommand::kSelectInnerSingleQuote);
+  bind_cmd(&mi, "`", HelixCommand::kSelectInnerBacktick);
   auto& ma = bind(&m, "a");
   bind_cmd(&ma, "w", HelixCommand::kSelectAroundWord);
   bind_cmd(&ma, "(", HelixCommand::kSelectAroundParen);
+  bind_cmd(&ma, "{", HelixCommand::kSelectAroundBrace);
+  bind_cmd(&ma, "[", HelixCommand::kSelectAroundSquare);
+  bind_cmd(&ma, "m", HelixCommand::kSelectAroundSurround);
+  bind_cmd(&ma, "f", HelixCommand::kSelectAroundFunction);
+  bind_cmd(&ma, "t", HelixCommand::kSelectAroundType);
+  bind_cmd(&ma, "a", HelixCommand::kSelectAroundArgument);
+  bind_cmd(&ma, "c", HelixCommand::kSelectAroundComment);
+  bind_cmd(&ma, "\"", HelixCommand::kSelectAroundDoubleQuote);
+  bind_cmd(&ma, "'", HelixCommand::kSelectAroundSingleQuote);
+  bind_cmd(&ma, "`", HelixCommand::kSelectAroundBacktick);
   bind_cmd(&m, "d", HelixCommand::kDeleteInnerWord);
   bind_cmd(&m, "m", HelixCommand::kMatchBrackets);
 }
@@ -83,6 +103,10 @@ HelixKeyTrieNode build_normal_map() {
   bind_cmd(&root, "w", HelixCommand::kMoveWordForward);
   bind_cmd(&root, "b", HelixCommand::kMoveWordBackward);
   bind_cmd(&root, "e", HelixCommand::kMoveWordEnd);
+  bind_cmd(&root, "f", HelixCommand::kFindCharForward);
+  bind_cmd(&root, "t", HelixCommand::kTillCharForward);
+  bind_cmd(&root, "F", HelixCommand::kFindCharBackward);
+  bind_cmd(&root, "T", HelixCommand::kTillCharBackward);
   bind_cmd(&root, "<home>", HelixCommand::kGotoLineStart);
   bind_cmd(&root, "<end>", HelixCommand::kGotoLineEnd);
   bind_cmd(&root, "<pageup>", HelixCommand::kPageUp);
@@ -105,6 +129,8 @@ HelixKeyTrieNode build_normal_map() {
   bind_cmd(&root, "/", HelixCommand::kSearch);
   bind_cmd(&root, "n", HelixCommand::kSearchNext);
   bind_cmd(&root, "N", HelixCommand::kSearchPrev);
+  bind_cmd(&root, "s", HelixCommand::kSelectAllMatches);
+  bind_cmd(&root, "S", HelixCommand::kSplitSelectionOnRegex);
   bind_cmd(&root, "%", HelixCommand::kSelectAll);
   bind_cmd(&root, "X", HelixCommand::kExtendLineBounds);
   bind_cmd(&root, ">", HelixCommand::kIndent);
@@ -247,6 +273,14 @@ std::string helix_command_label(HelixCommand command) {
       return i18n::tr("helix.cmd.move_word_backward");
     case HelixCommand::kMoveWordEnd:
       return i18n::tr("helix.cmd.move_word_end");
+    case HelixCommand::kFindCharForward:
+      return i18n::tr("helix.cmd.find_char_forward");
+    case HelixCommand::kTillCharForward:
+      return i18n::tr("helix.cmd.till_char_forward");
+    case HelixCommand::kFindCharBackward:
+      return i18n::tr("helix.cmd.find_char_backward");
+    case HelixCommand::kTillCharBackward:
+      return i18n::tr("helix.cmd.till_char_backward");
     case HelixCommand::kGotoLineStart:
       return i18n::tr("helix.cmd.goto_line_start");
     case HelixCommand::kGotoLineEnd:
@@ -353,6 +387,46 @@ std::string helix_command_label(HelixCommand command) {
       return i18n::tr("helix.cmd.select_inner_paren");
     case HelixCommand::kSelectAroundParen:
       return i18n::tr("helix.cmd.select_around_paren");
+    case HelixCommand::kSelectInnerBrace:
+      return i18n::tr("helix.cmd.select_inner_brace");
+    case HelixCommand::kSelectAroundBrace:
+      return i18n::tr("helix.cmd.select_around_brace");
+    case HelixCommand::kSelectInnerSquare:
+      return i18n::tr("helix.cmd.select_inner_square");
+    case HelixCommand::kSelectAroundSquare:
+      return i18n::tr("helix.cmd.select_around_square");
+    case HelixCommand::kSelectInnerSurround:
+      return i18n::tr("helix.cmd.select_inner_surround");
+    case HelixCommand::kSelectAroundSurround:
+      return i18n::tr("helix.cmd.select_around_surround");
+    case HelixCommand::kSelectInnerFunction:
+      return i18n::tr("helix.cmd.select_inner_function");
+    case HelixCommand::kSelectAroundFunction:
+      return i18n::tr("helix.cmd.select_around_function");
+    case HelixCommand::kSelectInnerType:
+      return i18n::tr("helix.cmd.select_inner_type");
+    case HelixCommand::kSelectAroundType:
+      return i18n::tr("helix.cmd.select_around_type");
+    case HelixCommand::kSelectInnerArgument:
+      return i18n::tr("helix.cmd.select_inner_argument");
+    case HelixCommand::kSelectAroundArgument:
+      return i18n::tr("helix.cmd.select_around_argument");
+    case HelixCommand::kSelectInnerComment:
+      return i18n::tr("helix.cmd.select_inner_comment");
+    case HelixCommand::kSelectAroundComment:
+      return i18n::tr("helix.cmd.select_around_comment");
+    case HelixCommand::kSelectInnerDoubleQuote:
+      return i18n::tr("helix.cmd.select_inner_double_quote");
+    case HelixCommand::kSelectAroundDoubleQuote:
+      return i18n::tr("helix.cmd.select_around_double_quote");
+    case HelixCommand::kSelectInnerSingleQuote:
+      return i18n::tr("helix.cmd.select_inner_single_quote");
+    case HelixCommand::kSelectAroundSingleQuote:
+      return i18n::tr("helix.cmd.select_around_single_quote");
+    case HelixCommand::kSelectInnerBacktick:
+      return i18n::tr("helix.cmd.select_inner_backtick");
+    case HelixCommand::kSelectAroundBacktick:
+      return i18n::tr("helix.cmd.select_around_backtick");
     case HelixCommand::kMatchBrackets:
       return i18n::tr("helix.cmd.match_brackets");
     case HelixCommand::kCommandMode:
@@ -381,6 +455,12 @@ std::string helix_command_label(HelixCommand command) {
       return i18n::tr("helix.cmd.goto_block_end");
     case HelixCommand::kGotoBlockStart:
       return i18n::tr("helix.cmd.goto_block_start");
+    case HelixCommand::kSelectAllMatches:
+      return i18n::tr("helix.cmd.select_all_matches");
+    case HelixCommand::kSplitSelectionOnRegex:
+      return i18n::tr("helix.cmd.split_selection_on_regex");
+    case HelixCommand::kSplitSelectionOnNewline:
+      return i18n::tr("helix.cmd.split_selection_on_newline");
     case HelixCommand::kNone:
     default:
       return "";

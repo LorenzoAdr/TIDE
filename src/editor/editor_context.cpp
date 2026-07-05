@@ -118,4 +118,20 @@ std::vector<StickyLine> sticky_lines_for_scroll(const std::vector<SymbolInfo>& s
   return sticky;
 }
 
+int symbol_end_line_1based(const std::vector<SymbolInfo>& symbols, std::size_t index) {
+  return symbol_end_line(symbols, index);
+}
+
+const SymbolInfo* innermost_scope_symbol(const std::vector<SymbolInfo>& symbols,
+                                         int line_0based,
+                                         bool (*predicate)(SymbolKind kind)) {
+  const std::vector<const SymbolInfo*> chain = scope_chain_at_line(symbols, line_0based);
+  for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+    if (predicate != nullptr && predicate((*it)->kind)) {
+      return *it;
+    }
+  }
+  return nullptr;
+}
+
 }  // namespace tgdb

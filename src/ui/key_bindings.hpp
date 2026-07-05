@@ -20,6 +20,7 @@ bool event_is_shift_up(const ftxui::Event& event);
 bool event_is_shift_down(const ftxui::Event& event);
 bool event_is_alt_left(const ftxui::Event& event);
 bool event_is_alt_right(const ftxui::Event& event);
+bool event_is_alt_s(const ftxui::Event& event);
 bool event_is_ctrl_alt_up(const ftxui::Event& event);
 bool event_is_ctrl_alt_down(const ftxui::Event& event);
 bool event_is_ctrl_shift_up(const ftxui::Event& event);

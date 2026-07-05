@@ -20,6 +20,7 @@ struct AppSettings {
   bool monitor_enabled = false;
   bool show_all_workspace_files = false;
   bool helix_mode_enabled = false;
+  bool workspace_auto_detect_enabled = true;
   IconMode icon_mode = IconMode::Auto;
   i18n::UiLocale ui_locale = i18n::UiLocale::kAuto;
 
