@@ -20,6 +20,7 @@
 #include "ui/panel.hpp"
 #include "ui/text_input_style.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -66,6 +67,11 @@ struct SearchPanelState {
   std::string path_filter;
   std::string include_pattern;
   std::string exclude_pattern;
+  std::string placeholder_query;
+  std::string placeholder_replace;
+  std::string placeholder_path;
+  std::string placeholder_include;
+  std::string placeholder_exclude;
   std::vector<WorkspaceSearchResult> results;
   int selected = 0;
   int first_visible = 0;
@@ -147,23 +153,23 @@ void apply_search_results(SearchPanelState* state, std::vector<WorkspaceSearchRe
   state->result_count = static_cast<int>(state->results.size());
   state->selected = 0;
   state->first_visible = 0;
-  const std::string backend = used_rg ? " [rg]" : " [interno]";
+  const std::string backend = used_rg ? i18n::tr("search.status.backend.rg") : i18n::tr("search.status.backend.internal");
   if (state->results.empty()) {
     if (cancelled) {
-      state->status = "Búsqueda cancelada";
+      state->status = i18n::tr("search.status.cancelled");
     } else if (state->query.empty()) {
-      state->status = "Introduce un texto para buscar";
+      state->status = i18n::tr("search.status.enter_query");
     } else {
-      state->status = "Sin coincidencias" + backend;
+      state->status = i18n::tr("search.status.no_matches") + backend;
     }
   } else {
-    state->status = std::to_string(state->result_count) + " coincidencia(s)" + backend;
+    state->status = i18n::tr_fmt("search.status.match_count", {std::to_string(state->result_count)}) + backend;
     if (state->result_count >= 2000) {
-      state->status += " (límite alcanzado)";
+      state->status += i18n::tr("search.status.limit_reached");
     }
   }
   if (files_scanned > 0 && state->results.empty() && !cancelled && !state->query.empty()) {
-    state->status += " en " + std::to_string(files_scanned) + " archivo(s)";
+    state->status += i18n::tr_fmt("search.status.files_scanned", {std::to_string(files_scanned)});
   }
 }
 
@@ -193,16 +199,16 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
     state->results.clear();
     state->selected = 0;
     state->result_count = 0;
-    state->status = "Introduce un texto para buscar";
+    state->status = i18n::tr("search.status.enter_query");
     return;
   }
   state->committed_query = state->query;
   const auto opts = build_options(state, workspace, model, indexer);
   if (opts.workspace_root.empty()) {
-    state->status = "Sin workspace abierto";
+    state->status = i18n::tr("search.status.no_workspace");
     return;
   }
-  state->status = "Buscando…";
+  state->status = i18n::tr("search.status.searching");
   state->results.clear();
   state->selected = 0;
   state->first_visible = 0;
@@ -217,15 +223,14 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
 void run_replace_all(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* model,
                      WorkspaceIndexer* indexer, MainLayoutState* layout_state) {
   if (state->query.empty() || state->replace.empty()) {
-    state->status = "Necesitas texto de búsqueda y reemplazo";
+    state->status = i18n::tr("search.status.need_replace");
     return;
   }
   state->runner.cancel();
   const auto opts = build_options(state, workspace, model, indexer);
   const auto result = replace_in_workspace(opts, state->replace);
   run_search(state, workspace, model, indexer, layout_state);
-  state->status = "Reemplazadas " + std::to_string(result.replacements) +
-                  " en " + std::to_string(result.files_modified) + " archivo(s)";
+  state->status = i18n::tr_fmt("search.status.replaced", {std::to_string(result.replacements), std::to_string(result.files_modified)});
 
   if (workspace != nullptr && !workspace->buffer.path.empty()) {
     namespace fs = std::filesystem;
@@ -274,12 +279,19 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
                           FocusManagerState* focus, MainLayoutState* layout_state,
                           WorkspaceIndexer* indexer, RightSidebarState* sidebar) {
   auto state = std::make_shared<SearchPanelState>();
+  state->placeholder_query = i18n::tr("search.placeholder.search");
+  state->placeholder_replace = i18n::tr("search.placeholder.replace");
+  state->placeholder_path = i18n::tr("search.placeholder.path");
+  state->placeholder_include = i18n::tr("search.placeholder.include");
+  state->placeholder_exclude = i18n::tr("search.placeholder.exclude");
 
-  auto query_input = Input(MakeBlinkInputOption(&state->query, "buscar..."));
-  auto replace_input = Input(MakeBlinkInputOption(&state->replace, "reemplazar..."));
-  auto path_input = Input(MakeBlinkInputOption(&state->path_filter, "todo el workspace"));
-  auto include_input = Input(MakeBlinkInputOption(&state->include_pattern, "p. ej. *.cpp"));
-  auto exclude_input = Input(MakeBlinkInputOption(&state->exclude_pattern, "p. ej. *.h"));
+  auto query_input = Input(MakeBlinkInputOption(&state->query, &state->placeholder_query));
+  auto replace_input = Input(MakeBlinkInputOption(&state->replace, &state->placeholder_replace));
+  auto path_input = Input(MakeBlinkInputOption(&state->path_filter, &state->placeholder_path));
+  auto include_input =
+      Input(MakeBlinkInputOption(&state->include_pattern, &state->placeholder_include));
+  auto exclude_input =
+      Input(MakeBlinkInputOption(&state->exclude_pattern, &state->placeholder_exclude));
 
   auto input_layers = Container::Horizontal(
       {query_input | flex, replace_input | flex, path_input | flex, include_input | flex,
@@ -349,7 +361,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     if (event == Event::Escape) {
       if (state->runner.running()) {
         state->runner.cancel();
-        state->status = "Cancelando…";
+        state->status = i18n::tr("search.status.cancelling");
         return true;
       }
       clear_search_input_focus(layout_state);
@@ -469,7 +481,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
           cursor_blink::show();
           if (state->query != state->committed_query && state->runner.running()) {
             state->runner.cancel();
-            state->status = "Enter: buscar";
+            state->status = i18n::tr("search.status.enter_to_search");
           }
         }
         return handled;
@@ -547,26 +559,26 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
 
         const std::string status_suffix =
             state->runner.running()
-                ? "  (buscando… Esc: cancelar)"
+                ? i18n::tr("search.status.suffix.searching")
                 : (state->query != state->committed_query
-                       ? "  (Enter: buscar)"
-                       : (state->replace.empty() ? "  Enter: buscar"
-                                                 : "  Enter: buscar  R: reemplazar"));
+                       ? i18n::tr("search.status.suffix.pending")
+                       : (state->replace.empty() ? i18n::tr("search.status.enter_to_search")
+                                                 : i18n::tr("search.status.suffix.replace")));
 
         Element form = vbox({
             hbox({
-                render_search_field("Buscar", state->query, "buscar...", active == TextInputFocus::SearchQuery,
+                render_search_field(i18n::tr("search.field.search"), state->query, i18n::tr("search.placeholder.search"), active == TextInputFocus::SearchQuery,
                                     query_input, &state->query_box),
-                render_search_field("Reempl", state->replace, "reemplazar...",
+                render_search_field(i18n::tr("search.field.replace"), state->replace, i18n::tr("search.placeholder.replace"),
                                     active == TextInputFocus::SearchReplace, replace_input,
                                     &state->replace_box),
-                render_search_field("Ruta", state->path_filter, "todo el workspace",
+                render_search_field(i18n::tr("search.field.path"), state->path_filter, i18n::tr("search.placeholder.path"),
                                     active == TextInputFocus::SearchPath, path_input,
                                     &state->path_box),
-                render_search_field("Incl", state->include_pattern, "p. ej. *.cpp",
+                render_search_field(i18n::tr("search.field.include"), state->include_pattern, i18n::tr("search.placeholder.include"),
                                     active == TextInputFocus::SearchInclude, include_input,
                                     &state->include_box),
-                render_search_field("Excl", state->exclude_pattern, "p. ej. *.h",
+                render_search_field(i18n::tr("search.field.exclude"), state->exclude_pattern, i18n::tr("search.placeholder.exclude"),
                                     active == TextInputFocus::SearchExclude, exclude_input,
                                     &state->exclude_box),
             }),
@@ -577,9 +589,9 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
 
         Elements rows;
         if (state->results.empty() && state->query.empty()) {
-          rows.push_back(text("(sin resultados)") | color(theme::Muted()));
+          rows.push_back(text(i18n::tr("common.no_results")) | color(theme::Muted()));
         } else if (state->results.empty()) {
-          rows.push_back(text(state->runner.running() ? "(buscando…)" : "(sin coincidencias)") |
+          rows.push_back(text(state->runner.running() ? i18n::tr("search.loading") : i18n::tr("common.no_matches")) |
                          color(theme::Muted()));
         } else {
           const int visible = visible_line_count(state->results_box);

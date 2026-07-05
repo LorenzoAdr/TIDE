@@ -6,6 +6,7 @@
 
 #include "app/app_settings.hpp"
 #include "app/workspace_config.hpp"
+#include "i18n/locale.hpp"
 #include "ftxui/component/component_base.hpp"
 #include "ui/path_browser.hpp"
 #include "util/clang_format_config.hpp"
@@ -48,10 +49,12 @@ struct SettingsModalState {
   bool draft_indent_guides_enabled = true;
   bool draft_overview_ruler_enabled = true;
   bool draft_secondary_panel_enabled = true;
+  bool draft_helix_mode_enabled = false;
   bool draft_force_bundled_clangd = false;
   bool draft_force_bundled_gdb = false;
   bool draft_monitor_enabled = false;
   bool draft_show_all_workspace_files = false;
+  i18n::UiLocale draft_ui_locale = i18n::UiLocale::kAuto;
   IconMode draft_icon_mode = IconMode::Auto;
   bool draft_clangd_use_gcc_query_driver = true;
   bool draft_clangd_background_index = false;

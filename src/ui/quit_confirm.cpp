@@ -1,10 +1,13 @@
 #include "ui/quit_confirm.hpp"
 
+#include <string_view>
+
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
+#include "i18n/tr.hpp"
 #include "ui/clickable.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
@@ -28,8 +31,8 @@ void close_quit_confirm(QuitConfirmState* state) {
   state->unsaved_paths.clear();
 }
 
-Element render_choice(const char* label, bool selected, bool hovered, bool pressed, Box* box) {
-  Element row = text(label) | color(theme::Header());
+Element render_choice(std::string_view label, bool selected, bool hovered, bool pressed, Box* box) {
+  Element row = text(std::string(label)) | color(theme::Header());
   if (pressed) {
     row = row | inverted | bold | bgcolor(theme::TabPressed());
   } else if (hovered) {
@@ -142,26 +145,28 @@ Component MakeQuitConfirmOverlay(Component main, QuitConfirmState* state,
 
         Elements body;
         if (state->unsaved_paths.empty()) {
-          body.push_back(text("¿Salir de tide?") | color(theme::Header()));
+          body.push_back(text(i18n::tr("modal.quit.question")) | color(theme::Header()));
         } else {
-          body.push_back(text("Tienes archivos modificados sin guardar:") | color(theme::Header()));
+          body.push_back(text(i18n::tr("modal.quit.unsaved_header")) | color(theme::Header()));
           Elements file_rows;
           for (const auto& path : state->unsaved_paths) {
-            file_rows.push_back(text(" " + path + " ") | color(theme::Muted()));
+            file_rows.push_back(
+                text(i18n::tr_fmt("common.highlight.wrap", {path})) | color(theme::Muted()));
           }
           body.push_back(vbox(std::move(file_rows)) | size(HEIGHT, LESS_THAN, 10));
-          body.push_back(text("Si sales, se perderán los cambios.") | color(theme::Header()));
+          body.push_back(text(i18n::tr("modal.quit.unsaved_warning")) | color(theme::Header()));
         }
         body.push_back(separator());
         body.push_back(hbox({
-            render_choice(" Sí ", state->selected == kYes, yes_hovered, yes_pressed,
+            render_choice(i18n::tr("common.yes"), state->selected == kYes, yes_hovered, yes_pressed,
                           &state->yes_box),
             text("  "),
-            render_choice(" No ", state->selected == kNo, no_hovered, no_pressed, &state->no_box),
+            render_choice(i18n::tr("common.no"), state->selected == kNo, no_hovered, no_pressed,
+                          &state->no_box),
         }));
-        body.push_back(text("Enter confirmar  Esc cancelar") | color(theme::Muted()));
+        body.push_back(text(i18n::tr("common.footer.confirm_esc")) | color(theme::Muted()));
 
-        Element dialog = ModalWindow(text("Confirmar salida") | color(theme::Accent()),
+        Element dialog = ModalWindow(text(i18n::tr("modal.quit.title")) | color(theme::Accent()),
                                      vbox(std::move(body)));
 
         return ScreenModalOverlay(std::move(base), std::move(dialog));

@@ -92,6 +92,7 @@ class Application {
   bool handle_focus_shortcuts(const ftxui::Event& event);
   bool any_modal_open() const;
   void apply_app_settings();
+  void toggle_helix_mode();
   void apply_workspace_settings(const WorkspaceConfig& config);
   void save_workspace_session();
   void restore_workspace_session();

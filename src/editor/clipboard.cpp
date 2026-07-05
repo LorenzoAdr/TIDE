@@ -5,7 +5,7 @@
 #include "util/system_clipboard.hpp"
 
 namespace tgdb {
-
+// sdkfjsldkjf
 std::string& editor_clipboard() {
   static std::string clipboard;
   return clipboard;

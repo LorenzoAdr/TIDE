@@ -16,6 +16,7 @@
 #include "ui/text_input_style.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -93,7 +94,7 @@ Color status_color(const GitStatusEntry& entry) {
 
 Element render_diff_lines(const std::string& diff_text, bool loading, int scroll, int height) {
   if (loading) {
-    return text(" cargando diff…") | color(theme::Muted());
+    return text(i18n::tr("git.diff.loading")) | color(theme::Muted());
   }
   std::vector<std::string> lines;
   std::istringstream stream(diff_text);
@@ -122,7 +123,7 @@ Element render_diff_lines(const std::string& diff_text, bool loading, int scroll
     rows.push_back(text(" " + row) | color(row_color));
   }
   if (rows.empty()) {
-    rows.push_back(text(" (sin cambios)") | color(theme::Muted()));
+    rows.push_back(text(i18n::tr("git.diff.no_changes")) | color(theme::Muted()));
   }
   return vbox(std::move(rows)) | flex;
 }
@@ -284,7 +285,7 @@ void stage_selected(GitService* git, GitPanelState* state, MainLayoutState* layo
   state->operation_pending = true;
   git->stage_file(path, [state, layout_state](bool ok, const std::string& msg) {
     state->operation_pending = false;
-    set_status(state, ok ? "staged" : msg);
+    set_status(state, ok ? i18n::tr("git.status.staged") : msg);
     if (layout_state != nullptr) {
       layout_state->request_ui_tick = true;
     }
@@ -301,7 +302,7 @@ void unstage_selected(GitService* git, GitPanelState* state, MainLayoutState* la
   state->operation_pending = true;
   git->unstage_file(path, [state, layout_state](bool ok, const std::string& msg) {
     state->operation_pending = false;
-    set_status(state, ok ? "unstaged" : msg);
+    set_status(state, ok ? i18n::tr("git.status.unstaged") : msg);
     if (layout_state != nullptr) {
       layout_state->request_ui_tick = true;
     }
@@ -320,7 +321,7 @@ void commit_message(GitService* git, GitPanelState* state, MainLayoutState* layo
       state->commit_message.clear();
       state->commit_cursor = 0;
     }
-    set_status(state, ok ? "commit ok" : msg);
+    set_status(state, ok ? i18n::tr("git.status.commit_ok") : msg);
     if (layout_state != nullptr) {
       layout_state->request_ui_tick = true;
     }
@@ -386,7 +387,7 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
       state->operation_pending = true;
       git->push([state, layout_state](bool ok, const std::string& msg) {
         state->operation_pending = false;
-        set_status(state, ok ? "push ok" : msg);
+        set_status(state, ok ? i18n::tr("git.status.push_ok") : msg);
         if (layout_state != nullptr) {
           layout_state->request_ui_tick = true;
         }
@@ -397,7 +398,7 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
       state->operation_pending = true;
       git->pull([state, layout_state](bool ok, const std::string& msg) {
         state->operation_pending = false;
-        set_status(state, ok ? "pull ok" : msg);
+        set_status(state, ok ? i18n::tr("git.status.pull_ok") : msg);
         if (layout_state != nullptr) {
           layout_state->request_ui_tick = true;
         }
@@ -485,7 +486,7 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
         state->operation_pending = true;
         git->checkout_branch(name, [state, layout_state](bool ok, const std::string& msg) {
           state->operation_pending = false;
-          set_status(state, ok ? "rama cambiada" : msg);
+          set_status(state, ok ? i18n::tr("git.status.branch_switched") : msg);
           if (layout_state != nullptr) {
             layout_state->request_ui_tick = true;
           }
@@ -622,7 +623,7 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
       state->operation_pending = true;
       git->push([state, layout_state](bool ok, const std::string& msg) {
         state->operation_pending = false;
-        set_status(state, ok ? "push ok" : msg);
+        set_status(state, ok ? i18n::tr("git.status.push_ok") : msg);
         if (layout_state != nullptr) {
           layout_state->request_ui_tick = true;
         }
@@ -634,7 +635,7 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
       state->operation_pending = true;
       git->pull([state, layout_state](bool ok, const std::string& msg) {
         state->operation_pending = false;
-        set_status(state, ok ? "pull ok" : msg);
+        set_status(state, ok ? i18n::tr("git.status.pull_ok") : msg);
         if (layout_state != nullptr) {
           layout_state->request_ui_tick = true;
         }
@@ -692,7 +693,7 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
 
   auto panel = Renderer([git, state, layout_state, content_height] {
     if (git == nullptr || state == nullptr) {
-      return text(" Git no disponible") | color(theme::Muted()) | flex;
+      return text(i18n::tr("git.unavailable")) | color(theme::Muted()) | flex;
     }
 
     const int body_height =
@@ -705,7 +706,7 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
     const GitRepoInfo repo = git->repo_info();
     if (!repo.valid) {
       return vbox({
-                 text(" " + (repo.last_error.empty() ? "No es un repositorio git"
+                 text(" " + (repo.last_error.empty() ? i18n::tr("git.not_repo")
                                                     : repo.last_error)) |
                      color(theme::Muted()),
              }) |
@@ -718,19 +719,19 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
     if (status.staged_count > 0 || status.unstaged_count > 0 || status.untracked_count > 0) {
       header << "  ●";
       if (status.staged_count > 0) {
-        header << status.staged_count << " staged";
+        header << i18n::tr_fmt("git.header.staged", {std::to_string(status.staged_count)});
       }
       if (status.unstaged_count > 0) {
         if (status.staged_count > 0) {
           header << ", ";
         }
-        header << status.unstaged_count << " modified";
+        header << i18n::tr_fmt("git.header.modified", {std::to_string(status.unstaged_count)});
       }
       if (status.untracked_count > 0) {
         if (status.staged_count > 0 || status.unstaged_count > 0) {
           header << ", ";
         }
-        header << status.untracked_count << " untracked";
+        header << i18n::tr_fmt("git.header.untracked", {std::to_string(status.untracked_count)});
       }
     }
 
@@ -747,11 +748,11 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
     Element tabs = hbox({
         text(header.str()) | bold | color(theme::Success()),
         filler(),
-        MakeTabButton("1 Status", state->selected_tab == GitPanelState::kTabStatus, hover0, press0,
+        MakeTabButton(i18n::tr("git.tab.status"), state->selected_tab == GitPanelState::kTabStatus, hover0, press0,
                       &state->tab_boxes[0]),
-        MakeTabButton("2 Log", state->selected_tab == GitPanelState::kTabLog, hover1, press1,
+        MakeTabButton(i18n::tr("git.tab.log"), state->selected_tab == GitPanelState::kTabLog, hover1, press1,
                       &state->tab_boxes[1]),
-        MakeTabButton("3 Branches", state->selected_tab == GitPanelState::kTabBranches, hover2,
+        MakeTabButton(i18n::tr("git.tab.branches"), state->selected_tab == GitPanelState::kTabBranches, hover2,
                       press2, &state->tab_boxes[2]),
         state->operation_pending ? text(" " + std::string(spinner::glyph())) | color(theme::Accent())
                                : text(""),
@@ -765,7 +766,7 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
       const auto& entries = status.entries;
       clamp_selection(state, static_cast<int>(entries.size()));
       if (entries.empty()) {
-        left_rows.push_back(text(" (working tree limpio)") | color(theme::Muted()));
+        left_rows.push_back(text(i18n::tr("git.working_tree_clean")) | color(theme::Muted()));
       }
       const int visible = list_visible;
       clamp_selection(state, static_cast<int>(entries.size()));
@@ -782,7 +783,7 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
       if (!entries.empty() && state->selected_file >= 0 &&
           state->selected_file < static_cast<int>(entries.size())) {
         const std::string& path = entries[static_cast<std::size_t>(state->selected_file)].path;
-        center_rows.push_back(text(" Diff: " + path) | color(theme::Accent()) | bold);
+        center_rows.push_back(text(i18n::tr_fmt("git.diff.title", {path})) | color(theme::Accent()) | bold);
         center_rows.push_back(separator() | color(theme::AccentDim()));
         const std::string diff = git->file_diff_text(path);
         const bool loading = diff.empty() && git->busy();
@@ -790,10 +791,10 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
         clamp_diff_scroll(state, diff_lines, diff_visible);
         center_rows.push_back(render_diff_lines(diff, loading, state->diff_scroll, diff_visible));
       } else {
-        center_rows.push_back(text(" Selecciona un archivo") | color(theme::Muted()));
+        center_rows.push_back(text(i18n::tr("git.select_file")) | color(theme::Muted()));
       }
 
-      const auto btn = [&](const char* id, const char* label, Box* box) {
+      const auto btn = [&](const char* id, const std::string& label, Box* box) {
         const bool hovered = interaction_active(layout_state, id);
         const bool pressed =
             layout_state != nullptr &&
@@ -802,21 +803,21 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
                size(HEIGHT, EQUAL, 1);
       };
 
-      action_rows.push_back(text(" Acciones") | color(theme::Accent()) | bold);
+      action_rows.push_back(text(i18n::tr("git.actions.title")) | color(theme::Accent()) | bold);
       action_rows.push_back(separator() | color(theme::AccentDim()));
-      action_rows.push_back(btn(kGitStage, " Stage", &state->stage_box));
-      action_rows.push_back(btn(kGitUnstage, " Unstage", &state->unstage_box));
-      action_rows.push_back(btn(kGitPush, " Push", &state->push_box));
-      action_rows.push_back(btn(kGitPull, " Pull", &state->pull_box));
+      action_rows.push_back(btn(kGitStage, i18n::tr("git.actions.stage"), &state->stage_box));
+      action_rows.push_back(btn(kGitUnstage, i18n::tr("git.actions.unstage"), &state->unstage_box));
+      action_rows.push_back(btn(kGitPush, i18n::tr("git.actions.push"), &state->push_box));
+      action_rows.push_back(btn(kGitPull, i18n::tr("git.actions.pull"), &state->pull_box));
       action_rows.push_back(text(""));
-      action_rows.push_back(text(" Commit:") | color(theme::Accent()) | bold);
+      action_rows.push_back(text(i18n::tr("git.commit.label")) | color(theme::Accent()) | bold);
       const bool commit_focused = state->commit_input_focus;
       Element commit_line =
           hbox({text(" "), RenderBlinkInputLine(state->commit_message, state->commit_cursor,
                                                 commit_focused)}) |
           bgcolor(theme::TabIdle()) | size(HEIGHT, EQUAL, 1) | reflect(state->commit_box);
       action_rows.push_back(std::move(commit_line));
-      action_rows.push_back(text(" Enter o clic confirmar") | color(theme::Muted()));
+      action_rows.push_back(text(i18n::tr("git.commit.confirm_hint")) | color(theme::Muted()));
     } else if (state->selected_tab == GitPanelState::kTabLog) {
       const auto commits = git->log_entries();
       clamp_selection(state, static_cast<int>(commits.size()));
@@ -831,10 +832,10 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
         left_rows.push_back(StyleListRow(std::move(row), selected, false, false));
       }
       if (commits.empty()) {
-        left_rows.push_back(text(" (sin commits)") | color(theme::Muted()));
+        left_rows.push_back(text(i18n::tr("git.log.empty")) | color(theme::Muted()));
       }
-      center_rows.push_back(text(" Historial de commits") | color(theme::Accent()) | bold);
-      center_rows.push_back(text(" Clic o ↑/↓ para navegar") | color(theme::Muted()));
+      center_rows.push_back(text(i18n::tr("git.log.title")) | color(theme::Accent()) | bold);
+      center_rows.push_back(text(i18n::tr("git.log.navigate_hint")) | color(theme::Muted()));
     } else {
       const auto branches = git->branches();
       clamp_selection(state, static_cast<int>(branches.size()));
@@ -852,10 +853,10 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
         left_rows.push_back(StyleListRow(std::move(row), selected, false, false));
       }
       if (branches.empty()) {
-        left_rows.push_back(text(" (sin ramas)") | color(theme::Muted()));
+        left_rows.push_back(text(i18n::tr("git.branches.empty")) | color(theme::Muted()));
       }
-      center_rows.push_back(text(" Ramas") | color(theme::Accent()) | bold);
-      center_rows.push_back(text(" Clic o Enter para cambiar rama") | color(theme::Muted()));
+      center_rows.push_back(text(i18n::tr("git.branches.title")) | color(theme::Accent()) | bold);
+      center_rows.push_back(text(i18n::tr("git.branches.switch_hint")) | color(theme::Muted()));
     }
 
     if (!state->status_message.empty()) {

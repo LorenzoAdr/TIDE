@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "i18n/tr.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
@@ -49,7 +50,7 @@ Element render_action_row(const std::string& label, Box* box, MainLayoutState* l
                           std::string_view id) {
   const bool hovered = layout != nullptr && layout->clickable.is_hovered(id);
   const bool pressed = layout != nullptr && layout->clickable.is_pressed(id);
-  Element row = text("  ▸  " + label) | color(theme::Header());
+  Element row = text(i18n::tr("common.action.prefix") + label) | color(theme::Header());
   if (pressed) {
     row = row | inverted | bold | bgcolor(theme::TabPressed());
   } else if (hovered) {
@@ -108,19 +109,21 @@ Element render_welcome_screen(WelcomeScreenState* state, MainLayoutState* layout
   body.push_back(render_welcome_logo());
   body.push_back(text(""));
   body.push_back(
-      centered_row(text("depura y edita desde la terminal") | color(theme::Muted())));
+      centered_row(text(i18n::tr("welcome.tagline")) | color(theme::Muted())));
   body.push_back(text(""));
-  body.push_back(render_action_row("F1   Abrir archivo suelto", &state->external_file_action_box,
-                                   layout_state, press_id::kWelcomeExternalFile));
+  body.push_back(render_action_row(i18n::tr("welcome.action.open_external"),
+                                   &state->external_file_action_box, layout_state,
+                                   press_id::kWelcomeExternalFile));
   body.push_back(text(""));
-  body.push_back(render_action_row("F2   Iniciar depuración", &state->debug_action_box,
+  body.push_back(render_action_row(i18n::tr("welcome.action.start_debug"), &state->debug_action_box,
                                    layout_state, press_id::kWelcomeDebug));
   body.push_back(text(""));
-  body.push_back(render_action_row("F3   Abrir workspace", &state->workspace_action_box,
-                                   layout_state, press_id::kWelcomeWorkspace));
+  body.push_back(render_action_row(i18n::tr("welcome.action.open_workspace"),
+                                   &state->workspace_action_box, layout_state,
+                                   press_id::kWelcomeWorkspace));
   body.push_back(text(""));
   body.push_back(
-      centered_row(text("Alt+F1 / Shift+F1 atajos de teclado") | color(theme::Muted())));
+      centered_row(text(i18n::tr("welcome.shortcuts_hint")) | color(theme::Muted())));
 
   Element inner = vbox(std::move(body));
   const std::string hline(46, '-');
@@ -132,9 +135,9 @@ Element render_welcome_screen(WelcomeScreenState* state, MainLayoutState* layout
                 });
 
   Element footer = vbox({
-      text("Lorenzo Arias del Real") | color(theme::Muted()),
-      text("lorenzo.adr@proton.me") | color(theme::Muted()),
-      text("Apache License 2.0") | color(theme::Muted()),
+      text(i18n::tr("welcome.author")) | color(theme::Muted()),
+      text(i18n::tr("welcome.email")) | color(theme::Muted()),
+      text(i18n::tr("welcome.license")) | color(theme::Muted()),
   });
 
   return vbox({

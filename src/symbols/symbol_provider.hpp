@@ -122,6 +122,10 @@ class ISymbolProvider {
     (void)params;
     return {};
   }
+  virtual SourceLocation goto_implementation(const NavigationParams& params) {
+    (void)params;
+    return {};
+  }
 
   virtual void on_workspace_opened(const std::string& root,
                                    const std::string& compile_commands_dir = {}) {
@@ -224,13 +228,41 @@ inline SourceLocation resolve_symbol_navigation(ISymbolProvider& symbols,
   SourceLocation alternate =
       declaration ? symbols.goto_definition(params) : symbols.goto_declaration(params);
   if (!primary.valid) {
+    if (alternate.valid && !navigation_at_same_spot(alternate, params)) {
+      return alternate;
+    }
+    if (!declaration) {
+      SourceLocation impl = symbols.goto_implementation(params);
+      if (impl.valid && !navigation_at_same_spot(impl, params)) {
+        return impl;
+      }
+    }
     return alternate;
   }
   if (navigation_at_same_spot(primary, params) && alternate.valid &&
       !navigation_at_same_spot(alternate, params)) {
     return alternate;
   }
+  if (!declaration && navigation_at_same_spot(primary, params)) {
+    SourceLocation impl = symbols.goto_implementation(params);
+    if (impl.valid && !navigation_at_same_spot(impl, params)) {
+      return impl;
+    }
+  }
   return primary;
+}
+
+inline SourceLocation resolve_implementation_navigation(ISymbolProvider& symbols,
+                                                        const NavigationParams& params) {
+  SourceLocation impl = symbols.goto_implementation(params);
+  if (impl.valid && !navigation_at_same_spot(impl, params)) {
+    return impl;
+  }
+  SourceLocation def = symbols.goto_definition(params);
+  if (def.valid && !navigation_at_same_spot(def, params)) {
+    return def;
+  }
+  return symbols.goto_declaration(params);
 }
 
 }  // namespace tgdb

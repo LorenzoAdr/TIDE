@@ -17,6 +17,8 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/screen_interactive.hpp"
 #include "editor/text_search.hpp"
+#include "i18n/locale.hpp"
+#include "i18n/tr.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/connection_wizard.hpp"
 #include "ui/core_analyzer_panel.hpp"
@@ -188,6 +190,9 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 
   symbol_provider_ = std::make_shared<LspSymbolProvider>();
   app_settings_ = AppSettings::load();
+  i18n::set_locale(app_settings_.ui_locale);
+  workspace_.status_message = i18n::tr("workspace.select");
+  model_.status_message = i18n::tr("debug.disconnected");
   configure_glyphs(resolve_icon_mode(app_settings_.icon_mode));
   layout_state_.app_settings = &app_settings_;
   layout_state_.workspace_clang_format = &clang_format_config_;
@@ -218,7 +223,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
     layout_state_.welcome_visible = true;
     layout_state_.console_visible = false;
     layout_state_.terminal_start_requested = false;
-    workspace_.status_message = "Bienvenido a TUIDE";
+    workspace_.status_message = i18n::tr("workspace.welcome");
     workspace_.clear_tabs();
   } else {
     set_workspace(config_.workspace_root);
@@ -232,8 +237,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
         layout_state_.console_visible = true;
         layout_state_.terminal_start_requested = true;
       } else {
-        set_workspace_status(
-            "Depuración no disponible (GDB 14+ con DAP requerido)");
+        set_workspace_status(i18n::tr("app.debug_unavailable"));
       }
     }
   }
@@ -459,7 +463,7 @@ void Application::begin_shutdown(ScreenInteractive* screen) {
   quit_confirm_state_.unsaved_paths.clear();
   shutdown_state_.begin(7);
   shutdown_step_index_ = 0;
-  shutdown_state_.set_current("Guardando sesión…");
+  shutdown_state_.set_current(i18n::tr("app.shutdown.save_session"));
   layout_state_.request_ui_tick = true;
   if (screen != nullptr) {
     screen->Post([this, screen] {
@@ -505,14 +509,13 @@ void Application::schedule_next_shutdown_step(ScreenInteractive* screen) {
 
 void Application::tick_shutdown() {
   struct ShutdownStep {
-    const char* label;
+    std::string label;
     std::function<void()> run;
   };
 
   const std::vector<ShutdownStep> steps = {
-      {"Guardando sesión…",
-       [this] { save_workspace_session(); }},
-      {"Cerrando depuración…",
+      {i18n::tr("app.shutdown.save_session"), [this] { save_workspace_session(); }},
+      {i18n::tr("app.shutdown.close_debug"),
        [this] {
          if (backend_started_) {
            submit_command(UiCommand{UiCommandKind::kQuit});
@@ -522,24 +525,24 @@ void Application::tick_shutdown() {
            backend_started_ = false;
          }
        }},
-      {"Cerrando terminal…", [this] { shell_session_.stop(); }},
-      {"Cerrando clangd…",
+      {i18n::tr("app.shutdown.close_terminal"), [this] { shell_session_.stop(); }},
+      {i18n::tr("app.shutdown.close_clangd"),
        [this] {
          if (symbol_provider_) {
            symbol_provider_->on_workspace_closed();
          }
        }},
-      {"Parando indexadores…",
+      {i18n::tr("app.shutdown.stop_indexers"),
        [this] {
          symbol_indexer_.stop();
          indexer_.stop();
        }},
-      {"Parando vigilancia de archivos…",
+      {i18n::tr("app.shutdown.stop_watcher"),
        [this] {
          workspace_watcher_.stop();
          build_artifact_watcher_.stop();
        }},
-      {"Parando entorno de compilación…",
+      {i18n::tr("app.shutdown.stop_build_env"),
        [this] { global_build_environment_service().shutdown(); }},
   };
 
@@ -609,7 +612,8 @@ void Application::set_workspace(const std::string& workspace_root) {
   workspace_.clear_tabs();
   secondary_workspace_.root = absolute;
   secondary_workspace_.clear_tabs();
-  workspace_.status_message = "Workspace: " + fs::path(absolute).filename().string();
+  workspace_.status_message =
+      i18n::tr_fmt("workspace.open_prefix", {fs::path(absolute).filename().string()});
   file_picker_state_.indexed_root.clear();
   file_picker_state_.all_files.clear();
   shell_session_.stop();
@@ -635,12 +639,12 @@ void Application::set_workspace(const std::string& workspace_root) {
     if (setup.compile_dir.empty()) {
       std::error_code cmake_ec;
       if (fs::is_regular_file(fs::path(absolute) / "CMakeLists.txt", cmake_ec)) {
-        workspace_.status_message += " | sin compile_commands (cmake falló)";
+        workspace_.status_message += i18n::tr("app.no_compile_commands");
       } else if (detect_build_system_kind(absolute) == BuildSystemKind::kMakefile ||
                  detect_build_system_kind(absolute) == BuildSystemKind::kHybrid) {
         workspace_.status_message += " | generando entorno make";
       } else {
-        workspace_.status_message += " | sin compile_commands.json";
+        workspace_.status_message += i18n::tr("app.no_compile_commands_json");
       }
     } else {
       if (!setup.status_note.empty()) {
@@ -779,7 +783,7 @@ void Application::exit_debug_mode() {
   layout_state_.text_input_focus = TextInputFocus::None;
   layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
   layout_state_.show_core_analyzer_tab = false;
-  set_workspace_status("Modo edición");
+  set_workspace_status(i18n::tr("app.edit_mode"));
   request_terminal_autostart();
 }
 
@@ -867,9 +871,9 @@ void Application::apply_connection_and_start() {
     attach.attach.target = config_.attach_target;
     submit_command(attach);
     if (config_.attach_pid > 0) {
-      set_status("Adjuntando PID " + std::to_string(config_.attach_pid));
+      set_status(i18n::tr_fmt("app.attach_pid", {std::to_string(config_.attach_pid)}));
     } else if (!config_.attach_target.empty()) {
-      set_status("Adjuntando " + config_.attach_target);
+      set_status(i18n::tr_fmt("app.attach_target", {config_.attach_target}));
     }
   } else if (config_.mode == SessionMode::kCore) {
     UiCommand load_core;
@@ -880,9 +884,10 @@ void Application::apply_connection_and_start() {
     load_core.core.analysis = config_.core_analysis;
     submit_command(load_core);
     const std::string mode_label =
-        config_.core_analysis == CoreAnalysisMode::kCoreAnalyzer ? "Core Analyzer"
-                                                                 : "GDB post-mortem";
-    set_status("Cargando core (" + mode_label + "): " + config_.core_path);
+        config_.core_analysis == CoreAnalysisMode::kCoreAnalyzer
+            ? i18n::tr("app.core_mode.ca")
+            : i18n::tr("app.core_mode.gdb_postmortem");
+    set_status(i18n::tr_fmt("app.load_core", {mode_label, config_.core_path}));
   } else {
     UiCommand launch;
     launch.kind = UiCommandKind::kLaunch;
@@ -891,7 +896,7 @@ void Application::apply_connection_and_start() {
     launch.launch.args = config_.args;
     launch.launch.stop_at_main = true;
     submit_command(launch);
-    set_status("Lanzando " + config_.program);
+    set_status(i18n::tr_fmt("app.launch_program", {config_.program}));
   }
 }
 
@@ -905,7 +910,7 @@ void Application::apply_pending_connection() {
   }
 
   if (workspace_.buffer.dirty) {
-    set_status("Guarda los cambios (Ctrl+S) antes de depurar.");
+    set_status(i18n::tr("app.save_before_debug"));
     return;
   }
 
@@ -922,7 +927,7 @@ void Application::apply_pending_connection() {
   if (config_.core_analysis == CoreAnalysisMode::kCoreAnalyzer &&
       !core_analyzer_supported()) {
     config_.core_analysis = CoreAnalysisMode::kGdbOnly;
-    set_status("Core Analyzer no disponible en esta build; usando GDB post-mortem");
+    set_status(i18n::tr("app.core_analyzer_fallback"));
   }
 
   if (result.mode == SessionMode::kLaunch && !result.program.empty()) {
@@ -933,7 +938,7 @@ void Application::apply_pending_connection() {
   model_.program = config_.program;
   model_.program_args = config_.args;
 
-  set_status("Conectando con GDB DAP...");
+  set_status(i18n::tr("app.connecting_dap"));
   ensure_backend_started();
 }
 
@@ -942,7 +947,7 @@ void Application::open_connection_wizard() {
     return;
   }
   if (!debug_available_) {
-    set_status("Depuración no disponible: GDB 14+ con DAP requerido");
+    set_status(i18n::tr("app.debug_unavailable_short"));
     return;
   }
 
@@ -961,7 +966,7 @@ void Application::open_connection_wizard() {
           : connection_wizard_state_.browser.launch_root;
   connection_wizard_state_.reset();
   connection_wizard_state_.open = true;
-  set_status("Configurar depuración...");
+  set_status(i18n::tr("app.configure_debug"));
 }
 
 void Application::submit_command(const UiCommand& command) {
@@ -1117,6 +1122,7 @@ bool Application::any_modal_open() const {
 }
 
 void Application::apply_app_settings() {
+  i18n::set_locale(app_settings_.ui_locale);
   if (has_bundled_clangd()) {
     set_runtime_force_bundled_clangd(app_settings_.force_bundled_clangd);
   }
@@ -1144,6 +1150,19 @@ void Application::apply_app_settings() {
   }
   workspace_.buffer.view_token++;
   layout_state_.request_ui_tick = true;
+}
+
+void Application::toggle_helix_mode() {
+  app_settings_.helix_mode_enabled = !app_settings_.helix_mode_enabled;
+  app_settings_.save();
+  if (layout_state_.reset_helix_editors) {
+    layout_state_.reset_helix_editors();
+  }
+  if (!app_settings_.helix_mode_enabled) {
+    layout_state_.helix_status = {};
+    layout_state_.editor_helix_prefix_pending = false;
+  }
+  apply_app_settings();
 }
 
 bool Application::handle_focus_shortcuts(const Event& event) {
@@ -1316,7 +1335,62 @@ int Application::run() {
     }
     layout_state_.request_ui_tick = true;
   };
+  layout_state_.helix_ide.open_quick_file = [this, &screen]() {
+    file_picker_state_.open = true;
+    file_picker_state_.query.clear();
+    file_picker_state_.selected = 0;
+    file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
+    file_picker_state_.mark_matches_dirty();
+    file_picker_state_.refresh_matches(&workspace_);
+    file_picker_state_.on_opened(model_.workspace_root);
+    force_immediate_repaint(&layout_state_, &screen);
+  };
+  layout_state_.helix_ide.open_symbol_picker = [this, &screen]() {
+    symbol_picker_state_.open = true;
+    symbol_picker_state_.query.clear();
+    symbol_picker_state_.selected = 0;
+    symbol_picker_state_.loaded_file.clear();
+    force_immediate_repaint(&layout_state_, &screen);
+  };
+  layout_state_.helix_ide.save_file = [this]() {
+    workspace_.save_buffer();
+    if (!workspace_.root.empty() && !workspace_.buffer.path.empty()) {
+      if (layout_state_.on_file_saved) {
+        layout_state_.on_file_saved(workspace_.buffer.path);
+      }
+      std::error_code ec;
+      const auto rel = std::filesystem::relative(
+          std::filesystem::path(workspace_.buffer.path),
+          std::filesystem::path(workspace_.root), ec);
+      if (!ec) {
+        const std::string rel_str = rel.generic_string();
+        indexer_.upsert_file(workspace_.root, rel_str, workspace_.buffer.path);
+        symbol_indexer_.reindex_file(workspace_.root, rel_str, workspace_.buffer.path);
+      }
+    }
+    layout_state_.request_ui_tick = true;
+  };
+  layout_state_.helix_ide.request_quit = [this]() {
+    workspace_.flush_active_tab();
+    secondary_workspace_.flush_active_tab();
+    quit_confirm_state_.unsaved_paths.clear();
+    for (const auto& path : workspace_.dirty_open_paths()) {
+      quit_confirm_state_.unsaved_paths.push_back(path);
+    }
+    for (const auto& path : secondary_workspace_.dirty_open_paths()) {
+      if (std::find(quit_confirm_state_.unsaved_paths.begin(),
+                    quit_confirm_state_.unsaved_paths.end(),
+                    path) == quit_confirm_state_.unsaved_paths.end()) {
+        quit_confirm_state_.unsaved_paths.push_back(path);
+      }
+    }
+    quit_confirm_state_.open = true;
+    quit_confirm_state_.selected = quit_confirm_state_.unsaved_paths.empty() ? 0 : 1;
+    layout_state_.request_ui_tick = true;
+  };
   git_service_.set_update_callback([this] { layout_state_.request_ui_tick = true; });
+
+  file_picker_state_.set_preview_notify([this] { layout_state_.request_ui_tick = true; });
 
   auto with_picker = MakeFilePickerOverlay(
       layout, &model_, &workspace_, &file_picker_state_, &focus_state_, &indexer_);
@@ -1522,6 +1596,11 @@ int Application::run() {
           open_settings_modal(&settings_modal_state_, app_settings_, workspace_.root,
                               workspace_config_);
         }
+        return true;
+      }
+
+      if (app_mode_ == AppMode::kNormal && event == Event::F6) {
+        toggle_helix_mode();
         return true;
       }
 
@@ -1755,6 +1834,20 @@ int Application::run() {
         }
       }
 
+      if (layout_state_.editor_helix_prefix_pending && is_editor_focus_region(focus_state_.region) &&
+          app_mode_ == AppMode::kNormal && !event_has_ctrl_modifier(event) &&
+          event != Event::CtrlP && active_editor_handlers.key_handler &&
+          active_editor_handlers.key_handler(event)) {
+        layout_state_.request_ui_tick = true;
+        screen.PostEvent(Event::Custom);
+        return true;
+      }
+      if (layout_state_.editor_helix_prefix_pending && is_editor_focus_region(focus_state_.region) &&
+          app_mode_ == AppMode::kNormal && !event_has_ctrl_modifier(event) &&
+          event != Event::CtrlP) {
+        return true;
+      }
+
       // Tab nunca cambia foco entre paneles; en terminal va al shell, en editor indenta.
       if (event == Event::Tab || event == Event::TabReverse) {
         const bool terminal_tab =
@@ -1878,13 +1971,6 @@ int Application::run() {
         return true;
       }
       if (event == Event::CtrlP) {
-        if (file_picker_state_.open && !file_picker_state_.matches.empty()) {
-          file_picker_state_.selected =
-              (file_picker_state_.selected + 1) %
-              static_cast<int>(file_picker_state_.matches.size());
-          layout_state_.request_ui_tick = true;
-          return true;
-        }
         file_picker_state_.open = !file_picker_state_.open;
         if (file_picker_state_.open) {
           file_picker_state_.query.clear();
@@ -1892,6 +1978,10 @@ int Application::run() {
           file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
           file_picker_state_.mark_matches_dirty();
           file_picker_state_.refresh_matches(&workspace_);
+          file_picker_state_.on_opened(model_.workspace_root);
+          file_picker_state_.arm_ctrl_chord();
+        } else {
+          file_picker_state_.on_closed();
         }
         force_immediate_repaint(&layout_state_, &screen);
         return true;
@@ -1937,7 +2027,7 @@ int Application::run() {
       return false;
     } catch (const std::exception& e) {
       model_.append_console(std::string("[crash] ") + e.what());
-      set_status(std::string("Error: ") + e.what());
+      set_status(i18n::tr_fmt("app.error_prefix", {e.what()}));
       print_current_backtrace(e.what());
       return true;
     }

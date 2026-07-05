@@ -1,12 +1,14 @@
 #include "ui/open_file_confirm.hpp"
 
 #include <filesystem>
+#include <string_view>
 
 #include "app/workspace_model.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "i18n/tr.hpp"
 #include "ui/clickable.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
@@ -24,8 +26,8 @@ namespace {
 constexpr int kYes = 0;
 constexpr int kNo = 1;
 
-Element render_choice(const char* label, bool selected, bool hovered, bool pressed, Box* box) {
-  Element row = text(label) | color(theme::Header());
+Element render_choice(std::string_view label, bool selected, bool hovered, bool pressed, Box* box) {
+  Element row = text(std::string(label)) | color(theme::Header());
   if (pressed) {
     row = row | inverted | bold | bgcolor(theme::TabPressed());
   } else if (hovered) {
@@ -198,31 +200,33 @@ Component MakeOpenFileConfirmOverlay(
         Element dialog;
         if (state->mode == OpenFileConfirmMode::BinaryWarning) {
           dialog = ModalWindow(
-              text("Archivo binario") | color(theme::Accent()),
+              text(i18n::tr("modal.open_file.binary.title")) | color(theme::Accent()),
               vbox({
-                  text("No se puede abrir en el editor:") | color(theme::Header()),
-                  text(" " + state->display_name + " ") | color(theme::Muted()),
+                  text(i18n::tr("modal.open_file.binary.message")) | color(theme::Header()),
+                  text(i18n::tr_fmt("common.highlight.wrap", {state->display_name})) |
+                      color(theme::Muted()),
                   separator(),
-                  hbox({render_choice(" OK ", state->selected == kYes, yes_hovered, yes_pressed,
-                                      &state->yes_box)}),
-                  text("Enter/Esc cerrar") | color(theme::Muted()),
+                  hbox({render_choice(i18n::tr("common.ok"), state->selected == kYes, yes_hovered,
+                                      yes_pressed, &state->yes_box)}),
+                  text(i18n::tr("modal.open_file.binary.footer")) | color(theme::Muted()),
               }));
         } else {
           const std::string size_label = format_file_size(state->size_bytes);
           dialog = ModalWindow(
-              text("Archivo grande") | color(theme::Accent()),
+              text(i18n::tr("modal.open_file.large.title")) | color(theme::Accent()),
               vbox({
-                  text("¿Abrir " + state->display_name + " (" + size_label + ")?") |
+                  text(i18n::tr_fmt("modal.open_file.large.prompt",
+                                    {state->display_name, size_label})) |
                       color(theme::Header()),
                   separator(),
                   hbox({
-                      render_choice(" Sí ", state->selected == kYes, yes_hovered, yes_pressed,
-                                    &state->yes_box),
+                      render_choice(i18n::tr("common.yes"), state->selected == kYes, yes_hovered,
+                                    yes_pressed, &state->yes_box),
                       text("  "),
-                      render_choice(" No ", state->selected == kNo, no_hovered, no_pressed,
-                                    &state->no_box),
+                      render_choice(i18n::tr("common.no"), state->selected == kNo, no_hovered,
+                                    no_pressed, &state->no_box),
                   }),
-                  text("Enter confirmar  Esc cancelar") | color(theme::Muted()),
+                  text(i18n::tr("common.footer.confirm_esc")) | color(theme::Muted()),
               }));
         }
 

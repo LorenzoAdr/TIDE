@@ -10,6 +10,7 @@
 #include "util/file_open_policy.hpp"
 #include "util/csv_viewer.hpp"
 #include "util/path_normalize.hpp"
+#include "i18n/tr.hpp"
 
 namespace fs = std::filesystem;
 
@@ -65,7 +66,7 @@ bool WorkspaceModel::load_buffer_from_disk(EditorBuffer* buffer,
 
   std::ifstream input(absolute_path);
   if (!input) {
-    buffer->lines.push_back("No se pudo abrir: " + absolute_path);
+    buffer->lines.push_back(i18n::tr_fmt("workspace.open_failed", {absolute_path}));
     return false;
   }
 
@@ -141,6 +142,20 @@ void WorkspaceModel::remove_tab_mru(const std::string& absolute_path) {
   tab_mru.erase(std::remove(tab_mru.begin(), tab_mru.end(), path), tab_mru.end());
 }
 
+std::vector<std::string> WorkspaceModel::open_tabs_mru() const {
+  std::vector<std::string> result;
+  for (const std::string& path : tab_mru) {
+    result.push_back(path);
+  }
+  for (const EditorTab& tab : tabs) {
+    const std::string path = normalize_path(tab.path);
+    if (std::find(result.begin(), result.end(), path) == result.end()) {
+      result.push_back(path);
+    }
+  }
+  return result;
+}
+
 std::vector<std::string> WorkspaceModel::open_tabs_mru_excluding_active() const {
   std::vector<std::string> result;
   const std::string current = normalize_path(active_file);
@@ -197,19 +212,20 @@ bool WorkspaceModel::try_open_external_pdf(const std::string& absolute_path) {
 
   std::error_code ec;
   if (!fs::is_regular_file(absolute_path, ec)) {
-    status_message = "PDF no encontrado: " + fs::path(absolute_path).filename().string();
+    status_message = i18n::tr_fmt("workspace.pdf_not_found", {fs::path(absolute_path).filename().string()});
     return true;
   }
 
   const std::string name = fs::path(absolute_path).filename().string();
-  status_message = "Abriendo " + name + " con evince…";
+  status_message = i18n::tr_fmt("workspace.pdf_opening", {name});
 
   launch_pdf_viewer_async(absolute_path, [this](const PdfLaunchResult& result) {
     if (!enqueue_ui_task) {
       return;
     }
     enqueue_ui_task([this, result]() {
-      status_message = result.ok ? result.message : ("PDF: " + result.message);
+      status_message = result.ok ? result.message
+                                 : i18n::tr_fmt("workspace.pdf_status", {result.message});
     });
   });
   return true;
@@ -227,7 +243,7 @@ bool WorkspaceModel::check_open_guard(const std::string& absolute_path) {
   if (assessment.kind == FileOpenKind::Binary) {
     const std::string name = fs::path(absolute_path).filename().string();
     open_file_confirm->show_binary_warning(absolute_path, name);
-    status_message = "Archivo binario, no se puede abrir: " + name;
+    status_message = i18n::tr_fmt("workspace.binary_blocked", {name});
     return false;
   }
   if (assessment.kind == FileOpenKind::Large) {
@@ -275,7 +291,7 @@ bool WorkspaceModel::open_external_file(const std::string& absolute_path) {
   }
   const int index = open_new_tab_from_disk(path, true);
   switch_to_tab(index);
-  status_message = "Externo: " + fs::path(path).filename().string();
+  status_message = i18n::tr_fmt("workspace.external_prefix", {fs::path(path).filename().string()});
   return true;
 }
 
@@ -424,7 +440,7 @@ bool WorkspaceModel::save_buffer() {
   }
   buffer.dirty = false;
   flush_active_tab();
-  status_message = "Guardado: " + fs::path(buffer.path).filename().string();
+  status_message = i18n::tr_fmt("workspace.saved", {fs::path(buffer.path).filename().string()});
   return true;
 }
 

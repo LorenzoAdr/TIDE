@@ -10,6 +10,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -139,17 +140,17 @@ Component MakeCoreAnalyzerPanel(DebugModel* model, CommandCallback on_command,
                              color(theme::Header()));
         }
         if (left_lines.empty()) {
-          left_lines.push_back(text("(comandos: obj, ref, heap, pattern, shrobj)") |
+          left_lines.push_back(text(i18n::tr("panel.core_analyzer.commands_hint")) |
                              color(theme::Muted()));
         }
 
         std::string cmd_line = state->command_input;
         cmd_line.push_back('_');
         left_lines.push_back(separator());
-        left_lines.push_back(text("> " + cmd_line) | color(theme::WatchInput()));
+        left_lines.push_back(text(i18n::tr_fmt("panel.core_analyzer.prompt", {cmd_line})) | color(theme::WatchInput()));
 
         Elements right_lines;
-        right_lines.push_back(text("Buscar clase") | bold | color(theme::Accent()));
+        right_lines.push_back(text(i18n::tr("panel.core_analyzer.search_class")) | bold | color(theme::Accent()));
         std::string search_line = state->search_input;
         search_line.push_back('_');
         right_lines.push_back(text(search_line) | color(theme::WatchInput()));
@@ -179,10 +180,10 @@ Component MakeCoreAnalyzerPanel(DebugModel* model, CommandCallback on_command,
           right_lines.push_back(row);
         }
         if (model->core_analyzer_instances.empty()) {
-          right_lines.push_back(text("(sin resultados)") | color(theme::Muted()));
+          right_lines.push_back(text(i18n::tr("common.no_results")) | color(theme::Muted()));
         }
         right_lines.push_back(separator());
-        right_lines.push_back(text("Enter: buscar  w: watch  r: ref  j/k: navegar") |
+        right_lines.push_back(text(i18n::tr("panel.core_analyzer.footer")) |
                            color(theme::Muted()));
 
         return hbox({

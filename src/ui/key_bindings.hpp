@@ -79,4 +79,6 @@ bool event_input_has_shift_release(const ftxui::Event& event);
 
 bool editor_priority_key(const ftxui::Event& event);
 
+bool event_is_tide_global_shortcut(const ftxui::Event& event);
+
 }  // namespace tgdb

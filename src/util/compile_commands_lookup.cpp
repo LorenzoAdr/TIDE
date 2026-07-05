@@ -11,6 +11,7 @@
 #include "util/clangd_workspace_setup.hpp"
 #include "util/compile_commands_remap.hpp"
 #include "util/path_normalize.hpp"
+#include "i18n/tr.hpp"
 
 namespace fs = std::filesystem;
 
@@ -245,7 +246,7 @@ void append_values(std::vector<std::string>* lines, const std::string& prefix,
     return;
   }
   if (values.empty()) {
-    lines->push_back(prefix + "(ninguna)");
+    lines->push_back(prefix + i18n::tr("indexer.paths.none"));
     return;
   }
   for (const std::string& value : values) {
@@ -267,8 +268,8 @@ FileIndexerPaths lookup_file_indexer_paths(const std::string& workspace_root,
   }
 
   if (workspace_root.empty() || host_absolute_path.empty()) {
-    result.display_lines.push_back("Rutas de indexación (clangd)");
-    result.display_lines.push_back("(sin workspace o archivo)");
+    result.display_lines.push_back(i18n::tr("indexer.paths.title"));
+    result.display_lines.push_back(i18n::tr("indexer.paths.no_workspace"));
     return result;
   }
 
@@ -291,44 +292,48 @@ FileIndexerPaths lookup_file_indexer_paths(const std::string& workspace_root,
   }
 
   result.display_lines.clear();
-  result.display_lines.push_back("Rutas de indexación (clangd)");
-  result.display_lines.push_back("Archivo host: " + canonical_path(host_absolute_path));
+  result.display_lines.push_back(i18n::tr("indexer.paths.title"));
+  result.display_lines.push_back(
+      i18n::tr_fmt("indexer.paths.host_file", {canonical_path(host_absolute_path)}));
   if (!result.status_note.empty()) {
-    result.display_lines.push_back("Nota: " + result.status_note);
+    result.display_lines.push_back(i18n::tr_fmt("indexer.paths.note", {result.status_note}));
   }
   if (result.compile_commands_dir.empty()) {
-    result.display_lines.push_back("compile_commands_dir: (no configurado)");
+    result.display_lines.push_back(i18n::tr("indexer.paths.compile_commands_dir_unset"));
   } else {
-    result.display_lines.push_back("compile_commands_dir: " + result.compile_commands_dir);
+    result.display_lines.push_back(
+        i18n::tr_fmt("indexer.paths.compile_commands_dir", {result.compile_commands_dir}));
   }
 
   if (!result.entry_found) {
-    append_section(&result.display_lines, "Entrada compile_commands");
-    result.display_lines.push_back("(sin entrada para este archivo)");
+    append_section(&result.display_lines, i18n::tr("indexer.paths.entry_section"));
+    result.display_lines.push_back(i18n::tr("indexer.paths.no_entry"));
   } else {
-    append_section(&result.display_lines, "Entrada compile_commands");
-    result.display_lines.push_back("file: " + result.entry_file);
+    append_section(&result.display_lines, i18n::tr("indexer.paths.entry_section"));
+    result.display_lines.push_back(i18n::tr_fmt("indexer.paths.entry_file", {result.entry_file}));
     if (!result.entry_directory.empty()) {
-      result.display_lines.push_back("directory: " + result.entry_directory);
+      result.display_lines.push_back(
+          i18n::tr_fmt("indexer.paths.entry_directory", {result.entry_directory}));
     }
     if (!result.entry_output.empty()) {
-      result.display_lines.push_back("output: " + result.entry_output);
+      result.display_lines.push_back(
+          i18n::tr_fmt("indexer.paths.entry_output", {result.entry_output}));
     }
-    append_section(&result.display_lines, "Includes (-I, -iquote)");
+    append_section(&result.display_lines, i18n::tr("indexer.paths.includes"));
     append_values(&result.display_lines, "  ", result.include_paths);
-    append_section(&result.display_lines, "Includes sistema (-isystem, -idirafter)");
+    append_section(&result.display_lines, i18n::tr("indexer.paths.system_includes"));
     append_values(&result.display_lines, "  ", result.system_include_paths);
-    append_section(&result.display_lines, "Defines (-D)");
+    append_section(&result.display_lines, i18n::tr("indexer.paths.defines"));
     append_values(&result.display_lines, "  ", result.defines);
     if (!result.compile_arguments.empty()) {
-      append_section(&result.display_lines, "Argumentos de compilación");
+      append_section(&result.display_lines, i18n::tr("indexer.paths.compile_args"));
       for (const std::string& arg : result.compile_arguments) {
-        result.display_lines.push_back("  " + arg);
+        result.display_lines.push_back(i18n::tr_fmt("indexer.paths.arg_line", {arg}));
       }
     }
   }
 
-  append_section(&result.display_lines, "Flags extra (.clangd / config)");
+  append_section(&result.display_lines, i18n::tr("indexer.paths.extra_flags"));
   append_values(&result.display_lines, "  ", result.clangd_extra_flags);
 
   return result;

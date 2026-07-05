@@ -34,8 +34,7 @@ int shift_col(int col, int scroll_col) { return col - scroll_col; }
 
 Element render_primary_caret_tail(const EditorBuffer& buffer, int line_index, bool editor_focused,
                                   bool show_caret, int scroll_col, int guide_visual_cols) {
-  if (!editor_focused || line_index != buffer.primary_line() || !show_caret ||
-      buffer.primary().has_selection()) {
+  if (!editor_focused || line_index != buffer.primary_line() || !show_caret) {
     return text(" ");
   }
   const int caret_vis = std::max(0, shift_col(buffer.primary_col(), scroll_col));
@@ -288,8 +287,7 @@ Element render_simple_line(const std::string& line, int line_index, const Editor
                            BuildFileKind build_file_kind, int guide_prefix_bytes = 0) {
   (void)line_bg;
   const int effective_scroll_col = scroll_col + guide_prefix_bytes;
-  if (!editor_focused || line_index != buffer.primary_line() || !show_caret ||
-      buffer.primary().has_selection()) {
+  if (!editor_focused || line_index != buffer.primary_line() || !show_caret) {
     return render_line_content(line, line_index, semantic_tokens, syntax_highlight, -1, {},
                                effective_scroll_col, highlight_ctx, build_file_kind);
   }
@@ -423,7 +421,7 @@ void collect_line_decorations(int line_index, const EditorBuffer& buffer, bool e
         }
       }
     }
-    if (show_caret && !cursor.has_selection() && cursor.head.line == line_index) {
+    if (show_caret && cursor.head.line == line_index) {
       const auto kind = (i == 0) ? EditorDecoration::Kind::PrimaryCaret
                                  : EditorDecoration::Kind::SecondaryCaret;
       const int col = cursor.head.col;

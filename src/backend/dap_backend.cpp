@@ -7,6 +7,7 @@
 #include "dap/gdb_protocol.hpp"
 #include "dap/protocol.h"
 #include "dap/session.h"
+#include "i18n/tr.hpp"
 #include "util/path_normalize.hpp"
 #include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
@@ -123,7 +124,7 @@ void DapBackend::setup_session() {
   session_->registerHandler([&](const dap::InitializedEvent&) {
     DebugEvent event;
     event.kind = DebugEventKind::kSessionReady;
-    event.text = "GDB DAP listo";
+    event.text = i18n::tr("debug.dap.session_ready");
     push_event(std::move(event));
   });
 
@@ -195,7 +196,8 @@ void DapBackend::setup_session() {
     DebugEvent event;
     event.kind = DebugEventKind::kTerminated;
     if (last_exit_code_ >= 0) {
-      event.text = "Proceso finalizado (código " + std::to_string(last_exit_code_) + ")";
+      event.text = i18n::tr_fmt("debug.dap.process_exited",
+                                {std::to_string(last_exit_code_)});
       last_exit_code_ = -1;
     }
     push_event(std::move(event));
@@ -243,7 +245,7 @@ void DapBackend::setup_session() {
   session_->registerHandler([&](const dap::MemoryEvent&) {});
 
   session_->onError([&](const char* message) {
-    push_error(std::string("DAP: ") + message);
+    push_error(i18n::tr_fmt("debug.dap.error", {message}));
   });
 }
 
@@ -255,7 +257,8 @@ bool DapBackend::initialize_session() {
 
   const auto response = session_->send(request).get();
   if (response.error) {
-    push_error("initialize falló: " + response.error.message);
+    push_error(i18n::tr_fmt("debug.dap.initialize_failed",
+                            {response.error.message}));
     return false;
   }
   return true;
@@ -287,7 +290,8 @@ void DapBackend::refresh_stack(int thread_id) {
       if (response.error.message.find("not stopped") != std::string::npos) {
         return;
       }
-      push_error("stackTrace falló: " + response.error.message);
+      push_error(i18n::tr_fmt("debug.dap.stack_trace_failed",
+                              {response.error.message}));
       return;
     }
 
@@ -328,7 +332,8 @@ void DapBackend::refresh_variables(int frame_id) {
   scopes_request.frameId = frame_id;
   const auto scopes_response = session_->send(scopes_request).get();
   if (scopes_response.error) {
-    push_error("scopes falló: " + scopes_response.error.message);
+    push_error(i18n::tr_fmt("debug.dap.scopes_failed",
+                            {scopes_response.error.message}));
     return;
   }
 
@@ -395,7 +400,8 @@ void DapBackend::fetch_variable_children(int variables_reference,
   variables_request.variablesReference = variables_reference;
   const auto variables_response = session_->send(variables_request).get();
   if (variables_response.error) {
-    push_error("variables (hijos) falló: " + variables_response.error.message);
+    push_error(i18n::tr_fmt("debug.dap.variables_children_failed",
+                            {variables_response.error.message}));
     return;
   }
 
@@ -479,12 +485,7 @@ bool DapBackend::verify_inferior_attached_locked() {
     return true;
   }
 
-  push_error(
-      "Attach no controla el proceso (bloqueo ptrace de Linux; "
-      "yama.ptrace_scope suele ser 1 en Ubuntu).\n"
-      "  • Recompila hello y vuelve a lanzarlo: ./tools/launch_hello.sh\n"
-      "  • O depura con launch: ./tools/launch.sh ./build/hello\n"
-      "  • O temporal: sudo sysctl kernel.yama.ptrace_scope=0");
+  push_error(i18n::tr("debug.dap.attach_ptrace_blocked"));
   return false;
 }
 
@@ -536,9 +537,7 @@ void DapBackend::on_inferior_attached() {
   if (!stopped) {
     expecting_stop_after_pause_ = false;
     inferior_stopped_.store(false, std::memory_order_release);
-    push_error(
-        "El proceso sigue en ejecución tras attach. "
-        "Pausa manualmente (⏸) para inspeccionar el stack.");
+    push_error(i18n::tr("debug.dap.attach_still_running"));
     notify_continued();
     return;
   }
@@ -568,7 +567,7 @@ void DapBackend::apply_pending_breakpoints_locked() {
 void DapBackend::send_breakpoints_locked(const std::string& normalized_file,
                                          const std::vector<int>& lines) {
   if (!inferior_stopped_.load(std::memory_order_acquire)) {
-    push_error("setBreakpoints: el inferior no está detenido");
+    push_error(i18n::tr("debug.dap.set_breakpoints_not_stopped"));
     return;
   }
 
@@ -587,7 +586,8 @@ void DapBackend::send_breakpoints_locked(const std::string& normalized_file,
 
   const auto response = session_->send(request).get();
   if (response.error) {
-    push_error("setBreakpoints falló: " + response.error.message);
+    push_error(i18n::tr_fmt("debug.dap.set_breakpoints_failed",
+                            {response.error.message}));
     return;
   }
 
@@ -612,15 +612,18 @@ void DapBackend::send_breakpoints_locked(const std::string& normalized_file,
     DebugEvent log;
     log.kind = DebugEventKind::kOutput;
     if (bp.verified && bp.line.has_value()) {
-      log.text = "[breakpoint] instalado en " + normalized_file + ":" +
-                 std::to_string(static_cast<int>(*bp.line));
+      log.text = i18n::tr_fmt("debug.dap.breakpoint_installed",
+                              {normalized_file,
+                               std::to_string(static_cast<int>(*bp.line))});
     } else if (bp.line.has_value()) {
-      log.text = "[breakpoint] NO verificado en " + normalized_file + ":" +
-                 std::to_string(static_cast<int>(*bp.line));
+      log.text = i18n::tr_fmt("debug.dap.breakpoint_not_verified",
+                              {normalized_file,
+                               std::to_string(static_cast<int>(*bp.line))});
       if (info.message.empty()) {
-        log.text += " (¿ruta de fuente distinta a la del binario?)";
+        log.text += i18n::tr("debug.dap.breakpoint_source_path_hint");
       } else {
-        log.text += " — " + info.message;
+        log.text += i18n::tr_fmt("debug.dap.breakpoint_message_suffix",
+                                 {info.message});
       }
     }
     if (!log.text.empty()) {
@@ -662,9 +665,7 @@ void DapBackend::update_breakpoints(const std::string& file,
     expecting_interrupt_for_breakpoints_ = false;
     breakpoints_pending_sync_ = false;
     resume_after_breakpoint_sync_ = false;
-    push_error(
-        "No se pudo interrumpir el proceso para instalar breakpoints. "
-        "Pausa manualmente (⏸) e inténtalo de nuevo.");
+    push_error(i18n::tr("debug.dap.interrupt_for_breakpoints_failed"));
   }
 }
 
@@ -675,7 +676,8 @@ bool DapBackend::send_configuration_done() {
   dap::ConfigurationDoneRequest done;
   const auto done_response = session_->send(done).get();
   if (done_response.error) {
-    push_error("configurationDone falló: " + done_response.error.message);
+    push_error(i18n::tr_fmt("debug.dap.configuration_done_failed",
+                            {done_response.error.message}));
     return false;
   }
   configuration_done_ = true;
@@ -688,7 +690,7 @@ bool DapBackend::exec_repl_locked(const std::string& gdb_command, bool emit_outp
   request.context = "repl";
   const auto response = session_->send(request).get();
   if (response.error) {
-    push_error("GDB: " + response.error.message);
+    push_error(i18n::tr_fmt("debug.dap.gdb", {response.error.message}));
     return false;
   }
   if (emit_output && !response.response.result.empty()) {
@@ -781,7 +783,8 @@ void DapBackend::handle_command(const UiCommand& command) {
         return;
       }
       if (response.error) {
-        push_error("launch falló: " + response.error.message);
+        push_error(i18n::tr_fmt("debug.dap.launch_failed",
+                                {response.error.message}));
       } else {
         inferior_started = true;
       }
@@ -821,7 +824,8 @@ void DapBackend::handle_command(const UiCommand& command) {
         return;
       }
       if (attach_response.error) {
-        push_error("attach falló: " + attach_response.error.message);
+        push_error(i18n::tr_fmt("debug.dap.attach_failed",
+                                {attach_response.error.message}));
       } else if (!verify_inferior_attached_locked()) {
         // ptrace bloqueado: GDB DAP devuelve attach OK pero sin inferior real.
       } else {
@@ -852,7 +856,7 @@ void DapBackend::handle_command(const UiCommand& command) {
         }
       }
       if (command.core.core_path.empty()) {
-        push_error("core-file: ruta vacía");
+        push_error(i18n::tr("debug.dap.core_file_empty_path"));
         return;
       }
       if (!exec_repl_locked("-exec core-file " + command.core.core_path)) {
@@ -878,7 +882,7 @@ void DapBackend::handle_command(const UiCommand& command) {
         break;
       }
       if (!continue_inferior_locked()) {
-        push_error("continue falló: el inferior no está detenido o ya finalizó");
+        push_error(i18n::tr("debug.dap.continue_failed"));
       }
       break;
     }
@@ -886,7 +890,7 @@ void DapBackend::handle_command(const UiCommand& command) {
       if (pause_inferior_locked()) {
         notify_stopped("pause");
       } else {
-        push_error("pause falló");
+        push_error(i18n::tr("debug.dap.pause_failed"));
       }
       break;
     }
@@ -896,7 +900,8 @@ void DapBackend::handle_command(const UiCommand& command) {
                                                : active_thread_id_;
       const auto response = session_->send(request).get();
       if (response.error) {
-        push_error("next falló: " + response.error.message);
+        push_error(i18n::tr_fmt("debug.dap.next_failed",
+                                {response.error.message}));
       }
       break;
     }
@@ -906,7 +911,8 @@ void DapBackend::handle_command(const UiCommand& command) {
                                                : active_thread_id_;
       const auto response = session_->send(request).get();
       if (response.error) {
-        push_error("stepIn falló: " + response.error.message);
+        push_error(i18n::tr_fmt("debug.dap.step_in_failed",
+                                {response.error.message}));
       }
       break;
     }
@@ -916,7 +922,8 @@ void DapBackend::handle_command(const UiCommand& command) {
                                                : active_thread_id_;
       const auto response = session_->send(request).get();
       if (response.error) {
-        push_error("stepOut falló: " + response.error.message);
+        push_error(i18n::tr_fmt("debug.dap.step_out_failed",
+                                {response.error.message}));
       }
       break;
     }
@@ -939,15 +946,18 @@ void DapBackend::handle_command(const UiCommand& command) {
           DebugEvent event;
           event.kind = DebugEventKind::kWatchUpdated;
           event.watch_expression = command.expression;
-          event.watch_value = "[error] " + response.error.message;
+          event.watch_value = i18n::tr_fmt("debug.dap.error_prefix",
+                                           {response.error.message});
           push_event(std::move(event));
         } else if (command.evaluate_context == EvaluateContext::kCoreAnalyzer) {
           DebugEvent event;
           event.kind = DebugEventKind::kCoreAnalyzerResult;
-          event.text = "[error] " + response.error.message;
+          event.text = i18n::tr_fmt("debug.dap.error_prefix",
+                                    {response.error.message});
           push_event(std::move(event));
         } else {
-          push_error("evaluate falló: " + response.error.message);
+          push_error(i18n::tr_fmt("debug.dap.evaluate_failed",
+                                  {response.error.message}));
         }
         break;
       }
@@ -987,7 +997,8 @@ void DapBackend::handle_command(const UiCommand& command) {
           DebugEvent event;
           event.kind = DebugEventKind::kWatchUpdated;
           event.watch_expression = command.expression;
-          event.watch_value = "[error] " + fb.error.message;
+          event.watch_value = i18n::tr_fmt("debug.dap.error_prefix",
+                                           {fb.error.message});
           push_event(std::move(event));
           break;
         }
@@ -1035,7 +1046,7 @@ void DapBackend::handle_command(const UiCommand& command) {
 void DapBackend::worker_main() {
   gdb_ = std::make_unique<GdbProcess>();
   if (!gdb_->start()) {
-    push_error("No se pudo iniciar gdb -i=dap");
+    push_error(i18n::tr("debug.dap.gdb_start_failed"));
     running_ = false;
     return;
   }
@@ -1044,7 +1055,7 @@ void DapBackend::worker_main() {
   session_->bind(gdb_->reader(), gdb_->writer(), [&] {
     DebugEvent event;
     event.kind = DebugEventKind::kTerminated;
-    event.text = "Conexión DAP cerrada";
+    event.text = i18n::tr("debug.dap.connection_closed");
     push_event(std::move(event));
   });
 

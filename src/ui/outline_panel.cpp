@@ -18,6 +18,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -367,9 +368,9 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     Elements rows;
     if (state->symbols_fetch_pending && state->symbols.empty()) {
-      rows.push_back(text("(cargando…)") | color(theme::Muted()));
+      rows.push_back(text(i18n::tr("panel.outline.loading")) | color(theme::Muted()));
     } else if (state->symbols.empty()) {
-      rows.push_back(text("(sin símbolos)") | color(theme::Muted()));
+      rows.push_back(text(i18n::tr("panel.outline.no_symbols")) | color(theme::Muted()));
     } else {
       for (int i = start; i < end; ++i) {
         const auto& row = state->display_rows[static_cast<std::size_t>(i)];

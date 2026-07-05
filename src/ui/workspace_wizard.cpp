@@ -6,6 +6,7 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "i18n/tr.hpp"
 #include "ui/clickable.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
@@ -153,7 +154,8 @@ Component MakeWorkspaceWizardOverlay(Component main, WorkspaceWizardState* state
         Elements list_rows;
         for (int i = start; i < end; ++i) {
           const auto& row = state->browser.entries[static_cast<std::size_t>(i)];
-          std::string prefix = row.is_directory ? "[dir] " : "      ";
+          std::string prefix = row.is_directory ? i18n::tr("common.browser.dir_prefix")
+                                                : i18n::tr("common.browser.file_indent");
           const std::string row_id = press_id::f3_browser_row(i);
           const bool selected = i == state->browser.selected;
           const bool hovered =
@@ -168,17 +170,16 @@ Component MakeWorkspaceWizardOverlay(Component main, WorkspaceWizardState* state
           list_rows.push_back(line);
         }
         if (list_rows.empty()) {
-          list_rows.push_back(text("(vacío)") | color(theme::Muted()));
+          list_rows.push_back(text(i18n::tr("common.empty")) | color(theme::Muted()));
         }
         body.push_back(vbox(std::move(list_rows)) | reflect(state->browser.browser_list_box));
 
         Element dialog = window(
-            text("Elegir directorio de trabajo") | color(theme::Accent()),
+            text(i18n::tr("wizard.workspace.title")) | color(theme::Accent()),
             vbox({
                 vbox(std::move(body)) | flex | bgcolor(theme::PanelBg()),
                 separator(),
-                text("j/k  Enter carpeta  clic  a=usar carpeta  Esc/q salir") |
-                    color(theme::Muted()),
+                text(i18n::tr("wizard.workspace.footer")) | color(theme::Muted()),
             }))
             | size(WIDTH, GREATER_THAN, 60)
             | size(HEIGHT, GREATER_THAN, 12)

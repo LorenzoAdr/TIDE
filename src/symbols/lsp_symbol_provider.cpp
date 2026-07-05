@@ -72,6 +72,10 @@ void LspSymbolProvider::finish_lsp_start_locked(bool ok) {
     if (!is_lsp_trackable_path(entry.first, text)) {
       continue;
     }
+    client_.did_open(entry.first, text);
+    if (is_cpp_header_path(entry.first)) {
+      open_companion_sources_for_clangd_locked(entry.first);
+    }
     enqueue_semantic_tokens_locked(normalize_lsp_path(entry.first));
   }
   semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
@@ -526,6 +530,53 @@ void LspSymbolProvider::on_workspace_closed() {
   std::lock_guard<std::mutex> lock(mutex_);
   workspace_root_.clear();
   open_buffers_.clear();
+  shadow_companions_.clear();
+}
+
+bool LspSymbolProvider::buffer_open_locked(const std::string& path) const {
+  if (path.empty()) {
+    return false;
+  }
+  const std::string key = normalize_lsp_path(path);
+  for (const auto& entry : open_buffers_) {
+    if (normalize_lsp_path(entry.first) == key) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void LspSymbolProvider::clear_shadow_companion_locked(const std::string& companion_path) {
+  const std::string key = normalize_lsp_path(companion_path);
+  for (auto it = shadow_companions_.begin(); it != shadow_companions_.end();) {
+    auto& companions = it->second;
+    companions.erase(key);
+    if (companions.empty()) {
+      it = shadow_companions_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+void LspSymbolProvider::open_companion_sources_for_clangd_locked(const std::string& header_path) {
+  if (!use_lsp_ || !is_cpp_header_path(header_path)) {
+    return;
+  }
+
+  const std::string header_key = normalize_lsp_path(header_path);
+  for (const std::string& companion : companion_source_paths_for_header(header_path)) {
+    const std::string companion_key = normalize_lsp_path(companion);
+    if (companion_key.empty() || buffer_open_locked(companion_key)) {
+      continue;
+    }
+    const std::string companion_text = read_file_text(companion_key);
+    if (!is_lsp_trackable_path(companion_key, companion_text)) {
+      continue;
+    }
+    client_.did_open(companion_key, companion_text);
+    shadow_companions_[header_key].insert(companion_key);
+  }
 }
 
 void LspSymbolProvider::on_document_opened(const std::string& path, const std::string& text) {
@@ -533,11 +584,19 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
     return;
   }
   bool notify_open = false;
+  bool open_companions = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     flush_all_pending_did_change_locked();
     open_buffers_[path] = text;
+    clear_shadow_companion_locked(path);
     notify_open = use_lsp_ && is_lsp_trackable_path(path, text);
+    open_companions = notify_open && is_cpp_header_path(path);
+    if (open_companions) {
+      client_.did_open(path, text);
+      open_companion_sources_for_clangd_locked(path);
+      notify_open = false;
+    }
   }
   if (notify_open) {
     client_.did_open(path, text);
@@ -581,8 +640,21 @@ void LspSymbolProvider::on_document_saved(const std::string& path) {
 void LspSymbolProvider::on_document_closed(const std::string& path) {
   std::lock_guard<std::mutex> lock(mutex_);
   open_buffers_.erase(path);
-  if (use_lsp_) {
-    client_.did_close(path);
+  if (!use_lsp_) {
+    return;
+  }
+
+  client_.did_close(path);
+
+  const std::string key = normalize_lsp_path(path);
+  const auto shadow_it = shadow_companions_.find(key);
+  if (shadow_it != shadow_companions_.end()) {
+    for (const std::string& companion : shadow_it->second) {
+      if (!buffer_open_locked(companion)) {
+        client_.did_close(companion);
+      }
+    }
+    shadow_companions_.erase(shadow_it);
   }
 }
 
@@ -723,6 +795,9 @@ SourceLocation LspSymbolProvider::goto_definition(const NavigationParams& params
   if (!use_lsp_) {
     return {};
   }
+  if (is_cpp_header_path(params.path)) {
+    open_companion_sources_for_clangd_locked(params.path);
+  }
   const std::string text =
       params.text.empty() ? buffer_text_for_path(params.path) : params.text;
   return client_.goto_definition(params.path, text, params.line, params.character);
@@ -736,9 +811,28 @@ SourceLocation LspSymbolProvider::goto_declaration(const NavigationParams& param
   if (!use_lsp_) {
     return {};
   }
+  if (is_cpp_header_path(params.path)) {
+    open_companion_sources_for_clangd_locked(params.path);
+  }
   const std::string text =
       params.text.empty() ? buffer_text_for_path(params.path) : params.text;
   return client_.goto_declaration(params.path, text, params.line, params.character);
+}
+
+SourceLocation LspSymbolProvider::goto_implementation(const NavigationParams& params) {
+  if (params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
+    return {};
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return {};
+  }
+  if (is_cpp_header_path(params.path)) {
+    open_companion_sources_for_clangd_locked(params.path);
+  }
+  const std::string text =
+      params.text.empty() ? buffer_text_for_path(params.path) : params.text;
+  return client_.goto_implementation(params.path, text, params.line, params.character);
 }
 
 bool LspSymbolProvider::supports_semantic_highlight() const {

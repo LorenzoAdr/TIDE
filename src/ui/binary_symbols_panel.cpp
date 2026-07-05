@@ -23,6 +23,7 @@
 #include "ui/scroll_bar.hpp"
 #include "ui/text_input_style.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 #include "util/nm_reader_runner.hpp"
 #include "util/thread_name.hpp"
 
@@ -124,6 +125,7 @@ class SymbolFilterRunner {
 struct BinarySymbolsPanelState {
   std::string binary_path;
   std::string filter_query;
+  std::string placeholder_filter;
   std::string applied_name_filter;
   bool filter_dirty = false;
   NmBindingFilter binding_filter = NmBindingFilter::kAll;
@@ -336,7 +338,7 @@ void start_analysis(BinarySymbolsPanelState* state, MainLayoutState* layout_stat
   state->runner.cancel();
   state->binary_path = binary_path;
   state->loading = true;
-  state->status = "Analizando " + fs::path(binary_path).filename().string() + "...";
+  state->status = i18n::tr_fmt("panel.symbols.analyzing", {fs::path(binary_path).filename().string()});
   state->symbols.reset();
   state->filtered_indices.clear();
   state->filter_query.clear();
@@ -377,14 +379,15 @@ void navigate_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state
   const auto loc = resolve_nm_symbol_in_workspace(symbol, workspace_root, symbol_indexer, symbols,
                                                   file_indexer);
   if (!loc.has_value() || !loc->valid) {
-    workspace->status_message = "Sin ubicación en código para: " + symbol.name;
+    workspace->status_message = i18n::tr_fmt("panel.symbols.no_code_location", {symbol.name});
     return;
   }
   workspace->record_cursor_jump();
   workspace->open_file_at(loc->path, loc->line, loc->character);
-  workspace->status_message = "→ " + fs::path(loc->path).filename().string() + ":" +
-                              std::to_string(loc->line + 1) + ":" +
-                              std::to_string(loc->character + 1);
+  workspace->status_message = i18n::tr_fmt("status.navigate",
+                                           {fs::path(loc->path).filename().string(),
+                                            std::to_string(loc->line + 1),
+                                            std::to_string(loc->character + 1)});
   if (layout_state != nullptr) {
     schedule_editor_navigation(layout_state, *loc);
   }
@@ -465,7 +468,7 @@ bool poll_runner(BinarySymbolsPanelState* state, MainLayoutState* layout_state) 
     }
     if (state->loading) {
       state->loading = false;
-      state->status = "Análisis cancelado";
+      state->status = i18n::tr("panel.symbols.analysis_cancelled");
       if (layout_state != nullptr) {
         layout_state->request_ui_tick = true;
       }
@@ -478,7 +481,7 @@ bool poll_runner(BinarySymbolsPanelState* state, MainLayoutState* layout_state) 
   if (!result.error.empty() && state->symbols->empty()) {
     state->status = result.error;
   } else {
-    state->status = std::to_string(state->symbols->size()) + " símbolos";
+    state->status = i18n::tr_fmt("panel.symbols.count", {std::to_string(state->symbols->size())});
     if (!result.error.empty()) {
       state->status += " (" + result.error + ")";
     }
@@ -552,7 +555,7 @@ Element render_name_filter_field(const BinarySymbolsPanelState& state, bool filt
     return clear_under(std::move(field));
   }
   std::string preview =
-      state.filter_query.empty() ? "Filtrar por nombre..." : state.filter_query;
+      state.filter_query.empty() ? i18n::tr("panel.symbols.filter_placeholder") : state.filter_query;
   if (state.filter_dirty) {
     preview += " *";
   }
@@ -800,9 +803,10 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
                                  SymbolWorkspaceIndexer* symbol_indexer,
                                  WorkspaceIndexer* file_indexer, ShellSession* shell) {
   auto state = std::make_shared<BinarySymbolsPanelState>();
+  state->placeholder_filter = i18n::tr("panel.symbols.filter_placeholder");
 
   auto filter_input_option = std::make_shared<InputOption>(
-      MakeBlinkInputOption(&state->filter_query, "Filtrar por nombre..."));
+      MakeBlinkInputOption(&state->filter_query, &state->placeholder_filter));
   auto filter_input = Input(*filter_input_option);
   Components children = {filter_input};
   auto input_layers = Container::Vertical(children);
@@ -945,14 +949,14 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
     if (event == Event::Escape && state->loading) {
       state->runner.cancel();
       state->loading = false;
-      state->status = "Análisis cancelado";
+      state->status = i18n::tr("panel.symbols.analysis_cancelled");
       layout_state->request_ui_tick = true;
       return true;
     }
 
     if (event == Event::Escape && binary_symbols_request_pending(layout_state)) {
       layout_state->binary_symbols_pending = {};
-      state->status = "Análisis cancelado";
+      state->status = i18n::tr("panel.symbols.analysis_cancelled");
       layout_state->request_ui_tick = true;
       return true;
     }
@@ -1029,24 +1033,25 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
 
         const std::string header_path = symbols_panel_binary_path(*state, layout_state);
         const std::string header_display =
-            header_path.empty() ? "(sin binario)" : fs::path(header_path).filename().string();
+            header_path.empty() ? i18n::tr("panel.symbols.no_binary")
+                                : fs::path(header_path).filename().string();
         const bool show_loading = symbols_panel_loading(*state, layout_state);
         std::string loading_suffix;
         if (show_loading) {
-          loading_suffix = "  [cargando… Esc: cancelar]";
+          loading_suffix = i18n::tr("panel.symbols.loading_suffix");
         } else if (state->filtering) {
-          loading_suffix = "  [filtrando…]";
+          loading_suffix = i18n::tr("panel.symbols.filtering_suffix");
         }
         std::string status_text = state->status;
         if (binary_symbols_request_pending(layout_state) && !header_display.empty() &&
-            header_display != "(sin binario)") {
-          status_text = "Analizando " + header_display + "...";
+            header_display != i18n::tr("panel.symbols.no_binary")) {
+          status_text = i18n::tr_fmt("panel.symbols.analyzing", {header_display});
         }
-        const std::string header = "Binario: " + header_display + "  |  " + status_text +
+        const std::string header = i18n::tr_fmt("panel.symbols.header", {header_display, status_text}) +
                                    loading_suffix;
 
         Elements binding_labels;
-        binding_labels.push_back(text("Estado: ") | color(theme::Muted()));
+        binding_labels.push_back(text(i18n::tr("panel.symbols.binding_label")) | color(theme::Muted()));
         for (int i = 0; i < kBindingFilterCount; ++i) {
           const NmBindingFilter filter = kBindingFilterOrder[i];
           Element label = text(nm_binding_filter_label(filter));
@@ -1061,15 +1066,15 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
           }
         }
         binding_labels.push_back(
-            text("  Enter: aplicar nombre  clic/Tab/1-7: estado  /: nombre") | color(theme::Muted()));
+            text(i18n::tr("panel.symbols.footer")) | color(theme::Muted()));
 
         Elements rows;
         if (show_loading && (state->symbols == nullptr || state->symbols->empty())) {
-          rows.push_back(text(" Ejecutando nm en segundo plano... ") | color(theme::Muted()));
+          rows.push_back(text(i18n::tr("panel.symbols.running_nm")) | color(theme::Muted()));
         } else if (state->filtering && state->filtered_indices.empty()) {
-          rows.push_back(text(" Filtrando símbolos... ") | color(theme::Muted()));
+          rows.push_back(text(i18n::tr("panel.symbols.filtering")) | color(theme::Muted()));
         } else if (state->filtered_indices.empty()) {
-          rows.push_back(text(" (sin símbolos) ") | color(theme::Muted()));
+          rows.push_back(text(i18n::tr("panel.symbols.no_symbols")) | color(theme::Muted()));
         } else {
           const int end = std::min(static_cast<int>(state->filtered_indices.size()),
                                    state->first_visible + visible);
@@ -1101,7 +1106,7 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
 
         return vbox({
                    text(header) | color(theme::Muted()) | size(HEIGHT, EQUAL, 1),
-                   hbox({text("Nombre: ") | color(theme::Muted()), filter_field | flex}) |
+                   hbox({text(i18n::tr("panel.symbols.name_label")) | color(theme::Muted()), filter_field | flex}) |
                        size(HEIGHT, EQUAL, 1) | reflect(state->filter_box),
                    hbox(std::move(binding_labels)) | size(HEIGHT, EQUAL, 1),
                    separator(),

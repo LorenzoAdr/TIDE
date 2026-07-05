@@ -37,6 +37,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool supports_navigation() const override;
   SourceLocation goto_definition(const NavigationParams& params) override;
   SourceLocation goto_declaration(const NavigationParams& params) override;
+  SourceLocation goto_implementation(const NavigationParams& params) override;
 
   bool supports_semantic_highlight() const override;
   bool ensure_semantic_tokens(const std::string& path) override;
@@ -120,6 +121,9 @@ class LspSymbolProvider : public ISymbolProvider {
   void tick_pending_did_change_locked();
   void flush_pending_did_change_for_key_locked(const std::string& key);
   void flush_all_pending_did_change_locked();
+  void open_companion_sources_for_clangd_locked(const std::string& header_path);
+  void clear_shadow_companion_locked(const std::string& companion_path);
+  bool buffer_open_locked(const std::string& path) const;
   static int64_t steady_now_ms();
 
   mutable std::mutex mutex_;
@@ -132,6 +136,7 @@ class LspSymbolProvider : public ISymbolProvider {
   std::string workspace_root_;
   std::string compile_commands_dir_;
   std::unordered_map<std::string, std::string> open_buffers_;
+  std::unordered_map<std::string, std::unordered_set<std::string>> shadow_companions_;
   mutable uint64_t cached_diag_revision_ = 0;
   mutable std::vector<DocumentDiagnostics> cached_diagnostics_;
 

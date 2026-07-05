@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "i18n/locale.hpp"
+#include "i18n/tr.hpp"
 #include "util/core_analyzer_support.hpp"
 #include "util/crash_handler.hpp"
 
@@ -74,30 +76,28 @@ bool path_is_ide_open_file(const std::string &path) {
 }
 
 void print_usage() {
-  std::cerr
-      << "Uso: tgdb [opciones] [<dir>|<archivo>|<programa>]\n"
-      << "Opciones:\n"
-      << "  --cwd <dir>         Directorio raiz del workspace\n"
-      << "  --args <a>...       Argumentos del programa (despues de --args)\n"
-      << "  --attach <pid>      Adjuntar a un proceso en ejecucion\n"
-      << "  --target <host:puerto>  Adjuntar a gdbserver remoto\n"
-      << "  --core <archivo>    Cargar core dump post-mortem\n"
-      << "  --core-analyzer     Usar pestana Core Analyzer (con --core)\n"
-      << "  -h, --help          Muestra esta ayuda\n"
-      << "\n"
-      << "Sin argumentos abre la pantalla de inicio TUIDE (modo IDE).\n"
-      << "Un directorio abre el workspace; un archivo abre su carpeta con el "
-         "archivo cargado.\n"
-      << "F1 abrir archivo externo; Alt+F1/Shift+F1 atajos; F2 depuracion; F3"
-         " directorio de trabajo.\n"
-      << "\n"
-      << "Ejemplos:\n"
-      << "  tgdb\n"
-      << "  tgdb .\n"
-      << "  tgdb src/main.cpp\n"
-      << "  tgdb --cwd ./proyecto\n"
-      << "  tgdb ./build/hello\n"
-      << "  tgdb --attach 12345 ./build/hello\n";
+  using tgdb::i18n::tr;
+  std::cerr << tr("cli.usage") << '\n'
+            << tr("cli.options_header") << '\n'
+            << tr("cli.opt.cwd") << '\n'
+            << tr("cli.opt.args") << '\n'
+            << tr("cli.opt.attach") << '\n'
+            << tr("cli.opt.target") << '\n'
+            << tr("cli.opt.core") << '\n'
+            << tr("cli.opt.core_analyzer") << '\n'
+            << tr("cli.opt.help") << '\n'
+            << '\n'
+            << tr("cli.help.no_args") << '\n'
+            << tr("cli.help.positional") << '\n'
+            << tr("cli.help.shortcuts") << '\n'
+            << '\n'
+            << tr("cli.examples_header") << '\n'
+            << tr("cli.example.welcome") << '\n'
+            << tr("cli.example.dot") << '\n'
+            << tr("cli.example.open_file") << '\n'
+            << tr("cli.example.cwd") << '\n'
+            << tr("cli.example.program") << '\n'
+            << tr("cli.example.attach") << '\n';
 }
 
 } // namespace
@@ -109,6 +109,8 @@ int main(int argc, char **argv) {
     setenv("TERM", "xterm-256color", 1);
   }
 #endif
+
+  tgdb::i18n::set_locale(tgdb::i18n::UiLocale::kAuto);
 
   tgdb::AppConfig config;
 
@@ -155,7 +157,7 @@ int main(int argc, char **argv) {
       break;
     }
     if (arg.rfind('-', 0) == 0) {
-      std::cerr << "Opción desconocida: " << arg << "\n";
+      std::cerr << tgdb::i18n::tr_fmt("cli.unknown_option", {arg}) << '\n';
       print_usage();
       return 1;
     }
@@ -166,7 +168,7 @@ int main(int argc, char **argv) {
     }
     if (path_is_ide_open_file(arg)) {
       if (!config.initial_file.empty()) {
-        std::cerr << "Error: demasiados argumentos posicionales\n";
+        std::cerr << tgdb::i18n::tr("cli.too_many_args") << '\n';
         print_usage();
         return 1;
       }
@@ -175,7 +177,7 @@ int main(int argc, char **argv) {
       continue;
     }
     if (!config.program.empty()) {
-      std::cerr << "Error: demasiados argumentos posicionales\n";
+      std::cerr << tgdb::i18n::tr("cli.too_many_args") << '\n';
       print_usage();
       return 1;
     }
@@ -200,39 +202,35 @@ int main(int argc, char **argv) {
   if (!config.program.empty()) {
     config.program = std::filesystem::absolute(config.program, ec).string();
     if (!std::filesystem::exists(config.program)) {
-      std::cerr << "Error: programa no encontrado: " << config.program << "\n";
+      std::cerr << tgdb::i18n::tr_fmt("cli.program_not_found", {config.program}) << '\n';
       return 1;
     }
     if (!std::filesystem::is_regular_file(config.program)) {
-      std::cerr << "Error: el programa debe ser un archivo: " << config.program
-                << "\n";
+      std::cerr << tgdb::i18n::tr_fmt("cli.program_not_file", {config.program}) << '\n';
       return 1;
     }
   }
   if (!config.core_path.empty()) {
     config.core_path = std::filesystem::absolute(config.core_path, ec).string();
     if (!std::filesystem::exists(config.core_path)) {
-      std::cerr << "Error: core no encontrado: " << config.core_path << "\n";
+      std::cerr << tgdb::i18n::tr_fmt("cli.core_not_found", {config.core_path}) << '\n';
       return 1;
     }
   }
   if (config.core_analysis == tgdb::CoreAnalysisMode::kCoreAnalyzer &&
       !tgdb::core_analyzer_supported()) {
-    std::cerr << "Error: esta build no incluye Core Analyzer (omitir "
-                 "--core-analyzer)\n";
+    std::cerr << tgdb::i18n::tr("cli.core_analyzer_unavailable") << '\n';
     return 1;
   }
   if (!config.initial_file.empty()) {
     config.initial_file =
         std::filesystem::absolute(config.initial_file, ec).string();
     if (!std::filesystem::exists(config.initial_file)) {
-      std::cerr << "Error: archivo no encontrado: " << config.initial_file
-                << "\n";
+      std::cerr << tgdb::i18n::tr_fmt("cli.file_not_found", {config.initial_file}) << '\n';
       return 1;
     }
     if (!std::filesystem::is_regular_file(config.initial_file)) {
-      std::cerr << "Error: debe ser un archivo: " << config.initial_file
-                << "\n";
+      std::cerr << tgdb::i18n::tr_fmt("cli.not_a_file", {config.initial_file}) << '\n';
       return 1;
     }
     if (config.workspace_root.empty()) {
@@ -244,8 +242,7 @@ int main(int argc, char **argv) {
     config.workspace_root =
         std::filesystem::absolute(config.workspace_root, ec).string();
     if (!std::filesystem::is_directory(config.workspace_root)) {
-      std::cerr << "Error: --cwd debe ser un directorio: "
-                << config.workspace_root << "\n";
+      std::cerr << tgdb::i18n::tr_fmt("cli.cwd_not_directory", {config.workspace_root}) << '\n';
       return 1;
     }
   }
@@ -256,11 +253,11 @@ int main(int argc, char **argv) {
     tgdb::Application app(std::move(config));
     return app.run();
   } catch (const std::exception &e) {
-    std::cerr << "Error fatal: " << e.what() << '\n';
+    std::cerr << tgdb::i18n::tr_fmt("cli.fatal_error", {e.what()}) << '\n';
     tgdb::print_current_backtrace(e.what());
     return 1;
   } catch (...) {
-    std::cerr << "Error fatal desconocido\n";
+    std::cerr << tgdb::i18n::tr("cli.fatal_unknown") << '\n';
     tgdb::print_current_backtrace("unknown");
     return 1;
   }

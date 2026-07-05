@@ -14,6 +14,10 @@ struct BracketPairHighlight {
 
 BracketPairHighlight find_bracket_pair_highlight(const EditorBuffer& buffer, int line, int col);
 
+// Innermost `{`/`[`/`(` pair enclosing (line, col), if any.
+BracketPairHighlight find_enclosing_bracket_pair(const EditorBuffer& buffer, int line, int col,
+                                               char open_ch = '{');
+
 // True when the cursor sits in normal code (not in a comment or string literal).
 bool cursor_in_code(const EditorBuffer& buffer, int line, int col);
 

@@ -91,6 +91,40 @@ bool text_looks_binary(const std::string& text) {
   return false;
 }
 
+bool is_cpp_header_path(const std::string& path) {
+  const std::string ext = lowercase_extension(path);
+  return ext == ".h" || ext == ".hpp" || ext == ".hxx" || ext == ".hh";
+}
+
+std::vector<std::string> companion_source_paths_for_header(const std::string& header_path) {
+  std::vector<std::string> out;
+  if (!is_cpp_header_path(header_path)) {
+    return out;
+  }
+
+  const fs::path header = fs::path(header_path);
+  const fs::path dir = header.parent_path();
+  const std::string stem = header.stem().string();
+  const std::string ext = lowercase_extension(header_path);
+
+  std::vector<std::string> suffixes;
+  if (ext == ".h") {
+    suffixes = {".c", ".cpp", ".cc", ".cxx"};
+  } else {
+    suffixes = {".cpp", ".cc", ".cxx"};
+  }
+
+  for (const std::string& suffix : suffixes) {
+    const fs::path candidate = dir / (stem + suffix);
+    std::error_code ec;
+    if (!fs::is_regular_file(candidate, ec)) {
+      continue;
+    }
+    out.push_back(fs::absolute(candidate).string());
+  }
+  return out;
+}
+
 bool is_lsp_trackable_path(const std::string& path, const std::string& text) {
   if (!is_indexed_source_path(path)) {
     return false;

@@ -6,6 +6,7 @@
 #include "git/git_command.hpp"
 #include "util/monitor_log.hpp"
 #include "util/path_normalize.hpp"
+#include "i18n/tr.hpp"
 
 namespace fs = std::filesystem;
 
@@ -166,7 +167,7 @@ void GitService::detect_repo(const std::string& root) {
   const auto tree = run_git(root, {"rev-parse", "--is-inside-work-tree"});
   if (!tree.success() || tree.stdout_text.find("true") == std::string::npos) {
     info.valid = false;
-    info.last_error = "no es un repositorio git";
+    info.last_error = i18n::tr("git.not_repo");
     std::lock_guard<std::mutex> lock(mutex_);
     if (workspace_root_ != root) {
       return;
@@ -420,7 +421,7 @@ std::string GitService::previous_line_content(const std::string& absolute_path, 
   }
   const auto change_it = diff.line_changes.find(line);
   if (change_it != diff.line_changes.end() && change_it->second == GitLineChange::kAdded) {
-    return "(línea nueva)";
+    return i18n::tr("git.new_line");
   }
   if (line >= 0 && static_cast<std::size_t>(line) < diff.head_lines.size()) {
     return diff.head_lines[static_cast<std::size_t>(line)];

@@ -21,11 +21,12 @@ struct WorkspaceModel {
   std::vector<EditorTab> tabs;
   std::vector<std::string> tab_mru;
   int active_tab = -1;
-  std::string status_message = "Selecciona un workspace";
+  std::string status_message;
   OpenFileConfirmState* open_file_confirm = nullptr;
   using UiTask = std::function<void()>;
   std::function<void(UiTask)> enqueue_ui_task;
 
+  std::vector<std::string> open_tabs_mru() const;
   std::vector<std::string> open_tabs_mru_excluding_active() const;
 
   void flush_active_tab();

@@ -6,6 +6,8 @@
 #include <exception>
 #include <iostream>
 
+#include "i18n/tr.hpp"
+
 #if defined(__linux__) || defined(__APPLE__)
 #include <execinfo.h>
 #include <unistd.h>
@@ -21,14 +23,14 @@ void print_backtrace_to_stderr(const char* reason) {
   const int count = backtrace(frames, 128);
   char** symbols = backtrace_symbols(frames, count);
 
-  std::cerr << "\n=== Backtrace (" << reason << ") ===\n";
+  std::cerr << i18n::tr_fmt("crash.backtrace_header", {reason});
   if (symbols != nullptr) {
     for (int i = 0; i < count; ++i) {
       std::cerr << "  #" << i << " " << symbols[i] << '\n';
     }
     std::free(symbols);
   } else {
-    std::cerr << "  (no se pudieron resolver símbolos)\n";
+    std::cerr << i18n::tr("crash.symbols_unresolved");
   }
   std::cerr << std::flush;
 }
@@ -79,7 +81,7 @@ void print_current_backtrace(const char* reason) {
 #if defined(__linux__) || defined(__APPLE__)
   print_backtrace_to_stderr(reason);
 #else
-  std::cerr << "Backtrace no disponible en esta plataforma (" << reason << ")\n";
+  std::cerr << i18n::tr_fmt("crash.unavailable", {reason});
 #endif
 }
 

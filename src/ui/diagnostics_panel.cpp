@@ -18,6 +18,7 @@
 #include "ui/context_menu.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -163,9 +164,7 @@ void navigate_to_diagnostic(WorkspaceModel* workspace, const DiagnosticRow& row)
   }
   workspace->record_cursor_jump();
   workspace->open_file_at(row.path, row.line, row.character);
-  workspace->status_message =
-      "→ " + fs::path(row.path).filename().string() + ":" + std::to_string(row.line + 1) + ":" +
-      std::to_string(row.character + 1);
+  workspace->status_message = i18n::tr_fmt("status.navigate", {fs::path(row.path).filename().string(), std::to_string(row.line + 1), std::to_string(row.character + 1)});
 }
 
 int visible_line_count(const Box& box) {
@@ -299,9 +298,9 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
 
     Elements rows;
     if (!symbols || !symbols->supports_diagnostics()) {
-      rows.push_back(text(" (requiere clangd) ") | color(theme::Muted()));
+      rows.push_back(text(i18n::tr("panel.problems.requires_clangd")) | color(theme::Muted()));
     } else if (state->rows.empty()) {
-      rows.push_back(text(" (sin problemas) ") | color(theme::Muted()));
+      rows.push_back(text(i18n::tr("panel.problems.no_problems")) | color(theme::Muted()));
     } else {
       const std::string workspace_root = workspace != nullptr ? workspace->root : std::string{};
       const int visible_rows = visible_problem_count(visible);

@@ -24,6 +24,7 @@
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 #include "util/compile_commands_lookup.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/path_normalize.hpp"
@@ -58,7 +59,7 @@ bool is_valid_filename(const std::string& name) {
 }
 
 void set_items(ContextMenuState* state, ContextMenuKind kind,
-               std::initializer_list<std::pair<const char*, const char*>> items) {
+               std::initializer_list<std::pair<std::string, const char*>> items) {
   if (state == nullptr) {
     return;
   }
@@ -157,7 +158,8 @@ bool apply_workspace_file_edits(WorkspaceModel* workspace, DebugModel* model,
       text = buffer_document_text(workspace->tabs[static_cast<std::size_t>(tab)].buffer);
     } else if (!read_file_text(path, &text)) {
       if (status_message != nullptr) {
-        *status_message = "No se pudo leer: " + fs::path(path).filename().string();
+        *status_message = i18n::tr_fmt("status.read_failed",
+                                       {fs::path(path).filename().string()});
       }
       return false;
     }
@@ -183,7 +185,8 @@ bool apply_workspace_file_edits(WorkspaceModel* workspace, DebugModel* model,
       }
     } else if (!write_file_text(path, updated)) {
       if (status_message != nullptr) {
-        *status_message = "No se pudo guardar: " + fs::path(path).filename().string();
+        *status_message = i18n::tr_fmt("status.save_failed",
+                                       {fs::path(path).filename().string()});
       }
       return false;
     }
@@ -200,7 +203,7 @@ bool apply_workspace_file_edits(WorkspaceModel* workspace, DebugModel* model,
 
   if (changed_files == 0) {
     if (status_message != nullptr) {
-      *status_message = "Sin cambios al aplicar";
+      *status_message = i18n::tr("status.no_changes_apply");
     }
     return false;
   }
@@ -245,15 +248,15 @@ bool format_file_at_path(WorkspaceModel* workspace, MainLayoutState* layout_stat
   }
   if (layout_state != nullptr && layout_state->app_settings != nullptr &&
       !layout_state->app_settings->lsp_enabled) {
-    workspace->status_message = "LSP desactivado en configuración";
+    workspace->status_message = i18n::tr("status.lsp_disabled");
     return false;
   }
   if (symbols == nullptr || !symbols->supports_formatting()) {
-    workspace->status_message = "Formateo no disponible (clangd inactivo)";
+    workspace->status_message = i18n::tr("status.format_unavailable");
     return false;
   }
   if (!is_lsp_trackable_path(absolute_path)) {
-    workspace->status_message = "Archivo no compatible con clang-format";
+    workspace->status_message = i18n::tr("status.format_incompatible");
     return false;
   }
 
@@ -276,19 +279,20 @@ bool format_file_at_path(WorkspaceModel* workspace, MainLayoutState* layout_stat
   if (tab >= 0) {
     text = buffer_document_text(workspace->tabs[static_cast<std::size_t>(tab)].buffer);
   } else if (!read_file_text(path, &text)) {
-    workspace->status_message = "No se pudo leer: " + fs::path(path).filename().string();
+    workspace->status_message = i18n::tr_fmt("status.read_failed",
+                                             {fs::path(path).filename().string()});
     return false;
   }
 
   const std::optional<std::string> formatted =
       symbols->format_document(FormatParams{path, text});
   if (!formatted.has_value()) {
-    workspace->status_message = "Error al formatear con clangd";
+    workspace->status_message = i18n::tr("status.format_error");
     return false;
   }
   if (*formatted == text) {
     workspace->status_message =
-        "Sin cambios: " + fs::path(path).filename().string();
+        i18n::tr_fmt("status.format_no_changes", {fs::path(path).filename().string()});
     return true;
   }
 
@@ -301,11 +305,12 @@ bool format_file_at_path(WorkspaceModel* workspace, MainLayoutState* layout_stat
     symbols->on_document_changed(path, *formatted);
     symbols->flush_document_sync(path);
   } else if (!write_file_text(path, *formatted)) {
-    workspace->status_message = "No se pudo guardar: " + fs::path(path).filename().string();
+    workspace->status_message = i18n::tr_fmt("status.save_failed",
+                                             {fs::path(path).filename().string()});
     return false;
   }
 
-  workspace->status_message = "Formateado: " + fs::path(path).filename().string();
+  workspace->status_message = i18n::tr_fmt("status.formatted", {fs::path(path).filename().string()});
   return true;
 }
 
@@ -317,8 +322,9 @@ bool navigate_to_location(WorkspaceModel* workspace, MainLayoutState* layout_sta
   workspace->record_cursor_jump();
   workspace->open_file_at(loc.path, loc.line, loc.character);
   workspace->status_message =
-      "→ " + fs::path(loc.path).filename().string() + ":" + std::to_string(loc.line + 1) + ":" +
-      std::to_string(loc.character + 1);
+      i18n::tr_fmt("status.navigate",
+                   {fs::path(loc.path).filename().string(), std::to_string(loc.line + 1),
+                    std::to_string(loc.character + 1)});
   ensure_scroll_visible(&workspace->buffer, visible_lines);
   return true;
 }
@@ -335,7 +341,28 @@ bool go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
   }
   SourceLocation loc = resolve_symbol_navigation(*symbols, params, declaration);
   if (!loc.valid) {
-    workspace->status_message = declaration ? "Sin declaración LSP" : "Sin definición LSP";
+    workspace->status_message =
+        declaration ? i18n::tr("status.no_declaration") : i18n::tr("status.no_definition");
+    return false;
+  }
+  flash_symbol_at_buffer_pos(workspace, layout_state, line, col, visible_lines);
+  schedule_editor_navigation(layout_state, loc);
+  return true;
+}
+
+bool go_to_implementation(WorkspaceModel* workspace, MainLayoutState* layout_state,
+                          const std::shared_ptr<ISymbolProvider>& symbols, int line, int col,
+                          int visible_lines) {
+  if (workspace == nullptr || symbols == nullptr || !symbols->supports_navigation()) {
+    return false;
+  }
+  const NavigationParams params = navigation_params_at(workspace, line, col);
+  if (params.path.empty()) {
+    return false;
+  }
+  SourceLocation loc = resolve_implementation_navigation(*symbols, params);
+  if (!loc.valid || navigation_at_same_spot(loc, params)) {
+    workspace->status_message = i18n::tr("status.no_definition");
     return false;
   }
   flash_symbol_at_buffer_pos(workspace, layout_state, line, col, visible_lines);
@@ -352,11 +379,11 @@ bool rename_symbol_with_lsp(ContextMenuState* state, WorkspaceModel* workspace,
   }
   if (layout_state != nullptr && layout_state->app_settings != nullptr &&
       !layout_state->app_settings->lsp_enabled) {
-    workspace->status_message = "LSP desactivado en configuración";
+    workspace->status_message = i18n::tr("status.lsp_disabled");
     return false;
   }
   if (symbols == nullptr || !symbols->supports_rename()) {
-    workspace->status_message = "Renombrado no disponible (clangd inactivo)";
+    workspace->status_message = i18n::tr("status.rename_unavailable");
     return false;
   }
 
@@ -364,7 +391,7 @@ bool rename_symbol_with_lsp(ContextMenuState* state, WorkspaceModel* workspace,
   const NavigationParams nav =
       navigation_params_at(workspace, state->editor_line, state->editor_col);
   if (nav.path.empty()) {
-    workspace->status_message = "No hay archivo activo para renombrar";
+    workspace->status_message = i18n::tr("status.no_active_file_rename");
     return false;
   }
 
@@ -377,7 +404,7 @@ bool rename_symbol_with_lsp(ContextMenuState* state, WorkspaceModel* workspace,
 
   const std::vector<LspFileEdits> file_edits = symbols->rename_symbol(params);
   if (file_edits.empty()) {
-    workspace->status_message = "clangd no pudo renombrar el símbolo";
+    workspace->status_message = i18n::tr("status.rename_failed");
     return false;
   }
 
@@ -385,12 +412,13 @@ bool rename_symbol_with_lsp(ContextMenuState* state, WorkspaceModel* workspace,
   if (!apply_workspace_file_edits(workspace, model, symbols, symbol_indexer, file_edits, nav.path,
                                   state->editor_line, state->editor_col, &status)) {
     workspace->status_message =
-        status.empty() ? "clangd no pudo renombrar el símbolo" : status;
+        status.empty() ? i18n::tr("status.rename_failed") : status;
     return false;
   }
 
-  workspace->status_message = "Renombrado: " + state->symbol_name + " → " + new_name + " (" +
-                              std::to_string(file_edits.size()) + " archivo(s))";
+  workspace->status_message = i18n::tr_fmt("status.renamed",
+                                           {state->symbol_name, new_name,
+                                            std::to_string(file_edits.size())});
   return true;
 }
 
@@ -403,17 +431,17 @@ bool apply_problem_quick_fix(ContextMenuState* state, WorkspaceModel* workspace,
   }
   if (layout_state != nullptr && layout_state->app_settings != nullptr &&
       !layout_state->app_settings->lsp_enabled) {
-    workspace->status_message = "LSP desactivado en configuración";
+    workspace->status_message = i18n::tr("status.lsp_disabled");
     return false;
   }
   if (symbols == nullptr || !symbols->supports_code_actions()) {
-    workspace->status_message = "Fix no disponible (clangd inactivo)";
+    workspace->status_message = i18n::tr("status.fix_unavailable");
     return false;
   }
 
   const std::string path = state->problem_path;
   if (path.empty()) {
-    workspace->status_message = "No hay archivo para el problema";
+    workspace->status_message = i18n::tr("status.no_file_for_problem");
     return false;
   }
 
@@ -422,7 +450,8 @@ bool apply_problem_quick_fix(ContextMenuState* state, WorkspaceModel* workspace,
   if (tab >= 0) {
     text = buffer_document_text(workspace->tabs[static_cast<std::size_t>(tab)].buffer);
   } else if (!read_file_text(path, &text)) {
-    workspace->status_message = "No se pudo leer: " + fs::path(path).filename().string();
+    workspace->status_message = i18n::tr_fmt("status.read_failed",
+                                             {fs::path(path).filename().string()});
     return false;
   }
 
@@ -448,19 +477,20 @@ bool apply_problem_quick_fix(ContextMenuState* state, WorkspaceModel* workspace,
     }
   }
   if (chosen == nullptr) {
-    workspace->status_message = "clangd no ofrece fix para este problema";
+    workspace->status_message = i18n::tr("status.no_fix_available");
     return false;
   }
 
   std::string status;
   if (!apply_workspace_file_edits(workspace, model, symbols, symbol_indexer, chosen->file_edits, path,
                                   state->problem_line, state->problem_start_col, &status)) {
-    workspace->status_message = status.empty() ? "No se pudo aplicar el fix" : status;
+    workspace->status_message = status.empty() ? i18n::tr("status.fix_apply_failed") : status;
     return false;
   }
 
   workspace->status_message =
-      "Fix aplicado: " + (chosen->title.empty() ? std::string("quickfix") : chosen->title);
+      i18n::tr_fmt("status.fix_applied",
+                   {chosen->title.empty() ? i18n::tr("status.fix_quickfix") : chosen->title});
   return true;
 }
 
@@ -503,7 +533,7 @@ bool delete_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer*
   const bool ok = is_dir ? fs::remove_all(absolute_path, ec) > 0 : fs::remove(absolute_path, ec);
   if (!ok || ec) {
     if (workspace != nullptr) {
-      workspace->status_message = "No se pudo borrar: " + absolute_path;
+      workspace->status_message = i18n::tr_fmt("status.delete_failed", {absolute_path});
     }
     return false;
   }
@@ -528,7 +558,8 @@ bool delete_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer*
     }
   }
   if (workspace != nullptr) {
-    workspace->status_message = "Borrado: " + fs::path(absolute_path).filename().string();
+    workspace->status_message =
+        i18n::tr_fmt("status.deleted", {fs::path(absolute_path).filename().string()});
   }
   return true;
 }
@@ -546,7 +577,7 @@ bool rename_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer*
   }
   if (fs::exists(target)) {
     if (workspace != nullptr) {
-      workspace->status_message = "Ya existe: " + new_name;
+      workspace->status_message = i18n::tr_fmt("status.already_exists", {new_name});
     }
     return false;
   }
@@ -554,7 +585,7 @@ bool rename_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer*
   fs::rename(absolute_path, target, ec);
   if (ec) {
     if (workspace != nullptr) {
-      workspace->status_message = "No se pudo renombrar: " + ec.message();
+      workspace->status_message = i18n::tr_fmt("status.rename_file_failed", {ec.message()});
     }
     return false;
   }
@@ -603,7 +634,7 @@ bool rename_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer*
       workspace->buffer.path = target.string();
       workspace->active_file = target.string();
     }
-    workspace->status_message = "Renombrado: " + new_name;
+    workspace->status_message = i18n::tr_fmt("status.renamed_file", {new_name});
     workspace->buffer.view_token++;
   }
   return true;
@@ -636,8 +667,8 @@ void open_indexer_paths_modal(ContextMenuState* state, const std::string& worksp
         lookup_file_indexer_paths(workspace_root, *workspace_config, state->absolute_path);
     state->indexer_paths_lines = paths.display_lines;
   } else {
-    state->indexer_paths_lines.push_back("Rutas de indexación (clangd)");
-    state->indexer_paths_lines.push_back("(sin workspace configurado)");
+    state->indexer_paths_lines.push_back(i18n::tr("context_menu.indexer_paths.section"));
+    state->indexer_paths_lines.push_back(i18n::tr("context_menu.indexer_paths.no_workspace"));
   }
 }
 
@@ -736,8 +767,8 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
       workspace->ensure_buffer();
       workspace->buffer.reset_to_single_cursor(state->editor_line, state->editor_col);
     }
-    go_to_symbol(workspace, layout_state, symbols, state->editor_line, state->editor_col, true,
-                 editor_visible_lines);
+    go_to_implementation(workspace, layout_state, symbols, state->editor_line, state->editor_col,
+                         editor_visible_lines);
     if (focus != nullptr) {
       focus->region = FocusRegion::Editor;
     }
@@ -771,7 +802,7 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
                                  : state->absolute_path;
     if (path.empty()) {
       if (workspace != nullptr) {
-        workspace->status_message = "No hay archivo para formatear";
+        workspace->status_message = i18n::tr("status.no_file_to_format");
       }
       return true;
     }
@@ -805,7 +836,7 @@ bool commit_rename(ContextMenuState* state, WorkspaceModel* workspace, DebugMode
   const std::string new_name = trim_copy(state->rename_input);
   if (!is_valid_filename(new_name)) {
     if (workspace != nullptr) {
-      workspace->status_message = "Nombre no válido";
+      workspace->status_message = i18n::tr("status.invalid_name");
     }
     return false;
   }
@@ -896,73 +927,73 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
     if (show_format) {
       if (show_secondary_open) {
         set_items(state, ContextMenuKind::File,
-                  {{"Analizar símbolos", "analyze_symbols"},
-                   {"Abrir en panel secundario", "open_file_secondary"},
-                   {"Abrir archivo", "open_file"},
-                   {"Rutas del indexer", "show_indexer_paths"},
-                   {"Formatear archivo", "format_file"},
-                   {"Renombrar archivo", "rename_file"},
-                   {"Borrar archivo", "delete_file"}});
+                  {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
+                   {i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
+                   {i18n::tr("context_menu.open_file"), "open_file"},
+                   {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
+                   {i18n::tr("context_menu.format_file"), "format_file"},
+                   {i18n::tr("context_menu.rename_file"), "rename_file"},
+                   {i18n::tr("context_menu.delete_file"), "delete_file"}});
       } else {
         set_items(state, ContextMenuKind::File,
-                  {{"Analizar símbolos", "analyze_symbols"},
-                   {"Abrir archivo", "open_file"},
-                   {"Rutas del indexer", "show_indexer_paths"},
-                   {"Formatear archivo", "format_file"},
-                   {"Renombrar archivo", "rename_file"},
-                   {"Borrar archivo", "delete_file"}});
+                  {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
+                   {i18n::tr("context_menu.open_file"), "open_file"},
+                   {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
+                   {i18n::tr("context_menu.format_file"), "format_file"},
+                   {i18n::tr("context_menu.rename_file"), "rename_file"},
+                   {i18n::tr("context_menu.delete_file"), "delete_file"}});
       }
     } else if (show_secondary_open) {
       set_items(state, ContextMenuKind::File,
-                {{"Analizar símbolos", "analyze_symbols"},
-                 {"Abrir en panel secundario", "open_file_secondary"},
-                 {"Abrir archivo", "open_file"},
-                 {"Rutas del indexer", "show_indexer_paths"},
-                 {"Renombrar archivo", "rename_file"},
-                 {"Borrar archivo", "delete_file"}});
+                {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
+                 {i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
+                 {i18n::tr("context_menu.open_file"), "open_file"},
+                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
+                 {i18n::tr("context_menu.rename_file"), "rename_file"},
+                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
     } else {
       set_items(state, ContextMenuKind::File,
-                {{"Analizar símbolos", "analyze_symbols"},
-                 {"Abrir archivo", "open_file"},
-                 {"Rutas del indexer", "show_indexer_paths"},
-                 {"Renombrar archivo", "rename_file"},
-                 {"Borrar archivo", "delete_file"}});
+                {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
+                 {i18n::tr("context_menu.open_file"), "open_file"},
+                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
+                 {i18n::tr("context_menu.rename_file"), "rename_file"},
+                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
     }
     return;
   }
   if (show_format) {
     if (show_secondary_open) {
       set_items(state, ContextMenuKind::File,
-                {{"Abrir en panel secundario", "open_file_secondary"},
-                 {"Abrir archivo", "open_file"},
-                 {"Rutas del indexer", "show_indexer_paths"},
-                 {"Formatear archivo", "format_file"},
-                 {"Renombrar archivo", "rename_file"},
-                 {"Borrar archivo", "delete_file"}});
+                {{i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
+                 {i18n::tr("context_menu.open_file"), "open_file"},
+                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
+                 {i18n::tr("context_menu.format_file"), "format_file"},
+                 {i18n::tr("context_menu.rename_file"), "rename_file"},
+                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
     } else {
       set_items(state, ContextMenuKind::File,
-                {{"Abrir archivo", "open_file"},
-                 {"Rutas del indexer", "show_indexer_paths"},
-                 {"Formatear archivo", "format_file"},
-                 {"Renombrar archivo", "rename_file"},
-                 {"Borrar archivo", "delete_file"}});
+                {{i18n::tr("context_menu.open_file"), "open_file"},
+                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
+                 {i18n::tr("context_menu.format_file"), "format_file"},
+                 {i18n::tr("context_menu.rename_file"), "rename_file"},
+                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
     }
     return;
   }
   if (show_secondary_open) {
     set_items(state, ContextMenuKind::File,
-              {{"Abrir en panel secundario", "open_file_secondary"},
-               {"Abrir archivo", "open_file"},
-               {"Rutas del indexer", "show_indexer_paths"},
-               {"Renombrar archivo", "rename_file"},
-               {"Borrar archivo", "delete_file"}});
+              {{i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
+               {i18n::tr("context_menu.open_file"), "open_file"},
+               {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
+               {i18n::tr("context_menu.rename_file"), "rename_file"},
+               {i18n::tr("context_menu.delete_file"), "delete_file"}});
     return;
   }
   set_items(state, ContextMenuKind::File,
-            {{"Abrir archivo", "open_file"},
-             {"Rutas del indexer", "show_indexer_paths"},
-             {"Renombrar archivo", "rename_file"},
-             {"Borrar archivo", "delete_file"}});
+            {{i18n::tr("context_menu.open_file"), "open_file"},
+             {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
+             {i18n::tr("context_menu.rename_file"), "rename_file"},
+             {i18n::tr("context_menu.delete_file"), "delete_file"}});
 }
 
 void context_menu_open_folder(ContextMenuState* state, int x, int y,
@@ -979,8 +1010,8 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
   state->absolute_path = absolute_path;
   state->relative_path = relative_path;
   set_items(state, ContextMenuKind::Folder,
-            {{"Renombrar carpeta", "rename_folder"},
-             {"Buscar en…", "search_in_folder"}});
+            {{i18n::tr("context_menu.rename_folder"), "rename_folder"},
+             {i18n::tr("context_menu.search_in_folder"), "search_in_folder"}});
 }
 
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
@@ -1005,36 +1036,36 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
   if (show_call_hierarchy) {
     if (show_format) {
       set_items(state, ContextMenuKind::EditorSymbol,
-                {{"Ir a definición", "go_definition"},
-                 {"Ir a implementación", "go_implementation"},
-                 {"Jerarquía de llamadas", "call_hierarchy"},
-                 {"Renombrar", "rename_symbol"},
-                 {"Encontrar referencias", "find_references"},
-                 {"Formatear archivo", "format_file"}});
+                {{i18n::tr("context_menu.go_definition"), "go_definition"},
+                 {i18n::tr("context_menu.go_implementation"), "go_implementation"},
+                 {i18n::tr("context_menu.call_hierarchy"), "call_hierarchy"},
+                 {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
+                 {i18n::tr("context_menu.find_references"), "find_references"},
+                 {i18n::tr("context_menu.format_file"), "format_file"}});
     } else {
       set_items(state, ContextMenuKind::EditorSymbol,
-                {{"Ir a definición", "go_definition"},
-                 {"Ir a implementación", "go_implementation"},
-                 {"Jerarquía de llamadas", "call_hierarchy"},
-                 {"Renombrar", "rename_symbol"},
-                 {"Encontrar referencias", "find_references"}});
+                {{i18n::tr("context_menu.go_definition"), "go_definition"},
+                 {i18n::tr("context_menu.go_implementation"), "go_implementation"},
+                 {i18n::tr("context_menu.call_hierarchy"), "call_hierarchy"},
+                 {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
+                 {i18n::tr("context_menu.find_references"), "find_references"}});
     }
     return;
   }
   if (show_format) {
     set_items(state, ContextMenuKind::EditorSymbol,
-              {{"Ir a definición", "go_definition"},
-               {"Ir a implementación", "go_implementation"},
-               {"Renombrar", "rename_symbol"},
-               {"Encontrar referencias", "find_references"},
-               {"Formatear archivo", "format_file"}});
+              {{i18n::tr("context_menu.go_definition"), "go_definition"},
+               {i18n::tr("context_menu.go_implementation"), "go_implementation"},
+               {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
+               {i18n::tr("context_menu.find_references"), "find_references"},
+               {i18n::tr("context_menu.format_file"), "format_file"}});
     return;
   }
   set_items(state, ContextMenuKind::EditorSymbol,
-            {{"Ir a definición", "go_definition"},
-             {"Ir a implementación", "go_implementation"},
-             {"Renombrar", "rename_symbol"},
-             {"Encontrar referencias", "find_references"}});
+            {{i18n::tr("context_menu.go_definition"), "go_definition"},
+             {i18n::tr("context_menu.go_implementation"), "go_implementation"},
+             {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
+             {i18n::tr("context_menu.find_references"), "find_references"}});
 }
 
 void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
@@ -1056,11 +1087,12 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
   state->symbol_name.clear();
   if (show_call_hierarchy) {
     set_items(state, ContextMenuKind::EditorBackground,
-              {{"Jerarquía de llamadas", "call_hierarchy"},
-               {"Formatear archivo", "format_file"}});
+              {{i18n::tr("context_menu.call_hierarchy"), "call_hierarchy"},
+               {i18n::tr("context_menu.format_file"), "format_file"}});
     return;
   }
-  set_items(state, ContextMenuKind::EditorBackground, {{"Formatear archivo", "format_file"}});
+  set_items(state, ContextMenuKind::EditorBackground,
+            {{i18n::tr("context_menu.format_file"), "format_file"}});
 }
 
 void context_menu_open_problem(ContextMenuState* state, int x, int y, const std::string& path,
@@ -1080,7 +1112,7 @@ void context_menu_open_problem(ContextMenuState* state, int x, int y, const std:
   state->problem_start_col = start_col;
   state->problem_end_col = end_col;
   state->problem_message = message;
-  set_items(state, ContextMenuKind::Problem, {{"Aplicar fix", "apply_fix"}});
+  set_items(state, ContextMenuKind::Problem, {{i18n::tr("context_menu.apply_fix"), "apply_fix"}});
 }
 
 Element render_indexer_paths_modal(ContextMenuState* state) {
@@ -1096,7 +1128,7 @@ Element render_indexer_paths_modal(ContextMenuState* state) {
   const int start = state->indexer_paths_scroll;
   const int end = std::min(total, start + kVisibleLines);
   if (total == 0) {
-    rows.push_back(text(" (sin datos) ") | color(theme::Muted()));
+    rows.push_back(text(i18n::tr("common.no_data")) | color(theme::Muted()));
   } else {
     for (int i = start; i < end; ++i) {
       const std::string& line = state->indexer_paths_lines[static_cast<std::size_t>(i)];
@@ -1107,11 +1139,11 @@ Element render_indexer_paths_modal(ContextMenuState* state) {
   }
 
   Element dialog = ModalWindow(
-      text("Rutas del indexer") | color(theme::Accent()),
+      text(i18n::tr("context_menu.indexer_paths.title")) | color(theme::Accent()),
       vbox({
           vbox(std::move(rows)) | bgcolor(theme::PanelBg()),
           separator() | color(theme::AccentDim()),
-          text(" j/k scroll  Esc cerrar") | color(theme::Muted()),
+          text(i18n::tr("context_menu.indexer_paths.footer")) | color(theme::Muted()),
       }));
   return CenteredModal(std::move(dialog));
 }
@@ -1122,9 +1154,9 @@ Element render_delete_confirm_modal(const ContextMenuState* state) {
   }
   const std::string name = fs::path(state->absolute_path).filename().string();
   Element dialog = ModalWindow(
-      text("Confirmar borrado") | color(theme::Accent()),
-      vbox({text(" ¿Borrar " + name + "? ") | color(theme::Header()),
-            text(" Enter confirmar  Esc cancelar") | color(theme::Muted())}));
+      text(i18n::tr("context_menu.delete.title")) | color(theme::Accent()),
+      vbox({text(i18n::tr_fmt("context_menu.delete.prompt", {name})) | color(theme::Header()),
+            text(i18n::tr("common.footer.confirm_esc")) | color(theme::Muted())}));
   return CenteredModal(std::move(dialog));
 }
 
@@ -1134,13 +1166,15 @@ Element render_rename_modal(ContextMenuState* state) {
   }
   std::string line = state->rename_input;
   line.push_back('_');
-  const char* title = state->kind == ContextMenuKind::EditorSymbol ? "Renombrar símbolo"
-                     : state->kind == ContextMenuKind::Folder     ? "Renombrar carpeta"
-                                                                  : "Renombrar archivo";
+  const std::string title = state->kind == ContextMenuKind::EditorSymbol
+                                ? i18n::tr("context_menu.rename.symbol")
+                            : state->kind == ContextMenuKind::Folder
+                                ? i18n::tr("context_menu.rename.folder")
+                                : i18n::tr("context_menu.rename.file");
   Element dialog = ModalWindow(
       text(title) | color(theme::Accent()),
       vbox({ModalInputLine(line),
-            text(" Enter confirmar  Esc cancelar") | color(theme::Muted())}));
+            text(i18n::tr("common.footer.confirm_esc")) | color(theme::Muted())}));
   return CenteredModal(std::move(dialog));
 }
 

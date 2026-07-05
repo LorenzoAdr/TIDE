@@ -23,6 +23,7 @@
 #include "ui/theme.hpp"
 #include "ui/watches_panel.hpp"
 #include "ui/welcome_screen.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -502,12 +503,12 @@ Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
 
 std::string status_shortcuts(AppMode mode, bool welcome_visible) {
   if (welcome_visible) {
-    return "F1 archivo  Alt+F1/Shift+F1 atajos  F2 depurar  F3 workspace";
+    return i18n::tr("status.shortcuts.welcome");
   }
   if (mode == AppMode::kDebug) {
-    return "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into";
+    return i18n::tr("status.shortcuts.debug");
   }
-  return "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 git  F7 buscar  F8 outline  F9 problemas  Ctrl+Shift+S símbolos";
+  return i18n::tr("status.shortcuts.normal");
 }
 
 std::string buffer_text(const EditorBuffer& buffer) {
@@ -838,16 +839,39 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                             : workspace_no_secondary->Render();
     }
 
-    std::string status_msg = model->status_message;
-    if (app_mode != nullptr && *app_mode == AppMode::kNormal && workspace != nullptr &&
-        !workspace->status_message.empty()) {
-      status_msg = workspace->status_message;
+    const bool editor_focus =
+        focus != nullptr && is_editor_focus_region(focus->region);
+    const bool helix_on =
+        layout_state != nullptr && layout_state->app_settings != nullptr &&
+        layout_state->app_settings->helix_mode_enabled &&
+        layout_state->helix_status.active;
+
+    std::string editor_mode_indicator;
+    if (editor_focus && helix_on) {
+      editor_mode_indicator = i18n::tr("status.editor_mode.helix");
+      if (!layout_state->helix_status.mode.empty()) {
+        editor_mode_indicator += " " + layout_state->helix_status.mode;
+      }
+      if (!layout_state->helix_status.pending.empty()) {
+        editor_mode_indicator += " " + layout_state->helix_status.pending;
+      }
+    }
+
+    std::string status_msg;
+    if (!editor_focus) {
+      status_msg = model->status_message;
+      if (app_mode != nullptr && *app_mode == AppMode::kNormal && workspace != nullptr &&
+          !workspace->status_message.empty()) {
+        status_msg = workspace->status_message;
+      }
     }
     if (model->is_post_mortem && !model->core_path.empty()) {
       const auto core_name = std::filesystem::path(model->core_path).filename().string();
-      const char* mode_label =
-          model->core_analysis_mode == CoreAnalysisMode::kCoreAnalyzer ? "CA" : "GDB";
-      status_msg += "  │ Core: " + core_name + " (" + mode_label + ")";
+      const std::string mode_label =
+          model->core_analysis_mode == CoreAnalysisMode::kCoreAnalyzer
+              ? i18n::tr("status.core_mode.ca")
+              : i18n::tr("status.core_mode.gdb");
+      status_msg += i18n::tr_fmt("status.core_suffix", {core_name, mode_label});
     }
 
     if (!git_tab_open && symbols && symbols->supports_diagnostics() && layout_state != nullptr &&
@@ -877,32 +901,47 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
         }
       }
       if (split_state->diag_errors > 0 || split_state->diag_warnings > 0) {
-        status_msg += "  │ ";
+        status_msg += i18n::tr("status.section_separator");
         if (split_state->diag_errors > 0) {
           status_msg += std::to_string(split_state->diag_errors) +
-                        (split_state->diag_errors == 1 ? " error" : " errores");
+                        (split_state->diag_errors == 1
+                             ? i18n::tr("status.diagnostics.errors_one")
+                             : i18n::tr("status.diagnostics.errors_many"));
         }
         if (split_state->diag_warnings > 0) {
           if (split_state->diag_errors > 0) {
-            status_msg += ", ";
+            status_msg += i18n::tr("status.diagnostics.separator");
           }
           status_msg += std::to_string(split_state->diag_warnings) +
-                        (split_state->diag_warnings == 1 ? " aviso" : " avisos");
+                        (split_state->diag_warnings == 1
+                             ? i18n::tr("status.diagnostics.warnings_one")
+                             : i18n::tr("status.diagnostics.warnings_many"));
         }
       }
     }
 
     std::string focus_label;
     if (focus != nullptr) {
-      focus_label = std::string("[") + focus->region_label() + "] ";
+      focus_label = i18n::tr_fmt("status.focus_prefix", {focus->region_label()});
+    }
+
+    Element focus_status;
+    if (!editor_mode_indicator.empty()) {
+      focus_status = hbox({
+          text(focus_label) | color(theme::Header()),
+          text(editor_mode_indicator) | color(theme::Accent()) | bold,
+      });
+    } else {
+      focus_status = text(focus_label) | color(theme::Header());
     }
 
     const AppMode mode = app_mode != nullptr ? *app_mode : AppMode::kNormal;
 
     Element status = hbox({
-        text(" tide ") | bold | color(theme::Accent()),
-        text(" │ "),
-        text(focus_label + status_msg) | flex | color(theme::Header()),
+        text(i18n::tr("status.app_name")) | bold | color(theme::Accent()),
+        text(i18n::tr("status.separator")),
+        focus_status,
+        text(status_msg) | flex | color(theme::Header()),
         text(status_shortcuts(mode, welcome_visible)) | color(theme::Muted()),
     }) | bgcolor(theme::StatusBar());
 

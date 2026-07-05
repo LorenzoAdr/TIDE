@@ -4,6 +4,7 @@
 #include <filesystem>
 
 #include "util/path_normalize.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -33,16 +34,16 @@ namespace {
 
 std::string format_stop_reason(const std::string& reason) {
   if (reason == "attach") {
-    return "adjunto";
+    return i18n::tr("debug.stop_reason.attach");
   }
   if (reason == "pause") {
-    return "pausa";
+    return i18n::tr("debug.stop_reason.pause");
   }
   if (reason == "breakpoint") {
-    return "breakpoint";
+    return i18n::tr("debug.stop_reason.breakpoint");
   }
   if (reason == "step") {
-    return "paso";
+    return i18n::tr("debug.stop_reason.step");
   }
   return reason;
 }
@@ -54,21 +55,21 @@ void DebugModel::set_stopped(int thread_id, const std::string& reason) {
   active_thread_id = thread_id;
   stop_reason = reason;
   if (reason.empty()) {
-    status_message = "Detenido";
+    status_message = i18n::tr("debug.session.stopped");
   } else {
-    status_message = "Detenido: " + format_stop_reason(reason);
+    status_message = i18n::tr_fmt("debug.session.stopped_reason", {format_stop_reason(reason)});
   }
 }
 
 void DebugModel::set_running() {
   state = DebugState::kRunning;
-  status_message = "Ejecutando";
+  status_message = i18n::tr("debug.session.running");
   stop_reason.clear();
 }
 
 void DebugModel::set_terminated() {
   state = DebugState::kTerminated;
-  status_message = "Sesión finalizada";
+  status_message = i18n::tr("debug.session.finished");
 }
 
 void DebugModel::toggle_breakpoint(const std::string& file, int line) {

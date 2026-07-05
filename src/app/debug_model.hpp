@@ -33,7 +33,7 @@ enum class DebugState {
 
 struct DebugModel {
   DebugState state = DebugState::kDisconnected;
-  std::string status_message = "Desconectado";
+  std::string status_message;
   std::string workspace_root;
   std::string program;
   std::vector<std::string> program_args;

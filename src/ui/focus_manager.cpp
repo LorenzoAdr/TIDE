@@ -1,5 +1,7 @@
 #include "ui/focus_manager.hpp"
 
+#include "i18n/tr.hpp"
+
 namespace tgdb {
 
 bool FocusManagerState::secondary_visible() const {
@@ -76,20 +78,20 @@ void FocusManagerState::move_up() {
   }
 }
 
-const char* FocusManagerState::region_label() const {
+std::string FocusManagerState::region_label() const {
   switch (region) {
     case FocusRegion::Explorer:
-      return "Explorador";
+      return i18n::tr("focus.region.explorer");
     case FocusRegion::Editor:
-      return "Editor";
+      return i18n::tr("focus.region.editor");
     case FocusRegion::SecondaryEditor:
-      return "Editor 2";
+      return i18n::tr("focus.region.editor_secondary");
     case FocusRegion::RightPanel:
-      return "Outline";
+      return i18n::tr("focus.region.outline");
     case FocusRegion::Terminal:
-      return "Terminal";
+      return i18n::tr("focus.region.terminal");
   }
-  return "";
+  return {};
 }
 
 }  // namespace tgdb

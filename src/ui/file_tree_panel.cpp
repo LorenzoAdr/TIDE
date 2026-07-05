@@ -29,6 +29,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 #include "util/filesystem_tree.hpp"
 #include "util/path_normalize.hpp"
 
@@ -659,12 +660,12 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
     Elements rows;
     if (state->flat.empty()) {
       if (scanning) {
-        rows.push_back(text("(indexando...)") | color(theme::Muted()));
+        rows.push_back(text(i18n::tr("common.indexing")) | color(theme::Muted()));
       } else {
-        rows.push_back(text("(sin archivos)") | color(theme::Muted()));
+        rows.push_back(text(i18n::tr("panel.explorer.no_files")) | color(theme::Muted()));
       }
       if (!model->workspace_root.empty()) {
-        rows.push_back(text("workspace: " + model->workspace_root) |
+        rows.push_back(text(i18n::tr_fmt("common.workspace", {model->workspace_root})) |
                        color(theme::Muted()));
       }
     } else {
@@ -726,7 +727,7 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
         reflect(state->scrollbar_box);
 
     auto content = vbox({hbox({list | flex, scrollbar}) | flex | bgcolor(theme::PanelBg())});
-    return MakePanel("Explorador", std::move(content));
+    return MakePanel(i18n::tr("panel.explorer.title"), std::move(content));
   });
 
   if (layout_state != nullptr) {

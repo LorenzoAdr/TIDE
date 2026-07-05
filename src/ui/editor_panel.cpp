@@ -14,6 +14,9 @@
 #include "editor/bracket_match.hpp"
 #include "editor/clipboard.hpp"
 #include "editor/code_snippets.hpp"
+#include "editor/helix/helix_dispatch.hpp"
+#include "editor/helix/helix_hints.hpp"
+#include "editor/helix/helix_state.hpp"
 #include "git/git_diff.hpp"
 #include "git/git_service.hpp"
 #include "editor/editor_context.hpp"
@@ -45,6 +48,7 @@
 #include "ftxui/component/screen_interactive.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
+#include "i18n/tr.hpp"
 #include "ui/clickable.hpp"
 #include "ui/editor_tab_bar.hpp"
 #include "ui/press_ids.hpp"
@@ -234,6 +238,7 @@ struct EditorPanelState {
   };
   SourceSymbolFlash source_flash;
   bool chord_k_pending = false;
+  HelixEditorState helix;
   std::string tabular_layout_path;
   TabularDelimiter tabular_delimiter = TabularDelimiter::kComma;
   TabularTableLayout tabular_layout;
@@ -1402,22 +1407,23 @@ Element make_git_history_modal(const GitHistoryModalState& state) {
   }
 
   Elements rows;
-  rows.push_back(text(" Línea " + std::to_string(state.line + 1)) | color(theme::Success()) | bold);
+  rows.push_back(text(i18n::tr_fmt("modal.git_history.line", {std::to_string(state.line + 1)})) |
+                 color(theme::Success()) | bold);
   rows.push_back(separator() | color(theme::AccentDim()));
-  rows.push_back(text(" Antes (HEAD):") | color(theme::Muted()) | bold);
-  rows.push_back(paragraphAlignLeft(" " + (state.previous_content.empty() ? "(vacío)"
-                                                                    : state.previous_content)) |
+  rows.push_back(text(i18n::tr("modal.git_history.before")) | color(theme::Muted()) | bold);
+  rows.push_back(paragraphAlignLeft(" " + (state.previous_content.empty() ? i18n::tr("common.empty")
+                                                                          : state.previous_content)) |
                  color(theme::Header()));
   rows.push_back(text(""));
-  rows.push_back(text(" Ahora:") | color(theme::Muted()) | bold);
-  rows.push_back(paragraphAlignLeft(" " + (state.current_content.empty() ? "(vacío)"
-                                                                     : state.current_content)) |
+  rows.push_back(text(i18n::tr("modal.git_history.after")) | color(theme::Muted()) | bold);
+  rows.push_back(paragraphAlignLeft(" " + (state.current_content.empty() ? i18n::tr("common.empty")
+                                                                         : state.current_content)) |
                  color(theme::Header()));
   rows.push_back(text(""));
-  rows.push_back(text(" Esc cerrar") | color(theme::Muted()));
+  rows.push_back(text(i18n::tr("common.footer.esc_close")) | color(theme::Muted()));
 
   Element dialog = ModalWindow(
-      text("Historial Git") | color(theme::Success()),
+      text(i18n::tr("modal.git_history.title")) | color(theme::Success()),
       vbox(std::move(rows)) | size(WIDTH, GREATER_THAN, 40) | size(HEIGHT, LESS_THAN, 18));
   return CenteredModal(std::move(dialog));
 }
@@ -1474,34 +1480,51 @@ bool handle_gutter_marker_click(EditorPanelState* panel, DiagnosticModalState* m
   return true;
 }
 
+std::string diagnostic_severity_tr(DiagnosticSeverity severity) {
+  switch (severity) {
+    case DiagnosticSeverity::kError:
+      return i18n::tr("diagnostic.severity.error");
+    case DiagnosticSeverity::kWarning:
+      return i18n::tr("diagnostic.severity.warning");
+    case DiagnosticSeverity::kInfo:
+      return i18n::tr("diagnostic.severity.info");
+    case DiagnosticSeverity::kHint:
+    default:
+      return i18n::tr("diagnostic.severity.hint");
+  }
+}
+
 Element make_diagnostic_modal(const DiagnosticModalState& state) {
   if (!state.open || state.items.empty()) {
     return text("");
   }
 
   Elements rows;
-  rows.push_back(text(" Línea " + std::to_string(state.line + 1)) | color(theme::Accent()) | bold);
+  rows.push_back(text(i18n::tr_fmt("modal.diagnostic.line", {std::to_string(state.line + 1)})) |
+                 color(theme::Accent()) | bold);
   rows.push_back(separator() | color(theme::AccentDim()));
 
   for (const auto& item : state.items) {
-    std::string header = diagnostic_severity_label(item.severity);
+    std::string header = diagnostic_severity_tr(item.severity);
     if (!item.source.empty()) {
-      header += " [" + item.source + "]";
+      header += i18n::tr_fmt("modal.diagnostic.source", {item.source});
     }
     if (item.start_col >= 0) {
-      header += "  col " + std::to_string(item.start_col + 1);
       if (item.end_col > item.start_col) {
-        header += "-" + std::to_string(item.end_col);
+        header += i18n::tr_fmt("modal.diagnostic.col_range",
+                               {std::to_string(item.start_col + 1), std::to_string(item.end_col)});
+      } else {
+        header += i18n::tr_fmt("modal.diagnostic.col", {std::to_string(item.start_col + 1)});
       }
     }
     rows.push_back(text(" " + header) | color(diagnostic_severity_color(item.severity)) | bold);
     rows.push_back(paragraphAlignLeft(" " + item.message) | color(theme::Header()));
     rows.push_back(text(""));
   }
-  rows.push_back(text(" Esc cerrar") | color(theme::Muted()));
+  rows.push_back(text(i18n::tr("common.footer.esc_close")) | color(theme::Muted()));
 
   Element dialog = ModalWindow(
-      text("Diagnóstico") | color(theme::Accent()),
+      text(i18n::tr("modal.diagnostic.title")) | color(theme::Accent()),
       vbox(std::move(rows)) | size(WIDTH, GREATER_THAN, 40) | size(HEIGHT, LESS_THAN, 18));
   return CenteredModal(std::move(dialog));
 }
@@ -1515,21 +1538,22 @@ Element make_breadcrumb_bar(const std::vector<BreadcrumbItem>& crumbs,
   for (std::size_t i = 0; i < crumbs.size(); ++i) {
     segments.push_back(text(crumbs[i].label) | color(theme::Accent()) | bold);
     if (i + 1 < crumbs.size()) {
-      segments.push_back(text(" › ") | color(theme::Muted()));
+      segments.push_back(text(i18n::tr("editor.breadcrumb.separator")) | color(theme::Muted()));
     }
   }
 
   std::string meta;
-  meta += "  L" + std::to_string(buffer.primary_line() + 1) + ":" +
-          std::to_string(buffer.primary_col() + 1);
+  meta += i18n::tr_fmt("editor.meta.line_col",
+                       {std::to_string(buffer.primary_line() + 1),
+                        std::to_string(buffer.primary_col() + 1)});
   if (buffer.dirty) {
-    meta += " *";
+    meta += i18n::tr("editor.meta.dirty");
   }
   if (buffer.multi_cursor_active()) {
-    meta += "  [" + std::to_string(buffer.cursors.size()) + " cursores]";
+    meta += i18n::tr_fmt("editor.meta.multi_cursor", {std::to_string(buffer.cursors.size())});
   }
   if (find.open) {
-    meta += "  [buscar]";
+    meta += i18n::tr("editor.meta.find_open");
   }
 
   int problem_errors = 0;
@@ -1538,11 +1562,13 @@ Element make_breadcrumb_bar(const std::vector<BreadcrumbItem>& crumbs,
     problem_errors = panel_state->problem_errors;
     problem_warnings = panel_state->problem_warnings;
   }
-  std::string problems_label = " Problemas";
+  std::string problems_label = i18n::tr("editor.problems.label");
   if (problem_errors > 0) {
-    problems_label += " (" + std::to_string(problem_errors) + ")";
+    problems_label +=
+        i18n::tr_fmt("editor.problems.count_errors", {std::to_string(problem_errors)});
   } else if (problem_warnings > 0) {
-    problems_label += " (" + std::to_string(problem_warnings) + "w)";
+    problems_label +=
+        i18n::tr_fmt("editor.problems.count_warnings", {std::to_string(problem_warnings)});
   }
   Color problems_color = theme::Muted();
   if (layout_state != nullptr && problems_tab_active(layout_state)) {
@@ -2093,7 +2119,8 @@ bool try_go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
   }
   SourceLocation loc = resolve_symbol_navigation(*symbols, params, declaration);
   if (!loc.valid) {
-    workspace->status_message = declaration ? "Sin declaración LSP" : "Sin definición LSP";
+    workspace->status_message =
+        declaration ? i18n::tr("status.no_declaration") : i18n::tr("status.no_definition");
     return false;
   }
   flash_symbol_at_cursor(workspace, layout_state, panel_state, line, col, visible_lines);
@@ -3265,6 +3292,111 @@ bool handle_completion_keys(CompletionState* completion, WorkspaceModel* workspa
   return true;
 }
 
+void goto_helix_diagnostic(EditorPanelState* panel, EditorBuffer* buffer, int visible_lines,
+                           bool forward) {
+  if (panel == nullptr || buffer == nullptr) {
+    return;
+  }
+  std::vector<int> lines;
+  lines.reserve(panel->diagnostics_by_line.size());
+  for (const auto& entry : panel->diagnostics_by_line) {
+    if (!entry.second.empty()) {
+      lines.push_back(entry.first);
+    }
+  }
+  if (lines.empty()) {
+    return;
+  }
+  std::sort(lines.begin(), lines.end());
+  const int current = buffer->primary_line();
+  int target = lines.front();
+  if (forward) {
+    for (int line : lines) {
+      if (line > current) {
+        target = line;
+        break;
+      }
+    }
+    if (target <= current) {
+      target = lines.front();
+    }
+  } else {
+    target = lines.back();
+    for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
+      if (*it < current) {
+        target = *it;
+        break;
+      }
+    }
+  }
+  buffer->reset_to_single_cursor(target, 0);
+  ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+  buffer->view_token++;
+}
+
+HelixDispatchContext build_helix_dispatch_context(WorkspaceModel* workspace, EditorPanelState* panel,
+                                                  EditorFindState* find, GotoLineState* goto_state,
+                                                  FocusManagerState* focus,
+                                                  MainLayoutState* layout_state,
+                                                  const std::shared_ptr<ISymbolProvider>& symbols,
+                                                  int visible_lines) {
+  HelixDispatchContext ctx;
+  ctx.workspace = workspace;
+  ctx.buffer = workspace != nullptr ? &workspace->buffer : nullptr;
+  ctx.helix = panel != nullptr ? &panel->helix : nullptr;
+  ctx.find = find;
+  ctx.layout_state = layout_state;
+  ctx.focus = focus;
+  ctx.panel_focus = panel != nullptr ? panel->panel_focus : FocusRegion::Editor;
+  ctx.visible_lines = visible_lines;
+  ctx.code_width = panel != nullptr ? panel->code_width_chars : 80;
+  ctx.on_buffer_changed = [workspace, panel, symbols]() {
+    notify_editor_buffer_changed(workspace, panel, symbols);
+  };
+  ctx.open_find_bar = [=]() {
+    if (workspace == nullptr || find == nullptr) {
+      return;
+    }
+    workspace->ensure_buffer();
+    activate_find(find, &workspace->buffer, layout_state, focus, ctx.panel_focus);
+  };
+  ctx.open_goto_line = [=]() {
+    if (goto_state == nullptr) {
+      return;
+    }
+    goto_state->open = true;
+    goto_state->query.clear();
+    if (layout_state != nullptr) {
+      layout_state->text_input_focus = TextInputFocus::EditorGotoLine;
+    }
+  };
+  ctx.go_to_symbol = [=](int line, int col, bool declaration) {
+    return try_go_to_symbol(workspace, layout_state, panel, symbols, line, col, declaration,
+                            visible_lines);
+  };
+  if (layout_state != nullptr) {
+    ctx.open_quick_file = layout_state->helix_ide.open_quick_file;
+    ctx.open_symbol_picker = layout_state->helix_ide.open_symbol_picker;
+    ctx.save_file = layout_state->helix_ide.save_file;
+    ctx.request_quit = layout_state->helix_ide.request_quit;
+  }
+  ctx.goto_next_diagnostic = [=]() {
+    goto_helix_diagnostic(panel, workspace != nullptr ? &workspace->buffer : nullptr,
+                          visible_lines, true);
+  };
+  ctx.goto_prev_diagnostic = [=]() {
+    goto_helix_diagnostic(panel, workspace != nullptr ? &workspace->buffer : nullptr,
+                          visible_lines, false);
+  };
+  ctx.symbols = symbols.get();
+  return ctx;
+}
+
+bool helix_editor_active(MainLayoutState* layout_state, bool tabular_view) {
+  return layout_state != nullptr && layout_state->app_settings != nullptr &&
+         layout_state->app_settings->helix_mode_enabled && !tabular_view;
+}
+
 bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
                         EditorFindState* find, GotoLineState* goto_state,
                         CompletionState* completion, EditorPanelState* panel,
@@ -3322,6 +3454,18 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (goto_state != nullptr && goto_state->open) {
     return handle_goto_line_keys(goto_state, layout_state, workspace, buffer, event,
                                  visible_lines);
+  }
+
+  const bool helix_on = helix_editor_active(layout_state, tabular_view);
+
+  if (helix_on && event == Event::Escape) {
+    HelixDispatchContext hctx =
+        build_helix_dispatch_context(workspace, panel, find, goto_state, focus, layout_state,
+                                     symbols, visible_lines);
+    if (dispatch_helix_keys(hctx, event)) {
+      sync_helix_layout_status(layout_state, &panel->helix, true);
+      return true;
+    }
   }
 
   if (event == Event::Escape) {
@@ -3462,6 +3606,29 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
 
+  if (helix_on) {
+    if (event_is_tide_global_shortcut(event) || event_is_ctrl_key_release(event)) {
+      return false;
+    }
+    HelixDispatchContext hctx =
+        build_helix_dispatch_context(workspace, panel, find, goto_state, focus, layout_state,
+                                     symbols, visible_lines);
+    if (dispatch_helix_keys(hctx, event)) {
+      sync_helix_layout_status(layout_state, &panel->helix, true);
+      return true;
+    }
+    if (panel->helix.mode != HelixMode::kInsert) {
+      sync_helix_layout_status(layout_state, &panel->helix, true);
+      if (event_has_ctrl_modifier(event) || event_is_tide_global_shortcut(event) ||
+          event_is_ctrl_key_release(event)) {
+        return false;
+      }
+      return true;
+    }
+  } else {
+    sync_helix_layout_status(layout_state, &panel->helix, false);
+  }
+
   const bool extend = event_is_shift_left(event) || event_is_shift_right(event) ||
                       event_is_shift_up(event) || event_is_shift_down(event) ||
                       event_is_ctrl_alt_left(event) || event_is_ctrl_alt_right(event) ||
@@ -3576,7 +3743,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (tabular_view) {
     if (event == Event::Backspace || event == Event::Delete || event == Event::Return ||
         event_is_ctrl_backspace(event) || event_is_ctrl_delete(event) || event.is_character()) {
-      workspace->status_message = "Vista tabular CSV/TSV (solo lectura)";
+      workspace->status_message = i18n::tr("editor.tabular.readonly_status");
       return true;
     }
   }
@@ -3722,9 +3889,9 @@ Element make_goto_line_overlay(const GotoLineState& goto_state) {
   std::string input_line = goto_state.query;
   input_line.push_back('_');
   Element dialog = ModalWindow(
-      text("Ir a línea") | color(theme::Accent()),
+      text(i18n::tr("modal.goto_line.title")) | color(theme::Accent()),
       vbox({ModalInputLine(input_line),
-            text("Enter ir  Esc cancelar") | color(theme::Muted())}));
+            text(i18n::tr("modal.goto_line.footer")) | color(theme::Muted())}));
   return CenteredModal(std::move(dialog));
 }
 
@@ -3803,6 +3970,18 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (tab_bar_state->overflow_open) {
       return make_tabs_overflow_modal(workspace, tab_bar_state.get());
     }
+    if (layout_state != nullptr && layout_state->app_settings != nullptr &&
+        layout_state->app_settings->helix_mode_enabled) {
+      if (panel_state->helix.help_open) {
+        return make_helix_help_overlay(panel_state->helix);
+      }
+      if (panel_state->helix.command_mode) {
+        return make_helix_command_overlay(panel_state->helix);
+      }
+      if (panel_state->helix.hint_visible && panel_state->helix.prefix_active()) {
+        return make_helix_hint_overlay(panel_state->helix);
+      }
+    }
     if (git_history_state->open) {
       return make_git_history_modal(*git_history_state);
     }
@@ -3842,9 +4021,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool find_focused = layout_state != nullptr &&
                               layout_state->text_input_focus == TextInputFocus::EditorFind;
     Element find_row =
-        hbox({text(" Buscar: ") | color(theme::Muted()),
+        hbox({text(i18n::tr("editor.find.label")) | color(theme::Muted()),
               RenderBlinkInputLine(find_state->query, find_state->cursor_pos, find_focused) | flex,
-              text(" (" + std::to_string(find_state->matches.size()) + ") Enter Esc ") |
+              text(i18n::tr_fmt("editor.find.count",
+                                {std::to_string(find_state->matches.size())})) |
                   color(theme::Muted())}) |
         border | bgcolor(theme::PanelBg()) | size(WIDTH, GREATER_THAN, 34) | size(HEIGHT, EQUAL, 3);
     return dbox({text(""),
@@ -3940,7 +4120,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     const int start = buffer.scroll;
     const int end = std::min(total, start + visible);
-    const int gutter_w = line_number_width(total);
+    const bool helix_relative =
+        layout_state != nullptr && layout_state->app_settings != nullptr &&
+        layout_state->app_settings->helix_mode_enabled;
+    const int gutter_w = helix_gutter_width(total, visible, helix_relative);
     const bool editor_focused = focus->region == panel_state->panel_focus;
 
     if (tabular_view && tabular_store != nullptr) {
@@ -3951,12 +4134,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
       if (tabular_indexing) {
         gutter_rows.push_back(text(format_line_number(1, 4)) | color(theme::Muted()) | row_bg);
-        code_rows.push_back(text("Indexando archivo tabular…") | color(theme::Muted()) | row_bg);
+        code_rows.push_back(text(i18n::tr("editor.tabular.indexing")) | color(theme::Muted()) | row_bg);
       } else if (!tabular_ready) {
         gutter_rows.push_back(text(format_line_number(1, 4)) | color(theme::Muted()) | row_bg);
         const std::string message =
             tabular_store->error_message().empty()
-                ? "No se pudo abrir el archivo tabular"
+                ? i18n::tr("editor.tabular.open_failed")
                 : tabular_store->error_message();
         code_rows.push_back(text(message) | color(theme::Error()) | row_bg);
       } else {
@@ -3999,11 +4182,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         if (tabular_store->loading_more()) {
           gutter_rows.push_back(text(format_line_number(data_end + 2, gutter_w)) |
                               color(theme::Muted()) | row_bg);
-          code_rows.push_back(text("Cargando más filas…") | color(theme::Muted()) | row_bg);
+          code_rows.push_back(text(i18n::tr("editor.tabular.loading_rows")) | color(theme::Muted()) |
+                              row_bg);
         } else if (code_rows.size() == 1) {
           gutter_rows.push_back(text(format_line_number(2, gutter_w)) | color(theme::Muted()) |
                                 row_bg);
-          code_rows.push_back(text("(sin filas de datos)") | color(theme::Muted()) | row_bg);
+          code_rows.push_back(text(i18n::tr("editor.tabular.no_data_rows")) | color(theme::Muted()) |
+                              row_bg);
         }
 
         const int rendered_lines = static_cast<int>(code_rows.size());
@@ -4102,8 +4287,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool suffixes_enabled =
         layout_state == nullptr || layout_state->app_settings == nullptr ||
         layout_state->app_settings->show_diagnostic_suffixes;
+    const bool helix_caret =
+        layout_state != nullptr && layout_state->app_settings != nullptr &&
+        layout_state->app_settings->helix_mode_enabled;
     const bool show_caret =
-        !panel_state->mouse_selecting && !buffer.primary().has_selection();
+        !panel_state->mouse_selecting &&
+        (!buffer.primary().has_selection() || helix_caret);
     const bool indent_guides_enabled =
         layout_state != nullptr && layout_state->app_settings != nullptr &&
         layout_state->app_settings->indent_guides_enabled;
@@ -4138,7 +4327,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         } else {
           gutter_text.assign(1, marker == '\0' ? ' ' : marker);
         }
-        gutter_text += format_line_number(i + 1, gutter_w);
+        gutter_text += helix_format_line_number(i, buffer.primary_line(), gutter_w, helix_relative);
         Color gutter_color = theme::Muted();
         if (has_breakpoint_markers &&
             debug_model->has_breakpoint(normalize_path(buffer.path), i + 1)) {
@@ -4152,8 +4341,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         }
         gutter_rows.push_back(text(gutter_text) | color(gutter_color) | row_bg);
       } else {
-        gutter_rows.push_back(text(format_line_number(i + 1, gutter_w)) | color(theme::Muted()) |
-                              row_bg);
+        gutter_rows.push_back(text(helix_format_line_number(i, buffer.primary_line(), gutter_w,
+                                                           helix_relative)) |
+                              color(theme::Muted()) | row_bg);
       }
 
       const std::string& display_line = buffer.lines[static_cast<std::size_t>(i)];
@@ -4428,6 +4618,23 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     handlers->visible_line_count = [panel_state]() {
       return visible_line_count(panel_state->code_box);
     };
+  }
+
+  if (layout_state != nullptr) {
+    EditorPanelState* panel_ptr = panel_state.get();
+    const auto previous_reset = layout_state->reset_helix_editors;
+    layout_state->reset_helix_editors = [previous_reset, panel_ptr, layout_state]() {
+      if (previous_reset) {
+        previous_reset();
+      }
+      reset_helix_editor_state(&panel_ptr->helix);
+      const bool enabled = layout_state->app_settings != nullptr &&
+                           layout_state->app_settings->helix_mode_enabled;
+      sync_helix_layout_status(layout_state, &panel_ptr->helix, enabled);
+    };
+  }
+
+  if (handlers != nullptr) {
     handlers->tick_callback = [workspace, panel_state, find_state, symbols, layout_state,
                                file_indexer, git_service, focus, panel_focus,
                                completion_state]() {

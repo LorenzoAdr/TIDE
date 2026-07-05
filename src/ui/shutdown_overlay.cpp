@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "ftxui/dom/elements.hpp"
+#include "i18n/tr.hpp"
 #include "ui/panel.hpp"
 #include "ui/spinner.hpp"
 #include "ui/theme.hpp"
@@ -60,7 +61,7 @@ void ShutdownState::complete_step(const std::string& message) {
 void ShutdownState::mark_complete() {
   std::lock_guard<std::mutex> lock(mutex_);
   complete_ = true;
-  current_step_ = "Listo";
+  current_step_ = i18n::tr("modal.shutdown.ready");
 }
 
 bool ShutdownState::is_active() const {
@@ -81,11 +82,12 @@ ShutdownState::Snapshot ShutdownState::snapshot() const {
 Element RenderShutdownDialog(const ShutdownState::Snapshot& snap) {
   Elements trace_rows;
   for (const auto& line : snap.trace) {
-    trace_rows.push_back(text("  ok  " + line) | color(theme::Muted()));
+    trace_rows.push_back(text(i18n::tr_fmt("modal.shutdown.step_ok", {line})) | color(theme::Muted()));
   }
   if (!snap.current_step.empty()) {
     trace_rows.push_back(hbox({
-        text("  " + spinner::glyph() + "  ") | color(theme::Accent()),
+        text(i18n::tr_fmt("modal.shutdown.spinner_prefix", {spinner::glyph()})) |
+            color(theme::Accent()),
         text(snap.current_step) | color(theme::Header()),
     }));
   }
@@ -93,14 +95,15 @@ Element RenderShutdownDialog(const ShutdownState::Snapshot& snap) {
   const int progress_steps = snap.complete ? snap.total_steps : snap.completed_steps;
   const std::string bar = progress_bar(progress_steps, snap.total_steps);
   const std::string progress_label =
-      snap.total_steps > 0
-          ? std::to_string(progress_steps) + "/" + std::to_string(snap.total_steps)
-          : "";
+      snap.total_steps > 0 ? i18n::tr_fmt("modal.shutdown.progress",
+                                          {std::to_string(progress_steps),
+                                           std::to_string(snap.total_steps)})
+                         : "";
 
   return ModalWindow(
-      text("Cerrando tide") | color(theme::Accent()),
+      text(i18n::tr("modal.shutdown.title")) | color(theme::Accent()),
       vbox({
-          text("Cerrando sesión...") | color(theme::Header()),
+          text(i18n::tr("modal.shutdown.message")) | color(theme::Header()),
           separator(),
           hbox({
               text(bar) | color(theme::Accent()),

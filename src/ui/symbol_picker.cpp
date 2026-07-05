@@ -9,6 +9,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -163,11 +164,11 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
           matches.push_back(row);
         }
         if (matches.empty()) {
-          matches.push_back(text("(sin coincidencias)") | color(theme::Muted()));
+          matches.push_back(text(i18n::tr("common.no_matches")) | color(theme::Muted()));
         }
 
         Element dialog = ModalWindow(
-            text("Ir a símbolo") | color(theme::Accent()),
+            text(i18n::tr("picker.symbol.title")) | color(theme::Accent()),
             vbox({ModalInputLine(input_line),
                   separator(),
                   vbox(std::move(matches)) | frame | vscroll_indicator |

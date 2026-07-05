@@ -9,6 +9,7 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "i18n/tr.hpp"
 #include "ui/clickable.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
@@ -28,34 +29,35 @@ namespace {
 std::string step_title(WizardStep step, WizardMode mode) {
   switch (step) {
     case WizardStep::ChooseMode:
-      return "Conectar depurador";
+      return i18n::tr("wizard.connection.title");
     case WizardStep::PickBinary:
-      return mode == WizardMode::AnalyzeSymbols ? "Elegir binario (nm)"
-                                                : "Elegir ejecutable";
+      return mode == WizardMode::AnalyzeSymbols
+                 ? i18n::tr("wizard.connection.title.pick_binary_nm")
+                 : i18n::tr("wizard.connection.title.pick_binary");
     case WizardStep::PickArgs:
-      return "Argumentos de lanzamiento";
+      return i18n::tr("wizard.connection.title.pick_args");
     case WizardStep::PickProcess:
-      return "Elegir proceso (PID)";
+      return i18n::tr("wizard.connection.title.pick_process");
     case WizardStep::PickCoreFile:
-      return "Elegir core dump";
+      return i18n::tr("wizard.connection.title.pick_core");
     case WizardStep::ChooseCoreBackend:
-      return "Modo de análisis";
+      return i18n::tr("wizard.connection.title.core_backend");
   }
-  return "Conectar";
+  return i18n::tr("wizard.connection.title.default");
 }
 
 std::string mode_label(WizardMode mode) {
   switch (mode) {
     case WizardMode::Launch:
-      return "Launch";
+      return i18n::tr("wizard.connection.mode.launch");
     case WizardMode::Attach:
-      return "Attach";
+      return i18n::tr("wizard.connection.mode.attach");
     case WizardMode::LoadCore:
-      return "Core";
+      return i18n::tr("wizard.connection.mode.core");
     case WizardMode::AnalyzeSymbols:
-      return "Símbolos";
+      return i18n::tr("wizard.connection.mode.symbols");
   }
-  return "Debug";
+  return i18n::tr("wizard.connection.mode.debug");
 }
 
 bool update_f2_mode_hover(ConnectionWizardState* state, MainLayoutState* layout_state, int x,
@@ -679,29 +681,29 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           const bool symbols_pressed =
               layout_state != nullptr && layout_state->clickable.is_pressed(press_id::f2_mode(3));
           Element launch_row = StyleListRow(
-              text(" 1  Launch — lanzar ejecutable") | color(theme::Header()), launch_sel,
+              text(i18n::tr("wizard.connection.option.launch")) | color(theme::Header()), launch_sel,
               launch_hovered, launch_pressed);
           Element attach_row = StyleListRow(
-              text(" 2  Attach — adjuntar a proceso en ejecución") | color(theme::Header()),
+              text(i18n::tr("wizard.connection.option.attach")) | color(theme::Header()),
               state->mode_selected == 1, attach_hovered, attach_pressed);
           const std::string core_label =
               core_analyzer_supported()
-                  ? " 3  Cargar core — post-mortem (GDB / Core Analyzer)"
-                  : " 3  Cargar core — post-mortem (GDB)";
+                  ? i18n::tr("wizard.connection.option.core")
+                  : i18n::tr("wizard.connection.option.core_gdb_only");
           Element core_row = StyleListRow(
               text(core_label) | color(theme::Header()),
               state->mode_selected == 2, core_hovered, core_pressed);
           Element symbols_row = StyleListRow(
-              text(" 4  Analizar símbolos — explorar binario (nm)") | color(theme::Header()),
+              text(i18n::tr("wizard.connection.option.symbols")) | color(theme::Header()),
               state->mode_selected == 3, symbols_hovered, symbols_pressed);
           body = {launch_row | reflect(state->launch_mode_box),
                   attach_row | reflect(state->attach_mode_box),
                   core_row | reflect(state->core_mode_box),
                   symbols_row | reflect(state->symbols_mode_box)};
-          help = "1/2/3/4 o j/k  Enter  clic  Esc cancelar";
+          help = i18n::tr("wizard.connection.help.choose_mode");
         } else if (state->step == WizardStep::PickBinary) {
           state->browser.ensure_browser_entries();
-          body.push_back(text("workspace: " + state->workspace_root) |
+          body.push_back(text(i18n::tr_fmt("common.workspace", {state->workspace_root})) |
                          color(theme::Muted()));
           body.push_back(text(state->browser.browser_path) | color(theme::Muted()));
           body.push_back(separator());
@@ -716,7 +718,8 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           Elements list_rows;
           for (int i = start; i < end; ++i) {
             const auto& row = state->browser.entries[i];
-            std::string prefix = row.is_directory ? "[dir] " : "      ";
+            std::string prefix = row.is_directory ? i18n::tr("common.browser.dir_prefix")
+                                                  : i18n::tr("common.browser.file_indent");
             const std::string row_id = press_id::f2_browser_row(i);
             const bool selected = i == state->browser.selected;
             const bool hovered =
@@ -731,20 +734,23 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
             list_rows.push_back(line);
           }
           if (list_rows.empty()) {
-            list_rows.push_back(text("(vacío)") | color(theme::Muted()));
+            list_rows.push_back(text(i18n::tr("common.empty")) | color(theme::Muted()));
           }
           body.push_back(vbox(std::move(list_rows)) |
                          reflect(state->browser.browser_list_box));
           help = state->mode == WizardMode::AnalyzeSymbols
-                     ? "j/k  Enter binario ELF/ar (.o .a .so)  clic  Esc atrás"
-                     : "j/k  Enter ejecutable  clic  Esc atrás";
+                     ? i18n::tr("wizard.connection.help.pick_binary_nm")
+                     : i18n::tr("wizard.connection.help.pick_binary");
         } else if (state->step == WizardStep::PickArgs) {
-          body.push_back(text("ejecutable: " + state->selected_program) |
+          body.push_back(text(i18n::tr_fmt("wizard.connection.label.executable",
+                                           {state->selected_program})) |
                          color(theme::Muted()));
-          body.push_back(text("cwd: " + state->launch_cwd) | color(theme::Muted()));
+          body.push_back(text(i18n::tr_fmt("wizard.connection.label.cwd", {state->launch_cwd})) |
+                         color(theme::Muted()));
           std::string query_line = state->args_line;
           query_line.push_back('_');
-          body.push_back(text("argumentos: " + query_line) | color(theme::WatchInput()));
+          body.push_back(text(i18n::tr_fmt("wizard.connection.label.args", {query_line})) |
+                         color(theme::WatchInput()));
           if (!state->args_completion_matches.empty()) {
             body.push_back(separator());
             const int max_rows = 6;
@@ -754,21 +760,23 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
                              color(theme::Muted()));
             }
             if (static_cast<int>(state->args_completion_matches.size()) > max_rows) {
-              body.push_back(text("  ...") | color(theme::Muted()));
+              body.push_back(text(i18n::tr("common.ellipsis")) | color(theme::Muted()));
             }
           }
-          help = "Enter lanzar  Tab autocompletar ruta  Esc atrás";
+          help = i18n::tr("wizard.connection.help.pick_args");
         } else if (state->step == WizardStep::PickProcess) {
           state->refresh_process_matches();
-          body.push_back(text("workspace: " + state->workspace_root) |
+          body.push_back(text(i18n::tr_fmt("common.workspace", {state->workspace_root})) |
                          color(theme::Muted()));
           if (!state->selected_program.empty()) {
-            body.push_back(text("binario: " + state->selected_program) |
+            body.push_back(text(i18n::tr_fmt("wizard.connection.label.binary",
+                                             {state->selected_program})) |
                            color(theme::Muted()));
           }
           std::string query_line = state->process_query;
           query_line.push_back('_');
-          body.push_back(text("buscar: " + query_line) | color(theme::WatchInput()));
+          body.push_back(text(i18n::tr_fmt("wizard.connection.label.search", {query_line})) |
+                         color(theme::WatchInput()));
           body.push_back(separator());
           const int max_rows = 10;
           state->process_list_start = std::max(
@@ -781,12 +789,13 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           Elements process_rows;
           for (int i = start; i < end; ++i) {
             const auto& proc = state->process_matches[static_cast<std::size_t>(i)];
-            std::string line = std::to_string(proc.pid) + "  " + proc.name;
+            std::string line = i18n::tr_fmt("wizard.connection.process.row",
+                                            {std::to_string(proc.pid), proc.name});
             if (!proc.cmdline.empty() && proc.cmdline != proc.name) {
-              line += "  — " + proc.cmdline;
+              line += i18n::tr_fmt("wizard.connection.process.cmdline", {proc.cmdline});
               if (line.size() > 72) {
                 line.resize(69);
-                line += "...";
+                line += i18n::tr("common.truncation_suffix");
               }
             }
             const std::string row_id = press_id::f2_process_row(i);
@@ -800,15 +809,18 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
             process_rows.push_back(row_el);
           }
           if (process_rows.empty()) {
-            process_rows.push_back(text("(sin coincidencias)") | color(theme::Muted()));
+            process_rows.push_back(text(i18n::tr("common.no_matches")) | color(theme::Muted()));
           }
           body.push_back(vbox(std::move(process_rows)) | reflect(state->process_list_box));
-          help = "escribe para filtrar  j/k  Enter  clic  Esc atrás";
+          help = i18n::tr("wizard.connection.help.pick_process");
         } else if (state->step == WizardStep::PickCoreFile) {
           state->browser.ensure_browser_entries();
-          body.push_back(text("ejecutable: " + state->selected_program) |
+          body.push_back(text(i18n::tr_fmt("wizard.connection.label.executable",
+                                           {state->selected_program})) |
                          color(theme::Muted()));
-          body.push_back(text("core: " + state->browser.browser_path) | color(theme::Muted()));
+          body.push_back(text(i18n::tr_fmt("wizard.connection.label.core",
+                                           {state->browser.browser_path})) |
+                         color(theme::Muted()));
           body.push_back(separator());
           const int max_rows = 12;
           state->browser.browser_list_start = std::max(
@@ -821,7 +833,8 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           Elements list_rows;
           for (int i = start; i < end; ++i) {
             const auto& row = state->browser.entries[i];
-            std::string prefix = row.is_directory ? "[dir] " : "      ";
+            std::string prefix = row.is_directory ? i18n::tr("common.browser.dir_prefix")
+                                                  : i18n::tr("common.browser.file_indent");
             const std::string row_id = press_id::f2_browser_row(i);
             const bool selected = i == state->browser.selected;
             const bool hovered =
@@ -836,38 +849,41 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
             list_rows.push_back(line);
           }
           if (list_rows.empty()) {
-            list_rows.push_back(text("(vacío)") | color(theme::Muted()));
+            list_rows.push_back(text(i18n::tr("common.empty")) | color(theme::Muted()));
           }
           body.push_back(vbox(std::move(list_rows)) |
                          reflect(state->browser.browser_list_box));
-          help = "j/k  Enter archivo core  clic  Esc atrás";
+          help = i18n::tr("wizard.connection.help.pick_core");
         } else if (state->step == WizardStep::ChooseCoreBackend) {
-          body.push_back(text("ejecutable: " + state->selected_program) |
+          body.push_back(text(i18n::tr_fmt("wizard.connection.label.executable",
+                                           {state->selected_program})) |
                          color(theme::Muted()));
-          body.push_back(text("core: " + state->selected_core_path) | color(theme::Muted()));
+          body.push_back(text(i18n::tr_fmt("wizard.connection.label.core",
+                                           {state->selected_core_path})) |
+                         color(theme::Muted()));
           body.push_back(separator());
           const bool gdb_sel = state->core_backend_selected == 0;
           Element gdb_row = StyleListRow(
-              text(" 1  GDB post-mortem — depuración clásica") | color(theme::Header()), gdb_sel,
-              false, false);
+              text(i18n::tr("wizard.connection.option.gdb_backend")) | color(theme::Header()),
+              gdb_sel, false, false);
           Element ca_row;
           if (core_analyzer_supported()) {
             ca_row = StyleListRow(
-                text(" 2  Core Analyzer — terminal CA + buscador de clases") |
-                    color(theme::Header()),
+                text(i18n::tr("wizard.connection.option.ca_backend")) | color(theme::Header()),
                 !gdb_sel, false, false);
             body = {gdb_row | reflect(state->gdb_backend_box),
                     ca_row | reflect(state->ca_backend_box)};
-            help = "1/2 o j/k  Enter  Esc atrás";
+            help = i18n::tr("wizard.connection.help.core_backend");
           } else {
             body = {gdb_row | reflect(state->gdb_backend_box),
-                    text(" Core Analyzer no disponible en esta build") | color(theme::Muted())};
-            help = "Enter  Esc atrás";
+                    text(i18n::tr("wizard.connection.ca_unavailable")) | color(theme::Muted())};
+            help = i18n::tr("wizard.connection.help.core_backend_gdb_only");
           }
         }
 
         Element dialog = window(
-            text(step_title(state->step, state->mode) + "  [" + mode_label(state->mode) + "]") |
+            text(step_title(state->step, state->mode) +
+                 i18n::tr_fmt("wizard.connection.badge", {mode_label(state->mode)})) |
                 color(theme::Accent()),
             vbox({
                 vbox(std::move(body)) | flex | bgcolor(theme::PanelBg()),

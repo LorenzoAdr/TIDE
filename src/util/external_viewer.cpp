@@ -13,6 +13,7 @@
 #include "util/monitor_log.hpp"
 #include "util/shell_utils.hpp"
 #include "util/thread_name.hpp"
+#include "i18n/tr.hpp"
 
 namespace fs = std::filesystem;
 
@@ -58,7 +59,7 @@ void redirect_stdio_to_devnull() {
 LaunchAttempt try_launch_evince(const std::string& evince_cmd, const std::string& pdf_path) {
   const pid_t pid = fork();
   if (pid < 0) {
-    return {false, "No se pudo iniciar evince"};
+    return {false, i18n::tr("pdf.evince_start_failed")};
   }
   if (pid == 0) {
     setsid();
@@ -73,9 +74,9 @@ LaunchAttempt try_launch_evince(const std::string& evince_cmd, const std::string
     const pid_t waited = waitpid(pid, &status, WNOHANG);
     if (waited == pid) {
       if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
-        return {false, "evince no está instalado o no se pudo ejecutar"};
+        return {false, i18n::tr("pdf.evince_not_installed")};
       }
-      return {false, "evince terminó al iniciar"};
+      return {false, i18n::tr("pdf.evince_exited")};
     }
     if (waited == 0) {
       usleep(25000);
@@ -107,7 +108,7 @@ void launch_pdf_viewer_async(const std::string& absolute_path,
 
     std::error_code ec;
     if (!fs::is_regular_file(absolute_path, ec)) {
-      result.message = "Archivo PDF no encontrado";
+      result.message = i18n::tr("pdf.not_found");
       if (on_finished) {
         on_finished(result);
       }
@@ -115,7 +116,7 @@ void launch_pdf_viewer_async(const std::string& absolute_path,
     }
 
     if (!has_graphical_display()) {
-      result.message = "Sin entorno gráfico (DISPLAY/WAYLAND_DISPLAY)";
+      result.message = i18n::tr("pdf.no_display");
       TGDB_MON("pdf", result.message + " path=" + absolute_path);
       if (on_finished) {
         on_finished(result);
@@ -125,7 +126,7 @@ void launch_pdf_viewer_async(const std::string& absolute_path,
 
     const std::string evince = resolve_evince_command();
     if (!command_exists(evince)) {
-      result.message = "evince no encontrado en PATH";
+      result.message = i18n::tr("pdf.evince_not_in_path");
       TGDB_MON("pdf", result.message + " path=" + absolute_path);
       if (on_finished) {
         on_finished(result);
@@ -136,8 +137,8 @@ void launch_pdf_viewer_async(const std::string& absolute_path,
     const LaunchAttempt launch = try_launch_evince(evince, absolute_path);
     result.ok = launch.ok;
     if (launch.ok) {
-      result.message =
-          "PDF abierto con evince: " + fs::path(absolute_path).filename().string();
+      result.message = i18n::tr_fmt(
+          "pdf.opened", {fs::path(absolute_path).filename().string()});
       TGDB_MON("pdf", "launched path=" + absolute_path);
     } else {
       result.message = launch.message;

@@ -8,6 +8,7 @@
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -73,12 +74,12 @@ Component MakeRightSidebarPanel(Component outline, MainLayoutState* layout_state
             layout_state->clickable.is_pressed(press_id::kSidebarHide);
 
         Element hide_btn = MakeToolbarButton(
-            text(" × ") | color(theme::Muted()),
+            text(i18n::tr("console.hide_panel")) | color(theme::Muted()),
             hide_hovered, hide_pressed, false, &state->hide_box);
 
         return vbox({
                    hbox({
-                       text(" Outline") | color(theme::Accent()) | bold,
+                       text(i18n::tr("panel.outline.title")) | color(theme::Accent()) | bold,
                        filler(),
                        hide_btn | size(WIDTH, EQUAL, 3),
                    }) | size(HEIGHT, EQUAL, 1) | bgcolor(theme::TabIdle()),

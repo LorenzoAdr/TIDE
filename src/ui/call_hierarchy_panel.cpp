@@ -15,6 +15,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/search_panel.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -305,7 +306,7 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
         state->row_layouts.clear();
 
         if (!active) {
-          rows.push_back(text("(sin jerarquía activa) — clic derecho en el editor") |
+          rows.push_back(text(i18n::tr("panel.call_hierarchy.inactive")) |
                          color(theme::Muted()));
         } else {
           const Color root_color = hierarchy->nodes.empty()
@@ -314,13 +315,13 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
           header = vbox({
               text(" " + hierarchy->root_label) | color(root_color) | bold,
               separator(),
-              text(" " + hierarchy->status + "  clic: ir al método  Esc: limpiar") |
+              text(" " + i18n::tr_fmt("panel.call_hierarchy.footer", {hierarchy->status})) |
                   color(theme::Muted()) | size(HEIGHT, EQUAL, 1),
           });
 
           const std::vector<int> visible = call_hierarchy_visible_rows(*hierarchy);
           if (visible.empty()) {
-            rows.push_back(text("(sin resultados)") | color(theme::Muted()));
+            rows.push_back(text(i18n::tr("common.no_results")) | color(theme::Muted()));
           } else {
             for (int i = 0; i < static_cast<int>(visible.size()); ++i) {
               const int node_index = visible[static_cast<std::size_t>(i)];

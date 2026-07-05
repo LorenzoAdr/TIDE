@@ -6,6 +6,7 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "i18n/tr.hpp"
 #include "ui/clickable.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
@@ -145,14 +146,15 @@ Component MakeExternalFileWizardOverlay(Component main, ExternalFileWizardState*
         Elements list_rows;
         for (int i = start; i < end; ++i) {
           const auto& row = state->browser.entries[static_cast<std::size_t>(i)];
-          std::string prefix = row.is_directory ? "[dir] " : "[file]";
+          std::string prefix = row.is_directory ? i18n::tr("common.browser.dir_prefix")
+                                                : i18n::tr("common.browser.file_prefix");
           const std::string row_id = press_id::f1_browser_row(i);
           const bool selected = i == state->browser.selected;
           const bool hovered =
               layout_state != nullptr && layout_state->clickable.is_hovered(row_id);
           const bool pressed =
               layout_state != nullptr && layout_state->clickable.is_pressed(row_id);
-          Element line = text(prefix + " " + row.name);
+          Element line = text(prefix + row.name);
           if (row.is_directory) {
             line = line | color(theme::Accent());
           }
@@ -160,17 +162,16 @@ Component MakeExternalFileWizardOverlay(Component main, ExternalFileWizardState*
           list_rows.push_back(line);
         }
         if (list_rows.empty()) {
-          list_rows.push_back(text("(vacío)") | color(theme::Muted()));
+          list_rows.push_back(text(i18n::tr("common.empty")) | color(theme::Muted()));
         }
         body.push_back(vbox(std::move(list_rows)) | reflect(state->browser.browser_list_box));
 
         Element dialog = window(
-            text("Abrir archivo externo") | color(theme::Accent()),
+            text(i18n::tr("wizard.external_file.title")) | color(theme::Accent()),
             vbox({
                 vbox(std::move(body)) | flex | bgcolor(theme::PanelBg()),
                 separator(),
-                text("j/k  Enter/o abrir  Enter carpeta  clic  Esc cancelar") |
-                    color(theme::Muted()),
+                text(i18n::tr("wizard.external_file.footer")) | color(theme::Muted()),
             }))
             | size(WIDTH, GREATER_THAN, 60)
             | size(HEIGHT, GREATER_THAN, 12)

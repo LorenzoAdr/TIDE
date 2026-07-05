@@ -6,6 +6,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "i18n/locale.hpp"
+
 namespace fs = std::filesystem;
 
 namespace tgdb {
@@ -85,6 +87,9 @@ AppSettings AppSettings::load() {
         doc["show_all_workspace_files"].is_boolean()) {
       settings.show_all_workspace_files = doc["show_all_workspace_files"].get<bool>();
     }
+    if (doc.contains("helix_mode_enabled") && doc["helix_mode_enabled"].is_boolean()) {
+      settings.helix_mode_enabled = doc["helix_mode_enabled"].get<bool>();
+    }
     if (doc.contains("icon_mode") && doc["icon_mode"].is_string()) {
       const std::string mode = doc["icon_mode"].get<std::string>();
       if (mode == "always") {
@@ -94,6 +99,9 @@ AppSettings AppSettings::load() {
       } else {
         settings.icon_mode = IconMode::Auto;
       }
+    }
+    if (doc.contains("ui_locale") && doc["ui_locale"].is_string()) {
+      settings.ui_locale = i18n::parse_locale(doc["ui_locale"].get<std::string>());
     }
   } catch (...) {
     return AppSettings{};
@@ -122,6 +130,7 @@ bool AppSettings::save() const {
   doc["force_bundled_gdb"] = force_bundled_gdb;
   doc["monitor_enabled"] = monitor_enabled;
   doc["show_all_workspace_files"] = show_all_workspace_files;
+  doc["helix_mode_enabled"] = helix_mode_enabled;
   switch (icon_mode) {
     case IconMode::Always:
       doc["icon_mode"] = "always";
@@ -134,6 +143,7 @@ bool AppSettings::save() const {
       doc["icon_mode"] = "auto";
       break;
   }
+  doc["ui_locale"] = i18n::locale_tag(ui_locale);
 
   std::ofstream output(path);
   if (!output) {

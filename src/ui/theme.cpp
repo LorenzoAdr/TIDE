@@ -1,5 +1,7 @@
 #include "ui/theme.hpp"
 
+#include "i18n/tr.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -271,20 +273,20 @@ const char* ui_color_preset_name(UiColorPreset preset) {
   return "custom";
 }
 
-const char* ui_color_preset_label(UiColorPreset preset) {
+std::string ui_color_preset_label(UiColorPreset preset) {
   switch (preset) {
     case UiColorPreset::kDarkClassic:
-      return "Oscuro clásico";
+      return i18n::tr("theme.preset.dark_classic");
     case UiColorPreset::kDarkSoft:
-      return "Oscuro suave";
+      return i18n::tr("theme.preset.dark_soft");
     case UiColorPreset::kLightClassic:
-      return "Claro clásico";
+      return i18n::tr("theme.preset.light_classic");
     case UiColorPreset::kLightPaper:
-      return "Claro papel";
+      return i18n::tr("theme.preset.light_paper");
     case UiColorPreset::kCustom:
-      return "Personalizado";
+      return i18n::tr("theme.preset.custom");
   }
-  return "Personalizado";
+  return i18n::tr("theme.preset.custom");
 }
 
 UiColorOverrides snapshot_effective_ui_colors() {

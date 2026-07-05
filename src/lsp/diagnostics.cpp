@@ -2,6 +2,7 @@
 
 #include "lsp/lsp_uri.hpp"
 #include "util/include_tree.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -87,14 +88,14 @@ std::vector<Diagnostic> diagnostics_on_line(const DocumentDiagnostics& doc, int 
 std::string diagnostic_severity_label(DiagnosticSeverity severity) {
   switch (severity) {
     case DiagnosticSeverity::kError:
-      return "Error";
+      return i18n::tr("diagnostic.severity.error");
     case DiagnosticSeverity::kWarning:
-      return "Aviso";
+      return i18n::tr("diagnostic.severity.warning");
     case DiagnosticSeverity::kInfo:
-      return "Info";
+      return i18n::tr("diagnostic.severity.info");
     case DiagnosticSeverity::kHint:
     default:
-      return "Sugerencia";
+      return i18n::tr("diagnostic.severity.hint");
   }
 }
 

@@ -11,6 +11,10 @@ add_executable(tgdb
   src/main.cpp
   src/app/application.cpp
   src/app/app_settings.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
   src/app/workspace_config.cpp
   src/app/workspace_session.cpp
   src/app/debug_model.cpp
@@ -39,6 +43,7 @@ add_executable(tgdb
   src/ui/binary_symbols_panel.cpp
   src/core_analyzer/output_parser.cpp
   src/ui/file_picker.cpp
+  src/ui/file_picker_preview.cpp
   src/ui/symbol_picker.cpp
   src/ui/quit_confirm.cpp
   src/ui/shutdown_overlay.cpp
@@ -100,6 +105,12 @@ add_executable(tgdb
   src/editor/editor_context.cpp
   src/editor/bracket_match.cpp
   src/editor/code_snippets.cpp
+  src/editor/helix/helix_state.cpp
+  src/editor/helix/helix_key.cpp
+  src/editor/helix/helix_keymap.cpp
+  src/editor/helix/helix_dispatch.cpp
+  src/editor/helix/helix_hints.cpp
+  src/editor/helix/helix_scope_nav.cpp
   src/util/cpp_highlight.cpp
   src/util/crash_handler.cpp
   src/util/child_process_guard.cpp
@@ -178,6 +189,15 @@ target_link_libraries(tgdb-bundle-wizard PRIVATE ftxui::component ftxui::dom ftx
 add_executable(hello examples/hello.cpp)
 target_compile_options(hello PRIVATE -g -O0)
 
+add_executable(i18n_test
+  tests/i18n_test.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(i18n_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 add_executable(text_ops_test
   tests/text_ops_test.cpp
   src/editor/editor_state.cpp
@@ -217,6 +237,10 @@ add_executable(csv_index_test
   src/util/csv_viewer.cpp
   src/editor/code_snippets.cpp
   src/ui/theme.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(csv_index_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -229,6 +253,10 @@ add_executable(external_viewer_test
   src/util/external_viewer.cpp
   src/util/shell_utils.cpp
   src/util/monitor_log.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(external_viewer_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -240,6 +268,10 @@ add_executable(tabular_file_test
   src/util/tabular_file.cpp
   src/util/csv_viewer.cpp
   src/ui/theme.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(tabular_file_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -257,6 +289,10 @@ add_executable(nm_reader_test
   tests/nm_reader_test.cpp
   src/util/nm_reader.cpp
   src/util/shell_utils.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(nm_reader_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 

@@ -51,7 +51,7 @@ UiColorOverrides overrides_for_preset(UiColorPreset preset);
 ThemeMode theme_mode_for_preset(UiColorPreset preset);
 UiColorPreset parse_ui_color_preset(const std::string& name);
 const char* ui_color_preset_name(UiColorPreset preset);
-const char* ui_color_preset_label(UiColorPreset preset);
+std::string ui_color_preset_label(UiColorPreset preset);
 
 UiColorOverrides snapshot_effective_ui_colors();
 bool parse_hex_color(const std::string& value, ColorRgb* out);

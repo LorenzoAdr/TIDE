@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <string>
 
 namespace tgdb {
 
@@ -20,7 +21,7 @@ struct FocusManagerState {
   void move_right();
   void move_down();
   void move_up();
-  const char* region_label() const;
+  std::string region_label() const;
 
  private:
   bool secondary_visible() const;

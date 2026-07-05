@@ -915,6 +915,12 @@ SourceLocation LspClient::goto_declaration(const std::string& absolute_path,
   return request_location("textDocument/declaration", absolute_path, text, line, character);
 }
 
+SourceLocation LspClient::goto_implementation(const std::string& absolute_path,
+                                              const std::string& text, int line,
+                                              int character) {
+  return request_location("textDocument/implementation", absolute_path, text, line, character);
+}
+
 std::string LspClient::strip_markdown(const std::string& text) {
   std::string out;
   out.reserve(text.size());

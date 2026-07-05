@@ -12,6 +12,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -63,7 +64,7 @@ std::string summarize_lsp_workers(const std::vector<ThreadSample>& workers) {
     return "";
   }
   std::ostringstream out;
-  out << "  ·  LSP:";
+  out << i18n::tr("panel.performance.lsp_prefix");
   if (has_clangd) {
     out << " clangd";
   }
@@ -110,7 +111,7 @@ Element render_labeled_bar(const std::string& label, double used_kb, double tota
 Element render_core_grid(const std::vector<CpuCoreSample>& cores, int core_count,
                          double total_percent, int panel_width) {
   if (cores.empty()) {
-    return text("  (sin datos de núcleos)") | color(theme::Muted());
+    return text(i18n::tr("panel.performance.no_core_data")) | color(theme::Muted());
   }
 
   const int columns = std::clamp(panel_width / 18, 1, 4);
@@ -118,7 +119,7 @@ Element render_core_grid(const std::vector<CpuCoreSample>& cores, int core_count
   Elements rows;
 
   std::ostringstream header;
-  header << "CPU " << core_count << " núcleos  ·  total " << format_percent(total_percent);
+  header << i18n::tr_fmt("panel.performance.cpu_header", {std::to_string(core_count), format_percent(total_percent)});
   rows.push_back(text(header.str()) | color(theme::Muted()));
 
   for (std::size_t i = 0; i < cores.size(); i += static_cast<std::size_t>(columns)) {
@@ -150,10 +151,7 @@ Element render_process_section(const PerformanceSnapshot& snapshot, int body_hei
   Elements lines;
 
   std::ostringstream summary;
-  summary << "FPS " << format_fps(snapshot.fps) << "  ·  RAM "
-          << format_mib(snapshot.process.rss_kb) << "  ·  CPU "
-          << format_percent(snapshot.process.cpu_percent) << "  ·  Hilos "
-          << snapshot.process.thread_count << summarize_lsp_workers(snapshot.process.threads);
+  summary << i18n::tr_fmt("panel.performance.summary_process", {format_fps(snapshot.fps), format_mib(snapshot.process.rss_kb), format_percent(snapshot.process.cpu_percent), std::to_string(snapshot.process.thread_count), summarize_lsp_workers(snapshot.process.threads)});
   lines.push_back(text(summary.str()) | color(theme::Header()));
 
   constexpr int kHeaderLines = 2;
@@ -163,25 +161,25 @@ Element render_process_section(const PerformanceSnapshot& snapshot, int body_hei
   state->thread_scroll = std::clamp(state->thread_scroll, 0, max_scroll);
 
   lines.push_back(hbox({
-      text("TID/PID") | size(WIDTH, EQUAL, 8) | color(theme::Muted()) | bold,
-      text("nombre") | size(WIDTH, EQUAL, 14) | color(theme::Muted()) | bold,
-      text("CPU%") | size(WIDTH, EQUAL, 7) | color(theme::Muted()) | bold,
-      text("RAM") | color(theme::Muted()) | bold,
+      text(i18n::tr("panel.performance.col.tid_pid")) | size(WIDTH, EQUAL, 8) | color(theme::Muted()) | bold,
+      text(i18n::tr("panel.performance.col.name")) | size(WIDTH, EQUAL, 14) | color(theme::Muted()) | bold,
+      text(i18n::tr("panel.performance.col.cpu")) | size(WIDTH, EQUAL, 7) | color(theme::Muted()) | bold,
+      text(i18n::tr("panel.performance.col.ram")) | color(theme::Muted()) | bold,
   }));
 
   const int start = state->thread_scroll;
   const int end = std::min(total_threads, start + table_height);
   if (total_threads == 0) {
-    lines.push_back(text("  (sin datos — j/k para desplazar cuando aparezcan)") |
+    lines.push_back(text(i18n::tr("panel.performance.no_thread_data")) |
                     color(theme::Muted()));
   } else {
     for (int i = start; i < end; ++i) {
       const ThreadSample& thread = snapshot.process.threads[static_cast<std::size_t>(i)];
       std::string name = thread.comm;
       if (thread.is_child_process) {
-        name += " [proc]";
+        name += i18n::tr("panel.performance.thread_proc");
         if (thread.child_thread_count > 0) {
-          name += " " + std::to_string(thread.child_thread_count) + "th";
+          name += i18n::tr_fmt("panel.performance.thread_th", {std::to_string(thread.child_thread_count)});
         }
       }
       if (name.size() > 14) {
@@ -203,7 +201,7 @@ Element render_process_section(const PerformanceSnapshot& snapshot, int body_hei
 
 Element render_system_section(const PerformanceSnapshot& snapshot, int body_height, int panel_width) {
   if (!snapshot.system.available) {
-    return text("Estadísticas del sistema no disponibles en esta plataforma.") |
+    return text(i18n::tr("panel.performance.unavailable")) |
            color(theme::Muted());
   }
 
@@ -214,11 +212,11 @@ Element render_system_section(const PerformanceSnapshot& snapshot, int body_heig
   const int used_lines = 2 + (snapshot.system.core_count + 3) / 4;
   if (body_height > used_lines + 3) {
     lines.push_back(separator() | color(theme::AccentDim()));
-    lines.push_back(render_labeled_bar("RAM", static_cast<double>(snapshot.system.mem_used_kb),
+    lines.push_back(render_labeled_bar(i18n::tr("panel.performance.label.ram"), static_cast<double>(snapshot.system.mem_used_kb),
                                        static_cast<double>(snapshot.system.mem_total_kb),
                                        std::max(8, panel_width / 3)));
     if (snapshot.system.swap_total_kb > 0) {
-      lines.push_back(render_labeled_bar("Swap", static_cast<double>(snapshot.system.swap_used_kb),
+      lines.push_back(render_labeled_bar(i18n::tr("panel.performance.label.swap"), static_cast<double>(snapshot.system.swap_used_kb),
                                          static_cast<double>(snapshot.system.swap_total_kb),
                                          std::max(8, panel_width / 3)));
     }
@@ -248,7 +246,7 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, PerformancePanelStat
       render_process_section(snapshot, process_height, panel_width, state);
 
   Elements layout;
-  layout.push_back(text(" tgdb ") | bold | color(theme::Accent()) | bgcolor(theme::TabIdle()) |
+  layout.push_back(text(i18n::tr("panel.performance.tab.process")) | bold | color(theme::Accent()) | bgcolor(theme::TabIdle()) |
                    size(HEIGHT, EQUAL, 1));
   layout.push_back(process_body | size(HEIGHT, EQUAL, process_height) | bgcolor(theme::PanelBg()));
 
@@ -257,7 +255,7 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, PerformancePanelStat
     Element system_body =
         render_system_section(snapshot, system_height, panel_width);
     layout.push_back(separator() | color(theme::AccentDim()) | size(HEIGHT, EQUAL, 1));
-    layout.push_back(text(" Sistema ") | bold | color(theme::Accent()) | bgcolor(theme::TabIdle()) |
+    layout.push_back(text(i18n::tr("panel.performance.tab.system")) | bold | color(theme::Accent()) | bgcolor(theme::TabIdle()) |
                      size(HEIGHT, EQUAL, 1));
     layout.push_back(system_body | size(HEIGHT, EQUAL, system_height) | bgcolor(theme::PanelBg()));
   }

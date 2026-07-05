@@ -19,6 +19,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 #include "util/cpp_highlight.hpp"
 #include "util/path_normalize.hpp"
 
@@ -42,13 +43,13 @@ struct SourcePanelState {
 void load_source_file(const std::string& path, std::vector<std::string>* lines) {
   lines->clear();
   if (path.empty()) {
-    lines->push_back("Abre un archivo o inicia una sesión de depuración.");
+    lines->push_back(i18n::tr("panel.source.empty_hint"));
     return;
   }
 
   std::ifstream input(path);
   if (!input) {
-    lines->push_back("No se pudo abrir: " + path);
+    lines->push_back(i18n::tr_fmt("panel.source.open_failed", {path}));
     return;
   }
 
@@ -411,12 +412,12 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
 
     if (gutter_rows.empty()) {
       gutter_rows.push_back(text(" ") | dim);
-      code_rows.push_back(text("(sin líneas)") | dim);
+      code_rows.push_back(text(i18n::tr("panel.source.no_lines")) | dim);
     }
 
     const int rendered_lines = static_cast<int>(code_rows.size());
 
-    std::string title = "Código";
+    std::string title = i18n::tr("panel.source.title");
     if (!model->active_file.empty()) {
       const auto filename =
           std::filesystem::path(model->active_file).filename().string();

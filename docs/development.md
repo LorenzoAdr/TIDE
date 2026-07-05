@@ -170,10 +170,24 @@ Keep all `DebugModel` mutations on the UI thread.
 
 - **C++17**, no extensions beyond the standard
 - **Namespace:** `tgdb`
-- **UI strings:** mixed English/Spanish in the app; documentation is English
+- **UI strings:** use `i18n::tr("key")` / `i18n::tr_fmt("key", {args})`; catalogs in `src/i18n/strings_es.cpp` and `strings_en.cpp` (generated from `tools/i18n_generate.py` + `tools/i18n_catalog_extra.py`). Do not add user-facing literals in UI code.
+- **Locale:** `AppSettings::ui_locale` (`auto` / `es` / `en`); selector in F10 settings. Auto reads `$LANG`.
 - **Thread safety:** background threads push to `ThreadSafeQueue`; UI drains on `Event::Custom`
 - **Paths:** normalize with `util/path_normalize.hpp`; store absolute paths in models
 - **Modals:** implement as overlays (`MakeXOverlay`) with a `*State` struct and `open` flag; register in `Application::any_modal_open()`
+
+## Internationalization (i18n)
+
+- **API:** `i18n::tr("dotted.key")`, `i18n::tr_fmt("key", {"arg0"})` — placeholders `{0}`, `{1}`, …
+- **Keys:** stable dot-notation (`panel.explorer.title`, `settings.general.lsp.label`, `cli.opt.cwd`)
+- **Catalogs:** edit `tools/i18n_catalog_extra.py` (and base entries in `tools/i18n_generate.py`), then run:
+
+```bash
+python3 tools/i18n_generate.py
+```
+
+- **Audit:** `./tools/i18n_audit.sh` — grep for stray literals before merging UI changes
+- **Tests:** `build/i18n_test`
 
 ## Debugging tgdb itself
 

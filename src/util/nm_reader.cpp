@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include "util/shell_utils.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -287,52 +288,52 @@ NmSymbolType classify_nm_type(char raw_type) {
 std::string translate_nm_type(char raw_type) {
   switch (raw_type) {
     case 'T':
-      return "Código (global, definido)";
+      return i18n::tr("nm.type.text_global");
     case 't':
-      return "Código (local, definido)";
+      return i18n::tr("nm.type.text_local");
     case 'D':
-      return "Datos (global, definido)";
+      return i18n::tr("nm.type.data_global");
     case 'd':
-      return "Datos (local, definido)";
+      return i18n::tr("nm.type.data_local");
     case 'B':
-      return "BSS (global, definido)";
+      return i18n::tr("nm.type.bss_global");
     case 'b':
-      return "BSS (local, definido)";
+      return i18n::tr("nm.type.bss_local");
     case 'U':
-      return "Sin definir (referencia externa)";
+      return i18n::tr("nm.type.undefined_external");
     case 'u':
-      return "Sin definir (local)";
+      return i18n::tr("nm.type.undefined_local");
     case 'W':
-      return "Débil (global)";
+      return i18n::tr("nm.type.weak_global");
     case 'w':
-      return "Débil (local)";
+      return i18n::tr("nm.type.weak_local");
     case 'R':
-      return "Solo lectura (global)";
+      return i18n::tr("nm.type.readonly_global");
     case 'r':
-      return "Solo lectura (local)";
+      return i18n::tr("nm.type.readonly_local");
     case 'C':
-      return "Común (global)";
+      return i18n::tr("nm.type.common_global");
     case 'c':
-      return "Común (local)";
+      return i18n::tr("nm.type.common_local");
     case 'A':
-      return "Absoluto";
+      return i18n::tr("nm.type.absolute");
     case 'a':
-      return "Absoluto (local)";
+      return i18n::tr("nm.type.absolute_local");
     case 'N':
-      return "Depuración (nombre)";
+      return i18n::tr("nm.type.debug_name");
     case 'n':
-      return "Depuración (local)";
+      return i18n::tr("nm.type.debug_local");
     case 'V':
-      return "Objeto débil (global)";
+      return i18n::tr("nm.type.weak_object_global");
     case 'v':
-      return "Objeto débil (local)";
+      return i18n::tr("nm.type.weak_object_local");
     case '?':
-      return "Tipo desconocido";
+      return i18n::tr("nm.type.unknown");
     default:
       if (std::islower(static_cast<unsigned char>(raw_type))) {
-        return "Símbolo local";
+        return i18n::tr("nm.type.symbol_local");
       }
-      return "Símbolo global";
+      return i18n::tr("nm.type.symbol_global");
   }
 }
 
@@ -367,16 +368,16 @@ std::vector<NmSymbol> parse_nm_output(const std::string& output) {
 NmReadResult read_binary_symbols(const std::string& binary_path) {
   NmReadResult result;
   if (binary_path.empty()) {
-    result.error = "Ruta de binario vacía";
+    result.error = i18n::tr("nm.error.empty_path");
     return result;
   }
   std::error_code ec;
   if (!std::filesystem::exists(binary_path, ec)) {
-    result.error = "Archivo no encontrado";
+    result.error = i18n::tr("nm.error.not_found");
     return result;
   }
   if (!is_nm_analyzable_path(binary_path)) {
-    result.error = "No es un binario ELF/ar analizable con nm";
+    result.error = i18n::tr("nm.error.not_analyzable");
     return result;
   }
 
@@ -384,13 +385,13 @@ NmReadResult read_binary_symbols(const std::string& binary_path) {
       shell_quote("nm") + " --demangle --print-size " + shell_quote(binary_path);
   const std::string output = run_shell_capture(command, 120);
   if (output.empty()) {
-    result.error = "nm no devolvió salida (¿está instalado?)";
+    result.error = i18n::tr("nm.error.no_output");
     return result;
   }
 
   result.symbols = parse_nm_output(output);
   if (result.symbols.empty()) {
-    result.error = "No se encontraron símbolos";
+    result.error = i18n::tr("nm.error.no_symbols");
   }
   return result;
 }
@@ -438,20 +439,20 @@ bool is_nm_analyzable_path(const std::string& path) {
 std::string nm_binding_filter_label(NmBindingFilter filter) {
   switch (filter) {
     case NmBindingFilter::kUndefined:
-      return "Sin definir";
+      return i18n::tr("nm.filter.undefined");
     case NmBindingFilter::kDefined:
-      return "Definidos";
+      return i18n::tr("nm.filter.defined");
     case NmBindingFilter::kText:
-      return "Código";
+      return i18n::tr("nm.filter.text");
     case NmBindingFilter::kData:
-      return "Datos";
+      return i18n::tr("nm.filter.data");
     case NmBindingFilter::kBss:
-      return "BSS";
+      return i18n::tr("nm.filter.bss");
     case NmBindingFilter::kWeak:
-      return "Débiles";
+      return i18n::tr("nm.filter.weak");
     case NmBindingFilter::kAll:
     default:
-      return "Todos";
+      return i18n::tr("nm.filter.all");
   }
 }
 

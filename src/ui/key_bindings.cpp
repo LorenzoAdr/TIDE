@@ -411,6 +411,18 @@ bool event_is_ctrl_i(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[73;5u");
 }
 
+namespace {
+
+bool input_is_ctrl_modifier_key(const std::string& input) {
+  return input.find("57442") != std::string::npos || input.find("57443") != std::string::npos;
+}
+
+bool input_is_kitty_release_event(const std::string& input) {
+  return input.find(":3u") != std::string::npos;
+}
+
+}  // namespace
+
 bool event_is_shift_key_press(const ftxui::Event& event) {
   if (event == ftxui::Event::Special("\x1B[57417u") ||
       event == ftxui::Event::Special("\x1B[57417;1u") ||
@@ -438,6 +450,10 @@ bool event_is_ctrl_key_press(const ftxui::Event& event) {
 }
 
 bool event_is_ctrl_key_release(const ftxui::Event& event) {
+  const std::string& input = event.input();
+  if (input_is_ctrl_modifier_key(input) && input_is_kitty_release_event(input)) {
+    return true;
+  }
   return event == ftxui::Event::Special("\x1B[57442;2u") ||
          event == ftxui::Event::Special("\x1B[57443;2u");
 }
@@ -540,9 +556,8 @@ bool event_is_alt_slash(const ftxui::Event& event) {
 }
 
 bool event_is_completion(const ftxui::Event& event) {
-  return event == ftxui::Event::F6 || event_is_ctrl_space(event) ||
-         event_is_ctrl_period(event) || event_is_alt_period(event) ||
-         event_is_alt_slash(event);
+  return event_is_ctrl_space(event) || event_is_ctrl_period(event) ||
+         event_is_alt_period(event) || event_is_alt_slash(event);
 }
 
 bool event_is_completion_trigger(const ftxui::Event& event, bool ctrl_modifier_held) {
@@ -618,6 +633,13 @@ bool event_has_ctrl_modifier(const ftxui::Event& event) {
          event == ftxui::Event::CtrlQ ||
          event == ftxui::Event::CtrlB || event == ftxui::Event::CtrlW ||
          event_is_ctrl_i(event);
+}
+
+bool event_is_tide_global_shortcut(const ftxui::Event& event) {
+  return event == ftxui::Event::CtrlP || event == ftxui::Event::CtrlT ||
+         event == ftxui::Event::CtrlO || event == ftxui::Event::CtrlQ ||
+         event == ftxui::Event::CtrlA || event == ftxui::Event::CtrlE ||
+         event == ftxui::Event::CtrlB;
 }
 
 bool editor_priority_key(const ftxui::Event& event) {

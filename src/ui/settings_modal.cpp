@@ -9,6 +9,8 @@
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "i18n/locale.hpp"
+#include "i18n/tr.hpp"
 #include "ui/panel.hpp"
 #include "ui/glyphs.hpp"
 #include "ui/theme.hpp"
@@ -21,18 +23,20 @@ using namespace ftxui;
 
 namespace {
 
-constexpr int kTheme = 0;
-constexpr int kLsp = 1;
-constexpr int kLiveLspCompletion = 2;
-constexpr int kDiagnosticSuffixes = 3;
-constexpr int kStickyScroll = 4;
-constexpr int kIndentGuides = 5;
-constexpr int kOverviewRuler = 6;
-constexpr int kSecondaryPanel = 7;
-constexpr int kShowAllFiles = 8;
-constexpr int kMonitor = 9;
-constexpr int kIcons = 10;
-constexpr int kBaseOptions = 11;
+constexpr int kUiLocale = 0;
+constexpr int kTheme = 1;
+constexpr int kLsp = 2;
+constexpr int kLiveLspCompletion = 3;
+constexpr int kDiagnosticSuffixes = 4;
+constexpr int kStickyScroll = 5;
+constexpr int kIndentGuides = 6;
+constexpr int kOverviewRuler = 7;
+constexpr int kSecondaryPanel = 8;
+constexpr int kShowAllFiles = 9;
+constexpr int kMonitor = 10;
+constexpr int kIcons = 11;
+constexpr int kHelixMode = 12;
+constexpr int kBaseOptions = 13;
 
 #ifdef TGDB_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -163,15 +167,15 @@ void cycle_top_level_panel(SettingsModalState* state, int delta) {
 std::string compile_commands_mode_label(CompileCommandsMode mode) {
   switch (mode) {
     case CompileCommandsMode::kAuto:
-      return "automático";
+      return i18n::tr("settings.compile_commands.mode.auto");
     case CompileCommandsMode::kHost:
-      return "solo host";
+      return i18n::tr("settings.compile_commands.mode.host");
     case CompileCommandsMode::kRemap:
-      return "remapear";
+      return i18n::tr("settings.compile_commands.mode.remap");
     case CompileCommandsMode::kDockerSync:
-      return "sincronizar Docker";
+      return i18n::tr("settings.compile_commands.mode.docker_sync");
   }
-  return "automático";
+  return i18n::tr("settings.compile_commands.mode.auto");
 }
 
 void cycle_compile_commands_mode(SettingsModalState* state) {
@@ -229,64 +233,103 @@ void cycle_docker_container(SettingsModalState* state) {
 }
 
 struct SettingsOption {
-  const char* label;
-  const char* description;
+  std::string label;
+  std::string description;
 };
 
-const std::vector<SettingsOption>& global_settings_options() {
-  static const std::vector<SettingsOption> options = {
-      {"Tema claro",
-       "Interfaz con fondos claros (se guarda en .tgdb/config.json del workspace)"},
-      {"clangd / LSP activo",
-       "Outline, completado, diagnósticos y resaltado semántico vía clangd"},
-      {"Autocompletado clang al escribir",
-       "Sugerencias de clangd mientras escribes (asíncrono; Ctrl+Espacio siempre disponible)"},
-      {"Sufijos de avisos en el código",
-       "Muestra mensajes cortos de clangd al final de cada línea"},
-      {"Sticky scroll en el editor",
-       "Muestra encabezados de ámbito fijos al hacer scroll en el código"},
-      {"Guías de indentación en el editor",
-       "Líneas verticales sutiles en el sangrado para alinear bloques de código"},
-      {"Franja de marcas junto al scroll",
-       "Muestra errores, avisos y cambios git en una columna junto al scrollbar"},
-      {"Panel secundario (outline / búsqueda)",
-       "Muestra la tercera columna con outline y búsqueda en el workspace"},
-      {"Mostrar todos los archivos del workspace",
-       "Incluye carpetas ocultas (.git, .tgdb), archivos en gitignore y directorios de build"},
-      {"Monitor interno (log circular)",
-       "Registra llamadas internas en ~/.config/tgdb/monitor.log (~1 s). Impacto en rendimiento"},
-      {"Iconos Nerd Font (Auto / Siempre / Nunca)",
-       "Iconos visuales en outline, autocompletado y explorador; Auto solo en terminales con Nerd Font probable (kitty, wezterm, etc.) o TGDB_NERD_FONT=1"},
+std::vector<SettingsOption> global_settings_options() {
+  std::vector<SettingsOption> options = {
+      {i18n::tr("settings.general.ui_locale.label"),
+       i18n::tr("settings.general.ui_locale.description")},
+      {i18n::tr("settings.general.light_theme.label"),
+       i18n::tr("settings.general.light_theme.description")},
+      {i18n::tr("settings.general.lsp.label"), i18n::tr("settings.general.lsp.description")},
+      {i18n::tr("settings.general.live_completion.label"),
+       i18n::tr("settings.general.live_completion.description")},
+      {i18n::tr("settings.general.diagnostic_suffixes.label"),
+       i18n::tr("settings.general.diagnostic_suffixes.description")},
+      {i18n::tr("settings.general.sticky_scroll.label"),
+       i18n::tr("settings.general.sticky_scroll.description")},
+      {i18n::tr("settings.general.indent_guides.label"),
+       i18n::tr("settings.general.indent_guides.description")},
+      {i18n::tr("settings.general.overview_ruler.label"),
+       i18n::tr("settings.general.overview_ruler.description")},
+      {i18n::tr("settings.general.secondary_panel.label"),
+       i18n::tr("settings.general.secondary_panel.description")},
+      {i18n::tr("settings.general.show_all_files.label"),
+       i18n::tr("settings.general.show_all_files.description")},
+      {i18n::tr("settings.general.monitor.label"),
+       i18n::tr("settings.general.monitor.description")},
+      {i18n::tr("settings.general.icons.label"),
+       i18n::tr("settings.general.icons.description")},
+      {i18n::tr("settings.general.helix_mode.label"),
+       i18n::tr("settings.general.helix_mode.description")},
 #ifdef TGDB_HAS_BUNDLED_CLANGD
-      {"Forzar clangd embebido",
-       "Usa solo el clangd del binario (ignora clangd en PATH salvo CLANGD_PATH)"},
+      {i18n::tr("settings.general.force_bundled_clangd.label"),
+       i18n::tr("settings.general.force_bundled_clangd.description")},
 #endif
 #ifdef TGDB_HAS_BUNDLED_GDB
-      {"Forzar gdb embebido",
-       "Usa solo el gdb del binario (ignora gdb en PATH salvo GDB_PATH)"},
+      {i18n::tr("settings.general.force_bundled_gdb.label"),
+       i18n::tr("settings.general.force_bundled_gdb.description")},
 #endif
   };
   return options;
 }
 
 std::string checkbox_label(bool checked, const std::string& text) {
-  return std::string(checked ? "[x] " : "[ ] ") + text;
+  return i18n::tr_fmt(checked ? "settings.checkbox.checked" : "settings.checkbox.unchecked",
+                      {text});
 }
 
-const char* icon_mode_label(IconMode mode) {
+std::string ui_locale_label(i18n::UiLocale locale) {
+  switch (locale) {
+    case i18n::UiLocale::kEs:
+      return i18n::tr("settings.locale.es");
+    case i18n::UiLocale::kEn:
+      return i18n::tr("settings.locale.en");
+    case i18n::UiLocale::kAuto:
+    default:
+      return i18n::tr("settings.locale.auto");
+  }
+}
+
+std::string ui_locale_option_label(i18n::UiLocale locale, const std::string& text) {
+  return i18n::tr_fmt("settings.icon_mode.checked", {ui_locale_label(locale), text});
+}
+
+void cycle_ui_locale(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  switch (state->draft_ui_locale) {
+    case i18n::UiLocale::kAuto:
+      state->draft_ui_locale = i18n::UiLocale::kEs;
+      break;
+    case i18n::UiLocale::kEs:
+      state->draft_ui_locale = i18n::UiLocale::kEn;
+      break;
+    case i18n::UiLocale::kEn:
+    default:
+      state->draft_ui_locale = i18n::UiLocale::kAuto;
+      break;
+  }
+  i18n::set_locale(state->draft_ui_locale);
+}
+
+std::string icon_mode_label(IconMode mode) {
   switch (mode) {
     case IconMode::Always:
-      return "Siempre";
+      return i18n::tr("settings.icon.always");
     case IconMode::Never:
-      return "Nunca";
+      return i18n::tr("settings.icon.never");
     case IconMode::Auto:
     default:
-      return "Auto";
+      return i18n::tr("settings.icon.auto");
   }
 }
 
 std::string icon_mode_option_label(IconMode mode, const std::string& text) {
-  return std::string("[") + icon_mode_label(mode) + "] " + text;
+  return i18n::tr_fmt("settings.icon_mode.checked", {icon_mode_label(mode), text});
 }
 
 bool option_checked(const SettingsModalState* state, int index) {
@@ -294,6 +337,8 @@ bool option_checked(const SettingsModalState* state, int index) {
     return false;
   }
   switch (index) {
+    case kUiLocale:
+      return true;
     case kTheme:
       return state->draft_theme == theme::ThemeMode::kLight;
     case kLsp:
@@ -310,6 +355,8 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_overview_ruler_enabled;
     case kSecondaryPanel:
       return state->draft_secondary_panel_enabled;
+    case kHelixMode:
+      return state->draft_helix_mode_enabled;
     case kShowAllFiles:
       return state->draft_show_all_workspace_files;
     case kMonitor:
@@ -334,6 +381,9 @@ void toggle_option(SettingsModalState* state, int index) {
     return;
   }
   switch (index) {
+    case kUiLocale:
+      cycle_ui_locale(state);
+      break;
     case kTheme:
       state->draft_theme = state->draft_theme == theme::ThemeMode::kLight
                                ? theme::ThemeMode::kDark
@@ -361,6 +411,9 @@ void toggle_option(SettingsModalState* state, int index) {
       break;
     case kSecondaryPanel:
       state->draft_secondary_panel_enabled = !state->draft_secondary_panel_enabled;
+      break;
+    case kHelixMode:
+      state->draft_helix_mode_enabled = !state->draft_helix_mode_enabled;
       break;
     case kShowAllFiles:
       state->draft_show_all_workspace_files = !state->draft_show_all_workspace_files;
@@ -712,19 +765,19 @@ void apply_palette_selection(SettingsModalState* state) {
 std::string ui_color_row_label(int row) {
   switch (row) {
     case kUiColorsPreset:
-      return "Preset";
+      return i18n::tr("settings.ui_colors.row.preset");
     case kUiColorsPanelBg:
-      return "Fondo general";
+      return i18n::tr("settings.ui_colors.row.panel_bg");
     case kUiColorsCodeBg:
-      return "Fondo código";
+      return i18n::tr("settings.ui_colors.row.code_bg");
     case kUiColorsText:
-      return "Texto general";
+      return i18n::tr("settings.ui_colors.row.text");
     case kUiColorsTitle:
-      return "Títulos y pestañas activas";
+      return i18n::tr("settings.ui_colors.row.title");
     case kUiColorsDirectory:
-      return "Carpetas y outline";
+      return i18n::tr("settings.ui_colors.row.directory");
     case kUiColorsFile:
-      return "Archivos y pestañas inactivas";
+      return i18n::tr("settings.ui_colors.row.file");
     default:
       return {};
   }
@@ -741,7 +794,7 @@ std::string ui_color_row_value(const SettingsModalState* state, int row) {
   if (field != nullptr && field->has_value()) {
     return theme::format_hex_color(**field);
   }
-  return "—";
+  return i18n::tr("settings.ui_colors.dash");
 }
 
 void begin_ui_color_edit(SettingsModalState* state, int row) {
@@ -873,16 +926,18 @@ bool handle_ui_colors_keys(SettingsModalState* state, Event event) {
 
 Element render_ui_colors_panel(const SettingsModalState* state) {
   Elements rows;
-  rows.push_back(text("Colores de interfaz") | color(theme::Accent()) | bold);
-  rows.push_back(text("Los colores de sintaxis clangd no cambian") | color(theme::Muted()));
+  rows.push_back(text(i18n::tr("settings.title.ui_colors")) | color(theme::Accent()) | bold);
+  rows.push_back(text(i18n::tr("settings.ui_colors.syntax_note")) | color(theme::Muted()));
   rows.push_back(separator());
 
   if (state->ui_colors_editing) {
-    rows.push_back(text("Elegir " + ui_color_row_label(state->ui_colors_edit_row)) |
+    rows.push_back(text(i18n::tr_fmt("settings.ui_colors.choose",
+                                      {ui_color_row_label(state->ui_colors_edit_row)})) |
                    color(theme::Accent()) | bold);
     const theme::ColorRgb& current =
         kUIColorPalette[static_cast<std::size_t>(state->ui_colors_palette_selected)];
-    rows.push_back(text("Seleccionado: " + theme::format_hex_color(current)) |
+    rows.push_back(text(i18n::tr_fmt("settings.ui_colors.selected",
+                                      {theme::format_hex_color(current)})) |
                    color(theme::Header()) | bold);
 
     for (int row = 0; row < kPaletteRows; ++row) {
@@ -906,8 +961,7 @@ Element render_ui_colors_panel(const SettingsModalState* state) {
     }
 
     rows.push_back(separator());
-    rows.push_back(text("↑↓←→ elegir color   Enter confirmar   Esc cancelar") |
-                   color(theme::Muted()));
+    rows.push_back(text(i18n::tr("settings.ui_colors.edit_footer")) | color(theme::Muted()));
     return vbox(std::move(rows));
   }
 
@@ -915,8 +969,9 @@ Element render_ui_colors_panel(const SettingsModalState* state) {
     const bool selected = i == state->ui_colors_selected;
     const std::string label = ui_color_row_label(i);
     const std::string value = ui_color_row_value(state, i);
-    Element row_el = text(label + ": " + value) | color(selected ? theme::Accent() : theme::Header()) |
-                     bold;
+    Element row_el =
+        text(i18n::tr_fmt("settings.ui_colors.row.value", {label, value})) |
+        color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
       row_el = row_el | inverted;
     }
@@ -924,8 +979,7 @@ Element render_ui_colors_panel(const SettingsModalState* state) {
   }
 
   rows.push_back(separator());
-  rows.push_back(text("p/Enter preset: siguiente   Enter fila: elegir color   Esc volver") |
-                 color(theme::Muted()));
+  rows.push_back(text(i18n::tr("settings.ui_colors.list_footer")) | color(theme::Muted()));
   return vbox(std::move(rows));
 }
 
@@ -1339,7 +1393,7 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
 
 std::string format_column_limit_label(int column_limit) {
   if (column_limit <= 0) {
-    return "sin límite";
+    return i18n::tr("settings.format.no_limit");
   }
   return std::to_string(column_limit);
 }
@@ -1359,9 +1413,11 @@ Element render_top_level_tabs(const SettingsModalState* state) {
     return tab;
   };
 
-  return hbox({render_tab(SettingsPanel::kGeneral, "General"), text("  "),
-               render_tab(SettingsPanel::kWorkspace, "Workspace"), text("  "),
-               render_tab(SettingsPanel::kFormat, "Formato")});
+  return hbox({render_tab(SettingsPanel::kGeneral, i18n::tr("settings.tab.general").c_str()),
+               text("  "),
+               render_tab(SettingsPanel::kWorkspace, i18n::tr("settings.tab.workspace").c_str()),
+               text("  "),
+               render_tab(SettingsPanel::kFormat, i18n::tr("settings.tab.format").c_str())});
 }
 
 Element render_general_settings(const SettingsModalState* state) {
@@ -1372,14 +1428,17 @@ Element render_general_settings(const SettingsModalState* state) {
     rows.push_back(text(""));
   }
 
-  const auto& options = global_settings_options();
+  const auto options = global_settings_options();
   for (int i = 0; i < kGlobalOptionCount; ++i) {
     const auto& option = options[static_cast<std::size_t>(i)];
     const bool selected = i == state->selected;
     const bool checked = option_checked(state, i);
 
     Element title;
-    if (i == kIcons) {
+    if (i == kUiLocale) {
+      title = text(ui_locale_option_label(state->draft_ui_locale, option.label)) |
+              color(selected ? theme::Accent() : theme::Header()) | bold;
+    } else if (i == kIcons) {
       title = text(icon_mode_option_label(state->draft_icon_mode, option.label)) |
               color(selected ? theme::Accent() : theme::Header()) | bold;
     } else {
@@ -1390,7 +1449,7 @@ Element render_general_settings(const SettingsModalState* state) {
       title = title | inverted;
     }
     rows.push_back(title);
-    rows.push_back(text("    " + std::string(option.description)) | color(theme::Muted()));
+    rows.push_back(text("    " + option.description) | color(theme::Muted()));
     rows.push_back(text(""));
   }
 
@@ -1410,15 +1469,14 @@ Element render_workspace_settings(const SettingsModalState* state) {
     const bool selected = state->selected == kWorkspaceGccQueryDriver;
     const bool checked = state->draft_clangd_use_gcc_query_driver;
     Element title =
-        text(checkbox_label(checked, "Consultar compilador GCC (query-driver)")) |
+        text(checkbox_label(checked, i18n::tr("settings.workspace.gcc_query_driver.label"))) |
         color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
       title = title | inverted;
     }
     rows.push_back(title);
     rows.push_back(
-        text("    Pide a clangd los includes del sistema vía gcc/g++ cuando compile_commands "
-             "no los cubre") |
+        text("    " + i18n::tr("settings.workspace.gcc_query_driver.description")) |
         color(theme::Muted()));
     rows.push_back(text(""));
   }
@@ -1426,16 +1484,15 @@ Element render_workspace_settings(const SettingsModalState* state) {
   {
     const bool selected = state->selected == kWorkspaceBackgroundIndex;
     const bool checked = state->draft_clangd_background_index;
-    Element title =
-        text(checkbox_label(checked, "Indexado completo con clangd (background-index)")) |
-        color(selected ? theme::Accent() : theme::Header()) | bold;
+    Element title = text(checkbox_label(
+        checked, i18n::tr("settings.workspace.background_index.label"))) |
+                    color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
       title = title | inverted;
     }
     rows.push_back(title);
     rows.push_back(
-        text("    Indexa todo el proyecto vía compile_commands (más RAM/CPU; mejor "
-             "autocompletado global). Desactivado: solo archivos abiertos") |
+        text("    " + i18n::tr("settings.workspace.background_index.description")) |
         color(theme::Muted()));
     rows.push_back(text(""));
   }
@@ -1443,42 +1500,44 @@ Element render_workspace_settings(const SettingsModalState* state) {
   {
     const bool selected = state->selected == kWorkspaceIncludePaths;
     const std::size_t count = state->draft_clangd_extra_include_paths.size();
-    const std::string label = "> Rutas include extra de clangd (" + std::to_string(count) + ")";
+    const std::string label =
+        i18n::tr_fmt("settings.workspace.include_paths.label", {std::to_string(count)});
     Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
       title = title | inverted;
     }
     rows.push_back(title);
-    rows.push_back(text("    Enter: gestionar rutas (recursivas) además de compile_commands") |
+    rows.push_back(text("    " + i18n::tr("settings.workspace.include_paths.description")) |
                    color(theme::Muted()));
     rows.push_back(text(""));
   }
 
   {
     const bool selected = state->selected == kWorkspaceCompileCommands;
-    const std::string label = std::string("> compile_commands (") +
-                              compile_commands_mode_label(state->draft_compile_commands.mode) +
-                              ")";
+    const std::string label = i18n::tr_fmt(
+        "settings.workspace.compile_commands.label",
+        {compile_commands_mode_label(state->draft_compile_commands.mode)});
     Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
       title = title | inverted;
     }
     rows.push_back(title);
-    rows.push_back(text("    Enter: Docker/remap → .tgdb/compile_commands.json para clangd") |
+    rows.push_back(text("    " + i18n::tr("settings.workspace.compile_commands.description")) |
                    color(theme::Muted()));
     rows.push_back(text(""));
   }
 
   {
     const bool selected = state->selected == kWorkspaceUiColors;
-    const std::string label = std::string("> Colores de interfaz (") +
-                              theme::ui_color_preset_label(state->draft_ui_colors_preset) + ")";
+    const std::string label = i18n::tr_fmt(
+        "settings.workspace.ui_colors.label",
+        {theme::ui_color_preset_label(state->draft_ui_colors_preset)});
     Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
       title = title | inverted;
     }
     rows.push_back(title);
-    rows.push_back(text("    Enter: presets y colores de fondo/texto de la interfaz") |
+    rows.push_back(text("    " + i18n::tr("settings.workspace.ui_colors.description")) |
                    color(theme::Muted()));
     rows.push_back(text(""));
   }
@@ -1496,8 +1555,8 @@ Element render_format_settings(const SettingsModalState* state) {
   rows.push_back(text(""));
 
   const std::string file_note =
-      state->clang_format_file_exists ? "Archivo existente en el workspace"
-                                    : "Se creará .clang-format al guardar (valores por defecto)";
+      state->clang_format_file_exists ? i18n::tr("settings.format.file_exists")
+                                      : i18n::tr("settings.format.file_will_create");
   rows.push_back(text(file_note) | color(theme::Muted()));
   rows.push_back(text(""));
 
@@ -1511,22 +1570,26 @@ Element render_format_settings(const SettingsModalState* state) {
     rows.push_back(line);
   };
 
-  row(kFormatBasedOnStyle, "Estilo base: ",
+  row(kFormatBasedOnStyle, i18n::tr("settings.format.base_style"),
       clang_based_on_style_name(config.based_on_style));
-  row(kFormatIndentWidth, "Ancho de indentación: ", std::to_string(config.indent_width));
-  row(kFormatUseTab, "Usar tabulador: ", clang_use_tab_name(config.use_tab));
-  row(kFormatTabWidth, "Ancho de tab: ", std::to_string(config.tab_width));
-  row(kFormatColumnLimit, "Límite de columna: ", format_column_limit_label(config.column_limit));
-  row(kFormatBreakBeforeBraces, "Llaves: ",
+  row(kFormatIndentWidth, i18n::tr("settings.format.indent_width"),
+      std::to_string(config.indent_width));
+  row(kFormatUseTab, i18n::tr("settings.format.use_tab"), clang_use_tab_name(config.use_tab));
+  row(kFormatTabWidth, i18n::tr("settings.format.tab_width"), std::to_string(config.tab_width));
+  row(kFormatColumnLimit, i18n::tr("settings.format.column_limit"),
+      format_column_limit_label(config.column_limit));
+  row(kFormatBreakBeforeBraces, i18n::tr("settings.format.break_before_braces"),
       clang_break_before_braces_name(config.break_before_braces));
-  row(kFormatPointerAlignment, "Alineación de punteros: ",
+  row(kFormatPointerAlignment, i18n::tr("settings.format.pointer_alignment"),
       clang_pointer_alignment_name(config.pointer_alignment));
-  row(kFormatSortIncludes, checkbox_label(config.sort_includes, "Ordenar includes"), "");
-  row(kFormatIncludeBlocks, "Bloques de includes: ",
-      clang_include_blocks_name(config.include_blocks));
-  row(kFormatIndentCaseLabels, checkbox_label(config.indent_case_labels, "Indentar case labels"),
+  row(kFormatSortIncludes, checkbox_label(config.sort_includes, i18n::tr("settings.format.sort_includes")),
       "");
-  row(kFormatShortFunctions, "Funciones cortas en una línea: ",
+  row(kFormatIncludeBlocks, i18n::tr("settings.format.include_blocks"),
+      clang_include_blocks_name(config.include_blocks));
+  row(kFormatIndentCaseLabels,
+      checkbox_label(config.indent_case_labels, i18n::tr("settings.format.indent_case_labels")),
+      "");
+  row(kFormatShortFunctions, i18n::tr("settings.format.short_functions"),
       clang_short_functions_name(config.allow_short_functions_on_a_single_line));
 
   return vbox(std::move(rows));
@@ -1534,8 +1597,8 @@ Element render_format_settings(const SettingsModalState* state) {
 
 Element render_compile_commands_panel(const SettingsModalState* state) {
   Elements rows;
-  rows.push_back(text("compile_commands para clangd") | color(theme::Accent()) | bold);
-  rows.push_back(text("Salida privada: .tgdb/compile_commands.json") | color(theme::Muted()));
+  rows.push_back(text(i18n::tr("settings.compile_commands.title")) | color(theme::Accent()) | bold);
+  rows.push_back(text(i18n::tr("settings.compile_commands.output")) | color(theme::Muted()));
   rows.push_back(separator());
 
   auto row = [&](int index, const std::string& label, const std::string& value) {
@@ -1547,37 +1610,40 @@ Element render_compile_commands_panel(const SettingsModalState* state) {
     rows.push_back(line);
   };
 
-  row(kCompileMode, "Modo: ",
+  row(kCompileMode, i18n::tr("settings.compile_commands.mode"),
       compile_commands_mode_label(state->draft_compile_commands.mode));
-  row(kCompileDetectMounts, checkbox_label(state->draft_compile_commands.docker_detect_mounts,
-                                           "Detectar mounts de Docker"),
+  row(kCompileDetectMounts,
+      checkbox_label(state->draft_compile_commands.docker_detect_mounts,
+                     i18n::tr("settings.compile_commands.detect_mounts")),
       "");
   const std::string container = state->draft_compile_commands.docker_container.empty()
-                                  ? "(ninguno)"
+                                  ? i18n::tr("common.none")
                                   : state->draft_compile_commands.docker_container;
-  row(kCompileDockerContainer, "Contenedor Docker: ", container);
-  row(kCompilePathMappings, "> Mapeos de rutas (",
+  row(kCompileDockerContainer, i18n::tr("settings.compile_commands.docker_container"), container);
+  row(kCompilePathMappings, i18n::tr("settings.compile_commands.path_mappings"),
       std::to_string(state->draft_compile_commands.path_mappings.size()) + ")");
 
   rows.push_back(separator());
-  rows.push_back(text("Fuente host: " + state->draft_compile_commands.source_path) |
+  rows.push_back(text(i18n::tr_fmt("settings.compile_commands.host_source",
+                                    {state->draft_compile_commands.source_path})) |
                  color(theme::Muted()));
   if (!state->draft_compile_commands.docker_compile_commands_path.empty()) {
-    rows.push_back(text("Ruta en Docker: " +
-                        state->draft_compile_commands.docker_compile_commands_path) |
+    rows.push_back(text(i18n::tr_fmt(
+                     "settings.compile_commands.docker_path",
+                     {state->draft_compile_commands.docker_compile_commands_path})) |
                    color(theme::Muted()));
   }
   rows.push_back(separator());
-  rows.push_back(text("m modo   n contenedor   Esc volver") | color(theme::Muted()));
+  rows.push_back(text(i18n::tr("settings.compile_commands.footer")) | color(theme::Muted()));
   return vbox(std::move(rows));
 }
 
 Element render_path_mappings_panel(const SettingsModalState* state) {
   Elements rows;
-  rows.push_back(text("Mapeos de rutas (contenedor → host)") | color(theme::Accent()) | bold);
+  rows.push_back(text(i18n::tr("settings.path_mappings.title")) | color(theme::Accent()) | bold);
   rows.push_back(separator());
   if (state->draft_compile_commands.path_mappings.empty()) {
-    rows.push_back(text("(sin mapeos)") | color(theme::Muted()));
+    rows.push_back(text(i18n::tr("common.no_mappings")) | color(theme::Muted()));
   } else {
     for (int i = 0; i < static_cast<int>(state->draft_compile_commands.path_mappings.size()); ++i) {
       const bool selected = i == state->mapping_selected;
@@ -1591,17 +1657,16 @@ Element render_path_mappings_panel(const SettingsModalState* state) {
     }
   }
   rows.push_back(separator());
-  rows.push_back(text("a añadir (host)   r detectar Docker   d borrar   Esc volver") |
-                 color(theme::Muted()));
+  rows.push_back(text(i18n::tr("settings.path_mappings.footer")) | color(theme::Muted()));
   return vbox(std::move(rows));
 }
 
 Element render_include_paths_panel(const SettingsModalState* state) {
   Elements rows;
-  rows.push_back(text("Rutas include extra (recursivas)") | color(theme::Accent()) | bold);
+  rows.push_back(text(i18n::tr("settings.include_paths.title")) | color(theme::Accent()) | bold);
   rows.push_back(separator());
   if (state->draft_clangd_extra_include_paths.empty()) {
-    rows.push_back(text("(sin rutas extra)") | color(theme::Muted()));
+    rows.push_back(text(i18n::tr("common.no_extra_paths")) | color(theme::Muted()));
   } else {
     for (int i = 0; i < static_cast<int>(state->draft_clangd_extra_include_paths.size()); ++i) {
       const bool selected = i == state->include_path_selected;
@@ -1614,7 +1679,7 @@ Element render_include_paths_panel(const SettingsModalState* state) {
     }
   }
   rows.push_back(separator());
-  rows.push_back(text("a añadir   d borrar seleccionada   Esc volver") | color(theme::Muted()));
+  rows.push_back(text(i18n::tr("settings.include_paths.footer")) | color(theme::Muted()));
   return vbox(std::move(rows));
 }
 
@@ -1623,8 +1688,8 @@ Element render_path_browser_panel(SettingsModalState* state) {
 
   Elements body;
   body.push_back(text(state->path_browser_purpose == PathBrowserPurpose::kMappingHostPath
-                          ? "Añadir ruta host para mapeo"
-                          : "Añadir ruta include") |
+                          ? i18n::tr("settings.path_browser.add_mapping")
+                          : i18n::tr("settings.path_browser.add_include")) |
                  color(theme::Accent()) | bold);
   body.push_back(separator());
   body.push_back(text(state->path_browser.browser_path) | color(theme::Muted()));
@@ -1640,7 +1705,8 @@ Element render_path_browser_panel(SettingsModalState* state) {
   Elements list_rows;
   for (int i = start; i < end; ++i) {
     const auto& row = state->path_browser.entries[static_cast<std::size_t>(i)];
-    const std::string prefix = row.is_directory ? "[dir] " : "      ";
+    const std::string prefix = row.is_directory ? i18n::tr("common.browser.dir_prefix")
+                                                : i18n::tr("common.browser.file_indent");
     const bool selected = i == state->path_browser.selected;
     Element line = text(prefix + row.name);
     if (row.is_directory) {
@@ -1652,11 +1718,11 @@ Element render_path_browser_panel(SettingsModalState* state) {
     list_rows.push_back(line);
   }
   if (list_rows.empty()) {
-    list_rows.push_back(text("(vacío)") | color(theme::Muted()));
+    list_rows.push_back(text(i18n::tr("common.empty")) | color(theme::Muted()));
   }
   body.push_back(vbox(std::move(list_rows)));
   body.push_back(separator());
-  body.push_back(text("j/k  Enter carpeta  a=usar carpeta  Esc cancelar") | color(theme::Muted()));
+  body.push_back(text(i18n::tr("settings.path_browser.footer")) | color(theme::Muted()));
   return vbox(std::move(body));
 }
 
@@ -1681,11 +1747,14 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_indent_guides_enabled = settings.indent_guides_enabled;
   state->draft_overview_ruler_enabled = settings.overview_ruler_enabled;
   state->draft_secondary_panel_enabled = settings.secondary_panel_enabled;
+  state->draft_helix_mode_enabled = settings.helix_mode_enabled;
   state->draft_show_all_workspace_files = settings.show_all_workspace_files;
   state->draft_force_bundled_clangd = settings.force_bundled_clangd;
   state->draft_force_bundled_gdb = settings.force_bundled_gdb;
   state->draft_monitor_enabled = settings.monitor_enabled;
   state->draft_icon_mode = settings.icon_mode;
+  state->draft_ui_locale = settings.ui_locale;
+  i18n::set_locale(state->draft_ui_locale);
   state->draft_theme = workspace_config.theme;
   state->workspace_root = workspace_root;
   state->has_workspace = !workspace_root.empty();
@@ -1733,11 +1802,13 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->indent_guides_enabled = state->draft_indent_guides_enabled;
   settings->overview_ruler_enabled = state->draft_overview_ruler_enabled;
   settings->secondary_panel_enabled = state->draft_secondary_panel_enabled;
+  settings->helix_mode_enabled = state->draft_helix_mode_enabled;
   settings->show_all_workspace_files = state->draft_show_all_workspace_files;
   settings->force_bundled_clangd = state->draft_force_bundled_clangd;
   settings->force_bundled_gdb = state->draft_force_bundled_gdb;
   settings->monitor_enabled = state->draft_monitor_enabled;
   settings->icon_mode = state->draft_icon_mode;
+  settings->ui_locale = state->draft_ui_locale;
   settings->save();
   if (on_apply) {
     on_apply(*settings);
@@ -1824,13 +1895,11 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         clamp_ui_colors_selection(state);
 
         Element body;
-        std::string title = "Configuración";
+        std::string title = i18n::tr("settings.title");
         std::string footer;
         if (is_top_level_panel(state->panel)) {
-          footer = state->has_workspace
-                       ? "←→ h/l Tab cambiar pestaña   ↑↓ j/k   Espacio/Enter alternar   "
-                         "F10/Esc cerrar y guardar"
-                       : "↑↓ j/k  Espacio/Enter alternar   F10/Esc cerrar y guardar";
+          footer = state->has_workspace ? i18n::tr("settings.footer.with_tabs")
+                                        : i18n::tr("settings.footer.no_tabs");
         }
         switch (state->panel) {
           case SettingsPanel::kGeneral:
@@ -1840,31 +1909,31 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
             body = render_workspace_settings(state);
             break;
           case SettingsPanel::kFormat:
-            title = "Formato (.clang-format)";
+            title = i18n::tr("settings.title.format");
             body = render_format_settings(state);
             break;
           case SettingsPanel::kIncludePaths:
-            title = "Rutas include de clangd";
+            title = i18n::tr("settings.title.include_paths");
             footer = "";
             body = render_include_paths_panel(state);
             break;
           case SettingsPanel::kCompileCommands:
-            title = "compile_commands";
+            title = i18n::tr("settings.title.compile_commands");
             footer = "";
             body = render_compile_commands_panel(state);
             break;
           case SettingsPanel::kPathMappings:
-            title = "Mapeos de rutas";
+            title = i18n::tr("settings.title.path_mappings");
             footer = "";
             body = render_path_mappings_panel(state);
             break;
           case SettingsPanel::kPathBrowser:
-            title = "Seleccionar directorio";
+            title = i18n::tr("settings.title.select_directory");
             footer = "";
             body = render_path_browser_panel(state);
             break;
           case SettingsPanel::kUiColors:
-            title = "Colores de interfaz";
+            title = i18n::tr("settings.title.ui_colors");
             footer = "";
             body = render_ui_colors_panel(state);
             break;
@@ -1873,21 +1942,22 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         std::string config_note;
         const std::string global_path = AppSettings::config_path();
         if (!global_path.empty()) {
-          config_note = "Global: " + global_path;
+          config_note = i18n::tr_fmt("settings.config.global", {global_path});
         }
         if (state->has_workspace) {
           const std::string workspace_path = WorkspaceConfig::config_path(state->workspace_root);
           if (!config_note.empty()) {
             config_note += "  |  ";
           }
-          config_note += "Workspace: " + workspace_path;
+          config_note += i18n::tr_fmt("settings.config.workspace", {workspace_path});
           const std::string format_path = clang_format_path(state->workspace_root);
           if (!format_path.empty()) {
-            config_note += "  |  .clang-format: " + format_path;
+            config_note += "  |  ";
+            config_note += i18n::tr_fmt("settings.config.clang_format", {format_path});
           }
         }
         if (config_note.empty()) {
-          config_note = "HOME no definido; la configuración global no se guardará en disco";
+          config_note = i18n::tr("settings.config.no_home");
         }
 
         Elements dialog_body = {std::move(body), separator() | color(theme::AccentDim()),

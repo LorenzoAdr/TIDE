@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 
+#include "i18n/tr.hpp"
+
 namespace tgdb {
 
 namespace {
@@ -10,7 +12,7 @@ namespace {
 struct StructureSnippet {
   const char* keyword;
   const char* label;
-  const char* detail;
+  const char* detail_key;
   const char* body;
   SymbolKind kind;
 };
@@ -33,37 +35,46 @@ bool prefix_match(const std::string& keyword, const std::string& query) {
 
 const std::vector<StructureSnippet>& all_snippets() {
   static const std::vector<StructureSnippet> kSnippets = {
-      {"struct", "struct", "structura", "struct ${1:Name} {\n\t$0\n};", SymbolKind::kStruct},
-      {"class", "class", "clase", "class ${1:Name} {\npublic:\n\t$0\n};", SymbolKind::kClass},
-      {"union", "union", "unión", "union ${1:Name} {\n\t$0\n};", SymbolKind::kStruct},
-      {"enum", "enum", "enumeración", "enum ${1:Name} {\n\t$0\n};", SymbolKind::kVariable},
-      {"enum class", "enum class", "enum class", "enum class ${1:Name} {\n\t$0\n};",
+      {"struct", "struct", "snippet.detail.struct", "struct ${1:Name} {\n\t$0\n};",
+       SymbolKind::kStruct},
+      {"class", "class", "snippet.detail.class", "class ${1:Name} {\npublic:\n\t$0\n};",
+       SymbolKind::kClass},
+      {"union", "union", "snippet.detail.union", "union ${1:Name} {\n\t$0\n};",
+       SymbolKind::kStruct},
+      {"enum", "enum", "snippet.detail.enum", "enum ${1:Name} {\n\t$0\n};",
        SymbolKind::kVariable},
-      {"namespace", "namespace", "espacio de nombres", "namespace ${1:name} {\n\t$0\n}",
-       SymbolKind::kNamespace},
-      {"switch", "switch", "switch", "switch (${1:expr}) {\n\tcase ${2:value}:\n\t\t$0\n\t\tbreak;\n}",
+      {"enum class", "enum class", "snippet.detail.enum_class",
+       "enum class ${1:Name} {\n\t$0\n};", SymbolKind::kVariable},
+      {"namespace", "namespace", "snippet.detail.namespace",
+       "namespace ${1:name} {\n\t$0\n}", SymbolKind::kNamespace},
+      {"switch", "switch", "snippet.detail.switch",
+       "switch (${1:expr}) {\n\tcase ${2:value}:\n\t\t$0\n\t\tbreak;\n}",
        SymbolKind::kFunction},
-      {"if", "if", "if", "if (${1:condition}) {\n\t$0\n}", SymbolKind::kFunction},
-      {"if else", "if else", "if / else", "if (${1:condition}) {\n\t$2\n} else {\n\t$0\n}",
+      {"if", "if", "snippet.detail.if", "if (${1:condition}) {\n\t$0\n}",
        SymbolKind::kFunction},
-      {"for", "for", "for clásico", "for (${1:int i = 0}; ${2:i < n}; ${3:++i}) {\n\t$0\n}",
-       SymbolKind::kFunction},
-      {"for range", "for (auto", "for rango (C++11)",
+      {"if else", "if else", "snippet.detail.if_else",
+       "if (${1:condition}) {\n\t$2\n} else {\n\t$0\n}", SymbolKind::kFunction},
+      {"for", "for", "snippet.detail.for_classic",
+       "for (${1:int i = 0}; ${2:i < n}; ${3:++i}) {\n\t$0\n}", SymbolKind::kFunction},
+      {"for range", "for (auto", "snippet.detail.for_range",
        "for (auto& ${1:item} : ${2:container}) {\n\t$0\n}", SymbolKind::kFunction},
-      {"while", "while", "while", "while (${1:condition}) {\n\t$0\n}", SymbolKind::kFunction},
-      {"do", "do while", "do / while", "do {\n\t$0\n} while (${1:condition});",
+      {"while", "while", "snippet.detail.while", "while (${1:condition}) {\n\t$0\n}",
        SymbolKind::kFunction},
-      {"try", "try catch", "try / catch",
-       "try {\n\t$1\n} catch (const ${2:std::exception}& e) {\n\t$0\n}", SymbolKind::kFunction},
-      {"void", "void fn()", "función void", "void ${1:name}(${2:}) {\n\t$0\n}",
+      {"do", "do while", "snippet.detail.do_while",
+       "do {\n\t$0\n} while (${1:condition});", SymbolKind::kFunction},
+      {"try", "try catch", "snippet.detail.try_catch",
+       "try {\n\t$1\n} catch (const ${2:std::exception}& e) {\n\t$0\n}",
        SymbolKind::kFunction},
-      {"main", "main()", "punto de entrada",
+      {"void", "void fn()", "snippet.detail.void_fn", "void ${1:name}(${2:}) {\n\t$0\n}",
+       SymbolKind::kFunction},
+      {"main", "main()", "snippet.detail.main",
        "int main(int argc, char* argv[]) {\n\t$0\n\treturn 0;\n}", SymbolKind::kFunction},
-      {"lambda", "lambda", "expresión lambda", "auto ${1:fn} = [${2:&}](${3:}) -> ${4:void} {\n\t$0\n};",
-       SymbolKind::kFunction},
-      {"ctor", "constructor", "constructor con init list",
+      {"lambda", "lambda", "snippet.detail.lambda",
+       "auto ${1:fn} = [${2:&}](${3:}) -> ${4:void} {\n\t$0\n};", SymbolKind::kFunction},
+      {"ctor", "constructor", "snippet.detail.constructor",
        "${1:Class}::${1:Class}(${2:}) : ${3:member_()}\n{\n\t$0\n}", SymbolKind::kMethod},
-      {"pragma", "#pragma once", "pragma once", "#pragma once\n\n$0", SymbolKind::kVariable},
+      {"pragma", "#pragma once", "snippet.detail.pragma_once", "#pragma once\n\n$0",
+       SymbolKind::kVariable},
   };
   return kSnippets;
 }
@@ -79,7 +90,7 @@ std::vector<CompletionItem> structure_snippet_completions(const std::string& que
     CompletionItem item;
     item.label = snippet.label;
     item.insert_text = snippet.body;
-    item.detail = snippet.detail;
+    item.detail = i18n::tr(snippet.detail_key);
     item.kind = snippet.kind;
     item.insert_format = InsertTextFormat::kSnippet;
     out.push_back(item);

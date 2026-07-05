@@ -6,6 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include "i18n/tr.hpp"
+
 namespace tgdb {
 
 namespace {
@@ -265,7 +267,7 @@ void TabularFileStore::open_worker(std::string path) {
   if (scan.offsets.empty()) {
     std::lock_guard<std::mutex> lock(mutex_);
     state_ = TabularFileState::kError;
-    error_ = "No se pudo abrir el archivo tabular";
+    error_ = i18n::tr("tabular.open_failed");
     return;
   }
 
@@ -274,7 +276,7 @@ void TabularFileStore::open_worker(std::string path) {
   if (!input) {
     std::lock_guard<std::mutex> lock(mutex_);
     state_ = TabularFileState::kError;
-    error_ = "No se pudo abrir el archivo tabular";
+    error_ = i18n::tr("tabular.open_failed");
     return;
   }
 
@@ -292,7 +294,7 @@ void TabularFileStore::open_worker(std::string path) {
   if (sample_lines.empty()) {
     std::lock_guard<std::mutex> lock(mutex_);
     state_ = TabularFileState::kError;
-    error_ = "Archivo tabular vacío";
+    error_ = i18n::tr("tabular.empty");
     return;
   }
 

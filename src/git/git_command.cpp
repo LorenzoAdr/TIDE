@@ -8,6 +8,8 @@
 
 #include <sys/wait.h>
 
+#include "i18n/tr.hpp"
+
 namespace tgdb {
 
 namespace {    
@@ -32,7 +34,7 @@ std::string shell_quote(const std::string& value) {
 GitCommandResult run_git(const std::string& cwd, const std::vector<std::string>& args) {
   GitCommandResult result;
   if (cwd.empty()) {
-    result.stderr_text = "workspace vacío";
+    result.stderr_text = i18n::tr("git.empty_workspace");
     return result;
   }
 
@@ -47,7 +49,7 @@ GitCommandResult run_git(const std::string& cwd, const std::vector<std::string>&
   std::string output;
   FILE* pipe = popen(cmd.str().c_str(), "r");
   if (pipe == nullptr) {
-    result.stderr_text = "no se pudo ejecutar git";
+    result.stderr_text = i18n::tr("git.exec_failed");
     return result;
   }
   while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {

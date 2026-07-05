@@ -373,4 +373,51 @@ BracketPairHighlight find_bracket_pair_highlight(const EditorBuffer& buffer, int
   return result;
 }
 
+bool pos_before_or_at(int line, int col, int other_line, int other_col) {
+  return line < other_line || (line == other_line && col <= other_col);
+}
+
+bool pos_after_or_at(int line, int col, int other_line, int other_col) {
+  return line > other_line || (line == other_line && col >= other_col);
+}
+
+BracketPairHighlight find_enclosing_bracket_pair(const EditorBuffer& buffer, int line, int col,
+                                                 char open_ch) {
+  BracketPairHighlight result;
+  if (buffer.lines.empty()) {
+    return result;
+  }
+  const char close_ch = closing_for(open_ch);
+  if (close_ch == '\0') {
+    return result;
+  }
+
+  BracketPairHighlight best;
+  LexMode mode = LexMode::Code;
+  TextPos pos{0, 0};
+  pos = normalize_forward(buffer, pos);
+  while (pos.line >= 0) {
+    pos = skip_literal_forward(buffer, pos, &mode);
+    if (pos.line < 0) {
+      break;
+    }
+    if (mode == LexMode::Code && char_at(buffer, pos) == open_ch &&
+        pos_before_or_at(pos.line, pos.col, line, col)) {
+      const TextPos close = scan_forward_match(buffer, pos, open_ch, close_ch);
+      if (close.line >= 0 && pos_after_or_at(close.line, close.col, line, col)) {
+        if (!best.valid || pos.line > best.line_a ||
+            (pos.line == best.line_a && pos.col > best.col_a)) {
+          best.valid = true;
+          best.line_a = pos.line;
+          best.col_a = pos.col;
+          best.line_b = close.line;
+          best.col_b = close.col;
+        }
+      }
+    }
+    pos = advance(buffer, pos);
+  }
+  return best;
+}
+
 }  // namespace tgdb

@@ -10,6 +10,7 @@
 #include "indexer/index_rules.hpp"
 #include "ui/main_layout.hpp"
 #include "util/monitor_log.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -328,7 +329,7 @@ void update_hierarchy_status(CallHierarchyViewState* view) {
   std::vector<int> leaves;
   std::vector<uint8_t> visited(view->nodes.size(), 0);
   append_leaf_rows(*view, 0, &leaves, &visited);
-  view->status = std::to_string(leaves.size()) + " llamada(s) entrante(s)";
+  view->status = i18n::tr_fmt("status.call_hierarchy.incoming_count", {std::to_string(leaves.size())});
 }
 
 void load_node_children(CallHierarchyViewState* view, int node_index,
@@ -503,11 +504,11 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
 
   if (layout_state != nullptr && layout_state->app_settings != nullptr &&
       !layout_state->app_settings->lsp_enabled) {
-    workspace->status_message = "LSP desactivado en configuración";
+    workspace->status_message = i18n::tr("status.lsp_disabled");
     return false;
   }
   if (symbols == nullptr || !symbols->supports_call_hierarchy()) {
-    workspace->status_message = "Jerarquía de llamadas no disponible (clangd inactivo)";
+    workspace->status_message = i18n::tr("status.call_hierarchy.unavailable");
     return false;
   }
 
@@ -516,7 +517,7 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
   params.path = workspace->buffer.path.empty() ? workspace->active_file : workspace->buffer.path;
   params.text = buffer_document_text(workspace->buffer);
   if (params.path.empty()) {
-    workspace->status_message = "No hay archivo activo";
+    workspace->status_message = i18n::tr("status.no_active_file");
     return false;
   }
 
@@ -534,7 +535,7 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
                                          &resolved_line, &resolved_col);
   }
   if (roots.empty()) {
-    workspace->status_message = "Sin jerarquía de llamadas en este ámbito";
+    workspace->status_message = i18n::tr("status.no_call_hierarchy_scope");
     return false;
   }
 
@@ -567,7 +568,7 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
     layout_state->focus_sync_needed = true;
     layout_state->request_ui_tick = true;
   }
-  workspace->status_message = "Jerarquía de llamadas: " + label;
+  workspace->status_message = i18n::tr_fmt("status.call_hierarchy.active", {label});
   return true;
 }
 

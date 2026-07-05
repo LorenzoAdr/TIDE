@@ -13,6 +13,7 @@
 
 #include "util/compile_commands_setup.hpp"
 #include "build/build_environment_service.hpp"
+#include "i18n/tr.hpp"
 
 namespace fs = std::filesystem;
 
@@ -282,7 +283,7 @@ bool write_remapped_private_database(const fs::path& workspace_root,
     return false;
   }
   result->compile_dir = private_dir.string();
-  result->status_note = "compile_commands en .tgdb (remapeado)";
+  result->status_note = i18n::tr("compile_commands.remap.ok");
   return true;
 }
 
@@ -316,7 +317,7 @@ CompileCommandsSetupResult try_remapped_compile_commands(const std::string& work
   if (!source_json.has_value()) {
     if (config.compile_commands.mode == CompileCommandsMode::kDockerSync ||
         config.compile_commands.mode == CompileCommandsMode::kRemap) {
-      result.status_note = "sin compile_commands para remapear";
+      result.status_note = i18n::tr("compile_commands.remap.no_source");
     }
     return result;
   }
@@ -325,7 +326,7 @@ CompileCommandsSetupResult try_remapped_compile_commands(const std::string& work
                                       &result)) {
     return result;
   }
-  result.status_note = "falló remapeo de compile_commands";
+  result.status_note = i18n::tr("compile_commands.remap.failed");
   return result;
 }
 

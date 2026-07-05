@@ -10,6 +10,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -18,7 +19,7 @@ using namespace ftxui;
 namespace {
 
 std::string tab_label(const EditorTab& tab) {
-  std::string name = tab.path.empty() ? "Sin título"
+  std::string name = tab.path.empty() ? i18n::tr("editor.tab.untitled")
                                       : std::filesystem::path(tab.path).filename().string();
   if (tab.external) {
     name = "+" + name;
@@ -213,11 +214,11 @@ Element make_tabs_overflow_modal(WorkspaceModel* workspace, EditorTabBarState* s
   Elements rows;
   const int count = static_cast<int>(workspace->tabs.size());
   if (count == 0) {
-    rows.push_back(text(" (sin pestañas abiertas) ") | color(theme::Muted()));
+    rows.push_back(text(i18n::tr("editor.tab.no_open_tabs")) | color(theme::Muted()));
   } else {
     for (int i = 0; i < count; ++i) {
       const auto& tab = workspace->tabs[static_cast<std::size_t>(i)];
-      std::string line = tab.path.empty() ? "(sin ruta)" : tab.path;
+      std::string line = tab.path.empty() ? i18n::tr("editor.tab.no_path") : tab.path;
       if (tab.buffer.dirty) {
         line += " *";
       }
@@ -235,9 +236,9 @@ Element make_tabs_overflow_modal(WorkspaceModel* workspace, EditorTabBarState* s
   }
 
   Element dialog = ModalWindow(
-      text("Archivos abiertos") | color(theme::Accent()),
+      text(i18n::tr("editor.tab.overflow.title")) | color(theme::Accent()),
       vbox({vbox(std::move(rows)) | size(HEIGHT, LESS_THAN, 12),
-            text(" Enter abrir  x cerrar  Esc cancelar") | color(theme::Muted())}));
+            text(i18n::tr("editor.tab.overflow.footer")) | color(theme::Muted())}));
   return CenteredModal(std::move(dialog));
 }
 

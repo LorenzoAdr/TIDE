@@ -10,6 +10,7 @@
 #include "app/app_settings.hpp"
 #include "app/debug_model.hpp"
 #include "app/workspace_model.hpp"
+#include "editor/helix/helix_state.hpp"
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/component/event.hpp"
 #include "symbols/symbol_provider.hpp"
@@ -96,6 +97,13 @@ struct BinarySymbolsPending {
   std::string select_symbol_name;
 };
 
+struct HelixIdeCallbacks {
+  std::function<void()> open_quick_file;
+  std::function<void()> open_symbol_picker;
+  std::function<void()> save_file;
+  std::function<void()> request_quit;
+};
+
 struct MainLayoutState {
   bool console_visible = true;
   bool welcome_visible = false;
@@ -106,6 +114,10 @@ struct MainLayoutState {
   std::atomic<bool> ui_heartbeat{false};
   uint64_t ui_custom_tick = 0;
   uint64_t ui_paint_count = 0;
+  HelixStatusSnapshot helix_status;
+  bool editor_helix_prefix_pending = false;
+  std::function<void()> reset_helix_editors;
+  HelixIdeCallbacks helix_ide;
   AppSettings* app_settings = nullptr;
   ClangFormatConfig* workspace_clang_format = nullptr;
   std::function<void()> apply_app_settings_callback;

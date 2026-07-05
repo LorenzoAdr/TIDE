@@ -37,6 +37,7 @@
 #include "ui/scroll_bar.hpp"
 #include "ui/terminal_display.hpp"
 #include "ui/theme.hpp"
+#include "i18n/tr.hpp"
 #include "util/monitor_log.hpp"
 
 namespace tgdb {
@@ -47,7 +48,7 @@ namespace {
 
 struct ConsolePanelState {
   std::string input;
-  std::string input_placeholder = "Shell";
+  std::string input_placeholder;
   Box panel_box;
   Box content_box;
   Box history_box;
@@ -684,7 +685,7 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
 }
 
 std::string console_placeholder(AppMode* /*app_mode*/) {
-  return "Comando GDB o -exec ...";
+  return i18n::tr("console.placeholder.gdb");
 }
 
 constexpr int kMaxTermCols = 160;
@@ -1015,7 +1016,7 @@ Element render_gdb_console(ConsolePanelState* state, DebugModel* model, AppMode*
     history.push_back(text(line.empty() ? " " : line) | color(theme::Header()));
   }
   if (history.empty()) {
-    history.push_back(text("(sin salida GDB)") | color(theme::Muted()));
+    history.push_back(text(i18n::tr("console.gdb.no_output")) | color(theme::Muted()));
   }
 
   const int rendered_lines = static_cast<int>(history.size());
@@ -1031,7 +1032,7 @@ Element render_gdb_console(ConsolePanelState* state, DebugModel* model, AppMode*
                 color(theme::WatchInput());
   } else {
     const std::string preview =
-        state->input.empty() ? console_placeholder(app_mode) + " (clic o Enter)" : state->input;
+        state->input.empty() ? console_placeholder(app_mode) + i18n::tr("console.gdb.placeholder_click") : state->input;
     input_row = text(" " + preview + " ") | size(HEIGHT, EQUAL, 1) | bgcolor(theme::TabIdle()) |
                 color(state->input.empty() ? theme::Muted() : theme::WatchInput());
   }
@@ -1044,20 +1045,20 @@ Element render_shell_terminal(ConsolePanelState* state, DebugModel* model, Shell
                               FocusManagerState* focus, MainLayoutState* layout_state,
                               int viewport_height, int panel_width) {
   if (model->workspace_root.empty()) {
-    return render_terminal_body(text("(selecciona workspace con F3)") | color(theme::Muted()));
+    return render_terminal_body(text(i18n::tr("console.terminal.select_workspace")) | color(theme::Muted()));
   }
 
   if (state == nullptr || !state->shell_ui_active) {
-    std::string message = "(F4 o clic para abrir la terminal)";
+    std::string message = i18n::tr("console.terminal.open_hint");
     if (state != nullptr && state->shell_start_failed) {
       message = state->shell_launch_uses_docker
-                    ? "(docker exec falló: " + state->shell_docker_container + ")"
-                    : "(shell no disponible)";
+                    ? i18n::tr_fmt("console.terminal.docker_failed", {state->shell_docker_container})
+                    : i18n::tr("console.terminal.shell_unavailable");
     } else if (state != nullptr && state->shell_start_requested && shell != nullptr &&
                shell->starting()) {
       message = state->shell_launch_uses_docker
-                    ? "(conectando a docker: " + state->shell_docker_container + "...)"
-                    : "(iniciando terminal...)";
+                    ? i18n::tr_fmt("console.terminal.connecting_docker", {state->shell_docker_container})
+                    : i18n::tr("console.terminal.starting");
     }
     return render_terminal_body(text(message) | color(theme::Muted()));
   }
@@ -1170,6 +1171,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
                            GitService* git_service,
                            GitPanelState* git_panel_state) {
   auto state = std::make_shared<ConsolePanelState>();
+  state->input_placeholder = i18n::tr("console.placeholder.shell");
   auto perf_state = std::make_shared<PerformancePanelState>();
   PerformanceSampler* sampler =
       layout_state != nullptr ? &layout_state->performance_sampler : nullptr;
@@ -1499,7 +1501,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
     Elements tab_row;
     tab_row.push_back(make_tab_button(
-        "Terminal", selected_tab == ConsolePanelTabs::kTerminal,
+        i18n::tr("console.tab.terminal"), selected_tab == ConsolePanelTabs::kTerminal,
         layout_state != nullptr &&
             layout_state->clickable.is_hovered(press_id::kConsoleTabTerminal),
         layout_state != nullptr &&
@@ -1507,51 +1509,51 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         &state->tab_boxes[ConsolePanelTabs::kTerminal]));
     if (debug_mode) {
       tab_row.push_back(make_tab_button(
-          "GDB", selected_tab == ConsolePanelTabs::kDebug,
+          i18n::tr("console.tab.gdb"), selected_tab == ConsolePanelTabs::kDebug,
           layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabGdb),
           layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabGdb),
           &state->tab_boxes[ConsolePanelTabs::kDebug]));
       if (layout_state != nullptr && layout_state->show_core_analyzer_tab) {
         tab_row.push_back(make_tab_button(
-            "CoreAn", selected_tab == ConsolePanelTabs::kCoreAnalyzer,
+            i18n::tr("console.tab.core_analyzer"), selected_tab == ConsolePanelTabs::kCoreAnalyzer,
             layout_state->clickable.is_hovered(press_id::kConsoleTabCoreAnalyzer),
             layout_state->clickable.is_pressed(press_id::kConsoleTabCoreAnalyzer),
             &state->tab_boxes[ConsolePanelTabs::kCoreAnalyzer]));
       }
     }
     tab_row.push_back(make_tab_button(
-        "Rendimiento", selected_tab == ConsolePanelTabs::kPerformance,
+        i18n::tr("console.tab.performance"), selected_tab == ConsolePanelTabs::kPerformance,
         layout_state != nullptr &&
             layout_state->clickable.is_hovered(press_id::kConsoleTabPerformance),
         layout_state != nullptr &&
             layout_state->clickable.is_pressed(press_id::kConsoleTabPerformance),
         &state->tab_boxes[ConsolePanelTabs::kPerformance]));
     tab_row.push_back(make_tab_button(
-        "Problemas", selected_tab == ConsolePanelTabs::kProblems,
+        i18n::tr("console.tab.problems"), selected_tab == ConsolePanelTabs::kProblems,
         layout_state != nullptr &&
             layout_state->clickable.is_hovered(press_id::kConsoleTabProblems),
         layout_state != nullptr &&
             layout_state->clickable.is_pressed(press_id::kConsoleTabProblems),
         &state->tab_boxes[ConsolePanelTabs::kProblems]));
     tab_row.push_back(make_tab_button(
-        "Buscar", selected_tab == ConsolePanelTabs::kSearch,
+        i18n::tr("console.tab.search"), selected_tab == ConsolePanelTabs::kSearch,
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabSearch),
         layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabSearch),
         &state->tab_boxes[ConsolePanelTabs::kSearch]));
     tab_row.push_back(make_tab_button(
-        "Jerarquía", selected_tab == ConsolePanelTabs::kCallHierarchy,
+        i18n::tr("console.tab.call_hierarchy"), selected_tab == ConsolePanelTabs::kCallHierarchy,
         layout_state != nullptr &&
             layout_state->clickable.is_hovered(press_id::kConsoleTabCallHierarchy),
         layout_state != nullptr &&
             layout_state->clickable.is_pressed(press_id::kConsoleTabCallHierarchy),
         &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]));
     tab_row.push_back(make_tab_button(
-        "Git", selected_tab == ConsolePanelTabs::kGit,
+        i18n::tr("console.tab.git"), selected_tab == ConsolePanelTabs::kGit,
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabGit),
         layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabGit),
         &state->tab_boxes[ConsolePanelTabs::kGit]));
     tab_row.push_back(make_tab_button(
-        "Símbolos", selected_tab == ConsolePanelTabs::kBinarySymbols,
+        i18n::tr("console.tab.symbols"), selected_tab == ConsolePanelTabs::kBinarySymbols,
         layout_state != nullptr &&
             layout_state->clickable.is_hovered(press_id::kConsoleTabBinarySymbols),
         layout_state != nullptr &&
@@ -1562,7 +1564,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleHide);
     const bool hide_pressed =
         layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleHide);
-    Element hide_btn = MakeToolbarButton(text(" × ") | color(theme::Muted()), hide_hovered,
+    Element hide_btn = MakeToolbarButton(text(i18n::tr("console.hide_panel")) | color(theme::Muted()), hide_hovered,
                                          hide_pressed, false, &state->hide_box);
 
     Element body;

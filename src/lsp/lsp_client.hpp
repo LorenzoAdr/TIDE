@@ -51,6 +51,8 @@ class LspClient {
                                  int line, int character);
   SourceLocation goto_declaration(const std::string& absolute_path, const std::string& text,
                                   int line, int character);
+  SourceLocation goto_implementation(const std::string& absolute_path, const std::string& text,
+                                   int line, int character);
 
   SemanticTokenDocument semantic_tokens_for_file(const std::string& absolute_path);
   bool has_ready_semantic_tokens(const std::string& absolute_path) const;

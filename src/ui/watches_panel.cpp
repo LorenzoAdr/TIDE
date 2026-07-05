@@ -24,6 +24,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/clickable.hpp"
 #include "ui/text_input_style.hpp"
+#include "i18n/tr.hpp"
 
 namespace tgdb {
 
@@ -52,7 +53,11 @@ struct BreakpointRow {
 struct WatchesPanelState {
   int selected_tab = 0;
   bool interaction_active = false;
-  std::array<std::string, kTabCount> tab_titles = {"Wtch", "Var", "Bt", "Bkts"};
+  std::array<std::string, kTabCount> tab_titles;
+  std::string placeholder_expression;
+  std::string placeholder_new_value;
+  std::string placeholder_new_value_click;
+  std::string placeholder_expression_click;
   std::string expr_input;
   std::string inject_input;
   bool inject_mode = false;
@@ -179,14 +184,14 @@ void sync_breakpoints_file(DebugModel* model, const std::string& file,
 
 std::string variables_frame_label(const DebugModel* model) {
   if (model->variables_frame_id < 0) {
-    return "(sin frame)";
+    return i18n::tr("panel.debug.no_frame");
   }
   for (const auto& frame : model->stack_frames) {
     if (frame.id == model->variables_frame_id) {
       return frame.name;
     }
   }
-  return "frame #" + std::to_string(model->variables_frame_id);
+  return i18n::tr("panel.debug.frame_prefix") + std::to_string(model->variables_frame_id);
 }
 
 void rebuild_flat_variables(DebugModel* model, WatchesPanelState* state) {
@@ -455,11 +460,11 @@ Elements render_breakpoint_list(DebugModel* model, WatchesPanelState* state) {
     ++index;
   }
   if (state->breakpoint_rows.empty()) {
-    body.push_back(text("(sin breakpoints)") | color(theme::Muted()));
-    body.push_back(text("Ctrl+B o clic gutter para añadir") | color(theme::Muted()));
+    body.push_back(text(i18n::tr("panel.debug.no_breakpoints")) | color(theme::Muted()));
+    body.push_back(text(i18n::tr("panel.debug.breakpoint_hint")) | color(theme::Muted()));
   } else {
     body.push_back(separator());
-    body.push_back(text("●/○: activar  doble-clic/x: quitar") | color(theme::Muted()));
+    body.push_back(text(i18n::tr("panel.debug.breakpoint_toggle_hint")) | color(theme::Muted()));
   }
   return body;
 }
@@ -530,8 +535,14 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
                            const std::function<void()>& on_stop_debug,
                            FocusManagerState* focus, AppMode* app_mode) {
   auto state = std::make_shared<WatchesPanelState>();
-  auto expr_input = Input(MakeBlinkInputOption(&state->expr_input, "expresión"));
-  auto inject_input = Input(MakeBlinkInputOption(&state->inject_input, "nuevo valor"));
+  state->tab_titles = {i18n::tr("panel.debug.tab.watch"), i18n::tr("panel.debug.tab.vars"),
+                       i18n::tr("panel.debug.tab.backtrace"), i18n::tr("panel.debug.tab.breakpoints")};
+  state->placeholder_expression = i18n::tr("panel.debug.placeholder.expression");
+  state->placeholder_new_value = i18n::tr("panel.debug.placeholder.new_value");
+  state->placeholder_new_value_click = i18n::tr("panel.debug.placeholder.new_value_click");
+  state->placeholder_expression_click = i18n::tr("panel.debug.placeholder.expression_click");
+  auto expr_input = Input(MakeBlinkInputOption(&state->expr_input, &state->placeholder_expression));
+  auto inject_input = Input(MakeBlinkInputOption(&state->inject_input, &state->placeholder_new_value));
   auto expr_maybe = Maybe(expr_input, [layout_state, state] {
     return watch_input_active(layout_state, state->selected_tab);
   });
@@ -921,7 +932,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
       Elements body = render_breakpoint_list(model, state.get());
       Element list = vbox(std::move(body)) | flex | vscroll_indicator |
                      reflect(state->breakpoints_box);
-      return MakePanel("Breakpoints", std::move(list));
+      return MakePanel(i18n::tr("panel.breakpoints.title"), std::move(list));
     }
 
     const bool running = model->state == DebugState::kRunning;
@@ -984,14 +995,14 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         ++index;
       }
       if (model->watches.empty()) {
-        body.push_back(text("(sin watches)") | color(theme::Muted()));
+        body.push_back(text(i18n::tr("panel.debug.no_watches")) | color(theme::Muted()));
       } else {
         body.push_back(separator());
-        body.push_back(text("e/Enter: editar valor  x: quitar  doble-clic: quitar") |
+        body.push_back(text(i18n::tr("panel.debug.watch_hint")) |
                        color(theme::Muted()));
       }
     } else if (state->selected_tab == 1) {
-      body.push_back(text("frame: " + variables_frame_label(model)) |
+      body.push_back(text(i18n::tr_fmt("panel.debug.frame_label", {variables_frame_label(model)})) |
                      color(theme::Muted()));
       body.push_back(separator());
       int index = 0;
@@ -1001,7 +1012,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         std::string prefix = row.expandable ? (row.expanded ? "v " : "> ") : "  ";
 
         Element type_part =
-            row.type.empty() ? text("") : text(" (" + row.type + ")");
+            row.type.empty() ? text("") : text(i18n::tr_fmt("panel.debug.type_paren", {row.type}));
         Element line = hbox({text(indent + prefix), text(row.name) | bold,
                              type_part, text(" = "), text(row.value)});
         if (selected) {
@@ -1011,7 +1022,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         ++index;
       }
       if (state->flat_variables.empty()) {
-        body.push_back(text("(sin variables)") | color(theme::Muted()));
+        body.push_back(text(i18n::tr("panel.debug.no_variables")) | color(theme::Muted()));
       }
     } else if (state->selected_tab == 2) {
       int index = 0;
@@ -1025,10 +1036,10 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         ++index;
       }
       if (model->stack_frames.empty()) {
-        body.push_back(text("(vacío)") | color(theme::Muted()));
+        body.push_back(text(i18n::tr("panel.debug.no_backtrace")) | color(theme::Muted()));
       } else {
         body.push_back(separator());
-        body.push_back(text("clic/Enter → ir al frame") | color(theme::Muted()));
+        body.push_back(text(i18n::tr("panel.debug.backtrace_hint")) | color(theme::Muted()));
       }
     } else {
       body = render_breakpoint_list(model, state.get());
@@ -1044,7 +1055,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
               inject_input->Render() | border | flex | bgcolor(theme::PanelBg());
         } else {
           const std::string preview =
-              state->inject_input.empty() ? "nuevo valor (clic o Enter)"
+              state->inject_input.empty() ? state->placeholder_new_value_click
                                           : state->inject_input;
           inject_row = text(" " + preview + " ") | border | flex |
                        bgcolor(theme::PanelBg()) |
@@ -1056,7 +1067,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
             text(" " + watch.expression + " = ") | color(theme::Accent()),
             inject_row | flex | reflect(state->watch_inject_box),
         }));
-        footer.push_back(text(" Enter aplicar  Esc cancelar ") | color(theme::Muted()));
+        footer.push_back(text(i18n::tr("panel.debug.inject_apply")) | color(theme::Muted()));
       }
 
       Element input_row;
@@ -1064,13 +1075,13 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         input_row = expr_input->Render() | border | flex | bgcolor(theme::PanelBg());
       } else {
         const std::string preview = state->expr_input.empty()
-                                        ? "expresión (clic o Enter)"
+                                        ? state->placeholder_expression_click
                                         : state->expr_input;
         input_row = text(" " + preview + " ") | border | flex | bgcolor(theme::PanelBg()) |
                     color(state->expr_input.empty() ? theme::Muted() : theme::WatchInput());
       }
       footer.push_back(separator());
-      footer.push_back(hbox({text(" watch: ") | color(theme::WatchInput()),
+      footer.push_back(hbox({text(i18n::tr("panel.debug.watch_prefix")) | color(theme::WatchInput()),
                              input_row | reflect(state->watch_input_box)}));
     }
 
@@ -1089,7 +1100,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         vbox({list | flex | vscroll_indicator, vbox(std::move(footer))}) | flex;
 
     return MakePanel(
-        "Depuración",
+        i18n::tr("panel.debug.title"),
         vbox({toolbar, content | bgcolor(theme::PanelBg()) | flex}));
       }),
       handler));
