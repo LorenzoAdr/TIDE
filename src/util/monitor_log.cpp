@@ -236,6 +236,19 @@ void close_log_file() {
   }
 }
 
+void stop_trim_thread() {
+  g_trim_stop.store(true, std::memory_order_release);
+  if (g_trim_thread.joinable()) {
+    g_trim_thread.join();
+  }
+}
+
+// Join before ~std::thread runs during process exit (otherwise std::terminate).
+struct TrimThreadAtExit {
+  ~TrimThreadAtExit() { stop_trim_thread(); }
+};
+TrimThreadAtExit g_trim_thread_guard;
+
 }  // namespace
 
 void set_enabled(bool on) {
@@ -258,10 +271,7 @@ void set_enabled(bool on) {
   }
 
   g_enabled.store(false, std::memory_order_release);
-  g_trim_stop.store(true, std::memory_order_release);
-  if (g_trim_thread.joinable()) {
-    g_trim_thread.join();
-  }
+  stop_trim_thread();
   {
     std::lock_guard<std::mutex> lock(g_write_mutex);
     close_log_file();

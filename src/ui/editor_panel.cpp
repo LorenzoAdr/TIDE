@@ -29,6 +29,7 @@
 #include "util/csv_viewer.hpp"
 #include "util/tabular_file.hpp"
 #include "util/monitor_log.hpp"
+#include "util/fuzzy_match.hpp"
 #include "lsp/diagnostics.hpp"
 #include "editor/editor_state.hpp"
 #include "editor/line_comment.hpp"
@@ -1758,12 +1759,36 @@ struct GotoLineState {
   std::string query;
 };
 
+struct CompletionMatch {
+  CompletionItem item;
+  std::string match_display;
+  std::vector<std::size_t> match_indices;
+};
+
+std::string completion_anchor_key(const std::string& path, int replace_line,
+                                  int replace_start) {
+  if (path.empty()) {
+    return {};
+  }
+  return path + "|" + std::to_string(replace_line) + "|" + std::to_string(replace_start);
+}
+
+struct CompletionCacheEntry {
+  CompletionItem item;
+  std::string match_text;
+  std::string match_lower;
+  std::string alt_text;
+  std::string alt_lower;
+};
+
 struct CompletionState {
   bool open = false;
   bool live_mode = false;
   bool semantic_mode = false;
+  bool item_cache_dirty = true;
   std::string prefix;
   std::string query;
+  std::string query_lower;
   std::string lsp_fetch_key;
   std::string lsp_pending_key;
   std::string lsp_inflight_key;
@@ -1774,54 +1799,114 @@ struct CompletionState {
   std::vector<CompletionItem> lsp_items;
   std::vector<CompletionItem> snippet_items;
   std::vector<CompletionItem> all_items;
-  std::vector<CompletionItem> matches;
+  std::vector<CompletionCacheEntry> item_cache;
+  std::vector<CompletionMatch> matches;
   int selected = 0;
   int replace_line = 0;
   int replace_start = 0;
   int replace_end = 0;
+  int lsp_fetch_line = 0;
+  int lsp_fetch_col = 0;
 
-  static std::string to_lower(std::string value) {
-    for (char& c : value) {
-      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    return value;
-  }
+  void invalidate_item_cache() { item_cache_dirty = true; }
 
-  static bool prefix_match(const std::string& name, const std::string& query) {
-    if (query.empty()) {
-      return true;
+  void rebuild_item_cache() {
+    item_cache.clear();
+    const std::vector<CompletionItem>& source = !lsp_items.empty() ? lsp_items : all_items;
+    item_cache.reserve(source.size() + snippet_items.size());
+    const auto add_item = [this](const CompletionItem& item) {
+      CompletionCacheEntry entry;
+      entry.item = item;
+      entry.match_text = strip_symbol_kind_prefix(item.label);
+      entry.match_lower = fuzzy_to_lower(entry.match_text);
+      if (!item.insert_text.empty()) {
+        const std::string insert_name = symbol_insert_name(item.insert_text);
+        if (insert_name != entry.match_text) {
+          entry.alt_text = insert_name;
+          entry.alt_lower = fuzzy_to_lower(entry.alt_text);
+        }
+      }
+      item_cache.push_back(std::move(entry));
+    };
+    for (const CompletionItem& item : source) {
+      add_item(item);
     }
-    const std::string n = to_lower(name);
-    const std::string q = to_lower(query);
-    return n.size() >= q.size() && n.compare(0, q.size(), q) == 0;
+    for (const CompletionItem& item : snippet_items) {
+      add_item(item);
+    }
+    item_cache_dirty = false;
   }
 
   void refresh_matches() {
-    matches.clear();
-    constexpr int kMaxMatches = 200;
-    auto consider = [&](const CompletionItem& item) {
-      if (prefix_match(symbol_insert_name(item.label), query)) {
-        matches.push_back(item);
-        return;
-      }
-      if (!item.insert_text.empty() &&
-          prefix_match(symbol_insert_name(item.insert_text), query)) {
-        matches.push_back(item);
-      }
+    if (item_cache_dirty) {
+      rebuild_item_cache();
+    }
+    query_lower = fuzzy_to_lower(query);
+
+    struct Candidate {
+      std::size_t index = 0;
+      int score = 0;
+      std::string match_display;
+      std::vector<std::size_t> match_indices;
     };
-    const std::vector<CompletionItem>& source = live_mode ? lsp_items : all_items;
-    for (const auto& item : source) {
-      consider(item);
-      if (static_cast<int>(matches.size()) >= kMaxMatches) {
-        break;
+    std::vector<Candidate> candidates;
+    candidates.reserve(std::min(item_cache.size(), std::size_t{256}));
+
+    if (query_lower.empty()) {
+      constexpr int kMaxMatches = 200;
+      const std::size_t limit = std::min(item_cache.size(), std::size_t{kMaxMatches});
+      matches.clear();
+      matches.reserve(limit);
+      for (std::size_t i = 0; i < limit; ++i) {
+        const CompletionCacheEntry& entry = item_cache[i];
+        matches.push_back({entry.item, entry.match_text, {}});
+      }
+    } else {
+      for (std::size_t i = 0; i < item_cache.size(); ++i) {
+        const CompletionCacheEntry& entry = item_cache[i];
+        FuzzyMatchResult result =
+            fuzzy_match_cached(entry.match_text, entry.match_lower, query_lower);
+        std::string match_display = entry.match_text;
+        if (!result.matched && !entry.alt_lower.empty()) {
+          result = fuzzy_match_cached(entry.alt_text, entry.alt_lower, query_lower);
+          if (result.matched) {
+            match_display = entry.alt_text;
+          }
+        }
+        if (!result.matched) {
+          continue;
+        }
+        candidates.push_back({i, result.score, std::move(match_display), result.indices});
+      }
+
+      std::sort(candidates.begin(), candidates.end(),
+                [this](const Candidate& a, const Candidate& b) {
+                  if (a.score != b.score) {
+                    return a.score > b.score;
+                  }
+                  const std::string& ta = item_cache[a.index].match_text;
+                  const std::string& tb = item_cache[b.index].match_text;
+                  if (ta.size() != tb.size()) {
+                    return ta.size() < tb.size();
+                  }
+                  return ta < tb;
+                });
+
+      constexpr int kMaxMatches = 200;
+      if (static_cast<int>(candidates.size()) > kMaxMatches) {
+        candidates.resize(static_cast<std::size_t>(kMaxMatches));
+      }
+
+      matches.clear();
+      matches.reserve(candidates.size());
+      for (const Candidate& candidate : candidates) {
+        const CompletionCacheEntry& entry = item_cache[candidate.index];
+        matches.push_back(
+            {entry.item, candidate.match_display, candidate.match_indices});
       }
     }
-    for (const auto& item : snippet_items) {
-      consider(item);
-      if (static_cast<int>(matches.size()) >= kMaxMatches) {
-        break;
-      }
-    }
+
+    const std::vector<CompletionItem>& source = !lsp_items.empty() ? lsp_items : all_items;
     semantic_mode = !source.empty() || !snippet_items.empty();
     if (selected >= static_cast<int>(matches.size())) {
       selected = std::max(0, static_cast<int>(matches.size()) - 1);
@@ -1844,16 +1929,16 @@ struct CompletionState {
     if (!allow_lsp || symbols == nullptr || !symbols->supports_semantic_completion() ||
         path.empty()) {
       if (!path.empty() && is_indexed_source_path(path)) {
-        snippet_items = structure_snippet_completions(query);
+        snippet_items = structure_snippet_completions("");
       } else {
         snippet_items.clear();
       }
+      invalidate_item_cache();
       refresh_matches();
       return;
     }
 
-    const std::string lsp_key =
-        path + "|" + std::to_string(line) + "|" + std::to_string(col) + "|" + query;
+    const std::string lsp_key = completion_anchor_key(path, replace_line, replace_start);
     if (lsp_fetch_key != lsp_key) {
       lsp_fetch_key = lsp_key;
       symbols->flush_document_sync(path);
@@ -1864,13 +1949,15 @@ struct CompletionState {
       params.character = col;
       all_items = symbols->completions_at(params);
       semantic_mode = !all_items.empty();
+      invalidate_item_cache();
     }
 
     if (!path.empty() && is_indexed_source_path(path)) {
-      snippet_items = structure_snippet_completions(query);
+      snippet_items = structure_snippet_completions("");
     } else {
       snippet_items.clear();
     }
+    invalidate_item_cache();
 
     refresh_matches();
   }
@@ -1880,6 +1967,7 @@ struct CompletionState {
     live_mode = false;
     prefix.clear();
     query.clear();
+    query_lower.clear();
     lsp_fetch_key.clear();
     lsp_pending_key.clear();
     lsp_inflight_key.clear();
@@ -1890,6 +1978,8 @@ struct CompletionState {
     lsp_items.clear();
     snippet_items.clear();
     all_items.clear();
+    item_cache.clear();
+    item_cache_dirty = true;
     matches.clear();
     semantic_mode = false;
     selected = 0;
@@ -2211,18 +2301,27 @@ void schedule_live_lsp_fetch(CompletionState* completion, WorkspaceModel* worksp
   if (buffer.path.empty() || !is_indexed_source_path(buffer.path)) {
     return;
   }
-  const int line = buffer.primary_line();
-  const int col = buffer.primary_col();
-  const std::string pending_key = buffer.path + "|" + std::to_string(line) + "|" +
-                                  std::to_string(col) + "|" + completion->query;
-  if (pending_key != completion->lsp_pending_key) {
+  const std::string anchor_key =
+      completion_anchor_key(buffer.path, completion->replace_line, completion->replace_start);
+  if (anchor_key.empty()) {
+    return;
+  }
+  if (anchor_key != completion->lsp_fetch_key) {
+    completion->lsp_fetch_key = anchor_key;
     completion->lsp_items.clear();
     completion->lsp_resolved_query.clear();
     completion->lsp_resolved_key.clear();
     completion->lsp_inflight_key.clear();
+    completion->lsp_fetch_line = buffer.primary_line();
+    completion->lsp_fetch_col = buffer.primary_col();
+    completion->invalidate_item_cache();
   }
-  completion->lsp_pending_key = pending_key;
-  completion->lsp_request_due_ms = steady_now_ms() + kLiveCompletionDebounceMs;
+  completion->lsp_pending_key = anchor_key;
+  if (completion->lsp_resolved_key != anchor_key) {
+    const int64_t debounce =
+        completion->prefix.size() <= 1 ? 0 : kLiveCompletionDebounceMs;
+    completion->lsp_request_due_ms = steady_now_ms() + debounce;
+  }
 }
 
 void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
@@ -2281,6 +2380,7 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
         completion->lsp_resolved_query = completion->query;
         completion->lsp_resolved_key = key;
         completion->semantic_mode = !completion->lsp_items.empty();
+        completion->invalidate_item_cache();
         completion->refresh_matches();
         if (completion->matches.empty()) {
           maybe_close_live_completion(completion, layout_state, symbols, buffer_path);
@@ -2314,8 +2414,8 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
   CompletionParams params;
   params.path = buffer.path;
   params.text = buffer_text(buffer);
-  params.line = buffer.primary_line();
-  params.character = buffer.primary_col();
+  params.line = completion->lsp_fetch_line;
+  params.character = completion->lsp_fetch_col;
   symbols->request_completion(params, completion->lsp_pending_key);
   completion->lsp_inflight_key = completion->lsp_pending_key;
   completion->lsp_last_request_ms = now_ms;
@@ -2343,10 +2443,11 @@ void update_live_completion(CompletionState* completion, WorkspaceModel* workspa
   completion->open = true;
   completion->live_mode = true;
   if (!buffer->path.empty() && is_indexed_source_path(buffer->path)) {
-    completion->snippet_items = structure_snippet_completions(completion->query);
+    completion->snippet_items = structure_snippet_completions("");
   } else {
     completion->snippet_items.clear();
   }
+  completion->invalidate_item_cache();
   completion->refresh_matches();
   schedule_live_lsp_fetch(completion, workspace, layout_state);
   maybe_close_live_completion(completion, layout_state, symbols, buffer->path);
@@ -3139,18 +3240,20 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
   completion->all_items.clear();
   completion->snippet_items.clear();
   completion->matches.clear();
+  completion->invalidate_item_cache();
   completion->semantic_mode = false;
   completion->sync_symbols(workspace, symbols, symbol_indexer, true);
-  completion->live_mode = true;
   if (!completion->all_items.empty()) {
     completion->lsp_items = std::move(completion->all_items);
     completion->all_items.clear();
     completion->semantic_mode = !completion->lsp_items.empty();
+    completion->invalidate_item_cache();
   }
   completion->refresh_matches();
   schedule_live_lsp_fetch(completion, workspace, layout_state);
-  completion->lsp_resolved_key = completion->lsp_pending_key;
-  completion->lsp_resolved_query = completion->query;
+  if (!completion->lsp_items.empty()) {
+    completion->lsp_resolved_key = completion->lsp_pending_key;
+  }
   if (layout_state != nullptr) {
     layout_state->text_input_focus = TextInputFocus::None;
   }
@@ -3165,7 +3268,7 @@ bool accept_completion(CompletionState* completion, EditorBuffer* buffer,
   }
   completion->selected =
       std::max(0, std::min(completion->selected, static_cast<int>(completion->matches.size()) - 1));
-  const auto& item = completion->matches[static_cast<std::size_t>(completion->selected)];
+  const auto& item = completion->matches[static_cast<std::size_t>(completion->selected)].item;
   const std::string raw_insert =
       item.insert_text.empty() ? symbol_insert_name(item.label) : item.insert_text;
 
@@ -3275,6 +3378,7 @@ bool handle_completion_keys(CompletionState* completion, WorkspaceModel* workspa
           completion->lsp_items = std::move(completion->all_items);
           completion->all_items.clear();
           completion->semantic_mode = !completion->lsp_items.empty();
+          completion->invalidate_item_cache();
         }
         if (layout_state != nullptr) {
           layout_state->text_input_focus = TextInputFocus::None;
@@ -3825,6 +3929,30 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   return false;
 }
 
+Element render_completion_fuzzy_chars(const std::string& segment,
+                                      const std::unordered_set<std::size_t>& hits,
+                                      Color base_color) {
+  Elements parts;
+  std::string run;
+  Color run_color = base_color;
+  auto flush = [&]() {
+    if (!run.empty()) {
+      parts.push_back(text(run) | color(run_color));
+      run.clear();
+    }
+  };
+  for (std::size_t i = 0; i < segment.size(); ++i) {
+    const Color want = hits.count(i) != 0 ? theme::Error() : base_color;
+    if (!run.empty() && want != run_color) {
+      flush();
+    }
+    run_color = want;
+    run.push_back(segment[i]);
+  }
+  flush();
+  return parts.size() == 1 ? parts[0] : hbox(std::move(parts));
+}
+
 Element make_completion_overlay(const CompletionState& completion_state,
                                 const EditorBuffer& buffer, int gutter_width,
                                 int visible_lines, MainLayoutState* layout_state,
@@ -3846,13 +3974,18 @@ Element make_completion_overlay(const CompletionState& completion_state,
 
   Elements rows;
   for (int i = start; i < end; ++i) {
-    const auto& item = completion_state.matches[static_cast<std::size_t>(i)];
+    const CompletionMatch& match = completion_state.matches[static_cast<std::size_t>(i)];
+    const CompletionItem& item = match.item;
     const std::string icon = symbol_kind_glyph(item.kind);
-    const std::string name = strip_symbol_kind_prefix(item.label);
     const Color kind_color = theme::ColorForSymbolKind(item.kind);
+    const std::unordered_set<std::size_t> hits(match.match_indices.begin(),
+                                               match.match_indices.end());
+    Element name_el = match.match_indices.empty()
+                          ? text(match.match_display) | color(theme::Header())
+                          : render_completion_fuzzy_chars(match.match_display, hits, theme::Header());
     Element label_row = hbox({
         text(" " + icon + " ") | color(kind_color),
-        text(name) | color(theme::Header()),
+        name_el,
     });
     if (!item.detail.empty()) {
       label_row = hbox({

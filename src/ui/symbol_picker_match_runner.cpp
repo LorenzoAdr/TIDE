@@ -1,8 +1,6 @@
 #include "ui/symbol_picker_match_runner.hpp"
 
-#include <algorithm>
-
-#include "util/fuzzy_match.hpp"
+#include "util/fuzzy_catalog_filter.hpp"
 #include "util/thread_name.hpp"
 
 namespace tgdb {
@@ -10,59 +8,22 @@ namespace tgdb {
 namespace {
 
 constexpr std::size_t kMaxResults = 150;
-constexpr std::size_t kMaxEmptyQueryResults = 150;
 
 std::vector<SymbolPickerMatch> search_catalog(std::string_view query_lower,
                                               const std::vector<SymbolCatalogEntry>& catalog) {
-  if (catalog.empty()) {
-    return {};
-  }
-
-  if (query_lower.empty()) {
-    std::vector<SymbolPickerMatch> results;
-    const std::size_t limit = std::min(kMaxEmptyQueryResults, catalog.size());
-    results.reserve(limit);
-    for (std::size_t i = 0; i < limit; ++i) {
-      results.push_back({catalog[i].symbol, 0, {}});
-    }
-    return results;
-  }
-
-  struct Candidate {
-    SymbolInfo symbol;
-    int score = 0;
-    std::vector<std::size_t> match_indices;
-  };
-  std::vector<Candidate> candidates;
-  candidates.reserve(std::min(catalog.size(), std::size_t{512}));
-
+  std::vector<FuzzyCatalogEntryView> views;
+  views.reserve(catalog.size());
   for (const SymbolCatalogEntry& entry : catalog) {
-    const FuzzyMatchResult result =
-        fuzzy_match_cached(entry.symbol.name, entry.name_lower, query_lower);
-    if (!result.matched) {
-      continue;
-    }
-    candidates.push_back({entry.symbol, result.score, result.indices});
+    views.push_back({entry.symbol.name, entry.name_lower});
   }
 
-  std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
-    if (a.score != b.score) {
-      return a.score > b.score;
-    }
-    if (a.symbol.name.size() != b.symbol.name.size()) {
-      return a.symbol.name.size() < b.symbol.name.size();
-    }
-    return a.symbol.name < b.symbol.name;
-  });
-
-  if (candidates.size() > kMaxResults) {
-    candidates.resize(kMaxResults);
-  }
+  const std::vector<FuzzyCatalogHit> hits =
+      fuzzy_filter_catalog(views, query_lower, kMaxResults, kMaxResults);
 
   std::vector<SymbolPickerMatch> results;
-  results.reserve(candidates.size());
-  for (const Candidate& candidate : candidates) {
-    results.push_back({candidate.symbol, candidate.score, candidate.match_indices});
+  results.reserve(hits.size());
+  for (const FuzzyCatalogHit& hit : hits) {
+    results.push_back({catalog[hit.index].symbol, hit.score, hit.match_indices});
   }
   return results;
 }

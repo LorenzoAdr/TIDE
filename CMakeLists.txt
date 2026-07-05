@@ -122,6 +122,7 @@ add_executable(tgdb
   src/util/include_tree.cpp
   src/util/path_normalize.cpp
   src/util/fuzzy_match.cpp
+  src/util/fuzzy_catalog_filter.cpp
   src/util/file_open_policy.cpp
   src/util/compile_commands_setup.cpp
   src/util/compile_commands_remap.cpp

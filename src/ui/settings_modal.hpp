@@ -76,6 +76,8 @@ struct SettingsModalState {
   PathBrowserState path_browser;
   bool has_workspace = false;
   std::string workspace_root;
+  int body_scroll = 0;
+  SettingsPanel body_scroll_panel = SettingsPanel::kGeneral;
 };
 
 ftxui::Component MakeSettingsModalOverlay(ftxui::Component main, SettingsModalState* state,

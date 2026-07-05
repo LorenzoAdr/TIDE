@@ -259,6 +259,7 @@ Application::~Application() {
   if (shutdown_thread_.joinable()) {
     shutdown_thread_.join();
   }
+  monitor_log::set_enabled(false);
   if (shutdown_performed_) {
     return;
   }

@@ -32,6 +32,59 @@ constexpr int kMaxMatchRows = kPaneHeight;
 constexpr int kMaxPreviewRows = kPaneHeight;
 constexpr int kMatchTextWidth = kLeftPaneWidth - 2;
 constexpr int kOpenTabScoreBonus = 1000;
+constexpr int kSameDirectoryBonus = 400;
+constexpr int kSharedPathComponentBonus = 80;
+
+std::string picker_directory_label(std::string_view label) {
+  const std::size_t slash = label.find_last_of("/\\");
+  if (slash == std::string::npos) {
+    return {};
+  }
+  return std::string(label.substr(0, slash));
+}
+
+int count_shared_path_components(std::string_view a, std::string_view b) {
+  int shared = 0;
+  std::size_t i = 0;
+  std::size_t j = 0;
+  while (i < a.size() && j < b.size()) {
+    while (i < a.size() && (a[i] == '/' || a[i] == '\\')) {
+      ++i;
+    }
+    while (j < b.size() && (b[j] == '/' || b[j] == '\\')) {
+      ++j;
+    }
+    if (i >= a.size() || j >= b.size()) {
+      break;
+    }
+
+    const std::size_t end_a = a.find_first_of("/\\", i);
+    const std::size_t end_b = b.find_first_of("/\\", j);
+    const std::size_t seg_end_a = end_a == std::string::npos ? a.size() : end_a;
+    const std::size_t seg_end_b = end_b == std::string::npos ? b.size() : end_b;
+    if (a.substr(i, seg_end_a - i) != b.substr(j, seg_end_b - j)) {
+      break;
+    }
+    ++shared;
+    i = seg_end_a;
+    j = seg_end_b;
+  }
+  return shared;
+}
+
+int path_proximity_bonus(std::string_view ref_dir, std::string_view candidate_label) {
+  if (ref_dir.empty()) {
+    return 0;
+  }
+  const std::string candidate_dir = picker_directory_label(candidate_label);
+  if (candidate_dir.empty()) {
+    return 0;
+  }
+  if (ref_dir == candidate_dir) {
+    return kSameDirectoryBonus;
+  }
+  return count_shared_path_components(ref_dir, candidate_dir) * kSharedPathComponentBonus;
+}
 
 Element render_fuzzy_chars(const std::string& segment, std::size_t label_offset,
                            const std::unordered_set<std::size_t>& hits, Color base_color) {
@@ -277,6 +330,11 @@ void FilePickerState::refresh_matches(const WorkspaceModel* workspace) {
   std::unordered_set<std::string> seen;
   const std::string query_lower = fuzzy_to_lower(query);
 
+  std::string ref_dir;
+  if (workspace != nullptr && !workspace->active_file.empty()) {
+    ref_dir = picker_directory_label(picker_display_path(workspace->active_file, workspace_root));
+  }
+
   const auto try_add = [&](const std::string& path, std::string_view label,
                            std::string_view label_lower, int bonus) {
     const FuzzyMatchResult result = fuzzy_match_cached(label, label_lower, query_lower);
@@ -289,7 +347,9 @@ void FilePickerState::refresh_matches(const WorkspaceModel* workspace) {
       return;
     }
     seen.insert(normalized);
-    candidates.push_back({path, std::string(label), result.score + bonus, result.indices});
+    const int proximity = path_proximity_bonus(ref_dir, label);
+    candidates.push_back(
+        {path, std::string(label), result.score + bonus + proximity, result.indices});
   };
 
   if (workspace != nullptr) {

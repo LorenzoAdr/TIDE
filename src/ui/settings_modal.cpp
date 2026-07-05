@@ -13,6 +13,7 @@
 #include "i18n/tr.hpp"
 #include "ui/panel.hpp"
 #include "ui/glyphs.hpp"
+#include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/compile_commands_remap.hpp"
@@ -22,6 +23,96 @@ namespace tgdb {
 using namespace ftxui;
 
 namespace {
+
+constexpr int kSettingsBodyHeight = 24;
+
+struct SettingsBodyContent {
+  Elements header;
+  Elements rows;
+  int focus_row = 0;
+};
+
+void clamp_settings_body_scroll(SettingsModalState* state, int total_lines) {
+  if (state == nullptr) {
+    return;
+  }
+  const int max_scroll = std::max(0, total_lines - kSettingsBodyHeight);
+  state->body_scroll = std::max(0, std::min(state->body_scroll, max_scroll));
+}
+
+void scroll_settings_body_to_row(SettingsModalState* state, int row, int total_lines) {
+  if (state == nullptr || row < 0) {
+    return;
+  }
+  if (row < state->body_scroll) {
+    state->body_scroll = row;
+  } else if (row >= state->body_scroll + kSettingsBodyHeight) {
+    state->body_scroll = row - kSettingsBodyHeight + 1;
+  }
+  clamp_settings_body_scroll(state, total_lines);
+}
+
+Element render_settings_scroll_body(SettingsModalState* state, SettingsBodyContent content) {
+  if (state == nullptr) {
+    return vbox(std::move(content.rows));
+  }
+
+  if (state->body_scroll_panel != state->panel) {
+    state->body_scroll = 0;
+    state->body_scroll_panel = state->panel;
+  }
+
+  const int total = static_cast<int>(content.rows.size());
+  scroll_settings_body_to_row(state, content.focus_row, total);
+  clamp_settings_body_scroll(state, total);
+
+  Elements visible;
+  const int end = std::min(total, state->body_scroll + kSettingsBodyHeight);
+  for (int i = state->body_scroll; i < end; ++i) {
+    visible.push_back(content.rows[static_cast<std::size_t>(i)]);
+  }
+
+  Element scrollable = vbox(std::move(visible)) | flex;
+  if (total > kSettingsBodyHeight) {
+    scrollable = hbox({
+        std::move(scrollable),
+        vertical_scrollbar(total, state->body_scroll, kSettingsBodyHeight, kSettingsBodyHeight),
+    });
+  }
+  scrollable =
+      scrollable | size(HEIGHT, EQUAL, kSettingsBodyHeight) | bgcolor(theme::PanelBg());
+
+  if (content.header.empty()) {
+    return scrollable;
+  }
+  return vbox({vbox(std::move(content.header)), std::move(scrollable)});
+}
+
+bool handle_settings_body_scroll_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr) {
+    return false;
+  }
+  if (event == Event::PageDown) {
+    state->body_scroll += kSettingsBodyHeight;
+    return true;
+  }
+  if (event == Event::PageUp) {
+    state->body_scroll -= kSettingsBodyHeight;
+    return true;
+  }
+  if (event.is_mouse()) {
+    const auto& m = event.mouse();
+    if (m.button == Mouse::WheelUp) {
+      state->body_scroll -= 3;
+      return true;
+    }
+    if (m.button == Mouse::WheelDown) {
+      state->body_scroll += 3;
+      return true;
+    }
+  }
+  return false;
+}
 
 constexpr int kUiLocale = 0;
 constexpr int kTheme = 1;
@@ -933,23 +1024,29 @@ bool handle_ui_colors_keys(SettingsModalState* state, Event event) {
   return true;
 }
 
-Element render_ui_colors_panel(const SettingsModalState* state) {
-  Elements rows;
-  rows.push_back(text(i18n::tr("settings.title.ui_colors")) | color(theme::Accent()) | bold);
-  rows.push_back(text(i18n::tr("settings.ui_colors.syntax_note")) | color(theme::Muted()));
-  rows.push_back(separator());
+SettingsBodyContent build_ui_colors_panel(const SettingsModalState* state) {
+  SettingsBodyContent content;
+  content.rows.push_back(text(i18n::tr("settings.title.ui_colors")) | color(theme::Accent()) | bold);
+  content.rows.push_back(text(i18n::tr("settings.ui_colors.syntax_note")) | color(theme::Muted()));
+  content.rows.push_back(separator());
 
   if (state->ui_colors_editing) {
-    rows.push_back(text(i18n::tr_fmt("settings.ui_colors.choose",
+    content.rows.push_back(text(i18n::tr_fmt("settings.ui_colors.choose",
                                       {ui_color_row_label(state->ui_colors_edit_row)})) |
                    color(theme::Accent()) | bold);
     const theme::ColorRgb& current =
         kUIColorPalette[static_cast<std::size_t>(state->ui_colors_palette_selected)];
-    rows.push_back(text(i18n::tr_fmt("settings.ui_colors.selected",
+    content.rows.push_back(text(i18n::tr_fmt("settings.ui_colors.selected",
                                       {theme::format_hex_color(current)})) |
                    color(theme::Header()) | bold);
 
     for (int row = 0; row < kPaletteRows; ++row) {
+      const int row_start = row * kPaletteCols;
+      const int row_end = std::min(row_start + kPaletteCols, kPaletteCount);
+      if (state->ui_colors_palette_selected >= row_start &&
+          state->ui_colors_palette_selected < row_end) {
+        content.focus_row = static_cast<int>(content.rows.size());
+      }
       Elements cells;
       for (int col = 0; col < kPaletteCols; ++col) {
         const int index = row * kPaletteCols + col;
@@ -966,12 +1063,12 @@ Element render_ui_colors_panel(const SettingsModalState* state) {
         }
         cells.push_back(cell);
       }
-      rows.push_back(hbox(std::move(cells)));
+      content.rows.push_back(hbox(std::move(cells)));
     }
 
-    rows.push_back(separator());
-    rows.push_back(text(i18n::tr("settings.ui_colors.edit_footer")) | color(theme::Muted()));
-    return vbox(std::move(rows));
+    content.rows.push_back(separator());
+    content.rows.push_back(text(i18n::tr("settings.ui_colors.edit_footer")) | color(theme::Muted()));
+    return content;
   }
 
   for (int i = 0; i < kUiColorsRowCount; ++i) {
@@ -982,14 +1079,15 @@ Element render_ui_colors_panel(const SettingsModalState* state) {
         text(i18n::tr_fmt("settings.ui_colors.row.value", {label, value})) |
         color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
       row_el = row_el | inverted;
     }
-    rows.push_back(row_el);
+    content.rows.push_back(row_el);
   }
 
-  rows.push_back(separator());
-  rows.push_back(text(i18n::tr("settings.ui_colors.list_footer")) | color(theme::Muted()));
-  return vbox(std::move(rows));
+  content.rows.push_back(separator());
+  content.rows.push_back(text(i18n::tr("settings.ui_colors.list_footer")) | color(theme::Muted()));
+  return content;
 }
 
 void confirm_path_browser_selection(SettingsModalState* state) {
@@ -1375,6 +1473,10 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
     return false;
   }
 
+  if (handle_settings_body_scroll_keys(state, event)) {
+    return true;
+  }
+
   if (event == Event::Escape || event == Event::F10) {
     return true;
   }
@@ -1429,13 +1531,18 @@ Element render_top_level_tabs(const SettingsModalState* state) {
                render_tab(SettingsPanel::kFormat, i18n::tr("settings.tab.format").c_str())});
 }
 
-Element render_general_settings(const SettingsModalState* state) {
-  Elements rows;
-  if (state->has_workspace) {
-    rows.push_back(render_top_level_tabs(state));
-    rows.push_back(separator() | color(theme::AccentDim()));
-    rows.push_back(text(""));
+void append_top_level_tabs_header(SettingsBodyContent* content, const SettingsModalState* state) {
+  if (content == nullptr || state == nullptr || !state->has_workspace) {
+    return;
   }
+  content->header.push_back(render_top_level_tabs(state));
+  content->header.push_back(separator() | color(theme::AccentDim()));
+  content->header.push_back(text(""));
+}
+
+SettingsBodyContent build_general_settings(const SettingsModalState* state) {
+  SettingsBodyContent content;
+  append_top_level_tabs_header(&content, state);
 
   const auto options = global_settings_options();
   for (int i = 0; i < kGlobalOptionCount; ++i) {
@@ -1455,24 +1562,23 @@ Element render_general_settings(const SettingsModalState* state) {
               color(selected ? theme::Accent() : theme::Header()) | bold;
     }
     if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
-    rows.push_back(title);
-    rows.push_back(text("    " + option.description) | color(theme::Muted()));
-    rows.push_back(text(""));
+    content.rows.push_back(title);
+    content.rows.push_back(text("    " + option.description) | color(theme::Muted()));
+    content.rows.push_back(text(""));
   }
 
-  if (!rows.empty()) {
-    rows.pop_back();
+  if (!content.rows.empty()) {
+    content.rows.pop_back();
   }
-  return vbox(std::move(rows));
+  return content;
 }
 
-Element render_workspace_settings(const SettingsModalState* state) {
-  Elements rows;
-  rows.push_back(render_top_level_tabs(state));
-  rows.push_back(separator() | color(theme::AccentDim()));
-  rows.push_back(text(""));
+SettingsBodyContent build_workspace_settings(const SettingsModalState* state) {
+  SettingsBodyContent content;
+  append_top_level_tabs_header(&content, state);
 
   {
     const bool selected = state->selected == kWorkspaceGccQueryDriver;
@@ -1481,13 +1587,14 @@ Element render_workspace_settings(const SettingsModalState* state) {
         text(checkbox_label(checked, i18n::tr("settings.workspace.gcc_query_driver.label"))) |
         color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
-    rows.push_back(title);
-    rows.push_back(
+    content.rows.push_back(title);
+    content.rows.push_back(
         text("    " + i18n::tr("settings.workspace.gcc_query_driver.description")) |
         color(theme::Muted()));
-    rows.push_back(text(""));
+    content.rows.push_back(text(""));
   }
 
   {
@@ -1497,13 +1604,14 @@ Element render_workspace_settings(const SettingsModalState* state) {
         checked, i18n::tr("settings.workspace.background_index.label"))) |
                     color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
-    rows.push_back(title);
-    rows.push_back(
+    content.rows.push_back(title);
+    content.rows.push_back(
         text("    " + i18n::tr("settings.workspace.background_index.description")) |
         color(theme::Muted()));
-    rows.push_back(text(""));
+    content.rows.push_back(text(""));
   }
 
   {
@@ -1513,12 +1621,13 @@ Element render_workspace_settings(const SettingsModalState* state) {
         i18n::tr_fmt("settings.workspace.include_paths.label", {std::to_string(count)});
     Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
-    rows.push_back(title);
-    rows.push_back(text("    " + i18n::tr("settings.workspace.include_paths.description")) |
+    content.rows.push_back(title);
+    content.rows.push_back(text("    " + i18n::tr("settings.workspace.include_paths.description")) |
                    color(theme::Muted()));
-    rows.push_back(text(""));
+    content.rows.push_back(text(""));
   }
 
   {
@@ -1528,12 +1637,13 @@ Element render_workspace_settings(const SettingsModalState* state) {
         {compile_commands_mode_label(state->draft_compile_commands.mode)});
     Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
-    rows.push_back(title);
-    rows.push_back(text("    " + i18n::tr("settings.workspace.compile_commands.description")) |
+    content.rows.push_back(title);
+    content.rows.push_back(text("    " + i18n::tr("settings.workspace.compile_commands.description")) |
                    color(theme::Muted()));
-    rows.push_back(text(""));
+    content.rows.push_back(text(""));
   }
 
   {
@@ -1543,40 +1653,40 @@ Element render_workspace_settings(const SettingsModalState* state) {
         {theme::ui_color_preset_label(state->draft_ui_colors_preset)});
     Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
       title = title | inverted;
     }
-    rows.push_back(title);
-    rows.push_back(text("    " + i18n::tr("settings.workspace.ui_colors.description")) |
+    content.rows.push_back(title);
+    content.rows.push_back(text("    " + i18n::tr("settings.workspace.ui_colors.description")) |
                    color(theme::Muted()));
-    rows.push_back(text(""));
+    content.rows.push_back(text(""));
   }
 
-  if (!rows.empty()) {
-    rows.pop_back();
+  if (!content.rows.empty()) {
+    content.rows.pop_back();
   }
-  return vbox(std::move(rows));
+  return content;
 }
 
-Element render_format_settings(const SettingsModalState* state) {
-  Elements rows;
-  rows.push_back(render_top_level_tabs(state));
-  rows.push_back(separator() | color(theme::AccentDim()));
-  rows.push_back(text(""));
+SettingsBodyContent build_format_settings(const SettingsModalState* state) {
+  SettingsBodyContent content;
+  append_top_level_tabs_header(&content, state);
 
   const std::string file_note =
       state->clang_format_file_exists ? i18n::tr("settings.format.file_exists")
                                       : i18n::tr("settings.format.file_will_create");
-  rows.push_back(text(file_note) | color(theme::Muted()));
-  rows.push_back(text(""));
+  content.rows.push_back(text(file_note) | color(theme::Muted()));
+  content.rows.push_back(text(""));
 
   const auto& config = state->draft_clang_format;
   const auto row = [&](int index, const std::string& label, const std::string& value) {
     const bool selected = index == state->selected;
     Element line = text(label + value) | color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
       line = line | inverted;
     }
-    rows.push_back(line);
+    content.rows.push_back(line);
   };
 
   row(kFormatBasedOnStyle, i18n::tr("settings.format.base_style"),
@@ -1601,22 +1711,23 @@ Element render_format_settings(const SettingsModalState* state) {
   row(kFormatShortFunctions, i18n::tr("settings.format.short_functions"),
       clang_short_functions_name(config.allow_short_functions_on_a_single_line));
 
-  return vbox(std::move(rows));
+  return content;
 }
 
-Element render_compile_commands_panel(const SettingsModalState* state) {
-  Elements rows;
-  rows.push_back(text(i18n::tr("settings.compile_commands.title")) | color(theme::Accent()) | bold);
-  rows.push_back(text(i18n::tr("settings.compile_commands.output")) | color(theme::Muted()));
-  rows.push_back(separator());
+SettingsBodyContent build_compile_commands_panel(const SettingsModalState* state) {
+  SettingsBodyContent content;
+  content.rows.push_back(text(i18n::tr("settings.compile_commands.title")) | color(theme::Accent()) | bold);
+  content.rows.push_back(text(i18n::tr("settings.compile_commands.output")) | color(theme::Muted()));
+  content.rows.push_back(separator());
 
   auto row = [&](int index, const std::string& label, const std::string& value) {
     const bool selected = index == state->compile_commands_selected;
     Element line = text(label + value) | color(selected ? theme::Accent() : theme::Header()) | bold;
     if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
       line = line | inverted;
     }
-    rows.push_back(line);
+    content.rows.push_back(line);
   };
 
   row(kCompileMode, i18n::tr("settings.compile_commands.mode"),
@@ -1632,27 +1743,27 @@ Element render_compile_commands_panel(const SettingsModalState* state) {
   row(kCompilePathMappings, i18n::tr("settings.compile_commands.path_mappings"),
       std::to_string(state->draft_compile_commands.path_mappings.size()) + ")");
 
-  rows.push_back(separator());
-  rows.push_back(text(i18n::tr_fmt("settings.compile_commands.host_source",
+  content.rows.push_back(separator());
+  content.rows.push_back(text(i18n::tr_fmt("settings.compile_commands.host_source",
                                     {state->draft_compile_commands.source_path})) |
                  color(theme::Muted()));
   if (!state->draft_compile_commands.docker_compile_commands_path.empty()) {
-    rows.push_back(text(i18n::tr_fmt(
+    content.rows.push_back(text(i18n::tr_fmt(
                      "settings.compile_commands.docker_path",
                      {state->draft_compile_commands.docker_compile_commands_path})) |
                    color(theme::Muted()));
   }
-  rows.push_back(separator());
-  rows.push_back(text(i18n::tr("settings.compile_commands.footer")) | color(theme::Muted()));
-  return vbox(std::move(rows));
+  content.rows.push_back(separator());
+  content.rows.push_back(text(i18n::tr("settings.compile_commands.footer")) | color(theme::Muted()));
+  return content;
 }
 
-Element render_path_mappings_panel(const SettingsModalState* state) {
-  Elements rows;
-  rows.push_back(text(i18n::tr("settings.path_mappings.title")) | color(theme::Accent()) | bold);
-  rows.push_back(separator());
+SettingsBodyContent build_path_mappings_panel(const SettingsModalState* state) {
+  SettingsBodyContent content;
+  content.rows.push_back(text(i18n::tr("settings.path_mappings.title")) | color(theme::Accent()) | bold);
+  content.rows.push_back(separator());
   if (state->draft_compile_commands.path_mappings.empty()) {
-    rows.push_back(text(i18n::tr("common.no_mappings")) | color(theme::Muted()));
+    content.rows.push_back(text(i18n::tr("common.no_mappings")) | color(theme::Muted()));
   } else {
     for (int i = 0; i < static_cast<int>(state->draft_compile_commands.path_mappings.size()); ++i) {
       const bool selected = i == state->mapping_selected;
@@ -1660,79 +1771,74 @@ Element render_path_mappings_panel(const SettingsModalState* state) {
       const std::string line = mapping.from + "  →  " + mapping.to;
       Element row = text(line) | color(selected ? theme::Accent() : theme::Header());
       if (selected) {
+        content.focus_row = static_cast<int>(content.rows.size());
         row = row | inverted;
       }
-      rows.push_back(row);
+      content.rows.push_back(row);
     }
   }
-  rows.push_back(separator());
-  rows.push_back(text(i18n::tr("settings.path_mappings.footer")) | color(theme::Muted()));
-  return vbox(std::move(rows));
+  content.rows.push_back(separator());
+  content.rows.push_back(text(i18n::tr("settings.path_mappings.footer")) | color(theme::Muted()));
+  return content;
 }
 
-Element render_include_paths_panel(const SettingsModalState* state) {
-  Elements rows;
-  rows.push_back(text(i18n::tr("settings.include_paths.title")) | color(theme::Accent()) | bold);
-  rows.push_back(separator());
+SettingsBodyContent build_include_paths_panel(const SettingsModalState* state) {
+  SettingsBodyContent content;
+  content.rows.push_back(text(i18n::tr("settings.include_paths.title")) | color(theme::Accent()) | bold);
+  content.rows.push_back(separator());
   if (state->draft_clangd_extra_include_paths.empty()) {
-    rows.push_back(text(i18n::tr("common.no_extra_paths")) | color(theme::Muted()));
+    content.rows.push_back(text(i18n::tr("common.no_extra_paths")) | color(theme::Muted()));
   } else {
     for (int i = 0; i < static_cast<int>(state->draft_clangd_extra_include_paths.size()); ++i) {
       const bool selected = i == state->include_path_selected;
       const std::string& path = state->draft_clangd_extra_include_paths[static_cast<std::size_t>(i)];
       Element line = text(path) | color(selected ? theme::Accent() : theme::Header());
       if (selected) {
+        content.focus_row = static_cast<int>(content.rows.size());
         line = line | inverted;
       }
-      rows.push_back(line);
+      content.rows.push_back(line);
     }
   }
-  rows.push_back(separator());
-  rows.push_back(text(i18n::tr("settings.include_paths.footer")) | color(theme::Muted()));
-  return vbox(std::move(rows));
+  content.rows.push_back(separator());
+  content.rows.push_back(text(i18n::tr("settings.include_paths.footer")) | color(theme::Muted()));
+  return content;
 }
 
-Element render_path_browser_panel(SettingsModalState* state) {
+SettingsBodyContent build_path_browser_panel(SettingsModalState* state) {
+  SettingsBodyContent content;
   state->path_browser.ensure_browser_entries();
 
-  Elements body;
-  body.push_back(text(state->path_browser_purpose == PathBrowserPurpose::kMappingHostPath
+  content.rows.push_back(text(state->path_browser_purpose == PathBrowserPurpose::kMappingHostPath
                           ? i18n::tr("settings.path_browser.add_mapping")
                           : i18n::tr("settings.path_browser.add_include")) |
                  color(theme::Accent()) | bold);
-  body.push_back(separator());
-  body.push_back(text(state->path_browser.browser_path) | color(theme::Muted()));
-  body.push_back(separator());
+  content.rows.push_back(separator());
+  content.rows.push_back(text(state->path_browser.browser_path) | color(theme::Muted()));
+  content.rows.push_back(separator());
 
-  const int max_rows = 12;
-  state->path_browser.browser_list_start = std::max(
-      0, std::min(state->path_browser.selected,
-                  std::max(0, static_cast<int>(state->path_browser.entries.size()) - max_rows)));
-  const int start = state->path_browser.browser_list_start;
-  const int end =
-      std::min(static_cast<int>(state->path_browser.entries.size()), start + max_rows);
-  Elements list_rows;
-  for (int i = start; i < end; ++i) {
-    const auto& row = state->path_browser.entries[static_cast<std::size_t>(i)];
-    const std::string prefix = row.is_directory ? i18n::tr("common.browser.dir_prefix")
-                                                : i18n::tr("common.browser.file_indent");
-    const bool selected = i == state->path_browser.selected;
-    Element line = text(prefix + row.name);
-    if (row.is_directory) {
-      line = line | color(theme::Accent());
+  if (state->path_browser.entries.empty()) {
+    content.rows.push_back(text(i18n::tr("common.empty")) | color(theme::Muted()));
+  } else {
+    for (int i = 0; i < static_cast<int>(state->path_browser.entries.size()); ++i) {
+      const auto& row = state->path_browser.entries[static_cast<std::size_t>(i)];
+      const std::string prefix = row.is_directory ? i18n::tr("common.browser.dir_prefix")
+                                                  : i18n::tr("common.browser.file_indent");
+      const bool selected = i == state->path_browser.selected;
+      Element line = text(prefix + row.name);
+      if (row.is_directory) {
+        line = line | color(theme::Accent());
+      }
+      if (selected) {
+        content.focus_row = static_cast<int>(content.rows.size());
+        line = line | inverted;
+      }
+      content.rows.push_back(line);
     }
-    if (selected) {
-      line = line | inverted;
-    }
-    list_rows.push_back(line);
   }
-  if (list_rows.empty()) {
-    list_rows.push_back(text(i18n::tr("common.empty")) | color(theme::Muted()));
-  }
-  body.push_back(vbox(std::move(list_rows)));
-  body.push_back(separator());
-  body.push_back(text(i18n::tr("settings.path_browser.footer")) | color(theme::Muted()));
-  return vbox(std::move(body));
+  content.rows.push_back(separator());
+  content.rows.push_back(text(i18n::tr("settings.path_browser.footer")) | color(theme::Muted()));
+  return content;
 }
 
 }  // namespace
@@ -1745,6 +1851,8 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   }
   state->open = true;
   state->panel = SettingsPanel::kGeneral;
+  state->body_scroll = 0;
+  state->body_scroll_panel = SettingsPanel::kGeneral;
   state->selected = 0;
   state->include_path_selected = 0;
   state->compile_commands_selected = 0;
@@ -1849,6 +1957,8 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
 
   state->open = false;
   state->panel = SettingsPanel::kGeneral;
+  state->body_scroll = 0;
+  state->body_scroll_panel = SettingsPanel::kGeneral;
   state->selected = 0;
   state->include_path_selected = 0;
   state->compile_commands_selected = 0;
@@ -1905,7 +2015,7 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         clamp_mapping_selection(state);
         clamp_ui_colors_selection(state);
 
-        Element body;
+        SettingsBodyContent content;
         std::string title = i18n::tr("settings.title");
         std::string footer;
         if (is_top_level_panel(state->panel)) {
@@ -1914,41 +2024,44 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         }
         switch (state->panel) {
           case SettingsPanel::kGeneral:
-            body = render_general_settings(state);
+            content = build_general_settings(state);
             break;
           case SettingsPanel::kWorkspace:
-            body = render_workspace_settings(state);
+            content = build_workspace_settings(state);
             break;
           case SettingsPanel::kFormat:
             title = i18n::tr("settings.title.format");
-            body = render_format_settings(state);
+            content = build_format_settings(state);
             break;
           case SettingsPanel::kIncludePaths:
             title = i18n::tr("settings.title.include_paths");
             footer = "";
-            body = render_include_paths_panel(state);
+            content = build_include_paths_panel(state);
             break;
           case SettingsPanel::kCompileCommands:
             title = i18n::tr("settings.title.compile_commands");
             footer = "";
-            body = render_compile_commands_panel(state);
+            content = build_compile_commands_panel(state);
             break;
           case SettingsPanel::kPathMappings:
             title = i18n::tr("settings.title.path_mappings");
             footer = "";
-            body = render_path_mappings_panel(state);
+            content = build_path_mappings_panel(state);
             break;
           case SettingsPanel::kPathBrowser:
             title = i18n::tr("settings.title.select_directory");
             footer = "";
-            body = render_path_browser_panel(state);
+            content = build_path_browser_panel(state);
             break;
           case SettingsPanel::kUiColors:
             title = i18n::tr("settings.title.ui_colors");
             footer = "";
-            body = render_ui_colors_panel(state);
+            content = build_ui_colors_panel(state);
             break;
         }
+
+        const int scrollable_lines = static_cast<int>(content.rows.size());
+        Element body = render_settings_scroll_body(state, std::move(content));
 
         std::string config_note;
         const std::string global_path = AppSettings::config_path();
@@ -1969,6 +2082,10 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         }
         if (config_note.empty()) {
           config_note = i18n::tr("settings.config.no_home");
+        }
+
+        if (scrollable_lines > kSettingsBodyHeight && !footer.empty()) {
+          footer += i18n::tr("modal.shortcuts.footer.scroll");
         }
 
         Elements dialog_body = {std::move(body), separator() | color(theme::AccentDim()),
