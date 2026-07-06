@@ -76,6 +76,7 @@ struct DebugModel {
   bool is_breakpoint_enabled(const std::string& file, int line) const;
   void set_breakpoint_enabled(const std::string& file, int line, bool enabled);
   void remove_breakpoint(const std::string& file, int line);
+  void clear_all_breakpoints();
   std::vector<int> enabled_breakpoint_lines(const std::string& file) const;
   void add_watch(const std::string& expression);
   void remove_watch(int index);

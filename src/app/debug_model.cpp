@@ -160,6 +160,11 @@ void DebugModel::remove_breakpoint(const std::string& file, int line) {
   }
 }
 
+void DebugModel::clear_all_breakpoints() {
+  breakpoints_by_file.clear();
+  disabled_breakpoints.clear();
+}
+
 std::vector<int> DebugModel::enabled_breakpoint_lines(
     const std::string& file) const {
   std::vector<int> lines;

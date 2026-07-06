@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <deque>
 #include <functional>
@@ -182,6 +183,7 @@ class Application {
   std::optional<std::string> pending_workspace_load_;
   mutable std::mutex ui_task_mutex_;
   std::deque<std::function<void()>> ui_tasks_;
+  std::atomic<bool> reindex_in_progress_{false};
 };
 
 }  // namespace tgdb

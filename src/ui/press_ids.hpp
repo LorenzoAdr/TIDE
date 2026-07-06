@@ -7,6 +7,7 @@ namespace tgdb::press_id {
 
 constexpr std::string_view kWatchesPlay = "watches.play";
 constexpr std::string_view kWatchesStop = "watches.stop";
+constexpr std::string_view kWatchesClearBreakpoints = "watches.clear_breakpoints";
 constexpr std::string_view kConsoleTabTerminal = "console.tab.terminal";
 constexpr std::string_view kConsoleTabGdb = "console.tab.gdb";
 constexpr std::string_view kConsoleTabPerformance = "console.tab.performance";
@@ -136,7 +137,8 @@ inline bool is_editor_chrome_hover(std::string_view id) {
 }
 
 inline bool is_watches_hover(std::string_view id) {
-  return id == kWatchesPlay || id == kWatchesStop || id.rfind("watches.tab.", 0) == 0;
+  return id == kWatchesPlay || id == kWatchesStop || id == kWatchesClearBreakpoints ||
+         id.rfind("watches.tab.", 0) == 0;
 }
 
 inline bool is_console_tab_hover(std::string_view id) {

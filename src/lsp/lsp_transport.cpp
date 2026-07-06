@@ -233,15 +233,10 @@ void LspTransport::reader_loop() {
   pending_cv_.notify_all();
 }
 
-bool LspTransport::send_request(int id, const std::string& method, nlohmann::json params,
-                                int timeout_ms, nlohmann::json* out) {
+bool LspTransport::write_request(int id, const std::string& method, nlohmann::json params) {
   if (!running_.load()) {
     return false;
   }
-
-  std::ostringstream scope_name;
-  scope_name << "send_request method=" << method << " id=" << id;
-  monitor_log::MonitorScope request_scope("lsp", scope_name.str());
 
   nlohmann::json request = {{"jsonrpc", "2.0"},
                             {"id", id},
@@ -253,8 +248,11 @@ bool LspTransport::send_request(int id, const std::string& method, nlohmann::jso
     pending_responses_.erase(id);
   }
 
-  if (!write_message(request.dump())) {
-    TGDB_MON("lsp", "send_request write_failed method=" + method);
+  return write_message(request.dump());
+}
+
+bool LspTransport::wait_response(int id, int timeout_ms, nlohmann::json* out) {
+  if (out == nullptr) {
     return false;
   }
 
@@ -263,7 +261,7 @@ bool LspTransport::send_request(int id, const std::string& method, nlohmann::jso
                         std::chrono::milliseconds(timeout_ms);
   while (pending_responses_.find(id) == pending_responses_.end() && running_.load()) {
     if (pending_cv_.wait_until(lock, deadline) == std::cv_status::timeout) {
-      TGDB_MON("lsp", "send_request timeout method=" + method + " id=" + std::to_string(id));
+      pending_responses_.erase(id);
       return false;
     }
   }
@@ -277,14 +275,32 @@ bool LspTransport::send_request(int id, const std::string& method, nlohmann::jso
   pending_responses_.erase(it);
   lock.unlock();
 
-  if (response.contains("error")) {
-    TGDB_MON("lsp", "send_request error method=" + method + " id=" + std::to_string(id));
-    return false;
-  }
-  if (!response.contains("result")) {
+  if (response.contains("error") || !response.contains("result")) {
     return false;
   }
   *out = response["result"];
+  return true;
+}
+
+bool LspTransport::send_request(int id, const std::string& method, nlohmann::json params,
+                                int timeout_ms, nlohmann::json* out) {
+  if (!running_.load()) {
+    return false;
+  }
+
+  std::ostringstream scope_name;
+  scope_name << "send_request method=" << method << " id=" << id;
+  monitor_log::MonitorScope request_scope("lsp", scope_name.str());
+
+  if (!write_request(id, method, std::move(params))) {
+    TGDB_MON("lsp", "send_request write_failed method=" + method);
+    return false;
+  }
+
+  if (!wait_response(id, timeout_ms, out)) {
+    TGDB_MON("lsp", "send_request timeout method=" + method + " id=" + std::to_string(id));
+    return false;
+  }
   return true;
 }
 

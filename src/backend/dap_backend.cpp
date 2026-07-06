@@ -1232,6 +1232,7 @@ void DapBackend::worker_main() {
   }
   session_.reset();
   gdb_.reset();
+  running_.store(false);
 }
 
 }  // namespace tgdb

@@ -24,6 +24,8 @@ class LspTransport {
 
   bool send_request(int id, const std::string& method, nlohmann::json params,
                     int timeout_ms, nlohmann::json* out);
+  bool write_request(int id, const std::string& method, nlohmann::json params);
+  bool wait_response(int id, int timeout_ms, nlohmann::json* out);
   void send_notification(const std::string& method, nlohmann::json params);
 
   using NotificationHandler =

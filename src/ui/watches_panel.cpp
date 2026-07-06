@@ -75,6 +75,7 @@ struct WatchesPanelState {
   std::array<Box, kTabCount> tab_boxes;
   Box play_box;
   Box stop_box;
+  Box clear_bp_box;
   std::unordered_set<std::string> expanded_expressions;
   int last_bp_click_row = -1;
   int64_t last_bp_click_ms = 0;
@@ -335,6 +336,7 @@ bool handle_watches_hover(WatchesPanelState* state, MainLayoutState* layout_stat
       layout_state, mouse.x, mouse.y,
       {{press_id::kWatchesPlay, &state->play_box},
        {press_id::kWatchesStop, &state->stop_box},
+       {press_id::kWatchesClearBreakpoints, &state->clear_bp_box},
        {press_id::kWatchesTab0, &state->tab_boxes[0]},
        {press_id::kWatchesTab1, &state->tab_boxes[1]},
        {press_id::kWatchesTab2, &state->tab_boxes[2]},
@@ -423,6 +425,49 @@ void remove_selected_breakpoint(WatchesPanelState* state, DebugModel* model,
   model->remove_breakpoint(row.file, row.line);
   sync_breakpoints_file(model, row.file, on_command);
   rebuild_breakpoint_rows(model, state);
+}
+
+void clear_all_breakpoints(WatchesPanelState* state, DebugModel* model,
+                           CommandCallback on_command) {
+  if (model->breakpoints_by_file.empty()) {
+    return;
+  }
+  std::vector<std::string> files;
+  files.reserve(model->breakpoints_by_file.size());
+  for (const auto& entry : model->breakpoints_by_file) {
+    files.push_back(entry.first);
+  }
+  model->clear_all_breakpoints();
+  if (on_command) {
+    for (const std::string& file : files) {
+      sync_breakpoints_file(model, file, on_command);
+    }
+  }
+  state->bp_selected = 0;
+  rebuild_breakpoint_rows(model, state);
+}
+
+Element make_clear_breakpoints_button(DebugModel* model, WatchesPanelState* state,
+                                    MainLayoutState* layout_state) {
+  const bool disabled = model->breakpoints_by_file.empty();
+  return MakeToolbarButton(
+      text(" " + i18n::tr("panel.breakpoints.clear_all") + " "),
+      layout_state != nullptr &&
+          layout_state->clickable.is_hovered(press_id::kWatchesClearBreakpoints),
+      layout_state != nullptr &&
+          layout_state->clickable.is_pressed(press_id::kWatchesClearBreakpoints),
+      disabled, &state->clear_bp_box);
+}
+
+bool handle_clear_breakpoints_mouse(WatchesPanelState* state, DebugModel* model,
+                                    MainLayoutState* layout_state, CommandCallback on_command,
+                                    const Mouse& mouse) {
+  if (!state->clear_bp_box.Contain(mouse.x, mouse.y)) {
+    return false;
+  }
+  trigger_press(layout_state, press_id::kWatchesClearBreakpoints);
+  clear_all_breakpoints(state, model, on_command);
+  return true;
 }
 
 void remove_selected_watch(WatchesPanelState* state, DebugModel* model) {
@@ -629,6 +674,18 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     }
 
     if (breakpoints_only) {
+      if (event.is_mouse() && event.mouse().motion == Mouse::Moved) {
+        handle_watches_hover(state.get(), layout_state, event.mouse());
+        return layout_state != nullptr && layout_state->request_ui_tick;
+      }
+      if (event.is_mouse() && event.mouse().button == Mouse::Left &&
+          event.mouse().motion == Mouse::Pressed) {
+        if (handle_clear_breakpoints_mouse(state.get(), model, layout_state, on_command,
+                                           event.mouse())) {
+          mark_watches_focus();
+          return true;
+        }
+      }
       if (handle_breakpoints_tab_keys(state.get(), model, layout_state, focus, on_command, event,
                                       mark_watches_focus)) {
         return true;
@@ -666,6 +723,12 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         event.mouse().motion == Mouse::Pressed) {
       if (handle_toolbar_mouse(state.get(), model, event.mouse(), layout_state,
                                send_continue, send_pause, send_stop)) {
+        mark_watches_focus();
+        return true;
+      }
+      if (state->selected_tab == 3 &&
+          handle_clear_breakpoints_mouse(state.get(), model, layout_state, on_command,
+                                         event.mouse())) {
         mark_watches_focus();
         return true;
       }
@@ -929,10 +992,15 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     const bool breakpoints_only = watches_breakpoints_only(app_mode);
     if (breakpoints_only) {
       state->selected_tab = 3;
-      Elements body = render_breakpoint_list(model, state.get());
-      Element list = vbox(std::move(body)) | flex | vscroll_indicator |
-                     reflect(state->breakpoints_box);
-      return MakePanel(i18n::tr("panel.breakpoints.title"), std::move(list));
+      Elements body;
+      body.push_back(make_clear_breakpoints_button(model, state.get(), layout_state));
+      body.push_back(separator());
+      Elements list = render_breakpoint_list(model, state.get());
+      body.insert(body.end(), std::make_move_iterator(list.begin()),
+                  std::make_move_iterator(list.end()));
+      Element panel_list = vbox(std::move(body)) | flex | vscroll_indicator |
+                           reflect(state->breakpoints_box);
+      return MakePanel(i18n::tr("panel.breakpoints.title"), std::move(panel_list));
     }
 
     const bool running = model->state == DebugState::kRunning;
@@ -1042,7 +1110,13 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         body.push_back(text(i18n::tr("panel.debug.backtrace_hint")) | color(theme::Muted()));
       }
     } else {
-      body = render_breakpoint_list(model, state.get());
+      Elements bp_body;
+      bp_body.push_back(make_clear_breakpoints_button(model, state.get(), layout_state));
+      bp_body.push_back(separator());
+      Elements bp_list = render_breakpoint_list(model, state.get());
+      bp_body.insert(bp_body.end(), std::make_move_iterator(bp_list.begin()),
+                     std::make_move_iterator(bp_list.end()));
+      body = std::move(bp_body);
     }
 
     Elements footer;

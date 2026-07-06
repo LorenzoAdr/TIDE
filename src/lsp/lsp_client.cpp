@@ -246,9 +246,7 @@ void LspClient::stop() {
   intentionally_stopping_.store(true, std::memory_order_release);
   ready_ = false;
 
-  if (child_pid_ > 0 && stdin_write_fd_ >= 0) {
-    send_lsp_notification("exit", nlohmann::json::object());
-  }
+  transport_.stop();
 
   if (stdin_write_fd_ >= 0) {
     ::close(stdin_write_fd_);
@@ -259,22 +257,32 @@ void LspClient::stop() {
     stdout_read_fd_ = -1;
   }
 
-  transport_.stop();
-
   if (child_pid_ > 0) {
     int status = 0;
-    for (int i = 0; i < 20; ++i) {
+    for (int i = 0; i < 10; ++i) {
       const pid_t result = waitpid(child_pid_, &status, WNOHANG);
       if (result == child_pid_ || result < 0) {
+        child_pid_ = -1;
         break;
       }
-      usleep(100000);
+      usleep(50000);
     }
-    if (waitpid(child_pid_, &status, WNOHANG) == 0) {
+    if (child_pid_ > 0) {
       kill(child_pid_, SIGTERM);
-      waitpid(child_pid_, &status, 0);
+      for (int i = 0; i < 20; ++i) {
+        const pid_t result = waitpid(child_pid_, &status, WNOHANG);
+        if (result == child_pid_ || result < 0) {
+          child_pid_ = -1;
+          break;
+        }
+        usleep(50000);
+      }
     }
-    child_pid_ = -1;
+    if (child_pid_ > 0) {
+      kill(child_pid_, SIGKILL);
+      waitpid(child_pid_, &status, 0);
+      child_pid_ = -1;
+    }
   }
 
   next_request_id_ = 1;
@@ -299,13 +307,31 @@ int64_t LspClient::steady_now_ms() {
 
 bool LspClient::send_lsp_request(const std::string& method, nlohmann::json params, int timeout_ms,
                                    nlohmann::json* out) {
-  std::lock_guard<std::mutex> lock(transport_io_mutex_);
-  const int id = next_request_id_++;
-  return transport_.send_request(id, method, std::move(params), timeout_ms, out);
+  if (out == nullptr || intentionally_stopping_.load(std::memory_order_acquire)) {
+    return false;
+  }
+  int id = 0;
+  {
+    std::lock_guard<std::mutex> lock(transport_io_mutex_);
+    if (!transport_.is_running() || intentionally_stopping_.load(std::memory_order_acquire)) {
+      return false;
+    }
+    id = next_request_id_++;
+    if (!transport_.write_request(id, method, std::move(params))) {
+      return false;
+    }
+  }
+  return transport_.wait_response(id, timeout_ms, out);
 }
 
 void LspClient::send_lsp_notification(const std::string& method, nlohmann::json params) {
+  if (intentionally_stopping_.load(std::memory_order_acquire)) {
+    return;
+  }
   std::lock_guard<std::mutex> lock(transport_io_mutex_);
+  if (!transport_.is_running()) {
+    return;
+  }
   transport_.send_notification(method, std::move(params));
 }
 
@@ -785,7 +811,8 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
   }
 
   if (!text.empty()) {
-    sync_document_and_wait(key, text);
+    wait_for_completion_ready(absolute_path, text, line,
+                              completion_wait_timeout_ms(text, line));
   } else {
     uint64_t generation = 0;
     {
@@ -796,7 +823,7 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
       }
     }
     if (generation > 0) {
-      wait_for_document_ready(key, generation, 5000);
+      wait_for_completion_ready(absolute_path, std::string{}, line, 5000);
     }
   }
 
@@ -810,14 +837,18 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
     return {};
   }
 
-  nlohmann::json items;
-  if (result.is_array()) {
-    items = result;
-  } else if (result.is_object() && result.contains("items") && result["items"].is_array()) {
-    items = result["items"];
-  } else {
-    return {};
-  }
+  auto parse_items = [](const nlohmann::json& completion_result) -> nlohmann::json {
+    if (completion_result.is_array()) {
+      return completion_result;
+    }
+    if (completion_result.is_object() && completion_result.contains("items") &&
+        completion_result["items"].is_array()) {
+      return completion_result["items"];
+    }
+    return nlohmann::json::array();
+  };
+
+  nlohmann::json items = parse_items(result);
 
   std::vector<CompletionItem> completions;
   for (const auto& item : items) {
@@ -833,6 +864,33 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
       break;
     }
   }
+
+  if (completions.empty() && line > 0 && !text.empty() &&
+      !intentionally_stopping_.load(std::memory_order_acquire)) {
+    wait_for_completion_ready(absolute_path, text, line, 1500);
+    nlohmann::json retry_params = {{"textDocument", {{"uri", uri}}},
+                                   {"position", make_lsp_position(text, line, character)},
+                                   {"context", {{"triggerKind", 1}}}};
+    nlohmann::json retry_result;
+    if (send_lsp_request("textDocument/completion", std::move(retry_params), 5000,
+                         &retry_result)) {
+      items = parse_items(retry_result);
+      for (const auto& item : items) {
+        if (!item.is_object()) {
+          continue;
+        }
+        CompletionItem parsed = parse_completion_item(item);
+        if (parsed.label.empty()) {
+          continue;
+        }
+        completions.push_back(std::move(parsed));
+        if (completions.size() >= 200) {
+          break;
+        }
+      }
+    }
+  }
+
   return completions;
 }
 
@@ -1611,6 +1669,30 @@ int LspClient::parse_wait_timeout_ms(const std::string& text) {
   return static_cast<int>(std::clamp<int64_t>(500 + scaled, 500, 10000));
 }
 
+int LspClient::completion_wait_timeout_ms(const std::string& text, int line) {
+  const int64_t base = parse_wait_timeout_ms(text);
+  const int64_t line_bonus = static_cast<int64_t>(std::max(0, line)) * 25;
+  return static_cast<int>(std::clamp<int64_t>(base + line_bonus, 800, 8000));
+}
+
+bool LspClient::document_semantic_tokens_cover_line(const std::string& key, uint64_t generation,
+                                                    int line) const {
+  if (line < 0) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto doc_it = documents_.find(key);
+  if (doc_it == documents_.end() || doc_it->second.generation != generation) {
+    return false;
+  }
+  const auto tok_it = semantic_token_cache_.find(key);
+  if (tok_it == semantic_token_cache_.end() || !tok_it->second.ready ||
+      tok_it->second.source_generation != generation) {
+    return false;
+  }
+  return line < static_cast<int>(tok_it->second.lines.size());
+}
+
 bool LspClient::wait_for_document_ready(const std::string& key, uint64_t generation,
                                         int timeout_ms) {
   if (generation == 0 || timeout_ms <= 0) {
@@ -1630,6 +1712,59 @@ bool LspClient::wait_for_document_ready(const std::string& key, uint64_t generat
     usleep(5000);
   }
   return false;
+}
+
+void LspClient::wait_for_completion_ready(const std::string& absolute_path,
+                                          const std::string& text, int line,
+                                          int timeout_ms) {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty() || timeout_ms <= 0) {
+    return;
+  }
+
+  if (!text.empty()) {
+    did_change(absolute_path, text);
+  }
+
+  uint64_t generation = 0;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = documents_.find(key);
+    if (it != documents_.end()) {
+      generation = it->second.generation;
+    }
+  }
+  if (generation == 0) {
+    return;
+  }
+
+  const int64_t deadline = steady_now_ms() + timeout_ms;
+  while (steady_now_ms() < deadline) {
+    if (intentionally_stopping_.load(std::memory_order_acquire) || !transport_.is_running()) {
+      return;
+    }
+    bool ready = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      const auto it = documents_.find(key);
+      if (it != documents_.end() && it->second.generation == generation) {
+        if (it->second.idle_generation >= generation) {
+          ready = true;
+        } else if (it->second.diagnostics_generation >= generation) {
+          const auto tok_it = semantic_token_cache_.find(key);
+          if (tok_it != semantic_token_cache_.end() && tok_it->second.ready &&
+              tok_it->second.source_generation == generation &&
+              line < static_cast<int>(tok_it->second.lines.size())) {
+            ready = true;
+          }
+        }
+      }
+    }
+    if (ready) {
+      return;
+    }
+    usleep(50000);
+  }
 }
 
 void LspClient::sync_document_and_wait(const std::string& absolute_path,
@@ -1718,6 +1853,30 @@ DocumentDiagnostics LspClient::parse_publish_diagnostics(const nlohmann::json& p
 }
 
 void LspClient::on_lsp_notification(const std::string& method, const nlohmann::json& params) {
+  if (method == "$/clangd/fileStatus") {
+    if (!params.is_object() || !params.contains("uri") || !params["uri"].is_string()) {
+      return;
+    }
+    std::string path = uri_to_path(params["uri"].get<std::string>());
+    path = normalize_lsp_path(path);
+    if (path.empty() || !is_lsp_trackable_path(path)) {
+      return;
+    }
+    std::string state;
+    if (params.contains("state") && params["state"].is_string()) {
+      state = params["state"].get<std::string>();
+    }
+    if (state != "idle") {
+      return;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = documents_.find(path);
+    if (it != documents_.end()) {
+      it->second.idle_generation = it->second.generation;
+    }
+    return;
+  }
+
   if (method != "textDocument/publishDiagnostics") {
     return;
   }

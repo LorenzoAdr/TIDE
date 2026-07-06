@@ -523,6 +523,7 @@ const StringTable& spanish_strings() {
       {"git.status.branch_switched", "rama cambiada"},
       {"panel.debug.title", "Depuración"},
       {"panel.breakpoints.title", "Breakpoints"},
+      {"panel.breakpoints.clear_all", "Quitar todos"},
       {"panel.debug.tab.watch", "Wtch"},
       {"panel.debug.tab.vars", "Var"},
       {"panel.debug.tab.backtrace", "Bt"},

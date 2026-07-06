@@ -611,10 +611,16 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
       state->terminal_box = Box{};
       state->terminal_view_valid = false;
     }
-    if (layout_state->text_input_focus == TextInputFocus::Console) {
+    if (layout_state->text_input_focus == TextInputFocus::Console &&
+        tab != ConsolePanelTabs::kDebug) {
       layout_state->text_input_focus = TextInputFocus::None;
     }
-    if (tab == ConsolePanelTabs::kSearch) {
+    if (tab == ConsolePanelTabs::kDebug) {
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      layout_state->text_input_focus = TextInputFocus::Console;
+    } else if (tab == ConsolePanelTabs::kSearch) {
       layout_state->right_sidebar.pending_focus_search = true;
       if (focus != nullptr) {
         focus->region = FocusRegion::Terminal;
@@ -1441,6 +1447,11 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       if (focus != nullptr && focus->region == FocusRegion::Terminal && layout_state != nullptr) {
         layout_state->text_input_focus = TextInputFocus::Console;
       }
+      return false;
+    }
+
+    if (on_debug_tab && event == Event::Custom && console_input_active(layout_state)) {
+      input_box->TakeFocus();
       return false;
     }
 

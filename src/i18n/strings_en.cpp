@@ -523,6 +523,7 @@ const StringTable& english_strings() {
       {"git.status.branch_switched", "branch switched"},
       {"panel.debug.title", "Debugging"},
       {"panel.breakpoints.title", "Breakpoints"},
+      {"panel.breakpoints.clear_all", "Clear all"},
       {"panel.debug.tab.watch", "Wtch"},
       {"panel.debug.tab.vars", "Var"},
       {"panel.debug.tab.backtrace", "Bt"},

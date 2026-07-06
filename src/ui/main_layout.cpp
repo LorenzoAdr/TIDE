@@ -96,6 +96,7 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
   if (focus->region == FocusRegion::Terminal) {
     if (mode == AppMode::kDebug &&
         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kDebug) {
+      layout_state->text_input_focus = TextInputFocus::Console;
       return;
     }
     if (layout_state->console_tabs.selected_tab == ConsolePanelTabs::kPerformance) {

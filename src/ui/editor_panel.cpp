@@ -253,6 +253,14 @@ constexpr int kEditorContentSettleMs = 120;
 constexpr int kLiveCompletionDebounceMs = 120;
 constexpr int kLiveCompletionMinIntervalMs = 50;
 constexpr int kLiveCompletionLspWaitTimeoutMs = 2500;
+constexpr int kLiveCompletionLspWaitMaxMs = 20000;
+
+int live_completion_lsp_wait_timeout_ms(const std::string& text) {
+  const int64_t scaled = static_cast<int64_t>(text.size()) / 150;
+  return static_cast<int>(
+      std::clamp<int64_t>(kLiveCompletionLspWaitTimeoutMs + scaled,
+                          kLiveCompletionLspWaitTimeoutMs, kLiveCompletionLspWaitMaxMs));
+}
 
 int64_t steady_now_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -2259,7 +2267,8 @@ bool live_completion_uses_async_lsp(MainLayoutState* layout_state,
 bool live_completion_awaiting_lsp(const CompletionState* completion,
                                   MainLayoutState* layout_state,
                                   const std::shared_ptr<ISymbolProvider>& symbols,
-                                  const std::string& buffer_path) {
+                                  const std::string& buffer_path,
+                                  const std::string& buffer_text) {
   if (completion == nullptr || !completion->open || !completion->live_mode) {
     return false;
   }
@@ -2273,8 +2282,9 @@ bool live_completion_awaiting_lsp(const CompletionState* completion,
     return false;
   }
   const int64_t now_ms = steady_now_ms();
+  const int64_t wait_ms = live_completion_lsp_wait_timeout_ms(buffer_text);
   if (completion->lsp_request_due_ms > 0 &&
-      now_ms > completion->lsp_request_due_ms + kLiveCompletionLspWaitTimeoutMs) {
+      now_ms > completion->lsp_request_due_ms + wait_ms) {
     return false;
   }
   return true;
@@ -2282,11 +2292,12 @@ bool live_completion_awaiting_lsp(const CompletionState* completion,
 
 void maybe_close_live_completion(CompletionState* completion, MainLayoutState* layout_state,
                                  const std::shared_ptr<ISymbolProvider>& symbols,
-                                 const std::string& buffer_path) {
+                                 const std::string& buffer_path,
+                                 const std::string& buffer_text) {
   if (completion == nullptr || !completion->matches.empty()) {
     return;
   }
-  if (live_completion_awaiting_lsp(completion, layout_state, symbols, buffer_path)) {
+  if (live_completion_awaiting_lsp(completion, layout_state, symbols, buffer_path, buffer_text)) {
     return;
   }
   completion->close(layout_state);
@@ -2353,17 +2364,21 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
 
   const int64_t now_ms = steady_now_ms();
   workspace->ensure_buffer();
-  const std::string buffer_path = workspace->buffer.path;
+  const EditorBuffer& buffer = workspace->buffer;
+  const std::string buffer_path = buffer.path;
+  const std::string buffer_text_snapshot = buffer_text(buffer);
+  const int64_t lsp_wait_ms = live_completion_lsp_wait_timeout_ms(buffer_text_snapshot);
   if (live_completion_uses_async_lsp(layout_state, symbols, buffer_path) &&
       !completion->lsp_pending_key.empty() &&
       completion->lsp_pending_key != completion->lsp_resolved_key &&
       completion->lsp_request_due_ms > 0 &&
-      now_ms > completion->lsp_request_due_ms + kLiveCompletionLspWaitTimeoutMs) {
+      now_ms > completion->lsp_request_due_ms + lsp_wait_ms) {
     completion->lsp_resolved_key = completion->lsp_pending_key;
     completion->lsp_resolved_query = completion->query;
     completion->lsp_inflight_key.clear();
     completion->refresh_matches();
-    maybe_close_live_completion(completion, layout_state, symbols, buffer_path);
+    maybe_close_live_completion(completion, layout_state, symbols, buffer_path,
+                                buffer_text_snapshot);
     layout_state->request_ui_tick = true;
     return;
   }
@@ -2389,7 +2404,8 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
         completion->invalidate_item_cache();
         completion->refresh_matches();
         if (completion->matches.empty()) {
-          maybe_close_live_completion(completion, layout_state, symbols, buffer_path);
+          maybe_close_live_completion(completion, layout_state, symbols, buffer_path,
+                                      buffer_text_snapshot);
         } else {
           layout_state->request_ui_tick = true;
         }
@@ -2409,8 +2425,6 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
   if (now_ms - completion->lsp_last_request_ms < kLiveCompletionMinIntervalMs) {
     return;
   }
-  workspace->ensure_buffer();
-  const EditorBuffer& buffer = workspace->buffer;
   if (buffer.path.empty() || !is_indexed_source_path(buffer.path)) {
     return;
   }
@@ -2419,7 +2433,7 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
 
   CompletionParams params;
   params.path = buffer.path;
-  params.text = buffer_text(buffer);
+  params.text = buffer_text_snapshot;
   params.line = completion->lsp_fetch_line;
   params.character = completion->lsp_fetch_col;
   symbols->request_completion(params, completion->lsp_pending_key);
@@ -2456,7 +2470,8 @@ void update_live_completion(CompletionState* completion, WorkspaceModel* workspa
   completion->invalidate_item_cache();
   completion->refresh_matches();
   schedule_live_lsp_fetch(completion, workspace, layout_state);
-  maybe_close_live_completion(completion, layout_state, symbols, buffer->path);
+  maybe_close_live_completion(completion, layout_state, symbols, buffer->path,
+                              buffer_text(*buffer));
 }
 
 void maybe_open_live_completion(CompletionState* completion, WorkspaceModel* workspace,
@@ -3171,7 +3186,12 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
     close_find_bar(find);
   }
   completion->open = true;
-  completion->live_mode = false;
+  const bool live_enabled =
+      layout_state != nullptr && layout_state->app_settings != nullptr &&
+      layout_state->app_settings->lsp_enabled &&
+      layout_state->app_settings->live_lsp_completion_enabled && symbols != nullptr &&
+      symbols->supports_semantic_completion();
+  completion->live_mode = live_enabled;
   completion->prefix = word_at_cursor(*buffer, buffer->primary());
   completion->query = completion->prefix;
   completion->selected = 0;
@@ -3909,7 +3929,8 @@ Element make_completion_overlay(const CompletionState& completion_state,
   if (!completion_state.open || completion_state.matches.empty()) {
     return text("");
   }
-  if (live_completion_awaiting_lsp(&completion_state, layout_state, symbols, buffer.path) &&
+  if (live_completion_awaiting_lsp(&completion_state, layout_state, symbols, buffer.path,
+                                   buffer_text(buffer)) &&
       completion_state.snippet_items.empty()) {
     return text("");
   }

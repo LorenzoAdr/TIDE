@@ -124,8 +124,24 @@ bool LspSymbolProvider::lsp_loading() const {
 }
 
 void LspSymbolProvider::stop_lsp_locked() {
-  stop_async_worker_locked();
+  async_stop_ = true;
+  async_jobs_.close();
   client_.stop();
+  if (async_worker_.joinable()) {
+    if (async_worker_.get_id() != std::this_thread::get_id()) {
+      async_worker_.join();
+    }
+  }
+  async_stop_ = false;
+  async_jobs_.reset();
+  async_results_.reset();
+  {
+    std::lock_guard<std::mutex> lock(inflight_mutex_);
+    inflight_symbols_.clear();
+    inflight_semantic_.clear();
+    inflight_hover_.clear();
+    inflight_completion_.clear();
+  }
   use_lsp_ = false;
   cached_diag_revision_ = 0;
   cached_diagnostics_.clear();
@@ -273,6 +289,10 @@ void LspSymbolProvider::async_worker_main() {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       run_job = use_lsp_ && client_.ready();
+    }
+
+    if (async_stop_) {
+      run_job = false;
     }
 
     if (run_job) {
@@ -623,19 +643,27 @@ void LspSymbolProvider::on_document_saved(const std::string& path) {
   if (path.empty()) {
     return;
   }
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!use_lsp_ || !is_lsp_trackable_path(path)) {
-    return;
+  std::string key;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_ || !is_lsp_trackable_path(path)) {
+      return;
+    }
+    key = normalize_lsp_path(path);
+    if (key.empty()) {
+      return;
+    }
+    pending_content_refresh_.erase(key);
+    semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
   }
-  const std::string key = normalize_lsp_path(path);
-  if (key.empty()) {
-    return;
-  }
-  flush_pending_did_change_for_key_locked(key);
+  flush_document_sync(path);
   client_.invalidate_semantic_tokens_for_file(path);
-  pending_content_refresh_.erase(key);
-  semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
-  enqueue_semantic_tokens_locked(key);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (use_lsp_) {
+      enqueue_semantic_tokens_locked(key);
+    }
+  }
 }
 
 void LspSymbolProvider::on_document_closed(const std::string& path) {

@@ -458,14 +458,29 @@ void Application::reindex_project() {
     layout_state_.request_ui_tick = true;
     return;
   }
-  workspace_.flush_active_tab();
-  restart_lsp_for_workspace();
-  sync_symbol_workspace_indexer();
-  restart_workspace_indexing();
-  reopen_workspace_documents(&workspace_, symbol_provider_);
-  workspace_.buffer.view_token++;
+  if (reindex_in_progress_.exchange(true)) {
+    set_workspace_status(i18n::tr("status.index_started"));
+    layout_state_.request_ui_tick = true;
+    return;
+  }
   set_workspace_status(i18n::tr("status.index_started"));
   layout_state_.request_ui_tick = true;
+  enqueue_ui_task([this]() {
+    workspace_.flush_active_tab();
+    std::thread([this]() {
+      set_current_thread_name("reindex");
+      restart_lsp_for_workspace();
+      sync_symbol_workspace_indexer();
+      restart_workspace_indexing();
+      enqueue_ui_task([this]() {
+        reopen_workspace_documents(&workspace_, symbol_provider_);
+        workspace_.buffer.view_token++;
+        reindex_in_progress_.store(false);
+        set_workspace_status(i18n::tr("status.index_started"));
+        layout_state_.request_ui_tick = true;
+      });
+    }).detach();
+  });
 }
 
 void Application::enqueue_ui_task(std::function<void()> task) {
@@ -861,6 +876,8 @@ void Application::exit_debug_mode() {
   if (backend_started_) {
     backend_->stop();
     backend_started_ = false;
+    command_queue_.reset();
+    event_queue_.reset();
     backend_ = std::make_unique<DapBackend>(command_queue_, event_queue_);
   }
 
@@ -950,7 +967,7 @@ void Application::apply_connection_and_start() {
     layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kCoreAnalyzer;
     layout_state_.text_input_focus = TextInputFocus::Console;
   } else {
-    layout_state_.text_input_focus = TextInputFocus::None;
+    layout_state_.text_input_focus = TextInputFocus::Console;
     layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kDebug;
   }
   layout_state_.console_visible = true;
@@ -1482,7 +1499,9 @@ bool Application::handle_focus_shortcuts(const Event& event) {
       focus_state_.move_down();
       layout_state_.console_visible = true;
       layout_state_.terminal_start_requested = true;
-      if (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal) {
+      if (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal ||
+          (app_mode_ == AppMode::kDebug &&
+           layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kDebug)) {
         layout_state_.text_input_focus = TextInputFocus::Console;
       }
       mark_focus_sync();

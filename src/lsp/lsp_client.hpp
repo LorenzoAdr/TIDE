@@ -90,12 +90,18 @@ class LspClient {
     int version = 0;
     uint64_t generation = 0;
     uint64_t diagnostics_generation = 0;
+    uint64_t idle_generation = 0;
   };
 
   uint64_t document_generation(const std::string& absolute_path) const;
   void sync_document_and_wait(const std::string& absolute_path, const std::string& text);
+  void wait_for_completion_ready(const std::string& absolute_path, const std::string& text,
+                                 int line, int timeout_ms);
   bool wait_for_document_ready(const std::string& key, uint64_t generation, int timeout_ms);
+  bool document_semantic_tokens_cover_line(const std::string& key, uint64_t generation,
+                                           int line) const;
   static int parse_wait_timeout_ms(const std::string& text);
+  static int completion_wait_timeout_ms(const std::string& text, int line);
 
   struct SemanticTokenAttempt {
     int count = 0;
