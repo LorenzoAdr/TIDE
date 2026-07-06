@@ -828,10 +828,6 @@ void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
   const int64_t last_edit_ms =
       workspace != nullptr ? workspace->last_buffer_edit_ms : panel->content_edit_ms;
   if (!diagnostics_display_allowed(last_edit_ms, symbols, path)) {
-    panel->problem_errors = 0;
-    panel->problem_warnings = 0;
-    panel->cached_file_diag = {};
-    panel->cached_file_diag_revision = 0;
     return;
   }
 
@@ -873,16 +869,20 @@ const DocumentDiagnostics& cached_file_diagnostics(EditorPanelState* panel,
                                                    int64_t last_edit_ms) {
   static const DocumentDiagnostics kEmpty;
   if (panel == nullptr || symbols == nullptr || !symbols->supports_diagnostics() ||
-      path.empty() || !is_lsp_trackable_path(path) ||
-      !diagnostics_display_allowed(last_edit_ms, symbols, path)) {
+      path.empty() || !is_lsp_trackable_path(path)) {
     return kEmpty;
   }
+  const bool allow_refresh = diagnostics_display_allowed(last_edit_ms, symbols, path);
   const uint64_t revision = symbols->diagnostics_revision();
-  if (revision != panel->cached_file_diag_revision || panel->cached_file_diag.path != path) {
+  if (allow_refresh &&
+      (revision != panel->cached_file_diag_revision || panel->cached_file_diag.path != path)) {
     panel->cached_file_diag = symbols->diagnostics_for_file(path);
     panel->cached_file_diag_revision = revision;
   }
-  return panel->cached_file_diag;
+  if (panel->cached_file_diag.path == path) {
+    return panel->cached_file_diag;
+  }
+  return kEmpty;
 }
 
 void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,

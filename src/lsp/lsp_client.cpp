@@ -1664,6 +1664,15 @@ bool LspClient::document_has_text(const std::string& absolute_path,
   return it != documents_.end() && it->second.text == text;
 }
 
+bool LspClient::document_is_open(const std::string& absolute_path) const {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  return documents_.find(key) != documents_.end();
+}
+
 bool LspClient::document_diagnostics_current(const std::string& absolute_path) const {
   const std::string key = normalize_lsp_path(absolute_path);
   if (key.empty()) {
@@ -1899,7 +1908,8 @@ void LspClient::on_lsp_notification(const std::string& method, const nlohmann::j
     return;
   }
   std::lock_guard<std::mutex> lock(mutex_);
-  if (doc.items.empty()) {
+  const bool had_items = !doc.items.empty();
+  if (!had_items) {
     diagnostics_.erase(doc.path);
   } else {
     diagnostics_[doc.path] = std::move(doc);

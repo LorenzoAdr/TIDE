@@ -25,13 +25,8 @@ bool diagnostics_display_allowed(const int64_t last_content_edit_ms, ISymbolProv
   if (path.empty() || symbols == nullptr || !symbols->supports_diagnostics()) {
     return false;
   }
-  if (steady_now_ms() - last_content_edit_ms < kLspDocumentDebounceMs) {
-    return false;
-  }
-  if (symbols->document_sync_pending(path)) {
-    return false;
-  }
-  if (!symbols->diagnostics_display_ready(path)) {
+  if (last_content_edit_ms > 0 &&
+      steady_now_ms() - last_content_edit_ms < kLspDocumentDebounceMs) {
     return false;
   }
   return true;

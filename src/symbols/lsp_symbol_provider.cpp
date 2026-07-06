@@ -740,22 +740,43 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
   }
   bool notify_open = false;
   bool open_header = false;
+  bool ensure_open = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto [it, inserted] = open_buffers_.try_emplace(path, text);
     if (!inserted) {
-      return;
+      if (it->second != text) {
+        it->second = text;
+        const std::string key = normalize_lsp_path(path);
+        if (!key.empty() && use_lsp_ && is_lsp_trackable_path(path, text)) {
+          pending_did_change_[key] = steady_now_ms();
+        }
+      }
+      ensure_open = use_lsp_ && is_lsp_trackable_path(path, text) && client_.ready() &&
+                    !client_.document_is_open(path);
+      if (!ensure_open) {
+        return;
+      }
+    } else {
+      clear_shadow_companion_locked(path);
+      const std::string key = normalize_lsp_path(path);
+      if (!key.empty()) {
+        pending_did_change_.erase(key);
+      }
+      notify_open = use_lsp_ && is_lsp_trackable_path(path, text);
+      open_header = notify_open && is_cpp_header_path(path);
+      if (open_header) {
+        notify_open = false;
+      }
     }
-    clear_shadow_companion_locked(path);
-    const std::string key = normalize_lsp_path(path);
-    if (!key.empty()) {
-      pending_did_change_.erase(key);
+  }
+  if (ensure_open) {
+    client_.did_open(path, text);
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (use_lsp_ && is_cpp_header_path(path)) {
+      open_companion_sources_for_clangd_locked(path);
     }
-    notify_open = use_lsp_ && is_lsp_trackable_path(path, text);
-    open_header = notify_open && is_cpp_header_path(path);
-    if (open_header) {
-      notify_open = false;
-    }
+    return;
   }
   if (open_header) {
     client_.did_open(path, text);

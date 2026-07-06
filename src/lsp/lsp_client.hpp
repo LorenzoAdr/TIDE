@@ -80,6 +80,7 @@ class LspClient {
   std::vector<CallHierarchyItem> outgoing_calls(const CallHierarchyItem& item);
 
   DocumentDiagnostics diagnostics_for_file(const std::string& absolute_path);
+  bool document_is_open(const std::string& absolute_path) const;
   bool document_diagnostics_current(const std::string& absolute_path) const;
   bool document_has_text(const std::string& absolute_path, const std::string& text) const;
   std::vector<DocumentDiagnostics> all_diagnostics() const;
