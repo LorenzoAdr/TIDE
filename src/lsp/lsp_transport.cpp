@@ -32,17 +32,25 @@ bool LspTransport::start(int stdin_write_fd, int stdout_read_fd) {
 }
 
 void LspTransport::stop() {
-  running_ = false;
-  if (reader_.joinable()) {
-    reader_.join();
-  }
+  running_.store(false);
   {
     std::lock_guard<std::mutex> lock(pending_mutex_);
     pending_responses_.clear();
   }
   pending_cv_.notify_all();
-  stdin_fd_ = -1;
-  stdout_fd_ = -1;
+
+  if (stdout_fd_ >= 0) {
+    ::close(stdout_fd_);
+    stdout_fd_ = -1;
+  }
+  if (stdin_fd_ >= 0) {
+    ::close(stdin_fd_);
+    stdin_fd_ = -1;
+  }
+
+  if (reader_.joinable()) {
+    reader_.join();
+  }
 }
 
 bool LspTransport::write_message(const std::string& payload) {

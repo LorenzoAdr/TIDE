@@ -212,7 +212,6 @@ bool LspClient::initialize(const std::string& workspace_root) {
 bool LspClient::start(const std::string& workspace_root,
                       const std::string& compile_commands_dir,
                       const bool use_gcc_query_driver, const bool background_index) {
-  intentionally_stopping_.store(false, std::memory_order_release);
   stop();
   if (workspace_root.empty()) {
     return false;
@@ -233,6 +232,7 @@ bool LspClient::start(const std::string& workspace_root,
   }
   transport_.set_reader_eof_handler([this] { on_transport_reader_eof(); });
   workspace_root_ = workspace_root;
+  intentionally_stopping_.store(false, std::memory_order_release);
   if (!initialize(workspace_root)) {
     stop();
     return false;
@@ -248,14 +248,8 @@ void LspClient::stop() {
 
   transport_.stop();
 
-  if (stdin_write_fd_ >= 0) {
-    ::close(stdin_write_fd_);
-    stdin_write_fd_ = -1;
-  }
-  if (stdout_read_fd_ >= 0) {
-    ::close(stdout_read_fd_);
-    stdout_read_fd_ = -1;
-  }
+  stdin_write_fd_ = -1;
+  stdout_read_fd_ = -1;
 
   if (child_pid_ > 0) {
     int status = 0;

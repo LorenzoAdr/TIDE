@@ -126,12 +126,9 @@ bool LspSymbolProvider::lsp_loading() const {
 void LspSymbolProvider::stop_lsp_locked() {
   async_stop_ = true;
   async_jobs_.close();
-  client_.stop();
-  if (async_worker_.joinable()) {
-    if (async_worker_.get_id() != std::this_thread::get_id()) {
-      async_worker_.join();
-    }
-  }
+}
+
+void LspSymbolProvider::stop_lsp_locked_finalize() {
   async_stop_ = false;
   async_jobs_.reset();
   async_results_.reset();
@@ -151,8 +148,18 @@ void LspSymbolProvider::stop_lsp_locked() {
 
 void LspSymbolProvider::stop_lsp() {
   join_startup_thread();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stop_lsp_locked();
+  }
+  client_.stop();
+  if (async_worker_.joinable()) {
+    if (async_worker_.get_id() != std::this_thread::get_id()) {
+      async_worker_.join();
+    }
+  }
   std::lock_guard<std::mutex> lock(mutex_);
-  stop_lsp_locked();
+  stop_lsp_locked_finalize();
 }
 
 void LspSymbolProvider::restart_lsp_after_transport_failure() {

@@ -111,6 +111,7 @@ class LspSymbolProvider : public ISymbolProvider {
   void join_startup_thread();
   void stop_lsp();
   void stop_lsp_locked();
+  void stop_lsp_locked_finalize();
   void restart_lsp_after_transport_failure();
   void process_pending_transport_restart();
   void start_async_worker_locked();

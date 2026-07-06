@@ -577,7 +577,9 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
         state->sync_index(indexer != nullptr ? indexer->snapshot() : nullptr,
                           model->workspace_root);
         state->refresh_matches(workspace);
-        state->update_preview_for_selection(model->workspace_root);
+        if (state->preview_requested_path.empty() && !state->matches.empty()) {
+          state->update_preview_for_selection(model->workspace_root);
+        }
 
         std::string input_line = state->query;
         input_line.push_back('_');

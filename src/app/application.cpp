@@ -77,7 +77,9 @@ bool event_is_alt_down(const Event& event) {
 void force_immediate_repaint(MainLayoutState* layout, ScreenInteractive* screen) {
   if (layout != nullptr) {
     layout->request_ui_tick = true;
-    layout->terminal_sync_after_draw = true;
+    if (!layout->shutdown_ui_poll_paused.load(std::memory_order_acquire)) {
+      layout->terminal_sync_after_draw = true;
+    }
   }
   if (screen == nullptr) {
     return;
@@ -95,6 +97,10 @@ class EventPoller {
       set_current_thread_name("ui-poller");
       while (running_.load(std::memory_order_acquire)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (layout_ != nullptr &&
+            layout_->shutdown_ui_poll_paused.load(std::memory_order_acquire)) {
+          continue;
+        }
         if (screen_ != nullptr) {
           if (layout_ != nullptr) {
             layout_->ui_heartbeat.store(true, std::memory_order_release);
@@ -561,6 +567,7 @@ void Application::begin_shutdown(ScreenInteractive* screen) {
   }
   quit_confirm_state_.open = false;
   quit_confirm_state_.unsaved_paths.clear();
+  layout_state_.shutdown_ui_poll_paused.store(true, std::memory_order_release);
   shutdown_state_.begin(7);
   shutdown_step_index_ = 0;
   shutdown_state_.set_current(i18n::tr("app.shutdown.save_session"));
@@ -595,9 +602,7 @@ void Application::schedule_next_shutdown_step(ScreenInteractive* screen) {
     screen->Post([this, screen] {
       force_immediate_repaint(&layout_state_, screen);
       if (shutdown_state_.is_complete()) {
-        screen->Post([screen] {
-          screen->ExitLoopClosure()();
-        });
+        screen->ExitLoopClosure()();
         return;
       }
       screen->Post([this, screen] {
@@ -1653,9 +1658,10 @@ int Application::run() {
     file_picker_state_.selected = 0;
     file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
     file_picker_state_.mark_matches_dirty();
-    file_picker_state_.refresh_matches(&workspace_);
-    file_picker_state_.on_opened(model_.workspace_root);
+    file_picker_state_.reset_preview();
+    file_picker_state_.arm_ctrl_chord();
     force_immediate_repaint(&layout_state_, &screen);
+    screen.WithRestoredIO(nudge_terminal_repaint)();
   };
   layout_state_.helix_ide.open_symbol_picker = [this, &screen]() {
     symbol_picker_state_.open = true;
@@ -1706,17 +1712,21 @@ int Application::run() {
   git_service_.set_update_callback([this] { layout_state_.request_ui_tick = true; });
 
   file_picker_state_.set_preview_notify([this] { layout_state_.request_ui_tick = true; });
+  file_picker_state_.set_repaint_notify([this, &screen] {
+    force_immediate_repaint(&layout_state_, &screen);
+    screen.WithRestoredIO(nudge_terminal_repaint)();
+  });
   symbol_picker_state_.set_search_notify([this] { layout_state_.request_ui_tick = true; });
 
-  auto with_picker = MakeFilePickerOverlay(
-      layout, &model_, &workspace_, &file_picker_state_, &focus_state_, &indexer_);
-
   auto with_symbol_picker = MakeSymbolPickerOverlay(
-      with_picker, &workspace_, &symbol_picker_state_, &focus_state_, symbol_provider_,
+      layout, &workspace_, &symbol_picker_state_, &focus_state_, symbol_provider_,
       &symbol_indexer_);
 
+  auto with_picker = MakeFilePickerOverlay(
+      with_symbol_picker, &model_, &workspace_, &file_picker_state_, &focus_state_, &indexer_);
+
   auto with_debug_wizard = MakeConnectionWizardOverlay(
-      with_symbol_picker, &connection_wizard_state_, &model_, &layout_state_,
+      with_picker, &connection_wizard_state_, &model_, &layout_state_,
       [this](const ConnectionResult& result) { on_connection_complete(result); },
       [&screen] { screen.ExitLoopClosure()(); });
 
@@ -1891,6 +1901,56 @@ int Application::run() {
         std::ostringstream key_msg;
         key_msg << "key event=" << event.input() << " focus=" << focus_state_.region_label();
         TGDB_MON("ui", key_msg.str());
+      }
+
+      // Tide app shortcuts must run before any_modal_open() and editor interceptors.
+      if (event_is_ctrl_p(event)) {
+        if (event_is_kitty_key_release(event)) {
+          return false;
+        }
+        if (file_picker_state_.open) {
+          if (!file_picker_state_.matches.empty()) {
+            file_picker_state_.selected =
+                (file_picker_state_.selected + 1) %
+                static_cast<int>(file_picker_state_.matches.size());
+            file_picker_state_.ctrl_chord_active = true;
+            file_picker_state_.update_preview_for_selection(model_.workspace_root);
+          }
+          force_immediate_repaint(&layout_state_, &screen);
+          screen.WithRestoredIO(nudge_terminal_repaint)();
+          return true;
+        }
+        file_picker_state_.open = true;
+        file_picker_state_.query.clear();
+        file_picker_state_.selected = 0;
+        file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
+        file_picker_state_.mark_matches_dirty();
+        file_picker_state_.reset_preview();
+        file_picker_state_.arm_ctrl_chord();
+        force_immediate_repaint(&layout_state_, &screen);
+        screen.WithRestoredIO(nudge_terminal_repaint)();
+        return true;
+      }
+      if (event_is_ctrl_o(event)) {
+        if (event_is_kitty_key_release(event)) {
+          return false;
+        }
+        if (symbol_picker_state_.open && !symbol_picker_state_.matches.empty()) {
+          symbol_picker_state_.selected =
+              (symbol_picker_state_.selected + 1) %
+              static_cast<int>(symbol_picker_state_.matches.size());
+          layout_state_.request_ui_tick = true;
+          return true;
+        }
+        symbol_picker_state_.open = true;
+        symbol_picker_state_.query.clear();
+        symbol_picker_state_.selected = 0;
+        symbol_picker_state_.loaded_file.clear();
+        symbol_picker_state_.catalog_key.clear();
+        symbol_picker_state_.catalog.reset();
+        symbol_picker_state_.mark_matches_dirty();
+        force_immediate_repaint(&layout_state_, &screen);
+        return true;
       }
 
       if (event_is_f1(event)) {
@@ -2378,52 +2438,6 @@ int Application::run() {
         layout_state_.request_ui_tick = true;
         return true;
       }
-      if (event_is_ctrl_p(event)) {
-        if (event_is_kitty_key_release(event)) {
-          return false;
-        }
-        if (file_picker_state_.open) {
-          if (!file_picker_state_.matches.empty()) {
-            file_picker_state_.selected =
-                (file_picker_state_.selected + 1) %
-                static_cast<int>(file_picker_state_.matches.size());
-            file_picker_state_.ctrl_chord_active = true;
-            file_picker_state_.update_preview_for_selection(model_.workspace_root);
-          }
-          force_immediate_repaint(&layout_state_, &screen);
-          return true;
-        }
-        file_picker_state_.open = true;
-        file_picker_state_.query.clear();
-        file_picker_state_.selected = 0;
-        file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
-        file_picker_state_.mark_matches_dirty();
-        file_picker_state_.on_opened(model_.workspace_root);
-        file_picker_state_.arm_ctrl_chord();
-        force_immediate_repaint(&layout_state_, &screen);
-        return true;
-      }
-      if (event_is_ctrl_o(event)) {
-        if (event_is_kitty_key_release(event)) {
-          return false;
-        }
-        if (symbol_picker_state_.open && !symbol_picker_state_.matches.empty()) {
-          symbol_picker_state_.selected =
-              (symbol_picker_state_.selected + 1) %
-              static_cast<int>(symbol_picker_state_.matches.size());
-          layout_state_.request_ui_tick = true;
-          return true;
-        }
-        symbol_picker_state_.open = true;
-        symbol_picker_state_.query.clear();
-        symbol_picker_state_.selected = 0;
-        symbol_picker_state_.loaded_file.clear();
-        symbol_picker_state_.catalog_key.clear();
-        symbol_picker_state_.catalog.reset();
-        symbol_picker_state_.mark_matches_dirty();
-        force_immediate_repaint(&layout_state_, &screen);
-        return true;
-      }
       if (event == Event::F9) {
         if (!layout_state_.console_visible) {
           layout_state_.console_visible = true;
@@ -2472,7 +2486,8 @@ int Application::run() {
   Loop ui_loop(&screen, WrapUiTickPost(root, &layout_state_, &screen));
   while (!ui_loop.HasQuitted()) {
     ui_loop.RunOnceBlocking();
-    if (layout_state_.terminal_sync_after_draw.exchange(false)) {
+    if (layout_state_.terminal_sync_after_draw.exchange(false) &&
+        !layout_state_.shutdown_ui_poll_paused.load(std::memory_order_acquire)) {
       screen.WithRestoredIO(nudge_terminal_repaint)();
       screen.PostEvent(Event::Custom);
     }
