@@ -189,6 +189,21 @@ target_link_libraries(tgdb PRIVATE
   cppdap
   Threads::Threads
 )
+
+set(TGDB_CPPDAP_ARCHIVE "${CMAKE_BINARY_DIR}/_deps/cppdap-build/libcppdap.a")
+add_custom_command(
+  OUTPUT "${CMAKE_BINARY_DIR}/cppdap_archive_verified.stamp"
+  COMMAND ${CMAKE_COMMAND}
+    -DARCHIVE=${TGDB_CPPDAP_ARCHIVE}
+    -DEXPECTED=13
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/VerifyCppdapArchive.cmake
+  COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/cppdap_archive_verified.stamp"
+  DEPENDS cppdap
+  COMMENT "Verifying libcppdap.a is complete"
+  VERBATIM)
+add_custom_target(cppdap_archive_verify
+  DEPENDS "${CMAKE_BINARY_DIR}/cppdap_archive_verified.stamp")
+add_dependencies(tgdb cppdap_archive_verify)
 tgdb_link_pthread(tgdb)
 if(TGDB_UTIL_LIBRARY)
   target_link_libraries(tgdb PRIVATE ${TGDB_UTIL_LIBRARY})

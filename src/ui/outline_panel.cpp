@@ -326,6 +326,125 @@ bool handle_outline_scrollbar_mouse(OutlinePanelState* state, MainLayoutState* l
   return false;
 }
 
+bool mouse_over_outline(const OutlinePanelState* state, int x, int y) {
+  if (state == nullptr) {
+    return false;
+  }
+  return state->content_box.Contain(x, y) || state->scrollbar_box.Contain(x, y);
+}
+
+bool outline_input_blocked(const MainLayoutState* layout_state) {
+  return layout_state != nullptr &&
+         (is_watch_input_focus(layout_state->text_input_focus) ||
+          layout_state->right_panel_active_section == 1);
+}
+
+bool handle_outline_navigation(OutlinePanelState* state, WorkspaceModel* workspace,
+                               FocusManagerState* focus, MainLayoutState* layout_state,
+                               Event event) {
+  const int total = state->display_row_count();
+  const int visible = state->last_visible_lines;
+  const int max_scroll = max_scroll_offset(total, visible);
+
+  if (event.is_mouse()) {
+    const auto& m = event.mouse();
+    if (handle_outline_scrollbar_mouse(state, layout_state, m, total, visible)) {
+      return true;
+    }
+    if (m.motion == Mouse::Moved) {
+      update_outline_hover(state, layout_state, m.x, m.y);
+      return false;
+    }
+    if (m.motion == Mouse::Pressed &&
+        (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) &&
+        state->content_box.Contain(m.x, m.y)) {
+      if (m.button == Mouse::WheelUp) {
+        state->list_scroll = std::max(0, state->list_scroll - 3);
+      } else {
+        state->list_scroll = std::min(state->list_scroll + 3, max_scroll);
+      }
+      return true;
+    }
+  }
+
+  if (event.is_mouse() && event.mouse().button == Mouse::Left &&
+      event.mouse().motion == Mouse::Pressed) {
+    const auto& m = event.mouse();
+    const auto row = state->row_at_mouse(m.x, m.y);
+    if (!row.has_value()) {
+      return false;
+    }
+    if (layout_state != nullptr) {
+      layout_state->right_panel_active_section = 0;
+    }
+    focus->region = FocusRegion::RightPanel;
+    trigger_press(layout_state, press_id::outline_row(*row));
+    const auto& display_row = state->display_rows[static_cast<std::size_t>(*row)];
+    if (display_row.kind != OutlineRowKind::Symbol || display_row.symbol_index < 0) {
+      state->selected = state->nearest_symbol_row(*row, 1);
+      state->scroll_row_into_view(state->selected);
+      return true;
+    }
+    state->selected = *row;
+    state->scroll_row_into_view(*row);
+    jump_to_symbol(workspace, focus,
+                   state->symbols[static_cast<std::size_t>(display_row.symbol_index)]);
+    return true;
+  }
+
+  if (focus->region != FocusRegion::RightPanel) {
+    return false;
+  }
+  if (state->display_rows.empty()) {
+    return false;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    state->selected = state->nearest_symbol_row(state->selected, 1);
+    state->scroll_row_into_view(state->selected);
+    return true;
+  }
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    state->selected = state->nearest_symbol_row(state->selected, -1);
+    state->scroll_row_into_view(state->selected);
+    return true;
+  }
+  if (event == Event::Return) {
+    const auto& display_row = state->display_rows[static_cast<std::size_t>(state->selected)];
+    if (display_row.kind != OutlineRowKind::Symbol || display_row.symbol_index < 0) {
+      return true;
+    }
+    trigger_press(layout_state, press_id::outline_row(state->selected));
+    jump_to_symbol(workspace, focus,
+                   state->symbols[static_cast<std::size_t>(display_row.symbol_index)]);
+    return true;
+  }
+  if (event == Event::PageUp) {
+    state->list_scroll = std::max(0, state->list_scroll - visible);
+    return true;
+  }
+  if (event == Event::PageDown) {
+    state->list_scroll = std::min(state->list_scroll + visible, max_scroll);
+    return true;
+  }
+  return false;
+}
+
+bool handle_outline_mouse(OutlinePanelState* state, WorkspaceModel* workspace,
+                          FocusManagerState* focus, MainLayoutState* layout_state,
+                          Event event) {
+  if (state == nullptr || !event.is_mouse()) {
+    return false;
+  }
+  if (outline_input_blocked(layout_state)) {
+    return false;
+  }
+  const auto& m = event.mouse();
+  if (!mouse_over_outline(state, m.x, m.y)) {
+    return false;
+  }
+  return handle_outline_navigation(state, workspace, focus, layout_state, event);
+}
+
 }  // namespace
 
 Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
@@ -415,99 +534,22 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
     return PanelBody(hbox({list | flex, scrollbar}) | flex);
   });
 
+  if (layout_state != nullptr) {
+    layout_state->outline_mouse_handler =
+        [state, workspace, focus, layout_state](const Event& event) {
+          return handle_outline_mouse(state.get(), workspace, focus, layout_state, event);
+        };
+  }
+
   return WrapFocusable(CatchEvent(renderer, [workspace, focus, state, layout_state](Event event) {
-    if (layout_state != nullptr &&
-        (is_watch_input_focus(layout_state->text_input_focus) ||
-         layout_state->right_panel_active_section == 1)) {
+    if (event.is_mouse() &&
+        mouse_over_outline(state.get(), event.mouse().x, event.mouse().y)) {
       return false;
     }
-
-    const int total = state->display_row_count();
-    const int visible = state->last_visible_lines;
-    const int max_scroll = max_scroll_offset(total, visible);
-
-    if (event.is_mouse()) {
-      const auto& m = event.mouse();
-      if (handle_outline_scrollbar_mouse(state.get(), layout_state, m, total, visible)) {
-        return true;
-      }
-      if (m.motion == Mouse::Moved) {
-        update_outline_hover(state.get(), layout_state, m.x, m.y);
-        return false;
-      }
-      if (m.motion == Mouse::Pressed &&
-          (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) &&
-          state->content_box.Contain(m.x, m.y)) {
-        if (m.button == Mouse::WheelUp) {
-          state->list_scroll = std::max(0, state->list_scroll - 3);
-        } else {
-          state->list_scroll = std::min(state->list_scroll + 3, max_scroll);
-        }
-        return true;
-      }
-    }
-
-    if (event.is_mouse() && event.mouse().button == Mouse::Left &&
-        event.mouse().motion == Mouse::Pressed) {
-      const auto& m = event.mouse();
-      const auto row = state->row_at_mouse(m.x, m.y);
-      if (!row.has_value()) {
-        return false;
-      }
-      if (layout_state != nullptr) {
-        layout_state->right_panel_active_section = 0;
-      }
-      focus->region = FocusRegion::RightPanel;
-      trigger_press(layout_state, press_id::outline_row(*row));
-      const auto& display_row = state->display_rows[static_cast<std::size_t>(*row)];
-      if (display_row.kind != OutlineRowKind::Symbol || display_row.symbol_index < 0) {
-        state->selected = state->nearest_symbol_row(*row, 1);
-        state->scroll_row_into_view(state->selected);
-        return true;
-      }
-      state->selected = *row;
-      state->scroll_row_into_view(*row);
-      jump_to_symbol(workspace, focus,
-                     state->symbols[static_cast<std::size_t>(display_row.symbol_index)]);
-      return true;
-    }
-
-    if (focus->region != FocusRegion::RightPanel) {
+    if (outline_input_blocked(layout_state)) {
       return false;
     }
-    if (state->display_rows.empty()) {
-      return false;
-    }
-    if (event == Event::ArrowDown || event == Event::Character('j')) {
-      state->selected = state->nearest_symbol_row(state->selected, 1);
-      state->scroll_row_into_view(state->selected);
-      return true;
-    }
-    if (event == Event::ArrowUp || event == Event::Character('k')) {
-      state->selected = state->nearest_symbol_row(state->selected, -1);
-      state->scroll_row_into_view(state->selected);
-      return true;
-    }
-    if (event == Event::Return) {
-      const auto& display_row =
-          state->display_rows[static_cast<std::size_t>(state->selected)];
-      if (display_row.kind != OutlineRowKind::Symbol || display_row.symbol_index < 0) {
-        return true;
-      }
-      trigger_press(layout_state, press_id::outline_row(state->selected));
-      jump_to_symbol(workspace, focus,
-                     state->symbols[static_cast<std::size_t>(display_row.symbol_index)]);
-      return true;
-    }
-    if (event == Event::PageUp) {
-      state->list_scroll = std::max(0, state->list_scroll - visible);
-      return true;
-    }
-    if (event == Event::PageDown) {
-      state->list_scroll = std::min(state->list_scroll + visible, max_scroll);
-      return true;
-    }
-    return false;
+    return handle_outline_navigation(state.get(), workspace, focus, layout_state, event);
   }));
 }
 

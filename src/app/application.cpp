@@ -81,6 +81,12 @@ void force_immediate_repaint(MainLayoutState* layout, ScreenInteractive* screen)
     return;
   }
   screen->PostEvent(Event::Custom);
+  // PostEvent invalidates the frame but Draw runs later in the same RunOnce.
+  // ConPTY / PowerShell+WSL may keep showing the old buffer until extra stdout
+  // activity; chain a deferred nudge so it runs after the draw flush.
+  screen->Post([screen] {
+    screen->Post([] { nudge_terminal_repaint(); });
+  });
 }
 
 class EventPoller {
@@ -1987,6 +1993,14 @@ int Application::run() {
         return true;
       }
 
+      if (editor_browse_active && !layout_state_.welcome_visible &&
+                 event.is_mouse() && layout_state_.outline_mouse_handler &&
+                 layout_state_.outline_mouse_handler(event)) {
+        screen.Post(Event::Custom);
+        layout_state_.focus_sync_needed = true;
+        return true;
+      }
+
       if (event.is_mouse() && layout_state_.status_bar_mouse_handler &&
           layout_state_.status_bar_mouse_handler(event)) {
         screen.Post(Event::Custom);
@@ -2050,6 +2064,10 @@ int Application::run() {
         bool handled = false;
         if (!model_.is_post_mortem && layout_state_.source_mouse_handler &&
             layout_state_.source_mouse_handler(event)) {
+          handled = true;
+        }
+        if (layout_state_.outline_mouse_handler &&
+            layout_state_.outline_mouse_handler(event)) {
           handled = true;
         }
         if (layout_state_.watches_mouse_handler &&
