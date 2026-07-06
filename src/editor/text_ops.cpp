@@ -977,9 +977,7 @@ void insert_char(EditorBuffer* buffer, char c) {
 }
 
 void insert_tab_stop(EditorBuffer* buffer, int tab_size) {
-  if (tab_size <= 0) {
-    tab_size = editor_indent::width();
-  }
+  const int display_tab = std::max(1, tab_size > 0 ? tab_size : editor_indent::tab_display_width());
   push_undo(buffer);
   clamp_all_cursors(buffer);
   if (any_cursor_has_selection(*buffer)) {
@@ -1003,15 +1001,25 @@ void insert_tab_stop(EditorBuffer* buffer, int tab_size) {
   });
 
   for (const auto& pos : positions) {
+    if (pos.line < 0 || pos.line >= static_cast<int>(buffer->lines.size())) {
+      continue;
+    }
+    const std::string& line_text = buffer->lines[static_cast<std::size_t>(pos.line)];
     if (editor_indent::use_tab_char()) {
       insert_string_at(buffer, pos.line, pos.col, "\t");
       continue;
     }
-    const int count = tab_size - (pos.col % tab_size);
-    if (count <= 0 || count > tab_size) {
+    const int visual_col = byte_index_to_visual_column(line_text, pos.col, display_tab);
+    if (visual_col == 0) {
+      insert_string_at(buffer, pos.line, pos.col, "\t");
       continue;
     }
-    insert_string_at(buffer, pos.line, pos.col, std::string(static_cast<std::size_t>(count), ' '));
+    int count = display_tab - (visual_col % display_tab);
+    if (count <= 0) {
+      count = display_tab;
+    }
+    insert_string_at(buffer, pos.line, pos.col,
+                     std::string(static_cast<std::size_t>(count), ' '));
   }
   for (auto& cursor : buffer->cursors) {
     cursor.collapse_to_head();

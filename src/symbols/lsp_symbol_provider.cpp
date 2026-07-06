@@ -1,6 +1,7 @@
 #include "symbols/lsp_symbol_provider.hpp"
 
 #include "indexer/index_rules.hpp"
+#include "lsp/lsp_sync.hpp"
 #include "lsp/lsp_uri.hpp"
 
 #include <chrono>
@@ -450,7 +451,7 @@ void LspSymbolProvider::tick_pending_did_change_locked() {
     return;
   }
   const int64_t now = steady_now_ms();
-  constexpr int64_t kDebounceMs = 1000;
+  constexpr int64_t kDebounceMs = kLspDocumentDebounceMs;
   std::vector<std::string> due;
   for (const auto& entry : pending_did_change_) {
     if (now - entry.second >= kDebounceMs) {
@@ -943,6 +944,29 @@ uint64_t LspSymbolProvider::diagnostics_revision() const {
     return 0;
   }
   return client_.diagnostics_revision();
+}
+
+bool LspSymbolProvider::document_sync_pending(const std::string& path) const {
+  if (path.empty()) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return false;
+  }
+  const std::string key = normalize_lsp_path(path);
+  return pending_did_change_.find(key) != pending_did_change_.end();
+}
+
+bool LspSymbolProvider::diagnostics_display_ready(const std::string& path) const {
+  if (path.empty()) {
+    return true;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return true;
+  }
+  return client_.document_diagnostics_current(path);
 }
 
 DocumentDiagnostics LspSymbolProvider::diagnostics_for_file(const std::string& path) {

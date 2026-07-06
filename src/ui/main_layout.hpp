@@ -125,6 +125,7 @@ struct MainLayoutState {
   int diagnostics_panel_height = 6;
   bool terminal_start_requested = true;
   bool request_ui_tick = false;
+  std::atomic<bool> terminal_sync_after_draw{false};
   std::atomic<bool> ui_heartbeat{false};
   uint64_t ui_custom_tick = 0;
   uint64_t ui_paint_count = 0;

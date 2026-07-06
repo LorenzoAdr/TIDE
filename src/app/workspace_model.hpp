@@ -18,6 +18,7 @@ struct WorkspaceModel {
   std::string active_file;
   EditorBuffer buffer;
   CursorHistory cursor_history;
+  int64_t last_buffer_edit_ms = 0;
   std::vector<EditorTab> tabs;
   std::vector<std::string> tab_mru;
   int active_tab = -1;

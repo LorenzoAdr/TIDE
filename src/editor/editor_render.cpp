@@ -20,10 +20,13 @@ using namespace ftxui;
 namespace {
 
 std::string slice_line_for_view(const std::string& line, int scroll_col, int view_width) {
-  if (scroll_col >= static_cast<int>(line.size())) {
+  const int tab_size = std::max(1, editor_indent::tab_display_width());
+  const int scroll_vis = byte_index_to_visual_column(line, scroll_col, tab_size);
+  const std::string expanded = expand_tabs_for_display(line, tab_size);
+  if (scroll_vis >= static_cast<int>(expanded.size())) {
     return {};
   }
-  std::string slice = line.substr(static_cast<std::size_t>(scroll_col));
+  std::string slice = expanded.substr(static_cast<std::size_t>(scroll_vis));
   if (view_width > 0 && static_cast<int>(slice.size()) > view_width) {
     slice.resize(static_cast<std::size_t>(view_width));
   }
@@ -283,31 +286,37 @@ Element render_line_content(const std::string& line, int line_index,
                             int cursor_col = -1, Decorator cursor_style = {},
                             int col_offset = 0, CppHighlightContext* highlight_ctx = nullptr,
                             BuildFileKind build_file_kind = BuildFileKind::kNone) {
+  const int tab_size = std::max(1, editor_indent::tab_display_width());
+  const std::string display_line = expand_tabs_for_display(line, tab_size);
+  const int visual_col_offset = byte_index_to_visual_column(line, col_offset, tab_size);
+  int draw_col = cursor_col;
+  if (draw_col >= 0) {
+    draw_col = byte_index_to_visual_column(line, draw_col + col_offset, tab_size) - visual_col_offset;
+  }
   if (build_file_kind != BuildFileKind::kNone) {
-    const int draw_col = cursor_col >= 0 ? cursor_col - col_offset : -1;
-    return HighlightBuildFileLine(build_file_kind, line, draw_col, cursor_style);
+    return HighlightBuildFileLine(build_file_kind, display_line, draw_col, cursor_style);
   }
   if (!syntax_highlight) {
-    if (cursor_col < 0 || !cursor_style || !cursor_blink::visible()) {
-      return line.empty() ? text(" ") : text(line);
+    if (draw_col < 0 || !cursor_style || !cursor_blink::visible()) {
+      return display_line.empty() ? text(" ") : text(display_line);
     }
-    const int clamped = std::max(0, std::min(cursor_col, static_cast<int>(line.size())));
+    const int clamped = std::max(0, std::min(draw_col, static_cast<int>(display_line.size())));
     Elements parts;
     if (clamped > 0) {
-      parts.push_back(text(line.substr(0, static_cast<std::size_t>(clamped))));
+      parts.push_back(text(display_line.substr(0, static_cast<std::size_t>(clamped))));
     }
     const std::string cursor_char =
-        clamped < static_cast<int>(line.size())
-            ? line.substr(static_cast<std::size_t>(clamped), 1)
+        clamped < static_cast<int>(display_line.size())
+            ? display_line.substr(static_cast<std::size_t>(clamped), 1)
             : " ";
     parts.push_back(text(cursor_char) | cursor_style);
-    if (clamped + 1 < static_cast<int>(line.size())) {
-      parts.push_back(text(line.substr(static_cast<std::size_t>(clamped + 1))));
+    if (clamped + 1 < static_cast<int>(display_line.size())) {
+      parts.push_back(text(display_line.substr(static_cast<std::size_t>(clamped + 1))));
     }
     return hbox(std::move(parts));
   }
-  return HighlightCodeLine(line, line_index, semantic_tokens, cursor_col, cursor_style, col_offset,
-                           highlight_ctx);
+  return HighlightCodeLine(display_line, line_index, semantic_tokens, draw_col, cursor_style,
+                         visual_col_offset, highlight_ctx);
 }
 
 Element render_simple_line(const std::string& line, int line_index, const EditorBuffer& buffer,

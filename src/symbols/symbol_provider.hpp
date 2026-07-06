@@ -173,6 +173,14 @@ class ISymbolProvider {
 
   virtual bool supports_diagnostics() const { return false; }
   virtual uint64_t diagnostics_revision() const { return 0; }
+  virtual bool document_sync_pending(const std::string& path) const {
+    (void)path;
+    return false;
+  }
+  virtual bool diagnostics_display_ready(const std::string& path) const {
+    (void)path;
+    return true;
+  }
   virtual DocumentDiagnostics diagnostics_for_file(const std::string& path) {
     (void)path;
     return {};

@@ -15,6 +15,7 @@
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/component/event.hpp"
+#include "ftxui/component/loop.hpp"
 #include "ftxui/component/screen_interactive.hpp"
 #include "editor/text_search.hpp"
 #include "i18n/locale.hpp"
@@ -76,17 +77,12 @@ bool event_is_alt_down(const Event& event) {
 void force_immediate_repaint(MainLayoutState* layout, ScreenInteractive* screen) {
   if (layout != nullptr) {
     layout->request_ui_tick = true;
+    layout->terminal_sync_after_draw = true;
   }
   if (screen == nullptr) {
     return;
   }
   screen->PostEvent(Event::Custom);
-  // PostEvent invalidates the frame but Draw runs later in the same RunOnce.
-  // ConPTY / PowerShell+WSL may keep showing the old buffer until extra stdout
-  // activity; chain a deferred nudge so it runs after the draw flush.
-  screen->Post([screen] {
-    screen->Post([] { nudge_terminal_repaint(); });
-  });
 }
 
 class EventPoller {
@@ -2255,7 +2251,8 @@ int Application::run() {
           force_immediate_repaint(&layout_state_, &screen);
           return true;
         }
-        if (is_editor_focus_region(focus_state_.region) && editor_browse_active &&
+        if (is_editor_focus_region(focus_state_.region) &&
+            (editor_browse_active || app_mode_ == AppMode::kDebug) &&
             layout_state_.text_input_focus != TextInputFocus::Console &&
             !is_search_input_focus(layout_state_.text_input_focus) &&
             !is_watch_input_focus(layout_state_.text_input_focus) &&
@@ -2434,7 +2431,14 @@ int Application::run() {
     screen.PostEvent(Event::Custom);
   };
 
-  screen.Loop(WrapUiTickPost(root, &layout_state_, &screen));
+  Loop ui_loop(&screen, WrapUiTickPost(root, &layout_state_, &screen));
+  while (!ui_loop.HasQuitted()) {
+    ui_loop.RunOnceBlocking();
+    if (layout_state_.terminal_sync_after_draw.exchange(false)) {
+      screen.WithRestoredIO(nudge_terminal_repaint)();
+      screen.PostEvent(Event::Custom);
+    }
+  }
 
   if (!ui_smoke) {
     disable_extended_key_reporting();

@@ -1,10 +1,41 @@
 #include "lsp/diagnostics.hpp"
 
+#include <chrono>
+
+#include "lsp/lsp_sync.hpp"
 #include "lsp/lsp_uri.hpp"
+#include "symbols/symbol_provider.hpp"
 #include "util/include_tree.hpp"
 #include "i18n/tr.hpp"
 
 namespace tgdb {
+
+namespace {
+
+int64_t steady_now_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+}  // namespace
+
+bool diagnostics_display_allowed(const int64_t last_content_edit_ms, ISymbolProvider* symbols,
+                                 const std::string& path) {
+  if (path.empty() || symbols == nullptr || !symbols->supports_diagnostics()) {
+    return false;
+  }
+  if (steady_now_ms() - last_content_edit_ms < kLspDocumentDebounceMs) {
+    return false;
+  }
+  if (symbols->document_sync_pending(path)) {
+    return false;
+  }
+  if (!symbols->diagnostics_display_ready(path)) {
+    return false;
+  }
+  return true;
+}
 
 int count_errors(const DocumentDiagnostics& doc) {
   int n = 0;

@@ -99,6 +99,10 @@ void notify_editor_buffer_changed(WorkspaceModel* workspace, EditorPanelState* p
   if (buffer.path.empty()) {
     return;
   }
+  const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now().time_since_epoch())
+                          .count();
+  workspace->last_buffer_edit_ms = now;
   buffer.view_token++;
   if (panel != nullptr) {
     mark_editor_content_edited(panel, buffer);
@@ -474,11 +478,13 @@ void rebuild_diagnostics_by_line(EditorPanelState* panel, const DocumentDiagnost
 }
 
 void rebuild_diagnostic_suffix_cache(EditorPanelState* panel, const EditorBuffer& buffer,
-                                     int code_width, uint64_t revision) {
+                                     int code_width, uint64_t revision,
+                                     ISymbolProvider* symbols, int64_t last_edit_ms) {
   if (panel == nullptr || code_width <= 0) {
     return;
   }
-  if (!editor_content_settled(*panel)) {
+  if (!diagnostics_display_allowed(last_edit_ms, symbols, buffer.path)) {
+    panel->diagnostic_suffix_by_line.clear();
     return;
   }
   if (panel->diagnostic_suffix_code_width == code_width &&
@@ -804,10 +810,20 @@ void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
   if (panel == nullptr || symbols == nullptr || !symbols->supports_diagnostics()) {
     return;
   }
-  const uint64_t revision = symbols->diagnostics_revision();
   const std::string path =
       workspace != nullptr && !workspace->buffer.path.empty() ? workspace->buffer.path
                                                                 : std::string{};
+  const int64_t last_edit_ms =
+      workspace != nullptr ? workspace->last_buffer_edit_ms : panel->content_edit_ms;
+  if (!diagnostics_display_allowed(last_edit_ms, symbols, path)) {
+    panel->problem_errors = 0;
+    panel->problem_warnings = 0;
+    panel->cached_file_diag = {};
+    panel->cached_file_diag_revision = 0;
+    return;
+  }
+
+  const uint64_t revision = symbols->diagnostics_revision();
   if (revision == panel->last_diag_revision && panel->last_diag_path == path) {
     return;
   }
@@ -841,10 +857,12 @@ void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
 
 const DocumentDiagnostics& cached_file_diagnostics(EditorPanelState* panel,
                                                    ISymbolProvider* symbols,
-                                                   const std::string& path) {
+                                                   const std::string& path,
+                                                   int64_t last_edit_ms) {
   static const DocumentDiagnostics kEmpty;
   if (panel == nullptr || symbols == nullptr || !symbols->supports_diagnostics() ||
-      path.empty() || !is_lsp_trackable_path(path)) {
+      path.empty() || !is_lsp_trackable_path(path) ||
+      !diagnostics_display_allowed(last_edit_ms, symbols, path)) {
     return kEmpty;
   }
   const uint64_t revision = symbols->diagnostics_revision();
@@ -2982,7 +3000,8 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     if (in_gutter && diagnostic_modal != nullptr && symbols != nullptr &&
         symbols->supports_diagnostics() && !buffer->path.empty()) {
       const DocumentDiagnostics& file_diag =
-          cached_file_diagnostics(panel, symbols.get(), buffer->path);
+          cached_file_diagnostics(panel, symbols.get(), buffer->path,
+                                  workspace->last_buffer_edit_ms);
       if (handle_gutter_marker_click(panel, diagnostic_modal, file_diag, m)) {
         end_mouse_selection(panel);
         return true;
@@ -3480,7 +3499,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     if (completion->live_mode) {
       // Live completion: typing continues in the editor.
-    } else {
+    } else if (event != Event::Tab && event != Event::Return) {
       return true;
     }
   }
@@ -3597,7 +3616,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     return true;
   }
-  if (event == Event::Tab) {
+  if (event_is_plain_tab(event)) {
     insert_tab_stop(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     notify_editor_buffer_changed(workspace, panel, symbols);
@@ -4323,11 +4342,19 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                    : std::vector<StickyLine>{});
 
     DocumentDiagnostics file_diag;
-    if (symbols && symbols->supports_diagnostics() && !buffer.path.empty() &&
-        is_lsp_trackable_path(buffer.path)) {
-      file_diag = cached_file_diagnostics(panel_state.get(), symbols.get(), buffer.path);
+    const bool show_diagnostics =
+        symbols && symbols->supports_diagnostics() && !buffer.path.empty() &&
+        is_lsp_trackable_path(buffer.path) &&
+        diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), buffer.path);
+    if (show_diagnostics) {
+      file_diag = cached_file_diagnostics(panel_state.get(), symbols.get(), buffer.path,
+                                          workspace->last_buffer_edit_ms);
       rebuild_diagnostics_by_line(panel_state.get(), file_diag,
                                   panel_state->cached_file_diag_revision);
+    } else {
+      panel_state->diagnostics_by_line.clear();
+      panel_state->diagnostics_by_line_path.clear();
+      panel_state->diagnostics_by_line_revision = 0;
     }
     const bool has_git_markers =
         git_service != nullptr && git_service->is_repo() &&
@@ -4335,7 +4362,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool has_breakpoint_markers =
         debug_model != nullptr && !buffer.path.empty();
     const bool gutter_markers =
-        has_breakpoint_markers || !file_diag.items.empty() || has_git_markers;
+        has_breakpoint_markers || (show_diagnostics && !file_diag.items.empty()) || has_git_markers;
     panel_state->gutter_scroll_start = start;
     panel_state->gutter_visible_rows = std::max(0, end - start);
 
@@ -4345,7 +4372,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     track_editor_scroll(panel_state.get(), start, layout_state);
     rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
-                                    panel_state->cached_file_diag_revision);
+                                    panel_state->cached_file_diag_revision, symbols.get(),
+                                    workspace->last_buffer_edit_ms);
 
     const bool suffixes_enabled =
         layout_state == nullptr || layout_state->app_settings == nullptr ||

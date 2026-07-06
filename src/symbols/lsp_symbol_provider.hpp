@@ -51,6 +51,8 @@ class LspSymbolProvider : public ISymbolProvider {
 
   bool supports_diagnostics() const override;
   uint64_t diagnostics_revision() const override;
+  bool document_sync_pending(const std::string& path) const override;
+  bool diagnostics_display_ready(const std::string& path) const override;
   DocumentDiagnostics diagnostics_for_file(const std::string& path) override;
   std::vector<DocumentDiagnostics> workspace_diagnostics() override;
 

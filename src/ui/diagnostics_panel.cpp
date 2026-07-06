@@ -121,6 +121,11 @@ std::vector<DiagnosticRow> build_rows(WorkspaceModel* workspace,
     return rows;
   }
 
+  const int64_t last_edit_ms = workspace != nullptr ? workspace->last_buffer_edit_ms : 0;
+  if (!diagnostics_display_allowed(last_edit_ms, symbols.get(), active)) {
+    return rows;
+  }
+
   const std::string workspace_root = workspace != nullptr ? workspace->root : std::string{};
   const std::string active_text =
       workspace != nullptr ? buffer_text(workspace->buffer) : std::string{};

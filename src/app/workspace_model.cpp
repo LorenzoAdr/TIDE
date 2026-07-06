@@ -100,6 +100,7 @@ void WorkspaceModel::load_active_tab_into_buffer() {
   buffer = tab.buffer;
   active_file = tab.path;
   buffer.view_token++;
+  last_buffer_edit_ms = 0;
 }
 
 void WorkspaceModel::clear_tabs() {

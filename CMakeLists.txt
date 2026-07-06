@@ -85,6 +85,7 @@ add_executable(tgdb
   src/indexer/index_rules.cpp
   src/indexer/workspace_watcher.cpp
   src/lsp/lsp_uri.cpp
+  src/lsp/lsp_position.cpp
   src/lsp/lsp_transport.cpp
   src/lsp/lsp_text_edits.cpp
   src/lsp/lsp_client.cpp

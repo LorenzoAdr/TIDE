@@ -1,6 +1,7 @@
 #include "lsp/lsp_client.hpp"
 
 #include <vector>
+#include <algorithm>
 #include <cstdlib>
 #include <fcntl.h>
 #include <filesystem>
@@ -13,6 +14,7 @@
 #include <unistd.h>
 
 #include "lsp/lsp_uri.hpp"
+#include "lsp/lsp_position.hpp"
 #include "indexer/index_rules.hpp"
 #include "util/bundled_tools.hpp"
 
@@ -783,12 +785,24 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
   }
 
   if (!text.empty()) {
-    did_change(key, text);
+    sync_document_and_wait(key, text);
+  } else {
+    uint64_t generation = 0;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      const auto it = documents_.find(key);
+      if (it != documents_.end()) {
+        generation = it->second.generation;
+      }
+    }
+    if (generation > 0) {
+      wait_for_document_ready(key, generation, 5000);
+    }
   }
 
   const std::string uri = path_to_uri(key);
   nlohmann::json params = {{"textDocument", {{"uri", uri}}},
-                           {"position", {{"line", line}, {"character", character}}},
+                           {"position", make_lsp_position(text, line, character)},
                            {"context", {{"triggerKind", 1}}}};
 
   nlohmann::json result;
@@ -889,12 +903,12 @@ SourceLocation LspClient::request_location(const std::string& method,
   }
 
   if (!text.empty()) {
-    did_change(absolute_path, text);
+    sync_document_and_wait(absolute_path, text);
   }
 
   const std::string uri = path_to_uri(absolute_path);
   nlohmann::json params = {{"textDocument", {{"uri", uri}}},
-                           {"position", {{"line", line}, {"character", character}}}};
+                           {"position", make_lsp_position(text, line, character)}};
 
   nlohmann::json result;
   if (!send_lsp_request(method, std::move(params), 10000, &result)) {
@@ -1001,12 +1015,12 @@ HoverInfo LspClient::hover(const std::string& absolute_path, const std::string& 
   }
 
   if (!text.empty()) {
-    did_change(absolute_path, text);
+    sync_document_and_wait(absolute_path, text);
   }
 
   const std::string uri = path_to_uri(absolute_path);
   nlohmann::json params = {{"textDocument", {{"uri", uri}}},
-                           {"position", {{"line", line}, {"character", character}}}};
+                           {"position", make_lsp_position(text, line, character)}};
 
   nlohmann::json result;
   if (!send_lsp_request("textDocument/hover", std::move(params), 5000, &result)) {
@@ -1023,7 +1037,7 @@ std::optional<std::string> LspClient::format_document(const std::string& absolut
   }
 
   if (!text.empty()) {
-    did_open(absolute_path, text);
+    did_change(absolute_path, text);
   }
 
   const std::string key = normalize_lsp_path(absolute_path);
@@ -1033,7 +1047,7 @@ std::optional<std::string> LspClient::format_document(const std::string& absolut
 
   const std::string uri = path_to_uri(key);
   const ClangFormatConfig style = load_clang_format_for_file(key, workspace_root_);
-  const int tab_size = std::max(1, style.indent_width);
+  const int tab_size = std::max(1, style.effective_tab_width());
   const bool insert_spaces = !style.uses_tab_char();
   nlohmann::json params = {{"textDocument", {{"uri", uri}}},
                            {"options", {{"tabSize", tab_size},
@@ -1579,6 +1593,70 @@ uint64_t LspClient::document_generation(const std::string& absolute_path) const 
   return it->second.generation;
 }
 
+bool LspClient::document_diagnostics_current(const std::string& absolute_path) const {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return true;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = documents_.find(key);
+  if (it == documents_.end()) {
+    return true;
+  }
+  return it->second.diagnostics_generation >= it->second.generation;
+}
+
+int LspClient::parse_wait_timeout_ms(const std::string& text) {
+  const int64_t scaled = static_cast<int64_t>(text.size()) / 500;
+  return static_cast<int>(std::clamp<int64_t>(500 + scaled, 500, 10000));
+}
+
+bool LspClient::wait_for_document_ready(const std::string& key, uint64_t generation,
+                                        int timeout_ms) {
+  if (generation == 0 || timeout_ms <= 0) {
+    return true;
+  }
+
+  const int64_t deadline = steady_now_ms() + timeout_ms;
+  while (steady_now_ms() < deadline) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      const auto it = documents_.find(key);
+      if (it != documents_.end() &&
+          it->second.diagnostics_generation >= generation) {
+        return true;
+      }
+    }
+    usleep(5000);
+  }
+  return false;
+}
+
+void LspClient::sync_document_and_wait(const std::string& absolute_path,
+                                       const std::string& text) {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return;
+  }
+
+  if (!text.empty()) {
+    did_change(absolute_path, text);
+  }
+
+  uint64_t generation = 0;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = documents_.find(key);
+    if (it != documents_.end()) {
+      generation = it->second.generation;
+    }
+  }
+
+  if (generation > 0) {
+    wait_for_document_ready(key, generation, parse_wait_timeout_ms(text));
+  }
+}
+
 Diagnostic LspClient::parse_diagnostic(const nlohmann::json& item) {
   Diagnostic diag;
   if (!item.is_object()) {
@@ -1653,6 +1731,18 @@ void LspClient::on_lsp_notification(const std::string& method, const nlohmann::j
   } else {
     diagnostics_[doc.path] = std::move(doc);
   }
+
+  const auto it = documents_.find(doc.path);
+  if (it != documents_.end()) {
+    int diag_version = -1;
+    if (params.contains("version") && params["version"].is_number_integer()) {
+      diag_version = params["version"].get<int>();
+    }
+    if (diag_version < 0 || diag_version == it->second.version) {
+      it->second.diagnostics_generation = it->second.generation;
+    }
+  }
+
   diagnostics_revision_.fetch_add(1, std::memory_order_release);
 }
 

@@ -79,6 +79,7 @@ class LspClient {
   std::vector<CallHierarchyItem> outgoing_calls(const CallHierarchyItem& item);
 
   DocumentDiagnostics diagnostics_for_file(const std::string& absolute_path);
+  bool document_diagnostics_current(const std::string& absolute_path) const;
   std::vector<DocumentDiagnostics> all_diagnostics() const;
   uint64_t diagnostics_revision() const { return diagnostics_revision_.load(); }
 
@@ -88,9 +89,13 @@ class LspClient {
     std::string text;
     int version = 0;
     uint64_t generation = 0;
+    uint64_t diagnostics_generation = 0;
   };
 
   uint64_t document_generation(const std::string& absolute_path) const;
+  void sync_document_and_wait(const std::string& absolute_path, const std::string& text);
+  bool wait_for_document_ready(const std::string& key, uint64_t generation, int timeout_ms);
+  static int parse_wait_timeout_ms(const std::string& text);
 
   struct SemanticTokenAttempt {
     int count = 0;

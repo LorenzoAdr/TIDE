@@ -112,10 +112,35 @@ int IndentGuideTracker::advance(const std::string& line, int tab_size) {
   if (is_blank_line(line)) {
     current_depth_ = prev_indent_cols_ / tab_size;
   } else {
-    current_depth_ = indent_cols / tab_size;
+    current_depth_ =
+        indent_cols > 0 ? (indent_cols + tab_size - 1) / tab_size : 0;
     prev_indent_cols_ = indent_cols;
   }
   return current_depth_;
+}
+
+std::string expand_tabs_for_display(const std::string& line, int tab_size) {
+  if (tab_size <= 0) {
+    tab_size = 4;
+  }
+  if (line.find('\t') == std::string::npos) {
+    return line;
+  }
+
+  std::string out;
+  out.reserve(line.size());
+  int col = 0;
+  for (unsigned char c : line) {
+    if (c == '\t') {
+      const int width = tab_size - (col % tab_size);
+      out.append(static_cast<std::size_t>(width), ' ');
+      col += width;
+    } else {
+      out.push_back(static_cast<char>(c));
+      ++col;
+    }
+  }
+  return out;
 }
 
 IndentGuideSplit split_indent_guide_prefix(const std::string& view_line, int tab_size,

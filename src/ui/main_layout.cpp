@@ -1038,26 +1038,30 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       workspace->ensure_buffer();
       const uint64_t revision = symbols->diagnostics_revision();
       const std::string& active_path = workspace->buffer.path;
-      if (revision != split_state->last_diag_revision ||
-          active_path != split_state->last_diag_path) {
+      const bool show_diag_counts =
+          !active_path.empty() &&
+          diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), active_path);
+      if (!show_diag_counts) {
+        split_state->diag_errors = 0;
+        split_state->diag_warnings = 0;
+      } else if (revision != split_state->last_diag_revision ||
+                 active_path != split_state->last_diag_path) {
         split_state->last_diag_revision = revision;
         split_state->last_diag_path = active_path;
         split_state->diag_errors = 0;
         split_state->diag_warnings = 0;
-        if (!active_path.empty()) {
-          std::vector<std::string> workspace_files;
-          if (indexer != nullptr) {
-            const auto snapshot = indexer->snapshot();
-            if (snapshot) {
-              workspace_files = snapshot->files;
-            }
+        std::vector<std::string> workspace_files;
+        if (indexer != nullptr) {
+          const auto snapshot = indexer->snapshot();
+          if (snapshot) {
+            workspace_files = snapshot->files;
           }
-          const auto docs = diagnostics_for_translation_unit(
-              symbols->workspace_diagnostics(), active_path, workspace->root, workspace_files,
-              buffer_text(workspace->buffer));
-          count_workspace_diagnostics(docs, &split_state->diag_errors,
-                                      &split_state->diag_warnings);
         }
+        const auto docs = diagnostics_for_translation_unit(
+            symbols->workspace_diagnostics(), active_path, workspace->root, workspace_files,
+            buffer_text(workspace->buffer));
+        count_workspace_diagnostics(docs, &split_state->diag_errors,
+                                    &split_state->diag_warnings);
       }
       if (split_state->diag_errors > 0 || split_state->diag_warnings > 0) {
         status_msg += i18n::tr("status.section_separator");

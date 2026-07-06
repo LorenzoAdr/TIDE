@@ -6,6 +6,8 @@
 
 namespace tgdb {
 
+class ISymbolProvider;
+
 enum class DiagnosticSeverity { kError = 1, kWarning = 2, kInfo = 3, kHint = 4 };
 
 struct Diagnostic {
@@ -40,5 +42,8 @@ std::vector<DocumentDiagnostics> diagnostics_for_translation_unit(
 std::vector<Diagnostic> diagnostics_on_line(const DocumentDiagnostics& doc, int line);
 std::string diagnostic_severity_label(DiagnosticSeverity severity);
 std::string build_diagnostic_suffix(const std::vector<Diagnostic>& items, int max_chars);
+
+bool diagnostics_display_allowed(int64_t last_content_edit_ms, ISymbolProvider* symbols,
+                                 const std::string& path);
 
 }  // namespace tgdb

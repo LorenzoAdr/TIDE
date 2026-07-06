@@ -36,6 +36,9 @@ int indent_guide_depth_for_line(const std::vector<std::string>& lines, int line_
 int visual_column_to_byte_index(const std::string& line, int visual_col, int tab_size);
 int byte_index_to_visual_column(const std::string& line, int byte_index, int tab_size);
 
+// FTXUI no expande tabs al pintar; convierte a espacios para el ancho visual correcto.
+std::string expand_tabs_for_display(const std::string& line, int tab_size);
+
 std::string build_blank_line_guides(int tab_size, int guide_depth, int max_width);
 
 }  // namespace tgdb
