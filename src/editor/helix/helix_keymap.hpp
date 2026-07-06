@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -12,7 +13,7 @@ namespace tgdb {
 
 struct HelixKeyTrieNode {
   std::optional<HelixCommand> command;
-  std::unordered_map<std::string, HelixKeyTrieNode> children;
+  std::unordered_map<std::string, std::unique_ptr<HelixKeyTrieNode>> children;
 };
 
 struct HelixKeyLookupResult {

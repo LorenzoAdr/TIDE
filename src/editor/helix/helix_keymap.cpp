@@ -7,7 +7,11 @@ namespace tgdb {
 namespace {
 
 HelixKeyTrieNode& bind(HelixKeyTrieNode* node, const std::string& key) {
-  return node->children[key];
+  auto& slot = node->children[key];
+  if (!slot) {
+    slot = std::make_unique<HelixKeyTrieNode>();
+  }
+  return *slot;
 }
 
 void set_cmd(HelixKeyTrieNode* node, HelixCommand command) {
@@ -200,10 +204,10 @@ const HelixKeyTrieNode* follow_prefix(const HelixKeyTrieNode& root,
   const HelixKeyTrieNode* node = &root;
   for (const std::string& key : prefix) {
     const auto it = node->children.find(key);
-    if (it == node->children.end()) {
+    if (it == node->children.end() || it->second == nullptr) {
       return nullptr;
     }
-    node = &it->second;
+    node = it->second.get();
   }
   return node;
 }
@@ -222,14 +226,14 @@ HelixKeyLookupResult helix_lookup_key(HelixMode mode, const std::vector<std::str
     return result;
   }
   const auto it = base->children.find(key);
-  if (it == base->children.end()) {
+  if (it == base->children.end() || it->second == nullptr) {
     return result;
   }
-  result.node = &it->second;
-  if (it->second.command.has_value()) {
+  result.node = it->second.get();
+  if (it->second->command.has_value()) {
     result.kind = HelixKeyLookupResult::Kind::kMatched;
-    result.command = *it->second.command;
-  } else if (!it->second.children.empty()) {
+    result.command = *it->second->command;
+  } else if (!it->second->children.empty()) {
     result.kind = HelixKeyLookupResult::Kind::kPending;
   }
   return result;
@@ -241,7 +245,11 @@ std::vector<std::pair<std::string, std::string>> helix_hint_entries(HelixMode mo
   if (node == nullptr) {
     return entries;
   }
-  for (const auto& [key, child] : node->children) {
+  for (const auto& [key, child_ptr] : node->children) {
+    if (child_ptr == nullptr) {
+      continue;
+    }
+    const HelixKeyTrieNode& child = *child_ptr;
     std::string label = key;
     if (label == "<space>") {
       label = "space";

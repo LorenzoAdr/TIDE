@@ -49,10 +49,10 @@ Element make_helix_hint_overlay(const HelixEditorState& helix) {
   const HelixKeyTrieNode* base = &helix_keymap_root(helix.mode);
   for (const std::string& key : helix.pending_keys) {
     const auto it = base->children.find(key);
-    if (it == base->children.end()) {
+    if (it == base->children.end() || it->second == nullptr) {
       return text("");
     }
-    base = &it->second;
+    base = it->second.get();
   }
   const auto entries = helix_hint_entries(helix.mode, base);
   const std::string title =
