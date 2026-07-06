@@ -7,6 +7,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Threads REQUIRED)
 
+function(tgdb_link_pthread target)
+  if(UNIX)
+    target_link_libraries(${target} PRIVATE pthread)
+  endif()
+endfunction()
+
 include(cmake/Dependencies.cmake)
 
 add_executable(tgdb
@@ -179,9 +185,7 @@ target_link_libraries(tgdb PRIVATE
   cppdap
   Threads::Threads
 )
-if(UNIX)
-  target_link_libraries(tgdb PRIVATE pthread)
-endif()
+tgdb_link_pthread(tgdb)
 
 if(UNIX)
   target_link_options(tgdb PRIVATE -rdynamic)
@@ -210,10 +214,12 @@ target_link_libraries(tgdb-bundle-wizard PRIVATE ftxui::component ftxui::dom ftx
 add_executable(hello examples/hello.cpp)
 target_compile_options(hello PRIVATE -g -O0)
 target_link_libraries(hello PRIVATE Threads::Threads)
+tgdb_link_pthread(hello)
 
 add_executable(packet_monitor_demo examples/packet_monitor_demo.cpp)
 target_compile_options(packet_monitor_demo PRIVATE -g -O0)
 target_link_libraries(packet_monitor_demo PRIVATE Threads::Threads)
+tgdb_link_pthread(packet_monitor_demo)
 
 add_library(tgdb_pkt_preload SHARED tools/packet_preload/pkt_hook.c)
 target_include_directories(tgdb_pkt_preload PRIVATE tools/packet_preload)
@@ -297,9 +303,6 @@ target_include_directories(workspace_indexer_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
-if(UNIX)
-  target_link_libraries(workspace_indexer_test PRIVATE pthread)
-endif()
 
 add_executable(csv_index_test
   tests/csv_index_test.cpp
@@ -332,9 +335,6 @@ target_include_directories(external_viewer_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
-if(UNIX)
-  target_link_libraries(external_viewer_test PRIVATE pthread)
-endif()
 
 add_executable(tabular_file_test
   tests/tabular_file_test.cpp
@@ -392,3 +392,24 @@ target_include_directories(pkt_protocol_test PRIVATE
 target_compile_definitions(pkt_protocol_test PRIVATE
   TGDB_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+
+set(TGDB_TEST_TARGETS
+  i18n_test
+  text_ops_test
+  bracket_match_test
+  build_environment_test
+  workspace_detect_test
+  fuzzy_match_test
+  workspace_indexer_test
+  csv_index_test
+  external_viewer_test
+  tabular_file_test
+  glyphs_test
+  compiler_location_test
+  nm_reader_test
+  git_diff_test
+  pkt_protocol_test
+)
+foreach(_tgdb_test_target IN LISTS TGDB_TEST_TARGETS)
+  tgdb_link_pthread(${_tgdb_test_target})
+endforeach()
