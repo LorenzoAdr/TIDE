@@ -147,9 +147,6 @@ bool list_workspace_files_rg(const std::string& workspace_root,
     while (true) {
       const std::size_t newline = pending.find('\n', pos);
       if (newline == std::string::npos) {
-        if (pos > 0) {
-          pending.erase(0, pos);
-        }
         break;
       }
       const std::string line = trim_line(pending.substr(pos, newline - pos));
@@ -163,8 +160,8 @@ bool list_workspace_files_rg(const std::string& workspace_root,
       }
       files.push_back(*rel);
     }
-    if (pos > 0 && pos >= pending.size()) {
-      pending.clear();
+    if (pos > 0) {
+      pending.erase(0, pos);
     }
   };
 

@@ -237,9 +237,6 @@ bool search_workspace_rg(const WorkspaceSearchOptions& opts, const std::string& 
     while (continue_search) {
       const std::size_t newline = pending.find('\n', pos);
       if (newline == std::string::npos) {
-        if (pos > 0) {
-          pending.erase(0, pos);
-        }
         break;
       }
       const std::string line = pending.substr(pos, newline - pos);
@@ -249,8 +246,8 @@ bool search_workspace_rg(const WorkspaceSearchOptions& opts, const std::string& 
         break;
       }
     }
-    if (pos > 0 && pos >= pending.size()) {
-      pending.clear();
+    if (pos > 0) {
+      pending.erase(0, pos);
     }
   };
 
