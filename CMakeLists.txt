@@ -13,6 +13,10 @@ function(tgdb_link_pthread target)
   endif()
 endfunction()
 
+if(UNIX)
+  find_library(TGDB_UTIL_LIBRARY util)
+endif()
+
 include(cmake/Dependencies.cmake)
 
 add_executable(tgdb
@@ -186,6 +190,9 @@ target_link_libraries(tgdb PRIVATE
   Threads::Threads
 )
 tgdb_link_pthread(tgdb)
+if(TGDB_UTIL_LIBRARY)
+  target_link_libraries(tgdb PRIVATE ${TGDB_UTIL_LIBRARY})
+endif()
 
 if(UNIX)
   target_link_options(tgdb PRIVATE -rdynamic)
