@@ -42,6 +42,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool supports_semantic_highlight() const override;
   bool ensure_semantic_tokens(const std::string& path) override;
   SemanticTokenDocument semantic_tokens_for_file(const std::string& path) override;
+  bool semantic_tokens_current_for_file(const std::string& path) override;
 
   bool supports_hover() const override;
   bool hover_uses_async_fetch() const override;
@@ -118,13 +119,14 @@ class LspSymbolProvider : public ISymbolProvider {
   void stop_async_worker_locked();
   void async_worker_main();
   void enqueue_document_symbols_locked(const std::string& path, bool force = false);
-  void enqueue_semantic_tokens_locked(const std::string& path);
+  void enqueue_semantic_tokens_locked(const std::string& path, bool force = false);
   bool symbols_lsp_pending_locked(const std::string& path) const;
   void tick_content_refresh_locked();
   void tick_pending_did_change_locked();
   void flush_pending_did_change_for_key_locked(const std::string& key);
   void flush_pending_did_change_for_key(const std::string& key);
   void flush_all_pending_did_change_locked();
+  bool sync_document_for_completion(const std::string& path, const std::string& text);
   void open_companion_sources_for_clangd_locked(const std::string& header_path);
   void clear_shadow_companion_locked(const std::string& companion_path);
   bool buffer_open_locked(const std::string& path) const;
@@ -157,6 +159,9 @@ class LspSymbolProvider : public ISymbolProvider {
   std::unordered_set<std::string> inflight_completion_;
   std::unordered_map<std::string, HoverInfo> hover_cache_;
   std::unordered_map<std::string, std::vector<CompletionItem>> completion_cache_;
+  std::unordered_map<std::string, std::string> latest_completion_key_by_path_;
+  std::unordered_map<std::string, int64_t> last_completion_document_sync_ms_;
+  std::unordered_map<std::string, int64_t> pending_semantic_refresh_;
   std::unordered_map<std::string, int64_t> pending_content_refresh_;
   std::unordered_map<std::string, int64_t> pending_did_change_;
   std::atomic<uint64_t> semantic_highlight_revision_{0};

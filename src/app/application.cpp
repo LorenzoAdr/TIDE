@@ -9,13 +9,13 @@
 #include <memory>
 #include <sstream>
 #include <thread>
+#include <unistd.h>
 
 #include "backend/idebug_backend.hpp"
 #include "dap/gdb_launcher.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/component/event.hpp"
-#include "ftxui/component/loop.hpp"
 #include "ftxui/component/screen_interactive.hpp"
 #include "editor/text_search.hpp"
 #include "i18n/locale.hpp"
@@ -46,6 +46,7 @@
 #include "ui/terminal_keyboard.hpp"
 #include "ui/terminal_display.hpp"
 #include "util/crash_handler.hpp"
+#include "util/debug_session_log.hpp"
 #include "util/bundled_tools.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/thread_name.hpp"
@@ -77,9 +78,6 @@ bool event_is_alt_down(const Event& event) {
 void force_immediate_repaint(MainLayoutState* layout, ScreenInteractive* screen) {
   if (layout != nullptr) {
     layout->request_ui_tick = true;
-    if (!layout->shutdown_ui_poll_paused.load(std::memory_order_acquire)) {
-      layout->terminal_sync_after_draw = true;
-    }
   }
   if (screen == nullptr) {
     return;
@@ -282,7 +280,6 @@ void Application::stop_all_subprocesses() {
   build_artifact_watcher_.stop();
   global_build_environment_service().shutdown();
   shell_session_.stop();
-  workspace_watcher_.stop();
   if (symbol_provider_) {
     symbol_provider_->on_workspace_closed();
   }
@@ -444,8 +441,6 @@ void Application::restart_workspace_indexing() {
   }
   const IndexFilterOptions options = index_filter_options();
   indexer_.start_scan(workspace_.root, options);
-  workspace_watcher_.stop();
-  workspace_watcher_.start(workspace_.root, options);
 }
 
 void Application::reindex_project() {
@@ -644,7 +639,6 @@ void Application::tick_shutdown() {
        }},
       {i18n::tr("app.shutdown.stop_watcher"),
        [this] {
-         workspace_watcher_.stop();
          build_artifact_watcher_.stop();
        }},
       {i18n::tr("app.shutdown.stop_build_env"),
@@ -671,6 +665,10 @@ void Application::tick_shutdown() {
     shutdown_performed_ = true;
   }
   layout_state_.request_ui_tick = true;
+}
+
+void Application::force_exit() {
+  _exit(1);
 }
 
 void Application::restore_workspace_session() {
@@ -778,7 +776,6 @@ void Application::set_workspace(const std::string& workspace_root,
   }
   indexer_.start_scan(absolute, index_filter_options());
   sync_symbol_workspace_indexer();
-  workspace_watcher_.start(absolute, index_filter_options());
   git_service_.open(absolute);
   restore_workspace_session();
 }
@@ -1336,7 +1333,7 @@ void Application::process_index_changes() {
   if (workspace_.root.empty()) {
     return;
   }
-  for (const auto& change : workspace_watcher_.drain_changes()) {
+  for (const auto& change : indexer_.drain_changes()) {
     if (change.kind == FileIndexChangeKind::Remove) {
       indexer_.remove_file(workspace_.root, change.relative_path);
       symbol_indexer_.remove_file(workspace_.root, change.relative_path);
@@ -1661,7 +1658,6 @@ int Application::run() {
     file_picker_state_.reset_preview();
     file_picker_state_.arm_ctrl_chord();
     force_immediate_repaint(&layout_state_, &screen);
-    screen.WithRestoredIO(nudge_terminal_repaint)();
   };
   layout_state_.helix_ide.open_symbol_picker = [this, &screen]() {
     symbol_picker_state_.open = true;
@@ -1714,7 +1710,6 @@ int Application::run() {
   file_picker_state_.set_preview_notify([this] { layout_state_.request_ui_tick = true; });
   file_picker_state_.set_repaint_notify([this, &screen] {
     force_immediate_repaint(&layout_state_, &screen);
-    screen.WithRestoredIO(nudge_terminal_repaint)();
   });
   symbol_picker_state_.set_search_notify([this] { layout_state_.request_ui_tick = true; });
 
@@ -1804,11 +1799,7 @@ int Application::run() {
           app_mode_ == AppMode::kDebug;
 
       if (shutdown_state_.is_active()) {
-        if (event == Event::Custom) {
-          cursor_blink::tick();
-          layout_state_.clickable.tick();
-        }
-        return true;
+        return false;
       }
 
         if (event == Event::Custom) {
@@ -1903,9 +1894,29 @@ int Application::run() {
         TGDB_MON("ui", key_msg.str());
       }
 
+      // #region agent log
+      if (!event_is_ctrl_p(event) && event.input() == "\x10") {
+        debug_session::trace("E", "application.cpp:near_miss", "raw_0x10_not_ctrl_p");
+      }
+      // #endregion
+
       // Tide app shortcuts must run before any_modal_open() and editor interceptors.
       if (event_is_ctrl_p(event)) {
+        // #region agent log
+        {
+          const std::string data = std::string("{\"input\":\"") +
+                                   debug_session::json_escape(event.input()) +
+                                   "\",\"kitty_release\":" +
+                                   (event_is_kitty_key_release(event) ? "true" : "false") +
+                                   ",\"was_open\":" +
+                                   (file_picker_state_.open ? "true" : "false") + "}";
+          debug_session::trace("A,E", "application.cpp:ctrl_p", "ctrl_p_handler_entry", data);
+        }
+        // #endregion
         if (event_is_kitty_key_release(event)) {
+          // #region agent log
+          debug_session::trace("C", "application.cpp:ctrl_p", "ctrl_p_kitty_release_passthrough");
+          // #endregion
           return false;
         }
         if (file_picker_state_.open) {
@@ -1917,7 +1928,6 @@ int Application::run() {
             file_picker_state_.update_preview_for_selection(model_.workspace_root);
           }
           force_immediate_repaint(&layout_state_, &screen);
-          screen.WithRestoredIO(nudge_terminal_repaint)();
           return true;
         }
         file_picker_state_.open = true;
@@ -1928,10 +1938,25 @@ int Application::run() {
         file_picker_state_.reset_preview();
         file_picker_state_.arm_ctrl_chord();
         force_immediate_repaint(&layout_state_, &screen);
-        screen.WithRestoredIO(nudge_terminal_repaint)();
+        // #region agent log
+        {
+          const std::string data = std::string("{\"open\":true,\"matches\":") +
+                                   std::to_string(file_picker_state_.matches.size()) + "}";
+          debug_session::trace("B,C", "application.cpp:ctrl_p", "ctrl_p_opened", data);
+        }
+        // #endregion
         return true;
       }
       if (event_is_ctrl_o(event)) {
+        // #region agent log
+        {
+          const std::string data = std::string("{\"input\":\"") +
+                                   debug_session::json_escape(event.input()) +
+                                   "\",\"was_open\":" +
+                                   (symbol_picker_state_.open ? "true" : "false") + "}";
+          debug_session::trace("baseline", "application.cpp:ctrl_o", "ctrl_o_handler_entry", data);
+        }
+        // #endregion
         if (event_is_kitty_key_release(event)) {
           return false;
         }
@@ -2021,6 +2046,15 @@ int Application::run() {
       }
 
       if (any_modal_open()) {
+        // #region agent log
+        if (file_picker_state_.open && !event.is_mouse()) {
+          const std::string data = std::string("{\"input\":\"") +
+                                   debug_session::json_escape(event.input()) +
+                                   "\",\"is_ctrl_p\":" +
+                                   (event_is_ctrl_p(event) ? "true" : "false") + "}";
+          debug_session::trace("C", "application.cpp:any_modal", "modal_delegates_to_child", data);
+        }
+        // #endregion
         return false;
       }
 
@@ -2295,6 +2329,11 @@ int Application::run() {
           layout_state_.text_input_focus != TextInputFocus::Console &&
           active_editor_handlers.key_handler) {
         if (active_editor_handlers.key_handler(event)) {
+          // #region agent log
+          if (event_is_ctrl_p(event) || event.input().find("\x10") != std::string::npos) {
+            debug_session::trace("A", "application.cpp:editor", "editor_consumed_ctrl_p_like");
+          }
+          // #endregion
           layout_state_.request_ui_tick = true;
           screen.PostEvent(Event::Custom);
           return true;
@@ -2470,12 +2509,8 @@ int Application::run() {
     }
   });
 
-  auto root = Renderer(inner_root, [this, inner_root] {
-    if (shutdown_state_.is_active()) {
-      return RenderShutdownFullScreen(shutdown_state_.snapshot());
-    }
-    return inner_root->Render();
-  });
+  auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_state_,
+                                  &layout_state_, [this] { force_exit(); });
 
   layout_state_.schedule_ui_tick = [this]() { layout_state_.request_ui_tick = true; };
   layout_state_.terminal_wake_callback = [this, &screen]() {
@@ -2483,15 +2518,7 @@ int Application::run() {
     screen.PostEvent(Event::Custom);
   };
 
-  Loop ui_loop(&screen, WrapUiTickPost(root, &layout_state_, &screen));
-  while (!ui_loop.HasQuitted()) {
-    ui_loop.RunOnceBlocking();
-    if (layout_state_.terminal_sync_after_draw.exchange(false) &&
-        !layout_state_.shutdown_ui_poll_paused.load(std::memory_order_acquire)) {
-      screen.WithRestoredIO(nudge_terminal_repaint)();
-      screen.PostEvent(Event::Custom);
-    }
-  }
+  screen.Loop(WrapUiTickPost(root, &layout_state_, &screen));
 
   if (!ui_smoke) {
     disable_extended_key_reporting();
@@ -2504,6 +2531,7 @@ int Application::run() {
   if (backend_ && !shutdown_performed_) {
     backend_->stop();
     backend_started_ = false;
+
   }
   return 0;
 }

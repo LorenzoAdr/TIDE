@@ -1,6 +1,7 @@
 #include "editor/bracket_match.hpp"
 
 #include <cassert>
+#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -57,6 +58,26 @@ void test_empty_lines_no_hang() {
   assert(match.line_b == 4);
 }
 
+void test_empty_string_literal_cursor() {
+  const EditorBuffer buffer = make_buffer({
+      "void foo(const char* p, const char* q);",
+      "foo(x, \"\");",
+      "int bar;",
+  });
+  assert(cursor_in_code(buffer, 2, 4));
+}
+
+void test_application_cpp_tail_cursor_in_code() {
+  EditorBuffer buffer;
+  std::ifstream input("/home/lorenzo/workspace/tgdb/src/app/application.cpp");
+  std::string line;
+  while (std::getline(input, line)) {
+    buffer.lines.push_back(line);
+  }
+  assert(cursor_in_code(buffer, 2470, 4));
+  assert(cursor_in_code(buffer, 2538, 4));
+}
+
 }  // namespace
 }  // namespace tgdb
 
@@ -65,6 +86,8 @@ int main() {
   tgdb::test_nested();
   tgdb::test_ignores_string();
   tgdb::test_empty_lines_no_hang();
+  tgdb::test_empty_string_literal_cursor();
+  tgdb::test_application_cpp_tail_cursor_in_code();
   std::cout << "bracket_match_test ok\n";
   return 0;
 }

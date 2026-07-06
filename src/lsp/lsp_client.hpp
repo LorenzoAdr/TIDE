@@ -46,7 +46,8 @@ class LspClient {
                                             const std::string& query);
   std::vector<CompletionItem> completions_at(const std::string& absolute_path,
                                                const std::string& text, int line,
-                                               int character);
+                                               int character,
+                                               bool document_synced = false);
   SourceLocation goto_definition(const std::string& absolute_path, const std::string& text,
                                  int line, int character);
   SourceLocation goto_declaration(const std::string& absolute_path, const std::string& text,
@@ -80,6 +81,7 @@ class LspClient {
 
   DocumentDiagnostics diagnostics_for_file(const std::string& absolute_path);
   bool document_diagnostics_current(const std::string& absolute_path) const;
+  bool document_has_text(const std::string& absolute_path, const std::string& text) const;
   std::vector<DocumentDiagnostics> all_diagnostics() const;
   uint64_t diagnostics_revision() const { return diagnostics_revision_.load(); }
 

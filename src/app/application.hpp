@@ -24,7 +24,7 @@
 #include "backend/dap_backend.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "indexer/workspace_indexer.hpp"
-#include "indexer/workspace_watcher.hpp"
+#include "indexer/workspace_indexer.hpp"
 #include "symbols/lsp_symbol_provider.hpp"
 #include "terminal/shell_session.hpp"
 #include "ui/connection_wizard.hpp"
@@ -127,6 +127,7 @@ class Application {
   void begin_shutdown(ftxui::ScreenInteractive* screen);
   void schedule_next_shutdown_step(ftxui::ScreenInteractive* screen);
   void tick_shutdown();
+  void force_exit();
   void stop_all_subprocesses();
 
   AppConfig config_;
@@ -139,6 +140,7 @@ class Application {
   SymbolPickerState symbol_picker_state_;
   QuitConfirmState quit_confirm_state_;
   ShutdownState shutdown_state_;
+  ShutdownOverlayState shutdown_overlay_state_;
   std::thread shutdown_thread_;
   int shutdown_step_index_ = 0;
   bool shutdown_performed_ = false;
@@ -160,7 +162,6 @@ class Application {
   GitPanelState git_panel_state_;
   WorkspaceIndexer indexer_;
   SymbolWorkspaceIndexer symbol_indexer_;
-  WorkspaceWatcher workspace_watcher_;
   BuildArtifactWatcher build_artifact_watcher_;
   std::shared_ptr<LspSymbolProvider> symbol_provider_;
 

@@ -81,9 +81,9 @@ add_executable(tgdb
   src/ui/spinner.cpp
   src/ui/glyphs.cpp
   src/indexer/workspace_indexer.cpp
+  src/indexer/workspace_indexer_rg.cpp
   src/indexer/symbol_workspace_indexer.cpp
   src/indexer/index_rules.cpp
-  src/indexer/workspace_watcher.cpp
   src/lsp/lsp_uri.cpp
   src/lsp/lsp_position.cpp
   src/lsp/lsp_transport.cpp
@@ -293,6 +293,12 @@ add_executable(bracket_match_test
 )
 target_include_directories(bracket_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+add_executable(indent_guides_test
+  tests/indent_guides_test.cpp
+  src/editor/indent_guides.cpp
+)
+target_include_directories(indent_guides_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 add_executable(build_environment_test
   tests/build_environment_test.cpp
   src/build/build_environment.cpp
@@ -318,9 +324,12 @@ target_include_directories(fuzzy_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 add_executable(workspace_indexer_test
   tests/workspace_indexer_test.cpp
   src/indexer/workspace_indexer.cpp
+  src/indexer/workspace_indexer_rg.cpp
   src/indexer/index_rules.cpp
   src/util/fuzzy_match.cpp
   src/util/monitor_log.cpp
+  src/util/bundled_tools.cpp
+  src/util/child_process_guard.cpp
 )
 target_include_directories(workspace_indexer_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -416,10 +425,35 @@ target_compile_definitions(pkt_protocol_test PRIVATE
   TGDB_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
+add_executable(lsp_completion_probe
+  tools/lsp_completion_probe.cpp
+  tools/lsp_probe_stubs.cpp
+  src/lsp/lsp_client.cpp
+  src/lsp/lsp_transport.cpp
+  src/lsp/lsp_uri.cpp
+  src/lsp/lsp_position.cpp
+  src/lsp/lsp_text_edits.cpp
+  src/indexer/index_rules.cpp
+  src/util/bundled_tools.cpp
+  src/util/child_process_guard.cpp
+  src/util/monitor_log.cpp
+  src/util/path_normalize.cpp
+  src/util/clang_format_config.cpp
+)
+target_include_directories(lsp_completion_probe PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+target_compile_definitions(lsp_completion_probe PRIVATE
+  TGDB_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(lsp_completion_probe PRIVATE ftxui::dom)
+
 set(TGDB_TEST_TARGETS
   i18n_test
   text_ops_test
   bracket_match_test
+  indent_guides_test
   build_environment_test
   workspace_detect_test
   fuzzy_match_test
@@ -432,6 +466,7 @@ set(TGDB_TEST_TARGETS
   nm_reader_test
   git_diff_test
   pkt_protocol_test
+  lsp_completion_probe
 )
 foreach(_tgdb_test_target IN LISTS TGDB_TEST_TARGETS)
   tgdb_link_pthread(${_tgdb_test_target})

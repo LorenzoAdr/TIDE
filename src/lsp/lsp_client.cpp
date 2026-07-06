@@ -793,7 +793,7 @@ CompletionItem LspClient::parse_completion_item(const nlohmann::json& item) {
 
 std::vector<CompletionItem> LspClient::completions_at(const std::string& absolute_path,
                                                         const std::string& text, int line,
-                                                        int character) {
+                                                        int character, bool document_synced) {
   if (!ready_.load() || absolute_path.empty() ||
       !is_lsp_trackable_path(absolute_path, text)) {
     return {};
@@ -804,20 +804,26 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
     return {};
   }
 
-  if (!text.empty()) {
-    wait_for_completion_ready(absolute_path, text, line,
-                              completion_wait_timeout_ms(text, line));
-  } else {
-    uint64_t generation = 0;
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      const auto it = documents_.find(key);
-      if (it != documents_.end()) {
-        generation = it->second.generation;
+  const int wait_ms = !text.empty() ? completion_wait_timeout_ms(text, line) : 5000;
+
+  if (!document_synced) {
+    constexpr int kMaxReadyPollMs = 400;
+    const int ready_poll_ms = std::min(wait_ms, kMaxReadyPollMs);
+    if (!text.empty()) {
+      wait_for_completion_ready(absolute_path, text, line, ready_poll_ms);
+    } else {
+      uint64_t generation = 0;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto it = documents_.find(key);
+        if (it != documents_.end()) {
+          generation = it->second.generation;
+        }
       }
-    }
-    if (generation > 0) {
-      wait_for_completion_ready(absolute_path, std::string{}, line, 5000);
+      if (generation > 0) {
+        wait_for_completion_ready(absolute_path, std::string{}, line,
+                                  std::min(5000, kMaxReadyPollMs));
+      }
     }
   }
 
@@ -827,7 +833,9 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
                            {"context", {{"triggerKind", 1}}}};
 
   nlohmann::json result;
-  if (!send_lsp_request("textDocument/completion", std::move(params), 10000, &result)) {
+  const bool rpc_ok =
+      send_lsp_request("textDocument/completion", std::move(params), 10000, &result);
+  if (!rpc_ok) {
     return {};
   }
 
@@ -860,8 +868,8 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
   }
 
   if (completions.empty() && line > 0 && !text.empty() &&
-      !intentionally_stopping_.load(std::memory_order_acquire)) {
-    wait_for_completion_ready(absolute_path, text, line, 1500);
+      !intentionally_stopping_.load(std::memory_order_acquire) && !document_synced) {
+    wait_for_completion_ready(absolute_path, text, line, 400);
     nlohmann::json retry_params = {{"textDocument", {{"uri", uri}}},
                                    {"position", make_lsp_position(text, line, character)},
                                    {"context", {{"triggerKind", 1}}}};
@@ -1645,6 +1653,17 @@ uint64_t LspClient::document_generation(const std::string& absolute_path) const 
   return it->second.generation;
 }
 
+bool LspClient::document_has_text(const std::string& absolute_path,
+                                  const std::string& text) const {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = documents_.find(key);
+  return it != documents_.end() && it->second.text == text;
+}
+
 bool LspClient::document_diagnostics_current(const std::string& absolute_path) const {
   const std::string key = normalize_lsp_path(absolute_path);
   if (key.empty()) {
@@ -1665,7 +1684,7 @@ int LspClient::parse_wait_timeout_ms(const std::string& text) {
 
 int LspClient::completion_wait_timeout_ms(const std::string& text, int line) {
   const int64_t base = parse_wait_timeout_ms(text);
-  const int64_t line_bonus = static_cast<int64_t>(std::max(0, line)) * 25;
+  const int64_t line_bonus = std::min<int64_t>(static_cast<int64_t>(std::max(0, line)) * 2, 1500);
   return static_cast<int>(std::clamp<int64_t>(base + line_bonus, 800, 8000));
 }
 
@@ -1759,6 +1778,7 @@ void LspClient::wait_for_completion_ready(const std::string& absolute_path,
     }
     usleep(50000);
   }
+
 }
 
 void LspClient::sync_document_and_wait(const std::string& absolute_path,

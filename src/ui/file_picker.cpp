@@ -1,7 +1,6 @@
 #include "ui/file_picker.hpp"
 
 #include "ui/key_bindings.hpp"
-
 #include <algorithm>
 #include <filesystem>
 #include <memory>

@@ -94,9 +94,8 @@ If clangd is unavailable, `RegexSymbolProvider` extracts symbols with regex heur
 
 | Component | Role |
 |-----------|------|
-| `WorkspaceIndexer` | Background scan of source files; powers file picker and search |
+| `WorkspaceIndexer` | File list via `rg --files`, inotify watcher; powers file picker and search |
 | `SymbolWorkspaceIndexer` | Regex-based workspace symbol index for `Ctrl+O` without LSP |
-| `WorkspaceWatcher` | Filesystem watcher; triggers re-index on changes |
 | `index_rules` | Skip rules for dirs (`build`, `.git`, …) and file extensions |
 
 ## Integrated terminal

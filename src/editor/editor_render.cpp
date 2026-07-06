@@ -33,7 +33,24 @@ std::string slice_line_for_view(const std::string& line, int scroll_col, int vie
   return slice;
 }
 
-int shift_col(int col, int scroll_col) { return col - scroll_col; }
+int body_start_visual_column(const std::string& source_line, int scroll_col,
+                             int guide_prefix_visual, int tab_size) {
+  return byte_index_to_visual_column(source_line, scroll_col, tab_size) + guide_prefix_visual;
+}
+
+int caret_column_in_body(const std::string& source_line, int primary_byte_col, int scroll_col,
+                         int guide_prefix_visual, int tab_size) {
+  const int body_start = body_start_visual_column(source_line, scroll_col, guide_prefix_visual,
+                                                  tab_size);
+  return byte_index_to_visual_column(source_line, primary_byte_col, tab_size) - body_start;
+}
+
+int body_source_byte_column(const std::string& source_line, int scroll_col,
+                            int guide_prefix_visual, int tab_size) {
+  const int body_start = body_start_visual_column(source_line, scroll_col, guide_prefix_visual,
+                                                  tab_size);
+  return visual_column_to_byte_index(source_line, body_start, tab_size);
+}
 
 int caret_visual_in_view(const std::string& line, int primary_col, int scroll_col, int tab_size) {
   const int primary_vis = byte_index_to_visual_column(line, primary_col, tab_size);
@@ -85,27 +102,36 @@ Element render_primary_caret_tail(const EditorBuffer& buffer, int line_index, bo
   return parts.empty() ? text(" ") : hbox(std::move(parts));
 }
 
-bool col_in_view(int col, int scroll_col, int view_width) {
-  if (view_width <= 0) {
-    return col >= scroll_col;
-  }
-  return col >= scroll_col && col < scroll_col + view_width;
-}
-
-void shift_decorations(std::vector<EditorDecoration>* decorations, int scroll_col, int view_width) {
+void shift_decorations_to_body(std::vector<EditorDecoration>* decorations,
+                               const std::string& source_line, int scroll_col,
+                               int guide_prefix_visual, int view_width, int tab_size) {
   if (decorations == nullptr) {
     return;
   }
+  const int body_start =
+      body_start_visual_column(source_line, scroll_col, guide_prefix_visual, tab_size);
   std::vector<EditorDecoration> shifted;
   shifted.reserve(decorations->size());
   for (const auto& deco : *decorations) {
-    if (!col_in_view(deco.end_col - 1, scroll_col, view_width) &&
-        !col_in_view(deco.start_col, scroll_col, view_width)) {
+    const int start_vis =
+        byte_index_to_visual_column(source_line, deco.start_col, tab_size) - body_start;
+    const int end_vis =
+        byte_index_to_visual_column(source_line, deco.end_col, tab_size) - body_start;
+    if (view_width > 0 && start_vis >= view_width && end_vis <= 0) {
+      continue;
+    }
+    if (end_vis <= 0 && start_vis < 0) {
       continue;
     }
     EditorDecoration copy = deco;
-    copy.start_col = std::max(0, shift_col(copy.start_col, scroll_col));
-    copy.end_col = std::max(copy.start_col + 1, shift_col(copy.end_col, scroll_col));
+    copy.start_col = std::max(0, start_vis);
+    copy.end_col = std::max(copy.start_col + 1, end_vis);
+    if (view_width > 0) {
+      if (copy.start_col >= view_width) {
+        continue;
+      }
+      copy.end_col = std::min(copy.end_col, view_width);
+    }
     shifted.push_back(copy);
   }
   *decorations = std::move(shifted);
@@ -288,10 +314,16 @@ Element render_line_content(const std::string& line, int line_index,
                             BuildFileKind build_file_kind = BuildFileKind::kNone) {
   const int tab_size = std::max(1, editor_indent::tab_display_width());
   const std::string display_line = expand_tabs_for_display(line, tab_size);
-  const int visual_col_offset = byte_index_to_visual_column(line, col_offset, tab_size);
+  const bool expanded_line = line.find('\t') == std::string::npos;
   int draw_col = cursor_col;
   if (draw_col >= 0) {
-    draw_col = byte_index_to_visual_column(line, draw_col + col_offset, tab_size) - visual_col_offset;
+    if (expanded_line) {
+      // Body fragments are already tab-expanded; cursor_col is visual within the fragment.
+    } else {
+      const int visual_col_offset = byte_index_to_visual_column(line, col_offset, tab_size);
+      draw_col =
+          byte_index_to_visual_column(line, draw_col + col_offset, tab_size) - visual_col_offset;
+    }
   }
   if (build_file_kind != BuildFileKind::kNone) {
     return HighlightBuildFileLine(build_file_kind, display_line, draw_col, cursor_style);
@@ -316,30 +348,34 @@ Element render_line_content(const std::string& line, int line_index,
     return hbox(std::move(parts));
   }
   return HighlightCodeLine(display_line, line_index, semantic_tokens, draw_col, cursor_style,
-                         visual_col_offset, highlight_ctx);
+                         col_offset, highlight_ctx);
 }
 
 Element render_simple_line(const std::string& line, int line_index, const EditorBuffer& buffer,
                            bool editor_focused, const SemanticTokenDocument* semantic_tokens,
                            bool syntax_highlight, const Decorator& line_bg, bool show_caret,
                            int scroll_col, CppHighlightContext* highlight_ctx,
-                           BuildFileKind build_file_kind, int guide_prefix_bytes = 0) {
+                           BuildFileKind build_file_kind, int guide_prefix_visual = 0) {
   (void)line_bg;
-  const int effective_scroll_col = scroll_col + guide_prefix_bytes;
+  const int tab_size = std::max(1, editor_indent::tab_display_width());
+  const std::string& source_line = buffer.lines[static_cast<std::size_t>(line_index)];
+  const int source_col_offset =
+      body_source_byte_column(source_line, scroll_col, guide_prefix_visual, tab_size);
   if (!editor_focused || line_index != buffer.primary_line() || !show_caret) {
     return render_line_content(line, line_index, semantic_tokens, syntax_highlight, -1, {},
-                               effective_scroll_col, highlight_ctx, build_file_kind);
+                               source_col_offset, highlight_ctx, build_file_kind);
   }
-  const int col = shift_col(buffer.primary_col(), effective_scroll_col);
+  const int caret_in_body =
+      caret_column_in_body(source_line, buffer.primary_col(), scroll_col, guide_prefix_visual,
+                           tab_size);
   const Decorator cursor_cell = cursor_blink::cell_decorator();
-  const int clamped = std::max(0, std::min(col, static_cast<int>(line.size())));
+  const int clamped = std::max(0, std::min(caret_in_body, static_cast<int>(line.size())));
   const int draw_col = cursor_blink::effective_col(clamped);
-  if (line.empty() || clamped >= static_cast<int>(line.size())) {
+  if (line.empty() || caret_in_body >= static_cast<int>(line.size())) {
     Elements parts;
     if (!line.empty()) {
       parts.push_back(render_line_content(line, line_index, semantic_tokens, syntax_highlight, -1,
-                                          {}, effective_scroll_col, highlight_ctx,
-                                          build_file_kind));
+                                          {}, source_col_offset, highlight_ctx, build_file_kind));
     }
     if (cursor_blink::visible()) {
       parts.push_back(text(" ") | cursor_cell);
@@ -349,7 +385,7 @@ Element render_simple_line(const std::string& line, int line_index, const Editor
     return hbox(std::move(parts));
   }
   return render_line_content(line, line_index, semantic_tokens, syntax_highlight, draw_col,
-                             cursor_cell, effective_scroll_col, highlight_ctx, build_file_kind);
+                             cursor_cell, source_col_offset, highlight_ctx, build_file_kind);
 }
 
 Element render_rich_line(const std::string& line, int line_index, const EditorBuffer& buffer,
@@ -360,8 +396,11 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
                          const std::vector<Diagnostic>* line_diagnostics,
                          const EditorSymbolPress* symbol_press, bool show_caret, int scroll_col,
                          int view_width, CppHighlightContext* highlight_ctx,
-                         BuildFileKind build_file_kind, int guide_prefix_bytes = 0) {
-  const int effective_scroll_col = scroll_col + guide_prefix_bytes;
+                         BuildFileKind build_file_kind, int guide_prefix_visual = 0) {
+  const int tab_size = std::max(1, editor_indent::tab_display_width());
+  const std::string& source_line = buffer.lines[static_cast<std::size_t>(line_index)];
+  const int source_col_offset =
+      body_source_byte_column(source_line, scroll_col, guide_prefix_visual, tab_size);
   std::vector<EditorDecoration> decorations;
   if (symbol_press != nullptr && symbol_press->active) {
     collect_press_decorations(line_index, *symbol_press, &decorations);
@@ -379,7 +418,8 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
     collect_bracket_decorations(line_index, *bracket, &decorations);
   }
   collect_line_decorations(line_index, buffer, editor_focused, show_caret, &decorations);
-  shift_decorations(&decorations, effective_scroll_col, view_width);
+  shift_decorations_to_body(&decorations, source_line, scroll_col, guide_prefix_visual, view_width,
+                            tab_size);
 
   std::set<int> breakpoints;
   breakpoints.insert(static_cast<int>(line.size()));
@@ -403,7 +443,7 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
                                             static_cast<std::size_t>(bp - prev));
     const EditorDecoration* chosen = decoration_at(decorations, prev);
     const bool use_build_highlight = build_file_kind != BuildFileKind::kNone;
-    const int col_offset = syntax_highlight ? prev + effective_scroll_col : 0;
+    const int col_offset = syntax_highlight ? source_col_offset + prev : 0;
     const bool highlight_segment = syntax_highlight && !use_build_highlight;
     parts.push_back(apply_decoration(
         segment.empty() ? text(" ")
@@ -533,7 +573,7 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
 
   const std::string& body_line =
       guide_split.prefix_byte_length > 0 ? guide_split.suffix : view_line;
-  const int guide_prefix_bytes = guide_split.prefix_byte_length;
+  const int guide_prefix_visual = guide_split.prefix_visual_width;
   const BuildFileKind build_file_kind = detect_build_file_kind(buffer.path);
   const bool is_build_file = build_file_kind != BuildFileKind::kNone;
   const bool use_warm_line_bg = build_file_kind == BuildFileKind::kMakefile;
@@ -564,20 +604,20 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
       caret_on_primary ? caret_visual_in_view(line, buffer.primary_col(), scroll_col, tab_size)
                        : -1;
   const bool caret_in_guide_prefix =
-      guide_prefix_bytes > 0 && caret_vis_in_view >= 0 &&
-      caret_vis_in_view < guide_split.prefix_visual_width;
+      guide_prefix_visual > 0 && caret_vis_in_view >= 0 &&
+      caret_vis_in_view < guide_prefix_visual;
   const bool body_show_caret = show_caret && !caret_in_guide_prefix;
 
   Element content =
       rich ? render_rich_line(body_line, line_index, buffer, editor_focused, find_matches,
                               selection_occurrences, semantic_tokens, syntax_highlight, bracket,
                               line_diagnostics, symbol_press, body_show_caret, scroll_col, view_width,
-                              highlight_ctx, build_file_kind, guide_prefix_bytes)
+                              highlight_ctx, build_file_kind, guide_prefix_visual)
            : render_simple_line(body_line, line_index, buffer, editor_focused, semantic_tokens,
                                 syntax_highlight, line_bg, body_show_caret, scroll_col, highlight_ctx,
-                                build_file_kind, guide_prefix_bytes);
+                                build_file_kind, guide_prefix_visual);
 
-  if (guide_prefix_bytes > 0) {
+  if (guide_prefix_visual > 0) {
     Element guide =
         caret_in_guide_prefix
             ? render_guide_with_caret(guide_split.guide_text, caret_vis_in_view)

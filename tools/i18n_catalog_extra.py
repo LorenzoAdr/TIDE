@@ -250,6 +250,7 @@ EXTRA_CATALOG: list[tuple[str, str, str]] = [
     ("modal.shutdown.step_ok", "  ok  {0}", "  ok  {0}"),
     ("modal.shutdown.spinner_prefix", "  {0}  ", "  {0}  "),
     ("modal.shutdown.progress", "{0}/{1}", "{0}/{1}"),
+    ("modal.shutdown.force_exit", "Forzar salida", "Force exit"),
     ("status.app_name", " tide ", " tide "),
     ("status.separator", " │ ", " │ "),
     ("status.focus_prefix", "[{0}] ", "[{0}] "),

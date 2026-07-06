@@ -72,6 +72,20 @@ class ThreadSafeQueue {
     closed_ = false;
   }
 
+  template <typename Predicate>
+  void remove_if(Predicate predicate) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::queue<T> kept;
+    while (!queue_.empty()) {
+      T item = std::move(queue_.front());
+      queue_.pop();
+      if (!predicate(item)) {
+        kept.push(std::move(item));
+      }
+    }
+    queue_.swap(kept);
+  }
+
  private:
   mutable std::mutex mutex_;
   std::condition_variable cv_;

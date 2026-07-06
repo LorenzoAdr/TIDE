@@ -332,6 +332,7 @@ const StringTable& english_strings() {
       {"modal.shutdown.step_ok", "  ok  {0}"},
       {"modal.shutdown.spinner_prefix", "  {0}  "},
       {"modal.shutdown.progress", "{0}/{1}"},
+      {"modal.shutdown.force_exit", "Force exit"},
       {"status.app_name", " tide "},
       {"status.separator", " │ "},
       {"status.focus_prefix", "[{0}] "},

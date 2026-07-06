@@ -509,8 +509,8 @@ int worker_display_rank(const ThreadSample& sample) {
     return 3;
   }
   static constexpr const char* kNamedThreads[] = {
-      "lsp-async", "lsp-read", "lsp-start", "ui-poller", "idx-watch", "shell-read",
-      "shell-boot", "idx-files", "idx-syms", "dap-wrk",
+      "lsp-async", "lsp-read", "lsp-start", "ui-poller", "idx-work", "shell-read",
+      "shell-boot", "idx-syms", "dap-wrk",
   };
   for (int i = 0; i < static_cast<int>(std::size(kNamedThreads)); ++i) {
     if (sample.comm == kNamedThreads[i]) {

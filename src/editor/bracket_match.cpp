@@ -161,12 +161,20 @@ TextPos skip_literal_forward(const EditorBuffer& buffer, TextPos pos, LexMode* m
 
   if (*mode == LexMode::Code) {
     if (c == '"') {
+      TextPos inside = advance(buffer, pos);
+      if (inside.line >= 0 && char_at(buffer, inside) == '"' && !is_escaped(buffer, inside)) {
+        return advance(buffer, inside);
+      }
       *mode = LexMode::String;
-      return advance(buffer, pos);
+      return inside;
     }
     if (c == '\'') {
+      TextPos inside = advance(buffer, pos);
+      if (inside.line >= 0 && char_at(buffer, inside) == '\'' && !is_escaped(buffer, inside)) {
+        return advance(buffer, inside);
+      }
       *mode = LexMode::Char;
-      return advance(buffer, pos);
+      return inside;
     }
     if (c == '/' && next == '/') {
       *mode = LexMode::LineComment;

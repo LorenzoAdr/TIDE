@@ -1010,13 +1010,12 @@ void insert_tab_stop(EditorBuffer* buffer, int tab_size) {
       continue;
     }
     const int visual_col = byte_index_to_visual_column(line_text, pos.col, display_tab);
-    if (visual_col == 0) {
-      insert_string_at(buffer, pos.line, pos.col, "\t");
-      continue;
-    }
-    int count = display_tab - (visual_col % display_tab);
-    if (count <= 0) {
-      count = display_tab;
+    int count = display_tab;
+    if (visual_col > 0) {
+      count = display_tab - (visual_col % display_tab);
+      if (count <= 0) {
+        count = display_tab;
+      }
     }
     insert_string_at(buffer, pos.line, pos.col,
                      std::string(static_cast<std::size_t>(count), ' '));

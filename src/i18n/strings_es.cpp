@@ -332,6 +332,7 @@ const StringTable& spanish_strings() {
       {"modal.shutdown.step_ok", "  ok  {0}"},
       {"modal.shutdown.spinner_prefix", "  {0}  "},
       {"modal.shutdown.progress", "{0}/{1}"},
+      {"modal.shutdown.force_exit", "Forzar salida"},
       {"status.app_name", " tide "},
       {"status.separator", " │ "},
       {"status.focus_prefix", "[{0}] "},
