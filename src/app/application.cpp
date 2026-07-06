@@ -18,6 +18,7 @@
 #include "ftxui/component/screen_interactive.hpp"
 #include "editor/text_search.hpp"
 #include "i18n/locale.hpp"
+#include "packet_monitor/pkt_monitor_service.hpp"
 #include "i18n/tr.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/connection_wizard.hpp"
@@ -879,7 +880,7 @@ void Application::exit_debug_mode() {
   layout_state_.text_input_focus = TextInputFocus::None;
   layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
   layout_state_.show_core_analyzer_tab = false;
-  layout_state_.packet_monitor_service.reset();
+  layout_state_.packet_monitor_service->reset();
   set_workspace_status(i18n::tr("app.edit_mode"));
   request_terminal_autostart();
 }
@@ -952,11 +953,11 @@ void Application::apply_connection_and_start() {
   }
   layout_state_.console_visible = true;
   layout_state_.terminal_start_requested = true;
-  layout_state_.packet_monitor_service.reset();
-  layout_state_.packet_monitor_service.set_enabled(config_.packet_monitor_enabled);
-  layout_state_.packet_monitor_service.set_workspace_root(workspace_.root);
+  layout_state_.packet_monitor_service->reset();
+  layout_state_.packet_monitor_service->set_enabled(config_.packet_monitor_enabled);
+  layout_state_.packet_monitor_service->set_workspace_root(workspace_.root);
   if (config_.packet_monitor_enabled) {
-    auto& filters = layout_state_.packet_monitor_service.state().filters;
+    auto& filters = layout_state_.packet_monitor_service->state().filters;
     filters.src_ip = config_.packet_monitor_filter_src;
     filters.dst_ip = config_.packet_monitor_filter_dst;
   }
@@ -1265,7 +1266,7 @@ void Application::apply_event(const DebugEvent& event) {
       }
       break;
     case DebugEventKind::kInferiorPid:
-      layout_state_.packet_monitor_service.set_inferior_pid(event.inferior_pid);
+      layout_state_.packet_monitor_service->set_inferior_pid(event.inferior_pid);
       break;
     case DebugEventKind::kBreakpointsUpdated:
       for (const auto& bp : event.breakpoints) {
@@ -1798,7 +1799,7 @@ int Application::run() {
           layout_state_.terminal_tick_callback();
         }
         if (app_mode_ == AppMode::kDebug) {
-          layout_state_.packet_monitor_service.tick();
+          layout_state_.packet_monitor_service->tick();
         }
         if (symbol_provider_) {
           TGDB_MON_SCOPE("ui", "tick.drain_async_results");

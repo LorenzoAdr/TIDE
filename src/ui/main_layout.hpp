@@ -25,13 +25,16 @@
 #include "ui/status_layout_popover.hpp"
 #include "git/git_service.hpp"
 #include "util/system_stats.hpp"
-#include "packet_monitor/pkt_monitor_service.hpp"
 #include "ui/source_panel.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/nm_reader.hpp"
 #include "util/path_normalize.hpp"
 
 namespace tgdb {
+
+namespace packet_monitor {
+class PacketMonitorService;
+}
 
 struct WelcomeScreenState;
 
@@ -108,6 +111,13 @@ struct HelixIdeCallbacks {
 };
 
 struct MainLayoutState {
+  MainLayoutState();
+  ~MainLayoutState();
+  MainLayoutState(const MainLayoutState&) = delete;
+  MainLayoutState& operator=(const MainLayoutState&) = delete;
+  MainLayoutState(MainLayoutState&&) = default;
+  MainLayoutState& operator=(MainLayoutState&&) = default;
+
   bool console_visible = true;
   bool explorer_visible = true;
   bool welcome_visible = false;
@@ -198,7 +208,7 @@ struct MainLayoutState {
   std::function<void()> schedule_ui_tick;
   std::function<void(const std::string& path)> on_file_saved;
   PerformanceSampler performance_sampler;
-  packet_monitor::PacketMonitorService packet_monitor_service;
+  std::unique_ptr<packet_monitor::PacketMonitorService> packet_monitor_service;
   std::function<void()> packet_monitor_tick_callback;
 };
 

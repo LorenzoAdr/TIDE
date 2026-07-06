@@ -58,6 +58,7 @@
 #include "ui/cursor_blink.hpp"
 #include "ui/glyphs.hpp"
 #include "ui/key_bindings.hpp"
+#include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
 #include "ui/welcome_screen.hpp"
 #include "ui/scroll_bar.hpp"

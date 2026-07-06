@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "ftxui/component/component.hpp"
+#include "packet_monitor/pkt_monitor_service.hpp"
 #include "ftxui/component/component_options.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
@@ -31,6 +32,11 @@
 namespace tgdb {
 
 using namespace ftxui;
+
+MainLayoutState::MainLayoutState()
+    : packet_monitor_service(std::make_unique<packet_monitor::PacketMonitorService>()) {}
+
+MainLayoutState::~MainLayoutState() = default;
 
 namespace {
 

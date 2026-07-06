@@ -1353,7 +1353,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   PerformanceSampler* sampler =
       layout_state != nullptr ? &layout_state->performance_sampler : nullptr;
   packet_monitor::PacketMonitorService* packet_monitor =
-      layout_state != nullptr ? &layout_state->packet_monitor_service : nullptr;
+      layout_state != nullptr ? layout_state->packet_monitor_service.get() : nullptr;
   auto performance_panel = MakePerformancePanel(sampler, perf_state);
   auto packet_monitor_panel = MakePacketMonitorPanel(packet_monitor, packet_monitor_state, layout_state);
   auto diagnostics_panel =

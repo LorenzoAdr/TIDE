@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include "app/debug_model.hpp"
@@ -10,9 +11,13 @@
 #include "symbols/symbol_provider.hpp"
 #include "git/git_service.hpp"
 #include "ui/focus_manager.hpp"
-#include "ui/main_layout.hpp"
+#include "ui/panel.hpp"
 
 namespace tgdb {
+
+struct MainLayoutState;
+struct EditorPanelHandlers;
+using CommandCallback = std::function<void(const struct UiCommand&)>;
 
 ftxui::Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                  MainLayoutState* layout_state,
