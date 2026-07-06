@@ -26,6 +26,7 @@ bool is_ident_char(char c);
 bool is_ident_start(char c);
 
 std::string word_at_cursor(const EditorBuffer& buffer, const MultiCursor& cursor);
+std::string word_at_line_col(const std::string& line, int col);
 bool ident_range_at_cursor(const EditorBuffer& buffer, const MultiCursor& cursor,
                              int* start_col, int* end_col);
 std::string selection_text(const EditorBuffer& buffer, const MultiCursor& cursor);

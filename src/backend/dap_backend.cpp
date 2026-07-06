@@ -1082,6 +1082,8 @@ void DapBackend::handle_command(const UiCommand& command) {
       // evalúa expresiones del programa (variables locales).
       if (command.evaluate_context == EvaluateContext::kWatch) {
         request.context = "watch";
+      } else if (command.evaluate_context == EvaluateContext::kHover) {
+        request.context = "watch";
       } else {
         request.context = "repl";
       }
@@ -1093,6 +1095,14 @@ void DapBackend::handle_command(const UiCommand& command) {
           event.watch_expression = command.expression;
           event.watch_value = i18n::tr_fmt("debug.dap.error_prefix",
                                            {response.error.message});
+          push_event(std::move(event));
+        } else if (command.evaluate_context == EvaluateContext::kHover) {
+          DebugEvent event;
+          event.kind = DebugEventKind::kHoverValue;
+          event.hover_key = command.correlation_id;
+          event.hover_expression = command.expression;
+          event.hover_value = i18n::tr_fmt("debug.dap.error_prefix",
+                                         {response.error.message});
           push_event(std::move(event));
         } else if (command.evaluate_context == EvaluateContext::kCoreAnalyzer) {
           DebugEvent event;
@@ -1111,6 +1121,11 @@ void DapBackend::handle_command(const UiCommand& command) {
         event.kind = DebugEventKind::kWatchUpdated;
         event.watch_expression = command.expression;
         event.watch_value = response.response.result;
+      } else if (command.evaluate_context == EvaluateContext::kHover) {
+        event.kind = DebugEventKind::kHoverValue;
+        event.hover_key = command.correlation_id;
+        event.hover_expression = command.expression;
+        event.hover_value = response.response.result;
       } else if (command.evaluate_context == EvaluateContext::kCoreAnalyzer) {
         event.kind = DebugEventKind::kCoreAnalyzerResult;
         event.text = response.response.result;

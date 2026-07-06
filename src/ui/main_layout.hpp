@@ -170,6 +170,7 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> source_mouse_handler;
   std::function<bool(const ftxui::Event&)> source_key_handler;
   std::function<bool(const ftxui::Event&)> watches_mouse_handler;
+  std::function<bool(const ftxui::Event&)> watches_key_handler;
   std::function<bool(const ftxui::Event&)> console_debug_mouse_handler;
   std::function<bool(const ftxui::Event&)> explorer_mouse_handler;
   std::function<bool(const ftxui::Event&)> sidebar_mouse_handler;
@@ -187,6 +188,7 @@ struct MainLayoutState {
   std::function<void(bool visible)> status_set_terminal_visible;
   StatusLayoutPopoverState status_layout_popover;
   std::function<void()> outline_tick_callback;
+  std::function<void()> source_tick_callback;
   std::function<bool(const ftxui::Event&)> console_key_handler;
   std::function<bool(const ftxui::Event&)> console_mouse_handler;
   std::function<bool(const ftxui::Event&)> split_mouse_handler;

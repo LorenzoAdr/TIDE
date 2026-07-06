@@ -1,11 +1,14 @@
 #include "ui/source_panel.hpp"
 
+#include <chrono>
 #include <fstream>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <sstream>
 
 #include "backend/idebug_backend.hpp"
+#include "editor/text_search.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
@@ -39,6 +42,159 @@ struct SourcePanelState {
   int last_visible_lines = 1;
   uint64_t last_view_token = 0;
 };
+
+constexpr int kDebugHoverDelayMs = 500;
+
+int64_t steady_now_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+void assign_evaluate_frame(UiCommand* command, const DebugModel* model) {
+  if (command == nullptr || model == nullptr) {
+    return;
+  }
+  if (model->variables_frame_id >= 0) {
+    command->frame_id = model->variables_frame_id;
+  } else if (!model->stack_frames.empty()) {
+    command->frame_id = model->stack_frames[model->selected_frame].id;
+  }
+}
+
+std::optional<std::string> lookup_local_value(const DebugModel& model, const std::string& word) {
+  if (word.empty()) {
+    return std::nullopt;
+  }
+  for (const VariableInfo& local : model.locals) {
+    if (local.name == word) {
+      return local.value;
+    }
+  }
+  return std::nullopt;
+}
+
+void track_source_debug_hover(DebugModel* model, SourceViewState* view_state,
+                              const SourcePanelState& panel, const Mouse& m, int visible_lines) {
+  if (model == nullptr || view_state == nullptr || model->state != DebugState::kStopped) {
+    return;
+  }
+  const int total = static_cast<int>(view_state->lines.size());
+  if (total <= 0) {
+    return;
+  }
+  const int rel_y = m.y - panel.content_box.y_min;
+  const int line = std::max(0, std::min(view_state->scroll + rel_y, total - 1));
+  const int col = std::max(0, m.x - panel.content_box.x_min);
+  auto& hover = view_state->debug_hover;
+  if (line == hover.line && col == hover.col) {
+    return;
+  }
+  hover.line = line;
+  hover.col = col;
+  hover.anchor_x = m.x;
+  hover.anchor_y = m.y;
+  hover.dwell_start_ms = steady_now_ms();
+  hover.visible = false;
+  hover.fetch_key.clear();
+  hover.pending_expression.clear();
+  hover.waiting_evaluate = false;
+  hover.title.clear();
+  hover.body_lines.clear();
+}
+
+void source_debug_hover_tick(DebugModel* model, SourceViewState* view_state,
+                             CommandCallback on_command) {
+  if (model == nullptr || view_state == nullptr) {
+    return;
+  }
+  auto& hover = view_state->debug_hover;
+  if (model->state != DebugState::kStopped) {
+    if (hover.line >= 0 || hover.visible) {
+      clear_source_debug_hover(&hover);
+    }
+    return;
+  }
+  if (hover.line < 0 || hover.visible) {
+    return;
+  }
+  const int64_t now_ms = steady_now_ms();
+  if (now_ms - hover.dwell_start_ms < kDebugHoverDelayMs) {
+    return;
+  }
+  if (hover.line < 0 || hover.line >= static_cast<int>(view_state->lines.size())) {
+    return;
+  }
+
+  const std::string key = model->active_file + "|" + std::to_string(hover.line) + "|" +
+                          std::to_string(hover.col) + "|" + std::to_string(model->view_token);
+  if (hover.fetch_key == key) {
+    if (hover.waiting_evaluate) {
+      return;
+    }
+    hover.visible = !hover.title.empty() || !hover.body_lines.empty();
+    return;
+  }
+
+  const std::string& line_text = view_state->lines[static_cast<std::size_t>(hover.line)];
+  const std::string word = word_at_line_col(line_text, hover.col);
+  if (word.empty()) {
+    return;
+  }
+
+  hover.fetch_key = key;
+  hover.pending_expression = word;
+  hover.title = word;
+  hover.body_lines.clear();
+
+  if (const auto local_value = lookup_local_value(*model, word); local_value.has_value()) {
+    hover.body_lines.push_back(*local_value);
+    hover.visible = true;
+    hover.waiting_evaluate = false;
+    return;
+  }
+
+  if (!on_command) {
+    return;
+  }
+  UiCommand command;
+  command.kind = UiCommandKind::kEvaluate;
+  command.expression = word;
+  command.evaluate_context = EvaluateContext::kHover;
+  command.correlation_id = key;
+  assign_evaluate_frame(&command, model);
+  on_command(command);
+  hover.waiting_evaluate = true;
+}
+
+Element make_source_hover_tooltip(const SourceDebugHoverState& hover, const Box& code_box) {
+  if (!hover.visible || hover.title.empty()) {
+    return text("");
+  }
+
+  Elements rows;
+  rows.push_back(text(" " + hover.title) | bold | color(theme::Accent()) | bgcolor(theme::PanelBg()));
+  for (const std::string& line : hover.body_lines) {
+    rows.push_back(text(" " + line) | color(theme::Header()) | bgcolor(theme::PanelBg()));
+  }
+  if (rows.size() <= 1 && hover.waiting_evaluate) {
+    rows.push_back(text(" …") | color(theme::Muted()) | bgcolor(theme::PanelBg()));
+  }
+
+  const int popup_rows = static_cast<int>(rows.size());
+  Element popup = vbox(std::move(rows)) | border | bgcolor(theme::PanelBg());
+  const int rel_x = std::max(0, hover.anchor_x - code_box.x_min + 1);
+  const int rel_y = std::max(0, hover.anchor_y - code_box.y_min + 1);
+  const int code_h = std::max(1, code_box.y_max - code_box.y_min + 1);
+  const bool place_above = rel_y + popup_rows + 2 >= code_h;
+  const int y_pad = place_above ? std::max(0, rel_y - popup_rows - 1) : rel_y + 1;
+
+  return dbox({text(""),
+               vbox({filler() | size(HEIGHT, EQUAL, y_pad),
+                     hbox({filler() | size(WIDTH, EQUAL, rel_x), popup | clear_under, filler()}),
+                     filler()}) |
+                   flex});
+}
 
 void load_source_file(const std::string& path, std::vector<std::string>* lines) {
   lines->clear();
@@ -230,6 +386,13 @@ bool handle_source_panel_event(DebugModel* model, SourceViewState* view_state,
                                       visible)) {
       return true;
     }
+    if (m.motion == Mouse::Moved) {
+      if (panel_state->content_box.Contain(m.x, m.y)) {
+        track_source_debug_hover(model, view_state, *panel_state, m, visible);
+      } else if (!panel_state->content_box.Contain(m.x, m.y)) {
+        clear_source_debug_hover(&view_state->debug_hover);
+      }
+    }
     if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
       const bool in_gutter = panel_state->gutter_box.Contain(m.x, m.y);
       const bool in_code = panel_state->content_box.Contain(m.x, m.y);
@@ -281,18 +444,22 @@ bool handle_source_panel_event(DebugModel* model, SourceViewState* view_state,
 
   if (event == Event::ArrowUp || event == Event::Character('k')) {
     view_state->scroll = std::max(0, view_state->scroll - 1);
+    clear_source_debug_hover(&view_state->debug_hover);
     return true;
   }
   if (event == Event::ArrowDown || event == Event::Character('j')) {
     view_state->scroll = std::min(view_state->scroll + 1, max_scroll);
+    clear_source_debug_hover(&view_state->debug_hover);
     return true;
   }
   if (event == Event::PageUp) {
     view_state->scroll = std::max(0, view_state->scroll - visible);
+    clear_source_debug_hover(&view_state->debug_hover);
     return true;
   }
   if (event == Event::PageDown) {
     view_state->scroll = std::min(view_state->scroll + visible, max_scroll);
+    clear_source_debug_hover(&view_state->debug_hover);
     return true;
   }
   const int half_page = std::max(1, visible / 2);
@@ -319,6 +486,23 @@ bool handle_source_panel_event(DebugModel* model, SourceViewState* view_state,
 }
 
 }  // namespace
+
+void clear_source_debug_hover(SourceDebugHoverState* hover) {
+  if (hover == nullptr) {
+    return;
+  }
+  hover->line = -1;
+  hover->col = -1;
+  hover->anchor_x = 0;
+  hover->anchor_y = 0;
+  hover->dwell_start_ms = 0;
+  hover->fetch_key.clear();
+  hover->pending_expression.clear();
+  hover->waiting_evaluate = false;
+  hover->title.clear();
+  hover->body_lines.clear();
+  hover->visible = false;
+}
 
 void ToggleBreakpointAtFile(DebugModel* model, const std::string& file, int line,
                             CommandCallback on_command) {
@@ -439,9 +623,11 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
     panel_state->scrollbar_layout =
         compute_scrollbar_layout(total, view_state->scroll, visible, rendered_lines);
 
-    return MakePanel(title, hbox({gutter, separator() | color(theme::AccentDim()), code | flex,
-                                  scrollbar}),
-                     theme::CodeBg());
+    Element panel = MakePanel(title, hbox({gutter, separator() | color(theme::AccentDim()), code | flex,
+                                           scrollbar}),
+                              theme::CodeBg());
+    Element overlay = make_source_hover_tooltip(view_state->debug_hover, panel_state->content_box);
+    return dbox({std::move(panel), std::move(overlay)}) | flex;
   });
 
   auto dispatch_source_mouse = [model, view_state, on_command, panel_state, focus,
@@ -455,6 +641,7 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
                                     static_cast<int>(view_state->lines.size()),
                                     panel_state->last_visible_lines);
       if (!source_panel_contains_mouse(*panel_state, m) && !panel_state->scrollbar_dragging) {
+        clear_source_debug_hover(&view_state->debug_hover);
         return layout_state != nullptr && layout_state->request_ui_tick;
       }
     } else if (!source_panel_contains_mouse(*panel_state, m) && !panel_state->scrollbar_dragging) {
@@ -476,6 +663,9 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
   if (layout_state != nullptr) {
     layout_state->source_mouse_handler = dispatch_source_mouse;
     layout_state->source_key_handler = dispatch_source_keys;
+    layout_state->source_tick_callback = [model, view_state, on_command]() {
+      source_debug_hover_tick(model, view_state, on_command);
+    };
   }
 
   return WrapFocusable(CatchEvent(renderer, [model, view_state, on_command, panel_state, focus,

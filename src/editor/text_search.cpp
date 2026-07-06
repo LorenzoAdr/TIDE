@@ -49,6 +49,31 @@ std::string word_at_cursor(const EditorBuffer& buffer, const MultiCursor& cursor
   return line.substr(static_cast<std::size_t>(start), static_cast<std::size_t>(end - start));
 }
 
+std::string word_at_line_col(const std::string& line, int col) {
+  if (line.empty()) {
+    return {};
+  }
+  int index = std::max(0, std::min(col, static_cast<int>(line.size()) - 1));
+  if (!is_ident_char(line[static_cast<std::size_t>(index)])) {
+    if (index > 0 && is_ident_char(line[static_cast<std::size_t>(index - 1)])) {
+      --index;
+    } else {
+      return {};
+    }
+  }
+
+  int start = index;
+  while (start > 0 && is_ident_char(line[static_cast<std::size_t>(start - 1)])) {
+    --start;
+  }
+  int end = index + 1;
+  while (end < static_cast<int>(line.size()) &&
+         is_ident_char(line[static_cast<std::size_t>(end)])) {
+    ++end;
+  }
+  return line.substr(static_cast<std::size_t>(start), static_cast<std::size_t>(end - start));
+}
+
 bool ident_range_at_cursor(const EditorBuffer& buffer, const MultiCursor& cursor,
                              int* start_col, int* end_col) {
   if (start_col == nullptr || end_col == nullptr || buffer.lines.empty()) {

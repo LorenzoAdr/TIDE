@@ -957,26 +957,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     return false;
   };
 
-  if (layout_state != nullptr) {
-    layout_state->watches_mouse_handler =
-        [state, layout_state, model, send_continue, send_pause, send_stop](Event event) {
-          if (!event.is_mouse()) {
-            return false;
-          }
-          const Mouse& m = event.mouse();
-          if (m.motion == Mouse::Moved) {
-            handle_watches_hover(state.get(), layout_state, m);
-            return layout_state->request_ui_tick;
-          }
-          if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
-            return handle_toolbar_mouse(state.get(), model, m, layout_state, send_continue,
-                                        send_pause, send_stop);
-          }
-          return false;
-        };
-  }
-
-  return WrapFocusable(CatchEvent(
+  auto panel = WrapFocusable(CatchEvent(
       Renderer(inputs, [model, state, expr_input, inject_input, layout_state, focus, app_mode] {
     if (focus != nullptr && focus->region != FocusRegion::RightPanel) {
       state->interaction_active = false;
@@ -1178,6 +1159,25 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         vbox({toolbar, content | bgcolor(theme::PanelBg()) | flex}));
       }),
       handler));
+
+  if (layout_state != nullptr) {
+    // En modo debug el workspace usa Renderer sin hijos interactivos; los eventos
+    // del panel de depuración se enrutan desde Application vía estos handlers.
+    layout_state->watches_mouse_handler = [panel](const Event& event) {
+      if (!event.is_mouse()) {
+        return false;
+      }
+      return panel->OnEvent(event);
+    };
+    layout_state->watches_key_handler = [panel](const Event& event) {
+      if (event.is_mouse()) {
+        return false;
+      }
+      return panel->OnEvent(event);
+    };
+  }
+
+  return panel;
 }
 
 }  // namespace tgdb

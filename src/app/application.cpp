@@ -1240,9 +1240,11 @@ void Application::apply_event(const DebugEvent& event) {
       break;
     case DebugEventKind::kContinued:
       model_.set_running();
+      clear_source_debug_hover(&source_state_.debug_hover);
       break;
     case DebugEventKind::kTerminated:
       model_.set_terminated();
+      clear_source_debug_hover(&source_state_.debug_hover);
       debugging_started_ = false;
       if (!event.text.empty()) {
         model_.status_message = event.text;
@@ -1266,6 +1268,19 @@ void Application::apply_event(const DebugEvent& event) {
       break;
     case DebugEventKind::kVariableChildrenUpdated:
       model_.variable_children[event.parent_expression] = event.variables;
+      break;
+    case DebugEventKind::kHoverValue:
+      if (source_state_.debug_hover.fetch_key == event.hover_key) {
+        source_state_.debug_hover.title = event.hover_expression;
+        source_state_.debug_hover.body_lines.clear();
+        if (!event.hover_value.empty()) {
+          source_state_.debug_hover.body_lines.push_back(event.hover_value);
+        }
+        source_state_.debug_hover.waiting_evaluate = false;
+        source_state_.debug_hover.visible = !source_state_.debug_hover.body_lines.empty() ||
+                                            !source_state_.debug_hover.title.empty();
+      }
+      layout_state_.request_ui_tick = true;
       break;
     case DebugEventKind::kEvaluateResult:
       if (!event.text.empty()) {
@@ -1845,6 +1860,9 @@ int Application::run() {
           TGDB_MON_SCOPE("ui", "tick.secondary_editor");
           layout_state_.secondary_editor.tick_callback();
         }
+        if (layout_state_.source_tick_callback && app_mode_ == AppMode::kDebug) {
+          layout_state_.source_tick_callback();
+        }
         {
           TGDB_MON_SCOPE("ui", "tick.git");
           git_service_.tick();
@@ -2312,6 +2330,14 @@ int Application::run() {
           layout_state_.packet_monitor_key_handler &&
           layout_state_.packet_monitor_key_handler(event)) {
         screen.Post(Event::Custom);
+        return true;
+      }
+      if (app_mode_ == AppMode::kDebug &&
+          (focus_state_.region == FocusRegion::RightPanel ||
+           is_watch_input_focus(layout_state_.text_input_focus)) &&
+          layout_state_.watches_key_handler && layout_state_.watches_key_handler(event)) {
+        screen.Post(Event::Custom);
+        layout_state_.focus_sync_needed = true;
         return true;
       }
       if (app_mode_ == AppMode::kDebug && !model_.is_post_mortem &&

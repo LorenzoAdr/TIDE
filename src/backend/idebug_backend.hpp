@@ -57,7 +57,7 @@ struct CoreConfig {
 
 enum class SessionMode { kLaunch, kAttach, kCore };
 
-enum class EvaluateContext { kRepl, kWatch, kCoreAnalyzer };
+enum class EvaluateContext { kRepl, kWatch, kCoreAnalyzer, kHover };
 
 enum class UiCommandKind {
   kConnect,
@@ -89,6 +89,7 @@ struct UiCommand {
   CoreConfig core;
   std::string expression;
   EvaluateContext evaluate_context = EvaluateContext::kRepl;
+  std::string correlation_id;
   std::string assign_value;
   std::string breakpoint_file;
   std::vector<int> breakpoint_lines;
@@ -109,6 +110,7 @@ enum class DebugEventKind {
   kVariablesUpdated,
   kEvaluateResult,
   kCoreAnalyzerResult,
+  kHoverValue,
   kWatchUpdated,
   kVariableChildrenUpdated,
   kError,
@@ -126,6 +128,9 @@ struct DebugEvent {
   std::vector<VariableInfo> variables;
   std::string parent_expression;
   std::string watch_expression;
+  std::string hover_key;
+  std::string hover_expression;
+  std::string hover_value;
   int stack_frame_id = -1;
   std::string watch_value;
   std::vector<BreakpointInfo> breakpoints;
