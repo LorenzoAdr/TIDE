@@ -237,9 +237,9 @@ inline SourceLocation resolve_symbol_navigation(ISymbolProvider& symbols,
                                                 bool declaration) {
   SourceLocation primary =
       declaration ? symbols.goto_declaration(params) : symbols.goto_definition(params);
-  SourceLocation alternate =
-      declaration ? symbols.goto_definition(params) : symbols.goto_declaration(params);
   if (!primary.valid) {
+    SourceLocation alternate =
+        declaration ? symbols.goto_definition(params) : symbols.goto_declaration(params);
     if (alternate.valid && !navigation_at_same_spot(alternate, params)) {
       return alternate;
     }
@@ -251,14 +251,17 @@ inline SourceLocation resolve_symbol_navigation(ISymbolProvider& symbols,
     }
     return alternate;
   }
-  if (navigation_at_same_spot(primary, params) && alternate.valid &&
-      !navigation_at_same_spot(alternate, params)) {
-    return alternate;
-  }
-  if (!declaration && navigation_at_same_spot(primary, params)) {
-    SourceLocation impl = symbols.goto_implementation(params);
-    if (impl.valid && !navigation_at_same_spot(impl, params)) {
-      return impl;
+  if (navigation_at_same_spot(primary, params)) {
+    SourceLocation alternate =
+        declaration ? symbols.goto_definition(params) : symbols.goto_declaration(params);
+    if (alternate.valid && !navigation_at_same_spot(alternate, params)) {
+      return alternate;
+    }
+    if (!declaration) {
+      SourceLocation impl = symbols.goto_implementation(params);
+      if (impl.valid && !navigation_at_same_spot(impl, params)) {
+        return impl;
+      }
     }
   }
   return primary;

@@ -963,7 +963,7 @@ SourceLocation LspClient::request_location(const std::string& method,
   }
 
   if (!text.empty()) {
-    sync_document_and_wait(absolute_path, text);
+    did_change(absolute_path, text);
   }
 
   const std::string uri = path_to_uri(absolute_path);

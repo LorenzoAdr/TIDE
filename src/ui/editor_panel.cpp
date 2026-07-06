@@ -2225,13 +2225,13 @@ bool try_go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
   if (params.path.empty()) {
     return false;
   }
+  flash_symbol_at_cursor(workspace, layout_state, panel_state, line, col, visible_lines);
   SourceLocation loc = resolve_symbol_navigation(*symbols, params, declaration);
   if (!loc.valid) {
     workspace->status_message =
         declaration ? i18n::tr("status.no_declaration") : i18n::tr("status.no_definition");
     return false;
   }
-  flash_symbol_at_cursor(workspace, layout_state, panel_state, line, col, visible_lines);
   schedule_editor_navigation(layout_state, loc);
   return true;
 }
