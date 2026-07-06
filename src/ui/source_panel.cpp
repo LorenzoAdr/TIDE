@@ -23,8 +23,12 @@
 #include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
+#include "indexer/index_rules.hpp"
+#include "lsp/semantic_tokens.hpp"
+#include "symbols/symbol_provider.hpp"
 #include "util/cpp_highlight.hpp"
 #include "util/path_normalize.hpp"
+#include "util/syntax_highlight.hpp"
 
 namespace tgdb {
 
@@ -41,6 +45,13 @@ struct SourcePanelState {
   int scrollbar_drag_offset = 0;
   int last_visible_lines = 1;
   uint64_t last_view_token = 0;
+  bool semantic_tokens_enqueue_pending = false;
+  uint64_t last_semantic_highlight_revision_tick = 0;
+  uint64_t last_semantic_highlight_revision = 0;
+  SemanticTokenDocument cached_semantic_tokens;
+  std::string cached_semantic_path;
+  std::vector<bool> block_comment_line_starts;
+  int block_comment_line_count = 0;
 };
 
 constexpr int kDebugHoverDelayMs = 500;
@@ -216,6 +227,44 @@ void load_source_file(const std::string& path, std::vector<std::string>* lines) 
   if (lines->empty()) {
     lines->push_back("");
   }
+}
+
+std::string lines_to_text(const std::vector<std::string>& lines) {
+  std::ostringstream out;
+  for (std::size_t i = 0; i < lines.size(); ++i) {
+    if (i > 0) {
+      out << '\n';
+    }
+    out << lines[i];
+  }
+  return out.str();
+}
+
+void notify_source_document_opened(ISymbolProvider* symbols, const std::string& path,
+                                   const std::vector<std::string>& lines) {
+  if (symbols == nullptr || path.empty() || !is_indexed_source_path(path)) {
+    return;
+  }
+  symbols->on_document_opened(path, lines_to_text(lines));
+}
+
+void sync_source_block_comment_cache(const std::vector<std::string>& lines,
+                                     SourcePanelState* panel) {
+  if (panel == nullptr) {
+    return;
+  }
+  const int line_count = static_cast<int>(lines.size());
+  if (panel->block_comment_line_count == line_count &&
+      panel->block_comment_line_starts.size() == static_cast<std::size_t>(line_count)) {
+    return;
+  }
+  panel->block_comment_line_starts.assign(static_cast<std::size_t>(line_count), false);
+  CppHighlightContext ctx;
+  for (int i = 0; i < line_count; ++i) {
+    panel->block_comment_line_starts[static_cast<std::size_t>(i)] = ctx.in_block_comment;
+    advance_cpp_highlight_context(lines[static_cast<std::size_t>(i)], &ctx);
+  }
+  panel->block_comment_line_count = line_count;
 }
 
 int line_number_width(int total_lines) {
@@ -531,14 +580,24 @@ void ToggleBreakpointAtLine(DebugModel* model, int line, CommandCallback on_comm
 
 Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
                           CommandCallback on_command, FocusManagerState* focus,
-                          MainLayoutState* layout_state) {
+                          MainLayoutState* layout_state,
+                          std::shared_ptr<ISymbolProvider> symbols) {
   auto loaded_file = std::make_shared<std::string>();
   auto panel_state = std::make_shared<SourcePanelState>();
 
-  auto renderer = Renderer([model, view_state, loaded_file, panel_state, layout_state] {
+  auto renderer = Renderer([model, view_state, loaded_file, panel_state, layout_state, symbols] {
     if (*loaded_file != model->active_file) {
       *loaded_file = model->active_file;
       load_source_file(*loaded_file, &view_state->lines);
+      panel_state->cached_semantic_path.clear();
+      panel_state->last_semantic_highlight_revision = 0;
+      panel_state->cached_semantic_tokens = {};
+      panel_state->semantic_tokens_enqueue_pending =
+          symbols != nullptr && symbols->supports_semantic_highlight() &&
+          is_indexed_source_path(model->active_file);
+      panel_state->last_semantic_highlight_revision_tick = 0;
+      panel_state->block_comment_line_count = 0;
+      notify_source_document_opened(symbols.get(), model->active_file, view_state->lines);
     }
 
     const int total = static_cast<int>(view_state->lines.size());
@@ -557,8 +616,40 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
 
     const int gutter_w = line_number_width(total);
 
+    const bool indexed_source =
+        !model->active_file.empty() && is_indexed_source_path(model->active_file);
+    const SemanticTokenDocument* semantic_tokens = nullptr;
+    if (symbols && symbols->supports_semantic_highlight() && indexed_source) {
+      const bool tokens_current = symbols->semantic_tokens_current_for_file(model->active_file);
+      const uint64_t semantic_rev = symbols->semantic_highlight_revision();
+      if (panel_state->cached_semantic_path != model->active_file ||
+          semantic_rev != panel_state->last_semantic_highlight_revision) {
+        const SemanticTokenDocument fresh = symbols->semantic_tokens_for_file(model->active_file);
+        if (fresh.ready) {
+          panel_state->cached_semantic_path = model->active_file;
+          panel_state->last_semantic_highlight_revision = semantic_rev;
+          panel_state->cached_semantic_tokens = fresh;
+        } else if (panel_state->cached_semantic_path != model->active_file) {
+          panel_state->cached_semantic_path = model->active_file;
+          panel_state->last_semantic_highlight_revision = semantic_rev;
+          panel_state->cached_semantic_tokens = fresh;
+        }
+      }
+      if (!tokens_current) {
+        panel_state->semantic_tokens_enqueue_pending = true;
+      }
+      if (panel_state->cached_semantic_tokens.ready) {
+        semantic_tokens = &panel_state->cached_semantic_tokens;
+      }
+    }
+
     Elements gutter_rows;
     Elements code_rows;
+    sync_source_block_comment_cache(view_state->lines, panel_state.get());
+    bool in_block_comment = false;
+    if (start < static_cast<int>(panel_state->block_comment_line_starts.size())) {
+      in_block_comment = panel_state->block_comment_line_starts[static_cast<std::size_t>(start)];
+    }
     for (int i = start; i < end; ++i) {
       const int line_no = i + 1;
       const bool is_current = line_no == model->active_line;
@@ -585,7 +676,11 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
       }
       gutter_rows.push_back(gutter_row);
 
-      Element code_row = HighlightCppLine(view_state->lines[i]);
+      CppHighlightContext highlight_ctx;
+      highlight_ctx.in_block_comment = in_block_comment;
+      Element code_row =
+          HighlightCodeLine(view_state->lines[i], i, semantic_tokens, -1, {}, 0, &highlight_ctx);
+      in_block_comment = block_comment_state_after_line(view_state->lines[i], in_block_comment);
       if (is_current) {
         code_row = code_row | inverted;
       } else if (is_bp) {
@@ -663,8 +758,35 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
   if (layout_state != nullptr) {
     layout_state->source_mouse_handler = dispatch_source_mouse;
     layout_state->source_key_handler = dispatch_source_keys;
-    layout_state->source_tick_callback = [model, view_state, on_command]() {
+    layout_state->source_tick_callback = [model, view_state, on_command, symbols, panel_state,
+                                          layout_state]() {
       source_debug_hover_tick(model, view_state, on_command);
+      if (symbols == nullptr || model->active_file.empty()) {
+        return;
+      }
+      symbols->tick_debounced_updates();
+      if (!symbols->supports_semantic_highlight() || !is_indexed_source_path(model->active_file)) {
+        return;
+      }
+      const uint64_t sem_rev = symbols->semantic_highlight_revision();
+      if (sem_rev != panel_state->last_semantic_highlight_revision_tick) {
+        panel_state->last_semantic_highlight_revision_tick = sem_rev;
+        if (!symbols->semantic_tokens_current_for_file(model->active_file)) {
+          panel_state->semantic_tokens_enqueue_pending = true;
+        }
+      }
+      if (!panel_state->semantic_tokens_enqueue_pending) {
+        return;
+      }
+      const bool ready = symbols->ensure_semantic_tokens(model->active_file);
+      if (ready || symbols->semantic_tokens_current_for_file(model->active_file)) {
+        panel_state->semantic_tokens_enqueue_pending = false;
+        if (layout_state->schedule_ui_tick) {
+          layout_state->schedule_ui_tick();
+        }
+      } else if (!symbols->lsp_loading() && !symbols->supports_semantic_highlight()) {
+        panel_state->semantic_tokens_enqueue_pending = false;
+      }
     };
   }
 

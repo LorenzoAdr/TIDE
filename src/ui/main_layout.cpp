@@ -877,7 +877,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       secondary_workspace, focus, layout_state, symbols, indexer, symbol_indexer, git_service,
       FocusRegion::SecondaryEditor, model, on_command,
       layout_state != nullptr ? &layout_state->secondary_editor : nullptr);
-  auto source = MakeSourcePanel(model, source_state, on_command, focus, layout_state);
+  auto source = MakeSourcePanel(model, source_state, on_command, focus, layout_state, symbols);
   auto center = MakeEditorCenterLayout(app_mode, model, editor_primary, editor_secondary, source,
                                        secondary_workspace, split_state);
 

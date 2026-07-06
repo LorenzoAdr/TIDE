@@ -742,7 +742,10 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
   bool open_header = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    open_buffers_[path] = text;
+    const auto [it, inserted] = open_buffers_.try_emplace(path, text);
+    if (!inserted) {
+      return;
+    }
     clear_shadow_companion_locked(path);
     const std::string key = normalize_lsp_path(path);
     if (!key.empty()) {
