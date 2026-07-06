@@ -122,6 +122,7 @@ class LspSymbolProvider : public ISymbolProvider {
   void tick_content_refresh_locked();
   void tick_pending_did_change_locked();
   void flush_pending_did_change_for_key_locked(const std::string& key);
+  void flush_pending_did_change_for_key(const std::string& key);
   void flush_all_pending_did_change_locked();
   void open_companion_sources_for_clangd_locked(const std::string& header_path);
   void clear_shadow_companion_locked(const std::string& companion_path);
@@ -160,6 +161,7 @@ class LspSymbolProvider : public ISymbolProvider {
   std::atomic<uint64_t> semantic_highlight_revision_{0};
   std::atomic<uint64_t> document_symbols_revision_{0};
   std::atomic<bool> pending_transport_restart_{false};
+  std::atomic<bool> lsp_restart_in_progress_{false};
   int64_t last_lsp_failure_restart_ms_ = 0;
   int64_t lsp_ready_since_ms_ = 0;
 };

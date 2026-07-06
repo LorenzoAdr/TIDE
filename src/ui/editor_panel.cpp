@@ -3186,12 +3186,7 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
     close_find_bar(find);
   }
   completion->open = true;
-  const bool live_enabled =
-      layout_state != nullptr && layout_state->app_settings != nullptr &&
-      layout_state->app_settings->lsp_enabled &&
-      layout_state->app_settings->live_lsp_completion_enabled && symbols != nullptr &&
-      symbols->supports_semantic_completion();
-  completion->live_mode = live_enabled;
+  completion->live_mode = false;
   completion->prefix = word_at_cursor(*buffer, buffer->primary());
   completion->query = completion->prefix;
   completion->selected = 0;

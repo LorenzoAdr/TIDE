@@ -365,6 +365,35 @@ void Application::process_build_environment_updates() {
   restart_lsp_for_workspace();
 }
 
+namespace {
+
+std::string editor_buffer_text(const EditorBuffer& buffer) {
+  std::string text;
+  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
+    if (i > 0) {
+      text.push_back('\n');
+    }
+    text += buffer.lines[i];
+  }
+  return text;
+}
+
+void reopen_workspace_documents(WorkspaceModel* workspace,
+                                const std::shared_ptr<ISymbolProvider>& symbols) {
+  if (workspace == nullptr || symbols == nullptr) {
+    return;
+  }
+  workspace->flush_active_tab();
+  for (const auto& tab : workspace->tabs) {
+    if (tab.path.empty()) {
+      continue;
+    }
+    symbols->on_document_opened(tab.path, editor_buffer_text(tab.buffer));
+  }
+}
+
+}  // namespace
+
 void Application::restart_lsp_for_workspace() {
   if (!symbol_provider_ || workspace_.root.empty()) {
     return;
@@ -373,6 +402,12 @@ void Application::restart_lsp_for_workspace() {
   symbol_provider_->set_workspace_clangd_options(workspace_config_.clangd_use_gcc_query_driver,
                                                  workspace_config_.clangd_background_index);
   symbol_provider_->on_workspace_opened(workspace_.root, setup.compile_dir);
+  enqueue_ui_task([this]() {
+    reopen_workspace_documents(&workspace_, symbol_provider_);
+    workspace_.buffer.view_token++;
+    secondary_workspace_.buffer.view_token++;
+    layout_state_.request_ui_tick = true;
+  });
   if (!setup.status_note.empty()) {
     workspace_.status_message += " | " + setup.status_note;
   }
@@ -406,35 +441,6 @@ void Application::restart_workspace_indexing() {
   workspace_watcher_.stop();
   workspace_watcher_.start(workspace_.root, options);
 }
-
-namespace {
-
-std::string editor_buffer_text(const EditorBuffer& buffer) {
-  std::string text;
-  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
-    if (i > 0) {
-      text.push_back('\n');
-    }
-    text += buffer.lines[i];
-  }
-  return text;
-}
-
-void reopen_workspace_documents(WorkspaceModel* workspace,
-                                const std::shared_ptr<ISymbolProvider>& symbols) {
-  if (workspace == nullptr || symbols == nullptr) {
-    return;
-  }
-  workspace->flush_active_tab();
-  for (const auto& tab : workspace->tabs) {
-    if (tab.path.empty()) {
-      continue;
-    }
-    symbols->on_document_opened(tab.path, editor_buffer_text(tab.buffer));
-  }
-}
-
-}  // namespace
 
 void Application::reindex_project() {
   if (workspace_.root.empty()) {
@@ -1784,7 +1790,8 @@ int Application::run() {
   auto inner_root = CatchEvent(with_context_menu, [this, &screen, on_command](const Event& event) {
     try {
       const bool editor_browse_active =
-          app_mode_ == AppMode::kNormal || model_.is_post_mortem;
+          app_mode_ == AppMode::kNormal || model_.is_post_mortem ||
+          app_mode_ == AppMode::kDebug;
 
       if (shutdown_state_.is_active()) {
         if (event == Event::Custom) {
@@ -2236,7 +2243,7 @@ int Application::run() {
 
       if (layout_state_.editor_helix_prefix_pending && is_editor_focus_region(focus_state_.region) &&
           editor_browse_active && !event_has_ctrl_modifier(event) &&
-          event != Event::CtrlP && active_editor_handlers.key_handler &&
+          event != Event::CtrlP && !event_is_ctrl_p(event) && active_editor_handlers.key_handler &&
           active_editor_handlers.key_handler(event)) {
         layout_state_.request_ui_tick = true;
         screen.PostEvent(Event::Custom);
@@ -2244,7 +2251,7 @@ int Application::run() {
       }
       if (layout_state_.editor_helix_prefix_pending && is_editor_focus_region(focus_state_.region) &&
           editor_browse_active && !event_has_ctrl_modifier(event) &&
-          event != Event::CtrlP && !event_is_tide_app_shortcut(event)) {
+          event != Event::CtrlP && !event_is_ctrl_p(event) && !event_is_tide_app_shortcut(event)) {
         return true;
       }
 
@@ -2371,23 +2378,35 @@ int Application::run() {
         layout_state_.request_ui_tick = true;
         return true;
       }
-      if (event == Event::CtrlP) {
-        file_picker_state_.open = !file_picker_state_.open;
-        if (file_picker_state_.open) {
-          file_picker_state_.query.clear();
-          file_picker_state_.selected = 0;
-          file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
-          file_picker_state_.mark_matches_dirty();
-          file_picker_state_.refresh_matches(&workspace_);
-          file_picker_state_.on_opened(model_.workspace_root);
-          file_picker_state_.arm_ctrl_chord();
-        } else {
-          file_picker_state_.on_closed();
+      if (event_is_ctrl_p(event)) {
+        if (event_is_kitty_key_release(event)) {
+          return false;
         }
+        if (file_picker_state_.open) {
+          if (!file_picker_state_.matches.empty()) {
+            file_picker_state_.selected =
+                (file_picker_state_.selected + 1) %
+                static_cast<int>(file_picker_state_.matches.size());
+            file_picker_state_.ctrl_chord_active = true;
+            file_picker_state_.update_preview_for_selection(model_.workspace_root);
+          }
+          force_immediate_repaint(&layout_state_, &screen);
+          return true;
+        }
+        file_picker_state_.open = true;
+        file_picker_state_.query.clear();
+        file_picker_state_.selected = 0;
+        file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
+        file_picker_state_.mark_matches_dirty();
+        file_picker_state_.on_opened(model_.workspace_root);
+        file_picker_state_.arm_ctrl_chord();
         force_immediate_repaint(&layout_state_, &screen);
         return true;
       }
-      if (event == Event::CtrlO) {
+      if (event_is_ctrl_o(event)) {
+        if (event_is_kitty_key_release(event)) {
+          return false;
+        }
         if (symbol_picker_state_.open && !symbol_picker_state_.matches.empty()) {
           symbol_picker_state_.selected =
               (symbol_picker_state_.selected + 1) %

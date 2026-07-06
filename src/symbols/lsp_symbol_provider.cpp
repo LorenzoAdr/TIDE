@@ -190,8 +190,15 @@ void LspSymbolProvider::process_pending_transport_restart() {
       now - last_lsp_failure_restart_ms_ < kRestartCooldownMs) {
     return;
   }
+  if (lsp_restart_in_progress_.exchange(true, std::memory_order_acq_rel)) {
+    return;
+  }
   pending_transport_restart_.store(false, std::memory_order_release);
-  restart_lsp_after_transport_failure();
+  std::thread([this]() {
+    set_current_thread_name("lsp-restart");
+    restart_lsp_after_transport_failure();
+    lsp_restart_in_progress_.store(false, std::memory_order_release);
+  }).detach();
 }
 
 void LspSymbolProvider::start_async_worker_locked() {
@@ -431,25 +438,42 @@ void LspSymbolProvider::tick_content_refresh_locked() {
   }
 }
 
-void LspSymbolProvider::flush_pending_did_change_for_key_locked(const std::string& key) {
-  if (!use_lsp_ || key.empty()) {
+void LspSymbolProvider::flush_pending_did_change_for_key(const std::string& key) {
+  if (key.empty()) {
     return;
   }
-  pending_did_change_.erase(key);
   std::string path_to_send;
   std::string text_to_send;
-  for (const auto& entry : open_buffers_) {
-    if (normalize_lsp_path(entry.first) == key) {
-      path_to_send = entry.first;
-      text_to_send = entry.second;
-      break;
+  bool send = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_) {
+      return;
+    }
+    pending_did_change_.erase(key);
+    for (const auto& entry : open_buffers_) {
+      if (normalize_lsp_path(entry.first) == key) {
+        path_to_send = entry.first;
+        text_to_send = entry.second;
+        break;
+      }
+    }
+    if (!path_to_send.empty() && is_lsp_trackable_path(path_to_send, text_to_send)) {
+      send = true;
     }
   }
-  if (path_to_send.empty() || !is_lsp_trackable_path(path_to_send, text_to_send)) {
+  if (!send) {
     return;
   }
   client_.did_change(path_to_send, text_to_send);
-  pending_content_refresh_[key] = steady_now_ms();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pending_content_refresh_[key] = steady_now_ms();
+  }
+}
+
+void LspSymbolProvider::flush_pending_did_change_for_key_locked(const std::string& key) {
+  flush_pending_did_change_for_key(key);
 }
 
 void LspSymbolProvider::flush_all_pending_did_change_locked() {
@@ -462,7 +486,7 @@ void LspSymbolProvider::flush_all_pending_did_change_locked() {
     keys.push_back(entry.first);
   }
   for (const std::string& key : keys) {
-    flush_pending_did_change_for_key_locked(key);
+    flush_pending_did_change_for_key(key);
   }
 }
 
@@ -479,14 +503,31 @@ void LspSymbolProvider::tick_pending_did_change_locked() {
     }
   }
   for (const std::string& key : due) {
-    flush_pending_did_change_for_key_locked(key);
+    flush_pending_did_change_for_key(key);
   }
 }
 
 void LspSymbolProvider::tick_debounced_updates() {
   process_pending_transport_restart();
+  std::vector<std::string> due;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_ || pending_did_change_.empty()) {
+      tick_content_refresh_locked();
+      return;
+    }
+    const int64_t now = steady_now_ms();
+    constexpr int64_t kDebounceMs = kLspDocumentDebounceMs;
+    for (const auto& entry : pending_did_change_) {
+      if (now - entry.second >= kDebounceMs) {
+        due.push_back(entry.first);
+      }
+    }
+  }
+  for (const std::string& key : due) {
+    flush_pending_did_change_for_key(key);
+  }
   std::lock_guard<std::mutex> lock(mutex_);
-  tick_pending_did_change_locked();
   tick_content_refresh_locked();
 }
 
@@ -494,12 +535,38 @@ void LspSymbolProvider::flush_document_sync(const std::string& path) {
   if (path.empty()) {
     return;
   }
-  std::lock_guard<std::mutex> lock(mutex_);
   const std::string key = normalize_lsp_path(path);
   if (key.empty()) {
     return;
   }
-  flush_pending_did_change_for_key_locked(key);
+  std::string path_to_send;
+  std::string text_to_send;
+  bool send = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_) {
+      return;
+    }
+    pending_did_change_.erase(key);
+    for (const auto& entry : open_buffers_) {
+      if (normalize_lsp_path(entry.first) == key) {
+        path_to_send = entry.first;
+        text_to_send = entry.second;
+        break;
+      }
+    }
+    if (!path_to_send.empty() && is_lsp_trackable_path(path_to_send, text_to_send)) {
+      send = true;
+    }
+  }
+  if (!send) {
+    return;
+  }
+  client_.did_change(path_to_send, text_to_send);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pending_content_refresh_[key] = steady_now_ms();
+  }
 }
 
 void LspSymbolProvider::set_lsp_enabled(bool enabled) {
@@ -539,7 +606,6 @@ void LspSymbolProvider::on_workspace_opened(const std::string& root,
   stop_lsp();
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    open_buffers_.clear();
     workspace_root_ = root;
     compile_commands_dir_ = compile_commands_dir;
   }
@@ -605,21 +671,28 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
     return;
   }
   bool notify_open = false;
-  bool open_companions = false;
+  bool open_header = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    flush_all_pending_did_change_locked();
     open_buffers_[path] = text;
     clear_shadow_companion_locked(path);
+    const std::string key = normalize_lsp_path(path);
+    if (!key.empty()) {
+      pending_did_change_.erase(key);
+    }
     notify_open = use_lsp_ && is_lsp_trackable_path(path, text);
-    open_companions = notify_open && is_cpp_header_path(path);
-    if (open_companions) {
-      client_.did_open(path, text);
-      open_companion_sources_for_clangd_locked(path);
+    open_header = notify_open && is_cpp_header_path(path);
+    if (open_header) {
       notify_open = false;
     }
   }
-  if (notify_open) {
+  if (open_header) {
+    client_.did_open(path, text);
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (use_lsp_) {
+      open_companion_sources_for_clangd_locked(path);
+    }
+  } else if (notify_open) {
     client_.did_open(path, text);
   }
 }
@@ -644,15 +717,17 @@ void LspSymbolProvider::on_document_saved(const std::string& path) {
     return;
   }
   std::string key;
+  const std::string saved_text = buffer_text_for_path(path);
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!use_lsp_ || !is_lsp_trackable_path(path)) {
+    if (!use_lsp_ || !is_lsp_trackable_path(path, saved_text)) {
       return;
     }
     key = normalize_lsp_path(path);
     if (key.empty()) {
       return;
     }
+    open_buffers_[path] = saved_text;
     pending_content_refresh_.erase(key);
     semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
   }
@@ -743,18 +818,21 @@ std::vector<CompletionItem> LspSymbolProvider::completions_at(
     return {};
   }
 
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!use_lsp_) {
+  std::string key;
+  std::string text;
+  bool active = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    active = use_lsp_;
+    key = normalize_lsp_path(params.path);
+    if (key.empty()) {
+      return {};
+    }
+    text = params.text.empty() ? buffer_text_for_path(key) : params.text;
+  }
+  if (!active) {
     return {};
   }
-
-  const std::string key = normalize_lsp_path(params.path);
-  if (key.empty()) {
-    return {};
-  }
-
-  const std::string text =
-      params.text.empty() ? buffer_text_for_path(key) : params.text;
   return client_.completions_at(key, text, params.line, params.character);
 }
 

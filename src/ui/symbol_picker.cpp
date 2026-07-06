@@ -10,6 +10,7 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ui/panel.hpp"
+#include "ui/key_bindings.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 #include "util/fuzzy_match.hpp"
@@ -308,7 +309,7 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
           state->selected = std::max(0, state->selected - 1);
           return true;
         }
-        if (event == Event::CtrlO) {
+        if (event_is_ctrl_o(event)) {
           if (!state->matches.empty()) {
             state->selected =
                 (state->selected + 1) % static_cast<int>(state->matches.size());

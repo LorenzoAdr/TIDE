@@ -1,5 +1,7 @@
 #include "ui/file_picker.hpp"
 
+#include "ui/key_bindings.hpp"
+
 #include <algorithm>
 #include <filesystem>
 #include <memory>
@@ -394,6 +396,10 @@ void FilePickerState::set_preview_notify(std::function<void()> notify) {
   preview.set_notify_callback(std::move(notify));
 }
 
+void FilePickerState::set_repaint_notify(std::function<void()> notify) {
+  repaint_notify = std::move(notify);
+}
+
 void FilePickerState::update_preview_for_selection(const std::string& workspace_root) {
   if (!open) {
     return;
@@ -479,6 +485,13 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
         state->sync_index(indexer != nullptr ? indexer->snapshot() : nullptr,
                           model->workspace_root);
 
+        if (event == Event::Custom) {
+          return false;
+        }
+        if (event_is_kitty_key_release(event)) {
+          return false;
+        }
+
         if (event == Event::Escape) {
           state->open = false;
           state->query.clear();
@@ -493,6 +506,9 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
             state->confirm_ctrl_chord_selection(model, workspace, focus);
           } else {
             state->ctrl_chord_armed = false;
+          }
+          if (state->repaint_notify) {
+            state->repaint_notify();
           }
           return true;
         }
@@ -517,7 +533,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
           }
           return true;
         }
-        if (event == Event::CtrlP) {
+        if (event_is_ctrl_p(event)) {
           if (!state->matches.empty()) {
             state->selected =
                 (state->selected + 1) % static_cast<int>(state->matches.size());

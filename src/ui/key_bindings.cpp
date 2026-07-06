@@ -465,6 +465,30 @@ bool event_is_ctrl_key_release(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[57443;2u");
 }
 
+bool event_is_kitty_key_release(const ftxui::Event& event) {
+  return input_is_kitty_release_event(event.input());
+}
+
+bool event_is_ctrl_p(const ftxui::Event& event) {
+  if (event == ftxui::Event::CtrlP) {
+    return true;
+  }
+  const std::string& input = event.input();
+  return input == "\x1B[112;5u" || input == "\x1B[16;5u" ||
+         input == "\x1B[112;5;1~" || input == "\x1B[27;5;112~" ||
+         input == "\x1B[27;5;80~";
+}
+
+bool event_is_ctrl_o(const ftxui::Event& event) {
+  if (event == ftxui::Event::CtrlO) {
+    return true;
+  }
+  const std::string& input = event.input();
+  return input == "\x1B[111;5u" || input == "\x1B[15;5u" ||
+         input == "\x1B[111;5;1~" || input == "\x1B[27;5;111~" ||
+         input == "\x1B[27;5;79~";
+}
+
 bool event_is_ctrl_d(const ftxui::Event& event) {
   return event == ftxui::Event::CtrlD ||
          event == ftxui::Event::Special("\x1B[27;5;100~") ||
@@ -643,8 +667,8 @@ bool event_has_ctrl_modifier(const ftxui::Event& event) {
 }
 
 bool event_is_tide_global_shortcut(const ftxui::Event& event) {
-  return event == ftxui::Event::CtrlP || event == ftxui::Event::CtrlT ||
-         event == ftxui::Event::CtrlO || event == ftxui::Event::CtrlQ ||
+  return event_is_ctrl_p(event) || event == ftxui::Event::CtrlT ||
+         event_is_ctrl_o(event) || event == ftxui::Event::CtrlQ ||
          event == ftxui::Event::CtrlA || event == ftxui::Event::CtrlE ||
          event == ftxui::Event::CtrlB;
 }

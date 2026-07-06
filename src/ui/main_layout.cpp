@@ -93,6 +93,11 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
     return;
   }
 
+  if (is_editor_focus_region(focus->region) &&
+      layout_state->text_input_focus == TextInputFocus::Console) {
+    layout_state->text_input_focus = TextInputFocus::None;
+  }
+
   if (focus->region == FocusRegion::Terminal) {
     if (mode == AppMode::kDebug &&
         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kDebug) {
