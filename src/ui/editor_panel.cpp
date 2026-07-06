@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -51,6 +52,7 @@
 #include "ftxui/screen/box.hpp"
 #include "i18n/tr.hpp"
 #include "ui/clickable.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/editor_tab_bar.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/focusable_component.hpp"
@@ -248,6 +250,15 @@ void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState*
 
 constexpr int kDoubleClickMs = 400;
 constexpr int kHoverDelayMs = 500;
+
+static bool hover_key_same_position(std::string_view fetch_key, std::string_view path, int line,
+                                    int col) {
+  const std::string prefix =
+      std::string(path) + "|" + std::to_string(line) + "|" + std::to_string(col) + "|";
+  return fetch_key.size() >= prefix.size() &&
+         fetch_key.compare(0, prefix.size(), prefix) == 0;
+}
+
 constexpr int kSuffixScrollSettleMs = 150;
 constexpr int kEditorContentSettleMs = 120;
 constexpr int kLiveCompletionDebounceMs = 120;
@@ -886,7 +897,11 @@ const DocumentDiagnostics& cached_file_diagnostics(EditorPanelState* panel,
 }
 
 void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
-                       const std::shared_ptr<ISymbolProvider>& symbols) {
+                       const std::shared_ptr<ISymbolProvider>& symbols,
+                       MainLayoutState* layout_state) {
+  if (!editor_lsp_hover_enabled()) {
+    return;
+  }
   if (workspace == nullptr || panel == nullptr) {
     return;
   }
@@ -910,15 +925,36 @@ void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
   if (hover.fetch_key == key) {
     if (hover.info.valid) {
       hover.visible = true;
+      if (layout_state != nullptr) {
+        layout_state->request_ui_tick = true;
+      }
       return;
     }
     if (symbols->hover_uses_async_fetch()) {
       if (const auto polled = symbols->poll_hover(key)) {
         hover.info = *polled;
         hover.visible = polled->valid;
+        if (hover.visible && layout_state != nullptr) {
+          layout_state->request_ui_tick = true;
+        }
       }
     }
     return;
+  }
+
+  if (!hover.fetch_key.empty() && symbols->hover_uses_async_fetch()) {
+    if (const auto polled = symbols->poll_hover(hover.fetch_key)) {
+      hover.info = *polled;
+      hover.fetch_key = key;
+      hover.visible = polled->valid;
+      if (hover.visible && layout_state != nullptr) {
+        layout_state->request_ui_tick = true;
+      }
+      return;
+    }
+    if (hover_key_same_position(hover.fetch_key, buffer.path, hover.line, hover.col)) {
+      return;
+    }
   }
 
   HoverParams params;
@@ -934,10 +970,16 @@ void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
   hover.info = symbols->hover_at(params);
   hover.fetch_key = key;
   hover.visible = hover.info.valid;
+  if (hover.visible && layout_state != nullptr) {
+    layout_state->request_ui_tick = true;
+  }
 }
 
 void track_hover_mouse(EditorPanelState* panel, const Mouse& m, const EditorBuffer& buffer,
                        int visible_lines) {
+  if (!editor_lsp_hover_enabled()) {
+    return;
+  }
   if (panel == nullptr) {
     return;
   }
@@ -1119,7 +1161,7 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   const bool in_bar = panel->scrollbar_box.Contain(m.x, m.y);
 
   if (m.motion == Mouse::Moved) {
-    if (layout_state != nullptr) {
+    if (layout_state != nullptr && hover_effects_enabled()) {
       const std::string_view before = layout_state->clickable.hovered_id();
       if (in_bar || panel->scrollbar_dragging) {
         layout_state->clickable.set_hover(press_id::kEditorScrollbar);
@@ -1128,9 +1170,7 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
           return id == press_id::kEditorScrollbar;
         });
       }
-      if (layout_state->clickable.hovered_id() != before) {
-        layout_state->request_ui_tick = true;
-      }
+      apply_hover_repaint(layout_state, before);
     }
     if (panel->scrollbar_dragging) {
       return apply_scrollbar_drag(workspace, panel, m.y, visible_lines);
@@ -1244,7 +1284,7 @@ bool handle_horizontal_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerSt
   const bool in_bar = panel->h_scrollbar_box.Contain(m.x, m.y);
 
   if (m.motion == Mouse::Moved) {
-    if (layout_state != nullptr) {
+    if (layout_state != nullptr && hover_effects_enabled()) {
       const std::string_view before = layout_state->clickable.hovered_id();
       if (in_bar || panel->h_scrollbar_dragging) {
         layout_state->clickable.set_hover(press_id::kEditorHorizontalScrollbar);
@@ -1253,9 +1293,7 @@ bool handle_horizontal_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerSt
           return id == press_id::kEditorHorizontalScrollbar;
         });
       }
-      if (layout_state->clickable.hovered_id() != before) {
-        layout_state->request_ui_tick = true;
-      }
+      apply_hover_repaint(layout_state, before);
     }
     if (panel->h_scrollbar_dragging) {
       return apply_h_scrollbar_drag(workspace, panel, m.x);
@@ -1348,10 +1386,12 @@ bool handle_editor_chrome_mouse(WorkspaceModel* workspace, FocusManagerState* fo
   }
   const auto& m = event.mouse();
   if (m.motion == Mouse::Moved) {
-    update_editor_chrome_hover(workspace, tab_bar, layout_state, panel->problems_button_box, m.x,
-                               m.y);
-    if (tab_bar != nullptr && tab_bar->bar_box.Contain(m.x, m.y)) {
-      return true;
+    if (hover_effects_enabled()) {
+      update_editor_chrome_hover(workspace, tab_bar, layout_state, panel->problems_button_box, m.x,
+                                 m.y);
+      if (tab_bar != nullptr && tab_bar->bar_box.Contain(m.x, m.y)) {
+        return true;
+      }
     }
   }
   if (handle_tab_bar_mouse(workspace, focus, tab_bar, m, layout_state, panel->panel_focus)) {
@@ -1382,7 +1422,8 @@ bool handle_editor_chrome_mouse(WorkspaceModel* workspace, FocusManagerState* fo
   if (m.motion == Mouse::Moved) {
     if (in_code && !panel->mouse_selecting) {
       track_hover_mouse(panel, m, workspace->buffer, visible_lines);
-    } else if (!in_code && !panel->breadcrumb_box.Contain(m.x, m.y) &&
+    } else if (hover_effects_enabled() && !in_code &&
+               !panel->breadcrumb_box.Contain(m.x, m.y) &&
                (tab_bar == nullptr || !tab_bar->bar_box.Contain(m.x, m.y))) {
       clear_hover_state(&panel->hover);
     }
@@ -4874,7 +4915,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       tick_pending_editor_navigation(layout_state, [&](const SourceLocation& loc) {
         navigate_to_location(workspace, layout_state, loc, visible);
       });
-      editor_hover_tick(workspace, panel_state.get(), symbols);
+      editor_hover_tick(workspace, panel_state.get(), symbols, layout_state);
       tick_block_comment_cache(panel_state.get(), workspace->buffer);
       tick_lsp_buffer_sync(panel_state.get(), workspace, symbols, layout_state);
       completion_lsp_tick(completion_state.get(), workspace, symbols, layout_state,

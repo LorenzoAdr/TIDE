@@ -21,6 +21,7 @@
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/clickable.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/cursor_blink_ui.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/panel.hpp"
@@ -193,6 +194,9 @@ bool terminal_link_at_cell(const ConsolePanelState* state, int row_index, int co
 
 bool update_terminal_link_hover(ConsolePanelState* state, MainLayoutState* layout_state, int x,
                                 int y) {
+  if (!hover_effects_enabled()) {
+    return false;
+  }
   if (state == nullptr || !terminal_box_valid(state->terminal_box) ||
       !state->terminal_box.Contain(x, y)) {
     const bool had_hover = state != nullptr && state->terminal_link_hover.has_value();
@@ -383,7 +387,7 @@ bool handle_terminal_scroll_mouse(ConsolePanelState* state, MainLayoutState* lay
   const bool in_body = terminal_body_contains(state, m.x, m.y);
 
   if (m.motion == Mouse::Moved) {
-    if (layout_state != nullptr) {
+    if (layout_state != nullptr && hover_effects_enabled()) {
       const std::string_view before = layout_state->clickable.hovered_id();
       if (in_bar || state->terminal_scrollbar_dragging) {
         layout_state->clickable.set_hover(press_id::kTerminalScrollbar);
@@ -392,9 +396,7 @@ bool handle_terminal_scroll_mouse(ConsolePanelState* state, MainLayoutState* lay
           return id == press_id::kTerminalScrollbar;
         });
       }
-      if (layout_state->clickable.hovered_id() != before) {
-        layout_state->request_ui_tick = true;
-      }
+      apply_hover_repaint(layout_state, before);
     }
     if (state->terminal_scrollbar_dragging) {
       return apply_terminal_scrollbar_drag(state, m.y, total_lines, visible_lines);

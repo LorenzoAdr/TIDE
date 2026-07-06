@@ -6,6 +6,7 @@
 #include "app/editor_tabs.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/clickable.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/panel.hpp"
@@ -334,6 +335,9 @@ Element make_tab_hover_tooltip(WorkspaceModel* workspace, const EditorTabBarStat
 bool update_editor_chrome_hover(WorkspaceModel* workspace, EditorTabBarState* state,
                                 MainLayoutState* layout_state, const Box& problems_box, int x,
                                 int y) {
+  if (!hover_effects_enabled()) {
+    return false;
+  }
   if (layout_state == nullptr) {
     return false;
   }

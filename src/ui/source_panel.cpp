@@ -19,6 +19,7 @@
 #include "ui/focusable_component.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/clickable.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
@@ -87,6 +88,9 @@ std::optional<std::string> lookup_local_value(const DebugModel& model, const std
 
 void track_source_debug_hover(DebugModel* model, SourceViewState* view_state,
                               const SourcePanelState& panel, const Mouse& m, int visible_lines) {
+  if (!hover_effects_enabled()) {
+    return;
+  }
   if (model == nullptr || view_state == nullptr || model->state != DebugState::kStopped) {
     return;
   }
@@ -116,6 +120,9 @@ void track_source_debug_hover(DebugModel* model, SourceViewState* view_state,
 
 void source_debug_hover_tick(DebugModel* model, SourceViewState* view_state,
                              CommandCallback on_command) {
+  if (!hover_effects_enabled()) {
+    return;
+  }
   if (model == nullptr || view_state == nullptr) {
     return;
   }
@@ -319,7 +326,7 @@ bool handle_source_scrollbar_mouse(SourceViewState* view_state, SourcePanelState
   const bool in_bar = panel->scrollbar_box.Contain(m.x, m.y);
 
   if (m.motion == Mouse::Moved) {
-    if (layout_state != nullptr) {
+    if (layout_state != nullptr && hover_effects_enabled()) {
       const std::string_view before = layout_state->clickable.hovered_id();
       if (in_bar || panel->scrollbar_dragging) {
         layout_state->clickable.set_hover(press_id::kSourceScrollbar);
@@ -328,9 +335,7 @@ bool handle_source_scrollbar_mouse(SourceViewState* view_state, SourcePanelState
           return id == press_id::kSourceScrollbar;
         });
       }
-      if (layout_state->clickable.hovered_id() != before) {
-        layout_state->request_ui_tick = true;
-      }
+      apply_hover_repaint(layout_state, before);
     }
     if (panel->scrollbar_dragging) {
       const int local_y = m.y - panel->scrollbar_box.y_min;

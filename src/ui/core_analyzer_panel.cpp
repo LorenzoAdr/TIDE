@@ -10,6 +10,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
 #include "ui/clickable.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/cursor_blink.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/press_ids.hpp"
@@ -167,7 +168,7 @@ bool handle_core_analyzer_mouse(Event event, DebugModel* model, CoreAnalyzerPane
   const int inst_total = model != nullptr ? static_cast<int>(model->core_analyzer_instances.size())
                                           : 0;
 
-  if (m.motion == Mouse::Moved) {
+  if (m.motion == Mouse::Moved && hover_effects_enabled()) {
     if (state->instances_box.Contain(m.x, m.y) && inst_total > 0) {
       const int visual_row = m.y - state->instances_box.y_min;
       const int row = state->instances_first_visible + visual_row;
@@ -178,9 +179,7 @@ bool handle_core_analyzer_mouse(Event event, DebugModel* model, CoreAnalyzerPane
     } else {
       const std::string_view before = layout_state->clickable.hovered_id();
       layout_state->clickable.clear_hover_if(press_id::is_core_analyzer_hover);
-      if (layout_state->clickable.hovered_id() != before) {
-        layout_state->request_ui_tick = true;
-      }
+      apply_hover_repaint(layout_state, before);
     }
   }
 

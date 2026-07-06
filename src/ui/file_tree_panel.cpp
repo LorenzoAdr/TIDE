@@ -22,6 +22,7 @@
 #include "ftxui/screen/box.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/clickable.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/glyphs.hpp"
@@ -376,7 +377,7 @@ bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState*
   const bool in_bar = state->scrollbar_box.Contain(m.x, m.y);
 
   if (m.motion == Mouse::Moved) {
-    if (layout_state != nullptr) {
+    if (layout_state != nullptr && hover_effects_enabled()) {
       const std::string_view before = layout_state->clickable.hovered_id();
       if (in_bar || state->scrollbar_dragging) {
         layout_state->clickable.set_hover(press_id::kEditorScrollbar);
@@ -384,9 +385,7 @@ bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState*
         layout_state->clickable.clear_hover_if(
             [](std::string_view id) { return id == press_id::kEditorScrollbar; });
       }
-      if (layout_state->clickable.hovered_id() != before) {
-        layout_state->request_ui_tick = true;
-      }
+      apply_hover_repaint(layout_state, before);
     }
     if (state->scrollbar_dragging) {
       const int local_y = m.y - state->scrollbar_box.y_min;
@@ -528,6 +527,9 @@ bool handle_explorer_header_mouse(FileTreePanelState* state, MainLayoutState* la
 
 bool update_explorer_hover(FileTreePanelState* state, MainLayoutState* layout_state, int x,
                            int y) {
+  if (!hover_effects_enabled()) {
+    return false;
+  }
   if (layout_state == nullptr || state == nullptr) {
     return false;
   }

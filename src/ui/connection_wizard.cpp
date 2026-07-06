@@ -11,6 +11,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "i18n/tr.hpp"
 #include "ui/clickable.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
@@ -62,6 +63,9 @@ std::string mode_label(WizardMode mode) {
 
 bool update_f2_mode_hover(ConnectionWizardState* state, MainLayoutState* layout_state, int x,
                           int y) {
+  if (!hover_effects_enabled()) {
+    return false;
+  }
   if (state == nullptr || layout_state == nullptr) {
     return false;
   }
@@ -86,6 +90,9 @@ bool update_f2_mode_hover(ConnectionWizardState* state, MainLayoutState* layout_
 
 bool update_f2_browser_hover(ConnectionWizardState* state, MainLayoutState* layout_state, int x,
                              int y) {
+  if (!hover_effects_enabled()) {
+    return false;
+  }
   if (state == nullptr || layout_state == nullptr) {
     return false;
   }
@@ -110,6 +117,9 @@ bool update_f2_browser_hover(ConnectionWizardState* state, MainLayoutState* layo
 
 bool update_f2_process_hover(ConnectionWizardState* state, MainLayoutState* layout_state, int x,
                              int y) {
+  if (!hover_effects_enabled()) {
+    return false;
+  }
   if (state == nullptr || layout_state == nullptr) {
     return false;
   }

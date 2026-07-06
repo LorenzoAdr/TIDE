@@ -10,6 +10,7 @@
 #include "ftxui/screen/box.hpp"
 #include "ui/call_hierarchy_view.hpp"
 #include "ui/clickable.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
@@ -118,6 +119,9 @@ std::optional<HierarchyHit> hierarchy_hit_at_mouse(const CallHierarchyPanelState
 
 bool update_call_hierarchy_hover(CallHierarchyPanelState* state, MainLayoutState* layout_state,
                                  int x, int y) {
+  if (!hover_effects_enabled()) {
+    return false;
+  }
   if (state == nullptr || layout_state == nullptr) {
     return false;
   }

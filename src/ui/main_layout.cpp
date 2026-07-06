@@ -1,4 +1,5 @@
 #include "ui/git_panel.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/status_layout_popover.hpp"
 
@@ -683,6 +684,9 @@ bool box_hit_bottom_sep(const Box& box, int x, int y) {
 }
 
 bool update_split_hover(LayoutState* state, int x, int y) {
+  if (!hover_effects_enabled()) {
+    return false;
+  }
   if (state == nullptr) {
     return false;
   }

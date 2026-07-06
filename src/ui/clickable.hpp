@@ -8,6 +8,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
 #include "ui/clickable_interaction.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/theme.hpp"
 
@@ -52,27 +53,20 @@ inline void trigger_press(MainLayoutState* layout, const std::string& id) {
 inline bool update_panel_hover(MainLayoutState* layout, int x, int y,
                                std::initializer_list<HoverTarget> targets,
                                const std::function<bool(std::string_view)>& owns_hover) {
-  if (layout == nullptr) {
+  if (layout == nullptr || !hover_effects_enabled()) {
     return false;
   }
 
   const auto hit = hit_test_hover(x, y, targets);
   if (hit.has_value()) {
-    if (layout->clickable.hovered_id() != *hit) {
-      layout->clickable.set_hover(*hit);
-      layout->request_ui_tick = true;
-      return true;
-    }
-    return false;
+    const std::string_view before = layout->clickable.hovered_id();
+    layout->clickable.set_hover(*hit);
+    return apply_hover_repaint(layout, before);
   }
 
   const std::string_view before = layout->clickable.hovered_id();
   layout->clickable.clear_hover_if(owns_hover);
-  if (layout->clickable.hovered_id() != before) {
-    layout->request_ui_tick = true;
-    return true;
-  }
-  return false;
+  return apply_hover_repaint(layout, before);
 }
 
 inline std::optional<int> local_row_in_box(const Box& box, int x, int y) {
@@ -83,6 +77,9 @@ inline std::optional<int> local_row_in_box(const Box& box, int x, int y) {
 }
 
 inline Element StyleListRow(Element row, bool selected, bool hovered, bool pressed) {
+  if (!hover_effects_enabled()) {
+    hovered = false;
+  }
   if (pressed) {
     return row | bold | inverted | bgcolor(theme::TabPressed());
   }
@@ -99,6 +96,9 @@ inline Element StyleListRow(Element row, bool selected, bool hovered, bool press
 }
 
 inline Element StyleClickable(Element base, ClickableState state) {
+  if (!hover_effects_enabled()) {
+    state.hovered = false;
+  }
   if (state.disabled) {
     return base | dim;
   }
@@ -124,6 +124,9 @@ inline Element MakeTabButton(const std::string& label, bool selected, bool hover
 
 inline Element MakeToolbarButton(Element content, bool hovered, bool pressed, bool disabled,
                                  Box* box) {
+  if (!hover_effects_enabled()) {
+    hovered = false;
+  }
   Element btn =
       hbox({text("  "), std::move(content), text("  ")}) | center | size(HEIGHT, EQUAL, 1);
   if (disabled) {
@@ -157,7 +160,8 @@ inline Element MakeSplitToolbarButton(Element main_content, Element arrow_conten
 
 inline bool interaction_active(const MainLayoutState* layout, std::string_view id) {
   return layout != nullptr &&
-         (layout->clickable.is_hovered(id) || layout->clickable.is_pressed(id));
+         ((hover_effects_enabled() && layout->clickable.is_hovered(id)) ||
+          layout->clickable.is_pressed(id));
 }
 
 }  // namespace tgdb

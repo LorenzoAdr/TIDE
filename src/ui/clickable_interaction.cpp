@@ -2,9 +2,14 @@
 
 #include <algorithm>
 
+#include "ui/hover_effects.hpp"
+
 namespace tgdb {
 
 void ClickableInteractionTracker::set_hover(std::string_view id) {
+  if (!hover_effects_enabled()) {
+    return;
+  }
   const std::string next(id);
   if (hovered_id_ == next) {
     return;
@@ -13,21 +18,33 @@ void ClickableInteractionTracker::set_hover(std::string_view id) {
 }
 
 void ClickableInteractionTracker::clear_hover() {
+  if (!hover_effects_enabled()) {
+    return;
+  }
   hovered_id_.clear();
 }
 
 void ClickableInteractionTracker::clear_hover_if(
     const std::function<bool(std::string_view)>& predicate) {
+  if (!hover_effects_enabled()) {
+    return;
+  }
   if (!hovered_id_.empty() && predicate(hovered_id_)) {
     hovered_id_.clear();
   }
 }
 
 bool ClickableInteractionTracker::is_hovered(std::string_view id) const {
+  if (!hover_effects_enabled()) {
+    return false;
+  }
   return !id.empty() && hovered_id_ == id;
 }
 
 std::string_view ClickableInteractionTracker::hovered_id() const {
+  if (!hover_effects_enabled()) {
+    return {};
+  }
   return hovered_id_;
 }
 

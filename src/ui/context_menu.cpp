@@ -19,6 +19,7 @@
 #include "symbols/code_action.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/clickable.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/editor_panel.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
@@ -1559,6 +1560,9 @@ Element render_context_menu_overlay(ContextMenuState* state, MainLayoutState* la
 
 bool handle_context_menu_hover(ContextMenuState* state, MainLayoutState* layout_state,
                                const Mouse& m) {
+  if (!hover_effects_enabled()) {
+    return false;
+  }
   if (state == nullptr || layout_state == nullptr || !state->open || state->rename_open ||
       state->delete_confirm_open || state->indexer_paths_open || state->move_browser_open ||
       m.motion != Mouse::Moved) {
