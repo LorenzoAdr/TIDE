@@ -25,6 +25,7 @@
 #include "ui/status_layout_popover.hpp"
 #include "git/git_service.hpp"
 #include "util/system_stats.hpp"
+#include "packet_monitor/pkt_monitor_service.hpp"
 #include "ui/source_panel.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/nm_reader.hpp"
@@ -85,6 +86,7 @@ struct ConsolePanelTabs {
   static constexpr int kGit = 6;
   static constexpr int kCoreAnalyzer = 7;
   static constexpr int kBinarySymbols = 8;
+  static constexpr int kPacketMonitor = 9;
   int selected_tab = kTerminal;
 };
 
@@ -125,7 +127,8 @@ struct MainLayoutState {
   std::function<void()> apply_app_settings_callback;
   ConsolePanelTabs console_tabs;
   BinarySymbolsPending binary_symbols_pending;
-  bool core_analyzer_search_focus = false;
+  enum class CoreAnalyzerFocus { kCommand, kSearch, kInstances };
+  CoreAnalyzerFocus core_analyzer_focus = CoreAnalyzerFocus::kCommand;
   bool show_core_analyzer_tab = false;
   TextInputFocus text_input_focus = TextInputFocus::None;
   bool focus_sync_needed = false;
@@ -179,7 +182,10 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> problems_key_handler;
   std::function<bool(const ftxui::Event&)> git_key_handler;
   std::function<bool(const ftxui::Event&)> git_mouse_handler;
+  std::function<bool(const ftxui::Event&)> core_analyzer_key_handler;
   std::function<bool(const ftxui::Event&)> binary_symbols_key_handler;
+  std::function<bool(const ftxui::Event&)> packet_monitor_key_handler;
+  std::function<bool(const ftxui::Event&)> packet_monitor_mouse_handler;
   std::function<bool(ftxui::Event&)> welcome_key_handler;
   std::function<bool(ftxui::Event&)> welcome_mouse_handler;
   bool editor_completion_open = false;
@@ -192,6 +198,8 @@ struct MainLayoutState {
   std::function<void()> schedule_ui_tick;
   std::function<void(const std::string& path)> on_file_saved;
   PerformanceSampler performance_sampler;
+  packet_monitor::PacketMonitorService packet_monitor_service;
+  std::function<void()> packet_monitor_tick_callback;
 };
 
 inline bool problems_tab_active(const MainLayoutState* layout_state) {
@@ -214,9 +222,20 @@ inline bool git_tab_active(const MainLayoutState* layout_state) {
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kGit;
 }
 
+inline bool core_analyzer_tab_active(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->show_core_analyzer_tab &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kCoreAnalyzer;
+}
+
 inline bool binary_symbols_tab_active(const MainLayoutState* layout_state) {
   return layout_state != nullptr && layout_state->console_visible &&
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kBinarySymbols;
+}
+
+inline bool packet_monitor_tab_active(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kPacketMonitor;
 }
 
 inline bool binary_symbols_request_pending(const MainLayoutState* layout_state) {

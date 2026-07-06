@@ -551,7 +551,14 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
             result.workspace_root = state->workspace_root;
             result.args_line = state->args_line;
             result.args = split_shell_args(state->args_line);
+            result.packet_monitor_enabled = state->packet_monitor_enabled;
+            result.packet_monitor_filter_src = state->packet_monitor_filter_src;
+            result.packet_monitor_filter_dst = state->packet_monitor_filter_dst;
             finish(result);
+            return true;
+          }
+          if (event == Event::Character('m')) {
+            state->packet_monitor_enabled = !state->packet_monitor_enabled;
             return true;
           }
           if (event == Event::Tab || event == Event::CtrlI) {
@@ -751,6 +758,17 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
           query_line.push_back('_');
           body.push_back(text(i18n::tr_fmt("wizard.connection.label.args", {query_line})) |
                          color(theme::WatchInput()));
+          body.push_back(text(i18n::tr_fmt("wizard.connection.label.packet_monitor",
+                                           {state->packet_monitor_enabled
+                                                ? i18n::tr("common.yes")
+                                                : i18n::tr("common.no"),
+                                            state->packet_monitor_filter_src.empty()
+                                                ? "*"
+                                                : state->packet_monitor_filter_src,
+                                            state->packet_monitor_filter_dst.empty()
+                                                ? "*"
+                                                : state->packet_monitor_filter_dst})) |
+                         color(theme::Muted()));
           if (!state->args_completion_matches.empty()) {
             body.push_back(separator());
             const int max_rows = 6;

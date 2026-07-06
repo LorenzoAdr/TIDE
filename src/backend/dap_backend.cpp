@@ -1,5 +1,6 @@
 #include "backend/dap_backend.hpp"
 
+#include <cctype>
 #include <filesystem>
 #include <sstream>
 #include <utility>
@@ -8,6 +9,7 @@
 #include "dap/protocol.h"
 #include "dap/session.h"
 #include "i18n/tr.hpp"
+#include "packet_monitor/pkt_preload_path.hpp"
 #include "util/path_normalize.hpp"
 #include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
@@ -60,6 +62,25 @@ const char* ui_command_kind_name(UiCommandKind kind) {
       return "quit";
   }
   return "unknown";
+}
+
+std::string glibc_debug_directory_paths() {
+  static constexpr const char* kCandidates[] = {
+      "/usr/lib/debug",
+      "/lib/debug",
+  };
+  std::string paths;
+  for (const char* candidate : kCandidates) {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(candidate, ec) || ec) {
+      continue;
+    }
+    if (!paths.empty()) {
+      paths += ':';
+    }
+    paths += candidate;
+  }
+  return paths;
 }
 
 }  // namespace
@@ -237,7 +258,11 @@ void DapBackend::setup_session() {
   session_->registerHandler([&](const dap::ModuleEvent&) {});
   session_->registerHandler([&](const dap::LoadedSourceEvent&) {});
   session_->registerHandler([&](const dap::CapabilitiesEvent&) {});
-  session_->registerHandler([&](const dap::ProcessEvent&) {});
+  session_->registerHandler([&](const dap::ProcessEvent& e) {
+    if (e.systemProcessId.has_value()) {
+      emit_inferior_pid(static_cast<int>(*e.systemProcessId));
+    }
+  });
   session_->registerHandler([&](const dap::ProgressStartEvent&) {});
   session_->registerHandler([&](const dap::ProgressUpdateEvent&) {});
   session_->registerHandler([&](const dap::ProgressEndEvent&) {});
@@ -507,6 +532,10 @@ void DapBackend::on_inferior_launched() {
 
   refresh_active_thread_locked();
 
+  if (reported_inferior_pid_.load(std::memory_order_acquire) <= 0) {
+    emit_inferior_pid(fetch_inferior_pid_locked(true));
+  }
+
   if (inferior_stopped_.load(std::memory_order_acquire)) {
     for (const auto& [file, lines] : breakpoints_by_file_) {
       send_breakpoints_locked(file, lines);
@@ -524,6 +553,10 @@ void DapBackend::on_inferior_attached() {
   }
 
   refresh_active_thread_locked();
+
+  if (reported_inferior_pid_.load(std::memory_order_acquire) <= 0) {
+    emit_inferior_pid(fetch_inferior_pid_locked(true));
+  }
 
   expecting_stop_after_pause_ = true;
   bool stopped = pause_inferior_locked();
@@ -685,21 +718,116 @@ bool DapBackend::send_configuration_done() {
 }
 
 bool DapBackend::exec_repl_locked(const std::string& gdb_command, bool emit_output) {
+  std::string output;
+  if (!exec_repl_capture_locked(gdb_command, &output)) {
+    return false;
+  }
+  if (emit_output && !output.empty()) {
+    DebugEvent event;
+    event.kind = DebugEventKind::kOutput;
+    event.text = output;
+    push_event(std::move(event));
+  }
+  return true;
+}
+
+bool DapBackend::exec_repl_capture_locked(const std::string& gdb_command, std::string* output,
+                                          bool silent) {
   dap::EvaluateRequest request;
   request.expression = gdb_command;
   request.context = "repl";
   const auto response = session_->send(request).get();
   if (response.error) {
-    push_error(i18n::tr_fmt("debug.dap.gdb", {response.error.message}));
+    if (!silent) {
+      push_error(i18n::tr_fmt("debug.dap.gdb", {response.error.message}));
+    }
     return false;
   }
-  if (emit_output && !response.response.result.empty()) {
-    DebugEvent event;
-    event.kind = DebugEventKind::kOutput;
-    event.text = response.response.result;
-    push_event(std::move(event));
+  if (output != nullptr) {
+    *output = response.response.result;
   }
   return true;
+}
+
+void DapBackend::emit_inferior_pid(int pid) {
+  if (pid <= 0) {
+    return;
+  }
+  const int previous = reported_inferior_pid_.exchange(pid, std::memory_order_acq_rel);
+  if (previous == pid) {
+    return;
+  }
+  DebugEvent event;
+  event.kind = DebugEventKind::kInferiorPid;
+  event.inferior_pid = pid;
+  push_event(std::move(event));
+}
+
+bool DapBackend::configure_packet_monitor_env_locked(const LaunchConfig& launch) {
+  if (!launch.packet_monitor_enabled) {
+    exec_repl_locked("unset environment LD_PRELOAD", false);
+    exec_repl_locked("unset environment TGDB_PKT_FILTER_SRC", false);
+    exec_repl_locked("unset environment TGDB_PKT_FILTER_DST", false);
+    return true;
+  }
+
+  const std::string preload_path = packet_monitor::resolve_preload_library_path();
+  if (preload_path.empty()) {
+    push_error(i18n::tr("packet_monitor.preload_missing"));
+    return false;
+  }
+
+  if (!exec_repl_locked("set environment LD_PRELOAD " + preload_path, false)) {
+    return false;
+  }
+  if (!launch.packet_monitor_filter_src.empty()) {
+    if (!exec_repl_locked("set environment TGDB_PKT_FILTER_SRC " +
+                              launch.packet_monitor_filter_src,
+                          false)) {
+      return false;
+    }
+  } else {
+    exec_repl_locked("unset environment TGDB_PKT_FILTER_SRC", false);
+  }
+  if (!launch.packet_monitor_filter_dst.empty()) {
+    if (!exec_repl_locked("set environment TGDB_PKT_FILTER_DST " +
+                              launch.packet_monitor_filter_dst,
+                          false)) {
+      return false;
+    }
+  } else {
+    exec_repl_locked("unset environment TGDB_PKT_FILTER_DST", false);
+  }
+  return true;
+}
+
+int DapBackend::fetch_inferior_pid_locked(bool silent) {
+  std::string output;
+  if (!exec_repl_capture_locked("info proc", &output, silent)) {
+    return 0;
+  }
+  std::istringstream stream(output);
+  std::string line;
+  while (std::getline(stream, line)) {
+    std::istringstream row(line);
+    std::string token;
+    row >> token;
+    if (token == "process" || token == "proceso") {
+      int pid = 0;
+      if (row >> pid) {
+        return pid;
+      }
+    }
+  }
+  return 0;
+}
+
+bool DapBackend::configure_glibc_debug_symbols_locked() {
+  const std::string paths = glibc_debug_directory_paths();
+  if (paths.empty()) {
+    return true;
+  }
+  return exec_repl_locked("set debug-file-directory " + paths, false);
 }
 
 void DapBackend::on_inferior_core_loaded() {
@@ -767,6 +895,9 @@ void DapBackend::handle_command(const UiCommand& command) {
 
     std::unique_lock<std::mutex> lock(session_mutex_);
     if (!session_) {
+      return;
+    }
+    if (!configure_packet_monitor_env_locked(command.launch)) {
       return;
     }
     auto launch_future = session_->send(launch);
@@ -840,29 +971,43 @@ void DapBackend::handle_command(const UiCommand& command) {
   }
 
   if (command.kind == UiCommandKind::kLoadCore) {
+    if (command.core.core_path.empty()) {
+      push_error(i18n::tr("debug.dap.core_file_empty_path"));
+      return;
+    }
+
+    dap::GdbAttachRequest attach;
+    attach.coreFile = command.core.core_path;
+    if (!command.core.program.empty()) {
+      attach.program = command.core.program;
+    }
+
+    std::unique_lock<std::mutex> lock(session_mutex_);
+    if (!session_) {
+      return;
+    }
+    if (!configure_glibc_debug_symbols_locked()) {
+      return;
+    }
+    auto attach_future = session_->send(attach);
+    if (!send_configuration_done()) {
+      return;
+    }
+    lock.unlock();
+
+    const auto attach_response = attach_future.get();
     bool loaded = false;
     {
       std::lock_guard<std::mutex> lock(session_mutex_);
       if (!session_) {
         return;
       }
-      if (!send_configuration_done()) {
-        return;
+      if (attach_response.error) {
+        push_error(i18n::tr_fmt("debug.dap.attach_failed",
+                                {attach_response.error.message}));
+      } else {
+        loaded = true;
       }
-
-      if (!command.core.program.empty()) {
-        if (!exec_repl_locked("-exec file " + command.core.program)) {
-          return;
-        }
-      }
-      if (command.core.core_path.empty()) {
-        push_error(i18n::tr("debug.dap.core_file_empty_path"));
-        return;
-      }
-      if (!exec_repl_locked("-exec core-file " + command.core.core_path)) {
-        return;
-      }
-      loaded = true;
     }
     if (loaded) {
       on_inferior_core_loaded();

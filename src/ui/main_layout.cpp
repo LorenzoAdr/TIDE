@@ -96,7 +96,8 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
       layout_state->text_input_focus = TextInputFocus::None;
       return;
     }
-    if (layout_state->console_tabs.selected_tab == ConsolePanelTabs::kTerminal) {
+    if (layout_state->console_tabs.selected_tab == ConsolePanelTabs::kTerminal ||
+        layout_state->console_tabs.selected_tab == ConsolePanelTabs::kCoreAnalyzer) {
       layout_state->text_input_focus = TextInputFocus::Console;
     }
     return;
@@ -191,10 +192,12 @@ Component MakeModeLayout(AppMode* app_mode, Component normal_child, Component de
 
 class EditorCenterLayout : public ComponentBase {
  public:
-  EditorCenterLayout(AppMode* app_mode, Component primary_editor, Component secondary_editor,
-                     Component source_panel, WorkspaceModel* secondary_workspace,
+  EditorCenterLayout(AppMode* app_mode, DebugModel* model, Component primary_editor,
+                     Component secondary_editor, Component source_panel,
+                     WorkspaceModel* secondary_workspace,
                      std::shared_ptr<LayoutState> split_state)
       : app_mode_(app_mode),
+        model_(model),
         secondary_workspace_(secondary_workspace),
         split_state_(std::move(split_state)) {
     Add(std::move(primary_editor));
@@ -206,7 +209,7 @@ class EditorCenterLayout : public ComponentBase {
     if (children_.size() < 3) {
       return text("");
     }
-    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
+    if (debug_source_only()) {
       return children_[2]->Render() | flex;
     }
     const bool split =
@@ -235,7 +238,7 @@ class EditorCenterLayout : public ComponentBase {
     if (children_.size() < 3) {
       return false;
     }
-    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug) {
+    if (debug_source_only()) {
       return children_[2]->OnEvent(std::move(event));
     }
     const bool split =
@@ -255,7 +258,7 @@ class EditorCenterLayout : public ComponentBase {
     if (children_.empty()) {
       return nullptr;
     }
-    if (app_mode_ != nullptr && *app_mode_ == AppMode::kDebug && children_.size() > 2) {
+    if (debug_source_only() && children_.size() > 2) {
       return children_[2];
     }
     const bool split =
@@ -264,18 +267,24 @@ class EditorCenterLayout : public ComponentBase {
   }
 
  private:
+  bool debug_source_only() const {
+    return app_mode_ != nullptr && *app_mode_ == AppMode::kDebug &&
+           (model_ == nullptr || !model_->is_post_mortem);
+  }
+
   AppMode* app_mode_;
+  DebugModel* model_;
   WorkspaceModel* secondary_workspace_;
   std::shared_ptr<LayoutState> split_state_;
 };
 
-Component MakeEditorCenterLayout(AppMode* app_mode, Component primary_editor,
+Component MakeEditorCenterLayout(AppMode* app_mode, DebugModel* model, Component primary_editor,
                                  Component secondary_editor, Component source_panel,
                                  WorkspaceModel* secondary_workspace,
                                  std::shared_ptr<LayoutState> split_state) {
-  return Make<EditorCenterLayout>(app_mode, std::move(primary_editor), std::move(secondary_editor),
-                                    std::move(source_panel), secondary_workspace,
-                                    std::move(split_state));
+  return Make<EditorCenterLayout>(app_mode, model, std::move(primary_editor),
+                                    std::move(secondary_editor), std::move(source_panel),
+                                    secondary_workspace, std::move(split_state));
 }
 
 // Panel derecho: un solo outline; en debug muestra watches debajo.
@@ -857,7 +866,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       FocusRegion::SecondaryEditor, model, on_command,
       layout_state != nullptr ? &layout_state->secondary_editor : nullptr);
   auto source = MakeSourcePanel(model, source_state, on_command, focus, layout_state);
-  auto center = MakeEditorCenterLayout(app_mode, editor_primary, editor_secondary, source,
+  auto center = MakeEditorCenterLayout(app_mode, model, editor_primary, editor_secondary, source,
                                        secondary_workspace, split_state);
 
   auto welcome_screen =
@@ -1165,10 +1174,15 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
         focus_status,
         text(status_msg) | flex | color(theme::Header()),
         index_btn,
+        text(" "),
         launch_btn,
+        text(" "),
         debug_btn,
+        text(" "),
         layout_btn,
+        text(" "),
         settings_btn,
+        text(" "),
         shortcuts_btn,
     }) | bgcolor(theme::StatusBar());
 

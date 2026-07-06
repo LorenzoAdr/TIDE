@@ -18,6 +18,7 @@ struct GdbAttachRequest : public AttachRequest {
   optional<string> program;
   optional<integer> pid;
   optional<string> target;
+  optional<string> coreFile;
 };
 
 DAP_DECLARE_STRUCT_TYPEINFO(GdbAttachRequest);

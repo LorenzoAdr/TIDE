@@ -16,6 +16,9 @@ constexpr std::string_view kConsoleTabCallHierarchy = "console.tab.call_hierarch
 constexpr std::string_view kConsoleTabGit = "console.tab.git";
 constexpr std::string_view kConsoleTabCoreAnalyzer = "console.tab.core_analyzer";
 constexpr std::string_view kConsoleTabBinarySymbols = "console.tab.binary_symbols";
+constexpr std::string_view kConsoleTabPacketMonitor = "console.tab.packet_monitor";
+constexpr std::string_view kPacketMonitorRecord = "packet_monitor.record";
+constexpr std::string_view kPacketMonitorSave = "packet_monitor.save";
 constexpr std::string_view kSidebarHide = "sidebar.hide";
 constexpr std::string_view kExplorerHide = "explorer.hide";
 constexpr std::string_view kConsoleHide = "console.hide";
@@ -81,6 +84,14 @@ inline std::string outline_row(int index) {
   return "outline.row." + std::to_string(index);
 }
 
+inline std::string core_analyzer_instance(int index) {
+  return "core_analyzer.instance." + std::to_string(index);
+}
+
+inline bool is_core_analyzer_hover(std::string_view id) {
+  return id.rfind("core_analyzer.", 0) == 0;
+}
+
 inline std::string context_menu_row(int index) {
   return "context_menu.row." + std::to_string(index);
 }
@@ -132,7 +143,7 @@ inline bool is_console_tab_hover(std::string_view id) {
   return id == kConsoleTabTerminal || id == kConsoleTabGdb || id == kConsoleTabPerformance ||
          id == kConsoleTabProblems || id == kConsoleTabSearch || id == kConsoleTabCallHierarchy ||
          id == kConsoleTabGit || id == kConsoleTabCoreAnalyzer ||
-         id == kConsoleTabBinarySymbols;
+         id == kConsoleTabBinarySymbols || id == kConsoleTabPacketMonitor;
 }
 
 inline bool is_console_header_hover(std::string_view id) {
@@ -191,6 +202,10 @@ inline bool is_f1_hover(std::string_view id) {
 
 inline bool is_welcome_hover(std::string_view id) {
   return id == kWelcomeExternalFile || id == kWelcomeDebug || id == kWelcomeWorkspace;
+}
+
+inline bool is_packet_monitor_hover(std::string_view id) {
+  return id == kPacketMonitorRecord || id == kPacketMonitorSave;
 }
 
 }  // namespace tgdb::press_id

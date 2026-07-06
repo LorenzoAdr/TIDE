@@ -62,6 +62,9 @@ struct AppConfig {
   bool show_welcome_screen = false;
   bool auto_debug = false;
   std::string launch_directory;
+  bool packet_monitor_enabled = false;
+  std::string packet_monitor_filter_src;
+  std::string packet_monitor_filter_dst;
 };
 
 class Application {

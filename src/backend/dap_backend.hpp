@@ -53,7 +53,13 @@ class DapBackend : public IDebugBackend {
   void on_inferior_launched();
   void on_inferior_attached();
   void on_inferior_core_loaded();
+  bool configure_glibc_debug_symbols_locked();
   bool exec_repl_locked(const std::string& gdb_command, bool emit_output = true);
+  bool exec_repl_capture_locked(const std::string& gdb_command, std::string* output,
+                                  bool silent = false);
+  bool configure_packet_monitor_env_locked(const LaunchConfig& launch);
+  int fetch_inferior_pid_locked(bool silent = false);
+  void emit_inferior_pid(int pid);
   void push_event(DebugEvent event);
   void push_error(const std::string& message);
 
@@ -76,6 +82,7 @@ class DapBackend : public IDebugBackend {
   bool expecting_stop_after_pause_ = false;
   int last_exit_code_ = -1;
   bool configuration_done_ = false;
+  std::atomic<int> reported_inferior_pid_{0};
   std::unordered_map<std::string, std::vector<int>> breakpoints_by_file_;
 };
 

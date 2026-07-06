@@ -19,8 +19,24 @@ void DebugModel::append_console(const std::string& line) {
   }
 }
 
-void DebugModel::append_core_analyzer_log(const std::string& line) {
-  core_analyzer_log.push_back(line);
+void DebugModel::append_core_analyzer_log(const std::string& text) {
+  if (text.empty()) {
+    return;
+  }
+  std::size_t start = 0;
+  while (start <= text.size()) {
+    const std::size_t end = text.find('\n', start);
+    std::string line =
+        end == std::string::npos ? text.substr(start) : text.substr(start, end - start);
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    core_analyzer_log.push_back(std::move(line));
+    if (end == std::string::npos) {
+      break;
+    }
+    start = end + 1;
+  }
   constexpr std::size_t kMaxLines = 5000;
   if (core_analyzer_log.size() > kMaxLines) {
     core_analyzer_log.erase(

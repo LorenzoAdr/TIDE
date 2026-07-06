@@ -65,6 +65,13 @@ if [[ -d "${CORE_ANALYZER_DIR}/gdbplus/python" ]]; then
   cp -rL "${CORE_ANALYZER_DIR}/gdbplus/python/." "${GDB_SRC_DIR}/gdb/python/"
 fi
 
+dap_corefile_dir="$(dirname "$0")/patches/gdb-dap"
+if [[ -f "${dap_corefile_dir}/launch.py" && -f "${dap_corefile_dir}/events.py" ]]; then
+  printf 'aplicando parche DAP core-file...\n'
+  cp "${dap_corefile_dir}/launch.py" "${GDB_SRC_DIR}/gdb/python/lib/gdb/dap/launch.py"
+  cp "${dap_corefile_dir}/events.py" "${GDB_SRC_DIR}/gdb/python/lib/gdb/dap/events.py"
+fi
+
 gdb_build="${GDB_SRC_DIR}/build"
 rm -rf "${gdb_build}"
 mkdir -p "${gdb_build}"

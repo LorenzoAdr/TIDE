@@ -35,6 +35,9 @@ struct ConnectionResult {
   int attach_pid = 0;
   std::string core_path;
   CoreAnalysisMode core_analysis = CoreAnalysisMode::kGdbOnly;
+  bool packet_monitor_enabled = false;
+  std::string packet_monitor_filter_src;
+  std::string packet_monitor_filter_dst;
 };
 
 struct ConnectionWizardState {
@@ -53,6 +56,10 @@ struct ConnectionWizardState {
   std::string args_line;
   std::vector<std::string> args_completion_matches;
   std::map<std::string, std::string> launch_args_by_program;
+
+  bool packet_monitor_enabled = false;
+  std::string packet_monitor_filter_src = "127.0.0.1";
+  std::string packet_monitor_filter_dst;
 
   std::string process_query;
   std::vector<ProcessEntry> all_processes;

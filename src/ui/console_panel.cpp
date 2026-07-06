@@ -34,6 +34,7 @@
 #include "ui/git_panel.hpp"
 #include "ui/search_panel.hpp"
 #include "ui/performance_panel.hpp"
+#include "ui/packet_monitor_panel.hpp"
 #include "ui/text_input_style.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/terminal_display.hpp"
@@ -95,7 +96,7 @@ struct ConsolePanelState {
   };
   std::optional<TerminalLinkHover> terminal_link_hover;
   std::string last_workspace_root;
-  std::array<Box, 9> tab_boxes;
+  std::array<Box, 10> tab_boxes;
   Box hide_box;
 };
 
@@ -506,6 +507,10 @@ bool core_analyzer_tab_active(AppMode* app_mode, MainLayoutState* layout_state) 
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kCoreAnalyzer;
 }
 
+bool packet_monitor_tab_active_console(AppMode* app_mode, MainLayoutState* layout_state) {
+  return debug_console_mode(app_mode) && packet_monitor_tab_active(layout_state);
+}
+
 bool git_tab_active_console(AppMode* /*app_mode*/, MainLayoutState* layout_state) {
   return git_tab_active(layout_state);
 }
@@ -534,6 +539,8 @@ std::string_view console_tab_press_id(int tab) {
       return press_id::kConsoleTabCoreAnalyzer;
     case ConsolePanelTabs::kBinarySymbols:
       return press_id::kConsoleTabBinarySymbols;
+    case ConsolePanelTabs::kPacketMonitor:
+      return press_id::kConsoleTabPacketMonitor;
     default:
       return press_id::kConsoleTabTerminal;
   }
@@ -579,7 +586,7 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
                         FocusManagerState* focus, int tab, GitService* git,
                         GitPanelState* git_state) {
   if (layout_state == nullptr || tab < ConsolePanelTabs::kTerminal ||
-      tab > ConsolePanelTabs::kBinarySymbols) {
+      tab > ConsolePanelTabs::kPacketMonitor) {
     return false;
   }
   if (layout_state->console_tabs.selected_tab == tab) {
@@ -631,6 +638,7 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
         focus->region = FocusRegion::Terminal;
       }
       layout_state->text_input_focus = TextInputFocus::Console;
+      layout_state->core_analyzer_focus = MainLayoutState::CoreAnalyzerFocus::kCommand;
     } else if (tab == ConsolePanelTabs::kGit) {
       if (focus != nullptr) {
         focus->region = FocusRegion::Terminal;
@@ -664,8 +672,11 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
     return false;
   }
   const bool debug_mode = debug_console_mode(app_mode);
-  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kBinarySymbols; ++i) {
+  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kPacketMonitor; ++i) {
     if (i == ConsolePanelTabs::kDebug && !debug_mode) {
+      continue;
+    }
+    if (i == ConsolePanelTabs::kPacketMonitor && !debug_mode) {
       continue;
     }
     if (i == ConsolePanelTabs::kCoreAnalyzer &&
@@ -804,6 +815,7 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
         layout_state, mouse.x, mouse.y,
         {{press_id::kConsoleTabTerminal, &state->tab_boxes[ConsolePanelTabs::kTerminal]},
          {press_id::kConsoleTabGdb, &state->tab_boxes[ConsolePanelTabs::kDebug]},
+         {press_id::kConsoleTabPacketMonitor, &state->tab_boxes[ConsolePanelTabs::kPacketMonitor]},
          {press_id::kConsoleTabPerformance, &state->tab_boxes[ConsolePanelTabs::kPerformance]},
          {press_id::kConsoleTabProblems, &state->tab_boxes[ConsolePanelTabs::kProblems]},
          {press_id::kConsoleTabSearch, &state->tab_boxes[ConsolePanelTabs::kSearch]},
@@ -1300,12 +1312,15 @@ bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, 
   for (int attempt = 0; attempt < 10; ++attempt) {
     tab += delta;
     if (tab < ConsolePanelTabs::kTerminal) {
-      tab = ConsolePanelTabs::kBinarySymbols;
+      tab = ConsolePanelTabs::kPacketMonitor;
     }
-    if (tab > ConsolePanelTabs::kBinarySymbols) {
+    if (tab > ConsolePanelTabs::kPacketMonitor) {
       tab = ConsolePanelTabs::kTerminal;
     }
     if (!debug_mode && tab == ConsolePanelTabs::kDebug) {
+      continue;
+    }
+    if (!debug_mode && tab == ConsolePanelTabs::kPacketMonitor) {
       continue;
     }
     if (tab == ConsolePanelTabs::kCoreAnalyzer && layout_state != nullptr &&
@@ -1334,9 +1349,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   auto state = std::make_shared<ConsolePanelState>();
   state->input_placeholder = i18n::tr("console.placeholder.shell");
   auto perf_state = std::make_shared<PerformancePanelState>();
+  auto packet_monitor_state = std::make_shared<PacketMonitorPanelState>();
   PerformanceSampler* sampler =
       layout_state != nullptr ? &layout_state->performance_sampler : nullptr;
+  packet_monitor::PacketMonitorService* packet_monitor =
+      layout_state != nullptr ? &layout_state->packet_monitor_service : nullptr;
   auto performance_panel = MakePerformancePanel(sampler, perf_state);
+  auto packet_monitor_panel = MakePacketMonitorPanel(packet_monitor, packet_monitor_state, layout_state);
   auto diagnostics_panel =
       MakeDiagnosticsPanel(workspace, focus, symbols, layout_state, indexer);
   auto search_panel =
@@ -1358,14 +1377,15 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
   auto component = Container::Vertical(
       {input_maybe, performance_panel, diagnostics_panel, search_panel, call_hierarchy_panel,
-       git_panel, core_analyzer_panel, binary_symbols_panel});
+       git_panel, core_analyzer_panel, binary_symbols_panel, packet_monitor_panel});
 
   auto wrapped = CatchEvent(component, [app_mode, model, shell, on_command, state,
                                         layout_state, focus, input_box,
                                         shell_launch_config, diagnostics_panel, search_panel,
                                         call_hierarchy_panel, git_panel, git_service,
                                         git_panel_state, core_analyzer_panel,
-                                        binary_symbols_panel](Event event) {
+                                        binary_symbols_panel, packet_monitor_state,
+                                        packet_monitor](Event event) {
     const bool editor_chrome_input =
         layout_state != nullptr &&
         is_editor_chrome_input_focus(layout_state->text_input_focus);
@@ -1403,6 +1423,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     if (binary_symbols_tab_active_console(app_mode, layout_state) && !editor_chrome_input &&
         event != Event::Custom) {
       if (binary_symbols_panel->OnEvent(event)) {
+        return true;
+      }
+    }
+    if (packet_monitor_tab_active_console(app_mode, layout_state) && !editor_chrome_input &&
+        layout_state != nullptr) {
+      if (handle_packet_monitor_keys(event, packet_monitor, packet_monitor_state.get(),
+                                     layout_state)) {
         return true;
       }
     }
@@ -1574,10 +1601,29 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     return forward_pty_key(shell, event, state.get(), layout_state);
   };
 
+  auto dispatch_packet_monitor_keys =
+      [packet_monitor, packet_monitor_state, layout_state](const Event& event) -> bool {
+    if (!packet_monitor_tab_active(layout_state)) {
+      return false;
+    }
+    return handle_packet_monitor_keys(event, packet_monitor, packet_monitor_state.get(),
+                                      layout_state);
+  };
+
+  auto dispatch_packet_monitor_mouse =
+      [packet_monitor, packet_monitor_state, layout_state, focus](const Event& event) -> bool {
+    if (!packet_monitor_tab_active(layout_state)) {
+      return false;
+    }
+    return handle_packet_monitor_mouse(event, packet_monitor, packet_monitor_state.get(),
+                                       layout_state, focus);
+  };
+
   auto dispatch_console_mouse = [app_mode, layout_state, focus, model, workspace, shell, state, input_box,
                                  shell_launch_config, diagnostics_panel, search_panel,
-                                 call_hierarchy_panel,                                  git_panel, git_service,
-                                 git_panel_state, binary_symbols_panel](Event event) -> bool {
+                                 call_hierarchy_panel, git_panel, git_service,
+                                 git_panel_state, core_analyzer_panel, binary_symbols_panel,
+                                 dispatch_packet_monitor_mouse](Event event) -> bool {
     if (event.is_mouse()) {
       if (problems_tab_active_console(app_mode, layout_state) &&
           layout_state != nullptr && layout_state->problems_key_handler &&
@@ -1598,8 +1644,16 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       if (git_tab_active_console(app_mode, layout_state) && git_panel->OnEvent(event)) {
         return true;
       }
+      if (core_analyzer_tab_active(app_mode, layout_state) &&
+          core_analyzer_panel->OnEvent(event)) {
+        return true;
+      }
       if (binary_symbols_tab_active_console(app_mode, layout_state) &&
           binary_symbols_panel->OnEvent(event)) {
+        return true;
+      }
+      if (packet_monitor_tab_active_console(app_mode, layout_state) &&
+          dispatch_packet_monitor_mouse(event)) {
         return true;
       }
     }
@@ -1612,6 +1666,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     layout_state->console_key_handler = dispatch_console_keys;
     layout_state->console_mouse_handler = dispatch_console_mouse;
     layout_state->console_debug_mouse_handler = dispatch_console_mouse;
+    layout_state->packet_monitor_key_handler = dispatch_packet_monitor_keys;
+    layout_state->packet_monitor_mouse_handler = dispatch_packet_monitor_mouse;
     layout_state->terminal_follow_input_callback = [state, layout_state]() {
       follow_terminal_on_input(state.get());
       request_terminal_repaint(layout_state);
@@ -1648,7 +1704,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   return Renderer(wrapped, [app_mode, model, shell, focus, input_box, input_maybe, state,
                             layout_state, bottom_height, perf_state, sampler, diagnostics_panel,
                             search_panel, call_hierarchy_panel, git_panel, core_analyzer_panel,
-                            binary_symbols_panel] {
+                            binary_symbols_panel, packet_monitor_panel] {
     state->input_placeholder = console_placeholder(app_mode);
     (void)input_maybe;
     (void)input_box;
@@ -1678,6 +1734,14 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
           layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabGdb),
           layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabGdb),
           &state->tab_boxes[ConsolePanelTabs::kDebug]));
+      tab_row.push_back(make_tab_button(
+          i18n::tr("console.tab.packet_monitor"),
+          selected_tab == ConsolePanelTabs::kPacketMonitor,
+          layout_state != nullptr &&
+              layout_state->clickable.is_hovered(press_id::kConsoleTabPacketMonitor),
+          layout_state != nullptr &&
+              layout_state->clickable.is_pressed(press_id::kConsoleTabPacketMonitor),
+          &state->tab_boxes[ConsolePanelTabs::kPacketMonitor]));
       if (layout_state != nullptr && layout_state->show_core_analyzer_tab) {
         tab_row.push_back(make_tab_button(
             i18n::tr("console.tab.core_analyzer"), selected_tab == ConsolePanelTabs::kCoreAnalyzer,
@@ -1751,6 +1815,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       body = git_panel->Render() | flex;
     } else if (selected_tab == ConsolePanelTabs::kBinarySymbols) {
       body = binary_symbols_panel->Render() | flex;
+    } else if (selected_tab == ConsolePanelTabs::kPacketMonitor) {
+      body = packet_monitor_panel->Render() | flex;
     } else {
       body = call_hierarchy_panel->Render() | flex;
     }

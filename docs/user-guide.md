@@ -150,6 +150,27 @@ When workspace and program are both known, tgdb skips wizards and enters debug m
 ./build/tgdb ./build/hello --args foo bar
 ```
 
+### UDP packet monitor (Launch only)
+
+When launching a debug session via **F2 → Launch**, press **m** on the arguments step to enable the packet monitor. tgdb injects `libtgdb_pkt.so` via `LD_PRELOAD` and shows a **Paquetes** tab in the bottom panel.
+
+- **r** — start/stop recording (filtered packets only)
+- **s** — save recording to `~/.cache/tgdb/captures/`
+- **p** — cycle JSON protocol (from `.tgdb/protocols/` or `examples/protocols/`)
+- **v** — cycle packet-type filter (when the protocol defines a discriminator)
+- **j/k** — select a packet to inspect decoded fields
+
+Example with the bundled UDP demo (`packet_monitor_demo` simulates app + peripheral with IN/OUT traffic):
+
+```bash
+cmake --build build --target packet_monitor_demo tgdb_pkt_preload
+./build/tgdb --cwd . ./build/packet_monitor_demo
+# F2 → Launch → packet_monitor_demo → m (enable monitor) → Continue
+# Tab Paquetes → p (hello_sensor.json) → r (record)
+```
+
+Protocol definitions live in `examples/protocols/*.json` (or `<workspace>/.tgdb/protocols/`).
+
 ### Attach to a running process
 
 ```bash

@@ -34,6 +34,9 @@ struct LaunchConfig {
   std::string cwd;
   std::vector<std::string> args;
   bool stop_at_main = true;
+  bool packet_monitor_enabled = false;
+  std::string packet_monitor_filter_src;
+  std::string packet_monitor_filter_dst;
 };
 
 struct AttachConfig {
@@ -110,11 +113,13 @@ enum class DebugEventKind {
   kVariableChildrenUpdated,
   kError,
   kBreakpointsUpdated,
+  kInferiorPid,
 };
 
 struct DebugEvent {
   DebugEventKind kind = DebugEventKind::kError;
   std::string text;
+  int inferior_pid = 0;
   int thread_id = 1;
   std::string stop_reason;
   std::vector<StackFrameInfo> stack_frames;

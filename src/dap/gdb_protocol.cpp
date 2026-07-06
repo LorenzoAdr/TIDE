@@ -11,7 +11,8 @@ DAP_IMPLEMENT_STRUCT_TYPEINFO_EXT(GdbLaunchRequest, LaunchRequest, "launch",
 DAP_IMPLEMENT_STRUCT_TYPEINFO_EXT(GdbAttachRequest, AttachRequest, "attach",
                                   DAP_FIELD(program, "program"),
                                   DAP_FIELD(pid, "pid"),
-                                  DAP_FIELD(target, "target"));
+                                  DAP_FIELD(target, "target"),
+                                  DAP_FIELD(coreFile, "coreFile"));
 
 DAP_IMPLEMENT_STRUCT_TYPEINFO(GdbTerminatedEvent, "terminated");
 

@@ -879,6 +879,7 @@ void Application::exit_debug_mode() {
   layout_state_.text_input_focus = TextInputFocus::None;
   layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
   layout_state_.show_core_analyzer_tab = false;
+  layout_state_.packet_monitor_service.reset();
   set_workspace_status(i18n::tr("app.edit_mode"));
   request_terminal_autostart();
 }
@@ -936,20 +937,29 @@ void Application::apply_connection_and_start() {
 
   app_mode_ = AppMode::kDebug;
   focus_state_.region = FocusRegion::Terminal;
-  layout_state_.text_input_focus = TextInputFocus::None;
   layout_state_.right_panel_active_section = 1;
   layout_state_.focus_sync_needed = true;
-  layout_state_.core_analyzer_search_focus = false;
+  layout_state_.core_analyzer_focus = MainLayoutState::CoreAnalyzerFocus::kCommand;
   layout_state_.show_core_analyzer_tab =
       core_analyzer_supported() && config_.mode == SessionMode::kCore &&
       config_.core_analysis == CoreAnalysisMode::kCoreAnalyzer;
   if (layout_state_.show_core_analyzer_tab) {
     layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kCoreAnalyzer;
+    layout_state_.text_input_focus = TextInputFocus::Console;
   } else {
+    layout_state_.text_input_focus = TextInputFocus::None;
     layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kDebug;
   }
   layout_state_.console_visible = true;
   layout_state_.terminal_start_requested = true;
+  layout_state_.packet_monitor_service.reset();
+  layout_state_.packet_monitor_service.set_enabled(config_.packet_monitor_enabled);
+  layout_state_.packet_monitor_service.set_workspace_root(workspace_.root);
+  if (config_.packet_monitor_enabled) {
+    auto& filters = layout_state_.packet_monitor_service.state().filters;
+    filters.src_ip = config_.packet_monitor_filter_src;
+    filters.dst_ip = config_.packet_monitor_filter_dst;
+  }
   model_.console_output.clear();
   if (!config_.program.empty()) {
     request_binary_symbols_panel(&layout_state_, config_.program, {}, NmBindingFilter::kAll, false);
@@ -990,6 +1000,9 @@ void Application::apply_connection_and_start() {
     launch.launch.cwd = launch_cwd_for_program(config_.program);
     launch.launch.args = config_.args;
     launch.launch.stop_at_main = true;
+    launch.launch.packet_monitor_enabled = config_.packet_monitor_enabled;
+    launch.launch.packet_monitor_filter_src = config_.packet_monitor_filter_src;
+    launch.launch.packet_monitor_filter_dst = config_.packet_monitor_filter_dst;
     submit_command(launch);
     set_status(i18n::tr_fmt("app.launch_program", {config_.program}));
   }
@@ -1019,6 +1032,9 @@ void Application::apply_pending_connection() {
   config_.args = result.args;
   config_.core_path = result.core_path;
   config_.core_analysis = result.core_analysis;
+  config_.packet_monitor_enabled = result.packet_monitor_enabled;
+  config_.packet_monitor_filter_src = result.packet_monitor_filter_src;
+  config_.packet_monitor_filter_dst = result.packet_monitor_filter_dst;
   if (config_.core_analysis == CoreAnalysisMode::kCoreAnalyzer &&
       !core_analyzer_supported()) {
     config_.core_analysis = CoreAnalysisMode::kGdbOnly;
@@ -1234,6 +1250,10 @@ void Application::apply_event(const DebugEvent& event) {
         if (!model_.core_analyzer_search_query.empty()) {
           apply_core_analyzer_search_result(&model_, event.text,
                                             model_.core_analyzer_search_query);
+          if (!model_.core_analyzer_instances.empty()) {
+            layout_state_.core_analyzer_focus =
+                MainLayoutState::CoreAnalyzerFocus::kInstances;
+          }
         }
       }
       break;
@@ -1243,6 +1263,9 @@ void Application::apply_event(const DebugEvent& event) {
           watch.value = event.watch_value;
         }
       }
+      break;
+    case DebugEventKind::kInferiorPid:
+      layout_state_.packet_monitor_service.set_inferior_pid(event.inferior_pid);
       break;
     case DebugEventKind::kBreakpointsUpdated:
       for (const auto& bp : event.breakpoints) {
@@ -1738,6 +1761,9 @@ int Application::run() {
 
   auto inner_root = CatchEvent(with_context_menu, [this, &screen, on_command](const Event& event) {
     try {
+      const bool editor_browse_active =
+          app_mode_ == AppMode::kNormal || model_.is_post_mortem;
+
       if (shutdown_state_.is_active()) {
         if (event == Event::Custom) {
           cursor_blink::tick();
@@ -1770,6 +1796,9 @@ int Application::run() {
         if (layout_state_.console_visible && layout_state_.terminal_tick_callback) {
           TGDB_MON_SCOPE("ui", "tick.terminal");
           layout_state_.terminal_tick_callback();
+        }
+        if (app_mode_ == AppMode::kDebug) {
+          layout_state_.packet_monitor_service.tick();
         }
         if (symbol_provider_) {
           TGDB_MON_SCOPE("ui", "tick.drain_async_results");
@@ -1943,14 +1972,14 @@ int Application::run() {
         return true;
       }
 
-      if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible &&
+      if (editor_browse_active && !layout_state_.welcome_visible &&
                  event.is_mouse() && layout_state_.explorer_mouse_handler &&
                  layout_state_.explorer_mouse_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
 
-      if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible &&
+      if (editor_browse_active && !layout_state_.welcome_visible &&
                  event.is_mouse() && layout_state_.sidebar_mouse_handler &&
                  layout_state_.sidebar_mouse_handler(event)) {
         screen.Post(Event::Custom);
@@ -1963,7 +1992,7 @@ int Application::run() {
         return true;
       }
 
-      if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible && event.is_mouse()) {
+      if (editor_browse_active && !layout_state_.welcome_visible && event.is_mouse()) {
         bool chrome_handled = false;
         if (layout_state_.primary_editor.chrome_mouse_handler &&
             layout_state_.primary_editor.chrome_mouse_handler(event)) {
@@ -1993,6 +2022,15 @@ int Application::run() {
       }
 
       if (layout_state_.console_visible && event.is_mouse() &&
+          packet_monitor_tab_active(&layout_state_) &&
+          layout_state_.packet_monitor_mouse_handler &&
+          layout_state_.packet_monitor_mouse_handler(event)) {
+        screen.Post(Event::Custom);
+        layout_state_.focus_sync_needed = true;
+        return true;
+      }
+
+      if (layout_state_.console_visible && event.is_mouse() &&
           problems_tab_active(&layout_state_) && layout_state_.problems_key_handler &&
           layout_state_.problems_key_handler(event)) {
         screen.Post(Event::Custom);
@@ -2009,7 +2047,7 @@ int Application::run() {
 
       if (app_mode_ == AppMode::kDebug && event.is_mouse()) {
         bool handled = false;
-        if (layout_state_.source_mouse_handler &&
+        if (!model_.is_post_mortem && layout_state_.source_mouse_handler &&
             layout_state_.source_mouse_handler(event)) {
           handled = true;
         }
@@ -2024,7 +2062,7 @@ int Application::run() {
         }
       }
 
-      if (app_mode_ == AppMode::kNormal && !layout_state_.welcome_visible && event.is_mouse()) {
+      if (editor_browse_active && !layout_state_.welcome_visible && event.is_mouse()) {
         bool mouse_handled = false;
         if (layout_state_.primary_editor.mouse_handler &&
             layout_state_.primary_editor.mouse_handler(event)) {
@@ -2069,19 +2107,19 @@ int Application::run() {
       }
       const auto& active_editor_handlers =
           editor_handlers_for(&layout_state_, focus_state_.region);
-      if (app_mode_ == AppMode::kNormal && event_is_ctrl_f(event) &&
+      if (editor_browse_active && event_is_ctrl_f(event) &&
           is_editor_focus_region(focus_state_.region) && active_editor_handlers.key_handler &&
           active_editor_handlers.key_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
-      if (app_mode_ == AppMode::kNormal && layout_state_.editor_completion_open &&
+      if (editor_browse_active && layout_state_.editor_completion_open &&
           event == Event::Escape && active_editor_handlers.key_handler &&
           active_editor_handlers.key_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
-      if (app_mode_ == AppMode::kNormal &&
+      if (editor_browse_active &&
           is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
           active_editor_handlers.key_handler && active_editor_handlers.key_handler(event)) {
         screen.Post(Event::Custom);
@@ -2125,14 +2163,31 @@ int Application::run() {
         screen.Post(Event::Custom);
         return true;
       }
-      if (app_mode_ == AppMode::kDebug && focus_state_.region == FocusRegion::Editor &&
+      if (core_analyzer_tab_active(&layout_state_) &&
+          focus_state_.region == FocusRegion::Terminal &&
+          !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
+          layout_state_.core_analyzer_key_handler &&
+          layout_state_.core_analyzer_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+      if (packet_monitor_tab_active(&layout_state_) &&
+          focus_state_.region == FocusRegion::Terminal &&
+          !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
+          layout_state_.packet_monitor_key_handler &&
+          layout_state_.packet_monitor_key_handler(event)) {
+        screen.Post(Event::Custom);
+        return true;
+      }
+      if (app_mode_ == AppMode::kDebug && !model_.is_post_mortem &&
+          focus_state_.region == FocusRegion::Editor &&
           !is_watch_input_focus(layout_state_.text_input_focus) &&
           layout_state_.text_input_focus != TextInputFocus::Console &&
           layout_state_.source_key_handler && layout_state_.source_key_handler(event)) {
         screen.Post(Event::Custom);
         return true;
       }
-      if (is_editor_focus_region(focus_state_.region) && app_mode_ == AppMode::kNormal &&
+      if (is_editor_focus_region(focus_state_.region) && editor_browse_active &&
           !is_search_input_focus(layout_state_.text_input_focus) &&
           !is_watch_input_focus(layout_state_.text_input_focus) &&
           !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
@@ -2146,7 +2201,7 @@ int Application::run() {
       }
 
       if (layout_state_.editor_helix_prefix_pending && is_editor_focus_region(focus_state_.region) &&
-          app_mode_ == AppMode::kNormal && !event_has_ctrl_modifier(event) &&
+          editor_browse_active && !event_has_ctrl_modifier(event) &&
           event != Event::CtrlP && active_editor_handlers.key_handler &&
           active_editor_handlers.key_handler(event)) {
         layout_state_.request_ui_tick = true;
@@ -2154,7 +2209,7 @@ int Application::run() {
         return true;
       }
       if (layout_state_.editor_helix_prefix_pending && is_editor_focus_region(focus_state_.region) &&
-          app_mode_ == AppMode::kNormal && !event_has_ctrl_modifier(event) &&
+          editor_browse_active && !event_has_ctrl_modifier(event) &&
           event != Event::CtrlP && !event_is_tide_app_shortcut(event)) {
         return true;
       }
@@ -2181,7 +2236,7 @@ int Application::run() {
           force_immediate_repaint(&layout_state_, &screen);
           return true;
         }
-        if (is_editor_focus_region(focus_state_.region) && app_mode_ == AppMode::kNormal &&
+        if (is_editor_focus_region(focus_state_.region) && editor_browse_active &&
             layout_state_.text_input_focus != TextInputFocus::Console &&
             !is_search_input_focus(layout_state_.text_input_focus) &&
             !is_watch_input_focus(layout_state_.text_input_focus) &&

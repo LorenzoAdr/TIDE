@@ -124,7 +124,8 @@ inline Element MakeTabButton(const std::string& label, bool selected, bool hover
 
 inline Element MakeToolbarButton(Element content, bool hovered, bool pressed, bool disabled,
                                  Box* box) {
-  Element btn = std::move(content) | center;
+  Element btn =
+      hbox({text("  "), std::move(content), text("  ")}) | center | size(HEIGHT, EQUAL, 1);
   if (disabled) {
     btn = btn | dim | bgcolor(theme::TabIdle());
   } else if (pressed) {

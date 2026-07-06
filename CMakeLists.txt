@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+find_package(Threads REQUIRED)
+
 include(cmake/Dependencies.cmake)
 
 add_executable(tgdb
@@ -147,6 +149,13 @@ add_executable(tgdb
   src/util/core_analyzer_support.cpp
   src/util/process_list.cpp
   src/util/system_stats.cpp
+  src/packet_monitor/pkt_ring.cpp
+  src/packet_monitor/pkt_protocol.cpp
+  src/packet_monitor/pkt_connections.cpp
+  src/packet_monitor/pkt_store.cpp
+  src/packet_monitor/pkt_preload_path.cpp
+  src/packet_monitor/pkt_monitor_service.cpp
+  src/ui/packet_monitor_panel.cpp
   src/git/git_command.cpp
   src/git/git_status.cpp
   src/git/git_diff.cpp
@@ -160,6 +169,7 @@ add_executable(tgdb
 target_include_directories(tgdb PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${CMAKE_CURRENT_SOURCE_DIR}/tools/packet_preload
 )
 
 target_link_libraries(tgdb PRIVATE
@@ -167,7 +177,11 @@ target_link_libraries(tgdb PRIVATE
   ftxui::dom
   ftxui::screen
   cppdap
+  Threads::Threads
 )
+if(UNIX)
+  target_link_libraries(tgdb PRIVATE pthread)
+endif()
 
 if(UNIX)
   target_link_options(tgdb PRIVATE -rdynamic)
@@ -195,6 +209,26 @@ target_link_libraries(tgdb-bundle-wizard PRIVATE ftxui::component ftxui::dom ftx
 
 add_executable(hello examples/hello.cpp)
 target_compile_options(hello PRIVATE -g -O0)
+target_link_libraries(hello PRIVATE Threads::Threads)
+
+add_executable(packet_monitor_demo examples/packet_monitor_demo.cpp)
+target_compile_options(packet_monitor_demo PRIVATE -g -O0)
+target_link_libraries(packet_monitor_demo PRIVATE Threads::Threads)
+
+add_library(tgdb_pkt_preload SHARED tools/packet_preload/pkt_hook.c)
+target_include_directories(tgdb_pkt_preload PRIVATE tools/packet_preload)
+set_target_properties(tgdb_pkt_preload PROPERTIES
+  OUTPUT_NAME tgdb_pkt
+  PREFIX "lib"
+  POSITION_INDEPENDENT_CODE ON
+)
+add_custom_command(TARGET tgdb_pkt_preload POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/lib
+  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:tgdb_pkt_preload> ${CMAKE_BINARY_DIR}/lib/
+)
+
+add_executable(core_analyzer_demo examples/core_analyzer_demo.cpp)
+target_compile_options(core_analyzer_demo PRIVATE -g -O0)
 
 add_executable(i18n_test
   tests/i18n_test.cpp
@@ -263,6 +297,9 @@ target_include_directories(workspace_indexer_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
+if(UNIX)
+  target_link_libraries(workspace_indexer_test PRIVATE pthread)
+endif()
 
 add_executable(csv_index_test
   tests/csv_index_test.cpp
@@ -295,6 +332,9 @@ target_include_directories(external_viewer_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
+if(UNIX)
+  target_link_libraries(external_viewer_test PRIVATE pthread)
+endif()
 
 add_executable(tabular_file_test
   tests/tabular_file_test.cpp
@@ -340,3 +380,15 @@ add_executable(git_diff_test
   src/git/git_diff.cpp
 )
 target_include_directories(git_diff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(pkt_protocol_test
+  tests/pkt_protocol_test.cpp
+  src/packet_monitor/pkt_protocol.cpp
+)
+target_include_directories(pkt_protocol_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+target_compile_definitions(pkt_protocol_test PRIVATE
+  TGDB_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)

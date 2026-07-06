@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <signal.h>
@@ -167,6 +168,10 @@ bool GdbProcess::start() {
 
   if (pid == 0) {
     child_die_with_parent();
+    unsetenv("LD_PRELOAD");
+    unsetenv("TGDB_PKT_FILTER_SRC");
+    unsetenv("TGDB_PKT_FILTER_DST");
+    unsetenv("TGDB_PKT_DISABLE");
     dup2(stdin_pipe[0], STDIN_FILENO);
     dup2(stdout_pipe[1], STDOUT_FILENO);
     dup2(stdout_pipe[1], STDERR_FILENO);
