@@ -55,7 +55,5 @@ bool match_occupied(const TextMatch& match, const EditorBuffer& buffer);
 
 void add_next_selection_match(EditorBuffer* buffer, int visible_lines);
 void select_all_matches(EditorBuffer* buffer, const TextRange* scope = nullptr);
-bool apply_regex_match_cursors(EditorBuffer* buffer, const std::string& pattern,
-                               const TextRange* scope);
 
 }  // namespace tgdb

@@ -28,8 +28,6 @@
 #include "indexer/index_rules.hpp"
 #include "lsp/semantic_tokens.hpp"
 #include "symbols/symbol_provider.hpp"
-#include "util/cpp_highlight.hpp"
-#include "util/path_normalize.hpp"
 #include "util/syntax_highlight.hpp"
 
 namespace tgdb {
@@ -52,8 +50,6 @@ struct SourcePanelState {
   uint64_t last_semantic_highlight_revision = 0;
   SemanticTokenDocument cached_semantic_tokens;
   std::string cached_semantic_path;
-  std::vector<bool> block_comment_line_starts;
-  int block_comment_line_count = 0;
 };
 
 constexpr int kDebugHoverDelayMs = 500;
@@ -254,25 +250,6 @@ void notify_source_document_opened(ISymbolProvider* symbols, const std::string& 
     return;
   }
   symbols->on_document_opened(path, lines_to_text(lines));
-}
-
-void sync_source_block_comment_cache(const std::vector<std::string>& lines,
-                                     SourcePanelState* panel) {
-  if (panel == nullptr) {
-    return;
-  }
-  const int line_count = static_cast<int>(lines.size());
-  if (panel->block_comment_line_count == line_count &&
-      panel->block_comment_line_starts.size() == static_cast<std::size_t>(line_count)) {
-    return;
-  }
-  panel->block_comment_line_starts.assign(static_cast<std::size_t>(line_count), false);
-  CppHighlightContext ctx;
-  for (int i = 0; i < line_count; ++i) {
-    panel->block_comment_line_starts[static_cast<std::size_t>(i)] = ctx.in_block_comment;
-    advance_cpp_highlight_context(lines[static_cast<std::size_t>(i)], &ctx);
-  }
-  panel->block_comment_line_count = line_count;
 }
 
 int line_number_width(int total_lines) {
@@ -642,7 +619,6 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
           symbols != nullptr && symbols->supports_semantic_highlight() &&
           is_indexed_source_path(model->active_file);
       panel_state->last_semantic_highlight_revision_tick = 0;
-      panel_state->block_comment_line_count = 0;
       notify_source_document_opened(symbols.get(), model->active_file, view_state->lines);
     }
 
@@ -694,11 +670,10 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
 
     Elements gutter_rows;
     Elements code_rows;
-    sync_source_block_comment_cache(view_state->lines, panel_state.get());
-    bool in_block_comment = false;
-    if (start < static_cast<int>(panel_state->block_comment_line_starts.size())) {
-      in_block_comment = panel_state->block_comment_line_starts[static_cast<std::size_t>(start)];
-    }
+    SyntaxHighlightContext highlight_ctx;
+    highlight_ctx.file_path = model->active_file;
+    highlight_ctx.lines = &view_state->lines;
+    highlight_ctx.buffer_token = model->view_token;
     const int execution_line = execution_line_for_view(*model);
     for (int i = start; i < end; ++i) {
       const int line_no = i + 1;
@@ -726,11 +701,8 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
       }
       gutter_rows.push_back(gutter_row);
 
-      CppHighlightContext highlight_ctx;
-      highlight_ctx.in_block_comment = in_block_comment;
       Element code_row =
           HighlightCodeLine(view_state->lines[i], i, semantic_tokens, -1, {}, 0, &highlight_ctx);
-      in_block_comment = block_comment_state_after_line(view_state->lines[i], in_block_comment);
       if (is_execution) {
         code_row = code_row | inverted;
       } else if (is_bp) {

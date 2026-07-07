@@ -133,8 +133,6 @@ HelixKeyTrieNode build_normal_map() {
   bind_cmd(&root, "/", HelixCommand::kSearch);
   bind_cmd(&root, "n", HelixCommand::kSearchNext);
   bind_cmd(&root, "N", HelixCommand::kSearchPrev);
-  bind_cmd(&root, "s", HelixCommand::kSelectAllMatches);
-  bind_cmd(&root, "S", HelixCommand::kSplitSelectionOnRegex);
   bind_cmd(&root, "%", HelixCommand::kSelectAll);
   bind_cmd(&root, "X", HelixCommand::kExtendLineBounds);
   bind_cmd(&root, ">", HelixCommand::kIndent);
@@ -464,10 +462,6 @@ std::string helix_command_label(HelixCommand command) {
       return i18n::tr("helix.cmd.goto_block_end");
     case HelixCommand::kGotoBlockStart:
       return i18n::tr("helix.cmd.goto_block_start");
-    case HelixCommand::kSelectAllMatches:
-      return i18n::tr("helix.cmd.select_all_matches");
-    case HelixCommand::kSplitSelectionOnRegex:
-      return i18n::tr("helix.cmd.split_selection_on_regex");
     case HelixCommand::kSplitSelectionOnNewline:
       return i18n::tr("helix.cmd.split_selection_on_newline");
     case HelixCommand::kNone:

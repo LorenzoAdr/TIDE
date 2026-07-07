@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
+
+#include "editor/editor_folds.hpp"
 
 namespace tgdb {
 
@@ -55,6 +58,8 @@ struct EditorBuffer {
   int scroll_col = 0;
   bool dirty = false;
   uint64_t view_token = 0;
+  std::set<int> collapsed_folds;
+  std::vector<FoldRegion> fold_regions;
 
   int primary_line() const;
   int primary_col() const;

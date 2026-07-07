@@ -136,14 +136,17 @@ constexpr int kLiveLspCompletion = 3;
 constexpr int kDiagnosticSuffixes = 4;
 constexpr int kStickyScroll = 5;
 constexpr int kIndentGuides = 6;
-constexpr int kOverviewRuler = 7;
-constexpr int kSecondaryPanel = 8;
-constexpr int kShowAllFiles = 9;
-constexpr int kMonitor = 10;
-constexpr int kIcons = 11;
-constexpr int kHelixMode = 12;
-constexpr int kWorkspaceAutoDetect = 13;
-constexpr int kBaseOptions = 14;
+constexpr int kScopeHighlight = 7;
+constexpr int kScopeHighlightStrength = 8;
+constexpr int kAnimations = 9;
+constexpr int kOverviewRuler = 10;
+constexpr int kSecondaryPanel = 11;
+constexpr int kShowAllFiles = 12;
+constexpr int kMonitor = 13;
+constexpr int kIcons = 14;
+constexpr int kHelixMode = 15;
+constexpr int kWorkspaceAutoDetect = 16;
+constexpr int kBaseOptions = 17;
 
 #ifdef TGDB_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -359,6 +362,12 @@ std::vector<SettingsOption> global_settings_options() {
        i18n::tr("settings.general.sticky_scroll.description")},
       {i18n::tr("settings.general.indent_guides.label"),
        i18n::tr("settings.general.indent_guides.description")},
+      {i18n::tr("settings.general.scope_highlight.label"),
+       i18n::tr("settings.general.scope_highlight.description")},
+      {i18n::tr("settings.general.scope_highlight_strength.label"),
+       i18n::tr("settings.general.scope_highlight_strength.description")},
+      {i18n::tr("settings.general.animations.label"),
+       i18n::tr("settings.general.animations.description")},
       {i18n::tr("settings.general.overview_ruler.label"),
        i18n::tr("settings.general.overview_ruler.description")},
       {i18n::tr("settings.general.secondary_panel.label"),
@@ -441,6 +450,34 @@ std::string icon_mode_option_label(IconMode mode, const std::string& text) {
   return i18n::tr_fmt("settings.icon_mode.checked", {icon_mode_label(mode), text});
 }
 
+std::string scope_highlight_strength_label(int strength) {
+  if (strength <= 45) {
+    return i18n::tr("settings.scope_strength.subtle");
+  }
+  if (strength <= 65) {
+    return i18n::tr("settings.scope_strength.normal");
+  }
+  return i18n::tr("settings.scope_strength.strong");
+}
+
+std::string scope_highlight_strength_option_label(int strength, const std::string& text) {
+  return i18n::tr_fmt("settings.scope_strength.checked",
+                       {scope_highlight_strength_label(strength), text});
+}
+
+void cycle_scope_highlight_strength(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  if (state->draft_scope_highlight_strength <= 45) {
+    state->draft_scope_highlight_strength = 58;
+  } else if (state->draft_scope_highlight_strength <= 65) {
+    state->draft_scope_highlight_strength = 75;
+  } else {
+    state->draft_scope_highlight_strength = 40;
+  }
+}
+
 bool option_checked(const SettingsModalState* state, int index) {
   if (state == nullptr) {
     return false;
@@ -460,6 +497,12 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_sticky_scroll_enabled;
     case kIndentGuides:
       return state->draft_indent_guides_enabled;
+    case kScopeHighlight:
+      return state->draft_scope_highlight_enabled;
+    case kScopeHighlightStrength:
+      return state->draft_scope_highlight_enabled && state->draft_animations_enabled;
+    case kAnimations:
+      return state->draft_animations_enabled;
     case kOverviewRuler:
       return state->draft_overview_ruler_enabled;
     case kSecondaryPanel:
@@ -516,6 +559,15 @@ void toggle_option(SettingsModalState* state, int index) {
       break;
     case kIndentGuides:
       state->draft_indent_guides_enabled = !state->draft_indent_guides_enabled;
+      break;
+    case kScopeHighlight:
+      state->draft_scope_highlight_enabled = !state->draft_scope_highlight_enabled;
+      break;
+    case kScopeHighlightStrength:
+      cycle_scope_highlight_strength(state);
+      break;
+    case kAnimations:
+      state->draft_animations_enabled = !state->draft_animations_enabled;
       break;
     case kOverviewRuler:
       state->draft_overview_ruler_enabled = !state->draft_overview_ruler_enabled;
@@ -1776,6 +1828,10 @@ SettingsBodyContent build_general_settings(SettingsModalState* state) {
     } else if (i == kIcons) {
       title = text(icon_mode_option_label(state->draft_icon_mode, option.label)) |
               color(selected ? theme::Accent() : theme::Header()) | bold;
+    } else if (i == kScopeHighlightStrength) {
+      title = text(scope_highlight_strength_option_label(state->draft_scope_highlight_strength,
+                                                         option.label)) |
+              color(selected ? theme::Accent() : theme::Header()) | bold;
     } else {
       title = text(checkbox_label(checked, option.label)) |
               color(selected ? theme::Accent() : theme::Header()) | bold;
@@ -2092,6 +2148,9 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_show_diagnostic_suffixes = settings.show_diagnostic_suffixes;
   state->draft_sticky_scroll_enabled = settings.sticky_scroll_enabled;
   state->draft_indent_guides_enabled = settings.indent_guides_enabled;
+  state->draft_scope_highlight_enabled = settings.scope_highlight_enabled;
+  state->draft_scope_highlight_strength = settings.scope_highlight_strength;
+  state->draft_animations_enabled = settings.animations_enabled;
   state->draft_overview_ruler_enabled = settings.overview_ruler_enabled;
   state->draft_secondary_panel_enabled = settings.secondary_panel_enabled;
   state->draft_helix_mode_enabled = settings.helix_mode_enabled;
@@ -2148,6 +2207,9 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->show_diagnostic_suffixes = state->draft_show_diagnostic_suffixes;
   settings->sticky_scroll_enabled = state->draft_sticky_scroll_enabled;
   settings->indent_guides_enabled = state->draft_indent_guides_enabled;
+  settings->scope_highlight_enabled = state->draft_scope_highlight_enabled;
+  settings->scope_highlight_strength = state->draft_scope_highlight_strength;
+  settings->animations_enabled = state->draft_animations_enabled;
   settings->overview_ruler_enabled = state->draft_overview_ruler_enabled;
   settings->secondary_panel_enabled = state->draft_secondary_panel_enabled;
   settings->helix_mode_enabled = state->draft_helix_mode_enabled;

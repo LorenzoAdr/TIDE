@@ -376,6 +376,27 @@ Color EditorLineHi() {
   return current_palette().editor_line_hi;
 }
 
+Color ScopeBg(int strength_percent) {
+  const int clamped = std::max(10, std::min(85, strength_percent));
+  const float blend_factor = static_cast<float>(clamped) / 100.0f;
+  const ColorRgb code = effective_code_bg_rgb();
+  const ColorRgb tint = g_mode == ThemeMode::kLight ? rgb(214, 226, 244) : rgb(42, 52, 72);
+  return from_rgb(blend(code, tint, blend_factor));
+}
+
+Color ScopeBraceBg(int gutter_strength_percent) {
+  const int gutter = std::max(10, std::min(85, gutter_strength_percent));
+  int brace_strength = gutter;
+  if (gutter <= 45) {
+    brace_strength = gutter + 14;
+  } else if (gutter <= 65) {
+    brace_strength = gutter + 20;
+  } else {
+    brace_strength = gutter + 8;
+  }
+  return ScopeBg(std::min(85, brace_strength));
+}
+
 Color CursorCell() { return current_palette().cursor_cell; }
 Color SelectionBg() { return current_palette().selection_bg; }
 Color FindMatchBg() { return current_palette().find_match_bg; }
@@ -385,6 +406,23 @@ Color SelectionOccurrenceBg() {
   return from_rgb(blend(code, tint, 0.45f));
 }
 Color BracketMatchBg() { return current_palette().bracket_match_bg; }
+
+Color BracePairColor(int depth) {
+  static const Color kDark[] = {
+      Color::RGB(255, 198, 88),   Color::RGB(178, 132, 255), Color::RGB(82, 218, 178),
+      Color::RGB(255, 118, 152), Color::RGB(118, 198, 255), Color::RGB(178, 220, 98),
+      Color::RGB(255, 158, 118), Color::RGB(148, 188, 255),
+  };
+  static const Color kLight[] = {
+      Color::RGB(180, 90, 0),    Color::RGB(120, 70, 190),  Color::RGB(0, 130, 95),
+      Color::RGB(200, 40, 90),   Color::RGB(0, 95, 180),    Color::RGB(90, 130, 0),
+      Color::RGB(190, 80, 30),   Color::RGB(60, 90, 180),
+  };
+  const Color* palette = g_mode == ThemeMode::kLight ? kLight : kDark;
+  constexpr int kCount = 8;
+  const int index = ((depth % kCount) + kCount) % kCount;
+  return palette[index];
+}
 
 Color TabIdle() {
   if (g_overrides.panel_bg) {

@@ -88,14 +88,30 @@ Breakpoints are tracked per normalized file path in `DebugModel`. When the user 
 3. Queries `documentSymbol`, completion, hover, semantic tokens
 4. Receives `textDocument/publishDiagnostics` for live errors/warnings (clangd)
 
-If clangd is unavailable, `RegexSymbolProvider` extracts symbols with regex heuristics.
+If clangd is unavailable, `TreeSitterSymbolProvider` provides immediate syntactic symbols, highlighting, scopes, and local completion from the C++ AST.
+
+### Tree-sitter document cache
+
+`TreeSitterService` owns a `TreeSitterDocumentCache` that parses C++ off the UI thread (`ts-parse` worker):
+
+| Piece | Role |
+|-------|------|
+| `request_prepare` | Coalesces edits per path; debounces parse jobs by `kTreeSitterParseDebounceMs` (200 ms) |
+| `single_edit_between` + `ts_tree_edit` | Applies one contiguous edit when the buffer change is a single insertion/replacement |
+| `run_prepare` | Full fallback parse when incremental edit detection fails; schedules a follow-up job if the source changed mid-parse |
+| `DocumentEntry` | Cached source, `TSTree`, line highlights, symbols, revision counter |
+| `queries/locals.scm` | Scopes (`@local.scope`) and definitions (`@local.definition`) for breadcrumbs and local completion |
+
+Bracket matching, `cursor_in_code`, quote/comment text objects, and local completion require a parsed AST (`parse_ready`). There is no regex/scan fallback.
+
+`tree_sitter_blocks.cpp` collects bracket tokens from the AST (excluding comments/strings) and pairs them with a stack. `tree_sitter_locals.cpp` runs the locals query for scope chains and visible definitions at the cursor.
 
 ## Indexing
 
 | Component | Role |
 |-----------|------|
 | `WorkspaceIndexer` | File list via `rg --files`, inotify watcher; powers file picker and search |
-| `SymbolWorkspaceIndexer` | Regex-based workspace symbol index for `Ctrl+O` without LSP |
+| `SymbolWorkspaceIndexer` | Tree-sitter workspace symbol index for `Ctrl+O` without LSP |
 | `index_rules` | Skip rules for dirs (`build`, `.git`, …) and file extensions |
 
 ## Integrated terminal
@@ -189,7 +205,8 @@ Overlays (stacked on top):
 | `src/dap/` | GDB process launch, protocol helpers |
 | `src/editor/` | Buffer, text ops, undo, find, render |
 | `src/lsp/` | LSP transport and client |
-| `src/symbols/` | Symbol providers (LSP + regex) |
+| `src/symbols/` | Symbol providers (LSP + Tree-sitter) |
+| `src/parser/` | Tree-sitter C++ parsing (highlight, symbols, scopes, blocks) |
 | `src/indexer/` | Workspace and symbol indexing |
 | `src/terminal/` | PTY shell session, `RawPtyScreen`, PTY key encoding |
 | `src/search/` | Workspace text search |

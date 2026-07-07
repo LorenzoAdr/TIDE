@@ -443,6 +443,7 @@ void ensure_selected_diff(GitService* git, GitPanelState* state) {
     return;
   }
   const std::string& path = entries[static_cast<std::size_t>(state->selected_file)].path;
+  git->set_context_from_path(path);
   reset_diff_scroll_for_path(state, path);
   if (!git->has_file_diff_text(path)) {
     git->refresh_file_diff(path);
@@ -1131,7 +1132,8 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
     state->last_list_visible = list_visible;
     state->last_diff_visible = diff_visible;
 
-    const GitRepoInfo repo = git->repo_info();
+    const GitRepoInfo repo = git->has_subrepos() ? git->context_repo_info() : git->repo_info();
+    const GitRepoInfo main_repo = git->repo_info();
     if (!repo.valid) {
       return vbox({
                  text(" " + (repo.last_error.empty() ? i18n::tr("git.not_repo")
@@ -1143,6 +1145,10 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
 
     std::ostringstream header;
     header << repo.branch;
+    if (main_repo.subrepo_count > 0) {
+      header << "  (" << i18n::tr_fmt("git.header.subrepos",
+                                       {std::to_string(main_repo.subrepo_count)}) << ")";
+    }
     const GitStatusSnapshot status = git->status();
     if (status.staged_count > 0 || status.unstaged_count > 0 || status.untracked_count > 0) {
       header << "  ●";

@@ -4,6 +4,7 @@
 #include <cctype>
 
 #include "editor/bracket_match.hpp"
+#include "editor/editor_folds.hpp"
 #include "editor/indent_guides.hpp"
 #include "editor/line_comment.hpp"
 #include "editor/text_search.hpp"
@@ -655,6 +656,10 @@ void delete_all_selections(EditorBuffer* buffer) {
 }
 
 void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines, int code_width) {
+  if (!buffer->collapsed_folds.empty()) {
+    ensure_scroll_visible_fold_aware(buffer, buffer->fold_regions, visible_lines, code_width);
+    return;
+  }
   const int primary = buffer->primary_line();
   if (primary < buffer->scroll) {
     buffer->scroll = primary;
@@ -682,6 +687,19 @@ void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines, int code_wid
 }
 
 void ensure_scroll_centered(EditorBuffer* buffer, int visible_lines, int code_width) {
+  if (!buffer->collapsed_folds.empty()) {
+    const int primary = buffer->primary_line();
+    const int half = std::max(0, visible_lines / 2);
+    const std::vector<int> visible = visible_buffer_lines(
+        static_cast<int>(buffer->lines.size()), buffer->fold_regions, buffer->collapsed_folds);
+    const int primary_index = visible_line_index(visible, primary);
+    if (primary_index >= 0) {
+      const int scroll_index = std::max(0, primary_index - half);
+      buffer->scroll = visible[static_cast<std::size_t>(scroll_index)];
+    }
+    ensure_scroll_visible_fold_aware(buffer, buffer->fold_regions, visible_lines, code_width);
+    return;
+  }
   const int primary = buffer->primary_line();
   const int half = std::max(0, visible_lines / 2);
   buffer->scroll = std::max(0, primary - half);
@@ -722,6 +740,10 @@ void scroll_view_by_columns(EditorBuffer* buffer, int delta_columns, int code_wi
 }
 
 void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lines) {
+  if (!buffer->collapsed_folds.empty()) {
+    scroll_view_by_lines_fold_aware(buffer, delta_lines, buffer->fold_regions, visible_lines);
+    return;
+  }
   const int total = static_cast<int>(buffer->lines.size());
   buffer->scroll = std::max(
       0, std::min(buffer->scroll + delta_lines, max_scroll(total, visible_lines)));

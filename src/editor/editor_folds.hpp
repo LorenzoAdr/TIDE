@@ -1,0 +1,45 @@
+#pragma once
+
+#include <set>
+#include <vector>
+
+namespace tgdb {
+
+struct FoldRegion {
+  int open_line = 0;
+  int close_line = 0;
+};
+
+struct EditorBuffer;
+
+bool fold_line_hidden(int line, const std::vector<FoldRegion>& regions,
+                      const std::set<int>& collapsed_open_lines);
+
+std::vector<int> visible_buffer_lines(int total_lines, const std::vector<FoldRegion>& regions,
+                                      const std::set<int>& collapsed_open_lines);
+
+std::vector<int> viewport_buffer_lines(const EditorBuffer& buffer,
+                                       const std::vector<FoldRegion>& regions,
+                                       int viewport_count);
+
+const FoldRegion* fold_region_at_open_line(const std::vector<FoldRegion>& regions, int open_line);
+
+char fold_gutter_marker(int buffer_line, const std::vector<FoldRegion>& regions,
+                        const std::set<int>& collapsed_open_lines);
+
+bool toggle_fold_at(EditorBuffer* buffer, int open_line, const std::vector<FoldRegion>& regions);
+
+void clamp_cursors_for_folds(EditorBuffer* buffer, const std::vector<FoldRegion>& regions);
+
+int fold_scroll_max(const EditorBuffer& buffer, const std::vector<FoldRegion>& regions,
+                    int viewport_count);
+
+void scroll_view_by_lines_fold_aware(EditorBuffer* buffer, int delta_lines,
+                                     const std::vector<FoldRegion>& regions, int viewport_count);
+
+void ensure_scroll_visible_fold_aware(EditorBuffer* buffer, const std::vector<FoldRegion>& regions,
+                                      int viewport_count, int code_width = -1);
+
+int visible_line_index(const std::vector<int>& visible_lines, int buffer_line);
+
+}  // namespace tgdb

@@ -9,7 +9,8 @@
 #include <unordered_set>
 
 #include "lsp/lsp_client.hpp"
-#include "symbols/regex_symbol_provider.hpp"
+#include "parser/tree_sitter_service.hpp"
+#include "symbols/tree_sitter_symbol_provider.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "util/thread_safe_queue.hpp"
 
@@ -134,7 +135,7 @@ class LspSymbolProvider : public ISymbolProvider {
 
   mutable std::mutex mutex_;
   LspClient client_;
-  RegexSymbolProvider fallback_;
+  TreeSitterSymbolProvider fallback_;
   bool lsp_enabled_ = true;
   bool use_gcc_query_driver_ = true;
   bool use_background_index_ = false;

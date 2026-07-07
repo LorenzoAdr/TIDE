@@ -19,6 +19,40 @@ endif()
 
 include(cmake/Dependencies.cmake)
 
+set(TGDB_TREE_SITTER_INCLUDE_DIRS
+  ${tree_sitter_SOURCE_DIR}/lib/include
+  ${tree_sitter_cpp_SOURCE_DIR}/bindings/c
+)
+
+set(TGDB_TREE_SITTER_SOURCES
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_document.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/parser/tree_sitter_highlight.cpp
+  src/parser/tree_sitter_locals.cpp
+  src/parser/tree_sitter_blocks.cpp
+  src/parser/tree_sitter_completion.cpp
+  src/parser/tree_sitter_service.cpp
+  src/util/syntax_highlight.cpp
+  src/editor/editor_context.cpp
+  src/util/csv_viewer.cpp
+  src/ui/theme.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+
+function(tgdb_link_tree_sitter target)
+  target_sources(${target} PRIVATE ${TGDB_TREE_SITTER_SOURCES})
+  target_include_directories(${target} PRIVATE
+    ${TGDB_TREE_SITTER_INCLUDE_DIRS}
+    ${cppdap_SOURCE_DIR}/include
+    ${cppdap_SOURCE_DIR}/third_party/json/include
+  )
+  target_link_libraries(${target} PRIVATE tree-sitter tree-sitter-cpp ftxui::dom)
+endfunction()
+
 add_executable(tgdb
   src/main.cpp
   src/app/application.cpp
@@ -37,6 +71,7 @@ add_executable(tgdb
   src/dap/gdb_launcher.cpp
   src/dap/gdb_protocol.cpp
   src/ui/main_layout.cpp
+  src/ui/hover_effects.cpp
   src/ui/status_layout_popover.cpp
   src/ui/file_tree_panel.cpp
   src/ui/source_panel.cpp
@@ -92,7 +127,16 @@ add_executable(tgdb
   src/lsp/lsp_client.cpp
   src/lsp/diagnostics.cpp
   src/symbols/lsp_symbol_provider.cpp
+  src/symbols/tree_sitter_symbol_provider.cpp
   src/symbols/completion_snippet.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_document.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/parser/tree_sitter_highlight.cpp
+  src/parser/tree_sitter_locals.cpp
+  src/parser/tree_sitter_blocks.cpp
+  src/parser/tree_sitter_completion.cpp
+  src/parser/tree_sitter_service.cpp
   src/util/syntax_highlight.cpp
   src/util/clang_format_config.cpp
   src/util/build_file_highlight.cpp
@@ -105,7 +149,6 @@ add_executable(tgdb
   src/search/workspace_search.cpp
   src/search/workspace_search_runner.cpp
   src/search/workspace_search_rg.cpp
-  src/symbols/regex_symbol_provider.cpp
   src/symbols/source_symbol_resolver.cpp
   src/symbols/symbol_utils.cpp
   src/editor/editor_state.cpp
@@ -121,6 +164,7 @@ add_executable(tgdb
   src/editor/clipboard.cpp
   src/editor/editor_render.cpp
   src/editor/editor_context.cpp
+  src/editor/editor_folds.cpp
   src/editor/bracket_match.cpp
   src/editor/code_snippets.cpp
   src/editor/helix/helix_state.cpp
@@ -130,7 +174,6 @@ add_executable(tgdb
   src/editor/helix/helix_hints.cpp
   src/editor/helix/helix_scope_nav.cpp
   src/editor/helix/helix_textobjects.cpp
-  src/util/cpp_highlight.cpp
   src/util/crash_handler.cpp
   src/util/child_process_guard.cpp
   src/util/monitor_log.cpp
@@ -170,6 +213,7 @@ add_executable(tgdb
   src/ui/packet_monitor_panel.cpp
   src/git/git_command.cpp
   src/git/git_status.cpp
+  src/git/git_subrepos.cpp
   src/git/git_diff.cpp
   src/git/git_log.cpp
   src/git/git_service.cpp
@@ -182,6 +226,7 @@ target_include_directories(tgdb PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/packet_preload
+  ${TGDB_TREE_SITTER_INCLUDE_DIRS}
 )
 
 target_link_libraries(tgdb PRIVATE
@@ -189,6 +234,8 @@ target_link_libraries(tgdb PRIVATE
   ftxui::dom
   ftxui::screen
   cppdap
+  tree-sitter
+  tree-sitter-cpp
   Threads::Threads
 )
 
@@ -273,6 +320,7 @@ add_executable(text_ops_test
   tests/text_ops_test.cpp
   src/editor/editor_state.cpp
   src/editor/text_ops.cpp
+  src/editor/editor_folds.cpp
   src/editor/line_comment.cpp
   src/editor/indent_guides.cpp
   src/editor/text_search.cpp
@@ -285,14 +333,30 @@ add_executable(text_ops_test
   src/util/system_clipboard.cpp
 )
 target_include_directories(text_ops_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+tgdb_link_tree_sitter(text_ops_test)
+
+add_executable(tree_sitter_test
+  tests/tree_sitter_test.cpp
+  src/editor/editor_state.cpp
+  src/editor/editor_folds.cpp
+  src/editor/bracket_match.cpp
+  src/editor/indent_guides.cpp
+  src/util/clang_format_config.cpp
+  src/ui/cursor_blink.cpp
+)
+target_include_directories(tree_sitter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+tgdb_link_tree_sitter(tree_sitter_test)
 
 add_executable(bracket_match_test
   tests/bracket_match_test.cpp
   src/editor/editor_state.cpp
   src/editor/bracket_match.cpp
+  src/editor/indent_guides.cpp
+  src/util/clang_format_config.cpp
   src/ui/cursor_blink.cpp
 )
 target_include_directories(bracket_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+tgdb_link_tree_sitter(bracket_match_test)
 
 add_executable(indent_guides_test
   tests/indent_guides_test.cpp
@@ -453,6 +517,7 @@ target_link_libraries(lsp_completion_probe PRIVATE ftxui::dom)
 set(TGDB_TEST_TARGETS
   i18n_test
   text_ops_test
+  tree_sitter_test
   bracket_match_test
   indent_guides_test
   build_environment_test

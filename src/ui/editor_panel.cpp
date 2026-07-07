@@ -15,6 +15,7 @@
 #include "editor/bracket_match.hpp"
 #include "editor/clipboard.hpp"
 #include "editor/code_snippets.hpp"
+#include "editor/editor_folds.hpp"
 #include "editor/helix/helix_dispatch.hpp"
 #include "editor/helix/helix_hints.hpp"
 #include "editor/helix/helix_state.hpp"
@@ -26,7 +27,7 @@
 #include "editor/indent_guides.hpp"
 #include "editor/selection_occurrence_runner.hpp"
 #include "util/clang_format_config.hpp"
-#include "util/cpp_highlight.hpp"
+#include "parser/tree_sitter_service.hpp"
 #include "util/csv_viewer.hpp"
 #include "util/tabular_file.hpp"
 #include "util/monitor_log.hpp"
@@ -183,6 +184,12 @@ struct EditorPanelState {
   int bracket_cache_line = -1;
   int bracket_cache_col = -1;
   BracketPairHighlight bracket_cache;
+  uint64_t scope_bracket_cache_token = 0;
+  int scope_bracket_cache_line = -1;
+  int scope_bracket_cache_col = -1;
+  BracketPairHighlight scope_bracket_cache;
+  std::vector<ColoredBraceMarker> colored_brace_cache;
+  uint64_t colored_brace_cache_token = 0;
   uint64_t last_diag_revision = 0;
   std::string last_diag_path;
   int problem_errors = 0;
@@ -191,6 +198,10 @@ struct EditorPanelState {
   uint64_t cached_file_diag_revision = 0;
   int gutter_scroll_start = 0;
   int gutter_visible_rows = 0;
+  int gutter_fold_width = 0;
+  std::vector<int> viewport_line_cache;
+  std::string fold_regions_cache_path;
+  uint64_t fold_regions_cache_token = 0;
   bool symbols_fetch_pending = false;
   uint64_t last_document_symbols_revision = 0;
   bool semantic_tokens_enqueue_pending = false;
@@ -199,10 +210,6 @@ struct EditorPanelState {
   std::string cached_semantic_path;
   uint64_t last_semantic_highlight_revision = 0;
   int code_width_chars = 80;
-  std::vector<bool> block_comment_line_starts;
-  uint64_t block_comment_token = 0;
-  std::size_t block_comment_line_count = 0;
-  int block_comment_dirty_from_line = -1;
   int64_t content_edit_ms = 0;
   bool lsp_sync_pending = false;
   std::unordered_map<int, std::vector<Diagnostic>> diagnostics_by_line;
@@ -292,10 +299,6 @@ void mark_editor_content_edited(EditorPanelState* panel, const EditorBuffer& buf
     return;
   }
   panel->content_edit_ms = steady_now_ms();
-  const int line = buffer.primary_line();
-  if (panel->block_comment_dirty_from_line < 0 || line < panel->block_comment_dirty_from_line) {
-    panel->block_comment_dirty_from_line = line;
-  }
   panel->guide_tracker_view_token = 0;
   if (is_indexed_source_path(buffer.path)) {
     panel->lsp_sync_pending = true;
@@ -378,53 +381,6 @@ void rebuild_breadcrumb_hits(const Box& box, const std::vector<BreadcrumbItem>& 
   }
 }
 
-void rebuild_block_comment_cache(EditorPanelState* panel, const EditorBuffer& buffer) {
-  if (panel == nullptr) {
-    return;
-  }
-  const std::size_t line_count = buffer.lines.size();
-  if (panel->block_comment_token == buffer.view_token &&
-      panel->block_comment_line_count == line_count) {
-    return;
-  }
-
-  const bool can_incremental =
-      line_count == panel->block_comment_line_count && panel->block_comment_dirty_from_line >= 0 &&
-      static_cast<std::size_t>(panel->block_comment_dirty_from_line) < line_count &&
-      panel->block_comment_line_starts.size() == line_count;
-
-  std::size_t start_line = 0;
-  CppHighlightContext ctx;
-  if (can_incremental) {
-    start_line = static_cast<std::size_t>(panel->block_comment_dirty_from_line);
-    ctx.in_block_comment = panel->block_comment_line_starts[start_line];
-  } else {
-    panel->block_comment_line_starts.assign(line_count, false);
-  }
-
-  for (std::size_t i = start_line; i < line_count; ++i) {
-    panel->block_comment_line_starts[i] = ctx.in_block_comment;
-    advance_cpp_highlight_context(buffer.lines[i], &ctx);
-  }
-  panel->block_comment_token = buffer.view_token;
-  panel->block_comment_line_count = line_count;
-  panel->block_comment_dirty_from_line = -1;
-}
-
-void tick_block_comment_cache(EditorPanelState* panel, const EditorBuffer& buffer) {
-  if (panel == nullptr) {
-    return;
-  }
-  if (panel->block_comment_token == buffer.view_token &&
-      panel->block_comment_line_count == buffer.lines.size()) {
-    return;
-  }
-  if (!editor_content_settled(*panel)) {
-    return;
-  }
-  rebuild_block_comment_cache(panel, buffer);
-}
-
 void tick_lsp_buffer_sync(EditorPanelState* panel, WorkspaceModel* workspace,
                           const std::shared_ptr<ISymbolProvider>& symbols,
                           MainLayoutState* layout_state) {
@@ -466,7 +422,7 @@ const std::vector<SymbolInfo>& cached_file_symbols(EditorPanelState* panel,
 }
 
 void ensure_file_symbols(EditorPanelState* panel, ISymbolProvider* symbols,
-                         const std::string& path) {
+                         const std::string& path, const std::string& buffer_text) {
   if (panel == nullptr || symbols == nullptr || path.empty() || !panel->symbols_fetch_pending) {
     return;
   }
@@ -475,7 +431,18 @@ void ensure_file_symbols(EditorPanelState* panel, ISymbolProvider* symbols,
     panel->symbols_fetch_pending = false;
     return;
   }
-  panel->cached_symbols = symbols->symbols_for_file(path);
+  const std::vector<SymbolInfo> fetched = symbols->symbols_for_file(path);
+  if (fetched.empty()) {
+    if (symbols->symbols_lsp_pending(path)) {
+      return;
+    }
+    if (!buffer_text.empty() && is_indexed_source_path(path) &&
+        !tree_sitter_service().document_ready(path, buffer_text)) {
+      tree_sitter_service().prepare_document(path, buffer_text);
+      return;
+    }
+  }
+  panel->cached_symbols = fetched;
   panel->symbols_fetch_pending = false;
 }
 
@@ -725,6 +692,42 @@ const BracketPairHighlight& cached_bracket_highlight(EditorPanelState* panel,
   panel->bracket_cache_col = col;
   panel->bracket_cache = find_bracket_pair_highlight(buffer, line, col);
   return panel->bracket_cache;
+}
+
+const BracketPairHighlight& cached_scope_bracket_highlight(EditorPanelState* panel,
+                                                           const EditorBuffer& buffer,
+                                                           bool editor_focused) {
+  static const BracketPairHighlight kEmpty{};
+  if (panel == nullptr || !editor_focused) {
+    return kEmpty;
+  }
+  const int line = buffer.primary_line();
+  const int col = buffer.primary_col();
+  if (panel->scope_bracket_cache_token == buffer.view_token &&
+      panel->scope_bracket_cache_line == line && panel->scope_bracket_cache_col == col) {
+    return panel->scope_bracket_cache;
+  }
+  panel->scope_bracket_cache_token = buffer.view_token;
+  panel->scope_bracket_cache_line = line;
+  panel->scope_bracket_cache_col = col;
+  panel->scope_bracket_cache = find_scope_bracket_pair(buffer, line, col);
+  return panel->scope_bracket_cache;
+}
+
+const std::vector<ColoredBraceMarker>& cached_colored_braces(EditorPanelState* panel,
+                                                             const EditorBuffer& buffer,
+                                                             bool enabled) {
+  static const std::vector<ColoredBraceMarker> kEmpty{};
+  if (panel == nullptr || !enabled || buffer.path.empty() ||
+      !is_indexed_source_path(buffer.path)) {
+    return kEmpty;
+  }
+  if (panel->colored_brace_cache_token == buffer.view_token) {
+    return panel->colored_brace_cache;
+  }
+  panel->colored_brace_cache_token = buffer.view_token;
+  panel->colored_brace_cache = find_colored_curly_braces(buffer);
+  return panel->colored_brace_cache;
 }
 
 SelectionOccurrenceKey selection_occurrence_key_from(const EditorBuffer& buffer) {
@@ -1488,6 +1491,39 @@ Element make_git_history_modal(const GitHistoryModalState& state) {
   return CenteredModal(std::move(dialog));
 }
 
+int gutter_buffer_line_at_row(const EditorPanelState& panel, int row) {
+  if (row >= 0 && row < static_cast<int>(panel.viewport_line_cache.size())) {
+    return panel.viewport_line_cache[static_cast<std::size_t>(row)];
+  }
+  return panel.gutter_scroll_start + row;
+}
+
+bool handle_fold_gutter_click(EditorPanelState* panel, EditorBuffer* buffer, const Mouse& m,
+                              int visible_lines) {
+  if (panel == nullptr || buffer == nullptr || panel->gutter_fold_width <= 0 ||
+      m.button != Mouse::Left || m.motion != Mouse::Pressed ||
+      !panel->gutter_box.Contain(m.x, m.y)) {
+    return false;
+  }
+  if (m.x - panel->gutter_box.x_min >= panel->gutter_fold_width) {
+    return false;
+  }
+  const int row = m.y - panel->gutter_box.y_min;
+  if (row < 0 || row >= static_cast<int>(panel->viewport_line_cache.size())) {
+    return false;
+  }
+  const int line = panel->viewport_line_cache[static_cast<std::size_t>(row)];
+  if (fold_gutter_marker(line, buffer->fold_regions, buffer->collapsed_folds) == '\0') {
+    return false;
+  }
+  if (!toggle_fold_at(buffer, line, buffer->fold_regions)) {
+    return false;
+  }
+  ensure_scroll_visible_fold_aware(buffer, buffer->fold_regions, visible_lines,
+                                   panel->code_width_chars);
+  return true;
+}
+
 bool handle_git_gutter_click(EditorPanelState* panel, GitHistoryModalState* modal,
                              GitService* git, const EditorBuffer& buffer, const Mouse& m) {
   if (panel == nullptr || modal == nullptr || git == nullptr || m.button != Mouse::Left ||
@@ -1498,7 +1534,7 @@ bool handle_git_gutter_click(EditorPanelState* panel, GitHistoryModalState* moda
   if (row < 0 || row >= panel->gutter_visible_rows) {
     return false;
   }
-  const int line = panel->gutter_scroll_start + row;
+  const int line = gutter_buffer_line_at_row(*panel, row);
   if (!git_line_changed(panel, line)) {
     return false;
   }
@@ -1529,7 +1565,7 @@ bool handle_gutter_marker_click(EditorPanelState* panel, DiagnosticModalState* m
   if (row < 0 || row >= panel->gutter_visible_rows) {
     return false;
   }
-  const int line = panel->gutter_scroll_start + row;
+  const int line = gutter_buffer_line_at_row(*panel, row);
   const char marker = line_gutter_marker(panel, line);
   if (marker == '\0' || marker == 'G') {
     return false;
@@ -1712,27 +1748,23 @@ Element make_hover_tooltip(const EditorHoverState& hover, const Box& code_box) {
 Element make_sticky_overlay(const std::vector<StickyLine>& sticky_lines, int gutter_width,
                             const EditorBuffer& buffer,
                             const SemanticTokenDocument* semantic_tokens, int code_width,
-                            const std::vector<bool>& block_comment_line_starts,
                             bool indent_guides_enabled) {
   if (sticky_lines.empty()) {
     return text("");
   }
+  SyntaxHighlightContext highlight_ctx;
+  highlight_ctx.file_path = buffer.path;
+  highlight_ctx.lines = &buffer.lines;
+  highlight_ctx.buffer_token = buffer.view_token;
   Elements rows;
   for (const StickyLine& sticky : sticky_lines) {
     const std::string indent(static_cast<std::size_t>(sticky.depth * 2), ' ');
     const std::string& display_line =
         buffer.lines[static_cast<std::size_t>(sticky.source_line)];
 
-    CppHighlightContext highlight_ctx;
-    if (sticky.source_line >= 0 &&
-        sticky.source_line < static_cast<int>(block_comment_line_starts.size())) {
-      highlight_ctx.in_block_comment =
-          block_comment_line_starts[static_cast<std::size_t>(sticky.source_line)];
-    }
-
     Element line = RenderEditorLine(
         display_line, sticky.source_line, buffer, false, nullptr, nullptr, semantic_tokens, nullptr,
-        nullptr, nullptr, nullptr, nullptr, false, 0, code_width, &highlight_ctx, true,
+        nullptr, 58, nullptr, nullptr, nullptr, nullptr, false, 0, code_width, &highlight_ctx, true,
         indent_guides_enabled,
         indent_guides_enabled
             ? indent_guide_depth_for_line(buffer.lines, sticky.source_line,
@@ -1998,6 +2030,7 @@ struct CompletionState {
     }
 
     const std::string lsp_key = completion_anchor_key(path, replace_line, replace_start);
+    std::vector<CompletionItem> lsp_items;
     if (lsp_fetch_key != lsp_key) {
       lsp_fetch_key = lsp_key;
       symbols->flush_document_sync(path);
@@ -2006,15 +2039,29 @@ struct CompletionState {
       params.text = buffer_text(workspace->buffer);
       params.line = line;
       params.character = col;
-      all_items = symbols->completions_at(params);
-      semantic_mode = !all_items.empty();
+      lsp_items = symbols->completions_at(params);
+      semantic_mode = !lsp_items.empty();
       invalidate_item_cache();
     }
 
     if (!path.empty() && is_indexed_source_path(path)) {
       snippet_items = structure_snippet_completions("");
+      if (!lsp_items.empty()) {
+        all_items = std::move(lsp_items);
+      } else {
+        CompletionParams params;
+        params.path = path;
+        params.text = buffer_text(workspace->buffer);
+        params.line = line;
+        params.character = col;
+        all_items = tree_sitter_service().local_completions_at(params);
+        if (!all_items.empty()) {
+          semantic_mode = true;
+        }
+      }
     } else {
       snippet_items.clear();
+      all_items = std::move(lsp_items);
     }
     invalidate_item_cache();
 
@@ -2556,6 +2603,7 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
   params.text = buffer_text_snapshot;
   params.line = completion->lsp_fetch_line;
   params.character = completion->lsp_fetch_col;
+  symbols->flush_document_sync(buffer.path);
   symbols->request_completion(params, completion->lsp_pending_key);
   completion->lsp_inflight_key = completion->lsp_pending_key;
   completion->lsp_last_request_ms = now_ms;
@@ -2592,6 +2640,11 @@ void update_live_completion(CompletionState* completion, WorkspaceModel* workspa
   schedule_live_lsp_fetch(completion, workspace, layout_state);
   maybe_close_completion_if_empty(completion, layout_state, symbols, buffer->path,
                                   buffer_text(*buffer));
+  if (layout_state != nullptr &&
+      (completion->open || completion_awaiting_async_lsp(completion, layout_state, symbols,
+                                                       buffer->path, buffer_text(*buffer)))) {
+    layout_state->request_ui_tick = true;
+  }
 }
 
 void maybe_open_live_completion(CompletionState* completion, WorkspaceModel* workspace,
@@ -2858,7 +2911,13 @@ CursorPos mouse_to_cursor(const Mouse& m, const EditorPanelState& panel, const E
   }
 
   const int max_line = std::max(0, static_cast<int>(buffer.lines.size()) - 1);
-  const int line = std::max(0, std::min(buffer.scroll + row, max_line));
+  int line = 0;
+  if (!panel.viewport_line_cache.empty() && row >= 0 &&
+      row < static_cast<int>(panel.viewport_line_cache.size())) {
+    line = panel.viewport_line_cache[static_cast<std::size_t>(row)];
+  } else {
+    line = std::max(0, std::min(buffer.scroll + row, max_line));
+  }
 
   int col = 0;
   if (in_code) {
@@ -3111,10 +3170,18 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       completion->close(layout_state);
     }
 
+    if (in_gutter && handle_fold_gutter_click(panel, buffer, m, visible_lines)) {
+      if (layout_state != nullptr) {
+        layout_state->request_ui_tick = true;
+      }
+      end_mouse_selection(panel);
+      return true;
+    }
+
     if (in_gutter && debug_model != nullptr && on_command && !buffer->path.empty()) {
       const int row = m.y - panel->gutter_box.y_min;
       if (row >= 0 && row < panel->gutter_visible_rows) {
-        const int line = panel->gutter_scroll_start + row + 1;
+        const int line = gutter_buffer_line_at_row(*panel, row) + 1;
         ToggleBreakpointAtFile(debug_model, buffer->path, line, on_command);
         if (layout_state != nullptr) {
           layout_state->request_ui_tick = true;
@@ -3328,6 +3395,7 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
   completion->semantic_mode = false;
   completion->sync_symbols(workspace, symbols, symbol_indexer, false);
   if (completion_uses_async_lsp(layout_state, symbols, buffer->path)) {
+    symbols->flush_document_sync(buffer->path);
     schedule_completion_lsp_fetch(completion, workspace, layout_state, false);
   } else {
     completion->sync_symbols(workspace, symbols, symbol_indexer, true);
@@ -4239,9 +4307,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       if (panel_state->helix.command_mode) {
         return make_helix_command_overlay(panel_state->helix);
       }
-      if (panel_state->helix.regex_prompt != HelixRegexPromptKind::kNone) {
-        return make_helix_regex_prompt_overlay(panel_state->helix);
-      }
       if (panel_state->helix.hint_visible && panel_state->helix.prefix_active()) {
         return make_helix_hint_overlay(panel_state->helix);
       }
@@ -4307,6 +4372,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     if (path_changed) {
       panel_state->last_path = buffer.path;
+      buffer.collapsed_folds.clear();
+      buffer.fold_regions.clear();
+      panel_state->fold_regions_cache_path.clear();
+      panel_state->fold_regions_cache_token = 0;
       panel_state->cached_symbols_path.clear();
       panel_state->cached_semantic_path.clear();
       panel_state->last_semantic_highlight_revision = 0;
@@ -4383,19 +4452,79 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       if (!tokens_current) {
         panel_state->semantic_tokens_enqueue_pending = true;
       }
-      if (panel_state->cached_semantic_tokens.ready) {
+      if (panel_state->cached_semantic_tokens.ready && tokens_current) {
         semantic_tokens = &panel_state->cached_semantic_tokens;
       }
     }
 
     const int visible = visible_line_count(panel_state->code_box);
 
-    const int start = buffer.scroll;
-    const int end = std::min(total, start + visible);
+    const bool scope_highlight_enabled =
+        layout_state != nullptr && layout_state->app_settings != nullptr &&
+        layout_state->app_settings->scope_highlight_enabled;
+    const bool scope_visual_effects =
+        editor_scope_effects_enabled(scope_highlight_enabled);
+    const int scope_highlight_strength =
+        layout_state != nullptr && layout_state->app_settings != nullptr
+            ? layout_state->app_settings->scope_highlight_strength
+            : 58;
+
+    const bool indexed_cpp_for_folds =
+        scope_visual_effects && !buffer.path.empty() && is_indexed_source_path(buffer.path);
+    if (indexed_cpp_for_folds) {
+      if (panel_state->fold_regions_cache_path != buffer.path ||
+          panel_state->fold_regions_cache_token != buffer.view_token) {
+        buffer.fold_regions =
+            tree_sitter_service().fold_regions_at(buffer.path, buffer.lines);
+        std::set<int> valid_open_lines;
+        for (const FoldRegion& region : buffer.fold_regions) {
+          valid_open_lines.insert(region.open_line);
+        }
+        for (auto it = buffer.collapsed_folds.begin(); it != buffer.collapsed_folds.end();) {
+          if (valid_open_lines.count(*it) == 0) {
+            it = buffer.collapsed_folds.erase(it);
+          } else {
+            ++it;
+          }
+        }
+        panel_state->fold_regions_cache_path = buffer.path;
+        panel_state->fold_regions_cache_token = buffer.view_token;
+      }
+    } else {
+      buffer.fold_regions.clear();
+      buffer.collapsed_folds.clear();
+    }
+    const bool fold_gutter_enabled =
+        indexed_cpp_for_folds && !buffer.fold_regions.empty();
+    panel_state->gutter_fold_width = fold_gutter_enabled ? 1 : 0;
+
+    const std::vector<int> viewport_lines =
+        viewport_buffer_lines(buffer, buffer.fold_regions, visible);
+    panel_state->viewport_line_cache = viewport_lines;
+    panel_state->gutter_scroll_start =
+        viewport_lines.empty() ? buffer.scroll : viewport_lines.front();
+    panel_state->gutter_visible_rows = static_cast<int>(viewport_lines.size());
+
+    const int scroll_total =
+        buffer.collapsed_folds.empty()
+            ? total
+            : static_cast<int>(visible_buffer_lines(total, buffer.fold_regions,
+                                                    buffer.collapsed_folds)
+                                   .size());
+    int scroll_visible_index = 0;
+    if (!buffer.collapsed_folds.empty()) {
+      const std::vector<int> all_visible =
+          visible_buffer_lines(total, buffer.fold_regions, buffer.collapsed_folds);
+      const int found = visible_line_index(all_visible, buffer.scroll);
+      scroll_visible_index = found >= 0 ? found : 0;
+    } else {
+      scroll_visible_index = buffer.scroll;
+    }
+
     const bool helix_relative =
         layout_state != nullptr && layout_state->app_settings != nullptr &&
         layout_state->app_settings->helix_mode_enabled;
-    const int gutter_w = helix_gutter_width(total, visible, helix_relative);
+    const int gutter_w = helix_gutter_width(total, visible, helix_relative) + panel_state->gutter_fold_width;
     const bool editor_focused = focus->region == panel_state->panel_focus;
 
     if (tabular_view && tabular_store != nullptr) {
@@ -4520,6 +4649,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const BracketPairHighlight& bracket =
         defer_rich_decorations ? kNoBracket
                              : cached_bracket_highlight(panel_state.get(), buffer, editor_focused);
+    static const BracketPairHighlight kNoScopeBracket{};
+    const BracketPairHighlight& scope_bracket =
+        defer_rich_decorations || !scope_visual_effects ? kNoScopeBracket
+        : cached_scope_bracket_highlight(panel_state.get(), buffer, editor_focused);
+    const BracketPairHighlight* scope_bracket_ptr =
+        scope_bracket.valid ? &scope_bracket : nullptr;
 
     const std::vector<SymbolInfo>& file_symbols =
         cached_file_symbols(panel_state.get(), buffer.path, symbols.get());
@@ -4528,7 +4663,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             ? std::vector<StickyLine>{}
             : (layout_state != nullptr && layout_state->app_settings != nullptr &&
                        layout_state->app_settings->sticky_scroll_enabled
-                   ? sticky_lines_for_scroll(file_symbols, buffer.lines, start, 3)
+                   ? sticky_lines_for_scroll(file_symbols, buffer.lines, buffer.scroll, 3)
                    : std::vector<StickyLine>{});
 
     DocumentDiagnostics file_diag;
@@ -4553,14 +4688,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         debug_model != nullptr && !buffer.path.empty();
     const bool gutter_markers =
         has_breakpoint_markers || (show_diagnostics && !file_diag.items.empty()) || has_git_markers;
-    panel_state->gutter_scroll_start = start;
-    panel_state->gutter_visible_rows = std::max(0, end - start);
 
     const int code_width =
         code_width_from_box(panel_state->code_box, panel_state->code_width_chars);
     panel_state->code_width_chars = code_width;
 
-    track_editor_scroll(panel_state.get(), start, layout_state);
+    track_editor_scroll(panel_state.get(), buffer.scroll, layout_state);
     rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
                                     panel_state->cached_file_diag_revision, symbols.get(),
                                     workspace->last_buffer_edit_ms);
@@ -4582,19 +4715,43 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         layout_state->app_settings->indent_guides_enabled;
     const int indent_tab_size = std::max(1, editor_indent::width());
     const int tab_col_width = std::max(1, editor_indent::tab_display_width());
-    sync_guide_tracker_cache(panel_state.get(), buffer, start, tab_col_width);
+    sync_guide_tracker_cache(panel_state.get(), buffer, buffer.scroll, tab_col_width);
     IndentGuideTracker& guide_tracker = panel_state->guide_tracker_cache;
 
     Elements gutter_rows;
     Elements code_rows;
-    bool in_block_comment = false;
-    if (start < static_cast<int>(panel_state->block_comment_line_starts.size())) {
-      in_block_comment = panel_state->block_comment_line_starts[static_cast<std::size_t>(start)];
-    }
-    for (int i = start; i < end; ++i) {
+    SyntaxHighlightContext highlight_ctx;
+    highlight_ctx.file_path = buffer.path;
+    highlight_ctx.lines = &buffer.lines;
+    highlight_ctx.buffer_token = buffer.view_token;
+    const ScopeLineRange immediate_scope =
+        scope_visual_effects && !buffer.path.empty() && is_indexed_source_path(buffer.path)
+            ? tree_sitter_service().innermost_scope_range_at(buffer.path, buffer.lines,
+                                                             buffer.primary_line(),
+                                                             buffer.primary_col())
+            : ScopeLineRange{};
+    const std::vector<ColoredBraceMarker>& colored_braces =
+        cached_colored_braces(panel_state.get(), buffer,
+                              !defer_rich_decorations && scope_visual_effects);
+    const std::vector<ColoredBraceMarker>* colored_braces_ptr =
+        colored_braces.empty() ? nullptr : &colored_braces;
+    for (int i : viewport_lines) {
       const bool is_primary = (i == buffer.primary_line());
-      const Decorator row_bg =
-          is_primary ? bgcolor(theme::EditorLineHi()) : bgcolor(theme::CodeBg());
+      const bool in_immediate_scope_gutter =
+          scope_visual_effects && immediate_scope.valid && immediate_scope.contains(i);
+      const Decorator gutter_bg =
+          is_primary ? bgcolor(theme::EditorLineHi())
+                     : (in_immediate_scope_gutter
+                            ? bgcolor(theme::ScopeBg(scope_highlight_strength))
+                            : bgcolor(theme::CodeBg()));
+
+      const char fold_marker =
+          fold_gutter_enabled
+              ? fold_gutter_marker(i, buffer.fold_regions, buffer.collapsed_folds)
+              : '\0';
+      const Element fold_el =
+          text(fold_marker == '\0' ? " " : std::string(1, fold_marker)) |
+          color(fold_marker == '\0' ? theme::Muted() : theme::Accent());
 
       if (gutter_markers) {
         char marker = ' ';
@@ -4611,7 +4768,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         } else {
           gutter_text.assign(1, marker == '\0' ? ' ' : marker);
         }
-        gutter_text += helix_format_line_number(i, buffer.primary_line(), gutter_w, helix_relative);
+        gutter_text += helix_format_line_number(
+            i, buffer.primary_line(), gutter_w - panel_state->gutter_fold_width, helix_relative);
         Color gutter_color = theme::Muted();
         if (has_breakpoint_markers &&
             debug_model->has_breakpoint(normalize_path(buffer.path), i + 1)) {
@@ -4623,11 +4781,15 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         } else if (marker == 'W') {
           gutter_color = theme::Warning();
         }
-        gutter_rows.push_back(text(gutter_text) | color(gutter_color) | row_bg);
+        gutter_rows.push_back(hbox({fold_el, text(gutter_text) | color(gutter_color)}) | gutter_bg);
       } else {
-        gutter_rows.push_back(text(helix_format_line_number(i, buffer.primary_line(), gutter_w,
-                                                           helix_relative)) |
-                              color(theme::Muted()) | row_bg);
+        gutter_rows.push_back(
+            hbox({fold_el,
+                  text(helix_format_line_number(i, buffer.primary_line(),
+                                                gutter_w - panel_state->gutter_fold_width,
+                                                helix_relative)) |
+                      color(theme::Muted())}) |
+            gutter_bg);
       }
 
       const std::string& display_line = buffer.lines[static_cast<std::size_t>(i)];
@@ -4650,23 +4812,22 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         }
       }
 
-      CppHighlightContext highlight_ctx;
-      highlight_ctx.in_block_comment = in_block_comment;
-
       code_rows.push_back(RenderEditorLine(display_line, i, buffer,
                                            editor_focused, find_matches, selection_occurrences,
                                            semantic_tokens,
-                                           &bracket, nullptr, suffix_ptr, suffix_color_ptr,
+                                           bracket.valid ? &bracket : nullptr, scope_bracket_ptr,
+                                           scope_highlight_strength,
+                                           diagnostics_for_editor_line(panel_state.get(), i),
+                                           suffix_ptr, suffix_color_ptr,
                                            &symbol_press, show_caret, buffer.scroll_col,
                                            code_width, &highlight_ctx, false,
                                            indent_guides_enabled,
                                            indent_guides_enabled
                                                ? guide_tracker.advance(display_line, tab_col_width)
                                                : 0,
-                                           defer_rich_decorations, cursor_cell) |
+                                           defer_rich_decorations, cursor_cell, colored_braces_ptr) |
                             xflex_shrink);
 
-      in_block_comment = block_comment_state_after_line(display_line, in_block_comment);
     }
     if (code_rows.empty()) {
       gutter_rows.push_back(text(format_line_number(1, gutter_w)) | color(theme::Muted()) |
@@ -4690,11 +4851,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         layout_state == nullptr || layout_state->app_settings == nullptr ||
         layout_state->app_settings->overview_ruler_enabled;
     Element scrollbar =
-        vertical_scrollbar(total, buffer.scroll, visible, rendered_lines, scroll_hovered,
-                           scroll_active) |
+        vertical_scrollbar(scroll_total, scroll_visible_index, visible, rendered_lines,
+                           scroll_hovered, scroll_active) |
         reflect(panel_state->scrollbar_box);
     panel_state->scrollbar_layout =
-        compute_scrollbar_layout(total, buffer.scroll, visible, rendered_lines);
+        compute_scrollbar_layout(scroll_total, scroll_visible_index, visible, rendered_lines);
 
     const bool h_scroll_hovered =
         layout_state != nullptr &&
@@ -4741,7 +4902,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     return dbox({std::move(body),
                  make_sticky_overlay(sticky_lines, gutter_w, buffer, semantic_tokens, code_width,
-                                     panel_state->block_comment_line_starts,
                                      indent_guides_enabled)});
   });
 
@@ -4928,7 +5088,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         navigate_to_location(workspace, layout_state, loc, visible);
       });
       editor_hover_tick(workspace, panel_state.get(), symbols, layout_state);
-      tick_block_comment_cache(panel_state.get(), workspace->buffer);
       tick_lsp_buffer_sync(panel_state.get(), workspace, symbols, layout_state);
       completion_lsp_tick(completion_state.get(), workspace, symbols, layout_state,
                           panel_state.get());
@@ -4949,7 +5108,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           }
           symbols->tick_debounced_updates();
           if (panel_state->symbols_fetch_pending) {
-            ensure_file_symbols(panel_state.get(), symbols.get(), path);
+            ensure_file_symbols(panel_state.get(), symbols.get(), path,
+                                buffer_text(workspace->buffer));
           }
           const uint64_t sym_rev = symbols->document_symbols_revision();
           if (sym_rev != panel_state->last_document_symbols_revision) {
@@ -4957,7 +5117,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             if (!is_tabular_path(path)) {
               panel_state->symbols_fetch_pending = true;
             }
-            ensure_file_symbols(panel_state.get(), symbols.get(), path);
+            ensure_file_symbols(panel_state.get(), symbols.get(), path,
+                                buffer_text(workspace->buffer));
           }
           if (symbols->supports_semantic_highlight() && !path.empty() &&
               !is_tabular_path(path)) {

@@ -20,12 +20,6 @@ void HelixEditorState::clear_command() {
   command_buffer.clear();
 }
 
-void HelixEditorState::clear_regex_prompt() {
-  regex_prompt = HelixRegexPromptKind::kNone;
-  regex_prompt_buffer.clear();
-  regex_scope_valid = false;
-}
-
 void HelixEditorState::clear_char_find_pending() {
   char_find_pending = HelixCharFindKind::kNone;
 }
@@ -67,12 +61,6 @@ std::string HelixEditorState::pending_label() const {
     }
     out << ':' << command_buffer;
   }
-  if (regex_prompt != HelixRegexPromptKind::kNone) {
-    if (out.tellp() > 0) {
-      out << ' ';
-    }
-    out << (regex_prompt == HelixRegexPromptKind::kSelect ? "s/" : "S/") << regex_prompt_buffer;
-  }
   if (char_find_pending != HelixCharFindKind::kNone) {
     if (out.tellp() > 0) {
       out << ' ';
@@ -85,12 +73,6 @@ std::string HelixEditorState::pending_label() const {
 std::string HelixEditorState::mode_label() const {
   if (command_mode) {
     return i18n::tr("helix.mode.command");
-  }
-  if (regex_prompt == HelixRegexPromptKind::kSelect) {
-    return i18n::tr("helix.mode.select_regex");
-  }
-  if (regex_prompt == HelixRegexPromptKind::kSplit) {
-    return i18n::tr("helix.mode.split_regex");
   }
   switch (mode) {
     case HelixMode::kNormal:
@@ -111,7 +93,6 @@ void reset_helix_editor_state(HelixEditorState* helix) {
   helix->clear_pending();
   helix->clear_count();
   helix->clear_command();
-  helix->clear_regex_prompt();
   helix->clear_char_find_pending();
   helix->help_open = false;
 }

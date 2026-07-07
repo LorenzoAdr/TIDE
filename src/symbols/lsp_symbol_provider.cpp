@@ -352,9 +352,9 @@ void LspSymbolProvider::async_worker_main() {
           const std::string text =
               params.text.empty() ? buffer_text_for_path(params.path) : params.text;
           if (!text.empty()) {
-            sync_document_for_completion(params.path, text);
+            flush_document_sync(params.path);
           }
-          items = client_.completions_at(key, text, params.line, params.character, true);
+          items = client_.completions_at(key, text, params.line, params.character, false);
         }
         if (!stale) {
           std::lock_guard<std::mutex> lock(mutex_);
@@ -885,6 +885,7 @@ std::vector<SymbolInfo> LspSymbolProvider::symbols_for_file(const std::string& p
       std::lock_guard<std::mutex> lock(mutex_);
       enqueue_document_symbols_locked(normalize_lsp_path(path));
     }
+    return {};
   }
   return fallback_.symbols_for_file(path);
 }
@@ -923,7 +924,7 @@ std::vector<CompletionItem> LspSymbolProvider::completions_at(
     text = params.text.empty() ? buffer_text_for_path(key) : params.text;
   }
   if (!active) {
-    return {};
+    return fallback_.completions_at(params);
   }
   const auto items = client_.completions_at(key, text, params.line, params.character);
   return items;

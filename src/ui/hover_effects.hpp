@@ -6,10 +6,13 @@
 
 namespace tgdb {
 
-// Temporary kill-switch while profiling mouse-move CPU usage.
-inline constexpr bool kHoverEffectsEnabled = true;
+void set_animations_enabled(bool enabled);
+bool animations_enabled();
 
-inline bool hover_effects_enabled() { return kHoverEffectsEnabled; }
+bool hover_effects_enabled();
+
+// Scope gutter, colored braces, and related editor chrome.
+bool editor_scope_effects_enabled(bool scope_highlight_enabled);
 
 // LSP symbol tooltip in the editor: independent of chrome hover styling.
 inline constexpr bool kEditorLspHoverEnabled = true;

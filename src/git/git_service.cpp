@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "git/git_command.hpp"
+#include "git/git_subrepos.hpp"
 #include "util/monitor_log.hpp"
 #include "util/path_normalize.hpp"
 #include "i18n/tr.hpp"
@@ -181,6 +182,10 @@ void GitService::open(const std::string& workspace_root) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     workspace_root_ = root;
+    main_repo_root_.clear();
+    main_repo_valid_ = false;
+    subrepos_.clear();
+    context_repo_root_.clear();
     repo_info_ = {};
     status_ = {};
     file_diffs_.clear();
@@ -202,13 +207,17 @@ void GitService::open(const std::string& workspace_root) {
   if (root.empty()) {
     return;
   }
-  enqueue([this, root] { detect_repo(root); });
+  enqueue([this, root] { discover_repos(root); });
 }
 
 void GitService::close() {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     workspace_root_.clear();
+    main_repo_root_.clear();
+    main_repo_valid_ = false;
+    subrepos_.clear();
+    context_repo_root_.clear();
     repo_info_ = {};
     status_ = {};
     file_diffs_.clear();
@@ -226,46 +235,72 @@ void GitService::close() {
   }
 }
 
-void GitService::detect_repo(const std::string& root) {
+void GitService::discover_repos(const std::string& workspace_root) {
   if (stop_.load()) {
     return;
   }
 
   GitRepoInfo info;
-  info.root = root;
+  info.root = workspace_root;
 
-  const auto tree = run_git(root, {"rev-parse", "--is-inside-work-tree"});
-  if (!tree.success() || tree.stdout_text.find("true") == std::string::npos) {
+  const std::string toplevel = git_toplevel(workspace_root);
+  const bool main_valid = !toplevel.empty() && is_git_work_tree(workspace_root);
+  const std::string main_root = main_valid ? toplevel : std::string{};
+
+  std::vector<GitSubrepoInfo> subrepos;
+  if (main_valid) {
+    subrepos = discover_submodules(main_root);
+    const auto nested = discover_nested_repos(workspace_root, main_root, subrepos);
+    subrepos.insert(subrepos.end(), nested.begin(), nested.end());
+  } else {
+    subrepos = discover_nested_repos(workspace_root, {}, {});
+  }
+
+  if (!main_valid && subrepos.empty()) {
     info.valid = false;
     info.last_error = i18n::tr("git.not_repo");
     std::lock_guard<std::mutex> lock(mutex_);
-    if (workspace_root_ != root) {
+    if (workspace_root_ != workspace_root) {
       return;
     }
+    main_repo_valid_ = false;
+    main_repo_root_.clear();
+    subrepos_.clear();
+    context_repo_root_.clear();
     repo_info_ = info;
     notify_updated();
     return;
   }
 
   info.valid = true;
-  const auto branch = run_git(root, {"rev-parse", "--abbrev-ref", "HEAD"});
-  if (branch.success()) {
-    info.branch = trim_newline(branch.stdout_text);
-  }
-  const auto head = run_git(root, {"rev-parse", "HEAD"});
-  if (head.success()) {
-    info.head = trim_newline(head.stdout_text);
+  info.subrepo_count = static_cast<int>(subrepos.size());
+
+  if (main_valid) {
+    const auto branch = run_git(main_root, {"rev-parse", "--abbrev-ref", "HEAD"});
+    if (branch.success()) {
+      info.branch = trim_newline(branch.stdout_text);
+    }
+    const auto head = run_git(main_root, {"rev-parse", "HEAD"});
+    if (head.success()) {
+      info.head = trim_newline(head.stdout_text);
+    }
+    info.root = main_root;
   }
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (workspace_root_ != root) {
+    if (workspace_root_ != workspace_root) {
       return;
     }
+    main_repo_valid_ = main_valid;
+    main_repo_root_ = main_root;
+    subrepos_ = std::move(subrepos);
     repo_info_ = info;
+    context_repo_root_ =
+        main_valid ? main_root : (subrepos_.empty() ? std::string{} : subrepos_.front().root);
   }
   notify_updated();
-  load_status(root);
+  load_all_status();
 }
 
 void GitService::invalidate(const std::string& path) {
@@ -297,11 +332,18 @@ void GitService::invalidate(const std::string& path) {
   }
   enqueue([this, root, rel, full = path.empty()]() {
     if (full) {
-      load_status(root);
+      load_all_status();
     } else if (!rel.empty()) {
-      load_file_diff_text(root, rel);
-      load_file_head(root, rel);
-      load_status(root);
+      ResolvedGitPath resolved;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        resolved = resolve_path_unlocked(rel);
+      }
+      if (resolved.valid) {
+        load_file_diff_text(resolved.repo_root, resolved.repo_rel, rel);
+        load_file_head(resolved.repo_root, resolved.repo_rel, rel);
+      }
+      load_all_status();
     }
     notify_updated();
   });
@@ -321,7 +363,7 @@ void GitService::refresh_status() {
     return;
   }
   enqueue([this, root]() {
-    load_status(root);
+    load_all_status();
     inflight_status_.store(false, std::memory_order_release);
     notify_updated();
   });
@@ -335,28 +377,32 @@ void GitService::refresh_file_diff(const std::string& path, bool force) {
   if (path.empty()) {
     return;
   }
-  std::string root;
-  std::string rel;
+  std::string workspace_rel;
+  ResolvedGitPath resolved;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
-    rel = repo_relative_path_unlocked(path);
-    if (!force && (diff_text_cached_unlocked(rel) || inflight_diffs_.count(rel) > 0)) {
+    workspace_rel = repo_relative_path_unlocked(path);
+    if (workspace_rel.empty()) {
       return;
     }
-    inflight_diffs_.insert(rel);
+    if (!force &&
+        (diff_text_cached_unlocked(workspace_rel) || inflight_diffs_.count(workspace_rel) > 0)) {
+      return;
+    }
+    inflight_diffs_.insert(workspace_rel);
+    resolved = resolve_path_unlocked(workspace_rel);
   }
-  if (root.empty() || rel.empty()) {
+  if (!resolved.valid) {
     std::lock_guard<std::mutex> lock(mutex_);
-    inflight_diffs_.erase(rel);
+    inflight_diffs_.erase(workspace_rel);
     return;
   }
-  enqueue([this, root, rel]() {
-    load_file_diff_text(root, rel);
-    load_file_head(root, rel);
+  enqueue([this, resolved, workspace_rel]() {
+    load_file_diff_text(resolved.repo_root, resolved.repo_rel, workspace_rel);
+    load_file_head(resolved.repo_root, resolved.repo_rel, workspace_rel);
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      inflight_diffs_.erase(rel);
+      inflight_diffs_.erase(workspace_rel);
     }
     notify_updated();
   });
@@ -366,56 +412,59 @@ void GitService::refresh_file_head(const std::string& path) {
   if (path.empty()) {
     return;
   }
-  std::string root;
-  std::string rel;
+  std::string workspace_rel;
+  ResolvedGitPath resolved;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
-    rel = repo_relative_path_unlocked(path);
-    const auto it = file_diffs_.find(rel);
+    workspace_rel = repo_relative_path_unlocked(path);
+    if (workspace_rel.empty()) {
+      return;
+    }
+    const auto it = file_diffs_.find(workspace_rel);
     if (it != file_diffs_.end() && it->second.loaded && !it->second.head_lines.empty()) {
       return;
     }
-    if (inflight_heads_.count(rel) > 0) {
+    if (inflight_heads_.count(workspace_rel) > 0) {
       return;
     }
-    inflight_heads_.insert(rel);
+    inflight_heads_.insert(workspace_rel);
+    resolved = resolve_path_unlocked(workspace_rel);
   }
-  if (root.empty() || rel.empty()) {
+  if (!resolved.valid) {
     std::lock_guard<std::mutex> lock(mutex_);
-    inflight_heads_.erase(rel);
+    inflight_heads_.erase(workspace_rel);
     return;
   }
-  enqueue([this, root, rel]() {
-    load_file_head(root, rel);
+  enqueue([this, resolved, workspace_rel]() {
+    load_file_head(resolved.repo_root, resolved.repo_rel, workspace_rel);
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      inflight_heads_.erase(rel);
+      inflight_heads_.erase(workspace_rel);
     }
     notify_updated();
   });
 }
 
 void GitService::refresh_log() {
-  std::string root;
+  std::string repo_root;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
+    repo_root = context_repo_root_unlocked();
   }
-  if (root.empty()) {
+  if (repo_root.empty()) {
     return;
   }
-  enqueue([this, root]() {
-    load_log(root);
+  enqueue([this, repo_root]() {
+    load_log(repo_root);
     notify_updated();
   });
 }
 
 void GitService::refresh_log_search(const std::string& query) {
-  std::string root;
+  std::string repo_root;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
+    repo_root = context_repo_root_unlocked();
     if (query.empty()) {
       log_search_query_.clear();
       log_search_results_.clear();
@@ -429,13 +478,13 @@ void GitService::refresh_log_search(const std::string& query) {
     }
     inflight_log_searches_.insert(query);
   }
-  if (root.empty()) {
+  if (repo_root.empty()) {
     std::lock_guard<std::mutex> lock(mutex_);
     inflight_log_searches_.erase(query);
     return;
   }
-  enqueue([this, root, query]() {
-    load_log_search(root, query);
+  enqueue([this, repo_root, query]() {
+    load_log_search(repo_root, query);
     {
       std::lock_guard<std::mutex> lock(mutex_);
       inflight_log_searches_.erase(query);
@@ -445,16 +494,16 @@ void GitService::refresh_log_search(const std::string& query) {
 }
 
 void GitService::refresh_branches() {
-  std::string root;
+  std::string repo_root;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
+    repo_root = context_repo_root_unlocked();
   }
-  if (root.empty()) {
+  if (repo_root.empty()) {
     return;
   }
-  enqueue([this, root]() {
-    load_branches(root);
+  enqueue([this, repo_root]() {
+    load_branches(repo_root);
     notify_updated();
   });
 }
@@ -463,33 +512,33 @@ void GitService::refresh_file_timeline(const std::string& path) {
   if (path.empty()) {
     return;
   }
-  std::string root;
-  std::string rel;
+  std::string workspace_rel;
+  ResolvedGitPath resolved;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
-    rel = repo_relative_path_unlocked(path);
-    if (rel.empty()) {
+    workspace_rel = repo_relative_path_unlocked(path);
+    if (workspace_rel.empty()) {
       return;
     }
-    if (timeline_path_ == rel) {
+    if (timeline_path_ == workspace_rel) {
       return;
     }
-    if (inflight_timelines_.count(rel) > 0) {
+    if (inflight_timelines_.count(workspace_rel) > 0) {
       return;
     }
-    inflight_timelines_.insert(rel);
+    inflight_timelines_.insert(workspace_rel);
+    resolved = resolve_path_unlocked(workspace_rel);
   }
-  if (root.empty()) {
+  if (!resolved.valid) {
     std::lock_guard<std::mutex> lock(mutex_);
-    inflight_timelines_.erase(rel);
+    inflight_timelines_.erase(workspace_rel);
     return;
   }
-  enqueue([this, root, rel]() {
-    load_file_timeline(root, rel);
+  enqueue([this, resolved, workspace_rel]() {
+    load_file_timeline(resolved.repo_root, resolved.repo_rel, workspace_rel);
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      inflight_timelines_.erase(rel);
+      inflight_timelines_.erase(workspace_rel);
     }
     notify_updated();
   });
@@ -499,34 +548,34 @@ void GitService::refresh_timeline_diff(const std::string& path, const std::strin
   if (path.empty() || commit_hash.empty()) {
     return;
   }
-  std::string root;
-  std::string rel;
+  std::string workspace_rel;
+  ResolvedGitPath resolved;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
-    rel = repo_relative_path_unlocked(path);
-    if (rel.empty()) {
+    workspace_rel = repo_relative_path_unlocked(path);
+    if (workspace_rel.empty()) {
       return;
     }
-    if (timeline_diff_cached_unlocked(rel, commit_hash)) {
+    if (timeline_diff_cached_unlocked(workspace_rel, commit_hash)) {
       return;
     }
-    const std::string key = timeline_diff_key_unlocked(rel, commit_hash);
+    const std::string key = timeline_diff_key_unlocked(workspace_rel, commit_hash);
     if (inflight_timeline_diffs_.count(key) > 0) {
       return;
     }
     inflight_timeline_diffs_.insert(key);
+    resolved = resolve_path_unlocked(workspace_rel);
   }
-  if (root.empty()) {
+  if (!resolved.valid) {
     std::lock_guard<std::mutex> lock(mutex_);
-    inflight_timeline_diffs_.erase(timeline_diff_key_unlocked(rel, commit_hash));
+    inflight_timeline_diffs_.erase(timeline_diff_key_unlocked(workspace_rel, commit_hash));
     return;
   }
-  enqueue([this, root, rel, commit_hash]() {
-    load_timeline_diff(root, rel, commit_hash);
+  enqueue([this, resolved, workspace_rel, commit_hash]() {
+    load_timeline_diff(resolved.repo_root, resolved.repo_rel, workspace_rel, commit_hash);
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      inflight_timeline_diffs_.erase(timeline_diff_key_unlocked(rel, commit_hash));
+      inflight_timeline_diffs_.erase(timeline_diff_key_unlocked(workspace_rel, commit_hash));
     }
     notify_updated();
   });
@@ -536,10 +585,10 @@ void GitService::refresh_commit_files(const std::string& commit_hash) {
   if (commit_hash.empty()) {
     return;
   }
-  std::string root;
+  std::string repo_root;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
+    repo_root = context_repo_root_unlocked();
     if (commit_files_cached_unlocked(commit_hash)) {
       return;
     }
@@ -548,13 +597,13 @@ void GitService::refresh_commit_files(const std::string& commit_hash) {
     }
     inflight_commit_files_.insert(commit_hash);
   }
-  if (root.empty()) {
+  if (repo_root.empty()) {
     std::lock_guard<std::mutex> lock(mutex_);
     inflight_commit_files_.erase(commit_hash);
     return;
   }
-  enqueue([this, root, commit_hash]() {
-    load_commit_files(root, commit_hash);
+  enqueue([this, repo_root, commit_hash]() {
+    load_commit_files(repo_root, commit_hash);
     {
       std::lock_guard<std::mutex> lock(mutex_);
       inflight_commit_files_.erase(commit_hash);
@@ -564,10 +613,10 @@ void GitService::refresh_commit_files(const std::string& commit_hash) {
 }
 
 void GitService::refresh_graph() {
-  std::string root;
+  std::string repo_root;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
+    repo_root = context_repo_root_unlocked();
     if (graph_loaded_) {
       return;
     }
@@ -576,12 +625,12 @@ void GitService::refresh_graph() {
       return;
     }
   }
-  if (root.empty()) {
+  if (repo_root.empty()) {
     inflight_graph_.store(false);
     return;
   }
-  enqueue([this, root]() {
-    load_graph(root);
+  enqueue([this, repo_root]() {
+    load_graph(repo_root);
     inflight_graph_.store(false);
     notify_updated();
   });
@@ -592,9 +641,61 @@ bool GitService::is_repo() const {
   return repo_info_.valid;
 }
 
+bool GitService::has_subrepos() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return !subrepos_.empty();
+}
+
 GitRepoInfo GitService::repo_info() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return repo_info_;
+}
+
+GitRepoInfo GitService::context_repo_info() const {
+  std::string root;
+  GitRepoInfo main_info;
+  std::string sub_workspace_path;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    root = context_repo_root_unlocked();
+    main_info = repo_info_;
+    if (root.empty()) {
+      return {};
+    }
+    if (main_repo_valid_ && root == main_repo_root_) {
+      return main_info;
+    }
+    for (const auto& sub : subrepos_) {
+      if (sub.root == root) {
+        sub_workspace_path = sub.workspace_path;
+        break;
+      }
+    }
+  }
+
+  GitRepoInfo info;
+  info.valid = true;
+  info.root = root;
+  const auto branch = run_git(root, {"rev-parse", "--abbrev-ref", "HEAD"});
+  if (branch.success()) {
+    info.branch = trim_newline(branch.stdout_text);
+  }
+  const auto head = run_git(root, {"rev-parse", "HEAD"});
+  if (head.success()) {
+    info.head = trim_newline(head.stdout_text);
+  }
+  if (!sub_workspace_path.empty()) {
+    info.branch = sub_workspace_path + (info.branch.empty() ? "" : " @ " + info.branch);
+  }
+  return info;
+}
+
+void GitService::set_context_from_path(const std::string& workspace_rel_path) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const ResolvedGitPath resolved = resolve_path_unlocked(workspace_rel_path);
+  if (resolved.valid) {
+    context_repo_root_ = resolved.repo_root;
+  }
 }
 
 GitStatusSnapshot GitService::status() const {
@@ -727,15 +828,20 @@ std::string GitService::previous_line_content(const std::string& absolute_path, 
 }
 
 void GitService::stage_file(const std::string& path, CompletionCallback on_done) {
-  std::string rel;
-  std::string root;
+  ResolvedGitPath resolved;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
-    rel = repo_relative_path_unlocked(path);
+    resolved = resolve_path_unlocked(path);
+    if (resolved.valid) {
+      context_repo_root_ = resolved.repo_root;
+    }
   }
-  enqueue([this, root, rel, on_done]() {
-    const auto result = run_git(root, {"add", "--", rel});
+  if (!resolved.valid) {
+    dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
+    return;
+  }
+  enqueue([this, resolved, on_done]() {
+    const auto result = run_git(resolved.repo_root, {"add", "--", resolved.repo_rel});
     if (result.success()) {
       invalidate();
       dispatch_completion(on_done, true, {});
@@ -746,15 +852,20 @@ void GitService::stage_file(const std::string& path, CompletionCallback on_done)
 }
 
 void GitService::unstage_file(const std::string& path, CompletionCallback on_done) {
-  std::string rel;
-  std::string root;
+  ResolvedGitPath resolved;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
-    rel = repo_relative_path_unlocked(path);
+    resolved = resolve_path_unlocked(path);
+    if (resolved.valid) {
+      context_repo_root_ = resolved.repo_root;
+    }
   }
-  enqueue([this, root, rel, on_done]() {
-    const auto result = run_git(root, {"reset", "HEAD", "--", rel});
+  if (!resolved.valid) {
+    dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
+    return;
+  }
+  enqueue([this, resolved, on_done]() {
+    const auto result = run_git(resolved.repo_root, {"reset", "HEAD", "--", resolved.repo_rel});
     if (result.success()) {
       invalidate();
       dispatch_completion(on_done, true, {});
@@ -765,13 +876,17 @@ void GitService::unstage_file(const std::string& path, CompletionCallback on_don
 }
 
 void GitService::commit(const std::string& message, CompletionCallback on_done) {
-  std::string root;
+  std::string repo_root;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
+    repo_root = context_repo_root_unlocked();
   }
-  enqueue([this, root, message, on_done]() {
-    const auto result = run_git(root, {"commit", "-m", message});
+  if (repo_root.empty()) {
+    dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
+    return;
+  }
+  enqueue([this, repo_root, message, on_done]() {
+    const auto result = run_git(repo_root, {"commit", "-m", message});
     if (result.success()) {
       invalidate();
       dispatch_completion(on_done, true, result.stdout_text);
@@ -782,15 +897,21 @@ void GitService::commit(const std::string& message, CompletionCallback on_done) 
 }
 
 void GitService::checkout_branch(const std::string& branch, CompletionCallback on_done) {
-  std::string root;
+  std::string repo_root;
+  std::string workspace;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
+    repo_root = context_repo_root_unlocked();
+    workspace = workspace_root_;
   }
-  enqueue([this, root, branch, on_done]() {
-    const auto result = run_git(root, {"switch", branch});
+  if (repo_root.empty()) {
+    dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
+    return;
+  }
+  enqueue([this, repo_root, workspace, branch, on_done]() {
+    const auto result = run_git(repo_root, {"switch", branch});
     if (result.success()) {
-      open(root);
+      open(workspace);
       dispatch_completion(on_done, true, {});
     } else {
       dispatch_completion(on_done, false, result.stderr_text);
@@ -799,13 +920,17 @@ void GitService::checkout_branch(const std::string& branch, CompletionCallback o
 }
 
 void GitService::push(CompletionCallback on_done) {
-  std::string root;
+  std::string repo_root;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
+    repo_root = context_repo_root_unlocked();
   }
-  enqueue([this, root, on_done]() {
-    const auto result = run_git(root, {"push"});
+  if (repo_root.empty()) {
+    dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
+    return;
+  }
+  enqueue([this, repo_root, on_done]() {
+    const auto result = run_git(repo_root, {"push"});
     if (result.success()) {
       invalidate();
       dispatch_completion(on_done, true, result.stdout_text);
@@ -816,13 +941,17 @@ void GitService::push(CompletionCallback on_done) {
 }
 
 void GitService::pull(CompletionCallback on_done) {
-  std::string root;
+  std::string repo_root;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    root = workspace_root_;
+    repo_root = context_repo_root_unlocked();
   }
-  enqueue([this, root, on_done]() {
-    const auto result = run_git(root, {"pull"});
+  if (repo_root.empty()) {
+    dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
+    return;
+  }
+  enqueue([this, repo_root, on_done]() {
+    const auto result = run_git(repo_root, {"pull"});
     if (result.success()) {
       invalidate();
       dispatch_completion(on_done, true, result.stdout_text);
@@ -895,69 +1024,130 @@ bool GitService::diff_text_cached_unlocked(const std::string& rel) const {
   return file_diff_texts_.find(rel) != file_diff_texts_.end();
 }
 
-void GitService::load_status(const std::string& root) {
+void GitService::load_all_status() {
   if (stop_.load()) {
     return;
   }
-  const auto result = run_git(root, {"status", "--porcelain"});
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_ != root) {
+
+  std::string workspace;
+  std::string main_root;
+  bool main_valid = false;
+  std::vector<GitSubrepoInfo> subrepos;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    workspace = workspace_root_;
+    main_root = main_repo_root_;
+    main_valid = main_repo_valid_;
+    subrepos = subrepos_;
+  }
+  if (workspace.empty()) {
     return;
   }
-  if (result.success()) {
-    status_ = parse_git_status_porcelain(result.stdout_text);
-  } else {
-    set_error_unlocked(result.stderr_text);
+
+  GitStatusSnapshot merged;
+  if (main_valid && !main_root.empty()) {
+    const auto result = run_git(main_root, {"status", "--porcelain"});
+    if (result.success()) {
+      const auto parsed = parse_git_status_porcelain(result.stdout_text);
+      for (GitStatusEntry entry : parsed.entries) {
+        if (main_root != workspace) {
+          const std::string ws_rel =
+              repo_to_workspace_rel(workspace, main_root, entry.path);
+          if (ws_rel.empty()) {
+            continue;
+          }
+          entry.path = ws_rel;
+        }
+        if (entry.staged != GitFileStatus::kUnmodified) {
+          ++merged.staged_count;
+        }
+        if (entry.unstaged == GitFileStatus::kUntracked) {
+          ++merged.untracked_count;
+        } else if (entry.unstaged != GitFileStatus::kUnmodified) {
+          ++merged.unstaged_count;
+        }
+        merged.entries.push_back(std::move(entry));
+      }
+    }
   }
+
+  for (const auto& sub : subrepos) {
+    const auto result = run_git(sub.root, {"status", "--porcelain"});
+    if (!result.success()) {
+      continue;
+    }
+    const auto parsed = parse_git_status_porcelain(result.stdout_text);
+    for (GitStatusEntry entry : parsed.entries) {
+      entry.path = join_workspace_path(sub.workspace_path, entry.path);
+      entry.repo_prefix = sub.workspace_path;
+      if (entry.staged != GitFileStatus::kUnmodified) {
+        ++merged.staged_count;
+      }
+      if (entry.unstaged == GitFileStatus::kUntracked) {
+        ++merged.untracked_count;
+      } else if (entry.unstaged != GitFileStatus::kUnmodified) {
+        ++merged.unstaged_count;
+      }
+      merged.entries.push_back(std::move(entry));
+    }
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (workspace_root_ != workspace) {
+    return;
+  }
+  status_ = std::move(merged);
 }
 
-void GitService::load_file_diff_text(const std::string& root, const std::string& rel) {
-  if (stop_.load() || rel.empty()) {
+void GitService::load_file_diff_text(const std::string& repo_root, const std::string& repo_rel,
+                                     const std::string& workspace_rel) {
+  if (stop_.load() || repo_rel.empty() || workspace_rel.empty()) {
     return;
   }
 
-  const auto diff_result = run_git(root, {"diff", "HEAD", "--", rel});
-  GitFileDiff parsed = parse_unified_diff(rel, diff_result.stdout_text);
-  parsed.path = rel;
+  const auto diff_result = run_git(repo_root, {"diff", "HEAD", "--", repo_rel});
+  GitFileDiff parsed = parse_unified_diff(workspace_rel, diff_result.stdout_text);
+  parsed.path = workspace_rel;
 
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_ != root) {
+  if (workspace_root_.empty()) {
     return;
   }
 
   parsed.untracked = false;
   for (const auto& entry : status_.entries) {
-    if (entry.path == rel && entry.unstaged == GitFileStatus::kUntracked) {
+    if (entry.path == workspace_rel && entry.unstaged == GitFileStatus::kUntracked) {
       parsed.untracked = true;
       break;
     }
   }
 
-  auto& existing = file_diffs_[rel];
+  auto& existing = file_diffs_[workspace_rel];
   parsed.head_lines = existing.head_lines;
   parsed.loaded = existing.loaded || !parsed.line_changes.empty() || parsed.untracked;
   existing = std::move(parsed);
-  file_diff_texts_[rel] = diff_result.stdout_text;
+  file_diff_texts_[workspace_rel] = diff_result.stdout_text;
 }
 
-void GitService::load_file_head(const std::string& root, const std::string& rel) {
-  if (stop_.load() || rel.empty()) {
+void GitService::load_file_head(const std::string& repo_root, const std::string& repo_rel,
+                                const std::string& workspace_rel) {
+  if (stop_.load() || repo_rel.empty() || workspace_rel.empty()) {
     return;
   }
 
-  const auto head_result = run_git(root, {"show", "HEAD:" + rel});
+  const auto head_result = run_git(repo_root, {"show", "HEAD:" + repo_rel});
 
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_ != root) {
+  if (workspace_root_.empty()) {
     return;
   }
 
-  GitFileDiff& diff = file_diffs_[rel];
-  diff.path = rel;
-  const auto text_it = file_diff_texts_.find(rel);
+  GitFileDiff& diff = file_diffs_[workspace_rel];
+  diff.path = workspace_rel;
+  const auto text_it = file_diff_texts_.find(workspace_rel);
   if (text_it != file_diff_texts_.end()) {
-    diff = parse_unified_diff(rel, text_it->second);
-    diff.path = rel;
+    diff = parse_unified_diff(workspace_rel, text_it->second);
+    diff.path = workspace_rel;
   }
 
   if (head_result.success()) {
@@ -969,7 +1159,7 @@ void GitService::load_file_head(const std::string& root, const std::string& rel)
     diff.loaded = true;
     diff.untracked = true;
   }
-  file_diffs_[rel] = diff;
+  file_diffs_[workspace_rel] = diff;
 }
 
 void GitService::load_log(const std::string& root) {
@@ -979,7 +1169,7 @@ void GitService::load_log(const std::string& root) {
   const auto result =
       run_git(root, {"log", "-n", "50", "--decorate=short", "--format=%H|%h|%s"});
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_ != root) {
+  if (workspace_root_.empty()) {
     return;
   }
   if (result.success()) {
@@ -1041,7 +1231,7 @@ void GitService::load_log_search(const std::string& root, const std::string& que
   }
 
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_ != root) {
+  if (workspace_root_.empty()) {
     return;
   }
   log_search_query_ = query;
@@ -1054,7 +1244,7 @@ void GitService::load_branches(const std::string& root) {
   }
   const auto result = run_git(root, {"branch", "-a", "--no-color"});
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_ != root) {
+  if (workspace_root_.empty()) {
     return;
   }
   if (result.success()) {
@@ -1073,17 +1263,18 @@ bool GitService::timeline_diff_cached_unlocked(const std::string& rel,
          timeline_diff_texts_.end();
 }
 
-void GitService::load_file_timeline(const std::string& root, const std::string& rel) {
-  if (stop_.load() || rel.empty()) {
+void GitService::load_file_timeline(const std::string& repo_root, const std::string& repo_rel,
+                                    const std::string& workspace_rel) {
+  if (stop_.load() || repo_rel.empty() || workspace_rel.empty()) {
     return;
   }
   const auto result = run_git(
-      root, {"log", "--follow", "--format=%H|%h|%s|%an|%ar", "-n", "100", "--", rel});
+      repo_root, {"log", "--follow", "--format=%H|%h|%s|%an|%ar", "-n", "100", "--", repo_rel});
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_ != root) {
+  if (workspace_root_.empty()) {
     return;
   }
-  timeline_path_ = rel;
+  timeline_path_ = workspace_rel;
   timeline_diff_texts_.clear();
   if (result.success()) {
     file_timeline_ = parse_git_log_timeline(result.stdout_text);
@@ -1092,17 +1283,18 @@ void GitService::load_file_timeline(const std::string& root, const std::string& 
   }
 }
 
-void GitService::load_timeline_diff(const std::string& root, const std::string& rel,
+void GitService::load_timeline_diff(const std::string& repo_root, const std::string& repo_rel,
+                                    const std::string& workspace_rel,
                                     const std::string& commit_hash) {
-  if (stop_.load() || rel.empty() || commit_hash.empty()) {
+  if (stop_.load() || repo_rel.empty() || workspace_rel.empty() || commit_hash.empty()) {
     return;
   }
-  const auto result = run_git(root, {"show", commit_hash, "--", rel});
+  const auto result = run_git(repo_root, {"show", commit_hash, "--", repo_rel});
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_ != root) {
+  if (workspace_root_.empty()) {
     return;
   }
-  timeline_diff_texts_[timeline_diff_key_unlocked(rel, commit_hash)] = result.stdout_text;
+  timeline_diff_texts_[timeline_diff_key_unlocked(workspace_rel, commit_hash)] = result.stdout_text;
 }
 
 bool GitService::commit_files_cached_unlocked(const std::string& commit_hash) const {
@@ -1116,7 +1308,7 @@ void GitService::load_commit_files(const std::string& root, const std::string& c
   const auto result =
       run_git(root, {"diff-tree", "--no-commit-id", "--name-status", "-r", commit_hash});
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_ != root) {
+  if (workspace_root_.empty()) {
     return;
   }
   if (result.success()) {
@@ -1133,7 +1325,7 @@ void GitService::load_graph(const std::string& root) {
   const auto result =
       run_git(root, {"log", "--graph", "--oneline", "--all", "--decorate", "-n", "80"});
   std::lock_guard<std::mutex> lock(mutex_);
-  if (workspace_root_ != root) {
+  if (workspace_root_.empty()) {
     return;
   }
   graph_loaded_ = true;
@@ -1142,6 +1334,23 @@ void GitService::load_graph(const std::string& root) {
   } else {
     graph_lines_.clear();
   }
+}
+
+ResolvedGitPath GitService::resolve_path_unlocked(const std::string& path) const {
+  return resolve_git_path(workspace_root_, main_repo_root_, main_repo_valid_, subrepos_, path);
+}
+
+std::string GitService::context_repo_root_unlocked() const {
+  if (!context_repo_root_.empty()) {
+    return context_repo_root_;
+  }
+  if (main_repo_valid_) {
+    return main_repo_root_;
+  }
+  if (!subrepos_.empty()) {
+    return subrepos_.front().root;
+  }
+  return {};
 }
 
 }  // namespace tgdb

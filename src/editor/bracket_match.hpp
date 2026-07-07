@@ -12,6 +12,12 @@ struct BracketPairHighlight {
   int col_b = -1;
 };
 
+struct ColoredBraceMarker {
+  int line = 0;
+  int col = 0;
+  int depth = 0;
+};
+
 struct TextSpan {
   bool valid = false;
   int line_a = -1;
@@ -21,6 +27,10 @@ struct TextSpan {
 };
 
 BracketPairHighlight find_bracket_pair_highlight(const EditorBuffer& buffer, int line, int col);
+
+BracketPairHighlight find_scope_bracket_pair(const EditorBuffer& buffer, int line, int col);
+
+std::vector<ColoredBraceMarker> find_colored_curly_braces(const EditorBuffer& buffer);
 
 // Innermost `{`/`[`/`(` pair enclosing (line, col), if any.
 BracketPairHighlight find_enclosing_bracket_pair(const EditorBuffer& buffer, int line, int col,

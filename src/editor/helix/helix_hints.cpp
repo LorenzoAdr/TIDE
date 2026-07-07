@@ -86,8 +86,6 @@ std::vector<std::pair<std::string, std::string>> helix_help_sections() {
       {"g g / g e", i18n::tr("helix.help.file_bounds")},
       {"g g + g e", i18n::tr("helix.help.select_whole_file")},
       {"%", i18n::tr("helix.help.select_whole_file_percent")},
-      {"s", i18n::tr("helix.help.select_regex")},
-      {"S", i18n::tr("helix.help.split_selection_on_regex")},
       {"Alt+s", i18n::tr("helix.help.split_selection_on_newline")},
       {"Ctrl+D / Ctrl+Alt+L", i18n::tr("helix.help.tide_multicursor")},
       {"g d", i18n::tr("helix.help.goto_definition")},
@@ -116,17 +114,6 @@ Element make_helix_command_overlay(const HelixEditorState& helix) {
     return text("");
   }
   const std::string line = ":" + helix.command_buffer + "_";
-  Element panel = hbox({text(line) | color(theme::Accent())}) | border | bgcolor(theme::PanelBg());
-  return bottom_prompt_overlay(std::move(panel));
-}
-
-Element make_helix_regex_prompt_overlay(const HelixEditorState& helix) {
-  if (helix.regex_prompt == HelixRegexPromptKind::kNone) {
-    return text("");
-  }
-  const char* prefix =
-      helix.regex_prompt == HelixRegexPromptKind::kSelect ? "s/" : "S/";
-  const std::string line = std::string(prefix) + helix.regex_prompt_buffer + "_";
   Element panel = hbox({text(line) | color(theme::Accent())}) | border | bgcolor(theme::PanelBg());
   return bottom_prompt_overlay(std::move(panel));
 }

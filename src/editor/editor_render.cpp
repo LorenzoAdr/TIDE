@@ -8,10 +8,9 @@
 #include "indexer/index_rules.hpp"
 #include "ui/cursor_blink_ui.hpp"
 #include "ui/theme.hpp"
-#include "util/cpp_highlight.hpp"
+#include "util/syntax_highlight.hpp"
 #include "util/build_file_highlight.hpp"
 #include "util/clang_format_config.hpp"
-#include "util/syntax_highlight.hpp"
 
 namespace tgdb {
 
@@ -168,10 +167,24 @@ bool line_has_diagnostics(const std::vector<Diagnostic>* line_diagnostics) {
   return line_diagnostics != nullptr && !line_diagnostics->empty();
 }
 
+bool line_has_colored_braces(int line_index, const std::vector<ColoredBraceMarker>* braces) {
+  if (braces == nullptr) {
+    return false;
+  }
+  for (const ColoredBraceMarker& marker : *braces) {
+    if (marker.line == line_index) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool line_needs_rich_decorations(int line_index, const EditorBuffer& buffer,
                                  const std::vector<TextMatch>* find_matches,
                                  const std::vector<TextMatch>* selection_occurrences,
                                  const BracketPairHighlight* bracket,
+                                 const BracketPairHighlight* scope_bracket,
+                                 const std::vector<ColoredBraceMarker>* colored_braces,
                                  const std::vector<Diagnostic>* line_diagnostics,
                                  const EditorSymbolPress* symbol_press) {
   if (symbol_press != nullptr && symbol_press->active) {
@@ -184,6 +197,14 @@ bool line_needs_rich_decorations(int line_index, const EditorBuffer& buffer,
     if (line_index == bracket->line_a || line_index == bracket->line_b) {
       return true;
     }
+  }
+  if (scope_bracket != nullptr && scope_bracket->valid) {
+    if (line_index == scope_bracket->line_a || line_index == scope_bracket->line_b) {
+      return true;
+    }
+  }
+  if (line_has_colored_braces(line_index, colored_braces)) {
+    return true;
   }
   if (line_has_find_matches(line_index, find_matches)) {
     return true;
@@ -226,6 +247,12 @@ const EditorDecoration* decoration_at(const std::vector<EditorDecoration>& decor
       case EditorDecoration::Kind::MatchingBracket:
         priority = 4;
         break;
+      case EditorDecoration::Kind::ScopeBrace:
+        priority = 5;
+        break;
+      case EditorDecoration::Kind::ColoredBrace:
+        priority = 3;
+        break;
       case EditorDecoration::Kind::Selection:
         priority = 5;
         break;
@@ -263,6 +290,10 @@ Element apply_decoration(Element element, const EditorDecoration* deco,
       return element | color(theme::Error()) | underlined | bold;
     case EditorDecoration::Kind::MatchingBracket:
       return element | bgcolor(theme::BracketMatchBg()) | bold;
+    case EditorDecoration::Kind::ScopeBrace:
+      return element | bgcolor(theme::ScopeBraceBg(deco->brace_depth)) | bold;
+    case EditorDecoration::Kind::ColoredBrace:
+      return element | color(theme::BracePairColor(deco->brace_depth)) | bold;
     case EditorDecoration::Kind::Selection:
       return element | bgcolor(theme::SelectionBg());
     case EditorDecoration::Kind::PrimaryCaret:
@@ -313,7 +344,7 @@ Element wrap_with_suffix(Element line_content, const Decorator& line_bg,
 Element render_line_content(const std::string& line, int line_index,
                             const SemanticTokenDocument* semantic_tokens, bool syntax_highlight,
                             int cursor_col = -1, Decorator cursor_style = {},
-                            int col_offset = 0, CppHighlightContext* highlight_ctx = nullptr,
+                            int col_offset = 0, SyntaxHighlightContext* highlight_ctx = nullptr,
                             BuildFileKind build_file_kind = BuildFileKind::kNone) {
   const int tab_size = std::max(1, editor_indent::tab_display_width());
   const std::string display_line = expand_tabs_for_display(line, tab_size);
@@ -357,7 +388,7 @@ Element render_line_content(const std::string& line, int line_index,
 Element render_simple_line(const std::string& line, int line_index, const EditorBuffer& buffer,
                            bool editor_focused, const SemanticTokenDocument* semantic_tokens,
                            bool syntax_highlight, const Decorator& line_bg, bool show_caret,
-                           int scroll_col, CppHighlightContext* highlight_ctx,
+                           int scroll_col, SyntaxHighlightContext* highlight_ctx,
                            BuildFileKind build_file_kind, int guide_prefix_visual,
                            const Decorator& primary_cursor) {
   (void)line_bg;
@@ -397,9 +428,11 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
                          const std::vector<TextMatch>* selection_occurrences,
                          const SemanticTokenDocument* semantic_tokens, bool syntax_highlight,
                          const BracketPairHighlight* bracket,
+                         const BracketPairHighlight* scope_bracket, int scope_highlight_strength,
+                         const std::vector<ColoredBraceMarker>* colored_braces,
                          const std::vector<Diagnostic>* line_diagnostics,
                          const EditorSymbolPress* symbol_press, bool show_caret, int scroll_col,
-                         int view_width, CppHighlightContext* highlight_ctx,
+                         int view_width, SyntaxHighlightContext* highlight_ctx,
                          BuildFileKind build_file_kind, int guide_prefix_visual,
                          const Decorator& primary_cursor) {
   const int tab_size = std::max(1, editor_indent::tab_display_width());
@@ -421,6 +454,13 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
   }
   if (bracket != nullptr) {
     collect_bracket_decorations(line_index, *bracket, &decorations);
+  }
+  if (scope_bracket != nullptr) {
+    collect_scope_bracket_decorations(line_index, *scope_bracket, scope_highlight_strength,
+                                      &decorations);
+  }
+  if (colored_braces != nullptr) {
+    collect_colored_brace_decorations(line_index, *colored_braces, &decorations);
   }
   collect_line_decorations(line_index, buffer, editor_focused, show_caret, &decorations);
   shift_decorations_to_body(&decorations, source_line, scroll_col, guide_prefix_visual, view_width,
@@ -471,7 +511,7 @@ void collect_find_decorations(int line_index, const std::vector<TextMatch>& matc
                               std::vector<EditorDecoration>* out) {
   for (const auto& match : matches) {
     if (match.line == line_index && match.length > 0) {
-      out->push_back({match.col, match.col + match.length, EditorDecoration::Kind::FindMatch});
+      out->push_back({match.col, match.col + match.length, 0, EditorDecoration::Kind::FindMatch});
     }
   }
 }
@@ -481,7 +521,7 @@ void collect_selection_occurrence_decorations(int line_index, const std::vector<
   for (const auto& match : matches) {
     if (match.line == line_index && match.length > 0) {
       out->push_back(
-          {match.col, match.col + match.length, EditorDecoration::Kind::SelectionOccurrence});
+          {match.col, match.col + match.length, 0, EditorDecoration::Kind::SelectionOccurrence});
     }
   }
 }
@@ -505,7 +545,7 @@ void collect_line_decorations(int line_index, const EditorBuffer& buffer, bool e
         const int sel_start = (line_index == start_line) ? start_col : 0;
         const int sel_end = (line_index == end_line) ? end_col : line_len;
         if (sel_end > sel_start) {
-          out->push_back({sel_start, sel_end, EditorDecoration::Kind::Selection});
+          out->push_back({sel_start, sel_end, 0, EditorDecoration::Kind::Selection});
         }
       }
     }
@@ -513,7 +553,7 @@ void collect_line_decorations(int line_index, const EditorBuffer& buffer, bool e
       const auto kind = (i == 0) ? EditorDecoration::Kind::PrimaryCaret
                                  : EditorDecoration::Kind::SecondaryCaret;
       const int col = cursor.head.col;
-      out->push_back({col, col + 1, kind});
+      out->push_back({col, col + 1, 0, kind});
     }
   }
 }
@@ -524,10 +564,41 @@ void collect_bracket_decorations(int line_index, const BracketPairHighlight& bra
     return;
   }
   if (line_index == bracket.line_a) {
-    out->push_back({bracket.col_a, bracket.col_a + 1, EditorDecoration::Kind::MatchingBracket});
+    out->push_back({bracket.col_a, bracket.col_a + 1, 0, EditorDecoration::Kind::MatchingBracket});
   }
   if (line_index == bracket.line_b) {
-    out->push_back({bracket.col_b, bracket.col_b + 1, EditorDecoration::Kind::MatchingBracket});
+    out->push_back({bracket.col_b, bracket.col_b + 1, 0, EditorDecoration::Kind::MatchingBracket});
+  }
+}
+
+void collect_scope_bracket_decorations(int line_index, const BracketPairHighlight& bracket,
+                                       int scope_highlight_strength,
+                                       std::vector<EditorDecoration>* out) {
+  if (out == nullptr || !bracket.valid) {
+    return;
+  }
+  const int strength = std::max(10, std::min(85, scope_highlight_strength));
+  if (line_index == bracket.line_a) {
+    out->push_back({bracket.col_a, bracket.col_a + 1, strength,
+                    EditorDecoration::Kind::ScopeBrace});
+  }
+  if (line_index == bracket.line_b) {
+    out->push_back({bracket.col_b, bracket.col_b + 1, strength,
+                    EditorDecoration::Kind::ScopeBrace});
+  }
+}
+
+void collect_colored_brace_decorations(int line_index,
+                                       const std::vector<ColoredBraceMarker>& braces,
+                                       std::vector<EditorDecoration>* out) {
+  if (out == nullptr) {
+    return;
+  }
+  for (const ColoredBraceMarker& marker : braces) {
+    if (marker.line != line_index) {
+      continue;
+    }
+    out->push_back({marker.col, marker.col + 1, marker.depth, EditorDecoration::Kind::ColoredBrace});
   }
 }
 
@@ -545,7 +616,7 @@ void collect_diagnostic_decorations(int line_index, const std::vector<Diagnostic
     const auto kind = item.severity == DiagnosticSeverity::kError
                           ? EditorDecoration::Kind::DiagnosticError
                           : EditorDecoration::Kind::DiagnosticWarning;
-    out->push_back({start, end, kind});
+    out->push_back({start, end, 0, kind});
   }
 }
 
@@ -554,7 +625,7 @@ void collect_press_decorations(int line_index, const EditorSymbolPress& press,
   if (out == nullptr || !press.active) {
     return;
   }
-  out->push_back({press.start_col, press.end_col, EditorDecoration::Kind::PressFlash});
+  out->push_back({press.start_col, press.end_col, 0, EditorDecoration::Kind::PressFlash});
 }
 
 Element RenderEditorLine(const std::string& line, int line_index, const EditorBuffer& buffer,
@@ -562,14 +633,16 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
                          const std::vector<TextMatch>* selection_occurrences,
                          const SemanticTokenDocument* semantic_tokens,
                          const BracketPairHighlight* bracket,
+                         const BracketPairHighlight* scope_bracket, int scope_highlight_strength,
                          const std::vector<Diagnostic>* line_diagnostics,
                          const std::string* diagnostic_suffix,
                          const std::vector<Diagnostic>* suffix_diagnostics,
                          const EditorSymbolPress* symbol_press, bool show_caret, int scroll_col,
-                         int view_width, CppHighlightContext* highlight_ctx,
+                         int view_width, SyntaxHighlightContext* highlight_ctx,
                          bool sticky_scroll_line, bool indent_guides_enabled,
                          int indent_guide_depth, bool defer_rich_decorations,
-                         ftxui::Color cursor_cell_bg) {
+                         ftxui::Color cursor_cell_bg,
+                         const std::vector<ColoredBraceMarker>* colored_braces) {
   const Decorator primary_cursor = cursor_blink::cell_decorator(cursor_cell_bg);
   const std::string view_line = slice_line_for_view(line, scroll_col, view_width);
   const int tab_size = std::max(1, editor_indent::tab_display_width());
@@ -600,11 +673,7 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
       press_active ||
       (!defer_rich_decorations &&
        line_needs_rich_decorations(line_index, buffer, find_matches, selection_occurrences, bracket,
-                                   line_diagnostics, symbol_press));
-  if (highlight_ctx != nullptr && highlight_ctx->in_block_comment) {
-    rich = false;
-  }
-
+                                   scope_bracket, colored_braces, line_diagnostics, symbol_press));
   const bool caret_on_primary =
       show_caret && editor_focused && line_index == buffer.primary_line();
   const int caret_vis_in_view =
@@ -618,8 +687,10 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
   Element content =
       rich ? render_rich_line(body_line, line_index, buffer, editor_focused, find_matches,
                               selection_occurrences, semantic_tokens, syntax_highlight, bracket,
-                              line_diagnostics, symbol_press, body_show_caret, scroll_col, view_width,
-                              highlight_ctx, build_file_kind, guide_prefix_visual, primary_cursor)
+                              scope_bracket, scope_highlight_strength, colored_braces,
+                              line_diagnostics, symbol_press, body_show_caret, scroll_col,
+                              view_width, highlight_ctx, build_file_kind, guide_prefix_visual,
+                              primary_cursor)
            : render_simple_line(body_line, line_index, buffer, editor_focused, semantic_tokens,
                                 syntax_highlight, line_bg, body_show_caret, scroll_col, highlight_ctx,
                                 build_file_kind, guide_prefix_visual, primary_cursor);

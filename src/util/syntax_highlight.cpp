@@ -1,11 +1,42 @@
 #include "util/syntax_highlight.hpp"
 
+#include "editor/indent_guides.hpp"
+#include "parser/tree_sitter_highlight.hpp"
+#include "parser/tree_sitter_service.hpp"
 #include "ui/theme.hpp"
-#include "util/cpp_highlight.hpp"
+#include "util/clang_format_config.hpp"
 
 namespace tgdb {
 
 using namespace ftxui;
+
+const std::string& SyntaxHighlightContext::joined() const {
+  if (lines == nullptr) {
+    return joined_source;
+  }
+  if (joined_token != buffer_token) {
+    joined_source = join_editor_lines(*lines);
+    joined_token = buffer_token;
+  }
+  return joined_source;
+}
+
+const std::vector<LineHighlights>* SyntaxHighlightContext::tree_sitter_highlights() const {
+  if (lines == nullptr || lines->empty() || file_path.empty()) {
+    return nullptr;
+  }
+  const std::string& source = joined();
+  if (source.empty()) {
+    return nullptr;
+  }
+  tree_sitter_service().prepare_document(file_path, source);
+  const uint64_t revision = tree_sitter_service().revision_for(file_path);
+  if (ts_revision != revision || ts_line_highlights == nullptr) {
+    ts_line_highlights = tree_sitter_service().highlights_for(file_path, source);
+    ts_revision = revision;
+  }
+  return ts_line_highlights;
+}
 
 namespace {
 
@@ -55,6 +86,39 @@ Decorator style_for_token_type(const std::vector<std::string>& types, int type_i
   return color(theme::SyntaxDefault());
 }
 
+LineHighlights display_spans_for_line(const LineHighlights& source_spans,
+                                      const std::string& source_line, int col_offset,
+                                      int display_length, int tab_size) {
+  LineHighlights out;
+  if (display_length <= 0) {
+    return out;
+  }
+  const int base_vis = byte_index_to_visual_column(source_line, std::max(0, col_offset), tab_size);
+  for (const HighlightSpan& span : source_spans.spans) {
+    const int rel_start =
+        byte_index_to_visual_column(source_line, span.start_col, tab_size) - base_vis;
+    const int rel_end =
+        byte_index_to_visual_column(source_line, span.end_col, tab_size) - base_vis;
+    if (rel_end <= 0 || rel_start >= display_length) {
+      continue;
+    }
+    HighlightSpan mapped = span;
+    mapped.start_col = std::max(0, rel_start);
+    mapped.end_col = std::min(display_length, rel_end);
+    if (mapped.end_col > mapped.start_col) {
+      out.spans.push_back(mapped);
+    }
+  }
+  std::sort(out.spans.begin(), out.spans.end(),
+            [](const HighlightSpan& a, const HighlightSpan& b) {
+              if (a.start_col != b.start_col) {
+                return a.start_col < b.start_col;
+              }
+              return a.end_col > b.end_col;
+            });
+  return out;
+}
+
 Element highlight_semantic_segment(const std::string& segment, const SemanticTokenSpan& span,
                                    const std::vector<std::string>& types, int line_cursor_col,
                                    Decorator cursor_style, int col_offset) {
@@ -81,8 +145,7 @@ Element highlight_semantic_segment(const std::string& segment, const SemanticTok
   if (rel > 0) {
     parts.push_back(text(segment.substr(0, static_cast<std::size_t>(rel))) | style);
   }
-  Element cursor_cell =
-      text(segment.substr(static_cast<std::size_t>(rel), 1));
+  Element cursor_cell = text(segment.substr(static_cast<std::size_t>(rel), 1));
   if (inverted_cursor) {
     cursor_cell = cursor_cell | inverted | bold;
   } else {
@@ -95,13 +158,33 @@ Element highlight_semantic_segment(const std::string& segment, const SemanticTok
   return hbox(std::move(parts));
 }
 
-Element highlight_semantic_line(const std::string& line,
+Element highlight_tree_sitter_gap(const std::string& line, int line_index,
+                                  const SyntaxHighlightContext* ctx, int cursor_col,
+                                  Decorator cursor_style, int col_offset) {
+  if (ctx == nullptr || ctx->lines == nullptr || ctx->lines->empty()) {
+    return text(line);
+  }
+  const auto* all_highlights = ctx->tree_sitter_highlights();
+  if (all_highlights == nullptr || line_index < 0 ||
+      line_index >= static_cast<int>(all_highlights->size())) {
+    return text(line);
+  }
+  const std::string& source_line = (*ctx->lines)[static_cast<std::size_t>(line_index)];
+  const int tab_size = std::max(1, editor_indent::tab_display_width());
+  const LineHighlights& source_hl = (*all_highlights)[static_cast<std::size_t>(line_index)];
+  const LineHighlights display_hl =
+      display_spans_for_line(source_hl, source_line, col_offset, static_cast<int>(line.size()),
+                             tab_size);
+  return HighlightTreeSitterLine(line, line_index, display_hl, cursor_col, cursor_style, 0);
+}
+
+Element highlight_semantic_line(const std::string& line, int line_index,
                                 const std::vector<SemanticTokenSpan>& spans,
                                 const std::vector<std::string>& types, int cursor_col,
                                 Decorator cursor_style, int col_offset,
-                                CppHighlightContext* ctx) {
+                                const SyntaxHighlightContext* ctx) {
   if (spans.empty()) {
-    return HighlightCppLine(line, cursor_col, cursor_style, col_offset, ctx);
+    return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style, col_offset);
   }
 
   Elements parts;
@@ -124,7 +207,8 @@ Element highlight_semantic_line(const std::string& line,
         const int gap_cursor = (cursor_col >= gap_view_start && cursor_col < gap_view_end)
                                    ? col_offset + cursor_col
                                    : -1;
-        parts.push_back(HighlightCppLine(gap, gap_cursor, cursor_style, col, ctx));
+        parts.push_back(highlight_tree_sitter_gap(gap, line_index, ctx, gap_cursor, cursor_style,
+                                                  col));
       }
       col = span.start_col;
     }
@@ -150,12 +234,13 @@ Element highlight_semantic_line(const std::string& line,
     const std::string tail = line.substr(static_cast<std::size_t>(col - col_offset));
     const int tail_view_start = col - col_offset;
     const int tail_cursor = cursor_col >= tail_view_start ? col_offset + cursor_col : -1;
-    parts.push_back(HighlightCppLine(tail, tail_cursor, cursor_style, col, ctx));
+    parts.push_back(highlight_tree_sitter_gap(tail, line_index, ctx, tail_cursor, cursor_style,
+                                              col));
   }
 
   if (parts.empty()) {
     const int abs_cursor = cursor_col >= 0 ? cursor_col + col_offset : -1;
-    return HighlightCppLine(line, abs_cursor, cursor_style, col_offset, ctx);
+    return highlight_tree_sitter_gap(line, line_index, ctx, abs_cursor, cursor_style, col_offset);
   }
   return hbox(std::move(parts));
 }
@@ -178,26 +263,22 @@ std::vector<SemanticTokenSpan> spans_for_segment(const std::vector<SemanticToken
 
 Element HighlightCodeLine(const std::string& line, int line_index,
                           const SemanticTokenDocument* semantic_tokens, int cursor_col,
-                          Decorator cursor_style, int col_offset, CppHighlightContext* ctx) {
-  if (ctx != nullptr && ctx->in_block_comment) {
-    return HighlightCppLine(line, cursor_col, cursor_style, col_offset, ctx);
-  }
-
-  if (semantic_tokens == nullptr || !semantic_tokens->ready ||
-      line_index < 0 ||
+                          Decorator cursor_style, int col_offset,
+                          const SyntaxHighlightContext* ctx) {
+  if (semantic_tokens == nullptr || !semantic_tokens->ready || line_index < 0 ||
       line_index >= static_cast<int>(semantic_tokens->lines.size())) {
-    return HighlightCppLine(line, cursor_col, cursor_style, col_offset, ctx);
+    return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style, col_offset);
   }
 
   const auto& line_spans = semantic_tokens->lines[static_cast<std::size_t>(line_index)];
   const auto spans = spans_for_segment(line_spans, col_offset, static_cast<int>(line.size()));
   if (spans.empty()) {
     const int abs_cursor = cursor_col >= 0 ? cursor_col + col_offset : -1;
-    return HighlightCppLine(line, abs_cursor, cursor_style, col_offset, ctx);
+    return highlight_tree_sitter_gap(line, line_index, ctx, abs_cursor, cursor_style, col_offset);
   }
 
-  return highlight_semantic_line(line, spans, semantic_tokens->token_types, cursor_col, cursor_style,
-                                 col_offset, ctx);
+  return highlight_semantic_line(line, line_index, spans, semantic_tokens->token_types, cursor_col,
+                                 cursor_style, col_offset, ctx);
 }
 
 }  // namespace tgdb

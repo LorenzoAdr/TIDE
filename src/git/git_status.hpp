@@ -18,6 +18,7 @@ enum class GitFileStatus {
 
 struct GitStatusEntry {
   std::string path;
+  std::string repo_prefix;
   GitFileStatus staged = GitFileStatus::kUnmodified;
   GitFileStatus unstaged = GitFileStatus::kUnmodified;
 };

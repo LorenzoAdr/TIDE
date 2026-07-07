@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cctype>
 #include <optional>
-#include <regex>
 
 #include "editor/clipboard.hpp"
 #include "editor/text_ops.hpp"
@@ -473,97 +472,6 @@ void select_all_matches(EditorBuffer* buffer, const TextRange* scope) {
     buffer->cursors.push_back(cursor);
   }
   merge_overlapping_cursors(buffer);
-}
-
-std::optional<std::regex> compile_search_regex(const std::string& pattern) {
-  if (pattern.empty()) {
-    return std::nullopt;
-  }
-  try {
-    return std::regex(pattern, std::regex::ECMAScript);
-  } catch (const std::regex_error&) {
-    return std::nullopt;
-  }
-}
-
-std::vector<TextMatch> find_regex_matches(const EditorBuffer& buffer, const std::regex& re,
-                                          const TextRange* scope) {
-  std::vector<TextMatch> matches;
-  if (buffer.lines.empty()) {
-    return matches;
-  }
-
-  TextRange bounds{};
-  if (scope != nullptr) {
-    bounds = *scope;
-  } else {
-    bounds.start_line = 0;
-    bounds.start_col = 0;
-    bounds.end_line = static_cast<int>(buffer.lines.size()) - 1;
-    bounds.end_col =
-        static_cast<int>(buffer.lines[static_cast<std::size_t>(bounds.end_line)].size());
-  }
-
-  const int max_line = static_cast<int>(buffer.lines.size()) - 1;
-  bounds.start_line = std::max(0, std::min(bounds.start_line, max_line));
-  bounds.end_line = std::max(0, std::min(bounds.end_line, max_line));
-  if (bounds.start_line > bounds.end_line) {
-    std::swap(bounds.start_line, bounds.end_line);
-  }
-
-  for (int line = bounds.start_line; line <= bounds.end_line; ++line) {
-    const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
-    const int line_start_col = line == bounds.start_line ? bounds.start_col : 0;
-    const int line_end_col =
-        line == bounds.end_line ? bounds.end_col : static_cast<int>(text.size());
-    if (line_start_col >= line_end_col) {
-      continue;
-    }
-    const std::string slice =
-        text.substr(static_cast<std::size_t>(line_start_col),
-                    static_cast<std::size_t>(line_end_col - line_start_col));
-
-    std::sregex_iterator it(slice.begin(), slice.end(), re);
-    const std::sregex_iterator end;
-    for (; it != end; ++it) {
-      const std::smatch& match = *it;
-      if (match.length() == 0) {
-        continue;
-      }
-      TextMatch found{line, line_start_col + static_cast<int>(match.position()),
-                      static_cast<int>(match.length())};
-      if (match_within_range(found, bounds)) {
-        matches.push_back(found);
-      }
-    }
-  }
-  return matches;
-}
-
-bool apply_regex_match_cursors(EditorBuffer* buffer, const std::string& pattern,
-                               const TextRange* scope) {
-  if (buffer == nullptr) {
-    return false;
-  }
-  const std::optional<std::regex> re = compile_search_regex(pattern);
-  if (!re.has_value()) {
-    return false;
-  }
-
-  std::vector<TextMatch> matches = find_regex_matches(*buffer, *re, scope);
-  if (matches.empty()) {
-    return false;
-  }
-
-  buffer->cursors.clear();
-  for (const auto& match : matches) {
-    MultiCursor cursor;
-    cursor.anchor = {match.line, match.col};
-    cursor.head = {match.line, match.col + match.length};
-    buffer->cursors.push_back(cursor);
-  }
-  merge_overlapping_cursors(buffer);
-  return true;
 }
 
 }  // namespace tgdb

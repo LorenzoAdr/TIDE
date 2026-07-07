@@ -16,4 +16,20 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 
-FetchContent_MakeAvailable(ftxui cppdap)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+  tree_sitter
+  GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter.git
+  GIT_TAG master
+  GIT_SHALLOW TRUE
+)
+
+FetchContent_Declare(
+  tree_sitter_cpp
+  GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-cpp.git
+  GIT_TAG v0.23.4
+  GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(ftxui cppdap tree_sitter tree_sitter_cpp)

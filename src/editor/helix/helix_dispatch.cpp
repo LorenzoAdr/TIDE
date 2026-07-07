@@ -206,38 +206,6 @@ void execute_command_buffer(const HelixDispatchContext& ctx) {
   }
 }
 
-bool capture_regex_scope(HelixEditorState* helix, EditorBuffer* buffer) {
-  if (helix == nullptr || buffer == nullptr) {
-    return false;
-  }
-  if (!buffer->primary().has_selection()) {
-    select_word_at(buffer, buffer->primary_line(), buffer->primary_col());
-  }
-  const MultiCursor& primary = buffer->primary();
-  if (!primary.has_selection()) {
-    helix->regex_scope_valid = false;
-    return true;
-  }
-  primary.normalized_range(&helix->regex_scope.start_line, &helix->regex_scope.start_col,
-                             &helix->regex_scope.end_line, &helix->regex_scope.end_col);
-  helix->regex_scope_valid = true;
-  return true;
-}
-
-void open_regex_prompt(HelixEditorState* helix, EditorBuffer* buffer,
-                       HelixRegexPromptKind kind) {
-  if (helix == nullptr) {
-    return;
-  }
-  helix->clear_pending();
-  helix->hint_visible = false;
-  helix->clear_command();
-  helix->clear_char_find_pending();
-  capture_regex_scope(helix, buffer);
-  helix->regex_prompt = kind;
-  helix->regex_prompt_buffer.clear();
-}
-
 CharFindKind to_char_find_kind(HelixCharFindKind kind) {
   switch (kind) {
     case HelixCharFindKind::kFind:
@@ -275,7 +243,6 @@ bool begin_char_find(HelixEditorState* helix, HelixCharFindKind kind) {
     return false;
   }
   helix->clear_pending();
-  helix->clear_regex_prompt();
   helix->char_find_pending = kind;
   helix->hint_visible = true;
   return true;
@@ -319,27 +286,6 @@ bool repeat_char_find(const HelixDispatchContext& ctx, bool reverse) {
   return true;
 }
 
-void execute_regex_prompt(const HelixDispatchContext& ctx) {
-  if (ctx.helix == nullptr || ctx.buffer == nullptr) {
-    return;
-  }
-  const HelixRegexPromptKind kind = ctx.helix->regex_prompt;
-  const std::string pattern = ctx.helix->regex_prompt_buffer;
-  const TextRange* scope = ctx.helix->regex_scope_valid ? &ctx.helix->regex_scope : nullptr;
-  ctx.helix->clear_regex_prompt();
-  if (pattern.empty()) {
-    return;
-  }
-  if (apply_regex_match_cursors(ctx.buffer, pattern, scope)) {
-    ctx.helix->mode = HelixMode::kNormal;
-    if (ctx.buffer != nullptr) {
-      ctx.buffer->view_token++;
-    }
-    notify(ctx);
-  }
-  ensure_view(ctx);
-}
-
 bool handle_command_mode_keys(const HelixDispatchContext& ctx, const ftxui::Event& event) {
   if (ctx.helix == nullptr || !ctx.helix->command_mode) {
     return false;
@@ -361,32 +307,6 @@ bool handle_command_mode_keys(const HelixDispatchContext& ctx, const ftxui::Even
   char ch = '\0';
   if (helix_event_is_printable(event, &ch)) {
     ctx.helix->command_buffer.push_back(ch);
-    return true;
-  }
-  return true;
-}
-
-bool handle_regex_prompt_keys(const HelixDispatchContext& ctx, const ftxui::Event& event) {
-  if (ctx.helix == nullptr || ctx.helix->regex_prompt == HelixRegexPromptKind::kNone) {
-    return false;
-  }
-  if (event == ftxui::Event::Escape) {
-    ctx.helix->clear_regex_prompt();
-    return true;
-  }
-  if (event == ftxui::Event::Return) {
-    execute_regex_prompt(ctx);
-    return true;
-  }
-  if (event == ftxui::Event::Backspace) {
-    if (!ctx.helix->regex_prompt_buffer.empty()) {
-      ctx.helix->regex_prompt_buffer.pop_back();
-    }
-    return true;
-  }
-  char ch = '\0';
-  if (helix_event_is_printable(event, &ch)) {
-    ctx.helix->regex_prompt_buffer.push_back(ch);
     return true;
   }
   return true;
@@ -842,7 +762,6 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
       helix->clear_pending();
       helix->clear_count();
       helix->clear_command();
-      helix->clear_regex_prompt();
       helix->clear_char_find_pending();
       helix->help_open = false;
       return true;
@@ -960,12 +879,6 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
         cursor.head = {last, static_cast<int>(buffer->lines.back().size())};
       }
       ensure_view(ctx);
-      return true;
-    case HelixCommand::kSelectAllMatches:
-      open_regex_prompt(helix, buffer, HelixRegexPromptKind::kSelect);
-      return true;
-    case HelixCommand::kSplitSelectionOnRegex:
-      open_regex_prompt(helix, buffer, HelixRegexPromptKind::kSplit);
       return true;
     case HelixCommand::kExtendLineBelow:
       extend_line_below(buffer);
@@ -1214,11 +1127,6 @@ bool dispatch_helix_keys(const HelixDispatchContext& ctx, const ftxui::Event& ev
     return true;
   }
 
-  if (handle_regex_prompt_keys(ctx, event)) {
-    sync_helix_layout_status(ctx.layout_state, ctx.helix, true);
-    return true;
-  }
-
   if (event == ftxui::Event::Escape) {
     if (ctx.helix->prefix_active()) {
       ctx.helix->clear_pending();
@@ -1226,10 +1134,6 @@ bool dispatch_helix_keys(const HelixDispatchContext& ctx, const ftxui::Event& ev
     }
     if (ctx.helix->count > 0) {
       ctx.helix->clear_count();
-      return true;
-    }
-    if (ctx.helix->regex_prompt != HelixRegexPromptKind::kNone) {
-      ctx.helix->clear_regex_prompt();
       return true;
     }
     if (ctx.helix->char_find_pending != HelixCharFindKind::kNone) {

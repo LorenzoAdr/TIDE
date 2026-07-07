@@ -66,6 +66,16 @@ AppSettings AppSettings::load() {
     if (doc.contains("indent_guides_enabled") && doc["indent_guides_enabled"].is_boolean()) {
       settings.indent_guides_enabled = doc["indent_guides_enabled"].get<bool>();
     }
+    if (doc.contains("scope_highlight_enabled") && doc["scope_highlight_enabled"].is_boolean()) {
+      settings.scope_highlight_enabled = doc["scope_highlight_enabled"].get<bool>();
+    }
+    if (doc.contains("scope_highlight_strength") && doc["scope_highlight_strength"].is_number_integer()) {
+      settings.scope_highlight_strength =
+          std::max(10, std::min(85, doc["scope_highlight_strength"].get<int>()));
+    }
+    if (doc.contains("animations_enabled") && doc["animations_enabled"].is_boolean()) {
+      settings.animations_enabled = doc["animations_enabled"].get<bool>();
+    }
     if (doc.contains("overview_ruler_enabled") &&
         doc["overview_ruler_enabled"].is_boolean()) {
       settings.overview_ruler_enabled = doc["overview_ruler_enabled"].get<bool>();
@@ -128,6 +138,9 @@ bool AppSettings::save() const {
   doc["show_diagnostic_suffixes"] = show_diagnostic_suffixes;
   doc["sticky_scroll_enabled"] = sticky_scroll_enabled;
   doc["indent_guides_enabled"] = indent_guides_enabled;
+  doc["scope_highlight_enabled"] = scope_highlight_enabled;
+  doc["scope_highlight_strength"] = scope_highlight_strength;
+  doc["animations_enabled"] = animations_enabled;
   doc["overview_ruler_enabled"] = overview_ruler_enabled;
   doc["secondary_panel_enabled"] = secondary_panel_enabled;
   doc["force_bundled_clangd"] = force_bundled_clangd;

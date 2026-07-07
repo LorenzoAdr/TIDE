@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <thread>
 
-#include "symbols/regex_symbol_provider.hpp"
+#include "symbols/tree_sitter_symbol_provider.hpp"
 #include "indexer/index_rules.hpp"
 #include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
@@ -160,8 +160,8 @@ void SymbolWorkspaceIndexer::worker_main(std::string workspace_root,
                                          std::shared_ptr<ISymbolProvider> provider,
                                          WorkspaceIndexer* file_indexer) {
   TGDB_MON_SCOPE("idx", "symbol_workspace_indexer.scan");
-  RegexSymbolProvider regex_provider;
-  const bool use_regex_bulk = provider != nullptr && !provider->indexes_workspace_bulk();
+  TreeSitterSymbolProvider ts_provider;
+  const bool use_ts_bulk = provider != nullptr && !provider->indexes_workspace_bulk();
 
   std::vector<std::string> files;
   if (file_indexer != nullptr) {
@@ -191,9 +191,9 @@ void SymbolWorkspaceIndexer::worker_main(std::string workspace_root,
       continue;
     }
     std::vector<IndexedSymbol> entries;
-    if (use_regex_bulk) {
+    if (use_ts_bulk) {
       const auto absolute = (fs::path(workspace_root) / rel).string();
-      for (const auto& sym : regex_provider.symbols_for_file(absolute)) {
+      for (const auto& sym : ts_provider.symbols_for_file(absolute)) {
         IndexedSymbol entry;
         entry.display_name = sym.name;
         entry.kind = sym.kind;

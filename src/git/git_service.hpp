@@ -14,6 +14,7 @@
 #include "git/git_diff.hpp"
 #include "git/git_log.hpp"
 #include "git/git_status.hpp"
+#include "git/git_subrepos.hpp"
 
 namespace tgdb {
 
@@ -23,6 +24,7 @@ struct GitRepoInfo {
   std::string branch;
   std::string head;
   std::string last_error;
+  int subrepo_count = 0;
 };
 
 class GitService {
@@ -51,7 +53,10 @@ class GitService {
   bool has_file_diff_text(const std::string& path) const;
 
   bool is_repo() const;
+  bool has_subrepos() const;
   GitRepoInfo repo_info() const;
+  GitRepoInfo context_repo_info() const;
+  void set_context_from_path(const std::string& workspace_rel_path);
   GitStatusSnapshot status() const;
   GitFileDiff file_diff(const std::string& absolute_path) const;
   std::vector<GitCommitEntry> log_entries() const;
@@ -85,19 +90,26 @@ class GitService {
  private:
   std::string relative_path_unlocked(const std::string& absolute_path) const;
   std::string repo_relative_path_unlocked(const std::string& path) const;
+  ResolvedGitPath resolve_path_unlocked(const std::string& path) const;
+  std::string context_repo_root_unlocked() const;
+  void discover_repos(const std::string& workspace_root);
   void enqueue(std::function<void()> task);
   void worker_main();
   void set_error_unlocked(const std::string& message);
-  void detect_repo(const std::string& root);
-  void load_status(const std::string& root);
-  void load_file_diff_text(const std::string& root, const std::string& rel);
-  void load_file_head(const std::string& root, const std::string& rel);
+  void load_all_status();
+  void merge_status_snapshot(GitStatusSnapshot* merged, const GitStatusSnapshot& part,
+                             const std::string& repo_prefix) const;
+  void load_file_diff_text(const std::string& repo_root, const std::string& repo_rel,
+                           const std::string& workspace_rel);
+  void load_file_head(const std::string& repo_root, const std::string& repo_rel,
+                      const std::string& workspace_rel);
   void load_log(const std::string& root);
   void load_log_search(const std::string& root, const std::string& query);
   void load_branches(const std::string& root);
-  void load_file_timeline(const std::string& root, const std::string& rel);
-  void load_timeline_diff(const std::string& root, const std::string& rel,
-                          const std::string& commit_hash);
+  void load_file_timeline(const std::string& repo_root, const std::string& repo_rel,
+                          const std::string& workspace_rel);
+  void load_timeline_diff(const std::string& repo_root, const std::string& repo_rel,
+                          const std::string& workspace_rel, const std::string& commit_hash);
   void load_commit_files(const std::string& root, const std::string& commit_hash);
   void load_graph(const std::string& root);
   bool commit_files_cached_unlocked(const std::string& commit_hash) const;
@@ -116,6 +128,10 @@ class GitService {
   std::deque<std::function<void()>> queue_;
   std::thread worker_;
   std::string workspace_root_;
+  std::string main_repo_root_;
+  bool main_repo_valid_ = false;
+  std::vector<GitSubrepoInfo> subrepos_;
+  std::string context_repo_root_;
   GitRepoInfo repo_info_;
   GitStatusSnapshot status_;
   std::map<std::string, GitFileDiff> file_diffs_;

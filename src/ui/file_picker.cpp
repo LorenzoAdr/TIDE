@@ -14,7 +14,7 @@
 #include "ui/key_bindings.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
-#include "util/cpp_highlight.hpp"
+#include "util/syntax_highlight.hpp"
 #include "util/path_normalize.hpp"
 #include "util/build_file_highlight.hpp"
 #include "util/fuzzy_match.hpp"
@@ -42,6 +42,19 @@ std::string picker_directory_label(std::string_view label) {
     return {};
   }
   return std::string(label.substr(0, slash));
+}
+
+std::string picker_filename(std::string_view path) {
+  const std::size_t slash = path.find_last_of("/\\");
+  if (slash == std::string::npos) {
+    return std::string(path);
+  }
+  return std::string(path.substr(slash + 1));
+}
+
+std::size_t picker_filename_offset(std::string_view label) {
+  const std::size_t slash = label.find_last_of("/\\");
+  return slash == std::string::npos ? 0 : slash + 1;
 }
 
 int count_shared_path_components(std::string_view a, std::string_view b) {
@@ -210,12 +223,15 @@ std::string selected_absolute_path(const FilePickerState* state, const std::stri
 }
 
 Element render_preview_line(const FilePickerPreviewData& preview, const std::string& line,
-                            CppHighlightContext* ctx) {
+                            int line_index) {
   if (preview.build_file_kind != BuildFileKind::kNone) {
     return HighlightBuildFileLine(preview.build_file_kind, line);
   }
   if (preview.use_cpp_highlight) {
-    return HighlightCppLine(line, -1, {}, 0, ctx);
+    SyntaxHighlightContext ctx;
+    ctx.file_path = preview.path;
+    ctx.lines = &preview.lines;
+    return HighlightCodeLine(line, line_index, nullptr, -1, {}, 0, &ctx);
   }
   return text(line.empty() ? " " : line) | color(theme::SyntaxDefault());
 }
@@ -254,7 +270,6 @@ Element render_preview_panel(const FilePickerPreviewData& preview, const std::st
       body.push_back(text(i18n::tr("picker.file.preview.error")) | color(theme::Muted()));
       break;
     case FilePickerPreviewState::kReady: {
-      CppHighlightContext highlight_ctx;
       const int line_count = static_cast<int>(preview.lines.size());
       const int end = std::min(line_count, kMaxPreviewRows);
       for (int i = 0; i < end; ++i) {
@@ -264,7 +279,7 @@ Element render_preview_panel(const FilePickerPreviewData& preview, const std::st
         Element row = hbox({
             text(line_no + std::string(static_cast<std::size_t>(gutter - line_no.size()), ' ')) |
                 color(theme::Muted()) | size(WIDTH, EQUAL, gutter),
-            render_preview_line(preview, line, &highlight_ctx),
+            render_preview_line(preview, line, i),
         });
         body.push_back(std::move(row));
       }
@@ -336,9 +351,9 @@ void FilePickerState::refresh_matches(const WorkspaceModel* workspace) {
     ref_dir = picker_directory_label(picker_display_path(workspace->active_file, workspace_root));
   }
 
-  const auto try_add = [&](const std::string& path, std::string_view label,
-                           std::string_view label_lower, int bonus) {
-    const FuzzyMatchResult result = fuzzy_match_cached(label, label_lower, query_lower);
+  const auto try_add = [&](const std::string& path, std::string_view filename,
+                           std::string_view filename_lower, int bonus) {
+    const FuzzyMatchResult result = fuzzy_match_cached(filename, filename_lower, query_lower);
     if (!result.matched) {
       return;
     }
@@ -348,23 +363,30 @@ void FilePickerState::refresh_matches(const WorkspaceModel* workspace) {
       return;
     }
     seen.insert(normalized);
+
+    const std::string label = picker_display_path(path, workspace_root);
+    const std::size_t filename_offset = picker_filename_offset(label);
+    std::vector<std::size_t> label_indices;
+    label_indices.reserve(result.indices.size());
+    for (const std::size_t index : result.indices) {
+      label_indices.push_back(index + filename_offset);
+    }
+
     const int proximity = path_proximity_bonus(ref_dir, label);
     candidates.push_back(
-        {path, std::string(label), result.score + bonus + proximity, result.indices});
+        {path, label, result.score + bonus + proximity, std::move(label_indices)});
   };
 
   if (workspace != nullptr) {
     for (const std::string& path : workspace->open_tabs_mru()) {
-      const std::string label = picker_display_path(path, workspace_root);
-      try_add(path, label, fuzzy_to_lower(label), kOpenTabScoreBonus);
+      const std::string filename = picker_filename(picker_display_path(path, workspace_root));
+      try_add(path, filename, fuzzy_to_lower(filename), kOpenTabScoreBonus);
     }
   }
 
-  for (std::size_t i = 0; i < all_files.size(); ++i) {
-    const std::string& path = all_files[i];
-    const std::string& label_lower =
-        i < all_files_lower.size() ? all_files_lower[i] : fuzzy_to_lower(path);
-    try_add(path, path, label_lower, 0);
+  for (const std::string& path : all_files) {
+    const std::string filename = picker_filename(path);
+    try_add(path, filename, fuzzy_to_lower(filename), 0);
   }
 
   std::sort(candidates.begin(), candidates.end(),

@@ -100,8 +100,6 @@ enum class HelixCommand {
   kGotoPrevParagraph,
   kGotoBlockEnd,
   kGotoBlockStart,
-  kSelectAllMatches,
-  kSplitSelectionOnRegex,
   kSplitSelectionOnNewline,
   kFindCharForward,
   kTillCharForward,

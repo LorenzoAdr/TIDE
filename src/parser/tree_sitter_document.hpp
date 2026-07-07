@@ -1,0 +1,120 @@
+#pragma once
+
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
+
+extern "C" {
+#include <tree_sitter/api.h>
+}
+
+#include "symbols/symbol_provider.hpp"
+
+namespace tgdb {
+
+constexpr int kTreeSitterParseDebounceMs = 200;
+
+struct HighlightSpan {
+  int start_col = 0;
+  int end_col = 0;
+  std::string capture;
+};
+
+struct LineHighlights {
+  std::vector<HighlightSpan> spans;
+};
+
+std::string join_editor_lines(const std::vector<std::string>& lines);
+
+// Canonical editor source: same bytes as join_editor_lines(buffer.lines), even when
+// the input came from reading a file with a trailing newline.
+std::string normalize_editor_source(const std::string& source);
+
+std::string join_editor_lines_from_file(const std::string& path);
+
+struct DocumentEntry {
+  std::string path;
+  std::string source;
+  TSTree* tree = nullptr;
+  uint64_t revision = 0;
+  std::vector<LineHighlights> line_highlights;
+  std::vector<SymbolInfo> symbols;
+  std::vector<SymbolInfo> scope_symbols;
+  bool parse_ready = false;
+  bool highlights_ready = false;
+  bool symbols_ready = false;
+  bool prepare_inflight = false;
+
+  ~DocumentEntry();
+  DocumentEntry() = default;
+  DocumentEntry(const DocumentEntry&) = delete;
+  DocumentEntry& operator=(const DocumentEntry&) = delete;
+};
+
+using DocumentPtr = std::shared_ptr<DocumentEntry>;
+
+class TreeSitterDocumentCache {
+ public:
+  using ReadyCallback = std::function<void(const std::string& path)>;
+
+  TreeSitterDocumentCache();
+  ~TreeSitterDocumentCache();
+
+  TreeSitterDocumentCache(const TreeSitterDocumentCache&) = delete;
+  TreeSitterDocumentCache& operator=(const TreeSitterDocumentCache&) = delete;
+
+  void set_ready_callback(ReadyCallback callback);
+
+  DocumentPtr lookup(const std::string& path) const;
+  void request_prepare(const std::string& path, const std::string& source);
+  void invalidate(const std::string& path);
+  uint64_t revision_for(const std::string& path) const;
+
+ private:
+  struct PrepareJob {
+    std::string path;
+    std::string source;
+    std::string previous_source;
+    TSTree* previous_tree = nullptr;
+  };
+
+  struct DebouncedPrepare {
+    std::string path;
+    std::string source;
+    std::string previous_source;
+    TSTree* previous_tree = nullptr;
+    std::chrono::steady_clock::time_point run_after{};
+  };
+
+  void reset_entry(DocumentEntry* entry);
+  void worker_main();
+  void run_prepare(PrepareJob job);
+  void flush_ready_debounce_jobs(std::vector<PrepareJob>* ready_jobs);
+
+  mutable std::mutex mutex_;
+  std::unordered_map<std::string, DocumentPtr> cache_;
+  uint64_t next_revision_ = 1;
+
+  std::mutex worker_mutex_;
+  std::condition_variable worker_cv_;
+  std::thread worker_;
+  std::atomic<bool> worker_stop_{false};
+  std::vector<PrepareJob> pending_jobs_;
+  std::unordered_map<std::string, DebouncedPrepare> debounce_jobs_;
+
+  std::mutex callback_mutex_;
+  ReadyCallback ready_callback_;
+};
+
+TSPoint make_ts_point(int line_0, int col);
+bool ts_point_in_node(TSNode node, TSPoint point);
+
+}  // namespace tgdb

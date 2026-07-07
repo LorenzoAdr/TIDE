@@ -13,6 +13,9 @@ struct AppSettings {
   bool show_diagnostic_suffixes = true;
   bool sticky_scroll_enabled = true;
   bool indent_guides_enabled = true;
+  bool scope_highlight_enabled = true;
+  int scope_highlight_strength = 58;
+  bool animations_enabled = true;
   bool overview_ruler_enabled = true;
   bool secondary_panel_enabled = true;
   bool force_bundled_clangd = false;

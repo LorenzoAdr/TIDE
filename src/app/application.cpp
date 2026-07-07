@@ -25,6 +25,7 @@
 #include "i18n/locale.hpp"
 #include "i18n/tr.hpp"
 #include "packet_monitor/pkt_monitor_service.hpp"
+#include "parser/tree_sitter_service.hpp"
 #include "ui/binary_symbols_panel.hpp"
 #include "ui/connection_wizard.hpp"
 #include "ui/console_panel.hpp"
@@ -34,6 +35,7 @@
 #include "ui/file_picker.hpp"
 #include "ui/git_panel.hpp"
 #include "ui/glyphs.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/open_file_confirm.hpp"
@@ -220,7 +222,6 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	if (!config_.initial_file.empty()) {
 		config_.initial_file = fs::absolute(config_.initial_file, ec).string();
 	}
-
 	model_.workspace_root = config_.workspace_root;
 	model_.program = config_.program;
 	model_.program_args = config_.args;
@@ -235,6 +236,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	symbol_provider_ = std::make_shared<LspSymbolProvider>();
 	app_settings_ = AppSettings::load();
 	i18n::set_locale(app_settings_.ui_locale);
+	set_animations_enabled(app_settings_.animations_enabled);
 	workspace_.status_message = i18n::tr("workspace.select");
 	model_.status_message = i18n::tr("debug.disconnected");
 	configure_glyphs(resolve_icon_mode(app_settings_.icon_mode));
@@ -454,7 +456,7 @@ void Application::sync_symbol_workspace_indexer() {
 		symbol_indexer_.stop();
 		return;
 	}
-	// With LSP on, bulk regex indexing scans the whole tree and duplicates clangd work.
+	// With LSP on, bulk tree-sitter indexing scans the whole tree and duplicates clangd work.
 	if (app_settings_.lsp_enabled) {
 		symbol_indexer_.stop();
 		return;
@@ -1400,6 +1402,7 @@ bool Application::any_modal_open() const {
 
 void Application::apply_app_settings() {
 	i18n::set_locale(app_settings_.ui_locale);
+	set_animations_enabled(app_settings_.animations_enabled);
 	if (has_bundled_clangd()) {
 		set_runtime_force_bundled_clangd(app_settings_.force_bundled_clangd);
 	}
@@ -2575,6 +2578,18 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 		layout_state_.request_ui_tick = true;
 		screen.PostEvent(Event::Custom);
 	};
+	tree_sitter_service().set_ready_callback([this, &screen](const std::string& path) {
+		enqueue_ui_task([this, path]() {
+			if (!path.empty() && workspace_.buffer.path == path) {
+				workspace_.buffer.view_token++;
+			}
+			if (!path.empty() && secondary_workspace_.buffer.path == path) {
+				secondary_workspace_.buffer.view_token++;
+			}
+			layout_state_.request_ui_tick = true;
+		});
+		screen.PostEvent(Event::Custom);
+	});
 
 	screen.Loop(WrapUiTickPost(root, &layout_state_, &screen));
 
