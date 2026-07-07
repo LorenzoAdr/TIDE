@@ -896,6 +896,19 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto center = MakeEditorCenterLayout(app_mode, model, editor_primary, editor_secondary, source,
                                        secondary_workspace, split_state);
 
+  auto console = MakeConsolePanel(app_mode, model, shell, on_command, layout_state, focus,
+                                  &split_state->bottom_height, shell_launch_config, workspace,
+                                  symbols, indexer, symbol_indexer, &layout_state->right_sidebar,
+                                  git_service, git_panel_state);
+  auto center_with_console =
+      MakeHSplitBottom(console, center, &split_state->bottom_height, split_state);
+  auto center_column = Renderer([=] {
+    if (layout_state != nullptr && layout_state->console_visible) {
+      return center_with_console->Render() | flex | bgcolor(theme::PanelBg());
+    }
+    return center->Render() | flex | bgcolor(theme::PanelBg());
+  });
+
   auto welcome_screen =
       MakeWelcomeScreen(layout_state, welcome_state, on_welcome_external_file, on_welcome_debug,
                         on_welcome_workspace);
@@ -907,16 +920,17 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height, layout_state);
 
   auto explorer_and_center =
-      MakeVSplitLeft(file_tree, center, &split_state->left_width, split_state);
+      MakeVSplitLeft(file_tree, center_column, &split_state->left_width, split_state);
   auto workspace_lr =
       MakeVSplitRight(right_panel, explorer_and_center, &split_state->right_width, split_state);
   workspace_lr = WrapClearInputFocus(std::move(workspace_lr), layout_state);
   auto workspace_l =
       WrapClearInputFocus(explorer_and_center, layout_state);
   auto workspace_r =
-      WrapClearInputFocus(MakeVSplitRight(right_panel, center, &split_state->right_width, split_state),
-                          layout_state);
-  auto workspace_none = WrapClearInputFocus(center, layout_state);
+      WrapClearInputFocus(
+          MakeVSplitRight(right_panel, center_column, &split_state->right_width, split_state),
+          layout_state);
+  auto workspace_none = WrapClearInputFocus(center_column, layout_state);
 
   auto workspace_picker = Renderer([=] {
     const bool show_left =
@@ -939,13 +953,6 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     return workspace_none->Render() | flex | bgcolor(theme::PanelBg());
   });
 
-  auto console = MakeConsolePanel(app_mode, model, shell, on_command, layout_state, focus,
-                                  &split_state->bottom_height, shell_launch_config, workspace,
-                                  symbols, indexer, symbol_indexer, &layout_state->right_sidebar,
-                                  git_service, git_panel_state);
-  auto with_console =
-      MakeHSplitBottom(console, workspace_picker, &split_state->bottom_height, split_state);
-
   auto welcome_screen_renderer = Renderer([welcome_screen] {
     return welcome_screen->Render() | flex | bgcolor(theme::PanelBg());
   });
@@ -958,10 +965,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     if (welcome_visible) {
       return welcome_screen_renderer->Render();
     }
-    if (layout_state != nullptr && layout_state->console_visible) {
-      return with_console->Render() | flex | bgcolor(theme::PanelBg());
-    }
-    return workspace_picker->Render();
+    return workspace_picker->Render() | flex | bgcolor(theme::PanelBg());
   });
 
   auto with_focus_sync = CatchEvent(

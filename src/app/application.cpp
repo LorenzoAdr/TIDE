@@ -171,7 +171,7 @@ class UiTickPostWrapper : public ComponentBase {
 		const bool is_custom = (event == Event::Custom);
 		// Pure mouse moves (no button pressed) already trigger a direct screen.Post from
 		// the mouse handler in CatchEvent; skip the duplicate UiTickPost to avoid running
-		// the UI loop at the raw mouse polling rate (~100-200 Hz).
+		// the UI loop at the raw mouse polling rate (~100-200 Hz).  
 		const bool is_pure_mouse_move = !is_custom && event.is_mouse() &&
 		                                event.mouse().motion == Mouse::Moved &&
 		                                event.mouse().button == Mouse::None;
