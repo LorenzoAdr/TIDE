@@ -48,6 +48,7 @@ bool event_is_ctrl_x(const ftxui::Event& event);
 bool event_is_ctrl_f(const ftxui::Event& event);
 bool event_is_ctrl_alt_f(const ftxui::Event& event);
 bool event_is_ctrl_shift_f(const ftxui::Event& event);
+bool event_is_ctrl_shift_s(const ftxui::Event& event);
 bool event_is_workspace_search_with_selection(const ftxui::Event& event);
 bool event_is_ctrl_alt_h(const ftxui::Event& event);
 bool event_is_ctrl_shift_h(const ftxui::Event& event);

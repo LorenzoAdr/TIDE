@@ -41,6 +41,7 @@
 #include "ui/quit_confirm.hpp"
 #include "ui/settings_modal.hpp"
 #include "ui/shutdown_overlay.hpp"
+#include "ui/source_substitute_modal.hpp"
 #include "ui/source_panel.hpp"
 #include "ui/status_layout_popover.hpp"
 #include "ui/symbol_picker.hpp"
@@ -1328,6 +1329,14 @@ void Application::apply_event(const DebugEvent &event) {
 			}
 		}
 		break;
+	case DebugEventKind::kHardwareWatchUpdated:
+		if (event.hardware_watch_index >= 0 &&
+		    event.hardware_watch_index < static_cast<int>(model_.hardware_watches.size()) &&
+		    event.hardware_watch_gdb_number > 0) {
+			model_.hardware_watches[static_cast<std::size_t>(event.hardware_watch_index)]
+			    .gdb_number = event.hardware_watch_gdb_number;
+		}
+		break;
 	case DebugEventKind::kInferiorPid:
 		layout_state_.packet_monitor_service->set_inferior_pid(event.inferior_pid);
 		break;
@@ -1384,7 +1393,8 @@ void Application::process_index_changes() {
 bool Application::any_modal_open() const {
 	return workspace_wizard_state_.open || external_file_wizard_state_.open ||
 	       connection_wizard_state_.open || file_picker_state_.open || symbol_picker_state_.open ||
-	       shortcuts_modal_state_.open || settings_modal_state_.open || quit_confirm_state_.open ||
+	       shortcuts_modal_state_.open || settings_modal_state_.open ||
+	       source_substitute_state_.open || quit_confirm_state_.open ||
 	       open_file_confirm_state_.is_open() || context_menu_active(&layout_state_.context_menu);
 }
 
@@ -1642,6 +1652,17 @@ int Application::run() {
 	};
 	layout_state_.status_open_launch = [this]() { open_launch_wizard(); };
 	layout_state_.status_reindex_project = [this]() { reindex_project(); };
+	layout_state_.status_open_source_substitute = [this]() {
+		if (app_mode_ != AppMode::kDebug || !debugging_started_) {
+			return;
+		}
+		if (source_substitute_state_.open) {
+			source_substitute_state_.open = false;
+		} else if (!any_modal_open()) {
+			open_source_substitute_modal(&source_substitute_state_, &model_, workspace_.root);
+		}
+		layout_state_.request_ui_tick = true;
+	};
 	layout_state_.status_quick_launch = [this]() { quick_launch_last(); };
 	layout_state_.status_open_debug = [this]() { open_debug_wizard(); };
 	layout_state_.status_quick_debug = [this]() { quick_attach_last(); };
@@ -1791,8 +1812,22 @@ int Application::run() {
 	    MakeSettingsModalOverlay(with_shortcuts, &settings_modal_state_, &app_settings_,
 	                             on_settings_apply, on_workspace_apply, on_clang_format_apply);
 
+	SourceSubstituteApplyCallback on_source_substitute_apply =
+	    [this](const std::string &from, const std::string &to) {
+		    model_.source_substitute_from = from;
+		    model_.source_substitute_to = to;
+		    UiCommand command;
+		    command.kind = UiCommandKind::kSetSourceSubstitutePath;
+		    command.substitute_from = from;
+		    command.substitute_to = to;
+		    submit_command(command);
+		    layout_state_.request_ui_tick = true;
+	    };
+	auto with_source_substitute = MakeSourceSubstituteModalOverlay(
+	    with_settings, &source_substitute_state_, &layout_state_, on_source_substitute_apply);
+
 	auto with_quit_confirm =
-	    MakeQuitConfirmOverlay(with_settings, &quit_confirm_state_, &layout_state_,
+	    MakeQuitConfirmOverlay(with_source_substitute, &quit_confirm_state_, &layout_state_,
 	                           &shutdown_state_, [this, &screen] { begin_shutdown(&screen); });
 
 	workspace_.open_file_confirm = &open_file_confirm_state_;
@@ -1815,7 +1850,7 @@ int Application::run() {
 			    return handlers.visible_line_count();
 		    }
 		    return 24;
-	    });
+	    }, on_command);
 
 	auto inner_root = CatchEvent(with_context_menu, [this, &screen, on_command,
 	                                                 &event_poller](const Event &event) {
@@ -2433,8 +2468,12 @@ int Application::run() {
 			if (app_mode_ == AppMode::kDebug) {
 				UiCommand command;
 				if (event == Event::CtrlB) {
-					if (!model_.active_file.empty() && model_.active_line > 0) {
-						ToggleBreakpointAtLine(&model_, model_.active_line, on_command);
+					int line = model_.active_line;
+					if (!model_.is_post_mortem && source_state_.cursor_line > 0) {
+						line = source_state_.cursor_line;
+					}
+					if (!model_.active_file.empty() && line > 0) {
+						ToggleBreakpointAtLine(&model_, line, on_command);
 					}
 					return true;
 				}
@@ -2458,6 +2497,16 @@ int Application::run() {
 				if (event == Event::Special({24}) && !model_.is_post_mortem) {
 					command.kind = UiCommandKind::kStepOut;
 					submit_command(command);
+					return true;
+				}
+				if (debugging_started_ && event_is_ctrl_shift_s(event)) {
+					if (source_substitute_state_.open) {
+						source_substitute_state_.open = false;
+					} else if (!any_modal_open()) {
+						open_source_substitute_modal(&source_substitute_state_, &model_,
+						                             workspace_.root);
+					}
+					layout_state_.request_ui_tick = true;
 					return true;
 				}
 			}

@@ -102,6 +102,41 @@ void set_items(ContextMenuState* state, ContextMenuKind kind,
   }
 }
 
+bool debug_watches_available(const DebugModel* model) {
+  return model != nullptr && model->state != DebugState::kDisconnected &&
+         model->state != DebugState::kTerminated;
+}
+
+bool hardware_watch_available(const DebugModel* model) {
+  return debug_watches_available(model) && !model->is_post_mortem &&
+         model->state == DebugState::kStopped;
+}
+
+void assign_watch_frame(UiCommand* command, const DebugModel* model) {
+  if (command == nullptr || model == nullptr) {
+    return;
+  }
+  if (model->variables_frame_id >= 0) {
+    command->frame_id = model->variables_frame_id;
+  } else if (!model->stack_frames.empty()) {
+    command->frame_id = model->stack_frames[model->selected_frame].id;
+  }
+}
+
+void append_debug_watch_items(ContextMenuState* state, bool show_hardware_watch) {
+  if (state == nullptr) {
+    return;
+  }
+  state->labels.push_back(i18n::tr("context_menu.add_to_watch"));
+  state->action_ids.push_back("add_to_watch");
+  state->row_boxes.push_back(Box{});
+  if (show_hardware_watch) {
+    state->labels.push_back(i18n::tr("context_menu.hardware_watch"));
+    state->action_ids.push_back("hardware_watch");
+    state->row_boxes.push_back(Box{});
+  }
+}
+
 NavigationParams navigation_params_at(WorkspaceModel* workspace, int line, int col) {
   NavigationParams params;
   if (workspace == nullptr) {
@@ -889,7 +924,7 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
                     DebugModel* model, FocusManagerState* focus, MainLayoutState* layout_state,
                     const std::shared_ptr<ISymbolProvider>& symbols, WorkspaceIndexer* indexer,
                     SymbolWorkspaceIndexer* symbol_indexer, const WorkspaceConfig* workspace_config,
-                    int editor_visible_lines) {
+                    int editor_visible_lines, CommandCallback on_command) {
   if (state == nullptr) {
     return false;
   }
@@ -1037,6 +1072,38 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     apply_problem_quick_fix(state, workspace, model, layout_state, symbols, symbol_indexer);
     if (focus != nullptr) {
       focus->region = FocusRegion::Editor;
+    }
+    return true;
+  }
+
+  if (action_id == "add_to_watch") {
+    if (model == nullptr || state->symbol_name.empty() || !on_command) {
+      return true;
+    }
+    model->add_watch(state->symbol_name);
+    UiCommand command;
+    command.kind = UiCommandKind::kAddWatch;
+    command.expression = state->symbol_name;
+    assign_watch_frame(&command, model);
+    on_command(command);
+    if (layout_state != nullptr) {
+      layout_state->right_panel_active_section = 1;
+    }
+    return true;
+  }
+
+  if (action_id == "hardware_watch") {
+    if (model == nullptr || state->symbol_name.empty() || !on_command) {
+      return true;
+    }
+    model->add_hardware_watch(state->symbol_name, state->symbol_name);
+    UiCommand command;
+    command.kind = UiCommandKind::kAddHardwareWatch;
+    command.expression = state->symbol_name;
+    command.hardware_watch_index = static_cast<int>(model->hardware_watches.size()) - 1;
+    on_command(command);
+    if (layout_state != nullptr) {
+      layout_state->right_panel_active_section = 1;
     }
     return true;
   }
@@ -1256,7 +1323,8 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
 
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
                                      int sym_start, int sym_end, const std::string& symbol,
-                                     const std::string& absolute_path, bool show_call_hierarchy) {
+                                     const std::string& absolute_path, bool show_call_hierarchy,
+                                     const DebugModel* model) {
   if (state == nullptr || symbol.empty()) {
     return;
   }
@@ -1273,6 +1341,8 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
   state->editor_sym_end = sym_end;
   state->symbol_name = symbol;
   const bool show_format = is_lsp_trackable_path(absolute_path);
+  const bool show_debug = debug_watches_available(model);
+  const bool show_hw = hardware_watch_available(model);
   if (show_call_hierarchy) {
     if (show_format) {
       set_items(state, ContextMenuKind::EditorSymbol,
@@ -1290,6 +1360,9 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
                  {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
                  {i18n::tr("context_menu.find_references"), "find_references"}});
     }
+    if (show_debug) {
+      append_debug_watch_items(state, show_hw);
+    }
     return;
   }
   if (show_format) {
@@ -1299,13 +1372,38 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
                {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
                {i18n::tr("context_menu.find_references"), "find_references"},
                {i18n::tr("context_menu.format_file"), "format_file"}});
+  } else {
+    set_items(state, ContextMenuKind::EditorSymbol,
+              {{i18n::tr("context_menu.go_definition"), "go_definition"},
+               {i18n::tr("context_menu.go_implementation"), "go_implementation"},
+               {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
+               {i18n::tr("context_menu.find_references"), "find_references"}});
+  }
+  if (show_debug) {
+    append_debug_watch_items(state, show_hw);
+  }
+}
+
+void context_menu_open_debug_symbol(ContextMenuState* state, int x, int y, int line, int col,
+                                    const std::string& symbol, const std::string& absolute_path,
+                                    const DebugModel* model) {
+  if (state == nullptr || symbol.empty()) {
     return;
   }
-  set_items(state, ContextMenuKind::EditorSymbol,
-            {{i18n::tr("context_menu.go_definition"), "go_definition"},
-             {i18n::tr("context_menu.go_implementation"), "go_implementation"},
-             {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
-             {i18n::tr("context_menu.find_references"), "find_references"}});
+  state->open = true;
+  state->rename_open = false;
+  state->delete_confirm_open = false;
+  state->rename_skip_return = false;
+  state->anchor_x = x;
+  state->anchor_y = y;
+  state->absolute_path = absolute_path;
+  state->editor_line = line;
+  state->editor_col = col;
+  state->editor_sym_start = 0;
+  state->editor_sym_end = 0;
+  state->symbol_name = symbol;
+  set_items(state, ContextMenuKind::DebugSymbol, {});
+  append_debug_watch_items(state, hardware_watch_available(model));
 }
 
 void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
@@ -1623,7 +1721,7 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
                               const std::shared_ptr<ISymbolProvider>& symbols,
                               WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
                               const WorkspaceConfig* workspace_config, int editor_visible_lines,
-                              const Event& event) {
+                              CommandCallback on_command, const Event& event) {
   if (state == nullptr || !context_menu_active(state)) {
     return false;
   }
@@ -1772,7 +1870,7 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
       trigger_press(layout_state, press_id::context_menu_row(state->selected));
       execute_action(state, state->action_ids[static_cast<std::size_t>(state->selected)], workspace,
                      secondary_workspace, model, focus, layout_state, symbols, indexer,
-                     symbol_indexer, workspace_config, editor_visible_lines);
+                     symbol_indexer, workspace_config, editor_visible_lines, on_command);
       if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open &&
           !state->move_browser_open) {
         context_menu_close(state, layout_state);
@@ -1793,7 +1891,8 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
                                  WorkspaceIndexer* indexer,
                                  SymbolWorkspaceIndexer* symbol_indexer,
                                  const WorkspaceConfig* workspace_config,
-                                 std::function<int()> editor_visible_lines) {
+                                 std::function<int()> editor_visible_lines,
+                                 CommandCallback on_command) {
   auto run_selected_action = [=](int row) {
     if (state == nullptr || row < 0 || row >= static_cast<int>(state->action_ids.size())) {
       return;
@@ -1801,7 +1900,7 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
     const int visible = editor_visible_lines ? editor_visible_lines() : 24;
     execute_action(state, state->action_ids[static_cast<std::size_t>(row)], workspace,
                    secondary_workspace, model, focus, layout_state, symbols, indexer,
-                   symbol_indexer, workspace_config, visible);
+                   symbol_indexer, workspace_config, visible, on_command);
     if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open &&
         !state->move_browser_open) {
       context_menu_close(state, layout_state);
@@ -1847,7 +1946,7 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
     const int visible = editor_visible_lines ? editor_visible_lines() : 24;
     return handle_context_menu_keys(state, workspace, secondary_workspace, model, focus,
                                     layout_state, symbols, indexer, symbol_indexer,
-                                    workspace_config, visible, event);
+                                    workspace_config, visible, on_command, event);
   };
 
   return Renderer(CatchEvent(main, handler),

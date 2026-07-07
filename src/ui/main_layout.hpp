@@ -45,6 +45,7 @@ enum class TextInputFocus {
   Console,
   Watch,
   WatchInject,
+  BreakpointHw,
   EditorFind,
   EditorGotoLine,
   EditorCompletion,
@@ -179,6 +180,7 @@ struct MainLayoutState {
   std::function<void()> status_open_settings;
   std::function<void()> status_open_shortcuts;
   std::function<void()> status_reindex_project;
+  std::function<void()> status_open_source_substitute;
   std::function<void()> status_open_launch;
   std::function<void()> status_quick_launch;
   std::function<void()> status_open_debug;
@@ -277,7 +279,8 @@ inline bool is_binary_symbols_input_focus(TextInputFocus focus) {
 }
 
 inline bool is_watch_input_focus(TextInputFocus focus) {
-  return focus == TextInputFocus::Watch || focus == TextInputFocus::WatchInject;
+  return focus == TextInputFocus::Watch || focus == TextInputFocus::WatchInject ||
+         focus == TextInputFocus::BreakpointHw;
 }
 
 inline bool is_editor_chrome_input_focus(TextInputFocus focus) {

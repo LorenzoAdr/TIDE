@@ -128,6 +128,7 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
       break;
     case TextInputFocus::Watch:
     case TextInputFocus::WatchInject:
+    case TextInputFocus::BreakpointHw:
       if (focus->region != FocusRegion::RightPanel) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
@@ -539,6 +540,7 @@ std::string buffer_text(const EditorBuffer& buffer) {
 }
 
 struct StatusBarUiState {
+  Box chg_dir_box;
   Box index_box;
   SplitToolbarButtonBoxes launch_btn;
   SplitToolbarButtonBoxes debug_btn;
@@ -559,10 +561,11 @@ bool index_clangd_ready(const MainLayoutState* layout_state) {
 }
 
 bool status_bar_hover_id(std::string_view id) {
-  return id == press_id::kStatusIndex || id == press_id::kStatusLaunch ||
-         id == press_id::kStatusLaunchQuick || id == press_id::kStatusDebug ||
-         id == press_id::kStatusDebugQuick || id == press_id::kStatusLayout ||
-         id == press_id::kStatusSettings || id == press_id::kStatusShortcuts;
+  return id == press_id::kStatusChgDir || id == press_id::kStatusIndex ||
+         id == press_id::kStatusLaunch || id == press_id::kStatusLaunchQuick ||
+         id == press_id::kStatusDebug || id == press_id::kStatusDebugQuick ||
+         id == press_id::kStatusLayout || id == press_id::kStatusSettings ||
+         id == press_id::kStatusShortcuts;
 }
 
 bool handle_status_bar_mouse(StatusBarUiState* state, MainLayoutState* layout_state,
@@ -580,7 +583,8 @@ bool handle_status_bar_mouse(StatusBarUiState* state, MainLayoutState* layout_st
   if (mouse.motion == Mouse::Moved) {
     return update_panel_hover(
         layout_state, mouse.x, mouse.y,
-        {{press_id::kStatusIndex, &state->index_box},
+        {{press_id::kStatusChgDir, &state->chg_dir_box},
+         {press_id::kStatusIndex, &state->index_box},
          {press_id::kStatusLaunch, &state->launch_btn.main},
          {press_id::kStatusLaunchQuick, &state->launch_btn.arrow},
          {press_id::kStatusDebug, &state->debug_btn.main},
@@ -592,6 +596,13 @@ bool handle_status_bar_mouse(StatusBarUiState* state, MainLayoutState* layout_st
   }
   if (mouse.button != Mouse::Left || mouse.motion != Mouse::Pressed) {
     return false;
+  }
+  if (state->chg_dir_box.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kStatusChgDir);
+    if (layout_state->status_open_source_substitute) {
+      layout_state->status_open_source_substitute();
+    }
+    return true;
   }
   if (state->index_box.Contain(mouse.x, mouse.y)) {
     trigger_press(layout_state, press_id::kStatusIndex);
@@ -1114,6 +1125,12 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     const bool index_pressed =
         layout_state != nullptr &&
         layout_state->clickable.is_pressed(press_id::kStatusIndex);
+    const bool chg_dir_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kStatusChgDir);
+    const bool chg_dir_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kStatusChgDir);
     const bool launch_hovered =
         layout_state != nullptr &&
         layout_state->clickable.is_hovered(press_id::kStatusLaunch);
@@ -1166,7 +1183,16 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       index_label = index_label | bold;
     }
     Element index_btn = MakeToolbarButton(
-        std::move(index_label), index_hovered, index_pressed, false, &status_ui->index_box);
+        std::move(index_label), index_hovered, index_pressed, false, &status_ui->index_box, true);
+
+    const bool show_chg_dir =
+        app_mode != nullptr && *app_mode == AppMode::kDebug &&
+        model->state != DebugState::kDisconnected &&
+        model->state != DebugState::kConnecting;
+    Element chg_dir_btn = MakeToolbarButton(
+        text(i18n::tr("status.button.chg_dir")) | color(theme::Muted()),
+        chg_dir_hovered, chg_dir_pressed, false, &status_ui->chg_dir_box, true);
+
     Element launch_btn = MakeSplitToolbarButton(
         muted(text(i18n::tr("status.button.launch"))),
         muted(text(i18n::tr("status.button.quick"))), launch_hovered, launch_pressed,
@@ -1180,30 +1206,28 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     Element layout_btn = MakeToolbarButton(
         text(i18n::tr("status.button.layout")) | color(theme::Muted()) |
             (layout_active ? bold : nothing),
-        layout_hovered, layout_pressed, false, &status_ui->layout_box);
+        layout_hovered, layout_pressed, false, &status_ui->layout_box, true);
     Element settings_btn = MakeToolbarButton(
         text(i18n::tr("status.button.settings")) | color(theme::Muted()),
-        settings_hovered, settings_pressed, false, &status_ui->settings_box);
+        settings_hovered, settings_pressed, false, &status_ui->settings_box, true);
     Element shortcuts_btn = MakeToolbarButton(
         text(i18n::tr("status.button.shortcuts")) | color(theme::Muted()),
-        shortcuts_hovered, shortcuts_pressed, false, &status_ui->shortcuts_box);
+        shortcuts_hovered, shortcuts_pressed, false, &status_ui->shortcuts_box, true);
 
     Element status = hbox({
         text(i18n::tr("status.app_name")) | bold | color(theme::Accent()),
         text(i18n::tr("status.separator")),
         focus_status,
         text(status_msg) | flex | color(theme::Header()),
-        index_btn,
-        text(" "),
-        launch_btn,
-        text(" "),
-        debug_btn,
-        text(" "),
-        layout_btn,
-        text(" "),
-        settings_btn,
-        text(" "),
-        shortcuts_btn,
+        hbox({
+            show_chg_dir ? chg_dir_btn : emptyElement(),
+            index_btn,
+            launch_btn,
+            debug_btn,
+            layout_btn,
+            settings_btn,
+            shortcuts_btn,
+        }) | bgcolor(theme::TabIdle()),
     }) | bgcolor(theme::StatusBar());
 
     Element chrome = vbox({main | flex | bgcolor(theme::PanelBg()), status});

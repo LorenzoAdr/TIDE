@@ -34,6 +34,7 @@
 #include "ui/open_file_confirm.hpp"
 #include "ui/settings_modal.hpp"
 #include "ui/shortcuts_modal.hpp"
+#include "ui/source_substitute_modal.hpp"
 #include "ui/symbol_picker.hpp"
 #include "git/git_service.hpp"
 #include "ui/git_panel.hpp"
@@ -147,6 +148,7 @@ class Application {
   OpenFileConfirmState open_file_confirm_state_;
   ShortcutsModalState shortcuts_modal_state_;
   SettingsModalState settings_modal_state_;
+  SourceSubstituteModalState source_substitute_state_;
   AppSettings app_settings_;
   WorkspaceConfig workspace_config_;
   ClangFormatConfig clang_format_config_;

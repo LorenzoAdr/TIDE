@@ -65,6 +65,7 @@ add_executable(tgdb
   src/ui/open_file_confirm.cpp
   src/ui/shortcuts_modal.cpp
   src/ui/settings_modal.cpp
+  src/ui/source_substitute_modal.cpp
   src/ui/theme.cpp
   src/ui/connection_wizard.cpp
   src/ui/workspace_wizard.cpp

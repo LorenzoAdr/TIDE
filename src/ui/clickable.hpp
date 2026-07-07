@@ -123,12 +123,14 @@ inline Element MakeTabButton(const std::string& label, bool selected, bool hover
 }
 
 inline Element MakeToolbarButton(Element content, bool hovered, bool pressed, bool disabled,
-                                 Box* box) {
+                                 Box* box, bool compact = false) {
   if (!hover_effects_enabled()) {
     hovered = false;
   }
-  Element btn =
-      hbox({text("  "), std::move(content), text("  ")}) | center | size(HEIGHT, EQUAL, 1);
+  Element btn = compact
+                    ? (std::move(content) | center | size(HEIGHT, EQUAL, 1))
+                    : (hbox({text("  "), std::move(content), text("  ")}) | center |
+                       size(HEIGHT, EQUAL, 1));
   if (disabled) {
     btn = btn | dim | bgcolor(theme::TabIdle());
   } else if (pressed) {
@@ -152,9 +154,9 @@ inline Element MakeSplitToolbarButton(Element main_content, Element arrow_conten
                                       SplitToolbarButtonBoxes* boxes) {
   return hbox({
       MakeToolbarButton(std::move(main_content), main_hovered, main_pressed, disabled,
-                        &boxes->main),
+                        &boxes->main, true),
       MakeToolbarButton(std::move(arrow_content), arrow_hovered, arrow_pressed, disabled,
-                        &boxes->arrow),
+                        &boxes->arrow, true),
   });
 }
 

@@ -3083,7 +3083,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
           is_lsp_trackable_path(buffer->path);
       context_menu_open_editor_symbol(&layout_state->context_menu, m.x, m.y, pos.line, pos.col,
                                       start_col, end_col, symbol, buffer->path,
-                                      show_call_hierarchy);
+                                      show_call_hierarchy, debug_model);
       end_mouse_selection(panel);
       return true;
     }
@@ -3434,9 +3434,18 @@ bool handle_completion_keys(CompletionState* completion, WorkspaceModel* workspa
     return false;
   }
 
-  if (event == Event::Return || event == Event::Tab) {
+  if (event == Event::Return) {
     return accept_completion(completion, buffer, layout_state, visible_lines, workspace, panel,
                            symbols);
+  }
+  if (event == Event::Tab) {
+    completion->selected = std::min(completion->selected + 1,
+                                    static_cast<int>(completion->matches.size()) - 1);
+    return true;
+  }
+  if (event == Event::TabReverse) {
+    completion->selected = std::max(0, completion->selected - 1);
+    return true;
   }
   if (event == Event::ArrowDown || (!completion->live_mode && event == Event::Character('j'))) {
     completion->selected = std::min(completion->selected + 1,
@@ -4562,6 +4571,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool helix_caret =
         layout_state != nullptr && layout_state->app_settings != nullptr &&
         layout_state->app_settings->helix_mode_enabled;
+    const Color cursor_cell =
+        helix_caret && panel_state->helix.mode == HelixMode::kInsert ? theme::Success()
+                                                                     : theme::CursorCell();
     const bool show_caret =
         !panel_state->mouse_selecting &&
         (!buffer.primary().has_selection() || helix_caret);
@@ -4651,7 +4663,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                            indent_guides_enabled
                                                ? guide_tracker.advance(display_line, tab_col_width)
                                                : 0,
-                                           defer_rich_decorations) |
+                                           defer_rich_decorations, cursor_cell) |
                             xflex_shrink);
 
       in_block_comment = block_comment_state_after_line(display_line, in_block_comment);

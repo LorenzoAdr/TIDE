@@ -10,6 +10,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "lsp/diagnostics.hpp"
 #include "lsp/semantic_tokens.hpp"
+#include "ui/theme.hpp"
 #include "util/cpp_highlight.hpp"
 
 namespace tgdb {
@@ -69,6 +70,7 @@ ftxui::Element RenderEditorLine(const std::string& line, int line_index,
                                CppHighlightContext* highlight_ctx = nullptr,
                                bool sticky_scroll_line = false,
                                bool indent_guides_enabled = false, int indent_guide_depth = 0,
-                               bool defer_rich_decorations = false);
+                               bool defer_rich_decorations = false,
+                               ftxui::Color cursor_cell_bg = theme::CursorCell());
 
 }  // namespace tgdb

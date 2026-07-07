@@ -7,6 +7,8 @@ namespace tgdb::press_id {
 
 constexpr std::string_view kWatchesPlay = "watches.play";
 constexpr std::string_view kWatchesStop = "watches.stop";
+constexpr std::string_view kWatchesNext = "watches.next";
+constexpr std::string_view kWatchesStep = "watches.step";
 constexpr std::string_view kWatchesClearBreakpoints = "watches.clear_breakpoints";
 constexpr std::string_view kConsoleTabTerminal = "console.tab.terminal";
 constexpr std::string_view kConsoleTabGdb = "console.tab.gdb";
@@ -24,6 +26,7 @@ constexpr std::string_view kSidebarHide = "sidebar.hide";
 constexpr std::string_view kExplorerHide = "explorer.hide";
 constexpr std::string_view kConsoleHide = "console.hide";
 constexpr std::string_view kStatusIndex = "status.index";
+constexpr std::string_view kStatusChgDir = "status.chg_dir";
 constexpr std::string_view kStatusLaunch = "status.launch";
 constexpr std::string_view kStatusLaunchQuick = "status.launch.quick";
 constexpr std::string_view kStatusDebug = "status.debug";
@@ -138,7 +141,8 @@ inline bool is_editor_chrome_hover(std::string_view id) {
 }
 
 inline bool is_watches_hover(std::string_view id) {
-  return id == kWatchesPlay || id == kWatchesStop || id == kWatchesClearBreakpoints ||
+  return id == kWatchesPlay || id == kWatchesStop || id == kWatchesNext ||
+         id == kWatchesStep || id == kWatchesClearBreakpoints ||
          id.rfind("watches.tab.", 0) == 0;
 }
 

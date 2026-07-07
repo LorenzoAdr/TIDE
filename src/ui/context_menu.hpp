@@ -17,12 +17,20 @@
 #include "symbols/symbol_provider.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/path_browser.hpp"
+#include "ui/source_panel.hpp"
 
 namespace tgdb {
 
 struct MainLayoutState;
 
-enum class ContextMenuKind { File, Folder, EditorSymbol, EditorBackground, Problem };
+enum class ContextMenuKind {
+  File,
+  Folder,
+  EditorSymbol,
+  EditorBackground,
+  DebugSymbol,
+  Problem
+};
 
 enum class NamePromptKind { Rename, CreateFile, CreateFolder };
 
@@ -82,7 +90,12 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
 
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
                                      int sym_start, int sym_end, const std::string& symbol,
-                                     const std::string& absolute_path, bool show_call_hierarchy);
+                                     const std::string& absolute_path, bool show_call_hierarchy,
+                                     const DebugModel* model = nullptr);
+
+void context_menu_open_debug_symbol(ContextMenuState* state, int x, int y, int line, int col,
+                                    const std::string& symbol, const std::string& absolute_path,
+                                    const DebugModel* model);
 
 void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
                                          const std::string& absolute_path, int line, int col,
@@ -98,7 +111,7 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
                               const std::shared_ptr<ISymbolProvider>& symbols,
                               WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
                               const WorkspaceConfig* workspace_config, int editor_visible_lines,
-                              const ftxui::Event& event);
+                              CommandCallback on_command, const ftxui::Event& event);
 
 bool handle_context_menu_mouse(ContextMenuState* state, MainLayoutState* layout_state,
                                const ftxui::Mouse& mouse, int* clicked_row);
@@ -108,6 +121,7 @@ ftxui::Component MakeContextMenuOverlay(
     WorkspaceModel* secondary_workspace, DebugModel* model, FocusManagerState* focus,
     MainLayoutState* layout_state, const std::shared_ptr<ISymbolProvider>& symbols,
     WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
-    const WorkspaceConfig* workspace_config, std::function<int()> editor_visible_lines);
+    const WorkspaceConfig* workspace_config, std::function<int()> editor_visible_lines,
+    CommandCallback on_command);
 
 }  // namespace tgdb

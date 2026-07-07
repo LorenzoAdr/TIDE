@@ -6,8 +6,8 @@
 
 namespace tgdb::cursor_blink {
 
-inline ftxui::Decorator cell_decorator() {
-  return ftxui::bgcolor(theme::CursorCell()) | ftxui::color(ftxui::Color::Black) | ftxui::bold;
+inline ftxui::Decorator cell_decorator(ftxui::Color bg = theme::CursorCell()) {
+  return ftxui::bgcolor(bg) | ftxui::color(ftxui::Color::Black) | ftxui::bold;
 }
 
 }  // namespace tgdb::cursor_blink

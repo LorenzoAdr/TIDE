@@ -23,6 +23,13 @@ struct WatchEntry {
   std::string value;
 };
 
+struct HardwareWatchEntry {
+  std::string expression;
+  std::string label;
+  bool enabled = true;
+  int gdb_number = -1;
+};
+
 enum class DebugState {
   kDisconnected,
   kConnecting,
@@ -59,9 +66,13 @@ struct DebugModel {
   int core_analyzer_selected_instance = -1;
 
   std::unordered_map<std::string, std::unordered_set<int>> breakpoints_by_file;
+  std::vector<HardwareWatchEntry> hardware_watches;
 
   int active_thread_id = 1;
   std::string stop_reason;
+
+  std::string source_substitute_from;
+  std::string source_substitute_to;
 
   // Incrementado al cambiar active_file para forzar recarga del panel de código.
   uint64_t view_token = 0;
@@ -81,6 +92,11 @@ struct DebugModel {
   void add_watch(const std::string& expression);
   void remove_watch(int index);
   void remove_watch(const std::string& expression);
+  void add_hardware_watch(const std::string& expression, const std::string& label);
+  void remove_hardware_watch(int index);
+  void set_hardware_watch_enabled(int index, bool enabled);
+  bool is_hardware_watch_enabled(int index) const;
+  void clear_hardware_watches();
 
   std::unordered_map<std::string, std::unordered_set<int>> disabled_breakpoints;
 };

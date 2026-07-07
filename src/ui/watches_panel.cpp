@@ -46,8 +46,11 @@ struct FlatVariable {
 };
 
 struct BreakpointRow {
+  enum class Kind { kLine, kHardware } kind = Kind::kLine;
   std::string file;
   int line = 0;
+  int hardware_index = -1;
+  std::string hardware_label;
 };
 
 struct WatchesPanelState {
@@ -58,7 +61,10 @@ struct WatchesPanelState {
   std::string placeholder_new_value;
   std::string placeholder_new_value_click;
   std::string placeholder_expression_click;
+  std::string placeholder_bp_hw;
+  std::string placeholder_bp_hw_click;
   std::string expr_input;
+  std::string bp_expr_input;
   std::string inject_input;
   bool inject_mode = false;
   int flat_selected = 0;
@@ -69,12 +75,16 @@ struct WatchesPanelState {
   Box variables_box;
   Box stack_box;
   Box breakpoints_box;
+  Box breakpoints_list_box;
   Box watches_box;
   Box watch_input_box;
   Box watch_inject_box;
+  Box bp_input_box;
   std::array<Box, kTabCount> tab_boxes;
   Box play_box;
   Box stop_box;
+  Box next_box;
+  Box step_box;
   Box clear_bp_box;
   std::unordered_set<std::string> expanded_expressions;
   int last_bp_click_row = -1;
@@ -91,6 +101,17 @@ bool watch_input_active(MainLayoutState* layout_state, int selected_tab) {
 bool watch_inject_active(MainLayoutState* layout_state, int selected_tab) {
   return layout_state && selected_tab == 0 &&
          layout_state->text_input_focus == TextInputFocus::WatchInject;
+}
+
+bool breakpoint_hw_input_active(MainLayoutState* layout_state, int selected_tab) {
+  return layout_state && selected_tab == 3 &&
+         layout_state->text_input_focus == TextInputFocus::BreakpointHw;
+}
+
+bool hardware_watch_available(const DebugModel* model) {
+  return model != nullptr && model->state != DebugState::kDisconnected &&
+         model->state != DebugState::kTerminated && !model->is_post_mortem &&
+         model->state == DebugState::kStopped;
 }
 
 void cancel_watch_inject(WatchesPanelState* state, MainLayoutState* layout_state) {
@@ -171,6 +192,19 @@ void submit_watch(const std::string& expression, DebugModel* model,
   on_command(command);
 }
 
+void submit_hardware_watch(const std::string& expression, DebugModel* model,
+                           CommandCallback on_command) {
+  if (expression.empty() || !on_command || model == nullptr) {
+    return;
+  }
+  model->add_hardware_watch(expression, expression);
+  UiCommand command;
+  command.kind = UiCommandKind::kAddHardwareWatch;
+  command.expression = expression;
+  command.hardware_watch_index = static_cast<int>(model->hardware_watches.size()) - 1;
+  on_command(command);
+}
+
 void sync_breakpoints_file(DebugModel* model, const std::string& file,
                            CommandCallback on_command) {
   if (!on_command) {
@@ -239,11 +273,22 @@ void rebuild_breakpoint_rows(DebugModel* model, WatchesPanelState* state) {
   state->breakpoint_rows.clear();
   for (const auto& [file, lines] : model->breakpoints_by_file) {
     for (int line : lines) {
-      state->breakpoint_rows.push_back({file, line});
+      state->breakpoint_rows.push_back({BreakpointRow::Kind::kLine, file, line, -1, {}});
     }
+  }
+  for (int i = 0; i < static_cast<int>(model->hardware_watches.size()); ++i) {
+    const auto& entry = model->hardware_watches[static_cast<std::size_t>(i)];
+    state->breakpoint_rows.push_back(
+        {BreakpointRow::Kind::kHardware, {}, 0, i, entry.label});
   }
   std::sort(state->breakpoint_rows.begin(), state->breakpoint_rows.end(),
             [](const BreakpointRow& a, const BreakpointRow& b) {
+              if (a.kind != b.kind) {
+                return a.kind == BreakpointRow::Kind::kLine;
+              }
+              if (a.kind == BreakpointRow::Kind::kHardware) {
+                return a.hardware_label < b.hardware_label;
+              }
               if (a.file != b.file) {
                 return a.file < b.file;
               }
@@ -308,6 +353,10 @@ bool switch_tab(WatchesPanelState* state, int tab, MainLayoutState* layout_state
       tab != 0) {
     layout_state->text_input_focus = TextInputFocus::None;
   }
+  if (layout_state && layout_state->text_input_focus == TextInputFocus::BreakpointHw &&
+      tab != 3) {
+    layout_state->text_input_focus = TextInputFocus::None;
+  }
   if (tab != 0) {
     cancel_watch_inject(state, layout_state);
   }
@@ -336,6 +385,8 @@ bool handle_watches_hover(WatchesPanelState* state, MainLayoutState* layout_stat
       layout_state, mouse.x, mouse.y,
       {{press_id::kWatchesPlay, &state->play_box},
        {press_id::kWatchesStop, &state->stop_box},
+       {press_id::kWatchesNext, &state->next_box},
+       {press_id::kWatchesStep, &state->step_box},
        {press_id::kWatchesClearBreakpoints, &state->clear_bp_box},
        {press_id::kWatchesTab0, &state->tab_boxes[0]},
        {press_id::kWatchesTab1, &state->tab_boxes[1]},
@@ -348,7 +399,9 @@ bool handle_toolbar_mouse(WatchesPanelState* state, DebugModel* model,
                           const Mouse& mouse, MainLayoutState* layout_state,
                           const std::function<void()>& send_continue,
                           const std::function<void()>& send_pause,
-                          const std::function<void()>& send_stop) {
+                          const std::function<void()>& send_stop,
+                          const std::function<void()>& send_next,
+                          const std::function<void()>& send_step) {
   if (state->play_box.Contain(mouse.x, mouse.y)) {
     trigger_press(layout_state, press_id::kWatchesPlay);
     if (model->state == DebugState::kRunning) {
@@ -366,6 +419,20 @@ bool handle_toolbar_mouse(WatchesPanelState* state, DebugModel* model,
     trigger_press(layout_state, press_id::kWatchesStop);
     if (send_stop) {
       send_stop();
+    }
+    return true;
+  }
+  if (state->next_box.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kWatchesNext);
+    if (model->state == DebugState::kStopped && !model->is_post_mortem && send_next) {
+      send_next();
+    }
+    return true;
+  }
+  if (state->step_box.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kWatchesStep);
+    if (model->state == DebugState::kStopped && !model->is_post_mortem && send_step) {
+      send_step();
     }
     return true;
   }
@@ -395,8 +462,43 @@ std::string gdb_backtrace_line(int index, const StackFrameInfo& frame) {
 }
 
 std::string breakpoint_label(const BreakpointRow& row) {
+  if (row.kind == BreakpointRow::Kind::kHardware) {
+    return "hw " + row.hardware_label;
+  }
   const auto basename = std::filesystem::path(row.file).filename().string();
   return basename + ":" + std::to_string(row.line);
+}
+
+void sync_hardware_watch_enabled(DebugModel* model, int index, CommandCallback on_command) {
+  if (!on_command || index < 0 || index >= static_cast<int>(model->hardware_watches.size())) {
+    return;
+  }
+  const auto& entry = model->hardware_watches[static_cast<std::size_t>(index)];
+  if (entry.gdb_number <= 0) {
+    return;
+  }
+  UiCommand command;
+  command.kind = UiCommandKind::kSetHardwareWatchEnabled;
+  command.hardware_watch_index = index;
+  command.hardware_watch_gdb_number = entry.gdb_number;
+  command.hardware_watch_enabled = entry.enabled;
+  on_command(command);
+}
+
+void remove_hardware_watch_at(DebugModel* model, int index, CommandCallback on_command) {
+  if (index < 0 || index >= static_cast<int>(model->hardware_watches.size())) {
+    return;
+  }
+  const int gdb_number = model->hardware_watches[static_cast<std::size_t>(index)].gdb_number;
+  model->remove_hardware_watch(index);
+  if (!on_command || gdb_number <= 0) {
+    return;
+  }
+  UiCommand command;
+  command.kind = UiCommandKind::kRemoveHardwareWatch;
+  command.hardware_watch_index = index;
+  command.hardware_watch_gdb_number = gdb_number;
+  on_command(command);
 }
 
 void toggle_breakpoint_enabled(WatchesPanelState* state, DebugModel* model,
@@ -408,6 +510,12 @@ void toggle_breakpoint_enabled(WatchesPanelState* state, DebugModel* model,
       0, std::min(state->bp_selected,
                   static_cast<int>(state->breakpoint_rows.size()) - 1));
   const auto& row = state->breakpoint_rows[index];
+  if (row.kind == BreakpointRow::Kind::kHardware) {
+    const bool enabled = model->is_hardware_watch_enabled(row.hardware_index);
+    model->set_hardware_watch_enabled(row.hardware_index, !enabled);
+    sync_hardware_watch_enabled(model, row.hardware_index, on_command);
+    return;
+  }
   const bool enabled = model->is_breakpoint_enabled(row.file, row.line);
   model->set_breakpoint_enabled(row.file, row.line, !enabled);
   sync_breakpoints_file(model, row.file, on_command);
@@ -422,6 +530,11 @@ void remove_selected_breakpoint(WatchesPanelState* state, DebugModel* model,
       0, std::min(state->bp_selected,
                   static_cast<int>(state->breakpoint_rows.size()) - 1));
   const auto row = state->breakpoint_rows[index];
+  if (row.kind == BreakpointRow::Kind::kHardware) {
+    remove_hardware_watch_at(model, row.hardware_index, on_command);
+    rebuild_breakpoint_rows(model, state);
+    return;
+  }
   model->remove_breakpoint(row.file, row.line);
   sync_breakpoints_file(model, row.file, on_command);
   rebuild_breakpoint_rows(model, state);
@@ -429,13 +542,17 @@ void remove_selected_breakpoint(WatchesPanelState* state, DebugModel* model,
 
 void clear_all_breakpoints(WatchesPanelState* state, DebugModel* model,
                            CommandCallback on_command) {
-  if (model->breakpoints_by_file.empty()) {
+  if (model->breakpoints_by_file.empty() && model->hardware_watches.empty()) {
     return;
   }
   std::vector<std::string> files;
   files.reserve(model->breakpoints_by_file.size());
   for (const auto& entry : model->breakpoints_by_file) {
     files.push_back(entry.first);
+  }
+  while (!model->hardware_watches.empty()) {
+    remove_hardware_watch_at(model, static_cast<int>(model->hardware_watches.size()) - 1,
+                             on_command);
   }
   model->clear_all_breakpoints();
   if (on_command) {
@@ -449,7 +566,8 @@ void clear_all_breakpoints(WatchesPanelState* state, DebugModel* model,
 
 Element make_clear_breakpoints_button(DebugModel* model, WatchesPanelState* state,
                                     MainLayoutState* layout_state) {
-  const bool disabled = model->breakpoints_by_file.empty();
+  const bool disabled =
+      model->breakpoints_by_file.empty() && model->hardware_watches.empty();
   return MakeToolbarButton(
       text(" " + i18n::tr("panel.breakpoints.clear_all") + " "),
       layout_state != nullptr &&
@@ -484,6 +602,69 @@ void remove_selected_watch(WatchesPanelState* state, DebugModel* model) {
   }
 }
 
+Elements render_breakpoint_hw_footer(WatchesPanelState* state, MainLayoutState* layout_state,
+                                     const Component& bp_expr_input, DebugModel* model) {
+  Elements footer;
+  Element input_row;
+  if (breakpoint_hw_input_active(layout_state, state->selected_tab)) {
+    input_row = bp_expr_input->Render() | border | flex | bgcolor(theme::PanelBg());
+  } else {
+    const std::string preview = state->bp_expr_input.empty() ? state->placeholder_bp_hw_click
+                                                             : state->bp_expr_input;
+    input_row = text(" " + preview + " ") | border | flex | bgcolor(theme::PanelBg()) |
+                color(state->bp_expr_input.empty() ? theme::Muted() : theme::WatchInput());
+  }
+  footer.push_back(separator());
+  footer.push_back(hbox({text(i18n::tr("panel.debug.hw_prefix")) | color(theme::WatchInput()),
+                         input_row | flex | reflect(state->bp_input_box)}));
+  if (!hardware_watch_available(model)) {
+    footer.push_back(text(i18n::tr("panel.debug.hw_requires_stop")) | color(theme::Muted()));
+  }
+  return footer;
+}
+
+bool handle_breakpoint_hw_input(WatchesPanelState* state, DebugModel* model,
+                                MainLayoutState* layout_state, Component bp_expr_input,
+                                CommandCallback on_command, Event event,
+                                const std::function<void()>& mark_watches_focus) {
+  if (event.is_mouse() && event.mouse().button == Mouse::Left &&
+      event.mouse().motion == Mouse::Pressed) {
+    const auto& m = event.mouse();
+    if (state->bp_input_box.Contain(m.x, m.y)) {
+      mark_watches_focus();
+      if (layout_state != nullptr) {
+        layout_state->text_input_focus = TextInputFocus::BreakpointHw;
+      }
+      bp_expr_input->TakeFocus();
+      return false;
+    }
+    return false;
+  }
+
+  if (breakpoint_hw_input_active(layout_state, state->selected_tab)) {
+    if (event == Event::Return) {
+      const std::string expr = state->bp_expr_input;
+      if (!expr.empty() && hardware_watch_available(model)) {
+        submit_hardware_watch(expr, model, on_command);
+        state->bp_expr_input.clear();
+      }
+      return true;
+    }
+    return false;
+  }
+
+  if (event == Event::Return) {
+    mark_watches_focus();
+    if (layout_state != nullptr) {
+      layout_state->text_input_focus = TextInputFocus::BreakpointHw;
+    }
+    bp_expr_input->TakeFocus();
+    return true;
+  }
+
+  return false;
+}
+
 bool watches_breakpoints_only(AppMode* app_mode) {
   return app_mode == nullptr || *app_mode != AppMode::kDebug;
 }
@@ -493,7 +674,9 @@ Elements render_breakpoint_list(DebugModel* model, WatchesPanelState* state) {
   int index = 0;
   for (const auto& row : state->breakpoint_rows) {
     const bool selected = index == state->bp_selected;
-    const bool enabled = model->is_breakpoint_enabled(row.file, row.line);
+    const bool enabled = row.kind == BreakpointRow::Kind::kHardware
+                             ? model->is_hardware_watch_enabled(row.hardware_index)
+                             : model->is_breakpoint_enabled(row.file, row.line);
     const std::string mark = enabled ? "● " : "○ ";
     Element line =
         hbox({text(mark) | color(enabled ? theme::BpActive() : theme::BpDisabled()),
@@ -542,11 +725,11 @@ bool handle_breakpoints_tab_keys(WatchesPanelState* state, DebugModel* model,
   if (event.is_mouse() && event.mouse().button == Mouse::Left &&
       event.mouse().motion == Mouse::Pressed) {
     const auto& m = event.mouse();
-    if (state->breakpoints_box.Contain(m.x, m.y)) {
+    if (state->breakpoints_list_box.Contain(m.x, m.y)) {
       mark_watches_focus();
-      const int row = m.y - state->breakpoints_box.y_min;
+      const int row = m.y - state->breakpoints_list_box.y_min;
       if (row >= 0 && row < static_cast<int>(state->breakpoint_rows.size())) {
-        const int rel_x = m.x - state->breakpoints_box.x_min;
+        const int rel_x = m.x - state->breakpoints_list_box.x_min;
         state->bp_selected = row;
         const auto& bp = state->breakpoint_rows[row];
         if (rel_x <= 2) {
@@ -557,9 +740,11 @@ bool handle_breakpoints_tab_keys(WatchesPanelState* state, DebugModel* model,
           remove_selected_breakpoint(state, model, on_command);
           return true;
         }
-        model->active_file = bp.file;
-        model->active_line = bp.line;
-        model->view_token++;
+        if (bp.kind == BreakpointRow::Kind::kLine) {
+          model->active_file = bp.file;
+          model->active_line = bp.line;
+          model->view_token++;
+        }
         if (focus != nullptr) {
           focus->region = FocusRegion::Editor;
         }
@@ -586,15 +771,22 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
   state->placeholder_new_value = i18n::tr("panel.debug.placeholder.new_value");
   state->placeholder_new_value_click = i18n::tr("panel.debug.placeholder.new_value_click");
   state->placeholder_expression_click = i18n::tr("panel.debug.placeholder.expression_click");
+  state->placeholder_bp_hw = i18n::tr("panel.debug.placeholder.hw_symbol");
+  state->placeholder_bp_hw_click = i18n::tr("panel.debug.placeholder.hw_symbol_click");
   auto expr_input = Input(MakeBlinkInputOption(&state->expr_input, &state->placeholder_expression));
+  auto bp_expr_input =
+      Input(MakeBlinkInputOption(&state->bp_expr_input, &state->placeholder_bp_hw));
   auto inject_input = Input(MakeBlinkInputOption(&state->inject_input, &state->placeholder_new_value));
   auto expr_maybe = Maybe(expr_input, [layout_state, state] {
     return watch_input_active(layout_state, state->selected_tab);
   });
+  auto bp_expr_maybe = Maybe(bp_expr_input, [layout_state, state] {
+    return breakpoint_hw_input_active(layout_state, state->selected_tab);
+  });
   auto inject_maybe = Maybe(inject_input, [layout_state, state] {
     return watch_inject_active(layout_state, state->selected_tab);
   });
-  auto inputs = Container::Vertical({inject_maybe, expr_maybe});
+  auto inputs = Container::Vertical({inject_maybe, expr_maybe, bp_expr_maybe});
 
   auto select_frame = [model, on_command](int index) {
     if (!on_command || model->stack_frames.empty()) {
@@ -636,8 +828,27 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     }
   };
 
+  auto send_next = [on_command] {
+    if (!on_command) {
+      return;
+    }
+    UiCommand command;
+    command.kind = UiCommandKind::kNext;
+    on_command(command);
+  };
+
+  auto send_step = [on_command] {
+    if (!on_command) {
+      return;
+    }
+    UiCommand command;
+    command.kind = UiCommandKind::kStepIn;
+    on_command(command);
+  };
+
   auto handler = [model, state, layout_state, focus, select_frame, on_command, send_continue,
-                  send_pause, send_stop, expr_input, inject_input, app_mode](Event event) {
+                  send_pause, send_stop, send_next, send_step, expr_input, bp_expr_input,
+                  inject_input, app_mode](Event event) {
     const bool breakpoints_only = watches_breakpoints_only(app_mode);
     if (breakpoints_only) {
       state->selected_tab = 3;
@@ -666,6 +877,12 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         cancel_watch_inject(state.get(), layout_state);
         return true;
       }
+      if (breakpoint_hw_input_active(layout_state, state->selected_tab)) {
+        if (layout_state) {
+          layout_state->text_input_focus = TextInputFocus::None;
+        }
+        return true;
+      }
       state->interaction_active = false;
       if (layout_state) {
         layout_state->text_input_focus = TextInputFocus::None;
@@ -685,6 +902,10 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           mark_watches_focus();
           return true;
         }
+      }
+      if (handle_breakpoint_hw_input(state.get(), model, layout_state, bp_expr_input, on_command,
+                                     event, mark_watches_focus)) {
+        return true;
       }
       if (handle_breakpoints_tab_keys(state.get(), model, layout_state, focus, on_command, event,
                                       mark_watches_focus)) {
@@ -722,7 +943,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
         event.mouse().motion == Mouse::Pressed) {
       if (handle_toolbar_mouse(state.get(), model, event.mouse(), layout_state,
-                               send_continue, send_pause, send_stop)) {
+                               send_continue, send_pause, send_stop, send_next, send_step)) {
         mark_watches_focus();
         return true;
       }
@@ -737,7 +958,8 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     const auto owns_watches_navigation = [&]() {
       return state->interaction_active ||
              watch_input_active(layout_state, state->selected_tab) ||
-             watch_inject_active(layout_state, state->selected_tab);
+             watch_inject_active(layout_state, state->selected_tab) ||
+             breakpoint_hw_input_active(layout_state, state->selected_tab);
     };
 
     if (state->selected_tab == 0) {
@@ -947,6 +1169,10 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     }
 
     if (state->selected_tab == 3) {
+      if (handle_breakpoint_hw_input(state.get(), model, layout_state, bp_expr_input, on_command,
+                                     event, mark_watches_focus)) {
+        return true;
+      }
       if (handle_breakpoints_tab_keys(state.get(), model, layout_state, focus, on_command, event,
                                       mark_watches_focus)) {
         return true;
@@ -958,7 +1184,8 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
   };
 
   auto panel = WrapFocusable(CatchEvent(
-      Renderer(inputs, [model, state, expr_input, inject_input, layout_state, focus, app_mode] {
+      Renderer(inputs, [model, state, expr_input, bp_expr_input, inject_input, layout_state, focus,
+                        app_mode] {
     if (focus != nullptr && focus->region != FocusRegion::RightPanel) {
       state->interaction_active = false;
     }
@@ -972,15 +1199,16 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
 
     const bool breakpoints_only = watches_breakpoints_only(app_mode);
     if (breakpoints_only) {
-      state->selected_tab = 3;
       Elements body;
       body.push_back(make_clear_breakpoints_button(model, state.get(), layout_state));
       body.push_back(separator());
       Elements list = render_breakpoint_list(model, state.get());
-      body.insert(body.end(), std::make_move_iterator(list.begin()),
-                  std::make_move_iterator(list.end()));
-      Element panel_list = vbox(std::move(body)) | flex | vscroll_indicator |
-                           reflect(state->breakpoints_box);
+      body.push_back(vbox(std::move(list)) | reflect(state->breakpoints_list_box));
+      Elements footer = render_breakpoint_hw_footer(state.get(), layout_state, bp_expr_input, model);
+      Element panel_list =
+          vbox({vbox(std::move(body)) | flex | vscroll_indicator | reflect(state->breakpoints_box),
+                vbox(std::move(footer))}) |
+          flex;
       return MakePanel(i18n::tr("panel.breakpoints.title"), std::move(panel_list));
     }
 
@@ -988,6 +1216,8 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     const bool stopped = model->state == DebugState::kStopped;
     const bool play_disabled =
         (!running && !stopped) || (stopped && model->is_post_mortem);
+    const bool step_disabled =
+        !stopped || model->is_post_mortem;
 
     Element play_content;
     if (running) {
@@ -1003,14 +1233,28 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         std::move(play_content),
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kWatchesPlay),
         layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kWatchesPlay),
-        play_disabled, &state->play_box) |
+        play_disabled, &state->play_box, true) |
                        size(WIDTH, EQUAL, 5);
 
     Element stop_btn = MakeToolbarButton(
         text(" ⏹ ") | bold | color(theme::Stop()),
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kWatchesStop),
         layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kWatchesStop),
-        false, &state->stop_box) |
+        false, &state->stop_box, true) |
+                       size(WIDTH, EQUAL, 5);
+
+    Element next_btn = MakeToolbarButton(
+        text(" ⏭ ") | bold | color(theme::Accent()),
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kWatchesNext),
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kWatchesNext),
+        step_disabled, &state->next_box, true) |
+                       size(WIDTH, EQUAL, 5);
+
+    Element step_btn = MakeToolbarButton(
+        text(" ↳ ") | bold | color(theme::Accent()),
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kWatchesStep),
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kWatchesStep),
+        step_disabled, &state->step_box, true) |
                        size(WIDTH, EQUAL, 5);
 
     Elements tab_row;
@@ -1025,7 +1269,8 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     }
 
     Element toolbar = vbox({
-        hbox({std::move(play_btn), std::move(stop_btn)}),
+        hbox({std::move(play_btn), std::move(stop_btn), std::move(next_btn), std::move(step_btn)}) |
+            bgcolor(theme::TabIdle()),
         hbox(std::move(tab_row)),
         separator(),
     });
@@ -1095,8 +1340,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
       bp_body.push_back(make_clear_breakpoints_button(model, state.get(), layout_state));
       bp_body.push_back(separator());
       Elements bp_list = render_breakpoint_list(model, state.get());
-      bp_body.insert(bp_body.end(), std::make_move_iterator(bp_list.begin()),
-                     std::make_move_iterator(bp_list.end()));
+      bp_body.push_back(vbox(std::move(bp_list)) | reflect(state->breakpoints_list_box));
       body = std::move(bp_body);
     }
 
@@ -1138,6 +1382,11 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
       footer.push_back(separator());
       footer.push_back(hbox({text(i18n::tr("panel.debug.watch_prefix")) | color(theme::WatchInput()),
                              input_row | reflect(state->watch_input_box)}));
+    } else if (state->selected_tab == 3) {
+      Elements hw_footer =
+          render_breakpoint_hw_footer(state.get(), layout_state, bp_expr_input, model);
+      footer.insert(footer.end(), std::make_move_iterator(hw_footer.begin()),
+                    std::make_move_iterator(hw_footer.end()));
     }
 
     Element list = vbox(std::move(body));

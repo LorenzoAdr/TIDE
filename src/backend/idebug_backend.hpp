@@ -77,8 +77,12 @@ enum class UiCommandKind {
   kFetchVariableChildren,
   kAddWatch,
   kSetWatchValue,
+  kAddHardwareWatch,
+  kRemoveHardwareWatch,
+  kSetHardwareWatchEnabled,
   kDisconnect,
   kDetach,
+  kSetSourceSubstitutePath,
   kQuit,
 };
 
@@ -98,6 +102,11 @@ struct UiCommand {
   int variables_reference = 0;
   std::string parent_expression;
   int variable_depth = 0;
+  int hardware_watch_index = -1;
+  bool hardware_watch_enabled = true;
+  int hardware_watch_gdb_number = -1;
+  std::string substitute_from;
+  std::string substitute_to;
 };
 
 enum class DebugEventKind {
@@ -115,6 +124,7 @@ enum class DebugEventKind {
   kVariableChildrenUpdated,
   kError,
   kBreakpointsUpdated,
+  kHardwareWatchUpdated,
   kInferiorPid,
 };
 
@@ -134,6 +144,8 @@ struct DebugEvent {
   int stack_frame_id = -1;
   std::string watch_value;
   std::vector<BreakpointInfo> breakpoints;
+  int hardware_watch_index = -1;
+  int hardware_watch_gdb_number = -1;
 };
 
 class IDebugBackend {

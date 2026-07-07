@@ -2,6 +2,8 @@
 
 #include <cctype>
 #include <filesystem>
+#include <optional>
+#include <regex>
 #include <sstream>
 #include <utility>
 
@@ -12,6 +14,7 @@
 #include "packet_monitor/pkt_preload_path.hpp"
 #include "util/path_normalize.hpp"
 #include "util/monitor_log.hpp"
+#include "util/shell_utils.hpp"
 #include "util/thread_name.hpp"
 
 namespace tgdb {
@@ -54,10 +57,18 @@ const char* ui_command_kind_name(UiCommandKind kind) {
       return "add_watch";
     case UiCommandKind::kSetWatchValue:
       return "set_watch_value";
+    case UiCommandKind::kAddHardwareWatch:
+      return "add_hardware_watch";
+    case UiCommandKind::kRemoveHardwareWatch:
+      return "remove_hardware_watch";
+    case UiCommandKind::kSetHardwareWatchEnabled:
+      return "set_hardware_watch_enabled";
     case UiCommandKind::kDisconnect:
       return "disconnect";
     case UiCommandKind::kDetach:
       return "detach";
+    case UiCommandKind::kSetSourceSubstitutePath:
+      return "set_source_substitute_path";
     case UiCommandKind::kQuit:
       return "quit";
   }
@@ -81,6 +92,15 @@ std::string glibc_debug_directory_paths() {
     paths += candidate;
   }
   return paths;
+}
+
+std::optional<int> parse_watchpoint_number(const std::string& output) {
+  static const std::regex kPattern(R"((?:Hardware\s+)?[Ww]atchpoint\s+(\d+))");
+  std::smatch match;
+  if (std::regex_search(output, match, kPattern) && match.size() > 1) {
+    return std::stoi(match[1].str());
+  }
+  return std::nullopt;
 }
 
 }  // namespace
@@ -862,6 +882,36 @@ void DapBackend::handle_command(const UiCommand& command) {
     }
     return;
   }
+  if (command.kind == UiCommandKind::kSetSourceSubstitutePath) {
+    const std::string from = normalize_path(command.substitute_from);
+    const std::string to = normalize_path(command.substitute_to);
+    if (from.empty() || to.empty()) {
+      push_error(i18n::tr("debug.source_substitute.invalid_paths"));
+      return;
+    }
+    std::lock_guard<std::mutex> lock(session_mutex_);
+    if (!session_) {
+      push_error(i18n::tr("debug.source_substitute.no_session"));
+      return;
+    }
+    const std::string gdb_cmd =
+        "set substitute-path " + shell_quote(from) + " " + shell_quote(to);
+    if (!exec_repl_locked(gdb_cmd, true)) {
+      push_error(i18n::tr("debug.source_substitute.failed"));
+      return;
+    }
+    DebugEvent applied;
+    applied.kind = DebugEventKind::kOutput;
+    applied.text = i18n::tr_fmt("debug.source_substitute.applied", {from, to});
+    push_event(std::move(applied));
+    if (inferior_attached_ && inferior_stopped_.load(std::memory_order_acquire)) {
+      for (const auto& [file, lines] : breakpoints_by_file_) {
+        send_breakpoints_locked(file, lines);
+      }
+      refresh_stack(active_thread_id_);
+    }
+    return;
+  }
   if (command.kind == UiCommandKind::kRefreshStack) {
     refresh_stack(command.thread_id > 0 ? command.thread_id : active_thread_id_);
     return;
@@ -880,6 +930,52 @@ void DapBackend::handle_command(const UiCommand& command) {
     eval.kind = UiCommandKind::kEvaluate;
     eval.evaluate_context = EvaluateContext::kWatch;
     handle_command(eval);
+    return;
+  }
+  if (command.kind == UiCommandKind::kAddHardwareWatch ||
+      command.kind == UiCommandKind::kRemoveHardwareWatch ||
+      command.kind == UiCommandKind::kSetHardwareWatchEnabled) {
+    std::lock_guard<std::mutex> lock(session_mutex_);
+    if (!session_) {
+      return;
+    }
+    if (command.kind == UiCommandKind::kAddHardwareWatch) {
+      if (!inferior_stopped_.load(std::memory_order_acquire)) {
+        push_error(i18n::tr("debug.dap.hardware_watch_requires_stop"));
+        return;
+      }
+      std::string output;
+      const std::string gdb_cmd = "watch " + command.expression;
+      if (!exec_repl_capture_locked(gdb_cmd, &output)) {
+        return;
+      }
+      if (!output.empty()) {
+        DebugEvent out;
+        out.kind = DebugEventKind::kOutput;
+        out.text = output;
+        push_event(std::move(out));
+      }
+      DebugEvent event;
+      event.kind = DebugEventKind::kHardwareWatchUpdated;
+      event.hardware_watch_index = command.hardware_watch_index;
+      if (const auto num = parse_watchpoint_number(output)) {
+        event.hardware_watch_gdb_number = *num;
+      }
+      push_event(std::move(event));
+      return;
+    }
+    if (command.kind == UiCommandKind::kRemoveHardwareWatch) {
+      if (command.hardware_watch_gdb_number > 0) {
+        exec_repl_locked("delete " + std::to_string(command.hardware_watch_gdb_number), true);
+      }
+      return;
+    }
+    if (command.hardware_watch_gdb_number > 0) {
+      const std::string action =
+          command.hardware_watch_enabled ? "enable" : "disable";
+      exec_repl_locked(action + " " + std::to_string(command.hardware_watch_gdb_number),
+                       true);
+    }
     return;
   }
 

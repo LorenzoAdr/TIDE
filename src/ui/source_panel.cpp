@@ -17,6 +17,7 @@
 #include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
 #include "ui/focusable_component.hpp"
+#include "ui/context_menu.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/clickable.hpp"
 #include "ui/hover_effects.hpp"
@@ -422,6 +423,17 @@ bool source_panel_contains_mouse(const SourcePanelState& panel, const Mouse& m) 
          panel.scrollbar_box.Contain(m.x, m.y);
 }
 
+int execution_line_for_view(const DebugModel& model) {
+  if (model.state != DebugState::kStopped || model.stack_frames.empty()) {
+    return -1;
+  }
+  const auto& frame = model.stack_frames[static_cast<std::size_t>(model.selected_frame)];
+  if (normalize_path(model.active_file) != normalize_path(frame.file)) {
+    return -1;
+  }
+  return frame.line;
+}
+
 bool handle_source_panel_event(DebugModel* model, SourceViewState* view_state,
                                SourcePanelState* panel_state, CommandCallback on_command,
                                FocusManagerState* focus, MainLayoutState* layout_state,
@@ -480,17 +492,46 @@ bool handle_source_panel_event(DebugModel* model, SourceViewState* view_state,
       const int rel_y = m.y - panel_state->content_box.y_min;
       const int clicked_line = view_state->scroll + rel_y + 1;
       if (clicked_line >= 1 && clicked_line <= total) {
-        model->active_line = clicked_line;
-        model->view_token++;
+        view_state->cursor_line = clicked_line;
+        scroll_to_line(view_state, clicked_line, visible);
         return true;
       }
     }
     return false;
   }
 
+  if (event.is_mouse() && event.mouse().button == Mouse::Right &&
+      event.mouse().motion == Mouse::Pressed) {
+    const auto& m = event.mouse();
+    if (panel_state->content_box.Contain(m.x, m.y) && layout_state != nullptr) {
+      const int rel_y = m.y - panel_state->content_box.y_min;
+      const int line = view_state->scroll + rel_y;
+      const int col = m.x - panel_state->content_box.x_min;
+      if (line >= 0 && line < total) {
+        const std::string& line_text = view_state->lines[static_cast<std::size_t>(line)];
+        const std::string symbol = word_at_line_col(line_text, col);
+        if (!symbol.empty()) {
+          if (focus != nullptr) {
+            focus->region = FocusRegion::Editor;
+          }
+          layout_state->text_input_focus = TextInputFocus::None;
+          layout_state->right_panel_active_section = 0;
+          layout_state->focus_sync_needed = true;
+          view_state->cursor_line = line + 1;
+          context_menu_open_debug_symbol(&layout_state->context_menu, m.x, m.y, line, col, symbol,
+                                         model->active_file, model);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  const int cursor_line =
+      view_state->cursor_line > 0 ? view_state->cursor_line : model->active_line;
   if (event == Event::CtrlB || event == Event::Character(' ')) {
-    if (!model->active_file.empty() && model->active_line > 0) {
-      ToggleBreakpointAtLine(model, model->active_line, on_command);
+    if (!model->active_file.empty() && cursor_line > 0) {
+      ToggleBreakpointAtLine(model, cursor_line, on_command);
       return true;
     }
     return false;
@@ -611,6 +652,9 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
 
     if (model->view_token != panel_state->last_view_token) {
       panel_state->last_view_token = model->view_token;
+      if (model->active_line > 0) {
+        view_state->cursor_line = model->active_line;
+      }
       scroll_to_line(view_state, model->active_line, visible);
     }
 
@@ -655,20 +699,21 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
     if (start < static_cast<int>(panel_state->block_comment_line_starts.size())) {
       in_block_comment = panel_state->block_comment_line_starts[static_cast<std::size_t>(start)];
     }
+    const int execution_line = execution_line_for_view(*model);
     for (int i = start; i < end; ++i) {
       const int line_no = i + 1;
-      const bool is_current = line_no == model->active_line;
+      const bool is_execution = execution_line > 0 && line_no == execution_line;
       const bool is_bp = model->has_breakpoint(model->active_file, line_no);
 
       std::string marker = " ";
-      if (is_current) {
+      if (is_execution) {
         marker = "►";
       } else if (is_bp) {
         marker = "●";
       }
 
       Element marker_el = text(marker);
-      if (is_current) {
+      if (is_execution) {
         marker_el = marker_el | bold;
       } else if (is_bp) {
         marker_el = marker_el | color(Color::Red);
@@ -676,7 +721,7 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
 
       Element gutter_row =
           hbox({marker_el, text(format_line_number(line_no, gutter_w))}) | color(theme::Muted());
-      if (is_current) {
+      if (is_execution) {
         gutter_row = gutter_row | inverted;
       }
       gutter_rows.push_back(gutter_row);
@@ -686,7 +731,7 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
       Element code_row =
           HighlightCodeLine(view_state->lines[i], i, semantic_tokens, -1, {}, 0, &highlight_ctx);
       in_block_comment = block_comment_state_after_line(view_state->lines[i], in_block_comment);
-      if (is_current) {
+      if (is_execution) {
         code_row = code_row | inverted;
       } else if (is_bp) {
         code_row = code_row | color(Color::Red);

@@ -1296,6 +1296,125 @@ bool debug_console_keys_active(AppMode* app_mode, FocusManagerState* focus,
   return focus != nullptr && focus->region == FocusRegion::Terminal;
 }
 
+bool handle_gdb_console_keys(AppMode* app_mode, DebugModel* model, ConsolePanelState* state,
+                             MainLayoutState* layout_state, FocusManagerState* focus,
+                             Component input_box, CommandCallback on_command, Event event) {
+  if (!debug_tab_active(app_mode, layout_state) || model == nullptr || state == nullptr) {
+    return false;
+  }
+
+  const int visible = state->last_visible_lines;
+  const int total = static_cast<int>(model->console_output.size());
+  const int max_first = max_first_visible(total, visible);
+
+  if (event == Event::Custom && console_input_active(layout_state) && input_box) {
+    input_box->TakeFocus();
+    return false;
+  }
+
+  if (event == Event::Escape) {
+    if (layout_state != nullptr && layout_state->editor_completion_open) {
+      return false;
+    }
+    if (console_input_active(layout_state)) {
+      if (layout_state != nullptr) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
+      return true;
+    }
+  }
+
+  if (event == Event::Return) {
+    if (!debug_console_keys_active(app_mode, focus, layout_state)) {
+      return false;
+    }
+    if (!console_input_active(layout_state)) {
+      activate_console_input(layout_state, focus, input_box);
+      return true;
+    }
+    const std::string line = state->input;
+    state->input.clear();
+    model->append_console("> " + line);
+    handle_gdb_command(line, model, on_command);
+    scroll_to_tail(state, total, visible);
+    return true;
+  }
+
+  if (console_input_active(layout_state)) {
+    if (!event.is_mouse() && event != Event::Custom && !event_is_tide_global_shortcut(event)) {
+      cursor_blink::show();
+      if (input_box) {
+        input_box->TakeFocus();
+        if (input_box->OnEvent(event)) {
+          return true;
+        }
+      }
+      if (event.is_character()) {
+        const std::string ch = event.character();
+        if (!ch.empty()) {
+          state->input += ch;
+          return true;
+        }
+      }
+      if (event == Event::Backspace && !state->input.empty()) {
+        state->input.pop_back();
+        return true;
+      }
+      if (event == Event::Delete && !state->input.empty()) {
+        state->input.pop_back();
+        return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  if (!debug_console_keys_active(app_mode, focus, layout_state)) {
+    return false;
+  }
+
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    state->follow_tail = false;
+    state->first_visible = std::max(0, state->first_visible - 1);
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    state->first_visible = std::min(state->first_visible + 1, max_first);
+    if (state->first_visible >= max_first) {
+      state->follow_tail = true;
+    }
+    return true;
+  }
+  if (event == Event::PageUp) {
+    state->follow_tail = false;
+    state->first_visible = std::max(0, state->first_visible - visible);
+    return true;
+  }
+  if (event == Event::PageDown) {
+    state->first_visible = std::min(state->first_visible + visible, max_first);
+    if (state->first_visible >= max_first) {
+      state->follow_tail = true;
+    }
+    return true;
+  }
+  if (event.is_mouse() && event.mouse().motion == Mouse::Pressed) {
+    if (event.mouse().button == Mouse::WheelUp) {
+      state->follow_tail = false;
+      state->first_visible = std::max(0, state->first_visible - 3);
+      return true;
+    }
+    if (event.mouse().button == Mouse::WheelDown) {
+      state->first_visible = std::min(state->first_visible + 3, max_first);
+      if (state->first_visible >= max_first) {
+        state->follow_tail = true;
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
 ShellLaunchConfig current_shell_launch(const ShellLaunchConfigProvider& provider,
                                        DebugModel* model) {
   if (provider) {
@@ -1457,10 +1576,6 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       return false;
     }
 
-    const int visible = state->last_visible_lines;
-    const int total = static_cast<int>(model->console_output.size());
-    const int max_first = max_first_visible(total, visible);
-
     if (const int tab = console_tab_from_digit(event, debug_console_mode(app_mode)); tab >= 0) {
       trigger_press(layout_state, console_tab_press_id(tab));
       switch_console_tab(state.get(), layout_state, focus, tab, git_service, git_panel_state);
@@ -1485,10 +1600,10 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       if (layout_state != nullptr && layout_state->editor_completion_open) {
         return false;
       }
-      if (layout_state) {
+      if (!on_debug_tab && layout_state) {
         layout_state->text_input_focus = TextInputFocus::None;
+        return true;
       }
-      return true;
     }
 
     if (on_terminal_tab && state->shell_ui_active && handle_terminal_scroll_keys(state.get(), event)) {
@@ -1506,22 +1621,6 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       return false;
     }
 
-    if (event == Event::Return && on_debug_tab) {
-      if (!debug_console_keys_active(app_mode, focus, layout_state)) {
-        return false;
-      }
-      if (!console_input_active(layout_state)) {
-        activate_console_input(layout_state, focus, input_box);
-        return true;
-      }
-      const std::string line = state->input;
-      state->input.clear();
-      model->append_console("> " + line);
-      handle_gdb_command(line, model, on_command);
-      scroll_to_tail(state.get(), static_cast<int>(model->console_output.size()), visible);
-      return true;
-    }
-
     if (event == Event::Return && on_terminal_tab) {
       activate_shell_input(model, layout_state, focus, shell, state.get(),
                            current_shell_launch(shell_launch_config, model));
@@ -1531,58 +1630,20 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       return true;
     }
 
-    if (console_input_active(layout_state) && on_debug_tab) {
-      if (!event.is_mouse() && event != Event::Custom) {
-        cursor_blink::show();
-      }
-      return false;
-    }
-
-    if (on_debug_tab && debug_console_keys_active(app_mode, focus, layout_state)) {
-      if (event == Event::ArrowUp || event == Event::Character('k')) {
-        state->follow_tail = false;
-        state->first_visible = std::max(0, state->first_visible - 1);
-        return true;
-      }
-      if (event == Event::ArrowDown || event == Event::Character('j')) {
-        state->first_visible = std::min(state->first_visible + 1, max_first);
-        if (state->first_visible >= max_first) {
-          state->follow_tail = true;
-        }
-        return true;
-      }
-      if (event == Event::PageUp) {
-        state->follow_tail = false;
-        state->first_visible = std::max(0, state->first_visible - visible);
-        return true;
-      }
-      if (event == Event::PageDown) {
-        state->first_visible = std::min(state->first_visible + visible, max_first);
-        if (state->first_visible >= max_first) {
-          state->follow_tail = true;
-        }
-        return true;
-      }
-      if (event.is_mouse() && event.mouse().motion == Mouse::Pressed) {
-        if (event.mouse().button == Mouse::WheelUp) {
-          state->follow_tail = false;
-          state->first_visible = std::max(0, state->first_visible - 3);
-          return true;
-        }
-        if (event.mouse().button == Mouse::WheelDown) {
-          state->first_visible = std::min(state->first_visible + 3, max_first);
-          if (state->first_visible >= max_first) {
-            state->follow_tail = true;
-          }
-          return true;
-        }
-      }
+    if (handle_gdb_console_keys(app_mode, model, state.get(), layout_state, focus, input_box,
+                                on_command, event)) {
+      return true;
     }
 
     return false;
   });
 
-  auto dispatch_console_keys = [app_mode, layout_state, focus, shell, state](Event event) -> bool {
+  auto dispatch_console_keys = [app_mode, layout_state, focus, shell, state, model, on_command,
+                                input_box](Event event) -> bool {
+    if (handle_gdb_console_keys(app_mode, model, state.get(), layout_state, focus, input_box,
+                                on_command, event)) {
+      return true;
+    }
     if (!terminal_tab_active(app_mode, layout_state)) {
       return false;
     }

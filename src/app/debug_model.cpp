@@ -58,6 +58,9 @@ std::string format_stop_reason(const std::string& reason) {
   if (reason == "breakpoint") {
     return i18n::tr("debug.stop_reason.breakpoint");
   }
+  if (reason == "data breakpoint") {
+    return i18n::tr("debug.stop_reason.data_breakpoint");
+  }
   if (reason == "step") {
     return i18n::tr("debug.stop_reason.step");
   }
@@ -202,6 +205,40 @@ void DebugModel::remove_watch(const std::string& expression) {
       std::remove_if(watches.begin(), watches.end(),
                      [&](const WatchEntry& w) { return w.expression == expression; }),
       watches.end());
+}
+
+void DebugModel::add_hardware_watch(const std::string& expression, const std::string& label) {
+  for (const auto& entry : hardware_watches) {
+    if (entry.expression == expression) {
+      return;
+    }
+  }
+  hardware_watches.push_back({expression, label.empty() ? expression : label, true, -1});
+}
+
+void DebugModel::remove_hardware_watch(int index) {
+  if (index < 0 || index >= static_cast<int>(hardware_watches.size())) {
+    return;
+  }
+  hardware_watches.erase(hardware_watches.begin() + index);
+}
+
+void DebugModel::set_hardware_watch_enabled(int index, bool enabled) {
+  if (index < 0 || index >= static_cast<int>(hardware_watches.size())) {
+    return;
+  }
+  hardware_watches[static_cast<std::size_t>(index)].enabled = enabled;
+}
+
+bool DebugModel::is_hardware_watch_enabled(int index) const {
+  if (index < 0 || index >= static_cast<int>(hardware_watches.size())) {
+    return false;
+  }
+  return hardware_watches[static_cast<std::size_t>(index)].enabled;
+}
+
+void DebugModel::clear_hardware_watches() {
+  hardware_watches.clear();
 }
 
 }  // namespace tgdb

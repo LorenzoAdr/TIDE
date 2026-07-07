@@ -35,6 +35,7 @@ struct SourceDebugHoverState {
 struct SourceViewState {
   std::vector<std::string> lines;
   int scroll = 0;
+  int cursor_line = 0;
   SourceDebugHoverState debug_hover;
 };
 

@@ -376,6 +376,17 @@ bool event_is_ctrl_shift_f(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[104;6u");
 }
 
+bool event_is_ctrl_shift_s(const ftxui::Event& event) {
+  const int mods[] = {6};
+  return (event == ftxui::Event::CtrlS && event_input_has_shift_modifier(event)) ||
+         csi_key_any_modifier(event, mods, 1, 83) ||
+         csi_key_any_modifier(event, mods, 1, 115) ||
+         event == ftxui::Event::Special("\x1B[27;6;83~") ||
+         event == ftxui::Event::Special("\x1B[27;6;115~") ||
+         event == ftxui::Event::Special("\x1B[83;6u") ||
+         event == ftxui::Event::Special("\x1B[115;6u");
+}
+
 bool event_is_workspace_search_with_selection(const ftxui::Event& event) {
   return event_is_ctrl_alt_f(event) || event_is_ctrl_shift_f(event);
 }
@@ -677,6 +688,7 @@ bool event_has_ctrl_modifier(const ftxui::Event& event) {
          event_is_ctrl_alt_o(event) || event_is_ctrl_shift_o(event) ||
          event_is_ctrl_alt_z(event) || event_is_ctrl_shift_z(event) ||
          event_is_ctrl_alt_f(event) || event_is_ctrl_shift_f(event) ||
+         event_is_ctrl_shift_s(event) ||
          event_is_ctrl_h(event) ||
          event == ftxui::Event::CtrlS ||
          event == ftxui::Event::CtrlQ ||
@@ -699,7 +711,7 @@ bool event_is_tide_app_shortcut(const ftxui::Event& event) {
     return true;
   }
   if (event_is_open_search_panel(event) || event_is_open_outline_panel(event) ||
-      event_is_open_binary_symbols_panel(event)) {
+      event_is_open_binary_symbols_panel(event) || event_is_ctrl_shift_s(event)) {
     return true;
   }
   return event == ftxui::Event::F2 || event == ftxui::Event::F3 ||

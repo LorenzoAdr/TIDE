@@ -122,6 +122,7 @@ std::vector<ShortcutSection> shortcut_sections() {
            {"Ctrl+U", i18n::tr("shortcuts.debug.scroll_half_up")},
            {"Ctrl+I", i18n::tr("shortcuts.debug.scroll_half_down")},
            {"Ctrl+B", i18n::tr("shortcuts.debug.toggle_breakpoint")},
+           {"Ctrl+Shift+S", i18n::tr("shortcuts.debug.source_substitute")},
            {i18n::tr("shortcuts.key.gutter_click"), i18n::tr("shortcuts.debug.gutter_breakpoint")},
            {i18n::tr("shortcuts.key.gdb_console"), i18n::tr("shortcuts.debug.gdb_console")},
            {"1 / 2", i18n::tr("shortcuts.debug.bottom_tabs")},
