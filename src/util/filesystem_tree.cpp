@@ -70,6 +70,32 @@ void insert_path(FileTreeNode* tree_root, const std::string& rel_str) {
   parent->children.push_back(std::move(file));
 }
 
+void insert_folder_path(FileTreeNode* tree_root, const std::string& rel_str) {
+  if (rel_str.empty()) {
+    return;
+  }
+
+  FileTreeNode* parent = tree_root;
+  std::size_t start = 0;
+  while (start < rel_str.size()) {
+    const auto next = rel_str.find('/', start);
+    const std::string part =
+        rel_str.substr(start, next == std::string::npos ? std::string::npos : next - start);
+    if (part.empty()) {
+      if (next == std::string::npos) {
+        break;
+      }
+      start = next + 1;
+      continue;
+    }
+    parent = find_or_create_folder(parent, part);
+    if (next == std::string::npos) {
+      break;
+    }
+    start = next + 1;
+  }
+}
+
 }  // namespace
 
 FileTreeNode build_file_tree_from_paths(const std::vector<std::string>& relative_paths) {
@@ -78,6 +104,25 @@ FileTreeNode build_file_tree_from_paths(const std::vector<std::string>& relative
   tree_root.is_file = false;
   tree_root.expanded = false;
 
+  for (const auto& path : relative_paths) {
+    insert_path(&tree_root, path);
+  }
+
+  sort_tree_nodes(&tree_root);
+  return tree_root;
+}
+
+FileTreeNode build_file_tree_from_paths_and_folders(
+    const std::vector<std::string>& relative_paths,
+    const std::vector<std::string>& relative_folders) {
+  FileTreeNode tree_root;
+  tree_root.name = "";
+  tree_root.is_file = false;
+  tree_root.expanded = false;
+
+  for (const auto& folder : relative_folders) {
+    insert_folder_path(&tree_root, folder);
+  }
   for (const auto& path : relative_paths) {
     insert_path(&tree_root, path);
   }

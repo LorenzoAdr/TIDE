@@ -1,10 +1,15 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
+
+#include "util/ui_activity_gate.hpp"
 
 namespace tgdb {
 
@@ -67,14 +72,32 @@ class PerformanceSampler {
   PerformanceSampler();
   ~PerformanceSampler();
   void on_frame(bool sample_workers = false);
-  const PerformanceSnapshot& snapshot() const { return snapshot_; }
+  void set_worker_sampling_enabled(bool enabled);
+  void set_file_dump_enabled(bool enabled);
+  bool file_dump_enabled() const;
+  void set_dump_hooks(const UiActivityGate* activity_gate,
+                      const std::atomic<uint64_t>* ui_paint_count,
+                      const std::atomic<uint64_t>* ui_custom_tick);
+  PerformanceSnapshot snapshot() const;
+  std::string dump_file_path() const;
 
  private:
+  void sampler_loop();
+  void open_dump_file();
+  void append_dump_line(const PerformanceSnapshot& snap, double elapsed_sec);
+
   FpsCounter fps_counter_;
+  mutable std::mutex snapshot_mutex_;
   PerformanceSnapshot snapshot_;
-  bool has_prev_ = false;
-  std::chrono::steady_clock::time_point last_sample_time_{};
   std::unique_ptr<SamplerStatsState> stats_state_;
+  std::atomic<bool> sampling_enabled_{false};
+  std::atomic<bool> file_dump_enabled_{false};
+  std::atomic<bool> sampler_running_{false};
+  std::thread sampler_thread_;
+  std::string dump_path_;
+  const UiActivityGate* activity_gate_ = nullptr;
+  const std::atomic<uint64_t>* ui_paint_count_ = nullptr;
+  const std::atomic<uint64_t>* ui_custom_tick_ = nullptr;
 };
 
 }  // namespace tgdb

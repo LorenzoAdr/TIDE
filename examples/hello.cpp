@@ -87,7 +87,7 @@ void try_receive(int fd) {
 int main() {
 	allow_external_debugger();
 
-	const pid_t pid = getpid();
+	const pid_t pid = getpid();  
 	std::cout << "hello PID " << pid << "\n"
 	          << "UDP demo en 127.0.0.1:" << kUdpPort << "\n"
 	          << "Launch con packet monitor activo para capturar trafico.\n"
@@ -100,6 +100,7 @@ int main() {
 	}
 
 	uint16_t sequence = 0;
+	         
 	uint8_t device_id = 1;
 	int counter = 0;
 	while (true) {
@@ -118,6 +119,7 @@ int main() {
 			send_packet(udp_fd, &sensor, sizeof(sensor));
 			std::cout << "[" << counter << "] sent sensor temp=" << sensor.temperature
 			          << " device=" << static_cast<int>(device_id) << "\n";
+			          
 		}
 
 		try_receive(udp_fd);

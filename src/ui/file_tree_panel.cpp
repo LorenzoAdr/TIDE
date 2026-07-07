@@ -169,6 +169,7 @@ struct FileTreePanelState {
   FileTreeNode root;
   std::vector<FlatEntry> flat;
   std::vector<std::string> indexed_files;
+  std::vector<std::string> indexed_skeleton_folders;
   int selected = 0;
   int list_scroll = 0;
   std::string loaded_workspace;
@@ -260,6 +261,7 @@ struct FileTreePanelState {
       }
       loaded_workspace.clear();
       indexed_files.clear();
+      indexed_skeleton_folders.clear();
       root = FileTreeNode{};
       root.expanded = false;
       selected = 0;
@@ -273,14 +275,21 @@ struct FileTreePanelState {
       return;
     }
 
-    if (loaded_workspace == workspace_root && indexed_files == snapshot->files) {
+    if (loaded_workspace == workspace_root && indexed_files == snapshot->files &&
+        indexed_skeleton_folders == snapshot->skeleton_folders) {
       return;
     }
 
     loaded_workspace = workspace_root;
     indexed_files = snapshot->files;
+    indexed_skeleton_folders = snapshot->skeleton_folders;
     const std::string to_reveal = last_revealed_path;
-    root = build_file_tree_from_paths(snapshot->files);
+    if (snapshot->skeleton_folders.empty()) {
+      root = build_file_tree_from_paths(snapshot->files);
+    } else {
+      root = build_file_tree_from_paths_and_folders(snapshot->files,
+                                                    snapshot->skeleton_folders);
+    }
     if (!to_reveal.empty()) {
       reveal_file(workspace_root, to_reveal);
     } else {
@@ -675,7 +684,6 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
   auto state = std::make_shared<FileTreePanelState>();
 
   auto renderer = Renderer([model, workspace, focus, state, indexer, layout_state, git_service] {
-    const bool scanning = indexer != nullptr && indexer->scanning();
     const GitExplorerMarks git_marks = build_git_explorer_marks(git_service);
     state->sync_index(indexer != nullptr ? indexer->snapshot() : nullptr,
                       model->workspace_root);
@@ -703,11 +711,7 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
 
     Elements rows;
     if (state->flat.empty()) {
-      if (scanning) {
-        rows.push_back(text(i18n::tr("common.indexing")) | color(theme::Muted()));
-      } else {
-        rows.push_back(text(i18n::tr("panel.explorer.no_files")) | color(theme::Muted()));
-      }
+      rows.push_back(text(i18n::tr("panel.explorer.no_files")) | color(theme::Muted()));
       if (!model->workspace_root.empty()) {
         rows.push_back(text(i18n::tr_fmt("common.workspace", {model->workspace_root})) |
                        color(theme::Muted()));

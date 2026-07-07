@@ -99,6 +99,13 @@ int byte_index_to_visual_column(const std::string& line, int byte_index, int tab
   return disp;
 }
 
+int source_byte_at_display_column(const std::string& line, int body_source_byte,
+                                  int fragment_display_col, int tab_size) {
+  const int base_vis =
+      byte_index_to_visual_column(line, std::max(0, body_source_byte), tab_size);
+  return visual_column_to_byte_index(line, base_vis + fragment_display_col, tab_size);
+}
+
 void IndentGuideTracker::reset() {
   prev_indent_cols_ = 0;
   current_depth_ = 0;

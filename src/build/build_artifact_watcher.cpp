@@ -15,6 +15,13 @@ namespace fs = std::filesystem;
 
 namespace tgdb {
 
+namespace {
+
+constexpr auto kChangeDebounce = std::chrono::milliseconds(2000);
+constexpr auto kPollInterval = std::chrono::milliseconds(100);
+
+}  // namespace
+
 void BuildArtifactWatcher::set_change_callback(ChangeCallback callback) {
   std::lock_guard<std::mutex> lock(callback_mutex_);
   callback_ = std::move(callback);
@@ -79,21 +86,32 @@ void BuildArtifactWatcher::worker_loop() {
   }
 
   std::array<char, 4096> buffer{};
+  bool debounce_pending = false;
+  auto last_event_time = std::chrono::steady_clock::now();
   while (!stop_requested_.load(std::memory_order_acquire)) {
     const ssize_t bytes = read(fd, buffer.data(), buffer.size());
-    if (bytes <= 0) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const auto now = std::chrono::steady_clock::now();
+    if (bytes > 0) {
+      debounce_pending = true;
+      last_event_time = now;
+      pending_change_.store(true, std::memory_order_release);
       continue;
     }
-    pending_change_.store(true, std::memory_order_release);
-    ChangeCallback callback;
-    {
-      std::lock_guard<std::mutex> lock(callback_mutex_);
-      callback = callback_;
+
+    if (debounce_pending && now - last_event_time >= kChangeDebounce) {
+      debounce_pending = false;
+      pending_change_.store(false, std::memory_order_release);
+      ChangeCallback callback;
+      {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
+        callback = callback_;
+      }
+      if (callback) {
+        callback();
+      }
     }
-    if (callback) {
-      callback();
-    }
+
+    std::this_thread::sleep_for(kPollInterval);
   }
 
   close(fd);

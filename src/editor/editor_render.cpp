@@ -488,7 +488,10 @@ Element render_rich_line(const std::string& line, int line_index, const EditorBu
                                             static_cast<std::size_t>(bp - prev));
     const EditorDecoration* chosen = decoration_at(decorations, prev);
     const bool use_build_highlight = build_file_kind != BuildFileKind::kNone;
-    const int col_offset = syntax_highlight ? source_col_offset + prev : 0;
+    const int col_offset =
+        syntax_highlight
+            ? source_byte_at_display_column(source_line, source_col_offset, prev, tab_size)
+            : 0;
     const bool highlight_segment = syntax_highlight && !use_build_highlight;
     parts.push_back(apply_decoration(
         segment.empty() ? text(" ")

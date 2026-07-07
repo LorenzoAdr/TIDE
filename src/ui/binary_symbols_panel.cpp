@@ -417,11 +417,11 @@ void apply_pending_request(BinarySymbolsPanelState* state, MainLayoutState* layo
   bool started_analysis = false;
   if (has_new_binary) {
     if (pending.start_after_paint == 0) {
-      pending.start_after_paint = layout_state->ui_paint_count + 1;
+      pending.start_after_paint = layout_state->ui_paint_count.load(std::memory_order_relaxed) + 1;
       pending.open_tab = false;
       return;
     }
-    if (layout_state->ui_paint_count < pending.start_after_paint) {
+    if (layout_state->ui_paint_count.load(std::memory_order_relaxed) < pending.start_after_paint) {
       pending.open_tab = false;
       return;
     }
@@ -708,10 +708,10 @@ void tick_binary_symbols_panel(BinarySymbolsPanelState* state, MainLayoutState* 
   if (state == nullptr || layout_state == nullptr) {
     return;
   }
-  if (state->last_custom_tick_processed == layout_state->ui_custom_tick) {
+  if (state->last_custom_tick_processed == layout_state->ui_custom_tick.load(std::memory_order_relaxed)) {
     return;
   }
-  state->last_custom_tick_processed = layout_state->ui_custom_tick;
+  state->last_custom_tick_processed = layout_state->ui_custom_tick.load(std::memory_order_relaxed);
   apply_pending_request(state, layout_state, model);
   poll_runner(state, layout_state);
   poll_filter_runner(state, layout_state);

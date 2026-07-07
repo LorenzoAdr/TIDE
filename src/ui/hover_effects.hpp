@@ -29,8 +29,8 @@ inline bool chrome_hover_allowed(const MainLayoutState* layout) {
 
 inline bool editor_scope_effects_allowed(const MainLayoutState* layout,
                                          bool scope_highlight_enabled) {
-  return editor_scope_effects_enabled(scope_highlight_enabled) &&
-         (layout == nullptr || layout->activity_gate.allows_hover_chrome());
+  (void)layout;
+  return editor_scope_effects_enabled(scope_highlight_enabled);
 }
 
 inline bool apply_hover_repaint(MainLayoutState* layout, std::string_view before) {

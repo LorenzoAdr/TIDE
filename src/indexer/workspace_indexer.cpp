@@ -24,6 +24,98 @@ namespace tgdb {
 
 namespace {
 
+std::string relative_path_in_workspace(const fs::path& workspace_root,
+                                       const fs::path& absolute_path) {
+  std::error_code ec;
+  const fs::path rel = fs::relative(absolute_path, workspace_root, ec);
+  if (ec || rel.empty() || rel == ".") {
+    return {};
+  }
+  return rel.generic_string();
+}
+
+void list_directory_skeleton(const fs::path& workspace_root, const fs::path& dir_relative,
+                             const IndexFilterOptions& options, std::vector<std::string>* files,
+                             std::vector<std::string>* folders) {
+  const fs::path absolute = workspace_root / dir_relative;
+  std::error_code ec;
+  if (!fs::is_directory(absolute, ec)) {
+    return;
+  }
+
+  for (const auto& entry : fs::directory_iterator(absolute, ec)) {
+    if (ec) {
+      break;
+    }
+    const auto name = entry.path().filename().string();
+    if (name.empty() || name == "." || name == "..") {
+      continue;
+    }
+
+    const fs::path rel = dir_relative.empty() ? fs::path(name) : dir_relative / name;
+    const std::string rel_str = rel.generic_string();
+
+    if (entry.is_directory(ec)) {
+      if (should_skip_dir_name(name, options)) {
+        continue;
+      }
+      folders->push_back(rel_str);
+    } else if (entry.is_regular_file(ec)) {
+      if (should_list_workspace_path(rel_str, options)) {
+        files->push_back(rel_str);
+      }
+    }
+  }
+}
+
+void scan_workspace_skeleton(const std::string& workspace_root,
+                             const IndexFilterOptions& filter_options,
+                             const std::string& anchor_path,
+                             const std::string& open_file_path, IndexSnapshot* snapshot) {
+  if (snapshot == nullptr) {
+    return;
+  }
+
+  std::error_code ec;
+  const fs::path root = fs::absolute(workspace_root, ec);
+  if (!fs::is_directory(root, ec)) {
+    return;
+  }
+
+  std::vector<std::string> scan_dirs;
+  scan_dirs.push_back("");
+
+  const std::string anchor_rel = relative_path_in_workspace(root, fs::path(anchor_path));
+  if (!anchor_rel.empty()) {
+    scan_dirs.push_back(anchor_rel);
+  }
+
+  if (!open_file_path.empty()) {
+    const std::string file_rel = relative_path_in_workspace(root, fs::path(open_file_path));
+    if (!file_rel.empty()) {
+      const fs::path parent = fs::path(file_rel).parent_path();
+      const std::string parent_rel = parent.empty() || parent == "." ? "" : parent.generic_string();
+      if (std::find(scan_dirs.begin(), scan_dirs.end(), parent_rel) == scan_dirs.end()) {
+        scan_dirs.push_back(parent_rel);
+      }
+    }
+  }
+
+  std::vector<std::string> files;
+  std::vector<std::string> folders;
+  for (const auto& dir : scan_dirs) {
+    list_directory_skeleton(root, fs::path(dir), filter_options, &files, &folders);
+  }
+
+  std::sort(files.begin(), files.end());
+  std::sort(folders.begin(), folders.end());
+  folders.erase(std::unique(folders.begin(), folders.end()), folders.end());
+
+  snapshot->files = std::move(files);
+  snapshot->skeleton_folders = std::move(folders);
+  rebuild_index_files_lower(snapshot);
+}
+
 void scan_dir(const fs::path& root, const fs::path& current, const IndexFilterOptions& options,
               std::vector<std::string>* out) {
   std::error_code ec;
@@ -198,7 +290,9 @@ WorkspaceIndexer::~WorkspaceIndexer() {
 }
 
 void WorkspaceIndexer::start_scan(const std::string& workspace_root,
-                                  const IndexFilterOptions& filter_options) {
+                                  const IndexFilterOptions& filter_options,
+                                  const std::string& anchor_path,
+                                  const std::string& open_file_path) {
   stop();
   stop_requested_ = false;
   scanning_ = true;
@@ -206,6 +300,8 @@ void WorkspaceIndexer::start_scan(const std::string& workspace_root,
     auto snap = std::make_shared<IndexSnapshot>();
     snap->workspace_root = workspace_root;
     snap->filter_options = filter_options;
+    scan_workspace_skeleton(workspace_root, filter_options, anchor_path, open_file_path,
+                            snap.get());
     std::lock_guard<std::mutex> lock(mutex_);
     snapshot_ = snap;
   }

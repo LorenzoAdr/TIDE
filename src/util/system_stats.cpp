@@ -1,5 +1,7 @@
 #include "util/system_stats.hpp"
 
+#include "util/thread_name.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -7,12 +9,14 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <cstdint>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -21,6 +25,8 @@
 #include <unistd.h>
 #endif
 
+#include "util/ui_activity_gate.hpp"
+
 namespace fs = std::filesystem;
 
 namespace tgdb {
@@ -28,6 +34,7 @@ namespace tgdb {
 namespace {
 
 constexpr auto kSampleInterval = std::chrono::milliseconds(500);
+constexpr auto kFileDumpInterval = std::chrono::milliseconds(100);
 constexpr double kMinFrameDtMs = 1.0;
 
 std::string read_file_trimmed(const fs::path& path) {
@@ -509,8 +516,8 @@ int worker_display_rank(const ThreadSample& sample) {
     return 3;
   }
   static constexpr const char* kNamedThreads[] = {
-      "lsp-async", "lsp-read", "lsp-start", "ui-poller", "idx-work", "shell-read",
-      "shell-boot", "idx-syms", "dap-wrk",
+      "ui-main",   "ui-poller", "perf-sampler", "lsp-async", "lsp-read", "lsp-start",
+      "idx-work",  "shell-read", "shell-boot",   "idx-syms",  "dap-wrk",
   };
   for (int i = 0; i < static_cast<int>(std::size(kNamedThreads)); ++i) {
     if (sample.comm == kNamedThreads[i]) {
@@ -546,11 +553,13 @@ void append_child_sample(const ChildProcessCpuState& child, SamplerStatsState* p
   if (out == nullptr) {
     return;
   }
+  bool found_prev = false;
   std::uint64_t prev_ticks = 0;
   if (prev != nullptr) {
     for (const ChildProcessCpuState& prev_child : prev->children) {
       if (prev_child.pid == child.pid) {
         prev_ticks = prev_child.utime + prev_child.stime;
+        found_prev = true;
         break;
       }
     }
@@ -561,8 +570,10 @@ void append_child_sample(const ChildProcessCpuState& child, SamplerStatsState* p
   sample.is_child_process = true;
   sample.rss_kb = child.rss_kb;
   sample.child_thread_count = child.thread_count;
-  sample.cpu_percent =
-      cpu_percent_from_delta(prev_ticks, child.utime + child.stime, elapsed_sec, clock_ticks);
+  sample.cpu_percent = found_prev
+                           ? cpu_percent_from_delta(prev_ticks, child.utime + child.stime,
+                                                    elapsed_sec, clock_ticks)
+                           : 0.0;
   out->push_back(std::move(sample));
 }
 
@@ -571,11 +582,13 @@ void append_thread_sample(const ThreadCpuState& thread, SamplerStatsState* prev,
   if (out == nullptr) {
     return;
   }
+  bool found_prev = false;
   std::uint64_t prev_ticks = 0;
   if (prev != nullptr) {
     for (const ThreadCpuState& prev_thread : prev->threads) {
       if (prev_thread.tid == thread.tid) {
         prev_ticks = prev_thread.utime + prev_thread.stime;
+        found_prev = true;
         break;
       }
     }
@@ -584,8 +597,10 @@ void append_thread_sample(const ThreadCpuState& thread, SamplerStatsState* prev,
   sample.tid = thread.tid;
   sample.comm = thread.comm;
   sample.is_child_process = false;
-  sample.cpu_percent =
-      cpu_percent_from_delta(prev_ticks, thread.utime + thread.stime, elapsed_sec, clock_ticks);
+  sample.cpu_percent = found_prev
+                           ? cpu_percent_from_delta(prev_ticks, thread.utime + thread.stime,
+                                                    elapsed_sec, clock_ticks)
+                           : 0.0;
   out->push_back(std::move(sample));
 }
 
@@ -712,53 +727,172 @@ void FpsCounter::on_frame() {
 
 PerformanceSampler::PerformanceSampler() {
   stats_state_ = std::make_unique<SamplerStatsState>();
+  sampler_running_.store(true, std::memory_order_release);
+  sampler_thread_ = std::thread([this] { sampler_loop(); });
 }
 
-PerformanceSampler::~PerformanceSampler() = default;
+PerformanceSampler::~PerformanceSampler() {
+  sampler_running_.store(false, std::memory_order_release);
+  if (sampler_thread_.joinable()) {
+    sampler_thread_.join();
+  }
+}
 
-void PerformanceSampler::on_frame(bool sample_workers) {
-  fps_counter_.on_frame();
-  snapshot_.fps = fps_counter_.fps();
+PerformanceSnapshot PerformanceSampler::snapshot() const {
+  std::lock_guard<std::mutex> lock(snapshot_mutex_);
+  return snapshot_;
+}
 
+void PerformanceSampler::set_worker_sampling_enabled(bool enabled) {
+  sampling_enabled_.store(enabled, std::memory_order_release);
+}
+
+void PerformanceSampler::set_file_dump_enabled(bool enabled) {
+  file_dump_enabled_.store(enabled, std::memory_order_release);
+}
+
+bool PerformanceSampler::file_dump_enabled() const {
+  return file_dump_enabled_.load(std::memory_order_acquire);
+}
+
+void PerformanceSampler::set_dump_hooks(const UiActivityGate* activity_gate,
+                                        const std::atomic<uint64_t>* ui_paint_count,
+                                        const std::atomic<uint64_t>* ui_custom_tick) {
+  activity_gate_ = activity_gate;
+  ui_paint_count_ = ui_paint_count;
+  ui_custom_tick_ = ui_custom_tick;
+}
+
+std::string PerformanceSampler::dump_file_path() const {
+  if (!file_dump_enabled_.load(std::memory_order_acquire)) {
+    return {};
+  }
+  return dump_path_;
+}
+
+void PerformanceSampler::open_dump_file() {
 #ifdef __linux__
-  if (!sample_workers) {
+  dump_path_ = "/tmp/tgdb-perf-" + std::to_string(getpid()) + ".log";
+#else
+  dump_path_ = "/tmp/tgdb-perf.log";
+#endif
+  std::ofstream out(dump_path_, std::ios::trunc);
+  if (!out) {
+    dump_path_.clear();
     return;
   }
-  if (stats_state_ == nullptr) {
-    stats_state_ = std::make_unique<SamplerStatsState>();
+  out << "# tgdb perf dump interval_ms=100 columns:\n";
+  out << "# ts_ms phase proc_cpu% proc_rss_kb paints ticks threads(tid:name:cpu% ...)\n";
+}
+
+void PerformanceSampler::append_dump_line(const PerformanceSnapshot& snap, double elapsed_sec) {
+  if (dump_path_.empty()) {
+    return;
   }
   const auto now = std::chrono::steady_clock::now();
-  if (!has_prev_) {
-    last_sample_time_ = now;
-    has_prev_ = true;
-    SamplerStatsState curr{};
-    read_process_cpu(&stats_state_->process);
-    read_thread_cpus(&stats_state_->threads);
-    read_child_process_cpus(&stats_state_->children);
-    read_system_cpu(&stats_state_->system);
-    read_process_status(&snapshot_.process);
-    read_system_meminfo(&snapshot_.system);
-    populate_worker_samples(&snapshot_.process, nullptr, stats_state_.get(), 0.0, 1);
-    snapshot_.stats_available = true;
-    snapshot_.system.available = true;
-    return;
+  const auto ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         now.time_since_epoch())
+                         .count();
+  UiActivityPhase phase = UiActivityPhase::kGraceWindow;
+  if (activity_gate_ != nullptr) {
+    phase = activity_gate_->phase();
   }
+  const uint64_t paints =
+      ui_paint_count_ != nullptr ? ui_paint_count_->load(std::memory_order_relaxed) : 0;
+  const uint64_t ticks =
+      ui_custom_tick_ != nullptr ? ui_custom_tick_->load(std::memory_order_relaxed) : 0;
 
-  const auto elapsed = now - last_sample_time_;
-  if (elapsed < kSampleInterval) {
-    return;
+  std::ostringstream line;
+  line << ts_ms << '\t' << ui_activity_phase_label(phase) << '\t'
+       << std::fixed << std::setprecision(1) << snap.process.cpu_percent << '\t'
+       << snap.process.rss_kb << '\t' << paints << '\t' << ticks << '\t';
+  bool first = true;
+  for (const ThreadSample& thread : snap.process.threads) {
+    if (!first) {
+      line << ' ';
+    }
+    first = false;
+    line << thread.tid << ':' << thread.comm << ':' << std::fixed << std::setprecision(1)
+         << thread.cpu_percent;
   }
+  line << '\n';
 
-  const double elapsed_sec = std::chrono::duration<double>(elapsed).count();
-  last_sample_time_ = now;
+  std::ofstream out(dump_path_, std::ios::app);
+  if (out) {
+    out << line.str();
+  }
+}
 
-  SamplerStatsState curr{};
-  sample_linux_stats(&snapshot_, stats_state_.get(), &curr, elapsed_sec);
-#else
-  (void)sample_workers;
-  snapshot_.stats_available = false;
-  snapshot_.system.available = false;
-#endif
+void PerformanceSampler::on_frame(bool /*sample_workers*/) {
+  fps_counter_.on_frame();
+  std::lock_guard<std::mutex> lock(snapshot_mutex_);
+  snapshot_.fps = fps_counter_.fps();
+}
+
+void PerformanceSampler::sampler_loop() {
+  set_current_thread_name("perf-sampler");
+
+  auto last_sample = std::chrono::steady_clock::time_point{};
+  auto last_ui_publish = std::chrono::steady_clock::time_point{};
+
+  while (sampler_running_.load(std::memory_order_acquire)) {
+    const auto now = std::chrono::steady_clock::now();
+    const bool dump_enabled = file_dump_enabled_.load(std::memory_order_acquire);
+    if (dump_enabled && dump_path_.empty()) {
+      open_dump_file();
+      last_sample = {};
+    } else if (!dump_enabled && !dump_path_.empty()) {
+      dump_path_.clear();
+      last_sample = {};
+    }
+
+    if (!dump_enabled) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      continue;
+    }
+
+    if (last_sample.time_since_epoch().count() == 0) {
+      last_sample = now;
+      {
+        std::lock_guard<std::mutex> lock(snapshot_mutex_);
+        read_process_cpu(&stats_state_->process);
+        read_thread_cpus(&stats_state_->threads);
+        read_child_process_cpus(&stats_state_->children);
+        read_system_cpu(&stats_state_->system);
+        read_process_status(&snapshot_.process);
+        read_system_meminfo(&snapshot_.system);
+        populate_worker_samples(&snapshot_.process, nullptr, stats_state_.get(), 0.0, 1);
+        snapshot_.stats_available = true;
+        snapshot_.system.available = true;
+      }
+      std::this_thread::sleep_for(kFileDumpInterval);
+      continue;
+    }
+
+    const auto since_sample = now - last_sample;
+    if (since_sample >= kFileDumpInterval) {
+      const double elapsed_sec = std::chrono::duration<double>(since_sample).count();
+      PerformanceSnapshot sample;
+      SamplerStatsState curr{};
+      {
+        std::lock_guard<std::mutex> lock(snapshot_mutex_);
+        sample_linux_stats(&sample, stats_state_.get(), &curr, elapsed_sec);
+        if (sampling_enabled_.load(std::memory_order_acquire)) {
+          const auto since_ui = now - last_ui_publish;
+          if (last_ui_publish.time_since_epoch().count() == 0 || since_ui >= kSampleInterval) {
+            snapshot_ = sample;
+            last_ui_publish = now;
+          }
+        }
+      }
+      if (!dump_path_.empty()) {
+        append_dump_line(sample, elapsed_sec);
+      }
+      last_sample = now;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
 }
 
 }  // namespace tgdb

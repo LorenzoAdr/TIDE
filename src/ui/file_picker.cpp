@@ -619,11 +619,9 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
                                                     i == state->selected, kMatchTextWidth));
         }
         if (matches.empty()) {
-          const bool scanning = indexer != nullptr && indexer->scanning();
           const std::string empty_label = state->query.empty()
                                               ? i18n::tr("picker.file.no_open_files")
-                                              : (scanning ? i18n::tr("common.indexing")
-                                                          : i18n::tr("common.no_matches"));
+                                              : i18n::tr("common.no_matches");
           matches.push_back(text(empty_label) | color(theme::Muted()));
         }
 

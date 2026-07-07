@@ -97,7 +97,8 @@ class Application {
   void on_workspace_complete(const std::string& workspace_root,
                              ftxui::ScreenInteractive* screen);
   void set_workspace(const std::string& workspace_root,
-                     const WorkspaceDetectResult* detect = nullptr);
+                     const WorkspaceDetectResult* detect = nullptr,
+                     const std::string& open_file_hint = {});
   WorkspaceDetectResult resolve_workspace_for_anchor(const std::string& anchor) const;
   void exit_debug_mode();
   bool connection_config_complete() const;

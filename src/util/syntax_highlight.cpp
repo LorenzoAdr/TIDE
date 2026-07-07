@@ -119,15 +119,49 @@ LineHighlights display_spans_for_line(const LineHighlights& source_spans,
   return out;
 }
 
+std::vector<SemanticTokenSpan> display_semantic_spans_for_line(
+    const std::vector<SemanticTokenSpan>& source_spans, const std::string& source_line,
+    int source_byte_offset, int display_length, int tab_size) {
+  std::vector<SemanticTokenSpan> out;
+  if (display_length <= 0 || source_spans.empty()) {
+    return out;
+  }
+  const int base_vis =
+      byte_index_to_visual_column(source_line, std::max(0, source_byte_offset), tab_size);
+  for (const SemanticTokenSpan& span : source_spans) {
+    const int span_start_vis = byte_index_to_visual_column(source_line, span.start_col, tab_size);
+    const int span_end_vis =
+        byte_index_to_visual_column(source_line, span.start_col + span.length, tab_size);
+    const int rel_start = span_start_vis - base_vis;
+    const int rel_end = span_end_vis - base_vis;
+    if (rel_end <= 0 || rel_start >= display_length) {
+      continue;
+    }
+    SemanticTokenSpan mapped = span;
+    mapped.start_col = std::max(0, rel_start);
+    mapped.length = std::min(display_length, rel_end) - mapped.start_col;
+    if (mapped.length > 0) {
+      out.push_back(mapped);
+    }
+  }
+  return out;
+}
+
+int fragment_display_to_source_byte(const std::string& source_line, int source_byte_offset,
+                                    int fragment_display_col, int tab_size) {
+  return source_byte_at_display_column(source_line, source_byte_offset, fragment_display_col,
+                                       tab_size);
+}
+
 Element highlight_semantic_segment(const std::string& segment, const SemanticTokenSpan& span,
                                    const std::vector<std::string>& types, int line_cursor_col,
-                                   Decorator cursor_style, int col_offset) {
+                                   Decorator cursor_style, int display_col_offset) {
   const Decorator style = style_for_token_type(types, span.type);
   if (line_cursor_col < 0 || !cursor_style) {
     return text(segment) | style;
   }
 
-  const int span_view_start = span.start_col - col_offset;
+  const int span_view_start = span.start_col - display_col_offset;
   const int rel = line_cursor_col - span_view_start;
   if (rel < 0 || rel >= static_cast<int>(segment.size())) {
     return text(segment) | style;
@@ -179,36 +213,46 @@ Element highlight_tree_sitter_gap(const std::string& line, int line_index,
 }
 
 Element highlight_semantic_line(const std::string& line, int line_index,
-                                const std::vector<SemanticTokenSpan>& spans,
+                                const std::vector<SemanticTokenSpan>& display_spans,
                                 const std::vector<std::string>& types, int cursor_col,
-                                Decorator cursor_style, int col_offset,
+                                Decorator cursor_style, int source_byte_offset,
                                 const SyntaxHighlightContext* ctx) {
-  if (spans.empty()) {
-    return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style, col_offset);
+  if (display_spans.empty()) {
+    return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style,
+                                     source_byte_offset);
+  }
+
+  const int tab_size = std::max(1, editor_indent::tab_display_width());
+  const std::string* source_line = nullptr;
+  if (ctx != nullptr && ctx->lines != nullptr &&
+      line_index >= 0 && line_index < static_cast<int>(ctx->lines->size())) {
+    source_line = &(*ctx->lines)[static_cast<std::size_t>(line_index)];
   }
 
   Elements parts;
-  const int segment_end = col_offset + static_cast<int>(line.size());
-  int col = col_offset;
-  for (const SemanticTokenSpan& span : spans) {
+  const int segment_end = static_cast<int>(line.size());
+  int col = 0;
+  for (const SemanticTokenSpan& span : display_spans) {
     const int span_end = span.start_col + span.length;
-    if (span_end <= col_offset || span.start_col >= segment_end) {
+    if (span_end <= 0 || span.start_col >= segment_end) {
       continue;
     }
 
     if (span.start_col > col) {
-      const int gap_start = col - col_offset;
-      const int gap_end = std::min(static_cast<int>(line.size()), span.start_col - col_offset);
+      const int gap_start = col;
+      const int gap_end = std::min(segment_end, span.start_col);
       if (gap_end > gap_start) {
         const std::string gap = line.substr(static_cast<std::size_t>(gap_start),
                                             static_cast<std::size_t>(gap_end - gap_start));
-        const int gap_view_start = col - col_offset;
-        const int gap_view_end = span.start_col - col_offset;
-        const int gap_cursor = (cursor_col >= gap_view_start && cursor_col < gap_view_end)
-                                   ? col_offset + cursor_col
-                                   : -1;
+        const int gap_cursor =
+            (cursor_col >= gap_start && cursor_col < gap_end) ? cursor_col : -1;
+        const int gap_source_byte =
+            source_line != nullptr
+                ? fragment_display_to_source_byte(*source_line, source_byte_offset, gap_start,
+                                                  tab_size)
+                : source_byte_offset;
         parts.push_back(highlight_tree_sitter_gap(gap, line_index, ctx, gap_cursor, cursor_style,
-                                                  col));
+                                                  gap_source_byte));
       }
       col = span.start_col;
     }
@@ -220,27 +264,30 @@ Element highlight_semantic_line(const std::string& line, int line_index,
     }
 
     const std::string segment =
-        line.substr(static_cast<std::size_t>(slice_start - col_offset),
+        line.substr(static_cast<std::size_t>(slice_start),
                     static_cast<std::size_t>(slice_end - slice_start));
     SemanticTokenSpan clipped = span;
     clipped.start_col = slice_start;
     clipped.length = slice_end - slice_start;
-    parts.push_back(
-        highlight_semantic_segment(segment, clipped, types, cursor_col, cursor_style, col_offset));
+    parts.push_back(highlight_semantic_segment(segment, clipped, types, cursor_col, cursor_style,
+                                               /*display_col_offset=*/0));
     col = slice_end;
   }
 
   if (col < segment_end) {
-    const std::string tail = line.substr(static_cast<std::size_t>(col - col_offset));
-    const int tail_view_start = col - col_offset;
-    const int tail_cursor = cursor_col >= tail_view_start ? col_offset + cursor_col : -1;
+    const std::string tail = line.substr(static_cast<std::size_t>(col));
+    const int tail_cursor = cursor_col >= col ? cursor_col : -1;
+    const int tail_source_byte =
+        source_line != nullptr
+            ? fragment_display_to_source_byte(*source_line, source_byte_offset, col, tab_size)
+            : source_byte_offset;
     parts.push_back(highlight_tree_sitter_gap(tail, line_index, ctx, tail_cursor, cursor_style,
-                                              col));
+                                              tail_source_byte));
   }
 
   if (parts.empty()) {
-    const int abs_cursor = cursor_col >= 0 ? cursor_col + col_offset : -1;
-    return highlight_tree_sitter_gap(line, line_index, ctx, abs_cursor, cursor_style, col_offset);
+    return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style,
+                                     source_byte_offset);
   }
   return hbox(std::move(parts));
 }
@@ -270,15 +317,22 @@ Element HighlightCodeLine(const std::string& line, int line_index,
     return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style, col_offset);
   }
 
-  const auto& line_spans = semantic_tokens->lines[static_cast<std::size_t>(line_index)];
-  const auto spans = spans_for_segment(line_spans, col_offset, static_cast<int>(line.size()));
-  if (spans.empty()) {
-    const int abs_cursor = cursor_col >= 0 ? cursor_col + col_offset : -1;
-    return highlight_tree_sitter_gap(line, line_index, ctx, abs_cursor, cursor_style, col_offset);
+  if (ctx == nullptr || ctx->lines == nullptr ||
+      line_index >= static_cast<int>(ctx->lines->size())) {
+    return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style, col_offset);
   }
 
-  return highlight_semantic_line(line, line_index, spans, semantic_tokens->token_types, cursor_col,
-                                 cursor_style, col_offset, ctx);
+  const std::string& source_line = (*ctx->lines)[static_cast<std::size_t>(line_index)];
+  const int tab_size = std::max(1, editor_indent::tab_display_width());
+  const auto& line_spans = semantic_tokens->lines[static_cast<std::size_t>(line_index)];
+  const auto display_spans = display_semantic_spans_for_line(
+      line_spans, source_line, col_offset, static_cast<int>(line.size()), tab_size);
+  if (display_spans.empty()) {
+    return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style, col_offset);
+  }
+
+  return highlight_semantic_line(line, line_index, display_spans, semantic_tokens->token_types,
+                                 cursor_col, cursor_style, col_offset, ctx);
 }
 
 }  // namespace tgdb

@@ -134,8 +134,8 @@ struct MainLayoutState {
   std::atomic<bool> ui_heartbeat{false};
   std::atomic<bool> terminal_minimal_wake{false};
   std::atomic<bool> debug_critical_wake{false};
-  uint64_t ui_custom_tick = 0;
-  uint64_t ui_paint_count = 0;
+  std::atomic<uint64_t> ui_custom_tick{0};
+  std::atomic<uint64_t> ui_paint_count{0};
   UiActivityGate activity_gate;
   UiPerfMonitor ui_perf_monitor;
   MouseVelocityTracker mouse_velocity;

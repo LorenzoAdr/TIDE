@@ -143,10 +143,11 @@ constexpr int kOverviewRuler = 10;
 constexpr int kSecondaryPanel = 11;
 constexpr int kShowAllFiles = 12;
 constexpr int kMonitor = 13;
-constexpr int kIcons = 14;
-constexpr int kHelixMode = 15;
-constexpr int kWorkspaceAutoDetect = 16;
-constexpr int kBaseOptions = 17;
+constexpr int kPerfDump = 14;
+constexpr int kIcons = 15;
+constexpr int kHelixMode = 16;
+constexpr int kWorkspaceAutoDetect = 17;
+constexpr int kBaseOptions = 18;
 
 #ifdef TGDB_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -376,6 +377,8 @@ std::vector<SettingsOption> global_settings_options() {
        i18n::tr("settings.general.show_all_files.description")},
       {i18n::tr("settings.general.monitor.label"),
        i18n::tr("settings.general.monitor.description")},
+      {i18n::tr("settings.general.perf_dump.label"),
+       i18n::tr("settings.general.perf_dump.description")},
       {i18n::tr("settings.general.icons.label"),
        i18n::tr("settings.general.icons.description")},
       {i18n::tr("settings.general.helix_mode.label"),
@@ -515,6 +518,8 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_show_all_workspace_files;
     case kMonitor:
       return state->draft_monitor_enabled;
+    case kPerfDump:
+      return state->draft_perf_dump_enabled;
     case kIcons:
       return state->draft_icon_mode == IconMode::Always;
 #ifdef TGDB_HAS_BUNDLED_CLANGD
@@ -587,6 +592,9 @@ void toggle_option(SettingsModalState* state, int index) {
       break;
     case kMonitor:
       state->draft_monitor_enabled = !state->draft_monitor_enabled;
+      break;
+    case kPerfDump:
+      state->draft_perf_dump_enabled = !state->draft_perf_dump_enabled;
       break;
     case kIcons:
       switch (state->draft_icon_mode) {
@@ -2159,6 +2167,7 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_force_bundled_clangd = settings.force_bundled_clangd;
   state->draft_force_bundled_gdb = settings.force_bundled_gdb;
   state->draft_monitor_enabled = settings.monitor_enabled;
+  state->draft_perf_dump_enabled = settings.perf_dump_enabled;
   state->draft_icon_mode = settings.icon_mode;
   state->draft_ui_locale = settings.ui_locale;
   i18n::set_locale(state->draft_ui_locale);
@@ -2218,6 +2227,7 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->force_bundled_clangd = state->draft_force_bundled_clangd;
   settings->force_bundled_gdb = state->draft_force_bundled_gdb;
   settings->monitor_enabled = state->draft_monitor_enabled;
+  settings->perf_dump_enabled = state->draft_perf_dump_enabled;
   settings->icon_mode = state->draft_icon_mode;
   settings->ui_locale = state->draft_ui_locale;
   settings->save();

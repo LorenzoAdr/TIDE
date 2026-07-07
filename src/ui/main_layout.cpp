@@ -1027,7 +1027,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
 
   auto layout_root = Renderer(with_focus_sync, [=] {
     if (layout_state != nullptr) {
-      ++layout_state->ui_paint_count;
+      layout_state->ui_paint_count.fetch_add(1, std::memory_order_relaxed);
       layout_state->ui_perf_monitor.on_paint(steady_now_ms());
     }
     const bool git_tab_open =

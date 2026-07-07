@@ -151,7 +151,12 @@ Element render_process_section(const PerformanceSnapshot& snapshot, int body_hei
   Elements lines;
 
   std::ostringstream summary;
-  summary << i18n::tr_fmt("panel.performance.summary_process", {format_fps(snapshot.fps), format_mib(snapshot.process.rss_kb), format_percent(snapshot.process.cpu_percent), std::to_string(snapshot.process.thread_count), summarize_lsp_workers(snapshot.process.threads)});
+  summary << i18n::tr_fmt("panel.performance.summary_process",
+                          {format_fps(snapshot.fps), format_mib(snapshot.process.rss_kb),
+                           format_percent(snapshot.process.cpu_percent),
+                           std::to_string(snapshot.process.thread_count),
+                           summarize_lsp_workers(snapshot.process.threads)});
+  summary << "  (CPU/hilo: hilo perf-sampler, % = 1 nucleo)";
   lines.push_back(text(summary.str()) | color(theme::Header()));
 
   constexpr int kHeaderLines = 2;
@@ -225,7 +230,8 @@ Element render_system_section(const PerformanceSnapshot& snapshot, int body_heig
   return vbox(std::move(lines)) | flex;
 }
 
-Element render_ui_thread_section(const UiPerfSnapshot& ui, int panel_width) {
+Element render_ui_thread_section(const UiPerfSnapshot& ui, int panel_width,
+                                 const std::string& dump_path) {
   (void)panel_width;
   Elements lines;
   std::ostringstream header;
@@ -234,7 +240,14 @@ Element render_ui_thread_section(const UiPerfSnapshot& ui, int panel_width) {
          << format_percent(ui.ticks_without_paint_ratio * 100.0) << "  phase "
          << ui_activity_phase_label(ui.activity_phase) << " " << ui.ms_in_phase << "ms";
   lines.push_back(text(header.str()) | color(theme::Header()));
+  if (ui.activity_phase == UiActivityPhase::kInhibited && !dump_path.empty()) {
+    lines.push_back(text("inhibido: ver /tmp/tgdb-perf-<pid>.log (100ms, hilo perf-sampler)") |
+                    color(theme::Muted()));
+  }
 
+  if (!dump_path.empty()) {
+    lines.push_back(text("dump: " + dump_path) | color(theme::Muted()));
+  }
   std::ostringstream counts;
   counts << "events  key=" << ui.event_counts[static_cast<std::size_t>(UiPerfEventKind::kKeyboard)]
          << " click="
@@ -267,7 +280,8 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
     ui_snapshot = ui_perf->snapshot();
   }
 
-  constexpr int kUiSectionLines = 4;
+  const std::string dump_path = sampler != nullptr ? sampler->dump_file_path() : std::string{};
+  constexpr int kUiSectionLines = 5;
   constexpr int kMinHeightForSystem = 12;
   const bool show_system = total_height >= kMinHeightForSystem + kUiSectionLines;
   const int ui_height = std::min(kUiSectionLines, std::max(2, total_height / 6));
@@ -279,7 +293,7 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
       render_process_section(snapshot, process_height, panel_width, state);
 
   Elements layout;
-  layout.push_back(render_ui_thread_section(ui_snapshot, panel_width) |
+  layout.push_back(render_ui_thread_section(ui_snapshot, panel_width, dump_path) |
                    size(HEIGHT, EQUAL, ui_height) | bgcolor(theme::PanelBg()));
   layout.push_back(separator() | color(theme::AccentDim()) | size(HEIGHT, EQUAL, 1));
   layout.push_back(text(i18n::tr("panel.performance.tab.process")) | bold | color(theme::Accent()) | bgcolor(theme::TabIdle()) |

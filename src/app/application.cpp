@@ -205,6 +205,36 @@ class EventPoller {
 // FTXUI CatchEvent invoca el handler antes que el hijo; RequestUiTickGuard en el
 // handler se destruía con request_ui_tick aún en false. Este wrapper postea Custom
 // después de que todo el árbol haya procesado el evento.
+// Swallow pure mouse moves while inhibited so FTXUI keeps frame_valid_ and no child
+// handler can return handled=true (scrollbars, tabs, etc.).
+class InhibitedMouseMoveBlocker : public ComponentBase {
+  public:
+	InhibitedMouseMoveBlocker(MainLayoutState *layout, std::function<bool()> modal_open)
+	    : layout_(layout), modal_open_(std::move(modal_open)) {}
+
+	bool OnEvent(Event event) override {
+		if (should_swallow_inhibited_mouse_move(event)) {
+			return false;
+		}
+		return ComponentBase::OnEvent(std::move(event));
+	}
+
+  private:
+	bool should_swallow_inhibited_mouse_move(const Event &event) const {
+		if (!is_pure_mouse_move_event(event) || layout_ == nullptr ||
+		    !layout_->activity_gate.is_inhibited()) {
+			return false;
+		}
+		if (modal_open_ && modal_open_()) {
+			return false;
+		}
+		return true;
+	}
+
+	MainLayoutState *layout_;
+	std::function<bool()> modal_open_;
+};
+
 class UiTickPostWrapper : public ComponentBase {
   public:
 	UiTickPostWrapper(MainLayoutState *layout, ScreenInteractive *screen)
@@ -243,9 +273,12 @@ class UiTickPostWrapper : public ComponentBase {
 	ScreenInteractive *screen_;
 };
 
-Component WrapUiTickPost(Component child, MainLayoutState *layout, ScreenInteractive *screen) {
+Component WrapUiTickPost(Component child, MainLayoutState *layout, ScreenInteractive *screen,
+                         std::function<bool()> modal_open) {
+	auto guard = Make<InhibitedMouseMoveBlocker>(layout, std::move(modal_open));
+	guard->Add(std::move(child));
 	auto wrapper = Make<UiTickPostWrapper>(layout, screen);
-	wrapper->Add(std::move(child));
+	wrapper->Add(std::move(guard));
 	return wrapper;
 }
 
@@ -296,6 +329,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	}
 	symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
 	monitor_log::set_enabled(app_settings_.monitor_enabled);
+	layout_state_.performance_sampler.set_file_dump_enabled(app_settings_.perf_dump_enabled);
 	debug_available_ = gdb_supports_dap();
 	workspace_.open_file_confirm = &open_file_confirm_state_;
 	secondary_workspace_.open_file_confirm = &open_file_confirm_state_;
@@ -440,7 +474,7 @@ void Application::process_build_environment_updates() {
 
 	const std::string fingerprint =
 	    global_build_environment_service().active_environment_fingerprint();
-	if (!fingerprint.empty() && fingerprint == last_lsp_environment_fingerprint_) {
+	if (fingerprint == last_lsp_environment_fingerprint_) {
 		return;
 	}
 	last_lsp_environment_fingerprint_ = fingerprint;
@@ -520,7 +554,11 @@ void Application::restart_workspace_indexing() {
 		return;
 	}
 	const IndexFilterOptions options = index_filter_options();
-	indexer_.start_scan(workspace_.root, options);
+	std::string open_hint = workspace_.active_file;
+	if (open_hint.empty() && !workspace_.buffer.path.empty()) {
+		open_hint = workspace_.buffer.path;
+	}
+	indexer_.start_scan(workspace_.root, options, workspace_.root, open_hint);
 }
 
 void Application::reindex_project() {
@@ -779,7 +817,8 @@ void Application::dismiss_welcome_screen() {
 }
 
 void Application::set_workspace(const std::string &workspace_root,
-                                const WorkspaceDetectResult *detect) {
+                                const WorkspaceDetectResult *detect,
+                                const std::string &open_file_hint) {
 	dismiss_welcome_screen();
 	workspace_initialized_ = true;
 	save_workspace_session();
@@ -848,10 +887,22 @@ void Application::set_workspace(const std::string &workspace_root,
 		    global_build_environment_service().active_environment_fingerprint();
 		setup_build_environment_watching();
 	}
-	indexer_.start_scan(absolute, index_filter_options());
+	restore_workspace_session();
+
+	std::string anchor = absolute;
+	if (detect != nullptr && !detect->anchor_path.empty()) {
+		anchor = detect->anchor_path;
+	}
+	std::string open_hint = open_file_hint;
+	if (open_hint.empty()) {
+		open_hint = config_.initial_file;
+	}
+	if (open_hint.empty() && !workspace_.active_file.empty()) {
+		open_hint = workspace_.active_file;
+	}
+	indexer_.start_scan(absolute, index_filter_options(), anchor, open_hint);
 	sync_symbol_workspace_indexer();
 	git_service_.open(absolute);
-	restore_workspace_session();
 }
 
 WorkspaceDetectResult Application::resolve_workspace_for_anchor(const std::string &anchor) const {
@@ -1467,6 +1518,7 @@ void Application::apply_app_settings() {
 		symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
 	}
 	monitor_log::set_enabled(app_settings_.monitor_enabled);
+	layout_state_.performance_sampler.set_file_dump_enabled(app_settings_.perf_dump_enabled);
 	layout_state_.activity_gate.set_passive_enabled(app_settings_.passive_mode_enabled);
 	layout_state_.activity_gate.set_grace_window_ms(app_settings_.grace_window_ms);
 	configure_glyphs(resolve_icon_mode(app_settings_.icon_mode));
@@ -1845,7 +1897,7 @@ int Application::run() {
 			        resolve_workspace_for_anchor(fs::path(path).parent_path().string());
 			    const WorkspaceDetectResult *detect_ptr =
 			        app_settings_.workspace_auto_detect_enabled ? &detected : nullptr;
-			    set_workspace(detected.workspace_root, detect_ptr);
+			    set_workspace(detected.workspace_root, detect_ptr, path);
 			    workspace_.open_file(path);
 		    } else {
 			    workspace_.open_external_file(path);
@@ -1945,14 +1997,15 @@ int Application::run() {
 		}
 
 		if (event == Event::Custom) {
-			++layout_state_.ui_custom_tick;
+			layout_state_.ui_custom_tick.fetch_add(1, std::memory_order_relaxed);
 			monitor_log::heartbeat();
 			layout_state_.activity_gate.tick(now_ms);
 			layout_state_.ui_perf_monitor.on_custom_tick_begin(now_ms);
 			layout_state_.ui_perf_monitor.set_activity_phase(
 			    layout_state_.activity_gate.phase(),
 			    layout_state_.activity_gate.ms_in_current_phase(now_ms));
-			const uint64_t paint_before = layout_state_.ui_paint_count;
+			const uint64_t paint_before =
+			    layout_state_.ui_paint_count.load(std::memory_order_relaxed);
 
 			const bool terminal_only = layout_state_.terminal_minimal_wake.exchange(false);
 			const bool debug_critical = layout_state_.debug_critical_wake.exchange(false);
@@ -2044,10 +2097,11 @@ int Application::run() {
 				const bool sample_perf =
 				    layout_state_.console_visible &&
 				    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kPerformance;
+				layout_state_.performance_sampler.set_worker_sampling_enabled(sample_perf);
 				if (layout_state_.ui_heartbeat.exchange(false, std::memory_order_acquire)) {
 					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "performance_sampler");
 					TGDB_MON_SCOPE("ui", "tick.performance_sampler");
-					layout_state_.performance_sampler.on_frame(sample_perf);
+					layout_state_.performance_sampler.on_frame();
 				}
 			}
 
@@ -2719,9 +2773,13 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 		screen.PostEvent(Event::Custom);
 	});
 
+	layout_state_.performance_sampler.set_dump_hooks(&layout_state_.activity_gate,
+	                                                 &layout_state_.ui_paint_count,
+	                                                 &layout_state_.ui_custom_tick);
 	layout_state_.activity_gate.on_significant_input(steady_now_ms());
 
-	screen.Loop(WrapUiTickPost(root, &layout_state_, &screen));
+	screen.Loop(WrapUiTickPost(root, &layout_state_, &screen,
+	                           [this] { return any_modal_open(); }));
 
 	if (!ui_smoke) {
 		disable_extended_key_reporting();

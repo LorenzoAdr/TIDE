@@ -15,6 +15,8 @@ struct IndexSnapshot {
   std::string workspace_root;
   std::vector<std::string> files;
   std::vector<std::string> files_lower;
+  // Carpetas de primer nivel del esqueleto inicial; vacío tras el escaneo completo.
+  std::vector<std::string> skeleton_folders;
   IndexFilterOptions filter_options;
 };
 
@@ -32,7 +34,9 @@ class WorkspaceIndexer {
   ~WorkspaceIndexer();
 
   void start_scan(const std::string& workspace_root,
-                  const IndexFilterOptions& filter_options = {});
+                  const IndexFilterOptions& filter_options = {},
+                  const std::string& anchor_path = {},
+                  const std::string& open_file_path = {});
   void upsert_file(const std::string& workspace_root, const std::string& relative_file,
                    const std::string& absolute_path);
   void remove_file(const std::string& workspace_root, const std::string& relative_file);

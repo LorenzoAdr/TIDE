@@ -93,6 +93,9 @@ AppSettings AppSettings::load() {
     if (doc.contains("monitor_enabled") && doc["monitor_enabled"].is_boolean()) {
       settings.monitor_enabled = doc["monitor_enabled"].get<bool>();
     }
+    if (doc.contains("perf_dump_enabled") && doc["perf_dump_enabled"].is_boolean()) {
+      settings.perf_dump_enabled = doc["perf_dump_enabled"].get<bool>();
+    }
     if (doc.contains("passive_mode_enabled") && doc["passive_mode_enabled"].is_boolean()) {
       settings.passive_mode_enabled = doc["passive_mode_enabled"].get<bool>();
     }
@@ -156,6 +159,7 @@ bool AppSettings::save() const {
   doc["force_bundled_clangd"] = force_bundled_clangd;
   doc["force_bundled_gdb"] = force_bundled_gdb;
   doc["monitor_enabled"] = monitor_enabled;
+  doc["perf_dump_enabled"] = perf_dump_enabled;
   doc["passive_mode_enabled"] = passive_mode_enabled;
   doc["grace_window_ms"] = grace_window_ms;
   doc["lsp_hover_on_click_only"] = lsp_hover_on_click_only;

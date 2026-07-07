@@ -2299,6 +2299,23 @@ bool completion_allowed_at_cursor(EditorBuffer& buffer) {
   return cursor_in_code(buffer, line, col);
 }
 
+bool is_member_access_at_cursor(const EditorBuffer& buffer) {
+  const int line = buffer.primary_line();
+  const int col = buffer.primary_col();
+  if (line < 0 || line >= static_cast<int>(buffer.lines.size()) || col <= 0) {
+    return false;
+  }
+  const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
+  if (col > static_cast<int>(text.size())) {
+    return false;
+  }
+  const char prev = text[static_cast<std::size_t>(col - 1)];
+  if (prev == '.') {
+    return true;
+  }
+  return col >= 2 && text[static_cast<std::size_t>(col - 2)] == '-' && prev == '>';
+}
+
 NavigationParams navigation_params_for_buffer(WorkspaceModel* workspace) {
   NavigationParams params;
   if (workspace == nullptr) {
@@ -2508,11 +2525,15 @@ void schedule_completion_lsp_fetch(CompletionState* completion, WorkspaceModel* 
   if (!completion->open) {
     return;
   }
-  if (live_only && (!completion->live_mode || completion->prefix.empty())) {
+  if (live_only && !completion->live_mode) {
     return;
   }
   workspace->ensure_buffer();
   const EditorBuffer& buffer = workspace->buffer;
+  if (live_only && completion->prefix.empty() &&
+      !is_member_access_at_cursor(buffer)) {
+    return;
+  }
   if (buffer.path.empty() || !is_indexed_source_path(buffer.path)) {
     return;
   }
@@ -2662,7 +2683,7 @@ void update_live_completion(CompletionState* completion, WorkspaceModel* workspa
   }
 
   prepare_completion_at_cursor(completion, buffer);
-  if (completion->prefix.empty()) {
+  if (completion->prefix.empty() && !is_member_access_at_cursor(*buffer)) {
     completion->close(layout_state);
     return;
   }
@@ -2698,6 +2719,36 @@ void maybe_open_live_completion(CompletionState* completion, WorkspaceModel* wor
 
   if (snippet_live) {
     if (!is_ident_char(typed) || !completion_allowed_at_cursor(*buffer)) {
+      if (completion != nullptr && completion->open && completion->live_mode) {
+        completion->close(layout_state);
+      }
+      return;
+    }
+    if (completion != nullptr && completion->open && !completion->live_mode) {
+      return;
+    }
+    update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state, buffer);
+    return;
+  }
+
+  const bool member_access_trigger =
+      (typed == '.' || typed == '>') && is_member_access_at_cursor(*buffer);
+  if (member_access_trigger) {
+    if (layout_state != nullptr && layout_state->app_settings != nullptr &&
+        !layout_state->app_settings->live_lsp_completion_enabled) {
+      if (completion != nullptr && completion->open && completion->live_mode) {
+        completion->close(layout_state);
+      }
+      return;
+    }
+    if (!live_completion_uses_async_lsp(layout_state, symbols, buffer->path)) {
+      if (completion != nullptr && completion->open && completion->live_mode) {
+        completion->close(layout_state);
+      }
+      return;
+    }
+    if (buffer->path.empty() || !is_indexed_source_path(buffer->path) || symbols == nullptr ||
+        !completion_allowed_at_cursor(*buffer)) {
       if (completion != nullptr && completion->open && completion->live_mode) {
         completion->close(layout_state);
       }
@@ -4503,7 +4554,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       if (!tokens_current) {
         panel_state->semantic_tokens_enqueue_pending = true;
       }
-      if (panel_state->cached_semantic_tokens.ready && tokens_current) {
+      if (panel_state->cached_semantic_tokens.ready) {
         semantic_tokens = &panel_state->cached_semantic_tokens;
       }
     }
@@ -4520,9 +4571,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             ? layout_state->app_settings->scope_highlight_strength
             : 58;
 
-    const bool indexed_cpp_for_folds =
-        scope_visual_effects && !buffer.path.empty() && is_indexed_source_path(buffer.path);
-    if (indexed_cpp_for_folds) {
+    const bool path_indexed_cpp =
+        !buffer.path.empty() && is_indexed_source_path(buffer.path);
+    if (scope_visual_effects && path_indexed_cpp) {
       if (panel_state->fold_regions_cache_path != buffer.path ||
           panel_state->fold_regions_cache_token != buffer.view_token) {
         buffer.fold_regions =
@@ -4541,12 +4592,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         panel_state->fold_regions_cache_path = buffer.path;
         panel_state->fold_regions_cache_token = buffer.view_token;
       }
-    } else {
+    } else if (!path_indexed_cpp) {
       buffer.fold_regions.clear();
       buffer.collapsed_folds.clear();
     }
     const bool fold_gutter_enabled =
-        indexed_cpp_for_folds && !buffer.fold_regions.empty();
+        scope_visual_effects && path_indexed_cpp && !buffer.fold_regions.empty();
     panel_state->gutter_fold_width = fold_gutter_enabled ? 1 : 0;
 
     const std::vector<int> viewport_lines =
