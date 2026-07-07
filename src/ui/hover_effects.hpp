@@ -22,8 +22,19 @@ inline bool hover_state_changed(std::string_view before, std::string_view after)
   return hover_effects_enabled() && before != after;
 }
 
+inline bool chrome_hover_allowed(const MainLayoutState* layout) {
+  return hover_effects_enabled() &&
+         (layout == nullptr || layout->activity_gate.allows_hover_chrome());
+}
+
+inline bool editor_scope_effects_allowed(const MainLayoutState* layout,
+                                         bool scope_highlight_enabled) {
+  return editor_scope_effects_enabled(scope_highlight_enabled) &&
+         (layout == nullptr || layout->activity_gate.allows_hover_chrome());
+}
+
 inline bool apply_hover_repaint(MainLayoutState* layout, std::string_view before) {
-  if (layout == nullptr || !hover_effects_enabled()) {
+  if (layout == nullptr || !chrome_hover_allowed(layout)) {
     return false;
   }
   if (layout->clickable.hovered_id() != before) {

@@ -53,7 +53,7 @@ inline void trigger_press(MainLayoutState* layout, const std::string& id) {
 inline bool update_panel_hover(MainLayoutState* layout, int x, int y,
                                std::initializer_list<HoverTarget> targets,
                                const std::function<bool(std::string_view)>& owns_hover) {
-  if (layout == nullptr || !hover_effects_enabled()) {
+  if (layout == nullptr || !chrome_hover_allowed(layout)) {
     return false;
   }
 

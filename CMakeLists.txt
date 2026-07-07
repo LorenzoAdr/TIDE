@@ -113,6 +113,7 @@ add_executable(tgdb
   src/ui/terminal_display.cpp
   src/ui/focusable_component.cpp
   src/ui/clickable_interaction.cpp
+  src/ui/mouse_velocity_tracker.cpp
   src/ui/cursor_blink.cpp
   src/ui/spinner.cpp
   src/ui/glyphs.cpp
@@ -177,6 +178,8 @@ add_executable(tgdb
   src/util/crash_handler.cpp
   src/util/child_process_guard.cpp
   src/util/monitor_log.cpp
+  src/util/ui_activity_gate.cpp
+  src/util/ui_perf_monitor.cpp
   src/util/filesystem_tree.cpp
   src/util/include_tree.cpp
   src/util/path_normalize.cpp

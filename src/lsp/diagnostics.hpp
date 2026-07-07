@@ -44,6 +44,6 @@ std::string diagnostic_severity_label(DiagnosticSeverity severity);
 std::string build_diagnostic_suffix(const std::vector<Diagnostic>& items, int max_chars);
 
 bool diagnostics_display_allowed(int64_t last_content_edit_ms, ISymbolProvider* symbols,
-                                 const std::string& path);
+                                 const std::string& path, bool lsp_ui_allowed = true);
 
 }  // namespace tgdb

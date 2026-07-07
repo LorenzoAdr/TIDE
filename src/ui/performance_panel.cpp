@@ -225,10 +225,36 @@ Element render_system_section(const PerformanceSnapshot& snapshot, int body_heig
   return vbox(std::move(lines)) | flex;
 }
 
+Element render_ui_thread_section(const UiPerfSnapshot& ui, int panel_width) {
+  (void)panel_width;
+  Elements lines;
+  std::ostringstream header;
+  header << "UI thread  paint " << format_fps(ui.paint_fps) << " fps  tick "
+         << format_fps(ui.tick_fps) << " fps  wasted "
+         << format_percent(ui.ticks_without_paint_ratio * 100.0) << "  phase "
+         << ui_activity_phase_label(ui.activity_phase) << " " << ui.ms_in_phase << "ms";
+  lines.push_back(text(header.str()) | color(theme::Header()));
+
+  std::ostringstream counts;
+  counts << "events  key=" << ui.event_counts[static_cast<std::size_t>(UiPerfEventKind::kKeyboard)]
+         << " click="
+         << ui.event_counts[static_cast<std::size_t>(UiPerfEventKind::kMouseClick)] << " wheel="
+         << ui.event_counts[static_cast<std::size_t>(UiPerfEventKind::kMouseWheel)] << " paint="
+         << ui.paints_total << " tick=" << ui.ticks_total;
+  lines.push_back(text(counts.str()) | color(theme::Muted()));
+
+  for (const UiPerfPhaseStats& phase : ui.tick_phases) {
+    std::ostringstream row;
+    row << phase.name << " p95=" << (phase.p95_us / 1000.0) << "ms n=" << phase.samples;
+    lines.push_back(text(row.str()) | color(theme::Muted()));
+  }
+  return vbox(std::move(lines));
+}
+
 }  // namespace
 
-Element RenderPerformancePanel(PerformanceSampler* sampler, PerformancePanelState* state,
-                               int width, int height) {
+Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,
+                               PerformancePanelState* state, int width, int height) {
   const int total_height = visible_height(height);
   const int panel_width = visible_width(width);
 
@@ -236,16 +262,26 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, PerformancePanelStat
   if (sampler != nullptr) {
     snapshot = sampler->snapshot();
   }
+  UiPerfSnapshot ui_snapshot;
+  if (ui_perf != nullptr) {
+    ui_snapshot = ui_perf->snapshot();
+  }
 
+  constexpr int kUiSectionLines = 4;
   constexpr int kMinHeightForSystem = 12;
-  const bool show_system = total_height >= kMinHeightForSystem;
+  const bool show_system = total_height >= kMinHeightForSystem + kUiSectionLines;
+  const int ui_height = std::min(kUiSectionLines, std::max(2, total_height / 6));
   const int process_height =
-      show_system ? std::max(4, (total_height * 2) / 3) : std::max(3, total_height - 1);
+      show_system ? std::max(4, (total_height - ui_height) * 2 / 3)
+                  : std::max(3, total_height - ui_height - 1);
 
   Element process_body =
       render_process_section(snapshot, process_height, panel_width, state);
 
   Elements layout;
+  layout.push_back(render_ui_thread_section(ui_snapshot, panel_width) |
+                   size(HEIGHT, EQUAL, ui_height) | bgcolor(theme::PanelBg()));
+  layout.push_back(separator() | color(theme::AccentDim()) | size(HEIGHT, EQUAL, 1));
   layout.push_back(text(i18n::tr("panel.performance.tab.process")) | bold | color(theme::Accent()) | bgcolor(theme::TabIdle()) |
                    size(HEIGHT, EQUAL, 1));
   layout.push_back(process_body | size(HEIGHT, EQUAL, process_height) | bgcolor(theme::PanelBg()));
@@ -263,9 +299,9 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, PerformancePanelStat
   return vbox(std::move(layout)) | flex | bgcolor(theme::PanelBg());
 }
 
-Component MakePerformancePanel(PerformanceSampler* sampler,
+Component MakePerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,
                                std::shared_ptr<PerformancePanelState> state) {
-  return CatchEvent(Renderer([] { return text(""); }), [sampler, state](const Event& event) {
+  return CatchEvent(Renderer([] { return text(""); }), [sampler, ui_perf, state](const Event& event) {
     if (state == nullptr) {
       return false;
     }
@@ -278,6 +314,7 @@ Component MakePerformancePanel(PerformanceSampler* sampler,
       return true;
     }
     (void)sampler;
+    (void)ui_perf;
     return false;
   });
 }

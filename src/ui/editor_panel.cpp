@@ -122,6 +122,7 @@ struct BreadcrumbHit {
 
 struct EditorHoverState {
   bool visible = false;
+  bool click_triggered = false;
   int line = -1;
   int col = -1;
   int anchor_x = 0;
@@ -338,10 +339,27 @@ void clear_hover_state(EditorHoverState* hover) {
     return;
   }
   hover->visible = false;
+  hover->click_triggered = false;
   hover->line = -1;
   hover->col = -1;
   hover->fetch_key.clear();
   hover->info = {};
+}
+
+void trigger_lsp_hover_at(EditorPanelState* panel, const CursorPos& pos, int anchor_x,
+                          int anchor_y) {
+  if (panel == nullptr || pos.line < 0) {
+    return;
+  }
+  panel->hover.line = pos.line;
+  panel->hover.col = pos.col;
+  panel->hover.anchor_x = anchor_x;
+  panel->hover.anchor_y = anchor_y;
+  panel->hover.dwell_start_ms = steady_now_ms();
+  panel->hover.visible = false;
+  panel->hover.click_triggered = true;
+  panel->hover.fetch_key.clear();
+  panel->hover.info = {};
 }
 
 void claim_editor_focus(FocusManagerState* focus, MainLayoutState* layout_state,
@@ -469,11 +487,14 @@ void rebuild_diagnostics_by_line(EditorPanelState* panel, const DocumentDiagnost
 
 void rebuild_diagnostic_suffix_cache(EditorPanelState* panel, const EditorBuffer& buffer,
                                      int code_width, uint64_t revision,
-                                     ISymbolProvider* symbols, int64_t last_edit_ms) {
+                                     ISymbolProvider* symbols, int64_t last_edit_ms,
+                                     MainLayoutState* layout_state) {
   if (panel == nullptr || code_width <= 0) {
     return;
   }
-  if (!diagnostics_display_allowed(last_edit_ms, symbols, buffer.path)) {
+  const bool lsp_ui_allowed =
+      layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
+  if (!diagnostics_display_allowed(last_edit_ms, symbols, buffer.path, lsp_ui_allowed)) {
     panel->diagnostic_suffix_by_line.clear();
     return;
   }
@@ -832,7 +853,8 @@ const std::vector<TextMatch>* selection_occurrence_matches_for(EditorPanelState*
 }
 
 void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
-                           WorkspaceModel* workspace, WorkspaceIndexer* indexer) {
+                           WorkspaceModel* workspace, WorkspaceIndexer* indexer,
+                           MainLayoutState* layout_state) {
   if (panel == nullptr || symbols == nullptr || !symbols->supports_diagnostics()) {
     return;
   }
@@ -841,7 +863,9 @@ void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
                                                                 : std::string{};
   const int64_t last_edit_ms =
       workspace != nullptr ? workspace->last_buffer_edit_ms : panel->content_edit_ms;
-  if (!diagnostics_display_allowed(last_edit_ms, symbols, path)) {
+  const bool lsp_ui_allowed =
+      layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
+  if (!diagnostics_display_allowed(last_edit_ms, symbols, path, lsp_ui_allowed)) {
     return;
   }
 
@@ -880,13 +904,17 @@ void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
 const DocumentDiagnostics& cached_file_diagnostics(EditorPanelState* panel,
                                                    ISymbolProvider* symbols,
                                                    const std::string& path,
-                                                   int64_t last_edit_ms) {
+                                                   int64_t last_edit_ms,
+                                                   MainLayoutState* layout_state) {
   static const DocumentDiagnostics kEmpty;
   if (panel == nullptr || symbols == nullptr || !symbols->supports_diagnostics() ||
       path.empty() || !is_lsp_trackable_path(path)) {
     return kEmpty;
   }
-  const bool allow_refresh = diagnostics_display_allowed(last_edit_ms, symbols, path);
+  const bool lsp_ui_allowed =
+      layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
+  const bool allow_refresh =
+      diagnostics_display_allowed(last_edit_ms, symbols, path, lsp_ui_allowed);
   const uint64_t revision = symbols->diagnostics_revision();
   if (allow_refresh &&
       (revision != panel->cached_file_diag_revision || panel->cached_file_diag.path != path)) {
@@ -908,12 +936,22 @@ void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
   if (workspace == nullptr || panel == nullptr) {
     return;
   }
+  if (layout_state != nullptr) {
+    if (!layout_state->activity_gate.allows_lsp_ui()) {
+      return;
+    }
+    if (layout_state->app_settings != nullptr &&
+        layout_state->app_settings->lsp_hover_on_click_only &&
+        !panel->hover.click_triggered) {
+      return;
+    }
+  }
   auto& hover = panel->hover;
   if (hover.line < 0 || hover.visible) {
     return;
   }
   const int64_t now_ms = steady_now_ms();
-  if (now_ms - hover.dwell_start_ms < kHoverDelayMs) {
+  if (!hover.click_triggered && now_ms - hover.dwell_start_ms < kHoverDelayMs) {
     return;
   }
 
@@ -1423,11 +1461,9 @@ bool handle_editor_chrome_mouse(WorkspaceModel* workspace, FocusManagerState* fo
   workspace->ensure_buffer();
   const bool in_code = panel->code_box.Contain(m.x, m.y);
   if (m.motion == Mouse::Moved) {
-    if (in_code && !panel->mouse_selecting) {
-      track_hover_mouse(panel, m, workspace->buffer, visible_lines);
-    } else if (hover_effects_enabled() && !in_code &&
-               !panel->breadcrumb_box.Contain(m.x, m.y) &&
-               (tab_bar == nullptr || !tab_bar->bar_box.Contain(m.x, m.y))) {
+    if (!in_code && hover_effects_enabled() &&
+        !panel->breadcrumb_box.Contain(m.x, m.y) &&
+        (tab_bar == nullptr || !tab_bar->bar_box.Contain(m.x, m.y))) {
       clear_hover_state(&panel->hover);
     }
   }
@@ -2463,6 +2499,9 @@ void schedule_completion_lsp_fetch(CompletionState* completion, WorkspaceModel* 
       layout_state->app_settings == nullptr || !layout_state->app_settings->lsp_enabled) {
     return;
   }
+  if (!layout_state->activity_gate.allows_lsp_ui()) {
+    return;
+  }
   if (live_only && !layout_state->app_settings->live_lsp_completion_enabled) {
     return;
   }
@@ -3081,7 +3120,11 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.motion == Mouse::Moved && in_code && !panel->mouse_selecting) {
-    track_hover_mouse(panel, m, *buffer, visible_lines);
+    return false;
+  }
+
+  if (m.motion == Mouse::Moved && !in_code) {
+    clear_hover_state(&panel->hover);
     return false;
   }
 
@@ -3203,7 +3246,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
         symbols->supports_diagnostics() && !buffer->path.empty()) {
       const DocumentDiagnostics& file_diag =
           cached_file_diagnostics(panel, symbols.get(), buffer->path,
-                                  workspace->last_buffer_edit_ms);
+                                  workspace->last_buffer_edit_ms, layout_state);
       if (handle_gutter_marker_click(panel, diagnostic_modal, file_diag, m)) {
         end_mouse_selection(panel);
         return true;
@@ -3297,6 +3340,14 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
 
     if (pos.line != buffer->primary().head.line || pos.col != buffer->primary().head.col) {
       workspace->record_cursor_jump();
+    }
+    if (in_code && layout_state != nullptr && layout_state->app_settings != nullptr &&
+        layout_state->app_settings->lsp_hover_on_click_only &&
+        layout_state->activity_gate.allows_lsp_ui()) {
+      trigger_lsp_hover_at(panel, pos, m.x, m.y);
+      if (layout_state != nullptr) {
+        layout_state->request_ui_tick = true;
+      }
     }
     buffer->reset_to_single_cursor(pos.line, pos.col);
     begin_mouse_selection(panel, event);
@@ -4463,7 +4514,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         layout_state != nullptr && layout_state->app_settings != nullptr &&
         layout_state->app_settings->scope_highlight_enabled;
     const bool scope_visual_effects =
-        editor_scope_effects_enabled(scope_highlight_enabled);
+        editor_scope_effects_allowed(layout_state, scope_highlight_enabled);
     const int scope_highlight_strength =
         layout_state != nullptr && layout_state->app_settings != nullptr
             ? layout_state->app_settings->scope_highlight_strength
@@ -4667,13 +4718,16 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                    : std::vector<StickyLine>{});
 
     DocumentDiagnostics file_diag;
+    const bool lsp_ui_allowed =
+        layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
     const bool show_diagnostics =
         symbols && symbols->supports_diagnostics() && !buffer.path.empty() &&
         is_lsp_trackable_path(buffer.path) &&
-        diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), buffer.path);
+        diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), buffer.path,
+                                    lsp_ui_allowed);
     if (show_diagnostics) {
       file_diag = cached_file_diagnostics(panel_state.get(), symbols.get(), buffer.path,
-                                          workspace->last_buffer_edit_ms);
+                                          workspace->last_buffer_edit_ms, layout_state);
       rebuild_diagnostics_by_line(panel_state.get(), file_diag,
                                   panel_state->cached_file_diag_revision);
     } else {
@@ -4696,7 +4750,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     track_editor_scroll(panel_state.get(), buffer.scroll, layout_state);
     rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
                                     panel_state->cached_file_diag_revision, symbols.get(),
-                                    workspace->last_buffer_edit_ms);
+                                    workspace->last_buffer_edit_ms, layout_state);
 
     const bool suffixes_enabled =
         layout_state == nullptr || layout_state->app_settings == nullptr ||
@@ -5138,7 +5192,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
               }
             }
           }
-          sync_diagnostic_cache(panel_state.get(), symbols.get(), workspace, file_indexer);
+          sync_diagnostic_cache(panel_state.get(), symbols.get(), workspace, file_indexer,
+                                layout_state);
         }
       }
       if (git_service != nullptr && git_service->is_repo()) {

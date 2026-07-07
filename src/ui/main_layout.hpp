@@ -25,6 +25,9 @@
 #include "ui/status_layout_popover.hpp"
 #include "git/git_service.hpp"
 #include "util/system_stats.hpp"
+#include "util/ui_activity_gate.hpp"
+#include "util/ui_perf_monitor.hpp"
+#include "ui/mouse_velocity_tracker.hpp"
 #include "ui/source_panel.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/nm_reader.hpp"
@@ -129,8 +132,13 @@ struct MainLayoutState {
   std::atomic<bool> terminal_sync_after_draw{false};
   std::atomic<bool> shutdown_ui_poll_paused{false};
   std::atomic<bool> ui_heartbeat{false};
+  std::atomic<bool> terminal_minimal_wake{false};
+  std::atomic<bool> debug_critical_wake{false};
   uint64_t ui_custom_tick = 0;
   uint64_t ui_paint_count = 0;
+  UiActivityGate activity_gate;
+  UiPerfMonitor ui_perf_monitor;
+  MouseVelocityTracker mouse_velocity;
   HelixStatusSnapshot helix_status;
   bool editor_helix_prefix_pending = false;
   std::function<void()> reset_helix_editors;

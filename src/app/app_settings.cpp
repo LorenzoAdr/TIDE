@@ -93,6 +93,16 @@ AppSettings AppSettings::load() {
     if (doc.contains("monitor_enabled") && doc["monitor_enabled"].is_boolean()) {
       settings.monitor_enabled = doc["monitor_enabled"].get<bool>();
     }
+    if (doc.contains("passive_mode_enabled") && doc["passive_mode_enabled"].is_boolean()) {
+      settings.passive_mode_enabled = doc["passive_mode_enabled"].get<bool>();
+    }
+    if (doc.contains("grace_window_ms") && doc["grace_window_ms"].is_number_integer()) {
+      settings.grace_window_ms =
+          std::max(100, std::min(10000, doc["grace_window_ms"].get<int>()));
+    }
+    if (doc.contains("lsp_hover_on_click_only") && doc["lsp_hover_on_click_only"].is_boolean()) {
+      settings.lsp_hover_on_click_only = doc["lsp_hover_on_click_only"].get<bool>();
+    }
     if (doc.contains("show_all_workspace_files") &&
         doc["show_all_workspace_files"].is_boolean()) {
       settings.show_all_workspace_files = doc["show_all_workspace_files"].get<bool>();
@@ -146,6 +156,9 @@ bool AppSettings::save() const {
   doc["force_bundled_clangd"] = force_bundled_clangd;
   doc["force_bundled_gdb"] = force_bundled_gdb;
   doc["monitor_enabled"] = monitor_enabled;
+  doc["passive_mode_enabled"] = passive_mode_enabled;
+  doc["grace_window_ms"] = grace_window_ms;
+  doc["lsp_hover_on_click_only"] = lsp_hover_on_click_only;
   doc["show_all_workspace_files"] = show_all_workspace_files;
   doc["helix_mode_enabled"] = helix_mode_enabled;
   doc["workspace_auto_detect_enabled"] = workspace_auto_detect_enabled;

@@ -21,6 +21,9 @@ struct AppSettings {
   bool force_bundled_clangd = false;
   bool force_bundled_gdb = false;
   bool monitor_enabled = false;
+  bool passive_mode_enabled = true;
+  int grace_window_ms = 1000;
+  bool lsp_hover_on_click_only = true;
   bool show_all_workspace_files = false;
   bool helix_mode_enabled = false;
   bool workspace_auto_detect_enabled = true;

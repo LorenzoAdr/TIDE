@@ -4,6 +4,7 @@
 #include "ui/status_layout_popover.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 
@@ -33,6 +34,15 @@
 namespace tgdb {
 
 using namespace ftxui;
+
+namespace {
+
+int64_t steady_now_ms() {
+  using namespace std::chrono;
+  return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+}  // namespace
 
 MainLayoutState::MainLayoutState()
     : packet_monitor_service(std::make_unique<packet_monitor::PacketMonitorService>()) {}
@@ -1018,6 +1028,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto layout_root = Renderer(with_focus_sync, [=] {
     if (layout_state != nullptr) {
       ++layout_state->ui_paint_count;
+      layout_state->ui_perf_monitor.on_paint(steady_now_ms());
     }
     const bool git_tab_open =
         layout_state != nullptr && git_tab_active(layout_state);
@@ -1065,7 +1076,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       const std::string& active_path = workspace->buffer.path;
       const bool show_diag_counts =
           !active_path.empty() &&
-          diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), active_path);
+          diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), active_path,
+                                      layout_state->activity_gate.allows_lsp_ui());
       if (!show_diag_counts) {
         split_state->diag_errors = 0;
         split_state->diag_warnings = 0;

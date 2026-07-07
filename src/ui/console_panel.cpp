@@ -1479,9 +1479,10 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   auto packet_monitor_state = std::make_shared<PacketMonitorPanelState>();
   PerformanceSampler* sampler =
       layout_state != nullptr ? &layout_state->performance_sampler : nullptr;
+  UiPerfMonitor* ui_perf = layout_state != nullptr ? &layout_state->ui_perf_monitor : nullptr;
   packet_monitor::PacketMonitorService* packet_monitor =
       layout_state != nullptr ? layout_state->packet_monitor_service.get() : nullptr;
-  auto performance_panel = MakePerformancePanel(sampler, perf_state);
+  auto performance_panel = MakePerformancePanel(sampler, ui_perf, perf_state);
   auto packet_monitor_panel = MakePacketMonitorPanel(packet_monitor, packet_monitor_state, layout_state);
   auto diagnostics_panel =
       MakeDiagnosticsPanel(workspace, focus, symbols, layout_state, indexer);
@@ -1776,9 +1777,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   }
 
   return Renderer(wrapped, [app_mode, model, shell, focus, input_box, input_maybe, state,
-                            layout_state, bottom_height, perf_state, sampler, diagnostics_panel,
-                            search_panel, call_hierarchy_panel, git_panel, core_analyzer_panel,
-                            binary_symbols_panel, packet_monitor_panel] {
+                            layout_state, bottom_height, perf_state, sampler, ui_perf,
+                            diagnostics_panel, search_panel, call_hierarchy_panel, git_panel,
+                            core_analyzer_panel, binary_symbols_panel, packet_monitor_panel] {
     state->input_placeholder = console_placeholder(app_mode);
     (void)input_maybe;
     (void)input_box;
@@ -1880,7 +1881,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     } else if (selected_tab == ConsolePanelTabs::kCoreAnalyzer) {
       body = core_analyzer_panel->Render() | flex;
     } else if (selected_tab == ConsolePanelTabs::kPerformance) {
-      body = RenderPerformancePanel(sampler, perf_state.get(), panel_width, body_height) | flex;
+      body = RenderPerformancePanel(sampler, ui_perf, perf_state.get(), panel_width, body_height) | flex;
     } else if (selected_tab == ConsolePanelTabs::kProblems) {
       body = diagnostics_panel->Render() | flex;
     } else if (selected_tab == ConsolePanelTabs::kSearch) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -18,6 +19,8 @@ class Session;
 
 namespace tgdb {
 
+using DebugWakeCallback = std::function<void(DebugEventKind)>;
+
 class DapBackend : public IDebugBackend {
  public:
   DapBackend(ThreadSafeQueue<UiCommand>& commands,
@@ -27,6 +30,7 @@ class DapBackend : public IDebugBackend {
   void start() override;
   void stop() override;
   void submit(const UiCommand& command) override;
+  void set_wake_callback(DebugWakeCallback callback);
 
  private:
   void worker_main();
@@ -65,6 +69,8 @@ class DapBackend : public IDebugBackend {
 
   ThreadSafeQueue<UiCommand>& commands_;
   ThreadSafeQueue<DebugEvent>& events_;
+  DebugWakeCallback wake_callback_;
+  std::mutex wake_mutex_;
 
   std::thread worker_;
   std::atomic<bool> running_{false};

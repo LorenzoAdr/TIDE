@@ -108,7 +108,7 @@ std::vector<std::string> workspace_relative_files(WorkspaceIndexer* indexer) {
 
 std::vector<DiagnosticRow> build_rows(WorkspaceModel* workspace,
                                       const std::shared_ptr<ISymbolProvider>& symbols,
-                                      WorkspaceIndexer* indexer) {
+                                      WorkspaceIndexer* indexer, MainLayoutState* layout_state) {
   std::vector<DiagnosticRow> rows;
   if (!symbols || !symbols->supports_diagnostics()) {
     return rows;
@@ -122,7 +122,9 @@ std::vector<DiagnosticRow> build_rows(WorkspaceModel* workspace,
   }
 
   const int64_t last_edit_ms = workspace != nullptr ? workspace->last_buffer_edit_ms : 0;
-  if (!diagnostics_display_allowed(last_edit_ms, symbols.get(), active)) {
+  if (!diagnostics_display_allowed(last_edit_ms, symbols.get(), active,
+                                   layout_state != nullptr &&
+                                       layout_state->activity_gate.allows_lsp_ui())) {
     return rows;
   }
 
@@ -285,7 +287,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
           workspace != nullptr ? workspace->buffer.view_token : static_cast<uint64_t>(0);
       const uint64_t cache_key = revision ^ (view_token << 1);
       if (cache_key != state->rows_revision) {
-        state->rows = build_rows(workspace, symbols, indexer);
+        state->rows = build_rows(workspace, symbols, indexer, layout_state);
         state->rows_revision = cache_key;
         if (state->selected >= static_cast<int>(state->rows.size())) {
           state->selected = std::max(0, static_cast<int>(state->rows.size()) - 1);

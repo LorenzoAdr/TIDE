@@ -148,8 +148,21 @@ void DapBackend::submit(const UiCommand& command) {
   commands_.push(command);
 }
 
+void DapBackend::set_wake_callback(DebugWakeCallback callback) {
+  std::lock_guard<std::mutex> lock(wake_mutex_);
+  wake_callback_ = std::move(callback);
+}
+
 void DapBackend::push_event(DebugEvent event) {
+  const DebugEventKind kind = event.kind;
   events_.push(std::move(event));
+  if (kind == DebugEventKind::kStopped || kind == DebugEventKind::kTerminated ||
+      kind == DebugEventKind::kSessionReady) {
+    std::lock_guard<std::mutex> lock(wake_mutex_);
+    if (wake_callback_) {
+      wake_callback_(kind);
+    }
+  }
 }
 
 void DapBackend::push_error(const std::string& message) {

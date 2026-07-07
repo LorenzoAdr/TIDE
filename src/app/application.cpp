@@ -61,6 +61,10 @@
 #include "util/path_normalize.hpp"
 #include "util/shell_args.hpp"
 #include "util/thread_name.hpp"
+#include "util/ui_activity_gate.hpp"
+#include "util/ui_perf_monitor.hpp"
+
+#include <string>
 
 namespace fs = std::filesystem;
 
@@ -74,6 +78,54 @@ static int64_t steady_now_ms() {
 	using namespace std::chrono;
 	return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
+
+bool is_significant_input_event(const Event &event) {
+	if (event == Event::Custom) {
+		return false;
+	}
+	if (!event.is_mouse() && !event.is_character()) {
+		return true;
+	}
+	if (event.is_character()) {
+		return true;
+	}
+	const Mouse &mouse = const_cast<Event &>(event).mouse();
+	if (mouse.button == Mouse::WheelUp || mouse.button == Mouse::WheelDown ||
+	    mouse.button == Mouse::WheelLeft || mouse.button == Mouse::WheelRight) {
+		return true;
+	}
+	if (mouse.motion == Mouse::Pressed || mouse.motion == Mouse::Released) {
+		return true;
+	}
+	if (mouse.motion == Mouse::Moved && mouse.button != Mouse::None) {
+		return true;
+	}
+	return false;
+}
+
+bool is_pure_mouse_move_event(const Event &event) {
+	return event.is_mouse() && const_cast<Event &>(event).mouse().motion == Mouse::Moved &&
+	       const_cast<Event &>(event).mouse().button == Mouse::None;
+}
+
+class UiPerfPhaseScope {
+  public:
+	UiPerfPhaseScope(UiPerfMonitor *monitor, std::string name)
+	    : monitor_(monitor), name_(std::move(name)), start_(std::chrono::steady_clock::now()) {}
+	~UiPerfPhaseScope() {
+		if (monitor_ == nullptr) {
+			return;
+		}
+		const auto end = std::chrono::steady_clock::now();
+		const auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start_).count();
+		monitor_->on_tick_phase(name_, static_cast<uint64_t>(std::max<int64_t>(0, us)));
+	}
+
+  private:
+	UiPerfMonitor *monitor_;
+	std::string name_;
+	std::chrono::steady_clock::time_point start_;
+};
 
 bool event_is_alt_up(const Event &event) {
 	return event == Event::Special("\x1B[1;3A");
@@ -98,20 +150,23 @@ class EventPoller {
 	using MainThreadTask = std::function<void()>;
 
 	static constexpr int64_t kActiveIntervalMs = 50;
-	static constexpr int64_t kIdleIntervalMs = 200;
-	static constexpr int64_t kIdleThresholdMs = 2000;
+	static constexpr int64_t kInhibitedSleepMs = 500;
 
 	EventPoller(ScreenInteractive *screen, MainLayoutState *layout, MainThreadTask on_main_thread)
-	    : screen_(screen), layout_(layout), on_main_thread_(std::move(on_main_thread)),
-	      last_user_activity_ms_(steady_now_ms()) {
+	    : screen_(screen), layout_(layout), on_main_thread_(std::move(on_main_thread)) {
 		thread_ = std::thread([this] {
 			set_current_thread_name("ui-poller");
 			while (running_.load(std::memory_order_acquire)) {
-				const int64_t since_activity =
-				    steady_now_ms() - last_user_activity_ms_.load(std::memory_order_relaxed);
-				const int64_t interval =
-				    since_activity >= kIdleThresholdMs ? kIdleIntervalMs : kActiveIntervalMs;
-				std::this_thread::sleep_for(std::chrono::milliseconds(interval));
+				if (layout_ != nullptr &&
+				    layout_->activity_gate.is_inhibited()) {
+					std::this_thread::sleep_for(
+					    std::chrono::milliseconds(kInhibitedSleepMs));
+					if (layout_->shutdown_ui_poll_paused.load(std::memory_order_acquire)) {
+						continue;
+					}
+					continue;
+				}
+				std::this_thread::sleep_for(std::chrono::milliseconds(kActiveIntervalMs));
 				if (layout_ != nullptr &&
 				    layout_->shutdown_ui_poll_paused.load(std::memory_order_acquire)) {
 					continue;
@@ -121,12 +176,12 @@ class EventPoller {
 						layout_->ui_heartbeat.store(true, std::memory_order_release);
 					}
 					if (on_main_thread_) {
-					screen_->Post(on_main_thread_);
+						screen_->Post(on_main_thread_);
+					}
+					screen_->PostEvent(Event::Custom);
 				}
-				screen_->PostEvent(Event::Custom);
 			}
-		}
-	});
+		});
 	}
 
 	~EventPoller() {
@@ -136,24 +191,14 @@ class EventPoller {
 		}
 	}
 
-	void notify_user_activity() {
-		last_user_activity_ms_.store(steady_now_ms(), std::memory_order_relaxed);
-	}
-
 	EventPoller(const EventPoller &) = delete;
 	EventPoller &operator=(const EventPoller &) = delete;
 
   private:
-	static int64_t steady_now_ms() {
-		using namespace std::chrono;
-		return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
-	}
-
 	ScreenInteractive *screen_;
 	MainLayoutState *layout_;
 	MainThreadTask on_main_thread_;
 	std::atomic<bool> running_{true};
-	std::atomic<int64_t> last_user_activity_ms_;
 	std::thread thread_;
 };
 
@@ -1245,6 +1290,8 @@ void Application::apply_event(const DebugEvent &event) {
 	case DebugEventKind::kSessionReady:
 		session_ready_ = true;
 		model_.status_message = event.text;
+		model_.view_token++;
+		layout_state_.request_ui_tick = true;
 		if (connection_wizard_state_.open || !connection_config_complete()) {
 			break;
 		}
@@ -1261,10 +1308,14 @@ void Application::apply_event(const DebugEvent &event) {
 			model_.append_console("[stopped] breakpoint alcanzado");
 		}
 		refresh_all_watches();
+		model_.view_token++;
+		layout_state_.request_ui_tick = true;
 		break;
 	case DebugEventKind::kContinued:
 		model_.set_running();
 		clear_source_debug_hover(&source_state_.debug_hover);
+		model_.view_token++;
+		layout_state_.request_ui_tick = true;
 		break;
 	case DebugEventKind::kTerminated:
 		model_.set_terminated();
@@ -1273,6 +1324,8 @@ void Application::apply_event(const DebugEvent &event) {
 		if (!event.text.empty()) {
 			model_.status_message = event.text;
 		}
+		model_.view_token++;
+		layout_state_.request_ui_tick = true;
 		break;
 	case DebugEventKind::kStackUpdated:
 		model_.stack_frames = event.stack_frames;
@@ -1414,6 +1467,8 @@ void Application::apply_app_settings() {
 		symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
 	}
 	monitor_log::set_enabled(app_settings_.monitor_enabled);
+	layout_state_.activity_gate.set_passive_enabled(app_settings_.passive_mode_enabled);
+	layout_state_.activity_gate.set_grace_window_ms(app_settings_.grace_window_ms);
 	configure_glyphs(resolve_icon_mode(app_settings_.icon_mode));
 	sync_symbol_workspace_indexer();
 	restart_workspace_indexing();
@@ -1571,6 +1626,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 }
 
 int Application::run() {
+	set_current_thread_name("ui-main");
 	if (config_.auto_debug && connection_config_complete() && !config_.show_welcome_screen &&
 	    debug_available_) {
 		ensure_backend_started();
@@ -1865,39 +1921,92 @@ int Application::run() {
 				return false;
 			}
 
-		if (event != Event::Custom && event_poller) {
-			event_poller->notify_user_activity();
+		const int64_t now_ms = steady_now_ms();
+		if (any_modal_open()) {
+			layout_state_.activity_gate.on_significant_input(now_ms);
+		} else if (is_significant_input_event(event)) {
+			layout_state_.activity_gate.on_significant_input(now_ms);
+			if (event.is_character()) {
+				layout_state_.ui_perf_monitor.on_input_event(UiPerfEventKind::kKeyboard);
+			} else if (event.is_mouse()) {
+				const Mouse &mouse = const_cast<Event &>(event).mouse();
+				if (mouse.button == Mouse::WheelUp || mouse.button == Mouse::WheelDown ||
+				    mouse.button == Mouse::WheelLeft || mouse.button == Mouse::WheelRight) {
+					layout_state_.ui_perf_monitor.on_input_event(UiPerfEventKind::kMouseWheel);
+				} else if (mouse.motion == Mouse::Moved && mouse.button != Mouse::None) {
+					layout_state_.ui_perf_monitor.on_input_event(UiPerfEventKind::kMouseDrag);
+				} else if (mouse.motion == Mouse::Pressed || mouse.motion == Mouse::Released) {
+					layout_state_.ui_perf_monitor.on_input_event(UiPerfEventKind::kMouseClick);
+				}
+			}
+		} else if (is_pure_mouse_move_event(event)) {
+			layout_state_.activity_gate.on_mouse_move();
+			layout_state_.ui_perf_monitor.on_input_event(UiPerfEventKind::kMouseMove);
 		}
 
 		if (event == Event::Custom) {
 			++layout_state_.ui_custom_tick;
 			monitor_log::heartbeat();
+			layout_state_.activity_gate.tick(now_ms);
+			layout_state_.ui_perf_monitor.on_custom_tick_begin(now_ms);
+			layout_state_.ui_perf_monitor.set_activity_phase(
+			    layout_state_.activity_gate.phase(),
+			    layout_state_.activity_gate.ms_in_current_phase(now_ms));
+			const uint64_t paint_before = layout_state_.ui_paint_count;
+
+			const bool terminal_only = layout_state_.terminal_minimal_wake.exchange(false);
+			const bool debug_critical = layout_state_.debug_critical_wake.exchange(false);
+			const bool allows_tick = layout_state_.activity_gate.allows_periodic_tick() ||
+			                         debug_critical || any_modal_open();
+
+			if (terminal_only && layout_state_.activity_gate.is_inhibited() &&
+			    layout_state_.console_visible && layout_state_.terminal_tick_callback) {
+				UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal_minimal");
+				layout_state_.terminal_tick_callback();
+				layout_state_.ui_perf_monitor.on_custom_tick_end(now_ms, paint_before);
+				return false;
+			}
+
+			if (debug_critical || allows_tick) {
+				{
+					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_events");
+					TGDB_MON_SCOPE("ui", "tick.drain_events");
+					drain_events();
+				}
+			}
+
+			if (allows_tick) {
 				if (!any_modal_open()) {
+					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "apply_pending_connection");
 					TGDB_MON_SCOPE("ui", "tick.apply_pending_connection");
 					apply_pending_connection();
 				}
 				{
+					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "process_index_changes");
 					TGDB_MON_SCOPE("ui", "tick.process_index_changes");
 					process_index_changes();
 				}
 				{
+					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "process_build_environment");
 					TGDB_MON_SCOPE("ui", "tick.process_build_environment_updates");
 					process_build_environment_updates();
 				}
-				{
-					TGDB_MON_SCOPE("ui", "tick.drain_events");
-					drain_events();
+				if (layout_state_.activity_gate.allows_cursor_blink()) {
+					cursor_blink::tick();
 				}
-			cursor_blink::tick();
-			layout_state_.clickable.tick();
-			if (layout_state_.console_visible && layout_state_.terminal_tick_callback) {
+				if (layout_state_.activity_gate.allows_hover_chrome()) {
+					layout_state_.clickable.tick();
+				}
+				if (layout_state_.console_visible && layout_state_.terminal_tick_callback) {
+					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal");
 					TGDB_MON_SCOPE("ui", "tick.terminal");
 					layout_state_.terminal_tick_callback();
 				}
 				if (app_mode_ == AppMode::kDebug) {
 					layout_state_.packet_monitor_service->tick();
 				}
-				if (symbol_provider_) {
+				if (symbol_provider_ && layout_state_.activity_gate.allows_lsp_ui()) {
+					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_async_results");
 					TGDB_MON_SCOPE("ui", "tick.drain_async_results");
 					if (symbol_provider_->drain_async_results()) {
 						workspace_.buffer.view_token++;
@@ -1905,11 +2014,13 @@ int Application::run() {
 					}
 				}
 				if (layout_state_.primary_editor.tick_callback && !layout_state_.welcome_visible) {
+					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "primary_editor");
 					TGDB_MON_SCOPE("ui", "tick.primary_editor");
 					layout_state_.primary_editor.tick_callback();
 				}
 				if (layout_state_.secondary_editor.tick_callback &&
 				    !layout_state_.welcome_visible) {
+					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "secondary_editor");
 					TGDB_MON_SCOPE("ui", "tick.secondary_editor");
 					layout_state_.secondary_editor.tick_callback();
 				}
@@ -1917,14 +2028,16 @@ int Application::run() {
 					layout_state_.source_tick_callback();
 				}
 				{
+					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "git");
 					TGDB_MON_SCOPE("ui", "tick.git");
 					git_service_.tick();
 				}
-			drain_ui_tasks();
-			if (git_tab_active(&layout_state_)) {
+				drain_ui_tasks();
+				if (git_tab_active(&layout_state_)) {
 					GitPanelEnsureSelectedDiff(&git_service_, &git_panel_state_);
 				}
 				if (layout_state_.outline_tick_callback) {
+					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "outline");
 					TGDB_MON_SCOPE("ui", "tick.outline");
 					layout_state_.outline_tick_callback();
 				}
@@ -1932,9 +2045,13 @@ int Application::run() {
 				    layout_state_.console_visible &&
 				    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kPerformance;
 				if (layout_state_.ui_heartbeat.exchange(false, std::memory_order_acquire)) {
+					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "performance_sampler");
 					TGDB_MON_SCOPE("ui", "tick.performance_sampler");
 					layout_state_.performance_sampler.on_frame(sample_perf);
 				}
+			}
+
+			layout_state_.ui_perf_monitor.on_custom_tick_end(now_ms, paint_before);
 				bool swallow_call_hierarchy_custom = false;
 				if (layout_state_.right_sidebar.pending_call_hierarchy &&
 				    layout_state_.call_hierarchy_key_handler) {
@@ -2116,23 +2233,21 @@ int Application::run() {
 				layout_state_.secondary_editor.modifier_handler(mod_event);
 			}
 
-	// Global throttle for pure mouse-move (no button pressed) repaints: cap at ~30 Hz.
-	// Clicks (Pressed/Released), drags (Moved + button held), and wheel events are
-	// always posted immediately. The EventPoller at 20 Hz covers the remaining renders.
-	static int64_t s_mouse_move_post_ms = 0;
-	const bool is_pure_move_event = event.is_mouse() &&
-	    const_cast<Event &>(event).mouse().motion == Mouse::Moved &&
-	    const_cast<Event &>(event).mouse().button == Mouse::None;
+	// Repaint on mouse move only when velocity drops (high→low); clicks/wheel always immediate.
+	const bool is_pure_move_event = is_pure_mouse_move_event(event);
 		const auto post_custom_throttled = [&] {
 			if (!is_pure_move_event) {
 				screen.Post(Event::Custom);
 				return;
 			}
-			const int64_t now = steady_now_ms();
-			if (now - s_mouse_move_post_ms >= 33) {
-				s_mouse_move_post_ms = now;
-				screen.Post(Event::Custom);
+			if (!layout_state_.activity_gate.allows_hover_chrome()) {
+				return;
 			}
+			const Mouse &mouse = const_cast<Event &>(event).mouse();
+			if (!layout_state_.mouse_velocity.on_mouse_move(mouse.x, mouse.y, steady_now_ms())) {
+				return;
+			}
+			screen.Post(Event::Custom);
 		};
 
 		if (event.is_mouse() && layout_state_.split_mouse_handler &&
@@ -2575,9 +2690,22 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 
 	layout_state_.schedule_ui_tick = [this]() { layout_state_.request_ui_tick = true; };
 	layout_state_.terminal_wake_callback = [this, &screen]() {
+		if (layout_state_.activity_gate.is_inhibited()) {
+			layout_state_.terminal_minimal_wake.store(true, std::memory_order_release);
+		}
 		layout_state_.request_ui_tick = true;
 		screen.PostEvent(Event::Custom);
 	};
+	if (backend_) {
+		backend_->set_wake_callback([this, &screen](DebugEventKind kind) {
+			(void)kind;
+			const int64_t now_ms = steady_now_ms();
+			layout_state_.activity_gate.on_debug_critical(now_ms);
+			layout_state_.debug_critical_wake.store(true, std::memory_order_release);
+			layout_state_.request_ui_tick = true;
+			screen.PostEvent(Event::Custom);
+		});
+	}
 	tree_sitter_service().set_ready_callback([this, &screen](const std::string& path) {
 		enqueue_ui_task([this, path]() {
 			if (!path.empty() && workspace_.buffer.path == path) {
@@ -2590,6 +2718,8 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 		});
 		screen.PostEvent(Event::Custom);
 	});
+
+	layout_state_.activity_gate.on_significant_input(steady_now_ms());
 
 	screen.Loop(WrapUiTickPost(root, &layout_state_, &screen));
 

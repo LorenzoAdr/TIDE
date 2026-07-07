@@ -21,7 +21,10 @@ int64_t steady_now_ms() {
 }  // namespace
 
 bool diagnostics_display_allowed(const int64_t last_content_edit_ms, ISymbolProvider* symbols,
-                                 const std::string& path) {
+                                 const std::string& path, const bool lsp_ui_allowed) {
+  if (!lsp_ui_allowed) {
+    return false;
+  }
   if (path.empty() || symbols == nullptr || !symbols->supports_diagnostics()) {
     return false;
   }
