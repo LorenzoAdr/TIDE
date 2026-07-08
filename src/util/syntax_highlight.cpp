@@ -35,11 +35,11 @@ const std::vector<LineHighlights>* SyntaxHighlightContext::tree_sitter_highlight
   if (source.empty()) {
     return nullptr;
   }
-  if (prepare_token != buffer_token) {
-    tree_sitter_service().prepare_document(file_path, source);
-    prepare_token = buffer_token;
-  }
   const uint64_t revision = tree_sitter_service().revision_for(file_path);
+  if (prepare_token != revision) {
+    tree_sitter_service().prepare_document(file_path, source);
+    prepare_token = revision;
+  }
   if (ts_revision != revision || ts_line_highlights == nullptr) {
     ts_line_highlights = tree_sitter_service().highlights_for(file_path, source);
     ts_revision = revision;
@@ -64,14 +64,13 @@ uint64_t syntax_span_hash_string(uint64_t h, std::string_view s) {
 }
 
 uint64_t syntax_line_span_cache_key(int line_index, const std::string& source_line, int col_offset,
-                                    int display_len, uint64_t buffer_token, uint64_t ts_revision,
+                                    int display_len, uint64_t ts_revision,
                                     uint64_t semantic_revision) {
   uint64_t h = kSyntaxSpanHashOffset;
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(line_index));
   h = syntax_span_hash_string(h, source_line);
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(col_offset));
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(display_len));
-  h = syntax_span_hash_u64(h, buffer_token);
   h = syntax_span_hash_u64(h, ts_revision);
   h = syntax_span_hash_u64(h, semantic_revision);
   return h;
@@ -197,8 +196,7 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
   const int tab_size = std::max(1, editor_indent::tab_display_width());
   ctx->tree_sitter_highlights();
   const uint64_t key = syntax_line_span_cache_key(line_index, source_line, col_offset, display_len,
-                                                  ctx->buffer_token, ctx->ts_revision,
-                                                  ctx->semantic_revision);
+                                                  ctx->ts_revision, ctx->semantic_revision);
   auto& cache = *ctx->line_span_cache;
   const auto it = cache.find(key);
   if (it != cache.end()) {

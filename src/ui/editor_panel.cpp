@@ -91,7 +91,7 @@ std::string buffer_text(const EditorBuffer& buffer) {
   return text;
 }
 
-void mark_editor_content_edited(EditorPanelState* panel, const EditorBuffer& buffer);
+void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer);
 
 void notify_editor_buffer_changed(WorkspaceModel* workspace, EditorPanelState* panel,
                                   const std::shared_ptr<ISymbolProvider>& symbols) {
@@ -108,8 +108,14 @@ void notify_editor_buffer_changed(WorkspaceModel* workspace, EditorPanelState* p
                           .count();
   workspace->last_buffer_edit_ms = now;
   buffer.view_token++;
+  const bool structural_edit = buffer.semantic_layout_dirty;
   if (panel != nullptr) {
     mark_editor_content_edited(panel, buffer);
+    if (structural_edit && symbols != nullptr) {
+      symbols->invalidate_semantic_tokens_for_file(buffer.path);
+      symbols->flush_document_sync(buffer.path);
+      symbols->on_document_changed(buffer.path, buffer_text(buffer));
+    }
   } else if (symbols != nullptr) {
     symbols->on_document_changed(buffer.path, buffer_text(buffer));
   }
@@ -214,6 +220,7 @@ struct EditorPanelState {
   bool symbols_fetch_pending = false;
   uint64_t last_document_symbols_revision = 0;
   bool semantic_tokens_enqueue_pending = false;
+  bool semantic_tokens_layout_stale = false;
   uint64_t last_semantic_highlight_revision_tick = 0;
   SemanticTokenDocument cached_semantic_tokens;
   std::string cached_semantic_path;
@@ -261,7 +268,6 @@ struct EditorPanelState {
   int tabular_scroll_limit = 0;
   std::unordered_map<int, CachedViewportLineRow> viewport_line_render_cache;
   std::unordered_map<uint64_t, CachedSyntaxLineSpans> line_syntax_span_cache;
-  int line_syntax_span_cache_scroll = -1;
   int line_syntax_span_cache_scroll_col = -1;
 };
 
@@ -470,12 +476,19 @@ bool editor_content_settled(const EditorPanelState& panel) {
   return steady_now_ms() - panel.content_edit_ms >= kEditorContentSettleMs;
 }
 
-void mark_editor_content_edited(EditorPanelState* panel, const EditorBuffer& buffer) {
+void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer) {
   if (panel == nullptr) {
     return;
   }
   panel->content_edit_ms = steady_now_ms();
   panel->guide_tracker_view_token = 0;
+  if (buffer.semantic_layout_dirty) {
+    panel->semantic_tokens_layout_stale = true;
+    panel->semantic_tokens_enqueue_pending = true;
+    panel->viewport_line_render_cache.clear();
+    panel->line_syntax_span_cache.clear();
+    buffer.semantic_layout_dirty = false;
+  }
   if (is_indexed_source_path(buffer.path)) {
     panel->lsp_sync_pending = true;
   }
@@ -1375,7 +1388,6 @@ bool apply_scrollbar_drag(WorkspaceModel* workspace, EditorPanelState* panel, in
   }
   if (buffer->scroll != new_scroll) {
     buffer->scroll = new_scroll;
-    buffer->view_token++;
     clear_hover_state(&panel->hover);
     if (tabular_view_ready(panel, *buffer)) {
       maybe_request_tabular_chunk(panel, buffer, visible_lines);
@@ -1501,7 +1513,6 @@ bool apply_h_scrollbar_drag(WorkspaceModel* workspace, EditorPanelState* panel, 
   }
   if (buffer->scroll_col != new_scroll_col) {
     buffer->scroll_col = new_scroll_col;
-    buffer->view_token++;
     clear_hover_state(&panel->hover);
   }
   return true;
@@ -1596,7 +1607,6 @@ bool handle_horizontal_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerSt
             std::min(new_scroll_col, editor_horizontal_max_scroll_col(*buffer, code_width));
       }
       buffer->scroll_col = new_scroll_col;
-      buffer->view_token++;
       panel->h_scrollbar_dragging = true;
       panel->h_scrollbar_drag_offset = panel->h_scrollbar_layout.thumb_width / 2;
       clear_hover_state(&panel->hover);
@@ -4781,11 +4791,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->colored_brace_cache_token = 0;
       panel_state->viewport_line_render_cache.clear();
       panel_state->line_syntax_span_cache.clear();
-      panel_state->line_syntax_span_cache_scroll = -1;
       panel_state->line_syntax_span_cache_scroll_col = -1;
       panel_state->cached_symbols_path.clear();
       panel_state->cached_semantic_path.clear();
       panel_state->last_semantic_highlight_revision = 0;
+      panel_state->semantic_tokens_layout_stale = false;
       panel_state->semantic_tokens_enqueue_pending =
           !buffer.path.empty() && !is_tabular_path(buffer.path);
       panel_state->last_semantic_highlight_revision_tick = 0;
@@ -4841,26 +4851,33 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool defer_sticky_scroll = typing_edit_mode;
 
     const SemanticTokenDocument* semantic_tokens = nullptr;
-    if (!typing_edit_mode && symbols && symbols->supports_semantic_highlight() && indexed_cpp) {
+    if (symbols && symbols->supports_semantic_highlight() && indexed_cpp) {
       const bool tokens_current = symbols->semantic_tokens_current_for_file(buffer.path);
-      const uint64_t semantic_rev = symbols->semantic_highlight_revision();
-      if (panel_state->cached_semantic_path != buffer.path ||
-          semantic_rev != panel_state->last_semantic_highlight_revision) {
-        const SemanticTokenDocument fresh = symbols->semantic_tokens_for_file(buffer.path);
-        if (fresh.ready) {
-          panel_state->cached_semantic_path = buffer.path;
-          panel_state->last_semantic_highlight_revision = semantic_rev;
-          panel_state->cached_semantic_tokens = fresh;
-        } else if (panel_state->cached_semantic_path != buffer.path) {
-          panel_state->cached_semantic_path = buffer.path;
-          panel_state->last_semantic_highlight_revision = semantic_rev;
-          panel_state->cached_semantic_tokens = fresh;
+      if (!typing_edit_mode) {
+        const uint64_t semantic_rev = symbols->semantic_highlight_revision();
+        if (panel_state->cached_semantic_path != buffer.path ||
+            semantic_rev != panel_state->last_semantic_highlight_revision) {
+          const SemanticTokenDocument fresh = symbols->semantic_tokens_for_file(buffer.path);
+          if (fresh.ready) {
+            panel_state->cached_semantic_path = buffer.path;
+            panel_state->last_semantic_highlight_revision = semantic_rev;
+            panel_state->cached_semantic_tokens = fresh;
+            panel_state->semantic_tokens_layout_stale = false;
+            panel_state->viewport_line_render_cache.clear();
+            panel_state->line_syntax_span_cache.clear();
+          } else if (panel_state->cached_semantic_path != buffer.path) {
+            panel_state->cached_semantic_path = buffer.path;
+            panel_state->last_semantic_highlight_revision = semantic_rev;
+            panel_state->cached_semantic_tokens = fresh;
+          }
+        }
+        if (!tokens_current) {
+          panel_state->semantic_tokens_enqueue_pending = true;
         }
       }
-      if (!tokens_current) {
-        panel_state->semantic_tokens_enqueue_pending = true;
-      }
-      if (panel_state->cached_semantic_tokens.ready) {
+      if (!panel_state->semantic_tokens_layout_stale &&
+          panel_state->cached_semantic_path == buffer.path &&
+          panel_state->cached_semantic_tokens.ready && tokens_current) {
         semantic_tokens = &panel_state->cached_semantic_tokens;
       }
     }
@@ -5138,10 +5155,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     sync_guide_tracker_cache(panel_state.get(), buffer, buffer.scroll, tab_col_width);
     IndentGuideTracker& guide_tracker = panel_state->guide_tracker_cache;
 
-    if (buffer.scroll != panel_state->line_syntax_span_cache_scroll ||
-        buffer.scroll_col != panel_state->line_syntax_span_cache_scroll_col) {
+    if (buffer.scroll_col != panel_state->line_syntax_span_cache_scroll_col) {
       panel_state->line_syntax_span_cache.clear();
-      panel_state->line_syntax_span_cache_scroll = buffer.scroll;
       panel_state->line_syntax_span_cache_scroll_col = buffer.scroll_col;
     }
 
@@ -5154,7 +5169,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     highlight_ctx.joined_override = &buffer_source;
     highlight_ctx.buffer_token = buffer.view_token;
     highlight_ctx.semantic_revision = panel_state->last_semantic_highlight_revision;
-    highlight_ctx.line_span_cache = &panel_state->line_syntax_span_cache;
+    highlight_ctx.line_span_cache =
+        typing_edit_mode ? nullptr : &panel_state->line_syntax_span_cache;
     const ScopeLineRange immediate_scope =
         typing_burst ? ScopeLineRange{}
         : scope_visual_effects && !buffer.path.empty() && is_indexed_source_path(buffer.path)

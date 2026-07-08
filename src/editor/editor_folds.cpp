@@ -176,7 +176,6 @@ void scroll_view_by_lines_fold_aware(EditorBuffer* buffer, int delta_lines,
   const int max_scroll = fold_scroll_max(*buffer, regions, viewport_count);
   buffer->scroll = std::min(buffer->scroll, max_scroll);
   buffer->scroll = std::max(0, buffer->scroll);
-  buffer->view_token++;
 }
 
 void ensure_scroll_visible_fold_aware(EditorBuffer* buffer, const std::vector<FoldRegion>& regions,

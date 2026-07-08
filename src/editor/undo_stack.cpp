@@ -41,6 +41,7 @@ bool undo(EditorBuffer* buffer) {
   buffer->cursors = snapshot.cursors;
   buffer->ensure_cursors();
   editor_buffer_invalidate_joined(buffer);
+  buffer->semantic_layout_dirty = true;
   buffer->dirty = true;
   cursor_blink::show();
   return true;
@@ -58,6 +59,7 @@ bool redo(EditorBuffer* buffer) {
   buffer->cursors = snapshot.cursors;
   buffer->ensure_cursors();
   editor_buffer_invalidate_joined(buffer);
+  buffer->semantic_layout_dirty = true;
   buffer->dirty = true;
   cursor_blink::show();
   return true;

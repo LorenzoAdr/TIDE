@@ -430,6 +430,7 @@ void LspClient::did_open(const std::string& absolute_path, const std::string& te
       it->second.text = text;
       it->second.version += 1;
       it->second.generation += 1;
+      invalidate_semantic_tokens(key);
       doc = it->second;
       notify_change = true;
     } else {
@@ -491,6 +492,7 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
       it->second.text = text;
       it->second.version += 1;
       it->second.generation += 1;
+      invalidate_semantic_tokens(key);
       doc = it->second;
     }
   }
@@ -1679,6 +1681,25 @@ uint64_t LspClient::document_generation(const std::string& absolute_path) const 
     return 0;
   }
   return it->second.generation;
+}
+
+bool LspClient::wait_for_current_document_parsed(const std::string& absolute_path) {
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return false;
+  }
+  uint64_t generation = 0;
+  std::string text;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = documents_.find(key);
+    if (it == documents_.end()) {
+      return false;
+    }
+    generation = it->second.generation;
+    text = it->second.text;
+  }
+  return wait_for_document_ready(key, generation, parse_wait_timeout_ms(text));
 }
 
 bool LspClient::document_has_text(const std::string& absolute_path,

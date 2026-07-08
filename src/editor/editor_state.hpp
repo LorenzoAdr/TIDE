@@ -59,6 +59,7 @@ struct EditorBuffer {
   int scroll_col = 0;
   bool dirty = false;
   uint64_t view_token = 0;
+  bool semantic_layout_dirty = false;
   std::set<int> collapsed_folds;
   std::vector<FoldRegion> fold_regions;
   mutable EditorJoinedSourceCache joined_source_cache;

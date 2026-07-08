@@ -61,6 +61,8 @@ class LspClient {
   bool ensure_semantic_tokens(const std::string& absolute_path);
   void invalidate_semantic_tokens_for_file(const std::string& absolute_path);
 
+  bool wait_for_current_document_parsed(const std::string& absolute_path);
+
   HoverInfo hover(const std::string& absolute_path, const std::string& text, int line,
                   int character);
 

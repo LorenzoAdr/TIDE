@@ -354,6 +354,7 @@ void insert_multiline_text_at(EditorBuffer* buffer, int line, int col, const std
     return;
   }
   editor_buffer_invalidate_joined(buffer);
+  buffer->semantic_layout_dirty = true;
 
   int cur_line = line;
   int cur_col = col;
@@ -399,6 +400,7 @@ void backspace_at(EditorBuffer* buffer, int line, int col) {
   buffer->lines.erase(buffer->lines.begin() + line);
   buffer->lines[static_cast<std::size_t>(line - 1)] += tail;
   editor_buffer_note_line_joined(buffer, line);
+  buffer->semantic_layout_dirty = true;
   for (auto& cursor : buffer->cursors) {
     if (cursor.head.line == line) {
       cursor.head.line = line - 1;
@@ -434,6 +436,7 @@ void delete_at(EditorBuffer* buffer, int line, int col) {
     return;
   }
   editor_buffer_invalidate_joined(buffer);
+  buffer->semantic_layout_dirty = true;
   const int old_len = static_cast<int>(text.size());
   text += buffer->lines[static_cast<std::size_t>(line + 1)];
   buffer->lines.erase(buffer->lines.begin() + line + 1);
@@ -524,6 +527,9 @@ std::string smart_newline_indent(const std::string& line, int col) {
 
 void newline_at(EditorBuffer* buffer, int line, int col, bool smart_indent) {
   editor_buffer_invalidate_joined(buffer);
+  if (buffer != nullptr) {
+    buffer->semantic_layout_dirty = true;
+  }
   auto& text = buffer->lines[static_cast<std::size_t>(line)];
   const std::string tail = text.substr(static_cast<std::size_t>(col));
   text.erase(static_cast<std::size_t>(col));
@@ -735,7 +741,6 @@ void ensure_scroll_centered(EditorBuffer* buffer, int visible_lines, int code_wi
 void scroll_view_by_columns(EditorBuffer* buffer, int delta_columns, int code_width) {
   if (code_width <= 0) {
     buffer->scroll_col = std::max(0, buffer->scroll_col + delta_columns);
-    buffer->view_token++;
     return;
   }
   int max_len = 0;
@@ -745,7 +750,6 @@ void scroll_view_by_columns(EditorBuffer* buffer, int delta_columns, int code_wi
   const int max_scroll_col = std::max(0, max_len - code_width + 1);
   buffer->scroll_col =
       std::max(0, std::min(buffer->scroll_col + delta_columns, max_scroll_col));
-  buffer->view_token++;
 }
 
 void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lines) {
@@ -756,7 +760,6 @@ void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lin
   const int total = static_cast<int>(buffer->lines.size());
   buffer->scroll = std::max(
       0, std::min(buffer->scroll + delta_lines, max_scroll(total, visible_lines)));
-  buffer->view_token++;
 }
 
 void move_primary_half_page_up(EditorBuffer* buffer, int visible_lines, bool extend_selection) {

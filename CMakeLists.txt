@@ -377,6 +377,13 @@ add_executable(build_environment_test
 )
 target_include_directories(build_environment_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+add_executable(clangd_workspace_setup_test
+  tests/clangd_workspace_setup_test.cpp
+  src/util/clangd_workspace_setup.cpp
+)
+target_include_directories(clangd_workspace_setup_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(clangd_workspace_setup_test PRIVATE ftxui::dom)
+
 add_executable(workspace_detect_test
   tests/workspace_detect_test.cpp
   src/app/workspace_detect.cpp

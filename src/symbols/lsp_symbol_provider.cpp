@@ -328,7 +328,8 @@ void LspSymbolProvider::async_worker_main() {
           }
         }
         if (is_lsp_trackable_path(job->path, text)) {
-          client_.did_open(job->path, text);
+          flush_document_sync(job->path);
+          client_.wait_for_current_document_parsed(job->path);
         }
         const bool fetched = client_.ensure_semantic_tokens(job->path);
         const bool ready = client_.has_ready_semantic_tokens(job->path);
@@ -1133,6 +1134,18 @@ bool LspSymbolProvider::semantic_tokens_current_for_file(const std::string& path
     return true;
   }
   return client_.has_ready_semantic_tokens(path);
+}
+
+void LspSymbolProvider::invalidate_semantic_tokens_for_file(const std::string& path) {
+  if (path.empty()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return;
+  }
+  client_.invalidate_semantic_tokens_for_file(path);
+  semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
 }
 
 bool LspSymbolProvider::supports_hover() const {

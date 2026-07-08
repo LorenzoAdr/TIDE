@@ -29,11 +29,17 @@ void collect_recursive_include_flags(const std::string& root,
   const std::string base = ec ? root : canonical.string();
   flags->insert("-I" + base);
 
-  for (fs::recursive_directory_iterator it(base, fs::directory_options::skip_permission_denied,
-                                           ec);
-       !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
-    if (it->is_directory(ec)) {
-      flags->insert("-I" + it->path().string());
+  // One level of immediate child directories covers #include "local.h" when the
+  // header lives in a direct subfolder. Avoid fs::recursive_directory_iterator:
+  // large trees (/usr/include, sysroot mounts) produced millions of -I flags and
+  // OOM/crashes when saving workspace settings.
+  for (const auto& entry : fs::directory_iterator(base, fs::directory_options::skip_permission_denied,
+                                                  ec)) {
+    if (ec) {
+      break;
+    }
+    if (entry.is_directory(ec)) {
+      flags->insert("-I" + entry.path().string());
     }
   }
 }

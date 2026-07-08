@@ -139,13 +139,19 @@ void force_immediate_repaint(MainLayoutState *layout, ScreenInteractive *screen)
 	if (layout != nullptr) {
 		layout->request_ui_tick = true;
 	}
-	if (screen == nullptr || layout == nullptr) {
+	if (screen == nullptr) {
 		return;
 	}
-	if (layout->custom_event_pending.exchange(true, std::memory_order_acq_rel)) {
-		return;
-	}
-	screen->PostEvent(Event::Custom);
+	// Defer Custom until after the current keyboard/mouse handler returns.
+	// Nested PTYs (WSL → docker exec -it) can leave the frame stale when a
+	// coalesced Custom from the poller is still pending.
+	screen->Post([screen, layout]() {
+		if (layout != nullptr) {
+			layout->request_ui_tick = true;
+			layout->custom_event_pending.store(true, std::memory_order_release);
+		}
+		screen->PostEvent(Event::Custom);
+	});
 }
 
 void request_custom_event(ScreenInteractive *screen, MainLayoutState *layout) {
@@ -2193,6 +2199,7 @@ int Application::run() {
 				file_picker_state_.mark_matches_dirty();
 				file_picker_state_.reset_preview();
 				file_picker_state_.arm_ctrl_chord();
+				file_picker_state_.on_opened(model_.workspace_root);
 				force_immediate_repaint(&layout_state_, &screen);
 				return true;
 			}
