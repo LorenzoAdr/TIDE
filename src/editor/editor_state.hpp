@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "editor/editor_folds.hpp"
+#include "editor/editor_buffer_source.hpp"
 
 namespace tgdb {
 
@@ -60,6 +61,7 @@ struct EditorBuffer {
   uint64_t view_token = 0;
   std::set<int> collapsed_folds;
   std::vector<FoldRegion> fold_regions;
+  mutable EditorJoinedSourceCache joined_source_cache;
 
   int primary_line() const;
   int primary_col() const;

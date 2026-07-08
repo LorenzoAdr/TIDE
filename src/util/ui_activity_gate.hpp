@@ -22,6 +22,7 @@ class UiActivityGate {
   bool is_inhibited() const;
   bool is_interactive() const;
   bool allows_periodic_tick() const;
+  bool allows_deferred_panel_tick() const;
   bool allows_lsp_ui() const;
   bool allows_hover_chrome() const;
   bool allows_cursor_blink() const;

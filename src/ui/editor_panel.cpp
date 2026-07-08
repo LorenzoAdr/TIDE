@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "editor/editor_buffer_source.hpp"
 #include "editor/bracket_match.hpp"
 #include "editor/clipboard.hpp"
 #include "editor/code_snippets.hpp"
@@ -4826,13 +4827,14 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->last_view_token = buffer.view_token;
     }
 
-    const bool typing_burst = !editor_content_settled(*panel_state);
     const bool indexed_cpp =
         !buffer.path.empty() && is_indexed_source_path(buffer.path);
-    const bool defer_sticky_scroll = typing_burst && indexed_cpp;
+    const bool typing_burst = !editor_content_settled(*panel_state);
+    const bool typing_edit_mode = typing_burst && indexed_cpp;
+    const bool defer_sticky_scroll = typing_edit_mode;
 
     const SemanticTokenDocument* semantic_tokens = nullptr;
-    if (symbols && symbols->supports_semantic_highlight() && indexed_cpp) {
+    if (!typing_edit_mode && symbols && symbols->supports_semantic_highlight() && indexed_cpp) {
       const bool tokens_current = symbols->semantic_tokens_current_for_file(buffer.path);
       const uint64_t semantic_rev = symbols->semantic_highlight_revision();
       if (panel_state->cached_semantic_path != buffer.path ||
@@ -5103,9 +5105,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     panel_state->code_width_chars = code_width;
 
     track_editor_scroll(panel_state.get(), buffer.scroll, layout_state);
-    rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
-                                    panel_state->cached_file_diag_revision, symbols.get(),
-                                    workspace->last_buffer_edit_ms, layout_state);
+    if (!typing_edit_mode) {
+      rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
+                                      panel_state->cached_file_diag_revision, symbols.get(),
+                                      workspace->last_buffer_edit_ms, layout_state);
+    }
 
     const bool suffixes_enabled =
         layout_state == nullptr || layout_state->app_settings == nullptr ||
@@ -5129,9 +5133,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     Elements gutter_rows;
     Elements code_rows;
+    const std::string& buffer_source = editor_buffer_joined_source(buffer);
     SyntaxHighlightContext highlight_ctx;
     highlight_ctx.file_path = buffer.path;
     highlight_ctx.lines = &buffer.lines;
+    highlight_ctx.joined_override = &buffer_source;
     highlight_ctx.buffer_token = buffer.view_token;
     const ScopeLineRange immediate_scope =
         typing_burst ? ScopeLineRange{}

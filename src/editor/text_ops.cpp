@@ -4,6 +4,7 @@
 #include <cctype>
 
 #include "editor/bracket_match.hpp"
+#include "editor/editor_buffer_source.hpp"
 #include "editor/editor_folds.hpp"
 #include "editor/indent_guides.hpp"
 #include "editor/line_comment.hpp"
@@ -315,6 +316,7 @@ void insert_char_at_with_pairs(EditorBuffer* buffer, int line, int col, char c) 
 void insert_char_at(EditorBuffer* buffer, int line, int col, char c) {
   auto& text = buffer->lines[static_cast<std::size_t>(line)];
   text.insert(static_cast<std::size_t>(col), 1, c);
+  editor_buffer_note_char_inserted(buffer, line, col, std::string_view(&c, 1));
   for (auto& cursor : buffer->cursors) {
     if (cursor.head.line == line && cursor.head.col >= col) {
       ++cursor.head.col;
@@ -331,6 +333,7 @@ void insert_string_at(EditorBuffer* buffer, int line, int col, const std::string
   }
   auto& line_text = buffer->lines[static_cast<std::size_t>(line)];
   line_text.insert(static_cast<std::size_t>(col), text);
+  editor_buffer_note_char_inserted(buffer, line, col, text);
   const int delta = static_cast<int>(text.size());
   for (auto& cursor : buffer->cursors) {
     if (cursor.head.line == line && cursor.head.col >= col) {
@@ -350,6 +353,7 @@ void insert_multiline_text_at(EditorBuffer* buffer, int line, int col, const std
     insert_string_at(buffer, line, col, text);
     return;
   }
+  editor_buffer_invalidate_joined(buffer);
 
   int cur_line = line;
   int cur_col = col;
@@ -375,6 +379,7 @@ void insert_multiline_text_at(EditorBuffer* buffer, int line, int col, const std
 void backspace_at(EditorBuffer* buffer, int line, int col) {
   if (col > 0) {
     buffer->lines[static_cast<std::size_t>(line)].erase(static_cast<std::size_t>(col - 1), 1);
+    editor_buffer_note_char_removed(buffer, line, col - 1, 1);
     for (auto& cursor : buffer->cursors) {
       if (cursor.head.line == line && cursor.head.col >= col) {
         --cursor.head.col;
@@ -393,6 +398,7 @@ void backspace_at(EditorBuffer* buffer, int line, int col) {
   const std::string tail = buffer->lines[static_cast<std::size_t>(line)];
   buffer->lines.erase(buffer->lines.begin() + line);
   buffer->lines[static_cast<std::size_t>(line - 1)] += tail;
+  editor_buffer_note_line_joined(buffer, line);
   for (auto& cursor : buffer->cursors) {
     if (cursor.head.line == line) {
       cursor.head.line = line - 1;
@@ -413,6 +419,7 @@ void delete_at(EditorBuffer* buffer, int line, int col) {
   auto& text = buffer->lines[static_cast<std::size_t>(line)];
   if (col < static_cast<int>(text.size())) {
     text.erase(static_cast<std::size_t>(col), 1);
+    editor_buffer_note_char_removed(buffer, line, col, 1);
     for (auto& cursor : buffer->cursors) {
       if (cursor.head.line == line && cursor.head.col > col) {
         --cursor.head.col;
@@ -426,6 +433,7 @@ void delete_at(EditorBuffer* buffer, int line, int col) {
   if (line + 1 >= static_cast<int>(buffer->lines.size())) {
     return;
   }
+  editor_buffer_invalidate_joined(buffer);
   const int old_len = static_cast<int>(text.size());
   text += buffer->lines[static_cast<std::size_t>(line + 1)];
   buffer->lines.erase(buffer->lines.begin() + line + 1);
@@ -515,6 +523,7 @@ std::string smart_newline_indent(const std::string& line, int col) {
 }
 
 void newline_at(EditorBuffer* buffer, int line, int col, bool smart_indent) {
+  editor_buffer_invalidate_joined(buffer);
   auto& text = buffer->lines[static_cast<std::size_t>(line)];
   const std::string tail = text.substr(static_cast<std::size_t>(col));
   text.erase(static_cast<std::size_t>(col));

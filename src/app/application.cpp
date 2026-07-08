@@ -2066,12 +2066,12 @@ int Application::run() {
 					TGDB_MON_SCOPE("ui", "tick.apply_pending_connection");
 					apply_pending_connection();
 				}
-				{
+				if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
 					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "process_index_changes");
 					TGDB_MON_SCOPE("ui", "tick.process_index_changes");
 					process_index_changes();
 				}
-				{
+				if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
 					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "process_build_environment");
 					TGDB_MON_SCOPE("ui", "tick.process_build_environment_updates");
 					process_build_environment_updates();
@@ -2112,7 +2112,7 @@ int Application::run() {
 				if (layout_state_.source_tick_callback && app_mode_ == AppMode::kDebug) {
 					layout_state_.source_tick_callback();
 				}
-				{
+				if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
 					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "git");
 					TGDB_MON_SCOPE("ui", "tick.git");
 					git_service_.tick();
@@ -2121,7 +2121,8 @@ int Application::run() {
 				if (git_tab_active(&layout_state_)) {
 					GitPanelEnsureSelectedDiff(&git_service_, &git_panel_state_);
 				}
-				if (layout_state_.outline_tick_callback) {
+				if (layout_state_.outline_tick_callback &&
+				    layout_state_.activity_gate.allows_deferred_panel_tick()) {
 					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "outline");
 					TGDB_MON_SCOPE("ui", "tick.outline");
 					layout_state_.outline_tick_callback();

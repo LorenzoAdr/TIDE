@@ -79,6 +79,13 @@ bool UiActivityGate::is_interactive() const {
 
 bool UiActivityGate::allows_periodic_tick() const { return !is_inhibited(); }
 
+bool UiActivityGate::allows_deferred_panel_tick() const {
+  if (!passive_enabled_.load(std::memory_order_relaxed)) {
+    return true;
+  }
+  return phase_.load(std::memory_order_acquire) != UiActivityPhase::kInteractive;
+}
+
 bool UiActivityGate::allows_lsp_ui() const { return !is_inhibited(); }
 
 bool UiActivityGate::allows_hover_chrome() const { return !is_inhibited(); }

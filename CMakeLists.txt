@@ -153,6 +153,7 @@ add_executable(tgdb
   src/symbols/source_symbol_resolver.cpp
   src/symbols/symbol_utils.cpp
   src/editor/editor_state.cpp
+  src/editor/editor_buffer_source.cpp
   src/editor/cursor_history.cpp
   src/editor/text_ops.cpp
   src/editor/line_comment.cpp
@@ -322,6 +323,7 @@ target_include_directories(i18n_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_executable(text_ops_test
   tests/text_ops_test.cpp
   src/editor/editor_state.cpp
+  src/editor/editor_buffer_source.cpp
   src/editor/text_ops.cpp
   src/editor/editor_folds.cpp
   src/editor/line_comment.cpp

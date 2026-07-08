@@ -1,5 +1,6 @@
 #include "util/syntax_highlight.hpp"
 
+#include "editor/editor_buffer_source.hpp"
 #include "editor/indent_guides.hpp"
 #include "parser/tree_sitter_highlight.hpp"
 #include "parser/tree_sitter_service.hpp"
@@ -11,6 +12,9 @@ namespace tgdb {
 using namespace ftxui;
 
 const std::string& SyntaxHighlightContext::joined() const {
+  if (joined_override != nullptr) {
+    return *joined_override;
+  }
   if (lines == nullptr) {
     return joined_source;
   }

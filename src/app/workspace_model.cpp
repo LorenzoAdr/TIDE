@@ -5,6 +5,7 @@
 #include <filesystem>
 
 #include "editor/undo_stack.hpp"
+#include "editor/editor_buffer_source.hpp"
 #include "ui/open_file_confirm.hpp"
 #include "util/external_viewer.hpp"
 #include "util/file_open_policy.hpp"
@@ -21,6 +22,7 @@ namespace {
 void set_welcome_buffer(EditorBuffer* buffer) {
   buffer->lines.clear();
   buffer->path.clear();
+  editor_buffer_invalidate_joined(buffer);
   buffer->reset_to_single_cursor(0, 0);
   buffer->scroll = 0;
   buffer->dirty = false;
@@ -54,6 +56,7 @@ bool WorkspaceModel::load_buffer_from_disk(EditorBuffer* buffer,
   }
   buffer->lines.clear();
   buffer->path = absolute_path;
+  editor_buffer_invalidate_joined(buffer);
   buffer->reset_to_single_cursor(0, 0);
   buffer->scroll = 0;
   buffer->dirty = false;
