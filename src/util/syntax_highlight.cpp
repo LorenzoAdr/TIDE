@@ -141,7 +141,8 @@ LineHighlights display_spans_for_line(const LineHighlights& source_spans,
     }
     HighlightSpan mapped = span;
     mapped.start_col = std::max(0, rel_start);
-    mapped.end_col = std::min(display_length, rel_end);
+    const int rel_end_clamped = std::max(0, rel_end);
+    mapped.end_col = std::max(mapped.start_col, std::min(display_length, rel_end_clamped));
     if (mapped.end_col > mapped.start_col) {
       out.spans.push_back(mapped);
     }
@@ -176,7 +177,8 @@ std::vector<SemanticTokenSpan> display_semantic_spans_for_line(
     }
     SemanticTokenSpan mapped = span;
     mapped.start_col = std::max(0, rel_start);
-    mapped.length = std::min(display_length, rel_end) - mapped.start_col;
+    const int rel_end_clamped = std::max(0, rel_end);
+    mapped.length = std::max(0, std::min(display_length, rel_end_clamped) - mapped.start_col);
     if (mapped.length > 0) {
       out.push_back(mapped);
     }
@@ -198,13 +200,12 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
                                                   ctx->buffer_token, ctx->ts_revision,
                                                   ctx->semantic_revision);
   auto& cache = *ctx->line_span_cache;
-  const auto it = cache.find(line_index);
-  if (it != cache.end() && it->second.key == key) {
+  const auto it = cache.find(key);
+  if (it != cache.end()) {
     return &it->second;
   }
 
   CachedSyntaxLineSpans entry;
-  entry.key = key;
   if (const auto* all_highlights = ctx->ts_line_highlights) {
     if (line_index >= 0 && line_index < static_cast<int>(all_highlights->size())) {
       const LineHighlights& source_hl = (*all_highlights)[static_cast<std::size_t>(line_index)];
@@ -219,8 +220,8 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
         line_spans, source_line, col_offset, display_len, tab_size);
     entry.has_semantic = !entry.semantic_display_spans.empty();
   }
-  cache[line_index] = std::move(entry);
-  return &cache[line_index];
+  cache[key] = std::move(entry);
+  return &cache[key];
 }
 
 int fragment_display_to_source_byte(const std::string& source_line, int source_byte_offset,

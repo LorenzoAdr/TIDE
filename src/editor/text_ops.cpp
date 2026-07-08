@@ -756,6 +756,7 @@ void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lin
   const int total = static_cast<int>(buffer->lines.size());
   buffer->scroll = std::max(
       0, std::min(buffer->scroll + delta_lines, max_scroll(total, visible_lines)));
+  buffer->view_token++;
 }
 
 void move_primary_half_page_up(EditorBuffer* buffer, int visible_lines, bool extend_selection) {

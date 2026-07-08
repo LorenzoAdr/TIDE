@@ -12,7 +12,6 @@
 namespace tgdb {
 
 struct CachedSyntaxLineSpans {
-  uint64_t key = 0;
   LineHighlights ts_display_spans;
   std::vector<SemanticTokenSpan> semantic_display_spans;
   bool has_semantic = false;
@@ -29,7 +28,7 @@ struct SyntaxHighlightContext {
   mutable uint64_t prepare_token = 0;
   mutable uint64_t ts_revision = 0;
   mutable const std::vector<LineHighlights>* ts_line_highlights = nullptr;
-  mutable std::unordered_map<int, CachedSyntaxLineSpans>* line_span_cache = nullptr;
+  mutable std::unordered_map<uint64_t, CachedSyntaxLineSpans>* line_span_cache = nullptr;
 
   const std::string& joined() const;
   const std::vector<LineHighlights>* tree_sitter_highlights() const;

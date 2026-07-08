@@ -260,7 +260,9 @@ struct EditorPanelState {
   bool tabular_scroll_locked = false;
   int tabular_scroll_limit = 0;
   std::unordered_map<int, CachedViewportLineRow> viewport_line_render_cache;
-  std::unordered_map<int, CachedSyntaxLineSpans> line_syntax_span_cache;
+  std::unordered_map<uint64_t, CachedSyntaxLineSpans> line_syntax_span_cache;
+  int line_syntax_span_cache_scroll = -1;
+  int line_syntax_span_cache_scroll_col = -1;
 };
 
 void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState* layout_state,
@@ -1373,6 +1375,7 @@ bool apply_scrollbar_drag(WorkspaceModel* workspace, EditorPanelState* panel, in
   }
   if (buffer->scroll != new_scroll) {
     buffer->scroll = new_scroll;
+    buffer->view_token++;
     clear_hover_state(&panel->hover);
     if (tabular_view_ready(panel, *buffer)) {
       maybe_request_tabular_chunk(panel, buffer, visible_lines);
@@ -4778,6 +4781,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->colored_brace_cache_token = 0;
       panel_state->viewport_line_render_cache.clear();
       panel_state->line_syntax_span_cache.clear();
+      panel_state->line_syntax_span_cache_scroll = -1;
+      panel_state->line_syntax_span_cache_scroll_col = -1;
       panel_state->cached_symbols_path.clear();
       panel_state->cached_semantic_path.clear();
       panel_state->last_semantic_highlight_revision = 0;
@@ -5132,6 +5137,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const int tab_col_width = std::max(1, editor_indent::tab_display_width());
     sync_guide_tracker_cache(panel_state.get(), buffer, buffer.scroll, tab_col_width);
     IndentGuideTracker& guide_tracker = panel_state->guide_tracker_cache;
+
+    if (buffer.scroll != panel_state->line_syntax_span_cache_scroll ||
+        buffer.scroll_col != panel_state->line_syntax_span_cache_scroll_col) {
+      panel_state->line_syntax_span_cache.clear();
+      panel_state->line_syntax_span_cache_scroll = buffer.scroll;
+      panel_state->line_syntax_span_cache_scroll_col = buffer.scroll_col;
+    }
 
     Elements gutter_rows;
     Elements code_rows;
