@@ -139,7 +139,7 @@ bool LspClient::spawn_clangd(const std::string& workspace_root,
     args_strings.emplace_back("-j=2");
     if (background_index) {
       args_strings.emplace_back("--background-index=true");
-      args_strings.emplace_back("--background-index-priority=low");
+      args_strings.emplace_back("--background-index-priority=idle");
     } else {
       args_strings.emplace_back("--background-index=false");
     }
@@ -291,6 +291,14 @@ void LspClient::stop() {
   semantic_token_types_.clear();
   semantic_tokens_supported_ = false;
   workspace_root_.clear();
+}
+
+void LspClient::set_background_paused(bool paused) {
+  const pid_t pid = child_pid_;
+  if (pid <= 0) {
+    return;
+  }
+  kill(pid, paused ? SIGSTOP : SIGCONT);
 }
 
 int64_t LspClient::steady_now_ms() {
@@ -747,6 +755,12 @@ CompletionItem LspClient::parse_completion_item(const nlohmann::json& item) {
   }
   if (item.contains("detail") && item["detail"].is_string()) {
     out.detail = item["detail"].get<std::string>();
+  }
+  if (item.contains("sortText") && item["sortText"].is_string()) {
+    out.sort_text = item["sortText"].get<std::string>();
+  }
+  if (item.contains("filterText") && item["filterText"].is_string()) {
+    out.filter_text = item["filterText"].get<std::string>();
   }
 
   if (item.contains("insertTextFormat") && item["insertTextFormat"].is_number_integer()) {

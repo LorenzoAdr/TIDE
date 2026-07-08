@@ -507,6 +507,33 @@ void test_local_completions_include_parameters() {
   assert(found_bar);
 }
 
+void test_sync_edit_keeps_ast_before_worker() {
+  const std::string path = "sync_live.cpp";
+  const std::string initial = "int foo() { return 0; }\n";
+  const std::string edited = "int foo() { return 1; }\n";
+  wait_document_ready(path, initial);
+  assert(tree_sitter_service().document_ready(path, initial));
+
+  tree_sitter_service().prepare_document(path, edited);
+  assert(tree_sitter_service().document_ready(path, edited));
+
+  EditorBuffer buffer;
+  buffer.path = path;
+  buffer.lines = {"int foo() { return 1; }"};
+  const std::vector<ColoredBraceMarker> markers = find_colored_curly_braces(buffer);
+  assert(!markers.empty());
+
+  for (int attempt = 0; attempt < 500; ++attempt) {
+    const std::vector<LineHighlights>* highlights =
+        tree_sitter_service().highlights_for(path, edited);
+    if (highlights != nullptr && highlights_ready_span_count(*highlights) > 0) {
+      return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  assert(false && "highlights did not refresh after sync edit");
+}
+
 void test_parse_debounce_coalesces_edits() {
   const std::string path = "debounce.cpp";
   const std::string initial = "int value = 0;\n";
@@ -561,6 +588,7 @@ int main() {
   tgdb::test_editor_fold_visibility();
   tgdb::test_colored_curly_braces_depths();
   tgdb::test_local_completions_include_parameters();
+  tgdb::test_sync_edit_keeps_ast_before_worker();
   tgdb::test_parse_debounce_coalesces_edits();
   tgdb::test_normalize_editor_source_trailing_newline();
   std::cout << "tree_sitter_test ok\n";

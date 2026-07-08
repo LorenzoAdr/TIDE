@@ -16,6 +16,7 @@ struct SyntaxHighlightContext {
   uint64_t buffer_token = 0;
   mutable std::string joined_source;
   mutable uint64_t joined_token = 0;
+  mutable uint64_t prepare_token = 0;
   mutable uint64_t ts_revision = 0;
   mutable const std::vector<LineHighlights>* ts_line_highlights = nullptr;
 

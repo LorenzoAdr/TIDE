@@ -146,6 +146,12 @@ struct GitHistoryModalState {
   std::string current_content;
 };
 
+struct CachedViewportLineRow {
+  uint64_t key = 0;
+  Element gutter;
+  Element code;
+};
+
 struct EditorPanelState {
   FocusRegion panel_focus = FocusRegion::Editor;
   Box code_box;
@@ -190,6 +196,7 @@ struct EditorPanelState {
   int scope_bracket_cache_col = -1;
   BracketPairHighlight scope_bracket_cache;
   std::vector<ColoredBraceMarker> colored_brace_cache;
+  std::string colored_brace_cache_path;
   uint64_t colored_brace_cache_token = 0;
   uint64_t last_diag_revision = 0;
   std::string last_diag_path;
@@ -212,6 +219,7 @@ struct EditorPanelState {
   uint64_t last_semantic_highlight_revision = 0;
   int code_width_chars = 80;
   int64_t content_edit_ms = 0;
+  int64_t last_heavy_editor_tick_ms = 0;
   bool lsp_sync_pending = false;
   std::unordered_map<int, std::vector<Diagnostic>> diagnostics_by_line;
   uint64_t diagnostics_by_line_revision = 0;
@@ -250,6 +258,7 @@ struct EditorPanelState {
   int64_t last_tabular_index_tick_ms = 0;
   bool tabular_scroll_locked = false;
   int tabular_scroll_limit = 0;
+  std::unordered_map<int, CachedViewportLineRow> viewport_line_render_cache;
 };
 
 void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState* layout_state,
@@ -269,6 +278,7 @@ static bool hover_key_same_position(std::string_view fetch_key, std::string_view
 
 constexpr int kSuffixScrollSettleMs = 150;
 constexpr int kEditorContentSettleMs = 120;
+constexpr int kHeavyEditorTickIntervalMs = 200;
 constexpr int kLiveCompletionDebounceMs = 120;
 constexpr int kLiveCompletionMinIntervalMs = 50;
 constexpr int kLiveCompletionLspWaitTimeoutMs = 2500;
@@ -289,6 +299,167 @@ int64_t steady_now_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
              std::chrono::steady_clock::now().time_since_epoch())
       .count();
+}
+
+constexpr uint64_t kViewportLineHashOffset = 14695981039346656037ULL;
+constexpr uint64_t kViewportLineHashPrime = 1099511628211ULL;
+
+uint64_t viewport_line_hash_u64(uint64_t h, uint64_t v) {
+  h ^= v;
+  h *= kViewportLineHashPrime;
+  return h;
+}
+
+uint64_t viewport_line_hash_int(uint64_t h, int v) {
+  return viewport_line_hash_u64(h, static_cast<uint64_t>(v));
+}
+
+uint64_t viewport_line_hash_bool(uint64_t h, bool v) {
+  return viewport_line_hash_u64(h, v ? 1 : 0);
+}
+
+uint64_t viewport_line_hash_string(uint64_t h, std::string_view s) {
+  for (unsigned char c : s) {
+    h = viewport_line_hash_u64(h, c);
+  }
+  return h;
+}
+
+uint64_t viewport_line_hash_matches_on_line(uint64_t h, const std::vector<TextMatch>* matches,
+                                            int line_index) {
+  if (matches == nullptr) {
+    return h;
+  }
+  for (const TextMatch& match : *matches) {
+    if (match.line != line_index) {
+      continue;
+    }
+    h = viewport_line_hash_int(h, match.col);
+    h = viewport_line_hash_int(h, match.length);
+  }
+  return h;
+}
+
+uint64_t viewport_line_hash_selection_on_line(uint64_t h, const EditorBuffer& buffer,
+                                              int line_index) {
+  const MultiCursor& cursor = buffer.primary();
+  if (!cursor.has_selection()) {
+    return h;
+  }
+  const int lo = std::min(cursor.anchor.line, cursor.head.line);
+  const int hi = std::max(cursor.anchor.line, cursor.head.line);
+  if (line_index < lo || line_index > hi) {
+    return h;
+  }
+  h = viewport_line_hash_int(h, cursor.anchor.line);
+  h = viewport_line_hash_int(h, cursor.anchor.col);
+  h = viewport_line_hash_int(h, cursor.head.line);
+  h = viewport_line_hash_int(h, cursor.head.col);
+  return h;
+}
+
+uint64_t viewport_line_hash_diagnostics(uint64_t h, const std::vector<Diagnostic>* diagnostics) {
+  if (diagnostics == nullptr) {
+    return h;
+  }
+  for (const Diagnostic& diag : *diagnostics) {
+    h = viewport_line_hash_int(h, static_cast<int>(diag.severity));
+    h = viewport_line_hash_int(h, diag.start_col);
+    h = viewport_line_hash_int(h, diag.end_col);
+  }
+  return h;
+}
+
+struct ViewportLineRenderKeyInput {
+  int line_index = -1;
+  std::string_view line_content;
+  int guide_depth = 0;
+  char fold_marker = '\0';
+  char gutter_marker = ' ';
+  bool has_breakpoint = false;
+  bool in_immediate_scope_gutter = false;
+  const std::string* suffix_ptr = nullptr;
+  bool symbol_press_active = false;
+  const std::vector<Diagnostic>* line_diagnostics = nullptr;
+  const std::vector<TextMatch>* find_matches = nullptr;
+  const std::vector<TextMatch>* selection_occurrences = nullptr;
+};
+
+uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line,
+                                        const EditorBuffer& buffer, const EditorPanelState& panel,
+                                        bool editor_focused, bool show_caret, bool mouse_selecting,
+                                        bool helix_caret_insert, int scroll_col, int code_width,
+                                        bool helix_relative, int gutter_w, bool fold_gutter_enabled,
+                                        bool gutter_markers, bool indent_guides_enabled,
+                                        int scope_highlight_strength, bool typing_burst,
+                                        const BracketPairHighlight& bracket,
+                                        const BracketPairHighlight* scope_bracket,
+                                        uint64_t colored_brace_token, uint64_t semantic_revision,
+                                        bool git_line_changed) {
+  uint64_t h = kViewportLineHashOffset;
+  h = viewport_line_hash_int(h, line.line_index);
+  h = viewport_line_hash_string(h, line.line_content);
+  h = viewport_line_hash_int(h, buffer.primary_line());
+  h = viewport_line_hash_int(h, buffer.primary_col());
+  h = viewport_line_hash_int(h, scroll_col);
+  h = viewport_line_hash_int(h, code_width);
+  h = viewport_line_hash_int(h, line.guide_depth);
+  h = viewport_line_hash_bool(h, editor_focused);
+  h = viewport_line_hash_bool(h, show_caret);
+  h = viewport_line_hash_bool(h, mouse_selecting);
+  h = viewport_line_hash_bool(h, helix_caret_insert);
+  h = viewport_line_hash_bool(h, helix_relative);
+  h = viewport_line_hash_int(h, gutter_w);
+  h = viewport_line_hash_bool(h, fold_gutter_enabled);
+  h = viewport_line_hash_int(h, line.fold_marker);
+  h = viewport_line_hash_bool(h, gutter_markers);
+  h = viewport_line_hash_bool(h, line.has_breakpoint);
+  h = viewport_line_hash_int(h, line.gutter_marker);
+  h = viewport_line_hash_bool(h, line.in_immediate_scope_gutter);
+  h = viewport_line_hash_bool(h, indent_guides_enabled);
+  h = viewport_line_hash_int(h, scope_highlight_strength);
+  h = viewport_line_hash_bool(h, typing_burst);
+  h = viewport_line_hash_bool(h, git_line_changed);
+  h = viewport_line_hash_bool(h, line.symbol_press_active);
+  h = viewport_line_hash_u64(h, colored_brace_token);
+  h = viewport_line_hash_u64(h, semantic_revision);
+  h = viewport_line_hash_string(h, buffer.path);
+  if (line.suffix_ptr != nullptr) {
+    h = viewport_line_hash_string(h, *line.suffix_ptr);
+  }
+  h = viewport_line_hash_matches_on_line(h, line.find_matches, line.line_index);
+  h = viewport_line_hash_matches_on_line(h, line.selection_occurrences, line.line_index);
+  h = viewport_line_hash_selection_on_line(h, buffer, line.line_index);
+  h = viewport_line_hash_diagnostics(h, line.line_diagnostics);
+  if (bracket.valid) {
+    h = viewport_line_hash_int(h, bracket.line_a);
+    h = viewport_line_hash_int(h, bracket.line_b);
+    h = viewport_line_hash_int(h, bracket.col_a);
+    h = viewport_line_hash_int(h, bracket.col_b);
+  }
+  if (scope_bracket != nullptr && scope_bracket->valid) {
+    h = viewport_line_hash_int(h, scope_bracket->line_a);
+    h = viewport_line_hash_int(h, scope_bracket->line_b);
+    h = viewport_line_hash_int(h, scope_bracket->col_a);
+    h = viewport_line_hash_int(h, scope_bracket->col_b);
+  }
+  return h;
+}
+
+void prune_viewport_line_render_cache(EditorPanelState* panel,
+                                      const std::vector<int>& visible_lines) {
+  if (panel == nullptr) {
+    return;
+  }
+  std::unordered_set<int> visible(visible_lines.begin(), visible_lines.end());
+  for (auto it = panel->viewport_line_render_cache.begin();
+       it != panel->viewport_line_render_cache.end();) {
+    if (visible.count(it->first) == 0) {
+      it = panel->viewport_line_render_cache.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 bool editor_content_settled(const EditorPanelState& panel) {
@@ -492,9 +663,10 @@ void rebuild_diagnostic_suffix_cache(EditorPanelState* panel, const EditorBuffer
   if (panel == nullptr || code_width <= 0) {
     return;
   }
-  const bool lsp_ui_allowed =
-      layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
-  if (!diagnostics_display_allowed(last_edit_ms, symbols, buffer.path, lsp_ui_allowed)) {
+  // Los sufijos se reconstruyen desde diagnósticos ya cacheados, así que deben seguir
+  // visibles en reposo (inhibido). Solo respetamos el debounce de edición, no la inhibición.
+  (void)layout_state;
+  if (!diagnostics_display_allowed(last_edit_ms, symbols, buffer.path, /*lsp_ui_allowed=*/true)) {
     panel->diagnostic_suffix_by_line.clear();
     return;
   }
@@ -704,6 +876,9 @@ const BracketPairHighlight& cached_bracket_highlight(EditorPanelState* panel,
   }
   const int line = buffer.primary_line();
   const int col = buffer.primary_col();
+  if (!editor_content_settled(*panel) && panel->bracket_cache.valid) {
+    return panel->bracket_cache;
+  }
   if (panel->bracket_cache_token == buffer.view_token && panel->bracket_cache_line == line &&
       panel->bracket_cache_col == col) {
     return panel->bracket_cache;
@@ -724,6 +899,9 @@ const BracketPairHighlight& cached_scope_bracket_highlight(EditorPanelState* pan
   }
   const int line = buffer.primary_line();
   const int col = buffer.primary_col();
+  if (!editor_content_settled(*panel) && panel->scope_bracket_cache.valid) {
+    return panel->scope_bracket_cache;
+  }
   if (panel->scope_bracket_cache_token == buffer.view_token &&
       panel->scope_bracket_cache_line == line && panel->scope_bracket_cache_col == col) {
     return panel->scope_bracket_cache;
@@ -743,11 +921,20 @@ const std::vector<ColoredBraceMarker>& cached_colored_braces(EditorPanelState* p
       !is_indexed_source_path(buffer.path)) {
     return kEmpty;
   }
-  if (panel->colored_brace_cache_token == buffer.view_token) {
+  if (!editor_content_settled(*panel)) {
     return panel->colored_brace_cache;
   }
-  panel->colored_brace_cache_token = buffer.view_token;
-  panel->colored_brace_cache = find_colored_curly_braces(buffer);
+  const bool path_changed = panel->colored_brace_cache_path != buffer.path;
+  const bool token_changed = panel->colored_brace_cache_token != buffer.view_token;
+  if (!path_changed && !token_changed) {
+    return panel->colored_brace_cache;
+  }
+  const std::vector<ColoredBraceMarker> fresh = find_colored_curly_braces(buffer);
+  if (!fresh.empty() || path_changed || panel->colored_brace_cache.empty()) {
+    panel->colored_brace_cache = fresh;
+    panel->colored_brace_cache_path = buffer.path;
+    panel->colored_brace_cache_token = buffer.view_token;
+  }
   return panel->colored_brace_cache;
 }
 
@@ -1900,13 +2087,118 @@ std::string completion_anchor_key(const std::string& path, int replace_line,
   return path + "|" + std::to_string(replace_line) + "|" + std::to_string(replace_start);
 }
 
+bool completion_starts_with(std::string_view haystack_lower, std::string_view query_lower) {
+  return haystack_lower.size() >= query_lower.size() &&
+         haystack_lower.compare(0, query_lower.size(), query_lower) == 0;
+}
+
+std::vector<std::size_t> completion_prefix_indices(std::size_t length) {
+  std::vector<std::size_t> indices;
+  indices.reserve(length);
+  for (std::size_t i = 0; i < length; ++i) {
+    indices.push_back(i);
+  }
+  return indices;
+}
+
 struct CompletionCacheEntry {
   CompletionItem item;
   std::string match_text;
   std::string match_lower;
+  std::string filter_text;
+  std::string filter_lower;
   std::string alt_text;
   std::string alt_lower;
+  std::string sort_key;
+  int source_index = 0;
 };
+
+struct CompletionRankedCandidate {
+  std::size_t index = 0;
+  int tier = 1;  // 0 = prefix match, 1 = fuzzy only
+  int score = 0;
+  std::string match_display;
+  std::vector<std::size_t> match_indices;
+};
+
+std::optional<CompletionRankedCandidate> rank_completion_entry(
+    std::size_t cache_index, const CompletionCacheEntry& entry, std::string_view query_lower) {
+  struct Attempt {
+    int tier = 1;
+    int score = 0;
+    std::string match_display;
+    std::vector<std::size_t> match_indices;
+  };
+  std::optional<Attempt> best;
+
+  const auto consider = [&](std::string_view display, std::string_view lower) {
+    if (display.empty() || lower.size() != display.size()) {
+      return;
+    }
+    if (completion_starts_with(lower, query_lower)) {
+      Attempt attempt;
+      attempt.tier = 0;
+      attempt.score = 100000 - static_cast<int>(display.size());
+      attempt.match_display.assign(display);
+      attempt.match_indices = completion_prefix_indices(query_lower.size());
+      if (!best || best->tier > 0 || attempt.score > best->score) {
+        best = std::move(attempt);
+      }
+      return;
+    }
+    if (best && best->tier == 0) {
+      return;
+    }
+    const FuzzyMatchResult fuzzy = fuzzy_match_cached(display, lower, query_lower);
+    if (!fuzzy.matched) {
+      return;
+    }
+    Attempt attempt;
+    attempt.tier = 1;
+    attempt.score = fuzzy.score;
+    attempt.match_display.assign(display);
+    attempt.match_indices = fuzzy.indices;
+    if (!best || best->tier > 1 || attempt.score > best->score) {
+      best = std::move(attempt);
+    }
+  };
+
+  if (!entry.filter_lower.empty()) {
+    consider(entry.filter_text, entry.filter_lower);
+  }
+  consider(entry.match_text, entry.match_lower);
+  if (!entry.alt_lower.empty()) {
+    consider(entry.alt_text, entry.alt_lower);
+  }
+  if (!best) {
+    return std::nullopt;
+  }
+
+  CompletionRankedCandidate ranked;
+  ranked.index = cache_index;
+  ranked.tier = best->tier;
+  ranked.score = best->score;
+  ranked.match_display = std::move(best->match_display);
+  ranked.match_indices = std::move(best->match_indices);
+  return ranked;
+}
+
+bool completion_ranked_before(const CompletionRankedCandidate& a,
+                              const CompletionRankedCandidate& b,
+                              const std::vector<CompletionCacheEntry>& cache) {
+  if (a.tier != b.tier) {
+    return a.tier < b.tier;
+  }
+  if (a.score != b.score) {
+    return a.score > b.score;
+  }
+  const std::string& sort_a = cache[a.index].sort_key;
+  const std::string& sort_b = cache[b.index].sort_key;
+  if (sort_a != sort_b) {
+    return sort_a < sort_b;
+  }
+  return cache[a.index].source_index < cache[b.index].source_index;
+}
 
 struct CompletionState {
   bool open = false;
@@ -1941,11 +2233,16 @@ struct CompletionState {
     item_cache.clear();
     const std::vector<CompletionItem>& source = !lsp_items.empty() ? lsp_items : all_items;
     item_cache.reserve(source.size() + snippet_items.size());
-    const auto add_item = [this](const CompletionItem& item) {
+    int source_index = 0;
+    const auto add_item = [this, &source_index](const CompletionItem& item) {
       CompletionCacheEntry entry;
       entry.item = item;
       entry.match_text = strip_symbol_kind_prefix(item.label);
       entry.match_lower = fuzzy_to_lower(entry.match_text);
+      if (!item.filter_text.empty()) {
+        entry.filter_text = item.filter_text;
+        entry.filter_lower = fuzzy_to_lower(entry.filter_text);
+      }
       if (!item.insert_text.empty()) {
         const std::string insert_name = symbol_insert_name(item.insert_text);
         if (insert_name != entry.match_text) {
@@ -1953,6 +2250,8 @@ struct CompletionState {
           entry.alt_lower = fuzzy_to_lower(entry.alt_text);
         }
       }
+      entry.sort_key = !item.sort_text.empty() ? item.sort_text : entry.match_text;
+      entry.source_index = source_index++;
       item_cache.push_back(std::move(entry));
     };
     for (const CompletionItem& item : source) {
@@ -1970,53 +2269,43 @@ struct CompletionState {
     }
     query_lower = fuzzy_to_lower(query);
 
-    struct Candidate {
-      std::size_t index = 0;
-      int score = 0;
-      std::string match_display;
-      std::vector<std::size_t> match_indices;
-    };
-    std::vector<Candidate> candidates;
+    std::vector<CompletionRankedCandidate> candidates;
     candidates.reserve(std::min(item_cache.size(), std::size_t{256}));
 
     if (query_lower.empty()) {
+      std::vector<std::size_t> order(item_cache.size());
+      for (std::size_t i = 0; i < order.size(); ++i) {
+        order[i] = i;
+      }
+      std::sort(order.begin(), order.end(), [this](std::size_t a, std::size_t b) {
+        const CompletionCacheEntry& ea = item_cache[a];
+        const CompletionCacheEntry& eb = item_cache[b];
+        if (ea.sort_key != eb.sort_key) {
+          return ea.sort_key < eb.sort_key;
+        }
+        return ea.source_index < eb.source_index;
+      });
+
       constexpr int kMaxMatches = 200;
-      const std::size_t limit = std::min(item_cache.size(), std::size_t{kMaxMatches});
+      const std::size_t limit = std::min(order.size(), std::size_t{kMaxMatches});
       matches.clear();
       matches.reserve(limit);
       for (std::size_t i = 0; i < limit; ++i) {
-        const CompletionCacheEntry& entry = item_cache[i];
+        const CompletionCacheEntry& entry = item_cache[order[i]];
         matches.push_back({entry.item, entry.match_text, {}});
       }
     } else {
       for (std::size_t i = 0; i < item_cache.size(); ++i) {
         const CompletionCacheEntry& entry = item_cache[i];
-        FuzzyMatchResult result =
-            fuzzy_match_cached(entry.match_text, entry.match_lower, query_lower);
-        std::string match_display = entry.match_text;
-        if (!result.matched && !entry.alt_lower.empty()) {
-          result = fuzzy_match_cached(entry.alt_text, entry.alt_lower, query_lower);
-          if (result.matched) {
-            match_display = entry.alt_text;
-          }
+        if (const std::optional<CompletionRankedCandidate> ranked =
+                rank_completion_entry(i, entry, query_lower)) {
+          candidates.push_back(*ranked);
         }
-        if (!result.matched) {
-          continue;
-        }
-        candidates.push_back({i, result.score, std::move(match_display), result.indices});
       }
 
       std::sort(candidates.begin(), candidates.end(),
-                [this](const Candidate& a, const Candidate& b) {
-                  if (a.score != b.score) {
-                    return a.score > b.score;
-                  }
-                  const std::string& ta = item_cache[a.index].match_text;
-                  const std::string& tb = item_cache[b.index].match_text;
-                  if (ta.size() != tb.size()) {
-                    return ta.size() < tb.size();
-                  }
-                  return ta < tb;
+                [this](const CompletionRankedCandidate& a, const CompletionRankedCandidate& b) {
+                  return completion_ranked_before(a, b, item_cache);
                 });
 
       constexpr int kMaxMatches = 200;
@@ -2026,7 +2315,7 @@ struct CompletionState {
 
       matches.clear();
       matches.reserve(candidates.size());
-      for (const Candidate& candidate : candidates) {
+      for (const CompletionRankedCandidate& candidate : candidates) {
         const CompletionCacheEntry& entry = item_cache[candidate.index];
         matches.push_back(
             {entry.item, candidate.match_display, candidate.match_indices});
@@ -2554,8 +2843,7 @@ void schedule_completion_lsp_fetch(CompletionState* completion, WorkspaceModel* 
   }
   completion->lsp_pending_key = anchor_key;
   if (completion->lsp_resolved_key != anchor_key) {
-    const int64_t debounce =
-        live_only && completion->prefix.size() > 1 ? kLiveCompletionDebounceMs : 0;
+    const int64_t debounce = live_only ? kLiveCompletionDebounceMs : 0;
     completion->lsp_request_due_ms = steady_now_ms() + debounce;
   }
 }
@@ -2581,6 +2869,11 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
   }
   if (symbols == nullptr || !symbols->supports_semantic_completion() ||
       !symbols->completion_uses_async_fetch()) {
+    return;
+  }
+  // Live completion: debounce in schedule_completion_lsp_fetch is enough; do not
+  // also wait for editor_content_settled (that doubled the 120 ms latency).
+  if (!live && panel != nullptr && !editor_content_settled(*panel)) {
     return;
   }
 
@@ -4478,6 +4771,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       buffer.fold_regions.clear();
       panel_state->fold_regions_cache_path.clear();
       panel_state->fold_regions_cache_token = 0;
+      panel_state->colored_brace_cache.clear();
+      panel_state->colored_brace_cache_path.clear();
+      panel_state->colored_brace_cache_token = 0;
+      panel_state->viewport_line_render_cache.clear();
       panel_state->cached_symbols_path.clear();
       panel_state->cached_semantic_path.clear();
       panel_state->last_semantic_highlight_revision = 0;
@@ -4532,7 +4829,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool typing_burst = !editor_content_settled(*panel_state);
     const bool indexed_cpp =
         !buffer.path.empty() && is_indexed_source_path(buffer.path);
-    const bool defer_rich_decorations = typing_burst && indexed_cpp;
+    const bool defer_sticky_scroll = typing_burst && indexed_cpp;
 
     const SemanticTokenDocument* semantic_tokens = nullptr;
     if (symbols && symbols->supports_semantic_highlight() && indexed_cpp) {
@@ -4574,23 +4871,29 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool path_indexed_cpp =
         !buffer.path.empty() && is_indexed_source_path(buffer.path);
     if (scope_visual_effects && path_indexed_cpp) {
-      if (panel_state->fold_regions_cache_path != buffer.path ||
-          panel_state->fold_regions_cache_token != buffer.view_token) {
-        buffer.fold_regions =
+      const bool path_changed = panel_state->fold_regions_cache_path != buffer.path;
+      const bool settled = editor_content_settled(*panel_state);
+      const bool token_changed =
+          panel_state->fold_regions_cache_token != buffer.view_token;
+      if (path_changed || (settled && token_changed)) {
+        const std::vector<FoldRegion> fresh =
             tree_sitter_service().fold_regions_at(buffer.path, buffer.lines);
-        std::set<int> valid_open_lines;
-        for (const FoldRegion& region : buffer.fold_regions) {
-          valid_open_lines.insert(region.open_line);
-        }
-        for (auto it = buffer.collapsed_folds.begin(); it != buffer.collapsed_folds.end();) {
-          if (valid_open_lines.count(*it) == 0) {
-            it = buffer.collapsed_folds.erase(it);
-          } else {
-            ++it;
+        if (!fresh.empty() || path_changed || buffer.fold_regions.empty()) {
+          buffer.fold_regions = fresh;
+          std::set<int> valid_open_lines;
+          for (const FoldRegion& region : buffer.fold_regions) {
+            valid_open_lines.insert(region.open_line);
           }
+          for (auto it = buffer.collapsed_folds.begin(); it != buffer.collapsed_folds.end();) {
+            if (valid_open_lines.count(*it) == 0) {
+              it = buffer.collapsed_folds.erase(it);
+            } else {
+              ++it;
+            }
+          }
+          panel_state->fold_regions_cache_path = buffer.path;
+          panel_state->fold_regions_cache_token = buffer.view_token;
         }
-        panel_state->fold_regions_cache_path = buffer.path;
-        panel_state->fold_regions_cache_token = buffer.view_token;
       }
     } else if (!path_indexed_cpp) {
       buffer.fold_regions.clear();
@@ -4749,11 +5052,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     static const BracketPairHighlight kNoBracket{};
     const BracketPairHighlight& bracket =
-        defer_rich_decorations ? kNoBracket
-                             : cached_bracket_highlight(panel_state.get(), buffer, editor_focused);
+        cached_bracket_highlight(panel_state.get(), buffer, editor_focused);
     static const BracketPairHighlight kNoScopeBracket{};
     const BracketPairHighlight& scope_bracket =
-        defer_rich_decorations || !scope_visual_effects ? kNoScopeBracket
+        !scope_visual_effects ? kNoScopeBracket
         : cached_scope_bracket_highlight(panel_state.get(), buffer, editor_focused);
     const BracketPairHighlight* scope_bracket_ptr =
         scope_bracket.valid ? &scope_bracket : nullptr;
@@ -4761,7 +5063,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const std::vector<SymbolInfo>& file_symbols =
         cached_file_symbols(panel_state.get(), buffer.path, symbols.get());
     const std::vector<StickyLine> sticky_lines =
-        defer_rich_decorations
+        defer_sticky_scroll
             ? std::vector<StickyLine>{}
             : (layout_state != nullptr && layout_state->app_settings != nullptr &&
                        layout_state->app_settings->sticky_scroll_enabled
@@ -4769,13 +5071,15 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                    : std::vector<StickyLine>{});
 
     DocumentDiagnostics file_diag;
-    const bool lsp_ui_allowed =
-        layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
+    // Mostrar diagnósticos ya cacheados no depende de la inhibición: en reposo seguimos
+    // pintando marcas y sufijos. Solo el refresh desde clangd respeta allows_lsp_ui()
+    // (lo comprueba cached_file_diagnostics internamente). Aquí el display únicamente
+    // respeta el debounce de edición para no mostrar diagnósticos obsoletos al escribir.
     const bool show_diagnostics =
         symbols && symbols->supports_diagnostics() && !buffer.path.empty() &&
         is_lsp_trackable_path(buffer.path) &&
         diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), buffer.path,
-                                    lsp_ui_allowed);
+                                    /*lsp_ui_allowed=*/true);
     if (show_diagnostics) {
       file_diag = cached_file_diagnostics(panel_state.get(), symbols.get(), buffer.path,
                                           workspace->last_buffer_edit_ms, layout_state);
@@ -4830,110 +5134,157 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     highlight_ctx.lines = &buffer.lines;
     highlight_ctx.buffer_token = buffer.view_token;
     const ScopeLineRange immediate_scope =
-        scope_visual_effects && !buffer.path.empty() && is_indexed_source_path(buffer.path)
+        typing_burst ? ScopeLineRange{}
+        : scope_visual_effects && !buffer.path.empty() && is_indexed_source_path(buffer.path)
             ? tree_sitter_service().innermost_scope_range_at(buffer.path, buffer.lines,
                                                              buffer.primary_line(),
                                                              buffer.primary_col())
             : ScopeLineRange{};
     const std::vector<ColoredBraceMarker>& colored_braces =
-        cached_colored_braces(panel_state.get(), buffer,
-                              !defer_rich_decorations && scope_visual_effects);
+        cached_colored_braces(panel_state.get(), buffer, scope_visual_effects);
     const std::vector<ColoredBraceMarker>* colored_braces_ptr =
         colored_braces.empty() ? nullptr : &colored_braces;
+    const bool helix_caret_insert =
+        helix_caret && panel_state->helix.mode == HelixMode::kInsert;
+    const uint64_t semantic_revision = panel_state->last_semantic_highlight_revision;
     for (int i : viewport_lines) {
+      const std::string& display_line = buffer.lines[static_cast<std::size_t>(i)];
+      const int guide_depth =
+          indent_guides_enabled ? guide_tracker.advance(display_line, tab_col_width) : 0;
+
       const bool is_primary = (i == buffer.primary_line());
+      const bool caret_line = show_caret && editor_focused && is_primary;
       const bool in_immediate_scope_gutter =
           scope_visual_effects && immediate_scope.valid && immediate_scope.contains(i);
+
+      const char fold_marker =
+          fold_gutter_enabled
+              ? fold_gutter_marker(i, buffer.fold_regions, buffer.collapsed_folds)
+              : '\0';
+      char gutter_marker = ' ';
+      bool line_breakpoint = false;
+      if (gutter_markers) {
+        if (has_breakpoint_markers &&
+            debug_model->has_breakpoint(normalize_path(buffer.path), i + 1)) {
+          line_breakpoint = true;
+          gutter_marker = '\0';
+        } else {
+          gutter_marker = line_gutter_marker(panel_state.get(), i);
+        }
+      }
+
+      const std::string* suffix_ptr = nullptr;
+      const std::vector<Diagnostic>* suffix_color_ptr = nullptr;
+      const std::vector<Diagnostic>* line_diagnostics =
+          diagnostics_for_editor_line(panel_state.get(), i);
+      if (show_diagnostic_suffix_on_line(*panel_state, i, buffer, suffixes_enabled)) {
+        const auto suffix_it = panel_state->diagnostic_suffix_by_line.find(i);
+        if (suffix_it != panel_state->diagnostic_suffix_by_line.end()) {
+          suffix_ptr = &suffix_it->second;
+          suffix_color_ptr = line_diagnostics;
+        }
+      }
+
+      EditorSymbolPress symbol_press;
+      bool symbol_press_active = false;
+      if (layout_state != nullptr && layout_state->editor_symbol_press.line == i) {
+        const auto& press = layout_state->editor_symbol_press;
+        if (editor_symbol_press_visible(layout_state)) {
+          symbol_press = {press.start_col, press.end_col, true};
+          symbol_press_active = true;
+        }
+      }
+
+      ViewportLineRenderKeyInput key_input;
+      key_input.line_index = i;
+      key_input.line_content = display_line;
+      key_input.guide_depth = guide_depth;
+      key_input.fold_marker = fold_marker;
+      key_input.gutter_marker = gutter_marker;
+      key_input.has_breakpoint = line_breakpoint;
+      key_input.in_immediate_scope_gutter = in_immediate_scope_gutter;
+      key_input.suffix_ptr = suffix_ptr;
+      key_input.symbol_press_active = symbol_press_active;
+      key_input.line_diagnostics = line_diagnostics;
+      key_input.find_matches = find_matches;
+      key_input.selection_occurrences = selection_occurrences;
+      const uint64_t render_key = compute_viewport_line_render_key(
+          key_input, buffer, *panel_state, editor_focused, show_caret,
+          panel_state->mouse_selecting, helix_caret_insert, buffer.scroll_col, code_width,
+          helix_relative, gutter_w, fold_gutter_enabled, gutter_markers, indent_guides_enabled,
+          scope_highlight_strength, typing_burst, bracket, scope_bracket_ptr,
+          panel_state->colored_brace_cache_token, semantic_revision,
+          git_line_changed(panel_state.get(), i));
+
+      auto cache_it = panel_state->viewport_line_render_cache.find(i);
+      if (!caret_line && cache_it != panel_state->viewport_line_render_cache.end() &&
+          cache_it->second.key == render_key) {
+        gutter_rows.push_back(cache_it->second.gutter);
+        code_rows.push_back(cache_it->second.code);
+        continue;
+      }
+
       const Decorator gutter_bg =
           is_primary ? bgcolor(theme::EditorLineHi())
                      : (in_immediate_scope_gutter
                             ? bgcolor(theme::ScopeBg(scope_highlight_strength))
                             : bgcolor(theme::CodeBg()));
 
-      const char fold_marker =
-          fold_gutter_enabled
-              ? fold_gutter_marker(i, buffer.fold_regions, buffer.collapsed_folds)
-              : '\0';
       const Element fold_el =
           text(fold_marker == '\0' ? " " : std::string(1, fold_marker)) |
           color(fold_marker == '\0' ? theme::Muted() : theme::Accent());
 
+      Element gutter_row;
       if (gutter_markers) {
-        char marker = ' ';
-        if (has_breakpoint_markers &&
-            debug_model->has_breakpoint(normalize_path(buffer.path), i + 1)) {
-          marker = '\0';  // rendered as bullet below
-        } else {
-          marker = line_gutter_marker(panel_state.get(), i);
-        }
         std::string gutter_text;
-        if (has_breakpoint_markers &&
-            debug_model->has_breakpoint(normalize_path(buffer.path), i + 1)) {
+        if (line_breakpoint) {
           gutter_text = "●";
         } else {
-          gutter_text.assign(1, marker == '\0' ? ' ' : marker);
+          gutter_text.assign(1, gutter_marker == '\0' ? ' ' : gutter_marker);
         }
         gutter_text += helix_format_line_number(
             i, buffer.primary_line(), gutter_w - panel_state->gutter_fold_width, helix_relative);
         Color gutter_color = theme::Muted();
-        if (has_breakpoint_markers &&
-            debug_model->has_breakpoint(normalize_path(buffer.path), i + 1)) {
+        if (line_breakpoint) {
           gutter_color = Color::Red;
-        } else if (marker == '!') {
+        } else if (gutter_marker == '!') {
           gutter_color = theme::Error();
-        } else if (marker == 'G') {
+        } else if (gutter_marker == 'G') {
           gutter_color = theme::Success();
-        } else if (marker == 'W') {
+        } else if (gutter_marker == 'W') {
           gutter_color = theme::Warning();
         }
-        gutter_rows.push_back(hbox({fold_el, text(gutter_text) | color(gutter_color)}) | gutter_bg);
+        gutter_row = hbox({fold_el, text(gutter_text) | color(gutter_color)}) | gutter_bg;
       } else {
-        gutter_rows.push_back(
+        gutter_row =
             hbox({fold_el,
                   text(helix_format_line_number(i, buffer.primary_line(),
                                                 gutter_w - panel_state->gutter_fold_width,
                                                 helix_relative)) |
                       color(theme::Muted())}) |
-            gutter_bg);
+            gutter_bg;
       }
 
-      const std::string& display_line = buffer.lines[static_cast<std::size_t>(i)];
+      Element code_row =
+          RenderEditorLine(display_line, i, buffer, editor_focused, find_matches,
+                           selection_occurrences, semantic_tokens,
+                           bracket.valid ? &bracket : nullptr, scope_bracket_ptr,
+                           scope_highlight_strength, line_diagnostics, suffix_ptr,
+                           suffix_color_ptr, symbol_press_active ? &symbol_press : nullptr,
+                           show_caret, buffer.scroll_col, code_width, &highlight_ctx, false,
+                           indent_guides_enabled, guide_depth, false, cursor_cell,
+                           colored_braces_ptr) |
+          xflex_shrink;
 
-      const std::string* suffix_ptr = nullptr;
-      const std::vector<Diagnostic>* suffix_color_ptr = nullptr;
-      if (show_diagnostic_suffix_on_line(*panel_state, i, buffer, suffixes_enabled)) {
-        const auto suffix_it = panel_state->diagnostic_suffix_by_line.find(i);
-        if (suffix_it != panel_state->diagnostic_suffix_by_line.end()) {
-          suffix_ptr = &suffix_it->second;
-          suffix_color_ptr = diagnostics_for_editor_line(panel_state.get(), i);
-        }
-      }
-
-      EditorSymbolPress symbol_press;
-      if (layout_state != nullptr && layout_state->editor_symbol_press.line == i) {
-        const auto& press = layout_state->editor_symbol_press;
-        if (editor_symbol_press_visible(layout_state)) {
-          symbol_press = {press.start_col, press.end_col, true};
-        }
-      }
-
-      code_rows.push_back(RenderEditorLine(display_line, i, buffer,
-                                           editor_focused, find_matches, selection_occurrences,
-                                           semantic_tokens,
-                                           bracket.valid ? &bracket : nullptr, scope_bracket_ptr,
-                                           scope_highlight_strength,
-                                           diagnostics_for_editor_line(panel_state.get(), i),
-                                           suffix_ptr, suffix_color_ptr,
-                                           &symbol_press, show_caret, buffer.scroll_col,
-                                           code_width, &highlight_ctx, false,
-                                           indent_guides_enabled,
-                                           indent_guides_enabled
-                                               ? guide_tracker.advance(display_line, tab_col_width)
-                                               : 0,
-                                           defer_rich_decorations, cursor_cell, colored_braces_ptr) |
-                            xflex_shrink);
-
+      CachedViewportLineRow cached_row;
+      cached_row.key = render_key;
+      cached_row.gutter = gutter_row;
+      cached_row.code = code_row;
+      panel_state->viewport_line_render_cache[i] = std::move(cached_row);
+      gutter_rows.push_back(panel_state->viewport_line_render_cache[i].gutter);
+      code_rows.push_back(panel_state->viewport_line_render_cache[i].code);
     }
+    prune_viewport_line_render_cache(panel_state.get(), viewport_lines);
     if (code_rows.empty()) {
       gutter_rows.push_back(text(format_line_number(1, gutter_w)) | color(theme::Muted()) |
                             bgcolor(theme::CodeBg()));
@@ -5193,10 +5544,17 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         navigate_to_location(workspace, layout_state, loc, visible);
       });
       editor_hover_tick(workspace, panel_state.get(), symbols, layout_state);
-      tick_lsp_buffer_sync(panel_state.get(), workspace, symbols, layout_state);
       completion_lsp_tick(completion_state.get(), workspace, symbols, layout_state,
                           panel_state.get());
       workspace->ensure_buffer();
+
+      const int64_t now = steady_now_ms();
+      if (now - panel_state->last_heavy_editor_tick_ms < kHeavyEditorTickIntervalMs) {
+        return;
+      }
+      panel_state->last_heavy_editor_tick_ms = now;
+
+      tick_lsp_buffer_sync(panel_state.get(), workspace, symbols, layout_state);
       tick_selection_occurrence_matches(panel_state.get(), workspace->buffer, layout_state);
       if (find_state->tick_matches(workspace->buffer) && layout_state != nullptr) {
         layout_state->request_ui_tick = true;

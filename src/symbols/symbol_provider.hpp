@@ -32,6 +32,8 @@ struct CompletionItem {
   std::string label;
   std::string insert_text;
   std::string detail;
+  std::string sort_text;
+  std::string filter_text;
   SymbolKind kind = SymbolKind::kVariable;
   std::string file;
   bool has_replace_range = false;

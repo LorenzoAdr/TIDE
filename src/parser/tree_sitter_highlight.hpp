@@ -17,6 +17,11 @@ LineHighlights highlights_for_line(TSNode root, const std::string& source, int l
 
 std::vector<LineHighlights> highlights_for_document(TSNode root, const std::string& source);
 
+// Re-highlight only lines touched by an incremental parse; falls back to full scan.
+std::vector<LineHighlights> highlights_after_incremental_parse(
+    TSTree* old_tree, TSTree* new_tree, TSNode new_root, const std::string& source,
+    const std::vector<LineHighlights>& previous);
+
 ftxui::Element HighlightTreeSitterLine(const std::string& line, int line_index,
                                        const LineHighlights& highlights, int cursor_col = -1,
                                        ftxui::Decorator cursor_style = {}, int col_offset = 0);

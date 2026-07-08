@@ -20,6 +20,7 @@ class UiActivityGate {
 
   UiActivityPhase phase() const { return phase_.load(std::memory_order_acquire); }
   bool is_inhibited() const;
+  bool is_interactive() const;
   bool allows_periodic_tick() const;
   bool allows_lsp_ui() const;
   bool allows_hover_chrome() const;
@@ -31,9 +32,10 @@ class UiActivityGate {
  private:
   std::atomic<bool> passive_enabled_{true};
   std::atomic<int64_t> grace_window_ms_{1000};
-  std::atomic<UiActivityPhase> phase_{UiActivityPhase::kGraceWindow};
+  std::atomic<UiActivityPhase> phase_{UiActivityPhase::kInhibited};
   std::atomic<int64_t> grace_end_ms_{0};
   std::atomic<int64_t> phase_entered_ms_{0};
+  std::atomic<int64_t> last_input_ms_{0};
 };
 
 const char* ui_activity_phase_label(UiActivityPhase phase);

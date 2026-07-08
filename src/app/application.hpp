@@ -131,6 +131,7 @@ class Application {
   void tick_shutdown();
   void force_exit();
   void stop_all_subprocesses();
+  void sync_activity_phase_effects();
 
   AppConfig config_;
   AppMode app_mode_ = AppMode::kNormal;
@@ -188,6 +189,7 @@ class Application {
   mutable std::mutex ui_task_mutex_;
   std::deque<std::function<void()>> ui_tasks_;
   std::atomic<bool> reindex_in_progress_{false};
+  UiActivityPhase last_activity_phase_ = UiActivityPhase::kInhibited;
 };
 
 }  // namespace tgdb

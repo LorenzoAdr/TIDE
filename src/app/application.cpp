@@ -139,7 +139,20 @@ void force_immediate_repaint(MainLayoutState *layout, ScreenInteractive *screen)
 	if (layout != nullptr) {
 		layout->request_ui_tick = true;
 	}
-	if (screen == nullptr) {
+	if (screen == nullptr || layout == nullptr) {
+		return;
+	}
+	if (layout->custom_event_pending.exchange(true, std::memory_order_acq_rel)) {
+		return;
+	}
+	screen->PostEvent(Event::Custom);
+}
+
+void request_custom_event(ScreenInteractive *screen, MainLayoutState *layout) {
+	if (screen == nullptr || layout == nullptr) {
+		return;
+	}
+	if (layout->custom_event_pending.exchange(true, std::memory_order_acq_rel)) {
 		return;
 	}
 	screen->PostEvent(Event::Custom);
@@ -178,7 +191,7 @@ class EventPoller {
 					if (on_main_thread_) {
 						screen_->Post(on_main_thread_);
 					}
-					screen_->PostEvent(Event::Custom);
+					request_custom_event(screen_, layout_);
 				}
 			}
 		});
@@ -266,7 +279,7 @@ class UiTickPostWrapper : public ComponentBase {
 			return;
 		}
 		layout_->request_ui_tick = false;
-		screen_->PostEvent(Event::Custom);
+		request_custom_event(screen_, layout_);
 	}
 
 	MainLayoutState *layout_;
@@ -629,6 +642,17 @@ void Application::drain_ui_tasks() {
 		if (task) {
 			task();
 		}
+	}
+}
+
+void Application::sync_activity_phase_effects() {
+	const UiActivityPhase phase = layout_state_.activity_gate.phase();
+	if (phase == last_activity_phase_) {
+		return;
+	}
+	last_activity_phase_ = phase;
+	if (symbol_provider_) {
+		symbol_provider_->set_ui_inhibited(phase == UiActivityPhase::kInhibited);
 	}
 }
 
@@ -1997,9 +2021,17 @@ int Application::run() {
 		}
 
 		if (event == Event::Custom) {
+			layout_state_.custom_event_pending.store(false, std::memory_order_release);
 			layout_state_.ui_custom_tick.fetch_add(1, std::memory_order_relaxed);
 			monitor_log::heartbeat();
+			// El emulador solo se consume cuando la consola está visible y en la
+			// pestaña de terminal; en otro caso la sesión drena en segundo plano
+			// para no acumular salida que congelaría la UI al reabrir.
+			shell_session_.set_consumer_active(
+			    layout_state_.console_visible &&
+			    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal);
 			layout_state_.activity_gate.tick(now_ms);
+			sync_activity_phase_effects();
 			layout_state_.ui_perf_monitor.on_custom_tick_begin(now_ms);
 			layout_state_.ui_perf_monitor.set_activity_phase(
 			    layout_state_.activity_gate.phase(),
@@ -2291,7 +2323,7 @@ int Application::run() {
 	const bool is_pure_move_event = is_pure_mouse_move_event(event);
 		const auto post_custom_throttled = [&] {
 			if (!is_pure_move_event) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return;
 			}
 			if (!layout_state_.activity_gate.allows_hover_chrome()) {
@@ -2301,7 +2333,7 @@ int Application::run() {
 			if (!layout_state_.mouse_velocity.on_mouse_move(mouse.x, mouse.y, steady_now_ms())) {
 				return;
 			}
-			screen.Post(Event::Custom);
+			request_custom_event(&screen, &layout_state_);
 		};
 
 		if (event.is_mouse() && layout_state_.split_mouse_handler &&
@@ -2353,7 +2385,7 @@ int Application::run() {
 		}
 
 		if (handle_focus_shortcuts(event)) {
-			screen.Post(Event::Custom);
+			request_custom_event(&screen, &layout_state_);
 			return true;
 		}
 
@@ -2438,7 +2470,7 @@ int Application::run() {
 		     shell_terminal_focus) &&
 		    !event_is_tide_global_shortcut(event) && layout_state_.console_key_handler &&
 		    layout_state_.console_key_handler(event)) {
-			screen.Post(Event::Custom);
+			request_custom_event(&screen, &layout_state_);
 			return true;
 		}
 			if (app_mode_ == AppMode::kNormal && event_is_workspace_search_with_selection(event) &&
@@ -2451,7 +2483,7 @@ int Application::run() {
 				    selection_text(active_workspace.buffer, active_workspace.buffer.primary());
 				focus_search_with_filter(&layout_state_, needle, "");
 				focus_state_.region = FocusRegion::Terminal;
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			const auto &active_editor_handlers =
@@ -2459,39 +2491,39 @@ int Application::run() {
 			if (editor_browse_active && event_is_ctrl_f(event) &&
 			    is_editor_focus_region(focus_state_.region) && active_editor_handlers.key_handler &&
 			    active_editor_handlers.key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if (editor_browse_active && layout_state_.editor_completion_open &&
 			    event == Event::Escape && active_editor_handlers.key_handler &&
 			    active_editor_handlers.key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if (editor_browse_active &&
 			    is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    active_editor_handlers.key_handler && active_editor_handlers.key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if ((is_search_input_focus(layout_state_.text_input_focus) ||
 			     search_tab_active(&layout_state_)) &&
 			    layout_state_.search_key_handler && layout_state_.search_key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if (call_hierarchy_tab_active(&layout_state_) &&
 			    focus_state_.region == FocusRegion::Terminal &&
 			    layout_state_.call_hierarchy_key_handler &&
 			    layout_state_.call_hierarchy_key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if (problems_tab_active(&layout_state_) &&
 			    focus_state_.region == FocusRegion::Terminal &&
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.problems_key_handler && layout_state_.problems_key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if ((is_binary_symbols_input_focus(layout_state_.text_input_focus) ||
@@ -2499,13 +2531,13 @@ int Application::run() {
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.binary_symbols_key_handler &&
 			    layout_state_.binary_symbols_key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if (git_tab_active(&layout_state_) && focus_state_.region == FocusRegion::Terminal &&
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.git_key_handler && layout_state_.git_key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if (core_analyzer_tab_active(&layout_state_) &&
@@ -2513,7 +2545,7 @@ int Application::run() {
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.core_analyzer_key_handler &&
 			    layout_state_.core_analyzer_key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if (packet_monitor_tab_active(&layout_state_) &&
@@ -2521,14 +2553,14 @@ int Application::run() {
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.packet_monitor_key_handler &&
 			    layout_state_.packet_monitor_key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if (app_mode_ == AppMode::kDebug &&
 			    (focus_state_.region == FocusRegion::RightPanel ||
 			     is_watch_input_focus(layout_state_.text_input_focus)) &&
 			    layout_state_.watches_key_handler && layout_state_.watches_key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				layout_state_.focus_sync_needed = true;
 				return true;
 			}
@@ -2537,7 +2569,7 @@ int Application::run() {
 			    !is_watch_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.text_input_focus != TextInputFocus::Console &&
 			    layout_state_.source_key_handler && layout_state_.source_key_handler(event)) {
-				screen.Post(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if (is_editor_focus_region(focus_state_.region) && editor_browse_active &&
@@ -2548,7 +2580,7 @@ int Application::run() {
 			    active_editor_handlers.key_handler) {
 				if (active_editor_handlers.key_handler(event)) {
 					layout_state_.request_ui_tick = true;
-					screen.PostEvent(Event::Custom);
+					request_custom_event(&screen, &layout_state_);
 					
 					return true;
 				}
@@ -2560,7 +2592,7 @@ int Application::run() {
 			    !event_is_ctrl_p(event) && active_editor_handlers.key_handler &&
 			    active_editor_handlers.key_handler(event)) {
 				layout_state_.request_ui_tick = true;
-				screen.PostEvent(Event::Custom);
+				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if (layout_state_.editor_helix_prefix_pending &&
@@ -2601,7 +2633,7 @@ int Application::run() {
 				    active_editor_handlers.key_handler &&
 				    active_editor_handlers.key_handler(event)) {
 					layout_state_.request_ui_tick = true;
-					screen.PostEvent(Event::Custom);
+					request_custom_event(&screen, &layout_state_);
 					return true;
 				}
 				return false;
@@ -2748,7 +2780,7 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 			layout_state_.terminal_minimal_wake.store(true, std::memory_order_release);
 		}
 		layout_state_.request_ui_tick = true;
-		screen.PostEvent(Event::Custom);
+		request_custom_event(&screen, &layout_state_);
 	};
 	if (backend_) {
 		backend_->set_wake_callback([this, &screen](DebugEventKind kind) {
@@ -2757,7 +2789,7 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 			layout_state_.activity_gate.on_debug_critical(now_ms);
 			layout_state_.debug_critical_wake.store(true, std::memory_order_release);
 			layout_state_.request_ui_tick = true;
-			screen.PostEvent(Event::Custom);
+			request_custom_event(&screen, &layout_state_);
 		});
 	}
 	tree_sitter_service().set_ready_callback([this, &screen](const std::string& path) {
@@ -2770,13 +2802,12 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 			}
 			layout_state_.request_ui_tick = true;
 		});
-		screen.PostEvent(Event::Custom);
+		request_custom_event(&screen, &layout_state_);
 	});
 
 	layout_state_.performance_sampler.set_dump_hooks(&layout_state_.activity_gate,
 	                                                 &layout_state_.ui_paint_count,
 	                                                 &layout_state_.ui_custom_tick);
-	layout_state_.activity_gate.on_significant_input(steady_now_ms());
 
 	screen.Loop(WrapUiTickPost(root, &layout_state_, &screen,
 	                           [this] { return any_modal_open(); }));

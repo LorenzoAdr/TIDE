@@ -372,7 +372,15 @@ void ShellSession::reader_loop() {
       output_chunks_.push(
           std::string(buffer.data(), static_cast<std::size_t>(bytes)));
       output_pending_.store(true, std::memory_order_release);
-      notify_output();
+      // Con la consola minimizada nadie drena la cola: la alimentamos aquí para
+      // que el emulador (con scrollback acotado) se mantenga al día y no se
+      // acumule trabajo que congelaría la UI al reabrir. Tampoco despertamos la
+      // UI en ese caso, evitando ticks innecesarios.
+      if (consumer_active_.load(std::memory_order_acquire)) {
+        notify_output();
+      } else {
+        background_drain();
+      }
       continue;
     }
     if (bytes == 0) {
@@ -420,10 +428,40 @@ int ShellSession::drain_output_bytes(int max_bytes) {
   }
   if (consumed > 0) {
     std::lock_guard<std::mutex> lock(terminal_mutex_);
-    display_text_ = terminal_.text();
-    display_styled_rows_ = terminal_.styled_rows();
+    rebuild_display_locked();
   }
   return consumed;
+}
+
+void ShellSession::background_drain() {
+  std::lock_guard<std::mutex> lock(terminal_mutex_);
+  while (auto chunk = output_chunks_.try_pop()) {
+    terminal_.feed(chunk->data(), chunk->size());
+  }
+}
+
+void ShellSession::rebuild_display_locked() {
+  display_text_ = terminal_.text();
+  display_styled_rows_ = terminal_.styled_rows();
+}
+
+void ShellSession::set_consumer_active(bool active) {
+  const bool previous = consumer_active_.exchange(active, std::memory_order_acq_rel);
+  if (previous == active) {
+    return;
+  }
+  if (active) {
+    // La consola vuelve a ser visible: el emulador ya está al día gracias al
+    // drenaje en segundo plano, así que basta reconstruir el texto visible una
+    // vez para reflejar todo lo acumulado sin bloquear la UI.
+    std::lock_guard<std::mutex> lock(terminal_mutex_);
+    rebuild_display_locked();
+    output_pending_.store(true, std::memory_order_release);
+  } else {
+    // La consola se minimiza: consumimos lo que quedara en la cola para no
+    // arrastrar chunks pendientes mientras esté oculta.
+    background_drain();
+  }
 }
 
 std::size_t ShellSession::pending_output_chunks() const { return output_chunks_.size(); }

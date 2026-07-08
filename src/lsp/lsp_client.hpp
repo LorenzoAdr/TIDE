@@ -29,6 +29,7 @@ class LspClient {
              const std::string& compile_commands_dir = {},
              bool use_gcc_query_driver = true, bool background_index = false);
   void stop();
+  void set_background_paused(bool paused);
   bool ready() const { return ready_.load(); }
   bool transport_running() const;
   bool clangd_process_alive() const;

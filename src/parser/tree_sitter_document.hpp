@@ -20,7 +20,7 @@ extern "C" {
 
 namespace tgdb {
 
-constexpr int kTreeSitterParseDebounceMs = 200;
+constexpr int kTreeSitterParseDebounceMs = 120;
 
 struct HighlightSpan {
   int start_col = 0;

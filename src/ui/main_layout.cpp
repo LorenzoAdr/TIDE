@@ -1074,15 +1074,20 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       workspace->ensure_buffer();
       const uint64_t revision = symbols->diagnostics_revision();
       const std::string& active_path = workspace->buffer.path;
-      const bool show_diag_counts =
+      // El display de contadores no depende de la inhibición (usa datos cacheados); solo
+      // el refetch respeta allows_lsp_ui(). Así los contadores no se ponen a 0 en reposo.
+      const bool diag_display_allowed =
           !active_path.empty() &&
           diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), active_path,
-                                      layout_state->activity_gate.allows_lsp_ui());
-      if (!show_diag_counts) {
+                                      /*lsp_ui_allowed=*/true);
+      const bool diag_refresh_allowed =
+          diag_display_allowed && layout_state->activity_gate.allows_lsp_ui();
+      if (!diag_display_allowed) {
         split_state->diag_errors = 0;
         split_state->diag_warnings = 0;
-      } else if (revision != split_state->last_diag_revision ||
-                 active_path != split_state->last_diag_path) {
+      } else if (diag_refresh_allowed &&
+                 (revision != split_state->last_diag_revision ||
+                  active_path != split_state->last_diag_path)) {
         split_state->last_diag_revision = revision;
         split_state->last_diag_path = active_path;
         split_state->diag_errors = 0;

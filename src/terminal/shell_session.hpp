@@ -59,11 +59,19 @@ class ShellSession {
 
   void set_output_notify(std::function<void()> callback);
 
+  // Marca si la UI está consumiendo la salida (consola visible y en la pestaña
+  // de terminal). Cuando está inactivo, el hilo lector alimenta el emulador en
+  // segundo plano en vez de acumular chunks sin límite, evitando el bloqueo del
+  // hilo de UI al reabrir una terminal minimizada.
+  void set_consumer_active(bool active);
+
  private:
   void bootstrap_shell(const ShellLaunchConfig& config);
   void reader_loop();
   void apply_winsize();
   void notify_output();
+  void background_drain();
+  void rebuild_display_locked();
 
   RawPtyScreen terminal_;
   mutable std::mutex terminal_mutex_;
@@ -80,6 +88,7 @@ class ShellSession {
   std::string display_text_;
   std::vector<TerminalStyledRow> display_styled_rows_;
   std::atomic<bool> output_pending_{false};
+  std::atomic<bool> consumer_active_{true};
   std::mutex notify_mutex_;
   std::function<void()> output_notify_;
 };

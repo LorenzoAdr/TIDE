@@ -88,6 +88,7 @@ class LspSymbolProvider : public ISymbolProvider {
   void set_lsp_enabled(bool enabled);
   bool lsp_enabled() const;
   void set_workspace_clangd_options(bool use_gcc_query_driver, bool background_index);
+  void set_ui_inhibited(bool inhibited);
 
  private:
   enum class AsyncJobKind { DocumentSymbols, SemanticTokens, Hover, Completion };
@@ -140,6 +141,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool use_gcc_query_driver_ = true;
   bool use_background_index_ = false;
   bool use_lsp_ = false;
+  bool ui_inhibited_ = false;
   std::string workspace_root_;
   std::string compile_commands_dir_;
   std::unordered_map<std::string, std::string> open_buffers_;

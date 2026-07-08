@@ -6,6 +6,8 @@ namespace tgdb {
 
 namespace {
 
+constexpr int64_t kSustainedIdleMs = 1500;
+
 int64_t default_grace_end(int64_t now_ms, int64_t grace_ms) {
   return now_ms + std::max<int64_t>(1, grace_ms);
 }
@@ -22,13 +24,13 @@ void UiActivityGate::on_significant_input(int64_t now_ms) {
     grace_end_ms_.store(0, std::memory_order_relaxed);
     return;
   }
+  last_input_ms_.store(now_ms, std::memory_order_relaxed);
   const auto prev = phase_.load(std::memory_order_relaxed);
-  if (prev != UiActivityPhase::kGraceWindow) {
+  if (prev != UiActivityPhase::kInteractive) {
     phase_entered_ms_.store(now_ms, std::memory_order_relaxed);
   }
-  phase_.store(UiActivityPhase::kGraceWindow, std::memory_order_release);
-  grace_end_ms_.store(default_grace_end(now_ms, grace_window_ms_.load(std::memory_order_relaxed)),
-                      std::memory_order_relaxed);
+  phase_.store(UiActivityPhase::kInteractive, std::memory_order_release);
+  grace_end_ms_.store(0, std::memory_order_relaxed);
 }
 
 void UiActivityGate::on_debug_critical(int64_t now_ms) {
@@ -39,7 +41,19 @@ void UiActivityGate::tick(int64_t now_ms) {
   if (!passive_enabled_.load(std::memory_order_relaxed)) {
     return;
   }
-  if (phase_.load(std::memory_order_acquire) != UiActivityPhase::kGraceWindow) {
+  const auto current = phase_.load(std::memory_order_acquire);
+  if (current == UiActivityPhase::kInteractive) {
+    const int64_t last_input = last_input_ms_.load(std::memory_order_relaxed);
+    if (last_input > 0 && now_ms - last_input >= kSustainedIdleMs) {
+      phase_.store(UiActivityPhase::kGraceWindow, std::memory_order_release);
+      grace_end_ms_.store(
+          default_grace_end(now_ms, grace_window_ms_.load(std::memory_order_relaxed)),
+          std::memory_order_relaxed);
+      phase_entered_ms_.store(now_ms, std::memory_order_relaxed);
+    }
+    return;
+  }
+  if (current != UiActivityPhase::kGraceWindow) {
     return;
   }
   const int64_t grace_end = grace_end_ms_.load(std::memory_order_relaxed);
@@ -54,6 +68,13 @@ bool UiActivityGate::is_inhibited() const {
     return false;
   }
   return phase_.load(std::memory_order_acquire) == UiActivityPhase::kInhibited;
+}
+
+bool UiActivityGate::is_interactive() const {
+  if (!passive_enabled_.load(std::memory_order_relaxed)) {
+    return false;
+  }
+  return phase_.load(std::memory_order_acquire) == UiActivityPhase::kInteractive;
 }
 
 bool UiActivityGate::allows_periodic_tick() const { return !is_inhibited(); }

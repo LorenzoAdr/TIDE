@@ -82,8 +82,31 @@ TSTree* parse_source(TSParser* parser, const std::string& source, const std::str
       }
     }
   }
+  if (previous_tree != nullptr) {
+    TSTree* tree = ts_parser_parse_string(parser, previous_tree, source.c_str(),
+                                          static_cast<uint32_t>(source.size()));
+    if (tree != nullptr) {
+      return tree;
+    }
+  }
   return ts_parser_parse_string(parser, nullptr, source.c_str(),
                                 static_cast<uint32_t>(source.size()));
+}
+
+bool apply_sync_source_edit(DocumentEntry* entry, const std::string& canonical) {
+  if (entry == nullptr || entry->tree == nullptr || entry->source == canonical) {
+    return false;
+  }
+  const std::optional<TSInputEdit> edit = single_edit_between(entry->source, canonical);
+  if (!edit.has_value()) {
+    return false;
+  }
+  ts_tree_edit(entry->tree, &*edit);
+  entry->source = canonical;
+  entry->parse_ready = true;
+  entry->highlights_ready = false;
+  entry->symbols_ready = false;
+  return true;
 }
 
 }  // namespace
@@ -205,6 +228,9 @@ void TreeSitterDocumentCache::request_prepare(const std::string& path,
   DebouncedPrepare debounced;
   debounced.path = path;
   debounced.source = canonical;
+  bool cold_parse = false;
+  bool source_changed = false;
+  bool should_enqueue = true;
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -213,25 +239,55 @@ void TreeSitterDocumentCache::request_prepare(const std::string& path,
       entry = std::make_shared<DocumentEntry>();
       entry->path = path;
     }
-    if (entry->source != canonical) {
-      debounced.previous_source = entry->source;
-      debounced.previous_tree = entry->tree;
-      entry->tree = nullptr;
-      entry->source = canonical;
-      entry->parse_ready = false;
-      entry->symbols_ready = false;
+
+    source_changed = entry->source != canonical;
+    if (source_changed) {
+      if (!apply_sync_source_edit(entry.get(), canonical)) {
+        debounced.previous_source = entry->source;
+        debounced.previous_tree = entry->tree;
+        entry->tree = nullptr;
+        entry->source = canonical;
+        entry->parse_ready = false;
+        entry->highlights_ready = false;
+        entry->symbols_ready = false;
+      }
     }
-    if (entry->parse_ready) {
+
+    if (entry->parse_ready && entry->highlights_ready && entry->symbols_ready &&
+        entry->source == canonical) {
       if (debounced.previous_tree != nullptr) {
         ts_tree_delete(debounced.previous_tree);
       }
       return;
     }
-    const bool cold_parse = debounced.previous_tree == nullptr;
-    debounced.run_after =
-        std::chrono::steady_clock::now() +
-        (cold_parse ? std::chrono::milliseconds(0)
-                    : std::chrono::milliseconds(kTreeSitterParseDebounceMs));
+
+    if (!source_changed) {
+      if (entry->prepare_inflight) {
+        should_enqueue = false;
+      }
+    }
+
+    if (should_enqueue) {
+      cold_parse = entry->tree == nullptr && debounced.previous_tree == nullptr;
+      debounced.run_after =
+          std::chrono::steady_clock::now() +
+          (cold_parse ? std::chrono::milliseconds(0)
+                      : std::chrono::milliseconds(kTreeSitterParseDebounceMs));
+    }
+  }
+
+  if (!should_enqueue) {
+    if (debounced.previous_tree != nullptr) {
+      ts_tree_delete(debounced.previous_tree);
+    }
+    std::lock_guard<std::mutex> worker_lock(worker_mutex_);
+    const auto it = debounce_jobs_.find(path);
+    if (it != debounce_jobs_.end() && it->second.source == canonical) {
+      return;
+    }
+    cold_parse = false;
+    debounced.run_after = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(kTreeSitterParseDebounceMs);
   }
 
   {
@@ -246,7 +302,9 @@ void TreeSitterDocumentCache::request_prepare(const std::string& path,
     }
     pending.path = path;
     pending.source = std::move(debounced.source);
-    pending.run_after = debounced.run_after;
+    if (source_changed || cold_parse || pending.run_after == std::chrono::steady_clock::time_point{}) {
+      pending.run_after = debounced.run_after;
+    }
   }
   worker_cv_.notify_one();
 }
@@ -409,23 +467,58 @@ void TreeSitterDocumentCache::worker_main() {
 }
 
 void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
+  TSTree* old_tree_for_highlights = nullptr;
+  std::vector<LineHighlights> previous_highlights;
+  TSTree* parse_base = job.previous_tree;
+  if (parse_base != nullptr) {
+    job.previous_tree = nullptr;
+  } else {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = cache_.find(job.path);
+    if (it != cache_.end() && it->second->tree != nullptr) {
+      parse_base = ts_tree_copy(it->second->tree);
+      old_tree_for_highlights = ts_tree_copy(it->second->tree);
+      previous_highlights = it->second->line_highlights;
+    }
+  }
+
   TSParser* parser = ts_parser_new();
   ts_parser_set_language(parser, tree_sitter_cpp_language());
-  TSTree* tree = parse_source(parser, job.source, job.previous_source, job.previous_tree);
+  TSTree* tree = parse_source(parser, job.source, job.previous_source, parse_base);
+  if (parse_base != nullptr) {
+    ts_tree_delete(parse_base);
+    parse_base = nullptr;
+  }
   if (job.previous_tree != nullptr) {
     ts_tree_delete(job.previous_tree);
     job.previous_tree = nullptr;
   }
   ts_parser_delete(parser);
 
+  bool more_edits_pending = false;
+  {
+    std::lock_guard<std::mutex> worker_lock(worker_mutex_);
+    more_edits_pending = debounce_jobs_.find(job.path) != debounce_jobs_.end();
+  }
+
   std::vector<LineHighlights> highlights;
   std::vector<SymbolInfo> symbols;
   std::vector<SymbolInfo> scopes;
   if (tree != nullptr) {
     const TSNode root = ts_tree_root_node(tree);
-    highlights = highlights_for_document(root, job.source);
-    symbols = extract_symbols_from_tree(root, job.source, job.path);
-    scopes = scope_symbols_from_tree(root, job.source, job.path);
+    if (old_tree_for_highlights != nullptr) {
+      highlights = highlights_after_incremental_parse(old_tree_for_highlights, tree, root,
+                                                    job.source, previous_highlights);
+    } else {
+      highlights = highlights_for_document(root, job.source);
+    }
+    if (!more_edits_pending) {
+      symbols = extract_symbols_from_tree(root, job.source, job.path);
+      scopes = scope_symbols_from_tree(root, job.source, job.path);
+    }
+  }
+  if (old_tree_for_highlights != nullptr) {
+    ts_tree_delete(old_tree_for_highlights);
   }
 
   ReadyCallback callback;
@@ -456,11 +549,13 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
       }
       entry->tree = tree;
       entry->line_highlights = std::move(highlights);
-      entry->symbols = std::move(symbols);
-      entry->scope_symbols = std::move(scopes);
+      if (!more_edits_pending) {
+        entry->symbols = std::move(symbols);
+        entry->scope_symbols = std::move(scopes);
+        entry->symbols_ready = entry->parse_ready;
+      }
       entry->parse_ready = tree != nullptr;
       entry->highlights_ready = entry->parse_ready;
-      entry->symbols_ready = entry->parse_ready;
       entry->revision = next_revision_++;
       committed = true;
     }

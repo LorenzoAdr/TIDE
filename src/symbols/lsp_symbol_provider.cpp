@@ -64,6 +64,9 @@ void LspSymbolProvider::finish_lsp_start_locked(bool ok) {
   }
   lsp_ready_since_ms_ = steady_now_ms();
   start_async_worker_locked();
+  if (ui_inhibited_ && use_background_index_) {
+    client_.set_background_paused(true);
+  }
   for (const auto& entry : open_buffers_) {
     std::string text = entry.second;
     if (text.empty()) {
@@ -538,6 +541,12 @@ void LspSymbolProvider::tick_pending_did_change_locked() {
 
 void LspSymbolProvider::tick_debounced_updates() {
   process_pending_transport_restart();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (ui_inhibited_) {
+      return;
+    }
+  }
   std::vector<std::string> due;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -667,6 +676,30 @@ void LspSymbolProvider::set_workspace_clangd_options(const bool use_gcc_query_dr
   std::lock_guard<std::mutex> lock(mutex_);
   use_gcc_query_driver_ = use_gcc_query_driver;
   use_background_index_ = background_index;
+}
+
+void LspSymbolProvider::set_ui_inhibited(const bool inhibited) {
+  bool should_flush = false;
+  bool should_pause = false;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (ui_inhibited_ == inhibited) {
+      return;
+    }
+    ui_inhibited_ = inhibited;
+    should_flush = !inhibited && use_lsp_;
+    should_pause = inhibited && use_lsp_ && use_background_index_;
+  }
+  if (should_pause) {
+    client_.set_background_paused(true);
+    return;
+  }
+  client_.set_background_paused(false);
+  if (should_flush) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    flush_all_pending_did_change_locked();
+    tick_content_refresh_locked();
+  }
 }
 
 void LspSymbolProvider::on_workspace_opened(const std::string& root,

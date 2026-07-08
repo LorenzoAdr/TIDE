@@ -1,8 +1,10 @@
 #include "parser/tree_sitter_highlight.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <set>
 
 #include "ftxui/dom/elements.hpp"
 #include "parser/tree_sitter_language.hpp"
@@ -227,6 +229,41 @@ int count_source_lines(const std::string& source) {
     }
   }
   return lines;
+}
+
+std::vector<LineHighlights> highlights_after_incremental_parse(
+    TSTree* old_tree, TSTree* new_tree, TSNode new_root, const std::string& source,
+    const std::vector<LineHighlights>& previous) {
+  if (old_tree == nullptr || new_tree == nullptr || ts_node_is_null(new_root) || previous.empty()) {
+    return highlights_for_document(new_root, source);
+  }
+
+  const int line_count = count_source_lines(source);
+  std::vector<LineHighlights> out(static_cast<std::size_t>(line_count));
+
+  uint32_t range_count = 0;
+  TSRange* ranges = ts_tree_get_changed_ranges(old_tree, new_tree, &range_count);
+
+  std::set<int> affected;
+  for (uint32_t i = 0; i < range_count; ++i) {
+    const uint32_t first = ranges[i].start_point.row;
+    const uint32_t last = ranges[i].end_point.row;
+    for (uint32_t row = first; row <= last; ++row) {
+      affected.insert(static_cast<int>(row));
+    }
+  }
+  if (ranges != nullptr) {
+    free(ranges);
+  }
+
+  for (int line = 0; line < line_count; ++line) {
+    if (line < static_cast<int>(previous.size()) && affected.count(line) == 0) {
+      out[static_cast<std::size_t>(line)] = previous[static_cast<std::size_t>(line)];
+    } else {
+      out[static_cast<std::size_t>(line)] = highlights_for_line(new_root, source, line);
+    }
+  }
+  return out;
 }
 
 std::vector<LineHighlights> highlights_for_document(TSNode root, const std::string& source) {

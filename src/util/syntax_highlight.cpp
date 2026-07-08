@@ -29,7 +29,10 @@ const std::vector<LineHighlights>* SyntaxHighlightContext::tree_sitter_highlight
   if (source.empty()) {
     return nullptr;
   }
-  tree_sitter_service().prepare_document(file_path, source);
+  if (prepare_token != buffer_token) {
+    tree_sitter_service().prepare_document(file_path, source);
+    prepare_token = buffer_token;
+  }
   const uint64_t revision = tree_sitter_service().revision_for(file_path);
   if (ts_revision != revision || ts_line_highlights == nullptr) {
     ts_line_highlights = tree_sitter_service().highlights_for(file_path, source);
