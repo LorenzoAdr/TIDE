@@ -260,6 +260,7 @@ struct EditorPanelState {
   bool tabular_scroll_locked = false;
   int tabular_scroll_limit = 0;
   std::unordered_map<int, CachedViewportLineRow> viewport_line_render_cache;
+  std::unordered_map<int, CachedSyntaxLineSpans> line_syntax_span_cache;
 };
 
 void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState* layout_state,
@@ -4776,6 +4777,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->colored_brace_cache_path.clear();
       panel_state->colored_brace_cache_token = 0;
       panel_state->viewport_line_render_cache.clear();
+      panel_state->line_syntax_span_cache.clear();
       panel_state->cached_symbols_path.clear();
       panel_state->cached_semantic_path.clear();
       panel_state->last_semantic_highlight_revision = 0;
@@ -5139,6 +5141,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     highlight_ctx.lines = &buffer.lines;
     highlight_ctx.joined_override = &buffer_source;
     highlight_ctx.buffer_token = buffer.view_token;
+    highlight_ctx.semantic_revision = panel_state->last_semantic_highlight_revision;
+    highlight_ctx.line_span_cache = &panel_state->line_syntax_span_cache;
     const ScopeLineRange immediate_scope =
         typing_burst ? ScopeLineRange{}
         : scope_visual_effects && !buffer.path.empty() && is_indexed_source_path(buffer.path)

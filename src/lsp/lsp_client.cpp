@@ -418,6 +418,7 @@ void LspClient::did_open(const std::string& absolute_path, const std::string& te
   DocumentState doc;
   bool notify_open = false;
   bool notify_change = false;
+  std::string previous_text;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto it = documents_.find(key);
@@ -425,6 +426,7 @@ void LspClient::did_open(const std::string& absolute_path, const std::string& te
       if (it->second.text == text) {
         return;
       }
+      previous_text = it->second.text;
       it->second.text = text;
       it->second.version += 1;
       it->second.generation += 1;
@@ -451,9 +453,14 @@ void LspClient::did_open(const std::string& absolute_path, const std::string& te
           {"text", doc.text}}}};
     send_lsp_notification("textDocument/didOpen", std::move(params));
   } else if (notify_change) {
-    nlohmann::json params = {
-        {"textDocument", {{"uri", doc.uri}, {"version", doc.version}}},
-        {"contentChanges", nlohmann::json::array({{{"text", doc.text}}})}};
+    nlohmann::json content_changes;
+    if (const std::optional<LspTextEdit> edit = single_lsp_edit_between(previous_text, text)) {
+      content_changes = nlohmann::json::array({lsp_content_change_json(*edit)});
+    } else {
+      content_changes = nlohmann::json::array({{{"text", doc.text}}});
+    }
+    nlohmann::json params = {{"textDocument", {{"uri", doc.uri}, {"version", doc.version}}},
+                             {"contentChanges", std::move(content_changes)}};
     send_lsp_notification("textDocument/didChange", std::move(params));
   }
 }
@@ -471,6 +478,7 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
 
   DocumentState doc;
   bool open_new = false;
+  std::string previous_text;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto it = documents_.find(key);
@@ -479,6 +487,7 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
     } else if (it->second.text == text) {
       return;
     } else {
+      previous_text = it->second.text;
       it->second.text = text;
       it->second.version += 1;
       it->second.generation += 1;
@@ -490,9 +499,14 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
     return;
   }
 
-  nlohmann::json params = {
-      {"textDocument", {{"uri", doc.uri}, {"version", doc.version}}},
-      {"contentChanges", nlohmann::json::array({{{"text", doc.text}}})}};
+  nlohmann::json content_changes;
+  if (const std::optional<LspTextEdit> edit = single_lsp_edit_between(previous_text, text)) {
+    content_changes = nlohmann::json::array({lsp_content_change_json(*edit)});
+  } else {
+    content_changes = nlohmann::json::array({{{"text", doc.text}}});
+  }
+  nlohmann::json params = {{"textDocument", {{"uri", doc.uri}, {"version", doc.version}}},
+                           {"contentChanges", std::move(content_changes)}};
   send_lsp_notification("textDocument/didChange", std::move(params));
 }
 

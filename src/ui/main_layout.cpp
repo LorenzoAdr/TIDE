@@ -35,6 +35,21 @@ namespace tgdb {
 
 using namespace ftxui;
 
+Component MakeCachedPanelRender(MainLayoutState* layout_state, UiPanelId panel, Component inner) {
+  return Renderer(inner, [=] {
+    if (layout_state == nullptr) {
+      return inner->Render();
+    }
+    return layout_state->panel_render_cache.render(panel, [=] { return inner->Render(); });
+  });
+}
+
+}  // namespace tgdb
+
+namespace tgdb {
+
+using namespace ftxui;
+
 namespace {
 
 int64_t steady_now_ms() {
@@ -892,8 +907,9 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     };
   }
 
-  auto file_tree = MakeFileTreePanel(model, workspace, focus, indexer, on_command,
-                                     layout_state, git_service);
+  auto file_tree = MakeCachedPanelRender(
+      layout_state, UiPanelId::FileTree,
+      MakeFileTreePanel(model, workspace, focus, indexer, on_command, layout_state, git_service));
   auto editor_primary =
       MakeEditorPanel(workspace, focus, layout_state, symbols, indexer, symbol_indexer, git_service,
                       FocusRegion::Editor, model, on_command,
@@ -913,10 +929,33 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto center_with_console =
       MakeHSplitBottom(console, center, &split_state->bottom_height, split_state);
   auto center_column = Renderer([=] {
-    if (layout_state != nullptr && layout_state->console_visible) {
-      return center_with_console->Render() | flex | bgcolor(theme::PanelBg());
+    if (layout_state != nullptr && workspace != nullptr) {
+      workspace->ensure_buffer();
+      if (workspace->buffer.view_token != layout_state->panel_cache_editor_view_token) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::EditorCenter);
+        layout_state->panel_cache_editor_view_token = workspace->buffer.view_token;
+      }
+      if (git_service != nullptr &&
+          git_service->cache_revision() != layout_state->panel_cache_git_revision) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::FileTree);
+        layout_state->panel_cache_git_revision = git_service->cache_revision();
+      }
+      if (symbols != nullptr &&
+          symbols->diagnostics_revision() != layout_state->panel_cache_diagnostics_revision) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+        layout_state->panel_cache_diagnostics_revision = symbols->diagnostics_revision();
+      }
     }
-    return center->Render() | flex | bgcolor(theme::PanelBg());
+    const auto build_center = [=] {
+      if (layout_state != nullptr && layout_state->console_visible) {
+        return center_with_console->Render() | flex | bgcolor(theme::PanelBg());
+      }
+      return center->Render() | flex | bgcolor(theme::PanelBg());
+    };
+    if (layout_state == nullptr) {
+      return build_center();
+    }
+    return layout_state->panel_render_cache.render(UiPanelId::EditorCenter, build_center);
   });
 
   auto welcome_screen =
@@ -926,8 +965,9 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto outline = MakeOutlinePanel(workspace, focus, symbols, layout_state);
   auto sidebar = MakeRightSidebarPanel(outline, layout_state);
   auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug, focus, app_mode);
-  auto right_panel =
-      MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height, layout_state);
+  auto right_panel = MakeCachedPanelRender(
+      layout_state, UiPanelId::RightSidebar,
+      MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height, layout_state));
 
   auto explorer_and_center =
       MakeVSplitLeft(file_tree, center_column, &split_state->left_width, split_state);
@@ -1029,6 +1069,16 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     if (layout_state != nullptr) {
       layout_state->ui_paint_count.fetch_add(1, std::memory_order_relaxed);
       layout_state->ui_perf_monitor.on_paint(steady_now_ms());
+      if (layout_state->terminal_width && layout_state->terminal_height) {
+        const int tw = layout_state->terminal_width();
+        const int th = layout_state->terminal_height();
+        if (tw != layout_state->panel_cache_terminal_w ||
+            th != layout_state->panel_cache_terminal_h) {
+          layout_state->panel_render_cache.mark_all_dirty();
+          layout_state->panel_cache_terminal_w = tw;
+          layout_state->panel_cache_terminal_h = th;
+        }
+      }
     }
     const bool git_tab_open =
         layout_state != nullptr && git_tab_active(layout_state);

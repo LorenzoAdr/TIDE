@@ -1,7 +1,9 @@
 #include "lsp/lsp_text_edits.hpp"
 
 #include <algorithm>
+#include <optional>
 
+#include "lsp/lsp_position.hpp"
 #include "lsp/lsp_uri.hpp"
 #include "util/path_normalize.hpp"
 
@@ -165,6 +167,76 @@ std::vector<std::string> lines_from_document_text(const std::string& text) {
     lines.push_back("");
   }
   return lines;
+}
+
+void byte_offset_to_line_byte_col(const std::string& text, std::size_t byte_offset, int* line,
+                                  int* col) {
+  if (line == nullptr || col == nullptr) {
+    return;
+  }
+  *line = 0;
+  *col = 0;
+  std::size_t offset = 0;
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    if (offset >= byte_offset) {
+      break;
+    }
+    if (text[i] == '\n') {
+      ++*line;
+      *col = 0;
+    } else {
+      ++*col;
+    }
+    ++offset;
+  }
+}
+
+std::optional<LspTextEdit> single_lsp_edit_between(const std::string& old_source,
+                                                   const std::string& new_source) {
+  if (old_source == new_source) {
+    return std::nullopt;
+  }
+  const std::size_t max_prefix = std::min(old_source.size(), new_source.size());
+  std::size_t prefix = 0;
+  while (prefix < max_prefix && old_source[prefix] == new_source[prefix]) {
+    ++prefix;
+  }
+  if (prefix == old_source.size() && prefix == new_source.size()) {
+    return std::nullopt;
+  }
+
+  std::size_t old_suffix = old_source.size();
+  std::size_t new_suffix = new_source.size();
+  while (old_suffix > prefix && new_suffix > prefix &&
+         old_source[old_suffix - 1] == new_source[new_suffix - 1]) {
+    --old_suffix;
+    --new_suffix;
+  }
+  if (old_suffix < prefix || new_suffix < prefix) {
+    return std::nullopt;
+  }
+
+  int start_line = 0;
+  int start_col = 0;
+  int end_line = 0;
+  int end_col = 0;
+  byte_offset_to_line_byte_col(old_source, prefix, &start_line, &start_col);
+  byte_offset_to_line_byte_col(old_source, old_suffix, &end_line, &end_col);
+
+  LspTextEdit edit;
+  edit.start_line = start_line;
+  edit.start_character = lsp_utf16_column(line_text_at(old_source, start_line), start_col);
+  edit.end_line = end_line;
+  edit.end_character = lsp_utf16_column(line_text_at(old_source, end_line), end_col);
+  edit.new_text = new_source.substr(prefix, new_suffix - prefix);
+  return edit;
+}
+
+nlohmann::json lsp_content_change_json(const LspTextEdit& edit) {
+  return {{"range",
+           {{"start", {{"line", edit.start_line}, {"character", edit.start_character}}},
+            {"end", {{"line", edit.end_line}, {"character", edit.end_character}}}}},
+          {"text", edit.new_text}};
 }
 
 }  // namespace tgdb

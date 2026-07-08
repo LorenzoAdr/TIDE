@@ -25,5 +25,8 @@ std::vector<LspTextEdit> parse_lsp_text_edits(const nlohmann::json& result);
 std::vector<LspFileEdits> parse_workspace_edit(const nlohmann::json& result);
 std::string apply_lsp_text_edits(const std::string& text, const std::vector<LspTextEdit>& edits);
 std::vector<std::string> lines_from_document_text(const std::string& text);
+std::optional<LspTextEdit> single_lsp_edit_between(const std::string& old_source,
+                                                   const std::string& new_source);
+nlohmann::json lsp_content_change_json(const LspTextEdit& edit);
 
 }  // namespace tgdb

@@ -1,5 +1,7 @@
 #include "util/syntax_highlight.hpp"
 
+#include <string_view>
+
 #include "editor/editor_buffer_source.hpp"
 #include "editor/indent_guides.hpp"
 #include "parser/tree_sitter_highlight.hpp"
@@ -46,6 +48,34 @@ const std::vector<LineHighlights>* SyntaxHighlightContext::tree_sitter_highlight
 }
 
 namespace {
+
+constexpr uint64_t kSyntaxSpanHashOffset = 14695981039346656037ULL;
+constexpr uint64_t kSyntaxSpanHashPrime = 1099511628211ULL;
+
+uint64_t syntax_span_hash_u64(uint64_t h, uint64_t v) {
+  return (h ^ v) * kSyntaxSpanHashPrime;
+}
+
+uint64_t syntax_span_hash_string(uint64_t h, std::string_view s) {
+  for (unsigned char c : s) {
+    h = syntax_span_hash_u64(h, c);
+  }
+  return h;
+}
+
+uint64_t syntax_line_span_cache_key(int line_index, const std::string& source_line, int col_offset,
+                                    int display_len, uint64_t buffer_token, uint64_t ts_revision,
+                                    uint64_t semantic_revision) {
+  uint64_t h = kSyntaxSpanHashOffset;
+  h = syntax_span_hash_u64(h, static_cast<uint64_t>(line_index));
+  h = syntax_span_hash_string(h, source_line);
+  h = syntax_span_hash_u64(h, static_cast<uint64_t>(col_offset));
+  h = syntax_span_hash_u64(h, static_cast<uint64_t>(display_len));
+  h = syntax_span_hash_u64(h, buffer_token);
+  h = syntax_span_hash_u64(h, ts_revision);
+  h = syntax_span_hash_u64(h, semantic_revision);
+  return h;
+}
 
 Decorator style_for_token_type(const std::vector<std::string>& types, int type_index) {
   std::string name;
@@ -154,6 +184,45 @@ std::vector<SemanticTokenSpan> display_semantic_spans_for_line(
   return out;
 }
 
+const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
+    SyntaxHighlightContext* ctx, int line_index, const SemanticTokenDocument* semantic_tokens,
+    int col_offset, int display_len) {
+  if (ctx == nullptr || ctx->lines == nullptr || ctx->line_span_cache == nullptr ||
+      line_index < 0 || line_index >= static_cast<int>(ctx->lines->size())) {
+    return nullptr;
+  }
+  const std::string& source_line = (*ctx->lines)[static_cast<std::size_t>(line_index)];
+  const int tab_size = std::max(1, editor_indent::tab_display_width());
+  ctx->tree_sitter_highlights();
+  const uint64_t key = syntax_line_span_cache_key(line_index, source_line, col_offset, display_len,
+                                                  ctx->buffer_token, ctx->ts_revision,
+                                                  ctx->semantic_revision);
+  auto& cache = *ctx->line_span_cache;
+  const auto it = cache.find(line_index);
+  if (it != cache.end() && it->second.key == key) {
+    return &it->second;
+  }
+
+  CachedSyntaxLineSpans entry;
+  entry.key = key;
+  if (const auto* all_highlights = ctx->ts_line_highlights) {
+    if (line_index >= 0 && line_index < static_cast<int>(all_highlights->size())) {
+      const LineHighlights& source_hl = (*all_highlights)[static_cast<std::size_t>(line_index)];
+      entry.ts_display_spans =
+          display_spans_for_line(source_hl, source_line, col_offset, display_len, tab_size);
+    }
+  }
+  if (semantic_tokens != nullptr && semantic_tokens->ready &&
+      line_index < static_cast<int>(semantic_tokens->lines.size())) {
+    const auto& line_spans = semantic_tokens->lines[static_cast<std::size_t>(line_index)];
+    entry.semantic_display_spans = display_semantic_spans_for_line(
+        line_spans, source_line, col_offset, display_len, tab_size);
+    entry.has_semantic = !entry.semantic_display_spans.empty();
+  }
+  cache[line_index] = std::move(entry);
+  return &cache[line_index];
+}
+
 int fragment_display_to_source_byte(const std::string& source_line, int source_byte_offset,
                                     int fragment_display_col, int tab_size) {
   return source_byte_at_display_column(source_line, source_byte_offset, fragment_display_col,
@@ -200,8 +269,16 @@ Element highlight_semantic_segment(const std::string& segment, const SemanticTok
 }
 
 Element highlight_tree_sitter_gap(const std::string& line, int line_index,
-                                  const SyntaxHighlightContext* ctx, int cursor_col,
-                                  Decorator cursor_style, int col_offset) {
+                                  SyntaxHighlightContext* ctx, int cursor_col,
+                                  Decorator cursor_style, int col_offset,
+                                  const SemanticTokenDocument* semantic_tokens) {
+  if (ctx != nullptr && ctx->line_span_cache != nullptr) {
+    if (const CachedSyntaxLineSpans* cached = cached_syntax_spans_for_line(
+            ctx, line_index, semantic_tokens, col_offset, static_cast<int>(line.size()))) {
+      return HighlightTreeSitterLine(line, line_index, cached->ts_display_spans, cursor_col,
+                                   cursor_style, 0);
+    }
+  }
   if (ctx == nullptr || ctx->lines == nullptr || ctx->lines->empty()) {
     return text(line);
   }
@@ -223,10 +300,11 @@ Element highlight_semantic_line(const std::string& line, int line_index,
                                 const std::vector<SemanticTokenSpan>& display_spans,
                                 const std::vector<std::string>& types, int cursor_col,
                                 Decorator cursor_style, int source_byte_offset,
-                                const SyntaxHighlightContext* ctx) {
+                                SyntaxHighlightContext* ctx,
+                                const SemanticTokenDocument* semantic_tokens) {
   if (display_spans.empty()) {
     return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style,
-                                     source_byte_offset);
+                                   source_byte_offset, semantic_tokens);
   }
 
   const int tab_size = std::max(1, editor_indent::tab_display_width());
@@ -259,7 +337,7 @@ Element highlight_semantic_line(const std::string& line, int line_index,
                                                   tab_size)
                 : source_byte_offset;
         parts.push_back(highlight_tree_sitter_gap(gap, line_index, ctx, gap_cursor, cursor_style,
-                                                  gap_source_byte));
+                                                  gap_source_byte, semantic_tokens));
       }
       col = span.start_col;
     }
@@ -289,12 +367,12 @@ Element highlight_semantic_line(const std::string& line, int line_index,
             ? fragment_display_to_source_byte(*source_line, source_byte_offset, col, tab_size)
             : source_byte_offset;
     parts.push_back(highlight_tree_sitter_gap(tail, line_index, ctx, tail_cursor, cursor_style,
-                                              tail_source_byte));
+                                              tail_source_byte, semantic_tokens));
   }
 
   if (parts.empty()) {
     return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style,
-                                     source_byte_offset);
+                                     source_byte_offset, semantic_tokens);
   }
   return hbox(std::move(parts));
 }
@@ -319,14 +397,30 @@ Element HighlightCodeLine(const std::string& line, int line_index,
                           const SemanticTokenDocument* semantic_tokens, int cursor_col,
                           Decorator cursor_style, int col_offset,
                           const SyntaxHighlightContext* ctx) {
+  SyntaxHighlightContext* mutable_ctx = const_cast<SyntaxHighlightContext*>(ctx);
+  if (mutable_ctx != nullptr && mutable_ctx->line_span_cache != nullptr) {
+    if (const CachedSyntaxLineSpans* cached = cached_syntax_spans_for_line(
+            mutable_ctx, line_index, semantic_tokens, col_offset, static_cast<int>(line.size()))) {
+      if (cached->has_semantic && semantic_tokens != nullptr && semantic_tokens->ready) {
+        return highlight_semantic_line(line, line_index, cached->semantic_display_spans,
+                                       semantic_tokens->token_types, cursor_col, cursor_style,
+                                       col_offset, mutable_ctx, semantic_tokens);
+      }
+      return HighlightTreeSitterLine(line, line_index, cached->ts_display_spans, cursor_col,
+                                     cursor_style, 0);
+    }
+  }
+
   if (semantic_tokens == nullptr || !semantic_tokens->ready || line_index < 0 ||
       line_index >= static_cast<int>(semantic_tokens->lines.size())) {
-    return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style, col_offset);
+    return highlight_tree_sitter_gap(line, line_index, mutable_ctx, cursor_col, cursor_style,
+                                   col_offset, semantic_tokens);
   }
 
   if (ctx == nullptr || ctx->lines == nullptr ||
       line_index >= static_cast<int>(ctx->lines->size())) {
-    return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style, col_offset);
+    return highlight_tree_sitter_gap(line, line_index, mutable_ctx, cursor_col, cursor_style,
+                                     col_offset, semantic_tokens);
   }
 
   const std::string& source_line = (*ctx->lines)[static_cast<std::size_t>(line_index)];
@@ -335,11 +429,13 @@ Element HighlightCodeLine(const std::string& line, int line_index,
   const auto display_spans = display_semantic_spans_for_line(
       line_spans, source_line, col_offset, static_cast<int>(line.size()), tab_size);
   if (display_spans.empty()) {
-    return highlight_tree_sitter_gap(line, line_index, ctx, cursor_col, cursor_style, col_offset);
+    return highlight_tree_sitter_gap(line, line_index, mutable_ctx, cursor_col, cursor_style,
+                                     col_offset, semantic_tokens);
   }
 
   return highlight_semantic_line(line, line_index, display_spans, semantic_tokens->token_types,
-                                 cursor_col, cursor_style, col_offset, ctx);
+                                 cursor_col, cursor_style, col_offset, mutable_ctx,
+                                 semantic_tokens);
 }
 
 }  // namespace tgdb
