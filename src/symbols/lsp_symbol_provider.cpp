@@ -329,7 +329,6 @@ void LspSymbolProvider::async_worker_main() {
         }
         if (is_lsp_trackable_path(job->path, text)) {
           flush_document_sync(job->path);
-          client_.wait_for_current_document_parsed(job->path);
         }
         const bool fetched = client_.ensure_semantic_tokens(job->path);
         const bool ready = client_.has_ready_semantic_tokens(job->path);
@@ -1140,12 +1139,28 @@ void LspSymbolProvider::invalidate_semantic_tokens_for_file(const std::string& p
   if (path.empty()) {
     return;
   }
+  const std::string key = normalize_lsp_path(path);
   std::lock_guard<std::mutex> lock(mutex_);
   if (!use_lsp_) {
     return;
   }
   client_.invalidate_semantic_tokens_for_file(path);
   semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> inflight_lock(inflight_mutex_);
+    inflight_semantic_.erase(key);
+  }
+}
+
+uint64_t LspSymbolProvider::document_generation_for_file(const std::string& path) const {
+  if (path.empty() || !is_lsp_trackable_path(path)) {
+    return 0;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return 0;
+  }
+  return client_.document_generation(path);
 }
 
 bool LspSymbolProvider::supports_hover() const {

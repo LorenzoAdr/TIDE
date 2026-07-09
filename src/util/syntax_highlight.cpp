@@ -185,6 +185,21 @@ std::vector<SemanticTokenSpan> display_semantic_spans_for_line(
   return out;
 }
 
+bool semantic_spans_plausible_for_line(const std::vector<SemanticTokenSpan>& spans, int line_len) {
+  if (line_len <= 0) {
+    return spans.empty();
+  }
+  for (const SemanticTokenSpan& span : spans) {
+    if (span.length <= 0 || span.start_col < 0 || span.start_col >= line_len) {
+      return false;
+    }
+    if (span.start_col + span.length > line_len) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
     SyntaxHighlightContext* ctx, int line_index, const SemanticTokenDocument* semantic_tokens,
     int col_offset, int display_len) {
@@ -427,7 +442,8 @@ Element HighlightCodeLine(const std::string& line, int line_index,
   const auto& line_spans = semantic_tokens->lines[static_cast<std::size_t>(line_index)];
   const auto display_spans = display_semantic_spans_for_line(
       line_spans, source_line, col_offset, static_cast<int>(line.size()), tab_size);
-  if (display_spans.empty()) {
+  if (display_spans.empty() ||
+      !semantic_spans_plausible_for_line(display_spans, static_cast<int>(line.size()))) {
     return highlight_tree_sitter_gap(line, line_index, mutable_ctx, cursor_col, cursor_style,
                                      col_offset, semantic_tokens);
   }

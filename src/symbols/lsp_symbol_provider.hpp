@@ -45,6 +45,7 @@ class LspSymbolProvider : public ISymbolProvider {
   SemanticTokenDocument semantic_tokens_for_file(const std::string& path) override;
   bool semantic_tokens_current_for_file(const std::string& path) override;
   void invalidate_semantic_tokens_for_file(const std::string& path) override;
+  uint64_t document_generation_for_file(const std::string& path) const override;
 
   bool supports_hover() const override;
   bool hover_uses_async_fetch() const override;

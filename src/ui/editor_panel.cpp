@@ -112,9 +112,8 @@ void notify_editor_buffer_changed(WorkspaceModel* workspace, EditorPanelState* p
   if (panel != nullptr) {
     mark_editor_content_edited(panel, buffer);
     if (structural_edit && symbols != nullptr) {
-      symbols->invalidate_semantic_tokens_for_file(buffer.path);
-      symbols->flush_document_sync(buffer.path);
       symbols->on_document_changed(buffer.path, buffer_text(buffer));
+      symbols->invalidate_semantic_tokens_for_file(buffer.path);
     }
   } else if (symbols != nullptr) {
     symbols->on_document_changed(buffer.path, buffer_text(buffer));
@@ -405,7 +404,7 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
                                         const BracketPairHighlight& bracket,
                                         const BracketPairHighlight* scope_bracket,
                                         uint64_t colored_brace_token, uint64_t semantic_revision,
-                                        bool git_line_changed) {
+                                        uint64_t semantic_source_generation, bool git_line_changed) {
   uint64_t h = kViewportLineHashOffset;
   h = viewport_line_hash_int(h, line.line_index);
   h = viewport_line_hash_string(h, line.line_content);
@@ -433,6 +432,7 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
   h = viewport_line_hash_bool(h, line.symbol_press_active);
   h = viewport_line_hash_u64(h, colored_brace_token);
   h = viewport_line_hash_u64(h, semantic_revision);
+  h = viewport_line_hash_u64(h, semantic_source_generation);
   h = viewport_line_hash_string(h, buffer.path);
   if (line.suffix_ptr != nullptr) {
     h = viewport_line_hash_string(h, *line.suffix_ptr);
@@ -474,6 +474,15 @@ void prune_viewport_line_render_cache(EditorPanelState* panel,
 
 bool editor_content_settled(const EditorPanelState& panel) {
   return steady_now_ms() - panel.content_edit_ms >= kEditorContentSettleMs;
+}
+
+bool semantic_tokens_match_document(const ISymbolProvider& symbols, const std::string& path,
+                                    const SemanticTokenDocument& tokens) {
+  if (!tokens.ready || path.empty()) {
+    return false;
+  }
+  const uint64_t doc_gen = symbols.document_generation_for_file(path);
+  return doc_gen > 0 && tokens.source_generation == doc_gen;
 }
 
 void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer) {
@@ -4851,14 +4860,17 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool defer_sticky_scroll = typing_edit_mode;
 
     const SemanticTokenDocument* semantic_tokens = nullptr;
+    uint64_t semantic_source_generation = 0;
     if (symbols && symbols->supports_semantic_highlight() && indexed_cpp) {
       const bool tokens_current = symbols->semantic_tokens_current_for_file(buffer.path);
-      if (!typing_edit_mode) {
+      const bool can_refresh_semantic =
+          !panel_state->semantic_tokens_layout_stale || editor_content_settled(*panel_state);
+      if (!typing_edit_mode && can_refresh_semantic) {
         const uint64_t semantic_rev = symbols->semantic_highlight_revision();
         if (panel_state->cached_semantic_path != buffer.path ||
             semantic_rev != panel_state->last_semantic_highlight_revision) {
           const SemanticTokenDocument fresh = symbols->semantic_tokens_for_file(buffer.path);
-          if (fresh.ready) {
+          if (fresh.ready && semantic_tokens_match_document(*symbols, buffer.path, fresh)) {
             panel_state->cached_semantic_path = buffer.path;
             panel_state->last_semantic_highlight_revision = semantic_rev;
             panel_state->cached_semantic_tokens = fresh;
@@ -4871,14 +4883,21 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             panel_state->cached_semantic_tokens = fresh;
           }
         }
-        if (!tokens_current) {
+        if (!tokens_current ||
+            !semantic_tokens_match_document(*symbols, buffer.path,
+                                            panel_state->cached_semantic_tokens)) {
           panel_state->semantic_tokens_enqueue_pending = true;
         }
+      } else if (panel_state->semantic_tokens_layout_stale) {
+        panel_state->semantic_tokens_enqueue_pending = true;
       }
-      if (!panel_state->semantic_tokens_layout_stale &&
+      if (!panel_state->semantic_tokens_layout_stale && tokens_current &&
           panel_state->cached_semantic_path == buffer.path &&
-          panel_state->cached_semantic_tokens.ready && tokens_current) {
+          panel_state->cached_semantic_tokens.ready &&
+          semantic_tokens_match_document(*symbols, buffer.path,
+                                         panel_state->cached_semantic_tokens)) {
         semantic_tokens = &panel_state->cached_semantic_tokens;
+        semantic_source_generation = panel_state->cached_semantic_tokens.source_generation;
       }
     }
 
@@ -5251,7 +5270,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           panel_state->mouse_selecting, helix_caret_insert, buffer.scroll_col, code_width,
           helix_relative, gutter_w, fold_gutter_enabled, gutter_markers, indent_guides_enabled,
           scope_highlight_strength, typing_burst, bracket, scope_bracket_ptr,
-          panel_state->colored_brace_cache_token, semantic_revision,
+          panel_state->colored_brace_cache_token, semantic_revision, semantic_source_generation,
           git_line_changed(panel_state.get(), i));
 
       auto cache_it = panel_state->viewport_line_render_cache.find(i);
@@ -5630,9 +5649,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                 panel_state->semantic_tokens_enqueue_pending = true;
               }
             }
-            if (panel_state->semantic_tokens_enqueue_pending) {
+            if (panel_state->semantic_tokens_enqueue_pending &&
+                (!panel_state->semantic_tokens_layout_stale ||
+                 editor_content_settled(*panel_state))) {
               const bool ready = symbols->ensure_semantic_tokens(path);
-              if (ready || symbols->semantic_tokens_current_for_file(path)) {
+              if (ready && symbols->semantic_tokens_current_for_file(path)) {
                 panel_state->semantic_tokens_enqueue_pending = false;
               } else if (!symbols->lsp_loading() && !symbols->supports_semantic_highlight()) {
                 panel_state->semantic_tokens_enqueue_pending = false;

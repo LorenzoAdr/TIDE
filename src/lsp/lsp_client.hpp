@@ -62,6 +62,7 @@ class LspClient {
   void invalidate_semantic_tokens_for_file(const std::string& absolute_path);
 
   bool wait_for_current_document_parsed(const std::string& absolute_path);
+  uint64_t document_generation(const std::string& absolute_path) const;
 
   HoverInfo hover(const std::string& absolute_path, const std::string& text, int line,
                   int character);
@@ -99,7 +100,6 @@ class LspClient {
     uint64_t idle_generation = 0;
   };
 
-  uint64_t document_generation(const std::string& absolute_path) const;
   void sync_document_and_wait(const std::string& absolute_path, const std::string& text);
   void wait_for_completion_ready(const std::string& absolute_path, const std::string& text,
                                  int line, int timeout_ms);

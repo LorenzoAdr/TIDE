@@ -162,6 +162,10 @@ class ISymbolProvider {
     return true;
   }
   virtual void invalidate_semantic_tokens_for_file(const std::string& path) { (void)path; }
+  virtual uint64_t document_generation_for_file(const std::string& path) const {
+    (void)path;
+    return 0;
+  }
 
   virtual bool supports_hover() const { return false; }
   virtual bool hover_uses_async_fetch() const { return false; }
