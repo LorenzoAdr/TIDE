@@ -22,6 +22,11 @@ std::vector<int> viewport_buffer_lines(const EditorBuffer& buffer,
                                        const std::vector<FoldRegion>& regions,
                                        int viewport_count);
 
+// Windowing-only step of viewport_buffer_lines, split out so callers that already have a
+// (possibly cached) visible-lines vector can skip re-running the O(lines*regions) fold scan.
+std::vector<int> viewport_window_from_visible(const std::vector<int>& visible, int scroll,
+                                              int viewport_count);
+
 const FoldRegion* fold_region_at_open_line(const std::vector<FoldRegion>& regions, int open_line);
 
 char fold_gutter_marker(int buffer_line, const std::vector<FoldRegion>& regions,

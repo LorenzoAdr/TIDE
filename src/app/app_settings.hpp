@@ -14,6 +14,11 @@ struct AppSettings {
   bool sticky_scroll_enabled = true;
   bool indent_guides_enabled = true;
   bool scope_highlight_enabled = true;
+  // Master switch for the purely cosmetic editor extras (diagnostic suffixes/underlines,
+  // symbol-press flash, search/selection highlighting, bracket matching, rainbow brackets,
+  // sticky scroll). Turning it off skips all of that per-line rendering work for extra
+  // performance on large files or slow terminals.
+  bool rich_session_enabled = true;
   int scope_highlight_strength = 58;
   bool animations_enabled = true;
   bool overview_ruler_enabled = true;

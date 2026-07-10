@@ -35,6 +35,7 @@
 #include "util/ui_perf_monitor.hpp"
 #include "util/fuzzy_match.hpp"
 #include "lsp/diagnostics.hpp"
+#include "lsp/semantic_tokens.hpp"
 #include "editor/editor_state.hpp"
 #include "editor/line_comment.hpp"
 #include "editor/text_ops.hpp"
@@ -214,6 +215,10 @@ struct EditorPanelState {
   std::vector<int> viewport_line_cache;
   std::string fold_regions_cache_path;
   uint64_t fold_regions_cache_token = 0;
+  std::vector<int> fold_visible_lines_cache;
+  uint64_t fold_visible_lines_cache_view_token = 0;
+  uint64_t fold_visible_lines_cache_fold_token = 0;
+  int fold_visible_lines_cache_total = -1;
   bool symbols_fetch_pending = false;
   uint64_t last_document_symbols_revision = 0;
   bool semantic_tokens_enqueue_pending = false;
@@ -381,6 +386,11 @@ uint64_t viewport_line_hash_diagnostics(uint64_t h, const std::vector<Diagnostic
   return h;
 }
 
+uint64_t viewport_line_hash_semantic_spans(uint64_t h,
+                                           const std::vector<SemanticTokenSpan>* spans) {
+  return viewport_line_hash_u64(h, hash_semantic_token_line(spans));
+}
+
 struct ViewportLineRenderKeyInput {
   int line_index = -1;
   std::string_view line_content;
@@ -394,6 +404,7 @@ struct ViewportLineRenderKeyInput {
   const std::vector<Diagnostic>* line_diagnostics = nullptr;
   const std::vector<TextMatch>* find_matches = nullptr;
   const std::vector<TextMatch>* selection_occurrences = nullptr;
+  const std::vector<SemanticTokenSpan>* line_semantic_spans = nullptr;
 };
 
 uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line,
@@ -405,7 +416,7 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
                                         int scope_highlight_strength, bool typing_burst,
                                         const BracketPairHighlight& bracket,
                                         const BracketPairHighlight* scope_bracket,
-                                        uint64_t colored_brace_token, uint64_t semantic_revision,
+                                        uint64_t colored_brace_token,
                                         uint64_t semantic_source_generation, bool git_line_changed,
                                         uint64_t ts_revision) {
   uint64_t h = kViewportLineHashOffset;
@@ -436,7 +447,11 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
   h = viewport_line_hash_bool(h, git_line_changed);
   h = viewport_line_hash_bool(h, line.symbol_press_active);
   h = viewport_line_hash_u64(h, colored_brace_token);
-  h = viewport_line_hash_u64(h, semantic_revision);
+  // Content hash of this line's own semantic spans, not the document-wide semantic
+  // revision counter: that counter bumps on every LSP re-fetch even when this
+  // particular line's tokens are unchanged, which used to force a re-render of every
+  // visible line on each fetch instead of just the ones that actually changed.
+  h = viewport_line_hash_semantic_spans(h, line.line_semantic_spans);
   h = viewport_line_hash_u64(h, semantic_source_generation);
   h = viewport_line_hash_string(h, buffer.path);
   if (line.suffix_ptr != nullptr) {
@@ -637,6 +652,27 @@ const std::vector<SymbolInfo>& cached_file_symbols(EditorPanelState* panel,
         !path.empty() && symbols != nullptr && !is_tabular_path(path);
   }
   return panel->cached_symbols;
+}
+
+// The fold-aware "which buffer lines are visible" scan is O(lines * fold_regions); cache it so
+// continuous scrolling (which doesn't touch view_token) reuses it instead of re-scanning the
+// whole file on every single render frame. view_token changes on every edit and on fold toggles;
+// fold_regions_cache_token additionally changes when tree-sitter's fold regions are (re)computed
+// for an unchanged view_token (which happens once typing settles), so both need to be watched.
+const std::vector<int>& cached_fold_visible_lines(EditorPanelState* panel,
+                                                  const EditorBuffer& buffer,
+                                                  const std::vector<FoldRegion>& regions) {
+  const int total = static_cast<int>(buffer.lines.size());
+  const bool stale = panel->fold_visible_lines_cache_view_token != buffer.view_token ||
+                     panel->fold_visible_lines_cache_fold_token != panel->fold_regions_cache_token ||
+                     panel->fold_visible_lines_cache_total != total;
+  if (stale) {
+    panel->fold_visible_lines_cache = visible_buffer_lines(total, regions, buffer.collapsed_folds);
+    panel->fold_visible_lines_cache_view_token = buffer.view_token;
+    panel->fold_visible_lines_cache_fold_token = panel->fold_regions_cache_token;
+    panel->fold_visible_lines_cache_total = total;
+  }
+  return panel->fold_visible_lines_cache;
 }
 
 void ensure_file_symbols(EditorPanelState* panel, ISymbolProvider* symbols,
@@ -908,11 +944,16 @@ const BracketPairHighlight& cached_bracket_highlight(EditorPanelState* panel,
   if (!editor_content_settled(*panel) && panel->bracket_cache.valid) {
     return panel->bracket_cache;
   }
-  if (panel->bracket_cache_token == buffer.view_token && panel->bracket_cache_line == line &&
+  // Keyed on the tree-sitter document revision rather than buffer.view_token: view_token is
+  // also bumped by unrelated async LSP events (diagnostics, semantic tokens), which would
+  // otherwise force a full re-scan on every one of those events even though the cursor and the
+  // underlying parsed text haven't actually changed.
+  const uint64_t doc_revision = tree_sitter_service().revision_for(buffer.path);
+  if (panel->bracket_cache_token == doc_revision && panel->bracket_cache_line == line &&
       panel->bracket_cache_col == col) {
     return panel->bracket_cache;
   }
-  panel->bracket_cache_token = buffer.view_token;
+  panel->bracket_cache_token = doc_revision;
   panel->bracket_cache_line = line;
   panel->bracket_cache_col = col;
   panel->bracket_cache = find_bracket_pair_highlight(buffer, line, col);
@@ -931,11 +972,12 @@ const BracketPairHighlight& cached_scope_bracket_highlight(EditorPanelState* pan
   if (!editor_content_settled(*panel) && panel->scope_bracket_cache.valid) {
     return panel->scope_bracket_cache;
   }
-  if (panel->scope_bracket_cache_token == buffer.view_token &&
+  const uint64_t doc_revision = tree_sitter_service().revision_for(buffer.path);
+  if (panel->scope_bracket_cache_token == doc_revision &&
       panel->scope_bracket_cache_line == line && panel->scope_bracket_cache_col == col) {
     return panel->scope_bracket_cache;
   }
-  panel->scope_bracket_cache_token = buffer.view_token;
+  panel->scope_bracket_cache_token = doc_revision;
   panel->scope_bracket_cache_line = line;
   panel->scope_bracket_cache_col = col;
   panel->scope_bracket_cache = find_scope_bracket_pair(buffer, line, col);
@@ -953,16 +995,22 @@ const std::vector<ColoredBraceMarker>& cached_colored_braces(EditorPanelState* p
   if (!editor_content_settled(*panel)) {
     return panel->colored_brace_cache;
   }
+  // See cached_bracket_highlight above: gate on the tree-sitter document revision, not
+  // buffer.view_token, to avoid re-running this full-document scan for unrelated async events.
+  const uint64_t doc_revision = tree_sitter_service().revision_for(buffer.path);
   const bool path_changed = panel->colored_brace_cache_path != buffer.path;
-  const bool token_changed = panel->colored_brace_cache_token != buffer.view_token;
+  const bool token_changed = panel->colored_brace_cache_token != doc_revision;
   if (!path_changed && !token_changed) {
     return panel->colored_brace_cache;
   }
   const std::vector<ColoredBraceMarker> fresh = find_colored_curly_braces(buffer);
+  // Always mark this revision as processed even if we keep the old (non-empty) cache below,
+  // otherwise a transient empty result would leave the token stale and force a re-scan of the
+  // whole document on every subsequent frame forever (see the analogous fold-region fix).
+  panel->colored_brace_cache_path = buffer.path;
+  panel->colored_brace_cache_token = doc_revision;
   if (!fresh.empty() || path_changed || panel->colored_brace_cache.empty()) {
     panel->colored_brace_cache = fresh;
-    panel->colored_brace_cache_path = buffer.path;
-    panel->colored_brace_cache_token = buffer.view_token;
   }
   return panel->colored_brace_cache;
 }
@@ -5013,6 +5061,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       buffer.fold_regions.clear();
       panel_state->fold_regions_cache_path.clear();
       panel_state->fold_regions_cache_token = 0;
+      panel_state->fold_visible_lines_cache.clear();
+      panel_state->fold_visible_lines_cache_view_token = 0;
+      panel_state->fold_visible_lines_cache_fold_token = 0;
+      panel_state->fold_visible_lines_cache_total = -1;
       panel_state->colored_brace_cache.clear();
       panel_state->colored_brace_cache_path.clear();
       panel_state->colored_brace_cache_token = 0;
@@ -5081,9 +5133,16 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool typing_burst = !editor_content_settled(*panel_state);
     const bool typing_edit_mode = typing_burst && indexed_cpp;
     const bool defer_sticky_scroll = typing_edit_mode;
+    // "Rich session" bundles the purely cosmetic decorations (diagnostic suffixes/underlines,
+    // symbol-press flash, search/selection highlighting, bracket matching, rainbow brackets,
+    // sticky scroll) behind a single switch so it can be turned off for extra performance.
+    const bool rich_session_enabled =
+        layout_state == nullptr || layout_state->app_settings == nullptr ||
+        layout_state->app_settings->rich_session_enabled;
 
     const SemanticTokenDocument* semantic_tokens = nullptr;
     uint64_t semantic_source_generation = 0;
+    UiSyncPhaseScope semantic_apply_scope(ui_perf, "render.editor.semantic");
     if (symbols && symbols->supports_semantic_highlight() && indexed_cpp) {
       const bool tokens_current = symbols->semantic_tokens_current_for_file(buffer.path);
       const bool can_refresh_semantic =
@@ -5098,8 +5157,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             panel_state->last_semantic_highlight_revision = semantic_rev;
             panel_state->cached_semantic_tokens = fresh;
             panel_state->semantic_tokens_layout_stale = false;
-            panel_state->viewport_line_render_cache.clear();
-            panel_state->line_syntax_span_cache.clear();
+            // No blanket cache clear here: both viewport_line_render_cache and
+            // line_syntax_span_cache now key on each line's own semantic-span content
+            // hash (see hash_semantic_token_line()), so a fetch that leaves a line's
+            // tokens unchanged keeps that line cached instead of forcing every visible
+            // line to be recomputed just because clangd sent a new response.
           } else if (panel_state->cached_semantic_path != buffer.path) {
             panel_state->cached_semantic_path = buffer.path;
             panel_state->last_semantic_highlight_revision = semantic_rev;
@@ -5129,8 +5191,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool scope_highlight_enabled =
         layout_state != nullptr && layout_state->app_settings != nullptr &&
         layout_state->app_settings->scope_highlight_enabled;
+    // Scope highlight and code folding both rely on the same expensive full-document
+    // tree-sitter scan (fold_regions_at), so they're bundled into "rich session" too.
     const bool scope_visual_effects =
-        editor_scope_effects_allowed(layout_state, scope_highlight_enabled);
+        rich_session_enabled && editor_scope_effects_allowed(layout_state, scope_highlight_enabled);
     const int scope_highlight_strength =
         layout_state != nullptr && layout_state->app_settings != nullptr
             ? layout_state->app_settings->scope_highlight_strength
@@ -5138,57 +5202,73 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     const bool path_indexed_cpp =
         !buffer.path.empty() && is_indexed_source_path(buffer.path);
-    if (scope_visual_effects && path_indexed_cpp) {
-      const bool path_changed = panel_state->fold_regions_cache_path != buffer.path;
-      const bool settled = editor_content_settled(*panel_state);
-      const bool token_changed =
-          panel_state->fold_regions_cache_token != buffer.view_token;
-      if (path_changed || (settled && token_changed)) {
-        const std::vector<FoldRegion> fresh =
-            tree_sitter_service().fold_regions_at(buffer.path, buffer.lines);
-        if (!fresh.empty() || path_changed || buffer.fold_regions.empty()) {
-          buffer.fold_regions = fresh;
-          std::set<int> valid_open_lines;
-          for (const FoldRegion& region : buffer.fold_regions) {
-            valid_open_lines.insert(region.open_line);
-          }
-          for (auto it = buffer.collapsed_folds.begin(); it != buffer.collapsed_folds.end();) {
-            if (valid_open_lines.count(*it) == 0) {
-              it = buffer.collapsed_folds.erase(it);
-            } else {
-              ++it;
+    {
+      UiSyncPhaseScope folds_scope(ui_perf, "render.editor.folds");
+      if (scope_visual_effects && path_indexed_cpp) {
+        const bool path_changed = panel_state->fold_regions_cache_path != buffer.path;
+        const bool settled = editor_content_settled(*panel_state);
+        // Gate on the tree-sitter document revision, not buffer.view_token: view_token is a
+        // catch-all "something changed, redraw" counter that also gets bumped by unrelated async
+        // LSP events (diagnostics, semantic tokens draining in) which can fire many times in a
+        // row (e.g. right after clangd restarts for a debug session) without the actual buffer
+        // text changing at all. ts_highlight_revision only changes when tree-sitter reparses the
+        // document, so it avoids re-running this expensive full-document fold scan for every
+        // unrelated async event.
+        const bool token_changed =
+            panel_state->fold_regions_cache_token != ts_highlight_revision;
+        if (path_changed || (settled && token_changed)) {
+          const std::vector<FoldRegion> fresh =
+              tree_sitter_service().fold_regions_at(buffer.path, buffer.lines);
+          // Always mark this revision as processed, even if we decide not to apply `fresh`
+          // below (e.g. a transient empty result while old fold regions are kept). Otherwise
+          // fold_regions_cache_token never catches up and this expensive tree-sitter fold scan
+          // (full source join + parse + query) reruns on every single render frame forever
+          // instead of once.
+          panel_state->fold_regions_cache_path = buffer.path;
+          panel_state->fold_regions_cache_token = ts_highlight_revision;
+          if (!fresh.empty() || path_changed || buffer.fold_regions.empty()) {
+            buffer.fold_regions = fresh;
+            std::set<int> valid_open_lines;
+            for (const FoldRegion& region : buffer.fold_regions) {
+              valid_open_lines.insert(region.open_line);
+            }
+            for (auto it = buffer.collapsed_folds.begin(); it != buffer.collapsed_folds.end();) {
+              if (valid_open_lines.count(*it) == 0) {
+                it = buffer.collapsed_folds.erase(it);
+              } else {
+                ++it;
+              }
             }
           }
-          panel_state->fold_regions_cache_path = buffer.path;
-          panel_state->fold_regions_cache_token = buffer.view_token;
         }
+      } else {
+        // Either not an indexed C++ file, or "rich session" / scope highlight is disabled:
+        // drop any stale fold regions so collapsed sections don't linger and folding is fully
+        // unavailable while this is off, instead of just hiding the gutter marker.
+        buffer.fold_regions.clear();
+        buffer.collapsed_folds.clear();
+        panel_state->fold_regions_cache_path.clear();
+        panel_state->fold_regions_cache_token = 0;
       }
-    } else if (!path_indexed_cpp) {
-      buffer.fold_regions.clear();
-      buffer.collapsed_folds.clear();
     }
     const bool fold_gutter_enabled =
         scope_visual_effects && path_indexed_cpp && !buffer.fold_regions.empty();
     panel_state->gutter_fold_width = fold_gutter_enabled ? 1 : 0;
 
+    const std::vector<int>& fold_visible_lines =
+        cached_fold_visible_lines(panel_state.get(), buffer, buffer.fold_regions);
     const std::vector<int> viewport_lines =
-        viewport_buffer_lines(buffer, buffer.fold_regions, visible);
+        viewport_window_from_visible(fold_visible_lines, buffer.scroll, visible);
     panel_state->viewport_line_cache = viewport_lines;
     panel_state->gutter_scroll_start =
         viewport_lines.empty() ? buffer.scroll : viewport_lines.front();
     panel_state->gutter_visible_rows = static_cast<int>(viewport_lines.size());
 
     const int scroll_total =
-        buffer.collapsed_folds.empty()
-            ? total
-            : static_cast<int>(visible_buffer_lines(total, buffer.fold_regions,
-                                                    buffer.collapsed_folds)
-                                   .size());
+        buffer.collapsed_folds.empty() ? total : static_cast<int>(fold_visible_lines.size());
     int scroll_visible_index = 0;
     if (!buffer.collapsed_folds.empty()) {
-      const std::vector<int> all_visible =
-          visible_buffer_lines(total, buffer.fold_regions, buffer.collapsed_folds);
-      const int found = visible_line_index(all_visible, buffer.scroll);
+      const int found = visible_line_index(fold_visible_lines, buffer.scroll);
       scroll_visible_index = found >= 0 ? found : 0;
     } else {
       scroll_visible_index = buffer.scroll;
@@ -5313,58 +5393,74 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
              flex;
     }
 
-    const std::vector<TextMatch>* find_matches =
-        find_state->open && !find_state->matches.empty() ? &find_state->matches : nullptr;
-    const std::vector<TextMatch>* selection_occurrences =
-        selection_occurrence_matches_for(panel_state.get(), buffer, find_state->open);
-
     static const BracketPairHighlight kNoBracket{};
-    const BracketPairHighlight& bracket =
-        typing_burst ? kNoBracket
-                     : cached_bracket_highlight(panel_state.get(), buffer, editor_focused);
     static const BracketPairHighlight kNoScopeBracket{};
-    const BracketPairHighlight& scope_bracket =
-        typing_burst || !scope_visual_effects
-            ? kNoScopeBracket
-            : cached_scope_bracket_highlight(panel_state.get(), buffer, editor_focused);
-    const BracketPairHighlight* scope_bracket_ptr =
-        scope_bracket.valid ? &scope_bracket : nullptr;
+    const std::vector<TextMatch>* find_matches = nullptr;
+    const std::vector<TextMatch>* selection_occurrences = nullptr;
+    const BracketPairHighlight* bracket_ptr = &kNoBracket;
+    const BracketPairHighlight* scope_bracket_ptr = nullptr;
+    std::vector<StickyLine> sticky_lines;
+    {
+      UiSyncPhaseScope decor_scope(ui_perf, "render.editor.decor");
+      find_matches = rich_session_enabled && find_state->open && !find_state->matches.empty()
+                        ? &find_state->matches
+                        : nullptr;
+      selection_occurrences =
+          rich_session_enabled
+              ? selection_occurrence_matches_for(panel_state.get(), buffer, find_state->open)
+              : nullptr;
 
-    const std::vector<SymbolInfo>& file_symbols =
-        cached_file_symbols(panel_state.get(), buffer.path, symbols.get());
-    const std::vector<StickyLine> sticky_lines =
-        defer_sticky_scroll
-            ? std::vector<StickyLine>{}
-            : (layout_state != nullptr && layout_state->app_settings != nullptr &&
-                       layout_state->app_settings->sticky_scroll_enabled
-                   ? sticky_lines_for_scroll(file_symbols, buffer.lines, buffer.scroll, 3)
-                   : std::vector<StickyLine>{});
+      bracket_ptr = !rich_session_enabled || typing_burst
+                       ? &kNoBracket
+                       : &cached_bracket_highlight(panel_state.get(), buffer, editor_focused);
+      const BracketPairHighlight* scope_bracket_result =
+          !rich_session_enabled || typing_burst || !scope_visual_effects
+              ? &kNoScopeBracket
+              : &cached_scope_bracket_highlight(panel_state.get(), buffer, editor_focused);
+      scope_bracket_ptr = scope_bracket_result->valid ? scope_bracket_result : nullptr;
+
+      const std::vector<SymbolInfo>& file_symbols =
+          cached_file_symbols(panel_state.get(), buffer.path, symbols.get());
+      sticky_lines = defer_sticky_scroll || !rich_session_enabled
+                        ? std::vector<StickyLine>{}
+                        : (layout_state != nullptr && layout_state->app_settings != nullptr &&
+                                   layout_state->app_settings->sticky_scroll_enabled
+                               ? sticky_lines_for_scroll(file_symbols, buffer.lines, buffer.scroll,
+                                                        3)
+                               : std::vector<StickyLine>{});
+    }
+    const BracketPairHighlight& bracket = *bracket_ptr;
 
     DocumentDiagnostics file_diag;
-    const bool allow_lsp_diagnostics_ui =
-        layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
-    const bool deferred_sync = editor_deferred_sync_allowed(layout_state);
-    const bool diagnostics_ready =
-        symbols && symbols->supports_diagnostics() && !buffer.path.empty() &&
-        is_lsp_trackable_path(buffer.path) &&
-        diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), buffer.path,
-                                    /*lsp_ui_allowed=*/true);
-    const bool show_diagnostics = deferred_sync && diagnostics_ready && allow_lsp_diagnostics_ui;
-    if (diagnostics_ready) {
-      file_diag = cached_file_diagnostics(panel_state.get(), symbols.get(), buffer.path,
-                                          workspace->last_buffer_edit_ms, layout_state);
-      if (file_diag.path == buffer.path) {
-        rebuild_diagnostics_by_line(panel_state.get(), file_diag,
-                                    panel_state->cached_file_diag_revision);
+    bool show_diagnostics = false;
+    bool has_git_markers = false;
+    {
+      UiSyncPhaseScope diag_scope(ui_perf, "render.editor.diagnostics");
+      const bool allow_lsp_diagnostics_ui =
+          layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
+      const bool deferred_sync = editor_deferred_sync_allowed(layout_state);
+      const bool diagnostics_ready =
+          symbols && symbols->supports_diagnostics() && !buffer.path.empty() &&
+          is_lsp_trackable_path(buffer.path) &&
+          diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), buffer.path,
+                                      /*lsp_ui_allowed=*/true);
+      show_diagnostics = deferred_sync && diagnostics_ready && allow_lsp_diagnostics_ui;
+      if (diagnostics_ready) {
+        file_diag = cached_file_diagnostics(panel_state.get(), symbols.get(), buffer.path,
+                                            workspace->last_buffer_edit_ms, layout_state);
+        if (file_diag.path == buffer.path) {
+          rebuild_diagnostics_by_line(panel_state.get(), file_diag,
+                                      panel_state->cached_file_diag_revision);
+        }
+      } else {
+        panel_state->diagnostics_by_line.clear();
+        panel_state->diagnostics_by_line_path.clear();
+        panel_state->diagnostics_by_line_revision = 0;
       }
-    } else {
-      panel_state->diagnostics_by_line.clear();
-      panel_state->diagnostics_by_line_path.clear();
-      panel_state->diagnostics_by_line_revision = 0;
+      has_git_markers =
+          deferred_sync && git_service != nullptr && git_service->is_repo() &&
+          (panel_state->git_untracked_all_lines || !panel_state->git_changed_lines.empty());
     }
-    const bool has_git_markers =
-        deferred_sync && git_service != nullptr && git_service->is_repo() &&
-        (panel_state->git_untracked_all_lines || !panel_state->git_changed_lines.empty());
     const bool has_breakpoint_markers =
         debug_model != nullptr && !buffer.path.empty();
     const bool has_diagnostic_markers = show_diagnostics && !file_diag.items.empty();
@@ -5377,14 +5473,16 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     track_editor_scroll(panel_state.get(), buffer.scroll, layout_state);
     if (!typing_edit_mode) {
+      UiSyncPhaseScope suffix_scope(ui_perf, "render.editor.diagnostics");
       rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
                                       panel_state->cached_file_diag_revision, symbols.get(),
                                       workspace->last_buffer_edit_ms, layout_state);
     }
 
     const bool suffixes_enabled =
-        layout_state == nullptr || layout_state->app_settings == nullptr ||
-        layout_state->app_settings->show_diagnostic_suffixes;
+        rich_session_enabled &&
+        (layout_state == nullptr || layout_state->app_settings == nullptr ||
+         layout_state->app_settings->show_diagnostic_suffixes);
     const bool helix_caret =
         layout_state != nullptr && layout_state->app_settings != nullptr &&
         layout_state->app_settings->helix_mode_enabled;
@@ -5437,13 +5535,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             : ScopeLineRange{};
     static const std::vector<ColoredBraceMarker> kNoColoredBraces{};
     const std::vector<ColoredBraceMarker>& colored_braces =
-        typing_burst ? kNoColoredBraces
-                     : cached_colored_braces(panel_state.get(), buffer, scope_visual_effects);
+        !rich_session_enabled || typing_burst
+            ? kNoColoredBraces
+            : cached_colored_braces(panel_state.get(), buffer, scope_visual_effects);
     const std::vector<ColoredBraceMarker>* colored_braces_ptr =
         colored_braces.empty() ? nullptr : &colored_braces;
     const bool helix_caret_insert =
         helix_caret && panel_state->helix.mode == HelixMode::kInsert;
-    const uint64_t semantic_revision = panel_state->last_semantic_highlight_revision;
     const int caret_line_index = buffer.primary_line();
     if (caret_line_index != panel_state->last_render_caret_line) {
       panel_state->viewport_line_render_cache.erase(panel_state->last_render_caret_line);
@@ -5489,16 +5587,28 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           suffix_color_ptr = line_diagnostics;
         }
       }
+      // The diagnostic underline decoration is a "rich session" extra; the gutter marker
+      // ('!'/'W') and the suffix text above are gated independently.
+      const std::vector<Diagnostic>* underline_diagnostics =
+          rich_session_enabled ? line_diagnostics : nullptr;
 
       EditorSymbolPress symbol_press;
       bool symbol_press_active = false;
-      if (layout_state != nullptr && layout_state->editor_symbol_press.line == i) {
+      if (rich_session_enabled && layout_state != nullptr &&
+          layout_state->editor_symbol_press.line == i) {
         const auto& press = layout_state->editor_symbol_press;
         if (editor_symbol_press_visible(layout_state)) {
           symbol_press = {press.start_col, press.end_col, true};
           symbol_press_active = true;
         }
       }
+
+      const SemanticTokenDocument* line_semantic =
+          typing_burst && !caret_line ? nullptr : semantic_tokens;
+      const std::vector<SemanticTokenSpan>* line_semantic_spans =
+          (line_semantic != nullptr && i < static_cast<int>(line_semantic->lines.size()))
+              ? &line_semantic->lines[static_cast<std::size_t>(i)]
+              : nullptr;
 
       ViewportLineRenderKeyInput key_input;
       key_input.line_index = i;
@@ -5510,15 +5620,16 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       key_input.in_immediate_scope_gutter = in_immediate_scope_gutter;
       key_input.suffix_ptr = suffix_ptr;
       key_input.symbol_press_active = symbol_press_active;
-      key_input.line_diagnostics = line_diagnostics;
+      key_input.line_diagnostics = underline_diagnostics;
       key_input.find_matches = find_matches;
       key_input.selection_occurrences = selection_occurrences;
+      key_input.line_semantic_spans = line_semantic_spans;
       const uint64_t render_key = compute_viewport_line_render_key(
           key_input, buffer, *panel_state, editor_focused, show_caret,
           panel_state->mouse_selecting, helix_caret_insert, buffer.scroll_col, code_width,
           helix_relative, gutter_w, fold_gutter_enabled, gutter_markers, indent_guides_enabled,
           scope_highlight_strength, typing_burst, bracket, scope_bracket_ptr,
-          panel_state->colored_brace_cache_token, semantic_revision, semantic_source_generation,
+          panel_state->colored_brace_cache_token, semantic_source_generation,
           git_line_changed(panel_state.get(), i), ts_highlight_revision);
 
       auto cache_it = panel_state->viewport_line_render_cache.find(i);
@@ -5570,13 +5681,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             gutter_bg;
       }
 
-      const SemanticTokenDocument* line_semantic =
-          typing_burst && !caret_line ? nullptr : semantic_tokens;
       Element code_row =
           RenderEditorLine(display_line, i, buffer, editor_focused, find_matches,
                            selection_occurrences, line_semantic,
                            bracket.valid ? &bracket : nullptr, scope_bracket_ptr,
-                           scope_highlight_strength, line_diagnostics, suffix_ptr,
+                           scope_highlight_strength, underline_diagnostics, suffix_ptr,
                            suffix_color_ptr, symbol_press_active ? &symbol_press : nullptr,
                            show_caret, buffer.scroll_col, code_width, &highlight_ctx, false,
                            indent_guides_enabled, guide_depth, false, cursor_cell,

@@ -34,6 +34,7 @@ set(TGDB_TREE_SITTER_SOURCES
   src/parser/tree_sitter_completion.cpp
   src/parser/tree_sitter_service.cpp
   src/util/syntax_highlight.cpp
+  src/util/syntax_scope.cpp
   src/editor/editor_context.cpp
   src/util/csv_viewer.cpp
   src/ui/theme.cpp
@@ -139,6 +140,7 @@ add_executable(tgdb
   src/parser/tree_sitter_completion.cpp
   src/parser/tree_sitter_service.cpp
   src/util/syntax_highlight.cpp
+  src/util/syntax_scope.cpp
   src/util/clang_format_config.cpp
   src/util/build_file_highlight.cpp
   src/util/csv_viewer.cpp

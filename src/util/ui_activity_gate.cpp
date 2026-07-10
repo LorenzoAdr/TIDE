@@ -7,7 +7,11 @@ namespace tgdb {
 namespace {
 
 constexpr int64_t kSustainedIdleMs = 1500;
-constexpr int64_t kDeferredEditorSyncIdleMs = 1000;
+// Deliberately not 1000ms: see the comment in lsp/lsp_sync.hpp. Firing this a bit
+// earlier than the diagnostics-display and didChange debounces spreads the "just
+// stopped typing" work (this gates diagnostics-cache/git sync in the editor's heavy
+// tick) across a couple of ticks instead of all landing in the same one.
+constexpr int64_t kDeferredEditorSyncIdleMs = 800;
 
 int64_t default_grace_end(int64_t now_ms, int64_t grace_ms) {
   return now_ms + std::max<int64_t>(1, grace_ms);

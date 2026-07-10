@@ -147,7 +147,8 @@ constexpr int kPerfDump = 14;
 constexpr int kIcons = 15;
 constexpr int kHelixMode = 16;
 constexpr int kWorkspaceAutoDetect = 17;
-constexpr int kBaseOptions = 18;
+constexpr int kRichSession = 18;
+constexpr int kBaseOptions = 19;
 
 #ifdef TGDB_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -385,6 +386,8 @@ std::vector<SettingsOption> global_settings_options() {
        i18n::tr("settings.general.helix_mode.description")},
       {i18n::tr("settings.general.workspace_auto_detect.label"),
        i18n::tr("settings.general.workspace_auto_detect.description")},
+      {i18n::tr("settings.general.rich_session.label"),
+       i18n::tr("settings.general.rich_session.description")},
 #ifdef TGDB_HAS_BUNDLED_CLANGD
       {i18n::tr("settings.general.force_bundled_clangd.label"),
        i18n::tr("settings.general.force_bundled_clangd.description")},
@@ -514,6 +517,8 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_helix_mode_enabled;
     case kWorkspaceAutoDetect:
       return state->draft_workspace_auto_detect_enabled;
+    case kRichSession:
+      return state->draft_rich_session_enabled;
     case kShowAllFiles:
       return state->draft_show_all_workspace_files;
     case kMonitor:
@@ -586,6 +591,9 @@ void toggle_option(SettingsModalState* state, int index) {
     case kWorkspaceAutoDetect:
       state->draft_workspace_auto_detect_enabled =
           !state->draft_workspace_auto_detect_enabled;
+      break;
+    case kRichSession:
+      state->draft_rich_session_enabled = !state->draft_rich_session_enabled;
       break;
     case kShowAllFiles:
       state->draft_show_all_workspace_files = !state->draft_show_all_workspace_files;
@@ -2157,6 +2165,7 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_sticky_scroll_enabled = settings.sticky_scroll_enabled;
   state->draft_indent_guides_enabled = settings.indent_guides_enabled;
   state->draft_scope_highlight_enabled = settings.scope_highlight_enabled;
+  state->draft_rich_session_enabled = settings.rich_session_enabled;
   state->draft_scope_highlight_strength = settings.scope_highlight_strength;
   state->draft_animations_enabled = settings.animations_enabled;
   state->draft_overview_ruler_enabled = settings.overview_ruler_enabled;
@@ -2217,6 +2226,7 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->sticky_scroll_enabled = state->draft_sticky_scroll_enabled;
   settings->indent_guides_enabled = state->draft_indent_guides_enabled;
   settings->scope_highlight_enabled = state->draft_scope_highlight_enabled;
+  settings->rich_session_enabled = state->draft_rich_session_enabled;
   settings->scope_highlight_strength = state->draft_scope_highlight_strength;
   settings->animations_enabled = state->draft_animations_enabled;
   settings->overview_ruler_enabled = state->draft_overview_ruler_enabled;

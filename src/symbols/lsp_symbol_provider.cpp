@@ -555,7 +555,7 @@ void LspSymbolProvider::tick_pending_did_change_locked() {
     return;
   }
   const int64_t now = steady_now_ms();
-  constexpr int64_t kDebounceMs = kLspDocumentDebounceMs;
+  constexpr int64_t kDebounceMs = kLspDidChangeDebounceMs;
   std::vector<std::string> due;
   for (const auto& entry : pending_did_change_) {
     if (now - entry.second >= kDebounceMs) {
@@ -583,7 +583,7 @@ void LspSymbolProvider::tick_debounced_updates() {
       return;
     }
     const int64_t now = steady_now_ms();
-    constexpr int64_t kDebounceMs = kLspDocumentDebounceMs;
+    constexpr int64_t kDebounceMs = kLspDidChangeDebounceMs;
     for (const auto& entry : pending_did_change_) {
       if (now - entry.second >= kDebounceMs) {
         due.push_back(entry.first);

@@ -9,6 +9,7 @@
 #include "parser/tree_sitter_service.hpp"
 #include "ui/theme.hpp"
 #include "util/clang_format_config.hpp"
+#include "util/syntax_scope.hpp"
 
 namespace tgdb {
 
@@ -75,7 +76,7 @@ uint64_t syntax_span_hash_string(uint64_t h, std::string_view s) {
 
 uint64_t syntax_line_span_cache_key(int line_index, const std::string& source_line, int col_offset,
                                     int display_len, uint64_t ts_revision,
-                                    uint64_t semantic_revision, bool syntax_incremental,
+                                    uint64_t semantic_line_hash, bool syntax_incremental,
                                     uint64_t buffer_token) {
   uint64_t h = kSyntaxSpanHashOffset;
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(line_index));
@@ -85,55 +86,25 @@ uint64_t syntax_line_span_cache_key(int line_index, const std::string& source_li
   h = syntax_span_hash_u64(h, buffer_token);
   h = syntax_span_hash_u64(h, ts_revision);
   if (!syntax_incremental) {
-    h = syntax_span_hash_u64(h, semantic_revision);
+    // Content hash of this specific line's semantic spans, not the document-wide
+    // revision counter: a clangd re-fetch that leaves this line's tokens unchanged
+    // must not evict/recompute it (see hash_semantic_token_line()).
+    h = syntax_span_hash_u64(h, semantic_line_hash);
   }
   return h;
 }
 
-Decorator style_for_token_type(const std::vector<std::string>& types, int type_index) {
+// Resolved through the same canonical scope translator tree-sitter uses (see
+// util/syntax_scope.hpp), so a token type like "class" always renders with
+// the exact color tree-sitter's "type" capture would use. That shared
+// mapping is what prevents a visible color flip when semantic tokens arrive
+// and take over from tree-sitter for a given line.
+SyntaxScope scope_for_token_type(const std::vector<std::string>& types, int type_index) {
   std::string name;
   if (type_index >= 0 && type_index < static_cast<int>(types.size())) {
     name = types[static_cast<std::size_t>(type_index)];
   }
-
-  if (name == "comment") {
-    return color(theme::SyntaxComment()) | dim;
-  }
-  if (name == "string" || name == "regexp") {
-    return color(theme::SyntaxString());
-  }
-  if (name == "number") {
-    return color(theme::SyntaxNumber());
-  }
-  if (name == "keyword" || name == "modifier") {
-    return color(theme::SyntaxKeyword()) | bold;
-  }
-  if (name == "macro" || name == "decorator") {
-    return color(theme::SyntaxMacro());
-  }
-  if (name == "namespace") {
-    return color(theme::SyntaxNamespace());
-  }
-  if (name == "type" || name == "class" || name == "struct" || name == "enum" ||
-      name == "interface" || name == "typeParameter") {
-    return color(theme::SyntaxType());
-  }
-  if (name == "function" || name == "method" || name == "event") {
-    return color(theme::SyntaxFunction());
-  }
-  if (name == "parameter") {
-    return color(theme::SyntaxParameter());
-  }
-  if (name == "property" || name == "enumMember") {
-    return color(theme::SyntaxProperty());
-  }
-  if (name == "operator") {
-    return color(theme::SyntaxOperator());
-  }
-  if (name == "variable") {
-    return color(theme::SyntaxVariable());
-  }
-  return color(theme::SyntaxDefault());
+  return SyntaxScopeForLspTokenType(name);
 }
 
 LineHighlights display_spans_for_line(const LineHighlights& source_spans,
@@ -224,9 +195,14 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
   const std::string& source_line = (*ctx->lines)[static_cast<std::size_t>(line_index)];
   const int tab_size = std::max(1, editor_indent::tab_display_width());
   ctx->tree_sitter_highlights();
+  const std::vector<SemanticTokenSpan>* semantic_line_spans =
+      (semantic_tokens != nullptr && line_index < static_cast<int>(semantic_tokens->lines.size()))
+          ? &semantic_tokens->lines[static_cast<std::size_t>(line_index)]
+          : nullptr;
+  const uint64_t semantic_line_hash = hash_semantic_token_line(semantic_line_spans);
   const uint64_t key =
       syntax_line_span_cache_key(line_index, source_line, col_offset, display_len, ctx->ts_revision,
-                                 ctx->semantic_revision, ctx->syntax_incremental, ctx->buffer_token);
+                                 semantic_line_hash, ctx->syntax_incremental, ctx->buffer_token);
   auto& cache = *ctx->line_span_cache;
   const auto it = cache.find(key);
   if (it != cache.end()) {
@@ -268,7 +244,8 @@ int fragment_display_to_source_byte(const std::string& source_line, int source_b
 Element highlight_semantic_segment(const std::string& segment, const SemanticTokenSpan& span,
                                    const std::vector<std::string>& types, int line_cursor_col,
                                    Decorator cursor_style, int display_col_offset) {
-  const Decorator style = style_for_token_type(types, span.type);
+  const SyntaxScope scope = scope_for_token_type(types, span.type);
+  const Decorator style = DecoratorForSyntaxScope(scope);
   if (line_cursor_col < 0 || !cursor_style) {
     return text(segment) | style;
   }
@@ -279,13 +256,7 @@ Element highlight_semantic_segment(const std::string& segment, const SemanticTok
     return text(segment) | style;
   }
 
-  std::string token_name;
-  if (span.type >= 0 && span.type < static_cast<int>(types.size())) {
-    token_name = types[static_cast<std::size_t>(span.type)];
-  }
-  const bool inverted_cursor = token_name == "keyword" || token_name == "modifier" ||
-                               token_name == "type" || token_name == "class" ||
-                               token_name == "struct" || token_name == "enum";
+  const bool inverted_cursor = SyntaxScopeUsesInvertedCursor(scope);
 
   Elements parts;
   if (rel > 0) {

@@ -49,6 +49,7 @@ struct SettingsModalState {
   bool draft_sticky_scroll_enabled = true;
   bool draft_indent_guides_enabled = true;
   bool draft_scope_highlight_enabled = true;
+  bool draft_rich_session_enabled = true;
   int draft_scope_highlight_strength = 58;
   bool draft_animations_enabled = true;
   bool draft_overview_ruler_enabled = true;

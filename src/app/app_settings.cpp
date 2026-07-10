@@ -69,6 +69,9 @@ AppSettings AppSettings::load() {
     if (doc.contains("scope_highlight_enabled") && doc["scope_highlight_enabled"].is_boolean()) {
       settings.scope_highlight_enabled = doc["scope_highlight_enabled"].get<bool>();
     }
+    if (doc.contains("rich_session_enabled") && doc["rich_session_enabled"].is_boolean()) {
+      settings.rich_session_enabled = doc["rich_session_enabled"].get<bool>();
+    }
     if (doc.contains("scope_highlight_strength") && doc["scope_highlight_strength"].is_number_integer()) {
       settings.scope_highlight_strength =
           std::max(10, std::min(85, doc["scope_highlight_strength"].get<int>()));
@@ -152,6 +155,7 @@ bool AppSettings::save() const {
   doc["sticky_scroll_enabled"] = sticky_scroll_enabled;
   doc["indent_guides_enabled"] = indent_guides_enabled;
   doc["scope_highlight_enabled"] = scope_highlight_enabled;
+  doc["rich_session_enabled"] = rich_session_enabled;
   doc["scope_highlight_strength"] = scope_highlight_strength;
   doc["animations_enabled"] = animations_enabled;
   doc["overview_ruler_enabled"] = overview_ruler_enabled;

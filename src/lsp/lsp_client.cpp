@@ -1621,7 +1621,10 @@ bool LspClient::ensure_semantic_tokens(const std::string& absolute_path) {
     SemanticTokenAttempt& attempt = semantic_token_attempts_[key];
     const int64_t now = steady_now_ms();
     constexpr int kMaxAttempts = 30;
-    constexpr int64_t kRetryIntervalMs = 1000;
+    // Deliberately not 1000ms: see the comment in lsp/lsp_sync.hpp -- this keeps the
+    // semantic-token fetch retry from landing in the same tick as the didChange flush
+    // and the diagnostics-display debounce.
+    constexpr int64_t kRetryIntervalMs = 1300;
     if (attempt.count >= kMaxAttempts) {
       return false;
     }

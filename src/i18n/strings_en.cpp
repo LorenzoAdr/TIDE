@@ -217,6 +217,8 @@ const StringTable& english_strings() {
        "Writes /tmp/tgdb-perf-<pid>.log every 100 ms (perf-sampler thread). Off by default"},
       {"settings.general.icons.label", "Nerd Font icons (Auto / Always / Never)"},
       {"settings.general.icons.description", "Visual icons in outline, completion, and explorer; Auto only on terminals likely using Nerd Font (kitty, wezterm, etc.) or TGDB_NERD_FONT=1"},
+      {"settings.general.rich_session.label", "Rich session (editor extras)"},
+      {"settings.general.rich_session.description", "Diagnostic suffixes/underlines, symbol-press flash, search match highlighting, bracket matching, colored braces, scope highlight, code folding, and sticky scroll. Turn it off for extra performance"},
       {"settings.general.force_bundled_clangd.label", "Force bundled clangd"},
       {"settings.general.force_bundled_clangd.description", "Uses only the bundled clangd (ignores clangd on PATH except CLANGD_PATH)"},
       {"settings.general.force_bundled_gdb.label", "Force bundled gdb"},

@@ -131,6 +131,8 @@ EXTRA_CATALOG: list[tuple[str, str, str]] = [
     ("settings.general.monitor.description", "Registra llamadas internas en ~/.config/tgdb/monitor.log (~1 s). Impacto en rendimiento", "Logs internal calls to ~/.config/tgdb/monitor.log (~1 s). Performance impact"),
     ("settings.general.icons.label", "Iconos Nerd Font (Auto / Siempre / Nunca)", "Nerd Font icons (Auto / Always / Never)"),
     ("settings.general.icons.description", "Iconos visuales en outline, autocompletado y explorador; Auto solo en terminales con Nerd Font probable (kitty, wezterm, etc.) o TGDB_NERD_FONT=1", "Visual icons in outline, completion, and explorer; Auto only on terminals likely using Nerd Font (kitty, wezterm, etc.) or TGDB_NERD_FONT=1"),
+    ("settings.general.rich_session.label", "Sesión enriquecida (extras del editor)", "Rich session (editor extras)"),
+    ("settings.general.rich_session.description", "Sufijos y subrayado de diagnósticos, flash al pulsar símbolos, resaltado de coincidencias de búsqueda, bracket matching, llaves de colores, resaltado de ámbito, plegado de código y sticky scroll. Desactívalo para mayor rendimiento", "Diagnostic suffixes/underlines, symbol-press flash, search match highlighting, bracket matching, colored braces, scope highlight, code folding, and sticky scroll. Turn it off for extra performance"),
     ("settings.general.force_bundled_clangd.label", "Forzar clangd embebido", "Force bundled clangd"),
     ("settings.general.force_bundled_clangd.description", "Usa solo el clangd del binario (ignora clangd en PATH salvo CLANGD_PATH)", "Uses only the bundled clangd (ignores clangd on PATH except CLANGD_PATH)"),
     ("settings.general.force_bundled_gdb.label", "Forzar gdb embebido", "Force bundled gdb"),

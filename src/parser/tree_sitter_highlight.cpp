@@ -8,7 +8,7 @@
 
 #include "ftxui/dom/elements.hpp"
 #include "parser/tree_sitter_language.hpp"
-#include "ui/theme.hpp"
+#include "util/syntax_scope.hpp"
 
 namespace tgdb {
 
@@ -120,46 +120,6 @@ TSQuery* highlight_query() {
                          &error_type);
   }
   return query;
-}
-
-Decorator style_for_capture(const std::string& capture) {
-  if (capture == "comment") {
-    return color(theme::SyntaxComment()) | dim;
-  }
-  if (capture == "string") {
-    return color(theme::SyntaxString());
-  }
-  if (capture == "number") {
-    return color(theme::SyntaxNumber());
-  }
-  if (capture == "keyword") {
-    return color(theme::SyntaxKeyword()) | bold;
-  }
-  if (capture == "macro") {
-    return color(theme::SyntaxMacro());
-  }
-  if (capture == "namespace") {
-    return color(theme::SyntaxNamespace());
-  }
-  if (capture == "type") {
-    return color(theme::SyntaxType());
-  }
-  if (capture == "function") {
-    return color(theme::SyntaxFunction());
-  }
-  if (capture == "parameter") {
-    return color(theme::SyntaxParameter());
-  }
-  if (capture == "property") {
-    return color(theme::SyntaxProperty());
-  }
-  if (capture == "constant" || capture == "variable.builtin") {
-    return color(theme::SyntaxKeyword()) | bold;
-  }
-  if (capture == "variable") {
-    return color(theme::SyntaxVariable());
-  }
-  return color(theme::SyntaxDefault());
 }
 
 std::size_t line_begin_offset(const std::string& source, int line_0) {
@@ -404,12 +364,13 @@ Element HighlightTreeSitterLine(const std::string& line, int line_index,
                    Decorator{}, col, cursor_col, cursor_style);
     }
     if (clamped_end > span.start_col) {
-      const bool keyword = span.capture == "keyword";
+      const SyntaxScope scope = SyntaxScopeForTreeSitterCapture(span.capture);
+      const bool inverted_cursor = SyntaxScopeUsesInvertedCursor(scope);
       emit_segment(&parts,
                    line.substr(static_cast<std::size_t>(span.start_col),
                                static_cast<std::size_t>(clamped_end - span.start_col)),
-                   style_for_capture(span.capture), span.start_col, cursor_col, cursor_style,
-                   keyword);
+                   DecoratorForSyntaxScope(scope), span.start_col, cursor_col, cursor_style,
+                   inverted_cursor);
       col = clamped_end;
     }
   }

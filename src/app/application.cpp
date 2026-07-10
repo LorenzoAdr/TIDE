@@ -266,6 +266,7 @@ class UiTickPostWrapper : public ComponentBase {
 		// Evaluate event type before the move; moving invalidates the string payload but
 		// leaves type_ and mouse_ data intact — checking before is cleaner.
 		const bool is_custom = (event == Event::Custom);
+
 		// Mouse moves already trigger screen.Post from CatchEvent handlers when needed;
 		// skip the duplicate UiTickPost to avoid running the UI loop at the raw mouse
 		// polling rate (~100-200 Hz).

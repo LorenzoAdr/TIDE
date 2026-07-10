@@ -29,7 +29,7 @@ bool diagnostics_display_allowed(const int64_t last_content_edit_ms, ISymbolProv
     return false;
   }
   if (last_content_edit_ms > 0 &&
-      steady_now_ms() - last_content_edit_ms < kLspDocumentDebounceMs) {
+      steady_now_ms() - last_content_edit_ms < kLspDiagnosticsDisplayDebounceMs) {
     return false;
   }
   return true;

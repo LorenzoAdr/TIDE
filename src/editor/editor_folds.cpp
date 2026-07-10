@@ -21,6 +21,9 @@ int index_of_visible_at_or_after(const std::vector<int>& visible_lines, int buff
 
 bool fold_line_hidden(int line, const std::vector<FoldRegion>& regions,
                       const std::set<int>& collapsed_open_lines) {
+  if (collapsed_open_lines.empty()) {
+    return false;
+  }
   for (const FoldRegion& region : regions) {
     if (collapsed_open_lines.count(region.open_line) == 0) {
       continue;
@@ -36,6 +39,13 @@ std::vector<int> visible_buffer_lines(int total_lines, const std::vector<FoldReg
                                       const std::set<int>& collapsed_open_lines) {
   std::vector<int> visible;
   visible.reserve(static_cast<std::size_t>(total_lines));
+  if (collapsed_open_lines.empty() || regions.empty()) {
+    // Nothing is folded (the common case): every line is visible, no per-line region scan needed.
+    for (int line = 0; line < total_lines; ++line) {
+      visible.push_back(line);
+    }
+    return visible;
+  }
   for (int line = 0; line < total_lines; ++line) {
     if (!fold_line_hidden(line, regions, collapsed_open_lines)) {
       visible.push_back(line);
@@ -44,23 +54,16 @@ std::vector<int> visible_buffer_lines(int total_lines, const std::vector<FoldReg
   return visible;
 }
 
-std::vector<int> viewport_buffer_lines(const EditorBuffer& buffer,
-                                       const std::vector<FoldRegion>& regions,
-                                       int viewport_count) {
-  const int total = static_cast<int>(buffer.lines.size());
-  if (total <= 0 || viewport_count <= 0) {
-    return {};
-  }
-  const std::vector<int> visible =
-      visible_buffer_lines(total, regions, buffer.collapsed_folds);
-  if (visible.empty()) {
+std::vector<int> viewport_window_from_visible(const std::vector<int>& visible, int scroll,
+                                              int viewport_count) {
+  if (visible.empty() || viewport_count <= 0) {
     return {};
   }
 
   std::vector<int> viewport;
   viewport.reserve(static_cast<std::size_t>(viewport_count));
   for (int line : visible) {
-    if (line < buffer.scroll) {
+    if (line < scroll) {
       continue;
     }
     viewport.push_back(line);
@@ -77,6 +80,18 @@ std::vector<int> viewport_buffer_lines(const EditorBuffer& buffer,
     }
   }
   return viewport;
+}
+
+std::vector<int> viewport_buffer_lines(const EditorBuffer& buffer,
+                                       const std::vector<FoldRegion>& regions,
+                                       int viewport_count) {
+  const int total = static_cast<int>(buffer.lines.size());
+  if (total <= 0 || viewport_count <= 0) {
+    return {};
+  }
+  const std::vector<int> visible =
+      visible_buffer_lines(total, regions, buffer.collapsed_folds);
+  return viewport_window_from_visible(visible, buffer.scroll, viewport_count);
 }
 
 const FoldRegion* fold_region_at_open_line(const std::vector<FoldRegion>& regions, int open_line) {

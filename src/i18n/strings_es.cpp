@@ -217,6 +217,8 @@ const StringTable& spanish_strings() {
        "Escribe /tmp/tgdb-perf-<pid>.log cada 100 ms (hilo perf-sampler). Desactivado por defecto"},
       {"settings.general.icons.label", "Iconos Nerd Font (Auto / Siempre / Nunca)"},
       {"settings.general.icons.description", "Iconos visuales en outline, autocompletado y explorador; Auto solo en terminales con Nerd Font probable (kitty, wezterm, etc.) o TGDB_NERD_FONT=1"},
+      {"settings.general.rich_session.label", "Sesión enriquecida (extras del editor)"},
+      {"settings.general.rich_session.description", "Sufijos y subrayado de diagnósticos, flash al pulsar símbolos, resaltado de coincidencias de búsqueda, bracket matching, llaves de colores, resaltado de ámbito, plegado de código y sticky scroll. Desactívalo para mayor rendimiento"},
       {"settings.general.force_bundled_clangd.label", "Forzar clangd embebido"},
       {"settings.general.force_bundled_clangd.description", "Usa solo el clangd del binario (ignora clangd en PATH salvo CLANGD_PATH)"},
       {"settings.general.force_bundled_gdb.label", "Forzar gdb embebido"},

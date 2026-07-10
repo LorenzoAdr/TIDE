@@ -70,6 +70,13 @@ std::optional<TSInputEdit> single_edit_between(const std::string& old_source,
   return edit;
 }
 
+// Above this line-count delta, an edit is treated as a "large" change (big paste,
+// multi-line block delete, etc.) and is left to the worker's snapshot path so the
+// heavier diffing/highlight work stays off the UI thread. Below it (the common case
+// while typing: a single Enter, a backspace joining two lines, autoindent...), we can
+// safely apply the incremental edit synchronously below.
+constexpr int kSyncIncrementalMaxLineDelta = 1;
+
 int count_source_lines(const std::string& source) {
   if (source.empty()) {
     return 1;
@@ -167,20 +174,32 @@ bool apply_sync_source_edit(DocumentEntry* entry, const std::string& canonical) 
 
   const int old_line_count = count_source_lines(entry->source);
   const int new_line_count = count_source_lines(canonical);
-  const bool line_count_changed = old_line_count != new_line_count;
+  const int line_delta = new_line_count > old_line_count ? new_line_count - old_line_count
+                                                          : old_line_count - new_line_count;
 
-  if (!line_count_changed) {
-    ts_tree_edit(entry->tree, &*edit);
-    entry->source = canonical;
-    entry->parse_ready = true;
-    entry->highlights_ready = false;
-    entry->symbols_ready = false;
-    return true;
+  if (line_delta > kSyncIncrementalMaxLineDelta) {
+    // Large layout change: defer to the worker so the UI thread never runs the
+    // heavier diff/highlight work, and so it can keep the pre-edit tree around for
+    // proper incremental-highlight diffing (see request_prepare's snapshot path).
+    return false;
   }
 
-  // Line layout changes need a full re-parse; defer to the worker so the UI
-  // thread never runs parse + highlight work while holding cache_mutex.
-  return false;
+  // ts_tree_edit() only marks the affected byte/point range dirty -- it never
+  // reparses -- so it's just as cheap for edits that change the line count (a single
+  // Enter, a backspace joining two lines, autoindent...) as it is for same-line edits.
+  // Applying it here, synchronously, lets the entry keep its live tree (parse_ready
+  // stays true) instead of nulling it out and bouncing the whole thing through the
+  // debounce snapshot machinery below, purely because the line count moved by one.
+  ts_tree_edit(entry->tree, &*edit);
+  entry->source = canonical;
+  if (!entry->line_highlights.empty()) {
+    remap_line_highlights_for_count_change(&entry->line_highlights, *edit, old_line_count,
+                                           new_line_count);
+  }
+  entry->parse_ready = true;
+  entry->highlights_ready = false;
+  entry->symbols_ready = false;
+  return true;
 }
 
 }  // namespace
