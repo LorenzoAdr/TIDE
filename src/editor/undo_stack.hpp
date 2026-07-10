@@ -4,6 +4,7 @@
 
 namespace tgdb {
 
+void commit_undo_group(EditorBuffer* buffer);
 void push_undo(EditorBuffer* buffer);
 bool undo(EditorBuffer* buffer);
 bool redo(EditorBuffer* buffer);

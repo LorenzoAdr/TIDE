@@ -1,5 +1,6 @@
 #include "util/syntax_highlight.hpp"
 
+#include <cctype>
 #include <string_view>
 
 #include "editor/editor_buffer_source.hpp"
@@ -30,6 +31,12 @@ const std::string& SyntaxHighlightContext::joined() const {
 const std::vector<LineHighlights>* SyntaxHighlightContext::tree_sitter_highlights() const {
   if (lines == nullptr || lines->empty() || file_path.empty()) {
     return nullptr;
+  }
+  if (syntax_incremental) {
+    if (ts_line_highlights == nullptr && !file_path.empty()) {
+      ts_line_highlights = tree_sitter_service().stale_highlights_for(file_path);
+    }
+    return ts_line_highlights;
   }
   const std::string& source = joined();
   if (source.empty()) {
@@ -65,14 +72,16 @@ uint64_t syntax_span_hash_string(uint64_t h, std::string_view s) {
 
 uint64_t syntax_line_span_cache_key(int line_index, const std::string& source_line, int col_offset,
                                     int display_len, uint64_t ts_revision,
-                                    uint64_t semantic_revision) {
+                                    uint64_t semantic_revision, bool syntax_incremental) {
   uint64_t h = kSyntaxSpanHashOffset;
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(line_index));
   h = syntax_span_hash_string(h, source_line);
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(col_offset));
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(display_len));
-  h = syntax_span_hash_u64(h, ts_revision);
-  h = syntax_span_hash_u64(h, semantic_revision);
+  if (!syntax_incremental) {
+    h = syntax_span_hash_u64(h, ts_revision);
+    h = syntax_span_hash_u64(h, semantic_revision);
+  }
   return h;
 }
 
@@ -210,8 +219,9 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
   const std::string& source_line = (*ctx->lines)[static_cast<std::size_t>(line_index)];
   const int tab_size = std::max(1, editor_indent::tab_display_width());
   ctx->tree_sitter_highlights();
-  const uint64_t key = syntax_line_span_cache_key(line_index, source_line, col_offset, display_len,
-                                                  ctx->ts_revision, ctx->semantic_revision);
+  const uint64_t key =
+      syntax_line_span_cache_key(line_index, source_line, col_offset, display_len, ctx->ts_revision,
+                                 ctx->semantic_revision, ctx->syntax_incremental);
   auto& cache = *ctx->line_span_cache;
   const auto it = cache.find(key);
   if (it != cache.end()) {
@@ -219,19 +229,19 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
   }
 
   CachedSyntaxLineSpans entry;
+  if (!ctx->syntax_incremental && semantic_tokens != nullptr && semantic_tokens->ready &&
+      line_index < static_cast<int>(semantic_tokens->lines.size())) {
+    const auto& line_spans = semantic_tokens->lines[static_cast<std::size_t>(line_index)];
+    entry.semantic_display_spans = display_semantic_spans_for_line(
+        line_spans, source_line, col_offset, display_len, tab_size);
+    entry.has_semantic = !entry.semantic_display_spans.empty();
+  }
   if (const auto* all_highlights = ctx->ts_line_highlights) {
     if (line_index >= 0 && line_index < static_cast<int>(all_highlights->size())) {
       const LineHighlights& source_hl = (*all_highlights)[static_cast<std::size_t>(line_index)];
       entry.ts_display_spans =
           display_spans_for_line(source_hl, source_line, col_offset, display_len, tab_size);
     }
-  }
-  if (semantic_tokens != nullptr && semantic_tokens->ready &&
-      line_index < static_cast<int>(semantic_tokens->lines.size())) {
-    const auto& line_spans = semantic_tokens->lines[static_cast<std::size_t>(line_index)];
-    entry.semantic_display_spans = display_semantic_spans_for_line(
-        line_spans, source_line, col_offset, display_len, tab_size);
-    entry.has_semantic = !entry.semantic_display_spans.empty();
   }
   cache[key] = std::move(entry);
   return &cache[key];
@@ -407,6 +417,144 @@ std::vector<SemanticTokenSpan> spans_for_segment(const std::vector<SemanticToken
 
 }  // namespace
 
+bool keyword_lite(std::string_view word) {
+  static constexpr const char* kWords[] = {
+      "alignas",    "alignof",   "asm",         "auto",       "bool",       "break",
+      "case",       "catch",     "char",        "class",      "const",      "constexpr",
+      "continue",   "default",   "delete",      "do",         "double",     "else",
+      "enum",       "explicit",  "extern",      "false",      "float",      "for",
+      "friend",     "goto",      "if",          "inline",     "int",        "long",
+      "mutable",    "namespace", "new",         "noexcept",   "nullptr",    "operator",
+      "private",    "protected", "public",      "register",   "return",     "short",
+      "signed",     "sizeof",    "static",      "struct",     "switch",     "template",
+      "this",       "throw",     "true",        "try",        "typedef",    "typename",
+      "union",      "unsigned",  "using",       "virtual",    "void",       "volatile",
+      "while",      "concept",   "requires",    "co_await",   "co_return",  "co_yield",
+      "import",     "module",    "consteval",   "constinit",  "char8_t",    "char16_t",
+      "char32_t",   "wchar_t",   "static_cast", "dynamic_cast", "reinterpret_cast"};
+  for (const char* kw : kWords) {
+    if (word == kw) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator cursor_style) {
+  if (line.empty()) {
+    if (cursor_col == 0 && cursor_style) {
+      return text(" ") | cursor_style;
+    }
+    return text(" ");
+  }
+
+  Elements parts;
+  enum class Lex { kNormal, kLineComment, kBlockComment, kString, kChar };
+  Lex lex = Lex::kNormal;
+  std::size_t i = 0;
+  while (i < line.size()) {
+    const char c = line[i];
+    if (lex == Lex::kLineComment) {
+      const std::size_t start = i;
+      i = line.size();
+      parts.push_back(text(line.substr(start)) | color(theme::SyntaxComment()) | dim);
+      break;
+    }
+    if (lex == Lex::kBlockComment) {
+      const std::size_t start = i;
+      while (i + 1 < line.size() && !(line[i] == '*' && line[i + 1] == '/')) {
+        ++i;
+      }
+      if (i + 1 < line.size()) {
+        i += 2;
+      } else {
+        i = line.size();
+      }
+      parts.push_back(text(line.substr(start, i - start)) | color(theme::SyntaxComment()) | dim);
+      lex = Lex::kNormal;
+      continue;
+    }
+    if (lex == Lex::kString || lex == Lex::kChar) {
+      const char quote = (lex == Lex::kString) ? '"' : '\'';
+      const std::size_t start = i;
+      ++i;
+      while (i < line.size()) {
+        if (line[i] == '\\' && i + 1 < line.size()) {
+          i += 2;
+          continue;
+        }
+        if (line[i] == quote) {
+          ++i;
+          break;
+        }
+        ++i;
+      }
+      parts.push_back(text(line.substr(start, i - start)) | color(theme::SyntaxString()));
+      lex = Lex::kNormal;
+      continue;
+    }
+
+    if (c == '/' && i + 1 < line.size() && line[i + 1] == '/') {
+      lex = Lex::kLineComment;
+      continue;
+    }
+    if (c == '/' && i + 1 < line.size() && line[i + 1] == '*') {
+      parts.push_back(text("/*") | color(theme::SyntaxComment()) | dim);
+      i += 2;
+      lex = Lex::kBlockComment;
+      continue;
+    }
+    if (c == '"') {
+      lex = Lex::kString;
+      continue;
+    }
+    if (c == '\'') {
+      lex = Lex::kChar;
+      continue;
+    }
+    if (std::isdigit(static_cast<unsigned char>(c))) {
+      const std::size_t start = i;
+      ++i;
+      while (i < line.size() &&
+             (std::isalnum(static_cast<unsigned char>(line[i])) || line[i] == '.' || line[i] == 'x' ||
+              line[i] == 'X' || line[i] == 'u' || line[i] == 'U' || line[i] == 'l' ||
+              line[i] == 'L')) {
+        ++i;
+      }
+      parts.push_back(text(line.substr(start, i - start)) | color(theme::SyntaxNumber()));
+      continue;
+    }
+    if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+      const std::size_t start = i;
+      ++i;
+      while (i < line.size() &&
+             (std::isalnum(static_cast<unsigned char>(line[i])) || line[i] == '_')) {
+        ++i;
+      }
+      const std::string_view word(line.data() + start, i - start);
+      if (keyword_lite(word)) {
+        parts.push_back(text(std::string(word)) | color(theme::SyntaxKeyword()) | bold);
+      } else {
+        parts.push_back(text(std::string(word)));
+      }
+      continue;
+    }
+
+    const int visual_col = static_cast<int>(i);
+    if (cursor_col == visual_col && cursor_style) {
+      parts.push_back(text(std::string(1, c)) | cursor_style);
+    } else {
+      parts.push_back(text(std::string(1, c)));
+    }
+    ++i;
+  }
+
+  if (parts.empty()) {
+    return text(line);
+  }
+  return hbox(std::move(parts));
+}
+
 Element HighlightCodeLine(const std::string& line, int line_index,
                           const SemanticTokenDocument* semantic_tokens, int cursor_col,
                           Decorator cursor_style, int col_offset,
@@ -415,7 +563,8 @@ Element HighlightCodeLine(const std::string& line, int line_index,
   if (mutable_ctx != nullptr && mutable_ctx->line_span_cache != nullptr) {
     if (const CachedSyntaxLineSpans* cached = cached_syntax_spans_for_line(
             mutable_ctx, line_index, semantic_tokens, col_offset, static_cast<int>(line.size()))) {
-      if (cached->has_semantic && semantic_tokens != nullptr && semantic_tokens->ready) {
+      if (!mutable_ctx->syntax_incremental && cached->has_semantic &&
+          semantic_tokens != nullptr && semantic_tokens->ready) {
         return highlight_semantic_line(line, line_index, cached->semantic_display_spans,
                                        semantic_tokens->token_types, cursor_col, cursor_style,
                                        col_offset, mutable_ctx, semantic_tokens);

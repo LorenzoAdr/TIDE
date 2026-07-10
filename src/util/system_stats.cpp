@@ -26,6 +26,7 @@
 #endif
 
 #include "util/ui_activity_gate.hpp"
+#include "util/ui_perf_monitor.hpp"
 
 namespace fs = std::filesystem;
 
@@ -757,10 +758,12 @@ bool PerformanceSampler::file_dump_enabled() const {
 
 void PerformanceSampler::set_dump_hooks(const UiActivityGate* activity_gate,
                                         const std::atomic<uint64_t>* ui_paint_count,
-                                        const std::atomic<uint64_t>* ui_custom_tick) {
+                                        const std::atomic<uint64_t>* ui_custom_tick,
+                                        const UiPerfMonitor* ui_perf_monitor) {
   activity_gate_ = activity_gate;
   ui_paint_count_ = ui_paint_count;
   ui_custom_tick_ = ui_custom_tick;
+  ui_perf_monitor_ = ui_perf_monitor;
 }
 
 std::string PerformanceSampler::dump_file_path() const {
@@ -782,7 +785,9 @@ void PerformanceSampler::open_dump_file() {
     return;
   }
   out << "# tgdb perf dump interval_ms=100 columns:\n";
-  out << "# ts_ms phase proc_cpu% proc_rss_kb paints ticks threads(tid:name:cpu% ...)\n";
+  out << "# ts_ms phase proc_cpu% proc_rss_kb paints ticks sync_phases "
+         "threads(tid:name:cpu% ...)\n";
+  out << "# sync_phases: name@p95_us,... (top sync tasks: tick + render)\n";
 }
 
 void PerformanceSampler::append_dump_line(const PerformanceSnapshot& snap, double elapsed_sec) {
@@ -801,11 +806,13 @@ void PerformanceSampler::append_dump_line(const PerformanceSnapshot& snap, doubl
       ui_paint_count_ != nullptr ? ui_paint_count_->load(std::memory_order_relaxed) : 0;
   const uint64_t ticks =
       ui_custom_tick_ != nullptr ? ui_custom_tick_->load(std::memory_order_relaxed) : 0;
+  const std::string sync_phases =
+      ui_perf_monitor_ != nullptr ? ui_perf_monitor_->dump_phases_line() : std::string{};
 
   std::ostringstream line;
   line << ts_ms << '\t' << ui_activity_phase_label(phase) << '\t'
        << std::fixed << std::setprecision(1) << snap.process.cpu_percent << '\t'
-       << snap.process.rss_kb << '\t' << paints << '\t' << ticks << '\t';
+       << snap.process.rss_kb << '\t' << paints << '\t' << ticks << '\t' << sync_phases << '\t';
   bool first = true;
   for (const ThreadSample& thread : snap.process.threads) {
     if (!first) {

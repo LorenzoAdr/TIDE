@@ -1,8 +1,11 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "util/ui_activity_gate.hpp"
@@ -49,11 +52,14 @@ class UiPerfMonitor {
   void on_input_event(UiPerfEventKind kind);
   void on_tick_phase(std::string_view name, uint64_t duration_us);
   void set_activity_phase(UiActivityPhase phase, int64_t ms_in_phase);
+  void publish_dump_phases();
+  std::string dump_phases_line() const;
 
   const UiPerfSnapshot& snapshot() const { return snapshot_; }
 
  private:
   void refresh_fps(int64_t now_ms, bool is_paint);
+  void refresh_phase_snapshot(std::size_t max_phases);
 
   UiPerfSnapshot snapshot_;
   int64_t last_paint_ms_ = 0;
@@ -65,6 +71,31 @@ class UiPerfMonitor {
     std::vector<uint64_t> recent_us;
   };
   std::vector<PhaseAccumulator> phase_accumulators_;
+  mutable std::mutex dump_mutex_;
+  std::string dump_phases_line_;
+};
+
+class UiSyncPhaseScope {
+ public:
+  UiSyncPhaseScope(UiPerfMonitor* monitor, std::string name)
+      : monitor_(monitor), name_(std::move(name)), start_(std::chrono::steady_clock::now()) {}
+  ~UiSyncPhaseScope() {
+    if (monitor_ == nullptr) {
+      return;
+    }
+    const auto end = std::chrono::steady_clock::now();
+    const auto us =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start_).count();
+    monitor_->on_tick_phase(name_, static_cast<uint64_t>(std::max<int64_t>(0, us)));
+  }
+
+  UiSyncPhaseScope(const UiSyncPhaseScope&) = delete;
+  UiSyncPhaseScope& operator=(const UiSyncPhaseScope&) = delete;
+
+ private:
+  UiPerfMonitor* monitor_;
+  std::string name_;
+  std::chrono::steady_clock::time_point start_;
 };
 
 }  // namespace tgdb

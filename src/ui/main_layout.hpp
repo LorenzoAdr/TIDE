@@ -26,6 +26,7 @@
 #include "git/git_service.hpp"
 #include "util/system_stats.hpp"
 #include "util/ui_activity_gate.hpp"
+#include "util/ui_panel_render_cache.hpp"
 #include "util/ui_perf_monitor.hpp"
 #include "ui/mouse_velocity_tracker.hpp"
 #include "ui/source_panel.hpp"
@@ -137,6 +138,12 @@ struct MainLayoutState {
   std::atomic<bool> debug_critical_wake{false};
   std::atomic<uint64_t> ui_custom_tick{0};
   std::atomic<uint64_t> ui_paint_count{0};
+  uint64_t panel_cache_git_revision = 0;
+  uint64_t panel_cache_diagnostics_revision = 0;
+  uint64_t panel_cache_symbols_revision = 0;
+  int panel_cache_terminal_w = 0;
+  int panel_cache_terminal_h = 0;
+  UiPanelRenderCache panel_render_cache;
   UiActivityGate activity_gate;
   UiPerfMonitor ui_perf_monitor;
   MouseVelocityTracker mouse_velocity;

@@ -16,6 +16,8 @@ struct EditorJoinedSourceCache {
 };
 
 const std::string& editor_buffer_joined_source(const EditorBuffer& buffer);
+void editor_buffer_rebuild_joined(EditorBuffer* buffer);
+int editor_buffer_max_line_length(const EditorBuffer& buffer);
 void editor_buffer_invalidate_joined(EditorBuffer* buffer);
 void editor_buffer_note_char_inserted(EditorBuffer* buffer, int line, int col,
                                       std::string_view text);

@@ -31,4 +31,6 @@ ftxui::Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* f
 void flash_symbol_at_buffer_pos(WorkspaceModel* workspace, MainLayoutState* layout_state,
                                 int line, int col, int visible_lines);
 
+bool editor_deferred_sync_allowed(MainLayoutState* layout_state);
+
 }  // namespace tgdb

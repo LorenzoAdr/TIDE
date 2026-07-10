@@ -18,9 +18,6 @@ void ClickableInteractionTracker::set_hover(std::string_view id) {
 }
 
 void ClickableInteractionTracker::clear_hover() {
-  if (!hover_effects_enabled()) {
-    return;
-  }
   hovered_id_.clear();
 }
 
@@ -90,11 +87,23 @@ bool ClickableInteractionTracker::is_pressed(const std::string& id) const {
   return is_pressed(std::string_view(id));
 }
 
-void ClickableInteractionTracker::tick() {
+bool ClickableInteractionTracker::has_active_presses() const {
   const auto now = std::chrono::steady_clock::now();
+  for (const auto& entry : presses_) {
+    if (entry.second > now) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ClickableInteractionTracker::tick() {
+  const auto now = std::chrono::steady_clock::now();
+  const std::size_t before = presses_.size();
   presses_.erase(std::remove_if(presses_.begin(), presses_.end(),
-                              [now](const auto& entry) { return entry.second <= now; }),
+                                [now](const auto& entry) { return entry.second <= now; }),
                  presses_.end());
+  return presses_.size() != before;
 }
 
 }  // namespace tgdb

@@ -32,6 +32,7 @@
 #include "util/csv_viewer.hpp"
 #include "util/tabular_file.hpp"
 #include "util/monitor_log.hpp"
+#include "util/ui_perf_monitor.hpp"
 #include "util/fuzzy_match.hpp"
 #include "lsp/diagnostics.hpp"
 #include "editor/editor_state.hpp"
@@ -108,14 +109,10 @@ void notify_editor_buffer_changed(WorkspaceModel* workspace, EditorPanelState* p
                           .count();
   workspace->last_buffer_edit_ms = now;
   buffer.view_token++;
-  const bool structural_edit = buffer.semantic_layout_dirty;
   if (panel != nullptr) {
     mark_editor_content_edited(panel, buffer);
-    if (structural_edit && symbols != nullptr) {
-      symbols->on_document_changed(buffer.path, buffer_text(buffer));
-      symbols->invalidate_semantic_tokens_for_file(buffer.path);
-    }
-  } else if (symbols != nullptr) {
+  }
+  if (panel == nullptr && symbols != nullptr) {
     symbols->on_document_changed(buffer.path, buffer_text(buffer));
   }
 }
@@ -175,6 +172,7 @@ struct EditorPanelState {
   int scrollbar_drag_offset = 0;
   int h_scrollbar_drag_offset = 0;
   uint64_t last_view_token = 0;
+  int last_render_caret_line = -1;
   std::string last_path;
   bool mouse_selecting = false;
   CapturedMouse captured_mouse;
@@ -408,8 +406,9 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
   uint64_t h = kViewportLineHashOffset;
   h = viewport_line_hash_int(h, line.line_index);
   h = viewport_line_hash_string(h, line.line_content);
-  h = viewport_line_hash_int(h, buffer.primary_line());
-  h = viewport_line_hash_int(h, buffer.primary_col());
+  if (line.line_index == buffer.primary_line()) {
+    h = viewport_line_hash_int(h, buffer.primary_col());
+  }
   h = viewport_line_hash_int(h, scroll_col);
   h = viewport_line_hash_int(h, code_width);
   h = viewport_line_hash_int(h, line.guide_depth);
@@ -500,15 +499,13 @@ void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer) {
   }
   if (is_indexed_source_path(buffer.path)) {
     panel->lsp_sync_pending = true;
+    tree_sitter_service().prepare_document(buffer.path, editor_buffer_joined_source(buffer));
   }
 }
 
 void sync_guide_tracker_cache(EditorPanelState* panel, const EditorBuffer& buffer, int scroll_start,
                               int tab_col_width) {
   if (panel == nullptr) {
-    return;
-  }
-  if (!editor_content_settled(*panel)) {
     return;
   }
   const bool needs_rebuild = panel->guide_tracker_scroll != scroll_start ||
@@ -2567,10 +2564,7 @@ void scroll_tabular_columns(EditorBuffer* buffer, EditorPanelState* panel, int d
 }
 
 int editor_horizontal_content_width(const EditorBuffer& buffer, int code_width) {
-  int max_len = 0;
-  for (const auto& line : buffer.lines) {
-    max_len = std::max(max_len, static_cast<int>(line.size()));
-  }
+  const int max_len = editor_buffer_max_line_length(buffer);
   const int max_scroll_col = std::max(0, max_len - code_width + 1);
   if (max_scroll_col <= 0) {
     return code_width;
@@ -2579,10 +2573,7 @@ int editor_horizontal_content_width(const EditorBuffer& buffer, int code_width) 
 }
 
 int editor_horizontal_max_scroll_col(const EditorBuffer& buffer, int code_width) {
-  int max_len = 0;
-  for (const auto& line : buffer.lines) {
-    max_len = std::max(max_len, static_cast<int>(line.size()));
-  }
+  const int max_len = editor_buffer_max_line_length(buffer);
   return std::max(0, max_len - code_width + 1);
 }
 
@@ -2867,7 +2858,11 @@ void schedule_completion_lsp_fetch(CompletionState* completion, WorkspaceModel* 
   }
   completion->lsp_pending_key = anchor_key;
   if (completion->lsp_resolved_key != anchor_key) {
-    const int64_t debounce = live_only ? kLiveCompletionDebounceMs : 0;
+    const int64_t debounce =
+        live_only ? ((completion->prefix.size() > 1 || is_member_access_at_cursor(buffer))
+                         ? kLiveCompletionDebounceMs
+                         : 0)
+                  : 0;
     completion->lsp_request_due_ms = steady_now_ms() + debounce;
   }
 }
@@ -4678,6 +4673,13 @@ void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState*
 
 }  // namespace
 
+bool editor_deferred_sync_allowed(MainLayoutState* layout_state) {
+  if (layout_state == nullptr) {
+    return true;
+  }
+  return layout_state->activity_gate.allows_deferred_editor_sync(steady_now_ms());
+}
+
 void flash_symbol_at_buffer_pos(WorkspaceModel* workspace, MainLayoutState* layout_state, int line,
                                 int col, int visible_lines) {
   flash_symbol_at_buffer_pos_impl(workspace, layout_state, nullptr, line, col, visible_lines);
@@ -4775,6 +4777,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
   auto code_view = Renderer([workspace, focus, panel_state, find_state, symbols, layout_state,
                              git_service, debug_model] {
     workspace->ensure_buffer();
+    UiPerfMonitor* ui_perf =
+        layout_state != nullptr ? &layout_state->ui_perf_monitor : nullptr;
+    UiSyncPhaseScope render_scope(ui_perf, "render.editor");
     EditorBuffer& buffer = workspace->buffer;
     buffer.ensure_cursors();
 
@@ -5097,11 +5102,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     static const BracketPairHighlight kNoBracket{};
     const BracketPairHighlight& bracket =
-        cached_bracket_highlight(panel_state.get(), buffer, editor_focused);
+        typing_burst ? kNoBracket
+                     : cached_bracket_highlight(panel_state.get(), buffer, editor_focused);
     static const BracketPairHighlight kNoScopeBracket{};
     const BracketPairHighlight& scope_bracket =
-        !scope_visual_effects ? kNoScopeBracket
-        : cached_scope_bracket_highlight(panel_state.get(), buffer, editor_focused);
+        typing_burst || !scope_visual_effects
+            ? kNoScopeBracket
+            : cached_scope_bracket_highlight(panel_state.get(), buffer, editor_focused);
     const BracketPairHighlight* scope_bracket_ptr =
         scope_bracket.valid ? &scope_bracket : nullptr;
 
@@ -5116,32 +5123,35 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                    : std::vector<StickyLine>{});
 
     DocumentDiagnostics file_diag;
-    // Mostrar diagnósticos ya cacheados no depende de la inhibición: en reposo seguimos
-    // pintando marcas y sufijos. Solo el refresh desde clangd respeta allows_lsp_ui()
-    // (lo comprueba cached_file_diagnostics internamente). Aquí el display únicamente
-    // respeta el debounce de edición para no mostrar diagnósticos obsoletos al escribir.
-    const bool show_diagnostics =
+    const bool allow_lsp_diagnostics_ui =
+        layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
+    const bool deferred_sync = editor_deferred_sync_allowed(layout_state);
+    const bool diagnostics_ready =
         symbols && symbols->supports_diagnostics() && !buffer.path.empty() &&
         is_lsp_trackable_path(buffer.path) &&
         diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), buffer.path,
                                     /*lsp_ui_allowed=*/true);
-    if (show_diagnostics) {
+    const bool show_diagnostics = deferred_sync && diagnostics_ready && allow_lsp_diagnostics_ui;
+    if (diagnostics_ready) {
       file_diag = cached_file_diagnostics(panel_state.get(), symbols.get(), buffer.path,
                                           workspace->last_buffer_edit_ms, layout_state);
-      rebuild_diagnostics_by_line(panel_state.get(), file_diag,
-                                  panel_state->cached_file_diag_revision);
+      if (file_diag.path == buffer.path) {
+        rebuild_diagnostics_by_line(panel_state.get(), file_diag,
+                                    panel_state->cached_file_diag_revision);
+      }
     } else {
       panel_state->diagnostics_by_line.clear();
       panel_state->diagnostics_by_line_path.clear();
       panel_state->diagnostics_by_line_revision = 0;
     }
     const bool has_git_markers =
-        git_service != nullptr && git_service->is_repo() &&
+        deferred_sync && git_service != nullptr && git_service->is_repo() &&
         (panel_state->git_untracked_all_lines || !panel_state->git_changed_lines.empty());
     const bool has_breakpoint_markers =
         debug_model != nullptr && !buffer.path.empty();
+    const bool has_diagnostic_markers = show_diagnostics && !file_diag.items.empty();
     const bool gutter_markers =
-        has_breakpoint_markers || (show_diagnostics && !file_diag.items.empty()) || has_git_markers;
+        has_breakpoint_markers || has_diagnostic_markers || has_git_markers;
 
     const int code_width =
         code_width_from_box(panel_state->code_box, panel_state->code_width_chars);
@@ -5171,7 +5181,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         layout_state->app_settings->indent_guides_enabled;
     const int indent_tab_size = std::max(1, editor_indent::width());
     const int tab_col_width = std::max(1, editor_indent::tab_display_width());
-    sync_guide_tracker_cache(panel_state.get(), buffer, buffer.scroll, tab_col_width);
+    {
+      UiSyncPhaseScope guide_scope(ui_perf, "render.editor.guide");
+      sync_guide_tracker_cache(panel_state.get(), buffer, buffer.scroll, tab_col_width);
+    }
     IndentGuideTracker& guide_tracker = panel_state->guide_tracker_cache;
 
     if (buffer.scroll_col != panel_state->line_syntax_span_cache_scroll_col) {
@@ -5188,8 +5201,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     highlight_ctx.joined_override = &buffer_source;
     highlight_ctx.buffer_token = buffer.view_token;
     highlight_ctx.semantic_revision = panel_state->last_semantic_highlight_revision;
-    highlight_ctx.line_span_cache =
-        typing_edit_mode ? nullptr : &panel_state->line_syntax_span_cache;
+    highlight_ctx.line_span_cache = &panel_state->line_syntax_span_cache;
+    highlight_ctx.syntax_incremental = typing_burst;
     const ScopeLineRange immediate_scope =
         typing_burst ? ScopeLineRange{}
         : scope_visual_effects && !buffer.path.empty() && is_indexed_source_path(buffer.path)
@@ -5197,14 +5210,24 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                                              buffer.primary_line(),
                                                              buffer.primary_col())
             : ScopeLineRange{};
+    static const std::vector<ColoredBraceMarker> kNoColoredBraces{};
     const std::vector<ColoredBraceMarker>& colored_braces =
-        cached_colored_braces(panel_state.get(), buffer, scope_visual_effects);
+        typing_burst ? kNoColoredBraces
+                     : cached_colored_braces(panel_state.get(), buffer, scope_visual_effects);
     const std::vector<ColoredBraceMarker>* colored_braces_ptr =
         colored_braces.empty() ? nullptr : &colored_braces;
     const bool helix_caret_insert =
         helix_caret && panel_state->helix.mode == HelixMode::kInsert;
     const uint64_t semantic_revision = panel_state->last_semantic_highlight_revision;
-    for (int i : viewport_lines) {
+    const int caret_line_index = buffer.primary_line();
+    if (caret_line_index != panel_state->last_render_caret_line) {
+      panel_state->viewport_line_render_cache.erase(panel_state->last_render_caret_line);
+      panel_state->viewport_line_render_cache.erase(caret_line_index);
+      panel_state->last_render_caret_line = caret_line_index;
+    }
+    {
+      UiSyncPhaseScope lines_scope(ui_perf, "render.editor.lines");
+      for (int i : viewport_lines) {
       const std::string& display_line = buffer.lines[static_cast<std::size_t>(i)];
       const int guide_depth =
           indent_guides_enabled ? guide_tracker.advance(display_line, tab_col_width) : 0;
@@ -5322,9 +5345,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             gutter_bg;
       }
 
+      const SemanticTokenDocument* line_semantic =
+          typing_burst && !caret_line ? nullptr : semantic_tokens;
       Element code_row =
           RenderEditorLine(display_line, i, buffer, editor_focused, find_matches,
-                           selection_occurrences, semantic_tokens,
+                           selection_occurrences, line_semantic,
                            bracket.valid ? &bracket : nullptr, scope_bracket_ptr,
                            scope_highlight_strength, line_diagnostics, suffix_ptr,
                            suffix_color_ptr, symbol_press_active ? &symbol_press : nullptr,
@@ -5340,6 +5365,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->viewport_line_render_cache[i] = std::move(cached_row);
       gutter_rows.push_back(panel_state->viewport_line_render_cache[i].gutter);
       code_rows.push_back(panel_state->viewport_line_render_cache[i].code);
+    }
     }
     prune_viewport_line_render_cache(panel_state.get(), viewport_lines);
     if (code_rows.empty()) {
@@ -5589,6 +5615,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                file_indexer, git_service, focus, panel_focus,
                                completion_state]() {
       TGDB_MON_SCOPE("editor", "tick_callback");
+      UiPerfMonitor* ui_perf =
+          layout_state != nullptr ? &layout_state->ui_perf_monitor : nullptr;
+      const std::string panel_tag =
+          panel_focus == FocusRegion::SecondaryEditor ? "sec" : "pri";
       if (panel_focus == FocusRegion::SecondaryEditor && workspace->tabs.empty() &&
           focus != nullptr && focus->region == FocusRegion::SecondaryEditor) {
         focus->region = FocusRegion::Editor;
@@ -5597,12 +5627,21 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         }
       }
       const int visible = visible_line_count(panel_state->code_box);
-      tick_pending_editor_navigation(layout_state, [&](const SourceLocation& loc) {
-        navigate_to_location(workspace, layout_state, loc, visible);
-      });
-      editor_hover_tick(workspace, panel_state.get(), symbols, layout_state);
-      completion_lsp_tick(completion_state.get(), workspace, symbols, layout_state,
-                          panel_state.get());
+      {
+        UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".nav");
+        tick_pending_editor_navigation(layout_state, [&](const SourceLocation& loc) {
+          navigate_to_location(workspace, layout_state, loc, visible);
+        });
+      }
+      {
+        UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".hover");
+        editor_hover_tick(workspace, panel_state.get(), symbols, layout_state);
+      }
+      {
+        UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".completion");
+        completion_lsp_tick(completion_state.get(), workspace, symbols, layout_state,
+                            panel_state.get());
+      }
       workspace->ensure_buffer();
 
       const int64_t now = steady_now_ms();
@@ -5611,8 +5650,15 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       }
       panel_state->last_heavy_editor_tick_ms = now;
 
-      tick_lsp_buffer_sync(panel_state.get(), workspace, symbols, layout_state);
-      tick_selection_occurrence_matches(panel_state.get(), workspace->buffer, layout_state);
+      UiSyncPhaseScope heavy_scope(ui_perf, "tick." + panel_tag + ".heavy");
+      {
+        UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.lsp_sync");
+        tick_lsp_buffer_sync(panel_state.get(), workspace, symbols, layout_state);
+      }
+      {
+        UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.selection");
+        tick_selection_occurrence_matches(panel_state.get(), workspace->buffer, layout_state);
+      }
       if (find_state->tick_matches(workspace->buffer) && layout_state != nullptr) {
         layout_state->request_ui_tick = true;
       }
@@ -5626,8 +5672,12 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                           buffer_text(workspace->buffer));
             }
           }
-          symbols->tick_debounced_updates();
+          {
+            UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.lsp_debounce");
+            symbols->tick_debounced_updates();
+          }
           if (panel_state->symbols_fetch_pending) {
+            UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.symbols");
             ensure_file_symbols(panel_state.get(), symbols.get(), path,
                                 buffer_text(workspace->buffer));
           }
@@ -5637,6 +5687,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             if (!is_tabular_path(path)) {
               panel_state->symbols_fetch_pending = true;
             }
+            UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.symbols");
             ensure_file_symbols(panel_state.get(), symbols.get(), path,
                                 buffer_text(workspace->buffer));
           }
@@ -5652,6 +5703,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             if (panel_state->semantic_tokens_enqueue_pending &&
                 (!panel_state->semantic_tokens_layout_stale ||
                  editor_content_settled(*panel_state))) {
+              UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.semantic");
               const bool ready = symbols->ensure_semantic_tokens(path);
               if (ready && symbols->semantic_tokens_current_for_file(path)) {
                 panel_state->semantic_tokens_enqueue_pending = false;
@@ -5660,13 +5712,20 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
               }
             }
           }
-          sync_diagnostic_cache(panel_state.get(), symbols.get(), workspace, file_indexer,
-                                layout_state);
+          {
+            UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.diagnostics");
+            if (editor_deferred_sync_allowed(layout_state)) {
+              sync_diagnostic_cache(panel_state.get(), symbols.get(), workspace, file_indexer,
+                                    layout_state);
+            }
+          }
         }
       }
-      if (git_service != nullptr && git_service->is_repo()) {
+      if (git_service != nullptr && git_service->is_repo() &&
+          editor_deferred_sync_allowed(layout_state)) {
         workspace->ensure_buffer();
         const EditorBuffer& buf = workspace->buffer;
+        UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.git");
         sync_git_cache(panel_state.get(), git_service, buf);
       }
     };

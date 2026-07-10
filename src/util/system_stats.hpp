@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "util/ui_activity_gate.hpp"
+#include "util/ui_perf_monitor.hpp"
 
 namespace tgdb {
 
@@ -77,7 +78,8 @@ class PerformanceSampler {
   bool file_dump_enabled() const;
   void set_dump_hooks(const UiActivityGate* activity_gate,
                       const std::atomic<uint64_t>* ui_paint_count,
-                      const std::atomic<uint64_t>* ui_custom_tick);
+                      const std::atomic<uint64_t>* ui_custom_tick,
+                      const UiPerfMonitor* ui_perf_monitor = nullptr);
   PerformanceSnapshot snapshot() const;
   std::string dump_file_path() const;
 
@@ -98,6 +100,7 @@ class PerformanceSampler {
   const UiActivityGate* activity_gate_ = nullptr;
   const std::atomic<uint64_t>* ui_paint_count_ = nullptr;
   const std::atomic<uint64_t>* ui_custom_tick_ = nullptr;
+  const UiPerfMonitor* ui_perf_monitor_ = nullptr;
 };
 
 }  // namespace tgdb

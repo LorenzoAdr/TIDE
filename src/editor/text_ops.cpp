@@ -763,6 +763,7 @@ void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lin
 }
 
 void move_primary_half_page_up(EditorBuffer* buffer, int visible_lines, bool extend_selection) {
+  commit_undo_group(buffer);
   const int delta = std::max(1, visible_lines / 2);
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
@@ -774,6 +775,7 @@ void move_primary_half_page_up(EditorBuffer* buffer, int visible_lines, bool ext
 }
 
 void move_primary_half_page_down(EditorBuffer* buffer, int visible_lines, bool extend_selection) {
+  commit_undo_group(buffer);
   const int delta = std::max(1, visible_lines / 2);
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
@@ -802,6 +804,7 @@ void replace_text_range(EditorBuffer* buffer, int line, int start_col, int end_c
   if (replacement.empty()) {
     return;
   }
+  commit_undo_group(buffer);
   push_undo(buffer);
   exit_multi_cursor_mode(buffer);
   if (any_cursor_has_selection(*buffer)) {
@@ -834,6 +837,7 @@ void replace_text_range_with_caret(EditorBuffer* buffer, int line, int start_col
   if (replacement.empty()) {
     return;
   }
+  commit_undo_group(buffer);
   push_undo(buffer);
   exit_multi_cursor_mode(buffer);
   if (any_cursor_has_selection(*buffer)) {
@@ -867,6 +871,7 @@ void apply_completion_at_all_cursors(EditorBuffer* buffer, const SnippetResult& 
   if (snippet.text.empty()) {
     return;
   }
+  commit_undo_group(buffer);
   push_undo(buffer);
   clamp_all_cursors(buffer);
   if (any_cursor_has_selection(*buffer)) {
@@ -1084,6 +1089,7 @@ void delete_char(EditorBuffer* buffer) {
 }
 
 void delete_word_backward(EditorBuffer* buffer) {
+  commit_undo_group(buffer);
   push_undo(buffer);
   if (any_cursor_has_selection(*buffer)) {
     delete_all_selections(buffer);
@@ -1094,6 +1100,7 @@ void delete_word_backward(EditorBuffer* buffer) {
 }
 
 void delete_word_forward(EditorBuffer* buffer) {
+  commit_undo_group(buffer);
   push_undo(buffer);
   if (any_cursor_has_selection(*buffer)) {
     delete_all_selections(buffer);
@@ -1104,6 +1111,7 @@ void delete_word_forward(EditorBuffer* buffer) {
 }
 
 void newline(EditorBuffer* buffer) {
+  commit_undo_group(buffer);
   push_undo(buffer);
   if (any_cursor_has_selection(*buffer)) {
     delete_all_selections(buffer);
@@ -1119,6 +1127,7 @@ void paste_at_primary(EditorBuffer* buffer, const std::string& text) {
   if (text.empty()) {
     return;
   }
+  commit_undo_group(buffer);
   push_undo(buffer);
   clamp_all_cursors(buffer);
   if (any_cursor_has_selection(*buffer)) {
@@ -1384,6 +1393,7 @@ bool char_find_on_line(EditorBuffer* buffer, CharFindKind kind, char target, boo
 }
 
 void move_primary_left(EditorBuffer* buffer, bool extend_selection) {
+  commit_undo_group(buffer);
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
       cursor.collapse_to_head();
@@ -1400,6 +1410,7 @@ void move_primary_left(EditorBuffer* buffer, bool extend_selection) {
 }
 
 void move_primary_right(EditorBuffer* buffer, bool extend_selection) {
+  commit_undo_group(buffer);
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
       cursor.collapse_to_head();
@@ -1420,6 +1431,7 @@ void move_primary_vertical(EditorBuffer* buffer, int line_delta, bool extend_sel
   if (buffer->lines.empty()) {
     return;
   }
+  commit_undo_group(buffer);
   const int tab_size = std::max(1, editor_indent::tab_display_width());
   const int last_line = static_cast<int>(buffer->lines.size()) - 1;
   for (auto& cursor : buffer->cursors) {
@@ -1452,6 +1464,7 @@ void move_primary_down(EditorBuffer* buffer, bool extend_selection) {
 }
 
 void move_primary_home(EditorBuffer* buffer, bool extend_selection) {
+  commit_undo_group(buffer);
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
       cursor.collapse_to_head();
@@ -1462,6 +1475,7 @@ void move_primary_home(EditorBuffer* buffer, bool extend_selection) {
 }
 
 void move_primary_end(EditorBuffer* buffer, bool extend_selection) {
+  commit_undo_group(buffer);
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
       cursor.collapse_to_head();
@@ -1473,6 +1487,7 @@ void move_primary_end(EditorBuffer* buffer, bool extend_selection) {
 }
 
 void move_primary_page_up(EditorBuffer* buffer, int visible_lines, bool extend_selection) {
+  commit_undo_group(buffer);
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
       cursor.collapse_to_head();
@@ -1483,6 +1498,7 @@ void move_primary_page_up(EditorBuffer* buffer, int visible_lines, bool extend_s
 }
 
 void move_primary_page_down(EditorBuffer* buffer, int visible_lines, bool extend_selection) {
+  commit_undo_group(buffer);
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
       cursor.collapse_to_head();
@@ -1495,6 +1511,7 @@ void move_primary_page_down(EditorBuffer* buffer, int visible_lines, bool extend
 }
 
 void move_primary_word_left(EditorBuffer* buffer, bool extend_selection) {
+  commit_undo_group(buffer);
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
       cursor.collapse_to_head();
@@ -1512,6 +1529,7 @@ void move_primary_word_left(EditorBuffer* buffer, bool extend_selection) {
 }
 
 void move_primary_word_right(EditorBuffer* buffer, bool extend_selection) {
+  commit_undo_group(buffer);
   for (auto& cursor : buffer->cursors) {
     if (!extend_selection) {
       cursor.collapse_to_head();
@@ -1659,6 +1677,7 @@ void comment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
     return;
   }
 
+  commit_undo_group(buffer);
   push_undo(buffer);
   for (int line_index : lines) {
     if (line_index < 0 || line_index >= static_cast<int>(buffer->lines.size())) {
@@ -1693,6 +1712,7 @@ void uncomment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
     return;
   }
 
+  commit_undo_group(buffer);
   push_undo(buffer);
   for (int line_index : lines) {
     if (line_index < 0 || line_index >= static_cast<int>(buffer->lines.size())) {

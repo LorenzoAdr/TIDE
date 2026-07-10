@@ -8,7 +8,7 @@ namespace tgdb {
 namespace {
 
 constexpr std::size_t kMaxPhaseSamples = 128;
-constexpr std::size_t kMaxPhases = 24;
+constexpr std::size_t kMaxPhases = 32;
 
 uint64_t percentile_p95(std::vector<uint64_t> values) {
   if (values.empty()) {
@@ -90,31 +90,82 @@ void UiPerfMonitor::on_tick_phase(std::string_view name, uint64_t duration_us) {
   }
 }
 
-void UiPerfMonitor::set_activity_phase(UiActivityPhase phase, int64_t ms_in_phase) {
-  snapshot_.activity_phase = phase;
-  snapshot_.ms_in_phase = ms_in_phase;
+void UiPerfMonitor::refresh_phase_snapshot(std::size_t max_phases) {
   snapshot_.tick_phases.clear();
-  for (const PhaseAccumulator& phase : phase_accumulators_) {
-    if (phase.recent_us.empty()) {
+  for (const PhaseAccumulator& phase_acc : phase_accumulators_) {
+    if (phase_acc.recent_us.empty()) {
       continue;
     }
     UiPerfPhaseStats stats;
-    stats.name = phase.name;
-    stats.samples = phase.recent_us.size();
-    for (uint64_t us : phase.recent_us) {
+    stats.name = phase_acc.name;
+    stats.samples = phase_acc.recent_us.size();
+    for (uint64_t us : phase_acc.recent_us) {
       stats.total_us += us;
       stats.max_us = std::max(stats.max_us, us);
     }
-    stats.p95_us = percentile_p95(phase.recent_us);
+    stats.p95_us = percentile_p95(phase_acc.recent_us);
     snapshot_.tick_phases.push_back(std::move(stats));
   }
   std::sort(snapshot_.tick_phases.begin(), snapshot_.tick_phases.end(),
             [](const UiPerfPhaseStats& a, const UiPerfPhaseStats& b) {
               return a.p95_us > b.p95_us;
             });
-  if (snapshot_.tick_phases.size() > 8) {
-    snapshot_.tick_phases.resize(8);
+  if (snapshot_.tick_phases.size() > max_phases) {
+    snapshot_.tick_phases.resize(max_phases);
   }
+}
+
+void UiPerfMonitor::set_activity_phase(UiActivityPhase phase, int64_t ms_in_phase) {
+  snapshot_.activity_phase = phase;
+  snapshot_.ms_in_phase = ms_in_phase;
+  refresh_phase_snapshot(8);
+}
+
+void UiPerfMonitor::publish_dump_phases() {
+  std::vector<UiPerfPhaseStats> ranked;
+  ranked.reserve(phase_accumulators_.size());
+  for (const PhaseAccumulator& phase_acc : phase_accumulators_) {
+    if (phase_acc.recent_us.empty()) {
+      continue;
+    }
+    UiPerfPhaseStats stats;
+    stats.name = phase_acc.name;
+    stats.samples = phase_acc.recent_us.size();
+    for (uint64_t us : phase_acc.recent_us) {
+      stats.total_us += us;
+      stats.max_us = std::max(stats.max_us, us);
+    }
+    stats.p95_us = percentile_p95(phase_acc.recent_us);
+    ranked.push_back(std::move(stats));
+  }
+  std::sort(ranked.begin(), ranked.end(),
+            [](const UiPerfPhaseStats& a, const UiPerfPhaseStats& b) {
+              return a.p95_us > b.p95_us;
+            });
+  if (ranked.size() > 6) {
+    ranked.resize(6);
+  }
+
+  std::string line;
+  for (std::size_t i = 0; i < ranked.size(); ++i) {
+    if (i > 0) {
+      line += ',';
+    }
+    line += ranked[i].name;
+    line += '@';
+    line += std::to_string(ranked[i].p95_us);
+    line += "us";
+  }
+
+  refresh_phase_snapshot(8);
+
+  std::lock_guard<std::mutex> lock(dump_mutex_);
+  dump_phases_line_ = std::move(line);
+}
+
+std::string UiPerfMonitor::dump_phases_line() const {
+  std::lock_guard<std::mutex> lock(dump_mutex_);
+  return dump_phases_line_;
 }
 
 void UiPerfMonitor::refresh_fps(int64_t now_ms, bool is_paint) {

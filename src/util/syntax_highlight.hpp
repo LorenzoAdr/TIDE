@@ -23,6 +23,8 @@ struct SyntaxHighlightContext {
   const std::string* joined_override = nullptr;
   uint64_t buffer_token = 0;
   uint64_t semantic_revision = 0;
+  // Typing burst: reuse cached tree-sitter highlights only (no prepare/parse on render).
+  bool syntax_incremental = false;
   mutable std::string joined_source;
   mutable uint64_t joined_token = 0;
   mutable uint64_t prepare_token = 0;
@@ -40,5 +42,7 @@ ftxui::Element HighlightCodeLine(const std::string& line, int line_index,
                                  ftxui::Decorator cursor_style = {},
                                  int col_offset = 0,
                                  const SyntaxHighlightContext* ctx = nullptr);
+ftxui::Element HighlightCodeLineLite(const std::string& line, int cursor_col = -1,
+                                     ftxui::Decorator cursor_style = {});
 
 }  // namespace tgdb

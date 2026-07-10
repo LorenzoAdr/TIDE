@@ -550,6 +550,7 @@ bool update_explorer_hover(FileTreePanelState* state, MainLayoutState* layout_st
     layout_state->clickable.clear_hover_if(press_id::is_explorer_hover);
   }
   if (layout_state->clickable.hovered_id() != before) {
+    layout_state->panel_render_cache.mark_dirty(UiPanelId::FileTree);
     layout_state->request_ui_tick = true;
     return true;
   }

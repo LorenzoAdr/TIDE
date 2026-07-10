@@ -127,6 +127,16 @@ const std::vector<LineHighlights>* TreeSitterService::highlights_for(const std::
   return &doc->line_highlights;
 }
 
+const std::vector<LineHighlights>* TreeSitterService::stale_highlights_for(
+    const std::string& path) {
+  const std::string key = cache_key_for(path);
+  DocumentPtr doc = cache_.lookup(key);
+  if (doc == nullptr || doc->line_highlights.empty()) {
+    return nullptr;
+  }
+  return &doc->line_highlights;
+}
+
 ftxui::Element TreeSitterService::highlight_line(const std::string& path,
                                                  const std::string& source, int line_index,
                                                  int cursor_col, ftxui::Decorator cursor_style,

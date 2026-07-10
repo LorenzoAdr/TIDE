@@ -103,29 +103,29 @@ bool is_significant_input_event(const Event &event) {
 	return false;
 }
 
-bool is_pure_mouse_move_event(const Event &event) {
-	return event.is_mouse() && const_cast<Event &>(event).mouse().motion == Mouse::Moved &&
-	       const_cast<Event &>(event).mouse().button == Mouse::None;
+bool is_mouse_motion_event(const Event &event) {
+	return event.is_mouse() && const_cast<Event &>(event).mouse().motion == Mouse::Moved;
 }
 
-class UiPerfPhaseScope {
-  public:
-	UiPerfPhaseScope(UiPerfMonitor *monitor, std::string name)
-	    : monitor_(monitor), name_(std::move(name)), start_(std::chrono::steady_clock::now()) {}
-	~UiPerfPhaseScope() {
-		if (monitor_ == nullptr) {
-			return;
-		}
-		const auto end = std::chrono::steady_clock::now();
-		const auto us = std::chrono::duration_cast<std::chrono::microseconds>(end - start_).count();
-		monitor_->on_tick_phase(name_, static_cast<uint64_t>(std::max<int64_t>(0, us)));
-	}
+bool is_pure_mouse_move_event(const Event &event) {
+	return is_mouse_motion_event(event) && const_cast<Event &>(event).mouse().button == Mouse::None;
+}
 
-  private:
-	UiPerfMonitor *monitor_;
-	std::string name_;
-	std::chrono::steady_clock::time_point start_;
-};
+bool should_block_inhibited_mouse_motion(const MainLayoutState *layout, const Event &event,
+                                         const std::function<bool()> &modal_open) {
+	if (layout == nullptr || !is_pure_mouse_move_event(event)) {
+		return false;
+	}
+	if (modal_open && modal_open()) {
+		return false;
+	}
+	// Pure mouse moves during interactive typing cause ~100 fps repaints (scrollbars/tabs
+	// return handled=true). Swallow them like inhibited mode; clicks still pass through.
+	if (layout->activity_gate.is_interactive() || layout->activity_gate.is_inhibited()) {
+		return true;
+	}
+	return false;
+}
 
 bool event_is_alt_up(const Event &event) {
 	return event == Event::Special("\x1B[1;3A");
@@ -197,7 +197,17 @@ class EventPoller {
 					if (on_main_thread_) {
 						screen_->Post(on_main_thread_);
 					}
-					request_custom_event(screen_, layout_);
+					const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+					                           std::chrono::steady_clock::now().time_since_epoch())
+					                           .count();
+					const bool needs_press_tick =
+					    layout_ != nullptr && layout_->clickable.has_active_presses();
+					if (layout_ == nullptr || !layout_->activity_gate.is_interactive() ||
+					    layout_->activity_gate.allows_deferred_editor_sync(now_ms) ||
+					    needs_press_tick ||
+					    layout_->activity_gate.is_workspace_bootstrap(now_ms)) {
+						request_custom_event(screen_, layout_);
+					}
 				}
 			}
 		});
@@ -224,7 +234,7 @@ class EventPoller {
 // FTXUI CatchEvent invoca el handler antes que el hijo; RequestUiTickGuard en el
 // handler se destruía con request_ui_tick aún en false. Este wrapper postea Custom
 // después de que todo el árbol haya procesado el evento.
-// Swallow pure mouse moves while inhibited so FTXUI keeps frame_valid_ and no child
+// Swallow pure mouse moves while interactive/inhibited so FTXUI keeps frame_valid_ and no child
 // handler can return handled=true (scrollbars, tabs, etc.).
 class InhibitedMouseMoveBlocker : public ComponentBase {
   public:
@@ -240,14 +250,7 @@ class InhibitedMouseMoveBlocker : public ComponentBase {
 
   private:
 	bool should_swallow_inhibited_mouse_move(const Event &event) const {
-		if (!is_pure_mouse_move_event(event) || layout_ == nullptr ||
-		    !layout_->activity_gate.is_inhibited()) {
-			return false;
-		}
-		if (modal_open_ && modal_open_()) {
-			return false;
-		}
-		return true;
+		return should_block_inhibited_mouse_motion(layout_, event, modal_open_);
 	}
 
 	MainLayoutState *layout_;
@@ -263,16 +266,15 @@ class UiTickPostWrapper : public ComponentBase {
 		// Evaluate event type before the move; moving invalidates the string payload but
 		// leaves type_ and mouse_ data intact — checking before is cleaner.
 		const bool is_custom = (event == Event::Custom);
-		// Pure mouse moves (no button pressed) already trigger a direct screen.Post from
-		// the mouse handler in CatchEvent; skip the duplicate UiTickPost to avoid running
-		// the UI loop at the raw mouse polling rate (~100-200 Hz).  
-		const bool is_pure_mouse_move = !is_custom && event.is_mouse() &&
-		                                event.mouse().motion == Mouse::Moved &&
-		                                event.mouse().button == Mouse::None;
+		// Mouse moves already trigger screen.Post from CatchEvent handlers when needed;
+		// skip the duplicate UiTickPost to avoid running the UI loop at the raw mouse
+		// polling rate (~100-200 Hz).
+		const bool is_mouse_move = !is_custom && event.is_mouse() &&
+		                           event.mouse().motion == Mouse::Moved;
 		const bool handled = ComponentBase::OnEvent(std::move(event));
 		// Never chain Custom→Custom: each tick that sets request_ui_tick would otherwi
 		// enqueue another Custom in the same RunOnce drain loop and starve keyboard input.
-		if (!is_custom && !is_pure_mouse_move) {
+		if (!is_custom && !is_mouse_move) {
 			post_pending_tick();
 		}
 		
@@ -657,6 +659,9 @@ void Application::sync_activity_phase_effects() {
 		return;
 	}
 	last_activity_phase_ = phase;
+	if (phase == UiActivityPhase::kInteractive) {
+		layout_state_.clickable.clear_hover();
+	}
 	if (symbol_provider_) {
 		symbol_provider_->set_ui_inhibited(phase == UiActivityPhase::kInhibited);
 	}
@@ -851,6 +856,10 @@ void Application::set_workspace(const std::string &workspace_root,
                                 const std::string &open_file_hint) {
 	dismiss_welcome_screen();
 	workspace_initialized_ = true;
+	const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+	                           std::chrono::steady_clock::now().time_since_epoch())
+	                           .count();
+	layout_state_.activity_gate.begin_workspace_bootstrap(now_ms);
 	save_workspace_session();
 	std::error_code ec;
 	const auto absolute = fs::absolute(workspace_root, ec).string();
@@ -2003,6 +2012,13 @@ int Application::run() {
 				return false;
 			}
 
+			// Inhibited: swallow all mouse motion before any handler can return handled=true
+			// or request a Custom tick (scrollbars, hover chrome, editor drag, etc.).
+			if (should_block_inhibited_mouse_motion(&layout_state_, event,
+			                                        [this] { return any_modal_open(); })) {
+				return false;
+			}
+
 		const int64_t now_ms = steady_now_ms();
 		if (any_modal_open()) {
 			layout_state_.activity_gate.on_significant_input(now_ms);
@@ -2052,15 +2068,16 @@ int Application::run() {
 
 			if (terminal_only && layout_state_.activity_gate.is_inhibited() &&
 			    layout_state_.console_visible && layout_state_.terminal_tick_callback) {
-				UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal_minimal");
+				UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal_minimal");
 				layout_state_.terminal_tick_callback();
 				layout_state_.ui_perf_monitor.on_custom_tick_end(now_ms, paint_before);
+				layout_state_.ui_perf_monitor.publish_dump_phases();
 				return false;
 			}
 
 			if (debug_critical || allows_tick) {
 				{
-					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_events");
+					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_events");
 					TGDB_MON_SCOPE("ui", "tick.drain_events");
 					drain_events();
 				}
@@ -2068,28 +2085,30 @@ int Application::run() {
 
 			if (allows_tick) {
 				if (!any_modal_open()) {
-					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "apply_pending_connection");
+					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "apply_pending_connection");
 					TGDB_MON_SCOPE("ui", "tick.apply_pending_connection");
 					apply_pending_connection();
 				}
 				if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
-					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "process_index_changes");
+					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "process_index_changes");
 					TGDB_MON_SCOPE("ui", "tick.process_index_changes");
 					process_index_changes();
 				}
 				if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
-					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "process_build_environment");
+					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "process_build_environment");
 					TGDB_MON_SCOPE("ui", "tick.process_build_environment_updates");
 					process_build_environment_updates();
 				}
 				if (layout_state_.activity_gate.allows_cursor_blink()) {
 					cursor_blink::tick();
 				}
-				if (layout_state_.activity_gate.allows_hover_chrome()) {
-					layout_state_.clickable.tick();
+				if (layout_state_.clickable.tick()) {
+					layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
+					layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+					layout_state_.request_ui_tick = true;
 				}
 				if (layout_state_.console_visible && layout_state_.terminal_tick_callback) {
-					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal");
+					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal");
 					TGDB_MON_SCOPE("ui", "tick.terminal");
 					layout_state_.terminal_tick_callback();
 				}
@@ -2097,7 +2116,7 @@ int Application::run() {
 					layout_state_.packet_monitor_service->tick();
 				}
 				if (symbol_provider_ && layout_state_.activity_gate.allows_lsp_ui()) {
-					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_async_results");
+					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_async_results");
 					TGDB_MON_SCOPE("ui", "tick.drain_async_results");
 					if (symbol_provider_->drain_async_results()) {
 						workspace_.buffer.view_token++;
@@ -2105,13 +2124,13 @@ int Application::run() {
 					}
 				}
 				if (layout_state_.primary_editor.tick_callback && !layout_state_.welcome_visible) {
-					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "primary_editor");
+					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "primary_editor");
 					TGDB_MON_SCOPE("ui", "tick.primary_editor");
 					layout_state_.primary_editor.tick_callback();
 				}
 				if (layout_state_.secondary_editor.tick_callback &&
 				    !layout_state_.welcome_visible) {
-					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "secondary_editor");
+					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "secondary_editor");
 					TGDB_MON_SCOPE("ui", "tick.secondary_editor");
 					layout_state_.secondary_editor.tick_callback();
 				}
@@ -2119,7 +2138,7 @@ int Application::run() {
 					layout_state_.source_tick_callback();
 				}
 				if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
-					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "git");
+					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "git");
 					TGDB_MON_SCOPE("ui", "tick.git");
 					git_service_.tick();
 				}
@@ -2129,7 +2148,7 @@ int Application::run() {
 				}
 				if (layout_state_.outline_tick_callback &&
 				    layout_state_.activity_gate.allows_deferred_panel_tick()) {
-					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "outline");
+					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "outline");
 					TGDB_MON_SCOPE("ui", "tick.outline");
 					layout_state_.outline_tick_callback();
 				}
@@ -2138,13 +2157,14 @@ int Application::run() {
 				    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kPerformance;
 				layout_state_.performance_sampler.set_worker_sampling_enabled(sample_perf);
 				if (layout_state_.ui_heartbeat.exchange(false, std::memory_order_acquire)) {
-					UiPerfPhaseScope phase(&layout_state_.ui_perf_monitor, "performance_sampler");
+					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "performance_sampler");
 					TGDB_MON_SCOPE("ui", "tick.performance_sampler");
 					layout_state_.performance_sampler.on_frame();
 				}
 			}
 
 			layout_state_.ui_perf_monitor.on_custom_tick_end(now_ms, paint_before);
+			layout_state_.ui_perf_monitor.publish_dump_phases();
 				bool swallow_call_hierarchy_custom = false;
 				if (layout_state_.right_sidebar.pending_call_hierarchy &&
 				    layout_state_.call_hierarchy_key_handler) {
@@ -2330,6 +2350,9 @@ int Application::run() {
 	// Repaint on mouse move only when velocity drops (high→low); clicks/wheel always immediate.
 	const bool is_pure_move_event = is_pure_mouse_move_event(event);
 		const auto post_custom_throttled = [&] {
+			if (layout_state_.activity_gate.is_inhibited() && is_mouse_motion_event(event)) {
+				return;
+			}
 			if (!is_pure_move_event) {
 				request_custom_event(&screen, &layout_state_);
 				return;
@@ -2588,8 +2611,6 @@ int Application::run() {
 			    active_editor_handlers.key_handler) {
 				if (active_editor_handlers.key_handler(event)) {
 					layout_state_.request_ui_tick = true;
-					request_custom_event(&screen, &layout_state_);
-					
 					return true;
 				}
 			}
@@ -2600,7 +2621,6 @@ int Application::run() {
 			    !event_is_ctrl_p(event) && active_editor_handlers.key_handler &&
 			    active_editor_handlers.key_handler(event)) {
 				layout_state_.request_ui_tick = true;
-				request_custom_event(&screen, &layout_state_);
 				return true;
 			}
 			if (layout_state_.editor_helix_prefix_pending &&
@@ -2641,7 +2661,6 @@ int Application::run() {
 				    active_editor_handlers.key_handler &&
 				    active_editor_handlers.key_handler(event)) {
 					layout_state_.request_ui_tick = true;
-					request_custom_event(&screen, &layout_state_);
 					return true;
 				}
 				return false;
@@ -2815,7 +2834,8 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 
 	layout_state_.performance_sampler.set_dump_hooks(&layout_state_.activity_gate,
 	                                                 &layout_state_.ui_paint_count,
-	                                                 &layout_state_.ui_custom_tick);
+	                                                 &layout_state_.ui_custom_tick,
+	                                                 &layout_state_.ui_perf_monitor);
 
 	screen.Loop(WrapUiTickPost(root, &layout_state_, &screen,
 	                           [this] { return any_modal_open(); }));

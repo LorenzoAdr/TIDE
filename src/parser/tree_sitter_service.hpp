@@ -33,6 +33,8 @@ class TreeSitterService {
 
   const std::vector<LineHighlights>* highlights_for(const std::string& path,
                                                       const std::string& source);
+  // Cached highlights only; never schedules tree-sitter prepare/parse.
+  const std::vector<LineHighlights>* stale_highlights_for(const std::string& path);
   ftxui::Element highlight_line(const std::string& path, const std::string& source, int line_index,
                                 int cursor_col = -1, ftxui::Decorator cursor_style = {},
                                 int col_offset = 0);

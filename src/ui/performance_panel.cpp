@@ -258,7 +258,9 @@ Element render_ui_thread_section(const UiPerfSnapshot& ui, int panel_width,
 
   for (const UiPerfPhaseStats& phase : ui.tick_phases) {
     std::ostringstream row;
-    row << phase.name << " p95=" << (phase.p95_us / 1000.0) << "ms n=" << phase.samples;
+    const double p95_ms = static_cast<double>(phase.p95_us) / 1000.0;
+    row << phase.name << " p95=" << std::fixed << std::setprecision(2) << p95_ms << "ms n="
+        << phase.samples;
     lines.push_back(text(row.str()) | color(theme::Muted()));
   }
   return vbox(std::move(lines));
@@ -281,7 +283,7 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
   }
 
   const std::string dump_path = sampler != nullptr ? sampler->dump_file_path() : std::string{};
-  constexpr int kUiSectionLines = 5;
+  constexpr int kUiSectionLines = 10;
   constexpr int kMinHeightForSystem = 12;
   const bool show_system = total_height >= kMinHeightForSystem + kUiSectionLines;
   const int ui_height = std::min(kUiSectionLines, std::max(2, total_height / 6));

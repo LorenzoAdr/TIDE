@@ -7,6 +7,7 @@ namespace tgdb {
 namespace {
 
 constexpr int64_t kSustainedIdleMs = 1500;
+constexpr int64_t kDeferredEditorSyncIdleMs = 1000;
 
 int64_t default_grace_end(int64_t now_ms, int64_t grace_ms) {
   return now_ms + std::max<int64_t>(1, grace_ms);
@@ -83,12 +84,44 @@ bool UiActivityGate::allows_deferred_panel_tick() const {
   if (!passive_enabled_.load(std::memory_order_relaxed)) {
     return true;
   }
-  return phase_.load(std::memory_order_acquire) != UiActivityPhase::kInteractive;
+  const auto phase = phase_.load(std::memory_order_acquire);
+  if (phase != UiActivityPhase::kInteractive) {
+    return true;
+  }
+  return false;
 }
 
 bool UiActivityGate::allows_lsp_ui() const { return !is_inhibited(); }
 
 bool UiActivityGate::allows_hover_chrome() const { return !is_inhibited(); }
+
+bool UiActivityGate::allows_deferred_editor_sync(int64_t now_ms) const {
+  if (is_workspace_bootstrap(now_ms)) {
+    return true;
+  }
+  if (!passive_enabled_.load(std::memory_order_relaxed)) {
+    return true;
+  }
+  const int64_t last_input = last_input_ms_.load(std::memory_order_relaxed);
+  if (last_input <= 0) {
+    return true;
+  }
+  return now_ms - last_input >= kDeferredEditorSyncIdleMs;
+}
+
+bool UiActivityGate::is_workspace_bootstrap(int64_t now_ms) const {
+  const int64_t until = workspace_bootstrap_until_ms_.load(std::memory_order_relaxed);
+  return until > 0 && now_ms < until;
+}
+
+void UiActivityGate::begin_workspace_bootstrap(int64_t now_ms, int64_t duration_ms) {
+  workspace_bootstrap_until_ms_.store(now_ms + std::max<int64_t>(1, duration_ms),
+                                      std::memory_order_relaxed);
+  phase_.store(UiActivityPhase::kGraceWindow, std::memory_order_release);
+  grace_end_ms_.store(0, std::memory_order_relaxed);
+  phase_entered_ms_.store(now_ms, std::memory_order_relaxed);
+  last_input_ms_.store(0, std::memory_order_relaxed);
+}
 
 bool UiActivityGate::allows_cursor_blink() const { return !is_inhibited(); }
 

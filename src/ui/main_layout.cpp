@@ -30,6 +30,8 @@
 #include "ui/welcome_screen.hpp"
 #include "i18n/tr.hpp"
 #include "util/bundled_tools.hpp"
+#include "util/ui_panel_render_cache.hpp"
+#include "util/ui_perf_monitor.hpp"
 
 namespace tgdb {
 
@@ -40,6 +42,15 @@ namespace {
 int64_t steady_now_ms() {
   using namespace std::chrono;
   return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+Component MakeCachedPanelRender(MainLayoutState* layout_state, UiPanelId panel, Component inner) {
+  return Renderer(std::move(inner), [=] {
+    if (layout_state == nullptr) {
+      return inner->Render();
+    }
+    return layout_state->panel_render_cache.render(panel, [=] { return inner->Render(); });
+  });
 }
 
 }  // namespace
@@ -892,8 +903,9 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     };
   }
 
-  auto file_tree = MakeFileTreePanel(model, workspace, focus, indexer, on_command, layout_state,
-                                     git_service);
+  auto file_tree = MakeCachedPanelRender(
+      layout_state, UiPanelId::FileTree,
+      MakeFileTreePanel(model, workspace, focus, indexer, on_command, layout_state, git_service));
   auto editor_primary =
       MakeEditorPanel(workspace, focus, layout_state, symbols, indexer, symbol_indexer, git_service,
                       FocusRegion::Editor, model, on_command,
@@ -926,8 +938,9 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto outline = MakeOutlinePanel(workspace, focus, symbols, layout_state);
   auto sidebar = MakeRightSidebarPanel(outline, layout_state);
   auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug, focus, app_mode);
-  auto right_panel =
-      MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height, layout_state);
+  auto right_panel = MakeCachedPanelRender(
+      layout_state, UiPanelId::RightSidebar,
+      MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height, layout_state));
 
   auto explorer_and_center =
       MakeVSplitLeft(file_tree, center_column, &split_state->left_width, split_state);
@@ -1028,7 +1041,33 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto layout_root = Renderer(with_focus_sync, [=] {
     if (layout_state != nullptr) {
       layout_state->ui_paint_count.fetch_add(1, std::memory_order_relaxed);
+      UiSyncPhaseScope paint_scope(&layout_state->ui_perf_monitor, "render.layout.root");
       layout_state->ui_perf_monitor.on_paint(steady_now_ms());
+      if (git_service != nullptr &&
+          git_service->cache_revision() != layout_state->panel_cache_git_revision) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::FileTree);
+        layout_state->panel_cache_git_revision = git_service->cache_revision();
+      }
+      if (symbols != nullptr &&
+          symbols->diagnostics_revision() != layout_state->panel_cache_diagnostics_revision) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+        layout_state->panel_cache_diagnostics_revision = symbols->diagnostics_revision();
+      }
+      if (symbols != nullptr &&
+          symbols->document_symbols_revision() != layout_state->panel_cache_symbols_revision) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+        layout_state->panel_cache_symbols_revision = symbols->document_symbols_revision();
+      }
+      if (layout_state->terminal_width && layout_state->terminal_height) {
+        const int tw = layout_state->terminal_width();
+        const int th = layout_state->terminal_height();
+        if (tw != layout_state->panel_cache_terminal_w ||
+            th != layout_state->panel_cache_terminal_h) {
+          layout_state->panel_render_cache.mark_all_dirty();
+          layout_state->panel_cache_terminal_w = tw;
+          layout_state->panel_cache_terminal_h = th;
+        }
+      }
     }
     const bool git_tab_open =
         layout_state != nullptr && git_tab_active(layout_state);
@@ -1077,9 +1116,9 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       // El display de contadores no depende de la inhibición (usa datos cacheados); solo
       // el refetch respeta allows_lsp_ui(). Así los contadores no se ponen a 0 en reposo.
       const bool diag_display_allowed =
-          !active_path.empty() &&
+          editor_deferred_sync_allowed(layout_state) && !active_path.empty() &&
           diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), active_path,
-                                      /*lsp_ui_allowed=*/true);
+                                      layout_state->activity_gate.allows_lsp_ui());
       const bool diag_refresh_allowed =
           diag_display_allowed && layout_state->activity_gate.allows_lsp_ui();
       if (!diag_display_allowed) {
@@ -1255,6 +1294,9 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     if (layout_state != nullptr && layout_state->status_layout_popover.open) {
       chrome = RenderStatusLayoutPopoverOverlay(&layout_state->status_layout_popover, layout_state,
                                                 std::move(chrome), status_ui->layout_box);
+    }
+    if (layout_state != nullptr) {
+      layout_state->ui_perf_monitor.publish_dump_phases();
     }
     return chrome;
   });

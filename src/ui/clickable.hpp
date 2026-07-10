@@ -43,6 +43,7 @@ inline void trigger_press(MainLayoutState* layout, std::string_view id) {
     return;
   }
   layout->clickable.trigger_press(id);
+  invalidate_cached_panel_chrome(layout, id);
   layout->request_ui_tick = true;
 }
 

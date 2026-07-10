@@ -67,6 +67,10 @@ void recompute_line_starts_from(EditorBuffer* buffer, int from_line) {
 
 }  // namespace
 
+void editor_buffer_rebuild_joined(EditorBuffer* buffer) {
+  rebuild_joined(buffer);
+}
+
 const std::string& editor_buffer_joined_source(const EditorBuffer& buffer) {
   EditorBuffer& mutable_buffer = const_cast<EditorBuffer&>(buffer);
   if (!mutable_buffer.joined_source_cache.valid) {
@@ -82,12 +86,31 @@ void editor_buffer_invalidate_joined(EditorBuffer* buffer) {
   buffer->joined_source_cache.valid = false;
   buffer->joined_source_cache.text.clear();
   buffer->joined_source_cache.line_starts.clear();
+  buffer->cached_max_line_len = -1;
+}
+
+int editor_buffer_max_line_length(const EditorBuffer& buffer) {
+  EditorBuffer& mutable_buffer = const_cast<EditorBuffer&>(buffer);
+  if (mutable_buffer.cached_max_line_len < 0) {
+    int max_len = 0;
+    for (const auto& line : buffer.lines) {
+      max_len = std::max(max_len, static_cast<int>(line.size()));
+    }
+    mutable_buffer.cached_max_line_len = max_len;
+  }
+  return mutable_buffer.cached_max_line_len;
 }
 
 void editor_buffer_note_char_inserted(EditorBuffer* buffer, int line, int col,
                                       std::string_view text) {
   if (buffer == nullptr || text.empty()) {
     return;
+  }
+  if (buffer->cached_max_line_len >= 0 && line >= 0 &&
+      line < static_cast<int>(buffer->lines.size())) {
+    buffer->cached_max_line_len =
+        std::max(buffer->cached_max_line_len,
+                 static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size()));
   }
   EditorJoinedSourceCache& cache = buffer->joined_source_cache;
   if (!cache.valid) {
@@ -101,6 +124,13 @@ void editor_buffer_note_char_inserted(EditorBuffer* buffer, int line, int col,
 void editor_buffer_note_char_removed(EditorBuffer* buffer, int line, int col, std::size_t count) {
   if (buffer == nullptr || count == 0) {
     return;
+  }
+  if (buffer->cached_max_line_len >= 0 && line >= 0 &&
+      line < static_cast<int>(buffer->lines.size())) {
+    const int line_len = static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size());
+    if (line_len + static_cast<int>(count) >= buffer->cached_max_line_len) {
+      buffer->cached_max_line_len = -1;
+    }
   }
   EditorJoinedSourceCache& cache = buffer->joined_source_cache;
   if (!cache.valid) {
@@ -119,6 +149,7 @@ void editor_buffer_note_line_split(EditorBuffer* buffer, int line, int col) {
   if (buffer == nullptr) {
     return;
   }
+  buffer->cached_max_line_len = -1;
   EditorJoinedSourceCache& cache = buffer->joined_source_cache;
   if (!cache.valid) {
     return;
@@ -137,6 +168,7 @@ void editor_buffer_note_line_joined(EditorBuffer* buffer, int line) {
     editor_buffer_invalidate_joined(buffer);
     return;
   }
+  buffer->cached_max_line_len = -1;
   EditorJoinedSourceCache& cache = buffer->joined_source_cache;
   if (!cache.valid) {
     return;

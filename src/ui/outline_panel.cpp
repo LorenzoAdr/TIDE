@@ -1,5 +1,6 @@
 #include "ui/outline_panel.hpp"
 
+#include "util/ui_panel_render_cache.hpp"
 #include <algorithm>
 #include <cstring>
 #include <memory>
@@ -199,6 +200,10 @@ void fetch_outline_symbols(OutlinePanelState* state, ISymbolProvider* symbols,
   state->symbols = symbols->symbols_for_file(state->loaded_file);
   state->rebuild_display_rows();
   state->symbols_fetch_pending = false;
+  if (layout_state != nullptr) {
+    layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+    layout_state->request_ui_tick = true;
+  }
   if (symbols->symbols_lsp_pending(state->loaded_file)) {
     return;
   }
@@ -208,9 +213,6 @@ void fetch_outline_symbols(OutlinePanelState* state, ISymbolProvider* symbols,
   if (!state->display_rows.empty() &&
       state->display_rows[static_cast<std::size_t>(state->selected)].kind == OutlineRowKind::Scope) {
     state->selected = state->nearest_symbol_row(state->selected, 1);
-  }
-  if (layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
   }
 }
 
@@ -229,6 +231,7 @@ bool update_outline_hover(OutlinePanelState* state, MainLayoutState* layout_stat
     layout_state->clickable.clear_hover_if(press_id::is_outline_hover);
   }
   if (layout_state->clickable.hovered_id() != before) {
+    layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
     layout_state->request_ui_tick = true;
     return true;
   }

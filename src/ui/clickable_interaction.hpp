@@ -23,7 +23,8 @@ class ClickableInteractionTracker {
   bool is_hovered(const std::string& id) const;
   bool is_pressed(std::string_view id) const;
   bool is_pressed(const std::string& id) const;
-  void tick();
+  bool has_active_presses() const;
+  bool tick();
 
  private:
   std::string hovered_id_;

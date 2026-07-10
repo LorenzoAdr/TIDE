@@ -60,6 +60,8 @@ struct EditorBuffer {
   bool dirty = false;
   uint64_t view_token = 0;
   bool semantic_layout_dirty = false;
+  bool undo_coalesce_open = false;
+  int cached_max_line_len = -1;
   std::set<int> collapsed_folds;
   std::vector<FoldRegion> fold_regions;
   mutable EditorJoinedSourceCache joined_source_cache;
