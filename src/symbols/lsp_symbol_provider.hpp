@@ -173,6 +173,7 @@ class LspSymbolProvider : public ISymbolProvider {
   std::atomic<uint64_t> document_symbols_revision_{0};
   std::atomic<bool> pending_transport_restart_{false};
   std::atomic<bool> lsp_restart_in_progress_{false};
+  std::atomic<bool> shutting_down_{false};
   int64_t last_lsp_failure_restart_ms_ = 0;
   int64_t lsp_ready_since_ms_ = 0;
 };

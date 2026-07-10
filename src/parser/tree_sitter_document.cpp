@@ -83,6 +83,56 @@ int count_source_lines(const std::string& source) {
   return lines;
 }
 
+// Keep highlight indices aligned with buffer lines while the worker re-parses.
+void remap_line_highlights_for_count_change(std::vector<LineHighlights>* highlights,
+                                            const TSInputEdit& edit, int old_line_count,
+                                            int new_line_count) {
+  if (highlights == nullptr || old_line_count == new_line_count) {
+    return;
+  }
+
+  const std::vector<LineHighlights> previous = *highlights;
+  const int edit_row = static_cast<int>(edit.start_point.row);
+
+  if (new_line_count > old_line_count) {
+    const int added = new_line_count - old_line_count;
+    const int insert_at = edit.start_point.column == 0 ? edit_row : edit_row + 1;
+    std::vector<LineHighlights> out(static_cast<std::size_t>(new_line_count));
+    for (int i = 0; i < new_line_count; ++i) {
+      if (i < insert_at) {
+        if (i < static_cast<int>(previous.size())) {
+          out[static_cast<std::size_t>(i)] = previous[static_cast<std::size_t>(i)];
+        }
+      } else if (i < insert_at + added) {
+        out[static_cast<std::size_t>(i)] = LineHighlights{};
+      } else {
+        const int src = i - added;
+        if (src >= 0 && src < static_cast<int>(previous.size())) {
+          out[static_cast<std::size_t>(i)] = previous[static_cast<std::size_t>(src)];
+        }
+      }
+    }
+    *highlights = std::move(out);
+    return;
+  }
+
+  const int removed = old_line_count - new_line_count;
+  const int skip_from = edit.start_point.column == 0 ? edit_row : edit_row + 1;
+  std::vector<LineHighlights> out(static_cast<std::size_t>(new_line_count));
+  for (int i = 0; i < new_line_count; ++i) {
+    int src = i;
+    if (edit.start_point.column > 0 && i == edit_row) {
+      src = edit_row;
+    } else if (i >= skip_from) {
+      src = i + removed;
+    }
+    if (src >= 0 && src < static_cast<int>(previous.size())) {
+      out[static_cast<std::size_t>(i)] = previous[static_cast<std::size_t>(src)];
+    }
+  }
+  *highlights = std::move(out);
+}
+
 TSTree* parse_source(TSParser* parser, const std::string& source, const std::string& previous_source,
                      TSTree* previous_tree) {
   if (previous_tree != nullptr && !previous_source.empty()) {
@@ -128,33 +178,9 @@ bool apply_sync_source_edit(DocumentEntry* entry, const std::string& canonical) 
     return true;
   }
 
-  const std::string old_source = entry->source;
-
-  TSParser* parser = ts_parser_new();
-  ts_parser_set_language(parser, tree_sitter_cpp_language());
-  TSTree* new_tree = parse_source(parser, canonical, old_source, entry->tree);
-  ts_parser_delete(parser);
-
-  if (new_tree == nullptr) {
-    return false;
-  }
-  if (entry->tree != nullptr) {
-    ts_tree_delete(entry->tree);
-  }
-  entry->tree = new_tree;
-  entry->source = canonical;
-  entry->parse_ready = true;
-  entry->symbols_ready = false;
-
-  const TSNode root = ts_tree_root_node(entry->tree);
-  if (ts_node_is_null(root)) {
-    entry->highlights_ready = false;
-    return true;
-  }
-
-  entry->line_highlights = highlights_for_document(root, canonical);
-  entry->highlights_ready = !entry->line_highlights.empty();
-  return true;
+  // Line layout changes need a full re-parse; defer to the worker so the UI
+  // thread never runs parse + highlight work while holding cache_mutex.
+  return false;
 }
 
 }  // namespace
@@ -290,6 +316,12 @@ void TreeSitterDocumentCache::request_prepare(const std::string& path,
 
     source_changed = entry->source != canonical;
     if (source_changed) {
+      const int old_line_count = count_source_lines(entry->source);
+      const int new_line_count = count_source_lines(canonical);
+      const std::optional<TSInputEdit> layout_edit =
+          old_line_count != new_line_count
+              ? single_edit_between(entry->source, canonical)
+              : std::nullopt;
       if (apply_sync_source_edit(entry.get(), canonical)) {
         if (entry->highlights_ready) {
           entry->revision = next_revision_++;
@@ -299,6 +331,12 @@ void TreeSitterDocumentCache::request_prepare(const std::string& path,
         debounced.previous_tree = entry->tree;
         entry->tree = nullptr;
         entry->source = canonical;
+        if (layout_edit.has_value() && !entry->line_highlights.empty()) {
+          remap_line_highlights_for_count_change(&entry->line_highlights, *layout_edit,
+                                                 old_line_count, new_line_count);
+        } else {
+          entry->line_highlights.clear();
+        }
         entry->parse_ready = false;
         entry->highlights_ready = false;
         entry->symbols_ready = false;
@@ -559,8 +597,18 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
   if (tree != nullptr) {
     const TSNode root = ts_tree_root_node(tree);
     if (old_tree_for_highlights != nullptr) {
+      int layout_shift_from_row = -1;
+      if (!job.previous_source.empty() &&
+          count_source_lines(job.previous_source) != count_source_lines(job.source)) {
+        const std::optional<TSInputEdit> edit =
+            single_edit_between(job.previous_source, job.source);
+        if (edit.has_value()) {
+          layout_shift_from_row = static_cast<int>(edit->start_point.row);
+        }
+      }
       highlights = highlights_after_incremental_parse(old_tree_for_highlights, tree, root,
-                                                    job.source, previous_highlights);
+                                                      job.source, previous_highlights,
+                                                      layout_shift_from_row);
     } else {
       highlights = highlights_for_document(root, job.source);
     }

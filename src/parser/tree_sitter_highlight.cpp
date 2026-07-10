@@ -233,7 +233,7 @@ int count_source_lines(const std::string& source) {
 
 std::vector<LineHighlights> highlights_after_incremental_parse(
     TSTree* old_tree, TSTree* new_tree, TSNode new_root, const std::string& source,
-    const std::vector<LineHighlights>& previous) {
+    const std::vector<LineHighlights>& previous, int layout_shift_from_row) {
   if (old_tree == nullptr || new_tree == nullptr || ts_node_is_null(new_root) || previous.empty()) {
     return highlights_for_document(new_root, source);
   }
@@ -256,9 +256,20 @@ std::vector<LineHighlights> highlights_after_incremental_parse(
     free(ranges);
   }
 
+  const bool layout_shifted = layout_shift_from_row >= 0;
+  std::vector<LineHighlights> fresh;
+  if (layout_shifted) {
+    // One query pass for the tail; per-line queries are O(lines * tree).
+    fresh = highlights_for_document(new_root, source);
+  }
+
   for (int line = 0; line < line_count; ++line) {
-    if (line < static_cast<int>(previous.size()) && affected.count(line) == 0) {
+    const bool needs_layout_refresh = layout_shifted && line >= layout_shift_from_row;
+    if (!needs_layout_refresh && line < static_cast<int>(previous.size()) &&
+        affected.count(line) == 0) {
       out[static_cast<std::size_t>(line)] = previous[static_cast<std::size_t>(line)];
+    } else if (needs_layout_refresh) {
+      out[static_cast<std::size_t>(line)] = fresh[static_cast<std::size_t>(line)];
     } else {
       out[static_cast<std::size_t>(line)] = highlights_for_line(new_root, source, line);
     }

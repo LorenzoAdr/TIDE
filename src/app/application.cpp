@@ -776,16 +776,16 @@ void Application::tick_shutdown() {
 		     }
 	     }},
 	    {i18n::tr("app.shutdown.close_terminal"), [this] { shell_session_.stop(); }},
+	    {i18n::tr("app.shutdown.stop_indexers"),
+	     [this] {
+		     symbol_indexer_.stop();
+		     indexer_.stop();
+	     }},
 	    {i18n::tr("app.shutdown.close_clangd"),
 	     [this] {
 		     if (symbol_provider_) {
 			     symbol_provider_->on_workspace_closed();
 		     }
-	     }},
-	    {i18n::tr("app.shutdown.stop_indexers"),
-	     [this] {
-		     symbol_indexer_.stop();
-		     indexer_.stop();
 	     }},
 	    {i18n::tr("app.shutdown.stop_watcher"), [this] { build_artifact_watcher_.stop(); }},
 	    {i18n::tr("app.shutdown.stop_build_env"),

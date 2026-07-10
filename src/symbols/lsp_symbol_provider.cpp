@@ -8,10 +8,25 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 #include "util/thread_name.hpp"
 #include "util/monitor_log.hpp"
 namespace fs = std::filesystem;
+
+namespace {
+
+void join_thread_if_joinable(std::thread& worker) {
+  if (!worker.joinable()) {
+    return;
+  }
+  if (worker.get_id() == std::this_thread::get_id()) {
+    return;
+  }
+  worker.join();
+}
+
+}  // namespace
 
 namespace tgdb {
 
@@ -58,6 +73,10 @@ void LspSymbolProvider::join_startup_thread() {
 }
 
 void LspSymbolProvider::finish_lsp_start_locked(bool ok) {
+  if (shutting_down_.load(std::memory_order_acquire)) {
+    use_lsp_ = false;
+    return;
+  }
   use_lsp_ = ok;
   if (!ok) {
     return;
@@ -85,6 +104,9 @@ void LspSymbolProvider::finish_lsp_start_locked(bool ok) {
 }
 
 void LspSymbolProvider::start_lsp_async(const std::string& compile_commands_dir) {
+  if (shutting_down_.load(std::memory_order_acquire)) {
+    return;
+  }
   join_startup_thread();
 
   std::string root;
@@ -115,6 +137,11 @@ void LspSymbolProvider::start_lsp_async(const std::string& compile_commands_dir)
   lsp_startup_thread_ = std::thread([this, root, compile_dir, gcc_query, background_index] {
     set_current_thread_name("lsp-start");
     const bool ok = client_.start(root, compile_dir, gcc_query, background_index);
+    if (shutting_down_.load(std::memory_order_acquire)) {
+      client_.stop();
+      lsp_starting_.store(false, std::memory_order_release);
+      return;
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     lsp_starting_.store(false, std::memory_order_release);
     finish_lsp_start_locked(ok);
@@ -149,22 +176,22 @@ void LspSymbolProvider::stop_lsp_locked_finalize() {
 }
 
 void LspSymbolProvider::stop_lsp() {
-  join_startup_thread();
   {
     std::lock_guard<std::mutex> lock(mutex_);
     stop_lsp_locked();
   }
   client_.stop();
-  if (async_worker_.joinable()) {
-    if (async_worker_.get_id() != std::this_thread::get_id()) {
-      async_worker_.join();
-    }
-  }
+  join_thread_if_joinable(lsp_startup_thread_);
+  lsp_starting_.store(false, std::memory_order_release);
+  join_thread_if_joinable(async_worker_);
   std::lock_guard<std::mutex> lock(mutex_);
   stop_lsp_locked_finalize();
 }
 
 void LspSymbolProvider::restart_lsp_after_transport_failure() {
+  if (shutting_down_.load(std::memory_order_acquire)) {
+    return;
+  }
   if (async_worker_.joinable() && std::this_thread::get_id() == async_worker_.get_id()) {
     pending_transport_restart_.store(true, std::memory_order_release);
     return;
@@ -190,7 +217,8 @@ void LspSymbolProvider::restart_lsp_after_transport_failure() {
 }
 
 void LspSymbolProvider::process_pending_transport_restart() {
-  if (!pending_transport_restart_.load(std::memory_order_acquire)) {
+  if (shutting_down_.load(std::memory_order_acquire) ||
+      !pending_transport_restart_.load(std::memory_order_acquire)) {
     return;
   }
   const int64_t now = steady_now_ms();
@@ -307,7 +335,7 @@ void LspSymbolProvider::async_worker_main() {
       run_job = use_lsp_ && client_.ready();
     }
 
-    if (async_stop_) {
+    if (async_stop_ || shutting_down_.load(std::memory_order_acquire)) {
       run_job = false;
     }
 
@@ -704,6 +732,7 @@ void LspSymbolProvider::set_ui_inhibited(const bool inhibited) {
 
 void LspSymbolProvider::on_workspace_opened(const std::string& root,
                                             const std::string& compile_commands_dir) {
+  shutting_down_.store(false, std::memory_order_release);
   stop_lsp();
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -714,6 +743,10 @@ void LspSymbolProvider::on_workspace_opened(const std::string& root,
 }
 
 void LspSymbolProvider::on_workspace_closed() {
+  if (shutting_down_.exchange(true, std::memory_order_acq_rel)) {
+    return;
+  }
+  pending_transport_restart_.store(false, std::memory_order_release);
   stop_lsp();
   std::lock_guard<std::mutex> lock(mutex_);
   workspace_root_.clear();

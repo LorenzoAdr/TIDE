@@ -175,8 +175,13 @@ void delete_range(EditorBuffer* buffer, int start_line, int start_col, int end_l
     auto& line = buffer->lines[static_cast<std::size_t>(start_line)];
     start_col = std::max(0, std::min(start_col, static_cast<int>(line.size())));
     end_col = std::max(start_col, std::min(end_col, static_cast<int>(line.size())));
+    const int removed = end_col - start_col;
     line.erase(static_cast<std::size_t>(start_col),
-               static_cast<std::size_t>(end_col - start_col));
+               static_cast<std::size_t>(removed));
+    if (removed > 0) {
+      editor_buffer_note_char_removed(buffer, start_line, start_col,
+                                      static_cast<std::size_t>(removed));
+    }
     adjust_cursors_after_col_delete(buffer, start_line, start_col, end_col);
     return;
   }
@@ -191,6 +196,8 @@ void delete_range(EditorBuffer* buffer, int start_line, int start_col, int end_l
   buffer->lines.erase(buffer->lines.begin() + start_line + 1,
                       buffer->lines.begin() + end_line + 1);
   adjust_cursors_after_multiline_delete(buffer, start_line, start_col, end_line, end_col);
+  editor_buffer_rebuild_joined(buffer);
+  buffer->semantic_layout_dirty = true;
 }
 
 bool any_cursor_has_selection(const EditorBuffer& buffer) {
@@ -400,6 +407,9 @@ void backspace_at(EditorBuffer* buffer, int line, int col) {
   buffer->lines.erase(buffer->lines.begin() + line);
   buffer->lines[static_cast<std::size_t>(line - 1)] += tail;
   editor_buffer_note_line_joined(buffer, line);
+  if (!buffer->joined_source_cache.valid) {
+    editor_buffer_rebuild_joined(buffer);
+  }
   buffer->semantic_layout_dirty = true;
   for (auto& cursor : buffer->cursors) {
     if (cursor.head.line == line) {
@@ -435,11 +445,11 @@ void delete_at(EditorBuffer* buffer, int line, int col) {
   if (line + 1 >= static_cast<int>(buffer->lines.size())) {
     return;
   }
-  editor_buffer_invalidate_joined(buffer);
-  buffer->semantic_layout_dirty = true;
   const int old_len = static_cast<int>(text.size());
   text += buffer->lines[static_cast<std::size_t>(line + 1)];
   buffer->lines.erase(buffer->lines.begin() + line + 1);
+  editor_buffer_rebuild_joined(buffer);
+  buffer->semantic_layout_dirty = true;
   for (auto& cursor : buffer->cursors) {
     if (cursor.head.line > line + 1) {
       --cursor.head.line;

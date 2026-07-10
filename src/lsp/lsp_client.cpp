@@ -253,6 +253,8 @@ void LspClient::stop() {
 
   if (child_pid_ > 0) {
     int status = 0;
+    // clangd may be SIGSTOP'd while the UI is inhibited; resume so SIGTERM can land.
+    kill(child_pid_, SIGCONT);
     for (int i = 0; i < 10; ++i) {
       const pid_t result = waitpid(child_pid_, &status, WNOHANG);
       if (result == child_pid_ || result < 0) {
@@ -1772,6 +1774,9 @@ bool LspClient::wait_for_document_ready(const std::string& key, uint64_t generat
 
   const int64_t deadline = steady_now_ms() + timeout_ms;
   while (steady_now_ms() < deadline) {
+    if (intentionally_stopping_.load(std::memory_order_acquire) || !transport_.is_running()) {
+      return false;
+    }
     {
       std::lock_guard<std::mutex> lock(mutex_);
       const auto it = documents_.find(key);

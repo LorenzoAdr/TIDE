@@ -556,6 +556,90 @@ void test_parse_debounce_coalesces_edits() {
   assert(revision_after_burst > revision_after_initial);
 }
 
+void test_duplicate_line_highlights_escape_string() {
+  const std::string line = "\treturn event == Event::Special(\"\\x1B[1;3A\");";
+  const std::string initial = "void f() {\n" + line + "\n}\n";
+  const std::string path = "dup_line.cpp";
+  wait_document_ready(path, initial);
+
+  const std::string duplicated = "void f() {\n" + line + "\n" + line + "\n}\n";
+  tree_sitter_service().prepare_document(path, duplicated);
+  for (int attempt = 0; attempt < 500; ++attempt) {
+    if (tree_sitter_service().document_ready(path, duplicated)) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  assert(tree_sitter_service().document_ready(path, duplicated));
+
+  const std::vector<LineHighlights>* highlights = nullptr;
+  for (int attempt = 0; attempt < 500; ++attempt) {
+    highlights = tree_sitter_service().highlights_for(path, duplicated);
+    if (highlights != nullptr && highlights->size() >= 3 &&
+        highlights_ready_span_count(*highlights) > 0) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  assert(highlights != nullptr);
+  assert(highlights->size() >= 3);
+
+  auto covers_keyword_return = [&](const LineHighlights& line_hl) {
+    for (const HighlightSpan& span : line_hl.spans) {
+      if (span.capture != "keyword") {
+        continue;
+      }
+      if (span.start_col <= 1 && span.end_col >= 7) {
+        return true;
+      }
+    }
+    return false;
+  };
+  auto covers_string_literal = [&](const LineHighlights& line_hl) {
+    const int q = static_cast<int>(line.find('"'));
+    assert(q > 0);
+    for (const HighlightSpan& span : line_hl.spans) {
+      if (span.capture != "string") {
+        continue;
+      }
+      if (span.start_col <= q && span.end_col >= static_cast<int>(line.size()) - 1) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  for (int line_index : {1, 2}) {
+    const LineHighlights& line_hl = (*highlights)[static_cast<std::size_t>(line_index)];
+    assert(covers_keyword_return(line_hl));
+    assert(covers_string_literal(line_hl));
+    int col = 0;
+    std::string rendered;
+    for (const HighlightSpan& span : line_hl.spans) {
+      if (span.start_col > static_cast<int>(line.size())) {
+        continue;
+      }
+      const int clamped_end = std::min(span.end_col, static_cast<int>(line.size()));
+      if (span.start_col < col) {
+        continue;
+      }
+      if (span.start_col > col) {
+        rendered += line.substr(static_cast<std::size_t>(col),
+                                static_cast<std::size_t>(span.start_col - col));
+      }
+      if (clamped_end > span.start_col) {
+        rendered += line.substr(static_cast<std::size_t>(span.start_col),
+                                static_cast<std::size_t>(clamped_end - span.start_col));
+        col = clamped_end;
+      }
+    }
+    if (col < static_cast<int>(line.size())) {
+      rendered += line.substr(static_cast<std::size_t>(col));
+    }
+    assert(rendered == line);
+  }
+}
+
 void test_normalize_editor_source_trailing_newline() {
   const std::string from_buffer = join_editor_lines({"int main() {}", "return 0;"});
   const std::string from_file = "int main() {}\nreturn 0;\n";
@@ -590,6 +674,7 @@ int main() {
   tgdb::test_local_completions_include_parameters();
   tgdb::test_sync_edit_keeps_ast_before_worker();
   tgdb::test_parse_debounce_coalesces_edits();
+  tgdb::test_duplicate_line_highlights_escape_string();
   tgdb::test_normalize_editor_source_trailing_newline();
   std::cout << "tree_sitter_test ok\n";
   return 0;

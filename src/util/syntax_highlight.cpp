@@ -33,9 +33,11 @@ const std::vector<LineHighlights>* SyntaxHighlightContext::tree_sitter_highlight
     return nullptr;
   }
   if (syntax_incremental) {
-    if (ts_line_highlights == nullptr && !file_path.empty() && lines != nullptr) {
+    const uint64_t revision = tree_sitter_service().revision_for(file_path);
+    if (ts_line_highlights == nullptr || ts_revision != revision) {
       ts_line_highlights = tree_sitter_service().stale_highlights_for(
           file_path, static_cast<int>(lines->size()));
+      ts_revision = revision;
     }
     return ts_line_highlights;
   }
@@ -73,14 +75,16 @@ uint64_t syntax_span_hash_string(uint64_t h, std::string_view s) {
 
 uint64_t syntax_line_span_cache_key(int line_index, const std::string& source_line, int col_offset,
                                     int display_len, uint64_t ts_revision,
-                                    uint64_t semantic_revision, bool syntax_incremental) {
+                                    uint64_t semantic_revision, bool syntax_incremental,
+                                    uint64_t buffer_token) {
   uint64_t h = kSyntaxSpanHashOffset;
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(line_index));
   h = syntax_span_hash_string(h, source_line);
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(col_offset));
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(display_len));
+  h = syntax_span_hash_u64(h, buffer_token);
+  h = syntax_span_hash_u64(h, ts_revision);
   if (!syntax_incremental) {
-    h = syntax_span_hash_u64(h, ts_revision);
     h = syntax_span_hash_u64(h, semantic_revision);
   }
   return h;
@@ -222,7 +226,7 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
   ctx->tree_sitter_highlights();
   const uint64_t key =
       syntax_line_span_cache_key(line_index, source_line, col_offset, display_len, ctx->ts_revision,
-                                 ctx->semantic_revision, ctx->syntax_incremental);
+                                 ctx->semantic_revision, ctx->syntax_incremental, ctx->buffer_token);
   auto& cache = *ctx->line_span_cache;
   const auto it = cache.find(key);
   if (it != cache.end()) {
@@ -243,6 +247,13 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
       entry.ts_display_spans =
           display_spans_for_line(source_hl, source_line, col_offset, display_len, tab_size);
     }
+  }
+  const bool has_ts_spans = !entry.ts_display_spans.spans.empty();
+  const bool defer_empty_ts_cache =
+      ctx->syntax_incremental && !has_ts_spans && !source_line.empty() &&
+      ctx->ts_line_highlights != nullptr;
+  if (defer_empty_ts_cache) {
+    return nullptr;
   }
   cache[key] = std::move(entry);
   return &cache[key];

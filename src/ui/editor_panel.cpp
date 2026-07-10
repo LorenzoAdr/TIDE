@@ -266,6 +266,10 @@ struct EditorPanelState {
   std::unordered_map<int, CachedViewportLineRow> viewport_line_render_cache;
   std::unordered_map<uint64_t, CachedSyntaxLineSpans> line_syntax_span_cache;
   int line_syntax_span_cache_scroll_col = -1;
+  uint64_t line_syntax_span_cache_ts_revision = 0;
+  uint64_t viewport_line_render_cache_ts_revision = 0;
+  std::string scope_completion_cache_key;
+  std::vector<CompletionItem> scope_completion_cache_items;
 };
 
 void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState* layout_state,
@@ -402,7 +406,8 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
                                         const BracketPairHighlight& bracket,
                                         const BracketPairHighlight* scope_bracket,
                                         uint64_t colored_brace_token, uint64_t semantic_revision,
-                                        uint64_t semantic_source_generation, bool git_line_changed) {
+                                        uint64_t semantic_source_generation, bool git_line_changed,
+                                        uint64_t ts_revision) {
   uint64_t h = kViewportLineHashOffset;
   h = viewport_line_hash_int(h, line.line_index);
   h = viewport_line_hash_string(h, line.line_content);
@@ -427,6 +432,7 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
   h = viewport_line_hash_bool(h, indent_guides_enabled);
   h = viewport_line_hash_int(h, scope_highlight_strength);
   h = viewport_line_hash_bool(h, typing_burst);
+  h = viewport_line_hash_u64(h, ts_revision);
   h = viewport_line_hash_bool(h, git_line_changed);
   h = viewport_line_hash_bool(h, line.symbol_press_active);
   h = viewport_line_hash_u64(h, colored_brace_token);
@@ -2108,6 +2114,76 @@ std::string completion_anchor_key(const std::string& path, int replace_line,
   return path + "|" + std::to_string(replace_line) + "|" + std::to_string(replace_start);
 }
 
+bool is_member_access_at_cursor(const EditorBuffer& buffer) {
+  const int line = buffer.primary_line();
+  const int col = buffer.primary_col();
+  if (line < 0 || line >= static_cast<int>(buffer.lines.size()) || col <= 0) {
+    return false;
+  }
+  const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
+  if (col > static_cast<int>(text.size())) {
+    return false;
+  }
+  const char prev = text[static_cast<std::size_t>(col - 1)];
+  if (prev == '.') {
+    return true;
+  }
+  return col >= 2 && text[static_cast<std::size_t>(col - 2)] == '-' && prev == '>';
+}
+
+int member_access_trigger_col(const EditorBuffer& buffer) {
+  const int line = buffer.primary_line();
+  const int col = buffer.primary_col();
+  if (line < 0 || line >= static_cast<int>(buffer.lines.size()) || col <= 0) {
+    return -1;
+  }
+  const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
+  if (col > static_cast<int>(text.size())) {
+    return -1;
+  }
+  if (text[static_cast<std::size_t>(col - 1)] == '.') {
+    return col - 1;
+  }
+  if (col >= 2 && text[static_cast<std::size_t>(col - 2)] == '-' &&
+      text[static_cast<std::size_t>(col - 1)] == '>') {
+    return col - 2;
+  }
+  return -1;
+}
+
+std::string completion_scope_key(const EditorBuffer& buffer) {
+  if (buffer.path.empty()) {
+    return {};
+  }
+  std::string key = buffer.path;
+  const int line = buffer.primary_line();
+  const std::vector<SymbolInfo> chain =
+      tree_sitter_service().scope_chain_at(buffer.path, buffer.lines, line);
+  if (chain.empty()) {
+    key += "|noscope|L";
+    key += std::to_string(line);
+  } else {
+    for (const SymbolInfo& sym : chain) {
+      key += "|";
+      key += std::to_string(static_cast<int>(sym.kind));
+      key += ":";
+      key += sym.name;
+      key += "@";
+      key += std::to_string(sym.line);
+    }
+  }
+  if (is_member_access_at_cursor(buffer)) {
+    const int trigger_col = member_access_trigger_col(buffer);
+    key += "|member@";
+    key += std::to_string(line);
+    key += ":";
+    key += std::to_string(trigger_col);
+  } else {
+    key += "|ident";
+  }
+  return key;
+}
+
 bool completion_starts_with(std::string_view haystack_lower, std::string_view query_lower) {
   return haystack_lower.size() >= query_lower.size() &&
          haystack_lower.compare(0, query_lower.size(), query_lower) == 0;
@@ -2132,6 +2208,8 @@ struct CompletionCacheEntry {
   std::string alt_lower;
   std::string sort_key;
   int source_index = 0;
+  // 0 = fresh LSP, 1 = scope LSP cache, 2 = tree-sitter / sync fallback, 3 = snippets
+  int source_priority = 0;
 };
 
 struct CompletionRankedCandidate {
@@ -2158,7 +2236,7 @@ std::optional<CompletionRankedCandidate> rank_completion_entry(
     }
     if (completion_starts_with(lower, query_lower)) {
       Attempt attempt;
-      attempt.tier = 0;
+      attempt.tier = entry.source_priority * 2;
       attempt.score = 100000 - static_cast<int>(display.size());
       attempt.match_display.assign(display);
       attempt.match_indices = completion_prefix_indices(query_lower.size());
@@ -2167,7 +2245,7 @@ std::optional<CompletionRankedCandidate> rank_completion_entry(
       }
       return;
     }
-    if (best && best->tier == 0) {
+    if (best && best->tier == entry.source_priority * 2) {
       return;
     }
     const FuzzyMatchResult fuzzy = fuzzy_match_cached(display, lower, query_lower);
@@ -2175,7 +2253,7 @@ std::optional<CompletionRankedCandidate> rank_completion_entry(
       return;
     }
     Attempt attempt;
-    attempt.tier = 1;
+    attempt.tier = entry.source_priority * 2 + 1;
     attempt.score = fuzzy.score;
     attempt.match_display.assign(display);
     attempt.match_indices = fuzzy.indices;
@@ -2247,17 +2325,95 @@ struct CompletionState {
   int replace_end = 0;
   int lsp_fetch_line = 0;
   int lsp_fetch_col = 0;
+  std::string active_scope_key;
+  std::vector<CompletionItem> scope_cached_items;
+  std::vector<CompletionItem> ts_fallback_items;
 
   void invalidate_item_cache() { item_cache_dirty = true; }
 
+  void sync_scope_cache(const EditorBuffer& buffer, EditorPanelState* panel) {
+    const std::string key = completion_scope_key(buffer);
+    if (key.empty()) {
+      return;
+    }
+    if (key == active_scope_key) {
+      return;
+    }
+    active_scope_key = key;
+    scope_cached_items.clear();
+    if (panel != nullptr && panel->scope_completion_cache_key == key &&
+        !panel->scope_completion_cache_items.empty()) {
+      scope_cached_items = panel->scope_completion_cache_items;
+    }
+  }
+
+  void commit_scope_cache(const EditorBuffer& buffer, EditorPanelState* panel,
+                          const std::vector<CompletionItem>& items) {
+    if (items.empty()) {
+      return;
+    }
+    const std::string key = completion_scope_key(buffer);
+    if (key.empty()) {
+      return;
+    }
+    active_scope_key = key;
+    scope_cached_items = items;
+    if (panel != nullptr) {
+      panel->scope_completion_cache_key = key;
+      panel->scope_completion_cache_items = items;
+    }
+  }
+
+  bool apply_polled_lsp_response(const std::string& key, std::vector<CompletionItem> items,
+                                 const EditorBuffer& buffer, EditorPanelState* panel) {
+    if (key != lsp_pending_key) {
+      return false;
+    }
+    lsp_inflight_key.clear();
+    lsp_items = std::move(items);
+    lsp_resolved_query = query;
+    lsp_resolved_key = key;
+    if (!lsp_items.empty()) {
+      commit_scope_cache(buffer, panel, lsp_items);
+      semantic_mode = true;
+    } else {
+      const std::string scope_key = completion_scope_key(buffer);
+      active_scope_key = scope_key;
+      scope_cached_items.clear();
+      if (panel != nullptr && panel->scope_completion_cache_key == scope_key) {
+        panel->scope_completion_cache_items.clear();
+      }
+      semantic_mode = false;
+    }
+    refresh_ts_fallback(buffer);
+    invalidate_item_cache();
+    return true;
+  }
+
+  void refresh_ts_fallback(const EditorBuffer& buffer) {
+    ts_fallback_items.clear();
+    if (!lsp_items.empty() || buffer.path.empty() || !is_indexed_source_path(buffer.path)) {
+      return;
+    }
+    CompletionParams params;
+    params.path = buffer.path;
+    params.text = buffer_text(buffer);
+    params.line = buffer.primary_line();
+    params.character = buffer.primary_col();
+    ts_fallback_items = tree_sitter_service().local_completions_at(params);
+  }
+
+  bool has_fallback_items() const {
+    return !scope_cached_items.empty() || !ts_fallback_items.empty() || !all_items.empty();
+  }
+
   void rebuild_item_cache() {
     item_cache.clear();
-    const std::vector<CompletionItem>& source = !lsp_items.empty() ? lsp_items : all_items;
-    item_cache.reserve(source.size() + snippet_items.size());
     int source_index = 0;
-    const auto add_item = [this, &source_index](const CompletionItem& item) {
+    const auto add_item = [this, &source_index](const CompletionItem& item, int priority) {
       CompletionCacheEntry entry;
       entry.item = item;
+      entry.source_priority = priority;
       entry.match_text = strip_symbol_kind_prefix(item.label);
       entry.match_lower = fuzzy_to_lower(entry.match_text);
       if (!item.filter_text.empty()) {
@@ -2275,12 +2431,25 @@ struct CompletionState {
       entry.source_index = source_index++;
       item_cache.push_back(std::move(entry));
     };
-    for (const CompletionItem& item : source) {
-      add_item(item);
+    const auto add_items = [&](const std::vector<CompletionItem>& items, int priority) {
+      for (const CompletionItem& item : items) {
+        add_item(item, priority);
+      }
+    };
+
+    if (!lsp_items.empty()) {
+      add_items(lsp_items, 0);
+    } else {
+      if (!scope_cached_items.empty()) {
+        add_items(scope_cached_items, 1);
+      }
+      if (!ts_fallback_items.empty()) {
+        add_items(ts_fallback_items, 2);
+      } else if (!all_items.empty()) {
+        add_items(all_items, 2);
+      }
     }
-    for (const CompletionItem& item : snippet_items) {
-      add_item(item);
-    }
+    add_items(snippet_items, 3);
     item_cache_dirty = false;
   }
 
@@ -2301,6 +2470,9 @@ struct CompletionState {
       std::sort(order.begin(), order.end(), [this](std::size_t a, std::size_t b) {
         const CompletionCacheEntry& ea = item_cache[a];
         const CompletionCacheEntry& eb = item_cache[b];
+        if (ea.source_priority != eb.source_priority) {
+          return ea.source_priority < eb.source_priority;
+        }
         if (ea.sort_key != eb.sort_key) {
           return ea.sort_key < eb.sort_key;
         }
@@ -2343,8 +2515,9 @@ struct CompletionState {
       }
     }
 
-    const std::vector<CompletionItem>& source = !lsp_items.empty() ? lsp_items : all_items;
-    semantic_mode = !source.empty() || !snippet_items.empty();
+    const bool has_semantic_source = !lsp_items.empty() || !scope_cached_items.empty() ||
+                                     !ts_fallback_items.empty() || !all_items.empty();
+    semantic_mode = has_semantic_source || !snippet_items.empty();
     if (selected >= static_cast<int>(matches.size())) {
       selected = std::max(0, static_cast<int>(matches.size()) - 1);
     }
@@ -2405,6 +2578,7 @@ struct CompletionState {
           semantic_mode = true;
         }
       }
+      ts_fallback_items = all_items;
     } else {
       snippet_items.clear();
       all_items = std::move(lsp_items);
@@ -2428,6 +2602,9 @@ struct CompletionState {
     lsp_last_request_ms = 0;
     lsp_resolved_query.clear();
     lsp_items.clear();
+    scope_cached_items.clear();
+    ts_fallback_items.clear();
+    active_scope_key.clear();
     snippet_items.clear();
     all_items.clear();
     item_cache.clear();
@@ -2603,23 +2780,6 @@ bool completion_allowed_at_cursor(EditorBuffer& buffer) {
   return cursor_in_code(buffer, line, col);
 }
 
-bool is_member_access_at_cursor(const EditorBuffer& buffer) {
-  const int line = buffer.primary_line();
-  const int col = buffer.primary_col();
-  if (line < 0 || line >= static_cast<int>(buffer.lines.size()) || col <= 0) {
-    return false;
-  }
-  const std::string& text = buffer.lines[static_cast<std::size_t>(line)];
-  if (col > static_cast<int>(text.size())) {
-    return false;
-  }
-  const char prev = text[static_cast<std::size_t>(col - 1)];
-  if (prev == '.') {
-    return true;
-  }
-  return col >= 2 && text[static_cast<std::size_t>(col - 2)] == '-' && prev == '>';
-}
-
 NavigationParams navigation_params_for_buffer(WorkspaceModel* workspace) {
   NavigationParams params;
   if (workspace == nullptr) {
@@ -2681,10 +2841,12 @@ bool try_go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
   return true;
 }
 
-void prepare_completion_at_cursor(CompletionState* completion, EditorBuffer* buffer) {
+void prepare_completion_at_cursor(CompletionState* completion, EditorBuffer* buffer,
+                                  EditorPanelState* panel = nullptr) {
   if (completion == nullptr || buffer == nullptr) {
     return;
   }
+  completion->sync_scope_cache(*buffer, panel);
   completion->prefix = completion_prefix_at_cursor(*buffer, buffer->primary());
   completion->query = completion->prefix;
   completion->selected = 0;
@@ -2797,6 +2959,9 @@ bool completion_ui_show_loading(const CompletionState* completion,
   if (completion == nullptr || !completion->open || !completion->matches.empty()) {
     return false;
   }
+  if (completion->has_fallback_items()) {
+    return false;
+  }
   if (!completion_uses_async_lsp(layout_state, symbols, buffer_path)) {
     return false;
   }
@@ -2815,7 +2980,8 @@ bool completion_ui_show_loading(const CompletionState* completion,
 }
 
 void schedule_completion_lsp_fetch(CompletionState* completion, WorkspaceModel* workspace,
-                                 MainLayoutState* layout_state, bool live_only) {
+                                 MainLayoutState* layout_state, bool live_only,
+                                 EditorPanelState* panel = nullptr) {
   if (completion == nullptr || workspace == nullptr || layout_state == nullptr ||
       layout_state->app_settings == nullptr || !layout_state->app_settings->lsp_enabled) {
     return;
@@ -2841,6 +3007,7 @@ void schedule_completion_lsp_fetch(CompletionState* completion, WorkspaceModel* 
   if (buffer.path.empty() || !is_indexed_source_path(buffer.path)) {
     return;
   }
+  completion->sync_scope_cache(buffer, panel);
   const std::string anchor_key =
       completion_anchor_key(buffer.path, completion->replace_line, completion->replace_start);
   if (anchor_key.empty()) {
@@ -2868,13 +3035,27 @@ void schedule_completion_lsp_fetch(CompletionState* completion, WorkspaceModel* 
 }
 
 void schedule_live_lsp_fetch(CompletionState* completion, WorkspaceModel* workspace,
-                             MainLayoutState* layout_state) {
-  schedule_completion_lsp_fetch(completion, workspace, layout_state, true);
+                             MainLayoutState* layout_state, EditorPanelState* panel = nullptr) {
+  schedule_completion_lsp_fetch(completion, workspace, layout_state, true, panel);
+}
+
+bool try_poll_lsp_completion(CompletionState* completion, WorkspaceModel* workspace,
+                             const std::shared_ptr<ISymbolProvider>& symbols,
+                             EditorPanelState* panel, const std::string& key) {
+  if (completion == nullptr || workspace == nullptr || symbols == nullptr || key.empty()) {
+    return false;
+  }
+  if (const auto polled = symbols->poll_completion(key)) {
+    workspace->ensure_buffer();
+    return completion->apply_polled_lsp_response(key, std::move(*polled), workspace->buffer,
+                                                 panel);
+  }
+  return false;
 }
 
 void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
                          const std::shared_ptr<ISymbolProvider>& symbols,
-                         MainLayoutState* layout_state, const EditorPanelState* panel) {
+                         MainLayoutState* layout_state, EditorPanelState* panel) {
   if (completion == nullptr || workspace == nullptr || layout_state == nullptr ||
       !completion->open) {
     return;
@@ -2914,43 +3095,58 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
       completion->lsp_pending_key != completion->lsp_resolved_key &&
       completion->lsp_request_due_ms > 0 &&
       now_ms > completion->lsp_request_due_ms + lsp_wait_ms) {
-    completion->lsp_resolved_key = completion->lsp_pending_key;
-    completion->lsp_resolved_query = completion->query;
-    completion->lsp_inflight_key.clear();
-    completion->refresh_matches();
-    maybe_close_completion_if_empty(completion, layout_state, symbols, buffer_path,
-                                    buffer_text_snapshot);
+    if (!try_poll_lsp_completion(completion, workspace, symbols, panel,
+                                 completion->lsp_pending_key)) {
+      completion->lsp_resolved_key = completion->lsp_pending_key;
+      completion->lsp_resolved_query = completion->query;
+      completion->lsp_inflight_key.clear();
+      completion->refresh_matches();
+      maybe_close_completion_if_empty(completion, layout_state, symbols, buffer_path,
+                                      buffer_text_snapshot);
+    } else {
+      completion->refresh_matches();
+      if (completion->matches.empty()) {
+        maybe_close_completion_if_empty(completion, layout_state, symbols, buffer_path,
+                                        buffer_text_snapshot);
+      }
+    }
     layout_state->request_ui_tick = true;
     return;
   }
-  if (completion->lsp_inflight_key.empty()) {
-    if (!completion->lsp_pending_key.empty() &&
-        completion->lsp_pending_key == completion->lsp_resolved_key) {
+
+  const auto poll_completion_key = [&](const std::string& key) -> bool {
+    if (!try_poll_lsp_completion(completion, workspace, symbols, panel, key)) {
+      return false;
+    }
+    completion->refresh_matches();
+    if (completion->matches.empty()) {
+      maybe_close_completion_if_empty(completion, layout_state, symbols, buffer_path,
+                                      buffer_text_snapshot);
+    } else {
+      layout_state->request_ui_tick = true;
+    }
+    return true;
+  };
+
+  if (!completion->lsp_inflight_key.empty()) {
+    if (poll_completion_key(completion->lsp_inflight_key)) {
       return;
     }
-    if (!completion->lsp_pending_key.empty() && now_ms < completion->lsp_request_due_ms) {
+  } else if (!completion->lsp_pending_key.empty() &&
+             completion->lsp_pending_key != completion->lsp_resolved_key) {
+    if (poll_completion_key(completion->lsp_pending_key)) {
       return;
     }
   }
 
-  if (!completion->lsp_inflight_key.empty()) {
-    if (const auto polled = symbols->poll_completion(completion->lsp_inflight_key)) {
-      const std::string key = completion->lsp_inflight_key;
-      completion->lsp_inflight_key.clear();
-      if (key == completion->lsp_pending_key) {
-        completion->lsp_items = std::move(*polled);
-        completion->lsp_resolved_query = completion->query;
-        completion->lsp_resolved_key = key;
-        completion->semantic_mode = !completion->lsp_items.empty();
-        completion->invalidate_item_cache();
-        completion->refresh_matches();
-        if (completion->matches.empty()) {
-          maybe_close_completion_if_empty(completion, layout_state, symbols, buffer_path,
-                                          buffer_text_snapshot);
-        } else {
-          layout_state->request_ui_tick = true;
-        }
-      }
+  if (completion->lsp_inflight_key.empty()) {
+    if (!completion->lsp_pending_key.empty() &&
+        completion->lsp_pending_key == completion->lsp_resolved_key &&
+        !completion->lsp_items.empty()) {
+      return;
+    }
+    if (!completion->lsp_pending_key.empty() && now_ms < completion->lsp_request_due_ms) {
+      return;
     }
   }
 
@@ -2979,12 +3175,19 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
   symbols->request_completion(params, completion->lsp_pending_key);
   completion->lsp_inflight_key = completion->lsp_pending_key;
   completion->lsp_last_request_ms = now_ms;
+  if (try_poll_lsp_completion(completion, workspace, symbols, panel, completion->lsp_pending_key)) {
+    completion->refresh_matches();
+    if (!completion->matches.empty()) {
+      layout_state->request_ui_tick = true;
+    }
+  }
 }
 
 void update_live_completion(CompletionState* completion, WorkspaceModel* workspace,
                             const std::shared_ptr<ISymbolProvider>& symbols,
                             SymbolWorkspaceIndexer* symbol_indexer,
-                            MainLayoutState* layout_state, EditorBuffer* buffer) {
+                            MainLayoutState* layout_state, EditorBuffer* buffer,
+                            EditorPanelState* panel = nullptr) {
   if (completion == nullptr || workspace == nullptr || symbols == nullptr ||
       buffer->path.empty()) {
     return;
@@ -2994,7 +3197,7 @@ void update_live_completion(CompletionState* completion, WorkspaceModel* workspa
     return;
   }
 
-  prepare_completion_at_cursor(completion, buffer);
+  prepare_completion_at_cursor(completion, buffer, panel);
   if (completion->prefix.empty() && !is_member_access_at_cursor(*buffer)) {
     completion->close(layout_state);
     return;
@@ -3007,9 +3210,10 @@ void update_live_completion(CompletionState* completion, WorkspaceModel* workspa
   } else {
     completion->snippet_items.clear();
   }
+  completion->refresh_ts_fallback(*buffer);
   completion->invalidate_item_cache();
   completion->refresh_matches();
-  schedule_live_lsp_fetch(completion, workspace, layout_state);
+  schedule_live_lsp_fetch(completion, workspace, layout_state, panel);
   maybe_close_completion_if_empty(completion, layout_state, symbols, buffer->path,
                                   buffer_text(*buffer));
   if (layout_state != nullptr &&
@@ -3023,7 +3227,7 @@ void maybe_open_live_completion(CompletionState* completion, WorkspaceModel* wor
                                 const std::shared_ptr<ISymbolProvider>& symbols,
                                 SymbolWorkspaceIndexer* symbol_indexer,
                                 MainLayoutState* layout_state, EditorBuffer* buffer,
-                                char typed) {
+                                EditorPanelState* panel, char typed) {
   const bool cpp_file = !buffer->path.empty() && is_indexed_source_path(buffer->path);
   buffer->ensure_cursors();
   const std::string prefix = word_at_cursor(*buffer, buffer->primary());
@@ -3039,7 +3243,8 @@ void maybe_open_live_completion(CompletionState* completion, WorkspaceModel* wor
     if (completion != nullptr && completion->open && !completion->live_mode) {
       return;
     }
-    update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state, buffer);
+    update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state, buffer,
+                           panel);
     return;
   }
 
@@ -3069,7 +3274,8 @@ void maybe_open_live_completion(CompletionState* completion, WorkspaceModel* wor
     if (completion != nullptr && completion->open && !completion->live_mode) {
       return;
     }
-    update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state, buffer);
+    update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state, buffer,
+                           panel);
     return;
   }
 
@@ -3102,7 +3308,8 @@ void maybe_open_live_completion(CompletionState* completion, WorkspaceModel* wor
   if (completion != nullptr && completion->open && !completion->live_mode) {
     return;
   }
-  update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state, buffer);
+  update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state, buffer,
+                       panel);
 }
 
 int line_number_width(int total_lines) {
@@ -3775,7 +3982,8 @@ bool handle_goto_line_keys(GotoLineState* goto_state, MainLayoutState* layout_st
 void open_completion(CompletionState* completion, WorkspaceModel* workspace,
                      const std::shared_ptr<ISymbolProvider>& symbols,
                      SymbolWorkspaceIndexer* symbol_indexer, EditorBuffer* buffer,
-                     EditorFindState* find, MainLayoutState* layout_state) {
+                     EditorFindState* find, MainLayoutState* layout_state,
+                     EditorPanelState* panel = nullptr) {
   TGDB_MON_SCOPE("editor", "open_completion");
   if (completion == nullptr) {
     return;
@@ -3807,10 +4015,11 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
   completion->matches.clear();
   completion->invalidate_item_cache();
   completion->semantic_mode = false;
+  completion->sync_scope_cache(*buffer, panel);
   completion->sync_symbols(workspace, symbols, symbol_indexer, false);
   if (completion_uses_async_lsp(layout_state, symbols, buffer->path)) {
     symbols->flush_document_sync(buffer->path);
-    schedule_completion_lsp_fetch(completion, workspace, layout_state, false);
+    schedule_completion_lsp_fetch(completion, workspace, layout_state, false, panel);
   } else {
     completion->sync_symbols(workspace, symbols, symbol_indexer, true);
   }
@@ -3818,13 +4027,15 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
     completion->lsp_items = std::move(completion->all_items);
     completion->all_items.clear();
     completion->semantic_mode = !completion->lsp_items.empty();
+    completion->commit_scope_cache(*buffer, panel, completion->lsp_items);
     completion->invalidate_item_cache();
   }
+  completion->refresh_ts_fallback(*buffer);
   completion->refresh_matches();
   if (completion_uses_async_lsp(layout_state, symbols, buffer->path)) {
     layout_state->request_ui_tick = true;
   } else {
-    schedule_live_lsp_fetch(completion, workspace, layout_state);
+    schedule_live_lsp_fetch(completion, workspace, layout_state, panel);
   }
   if (!completion->lsp_items.empty()) {
     completion->lsp_resolved_key = completion->lsp_pending_key;
@@ -3974,7 +4185,7 @@ bool handle_completion_keys(CompletionState* completion, WorkspaceModel* workspa
           layout_state->text_input_focus = TextInputFocus::None;
         }
         update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
-                               buffer);
+                               buffer, panel);
         return true;
       }
       completion->query += ch;
@@ -4129,7 +4340,8 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (completion != nullptr && completion->open &&
       event_is_completion_trigger(event, layout_state != nullptr &&
                                             layout_state->editor_ctrl_modifier_held)) {
-    open_completion(completion, workspace, symbols, symbol_indexer, buffer, find, layout_state);
+    open_completion(completion, workspace, symbols, symbol_indexer, buffer, find, layout_state,
+                    panel);
     return true;
   }
 
@@ -4177,7 +4389,8 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event_is_completion_trigger(event, layout_state != nullptr &&
                                               layout_state->editor_ctrl_modifier_held)) {
-    open_completion(completion, workspace, symbols, symbol_indexer, buffer, find, layout_state);
+    open_completion(completion, workspace, symbols, symbol_indexer, buffer, find, layout_state,
+                    panel);
     return true;
   }
   if (event_is_go_to_definition(event)) {
@@ -4313,7 +4526,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
           completion->open && completion->live_mode &&
           (event == Event::Backspace || event == Event::Delete)) {
         update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
-                               buffer);
+                               buffer, panel);
       }
       return true;
     }
@@ -4453,7 +4666,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     notify_editor_buffer_changed(workspace, panel, symbols);
     if (completion != nullptr && completion->open && completion->live_mode) {
       update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
-                             buffer);
+                             buffer, panel);
     }
     return true;
   }
@@ -4463,7 +4676,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     notify_editor_buffer_changed(workspace, panel, symbols);
     if (completion != nullptr && completion->open && completion->live_mode) {
       update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
-                             buffer);
+                             buffer, panel);
     }
     return true;
   }
@@ -4473,7 +4686,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     notify_editor_buffer_changed(workspace, panel, symbols);
     if (completion != nullptr && completion->open && completion->live_mode) {
       update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
-                             buffer);
+                             buffer, panel);
     }
     return true;
   }
@@ -4483,7 +4696,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     notify_editor_buffer_changed(workspace, panel, symbols);
     if (completion != nullptr && completion->open && completion->live_mode) {
       update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
-                             buffer);
+                             buffer, panel);
     }
     return true;
   }
@@ -4512,7 +4725,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       notify_editor_buffer_changed(workspace, panel, symbols);
       maybe_open_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
-                                 buffer, typed);
+                                 buffer, panel, typed);
       return true;
     }
   }
@@ -4806,6 +5019,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->viewport_line_render_cache.clear();
       panel_state->line_syntax_span_cache.clear();
       panel_state->line_syntax_span_cache_scroll_col = -1;
+      panel_state->scope_completion_cache_key.clear();
+      panel_state->scope_completion_cache_items.clear();
       panel_state->cached_symbols_path.clear();
       panel_state->cached_semantic_path.clear();
       panel_state->last_semantic_highlight_revision = 0;
@@ -4857,6 +5072,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (buffer.view_token != panel_state->last_view_token) {
       panel_state->last_view_token = buffer.view_token;
     }
+
+    const uint64_t ts_highlight_revision =
+        !buffer.path.empty() ? tree_sitter_service().revision_for(buffer.path) : 0;
 
     const bool indexed_cpp =
         !buffer.path.empty() && is_indexed_source_path(buffer.path);
@@ -5187,9 +5405,15 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     IndentGuideTracker& guide_tracker = panel_state->guide_tracker_cache;
 
-    if (buffer.scroll_col != panel_state->line_syntax_span_cache_scroll_col) {
+    if (buffer.scroll_col != panel_state->line_syntax_span_cache_scroll_col ||
+        ts_highlight_revision != panel_state->line_syntax_span_cache_ts_revision) {
       panel_state->line_syntax_span_cache.clear();
       panel_state->line_syntax_span_cache_scroll_col = buffer.scroll_col;
+      panel_state->line_syntax_span_cache_ts_revision = ts_highlight_revision;
+    }
+    if (ts_highlight_revision != panel_state->viewport_line_render_cache_ts_revision) {
+      panel_state->viewport_line_render_cache.clear();
+      panel_state->viewport_line_render_cache_ts_revision = ts_highlight_revision;
     }
 
     Elements gutter_rows;
@@ -5200,6 +5424,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     highlight_ctx.lines = &buffer.lines;
     highlight_ctx.joined_override = &buffer_source;
     highlight_ctx.buffer_token = buffer.view_token;
+    highlight_ctx.ts_revision = ts_highlight_revision;
     highlight_ctx.semantic_revision = panel_state->last_semantic_highlight_revision;
     highlight_ctx.line_span_cache = &panel_state->line_syntax_span_cache;
     highlight_ctx.syntax_incremental = typing_burst;
@@ -5294,7 +5519,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           helix_relative, gutter_w, fold_gutter_enabled, gutter_markers, indent_guides_enabled,
           scope_highlight_strength, typing_burst, bracket, scope_bracket_ptr,
           panel_state->colored_brace_cache_token, semantic_revision, semantic_source_generation,
-          git_line_changed(panel_state.get(), i));
+          git_line_changed(panel_state.get(), i), ts_highlight_revision);
 
       auto cache_it = panel_state->viewport_line_render_cache.find(i);
       if (!caret_line && cache_it != panel_state->viewport_line_render_cache.end() &&

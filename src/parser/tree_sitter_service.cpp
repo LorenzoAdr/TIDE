@@ -158,12 +158,19 @@ const std::vector<LineHighlights>* TreeSitterService::stale_highlights_for(
 
 const std::vector<LineHighlights>* TreeSitterService::stale_highlights_for(
     const std::string& path, int line_count) {
-  const std::vector<LineHighlights>* highlights = stale_highlights_for(path);
-  if (highlights == nullptr || line_count <= 0 ||
-      static_cast<int>(highlights->size()) != line_count) {
+  const std::string key = cache_key_for(path);
+  DocumentPtr doc = cache_.lookup(key);
+  if (doc == nullptr || doc->line_highlights.empty() || line_count <= 0) {
     return nullptr;
   }
-  return highlights;
+  if (static_cast<int>(doc->line_highlights.size()) == line_count) {
+    return &doc->line_highlights;
+  }
+  // Worker refresh pending: prefer stale colors over a full plain-text flash.
+  if (!doc->highlights_ready) {
+    return &doc->line_highlights;
+  }
+  return nullptr;
 }
 
 ftxui::Element TreeSitterService::highlight_line(const std::string& path,
