@@ -56,6 +56,7 @@
 #include "ftxui/screen/box.hpp"
 #include "i18n/tr.hpp"
 #include "ui/clickable.hpp"
+#include "ui/editor_grid_node.hpp"
 #include "ui/hover_effects.hpp"
 #include "ui/editor_tab_bar.hpp"
 #include "ui/press_ids.hpp"
@@ -152,8 +153,12 @@ struct GitHistoryModalState {
 
 struct CachedViewportLineRow {
   uint64_t key = 0;
-  Element gutter;
-  Element code;
+  // Rasterized Pixels (see editor_grid_node.hpp), not Element trees: on a cache hit we
+  // want to reuse the finished cells directly (a cheap shared_ptr copy + PixelAt blit),
+  // instead of reusing an Element that FTXUI would still have to walk and re-apply every
+  // Decorator to on every single Draw() call regardless of whether it changed.
+  std::shared_ptr<EditorPixelRow> gutter;
+  std::shared_ptr<EditorPixelRow> code;
 };
 
 struct EditorPanelState {
@@ -5514,8 +5519,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->viewport_line_render_cache_ts_revision = ts_highlight_revision;
     }
 
-    Elements gutter_rows;
-    Elements code_rows;
+    std::vector<std::shared_ptr<EditorPixelRow>> gutter_pixel_rows;
+    std::vector<std::shared_ptr<EditorPixelRow>> code_pixel_rows;
     const std::string& buffer_source = editor_buffer_joined_source(buffer);
     SyntaxHighlightContext highlight_ctx;
     highlight_ctx.file_path = buffer.path;
@@ -5635,8 +5640,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       auto cache_it = panel_state->viewport_line_render_cache.find(i);
       if (!caret_line && cache_it != panel_state->viewport_line_render_cache.end() &&
           cache_it->second.key == render_key) {
-        gutter_rows.push_back(cache_it->second.gutter);
-        code_rows.push_back(cache_it->second.code);
+        // Cache hit: reuse the already-rasterized Pixels (cheap shared_ptr copy) instead
+        // of an Element that FTXUI's Draw() would still walk and re-decorate from scratch
+        // on every frame even though nothing about this line actually changed.
+        gutter_pixel_rows.push_back(cache_it->second.gutter);
+        code_pixel_rows.push_back(cache_it->second.code);
         continue;
       }
 
@@ -5694,26 +5702,42 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
       CachedViewportLineRow cached_row;
       cached_row.key = render_key;
-      cached_row.gutter = gutter_row;
-      cached_row.code = code_row;
-      panel_state->viewport_line_render_cache[i] = std::move(cached_row);
-      gutter_rows.push_back(panel_state->viewport_line_render_cache[i].gutter);
-      code_rows.push_back(panel_state->viewport_line_render_cache[i].code);
+      {
+        // Phase 0 instrumentation: this is the *new* cost a cache miss pays (build the
+        // Element exactly as before, then rasterize it once) in exchange for every
+        // subsequent frame -- hit or miss -- skipping FTXUI's per-frame tree-walk entirely
+        // (see render.editor.grid.* below, timed inside EditorGridNode::Render).
+        UiSyncPhaseScope rasterize_scope(ui_perf, "render.editor.lines.rasterize");
+        cached_row.gutter = PixelRowFromElement(gutter_row, gutter_w);
+        cached_row.code = PixelRowFromElement(code_row, code_width);
+      }
+      panel_state->viewport_line_render_cache[i] = cached_row;
+      gutter_pixel_rows.push_back(cached_row.gutter);
+      code_pixel_rows.push_back(cached_row.code);
     }
     }
     prune_viewport_line_render_cache(panel_state.get(), viewport_lines);
-    if (code_rows.empty()) {
-      gutter_rows.push_back(text(format_line_number(1, gutter_w)) | color(theme::Muted()) |
-                            bgcolor(theme::CodeBg()));
-      code_rows.push_back(text(" ") | bgcolor(theme::CodeBg()));
+    if (code_pixel_rows.empty()) {
+      gutter_pixel_rows.push_back(
+          PixelRowFromElement(text(format_line_number(1, gutter_w)) | color(theme::Muted()) |
+                                  bgcolor(theme::CodeBg()),
+                              gutter_w));
+      code_pixel_rows.push_back(
+          PixelRowFromElement(text(" ") | bgcolor(theme::CodeBg()), code_width));
     }
 
-    const int rendered_lines = static_cast<int>(code_rows.size());
+    const int rendered_lines = static_cast<int>(code_pixel_rows.size());
 
-    Element gutter = vbox(std::move(gutter_rows)) | reflect(panel_state->gutter_box) |
-                     bgcolor(theme::CodeBg());
-    Element code = vbox(std::move(code_rows)) | flex | reflect(panel_state->code_box) |
-                   bgcolor(theme::CodeBg());
+    // Phase 1: instead of a vbox(Elements) that FTXUI has to walk and re-decorate cell by
+    // cell on every single Draw() call, these are leaf nodes that blit already-rasterized
+    // Pixels directly into the Screen. See ui/editor_grid_node.hpp for the rationale and
+    // render.editor.grid.gutter/code below for the measured cost of that direct write.
+    Element gutter = MakeEditorPixelGrid(std::move(gutter_pixel_rows), gutter_w, ui_perf,
+                                         "render.editor.grid.gutter") |
+                     reflect(panel_state->gutter_box) | bgcolor(theme::CodeBg());
+    Element code = MakeEditorPixelGrid(std::move(code_pixel_rows), code_width, ui_perf,
+                                       "render.editor.grid.code") |
+                   flex | reflect(panel_state->code_box) | bgcolor(theme::CodeBg());
     const bool scroll_hovered =
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kEditorScrollbar);
     const bool scroll_active =
