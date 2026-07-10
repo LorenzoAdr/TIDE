@@ -112,6 +112,84 @@ bool ident_range_at_cursor(const EditorBuffer& buffer, const MultiCursor& cursor
   return true;
 }
 
+bool completion_replace_range_at_cursor(const EditorBuffer& buffer, const MultiCursor& cursor,
+                                          int* start_col, int* end_col) {
+  if (start_col == nullptr || end_col == nullptr || buffer.lines.empty()) {
+    return false;
+  }
+  const int line_idx =
+      std::max(0, std::min(cursor.head.line, static_cast<int>(buffer.lines.size()) - 1));
+  const std::string& line = buffer.lines[static_cast<std::size_t>(line_idx)];
+  const int col = std::max(0, std::min(cursor.head.col, static_cast<int>(line.size())));
+
+  if (col > 0 && line[static_cast<std::size_t>(col - 1)] == '.') {
+    *start_col = col;
+    *end_col = col;
+    return true;
+  }
+  if (col >= 2 && line[static_cast<std::size_t>(col - 2)] == '-' &&
+      line[static_cast<std::size_t>(col - 1)] == '>') {
+    *start_col = col;
+    *end_col = col;
+    return true;
+  }
+
+  int probe = col;
+  if (probe < static_cast<int>(line.size()) && is_ident_char(line[static_cast<std::size_t>(probe)])) {
+    // Cursor on a member identifier character.
+  } else if (probe > 0 && is_ident_char(line[static_cast<std::size_t>(probe - 1)])) {
+    probe = probe - 1;
+  } else {
+    return ident_range_at_cursor(buffer, cursor, start_col, end_col);
+  }
+
+  int member_start = probe;
+  while (member_start > 0 && is_ident_char(line[static_cast<std::size_t>(member_start - 1)])) {
+    --member_start;
+  }
+  if (member_start > 0 && line[static_cast<std::size_t>(member_start - 1)] == '.') {
+    int end = member_start;
+    while (end < static_cast<int>(line.size()) &&
+           is_ident_char(line[static_cast<std::size_t>(end)])) {
+      ++end;
+    }
+    *start_col = member_start;
+    *end_col = end;
+    return true;
+  }
+  if (member_start >= 2 && line[static_cast<std::size_t>(member_start - 2)] == '-' &&
+      line[static_cast<std::size_t>(member_start - 1)] == '>') {
+    int end = member_start;
+    while (end < static_cast<int>(line.size()) &&
+           is_ident_char(line[static_cast<std::size_t>(end)])) {
+      ++end;
+    }
+    *start_col = member_start;
+    *end_col = end;
+    return true;
+  }
+
+  return ident_range_at_cursor(buffer, cursor, start_col, end_col);
+}
+
+std::string completion_prefix_at_cursor(const EditorBuffer& buffer, const MultiCursor& cursor) {
+  if (buffer.lines.empty()) {
+    return {};
+  }
+  const int line_idx =
+      std::max(0, std::min(cursor.head.line, static_cast<int>(buffer.lines.size()) - 1));
+  const std::string& line = buffer.lines[static_cast<std::size_t>(line_idx)];
+  int start_col = 0;
+  int end_col = 0;
+  if (!completion_replace_range_at_cursor(buffer, cursor, &start_col, &end_col)) {
+    return {};
+  }
+  start_col = std::max(0, std::min(start_col, static_cast<int>(line.size())));
+  end_col = std::max(start_col, std::min(end_col, static_cast<int>(line.size())));
+  return line.substr(static_cast<std::size_t>(start_col),
+                     static_cast<std::size_t>(end_col - start_col));
+}
+
 std::string selection_text(const EditorBuffer& buffer, const MultiCursor& cursor) {
   if (!cursor.has_selection()) {
     return {};

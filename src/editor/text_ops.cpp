@@ -526,7 +526,6 @@ std::string smart_newline_indent(const std::string& line, int col) {
 }
 
 void newline_at(EditorBuffer* buffer, int line, int col, bool smart_indent) {
-  editor_buffer_invalidate_joined(buffer);
   if (buffer != nullptr) {
     buffer->semantic_layout_dirty = true;
   }
@@ -536,6 +535,7 @@ void newline_at(EditorBuffer* buffer, int line, int col, bool smart_indent) {
   const std::string indent = smart_indent ? smart_newline_indent(text, col) : std::string{};
   const int indent_len = static_cast<int>(indent.size());
   buffer->lines.insert(buffer->lines.begin() + line + 1, indent + tail);
+  editor_buffer_rebuild_joined(buffer);
 
   for (auto& cursor : buffer->cursors) {
     if (cursor.head.line == line) {
@@ -892,7 +892,8 @@ void apply_completion_at_all_cursors(EditorBuffer* buffer, const SnippetResult& 
   for (std::size_t i = 0; i < buffer->cursors.size(); ++i) {
     Site site;
     site.line = buffer->cursors[i].head.line;
-    ident_range_at_cursor(*buffer, buffer->cursors[i], &site.start_col, &site.end_col);
+    completion_replace_range_at_cursor(*buffer, buffer->cursors[i], &site.start_col,
+                                       &site.end_col);
     site.cursor_index = i;
     sites.push_back(site);
   }

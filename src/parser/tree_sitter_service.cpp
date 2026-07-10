@@ -1,5 +1,6 @@
 #include "parser/tree_sitter_service.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <sstream>
 
@@ -106,6 +107,17 @@ std::vector<SymbolInfo> TreeSitterService::symbols_for_buffer(
   return symbols_for_file(path, join_editor_lines(lines));
 }
 
+namespace {
+
+int source_line_count(const std::string& source) {
+  if (source.empty()) {
+    return 1;
+  }
+  return static_cast<int>(std::count(source.begin(), source.end(), '\n') + 1);
+}
+
+}  // namespace
+
 const std::vector<LineHighlights>* TreeSitterService::highlights_for(const std::string& path,
                                                                         const std::string& source) {
   const std::string canonical = normalize_editor_source(source);
@@ -118,8 +130,15 @@ const std::vector<LineHighlights>* TreeSitterService::highlights_for(const std::
   if (doc == nullptr) {
     return nullptr;
   }
-  if (!doc->line_highlights.empty()) {
-    return &doc->line_highlights;
+  const int line_count = source_line_count(canonical);
+  if (doc->source == canonical && !doc->line_highlights.empty()) {
+    if (static_cast<int>(doc->line_highlights.size()) == line_count) {
+      return &doc->line_highlights;
+    }
+    if (!doc->highlights_ready) {
+      return &doc->line_highlights;
+    }
+    return nullptr;
   }
   if (doc->source != canonical || !doc->highlights_ready) {
     return nullptr;
@@ -135,6 +154,16 @@ const std::vector<LineHighlights>* TreeSitterService::stale_highlights_for(
     return nullptr;
   }
   return &doc->line_highlights;
+}
+
+const std::vector<LineHighlights>* TreeSitterService::stale_highlights_for(
+    const std::string& path, int line_count) {
+  const std::vector<LineHighlights>* highlights = stale_highlights_for(path);
+  if (highlights == nullptr || line_count <= 0 ||
+      static_cast<int>(highlights->size()) != line_count) {
+    return nullptr;
+  }
+  return highlights;
 }
 
 ftxui::Element TreeSitterService::highlight_line(const std::string& path,

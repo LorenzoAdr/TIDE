@@ -2685,12 +2685,12 @@ void prepare_completion_at_cursor(CompletionState* completion, EditorBuffer* buf
   if (completion == nullptr || buffer == nullptr) {
     return;
   }
-  completion->prefix = word_at_cursor(*buffer, buffer->primary());
+  completion->prefix = completion_prefix_at_cursor(*buffer, buffer->primary());
   completion->query = completion->prefix;
   completion->selected = 0;
   completion->replace_line = buffer->primary().head.line;
-  ident_range_at_cursor(*buffer, buffer->primary(), &completion->replace_start,
-                        &completion->replace_end);
+  completion_replace_range_at_cursor(*buffer, buffer->primary(), &completion->replace_start,
+                                     &completion->replace_end);
 }
 
 bool completion_uses_async_lsp(MainLayoutState* layout_state,
@@ -3788,12 +3788,12 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
   }
   completion->open = true;
   completion->live_mode = false;
-  completion->prefix = word_at_cursor(*buffer, buffer->primary());
+  completion->prefix = completion_prefix_at_cursor(*buffer, buffer->primary());
   completion->query.clear();
   completion->selected = 0;
   completion->replace_line = buffer->primary().head.line;
-  ident_range_at_cursor(*buffer, buffer->primary(), &completion->replace_start,
-                        &completion->replace_end);
+  completion_replace_range_at_cursor(*buffer, buffer->primary(), &completion->replace_start,
+                                     &completion->replace_end);
   completion->lsp_fetch_key.clear();
   completion->lsp_pending_key.clear();
   completion->lsp_inflight_key.clear();

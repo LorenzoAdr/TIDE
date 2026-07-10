@@ -29,6 +29,11 @@ std::string word_at_cursor(const EditorBuffer& buffer, const MultiCursor& cursor
 std::string word_at_line_col(const std::string& line, int col);
 bool ident_range_at_cursor(const EditorBuffer& buffer, const MultiCursor& cursor,
                              int* start_col, int* end_col);
+// Replace range for completion: after '.' or '->' only replaces the member suffix, not the
+// receiver expression.
+bool completion_replace_range_at_cursor(const EditorBuffer& buffer, const MultiCursor& cursor,
+                                        int* start_col, int* end_col);
+std::string completion_prefix_at_cursor(const EditorBuffer& buffer, const MultiCursor& cursor);
 std::string selection_text(const EditorBuffer& buffer, const MultiCursor& cursor);
 
 std::string search_needle(const EditorBuffer& buffer);

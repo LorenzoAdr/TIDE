@@ -70,6 +70,19 @@ std::optional<TSInputEdit> single_edit_between(const std::string& old_source,
   return edit;
 }
 
+int count_source_lines(const std::string& source) {
+  if (source.empty()) {
+    return 1;
+  }
+  int lines = 1;
+  for (char ch : source) {
+    if (ch == '\n') {
+      ++lines;
+    }
+  }
+  return lines;
+}
+
 TSTree* parse_source(TSParser* parser, const std::string& source, const std::string& previous_source,
                      TSTree* previous_tree) {
   if (previous_tree != nullptr && !previous_source.empty()) {
@@ -101,11 +114,46 @@ bool apply_sync_source_edit(DocumentEntry* entry, const std::string& canonical) 
   if (!edit.has_value()) {
     return false;
   }
-  ts_tree_edit(entry->tree, &*edit);
+
+  const int old_line_count = count_source_lines(entry->source);
+  const int new_line_count = count_source_lines(canonical);
+  const bool line_count_changed = old_line_count != new_line_count;
+
+  if (!line_count_changed) {
+    ts_tree_edit(entry->tree, &*edit);
+    entry->source = canonical;
+    entry->parse_ready = true;
+    entry->highlights_ready = false;
+    entry->symbols_ready = false;
+    return true;
+  }
+
+  const std::string old_source = entry->source;
+
+  TSParser* parser = ts_parser_new();
+  ts_parser_set_language(parser, tree_sitter_cpp_language());
+  TSTree* new_tree = parse_source(parser, canonical, old_source, entry->tree);
+  ts_parser_delete(parser);
+
+  if (new_tree == nullptr) {
+    return false;
+  }
+  if (entry->tree != nullptr) {
+    ts_tree_delete(entry->tree);
+  }
+  entry->tree = new_tree;
   entry->source = canonical;
   entry->parse_ready = true;
-  entry->highlights_ready = false;
   entry->symbols_ready = false;
+
+  const TSNode root = ts_tree_root_node(entry->tree);
+  if (ts_node_is_null(root)) {
+    entry->highlights_ready = false;
+    return true;
+  }
+
+  entry->line_highlights = highlights_for_document(root, canonical);
+  entry->highlights_ready = !entry->line_highlights.empty();
   return true;
 }
 
@@ -242,7 +290,11 @@ void TreeSitterDocumentCache::request_prepare(const std::string& path,
 
     source_changed = entry->source != canonical;
     if (source_changed) {
-      if (!apply_sync_source_edit(entry.get(), canonical)) {
+      if (apply_sync_source_edit(entry.get(), canonical)) {
+        if (entry->highlights_ready) {
+          entry->revision = next_revision_++;
+        }
+      } else {
         debounced.previous_source = entry->source;
         debounced.previous_tree = entry->tree;
         entry->tree = nullptr;

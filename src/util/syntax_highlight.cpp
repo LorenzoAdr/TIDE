@@ -33,8 +33,9 @@ const std::vector<LineHighlights>* SyntaxHighlightContext::tree_sitter_highlight
     return nullptr;
   }
   if (syntax_incremental) {
-    if (ts_line_highlights == nullptr && !file_path.empty()) {
-      ts_line_highlights = tree_sitter_service().stale_highlights_for(file_path);
+    if (ts_line_highlights == nullptr && !file_path.empty() && lines != nullptr) {
+      ts_line_highlights = tree_sitter_service().stale_highlights_for(
+          file_path, static_cast<int>(lines->size()));
     }
     return ts_line_highlights;
   }
