@@ -448,7 +448,11 @@ void indent_lines(EditorBuffer* buffer) {
       if (line < 0 || line >= static_cast<int>(buffer->lines.size())) {
         continue;
       }
-      buffer->lines[static_cast<std::size_t>(line)].insert(0, static_cast<std::size_t>(tab), ' ');
+      {
+        std::string indented = buffer->lines[static_cast<std::size_t>(line)];
+        indented.insert(0, static_cast<std::size_t>(tab), ' ');
+        buffer->lines.set_line(line, std::move(indented));
+      }
       for (auto& other : buffer->cursors) {
         if (other.head.line == line && other.head.col >= 0) {
           other.head.col += tab;
@@ -483,7 +487,7 @@ void unindent_lines(EditorBuffer* buffer) {
       if (line < 0 || line >= static_cast<int>(buffer->lines.size())) {
         continue;
       }
-      std::string& text = buffer->lines[static_cast<std::size_t>(line)];
+      std::string text = buffer->lines[static_cast<std::size_t>(line)];
       int removed = 0;
       while (removed < 4 && !text.empty() && text.front() == ' ') {
         text.erase(text.begin());
@@ -494,6 +498,7 @@ void unindent_lines(EditorBuffer* buffer) {
         removed = 1;
       }
       if (removed > 0) {
+        buffer->lines.set_line(line, std::move(text));
         for (auto& other : buffer->cursors) {
           if (other.head.line == line) {
             other.head.col = std::max(0, other.head.col - removed);

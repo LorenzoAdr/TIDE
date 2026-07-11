@@ -6,15 +6,19 @@
 #include <cassert>
 #include <chrono>
 #include <fstream>
+#include <functional>
 #include <iostream>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
 #include <thread>
 
 #include "editor/bracket_match.hpp"
+#include "editor/editor_buffer_source.hpp"
 #include "editor/editor_folds.hpp"
 #include "editor/editor_state.hpp"
+#include "editor/text_ops.hpp"
 
 namespace tgdb {
 namespace {
@@ -640,6 +644,128 @@ void test_duplicate_line_highlights_escape_string() {
   }
 }
 
+bool line_highlights_equal(const std::vector<LineHighlights>& a, const std::vector<LineHighlights>& b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    if (a[i].spans.size() != b[i].spans.size()) {
+      return false;
+    }
+    for (std::size_t j = 0; j < a[i].spans.size(); ++j) {
+      const HighlightSpan& sa = a[i].spans[j];
+      const HighlightSpan& sb = b[i].spans[j];
+      if (sa.start_col != sb.start_col || sa.end_col != sb.end_col || sa.capture != sb.capture) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+std::vector<LineHighlights> wait_highlights(const std::string& path, const std::string& source) {
+  for (int attempt = 0; attempt < 500; ++attempt) {
+    const std::vector<LineHighlights>* highlights = tree_sitter_service().highlights_for(path, source);
+    if (highlights != nullptr && tree_sitter_service().document_ready(path, source)) {
+      return *highlights;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  assert(false && "highlights never became ready");
+  return {};
+}
+
+// Runs the same edit (via text_ops.cpp, so it goes through the real
+// editor_buffer_note_* hint-tracking path) against two otherwise-identical
+// documents -- one fed the resulting EditorTextEditHint, one not -- and
+// checks that TSInputEdit-from-hint (an O(1) conversion) produces exactly
+// the same parse/highlight result as the O(document size) prefix/suffix
+// diff fallback. This is the correctness guarantee the "Fase 3" hint
+// optimization depends on: a wrong hint would silently desync the tree from
+// the source, and tree-sitter has no way to detect that on its own.
+void run_hint_vs_diff_scenario(const std::string& scenario_name,
+                               const std::vector<std::string>& initial_lines,
+                               const std::function<void(EditorBuffer*)>& mutate) {
+  const std::string hinted_path = "hint_" + scenario_name + ".cpp";
+  const std::string baseline_path = "diff_" + scenario_name + ".cpp";
+
+  EditorBuffer hinted;
+  hinted.path = hinted_path;
+  hinted.lines.assign(initial_lines);
+  hinted.ensure_cursors();
+  wait_document_ready(hinted_path, join_editor_lines(hinted.lines));
+
+  wait_document_ready(baseline_path, join_editor_lines(initial_lines));
+
+  mutate(&hinted);
+  const std::optional<EditorTextEditHint> hint = editor_buffer_take_edit_hint(&hinted);
+  assert(hint.has_value() && ("expected a usable hint for scenario: " + scenario_name).c_str());
+
+  const std::string new_source = editor_buffer_joined_source(hinted);
+  tree_sitter_service().prepare_document(hinted_path, new_source, hint);
+  tree_sitter_service().prepare_document(baseline_path, new_source);  // no hint: forces the diff path
+
+  const std::vector<LineHighlights> hinted_highlights = wait_highlights(hinted_path, new_source);
+  const std::vector<LineHighlights> baseline_highlights = wait_highlights(baseline_path, new_source);
+  assert(line_highlights_equal(hinted_highlights, baseline_highlights) &&
+        ("hint-based and diff-based highlights diverged for scenario: " + scenario_name).c_str());
+}
+
+void test_edit_hint_matches_diff_on_char_insert() {
+  run_hint_vs_diff_scenario("char_insert", {"int foo() {", "  int value = 1;", "  return value;", "}"},
+                            [](EditorBuffer* buffer) {
+                              buffer->set_primary(1, 14);  // right after "value = "
+                              insert_char(buffer, '9');
+                            });
+}
+
+void test_edit_hint_matches_diff_on_newline_insert() {
+  run_hint_vs_diff_scenario("newline_insert",
+                            {"int foo() {", "  int value = 1;", "  return value;", "}"},
+                            [](EditorBuffer* buffer) {
+                              buffer->set_primary(0, 0);  // beginning of file, per the earlier bug report
+                              newline(buffer);
+                            });
+}
+
+void test_edit_hint_matches_diff_on_backspace_join() {
+  run_hint_vs_diff_scenario("backspace_join",
+                            {"int foo() {", "  int value = 1;", "  return value;", "}"},
+                            [](EditorBuffer* buffer) {
+                              buffer->set_primary(2, 0);  // start of "  return value;"
+                              backspace(buffer);          // joins line 1 and 2
+                            });
+}
+
+void test_edit_hint_poisoned_by_multiple_edits_falls_back_correctly() {
+  const std::string path = "hint_poisoned.cpp";
+  const std::vector<std::string> initial_lines = {"int foo() {", "  int value = 1;", "  return value;",
+                                                   "}"};
+  EditorBuffer buffer;
+  buffer.path = path;
+  buffer.lines.assign(initial_lines);
+  buffer.ensure_cursors();
+  wait_document_ready(path, join_editor_lines(buffer.lines));
+
+  // Two separate mutations without an intervening take_edit_hint() call --
+  // this is what a multi-cursor edit looks like from editor_buffer_source's
+  // point of view. The pending hint can only describe one contiguous edit,
+  // so it must poison itself rather than silently returning a hint that
+  // only covers the first mutation.
+  buffer.set_primary(1, 14);
+  insert_char(&buffer, '9');
+  buffer.set_primary(2, 15);
+  insert_char(&buffer, '9');
+
+  const std::optional<EditorTextEditHint> hint = editor_buffer_take_edit_hint(&buffer);
+  assert(!hint.has_value());
+
+  const std::string new_source = editor_buffer_joined_source(buffer);
+  tree_sitter_service().prepare_document(path, new_source, hint);
+  const std::vector<LineHighlights> highlights = wait_highlights(path, new_source);
+  assert(!highlights.empty());
+}
+
 void test_normalize_editor_source_trailing_newline() {
   const std::string from_buffer = join_editor_lines({"int main() {}", "return 0;"});
   const std::string from_file = "int main() {}\nreturn 0;\n";
@@ -675,6 +801,10 @@ int main() {
   tgdb::test_sync_edit_keeps_ast_before_worker();
   tgdb::test_parse_debounce_coalesces_edits();
   tgdb::test_duplicate_line_highlights_escape_string();
+  tgdb::test_edit_hint_matches_diff_on_char_insert();
+  tgdb::test_edit_hint_matches_diff_on_newline_insert();
+  tgdb::test_edit_hint_matches_diff_on_backspace_join();
+  tgdb::test_edit_hint_poisoned_by_multiple_edits_falls_back_correctly();
   tgdb::test_normalize_editor_source_trailing_newline();
   std::cout << "tree_sitter_test ok\n";
   return 0;

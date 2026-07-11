@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -16,7 +17,10 @@ extern "C" {
 #include <tree_sitter/api.h>
 }
 
+#include "editor/editor_buffer_source.hpp"
+#include "editor/editor_text.hpp"
 #include "symbols/symbol_provider.hpp"
+#include "util/line_source.hpp"
 
 namespace tgdb {
 
@@ -33,6 +37,23 @@ struct LineHighlights {
 };
 
 std::string join_editor_lines(const std::vector<std::string>& lines);
+// EditorText already maintains this exact join incrementally where possible
+// (see EditorBuffer::joined_source_cache) -- to_string() here is the plain,
+// non-incremental O(n) fallback for callers that just want the full text.
+inline std::string join_editor_lines(const EditorText& lines) { return lines.to_string(); }
+// Generic fallback for any other LineSource (e.g. a read-only preview panel
+// backed by a plain vector<string> via VectorLineSource).
+inline std::string join_editor_lines(const LineSource& lines) {
+  std::string out;
+  const int count = lines.size();
+  for (int i = 0; i < count; ++i) {
+    if (i > 0) {
+      out.push_back('\n');
+    }
+    out += lines.at(i);
+  }
+  return out;
+}
 
 // Canonical editor source: same bytes as join_editor_lines(buffer.lines), even when
 // the input came from reading a file with a trailing newline.
@@ -74,7 +95,13 @@ class TreeSitterDocumentCache {
   void set_ready_callback(ReadyCallback callback);
 
   DocumentPtr lookup(const std::string& path) const;
-  void request_prepare(const std::string& path, const std::string& source);
+  // `edit_hint`, when present, lets this skip the O(document size)
+  // prefix/suffix diff against the previous source (see single_edit_between
+  // in the .cpp) and build the TSInputEdit directly -- see the "Fase 3" text
+  // storage migration plan. Only trusted for small, single-edit changes (the
+  // common case while typing); anything else safely falls back to diffing.
+  void request_prepare(const std::string& path, const std::string& source,
+                       const std::optional<EditorTextEditHint>& edit_hint = std::nullopt);
   void invalidate(const std::string& path);
   uint64_t revision_for(const std::string& path) const;
 

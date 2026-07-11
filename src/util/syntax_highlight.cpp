@@ -30,7 +30,7 @@ const std::string& SyntaxHighlightContext::joined() const {
 }
 
 const std::vector<LineHighlights>* SyntaxHighlightContext::tree_sitter_highlights() const {
-  if (lines == nullptr || lines->empty() || file_path.empty()) {
+  if (lines == nullptr || lines->size() == 0 || file_path.empty()) {
     return nullptr;
   }
   if (syntax_incremental) {
@@ -192,7 +192,7 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
       line_index < 0 || line_index >= static_cast<int>(ctx->lines->size())) {
     return nullptr;
   }
-  const std::string& source_line = (*ctx->lines)[static_cast<std::size_t>(line_index)];
+  const std::string& source_line = ctx->lines->at(line_index);
   const int tab_size = std::max(1, editor_indent::tab_display_width());
   ctx->tree_sitter_highlights();
   const std::vector<SemanticTokenSpan>* semantic_line_spans =
@@ -286,7 +286,7 @@ Element highlight_tree_sitter_gap(const std::string& line, int line_index,
                                    cursor_style, 0);
     }
   }
-  if (ctx == nullptr || ctx->lines == nullptr || ctx->lines->empty()) {
+  if (ctx == nullptr || ctx->lines == nullptr || ctx->lines->size() == 0) {
     return text(line);
   }
   const auto* all_highlights = ctx->tree_sitter_highlights();
@@ -294,7 +294,7 @@ Element highlight_tree_sitter_gap(const std::string& line, int line_index,
       line_index >= static_cast<int>(all_highlights->size())) {
     return text(line);
   }
-  const std::string& source_line = (*ctx->lines)[static_cast<std::size_t>(line_index)];
+  const std::string& source_line = ctx->lines->at(line_index);
   const int tab_size = std::max(1, editor_indent::tab_display_width());
   const LineHighlights& source_hl = (*all_highlights)[static_cast<std::size_t>(line_index)];
   const LineHighlights display_hl =
@@ -318,7 +318,7 @@ Element highlight_semantic_line(const std::string& line, int line_index,
   const std::string* source_line = nullptr;
   if (ctx != nullptr && ctx->lines != nullptr &&
       line_index >= 0 && line_index < static_cast<int>(ctx->lines->size())) {
-    source_line = &(*ctx->lines)[static_cast<std::size_t>(line_index)];
+    source_line = &ctx->lines->at(line_index);
   }
 
   Elements parts;
@@ -569,7 +569,7 @@ Element HighlightCodeLine(const std::string& line, int line_index,
                                      col_offset, semantic_tokens);
   }
 
-  const std::string& source_line = (*ctx->lines)[static_cast<std::size_t>(line_index)];
+  const std::string& source_line = ctx->lines->at(line_index);
   const int tab_size = std::max(1, editor_indent::tab_display_width());
   const auto& line_spans = semantic_tokens->lines[static_cast<std::size_t>(line_index)];
   const auto display_spans = display_semantic_spans_for_line(

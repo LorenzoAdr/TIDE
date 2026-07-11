@@ -18,6 +18,20 @@ void trim_history(std::vector<EditorSnapshot>* stack) {
   }
 }
 
+// Snapshotting a buffer used to mean copying the whole vector<string> (one
+// allocation per line) on every push_undo/undo/redo -- O(document size),
+// paid on the first keystroke of every edit group. With the rope backend,
+// EditorText::clone() is O(1): TextRope's nodes are immutable and shared via
+// shared_ptr, so cloning is just bumping the root's refcount, and any
+// subsequent mutation only reallocates the O(log n) nodes on the path it
+// touches (see text_rope.hpp). Calling .clone() explicitly here (rather than
+// relying on EditorText's copy constructor doing the same thing implicitly)
+// documents that this is the operation this migration phase specifically
+// targets -- see the "Fase 4" text storage migration plan.
+EditorSnapshot make_snapshot(const EditorBuffer& buffer) {
+  return EditorSnapshot{buffer.lines.clone(), buffer.cursors};
+}
+
 }  // namespace
 
 void commit_undo_group(EditorBuffer* buffer) {
@@ -35,7 +49,7 @@ void push_undo(EditorBuffer* buffer) {
     return;
   }
   buffer->redo_stack.clear();
-  buffer->undo_stack.push_back({buffer->lines, buffer->cursors});
+  buffer->undo_stack.push_back(make_snapshot(*buffer));
   trim_history(&buffer->undo_stack);
   buffer->undo_coalesce_open = true;
 }
@@ -45,12 +59,12 @@ bool undo(EditorBuffer* buffer) {
     return false;
   }
   const std::size_t prev_line_count = buffer->lines.size();
-  buffer->redo_stack.push_back({buffer->lines, buffer->cursors});
+  buffer->redo_stack.push_back(make_snapshot(*buffer));
   trim_history(&buffer->redo_stack);
-  const EditorSnapshot snapshot = std::move(buffer->undo_stack.back());
+  EditorSnapshot snapshot = std::move(buffer->undo_stack.back());
   buffer->undo_stack.pop_back();
-  buffer->lines = snapshot.lines;
-  buffer->cursors = snapshot.cursors;
+  buffer->lines = std::move(snapshot.lines);
+  buffer->cursors = std::move(snapshot.cursors);
   buffer->ensure_cursors();
   editor_buffer_rebuild_joined(buffer);
   buffer->semantic_layout_dirty = buffer->lines.size() != prev_line_count;
@@ -66,12 +80,12 @@ bool redo(EditorBuffer* buffer) {
   }
   commit_undo_group(buffer);
   const std::size_t prev_line_count = buffer->lines.size();
-  buffer->undo_stack.push_back({buffer->lines, buffer->cursors});
+  buffer->undo_stack.push_back(make_snapshot(*buffer));
   trim_history(&buffer->undo_stack);
-  const EditorSnapshot snapshot = std::move(buffer->redo_stack.back());
+  EditorSnapshot snapshot = std::move(buffer->redo_stack.back());
   buffer->redo_stack.pop_back();
-  buffer->lines = snapshot.lines;
-  buffer->cursors = snapshot.cursors;
+  buffer->lines = std::move(snapshot.lines);
+  buffer->cursors = std::move(snapshot.cursors);
   buffer->ensure_cursors();
   editor_buffer_rebuild_joined(buffer);
   buffer->semantic_layout_dirty = buffer->lines.size() != prev_line_count;

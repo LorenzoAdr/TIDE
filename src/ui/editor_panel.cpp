@@ -82,16 +82,16 @@ namespace {
 
 struct EditorPanelState;
 
-std::string buffer_text(const EditorBuffer& buffer) {
-  std::string text;
-  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
-    if (i > 0) {
-      text.push_back('\n');
-    }
-    text += buffer.lines[i];
-  }
-  return text;
-}
+// Kept as a thin wrapper (rather than rewriting the ~17 call sites below) so
+// that this and editor_buffer_joined_source()/join_editor_lines() -- the
+// three forms of "joined document text" that used to exist independently --
+// become one single cached implementation. This used to rebuild the whole
+// string from scratch via `buffer.lines[i]` on every call: besides being
+// uncached (paying the full O(document size) join even when nothing
+// changed since the last call), for the rope backend that per-index
+// operator[] is O(log n) *per line*, i.e. an O(n log n) full-document scan
+// instead of O(n) -- see EditorText::begin()/seek()'s doc comments.
+std::string buffer_text(const EditorBuffer& buffer) { return editor_buffer_joined_source(buffer); }
 
 void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer);
 
@@ -520,7 +520,16 @@ void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer) {
   }
   if (is_indexed_source_path(buffer.path)) {
     panel->lsp_sync_pending = true;
-    tree_sitter_service().prepare_document(buffer.path, editor_buffer_joined_source(buffer));
+    // Pop the buffer's single-edit hint (if any) so tree_sitter_document.cpp
+    // can build the TSInputEdit directly instead of diffing the whole
+    // document against its previous state on every keystroke -- see the
+    // "Fase 3" text storage migration plan. This must be popped exactly
+    // once per edit cycle, right before the source is handed off, since
+    // editor_buffer_take_edit_hint() resets the tracking state as a side
+    // effect.
+    const std::optional<EditorTextEditHint> edit_hint = editor_buffer_take_edit_hint(&buffer);
+    tree_sitter_service().prepare_document(buffer.path, editor_buffer_joined_source(buffer),
+                                           edit_hint);
   }
 }
 
@@ -537,8 +546,12 @@ void sync_guide_tracker_cache(EditorPanelState* panel, const EditorBuffer& buffe
   }
 
   panel->guide_tracker_cache.reset();
-  for (int i = 0; i < scroll_start && i < static_cast<int>(buffer.lines.size()); ++i) {
-    panel->guide_tracker_cache.advance(buffer.lines[static_cast<std::size_t>(i)], tab_col_width);
+  // Sequential scan from line 0 -- use the iterator rather than indexing so
+  // this stays O(scroll_start) instead of O(scroll_start * log n) for the
+  // rope backend (see EditorText::begin()'s doc comment).
+  int i = 0;
+  for (auto it = buffer.lines.begin(); i < scroll_start && it != buffer.lines.end(); ++it, ++i) {
+    panel->guide_tracker_cache.advance(*it, tab_col_width);
   }
   panel->guide_tracker_scroll = scroll_start;
   panel->guide_tracker_tab_width = tab_col_width;
@@ -928,7 +941,7 @@ void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer
     return;
   }
 
-  apply_git_diff_to_panel(panel, diff, buffer.lines);
+  apply_git_diff_to_panel(panel, diff, buffer.lines.to_vector());
   panel->git_cache_view_token = buffer.view_token;
 }
 
@@ -1083,7 +1096,7 @@ void request_selection_occurrence_matches(EditorPanelState* panel, const EditorB
   }
 
   const uint64_t request_id = ++panel->selection_occurrence_request_counter;
-  panel->selection_occurrence_runner.start(request_id, key, buffer.lines, needle,
+  panel->selection_occurrence_runner.start(request_id, key, buffer.lines.to_vector(), needle,
                                            selection_occurrence_needle_is_identifier(needle));
   panel->selection_occurrence_inflight_id = request_id;
 }
@@ -2054,6 +2067,10 @@ Element make_sticky_overlay(const std::vector<StickyLine>& sticky_lines, int gut
   highlight_ctx.file_path = buffer.path;
   highlight_ctx.lines = &buffer.lines;
   highlight_ctx.buffer_token = buffer.view_token;
+  // Reuse the buffer's already-cached joined source instead of paying
+  // another O(document size) join() -- see the Fase 5 unification note on
+  // SyntaxHighlightContext::joined().
+  highlight_ctx.joined_override = &editor_buffer_joined_source(buffer);
   Elements rows;
   for (const StickyLine& sticky : sticky_lines) {
     const std::string indent(static_cast<std::size_t>(sticky.depth * 2), ' ');
@@ -2065,7 +2082,7 @@ Element make_sticky_overlay(const std::vector<StickyLine>& sticky_lines, int gut
         nullptr, 58, nullptr, nullptr, nullptr, nullptr, false, 0, code_width, &highlight_ctx, true,
         indent_guides_enabled,
         indent_guides_enabled
-            ? indent_guide_depth_for_line(buffer.lines, sticky.source_line,
+            ? indent_guide_depth_for_line(buffer.lines.to_vector(), sticky.source_line,
                                           std::max(1, editor_indent::width()))
             : 0);
     rows.push_back(hbox({text(indent) | bgcolor(theme::TabIdle()), line | flex}) | clear_under);
@@ -2206,7 +2223,7 @@ std::string completion_scope_key(const EditorBuffer& buffer) {
   std::string key = buffer.path;
   const int line = buffer.primary_line();
   const std::vector<SymbolInfo> chain =
-      tree_sitter_service().scope_chain_at(buffer.path, buffer.lines, line);
+      tree_sitter_service().scope_chain_at(buffer.path, buffer.lines.to_vector(), line);
   if (chain.empty()) {
     key += "|noscope|L";
     key += std::to_string(line);
@@ -5218,7 +5235,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             panel_state->fold_regions_cache_token != ts_highlight_revision;
         if (path_changed || (settled && token_changed)) {
           const std::vector<FoldRegion> fresh =
-              tree_sitter_service().fold_regions_at(buffer.path, buffer.lines);
+              tree_sitter_service().fold_regions_at(buffer.path, buffer.lines.to_vector());
           // Always mark this revision as processed, even if we decide not to apply `fresh`
           // below (e.g. a transient empty result while old fold regions are kept). Otherwise
           // fold_regions_cache_token never catches up and this expensive tree-sitter fold scan
@@ -5425,8 +5442,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                         ? std::vector<StickyLine>{}
                         : (layout_state != nullptr && layout_state->app_settings != nullptr &&
                                    layout_state->app_settings->sticky_scroll_enabled
-                               ? sticky_lines_for_scroll(file_symbols, buffer.lines, buffer.scroll,
-                                                        3)
+                               ? sticky_lines_for_scroll(file_symbols, buffer.lines.to_vector(),
+                                                        buffer.scroll, 3)
                                : std::vector<StickyLine>{});
     }
     const BracketPairHighlight& bracket = *bracket_ptr;
@@ -5529,7 +5546,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const ScopeLineRange immediate_scope =
         typing_burst ? ScopeLineRange{}
         : scope_visual_effects && !buffer.path.empty() && is_indexed_source_path(buffer.path)
-            ? tree_sitter_service().innermost_scope_range_at(buffer.path, buffer.lines,
+            ? tree_sitter_service().innermost_scope_range_at(buffer.path, buffer.lines.to_vector(),
                                                              buffer.primary_line(),
                                                              buffer.primary_col())
             : ScopeLineRange{};

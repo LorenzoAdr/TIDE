@@ -42,7 +42,7 @@ void EditorFindState::request_matches(const EditorBuffer& buffer) {
   }
 
   const uint64_t request_id = ++request_counter_;
-  runner_.start(request_id, key, buffer.lines, query);
+  runner_.start(request_id, key, buffer.lines.to_vector(), query);
   inflight_id_ = request_id;
 }
 

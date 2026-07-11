@@ -671,8 +671,9 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
     Elements gutter_rows;
     Elements code_rows;
     SyntaxHighlightContext highlight_ctx;
+    VectorLineSource view_line_source(view_state->lines);
     highlight_ctx.file_path = model->active_file;
-    highlight_ctx.lines = &view_state->lines;
+    highlight_ctx.lines = &view_line_source;
     highlight_ctx.buffer_token = model->view_token;
     const int execution_line = execution_line_for_view(*model);
     for (int i = start; i < end; ++i) {

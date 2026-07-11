@@ -436,11 +436,16 @@ bool WorkspaceModel::save_buffer() {
   if (!output) {
     return false;
   }
-  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
-    output << buffer.lines[i];
-    if (i + 1 < buffer.lines.size()) {
+  // Range-for uses EditorText's proper linear iterator (O(n) total for
+  // either backend); a manual index loop here would be O(n log n) for the
+  // rope backend, since operator[] does an O(log n) descent per line.
+  bool first = true;
+  for (const std::string& line : buffer.lines) {
+    if (!first) {
       output << '\n';
     }
+    first = false;
+    output << line;
   }
   buffer.dirty = false;
   flush_active_tab();

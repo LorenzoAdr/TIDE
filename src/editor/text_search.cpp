@@ -284,7 +284,7 @@ std::vector<TextMatch> find_all_matches_in_lines(const std::vector<std::string>&
 }
 
 std::vector<TextMatch> find_all_matches(const EditorBuffer& buffer, const std::string& needle) {
-  return find_all_matches_in_lines(buffer.lines, needle, nullptr, 0);
+  return find_all_matches_in_lines(buffer.lines.to_vector(), needle, nullptr, 0);
 }
 
 namespace {
@@ -337,7 +337,7 @@ std::vector<TextMatch> find_bounded_matches_in_lines(const std::vector<std::stri
 
 std::vector<TextMatch> find_bounded_matches(const EditorBuffer& buffer, const std::string& needle,
                                             bool whole_word) {
-  return find_bounded_matches_in_lines(buffer.lines, needle, whole_word, nullptr, 0);
+  return find_bounded_matches_in_lines(buffer.lines.to_vector(), needle, whole_word, nullptr, 0);
 }
 
 bool match_within_range(const TextMatch& match, const TextRange& range) {

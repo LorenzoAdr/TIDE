@@ -14,6 +14,7 @@
 #include "ui/key_bindings.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
+#include "util/line_source.hpp"
 #include "util/syntax_highlight.hpp"
 #include "util/path_normalize.hpp"
 #include "util/build_file_highlight.hpp"
@@ -230,7 +231,8 @@ Element render_preview_line(const FilePickerPreviewData& preview, const std::str
   if (preview.use_cpp_highlight) {
     SyntaxHighlightContext ctx;
     ctx.file_path = preview.path;
-    ctx.lines = &preview.lines;
+    VectorLineSource preview_line_source(preview.lines);
+    ctx.lines = &preview_line_source;
     return HighlightCodeLine(line, line_index, nullptr, -1, {}, 0, &ctx);
   }
   return text(line.empty() ? " " : line) | color(theme::SyntaxDefault());

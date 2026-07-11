@@ -84,16 +84,9 @@ std::string display_path(const std::string& absolute, const std::string& workspa
   return fs::path(absolute).filename().string();
 }
 
-std::string buffer_text(const EditorBuffer& buffer) {
-  std::string text;
-  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
-    if (i > 0) {
-      text.push_back('\n');
-    }
-    text += buffer.lines[i];
-  }
-  return text;
-}
+// See editor_panel.cpp's buffer_text(): unified onto the cached,
+// backend-agnostic-O(n) editor_buffer_joined_source().
+std::string buffer_text(const EditorBuffer& buffer) { return editor_buffer_joined_source(buffer); }
 
 std::vector<std::string> workspace_relative_files(WorkspaceIndexer* indexer) {
   if (indexer == nullptr) {

@@ -17,6 +17,7 @@
 #include "build/build_environment.hpp"
 #include "build/build_environment_service.hpp"
 #include "dap/gdb_launcher.hpp"
+#include "editor/editor_buffer_source.hpp"
 #include "editor/text_search.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/component_base.hpp"
@@ -506,16 +507,10 @@ void Application::process_build_environment_updates() {
 
 namespace {
 
-std::string editor_buffer_text(const EditorBuffer &buffer) {
-	std::string text;
-	for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
-		if (i > 0) {
-			text.push_back('\n');
-		}
-		text += buffer.lines[i];
-	}
-	return text;
-}
+// See editor_panel.cpp's buffer_text(): same "joined document text" helper,
+// now unified onto the cached, backend-agnostic-O(n) editor_buffer_joined_source()
+// instead of an uncached, index-based (O(n log n) for the rope backend) scan.
+std::string editor_buffer_text(const EditorBuffer &buffer) { return editor_buffer_joined_source(buffer); }
 
 void reopen_workspace_documents(WorkspaceModel *workspace,
                                 const std::shared_ptr<ISymbolProvider> &symbols) {

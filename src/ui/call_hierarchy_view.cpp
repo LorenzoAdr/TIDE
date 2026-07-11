@@ -18,15 +18,10 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// See editor_panel.cpp's buffer_text(): unified onto the cached,
+// backend-agnostic-O(n) editor_buffer_joined_source().
 std::string buffer_document_text(const EditorBuffer& buffer) {
-  std::string text;
-  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
-    if (i > 0) {
-      text.push_back('\n');
-    }
-    text += buffer.lines[i];
-  }
-  return text;
+  return editor_buffer_joined_source(buffer);
 }
 
 bool is_ident_char(char c) {

@@ -8,6 +8,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "lsp/semantic_tokens.hpp"
 #include "parser/tree_sitter_document.hpp"
+#include "util/line_source.hpp"
 
 namespace tgdb {
 
@@ -19,7 +20,7 @@ struct CachedSyntaxLineSpans {
 
 struct SyntaxHighlightContext {
   std::string file_path;
-  const std::vector<std::string>* lines = nullptr;
+  const LineSource* lines = nullptr;
   const std::string* joined_override = nullptr;
   uint64_t buffer_token = 0;
   uint64_t semantic_revision = 0;

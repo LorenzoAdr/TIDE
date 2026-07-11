@@ -172,12 +172,13 @@ void delete_range(EditorBuffer* buffer, int start_line, int start_col, int end_l
   }
 
   if (start_line == end_line) {
-    auto& line = buffer->lines[static_cast<std::size_t>(start_line)];
+    std::string line = buffer->lines[static_cast<std::size_t>(start_line)];
     start_col = std::max(0, std::min(start_col, static_cast<int>(line.size())));
     end_col = std::max(start_col, std::min(end_col, static_cast<int>(line.size())));
     const int removed = end_col - start_col;
     line.erase(static_cast<std::size_t>(start_col),
                static_cast<std::size_t>(removed));
+    buffer->lines.set_line(start_line, std::move(line));
     if (removed > 0) {
       editor_buffer_note_char_removed(buffer, start_line, start_col,
                                       static_cast<std::size_t>(removed));
@@ -186,15 +187,15 @@ void delete_range(EditorBuffer* buffer, int start_line, int start_col, int end_l
     return;
   }
 
-  auto& first = buffer->lines[static_cast<std::size_t>(start_line)];
-  const auto& last = buffer->lines[static_cast<std::size_t>(end_line)];
+  std::string first = buffer->lines[static_cast<std::size_t>(start_line)];
+  const std::string last = buffer->lines[static_cast<std::size_t>(end_line)];
   start_col = std::max(0, std::min(start_col, static_cast<int>(first.size())));
   end_col = std::max(0, std::min(end_col, static_cast<int>(last.size())));
 
   first.erase(static_cast<std::size_t>(start_col));
   first += last.substr(static_cast<std::size_t>(end_col));
-  buffer->lines.erase(buffer->lines.begin() + start_line + 1,
-                      buffer->lines.begin() + end_line + 1);
+  buffer->lines.set_line(start_line, std::move(first));
+  buffer->lines.erase_lines(start_line + 1, end_line + 1);
   adjust_cursors_after_multiline_delete(buffer, start_line, start_col, end_line, end_col);
   editor_buffer_rebuild_joined(buffer);
   buffer->semantic_layout_dirty = true;
@@ -321,8 +322,9 @@ void insert_char_at_with_pairs(EditorBuffer* buffer, int line, int col, char c) 
 }
 
 void insert_char_at(EditorBuffer* buffer, int line, int col, char c) {
-  auto& text = buffer->lines[static_cast<std::size_t>(line)];
+  std::string text = buffer->lines[static_cast<std::size_t>(line)];
   text.insert(static_cast<std::size_t>(col), 1, c);
+  buffer->lines.set_line(line, std::move(text));
   editor_buffer_note_char_inserted(buffer, line, col, std::string_view(&c, 1));
   for (auto& cursor : buffer->cursors) {
     if (cursor.head.line == line && cursor.head.col >= col) {
@@ -338,8 +340,9 @@ void insert_string_at(EditorBuffer* buffer, int line, int col, const std::string
   if (text.empty()) {
     return;
   }
-  auto& line_text = buffer->lines[static_cast<std::size_t>(line)];
+  std::string line_text = buffer->lines[static_cast<std::size_t>(line)];
   line_text.insert(static_cast<std::size_t>(col), text);
+  buffer->lines.set_line(line, std::move(line_text));
   editor_buffer_note_char_inserted(buffer, line, col, text);
   const int delta = static_cast<int>(text.size());
   for (auto& cursor : buffer->cursors) {
@@ -386,7 +389,9 @@ void insert_multiline_text_at(EditorBuffer* buffer, int line, int col, const std
 
 void backspace_at(EditorBuffer* buffer, int line, int col) {
   if (col > 0) {
-    buffer->lines[static_cast<std::size_t>(line)].erase(static_cast<std::size_t>(col - 1), 1);
+    std::string text = buffer->lines[static_cast<std::size_t>(line)];
+    text.erase(static_cast<std::size_t>(col - 1), 1);
+    buffer->lines.set_line(line, std::move(text));
     editor_buffer_note_char_removed(buffer, line, col - 1, 1);
     for (auto& cursor : buffer->cursors) {
       if (cursor.head.line == line && cursor.head.col >= col) {
@@ -404,9 +409,11 @@ void backspace_at(EditorBuffer* buffer, int line, int col) {
   const int join_col =
       static_cast<int>(buffer->lines[static_cast<std::size_t>(line - 1)].size());
   const std::string tail = buffer->lines[static_cast<std::size_t>(line)];
-  buffer->lines.erase(buffer->lines.begin() + line);
-  buffer->lines[static_cast<std::size_t>(line - 1)] += tail;
-  editor_buffer_note_line_joined(buffer, line);
+  buffer->lines.erase_line(line);
+  std::string prev = buffer->lines[static_cast<std::size_t>(line - 1)];
+  prev += tail;
+  buffer->lines.set_line(line - 1, std::move(prev));
+  editor_buffer_note_line_joined(buffer, line, join_col);
   if (!buffer->joined_source_cache.valid) {
     editor_buffer_rebuild_joined(buffer);
   }
@@ -428,9 +435,10 @@ void backspace_at(EditorBuffer* buffer, int line, int col) {
 }
 
 void delete_at(EditorBuffer* buffer, int line, int col) {
-  auto& text = buffer->lines[static_cast<std::size_t>(line)];
+  std::string text = buffer->lines[static_cast<std::size_t>(line)];
   if (col < static_cast<int>(text.size())) {
     text.erase(static_cast<std::size_t>(col), 1);
+    buffer->lines.set_line(line, std::move(text));
     editor_buffer_note_char_removed(buffer, line, col, 1);
     for (auto& cursor : buffer->cursors) {
       if (cursor.head.line == line && cursor.head.col > col) {
@@ -447,7 +455,8 @@ void delete_at(EditorBuffer* buffer, int line, int col) {
   }
   const int old_len = static_cast<int>(text.size());
   text += buffer->lines[static_cast<std::size_t>(line + 1)];
-  buffer->lines.erase(buffer->lines.begin() + line + 1);
+  buffer->lines.set_line(line, std::move(text));
+  buffer->lines.erase_line(line + 1);
   editor_buffer_rebuild_joined(buffer);
   buffer->semantic_layout_dirty = true;
   for (auto& cursor : buffer->cursors) {
@@ -539,12 +548,13 @@ void newline_at(EditorBuffer* buffer, int line, int col, bool smart_indent) {
   if (buffer != nullptr) {
     buffer->semantic_layout_dirty = true;
   }
-  auto& text = buffer->lines[static_cast<std::size_t>(line)];
+  std::string text = buffer->lines[static_cast<std::size_t>(line)];
   const std::string tail = text.substr(static_cast<std::size_t>(col));
   text.erase(static_cast<std::size_t>(col));
   const std::string indent = smart_indent ? smart_newline_indent(text, col) : std::string{};
   const int indent_len = static_cast<int>(indent.size());
-  buffer->lines.insert(buffer->lines.begin() + line + 1, indent + tail);
+  buffer->lines.set_line(line, std::move(text));
+  buffer->lines.insert_line(line + 1, indent + tail);
   editor_buffer_rebuild_joined(buffer);
 
   for (auto& cursor : buffer->cursors) {
@@ -823,9 +833,10 @@ void replace_text_range(EditorBuffer* buffer, int line, int start_col, int end_c
 
   delete_range(buffer, line, start_col, line, end_col);
 
-  auto& text = buffer->lines[static_cast<std::size_t>(line)];
+  std::string text = buffer->lines[static_cast<std::size_t>(line)];
   start_col = std::max(0, std::min(start_col, static_cast<int>(text.size())));
   text.insert(static_cast<std::size_t>(start_col), replacement);
+  buffer->lines.set_line(line, std::move(text));
 
   const int delta = static_cast<int>(replacement.size());
   for (auto& cursor : buffer->cursors) {
@@ -856,12 +867,13 @@ void replace_text_range_with_caret(EditorBuffer* buffer, int line, int start_col
 
   delete_range(buffer, line, start_col, line, end_col);
 
-  auto& text = buffer->lines[static_cast<std::size_t>(line)];
+  std::string text = buffer->lines[static_cast<std::size_t>(line)];
   start_col = std::max(0, std::min(start_col, static_cast<int>(text.size())));
   if (replacement.find('\n') != std::string::npos) {
     insert_multiline_text_at(buffer, line, start_col, replacement);
   } else {
     text.insert(static_cast<std::size_t>(start_col), replacement);
+    buffer->lines.set_line(line, std::move(text));
   }
 
   const int caret_line = line + caret_line_offset;
@@ -1694,7 +1706,7 @@ void comment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
     if (line_index < 0 || line_index >= static_cast<int>(buffer->lines.size())) {
       continue;
     }
-    std::string& line = buffer->lines[static_cast<std::size_t>(line_index)];
+    std::string line = buffer->lines[static_cast<std::size_t>(line_index)];
     const std::size_t insert_col = comment_insert_column(line);
     const std::string before = line;
     comment_line_text(&line, style);
@@ -1702,6 +1714,7 @@ void comment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
       const int delta = static_cast<int>(line.size()) - static_cast<int>(before.size());
       adjust_cursors_after_line_edit(buffer, line_index, static_cast<int>(insert_col), delta);
     }
+    buffer->lines.set_line(line_index, std::move(line));
   }
 
   for (auto& cursor : buffer->cursors) {
@@ -1729,13 +1742,14 @@ void uncomment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
     if (line_index < 0 || line_index >= static_cast<int>(buffer->lines.size())) {
       continue;
     }
-    std::string& line = buffer->lines[static_cast<std::size_t>(line_index)];
+    std::string line = buffer->lines[static_cast<std::size_t>(line_index)];
     const std::size_t insert_col = comment_insert_column(line);
     const std::string before = line;
     if (uncomment_line_text(&line, style)) {
       const int delta = static_cast<int>(line.size()) - static_cast<int>(before.size());
       adjust_cursors_after_line_edit(buffer, line_index, static_cast<int>(insert_col), delta);
     }
+    buffer->lines.set_line(line_index, std::move(line));
   }
 
   for (auto& cursor : buffer->cursors) {

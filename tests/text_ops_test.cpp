@@ -19,7 +19,7 @@ void check(bool condition, const char* message) {
 
 tgdb::EditorBuffer make_buffer(std::initializer_list<std::string> lines) {
   tgdb::EditorBuffer buffer;
-  buffer.lines = lines;
+  buffer.lines.assign(std::vector<std::string>(lines));
   buffer.reset_to_single_cursor(0, 0);
   return buffer;
 }

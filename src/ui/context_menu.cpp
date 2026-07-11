@@ -155,15 +155,10 @@ NavigationParams navigation_params_at(WorkspaceModel* workspace, int line, int c
   return params;
 }
 
+// See editor_panel.cpp's buffer_text(): unified onto the cached,
+// backend-agnostic-O(n) editor_buffer_joined_source().
 std::string buffer_document_text(const EditorBuffer& buffer) {
-  std::string text;
-  for (std::size_t i = 0; i < buffer.lines.size(); ++i) {
-    if (i > 0) {
-      text.push_back('\n');
-    }
-    text += buffer.lines[i];
-  }
-  return text;
+  return editor_buffer_joined_source(buffer);
 }
 
 bool read_file_text(const std::string& absolute_path, std::string* text_out);
@@ -173,7 +168,7 @@ void apply_document_text_to_buffer(EditorBuffer* buffer, const std::string& text
   if (buffer == nullptr) {
     return;
   }
-  buffer->lines = lines_from_document_text(text);
+  buffer->lines.assign(lines_from_document_text(text));
   if (buffer->lines.empty()) {
     buffer->lines.push_back("");
   }
@@ -187,7 +182,7 @@ void reload_buffer_text(EditorBuffer* buffer, const std::string& text, int line,
   if (buffer == nullptr) {
     return;
   }
-  buffer->lines = lines_from_document_text(text);
+  buffer->lines.assign(lines_from_document_text(text));
   if (buffer->lines.empty()) {
     buffer->lines.push_back("");
   }

@@ -24,7 +24,8 @@ class TreeSitterService {
   using ReadyCallback = std::function<void(const std::string& path)>;
   void set_ready_callback(ReadyCallback callback);
 
-  void prepare_document(const std::string& path, const std::string& source);
+  void prepare_document(const std::string& path, const std::string& source,
+                        const std::optional<EditorTextEditHint>& edit_hint = std::nullopt);
   bool document_ready(const std::string& path, const std::string& source) const;
 
   std::vector<SymbolInfo> symbols_for_file(const std::string& path, const std::string& source);

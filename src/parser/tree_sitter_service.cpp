@@ -52,12 +52,13 @@ std::string TreeSitterService::cache_key_for(const std::string& path) const {
   return path;
 }
 
-void TreeSitterService::prepare_document(const std::string& path, const std::string& source) {
+void TreeSitterService::prepare_document(const std::string& path, const std::string& source,
+                                         const std::optional<EditorTextEditHint>& edit_hint) {
   const std::string canonical = normalize_editor_source(source);
   if (canonical.empty()) {
     return;
   }
-  cache_.request_prepare(cache_key_for(path), canonical);
+  cache_.request_prepare(cache_key_for(path), canonical, edit_hint);
 }
 
 bool TreeSitterService::document_ready(const std::string& path, const std::string& source) const {

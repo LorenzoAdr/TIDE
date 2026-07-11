@@ -163,11 +163,60 @@ TSTree* parse_source(TSParser* parser, const std::string& source, const std::str
                                 static_cast<uint32_t>(source.size()));
 }
 
-bool apply_sync_source_edit(DocumentEntry* entry, const std::string& canonical) {
+// Converts a buffer-level edit hint (see editor_buffer_source.hpp) into a
+// TSInputEdit against `old_canonical`/`new_canonical`, without touching
+// either string -- this is the whole point: single_edit_between() below is
+// an O(document size) prefix/suffix scan, while this is O(1).
+//
+// The hint's byte offsets are computed against the buffer's *raw* joined
+// source (see join_editor_lines), while old_canonical/new_canonical have
+// been through normalize_editor_source(), which strips a single trailing
+// '\n' if present. That only matters when the edit's own end reaches the
+// byte normalize would strip (i.e. it touches the buffer's last, empty
+// line) -- bail out to the (correct, if O(n)) diff fallback in that case
+// rather than risk an off-by-one TSInputEdit, which tree-sitter has no way
+// to detect as wrong.
+std::optional<TSInputEdit> ts_input_edit_from_hint(const EditorTextEditHint& hint,
+                                                   const std::string& old_canonical,
+                                                   const std::string& new_canonical) {
+  if (hint.old_ends_with_newline != hint.new_ends_with_newline) {
+    return std::nullopt;
+  }
+  if (hint.old_end_byte > old_canonical.size() || hint.new_end_byte > new_canonical.size()) {
+    return std::nullopt;
+  }
+  // Belt-and-suspenders (O(1)) consistency check: the hint's implied length
+  // delta must exactly match the actual size delta between the two
+  // canonical strings. A stale/mismatched hint (e.g. from a code path that
+  // doesn't keep old_canonical/new_canonical in lockstep with the hint's
+  // originating buffer) would almost certainly fail this.
+  const std::ptrdiff_t hint_delta = static_cast<std::ptrdiff_t>(hint.new_end_byte) -
+                                    static_cast<std::ptrdiff_t>(hint.old_end_byte);
+  const std::ptrdiff_t actual_delta = static_cast<std::ptrdiff_t>(new_canonical.size()) -
+                                      static_cast<std::ptrdiff_t>(old_canonical.size());
+  if (hint_delta != actual_delta) {
+    return std::nullopt;
+  }
+
+  TSInputEdit edit{};
+  edit.start_byte = static_cast<uint32_t>(hint.start_byte);
+  edit.old_end_byte = static_cast<uint32_t>(hint.old_end_byte);
+  edit.new_end_byte = static_cast<uint32_t>(hint.new_end_byte);
+  edit.start_point = TSPoint{static_cast<uint32_t>(hint.start_row), static_cast<uint32_t>(hint.start_col)};
+  edit.old_end_point =
+      TSPoint{static_cast<uint32_t>(hint.old_end_row), static_cast<uint32_t>(hint.old_end_col)};
+  edit.new_end_point =
+      TSPoint{static_cast<uint32_t>(hint.new_end_row), static_cast<uint32_t>(hint.new_end_col)};
+  return edit;
+}
+
+bool apply_sync_source_edit(DocumentEntry* entry, const std::string& canonical,
+                            const std::optional<TSInputEdit>& hint_edit) {
   if (entry == nullptr || entry->tree == nullptr || entry->source == canonical) {
     return false;
   }
-  const std::optional<TSInputEdit> edit = single_edit_between(entry->source, canonical);
+  const std::optional<TSInputEdit> edit =
+      hint_edit.has_value() ? hint_edit : single_edit_between(entry->source, canonical);
   if (!edit.has_value()) {
     return false;
   }
@@ -221,19 +270,20 @@ std::string join_editor_lines(const std::vector<std::string>& lines) {
 }
 
 std::string normalize_editor_source(const std::string& source) {
-  if (source.empty()) {
-    return source;
+  // This used to split the whole source into a fresh vector<string> via
+  // istringstream::getline (one allocation per line) and immediately rejoin
+  // it, purely to drop a single trailing '\n' if present -- getline never
+  // strips embedded '\r', so that's the entire observable effect. It was
+  // called on every keystroke (via cursor_in_code's auto-pair check), making
+  // it an O(document size) cost -- with a large per-call constant on top,
+  // since it used to be   O(document size) *and* allocation-heavy -- paid on
+  // every single character typed. A single substr() is behaviorally
+  // identical and just as O(n) but without the per-line allocations/stream
+  // overhead.
+  if (!source.empty() && source.back() == '\n') {
+    return source.substr(0, source.size() - 1);
   }
-  std::vector<std::string> lines;
-  std::istringstream input(source);
-  std::string line;
-  while (std::getline(input, line)) {
-    lines.push_back(line);
-  }
-  if (lines.empty()) {
-    lines.push_back("");
-  }
-  return join_editor_lines(lines);
+  return source;
 }
 
 std::string join_editor_lines_from_file(const std::string& path) {
@@ -311,8 +361,8 @@ DocumentPtr TreeSitterDocumentCache::lookup(const std::string& path) const {
   return it->second;
 }
 
-void TreeSitterDocumentCache::request_prepare(const std::string& path,
-                                              const std::string& source) {
+void TreeSitterDocumentCache::request_prepare(const std::string& path, const std::string& source,
+                                              const std::optional<EditorTextEditHint>& edit_hint) {
   const std::string canonical = normalize_editor_source(source);
   if (path.empty() || canonical.empty()) {
     return;
@@ -337,11 +387,14 @@ void TreeSitterDocumentCache::request_prepare(const std::string& path,
     if (source_changed) {
       const int old_line_count = count_source_lines(entry->source);
       const int new_line_count = count_source_lines(canonical);
+      const std::optional<TSInputEdit> hint_edit =
+          edit_hint.has_value() ? ts_input_edit_from_hint(*edit_hint, entry->source, canonical)
+                                : std::nullopt;
       const std::optional<TSInputEdit> layout_edit =
           old_line_count != new_line_count
-              ? single_edit_between(entry->source, canonical)
+              ? (hint_edit.has_value() ? hint_edit : single_edit_between(entry->source, canonical))
               : std::nullopt;
-      if (apply_sync_source_edit(entry.get(), canonical)) {
+      if (apply_sync_source_edit(entry.get(), canonical, hint_edit)) {
         if (entry->highlights_ready) {
           entry->revision = next_revision_++;
         }

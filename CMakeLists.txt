@@ -156,6 +156,7 @@ add_executable(tgdb
   src/symbols/symbol_utils.cpp
   src/editor/editor_state.cpp
   src/editor/editor_buffer_source.cpp
+  src/editor/text_rope.cpp
   src/editor/cursor_history.cpp
   src/editor/text_ops.cpp
   src/editor/line_comment.cpp
@@ -326,6 +327,7 @@ add_executable(text_ops_test
   tests/text_ops_test.cpp
   src/editor/editor_state.cpp
   src/editor/editor_buffer_source.cpp
+  src/editor/text_rope.cpp
   src/editor/text_ops.cpp
   src/editor/editor_folds.cpp
   src/editor/line_comment.cpp
@@ -342,13 +344,49 @@ add_executable(text_ops_test
 target_include_directories(text_ops_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 tgdb_link_tree_sitter(text_ops_test)
 
+add_executable(text_rope_test
+  tests/text_rope_test.cpp
+  src/editor/text_rope.cpp
+)
+target_include_directories(text_rope_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(text_buffer_bench
+  tests/text_buffer_bench.cpp
+  src/editor/editor_state.cpp
+  src/editor/editor_buffer_source.cpp
+  src/editor/text_rope.cpp
+  src/editor/text_ops.cpp
+  src/editor/editor_folds.cpp
+  src/editor/line_comment.cpp
+  src/editor/indent_guides.cpp
+  src/editor/text_search.cpp
+  src/editor/undo_stack.cpp
+  src/editor/clipboard.cpp
+  src/editor/bracket_match.cpp
+  src/ui/cursor_blink.cpp
+  src/util/clang_format_config.cpp
+  src/util/shell_utils.cpp
+  src/util/system_clipboard.cpp
+)
+target_include_directories(text_buffer_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+tgdb_link_tree_sitter(text_buffer_bench)
+
 add_executable(tree_sitter_test
   tests/tree_sitter_test.cpp
   src/editor/editor_state.cpp
+  src/editor/editor_buffer_source.cpp
+  src/editor/text_rope.cpp
+  src/editor/text_ops.cpp
   src/editor/editor_folds.cpp
-  src/editor/bracket_match.cpp
+  src/editor/line_comment.cpp
   src/editor/indent_guides.cpp
+  src/editor/text_search.cpp
+  src/editor/undo_stack.cpp
+  src/editor/clipboard.cpp
+  src/editor/bracket_match.cpp
   src/util/clang_format_config.cpp
+  src/util/shell_utils.cpp
+  src/util/system_clipboard.cpp
   src/ui/cursor_blink.cpp
 )
 target_include_directories(tree_sitter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -357,6 +395,8 @@ tgdb_link_tree_sitter(tree_sitter_test)
 add_executable(bracket_match_test
   tests/bracket_match_test.cpp
   src/editor/editor_state.cpp
+  src/editor/editor_buffer_source.cpp
+  src/editor/text_rope.cpp
   src/editor/bracket_match.cpp
   src/editor/indent_guides.cpp
   src/util/clang_format_config.cpp
@@ -531,6 +571,8 @@ target_link_libraries(lsp_completion_probe PRIVATE ftxui::dom)
 set(TGDB_TEST_TARGETS
   i18n_test
   text_ops_test
+  text_buffer_bench
+  text_rope_test
   tree_sitter_test
   bracket_match_test
   indent_guides_test

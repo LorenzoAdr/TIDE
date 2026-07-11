@@ -5,8 +5,9 @@
 #include <string>
 #include <vector>
 
-#include "editor/editor_folds.hpp"
 #include "editor/editor_buffer_source.hpp"
+#include "editor/editor_folds.hpp"
+#include "editor/editor_text.hpp"
 
 namespace tgdb {
 
@@ -45,13 +46,13 @@ struct MultiCursor {
 };
 
 struct EditorSnapshot {
-  std::vector<std::string> lines;
+  EditorText lines;
   std::vector<MultiCursor> cursors;
 };
 
 struct EditorBuffer {
   std::string path;
-  std::vector<std::string> lines;
+  EditorText lines;
   std::vector<MultiCursor> cursors;
   std::vector<EditorSnapshot> undo_stack;
   std::vector<EditorSnapshot> redo_stack;
