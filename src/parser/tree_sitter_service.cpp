@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <sstream>
 
 #include "editor/editor_context.hpp"
 #include "parser/tree_sitter_blocks.hpp"
@@ -11,6 +10,7 @@
 #include "parser/tree_sitter_language.hpp"
 #include "parser/tree_sitter_locals.hpp"
 #include "parser/tree_sitter_symbols.hpp"
+
 #include "util/csv_viewer.hpp"
 
 namespace tgdb {

@@ -2248,7 +2248,7 @@ int member_access_trigger_col(const EditorBuffer& buffer) {
   return -1;
 }
 
-std::string completion_scope_key(const EditorBuffer& buffer) {
+std::string completion_scope_key_uncached(const EditorBuffer& buffer) {
   if (buffer.path.empty()) {
     return {};
   }
@@ -2427,11 +2427,36 @@ struct CompletionState {
   std::string active_scope_key;
   std::vector<CompletionItem> scope_cached_items;
   std::vector<CompletionItem> ts_fallback_items;
+  mutable int cached_scope_line = -1;
+  mutable bool cached_scope_member = false;
+  mutable std::string cached_scope_path;
+  mutable std::string cached_scope_key;
 
   void invalidate_item_cache() { item_cache_dirty = true; }
 
+  void clear_scope_key_cache() {
+    cached_scope_line = -1;
+    cached_scope_member = false;
+    cached_scope_path.clear();
+    cached_scope_key.clear();
+  }
+
+  std::string scope_key_for(const EditorBuffer& buffer) const {
+    const int line = buffer.primary_line();
+    const bool member = is_member_access_at_cursor(buffer);
+    if (line == cached_scope_line && member == cached_scope_member &&
+        buffer.path == cached_scope_path && !cached_scope_key.empty()) {
+      return cached_scope_key;
+    }
+    cached_scope_line = line;
+    cached_scope_member = member;
+    cached_scope_path = buffer.path;
+    cached_scope_key = completion_scope_key_uncached(buffer);
+    return cached_scope_key;
+  }
+
   void sync_scope_cache(const EditorBuffer& buffer, EditorPanelState* panel) {
-    const std::string key = completion_scope_key(buffer);
+    const std::string key = scope_key_for(buffer);
     if (key.empty()) {
       return;
     }
@@ -2451,7 +2476,7 @@ struct CompletionState {
     if (items.empty()) {
       return;
     }
-    const std::string key = completion_scope_key(buffer);
+    const std::string key = scope_key_for(buffer);
     if (key.empty()) {
       return;
     }
@@ -2476,7 +2501,7 @@ struct CompletionState {
       commit_scope_cache(buffer, panel, lsp_items);
       semantic_mode = true;
     } else {
-      const std::string scope_key = completion_scope_key(buffer);
+      const std::string scope_key = scope_key_for(buffer);
       active_scope_key = scope_key;
       scope_cached_items.clear();
       if (panel != nullptr && panel->scope_completion_cache_key == scope_key) {
@@ -2703,6 +2728,7 @@ struct CompletionState {
     lsp_last_fetched_scope_key.clear();
     lsp_resolved_query.clear();
     lsp_items.clear();
+    clear_scope_key_cache();
     scope_cached_items.clear();
     ts_fallback_items.clear();
     active_scope_key.clear();
@@ -2743,7 +2769,7 @@ bool lsp_trigger_from_typed_char(char typed, const EditorBuffer& buffer) {
 }
 
 bool lsp_scope_changed(const EditorBuffer& buffer, const CompletionState& completion) {
-  const std::string scope_key = completion_scope_key(buffer);
+  const std::string scope_key = completion.scope_key_for(buffer);
   return !scope_key.empty() && scope_key != completion.lsp_last_fetched_scope_key;
 }
 
@@ -3181,11 +3207,16 @@ void schedule_completion_lsp_fetch(CompletionState* completion, WorkspaceModel* 
     completion->lsp_fetch_col = buffer.primary_col();
     completion->invalidate_item_cache();
   }
+  if (live_only && !completion->lsp_items.empty() &&
+      completion->lsp_resolved_key == anchor_key) {
+    completion->lsp_pending_key = anchor_key;
+    return;
+  }
+  if (live_only && !should_trigger_lsp_fetch(buffer, *completion)) {
+    return;
+  }
   completion->lsp_pending_key = anchor_key;
   if (completion->lsp_resolved_key != anchor_key) {
-    if (live_only && !should_trigger_lsp_fetch(buffer, *completion)) {
-      return;
-    }
     completion->lsp_request_due_ms = steady_now_ms() + kLiveCompletionTriggerDebounceMs;
   }
 }
@@ -3373,6 +3404,16 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
     return;
   }
 
+  const std::string anchor_key =
+      completion_anchor_key(buffer.path, completion->replace_line, completion->replace_start);
+  if (live && !completion->lsp_items.empty() && !anchor_key.empty() &&
+      anchor_key == completion->lsp_fetch_key &&
+      !should_trigger_lsp_fetch(buffer, *completion)) {
+    completion->lsp_pending_key = anchor_key;
+    completion->lsp_resolved_key = anchor_key;
+    return;
+  }
+
   CompletionParams params;
   params.path = buffer.path;
   params.text = buffer_text_snapshot;
@@ -3382,7 +3423,7 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
   symbols->request_completion(params, completion->lsp_pending_key);
   completion->lsp_inflight_key = completion->lsp_pending_key;
   completion->lsp_last_request_ms = now_ms;
-  completion->lsp_last_fetched_scope_key = completion_scope_key(buffer);
+  completion->lsp_last_fetched_scope_key = completion->scope_key_for(buffer);
   if (try_poll_lsp_completion(completion, workspace, symbols, panel, completion->lsp_pending_key)) {
     completion->refresh_matches();
     if (!completion->matches.empty()) {
@@ -3419,7 +3460,9 @@ void update_live_completion(CompletionState* completion, WorkspaceModel* workspa
     completion->snippet_items.clear();
   }
   completion->refresh_ts_fallback(*buffer);
-  completion->invalidate_item_cache();
+  if (completion->lsp_items.empty()) {
+    completion->invalidate_item_cache();
+  }
   completion->refresh_matches();
   if (should_trigger_lsp_fetch(*buffer, *completion, typed)) {
     schedule_live_lsp_fetch(completion, workspace, layout_state, panel);

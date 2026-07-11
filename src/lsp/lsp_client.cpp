@@ -335,7 +335,8 @@ bool LspClient::send_lsp_request(const std::string& method, nlohmann::json param
       return false;
     }
   }
-  return transport_.wait_response(id, timeout_ms, out);
+  const bool ok = transport_.wait_response(id, timeout_ms, out);
+  return ok;
 }
 
 void LspClient::cancel_inflight_completion() {
