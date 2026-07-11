@@ -4,7 +4,6 @@
 #include <chrono>
 #include <fstream>
 #include <optional>
-#include <sstream>
 
 #include "parser/tree_sitter_highlight.hpp"
 #include "parser/tree_sitter_language.hpp"

@@ -8,6 +8,7 @@
 #include "parser/tree_sitter_blocks.hpp"
 #include "parser/tree_sitter_completion.hpp"
 #include "parser/tree_sitter_highlight.hpp"
+#include "parser/tree_sitter_language.hpp"
 #include "parser/tree_sitter_locals.hpp"
 #include "parser/tree_sitter_symbols.hpp"
 #include "util/csv_viewer.hpp"
@@ -117,6 +118,18 @@ int source_line_count(const std::string& source) {
   return static_cast<int>(std::count(source.begin(), source.end(), '\n') + 1);
 }
 
+TSTree* parse_tree_for_source(TSTree* old_tree, const std::string& source) {
+  if (source.empty()) {
+    return nullptr;
+  }
+  TSParser* parser = ts_parser_new();
+  ts_parser_set_language(parser, tree_sitter_cpp_language());
+  TSTree* reparsed =
+      ts_parser_parse_string(parser, old_tree, source.c_str(), static_cast<uint32_t>(source.size()));
+  ts_parser_delete(parser);
+  return reparsed;
+}
+
 }  // namespace
 
 const std::vector<LineHighlights>* TreeSitterService::highlights_for(const std::string& path,
@@ -172,6 +185,127 @@ const std::vector<LineHighlights>* TreeSitterService::stale_highlights_for(
     return &doc->line_highlights;
   }
   return nullptr;
+}
+
+std::optional<LineHighlights> TreeSitterService::highlights_for_editing_line(
+    const std::string& path, const std::string& source, int line_0) {
+  if (path.empty() || line_0 < 0 || source.empty()) {
+    return std::nullopt;
+  }
+  const std::string canonical = normalize_editor_source(source);
+  if (canonical.empty()) {
+    return std::nullopt;
+  }
+  const std::string key = cache_key_for(path);
+  DocumentPtr doc = cache_.lookup(key);
+  if (doc == nullptr || !doc->parse_ready || doc->tree == nullptr) {
+    return std::nullopt;
+  }
+  const int doc_line_count = source_line_count(doc->source);
+  if (line_0 >= doc_line_count) {
+    return std::nullopt;
+  }
+  TSTree* query_tree = doc->tree;
+  TSTree* reparsed_tree = nullptr;
+  const bool needs_reparse = !doc->highlights_ready;
+  if (needs_reparse) {
+    reparsed_tree = parse_tree_for_source(doc->tree, doc->source);
+    if (reparsed_tree != nullptr) {
+      query_tree = reparsed_tree;
+    }
+  }
+  const TSNode root = ts_tree_root_node(query_tree);
+  if (ts_node_is_null(root)) {
+    if (reparsed_tree != nullptr) {
+      ts_tree_delete(reparsed_tree);
+    }
+    return std::nullopt;
+  }
+  LineHighlights result = highlights_for_line(root, doc->source, line_0);
+  const bool line_has_text = [&]() {
+    std::size_t pos = 0;
+    for (int row = 0; row < line_0; ++row) {
+      const std::size_t next = doc->source.find('\n', pos);
+      if (next == std::string::npos) {
+        return false;
+      }
+      pos = next + 1;
+    }
+    const std::size_t end = doc->source.find('\n', pos);
+    return (end == std::string::npos ? doc->source.size() : end) > pos;
+  }();
+  bool did_full_reparse = false;
+  if (result.spans.empty() && line_has_text) {
+    if (reparsed_tree != nullptr) {
+      ts_tree_delete(reparsed_tree);
+      reparsed_tree = nullptr;
+    }
+    TSTree* fresh_tree = parse_tree_for_source(nullptr, doc->source);
+    if (fresh_tree != nullptr) {
+      const TSNode fresh_root = ts_tree_root_node(fresh_tree);
+      if (!ts_node_is_null(fresh_root)) {
+        result = highlights_for_line(fresh_root, doc->source, line_0);
+        did_full_reparse = true;
+      }
+      ts_tree_delete(fresh_tree);
+    }
+  }
+  const bool did_reparse = reparsed_tree != nullptr || did_full_reparse;
+  if (reparsed_tree != nullptr) {
+    ts_tree_delete(reparsed_tree);
+  }
+  return result;
+}
+
+bool TreeSitterService::highlights_refresh_pending(const std::string& path) const {
+  if (path.empty()) {
+    return false;
+  }
+  const DocumentPtr doc = cache_.lookup(cache_key_for(path));
+  return doc != nullptr && doc->parse_ready && !doc->highlights_ready;
+}
+
+namespace {
+
+bool highlight_spans_map_to_line(const LineHighlights& highlights, const std::string& line_text) {
+  if (line_text.empty()) {
+    return highlights.spans.empty();
+  }
+  for (const HighlightSpan& span : highlights.spans) {
+    if (span.end_col > span.start_col && span.start_col < static_cast<int>(line_text.size())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+void TreeSitterService::commit_line_highlights(const std::string& path, const std::string& source,
+                                                int line_0, const std::string& line_text) {
+  if (path.empty() || line_0 < 0 || source.empty()) {
+    return;
+  }
+  const std::optional<LineHighlights> live = highlights_for_editing_line(path, source, line_0);
+  if (!live.has_value() || live->spans.empty()) {
+    return;
+  }
+  if (!highlight_spans_map_to_line(*live, line_text)) {
+    return;
+  }
+  const DocumentPtr doc = cache_.lookup(cache_key_for(path));
+  if (doc == nullptr) {
+    return;
+  }
+  const std::string canonical = normalize_editor_source(source);
+  const int line_count = source_line_count(canonical);
+  if (line_0 >= line_count) {
+    return;
+  }
+  if (static_cast<int>(doc->line_highlights.size()) < line_count) {
+    doc->line_highlights.resize(static_cast<std::size_t>(line_count));
+  }
+  doc->line_highlights[static_cast<std::size_t>(line_0)] = *live;
 }
 
 ftxui::Element TreeSitterService::highlight_line(const std::string& path,

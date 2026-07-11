@@ -56,7 +56,6 @@
 #include "util/clangd_workspace_setup.hpp"
 #include "util/core_analyzer_support.hpp"
 #include "util/crash_handler.hpp"
-#include "util/debug_session_log.hpp"
 #include "util/docker_shell.hpp"
 #include "util/monitor_log.hpp"
 #include "util/path_normalize.hpp"

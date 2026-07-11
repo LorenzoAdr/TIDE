@@ -60,6 +60,41 @@ const std::vector<LineHighlights>* SyntaxHighlightContext::tree_sitter_highlight
 
 namespace {
 
+const LineHighlights* live_line_highlights(SyntaxHighlightContext* ctx, int line_index) {
+  if (ctx == nullptr || !ctx->syntax_incremental || line_index < 0 || ctx->file_path.empty()) {
+    return nullptr;
+  }
+  if (ctx->editing_live_token != ctx->buffer_token) {
+    ctx->editing_live_by_line.clear();
+    ctx->editing_live_token = ctx->buffer_token;
+  }
+  const auto cached = ctx->editing_live_by_line.find(line_index);
+  if (cached != ctx->editing_live_by_line.end()) {
+    return &cached->second;
+  }
+  const std::string& source = ctx->joined();
+  if (source.empty()) {
+    ctx->editing_live_by_line.emplace(line_index, LineHighlights{});
+    return &ctx->editing_live_by_line.at(line_index);
+  }
+  std::optional<LineHighlights> live =
+      tree_sitter_service().highlights_for_editing_line(ctx->file_path, source, line_index);
+  ctx->editing_live_by_line.emplace(line_index,
+                                    live.has_value() ? std::move(*live) : LineHighlights{});
+  return &ctx->editing_live_by_line.at(line_index);
+}
+
+bool line_uses_live_ts_overlay(const SyntaxHighlightContext* ctx, int line_index) {
+  if (ctx == nullptr || !ctx->syntax_incremental || line_index < 0) {
+    return false;
+  }
+  if (line_index == ctx->editing_line) {
+    return true;
+  }
+  return ctx->dirty_highlight_lines != nullptr &&
+         ctx->dirty_highlight_lines->count(line_index) > 0;
+}
+
 constexpr uint64_t kSyntaxSpanHashOffset = 14695981039346656037ULL;
 constexpr uint64_t kSyntaxSpanHashPrime = 1099511628211ULL;
 
@@ -210,6 +245,10 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
   }
 
   CachedSyntaxLineSpans entry;
+  const LineHighlights* ts_source_hl = nullptr;
+  if (line_uses_live_ts_overlay(ctx, line_index)) {
+    ts_source_hl = live_line_highlights(ctx, line_index);
+  }
   // Whether to even try semantic spans for this line is decided by the caller (it
   // passes semantic_tokens == nullptr for the one line whose text is actively changing
   // mid-typing-burst -- see the line_semantic ternary in editor_panel.cpp). It must NOT
@@ -231,18 +270,27 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
       entry.has_semantic = !entry.semantic_display_spans.empty();
     }
   }
-  if (const auto* all_highlights = ctx->ts_line_highlights) {
-    if (line_index >= 0 && line_index < static_cast<int>(all_highlights->size())) {
-      const LineHighlights& source_hl = (*all_highlights)[static_cast<std::size_t>(line_index)];
-      entry.ts_display_spans =
-          display_spans_for_line(source_hl, source_line, col_offset, display_len, tab_size);
+  if (ts_source_hl == nullptr) {
+    if (const auto* all_highlights = ctx->ts_line_highlights) {
+      if (line_index >= 0 && line_index < static_cast<int>(all_highlights->size())) {
+        ts_source_hl = &(*all_highlights)[static_cast<std::size_t>(line_index)];
+      }
     }
   }
+  if (ts_source_hl != nullptr) {
+    entry.ts_display_spans =
+        display_spans_for_line(*ts_source_hl, source_line, col_offset, display_len, tab_size);
+  }
   const bool has_ts_spans = !entry.ts_display_spans.spans.empty();
+  const bool stale_baseline_unmapped =
+      ts_source_hl != nullptr && !ts_source_hl->spans.empty() && !has_ts_spans;
   const bool defer_empty_ts_cache =
-      ctx->syntax_incremental && !has_ts_spans && !source_line.empty() &&
-      ctx->ts_line_highlights != nullptr;
-  if (defer_empty_ts_cache) {
+      ctx->syntax_incremental && !line_uses_live_ts_overlay(ctx, line_index) && !has_ts_spans &&
+      !source_line.empty() && ctx->ts_line_highlights != nullptr;
+  if (defer_empty_ts_cache || stale_baseline_unmapped) {
+    return nullptr;
+  }
+  if (line_uses_live_ts_overlay(ctx, line_index) && !has_ts_spans && !source_line.empty()) {
     return nullptr;
   }
   cache[key] = std::move(entry);
@@ -303,6 +351,18 @@ Element highlight_tree_sitter_gap(const std::string& line, int line_index,
   if (ctx == nullptr || ctx->lines == nullptr || ctx->lines->size() == 0) {
     return text(line);
   }
+  if (line_uses_live_ts_overlay(ctx, line_index)) {
+    if (const LineHighlights* live = live_line_highlights(ctx, line_index)) {
+      const int tab_size = std::max(1, editor_indent::tab_display_width());
+      const LineHighlights display_hl =
+          display_spans_for_line(*live, ctx->lines->at(line_index), col_offset,
+                                 static_cast<int>(line.size()), tab_size);
+      if (!display_hl.spans.empty()) {
+        return HighlightTreeSitterLine(line, line_index, display_hl, cursor_col, cursor_style, 0);
+      }
+    }
+    return HighlightCodeLineLite(line, cursor_col, cursor_style);
+  }
   const auto* all_highlights = ctx->tree_sitter_highlights();
   if (all_highlights == nullptr || line_index < 0 ||
       line_index >= static_cast<int>(all_highlights->size())) {
@@ -314,6 +374,9 @@ Element highlight_tree_sitter_gap(const std::string& line, int line_index,
   const LineHighlights display_hl =
       display_spans_for_line(source_hl, source_line, col_offset, static_cast<int>(line.size()),
                              tab_size);
+  if (display_hl.spans.empty() && !line.empty()) {
+    return HighlightCodeLineLite(line, cursor_col, cursor_style);
+  }
   return HighlightTreeSitterLine(line, line_index, display_hl, cursor_col, cursor_style, 0);
 }
 

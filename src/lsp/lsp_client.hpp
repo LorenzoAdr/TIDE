@@ -83,6 +83,8 @@ class LspClient {
   std::vector<CallHierarchyItem> incoming_calls(const CallHierarchyItem& item);
   std::vector<CallHierarchyItem> outgoing_calls(const CallHierarchyItem& item);
 
+  void cancel_inflight_completion();
+
   DocumentDiagnostics diagnostics_for_file(const std::string& absolute_path);
   bool document_is_open(const std::string& absolute_path) const;
   bool document_diagnostics_current(const std::string& absolute_path) const;
@@ -149,6 +151,7 @@ class LspClient {
 
   bool send_lsp_request(const std::string& method, nlohmann::json params, int timeout_ms,
                         nlohmann::json* out);
+  bool send_completion_request(nlohmann::json params, int timeout_ms, nlohmann::json* out);
   void send_lsp_notification(const std::string& method, nlohmann::json params);
   void on_transport_reader_eof();
 
@@ -171,6 +174,8 @@ class LspClient {
   std::vector<std::string> semantic_token_types_;
   bool semantic_tokens_supported_ = false;
   int next_request_id_ = 1;
+  std::atomic<int> inflight_completion_request_id_{0};
+  std::atomic<int> latest_completion_request_id_{0};
 };
 
 }  // namespace tgdb

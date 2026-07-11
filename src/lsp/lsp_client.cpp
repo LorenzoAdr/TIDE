@@ -220,6 +220,14 @@ bool LspClient::start(const std::string& workspace_root,
                                              const nlohmann::json& params) {
     on_lsp_notification(method, params);
   });
+  transport_.set_response_acceptance_filter([this](int response_id) {
+    const int inflight = inflight_completion_request_id_.load(std::memory_order_acquire);
+    if (inflight <= 0) {
+      return true;
+    }
+    const int latest = latest_completion_request_id_.load(std::memory_order_acquire);
+    return response_id >= latest;
+  });
   std::string compile_dir = compile_commands_dir;
   if (compile_dir.empty()) {
     WorkspaceConfig default_config;
@@ -282,6 +290,8 @@ void LspClient::stop() {
   }
 
   next_request_id_ = 1;
+  inflight_completion_request_id_.store(0, std::memory_order_release);
+  latest_completion_request_id_.store(0, std::memory_order_release);
 
   std::lock_guard<std::mutex> lock(mutex_);
   documents_.clear();
@@ -326,6 +336,45 @@ bool LspClient::send_lsp_request(const std::string& method, nlohmann::json param
     }
   }
   return transport_.wait_response(id, timeout_ms, out);
+}
+
+void LspClient::cancel_inflight_completion() {
+  const int id = inflight_completion_request_id_.exchange(0, std::memory_order_acq_rel);
+  if (id > 0) {
+    transport_.send_cancel(id);
+  }
+}
+
+bool LspClient::send_completion_request(nlohmann::json params, int timeout_ms,
+                                          nlohmann::json* out) {
+  if (out == nullptr || intentionally_stopping_.load(std::memory_order_acquire)) {
+    return false;
+  }
+  cancel_inflight_completion();
+
+  int id = 0;
+  {
+    std::lock_guard<std::mutex> lock(transport_io_mutex_);
+    if (!transport_.is_running() || intentionally_stopping_.load(std::memory_order_acquire)) {
+      return false;
+    }
+    id = next_request_id_++;
+    latest_completion_request_id_.store(id, std::memory_order_release);
+    inflight_completion_request_id_.store(id, std::memory_order_release);
+    if (!transport_.write_request(id, "textDocument/completion", std::move(params))) {
+      inflight_completion_request_id_.store(0, std::memory_order_release);
+      return false;
+    }
+  }
+
+  const bool ok = transport_.wait_response(id, timeout_ms, out);
+  if (inflight_completion_request_id_.load(std::memory_order_acquire) == id) {
+    inflight_completion_request_id_.store(0, std::memory_order_release);
+  }
+  if (!ok) {
+    return false;
+  }
+  return latest_completion_request_id_.load(std::memory_order_acquire) == id;
 }
 
 void LspClient::send_lsp_notification(const std::string& method, nlohmann::json params) {
@@ -877,8 +926,7 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
                            {"context", {{"triggerKind", 1}}}};
 
   nlohmann::json result;
-  const bool rpc_ok =
-      send_lsp_request("textDocument/completion", std::move(params), 10000, &result);
+  const bool rpc_ok = send_completion_request(std::move(params), 10000, &result);
   if (!rpc_ok) {
     return {};
   }
@@ -918,8 +966,7 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
                                    {"position", make_lsp_position(text, line, character)},
                                    {"context", {{"triggerKind", 1}}}};
     nlohmann::json retry_result;
-    if (send_lsp_request("textDocument/completion", std::move(retry_params), 5000,
-                         &retry_result)) {
+    if (send_completion_request(std::move(retry_params), 5000, &retry_result)) {
       items = parse_items(retry_result);
       for (const auto& item : items) {
         if (!item.is_object()) {

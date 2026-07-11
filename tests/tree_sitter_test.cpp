@@ -538,6 +538,26 @@ void test_sync_edit_keeps_ast_before_worker() {
   assert(false && "highlights did not refresh after sync edit");
 }
 
+void test_editing_line_highlights_sync() {
+  const std::string path = "edit_line_sync.cpp";
+  const std::string initial = "int foo() { return 0; }\nint bar() { return 0; }\n";
+  wait_document_ready(path, initial);
+
+  const std::string edited = "int foo() { return 0; }\nint bar() { return 1; }\n";
+  tree_sitter_service().prepare_document(path, edited);
+  assert(tree_sitter_service().document_ready(path, edited));
+
+  const std::optional<LineHighlights> live =
+      tree_sitter_service().highlights_for_editing_line(path, edited, 1);
+  assert(live.has_value());
+  assert(!live->spans.empty());
+
+  const std::vector<LineHighlights>* stale =
+      tree_sitter_service().stale_highlights_for(path, 2);
+  assert(stale != nullptr);
+  assert(stale->size() >= 2);
+}
+
 void test_parse_debounce_coalesces_edits() {
   const std::string path = "debounce.cpp";
   const std::string initial = "int value = 0;\n";
@@ -799,6 +819,7 @@ int main() {
   tgdb::test_colored_curly_braces_depths();
   tgdb::test_local_completions_include_parameters();
   tgdb::test_sync_edit_keeps_ast_before_worker();
+  tgdb::test_editing_line_highlights_sync();
   tgdb::test_parse_debounce_coalesces_edits();
   tgdb::test_duplicate_line_highlights_escape_string();
   tgdb::test_edit_hint_matches_diff_on_char_insert();

@@ -26,7 +26,11 @@ class LspTransport {
                     int timeout_ms, nlohmann::json* out);
   bool write_request(int id, const std::string& method, nlohmann::json params);
   bool wait_response(int id, int timeout_ms, nlohmann::json* out);
+  void send_cancel(int id);
   void send_notification(const std::string& method, nlohmann::json params);
+
+  using ResponseAcceptanceFilter = std::function<bool(int response_id)>;
+  void set_response_acceptance_filter(ResponseAcceptanceFilter filter);
 
   using NotificationHandler =
       std::function<void(const std::string& method, const nlohmann::json& params)>;
@@ -57,6 +61,8 @@ class LspTransport {
   NotificationHandler notification_handler_;
   std::mutex eof_handler_mutex_;
   std::function<void()> reader_eof_handler_;
+  std::mutex response_filter_mutex_;
+  ResponseAcceptanceFilter response_acceptance_filter_;
 };
 
 }  // namespace tgdb

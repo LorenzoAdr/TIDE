@@ -20,4 +20,12 @@ constexpr int64_t kLspDidChangeDebounceMs = 900;
 // same tick as the didChange flush + its own follow-up work).
 constexpr int64_t kLspDiagnosticsDisplayDebounceMs = 1150;
 
+// When true, LSP semantic token fetches are skipped (tree-sitter only). Code paths stay
+// in place so the impact can be measured by toggling this flag.
+constexpr bool kLspSemanticTokensStandby = true;
+
+// Debounce before evaluating whether a live completion LSP fetch is needed (scope jump,
+// trigger character, etc.).
+constexpr int kLiveCompletionTriggerDebounceMs = 50;
+
 }  // namespace tgdb

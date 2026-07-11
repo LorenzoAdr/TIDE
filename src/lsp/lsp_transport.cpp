@@ -234,6 +234,13 @@ void LspTransport::reader_loop() {
       continue;
     }
 
+    {
+      std::lock_guard<std::mutex> filter_lock(response_filter_mutex_);
+      if (response_acceptance_filter_ && !response_acceptance_filter_(response_id)) {
+        continue;
+      }
+    }
+
     std::lock_guard<std::mutex> lock(pending_mutex_);
     pending_responses_[response_id] = std::move(json);
     pending_cv_.notify_all();
@@ -320,6 +327,23 @@ void LspTransport::set_notification_handler(NotificationHandler handler) {
 void LspTransport::set_reader_eof_handler(std::function<void()> handler) {
   std::lock_guard<std::mutex> lock(eof_handler_mutex_);
   reader_eof_handler_ = std::move(handler);
+}
+
+void LspTransport::send_cancel(int id) {
+  if (!running_.load() || id <= 0) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    pending_responses_.erase(id);
+  }
+  pending_cv_.notify_all();
+  send_notification("$/cancelRequest", nlohmann::json{{"id", id}});
+}
+
+void LspTransport::set_response_acceptance_filter(ResponseAcceptanceFilter filter) {
+  std::lock_guard<std::mutex> lock(response_filter_mutex_);
+  response_acceptance_filter_ = std::move(filter);
 }
 
 void LspTransport::send_notification(const std::string& method, nlohmann::json params) {

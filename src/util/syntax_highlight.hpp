@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "ftxui/dom/elements.hpp"
@@ -26,12 +28,23 @@ struct SyntaxHighlightContext {
   uint64_t semantic_revision = 0;
   // Typing burst: reuse cached tree-sitter highlights only (no prepare/parse on render).
   bool syntax_incremental = false;
+  // During a typing burst, re-highlight this line synchronously from the live tree;
+  // all other lines keep the frozen baseline snapshot.
+  int editing_line = -1;
+  // Lines edited while tree-sitter highlights are still pending a worker refresh; keeps
+  // live/lite coloring even after the caret moves away (e.g. after ';' auto-newline)
+  // until the async parse commits.
+  const std::unordered_set<int>* dirty_highlight_lines = nullptr;
   mutable std::string joined_source;
   mutable uint64_t joined_token = 0;
   mutable uint64_t prepare_token = 0;
   mutable uint64_t ts_revision = 0;
   mutable const std::vector<LineHighlights>* ts_line_highlights = nullptr;
   mutable std::unordered_map<uint64_t, CachedSyntaxLineSpans>* line_span_cache = nullptr;
+  // One live tree-sitter query + reparse per buffer edit per line (highlight_tree_sitter_gap
+  // may call into the editing-line path multiple times while rasterizing semantic gaps).
+  mutable uint64_t editing_live_token = 0;
+  mutable std::unordered_map<int, LineHighlights> editing_live_by_line;
 
   const std::string& joined() const;
   const std::vector<LineHighlights>* tree_sitter_highlights() const;

@@ -294,6 +294,9 @@ void LspSymbolProvider::enqueue_document_symbols_locked(const std::string& path,
 }
 
 void LspSymbolProvider::enqueue_semantic_tokens_locked(const std::string& path, bool force) {
+  if (kLspSemanticTokensStandby) {
+    return;
+  }
   if (path.empty() || !use_lsp_ || !client_.ready()) {
     return;
   }
@@ -1027,13 +1030,12 @@ void LspSymbolProvider::request_completion(const CompletionParams& params,
     }
   }
 
+  client_.cancel_inflight_completion();
+
   {
     std::lock_guard<std::mutex> lock(inflight_mutex_);
     for (auto it = inflight_completion_.begin(); it != inflight_completion_.end();) {
-      const std::size_t sep = it->find('|');
-      const std::string inflight_path =
-          normalize_lsp_path(sep == std::string::npos ? *it : it->substr(0, sep));
-      if (inflight_path == path_key && *it != cache_key) {
+      if (*it != cache_key) {
         it = inflight_completion_.erase(it);
       } else {
         ++it;
@@ -1050,11 +1052,8 @@ void LspSymbolProvider::request_completion(const CompletionParams& params,
   job.path = path_key;
   job.completion_key = cache_key;
   job.completion_params = params;
-  async_jobs_.remove_if([&](const AsyncJob& queued) {
-    return queued.kind == AsyncJobKind::Completion &&
-           normalize_lsp_path(queued.completion_params.path) == path_key &&
-           queued.completion_key != cache_key;
-  });
+  async_jobs_.remove_if(
+      [](const AsyncJob& queued) { return queued.kind == AsyncJobKind::Completion; });
   async_jobs_.push_front(std::move(job));
 }
 
@@ -1132,6 +1131,9 @@ bool LspSymbolProvider::supports_semantic_highlight() const {
 }
 
 bool LspSymbolProvider::ensure_semantic_tokens(const std::string& path) {
+  if (kLspSemanticTokensStandby) {
+    return false;
+  }
   if (path.empty() || !is_lsp_trackable_path(path)) {
     return false;
   }

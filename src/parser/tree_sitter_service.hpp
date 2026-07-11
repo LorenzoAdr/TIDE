@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -38,6 +39,17 @@ class TreeSitterService {
   const std::vector<LineHighlights>* stale_highlights_for(const std::string& path);
   const std::vector<LineHighlights>* stale_highlights_for(const std::string& path,
                                                            int line_count);
+  // Sync highlight query for the active editing line only (uses the live tree after
+  // ts_tree_edit; never schedules parse). Returns nullopt when the tree is unavailable.
+  std::optional<LineHighlights> highlights_for_editing_line(const std::string& path,
+                                                              const std::string& source,
+                                                              int line_0);
+  // True while sync edits have dirtied the cached per-line highlights and the worker
+  // refresh has not committed yet.
+  bool highlights_refresh_pending(const std::string& path) const;
+  // Patch one line of the frozen baseline from the live tree (called when typing settles).
+  void commit_line_highlights(const std::string& path, const std::string& source, int line_0,
+                              const std::string& line_text);
   ftxui::Element highlight_line(const std::string& path, const std::string& source, int line_index,
                                 int cursor_col = -1, ftxui::Decorator cursor_style = {},
                                 int col_offset = 0);

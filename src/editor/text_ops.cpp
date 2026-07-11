@@ -891,6 +891,11 @@ void replace_text_range_with_caret(EditorBuffer* buffer, int line, int start_col
     buffer->primary().head = {caret_line, caret_col_base + sel_end_col};
   }
   clamp_all_cursors(buffer);
+  // delete_range() updates the incremental joined cache, but the following set_line()
+  // insert does not -- leaving joined_source one edit behind (common on LSP completion).
+  // Invalidate so the next joined rebuild matches buffer.lines and tree-sitter diffs
+  // against the real text instead of a delete-only snapshot.
+  editor_buffer_invalidate_joined(buffer);
   mark_dirty(buffer);
 }
 
