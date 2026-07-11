@@ -1,4 +1,5 @@
 #include "ui/file_tree_panel.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -317,7 +318,7 @@ struct FileTreePanelState {
       model->active_line = 0;
       model->view_token++;
       if (layout_state != nullptr) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
       if (focus != nullptr) {
         focus->region = FocusRegion::Editor;
@@ -510,7 +511,7 @@ void hide_explorer_panel(MainLayoutState* layout_state, FocusManagerState* focus
     layout_state->focus_sync_needed = true;
   }
   layout_state->text_input_focus = TextInputFocus::None;
-  layout_state->request_ui_tick = true;
+  UI_WAKE(layout_state, "wake");
 }
 
 bool handle_explorer_header_mouse(FileTreePanelState* state, MainLayoutState* layout_state,
@@ -551,7 +552,7 @@ bool update_explorer_hover(FileTreePanelState* state, MainLayoutState* layout_st
   }
   if (layout_state->clickable.hovered_id() != before) {
     layout_state->panel_render_cache.mark_dirty(UiPanelId::FileTree);
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   return false;

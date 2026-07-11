@@ -1,4 +1,5 @@
 #include "ui/search_panel.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -187,7 +188,7 @@ bool poll_search_results(SearchPanelState* state, MainLayoutState* layout_state)
   }
   apply_search_results(state, std::move(results), cancelled, files_scanned, used_rg);
   if (layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
   return true;
 }
@@ -217,7 +218,7 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
   ++state->search_generation;
   state->runner.start(opts);
   if (layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
 }
 
@@ -338,7 +339,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     if (event == Event::Custom) {
       poll_search_results(state.get(), layout_state);
       if (state->runner.running() && layout_state != nullptr) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
     }
     if (event == Event::Custom && sidebar != nullptr && sidebar->pending_search_setup) {
@@ -421,14 +422,14 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       if (m.button == Mouse::WheelUp) {
         state->first_visible = std::max(0, state->first_visible - 3);
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
         return true;
       }
       if (m.button == Mouse::WheelDown) {
         state->first_visible = std::min(state->first_visible + 3, max_scroll);
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
         return true;
       }

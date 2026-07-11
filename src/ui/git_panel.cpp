@@ -1,4 +1,5 @@
 #include "ui/git_panel.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <sstream>
@@ -547,7 +548,7 @@ void stage_selected(GitService* git, GitPanelState* state, MainLayoutState* layo
     state->operation_pending = false;
     set_status(state, ok ? i18n::tr("git.status.staged") : msg);
     if (layout_state != nullptr) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
   });
 }
@@ -564,7 +565,7 @@ void unstage_selected(GitService* git, GitPanelState* state, MainLayoutState* la
     state->operation_pending = false;
     set_status(state, ok ? i18n::tr("git.status.unstaged") : msg);
     if (layout_state != nullptr) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
   });
 }
@@ -583,7 +584,7 @@ void commit_message(GitService* git, GitPanelState* state, MainLayoutState* layo
     }
     set_status(state, ok ? i18n::tr("git.status.commit_ok") : msg);
     if (layout_state != nullptr) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
   });
 }
@@ -688,7 +689,7 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
         state->operation_pending = false;
         set_status(state, ok ? i18n::tr("git.status.push_ok") : msg);
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
       });
       return true;
@@ -699,7 +700,7 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
         state->operation_pending = false;
         set_status(state, ok ? i18n::tr("git.status.pull_ok") : msg);
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
       });
       return true;
@@ -795,7 +796,7 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
           state->operation_pending = false;
           set_status(state, ok ? i18n::tr("git.status.branch_switched") : msg);
           if (layout_state != nullptr) {
-            layout_state->request_ui_tick = true;
+            UI_WAKE(layout_state, "wake");
           }
         });
       }
@@ -1049,7 +1050,7 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
         state->operation_pending = false;
         set_status(state, ok ? i18n::tr("git.status.push_ok") : msg);
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
       });
       return true;
@@ -1061,7 +1062,7 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
         state->operation_pending = false;
         set_status(state, ok ? i18n::tr("git.status.pull_ok") : msg);
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
       });
       return true;

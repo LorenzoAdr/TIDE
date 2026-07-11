@@ -1,4 +1,5 @@
 #include "ui/right_sidebar_panel.hpp"
+#include "ui/ui_wake.hpp"
 
 #include "app/app_settings.hpp"
 #include "ftxui/component/component.hpp"
@@ -30,7 +31,7 @@ void hide_secondary_panel(MainLayoutState* layout_state) {
   if (layout_state->apply_app_settings_callback) {
     layout_state->apply_app_settings_callback();
   } else {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
 }
 

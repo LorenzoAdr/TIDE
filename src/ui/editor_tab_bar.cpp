@@ -1,4 +1,5 @@
 #include "ui/editor_tab_bar.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -371,7 +372,7 @@ bool update_editor_chrome_hover(WorkspaceModel* workspace, EditorTabBarState* st
   }
   if (layout_state->clickable.hovered_id() != before ||
       (state != nullptr && state->hover_close_tab_index != before_close)) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   return false;

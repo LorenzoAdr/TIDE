@@ -1,4 +1,6 @@
 #include "ui/console_panel.hpp"
+#include "ui/terminal_ui_channel.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <array>
@@ -262,7 +264,7 @@ bool open_terminal_link(WorkspaceModel* workspace, DebugModel* model, FocusManag
   if (layout_state != nullptr) {
     layout_state->text_input_focus = TextInputFocus::None;
     layout_state->focus_sync_needed = true;
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
   return true;
 }
@@ -300,14 +302,8 @@ void follow_terminal_on_input(ConsolePanelState* state) {
 }
 
 void request_terminal_repaint(MainLayoutState* layout_state) {
-  if (layout_state != nullptr && layout_state->terminal_wake_callback) {
-    layout_state->terminal_wake_callback();
-    return;
-  }
-  if (layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
-  }
-  nudge_terminal_repaint();
+  TerminalUiChannel channel(layout_state);
+  channel.on_pty_output();
 }
 
 void scroll_terminal_by_lines(ConsolePanelState* state, int delta, int total_lines,
@@ -597,7 +593,7 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
   const int previous_tab = layout_state->console_tabs.selected_tab;
   layout_state->console_tabs.selected_tab = tab;
   layout_state->focus_sync_needed = true;
-  layout_state->request_ui_tick = true;
+  UI_WAKE(layout_state, "wake");
   if (tab == ConsolePanelTabs::kTerminal) {
     layout_state->text_input_focus = TextInputFocus::Console;
     if (focus != nullptr) {
@@ -703,7 +699,7 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
     } else if (i == ConsolePanelTabs::kCoreAnalyzer) {
       activate_console_input(layout_state, focus, input_box);
     } else if (layout_state != nullptr) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
     return true;
   }
@@ -725,18 +721,18 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
   if (m.motion == Mouse::Moved) {
     if (on_terminal_tab && state->shell_ui_active) {
       if (update_terminal_link_hover(state, layout_state, m.x, m.y)) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
     } else if (state->terminal_link_hover.has_value()) {
       state->terminal_link_hover.reset();
       if (layout_state != nullptr) {
         layout_state->clickable.clear_hover_if(
             [](std::string_view id) { return id == press_id::kTerminalLink; });
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
     }
     if (handle_console_tab_hover(state, layout_state, app_mode, m)) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
       return true;
     }
     if (on_terminal_tab && state->shell_ui_active) {
@@ -757,7 +753,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
       state->hide_box.Contain(m.x, m.y)) {
     trigger_press(layout_state, press_id::kConsoleHide);
     layout_state->console_visible = false;
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
 
@@ -1881,7 +1877,11 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     } else if (selected_tab == ConsolePanelTabs::kCoreAnalyzer) {
       body = core_analyzer_panel->Render() | flex;
     } else if (selected_tab == ConsolePanelTabs::kPerformance) {
-      body = RenderPerformancePanel(sampler, ui_perf, perf_state.get(), panel_width, body_height) | flex;
+      body = RenderPerformancePanel(sampler, ui_perf, perf_state.get(), panel_width, body_height,
+                                    layout_state != nullptr && layout_state->ui_events != nullptr
+                                        ? &layout_state->ui_events->trace()
+                                        : nullptr) |
+             flex;
     } else if (selected_tab == ConsolePanelTabs::kProblems) {
       body = diagnostics_panel->Render() | flex;
     } else if (selected_tab == ConsolePanelTabs::kSearch) {

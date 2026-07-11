@@ -115,6 +115,8 @@ add_executable(tgdb
   src/ui/terminal_display.cpp
   src/ui/focusable_component.cpp
   src/ui/clickable_interaction.cpp
+  src/ui/ui_event_dispatcher.cpp
+  src/ui/ui_event_trace.cpp
   src/ui/mouse_velocity_tracker.cpp
   src/ui/cursor_blink.cpp
   src/ui/spinner.cpp

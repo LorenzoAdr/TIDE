@@ -1,4 +1,5 @@
 #include "ui/diagnostics_panel.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <array>
@@ -339,7 +340,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
         }
         clamp_scroll(state.get(), visible);
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
         return true;
       }
@@ -365,7 +366,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
         context_menu_open_problem(&layout_state->context_menu, m.x, m.y, diag.path, diag.line,
                                   diag.character, diag.end_col, diag.message, lsp_available);
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
         return true;
       }
@@ -391,7 +392,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
           focus->region = FocusRegion::Editor;
         }
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
         return true;
       }

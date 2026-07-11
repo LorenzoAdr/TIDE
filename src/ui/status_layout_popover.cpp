@@ -1,4 +1,5 @@
 #include "ui/status_layout_popover.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <string>
 
@@ -175,13 +176,13 @@ bool HandleStatusLayoutPopoverMouse(StatusLayoutPopoverState* popover,
   if (anchor_box.Contain(mouse.x, mouse.y)) {
     popover->open = false;
     layout_state->clickable.clear_hover_if(layout_popover_hover_id);
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
 
   popover->open = false;
   layout_state->clickable.clear_hover_if(layout_popover_hover_id);
-  layout_state->request_ui_tick = true;
+  UI_WAKE(layout_state, "wake");
   return true;
 }
 

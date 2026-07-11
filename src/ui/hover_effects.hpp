@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string_view>
+#include "ui/ui_wake.hpp"
 
 #include "ui/main_layout.hpp"
 #include "ui/press_ids.hpp"
@@ -56,7 +57,7 @@ inline bool apply_hover_repaint(MainLayoutState* layout, std::string_view before
   if (layout->clickable.hovered_id() != before) {
     invalidate_cached_panel_chrome(layout, before);
     invalidate_cached_panel_chrome(layout, layout->clickable.hovered_id());
-    layout->request_ui_tick = true;
+    UI_WAKE(layout, "wake");
     return true;
   }
   return false;

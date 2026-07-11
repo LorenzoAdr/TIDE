@@ -1,4 +1,6 @@
 #include "ui/performance_panel.hpp"
+#include "ui/ui_event_trace.hpp"
+#include "ui/ui_event_types.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -231,7 +233,8 @@ Element render_system_section(const PerformanceSnapshot& snapshot, int body_heig
 }
 
 Element render_ui_thread_section(const UiPerfSnapshot& ui, int panel_width,
-                                 const std::string& dump_path) {
+                                 const std::string& dump_path,
+                                 const UiEventTrace* ui_event_trace) {
   (void)panel_width;
   Elements lines;
   std::ostringstream header;
@@ -263,13 +266,29 @@ Element render_ui_thread_section(const UiPerfSnapshot& ui, int panel_width,
         << phase.samples;
     lines.push_back(text(row.str()) | color(theme::Muted()));
   }
+  if (ui_event_trace != nullptr) {
+    const auto counts = ui_event_trace->counts_by_kind();
+    std::ostringstream events;
+    events << "ui_events total=" << ui_event_trace->total_emitted() << " input=" << counts[0]
+           << " correlated=" << counts[1] << " terminal=" << counts[2] << " debug=" << counts[3];
+    lines.push_back(text(events.str()) | color(theme::Muted()));
+    for (const UiEventTraceEntry& entry : ui_event_trace->recent(4)) {
+      std::ostringstream row;
+      row << "#" << entry.seq << " " << ui_event_kind_label(entry.kind) << " " << entry.tag;
+      if (!entry.src_file.empty()) {
+        row << " @" << entry.src_line;
+      }
+      lines.push_back(text(row.str()) | color(theme::Muted()));
+    }
+  }
   return vbox(std::move(lines));
 }
 
 }  // namespace
 
 Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,
-                               PerformancePanelState* state, int width, int height) {
+                               PerformancePanelState* state, int width, int height,
+                               const UiEventTrace* ui_event_trace) {
   const int total_height = visible_height(height);
   const int panel_width = visible_width(width);
 
@@ -295,7 +314,7 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
       render_process_section(snapshot, process_height, panel_width, state);
 
   Elements layout;
-  layout.push_back(render_ui_thread_section(ui_snapshot, panel_width, dump_path) |
+  layout.push_back(render_ui_thread_section(ui_snapshot, panel_width, dump_path, ui_event_trace) |
                    size(HEIGHT, EQUAL, ui_height) | bgcolor(theme::PanelBg()));
   layout.push_back(separator() | color(theme::AccentDim()) | size(HEIGHT, EQUAL, 1));
   layout.push_back(text(i18n::tr("panel.performance.tab.process")) | bold | color(theme::Accent()) | bgcolor(theme::TabIdle()) |

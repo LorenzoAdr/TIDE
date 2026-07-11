@@ -1,4 +1,5 @@
 #include "ui/workspace_wizard.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <memory>
 
@@ -36,7 +37,7 @@ bool update_f3_browser_hover(WorkspaceWizardState* state, MainLayoutState* layou
     layout_state->clickable.clear_hover_if(press_id::is_f3_hover);
   }
   if (layout_state->clickable.hovered_id() != before) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   return false;

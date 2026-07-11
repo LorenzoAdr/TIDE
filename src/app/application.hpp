@@ -39,6 +39,7 @@
 #include "git/git_service.hpp"
 #include "ui/git_panel.hpp"
 #include "ui/main_layout.hpp"
+#include "ui/ui_event_dispatcher.hpp"
 #include "ui/source_panel.hpp"
 #include "ui/workspace_wizard.hpp"
 #include "ui/welcome_screen.hpp"
@@ -74,6 +75,7 @@ class Application {
   explicit Application(AppConfig config);
   ~Application();
   int run();
+  void run_input_sync_drain(int64_t now_ms);
 
  private:
   void drain_events();
@@ -132,6 +134,7 @@ class Application {
   void force_exit();
   void stop_all_subprocesses();
   void sync_activity_phase_effects();
+  void run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan& plan, uint64_t paint_before);
 
   AppConfig config_;
   AppMode app_mode_ = AppMode::kNormal;
@@ -190,6 +193,7 @@ class Application {
   std::deque<std::function<void()>> ui_tasks_;
   std::atomic<bool> reindex_in_progress_{false};
   UiActivityPhase last_activity_phase_ = UiActivityPhase::kInhibited;
+  UiEventDispatcher ui_event_dispatcher_;
 };
 
 }  // namespace tgdb

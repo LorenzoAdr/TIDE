@@ -6,7 +6,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "util/system_stats.hpp"
 #include "util/ui_activity_gate.hpp"
-#include "util/ui_perf_monitor.hpp"
+#include "ui/ui_event_trace.hpp"
 
 namespace tgdb {
 
@@ -15,7 +15,8 @@ struct PerformancePanelState {
 };
 
 ftxui::Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,
-                                        PerformancePanelState* state, int width, int height);
+                                        PerformancePanelState* state, int width, int height,
+                                        const UiEventTrace* ui_event_trace = nullptr);
 ftxui::Component MakePerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,
                                         std::shared_ptr<PerformancePanelState> state);
 

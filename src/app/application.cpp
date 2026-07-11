@@ -50,6 +50,10 @@
 #include "ui/symbol_picker.hpp"
 #include "ui/terminal_display.hpp"
 #include "ui/terminal_keyboard.hpp"
+#include "ui/terminal_ui_channel.hpp"
+#include "ui/debug_ui_channel.hpp"
+#include "ui/ui_event_dispatcher.hpp"
+#include "ui/ui_wake.hpp"
 #include "ui/theme.hpp"
 #include "util/bundled_tools.hpp"
 #include "util/clang_format_config.hpp"
@@ -135,105 +139,41 @@ bool event_is_alt_down(const Event &event) {
 	return event == Event::Special("\x1B[1;3B");
 }
 
-void force_immediate_repaint(MainLayoutState *layout, ScreenInteractive *screen) {
-	if (layout != nullptr) {
-		layout->request_ui_tick = true;
-	}
-	if (screen == nullptr) {
-		return;
-	}
-	// Defer Custom until after the current keyboard/mouse handler returns.
-	// Nested PTYs (WSL → docker exec -it) can leave the frame stale when a
-	// coalesced Custom from the poller is still pending.
-	screen->Post([screen, layout]() {
-		if (layout != nullptr) {
-			layout->request_ui_tick = true;
-			layout->custom_event_pending.store(true, std::memory_order_release);
-		}
-		screen->PostEvent(Event::Custom);
-	});
-}
-
-void request_custom_event(ScreenInteractive *screen, MainLayoutState *layout) {
-	if (screen == nullptr || layout == nullptr) {
-		return;
-	}
-	if (layout->custom_event_pending.exchange(true, std::memory_order_acq_rel)) {
-		return;
-	}
-	screen->PostEvent(Event::Custom);
-}
-
-class EventPoller {
+class BackgroundWorker {
   public:
 	using MainThreadTask = std::function<void()>;
 
 	static constexpr int64_t kActiveIntervalMs = 50;
-	static constexpr int64_t kInhibitedSleepMs = 500;
 
-	EventPoller(ScreenInteractive *screen, MainLayoutState *layout, MainThreadTask on_main_thread)
-	    : screen_(screen), layout_(layout), on_main_thread_(std::move(on_main_thread)) {
+	explicit BackgroundWorker(MainThreadTask on_main_thread)
+	    : on_main_thread_(std::move(on_main_thread)) {
 		thread_ = std::thread([this] {
 			set_current_thread_name("ui-poller");
 			while (running_.load(std::memory_order_acquire)) {
-				if (layout_ != nullptr &&
-				    layout_->activity_gate.is_inhibited()) {
-					std::this_thread::sleep_for(
-					    std::chrono::milliseconds(kInhibitedSleepMs));
-					if (layout_->shutdown_ui_poll_paused.load(std::memory_order_acquire)) {
-						continue;
-					}
-					continue;
-				}
 				std::this_thread::sleep_for(std::chrono::milliseconds(kActiveIntervalMs));
-				if (layout_ != nullptr &&
-				    layout_->shutdown_ui_poll_paused.load(std::memory_order_acquire)) {
-					continue;
-				}
-				if (screen_ != nullptr) {
-					if (layout_ != nullptr) {
-						layout_->ui_heartbeat.store(true, std::memory_order_release);
-					}
-					if (on_main_thread_) {
-						screen_->Post(on_main_thread_);
-					}
-					const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-					                           std::chrono::steady_clock::now().time_since_epoch())
-					                           .count();
-					const bool needs_press_tick =
-					    layout_ != nullptr && layout_->clickable.has_active_presses();
-					if (layout_ == nullptr || !layout_->activity_gate.is_interactive() ||
-					    layout_->activity_gate.allows_deferred_editor_sync(now_ms) ||
-					    needs_press_tick ||
-					    layout_->activity_gate.is_workspace_bootstrap(now_ms)) {
-						request_custom_event(screen_, layout_);
-					}
+				if (on_main_thread_) {
+					on_main_thread_();
 				}
 			}
 		});
 	}
 
-	~EventPoller() {
+	~BackgroundWorker() {
 		running_.store(false, std::memory_order_release);
 		if (thread_.joinable()) {
 			thread_.join();
 		}
 	}
 
-	EventPoller(const EventPoller &) = delete;
-	EventPoller &operator=(const EventPoller &) = delete;
+	BackgroundWorker(const BackgroundWorker &) = delete;
+	BackgroundWorker &operator=(const BackgroundWorker &) = delete;
 
   private:
-	ScreenInteractive *screen_;
-	MainLayoutState *layout_;
 	MainThreadTask on_main_thread_;
 	std::atomic<bool> running_{true};
 	std::thread thread_;
 };
 
-// FTXUI CatchEvent invoca el handler antes que el hijo; RequestUiTickGuard en el
-// handler se destruía con request_ui_tick aún en false. Este wrapper postea Custom
-// después de que todo el árbol haya procesado el evento.
 // Swallow pure mouse moves while interactive/inhibited so FTXUI keeps frame_valid_ and no child
 // handler can return handled=true (scrollbars, tabs, etc.).
 class InhibitedMouseMoveBlocker : public ComponentBase {
@@ -257,51 +197,35 @@ class InhibitedMouseMoveBlocker : public ComponentBase {
 	std::function<bool()> modal_open_;
 };
 
-class UiTickPostWrapper : public ComponentBase {
-  public:
-	UiTickPostWrapper(MainLayoutState *layout, ScreenInteractive *screen)
-	    : layout_(layout), screen_(screen) {}
-
-	bool OnEvent(Event event) override {
-		// Evaluate event type before the move; moving invalidates the string payload but
-		// leaves type_ and mouse_ data intact — checking before is cleaner.
-		const bool is_custom = (event == Event::Custom);
-
-		// Mouse moves already trigger screen.Post from CatchEvent handlers when needed;
-		// skip the duplicate UiTickPost to avoid running the UI loop at the raw mouse
-		// polling rate (~100-200 Hz).
-		const bool is_mouse_move = !is_custom && event.is_mouse() &&
-		                           event.mouse().motion == Mouse::Moved;
-		const bool handled = ComponentBase::OnEvent(std::move(event));
-		// Never chain Custom→Custom: each tick that sets request_ui_tick would otherwi
-		// enqueue another Custom in the same RunOnce drain loop and starve keyboard input.
-		if (!is_custom && !is_mouse_move) {
-			post_pending_tick();
-		}
-		
-		return handled;
-	}
-
-  private:
-	void post_pending_tick() {
-		if (layout_ == nullptr || screen_ == nullptr || !layout_->request_ui_tick) {
-			return;
-		}
-		layout_->request_ui_tick = false;
-		request_custom_event(screen_, layout_);
-	}
-
-	MainLayoutState *layout_;
-	ScreenInteractive *screen_;
-};
-
-Component WrapUiTickPost(Component child, MainLayoutState *layout, ScreenInteractive *screen,
-                         std::function<bool()> modal_open) {
+Component WrapUiTickPost(Component child, MainLayoutState *layout, ScreenInteractive * /*screen*/,
+                         std::function<bool()> modal_open, Application *app) {
 	auto guard = Make<InhibitedMouseMoveBlocker>(layout, std::move(modal_open));
 	guard->Add(std::move(child));
-	auto wrapper = Make<UiTickPostWrapper>(layout, screen);
-	wrapper->Add(std::move(guard));
-	return wrapper;
+	if (app == nullptr) {
+		return guard;
+	}
+	class UiInputSyncWrapper : public ComponentBase {
+	  public:
+		UiInputSyncWrapper(MainLayoutState *layout_state, Application *application)
+		    : layout_state_(layout_state), application_(application) {}
+
+		bool OnEvent(Event event) override {
+			const bool is_custom = (event == Event::Custom);
+			const bool significant = is_significant_input_event(event);
+			const bool handled = ComponentBase::OnEvent(std::move(event));
+			if (!is_custom && significant && application_ != nullptr) {
+				application_->run_input_sync_drain(steady_now_ms());
+			}
+			return handled;
+		}
+
+	  private:
+		MainLayoutState *layout_state_;
+		Application *application_;
+	};
+	auto sync = Make<UiInputSyncWrapper>(layout, app);
+	sync->Add(std::move(guard));
+	return sync;
 }
 
 } // namespace
@@ -539,7 +463,7 @@ void Application::restart_lsp_for_workspace() {
 		reopen_workspace_documents(&workspace_, symbol_provider_);
 		workspace_.buffer.view_token++;
 		secondary_workspace_.buffer.view_token++;
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 	});
 	if (!setup.status_note.empty()) {
 		workspace_.status_message += " | " + setup.status_note;
@@ -580,12 +504,12 @@ void Application::restart_workspace_indexing() {
 void Application::reindex_project() {
 	if (workspace_.root.empty()) {
 		set_workspace_status(i18n::tr("status.index_no_workspace"));
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 		return;
 	}
 	if (!resolve_clangd().has_value()) {
 		set_workspace_status(i18n::tr("status.index_no_clangd"));
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 		return;
 	}
 	if (!app_settings_.lsp_enabled) {
@@ -596,16 +520,16 @@ void Application::reindex_project() {
 		}
 		apply_app_settings();
 		set_workspace_status(i18n::tr("status.index_lsp_enabled"));
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 		return;
 	}
 	if (reindex_in_progress_.exchange(true)) {
 		set_workspace_status(i18n::tr("status.index_started"));
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 		return;
 	}
 	set_workspace_status(i18n::tr("status.index_started"));
-	layout_state_.request_ui_tick = true;
+	UI_WAKE(&layout_state_, "app");
 	enqueue_ui_task([this]() {
 		workspace_.flush_active_tab();
 		std::thread([this]() {
@@ -618,7 +542,7 @@ void Application::reindex_project() {
 				workspace_.buffer.view_token++;
 				reindex_in_progress_.store(false);
 				set_workspace_status(i18n::tr("status.index_started"));
-				layout_state_.request_ui_tick = true;
+				UI_WAKE(&layout_state_, "app");
 			});
 		}).detach();
 	});
@@ -628,11 +552,8 @@ void Application::enqueue_ui_task(std::function<void()> task) {
 	if (!task) {
 		return;
 	}
-	{
-		std::lock_guard<std::mutex> lock(ui_task_mutex_);
-		ui_tasks_.push_back(std::move(task));
-	}
-	layout_state_.request_ui_tick = true;
+	std::lock_guard<std::mutex> lock(ui_task_mutex_);
+	ui_tasks_.push_back(std::move(task));
 }
 
 void Application::drain_ui_tasks() {
@@ -646,6 +567,128 @@ void Application::drain_ui_tasks() {
 			task();
 		}
 	}
+}
+
+void Application::run_input_sync_drain(int64_t now_ms) {
+	if (layout_state_.ui_events != nullptr) {
+		layout_state_.ui_events->begin_input_correlation();
+	}
+	layout_state_.activity_gate.tick(now_ms);
+	shell_session_.set_consumer_active(
+	    layout_state_.console_visible &&
+	    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal);
+	if (layout_state_.primary_editor.tick_callback && !layout_state_.welcome_visible) {
+		layout_state_.primary_editor.tick_callback();
+	}
+	if (layout_state_.secondary_editor.tick_callback && !layout_state_.welcome_visible) {
+		layout_state_.secondary_editor.tick_callback();
+	}
+	if (symbol_provider_ && layout_state_.activity_gate.allows_lsp_ui()) {
+		if (symbol_provider_->drain_async_results()) {
+			workspace_.buffer.view_token++;
+			secondary_workspace_.buffer.view_token++;
+		}
+	}
+	drain_ui_tasks();
+}
+
+void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan &plan,
+                                         uint64_t paint_before) {
+	layout_state_.activity_gate.tick(now_ms);
+	sync_activity_phase_effects();
+	layout_state_.ui_perf_monitor.on_custom_tick_begin(now_ms);
+	layout_state_.ui_perf_monitor.set_activity_phase(
+	    layout_state_.activity_gate.phase(),
+	    layout_state_.activity_gate.ms_in_current_phase(now_ms));
+
+	shell_session_.set_consumer_active(
+	    layout_state_.console_visible &&
+	    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal);
+
+	if (plan.run_debug) {
+		UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_events");
+		TGDB_MON_SCOPE("ui", "tick.drain_events");
+		drain_events();
+	}
+
+	if (plan.run_full_background) {
+		if (!any_modal_open()) {
+			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "apply_pending_connection");
+			TGDB_MON_SCOPE("ui", "tick.apply_pending_connection");
+			apply_pending_connection();
+		}
+		if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
+			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "process_index_changes");
+			TGDB_MON_SCOPE("ui", "tick.process_index_changes");
+			process_index_changes();
+		}
+		if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
+			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "process_build_environment");
+			TGDB_MON_SCOPE("ui", "tick.process_build_environment_updates");
+			process_build_environment_updates();
+		}
+		if (layout_state_.source_tick_callback && app_mode_ == AppMode::kDebug) {
+			layout_state_.source_tick_callback();
+		}
+		if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
+			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "git");
+			TGDB_MON_SCOPE("ui", "tick.git");
+			git_service_.tick();
+		}
+		if (layout_state_.outline_tick_callback &&
+		    layout_state_.activity_gate.allows_deferred_panel_tick()) {
+			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "outline");
+			TGDB_MON_SCOPE("ui", "tick.outline");
+			layout_state_.outline_tick_callback();
+		}
+	}
+
+	if (plan.run_terminal && layout_state_.console_visible &&
+	    layout_state_.terminal_tick_callback) {
+		UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal");
+		TGDB_MON_SCOPE("ui", "tick.terminal");
+		layout_state_.terminal_tick_callback();
+	}
+
+	if (plan.run_editor) {
+		if (layout_state_.primary_editor.tick_callback && !layout_state_.welcome_visible) {
+			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "primary_editor");
+			TGDB_MON_SCOPE("ui", "tick.primary_editor");
+			layout_state_.primary_editor.tick_callback();
+		}
+		if (layout_state_.secondary_editor.tick_callback && !layout_state_.welcome_visible) {
+			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "secondary_editor");
+			TGDB_MON_SCOPE("ui", "tick.secondary_editor");
+			layout_state_.secondary_editor.tick_callback();
+		}
+		if (symbol_provider_ && layout_state_.activity_gate.allows_lsp_ui()) {
+			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_async_results");
+			TGDB_MON_SCOPE("ui", "tick.drain_async_results");
+			if (symbol_provider_->drain_async_results()) {
+				workspace_.buffer.view_token++;
+				secondary_workspace_.buffer.view_token++;
+			}
+		}
+		if (app_mode_ == AppMode::kDebug) {
+			layout_state_.packet_monitor_service->tick();
+		}
+	}
+
+	if (plan.run_ui_tasks) {
+		drain_ui_tasks();
+	}
+
+	if (git_tab_active(&layout_state_)) {
+		GitPanelEnsureSelectedDiff(&git_service_, &git_panel_state_);
+	}
+	const bool sample_perf =
+	    layout_state_.console_visible &&
+	    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kPerformance;
+	layout_state_.performance_sampler.set_worker_sampling_enabled(sample_perf);
+	layout_state_.performance_sampler.on_frame();
+
+	layout_state_.ui_perf_monitor.on_custom_tick_end(now_ms, paint_before);
+	layout_state_.ui_perf_monitor.publish_dump_phases();
 }
 
 void Application::sync_activity_phase_effects() {
@@ -679,7 +722,7 @@ void Application::apply_workspace_settings(const WorkspaceConfig &config) {
 	setup_build_environment_watching();
 	sync_symbol_workspace_indexer();
 	workspace_.buffer.view_token++;
-	layout_state_.request_ui_tick = true;
+	UI_WAKE(&layout_state_, "app");
 }
 
 void Application::save_workspace_session() {
@@ -715,12 +758,12 @@ void Application::begin_shutdown(ScreenInteractive *screen) {
 	shutdown_state_.begin(7);
 	shutdown_step_index_ = 0;
 	shutdown_state_.set_current(i18n::tr("app.shutdown.save_session"));
-	layout_state_.request_ui_tick = true;
+	UI_WAKE(&layout_state_, "app");
 	if (screen != nullptr) {
 		screen->Post([this, screen] {
-			force_immediate_repaint(&layout_state_, screen);
+			UI_WAKE(&layout_state_, "app.urgent");
 			screen->Post([this, screen] {
-				force_immediate_repaint(&layout_state_, screen);
+				UI_WAKE(&layout_state_, "app.urgent");
 				screen->Post([this, screen] { schedule_next_shutdown_step(screen); });
 			});
 		});
@@ -742,7 +785,7 @@ void Application::schedule_next_shutdown_step(ScreenInteractive *screen) {
 			return;
 		}
 		screen->Post([this, screen] {
-			force_immediate_repaint(&layout_state_, screen);
+			UI_WAKE(&layout_state_, "app.urgent");
 			if (shutdown_state_.is_complete()) {
 				screen->ExitLoopClosure()();
 				return;
@@ -806,7 +849,7 @@ void Application::tick_shutdown() {
 		shutdown_state_.mark_complete();
 		shutdown_performed_ = true;
 	}
-	layout_state_.request_ui_tick = true;
+	UI_WAKE(&layout_state_, "app");
 }
 
 void Application::force_exit() {
@@ -843,7 +886,7 @@ void Application::dismiss_welcome_screen() {
 	layout_state_.welcome_visible = false;
 	layout_state_.console_visible = true;
 	layout_state_.terminal_start_requested = true;
-	layout_state_.request_ui_tick = true;
+	UI_WAKE(&layout_state_, "app");
 }
 
 void Application::set_workspace(const std::string &workspace_root,
@@ -968,7 +1011,7 @@ void Application::process_pending_workspace_load() {
 	layout_state_.focus_sync_needed = true;
 	// No autostart shell here: bash PTY output + repaint nudges starve the UI event loop.
 	layout_state_.terminal_start_requested = false;
-	layout_state_.request_ui_tick = true;
+	UI_WAKE(&layout_state_, "app");
 }
 
 void Application::open_external_file_wizard() {
@@ -1324,7 +1367,7 @@ void Application::quick_launch_last() {
 	}
 	on_connection_complete(result);
 	apply_pending_connection();
-	layout_state_.request_ui_tick = true;
+	UI_WAKE(&layout_state_, "app");
 }
 
 void Application::quick_attach_last() {
@@ -1347,7 +1390,7 @@ void Application::quick_attach_last() {
 	connection_wizard_state_.refresh_process_matches();
 	connection_wizard_state_.open = true;
 	set_status(i18n::tr("app.configure_debug"));
-	layout_state_.request_ui_tick = true;
+	UI_WAKE(&layout_state_, "app");
 }
 
 void Application::submit_command(const UiCommand &command) {
@@ -1376,7 +1419,7 @@ void Application::apply_event(const DebugEvent &event) {
 		session_ready_ = true;
 		model_.status_message = event.text;
 		model_.view_token++;
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 		if (connection_wizard_state_.open || !connection_config_complete()) {
 			break;
 		}
@@ -1394,13 +1437,13 @@ void Application::apply_event(const DebugEvent &event) {
 		}
 		refresh_all_watches();
 		model_.view_token++;
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 		break;
 	case DebugEventKind::kContinued:
 		model_.set_running();
 		clear_source_debug_hover(&source_state_.debug_hover);
 		model_.view_token++;
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 		break;
 	case DebugEventKind::kTerminated:
 		model_.set_terminated();
@@ -1410,7 +1453,7 @@ void Application::apply_event(const DebugEvent &event) {
 			model_.status_message = event.text;
 		}
 		model_.view_token++;
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 		break;
 	case DebugEventKind::kStackUpdated:
 		model_.stack_frames = event.stack_frames;
@@ -1442,7 +1485,7 @@ void Application::apply_event(const DebugEvent &event) {
 			source_state_.debug_hover.visible = !source_state_.debug_hover.body_lines.empty() ||
 			                                    !source_state_.debug_hover.title.empty();
 		}
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 		break;
 	case DebugEventKind::kEvaluateResult:
 		if (!event.text.empty()) {
@@ -1574,7 +1617,7 @@ void Application::apply_app_settings() {
 		layout_state_.focus_sync_needed = true;
 	}
 	workspace_.buffer.view_token++;
-	layout_state_.request_ui_tick = true;
+	UI_WAKE(&layout_state_, "app");
 }
 
 void Application::toggle_helix_mode() {
@@ -1596,7 +1639,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 	if (event == Event::CtrlA) {
 		if (!layout_state_.explorer_visible) {
 			layout_state_.explorer_visible = true;
-			layout_state_.request_ui_tick = true;
+			UI_WAKE(&layout_state_, "app");
 		}
 		focus_state_.region = FocusRegion::Explorer;
 		mark_focus_sync();
@@ -1726,9 +1769,9 @@ int Application::run() {
 		enable_extended_key_reporting();
 	}
 
-	std::unique_ptr<EventPoller> event_poller;
+	std::unique_ptr<BackgroundWorker> background_worker;
 	if (!ui_smoke) {
-		event_poller = std::make_unique<EventPoller>(&screen, &layout_state_, [this]() {
+		background_worker = std::make_unique<BackgroundWorker>([this]() {
 			if (pending_workspace_load_.has_value()) {
 				process_pending_workspace_load();
 			}
@@ -1767,7 +1810,7 @@ int Application::run() {
 		if (symbol_provider_) {
 			symbol_provider_->on_document_saved(path);
 		}
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 	};
 	layout_state_.status_open_settings = [this]() {
 		if (settings_modal_state_.open) {
@@ -1777,13 +1820,13 @@ int Application::run() {
 			    [this](const WorkspaceConfig &config) { apply_workspace_settings(config); },
 			    [this](const ClangFormatConfig &) {
 				    workspace_.buffer.view_token++;
-				    layout_state_.request_ui_tick = true;
+				    UI_WAKE(&layout_state_, "app");
 			    });
 		} else if (!any_modal_open()) {
 			open_settings_modal(&settings_modal_state_, app_settings_, workspace_.root,
 			                    workspace_config_);
 		}
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 	};
 	layout_state_.status_open_shortcuts = [this]() {
 		if (shortcuts_modal_state_.open) {
@@ -1793,7 +1836,7 @@ int Application::run() {
 			shortcuts_modal_state_.open = true;
 			shortcuts_modal_state_.first_visible = 0;
 		}
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 	};
 	layout_state_.status_open_launch = [this]() { open_launch_wizard(); };
 	layout_state_.status_reindex_project = [this]() { reindex_project(); };
@@ -1806,7 +1849,7 @@ int Application::run() {
 		} else if (!any_modal_open()) {
 			open_source_substitute_modal(&source_substitute_state_, &model_, workspace_.root);
 		}
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 	};
 	layout_state_.status_quick_launch = [this]() { quick_launch_last(); };
 	layout_state_.status_open_debug = [this]() { open_debug_wizard(); };
@@ -1821,7 +1864,7 @@ int Application::run() {
 			layout_state_.text_input_focus = TextInputFocus::None;
 		}
 		layout_state_.focus_sync_needed = true;
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 	};
 	layout_state_.status_set_outline_visible = [this](bool visible) {
 		if (app_settings_.secondary_panel_enabled == visible) {
@@ -1840,7 +1883,7 @@ int Application::run() {
 			layout_state_.terminal_start_requested = true;
 		}
 		layout_state_.focus_sync_needed = true;
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 	};
 	layout_state_.helix_ide.open_quick_file = [this, &screen]() {
 		file_picker_state_.open = true;
@@ -1850,7 +1893,7 @@ int Application::run() {
 		file_picker_state_.mark_matches_dirty();
 		file_picker_state_.reset_preview();
 		file_picker_state_.arm_ctrl_chord();
-		force_immediate_repaint(&layout_state_, &screen);
+		UI_WAKE(&layout_state_, "app.urgent");
 	};
 	layout_state_.helix_ide.open_symbol_picker = [this, &screen]() {
 		symbol_picker_state_.open = true;
@@ -1860,7 +1903,7 @@ int Application::run() {
 		symbol_picker_state_.catalog_key.clear();
 		symbol_picker_state_.catalog.reset();
 		symbol_picker_state_.mark_matches_dirty();
-		force_immediate_repaint(&layout_state_, &screen);
+		UI_WAKE(&layout_state_, "app.urgent");
 	};
 	layout_state_.helix_ide.save_file = [this]() {
 		workspace_.save_buffer();
@@ -1878,7 +1921,7 @@ int Application::run() {
 				symbol_indexer_.reindex_file(workspace_.root, rel_str, workspace_.buffer.path);
 			}
 		}
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 	};
 	layout_state_.helix_ide.request_quit = [this]() {
 		workspace_.flush_active_tab();
@@ -1896,14 +1939,16 @@ int Application::run() {
 		}
 		quit_confirm_state_.open = true;
 		quit_confirm_state_.selected = quit_confirm_state_.unsaved_paths.empty() ? 0 : 1;
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 	};
-	git_service_.set_update_callback([this] { layout_state_.request_ui_tick = true; });
+	git_service_.set_update_callback([] {});
 
-	file_picker_state_.set_preview_notify([this] { layout_state_.request_ui_tick = true; });
-	file_picker_state_.set_repaint_notify(
-	    [this, &screen] { force_immediate_repaint(&layout_state_, &screen); });
-	symbol_picker_state_.set_search_notify([this] { layout_state_.request_ui_tick = true; });
+	file_picker_state_.set_preview_notify([this] {
+		ui_wake_correlated(&layout_state_, ui_capture_correlation(&layout_state_),
+		                   "file_picker.preview");
+	});
+	file_picker_state_.set_repaint_notify([this] { UI_WAKE(&layout_state_, "file_picker.repaint"); });
+	symbol_picker_state_.set_search_notify([this] { UI_WAKE(&layout_state_, "app"); });
 
 	auto with_symbol_picker =
 	    MakeSymbolPickerOverlay(layout, &workspace_, &symbol_picker_state_, &focus_state_,
@@ -1936,7 +1981,7 @@ int Application::run() {
 		    } else {
 			    workspace_.open_external_file(path);
 		    }
-		    layout_state_.request_ui_tick = true;
+		    UI_WAKE(&layout_state_, "app");
 	    });
 
 	auto with_shortcuts =
@@ -1951,7 +1996,7 @@ int Application::run() {
 		editor_indent::apply(config);
 		workspace_.buffer.view_token++;
 		secondary_workspace_.buffer.view_token++;
-		layout_state_.request_ui_tick = true;
+		UI_WAKE(&layout_state_, "app");
 	};
 	auto with_settings =
 	    MakeSettingsModalOverlay(with_shortcuts, &settings_modal_state_, &app_settings_,
@@ -1966,7 +2011,7 @@ int Application::run() {
 		    command.substitute_from = from;
 		    command.substitute_to = to;
 		    submit_command(command);
-		    layout_state_.request_ui_tick = true;
+		    UI_WAKE(&layout_state_, "app");
 	    };
 	auto with_source_substitute = MakeSourceSubstituteModalOverlay(
 	    with_settings, &source_substitute_state_, &layout_state_, on_source_substitute_apply);
@@ -1983,7 +2028,7 @@ int Application::run() {
 		                               model_.active_file = path;
 		                               model_.active_line = line + 1;
 		                               model_.view_token++;
-		                               layout_state_.request_ui_tick = true;
+		                               UI_WAKE(&layout_state_, "app");
 	                               });
 
 	auto with_context_menu = MakeContextMenuOverlay(
@@ -1997,8 +2042,7 @@ int Application::run() {
 		    return 24;
 	    }, on_command);
 
-	auto inner_root = CatchEvent(with_context_menu, [this, &screen, on_command,
-	                                                 &event_poller](const Event &event) {
+	auto inner_root = CatchEvent(with_context_menu, [this, &screen, on_command](const Event &event) {
 		try {
 			const bool editor_browse_active = app_mode_ == AppMode::kNormal ||
 			                                  model_.is_post_mortem || app_mode_ == AppMode::kDebug;
@@ -2038,151 +2082,35 @@ int Application::run() {
 		}
 
 		if (event == Event::Custom) {
-			layout_state_.custom_event_pending.store(false, std::memory_order_release);
 			layout_state_.ui_custom_tick.fetch_add(1, std::memory_order_relaxed);
 			monitor_log::heartbeat();
-			// El emulador solo se consume cuando la consola está visible y en la
-			// pestaña de terminal; en otro caso la sesión drena en segundo plano
-			// para no acumular salida que congelaría la UI al reabrir.
-			shell_session_.set_consumer_active(
-			    layout_state_.console_visible &&
-			    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal);
-			layout_state_.activity_gate.tick(now_ms);
-			sync_activity_phase_effects();
-			layout_state_.ui_perf_monitor.on_custom_tick_begin(now_ms);
-			layout_state_.ui_perf_monitor.set_activity_phase(
-			    layout_state_.activity_gate.phase(),
-			    layout_state_.activity_gate.ms_in_current_phase(now_ms));
 			const uint64_t paint_before =
 			    layout_state_.ui_paint_count.load(std::memory_order_relaxed);
-
-			const bool terminal_only = layout_state_.terminal_minimal_wake.exchange(false);
-			const bool debug_critical = layout_state_.debug_critical_wake.exchange(false);
-			const bool allows_tick = layout_state_.activity_gate.allows_periodic_tick() ||
-			                         debug_critical || any_modal_open();
-
-			if (terminal_only && layout_state_.activity_gate.is_inhibited() &&
-			    layout_state_.console_visible && layout_state_.terminal_tick_callback) {
-				UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal_minimal");
-				layout_state_.terminal_tick_callback();
-				layout_state_.ui_perf_monitor.on_custom_tick_end(now_ms, paint_before);
-				layout_state_.ui_perf_monitor.publish_dump_phases();
-				return false;
+			const UiEventDrainPlan plan = ui_event_dispatcher_.drain_pending(now_ms);
+			run_custom_event_drain(now_ms, plan, paint_before);
+			bool swallow_call_hierarchy_custom = false;
+			if (layout_state_.right_sidebar.pending_call_hierarchy &&
+			    layout_state_.call_hierarchy_key_handler) {
+				layout_state_.call_hierarchy_key_handler(event);
+				swallow_call_hierarchy_custom = true;
 			}
-
-			if (debug_critical || allows_tick) {
-				{
-					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_events");
-					TGDB_MON_SCOPE("ui", "tick.drain_events");
-					drain_events();
-				}
+			if ((search_tab_active(&layout_state_) ||
+			     is_search_input_focus(layout_state_.text_input_focus)) &&
+			    layout_state_.search_key_handler) {
+				layout_state_.search_key_handler(event);
 			}
-
-			if (allows_tick) {
-				if (!any_modal_open()) {
-					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "apply_pending_connection");
-					TGDB_MON_SCOPE("ui", "tick.apply_pending_connection");
-					apply_pending_connection();
-				}
-				if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
-					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "process_index_changes");
-					TGDB_MON_SCOPE("ui", "tick.process_index_changes");
-					process_index_changes();
-				}
-				if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
-					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "process_build_environment");
-					TGDB_MON_SCOPE("ui", "tick.process_build_environment_updates");
-					process_build_environment_updates();
-				}
-				if (layout_state_.activity_gate.allows_cursor_blink()) {
-					cursor_blink::tick();
-				}
-				if (layout_state_.clickable.tick()) {
-					layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
-					layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
-					layout_state_.request_ui_tick = true;
-				}
-				if (layout_state_.console_visible && layout_state_.terminal_tick_callback) {
-					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal");
-					TGDB_MON_SCOPE("ui", "tick.terminal");
-					layout_state_.terminal_tick_callback();
-				}
-				if (app_mode_ == AppMode::kDebug) {
-					layout_state_.packet_monitor_service->tick();
-				}
-				if (symbol_provider_ && layout_state_.activity_gate.allows_lsp_ui()) {
-					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_async_results");
-					TGDB_MON_SCOPE("ui", "tick.drain_async_results");
-					if (symbol_provider_->drain_async_results()) {
-						workspace_.buffer.view_token++;
-						secondary_workspace_.buffer.view_token++;
-					}
-				}
-				if (layout_state_.primary_editor.tick_callback && !layout_state_.welcome_visible) {
-					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "primary_editor");
-					TGDB_MON_SCOPE("ui", "tick.primary_editor");
-					layout_state_.primary_editor.tick_callback();
-				}
-				if (layout_state_.secondary_editor.tick_callback &&
-				    !layout_state_.welcome_visible) {
-					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "secondary_editor");
-					TGDB_MON_SCOPE("ui", "tick.secondary_editor");
-					layout_state_.secondary_editor.tick_callback();
-				}
-				if (layout_state_.source_tick_callback && app_mode_ == AppMode::kDebug) {
-					layout_state_.source_tick_callback();
-				}
-				if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
-					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "git");
-					TGDB_MON_SCOPE("ui", "tick.git");
-					git_service_.tick();
-				}
-				drain_ui_tasks();
-				if (git_tab_active(&layout_state_)) {
-					GitPanelEnsureSelectedDiff(&git_service_, &git_panel_state_);
-				}
-				if (layout_state_.outline_tick_callback &&
-				    layout_state_.activity_gate.allows_deferred_panel_tick()) {
-					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "outline");
-					TGDB_MON_SCOPE("ui", "tick.outline");
-					layout_state_.outline_tick_callback();
-				}
-				const bool sample_perf =
-				    layout_state_.console_visible &&
-				    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kPerformance;
-				layout_state_.performance_sampler.set_worker_sampling_enabled(sample_perf);
-				if (layout_state_.ui_heartbeat.exchange(false, std::memory_order_acquire)) {
-					UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "performance_sampler");
-					TGDB_MON_SCOPE("ui", "tick.performance_sampler");
-					layout_state_.performance_sampler.on_frame();
-				}
+			if (layout_state_.binary_symbols_key_handler &&
+			    (binary_symbols_tab_active(&layout_state_) ||
+			     layout_state_.binary_symbols_pending.open_tab ||
+			     !layout_state_.binary_symbols_pending.binary_path.empty() ||
+			     layout_state_.binary_symbols_pending.refresh)) {
+				layout_state_.binary_symbols_key_handler(event);
 			}
-
-			layout_state_.ui_perf_monitor.on_custom_tick_end(now_ms, paint_before);
-			layout_state_.ui_perf_monitor.publish_dump_phases();
-				bool swallow_call_hierarchy_custom = false;
-				if (layout_state_.right_sidebar.pending_call_hierarchy &&
-				    layout_state_.call_hierarchy_key_handler) {
-					layout_state_.call_hierarchy_key_handler(event);
-					swallow_call_hierarchy_custom = true;
-				}
-				if ((search_tab_active(&layout_state_) ||
-				     is_search_input_focus(layout_state_.text_input_focus)) &&
-				    layout_state_.search_key_handler) {
-					layout_state_.search_key_handler(event);
-				}
-				if (layout_state_.binary_symbols_key_handler &&
-				    (binary_symbols_tab_active(&layout_state_) ||
-				     layout_state_.binary_symbols_pending.open_tab ||
-				     !layout_state_.binary_symbols_pending.binary_path.empty() ||
-				     layout_state_.binary_symbols_pending.refresh)) {
-					layout_state_.binary_symbols_key_handler(event);
-				}
-				if (swallow_call_hierarchy_custom) {
-					return true;
-				}
-				return false;
+			if (swallow_call_hierarchy_custom) {
+				return true;
 			}
+			return false;
+		}
 
 			if (!event.is_character() && !event.is_mouse()) {
 				std::ostringstream key_msg;
@@ -2204,7 +2132,7 @@ int Application::run() {
 						file_picker_state_.ctrl_chord_active = true;
 						file_picker_state_.update_preview_for_selection(model_.workspace_root);
 					}
-					force_immediate_repaint(&layout_state_, &screen);
+					UI_WAKE(&layout_state_, "app.urgent");
 					return true;
 				}
 				file_picker_state_.open = true;
@@ -2215,7 +2143,7 @@ int Application::run() {
 				file_picker_state_.reset_preview();
 				file_picker_state_.arm_ctrl_chord();
 				file_picker_state_.on_opened(model_.workspace_root);
-				force_immediate_repaint(&layout_state_, &screen);
+				UI_WAKE(&layout_state_, "app.urgent");
 				return true;
 			}
 			if (event_is_ctrl_o(event)) {
@@ -2226,7 +2154,7 @@ int Application::run() {
 					symbol_picker_state_.selected =
 					    (symbol_picker_state_.selected + 1) %
 					    static_cast<int>(symbol_picker_state_.matches.size());
-					layout_state_.request_ui_tick = true;
+					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
 				symbol_picker_state_.open = true;
@@ -2236,7 +2164,7 @@ int Application::run() {
 				symbol_picker_state_.catalog_key.clear();
 				symbol_picker_state_.catalog.reset();
 				symbol_picker_state_.mark_matches_dirty();
-				force_immediate_repaint(&layout_state_, &screen);
+				UI_WAKE(&layout_state_, "app.urgent");
 				return true;
 			}
 
@@ -2246,7 +2174,7 @@ int Application::run() {
 				} else if (!any_modal_open()) {
 					open_external_file_wizard();
 				}
-				layout_state_.request_ui_tick = true;
+				UI_WAKE(&layout_state_, "app");
 				return true;
 			}
 
@@ -2258,7 +2186,7 @@ int Application::run() {
 					shortcuts_modal_state_.open = true;
 					shortcuts_modal_state_.first_visible = 0;
 				}
-				layout_state_.request_ui_tick = true;
+				UI_WAKE(&layout_state_, "app");
 				return true;
 			}
 
@@ -2270,7 +2198,7 @@ int Application::run() {
 					    [this](const WorkspaceConfig &config) { apply_workspace_settings(config); },
 					    [this](const ClangFormatConfig &) {
 						    workspace_.buffer.view_token++;
-						    layout_state_.request_ui_tick = true;
+						    UI_WAKE(&layout_state_, "app");
 					    });
 				} else if (!any_modal_open()) {
 					open_settings_modal(&settings_modal_state_, app_settings_, workspace_.root,
@@ -2287,21 +2215,21 @@ int Application::run() {
 			if (settings_modal_state_.open && event.is_mouse()) {
 				Event mouse_event = event;
 				if (settings_modal_handle_mouse(&settings_modal_state_, mouse_event)) {
-					layout_state_.request_ui_tick = true;
+					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
 			}
 
 			if (layout_state_.status_layout_popover.open) {
 				if (HandleStatusLayoutPopoverKeys(&layout_state_.status_layout_popover, event)) {
-					layout_state_.request_ui_tick = true;
+					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
 				if (event.is_mouse()) {
 					Event mouse_event = event;
 					if (layout_state_.status_bar_mouse_handler &&
 					    layout_state_.status_bar_mouse_handler(mouse_event)) {
-						layout_state_.request_ui_tick = true;
+						UI_WAKE(&layout_state_, "app");
 						return true;
 					}
 				}
@@ -2315,12 +2243,12 @@ int Application::run() {
 				Event welcome_event = event;
 				if (layout_state_.welcome_mouse_handler && event.is_mouse() &&
 				    layout_state_.welcome_mouse_handler(welcome_event)) {
-					layout_state_.request_ui_tick = true;
+					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
 				if (!event.is_mouse() && layout_state_.welcome_key_handler &&
 				    layout_state_.welcome_key_handler(welcome_event)) {
-					layout_state_.request_ui_tick = true;
+					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
 				if (handle_focus_shortcuts(event)) {
@@ -2349,7 +2277,7 @@ int Application::run() {
 				return;
 			}
 			if (!is_pure_move_event) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return;
 			}
 			if (!layout_state_.activity_gate.allows_hover_chrome()) {
@@ -2359,7 +2287,7 @@ int Application::run() {
 			if (!layout_state_.mouse_velocity.on_mouse_move(mouse.x, mouse.y, steady_now_ms())) {
 				return;
 			}
-			request_custom_event(&screen, &layout_state_);
+			UI_WAKE(&layout_state_, "app.custom");
 		};
 
 		if (event.is_mouse() && layout_state_.split_mouse_handler &&
@@ -2411,7 +2339,7 @@ int Application::run() {
 		}
 
 		if (handle_focus_shortcuts(event)) {
-			request_custom_event(&screen, &layout_state_);
+			UI_WAKE(&layout_state_, "app.custom");
 			return true;
 		}
 
@@ -2461,8 +2389,7 @@ int Application::run() {
 			    layout_state_.watches_mouse_handler(event)) {
 				handled = true;
 			}
-			if (handled || layout_state_.request_ui_tick) {
-				post_custom_throttled();
+			if (handled) {
 				layout_state_.focus_sync_needed = true;
 				return handled;
 			}
@@ -2496,7 +2423,7 @@ int Application::run() {
 		     shell_terminal_focus) &&
 		    !event_is_tide_global_shortcut(event) && layout_state_.console_key_handler &&
 		    layout_state_.console_key_handler(event)) {
-			request_custom_event(&screen, &layout_state_);
+			UI_WAKE(&layout_state_, "app.custom");
 			return true;
 		}
 			if (app_mode_ == AppMode::kNormal && event_is_workspace_search_with_selection(event) &&
@@ -2509,7 +2436,7 @@ int Application::run() {
 				    selection_text(active_workspace.buffer, active_workspace.buffer.primary());
 				focus_search_with_filter(&layout_state_, needle, "");
 				focus_state_.region = FocusRegion::Terminal;
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			const auto &active_editor_handlers =
@@ -2517,39 +2444,39 @@ int Application::run() {
 			if (editor_browse_active && event_is_ctrl_f(event) &&
 			    is_editor_focus_region(focus_state_.region) && active_editor_handlers.key_handler &&
 			    active_editor_handlers.key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			if (editor_browse_active && layout_state_.editor_completion_open &&
 			    event == Event::Escape && active_editor_handlers.key_handler &&
 			    active_editor_handlers.key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			if (editor_browse_active &&
 			    is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    active_editor_handlers.key_handler && active_editor_handlers.key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			if ((is_search_input_focus(layout_state_.text_input_focus) ||
 			     search_tab_active(&layout_state_)) &&
 			    layout_state_.search_key_handler && layout_state_.search_key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			if (call_hierarchy_tab_active(&layout_state_) &&
 			    focus_state_.region == FocusRegion::Terminal &&
 			    layout_state_.call_hierarchy_key_handler &&
 			    layout_state_.call_hierarchy_key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			if (problems_tab_active(&layout_state_) &&
 			    focus_state_.region == FocusRegion::Terminal &&
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.problems_key_handler && layout_state_.problems_key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			if ((is_binary_symbols_input_focus(layout_state_.text_input_focus) ||
@@ -2557,13 +2484,13 @@ int Application::run() {
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.binary_symbols_key_handler &&
 			    layout_state_.binary_symbols_key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			if (git_tab_active(&layout_state_) && focus_state_.region == FocusRegion::Terminal &&
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.git_key_handler && layout_state_.git_key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			if (core_analyzer_tab_active(&layout_state_) &&
@@ -2571,7 +2498,7 @@ int Application::run() {
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.core_analyzer_key_handler &&
 			    layout_state_.core_analyzer_key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			if (packet_monitor_tab_active(&layout_state_) &&
@@ -2579,14 +2506,14 @@ int Application::run() {
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.packet_monitor_key_handler &&
 			    layout_state_.packet_monitor_key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			if (app_mode_ == AppMode::kDebug &&
 			    (focus_state_.region == FocusRegion::RightPanel ||
 			     is_watch_input_focus(layout_state_.text_input_focus)) &&
 			    layout_state_.watches_key_handler && layout_state_.watches_key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				layout_state_.focus_sync_needed = true;
 				return true;
 			}
@@ -2595,7 +2522,7 @@ int Application::run() {
 			    !is_watch_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.text_input_focus != TextInputFocus::Console &&
 			    layout_state_.source_key_handler && layout_state_.source_key_handler(event)) {
-				request_custom_event(&screen, &layout_state_);
+				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
 			if (is_editor_focus_region(focus_state_.region) && editor_browse_active &&
@@ -2605,7 +2532,7 @@ int Application::run() {
 			    layout_state_.text_input_focus != TextInputFocus::Console &&
 			    active_editor_handlers.key_handler) {
 				if (active_editor_handlers.key_handler(event)) {
-					layout_state_.request_ui_tick = true;
+					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
 			}
@@ -2615,7 +2542,7 @@ int Application::run() {
 			    !event_has_ctrl_modifier(event) && event != Event::CtrlP &&
 			    !event_is_ctrl_p(event) && active_editor_handlers.key_handler &&
 			    active_editor_handlers.key_handler(event)) {
-				layout_state_.request_ui_tick = true;
+				UI_WAKE(&layout_state_, "app");
 				return true;
 			}
 			if (layout_state_.editor_helix_prefix_pending &&
@@ -2644,7 +2571,7 @@ int Application::run() {
 					if (layout_state_.terminal_follow_input_callback) {
 						layout_state_.terminal_follow_input_callback();
 					}
-					force_immediate_repaint(&layout_state_, &screen);
+					UI_WAKE(&layout_state_, "app.urgent");
 					return true;
 				}
 				if (is_editor_focus_region(focus_state_.region) &&
@@ -2655,7 +2582,7 @@ int Application::run() {
 				    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 				    active_editor_handlers.key_handler &&
 				    active_editor_handlers.key_handler(event)) {
-					layout_state_.request_ui_tick = true;
+					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
 				return false;
@@ -2677,7 +2604,7 @@ int Application::run() {
 				}
 				quit_confirm_state_.open = true;
 				quit_confirm_state_.selected = quit_confirm_state_.unsaved_paths.empty() ? 0 : 1;
-				layout_state_.request_ui_tick = true;
+				UI_WAKE(&layout_state_, "app");
 				return true;
 			}
 
@@ -2686,7 +2613,7 @@ int Application::run() {
 				if (!workspace_.buffer.path.empty()) {
 					ToggleBreakpointAtFile(&model_, workspace_.buffer.path,
 					                       workspace_.buffer.primary_line() + 1, on_command);
-					layout_state_.request_ui_tick = true;
+					UI_WAKE(&layout_state_, "app");
 				}
 				return true;
 			}
@@ -2707,7 +2634,7 @@ int Application::run() {
 					command.kind = UiCommandKind::kContinue;
 					submit_command(command);
 					layout_state_.clickable.trigger_press(press_id::kWatchesPlay);
-					layout_state_.request_ui_tick = true;
+					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
 				if (event == Event::F10 && !model_.is_post_mortem) {
@@ -2732,7 +2659,7 @@ int Application::run() {
 						open_source_substitute_modal(&source_substitute_state_, &model_,
 						                             workspace_.root);
 					}
-					layout_state_.request_ui_tick = true;
+					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
 			}
@@ -2758,7 +2685,7 @@ int Application::run() {
 				focus_state_.region = FocusRegion::Terminal;
 				layout_state_.text_input_focus = TextInputFocus::None;
 				layout_state_.focus_sync_needed = true;
-				layout_state_.request_ui_tick = true;
+				UI_WAKE(&layout_state_, "app");
 				return true;
 			}
 			if (event == Event::F9) {
@@ -2796,25 +2723,19 @@ int Application::run() {
 auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_state_,
 	                                &layout_state_, [this] { force_exit(); });
 
-	layout_state_.schedule_ui_tick = [this]() { layout_state_.request_ui_tick = true; };
-	layout_state_.terminal_wake_callback = [this, &screen]() {
-		if (layout_state_.activity_gate.is_inhibited()) {
-			layout_state_.terminal_minimal_wake.store(true, std::memory_order_release);
-		}
-		layout_state_.request_ui_tick = true;
-		request_custom_event(&screen, &layout_state_);
-	};
+	layout_state_.ui_events = &ui_event_dispatcher_;
+	ui_event_dispatcher_.set_screen(&screen);
+
 	if (backend_) {
-		backend_->set_wake_callback([this, &screen](DebugEventKind kind) {
-			(void)kind;
+		backend_->set_wake_callback([this](DebugEventKind kind) {
 			const int64_t now_ms = steady_now_ms();
 			layout_state_.activity_gate.on_debug_critical(now_ms);
-			layout_state_.debug_critical_wake.store(true, std::memory_order_release);
-			layout_state_.request_ui_tick = true;
-			request_custom_event(&screen, &layout_state_);
+			DebugUiChannel channel(&layout_state_);
+			channel.on_debug_event(kind);
 		});
 	}
-	tree_sitter_service().set_ready_callback([this, &screen](const std::string& path) {
+	tree_sitter_service().set_ready_callback([this](const std::string& path) {
+		const uint64_t correlation = layout_state_.last_editor_correlation_id;
 		enqueue_ui_task([this, path]() {
 			if (!path.empty() && workspace_.buffer.path == path) {
 				workspace_.buffer.view_token++;
@@ -2822,9 +2743,8 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 			if (!path.empty() && secondary_workspace_.buffer.path == path) {
 				secondary_workspace_.buffer.view_token++;
 			}
-			layout_state_.request_ui_tick = true;
 		});
-		request_custom_event(&screen, &layout_state_);
+		ui_wake_correlated(&layout_state_, correlation, "tree_sitter.ready");
 	});
 
 	layout_state_.performance_sampler.set_dump_hooks(&layout_state_.activity_gate,
@@ -2833,7 +2753,7 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 	                                                 &layout_state_.ui_perf_monitor);
 
 	screen.Loop(WrapUiTickPost(root, &layout_state_, &screen,
-	                           [this] { return any_modal_open(); }));
+	                           [this] { return any_modal_open(); }, this));
 
 	if (!ui_smoke) {
 		disable_extended_key_reporting();

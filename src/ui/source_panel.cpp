@@ -1,4 +1,5 @@
 #include "ui/source_panel.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <chrono>
 #include <fstream>
@@ -760,7 +761,7 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
                                     panel_state->last_visible_lines);
       if (!source_panel_contains_mouse(*panel_state, m) && !panel_state->scrollbar_dragging) {
         clear_source_debug_hover(&view_state->debug_hover);
-        return layout_state != nullptr && layout_state->request_ui_tick;
+        return true;
       }
     } else if (!source_panel_contains_mouse(*panel_state, m) && !panel_state->scrollbar_dragging) {
       return false;
@@ -804,8 +805,8 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
       const bool ready = symbols->ensure_semantic_tokens(model->active_file);
       if (ready || symbols->semantic_tokens_current_for_file(model->active_file)) {
         panel_state->semantic_tokens_enqueue_pending = false;
-        if (layout_state->schedule_ui_tick) {
-          layout_state->schedule_ui_tick();
+        if (layout_state != nullptr) {
+          UI_WAKE(layout_state, "source.semantic");
         }
       } else if (!symbols->lsp_loading() && !symbols->supports_semantic_highlight()) {
         panel_state->semantic_tokens_enqueue_pending = false;

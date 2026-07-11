@@ -36,6 +36,8 @@
 
 namespace tgdb {
 
+class UiEventDispatcher;
+
 namespace packet_monitor {
 class PacketMonitorService;
 }
@@ -129,7 +131,8 @@ struct MainLayoutState {
   bool diagnostics_panel_visible = false;
   int diagnostics_panel_height = 6;
   bool terminal_start_requested = true;
-  bool request_ui_tick = false;
+  UiEventDispatcher* ui_events = nullptr;
+  uint64_t last_editor_correlation_id = 0;
   std::atomic<bool> custom_event_pending{false};
   std::atomic<bool> terminal_sync_after_draw{false};
   std::atomic<bool> shutdown_ui_poll_paused{false};
@@ -225,10 +228,8 @@ struct MainLayoutState {
   bool editor_ctrl_modifier_held = false;
   std::function<void()> terminal_tick_callback;
   std::function<void()> terminal_follow_input_callback;
-  std::function<void()> terminal_wake_callback;
   std::function<int()> terminal_width;
   std::function<int()> terminal_height;
-  std::function<void()> schedule_ui_tick;
   std::function<void(const std::string& path)> on_file_saved;
   PerformanceSampler performance_sampler;
   std::unique_ptr<packet_monitor::PacketMonitorService> packet_monitor_service;

@@ -1,4 +1,5 @@
 #include "ui/core_analyzer_panel.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <sstream>
@@ -174,7 +175,7 @@ bool handle_core_analyzer_mouse(Event event, DebugModel* model, CoreAnalyzerPane
       const int row = state->instances_first_visible + visual_row;
       if (row >= 0 && row < inst_total) {
         layout_state->clickable.set_hover(press_id::core_analyzer_instance(row));
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
     } else {
       const std::string_view before = layout_state->clickable.hovered_id();
@@ -189,7 +190,7 @@ bool handle_core_analyzer_mouse(Event event, DebugModel* model, CoreAnalyzerPane
     state->instances_first_visible =
         std::max(0, std::min(state->instances_first_visible + delta,
                              max_first_visible(inst_total, inst_visible)));
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
 
@@ -205,13 +206,13 @@ bool handle_core_analyzer_mouse(Event event, DebugModel* model, CoreAnalyzerPane
   if (state->command_input_box.Contain(m.x, m.y)) {
     layout_state->core_analyzer_focus = CoreAnalyzerFocus::kCommand;
     cursor_blink::show();
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   if (state->search_input_box.Contain(m.x, m.y)) {
     layout_state->core_analyzer_focus = CoreAnalyzerFocus::kSearch;
     cursor_blink::show();
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   if (state->instances_box.Contain(m.x, m.y) && inst_total > 0) {
@@ -222,7 +223,7 @@ bool handle_core_analyzer_mouse(Event event, DebugModel* model, CoreAnalyzerPane
       return true;
     }
     set_selected_instance(row, model, state, inst_visible);
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   return false;
@@ -556,7 +557,7 @@ Component MakeCoreAnalyzerPanel(DebugModel* model, CommandCallback on_command,
         }
         if (handle_core_analyzer_keyboard(event, model, state.get(), layout_state, on_command)) {
           if (layout_state != nullptr) {
-            layout_state->request_ui_tick = true;
+            UI_WAKE(layout_state, "wake");
           }
           return true;
         }

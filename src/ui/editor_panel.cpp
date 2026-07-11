@@ -1,4 +1,5 @@
 #include "ui/editor_panel.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -99,7 +100,8 @@ std::string buffer_text(const EditorBuffer& buffer) { return editor_buffer_joine
 void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer);
 
 void notify_editor_buffer_changed(WorkspaceModel* workspace, EditorPanelState* panel,
-                                  const std::shared_ptr<ISymbolProvider>& symbols) {
+                                  const std::shared_ptr<ISymbolProvider>& symbols,
+                                  MainLayoutState* layout_state = nullptr) {
   if (workspace == nullptr) {
     return;
   }
@@ -113,6 +115,9 @@ void notify_editor_buffer_changed(WorkspaceModel* workspace, EditorPanelState* p
                           .count();
   workspace->last_buffer_edit_ms = now;
   buffer.view_token++;
+  if (layout_state != nullptr) {
+    layout_state->last_editor_correlation_id = ui_capture_correlation(layout_state);
+  }
   if (panel != nullptr) {
     mark_editor_content_edited(panel, buffer);
   }
@@ -823,8 +828,8 @@ void track_editor_scroll(EditorPanelState* panel, int scroll, MainLayoutState* l
   }
   panel->last_render_scroll = scroll;
   panel->last_scroll_change_ms = steady_now_ms();
-  if (layout_state != nullptr && layout_state->schedule_ui_tick) {
-    layout_state->schedule_ui_tick();
+  if (layout_state != nullptr) {
+    UI_WAKE(layout_state, "editor.scroll");
   }
 }
 
@@ -1086,7 +1091,7 @@ void poll_selection_occurrence_matches(EditorPanelState* panel, const EditorBuff
   panel->selection_occurrence_inflight_id = 0;
   panel->selection_occurrence_matches = std::move(matches);
   if (layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
 }
 
@@ -1137,7 +1142,7 @@ void tick_selection_occurrence_matches(EditorPanelState* panel, const EditorBuff
   }
   request_selection_occurrence_matches(panel, buffer);
   if (panel->selection_occurrence_inflight_id != 0 && layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
 }
 
@@ -1269,7 +1274,7 @@ void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
     if (hover.info.valid) {
       hover.visible = true;
       if (layout_state != nullptr) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
       return;
     }
@@ -1278,7 +1283,7 @@ void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
         hover.info = *polled;
         hover.visible = polled->valid;
         if (hover.visible && layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
       }
     }
@@ -1291,7 +1296,7 @@ void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
       hover.fetch_key = key;
       hover.visible = polled->valid;
       if (hover.visible && layout_state != nullptr) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
       return;
     }
@@ -1314,7 +1319,7 @@ void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
   hover.fetch_key = key;
   hover.visible = hover.info.valid;
   if (hover.visible && layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
 }
 
@@ -1361,7 +1366,7 @@ bool handle_problems_button_click(MainLayoutState* layout_state, FocusManagerSta
     }
   }
   layout_state->focus_sync_needed = true;
-  layout_state->request_ui_tick = true;
+  UI_WAKE(layout_state, "wake");
   return true;
 }
 
@@ -1738,7 +1743,7 @@ bool handle_editor_chrome_mouse(WorkspaceModel* workspace, FocusManagerState* fo
   if (handle_tab_bar_mouse(workspace, focus, tab_bar, m, layout_state, panel->panel_focus)) {
     claim_editor_focus(focus, layout_state, panel->panel_focus);
     if (layout_state != nullptr) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
     return true;
   }
@@ -2799,7 +2804,7 @@ void notify_cursor_moved_for_lsp(CompletionState* completion, MainLayoutState* l
   }
   completion->lsp_trigger_check_due_ms =
       steady_now_ms() + kLiveCompletionTriggerDebounceMs;
-  layout_state->request_ui_tick = true;
+  UI_WAKE(layout_state, "wake");
 }
 
 int visible_line_count(const Box& box) {
@@ -3272,7 +3277,7 @@ void process_debounced_lsp_trigger(CompletionState* completion, WorkspaceModel* 
   completion->invalidate_item_cache();
   schedule_live_lsp_fetch(completion, workspace, layout_state, panel);
   completion->refresh_matches();
-  layout_state->request_ui_tick = true;
+  UI_WAKE(layout_state, "wake");
 }
 
 bool try_poll_lsp_completion(CompletionState* completion, WorkspaceModel* workspace,
@@ -3351,7 +3356,7 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
                                         buffer_text_snapshot);
       }
     }
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return;
   }
 
@@ -3364,7 +3369,7 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
       maybe_close_completion_if_empty(completion, layout_state, symbols, buffer_path,
                                       buffer_text_snapshot);
     } else {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
     return true;
   };
@@ -3427,7 +3432,7 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
   if (try_poll_lsp_completion(completion, workspace, symbols, panel, completion->lsp_pending_key)) {
     completion->refresh_matches();
     if (!completion->matches.empty()) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
   }
 }
@@ -3472,7 +3477,7 @@ void update_live_completion(CompletionState* completion, WorkspaceModel* workspa
   if (layout_state != nullptr &&
       (completion->open || completion_awaiting_async_lsp(completion, layout_state, symbols,
                                                        buffer->path, buffer_text(*buffer)))) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
 }
 
@@ -4037,7 +4042,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
 
     if (in_gutter && handle_fold_gutter_click(panel, buffer, m, visible_lines)) {
       if (layout_state != nullptr) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
       end_mouse_selection(panel);
       return true;
@@ -4049,7 +4054,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
         const int line = gutter_buffer_line_at_row(*panel, row) + 1;
         ToggleBreakpointAtFile(debug_model, buffer->path, line, on_command);
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
         end_mouse_selection(panel);
         return true;
@@ -4168,7 +4173,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
         layout_state->activity_gate.allows_lsp_ui()) {
       trigger_lsp_hover_at(panel, pos, m.x, m.y);
       if (layout_state != nullptr) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
     }
     buffer->reset_to_single_cursor(pos.line, pos.col);
@@ -4288,7 +4293,7 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
   completion->refresh_ts_fallback(*buffer);
   completion->refresh_matches();
   if (completion_uses_async_lsp(layout_state, symbols, buffer->path)) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   } else {
     schedule_live_lsp_fetch(completion, workspace, layout_state, panel);
   }
@@ -4354,7 +4359,7 @@ bool accept_completion(CompletionState* completion, EditorBuffer* buffer,
   }
   ensure_scroll_visible(buffer, visible_lines, -1);
   if (workspace != nullptr && symbols != nullptr) {
-    notify_editor_buffer_changed(workspace, panel, symbols);
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
   }
   completion->close(layout_state);
   return true;
@@ -4428,7 +4433,7 @@ bool handle_completion_keys(CompletionState* completion, WorkspaceModel* workspa
       if (is_ident_char(typed)) {
         insert_char(buffer, typed);
         ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-        notify_editor_buffer_changed(workspace, panel, symbols);
+        notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
         completion->live_mode = true;
         if (!completion->all_items.empty()) {
           completion->lsp_items = std::move(completion->all_items);
@@ -4510,8 +4515,8 @@ HelixDispatchContext build_helix_dispatch_context(WorkspaceModel* workspace, Edi
   ctx.panel_focus = panel != nullptr ? panel->panel_focus : FocusRegion::Editor;
   ctx.visible_lines = visible_lines;
   ctx.code_width = panel != nullptr ? panel->code_width_chars : 80;
-  ctx.on_buffer_changed = [workspace, panel, symbols]() {
-    notify_editor_buffer_changed(workspace, panel, symbols);
+  ctx.on_buffer_changed = [=]() {
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
   };
   ctx.open_find_bar = [=]() {
     if (workspace == nullptr || find == nullptr) {
@@ -4638,7 +4643,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event == Event::CtrlB && debug_model != nullptr && on_command && !buffer->path.empty()) {
     ToggleBreakpointAtFile(debug_model, buffer->path, buffer->primary_line() + 1, on_command);
     if (layout_state != nullptr) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
     return true;
   }
@@ -4671,14 +4676,14 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event_is_ctrl_alt_z(event) || event_is_ctrl_shift_z(event) || event_is_ctrl_y(event)) {
     if (redo_edit(buffer)) {
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-      notify_editor_buffer_changed(workspace, panel, symbols);
+      notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     }
     return true;
   }
   if (event_is_ctrl_z(event) && !event_input_has_shift_modifier(event)) {
     undo_edit(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    notify_editor_buffer_changed(workspace, panel, symbols);
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     return true;
   }
   if (panel->chord_k_pending) {
@@ -4687,7 +4692,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
       const LineCommentStyle style = line_comment_style_for_path(buffer->path);
       comment_lines(buffer, style);
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-      notify_editor_buffer_changed(workspace, panel, symbols);
+      notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
       return true;
     }
     if (event_is_ctrl_u(event)) {
@@ -4695,7 +4700,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
       const LineCommentStyle style = line_comment_style_for_path(buffer->path);
       uncomment_lines(buffer, style);
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-      notify_editor_buffer_changed(workspace, panel, symbols);
+      notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
       return true;
     }
     panel->chord_k_pending = false;
@@ -4711,13 +4716,13 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event_is_ctrl_x(event)) {
     cut_selection(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    notify_editor_buffer_changed(workspace, panel, symbols);
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     return true;
   }
   if (event_is_ctrl_v(event)) {
     paste_text(buffer, read_clipboard_for_paste());
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    notify_editor_buffer_changed(workspace, panel, symbols);
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     return true;
   }
   if (event_is_ctrl_u(event)) {
@@ -4729,7 +4734,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event_is_plain_tab(event)) {
     insert_tab_stop(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    notify_editor_buffer_changed(workspace, panel, symbols);
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     return true;
   }
   if (event_is_ctrl_i(event)) {
@@ -4928,7 +4933,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event_is_ctrl_backspace(event)) {
     delete_word_backward(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    notify_editor_buffer_changed(workspace, panel, symbols);
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     if (completion != nullptr && completion->open && completion->live_mode) {
       update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
                              buffer, panel);
@@ -4938,7 +4943,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event_is_ctrl_delete(event)) {
     delete_word_forward(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    notify_editor_buffer_changed(workspace, panel, symbols);
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     if (completion != nullptr && completion->open && completion->live_mode) {
       update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
                              buffer, panel);
@@ -4948,7 +4953,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event == Event::Backspace) {
     backspace(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    notify_editor_buffer_changed(workspace, panel, symbols);
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     if (completion != nullptr && completion->open && completion->live_mode) {
       update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
                              buffer, panel);
@@ -4958,7 +4963,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event == Event::Delete) {
     delete_char(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    notify_editor_buffer_changed(workspace, panel, symbols);
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     if (completion != nullptr && completion->open && completion->live_mode) {
       update_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
                              buffer, panel);
@@ -4968,7 +4973,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   if (event == Event::Return) {
     newline(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-    notify_editor_buffer_changed(workspace, panel, symbols);
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     return true;
   }
   if (event == Event::PageDown) {
@@ -4990,7 +4995,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
       const char typed = ch[0];
       insert_char(buffer, typed);
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-      notify_editor_buffer_changed(workspace, panel, symbols);
+      notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
       maybe_open_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
                                  buffer, panel, typed);
       return true;
@@ -5315,8 +5320,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         panel_state->tabular_store = std::make_unique<TabularFileStore>();
         panel_state->tabular_store->open_async(buffer.path);
       }
-      if (layout_state != nullptr && layout_state->schedule_ui_tick) {
-        layout_state->schedule_ui_tick();
+      if (layout_state != nullptr) {
+        UI_WAKE(layout_state, "editor.open");
       }
       buffer.scroll = std::max(0, buffer.primary_line() - 2);
       if (is_indexed_source_path(buffer.path)) {
@@ -5332,13 +5337,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool tabular_indexing = tabular_store != nullptr && tabular_store->indexing();
 
     if (tabular_view && tabular_store != nullptr) {
-      if (layout_state != nullptr && layout_state->schedule_ui_tick) {
+      if (layout_state != nullptr) {
         const int64_t now = steady_now_ms();
         if (tabular_indexing || tabular_store->loading_more() ||
             (tabular_ready && tabular_store->has_more())) {
           if (now - panel_state->last_tabular_index_tick_ms >= 200) {
             panel_state->last_tabular_index_tick_ms = now;
-            layout_state->schedule_ui_tick();
+            UI_WAKE(layout_state, "schedule");
           }
         }
       }
@@ -6178,7 +6183,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                            git_history_state.get(), symbols, file_indexer, symbol_indexer,
                            layout_state, debug_model, on_command, event, visible);
     if (handled && layout_state != nullptr) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
     return handled;
   };
@@ -6314,7 +6319,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         tick_selection_occurrence_matches(panel_state.get(), workspace->buffer, layout_state);
       }
       if (find_state->tick_matches(workspace->buffer) && layout_state != nullptr) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
       if (symbols && workspace != nullptr) {
         const std::string& path = workspace->buffer.path;

@@ -1,4 +1,5 @@
 #include "ui/packet_monitor_panel.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 
@@ -53,12 +54,12 @@ bool handle_packet_monitor_keys(const Event& event, packet_monitor::PacketMonito
   auto& pkt_state = monitor;
   if (event == Event::Character('r')) {
     service->toggle_recording();
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   if (event == Event::Character('s')) {
     service->stop_recording_and_save();
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   if (event == Event::Character('p')) {
@@ -67,20 +68,20 @@ bool handle_packet_monitor_keys(const Event& event, packet_monitor::PacketMonito
       state->protocol_selected =
           (state->protocol_selected + 1) % static_cast<int>(labels.size());
       service->select_protocol_by_index(state->protocol_selected);
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
     return true;
   }
   if (event == Event::ArrowUp || event == Event::Character('k')) {
     service->select_packet(pkt_state.selected_packet - 1);
     pkt_state.packet_scroll = std::max(0, pkt_state.selected_packet - 2);
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   if (event == Event::ArrowDown || event == Event::Character('j')) {
     service->select_packet(pkt_state.selected_packet + 1);
     pkt_state.packet_scroll = std::max(0, pkt_state.selected_packet - 2);
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   if (event == Event::Character('v')) {
@@ -90,7 +91,7 @@ bool handle_packet_monitor_keys(const Event& event, packet_monitor::PacketMonito
       static int variant_idx = 0;
       variant_idx = (variant_idx + 1) % static_cast<int>(keys.size());
       pkt_state.filters.variant_key = keys[static_cast<std::size_t>(variant_idx)];
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
     return true;
   }
@@ -125,13 +126,13 @@ bool handle_packet_monitor_mouse(const ftxui::Event& event,
   if (panel_state->record_box.Contain(mouse.x, mouse.y)) {
     trigger_press(layout_state, press_id::kPacketMonitorRecord);
     service->toggle_recording();
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   if (panel_state->save_box.Contain(mouse.x, mouse.y)) {
     trigger_press(layout_state, press_id::kPacketMonitorSave);
     service->stop_recording_and_save();
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
 

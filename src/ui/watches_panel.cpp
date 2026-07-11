@@ -892,8 +892,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
 
     if (breakpoints_only) {
       if (event.is_mouse() && event.mouse().motion == Mouse::Moved) {
-        handle_watches_hover(state.get(), layout_state, event.mouse());
-        return layout_state != nullptr && layout_state->request_ui_tick;
+        return handle_watches_hover(state.get(), layout_state, event.mouse());
       }
       if (event.is_mouse() && event.mouse().button == Mouse::Left &&
           event.mouse().motion == Mouse::Pressed) {

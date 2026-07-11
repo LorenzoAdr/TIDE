@@ -1,5 +1,6 @@
 #include "ui/binary_symbols_panel.hpp"
 #include "ui/connection_wizard.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -82,7 +83,7 @@ bool update_f2_mode_hover(ConnectionWizardState* state, MainLayoutState* layout_
     layout_state->clickable.clear_hover_if(press_id::is_f2_hover);
   }
   if (layout_state->clickable.hovered_id() != before) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   return false;
@@ -109,7 +110,7 @@ bool update_f2_browser_hover(ConnectionWizardState* state, MainLayoutState* layo
     layout_state->clickable.clear_hover_if(press_id::is_f2_hover);
   }
   if (layout_state->clickable.hovered_id() != before) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   return false;
@@ -136,7 +137,7 @@ bool update_f2_process_hover(ConnectionWizardState* state, MainLayoutState* layo
     layout_state->clickable.clear_hover_if(press_id::is_f2_hover);
   }
   if (layout_state->clickable.hovered_id() != before) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   return false;

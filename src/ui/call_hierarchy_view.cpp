@@ -1,4 +1,5 @@
 #include "ui/call_hierarchy_view.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -561,7 +562,7 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
   layout_state->text_input_focus = TextInputFocus::None;
   if (layout_state != nullptr) {
     layout_state->focus_sync_needed = true;
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
   workspace->status_message = i18n::tr_fmt("status.call_hierarchy.active", {label});
   return true;

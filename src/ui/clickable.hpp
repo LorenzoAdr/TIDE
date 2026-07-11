@@ -4,6 +4,7 @@
 #include <initializer_list>
 #include <optional>
 #include <string_view>
+#include "ui/ui_wake.hpp"
 
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
@@ -44,7 +45,7 @@ inline void trigger_press(MainLayoutState* layout, std::string_view id) {
   }
   layout->clickable.trigger_press(id);
   invalidate_cached_panel_chrome(layout, id);
-  layout->request_ui_tick = true;
+  UI_WAKE(layout, "wake");
 }
 
 inline void trigger_press(MainLayoutState* layout, const std::string& id) {

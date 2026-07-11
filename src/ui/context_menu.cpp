@@ -1,6 +1,7 @@
 #include "ui/binary_symbols_panel.hpp"
 #include "ui/call_hierarchy_view.hpp"
 #include "ui/context_menu.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -576,7 +577,7 @@ void focus_call_hierarchy(MainLayoutState* layout_state, int line, int col,
   layout_state->right_sidebar.pending_call_hierarchy_symbol = symbol;
   layout_state->text_input_focus = TextInputFocus::None;
   layout_state->focus_sync_needed = true;
-  layout_state->request_ui_tick = true;
+  UI_WAKE(layout_state, "wake");
 }
 
 bool delete_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer* indexer,
@@ -1169,7 +1170,7 @@ void focus_search_with_filter(MainLayoutState* layout_state, const std::string& 
   layout_state->right_sidebar.pending_focus_search = true;
   layout_state->text_input_focus = TextInputFocus::SearchQuery;
   layout_state->focus_sync_needed = true;
-  layout_state->request_ui_tick = true;
+  UI_WAKE(layout_state, "wake");
 }
 
 bool context_menu_active(const ContextMenuState* state) {
@@ -1195,7 +1196,7 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
   state->row_boxes.clear();
   if (layout_state != nullptr) {
     layout_state->clickable.clear_hover_if(press_id::is_context_menu_hover);
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
 }
 
@@ -1546,7 +1547,7 @@ bool update_move_browser_hover(ContextMenuState* state, MainLayoutState* layout_
     layout_state->clickable.clear_hover_if(press_id::is_f3_hover);
   }
   if (layout_state->clickable.hovered_id() != before) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   return false;
@@ -1673,7 +1674,7 @@ bool handle_context_menu_hover(ContextMenuState* state, MainLayoutState* layout_
     }
   }
   if (layout_state->clickable.hovered_id() != before) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   return false;
@@ -1761,7 +1762,7 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
                       state->move_is_dir)) {
           context_menu_close(state, layout_state);
           if (layout_state != nullptr) {
-            layout_state->request_ui_tick = true;
+            UI_WAKE(layout_state, "wake");
           }
         }
       }
@@ -1804,7 +1805,7 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
                   state->relative_path, false);
       context_menu_close(state, layout_state);
       if (layout_state != nullptr) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
       return true;
     }
@@ -1825,7 +1826,7 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
                         symbol_indexer)) {
         context_menu_close(state, layout_state);
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
       }
       return true;
@@ -1871,7 +1872,7 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
         context_menu_close(state, layout_state);
       }
       if (layout_state != nullptr) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
     }
     return true;
@@ -1901,7 +1902,7 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
       context_menu_close(state, layout_state);
     }
     if (layout_state != nullptr) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
   };
 

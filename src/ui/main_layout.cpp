@@ -2,6 +2,7 @@
 #include "ui/hover_effects.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/status_layout_popover.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -657,7 +658,7 @@ bool handle_status_bar_mouse(StatusBarUiState* state, MainLayoutState* layout_st
   if (state->layout_box.Contain(mouse.x, mouse.y)) {
     trigger_press(layout_state, press_id::kStatusLayout);
     layout_state->status_layout_popover.open = !layout_state->status_layout_popover.open;
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
     return true;
   }
   if (state->settings_box.Contain(mouse.x, mouse.y)) {
@@ -829,7 +830,7 @@ bool handle_split_mouse(LayoutState* state, MainLayoutState* layout_state, Event
 
   if (mouse.motion == Mouse::Moved) {
     if (update_split_hover(state, mouse.x, mouse.y) && layout_state != nullptr) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
     return false;
   }

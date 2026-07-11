@@ -1,4 +1,5 @@
 #include "ui/binary_symbols_panel.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <array>
@@ -242,14 +243,14 @@ void schedule_async_filter(BinarySymbolsPanelState* state, MainLayoutState* layo
     std::iota(state->filtered_indices.begin(), state->filtered_indices.end(), 0);
     state->filtering = false;
     if (layout_state != nullptr) {
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
     }
     return;
   }
   state->filtering = true;
   state->filter_runner.start(state->symbols, state->applied_name_filter, state->binding_filter);
   if (layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
 }
 
@@ -351,7 +352,7 @@ void start_analysis(BinarySymbolsPanelState* state, MainLayoutState* layout_stat
   state->first_visible = 0;
   state->runner.start(binary_path);
   if (layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
 }
 
@@ -471,7 +472,7 @@ bool poll_runner(BinarySymbolsPanelState* state, MainLayoutState* layout_state) 
       state->loading = false;
       state->status = i18n::tr("panel.symbols.analysis_cancelled");
       if (layout_state != nullptr) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
       return true;
     }
@@ -489,7 +490,7 @@ bool poll_runner(BinarySymbolsPanelState* state, MainLayoutState* layout_state) 
   }
   schedule_async_filter(state, layout_state);
   if (layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
   return true;
 }
@@ -679,7 +680,7 @@ bool poll_filter_runner(BinarySymbolsPanelState* state, MainLayoutState* layout_
     if (state->filtering) {
       state->filtering = false;
       if (layout_state != nullptr) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
       }
       return true;
     }
@@ -698,7 +699,7 @@ bool poll_filter_runner(BinarySymbolsPanelState* state, MainLayoutState* layout_
     state->pending_select_name.clear();
   }
   if (layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
   return true;
 }
@@ -726,10 +727,10 @@ void tick_binary_symbols_panel(BinarySymbolsPanelState* state, MainLayoutState* 
   }
 
   if (state->runner.running() && layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
   if (state->filter_runner.running() && layout_state != nullptr) {
-    layout_state->request_ui_tick = true;
+    UI_WAKE(layout_state, "wake");
   }
 }
 
@@ -759,7 +760,7 @@ void request_binary_symbols_panel(MainLayoutState* layout_state, const std::stri
   if (binding_filter != NmBindingFilter::kAll) {
     pending.binding_filter = binding_filter;
   }
-  layout_state->request_ui_tick = true;
+  UI_WAKE(layout_state, "wake");
 }
 
 void refresh_binary_symbols_if_matches(MainLayoutState* layout_state,
@@ -771,7 +772,7 @@ void refresh_binary_symbols_if_matches(MainLayoutState* layout_state,
   layout_state->binary_symbols_pending.binary_path = binary_path;
   layout_state->binary_symbols_pending.start_after_paint = 0;
   layout_state->binary_symbols_pending.open_tab = false;
-  layout_state->request_ui_tick = true;
+  UI_WAKE(layout_state, "wake");
 }
 
 void scan_shell_output_for_linker_errors(const std::string& output, MainLayoutState* layout_state,
@@ -841,7 +842,7 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
       const int visible = list_viewport_lines(*state);
       const int total = static_cast<int>(state->filtered_indices.size());
       if (handle_binary_symbols_scrollbar_mouse(state.get(), layout_state, m, total, visible)) {
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
         return true;
       }
       if (m.button == Mouse::Left && m.motion == Mouse::Pressed &&
@@ -850,20 +851,20 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
           focus->region = FocusRegion::Terminal;
         }
         layout_state->text_input_focus = TextInputFocus::None;
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
         return true;
       }
       if (state->filter_box.Contain(m.x, m.y) && m.button == Mouse::Left &&
           m.motion == Mouse::Pressed) {
         activate_filter_input(layout_state, focus, filter_input);
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
         return true;
       }
       if ((state->list_content_box.Contain(m.x, m.y) || state->scrollbar_box.Contain(m.x, m.y)) &&
           (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown)) {
         const int delta = m.button == Mouse::WheelUp ? -3 : 3;
         if (scroll_list_by_wheel(state.get(), delta, visible)) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
           return true;
         }
       }
@@ -888,7 +889,7 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
         if (focus != nullptr && !m.control) {
           focus->region = FocusRegion::Editor;
         }
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
         return true;
       }
       if (event.mouse().motion == Mouse::Moved && state->list_content_box.Contain(m.x, m.y)) {
@@ -928,7 +929,7 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
       if (forward_filter_input(event, filter_input)) {
         state->filter_dirty = state->filter_query != state->applied_name_filter;
         cursor_blink::show();
-        layout_state->request_ui_tick = true;
+        UI_WAKE(layout_state, "wake");
         return true;
       }
       return false;
@@ -949,14 +950,14 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
       state->runner.cancel();
       state->loading = false;
       state->status = i18n::tr("panel.symbols.analysis_cancelled");
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
       return true;
     }
 
     if (event == Event::Escape && binary_symbols_request_pending(layout_state)) {
       layout_state->binary_symbols_pending = {};
       state->status = i18n::tr("panel.symbols.analysis_cancelled");
-      layout_state->request_ui_tick = true;
+      UI_WAKE(layout_state, "wake");
       return true;
     }
 

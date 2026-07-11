@@ -1,4 +1,5 @@
 #include "ui/source_substitute_modal.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <filesystem>
 
@@ -154,7 +155,7 @@ Component MakeSourceSubstituteModalOverlay(Component main, SourceSubstituteModal
                         vbox(std::move(body)));
 
         if (layout_state != nullptr) {
-          layout_state->request_ui_tick = true;
+          UI_WAKE(layout_state, "wake");
         }
         return ScreenModalOverlay(std::move(base), std::move(dialog));
       }),
