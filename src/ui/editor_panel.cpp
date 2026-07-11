@@ -5276,6 +5276,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         layout_state->schedule_ui_tick();
       }
       buffer.scroll = std::max(0, buffer.primary_line() - 2);
+      if (is_indexed_source_path(buffer.path)) {
+        tree_sitter_service().prepare_document(buffer.path, editor_buffer_joined_source(buffer));
+      }
     }
 
     const int total = static_cast<int>(buffer.lines.size());
@@ -5746,6 +5749,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->last_ts_baseline_commit_token = buffer.view_token;
       panel_state->line_syntax_span_cache.clear();
       panel_state->viewport_line_render_cache.clear();
+    }
+    if (indexed_cpp && !viewport_lines.empty() &&
+        !tree_sitter_service().document_highlights_ready(buffer.path, buffer_source) &&
+        editor_content_settled(*panel_state)) {
+      tree_sitter_service().ensure_viewport_preview(buffer.path, buffer_source, viewport_lines);
     }
     const ScopeLineRange immediate_scope =
         typing_burst ? ScopeLineRange{}

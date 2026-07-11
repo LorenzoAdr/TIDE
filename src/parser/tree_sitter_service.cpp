@@ -265,6 +265,33 @@ bool TreeSitterService::highlights_refresh_pending(const std::string& path) cons
   return doc != nullptr && doc->parse_ready && !doc->highlights_ready;
 }
 
+bool TreeSitterService::document_highlights_ready(const std::string& path,
+                                                const std::string& source) const {
+  if (path.empty() || source.empty()) {
+    return false;
+  }
+  return cache_.document_highlights_ready(cache_key_for(path), normalize_editor_source(source));
+}
+
+void TreeSitterService::ensure_viewport_preview(const std::string& path, const std::string& source,
+                                                const std::vector<int>& line_indices) {
+  if (path.empty() || source.empty() || line_indices.empty()) {
+    return;
+  }
+  cache_.ensure_viewport_preview(cache_key_for(path), normalize_editor_source(source),
+                                 line_indices);
+}
+
+const LineHighlights* TreeSitterService::viewport_preview_line(const std::string& path,
+                                                               const std::string& source,
+                                                               int line_0) const {
+  if (path.empty() || source.empty() || line_0 < 0) {
+    return nullptr;
+  }
+  return cache_.viewport_preview_line(cache_key_for(path), normalize_editor_source(source),
+                                      line_0);
+}
+
 namespace {
 
 bool highlight_spans_map_to_line(const LineHighlights& highlights, const std::string& line_text) {

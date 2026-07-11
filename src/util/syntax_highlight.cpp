@@ -277,6 +277,12 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
       }
     }
   }
+  if ((ts_source_hl == nullptr || ts_source_hl->spans.empty()) && !ctx->file_path.empty()) {
+    if (const LineHighlights* preview = tree_sitter_service().viewport_preview_line(
+            ctx->file_path, ctx->joined(), line_index)) {
+      ts_source_hl = preview;
+    }
+  }
   if (ts_source_hl != nullptr) {
     entry.ts_display_spans =
         display_spans_for_line(*ts_source_hl, source_line, col_offset, display_len, tab_size);

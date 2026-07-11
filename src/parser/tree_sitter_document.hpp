@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 extern "C" {
@@ -34,6 +35,15 @@ struct HighlightSpan {
 
 struct LineHighlights {
   std::vector<HighlightSpan> spans;
+};
+
+// Sync tree-sitter colors for a visible viewport slice while the async worker
+// is still building full-document highlights (typically on file open).
+struct ViewportHighlightPreview {
+  std::string source;
+  int first_line = 0;
+  int last_line = -1;
+  std::unordered_map<int, LineHighlights> by_line;
 };
 
 std::string join_editor_lines(const std::vector<std::string>& lines);
@@ -73,6 +83,7 @@ struct DocumentEntry {
   bool highlights_ready = false;
   bool symbols_ready = false;
   bool prepare_inflight = false;
+  std::optional<ViewportHighlightPreview> viewport_preview;
 
   ~DocumentEntry();
   DocumentEntry() = default;
@@ -104,6 +115,11 @@ class TreeSitterDocumentCache {
                        const std::optional<EditorTextEditHint>& edit_hint = std::nullopt);
   void invalidate(const std::string& path);
   uint64_t revision_for(const std::string& path) const;
+  bool document_highlights_ready(const std::string& path, const std::string& canonical) const;
+  void ensure_viewport_preview(const std::string& path, const std::string& canonical,
+                               const std::vector<int>& line_indices);
+  const LineHighlights* viewport_preview_line(const std::string& path, const std::string& canonical,
+                                              int line_0) const;
 
  private:
   struct PrepareJob {

@@ -786,6 +786,27 @@ void test_edit_hint_poisoned_by_multiple_edits_falls_back_correctly() {
   assert(!highlights.empty());
 }
 
+void test_viewport_preview_before_full_parse() {
+  const std::string path = "viewport_preview.cpp";
+  const std::string source = "int foo() {\n  return 0;\n}\nint bar() { return 1; }\n";
+  const std::string canonical = normalize_editor_source(source);
+  tree_sitter_service().invalidate(path);
+  assert(!tree_sitter_service().document_highlights_ready(path, canonical));
+
+  tree_sitter_service().ensure_viewport_preview(path, canonical, {0, 1});
+  const LineHighlights* line0 = tree_sitter_service().viewport_preview_line(path, canonical, 0);
+  const LineHighlights* line1 = tree_sitter_service().viewport_preview_line(path, canonical, 1);
+  assert(line0 != nullptr);
+  assert(!line0->spans.empty());
+  assert(line1 != nullptr);
+  assert(!line1->spans.empty());
+  assert(tree_sitter_service().viewport_preview_line(path, canonical, 3) == nullptr);
+
+  wait_document_ready(path, canonical);
+  assert(tree_sitter_service().document_highlights_ready(path, canonical));
+  assert(tree_sitter_service().viewport_preview_line(path, canonical, 0) == nullptr);
+}
+
 void test_normalize_editor_source_trailing_newline() {
   const std::string from_buffer = join_editor_lines({"int main() {}", "return 0;"});
   const std::string from_file = "int main() {}\nreturn 0;\n";
@@ -826,6 +847,7 @@ int main() {
   tgdb::test_edit_hint_matches_diff_on_newline_insert();
   tgdb::test_edit_hint_matches_diff_on_backspace_join();
   tgdb::test_edit_hint_poisoned_by_multiple_edits_falls_back_correctly();
+  tgdb::test_viewport_preview_before_full_parse();
   tgdb::test_normalize_editor_source_trailing_newline();
   std::cout << "tree_sitter_test ok\n";
   return 0;
