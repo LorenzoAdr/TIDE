@@ -77,6 +77,7 @@ add_executable(tgdb
   src/ui/file_tree_panel.cpp
   src/ui/source_panel.cpp
   src/ui/editor_panel.cpp
+  src/ui/editor_grid_node.cpp
   src/ui/editor_tab_bar.cpp
   src/ui/context_menu.cpp
   src/ui/call_hierarchy_panel.cpp
