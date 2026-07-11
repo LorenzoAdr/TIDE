@@ -76,8 +76,7 @@ uint64_t syntax_span_hash_string(uint64_t h, std::string_view s) {
 
 uint64_t syntax_line_span_cache_key(int line_index, const std::string& source_line, int col_offset,
                                     int display_len, uint64_t ts_revision,
-                                    uint64_t semantic_line_hash, bool syntax_incremental,
-                                    uint64_t buffer_token) {
+                                    uint64_t semantic_line_hash, uint64_t buffer_token) {
   uint64_t h = kSyntaxSpanHashOffset;
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(line_index));
   h = syntax_span_hash_string(h, source_line);
@@ -85,12 +84,13 @@ uint64_t syntax_line_span_cache_key(int line_index, const std::string& source_li
   h = syntax_span_hash_u64(h, static_cast<uint64_t>(display_len));
   h = syntax_span_hash_u64(h, buffer_token);
   h = syntax_span_hash_u64(h, ts_revision);
-  if (!syntax_incremental) {
-    // Content hash of this specific line's semantic spans, not the document-wide
-    // revision counter: a clangd re-fetch that leaves this line's tokens unchanged
-    // must not evict/recompute it (see hash_semantic_token_line()).
-    h = syntax_span_hash_u64(h, semantic_line_hash);
-  }
+  // Content hash of this specific line's semantic spans (not the document-wide
+  // revision counter, and not gated on the typing-burst flag): a clangd re-fetch that
+  // leaves this line's tokens unchanged must not evict/recompute it (see
+  // hash_semantic_token_line()), and neither must starting/stopping a typing burst on
+  // some *other* line -- both used to force every visible line to switch cache keys
+  // and re-render at once.
+  h = syntax_span_hash_u64(h, semantic_line_hash);
   return h;
 }
 
@@ -202,7 +202,7 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
   const uint64_t semantic_line_hash = hash_semantic_token_line(semantic_line_spans);
   const uint64_t key =
       syntax_line_span_cache_key(line_index, source_line, col_offset, display_len, ctx->ts_revision,
-                                 semantic_line_hash, ctx->syntax_incremental, ctx->buffer_token);
+                                 semantic_line_hash, ctx->buffer_token);
   auto& cache = *ctx->line_span_cache;
   const auto it = cache.find(key);
   if (it != cache.end()) {
@@ -210,12 +210,26 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
   }
 
   CachedSyntaxLineSpans entry;
-  if (!ctx->syntax_incremental && semantic_tokens != nullptr && semantic_tokens->ready &&
+  // Whether to even try semantic spans for this line is decided by the caller (it
+  // passes semantic_tokens == nullptr for the one line whose text is actively changing
+  // mid-typing-burst -- see the line_semantic ternary in editor_panel.cpp). It must NOT
+  // also be gated on ctx->syntax_incremental here, or every *other* visible line would
+  // lose its real semantic colors too just because typing started/stopped somewhere.
+  if (semantic_tokens != nullptr && semantic_tokens->ready &&
       line_index < static_cast<int>(semantic_tokens->lines.size())) {
     const auto& line_spans = semantic_tokens->lines[static_cast<std::size_t>(line_index)];
-    entry.semantic_display_spans = display_semantic_spans_for_line(
+    std::vector<SemanticTokenSpan> display = display_semantic_spans_for_line(
         line_spans, source_line, col_offset, display_len, tab_size);
-    entry.has_semantic = !entry.semantic_display_spans.empty();
+    // The cached SemanticTokenDocument can be one edit behind the live buffer (the
+    // editor keeps showing it across edits instead of blanking every line back to
+    // tree-sitter the instant the doc's generation stops matching -- see the
+    // semantic_tokens selection comment in editor_panel.cpp). Only trust its spans for
+    // this line if they still plausibly fit the *current* text; otherwise fall back to
+    // tree-sitter for just this one line until the next fetch lands.
+    if (semantic_spans_plausible_for_line(display, display_len)) {
+      entry.semantic_display_spans = std::move(display);
+      entry.has_semantic = !entry.semantic_display_spans.empty();
+    }
   }
   if (const auto* all_highlights = ctx->ts_line_highlights) {
     if (line_index >= 0 && line_index < static_cast<int>(all_highlights->size())) {
@@ -546,8 +560,9 @@ Element HighlightCodeLine(const std::string& line, int line_index,
   if (mutable_ctx != nullptr && mutable_ctx->line_span_cache != nullptr) {
     if (const CachedSyntaxLineSpans* cached = cached_syntax_spans_for_line(
             mutable_ctx, line_index, semantic_tokens, col_offset, static_cast<int>(line.size()))) {
-      if (!mutable_ctx->syntax_incremental && cached->has_semantic &&
-          semantic_tokens != nullptr && semantic_tokens->ready) {
+      const bool use_semantic =
+          cached->has_semantic && semantic_tokens != nullptr && semantic_tokens->ready;
+      if (use_semantic) {
         return highlight_semantic_line(line, line_index, cached->semantic_display_spans,
                                        semantic_tokens->token_types, cursor_col, cursor_style,
                                        col_offset, mutable_ctx, semantic_tokens);

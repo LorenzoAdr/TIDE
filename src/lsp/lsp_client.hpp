@@ -119,10 +119,12 @@ class LspClient {
   bool initialize(const std::string& workspace_root);
   void invalidate_cache(const std::string& absolute_path);
   void invalidate_semantic_tokens(const std::string& absolute_path);
+  void mark_semantic_tokens_stale(const std::string& absolute_path);
   bool refresh_semantic_tokens(const std::string& absolute_path);
   static int64_t steady_now_ms();
-  static SemanticTokenDocument decode_semantic_tokens(const nlohmann::json& result,
-                                                      const std::vector<std::string>& token_types);
+  static SemanticTokenDocument decode_semantic_tokens_from_data(
+      std::vector<int64_t> data, const std::vector<std::string>& token_types);
+  static void apply_semantic_token_edits(std::vector<int64_t>* data, const nlohmann::json& edits);
   static std::vector<std::string> default_semantic_token_types();
   void load_semantic_legend(const nlohmann::json& initialize_result);
 

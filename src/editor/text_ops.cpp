@@ -199,6 +199,7 @@ void delete_range(EditorBuffer* buffer, int start_line, int start_col, int end_l
   adjust_cursors_after_multiline_delete(buffer, start_line, start_col, end_line, end_col);
   editor_buffer_rebuild_joined(buffer);
   buffer->semantic_layout_dirty = true;
+  buffer->semantic_layout_dirty_from_line = std::min(buffer->semantic_layout_dirty_from_line, start_line);
 }
 
 bool any_cursor_has_selection(const EditorBuffer& buffer) {
@@ -365,6 +366,7 @@ void insert_multiline_text_at(EditorBuffer* buffer, int line, int col, const std
   }
   editor_buffer_invalidate_joined(buffer);
   buffer->semantic_layout_dirty = true;
+  buffer->semantic_layout_dirty_from_line = std::min(buffer->semantic_layout_dirty_from_line, line);
 
   int cur_line = line;
   int cur_col = col;
@@ -418,6 +420,7 @@ void backspace_at(EditorBuffer* buffer, int line, int col) {
     editor_buffer_rebuild_joined(buffer);
   }
   buffer->semantic_layout_dirty = true;
+  buffer->semantic_layout_dirty_from_line = std::min(buffer->semantic_layout_dirty_from_line, line - 1);
   for (auto& cursor : buffer->cursors) {
     if (cursor.head.line == line) {
       cursor.head.line = line - 1;
@@ -459,6 +462,7 @@ void delete_at(EditorBuffer* buffer, int line, int col) {
   buffer->lines.erase_line(line + 1);
   editor_buffer_rebuild_joined(buffer);
   buffer->semantic_layout_dirty = true;
+  buffer->semantic_layout_dirty_from_line = std::min(buffer->semantic_layout_dirty_from_line, line);
   for (auto& cursor : buffer->cursors) {
     if (cursor.head.line > line + 1) {
       --cursor.head.line;
@@ -547,6 +551,7 @@ std::string smart_newline_indent(const std::string& line, int col) {
 void newline_at(EditorBuffer* buffer, int line, int col, bool smart_indent) {
   if (buffer != nullptr) {
     buffer->semantic_layout_dirty = true;
+    buffer->semantic_layout_dirty_from_line = std::min(buffer->semantic_layout_dirty_from_line, line);
   }
   std::string text = buffer->lines[static_cast<std::size_t>(line)];
   const std::string tail = text.substr(static_cast<std::size_t>(col));

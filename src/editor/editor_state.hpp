@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <set>
 #include <string>
 #include <vector>
@@ -61,6 +62,12 @@ struct EditorBuffer {
   bool dirty = false;
   uint64_t view_token = 0;
   bool semantic_layout_dirty = false;
+  // Lowest line index whose content/index may have shifted since the last time
+  // semantic_layout_dirty was consumed (see mark_editor_content_edited in
+  // editor_panel.cpp). Lines below this boundary are guaranteed untouched by the edit
+  // and can keep trusting their cached LSP semantic tokens even while the rest of the
+  // document is treated as stale. INT_MAX means "no pending edit registered yet".
+  int semantic_layout_dirty_from_line = std::numeric_limits<int>::max();
   bool undo_coalesce_open = false;
   int cached_max_line_len = -1;
   std::set<int> collapsed_folds;

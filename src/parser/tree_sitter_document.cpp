@@ -90,6 +90,34 @@ int count_source_lines(const std::string& source) {
   return lines;
 }
 
+// A plain `Enter` splits one line into a prefix (kept at the same index) and a
+// suffix that becomes the new line below it. That suffix isn't actually new
+// content -- it's the tail of a line tree-sitter already had highlights for --
+// so instead of leaving it blank until the async worker re-parses, keep the
+// spans that fall after the split column and shift them to their new column.
+// `dest_col_offset` accounts for auto-indent: the new line's real content is
+// `indent + tail`, not just `tail` starting at column 0, so the tail's spans
+// must land at `indent_len` onward, not at 0 -- otherwise they end up shorter
+// than the real token and the last characters render with no color at all.
+// Spans straddling the split point get clamped rather than dropped, which is
+// only ever slightly wrong (at most one token's worth) for the brief window
+// until the real reparse lands.
+LineHighlights shift_highlights_for_split(const LineHighlights& original, int split_col,
+                                          int dest_col_offset) {
+  LineHighlights out;
+  out.spans.reserve(original.spans.size());
+  for (const HighlightSpan& span : original.spans) {
+    if (span.end_col <= split_col) {
+      continue;
+    }
+    HighlightSpan shifted = span;
+    shifted.start_col = std::max(0, span.start_col - split_col) + dest_col_offset;
+    shifted.end_col = span.end_col - split_col + dest_col_offset;
+    out.spans.push_back(shifted);
+  }
+  return out;
+}
+
 // Keep highlight indices aligned with buffer lines while the worker re-parses.
 void remap_line_highlights_for_count_change(std::vector<LineHighlights>* highlights,
                                             const TSInputEdit& edit, int old_line_count,
@@ -104,6 +132,21 @@ void remap_line_highlights_for_count_change(std::vector<LineHighlights>* highlig
   if (new_line_count > old_line_count) {
     const int added = new_line_count - old_line_count;
     const int insert_at = edit.start_point.column == 0 ? edit_row : edit_row + 1;
+    // Only a single-line split (one Enter press, mid-line) has a well-defined
+    // "previous content" to approximate from; multi-line pastes/edits that add
+    // several lines at once have no prior per-line highlights to borrow, so
+    // those stay blank placeholders as before.
+    const bool single_line_split = added == 1 && edit.start_point.column > 0 &&
+                                   edit_row < static_cast<int>(previous.size());
+    // When the insertion is a plain "\n" + indent (the common Enter-with-autoindent
+    // case), new_end_point lands one row below start_point, at the column right after
+    // the inserted indent -- i.e. exactly the indent's length. Any other shape (e.g. a
+    // hint/diff edit that also touched later rows) can't be trusted as an indent
+    // length, so fall back to no offset rather than risk shifting to the wrong column.
+    const int dest_col_offset = (single_line_split &&
+                                 edit.new_end_point.row == static_cast<uint32_t>(edit_row + 1))
+                                    ? static_cast<int>(edit.new_end_point.column)
+                                    : 0;
     std::vector<LineHighlights> out(static_cast<std::size_t>(new_line_count));
     for (int i = 0; i < new_line_count; ++i) {
       if (i < insert_at) {
@@ -111,7 +154,12 @@ void remap_line_highlights_for_count_change(std::vector<LineHighlights>* highlig
           out[static_cast<std::size_t>(i)] = previous[static_cast<std::size_t>(i)];
         }
       } else if (i < insert_at + added) {
-        out[static_cast<std::size_t>(i)] = LineHighlights{};
+        out[static_cast<std::size_t>(i)] =
+            single_line_split
+                ? shift_highlights_for_split(previous[static_cast<std::size_t>(edit_row)],
+                                             static_cast<int>(edit.start_point.column),
+                                             dest_col_offset)
+                : LineHighlights{};
       } else {
         const int src = i - added;
         if (src >= 0 && src < static_cast<int>(previous.size())) {

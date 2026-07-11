@@ -183,7 +183,7 @@ bool LspClient::initialize(const std::string& workspace_root) {
          {{"valueSet", nlohmann::json::array({"quickfix", "refactor", "source"})}}}}}};
   params["capabilities"]["callHierarchy"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["semanticTokens"] = {
-      {"requests", {{"range", false}, {"full", {{"delta", false}}}}},
+      {"requests", {{"range", false}, {"full", {{"delta", true}}}}},
       {"tokenTypes",
        {"namespace", "type",      "class",   "enum",       "interface", "struct",
         "typeParameter", "parameter", "variable", "property", "enumMember", "event",
@@ -369,6 +369,18 @@ void LspClient::invalidate_semantic_tokens(const std::string& absolute_path) {
   semantic_token_attempts_.erase(key);
 }
 
+// Used when the document's text changes: resets the retry backoff so the next
+// ensure_semantic_tokens() call fetches promptly, but -- unlike invalidate_semantic_tokens()
+// -- deliberately keeps the cached SemanticTokenDocument (with its resultId/raw token data)
+// around. has_ready_semantic_tokens() already stops treating it as current the moment
+// `generation` is bumped (see the callers below), so nothing gets shown that doesn't match the
+// new text; preserving the old document here just lets the next fetch ask clangd for the
+// /full/delta edits instead of re-sending the whole file's tokens.
+void LspClient::mark_semantic_tokens_stale(const std::string& absolute_path) {
+  const std::string key = normalize_lsp_path(absolute_path);
+  semantic_token_attempts_.erase(key);
+}
+
 void LspClient::invalidate_semantic_tokens_for_file(const std::string& absolute_path) {
   std::lock_guard<std::mutex> lock(mutex_);
   invalidate_semantic_tokens(absolute_path);
@@ -432,7 +444,7 @@ void LspClient::did_open(const std::string& absolute_path, const std::string& te
       it->second.text = text;
       it->second.version += 1;
       it->second.generation += 1;
-      invalidate_semantic_tokens(key);
+      mark_semantic_tokens_stale(key);
       doc = it->second;
       notify_change = true;
     } else {
@@ -494,7 +506,7 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
       it->second.text = text;
       it->second.version += 1;
       it->second.generation += 1;
-      invalidate_semantic_tokens(key);
+      mark_semantic_tokens_stale(key);
       doc = it->second;
     }
   }
@@ -1492,15 +1504,10 @@ std::vector<CallHierarchyItem> LspClient::outgoing_calls(const CallHierarchyItem
   return parse_call_hierarchy_relations(result, "to");
 }
 
-SemanticTokenDocument LspClient::decode_semantic_tokens(
-    const nlohmann::json& result, const std::vector<std::string>& token_types) {
+SemanticTokenDocument LspClient::decode_semantic_tokens_from_data(
+    std::vector<int64_t> data, const std::vector<std::string>& token_types) {
   SemanticTokenDocument doc;
   doc.token_types = token_types;
-  if (!result.is_object() || !result.contains("data") || !result["data"].is_array()) {
-    return doc;
-  }
-
-  const auto& data = result["data"];
   if (data.empty() || data.size() % 5 != 0) {
     return doc;
   }
@@ -1510,21 +1517,15 @@ SemanticTokenDocument LspClient::decode_semantic_tokens(
   int max_line = 0;
 
   for (std::size_t i = 0; i < data.size(); i += 5) {
-    if (!data[i].is_number_integer() || !data[i + 1].is_number_integer() ||
-        !data[i + 2].is_number_integer() || !data[i + 3].is_number_integer() ||
-        !data[i + 4].is_number_integer()) {
-      continue;
-    }
-
-    const int delta_line = data[i].get<int>();
-    const int delta_start = data[i + 1].get<int>();
+    const int delta_line = static_cast<int>(data[i]);
+    const int delta_start = static_cast<int>(data[i + 1]);
     line += delta_line;
     if (delta_line == 0) {
       start += delta_start;
     } else {
       start = delta_start;
     }
-    const int length = data[i + 2].get<int>();
+    const int length = static_cast<int>(data[i + 2]);
     if (length <= 0) {
       continue;
     }
@@ -1532,8 +1533,8 @@ SemanticTokenDocument LspClient::decode_semantic_tokens(
     SemanticTokenSpan span;
     span.start_col = start;
     span.length = length;
-    span.type = data[i + 3].get<int>();
-    span.modifiers = data[i + 4].get<int>();
+    span.type = static_cast<int>(data[i + 3]);
+    span.modifiers = static_cast<int>(data[i + 4]);
 
     if (line >= max_line) {
       doc.lines.resize(static_cast<std::size_t>(line + 1));
@@ -1543,7 +1544,43 @@ SemanticTokenDocument LspClient::decode_semantic_tokens(
   }
 
   doc.ready = !doc.lines.empty();
+  doc.raw_data = std::move(data);
   return doc;
+}
+
+// Splices a `textDocument/semanticTokens/full/delta` response's edits into a copy of the
+// previously decoded flat token array, per the LSP spec: each edit removes `deleteCount`
+// ints starting at `start` and inserts its own `data` there, and edits are applied in the
+// order the server sent them (each one's `start`/`deleteCount` is relative to the array as
+// left by the previous edit in the same response, not to the original array).
+void LspClient::apply_semantic_token_edits(std::vector<int64_t>* data,
+                                           const nlohmann::json& edits) {
+  if (data == nullptr || !edits.is_array()) {
+    return;
+  }
+  for (const auto& edit : edits) {
+    if (!edit.is_object() || !edit.contains("start") || !edit.contains("deleteCount") ||
+        !edit["start"].is_number_integer() || !edit["deleteCount"].is_number_integer()) {
+      continue;
+    }
+    const std::size_t start =
+        std::min<std::size_t>(static_cast<std::size_t>(edit["start"].get<int64_t>()), data->size());
+    const std::size_t delete_count = std::min<std::size_t>(
+        static_cast<std::size_t>(edit["deleteCount"].get<int64_t>()), data->size() - start);
+
+    std::vector<int64_t> insertion;
+    if (edit.contains("data") && edit["data"].is_array()) {
+      insertion.reserve(edit["data"].size());
+      for (const auto& value : edit["data"]) {
+        insertion.push_back(value.is_number_integer() ? value.get<int64_t>() : 0);
+      }
+    }
+
+    data->erase(data->begin() + static_cast<std::ptrdiff_t>(start),
+               data->begin() + static_cast<std::ptrdiff_t>(start + delete_count));
+    data->insert(data->begin() + static_cast<std::ptrdiff_t>(start), insertion.begin(),
+                insertion.end());
+  }
 }
 
 bool LspClient::refresh_semantic_tokens(const std::string& absolute_path) {
@@ -1560,6 +1597,8 @@ bool LspClient::refresh_semantic_tokens(const std::string& absolute_path) {
   std::string uri;
   std::vector<std::string> token_types;
   uint64_t generation = 0;
+  std::string previous_result_id;
+  std::vector<int64_t> previous_raw_data;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto it = documents_.find(key);
@@ -1572,15 +1611,70 @@ bool LspClient::refresh_semantic_tokens(const std::string& absolute_path) {
     if (token_types.empty()) {
       token_types = default_semantic_token_types();
     }
+    // Chain off the last response we decoded (even if it's stale for the current
+    // generation -- mark_semantic_tokens_stale() keeps it around for exactly this) so
+    // clangd can reply with a small delta instead of the whole file's tokens.
+    const auto cached = semantic_token_cache_.find(key);
+    if (cached != semantic_token_cache_.end() && !cached->second.result_id.empty() &&
+        !cached->second.raw_data.empty()) {
+      previous_result_id = cached->second.result_id;
+      previous_raw_data = cached->second.raw_data;
+    }
   }
 
+  const bool use_delta = !previous_result_id.empty();
   nlohmann::json params = {{"textDocument", {{"uri", uri}}}};
+  if (use_delta) {
+    params["previousResultId"] = previous_result_id;
+  }
+  const std::string method = use_delta ? "textDocument/semanticTokens/full/delta"
+                                       : "textDocument/semanticTokens/full";
+
   nlohmann::json result;
-  if (!send_lsp_request("textDocument/semanticTokens/full", std::move(params), 30000, &result)) {
+  if (!send_lsp_request(method, std::move(params), 30000, &result)) {
     return false;
   }
 
-  SemanticTokenDocument decoded = decode_semantic_tokens(result, token_types);
+  if (!result.is_object()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    semantic_token_cache_.erase(key);
+    return false;
+  }
+
+  SemanticTokenDocument decoded;
+  if (result.contains("data") && result["data"].is_array()) {
+    // Either a plain /full response, or the server decided a full result was cheaper
+    // than a delta even though we asked for one -- both carry a flat `data` array.
+    std::vector<int64_t> data;
+    data.reserve(result["data"].size());
+    bool valid = true;
+    for (const auto& value : result["data"]) {
+      if (!value.is_number_integer()) {
+        valid = false;
+        break;
+      }
+      data.push_back(value.get<int64_t>());
+    }
+    if (!valid) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      semantic_token_cache_.erase(key);
+      return false;
+    }
+    decoded = decode_semantic_tokens_from_data(std::move(data), token_types);
+  } else if (use_delta && result.contains("edits") && result["edits"].is_array()) {
+    std::vector<int64_t> merged = previous_raw_data;
+    apply_semantic_token_edits(&merged, result["edits"]);
+    decoded = decode_semantic_tokens_from_data(std::move(merged), token_types);
+  } else {
+    std::lock_guard<std::mutex> lock(mutex_);
+    semantic_token_cache_.erase(key);
+    return false;
+  }
+
+  if (result.contains("resultId") && result["resultId"].is_string()) {
+    decoded.result_id = result["resultId"].get<std::string>();
+  }
+
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (decoded.ready) {

@@ -68,6 +68,11 @@ bool undo(EditorBuffer* buffer) {
   buffer->ensure_cursors();
   editor_buffer_rebuild_joined(buffer);
   buffer->semantic_layout_dirty = buffer->lines.size() != prev_line_count;
+  if (buffer->semantic_layout_dirty) {
+    // Undo can rewrite any part of the buffer, so conservatively treat the
+    // whole document as shifted rather than guessing a safe boundary line.
+    buffer->semantic_layout_dirty_from_line = 0;
+  }
   buffer->dirty = true;
   buffer->undo_coalesce_open = false;
   cursor_blink::show();
@@ -89,6 +94,11 @@ bool redo(EditorBuffer* buffer) {
   buffer->ensure_cursors();
   editor_buffer_rebuild_joined(buffer);
   buffer->semantic_layout_dirty = buffer->lines.size() != prev_line_count;
+  if (buffer->semantic_layout_dirty) {
+    // Redo can rewrite any part of the buffer, so conservatively treat the
+    // whole document as shifted rather than guessing a safe boundary line.
+    buffer->semantic_layout_dirty_from_line = 0;
+  }
   buffer->dirty = true;
   buffer->undo_coalesce_open = false;
   cursor_blink::show();

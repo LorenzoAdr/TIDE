@@ -18,6 +18,14 @@ struct SemanticTokenDocument {
   std::vector<std::vector<SemanticTokenSpan>> lines;
   bool ready = false;
   uint64_t source_generation = 0;
+  // Server-assigned id for the response this document was decoded from. Sent back as
+  // `previousResultId` on the next `textDocument/semanticTokens/full/delta` request so
+  // clangd can reply with just the edits instead of re-sending the whole file's tokens.
+  std::string result_id;
+  // Flat token data backing `lines` (5 ints per token: deltaLine, deltaStart, length,
+  // tokenType, tokenModifiers), kept around so a future delta response's edits can be
+  // spliced into it and re-decoded without needing a fresh full fetch.
+  std::vector<int64_t> raw_data;
 };
 
 // Content hash of a single line's semantic token spans. Used as a per-line cache-key

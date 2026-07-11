@@ -6,7 +6,9 @@ namespace tgdb {
 
 using namespace ftxui;
 
-SyntaxScope SyntaxScopeForTreeSitterCapture(const std::string& capture) {
+namespace {
+
+SyntaxScope SyntaxScopeForTreeSitterCaptureImpl(const std::string& capture) {
   if (capture == "comment") {
     return SyntaxScope::kComment;
   }
@@ -47,7 +49,7 @@ SyntaxScope SyntaxScopeForTreeSitterCapture(const std::string& capture) {
   return SyntaxScope::kDefault;
 }
 
-SyntaxScope SyntaxScopeForLspTokenType(const std::string& token_type) {
+SyntaxScope SyntaxScopeForLspTokenTypeImpl(const std::string& token_type) {
   if (token_type == "comment") {
     return SyntaxScope::kComment;
   }
@@ -86,6 +88,16 @@ SyntaxScope SyntaxScopeForLspTokenType(const std::string& token_type) {
     return SyntaxScope::kVariable;
   }
   return SyntaxScope::kDefault;
+}
+
+}  // namespace
+
+SyntaxScope SyntaxScopeForTreeSitterCapture(const std::string& capture) {
+  return SyntaxScopeForTreeSitterCaptureImpl(capture);
+}
+
+SyntaxScope SyntaxScopeForLspTokenType(const std::string& token_type) {
+  return SyntaxScopeForLspTokenTypeImpl(token_type);
 }
 
 Decorator DecoratorForSyntaxScope(SyntaxScope scope) {

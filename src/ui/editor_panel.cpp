@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <limits>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
@@ -228,6 +229,12 @@ struct EditorPanelState {
   uint64_t last_document_symbols_revision = 0;
   bool semantic_tokens_enqueue_pending = false;
   bool semantic_tokens_layout_stale = false;
+  // Lowest visible line index affected by the layout shift that set
+  // semantic_tokens_layout_stale. Lines before this boundary are guaranteed untouched
+  // by the pending edit and keep trusting cached LSP semantic tokens; only lines at or
+  // after it fall back to tree-sitter until fresh tokens land. See
+  // mark_editor_content_edited().
+  int semantic_tokens_layout_stale_from_line = std::numeric_limits<int>::max();
   uint64_t last_semantic_highlight_revision_tick = 0;
   SemanticTokenDocument cached_semantic_tokens;
   std::string cached_semantic_path;
@@ -421,12 +428,19 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
                                         int scope_highlight_strength, bool typing_burst,
                                         const BracketPairHighlight& bracket,
                                         const BracketPairHighlight* scope_bracket,
-                                        uint64_t colored_brace_token,
-                                        uint64_t semantic_source_generation, bool git_line_changed,
+                                        uint64_t colored_brace_token, bool git_line_changed,
                                         uint64_t ts_revision) {
   uint64_t h = kViewportLineHashOffset;
   h = viewport_line_hash_int(h, line.line_index);
   h = viewport_line_hash_string(h, line.line_content);
+  // Deliberately NOT hashing buffer.primary_line() itself here: doing so would bust every
+  // visible row's cache entry on every single cursor-line move (e.g. every j/k in Helix),
+  // defeating the point of this cache. The two rows whose *appearance* actually depends on
+  // "is this the caret line" (old and new caret row, for the current-line background) are
+  // instead evicted explicitly by caret_line_index tracking below, in the caller. The
+  // exception is relative line numbers (helix_relative): those depend on primary_line for
+  // *every* row, not just the caret's own -- see the full-cache clear guarded by
+  // helix_relative right below this loop's setup, which this per-row hash alone cannot cover.
   if (line.line_index == buffer.primary_line()) {
     h = viewport_line_hash_int(h, buffer.primary_col());
   }
@@ -453,11 +467,14 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
   h = viewport_line_hash_bool(h, line.symbol_press_active);
   h = viewport_line_hash_u64(h, colored_brace_token);
   // Content hash of this line's own semantic spans, not the document-wide semantic
-  // revision counter: that counter bumps on every LSP re-fetch even when this
-  // particular line's tokens are unchanged, which used to force a re-render of every
-  // visible line on each fetch instead of just the ones that actually changed.
+  // revision/generation counter: that counter bumps on every LSP re-fetch even when
+  // this particular line's tokens are unchanged (or even absent from the cache, e.g.
+  // while the buffer is falling back to tree-sitter), which would otherwise force a
+  // re-render of every visible line on each fetch instead of just the ones whose
+  // spans actually changed. HighlightCodeLine()'s choice between semantic and
+  // tree-sitter rendering for a line is fully determined by this span content (see
+  // cached_syntax_spans_for_line()), so hashing the spans alone is sufficient.
   h = viewport_line_hash_semantic_spans(h, line.line_semantic_spans);
-  h = viewport_line_hash_u64(h, semantic_source_generation);
   h = viewport_line_hash_string(h, buffer.path);
   if (line.suffix_ptr != nullptr) {
     h = viewport_line_hash_string(h, *line.suffix_ptr);
@@ -518,10 +535,13 @@ void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer) {
   panel->guide_tracker_view_token = 0;
   if (buffer.semantic_layout_dirty) {
     panel->semantic_tokens_layout_stale = true;
+    panel->semantic_tokens_layout_stale_from_line =
+        std::min(panel->semantic_tokens_layout_stale_from_line, buffer.semantic_layout_dirty_from_line);
     panel->semantic_tokens_enqueue_pending = true;
     panel->viewport_line_render_cache.clear();
     panel->line_syntax_span_cache.clear();
     buffer.semantic_layout_dirty = false;
+    buffer.semantic_layout_dirty_from_line = std::numeric_limits<int>::max();
   }
   if (is_indexed_source_path(buffer.path)) {
     panel->lsp_sync_pending = true;
@@ -5099,6 +5119,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->cached_semantic_path.clear();
       panel_state->last_semantic_highlight_revision = 0;
       panel_state->semantic_tokens_layout_stale = false;
+      panel_state->semantic_tokens_layout_stale_from_line = std::numeric_limits<int>::max();
       panel_state->semantic_tokens_enqueue_pending =
           !buffer.path.empty() && !is_tabular_path(buffer.path);
       panel_state->last_semantic_highlight_revision_tick = 0;
@@ -5163,7 +5184,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         layout_state->app_settings->rich_session_enabled;
 
     const SemanticTokenDocument* semantic_tokens = nullptr;
-    uint64_t semantic_source_generation = 0;
     UiSyncPhaseScope semantic_apply_scope(ui_perf, "render.editor.semantic");
     if (symbols && symbols->supports_semantic_highlight() && indexed_cpp) {
       const bool tokens_current = symbols->semantic_tokens_current_for_file(buffer.path);
@@ -5179,6 +5199,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             panel_state->last_semantic_highlight_revision = semantic_rev;
             panel_state->cached_semantic_tokens = fresh;
             panel_state->semantic_tokens_layout_stale = false;
+            panel_state->semantic_tokens_layout_stale_from_line = std::numeric_limits<int>::max();
             // No blanket cache clear here: both viewport_line_render_cache and
             // line_syntax_span_cache now key on each line's own semantic-span content
             // hash (see hash_semantic_token_line()), so a fetch that leaves a line's
@@ -5198,13 +5219,25 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       } else if (panel_state->semantic_tokens_layout_stale) {
         panel_state->semantic_tokens_enqueue_pending = true;
       }
-      if (!panel_state->semantic_tokens_layout_stale && tokens_current &&
-          panel_state->cached_semantic_path == buffer.path &&
-          panel_state->cached_semantic_tokens.ready &&
-          semantic_tokens_match_document(*symbols, buffer.path,
-                                         panel_state->cached_semantic_tokens)) {
+      // Deliberately NOT requiring tokens_current/semantic_tokens_match_document here:
+      // the document's generation bumps (and tokens_current goes false) the moment an
+      // edit is flushed to clangd, well before the refreshed tokens come back, and if
+      // this gate required an exact generation match the whole file would flash back to
+      // tree-sitter colors on every edit and flash back to LSP colors again once the
+      // fetch lands. Showing the last-known-good cached document instead -- filtered
+      // per line by semantic_spans_plausible_for_line() in cached_syntax_spans_for_line()
+      // -- keeps unaffected lines on their LSP colors throughout; only lines whose cached
+      // spans no longer fit the live text fall back to tree-sitter until the next fetch.
+      // semantic_tokens_layout_stale (line count changed) still forces a fallback to
+      // tree-sitter, but only for lines at/after semantic_tokens_layout_stale_from_line:
+      // once lines have shifted, a stale doc's per-line spans point at the wrong lines
+      // entirely for that shifted region, which the plausibility check can't reliably
+      // catch. Lines before the boundary are untouched by the edit -- their index and
+      // content are unchanged -- so they keep using the cached doc here; the per-line
+      // fallback is applied below where line_semantic is chosen for each visible line.
+      if (panel_state->cached_semantic_path == buffer.path &&
+          panel_state->cached_semantic_tokens.ready) {
         semantic_tokens = &panel_state->cached_semantic_tokens;
-        semantic_source_generation = panel_state->cached_semantic_tokens.source_generation;
       }
     }
 
@@ -5488,6 +5521,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool has_diagnostic_markers = show_diagnostics && !file_diag.items.empty();
     const bool gutter_markers =
         has_breakpoint_markers || has_diagnostic_markers || has_git_markers;
+    // gutter_w only budgets the number field plus the fold column (see its computation
+    // above, before gutter_markers is known). When marker glyphs (breakpoint/git/diagnostic)
+    // are shown, they occupy one more always-present column prepended to the number text
+    // below, so the actual rasterized/allocated gutter width must grow by 1 too -- otherwise
+    // that extra column pushes the number text's own last column out of the fixed-width
+    // scratch Screen PixelRowFromElement rasterizes into, clipping it.
+    const int gutter_render_width = gutter_w + (gutter_markers ? 1 : 0);
 
     const int code_width =
         code_width_from_box(panel_state->code_box, panel_state->code_width_chars);
@@ -5566,8 +5606,18 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         helix_caret && panel_state->helix.mode == HelixMode::kInsert;
     const int caret_line_index = buffer.primary_line();
     if (caret_line_index != panel_state->last_render_caret_line) {
-      panel_state->viewport_line_render_cache.erase(panel_state->last_render_caret_line);
-      panel_state->viewport_line_render_cache.erase(caret_line_index);
+      if (helix_relative) {
+        // Every visible row's gutter text encodes abs(row - caret_line) when relative
+        // numbering is on (see helix_format_line_number), but compute_viewport_line_render_key
+        // deliberately only hashes buffer.primary_line() for the caret's own row (see its
+        // comment) to keep ordinary cursor moves from invalidating the whole viewport. That
+        // shortcut is wrong here: every cached row's number is now stale, not just the old/new
+        // caret rows, so the whole cache must be dropped instead of just those two entries.
+        panel_state->viewport_line_render_cache.clear();
+      } else {
+        panel_state->viewport_line_render_cache.erase(panel_state->last_render_caret_line);
+        panel_state->viewport_line_render_cache.erase(caret_line_index);
+      }
       panel_state->last_render_caret_line = caret_line_index;
     }
     {
@@ -5625,8 +5675,18 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         }
       }
 
+      // Only the caret's own line has text that is actively changing character-by-character
+      // mid-burst (so its cached semantic offsets can be momentarily stale); every other
+      // visible line is untouched by the edit and should keep showing its real LSP colors
+      // instead of flashing to tree-sitter along with it (see cached_syntax_spans_for_line).
+      // Similarly, when a line-count-changing edit (e.g. pressing Enter) makes the layout
+      // stale, only lines at/after the shifted region actually risk pointing at the wrong
+      // cached spans; lines above the edit keep their real index and content untouched.
+      const bool line_shifted_by_layout_change =
+          panel_state->semantic_tokens_layout_stale &&
+          i >= panel_state->semantic_tokens_layout_stale_from_line;
       const SemanticTokenDocument* line_semantic =
-          typing_burst && !caret_line ? nullptr : semantic_tokens;
+          (typing_burst && caret_line) || line_shifted_by_layout_change ? nullptr : semantic_tokens;
       const std::vector<SemanticTokenSpan>* line_semantic_spans =
           (line_semantic != nullptr && i < static_cast<int>(line_semantic->lines.size()))
               ? &line_semantic->lines[static_cast<std::size_t>(i)]
@@ -5649,9 +5709,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       const uint64_t render_key = compute_viewport_line_render_key(
           key_input, buffer, *panel_state, editor_focused, show_caret,
           panel_state->mouse_selecting, helix_caret_insert, buffer.scroll_col, code_width,
-          helix_relative, gutter_w, fold_gutter_enabled, gutter_markers, indent_guides_enabled,
-          scope_highlight_strength, typing_burst, bracket, scope_bracket_ptr,
-          panel_state->colored_brace_cache_token, semantic_source_generation,
+          helix_relative, gutter_render_width, fold_gutter_enabled, gutter_markers,
+          indent_guides_enabled, scope_highlight_strength, typing_burst, bracket,
+          scope_bracket_ptr, panel_state->colored_brace_cache_token,
           git_line_changed(panel_state.get(), i), ts_highlight_revision);
 
       auto cache_it = panel_state->viewport_line_render_cache.find(i);
@@ -5671,9 +5731,18 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                             ? bgcolor(theme::ScopeBg(scope_highlight_strength))
                             : bgcolor(theme::CodeBg()));
 
-      const Element fold_el =
-          text(fold_marker == '\0' ? " " : std::string(1, fold_marker)) |
-          color(fold_marker == '\0' ? theme::Muted() : theme::Accent());
+      // fold_el occupies exactly the `panel_state->gutter_fold_width` column(s) that were
+      // budgeted into `gutter_w` (see its computation above). When fold gutters are disabled
+      // for this buffer, gutter_fold_width is 0 and no column was reserved for it, so it must
+      // be omitted here too -- otherwise every row's content (marker + number, sized to fit
+      // gutter_w - gutter_fold_width) plus this extra always-present cell would be one column
+      // wider than the `gutter_w`-wide scratch Screen PixelRowFromElement rasterizes into,
+      // silently clipping the last (i.e. least-significant-digit) column of every line number.
+      Elements gutter_children;
+      if (fold_gutter_enabled) {
+        gutter_children.push_back(text(fold_marker == '\0' ? " " : std::string(1, fold_marker)) |
+                                  color(fold_marker == '\0' ? theme::Muted() : theme::Accent()));
+      }
 
       Element gutter_row;
       if (gutter_markers) {
@@ -5695,16 +5764,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         } else if (gutter_marker == 'W') {
           gutter_color = theme::Warning();
         }
-        gutter_row = hbox({fold_el, text(gutter_text) | color(gutter_color)}) | gutter_bg;
+        gutter_children.push_back(text(gutter_text) | color(gutter_color));
       } else {
-        gutter_row =
-            hbox({fold_el,
-                  text(helix_format_line_number(i, buffer.primary_line(),
-                                                gutter_w - panel_state->gutter_fold_width,
-                                                helix_relative)) |
-                      color(theme::Muted())}) |
-            gutter_bg;
+        const std::string gutter_num_text = helix_format_line_number(
+            i, buffer.primary_line(), gutter_w - panel_state->gutter_fold_width, helix_relative);
+        gutter_children.push_back(text(gutter_num_text) | color(theme::Muted()));
       }
+      gutter_row = hbox(std::move(gutter_children)) | gutter_bg;
 
       Element code_row =
           RenderEditorLine(display_line, i, buffer, editor_focused, find_matches,
@@ -5725,7 +5791,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         // subsequent frame -- hit or miss -- skipping FTXUI's per-frame tree-walk entirely
         // (see render.editor.grid.* below, timed inside EditorGridNode::Render).
         UiSyncPhaseScope rasterize_scope(ui_perf, "render.editor.lines.rasterize");
-        cached_row.gutter = PixelRowFromElement(gutter_row, gutter_w);
+        cached_row.gutter = PixelRowFromElement(gutter_row, gutter_render_width);
         cached_row.code = PixelRowFromElement(code_row, code_width);
       }
       panel_state->viewport_line_render_cache[i] = cached_row;
@@ -5736,9 +5802,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     prune_viewport_line_render_cache(panel_state.get(), viewport_lines);
     if (code_pixel_rows.empty()) {
       gutter_pixel_rows.push_back(
-          PixelRowFromElement(text(format_line_number(1, gutter_w)) | color(theme::Muted()) |
-                                  bgcolor(theme::CodeBg()),
-                              gutter_w));
+          PixelRowFromElement(text(format_line_number(1, gutter_render_width)) |
+                                  color(theme::Muted()) | bgcolor(theme::CodeBg()),
+                              gutter_render_width));
       code_pixel_rows.push_back(
           PixelRowFromElement(text(" ") | bgcolor(theme::CodeBg()), code_width));
     }
@@ -5749,8 +5815,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     // cell on every single Draw() call, these are leaf nodes that blit already-rasterized
     // Pixels directly into the Screen. See ui/editor_grid_node.hpp for the rationale and
     // render.editor.grid.gutter/code below for the measured cost of that direct write.
-    Element gutter = MakeEditorPixelGrid(std::move(gutter_pixel_rows), gutter_w, ui_perf,
-                                         "render.editor.grid.gutter") |
+    Element gutter = MakeEditorPixelGrid(std::move(gutter_pixel_rows), gutter_render_width,
+                                         ui_perf, "render.editor.grid.gutter") |
                      reflect(panel_state->gutter_box) | bgcolor(theme::CodeBg());
     Element code = MakeEditorPixelGrid(std::move(code_pixel_rows), code_width, ui_perf,
                                        "render.editor.grid.code") |
@@ -5815,8 +5881,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       return body;
     }
     return dbox({std::move(body),
-                 make_sticky_overlay(sticky_lines, gutter_w, buffer, semantic_tokens, code_width,
-                                     indent_guides_enabled)});
+                 make_sticky_overlay(sticky_lines, gutter_render_width, buffer, semantic_tokens,
+                                     code_width, indent_guides_enabled)});
   });
 
   // En Stacked, el primer hijo se dibuja encima (FTXUI invierte el dbox interno).
