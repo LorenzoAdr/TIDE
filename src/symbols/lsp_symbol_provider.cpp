@@ -492,7 +492,6 @@ void LspSymbolProvider::tick_content_refresh_locked() {
   }
   for (auto it = pending_content_refresh_.begin(); it != pending_content_refresh_.end();) {
     if (now - it->second >= kDebounceMs) {
-      enqueue_document_symbols_locked(it->first, true);
       enqueue_semantic_tokens_locked(it->first);
       it = pending_content_refresh_.erase(it);
     } else {
@@ -707,6 +706,10 @@ void LspSymbolProvider::set_workspace_clangd_options(const bool use_gcc_query_dr
   std::lock_guard<std::mutex> lock(mutex_);
   use_gcc_query_driver_ = use_gcc_query_driver;
   use_background_index_ = background_index;
+}
+
+void LspSymbolProvider::set_lsp_request_counter(std::atomic<uint64_t>* counter) {
+  client_.set_request_counter(counter);
 }
 
 void LspSymbolProvider::set_ui_inhibited(const bool inhibited) {
@@ -937,23 +940,6 @@ bool LspSymbolProvider::indexes_workspace_bulk() const {
 
 std::vector<SymbolInfo> LspSymbolProvider::symbols_for_file(const std::string& path) {
   if (path.empty()) {
-    return {};
-  }
-
-  bool use_lsp = false;
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    use_lsp = use_lsp_;
-  }
-
-  if (use_lsp && is_indexed_source_path(path)) {
-    if (auto cached = client_.cached_document_symbols(path)) {
-      return *cached;
-    }
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      enqueue_document_symbols_locked(normalize_lsp_path(path));
-    }
     return {};
   }
   return fallback_.symbols_for_file(path);

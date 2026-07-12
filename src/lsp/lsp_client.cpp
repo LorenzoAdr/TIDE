@@ -1,5 +1,6 @@
 #include "lsp/lsp_client.hpp"
 
+#include <cstdint>
 #include <vector>
 #include <algorithm>
 #include <cstdlib>
@@ -319,6 +320,10 @@ int64_t LspClient::steady_now_ms() {
       .count();
 }
 
+void LspClient::set_request_counter(std::atomic<uint64_t>* counter) {
+  request_counter_ = counter;
+}
+
 bool LspClient::send_lsp_request(const std::string& method, nlohmann::json params, int timeout_ms,
                                    nlohmann::json* out) {
   if (out == nullptr || intentionally_stopping_.load(std::memory_order_acquire)) {
@@ -333,6 +338,9 @@ bool LspClient::send_lsp_request(const std::string& method, nlohmann::json param
     id = next_request_id_++;
     if (!transport_.write_request(id, method, std::move(params))) {
       return false;
+    }
+    if (request_counter_ != nullptr) {
+      request_counter_->fetch_add(1, std::memory_order_relaxed);
     }
   }
   const bool ok = transport_.wait_response(id, timeout_ms, out);
@@ -365,6 +373,9 @@ bool LspClient::send_completion_request(nlohmann::json params, int timeout_ms,
     if (!transport_.write_request(id, "textDocument/completion", std::move(params))) {
       inflight_completion_request_id_.store(0, std::memory_order_release);
       return false;
+    }
+    if (request_counter_ != nullptr) {
+      request_counter_->fetch_add(1, std::memory_order_relaxed);
     }
   }
 

@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "editor/editor_buffer_source.hpp"
+#include "parser/tree_sitter_service.hpp"
 #include "ftxui/component/component.hpp"
 #include "packet_monitor/pkt_monitor_service.hpp"
 #include "ftxui/component/component_options.hpp"
@@ -84,6 +85,7 @@ struct LayoutState {
   bool editor_center_sep_hovered = false;
   bool split_dragging = false;
   int split_drag_kind = 0;  // 1=left, 2=right, 3=bottom, 4=editor center
+  bool last_show_secondary = false;
   int split_drag_start_pos = 0;
   int split_drag_start_size = 0;
   bool show_left_split = true;
@@ -930,7 +932,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       MakeWelcomeScreen(layout_state, welcome_state, on_welcome_external_file, on_welcome_debug,
                         on_welcome_workspace);
 
-  auto outline = MakeOutlinePanel(workspace, focus, symbols, layout_state);
+  auto outline = MakeOutlinePanel(workspace, focus, layout_state);
   auto sidebar = MakeRightSidebarPanel(outline, layout_state);
   auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug, focus, app_mode);
   auto right_panel = MakeCachedPanelRender(
@@ -958,6 +960,10 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
         layout_state->app_settings->secondary_panel_enabled;
     split_state->show_left_split = show_left;
     split_state->show_right_split = show_secondary;
+    if (layout_state != nullptr && show_secondary && !split_state->last_show_secondary) {
+      layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+    }
+    split_state->last_show_secondary = show_secondary;
 
     if (show_left && show_secondary) {
       return workspace_lr->Render() | flex | bgcolor(theme::PanelBg());
@@ -1048,10 +1054,20 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
         layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
         layout_state->panel_cache_diagnostics_revision = symbols->diagnostics_revision();
       }
-      if (symbols != nullptr &&
-          symbols->document_symbols_revision() != layout_state->panel_cache_symbols_revision) {
-        layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
-        layout_state->panel_cache_symbols_revision = symbols->document_symbols_revision();
+      {
+        const std::string outline_path = workspace->buffer.path.empty()
+                                             ? workspace->active_file
+                                             : workspace->buffer.path;
+        if (outline_path != layout_state->panel_cache_outline_path) {
+          layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+          layout_state->panel_cache_outline_path = outline_path;
+        }
+        const uint64_t ts_rev =
+            outline_path.empty() ? 0 : tree_sitter_service().revision_for(outline_path);
+        if (ts_rev != layout_state->panel_cache_symbols_revision) {
+          layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+          layout_state->panel_cache_symbols_revision = ts_rev;
+        }
       }
       if (layout_state->terminal_width && layout_state->terminal_height) {
         const int tw = layout_state->terminal_width();

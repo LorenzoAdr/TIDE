@@ -273,6 +273,14 @@ bool TreeSitterService::document_highlights_ready(const std::string& path,
   return cache_.document_highlights_ready(cache_key_for(path), normalize_editor_source(source));
 }
 
+bool TreeSitterService::document_symbols_ready(const std::string& path,
+                                               const std::string& source) const {
+  if (path.empty() || source.empty()) {
+    return false;
+  }
+  return cache_.document_symbols_ready(cache_key_for(path), normalize_editor_source(source));
+}
+
 void TreeSitterService::ensure_viewport_preview(const std::string& path, const std::string& source,
                                                 const std::vector<int>& line_indices) {
   if (path.empty() || source.empty() || line_indices.empty()) {

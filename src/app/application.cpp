@@ -258,6 +258,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	workspace_wizard_state_.launch_root = connection_wizard_state_.browser.launch_root;
 
 	symbol_provider_ = std::make_shared<LspSymbolProvider>();
+	symbol_provider_->set_lsp_request_counter(&layout_state_.ui_lsp_request_count);
 	app_settings_ = AppSettings::load();
 	i18n::set_locale(app_settings_.ui_locale);
 	set_animations_enabled(app_settings_.animations_enabled);
@@ -635,12 +636,6 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 			TGDB_MON_SCOPE("ui", "tick.git");
 			git_service_.tick();
 		}
-		if (layout_state_.outline_tick_callback &&
-		    layout_state_.activity_gate.allows_deferred_panel_tick()) {
-			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "outline");
-			TGDB_MON_SCOPE("ui", "tick.outline");
-			layout_state_.outline_tick_callback();
-		}
 	}
 
 	if (plan.run_terminal && layout_state_.console_visible &&
@@ -651,6 +646,11 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 	}
 
 	if (plan.run_editor) {
+		if (layout_state_.outline_tick_callback && !layout_state_.welcome_visible) {
+			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "outline");
+			TGDB_MON_SCOPE("ui", "tick.outline");
+			layout_state_.outline_tick_callback();
+		}
 		if (layout_state_.primary_editor.tick_callback && !layout_state_.welcome_visible) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "primary_editor");
 			TGDB_MON_SCOPE("ui", "tick.primary_editor");
@@ -2735,7 +2735,6 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 		});
 	}
 	tree_sitter_service().set_ready_callback([this](const std::string& path) {
-		const uint64_t correlation = layout_state_.last_editor_correlation_id;
 		enqueue_ui_task([this, path]() {
 			if (!path.empty() && workspace_.buffer.path == path) {
 				workspace_.buffer.view_token++;
@@ -2743,8 +2742,12 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 			if (!path.empty() && secondary_workspace_.buffer.path == path) {
 				secondary_workspace_.buffer.view_token++;
 			}
+			layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+			if (layout_state_.outline_tick_callback) {
+				layout_state_.outline_tick_callback();
+			}
 		});
-		ui_wake_correlated(&layout_state_, correlation, "tree_sitter.ready");
+		UI_WAKE(&layout_state_, "tree_sitter.ready");
 	});
 
 	layout_state_.performance_sampler.set_dump_hooks(&layout_state_.activity_gate,

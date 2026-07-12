@@ -91,6 +91,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool lsp_enabled() const;
   void set_workspace_clangd_options(bool use_gcc_query_driver, bool background_index);
   void set_ui_inhibited(bool inhibited);
+  void set_lsp_request_counter(std::atomic<uint64_t>* counter);
 
  private:
   enum class AsyncJobKind { DocumentSymbols, SemanticTokens, Hover, Completion };

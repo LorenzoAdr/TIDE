@@ -1880,7 +1880,11 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       body = RenderPerformancePanel(sampler, ui_perf, perf_state.get(), panel_width, body_height,
                                     layout_state != nullptr && layout_state->ui_events != nullptr
                                         ? &layout_state->ui_events->trace()
-                                        : nullptr) |
+                                        : nullptr,
+                                    layout_state != nullptr ? &layout_state->ui_paint_count
+                                                            : nullptr,
+                                    layout_state != nullptr ? &layout_state->ui_lsp_request_count
+                                                            : nullptr) |
              flex;
     } else if (selected_tab == ConsolePanelTabs::kProblems) {
       body = diagnostics_panel->Render() | flex;

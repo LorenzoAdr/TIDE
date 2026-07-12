@@ -48,6 +48,7 @@ class TreeSitterService {
   // refresh has not committed yet.
   bool highlights_refresh_pending(const std::string& path) const;
   bool document_highlights_ready(const std::string& path, const std::string& source) const;
+  bool document_symbols_ready(const std::string& path, const std::string& source) const;
   void ensure_viewport_preview(const std::string& path, const std::string& source,
                              const std::vector<int>& line_indices);
   const LineHighlights* viewport_preview_line(const std::string& path, const std::string& source,

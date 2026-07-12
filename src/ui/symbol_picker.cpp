@@ -9,8 +9,11 @@
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
-#include "ui/panel.hpp"
+#include "editor/editor_buffer_source.hpp"
+#include "indexer/index_rules.hpp"
+#include "parser/tree_sitter_service.hpp"
 #include "ui/key_bindings.hpp"
+#include "ui/panel.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 #include "util/fuzzy_match.hpp"
@@ -182,14 +185,27 @@ void SymbolPickerState::sync_catalog(const WorkspaceModel& workspace,
     return;
   }
 
-  const std::string key = "file:" + path;
+  const std::string source = editor_buffer_joined_source(workspace.buffer);
+  if (path != loaded_file && !source.empty() && is_indexed_source_path(path)) {
+    tree_sitter_service().prepare_document(path, source);
+  }
+  if (!source.empty() && is_indexed_source_path(path) &&
+      !tree_sitter_service().document_symbols_ready(path, source) &&
+      tree_sitter_service().revision_for(path) == 0) {
+    tree_sitter_service().prepare_document(path, source);
+  }
+  const uint64_t ts_rev = tree_sitter_service().revision_for(path);
+  const std::string key = "file:" + path + "@" + std::to_string(ts_rev);
   if (catalog_key == key && catalog != nullptr) {
     return;
   }
 
   loaded_file = path;
   const std::vector<SymbolInfo> file_symbols =
-      symbols ? symbols->symbols_for_file(path) : std::vector<SymbolInfo>{};
+      tree_sitter_service().symbols_for_file(path, source);
+  if (file_symbols.empty() && !tree_sitter_service().document_symbols_ready(path, source)) {
+    return;
+  }
   catalog = build_catalog_from_file(file_symbols);
   catalog_key = key;
   mark_matches_dirty();

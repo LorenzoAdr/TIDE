@@ -141,9 +141,11 @@ struct MainLayoutState {
   std::atomic<bool> debug_critical_wake{false};
   std::atomic<uint64_t> ui_custom_tick{0};
   std::atomic<uint64_t> ui_paint_count{0};
+  std::atomic<uint64_t> ui_lsp_request_count{0};
   uint64_t panel_cache_git_revision = 0;
   uint64_t panel_cache_diagnostics_revision = 0;
   uint64_t panel_cache_symbols_revision = 0;
+  std::string panel_cache_outline_path;
   int panel_cache_terminal_w = 0;
   int panel_cache_terminal_h = 0;
   UiPanelRenderCache panel_render_cache;

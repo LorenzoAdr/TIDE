@@ -511,6 +511,33 @@ void test_local_completions_include_parameters() {
   assert(found_bar);
 }
 
+void test_symbols_refresh_after_sync_edit() {
+  const std::string path = "sync_symbols.cpp";
+  const std::string initial = "int foo() { return 0; }\n";
+  wait_document_ready(path, initial);
+  assert(tree_sitter_service().document_symbols_ready(path, initial));
+  assert(!tree_sitter_service().symbols_for_file(path, initial).empty());
+
+  EditorBuffer buffer;
+  buffer.path = path;
+  buffer.lines = {"int foo() { return 0; }"};
+  editor_buffer_note_char_inserted(&buffer, 0, static_cast<int>(buffer.lines[0].size()) - 2, "1");
+  const std::optional<EditorTextEditHint> hint = editor_buffer_take_edit_hint(&buffer);
+  const std::string edited = editor_buffer_joined_source(buffer);
+  tree_sitter_service().prepare_document(path, edited, hint);
+  assert(tree_sitter_service().document_ready(path, edited));
+
+  for (int attempt = 0; attempt < 500; ++attempt) {
+    if (tree_sitter_service().document_symbols_ready(path, edited)) {
+      const auto symbols = tree_sitter_service().symbols_for_file(path, edited);
+      assert(!symbols.empty());
+      return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  assert(false && "symbols did not refresh after sync edit");
+}
+
 void test_sync_edit_keeps_ast_before_worker() {
   const std::string path = "sync_live.cpp";
   const std::string initial = "int foo() { return 0; }\n";
@@ -839,6 +866,7 @@ int main() {
   tgdb::test_editor_fold_visibility();
   tgdb::test_colored_curly_braces_depths();
   tgdb::test_local_completions_include_parameters();
+  tgdb::test_symbols_refresh_after_sync_edit();
   tgdb::test_sync_edit_keeps_ast_before_worker();
   tgdb::test_editing_line_highlights_sync();
   tgdb::test_parse_debounce_coalesces_edits();

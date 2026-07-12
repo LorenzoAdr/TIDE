@@ -234,9 +234,25 @@ Element render_system_section(const PerformanceSnapshot& snapshot, int body_heig
 
 Element render_ui_thread_section(const UiPerfSnapshot& ui, int panel_width,
                                  const std::string& dump_path,
-                                 const UiEventTrace* ui_event_trace) {
+                                 const UiEventTrace* ui_event_trace,
+                                 const std::atomic<uint64_t>* ui_paint_count,
+                                 const std::atomic<uint64_t>* ui_lsp_request_count) {
   (void)panel_width;
   Elements lines;
+  if (ui_paint_count != nullptr || ui_lsp_request_count != nullptr) {
+    std::ostringstream counters;
+    if (ui_paint_count != nullptr) {
+      counters << "Redibujados (total): " << ui_paint_count->load(std::memory_order_relaxed);
+    }
+    if (ui_paint_count != nullptr && ui_lsp_request_count != nullptr) {
+      counters << "   ";
+    }
+    if (ui_lsp_request_count != nullptr) {
+      counters << "Peticiones LSP (total): "
+               << ui_lsp_request_count->load(std::memory_order_relaxed);
+    }
+    lines.push_back(text(counters.str()) | bold | color(theme::Accent()));
+  }
   std::ostringstream header;
   header << "UI thread  paint " << format_fps(ui.paint_fps) << " fps  tick "
          << format_fps(ui.tick_fps) << " fps  wasted "
@@ -288,7 +304,9 @@ Element render_ui_thread_section(const UiPerfSnapshot& ui, int panel_width,
 
 Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,
                                PerformancePanelState* state, int width, int height,
-                               const UiEventTrace* ui_event_trace) {
+                               const UiEventTrace* ui_event_trace,
+                               const std::atomic<uint64_t>* ui_paint_count,
+                               const std::atomic<uint64_t>* ui_lsp_request_count) {
   const int total_height = visible_height(height);
   const int panel_width = visible_width(width);
 
@@ -302,7 +320,7 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
   }
 
   const std::string dump_path = sampler != nullptr ? sampler->dump_file_path() : std::string{};
-  constexpr int kUiSectionLines = 10;
+  constexpr int kUiSectionLines = 11;
   constexpr int kMinHeightForSystem = 12;
   const bool show_system = total_height >= kMinHeightForSystem + kUiSectionLines;
   const int ui_height = std::min(kUiSectionLines, std::max(2, total_height / 6));
@@ -314,7 +332,8 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
       render_process_section(snapshot, process_height, panel_width, state);
 
   Elements layout;
-  layout.push_back(render_ui_thread_section(ui_snapshot, panel_width, dump_path, ui_event_trace) |
+  layout.push_back(render_ui_thread_section(ui_snapshot, panel_width, dump_path, ui_event_trace,
+                                            ui_paint_count, ui_lsp_request_count) |
                    size(HEIGHT, EQUAL, ui_height) | bgcolor(theme::PanelBg()));
   layout.push_back(separator() | color(theme::AccentDim()) | size(HEIGHT, EQUAL, 1));
   layout.push_back(text(i18n::tr("panel.performance.tab.process")) | bold | color(theme::Accent()) | bgcolor(theme::TabIdle()) |

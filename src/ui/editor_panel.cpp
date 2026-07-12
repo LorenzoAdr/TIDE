@@ -232,7 +232,7 @@ struct EditorPanelState {
   uint64_t fold_visible_lines_cache_fold_token = 0;
   int fold_visible_lines_cache_total = -1;
   bool symbols_fetch_pending = false;
-  uint64_t last_document_symbols_revision = 0;
+  uint64_t last_tree_sitter_symbols_revision = 0;
   bool semantic_tokens_enqueue_pending = false;
   bool semantic_tokens_layout_stale = false;
   // Lowest visible line index affected by the layout shift that set
@@ -718,9 +718,9 @@ const std::vector<int>& cached_fold_visible_lines(EditorPanelState* panel,
   return panel->fold_visible_lines_cache;
 }
 
-void ensure_file_symbols(EditorPanelState* panel, ISymbolProvider* symbols,
-                         const std::string& path, const std::string& buffer_text) {
-  if (panel == nullptr || symbols == nullptr || path.empty() || !panel->symbols_fetch_pending) {
+void ensure_file_symbols(EditorPanelState* panel, const std::string& path,
+                         const std::string& buffer_text) {
+  if (panel == nullptr || path.empty() || !panel->symbols_fetch_pending) {
     return;
   }
   if (is_tabular_path(path)) {
@@ -728,16 +728,10 @@ void ensure_file_symbols(EditorPanelState* panel, ISymbolProvider* symbols,
     panel->symbols_fetch_pending = false;
     return;
   }
-  const std::vector<SymbolInfo> fetched = symbols->symbols_for_file(path);
-  if (fetched.empty()) {
-    if (symbols->symbols_lsp_pending(path)) {
-      return;
-    }
-    if (!buffer_text.empty() && is_indexed_source_path(path) &&
-        !tree_sitter_service().document_ready(path, buffer_text)) {
-      tree_sitter_service().prepare_document(path, buffer_text);
-      return;
-    }
+  const std::vector<SymbolInfo> fetched =
+      tree_sitter_service().symbols_for_file(path, buffer_text);
+  if (fetched.empty() && !tree_sitter_service().document_symbols_ready(path, buffer_text)) {
+    return;
   }
   panel->cached_symbols = fetched;
   panel->symbols_fetch_pending = false;
@@ -6337,18 +6331,16 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           }
           if (panel_state->symbols_fetch_pending) {
             UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.symbols");
-            ensure_file_symbols(panel_state.get(), symbols.get(), path,
-                                buffer_text(workspace->buffer));
+            ensure_file_symbols(panel_state.get(), path, buffer_text(workspace->buffer));
           }
-          const uint64_t sym_rev = symbols->document_symbols_revision();
-          if (sym_rev != panel_state->last_document_symbols_revision) {
-            panel_state->last_document_symbols_revision = sym_rev;
+          const uint64_t ts_rev = tree_sitter_service().revision_for(path);
+          if (ts_rev != panel_state->last_tree_sitter_symbols_revision) {
+            panel_state->last_tree_sitter_symbols_revision = ts_rev;
             if (!is_tabular_path(path)) {
               panel_state->symbols_fetch_pending = true;
             }
             UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.symbols");
-            ensure_file_symbols(panel_state.get(), symbols.get(), path,
-                                buffer_text(workspace->buffer));
+            ensure_file_symbols(panel_state.get(), path, buffer_text(workspace->buffer));
           }
           if (!kLspSemanticTokensStandby && symbols->supports_semantic_highlight() &&
               !path.empty() && !is_tabular_path(path)) {

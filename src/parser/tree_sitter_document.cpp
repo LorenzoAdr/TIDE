@@ -545,6 +545,17 @@ bool TreeSitterDocumentCache::document_highlights_ready(const std::string& path,
   return entry->source == canonical && entry->highlights_ready && !entry->line_highlights.empty();
 }
 
+bool TreeSitterDocumentCache::document_symbols_ready(const std::string& path,
+                                                     const std::string& canonical) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = cache_.find(path);
+  if (it == cache_.end()) {
+    return false;
+  }
+  const DocumentPtr& entry = it->second;
+  return entry->source == canonical && entry->symbols_ready;
+}
+
 namespace {
 
 std::string extract_line_range(const std::string& source, int first_line, int last_line) {
@@ -727,8 +738,10 @@ void TreeSitterDocumentCache::worker_main() {
             const auto it = cache_.find(job.path);
             if (it != cache_.end()) {
               DocumentEntry* entry = it->second.get();
-              if (!entry->prepare_inflight && !entry->parse_ready &&
-                  entry->source == job.source) {
+              const bool document_fully_ready = entry->parse_ready && entry->highlights_ready &&
+                                                entry->symbols_ready;
+              if (!entry->prepare_inflight && entry->source == job.source &&
+                  !document_fully_ready) {
                 entry->prepare_inflight = true;
                 schedule = true;
               } else if (entry->prepare_inflight) {
@@ -916,13 +929,13 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
       }
       entry->tree = tree;
       entry->line_highlights = std::move(highlights);
+      entry->parse_ready = tree != nullptr;
+      entry->highlights_ready = entry->parse_ready;
       if (!more_edits_pending) {
         entry->symbols = std::move(symbols);
         entry->scope_symbols = std::move(scopes);
         entry->symbols_ready = entry->parse_ready;
       }
-      entry->parse_ready = tree != nullptr;
-      entry->highlights_ready = entry->parse_ready;
       entry->viewport_preview.reset();
       entry->revision = next_revision_++;
       committed = true;

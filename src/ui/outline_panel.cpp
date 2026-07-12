@@ -1,6 +1,9 @@
 #include "ui/outline_panel.hpp"
 #include "ui/ui_wake.hpp"
 
+#include "editor/editor_buffer_source.hpp"
+#include "indexer/index_rules.hpp"
+#include "parser/tree_sitter_service.hpp"
 #include "util/ui_panel_render_cache.hpp"
 #include <algorithm>
 #include <cstring>
@@ -88,8 +91,8 @@ struct OutlinePanelState {
   std::vector<SymbolInfo> symbols;
   std::vector<OutlineDisplayRow> display_rows;
   std::string loaded_file;
-  bool symbols_fetch_pending = false;
-  uint64_t last_document_symbols_revision = 0;
+  bool symbols_loading = false;
+  uint64_t loaded_symbols_revision = 0;
   int selected = 0;
   int list_scroll = 0;
   int last_visible_lines = 1;
@@ -192,21 +195,69 @@ struct OutlinePanelState {
   }
 };
 
-void fetch_outline_symbols(OutlinePanelState* state, ISymbolProvider* symbols,
-                           WorkspaceModel* workspace, MainLayoutState* layout_state) {
-  if (state == nullptr || symbols == nullptr || !state->symbols_fetch_pending ||
-      state->loaded_file.empty()) {
+void refresh_outline_symbols(OutlinePanelState* state, WorkspaceModel* workspace,
+                             MainLayoutState* layout_state) {
+  if (state == nullptr || workspace == nullptr) {
     return;
   }
-  state->symbols = symbols->symbols_for_file(state->loaded_file);
+  const std::string path =
+      workspace->buffer.path.empty() ? workspace->active_file : workspace->buffer.path;
+  if (path.empty()) {
+    state->loaded_file.clear();
+    state->symbols.clear();
+    state->display_rows.clear();
+    state->symbols_loading = false;
+    state->loaded_symbols_revision = 0;
+    return;
+  }
+
+  const std::string source = editor_buffer_joined_source(workspace->buffer);
+  if (path != state->loaded_file) {
+    state->loaded_file = path;
+    state->symbols.clear();
+    state->display_rows.clear();
+    state->loaded_symbols_revision = 0;
+    state->selected = 0;
+    state->list_scroll = 0;
+    if (!source.empty() && is_indexed_source_path(path)) {
+      tree_sitter_service().prepare_document(path, source);
+    }
+  }
+
+  if (source.empty()) {
+    state->symbols.clear();
+    state->display_rows.clear();
+    state->symbols_loading = false;
+    state->loaded_symbols_revision = 0;
+    return;
+  }
+
+  if (!tree_sitter_service().document_symbols_ready(path, source) &&
+      is_indexed_source_path(path) &&
+      tree_sitter_service().revision_for(path) == 0 && state->loaded_symbols_revision == 0) {
+    tree_sitter_service().prepare_document(path, source);
+  }
+
+  const uint64_t ts_rev = tree_sitter_service().revision_for(path);
+  const bool up_to_date = path == state->loaded_file && ts_rev != 0 &&
+                          state->loaded_symbols_revision == ts_rev;
+  if (up_to_date) {
+    state->symbols_loading = false;
+    return;
+  }
+
+  if (!tree_sitter_service().document_symbols_ready(path, source)) {
+    state->symbols_loading = true;
+    return;
+  }
+
+  state->symbols = tree_sitter_service().symbols_for_file(path, source);
+  state->loaded_symbols_revision = ts_rev;
+  state->symbols_loading = false;
   state->rebuild_display_rows();
-  state->symbols_fetch_pending = false;
   if (layout_state != nullptr) {
     layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
-    UI_WAKE(layout_state, "wake");
-  }
-  if (symbols->symbols_lsp_pending(state->loaded_file)) {
-    return;
+    UI_WAKE(layout_state, "outline.symbols");
   }
   if (state->selected >= state->display_row_count()) {
     state->selected = std::max(0, state->display_row_count() - 1);
@@ -454,35 +505,16 @@ bool handle_outline_mouse(OutlinePanelState* state, WorkspaceModel* workspace,
 }  // namespace
 
 Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
-                           std::shared_ptr<ISymbolProvider> symbols,
                            MainLayoutState* layout_state) {
   auto state = std::make_shared<OutlinePanelState>();
 
   if (layout_state != nullptr) {
-    layout_state->outline_tick_callback = [state, symbols, workspace, layout_state]() {
-      const uint64_t sym_rev = symbols->document_symbols_revision();
-      if (sym_rev != state->last_document_symbols_revision) {
-        state->last_document_symbols_revision = sym_rev;
-        if (!state->loaded_file.empty()) {
-          state->symbols_fetch_pending = true;
-        }
-      }
-      fetch_outline_symbols(state.get(), symbols.get(), workspace, layout_state);
+    layout_state->outline_tick_callback = [state, workspace, layout_state]() {
+      refresh_outline_symbols(state.get(), workspace, layout_state);
     };
   }
 
   auto renderer = Renderer([workspace, focus, state, layout_state] {
-    const std::string path =
-        workspace->buffer.path.empty() ? workspace->active_file : workspace->buffer.path;
-    if (path != state->loaded_file) {
-      state->loaded_file = path;
-      state->symbols.clear();
-      state->display_rows.clear();
-      state->symbols_fetch_pending = !path.empty();
-      state->selected = 0;
-      state->list_scroll = 0;
-    }
-
     const int total = state->display_row_count();
     const int visible = visible_line_count(state->content_box);
     state->last_visible_lines = visible;
@@ -492,7 +524,7 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const int end = std::min(total, start + visible);
 
     Elements rows;
-    if (state->symbols_fetch_pending && state->symbols.empty()) {
+    if (state->symbols_loading && state->symbols.empty()) {
       rows.push_back(text(i18n::tr("panel.outline.loading")) | color(theme::Muted()));
     } else if (state->symbols.empty()) {
       rows.push_back(text(i18n::tr("panel.outline.no_symbols")) | color(theme::Muted()));

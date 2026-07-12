@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -30,6 +31,7 @@ class LspClient {
              bool use_gcc_query_driver = true, bool background_index = false);
   void stop();
   void set_background_paused(bool paused);
+  void set_request_counter(std::atomic<uint64_t>* counter);
   bool ready() const { return ready_.load(); }
   bool transport_running() const;
   bool clangd_process_alive() const;
@@ -174,6 +176,7 @@ class LspClient {
   std::vector<std::string> semantic_token_types_;
   bool semantic_tokens_supported_ = false;
   int next_request_id_ = 1;
+  std::atomic<uint64_t>* request_counter_ = nullptr;
   std::atomic<int> inflight_completion_request_id_{0};
   std::atomic<int> latest_completion_request_id_{0};
 };

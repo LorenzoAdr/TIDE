@@ -116,6 +116,7 @@ class TreeSitterDocumentCache {
   void invalidate(const std::string& path);
   uint64_t revision_for(const std::string& path) const;
   bool document_highlights_ready(const std::string& path, const std::string& canonical) const;
+  bool document_symbols_ready(const std::string& path, const std::string& canonical) const;
   void ensure_viewport_preview(const std::string& path, const std::string& canonical,
                                const std::vector<int>& line_indices);
   const LineHighlights* viewport_preview_line(const std::string& path, const std::string& canonical,
