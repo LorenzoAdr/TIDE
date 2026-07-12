@@ -109,6 +109,9 @@ class ISymbolProvider {
     (void)params;
     (void)cache_key;
   }
+  virtual void cancel_completion_fetch() {}
+  virtual void cancel_hover_fetch() {}
+  virtual bool async_drain_invalidates_view() const { return true; }
   virtual std::optional<std::vector<CompletionItem>> poll_completion(
       const std::string& cache_key) {
     (void)cache_key;

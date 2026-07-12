@@ -1,5 +1,5 @@
 #include "ui/binary_symbols_panel.hpp"
-#include "ui/ui_wake.hpp"
+#include "ui/ui_wake_policy.hpp"
 
 #include <algorithm>
 #include <array>
@@ -391,7 +391,8 @@ void navigate_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state
                                             std::to_string(loc->line + 1),
                                             std::to_string(loc->character + 1)});
   if (layout_state != nullptr) {
-    schedule_editor_navigation(layout_state, *loc);
+    invalidate_editor_view(layout_state);
+    UI_WAKE_REASON(layout_state, UiWakeReason::EditorNavigationComplete);
   }
 }
 

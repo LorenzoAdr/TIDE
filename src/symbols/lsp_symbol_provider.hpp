@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -16,6 +17,8 @@
 
 namespace tgdb {
 
+enum class LspAsyncJobKind { DocumentSymbols, SemanticTokens, Hover, Completion };
+
 class LspSymbolProvider : public ISymbolProvider {
  public:
   LspSymbolProvider();
@@ -24,6 +27,7 @@ class LspSymbolProvider : public ISymbolProvider {
   std::vector<SymbolInfo> symbols_for_file(const std::string& path) override;
   bool symbols_lsp_pending(const std::string& path) const override;
   bool drain_async_results() override;
+  bool async_drain_invalidates_view() const override;
   uint64_t semantic_highlight_revision() const override;
   uint64_t document_symbols_revision() const override;
   bool indexes_workspace_bulk() const override;
@@ -33,6 +37,8 @@ class LspSymbolProvider : public ISymbolProvider {
   std::vector<CompletionItem> completions_at(const CompletionParams& params) override;
   bool completion_uses_async_fetch() const override;
   void request_completion(const CompletionParams& params, const std::string& cache_key) override;
+  void cancel_completion_fetch() override;
+  void cancel_hover_fetch() override;
   std::optional<std::vector<CompletionItem>> poll_completion(
       const std::string& cache_key) override;
   bool supports_navigation() const override;
@@ -92,9 +98,13 @@ class LspSymbolProvider : public ISymbolProvider {
   void set_workspace_clangd_options(bool use_gcc_query_driver, bool background_index);
   void set_ui_inhibited(bool inhibited);
   void set_lsp_request_counter(std::atomic<uint64_t>* counter);
+  void set_async_job_ready_callback(std::function<void(LspAsyncJobKind)> callback);
+  void set_diagnostics_notify_callback(std::function<void()> callback);
 
  private:
   enum class AsyncJobKind { DocumentSymbols, SemanticTokens, Hover, Completion };
+  static LspAsyncJobKind to_public_job_kind(AsyncJobKind kind);
+  void notify_async_job_ready(AsyncJobKind kind);
 
   struct AsyncJob {
     AsyncJobKind kind;
@@ -164,7 +174,11 @@ class LspSymbolProvider : public ISymbolProvider {
   std::unordered_set<std::string> inflight_hover_;
   std::unordered_set<std::string> inflight_completion_;
   std::unordered_map<std::string, HoverInfo> hover_cache_;
-  std::unordered_map<std::string, std::vector<CompletionItem>> completion_cache_;
+  struct CachedCompletion {
+    std::vector<CompletionItem> items;
+    int request_id = 0;
+  };
+  std::unordered_map<std::string, CachedCompletion> completion_cache_;
   std::unordered_map<std::string, std::string> latest_completion_key_by_path_;
   std::unordered_map<std::string, int64_t> last_completion_document_sync_ms_;
   std::unordered_map<std::string, int64_t> pending_semantic_refresh_;
@@ -177,6 +191,9 @@ class LspSymbolProvider : public ISymbolProvider {
   std::atomic<bool> shutting_down_{false};
   int64_t last_lsp_failure_restart_ms_ = 0;
   int64_t lsp_ready_since_ms_ = 0;
+  bool async_drain_invalidates_view_ = true;
+  std::function<void(LspAsyncJobKind)> async_job_ready_callback_;
+  std::mutex async_job_ready_callback_mutex_;
 };
 
 }  // namespace tgdb

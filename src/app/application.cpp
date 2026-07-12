@@ -53,7 +53,7 @@
 #include "ui/terminal_ui_channel.hpp"
 #include "ui/debug_ui_channel.hpp"
 #include "ui/ui_event_dispatcher.hpp"
-#include "ui/ui_wake.hpp"
+#include "ui/ui_wake_policy.hpp"
 #include "ui/theme.hpp"
 #include "util/bundled_tools.hpp"
 #include "util/clang_format_config.hpp"
@@ -259,6 +259,25 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 
 	symbol_provider_ = std::make_shared<LspSymbolProvider>();
 	symbol_provider_->set_lsp_request_counter(&layout_state_.ui_lsp_request_count);
+	symbol_provider_->set_async_job_ready_callback([this](LspAsyncJobKind kind) {
+		switch (kind) {
+		case LspAsyncJobKind::Completion:
+			UI_WAKE_REASON(&layout_state_, UiWakeReason::LspCompletion);
+			break;
+		case LspAsyncJobKind::Hover:
+			UI_WAKE_REASON(&layout_state_, UiWakeReason::LspHover);
+			break;
+		case LspAsyncJobKind::DocumentSymbols:
+			UI_WAKE_REASON(&layout_state_, UiWakeReason::LspDocumentSymbols);
+			break;
+		case LspAsyncJobKind::SemanticTokens:
+			UI_WAKE_REASON(&layout_state_, UiWakeReason::LspSemanticTokens);
+			break;
+		}
+	});
+	symbol_provider_->set_diagnostics_notify_callback([this] {
+		UI_WAKE_REASON(&layout_state_, UiWakeReason::LspDiagnostics);
+	});
 	app_settings_ = AppSettings::load();
 	i18n::set_locale(app_settings_.ui_locale);
 	set_animations_enabled(app_settings_.animations_enabled);
@@ -585,7 +604,8 @@ void Application::run_input_sync_drain(int64_t now_ms) {
 		layout_state_.secondary_editor.tick_callback();
 	}
 	if (symbol_provider_ && layout_state_.activity_gate.allows_lsp_ui()) {
-		if (symbol_provider_->drain_async_results()) {
+		if (symbol_provider_->drain_async_results() &&
+		    symbol_provider_->async_drain_invalidates_view()) {
 			workspace_.buffer.view_token++;
 			secondary_workspace_.buffer.view_token++;
 		}
@@ -664,7 +684,8 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 		if (symbol_provider_ && layout_state_.activity_gate.allows_lsp_ui()) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_async_results");
 			TGDB_MON_SCOPE("ui", "tick.drain_async_results");
-			if (symbol_provider_->drain_async_results()) {
+			if (symbol_provider_->drain_async_results() &&
+			    symbol_provider_->async_drain_invalidates_view()) {
 				workspace_.buffer.view_token++;
 				secondary_workspace_.buffer.view_token++;
 			}
@@ -2735,11 +2756,15 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 		});
 	}
 	tree_sitter_service().set_ready_callback([this](const std::string& path) {
-		enqueue_ui_task([this, path]() {
-			if (!path.empty() && workspace_.buffer.path == path) {
+		const int64_t now = steady_now_ms();
+		const bool typing_burst =
+		    now - workspace_.last_buffer_edit_ms < 250 &&
+		    !path.empty() && workspace_.buffer.path == path;
+		enqueue_ui_task([this, path, typing_burst]() {
+			if (!path.empty() && workspace_.buffer.path == path && !typing_burst) {
 				workspace_.buffer.view_token++;
 			}
-			if (!path.empty() && secondary_workspace_.buffer.path == path) {
+			if (!path.empty() && secondary_workspace_.buffer.path == path && !typing_burst) {
 				secondary_workspace_.buffer.view_token++;
 			}
 			layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
@@ -2747,7 +2772,9 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 				layout_state_.outline_tick_callback();
 			}
 		});
-		UI_WAKE(&layout_state_, "tree_sitter.ready");
+		if (!typing_burst) {
+			UI_WAKE_REASON(&layout_state_, UiWakeReason::TreeSitterReady);
+		}
 	});
 
 	layout_state_.performance_sampler.set_dump_hooks(&layout_state_.activity_gate,

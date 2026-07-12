@@ -187,6 +187,14 @@ struct MainLayoutState {
     bool active = false;
   };
   PendingEditorNavigation pending_editor_navigation;
+  struct PendingSymbolInfoRequest {
+    bool active = false;
+    int line = -1;
+    int col = -1;
+    int anchor_x = 0;
+    int anchor_y = 0;
+  };
+  PendingSymbolInfoRequest pending_symbol_info;
   EditorPanelHandlers primary_editor;
   EditorPanelHandlers secondary_editor;
   std::function<bool(const ftxui::Event&)> source_mouse_handler;
@@ -307,6 +315,29 @@ inline bool is_editor_chrome_input_focus(TextInputFocus focus) {
          focus == TextInputFocus::EditorCompletion;
 }
 
+using EditorNavigateCallback = std::function<void(const SourceLocation&)>;
+
+inline void invalidate_editor_view(MainLayoutState* layout_state) {
+  if (layout_state == nullptr) {
+    return;
+  }
+  layout_state->focus_sync_needed = true;
+  layout_state->panel_render_cache.mark_dirty(UiPanelId::EditorCenter);
+  layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+}
+
+void apply_editor_navigation(MainLayoutState* layout_state, const SourceLocation& loc,
+                             EditorNavigateCallback navigate);
+
+void schedule_editor_navigation(MainLayoutState* layout_state, const SourceLocation& loc);
+
+bool tick_pending_editor_navigation(
+    MainLayoutState* layout_state,
+    const std::function<void(const SourceLocation&)>& navigate);
+
+void request_symbol_info_at(MainLayoutState* layout_state, int line, int col, int anchor_x,
+                            int anchor_y);
+
 inline bool editor_symbol_press_visible(const MainLayoutState* layout_state) {
   if (layout_state == nullptr) {
     return false;
@@ -335,41 +366,6 @@ inline void request_editor_symbol_press(MainLayoutState* layout_state, const std
       std::chrono::steady_clock::now() + std::chrono::milliseconds(500)};
   layout_state->clickable.trigger_press(press_id::editor_symbol(line, start_col, end_col),
                                         std::chrono::milliseconds(500));
-}
-
-inline void schedule_editor_navigation(MainLayoutState* layout_state, const SourceLocation& loc) {
-  if (layout_state == nullptr || !loc.valid || loc.path.empty()) {
-    return;
-  }
-  const auto now = std::chrono::steady_clock::now();
-  layout_state->pending_editor_navigation.loc = loc;
-  layout_state->pending_editor_navigation.execute_after = now + std::chrono::milliseconds(350);
-  layout_state->pending_editor_navigation.deadline = now + std::chrono::milliseconds(600);
-  layout_state->pending_editor_navigation.active = true;
-}
-
-inline bool tick_pending_editor_navigation(
-    MainLayoutState* layout_state,
-    const std::function<void(const SourceLocation&)>& navigate) {
-  if (layout_state == nullptr || !layout_state->pending_editor_navigation.active) {
-    return false;
-  }
-  const auto now = std::chrono::steady_clock::now();
-  if (now > layout_state->pending_editor_navigation.deadline) {
-    const SourceLocation loc = layout_state->pending_editor_navigation.loc;
-    layout_state->pending_editor_navigation.active = false;
-    navigate(loc);
-    clear_editor_symbol_press(layout_state);
-    return true;
-  }
-  if (now < layout_state->pending_editor_navigation.execute_after) {
-    return false;
-  }
-  const SourceLocation loc = layout_state->pending_editor_navigation.loc;
-  layout_state->pending_editor_navigation.active = false;
-  navigate(loc);
-  clear_editor_symbol_press(layout_state);
-  return true;
 }
 
 inline EditorPanelHandlers& editor_handlers_for(MainLayoutState* layout_state,

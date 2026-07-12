@@ -898,7 +898,11 @@ CompletionItem LspClient::parse_completion_item(const nlohmann::json& item) {
 
 std::vector<CompletionItem> LspClient::completions_at(const std::string& absolute_path,
                                                         const std::string& text, int line,
-                                                        int character, bool document_synced) {
+                                                        int character, bool document_synced,
+                                                        int* out_request_id) {
+  if (out_request_id != nullptr) {
+    *out_request_id = 0;
+  }
   if (!ready_.load() || absolute_path.empty() ||
       !is_lsp_trackable_path(absolute_path, text)) {
     return {};
@@ -942,6 +946,9 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
   if (!rpc_ok) {
     return {};
   }
+  if (out_request_id != nullptr) {
+    *out_request_id = latest_completion_request_id();
+  }
 
   auto parse_items = [](const nlohmann::json& completion_result) -> nlohmann::json {
     if (completion_result.is_array()) {
@@ -979,6 +986,9 @@ std::vector<CompletionItem> LspClient::completions_at(const std::string& absolut
                                    {"context", {{"triggerKind", 1}}}};
     nlohmann::json retry_result;
     if (send_completion_request(std::move(retry_params), 5000, &retry_result)) {
+      if (out_request_id != nullptr) {
+        *out_request_id = latest_completion_request_id();
+      }
       items = parse_items(retry_result);
       for (const auto& item : items) {
         if (!item.is_object()) {
@@ -2137,6 +2147,13 @@ void LspClient::on_lsp_notification(const std::string& method, const nlohmann::j
   }
 
   diagnostics_revision_.fetch_add(1, std::memory_order_release);
+  if (diagnostics_notify_callback_) {
+    diagnostics_notify_callback_();
+  }
+}
+
+void LspClient::set_diagnostics_notify_callback(std::function<void()> callback) {
+  diagnostics_notify_callback_ = std::move(callback);
 }
 
 DocumentDiagnostics LspClient::diagnostics_for_file(const std::string& absolute_path) {

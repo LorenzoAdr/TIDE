@@ -391,6 +391,7 @@ const StringTable& spanish_strings() {
       {"context_menu.search_in_folder", "Buscar en…"},
       {"context_menu.go_definition", "Ir a definición"},
       {"context_menu.go_implementation", "Ir a implementación"},
+      {"context_menu.symbol_info", "Información"},
       {"context_menu.call_hierarchy", "Jerarquía de llamadas"},
       {"context_menu.rename_symbol", "Renombrar"},
       {"context_menu.find_references", "Encontrar referencias"},

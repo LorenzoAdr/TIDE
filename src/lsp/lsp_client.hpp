@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -49,8 +50,8 @@ class LspClient {
                                             const std::string& query);
   std::vector<CompletionItem> completions_at(const std::string& absolute_path,
                                                const std::string& text, int line,
-                                               int character,
-                                               bool document_synced = false);
+                                               int character, bool document_synced = false,
+                                               int* out_request_id = nullptr);
   SourceLocation goto_definition(const std::string& absolute_path, const std::string& text,
                                  int line, int character);
   SourceLocation goto_declaration(const std::string& absolute_path, const std::string& text,
@@ -86,6 +87,9 @@ class LspClient {
   std::vector<CallHierarchyItem> outgoing_calls(const CallHierarchyItem& item);
 
   void cancel_inflight_completion();
+  int latest_completion_request_id() const {
+    return latest_completion_request_id_.load(std::memory_order_acquire);
+  }
 
   DocumentDiagnostics diagnostics_for_file(const std::string& absolute_path);
   bool document_is_open(const std::string& absolute_path) const;
@@ -93,6 +97,8 @@ class LspClient {
   bool document_has_text(const std::string& absolute_path, const std::string& text) const;
   std::vector<DocumentDiagnostics> all_diagnostics() const;
   uint64_t diagnostics_revision() const { return diagnostics_revision_.load(); }
+
+  void set_diagnostics_notify_callback(std::function<void()> callback);
 
  private:
   struct DocumentState {
@@ -179,6 +185,7 @@ class LspClient {
   std::atomic<uint64_t>* request_counter_ = nullptr;
   std::atomic<int> inflight_completion_request_id_{0};
   std::atomic<int> latest_completion_request_id_{0};
+  std::function<void()> diagnostics_notify_callback_;
 };
 
 }  // namespace tgdb

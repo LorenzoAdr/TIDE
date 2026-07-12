@@ -403,7 +403,9 @@ bool go_to_symbol(WorkspaceModel* workspace, MainLayoutState* layout_state,
     return false;
   }
   flash_symbol_at_buffer_pos(workspace, layout_state, line, col, visible_lines);
-  schedule_editor_navigation(layout_state, loc);
+  apply_editor_navigation(layout_state, loc, [&](const SourceLocation& target) {
+    navigate_to_location(workspace, layout_state, target, visible_lines);
+  });
   return true;
 }
 
@@ -423,7 +425,9 @@ bool go_to_implementation(WorkspaceModel* workspace, MainLayoutState* layout_sta
     return false;
   }
   flash_symbol_at_buffer_pos(workspace, layout_state, line, col, visible_lines);
-  schedule_editor_navigation(layout_state, loc);
+  apply_editor_navigation(layout_state, loc, [&](const SourceLocation& target) {
+    navigate_to_location(workspace, layout_state, target, visible_lines);
+  });
   return true;
 }
 
@@ -998,6 +1002,15 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
+  if (action_id == "symbol_info") {
+    request_symbol_info_at(layout_state, state->editor_line, state->editor_col, state->anchor_x,
+                           state->anchor_y);
+    if (focus != nullptr) {
+      focus->region = FocusRegion::Editor;
+    }
+    return true;
+  }
+
   if (action_id == "go_definition") {
     if (workspace != nullptr) {
       workspace->ensure_buffer();
@@ -1343,6 +1356,7 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
     if (show_format) {
       set_items(state, ContextMenuKind::EditorSymbol,
                 {{i18n::tr("context_menu.go_definition"), "go_definition"},
+                 {i18n::tr("context_menu.symbol_info"), "symbol_info"},
                  {i18n::tr("context_menu.go_implementation"), "go_implementation"},
                  {i18n::tr("context_menu.call_hierarchy"), "call_hierarchy"},
                  {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
@@ -1351,6 +1365,7 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
     } else {
       set_items(state, ContextMenuKind::EditorSymbol,
                 {{i18n::tr("context_menu.go_definition"), "go_definition"},
+                 {i18n::tr("context_menu.symbol_info"), "symbol_info"},
                  {i18n::tr("context_menu.go_implementation"), "go_implementation"},
                  {i18n::tr("context_menu.call_hierarchy"), "call_hierarchy"},
                  {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
@@ -1364,6 +1379,7 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
   if (show_format) {
     set_items(state, ContextMenuKind::EditorSymbol,
               {{i18n::tr("context_menu.go_definition"), "go_definition"},
+               {i18n::tr("context_menu.symbol_info"), "symbol_info"},
                {i18n::tr("context_menu.go_implementation"), "go_implementation"},
                {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
                {i18n::tr("context_menu.find_references"), "find_references"},
@@ -1371,6 +1387,7 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
   } else {
     set_items(state, ContextMenuKind::EditorSymbol,
               {{i18n::tr("context_menu.go_definition"), "go_definition"},
+               {i18n::tr("context_menu.symbol_info"), "symbol_info"},
                {i18n::tr("context_menu.go_implementation"), "go_implementation"},
                {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
                {i18n::tr("context_menu.find_references"), "find_references"}});

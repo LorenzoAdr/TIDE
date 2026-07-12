@@ -346,6 +346,7 @@ void LspSymbolProvider::async_worker_main() {
       if (job->kind == AsyncJobKind::DocumentSymbols) {
         client_.document_symbols(job->path);
         async_results_.push({job->kind, job->path});
+        notify_async_job_ready(job->kind);
       } else if (job->kind == AsyncJobKind::SemanticTokens) {
         std::string text;
         {
@@ -366,6 +367,7 @@ void LspSymbolProvider::async_worker_main() {
         const auto doc = client_.semantic_tokens_for_file(job->path);
         if (fetched) {
           async_results_.push({job->kind, job->path});
+          notify_async_job_ready(job->kind);
         } else if (!client_.transport_running()) {
           pending_transport_restart_.store(true, std::memory_order_release);
         }
@@ -373,6 +375,7 @@ void LspSymbolProvider::async_worker_main() {
         const CompletionParams& params = job->completion_params;
         const std::string key = normalize_lsp_path(params.path);
         std::vector<CompletionItem> items;
+        int request_id = 0;
         bool stale = false;
         {
           std::lock_guard<std::mutex> lock(mutex_);
@@ -388,23 +391,38 @@ void LspSymbolProvider::async_worker_main() {
           if (!text.empty()) {
             flush_document_sync(params.path);
           }
-          items = client_.completions_at(key, text, params.line, params.character, false);
+          items = client_.completions_at(key, text, params.line, params.character, false,
+                                       &request_id);
+          if (request_id <= 0) {
+            stale = true;
+          }
         }
         if (!stale) {
           std::lock_guard<std::mutex> lock(mutex_);
           const auto latest = latest_completion_key_by_path_.find(key);
           if (latest != latest_completion_key_by_path_.end() &&
               latest->second == job->completion_key) {
-            completion_cache_[job->completion_key] = std::move(items);
+            CachedCompletion cached;
+            cached.items = std::move(items);
+            cached.request_id = request_id;
+            completion_cache_[job->completion_key] = std::move(cached);
+            async_results_.push({job->kind, job->path});
+            notify_async_job_ready(job->kind);
+          } else {
+            async_results_.push({job->kind, job->path});
+            notify_async_job_ready(job->kind);
           }
+        } else {
+          async_results_.push({job->kind, job->path});
+          notify_async_job_ready(job->kind);
         }
-        async_results_.push({job->kind, job->path});
       } else {
         const HoverInfo info = client_.hover(job->hover_params.path, job->hover_params.text,
                                            job->hover_params.line, job->hover_params.character);
         std::lock_guard<std::mutex> lock(mutex_);
         hover_cache_[job->hover_key] = info;
         async_results_.push({job->kind, job->path});
+        notify_async_job_ready(job->kind);
       }
     }
 
@@ -451,20 +469,29 @@ bool LspSymbolProvider::symbols_lsp_pending(const std::string& path) const {
 bool LspSymbolProvider::drain_async_results() {
   process_pending_transport_restart();
   bool updated = false;
+  bool invalidates_view = false;
   int drained = 0;
   while (auto result = async_results_.try_pop()) {
     updated = true;
     ++drained;
+    if (result->kind != AsyncJobKind::Completion) {
+      invalidates_view = true;
+    }
     if (result->kind == AsyncJobKind::SemanticTokens) {
       semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
     } else if (result->kind == AsyncJobKind::DocumentSymbols) {
       document_symbols_revision_.fetch_add(1, std::memory_order_relaxed);
     }
   }
+  async_drain_invalidates_view_ = invalidates_view;
   if (drained > 0) {
     TGDB_MON("lsp", "drain_async_results count=" + std::to_string(drained));
   }
   return updated;
+}
+
+bool LspSymbolProvider::async_drain_invalidates_view() const {
+  return async_drain_invalidates_view_;
 }
 
 uint64_t LspSymbolProvider::semantic_highlight_revision() const {
@@ -706,6 +733,40 @@ void LspSymbolProvider::set_workspace_clangd_options(const bool use_gcc_query_dr
   std::lock_guard<std::mutex> lock(mutex_);
   use_gcc_query_driver_ = use_gcc_query_driver;
   use_background_index_ = background_index;
+}
+
+LspAsyncJobKind LspSymbolProvider::to_public_job_kind(const AsyncJobKind kind) {
+  switch (kind) {
+    case AsyncJobKind::DocumentSymbols:
+      return LspAsyncJobKind::DocumentSymbols;
+    case AsyncJobKind::SemanticTokens:
+      return LspAsyncJobKind::SemanticTokens;
+    case AsyncJobKind::Hover:
+      return LspAsyncJobKind::Hover;
+    case AsyncJobKind::Completion:
+      return LspAsyncJobKind::Completion;
+  }
+  return LspAsyncJobKind::Completion;
+}
+
+void LspSymbolProvider::notify_async_job_ready(const AsyncJobKind kind) {
+  std::function<void(LspAsyncJobKind)> callback;
+  {
+    std::lock_guard<std::mutex> lock(async_job_ready_callback_mutex_);
+    callback = async_job_ready_callback_;
+  }
+  if (callback) {
+    callback(to_public_job_kind(kind));
+  }
+}
+
+void LspSymbolProvider::set_async_job_ready_callback(std::function<void(LspAsyncJobKind)> callback) {
+  std::lock_guard<std::mutex> lock(async_job_ready_callback_mutex_);
+  async_job_ready_callback_ = std::move(callback);
+}
+
+void LspSymbolProvider::set_diagnostics_notify_callback(std::function<void()> callback) {
+  client_.set_diagnostics_notify_callback(std::move(callback));
 }
 
 void LspSymbolProvider::set_lsp_request_counter(std::atomic<uint64_t>* counter) {
@@ -1043,6 +1104,24 @@ void LspSymbolProvider::request_completion(const CompletionParams& params,
   async_jobs_.push_front(std::move(job));
 }
 
+void LspSymbolProvider::cancel_completion_fetch() {
+  client_.cancel_inflight_completion();
+  {
+    std::lock_guard<std::mutex> lock(inflight_mutex_);
+    inflight_completion_.clear();
+  }
+  async_jobs_.remove_if(
+      [](const AsyncJob& queued) { return queued.kind == AsyncJobKind::Completion; });
+}
+
+void LspSymbolProvider::cancel_hover_fetch() {
+  {
+    std::lock_guard<std::mutex> lock(inflight_mutex_);
+    inflight_hover_.clear();
+  }
+  async_jobs_.remove_if([](const AsyncJob& queued) { return queued.kind == AsyncJobKind::Hover; });
+}
+
 std::optional<std::vector<CompletionItem>> LspSymbolProvider::poll_completion(
     const std::string& cache_key) {
   if (cache_key.empty()) {
@@ -1053,7 +1132,12 @@ std::optional<std::vector<CompletionItem>> LspSymbolProvider::poll_completion(
   if (it == completion_cache_.end()) {
     return std::nullopt;
   }
-  std::vector<CompletionItem> items = it->second;
+  if (it->second.request_id <= 0 ||
+      it->second.request_id != client_.latest_completion_request_id()) {
+    completion_cache_.erase(it);
+    return std::nullopt;
+  }
+  std::vector<CompletionItem> items = std::move(it->second.items);
   completion_cache_.erase(it);
   return items;
 }

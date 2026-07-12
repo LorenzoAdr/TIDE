@@ -2,7 +2,7 @@
 #include "ui/hover_effects.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/status_layout_popover.hpp"
-#include "ui/ui_wake.hpp"
+#include "ui/ui_wake_policy.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -62,6 +62,57 @@ MainLayoutState::MainLayoutState()
     : packet_monitor_service(std::make_unique<packet_monitor::PacketMonitorService>()) {}
 
 MainLayoutState::~MainLayoutState() = default;
+
+void apply_editor_navigation(MainLayoutState* layout_state, const SourceLocation& loc,
+                             EditorNavigateCallback navigate) {
+  if (layout_state == nullptr || !loc.valid || loc.path.empty() || !navigate) {
+    return;
+  }
+  navigate(loc);
+  clear_editor_symbol_press(layout_state);
+  invalidate_editor_view(layout_state);
+  UI_WAKE_REASON(layout_state, UiWakeReason::EditorNavigationComplete);
+}
+
+void schedule_editor_navigation(MainLayoutState* layout_state, const SourceLocation& loc) {
+  if (layout_state == nullptr || !loc.valid || loc.path.empty()) {
+    return;
+  }
+  layout_state->pending_editor_navigation.loc = loc;
+  layout_state->pending_editor_navigation.execute_after = std::chrono::steady_clock::now();
+  layout_state->pending_editor_navigation.deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+  layout_state->pending_editor_navigation.active = true;
+  UI_WAKE_REASON(layout_state, UiWakeReason::EditorNavigationScheduled);
+}
+
+bool tick_pending_editor_navigation(MainLayoutState* layout_state,
+                                    const std::function<void(const SourceLocation&)>& navigate) {
+  if (layout_state == nullptr || !layout_state->pending_editor_navigation.active || !navigate) {
+    return false;
+  }
+  const auto now = std::chrono::steady_clock::now();
+  if (now < layout_state->pending_editor_navigation.execute_after) {
+    return false;
+  }
+  const SourceLocation loc = layout_state->pending_editor_navigation.loc;
+  layout_state->pending_editor_navigation.active = false;
+  apply_editor_navigation(layout_state, loc, navigate);
+  return true;
+}
+
+void request_symbol_info_at(MainLayoutState* layout_state, int line, int col, int anchor_x,
+                            int anchor_y) {
+  if (layout_state == nullptr || line < 0 || col < 0) {
+    return;
+  }
+  layout_state->pending_symbol_info.active = true;
+  layout_state->pending_symbol_info.line = line;
+  layout_state->pending_symbol_info.col = col;
+  layout_state->pending_symbol_info.anchor_x = anchor_x;
+  layout_state->pending_symbol_info.anchor_y = anchor_y;
+  UI_WAKE_REASON(layout_state, UiWakeReason::LspHover);
+}
 
 namespace {
 

@@ -24,8 +24,8 @@ constexpr int64_t kLspDiagnosticsDisplayDebounceMs = 1150;
 // in place so the impact can be measured by toggling this flag.
 constexpr bool kLspSemanticTokensStandby = true;
 
-// Debounce before evaluating whether a live completion LSP fetch is needed (scope jump,
-// trigger character, etc.).
-constexpr int kLiveCompletionTriggerDebounceMs = 50;
+// When true, skip reusing the last LSP completion list for the same Tree-sitter scope
+// (scope cache + resolved-key short-circuit). For experiments only; keep the code paths.
+constexpr bool kDisableLspCompletionScopeCacheForTest = false;
 
 }  // namespace tgdb

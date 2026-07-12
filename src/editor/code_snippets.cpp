@@ -82,6 +82,9 @@ const std::vector<StructureSnippet>& all_snippets() {
 }  // namespace
 
 std::vector<CompletionItem> structure_snippet_completions(const std::string& query) {
+  if (!kStructureSnippetCompletionsEnabled) {
+    return {};
+  }
   std::vector<CompletionItem> out;
   for (const StructureSnippet& snippet : all_snippets()) {
     if (!prefix_match(snippet.keyword, query)) {
@@ -99,6 +102,9 @@ std::vector<CompletionItem> structure_snippet_completions(const std::string& que
 }
 
 bool structure_snippet_prefix_active(const std::string& prefix) {
+  if (!kStructureSnippetCompletionsEnabled) {
+    return false;
+  }
   if (prefix.empty()) {
     return false;
   }
