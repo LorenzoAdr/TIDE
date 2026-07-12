@@ -3,7 +3,6 @@
 
 #include <chrono>
 #include <condition_variable>
-#include <fstream>
 #include <mutex>
 #include <utility>
 
@@ -33,20 +32,6 @@ bool visual_highlight_configs_match(const VisualHighlightConfig& a,
          a.scope_brace_highlight == b.scope_brace_highlight &&
          a.scope_strength == b.scope_strength;
 }
-
-// #region agent log
-void vh_agent_log(const char* message, const std::string& data) {
-  std::ofstream out("/home/lorenzo/workspace/tgdb/.cursor/debug-b2c081.log", std::ios::app);
-  if (!out) {
-    return;
-  }
-  const int64_t ts = std::chrono::duration_cast<std::chrono::milliseconds>(
-                         std::chrono::system_clock::now().time_since_epoch())
-                         .count();
-  out << "{\"sessionId\":\"b2c081\",\"location\":\"visual_highlight.cpp\",\"message\":\""
-      << message << "\",\"data\":" << data << ",\"timestamp\":" << ts << "}\n";
-}
-// #endregion
 
 void schedule_visual_highlight_debounce_wake(VisualHighlightPanelState* state, int64_t now_ms) {
   if (state == nullptr || !state->dirty || state->job_inflight) {
@@ -342,10 +327,6 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
       state->dirty_ms = now_ms;
       visual_highlight_service().clear_debounce_wake_scheduled();
       schedule_visual_highlight_debounce_wake(state, now_ms);
-      // #region agent log
-      vh_agent_log("debounce_slide", "{\"line\":" + std::to_string(line) + ",\"col\":" +
-                                         std::to_string(col) + "}");
-      // #endregion
     }
   }
 
@@ -359,12 +340,6 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
   }
   const int64_t debounce_elapsed = now_ms - state->dirty_ms;
   if (debounce_elapsed < kVisualHighlightDebounceMs) {
-    if (debounce_due) {
-      // #region agent log
-      vh_agent_log("stale_timer_ignored",
-                   "{\"elapsed\":" + std::to_string(debounce_elapsed) + "}");
-      // #endregion
-    }
     schedule_visual_highlight_debounce_wake(state, now_ms);
     return;
   }
@@ -404,12 +379,6 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
   const uint64_t dispatched_gen = job.generation;
   visual_highlight_service().begin_sync_result_wait(dispatched_gen);
   visual_highlight_service().enqueue(std::move(job));
-  // #region agent log
-  vh_agent_log("job_dispatched", "{\"gen\":" + std::to_string(dispatched_gen) + ",\"elapsed\":" +
-                                      std::to_string(debounce_elapsed) + ",\"line\":" +
-                                      std::to_string(line) + ",\"col\":" + std::to_string(col) +
-                                      "}");
-  // #endregion
 }
 
 bool drain_visual_highlight_results(VisualHighlightPanelState* state, const EditorBuffer& buffer,
