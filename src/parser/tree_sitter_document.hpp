@@ -122,6 +122,17 @@ class TreeSitterDocumentCache {
   const LineHighlights* viewport_preview_line(const std::string& path, const std::string& canonical,
                                               int line_0) const;
 
+  struct HighlightTreeSnapshot {
+    TSTree* tree_copy = nullptr;
+    std::vector<SymbolInfo> scope_symbols;
+    uint64_t revision = 0;
+    bool ok = false;
+  };
+
+  HighlightTreeSnapshot snapshot_for_highlight(const std::string& path,
+                                               const std::string& canonical,
+                                               uint64_t expected_revision) const;
+
  private:
   struct PrepareJob {
     std::string path;

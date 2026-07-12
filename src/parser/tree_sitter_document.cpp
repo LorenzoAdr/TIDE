@@ -525,6 +525,29 @@ void TreeSitterDocumentCache::invalidate(const std::string& path) {
   cache_.erase(path);
 }
 
+TreeSitterDocumentCache::HighlightTreeSnapshot TreeSitterDocumentCache::snapshot_for_highlight(
+    const std::string& path, const std::string& canonical, uint64_t expected_revision) const {
+  HighlightTreeSnapshot out;
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = cache_.find(path);
+  if (it == cache_.end()) {
+    return out;
+  }
+  const DocumentPtr& entry = it->second;
+  if (entry == nullptr || entry->source != canonical || !entry->parse_ready ||
+      entry->tree == nullptr || entry->revision != expected_revision) {
+    return out;
+  }
+  out.tree_copy = ts_tree_copy(entry->tree);
+  if (out.tree_copy == nullptr) {
+    return out;
+  }
+  out.scope_symbols = entry->scope_symbols;
+  out.revision = entry->revision;
+  out.ok = true;
+  return out;
+}
+
 uint64_t TreeSitterDocumentCache::revision_for(const std::string& path) const {
   std::lock_guard<std::mutex> lock(mutex_);
   const auto it = cache_.find(path);

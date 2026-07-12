@@ -99,6 +99,10 @@ class TreeSitterService {
   void invalidate(const std::string& path);
   uint64_t revision_for(const std::string& path) const;
 
+  using HighlightTreeSnapshot = TreeSitterDocumentCache::HighlightTreeSnapshot;
+  HighlightTreeSnapshot snapshot_for_highlight(const std::string& path, const std::string& canonical,
+                                               uint64_t expected_revision) const;
+
  private:
   TreeSitterService() = default;
   std::string cache_key_for(const std::string& path) const;

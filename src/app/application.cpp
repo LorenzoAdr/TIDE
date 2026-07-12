@@ -19,6 +19,7 @@
 #include "dap/gdb_launcher.hpp"
 #include "editor/editor_buffer_source.hpp"
 #include "editor/text_search.hpp"
+#include "editor/visual_highlight.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/component/event.hpp"
@@ -590,7 +591,7 @@ void Application::drain_ui_tasks() {
 }
 
 void Application::run_input_sync_drain(int64_t now_ms) {
-	if (layout_state_.ui_events != nullptr) {
+  if (layout_state_.ui_events != nullptr) {
 		layout_state_.ui_events->begin_input_correlation();
 	}
 	layout_state_.activity_gate.tick(now_ms);
@@ -2775,6 +2776,12 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 		if (!typing_burst) {
 			UI_WAKE_REASON(&layout_state_, UiWakeReason::TreeSitterReady);
 		}
+	});
+	visual_highlight_service().set_debounce_wake_callback([this]() {
+		UI_WAKE_REASON(&layout_state_, UiWakeReason::VisualHighlightSync);
+	});
+	visual_highlight_service().set_result_wake_callback([this]() {
+		UI_WAKE_REASON(&layout_state_, UiWakeReason::VisualHighlightSync);
 	});
 
 	layout_state_.performance_sampler.set_dump_hooks(&layout_state_.activity_gate,

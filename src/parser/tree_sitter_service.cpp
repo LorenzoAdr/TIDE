@@ -540,4 +540,9 @@ uint64_t TreeSitterService::revision_for(const std::string& path) const {
   return cache_.revision_for(cache_key_for(path));
 }
 
+TreeSitterService::HighlightTreeSnapshot TreeSitterService::snapshot_for_highlight(
+    const std::string& path, const std::string& canonical, uint64_t expected_revision) const {
+  return cache_.snapshot_for_highlight(cache_key_for(path), canonical, expected_revision);
+}
+
 }  // namespace tgdb

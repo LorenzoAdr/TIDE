@@ -16,6 +16,7 @@ namespace tgdb {
 
 enum class SettingsPanel {
   kGeneral,
+  kVisualHighlight,
   kWorkspace,
   kFormat,
   kIncludePaths,
@@ -48,7 +49,11 @@ struct SettingsModalState {
   bool draft_show_diagnostic_suffixes = true;
   bool draft_sticky_scroll_enabled = true;
   bool draft_indent_guides_enabled = true;
-  bool draft_scope_highlight_enabled = true;
+  bool draft_visual_highlight_enabled = true;
+  bool draft_visual_brace_pair_colors_enabled = true;
+  bool draft_visual_matching_bracket_enabled = true;
+  bool draft_visual_scope_background_enabled = true;
+  bool draft_visual_scope_brace_highlight_enabled = true;
   bool draft_rich_session_enabled = true;
   int draft_scope_highlight_strength = 58;
   bool draft_animations_enabled = true;
@@ -87,6 +92,7 @@ struct SettingsModalState {
   SettingsPanel body_scroll_panel = SettingsPanel::kGeneral;
 
   ftxui::Box tab_general_box;
+  ftxui::Box tab_visual_highlight_box;
   ftxui::Box tab_workspace_box;
   ftxui::Box tab_format_box;
   ftxui::Box body_box;

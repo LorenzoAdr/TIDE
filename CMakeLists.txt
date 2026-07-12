@@ -174,6 +174,7 @@ add_executable(tgdb
   src/editor/editor_context.cpp
   src/editor/editor_folds.cpp
   src/editor/bracket_match.cpp
+  src/editor/visual_highlight.cpp
   src/editor/code_snippets.cpp
   src/editor/helix/helix_state.cpp
   src/editor/helix/helix_key.cpp

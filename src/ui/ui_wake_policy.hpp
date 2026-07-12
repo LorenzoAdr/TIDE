@@ -19,6 +19,7 @@
 //   - LspSemanticTokens     — resaltado LSP (standby; tree-sitter cubre el color)
 //   - FindMatchesUpdated    — búsqueda incremental async en el editor
 //   - FilePickerPreview     — vista previa async del selector de archivos
+//   - VisualHighlightSync   — realce visual del editor (debounce 200ms, hilo vh-compute)
 //
 // NO despiertan por diseño (se drenan cuando otro wake corre):
 //   - GitIndexerUpdated     — panel git; callback vacío
@@ -30,7 +31,6 @@
 #include <string_view>
 
 #include "ui/main_layout.hpp"
-#include "ui/ui_event_types.hpp"
 #include "ui/ui_event_types.hpp"
 #include "ui/ui_wake.hpp"
 
@@ -51,6 +51,7 @@ enum class UiWakeReason {
   TerminalOutput,
   FindMatchesUpdated,
   FilePickerPreview,
+  VisualHighlightSync,
 };
 
 struct UiWakeSpec {
@@ -88,6 +89,8 @@ inline UiWakeSpec ui_wake_spec(UiWakeReason reason) {
       return {"editor.find_matches", UiEventKind::InputCorrelated};
     case UiWakeReason::FilePickerPreview:
       return {"file_picker.preview", UiEventKind::InputCorrelated};
+    case UiWakeReason::VisualHighlightSync:
+      return {"editor.visual_highlight", UiEventKind::InputCorrelated};
   }
   return {"wake", UiEventKind::InputCorrelated};
 }

@@ -54,6 +54,20 @@ std::string relative_to_workspace(const std::string& workspace_root,
   return rel.generic_string();
 }
 
+bool diagnostics_items_equal(const std::vector<Diagnostic>& a, const std::vector<Diagnostic>& b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (a[i].line != b[i].line || a[i].start_col != b[i].start_col ||
+        a[i].end_col != b[i].end_col || a[i].severity != b[i].severity ||
+        a[i].message != b[i].message || a[i].source != b[i].source) {
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 LspClient::LspClient() = default;
@@ -2127,15 +2141,24 @@ void LspClient::on_lsp_notification(const std::string& method, const nlohmann::j
   if (doc.path.empty() || !is_lsp_trackable_path(doc.path)) {
     return;
   }
+  const std::string path = doc.path;
   std::lock_guard<std::mutex> lock(mutex_);
-  const bool had_items = !doc.items.empty();
-  if (!had_items) {
-    diagnostics_.erase(doc.path);
+  const auto existing = diagnostics_.find(path);
+  const bool had_items = existing != diagnostics_.end() && !existing->second.items.empty();
+  const bool has_items = !doc.items.empty();
+  if (existing != diagnostics_.end() && diagnostics_items_equal(existing->second.items, doc.items)) {
+    return;
+  }
+  if (!had_items && !has_items) {
+    return;
+  }
+  if (!has_items) {
+    diagnostics_.erase(path);
   } else {
-    diagnostics_[doc.path] = std::move(doc);
+    diagnostics_[path] = std::move(doc);
   }
 
-  const auto it = documents_.find(doc.path);
+  const auto it = documents_.find(path);
   if (it != documents_.end()) {
     int diag_version = -1;
     if (params.contains("version") && params["version"].is_number_integer()) {

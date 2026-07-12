@@ -72,6 +72,42 @@ AppSettings AppSettings::load() {
     if (doc.contains("rich_session_enabled") && doc["rich_session_enabled"].is_boolean()) {
       settings.rich_session_enabled = doc["rich_session_enabled"].get<bool>();
     }
+    const bool legacy_visual =
+        settings.scope_highlight_enabled && settings.rich_session_enabled;
+    if (doc.contains("visual_highlight_enabled") &&
+        doc["visual_highlight_enabled"].is_boolean()) {
+      settings.visual_highlight_enabled = doc["visual_highlight_enabled"].get<bool>();
+    } else {
+      settings.visual_highlight_enabled = legacy_visual;
+    }
+    if (doc.contains("visual_brace_pair_colors_enabled") &&
+        doc["visual_brace_pair_colors_enabled"].is_boolean()) {
+      settings.visual_brace_pair_colors_enabled =
+          doc["visual_brace_pair_colors_enabled"].get<bool>();
+    } else {
+      settings.visual_brace_pair_colors_enabled = legacy_visual;
+    }
+    if (doc.contains("visual_matching_bracket_enabled") &&
+        doc["visual_matching_bracket_enabled"].is_boolean()) {
+      settings.visual_matching_bracket_enabled =
+          doc["visual_matching_bracket_enabled"].get<bool>();
+    } else {
+      settings.visual_matching_bracket_enabled = legacy_visual;
+    }
+    if (doc.contains("visual_scope_background_enabled") &&
+        doc["visual_scope_background_enabled"].is_boolean()) {
+      settings.visual_scope_background_enabled =
+          doc["visual_scope_background_enabled"].get<bool>();
+    } else {
+      settings.visual_scope_background_enabled = settings.scope_highlight_enabled;
+    }
+    if (doc.contains("visual_scope_brace_highlight_enabled") &&
+        doc["visual_scope_brace_highlight_enabled"].is_boolean()) {
+      settings.visual_scope_brace_highlight_enabled =
+          doc["visual_scope_brace_highlight_enabled"].get<bool>();
+    } else {
+      settings.visual_scope_brace_highlight_enabled = settings.scope_highlight_enabled;
+    }
     if (doc.contains("scope_highlight_strength") && doc["scope_highlight_strength"].is_number_integer()) {
       settings.scope_highlight_strength =
           std::max(10, std::min(85, doc["scope_highlight_strength"].get<int>()));
@@ -154,6 +190,11 @@ bool AppSettings::save() const {
   doc["show_diagnostic_suffixes"] = show_diagnostic_suffixes;
   doc["sticky_scroll_enabled"] = sticky_scroll_enabled;
   doc["indent_guides_enabled"] = indent_guides_enabled;
+  doc["visual_highlight_enabled"] = visual_highlight_enabled;
+  doc["visual_brace_pair_colors_enabled"] = visual_brace_pair_colors_enabled;
+  doc["visual_matching_bracket_enabled"] = visual_matching_bracket_enabled;
+  doc["visual_scope_background_enabled"] = visual_scope_background_enabled;
+  doc["visual_scope_brace_highlight_enabled"] = visual_scope_brace_highlight_enabled;
   doc["scope_highlight_enabled"] = scope_highlight_enabled;
   doc["rich_session_enabled"] = rich_session_enabled;
   doc["scope_highlight_strength"] = scope_highlight_strength;

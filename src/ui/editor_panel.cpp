@@ -1,4 +1,5 @@
 #include "ui/editor_panel.hpp"
+#include "editor/visual_highlight.hpp"
 #include "ui/ui_wake_policy.hpp"
 
 #include <algorithm>
@@ -204,20 +205,10 @@ struct EditorPanelState {
   int word_select_anchor_col = -1;
   std::vector<BreadcrumbHit> breadcrumb_hits;
   std::vector<BreadcrumbItem> breadcrumbs;
+  VisualHighlightPanelState visual_highlight;
   std::vector<SymbolInfo> cached_symbols;
   std::string cached_symbols_path;
   EditorHoverState hover;
-  uint64_t bracket_cache_token = 0;
-  int bracket_cache_line = -1;
-  int bracket_cache_col = -1;
-  BracketPairHighlight bracket_cache;
-  uint64_t scope_bracket_cache_token = 0;
-  int scope_bracket_cache_line = -1;
-  int scope_bracket_cache_col = -1;
-  BracketPairHighlight scope_bracket_cache;
-  std::vector<ColoredBraceMarker> colored_brace_cache;
-  std::string colored_brace_cache_path;
-  uint64_t colored_brace_cache_token = 0;
   uint64_t last_diag_revision = 0;
   std::string last_diag_path;
   int problem_errors = 0;
@@ -564,6 +555,7 @@ void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer) {
     const std::optional<EditorTextEditHint> edit_hint = editor_buffer_take_edit_hint(&buffer);
     tree_sitter_service().prepare_document(buffer.path, editor_buffer_joined_source(buffer),
                                            edit_hint);
+    mark_visual_highlight_content_dirty(&panel->visual_highlight, panel->content_edit_ms);
   }
 }
 
@@ -971,89 +963,6 @@ void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer
 
   apply_git_diff_to_panel(panel, diff, buffer.lines.to_vector());
   panel->git_cache_view_token = buffer.view_token;
-}
-
-const BracketPairHighlight& cached_bracket_highlight(EditorPanelState* panel,
-                                                   const EditorBuffer& buffer,
-                                                   bool editor_focused) {
-  static const BracketPairHighlight kEmpty{};
-  if (panel == nullptr || !editor_focused) {
-    return kEmpty;
-  }
-  const int line = buffer.primary_line();
-  const int col = buffer.primary_col();
-  if (!editor_content_settled(*panel) && panel->bracket_cache.valid) {
-    return panel->bracket_cache;
-  }
-  // Keyed on the tree-sitter document revision rather than buffer.view_token: view_token is
-  // also bumped by unrelated async LSP events (diagnostics, semantic tokens), which would
-  // otherwise force a full re-scan on every one of those events even though the cursor and the
-  // underlying parsed text haven't actually changed.
-  const uint64_t doc_revision = tree_sitter_service().revision_for(buffer.path);
-  if (panel->bracket_cache_token == doc_revision && panel->bracket_cache_line == line &&
-      panel->bracket_cache_col == col) {
-    return panel->bracket_cache;
-  }
-  panel->bracket_cache_token = doc_revision;
-  panel->bracket_cache_line = line;
-  panel->bracket_cache_col = col;
-  panel->bracket_cache = find_bracket_pair_highlight(buffer, line, col);
-  return panel->bracket_cache;
-}
-
-const BracketPairHighlight& cached_scope_bracket_highlight(EditorPanelState* panel,
-                                                           const EditorBuffer& buffer,
-                                                           bool editor_focused) {
-  static const BracketPairHighlight kEmpty{};
-  if (panel == nullptr || !editor_focused) {
-    return kEmpty;
-  }
-  const int line = buffer.primary_line();
-  const int col = buffer.primary_col();
-  if (!editor_content_settled(*panel) && panel->scope_bracket_cache.valid) {
-    return panel->scope_bracket_cache;
-  }
-  const uint64_t doc_revision = tree_sitter_service().revision_for(buffer.path);
-  if (panel->scope_bracket_cache_token == doc_revision &&
-      panel->scope_bracket_cache_line == line && panel->scope_bracket_cache_col == col) {
-    return panel->scope_bracket_cache;
-  }
-  panel->scope_bracket_cache_token = doc_revision;
-  panel->scope_bracket_cache_line = line;
-  panel->scope_bracket_cache_col = col;
-  panel->scope_bracket_cache = find_scope_bracket_pair(buffer, line, col);
-  return panel->scope_bracket_cache;
-}
-
-const std::vector<ColoredBraceMarker>& cached_colored_braces(EditorPanelState* panel,
-                                                             const EditorBuffer& buffer,
-                                                             bool enabled) {
-  static const std::vector<ColoredBraceMarker> kEmpty{};
-  if (panel == nullptr || !enabled || buffer.path.empty() ||
-      !is_indexed_source_path(buffer.path)) {
-    return kEmpty;
-  }
-  if (!editor_content_settled(*panel)) {
-    return panel->colored_brace_cache;
-  }
-  // See cached_bracket_highlight above: gate on the tree-sitter document revision, not
-  // buffer.view_token, to avoid re-running this full-document scan for unrelated async events.
-  const uint64_t doc_revision = tree_sitter_service().revision_for(buffer.path);
-  const bool path_changed = panel->colored_brace_cache_path != buffer.path;
-  const bool token_changed = panel->colored_brace_cache_token != doc_revision;
-  if (!path_changed && !token_changed) {
-    return panel->colored_brace_cache;
-  }
-  const std::vector<ColoredBraceMarker> fresh = find_colored_curly_braces(buffer);
-  // Always mark this revision as processed even if we keep the old (non-empty) cache below,
-  // otherwise a transient empty result would leave the token stale and force a re-scan of the
-  // whole document on every subsequent frame forever (see the analogous fold-region fix).
-  panel->colored_brace_cache_path = buffer.path;
-  panel->colored_brace_cache_token = doc_revision;
-  if (!fresh.empty() || path_changed || panel->colored_brace_cache.empty()) {
-    panel->colored_brace_cache = fresh;
-  }
-  return panel->colored_brace_cache;
 }
 
 SelectionOccurrenceKey selection_occurrence_key_from(const EditorBuffer& buffer) {
@@ -5315,9 +5224,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->fold_visible_lines_cache_view_token = 0;
       panel_state->fold_visible_lines_cache_fold_token = 0;
       panel_state->fold_visible_lines_cache_total = -1;
-      panel_state->colored_brace_cache.clear();
-      panel_state->colored_brace_cache_path.clear();
-      panel_state->colored_brace_cache_token = 0;
+      panel_state->visual_highlight = VisualHighlightPanelState{};
       panel_state->viewport_line_render_cache.clear();
       panel_state->line_syntax_span_cache.clear();
       panel_state->line_syntax_span_cache_scroll_col = -1;
@@ -5393,9 +5300,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const bool caret_live_highlight = typing_burst || ts_highlights_pending;
     const bool typing_edit_mode = typing_burst && indexed_cpp;
     const bool defer_sticky_scroll = typing_edit_mode;
-    // "Rich session" bundles the purely cosmetic decorations (diagnostic suffixes/underlines,
-    // symbol-press flash, search/selection highlighting, bracket matching, rainbow brackets,
-    // sticky scroll) behind a single switch so it can be turned off for extra performance.
+    // "Rich session" bundles non-highlight editor extras (diagnostic suffixes/underlines,
+    // symbol-press flash, search/selection highlighting, code folding, sticky scroll) behind
+    // a single switch so it can be turned off for extra performance.
     const bool rich_session_enabled =
         layout_state == nullptr || layout_state->app_settings == nullptr ||
         layout_state->app_settings->rich_session_enabled;
@@ -5460,23 +5367,34 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     const int visible = visible_line_count(panel_state->code_box);
 
-    const bool scope_highlight_enabled =
-        layout_state != nullptr && layout_state->app_settings != nullptr &&
-        layout_state->app_settings->scope_highlight_enabled;
-    // Scope highlight and code folding both rely on the same expensive full-document
-    // tree-sitter scan (fold_regions_at), so they're bundled into "rich session" too.
-    const bool scope_visual_effects =
-        rich_session_enabled && editor_scope_effects_allowed(layout_state, scope_highlight_enabled);
+    const VisualHighlightConfig vh_config = visual_highlight_config_from_settings(
+        layout_state != nullptr ? layout_state->app_settings : nullptr);
+    const VisualHighlightSnapshot& vh_snap = panel_state->visual_highlight.snapshot;
+    const VisualHighlightPanelState& vh_state = panel_state->visual_highlight;
+    const bool vh_path_match = !buffer.path.empty() && vh_snap.path == buffer.path;
+    const bool vh_braces_active =
+        vh_config.enabled && vh_config.brace_pair_colors && vh_path_match &&
+        !vh_snap.colored_braces.empty();
+    const bool vh_cursor_exact =
+        vh_config.enabled && vh_snap.ready && vh_path_match &&
+        vh_snap.cursor_line == buffer.primary_line() &&
+        vh_snap.cursor_col == buffer.primary_col();
+    const bool vh_has_stale_cursor_highlights =
+        vh_path_match &&
+        (vh_snap.matching_bracket.valid || vh_snap.scope_braces.valid ||
+         vh_snap.immediate_scope.valid);
+    const bool vh_cursor_active =
+        vh_cursor_exact ||
+        (vh_config.enabled && vh_path_match &&
+         (vh_state.dirty || vh_state.job_inflight) && vh_has_stale_cursor_highlights);
     const int scope_highlight_strength =
-        layout_state != nullptr && layout_state->app_settings != nullptr
-            ? layout_state->app_settings->scope_highlight_strength
-            : 58;
+        vh_cursor_active && vh_config.scope_background ? vh_config.scope_strength : 58;
 
     const bool path_indexed_cpp =
         !buffer.path.empty() && is_indexed_source_path(buffer.path);
     {
       UiSyncPhaseScope folds_scope(ui_perf, "render.editor.folds");
-      if (scope_visual_effects && path_indexed_cpp) {
+      if (rich_session_enabled && path_indexed_cpp) {
         const bool path_changed = panel_state->fold_regions_cache_path != buffer.path;
         const bool settled = editor_content_settled(*panel_state);
         // Gate on the tree-sitter document revision, not buffer.view_token: view_token is a
@@ -5524,7 +5442,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       }
     }
     const bool fold_gutter_enabled =
-        scope_visual_effects && path_indexed_cpp && !buffer.fold_regions.empty();
+        rich_session_enabled && path_indexed_cpp && !buffer.fold_regions.empty();
     panel_state->gutter_fold_width = fold_gutter_enabled ? 1 : 0;
 
     const std::vector<int>& fold_visible_lines =
@@ -5682,14 +5600,14 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
               ? selection_occurrence_matches_for(panel_state.get(), buffer, find_state->open)
               : nullptr;
 
-      bracket_ptr = !rich_session_enabled || typing_burst
-                       ? &kNoBracket
-                       : &cached_bracket_highlight(panel_state.get(), buffer, editor_focused);
-      const BracketPairHighlight* scope_bracket_result =
-          !rich_session_enabled || typing_burst || !scope_visual_effects
-              ? &kNoScopeBracket
-              : &cached_scope_bracket_highlight(panel_state.get(), buffer, editor_focused);
-      scope_bracket_ptr = scope_bracket_result->valid ? scope_bracket_result : nullptr;
+      if (vh_cursor_active && vh_config.matching_bracket && editor_focused &&
+          panel_state->visual_highlight.snapshot.matching_bracket.valid) {
+        bracket_ptr = &panel_state->visual_highlight.snapshot.matching_bracket;
+      }
+      if (vh_cursor_active && vh_config.scope_brace_highlight && editor_focused &&
+          panel_state->visual_highlight.snapshot.scope_braces.valid) {
+        scope_bracket_ptr = &panel_state->visual_highlight.snapshot.scope_braces;
+      }
 
       const std::vector<SymbolInfo>& file_symbols =
           cached_file_symbols(panel_state.get(), buffer.path, symbols.get());
@@ -5830,17 +5748,14 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       tree_sitter_service().ensure_viewport_preview(buffer.path, buffer_source, viewport_lines);
     }
     const ScopeLineRange immediate_scope =
-        typing_burst ? ScopeLineRange{}
-        : scope_visual_effects && !buffer.path.empty() && is_indexed_source_path(buffer.path)
-            ? tree_sitter_service().innermost_scope_range_at(buffer.path, buffer.lines.to_vector(),
-                                                             buffer.primary_line(),
-                                                             buffer.primary_col())
+        vh_cursor_active && vh_config.scope_background
+            ? panel_state->visual_highlight.snapshot.immediate_scope
             : ScopeLineRange{};
     static const std::vector<ColoredBraceMarker> kNoColoredBraces{};
     const std::vector<ColoredBraceMarker>& colored_braces =
-        !rich_session_enabled || typing_burst
-            ? kNoColoredBraces
-            : cached_colored_braces(panel_state.get(), buffer, scope_visual_effects);
+        vh_braces_active ? panel_state->visual_highlight.snapshot.colored_braces : kNoColoredBraces;
+    const uint64_t colored_brace_token =
+        vh_braces_active ? panel_state->visual_highlight.snapshot.generation : 0;
     const std::vector<ColoredBraceMarker>* colored_braces_ptr =
         colored_braces.empty() ? nullptr : &colored_braces;
     const bool helix_caret_insert =
@@ -5870,7 +5785,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       const bool is_primary = (i == buffer.primary_line());
       const bool caret_line = show_caret && editor_focused && is_primary;
       const bool in_immediate_scope_gutter =
-          scope_visual_effects && immediate_scope.valid && immediate_scope.contains(i);
+          vh_cursor_active && vh_config.scope_background && immediate_scope.valid &&
+          immediate_scope.contains(i);
 
       const char fold_marker =
           fold_gutter_enabled
@@ -5955,7 +5871,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           panel_state->mouse_selecting, helix_caret_insert, buffer.scroll_col, code_width,
           helix_relative, gutter_render_width, fold_gutter_enabled, gutter_markers,
           indent_guides_enabled, scope_highlight_strength, typing_burst, bracket,
-          scope_bracket_ptr, panel_state->colored_brace_cache_token,
+          scope_bracket_ptr, colored_brace_token,
           git_line_changed(panel_state.get(), i), ts_highlight_revision);
 
       auto cache_it = panel_state->viewport_line_render_cache.find(i);
@@ -6323,6 +6239,30 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                             panel_state.get());
       }
       workspace->ensure_buffer();
+      const bool vh_focused = focus != nullptr && focus->region == panel_focus;
+      if (vh_focused) {
+        const int64_t vh_now = steady_now_ms();
+        const VisualHighlightConfig vh_config = visual_highlight_config_from_settings(
+            layout_state != nullptr ? layout_state->app_settings : nullptr);
+        const bool vh_indexed = !workspace->buffer.path.empty() &&
+                                is_indexed_source_path(workspace->buffer.path);
+        UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".visual_highlight");
+        tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
+                                        vh_config, vh_focused, vh_indexed, vh_now);
+        if (panel_state->visual_highlight.job_inflight) {
+          visual_highlight_service().wait_for_pending_result(
+              panel_state->visual_highlight.pending_generation);
+        }
+        if (drain_visual_highlight_results(&panel_state->visual_highlight, workspace->buffer,
+                                           layout_state, vh_focused)) {
+          panel_state->viewport_line_render_cache.clear();
+        }
+        if (panel_state->visual_highlight.dirty &&
+            !panel_state->visual_highlight.job_inflight) {
+          tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
+                                          vh_config, vh_focused, vh_indexed, vh_now);
+        }
+      }
 
       const int64_t now = steady_now_ms();
       if (now - panel_state->last_heavy_editor_tick_ms < kHeavyEditorTickIntervalMs) {

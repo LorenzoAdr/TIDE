@@ -13,11 +13,15 @@ struct AppSettings {
   bool show_diagnostic_suffixes = true;
   bool sticky_scroll_enabled = true;
   bool indent_guides_enabled = true;
+  bool visual_highlight_enabled = true;
+  bool visual_brace_pair_colors_enabled = true;
+  bool visual_matching_bracket_enabled = true;
+  bool visual_scope_background_enabled = true;
+  bool visual_scope_brace_highlight_enabled = true;
+  // Legacy keys kept for JSON migration; prefer visual_* toggles in settings UI.
   bool scope_highlight_enabled = true;
-  // Master switch for the purely cosmetic editor extras (diagnostic suffixes/underlines,
-  // symbol-press flash, search/selection highlighting, bracket matching, rainbow brackets,
-  // sticky scroll). Turning it off skips all of that per-line rendering work for extra
-  // performance on large files or slow terminals.
+  // Master switch for non-highlight session extras (diagnostic suffixes/underlines,
+  // symbol-press flash, search/selection highlighting, sticky scroll).
   bool rich_session_enabled = true;
   int scope_highlight_strength = 58;
   bool animations_enabled = true;

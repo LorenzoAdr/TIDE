@@ -136,19 +136,17 @@ constexpr int kLiveLspCompletion = 3;
 constexpr int kDiagnosticSuffixes = 4;
 constexpr int kStickyScroll = 5;
 constexpr int kIndentGuides = 6;
-constexpr int kScopeHighlight = 7;
-constexpr int kScopeHighlightStrength = 8;
-constexpr int kAnimations = 9;
-constexpr int kOverviewRuler = 10;
-constexpr int kSecondaryPanel = 11;
-constexpr int kShowAllFiles = 12;
-constexpr int kMonitor = 13;
-constexpr int kPerfDump = 14;
-constexpr int kIcons = 15;
-constexpr int kHelixMode = 16;
-constexpr int kWorkspaceAutoDetect = 17;
-constexpr int kRichSession = 18;
-constexpr int kBaseOptions = 19;
+constexpr int kAnimations = 7;
+constexpr int kOverviewRuler = 8;
+constexpr int kSecondaryPanel = 9;
+constexpr int kShowAllFiles = 10;
+constexpr int kMonitor = 11;
+constexpr int kPerfDump = 12;
+constexpr int kIcons = 13;
+constexpr int kHelixMode = 14;
+constexpr int kWorkspaceAutoDetect = 15;
+constexpr int kRichSession = 16;
+constexpr int kBaseOptions = 17;
 
 #ifdef TGDB_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -221,39 +219,52 @@ constexpr int kCompileDockerContainer = 2;
 constexpr int kCompilePathMappings = 3;
 constexpr int kCompileCommandsRowCount = 4;
 
+constexpr int kVhMaster = 0;
+constexpr int kVhBracePairColors = 1;
+constexpr int kVhMatchingBracket = 2;
+constexpr int kVhScopeBackground = 3;
+constexpr int kVhScopeBraceHighlight = 4;
+constexpr int kVhScopeStrength = 5;
+constexpr int kVisualHighlightOptionCount = 6;
+
 bool is_top_level_panel(SettingsPanel panel) {
-  return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kWorkspace ||
-         panel == SettingsPanel::kFormat;
+  return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kVisualHighlight ||
+         panel == SettingsPanel::kWorkspace || panel == SettingsPanel::kFormat;
 }
 
 int top_level_panel_count(const SettingsModalState* state) {
   if (state != nullptr && state->has_workspace) {
-    return 3;
+    return 4;
   }
-  return 1;
+  return 2;
 }
 
 SettingsPanel top_level_panel_at(const SettingsModalState* state, int index) {
   if (index <= 0) {
     return SettingsPanel::kGeneral;
   }
+  if (index == 1) {
+    return SettingsPanel::kVisualHighlight;
+  }
   if (state != nullptr && state->has_workspace) {
-    if (index == 1) {
+    if (index == 2) {
       return SettingsPanel::kWorkspace;
     }
     return SettingsPanel::kFormat;
   }
-  return SettingsPanel::kGeneral;
+  return SettingsPanel::kVisualHighlight;
 }
 
 int top_level_panel_index(const SettingsModalState* state, SettingsPanel panel) {
   switch (panel) {
     case SettingsPanel::kGeneral:
       return 0;
+    case SettingsPanel::kVisualHighlight:
+      return 1;
     case SettingsPanel::kWorkspace:
-      return state != nullptr && state->has_workspace ? 1 : 0;
+      return state != nullptr && state->has_workspace ? 2 : 1;
     case SettingsPanel::kFormat:
-      return state != nullptr && state->has_workspace ? 2 : 0;
+      return state != nullptr && state->has_workspace ? 3 : 2;
     default:
       return 0;
   }
@@ -364,10 +375,6 @@ std::vector<SettingsOption> global_settings_options() {
        i18n::tr("settings.general.sticky_scroll.description")},
       {i18n::tr("settings.general.indent_guides.label"),
        i18n::tr("settings.general.indent_guides.description")},
-      {i18n::tr("settings.general.scope_highlight.label"),
-       i18n::tr("settings.general.scope_highlight.description")},
-      {i18n::tr("settings.general.scope_highlight_strength.label"),
-       i18n::tr("settings.general.scope_highlight_strength.description")},
       {i18n::tr("settings.general.animations.label"),
        i18n::tr("settings.general.animations.description")},
       {i18n::tr("settings.general.overview_ruler.label"),
@@ -398,6 +405,85 @@ std::vector<SettingsOption> global_settings_options() {
 #endif
   };
   return options;
+}
+
+void cycle_scope_highlight_strength(SettingsModalState* state);
+
+std::vector<SettingsOption> visual_highlight_settings_options() {
+  return {
+      {i18n::tr("settings.visual_highlight.master.label"),
+       i18n::tr("settings.visual_highlight.master.description")},
+      {i18n::tr("settings.visual_highlight.brace_pair_colors.label"),
+       i18n::tr("settings.visual_highlight.brace_pair_colors.description")},
+      {i18n::tr("settings.visual_highlight.matching_bracket.label"),
+       i18n::tr("settings.visual_highlight.matching_bracket.description")},
+      {i18n::tr("settings.visual_highlight.scope_background.label"),
+       i18n::tr("settings.visual_highlight.scope_background.description")},
+      {i18n::tr("settings.visual_highlight.scope_brace_highlight.label"),
+       i18n::tr("settings.visual_highlight.scope_brace_highlight.description")},
+      {i18n::tr("settings.visual_highlight.scope_strength.label"),
+       i18n::tr("settings.visual_highlight.scope_strength.description")},
+  };
+}
+
+bool visual_highlight_option_checked(const SettingsModalState* state, int index) {
+  if (state == nullptr) {
+    return false;
+  }
+  switch (index) {
+    case kVhMaster:
+      return state->draft_visual_highlight_enabled;
+    case kVhBracePairColors:
+      return state->draft_visual_highlight_enabled &&
+             state->draft_visual_brace_pair_colors_enabled;
+    case kVhMatchingBracket:
+      return state->draft_visual_highlight_enabled &&
+             state->draft_visual_matching_bracket_enabled;
+    case kVhScopeBackground:
+      return state->draft_visual_highlight_enabled &&
+             state->draft_visual_scope_background_enabled;
+    case kVhScopeBraceHighlight:
+      return state->draft_visual_highlight_enabled &&
+             state->draft_visual_scope_brace_highlight_enabled;
+    case kVhScopeStrength:
+      return state->draft_visual_highlight_enabled && state->draft_animations_enabled &&
+             (state->draft_visual_scope_background_enabled ||
+              state->draft_visual_scope_brace_highlight_enabled);
+    default:
+      return false;
+  }
+}
+
+void toggle_visual_highlight_option(SettingsModalState* state, int index) {
+  if (state == nullptr) {
+    return;
+  }
+  switch (index) {
+    case kVhMaster:
+      state->draft_visual_highlight_enabled = !state->draft_visual_highlight_enabled;
+      break;
+    case kVhBracePairColors:
+      state->draft_visual_brace_pair_colors_enabled =
+          !state->draft_visual_brace_pair_colors_enabled;
+      break;
+    case kVhMatchingBracket:
+      state->draft_visual_matching_bracket_enabled =
+          !state->draft_visual_matching_bracket_enabled;
+      break;
+    case kVhScopeBackground:
+      state->draft_visual_scope_background_enabled =
+          !state->draft_visual_scope_background_enabled;
+      break;
+    case kVhScopeBraceHighlight:
+      state->draft_visual_scope_brace_highlight_enabled =
+          !state->draft_visual_scope_brace_highlight_enabled;
+      break;
+    case kVhScopeStrength:
+      cycle_scope_highlight_strength(state);
+      break;
+    default:
+      break;
+  }
 }
 
 std::string checkbox_label(bool checked, const std::string& text) {
@@ -503,10 +589,6 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_sticky_scroll_enabled;
     case kIndentGuides:
       return state->draft_indent_guides_enabled;
-    case kScopeHighlight:
-      return state->draft_scope_highlight_enabled;
-    case kScopeHighlightStrength:
-      return state->draft_scope_highlight_enabled && state->draft_animations_enabled;
     case kAnimations:
       return state->draft_animations_enabled;
     case kOverviewRuler:
@@ -569,12 +651,6 @@ void toggle_option(SettingsModalState* state, int index) {
       break;
     case kIndentGuides:
       state->draft_indent_guides_enabled = !state->draft_indent_guides_enabled;
-      break;
-    case kScopeHighlight:
-      state->draft_scope_highlight_enabled = !state->draft_scope_highlight_enabled;
-      break;
-    case kScopeHighlightStrength:
-      cycle_scope_highlight_strength(state);
       break;
     case kAnimations:
       state->draft_animations_enabled = !state->draft_animations_enabled;
@@ -709,6 +785,14 @@ void clamp_general_selection(SettingsModalState* state) {
   state->selected = std::max(0, std::min(state->selected, kGlobalOptionCount - 1));
 }
 
+void clamp_visual_highlight_selection(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->selected =
+      std::max(0, std::min(state->selected, kVisualHighlightOptionCount - 1));
+}
+
 void clamp_workspace_selection(SettingsModalState* state) {
   if (state == nullptr) {
     return;
@@ -730,6 +814,9 @@ void clamp_top_level_selection(SettingsModalState* state) {
   switch (state->panel) {
     case SettingsPanel::kGeneral:
       clamp_general_selection(state);
+      break;
+    case SettingsPanel::kVisualHighlight:
+      clamp_visual_highlight_selection(state);
       break;
     case SettingsPanel::kWorkspace:
       clamp_workspace_selection(state);
@@ -1268,6 +1355,15 @@ void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel) {
   state->body_scroll = 0;
 }
 
+void activate_visual_highlight_option(SettingsModalState* state, int index) {
+  if (state == nullptr) {
+    return;
+  }
+  state->selected = index;
+  clamp_visual_highlight_selection(state);
+  toggle_visual_highlight_option(state, index);
+}
+
 void activate_general_option(SettingsModalState* state, int index) {
   if (state == nullptr) {
     return;
@@ -1340,6 +1436,9 @@ void activate_settings_click(SettingsModalState* state, int index, int mouse_x) 
     case SettingsPanel::kGeneral:
       activate_general_option(state, index);
       break;
+    case SettingsPanel::kVisualHighlight:
+      activate_visual_highlight_option(state, index);
+      break;
     case SettingsPanel::kWorkspace:
       activate_workspace_option(state, index);
       break;
@@ -1402,16 +1501,20 @@ bool handle_settings_mouse(SettingsModalState* state, Event event) {
     return false;
   }
 
-  if (state->has_workspace && is_top_level_panel(state->panel)) {
+  if (is_top_level_panel(state->panel)) {
     if (state->tab_general_box.Contain(m.x, m.y)) {
       switch_top_level_tab(state, SettingsPanel::kGeneral);
       return true;
     }
-    if (state->tab_workspace_box.Contain(m.x, m.y)) {
+    if (state->tab_visual_highlight_box.Contain(m.x, m.y)) {
+      switch_top_level_tab(state, SettingsPanel::kVisualHighlight);
+      return true;
+    }
+    if (state->has_workspace && state->tab_workspace_box.Contain(m.x, m.y)) {
       switch_top_level_tab(state, SettingsPanel::kWorkspace);
       return true;
     }
-    if (state->tab_format_box.Contain(m.x, m.y)) {
+    if (state->has_workspace && state->tab_format_box.Contain(m.x, m.y)) {
       switch_top_level_tab(state, SettingsPanel::kFormat);
       return true;
     }
@@ -1468,6 +1571,31 @@ bool handle_general_settings_keys(SettingsModalState* state, Event event) {
   }
   if (event == Event::Return || event == Event::Character(' ')) {
     toggle_option(state, state->selected);
+    return true;
+  }
+  return true;
+}
+
+bool handle_visual_highlight_settings_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr) {
+    return false;
+  }
+  if (handle_top_level_tab_keys(state, event)) {
+    return true;
+  }
+
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    state->selected += 1;
+    clamp_visual_highlight_selection(state);
+    return true;
+  }
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    state->selected -= 1;
+    clamp_visual_highlight_selection(state);
+    return true;
+  }
+  if (event == Event::Return || event == Event::Character(' ')) {
+    toggle_visual_highlight_option(state, state->selected);
     return true;
   }
   return true;
@@ -1768,6 +1896,8 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
   switch (state->panel) {
     case SettingsPanel::kGeneral:
       return handle_general_settings_keys(state, event);
+    case SettingsPanel::kVisualHighlight:
+      return handle_visual_highlight_settings_keys(state, event);
     case SettingsPanel::kWorkspace:
       return handle_workspace_settings_keys(state, event);
     case SettingsPanel::kFormat:
@@ -1794,7 +1924,7 @@ std::string format_column_limit_label(int column_limit) {
 }
 
 Element render_top_level_tabs(SettingsModalState* state) {
-  if (state == nullptr || !state->has_workspace) {
+  if (state == nullptr) {
     return text("");
   }
 
@@ -1808,18 +1938,26 @@ Element render_top_level_tabs(SettingsModalState* state) {
     return tab | reflect(*box);
   };
 
-  return hbox({render_tab(SettingsPanel::kGeneral, i18n::tr("settings.tab.general").c_str(),
-                          &state->tab_general_box),
-               text("  "),
-               render_tab(SettingsPanel::kWorkspace, i18n::tr("settings.tab.workspace").c_str(),
-                          &state->tab_workspace_box),
-               text("  "),
-               render_tab(SettingsPanel::kFormat, i18n::tr("settings.tab.format").c_str(),
-                          &state->tab_format_box)});
+  Elements tabs = {render_tab(SettingsPanel::kGeneral, i18n::tr("settings.tab.general").c_str(),
+                              &state->tab_general_box),
+                   text("  "),
+                   render_tab(SettingsPanel::kVisualHighlight,
+                              i18n::tr("settings.tab.visual_highlight").c_str(),
+                              &state->tab_visual_highlight_box)};
+  if (state->has_workspace) {
+    tabs.push_back(text("  "));
+    tabs.push_back(render_tab(SettingsPanel::kWorkspace,
+                              i18n::tr("settings.tab.workspace").c_str(),
+                              &state->tab_workspace_box));
+    tabs.push_back(text("  "));
+    tabs.push_back(render_tab(SettingsPanel::kFormat, i18n::tr("settings.tab.format").c_str(),
+                              &state->tab_format_box));
+  }
+  return hbox(std::move(tabs));
 }
 
 void append_top_level_tabs_header(SettingsBodyContent* content, SettingsModalState* state) {
-  if (content == nullptr || state == nullptr || !state->has_workspace) {
+  if (content == nullptr || state == nullptr) {
     return;
   }
   content->header.push_back(render_top_level_tabs(state));
@@ -1844,7 +1982,38 @@ SettingsBodyContent build_general_settings(SettingsModalState* state) {
     } else if (i == kIcons) {
       title = text(icon_mode_option_label(state->draft_icon_mode, option.label)) |
               color(selected ? theme::Accent() : theme::Header()) | bold;
-    } else if (i == kScopeHighlightStrength) {
+    } else {
+      title = text(checkbox_label(checked, option.label)) |
+              color(selected ? theme::Accent() : theme::Header()) | bold;
+    }
+    if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
+      title = title | inverted;
+    }
+    add_click_target(&content, i);
+    content.rows.push_back(title);
+    content.rows.push_back(text("    " + option.description) | color(theme::Muted()));
+    content.rows.push_back(text(""));
+  }
+
+  if (!content.rows.empty()) {
+    content.rows.pop_back();
+  }
+  return content;
+}
+
+SettingsBodyContent build_visual_highlight_settings(SettingsModalState* state) {
+  SettingsBodyContent content;
+  append_top_level_tabs_header(&content, state);
+
+  const auto options = visual_highlight_settings_options();
+  for (int i = 0; i < kVisualHighlightOptionCount; ++i) {
+    const auto& option = options[static_cast<std::size_t>(i)];
+    const bool selected = i == state->selected;
+    const bool checked = visual_highlight_option_checked(state, i);
+
+    Element title;
+    if (i == kVhScopeStrength) {
       title = text(scope_highlight_strength_option_label(state->draft_scope_highlight_strength,
                                                          option.label)) |
               color(selected ? theme::Accent() : theme::Header()) | bold;
@@ -2164,7 +2333,12 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_show_diagnostic_suffixes = settings.show_diagnostic_suffixes;
   state->draft_sticky_scroll_enabled = settings.sticky_scroll_enabled;
   state->draft_indent_guides_enabled = settings.indent_guides_enabled;
-  state->draft_scope_highlight_enabled = settings.scope_highlight_enabled;
+  state->draft_visual_highlight_enabled = settings.visual_highlight_enabled;
+  state->draft_visual_brace_pair_colors_enabled = settings.visual_brace_pair_colors_enabled;
+  state->draft_visual_matching_bracket_enabled = settings.visual_matching_bracket_enabled;
+  state->draft_visual_scope_background_enabled = settings.visual_scope_background_enabled;
+  state->draft_visual_scope_brace_highlight_enabled =
+      settings.visual_scope_brace_highlight_enabled;
   state->draft_rich_session_enabled = settings.rich_session_enabled;
   state->draft_scope_highlight_strength = settings.scope_highlight_strength;
   state->draft_animations_enabled = settings.animations_enabled;
@@ -2225,7 +2399,14 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->show_diagnostic_suffixes = state->draft_show_diagnostic_suffixes;
   settings->sticky_scroll_enabled = state->draft_sticky_scroll_enabled;
   settings->indent_guides_enabled = state->draft_indent_guides_enabled;
-  settings->scope_highlight_enabled = state->draft_scope_highlight_enabled;
+  settings->visual_highlight_enabled = state->draft_visual_highlight_enabled;
+  settings->visual_brace_pair_colors_enabled = state->draft_visual_brace_pair_colors_enabled;
+  settings->visual_matching_bracket_enabled = state->draft_visual_matching_bracket_enabled;
+  settings->visual_scope_background_enabled = state->draft_visual_scope_background_enabled;
+  settings->visual_scope_brace_highlight_enabled =
+      state->draft_visual_scope_brace_highlight_enabled;
+  settings->scope_highlight_enabled = state->draft_visual_scope_background_enabled ||
+                                      state->draft_visual_scope_brace_highlight_enabled;
   settings->rich_session_enabled = state->draft_rich_session_enabled;
   settings->scope_highlight_strength = state->draft_scope_highlight_strength;
   settings->animations_enabled = state->draft_animations_enabled;
@@ -2306,6 +2487,7 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
               state->panel = SettingsPanel::kWorkspace;
               return true;
             case SettingsPanel::kGeneral:
+            case SettingsPanel::kVisualHighlight:
             case SettingsPanel::kWorkspace:
             case SettingsPanel::kFormat:
               close_settings_modal(state, settings, on_apply, on_workspace_apply,
@@ -2331,12 +2513,14 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         std::string title = i18n::tr("settings.title");
         std::string footer;
         if (is_top_level_panel(state->panel)) {
-          footer = state->has_workspace ? i18n::tr("settings.footer.with_tabs")
-                                        : i18n::tr("settings.footer.no_tabs");
+          footer = i18n::tr("settings.footer.with_tabs");
         }
         switch (state->panel) {
           case SettingsPanel::kGeneral:
             content = build_general_settings(state);
+            break;
+          case SettingsPanel::kVisualHighlight:
+            content = build_visual_highlight_settings(state);
             break;
           case SettingsPanel::kWorkspace:
             content = build_workspace_settings(state);
