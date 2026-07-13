@@ -52,7 +52,8 @@ Component MakeCachedPanelRender(MainLayoutState* layout_state, UiPanelId panel, 
     if (layout_state == nullptr) {
       return inner->Render();
     }
-    return layout_state->panel_render_cache.render(panel, [=] { return inner->Render(); });
+    return layout_state->panel_render_cache.render(
+        panel, theme::colors_revision(), [=] { return inner->Render(); });
   });
 }
 

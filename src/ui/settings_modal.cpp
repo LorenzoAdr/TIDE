@@ -130,20 +130,15 @@ bool handle_settings_body_scroll_keys(SettingsModalState* state, Event event) {
 }
 
 constexpr int kUiLocale = 0;
-constexpr int kTheme = 1;
-constexpr int kLsp = 2;
-constexpr int kLiveLspCompletion = 3;
-constexpr int kIndentGuides = 4;
-constexpr int kAnimations = 5;
-constexpr int kSecondaryPanel = 6;
-constexpr int kShowAllFiles = 7;
-constexpr int kMonitor = 8;
-constexpr int kPerfDump = 9;
-constexpr int kIcons = 10;
-constexpr int kHelixMode = 11;
-constexpr int kWorkspaceAutoDetect = 12;
-constexpr int kRichSession = 13;
-constexpr int kBaseOptions = 14;
+constexpr int kLsp = 1;
+constexpr int kLiveLspCompletion = 2;
+constexpr int kShowAllFiles = 3;
+constexpr int kMonitor = 4;
+constexpr int kPerfDump = 5;
+constexpr int kIcons = 6;
+constexpr int kHelixMode = 7;
+constexpr int kWorkspaceAutoDetect = 8;
+constexpr int kBaseOptions = 9;
 
 #ifdef TGDB_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -179,14 +174,13 @@ constexpr int kFormatIndentCaseLabels = 9;
 constexpr int kFormatShortFunctions = 10;
 constexpr int kFormatOptionCount = 11;
 
-constexpr int kUiColorsPreset = 0;
-constexpr int kUiColorsPanelBg = 1;
-constexpr int kUiColorsCodeBg = 2;
-constexpr int kUiColorsText = 3;
-constexpr int kUiColorsTitle = 4;
-constexpr int kUiColorsDirectory = 5;
-constexpr int kUiColorsFile = 6;
-constexpr int kUiColorsRowCount = 7;
+constexpr int kUiColorsPanelBg = theme::kListedPresetCount + 0;
+constexpr int kUiColorsCodeBg = theme::kListedPresetCount + 1;
+constexpr int kUiColorsText = theme::kListedPresetCount + 2;
+constexpr int kUiColorsTitle = theme::kListedPresetCount + 3;
+constexpr int kUiColorsDirectory = theme::kListedPresetCount + 4;
+constexpr int kUiColorsFile = theme::kListedPresetCount + 5;
+constexpr int kUiColorsRowCount = theme::kListedPresetCount + 6;
 
 constexpr int kPaletteCols = 8;
 constexpr std::array<theme::ColorRgb, 40> kUIColorPalette = {{
@@ -227,7 +221,8 @@ constexpr int kVhStickyScroll = 7;
 constexpr int kVhOverviewRuler = 8;
 constexpr int kVhSelectionOccurrences = 9;
 constexpr int kVhCodeFolding = 10;
-constexpr int kVisualHighlightOptionCount = 11;
+constexpr int kVhIndentGuides = 11;
+constexpr int kVisualHighlightOptionCount = 12;
 
 bool is_top_level_panel(SettingsPanel panel) {
   return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kVisualHighlight ||
@@ -366,17 +361,9 @@ std::vector<SettingsOption> global_settings_options() {
   std::vector<SettingsOption> options = {
       {i18n::tr("settings.general.ui_locale.label"),
        i18n::tr("settings.general.ui_locale.description")},
-      {i18n::tr("settings.general.light_theme.label"),
-       i18n::tr("settings.general.light_theme.description")},
       {i18n::tr("settings.general.lsp.label"), i18n::tr("settings.general.lsp.description")},
       {i18n::tr("settings.general.live_completion.label"),
        i18n::tr("settings.general.live_completion.description")},
-      {i18n::tr("settings.general.indent_guides.label"),
-       i18n::tr("settings.general.indent_guides.description")},
-      {i18n::tr("settings.general.animations.label"),
-       i18n::tr("settings.general.animations.description")},
-      {i18n::tr("settings.general.secondary_panel.label"),
-       i18n::tr("settings.general.secondary_panel.description")},
       {i18n::tr("settings.general.show_all_files.label"),
        i18n::tr("settings.general.show_all_files.description")},
       {i18n::tr("settings.general.monitor.label"),
@@ -389,8 +376,6 @@ std::vector<SettingsOption> global_settings_options() {
        i18n::tr("settings.general.helix_mode.description")},
       {i18n::tr("settings.general.workspace_auto_detect.label"),
        i18n::tr("settings.general.workspace_auto_detect.description")},
-      {i18n::tr("settings.general.rich_session.label"),
-       i18n::tr("settings.general.rich_session.description")},
 #ifdef TGDB_HAS_BUNDLED_CLANGD
       {i18n::tr("settings.general.force_bundled_clangd.label"),
        i18n::tr("settings.general.force_bundled_clangd.description")},
@@ -429,6 +414,8 @@ std::vector<SettingsOption> visual_highlight_settings_options() {
        i18n::tr("settings.visual_highlight.selection_occurrences.description")},
       {i18n::tr("settings.visual_highlight.code_folding.label"),
        i18n::tr("settings.visual_highlight.code_folding.description")},
+      {i18n::tr("settings.visual_highlight.indent_guides.label"),
+       i18n::tr("settings.visual_highlight.indent_guides.description")},
   };
 }
 
@@ -452,7 +439,7 @@ bool visual_highlight_option_checked(const SettingsModalState* state, int index)
       return state->draft_visual_highlight_enabled &&
              state->draft_visual_scope_brace_highlight_enabled;
     case kVhScopeStrength:
-      return state->draft_visual_highlight_enabled && state->draft_animations_enabled &&
+      return state->draft_visual_highlight_enabled &&
              (state->draft_visual_scope_background_enabled ||
               state->draft_visual_scope_brace_highlight_enabled);
     case kVhDiagnosticSuffixes:
@@ -467,6 +454,8 @@ bool visual_highlight_option_checked(const SettingsModalState* state, int index)
              state->draft_visual_selection_occurrences_enabled;
     case kVhCodeFolding:
       return state->draft_visual_highlight_enabled && state->draft_visual_code_folding_enabled;
+    case kVhIndentGuides:
+      return state->draft_indent_guides_enabled;
     default:
       return false;
   }
@@ -514,6 +503,9 @@ void toggle_visual_highlight_option(SettingsModalState* state, int index) {
       break;
     case kVhCodeFolding:
       state->draft_visual_code_folding_enabled = !state->draft_visual_code_folding_enabled;
+      break;
+    case kVhIndentGuides:
+      state->draft_indent_guides_enabled = !state->draft_indent_guides_enabled;
       break;
     default:
       break;
@@ -611,24 +603,10 @@ bool option_checked(const SettingsModalState* state, int index) {
   switch (index) {
     case kUiLocale:
       return true;
-    case kTheme:
-      return state->draft_theme == theme::ThemeMode::kLight;
     case kLsp:
       return state->draft_lsp_enabled;
     case kLiveLspCompletion:
       return state->draft_live_lsp_completion_enabled;
-    case kIndentGuides:
-      return state->draft_indent_guides_enabled;
-    case kAnimations:
-      return state->draft_animations_enabled;
-    case kSecondaryPanel:
-      return state->draft_secondary_panel_enabled;
-    case kHelixMode:
-      return state->draft_helix_mode_enabled;
-    case kWorkspaceAutoDetect:
-      return state->draft_workspace_auto_detect_enabled;
-    case kRichSession:
-      return state->draft_rich_session_enabled;
     case kShowAllFiles:
       return state->draft_show_all_workspace_files;
     case kMonitor:
@@ -637,6 +615,10 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_perf_dump_enabled;
     case kIcons:
       return state->draft_icon_mode == IconMode::Always;
+    case kHelixMode:
+      return state->draft_helix_mode_enabled;
+    case kWorkspaceAutoDetect:
+      return state->draft_workspace_auto_detect_enabled;
 #ifdef TGDB_HAS_BUNDLED_CLANGD
     case kForceBundledClangd:
       return state->draft_force_bundled_clangd;
@@ -658,37 +640,11 @@ void toggle_option(SettingsModalState* state, int index) {
     case kUiLocale:
       cycle_ui_locale(state);
       break;
-    case kTheme:
-      state->draft_theme = state->draft_theme == theme::ThemeMode::kLight
-                               ? theme::ThemeMode::kDark
-                               : theme::ThemeMode::kLight;
-      state->draft_ui_colors_preset = theme::UiColorPreset::kCustom;
-      theme::set_mode(state->draft_theme);
-      break;
     case kLsp:
       state->draft_lsp_enabled = !state->draft_lsp_enabled;
       break;
     case kLiveLspCompletion:
       state->draft_live_lsp_completion_enabled = !state->draft_live_lsp_completion_enabled;
-      break;
-    case kIndentGuides:
-      state->draft_indent_guides_enabled = !state->draft_indent_guides_enabled;
-      break;
-    case kAnimations:
-      state->draft_animations_enabled = !state->draft_animations_enabled;
-      break;
-    case kSecondaryPanel:
-      state->draft_secondary_panel_enabled = !state->draft_secondary_panel_enabled;
-      break;
-    case kHelixMode:
-      state->draft_helix_mode_enabled = !state->draft_helix_mode_enabled;
-      break;
-    case kWorkspaceAutoDetect:
-      state->draft_workspace_auto_detect_enabled =
-          !state->draft_workspace_auto_detect_enabled;
-      break;
-    case kRichSession:
-      state->draft_rich_session_enabled = !state->draft_rich_session_enabled;
       break;
     case kShowAllFiles:
       state->draft_show_all_workspace_files = !state->draft_show_all_workspace_files;
@@ -713,6 +669,13 @@ void toggle_option(SettingsModalState* state, int index) {
           break;
       }
       configure_glyphs(resolve_icon_mode(state->draft_icon_mode));
+      break;
+    case kHelixMode:
+      state->draft_helix_mode_enabled = !state->draft_helix_mode_enabled;
+      break;
+    case kWorkspaceAutoDetect:
+      state->draft_workspace_auto_detect_enabled =
+          !state->draft_workspace_auto_detect_enabled;
       break;
 #ifdef TGDB_HAS_BUNDLED_CLANGD
     case kForceBundledClangd:
@@ -929,8 +892,14 @@ void apply_draft_ui_colors(SettingsModalState* state) {
   if (state == nullptr) {
     return;
   }
-  theme::set_mode(state->draft_theme);
-  theme::set_ui_overrides(state->draft_ui_colors);
+  if (state->draft_ui_colors_preset == theme::UiColorPreset::kCustom) {
+    theme::apply_color_preset(theme::UiColorPreset::kCustom, state->draft_ui_colors);
+    theme::set_mode(state->draft_theme);
+  } else {
+    theme::apply_color_preset(state->draft_ui_colors_preset);
+    state->draft_theme = theme::current_mode();
+    state->draft_ui_colors = theme::overrides_for_preset(state->draft_ui_colors_preset);
+  }
 }
 
 void ensure_draft_ui_colors_complete(SettingsModalState* state) {
@@ -966,24 +935,9 @@ void cycle_ui_color_preset(SettingsModalState* state) {
   if (state == nullptr) {
     return;
   }
-  theme::UiColorPreset next = theme::UiColorPreset::kDarkClassic;
-  switch (state->draft_ui_colors_preset) {
-    case theme::UiColorPreset::kDarkClassic:
-      next = theme::UiColorPreset::kDarkSoft;
-      break;
-    case theme::UiColorPreset::kDarkSoft:
-      next = theme::UiColorPreset::kLightClassic;
-      break;
-    case theme::UiColorPreset::kLightClassic:
-      next = theme::UiColorPreset::kLightPaper;
-      break;
-    case theme::UiColorPreset::kLightPaper:
-    case theme::UiColorPreset::kCustom:
-    default:
-      next = theme::UiColorPreset::kDarkClassic;
-      break;
-  }
-  apply_ui_color_preset(state, next);
+  const int current = theme::index_of_listed_preset(state->draft_ui_colors_preset);
+  const int next = (current + 1) % theme::kListedPresetCount;
+  apply_ui_color_preset(state, theme::listed_preset_at(next));
 }
 
 void open_ui_colors_panel(SettingsModalState* state) {
@@ -1047,25 +1001,27 @@ void apply_palette_selection(SettingsModalState* state) {
   if (auto* field = mutable_ui_color_field(state, state->ui_colors_edit_row)) {
     *field = chosen;
     state->draft_ui_colors_preset = theme::UiColorPreset::kCustom;
+    state->draft_ui_colors = theme::current_ui_overrides();
     apply_draft_ui_colors(state);
   }
 }
 
 std::string ui_color_row_label(int row) {
-  switch (row) {
-    case kUiColorsPreset:
-      return i18n::tr("settings.ui_colors.row.preset");
-    case kUiColorsPanelBg:
+  if (row < theme::kListedPresetCount) {
+    return theme::ui_color_preset_label(theme::listed_preset_at(row));
+  }
+  switch (row - theme::kListedPresetCount) {
+    case 0:
       return i18n::tr("settings.ui_colors.row.panel_bg");
-    case kUiColorsCodeBg:
+    case 1:
       return i18n::tr("settings.ui_colors.row.code_bg");
-    case kUiColorsText:
+    case 2:
       return i18n::tr("settings.ui_colors.row.text");
-    case kUiColorsTitle:
+    case 3:
       return i18n::tr("settings.ui_colors.row.title");
-    case kUiColorsDirectory:
+    case 4:
       return i18n::tr("settings.ui_colors.row.directory");
-    case kUiColorsFile:
+    case 5:
       return i18n::tr("settings.ui_colors.row.file");
     default:
       return {};
@@ -1076,10 +1032,13 @@ std::string ui_color_row_value(const SettingsModalState* state, int row) {
   if (state == nullptr) {
     return {};
   }
-  if (row == kUiColorsPreset) {
-    return theme::ui_color_preset_label(state->draft_ui_colors_preset);
+  if (row < theme::kListedPresetCount) {
+    return state->draft_ui_colors_preset == theme::listed_preset_at(row)
+               ? i18n::tr("settings.ui_colors.theme_active")
+               : i18n::tr("settings.ui_colors.dash");
   }
-  const auto* field = mutable_ui_color_field(const_cast<SettingsModalState*>(state), row);
+  const auto* field =
+      mutable_ui_color_field(const_cast<SettingsModalState*>(state), row);
   if (field != nullptr && field->has_value()) {
     return theme::format_hex_color(**field);
   }
@@ -1087,7 +1046,7 @@ std::string ui_color_row_value(const SettingsModalState* state, int row) {
 }
 
 void begin_ui_color_edit(SettingsModalState* state, int row) {
-  if (state == nullptr) {
+  if (state == nullptr || row < theme::kListedPresetCount) {
     return;
   }
   ensure_draft_ui_colors_complete(state);
@@ -1203,8 +1162,8 @@ bool handle_ui_colors_keys(SettingsModalState* state, Event event) {
     return true;
   }
   if (event == Event::Return || event == Event::Character(' ')) {
-    if (state->ui_colors_selected == kUiColorsPreset) {
-      cycle_ui_color_preset(state);
+    if (state->ui_colors_selected < theme::kListedPresetCount) {
+      apply_ui_color_preset(state, theme::listed_preset_at(state->ui_colors_selected));
       return true;
     }
     begin_ui_color_edit(state, state->ui_colors_selected);
@@ -1265,7 +1224,37 @@ SettingsBodyContent build_ui_colors_panel(SettingsModalState* state) {
   state->ui_palette_row_start = -1;
   state->ui_palette_row_count = 0;
 
-  for (int i = 0; i < kUiColorsRowCount; ++i) {
+  content.rows.push_back(text(i18n::tr("settings.ui_colors.themes_header")) | color(theme::Accent()) |
+                         bold);
+  content.rows.push_back(text(""));
+
+  for (int i = 0; i < theme::kListedPresetCount; ++i) {
+    const theme::UiColorPreset preset = theme::listed_preset_at(i);
+    const bool active = state->draft_ui_colors_preset == preset;
+    const bool selected = i == state->ui_colors_selected;
+    const theme::UiColorOverrides preview = theme::overrides_for_preset(preset);
+    const theme::ColorRgb swatch =
+        preview.code_bg.value_or(theme::ColorRgb{30, 30, 30});
+    const Color swatch_color = Color::RGB(swatch.r, swatch.g, swatch.b);
+  const std::string marker = active ? "● " : "  ";
+    Element row_el =
+        hbox({text(marker) | color(active ? theme::Accent() : theme::Muted()),
+              text("██ ") | color(swatch_color) | bgcolor(swatch_color),
+              text(theme::ui_color_preset_label(preset)) |
+                  color(selected ? theme::Accent() : theme::Header()) | bold});
+    if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
+      row_el = row_el | inverted;
+    }
+    add_click_target(&content, i);
+    content.rows.push_back(row_el);
+  }
+
+  content.rows.push_back(separator());
+  content.rows.push_back(text(i18n::tr("settings.ui_colors.custom_header")) | color(theme::Muted()));
+  content.rows.push_back(text(""));
+
+  for (int i = theme::kListedPresetCount; i < kUiColorsRowCount; ++i) {
     const bool selected = i == state->ui_colors_selected;
     const std::string label = ui_color_row_label(i);
     const std::string value = ui_color_row_value(state, i);
@@ -1485,8 +1474,8 @@ void activate_settings_click(SettingsModalState* state, int index, int mouse_x) 
       }
       state->ui_colors_selected = index;
       clamp_ui_colors_selection(state);
-      if (index == kUiColorsPreset) {
-        cycle_ui_color_preset(state);
+      if (index < theme::kListedPresetCount) {
+        apply_ui_color_preset(state, theme::listed_preset_at(index));
       } else {
         begin_ui_color_edit(state, index);
       }
@@ -2461,9 +2450,11 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
     workspace.ui_colors_preset = state->draft_ui_colors_preset;
     workspace.ui_colors = state->draft_ui_colors;
     on_workspace_apply(workspace);
-  } else {
+  } else if (state->draft_ui_colors_preset == theme::UiColorPreset::kCustom) {
+    theme::apply_color_preset(theme::UiColorPreset::kCustom, state->draft_ui_colors);
     theme::set_mode(state->draft_theme);
-    theme::set_ui_overrides(state->draft_ui_colors);
+  } else {
+    theme::apply_color_preset(state->draft_ui_colors_preset);
   }
 
   if (state->has_workspace) {

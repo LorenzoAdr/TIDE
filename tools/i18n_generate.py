@@ -55,8 +55,16 @@ CATALOG: list[tuple[str, str, str]] = [
     # theme
     ("theme.preset.dark_classic", "Oscuro clásico", "Dark classic"),
     ("theme.preset.dark_soft", "Oscuro suave", "Dark soft"),
+    ("theme.preset.nord", "Nord", "Nord"),
+    ("theme.preset.gruvbox_dark", "Gruvbox oscuro", "Gruvbox dark"),
+    ("theme.preset.one_dark", "One Dark", "One Dark"),
+    ("theme.preset.dracula", "Dracula", "Dracula"),
+    ("theme.preset.monokai", "Monokai", "Monokai"),
+    ("theme.preset.tokyo_night", "Tokyo Night", "Tokyo Night"),
     ("theme.preset.light_classic", "Claro clásico", "Light classic"),
     ("theme.preset.light_paper", "Claro papel", "Light paper"),
+    ("theme.preset.gruvbox_light", "Gruvbox claro", "Gruvbox light"),
+    ("theme.preset.solarized_light", "Solarized claro", "Solarized light"),
     ("theme.preset.custom", "Personalizado", "Custom"),
     # settings locale
     ("settings.general.ui_locale.label", "Idioma de interfaz", "Interface language"),

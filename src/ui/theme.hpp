@@ -35,10 +35,24 @@ struct UiColorOverrides {
 enum class UiColorPreset {
   kDarkClassic,
   kDarkSoft,
+  kNord,
+  kGruvboxDark,
+  kOneDark,
+  kDracula,
+  kMonokai,
+  kTokyoNight,
   kLightClassic,
   kLightPaper,
+  kGruvboxLight,
+  kSolarizedLight,
   kCustom,
 };
+
+constexpr int kListedPresetCount = 12;
+
+int listed_preset_count();
+UiColorPreset listed_preset_at(int index);
+int index_of_listed_preset(UiColorPreset preset);
 
 void set_mode(ThemeMode mode);
 ThemeMode current_mode();
@@ -46,6 +60,10 @@ ThemeMode current_mode();
 void set_ui_overrides(const UiColorOverrides& overrides);
 const UiColorOverrides& current_ui_overrides();
 void clear_ui_overrides();
+
+void apply_color_preset(UiColorPreset preset, const UiColorOverrides& custom_overrides = {});
+UiColorPreset current_color_preset();
+uint64_t colors_revision();
 
 UiColorOverrides overrides_for_preset(UiColorPreset preset);
 ThemeMode theme_mode_for_preset(UiColorPreset preset);

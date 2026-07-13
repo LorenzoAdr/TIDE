@@ -21,6 +21,7 @@ struct UiPanelRenderCacheEntry {
   ftxui::Element cached = ftxui::text("");
   uint64_t dirty_generation = 1;
   uint64_t last_painted_generation = 0;
+  uint64_t last_colors_revision = 0;
 };
 
 struct UiPanelRenderCache {
@@ -36,11 +37,14 @@ struct UiPanelRenderCache {
     }
   }
 
-  ftxui::Element render(UiPanelId panel, const std::function<ftxui::Element()>& build) {
+  ftxui::Element render(UiPanelId panel, uint64_t colors_revision,
+                        const std::function<ftxui::Element()>& build) {
     UiPanelRenderCacheEntry& entry = entries[static_cast<std::size_t>(panel)];
-    if (entry.dirty_generation != entry.last_painted_generation) {
+    if (entry.dirty_generation != entry.last_painted_generation ||
+        entry.last_colors_revision != colors_revision) {
       entry.cached = build();
       entry.last_painted_generation = entry.dirty_generation;
+      entry.last_colors_revision = colors_revision;
     }
     return entry.cached;
   }

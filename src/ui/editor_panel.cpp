@@ -280,6 +280,7 @@ struct EditorPanelState {
   int line_syntax_span_cache_scroll_col = -1;
   uint64_t line_syntax_span_cache_ts_revision = 0;
   uint64_t viewport_line_render_cache_ts_revision = 0;
+  uint64_t viewport_line_render_cache_colors_revision = 0;
   std::string scope_completion_cache_key;
   std::vector<CompletionItem> scope_completion_cache_items;
   uint64_t vh_last_inputs_git_view_token = 0;
@@ -491,6 +492,7 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
     h = viewport_line_hash_int(h, scope_bracket->col_a);
     h = viewport_line_hash_int(h, scope_bracket->col_b);
   }
+  h = viewport_line_hash_u64(h, theme::colors_revision());
   return h;
 }
 
@@ -5853,6 +5855,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (ts_highlight_revision != panel_state->viewport_line_render_cache_ts_revision) {
       panel_state->viewport_line_render_cache.clear();
       panel_state->viewport_line_render_cache_ts_revision = ts_highlight_revision;
+    }
+    const uint64_t colors_revision = theme::colors_revision();
+    if (colors_revision != panel_state->viewport_line_render_cache_colors_revision) {
+      panel_state->viewport_line_render_cache.clear();
+      panel_state->viewport_line_render_cache_colors_revision = colors_revision;
     }
 
     std::vector<std::shared_ptr<EditorPixelRow>> gutter_pixel_rows;

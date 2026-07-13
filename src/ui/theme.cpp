@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <optional>
 #include <string>
 
 namespace tgdb::theme {
@@ -104,12 +105,165 @@ const Palette kLightPalette{
 
 ThemeMode g_mode = ThemeMode::kDark;
 UiColorOverrides g_overrides;
+UiColorPreset g_color_preset = UiColorPreset::kDarkClassic;
+std::optional<Palette> g_preset_palette;
+uint64_t g_colors_revision = 1;
 
-const Palette& current_palette() {
-  return g_mode == ThemeMode::kLight ? kLightPalette : kDarkPalette;
+void bump_colors_revision() { ++g_colors_revision; }
+
+constexpr UiColorPreset kListedPresets[] = {
+    UiColorPreset::kDarkClassic,  UiColorPreset::kDarkSoft,      UiColorPreset::kNord,
+    UiColorPreset::kGruvboxDark,  UiColorPreset::kOneDark,       UiColorPreset::kDracula,
+    UiColorPreset::kMonokai,      UiColorPreset::kTokyoNight,    UiColorPreset::kLightClassic,
+    UiColorPreset::kLightPaper,   UiColorPreset::kGruvboxLight,  UiColorPreset::kSolarizedLight,
+};
+
+int luminance(const ColorRgb& color) {
+  return (static_cast<int>(color.r) * 299 + static_cast<int>(color.g) * 587 +
+          static_cast<int>(color.b) * 114) /
+         1000;
 }
 
 Color from_rgb(const ColorRgb& rgb_color) { return Color::RGB(rgb_color.r, rgb_color.g, rgb_color.b); }
+
+Palette with_ui_rgb(Palette palette, ColorRgb panel_bg, ColorRgb code_bg, ColorRgb accent_rgb,
+                    ColorRgb header_rgb, ColorRgb muted_rgb) {
+  palette.panel_bg_rgb = panel_bg;
+  palette.code_bg_rgb = code_bg;
+  palette.accent_rgb = accent_rgb;
+  palette.header_rgb = header_rgb;
+  palette.muted_rgb = muted_rgb;
+  palette.panel_bg = from_rgb(panel_bg);
+  palette.code_bg = from_rgb(code_bg);
+  palette.header = from_rgb(header_rgb);
+  palette.muted = from_rgb(muted_rgb);
+  palette.watch_input = from_rgb(header_rgb);
+  palette.stack_frame = from_rgb(header_rgb);
+  palette.syntax_default = from_rgb(header_rgb);
+  return palette;
+}
+
+Palette with_syntax(Palette palette, ColorRgb def, ColorRgb comment, ColorRgb str, ColorRgb number,
+                    ColorRgb keyword, ColorRgb type, ColorRgb function, ColorRgb variable,
+                    ColorRgb parameter, ColorRgb property, ColorRgb macro, ColorRgb ns,
+                    ColorRgb op) {
+  palette.syntax_default = from_rgb(def);
+  palette.syntax_comment = from_rgb(comment);
+  palette.syntax_string = from_rgb(str);
+  palette.syntax_number = from_rgb(number);
+  palette.syntax_keyword = from_rgb(keyword);
+  palette.syntax_type = from_rgb(type);
+  palette.syntax_function = from_rgb(function);
+  palette.syntax_variable = from_rgb(variable);
+  palette.syntax_parameter = from_rgb(parameter);
+  palette.syntax_property = from_rgb(property);
+  palette.syntax_macro = from_rgb(macro);
+  palette.syntax_namespace = from_rgb(ns);
+  palette.syntax_operator = from_rgb(op);
+  return palette;
+}
+
+Palette preset_palette(UiColorPreset preset) {
+  switch (preset) {
+    case UiColorPreset::kDarkClassic:
+      return kDarkPalette;
+    case UiColorPreset::kDarkSoft:
+      return with_syntax(
+          with_ui_rgb(kDarkPalette, rgb(0x2d, 0x2d, 0x30), rgb(0x1e, 0x1e, 0x1e),
+                      rgb(0x9c, 0xdc, 0xfe), rgb(0xd4, 0xd4, 0xd4), rgb(0x85, 0x85, 0x85)),
+          rgb(0xd4, 0xd4, 0xd4), rgb(0x6a, 0x99, 0x55), rgb(0xce, 0x91, 0x78), rgb(0xb5, 0xce, 0xa8),
+          rgb(0x56, 0x9c, 0xd6), rgb(0x4e, 0xc9, 0xb0), rgb(0xd4, 0xdc, 0xeb), rgb(0x9d, 0xdc, 0xfe),
+          rgb(0x9d, 0xdc, 0xfe), rgb(0x4f, 0xc1, 0xff), rgb(0xc5, 0x86, 0xc0), rgb(0x4e, 0xc9, 0xb0),
+          rgb(0xd4, 0xd4, 0xd4));
+    case UiColorPreset::kNord:
+      return with_syntax(
+          with_ui_rgb(kDarkPalette, rgb(0x2e, 0x34, 0x40), rgb(0x2e, 0x34, 0x40),
+                      rgb(0x88, 0xc0, 0xd0), rgb(0xd8, 0xde, 0xe9), rgb(0x81, 0xa1, 0xc1)),
+          rgb(0xd8, 0xde, 0xe9), rgb(0x61, 0x6e, 0x88), rgb(0xa3, 0xbe, 0x8c), rgb(0xb4, 0x8e, 0xad),
+          rgb(0x81, 0xa1, 0xc1), rgb(0x8f, 0xbc, 0xbb), rgb(0x88, 0xc0, 0xd0), rgb(0xd8, 0xde, 0xe9),
+          rgb(0xd8, 0xde, 0xe9), rgb(0x5e, 0x81, 0xac), rgb(0xb4, 0x8e, 0xad), rgb(0x8f, 0xbc, 0xbb),
+          rgb(0xd8, 0xde, 0xe9));
+    case UiColorPreset::kGruvboxDark:
+      return with_syntax(
+          with_ui_rgb(kDarkPalette, rgb(0x28, 0x28, 0x28), rgb(0x1d, 0x20, 0x21),
+                      rgb(0x83, 0xa5, 0x98), rgb(0xeb, 0xdb, 0xb2), rgb(0xa8, 0x99, 0x84)),
+          rgb(0xeb, 0xdb, 0xb2), rgb(0x92, 0x83, 0x74), rgb(0xb8, 0xbb, 0x26), rgb(0xd3, 0x86, 0x9b),
+          rgb(0xfb, 0x49, 0x34), rgb(0xfa, 0xbd, 0x2f), rgb(0x83, 0xa5, 0x98), rgb(0xeb, 0xdb, 0xb2),
+          rgb(0xeb, 0xdb, 0xb2), rgb(0xfe, 0x80, 0x19), rgb(0xd3, 0x86, 0x9b), rgb(0x8e, 0xc0, 0x7c),
+          rgb(0xeb, 0xdb, 0xb2));
+    case UiColorPreset::kOneDark:
+      return with_syntax(
+          with_ui_rgb(kDarkPalette, rgb(0x28, 0x2c, 0x34), rgb(0x28, 0x2c, 0x34),
+                      rgb(0x61, 0xaf, 0xef), rgb(0xab, 0xb2, 0xbf), rgb(0x5c, 0x63, 0x70)),
+          rgb(0xab, 0xb2, 0xbf), rgb(0x5c, 0x63, 0x70), rgb(0x98, 0xc3, 0x79), rgb(0xd1, 0x9a, 0x66),
+          rgb(0xc6, 0x78, 0xdd), rgb(0xe5, 0xc0, 0x7b), rgb(0x61, 0xaf, 0xef), rgb(0xe0, 0x6c, 0x75),
+          rgb(0xab, 0xb2, 0xbf), rgb(0xe0, 0x6c, 0x75), rgb(0xc6, 0x78, 0xdd), rgb(0x56, 0xb6, 0xc2),
+          rgb(0xab, 0xb2, 0xbf));
+    case UiColorPreset::kDracula:
+      return with_syntax(
+          with_ui_rgb(kDarkPalette, rgb(0x28, 0x2a, 0x36), rgb(0x28, 0x2a, 0x36),
+                      rgb(0xbd, 0x93, 0xf9), rgb(0xf8, 0xf8, 0xf2), rgb(0x62, 0x72, 0xa4)),
+          rgb(0xf8, 0xf8, 0xf2), rgb(0x62, 0x7a, 0xa0), rgb(0xf1, 0xfa, 0x8c), rgb(0xbd, 0x93, 0xf9),
+          rgb(0xff, 0x79, 0xc6), rgb(0x8b, 0xe9, 0xfd), rgb(0x50, 0xfa, 0x7b), rgb(0xff, 0x55, 0x55),
+          rgb(0xff, 0xb8, 0x6c), rgb(0xff, 0x55, 0x55), rgb(0xff, 0x79, 0xc6), rgb(0x8b, 0xe9, 0xfd),
+          rgb(0xf8, 0xf8, 0xf2));
+    case UiColorPreset::kMonokai:
+      return with_syntax(
+          with_ui_rgb(kDarkPalette, rgb(0x27, 0x28, 0x22), rgb(0x27, 0x28, 0x22),
+                      rgb(0x66, 0xd9, 0xef), rgb(0xf8, 0xf8, 0xf2), rgb(0x75, 0x71, 0x5e)),
+          rgb(0xf8, 0xf8, 0xf2), rgb(0x75, 0x71, 0x5e), rgb(0xe6, 0xdb, 0x74), rgb(0xae, 0x81, 0xff),
+          rgb(0xf9, 0x26, 0x72), rgb(0xfd, 0x97, 0x1f), rgb(0xa6, 0xe2, 0x2e), rgb(0xf9, 0x26, 0x72),
+          rgb(0xfd, 0x97, 0x1f), rgb(0xf9, 0x26, 0x72), rgb(0xae, 0x81, 0xff), rgb(0x66, 0xd9, 0xef),
+          rgb(0xf8, 0xf8, 0xf2));
+    case UiColorPreset::kTokyoNight:
+      return with_syntax(
+          with_ui_rgb(kDarkPalette, rgb(0x1a, 0x1b, 0x26), rgb(0x1a, 0x1b, 0x26),
+                      rgb(0x7a, 0xa2, 0xf7), rgb(0xc0, 0xca, 0xf5), rgb(0x56, 0x5f, 0x89)),
+          rgb(0xc0, 0xca, 0xf5), rgb(0x56, 0x5f, 0x89), rgb(0x9e, 0xce, 0x6a), rgb(0xff, 0x9e, 0x64),
+          rgb(0xbb, 0x9a, 0xf7), rgb(0x2a, 0xc3, 0xde), rgb(0x7a, 0xa2, 0xf7), rgb(0xf7, 0x76, 0x8e),
+          rgb(0xc0, 0xca, 0xf5), rgb(0xf7, 0x76, 0x8e), rgb(0xbb, 0x9a, 0xf7), rgb(0x2a, 0xc3, 0xde),
+          rgb(0xc0, 0xca, 0xf5));
+    case UiColorPreset::kLightClassic:
+      return kLightPalette;
+    case UiColorPreset::kLightPaper:
+      return with_syntax(
+          with_ui_rgb(kLightPalette, rgb(0xec, 0xea, 0xe4), rgb(0xfa, 0xf9, 0xf5),
+                      rgb(0x00, 0x5a, 0x9e), rgb(0x2b, 0x2b, 0x28), rgb(0x70, 0x70, 0x68)),
+          rgb(0x2b, 0x2b, 0x28), rgb(0x96, 0x96, 0x90), rgb(0x0d, 0x73, 0x45), rgb(0x9a, 0x34, 0x00),
+          rgb(0x00, 0x5a, 0x9e), rgb(0x8b, 0x5e, 0x00), rgb(0x00, 0x5a, 0x9e), rgb(0x9a, 0x34, 0x00),
+          rgb(0x2b, 0x2b, 0x28), rgb(0x9a, 0x34, 0x00), rgb(0x5a, 0x00, 0x7a), rgb(0x00, 0x6d, 0x6d),
+          rgb(0x2b, 0x2b, 0x28));
+    case UiColorPreset::kGruvboxLight:
+      return with_syntax(
+          with_ui_rgb(kLightPalette, rgb(0xeb, 0xdb, 0xb2), rgb(0xfb, 0xf1, 0xc7),
+                      rgb(0x45, 0x7b, 0x6c), rgb(0x3c, 0x38, 0x36), rgb(0x7c, 0x6f, 0x64)),
+          rgb(0x3c, 0x38, 0x36), rgb(0x92, 0x83, 0x74), rgb(0x79, 0x7a, 0x1a), rgb(0x8f, 0x3f, 0x71),
+          rgb(0x9d, 0x00, 0x06), rgb(0xb5, 0x76, 0x14), rgb(0x45, 0x7b, 0x6c), rgb(0x9d, 0x00, 0x06),
+          rgb(0x3c, 0x38, 0x36), rgb(0xaf, 0x3a, 0x03), rgb(0x8f, 0x3f, 0x71), rgb(0x42, 0x7b, 0x58),
+          rgb(0x3c, 0x38, 0x36));
+    case UiColorPreset::kSolarizedLight:
+      return with_syntax(
+          with_ui_rgb(kLightPalette, rgb(0xee, 0xe8, 0xd5), rgb(0xfd, 0xf6, 0xe3),
+                      rgb(0x26, 0x8b, 0xd2), rgb(0x65, 0x7b, 0x83), rgb(0x93, 0xa1, 0xa1)),
+          rgb(0x65, 0x7b, 0x83), rgb(0x93, 0xa1, 0xa1), rgb(0x2a, 0xa1, 0x98), rgb(0xd3, 0x36, 0x82),
+          rgb(0x26, 0x8b, 0xd2), rgb(0xb5, 0x89, 0x00), rgb(0x26, 0x8b, 0xd2), rgb(0xdc, 0x32, 0x2f),
+          rgb(0x65, 0x7b, 0x83), rgb(0xcb, 0x4b, 0x16), rgb(0xd3, 0x36, 0x82), rgb(0x2a, 0xa1, 0x98),
+          rgb(0x65, 0x7b, 0x83));
+    case UiColorPreset::kCustom:
+      break;
+  }
+  return g_mode == ThemeMode::kLight ? kLightPalette : kDarkPalette;
+}
+
+const Palette& current_palette() {
+  if (g_color_preset != UiColorPreset::kCustom && g_preset_palette.has_value()) {
+    return *g_preset_palette;
+  }
+  if (g_overrides.code_bg) {
+    return luminance(*g_overrides.code_bg) > 140 ? kLightPalette : kDarkPalette;
+  }
+  return g_mode == ThemeMode::kLight ? kLightPalette : kDarkPalette;
+}
 
 ColorRgb brighten(const ColorRgb& color, int delta) {
   auto clamp = [](int value) {
@@ -164,31 +318,14 @@ ColorRgb effective_title_rgb() {
 bool has_ui_color_overrides() { return !g_overrides.empty(); }
 
 UiColorOverrides make_preset_overrides(UiColorPreset preset) {
-  switch (preset) {
-    case UiColorPreset::kDarkClassic:
-      return UiColorOverrides{
-          rgb(0x1c, 0x20, 0x2a), rgb(0x00, 0x00, 0x00), rgb(0xb4, 0xc8, 0xff),
-          rgb(0x5a, 0xaa, 0xff), rgb(0xb4, 0xc8, 0xff), rgb(0x82, 0x8c, 0xa0),
-      };
-    case UiColorPreset::kDarkSoft:
-      return UiColorOverrides{
-          rgb(0x2d, 0x2d, 0x30), rgb(0x1e, 0x1e, 0x1e), rgb(0xd4, 0xd4, 0xd4),
-          rgb(0x9c, 0xdc, 0xfe), rgb(0xcc, 0xcc, 0xcc), rgb(0x85, 0x85, 0x85),
-      };
-    case UiColorPreset::kLightClassic:
-      return UiColorOverrides{
-          rgb(0xf5, 0xf5, 0xf8), rgb(0xff, 0xff, 0xff), rgb(0x1e, 0x28, 0x3c),
-          rgb(0x00, 0x66, 0xcc), rgb(0x1e, 0x28, 0x3c), rgb(0x64, 0x6e, 0x82),
-      };
-    case UiColorPreset::kLightPaper:
-      return UiColorOverrides{
-          rgb(0xec, 0xea, 0xe4), rgb(0xfa, 0xf9, 0xf5), rgb(0x2b, 0x2b, 0x28),
-          rgb(0x00, 0x5a, 0x9e), rgb(0x3a, 0x3a, 0x36), rgb(0x70, 0x70, 0x68),
-      };
-    case UiColorPreset::kCustom:
-      break;
+  if (preset == UiColorPreset::kCustom) {
+    return {};
   }
-  return {};
+  const Palette palette = preset_palette(preset);
+  return UiColorOverrides{
+      palette.panel_bg_rgb, palette.code_bg_rgb, palette.header_rgb,
+      palette.accent_rgb,     palette.header_rgb, palette.muted_rgb,
+  };
 }
 
 int hex_nibble(char c) {
@@ -208,15 +345,74 @@ bool UiColorOverrides::empty() const {
   return !panel_bg && !code_bg && !text && !title && !directory && !file;
 }
 
-void set_mode(ThemeMode mode) { g_mode = mode; }
+void set_mode(ThemeMode mode) {
+  if (g_mode != mode) {
+    g_mode = mode;
+    bump_colors_revision();
+  }
+}
 
 ThemeMode current_mode() { return g_mode; }
 
-void set_ui_overrides(const UiColorOverrides& overrides) { g_overrides = overrides; }
+int listed_preset_count() {
+  return static_cast<int>(sizeof(kListedPresets) / sizeof(kListedPresets[0]));
+}
+
+UiColorPreset listed_preset_at(int index) {
+  if (index < 0 || index >= listed_preset_count()) {
+    return UiColorPreset::kDarkClassic;
+  }
+  return kListedPresets[index];
+}
+
+int index_of_listed_preset(UiColorPreset preset) {
+  for (int i = 0; i < listed_preset_count(); ++i) {
+    if (kListedPresets[i] == preset) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+void apply_color_preset(UiColorPreset preset, const UiColorOverrides& custom_overrides) {
+  g_color_preset = preset;
+  if (preset == UiColorPreset::kCustom) {
+    g_preset_palette.reset();
+    g_overrides = custom_overrides;
+    if (custom_overrides.code_bg) {
+      g_mode = luminance(*custom_overrides.code_bg) > 140 ? ThemeMode::kLight : ThemeMode::kDark;
+    }
+    bump_colors_revision();
+    return;
+  }
+  g_preset_palette = preset_palette(preset);
+  g_overrides = overrides_for_preset(preset);
+  g_mode = theme_mode_for_preset(preset);
+  bump_colors_revision();
+}
+
+UiColorPreset current_color_preset() { return g_color_preset; }
+
+uint64_t colors_revision() { return g_colors_revision; }
+
+void set_ui_overrides(const UiColorOverrides& overrides) {
+  g_overrides = overrides;
+  if (!overrides.empty()) {
+    g_color_preset = UiColorPreset::kCustom;
+    g_preset_palette.reset();
+    if (overrides.code_bg) {
+      g_mode = luminance(*overrides.code_bg) > 140 ? ThemeMode::kLight : ThemeMode::kDark;
+    }
+  }
+  bump_colors_revision();
+}
 
 const UiColorOverrides& current_ui_overrides() { return g_overrides; }
 
-void clear_ui_overrides() { g_overrides = {}; }
+void clear_ui_overrides() {
+  g_overrides = {};
+  bump_colors_revision();
+}
 
 UiColorOverrides overrides_for_preset(UiColorPreset preset) {
   return make_preset_overrides(preset);
@@ -226,9 +422,17 @@ ThemeMode theme_mode_for_preset(UiColorPreset preset) {
   switch (preset) {
     case UiColorPreset::kLightClassic:
     case UiColorPreset::kLightPaper:
+    case UiColorPreset::kGruvboxLight:
+    case UiColorPreset::kSolarizedLight:
       return ThemeMode::kLight;
     case UiColorPreset::kDarkClassic:
     case UiColorPreset::kDarkSoft:
+    case UiColorPreset::kNord:
+    case UiColorPreset::kGruvboxDark:
+    case UiColorPreset::kOneDark:
+    case UiColorPreset::kDracula:
+    case UiColorPreset::kMonokai:
+    case UiColorPreset::kTokyoNight:
     case UiColorPreset::kCustom:
     default:
       return ThemeMode::kDark;
@@ -251,6 +455,30 @@ UiColorPreset parse_ui_color_preset(const std::string& name) {
   if (lower == "light_paper" || lower == "claro_papel") {
     return UiColorPreset::kLightPaper;
   }
+  if (lower == "nord") {
+    return UiColorPreset::kNord;
+  }
+  if (lower == "gruvbox_dark" || lower == "gruvbox") {
+    return UiColorPreset::kGruvboxDark;
+  }
+  if (lower == "one_dark" || lower == "onedark") {
+    return UiColorPreset::kOneDark;
+  }
+  if (lower == "dracula") {
+    return UiColorPreset::kDracula;
+  }
+  if (lower == "monokai") {
+    return UiColorPreset::kMonokai;
+  }
+  if (lower == "tokyo_night" || lower == "tokyonight") {
+    return UiColorPreset::kTokyoNight;
+  }
+  if (lower == "gruvbox_light") {
+    return UiColorPreset::kGruvboxLight;
+  }
+  if (lower == "solarized_light" || lower == "solarized") {
+    return UiColorPreset::kSolarizedLight;
+  }
   if (lower == "custom") {
     return UiColorPreset::kCustom;
   }
@@ -267,6 +495,22 @@ const char* ui_color_preset_name(UiColorPreset preset) {
       return "light_classic";
     case UiColorPreset::kLightPaper:
       return "light_paper";
+    case UiColorPreset::kNord:
+      return "nord";
+    case UiColorPreset::kGruvboxDark:
+      return "gruvbox_dark";
+    case UiColorPreset::kOneDark:
+      return "one_dark";
+    case UiColorPreset::kDracula:
+      return "dracula";
+    case UiColorPreset::kMonokai:
+      return "monokai";
+    case UiColorPreset::kTokyoNight:
+      return "tokyo_night";
+    case UiColorPreset::kGruvboxLight:
+      return "gruvbox_light";
+    case UiColorPreset::kSolarizedLight:
+      return "solarized_light";
     case UiColorPreset::kCustom:
       return "custom";
   }
@@ -283,6 +527,22 @@ std::string ui_color_preset_label(UiColorPreset preset) {
       return i18n::tr("theme.preset.light_classic");
     case UiColorPreset::kLightPaper:
       return i18n::tr("theme.preset.light_paper");
+    case UiColorPreset::kNord:
+      return i18n::tr("theme.preset.nord");
+    case UiColorPreset::kGruvboxDark:
+      return i18n::tr("theme.preset.gruvbox_dark");
+    case UiColorPreset::kOneDark:
+      return i18n::tr("theme.preset.one_dark");
+    case UiColorPreset::kDracula:
+      return i18n::tr("theme.preset.dracula");
+    case UiColorPreset::kMonokai:
+      return i18n::tr("theme.preset.monokai");
+    case UiColorPreset::kTokyoNight:
+      return i18n::tr("theme.preset.tokyo_night");
+    case UiColorPreset::kGruvboxLight:
+      return i18n::tr("theme.preset.gruvbox_light");
+    case UiColorPreset::kSolarizedLight:
+      return i18n::tr("theme.preset.solarized_light");
     case UiColorPreset::kCustom:
       return i18n::tr("theme.preset.custom");
   }

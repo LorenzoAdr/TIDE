@@ -782,8 +782,12 @@ void Application::sync_activity_phase_effects() {
 
 void Application::apply_workspace_settings(const WorkspaceConfig &config) {
 	workspace_config_ = config;
-	theme::set_mode(workspace_config_.theme);
-	theme::set_ui_overrides(workspace_config_.ui_colors);
+	if (workspace_config_.ui_colors_preset == theme::UiColorPreset::kCustom) {
+		theme::apply_color_preset(theme::UiColorPreset::kCustom, workspace_config_.ui_colors);
+		theme::set_mode(workspace_config_.theme);
+	} else {
+		theme::apply_color_preset(workspace_config_.ui_colors_preset);
+	}
 	if (workspace_.root.empty()) {
 		return;
 	}
@@ -997,8 +1001,12 @@ void Application::set_workspace(const std::string &workspace_root,
 	model_.console_output.clear();
 	request_terminal_autostart();
 	workspace_config_ = WorkspaceConfig::load(absolute);
-	theme::set_mode(workspace_config_.theme);
-	theme::set_ui_overrides(workspace_config_.ui_colors);
+	if (workspace_config_.ui_colors_preset == theme::UiColorPreset::kCustom) {
+		theme::apply_color_preset(theme::UiColorPreset::kCustom, workspace_config_.ui_colors);
+		theme::set_mode(workspace_config_.theme);
+	} else {
+		theme::apply_color_preset(workspace_config_.ui_colors_preset);
+	}
 	const ClangFormatConfig format_config = load_clang_format(absolute);
 	clang_format_config_ = format_config;
 	{
