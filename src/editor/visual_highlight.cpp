@@ -9,7 +9,6 @@
 
 #include "editor/editor_buffer_source.hpp"
 #include "indexer/index_rules.hpp"
-#include "lsp/diagnostics.hpp"
 #include "parser/tree_sitter_blocks.hpp"
 #include "parser/tree_sitter_document.hpp"
 #include "parser/tree_sitter_locals.hpp"
@@ -130,11 +129,22 @@ void VisualHighlightService::begin_sync_result_wait(uint64_t generation) {
 
 bool VisualHighlightService::wait_for_pending_result(uint64_t generation) {
   std::unique_lock<std::mutex> lock(result_sync_mutex_);
-  result_sync_cv_.wait_for(lock, std::chrono::milliseconds(100), [this, generation] {
+  result_sync_cv_.wait_for(lock, std::chrono::milliseconds(3000), [this, generation] {
     return completed_generation_ >= generation || stop_.load(std::memory_order_acquire);
   });
+  const bool ready = completed_generation_ >= generation;
   sync_wait_generation_.store(0, std::memory_order_release);
-  return completed_generation_ >= generation;
+  return ready;
+}
+
+void VisualHighlightService::request_completion_wake(uint64_t generation) {
+  completion_wake_generation_.store(generation, std::memory_order_release);
+}
+
+void VisualHighlightService::clear_completion_wake(uint64_t generation) {
+  if (completion_wake_generation_.load(std::memory_order_acquire) == generation) {
+    completion_wake_generation_.store(0, std::memory_order_release);
+  }
 }
 
 bool VisualHighlightService::consume_debounce_due() {
@@ -206,52 +216,11 @@ std::vector<VisualHighlightSnapshot> VisualHighlightService::drain_results() {
 
 namespace {
 
-std::vector<std::string> split_source_lines(const std::string& source) {
-  std::vector<std::string> lines;
-  std::size_t start = 0;
-  while (start <= source.size()) {
-    const std::size_t end = source.find('\n', start);
-    if (end == std::string::npos) {
-      lines.emplace_back(source.substr(start));
-      break;
-    }
-    lines.emplace_back(source.substr(start, end - start));
-    start = end + 1;
-  }
-  if (source.empty()) {
-    lines.emplace_back("");
-  }
-  return lines;
-}
-
-void build_diagnostic_suffix_snapshot(const VisualHighlightJob& job,
-                                      VisualHighlightSnapshot* snap) {
-  if (snap == nullptr || !job.config.diagnostic_suffixes || !job.inputs.diagnostics_ui_allowed ||
-      job.inputs.code_width <= 0 || job.inputs.diagnostics_by_line.empty()) {
-    return;
-  }
-  const std::vector<std::string> lines = split_source_lines(job.source);
-  snap->diagnostic_suffix_code_width = job.inputs.code_width;
-  for (const auto& entry : job.inputs.diagnostics_by_line) {
-    const int line = entry.first;
-    if (line < 0 || line >= static_cast<int>(lines.size())) {
-      continue;
-    }
-    const int max_suffix =
-        job.inputs.code_width - static_cast<int>(lines[static_cast<std::size_t>(line)].size()) - 2;
-    const std::string suffix = build_diagnostic_suffix(entry.second, max_suffix);
-    if (!suffix.empty()) {
-      snap->diagnostic_suffix_by_line[line] = suffix;
-    }
-  }
-}
-
 void build_overview_snapshot(const VisualHighlightJob& job, VisualHighlightSnapshot* snap) {
   if (snap == nullptr || !job.config.overview_ruler) {
     return;
   }
   snap->overview.total_lines = job.inputs.total_lines;
-  snap->overview.diagnostics_by_line = job.inputs.diagnostics_by_line;
   snap->overview.git_changed_lines = job.inputs.git_changed_lines;
   snap->overview.git_untracked_all = job.inputs.git_untracked_all;
   snap->overview.text_matches = job.inputs.text_matches;
@@ -293,7 +262,6 @@ VisualHighlightSnapshot VisualHighlightService::compute(const VisualHighlightJob
     }
   }
 
-  build_diagnostic_suffix_snapshot(job, &snap);
   build_overview_snapshot(job, &snap);
 
   if (tree_snapshot.tree_copy != nullptr) {
@@ -323,8 +291,11 @@ void VisualHighlightService::worker_main() {
     }
     result_sync_cv_.notify_all();
     const uint64_t sync_gen = sync_wait_generation_.load(std::memory_order_acquire);
+    const uint64_t completion_wake = completion_wake_generation_.load(std::memory_order_acquire);
     const bool suppress_wake = snap.ready && sync_gen == snap.generation;
-    if (result_wake_callback_ && snap.ready && !suppress_wake) {
+    if (result_wake_callback_ && snap.ready && !suppress_wake &&
+        completion_wake == snap.generation) {
+      completion_wake_generation_.store(0, std::memory_order_release);
       result_wake_callback_();
     }
   }
@@ -506,6 +477,7 @@ bool drain_visual_highlight_results(VisualHighlightPanelState* state, const Edit
 
   merged.ready = revision_match && cursor_match;
   state->snapshot = std::move(merged);
+  visual_highlight_service().clear_completion_wake(state->pending_generation);
 
   if (!revision_match || (editor_focused && !cursor_match)) {
     state->dirty = true;

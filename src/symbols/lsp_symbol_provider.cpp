@@ -59,7 +59,12 @@ void LspSymbolProvider::refresh_diagnostics_cache_locked() const {
   cached_diag_revision_ = revision;
 }
 
-LspSymbolProvider::LspSymbolProvider() = default;
+LspSymbolProvider::LspSymbolProvider() {
+  did_change_timer_ = std::thread([this] {
+    set_current_thread_name("lsp-didchange");
+    did_change_timer_main();
+  });
+}
 
 LspSymbolProvider::~LspSymbolProvider() {
   on_workspace_closed();
@@ -765,8 +770,69 @@ void LspSymbolProvider::set_async_job_ready_callback(std::function<void(LspAsync
   async_job_ready_callback_ = std::move(callback);
 }
 
-void LspSymbolProvider::set_diagnostics_notify_callback(std::function<void()> callback) {
+void LspSymbolProvider::set_diagnostics_notify_callback(
+    std::function<void(const std::string& path)> callback) {
   client_.set_diagnostics_notify_callback(std::move(callback));
+}
+
+void LspSymbolProvider::set_did_change_debounce_callback(std::function<void()> callback) {
+  std::lock_guard<std::mutex> lock(did_change_debounce_callback_mutex_);
+  did_change_debounce_callback_ = std::move(callback);
+}
+
+void LspSymbolProvider::request_did_change_wake_after(int64_t delay_ms) {
+  if (delay_ms < 0) {
+    delay_ms = 0;
+  }
+  const int64_t fire_at = steady_now_ms() + delay_ms;
+  {
+    std::lock_guard<std::mutex> lock(did_change_timer_mutex_);
+    if (did_change_timer_fire_at_ms_ == 0 || fire_at > did_change_timer_fire_at_ms_) {
+      did_change_timer_fire_at_ms_ = fire_at;
+    }
+  }
+  did_change_timer_cv_.notify_one();
+}
+
+void LspSymbolProvider::schedule_did_change_debounce_wake() {
+  request_did_change_wake_after(kLspDidChangeDebounceMs);
+}
+
+void LspSymbolProvider::did_change_timer_main() {
+  while (!did_change_timer_stop_.load(std::memory_order_acquire)) {
+    int64_t fire_at = 0;
+    {
+      std::unique_lock<std::mutex> lock(did_change_timer_mutex_);
+      did_change_timer_cv_.wait(lock, [this] {
+        return did_change_timer_stop_.load(std::memory_order_acquire) ||
+               did_change_timer_fire_at_ms_ != 0;
+      });
+      if (did_change_timer_stop_.load(std::memory_order_acquire)) {
+        break;
+      }
+      fire_at = did_change_timer_fire_at_ms_;
+      const int64_t now = steady_now_ms();
+      if (fire_at > now) {
+        did_change_timer_cv_.wait_for(lock, std::chrono::milliseconds(fire_at - now), [this, fire_at] {
+          return did_change_timer_stop_.load(std::memory_order_acquire) ||
+                 did_change_timer_fire_at_ms_ != fire_at;
+        });
+      }
+      if (did_change_timer_fire_at_ms_ == fire_at) {
+        did_change_timer_fire_at_ms_ = 0;
+      } else {
+        continue;
+      }
+    }
+    std::function<void()> callback;
+    {
+      std::lock_guard<std::mutex> lock(did_change_debounce_callback_mutex_);
+      callback = did_change_debounce_callback_;
+    }
+    if (callback) {
+      callback();
+    }
+  }
 }
 
 void LspSymbolProvider::set_lsp_request_counter(std::atomic<uint64_t>* counter) {
@@ -812,6 +878,16 @@ void LspSymbolProvider::on_workspace_opened(const std::string& root,
 void LspSymbolProvider::on_workspace_closed() {
   if (shutting_down_.exchange(true, std::memory_order_acq_rel)) {
     return;
+  }
+  did_change_timer_stop_.store(true, std::memory_order_release);
+  {
+    std::lock_guard<std::mutex> lock(did_change_timer_mutex_);
+    did_change_timer_fire_at_ms_ = 0;
+  }
+  did_change_timer_cv_.notify_all();
+  if (did_change_timer_.joinable() &&
+      did_change_timer_.get_id() != std::this_thread::get_id()) {
+    did_change_timer_.join();
   }
   pending_transport_restart_.store(false, std::memory_order_release);
   stop_lsp();
@@ -883,6 +959,7 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
         const std::string key = normalize_lsp_path(path);
         if (!key.empty() && use_lsp_ && is_lsp_trackable_path(path, text)) {
           pending_did_change_[key] = steady_now_ms();
+          schedule_did_change_debounce_wake();
         }
       }
       ensure_open = use_lsp_ && is_lsp_trackable_path(path, text) && client_.ready() &&
@@ -934,6 +1011,7 @@ void LspSymbolProvider::on_document_changed(const std::string& path, const std::
   const std::string key = normalize_lsp_path(path);
   if (!key.empty()) {
     pending_did_change_[key] = steady_now_ms();
+    schedule_did_change_debounce_wake();
   }
 }
 
@@ -1385,7 +1463,9 @@ DocumentDiagnostics LspSymbolProvider::diagnostics_for_file(const std::string& p
       return doc;
     }
   }
-  return {};
+  DocumentDiagnostics empty;
+  empty.path = key;
+  return empty;
 }
 
 std::vector<DocumentDiagnostics> LspSymbolProvider::workspace_diagnostics() {

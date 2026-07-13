@@ -1102,6 +1102,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       }
       if (symbols != nullptr &&
           symbols->diagnostics_revision() != layout_state->panel_cache_diagnostics_revision) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::EditorCenter);
         layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
         layout_state->panel_cache_diagnostics_revision = symbols->diagnostics_revision();
       }

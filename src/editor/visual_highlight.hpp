@@ -12,7 +12,6 @@
 #include "app/app_settings.hpp"
 #include "editor/bracket_match.hpp"
 #include "editor/text_search.hpp"
-#include "lsp/diagnostics.hpp"
 #include "parser/tree_sitter_locals.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/main_layout.hpp"
@@ -41,7 +40,6 @@ struct VisualHighlightConfig {
 VisualHighlightConfig visual_highlight_config_from_settings(const AppSettings* settings);
 
 struct VisualHighlightOverviewData {
-  std::unordered_map<int, std::vector<Diagnostic>> diagnostics_by_line;
   std::unordered_set<int> git_changed_lines;
   bool git_untracked_all = false;
   std::vector<TextMatch> text_matches;
@@ -59,8 +57,6 @@ struct VisualHighlightSnapshot {
   ScopeLineRange immediate_scope;
   std::vector<ColoredBraceMarker> colored_braces;
   std::vector<SymbolInfo> file_symbols;
-  std::unordered_map<int, std::string> diagnostic_suffix_by_line;
-  int diagnostic_suffix_code_width = 0;
   VisualHighlightOverviewData overview;
   bool ready = false;
 };
@@ -86,8 +82,6 @@ struct VisualHighlightPanelState {
 struct VisualHighlightJobInputs {
   int code_width = 0;
   int total_lines = 0;
-  bool diagnostics_ui_allowed = false;
-  std::unordered_map<int, std::vector<Diagnostic>> diagnostics_by_line;
   std::unordered_set<int> git_changed_lines;
   bool git_untracked_all = false;
   std::vector<TextMatch> text_matches;
@@ -119,6 +113,8 @@ class VisualHighlightService {
   void clear_debounce_wake_scheduled();
   void begin_sync_result_wait(uint64_t generation);
   bool wait_for_pending_result(uint64_t generation);
+  void request_completion_wake(uint64_t generation);
+  void clear_completion_wake(uint64_t generation);
 
  private:
   VisualHighlightService();
@@ -142,6 +138,7 @@ class VisualHighlightService {
   std::mutex result_sync_mutex_;
   std::condition_variable result_sync_cv_;
   std::atomic<uint64_t> sync_wait_generation_{0};
+  std::atomic<uint64_t> completion_wake_generation_{0};
   uint64_t completed_generation_ = 0;
   std::mutex wake_timer_mutex_;
   std::condition_variable wake_timer_cv_;

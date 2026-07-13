@@ -99,7 +99,8 @@ class LspSymbolProvider : public ISymbolProvider {
   void set_ui_inhibited(bool inhibited);
   void set_lsp_request_counter(std::atomic<uint64_t>* counter);
   void set_async_job_ready_callback(std::function<void(LspAsyncJobKind)> callback);
-  void set_diagnostics_notify_callback(std::function<void()> callback);
+  void set_diagnostics_notify_callback(std::function<void(const std::string& path)> callback);
+  void set_did_change_debounce_callback(std::function<void()> callback);
 
  private:
   enum class AsyncJobKind { DocumentSymbols, SemanticTokens, Hover, Completion };
@@ -141,6 +142,9 @@ class LspSymbolProvider : public ISymbolProvider {
   void flush_pending_did_change_for_key_locked(const std::string& key);
   void flush_pending_did_change_for_key(const std::string& key);
   void flush_all_pending_did_change_locked();
+  void schedule_did_change_debounce_wake();
+  void request_did_change_wake_after(int64_t delay_ms);
+  void did_change_timer_main();
   bool sync_document_for_completion(const std::string& path, const std::string& text);
   void open_companion_sources_for_clangd_locked(const std::string& header_path);
   void clear_shadow_companion_locked(const std::string& companion_path);
@@ -194,6 +198,13 @@ class LspSymbolProvider : public ISymbolProvider {
   bool async_drain_invalidates_view_ = true;
   std::function<void(LspAsyncJobKind)> async_job_ready_callback_;
   std::mutex async_job_ready_callback_mutex_;
+  std::function<void()> did_change_debounce_callback_;
+  std::mutex did_change_debounce_callback_mutex_;
+  std::thread did_change_timer_;
+  std::atomic<bool> did_change_timer_stop_{false};
+  std::mutex did_change_timer_mutex_;
+  std::condition_variable did_change_timer_cv_;
+  int64_t did_change_timer_fire_at_ms_ = 0;
 };
 
 }  // namespace tgdb

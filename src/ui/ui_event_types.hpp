@@ -28,6 +28,8 @@ struct UiEventDrainPlan {
   bool run_editor = false;
   bool run_ui_tasks = false;
   bool run_full_background = false;
+  bool lsp_diag_only = false;
+  bool lsp_completion_only = false;
 };
 
 const char* ui_event_kind_label(UiEventKind kind);

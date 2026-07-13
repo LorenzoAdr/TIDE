@@ -56,6 +56,9 @@ class TreeSitterService {
   // Patch one line of the frozen baseline from the live tree (called when typing settles).
   void commit_line_highlights(const std::string& path, const std::string& source, int line_0,
                               const std::string& line_text);
+  // True when cached baseline TS spans still cover at least one token on line_text.
+  bool line_highlights_trustworthy_for_line(const std::string& path, const std::string& source,
+                                            int line_0, const std::string& line_text) const;
   ftxui::Element highlight_line(const std::string& path, const std::string& source, int line_index,
                                 int cursor_col = -1, ftxui::Decorator cursor_style = {},
                                 int col_offset = 0);

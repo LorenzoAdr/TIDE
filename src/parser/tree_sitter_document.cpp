@@ -89,6 +89,58 @@ int count_source_lines(const std::string& source) {
   return lines;
 }
 
+bool highlight_spans_map_to_line(const LineHighlights& highlights, const std::string& line_text) {
+  if (line_text.empty()) {
+    return highlights.spans.empty();
+  }
+  for (const HighlightSpan& span : highlights.spans) {
+    if (span.end_col > span.start_col && span.start_col < static_cast<int>(line_text.size())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string source_line_at(const std::string& source, int line_0) {
+  if (line_0 < 0 || source.empty()) {
+    return {};
+  }
+  int line = 0;
+  std::size_t begin = 0;
+  for (;;) {
+    const std::size_t end = source.find('\n', begin);
+    if (line == line_0) {
+      return source.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+    }
+    if (end == std::string::npos) {
+      return {};
+    }
+    begin = end + 1;
+    ++line;
+  }
+}
+
+void preserve_trustworthy_line_highlights(std::vector<LineHighlights>* incoming,
+                                            const std::vector<LineHighlights>& existing,
+                                            const std::string& source) {
+  if (incoming == nullptr || incoming->empty() || existing.size() != incoming->size()) {
+    return;
+  }
+  const int line_count = static_cast<int>(incoming->size());
+  for (int i = 0; i < line_count; ++i) {
+    const std::string line_text = source_line_at(source, i);
+    if (line_text.empty()) {
+      continue;
+    }
+    const LineHighlights& new_hl = (*incoming)[static_cast<std::size_t>(i)];
+    const LineHighlights& old_hl = existing[static_cast<std::size_t>(i)];
+    if (!highlight_spans_map_to_line(new_hl, line_text) &&
+        highlight_spans_map_to_line(old_hl, line_text)) {
+      (*incoming)[static_cast<std::size_t>(i)] = old_hl;
+    }
+  }
+}
+
 // A plain `Enter` splits one line into a prefix (kept at the same index) and a
 // suffix that becomes the new line below it. That suffix isn't actually new
 // content -- it's the tail of a line tree-sitter already had highlights for --
@@ -951,6 +1003,9 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
         ts_tree_delete(entry->tree);
       }
       entry->tree = tree;
+      if (!highlights.empty() && entry->line_highlights.size() == highlights.size()) {
+        preserve_trustworthy_line_highlights(&highlights, entry->line_highlights, job.source);
+      }
       entry->line_highlights = std::move(highlights);
       entry->parse_ready = tree != nullptr;
       entry->highlights_ready = entry->parse_ready;

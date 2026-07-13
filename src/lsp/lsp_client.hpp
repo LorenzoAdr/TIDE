@@ -98,7 +98,7 @@ class LspClient {
   std::vector<DocumentDiagnostics> all_diagnostics() const;
   uint64_t diagnostics_revision() const { return diagnostics_revision_.load(); }
 
-  void set_diagnostics_notify_callback(std::function<void()> callback);
+  void set_diagnostics_notify_callback(std::function<void(const std::string& path)> callback);
 
  private:
   struct DocumentState {
@@ -185,7 +185,7 @@ class LspClient {
   std::atomic<uint64_t>* request_counter_ = nullptr;
   std::atomic<int> inflight_completion_request_id_{0};
   std::atomic<int> latest_completion_request_id_{0};
-  std::function<void()> diagnostics_notify_callback_;
+  std::function<void(const std::string& path)> diagnostics_notify_callback_;
 };
 
 }  // namespace tgdb

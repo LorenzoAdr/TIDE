@@ -21,7 +21,18 @@ bool UiEventDispatcher::correlation_still_valid(uint64_t id) const {
   return id != 0 && id == active_correlation_id_;
 }
 
-void UiEventDispatcher::enqueue(UiEvent event) {
+void UiEventDispatcher::post_custom_coalesced(bool urgent) {
+  if (screen_ == nullptr) {
+    return;
+  }
+  (void)urgent;
+  if (custom_pending_.exchange(true, std::memory_order_acq_rel)) {
+    return;
+  }
+  screen_->PostEvent(Event::Custom);
+}
+
+void UiEventDispatcher::enqueue(UiEvent event, bool urgent) {
   if (event.tag.empty()) {
     event.tag = "unnamed";
   }
@@ -29,21 +40,26 @@ void UiEventDispatcher::enqueue(UiEvent event) {
     std::lock_guard<std::mutex> lock(pending_mutex_);
     pending_events_.push_back(std::move(event));
   }
-  post_custom_coalesced();
+  post_custom_coalesced(urgent);
 }
 
-void UiEventDispatcher::post_custom_coalesced() {
+void UiEventDispatcher::enqueue(UiEvent event) { enqueue(std::move(event), false); }
+
+void UiEventDispatcher::emit(UiEvent event) { enqueue(std::move(event), false); }
+
+void UiEventDispatcher::emit_urgent(UiEvent event) { enqueue(std::move(event), true); }
+
+void UiEventDispatcher::post_repaint_urgent() {
   if (screen_ == nullptr) {
     return;
   }
-  if (custom_pending_.exchange(true, std::memory_order_acq_rel)) {
-    return;
-  }
-  screen_->PostEvent(Event::Custom);
-}
-
-void UiEventDispatcher::emit(UiEvent event) {
-  enqueue(std::move(event));
+  UiEvent event;
+  event.kind = UiEventKind::InputCorrelated;
+  event.tag = "ui.repaint_urgent";
+  event.src_file = __FILE__;
+  event.src_line = __LINE__;
+  enqueue(std::move(event), true);
+  request_animation_frame();
 }
 
 void UiEventDispatcher::emit_correlated_if_valid(uint64_t correlation_id, std::string tag,
@@ -87,6 +103,30 @@ void UiEventDispatcher::emit_debug(std::string tag, std::function<void()> pre_pa
   emit(std::move(event));
 }
 
+void UiEventDispatcher::post_repaint_custom() {
+  if (screen_ == nullptr) {
+    return;
+  }
+  screen_->PostEvent(Event::Custom);
+}
+
+void UiEventDispatcher::post_on_main(std::function<void()> fn) {
+  if (!fn) {
+    return;
+  }
+  if (screen_ == nullptr) {
+    fn();
+    return;
+  }
+  screen_->Post(std::move(fn));
+}
+
+void UiEventDispatcher::request_animation_frame() {
+  if (screen_ != nullptr) {
+    screen_->RequestAnimationFrame();
+  }
+}
+
 UiEventDrainPlan UiEventDispatcher::drain_pending(int64_t now_ms) {
   (void)now_ms;
   custom_pending_.store(false, std::memory_order_release);
@@ -103,6 +143,8 @@ UiEventDrainPlan UiEventDispatcher::drain_pending(int64_t now_ms) {
     if (event.pre_paint) {
       event.pre_paint();
     }
+    const bool is_lsp_diag = event.tag == "lsp.diagnostics";
+    const bool is_lsp_completion = event.tag == "lsp.completion";
     switch (event.kind) {
       case UiEventKind::TerminalOutput:
         plan.run_terminal = true;
@@ -115,11 +157,33 @@ UiEventDrainPlan UiEventDispatcher::drain_pending(int64_t now_ms) {
         break;
       case UiEventKind::UserInput:
       case UiEventKind::InputCorrelated:
-        plan.run_editor = true;
-        plan.run_ui_tasks = true;
-        plan.run_full_background = true;
+        if (!is_lsp_diag && !is_lsp_completion) {
+          plan.run_editor = true;
+          plan.run_ui_tasks = true;
+          plan.run_full_background = true;
+        }
         break;
     }
+  }
+  if (!events.empty()) {
+    plan.lsp_diag_only = true;
+    plan.lsp_completion_only = true;
+    for (const UiEvent& event : events) {
+      if (event.tag != "lsp.diagnostics") {
+        plan.lsp_diag_only = false;
+      }
+      if (event.tag != "lsp.completion") {
+        plan.lsp_completion_only = false;
+      }
+    }
+  }
+  bool repost = false;
+  {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    repost = !pending_events_.empty();
+  }
+  if (repost) {
+    post_custom_coalesced(false);
   }
   return plan;
 }

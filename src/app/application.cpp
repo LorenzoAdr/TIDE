@@ -54,6 +54,7 @@
 #include "ui/terminal_ui_channel.hpp"
 #include "ui/debug_ui_channel.hpp"
 #include "ui/ui_event_dispatcher.hpp"
+#include "ui/ui_wake.hpp"
 #include "ui/ui_wake_policy.hpp"
 #include "ui/theme.hpp"
 #include "util/bundled_tools.hpp"
@@ -217,6 +218,12 @@ Component WrapUiTickPost(Component child, MainLayoutState *layout, ScreenInterac
 			if (!is_custom && significant && application_ != nullptr) {
 				application_->run_input_sync_drain(steady_now_ms());
 			}
+			// FTXUI solo invalida frame_valid_ cuando OnEvent devuelve false. Si un hijo
+			// devuelve true en Custom (p. ej. consola), Draw() se salta aunque el apply
+			// LSP ya corrió en screen->Post — el 3.er repintado nunca llega al terminal.
+			if (is_custom && handled) {
+				return false;
+			}
 			return handled;
 		}
 
@@ -262,9 +269,27 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	symbol_provider_->set_lsp_request_counter(&layout_state_.ui_lsp_request_count);
 	symbol_provider_->set_async_job_ready_callback([this](LspAsyncJobKind kind) {
 		switch (kind) {
-		case LspAsyncJobKind::Completion:
-			UI_WAKE_REASON(&layout_state_, UiWakeReason::LspCompletion);
+		case LspAsyncJobKind::Completion: {
+			// Poll en pre_paint (como lsp.diagnostics): wake sin run_editor evita el
+			// 4.º repintado VH, pero garantiza poll+overlay en cada paquete LSP.
+			UiEvent event;
+			event.kind = UiEventKind::InputCorrelated;
+			event.correlation_id = ui_event_dispatcher_.current_correlation_id();
+			event.tag = std::string(ui_wake_spec(UiWakeReason::LspCompletion).tag);
+			event.src_file = __FILE__;
+			event.src_line = __LINE__;
+			event.pre_paint = [this]() {
+				const auto dispatch = [&](EditorPanelHandlers &handlers) {
+					if (handlers.completion_received_handler && symbol_provider_) {
+						handlers.completion_received_handler(symbol_provider_.get());
+					}
+				};
+				dispatch(layout_state_.primary_editor);
+				dispatch(layout_state_.secondary_editor);
+			};
+			ui_event_dispatcher_.emit_urgent(std::move(event));
 			break;
+		}
 		case LspAsyncJobKind::Hover:
 			UI_WAKE_REASON(&layout_state_, UiWakeReason::LspHover);
 			break;
@@ -276,8 +301,36 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 			break;
 		}
 	});
-	symbol_provider_->set_diagnostics_notify_callback([this] {
-		UI_WAKE_REASON(&layout_state_, UiWakeReason::LspDiagnostics);
+	symbol_provider_->set_did_change_debounce_callback([this] {
+		if (layout_state_.ui_events != nullptr) {
+			layout_state_.ui_events->post_on_main([this] {
+				if (symbol_provider_) {
+					symbol_provider_->tick_debounced_updates();
+				}
+			});
+		} else if (symbol_provider_) {
+			symbol_provider_->tick_debounced_updates();
+		}
+	});
+	symbol_provider_->set_diagnostics_notify_callback([this](const std::string& path) {
+		// Un solo Custom urgente: apply en pre_paint y Draw en el mismo ciclo OnEvent
+		// (post_on_main + Custom separado desincronizaba apply y repintado).
+		UiEvent event;
+		event.kind = UiEventKind::InputCorrelated;
+		event.correlation_id = ui_event_dispatcher_.current_correlation_id();
+		event.tag = std::string(ui_wake_spec(UiWakeReason::LspDiagnostics).tag);
+		event.src_file = __FILE__;
+		event.src_line = __LINE__;
+		event.pre_paint = [this, path]() {
+			const auto dispatch = [&](EditorPanelHandlers& handlers) {
+				if (handlers.diagnostics_received_handler) {
+					handlers.diagnostics_received_handler(symbol_provider_.get(), path);
+				}
+			};
+			dispatch(layout_state_.primary_editor);
+			dispatch(layout_state_.secondary_editor);
+		};
+		ui_event_dispatcher_.emit_urgent(std::move(event));
 	});
 	app_settings_ = AppSettings::load();
 	i18n::set_locale(app_settings_.ui_locale);

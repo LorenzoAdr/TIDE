@@ -343,6 +343,25 @@ void TreeSitterService::commit_line_highlights(const std::string& path, const st
   doc->line_highlights[static_cast<std::size_t>(line_0)] = *live;
 }
 
+bool TreeSitterService::line_highlights_trustworthy_for_line(const std::string& path,
+                                                              const std::string& source, int line_0,
+                                                              const std::string& line_text) const {
+  if (path.empty() || line_0 < 0 || source.empty()) {
+    return false;
+  }
+  if (line_text.empty()) {
+    return true;
+  }
+  const std::string canonical = normalize_editor_source(source);
+  const DocumentPtr doc = cache_.lookup(cache_key_for(path));
+  if (doc == nullptr || doc->source != canonical || doc->line_highlights.empty() ||
+      line_0 >= static_cast<int>(doc->line_highlights.size())) {
+    return false;
+  }
+  return highlight_spans_map_to_line(doc->line_highlights[static_cast<std::size_t>(line_0)],
+                                     line_text);
+}
+
 ftxui::Element TreeSitterService::highlight_line(const std::string& path,
                                                  const std::string& source, int line_index,
                                                  int cursor_col, ftxui::Decorator cursor_style,

@@ -35,6 +35,17 @@ bool diagnostics_display_allowed(const int64_t last_content_edit_ms, ISymbolProv
   return true;
 }
 
+bool diagnostics_reveal_allowed(const int64_t last_content_edit_ms, ISymbolProvider* symbols,
+                                const std::string& path, const bool lsp_ui_allowed) {
+  if (!lsp_ui_allowed || path.empty() || symbols == nullptr || !symbols->supports_diagnostics()) {
+    return false;
+  }
+  if (symbols->diagnostics_display_ready(path)) {
+    return true;
+  }
+  return diagnostics_display_allowed(last_content_edit_ms, symbols, path, lsp_ui_allowed);
+}
+
 int count_errors(const DocumentDiagnostics& doc) {
   int n = 0;
   for (const auto& item : doc.items) {

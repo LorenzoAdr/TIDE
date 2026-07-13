@@ -83,6 +83,9 @@ struct EditorPanelHandlers {
   std::function<bool(const ftxui::Event&)> chrome_mouse_handler;
   std::function<void(ftxui::Event&)> modifier_handler;
   std::function<void()> tick_callback;
+  std::function<void(ISymbolProvider* symbols, const std::string& notified_path)>
+      diagnostics_received_handler;
+  std::function<void(ISymbolProvider* symbols)> completion_received_handler;
   std::function<int()> visible_line_count;
 };
 

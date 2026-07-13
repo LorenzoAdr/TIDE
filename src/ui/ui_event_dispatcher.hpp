@@ -26,6 +26,7 @@ class UiEventDispatcher {
   bool correlation_still_valid(uint64_t id) const;
 
   void emit(UiEvent event);
+  void emit_urgent(UiEvent event);
   void emit_correlated_if_valid(uint64_t correlation_id, std::string tag,
                                 std::function<void()> pre_paint, const char* src_file,
                                 int src_line);
@@ -36,12 +37,17 @@ class UiEventDispatcher {
                   int src_line);
 
   UiEventDrainPlan drain_pending(int64_t now_ms);
+  void post_on_main(std::function<void()> fn);
+  void post_repaint_custom();
+  void request_animation_frame();
+  void post_repaint_urgent();
   UiEventTrace& trace();
   const UiEventTrace& trace() const;
 
  private:
   void enqueue(UiEvent event);
-  void post_custom_coalesced();
+  void enqueue(UiEvent event, bool urgent);
+  void post_custom_coalesced(bool urgent = false);
 
   ftxui::ScreenInteractive* screen_ = nullptr;
   std::atomic<bool> custom_pending_{false};

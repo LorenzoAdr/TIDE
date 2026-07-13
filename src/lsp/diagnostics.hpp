@@ -46,4 +46,9 @@ std::string build_diagnostic_suffix(const std::vector<Diagnostic>& items, int ma
 bool diagnostics_display_allowed(int64_t last_content_edit_ms, ISymbolProvider* symbols,
                                  const std::string& path, bool lsp_ui_allowed = true);
 
+// True when inline diagnostics may be shown: either the edit debounce has elapsed, or clangd
+// just published diagnostics for the current document version (publishDiagnostics).
+bool diagnostics_reveal_allowed(int64_t last_content_edit_ms, ISymbolProvider* symbols,
+                                const std::string& path, bool lsp_ui_allowed = true);
+
 }  // namespace tgdb

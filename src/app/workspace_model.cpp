@@ -21,7 +21,7 @@ namespace {
 
 void set_welcome_buffer(EditorBuffer* buffer) {
   buffer->lines.clear();
-  buffer->path.clear();
+  buffer->path.clear(); 
   editor_buffer_invalidate_joined(buffer);
   buffer->reset_to_single_cursor(0, 0);
   buffer->scroll = 0;

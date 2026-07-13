@@ -39,6 +39,7 @@
 #include "util/fuzzy_match.hpp"
 #include "lsp/diagnostics.hpp"
 #include "lsp/lsp_sync.hpp"
+#include "lsp/lsp_uri.hpp"
 #include "lsp/semantic_tokens.hpp"
 #include "editor/editor_state.hpp"
 #include "editor/line_comment.hpp"
@@ -289,7 +290,6 @@ struct EditorPanelState {
   uint64_t viewport_line_render_cache_ts_revision = 0;
   std::string scope_completion_cache_key;
   std::vector<CompletionItem> scope_completion_cache_items;
-  uint64_t vh_last_inputs_diag_revision = 0;
   uint64_t vh_last_inputs_git_view_token = 0;
   int vh_last_inputs_code_width = -1;
   std::size_t vh_last_inputs_find_count = 0;
@@ -518,6 +518,14 @@ void prune_viewport_line_render_cache(EditorPanelState* panel,
   }
 }
 
+void clear_editor_line_paint_caches(EditorPanelState* panel) {
+  if (panel == nullptr) {
+    return;
+  }
+  panel->viewport_line_render_cache.clear();
+  panel->line_syntax_span_cache.clear();
+}
+
 bool editor_content_settled(const EditorPanelState& panel) {
   return steady_now_ms() - panel.content_edit_ms >= kEditorContentSettleMs;
 }
@@ -737,13 +745,45 @@ void ensure_file_symbols(EditorPanelState* panel, const std::string& path,
   panel->symbols_fetch_pending = false;
 }
 
+bool diagnostic_vectors_equal(const std::vector<Diagnostic>& a, const std::vector<Diagnostic>& b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    if (a[i].line != b[i].line || a[i].start_col != b[i].start_col ||
+        a[i].end_col != b[i].end_col || a[i].severity != b[i].severity ||
+        a[i].message != b[i].message || a[i].source != b[i].source) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::vector<Diagnostic> flatten_panel_diagnostics(const EditorPanelState& panel) {
+  std::vector<Diagnostic> out;
+  for (const auto& entry : panel.diagnostics_by_line) {
+    for (const auto& item : entry.second) {
+      out.push_back(item);
+    }
+  }
+  return out;
+}
+
+bool panel_diagnostics_match_doc(const EditorPanelState& panel, const DocumentDiagnostics& doc) {
+  if (panel.diagnostics_by_line_path != doc.path) {
+    return false;
+  }
+  return diagnostic_vectors_equal(flatten_panel_diagnostics(panel), doc.items);
+}
+
 void rebuild_diagnostics_by_line(EditorPanelState* panel, const DocumentDiagnostics& doc,
                                  uint64_t revision) {
   if (panel == nullptr) {
     return;
   }
   if (panel->diagnostics_by_line_path == doc.path &&
-      revision == panel->diagnostics_by_line_revision) {
+      revision == panel->diagnostics_by_line_revision &&
+      panel_diagnostics_match_doc(*panel, doc)) {
     return;
   }
   panel->diagnostics_by_line_path = doc.path;
@@ -756,7 +796,20 @@ void rebuild_diagnostics_by_line(EditorPanelState* panel, const DocumentDiagnost
   for (const auto& item : doc.items) {
     panel->diagnostics_by_line[item.line].push_back(item);
   }
-  mark_visual_highlight_inputs_dirty(&panel->visual_highlight, steady_now_ms());
+}
+
+bool rebuild_diagnostics_by_line_if_changed(EditorPanelState* panel, const DocumentDiagnostics& doc,
+                                            uint64_t revision) {
+  if (panel == nullptr) {
+    return false;
+  }
+  if (panel->diagnostics_by_line_path == doc.path &&
+      revision == panel->diagnostics_by_line_revision &&
+      panel_diagnostics_match_doc(*panel, doc)) {
+    return false;
+  }
+  rebuild_diagnostics_by_line(panel, doc, revision);
+  return true;
 }
 
 void rebuild_diagnostic_suffix_cache(EditorPanelState* panel, const EditorBuffer& buffer,
@@ -769,8 +822,10 @@ void rebuild_diagnostic_suffix_cache(EditorPanelState* panel, const EditorBuffer
   // Los sufijos se reconstruyen desde diagnósticos ya cacheados, así que deben seguir
   // visibles en reposo (inhibido). Solo respetamos el debounce de edición, no la inhibición.
   (void)layout_state;
-  if (!diagnostics_display_allowed(last_edit_ms, symbols, buffer.path, /*lsp_ui_allowed=*/true)) {
-    panel->diagnostic_suffix_by_line.clear();
+  // Durante el debounce de edición o mientras clangd sincroniza, no ocultar sufijos ya
+  // aplicados por publishDiagnostics (pre_paint). Antes se hacía clear() aquí y el
+  // diagnóstico desaparecía hasta el siguiente repintado acumulado.
+  if (!diagnostics_reveal_allowed(last_edit_ms, symbols, buffer.path, /*lsp_ui_allowed=*/true)) {
     return;
   }
   if (panel->diagnostic_suffix_code_width == code_width &&
@@ -818,19 +873,14 @@ void track_editor_scroll(EditorPanelState* panel, int scroll, MainLayoutState* l
 
 VisualHighlightJobInputs build_visual_highlight_job_inputs(
     EditorPanelState* panel, const EditorBuffer& buffer, int code_width,
-    ISymbolProvider* symbols, const EditorFindState* find_state, int64_t last_edit_ms,
-    MainLayoutState* layout_state, bool find_open) {
+    ISymbolProvider* /*symbols*/, const EditorFindState* find_state, int64_t /*last_edit_ms*/,
+    MainLayoutState* /*layout_state*/, bool find_open) {
   VisualHighlightJobInputs inputs;
   if (panel == nullptr) {
     return inputs;
   }
   inputs.code_width = code_width;
   inputs.total_lines = static_cast<int>(buffer.lines.size());
-  inputs.diagnostics_ui_allowed =
-      diagnostics_display_allowed(last_edit_ms, symbols, buffer.path,
-                                  layout_state == nullptr ||
-                                      layout_state->activity_gate.allows_lsp_ui());
-  inputs.diagnostics_by_line = panel->diagnostics_by_line;
   inputs.git_changed_lines = panel->git_changed_lines;
   inputs.git_untracked_all = panel->git_untracked_all_lines;
   if (find_open && find_state != nullptr && !find_state->matches.empty()) {
@@ -841,21 +891,19 @@ VisualHighlightJobInputs build_visual_highlight_job_inputs(
 
 void maybe_mark_visual_highlight_inputs_dirty(VisualHighlightPanelState* vh,
                                               EditorPanelState* panel, int code_width,
-                                              uint64_t diag_revision, const EditorFindState* find,
-                                              bool find_open, int64_t now_ms) {
+                                              const EditorFindState* find, bool find_open,
+                                              int64_t now_ms) {
   if (vh == nullptr || panel == nullptr || vh->job_inflight) {
     return;
   }
   const std::size_t find_count =
       find_open && find != nullptr ? find->matches.size() : 0;
-  const bool changed = panel->vh_last_inputs_diag_revision != diag_revision ||
-                       panel->vh_last_inputs_git_view_token != panel->git_cache_view_token ||
+  const bool changed = panel->vh_last_inputs_git_view_token != panel->git_cache_view_token ||
                        panel->vh_last_inputs_code_width != code_width ||
                        panel->vh_last_inputs_find_count != find_count;
   if (!changed) {
     return;
   }
-  panel->vh_last_inputs_diag_revision = diag_revision;
   panel->vh_last_inputs_git_view_token = panel->git_cache_view_token;
   panel->vh_last_inputs_code_width = code_width;
   panel->vh_last_inputs_find_count = find_count;
@@ -863,13 +911,7 @@ void maybe_mark_visual_highlight_inputs_dirty(VisualHighlightPanelState* vh,
 }
 
 const std::unordered_map<int, std::string>* active_diagnostic_suffix_map(
-    const EditorPanelState& panel, const VisualHighlightConfig& vh_config,
-    const std::string& path) {
-  if (vh_config.enabled && vh_config.diagnostic_suffixes && !path.empty() &&
-      panel.visual_highlight.snapshot.path == path &&
-      !panel.visual_highlight.snapshot.diagnostic_suffix_by_line.empty()) {
-    return &panel.visual_highlight.snapshot.diagnostic_suffix_by_line;
-  }
+    const EditorPanelState& panel) {
   return &panel.diagnostic_suffix_by_line;
 }
 
@@ -1132,6 +1174,10 @@ const std::vector<TextMatch>* selection_occurrence_matches_for(EditorPanelState*
   return &panel->selection_occurrence_matches;
 }
 
+bool push_active_file_diagnostics_from_cache(EditorPanelState* panel, ISymbolProvider* symbols,
+                                             WorkspaceModel* workspace,
+                                             MainLayoutState* layout_state, int64_t last_edit_ms);
+
 void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
                            WorkspaceModel* workspace, WorkspaceIndexer* indexer,
                            MainLayoutState* layout_state) {
@@ -1145,7 +1191,7 @@ void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
       workspace != nullptr ? workspace->last_buffer_edit_ms : panel->content_edit_ms;
   const bool lsp_ui_allowed =
       layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
-  if (!diagnostics_display_allowed(last_edit_ms, symbols, path, lsp_ui_allowed)) {
+  if (!diagnostics_reveal_allowed(last_edit_ms, symbols, path, lsp_ui_allowed)) {
     return;
   }
 
@@ -1177,6 +1223,9 @@ void sync_diagnostic_cache(EditorPanelState* panel, ISymbolProvider* symbols,
   panel->cached_file_diag_revision = 0;
   if (!path.empty() && is_lsp_trackable_path(path)) {
     panel->cached_file_diag = symbols->diagnostics_for_file(path);
+    if (panel->cached_file_diag.path.empty()) {
+      panel->cached_file_diag.path = path;
+    }
     panel->cached_file_diag_revision = revision;
   }
 }
@@ -1194,17 +1243,138 @@ const DocumentDiagnostics& cached_file_diagnostics(EditorPanelState* panel,
   const bool lsp_ui_allowed =
       layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
   const bool allow_refresh =
-      diagnostics_display_allowed(last_edit_ms, symbols, path, lsp_ui_allowed);
+      diagnostics_reveal_allowed(last_edit_ms, symbols, path, lsp_ui_allowed);
   const uint64_t revision = symbols->diagnostics_revision();
   if (allow_refresh &&
       (revision != panel->cached_file_diag_revision || panel->cached_file_diag.path != path)) {
     panel->cached_file_diag = symbols->diagnostics_for_file(path);
+    if (panel->cached_file_diag.path.empty()) {
+      panel->cached_file_diag.path = path;
+    }
     panel->cached_file_diag_revision = revision;
   }
   if (panel->cached_file_diag.path == path) {
     return panel->cached_file_diag;
   }
   return kEmpty;
+}
+
+bool push_active_file_diagnostics_from_cache(EditorPanelState* panel, ISymbolProvider* symbols,
+                                             WorkspaceModel* workspace,
+                                             MainLayoutState* layout_state, int64_t last_edit_ms) {
+  if (panel == nullptr || symbols == nullptr || workspace == nullptr) {
+    return false;
+  }
+  workspace->ensure_buffer();
+  const EditorBuffer& buffer = workspace->buffer;
+  const std::string& path = buffer.path;
+  if (path.empty()) {
+    return false;
+  }
+  const DocumentDiagnostics& file_diag =
+      cached_file_diagnostics(panel, symbols, path, last_edit_ms, layout_state);
+  if (file_diag.path != path) {
+    return false;
+  }
+  const bool lsp_ui_allowed =
+      layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
+  if (file_diag.items.empty() && !panel->diagnostics_by_line.empty() &&
+      !diagnostics_display_allowed(last_edit_ms, symbols, path, lsp_ui_allowed)) {
+    return false;
+  }
+  const uint64_t prev_by_line_revision = panel->diagnostics_by_line_revision;
+  const uint64_t prev_suffix_revision = panel->diagnostic_suffix_revision;
+  const std::size_t prev_line_count = panel->diagnostics_by_line.size();
+  const std::size_t prev_suffix_count = panel->diagnostic_suffix_by_line.size();
+
+  const bool rebuilt =
+      rebuild_diagnostics_by_line_if_changed(panel, file_diag, panel->cached_file_diag_revision);
+
+  const VisualHighlightConfig vh_config = visual_highlight_config_from_settings(
+      layout_state != nullptr ? layout_state->app_settings : nullptr);
+  if (vh_config.enabled && vh_config.diagnostic_suffixes) {
+    rebuild_diagnostic_suffix_cache(panel, buffer, panel->code_width_chars,
+                                    panel->cached_file_diag_revision, symbols, last_edit_ms,
+                                    layout_state);
+  } else {
+    panel->diagnostic_suffix_by_line.clear();
+    panel->diagnostic_suffix_code_width = 0;
+    panel->diagnostic_suffix_view_token = 0;
+    panel->diagnostic_suffix_revision = 0;
+  }
+
+  const bool editor_changed =
+      rebuilt || panel->diagnostics_by_line_revision != prev_by_line_revision ||
+      panel->diagnostic_suffix_revision != prev_suffix_revision ||
+      panel->diagnostics_by_line.size() != prev_line_count ||
+      panel->diagnostic_suffix_by_line.size() != prev_suffix_count;
+  if (editor_changed && layout_state != nullptr) {
+    // Gutter/suffix/underline state is already part of compute_viewport_line_render_key;
+    // only lines whose diagnostic decoration changed miss cache. Do NOT clear
+    // line_syntax_span_cache or bump view_token — that invalidated every line's TS/LSP
+    // span cache and caused brief loss of syntax color on unaffected lines.
+    invalidate_editor_view(layout_state);
+  }
+  return editor_changed;
+}
+
+bool apply_lsp_diagnostics_to_panel(EditorPanelState* panel, ISymbolProvider* symbols,
+                                    WorkspaceModel* workspace, WorkspaceIndexer* indexer,
+                                    MainLayoutState* layout_state,
+                                    const std::string& notified_path) {
+  if (panel == nullptr || symbols == nullptr || !symbols->supports_diagnostics() ||
+      workspace == nullptr) {
+    return false;
+  }
+  workspace->ensure_buffer();
+  const EditorBuffer& buffer = workspace->buffer;
+  const std::string& path = buffer.path;
+  if (path.empty()) {
+    return false;
+  }
+  const int64_t last_edit_ms = workspace->last_buffer_edit_ms;
+  const bool lsp_ui_allowed =
+      layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
+  if (!lsp_ui_allowed) {
+    return false;
+  }
+
+  const uint64_t revision = symbols->diagnostics_revision();
+  const bool revision_changed =
+      revision != panel->last_diag_revision || panel->last_diag_path != path;
+  if (revision_changed) {
+    sync_diagnostic_cache(panel, symbols, workspace, indexer, layout_state);
+  }
+
+  const bool affects_active_file =
+      notified_path.empty() || normalize_lsp_path(notified_path) == normalize_lsp_path(path);
+  const bool reveal =
+      diagnostics_reveal_allowed(last_edit_ms, symbols, path, lsp_ui_allowed);
+
+  if (!affects_active_file) {
+    bool editor_changed = false;
+    if (revision_changed && reveal) {
+      editor_changed =
+          push_active_file_diagnostics_from_cache(panel, symbols, workspace, layout_state,
+                                                  last_edit_ms);
+    }
+    return revision_changed || editor_changed;
+  }
+
+  if (!reveal) {
+    panel->diagnostics_by_line.clear();
+    panel->diagnostics_by_line_path.clear();
+    panel->diagnostics_by_line_revision = 0;
+    panel->diagnostic_suffix_by_line.clear();
+    panel->diagnostic_suffix_code_width = 0;
+    panel->diagnostic_suffix_view_token = 0;
+    panel->diagnostic_suffix_revision = 0;
+    return revision_changed;
+  }
+
+  const bool editor_changed =
+      push_active_file_diagnostics_from_cache(panel, symbols, workspace, layout_state, last_edit_ms);
+  return editor_changed || revision_changed;
 }
 
 void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
@@ -1236,6 +1406,10 @@ void editor_hover_tick(WorkspaceModel* workspace, EditorPanelState* panel,
     return;
   }
   const int64_t now_ms = steady_now_ms();
+  if (!editor_content_settled(*panel) ||
+      now_ms - panel->content_edit_ms < kHoverDelayMs) {
+    return;
+  }
   if (!hover.click_triggered && now_ms - hover.dwell_start_ms < kHoverDelayMs) {
     return;
   }
@@ -5365,7 +5539,34 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (!ts_highlights_pending) {
       panel_state->ts_dirty_highlight_lines.clear();
     }
-    const bool caret_live_highlight = typing_burst || ts_highlights_pending;
+    const bool semantic_highlight_current = [&]() {
+      if (!indexed_cpp || symbols == nullptr || !symbols->supports_semantic_highlight()) {
+        return true;
+      }
+      if (panel_state->cached_semantic_path != buffer.path ||
+          !panel_state->cached_semantic_tokens.ready) {
+        return false;
+      }
+      return symbols->semantic_tokens_current_for_file(buffer.path) &&
+             semantic_tokens_match_document(*symbols, buffer.path,
+                                              panel_state->cached_semantic_tokens);
+    }();
+    const int caret_line_for_syntax = buffer.primary_line();
+    const bool caret_baseline_ts_trustworthy = [&]() {
+      if (!indexed_cpp || caret_line_for_syntax < 0 ||
+          caret_line_for_syntax >= static_cast<int>(buffer.lines.size())) {
+        return true;
+      }
+      return tree_sitter_service().line_highlights_trustworthy_for_line(
+          buffer.path, editor_buffer_joined_source(buffer), caret_line_for_syntax,
+          buffer.lines[static_cast<std::size_t>(caret_line_for_syntax)]);
+    }();
+    // Keep live TS on the caret until the async baseline and/or LSP semantic tokens
+    // actually match the edited text (at settle+120ms stale semantic was winning).
+    const bool caret_needs_live_syntax =
+        typing_burst || ts_highlights_pending || !semantic_highlight_current ||
+        !caret_baseline_ts_trustworthy;
+    const bool caret_live_highlight = caret_needs_live_syntax;
     const bool typing_edit_mode = typing_burst && indexed_cpp;
     const bool defer_sticky_scroll = typing_edit_mode;
     // "Rich session" bundles non-highlight editor extras (diagnostic suffixes/underlines,
@@ -5696,32 +5897,46 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       UiSyncPhaseScope diag_scope(ui_perf, "render.editor.diagnostics");
       const bool allow_lsp_diagnostics_ui =
           layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
-      const bool deferred_sync = editor_deferred_sync_allowed(layout_state);
-      const bool diagnostics_ready =
+      const bool diagnostics_reveal =
           symbols && symbols->supports_diagnostics() && !buffer.path.empty() &&
           is_lsp_trackable_path(buffer.path) &&
-          diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), buffer.path,
-                                      /*lsp_ui_allowed=*/true);
-      show_diagnostics = deferred_sync && diagnostics_ready && allow_lsp_diagnostics_ui;
-      if (diagnostics_ready) {
+          diagnostics_reveal_allowed(workspace->last_buffer_edit_ms, symbols.get(), buffer.path,
+                                     allow_lsp_diagnostics_ui);
+      if (diagnostics_reveal) {
         file_diag = cached_file_diagnostics(panel_state.get(), symbols.get(), buffer.path,
                                             workspace->last_buffer_edit_ms, layout_state);
         if (file_diag.path == buffer.path) {
-          rebuild_diagnostics_by_line(panel_state.get(), file_diag,
-                                      panel_state->cached_file_diag_revision);
+          if (!file_diag.items.empty() &&
+              (panel_state->diagnostics_by_line_path != buffer.path ||
+               panel_state->diagnostics_by_line.empty())) {
+            push_active_file_diagnostics_from_cache(panel_state.get(), symbols.get(), workspace,
+                                                    layout_state, workspace->last_buffer_edit_ms);
+          } else if (panel_state->diagnostics_by_line_path != buffer.path) {
+            panel_state->diagnostics_by_line_path = buffer.path;
+            panel_state->diagnostics_by_line.clear();
+            panel_state->diagnostic_suffix_by_line.clear();
+            panel_state->diagnostics_by_line_revision = 0;
+            panel_state->diagnostic_suffix_code_width = 0;
+            panel_state->diagnostic_suffix_view_token = 0;
+            panel_state->diagnostic_suffix_revision = 0;
+          } else if (!panel_state->diagnostics_by_line.empty() && file_diag.items.empty()) {
+            push_active_file_diagnostics_from_cache(panel_state.get(), symbols.get(), workspace,
+                                                    layout_state, workspace->last_buffer_edit_ms);
+          }
         }
-      } else {
-        panel_state->diagnostics_by_line.clear();
-        panel_state->diagnostics_by_line_path.clear();
-        panel_state->diagnostics_by_line_revision = 0;
       }
+      const bool has_applied_diagnostics =
+          panel_state->diagnostics_by_line_path == buffer.path &&
+          !panel_state->diagnostics_by_line.empty();
+      show_diagnostics = allow_lsp_diagnostics_ui && has_applied_diagnostics;
+      const bool deferred_sync = editor_deferred_sync_allowed(layout_state);
       has_git_markers =
           deferred_sync && git_service != nullptr && git_service->is_repo() &&
           (panel_state->git_untracked_all_lines || !panel_state->git_changed_lines.empty());
     }
     const bool has_breakpoint_markers =
         debug_model != nullptr && !buffer.path.empty();
-    const bool has_diagnostic_markers = show_diagnostics && !file_diag.items.empty();
+    const bool has_diagnostic_markers = show_diagnostics;
     const bool gutter_markers =
         has_breakpoint_markers || has_diagnostic_markers || has_git_markers;
     // gutter_w only budgets the number field plus the fold column (see its computation
@@ -5736,25 +5951,23 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         code_width_from_box(panel_state->code_box, panel_state->code_width_chars);
     panel_state->code_width_chars = code_width;
 
-    const bool scroll_driven_vh =
-        vh_config.enabled && (vh_config.diagnostic_suffixes || vh_config.overview_ruler);
+    const bool scroll_driven_vh = vh_config.enabled && vh_config.overview_ruler;
     track_editor_scroll(panel_state.get(), buffer.scroll, layout_state, scroll_driven_vh);
-    if (!typing_edit_mode && (!vh_config.enabled || !vh_config.diagnostic_suffixes)) {
-      UiSyncPhaseScope suffix_scope(ui_perf, "render.editor.diagnostics");
-      rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
-                                      panel_state->cached_file_diag_revision, symbols.get(),
-                                      workspace->last_buffer_edit_ms, layout_state);
-    } else if (!typing_edit_mode && vh_config.enabled && vh_config.diagnostic_suffixes &&
-               panel_state->diagnostic_suffix_by_line.empty() &&
-               panel_state->visual_highlight.snapshot.diagnostic_suffix_by_line.empty()) {
-      rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
-                                      panel_state->cached_file_diag_revision, symbols.get(),
-                                      workspace->last_buffer_edit_ms, layout_state);
+    if (vh_config.enabled && vh_config.diagnostic_suffixes) {
+      const bool suffix_missing =
+          !panel_state->diagnostics_by_line.empty() &&
+          panel_state->diagnostic_suffix_by_line.empty();
+      if (!typing_edit_mode || suffix_missing) {
+        UiSyncPhaseScope suffix_scope(ui_perf, "render.editor.diagnostics");
+        rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
+                                        panel_state->cached_file_diag_revision, symbols.get(),
+                                        workspace->last_buffer_edit_ms, layout_state);
+      }
     }
 
     const bool suffixes_enabled = vh_config.enabled && vh_config.diagnostic_suffixes;
     const std::unordered_map<int, std::string>* suffix_map =
-        active_diagnostic_suffix_map(*panel_state, vh_config, buffer.path);
+        active_diagnostic_suffix_map(*panel_state);
     const bool helix_caret =
         layout_state != nullptr && layout_state->app_settings != nullptr &&
         layout_state->app_settings->helix_mode_enabled;
@@ -5917,7 +6130,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           panel_state->semantic_tokens_layout_stale &&
           i >= panel_state->semantic_tokens_layout_stale_from_line;
       const bool caret_or_dirty_ts_live =
-          (caret_line && (typing_burst || ts_highlights_pending)) ||
+          (caret_line && caret_needs_live_syntax) ||
           (ts_highlights_pending &&
            panel_state->ts_dirty_highlight_lines.count(i) > 0);
       const SemanticTokenDocument* line_semantic =
@@ -5950,8 +6163,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           git_line_changed(panel_state.get(), i), ts_highlight_revision);
 
       auto cache_it = panel_state->viewport_line_render_cache.find(i);
-      if (!caret_line && cache_it != panel_state->viewport_line_render_cache.end() &&
-          cache_it->second.key == render_key) {
+      const bool viewport_cache_hit =
+          !caret_line && cache_it != panel_state->viewport_line_render_cache.end() &&
+          cache_it->second.key == render_key;
+      if (viewport_cache_hit) {
         // Cache hit: reuse the already-rasterized Pixels (cheap shared_ptr copy) instead
         // of an Element that FTXUI's Draw() would still walk and re-decorate from scratch
         // on every frame even though nothing about this line actually changed.
@@ -6067,21 +6282,21 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     VisualHighlightOverviewData overview_fallback;
     const VisualHighlightOverviewData* overview_data = nullptr;
     if (overview_ruler_enabled) {
+      overview_fallback.total_lines = static_cast<int>(buffer.lines.size());
+      overview_fallback.git_changed_lines = panel_state->git_changed_lines;
+      overview_fallback.git_untracked_all = panel_state->git_untracked_all_lines;
       const VisualHighlightOverviewData& snap_overview =
           panel_state->visual_highlight.snapshot.overview;
       if (panel_state->visual_highlight.snapshot.path == buffer.path &&
           snap_overview.total_lines > 0) {
-        overview_data = &snap_overview;
-      } else {
-        overview_fallback.total_lines = static_cast<int>(buffer.lines.size());
-        overview_fallback.diagnostics_by_line = panel_state->diagnostics_by_line;
-        overview_fallback.git_changed_lines = panel_state->git_changed_lines;
-        overview_fallback.git_untracked_all = panel_state->git_untracked_all_lines;
-        if (find_state->open && !find_state->matches.empty()) {
-          overview_fallback.text_matches = find_state->matches;
-        }
-        overview_data = &overview_fallback;
+        overview_fallback.total_lines = snap_overview.total_lines;
+        overview_fallback.git_changed_lines = snap_overview.git_changed_lines;
+        overview_fallback.git_untracked_all = snap_overview.git_untracked_all;
+        overview_fallback.text_matches = snap_overview.text_matches;
+      } else if (find_state->open && !find_state->matches.empty()) {
+        overview_fallback.text_matches = find_state->matches;
       }
+      overview_data = &overview_fallback;
     }
     Element scrollbar =
         vertical_scrollbar(scroll_total, scroll_visible_index, visible, rendered_lines,
@@ -6109,7 +6324,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       ruler_input.total_lines = overview_data->total_lines;
       ruler_input.scroll = buffer.scroll;
       ruler_input.visible_lines = visible;
-      ruler_input.diagnostics_by_line = &overview_data->diagnostics_by_line;
+      ruler_input.diagnostics_by_line = &panel_state->diagnostics_by_line;
       ruler_input.git_changed_lines = &overview_data->git_changed_lines;
       ruler_input.git_untracked_all = overview_data->git_untracked_all;
       if (find_state->open && !overview_data->text_matches.empty()) {
@@ -6283,6 +6498,21 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     handlers->mouse_handler = dispatch_editor_mouse;
     handlers->chrome_mouse_handler = dispatch_editor_chrome_mouse;
     handlers->modifier_handler = dispatch_editor_modifiers;
+    handlers->diagnostics_received_handler =
+        [workspace, panel_state, file_indexer, layout_state](ISymbolProvider* symbols,
+                                                              const std::string& notified_path) {
+          apply_lsp_diagnostics_to_panel(panel_state.get(), symbols, workspace, file_indexer,
+                                         layout_state, notified_path);
+        };
+    handlers->completion_received_handler =
+        [workspace, panel_state, completion_state, symbols, layout_state](ISymbolProvider*) {
+          completion_lsp_tick(completion_state.get(), workspace, symbols, layout_state,
+                              panel_state.get());
+          if (layout_state != nullptr) {
+            layout_state->editor_completion_open = completion_state->open;
+            invalidate_editor_view(layout_state);
+          }
+        };
     handlers->visible_line_count = [panel_state]() {
       return visible_line_count(panel_state->code_box);
     };
@@ -6343,8 +6573,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         if (vh_config.enabled) {
           const int code_width = panel_state->code_width_chars;
           maybe_mark_visual_highlight_inputs_dirty(
-              &panel_state->visual_highlight, panel_state.get(), code_width,
-              panel_state->cached_file_diag_revision, find_state.get(), find_state->open, vh_now);
+              &panel_state->visual_highlight, panel_state.get(), code_width, find_state.get(),
+              find_state->open, vh_now);
           const VisualHighlightJobInputs vh_inputs = build_visual_highlight_job_inputs(
               panel_state.get(), workspace->buffer, code_width, symbols.get(), find_state.get(),
               workspace->last_buffer_edit_ms, layout_state, find_state->open);
@@ -6352,8 +6582,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
                                           vh_config, vh_focused, true, vh_now, vh_inputs);
           if (panel_state->visual_highlight.job_inflight) {
-            visual_highlight_service().wait_for_pending_result(
-                panel_state->visual_highlight.pending_generation);
+            const uint64_t pending_gen = panel_state->visual_highlight.pending_generation;
+            if (!visual_highlight_service().wait_for_pending_result(pending_gen)) {
+              visual_highlight_service().request_completion_wake(pending_gen);
+            }
           }
           if (drain_visual_highlight_results(&panel_state->visual_highlight, workspace->buffer,
                                              layout_state, vh_focused)) {

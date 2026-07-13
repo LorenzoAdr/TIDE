@@ -22,7 +22,6 @@
 #include "app/workspace_config.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/compile_commands_remap.hpp"
-
 #include <chrono>
 
 namespace fs = std::filesystem;
@@ -2171,11 +2170,12 @@ void LspClient::on_lsp_notification(const std::string& method, const nlohmann::j
 
   diagnostics_revision_.fetch_add(1, std::memory_order_release);
   if (diagnostics_notify_callback_) {
-    diagnostics_notify_callback_();
+    diagnostics_notify_callback_(path);
   }
 }
 
-void LspClient::set_diagnostics_notify_callback(std::function<void()> callback) {
+void LspClient::set_diagnostics_notify_callback(
+    std::function<void(const std::string& path)> callback) {
   diagnostics_notify_callback_ = std::move(callback);
 }
 
@@ -2187,7 +2187,9 @@ DocumentDiagnostics LspClient::diagnostics_for_file(const std::string& absolute_
   std::lock_guard<std::mutex> lock(mutex_);
   const auto it = diagnostics_.find(key);
   if (it == diagnostics_.end()) {
-    return {};
+    DocumentDiagnostics empty;
+    empty.path = key;
+    return empty;
   }
   return it->second;
 }
