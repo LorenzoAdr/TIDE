@@ -214,6 +214,8 @@ const StringTable& english_strings() {
       {"settings.visual_highlight.sticky_scroll.description", "Shows fixed scope headers while scrolling code"},
       {"settings.visual_highlight.overview_ruler.label", "Mark strip next to scrollbar"},
       {"settings.visual_highlight.overview_ruler.description", "Shows errors, warnings, and git changes in a column next to the scrollbar"},
+      {"settings.visual_highlight.selection_occurrences.label", "Selection occurrences"},
+      {"settings.visual_highlight.selection_occurrences.description", "Highlights other instances of the selected text in the visible viewport"},
       {"settings.general.animations.label", "Interface animations"},
       {"settings.general.animations.description", "Hover and animated effects; disable for low-power mode"},
       {"settings.general.overview_ruler.label", "Mark strip next to scrollbar"},

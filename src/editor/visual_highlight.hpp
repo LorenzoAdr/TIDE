@@ -35,7 +35,28 @@ struct VisualHighlightConfig {
   bool sticky_scroll = true;
   bool diagnostic_suffixes = true;
   bool overview_ruler = true;
+  bool selection_occurrences = true;
 };
+
+struct VisualHighlightSelectionKey {
+  int start_line = -1;
+  int start_col = 0;
+  int end_line = 0;
+  int end_col = 0;
+  uint64_t view_token = 0;
+
+  bool operator==(const VisualHighlightSelectionKey& other) const {
+    return start_line == other.start_line && start_col == other.start_col &&
+           end_line == other.end_line && end_col == other.end_col &&
+           view_token == other.view_token;
+  }
+
+  bool operator!=(const VisualHighlightSelectionKey& other) const {
+    return !(*this == other);
+  }
+};
+
+VisualHighlightSelectionKey visual_highlight_selection_key_from(const EditorBuffer& buffer);
 
 VisualHighlightConfig visual_highlight_config_from_settings(const AppSettings* settings);
 
@@ -58,6 +79,8 @@ struct VisualHighlightSnapshot {
   std::vector<ColoredBraceMarker> colored_braces;
   std::vector<SymbolInfo> file_symbols;
   VisualHighlightOverviewData overview;
+  VisualHighlightSelectionKey selection_key;
+  std::vector<TextMatch> selection_occurrences;
   bool ready = false;
 };
 
@@ -74,6 +97,7 @@ struct VisualHighlightPanelState {
   uint64_t pending_doc_revision = 0;
   int last_cursor_line = -1;
   int last_cursor_col = -1;
+  VisualHighlightSelectionKey last_selection_key;
   uint64_t last_seen_ts_revision = 0;
   VisualHighlightConfig last_job_config;
   bool has_last_job_config = false;
@@ -82,20 +106,31 @@ struct VisualHighlightPanelState {
 struct VisualHighlightJobInputs {
   int code_width = 0;
   int total_lines = 0;
+  int viewport_scroll = 0;
+  int viewport_visible_lines = 0;
   std::unordered_set<int> git_changed_lines;
   bool git_untracked_all = false;
   std::vector<TextMatch> text_matches;
+};
+
+struct VisualHighlightSelectionQuery {
+  bool active = false;
+  std::string needle;
+  bool whole_word = false;
+  VisualHighlightSelectionKey key;
 };
 
 struct VisualHighlightJob {
   uint64_t generation = 0;
   std::string path;
   std::string source;
+  std::vector<std::string> lines;
   int cursor_line = 0;
   int cursor_col = 0;
   uint64_t doc_revision = 0;
   VisualHighlightConfig config;
   VisualHighlightJobInputs inputs;
+  VisualHighlightSelectionQuery selection;
 };
 
 class VisualHighlightService {
@@ -159,6 +194,10 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
 
 bool drain_visual_highlight_results(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                     MainLayoutState* layout, bool editor_focused);
+
+const std::vector<TextMatch>* visual_highlight_selection_occurrences(
+    const VisualHighlightPanelState& state, const EditorBuffer& buffer, bool find_bar_open,
+    int viewport_scroll, int viewport_visible_lines);
 
 inline VisualHighlightService& visual_highlight_service() {
   return VisualHighlightService::instance();

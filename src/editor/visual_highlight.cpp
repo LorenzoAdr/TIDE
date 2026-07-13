@@ -1,13 +1,16 @@
 #include "editor/editor_state.hpp"
 #include "editor/visual_highlight.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cctype>
 #include <mutex>
 #include <utility>
 #include <vector>
 
 #include "editor/editor_buffer_source.hpp"
+#include "editor/text_search.hpp"
 #include "indexer/index_rules.hpp"
 #include "parser/tree_sitter_blocks.hpp"
 #include "parser/tree_sitter_document.hpp"
@@ -33,7 +36,8 @@ bool visual_highlight_configs_match(const VisualHighlightConfig& a,
          a.scope_brace_highlight == b.scope_brace_highlight &&
          a.scope_strength == b.scope_strength && a.sticky_scroll == b.sticky_scroll &&
          a.diagnostic_suffixes == b.diagnostic_suffixes &&
-         a.overview_ruler == b.overview_ruler;
+         a.overview_ruler == b.overview_ruler &&
+         a.selection_occurrences == b.selection_occurrences;
 }
 
 void schedule_visual_highlight_debounce_wake(VisualHighlightPanelState* state, int64_t now_ms) {
@@ -68,7 +72,68 @@ VisualHighlightConfig visual_highlight_config_from_settings(const AppSettings* s
   config.sticky_scroll = settings->sticky_scroll_enabled;
   config.diagnostic_suffixes = settings->show_diagnostic_suffixes;
   config.overview_ruler = settings->overview_ruler_enabled;
+  config.selection_occurrences = settings->visual_selection_occurrences_enabled;
   return config;
+}
+
+VisualHighlightSelectionKey visual_highlight_selection_key_from(const EditorBuffer& buffer) {
+  VisualHighlightSelectionKey key;
+  if (buffer.cursors.size() == 1 && buffer.primary().has_selection()) {
+    key.view_token = buffer.view_token;
+    buffer.primary().normalized_range(&key.start_line, &key.start_col, &key.end_line, &key.end_col);
+  }
+  return key;
+}
+
+bool selection_needle_is_identifier(const std::string& needle) {
+  return !needle.empty() && is_ident_start(needle[0]) &&
+         std::all_of(needle.begin(), needle.end(), [](unsigned char c) {
+           return is_ident_char(static_cast<char>(c));
+         });
+}
+
+bool selection_needle_is_valid(const std::string& needle) {
+  constexpr std::size_t kMaxNeedle = 256;
+  if (needle.size() < 2 || needle.size() > kMaxNeedle) {
+    return false;
+  }
+  return !std::all_of(needle.begin(), needle.end(),
+                      [](unsigned char c) { return std::isspace(static_cast<unsigned char>(c)); });
+}
+
+VisualHighlightSelectionQuery build_selection_query(const EditorBuffer& buffer) {
+  VisualHighlightSelectionQuery query;
+  query.key = visual_highlight_selection_key_from(buffer);
+  if (query.key.start_line < 0 || buffer.cursors.size() != 1 ||
+      !buffer.primary().has_selection() || query.key.start_line != query.key.end_line) {
+    return query;
+  }
+
+  const std::string needle = selection_text(buffer, buffer.primary());
+  if (!selection_needle_is_valid(needle)) {
+    return query;
+  }
+
+  query.active = true;
+  query.needle = needle;
+  query.whole_word = selection_needle_is_identifier(needle);
+  return query;
+}
+
+std::vector<TextMatch> filter_matches_to_viewport(const std::vector<TextMatch>& matches,
+                                                  int viewport_scroll, int viewport_visible_lines) {
+  if (viewport_visible_lines <= 0 || matches.empty()) {
+    return {};
+  }
+  const int viewport_end = viewport_scroll + viewport_visible_lines;
+  std::vector<TextMatch> filtered;
+  filtered.reserve(matches.size());
+  for (const TextMatch& match : matches) {
+    if (match.line >= viewport_scroll && match.line < viewport_end) {
+      filtered.push_back(match);
+    }
+  }
+  return filtered;
 }
 
 VisualHighlightService& VisualHighlightService::instance() {
@@ -262,6 +327,16 @@ VisualHighlightSnapshot VisualHighlightService::compute(const VisualHighlightJob
     }
   }
 
+  if (job.config.selection_occurrences && job.selection.active && !job.lines.empty()) {
+    snap.selection_key = job.selection.key;
+    snap.selection_occurrences =
+        find_occurrences_in_lines(job.lines, job.selection.needle, job.selection.whole_word,
+                                  nullptr, 0);
+  } else {
+    snap.selection_key = {};
+    snap.selection_occurrences.clear();
+  }
+
   build_overview_snapshot(job, &snap);
 
   if (tree_snapshot.tree_copy != nullptr) {
@@ -379,6 +454,29 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
     }
   }
 
+  if (config.selection_occurrences) {
+    const VisualHighlightSelectionKey selection_key = visual_highlight_selection_key_from(buffer);
+    if (selection_key != state->last_selection_key) {
+      state->last_selection_key = selection_key;
+      if (!state->dirty) {
+        mark_visual_highlight_cursor_dirty(state, now_ms);
+      } else if (!state->job_inflight) {
+        state->dirty_ms = now_ms;
+        visual_highlight_service().clear_debounce_wake_scheduled();
+        schedule_visual_highlight_debounce_wake(state, now_ms);
+      }
+    }
+  } else {
+    const VisualHighlightSelectionKey selection_key = visual_highlight_selection_key_from(buffer);
+    if (selection_key != state->last_selection_key) {
+      state->last_selection_key = selection_key;
+    }
+    if (!state->snapshot.selection_occurrences.empty()) {
+      state->snapshot.selection_key = {};
+      state->snapshot.selection_occurrences.clear();
+    }
+  }
+
   const bool debounce_due = visual_highlight_service().consume_debounce_due();
 
   if (!state->dirty || state->job_inflight) {
@@ -406,11 +504,14 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
   job.generation = state->next_generation++;
   job.path = buffer.path;
   job.source = canonical;
+  job.lines = buffer.lines.to_vector();
   job.cursor_line = line;
   job.cursor_col = col;
   job.doc_revision = doc_revision;
   job.config = config;
   job.inputs = inputs;
+  job.selection = config.selection_occurrences ? build_selection_query(buffer)
+                                               : VisualHighlightSelectionQuery{};
 
   state->pending_generation = job.generation;
   state->pending_path = job.path;
@@ -426,6 +527,7 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
   if (!editor_focused) {
     job.config.matching_bracket = false;
     job.config.scope_brace_highlight = false;
+    job.config.selection_occurrences = false;
   }
 
   const uint64_t dispatched_gen = job.generation;
@@ -463,23 +565,37 @@ bool drain_visual_highlight_results(VisualHighlightPanelState* state, const Edit
   if (!editor_focused) {
     merged.matching_bracket = {};
     merged.scope_braces = {};
+    merged.selection_occurrences.clear();
+    merged.selection_key = {};
   }
 
   const bool cursor_match =
       merged.cursor_line == buffer.primary_line() && merged.cursor_col == buffer.primary_col();
   const uint64_t current_rev = tree_sitter_service().revision_for(buffer.path);
   const bool revision_match = merged.doc_revision == current_rev;
+  const bool track_selection =
+      state->has_last_job_config && state->last_job_config.selection_occurrences;
+  const VisualHighlightSelectionKey current_selection = visual_highlight_selection_key_from(buffer);
+  const bool selection_match =
+      !track_selection || merged.selection_key == current_selection;
   if (!cursor_match) {
     merged.matching_bracket = state->snapshot.matching_bracket;
     merged.scope_braces = state->snapshot.scope_braces;
     merged.immediate_scope = state->snapshot.immediate_scope;
   }
+  if (!track_selection) {
+    merged.selection_key = {};
+    merged.selection_occurrences.clear();
+  } else if (!selection_match) {
+    merged.selection_key = state->snapshot.selection_key;
+    merged.selection_occurrences = state->snapshot.selection_occurrences;
+  }
 
-  merged.ready = revision_match && cursor_match;
+  merged.ready = revision_match && cursor_match && selection_match;
   state->snapshot = std::move(merged);
   visual_highlight_service().clear_completion_wake(state->pending_generation);
 
-  if (!revision_match || (editor_focused && !cursor_match)) {
+  if (!revision_match || (editor_focused && (!cursor_match || !selection_match))) {
     state->dirty = true;
     state->dirty_ms = steady_now_ms();
   } else {
@@ -490,6 +606,25 @@ bool drain_visual_highlight_results(VisualHighlightPanelState* state, const Edit
     invalidate_editor_view(layout);
   }
   return true;
+}
+
+const std::vector<TextMatch>* visual_highlight_selection_occurrences(
+    const VisualHighlightPanelState& state, const EditorBuffer& buffer, bool find_bar_open,
+    int viewport_scroll, int viewport_visible_lines) {
+  if (find_bar_open || state.snapshot.selection_occurrences.empty()) {
+    return nullptr;
+  }
+  if (state.snapshot.selection_key != visual_highlight_selection_key_from(buffer)) {
+    return nullptr;
+  }
+
+  thread_local std::vector<TextMatch> viewport_matches;
+  viewport_matches = filter_matches_to_viewport(state.snapshot.selection_occurrences,
+                                                  viewport_scroll, viewport_visible_lines);
+  if (viewport_matches.empty()) {
+    return nullptr;
+  }
+  return &viewport_matches;
 }
 
 }  // namespace tgdb

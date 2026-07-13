@@ -214,6 +214,8 @@ const StringTable& spanish_strings() {
       {"settings.visual_highlight.sticky_scroll.description", "Muestra encabezados de ámbito fijos al hacer scroll en el código"},
       {"settings.visual_highlight.overview_ruler.label", "Franja de marcas junto al scroll"},
       {"settings.visual_highlight.overview_ruler.description", "Muestra errores, avisos y cambios git en una columna junto al scrollbar"},
+      {"settings.visual_highlight.selection_occurrences.label", "Coincidencias al seleccionar"},
+      {"settings.visual_highlight.selection_occurrences.description", "Resalta otras apariciones del texto seleccionado en el viewport visible"},
       {"settings.general.animations.label", "Animaciones en la interfaz"},
       {"settings.general.animations.description", "Hover y efectos animados; desactivar para modo de bajo consumo"},
       {"settings.general.overview_ruler.label", "Franja de marcas junto al scroll"},

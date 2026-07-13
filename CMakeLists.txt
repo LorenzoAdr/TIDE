@@ -165,7 +165,6 @@ add_executable(tgdb
   src/editor/line_comment.cpp
   src/editor/indent_guides.cpp
   src/editor/text_search.cpp
-  src/editor/selection_occurrence_runner.cpp
   src/editor/find_match_runner.cpp
   src/editor/editor_find_state.cpp
   src/editor/undo_stack.cpp

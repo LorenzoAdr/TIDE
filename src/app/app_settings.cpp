@@ -108,6 +108,13 @@ AppSettings AppSettings::load() {
     } else {
       settings.visual_scope_brace_highlight_enabled = settings.scope_highlight_enabled;
     }
+    if (doc.contains("visual_selection_occurrences_enabled") &&
+        doc["visual_selection_occurrences_enabled"].is_boolean()) {
+      settings.visual_selection_occurrences_enabled =
+          doc["visual_selection_occurrences_enabled"].get<bool>();
+    } else {
+      settings.visual_selection_occurrences_enabled = settings.rich_session_enabled;
+    }
     if (doc.contains("scope_highlight_strength") && doc["scope_highlight_strength"].is_number_integer()) {
       settings.scope_highlight_strength =
           std::max(10, std::min(85, doc["scope_highlight_strength"].get<int>()));
@@ -195,6 +202,7 @@ bool AppSettings::save() const {
   doc["visual_matching_bracket_enabled"] = visual_matching_bracket_enabled;
   doc["visual_scope_background_enabled"] = visual_scope_background_enabled;
   doc["visual_scope_brace_highlight_enabled"] = visual_scope_brace_highlight_enabled;
+  doc["visual_selection_occurrences_enabled"] = visual_selection_occurrences_enabled;
   doc["scope_highlight_enabled"] = scope_highlight_enabled;
   doc["rich_session_enabled"] = rich_session_enabled;
   doc["scope_highlight_strength"] = scope_highlight_strength;

@@ -225,7 +225,8 @@ constexpr int kVhScopeStrength = 5;
 constexpr int kVhDiagnosticSuffixes = 6;
 constexpr int kVhStickyScroll = 7;
 constexpr int kVhOverviewRuler = 8;
-constexpr int kVisualHighlightOptionCount = 9;
+constexpr int kVhSelectionOccurrences = 9;
+constexpr int kVisualHighlightOptionCount = 10;
 
 bool is_top_level_panel(SettingsPanel panel) {
   return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kVisualHighlight ||
@@ -423,6 +424,8 @@ std::vector<SettingsOption> visual_highlight_settings_options() {
        i18n::tr("settings.visual_highlight.sticky_scroll.description")},
       {i18n::tr("settings.visual_highlight.overview_ruler.label"),
        i18n::tr("settings.visual_highlight.overview_ruler.description")},
+      {i18n::tr("settings.visual_highlight.selection_occurrences.label"),
+       i18n::tr("settings.visual_highlight.selection_occurrences.description")},
   };
 }
 
@@ -456,6 +459,9 @@ bool visual_highlight_option_checked(const SettingsModalState* state, int index)
       return state->draft_visual_highlight_enabled && state->draft_sticky_scroll_enabled;
     case kVhOverviewRuler:
       return state->draft_visual_highlight_enabled && state->draft_overview_ruler_enabled;
+    case kVhSelectionOccurrences:
+      return state->draft_visual_highlight_enabled &&
+             state->draft_visual_selection_occurrences_enabled;
     default:
       return false;
   }
@@ -496,6 +502,10 @@ void toggle_visual_highlight_option(SettingsModalState* state, int index) {
       break;
     case kVhOverviewRuler:
       state->draft_overview_ruler_enabled = !state->draft_overview_ruler_enabled;
+      break;
+    case kVhSelectionOccurrences:
+      state->draft_visual_selection_occurrences_enabled =
+          !state->draft_visual_selection_occurrences_enabled;
       break;
     default:
       break;
@@ -2340,6 +2350,8 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_visual_scope_background_enabled = settings.visual_scope_background_enabled;
   state->draft_visual_scope_brace_highlight_enabled =
       settings.visual_scope_brace_highlight_enabled;
+  state->draft_visual_selection_occurrences_enabled =
+      settings.visual_selection_occurrences_enabled;
   state->draft_rich_session_enabled = settings.rich_session_enabled;
   state->draft_scope_highlight_strength = settings.scope_highlight_strength;
   state->draft_animations_enabled = settings.animations_enabled;
@@ -2406,6 +2418,8 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->visual_scope_background_enabled = state->draft_visual_scope_background_enabled;
   settings->visual_scope_brace_highlight_enabled =
       state->draft_visual_scope_brace_highlight_enabled;
+  settings->visual_selection_occurrences_enabled =
+      state->draft_visual_selection_occurrences_enabled;
   settings->scope_highlight_enabled = state->draft_visual_scope_background_enabled ||
                                       state->draft_visual_scope_brace_highlight_enabled;
   settings->rich_session_enabled = state->draft_rich_session_enabled;

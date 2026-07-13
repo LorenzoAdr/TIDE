@@ -29,7 +29,6 @@
 #include "editor/editor_find_state.hpp"
 #include "editor/editor_render.hpp"
 #include "editor/indent_guides.hpp"
-#include "editor/selection_occurrence_runner.hpp"
 #include "util/clang_format_config.hpp"
 #include "parser/tree_sitter_service.hpp"
 #include "util/csv_viewer.hpp"
@@ -266,11 +265,6 @@ struct EditorPanelState {
   uint64_t guide_tracker_view_token = 0;
   bool document_open_pending = false;
   std::string pending_document_open_path;
-  std::vector<TextMatch> selection_occurrence_matches;
-  SelectionOccurrenceKey selection_occurrence_committed_key;
-  SelectionOccurrenceRunner selection_occurrence_runner;
-  uint64_t selection_occurrence_request_counter = 0;
-  uint64_t selection_occurrence_inflight_id = 0;
   bool chord_k_pending = false;
   HelixEditorState helix;
   std::string tabular_layout_path;
@@ -872,7 +866,7 @@ void track_editor_scroll(EditorPanelState* panel, int scroll, MainLayoutState* l
 }
 
 VisualHighlightJobInputs build_visual_highlight_job_inputs(
-    EditorPanelState* panel, const EditorBuffer& buffer, int code_width,
+    EditorPanelState* panel, const EditorBuffer& buffer, int code_width, int visible_lines,
     ISymbolProvider* /*symbols*/, const EditorFindState* find_state, int64_t /*last_edit_ms*/,
     MainLayoutState* /*layout_state*/, bool find_open) {
   VisualHighlightJobInputs inputs;
@@ -881,6 +875,8 @@ VisualHighlightJobInputs build_visual_highlight_job_inputs(
   }
   inputs.code_width = code_width;
   inputs.total_lines = static_cast<int>(buffer.lines.size());
+  inputs.viewport_scroll = buffer.scroll;
+  inputs.viewport_visible_lines = visible_lines;
   inputs.git_changed_lines = panel->git_changed_lines;
   inputs.git_untracked_all = panel->git_untracked_all_lines;
   if (find_open && find_state != nullptr && !find_state->matches.empty()) {
@@ -1073,105 +1069,15 @@ void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer
   mark_visual_highlight_inputs_dirty(&panel->visual_highlight, steady_now_ms());
 }
 
-SelectionOccurrenceKey selection_occurrence_key_from(const EditorBuffer& buffer) {
-  SelectionOccurrenceKey key;
-  key.path = buffer.path;
-  if (buffer.cursors.size() == 1 && buffer.primary().has_selection()) {
-    key.view_token = buffer.view_token;
-    buffer.primary().normalized_range(&key.start_line, &key.start_col, &key.end_line, &key.end_col);
-  }
-  return key;
-}
-
-bool selection_occurrence_needle_is_identifier(const std::string& needle) {
-  return !needle.empty() && is_ident_start(needle[0]) &&
-         std::all_of(needle.begin(), needle.end(), [](unsigned char c) {
-           return is_ident_char(static_cast<char>(c));
-         });
-}
-
-void poll_selection_occurrence_matches(EditorPanelState* panel, const EditorBuffer& buffer,
-                                     MainLayoutState* layout_state) {
-  if (panel == nullptr || panel->selection_occurrence_inflight_id == 0) {
-    return;
-  }
-
-  const SelectionOccurrenceKey current = selection_occurrence_key_from(buffer);
-  std::vector<TextMatch> matches;
-  if (!panel->selection_occurrence_runner.poll(panel->selection_occurrence_inflight_id, current,
-                                             &matches)) {
-    return;
-  }
-
-  panel->selection_occurrence_inflight_id = 0;
-  panel->selection_occurrence_matches = std::move(matches);
-  if (layout_state != nullptr) {
-    UI_WAKE(layout_state, "wake");
-  }
-}
-
-void request_selection_occurrence_matches(EditorPanelState* panel, const EditorBuffer& buffer) {
-  if (panel == nullptr) {
-    return;
-  }
-
-  const SelectionOccurrenceKey key = selection_occurrence_key_from(buffer);
-  if (key == panel->selection_occurrence_committed_key) {
-    return;
-  }
-
-  panel->selection_occurrence_committed_key = key;
-  panel->selection_occurrence_matches.clear();
-  panel->selection_occurrence_runner.cancel();
-  panel->selection_occurrence_inflight_id = 0;
-
-  if (key.start_line < 0 || buffer.cursors.size() != 1 || !buffer.primary().has_selection() ||
-      key.start_line != key.end_line) {
-    return;
-  }
-
-  const std::string needle = selection_text(buffer, buffer.primary());
-  constexpr std::size_t kMaxNeedle = 256;
-  if (needle.size() < 2 || needle.size() > kMaxNeedle) {
-    return;
-  }
-  if (std::all_of(needle.begin(), needle.end(),
-                  [](unsigned char c) { return std::isspace(static_cast<unsigned char>(c)); })) {
-    return;
-  }
-
-  const uint64_t request_id = ++panel->selection_occurrence_request_counter;
-  panel->selection_occurrence_runner.start(request_id, key, buffer.lines.to_vector(), needle,
-                                           selection_occurrence_needle_is_identifier(needle));
-  panel->selection_occurrence_inflight_id = request_id;
-}
-
-void tick_selection_occurrence_matches(EditorPanelState* panel, const EditorBuffer& buffer,
-                                       MainLayoutState* layout_state) {
-  if (panel == nullptr) {
-    return;
-  }
-  poll_selection_occurrence_matches(panel, buffer, layout_state);
-  if (panel->mouse_selecting) {
-    return;
-  }
-  request_selection_occurrence_matches(panel, buffer);
-  if (panel->selection_occurrence_inflight_id != 0 && layout_state != nullptr) {
-    UI_WAKE(layout_state, "wake");
-  }
-}
-
-const std::vector<TextMatch>* selection_occurrence_matches_for(EditorPanelState* panel,
-                                                               const EditorBuffer& buffer,
-                                                               bool find_bar_open) {
-  (void)buffer;
-  if (panel == nullptr || find_bar_open) {
+const std::vector<TextMatch>* overview_selection_occurrences(
+    const VisualHighlightPanelState& vh_state, const EditorBuffer& buffer, bool find_bar_open) {
+  if (find_bar_open || vh_state.snapshot.selection_occurrences.empty()) {
     return nullptr;
   }
-  if (panel->selection_occurrence_matches.empty()) {
+  if (vh_state.snapshot.selection_key != visual_highlight_selection_key_from(buffer)) {
     return nullptr;
   }
-  return &panel->selection_occurrence_matches;
+  return &vh_state.snapshot.selection_occurrences;
 }
 
 bool push_active_file_diagnostics_from_cache(EditorPanelState* panel, ISymbolProvider* symbols,
@@ -5865,8 +5771,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                         ? &find_state->matches
                         : nullptr;
       selection_occurrences =
-          rich_session_enabled
-              ? selection_occurrence_matches_for(panel_state.get(), buffer, find_state->open)
+          vh_config.enabled && vh_config.selection_occurrences
+              ? visual_highlight_selection_occurrences(panel_state->visual_highlight, buffer,
+                                                       find_state->open, buffer.scroll, visible)
               : nullptr;
 
       if (vh_cursor_active && vh_config.matching_bracket && editor_focused &&
@@ -6331,7 +6238,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         ruler_input.text_matches = &overview_data->text_matches;
       } else {
         ruler_input.text_matches =
-            selection_occurrence_matches_for(panel_state.get(), buffer, find_state->open);
+            overview_selection_occurrences(panel_state->visual_highlight, buffer,
+                                             find_state->open);
       }
       Element overview_ruler =
           vertical_overview_ruler(ruler_input, rendered_lines,
@@ -6572,12 +6480,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             layout_state != nullptr ? layout_state->app_settings : nullptr);
         if (vh_config.enabled) {
           const int code_width = panel_state->code_width_chars;
+          const int visible = visible_line_count(panel_state->code_box);
           maybe_mark_visual_highlight_inputs_dirty(
               &panel_state->visual_highlight, panel_state.get(), code_width, find_state.get(),
               find_state->open, vh_now);
           const VisualHighlightJobInputs vh_inputs = build_visual_highlight_job_inputs(
-              panel_state.get(), workspace->buffer, code_width, symbols.get(), find_state.get(),
-              workspace->last_buffer_edit_ms, layout_state, find_state->open);
+              panel_state.get(), workspace->buffer, code_width, visible, symbols.get(),
+              find_state.get(), workspace->last_buffer_edit_ms, layout_state, find_state->open);
           UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".visual_highlight");
           tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
                                           vh_config, vh_focused, true, vh_now, vh_inputs);
@@ -6609,10 +6518,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       {
         UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.lsp_sync");
         tick_lsp_buffer_sync(panel_state.get(), workspace, symbols, layout_state);
-      }
-      {
-        UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.selection");
-        tick_selection_occurrence_matches(panel_state.get(), workspace->buffer, layout_state);
       }
       if (find_state->tick_matches(workspace->buffer) && layout_state != nullptr) {
         mark_visual_highlight_inputs_dirty(&panel_state->visual_highlight, now);
