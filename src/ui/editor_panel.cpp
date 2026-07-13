@@ -6439,9 +6439,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
               panel_state.get(), workspace->buffer, code_width, visible, symbols.get(),
               find_state.get(), workspace->last_buffer_edit_ms, layout_state, find_state->open);
           UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".visual_highlight");
+          const bool content_settled = editor_content_settled(*panel_state);
           tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
-                                          vh_config, vh_focused, path_indexed, vh_now,
-                                          vh_inputs);
+                                          vh_config, vh_focused, path_indexed, content_settled,
+                                          vh_now, vh_inputs);
           if (panel_state->visual_highlight.job_inflight) {
             const uint64_t pending_gen = panel_state->visual_highlight.pending_generation;
             if (!visual_highlight_service().wait_for_pending_result(pending_gen)) {
@@ -6465,8 +6466,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           if (panel_state->visual_highlight.dirty &&
               !panel_state->visual_highlight.job_inflight) {
             tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
-                                            vh_config, vh_focused, path_indexed, vh_now,
-                                            vh_inputs);
+                                            vh_config, vh_focused, path_indexed, content_settled,
+                                            vh_now, vh_inputs);
           }
         } else if (apply_visual_highlight_fold_regions(&workspace->buffer,
                                                        &panel_state->visual_highlight, vh_config,

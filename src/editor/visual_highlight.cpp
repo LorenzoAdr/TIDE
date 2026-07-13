@@ -440,7 +440,7 @@ void mark_visual_highlight_dirty(VisualHighlightPanelState* state, int64_t now_m
 
 void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                      const VisualHighlightConfig& config, bool editor_focused,
-                                     bool indexed_source, int64_t now_ms,
+                                     bool indexed_source, bool content_settled, int64_t now_ms,
                                      const VisualHighlightJobInputs& inputs) {
   if (state == nullptr || buffer.path.empty()) {
     return;
@@ -458,6 +458,7 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
   const uint64_t ts_revision = tree_sitter_service().revision_for(buffer.path);
   if (ts_revision != state->last_seen_ts_revision) {
     state->last_seen_ts_revision = ts_revision;
+    state->last_fold_attempt_revision = 0;
     if (!state->dirty && !state->job_inflight) {
       mark_visual_highlight_content_dirty(state, now_ms);
     }
@@ -508,7 +509,7 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
   const bool debounce_due = visual_highlight_service().consume_debounce_due();
 
   if (!state->dirty || state->job_inflight) {
-    if (!debounce_due) {
+    if (state->dirty && !state->job_inflight && !debounce_due) {
       schedule_visual_highlight_debounce_wake(state, now_ms);
     }
     return;
@@ -542,9 +543,12 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
                                                : VisualHighlightSelectionQuery{};
   job.indexed_source = indexed_source;
   job.recompute_fold_regions =
-      config.code_folding && indexed_source &&
-      (doc_revision != state->last_applied_fold_revision ||
-       state->snapshot.fold_regions_revision == 0);
+      config.code_folding && indexed_source && content_settled &&
+      doc_revision != state->last_applied_fold_revision &&
+      doc_revision != state->last_fold_attempt_revision;
+  if (job.recompute_fold_regions) {
+    state->last_fold_attempt_revision = doc_revision;
+  }
 
   state->pending_generation = job.generation;
   state->pending_path = job.path;
@@ -674,6 +678,7 @@ bool apply_visual_highlight_fold_regions(EditorBuffer* buffer, VisualHighlightPa
     buffer->fold_regions.clear();
     buffer->collapsed_folds.clear();
     state->last_applied_fold_revision = 0;
+    state->last_fold_attempt_revision = 0;
     return changed;
   }
 
@@ -687,14 +692,12 @@ bool apply_visual_highlight_fold_regions(EditorBuffer* buffer, VisualHighlightPa
   }
 
   bool changed = false;
-  if (!snap.fold_regions.empty() || buffer->fold_regions.empty()) {
-    if (buffer->fold_regions != snap.fold_regions) {
-      buffer->fold_regions = snap.fold_regions;
-      changed = true;
-    }
-  }
-  if (changed) {
+  if (buffer->fold_regions != snap.fold_regions) {
+    buffer->fold_regions = snap.fold_regions;
     prune_invalid_collapsed_folds(buffer);
+    changed = true;
+  }
+  if (state->last_applied_fold_revision != snap.fold_regions_revision) {
     state->last_applied_fold_revision = snap.fold_regions_revision;
   }
   return changed;

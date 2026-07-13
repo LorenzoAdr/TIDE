@@ -106,6 +106,7 @@ struct VisualHighlightPanelState {
   VisualHighlightConfig last_job_config;
   bool has_last_job_config = false;
   uint64_t last_applied_fold_revision = 0;
+  uint64_t last_fold_attempt_revision = 0;
 };
 
 struct VisualHighlightJobInputs {
@@ -196,7 +197,7 @@ void mark_visual_highlight_dirty(VisualHighlightPanelState* state, int64_t now_m
 
 void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                      const VisualHighlightConfig& config, bool editor_focused,
-                                     bool indexed_cpp, int64_t now_ms,
+                                     bool indexed_source, bool content_settled, int64_t now_ms,
                                      const VisualHighlightJobInputs& inputs);
 
 bool drain_visual_highlight_results(VisualHighlightPanelState* state, const EditorBuffer& buffer,
