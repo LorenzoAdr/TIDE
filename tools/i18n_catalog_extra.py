@@ -134,6 +134,8 @@ EXTRA_CATALOG: list[tuple[str, str, str]] = [
     ("settings.visual_highlight.overview_ruler.description", "Muestra errores, avisos y cambios git en una columna junto al scrollbar", "Shows errors, warnings, and git changes in a column next to the scrollbar"),
     ("settings.visual_highlight.selection_occurrences.label", "Coincidencias al seleccionar", "Selection occurrences"),
     ("settings.visual_highlight.selection_occurrences.description", "Resalta otras apariciones del texto seleccionado en el viewport visible", "Highlights other instances of the selected text in the visible viewport"),
+    ("settings.visual_highlight.code_folding.label", "Zonas colapsables", "Collapsible regions"),
+    ("settings.visual_highlight.code_folding.description", "Muestra marcadores en el gutter para plegar bloques de código (C/C++)", "Shows gutter markers to fold code blocks (C/C++)"),
     ("settings.general.animations.label", "Animaciones en la interfaz", "Interface animations"),
     ("settings.general.animations.description", "Hover y efectos animados; desactivar para modo de bajo consumo", "Hover and animated effects; disable for low-power mode"),
     ("settings.general.overview_ruler.label", "Franja de marcas junto al scroll", "Mark strip next to scrollbar"),

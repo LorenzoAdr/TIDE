@@ -19,6 +19,7 @@ struct AppSettings {
   bool visual_scope_background_enabled = true;
   bool visual_scope_brace_highlight_enabled = true;
   bool visual_selection_occurrences_enabled = true;
+  bool visual_code_folding_enabled = true;
   // Legacy keys kept for JSON migration; prefer visual_* toggles in settings UI.
   bool scope_highlight_enabled = true;
   // Master switch for non-highlight session extras (diagnostic suffixes/underlines,

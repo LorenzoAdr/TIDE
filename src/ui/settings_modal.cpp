@@ -226,7 +226,8 @@ constexpr int kVhDiagnosticSuffixes = 6;
 constexpr int kVhStickyScroll = 7;
 constexpr int kVhOverviewRuler = 8;
 constexpr int kVhSelectionOccurrences = 9;
-constexpr int kVisualHighlightOptionCount = 10;
+constexpr int kVhCodeFolding = 10;
+constexpr int kVisualHighlightOptionCount = 11;
 
 bool is_top_level_panel(SettingsPanel panel) {
   return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kVisualHighlight ||
@@ -426,6 +427,8 @@ std::vector<SettingsOption> visual_highlight_settings_options() {
        i18n::tr("settings.visual_highlight.overview_ruler.description")},
       {i18n::tr("settings.visual_highlight.selection_occurrences.label"),
        i18n::tr("settings.visual_highlight.selection_occurrences.description")},
+      {i18n::tr("settings.visual_highlight.code_folding.label"),
+       i18n::tr("settings.visual_highlight.code_folding.description")},
   };
 }
 
@@ -462,6 +465,8 @@ bool visual_highlight_option_checked(const SettingsModalState* state, int index)
     case kVhSelectionOccurrences:
       return state->draft_visual_highlight_enabled &&
              state->draft_visual_selection_occurrences_enabled;
+    case kVhCodeFolding:
+      return state->draft_visual_highlight_enabled && state->draft_visual_code_folding_enabled;
     default:
       return false;
   }
@@ -506,6 +511,9 @@ void toggle_visual_highlight_option(SettingsModalState* state, int index) {
     case kVhSelectionOccurrences:
       state->draft_visual_selection_occurrences_enabled =
           !state->draft_visual_selection_occurrences_enabled;
+      break;
+    case kVhCodeFolding:
+      state->draft_visual_code_folding_enabled = !state->draft_visual_code_folding_enabled;
       break;
     default:
       break;
@@ -2352,6 +2360,7 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
       settings.visual_scope_brace_highlight_enabled;
   state->draft_visual_selection_occurrences_enabled =
       settings.visual_selection_occurrences_enabled;
+  state->draft_visual_code_folding_enabled = settings.visual_code_folding_enabled;
   state->draft_rich_session_enabled = settings.rich_session_enabled;
   state->draft_scope_highlight_strength = settings.scope_highlight_strength;
   state->draft_animations_enabled = settings.animations_enabled;
@@ -2420,6 +2429,7 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
       state->draft_visual_scope_brace_highlight_enabled;
   settings->visual_selection_occurrences_enabled =
       state->draft_visual_selection_occurrences_enabled;
+  settings->visual_code_folding_enabled = state->draft_visual_code_folding_enabled;
   settings->scope_highlight_enabled = state->draft_visual_scope_background_enabled ||
                                       state->draft_visual_scope_brace_highlight_enabled;
   settings->rich_session_enabled = state->draft_rich_session_enabled;

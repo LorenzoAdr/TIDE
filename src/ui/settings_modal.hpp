@@ -55,6 +55,7 @@ struct SettingsModalState {
   bool draft_visual_scope_background_enabled = true;
   bool draft_visual_scope_brace_highlight_enabled = true;
   bool draft_visual_selection_occurrences_enabled = true;
+  bool draft_visual_code_folding_enabled = true;
   bool draft_rich_session_enabled = true;
   int draft_scope_highlight_strength = 58;
   bool draft_animations_enabled = true;

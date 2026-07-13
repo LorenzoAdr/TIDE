@@ -216,6 +216,8 @@ const StringTable& spanish_strings() {
       {"settings.visual_highlight.overview_ruler.description", "Muestra errores, avisos y cambios git en una columna junto al scrollbar"},
       {"settings.visual_highlight.selection_occurrences.label", "Coincidencias al seleccionar"},
       {"settings.visual_highlight.selection_occurrences.description", "Resalta otras apariciones del texto seleccionado en el viewport visible"},
+      {"settings.visual_highlight.code_folding.label", "Zonas colapsables"},
+      {"settings.visual_highlight.code_folding.description", "Muestra marcadores en el gutter para plegar bloques de código (C/C++)"},
       {"settings.general.animations.label", "Animaciones en la interfaz"},
       {"settings.general.animations.description", "Hover y efectos animados; desactivar para modo de bajo consumo"},
       {"settings.general.overview_ruler.label", "Franja de marcas junto al scroll"},

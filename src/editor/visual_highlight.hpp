@@ -11,6 +11,7 @@
 
 #include "app/app_settings.hpp"
 #include "editor/bracket_match.hpp"
+#include "editor/editor_folds.hpp"
 #include "editor/text_search.hpp"
 #include "parser/tree_sitter_locals.hpp"
 #include "symbols/symbol_provider.hpp"
@@ -36,6 +37,7 @@ struct VisualHighlightConfig {
   bool diagnostic_suffixes = true;
   bool overview_ruler = true;
   bool selection_occurrences = true;
+  bool code_folding = true;
 };
 
 struct VisualHighlightSelectionKey {
@@ -81,6 +83,8 @@ struct VisualHighlightSnapshot {
   VisualHighlightOverviewData overview;
   VisualHighlightSelectionKey selection_key;
   std::vector<TextMatch> selection_occurrences;
+  std::vector<FoldRegion> fold_regions;
+  uint64_t fold_regions_revision = 0;
   bool ready = false;
 };
 
@@ -101,6 +105,7 @@ struct VisualHighlightPanelState {
   uint64_t last_seen_ts_revision = 0;
   VisualHighlightConfig last_job_config;
   bool has_last_job_config = false;
+  uint64_t last_applied_fold_revision = 0;
 };
 
 struct VisualHighlightJobInputs {
@@ -131,6 +136,8 @@ struct VisualHighlightJob {
   VisualHighlightConfig config;
   VisualHighlightJobInputs inputs;
   VisualHighlightSelectionQuery selection;
+  bool recompute_fold_regions = false;
+  bool indexed_source = false;
 };
 
 class VisualHighlightService {
@@ -198,6 +205,9 @@ bool drain_visual_highlight_results(VisualHighlightPanelState* state, const Edit
 const std::vector<TextMatch>* visual_highlight_selection_occurrences(
     const VisualHighlightPanelState& state, const EditorBuffer& buffer, bool find_bar_open,
     int viewport_scroll, int viewport_visible_lines);
+
+bool apply_visual_highlight_fold_regions(EditorBuffer* buffer, VisualHighlightPanelState* state,
+                                         const VisualHighlightConfig& config, bool indexed_source);
 
 inline VisualHighlightService& visual_highlight_service() {
   return VisualHighlightService::instance();

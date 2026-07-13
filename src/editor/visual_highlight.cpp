@@ -37,7 +37,8 @@ bool visual_highlight_configs_match(const VisualHighlightConfig& a,
          a.scope_strength == b.scope_strength && a.sticky_scroll == b.sticky_scroll &&
          a.diagnostic_suffixes == b.diagnostic_suffixes &&
          a.overview_ruler == b.overview_ruler &&
-         a.selection_occurrences == b.selection_occurrences;
+         a.selection_occurrences == b.selection_occurrences &&
+         a.code_folding == b.code_folding;
 }
 
 void schedule_visual_highlight_debounce_wake(VisualHighlightPanelState* state, int64_t now_ms) {
@@ -73,6 +74,7 @@ VisualHighlightConfig visual_highlight_config_from_settings(const AppSettings* s
   config.diagnostic_suffixes = settings->show_diagnostic_suffixes;
   config.overview_ruler = settings->overview_ruler_enabled;
   config.selection_occurrences = settings->visual_selection_occurrences_enabled;
+  config.code_folding = settings->visual_code_folding_enabled;
   return config;
 }
 
@@ -134,6 +136,23 @@ std::vector<TextMatch> filter_matches_to_viewport(const std::vector<TextMatch>& 
     }
   }
   return filtered;
+}
+
+void prune_invalid_collapsed_folds(EditorBuffer* buffer) {
+  if (buffer == nullptr) {
+    return;
+  }
+  std::set<int> valid_open_lines;
+  for (const FoldRegion& region : buffer->fold_regions) {
+    valid_open_lines.insert(region.open_line);
+  }
+  for (auto it = buffer->collapsed_folds.begin(); it != buffer->collapsed_folds.end();) {
+    if (valid_open_lines.count(*it) == 0) {
+      it = buffer->collapsed_folds.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 VisualHighlightService& VisualHighlightService::instance() {
@@ -325,6 +344,10 @@ VisualHighlightSnapshot VisualHighlightService::compute(const VisualHighlightJob
     if (job.config.brace_pair_colors && !ts_node_is_null(root)) {
       snap.colored_braces = colored_curly_braces(root, job.source);
     }
+    if (job.config.code_folding && job.recompute_fold_regions && !ts_node_is_null(root)) {
+      snap.fold_regions = fold_regions_from_tree(root, job.source);
+      snap.fold_regions_revision = job.doc_revision;
+    }
   }
 
   if (job.config.selection_occurrences && job.selection.active && !job.lines.empty()) {
@@ -335,6 +358,11 @@ VisualHighlightSnapshot VisualHighlightService::compute(const VisualHighlightJob
   } else {
     snap.selection_key = {};
     snap.selection_occurrences.clear();
+  }
+
+  if (!job.config.code_folding) {
+    snap.fold_regions.clear();
+    snap.fold_regions_revision = 0;
   }
 
   build_overview_snapshot(job, &snap);
@@ -412,7 +440,7 @@ void mark_visual_highlight_dirty(VisualHighlightPanelState* state, int64_t now_m
 
 void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                      const VisualHighlightConfig& config, bool editor_focused,
-                                     bool /*indexed_cpp*/, int64_t now_ms,
+                                     bool indexed_source, int64_t now_ms,
                                      const VisualHighlightJobInputs& inputs) {
   if (state == nullptr || buffer.path.empty()) {
     return;
@@ -512,6 +540,11 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
   job.inputs = inputs;
   job.selection = config.selection_occurrences ? build_selection_query(buffer)
                                                : VisualHighlightSelectionQuery{};
+  job.indexed_source = indexed_source;
+  job.recompute_fold_regions =
+      config.code_folding && indexed_source &&
+      (doc_revision != state->last_applied_fold_revision ||
+       state->snapshot.fold_regions_revision == 0);
 
   state->pending_generation = job.generation;
   state->pending_path = job.path;
@@ -590,6 +623,10 @@ bool drain_visual_highlight_results(VisualHighlightPanelState* state, const Edit
     merged.selection_key = state->snapshot.selection_key;
     merged.selection_occurrences = state->snapshot.selection_occurrences;
   }
+  if (merged.fold_regions_revision == 0) {
+    merged.fold_regions = state->snapshot.fold_regions;
+    merged.fold_regions_revision = state->snapshot.fold_regions_revision;
+  }
 
   merged.ready = revision_match && cursor_match && selection_match;
   state->snapshot = std::move(merged);
@@ -625,6 +662,42 @@ const std::vector<TextMatch>* visual_highlight_selection_occurrences(
     return nullptr;
   }
   return &viewport_matches;
+}
+
+bool apply_visual_highlight_fold_regions(EditorBuffer* buffer, VisualHighlightPanelState* state,
+                                         const VisualHighlightConfig& config, bool indexed_source) {
+  if (buffer == nullptr || state == nullptr) {
+    return false;
+  }
+  if (!config.enabled || !config.code_folding || !indexed_source) {
+    const bool changed = !buffer->fold_regions.empty() || !buffer->collapsed_folds.empty();
+    buffer->fold_regions.clear();
+    buffer->collapsed_folds.clear();
+    state->last_applied_fold_revision = 0;
+    return changed;
+  }
+
+  const VisualHighlightSnapshot& snap = state->snapshot;
+  if (snap.fold_regions_revision == 0) {
+    return false;
+  }
+  const uint64_t current_rev = tree_sitter_service().revision_for(buffer->path);
+  if (snap.fold_regions_revision != current_rev) {
+    return false;
+  }
+
+  bool changed = false;
+  if (!snap.fold_regions.empty() || buffer->fold_regions.empty()) {
+    if (buffer->fold_regions != snap.fold_regions) {
+      buffer->fold_regions = snap.fold_regions;
+      changed = true;
+    }
+  }
+  if (changed) {
+    prune_invalid_collapsed_folds(buffer);
+    state->last_applied_fold_revision = snap.fold_regions_revision;
+  }
+  return changed;
 }
 
 }  // namespace tgdb

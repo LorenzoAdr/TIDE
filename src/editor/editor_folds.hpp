@@ -8,6 +8,12 @@ namespace tgdb {
 struct FoldRegion {
   int open_line = 0;
   int close_line = 0;
+
+  bool operator==(const FoldRegion& other) const {
+    return open_line == other.open_line && close_line == other.close_line;
+  }
+
+  bool operator!=(const FoldRegion& other) const { return !(*this == other); }
 };
 
 struct EditorBuffer;

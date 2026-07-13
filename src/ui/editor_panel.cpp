@@ -219,8 +219,6 @@ struct EditorPanelState {
   int gutter_visible_rows = 0;
   int gutter_fold_width = 0;
   std::vector<int> viewport_line_cache;
-  std::string fold_regions_cache_path;
-  uint64_t fold_regions_cache_token = 0;
   std::vector<int> fold_visible_lines_cache;
   uint64_t fold_visible_lines_cache_view_token = 0;
   uint64_t fold_visible_lines_cache_fold_token = 0;
@@ -702,19 +700,20 @@ const std::vector<SymbolInfo>& cached_file_symbols(EditorPanelState* panel,
 // The fold-aware "which buffer lines are visible" scan is O(lines * fold_regions); cache it so
 // continuous scrolling (which doesn't touch view_token) reuses it instead of re-scanning the
 // whole file on every single render frame. view_token changes on every edit and on fold toggles;
-// fold_regions_cache_token additionally changes when tree-sitter's fold regions are (re)computed
-// for an unchanged view_token (which happens once typing settles), so both need to be watched.
+// fold_regions_revision additionally changes when fold regions are (re)computed in the
+// visual-highlight worker.
 const std::vector<int>& cached_fold_visible_lines(EditorPanelState* panel,
                                                   const EditorBuffer& buffer,
                                                   const std::vector<FoldRegion>& regions) {
   const int total = static_cast<int>(buffer.lines.size());
+  const uint64_t fold_token = panel->visual_highlight.snapshot.fold_regions_revision;
   const bool stale = panel->fold_visible_lines_cache_view_token != buffer.view_token ||
-                     panel->fold_visible_lines_cache_fold_token != panel->fold_regions_cache_token ||
+                     panel->fold_visible_lines_cache_fold_token != fold_token ||
                      panel->fold_visible_lines_cache_total != total;
   if (stale) {
     panel->fold_visible_lines_cache = visible_buffer_lines(total, regions, buffer.collapsed_folds);
     panel->fold_visible_lines_cache_view_token = buffer.view_token;
-    panel->fold_visible_lines_cache_fold_token = panel->fold_regions_cache_token;
+    panel->fold_visible_lines_cache_fold_token = fold_token;
     panel->fold_visible_lines_cache_total = total;
   }
   return panel->fold_visible_lines_cache;
@@ -5366,8 +5365,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->gutter_box = Box{};
       buffer.collapsed_folds.clear();
       buffer.fold_regions.clear();
-      panel_state->fold_regions_cache_path.clear();
-      panel_state->fold_regions_cache_token = 0;
       panel_state->fold_visible_lines_cache.clear();
       panel_state->fold_visible_lines_cache_view_token = 0;
       panel_state->fold_visible_lines_cache_fold_token = 0;
@@ -5567,57 +5564,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     const bool path_indexed_cpp =
         !buffer.path.empty() && is_indexed_source_path(buffer.path);
-    {
-      UiSyncPhaseScope folds_scope(ui_perf, "render.editor.folds");
-      if (rich_session_enabled && path_indexed_cpp) {
-        const bool path_changed = panel_state->fold_regions_cache_path != buffer.path;
-        const bool settled = editor_content_settled(*panel_state);
-        // Gate on the tree-sitter document revision, not buffer.view_token: view_token is a
-        // catch-all "something changed, redraw" counter that also gets bumped by unrelated async
-        // LSP events (diagnostics, semantic tokens draining in) which can fire many times in a
-        // row (e.g. right after clangd restarts for a debug session) without the actual buffer
-        // text changing at all. ts_highlight_revision only changes when tree-sitter reparses the
-        // document, so it avoids re-running this expensive full-document fold scan for every
-        // unrelated async event.
-        const bool token_changed =
-            panel_state->fold_regions_cache_token != ts_highlight_revision;
-        if (path_changed || (settled && token_changed)) {
-          const std::vector<FoldRegion> fresh =
-              tree_sitter_service().fold_regions_at(buffer.path, buffer.lines.to_vector());
-          // Always mark this revision as processed, even if we decide not to apply `fresh`
-          // below (e.g. a transient empty result while old fold regions are kept). Otherwise
-          // fold_regions_cache_token never catches up and this expensive tree-sitter fold scan
-          // (full source join + parse + query) reruns on every single render frame forever
-          // instead of once.
-          panel_state->fold_regions_cache_path = buffer.path;
-          panel_state->fold_regions_cache_token = ts_highlight_revision;
-          if (!fresh.empty() || path_changed || buffer.fold_regions.empty()) {
-            buffer.fold_regions = fresh;
-            std::set<int> valid_open_lines;
-            for (const FoldRegion& region : buffer.fold_regions) {
-              valid_open_lines.insert(region.open_line);
-            }
-            for (auto it = buffer.collapsed_folds.begin(); it != buffer.collapsed_folds.end();) {
-              if (valid_open_lines.count(*it) == 0) {
-                it = buffer.collapsed_folds.erase(it);
-              } else {
-                ++it;
-              }
-            }
-          }
-        }
-      } else {
-        // Either not an indexed C++ file, or "rich session" / scope highlight is disabled:
-        // drop any stale fold regions so collapsed sections don't linger and folding is fully
-        // unavailable while this is off, instead of just hiding the gutter marker.
-        buffer.fold_regions.clear();
-        buffer.collapsed_folds.clear();
-        panel_state->fold_regions_cache_path.clear();
-        panel_state->fold_regions_cache_token = 0;
-      }
-    }
     const bool fold_gutter_enabled =
-        rich_session_enabled && path_indexed_cpp && !buffer.fold_regions.empty();
+        vh_config.enabled && vh_config.code_folding && path_indexed_cpp &&
+        !buffer.fold_regions.empty();
     panel_state->gutter_fold_width = fold_gutter_enabled ? 1 : 0;
 
     const std::vector<int>& fold_visible_lines =
@@ -6474,6 +6423,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       }
       workspace->ensure_buffer();
       const bool vh_focused = focus != nullptr && focus->region == panel_focus;
+      const bool path_indexed =
+          !workspace->buffer.path.empty() && is_indexed_source_path(workspace->buffer.path);
       if (vh_focused && !workspace->buffer.path.empty()) {
         const int64_t vh_now = steady_now_ms();
         const VisualHighlightConfig vh_config = visual_highlight_config_from_settings(
@@ -6489,22 +6440,39 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
               find_state.get(), workspace->last_buffer_edit_ms, layout_state, find_state->open);
           UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".visual_highlight");
           tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
-                                          vh_config, vh_focused, true, vh_now, vh_inputs);
+                                          vh_config, vh_focused, path_indexed, vh_now,
+                                          vh_inputs);
           if (panel_state->visual_highlight.job_inflight) {
             const uint64_t pending_gen = panel_state->visual_highlight.pending_generation;
             if (!visual_highlight_service().wait_for_pending_result(pending_gen)) {
               visual_highlight_service().request_completion_wake(pending_gen);
             }
           }
+          bool vh_view_invalidated = false;
           if (drain_visual_highlight_results(&panel_state->visual_highlight, workspace->buffer,
                                              layout_state, vh_focused)) {
+            vh_view_invalidated = true;
+          }
+          if (apply_visual_highlight_fold_regions(&workspace->buffer,
+                                                  &panel_state->visual_highlight, vh_config,
+                                                  path_indexed)) {
+            panel_state->fold_visible_lines_cache_view_token = 0;
+            vh_view_invalidated = true;
+          }
+          if (vh_view_invalidated) {
             panel_state->viewport_line_render_cache.clear();
           }
           if (panel_state->visual_highlight.dirty &&
               !panel_state->visual_highlight.job_inflight) {
             tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
-                                            vh_config, vh_focused, true, vh_now, vh_inputs);
+                                            vh_config, vh_focused, path_indexed, vh_now,
+                                            vh_inputs);
           }
+        } else if (apply_visual_highlight_fold_regions(&workspace->buffer,
+                                                       &panel_state->visual_highlight, vh_config,
+                                                       path_indexed)) {
+          panel_state->fold_visible_lines_cache_view_token = 0;
+          panel_state->viewport_line_render_cache.clear();
         }
       }
 
