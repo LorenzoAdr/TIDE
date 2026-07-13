@@ -5,11 +5,16 @@
 #include <functional>
 #include <string>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "app/app_settings.hpp"
 #include "editor/bracket_match.hpp"
+#include "editor/text_search.hpp"
+#include "lsp/diagnostics.hpp"
 #include "parser/tree_sitter_locals.hpp"
+#include "symbols/symbol_provider.hpp"
 #include "ui/main_layout.hpp"
 #include "util/thread_safe_queue.hpp"
 
@@ -28,9 +33,20 @@ struct VisualHighlightConfig {
   bool scope_background = true;
   bool scope_brace_highlight = true;
   int scope_strength = 58;
+  bool sticky_scroll = true;
+  bool diagnostic_suffixes = true;
+  bool overview_ruler = true;
 };
 
 VisualHighlightConfig visual_highlight_config_from_settings(const AppSettings* settings);
+
+struct VisualHighlightOverviewData {
+  std::unordered_map<int, std::vector<Diagnostic>> diagnostics_by_line;
+  std::unordered_set<int> git_changed_lines;
+  bool git_untracked_all = false;
+  std::vector<TextMatch> text_matches;
+  int total_lines = 0;
+};
 
 struct VisualHighlightSnapshot {
   uint64_t generation = 0;
@@ -42,6 +58,10 @@ struct VisualHighlightSnapshot {
   BracketPairHighlight scope_braces;
   ScopeLineRange immediate_scope;
   std::vector<ColoredBraceMarker> colored_braces;
+  std::vector<SymbolInfo> file_symbols;
+  std::unordered_map<int, std::string> diagnostic_suffix_by_line;
+  int diagnostic_suffix_code_width = 0;
+  VisualHighlightOverviewData overview;
   bool ready = false;
 };
 
@@ -63,6 +83,16 @@ struct VisualHighlightPanelState {
   bool has_last_job_config = false;
 };
 
+struct VisualHighlightJobInputs {
+  int code_width = 0;
+  int total_lines = 0;
+  bool diagnostics_ui_allowed = false;
+  std::unordered_map<int, std::vector<Diagnostic>> diagnostics_by_line;
+  std::unordered_set<int> git_changed_lines;
+  bool git_untracked_all = false;
+  std::vector<TextMatch> text_matches;
+};
+
 struct VisualHighlightJob {
   uint64_t generation = 0;
   std::string path;
@@ -71,6 +101,7 @@ struct VisualHighlightJob {
   int cursor_col = 0;
   uint64_t doc_revision = 0;
   VisualHighlightConfig config;
+  VisualHighlightJobInputs inputs;
 };
 
 class VisualHighlightService {
@@ -118,6 +149,7 @@ class VisualHighlightService {
 };
 
 void mark_visual_highlight_content_dirty(VisualHighlightPanelState* state, int64_t now_ms);
+void mark_visual_highlight_inputs_dirty(VisualHighlightPanelState* state, int64_t now_ms);
 
 void mark_visual_highlight_cursor_dirty(VisualHighlightPanelState* state, int64_t now_ms);
 
@@ -125,7 +157,8 @@ void mark_visual_highlight_dirty(VisualHighlightPanelState* state, int64_t now_m
 
 void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                      const VisualHighlightConfig& config, bool editor_focused,
-                                     bool indexed_cpp, int64_t now_ms);
+                                     bool indexed_cpp, int64_t now_ms,
+                                     const VisualHighlightJobInputs& inputs);
 
 bool drain_visual_highlight_results(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                     MainLayoutState* layout, bool editor_focused);

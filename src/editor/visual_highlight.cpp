@@ -5,9 +5,11 @@
 #include <condition_variable>
 #include <mutex>
 #include <utility>
+#include <vector>
 
 #include "editor/editor_buffer_source.hpp"
 #include "indexer/index_rules.hpp"
+#include "lsp/diagnostics.hpp"
 #include "parser/tree_sitter_blocks.hpp"
 #include "parser/tree_sitter_document.hpp"
 #include "parser/tree_sitter_locals.hpp"
@@ -30,7 +32,9 @@ bool visual_highlight_configs_match(const VisualHighlightConfig& a,
          a.matching_bracket == b.matching_bracket &&
          a.scope_background == b.scope_background &&
          a.scope_brace_highlight == b.scope_brace_highlight &&
-         a.scope_strength == b.scope_strength;
+         a.scope_strength == b.scope_strength && a.sticky_scroll == b.sticky_scroll &&
+         a.diagnostic_suffixes == b.diagnostic_suffixes &&
+         a.overview_ruler == b.overview_ruler;
 }
 
 void schedule_visual_highlight_debounce_wake(VisualHighlightPanelState* state, int64_t now_ms) {
@@ -62,6 +66,9 @@ VisualHighlightConfig visual_highlight_config_from_settings(const AppSettings* s
   config.scope_background = settings->visual_scope_background_enabled;
   config.scope_brace_highlight = settings->visual_scope_brace_highlight_enabled;
   config.scope_strength = settings->scope_highlight_strength;
+  config.sticky_scroll = settings->sticky_scroll_enabled;
+  config.diagnostic_suffixes = settings->show_diagnostic_suffixes;
+  config.overview_ruler = settings->overview_ruler_enabled;
   return config;
 }
 
@@ -197,6 +204,61 @@ std::vector<VisualHighlightSnapshot> VisualHighlightService::drain_results() {
   return drained;
 }
 
+namespace {
+
+std::vector<std::string> split_source_lines(const std::string& source) {
+  std::vector<std::string> lines;
+  std::size_t start = 0;
+  while (start <= source.size()) {
+    const std::size_t end = source.find('\n', start);
+    if (end == std::string::npos) {
+      lines.emplace_back(source.substr(start));
+      break;
+    }
+    lines.emplace_back(source.substr(start, end - start));
+    start = end + 1;
+  }
+  if (source.empty()) {
+    lines.emplace_back("");
+  }
+  return lines;
+}
+
+void build_diagnostic_suffix_snapshot(const VisualHighlightJob& job,
+                                      VisualHighlightSnapshot* snap) {
+  if (snap == nullptr || !job.config.diagnostic_suffixes || !job.inputs.diagnostics_ui_allowed ||
+      job.inputs.code_width <= 0 || job.inputs.diagnostics_by_line.empty()) {
+    return;
+  }
+  const std::vector<std::string> lines = split_source_lines(job.source);
+  snap->diagnostic_suffix_code_width = job.inputs.code_width;
+  for (const auto& entry : job.inputs.diagnostics_by_line) {
+    const int line = entry.first;
+    if (line < 0 || line >= static_cast<int>(lines.size())) {
+      continue;
+    }
+    const int max_suffix =
+        job.inputs.code_width - static_cast<int>(lines[static_cast<std::size_t>(line)].size()) - 2;
+    const std::string suffix = build_diagnostic_suffix(entry.second, max_suffix);
+    if (!suffix.empty()) {
+      snap->diagnostic_suffix_by_line[line] = suffix;
+    }
+  }
+}
+
+void build_overview_snapshot(const VisualHighlightJob& job, VisualHighlightSnapshot* snap) {
+  if (snap == nullptr || !job.config.overview_ruler) {
+    return;
+  }
+  snap->overview.total_lines = job.inputs.total_lines;
+  snap->overview.diagnostics_by_line = job.inputs.diagnostics_by_line;
+  snap->overview.git_changed_lines = job.inputs.git_changed_lines;
+  snap->overview.git_untracked_all = job.inputs.git_untracked_all;
+  snap->overview.text_matches = job.inputs.text_matches;
+}
+
+}  // namespace
+
 VisualHighlightSnapshot VisualHighlightService::compute(const VisualHighlightJob& job) const {
   VisualHighlightSnapshot snap;
   snap.generation = job.generation;
@@ -211,28 +273,32 @@ VisualHighlightSnapshot VisualHighlightService::compute(const VisualHighlightJob
 
   const auto tree_snapshot = tree_sitter_service().snapshot_for_highlight(
       job.path, job.source, job.doc_revision);
-  if (!tree_snapshot.ok || tree_snapshot.tree_copy == nullptr) {
-    return snap;
+  TSNode root = {};
+  if (tree_snapshot.ok && tree_snapshot.tree_copy != nullptr) {
+    root = ts_tree_root_node(tree_snapshot.tree_copy);
+    if (job.config.matching_bracket && !ts_node_is_null(root)) {
+      snap.matching_bracket =
+          bracket_pair_at(root, job.source, job.cursor_line, job.cursor_col);
+    }
+    if (job.config.scope_background && !tree_snapshot.scope_symbols.empty()) {
+      snap.immediate_scope = innermost_scope_range_from_symbols(
+          tree_snapshot.scope_symbols, job.cursor_line, job.cursor_col);
+    }
+    if (job.config.scope_brace_highlight && !ts_node_is_null(root)) {
+      snap.scope_braces =
+          scope_bracket_pair_from_tree(root, job.source, job.cursor_line, job.cursor_col);
+    }
+    if (job.config.brace_pair_colors && !ts_node_is_null(root)) {
+      snap.colored_braces = colored_curly_braces(root, job.source);
+    }
   }
 
-  const TSNode root = ts_tree_root_node(tree_snapshot.tree_copy);
-  if (job.config.matching_bracket && !ts_node_is_null(root)) {
-    snap.matching_bracket =
-        bracket_pair_at(root, job.source, job.cursor_line, job.cursor_col);
-  }
-  if (job.config.scope_background && !tree_snapshot.scope_symbols.empty()) {
-    snap.immediate_scope = innermost_scope_range_from_symbols(
-        tree_snapshot.scope_symbols, job.cursor_line, job.cursor_col);
-  }
-  if (job.config.scope_brace_highlight && !ts_node_is_null(root)) {
-    snap.scope_braces =
-        scope_bracket_pair_from_tree(root, job.source, job.cursor_line, job.cursor_col);
-  }
-  if (job.config.brace_pair_colors && !ts_node_is_null(root)) {
-    snap.colored_braces = colored_curly_braces(root, job.source);
-  }
+  build_diagnostic_suffix_snapshot(job, &snap);
+  build_overview_snapshot(job, &snap);
 
-  ts_tree_delete(tree_snapshot.tree_copy);
+  if (tree_snapshot.tree_copy != nullptr) {
+    ts_tree_delete(tree_snapshot.tree_copy);
+  }
   snap.ready = true;
   return snap;
 }
@@ -270,7 +336,18 @@ void mark_visual_highlight_content_dirty(VisualHighlightPanelState* state, int64
   }
   state->dirty = true;
   state->dirty_ms = now_ms;
+  // Cursor/viewport highlights need a fresh job; file-wide metadata (sticky symbols,
+  // suffixes, overview) stays visible until the next snapshot lands.
   state->snapshot.ready = false;
+  visual_highlight_service().clear_debounce_wake_scheduled();
+}
+
+void mark_visual_highlight_inputs_dirty(VisualHighlightPanelState* state, int64_t now_ms) {
+  if (state == nullptr) {
+    return;
+  }
+  state->dirty = true;
+  state->dirty_ms = now_ms;
   visual_highlight_service().clear_debounce_wake_scheduled();
 }
 
@@ -289,8 +366,9 @@ void mark_visual_highlight_dirty(VisualHighlightPanelState* state, int64_t now_m
 
 void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                      const VisualHighlightConfig& config, bool editor_focused,
-                                     bool indexed_cpp, int64_t now_ms) {
-  if (state == nullptr || buffer.path.empty() || !indexed_cpp) {
+                                     bool /*indexed_cpp*/, int64_t now_ms,
+                                     const VisualHighlightJobInputs& inputs) {
+  if (state == nullptr || buffer.path.empty()) {
     return;
   }
 
@@ -338,10 +416,12 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
     }
     return;
   }
-  const int64_t debounce_elapsed = now_ms - state->dirty_ms;
-  if (debounce_elapsed < kVisualHighlightDebounceMs) {
-    schedule_visual_highlight_debounce_wake(state, now_ms);
-    return;
+  if (!debounce_due) {
+    const int64_t debounce_elapsed = now_ms - state->dirty_ms;
+    if (debounce_elapsed < kVisualHighlightDebounceMs) {
+      schedule_visual_highlight_debounce_wake(state, now_ms);
+      return;
+    }
   }
 
   const std::string source = join_editor_lines(buffer.lines);
@@ -359,6 +439,7 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
   job.cursor_col = col;
   job.doc_revision = doc_revision;
   job.config = config;
+  job.inputs = inputs;
 
   state->pending_generation = job.generation;
   state->pending_path = job.path;
@@ -394,12 +475,7 @@ bool drain_visual_highlight_results(VisualHighlightPanelState* state, const Edit
 
   VisualHighlightSnapshot* best = nullptr;
   for (VisualHighlightSnapshot& snap : snaps) {
-    if (snap.path != buffer.path || snap.generation != state->pending_generation ||
-        snap.doc_revision != tree_sitter_service().revision_for(buffer.path)) {
-      state->job_inflight = false;
-      state->dirty = true;
-      state->dirty_ms = steady_now_ms() - kVisualHighlightDebounceMs;
-      visual_highlight_service().clear_debounce_wake_scheduled();
+    if (snap.path != buffer.path || snap.generation != state->pending_generation) {
       continue;
     }
     best = &snap;
@@ -420,13 +496,23 @@ bool drain_visual_highlight_results(VisualHighlightPanelState* state, const Edit
 
   const bool cursor_match =
       merged.cursor_line == buffer.primary_line() && merged.cursor_col == buffer.primary_col();
+  const uint64_t current_rev = tree_sitter_service().revision_for(buffer.path);
+  const bool revision_match = merged.doc_revision == current_rev;
   if (!cursor_match) {
     merged.matching_bracket = state->snapshot.matching_bracket;
     merged.scope_braces = state->snapshot.scope_braces;
     merged.immediate_scope = state->snapshot.immediate_scope;
   }
 
+  merged.ready = revision_match && cursor_match;
   state->snapshot = std::move(merged);
+
+  if (!revision_match || (editor_focused && !cursor_match)) {
+    state->dirty = true;
+    state->dirty_ms = steady_now_ms();
+  } else {
+    state->dirty = false;
+  }
 
   if (layout != nullptr) {
     invalidate_editor_view(layout);

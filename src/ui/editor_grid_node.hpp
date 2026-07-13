@@ -39,7 +39,11 @@ std::shared_ptr<EditorPixelRow> PixelRowFromElement(const ftxui::Element& elemen
 // `ui_perf`/`perf_phase` are optional (pass nullptr/"" to disable) and let
 // the caller measure exactly how much this direct-write pass costs, via the
 // same UiPerfMonitor phase log used elsewhere in the editor panel.
+// `width` is the rasterized row width (cells captured per line). `layout_min_x` is the
+// horizontal space the hbox must reserve: fixed for the gutter (line numbers), 0 for the
+// flex-growing code column so the scrollbar is not clipped by an outer frame.
 ftxui::Element MakeEditorPixelGrid(std::vector<std::shared_ptr<EditorPixelRow>> rows, int width,
-                                   UiPerfMonitor* ui_perf, std::string perf_phase);
+                                   int layout_min_x, UiPerfMonitor* ui_perf,
+                                   std::string perf_phase);
 
 }  // namespace tgdb

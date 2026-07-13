@@ -289,6 +289,10 @@ struct EditorPanelState {
   uint64_t viewport_line_render_cache_ts_revision = 0;
   std::string scope_completion_cache_key;
   std::vector<CompletionItem> scope_completion_cache_items;
+  uint64_t vh_last_inputs_diag_revision = 0;
+  uint64_t vh_last_inputs_git_view_token = 0;
+  int vh_last_inputs_code_width = -1;
+  std::size_t vh_last_inputs_find_count = 0;
 };
 
 void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState* layout_state,
@@ -752,6 +756,7 @@ void rebuild_diagnostics_by_line(EditorPanelState* panel, const DocumentDiagnost
   for (const auto& item : doc.items) {
     panel->diagnostics_by_line[item.line].push_back(item);
   }
+  mark_visual_highlight_inputs_dirty(&panel->visual_highlight, steady_now_ms());
 }
 
 void rebuild_diagnostic_suffix_cache(EditorPanelState* panel, const EditorBuffer& buffer,
@@ -795,32 +800,92 @@ bool scroll_suffixes_settled(const EditorPanelState& panel) {
   return steady_now_ms() - panel.last_scroll_change_ms >= kSuffixScrollSettleMs;
 }
 
+void track_editor_scroll(EditorPanelState* panel, int scroll, MainLayoutState* layout_state,
+                         bool scroll_driven_redraw) {
+  if (panel == nullptr) {
+    return;
+  }
+  const int prev_scroll = panel->last_render_scroll;
+  if (scroll == prev_scroll) {
+    return;
+  }
+  panel->last_render_scroll = scroll;
+  panel->last_scroll_change_ms = steady_now_ms();
+  if (layout_state != nullptr && scroll_driven_redraw) {
+    UI_WAKE(layout_state, "editor.scroll");
+  }
+}
+
+VisualHighlightJobInputs build_visual_highlight_job_inputs(
+    EditorPanelState* panel, const EditorBuffer& buffer, int code_width,
+    ISymbolProvider* symbols, const EditorFindState* find_state, int64_t last_edit_ms,
+    MainLayoutState* layout_state, bool find_open) {
+  VisualHighlightJobInputs inputs;
+  if (panel == nullptr) {
+    return inputs;
+  }
+  inputs.code_width = code_width;
+  inputs.total_lines = static_cast<int>(buffer.lines.size());
+  inputs.diagnostics_ui_allowed =
+      diagnostics_display_allowed(last_edit_ms, symbols, buffer.path,
+                                  layout_state == nullptr ||
+                                      layout_state->activity_gate.allows_lsp_ui());
+  inputs.diagnostics_by_line = panel->diagnostics_by_line;
+  inputs.git_changed_lines = panel->git_changed_lines;
+  inputs.git_untracked_all = panel->git_untracked_all_lines;
+  if (find_open && find_state != nullptr && !find_state->matches.empty()) {
+    inputs.text_matches = find_state->matches;
+  }
+  return inputs;
+}
+
+void maybe_mark_visual_highlight_inputs_dirty(VisualHighlightPanelState* vh,
+                                              EditorPanelState* panel, int code_width,
+                                              uint64_t diag_revision, const EditorFindState* find,
+                                              bool find_open, int64_t now_ms) {
+  if (vh == nullptr || panel == nullptr || vh->job_inflight) {
+    return;
+  }
+  const std::size_t find_count =
+      find_open && find != nullptr ? find->matches.size() : 0;
+  const bool changed = panel->vh_last_inputs_diag_revision != diag_revision ||
+                       panel->vh_last_inputs_git_view_token != panel->git_cache_view_token ||
+                       panel->vh_last_inputs_code_width != code_width ||
+                       panel->vh_last_inputs_find_count != find_count;
+  if (!changed) {
+    return;
+  }
+  panel->vh_last_inputs_diag_revision = diag_revision;
+  panel->vh_last_inputs_git_view_token = panel->git_cache_view_token;
+  panel->vh_last_inputs_code_width = code_width;
+  panel->vh_last_inputs_find_count = find_count;
+  mark_visual_highlight_inputs_dirty(vh, now_ms);
+}
+
+const std::unordered_map<int, std::string>* active_diagnostic_suffix_map(
+    const EditorPanelState& panel, const VisualHighlightConfig& vh_config,
+    const std::string& path) {
+  if (vh_config.enabled && vh_config.diagnostic_suffixes && !path.empty() &&
+      panel.visual_highlight.snapshot.path == path &&
+      !panel.visual_highlight.snapshot.diagnostic_suffix_by_line.empty()) {
+    return &panel.visual_highlight.snapshot.diagnostic_suffix_by_line;
+  }
+  return &panel.diagnostic_suffix_by_line;
+}
+
 bool show_diagnostic_suffix_on_line(const EditorPanelState& panel, int line,
-                                    const EditorBuffer& buffer, bool suffixes_enabled) {
-  if (!suffixes_enabled) {
+                                    const EditorBuffer& buffer, bool suffixes_enabled,
+                                    const std::unordered_map<int, std::string>* suffix_map) {
+  if (!suffixes_enabled || suffix_map == nullptr) {
     return false;
   }
-  if (panel.diagnostic_suffix_by_line.find(line) == panel.diagnostic_suffix_by_line.end()) {
+  if (suffix_map->find(line) == suffix_map->end()) {
     return false;
   }
   if (scroll_suffixes_settled(panel)) {
     return true;
   }
   return line == buffer.primary_line();
-}
-
-void track_editor_scroll(EditorPanelState* panel, int scroll, MainLayoutState* layout_state) {
-  if (panel == nullptr) {
-    return;
-  }
-  if (scroll == panel->last_render_scroll) {
-    return;
-  }
-  panel->last_render_scroll = scroll;
-  panel->last_scroll_change_ms = steady_now_ms();
-  if (layout_state != nullptr) {
-    UI_WAKE(layout_state, "editor.scroll");
-  }
 }
 
 const std::vector<Diagnostic>* diagnostics_for_editor_line(EditorPanelState* panel, int line) {
@@ -963,6 +1028,7 @@ void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer
 
   apply_git_diff_to_panel(panel, diff, buffer.lines.to_vector());
   panel->git_cache_view_token = buffer.view_token;
+  mark_visual_highlight_inputs_dirty(&panel->visual_highlight, steady_now_ms());
 }
 
 SelectionOccurrenceKey selection_occurrence_key_from(const EditorBuffer& buffer) {
@@ -5216,6 +5282,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     if (path_changed) {
       panel_state->last_path = buffer.path;
+      panel_state->code_box = Box{};
+      panel_state->gutter_box = Box{};
       buffer.collapsed_folds.clear();
       buffer.fold_regions.clear();
       panel_state->fold_regions_cache_path.clear();
@@ -5609,15 +5677,15 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         scope_bracket_ptr = &panel_state->visual_highlight.snapshot.scope_braces;
       }
 
-      const std::vector<SymbolInfo>& file_symbols =
+      const std::vector<SymbolInfo>& sticky_symbol_source =
           cached_file_symbols(panel_state.get(), buffer.path, symbols.get());
-      sticky_lines = defer_sticky_scroll || !rich_session_enabled
-                        ? std::vector<StickyLine>{}
-                        : (layout_state != nullptr && layout_state->app_settings != nullptr &&
-                                   layout_state->app_settings->sticky_scroll_enabled
-                               ? sticky_lines_for_scroll(file_symbols, buffer.lines.to_vector(),
-                                                        buffer.scroll, 3)
-                               : std::vector<StickyLine>{});
+      const bool vh_sticky_ready =
+          vh_config.enabled && vh_config.sticky_scroll && !sticky_symbol_source.empty();
+      sticky_lines =
+          defer_sticky_scroll || !vh_config.enabled || !vh_config.sticky_scroll || !vh_sticky_ready
+              ? std::vector<StickyLine>{}
+              : sticky_lines_for_scroll(sticky_symbol_source, buffer.lines.to_vector(),
+                                        buffer.scroll, 3);
     }
     const BracketPairHighlight& bracket = *bracket_ptr;
 
@@ -5668,18 +5736,25 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         code_width_from_box(panel_state->code_box, panel_state->code_width_chars);
     panel_state->code_width_chars = code_width;
 
-    track_editor_scroll(panel_state.get(), buffer.scroll, layout_state);
-    if (!typing_edit_mode) {
+    const bool scroll_driven_vh =
+        vh_config.enabled && (vh_config.diagnostic_suffixes || vh_config.overview_ruler);
+    track_editor_scroll(panel_state.get(), buffer.scroll, layout_state, scroll_driven_vh);
+    if (!typing_edit_mode && (!vh_config.enabled || !vh_config.diagnostic_suffixes)) {
       UiSyncPhaseScope suffix_scope(ui_perf, "render.editor.diagnostics");
+      rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
+                                      panel_state->cached_file_diag_revision, symbols.get(),
+                                      workspace->last_buffer_edit_ms, layout_state);
+    } else if (!typing_edit_mode && vh_config.enabled && vh_config.diagnostic_suffixes &&
+               panel_state->diagnostic_suffix_by_line.empty() &&
+               panel_state->visual_highlight.snapshot.diagnostic_suffix_by_line.empty()) {
       rebuild_diagnostic_suffix_cache(panel_state.get(), buffer, code_width,
                                       panel_state->cached_file_diag_revision, symbols.get(),
                                       workspace->last_buffer_edit_ms, layout_state);
     }
 
-    const bool suffixes_enabled =
-        rich_session_enabled &&
-        (layout_state == nullptr || layout_state->app_settings == nullptr ||
-         layout_state->app_settings->show_diagnostic_suffixes);
+    const bool suffixes_enabled = vh_config.enabled && vh_config.diagnostic_suffixes;
+    const std::unordered_map<int, std::string>* suffix_map =
+        active_diagnostic_suffix_map(*panel_state, vh_config, buffer.path);
     const bool helix_caret =
         layout_state != nullptr && layout_state->app_settings != nullptr &&
         layout_state->app_settings->helix_mode_enabled;
@@ -5808,9 +5883,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       const std::vector<Diagnostic>* suffix_color_ptr = nullptr;
       const std::vector<Diagnostic>* line_diagnostics =
           diagnostics_for_editor_line(panel_state.get(), i);
-      if (show_diagnostic_suffix_on_line(*panel_state, i, buffer, suffixes_enabled)) {
-        const auto suffix_it = panel_state->diagnostic_suffix_by_line.find(i);
-        if (suffix_it != panel_state->diagnostic_suffix_by_line.end()) {
+      if (show_diagnostic_suffix_on_line(*panel_state, i, buffer, suffixes_enabled, suffix_map)) {
+        const auto suffix_it = suffix_map->find(i);
+        if (suffix_it != suffix_map->end()) {
           suffix_ptr = &suffix_it->second;
           suffix_color_ptr = line_diagnostics;
         }
@@ -5976,9 +6051,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     // Pixels directly into the Screen. See ui/editor_grid_node.hpp for the rationale and
     // render.editor.grid.gutter/code below for the measured cost of that direct write.
     Element gutter = MakeEditorPixelGrid(std::move(gutter_pixel_rows), gutter_render_width,
-                                         ui_perf, "render.editor.grid.gutter") |
+                                         gutter_render_width, ui_perf,
+                                         "render.editor.grid.gutter") |
                      reflect(panel_state->gutter_box) | bgcolor(theme::CodeBg());
-    Element code = MakeEditorPixelGrid(std::move(code_pixel_rows), code_width, ui_perf,
+    Element code = MakeEditorPixelGrid(std::move(code_pixel_rows), code_width, 0, ui_perf,
                                        "render.editor.grid.code") |
                    flex | reflect(panel_state->code_box) | bgcolor(theme::CodeBg());
     const bool scroll_hovered =
@@ -5987,9 +6063,26 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         panel_state->scrollbar_dragging ||
         (layout_state != nullptr &&
          layout_state->clickable.is_pressed(press_id::kEditorScrollbar));
-    const bool overview_ruler_enabled =
-        layout_state == nullptr || layout_state->app_settings == nullptr ||
-        layout_state->app_settings->overview_ruler_enabled;
+    const bool overview_ruler_enabled = vh_config.enabled && vh_config.overview_ruler;
+    VisualHighlightOverviewData overview_fallback;
+    const VisualHighlightOverviewData* overview_data = nullptr;
+    if (overview_ruler_enabled) {
+      const VisualHighlightOverviewData& snap_overview =
+          panel_state->visual_highlight.snapshot.overview;
+      if (panel_state->visual_highlight.snapshot.path == buffer.path &&
+          snap_overview.total_lines > 0) {
+        overview_data = &snap_overview;
+      } else {
+        overview_fallback.total_lines = static_cast<int>(buffer.lines.size());
+        overview_fallback.diagnostics_by_line = panel_state->diagnostics_by_line;
+        overview_fallback.git_changed_lines = panel_state->git_changed_lines;
+        overview_fallback.git_untracked_all = panel_state->git_untracked_all_lines;
+        if (find_state->open && !find_state->matches.empty()) {
+          overview_fallback.text_matches = find_state->matches;
+        }
+        overview_data = &overview_fallback;
+      }
+    }
     Element scrollbar =
         vertical_scrollbar(scroll_total, scroll_visible_index, visible, rendered_lines,
                            scroll_hovered, scroll_active) |
@@ -6011,16 +6104,16 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     Elements editor_columns = {gutter, separator() | color(theme::AccentDim()),
                                std::move(code_column)};
-    if (overview_ruler_enabled) {
+    if (overview_ruler_enabled && overview_data != nullptr) {
       OverviewRulerInput ruler_input;
-      ruler_input.total_lines = total;
+      ruler_input.total_lines = overview_data->total_lines;
       ruler_input.scroll = buffer.scroll;
       ruler_input.visible_lines = visible;
-      ruler_input.diagnostics_by_line = &panel_state->diagnostics_by_line;
-      ruler_input.git_changed_lines = &panel_state->git_changed_lines;
-      ruler_input.git_untracked_all = panel_state->git_untracked_all_lines;
-      if (find_state->open && !find_state->matches.empty()) {
-        ruler_input.text_matches = &find_state->matches;
+      ruler_input.diagnostics_by_line = &overview_data->diagnostics_by_line;
+      ruler_input.git_changed_lines = &overview_data->git_changed_lines;
+      ruler_input.git_untracked_all = overview_data->git_untracked_all;
+      if (find_state->open && !overview_data->text_matches.empty()) {
+        ruler_input.text_matches = &overview_data->text_matches;
       } else {
         ruler_input.text_matches =
             selection_occurrence_matches_for(panel_state.get(), buffer, find_state->open);
@@ -6036,7 +6129,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     editor_columns.push_back(std::move(scrollbar));
     Element editor_body = hbox(std::move(editor_columns));
 
-    Element body = std::move(editor_body) | frame | flex | bgcolor(theme::CodeBg());
+    // Do not wrap in FTXUI's `frame` decorator: it clips via stencil when the child's
+    // minimum width meets the allocated width, which hides the right-edge scrollbar
+    // (and overview ruler) once EditorGridNode reports a fixed code_width minimum.
+    Element body = std::move(editor_body) | flex | bgcolor(theme::CodeBg());
     if (sticky_lines.empty()) {
       return body;
     }
@@ -6240,27 +6336,34 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       }
       workspace->ensure_buffer();
       const bool vh_focused = focus != nullptr && focus->region == panel_focus;
-      if (vh_focused) {
+      if (vh_focused && !workspace->buffer.path.empty()) {
         const int64_t vh_now = steady_now_ms();
         const VisualHighlightConfig vh_config = visual_highlight_config_from_settings(
             layout_state != nullptr ? layout_state->app_settings : nullptr);
-        const bool vh_indexed = !workspace->buffer.path.empty() &&
-                                is_indexed_source_path(workspace->buffer.path);
-        UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".visual_highlight");
-        tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
-                                        vh_config, vh_focused, vh_indexed, vh_now);
-        if (panel_state->visual_highlight.job_inflight) {
-          visual_highlight_service().wait_for_pending_result(
-              panel_state->visual_highlight.pending_generation);
-        }
-        if (drain_visual_highlight_results(&panel_state->visual_highlight, workspace->buffer,
-                                           layout_state, vh_focused)) {
-          panel_state->viewport_line_render_cache.clear();
-        }
-        if (panel_state->visual_highlight.dirty &&
-            !panel_state->visual_highlight.job_inflight) {
+        if (vh_config.enabled) {
+          const int code_width = panel_state->code_width_chars;
+          maybe_mark_visual_highlight_inputs_dirty(
+              &panel_state->visual_highlight, panel_state.get(), code_width,
+              panel_state->cached_file_diag_revision, find_state.get(), find_state->open, vh_now);
+          const VisualHighlightJobInputs vh_inputs = build_visual_highlight_job_inputs(
+              panel_state.get(), workspace->buffer, code_width, symbols.get(), find_state.get(),
+              workspace->last_buffer_edit_ms, layout_state, find_state->open);
+          UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".visual_highlight");
           tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
-                                          vh_config, vh_focused, vh_indexed, vh_now);
+                                          vh_config, vh_focused, true, vh_now, vh_inputs);
+          if (panel_state->visual_highlight.job_inflight) {
+            visual_highlight_service().wait_for_pending_result(
+                panel_state->visual_highlight.pending_generation);
+          }
+          if (drain_visual_highlight_results(&panel_state->visual_highlight, workspace->buffer,
+                                             layout_state, vh_focused)) {
+            panel_state->viewport_line_render_cache.clear();
+          }
+          if (panel_state->visual_highlight.dirty &&
+              !panel_state->visual_highlight.job_inflight) {
+            tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
+                                            vh_config, vh_focused, true, vh_now, vh_inputs);
+          }
         }
       }
 
@@ -6280,6 +6383,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         tick_selection_occurrence_matches(panel_state.get(), workspace->buffer, layout_state);
       }
       if (find_state->tick_matches(workspace->buffer) && layout_state != nullptr) {
+        mark_visual_highlight_inputs_dirty(&panel_state->visual_highlight, now);
         UI_WAKE(layout_state, "wake");
       }
       if (symbols && workspace != nullptr) {

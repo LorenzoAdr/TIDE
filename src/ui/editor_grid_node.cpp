@@ -15,16 +15,17 @@ namespace {
 
 class EditorGridNode : public Node {
  public:
-  EditorGridNode(std::vector<std::shared_ptr<EditorPixelRow>> rows, int width,
+  EditorGridNode(std::vector<std::shared_ptr<EditorPixelRow>> rows, int width, int layout_min_x,
                 UiPerfMonitor* ui_perf, std::string perf_phase)
       : rows_(std::move(rows)),
         width_(width),
+        layout_min_x_(layout_min_x),
         ui_perf_(ui_perf),
         perf_phase_(std::move(perf_phase)) {}
 
   void ComputeRequirement() override {
     requirement_ = Requirement{};
-    requirement_.min_x = std::max(0, width_);
+    requirement_.min_x = std::max(0, layout_min_x_);
     requirement_.min_y = static_cast<int>(rows_.size());
   }
 
@@ -34,6 +35,9 @@ class EditorGridNode : public Node {
     // used to be invisible, buried inside FTXUI's own (private) ScreenInteractive::Draw().
     UiSyncPhaseScope scope(ui_perf_, perf_phase_);
     const int row_count = static_cast<int>(rows_.size());
+    const int box_width =
+        box_.x_max >= box_.x_min ? box_.x_max - box_.x_min + 1 : 0;
+    const int draw_width = std::min(width_, box_width);
     for (int row = 0; row < row_count; ++row) {
       const int y = box_.y_min + row;
       if (y > box_.y_max) {
@@ -43,7 +47,8 @@ class EditorGridNode : public Node {
       if (pixel_row == nullptr) {
         continue;
       }
-      const int cell_count = static_cast<int>(pixel_row->cells.size());
+      const int cell_count =
+          std::min(draw_width, static_cast<int>(pixel_row->cells.size()));
       for (int x = 0; x < cell_count; ++x) {
         const int screen_x = box_.x_min + x;
         if (screen_x > box_.x_max) {
@@ -57,6 +62,7 @@ class EditorGridNode : public Node {
  private:
   std::vector<std::shared_ptr<EditorPixelRow>> rows_;
   int width_;
+  int layout_min_x_;
   UiPerfMonitor* ui_perf_;
   std::string perf_phase_;
 };
@@ -81,8 +87,9 @@ std::shared_ptr<EditorPixelRow> PixelRowFromElement(const Element& element, int 
 }
 
 Element MakeEditorPixelGrid(std::vector<std::shared_ptr<EditorPixelRow>> rows, int width,
-                            UiPerfMonitor* ui_perf, std::string perf_phase) {
-  return std::make_shared<EditorGridNode>(std::move(rows), width, ui_perf, std::move(perf_phase));
+                            int layout_min_x, UiPerfMonitor* ui_perf, std::string perf_phase) {
+  return std::make_shared<EditorGridNode>(std::move(rows), width, layout_min_x, ui_perf,
+                                          std::move(perf_phase));
 }
 
 }  // namespace tgdb

@@ -133,20 +133,17 @@ constexpr int kUiLocale = 0;
 constexpr int kTheme = 1;
 constexpr int kLsp = 2;
 constexpr int kLiveLspCompletion = 3;
-constexpr int kDiagnosticSuffixes = 4;
-constexpr int kStickyScroll = 5;
-constexpr int kIndentGuides = 6;
-constexpr int kAnimations = 7;
-constexpr int kOverviewRuler = 8;
-constexpr int kSecondaryPanel = 9;
-constexpr int kShowAllFiles = 10;
-constexpr int kMonitor = 11;
-constexpr int kPerfDump = 12;
-constexpr int kIcons = 13;
-constexpr int kHelixMode = 14;
-constexpr int kWorkspaceAutoDetect = 15;
-constexpr int kRichSession = 16;
-constexpr int kBaseOptions = 17;
+constexpr int kIndentGuides = 4;
+constexpr int kAnimations = 5;
+constexpr int kSecondaryPanel = 6;
+constexpr int kShowAllFiles = 7;
+constexpr int kMonitor = 8;
+constexpr int kPerfDump = 9;
+constexpr int kIcons = 10;
+constexpr int kHelixMode = 11;
+constexpr int kWorkspaceAutoDetect = 12;
+constexpr int kRichSession = 13;
+constexpr int kBaseOptions = 14;
 
 #ifdef TGDB_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -225,7 +222,10 @@ constexpr int kVhMatchingBracket = 2;
 constexpr int kVhScopeBackground = 3;
 constexpr int kVhScopeBraceHighlight = 4;
 constexpr int kVhScopeStrength = 5;
-constexpr int kVisualHighlightOptionCount = 6;
+constexpr int kVhDiagnosticSuffixes = 6;
+constexpr int kVhStickyScroll = 7;
+constexpr int kVhOverviewRuler = 8;
+constexpr int kVisualHighlightOptionCount = 9;
 
 bool is_top_level_panel(SettingsPanel panel) {
   return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kVisualHighlight ||
@@ -369,16 +369,10 @@ std::vector<SettingsOption> global_settings_options() {
       {i18n::tr("settings.general.lsp.label"), i18n::tr("settings.general.lsp.description")},
       {i18n::tr("settings.general.live_completion.label"),
        i18n::tr("settings.general.live_completion.description")},
-      {i18n::tr("settings.general.diagnostic_suffixes.label"),
-       i18n::tr("settings.general.diagnostic_suffixes.description")},
-      {i18n::tr("settings.general.sticky_scroll.label"),
-       i18n::tr("settings.general.sticky_scroll.description")},
       {i18n::tr("settings.general.indent_guides.label"),
        i18n::tr("settings.general.indent_guides.description")},
       {i18n::tr("settings.general.animations.label"),
        i18n::tr("settings.general.animations.description")},
-      {i18n::tr("settings.general.overview_ruler.label"),
-       i18n::tr("settings.general.overview_ruler.description")},
       {i18n::tr("settings.general.secondary_panel.label"),
        i18n::tr("settings.general.secondary_panel.description")},
       {i18n::tr("settings.general.show_all_files.label"),
@@ -423,6 +417,12 @@ std::vector<SettingsOption> visual_highlight_settings_options() {
        i18n::tr("settings.visual_highlight.scope_brace_highlight.description")},
       {i18n::tr("settings.visual_highlight.scope_strength.label"),
        i18n::tr("settings.visual_highlight.scope_strength.description")},
+      {i18n::tr("settings.visual_highlight.diagnostic_suffixes.label"),
+       i18n::tr("settings.visual_highlight.diagnostic_suffixes.description")},
+      {i18n::tr("settings.visual_highlight.sticky_scroll.label"),
+       i18n::tr("settings.visual_highlight.sticky_scroll.description")},
+      {i18n::tr("settings.visual_highlight.overview_ruler.label"),
+       i18n::tr("settings.visual_highlight.overview_ruler.description")},
   };
 }
 
@@ -449,6 +449,13 @@ bool visual_highlight_option_checked(const SettingsModalState* state, int index)
       return state->draft_visual_highlight_enabled && state->draft_animations_enabled &&
              (state->draft_visual_scope_background_enabled ||
               state->draft_visual_scope_brace_highlight_enabled);
+    case kVhDiagnosticSuffixes:
+      return state->draft_visual_highlight_enabled &&
+             state->draft_show_diagnostic_suffixes;
+    case kVhStickyScroll:
+      return state->draft_visual_highlight_enabled && state->draft_sticky_scroll_enabled;
+    case kVhOverviewRuler:
+      return state->draft_visual_highlight_enabled && state->draft_overview_ruler_enabled;
     default:
       return false;
   }
@@ -480,6 +487,15 @@ void toggle_visual_highlight_option(SettingsModalState* state, int index) {
       break;
     case kVhScopeStrength:
       cycle_scope_highlight_strength(state);
+      break;
+    case kVhDiagnosticSuffixes:
+      state->draft_show_diagnostic_suffixes = !state->draft_show_diagnostic_suffixes;
+      break;
+    case kVhStickyScroll:
+      state->draft_sticky_scroll_enabled = !state->draft_sticky_scroll_enabled;
+      break;
+    case kVhOverviewRuler:
+      state->draft_overview_ruler_enabled = !state->draft_overview_ruler_enabled;
       break;
     default:
       break;
@@ -583,16 +599,10 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_lsp_enabled;
     case kLiveLspCompletion:
       return state->draft_live_lsp_completion_enabled;
-    case kDiagnosticSuffixes:
-      return state->draft_show_diagnostic_suffixes;
-    case kStickyScroll:
-      return state->draft_sticky_scroll_enabled;
     case kIndentGuides:
       return state->draft_indent_guides_enabled;
     case kAnimations:
       return state->draft_animations_enabled;
-    case kOverviewRuler:
-      return state->draft_overview_ruler_enabled;
     case kSecondaryPanel:
       return state->draft_secondary_panel_enabled;
     case kHelixMode:
@@ -643,20 +653,11 @@ void toggle_option(SettingsModalState* state, int index) {
     case kLiveLspCompletion:
       state->draft_live_lsp_completion_enabled = !state->draft_live_lsp_completion_enabled;
       break;
-    case kDiagnosticSuffixes:
-      state->draft_show_diagnostic_suffixes = !state->draft_show_diagnostic_suffixes;
-      break;
-    case kStickyScroll:
-      state->draft_sticky_scroll_enabled = !state->draft_sticky_scroll_enabled;
-      break;
     case kIndentGuides:
       state->draft_indent_guides_enabled = !state->draft_indent_guides_enabled;
       break;
     case kAnimations:
       state->draft_animations_enabled = !state->draft_animations_enabled;
-      break;
-    case kOverviewRuler:
-      state->draft_overview_ruler_enabled = !state->draft_overview_ruler_enabled;
       break;
     case kSecondaryPanel:
       state->draft_secondary_panel_enabled = !state->draft_secondary_panel_enabled;
