@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "editor/editor_state.hpp"
+#include "git/git_diff.hpp"
 
 namespace tgdb {
 
@@ -12,7 +13,8 @@ struct EditorTab {
   EditorBuffer buffer;
   bool external = false;
   bool read_only = false;
-  bool git_diff_head = false;
+  bool git_diff_view = false;
+  std::vector<SideBySideDiffRow> diff_rows;
 };
 
 struct TabVisibleRange {

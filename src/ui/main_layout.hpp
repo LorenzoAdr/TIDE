@@ -22,7 +22,6 @@
 #include "ui/clickable_interaction.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/press_ids.hpp"
-#include "ui/git_diff_sync.hpp"
 #include "ui/status_layout_popover.hpp"
 #include "git/git_service.hpp"
 #include "util/system_stats.hpp"
@@ -233,7 +232,6 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> git_key_handler;
   std::function<bool(const ftxui::Event&)> git_mouse_handler;
   std::function<void(const std::string& workspace_rel_path)> git_open_diff_view;
-  GitDiffSyncState git_diff_sync;
   std::function<bool(const ftxui::Event&)> core_analyzer_key_handler;
   std::function<bool(const ftxui::Event&)> binary_symbols_key_handler;
   std::function<bool(const ftxui::Event&)> packet_monitor_key_handler;

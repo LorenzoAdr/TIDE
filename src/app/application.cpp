@@ -218,7 +218,7 @@ Component WrapUiTickPost(Component child, MainLayoutState *layout, ScreenInterac
 			const bool handled = ComponentBase::OnEvent(std::move(event));
 			if (!is_custom && significant && application_ != nullptr) {
 				application_->run_input_sync_drain(steady_now_ms());
-			}
+			} 
 			// FTXUI solo invalida frame_valid_ cuando OnEvent devuelve false. Si un hijo
 			// devuelve true en Custom (p. ej. consola), Draw() se salta aunque el apply
 			// LSP ya corrió en screen->Post — el 3.er repintado nunca llega al terminal.
@@ -332,7 +332,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 			dispatch(layout_state_.secondary_editor);
 		};
 		ui_event_dispatcher_.emit_urgent(std::move(event));
-	});
+	}); 
 	app_settings_ = AppSettings::load();
 	i18n::set_locale(app_settings_.ui_locale);
 	set_animations_enabled(app_settings_.animations_enabled);
@@ -596,7 +596,7 @@ void Application::reindex_project() {
 		apply_app_settings();
 		set_workspace_status(i18n::tr("status.index_lsp_enabled"));
 		UI_WAKE(&layout_state_, "app");
-		return;
+		return; 
 	}
 	if (reindex_in_progress_.exchange(true)) {
 		set_workspace_status(i18n::tr("status.index_started"));
@@ -735,14 +735,6 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "secondary_editor");
 			TGDB_MON_SCOPE("ui", "tick.secondary_editor");
 			layout_state_.secondary_editor.tick_callback();
-		}
-		if (layout_state_.git_diff_sync.active) {
-			workspace_.ensure_buffer();
-			secondary_workspace_.ensure_buffer();
-			if (secondary_workspace_.tabs.empty() ||
-			    normalize_path(workspace_.active_file) != layout_state_.git_diff_sync.path) {
-				git_diff_sync_deactivate(&layout_state_);
-			}
 		}
 		if (symbol_provider_ && layout_state_.activity_gate.allows_lsp_ui()) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_async_results");
@@ -2035,8 +2027,7 @@ int Application::run() {
 		UI_WAKE(&layout_state_, "app");
 	};
 	layout_state_.git_open_diff_view = [this](const std::string &workspace_rel_path) {
-		if (open_git_diff_split_view(&workspace_, &secondary_workspace_, &git_service_,
-		                             &layout_state_, &focus_state_, workspace_rel_path)) {
+		if (open_git_diff_view(&workspace_, &git_service_, &focus_state_, workspace_rel_path)) {
 			UI_WAKE(&layout_state_, "app");
 		}
 	};

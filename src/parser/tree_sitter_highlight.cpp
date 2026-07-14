@@ -157,6 +157,14 @@ void emit_segment(Elements* out, const std::string& segment, Decorator style, in
     return;
   }
   const int rel = cursor_col - global_offset;
+  if (rel < 0 || rel >= len) {
+    Element element = text(segment);
+    if (style) {
+      element = element | style;
+    }
+    out->push_back(std::move(element));
+    return;
+  }
   auto emit_part = [&](const std::string& part) {
     if (part.empty()) {
       return;

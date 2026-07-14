@@ -25,7 +25,7 @@
 #include "editor/helix/helix_state.hpp"
 #include "git/git_diff.hpp"
 #include "git/git_service.hpp"
-#include "ui/git_diff_sync.hpp"
+#include "ui/git_diff_view.hpp"
 #include "editor/editor_context.hpp"
 #include "editor/editor_find_state.hpp"
 #include "editor/editor_render.hpp"
@@ -676,7 +676,8 @@ void tick_lsp_buffer_sync(EditorPanelState* panel, WorkspaceModel* workspace,
   }
   workspace->ensure_buffer();
   const EditorBuffer& buffer = workspace->buffer;
-  if (buffer.path.empty() || !is_indexed_source_path(buffer.path)) {
+  if (buffer.path.empty() || !is_indexed_source_path(buffer.path) ||
+      workspace->active_tab_read_only() || workspace->active_tab_git_diff_view()) {
     panel->lsp_sync_pending = false;
     return;
   }
@@ -1012,7 +1013,19 @@ void apply_git_diff_to_panel(EditorPanelState* panel, const GitFileDiff& diff,
   }
 }
 
-void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer& buffer) {
+void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer& buffer,
+                    bool read_only_tab) {
+  if (read_only_tab) {
+    if (panel != nullptr) {
+      panel->git_changed_lines.clear();
+      panel->git_previous_by_line.clear();
+      panel->git_untracked_all_lines = false;
+      panel->git_cached_line_count = 0;
+      panel->git_cache_path.clear();
+      panel->git_cache_revision = 0;
+    }
+    return;
+  }
   if (panel == nullptr || git == nullptr || !git->is_repo() || buffer.path.empty()) {
     if (panel != nullptr) {
       panel->git_changed_lines.clear();
@@ -5367,6 +5380,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
              flex | bgcolor(theme::CodeBg()) | reflect(panel_state->code_box);
     }
 
+    const bool diff_view = workspace->active_tab_git_diff_view();
+    const bool read_only_tab = workspace->active_tab_read_only();
     const bool path_changed = buffer.path != panel_state->last_path;
 
     if (path_changed) {
@@ -5391,13 +5406,14 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->semantic_tokens_layout_stale = false;
       panel_state->semantic_tokens_layout_stale_from_line = std::numeric_limits<int>::max();
       panel_state->semantic_tokens_enqueue_pending =
-          !buffer.path.empty() && !is_tabular_path(buffer.path);
+          !diff_view && !read_only_tab && !buffer.path.empty() && !is_tabular_path(buffer.path);
       panel_state->last_semantic_highlight_revision_tick = 0;
       buffer.scroll_col = 0;
       panel_state->h_scrollbar_dragging = false;
       panel_state->h_scrollbar_layout = {};
       clear_hover_state(&panel_state->hover);
-      panel_state->document_open_pending = !buffer.path.empty();
+      panel_state->document_open_pending =
+          !diff_view && !read_only_tab && !buffer.path.empty();
       panel_state->pending_document_open_path = buffer.path;
       panel_state->tabular_layout_path.clear();
       panel_state->tabular_layout_line_count = 0;
@@ -5411,8 +5427,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       if (layout_state != nullptr) {
         UI_WAKE(layout_state, "editor.open");
       }
-      buffer.scroll = std::max(0, buffer.primary_line() - 2);
-      if (is_indexed_source_path(buffer.path)) {
+      buffer.scroll = diff_view ? 0 : std::max(0, buffer.primary_line() - 2);
+      if (!diff_view && !read_only_tab && is_indexed_source_path(buffer.path)) {
         tree_sitter_service().prepare_document(buffer.path, editor_buffer_joined_source(buffer));
       }
     }
@@ -5445,7 +5461,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         !buffer.path.empty() ? tree_sitter_service().revision_for(buffer.path) : 0;
 
     const bool indexed_cpp =
-        !buffer.path.empty() && is_indexed_source_path(buffer.path);
+        !diff_view && !read_only_tab && !buffer.path.empty() && is_indexed_source_path(buffer.path);
     const bool typing_burst = !editor_content_settled(*panel_state);
     const bool ts_highlights_pending =
         indexed_cpp && tree_sitter_service().highlights_refresh_pending(buffer.path);
@@ -5608,6 +5624,61 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         layout_state->app_settings->helix_mode_enabled;
     const int gutter_w = helix_gutter_width(total, visible, helix_relative) + panel_state->gutter_fold_width;
     const bool editor_focused = focus->region == panel_state->panel_focus;
+
+    if (diff_view) {
+      const std::vector<SideBySideDiffRow>& diff_rows = workspace->active_diff_rows();
+      const int row_total = static_cast<int>(diff_rows.size());
+      buffer.scroll = std::max(0, std::min(buffer.scroll, max_scroll(row_total, visible)));
+      const int code_width =
+          code_width_from_box(panel_state->code_box, panel_state->code_width_chars);
+      panel_state->code_width_chars = code_width;
+      const std::vector<TextMatch>* find_matches =
+          find_state->open && !find_state->matches.empty() ? &find_state->matches : nullptr;
+      const GitDiffViewRenderResult diff_render = render_git_diff_viewport(
+          diff_rows, buffer.scroll, visible, buffer.scroll_col, code_width, find_matches,
+          buffer.primary_line());
+      const VisualHighlightConfig diff_vh_config = visual_highlight_config_from_settings(
+          layout_state != nullptr ? layout_state->app_settings : nullptr);
+      const bool overview_ruler_enabled =
+          diff_vh_config.enabled && diff_vh_config.overview_ruler;
+      const DiffOverviewLines diff_overview = build_diff_overview_lines(diff_rows);
+      const bool scroll_hovered =
+          layout_state != nullptr &&
+          layout_state->clickable.is_hovered(press_id::kEditorScrollbar);
+      const bool scroll_active =
+          panel_state->scrollbar_dragging ||
+          (layout_state != nullptr &&
+           layout_state->clickable.is_pressed(press_id::kEditorScrollbar));
+      Element scrollbar =
+          vertical_scrollbar(row_total, buffer.scroll, visible, diff_render.rendered_lines,
+                               scroll_hovered, scroll_active) |
+          reflect(panel_state->scrollbar_box);
+      panel_state->scrollbar_layout =
+          compute_scrollbar_layout(row_total, buffer.scroll, visible, diff_render.rendered_lines);
+      panel_state->h_scrollbar_layout = {};
+      Element body = diff_render.body | flex | reflect(panel_state->code_box) | bgcolor(theme::CodeBg());
+      Elements editor_columns = {std::move(body)};
+      if (overview_ruler_enabled) {
+        OverviewRulerInput ruler_input;
+        ruler_input.total_lines = row_total;
+        ruler_input.scroll = buffer.scroll;
+        ruler_input.visible_lines = visible;
+        ruler_input.diff_add_lines = &diff_overview.add_lines;
+        ruler_input.diff_change_lines = &diff_overview.change_lines;
+        if (find_matches != nullptr) {
+          ruler_input.text_matches = find_matches;
+        }
+        const int ruler_height = diff_render.rendered_lines + 1;
+        Element overview_ruler =
+            vertical_overview_ruler(ruler_input, ruler_height, &panel_state->overview_ruler_layout) |
+            reflect(panel_state->overview_ruler_box);
+        editor_columns.push_back(std::move(overview_ruler));
+      } else {
+        panel_state->overview_ruler_layout = {};
+      }
+      editor_columns.push_back(std::move(scrollbar));
+      return hbox(std::move(editor_columns)) | flex;
+    }
 
     if (tabular_view && tabular_store != nullptr) {
       Elements gutter_rows;
@@ -6263,9 +6334,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     Element chrome =
         vbox({std::move(tab_bar), std::move(title), PanelBody(std::move(editor), theme::CodeBg())});
     Element tooltip = make_tab_hover_tooltip(workspace, tab_bar_state.get());
-    if (layout_state != nullptr && layout_state->git_diff_sync.active) {
-      git_diff_sync_on_scroll(layout_state, panel_state->panel_focus);
-    }
     return dbox({std::move(chrome), std::move(tooltip)}) | flex | bgcolor(theme::CodeBg());
   });
 
@@ -6515,7 +6583,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         mark_visual_highlight_inputs_dirty(&panel_state->visual_highlight, now);
         UI_WAKE(layout_state, "wake");
       }
-      if (symbols && workspace != nullptr) {
+      if (symbols && workspace != nullptr && !workspace->active_tab_read_only() &&
+          !workspace->active_tab_git_diff_view()) {
         const std::string& path = workspace->buffer.path;
         if (!path.empty()) {
           if (panel_state->document_open_pending && symbols) {
@@ -6577,7 +6646,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         workspace->ensure_buffer();
         const EditorBuffer& buf = workspace->buffer;
         UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.git");
-        sync_git_cache(panel_state.get(), git_service, buf);
+        sync_git_cache(panel_state.get(), git_service, buf, workspace->active_tab_read_only());
       }
     };
   }

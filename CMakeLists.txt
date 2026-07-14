@@ -86,6 +86,7 @@ add_executable(tgdb
   src/ui/performance_panel.cpp
   src/ui/git_panel.cpp
   src/ui/git_diff_sync.cpp
+  src/ui/git_diff_view.cpp
   src/ui/outline_panel.cpp
   src/ui/search_panel.cpp
   src/ui/right_sidebar_panel.cpp

@@ -10,6 +10,8 @@
 #include "util/external_viewer.hpp"
 #include "util/file_open_policy.hpp"
 #include "util/csv_viewer.hpp"
+#include "git/git_diff.hpp"
+#include "git/git_service.hpp"
 #include "util/path_normalize.hpp"
 #include "i18n/tr.hpp"
 
@@ -38,6 +40,45 @@ bool load_tabular_placeholder(EditorBuffer* buffer, const std::string& absolute_
   buffer->path = absolute_path;
   buffer->view_token++;
   return true;
+}
+
+void setup_diff_tab_buffer(EditorBuffer* buffer, const std::string& absolute_path,
+                           const std::vector<SideBySideDiffRow>& rows) {
+  if (buffer == nullptr) {
+    return;
+  }
+  buffer->lines.clear();
+  buffer->path = absolute_path;
+  editor_buffer_invalidate_joined(buffer);
+  buffer->reset_to_single_cursor(0, 0);
+  buffer->scroll = 0;
+  buffer->scroll_col = 0;
+  buffer->dirty = false;
+  clear_undo(buffer);
+  for (const SideBySideDiffRow& row : rows) {
+    if (row.left.empty()) {
+      buffer->lines.push_back(row.right);
+    } else if (row.right.empty()) {
+      buffer->lines.push_back(row.left);
+    } else if (row.left == row.right) {
+      buffer->lines.push_back(row.left);
+    } else {
+      buffer->lines.push_back(row.left + " | " + row.right);
+    }
+  }
+  if (buffer->lines.empty()) {
+    buffer->lines.push_back("");
+  }
+  buffer->view_token++;
+}
+
+std::vector<std::string> load_working_lines_from_disk(const std::string& absolute_path) {
+  std::ifstream input(absolute_path);
+  if (!input) {
+    return {};
+  }
+  std::string content((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  return parse_file_lines(content);
 }
 
 }  // namespace
@@ -137,20 +178,43 @@ bool WorkspaceModel::active_tab_read_only() const {
   return tabs[static_cast<std::size_t>(active_tab)].read_only;
 }
 
-bool WorkspaceModel::open_git_head_tab(const std::string& absolute_path,
-                                       const std::vector<std::string>& head_lines) {
-  if (absolute_path.empty()) {
+bool WorkspaceModel::active_tab_git_diff_view() const {
+  if (active_tab < 0 || active_tab >= static_cast<int>(tabs.size())) {
+    return false;
+  }
+  return tabs[static_cast<std::size_t>(active_tab)].git_diff_view;
+}
+
+const std::vector<SideBySideDiffRow>& WorkspaceModel::active_diff_rows() const {
+  static const std::vector<SideBySideDiffRow> kEmpty;
+  if (active_tab < 0 || active_tab >= static_cast<int>(tabs.size())) {
+    return kEmpty;
+  }
+  return tabs[static_cast<std::size_t>(active_tab)].diff_rows;
+}
+
+bool WorkspaceModel::open_git_diff_tab(const std::string& absolute_path, GitService* git) {
+  if (absolute_path.empty() || git == nullptr) {
     return false;
   }
   flush_active_tab();
   const std::string path = normalize_path(absolute_path);
+
+  git->refresh_file_diff(path, true);
+  git->refresh_file_head(path);
+  const GitFileDiff diff = git->file_diff(path);
+  const std::string diff_text = git->file_diff_text(path);
+  const std::vector<std::string> working_lines = load_working_lines_from_disk(path);
+  std::vector<SideBySideDiffRow> rows =
+      build_side_by_side_rows(diff_text, diff.head_lines, working_lines);
+
   for (int i = 0; i < static_cast<int>(tabs.size()); ++i) {
-    const EditorTab& tab = tabs[static_cast<std::size_t>(i)];
-    if (tab.git_diff_head && normalize_path(tab.path) == path) {
-      EditorTab& existing = tabs[static_cast<std::size_t>(i)];
-      load_buffer_from_lines(&existing.buffer, path, head_lines);
+    EditorTab& existing = tabs[static_cast<std::size_t>(i)];
+    if (existing.git_diff_view && normalize_path(existing.path) == path) {
+      existing.diff_rows = std::move(rows);
       existing.read_only = true;
-      existing.git_diff_head = true;
+      existing.git_diff_view = true;
+      setup_diff_tab_buffer(&existing.buffer, path, existing.diff_rows);
       switch_to_tab(i);
       return true;
     }
@@ -159,8 +223,9 @@ bool WorkspaceModel::open_git_head_tab(const std::string& absolute_path,
   EditorTab tab;
   tab.path = path;
   tab.read_only = true;
-  tab.git_diff_head = true;
-  load_buffer_from_lines(&tab.buffer, path, head_lines);
+  tab.git_diff_view = true;
+  tab.diff_rows = std::move(rows);
+  setup_diff_tab_buffer(&tab.buffer, path, tab.diff_rows);
   tabs.push_back(std::move(tab));
   switch_to_tab(static_cast<int>(tabs.size()) - 1);
   return true;

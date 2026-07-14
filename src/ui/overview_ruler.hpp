@@ -21,6 +21,8 @@ enum class OverviewMark {
   kFind = 2,
   kWarning = 3,
   kError = 4,
+  kDiffAdd = 5,
+  kDiffChange = 6,
 };
 
 struct OverviewRulerLayout {
@@ -37,6 +39,8 @@ struct OverviewRulerInput {
   const std::unordered_map<int, std::vector<Diagnostic>>* diagnostics_by_line = nullptr;
   const std::unordered_set<int>* git_changed_lines = nullptr;
   bool git_untracked_all = false;
+  const std::unordered_set<int>* diff_add_lines = nullptr;
+  const std::unordered_set<int>* diff_change_lines = nullptr;
   const std::vector<TextMatch>* text_matches = nullptr;
 };
 
@@ -107,6 +111,10 @@ inline Color overview_mark_color(OverviewMark mark) {
       return theme::Warning();
     case OverviewMark::kGit:
       return theme::Success();
+    case OverviewMark::kDiffAdd:
+      return theme::Success();
+    case OverviewMark::kDiffChange:
+      return theme::Warning();
     case OverviewMark::kFind:
       return theme::Accent();
     case OverviewMark::kNone:
@@ -144,6 +152,19 @@ inline std::vector<OverviewMark> build_overview_buckets(const OverviewRulerInput
   if (input.git_changed_lines != nullptr) {
     for (int line : *input.git_changed_lines) {
       overview_ruler_place_mark(buckets, line, OverviewMark::kGit, bar_height, input.total_lines);
+    }
+  }
+
+  if (input.diff_add_lines != nullptr) {
+    for (int line : *input.diff_add_lines) {
+      overview_ruler_place_mark(buckets, line, OverviewMark::kDiffAdd, bar_height,
+                                input.total_lines);
+    }
+  }
+  if (input.diff_change_lines != nullptr) {
+    for (int line : *input.diff_change_lines) {
+      overview_ruler_place_mark(buckets, line, OverviewMark::kDiffChange, bar_height,
+                                input.total_lines);
     }
   }
 

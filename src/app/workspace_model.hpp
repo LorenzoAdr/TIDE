@@ -12,6 +12,7 @@
 namespace tgdb {
 
 struct OpenFileConfirmState;
+struct GitService;
 
 struct WorkspaceModel {
   std::string root;
@@ -54,8 +55,9 @@ struct WorkspaceModel {
   bool navigate_cursor_forward(int visible_lines);
 
   bool active_tab_read_only() const;
-  bool open_git_head_tab(const std::string& absolute_path,
-                         const std::vector<std::string>& head_lines);
+  bool active_tab_git_diff_view() const;
+  const std::vector<SideBySideDiffRow>& active_diff_rows() const;
+  bool open_git_diff_tab(const std::string& absolute_path, GitService* git);
 
  private:
   struct PendingOpenAt {

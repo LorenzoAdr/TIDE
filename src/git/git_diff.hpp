@@ -47,4 +47,30 @@ GitLineMap build_git_line_map(const std::vector<std::string>& head,
 
 int map_git_scroll_line(const std::vector<int>& line_map, int line);
 
+enum class SideBySideRowKind {
+  kContext,
+  kDeletion,
+  kAddition,
+  kModification,
+};
+
+struct SideBySideDiffRow {
+  SideBySideRowKind kind = SideBySideRowKind::kContext;
+  std::string left;
+  std::string right;
+  int left_line = 0;
+  int right_line = 0;
+};
+
+std::vector<SideBySideDiffRow> build_side_by_side_rows(
+    const std::string& unified_diff, const std::vector<std::string>& head_lines,
+    const std::vector<std::string>& working_lines);
+
+struct DiffOverviewLines {
+  std::unordered_set<int> add_lines;
+  std::unordered_set<int> change_lines;
+};
+
+DiffOverviewLines build_diff_overview_lines(const std::vector<SideBySideDiffRow>& rows);
+
 }  // namespace tgdb
