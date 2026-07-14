@@ -23,6 +23,9 @@ namespace {
 std::string tab_label(const EditorTab& tab) {
   std::string name = tab.path.empty() ? i18n::tr("editor.tab.untitled")
                                       : std::filesystem::path(tab.path).filename().string();
+  if (tab.git_diff_head) {
+    name += i18n::tr("editor.tab.git_head_suffix");
+  }
   if (tab.external) {
     name = "+" + name;
   }

@@ -44,6 +44,8 @@ struct GitPanelState {
   bool commit_input_focus = false;
   bool operation_pending = false;
   std::string pending_diff_path;
+  int last_file_click_index = -1;
+  int64_t last_file_click_ms = 0;
 
   ftxui::Box panel_box;
   std::array<ftxui::Box, 5> tab_boxes{};

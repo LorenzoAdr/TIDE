@@ -11,6 +11,8 @@ struct EditorTab {
   std::string path;
   EditorBuffer buffer;
   bool external = false;
+  bool read_only = false;
+  bool git_diff_head = false;
 };
 
 struct TabVisibleRange {

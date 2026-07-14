@@ -84,6 +84,30 @@ bool WorkspaceModel::load_buffer_from_disk(EditorBuffer* buffer,
   return true;
 }
 
+bool WorkspaceModel::load_buffer_from_lines(EditorBuffer* buffer,
+                                            const std::string& absolute_path,
+                                            const std::vector<std::string>& lines) {
+  if (buffer == nullptr) {
+    return false;
+  }
+  buffer->lines.clear();
+  buffer->path = absolute_path;
+  editor_buffer_invalidate_joined(buffer);
+  buffer->reset_to_single_cursor(0, 0);
+  buffer->scroll = 0;
+  buffer->scroll_col = 0;
+  buffer->dirty = false;
+  clear_undo(buffer);
+  for (const std::string& line : lines) {
+    buffer->lines.push_back(line);
+  }
+  if (buffer->lines.empty()) {
+    buffer->lines.push_back("");
+  }
+  buffer->view_token++;
+  return true;
+}
+
 void WorkspaceModel::flush_active_tab() {
   if (active_tab < 0 || active_tab >= static_cast<int>(tabs.size())) {
     return;
@@ -104,6 +128,42 @@ void WorkspaceModel::load_active_tab_into_buffer() {
   active_file = tab.path;
   buffer.view_token++;
   last_buffer_edit_ms = 0;
+}
+
+bool WorkspaceModel::active_tab_read_only() const {
+  if (active_tab < 0 || active_tab >= static_cast<int>(tabs.size())) {
+    return false;
+  }
+  return tabs[static_cast<std::size_t>(active_tab)].read_only;
+}
+
+bool WorkspaceModel::open_git_head_tab(const std::string& absolute_path,
+                                       const std::vector<std::string>& head_lines) {
+  if (absolute_path.empty()) {
+    return false;
+  }
+  flush_active_tab();
+  const std::string path = normalize_path(absolute_path);
+  for (int i = 0; i < static_cast<int>(tabs.size()); ++i) {
+    const EditorTab& tab = tabs[static_cast<std::size_t>(i)];
+    if (tab.git_diff_head && normalize_path(tab.path) == path) {
+      EditorTab& existing = tabs[static_cast<std::size_t>(i)];
+      load_buffer_from_lines(&existing.buffer, path, head_lines);
+      existing.read_only = true;
+      existing.git_diff_head = true;
+      switch_to_tab(i);
+      return true;
+    }
+  }
+
+  EditorTab tab;
+  tab.path = path;
+  tab.read_only = true;
+  tab.git_diff_head = true;
+  load_buffer_from_lines(&tab.buffer, path, head_lines);
+  tabs.push_back(std::move(tab));
+  switch_to_tab(static_cast<int>(tabs.size()) - 1);
+  return true;
 }
 
 void WorkspaceModel::clear_tabs() {

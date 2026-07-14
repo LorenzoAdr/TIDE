@@ -25,6 +25,7 @@
 #include "editor/helix/helix_state.hpp"
 #include "git/git_diff.hpp"
 #include "git/git_service.hpp"
+#include "ui/git_diff_sync.hpp"
 #include "editor/editor_context.hpp"
 #include "editor/editor_find_state.hpp"
 #include "editor/editor_render.hpp"
@@ -4665,6 +4666,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   EditorBuffer* buffer = &workspace->buffer;
   buffer->ensure_cursors();
   const bool tabular_view = is_tabular_path(buffer->path);
+  const bool read_only = workspace->active_tab_read_only();
   const auto cancel_completion_on_cursor_move = [&]() {
     cancel_live_lsp_on_cursor_move(completion, symbols, layout_state, panel);
   };
@@ -4709,7 +4711,13 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
                                  visible_lines);
   }
 
-  const bool helix_on = helix_editor_active(layout_state, tabular_view);
+  const bool helix_on = helix_editor_active(layout_state, tabular_view) && !read_only;
+
+  if (read_only && (event_is_ctrl_x(event) || event_is_ctrl_v(event) || event_is_plain_tab(event) ||
+                    event == Event::CtrlS || event == Event::Backspace || event == Event::Delete ||
+                    event == Event::Return || event.is_character())) {
+    return true;
+  }
 
   if (helix_on && event == Event::Escape) {
     HelixDispatchContext hctx =
@@ -6255,6 +6263,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     Element chrome =
         vbox({std::move(tab_bar), std::move(title), PanelBody(std::move(editor), theme::CodeBg())});
     Element tooltip = make_tab_hover_tooltip(workspace, tab_bar_state.get());
+    if (layout_state != nullptr && layout_state->git_diff_sync.active) {
+      git_diff_sync_on_scroll(layout_state, panel_state->panel_focus);
+    }
     return dbox({std::move(chrome), std::move(tooltip)}) | flex | bgcolor(theme::CodeBg());
   });
 

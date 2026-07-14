@@ -37,4 +37,14 @@ LineDiffResult compute_line_diff(const std::vector<std::string>& head,
 std::unordered_set<int> compute_changed_lines(const std::vector<std::string>& current,
                                               const std::vector<std::string>& head);
 
+struct GitLineMap {
+  std::vector<int> working_to_head;
+  std::vector<int> head_to_working;
+};
+
+GitLineMap build_git_line_map(const std::vector<std::string>& head,
+                              const std::vector<std::string>& working);
+
+int map_git_scroll_line(const std::vector<int>& line_map, int line);
+
 }  // namespace tgdb

@@ -2,6 +2,7 @@
 #include "ui/ui_wake.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <sstream>
 
 #include "app/workspace_model.hpp"
@@ -222,6 +223,34 @@ Element render_log_commit_view(const std::vector<LogCommitViewLine>& lines, int 
 void set_status(GitPanelState* state, const std::string& message) {
   if (state != nullptr) {
     state->status_message = message;
+  }
+}
+
+bool is_double_click(int index, int* last_index, int64_t* last_ms) {
+  using namespace std::chrono;
+  const int64_t now =
+      duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+  const bool doubled = index == *last_index && *last_index >= 0 && (now - *last_ms) < 450;
+  *last_index = index;
+  *last_ms = now;
+  return doubled;
+}
+
+void open_status_file_diff(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
+                           FocusManagerState* focus, WorkspaceModel* workspace, int index) {
+  if (git == nullptr || state == nullptr || layout_state == nullptr || workspace == nullptr) {
+    return;
+  }
+  const auto entries = git->status().entries;
+  if (index < 0 || index >= static_cast<int>(entries.size())) {
+    return;
+  }
+  if (layout_state->git_open_diff_view) {
+    layout_state->git_open_diff_view(entries[static_cast<std::size_t>(index)].path);
+    if (focus != nullptr) {
+      focus->region = FocusRegion::Editor;
+    }
+    UI_WAKE(layout_state, "git.diff.open");
   }
 }
 
@@ -639,6 +668,10 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
       return true;
     }
     if (!state->commit_input_focus) {
+      if (event == Event::Return && count > 0) {
+        open_status_file_diff(git, state, layout_state, focus, workspace, state->selected_file);
+        return true;
+      }
       if (event == Event::PageUp) {
         scroll_git_list(state, -visible, count, visible);
         return true;
@@ -1010,10 +1043,16 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
       count = static_cast<int>(git->branches().size());
     }
     if (index >= 0 && index < count) {
+      const bool open_diff =
+          state->selected_tab == GitPanelState::kTabStatus &&
+          is_double_click(index, &state->last_file_click_index, &state->last_file_click_ms);
       state->selected_file = index;
       scroll_selection_into_view(state, count, state->last_list_visible);
       if (state->selected_tab == GitPanelState::kTabStatus) {
         ensure_selected_diff(git, state);
+        if (open_diff) {
+          open_status_file_diff(git, state, layout_state, focus, workspace, index);
+        }
       } else if (state->selected_tab == GitPanelState::kTabLog) {
         ensure_commit_files(git, state);
       } else if (state->selected_tab == GitPanelState::kTabTimeline) {
@@ -1263,6 +1302,7 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
           bgcolor(theme::TabIdle()) | size(HEIGHT, EQUAL, 1) | reflect(state->commit_box);
       action_rows.push_back(std::move(commit_line));
       action_rows.push_back(text(i18n::tr("git.commit.confirm_hint")) | color(theme::Muted()));
+      action_rows.push_back(text(i18n::tr("git.status.open_diff_hint")) | color(theme::Muted()));
     } else if (state->selected_tab == GitPanelState::kTabLog) {
       const auto commits = visible_log_commits(git, state);
       const bool search_loading =

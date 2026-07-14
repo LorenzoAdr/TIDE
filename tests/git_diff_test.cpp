@@ -74,6 +74,16 @@ int main() {
     assert(parsed.previous_content_by_line.at(2) == "old");
   }
 
+  {
+    const auto head = lines({"a", "b", "c"});
+    const auto current = lines({"a", "x", "c"});
+    const auto map = tgdb::build_git_line_map(head, current);
+    assert(map.working_to_head.size() == 3);
+    assert(map.working_to_head[1] == 1);
+    assert(map.head_to_working[1] == 1);
+    assert(tgdb::map_git_scroll_line(map.working_to_head, 1) == 1);
+  }
+
   std::cout << "git_diff_test ok\n";
   return 0;
 }

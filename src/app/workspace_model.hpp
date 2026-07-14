@@ -53,6 +53,10 @@ struct WorkspaceModel {
   bool navigate_cursor_back(int visible_lines);
   bool navigate_cursor_forward(int visible_lines);
 
+  bool active_tab_read_only() const;
+  bool open_git_head_tab(const std::string& absolute_path,
+                         const std::vector<std::string>& head_lines);
+
  private:
   struct PendingOpenAt {
     int line = 0;
@@ -66,6 +70,8 @@ struct WorkspaceModel {
   bool try_open_external_pdf(const std::string& absolute_path);
 
   static bool load_buffer_from_disk(EditorBuffer* buffer, const std::string& absolute_path);
+  static bool load_buffer_from_lines(EditorBuffer* buffer, const std::string& absolute_path,
+                                     const std::vector<std::string>& lines);
   static std::string normalize_path(const std::string& path);
   static bool is_path_in_workspace(const std::string& workspace_root,
                                    const std::string& absolute_path);

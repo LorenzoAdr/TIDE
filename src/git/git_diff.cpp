@@ -136,4 +136,57 @@ std::unordered_set<int> compute_changed_lines(const std::vector<std::string>& cu
   return compute_line_diff(head, current).changed_new_lines;
 }
 
+GitLineMap build_git_line_map(const std::vector<std::string>& head,
+                              const std::vector<std::string>& working) {
+  GitLineMap map;
+  map.working_to_head.assign(working.size(), -1);
+  map.head_to_working.assign(head.size(), -1);
+
+  std::size_t i = 0;
+  std::size_t j = 0;
+  while (i < working.size() && j < head.size()) {
+    if (working[i] == head[j]) {
+      map.working_to_head[i] = static_cast<int>(j);
+      map.head_to_working[j] = static_cast<int>(i);
+      ++i;
+      ++j;
+      continue;
+    }
+    if (j + 1 < head.size() && working[i] == head[j + 1]) {
+      ++j;
+      continue;
+    }
+    if (i + 1 < working.size() && working[i + 1] == head[j]) {
+      ++i;
+      continue;
+    }
+    map.working_to_head[i] = static_cast<int>(j);
+    map.head_to_working[j] = static_cast<int>(i);
+    ++i;
+    ++j;
+  }
+  return map;
+}
+
+int map_git_scroll_line(const std::vector<int>& line_map, int line) {
+  if (line_map.empty()) {
+    return std::max(0, line);
+  }
+  if (line >= 0 && line < static_cast<int>(line_map.size()) && line_map[static_cast<std::size_t>(line)] >= 0) {
+    return line_map[static_cast<std::size_t>(line)];
+  }
+  const int start = std::min(line, static_cast<int>(line_map.size()) - 1);
+  for (int i = start; i >= 0; --i) {
+    if (line_map[static_cast<std::size_t>(i)] >= 0) {
+      return line_map[static_cast<std::size_t>(i)];
+    }
+  }
+  for (int i = std::max(0, line); i < static_cast<int>(line_map.size()); ++i) {
+    if (line_map[static_cast<std::size_t>(i)] >= 0) {
+      return line_map[static_cast<std::size_t>(i)];
+    }
+  }
+  return 0;
+}
+
 }  // namespace tgdb
