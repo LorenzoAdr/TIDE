@@ -1847,10 +1847,12 @@ int Application::run() {
 
 	const bool ui_smoke = std::getenv("TGDB_UI_SMOKE") != nullptr;
 	auto screen = ui_smoke ? ScreenInteractive::TerminalOutput() : ScreenInteractive::Fullscreen();
+	screen.TrackMouse(false);
 	if (!ui_smoke) {
 		screen.ForceHandleCtrlC(false);
 		screen.ForceHandleCtrlZ(false);
 		enable_extended_key_reporting();
+		enable_click_drag_mouse_reporting();
 	}
 
 	std::unique_ptr<BackgroundWorker> background_worker;
@@ -2875,6 +2877,7 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 	                           [this] { return any_modal_open(); }, this));
 
 	if (!ui_smoke) {
+		disable_click_drag_mouse_reporting();
 		disable_extended_key_reporting();
 	}
 

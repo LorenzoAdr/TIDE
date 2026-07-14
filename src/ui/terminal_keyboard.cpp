@@ -20,4 +20,23 @@ void disable_extended_key_reporting() {
   std::cout.flush();
 }
 
+void enable_click_drag_mouse_reporting() {
+  // FTXUI TrackMouse(true) enables DEC 1003 (any-event), which reports every pointer
+  // move and forces a full repaint per event. We only need clicks/wheel (1000) and
+  // motion while a button is held (1002). SGR coordinates (1006) match FTXUI's parser.
+  std::cout << "\033[?1003l";  // clear any-event if a prior session left it on
+  std::cout << "\033[?1000h";  // VT200 click/wheel
+  std::cout << "\033[?1002h";  // button-event drag tracking
+  std::cout << "\033[?1006h";  // SGR extended coordinates
+  std::cout.flush();
+}
+
+void disable_click_drag_mouse_reporting() {
+  std::cout << "\033[?1006l";
+  std::cout << "\033[?1002l";
+  std::cout << "\033[?1000l";
+  std::cout << "\033[?1003l";
+  std::cout.flush();
+}
+
 }  // namespace tgdb
