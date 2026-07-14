@@ -79,7 +79,7 @@ void try_receive(int fd) {
 	                                  reinterpret_cast<sockaddr *>(&src), &src_len);
 	if (received > 0) {
 		std::cout << "udp recv " << received << " bytes\n";
-	}
+	} 
 }
 
 } // namespace

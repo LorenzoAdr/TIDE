@@ -194,6 +194,8 @@ class Application {
   std::atomic<bool> reindex_in_progress_{false};
   UiActivityPhase last_activity_phase_ = UiActivityPhase::kInhibited;
   UiEventDispatcher ui_event_dispatcher_;
+  mutable std::mutex tree_sitter_wake_mutex_;
+  std::map<std::string, uint64_t> tree_sitter_last_wake_revision_;
 };
 
 }  // namespace tgdb

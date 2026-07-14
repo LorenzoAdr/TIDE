@@ -545,6 +545,28 @@ bool event_is_ctrl_shift_d(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[100;6u");
 }
 
+bool event_is_ctrl_a(const ftxui::Event& event) {
+  if (event == ftxui::Event::CtrlA) {
+    return true;
+  }
+  const std::string& input = event.input();
+  if (input == "\x01") {
+    return true;
+  }
+  if (event.is_character()) {
+    const std::string ch = event.character();
+    if (ch.size() == 1 && static_cast<unsigned char>(ch[0]) == 0x01) {
+      return true;
+    }
+  }
+  const int mods[] = {5};
+  return csi_key_any_modifier(event, mods, 1, 97) ||
+         csi_key_any_modifier(event, mods, 1, 65) ||
+         input == "\x1B[97;5u" || input == "\x1B[1;5u" ||
+         input == "\x1B[97;5;1~" || input == "\x1B[27;5;97~" ||
+         input == "\x1B[27;5;65~";
+}
+
 bool event_is_ctrl_backspace(const ftxui::Event& event) {
   // Ctrl+W is the de-facto delete-word-backward in many terminals.
   if (event == ftxui::Event::CtrlW) {

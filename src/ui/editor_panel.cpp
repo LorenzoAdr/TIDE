@@ -5462,8 +5462,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           caret_line_for_syntax >= static_cast<int>(buffer.lines.size())) {
         return true;
       }
+      const std::string& buffer_source = editor_buffer_joined_source(buffer);
+      if (symbols == nullptr || !symbols->supports_semantic_highlight()) {
+        return !ts_highlights_pending &&
+               tree_sitter_service().document_highlights_ready(buffer.path, buffer_source);
+      }
       return tree_sitter_service().line_highlights_trustworthy_for_line(
-          buffer.path, editor_buffer_joined_source(buffer), caret_line_for_syntax,
+          buffer.path, buffer_source, caret_line_for_syntax,
           buffer.lines[static_cast<std::size_t>(caret_line_for_syntax)]);
     }();
     // Keep live TS on the caret until the async baseline and/or LSP semantic tokens

@@ -1,8 +1,6 @@
 #include "ui/file_picker_preview.hpp"
 
 #include <algorithm>
-#include <cctype>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <utility>
@@ -11,6 +9,9 @@
 #include "util/external_viewer.hpp"
 #include "util/file_open_policy.hpp"
 #include "util/thread_name.hpp"
+#include "indexer/index_rules.hpp"
+#include "parser/tree_sitter_document.hpp"
+#include "parser/tree_sitter_service.hpp"
 
 namespace tgdb {
 
@@ -18,24 +19,26 @@ namespace {
 
 constexpr int kMaxPreviewLines = 200;
 constexpr std::size_t kMaxPreviewBytes = 256 * 1024;
+constexpr int kContextBeforeLine = 4;
 
-bool is_cpp_like_path(const std::string& path) {
-  const std::string name = std::filesystem::path(path).filename().string();
-  std::string lower = name;
-  for (char& c : lower) {
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+void fill_preview_display_lines(FilePickerPreviewData* result, int center_line) {
+  if (result == nullptr || result->highlight_lines.empty()) {
+    return;
   }
-  static constexpr const char* kExtensions[] = {".c",   ".cc",  ".cpp", ".cxx",
-                                                ".h",   ".hh",  ".hpp", ".hxx",
-                                                ".inl", ".inc"};
-  for (const char* ext : kExtensions) {
-    const std::size_t ext_len = std::strlen(ext);
-    if (lower.size() >= ext_len &&
-        lower.compare(lower.size() - ext_len, ext_len, ext) == 0) {
-      return true;
-    }
+  const int start_line =
+      center_line > 0 ? std::max(1, center_line - kContextBeforeLine) : 1;
+  result->first_line_number = start_line;
+  result->lines.clear();
+  const int start_index = start_line - 1;
+  const int end_index = std::min(
+      static_cast<int>(result->highlight_lines.size()),
+      start_index + kMaxPreviewLines);
+  for (int i = start_index; i < end_index; ++i) {
+    result->lines.push_back(result->highlight_lines[static_cast<std::size_t>(i)]);
   }
-  return false;
+  if (result->lines.empty()) {
+    result->lines.push_back("");
+  }
 }
 
 }  // namespace
@@ -51,7 +54,7 @@ void FilePickerPreview::set_notify_callback(NotifyCallback callback) {
   notify_ = std::move(callback);
 }
 
-void FilePickerPreview::request(const std::string& absolute_path) {
+void FilePickerPreview::request(const std::string& absolute_path, int center_line) {
   join_worker();
 
   const std::uint64_t request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
@@ -60,8 +63,11 @@ void FilePickerPreview::request(const std::string& absolute_path) {
     data_.request_id = request_id;
     data_.path = absolute_path;
     data_.lines.clear();
+    data_.first_line_number = 1;
+    data_.highlight_line = center_line > 0 ? center_line : 0;
+    data_.highlight_lines.clear();
     data_.build_file_kind = BuildFileKind::kNone;
-    data_.use_cpp_highlight = false;
+    data_.use_tree_sitter = false;
     data_.unsupported_reason = FilePickerPreviewUnsupportedReason::kNone;
     data_.error_message.clear();
     data_.state = absolute_path.empty() ? FilePickerPreviewState::kIdle
@@ -81,9 +87,9 @@ void FilePickerPreview::request(const std::string& absolute_path) {
     notify();
   }
 
-  worker_ = std::thread([this, absolute_path, request_id] {
+  worker_ = std::thread([this, absolute_path, center_line, request_id] {
     set_current_thread_name("file-prev");
-    worker_main(std::move(absolute_path), request_id);
+    worker_main(std::move(absolute_path), center_line, request_id);
   });
 }
 
@@ -105,10 +111,12 @@ void FilePickerPreview::join_worker() {
   }
 }
 
-void FilePickerPreview::worker_main(std::string absolute_path, std::uint64_t request_id) {
+void FilePickerPreview::worker_main(std::string absolute_path, int center_line,
+                                    std::uint64_t request_id) {
   FilePickerPreviewData result;
   result.request_id = request_id;
   result.path = absolute_path;
+  result.highlight_line = center_line > 0 ? center_line : 0;
 
   if (is_tabular_path(absolute_path)) {
     result.state = FilePickerPreviewState::kUnsupported;
@@ -140,22 +148,28 @@ void FilePickerPreview::worker_main(std::string absolute_path, std::uint64_t req
   }
 
   result.build_file_kind = detect_build_file_kind(absolute_path);
-  result.use_cpp_highlight =
-      result.build_file_kind == BuildFileKind::kNone && is_cpp_like_path(absolute_path);
+  result.use_tree_sitter =
+      result.build_file_kind == BuildFileKind::kNone && is_indexed_source_path(absolute_path);
 
   std::size_t bytes_read = 0;
   std::string line;
-  while (std::getline(input, line) &&
-         result.lines.size() < static_cast<std::size_t>(kMaxPreviewLines)) {
+  while (std::getline(input, line)) {
     bytes_read += line.size() + 1;
     if (bytes_read > kMaxPreviewBytes) {
       break;
     }
-    result.lines.push_back(std::move(line));
+    result.highlight_lines.push_back(std::move(line));
   }
-  if (result.lines.empty()) {
-    result.lines.push_back("");
+  if (result.highlight_lines.empty()) {
+    result.highlight_lines.push_back("");
   }
+
+  if (result.use_tree_sitter) {
+    tree_sitter_service().prepare_document(absolute_path,
+                                           join_editor_lines(result.highlight_lines));
+  }
+
+  fill_preview_display_lines(&result, center_line);
 
   result.state = FilePickerPreviewState::kReady;
   publish(std::move(result), request_id);

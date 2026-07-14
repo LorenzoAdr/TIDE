@@ -9,6 +9,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "i18n/tr.hpp"
 #include "ui/clickable.hpp"
+#include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
@@ -41,6 +42,18 @@ bool update_f3_browser_hover(WorkspaceWizardState* state, MainLayoutState* layou
     return true;
   }
   return false;
+}
+
+bool confirm_workspace_folder(WorkspaceWizardState* state,
+                              const WorkspaceCompleteCallback& on_complete) {
+  if (!is_directory_path(state->browser.browser_path)) {
+    return true;
+  }
+  state->open = false;
+  if (on_complete) {
+    on_complete(state->browser.browser_path);
+  }
+  return true;
 }
 
 void activate_workspace_browser_row(WorkspaceWizardState* state, MainLayoutState* layout_state,
@@ -81,41 +94,24 @@ Component MakeWorkspaceWizardOverlay(Component main, WorkspaceWizardState* state
         }
 
         if (event == Event::Escape || event == Event::Character('q')) {
+          if (state->browser.handle_filter_input(event) == PathBrowserFilterResult::kClearFilter) {
+            return true;
+          }
           if (on_request_quit) {
             on_request_quit();
           }
           return true;
         }
 
-        if (event == Event::Character('a') || event == Event::Character('A')) {
-          if (!is_directory_path(state->browser.browser_path)) {
-            return true;
-          }
-          state->open = false;
-          if (on_complete) {
-            on_complete(state->browser.browser_path);
-          }
+        if (event_is_ctrl_a(event)) {
+          return confirm_workspace_folder(state, on_complete);
+        }
+
+        if (state->browser.handle_filter_input(event) == PathBrowserFilterResult::kHandled) {
           return true;
         }
 
-        if (event == Event::ArrowDown || event == Event::Character('j')) {
-          state->browser.selected = std::min(
-              state->browser.selected + 1,
-              std::max(0, static_cast<int>(state->browser.entries.size()) - 1));
-          return true;
-        }
-        if (event == Event::ArrowUp || event == Event::Character('k')) {
-          state->browser.selected = std::max(0, state->browser.selected - 1);
-          return true;
-        }
-        if (event == Event::PageDown) {
-          state->browser.selected = std::min(
-              state->browser.selected + 12,
-              std::max(0, static_cast<int>(state->browser.entries.size()) - 1));
-          return true;
-        }
-        if (event == Event::PageUp) {
-          state->browser.selected = std::max(0, state->browser.selected - 12);
+        if (state->browser.handle_list_navigation(event)) {
           return true;
         }
         if (event == Event::Return) {
@@ -143,6 +139,9 @@ Component MakeWorkspaceWizardOverlay(Component main, WorkspaceWizardState* state
         state->browser.ensure_browser_entries();
 
         Elements body;
+        std::string filter_line = state->browser.filter_query;
+        filter_line.push_back('_');
+        body.push_back(ModalInputLine(filter_line));
         body.push_back(text(state->browser.browser_path) | color(theme::Muted()));
         body.push_back(separator());
 

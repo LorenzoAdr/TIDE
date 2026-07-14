@@ -8,6 +8,7 @@
 
 #include "ftxui/dom/elements.hpp"
 #include "parser/tree_sitter_language.hpp"
+#include "util/syntax_highlight.hpp"
 #include "util/syntax_scope.hpp"
 
 namespace tgdb {
@@ -345,7 +346,7 @@ Element HighlightTreeSitterLine(const std::string& line, int line_index,
                                 const LineHighlights& highlights, int cursor_col,
                                 Decorator cursor_style, int col_offset) {
   if (highlights.spans.empty()) {
-    return text(line);
+    return HighlightCodeLineLite(line, cursor_col, cursor_style);
   }
 
   Elements parts;

@@ -31,8 +31,11 @@ struct FilePickerPreviewData {
   std::uint64_t request_id = 0;
   std::string path;
   std::vector<std::string> lines;
+  std::vector<std::string> highlight_lines;
+  int first_line_number = 1;
+  int highlight_line = 0;
   BuildFileKind build_file_kind = BuildFileKind::kNone;
-  bool use_cpp_highlight = false;
+  bool use_tree_sitter = false;
   FilePickerPreviewState state = FilePickerPreviewState::kIdle;
   FilePickerPreviewUnsupportedReason unsupported_reason =
       FilePickerPreviewUnsupportedReason::kNone;
@@ -50,14 +53,14 @@ class FilePickerPreview {
   FilePickerPreview& operator=(const FilePickerPreview&) = delete;
 
   void set_notify_callback(NotifyCallback callback);
-  void request(const std::string& absolute_path);
+  void request(const std::string& absolute_path, int center_line = 0);
   void reset();
 
   FilePickerPreviewData snapshot() const;
 
  private:
   void join_worker();
-  void worker_main(std::string absolute_path, std::uint64_t request_id);
+  void worker_main(std::string absolute_path, int center_line, std::uint64_t request_id);
   void publish(FilePickerPreviewData data, std::uint64_t request_id);
 
   mutable std::mutex mutex_;

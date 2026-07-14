@@ -95,6 +95,7 @@ add_executable(tgdb
   src/core_analyzer/output_parser.cpp
   src/ui/file_picker.cpp
   src/ui/file_picker_preview.cpp
+  src/ui/file_preview_panel.cpp
   src/ui/symbol_picker.cpp
   src/ui/symbol_picker_match_runner.cpp
   src/ui/quit_confirm.cpp

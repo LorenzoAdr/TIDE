@@ -241,6 +241,10 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
   auto& cache = *ctx->line_span_cache;
   const auto it = cache.find(key);
   if (it != cache.end()) {
+    if (!it->second.has_semantic && it->second.ts_display_spans.spans.empty() &&
+        !source_line.empty()) {
+      return nullptr;
+    }
     return &it->second;
   }
 
@@ -299,6 +303,9 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
   if (line_uses_live_ts_overlay(ctx, line_index) && !has_ts_spans && !source_line.empty()) {
     return nullptr;
   }
+  if (!has_ts_spans && !entry.has_semantic && !source_line.empty()) {
+    return nullptr;
+  }
   cache[key] = std::move(entry);
   return &cache[key];
 }
@@ -343,6 +350,28 @@ Element highlight_semantic_segment(const std::string& segment, const SemanticTok
   return hbox(std::move(parts));
 }
 
+Element preview_or_lite_line(const std::string& line, int line_index, SyntaxHighlightContext* ctx,
+                             int cursor_col, Decorator cursor_style, int col_offset) {
+  if (!line.empty() && ctx != nullptr && !ctx->file_path.empty() && ctx->lines != nullptr &&
+      line_index >= 0 && line_index < ctx->lines->size()) {
+    const std::string& source = ctx->joined();
+    if (const LineHighlights* preview_hl =
+            tree_sitter_service().viewport_preview_line(ctx->file_path, source, line_index)) {
+      const int tab_size = std::max(1, editor_indent::tab_display_width());
+      const LineHighlights display_hl =
+          display_spans_for_line(*preview_hl, ctx->lines->at(line_index), col_offset,
+                                 static_cast<int>(line.size()), tab_size);
+      if (!display_hl.spans.empty()) {
+        return HighlightTreeSitterLine(line, line_index, display_hl, cursor_col, cursor_style, 0);
+      }
+    }
+  }
+  if (line.empty()) {
+    return text(" ");
+  }
+  return HighlightCodeLineLite(line, cursor_col, cursor_style);
+}
+
 Element highlight_tree_sitter_gap(const std::string& line, int line_index,
                                   SyntaxHighlightContext* ctx, int cursor_col,
                                   Decorator cursor_style, int col_offset,
@@ -355,7 +384,7 @@ Element highlight_tree_sitter_gap(const std::string& line, int line_index,
     }
   }
   if (ctx == nullptr || ctx->lines == nullptr || ctx->lines->size() == 0) {
-    return text(line);
+    return preview_or_lite_line(line, line_index, ctx, cursor_col, cursor_style, col_offset);
   }
   if (line_uses_live_ts_overlay(ctx, line_index)) {
     if (const LineHighlights* live = live_line_highlights(ctx, line_index)) {
@@ -372,7 +401,7 @@ Element highlight_tree_sitter_gap(const std::string& line, int line_index,
   const auto* all_highlights = ctx->tree_sitter_highlights();
   if (all_highlights == nullptr || line_index < 0 ||
       line_index >= static_cast<int>(all_highlights->size())) {
-    return text(line);
+    return preview_or_lite_line(line, line_index, ctx, cursor_col, cursor_style, col_offset);
   }
   const std::string& source_line = ctx->lines->at(line_index);
   const int tab_size = std::max(1, editor_indent::tab_display_width());
@@ -636,8 +665,10 @@ Element HighlightCodeLine(const std::string& line, int line_index,
                                        semantic_tokens->token_types, cursor_col, cursor_style,
                                        col_offset, mutable_ctx, semantic_tokens);
       }
-      return HighlightTreeSitterLine(line, line_index, cached->ts_display_spans, cursor_col,
-                                     cursor_style, 0);
+      if (!cached->ts_display_spans.spans.empty()) {
+        return HighlightTreeSitterLine(line, line_index, cached->ts_display_spans, cursor_col,
+                                       cursor_style, 0);
+      }
     }
   }
 

@@ -12,7 +12,10 @@
 #include "editor/editor_buffer_source.hpp"
 #include "indexer/index_rules.hpp"
 #include "parser/tree_sitter_service.hpp"
+#include "ui/file_preview_panel.hpp"
+#include "ui/glyphs.hpp"
 #include "ui/key_bindings.hpp"
+#include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
@@ -24,9 +27,6 @@ using namespace ftxui;
 
 namespace {
 
-constexpr int kModalWidth = 84;
-constexpr int kTextWidth = kModalWidth - 4;
-constexpr int kMaxRows = 14;
 constexpr std::size_t kMaxCatalogEntries = 12000;
 
 Element render_fuzzy_chars(const std::string& segment, std::size_t label_offset,
@@ -72,12 +72,14 @@ std::string truncate_path_prefix(const std::string& path, int max_width) {
 
 Element render_symbol_row(const SymbolPickerMatch& match, bool selected, int max_width) {
   const SymbolInfo& sym = match.symbol;
+  const std::string icon = symbol_kind_glyph(sym.kind) + " ";
+  const Color kind_color = theme::ColorForSymbolKind(sym.kind);
   const std::string suffix = "  :" + std::to_string(sym.line);
   const int suffix_width = static_cast<int>(suffix.size());
-  int name_budget = max_width - suffix_width;
+  const int icon_width = static_cast<int>(icon.size());
+  int name_budget = max_width - suffix_width - icon_width;
   if (!sym.file.empty()) {
-    const std::string file_tag = "  " + sym.file;
-    name_budget -= std::min(static_cast<int>(file_tag.size()), max_width / 3);
+    name_budget -= std::min(max_width / 4, 12);
   }
   if (name_budget < 8) {
     name_budget = 8;
@@ -90,11 +92,12 @@ Element render_symbol_row(const SymbolPickerMatch& match, bool selected, int max
 
   std::unordered_set<std::size_t> hits(match.match_indices.begin(), match.match_indices.end());
   Elements parts;
-  parts.push_back(render_fuzzy_chars(name, sym.name.size() - name.size(), hits, theme::Header()));
+  parts.push_back(text(icon) | color(kind_color));
+  parts.push_back(render_fuzzy_chars(name, sym.name.size() - name.size(), hits, kind_color));
   parts.push_back(text(suffix) | color(theme::Muted()));
   if (!sym.file.empty()) {
     const int file_budget =
-        std::max(0, max_width - static_cast<int>(name.size()) - suffix_width);
+        std::max(0, max_width - icon_width - static_cast<int>(name.size()) - suffix_width);
     if (file_budget > 0) {
       parts.push_back(text("  " + truncate_path_prefix(sym.file, file_budget)) | color(theme::Muted()));
     }
@@ -143,10 +146,27 @@ std::shared_ptr<std::vector<SymbolCatalogEntry>> build_catalog_from_file(
   return catalog;
 }
 
+std::filesystem::path symbol_absolute_path(const SymbolInfo& sym,
+                                           const std::string& workspace_root) {
+  std::error_code ec;
+  if (sym.file.empty()) {
+    return {};
+  }
+  const std::filesystem::path file_path(sym.file);
+  if (file_path.is_absolute()) {
+    return std::filesystem::absolute(file_path, ec);
+  }
+  return std::filesystem::absolute(std::filesystem::path(workspace_root) / sym.file, ec);
+}
+
 }  // namespace
 
 void SymbolPickerState::set_search_notify(std::function<void()> notify) {
   search_notify_ = std::move(notify);
+}
+
+void SymbolPickerState::set_preview_notify(std::function<void()> notify) {
+  preview.set_notify_callback(std::move(notify));
 }
 
 void SymbolPickerState::notify_search_tick() {
@@ -243,6 +263,8 @@ void SymbolPickerState::poll_search() {
     if (selected >= static_cast<int>(matches.size())) {
       selected = std::max(0, static_cast<int>(matches.size()) - 1);
     }
+    preview_requested_path.clear();
+    preview_requested_line = 0;
     return;
   }
 
@@ -256,6 +278,33 @@ void SymbolPickerState::on_closed() {
   searching = false;
   matches_dirty = true;
   matches.clear();
+  reset_preview();
+}
+
+void SymbolPickerState::reset_preview() {
+  preview_requested_path.clear();
+  preview_requested_line = 0;
+  preview.reset();
+}
+
+void SymbolPickerState::update_preview_for_selection(const std::string& workspace_root) {
+  if (!open || matches.empty()) {
+    return;
+  }
+  selected = std::max(0, std::min(selected, static_cast<int>(matches.size()) - 1));
+  const SymbolInfo& sym = matches[static_cast<std::size_t>(selected)].symbol;
+  const std::filesystem::path absolute = symbol_absolute_path(sym, workspace_root);
+  if (absolute.empty()) {
+    return;
+  }
+  const std::string path = absolute.string();
+  const int line = std::max(1, sym.line);
+  if (path == preview_requested_path && line == preview_requested_line) {
+    return;
+  }
+  preview_requested_path = path;
+  preview_requested_line = line;
+  preview.request(path, line);
 }
 
 void SymbolPickerState::jump_to_selected(WorkspaceModel* workspace, FocusManagerState* focus) {
@@ -290,7 +339,8 @@ void SymbolPickerState::jump_to_selected(WorkspaceModel* workspace, FocusManager
 Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
                                   SymbolPickerState* state, FocusManagerState* focus,
                                   std::shared_ptr<ISymbolProvider> symbols,
-                                  SymbolWorkspaceIndexer* symbol_indexer) {
+                                  SymbolWorkspaceIndexer* symbol_indexer,
+                                  MainLayoutState* layout_state) {
   return Renderer(
       CatchEvent(main, [workspace, state, focus, symbols, symbol_indexer](Event event) {
         if (!state->open) {
@@ -318,17 +368,22 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
           if (!state->matches.empty()) {
             state->selected = std::min(state->selected + 1,
                                        static_cast<int>(state->matches.size()) - 1);
+            state->update_preview_for_selection(workspace->root);
           }
           return true;
         }
         if (event == Event::ArrowUp) {
-          state->selected = std::max(0, state->selected - 1);
+          if (!state->matches.empty()) {
+            state->selected = std::max(0, state->selected - 1);
+            state->update_preview_for_selection(workspace->root);
+          }
           return true;
         }
         if (event_is_ctrl_o(event)) {
           if (!state->matches.empty()) {
             state->selected =
                 (state->selected + 1) % static_cast<int>(state->matches.size());
+            state->update_preview_for_selection(workspace->root);
           }
           return true;
         }
@@ -338,6 +393,7 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
             state->selected = 0;
             state->mark_matches_dirty();
             state->schedule_search();
+            state->update_preview_for_selection(workspace->root);
           }
           return true;
         }
@@ -349,12 +405,13 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
             state->selected = 0;
             state->mark_matches_dirty();
             state->schedule_search();
+            state->update_preview_for_selection(workspace->root);
           }
           return true;
         }
         return true;
       }),
-      [main, workspace, state, symbols, symbol_indexer] {
+      [main, workspace, state, symbols, symbol_indexer, layout_state] {
         Element base = main->Render();
         if (!state->open) {
           return base;
@@ -365,6 +422,17 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
         if (state->runner.running()) {
           state->notify_search_tick();
         }
+        if (state->preview_requested_path.empty() && !state->matches.empty()) {
+          state->update_preview_for_selection(workspace->root);
+        }
+
+        const int term_w =
+            layout_state != nullptr ? terminal_width_or_default(layout_state->terminal_width) : 120;
+        const int term_h =
+            layout_state != nullptr ? terminal_height_or_default(layout_state->terminal_height) : 40;
+        const LargeModalLayout dims = compute_large_modal_layout(term_w, term_h);
+        const int match_text_width = dims.left_pane_width - 2;
+        const int pane_content_height = dims.max_rows + 2;
 
         std::string input_line = state->query;
         input_line.push_back('_');
@@ -372,11 +440,11 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
         Elements rows;
         const int start = std::max(
             0, std::min(state->selected,
-                        std::max(0, static_cast<int>(state->matches.size()) - kMaxRows)));
-        const int end = std::min(static_cast<int>(state->matches.size()), start + kMaxRows);
+                        std::max(0, static_cast<int>(state->matches.size()) - dims.max_rows)));
+        const int end = std::min(static_cast<int>(state->matches.size()), start + dims.max_rows);
         for (int i = start; i < end; ++i) {
           rows.push_back(render_symbol_row(state->matches[static_cast<std::size_t>(i)],
-                                           i == state->selected, kTextWidth));
+                                           i == state->selected, match_text_width));
         }
         if (rows.empty()) {
           const bool indexing =
@@ -386,13 +454,27 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
           rows.push_back(text(i18n::tr(key)) | color(theme::Muted()));
         }
 
+        const FilePickerPreviewData preview = state->preview.snapshot();
+
+        Element left_pane = vbox({
+                               ModalInputLine(input_line),
+                               separator(),
+                               vbox(std::move(rows)) | frame | vscroll_indicator |
+                                   bgcolor(theme::PanelBg()),
+                           }) |
+                           size(WIDTH, EQUAL, dims.left_pane_width) |
+                           size(HEIGHT, EQUAL, pane_content_height);
+
+        Element right_pane = RenderFilePreviewPanel(preview, workspace->root, dims.right_pane_width,
+                                                    pane_content_height, dims.max_rows);
+
         Element dialog = ModalWindow(
             text(i18n::tr("picker.symbol.title")) | color(theme::Accent()),
-            vbox({ModalInputLine(input_line),
-                  separator(),
-                  vbox(std::move(rows)) | frame | vscroll_indicator |
-                      bgcolor(theme::PanelBg())}) |
-                size(WIDTH, EQUAL, kModalWidth));
+            hbox({
+                std::move(left_pane),
+                separatorCharacter("│") | color(theme::AccentDim()),
+                std::move(right_pane),
+            }) | size(WIDTH, EQUAL, dims.modal_width) | size(HEIGHT, EQUAL, dims.max_rows + 3));
 
         return ScreenModalOverlay(std::move(base), std::move(dialog));
       });

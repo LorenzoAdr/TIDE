@@ -85,28 +85,18 @@ Component MakeExternalFileWizardOverlay(Component main, ExternalFileWizardState*
         }
 
         if (event == Event::Escape) {
+          if (state->browser.handle_filter_input(event) == PathBrowserFilterResult::kClearFilter) {
+            return true;
+          }
           state->open = false;
           return true;
         }
 
-        if (event == Event::ArrowDown || event == Event::Character('j')) {
-          state->browser.selected = std::min(
-              state->browser.selected + 1,
-              std::max(0, static_cast<int>(state->browser.entries.size()) - 1));
+        if (state->browser.handle_filter_input(event) == PathBrowserFilterResult::kHandled) {
           return true;
         }
-        if (event == Event::ArrowUp || event == Event::Character('k')) {
-          state->browser.selected = std::max(0, state->browser.selected - 1);
-          return true;
-        }
-        if (event == Event::PageDown) {
-          state->browser.selected = std::min(
-              state->browser.selected + 12,
-              std::max(0, static_cast<int>(state->browser.entries.size()) - 1));
-          return true;
-        }
-        if (event == Event::PageUp) {
-          state->browser.selected = std::max(0, state->browser.selected - 12);
+
+        if (state->browser.handle_list_navigation(event)) {
           return true;
         }
         if (event == Event::Return || event == Event::Character('o') ||
@@ -135,6 +125,9 @@ Component MakeExternalFileWizardOverlay(Component main, ExternalFileWizardState*
         state->browser.ensure_browser_entries();
 
         Elements body;
+        std::string filter_line = state->browser.filter_query;
+        filter_line.push_back('_');
+        body.push_back(ModalInputLine(filter_line));
         body.push_back(text(state->browser.browser_path) | color(theme::Muted()));
         body.push_back(separator());
 

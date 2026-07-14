@@ -14,6 +14,8 @@
 
 namespace tgdb {
 
+struct MainLayoutState;
+
 struct FilePickerMatch {
   std::string path;
   int score = 0;
@@ -58,6 +60,7 @@ ftxui::Component MakeFilePickerOverlay(ftxui::Component main, DebugModel* model,
                                       WorkspaceModel* workspace,
                                       FilePickerState* state,
                                       FocusManagerState* focus,
-                                      WorkspaceIndexer* indexer);
+                                      WorkspaceIndexer* indexer,
+                                      MainLayoutState* layout_state);
 
 }  // namespace tgdb

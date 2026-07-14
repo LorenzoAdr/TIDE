@@ -1986,6 +1986,7 @@ int Application::run() {
 		symbol_picker_state_.catalog_key.clear();
 		symbol_picker_state_.catalog.reset();
 		symbol_picker_state_.mark_matches_dirty();
+		symbol_picker_state_.reset_preview();
 		UI_WAKE(&layout_state_, "app.urgent");
 	};
 	layout_state_.helix_ide.save_file = [this]() {
@@ -2032,13 +2033,18 @@ int Application::run() {
 	});
 	file_picker_state_.set_repaint_notify([this] { UI_WAKE(&layout_state_, "file_picker.repaint"); });
 	symbol_picker_state_.set_search_notify([this] { UI_WAKE(&layout_state_, "app"); });
+	symbol_picker_state_.set_preview_notify([this] {
+		ui_wake_correlated(&layout_state_, ui_capture_correlation(&layout_state_),
+		                   "symbol_picker.preview");
+	});
 
 	auto with_symbol_picker =
 	    MakeSymbolPickerOverlay(layout, &workspace_, &symbol_picker_state_, &focus_state_,
-	                            symbol_provider_, &symbol_indexer_);
+	                            symbol_provider_, &symbol_indexer_, &layout_state_);
 
 	auto with_picker = MakeFilePickerOverlay(with_symbol_picker, &model_, &workspace_,
-	                                         &file_picker_state_, &focus_state_, &indexer_);
+	                                         &file_picker_state_, &focus_state_, &indexer_,
+	                                         &layout_state_);
 
 	auto with_debug_wizard = MakeConnectionWizardOverlay(
 	    with_picker, &connection_wizard_state_, &model_, &layout_state_,
@@ -2237,6 +2243,7 @@ int Application::run() {
 					symbol_picker_state_.selected =
 					    (symbol_picker_state_.selected + 1) %
 					    static_cast<int>(symbol_picker_state_.matches.size());
+					symbol_picker_state_.update_preview_for_selection(model_.workspace_root);
 					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
@@ -2247,6 +2254,7 @@ int Application::run() {
 				symbol_picker_state_.catalog_key.clear();
 				symbol_picker_state_.catalog.reset();
 				symbol_picker_state_.mark_matches_dirty();
+				symbol_picker_state_.reset_preview();
 				UI_WAKE(&layout_state_, "app.urgent");
 				return true;
 			}
@@ -2818,17 +2826,24 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 		});
 	}
 	tree_sitter_service().set_ready_callback([this](const std::string& path) {
+		if (path.empty()) {
+			return;
+		}
+		const uint64_t revision = tree_sitter_service().revision_for(path);
+		{
+			std::lock_guard<std::mutex> lock(tree_sitter_wake_mutex_);
+			const auto it = tree_sitter_last_wake_revision_.find(path);
+			if (revision != 0 && it != tree_sitter_last_wake_revision_.end() &&
+			    it->second == revision) {
+				return;
+			}
+			tree_sitter_last_wake_revision_[path] = revision;
+		}
 		const int64_t now = steady_now_ms();
 		const bool typing_burst =
 		    now - workspace_.last_buffer_edit_ms < 250 &&
-		    !path.empty() && workspace_.buffer.path == path;
-		enqueue_ui_task([this, path, typing_burst]() {
-			if (!path.empty() && workspace_.buffer.path == path && !typing_burst) {
-				workspace_.buffer.view_token++;
-			}
-			if (!path.empty() && secondary_workspace_.buffer.path == path && !typing_burst) {
-				secondary_workspace_.buffer.view_token++;
-			}
+		    workspace_.buffer.path == path;
+		enqueue_ui_task([this, path]() {
 			layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
 			if (layout_state_.outline_tick_callback) {
 				layout_state_.outline_tick_callback();

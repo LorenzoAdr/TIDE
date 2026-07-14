@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <functional>
 #include <string>
 
 #include "ftxui/dom/elements.hpp"
@@ -9,6 +11,32 @@
 namespace tgdb {
 
 using namespace ftxui;
+
+struct LargeModalLayout {
+  int modal_width = 120;
+  int modal_height = 22;
+  int left_pane_width = 54;
+  int right_pane_width = 65;
+  int max_rows = 18;
+};
+
+inline LargeModalLayout compute_large_modal_layout(int term_w, int term_h) {
+  LargeModalLayout layout;
+  layout.modal_width = std::max(80, std::min(term_w - 2, (term_w * 92) / 100));
+  layout.modal_height = std::max(16, std::min(term_h - 3, (term_h * 88) / 100));
+  layout.left_pane_width = std::max(32, layout.modal_width * 42 / 100);
+  layout.right_pane_width = layout.modal_width - layout.left_pane_width - 1;
+  layout.max_rows = std::max(8, layout.modal_height - 5);
+  return layout;
+}
+
+inline int terminal_width_or_default(const std::function<int()>& width_fn, int fallback = 120) {
+  return width_fn ? width_fn() : fallback;
+}
+
+inline int terminal_height_or_default(const std::function<int()>& height_fn, int fallback = 40) {
+  return height_fn ? height_fn() : fallback;
+}
 
 inline Element PanelTitle(const std::string& title) {
   return hbox({text(" " + title + " ") | bold | color(theme::TitleText()),

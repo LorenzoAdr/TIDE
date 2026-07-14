@@ -617,7 +617,7 @@ bool TreeSitterDocumentCache::document_highlights_ready(const std::string& path,
     return false;
   }
   const DocumentPtr& entry = it->second;
-  return entry->source == canonical && entry->highlights_ready && !entry->line_highlights.empty();
+  return entry->source == canonical && entry->highlights_ready;
 }
 
 bool TreeSitterDocumentCache::document_symbols_ready(const std::string& path,
@@ -940,12 +940,6 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
   }
   ts_parser_delete(parser);
 
-  bool more_edits_pending = false;
-  {
-    std::lock_guard<std::mutex> worker_lock(worker_mutex_);
-    more_edits_pending = debounce_jobs_.find(job.path) != debounce_jobs_.end();
-  }
-
   std::vector<LineHighlights> highlights;
   std::vector<SymbolInfo> symbols;
   std::vector<SymbolInfo> scopes;
@@ -967,10 +961,8 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
     } else {
       highlights = highlights_for_document(root, job.source);
     }
-    if (!more_edits_pending) {
-      symbols = extract_symbols_from_tree(root, job.source, job.path);
-      scopes = scope_symbols_from_tree(root, job.source, job.path);
-    }
+    symbols = extract_symbols_from_tree(root, job.source, job.path);
+    scopes = scope_symbols_from_tree(root, job.source, job.path);
   }
   if (old_tree_for_highlights != nullptr) {
     ts_tree_delete(old_tree_for_highlights);
@@ -1009,11 +1001,9 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
       entry->line_highlights = std::move(highlights);
       entry->parse_ready = tree != nullptr;
       entry->highlights_ready = entry->parse_ready;
-      if (!more_edits_pending) {
-        entry->symbols = std::move(symbols);
-        entry->scope_symbols = std::move(scopes);
-        entry->symbols_ready = entry->parse_ready;
-      }
+      entry->symbols = std::move(symbols);
+      entry->scope_symbols = std::move(scopes);
+      entry->symbols_ready = entry->parse_ready;
       entry->viewport_preview.reset();
       entry->revision = next_revision_++;
       committed = true;

@@ -9,7 +9,9 @@
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "ui/file_preview_panel.hpp"
 #include "ui/focus_manager.hpp"
+#include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/theme.hpp"
@@ -26,13 +28,6 @@ using namespace ftxui;
 
 namespace {
 
-constexpr int kModalWidth = 120;
-constexpr int kLeftPaneWidth = 54;
-constexpr int kRightPaneWidth = kModalWidth - kLeftPaneWidth - 1;
-constexpr int kPaneHeight = 18;
-constexpr int kMaxMatchRows = kPaneHeight;
-constexpr int kMaxPreviewRows = kPaneHeight;
-constexpr int kMatchTextWidth = kLeftPaneWidth - 2;
 constexpr int kOpenTabScoreBonus = 1000;
 constexpr int kSameDirectoryBonus = 400;
 constexpr int kSharedPathComponentBonus = 80;
@@ -221,84 +216,6 @@ std::string selected_absolute_path(const FilePickerState* state, const std::stri
       std::max(0, std::min(state->selected, static_cast<int>(state->matches.size()) - 1));
   return picker_absolute_path(state->matches[static_cast<std::size_t>(index)].path, workspace_root)
       .string();
-}
-
-Element render_preview_line(const FilePickerPreviewData& preview, const std::string& line,
-                            int line_index) {
-  if (preview.build_file_kind != BuildFileKind::kNone) {
-    return HighlightBuildFileLine(preview.build_file_kind, line);
-  }
-  if (preview.use_cpp_highlight) {
-    SyntaxHighlightContext ctx;
-    ctx.file_path = preview.path;
-    VectorLineSource preview_line_source(preview.lines);
-    ctx.lines = &preview_line_source;
-    return HighlightCodeLine(line, line_index, nullptr, -1, {}, 0, &ctx);
-  }
-  return text(line.empty() ? " " : line) | color(theme::SyntaxDefault());
-}
-
-Element render_preview_panel(const FilePickerPreviewData& preview, const std::string& workspace_root) {
-  const std::string header =
-      preview.path.empty() ? " " : picker_display_path(preview.path, workspace_root);
-
-  Elements body;
-  switch (preview.state) {
-    case FilePickerPreviewState::kIdle:
-      body.push_back(text(" ") | color(theme::Muted()));
-      break;
-    case FilePickerPreviewState::kLoading:
-      body.push_back(text(i18n::tr("picker.file.preview.loading")) | color(theme::Muted()));
-      break;
-    case FilePickerPreviewState::kUnsupported: {
-      const char* key = "picker.file.preview.unsupported";
-      switch (preview.unsupported_reason) {
-        case FilePickerPreviewUnsupportedReason::kBinary:
-          key = "picker.file.preview.binary";
-          break;
-        case FilePickerPreviewUnsupportedReason::kTabular:
-          key = "picker.file.preview.tabular";
-          break;
-        case FilePickerPreviewUnsupportedReason::kPdf:
-          key = "picker.file.preview.pdf";
-          break;
-        default:
-          break;
-      }
-      body.push_back(text(i18n::tr(key)) | color(theme::Muted()));
-      break;
-    }
-    case FilePickerPreviewState::kError:
-      body.push_back(text(i18n::tr("picker.file.preview.error")) | color(theme::Muted()));
-      break;
-    case FilePickerPreviewState::kReady: {
-      const int line_count = static_cast<int>(preview.lines.size());
-      const int end = std::min(line_count, kMaxPreviewRows);
-      for (int i = 0; i < end; ++i) {
-        const std::string& line = preview.lines[static_cast<std::size_t>(i)];
-        const std::string line_no = std::to_string(i + 1);
-        const int gutter = std::max(4, static_cast<int>(line_no.size()) + 1);
-        Element row = hbox({
-            text(line_no + std::string(static_cast<std::size_t>(gutter - line_no.size()), ' ')) |
-                color(theme::Muted()) | size(WIDTH, EQUAL, gutter),
-            render_preview_line(preview, line, i),
-        });
-        body.push_back(std::move(row));
-      }
-      if (line_count > kMaxPreviewRows) {
-        body.push_back(text(i18n::tr("common.ellipsis")) | color(theme::Muted()));
-      }
-      break;
-    }
-  }
-
-  return vbox({
-             hbox({text(" " + header) | color(theme::Accent()) | bold, filler()}) |
-                 size(HEIGHT, EQUAL, 1),
-             separator(),
-             vbox(std::move(body)) | frame | vscroll_indicator | bgcolor(theme::CodeBg()),
-         }) |
-         size(WIDTH, EQUAL, kRightPaneWidth) | size(HEIGHT, EQUAL, kPaneHeight + 2);
 }
 
 }  // namespace
@@ -498,7 +415,8 @@ void FilePickerState::open_file(DebugModel* model, WorkspaceModel* workspace,
 
 Component MakeFilePickerOverlay(Component main, DebugModel* model,
                                 WorkspaceModel* workspace, FilePickerState* state,
-                                FocusManagerState* focus, WorkspaceIndexer* indexer) {
+                                FocusManagerState* focus, WorkspaceIndexer* indexer,
+                                MainLayoutState* layout_state) {
   return Renderer(
       CatchEvent(main, [model, workspace, state, focus, indexer](Event event) {
         if (!state->open) {
@@ -591,7 +509,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
         }
         return true;
       }),
-      [main, model, workspace, state, indexer] {
+      [main, model, workspace, state, indexer, layout_state] {
         Element base = main->Render();
         if (!state->open) {
           return base;
@@ -604,21 +522,29 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
           state->update_preview_for_selection(model->workspace_root);
         }
 
+        const int term_w =
+            layout_state != nullptr ? terminal_width_or_default(layout_state->terminal_width) : 120;
+        const int term_h =
+            layout_state != nullptr ? terminal_height_or_default(layout_state->terminal_height) : 40;
+        const LargeModalLayout dims = compute_large_modal_layout(term_w, term_h);
+        const int match_text_width = dims.left_pane_width - 2;
+        const int pane_content_height = dims.max_rows + 2;
+
         std::string input_line = state->query;
         input_line.push_back('_');
 
         Elements matches;
         const int start = std::max(
             0, std::min(state->selected,
-                        std::max(0, static_cast<int>(state->matches.size()) - kMaxMatchRows)));
+                        std::max(0, static_cast<int>(state->matches.size()) - dims.max_rows)));
         const int end =
-            std::min(static_cast<int>(state->matches.size()), start + kMaxMatchRows);
+            std::min(static_cast<int>(state->matches.size()), start + dims.max_rows);
         for (int i = start; i < end; ++i) {
           const auto& match = state->matches[static_cast<std::size_t>(i)];
           const std::string label =
               picker_display_path(match.path, model->workspace_root);
           matches.push_back(render_fuzzy_path_label(label, match.match_indices,
-                                                    i == state->selected, kMatchTextWidth));
+                                                    i == state->selected, match_text_width));
         }
         if (matches.empty()) {
           const std::string empty_label = state->query.empty()
@@ -638,9 +564,12 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
                                vbox(std::move(matches)) | frame | vscroll_indicator |
                                    bgcolor(theme::PanelBg()),
                            }) |
-                           size(WIDTH, EQUAL, kLeftPaneWidth) | size(HEIGHT, EQUAL, kPaneHeight + 2);
+                           size(WIDTH, EQUAL, dims.left_pane_width) |
+                           size(HEIGHT, EQUAL, pane_content_height);
 
-        Element right_pane = render_preview_panel(preview, model->workspace_root);
+        Element right_pane = RenderFilePreviewPanel(preview, model->workspace_root,
+                                                    dims.right_pane_width, pane_content_height,
+                                                    dims.max_rows);
 
         Element dialog = ModalWindow(
             text(title) | color(theme::Accent()),
@@ -648,7 +577,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
                 std::move(left_pane),
                 separatorCharacter("│") | color(theme::AccentDim()),
                 std::move(right_pane),
-            }) | size(WIDTH, EQUAL, kModalWidth) | size(HEIGHT, EQUAL, kPaneHeight + 3));
+            }) | size(WIDTH, EQUAL, dims.modal_width) | size(HEIGHT, EQUAL, dims.max_rows + 3));
 
         return ScreenModalOverlay(std::move(base), std::move(dialog));
       });

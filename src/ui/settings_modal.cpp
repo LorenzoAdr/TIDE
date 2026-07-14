@@ -1858,6 +1858,9 @@ bool handle_path_browser_keys(SettingsModalState* state, Event event) {
   state->path_browser.ensure_browser_entries();
 
   if (event == Event::Escape) {
+    if (state->path_browser.handle_filter_input(event) == PathBrowserFilterResult::kClearFilter) {
+      return true;
+    }
     state->panel = state->path_browser_purpose == PathBrowserPurpose::kMappingHostPath
                        ? SettingsPanel::kPathMappings
                        : SettingsPanel::kIncludePaths;
@@ -1867,14 +1870,10 @@ bool handle_path_browser_keys(SettingsModalState* state, Event event) {
     confirm_path_browser_selection(state);
     return true;
   }
-  if (event == Event::ArrowDown || event == Event::Character('j')) {
-    state->path_browser.selected = std::min(
-        state->path_browser.selected + 1,
-        std::max(0, static_cast<int>(state->path_browser.entries.size()) - 1));
+  if (state->path_browser.handle_filter_input(event) == PathBrowserFilterResult::kHandled) {
     return true;
   }
-  if (event == Event::ArrowUp || event == Event::Character('k')) {
-    state->path_browser.selected = std::max(0, state->path_browser.selected - 1);
+  if (state->path_browser.handle_list_navigation(event)) {
     return true;
   }
   if (event == Event::Return) {
@@ -2292,6 +2291,9 @@ SettingsBodyContent build_path_browser_panel(SettingsModalState* state) {
                           : i18n::tr("settings.path_browser.add_include")) |
                  color(theme::Accent()) | bold);
   content.rows.push_back(separator());
+  std::string filter_line = state->path_browser.filter_query;
+  filter_line.push_back('_');
+  content.rows.push_back(ModalInputLine(filter_line));
   content.rows.push_back(text(state->path_browser.browser_path) | color(theme::Muted()));
   content.rows.push_back(separator());
 
