@@ -10,7 +10,7 @@
 
 namespace tgdb {
 
-enum class OpenFileConfirmMode { Closed, LargeFile, BinaryWarning };
+enum class OpenFileConfirmMode { Closed, LargeFile, BinaryWarning, TooLarge };
 
 struct OpenFileConfirmState {
   OpenFileConfirmMode mode = OpenFileConfirmMode::Closed;
@@ -27,6 +27,8 @@ struct OpenFileConfirmState {
   bool is_open() const { return mode != OpenFileConfirmMode::Closed; }
 
   void show_binary_warning(const std::string& absolute_path, const std::string& display_name);
+  void show_too_large_warning(const std::string& absolute_path, const std::string& display_name,
+                              std::uintmax_t size_bytes);
   void request_large_confirm(const std::string& absolute_path, std::uintmax_t size_bytes);
   void close();
 };

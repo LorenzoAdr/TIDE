@@ -368,19 +368,26 @@ uint64_t viewport_line_hash_matches_on_line(uint64_t h, const std::vector<TextMa
 
 uint64_t viewport_line_hash_selection_on_line(uint64_t h, const EditorBuffer& buffer,
                                               int line_index) {
-  const MultiCursor& cursor = buffer.primary();
-  if (!cursor.has_selection()) {
-    return h;
+  // Hash every cursor that touches this line so Ctrl+D / multicursor invalida
+  // the right rows instead of leaving stale selection backgrounds.
+  h = viewport_line_hash_int(h, static_cast<int>(buffer.cursors.size()));
+  for (const auto& cursor : buffer.cursors) {
+    if (cursor.has_selection()) {
+      const int lo = std::min(cursor.anchor.line, cursor.head.line);
+      const int hi = std::max(cursor.anchor.line, cursor.head.line);
+      if (line_index < lo || line_index > hi) {
+        continue;
+      }
+      h = viewport_line_hash_int(h, cursor.anchor.line);
+      h = viewport_line_hash_int(h, cursor.anchor.col);
+      h = viewport_line_hash_int(h, cursor.head.line);
+      h = viewport_line_hash_int(h, cursor.head.col);
+      continue;
+    }
+    if (cursor.head.line == line_index) {
+      h = viewport_line_hash_int(h, cursor.head.col);
+    }
   }
-  const int lo = std::min(cursor.anchor.line, cursor.head.line);
-  const int hi = std::max(cursor.anchor.line, cursor.head.line);
-  if (line_index < lo || line_index > hi) {
-    return h;
-  }
-  h = viewport_line_hash_int(h, cursor.anchor.line);
-  h = viewport_line_hash_int(h, cursor.anchor.col);
-  h = viewport_line_hash_int(h, cursor.head.line);
-  h = viewport_line_hash_int(h, cursor.head.col);
   return h;
 }
 
@@ -4851,11 +4858,15 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
   if (event_is_ctrl_d(event) || event_is_ctrl_alt_d(event) || event_is_ctrl_shift_d(event)) {
     add_next_selection_match(buffer, visible_lines);
+    // Secondary selections are not hashed by view_token; drop line cache so all
+    // multicursor backgrounds/carets paint on the next frame.
+    panel->viewport_line_render_cache.clear();
     return true;
   }
   if (event_is_ctrl_alt_l(event) || event_is_ctrl_shift_l(event)) {
     select_all_matches(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+    panel->viewport_line_render_cache.clear();
     return true;
   }
   if (event == Event::CtrlS) {

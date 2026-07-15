@@ -165,6 +165,10 @@ void SymbolPickerState::set_search_notify(std::function<void()> notify) {
   search_notify_ = std::move(notify);
 }
 
+void SymbolPickerState::set_file_opened_notify(std::function<void()> notify) {
+  file_opened_notify_ = std::move(notify);
+}
+
 void SymbolPickerState::set_preview_notify(std::function<void()> notify) {
   preview.set_notify_callback(std::move(notify));
 }
@@ -334,6 +338,9 @@ void SymbolPickerState::jump_to_selected(WorkspaceModel* workspace, FocusManager
   query.clear();
   selected = 0;
   on_closed();
+  if (file_opened_notify_) {
+    file_opened_notify_();
+  }
 }
 
 Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
@@ -364,7 +371,7 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
           state->jump_to_selected(workspace, focus);
           return true;
         }
-        if (event == Event::ArrowDown) {
+        if (event == Event::ArrowDown || event_is_plain_tab(event)) {
           if (!state->matches.empty()) {
             state->selected = std::min(state->selected + 1,
                                        static_cast<int>(state->matches.size()) - 1);

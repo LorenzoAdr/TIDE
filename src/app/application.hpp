@@ -92,7 +92,10 @@ class Application {
   void quick_launch_last();
   void quick_attach_last();
   void open_workspace_wizard();
-  void open_external_file_wizard();
+  void open_external_file_wizard(bool from_active_file_dir = false);
+  void open_quick_file_picker(bool arm_ctrl_chord = false);
+  void cycle_quick_file_picker();
+  void notify_file_tree_reveal();
   void sync_model_breakpoints_to_backend();
   void on_connection_complete(const ConnectionResult& result);
   void apply_pending_connection();

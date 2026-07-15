@@ -36,6 +36,7 @@ std::vector<ShortcutSection> shortcut_sections() {
       {i18n::tr("shortcuts.section.general"),
        {
            {"F1", i18n::tr("shortcuts.general.open_external")},
+           {"Alt+E", i18n::tr("shortcuts.general.open_external_here")},
            {"Alt+F1 / Shift+F1", i18n::tr("shortcuts.general.keyboard_shortcuts")},
            {"F2", i18n::tr("shortcuts.general.debug_wizard")},
            {"F3", i18n::tr("shortcuts.general.change_workspace")},
@@ -47,7 +48,7 @@ std::vector<ShortcutSection> shortcut_sections() {
            {"F6", i18n::tr("shortcuts.general.helix_toggle")},
            {"Ctrl+Shift+S", i18n::tr("shortcuts.general.binary_symbols")},
            {"F10", i18n::tr("shortcuts.general.settings")},
-           {"Ctrl+P", i18n::tr("shortcuts.general.quick_open")},
+           {"Ctrl+P / Alt+P", i18n::tr("shortcuts.general.quick_open")},
            {"Ctrl+O", i18n::tr("shortcuts.general.go_to_symbol")},
            {"Ctrl+T", i18n::tr("shortcuts.general.toggle_bottom_panel")},
            {"Ctrl+Q", i18n::tr("shortcuts.general.quit")},

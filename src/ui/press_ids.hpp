@@ -77,6 +77,7 @@ inline std::string_view watches_tab_id(int index) {
 
 constexpr std::string_view kEditorScrollbar = "scrollbar.editor";
 constexpr std::string_view kEditorHorizontalScrollbar = "scrollbar.editor.horizontal";
+constexpr std::string_view kExplorerScrollbar = "scrollbar.explorer";
 constexpr std::string_view kSourceScrollbar = "scrollbar.source";
 constexpr std::string_view kTerminalScrollbar = "scrollbar.terminal";
 constexpr std::string_view kTerminalLink = "terminal.link";
@@ -187,8 +188,9 @@ inline bool is_context_menu_hover(std::string_view id) {
 }
 
 inline bool is_scrollbar_hover(std::string_view id) {
-  return id == kEditorScrollbar || id == kEditorHorizontalScrollbar || id == kSourceScrollbar ||
-         id == kTerminalScrollbar || id == kTerminalLink;
+  return id == kEditorScrollbar || id == kEditorHorizontalScrollbar ||
+         id == kExplorerScrollbar || id == kSourceScrollbar || id == kTerminalScrollbar ||
+         id == kTerminalLink;
 }
 
 inline bool is_f2_hover(std::string_view id) {

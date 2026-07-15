@@ -80,6 +80,8 @@ VisualHighlightConfig visual_highlight_config_from_settings(const AppSettings* s
 
 VisualHighlightSelectionKey visual_highlight_selection_key_from(const EditorBuffer& buffer) {
   VisualHighlightSelectionKey key;
+  // Occurrence highlights only apply with a single cursor; multicursor uses
+  // Selection decorations (hashed per-line in the editor viewport cache).
   if (buffer.cursors.size() == 1 && buffer.primary().has_selection()) {
     key.view_token = buffer.view_token;
     buffer.primary().normalized_range(&key.start_line, &key.start_col, &key.end_line, &key.end_col);
@@ -455,6 +457,18 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
     return;
   }
 
+  // Full-buffer join + occurrence scan on huge files can OOM (often SIGKILL, no crash log).
+  constexpr int kMaxVisualHighlightLines = 40000;
+  if (static_cast<int>(buffer.lines.size()) > kMaxVisualHighlightLines) {
+    if (state->job_inflight || state->dirty || state->snapshot.ready) {
+      state->snapshot = {};
+      state->job_inflight = false;
+      state->dirty = false;
+      state->has_last_job_config = false;
+    }
+    return;
+  }
+
   const uint64_t ts_revision = tree_sitter_service().revision_for(buffer.path);
   if (ts_revision != state->last_seen_ts_revision) {
     state->last_seen_ts_revision = ts_revision;
@@ -653,6 +667,11 @@ const std::vector<TextMatch>* visual_highlight_selection_occurrences(
     const VisualHighlightPanelState& state, const EditorBuffer& buffer, bool find_bar_open,
     int viewport_scroll, int viewport_visible_lines) {
   if (find_bar_open || state.snapshot.selection_occurrences.empty()) {
+    return nullptr;
+  }
+  // With multicursor, Selection decorations already cover each match; scanning/
+  // filtering occurrences every paint is O(cursors × matches) and causes lag.
+  if (buffer.cursors.size() > 1) {
     return nullptr;
   }
   if (state.snapshot.selection_key != visual_highlight_selection_key_from(buffer)) {

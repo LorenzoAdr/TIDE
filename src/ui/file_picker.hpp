@@ -34,6 +34,7 @@ struct FilePickerState {
   bool matches_dirty = true;
   FilePickerPreview preview;
   std::function<void()> repaint_notify;
+  std::function<void()> file_opened_notify;
   std::string preview_requested_path;
   bool ctrl_chord_armed = false;
   bool ctrl_chord_active = false;
@@ -46,6 +47,7 @@ struct FilePickerState {
                  FocusManagerState* focus, int index);
   void set_preview_notify(std::function<void()> notify);
   void set_repaint_notify(std::function<void()> notify);
+  void set_file_opened_notify(std::function<void()> notify);
   void update_preview_for_selection(const std::string& workspace_root);
   void reset_preview();
   void on_opened(const std::string& workspace_root);

@@ -375,6 +375,13 @@ bool WorkspaceModel::check_open_guard(const std::string& absolute_path) {
     status_message = i18n::tr_fmt("workspace.binary_blocked", {name});
     return false;
   }
+  if (assessment.kind == FileOpenKind::TooLarge) {
+    const std::string name = fs::path(absolute_path).filename().string();
+    open_file_confirm->show_too_large_warning(absolute_path, name, assessment.size_bytes);
+    status_message = i18n::tr_fmt("workspace.too_large_blocked",
+                                  {name, format_file_size(assessment.size_bytes)});
+    return false;
+  }
   if (assessment.kind == FileOpenKind::Large) {
     open_file_confirm->request_large_confirm(absolute_path, assessment.size_bytes);
     if (pending_open_at_.active) {

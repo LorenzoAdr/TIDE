@@ -52,7 +52,9 @@ FileOpenAssessment assess_file_open(const std::string& absolute_path) {
     return result;
   }
 
-  if (result.size_bytes > FileOpenPolicy::kLargeFileBytes) {
+  if (result.size_bytes > FileOpenPolicy::kMaxOpenFileBytes) {
+    result.kind = FileOpenKind::TooLarge;
+  } else if (result.size_bytes > FileOpenPolicy::kLargeFileBytes) {
     result.kind = FileOpenKind::Large;
   }
   return result;

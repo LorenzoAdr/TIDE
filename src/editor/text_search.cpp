@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <optional>
+#include <unordered_set>
 
 #include "editor/clipboard.hpp"
 #include "editor/text_ops.hpp"
@@ -223,14 +224,23 @@ bool find_next_match(const EditorBuffer& buffer, const std::string& needle,
     return false;
   }
 
+  // Pack (line, col, length) into a key so skip checks stay O(1) as Ctrl+D grows.
+  std::unordered_set<uint64_t> skip_keys;
+  if (skip != nullptr) {
+    skip_keys.reserve(skip->size() * 2);
+    for (const auto& existing : *skip) {
+      const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(existing.line)) << 32) |
+                           (static_cast<uint64_t>(static_cast<uint16_t>(existing.col)) << 16) |
+                           static_cast<uint16_t>(existing.length);
+      skip_keys.insert(key);
+    }
+  }
   auto is_skipped = [&](const TextMatch& candidate) {
-    if (skip) {
-      for (const auto& existing : *skip) {
-        if (existing.line == candidate.line && existing.col == candidate.col &&
-            existing.length == candidate.length) {
-          return true;
-        }
-      }
+    const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(candidate.line)) << 32) |
+                         (static_cast<uint64_t>(static_cast<uint16_t>(candidate.col)) << 16) |
+                         static_cast<uint16_t>(candidate.length);
+    if (!skip_keys.empty() && skip_keys.count(key) != 0) {
+      return true;
     }
     return match_occupied(candidate, buffer);
   };

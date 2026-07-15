@@ -1098,13 +1098,57 @@ void Application::process_pending_workspace_load() {
 	UI_WAKE(&layout_state_, "app");
 }
 
-void Application::open_external_file_wizard() {
+void Application::notify_file_tree_reveal() {
+	layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
+	UI_WAKE(&layout_state_, "app");
+}
+
+void Application::open_quick_file_picker(bool arm_ctrl_chord) {
+	file_picker_state_.open = true;
+	file_picker_state_.query.clear();
+	file_picker_state_.selected = 0;
+	file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
+	file_picker_state_.mark_matches_dirty();
+	file_picker_state_.reset_preview();
+	if (arm_ctrl_chord) {
+		file_picker_state_.arm_ctrl_chord();
+	} else {
+		file_picker_state_.cancel_ctrl_chord();
+	}
+	file_picker_state_.on_opened(model_.workspace_root);
+	UI_WAKE(&layout_state_, "app.urgent");
+}
+
+void Application::cycle_quick_file_picker() {
+	if (!file_picker_state_.matches.empty()) {
+		file_picker_state_.selected =
+		    (file_picker_state_.selected + 1) %
+		    static_cast<int>(file_picker_state_.matches.size());
+		file_picker_state_.update_preview_for_selection(model_.workspace_root);
+	}
+	UI_WAKE(&layout_state_, "app.urgent");
+}
+
+void Application::open_external_file_wizard(bool from_active_file_dir) {
 	if (external_file_wizard_state_.open || workspace_wizard_state_.open ||
 	    connection_wizard_state_.open) {
 		return;
 	}
-	external_file_wizard_state_.launch_root =
-	    workspace_.root.empty() ? connection_wizard_state_.browser.launch_root : workspace_.root;
+	std::string start = workspace_.root.empty() ? connection_wizard_state_.browser.launch_root
+	                                            : workspace_.root;
+	if (from_active_file_dir) {
+		const std::string& active =
+		    !workspace_.active_file.empty() ? workspace_.active_file : workspace_.buffer.path;
+		if (!active.empty()) {
+			std::error_code ec;
+			const auto parent = std::filesystem::path(active).parent_path();
+			if (!parent.empty()) {
+				const auto canonical = std::filesystem::weakly_canonical(parent, ec);
+				start = ec ? parent.string() : canonical.string();
+			}
+		}
+	}
+	external_file_wizard_state_.launch_root = start;
 	external_file_wizard_state_.reset();
 	external_file_wizard_state_.open = true;
 }
@@ -1971,16 +2015,7 @@ int Application::run() {
 		layout_state_.focus_sync_needed = true;
 		UI_WAKE(&layout_state_, "app");
 	};
-	layout_state_.helix_ide.open_quick_file = [this, &screen]() {
-		file_picker_state_.open = true;
-		file_picker_state_.query.clear();
-		file_picker_state_.selected = 0;
-		file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
-		file_picker_state_.mark_matches_dirty();
-		file_picker_state_.reset_preview();
-		file_picker_state_.arm_ctrl_chord();
-		UI_WAKE(&layout_state_, "app.urgent");
-	};
+	layout_state_.helix_ide.open_quick_file = [this]() { open_quick_file_picker(); };
 	layout_state_.helix_ide.open_symbol_picker = [this, &screen]() {
 		symbol_picker_state_.open = true;
 		symbol_picker_state_.query.clear();
@@ -2040,11 +2075,13 @@ int Application::run() {
 		                   "file_picker.preview");
 	});
 	file_picker_state_.set_repaint_notify([this] { UI_WAKE(&layout_state_, "file_picker.repaint"); });
+	file_picker_state_.set_file_opened_notify([this] { notify_file_tree_reveal(); });
 	symbol_picker_state_.set_search_notify([this] { UI_WAKE(&layout_state_, "app"); });
 	symbol_picker_state_.set_preview_notify([this] {
 		ui_wake_correlated(&layout_state_, ui_capture_correlation(&layout_state_),
 		                   "symbol_picker.preview");
 	});
+	symbol_picker_state_.set_file_opened_notify([this] { notify_file_tree_reveal(); });
 
 	auto with_symbol_picker =
 	    MakeSymbolPickerOverlay(layout, &workspace_, &symbol_picker_state_, &focus_state_,
@@ -2078,7 +2115,7 @@ int Application::run() {
 		    } else {
 			    workspace_.open_external_file(path);
 		    }
-		    UI_WAKE(&layout_state_, "app");
+		    notify_file_tree_reveal();
 	    });
 
 	auto with_shortcuts =
@@ -2217,30 +2254,18 @@ int Application::run() {
 			}
 
 			// Tide app shortcuts must run before any_modal_open() and editor interceptors.
-			if (event_is_ctrl_p(event)) {
+			if (event_is_quick_open(event)) {
 				if (event_is_kitty_key_release(event)) {
 					return false;
 				}
 				if (file_picker_state_.open) {
-					if (!file_picker_state_.matches.empty()) {
-						file_picker_state_.selected =
-						    (file_picker_state_.selected + 1) %
-						    static_cast<int>(file_picker_state_.matches.size());
+					cycle_quick_file_picker();
+					if (event_is_ctrl_p(event)) {
 						file_picker_state_.ctrl_chord_active = true;
-						file_picker_state_.update_preview_for_selection(model_.workspace_root);
 					}
-					UI_WAKE(&layout_state_, "app.urgent");
 					return true;
 				}
-				file_picker_state_.open = true;
-				file_picker_state_.query.clear();
-				file_picker_state_.selected = 0;
-				file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
-				file_picker_state_.mark_matches_dirty();
-				file_picker_state_.reset_preview();
-				file_picker_state_.arm_ctrl_chord();
-				file_picker_state_.on_opened(model_.workspace_root);
-				UI_WAKE(&layout_state_, "app.urgent");
+				open_quick_file_picker(event_is_ctrl_p(event));
 				return true;
 			}
 			if (event_is_ctrl_o(event)) {
@@ -2267,11 +2292,14 @@ int Application::run() {
 				return true;
 			}
 
-			if (event_is_f1(event)) {
+			if (event_is_f1(event) || event_is_alt_e(event)) {
+				if (event_is_kitty_key_release(event)) {
+					return false;
+				}
 				if (external_file_wizard_state_.open) {
 					external_file_wizard_state_.open = false;
 				} else if (!any_modal_open()) {
-					open_external_file_wizard();
+					open_external_file_wizard(event_is_alt_e(event));
 				}
 				UI_WAKE(&layout_state_, "app");
 				return true;

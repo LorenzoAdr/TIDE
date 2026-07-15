@@ -86,6 +86,19 @@ void OpenFileConfirmState::show_binary_warning(const std::string& absolute_path,
   has_position = false;
 }
 
+void OpenFileConfirmState::show_too_large_warning(const std::string& absolute_path,
+                                                  const std::string& name,
+                                                  std::uintmax_t size) {
+  mode = OpenFileConfirmMode::TooLarge;
+  selected = kYes;
+  path = absolute_path;
+  display_name = name;
+  size_bytes = size;
+  line = 0;
+  col = 0;
+  has_position = false;
+}
+
 void OpenFileConfirmState::request_large_confirm(const std::string& absolute_path,
                                                  std::uintmax_t size) {
   mode = OpenFileConfirmMode::LargeFile;
@@ -130,11 +143,19 @@ Component MakeOpenFileConfirmOverlay(
           if (state->yes_box.Contain(m.x, m.y)) {
             state->selected = kYes;
             trigger_press(layout_state, press_id::kOpenFileYes);
+            if (state->mode == OpenFileConfirmMode::BinaryWarning ||
+                state->mode == OpenFileConfirmMode::TooLarge) {
+              state->close();
+              return true;
+            }
+            complete_open(workspace, on_opened, state);
+            state->close();
             return true;
           }
           if (state->mode == OpenFileConfirmMode::LargeFile && state->no_box.Contain(m.x, m.y)) {
             state->selected = kNo;
             trigger_press(layout_state, press_id::kOpenFileNo);
+            state->close();
             return true;
           }
         }
@@ -144,8 +165,9 @@ Component MakeOpenFileConfirmOverlay(
           return true;
         }
 
-        if (state->mode == OpenFileConfirmMode::BinaryWarning) {
-          if (event == Event::Return) {
+        if (state->mode == OpenFileConfirmMode::BinaryWarning ||
+            state->mode == OpenFileConfirmMode::TooLarge) {
+          if (event == Event::Return || event == Event::Escape) {
             trigger_press(layout_state, press_id::kOpenFileYes);
             state->close();
             return true;
@@ -205,6 +227,19 @@ Component MakeOpenFileConfirmOverlay(
                   text(i18n::tr("modal.open_file.binary.message")) | color(theme::Header()),
                   text(i18n::tr_fmt("common.highlight.wrap", {state->display_name})) |
                       color(theme::Muted()),
+                  separator(),
+                  hbox({render_choice(i18n::tr("common.ok"), state->selected == kYes, yes_hovered,
+                                      yes_pressed, &state->yes_box)}),
+                  text(i18n::tr("modal.open_file.binary.footer")) | color(theme::Muted()),
+              }));
+        } else if (state->mode == OpenFileConfirmMode::TooLarge) {
+          const std::string size_label = format_file_size(state->size_bytes);
+          dialog = ModalWindow(
+              text(i18n::tr("modal.open_file.too_large.title")) | color(theme::Accent()),
+              vbox({
+                  text(i18n::tr_fmt("modal.open_file.too_large.message",
+                                    {state->display_name, size_label})) |
+                      color(theme::Header()),
                   separator(),
                   hbox({render_choice(i18n::tr("common.ok"), state->selected == kYes, yes_hovered,
                                       yes_pressed, &state->yes_box)}),

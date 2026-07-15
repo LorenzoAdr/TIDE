@@ -86,7 +86,8 @@ CATALOG: list[tuple[str, str, str]] = [
     ("shortcuts.section.performance", "Rendimiento", "Performance"),
     ("shortcuts.section.git", "Git", "Git"),
     # shortcuts — General
-    ("shortcuts.general.open_external", "Abrir archivo externo (explorador de archivos)", "Open external file (file browser)"),
+    ("shortcuts.general.open_external", "Abrir archivo externo (explorador desde raíz)", "Open external file (browser from root)"),
+    ("shortcuts.general.open_external_here", "Abrir explorador de archivos desde la carpeta actual", "Open file browser from current folder"),
     ("shortcuts.general.keyboard_shortcuts", "Atajos de teclado (este diálogo)", "Keyboard shortcuts (this dialog)"),
     ("shortcuts.general.debug_wizard", "Asistente de depuración / detener sesión", "Debug wizard / stop session"),
     ("shortcuts.general.change_workspace", "Cambiar directorio de trabajo", "Change working directory"),
@@ -97,7 +98,7 @@ CATALOG: list[tuple[str, str, str]] = [
     ("shortcuts.general.problems_panel", "Mostrar / ocultar panel de problemas (clangd)", "Show / hide problems panel (clangd)"),
     ("shortcuts.general.binary_symbols", "Panel de símbolos de binario (nm)", "Binary symbols panel (nm)"),
     ("shortcuts.general.settings", "Configuración (modo normal)", "Settings (normal mode)"),
-    ("shortcuts.general.quick_open", "Abrir archivo rápido", "Quick open file"),
+    ("shortcuts.general.quick_open", "Abrir archivo rápido (Ctrl+P / Alt+P)", "Quick open file (Ctrl+P / Alt+P)"),
     ("shortcuts.general.go_to_symbol", "Ir a símbolo", "Go to symbol"),
     ("shortcuts.general.toggle_bottom_panel", "Mostrar / ocultar panel inferior", "Show / hide bottom panel"),
     ("shortcuts.general.quit", "Salir (confirmación)", "Quit (confirmation)"),

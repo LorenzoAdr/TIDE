@@ -42,6 +42,7 @@ struct SymbolPickerState {
   void mark_matches_dirty();
   void set_search_notify(std::function<void()> notify);
   void set_preview_notify(std::function<void()> notify);
+  void set_file_opened_notify(std::function<void()> notify);
   void notify_search_tick();
   void update_preview_for_selection(const std::string& workspace_root);
   void reset_preview();
@@ -50,6 +51,7 @@ struct SymbolPickerState {
 
  private:
   std::function<void()> search_notify_;
+  std::function<void()> file_opened_notify_;
 };
 
 ftxui::Component MakeSymbolPickerOverlay(

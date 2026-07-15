@@ -340,6 +340,10 @@ void FilePickerState::set_repaint_notify(std::function<void()> notify) {
   repaint_notify = std::move(notify);
 }
 
+void FilePickerState::set_file_opened_notify(std::function<void()> notify) {
+  file_opened_notify = std::move(notify);
+}
+
 void FilePickerState::update_preview_for_selection(const std::string& workspace_root) {
   if (!open) {
     return;
@@ -411,6 +415,9 @@ void FilePickerState::open_file(DebugModel* model, WorkspaceModel* workspace,
   mark_matches_dirty();
   refresh_matches(workspace);
   on_closed();
+  if (file_opened_notify) {
+    file_opened_notify();
+  }
 }
 
 Component MakeFilePickerOverlay(Component main, DebugModel* model,
@@ -457,7 +464,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
           state->open_file(model, workspace, focus, state->selected);
           return true;
         }
-        if (event == Event::ArrowDown) {
+        if (event == Event::ArrowDown || event_is_plain_tab(event)) {
           state->cancel_ctrl_chord();
           if (!state->matches.empty()) {
             state->selected = std::min(state->selected + 1,
@@ -474,11 +481,16 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
           }
           return true;
         }
-        if (event_is_ctrl_p(event)) {
+        if (event_is_ctrl_p(event) || event_is_alt_p(event)) {
+          if (event_is_kitty_key_release(event)) {
+            return false;
+          }
           if (!state->matches.empty()) {
             state->selected =
                 (state->selected + 1) % static_cast<int>(state->matches.size());
-            state->ctrl_chord_active = true;
+            if (event_is_ctrl_p(event)) {
+              state->ctrl_chord_active = true;
+            }
             state->update_preview_for_selection(model->workspace_root);
           }
           return true;

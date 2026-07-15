@@ -499,6 +499,28 @@ bool event_is_ctrl_p(const ftxui::Event& event) {
          input == "\x1B[27;5;80~";
 }
 
+bool event_is_alt_p(const ftxui::Event& event) {
+  return event == ftxui::Event::AltP || alt_letter(event, 'p', 'P') ||
+         event == ftxui::Event::Special("\x1Bp") ||
+         event == ftxui::Event::Special("\x1B[112;3u") ||
+         event == ftxui::Event::Special("\x1B[80;3u") ||
+         event == ftxui::Event::Special("\x1B[27;3;112~") ||
+         event == ftxui::Event::Special("\x1B[27;3;80~");
+}
+
+bool event_is_quick_open(const ftxui::Event& event) {
+  return event_is_ctrl_p(event) || event_is_alt_p(event);
+}
+
+bool event_is_alt_e(const ftxui::Event& event) {
+  return event == ftxui::Event::AltE || alt_letter(event, 'e', 'E') ||
+         event == ftxui::Event::Special("\x1B" "e") ||
+         event == ftxui::Event::Special("\x1B[101;3u") ||
+         event == ftxui::Event::Special("\x1B[69;3u") ||
+         event == ftxui::Event::Special("\x1B[27;3;101~") ||
+         event == ftxui::Event::Special("\x1B[27;3;69~");
+}
+
 bool event_is_ctrl_o(const ftxui::Event& event) {
   if (event == ftxui::Event::CtrlO) {
     return true;
@@ -719,7 +741,7 @@ bool event_has_ctrl_modifier(const ftxui::Event& event) {
 }
 
 bool event_is_tide_global_shortcut(const ftxui::Event& event) {
-  return event_is_ctrl_p(event) || event == ftxui::Event::CtrlT ||
+  return event_is_quick_open(event) || event == ftxui::Event::CtrlT ||
          event_is_ctrl_o(event) || event == ftxui::Event::CtrlQ ||
          event == ftxui::Event::CtrlA || event == ftxui::Event::CtrlE ||
          event == ftxui::Event::CtrlB;
@@ -729,7 +751,7 @@ bool event_is_tide_app_shortcut(const ftxui::Event& event) {
   if (event_is_tide_global_shortcut(event)) {
     return true;
   }
-  if (event_is_f1(event) || event_is_open_shortcuts_modal(event)) {
+  if (event_is_f1(event) || event_is_alt_e(event) || event_is_open_shortcuts_modal(event)) {
     return true;
   }
   if (event_is_open_search_panel(event) || event_is_open_outline_panel(event) ||

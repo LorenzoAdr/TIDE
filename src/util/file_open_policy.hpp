@@ -5,7 +5,7 @@
 
 namespace tgdb {
 
-enum class FileOpenKind { Allowed, Binary, Large };
+enum class FileOpenKind { Allowed, Binary, Large, TooLarge };
 
 struct FileOpenAssessment {
   FileOpenKind kind = FileOpenKind::Allowed;
@@ -13,7 +13,10 @@ struct FileOpenAssessment {
 };
 
 struct FileOpenPolicy {
+  // Soft warn: user can confirm after a modal.
   static constexpr std::uintmax_t kLargeFileBytes = 1024 * 1024;
+  // Hard reject: opening larger files can OOM the process (silent SIGKILL).
+  static constexpr std::uintmax_t kMaxOpenFileBytes = 16ULL * 1024 * 1024;
 };
 
 FileOpenAssessment assess_file_open(const std::string& absolute_path);

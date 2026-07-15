@@ -379,25 +379,26 @@ struct FileTreePanelState {
 
 bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState* layout_state,
                                      const Mouse& m, int total, int visible) {
-  if (state == nullptr || !state->scrollbar_layout.scrollable) {
+  if (state == nullptr) {
     return false;
   }
 
   const int max_scroll = max_scroll_offset(total, visible);
   const bool in_bar = state->scrollbar_box.Contain(m.x, m.y);
+  const bool scrollable = state->scrollbar_layout.scrollable;
 
   if (m.motion == Mouse::Moved) {
     if (layout_state != nullptr && hover_effects_enabled()) {
       const std::string_view before = layout_state->clickable.hovered_id();
       if (in_bar || state->scrollbar_dragging) {
-        layout_state->clickable.set_hover(press_id::kEditorScrollbar);
+        layout_state->clickable.set_hover(press_id::kExplorerScrollbar);
       } else {
         layout_state->clickable.clear_hover_if(
-            [](std::string_view id) { return id == press_id::kEditorScrollbar; });
+            [](std::string_view id) { return id == press_id::kExplorerScrollbar; });
       }
       apply_hover_repaint(layout_state, before);
     }
-    if (state->scrollbar_dragging) {
+    if (state->scrollbar_dragging && scrollable) {
       const int local_y = m.y - state->scrollbar_box.y_min;
       const int thumb_top = local_y - state->scrollbar_drag_offset;
       state->list_scroll =
@@ -405,7 +406,7 @@ bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState*
                                max_scroll));
       return true;
     }
-    return in_bar;
+    return false;
   }
 
   if (state->scrollbar_dragging) {
@@ -413,7 +414,7 @@ bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState*
       state->scrollbar_dragging = false;
       return true;
     }
-    if (m.button == Mouse::Left && m.motion == Mouse::Moved) {
+    if (m.button == Mouse::Left && m.motion == Mouse::Moved && scrollable) {
       const int local_y = m.y - state->scrollbar_box.y_min;
       const int thumb_top = local_y - state->scrollbar_drag_offset;
       state->list_scroll =
@@ -436,8 +437,12 @@ bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState*
     return true;
   }
 
+  if (!scrollable) {
+    return false;
+  }
+
   if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
-    trigger_press(layout_state, press_id::kEditorScrollbar);
+    trigger_press(layout_state, press_id::kExplorerScrollbar);
     const int local_y = m.y - state->scrollbar_box.y_min;
     if (scrollbar_thumb_hit(state->scrollbar_layout, state->scrollbar_box, m.x, m.y)) {
       state->scrollbar_dragging = true;
@@ -576,7 +581,8 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
     }
     if (m.motion == Mouse::Pressed &&
         (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) &&
-        state->content_box.Contain(m.x, m.y)) {
+        (state->content_box.Contain(m.x, m.y) || state->panel_box.Contain(m.x, m.y) ||
+         state->scrollbar_box.Contain(m.x, m.y))) {
       if (m.button == Mouse::WheelUp) {
         state->list_scroll = std::max(0, state->list_scroll - 3);
       } else {

@@ -740,9 +740,9 @@ bool box_hit_left_sep(const Box& box, int x, int y) {
   if (box.IsEmpty()) {
     return false;
   }
-  // Padding solo hacia el panel izquierdo; no invadir la scrollbar del panel derecho.
-  constexpr int kPadLeft = 1;
-  return x >= box.x_min - kPadLeft && x <= box.x_max && y >= box.y_min && y <= box.y_max;
+  // Sin padding hacia la izquierda: el scrollbar del explorador ocupa la última
+  // columna del panel y un pad de 1 se la comía entera.
+  return x >= box.x_min && x <= box.x_max && y >= box.y_min && y <= box.y_max;
 }
 
 bool box_hit_right_sep(const Box& box, int x, int y) {
@@ -875,9 +875,14 @@ bool handle_split_mouse(LayoutState* state, MainLayoutState* layout_state, Event
       state->split_drag_kind = 0;
       return true;
     }
-    if (mouse.motion == Mouse::Moved) {
+    if (mouse.motion == Mouse::Moved && mouse.button == Mouse::Left) {
       apply_split_drag(state, mouse.x, mouse.y, screen_w, screen_h);
       return true;
+    }
+    // No tragar rueda ni otros botones: el explorador/editor deben seguir scrolleando.
+    if (mouse.button == Mouse::WheelUp || mouse.button == Mouse::WheelDown ||
+        mouse.button == Mouse::WheelLeft || mouse.button == Mouse::WheelRight) {
+      return false;
     }
     return true;
   }
