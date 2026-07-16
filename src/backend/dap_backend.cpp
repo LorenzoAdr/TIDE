@@ -8,6 +8,8 @@
 #include <utility>
 
 #include "dap/gdb_protocol.hpp"
+#include "dap/debug_adapter_process.hpp"
+#include "dap/debug_adapter_spec.hpp"
 #include "dap/protocol.h"
 #include "dap/session.h"
 #include "i18n/tr.hpp"
@@ -133,15 +135,15 @@ void DapBackend::stop() {
     worker_.join();
   }
 
-  if (gdb_) {
-    gdb_->stop(true);
+  if (adapter_) {
+    adapter_->stop(true);
   }
   {
     std::lock_guard<std::mutex> lock(session_mutex_);
     session_.reset();
   }
 
-  gdb_.reset();
+  adapter_.reset();
 }
 
 void DapBackend::submit(const UiCommand& command) {
@@ -307,9 +309,17 @@ void DapBackend::setup_session() {
   });
 }
 
+bool DapBackend::adapter_is_gdb() const {
+  return adapter_ != nullptr && adapter_->kind() == DebugAdapterKind::kGdb;
+}
+
+void DapBackend::set_preferred_adapter(DebugAdapterKind kind) {
+  preferred_adapter_ = kind;
+}
+
 bool DapBackend::initialize_session() {
   dap::InitializeRequest request;
-  request.adapterID = "gdb";
+  request.adapterID = adapter_ ? adapter_->adapter_id() : std::string(kDapAdapterGdb);
   request.linesStartAt1 = true;
   request.columnsStartAt1 = true;
 
@@ -948,6 +958,10 @@ void DapBackend::handle_command(const UiCommand& command) {
   if (command.kind == UiCommandKind::kAddHardwareWatch ||
       command.kind == UiCommandKind::kRemoveHardwareWatch ||
       command.kind == UiCommandKind::kSetHardwareWatchEnabled) {
+    if (!adapter_is_gdb()) {
+      push_error(i18n::tr("debug.dap.hardware_watch_gdb_only"));
+      return;
+    }
     std::lock_guard<std::mutex> lock(session_mutex_);
     if (!session_) {
       return;
@@ -996,8 +1010,10 @@ void DapBackend::handle_command(const UiCommand& command) {
     dap::GdbLaunchRequest launch;
     launch.program = command.launch.program;
     launch.cwd = command.launch.cwd;
-    launch.stopAtBeginningOfMainSubprogram =
-        dap::boolean(command.launch.stop_at_main);
+    if (adapter_is_gdb()) {
+      launch.stopAtBeginningOfMainSubprogram =
+          dap::boolean(command.launch.stop_at_main);
+    }
     if (!command.launch.args.empty()) {
       launch.args = command.launch.args;
     }
@@ -1006,7 +1022,7 @@ void DapBackend::handle_command(const UiCommand& command) {
     if (!session_) {
       return;
     }
-    if (!configure_packet_monitor_env_locked(command.launch)) {
+    if (adapter_is_gdb() && !configure_packet_monitor_env_locked(command.launch)) {
       return;
     }
     auto launch_future = session_->send(launch);
@@ -1313,15 +1329,19 @@ void DapBackend::handle_command(const UiCommand& command) {
 }
 
 void DapBackend::worker_main() {
-  gdb_ = std::make_unique<GdbProcess>();
-  if (!gdb_->start()) {
-    push_error(i18n::tr("debug.dap.gdb_start_failed"));
+  adapter_ = create_debug_adapter_process(preferred_adapter_);
+  if (!adapter_ || !adapter_->start()) {
+    if (preferred_adapter_ == DebugAdapterKind::kDebugpy) {
+      push_error(i18n::tr("debug.dap.debugpy_start_failed"));
+    } else {
+      push_error(i18n::tr("debug.dap.gdb_start_failed"));
+    }
     running_ = false;
     return;
   }
 
   setup_session();
-  session_->bind(gdb_->reader(), gdb_->writer(), [&] {
+  session_->bind(adapter_->reader(), adapter_->writer(), [&] {
     DebugEvent event;
     event.kind = DebugEventKind::kTerminated;
     event.text = i18n::tr("debug.dap.connection_closed");
@@ -1329,7 +1349,7 @@ void DapBackend::worker_main() {
   });
 
   if (!initialize_session()) {
-    gdb_->stop();
+    adapter_->stop();
     running_ = false;
     return;
   }
@@ -1345,17 +1365,17 @@ void DapBackend::worker_main() {
     handle_command(*command);
   }
 
-  if (session_ && gdb_ && gdb_->running() && inferior_attached_) {
+  if (session_ && adapter_ && adapter_->running() && inferior_attached_) {
     dap::DisconnectRequest disconnect;
     disconnect.terminateDebuggee = inferior_launched_;
     session_->send(disconnect).get();
     inferior_attached_ = false;
   }
-  if (gdb_) {
-    gdb_->stop();
+  if (adapter_) {
+    adapter_->stop();
   }
   session_.reset();
-  gdb_.reset();
+  adapter_.reset();
   running_.store(false);
 }
 

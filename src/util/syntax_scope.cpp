@@ -9,41 +9,47 @@ using namespace ftxui;
 namespace {
 
 SyntaxScope SyntaxScopeForTreeSitterCaptureImpl(const std::string& capture) {
-  if (capture == "comment") {
+  // Dotted captures (e.g. function.method, constant.builtin) map by prefix.
+  std::string base = capture;
+  const auto dot = base.find('.');
+  if (dot != std::string::npos) {
+    base = base.substr(0, dot);
+  }
+  if (base == "comment") {
     return SyntaxScope::kComment;
   }
-  if (capture == "string") {
+  if (base == "string" || base == "escape") {
     return SyntaxScope::kString;
   }
-  if (capture == "number") {
+  if (base == "number") {
     return SyntaxScope::kNumber;
   }
-  if (capture == "keyword") {
+  if (base == "keyword" || base == "operator") {
     return SyntaxScope::kKeyword;
   }
-  if (capture == "macro") {
+  if (base == "macro") {
     return SyntaxScope::kMacro;
   }
-  if (capture == "namespace") {
+  if (base == "namespace") {
     return SyntaxScope::kNamespace;
   }
-  if (capture == "type") {
+  if (base == "type" || base == "constructor") {
     return SyntaxScope::kType;
   }
-  if (capture == "function") {
+  if (base == "function") {
     return SyntaxScope::kFunction;
   }
-  if (capture == "parameter") {
+  if (base == "parameter") {
     return SyntaxScope::kParameter;
   }
-  if (capture == "property") {
+  if (base == "property") {
     return SyntaxScope::kProperty;
   }
   // `nullptr` / `this`-like builtins read as keywords in both highlighters.
-  if (capture == "constant" || capture == "variable.builtin") {
+  if (base == "constant" || capture == "variable.builtin" || capture == "constant.builtin") {
     return SyntaxScope::kKeyword;
   }
-  if (capture == "variable") {
+  if (base == "variable") {
     return SyntaxScope::kVariable;
   }
   return SyntaxScope::kDefault;

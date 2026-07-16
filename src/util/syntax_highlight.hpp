@@ -60,5 +60,7 @@ ftxui::Element HighlightCodeLine(const std::string& line, int line_index,
                                  const SyntaxHighlightContext* ctx = nullptr);
 ftxui::Element HighlightCodeLineLite(const std::string& line, int cursor_col = -1,
                                      ftxui::Decorator cursor_style = {});
+ftxui::Element HighlightCodeLineLite(const std::string& line, int cursor_col,
+                                     ftxui::Decorator cursor_style, const std::string& file_path);
 
 }  // namespace tgdb

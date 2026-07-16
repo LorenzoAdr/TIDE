@@ -82,6 +82,52 @@ void baz() {}
   assert(found_foo);
 }
 
+void test_parse_python_symbols() {
+  const std::string source = R"py(
+class Foo:
+    def bar(self):
+        pass
+
+def baz():
+    def nested():
+        pass
+)py";
+  const auto symbols = wait_symbols("test.py", source);
+  assert(!symbols.empty());
+  bool found_foo = false;
+  bool found_bar = false;
+  bool found_baz = false;
+  bool found_nested = false;
+  int bar_depth = -1;
+  int nested_depth = -1;
+  for (const SymbolInfo& sym : symbols) {
+    if (sym.name.find("Foo") != std::string::npos) {
+      found_foo = true;
+      assert(sym.kind == SymbolKind::kClass);
+    }
+    if (sym.name.find("bar") != std::string::npos) {
+      found_bar = true;
+      bar_depth = sym.depth;
+      assert(sym.kind == SymbolKind::kMethod);
+    }
+    if (sym.name.find("baz") != std::string::npos) {
+      found_baz = true;
+      assert(sym.kind == SymbolKind::kFunction);
+    }
+    if (sym.name.find("nested") != std::string::npos) {
+      found_nested = true;
+      nested_depth = sym.depth;
+      assert(sym.kind == SymbolKind::kFunction);
+    }
+  }
+  assert(found_foo);
+  assert(found_bar);
+  assert(found_baz);
+  assert(found_nested);
+  assert(bar_depth == 1);
+  assert(nested_depth == 1);
+}
+
 void test_simple_pair() {
   const EditorBuffer buffer =
       prepare_buffer("brackets_simple.cpp", {"int main() {", "  return 0;", "}"});
@@ -861,6 +907,7 @@ void test_normalize_editor_source_trailing_newline() {
 
 int main() {
   tgdb::test_parse_symbols();
+  tgdb::test_parse_python_symbols();
   tgdb::test_simple_pair();
   tgdb::test_nested();
   tgdb::test_ignores_string();

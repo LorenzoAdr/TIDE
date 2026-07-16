@@ -539,6 +539,19 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
     return;
   }
 
+  // Avisa a la UI: el esqueleto ya no aplica y el explorador debe sincronizar el
+  // snapshot completo (rg + carpetas). Sin esto el panel no se entera del cambio.
+  {
+    std::function<void()> notify;
+    {
+      std::lock_guard<std::mutex> lock(changes_mutex_);
+      notify = change_notify_;
+    }
+    if (notify) {
+      notify();
+    }
+  }
+
 #if defined(__linux__)
   inotify_fd_ = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
   if (inotify_fd_ < 0) {

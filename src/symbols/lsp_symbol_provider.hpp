@@ -10,6 +10,7 @@
 #include <unordered_set>
 
 #include "lsp/lsp_client.hpp"
+#include "lsp/language_server_spec.hpp"
 #include "parser/tree_sitter_service.hpp"
 #include "symbols/tree_sitter_symbol_provider.hpp"
 #include "symbols/symbol_provider.hpp"
@@ -76,6 +77,7 @@ class LspSymbolProvider : public ISymbolProvider {
   std::vector<CodeActionItem> code_actions_for_diagnostic(const CodeActionParams& params) override;
 
   bool supports_call_hierarchy() const override;
+  bool supports_call_hierarchy(const std::string& path) const override;
   std::vector<CallHierarchyItem> prepare_call_hierarchy(const CallHierarchyParams& params) override;
   std::vector<CallHierarchyItem> incoming_calls(const CallHierarchyItem& item) override;
   std::vector<CallHierarchyItem> outgoing_calls(const CallHierarchyItem& item) override;
@@ -124,8 +126,11 @@ class LspSymbolProvider : public ISymbolProvider {
   std::string buffer_text_for_path(const std::string& path) const;
   void refresh_diagnostics_cache_locked() const;
   void start_lsp_async(const std::string& compile_commands_dir);
+  void ensure_python_lsp_async();
   void finish_lsp_start_locked(bool ok);
+  void finish_python_lsp_start_locked(bool ok);
   void join_startup_thread();
+  void join_python_startup_thread();
   void stop_lsp();
   void stop_lsp_locked();
   void stop_lsp_locked_finalize();
@@ -149,10 +154,14 @@ class LspSymbolProvider : public ISymbolProvider {
   void open_companion_sources_for_clangd_locked(const std::string& header_path);
   void clear_shadow_companion_locked(const std::string& companion_path);
   bool buffer_open_locked(const std::string& path) const;
+  LspClient* client_for_path(const std::string& path);
+  const LspClient* client_for_path(const std::string& path) const;
+  bool any_lsp_ready() const;
   static int64_t steady_now_ms();
 
   mutable std::mutex mutex_;
-  LspClient client_;
+  LspClient client_;  // clangd (C/C++)
+  std::unique_ptr<LspClient> python_client_;  // basedpyright (lazy)
   TreeSitterSymbolProvider fallback_;
   bool lsp_enabled_ = true;
   bool use_gcc_query_driver_ = true;
@@ -170,7 +179,9 @@ class LspSymbolProvider : public ISymbolProvider {
   ThreadSafeQueue<AsyncResult> async_results_;
   std::thread async_worker_;
   std::thread lsp_startup_thread_;
+  std::thread python_lsp_startup_thread_;
   std::atomic<bool> lsp_starting_{false};
+  std::atomic<bool> python_lsp_starting_{false};
   std::atomic<bool> async_stop_{false};
   mutable std::mutex inflight_mutex_;
   std::unordered_set<std::string> inflight_symbols_;
@@ -198,6 +209,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool async_drain_invalidates_view_ = true;
   std::function<void(LspAsyncJobKind)> async_job_ready_callback_;
   std::mutex async_job_ready_callback_mutex_;
+  std::function<void(const std::string& path)> diagnostics_notify_callback_;
   std::function<void()> did_change_debounce_callback_;
   std::mutex did_change_debounce_callback_mutex_;
   std::thread did_change_timer_;

@@ -40,13 +40,14 @@ bool should_skip_dir_name(const std::string& name, const IndexFilterOptions& opt
   }
   return name == "build" || name == "cmake-build-debug" ||
          name == "cmake-build-release" || name == "node_modules" ||
-         name == "_deps" || name == ".cache" || name == "dist" || name == "out";
+         name == "_deps" || name == ".cache" || name == "dist" || name == "out" ||
+         name == ".venv" || name == "venv" || name == "__pycache__";
 }
 
 bool is_indexed_source_path(const std::string& path) {
   const auto ext = fs::path(path).extension().string();
   return ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".h" ||
-         ext == ".hpp" || ext == ".c";
+         ext == ".hpp" || ext == ".c" || ext == ".py" || ext == ".pyi" || ext == ".pyw";
 }
 
 bool should_list_workspace_path(const std::string& relative_path,

@@ -24,7 +24,9 @@
 #include "ui/press_ids.hpp"
 #include "ui/clickable.hpp"
 #include "ui/text_input_style.hpp"
+#include "ui/ui_wake.hpp"
 #include "i18n/tr.hpp"
+#include "util/ui_panel_render_cache.hpp"
 
 namespace tgdb {
 
@@ -33,6 +35,21 @@ using namespace ftxui;
 namespace {
 
 constexpr int kTabCount = 4;
+
+void invalidate_watches_panel(MainLayoutState* layout_state) {
+  if (layout_state == nullptr) {
+    return;
+  }
+  layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+  UI_WAKE(layout_state, "wake");
+}
+
+InputOption MakeWatchesBlinkInput(StringRef content, StringRef placeholder,
+                                  MainLayoutState* layout_state) {
+  InputOption opt = MakeBlinkInputOption(std::move(content), std::move(placeholder));
+  opt.on_change = [layout_state] { invalidate_watches_panel(layout_state); };
+  return opt;
+}
 
 struct FlatVariable {
   std::string expression;
@@ -121,6 +138,7 @@ void cancel_watch_inject(WatchesPanelState* state, MainLayoutState* layout_state
       layout_state->text_input_focus == TextInputFocus::WatchInject) {
     layout_state->text_input_focus = TextInputFocus::None;
   }
+  invalidate_watches_panel(layout_state);
 }
 
 void start_watch_inject(WatchesPanelState* state, DebugModel* model,
@@ -140,6 +158,7 @@ void start_watch_inject(WatchesPanelState* state, DebugModel* model,
   if (layout_state) {
     layout_state->text_input_focus = TextInputFocus::WatchInject;
   }
+  invalidate_watches_panel(layout_state);
 }
 
 bool is_double_click(int row, int* last_row, int64_t* last_ms) {
@@ -180,7 +199,7 @@ void submit_watch_inject(WatchesPanelState* state, DebugModel* model,
 }
 
 void submit_watch(const std::string& expression, DebugModel* model,
-                  CommandCallback on_command) {
+                  CommandCallback on_command, MainLayoutState* layout_state = nullptr) {
   if (expression.empty() || !on_command) {
     return;
   }
@@ -190,10 +209,12 @@ void submit_watch(const std::string& expression, DebugModel* model,
   command.expression = expression;
   assign_watch_frame(&command, model);
   on_command(command);
+  invalidate_watches_panel(layout_state);
 }
 
 void submit_hardware_watch(const std::string& expression, DebugModel* model,
-                           CommandCallback on_command) {
+                           CommandCallback on_command,
+                           MainLayoutState* layout_state = nullptr) {
   if (expression.empty() || !on_command || model == nullptr) {
     return;
   }
@@ -203,6 +224,7 @@ void submit_hardware_watch(const std::string& expression, DebugModel* model,
   command.expression = expression;
   command.hardware_watch_index = static_cast<int>(model->hardware_watches.size()) - 1;
   on_command(command);
+  invalidate_watches_panel(layout_state);
 }
 
 void sync_breakpoints_file(DebugModel* model, const std::string& file,
@@ -334,14 +356,15 @@ void toggle_expand(DebugModel* model, WatchesPanelState* state, int index,
 }
 
 void add_flat_as_watch(WatchesPanelState* state, DebugModel* model,
-                       CommandCallback on_command) {
+                       CommandCallback on_command,
+                       MainLayoutState* layout_state = nullptr) {
   if (state->flat_variables.empty()) {
     return;
   }
   const int index = std::max(
       0, std::min(state->flat_selected,
                   static_cast<int>(state->flat_variables.size()) - 1));
-  submit_watch(state->flat_variables[index].expression, model, on_command);
+  submit_watch(state->flat_variables[index].expression, model, on_command, layout_state);
 }
 
 bool switch_tab(WatchesPanelState* state, int tab, MainLayoutState* layout_state) {
@@ -359,6 +382,9 @@ bool switch_tab(WatchesPanelState* state, int tab, MainLayoutState* layout_state
   }
   if (tab != 0) {
     cancel_watch_inject(state, layout_state);
+  }
+  if (layout_state != nullptr) {
+    layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
   }
   return true;
 }
@@ -502,7 +528,8 @@ void remove_hardware_watch_at(DebugModel* model, int index, CommandCallback on_c
 }
 
 void toggle_breakpoint_enabled(WatchesPanelState* state, DebugModel* model,
-                               CommandCallback on_command) {
+                               CommandCallback on_command,
+                               MainLayoutState* layout_state = nullptr) {
   if (state->breakpoint_rows.empty()) {
     return;
   }
@@ -514,15 +541,19 @@ void toggle_breakpoint_enabled(WatchesPanelState* state, DebugModel* model,
     const bool enabled = model->is_hardware_watch_enabled(row.hardware_index);
     model->set_hardware_watch_enabled(row.hardware_index, !enabled);
     sync_hardware_watch_enabled(model, row.hardware_index, on_command);
-    return;
+  } else {
+    const bool enabled = model->is_breakpoint_enabled(row.file, row.line);
+    model->set_breakpoint_enabled(row.file, row.line, !enabled);
+    sync_breakpoints_file(model, row.file, on_command);
   }
-  const bool enabled = model->is_breakpoint_enabled(row.file, row.line);
-  model->set_breakpoint_enabled(row.file, row.line, !enabled);
-  sync_breakpoints_file(model, row.file, on_command);
+  if (layout_state != nullptr) {
+    layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+  }
 }
 
 void remove_selected_breakpoint(WatchesPanelState* state, DebugModel* model,
-                                CommandCallback on_command) {
+                                CommandCallback on_command,
+                                MainLayoutState* layout_state = nullptr) {
   if (state->breakpoint_rows.empty()) {
     return;
   }
@@ -533,15 +564,19 @@ void remove_selected_breakpoint(WatchesPanelState* state, DebugModel* model,
   if (row.kind == BreakpointRow::Kind::kHardware) {
     remove_hardware_watch_at(model, row.hardware_index, on_command);
     rebuild_breakpoint_rows(model, state);
-    return;
+  } else {
+    model->remove_breakpoint(row.file, row.line);
+    sync_breakpoints_file(model, row.file, on_command);
+    rebuild_breakpoint_rows(model, state);
   }
-  model->remove_breakpoint(row.file, row.line);
-  sync_breakpoints_file(model, row.file, on_command);
-  rebuild_breakpoint_rows(model, state);
+  if (layout_state != nullptr) {
+    layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+  }
 }
 
 void clear_all_breakpoints(WatchesPanelState* state, DebugModel* model,
-                           CommandCallback on_command) {
+                           CommandCallback on_command,
+                           MainLayoutState* layout_state = nullptr) {
   if (model->breakpoints_by_file.empty() && model->hardware_watches.empty()) {
     return;
   }
@@ -562,6 +597,9 @@ void clear_all_breakpoints(WatchesPanelState* state, DebugModel* model,
   }
   state->bp_selected = 0;
   rebuild_breakpoint_rows(model, state);
+  if (layout_state != nullptr) {
+    layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+  }
 }
 
 Element make_clear_breakpoints_button(DebugModel* model, WatchesPanelState* state,
@@ -584,11 +622,12 @@ bool handle_clear_breakpoints_mouse(WatchesPanelState* state, DebugModel* model,
     return false;
   }
   trigger_press(layout_state, press_id::kWatchesClearBreakpoints);
-  clear_all_breakpoints(state, model, on_command);
+  clear_all_breakpoints(state, model, on_command, layout_state);
   return true;
 }
 
-void remove_selected_watch(WatchesPanelState* state, DebugModel* model) {
+void remove_selected_watch(WatchesPanelState* state, DebugModel* model,
+                           MainLayoutState* layout_state = nullptr) {
   if (model->watches.empty()) {
     return;
   }
@@ -600,6 +639,7 @@ void remove_selected_watch(WatchesPanelState* state, DebugModel* model) {
     state->watch_selected =
         std::max(0, static_cast<int>(model->watches.size()) - 1);
   }
+  invalidate_watches_panel(layout_state);
 }
 
 Elements render_breakpoint_hw_footer(WatchesPanelState* state, MainLayoutState* layout_state,
@@ -636,6 +676,7 @@ bool handle_breakpoint_hw_input(WatchesPanelState* state, DebugModel* model,
         layout_state->text_input_focus = TextInputFocus::BreakpointHw;
       }
       bp_expr_input->TakeFocus();
+      invalidate_watches_panel(layout_state);
       return false;
     }
     return false;
@@ -645,8 +686,9 @@ bool handle_breakpoint_hw_input(WatchesPanelState* state, DebugModel* model,
     if (event == Event::Return) {
       const std::string expr = state->bp_expr_input;
       if (!expr.empty() && hardware_watch_available(model)) {
-        submit_hardware_watch(expr, model, on_command);
+        submit_hardware_watch(expr, model, on_command, layout_state);
         state->bp_expr_input.clear();
+        invalidate_watches_panel(layout_state);
       }
       return true;
     }
@@ -659,6 +701,7 @@ bool handle_breakpoint_hw_input(WatchesPanelState* state, DebugModel* model,
       layout_state->text_input_focus = TextInputFocus::BreakpointHw;
     }
     bp_expr_input->TakeFocus();
+    invalidate_watches_panel(layout_state);
     return true;
   }
 
@@ -687,14 +730,19 @@ Elements render_breakpoint_list(DebugModel* model, WatchesPanelState* state) {
     body.push_back(line);
     ++index;
   }
-  if (state->breakpoint_rows.empty()) {
-    body.push_back(text(i18n::tr("panel.debug.no_breakpoints")) | color(theme::Muted()));
-    body.push_back(text(i18n::tr("panel.debug.breakpoint_hint")) | color(theme::Muted()));
-  } else {
-    body.push_back(separator());
-    body.push_back(text(i18n::tr("panel.debug.breakpoint_toggle_hint")) | color(theme::Muted()));
-  }
   return body;
+}
+
+Elements render_breakpoint_hints(WatchesPanelState* state) {
+  Elements hints;
+  if (state->breakpoint_rows.empty()) {
+    hints.push_back(text(i18n::tr("panel.debug.no_breakpoints")) | color(theme::Muted()));
+    hints.push_back(text(i18n::tr("panel.debug.breakpoint_hint")) | color(theme::Muted()));
+  } else {
+    hints.push_back(separator());
+    hints.push_back(text(i18n::tr("panel.debug.breakpoint_toggle_hint")) | color(theme::Muted()));
+  }
+  return hints;
 }
 
 bool handle_breakpoints_tab_keys(WatchesPanelState* state, DebugModel* model,
@@ -706,20 +754,26 @@ bool handle_breakpoints_tab_keys(WatchesPanelState* state, DebugModel* model,
     state->bp_selected = std::min(
         state->bp_selected + 1,
         std::max(0, static_cast<int>(state->breakpoint_rows.size()) - 1));
+    if (layout_state != nullptr) {
+      layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+    }
     return true;
   }
   if (event == Event::ArrowUp || event == Event::Character('k')) {
     state->bp_selected = std::max(0, state->bp_selected - 1);
+    if (layout_state != nullptr) {
+      layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+    }
     return true;
   }
   if (event == Event::Return || event == Event::Character(' ')) {
     mark_watches_focus();
-    toggle_breakpoint_enabled(state, model, on_command);
+    toggle_breakpoint_enabled(state, model, on_command, layout_state);
     return true;
   }
   if (event == Event::Delete || event == Event::Character('x') ||
       event == Event::Character('d')) {
-    remove_selected_breakpoint(state, model, on_command);
+    remove_selected_breakpoint(state, model, on_command, layout_state);
     return true;
   }
   if (event.is_mouse() && event.mouse().button == Mouse::Left &&
@@ -732,12 +786,13 @@ bool handle_breakpoints_tab_keys(WatchesPanelState* state, DebugModel* model,
         const int rel_x = m.x - state->breakpoints_list_box.x_min;
         state->bp_selected = row;
         const auto& bp = state->breakpoint_rows[row];
-        if (rel_x <= 2) {
-          toggle_breakpoint_enabled(state, model, on_command);
+        // Mark column (● / ○) or first few cells: toggle enabled.
+        if (rel_x <= 3) {
+          toggle_breakpoint_enabled(state, model, on_command, layout_state);
           return true;
         }
         if (is_double_click(row, &state->last_bp_click_row, &state->last_bp_click_ms)) {
-          remove_selected_breakpoint(state, model, on_command);
+          remove_selected_breakpoint(state, model, on_command, layout_state);
           return true;
         }
         if (bp.kind == BreakpointRow::Kind::kLine) {
@@ -750,6 +805,7 @@ bool handle_breakpoints_tab_keys(WatchesPanelState* state, DebugModel* model,
         }
         if (layout_state != nullptr) {
           layout_state->focus_sync_needed = true;
+          layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
         }
         return true;
       }
@@ -773,10 +829,15 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
   state->placeholder_expression_click = i18n::tr("panel.debug.placeholder.expression_click");
   state->placeholder_bp_hw = i18n::tr("panel.debug.placeholder.hw_symbol");
   state->placeholder_bp_hw_click = i18n::tr("panel.debug.placeholder.hw_symbol_click");
-  auto expr_input = Input(MakeBlinkInputOption(&state->expr_input, &state->placeholder_expression));
+  auto expr_input =
+      Input(MakeWatchesBlinkInput(&state->expr_input, &state->placeholder_expression,
+                                  layout_state));
   auto bp_expr_input =
-      Input(MakeBlinkInputOption(&state->bp_expr_input, &state->placeholder_bp_hw));
-  auto inject_input = Input(MakeBlinkInputOption(&state->inject_input, &state->placeholder_new_value));
+      Input(MakeWatchesBlinkInput(&state->bp_expr_input, &state->placeholder_bp_hw,
+                                  layout_state));
+  auto inject_input =
+      Input(MakeWatchesBlinkInput(&state->inject_input, &state->placeholder_new_value,
+                                  layout_state));
   auto expr_maybe = Maybe(expr_input, [layout_state, state] {
     return watch_input_active(layout_state, state->selected_tab);
   });
@@ -788,7 +849,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
   });
   auto inputs = Container::Vertical({inject_maybe, expr_maybe, bp_expr_maybe});
 
-  auto select_frame = [model, on_command](int index) {
+  auto select_frame = [model, on_command, layout_state](int index) {
     if (!on_command || model->stack_frames.empty()) {
       return;
     }
@@ -798,6 +859,9 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     model->active_file = frame.file;
     model->active_line = frame.line;
     model->view_token++;
+    if (layout_state != nullptr) {
+      layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+    }
     UiCommand command;
     command.kind = UiCommandKind::kFetchVariables;
     command.frame_id = frame.id;
@@ -971,6 +1035,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
             layout_state->text_input_focus = TextInputFocus::WatchInject;
           }
           inject_input->TakeFocus();
+          invalidate_watches_panel(layout_state);
           return false;
         }
         if (state->watch_input_box.Contain(m.x, m.y)) {
@@ -980,6 +1045,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
             layout_state->text_input_focus = TextInputFocus::Watch;
           }
           expr_input->TakeFocus();
+          invalidate_watches_panel(layout_state);
           return false;
         }
         if (state->watches_box.Contain(m.x, m.y)) {
@@ -989,9 +1055,10 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
             if (is_double_click(row, &state->last_watch_click_row,
                                 &state->last_watch_click_ms)) {
               state->watch_selected = row;
-              remove_selected_watch(state.get(), model);
+              remove_selected_watch(state.get(), model, layout_state);
             } else {
               state->watch_selected = row;
+              invalidate_watches_panel(layout_state);
             }
             return true;
           }
@@ -1010,8 +1077,9 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         if (event == Event::Return) {
           const std::string expr = state->expr_input;
           if (!expr.empty()) {
-            submit_watch(expr, model, on_command);
+            submit_watch(expr, model, on_command, layout_state);
             state->expr_input.clear();
+            invalidate_watches_panel(layout_state);
           }
           return true;
         }
@@ -1040,6 +1108,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           layout_state->text_input_focus = TextInputFocus::Watch;
         }
         expr_input->TakeFocus();
+        invalidate_watches_panel(layout_state);
         return true;
       }
 
@@ -1050,6 +1119,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         state->watch_selected = std::min(
             state->watch_selected + 1,
             std::max(0, static_cast<int>(model->watches.size()) - 1));
+        invalidate_watches_panel(layout_state);
         return true;
       }
       if (event == Event::ArrowUp || event == Event::Character('k')) {
@@ -1057,6 +1127,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           return false;
         }
         state->watch_selected = std::max(0, state->watch_selected - 1);
+        invalidate_watches_panel(layout_state);
         return true;
       }
       if (event == Event::Delete || event == Event::Character('x') ||
@@ -1064,7 +1135,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         if (!owns_watches_navigation()) {
           return false;
         }
-        remove_selected_watch(state.get(), model);
+        remove_selected_watch(state.get(), model, layout_state);
         return true;
       }
       return false;
@@ -1109,12 +1180,12 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
       }
       if (event == Event::Character('w') || event == Event::Character('a')) {
         mark_watches_focus();
-        add_flat_as_watch(state.get(), model, on_command);
+        add_flat_as_watch(state.get(), model, on_command, layout_state);
         return true;
       }
       if (event == Event::Return) {
         mark_watches_focus();
-        add_flat_as_watch(state.get(), model, on_command);
+        add_flat_as_watch(state.get(), model, on_command, layout_state);
         return true;
       }
       if (event.is_mouse() && event.mouse().button == Mouse::Left &&
@@ -1203,6 +1274,9 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
       body.push_back(separator());
       Elements list = render_breakpoint_list(model, state.get());
       body.push_back(vbox(std::move(list)) | reflect(state->breakpoints_list_box));
+      Elements hints = render_breakpoint_hints(state.get());
+      body.insert(body.end(), std::make_move_iterator(hints.begin()),
+                  std::make_move_iterator(hints.end()));
       Elements footer = render_breakpoint_hw_footer(state.get(), layout_state, bp_expr_input, model);
       Element panel_list =
           vbox({vbox(std::move(body)) | flex | vscroll_indicator | reflect(state->breakpoints_box),
@@ -1340,6 +1414,9 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
       bp_body.push_back(separator());
       Elements bp_list = render_breakpoint_list(model, state.get());
       bp_body.push_back(vbox(std::move(bp_list)) | reflect(state->breakpoints_list_box));
+      Elements hints = render_breakpoint_hints(state.get());
+      bp_body.insert(bp_body.end(), std::make_move_iterator(hints.begin()),
+                     std::make_move_iterator(hints.end()));
       body = std::move(bp_body);
     }
 

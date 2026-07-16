@@ -3,6 +3,8 @@
 #include "indexer/index_rules.hpp"
 #include "lsp/lsp_sync.hpp"
 #include "lsp/lsp_uri.hpp"
+#include "lsp/language_server_spec.hpp"
+#include <memory>
 
 #include <chrono>
 #include <filesystem>
@@ -50,12 +52,145 @@ int64_t LspSymbolProvider::steady_now_ms() {
       .count();
 }
 
+
+LspClient* LspSymbolProvider::client_for_path(const std::string& path) {
+  const std::string lang = language_id_for_path(path);
+  if (language_id_is_python(lang)) {
+    if (python_client_ && python_client_->ready()) {
+      return python_client_.get();
+    }
+    return nullptr;
+  }
+  if (language_id_is_cpp_family(lang) || lang == "plaintext") {
+    return client_.ready() ? &client_ : nullptr;
+  }
+  return client_.ready() ? &client_ : nullptr;
+}
+
+const LspClient* LspSymbolProvider::client_for_path(const std::string& path) const {
+  return const_cast<LspSymbolProvider*>(this)->client_for_path(path);
+}
+
+bool LspSymbolProvider::any_lsp_ready() const {
+  if (client_.ready()) {
+    return true;
+  }
+  return python_client_ && python_client_->ready();
+}
+
+void LspSymbolProvider::join_python_startup_thread() {
+  if (python_lsp_startup_thread_.joinable()) {
+    python_lsp_startup_thread_.join();
+  }
+  python_lsp_starting_.store(false, std::memory_order_release);
+}
+
+void LspSymbolProvider::finish_python_lsp_start_locked(bool ok) {
+  if (shutting_down_.load(std::memory_order_acquire)) {
+    if (python_client_) {
+      python_client_->stop();
+      python_client_.reset();
+    }
+    return;
+  }
+  if (!ok) {
+    python_client_.reset();
+    monitor_log::event("lsp", "basedpyright start failed or binary missing");
+    return;
+  }
+  use_lsp_ = true;
+  lsp_ready_since_ms_ = steady_now_ms();
+  if (diagnostics_notify_callback_) {
+    python_client_->set_diagnostics_notify_callback(diagnostics_notify_callback_);
+  }
+  if (!async_worker_.joinable()) {
+    start_async_worker_locked();
+  }
+  for (const auto& entry : open_buffers_) {
+    if (!language_id_is_python(language_id_for_path(entry.first))) {
+      continue;
+    }
+    std::string text = entry.second;
+    if (text.empty()) {
+      text = buffer_text_for_path(entry.first);
+    }
+    if (!is_lsp_trackable_path(entry.first, text)) {
+      continue;
+    }
+    if (python_client_) {
+      python_client_->did_open(entry.first, text);
+    }
+    enqueue_semantic_tokens_locked(normalize_lsp_path(entry.first));
+  }
+  semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void LspSymbolProvider::ensure_python_lsp_async() {
+  if (shutting_down_.load(std::memory_order_acquire)) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!lsp_enabled_ || workspace_root_.empty()) {
+      return;
+    }
+    if (python_client_ && python_client_->ready()) {
+      return;
+    }
+    if (python_lsp_starting_.load(std::memory_order_acquire)) {
+      return;
+    }
+  }
+  join_python_startup_thread();
+  std::string root;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!lsp_enabled_ || workspace_root_.empty()) {
+      return;
+    }
+    if (python_client_ && python_client_->ready()) {
+      return;
+    }
+    root = workspace_root_;
+  }
+  python_lsp_starting_.store(true, std::memory_order_release);
+  python_lsp_startup_thread_ = std::thread([this, root] {
+    set_current_thread_name("lsp-py-start");
+    auto client = std::make_unique<LspClient>();
+    const auto spec = make_basedpyright_spec(root);
+    bool ok = false;
+    if (spec.has_value()) {
+      ok = client->start(*spec);
+    }
+    if (shutting_down_.load(std::memory_order_acquire)) {
+      if (ok) {
+        client->stop();
+      }
+      python_lsp_starting_.store(false, std::memory_order_release);
+      return;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    python_lsp_starting_.store(false, std::memory_order_release);
+    if (ok) {
+      python_client_ = std::move(client);
+    }
+    finish_python_lsp_start_locked(ok);
+  });
+}
+
 void LspSymbolProvider::refresh_diagnostics_cache_locked() const {
-  const uint64_t revision = client_.diagnostics_revision();
+  uint64_t revision = client_.diagnostics_revision();
+  if (python_client_) {
+    revision ^= (python_client_->diagnostics_revision() << 1);
+  }
   if (revision == cached_diag_revision_) {
     return;
   }
   cached_diagnostics_ = client_.all_diagnostics();
+  if (python_client_) {
+    auto py = python_client_->all_diagnostics();
+    cached_diagnostics_.insert(cached_diagnostics_.end(), py.begin(), py.end());
+  }
   cached_diag_revision_ = revision;
 }
 
@@ -82,7 +217,12 @@ void LspSymbolProvider::finish_lsp_start_locked(bool ok) {
     use_lsp_ = false;
     return;
   }
-  use_lsp_ = ok;
+  // Do not clear use_lsp_ if basedpyright is already serving Python files.
+  if (ok) {
+    use_lsp_ = true;
+  } else if (!(python_client_ && python_client_->ready())) {
+    use_lsp_ = false;
+  }
   if (!ok) {
     return;
   }
@@ -92,6 +232,9 @@ void LspSymbolProvider::finish_lsp_start_locked(bool ok) {
     client_.set_background_paused(true);
   }
   for (const auto& entry : open_buffers_) {
+    if (language_id_is_python(language_id_for_path(entry.first))) {
+      continue;
+    }
     std::string text = entry.second;
     if (text.empty()) {
       text = buffer_text_for_path(entry.first);
@@ -154,7 +297,8 @@ void LspSymbolProvider::start_lsp_async(const std::string& compile_commands_dir)
 }
 
 bool LspSymbolProvider::lsp_loading() const {
-  return lsp_starting_.load(std::memory_order_acquire);
+  return lsp_starting_.load(std::memory_order_acquire) ||
+         python_lsp_starting_.load(std::memory_order_acquire);
 }
 
 void LspSymbolProvider::stop_lsp_locked() {
@@ -186,10 +330,16 @@ void LspSymbolProvider::stop_lsp() {
     stop_lsp_locked();
   }
   client_.stop();
+  if (python_client_) {
+    python_client_->stop();
+  }
   join_thread_if_joinable(lsp_startup_thread_);
   lsp_starting_.store(false, std::memory_order_release);
+  join_thread_if_joinable(python_lsp_startup_thread_);
+  python_lsp_starting_.store(false, std::memory_order_release);
   join_thread_if_joinable(async_worker_);
   std::lock_guard<std::mutex> lock(mutex_);
+  python_client_.reset();
   stop_lsp_locked_finalize();
 }
 
@@ -282,10 +432,11 @@ void LspSymbolProvider::stop_async_worker_locked() {
 }
 
 void LspSymbolProvider::enqueue_document_symbols_locked(const std::string& path, bool force) {
-  if (path.empty() || !use_lsp_ || !client_.ready()) {
+  LspClient* lsp = client_for_path(path);
+  if (path.empty() || !use_lsp_ || lsp == nullptr) {
     return;
   }
-  if (!force && client_.has_cached_document_symbols(path)) {
+  if (!force && lsp->has_cached_document_symbols(path)) {
     return;
   }
   {
@@ -302,10 +453,11 @@ void LspSymbolProvider::enqueue_semantic_tokens_locked(const std::string& path, 
   if (kLspSemanticTokensStandby) {
     return;
   }
-  if (path.empty() || !use_lsp_ || !client_.ready()) {
+  LspClient* lsp = client_for_path(path);
+  if (path.empty() || !use_lsp_ || lsp == nullptr) {
     return;
   }
-  if (!force && client_.has_ready_semantic_tokens(path)) {
+  if (!force && lsp->has_ready_semantic_tokens(path)) {
     return;
   }
   {
@@ -338,18 +490,20 @@ void LspSymbolProvider::async_worker_main() {
     monitor_log::MonitorScope job_scope("lsp", job_name.str());
 
     bool run_job = false;
+    LspClient* job_lsp = nullptr;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      run_job = use_lsp_ && client_.ready();
+      job_lsp = job ? client_for_path(job->path) : nullptr;
+      run_job = use_lsp_ && job_lsp != nullptr;
     }
 
     if (async_stop_ || shutting_down_.load(std::memory_order_acquire)) {
       run_job = false;
     }
 
-    if (run_job) {
+    if (run_job && job_lsp != nullptr) {
       if (job->kind == AsyncJobKind::DocumentSymbols) {
-        client_.document_symbols(job->path);
+        job_lsp->document_symbols(job->path);
         async_results_.push({job->kind, job->path});
         notify_async_job_ready(job->kind);
       } else if (job->kind == AsyncJobKind::SemanticTokens) {
@@ -367,13 +521,13 @@ void LspSymbolProvider::async_worker_main() {
         if (is_lsp_trackable_path(job->path, text)) {
           flush_document_sync(job->path);
         }
-        const bool fetched = client_.ensure_semantic_tokens(job->path);
-        const bool ready = client_.has_ready_semantic_tokens(job->path);
-        const auto doc = client_.semantic_tokens_for_file(job->path);
+        const bool fetched = job_lsp->ensure_semantic_tokens(job->path);
+        const bool ready = job_lsp->has_ready_semantic_tokens(job->path);
+        const auto doc = job_lsp->semantic_tokens_for_file(job->path);
         if (fetched) {
           async_results_.push({job->kind, job->path});
           notify_async_job_ready(job->kind);
-        } else if (!client_.transport_running()) {
+        } else if (!job_lsp->transport_running()) {
           pending_transport_restart_.store(true, std::memory_order_release);
         }
       } else if (job->kind == AsyncJobKind::Completion) {
@@ -396,7 +550,7 @@ void LspSymbolProvider::async_worker_main() {
           if (!text.empty()) {
             flush_document_sync(params.path);
           }
-          items = client_.completions_at(key, text, params.line, params.character, false,
+          items = job_lsp->completions_at(key, text, params.line, params.character, false,
                                        &request_id);
           if (request_id <= 0) {
             stale = true;
@@ -422,7 +576,7 @@ void LspSymbolProvider::async_worker_main() {
           notify_async_job_ready(job->kind);
         }
       } else {
-        const HoverInfo info = client_.hover(job->hover_params.path, job->hover_params.text,
+        const HoverInfo info = job_lsp->hover(job->hover_params.path, job->hover_params.text,
                                            job->hover_params.line, job->hover_params.character);
         std::lock_guard<std::mutex> lock(mutex_);
         hover_cache_[job->hover_key] = info;
@@ -459,7 +613,8 @@ bool LspSymbolProvider::symbols_lsp_pending_locked(const std::string& path) cons
   if (path.empty() || !use_lsp_ || !is_indexed_source_path(path)) {
     return false;
   }
-  if (client_.has_cached_document_symbols(path)) {
+  if (const LspClient* lsp = client_for_path(path);
+      lsp != nullptr && lsp->has_cached_document_symbols(path)) {
     return false;
   }
   std::lock_guard<std::mutex> lock(inflight_mutex_);
@@ -559,7 +714,9 @@ void LspSymbolProvider::flush_pending_did_change_for_key(const std::string& key)
   if (!send) {
     return;
   }
-  client_.did_change(path_to_send, text_to_send);
+  if (LspClient* lsp = client_for_path(path_to_send)) {
+    lsp->did_change(path_to_send, text_to_send);
+  }
   {
     std::lock_guard<std::mutex> lock(mutex_);
     pending_content_refresh_[key] = steady_now_ms();
@@ -647,7 +804,7 @@ bool LspSymbolProvider::sync_document_for_completion(const std::string& path,
       return false;
     }
     open_buffers_[path] = text;
-    if (client_.document_has_text(path, text)) {
+    if (LspClient* lsp = client_for_path(path); lsp && lsp->document_has_text(path, text)) {
       return true;
     }
     const int64_t now = steady_now_ms();
@@ -662,7 +819,9 @@ bool LspSymbolProvider::sync_document_for_completion(const std::string& path,
   if (!send_change) {
     return false;
   }
-  client_.did_change(path, text);
+  if (LspClient* lsp = client_for_path(path)) {
+    lsp->did_change(path, text);
+  }
   {
     std::lock_guard<std::mutex> lock(mutex_);
     pending_semantic_refresh_[key] = steady_now_ms();
@@ -701,7 +860,9 @@ void LspSymbolProvider::flush_document_sync(const std::string& path) {
   if (!send) {
     return;
   }
-  client_.did_change(path_to_send, text_to_send);
+  if (LspClient* lsp = client_for_path(path_to_send)) {
+    lsp->did_change(path_to_send, text_to_send);
+  }
   {
     std::lock_guard<std::mutex> lock(mutex_);
     pending_content_refresh_[key] = steady_now_ms();
@@ -772,7 +933,11 @@ void LspSymbolProvider::set_async_job_ready_callback(std::function<void(LspAsync
 
 void LspSymbolProvider::set_diagnostics_notify_callback(
     std::function<void(const std::string& path)> callback) {
-  client_.set_diagnostics_notify_callback(std::move(callback));
+  diagnostics_notify_callback_ = callback;
+  client_.set_diagnostics_notify_callback(callback);
+  if (python_client_) {
+    python_client_->set_diagnostics_notify_callback(callback);
+  }
 }
 
 void LspSymbolProvider::set_did_change_debounce_callback(std::function<void()> callback) {
@@ -837,6 +1002,9 @@ void LspSymbolProvider::did_change_timer_main() {
 
 void LspSymbolProvider::set_lsp_request_counter(std::atomic<uint64_t>* counter) {
   client_.set_request_counter(counter);
+  if (python_client_) {
+    python_client_->set_request_counter(counter);
+  }
 }
 
 void LspSymbolProvider::set_ui_inhibited(const bool inhibited) {
@@ -853,9 +1021,15 @@ void LspSymbolProvider::set_ui_inhibited(const bool inhibited) {
   }
   if (should_pause) {
     client_.set_background_paused(true);
+    if (python_client_) {
+      python_client_->set_background_paused(true);
+    }
     return;
   }
   client_.set_background_paused(false);
+  if (python_client_) {
+    python_client_->set_background_paused(false);
+  }
   if (should_flush) {
     std::lock_guard<std::mutex> lock(mutex_);
     flush_all_pending_did_change_locked();
@@ -947,6 +1121,9 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
   if (path.empty()) {
     return;
   }
+  if (language_id_is_python(language_id_for_path(path))) {
+    ensure_python_lsp_async();
+  }
   bool notify_open = false;
   bool open_header = false;
   bool ensure_open = false;
@@ -962,8 +1139,11 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
           schedule_did_change_debounce_wake();
         }
       }
-      ensure_open = use_lsp_ && is_lsp_trackable_path(path, text) && client_.ready() &&
-                    !client_.document_is_open(path);
+      {
+        LspClient* lsp = client_for_path(path);
+        ensure_open = use_lsp_ && is_lsp_trackable_path(path, text) && lsp != nullptr &&
+                      !lsp->document_is_open(path);
+      }
       if (!ensure_open) {
         return;
       }
@@ -973,15 +1153,25 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
       if (!key.empty()) {
         pending_did_change_.erase(key);
       }
-      notify_open = use_lsp_ && is_lsp_trackable_path(path, text);
+      notify_open = lsp_enabled_ && is_lsp_trackable_path(path, text);
+      if (notify_open && language_id_is_python(language_id_for_path(path))) {
+        // Ensure basedpyright is up; did_open happens below or after start.
+      }
       open_header = notify_open && is_cpp_header_path(path);
       if (open_header) {
         notify_open = false;
       }
     }
   }
+  if (language_id_is_python(language_id_for_path(path))) {
+    ensure_python_lsp_async();
+  }
   if (ensure_open) {
-    client_.did_open(path, text);
+    if (LspClient* lsp = client_for_path(path)) {
+      lsp->did_open(path, text);
+    } else if (language_id_is_python(language_id_for_path(path))) {
+      // Server still starting; finish_python_lsp_start_locked will open buffers.
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     if (use_lsp_ && is_cpp_header_path(path)) {
       open_companion_sources_for_clangd_locked(path);
@@ -989,13 +1179,19 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
     return;
   }
   if (open_header) {
-    client_.did_open(path, text);
+    if (LspClient* lsp = client_for_path(path)) {
+      lsp->did_open(path, text);
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     if (use_lsp_) {
       open_companion_sources_for_clangd_locked(path);
     }
   } else if (notify_open) {
-    client_.did_open(path, text);
+    if (LspClient* lsp = client_for_path(path)) {
+      lsp->did_open(path, text);
+    } else if (language_id_is_python(language_id_for_path(path))) {
+      ensure_python_lsp_async();
+    }
   }
 }
 
@@ -1005,7 +1201,11 @@ void LspSymbolProvider::on_document_changed(const std::string& path, const std::
   }
   std::lock_guard<std::mutex> lock(mutex_);
   open_buffers_[path] = text;
-  if (!use_lsp_ || !is_lsp_trackable_path(path, text)) {
+  if (!lsp_enabled_ || !is_lsp_trackable_path(path, text)) {
+    return;
+  }
+  // Allow debounce even while the language server is still starting.
+  if (!any_lsp_ready() && !language_id_is_python(language_id_for_path(path))) {
     return;
   }
   const std::string key = normalize_lsp_path(path);
@@ -1035,7 +1235,9 @@ void LspSymbolProvider::on_document_saved(const std::string& path) {
     semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
   }
   flush_document_sync(path);
-  client_.invalidate_semantic_tokens_for_file(path);
+  if (LspClient* lsp = client_for_path(path)) {
+    lsp->invalidate_semantic_tokens_for_file(path);
+  }
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (use_lsp_) {
@@ -1051,7 +1253,9 @@ void LspSymbolProvider::on_document_closed(const std::string& path) {
     return;
   }
 
-  client_.did_close(path);
+  if (LspClient* lsp = client_for_path(path)) {
+    lsp->did_close(path);
+  }
 
   const std::string key = normalize_lsp_path(path);
   const auto shadow_it = shadow_companions_.find(key);
@@ -1091,12 +1295,17 @@ std::vector<SymbolInfo> LspSymbolProvider::workspace_symbols(const std::string& 
     return {};
   }
   (void)workspace_root;
-  return client_.workspace_symbols(workspace_root_, query);
+  std::vector<SymbolInfo> out = client_.workspace_symbols(workspace_root_, query);
+  if (python_client_ && python_client_->ready()) {
+    auto py = python_client_->workspace_symbols(workspace_root_, query);
+    out.insert(out.end(), py.begin(), py.end());
+  }
+  return out;
 }
 
 bool LspSymbolProvider::supports_semantic_completion() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return use_lsp_;
+  return lsp_enabled_ && any_lsp_ready();
 }
 
 std::vector<CompletionItem> LspSymbolProvider::completions_at(
@@ -1120,13 +1329,17 @@ std::vector<CompletionItem> LspSymbolProvider::completions_at(
   if (!active) {
     return fallback_.completions_at(params);
   }
-  const auto items = client_.completions_at(key, text, params.line, params.character);
+  LspClient* lsp = client_for_path(params.path);
+  if (lsp == nullptr) {
+    return fallback_.completions_at(params);
+  }
+  const auto items = lsp->completions_at(key, text, params.line, params.character);
   return items;
 }
 
 bool LspSymbolProvider::completion_uses_async_fetch() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return use_lsp_;
+  return lsp_enabled_ && any_lsp_ready();
 }
 
 void LspSymbolProvider::request_completion(const CompletionParams& params,
@@ -1143,7 +1356,7 @@ void LspSymbolProvider::request_completion(const CompletionParams& params,
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!use_lsp_) {
+    if (!lsp_enabled_ || client_for_path(params.path) == nullptr) {
       return;
     }
     if (!params.text.empty()) {
@@ -1156,6 +1369,9 @@ void LspSymbolProvider::request_completion(const CompletionParams& params,
   }
 
   client_.cancel_inflight_completion();
+  if (python_client_) {
+    python_client_->cancel_inflight_completion();
+  }
 
   {
     std::lock_guard<std::mutex> lock(inflight_mutex_);
@@ -1184,6 +1400,9 @@ void LspSymbolProvider::request_completion(const CompletionParams& params,
 
 void LspSymbolProvider::cancel_completion_fetch() {
   client_.cancel_inflight_completion();
+  if (python_client_) {
+    python_client_->cancel_inflight_completion();
+  }
   {
     std::lock_guard<std::mutex> lock(inflight_mutex_);
     inflight_completion_.clear();
@@ -1210,8 +1429,11 @@ std::optional<std::vector<CompletionItem>> LspSymbolProvider::poll_completion(
   if (it == completion_cache_.end()) {
     return std::nullopt;
   }
+  const int clangd_latest = client_.latest_completion_request_id();
+  const int py_latest =
+      python_client_ ? python_client_->latest_completion_request_id() : 0;
   if (it->second.request_id <= 0 ||
-      it->second.request_id != client_.latest_completion_request_id()) {
+      (it->second.request_id != clangd_latest && it->second.request_id != py_latest)) {
     completion_cache_.erase(it);
     return std::nullopt;
   }
@@ -1222,7 +1444,7 @@ std::optional<std::vector<CompletionItem>> LspSymbolProvider::poll_completion(
 
 bool LspSymbolProvider::supports_navigation() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return use_lsp_;
+  return lsp_enabled_ && any_lsp_ready();
 }
 
 SourceLocation LspSymbolProvider::goto_definition(const NavigationParams& params) {
@@ -1238,7 +1460,11 @@ SourceLocation LspSymbolProvider::goto_definition(const NavigationParams& params
   }
   const std::string text =
       params.text.empty() ? buffer_text_for_path(params.path) : params.text;
-  return client_.goto_definition(params.path, text, params.line, params.character);
+  LspClient* lsp = client_for_path(params.path);
+  if (lsp == nullptr) {
+    return {};
+  }
+  return lsp->goto_definition(params.path, text, params.line, params.character);
 }
 
 SourceLocation LspSymbolProvider::goto_declaration(const NavigationParams& params) {
@@ -1254,7 +1480,11 @@ SourceLocation LspSymbolProvider::goto_declaration(const NavigationParams& param
   }
   const std::string text =
       params.text.empty() ? buffer_text_for_path(params.path) : params.text;
-  return client_.goto_declaration(params.path, text, params.line, params.character);
+  LspClient* lsp = client_for_path(params.path);
+  if (lsp == nullptr) {
+    return {};
+  }
+  return lsp->goto_declaration(params.path, text, params.line, params.character);
 }
 
 SourceLocation LspSymbolProvider::goto_implementation(const NavigationParams& params) {
@@ -1270,7 +1500,11 @@ SourceLocation LspSymbolProvider::goto_implementation(const NavigationParams& pa
   }
   const std::string text =
       params.text.empty() ? buffer_text_for_path(params.path) : params.text;
-  return client_.goto_implementation(params.path, text, params.line, params.character);
+  LspClient* lsp = client_for_path(params.path);
+  if (lsp == nullptr) {
+    return {};
+  }
+  return lsp->goto_implementation(params.path, text, params.line, params.character);
 }
 
 bool LspSymbolProvider::supports_semantic_highlight() const {
@@ -1289,7 +1523,7 @@ bool LspSymbolProvider::ensure_semantic_tokens(const std::string& path) {
   if (!use_lsp_) {
     return false;
   }
-  if (client_.has_ready_semantic_tokens(path)) {
+  if (LspClient* lsp = client_for_path(path); lsp && lsp->has_ready_semantic_tokens(path)) {
     return true;
   }
   enqueue_semantic_tokens_locked(normalize_lsp_path(path));
@@ -1304,7 +1538,10 @@ SemanticTokenDocument LspSymbolProvider::semantic_tokens_for_file(const std::str
   if (!use_lsp_) {
     return {};
   }
-  return client_.semantic_tokens_for_file(path);
+  if (LspClient* lsp = client_for_path(path)) {
+    return lsp->semantic_tokens_for_file(path);
+  }
+  return {};
 }
 
 bool LspSymbolProvider::semantic_tokens_current_for_file(const std::string& path) {
@@ -1315,7 +1552,10 @@ bool LspSymbolProvider::semantic_tokens_current_for_file(const std::string& path
   if (!use_lsp_) {
     return true;
   }
-  return client_.has_ready_semantic_tokens(path);
+  if (const LspClient* lsp = client_for_path(path)) {
+    return lsp->has_ready_semantic_tokens(path);
+  }
+  return true;
 }
 
 void LspSymbolProvider::invalidate_semantic_tokens_for_file(const std::string& path) {
@@ -1327,7 +1567,9 @@ void LspSymbolProvider::invalidate_semantic_tokens_for_file(const std::string& p
   if (!use_lsp_) {
     return;
   }
-  client_.invalidate_semantic_tokens_for_file(path);
+  if (LspClient* lsp = client_for_path(path)) {
+    lsp->invalidate_semantic_tokens_for_file(path);
+  }
   semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
   {
     std::lock_guard<std::mutex> inflight_lock(inflight_mutex_);
@@ -1343,7 +1585,10 @@ uint64_t LspSymbolProvider::document_generation_for_file(const std::string& path
   if (!use_lsp_) {
     return 0;
   }
-  return client_.document_generation(path);
+  if (const LspClient* lsp = client_for_path(path)) {
+    return lsp->document_generation(path);
+  }
+  return 0;
 }
 
 bool LspSymbolProvider::supports_hover() const {
@@ -1352,7 +1597,7 @@ bool LspSymbolProvider::supports_hover() const {
 
 bool LspSymbolProvider::hover_uses_async_fetch() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return use_lsp_;
+  return lsp_enabled_ && any_lsp_ready();
 }
 
 void LspSymbolProvider::request_hover(const HoverParams& params, const std::string& cache_key) {
@@ -1422,7 +1667,11 @@ uint64_t LspSymbolProvider::diagnostics_revision() const {
   if (!use_lsp_) {
     return 0;
   }
-  return client_.diagnostics_revision();
+  uint64_t revision = client_.diagnostics_revision();
+  if (python_client_) {
+    revision ^= (python_client_->diagnostics_revision() << 1);
+  }
+  return revision;
 }
 
 bool LspSymbolProvider::document_sync_pending(const std::string& path) const {
@@ -1445,7 +1694,10 @@ bool LspSymbolProvider::diagnostics_display_ready(const std::string& path) const
   if (!use_lsp_) {
     return true;
   }
-  return client_.document_diagnostics_current(path);
+  if (const LspClient* lsp = client_for_path(path)) {
+    return lsp->document_diagnostics_current(path);
+  }
+  return true;
 }
 
 DocumentDiagnostics LspSymbolProvider::diagnostics_for_file(const std::string& path) {
@@ -1479,7 +1731,7 @@ std::vector<DocumentDiagnostics> LspSymbolProvider::workspace_diagnostics() {
 
 bool LspSymbolProvider::supports_formatting() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return use_lsp_ && client_.ready();
+  return use_lsp_ && any_lsp_ready();
 }
 
 std::optional<std::string> LspSymbolProvider::format_document(const FormatParams& params) {
@@ -1499,12 +1751,15 @@ std::optional<std::string> LspSymbolProvider::format_document(const FormatParams
 
   const std::string text =
       params.text.empty() ? buffer_text_for_path(key) : params.text;
-  return client_.format_document(key, text);
+  if (LspClient* lsp = client_for_path(params.path)) {
+    return lsp->format_document(key, text);
+  }
+  return std::nullopt;
 }
 
 bool LspSymbolProvider::supports_rename() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return use_lsp_ && client_.ready();
+  return use_lsp_ && any_lsp_ready();
 }
 
 std::vector<LspFileEdits> LspSymbolProvider::rename_symbol(const RenameParams& params) {
@@ -1525,12 +1780,15 @@ std::vector<LspFileEdits> LspSymbolProvider::rename_symbol(const RenameParams& p
 
   const std::string text =
       params.text.empty() ? buffer_text_for_path(key) : params.text;
-  return client_.rename_symbol(key, text, params.line, params.character, params.new_name);
+  if (LspClient* lsp = client_for_path(params.path)) {
+    return lsp->rename_symbol(key, text, params.line, params.character, params.new_name);
+  }
+  return {};
 }
 
 bool LspSymbolProvider::supports_code_actions() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return use_lsp_ && client_.ready();
+  return use_lsp_ && any_lsp_ready();
 }
 
 std::vector<CodeActionItem> LspSymbolProvider::code_actions_for_diagnostic(
@@ -1551,12 +1809,23 @@ std::vector<CodeActionItem> LspSymbolProvider::code_actions_for_diagnostic(
 
   const std::string text =
       params.text.empty() ? buffer_text_for_path(key) : params.text;
-  return client_.code_actions(params);
+  if (LspClient* lsp = client_for_path(params.path)) {
+    return lsp->code_actions(params);
+  }
+  return {};
 }
 
 bool LspSymbolProvider::supports_call_hierarchy() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return use_lsp_ && client_.ready();
+  return use_lsp_ && any_lsp_ready();
+}
+
+bool LspSymbolProvider::supports_call_hierarchy(const std::string& path) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_ || path.empty() || !is_lsp_trackable_path(path)) {
+    return false;
+  }
+  return client_for_path(path) != nullptr;
 }
 
 std::vector<CallHierarchyItem> LspSymbolProvider::prepare_call_hierarchy(
@@ -1577,25 +1846,34 @@ std::vector<CallHierarchyItem> LspSymbolProvider::prepare_call_hierarchy(
 
   const std::string text =
       params.text.empty() ? buffer_text_for_path(key) : params.text;
-  return client_.prepare_call_hierarchy(key, text, params.line, params.character);
+  if (LspClient* lsp = client_for_path(params.path)) {
+    return lsp->prepare_call_hierarchy(key, text, params.line, params.character);
+  }
+  return {};
 }
 
 std::vector<CallHierarchyItem> LspSymbolProvider::incoming_calls(
     const CallHierarchyItem& item) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!use_lsp_) {
+  if (!use_lsp_ || item.path.empty()) {
     return {};
   }
-  return client_.incoming_calls(item);
+  if (LspClient* lsp = client_for_path(item.path)) {
+    return lsp->incoming_calls(item);
+  }
+  return {};
 }
 
 std::vector<CallHierarchyItem> LspSymbolProvider::outgoing_calls(
     const CallHierarchyItem& item) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!use_lsp_) {
+  if (!use_lsp_ || item.path.empty()) {
     return {};
   }
-  return client_.outgoing_calls(item);
+  if (LspClient* lsp = client_for_path(item.path)) {
+    return lsp->outgoing_calls(item);
+  }
+  return {};
 }
 
 }  // namespace tgdb

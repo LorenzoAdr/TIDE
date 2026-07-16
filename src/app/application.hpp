@@ -108,6 +108,8 @@ class Application {
   void exit_debug_mode();
   bool connection_config_complete() const;
   void ensure_backend_started();
+  void register_backend_wake_callback();
+  void invalidate_debug_ui();
   bool handle_focus_shortcuts(const ftxui::Event& event);
   bool any_modal_open() const;
   void apply_app_settings();

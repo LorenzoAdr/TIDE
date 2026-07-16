@@ -11,6 +11,8 @@ BUNDLE_CLANGD_FORCE=0
 GDB_BUNDLE_KIND=none
 BUNDLE_GDB=0
 BUNDLE_GDB_FORCE=0
+PYTHON_BUNDLE_KIND=none
+BUNDLE_PYTHON_FORCE=0
 BUILD_GDB_CA=0
 STATIC_LIBSTDCXX=0
 INTERACTIVE=1
@@ -46,6 +48,11 @@ Opciones:
   --build-gdb-ca             Compilar gdb+CA si falta tarball (solo --bundle-gdb-ca)
   --force-bundled-gdb        Forzar gdb embebido en runtime (requiere bundle)
   --no-force-bundled-gdb     Permitir fallback a gdb en PATH
+  --bundle-python-lsp-min    Embeber basedpyright (opción A; Python del host)
+  --bundle-python-tools      Embeber CPython + basedpyright + debugpy (opción B)
+  --no-bundle-python         No embeber herramientas Python
+  --force-bundled-python     Forzar herramientas Python embebidas en runtime
+  --no-force-bundled-python  Permitir fallback a PATH / venv del host
   --static-libstdc++         Enlazar libstdc++/libgcc estáticamente (menos deps en runtime)
   -h, --help                 Mostrar esta ayuda
 
@@ -67,6 +74,20 @@ sync_gdb_bundle_flags() {
   else
     BUNDLE_GDB=0
     BUNDLE_GDB_FORCE=0
+  fi
+}
+
+sync_python_bundle_flags() {
+  case "${PYTHON_BUNDLE_KIND}" in
+    lsp_min|full)
+      ;;
+    *)
+      PYTHON_BUNDLE_KIND=none
+      BUNDLE_PYTHON_FORCE=0
+      ;;
+  esac
+  if [[ "${PYTHON_BUNDLE_KIND}" == "none" ]]; then
+    BUNDLE_PYTHON_FORCE=0
   fi
 }
 
@@ -149,6 +170,8 @@ load_bundle_config() {
   GDB_BUNDLE_KIND=none
   BUNDLE_GDB=0
   BUNDLE_GDB_FORCE=0
+  PYTHON_BUNDLE_KIND=none
+  BUNDLE_PYTHON_FORCE=0
   if [[ ! -f "${CONFIG_FILE}" ]]; then
     return
   fi
@@ -166,12 +189,18 @@ load_bundle_config() {
       BUNDLE_GDB=0) legacy_bundle_gdb=0 ;;
       BUNDLE_GDB_FORCE=1) BUNDLE_GDB_FORCE=1 ;;
       BUNDLE_GDB_FORCE=0) BUNDLE_GDB_FORCE=0 ;;
+      PYTHON_BUNDLE_KIND=lsp_min) PYTHON_BUNDLE_KIND=lsp_min ;;
+      PYTHON_BUNDLE_KIND=full) PYTHON_BUNDLE_KIND=full ;;
+      PYTHON_BUNDLE_KIND=none) PYTHON_BUNDLE_KIND=none ;;
+      BUNDLE_PYTHON_FORCE=1) BUNDLE_PYTHON_FORCE=1 ;;
+      BUNDLE_PYTHON_FORCE=0) BUNDLE_PYTHON_FORCE=0 ;;
     esac
   done < "${CONFIG_FILE}"
   if [[ "${GDB_BUNDLE_KIND}" == "none" && "${legacy_bundle_gdb}" == "1" ]]; then
     GDB_BUNDLE_KIND=static
   fi
   sync_gdb_bundle_flags
+  sync_python_bundle_flags
   # Migrar configs antiguas sin GDB_BUNDLE_KIND explícito.
   if [[ "${legacy_bundle_gdb}" == "1" ]] && ! grep -q '^GDB_BUNDLE_KIND=' "${CONFIG_FILE}" 2>/dev/null; then
     save_bundle_config
@@ -181,12 +210,15 @@ load_bundle_config() {
 
 save_bundle_config() {
   sync_gdb_bundle_flags
+  sync_python_bundle_flags
   cat > "${CONFIG_FILE}" <<EOF
 BUNDLE_CLANGD=${BUNDLE_CLANGD}
 BUNDLE_CLANGD_FORCE=${BUNDLE_CLANGD_FORCE}
 GDB_BUNDLE_KIND=${GDB_BUNDLE_KIND}
 BUNDLE_GDB=${BUNDLE_GDB}
 BUNDLE_GDB_FORCE=${BUNDLE_GDB_FORCE}
+PYTHON_BUNDLE_KIND=${PYTHON_BUNDLE_KIND}
+BUNDLE_PYTHON_FORCE=${BUNDLE_PYTHON_FORCE}
 EOF
 }
 
@@ -240,6 +272,28 @@ cmake_bundle_args() {
   else
     args+=(-DTGDB_BUNDLE_GDB=OFF -DTGDB_FORCE_BUNDLED_GDB=OFF)
   fi
+  case "${PYTHON_BUNDLE_KIND}" in
+    lsp_min)
+      args+=(-DTGDB_BUNDLE_PYTHON_LSP_MIN=ON -DTGDB_BUNDLE_PYTHON_TOOLS=OFF)
+      if [[ "${BUNDLE_PYTHON_FORCE}" == "1" ]]; then
+        args+=(-DTGDB_FORCE_BUNDLED_PYTHON_TOOLS=ON)
+      else
+        args+=(-DTGDB_FORCE_BUNDLED_PYTHON_TOOLS=OFF)
+      fi
+      ;;
+    full)
+      args+=(-DTGDB_BUNDLE_PYTHON_TOOLS=ON -DTGDB_BUNDLE_PYTHON_LSP_MIN=OFF)
+      if [[ "${BUNDLE_PYTHON_FORCE}" == "1" ]]; then
+        args+=(-DTGDB_FORCE_BUNDLED_PYTHON_TOOLS=ON)
+      else
+        args+=(-DTGDB_FORCE_BUNDLED_PYTHON_TOOLS=OFF)
+      fi
+      ;;
+    *)
+      args+=(-DTGDB_BUNDLE_PYTHON_LSP_MIN=OFF -DTGDB_BUNDLE_PYTHON_TOOLS=OFF \
+             -DTGDB_FORCE_BUNDLED_PYTHON_TOOLS=OFF)
+      ;;
+  esac
   printf '%s\n' "${args[@]}"
 }
 
@@ -334,6 +388,45 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE=0
       shift
       ;;
+    --bundle-python-lsp-min)
+      CLI_OVERRIDES_BUNDLE=1
+      PYTHON_BUNDLE_KIND=lsp_min
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --bundle-python-tools)
+      CLI_OVERRIDES_BUNDLE=1
+      PYTHON_BUNDLE_KIND=full
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-bundle-python)
+      CLI_OVERRIDES_BUNDLE=1
+      PYTHON_BUNDLE_KIND=none
+      BUNDLE_PYTHON_FORCE=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --force-bundled-python)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_PYTHON_FORCE=1
+      if [[ "${PYTHON_BUNDLE_KIND}" == "none" ]]; then
+        PYTHON_BUNDLE_KIND=lsp_min
+      fi
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-force-bundled-python)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_PYTHON_FORCE=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
     --static-libstdc++)
       STATIC_LIBSTDCXX=1
       shift
@@ -360,6 +453,8 @@ if [[ "${SKIP_WIZARD}" == "0" ]]; then
   cmake -S "${ROOT}" -B "${BUILD_DIR}" \
     -DTGDB_BUNDLE_CLANGD=OFF -DTGDB_FORCE_BUNDLED_CLANGD=OFF \
     -DTGDB_BUNDLE_GDB=OFF -DTGDB_FORCE_BUNDLED_GDB=OFF \
+    -DTGDB_BUNDLE_PYTHON_LSP_MIN=OFF -DTGDB_BUNDLE_PYTHON_TOOLS=OFF \
+    -DTGDB_FORCE_BUNDLED_PYTHON_TOOLS=OFF \
     ${CMAKE_EXTRA_ARGS[@]}
   log "compilando asistente de bundles..."
   cmake --build "${BUILD_DIR}" --target tgdb-bundle-wizard -j "${JOBS}"
@@ -372,6 +467,7 @@ else
 fi
 
 sync_gdb_bundle_flags
+sync_python_bundle_flags
 
 warn_gdb_dap
 ensure_gdb_ca_tarball
@@ -418,6 +514,17 @@ if [[ "${BUNDLE_GDB}" == "1" ]]; then
 else
   log "  gdb embebido: no"
 fi
+case "${PYTHON_BUNDLE_KIND}" in
+  lsp_min)
+    log "  python embebido: A / lsp_min (force=${BUNDLE_PYTHON_FORCE})"
+    ;;
+  full)
+    log "  python embebido: B / full (force=${BUNDLE_PYTHON_FORCE})"
+    ;;
+  *)
+    log "  python embebido: no"
+    ;;
+esac
 if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
   log "  libstdc++ estático: sí"
 fi

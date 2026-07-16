@@ -197,7 +197,7 @@ bool resolve_call_hierarchy_position(const std::shared_ptr<ISymbolProvider>& sym
     return true;
   }
 
-  // Clic sobre un identificador: clangd resuelve el símbolo en esa posición
+  // Clic sobre un identificador: el language server resuelve el símbolo en esa posición
   // (declaración o sitio de uso).
   if (!symbol_at_cursor.empty()) {
     return true;
@@ -503,10 +503,6 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
     workspace->status_message = i18n::tr("status.lsp_disabled");
     return false;
   }
-  if (symbols == nullptr || !symbols->supports_call_hierarchy()) {
-    workspace->status_message = i18n::tr("status.call_hierarchy.unavailable");
-    return false;
-  }
 
   workspace->ensure_buffer();
   CallHierarchyParams params;
@@ -514,6 +510,10 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
   params.text = buffer_document_text(workspace->buffer);
   if (params.path.empty()) {
     workspace->status_message = i18n::tr("status.no_active_file");
+    return false;
+  }
+  if (symbols == nullptr || !symbols->supports_call_hierarchy(params.path)) {
+    workspace->status_message = i18n::tr("status.call_hierarchy.unavailable");
     return false;
   }
 

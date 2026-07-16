@@ -47,6 +47,19 @@ extern const unsigned char _binary_rg_blob_zst_end[];
 }
 #endif
 
+#ifdef TGDB_HAS_BUNDLED_PYTHON_TOOLS
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG)
+#include <zstd.h>
+#endif
+#include "bundled_python_tools_manifest.hpp"
+
+extern "C" {
+extern const unsigned char _binary_python_tools_blob_zst_start[];
+extern const unsigned char _binary_python_tools_blob_zst_end[];
+}
+#endif
+
 namespace fs = std::filesystem;
 
 namespace tgdb {
@@ -56,6 +69,7 @@ namespace {
 std::optional<bool> g_runtime_force_bundled_clangd;
 std::optional<bool> g_runtime_force_bundled_gdb;
 std::optional<bool> g_runtime_force_bundled_rg;
+std::optional<bool> g_runtime_force_bundled_python_tools;
 
 std::string trim_ascii(std::string value) {
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
@@ -147,7 +161,8 @@ std::optional<std::string> gdb_from_env() {
   return std::string(raw);
 }
 
-#if defined(TGDB_HAS_BUNDLED_CLANGD) || defined(TGDB_HAS_BUNDLED_GDB) || defined(TGDB_HAS_BUNDLED_RG)
+#if defined(TGDB_HAS_BUNDLED_CLANGD) || defined(TGDB_HAS_BUNDLED_GDB) || \
+    defined(TGDB_HAS_BUNDLED_RG) || defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS)
 std::optional<std::vector<unsigned char>> decompress_zstd_blob(const unsigned char* start,
                                                                  const unsigned char* end) {
   const std::size_t compressed_size = static_cast<std::size_t>(end - start);
@@ -275,6 +290,18 @@ bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
     if (null_pos != std::string::npos) {
       name.resize(null_pos);
     }
+    // ustar long names: prefix (155) + "/" + name (100)
+    const bool is_ustar = std::memcmp(header + 257, "ustar", 5) == 0;
+    if (is_ustar) {
+      std::string prefix(header + 345, header + 345 + 155);
+      const auto prefix_null = prefix.find('\0');
+      if (prefix_null != std::string::npos) {
+        prefix.resize(prefix_null);
+      }
+      if (!prefix.empty()) {
+        name = prefix + "/" + name;
+      }
+    }
     if (name.empty()) {
       return false;
     }
@@ -287,9 +314,27 @@ bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
     }
 
     const fs::path target = output_dir / name;
-    if (typeflag == '5' || (typeflag == '\0' && file_size == 0 && name.back() == '/')) {
+    if (typeflag == '5' || (typeflag == '\0' && file_size == 0 && !name.empty() && name.back() == '/')) {
       std::error_code ec;
       fs::create_directories(target, ec);
+    } else if (typeflag == '2') {
+      // Symlink: linkname at offset 157 (100 bytes). Prefer packing without symlinks;
+      // still accept them so older/partial trees extract cleanly.
+      std::string linkname(header + 157, header + 157 + 100);
+      const auto link_null = linkname.find('\0');
+      if (link_null != std::string::npos) {
+        linkname.resize(link_null);
+      }
+      if (linkname.empty()) {
+        return false;
+      }
+      std::error_code ec;
+      fs::create_directories(target.parent_path(), ec);
+      fs::remove(target, ec);
+      fs::create_symlink(linkname, target, ec);
+      if (ec) {
+        return false;
+      }
     } else if (typeflag == '\0' || typeflag == '0') {
       std::error_code ec;
       fs::create_directories(target.parent_path(), ec);
@@ -306,7 +351,8 @@ bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
       fs::permissions(target, fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec,
                       perm_ec);
     } else {
-      return false;
+      // Skip unsupported types (hardlinks, devices, etc.) without failing the whole extract.
+      // Python trees packed with cp -aL should only contain files/dirs.
     }
 
     offset += padded_size;
@@ -485,6 +531,80 @@ std::optional<RgLocation> resolve_bundled_rg() {
 }
 #endif
 
+#ifdef TGDB_HAS_BUNDLED_PYTHON_TOOLS
+std::optional<fs::path> ensure_bundled_python_tools_root() {
+  const fs::path install_root =
+      fs::path(bundled_cache_root()) / ("python-tools-" TGDB_BUNDLED_PYTHON_TOOLS_VERSION);
+  const fs::path langserver = install_root / "bin" / "basedpyright-langserver";
+  const fs::path marker = install_root / ".installed";
+  const std::string expected_marker = std::string(TGDB_BUNDLED_PYTHON_TOOLS_BLOB_SHA256) + "\n";
+
+  if (is_executable_file(langserver.string()) && read_text_file(marker) == expected_marker) {
+    return install_root;
+  }
+
+  const auto tar_data = decompress_zstd_blob(_binary_python_tools_blob_zst_start,
+                                             _binary_python_tools_blob_zst_end);
+  if (!tar_data.has_value()) {
+    return std::nullopt;
+  }
+
+  const fs::path temp_root = install_root.string() + ".tmp";
+  std::error_code ec;
+  fs::remove_all(temp_root, ec);
+  fs::create_directories(temp_root, ec);
+
+  if (!extract_tar_to_directory(*tar_data, temp_root)) {
+    fs::remove_all(temp_root, ec);
+    return std::nullopt;
+  }
+
+  if (!is_executable_file((temp_root / "bin" / "basedpyright-langserver").string())) {
+    fs::remove_all(temp_root, ec);
+    return std::nullopt;
+  }
+
+  fs::remove_all(install_root, ec);
+  fs::rename(temp_root, install_root, ec);
+  if (ec) {
+    fs::remove_all(temp_root, ec);
+    return std::nullopt;
+  }
+
+  if (!write_text_file(marker, expected_marker)) {
+    return std::nullopt;
+  }
+
+  return install_root;
+}
+
+std::optional<BasedpyrightLocation> resolve_bundled_basedpyright() {
+  const auto root = ensure_bundled_python_tools_root();
+  if (!root.has_value()) {
+    return std::nullopt;
+  }
+  BasedpyrightLocation loc;
+  loc.binary_path = (*root / "bin" / "basedpyright-langserver").string();
+  loc.needs_stdio_flag = true;
+  loc.source = BasedpyrightLocation::Source::Bundled;
+  return loc;
+}
+
+#if TGDB_BUNDLED_PYTHON_TOOLS_KIND_FULL
+std::optional<DebugpyLocation> resolve_bundled_debugpy() {
+  const auto root = ensure_bundled_python_tools_root();
+  if (!root.has_value()) {
+    return std::nullopt;
+  }
+  const fs::path python = *root / "bin" / "python3";
+  if (!is_executable_file(python.string())) {
+    return std::nullopt;
+  }
+  return DebugpyLocation{python.string(), DebugpyLocation::Source::Bundled};
+}
+#endif
+#endif
+
 }  // namespace
 
 bool has_bundled_clangd() {
@@ -616,6 +736,169 @@ std::optional<RgLocation> resolve_rg() {
     }
   }
 
+  return std::nullopt;
+}
+
+bool has_bundled_python_tools() {
+#ifdef TGDB_HAS_BUNDLED_PYTHON_TOOLS
+  return true;
+#else
+  return false;
+#endif
+}
+
+void set_runtime_force_bundled_python_tools(bool value) {
+  g_runtime_force_bundled_python_tools = value;
+}
+
+bool should_force_bundled_python_tools() {
+  if (const auto env = parse_env_bool("TGDB_FORCE_BUNDLED_PYTHON_TOOLS"); env.has_value()) {
+    return *env;
+  }
+  if (g_runtime_force_bundled_python_tools.has_value()) {
+    return *g_runtime_force_bundled_python_tools;
+  }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_PYTHON_TOOLS
+  return true;
+#else
+  return false;
+#endif
+}
+
+namespace {
+
+std::optional<std::string> find_named_binary_on_path(const std::string& name) {
+  const char* path_env = std::getenv("PATH");
+  if (path_env == nullptr || path_env[0] == '\0' || name.empty()) {
+    return std::nullopt;
+  }
+  std::stringstream stream(path_env);
+  std::string dir;
+  while (std::getline(stream, dir, ':')) {
+    if (dir.empty()) {
+      continue;
+    }
+    const fs::path candidate = fs::path(dir) / name;
+    if (is_executable_file(candidate.string())) {
+      return candidate.string();
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> env_executable(const char* var_name) {
+  const char* raw = std::getenv(var_name);
+  if (raw == nullptr || raw[0] == '\0') {
+    return std::nullopt;
+  }
+  if (!is_executable_file(raw)) {
+    return std::nullopt;
+  }
+  return std::string(raw);
+}
+
+bool python_module_importable(const std::string& python_bin, const std::string& module) {
+  if (python_bin.empty() || module.empty()) {
+    return false;
+  }
+  const std::string cmd = "\"" + python_bin + "\" -c \"import " + module + "\" >/dev/null 2>&1";
+  return std::system(cmd.c_str()) == 0;
+}
+
+}  // namespace
+
+std::optional<BasedpyrightLocation> resolve_basedpyright() {
+  if (const auto env_path = env_executable("BASEDPYRIGHT_PATH"); env_path.has_value()) {
+    BasedpyrightLocation loc;
+    loc.binary_path = *env_path;
+    loc.needs_stdio_flag = true;
+    loc.source = BasedpyrightLocation::Source::Env;
+    return loc;
+  }
+  if (const auto env_path = env_executable("PYRIGHT_LANGSERVER_PATH"); env_path.has_value()) {
+    BasedpyrightLocation loc;
+    loc.binary_path = *env_path;
+    loc.needs_stdio_flag = true;
+    loc.source = BasedpyrightLocation::Source::Env;
+    return loc;
+  }
+
+#ifdef TGDB_HAS_BUNDLED_PYTHON_TOOLS
+  if (const auto bundled = resolve_bundled_basedpyright(); bundled.has_value()) {
+    return bundled;
+  }
+#endif
+
+  if (!should_force_bundled_python_tools()) {
+    // Prefer dedicated langserver binaries (not the typecheck CLI).
+    static const char* kCandidates[] = {"basedpyright-langserver", "pyright-langserver"};
+    for (const char* name : kCandidates) {
+      if (const auto path_bin = find_named_binary_on_path(name); path_bin.has_value()) {
+        BasedpyrightLocation loc;
+        loc.binary_path = *path_bin;
+        loc.needs_stdio_flag = true;
+        loc.source = BasedpyrightLocation::Source::SystemPath;
+        return loc;
+      }
+    }
+
+    // Fallback: python -m basedpyright.langserver / pyright.langserver
+    static const char* kPythons[] = {"python3", "python"};
+    for (const char* name : kPythons) {
+      if (const auto path_bin = find_named_binary_on_path(name); path_bin.has_value()) {
+        if (python_module_importable(*path_bin, "basedpyright")) {
+          BasedpyrightLocation loc;
+          loc.binary_path = *path_bin;
+          loc.needs_stdio_flag = true;
+          loc.source = BasedpyrightLocation::Source::SystemPath;
+          loc.use_python_module = true;
+          loc.python_module = "basedpyright.langserver";
+          return loc;
+        }
+        if (python_module_importable(*path_bin, "pyright")) {
+          BasedpyrightLocation loc;
+          loc.binary_path = *path_bin;
+          loc.needs_stdio_flag = true;
+          loc.source = BasedpyrightLocation::Source::SystemPath;
+          loc.use_python_module = true;
+          loc.python_module = "pyright.langserver";
+          return loc;
+        }
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<DebugpyLocation> resolve_debugpy() {
+  if (const auto env_path = env_executable("DEBUGPY_PYTHON"); env_path.has_value()) {
+    if (python_module_importable(*env_path, "debugpy")) {
+      return DebugpyLocation{*env_path, DebugpyLocation::Source::Env};
+    }
+  }
+  if (const auto env_path = env_executable("PYTHON"); env_path.has_value()) {
+    if (python_module_importable(*env_path, "debugpy")) {
+      return DebugpyLocation{*env_path, DebugpyLocation::Source::Env};
+    }
+  }
+
+#if defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && TGDB_BUNDLED_PYTHON_TOOLS_KIND_FULL
+  if (const auto bundled = resolve_bundled_debugpy(); bundled.has_value()) {
+    return bundled;
+  }
+  if (should_force_bundled_python_tools()) {
+    return std::nullopt;
+  }
+#endif
+
+  static const char* kPythons[] = {"python3", "python"};
+  for (const char* name : kPythons) {
+    if (const auto path_bin = find_named_binary_on_path(name); path_bin.has_value()) {
+      if (python_module_importable(*path_bin, "debugpy")) {
+        return DebugpyLocation{*path_bin, DebugpyLocation::Source::SystemPath};
+      }
+    }
+  }
   return std::nullopt;
 }
 

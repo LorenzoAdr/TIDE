@@ -957,9 +957,11 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     };
   }
 
-  auto file_tree = MakeCachedPanelRender(
-      layout_state, UiPanelId::FileTree,
-      MakeFileTreePanel(model, workspace, focus, indexer, on_command, layout_state, git_service));
+  // No cachear el explorador: el primer layout aún no tiene content_box y, si se
+  // congela un Element de 1 fila, la UI se queda en la primera carpeta (.cache).
+  // Reconstruir la lista (pocas filas en raíz) es barato frente al editor.
+  auto file_tree =
+      MakeFileTreePanel(model, workspace, focus, indexer, on_command, layout_state, git_service);
   auto editor_primary =
       MakeEditorPanel(workspace, focus, layout_state, symbols, indexer, symbol_indexer, git_service,
                       FocusRegion::Editor, model, on_command,
@@ -1135,6 +1137,14 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
           layout_state->panel_render_cache.mark_all_dirty();
           layout_state->panel_cache_terminal_w = tw;
           layout_state->panel_cache_terminal_h = th;
+        }
+      }
+      if (app_mode != nullptr) {
+        const int mode = static_cast<int>(*app_mode);
+        if (mode != layout_state->panel_cache_app_mode) {
+          layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+          layout_state->panel_render_cache.mark_dirty(UiPanelId::EditorCenter);
+          layout_state->panel_cache_app_mode = mode;
         }
       }
     }

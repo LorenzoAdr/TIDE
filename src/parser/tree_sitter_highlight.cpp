@@ -111,7 +111,134 @@ const char* kEmbeddedHighlightsQuery = R"scm(
 (parameter_declaration declarator: (_) @parameter)
 )scm";
 
-TSQuery* highlight_query() {
+const char* kEmbeddedPythonHighlightsQuery = R"scm(
+; Tree-sitter highlight query for Python (tree-sitter-python).
+; No #match? predicates — the C client does not evaluate them.
+
+(identifier) @variable
+
+(decorator) @function
+(decorator
+  (identifier) @function)
+
+(call
+  function: (attribute attribute: (identifier) @function.method))
+(call
+  function: (identifier) @function)
+
+(function_definition
+  name: (identifier) @function)
+
+(class_definition
+  name: (identifier) @type)
+
+(attribute attribute: (identifier) @property)
+(type (identifier) @type)
+
+[
+  (none)
+  (true)
+  (false)
+] @constant.builtin
+
+[
+  (integer)
+  (float)
+] @number
+
+(comment) @comment
+(string) @string
+(escape_sequence) @escape
+
+[
+  "as"
+  "assert"
+  "async"
+  "await"
+  "break"
+  "class"
+  "continue"
+  "def"
+  "del"
+  "elif"
+  "else"
+  "except"
+  "finally"
+  "for"
+  "from"
+  "global"
+  "if"
+  "import"
+  "lambda"
+  "nonlocal"
+  "pass"
+  "raise"
+  "return"
+  "try"
+  "while"
+  "with"
+  "yield"
+  "match"
+  "case"
+  "and"
+  "in"
+  "is"
+  "not"
+  "or"
+] @keyword
+
+[
+  "-"
+  "-="
+  "!="
+  "*"
+  "**"
+  "**="
+  "*="
+  "/"
+  "//"
+  "//="
+  "/="
+  "&"
+  "&="
+  "%"
+  "%="
+  "^"
+  "^="
+  "+"
+  "->"
+  "+="
+  "<"
+  "<<"
+  "<<="
+  "<="
+  "<>"
+  "="
+  ":="
+  "=="
+  ">"
+  ">="
+  ">>"
+  ">>="
+  "|"
+  "|="
+  "~"
+  "@="
+] @operator
+)scm";
+
+TSQuery* highlight_query_for_lang(TreeSitterLangKind lang) {
+  if (lang == TreeSitterLangKind::kPython) {
+    static TSQuery* py_query = nullptr;
+    static uint32_t py_error_offset = 0;
+    static TSQueryError py_error_type = TSQueryErrorNone;
+    if (py_query == nullptr) {
+      py_query = ts_query_new(tree_sitter_python_language(), kEmbeddedPythonHighlightsQuery,
+                             static_cast<uint32_t>(std::strlen(kEmbeddedPythonHighlightsQuery)),
+                             &py_error_offset, &py_error_type);
+    }
+    return py_query;
+  }
   static TSQuery* query = nullptr;
   static uint32_t error_offset = 0;
   static TSQueryError error_type = TSQueryErrorNone;
@@ -121,6 +248,10 @@ TSQuery* highlight_query() {
                          &error_type);
   }
   return query;
+}
+
+TSQuery* highlight_query() {
+  return highlight_query_for_lang(TreeSitterLangKind::kCpp);
 }
 
 std::size_t line_begin_offset(const std::string& source, int line_0) {
@@ -202,9 +333,10 @@ int count_source_lines(const std::string& source) {
 
 std::vector<LineHighlights> highlights_after_incremental_parse(
     TSTree* old_tree, TSTree* new_tree, TSNode new_root, const std::string& source,
-    const std::vector<LineHighlights>& previous, int layout_shift_from_row) {
+    const std::vector<LineHighlights>& previous, int layout_shift_from_row,
+    TreeSitterLangKind lang) {
   if (old_tree == nullptr || new_tree == nullptr || ts_node_is_null(new_root) || previous.empty()) {
-    return highlights_for_document(new_root, source);
+    return highlights_for_document(new_root, source, lang);
   }
 
   const int line_count = count_source_lines(source);
@@ -229,7 +361,7 @@ std::vector<LineHighlights> highlights_after_incremental_parse(
   std::vector<LineHighlights> fresh;
   if (layout_shifted) {
     // One query pass for the tail; per-line queries are O(lines * tree).
-    fresh = highlights_for_document(new_root, source);
+    fresh = highlights_for_document(new_root, source, lang);
   }
 
   for (int line = 0; line < line_count; ++line) {
@@ -240,17 +372,18 @@ std::vector<LineHighlights> highlights_after_incremental_parse(
     } else if (needs_layout_refresh) {
       out[static_cast<std::size_t>(line)] = fresh[static_cast<std::size_t>(line)];
     } else {
-      out[static_cast<std::size_t>(line)] = highlights_for_line(new_root, source, line);
+      out[static_cast<std::size_t>(line)] = highlights_for_line(new_root, source, line, lang);
     }
   }
   return out;
 }
 
-std::vector<LineHighlights> highlights_for_document(TSNode root, const std::string& source) {
+std::vector<LineHighlights> highlights_for_document(TSNode root, const std::string& source,
+                                                    TreeSitterLangKind lang) {
   const int line_count = count_source_lines(source);
   std::vector<LineHighlights> per_line(static_cast<std::size_t>(line_count));
 
-  TSQuery* query = highlight_query();
+  TSQuery* query = highlight_query_for_lang(lang);
   if (query == nullptr || ts_node_is_null(root)) {
     return per_line;
   }
@@ -301,9 +434,10 @@ std::vector<LineHighlights> highlights_for_document(TSNode root, const std::stri
   return per_line;
 }
 
-LineHighlights highlights_for_line(TSNode root, const std::string& source, int line_0) {
+LineHighlights highlights_for_line(TSNode root, const std::string& source, int line_0,
+                                   TreeSitterLangKind lang) {
   LineHighlights result;
-  TSQuery* query = highlight_query();
+  TSQuery* query = highlight_query_for_lang(lang);
   if (query == nullptr || ts_node_is_null(root)) {
     return result;
   }
@@ -392,10 +526,11 @@ Element HighlightTreeSitterLine(const std::string& line, int line_index,
 
 Element HighlightTreeSitterLine(const std::string& line, int line_index, const std::string& source,
                                 TSNode root, int cursor_col, Decorator cursor_style,
-                                int col_offset) {
+                                int col_offset, TreeSitterLangKind lang) {
   (void)source;
-  return HighlightTreeSitterLine(line, line_index, highlights_for_line(root, source, line_index),
-                                 cursor_col, cursor_style, col_offset);
+  return HighlightTreeSitterLine(line, line_index,
+                                 highlights_for_line(root, source, line_index, lang), cursor_col,
+                                 cursor_style, col_offset);
 }
 
 }  // namespace tgdb

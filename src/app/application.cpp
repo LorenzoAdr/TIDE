@@ -17,6 +17,7 @@
 #include "build/build_environment.hpp"
 #include "build/build_environment_service.hpp"
 #include "dap/gdb_launcher.hpp"
+#include "dap/debug_adapter_spec.hpp"
 #include "editor/editor_buffer_source.hpp"
 #include "editor/text_search.hpp"
 #include "editor/visual_highlight.hpp"
@@ -351,7 +352,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
 	monitor_log::set_enabled(app_settings_.monitor_enabled);
 	layout_state_.performance_sampler.set_file_dump_enabled(app_settings_.perf_dump_enabled);
-	debug_available_ = gdb_supports_dap();
+	debug_available_ = gdb_supports_dap() || debugpy_available();
 	workspace_.open_file_confirm = &open_file_confirm_state_;
 	secondary_workspace_.open_file_confirm = &open_file_confirm_state_;
 	const auto wire_ui_tasks = [this](WorkspaceModel *workspace) {
@@ -574,6 +575,7 @@ void Application::restart_workspace_indexing() {
 		open_hint = workspace_.buffer.path;
 	}
 	indexer_.start_scan(workspace_.root, options, workspace_.root, open_hint);
+	notify_file_tree_reveal();
 }
 
 void Application::refresh_workspace_explorer() {
@@ -1074,6 +1076,9 @@ void Application::set_workspace(const std::string &workspace_root,
 		open_hint = workspace_.active_file;
 	}
 	indexer_.start_scan(absolute, index_filter_options(), anchor, open_hint);
+	// El esqueleto ya está en el snapshot; invalidar el panel cacheado para que el
+	// primer pintado del explorador muestre las carpetas raíz.
+	notify_file_tree_reveal();
 	sync_symbol_workspace_indexer();
 	git_service_.open(absolute);
 }
@@ -1190,9 +1195,32 @@ bool Application::connection_config_complete() const {
 	return true;
 }
 
+void Application::register_backend_wake_callback() {
+	if (!backend_) {
+		return;
+	}
+	backend_->set_wake_callback([this](DebugEventKind kind) {
+		const int64_t now_ms = steady_now_ms();
+		layout_state_.activity_gate.on_debug_critical(now_ms);
+		DebugUiChannel channel(&layout_state_);
+		channel.on_debug_event(kind);
+	});
+}
+
+void Application::invalidate_debug_ui() {
+	layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+	layout_state_.panel_render_cache.mark_dirty(UiPanelId::EditorCenter);
+	layout_state_.focus_sync_needed = true;
+	UI_WAKE(&layout_state_, "app");
+}
+
 void Application::ensure_backend_started() {
 	if (backend_started_ || !debug_available_) {
 		return;
+	}
+	if (backend_) {
+		backend_->set_preferred_adapter(debug_adapter_kind_for_program(config_.program));
+		register_backend_wake_callback();
 	}
 	backend_->start();
 	backend_started_ = true;
@@ -1226,6 +1254,7 @@ void Application::exit_debug_mode() {
 		command_queue_.reset();
 		event_queue_.reset();
 		backend_ = std::make_unique<DapBackend>(command_queue_, event_queue_);
+		register_backend_wake_callback();
 	}
 
 	model_.stack_frames.clear();
@@ -1249,6 +1278,7 @@ void Application::exit_debug_mode() {
 	layout_state_.packet_monitor_service->reset();
 	set_workspace_status(i18n::tr("app.edit_mode"));
 	request_terminal_autostart();
+	invalidate_debug_ui();
 }
 
 std::string Application::launch_cwd_for_program(const std::string &program) const {
@@ -1373,6 +1403,7 @@ void Application::apply_connection_and_start() {
 		submit_command(launch);
 		set_status(i18n::tr_fmt("app.launch_program", {config_.program}));
 	}
+	invalidate_debug_ui();
 }
 
 void Application::on_connection_complete(const ConnectionResult &result) {
@@ -1558,8 +1589,8 @@ void Application::apply_event(const DebugEvent &event) {
 		session_ready_ = true;
 		model_.status_message = event.text;
 		model_.view_token++;
-		UI_WAKE(&layout_state_, "app");
 		if (connection_wizard_state_.open || !connection_config_complete()) {
+			invalidate_debug_ui();
 			break;
 		}
 		apply_connection_and_start();
@@ -1576,13 +1607,13 @@ void Application::apply_event(const DebugEvent &event) {
 		}
 		refresh_all_watches();
 		model_.view_token++;
-		UI_WAKE(&layout_state_, "app");
+		invalidate_debug_ui();
 		break;
 	case DebugEventKind::kContinued:
 		model_.set_running();
 		clear_source_debug_hover(&source_state_.debug_hover);
 		model_.view_token++;
-		UI_WAKE(&layout_state_, "app");
+		invalidate_debug_ui();
 		break;
 	case DebugEventKind::kTerminated:
 		model_.set_terminated();
@@ -1592,7 +1623,7 @@ void Application::apply_event(const DebugEvent &event) {
 			model_.status_message = event.text;
 		}
 		model_.view_token++;
-		UI_WAKE(&layout_state_, "app");
+		invalidate_debug_ui();
 		break;
 	case DebugEventKind::kStackUpdated:
 		model_.stack_frames = event.stack_frames;
@@ -1602,6 +1633,7 @@ void Application::apply_event(const DebugEvent &event) {
 			model_.active_line = model_.stack_frames.front().line;
 			model_.view_token++;
 		}
+		layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
 		break;
 	case DebugEventKind::kVariablesUpdated:
 		model_.locals = event.variables;
@@ -1609,9 +1641,11 @@ void Application::apply_event(const DebugEvent &event) {
 		if (event.stack_frame_id >= 0) {
 			model_.variables_frame_id = event.stack_frame_id;
 		}
+		layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
 		break;
 	case DebugEventKind::kVariableChildrenUpdated:
 		model_.variable_children[event.parent_expression] = event.variables;
+		layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
 		break;
 	case DebugEventKind::kHoverValue:
 		if (source_state_.debug_hover.fetch_key == event.hover_key) {
@@ -1650,6 +1684,8 @@ void Application::apply_event(const DebugEvent &event) {
 				watch.value = event.watch_value;
 			}
 		}
+		layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+		UI_WAKE(&layout_state_, "app");
 		break;
 	case DebugEventKind::kHardwareWatchUpdated:
 		if (event.hardware_watch_index >= 0 &&
@@ -1658,6 +1694,8 @@ void Application::apply_event(const DebugEvent &event) {
 			model_.hardware_watches[static_cast<std::size_t>(event.hardware_watch_index)]
 			    .gdb_number = event.hardware_watch_gdb_number;
 		}
+		layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+		UI_WAKE(&layout_state_, "app");
 		break;
 	case DebugEventKind::kInferiorPid:
 		layout_state_.packet_monitor_service->set_inferior_pid(event.inferior_pid);
@@ -1769,7 +1807,7 @@ void Application::apply_app_settings() {
 	}
 	if (has_bundled_gdb()) {
 		set_runtime_force_bundled_gdb(app_settings_.force_bundled_gdb);
-		debug_available_ = gdb_supports_dap();
+		debug_available_ = gdb_supports_dap() || debugpy_available();
 	}
 	if (symbol_provider_) {
 		symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
@@ -2122,7 +2160,10 @@ int Application::run() {
 		}
 	};
 	git_service_.set_update_callback([] {});
-	indexer_.set_change_notify([this] { UI_WAKE(&layout_state_, "indexer.fs_change"); });
+	indexer_.set_change_notify([this] {
+		layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
+		UI_WAKE(&layout_state_, "indexer.fs_change");
+	});
 
 	file_picker_state_.set_preview_notify([this] {
 		ui_wake_correlated(&layout_state_, ui_capture_correlation(&layout_state_),
@@ -2912,14 +2953,7 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 	layout_state_.ui_events = &ui_event_dispatcher_;
 	ui_event_dispatcher_.set_screen(&screen);
 
-	if (backend_) {
-		backend_->set_wake_callback([this](DebugEventKind kind) {
-			const int64_t now_ms = steady_now_ms();
-			layout_state_.activity_gate.on_debug_critical(now_ms);
-			DebugUiChannel channel(&layout_state_);
-			channel.on_debug_event(kind);
-		});
-	}
+	register_backend_wake_callback();
 	tree_sitter_service().set_ready_callback([this](const std::string& path) {
 		if (path.empty()) {
 			return;

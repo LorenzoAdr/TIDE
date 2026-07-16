@@ -15,6 +15,7 @@
 #include "lsp/lsp_text_edits.hpp"
 #include "lsp/semantic_tokens.hpp"
 #include "lsp/diagnostics.hpp"
+#include "lsp/language_server_spec.hpp"
 #include "symbols/call_hierarchy.hpp"
 #include "symbols/code_action.hpp"
 #include "symbols/hover_info.hpp"
@@ -27,6 +28,10 @@ class LspClient {
   LspClient();
   ~LspClient();
 
+  // Preferred: start any stdio language server from a LanguageServerSpec.
+  bool start(const LanguageServerSpec& spec);
+
+  // Backward-compatible clangd entry point (builds a clangd spec internally).
   bool start(const std::string& workspace_root,
              const std::string& compile_commands_dir = {},
              bool use_gcc_query_driver = true, bool background_index = false);
@@ -35,8 +40,10 @@ class LspClient {
   void set_request_counter(std::atomic<uint64_t>* counter);
   bool ready() const { return ready_.load(); }
   bool transport_running() const;
-  bool clangd_process_alive() const;
+  bool process_alive() const;
+  bool clangd_process_alive() const { return process_alive(); }
   bool semantic_tokens_supported() const { return semantic_tokens_supported_; }
+  const std::string& server_id() const { return server_id_; }
 
   void did_open(const std::string& absolute_path, const std::string& text);
   void did_change(const std::string& absolute_path, const std::string& text);
@@ -124,6 +131,7 @@ class LspClient {
     int64_t last_ms = 0;
   };
 
+  bool spawn_language_server(const LanguageServerSpec& spec);
   bool spawn_clangd(const std::string& workspace_root, const std::string& compile_commands_dir,
                     bool use_gcc_query_driver, bool background_index);
   bool initialize(const std::string& workspace_root);
@@ -171,6 +179,7 @@ class LspClient {
   int stdin_write_fd_ = -1;
   int stdout_read_fd_ = -1;
   std::string workspace_root_;
+  std::string server_id_;
 
   mutable std::mutex mutex_;
   std::unordered_map<std::string, DocumentState> documents_;

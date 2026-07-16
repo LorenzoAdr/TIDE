@@ -10,7 +10,8 @@
 #include <vector>
 
 #include "backend/idebug_backend.hpp"
-#include "dap/gdb_launcher.hpp"
+#include "dap/debug_adapter_process.hpp"
+#include "dap/debug_adapter_spec.hpp"
 #include "util/thread_safe_queue.hpp"
 
 namespace dap {
@@ -31,6 +32,8 @@ class DapBackend : public IDebugBackend {
   void stop() override;
   void submit(const UiCommand& command) override;
   void set_wake_callback(DebugWakeCallback callback);
+  void set_preferred_adapter(DebugAdapterKind kind);
+  DebugAdapterKind preferred_adapter() const { return preferred_adapter_; }
 
  private:
   void worker_main();
@@ -66,6 +69,7 @@ class DapBackend : public IDebugBackend {
   void emit_inferior_pid(int pid);
   void push_event(DebugEvent event);
   void push_error(const std::string& message);
+  bool adapter_is_gdb() const;
 
   ThreadSafeQueue<UiCommand>& commands_;
   ThreadSafeQueue<DebugEvent>& events_;
@@ -74,8 +78,9 @@ class DapBackend : public IDebugBackend {
 
   std::thread worker_;
   std::atomic<bool> running_{false};
+  DebugAdapterKind preferred_adapter_ = DebugAdapterKind::kGdb;
 
-  std::unique_ptr<GdbProcess> gdb_;
+  std::unique_ptr<IDebugAdapterProcess> adapter_;
   std::unique_ptr<dap::Session> session_;
   std::mutex session_mutex_;
   int active_thread_id_ = 1;

@@ -1,7 +1,11 @@
+#include <vector>
+
 #include "dap/gdb_launcher.hpp"
 
-#include "util/bundled_tools.hpp"
+#include "dap/debug_adapter_process.hpp"
+#include "dap/debug_adapter_spec.hpp"
 
+#include "util/bundled_tools.hpp"
 #include "util/child_process_guard.hpp"
 
 #include <array>
@@ -82,6 +86,71 @@ class FdWriter : public dap::Writer {
   int fd_;
 };
 
+bool spawn_stdio_adapter(const std::string& command, const std::vector<std::string>& args,
+                         int* child_pid, int* stdin_write_fd, int* stdout_read_fd,
+                         std::shared_ptr<dap::Reader>* reader,
+                         std::shared_ptr<dap::Writer>* writer) {
+  if (command.empty() || child_pid == nullptr || stdin_write_fd == nullptr ||
+      stdout_read_fd == nullptr || reader == nullptr || writer == nullptr) {
+    return false;
+  }
+
+  int stdin_pipe[2] = {-1, -1};
+  int stdout_pipe[2] = {-1, -1};
+  if (pipe(stdin_pipe) != 0 || pipe(stdout_pipe) != 0) {
+    return false;
+  }
+
+  const pid_t pid = fork();
+  if (pid < 0) {
+    ::close(stdin_pipe[0]);
+    ::close(stdin_pipe[1]);
+    ::close(stdout_pipe[0]);
+    ::close(stdout_pipe[1]);
+    return false;
+  }
+
+  if (pid == 0) {
+    child_die_with_parent();
+    unsetenv("LD_PRELOAD");
+    unsetenv("TGDB_PKT_FILTER_SRC");
+    unsetenv("TGDB_PKT_FILTER_DST");
+    unsetenv("TGDB_PKT_DISABLE");
+    dup2(stdin_pipe[0], STDIN_FILENO);
+    dup2(stdout_pipe[1], STDOUT_FILENO);
+    dup2(stdout_pipe[1], STDERR_FILENO);
+
+    ::close(stdin_pipe[0]);
+    ::close(stdin_pipe[1]);
+    ::close(stdout_pipe[0]);
+    ::close(stdout_pipe[1]);
+
+    std::vector<std::string> args_storage;
+    args_storage.reserve(args.size() + 1);
+    args_storage.push_back(command);
+    for (const std::string& arg : args) {
+      args_storage.push_back(arg);
+    }
+    std::vector<char*> argv;
+    argv.reserve(args_storage.size() + 1);
+    for (std::string& arg : args_storage) {
+      argv.push_back(arg.data());
+    }
+    argv.push_back(nullptr);
+    execv(command.c_str(), argv.data());
+    _exit(127);
+  }
+
+  ::close(stdin_pipe[0]);
+  ::close(stdout_pipe[1]);
+  *child_pid = pid;
+  *stdin_write_fd = stdin_pipe[1];
+  *stdout_read_fd = stdout_pipe[0];
+  *reader = std::make_shared<FdReader>(*stdout_read_fd);
+  *writer = std::make_shared<FdWriter>(*stdin_write_fd);
+  return true;
+}
+
 bool probe_dap(const std::string& gdb_path) {
   if (gdb_path.empty()) {
     return false;
@@ -123,6 +192,77 @@ bool probe_dap(const std::string& gdb_path) {
   return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
+class StdioDebugAdapterProcess : public IDebugAdapterProcess {
+ public:
+  explicit StdioDebugAdapterProcess(DebugAdapterSpec spec) : spec_(std::move(spec)) {}
+  ~StdioDebugAdapterProcess() override { stop(); }
+
+  bool start() override {
+    if (running_) {
+      return true;
+    }
+    if (!spawn_stdio_adapter(spec_.command, spec_.args, &child_pid_, &stdin_write_fd_,
+                             &stdout_read_fd_, &reader_, &writer_)) {
+      return false;
+    }
+    running_ = true;
+    return true;
+  }
+
+  void stop(bool force = false) override {
+    if (!running_) {
+      return;
+    }
+    if (writer_) {
+      writer_->close();
+    }
+    if (reader_) {
+      reader_->close();
+    }
+    if (child_pid_ > 0) {
+      int status = 0;
+      if (force) {
+        kill(child_pid_, SIGKILL);
+      } else {
+        kill(child_pid_, SIGTERM);
+      }
+      for (int i = 0; i < 40; ++i) {
+        const pid_t result = waitpid(child_pid_, &status, WNOHANG);
+        if (result == child_pid_ || result < 0) {
+          child_pid_ = -1;
+          break;
+        }
+        usleep(50000);
+      }
+      if (child_pid_ > 0) {
+        kill(child_pid_, SIGKILL);
+        waitpid(child_pid_, &status, 0);
+        child_pid_ = -1;
+      }
+    }
+    reader_.reset();
+    writer_.reset();
+    stdin_write_fd_ = -1;
+    stdout_read_fd_ = -1;
+    running_ = false;
+  }
+
+  std::shared_ptr<dap::Reader> reader() const override { return reader_; }
+  std::shared_ptr<dap::Writer> writer() const override { return writer_; }
+  bool running() const override { return running_; }
+  DebugAdapterKind kind() const override { return spec_.kind; }
+  const std::string& adapter_id() const override { return spec_.id; }
+
+ private:
+  DebugAdapterSpec spec_;
+  int child_pid_ = -1;
+  int stdin_write_fd_ = -1;
+  int stdout_read_fd_ = -1;
+  std::shared_ptr<dap::Reader> reader_;
+  std::shared_ptr<dap::Writer> writer_;
+  bool running_ = false;
+};
+
 }  // namespace
 
 bool gdb_supports_dap_at(const std::string& gdb_path) { return probe_dap(gdb_path); }
@@ -134,72 +274,24 @@ bool gdb_supports_dap() {
   return false;
 }
 
+bool debugpy_available() { return resolve_debugpy().has_value(); }
+
 GdbProcess::GdbProcess() = default;
 
-GdbProcess::~GdbProcess() {
-  stop();
-}
+GdbProcess::~GdbProcess() { stop(); }
 
 bool GdbProcess::start() {
   if (running_) {
     return true;
   }
-
-  const auto gdb = resolve_gdb();
-  if (!gdb.has_value()) {
+  const auto spec = make_gdb_adapter_spec();
+  if (!spec.has_value()) {
     return false;
   }
-
-  int stdin_pipe[2] = {-1, -1};
-  int stdout_pipe[2] = {-1, -1};
-  if (pipe(stdin_pipe) != 0 || pipe(stdout_pipe) != 0) {
+  if (!spawn_stdio_adapter(spec->command, spec->args, &child_pid_, &stdin_write_fd_,
+                           &stdout_read_fd_, &reader_, &writer_)) {
     return false;
   }
-
-  const std::string gdb_path = gdb->binary_path;
-  const pid_t pid = fork();
-  if (pid < 0) {
-    ::close(stdin_pipe[0]);
-    ::close(stdin_pipe[1]);
-    ::close(stdout_pipe[0]);
-    ::close(stdout_pipe[1]);
-    return false;
-  }
-
-  if (pid == 0) {
-    child_die_with_parent();
-    unsetenv("LD_PRELOAD");
-    unsetenv("TGDB_PKT_FILTER_SRC");
-    unsetenv("TGDB_PKT_FILTER_DST");
-    unsetenv("TGDB_PKT_DISABLE");
-    dup2(stdin_pipe[0], STDIN_FILENO);
-    dup2(stdout_pipe[1], STDOUT_FILENO);
-    dup2(stdout_pipe[1], STDERR_FILENO);
-
-    ::close(stdin_pipe[0]);
-    ::close(stdin_pipe[1]);
-    ::close(stdout_pipe[0]);
-    ::close(stdout_pipe[1]);
-
-    std::array<const char*, 4> argv = {
-        gdb_path.c_str(),
-        "--quiet",
-        "--interpreter=dap",
-        nullptr,
-    };
-    execv(gdb_path.c_str(), const_cast<char* const*>(argv.data()));
-    _exit(127);
-  }
-
-  ::close(stdin_pipe[0]);
-  ::close(stdout_pipe[1]);
-
-  child_pid_ = pid;
-  stdin_write_fd_ = stdin_pipe[1];
-  stdout_read_fd_ = stdout_pipe[0];
-
-  reader_ = std::make_shared<FdReader>(stdout_read_fd_);
-  writer_ = std::make_shared<FdWriter>(stdin_write_fd_);
   running_ = true;
   return true;
 }
@@ -220,28 +312,42 @@ void GdbProcess::stop(bool force) {
     int status = 0;
     if (force) {
       kill(child_pid_, SIGKILL);
-      waitpid(child_pid_, &status, 0);
     } else {
-      for (int i = 0; i < 20; ++i) {
-        const pid_t result = waitpid(child_pid_, &status, WNOHANG);
-        if (result == child_pid_ || result < 0) {
-          break;
-        }
-        usleep(100000);
-      }
-      if (waitpid(child_pid_, &status, WNOHANG) == 0) {
-        kill(child_pid_, SIGTERM);
-        waitpid(child_pid_, &status, 0);
-      }
+      kill(child_pid_, SIGTERM);
     }
-    child_pid_ = -1;
+    for (int i = 0; i < 40; ++i) {
+      const pid_t result = waitpid(child_pid_, &status, WNOHANG);
+      if (result == child_pid_ || result < 0) {
+        child_pid_ = -1;
+        break;
+      }
+      usleep(50000);
+    }
+    if (child_pid_ > 0) {
+      kill(child_pid_, SIGKILL);
+      waitpid(child_pid_, &status, 0);
+      child_pid_ = -1;
+    }
   }
 
-  stdin_write_fd_ = -1;
-  stdout_read_fd_ = -1;
   reader_.reset();
   writer_.reset();
+  stdin_write_fd_ = -1;
+  stdout_read_fd_ = -1;
   running_ = false;
+}
+
+std::unique_ptr<IDebugAdapterProcess> create_debug_adapter_process(DebugAdapterKind kind) {
+  const auto spec = make_debug_adapter_spec(kind);
+  if (!spec.has_value()) {
+    return nullptr;
+  }
+  return std::make_unique<StdioDebugAdapterProcess>(*spec);
+}
+
+std::unique_ptr<IDebugAdapterProcess> create_debug_adapter_process_for_program(
+    const std::string& program_path) {
+  return create_debug_adapter_process(debug_adapter_kind_for_program(program_path));
 }
 
 }  // namespace tgdb

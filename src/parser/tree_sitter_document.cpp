@@ -676,12 +676,16 @@ std::string extract_line_range(const std::string& source, int first_line, int la
   return out;
 }
 
-TSTree* parse_tree_for_source_local(const std::string& source) {
+TSTree* parse_tree_for_source_local(const std::string& source, const std::string& path) {
   if (source.empty()) {
     return nullptr;
   }
+  const TSLanguage* language = tree_sitter_language_for_path(path);
+  if (language == nullptr) {
+    language = tree_sitter_cpp_language();
+  }
   TSParser* parser = ts_parser_new();
-  ts_parser_set_language(parser, tree_sitter_cpp_language());
+  ts_parser_set_language(parser, language);
   TSTree* tree =
       ts_parser_parse_string(parser, nullptr, source.c_str(), static_cast<uint32_t>(source.size()));
   ts_parser_delete(parser);
@@ -726,7 +730,7 @@ void TreeSitterDocumentCache::ensure_viewport_preview(const std::string& path,
   if (slice.empty()) {
     return;
   }
-  TSTree* tree = parse_tree_for_source_local(slice);
+  TSTree* tree = parse_tree_for_source_local(slice, path);
   if (tree == nullptr) {
     return;
   }
@@ -736,7 +740,11 @@ void TreeSitterDocumentCache::ensure_viewport_preview(const std::string& path,
   preview.first_line = first_line;
   preview.last_line = last_line;
   if (!ts_node_is_null(root)) {
-    const std::vector<LineHighlights> slice_highlights = highlights_for_document(root, slice);
+    const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path);
+    const std::vector<LineHighlights> slice_highlights =
+        highlights_for_document(root, slice, lang == TreeSitterLangKind::kNone
+                                   ? TreeSitterLangKind::kCpp
+                                   : lang);
     for (int line = first_line; line <= last_line; ++line) {
       const int slice_line = line - first_line;
       if (slice_line >= 0 && slice_line < static_cast<int>(slice_highlights.size())) {
@@ -838,7 +846,7 @@ void TreeSitterDocumentCache::ensure_viewport_preview_slice(const std::string& p
     }
   }
 
-  TSTree* tree = parse_tree_for_source_local(slice);
+  TSTree* tree = parse_tree_for_source_local(slice, path);
   if (tree == nullptr) {
     return;
   }
@@ -848,7 +856,11 @@ void TreeSitterDocumentCache::ensure_viewport_preview_slice(const std::string& p
   preview.first_line = first_line;
   preview.last_line = last_line;
   if (!ts_node_is_null(root)) {
-    const std::vector<LineHighlights> slice_highlights = highlights_for_document(root, slice);
+    const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path);
+    const std::vector<LineHighlights> slice_highlights =
+        highlights_for_document(root, slice, lang == TreeSitterLangKind::kNone
+                                   ? TreeSitterLangKind::kCpp
+                                   : lang);
     for (int line = first_line; line <= last_line; ++line) {
       const int slice_line = line - first_line;
       if (slice_line >= 0 && slice_line < static_cast<int>(slice_highlights.size())) {
@@ -1056,7 +1068,11 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
   }
 
   TSParser* parser = ts_parser_new();
-  ts_parser_set_language(parser, tree_sitter_cpp_language());
+  const TSLanguage* language = tree_sitter_language_for_path(job.path);
+  if (language == nullptr) {
+    language = tree_sitter_cpp_language();
+  }
+  ts_parser_set_language(parser, language);
   TSTree* tree = parse_source(parser, job.source, job.previous_source, parse_base);
   if (parse_base != nullptr) {
     ts_tree_delete(parse_base);
@@ -1071,6 +1087,9 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
   std::vector<LineHighlights> highlights;
   std::vector<SymbolInfo> symbols;
   std::vector<SymbolInfo> scopes;
+  const TreeSitterLangKind lang_kind = tree_sitter_lang_kind_for_path(job.path);
+  const TreeSitterLangKind highlight_lang =
+      lang_kind == TreeSitterLangKind::kNone ? TreeSitterLangKind::kCpp : lang_kind;
   if (tree != nullptr) {
     const TSNode root = ts_tree_root_node(tree);
     if (old_tree_for_highlights != nullptr) {
@@ -1085,12 +1104,16 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
       }
       highlights = highlights_after_incremental_parse(old_tree_for_highlights, tree, root,
                                                       job.source, previous_highlights,
-                                                      layout_shift_from_row);
+                                                      layout_shift_from_row, highlight_lang);
     } else {
-      highlights = highlights_for_document(root, job.source);
+      highlights = highlights_for_document(root, job.source, highlight_lang);
     }
+    // Outline symbols: language-dispatched in extract_symbols_from_tree (C++/Python today).
     symbols = extract_symbols_from_tree(root, job.source, job.path);
-    scopes = scope_symbols_from_tree(root, job.source, job.path);
+    // Locals/scope queries remain C++-only for now.
+    if (lang_kind == TreeSitterLangKind::kCpp) {
+      scopes = scope_symbols_from_tree(root, job.source, job.path);
+    }
   }
   if (old_tree_for_highlights != nullptr) {
     ts_tree_delete(old_tree_for_highlights);

@@ -1,6 +1,7 @@
 #include "ui/source_panel.hpp"
 #include "ui/ui_wake.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <filesystem>
@@ -29,6 +30,8 @@
 #include "indexer/index_rules.hpp"
 #include "lsp/semantic_tokens.hpp"
 #include "symbols/symbol_provider.hpp"
+#include "editor/indent_guides.hpp"
+#include "util/clang_format_config.hpp"
 #include "util/syntax_highlight.hpp"
 
 namespace tgdb {
@@ -458,14 +461,6 @@ bool handle_source_panel_event(DebugModel* model, SourceViewState* view_state,
   if (event.is_mouse() && event.mouse().button == Mouse::Left &&
       event.mouse().motion == Mouse::Pressed) {
     const auto& m = event.mouse();
-    if (panel_state->gutter_box.Contain(m.x, m.y)) {
-      const int rel_y = m.y - panel_state->gutter_box.y_min;
-      const int clicked_line = view_state->scroll + rel_y + 1;
-      if (clicked_line >= 1 && clicked_line <= total && !model->active_file.empty()) {
-        ToggleBreakpointAtLine(model, clicked_line, on_command);
-        return true;
-      }
-    }
     if (panel_state->content_box.Contain(m.x, m.y)) {
       const int rel_y = m.y - panel_state->content_box.y_min;
       const int clicked_line = view_state->scroll + rel_y + 1;
@@ -481,6 +476,14 @@ bool handle_source_panel_event(DebugModel* model, SourceViewState* view_state,
   if (event.is_mouse() && event.mouse().button == Mouse::Right &&
       event.mouse().motion == Mouse::Pressed) {
     const auto& m = event.mouse();
+    if (panel_state->gutter_box.Contain(m.x, m.y)) {
+      const int rel_y = m.y - panel_state->gutter_box.y_min;
+      const int clicked_line = view_state->scroll + rel_y + 1;
+      if (clicked_line >= 1 && clicked_line <= total && !model->active_file.empty()) {
+        ToggleBreakpointAtLine(model, clicked_line, on_command);
+        return true;
+      }
+    }
     if (panel_state->content_box.Contain(m.x, m.y) && layout_state != nullptr) {
       const int rel_y = m.y - panel_state->content_box.y_min;
       const int line = view_state->scroll + rel_y;
@@ -703,8 +706,14 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
       }
       gutter_rows.push_back(gutter_row);
 
-      Element code_row =
-          HighlightCodeLine(view_state->lines[i], i, semantic_tokens, -1, {}, 0, &highlight_ctx);
+      Element code_row;
+      {
+        const int tab_size = std::max(1, editor_indent::tab_display_width());
+        const std::string display_line =
+            expand_tabs_for_display(view_state->lines[i], tab_size);
+        code_row =
+            HighlightCodeLine(display_line, i, semantic_tokens, -1, {}, 0, &highlight_ctx);
+      }
       if (is_execution) {
         code_row = code_row | inverted;
       } else if (is_bp) {

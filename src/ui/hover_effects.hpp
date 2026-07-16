@@ -34,7 +34,7 @@ inline void invalidate_cached_panel_chrome(MainLayoutState* layout, std::string_
     layout->panel_render_cache.mark_dirty(UiPanelId::FileTree);
   }
   if (press_id::is_outline_hover(id) || press_id::is_sidebar_tab_hover(id) ||
-      id == press_id::kSidebarHide) {
+      press_id::is_watches_hover(id) || id == press_id::kSidebarHide) {
     layout->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
   }
 }

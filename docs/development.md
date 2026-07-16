@@ -67,7 +67,26 @@ Native gdb+CA build requires dev packages (Debian/Ubuntu):
 sudo apt install libgmp-dev libmpfr-dev libmpc-dev
 ```
 
-Build-time tools (when bundling): `curl` or `wget`, `zstd`, `objcopy`, `sha256sum`; for clangd also `unzip`, `strip`, `ldd`.
+Python tooling can be embedded the same way (Linux x86_64). Choose **one** of:
+
+| CMake option | Contents | Runtime |
+|--------------|----------|---------|
+| `TGDB_BUNDLE_PYTHON_LSP_MIN` (A) | basedpyright + Node wheel | needs host `python3`; no embedded debugpy |
+| `TGDB_BUNDLE_PYTHON_TOOLS` (B) | portable CPython + basedpyright + debugpy | self-contained LSP + DAP |
+
+B supersedes A if both are set. Blobs extract to `$XDG_CACHE_HOME/tgdb/bundled/python-tools-<version>/`.
+
+```bash
+./tools/compile.sh --bundle-python-lsp-min -y   # A
+./tools/compile.sh --bundle-python-tools -y     # B
+./tools/compile.sh --no-bundle-python -y        # PATH / venv only
+```
+
+Build-time tools (when bundling): `curl` or `wget`, `zstd`, `objcopy`, `sha256sum`; for clangd also `unzip`, `strip`, `ldd`; for option A also host `python3` (venv + pip).
+
+### Install (no build)
+
+`tools/install.sh` only copies an existing `build/tgdb` to `/usr/opt/tide` and adds the `tide` alias to `~/.bashrc`. Compile first with `tools/compile.sh`.
 
 ### Portable build (legacy glibc)
 
@@ -102,6 +121,22 @@ Environment variables:
 | `JOBS` | Parallel build jobs for `compile.sh` (default: `nproc`) |
 | `CLANGD_PATH` | Override path to clangd binary (highest priority) |
 | `GDB_PATH` | Override path to gdb binary (highest priority) |
+| `BASEDPYRIGHT_PATH` | Override path to basedpyright / pyright language server (highest priority) |
+| `PYRIGHT_LANGSERVER_PATH` | Alternate override for the Python language server binary |
+| `DEBUGPY_PYTHON` | Python interpreter used to run `python -m debugpy.adapter` |
+| `PYTHON` | Fallback interpreter probed for the `debugpy` module |
+| `TGDB_FORCE_BUNDLED_PYTHON_TOOLS` | `1`/`0` override for preferring the embedded Python tools blob |
+
+Without an embedded Python blob (and without basedpyright on `PATH`), `.py` files still get tree-sitter syntax highlighting; completions/diagnostics/hover require the language server. Option A still needs a host `python3` to run the extracted langserver. Option B embeds CPython and debugpy for DAP.
+
+Install basedpyright/debugpy on the host only when not bundling:
+
+```bash
+python3 -m venv ~/.venvs/tgdb-tools
+~/.venvs/tgdb-tools/bin/pip install basedpyright debugpy
+export PATH="$HOME/.venvs/tgdb-tools/bin:$PATH"
+# or: export BASEDPYRIGHT_PATH=$HOME/.venvs/tgdb-tools/bin/basedpyright-langserver
+```
 | `TGDB_FORCE_BUNDLED_CLANGD` | `1` = use only embedded clangd; `0` = allow `PATH` fallback |
 | `TGDB_FORCE_BUNDLED_GDB` | `1` = use only embedded gdb; `0` = allow `PATH` fallback |
 | `TGDB_UI_SMOKE` | Headless UI smoke test (exits quickly, no fullscreen) |
@@ -124,7 +159,8 @@ tgdb/
 │   └── Dependencies.cmake  # FetchContent: FTXUI, cppdap, json
 ├── docs/                   # Documentation (this folder)
 ├── examples/
-│   └── hello.cpp           # Sample debug target
+│   ├── hello.cpp           # Sample C++ debug target (UDP demo)
+│   └── hello.py            # Sample Python debug target (same UDP demo)
 ├── src/
 │   ├── main.cpp            # Entry point, CLI parsing
 │   ├── app/                # Application orchestration

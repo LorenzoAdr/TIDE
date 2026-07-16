@@ -14,17 +14,25 @@ constexpr int kBundleClangd = 0;
 constexpr int kForceClangd = 1;
 constexpr int kGdbKind = 2;
 constexpr int kForceGdb = 3;
-constexpr int kOptionCount = 4;
+constexpr int kPythonKind = 4;
+constexpr int kForcePython = 5;
+constexpr int kOptionCount = 6;
 
 constexpr int kGdbNone = 0;
 constexpr int kGdbStatic = 1;
 constexpr int kGdbCoreAnalyzer = 2;
+
+constexpr int kPythonNone = 0;
+constexpr int kPythonLspMin = 1;
+constexpr int kPythonFull = 2;
 
 struct BundleConfig {
   bool bundle_clangd = false;
   bool force_clangd = false;
   int gdb_kind = kGdbNone;
   bool force_gdb = false;
+  int python_kind = kPythonNone;
+  bool force_python = false;
 };
 
 struct WizardState {
@@ -40,6 +48,17 @@ std::string gdb_kind_label(int kind) {
       return "gdb + Core Analyzer (obj/ref/heap, deps dinámicas)";
     default:
       return "ninguno (gdb del sistema)";
+  }
+}
+
+std::string python_kind_label(int kind) {
+  switch (kind) {
+    case kPythonLspMin:
+      return "A: basedpyright (~+70–90 MB; Python del host)";
+    case kPythonFull:
+      return "B: CPython + basedpyright + debugpy (~+90–120 MB)";
+    default:
+      return "ninguno (herramientas Python del sistema)";
   }
 }
 
@@ -71,6 +90,17 @@ void load_bundle_config(const std::string& path, BundleConfig* config) {
       legacy_bundle_gdb = line.substr(11) == "1";
     } else if (line.rfind("BUNDLE_GDB_FORCE=", 0) == 0) {
       config->force_gdb = line.substr(17) == "1";
+    } else if (line.rfind("PYTHON_BUNDLE_KIND=", 0) == 0) {
+      const std::string kind = line.substr(19);
+      if (kind == "lsp_min") {
+        config->python_kind = kPythonLspMin;
+      } else if (kind == "full") {
+        config->python_kind = kPythonFull;
+      } else {
+        config->python_kind = kPythonNone;
+      }
+    } else if (line.rfind("BUNDLE_PYTHON_FORCE=", 0) == 0) {
+      config->force_python = line.substr(20) == "1";
     }
   }
   if (config->gdb_kind == kGdbNone && legacy_bundle_gdb) {
@@ -89,11 +119,19 @@ bool save_bundle_config(const std::string& path, const BundleConfig& config) {
   } else if (config.gdb_kind == kGdbCoreAnalyzer) {
     kind_name = "core_analyzer";
   }
+  const char* python_kind_name = "none";
+  if (config.python_kind == kPythonLspMin) {
+    python_kind_name = "lsp_min";
+  } else if (config.python_kind == kPythonFull) {
+    python_kind_name = "full";
+  }
   output << "BUNDLE_CLANGD=" << (config.bundle_clangd ? "1" : "0") << '\n';
   output << "BUNDLE_CLANGD_FORCE=" << (config.force_clangd ? "1" : "0") << '\n';
   output << "GDB_BUNDLE_KIND=" << kind_name << '\n';
   output << "BUNDLE_GDB=" << (config.gdb_kind != kGdbNone ? "1" : "0") << '\n';
   output << "BUNDLE_GDB_FORCE=" << (config.force_gdb ? "1" : "0") << '\n';
+  output << "PYTHON_BUNDLE_KIND=" << python_kind_name << '\n';
+  output << "BUNDLE_PYTHON_FORCE=" << (config.force_python ? "1" : "0") << '\n';
   return static_cast<bool>(output);
 }
 
@@ -101,11 +139,14 @@ bool option_enabled(const WizardState& state, int index) {
   switch (index) {
     case kBundleClangd:
     case kGdbKind:
+    case kPythonKind:
       return true;
     case kForceClangd:
       return state.draft.bundle_clangd;
     case kForceGdb:
       return state.draft.gdb_kind != kGdbNone;
+    case kForcePython:
+      return state.draft.python_kind != kPythonNone;
     default:
       return false;
   }
@@ -121,6 +162,19 @@ void cycle_gdb_kind(WizardState* state) {
   }
   if (state->draft.gdb_kind == kGdbNone) {
     state->draft.force_gdb = false;
+  }
+}
+
+void cycle_python_kind(WizardState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->draft.python_kind = (state->draft.python_kind + 1) % 3;
+  if (state->draft.python_kind != kPythonNone && !state->draft.force_python) {
+    state->draft.force_python = true;
+  }
+  if (state->draft.python_kind == kPythonNone) {
+    state->draft.force_python = false;
   }
 }
 
@@ -146,6 +200,12 @@ void toggle_option(WizardState* state, int index) {
       break;
     case kForceGdb:
       state->draft.force_gdb = !state->draft.force_gdb;
+      break;
+    case kPythonKind:
+      cycle_python_kind(state);
+      break;
+    case kForcePython:
+      state->draft.force_python = !state->draft.force_python;
       break;
     default:
       break;
@@ -181,6 +241,10 @@ int main(int argc, char** argv) {
              "Espacio alterna: ninguno → gdb-static → gdb+Core Analyzer"},
             {"Forzar gdb embebido (sin fallback al sistema)",
              "Ignora gdb en PATH salvo GDB_PATH"},
+            {"Herramientas Python embebidas",
+             "Espacio alterna: ninguna → A (LSP min) → B (completo)"},
+            {"Forzar herramientas Python embebidas",
+             "Ignora basedpyright/debugpy del sistema salvo overrides de entorno"},
         };
 
         for (int i = 0; i < kOptionCount; ++i) {
@@ -189,11 +253,14 @@ int main(int argc, char** argv) {
           std::string label = options[i].first;
           if (i == kGdbKind) {
             label += ": " + gdb_kind_label(state.draft.gdb_kind);
+          } else if (i == kPythonKind) {
+            label += ": " + python_kind_label(state.draft.python_kind);
           } else {
             const bool checked =
                 i == kBundleClangd   ? state.draft.bundle_clangd
                 : i == kForceClangd  ? state.draft.force_clangd
                 : i == kForceGdb     ? state.draft.force_gdb
+                : i == kForcePython  ? state.draft.force_python
                                      : false;
             label = std::string(checked ? "[x] " : "[ ] ") + label;
           }

@@ -16,6 +16,7 @@
 
 #include "lsp/lsp_uri.hpp"
 #include "lsp/lsp_position.hpp"
+#include "lsp/language_server_spec.hpp"
 #include "indexer/index_rules.hpp"
 #include "util/bundled_tools.hpp"
 
@@ -75,20 +76,8 @@ LspClient::~LspClient() {
   stop();
 }
 
-namespace {
-
-constexpr const char* kClangdQueryDriver =
-    "/usr/bin/gcc*,/usr/bin/g++,/usr/bin/c++*,/usr/bin/clang*,"
-    "/usr/local/bin/gcc*,/usr/local/bin/g++,/usr/local/bin/c++*,/usr/local/bin/clang*";
-
-}  // namespace
-
-bool LspClient::spawn_clangd(const std::string& workspace_root,
-                             const std::string& compile_commands_dir,
-                             const bool use_gcc_query_driver,
-                             const bool background_index) {
-  const auto location = resolve_clangd();
-  if (!location.has_value()) {
+bool LspClient::spawn_language_server(const LanguageServerSpec& spec) {
+  if (spec.command.empty()) {
     return false;
   }
 
@@ -97,19 +86,6 @@ bool LspClient::spawn_clangd(const std::string& workspace_root,
   if (pipe(stdin_pipe) != 0 || pipe(stdout_pipe) != 0) {
     return false;
   }
-
-  const std::string& compile_dir = compile_commands_dir;
-  const std::string& clangd_bin = location->binary_path;
-  std::string resource_arg;
-  if (!location->resource_dir.empty()) {
-    resource_arg = "--resource-dir=" + location->resource_dir;
-  }
-  std::string compile_arg;
-  if (!compile_dir.empty()) {
-    compile_arg = "--compile-commands-dir=" + compile_dir;
-  }
-  const std::string query_driver_arg =
-      std::string("--query-driver=") + kClangdQueryDriver;
 
   const pid_t pid = fork();
   if (pid < 0) {
@@ -122,9 +98,12 @@ bool LspClient::spawn_clangd(const std::string& workspace_root,
 
   if (pid == 0) {
     // Do not use child_die_with_parent() here: fork from the lsp-start thread plus
-    // PR_SET_PDEATHSIG inherited by clangd after exec causes immediate SIGTERM.
-    if (!workspace_root.empty()) {
-      ::chdir(workspace_root.c_str());
+    // PR_SET_PDEATHSIG inherited by the server after exec causes immediate SIGTERM.
+    if (!spec.workspace_root.empty()) {
+      ::chdir(spec.workspace_root.c_str());
+    }
+    for (const std::string& entry : spec.env) {
+      ::putenv(const_cast<char*>(entry.c_str()));
     }
     dup2(stdin_pipe[0], STDIN_FILENO);
     dup2(stdout_pipe[1], STDOUT_FILENO);
@@ -140,22 +119,9 @@ bool LspClient::spawn_clangd(const std::string& workspace_root,
     }
 
     std::vector<std::string> args_strings;
-    args_strings.push_back(clangd_bin);
-    if (!resource_arg.empty()) {
-      args_strings.push_back(resource_arg);
-    }
-    if (!compile_arg.empty()) {
-      args_strings.push_back(compile_arg);
-    }
-    if (use_gcc_query_driver) {
-      args_strings.push_back(query_driver_arg);
-    }
-    args_strings.emplace_back("-j=2");
-    if (background_index) {
-      args_strings.emplace_back("--background-index=true");
-      args_strings.emplace_back("--background-index-priority=idle");
-    } else {
-      args_strings.emplace_back("--background-index=false");
+    args_strings.push_back(spec.command);
+    for (const std::string& arg : spec.args) {
+      args_strings.push_back(arg);
     }
 
     std::vector<char*> argv;
@@ -165,7 +131,7 @@ bool LspClient::spawn_clangd(const std::string& workspace_root,
     }
     argv.push_back(nullptr);
 
-    execv(clangd_bin.c_str(), argv.data());
+    execv(spec.command.c_str(), argv.data());
     _exit(127);
   }
 
@@ -175,6 +141,19 @@ bool LspClient::spawn_clangd(const std::string& workspace_root,
   stdin_write_fd_ = stdin_pipe[1];
   stdout_read_fd_ = stdout_pipe[0];
   return transport_.start(stdin_write_fd_, stdout_read_fd_);
+}
+
+bool LspClient::spawn_clangd(const std::string& workspace_root,
+                             const std::string& compile_commands_dir,
+                             const bool use_gcc_query_driver,
+                             const bool background_index) {
+  const auto spec =
+      make_clangd_spec(workspace_root, compile_commands_dir, use_gcc_query_driver,
+                       background_index);
+  if (!spec.has_value()) {
+    return false;
+  }
+  return spawn_language_server(*spec);
 }
 
 bool LspClient::initialize(const std::string& workspace_root) {
@@ -223,11 +202,9 @@ bool LspClient::initialize(const std::string& workspace_root) {
   return true;
 }
 
-bool LspClient::start(const std::string& workspace_root,
-                      const std::string& compile_commands_dir,
-                      const bool use_gcc_query_driver, const bool background_index) {
+bool LspClient::start(const LanguageServerSpec& spec) {
   stop();
-  if (workspace_root.empty()) {
+  if (spec.workspace_root.empty() || spec.command.empty()) {
     return false;
   }
   transport_.set_notification_handler([this](const std::string& method,
@@ -242,26 +219,38 @@ bool LspClient::start(const std::string& workspace_root,
     const int latest = latest_completion_request_id_.load(std::memory_order_acquire);
     return response_id >= latest;
   });
-  std::string compile_dir = compile_commands_dir;
-  if (compile_dir.empty()) {
-    WorkspaceConfig default_config;
-    const auto setup = ensure_compile_commands_for_clangd(workspace_root, default_config);
-    compile_dir = setup.compile_dir;
-  }
-  if (!spawn_clangd(workspace_root, compile_dir, use_gcc_query_driver, background_index)) {
+  if (!spawn_language_server(spec)) {
     stop();
     return false;
   }
   transport_.set_reader_eof_handler([this] { on_transport_reader_eof(); });
-  workspace_root_ = workspace_root;
+  workspace_root_ = spec.workspace_root;
+  server_id_ = spec.id;
   intentionally_stopping_.store(false, std::memory_order_release);
-  if (!initialize(workspace_root)) {
+  if (!initialize(spec.workspace_root)) {
     stop();
     return false;
   }
   ready_ = true;
   intentionally_stopping_.store(false, std::memory_order_release);
   return true;
+}
+
+bool LspClient::start(const std::string& workspace_root,
+                      const std::string& compile_commands_dir,
+                      const bool use_gcc_query_driver, const bool background_index) {
+  std::string compile_dir = compile_commands_dir;
+  if (compile_dir.empty()) {
+    WorkspaceConfig default_config;
+    const auto setup = ensure_compile_commands_for_clangd(workspace_root, default_config);
+    compile_dir = setup.compile_dir;
+  }
+  const auto spec =
+      make_clangd_spec(workspace_root, compile_dir, use_gcc_query_driver, background_index);
+  if (!spec.has_value()) {
+    return false;
+  }
+  return start(*spec);
 }
 
 void LspClient::stop() {
@@ -306,6 +295,7 @@ void LspClient::stop() {
   next_request_id_ = 1;
   inflight_completion_request_id_.store(0, std::memory_order_release);
   latest_completion_request_id_.store(0, std::memory_order_release);
+  server_id_.clear();
 
   std::lock_guard<std::mutex> lock(mutex_);
   documents_.clear();
@@ -417,7 +407,7 @@ bool LspClient::transport_running() const {
   return transport_.is_running();
 }
 
-bool LspClient::clangd_process_alive() const {
+bool LspClient::process_alive() const {
   return child_pid_ > 0 && kill(child_pid_, 0) == 0;
 }
 

@@ -1,0 +1,105 @@
+#include "lsp/language_server_spec.hpp"
+
+#include <cstdlib>
+
+#include "util/bundled_tools.hpp"
+
+namespace tgdb {
+
+bool language_id_is_cpp_family(const std::string& language_id) {
+  return language_id == "c" || language_id == "cpp";
+}
+
+bool language_id_is_python(const std::string& language_id) {
+  return language_id == "python";
+}
+
+std::string language_server_id_for_language(const std::string& language_id) {
+  if (language_id_is_python(language_id)) {
+    return kLspServerBasedpyright;
+  }
+  if (language_id_is_cpp_family(language_id)) {
+    return kLspServerClangd;
+  }
+  return {};
+}
+
+namespace {
+
+constexpr const char* kClangdQueryDriver =
+    "/usr/bin/gcc*,/usr/bin/g++,/usr/bin/c++*,/usr/bin/clang*,"
+    "/usr/local/bin/gcc*,/usr/local/bin/g++,/usr/local/bin/c++*,/usr/local/bin/clang*";
+
+}  // namespace
+
+std::optional<LanguageServerSpec> make_clangd_spec(const std::string& workspace_root,
+                                                   const std::string& compile_commands_dir,
+                                                   const bool use_gcc_query_driver,
+                                                   const bool background_index) {
+  const auto location = resolve_clangd();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+
+  LanguageServerSpec spec;
+  spec.id = kLspServerClangd;
+  spec.command = location->binary_path;
+  spec.workspace_root = workspace_root;
+  spec.language_ids = {"c", "cpp"};
+
+  if (!location->resource_dir.empty()) {
+    spec.args.push_back("--resource-dir=" + location->resource_dir);
+  }
+  if (!compile_commands_dir.empty()) {
+    spec.args.push_back("--compile-commands-dir=" + compile_commands_dir);
+  }
+  if (use_gcc_query_driver) {
+    spec.args.emplace_back(std::string("--query-driver=") + kClangdQueryDriver);
+  }
+  spec.args.emplace_back("-j=2");
+  if (background_index) {
+    spec.args.emplace_back("--background-index=true");
+    spec.args.emplace_back("--background-index-priority=idle");
+  } else {
+    spec.args.emplace_back("--background-index=false");
+  }
+  return spec;
+}
+
+std::optional<LanguageServerSpec> make_basedpyright_spec(const std::string& workspace_root) {
+  const auto location = resolve_basedpyright();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+
+  LanguageServerSpec spec;
+  spec.id = kLspServerBasedpyright;
+  spec.command = location->binary_path;
+  spec.workspace_root = workspace_root;
+  spec.language_ids = {"python"};
+  if (location->use_python_module) {
+    spec.args.emplace_back("-m");
+    spec.args.push_back(location->python_module.empty() ? "basedpyright.langserver"
+                                                        : location->python_module);
+  }
+  if (location->needs_stdio_flag) {
+    spec.args.emplace_back("--stdio");
+  }
+  return spec;
+}
+
+std::optional<LanguageServerSpec> make_language_server_spec(
+    const std::string& server_id, const std::string& workspace_root,
+    const std::string& compile_commands_dir, const bool use_gcc_query_driver,
+    const bool background_index) {
+  if (server_id == kLspServerClangd) {
+    return make_clangd_spec(workspace_root, compile_commands_dir, use_gcc_query_driver,
+                            background_index);
+  }
+  if (server_id == kLspServerBasedpyright) {
+    return make_basedpyright_spec(workspace_root);
+  }
+  return std::nullopt;
+}
+
+}  // namespace tgdb

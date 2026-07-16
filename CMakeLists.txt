@@ -22,6 +22,7 @@ include(cmake/Dependencies.cmake)
 set(TGDB_TREE_SITTER_INCLUDE_DIRS
   ${tree_sitter_SOURCE_DIR}/lib/include
   ${tree_sitter_cpp_SOURCE_DIR}/bindings/c
+  ${tree_sitter_python_SOURCE_DIR}/bindings/c
 )
 
 set(TGDB_TREE_SITTER_SOURCES
@@ -42,6 +43,7 @@ set(TGDB_TREE_SITTER_SOURCES
   src/i18n/tr.cpp
   src/i18n/strings_es.cpp
   src/i18n/strings_en.cpp
+  src/lsp/lsp_uri.cpp
 )
 
 function(tgdb_link_tree_sitter target)
@@ -51,7 +53,7 @@ function(tgdb_link_tree_sitter target)
     ${cppdap_SOURCE_DIR}/include
     ${cppdap_SOURCE_DIR}/third_party/json/include
   )
-  target_link_libraries(${target} PRIVATE tree-sitter tree-sitter-cpp ftxui::dom)
+  target_link_libraries(${target} PRIVATE tree-sitter tree-sitter-cpp tree-sitter-python ftxui::dom)
 endfunction()
 
 add_executable(tgdb
@@ -70,6 +72,7 @@ add_executable(tgdb
   src/app/editor_tabs.cpp
   src/backend/dap_backend.cpp
   src/dap/gdb_launcher.cpp
+  src/dap/debug_adapter_spec.cpp
   src/dap/gdb_protocol.cpp
   src/ui/main_layout.cpp
   src/ui/hover_effects.cpp
@@ -133,6 +136,7 @@ add_executable(tgdb
   src/lsp/lsp_position.cpp
   src/lsp/lsp_transport.cpp
   src/lsp/lsp_text_edits.cpp
+  src/lsp/language_server_spec.cpp
   src/lsp/lsp_client.cpp
   src/lsp/diagnostics.cpp
   src/symbols/lsp_symbol_provider.cpp
@@ -251,6 +255,7 @@ target_link_libraries(tgdb PRIVATE
   cppdap
   tree-sitter
   tree-sitter-cpp
+  tree-sitter-python
   Threads::Threads
 )
 
@@ -292,6 +297,11 @@ if(TGDB_BUNDLE_GDB)
 endif()
 if(TGDB_BUNDLE_RG)
   include(cmake/BundleRg.cmake)
+endif()
+if(TGDB_BUNDLE_PYTHON_TOOLS)
+  include(cmake/BundlePythonTools.cmake)
+elseif(TGDB_BUNDLE_PYTHON_LSP_MIN)
+  include(cmake/BundlePythonLspMin.cmake)
 endif()
 
 add_executable(tgdb-bundle-wizard tools/bundle_wizard/main.cpp)
@@ -555,6 +565,7 @@ target_compile_definitions(pkt_protocol_test PRIVATE
 add_executable(lsp_completion_probe
   tools/lsp_completion_probe.cpp
   tools/lsp_probe_stubs.cpp
+  src/lsp/language_server_spec.cpp
   src/lsp/lsp_client.cpp
   src/lsp/lsp_transport.cpp
   src/lsp/lsp_uri.cpp

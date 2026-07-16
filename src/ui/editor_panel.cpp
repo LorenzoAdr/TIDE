@@ -4391,35 +4391,50 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
 
-  if (m.button == Mouse::Right && m.motion == Mouse::Pressed && in_code) {
-    claim_editor_focus(focus, layout_state, panel->panel_focus);
-    const CursorPos pos =
-        mouse_to_cursor(m, *panel, *buffer, visible_lines);
-    buffer->reset_to_single_cursor(pos.line, pos.col);
-    MultiCursor cursor = buffer->primary();
-    cursor.head = pos;
-    int start_col = 0;
-    int end_col = 0;
-    ident_range_at_cursor(*buffer, cursor, &start_col, &end_col);
-    const std::string symbol = word_at_cursor(*buffer, cursor);
-    if (!symbol.empty() && layout_state != nullptr) {
-      const bool show_call_hierarchy =
-          symbols != nullptr && symbols->supports_call_hierarchy() &&
-          is_lsp_trackable_path(buffer->path);
-      context_menu_open_editor_symbol(&layout_state->context_menu, m.x, m.y, pos.line, pos.col,
-                                      start_col, end_col, symbol, buffer->path,
-                                      show_call_hierarchy, debug_model);
-      end_mouse_selection(panel);
-      return true;
+  if (m.button == Mouse::Right && m.motion == Mouse::Pressed) {
+    if (in_gutter && debug_model != nullptr && on_command && !buffer->path.empty()) {
+      claim_editor_focus(focus, layout_state, panel->panel_focus);
+      const int row = m.y - panel->gutter_box.y_min;
+      if (row >= 0 && row < panel->gutter_visible_rows) {
+        const int line = gutter_buffer_line_at_row(*panel, row) + 1;
+        ToggleBreakpointAtFile(debug_model, buffer->path, line, on_command);
+        if (layout_state != nullptr) {
+          UI_WAKE(layout_state, "wake");
+        }
+        end_mouse_selection(panel);
+        return true;
+      }
     }
-    if (layout_state != nullptr && !buffer->path.empty() &&
-        is_lsp_trackable_path(buffer->path)) {
-      const bool show_call_hierarchy =
-          symbols != nullptr && symbols->supports_call_hierarchy();
-      context_menu_open_editor_background(&layout_state->context_menu, m.x, m.y, buffer->path,
-                                          pos.line, pos.col, show_call_hierarchy);
-      end_mouse_selection(panel);
-      return true;
+    if (in_code) {
+      claim_editor_focus(focus, layout_state, panel->panel_focus);
+      const CursorPos pos =
+          mouse_to_cursor(m, *panel, *buffer, visible_lines);
+      buffer->reset_to_single_cursor(pos.line, pos.col);
+      MultiCursor cursor = buffer->primary();
+      cursor.head = pos;
+      int start_col = 0;
+      int end_col = 0;
+      ident_range_at_cursor(*buffer, cursor, &start_col, &end_col);
+      const std::string symbol = word_at_cursor(*buffer, cursor);
+      if (!symbol.empty() && layout_state != nullptr) {
+        const bool show_call_hierarchy =
+            symbols != nullptr && symbols->supports_call_hierarchy(buffer->path) &&
+            is_lsp_trackable_path(buffer->path);
+        context_menu_open_editor_symbol(&layout_state->context_menu, m.x, m.y, pos.line, pos.col,
+                                        start_col, end_col, symbol, buffer->path,
+                                        show_call_hierarchy, debug_model);
+        end_mouse_selection(panel);
+        return true;
+      }
+      if (layout_state != nullptr && !buffer->path.empty() &&
+          is_lsp_trackable_path(buffer->path)) {
+        const bool show_call_hierarchy =
+            symbols != nullptr && symbols->supports_call_hierarchy(buffer->path);
+        context_menu_open_editor_background(&layout_state->context_menu, m.x, m.y, buffer->path,
+                                            pos.line, pos.col, show_call_hierarchy);
+        end_mouse_selection(panel);
+        return true;
+      }
     }
     return false;
   }
@@ -4443,19 +4458,6 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       }
       end_mouse_selection(panel);
       return true;
-    }
-
-    if (in_gutter && debug_model != nullptr && on_command && !buffer->path.empty()) {
-      const int row = m.y - panel->gutter_box.y_min;
-      if (row >= 0 && row < panel->gutter_visible_rows) {
-        const int line = gutter_buffer_line_at_row(*panel, row) + 1;
-        ToggleBreakpointAtFile(debug_model, buffer->path, line, on_command);
-        if (layout_state != nullptr) {
-          UI_WAKE(layout_state, "wake");
-        }
-        end_mouse_selection(panel);
-        return true;
-      }
     }
 
     if (in_gutter && git_modal != nullptr && git != nullptr && git->is_repo() &&

@@ -151,6 +151,8 @@ struct MainLayoutState {
   std::string panel_cache_outline_path;
   int panel_cache_terminal_w = 0;
   int panel_cache_terminal_h = 0;
+  // -1 = unset; tracks AppMode so RightSidebar cache rebuilds on enter/exit debug.
+  int panel_cache_app_mode = -1;
   UiPanelRenderCache panel_render_cache;
   UiActivityGate activity_gate;
   UiPerfMonitor ui_perf_monitor;

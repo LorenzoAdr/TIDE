@@ -255,11 +255,16 @@ Element make_problem_row_element(const DiagnosticRow& row, const std::string& wo
   return row_el;
 }
 
-void clamp_scroll(DiagnosticsPanelState* state, int visible_terminal_lines) {
+void clamp_scroll_viewport(DiagnosticsPanelState* state, int visible_terminal_lines) {
   const int total = static_cast<int>(state->rows.size());
   const int visible_rows = visible_problem_count(visible_terminal_lines);
   const int max_first = std::max(0, total - visible_rows);
   state->first_visible = std::max(0, std::min(state->first_visible, max_first));
+}
+
+void ensure_selection_visible(DiagnosticsPanelState* state, int visible_terminal_lines) {
+  clamp_scroll_viewport(state, visible_terminal_lines);
+  const int visible_rows = visible_problem_count(visible_terminal_lines);
   if (state->selected < state->first_visible) {
     state->first_visible = state->selected;
   } else if (state->selected >= state->first_visible + visible_rows) {
@@ -295,7 +300,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
     const int visible = visible_line_count(state->content_box);
     state->last_visible_lines = visible;
     const int panel_width = panel_content_width(state->content_box);
-    clamp_scroll(state.get(), visible);
+    clamp_scroll_viewport(state.get(), visible);
 
     Elements rows;
     if (!symbols || !symbols->supports_diagnostics()) {
@@ -333,12 +338,10 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
         const int visible_rows = visible_problem_count(visible);
         const int total = static_cast<int>(state->rows.size());
         const int max_first = std::max(0, total - visible_rows);
-        if (m.button == Mouse::WheelUp) {
-          state->first_visible = std::max(0, state->first_visible - 1);
-        } else {
-          state->first_visible = std::min(state->first_visible + 1, max_first);
-        }
-        clamp_scroll(state.get(), visible);
+        const int delta = m.button == Mouse::WheelUp ? -3 : 3;
+        state->first_visible =
+            std::max(0, std::min(state->first_visible + delta, max_first));
+        clamp_scroll_viewport(state.get(), visible);
         if (layout_state != nullptr) {
           UI_WAKE(layout_state, "wake");
         }
@@ -358,7 +361,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
           return false;
         }
         state->selected = row;
-        clamp_scroll(state.get(), visible);
+        ensure_selection_visible(state.get(), visible);
         const DiagnosticRow& diag = state->rows[static_cast<std::size_t>(row)];
         const bool lsp_available =
             symbols != nullptr && symbols->supports_code_actions() &&
@@ -386,7 +389,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       const int row = state->first_visible + (visual_row / kLinesPerProblem);
       if (row >= 0 && row < static_cast<int>(state->rows.size())) {
         state->selected = row;
-        clamp_scroll(state.get(), visible);
+        ensure_selection_visible(state.get(), visible);
         navigate_to_diagnostic(workspace, state->rows[static_cast<std::size_t>(row)]);
         if (focus != nullptr) {
           focus->region = FocusRegion::Editor;
@@ -413,12 +416,12 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
     if (event == Event::ArrowDown || event == Event::Character('j')) {
       state->selected =
           std::min(state->selected + 1, static_cast<int>(state->rows.size()) - 1);
-      clamp_scroll(state.get(), visible);
+      ensure_selection_visible(state.get(), visible);
       return true;
     }
     if (event == Event::ArrowUp || event == Event::Character('k')) {
       state->selected = std::max(0, state->selected - 1);
-      clamp_scroll(state.get(), visible);
+      ensure_selection_visible(state.get(), visible);
       return true;
     }
     if (event == Event::Return) {
@@ -431,12 +434,12 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
     if (event == Event::PageDown) {
       state->selected =
           std::min(state->selected + visible_rows, static_cast<int>(state->rows.size()) - 1);
-      clamp_scroll(state.get(), visible);
+      ensure_selection_visible(state.get(), visible);
       return true;
     }
     if (event == Event::PageUp) {
       state->selected = std::max(0, state->selected - visible_rows);
-      clamp_scroll(state.get(), visible);
+      ensure_selection_visible(state.get(), visible);
       return true;
     }
     return false;

@@ -58,6 +58,27 @@ int visible_line_count(const Box& box) {
   return std::max(1, box.y_max - box.y_min + 1);
 }
 
+// True when reflect() has not yet assigned a real layout box (default 0,0,0,0).
+bool content_box_laid_out(const Box& box) {
+  return box.y_max > box.y_min || box.x_max > box.x_min;
+}
+
+int explorer_visible_rows(const Box& content_box, MainLayoutState* layout_state, int total,
+                          int last_visible_lines) {
+  int visible = visible_line_count(content_box);
+  // First paint (and any rebuild before reflect): content_box is still empty, so
+  // visible_line_count returns 1. The FileTree sits behind UiPanelRenderCache; if we
+  // only emit one row, that Element is frozen and the explorer stays stuck on the
+  // first sorted folder (often ".cache" with show_all_workspace_files).
+  if (!content_box_laid_out(content_box) || (visible <= 1 && total > 1)) {
+    visible = std::max({1, total, last_visible_lines});
+    if (layout_state != nullptr && layout_state->terminal_height) {
+      visible = std::max(visible, layout_state->terminal_height() - 4);
+    }
+  }
+  return visible;
+}
+
 int max_scroll_offset(int total_lines, int visible_lines) {
   return std::max(0, total_lines - visible_lines);
 }
@@ -779,7 +800,8 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
         relative_path_in_workspace(model->workspace_root, active_file);
 
     const int total = static_cast<int>(state->flat.size());
-    const int visible = visible_line_count(state->content_box);
+    const int visible =
+        explorer_visible_rows(state->content_box, layout_state, total, state->last_visible_lines);
     state->last_visible_lines = visible;
     state->clamp_scroll();
 

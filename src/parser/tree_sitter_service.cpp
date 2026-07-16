@@ -118,12 +118,17 @@ int source_line_count(const std::string& source) {
   return static_cast<int>(std::count(source.begin(), source.end(), '\n') + 1);
 }
 
-TSTree* parse_tree_for_source(TSTree* old_tree, const std::string& source) {
+TSTree* parse_tree_for_source(TSTree* old_tree, const std::string& source,
+                              const std::string& path) {
   if (source.empty()) {
     return nullptr;
   }
+  const TSLanguage* language = tree_sitter_language_for_path(path);
+  if (language == nullptr) {
+    language = tree_sitter_cpp_language();
+  }
   TSParser* parser = ts_parser_new();
-  ts_parser_set_language(parser, tree_sitter_cpp_language());
+  ts_parser_set_language(parser, language);
   TSTree* reparsed =
       ts_parser_parse_string(parser, old_tree, source.c_str(), static_cast<uint32_t>(source.size()));
   ts_parser_delete(parser);
@@ -209,7 +214,7 @@ std::optional<LineHighlights> TreeSitterService::highlights_for_editing_line(
   TSTree* reparsed_tree = nullptr;
   const bool needs_reparse = !doc->highlights_ready;
   if (needs_reparse) {
-    reparsed_tree = parse_tree_for_source(doc->tree, doc->source);
+    reparsed_tree = parse_tree_for_source(doc->tree, doc->source, path);
     if (reparsed_tree != nullptr) {
       query_tree = reparsed_tree;
     }
@@ -221,7 +226,10 @@ std::optional<LineHighlights> TreeSitterService::highlights_for_editing_line(
     }
     return std::nullopt;
   }
-  LineHighlights result = highlights_for_line(root, doc->source, line_0);
+  const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path);
+  LineHighlights result = highlights_for_line(
+      root, doc->source, line_0,
+      lang == TreeSitterLangKind::kNone ? TreeSitterLangKind::kCpp : lang);
   const bool line_has_text = [&]() {
     std::size_t pos = 0;
     for (int row = 0; row < line_0; ++row) {
@@ -240,11 +248,13 @@ std::optional<LineHighlights> TreeSitterService::highlights_for_editing_line(
       ts_tree_delete(reparsed_tree);
       reparsed_tree = nullptr;
     }
-    TSTree* fresh_tree = parse_tree_for_source(nullptr, doc->source);
+    TSTree* fresh_tree = parse_tree_for_source(nullptr, doc->source, path);
     if (fresh_tree != nullptr) {
       const TSNode fresh_root = ts_tree_root_node(fresh_tree);
       if (!ts_node_is_null(fresh_root)) {
-        result = highlights_for_line(fresh_root, doc->source, line_0);
+        result = highlights_for_line(
+            fresh_root, doc->source, line_0,
+            lang == TreeSitterLangKind::kNone ? TreeSitterLangKind::kCpp : lang);
         did_full_reparse = true;
       }
       ts_tree_delete(fresh_tree);

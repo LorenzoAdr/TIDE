@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Instala el ejecutable en /usr/opt/tide y registra el alias "tide" en el shell.
+# No compila: usa el binario ya generado en build/tgdb (o TGDB_BIN).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_BIN="${ROOT}/build/tgdb"
+BUILD_BIN="${TGDB_BIN:-${ROOT}/build/tgdb}"
 INSTALL_DIR="/usr/opt"
 INSTALL_BIN="${INSTALL_DIR}/tide"
 MARKER_BEGIN="# >>> tide (tgdb) >>>"
@@ -14,11 +15,14 @@ usage() {
   cat <<EOF
 Uso: $(basename "$0") [opciones]
 
-Instala el IDE en ${INSTALL_BIN} y añade el alias "tide" al shell.
+Copia el binario a ${INSTALL_BIN} y añade el alias "tide" a ~/.bashrc.
+No compila; el binario debe existir de antemano (p. ej. tras tools/compile.sh).
 
 Opciones:
-  --no-build   No compilar; usar el binario existente en build/tgdb
   -h, --help   Muestra esta ayuda
+
+Variables de entorno:
+  TGDB_BIN     Ruta al ejecutable a instalar (default: build/tgdb)
 
 Requiere permisos de administrador (sudo) para copiar en ${INSTALL_DIR}.
 EOF
@@ -33,13 +37,8 @@ log() {
   printf '[install] %s\n' "$*"
 }
 
-need_build=true
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --no-build)
-      need_build=false
-      shift
-      ;;
     -h | --help)
       usage
       exit 0
@@ -50,12 +49,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "${need_build}" == true ]]; then
-  log "compilando…"
-  "${ROOT}/tools/compile.sh"
-fi
-
-[[ -x "${BUILD_BIN}" ]] || die "no se encontró el ejecutable: ${BUILD_BIN}"
+[[ -x "${BUILD_BIN}" ]] || die "no se encontró el ejecutable: ${BUILD_BIN} (compila antes con tools/compile.sh)"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   SUDO=(sudo)

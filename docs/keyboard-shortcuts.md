@@ -62,7 +62,7 @@ Press **F1** inside tgdb to open the in-app shortcuts dialog (scrollable). This 
 | Ctrl+U | Scroll half page up |
 | Ctrl+I | Scroll half page down |
 | Ctrl+B | Toggle breakpoint on current line |
-| Click gutter | Toggle breakpoint |
+| Right-click gutter | Toggle breakpoint |
 
 In the GDB console, type native GDB commands or `watch <expression>` to add a watch.
 

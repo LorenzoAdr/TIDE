@@ -10,6 +10,7 @@
 #include "ui/theme.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/syntax_scope.hpp"
+#include "lsp/lsp_uri.hpp"
 
 namespace tgdb {
 
@@ -374,7 +375,8 @@ Element preview_or_lite_line(const std::string& line, int line_index, SyntaxHigh
   if (line.empty()) {
     return text(" ");
   }
-  return HighlightCodeLineLite(line, cursor_col, cursor_style);
+  return HighlightCodeLineLite(line, cursor_col, cursor_style,
+                               ctx != nullptr ? ctx->file_path : std::string{});
 }
 
 Element highlight_tree_sitter_gap(const std::string& line, int line_index,
@@ -401,7 +403,8 @@ Element highlight_tree_sitter_gap(const std::string& line, int line_index,
         return HighlightTreeSitterLine(line, line_index, display_hl, cursor_col, cursor_style, 0);
       }
     }
-    return HighlightCodeLineLite(line, cursor_col, cursor_style);
+    return HighlightCodeLineLite(line, cursor_col, cursor_style,
+                                 ctx != nullptr ? ctx->file_path : std::string{});
   }
   const auto* all_highlights = ctx->tree_sitter_highlights();
   if (all_highlights == nullptr || line_index < 0 ||
@@ -415,7 +418,7 @@ Element highlight_tree_sitter_gap(const std::string& line, int line_index,
       display_spans_for_line(source_hl, source_line, col_offset, static_cast<int>(line.size()),
                              tab_size);
   if (display_hl.spans.empty() && !line.empty()) {
-    return HighlightCodeLineLite(line, cursor_col, cursor_style);
+    return HighlightCodeLineLite(line, cursor_col, cursor_style, ctx->file_path);
   }
   return HighlightTreeSitterLine(line, line_index, display_hl, cursor_col, cursor_style, 0);
 }
@@ -540,7 +543,32 @@ bool keyword_lite(std::string_view word) {
   return false;
 }
 
+bool keyword_lite_python(std::string_view word) {
+  static constexpr const char* kWords[] = {
+      "and",      "as",     "assert",  "async",   "await",  "break",   "class",  "continue",
+      "def",      "del",    "elif",    "else",    "except", "False",   "finally","for",
+      "from",     "global", "if",      "import",  "in",     "is",      "lambda", "None",
+      "nonlocal", "not",    "or",      "pass",    "raise",  "return",  "True",   "try",
+      "while",    "with",   "yield",   "match",   "case"};
+  for (const char* kw : kWords) {
+    if (word == kw) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool path_looks_python(const std::string& path) {
+  return language_id_for_path(path) == "python";
+}
+
 Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator cursor_style) {
+  return HighlightCodeLineLite(line, cursor_col, cursor_style, {});
+}
+
+Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator cursor_style,
+                              const std::string& file_path) {
+  const bool python = path_looks_python(file_path);
   if (line.empty()) {
     if (cursor_col == 0 && cursor_style) {
       return text(" ") | cursor_style;
@@ -594,11 +622,15 @@ Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator
       continue;
     }
 
-    if (c == '/' && i + 1 < line.size() && line[i + 1] == '/') {
+    if (python && c == '#') {
       lex = Lex::kLineComment;
       continue;
     }
-    if (c == '/' && i + 1 < line.size() && line[i + 1] == '*') {
+    if (!python && c == '/' && i + 1 < line.size() && line[i + 1] == '/') {
+      lex = Lex::kLineComment;
+      continue;
+    }
+    if (!python && c == '/' && i + 1 < line.size() && line[i + 1] == '*') {
       parts.push_back(text("/*") | color(theme::SyntaxComment()) | dim);
       i += 2;
       lex = Lex::kBlockComment;
@@ -632,7 +664,8 @@ Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator
         ++i;
       }
       const std::string_view word(line.data() + start, i - start);
-      if (keyword_lite(word)) {
+      const bool is_kw = python ? keyword_lite_python(word) : keyword_lite(word);
+      if (is_kw) {
         parts.push_back(text(std::string(word)) | color(theme::SyntaxKeyword()) | bold);
       } else {
         parts.push_back(text(std::string(word)));

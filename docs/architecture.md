@@ -12,17 +12,17 @@
         │              │
         │  UiCommand   │  file events
         ▼              ▼
-┌───────────────┐  ┌────────────────┐  ┌─────────────────────┐
-│  DAP thread   │  │ Indexer threads│  │  clangd (optional)  │
-│  DapBackend   │  │ WorkspaceIndexer│  │  LspClient          │
-│  cppdap ↔ GDB │  │ SymbolIndexer  │  │  LSP over stdio     │
-└───────┬───────┘  └────────────────┘  └─────────────────────┘
-        │
-        ▼
-   gdb -i=dap
+┌───────────────┐  ┌────────────────┐  ┌──────────────────────────┐
+│  DAP thread   │  │ Indexer threads│  │  Language servers (LSP)  │
+│  DapBackend   │  │ WorkspaceIndexer│  │  LspClient × N (stdio)   │
+│  cppdap ↔     │  │ SymbolIndexer  │  │  clangd / basedpyright   │
+│  GDB|debugpy  │  └────────────────┘  └──────────────────────────┘
+└───────────────┘
 ```
 
 All UI state lives on a single FTXUI thread. Background workers communicate through thread-safe queues or callbacks posted back to the UI loop via `Event::Custom`.
+
+Language servers are described by `LanguageServerSpec` and started lazily (clangd on workspace open for C/C++; basedpyright when a `.py` file is opened). Debug adapters use `DebugAdapterSpec` / `IDebugAdapterProcess` (`gdb -i=dap` for native binaries, `python -m debugpy.adapter` for `.py`).
 
 ## Application modes
 

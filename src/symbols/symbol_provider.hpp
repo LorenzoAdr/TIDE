@@ -219,7 +219,13 @@ class ISymbolProvider {
     return {};
   }
 
+  // True when some language server that can answer call-hierarchy is ready.
   virtual bool supports_call_hierarchy() const { return false; }
+  // True when the language server for this path can answer call-hierarchy.
+  virtual bool supports_call_hierarchy(const std::string& path) const {
+    (void)path;
+    return supports_call_hierarchy();
+  }
   virtual std::vector<CallHierarchyItem> prepare_call_hierarchy(const CallHierarchyParams& params) {
     (void)params;
     return {};

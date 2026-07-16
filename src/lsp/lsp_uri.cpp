@@ -92,6 +92,9 @@ std::string language_id_for_path(const std::string& path) {
       ext == ".cxx") {
     return "cpp";
   }
+  if (ext == ".py" || ext == ".pyi" || ext == ".pyw") {
+    return "python";
+  }
   return "plaintext";
 }
 

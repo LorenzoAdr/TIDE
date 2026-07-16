@@ -1,0 +1,78 @@
+set(TGDB_BUNDLED_CACHE_DIR "${CMAKE_SOURCE_DIR}/third_party/bundled/cache")
+set(TGDB_BUNDLED_GEN_DIR "${CMAKE_BINARY_DIR}/generated/bundled")
+
+file(MAKE_DIRECTORY "${TGDB_BUNDLED_CACHE_DIR}")
+file(MAKE_DIRECTORY "${TGDB_BUNDLED_GEN_DIR}")
+
+set(TGDB_PYTHON_STANDALONE_TAR_NAME
+    "cpython-${TGDB_PYTHON_STANDALONE_VERSION}+${TGDB_PYTHON_STANDALONE_TAG}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz")
+set(TGDB_PYTHON_STANDALONE_URL
+    "https://github.com/astral-sh/python-build-standalone/releases/download/${TGDB_PYTHON_STANDALONE_TAG}/${TGDB_PYTHON_STANDALONE_TAR_NAME}")
+set(TGDB_PYTHON_STANDALONE_TAR_PATH
+    "${TGDB_BUNDLED_CACHE_DIR}/${TGDB_PYTHON_STANDALONE_TAR_NAME}")
+
+set(TGDB_PYTHON_TOOLS_STAGING_DIR "${TGDB_BUNDLED_GEN_DIR}/python_tools_staging")
+set(TGDB_PYTHON_TOOLS_PAYLOAD_DIR "${TGDB_BUNDLED_GEN_DIR}/python_tools_payload")
+set(TGDB_PYTHON_TOOLS_TAR_PATH "${TGDB_BUNDLED_GEN_DIR}/python_tools_blob.tar")
+set(TGDB_PYTHON_TOOLS_ZST_PATH "${TGDB_BUNDLED_GEN_DIR}/python_tools_blob.zst")
+set(TGDB_PYTHON_TOOLS_MANIFEST_PATH "${TGDB_BUNDLED_GEN_DIR}/python_tools_manifest.json")
+set(TGDB_PYTHON_TOOLS_BLOB_OBJ "${TGDB_BUNDLED_GEN_DIR}/python_tools_blob.o")
+set(TGDB_PYTHON_TOOLS_MANIFEST_HPP "${TGDB_BUNDLED_GEN_DIR}/bundled_python_tools_manifest.hpp")
+
+find_program(TGDB_OBJCOPY objcopy)
+find_program(TGDB_ZSTD zstd)
+find_program(TGDB_SHA256SUM sha256sum)
+find_program(TGDB_CURL curl)
+find_program(TGDB_WGET wget)
+
+foreach(_tool TGDB_OBJCOPY TGDB_ZSTD TGDB_SHA256SUM)
+  if(NOT ${_tool})
+    message(FATAL_ERROR "TGDB_BUNDLE_PYTHON_TOOLS requires '${_tool}' in PATH")
+  endif()
+endforeach()
+
+if(NOT TGDB_CURL AND NOT TGDB_WGET)
+  message(FATAL_ERROR "TGDB_BUNDLE_PYTHON_TOOLS requires curl or wget")
+endif()
+
+set(TGDB_PREPARE_PYTHON_TOOLS_SCRIPT
+    "${CMAKE_SOURCE_DIR}/cmake/prepare_python_tools_bundle.sh")
+
+add_custom_command(
+  OUTPUT "${TGDB_PYTHON_TOOLS_ZST_PATH}" "${TGDB_PYTHON_TOOLS_MANIFEST_PATH}"
+         "${TGDB_PYTHON_TOOLS_MANIFEST_HPP}" "${TGDB_PYTHON_TOOLS_BLOB_OBJ}"
+  COMMAND "${CMAKE_COMMAND}" -E rm -rf
+          "${TGDB_PYTHON_TOOLS_STAGING_DIR}" "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${TGDB_PYTHON_TOOLS_STAGING_DIR}"
+  COMMAND "${CMAKE_COMMAND}" -E env
+          TGDB_PYTHON_TOOLS_VERSION="${TGDB_PYTHON_TOOLS_VERSION}"
+          TGDB_BASEDPYRIGHT_VERSION="${TGDB_BASEDPYRIGHT_VERSION}"
+          TGDB_DEBUGPY_VERSION="${TGDB_DEBUGPY_VERSION}"
+          TGDB_PYTHON_STANDALONE_URL="${TGDB_PYTHON_STANDALONE_URL}"
+          TGDB_PYTHON_STANDALONE_TAR_PATH="${TGDB_PYTHON_STANDALONE_TAR_PATH}"
+          TGDB_PYTHON_TOOLS_STAGING_DIR="${TGDB_PYTHON_TOOLS_STAGING_DIR}"
+          TGDB_PYTHON_TOOLS_PAYLOAD_DIR="${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}"
+          TGDB_PYTHON_TOOLS_TAR_PATH="${TGDB_PYTHON_TOOLS_TAR_PATH}"
+          TGDB_PYTHON_TOOLS_ZST_PATH="${TGDB_PYTHON_TOOLS_ZST_PATH}"
+          TGDB_PYTHON_TOOLS_MANIFEST_PATH="${TGDB_PYTHON_TOOLS_MANIFEST_PATH}"
+          TGDB_PYTHON_TOOLS_MANIFEST_HPP="${TGDB_PYTHON_TOOLS_MANIFEST_HPP}"
+          TGDB_PYTHON_TOOLS_BLOB_OBJ="${TGDB_PYTHON_TOOLS_BLOB_OBJ}"
+          bash "${TGDB_PREPARE_PYTHON_TOOLS_SCRIPT}"
+  DEPENDS "${TGDB_PREPARE_PYTHON_TOOLS_SCRIPT}"
+  COMMENT "Preparing embedded CPython+basedpyright+debugpy (full)"
+  VERBATIM)
+
+add_custom_target(tgdb_python_tools_bundle DEPENDS
+                  "${TGDB_PYTHON_TOOLS_ZST_PATH}" "${TGDB_PYTHON_TOOLS_MANIFEST_HPP}"
+                  "${TGDB_PYTHON_TOOLS_BLOB_OBJ}")
+
+include("${CMAKE_SOURCE_DIR}/cmake/BundleZstd.cmake")
+
+target_sources(tgdb PRIVATE "${TGDB_PYTHON_TOOLS_BLOB_OBJ}")
+target_include_directories(tgdb PRIVATE "${TGDB_BUNDLED_GEN_DIR}")
+target_compile_definitions(tgdb PRIVATE TGDB_HAS_BUNDLED_PYTHON_TOOLS=1)
+if(TGDB_FORCE_BUNDLED_PYTHON_TOOLS)
+  target_compile_definitions(tgdb PRIVATE TGDB_DEFAULT_FORCE_BUNDLED_PYTHON_TOOLS=1)
+endif()
+target_link_libraries(tgdb PRIVATE libzstd_static)
+add_dependencies(tgdb tgdb_python_tools_bundle)
