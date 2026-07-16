@@ -51,8 +51,13 @@ class TreeSitterService {
   bool document_symbols_ready(const std::string& path, const std::string& source) const;
   void ensure_viewport_preview(const std::string& path, const std::string& source,
                              const std::vector<int>& line_indices);
+  void ensure_viewport_preview_slice(const std::string& path, int first_line, int last_line,
+                                     const std::string& slice);
   const LineHighlights* viewport_preview_line(const std::string& path, const std::string& source,
                                               int line_0) const;
+  const LineHighlights* viewport_preview_line_virtual(const std::string& path, int line_0) const;
+  void mark_document_viewport_only(const std::string& path);
+  bool document_viewport_only(const std::string& path) const;
   // Patch one line of the frozen baseline from the live tree (called when typing settles).
   void commit_line_highlights(const std::string& path, const std::string& source, int line_0,
                               const std::string& line_text);

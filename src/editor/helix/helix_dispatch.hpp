@@ -7,6 +7,7 @@
 #include "editor/editor_state.hpp"
 #include "editor/helix/helix_commands.hpp"
 #include "editor/helix/helix_state.hpp"
+#include "symbols/completion_snippet.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 
@@ -35,6 +36,7 @@ struct HelixDispatchContext {
   std::function<void()> goto_next_diagnostic;
   std::function<void()> goto_prev_diagnostic;
   ISymbolProvider* symbols = nullptr;
+  SnippetSession* snippet_session = nullptr;
 };
 
 bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command);

@@ -5,6 +5,7 @@
 #include <fstream>
 
 #include "indexer/index_rules.hpp"
+#include "util/csv_viewer.hpp"
 
 namespace fs = std::filesystem;
 
@@ -52,12 +53,17 @@ FileOpenAssessment assess_file_open(const std::string& absolute_path) {
     return result;
   }
 
-  if (result.size_bytes > FileOpenPolicy::kMaxOpenFileBytes) {
-    result.kind = FileOpenKind::TooLarge;
-  } else if (result.size_bytes > FileOpenPolicy::kLargeFileBytes) {
+  if (result.size_bytes > FileOpenPolicy::kLargeFileBytes) {
     result.kind = FileOpenKind::Large;
   }
   return result;
+}
+
+bool should_open_as_virtual_text(const std::string& absolute_path) {
+  if (absolute_path.empty() || is_tabular_path(absolute_path)) {
+    return false;
+  }
+  return assess_file_open(absolute_path).kind == FileOpenKind::Large;
 }
 
 std::string format_file_size(std::uintmax_t bytes) {

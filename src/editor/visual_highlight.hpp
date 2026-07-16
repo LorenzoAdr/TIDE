@@ -198,7 +198,8 @@ void mark_visual_highlight_dirty(VisualHighlightPanelState* state, int64_t now_m
 void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                      const VisualHighlightConfig& config, bool editor_focused,
                                      bool indexed_source, bool content_settled, int64_t now_ms,
-                                     const VisualHighlightJobInputs& inputs);
+                                     const VisualHighlightJobInputs& inputs,
+                                     bool selection_in_progress = false);
 
 bool drain_visual_highlight_results(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                     MainLayoutState* layout, bool editor_focused);

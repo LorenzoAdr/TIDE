@@ -4,6 +4,7 @@
 #include <filesystem>
 
 #include "ftxui/component/event.hpp"
+#include "ui/key_bindings.hpp"
 #include "util/fuzzy_match.hpp"
 
 namespace fs = std::filesystem;
@@ -32,33 +33,17 @@ bool is_directory_path(const std::string& path) {
   return fs::is_directory(path, ec);
 }
 
-void PathBrowserState::reset(const std::string& start_path) {
-  browser_path = canonical_browser_root(start_path);
-  browser_loaded_path.clear();
-  entries.clear();
-  filter_query.clear();
-  selected = 0;
-  browser_list_start = 0;
-}
-
-void PathBrowserState::reload_browser_entries(bool reset_selection) {
-  entries.clear();
-  if (reset_selection) {
-    filter_query.clear();
-    selected = 0;
-    browser_list_start = 0;
-  }
+std::vector<BrowserEntry> list_directory_entries(const std::string& path) {
+  std::vector<BrowserEntry> entries;
   std::error_code ec;
-  fs::path current(browser_path);
+  fs::path current(path);
   if (!fs::exists(current, ec)) {
-    browser_path = canonical_browser_root(launch_root);
-    current = fs::path(browser_path);
+    return entries;
   }
-  browser_path = fs::weakly_canonical(current, ec).string();
+  current = fs::weakly_canonical(current, ec);
   if (ec) {
-    browser_path = current.string();
+    current = fs::path(path);
   }
-  browser_loaded_path = browser_path;
 
   if (current.has_parent_path()) {
     BrowserEntry parent;
@@ -90,13 +75,42 @@ void PathBrowserState::reload_browser_entries(bool reset_selection) {
     }
   }
 
-  auto by_name = [](const BrowserEntry& a, const BrowserEntry& b) {
-    return a.name < b.name;
-  };
+  auto by_name = [](const BrowserEntry& a, const BrowserEntry& b) { return a.name < b.name; };
   std::sort(dirs.begin(), dirs.end(), by_name);
   std::sort(files.begin(), files.end(), by_name);
   entries.insert(entries.end(), dirs.begin(), dirs.end());
   entries.insert(entries.end(), files.begin(), files.end());
+  return entries;
+}
+
+void PathBrowserState::reset(const std::string& start_path) {
+  browser_path = canonical_browser_root(start_path);
+  browser_loaded_path.clear();
+  entries.clear();
+  filter_query.clear();
+  selected = 0;
+  browser_list_start = 0;
+}
+
+void PathBrowserState::reload_browser_entries(bool reset_selection) {
+  entries.clear();
+  if (reset_selection) {
+    filter_query.clear();
+    selected = 0;
+    browser_list_start = 0;
+  }
+  std::error_code ec;
+  fs::path current(browser_path);
+  if (!fs::exists(current, ec)) {
+    browser_path = canonical_browser_root(launch_root);
+    current = fs::path(browser_path);
+  }
+  browser_path = fs::weakly_canonical(current, ec).string();
+  if (ec) {
+    browser_path = current.string();
+  }
+  browser_loaded_path = browser_path;
+  entries = list_directory_entries(browser_path);
 
   selected = std::max(
       0, std::min(selected, std::max(0, static_cast<int>(entries.size()) - 1)));
@@ -172,12 +186,12 @@ PathBrowserFilterResult PathBrowserState::handle_filter_input(const Event& event
 }
 
 bool PathBrowserState::handle_list_navigation(const Event& event, int page_size) {
-  if (event == Event::ArrowDown || event == Event::Character('j')) {
+  if (event == Event::ArrowDown || event == Event::Character('j') || event_is_plain_tab(event)) {
     clear_filter();
     selected = std::min(selected + 1, std::max(0, static_cast<int>(entries.size()) - 1));
     return true;
   }
-  if (event == Event::ArrowUp || event == Event::Character('k')) {
+  if (event == Event::ArrowUp || event == Event::Character('k') || event == Event::TabReverse) {
     clear_filter();
     selected = std::max(0, selected - 1);
     return true;

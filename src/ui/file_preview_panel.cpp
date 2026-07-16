@@ -168,4 +168,35 @@ Element RenderFilePreviewPanel(const FilePickerPreviewData& preview,
          size(WIDTH, EQUAL, pane_width) | size(HEIGHT, EQUAL, pane_height);
 }
 
+Element RenderFolderPreviewPanel(const std::vector<BrowserEntry>& entries,
+                                 const std::string& folder_path, int pane_width, int pane_height,
+                                 int max_rows) {
+  const std::string header = folder_path.empty() ? " " : folder_path;
+  Elements body;
+  const int end = std::min(static_cast<int>(entries.size()), max_rows);
+  for (int i = 0; i < end; ++i) {
+    const BrowserEntry& row = entries[static_cast<std::size_t>(i)];
+    const std::string prefix = row.is_directory ? i18n::tr("common.browser.dir_prefix")
+                                                : i18n::tr("common.browser.file_prefix");
+    Element line = text(prefix + row.name);
+    if (row.is_directory) {
+      line = line | color(theme::Accent());
+    }
+    body.push_back(std::move(line));
+  }
+  if (body.empty()) {
+    body.push_back(text(i18n::tr("common.empty")) | color(theme::Muted()));
+  } else if (static_cast<int>(entries.size()) > max_rows) {
+    body.push_back(text(i18n::tr("common.ellipsis")) | color(theme::Muted()));
+  }
+
+  return vbox({
+             hbox({text(" " + header) | color(theme::Accent()) | bold, filler()}) |
+                 size(HEIGHT, EQUAL, 1),
+             separator(),
+             vbox(std::move(body)) | frame | vscroll_indicator | bgcolor(theme::CodeBg()),
+         }) |
+         size(WIDTH, EQUAL, pane_width) | size(HEIGHT, EQUAL, pane_height);
+}
+
 }  // namespace tgdb

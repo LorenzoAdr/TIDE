@@ -71,6 +71,9 @@ std::string normalize_editor_source(const std::string& source);
 
 std::string join_editor_lines_from_file(const std::string& path);
 
+// Sentinel source key for large virtualized read-only documents (no full-buffer join).
+std::string virtual_document_source_key(const std::string& path);
+
 struct DocumentEntry {
   std::string path;
   std::string source;
@@ -83,6 +86,7 @@ struct DocumentEntry {
   bool highlights_ready = false;
   bool symbols_ready = false;
   bool prepare_inflight = false;
+  bool viewport_only = false;
   std::optional<ViewportHighlightPreview> viewport_preview;
 
   ~DocumentEntry();
@@ -119,8 +123,13 @@ class TreeSitterDocumentCache {
   bool document_symbols_ready(const std::string& path, const std::string& canonical) const;
   void ensure_viewport_preview(const std::string& path, const std::string& canonical,
                                const std::vector<int>& line_indices);
+  void ensure_viewport_preview_slice(const std::string& path, int first_line, int last_line,
+                                     const std::string& slice);
   const LineHighlights* viewport_preview_line(const std::string& path, const std::string& canonical,
                                               int line_0) const;
+  const LineHighlights* viewport_preview_line_virtual(const std::string& path, int line_0) const;
+  void mark_document_viewport_only(const std::string& path);
+  bool document_viewport_only(const std::string& path) const;
 
   struct HighlightTreeSnapshot {
     TSTree* tree_copy = nullptr;

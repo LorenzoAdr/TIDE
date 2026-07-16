@@ -290,6 +290,14 @@ void TreeSitterService::ensure_viewport_preview(const std::string& path, const s
                                  line_indices);
 }
 
+void TreeSitterService::ensure_viewport_preview_slice(const std::string& path, int first_line,
+                                                      int last_line, const std::string& slice) {
+  if (path.empty() || slice.empty()) {
+    return;
+  }
+  cache_.ensure_viewport_preview_slice(cache_key_for(path), first_line, last_line, slice);
+}
+
 const LineHighlights* TreeSitterService::viewport_preview_line(const std::string& path,
                                                                const std::string& source,
                                                                int line_0) const {
@@ -298,6 +306,28 @@ const LineHighlights* TreeSitterService::viewport_preview_line(const std::string
   }
   return cache_.viewport_preview_line(cache_key_for(path), normalize_editor_source(source),
                                       line_0);
+}
+
+const LineHighlights* TreeSitterService::viewport_preview_line_virtual(const std::string& path,
+                                                                       int line_0) const {
+  if (path.empty() || line_0 < 0) {
+    return nullptr;
+  }
+  return cache_.viewport_preview_line_virtual(cache_key_for(path), line_0);
+}
+
+void TreeSitterService::mark_document_viewport_only(const std::string& path) {
+  if (path.empty()) {
+    return;
+  }
+  cache_.mark_document_viewport_only(cache_key_for(path));
+}
+
+bool TreeSitterService::document_viewport_only(const std::string& path) const {
+  if (path.empty()) {
+    return false;
+  }
+  return cache_.document_viewport_only(cache_key_for(path));
 }
 
 namespace {

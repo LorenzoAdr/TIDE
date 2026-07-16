@@ -141,6 +141,37 @@ int main() {
     assert(marks.add_lines.count(0) == 0);
   }
 
+  {
+    const auto head = lines({"keep", "old", "tail"});
+    auto working = lines({"keep", "new", "added", "tail"});
+    const auto rows = tgdb::build_side_by_side_rows_from_lines(head, working);
+    assert(rows.size() == 4);
+    const auto blocks = tgdb::build_diff_change_blocks(rows);
+    assert(blocks.size() == 1);
+    assert(tgdb::revert_diff_change_block(&working, head, rows, 0));
+    assert(working == head);
+  }
+
+  {
+    const auto head = lines({"a", "b", "c"});
+    auto working = lines({"a", "x", "c"});
+    const auto rows = tgdb::build_side_by_side_rows_from_lines(head, working);
+    const auto blocks = tgdb::build_diff_change_blocks(rows);
+    assert(blocks.size() == 1);
+    assert(tgdb::revert_diff_change_block(&working, head, rows, 0));
+    assert(working == head);
+  }
+
+  {
+    const auto head = lines({"gone", "file"});
+    auto working = std::vector<std::string>{};
+    const auto rows = tgdb::build_side_by_side_rows_from_lines(head, working);
+    const auto blocks = tgdb::build_diff_change_blocks(rows);
+    assert(blocks.size() == 1);
+    assert(tgdb::revert_diff_change_block(&working, head, rows, 0));
+    assert(working == head);
+  }
+
   std::cout << "git_diff_test ok\n";
   return 0;
 }

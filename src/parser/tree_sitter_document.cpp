@@ -385,6 +385,10 @@ std::string normalize_editor_source(const std::string& source) {
   return source;
 }
 
+std::string virtual_document_source_key(const std::string& path) {
+  return path + "\n\x01virtual";
+}
+
 std::string join_editor_lines_from_file(const std::string& path) {
   if (path.empty()) {
     return {};
@@ -466,6 +470,14 @@ void TreeSitterDocumentCache::request_prepare(const std::string& path, const std
   const std::string canonical = normalize_editor_source(source);
   if (path.empty() || canonical.empty()) {
     return;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = cache_.find(path);
+    if (it != cache_.end() && it->second != nullptr && it->second->viewport_only) {
+      return;
+    }
   }
 
   DebouncedPrepare debounced;
@@ -617,6 +629,9 @@ bool TreeSitterDocumentCache::document_highlights_ready(const std::string& path,
     return false;
   }
   const DocumentPtr& entry = it->second;
+  if (entry->viewport_only) {
+    return false;
+  }
   return entry->source == canonical && entry->highlights_ready;
 }
 
@@ -757,6 +772,119 @@ const LineHighlights* TreeSitterDocumentCache::viewport_preview_line(const std::
   }
   const ViewportHighlightPreview& preview = *entry->viewport_preview;
   if (preview.source != canonical || line_0 < preview.first_line || line_0 > preview.last_line) {
+    return nullptr;
+  }
+  const auto found = preview.by_line.find(line_0);
+  if (found == preview.by_line.end()) {
+    return nullptr;
+  }
+  return &found->second;
+}
+
+void TreeSitterDocumentCache::mark_document_viewport_only(const std::string& path) {
+  if (path.empty()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  DocumentPtr& entry = cache_[path];
+  if (entry == nullptr) {
+    entry = std::make_shared<DocumentEntry>();
+    entry->path = path;
+  }
+  if (entry->tree != nullptr) {
+    ts_tree_delete(entry->tree);
+    entry->tree = nullptr;
+  }
+  entry->viewport_only = true;
+  entry->source = virtual_document_source_key(path);
+  entry->line_highlights.clear();
+  entry->symbols.clear();
+  entry->scope_symbols.clear();
+  entry->parse_ready = false;
+  entry->highlights_ready = false;
+  entry->symbols_ready = false;
+  entry->prepare_inflight = false;
+  entry->viewport_preview.reset();
+  entry->revision = next_revision_++;
+}
+
+bool TreeSitterDocumentCache::document_viewport_only(const std::string& path) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = cache_.find(path);
+  if (it == cache_.end() || it->second == nullptr) {
+    return false;
+  }
+  return it->second->viewport_only;
+}
+
+void TreeSitterDocumentCache::ensure_viewport_preview_slice(const std::string& path,
+                                                            int first_line, int last_line,
+                                                            const std::string& slice) {
+  if (path.empty() || first_line < 0 || last_line < first_line || slice.empty()) {
+    return;
+  }
+
+  const std::string source_key = virtual_document_source_key(path);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = cache_.find(path);
+    if (it != cache_.end()) {
+      const DocumentPtr& entry = it->second;
+      if (entry->viewport_preview.has_value() && entry->viewport_preview->source == source_key &&
+          first_line >= entry->viewport_preview->first_line &&
+          last_line <= entry->viewport_preview->last_line) {
+        return;
+      }
+    }
+  }
+
+  TSTree* tree = parse_tree_for_source_local(slice);
+  if (tree == nullptr) {
+    return;
+  }
+  const TSNode root = ts_tree_root_node(tree);
+  ViewportHighlightPreview preview;
+  preview.source = source_key;
+  preview.first_line = first_line;
+  preview.last_line = last_line;
+  if (!ts_node_is_null(root)) {
+    const std::vector<LineHighlights> slice_highlights = highlights_for_document(root, slice);
+    for (int line = first_line; line <= last_line; ++line) {
+      const int slice_line = line - first_line;
+      if (slice_line >= 0 && slice_line < static_cast<int>(slice_highlights.size())) {
+        preview.by_line.emplace(line, slice_highlights[static_cast<std::size_t>(slice_line)]);
+      }
+    }
+  }
+  ts_tree_delete(tree);
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  DocumentPtr& entry = cache_[path];
+  if (entry == nullptr) {
+    entry = std::make_shared<DocumentEntry>();
+    entry->path = path;
+  }
+  entry->viewport_only = true;
+  if (entry->source.empty()) {
+    entry->source = source_key;
+  }
+  entry->viewport_preview = std::move(preview);
+}
+
+const LineHighlights* TreeSitterDocumentCache::viewport_preview_line_virtual(const std::string& path,
+                                                                             int line_0) const {
+  const std::string source_key = virtual_document_source_key(path);
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = cache_.find(path);
+  if (it == cache_.end()) {
+    return nullptr;
+  }
+  const DocumentPtr& entry = it->second;
+  if (!entry->viewport_only || !entry->viewport_preview.has_value()) {
+    return nullptr;
+  }
+  const ViewportHighlightPreview& preview = *entry->viewport_preview;
+  if (preview.source != source_key || line_0 < preview.first_line || line_0 > preview.last_line) {
     return nullptr;
   }
   const auto found = preview.by_line.find(line_0);

@@ -443,7 +443,8 @@ void mark_visual_highlight_dirty(VisualHighlightPanelState* state, int64_t now_m
 void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const EditorBuffer& buffer,
                                      const VisualHighlightConfig& config, bool editor_focused,
                                      bool indexed_source, bool content_settled, int64_t now_ms,
-                                     const VisualHighlightJobInputs& inputs) {
+                                     const VisualHighlightJobInputs& inputs,
+                                     bool selection_in_progress) {
   if (state == nullptr || buffer.path.empty()) {
     return;
   }
@@ -497,7 +498,7 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
     }
   }
 
-  if (config.selection_occurrences) {
+  if (config.selection_occurrences && !selection_in_progress) {
     const VisualHighlightSelectionKey selection_key = visual_highlight_selection_key_from(buffer);
     if (selection_key != state->last_selection_key) {
       state->last_selection_key = selection_key;
@@ -509,6 +510,8 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
         schedule_visual_highlight_debounce_wake(state, now_ms);
       }
     }
+  } else if (config.selection_occurrences && selection_in_progress) {
+    state->last_selection_key = visual_highlight_selection_key_from(buffer);
   } else {
     const VisualHighlightSelectionKey selection_key = visual_highlight_selection_key_from(buffer);
     if (selection_key != state->last_selection_key) {
@@ -650,14 +653,14 @@ bool drain_visual_highlight_results(VisualHighlightPanelState* state, const Edit
   state->snapshot = std::move(merged);
   visual_highlight_service().clear_completion_wake(state->pending_generation);
 
-  if (!revision_match || (editor_focused && (!cursor_match || !selection_match))) {
+  if (!revision_match || (editor_focused && !cursor_match)) {
     state->dirty = true;
     state->dirty_ms = steady_now_ms();
   } else {
     state->dirty = false;
   }
 
-  if (layout != nullptr) {
+  if (layout != nullptr && state->snapshot.ready) {
     invalidate_editor_view(layout);
   }
   return true;

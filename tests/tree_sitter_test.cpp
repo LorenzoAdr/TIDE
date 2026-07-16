@@ -453,6 +453,22 @@ void test_editor_fold_visibility() {
   assert(fold_gutter_marker(1, regions, {}) == '-');
 }
 
+void test_fold_scroll_stable_on_collapse() {
+  EditorBuffer buffer = make_buffer({"head", "open {", "hidden a", "hidden b", "}", "tail"});
+  buffer.fold_regions = {{1, 4}};
+  buffer.scroll = 5;
+  buffer.reset_to_single_cursor(0, 0);
+
+  assert(toggle_fold_at(&buffer, 1, buffer.fold_regions));
+  stabilize_scroll_after_fold_change(&buffer, buffer.fold_regions, 3);
+  assert(buffer.scroll == 5);
+
+  buffer.scroll = 2;
+  assert(toggle_fold_at(&buffer, 1, buffer.fold_regions));
+  stabilize_scroll_after_fold_change(&buffer, buffer.fold_regions, 3);
+  assert(buffer.scroll == 1);
+}
+
 void test_colored_curly_braces_depths() {
   const std::vector<std::string> lines = {"void foo() {",
                                           "  if (cond) {",
@@ -864,6 +880,7 @@ int main() {
   tgdb::test_innermost_scope_declaration_in_if();
   tgdb::test_fold_regions_from_tree();
   tgdb::test_editor_fold_visibility();
+  tgdb::test_fold_scroll_stable_on_collapse();
   tgdb::test_colored_curly_braces_depths();
   tgdb::test_local_completions_include_parameters();
   tgdb::test_symbols_refresh_after_sync_edit();

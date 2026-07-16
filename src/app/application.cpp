@@ -996,8 +996,7 @@ void Application::set_workspace(const std::string &workspace_root,
 		    i18n::tr_fmt("workspace.open_prefix", {fs::path(absolute).filename().string()});
 	}
 	file_picker_state_.indexed_root.clear();
-	file_picker_state_.all_files.clear();
-	file_picker_state_.all_files_lower.clear();
+	file_picker_state_.index_snapshot.reset();
 	shell_session_.stop();
 	model_.console_output.clear();
 	request_terminal_autostart();
@@ -1107,7 +1106,6 @@ void Application::open_quick_file_picker(bool arm_ctrl_chord) {
 	file_picker_state_.open = true;
 	file_picker_state_.query.clear();
 	file_picker_state_.selected = 0;
-	file_picker_state_.sync_index(indexer_.snapshot(), model_.workspace_root);
 	file_picker_state_.mark_matches_dirty();
 	file_picker_state_.reset_preview();
 	if (arm_ctrl_chord) {
@@ -2074,8 +2072,13 @@ int Application::run() {
 		ui_wake_correlated(&layout_state_, ui_capture_correlation(&layout_state_),
 		                   "file_picker.preview");
 	});
+	file_picker_state_.set_search_notify([this] { UI_WAKE(&layout_state_, "app"); });
 	file_picker_state_.set_repaint_notify([this] { UI_WAKE(&layout_state_, "file_picker.repaint"); });
 	file_picker_state_.set_file_opened_notify([this] { notify_file_tree_reveal(); });
+	external_file_wizard_state_.set_preview_notify([this] {
+		ui_wake_correlated(&layout_state_, ui_capture_correlation(&layout_state_),
+		                   "external_file_wizard.preview");
+	});
 	symbol_picker_state_.set_search_notify([this] { UI_WAKE(&layout_state_, "app"); });
 	symbol_picker_state_.set_preview_notify([this] {
 		ui_wake_correlated(&layout_state_, ui_capture_correlation(&layout_state_),

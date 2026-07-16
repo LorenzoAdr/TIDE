@@ -13,6 +13,7 @@ struct EditorTab {
   EditorBuffer buffer;
   bool external = false;
   bool read_only = false;
+  bool large_virtual_view = false;
   bool git_diff_view = false;
   std::vector<SideBySideDiffRow> diff_rows;
 };

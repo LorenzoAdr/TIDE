@@ -12,6 +12,7 @@
 #include "editor/helix/helix_textobjects.hpp"
 #include "editor/line_comment.hpp"
 #include "editor/text_ops.hpp"
+#include "symbols/completion_snippet.hpp"
 #include "editor/text_search.hpp"
 #include "editor/undo_stack.hpp"
 #include "ftxui/component/event.hpp"
@@ -102,20 +103,11 @@ void collapse_cursors_for_fresh_extend(EditorBuffer* buffer) {
   }
 }
 
-void move_fresh_extend(EditorBuffer* buffer, void (*move_fn)(EditorBuffer*, bool)) {
-  collapse_cursors_for_fresh_extend(buffer);
-  move_fn(buffer, true);
-}
-
 void move_helix_navigation(EditorBuffer* buffer, void (*move_fn)(EditorBuffer*, bool)) {
   if (buffer == nullptr) {
     return;
   }
-  if (buffer->multi_cursor_active()) {
-    move_fn(buffer, false);
-    return;
-  }
-  move_fresh_extend(buffer, move_fn);
+  move_fn(buffer, false);
 }
 
 void goto_buffer_line_fresh_extend(EditorBuffer* buffer, int line_one_based, int visible_lines,
@@ -895,6 +887,11 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
       return true;
     case HelixCommand::kIndent:
       if (helix->mode == HelixMode::kInsert) {
+        if (ctx.snippet_session != nullptr && snippet_session_active(*ctx.snippet_session) &&
+            advance_snippet_session(buffer, ctx.snippet_session)) {
+          ensure_view(ctx);
+          return true;
+        }
         insert_tab_stop(buffer);
       } else {
         indent_lines(buffer);

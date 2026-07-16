@@ -31,9 +31,12 @@
 #include "editor/editor_render.hpp"
 #include "editor/indent_guides.hpp"
 #include "util/clang_format_config.hpp"
+#include "util/syntax_highlight.hpp"
 #include "parser/tree_sitter_service.hpp"
 #include "util/csv_viewer.hpp"
 #include "util/tabular_file.hpp"
+#include "util/virtual_text_file.hpp"
+#include "parser/tree_sitter_document.hpp"
 #include "util/monitor_log.hpp"
 #include "util/ui_perf_monitor.hpp"
 #include "util/fuzzy_match.hpp"
@@ -265,6 +268,7 @@ struct EditorPanelState {
   bool document_open_pending = false;
   std::string pending_document_open_path;
   bool chord_k_pending = false;
+  SnippetSession snippet_session;
   HelixEditorState helix;
   std::string tabular_layout_path;
   TabularDelimiter tabular_delimiter = TabularDelimiter::kComma;
@@ -274,6 +278,11 @@ struct EditorPanelState {
   int64_t last_tabular_index_tick_ms = 0;
   bool tabular_scroll_locked = false;
   int tabular_scroll_limit = 0;
+  std::unique_ptr<VirtualTextFileStore> virtual_store;
+  std::string virtual_ts_source_key;
+  int64_t last_virtual_index_tick_ms = 0;
+  bool virtual_scroll_locked = false;
+  int virtual_scroll_limit = 0;
   std::unordered_map<int, CachedViewportLineRow> viewport_line_render_cache;
   std::unordered_map<uint64_t, CachedSyntaxLineSpans> line_syntax_span_cache;
   uint64_t last_ts_baseline_commit_token = 0;
@@ -287,6 +296,10 @@ struct EditorPanelState {
   uint64_t vh_last_inputs_git_view_token = 0;
   int vh_last_inputs_code_width = -1;
   std::size_t vh_last_inputs_find_count = 0;
+  Box diff_action_box;
+  std::vector<int> diff_revert_block_by_viewport_row;
+  int diff_revert_hover_block = -1;
+  int diff_revert_pressed_block = -1;
 };
 
 void flash_symbol_at_buffer_pos_impl(WorkspaceModel* workspace, MainLayoutState* layout_state,
@@ -426,7 +439,7 @@ struct ViewportLineRenderKeyInput {
 
 uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line,
                                         const EditorBuffer& buffer, const EditorPanelState& panel,
-                                        bool editor_focused, bool show_caret, bool mouse_selecting,
+                                        bool editor_focused, bool show_caret,
                                         bool helix_caret_insert, int scroll_col, int code_width,
                                         bool helix_relative, int gutter_w, bool fold_gutter_enabled,
                                         bool gutter_markers, bool indent_guides_enabled,
@@ -454,7 +467,6 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
   h = viewport_line_hash_int(h, line.guide_depth);
   h = viewport_line_hash_bool(h, editor_focused);
   h = viewport_line_hash_bool(h, show_caret);
-  h = viewport_line_hash_bool(h, mouse_selecting);
   h = viewport_line_hash_bool(h, helix_caret_insert);
   h = viewport_line_hash_bool(h, helix_relative);
   h = viewport_line_hash_int(h, gutter_w);
@@ -1501,7 +1513,10 @@ void navigate_editor_to_line(WorkspaceModel* workspace, EditorPanelState* panel,
 
 bool tabular_view_ready(EditorPanelState* panel, const EditorBuffer& buffer);
 bool scroll_tabular_lines(WorkspaceModel* workspace, EditorPanelState* panel, int delta_lines,
-                            int visible_lines);
+                          int visible_lines);
+bool virtual_text_view_ready(WorkspaceModel* workspace, EditorPanelState* panel);
+bool scroll_virtual_lines(WorkspaceModel* workspace, EditorPanelState* panel, int delta_lines,
+                          int visible_lines);
 void scroll_tabular_columns(EditorBuffer* buffer, EditorPanelState* panel, int delta_columns,
                             int code_width);
 int tabular_total_content_width(EditorPanelState* panel);
@@ -1515,6 +1530,11 @@ int tabular_data_visible_lines(int visible_lines);
 int tabular_max_allowed_scroll(EditorPanelState* panel, int visible_lines);
 void clamp_tabular_scroll(EditorPanelState* panel, EditorBuffer* buffer, int visible_lines);
 void maybe_request_tabular_chunk(EditorPanelState* panel, EditorBuffer* buffer, int visible_lines);
+int virtual_max_allowed_scroll(EditorPanelState* panel, int visible_lines);
+void clamp_virtual_scroll(EditorPanelState* panel, EditorBuffer* buffer, int visible_lines);
+void maybe_request_virtual_chunk(EditorPanelState* panel, EditorBuffer* buffer, int visible_lines);
+void ensure_virtual_viewport_ts(const std::string& path, VirtualTextFileStore* store, int scroll,
+                                int visible_lines);
 
 bool handle_overview_ruler_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
                                  MainLayoutState* layout_state, EditorPanelState* panel,
@@ -1529,6 +1549,10 @@ bool handle_overview_ruler_mouse(WorkspaceModel* workspace, FocusManagerState* f
   }
 
   if (m.button == Mouse::WheelUp) {
+    if (scroll_virtual_lines(workspace, panel, -3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     if (scroll_tabular_lines(workspace, panel, -3, visible_lines)) {
       clear_hover_state(&panel->hover);
       return true;
@@ -1539,6 +1563,10 @@ bool handle_overview_ruler_mouse(WorkspaceModel* workspace, FocusManagerState* f
     return true;
   }
   if (m.button == Mouse::WheelDown) {
+    if (scroll_virtual_lines(workspace, panel, 3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     if (scroll_tabular_lines(workspace, panel, 3, visible_lines)) {
       clear_hover_state(&panel->hover);
       return true;
@@ -1572,12 +1600,16 @@ bool apply_scrollbar_drag(WorkspaceModel* workspace, EditorPanelState* panel, in
   int new_scroll = scroll_for_thumb_top(panel->scrollbar_layout, thumb_top);
   if (tabular_view_ready(panel, *buffer)) {
     new_scroll = std::min(new_scroll, tabular_max_allowed_scroll(panel, visible_lines));
+  } else if (virtual_text_view_ready(workspace, panel)) {
+    new_scroll = std::min(new_scroll, virtual_max_allowed_scroll(panel, visible_lines));
   }
   if (buffer->scroll != new_scroll) {
     buffer->scroll = new_scroll;
     clear_hover_state(&panel->hover);
     if (tabular_view_ready(panel, *buffer)) {
       maybe_request_tabular_chunk(panel, buffer, visible_lines);
+    } else if (virtual_text_view_ready(workspace, panel)) {
+      maybe_request_virtual_chunk(panel, buffer, visible_lines);
     }
   }
   return true;
@@ -1626,6 +1658,10 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.button == Mouse::WheelUp) {
+    if (scroll_virtual_lines(workspace, panel, -3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     if (scroll_tabular_lines(workspace, panel, -3, visible_lines)) {
       clear_hover_state(&panel->hover);
       return true;
@@ -1636,6 +1672,10 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (m.button == Mouse::WheelDown) {
+    if (scroll_virtual_lines(workspace, panel, 3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     if (scroll_tabular_lines(workspace, panel, 3, visible_lines)) {
       clear_hover_state(&panel->hover);
       return true;
@@ -1664,10 +1704,14 @@ bool handle_scrollbar_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       int new_scroll = scroll_for_thumb_top(panel->scrollbar_layout, thumb_top);
       if (tabular_view_ready(panel, workspace->buffer)) {
         new_scroll = std::min(new_scroll, tabular_max_allowed_scroll(panel, visible_lines));
+      } else if (virtual_text_view_ready(workspace, panel)) {
+        new_scroll = std::min(new_scroll, virtual_max_allowed_scroll(panel, visible_lines));
       }
       workspace->buffer.scroll = new_scroll;
       if (tabular_view_ready(panel, workspace->buffer)) {
         maybe_request_tabular_chunk(panel, &workspace->buffer, visible_lines);
+      } else if (virtual_text_view_ready(workspace, panel)) {
+        maybe_request_virtual_chunk(panel, &workspace->buffer, visible_lines);
       }
       panel->scrollbar_dragging = true;
       panel->scrollbar_drag_offset = panel->scrollbar_layout.thumb_height / 2;
@@ -1944,8 +1988,7 @@ bool handle_fold_gutter_click(EditorPanelState* panel, EditorBuffer* buffer, con
   if (!toggle_fold_at(buffer, line, buffer->fold_regions)) {
     return false;
   }
-  ensure_scroll_visible_fold_aware(buffer, buffer->fold_regions, visible_lines,
-                                   panel->code_width_chars);
+  stabilize_scroll_after_fold_change(buffer, buffer->fold_regions, visible_lines);
   return true;
 }
 
@@ -3063,6 +3106,99 @@ bool scroll_tabular_lines(WorkspaceModel* workspace, EditorPanelState* panel, in
   return true;
 }
 
+namespace {
+
+constexpr int kVirtualTsContextLines = 48;
+
+}  // namespace
+
+bool virtual_text_view_ready(WorkspaceModel* workspace, EditorPanelState* panel) {
+  return workspace != nullptr && workspace->active_tab_large_virtual_view() && panel != nullptr &&
+         panel->virtual_store != nullptr && panel->virtual_store->ready();
+}
+
+int virtual_max_allowed_scroll(EditorPanelState* panel, int visible_lines) {
+  if (panel == nullptr || panel->virtual_store == nullptr || !panel->virtual_store->ready()) {
+    return 0;
+  }
+  const int total = panel->virtual_store->line_count();
+  int allowed = max_scroll(total, visible_lines);
+  if (panel->virtual_scroll_locked || panel->virtual_store->loading_more()) {
+    allowed = std::min(allowed, panel->virtual_scroll_limit);
+  }
+  return allowed;
+}
+
+void clamp_virtual_scroll(EditorPanelState* panel, EditorBuffer* buffer, int visible_lines) {
+  if (panel == nullptr || buffer == nullptr || panel->virtual_store == nullptr ||
+      !panel->virtual_store->ready()) {
+    return;
+  }
+  const int allowed = virtual_max_allowed_scroll(panel, visible_lines);
+  buffer->scroll = std::max(0, std::min(buffer->scroll, allowed));
+}
+
+void maybe_request_virtual_chunk(EditorPanelState* panel, EditorBuffer* buffer, int visible_lines) {
+  if (panel == nullptr || buffer == nullptr || panel->virtual_store == nullptr ||
+      !panel->virtual_store->ready()) {
+    return;
+  }
+  VirtualTextFileStore* store = panel->virtual_store.get();
+  if (!store->has_more() || store->loading_more() || panel->virtual_scroll_locked) {
+    return;
+  }
+  const int total = store->line_count();
+  if (buffer->scroll < max_scroll(total, visible_lines)) {
+    return;
+  }
+  if (store->request_load_at_end(buffer->scroll, visible_lines)) {
+    panel->virtual_scroll_locked = true;
+    panel->virtual_scroll_limit = buffer->scroll;
+  }
+}
+
+bool scroll_virtual_lines(WorkspaceModel* workspace, EditorPanelState* panel, int delta_lines,
+                          int visible_lines) {
+  if (!virtual_text_view_ready(workspace, panel)) {
+    return false;
+  }
+  workspace->ensure_buffer();
+  EditorBuffer* buffer = &workspace->buffer;
+  const int total = panel->virtual_store->line_count();
+  buffer->scroll = std::max(
+      0, std::min(buffer->scroll + delta_lines, max_scroll(total, visible_lines)));
+  clamp_virtual_scroll(panel, buffer, visible_lines);
+  maybe_request_virtual_chunk(panel, buffer, visible_lines);
+  buffer->view_token++;
+  return true;
+}
+
+void ensure_virtual_viewport_ts(const std::string& path, VirtualTextFileStore* store, int scroll,
+                                int visible_lines) {
+  if (store == nullptr || !store->ready() || path.empty() || visible_lines <= 0) {
+    return;
+  }
+  const int total = store->line_count();
+  if (total <= 0) {
+    return;
+  }
+  const int view_end = std::min(total - 1, scroll + visible_lines - 1);
+  const int first = std::max(0, scroll - kVirtualTsContextLines);
+  const int last = std::min(total - 1, view_end + kVirtualTsContextLines);
+  std::string slice;
+  slice.reserve(static_cast<std::size_t>((last - first + 1) * 64));
+  for (int line = first; line <= last; ++line) {
+    if (!slice.empty()) {
+      slice.push_back('\n');
+    }
+    slice += store->line_at(line);
+  }
+  if (slice.empty()) {
+    return;
+  }
+  tree_sitter_service().ensure_viewport_preview_slice(path, first, last, slice);
+}
+
 int tabular_total_content_width(EditorPanelState* panel) {
   if (panel == nullptr || panel->tabular_store == nullptr || !panel->tabular_store->ready()) {
     return 0;
@@ -3829,6 +3965,7 @@ bool handle_editor_escape(EditorBuffer* buffer, EditorFindState* find,
                           GitHistoryModalState* git_modal) {
   if (panel != nullptr) {
     end_mouse_selection(panel);
+    clear_snippet_session(&panel->snippet_session);
   }
   if (git_modal != nullptr && git_modal->open) {
     git_modal->open = false;
@@ -3914,10 +4051,22 @@ CursorPos mouse_to_cursor(const Mouse& m, const EditorPanelState& panel, const E
 
 void autoscroll_on_drag(EditorBuffer* buffer, const Mouse& m, const EditorPanelState& panel,
                         int visible_lines, int code_width) {
-  if (m.y < panel.code_box.y_min && buffer->scroll > 0) {
-    scroll_view_by_lines(buffer, -1, visible_lines);
-  } else if (m.y > panel.code_box.y_max) {
-    scroll_view_by_lines(buffer, 1, visible_lines);
+  if (!panel.code_box.IsEmpty()) {
+    const int box_height = panel.code_box.y_max - panel.code_box.y_min + 1;
+    const int local_y = m.y - panel.code_box.y_min;
+    const int margin = kScrollEdgeMarginLines;
+    const int total = static_cast<int>(buffer->lines.size());
+    const int max_scroll_line = max_scroll(total, visible_lines);
+
+    if (m.y < panel.code_box.y_min) {
+      scroll_view_by_lines(buffer, -1, visible_lines);
+    } else if (local_y < margin && buffer->scroll > 0) {
+      scroll_view_by_lines(buffer, -1, visible_lines);
+    } else if (m.y > panel.code_box.y_max) {
+      scroll_view_by_lines(buffer, 1, visible_lines);
+    } else if (local_y >= box_height - margin && buffer->scroll < max_scroll_line) {
+      scroll_view_by_lines(buffer, 1, visible_lines);
+    }
   }
   if (code_width > 0 && m.x < panel.code_box.x_min) {
     scroll_view_by_columns(buffer, -3, code_width);
@@ -3990,6 +4139,130 @@ void apply_mouse_drag_head(EditorBuffer* buffer, const Mouse& m, const EditorPan
   ensure_scroll_visible(buffer, visible_lines, code_width);
 }
 
+constexpr int kGitDiffActionWidth = 2;
+
+int diff_revert_block_at_viewport_row(const EditorPanelState& panel, int viewport_row) {
+  if (viewport_row < 0 ||
+      viewport_row >= static_cast<int>(panel.diff_revert_block_by_viewport_row.size())) {
+    return -1;
+  }
+  return panel.diff_revert_block_by_viewport_row[static_cast<std::size_t>(viewport_row)];
+}
+
+int diff_revert_block_for_row_index(const std::vector<SideBySideDiffRow>& rows, int row_index) {
+  if (row_index < 0 || row_index >= static_cast<int>(rows.size())) {
+    return -1;
+  }
+  const std::vector<GitDiffChangeBlock> blocks = build_diff_change_blocks(rows);
+  for (int block_index = 0; block_index < static_cast<int>(blocks.size()); ++block_index) {
+    const GitDiffChangeBlock& block = blocks[static_cast<std::size_t>(block_index)];
+    if (row_index >= block.start_row && row_index <= block.end_row) {
+      return block_index;
+    }
+  }
+  return -1;
+}
+
+bool revert_git_diff_block_from_panel(WorkspaceModel* workspace, EditorPanelState* panel,
+                                      GitService* git, int block_index,
+                                      MainLayoutState* layout_state) {
+  if (workspace == nullptr || panel == nullptr || git == nullptr || block_index < 0) {
+    return false;
+  }
+  if (!workspace->revert_git_diff_block(block_index, git)) {
+    return false;
+  }
+  panel->git_cache_revision = 0;
+  panel->git_cache_view_token = 0;
+  panel->diff_revert_hover_block = -1;
+  panel->diff_revert_pressed_block = -1;
+  if (layout_state != nullptr) {
+    UI_WAKE(layout_state, "git.diff.revert");
+  }
+  return true;
+}
+
+bool handle_git_diff_view_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
+                                EditorPanelState* panel, GitService* git,
+                                MainLayoutState* layout_state, const Mouse& m, int visible_lines) {
+  if (workspace == nullptr || panel == nullptr || !workspace->active_tab_git_diff_view()) {
+    return false;
+  }
+
+  EditorBuffer* buffer = &workspace->buffer;
+  const bool in_code = panel->code_box.Contain(m.x, m.y);
+
+  if (m.motion == Mouse::Moved) {
+    if (!in_code) {
+      if (panel->diff_revert_hover_block >= 0) {
+        panel->diff_revert_hover_block = -1;
+        if (layout_state != nullptr) {
+          UI_WAKE(layout_state, "git.diff.hover");
+        }
+      }
+      return false;
+    }
+    const int local_x = m.x - panel->code_box.x_min;
+    const int local_y = m.y - panel->code_box.y_min;
+    int hover_block = -1;
+    if (local_x >= 0 && local_x < kGitDiffActionWidth && local_y > 0) {
+      hover_block = diff_revert_block_at_viewport_row(*panel, local_y - 1);
+    }
+    if (hover_block != panel->diff_revert_hover_block) {
+      panel->diff_revert_hover_block = hover_block;
+      if (layout_state != nullptr) {
+        UI_WAKE(layout_state, "git.diff.hover");
+      }
+    }
+    return hover_block >= 0;
+  }
+
+  if (m.button == Mouse::Left && in_code) {
+    const int local_x = m.x - panel->code_box.x_min;
+    const int local_y = m.y - panel->code_box.y_min;
+    if (local_x >= 0 && local_x < kGitDiffActionWidth && local_y > 0) {
+      const int block = diff_revert_block_at_viewport_row(*panel, local_y - 1);
+      if (block < 0) {
+        return true;
+      }
+      claim_editor_focus(focus, layout_state, panel->panel_focus);
+      if (m.motion == Mouse::Pressed) {
+        panel->diff_revert_pressed_block = block;
+        if (layout_state != nullptr) {
+          UI_WAKE(layout_state, "git.diff.press");
+        }
+        return true;
+      }
+      if (m.motion == Mouse::Released &&
+          panel->diff_revert_pressed_block == block) {
+        revert_git_diff_block_from_panel(workspace, panel, git, block, layout_state);
+        panel->diff_revert_pressed_block = -1;
+        return true;
+      }
+      return true;
+    }
+  }
+
+  if (m.button == Mouse::WheelUp && !m.shift) {
+    scroll_view_by_lines(buffer, -3, visible_lines);
+    return true;
+  }
+  if (m.button == Mouse::WheelDown && !m.shift) {
+    scroll_view_by_lines(buffer, 3, visible_lines);
+    return true;
+  }
+  if (m.button == Mouse::WheelLeft || (m.shift && m.button == Mouse::WheelUp)) {
+    scroll_view_by_columns(buffer, -3, panel->code_width_chars);
+    return true;
+  }
+  if (m.button == Mouse::WheelRight || (m.shift && m.button == Mouse::WheelDown)) {
+    scroll_view_by_columns(buffer, 3, panel->code_width_chars);
+    return true;
+  }
+
+  return false;
+}
+
 bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
                          EditorFindState* find, CompletionState* completion,
                          MainLayoutState* layout_state,
@@ -4005,6 +4278,11 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   buffer->ensure_cursors();
 
   const auto& m = event.mouse();
+  if (workspace->active_tab_git_diff_view() &&
+      handle_git_diff_view_mouse(workspace, focus, panel, git, layout_state, m, visible_lines)) {
+    return true;
+  }
+
   const bool in_code = panel->code_box.Contain(m.x, m.y);
   const bool in_gutter = panel->gutter_box.Contain(m.x, m.y);
   const bool in_editor = in_code || in_gutter;
@@ -4087,6 +4365,10 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (m.button == Mouse::WheelUp && !m.shift) {
+    if (scroll_virtual_lines(workspace, panel, -3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     if (scroll_tabular_lines(workspace, panel, -3, visible_lines)) {
       clear_hover_state(&panel->hover);
       return true;
@@ -4096,6 +4378,10 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (m.button == Mouse::WheelDown && !m.shift) {
+    if (scroll_virtual_lines(workspace, panel, 3, visible_lines)) {
+      clear_hover_state(&panel->hover);
+      return true;
+    }
     if (scroll_tabular_lines(workspace, panel, 3, visible_lines)) {
       clear_hover_state(&panel->hover);
       return true;
@@ -4442,6 +4728,8 @@ bool accept_completion(CompletionState* completion, EditorBuffer* buffer,
       item.insert_format == InsertTextFormat::kSnippet ||
       raw_insert.find('$') != std::string::npos;
 
+  const bool is_callable = item.kind == SymbolKind::kFunction || item.kind == SymbolKind::kMethod;
+
   SnippetResult snippet;
   if (treat_as_snippet) {
     snippet = expand_snippet(raw_insert);
@@ -4449,16 +4737,19 @@ bool accept_completion(CompletionState* completion, EditorBuffer* buffer,
       snippet = adjust_snippet_for_existing_open_paren(raw_insert);
     }
   } else {
-    snippet.text = raw_insert;
-    snippet.caret_col = static_cast<int>(raw_insert.size());
+    snippet = finalize_function_call_insert(raw_insert, item.detail, is_callable, paren_already_there);
   }
 
   if (buffer->multi_cursor_active()) {
     apply_completion_at_all_cursors(buffer, snippet);
+    clear_snippet_session(panel != nullptr ? &panel->snippet_session : nullptr);
   } else {
     replace_text_range_with_caret(buffer, repl_line, repl_start, repl_end, snippet.text,
                                   snippet.caret_line_offset, snippet.caret_col,
                                   snippet.sel_start_col, snippet.sel_end_col);
+    if (panel != nullptr) {
+      begin_snippet_session(&panel->snippet_session, repl_line, repl_start, snippet);
+    }
   }
   ensure_scroll_visible(buffer, visible_lines, -1);
   if (workspace != nullptr && symbols != nullptr) {
@@ -4657,12 +4948,13 @@ HelixDispatchContext build_helix_dispatch_context(WorkspaceModel* workspace, Edi
                           visible_lines, false);
   };
   ctx.symbols = symbols.get();
+  ctx.snippet_session = panel != nullptr ? &panel->snippet_session : nullptr;
   return ctx;
 }
 
-bool helix_editor_active(MainLayoutState* layout_state, bool tabular_view) {
+bool helix_editor_active(MainLayoutState* layout_state, bool tabular_view, bool virtual_view) {
   return layout_state != nullptr && layout_state->app_settings != nullptr &&
-         layout_state->app_settings->helix_mode_enabled && !tabular_view;
+         layout_state->app_settings->helix_mode_enabled && !tabular_view && !virtual_view;
 }
 
 bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
@@ -4686,6 +4978,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   EditorBuffer* buffer = &workspace->buffer;
   buffer->ensure_cursors();
   const bool tabular_view = is_tabular_path(buffer->path);
+  const bool large_virtual_view = workspace->active_tab_large_virtual_view();
   const bool read_only = workspace->active_tab_read_only();
   const auto cancel_completion_on_cursor_move = [&]() {
     cancel_live_lsp_on_cursor_move(completion, symbols, layout_state, panel);
@@ -4731,7 +5024,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
                                  visible_lines);
   }
 
-  const bool helix_on = helix_editor_active(layout_state, tabular_view) && !read_only;
+  const bool helix_on = helix_editor_active(layout_state, tabular_view, large_virtual_view) && !read_only;
 
   if (read_only && (event_is_ctrl_x(event) || event_is_ctrl_v(event) || event_is_plain_tab(event) ||
                     event == Event::CtrlS || event == Event::Backspace || event == Event::Delete ||
@@ -4846,6 +5139,11 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (event_is_plain_tab(event)) {
+    if (snippet_session_active(panel->snippet_session) &&
+        advance_snippet_session(buffer, &panel->snippet_session)) {
+      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+      return true;
+    }
     insert_tab_stop(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
@@ -4975,6 +5273,42 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     }
   }
 
+  if (large_virtual_view && panel != nullptr && panel->virtual_store != nullptr &&
+      panel->virtual_store->ready()) {
+    const int file_lines = panel->virtual_store->line_count();
+    const auto scroll_data = [&](int delta) {
+      buffer->scroll =
+          std::max(0, std::min(buffer->scroll + delta, max_scroll(file_lines, visible_lines)));
+      clamp_virtual_scroll(panel, buffer, visible_lines);
+      maybe_request_virtual_chunk(panel, buffer, visible_lines);
+      buffer->view_token++;
+      return true;
+    };
+    if (event == Event::ArrowDown || event_is_shift_down(event)) {
+      return scroll_data(1);
+    }
+    if (event == Event::ArrowUp || event_is_shift_up(event)) {
+      return scroll_data(-1);
+    }
+    if (event == Event::PageDown) {
+      return scroll_data(visible_lines);
+    }
+    if (event == Event::PageUp) {
+      return scroll_data(-visible_lines);
+    }
+    if (event == Event::Home || event_is_shift_home(event)) {
+      buffer->scroll = 0;
+      buffer->view_token++;
+      return true;
+    }
+    if (event == Event::End || event_is_shift_end(event)) {
+      buffer->scroll = virtual_max_allowed_scroll(panel, visible_lines);
+      maybe_request_virtual_chunk(panel, buffer, visible_lines);
+      buffer->view_token++;
+      return true;
+    }
+  }
+
   if (event_is_ctrl_left(event) || event_is_ctrl_alt_left(event) ||
       event_is_ctrl_shift_left(event)) {
     cancel_completion_on_cursor_move();
@@ -5002,7 +5336,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (event_is_ctrl_alt_up(event) || event_is_ctrl_shift_up(event)) {
-    if (tabular_view) {
+    if (tabular_view || large_virtual_view) {
       return true;
     }
     cancel_completion_on_cursor_move();
@@ -5011,7 +5345,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (event_is_ctrl_alt_down(event) || event_is_ctrl_shift_down(event)) {
-    if (tabular_view) {
+    if (tabular_view || large_virtual_view) {
       return true;
     }
     cancel_completion_on_cursor_move();
@@ -5041,10 +5375,12 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     move_primary_end(buffer, event_is_shift_end(event));
     return true;
   }
-  if (tabular_view) {
+  if (tabular_view || large_virtual_view) {
     if (event == Event::Backspace || event == Event::Delete || event == Event::Return ||
         event_is_ctrl_backspace(event) || event_is_ctrl_delete(event) || event.is_character()) {
-      workspace->status_message = i18n::tr("editor.tabular.readonly_status");
+      workspace->status_message =
+          tabular_view ? i18n::tr("editor.tabular.readonly_status")
+                       : i18n::tr("editor.virtual.readonly_status");
       return true;
     }
   }
@@ -5417,7 +5753,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->semantic_tokens_layout_stale = false;
       panel_state->semantic_tokens_layout_stale_from_line = std::numeric_limits<int>::max();
       panel_state->semantic_tokens_enqueue_pending =
-          !diff_view && !read_only_tab && !buffer.path.empty() && !is_tabular_path(buffer.path);
+          !diff_view && !read_only_tab && !buffer.path.empty() && !is_tabular_path(buffer.path) &&
+          !workspace->active_tab_large_virtual_view();
       panel_state->last_semantic_highlight_revision_tick = 0;
       buffer.scroll_col = 0;
       panel_state->h_scrollbar_dragging = false;
@@ -5431,9 +5768,18 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->tabular_store.reset();
       panel_state->tabular_scroll_locked = false;
       panel_state->tabular_scroll_limit = 0;
+      panel_state->virtual_store.reset();
+      panel_state->virtual_scroll_locked = false;
+      panel_state->virtual_scroll_limit = 0;
+      panel_state->virtual_ts_source_key.clear();
       if (is_tabular_path(buffer.path)) {
         panel_state->tabular_store = std::make_unique<TabularFileStore>();
         panel_state->tabular_store->open_async(buffer.path);
+      } else if (workspace->active_tab_large_virtual_view()) {
+        panel_state->virtual_store = std::make_unique<VirtualTextFileStore>();
+        panel_state->virtual_store->open_async(buffer.path);
+        panel_state->virtual_ts_source_key = virtual_document_source_key(buffer.path);
+        tree_sitter_service().mark_document_viewport_only(buffer.path);
       }
       if (layout_state != nullptr) {
         UI_WAKE(layout_state, "editor.open");
@@ -5444,12 +5790,21 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       }
     }
 
-    const int total = static_cast<int>(buffer.lines.size());
+    const bool large_virtual_view = workspace->active_tab_large_virtual_view();
     const bool tabular_view = is_tabular_path(buffer.path);
     TabularFileStore* tabular_store =
         tabular_view ? panel_state->tabular_store.get() : nullptr;
+    VirtualTextFileStore* virtual_store =
+        large_virtual_view ? panel_state->virtual_store.get() : nullptr;
     const bool tabular_ready = tabular_store != nullptr && tabular_store->ready();
     const bool tabular_indexing = tabular_store != nullptr && tabular_store->indexing();
+    const bool virtual_ready = virtual_store != nullptr && virtual_store->ready();
+    const bool virtual_indexing = virtual_store != nullptr && virtual_store->indexing();
+
+    int total = static_cast<int>(buffer.lines.size());
+    if (virtual_ready) {
+      total = virtual_store->line_count();
+    }
 
     if (tabular_view && tabular_store != nullptr) {
       if (layout_state != nullptr) {
@@ -5461,6 +5816,22 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             UI_WAKE(layout_state, "schedule");
           }
         }
+      }
+    }
+
+    if (large_virtual_view && virtual_store != nullptr) {
+      if (layout_state != nullptr) {
+        const int64_t now = steady_now_ms();
+        if (virtual_indexing || virtual_store->loading_more() ||
+            (virtual_ready && virtual_store->has_more())) {
+          if (now - panel_state->last_virtual_index_tick_ms >= 200) {
+            panel_state->last_virtual_index_tick_ms = now;
+            UI_WAKE(layout_state, "schedule");
+          }
+        }
+      }
+      if (virtual_store->loading_more() && virtual_ready) {
+        panel_state->virtual_scroll_locked = false;
       }
     }
 
@@ -5647,7 +6018,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           find_state->open && !find_state->matches.empty() ? &find_state->matches : nullptr;
       const GitDiffViewRenderResult diff_render = render_git_diff_viewport(
           diff_rows, buffer.scroll, visible, buffer.scroll_col, code_width, find_matches,
-          buffer.primary_line());
+          buffer.primary_line(), panel_state->diff_revert_hover_block,
+          panel_state->diff_revert_pressed_block);
+      panel_state->diff_revert_block_by_viewport_row = diff_render.revert_block_by_viewport_row;
       const VisualHighlightConfig diff_vh_config = visual_highlight_config_from_settings(
           layout_state != nullptr ? layout_state->app_settings : nullptr);
       const bool overview_ruler_enabled =
@@ -5782,6 +6155,120 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             (layout_state != nullptr &&
              layout_state->clickable.is_pressed(press_id::kEditorHorizontalScrollbar));
         const int total_content_width = tabular_total_content_width(panel_state.get());
+        Element code_column = attach_horizontal_scrollbar(
+            std::move(code), total_content_width, buffer.scroll_col, code_width, h_scroll_hovered,
+            h_scroll_active, panel_state.get());
+        return hbox({gutter, separator() | color(theme::AccentDim()), std::move(code_column),
+                     scrollbar}) |
+               flex;
+      }
+
+      const int rendered_lines = static_cast<int>(code_rows.size());
+      Element gutter = vbox(std::move(gutter_rows)) | reflect(panel_state->gutter_box) |
+                       bgcolor(theme::CodeBg());
+      Element code = vbox(std::move(code_rows)) | flex | reflect(panel_state->code_box) |
+                     bgcolor(theme::CodeBg());
+      Element scrollbar =
+          vertical_scrollbar(1, 0, 1, rendered_lines, false, false) |
+          reflect(panel_state->scrollbar_box);
+      panel_state->scrollbar_layout = compute_scrollbar_layout(1, 0, 1, rendered_lines);
+      panel_state->h_scrollbar_layout = {};
+      return hbox({gutter, separator() | color(theme::AccentDim()), code | flex, scrollbar}) |
+             flex;
+    }
+
+    if (large_virtual_view && virtual_store != nullptr) {
+      Elements gutter_rows;
+      Elements code_rows;
+      const Decorator row_bg = bgcolor(theme::CodeBg());
+
+      if (virtual_indexing) {
+        gutter_rows.push_back(text(format_line_number(1, 4)) | color(theme::Muted()) | row_bg);
+        code_rows.push_back(text(i18n::tr("editor.virtual.indexing")) | color(theme::Muted()) |
+                            row_bg);
+      } else if (!virtual_ready) {
+        gutter_rows.push_back(text(format_line_number(1, 4)) | color(theme::Muted()) | row_bg);
+        const std::string message =
+            virtual_store->error_message().empty()
+                ? i18n::tr("editor.virtual.open_failed")
+                : virtual_store->error_message();
+        code_rows.push_back(text(message) | color(theme::Error()) | row_bg);
+      } else {
+        const int file_lines = virtual_store->line_count();
+        clamp_virtual_scroll(panel_state.get(), &buffer, visible);
+        virtual_store->ensure_viewport(buffer.scroll, visible);
+        maybe_request_virtual_chunk(panel_state.get(), &buffer, visible);
+
+        const int scroll = std::max(0, std::min(buffer.scroll, max_scroll(file_lines, visible)));
+        buffer.scroll = scroll;
+        const int gutter_w = line_number_width(std::max(file_lines, 1));
+        const int code_width =
+            code_width_from_box(panel_state->code_box, panel_state->code_width_chars);
+        panel_state->code_width_chars = code_width;
+
+        const bool indexed_virtual = is_indexed_source_path(buffer.path);
+        if (indexed_virtual) {
+          ensure_virtual_viewport_ts(buffer.path, virtual_store, scroll, visible);
+        }
+
+        SyntaxHighlightContext virtual_hl_ctx;
+        virtual_hl_ctx.file_path = buffer.path;
+        virtual_hl_ctx.viewport_only_ts = indexed_virtual;
+        virtual_hl_ctx.joined_override = &panel_state->virtual_ts_source_key;
+        virtual_hl_ctx.buffer_token = buffer.view_token;
+        virtual_hl_ctx.ts_revision = ts_highlight_revision;
+        virtual_hl_ctx.line_span_cache = &panel_state->line_syntax_span_cache;
+
+        int max_line_len = 0;
+        const int view_end = std::min(file_lines, scroll + visible);
+        for (int line_index = scroll; line_index < view_end; ++line_index) {
+          const std::string line = virtual_store->line_at(line_index);
+          max_line_len = std::max(max_line_len, static_cast<int>(line.size()));
+          gutter_rows.push_back(text(format_line_number(line_index + 1, gutter_w)) |
+                              color(theme::Muted()) | row_bg);
+          Element code_line =
+              indexed_virtual
+                  ? HighlightCodeLine(line, line_index, nullptr, -1, {}, 0, &virtual_hl_ctx)
+                  : HighlightCodeLineLite(line);
+          code_rows.push_back(code_line | size(WIDTH, EQUAL, code_width) | xflex_shrink | row_bg);
+        }
+
+        if (virtual_store->loading_more()) {
+          gutter_rows.push_back(text(format_line_number(view_end + 1, gutter_w)) |
+                              color(theme::Muted()) | row_bg);
+          code_rows.push_back(text(i18n::tr("editor.virtual.loading_lines")) | color(theme::Muted()) |
+                              row_bg);
+        }
+
+        const int max_scroll_col = std::max(0, max_line_len - code_width + 1);
+        buffer.scroll_col = std::min(buffer.scroll_col, max_scroll_col);
+        const int rendered_lines = static_cast<int>(code_rows.size());
+        Element gutter = vbox(std::move(gutter_rows)) | reflect(panel_state->gutter_box) |
+                         bgcolor(theme::CodeBg());
+        Element code = vbox(std::move(code_rows)) | flex | reflect(panel_state->code_box) |
+                       bgcolor(theme::CodeBg());
+        const bool scroll_hovered =
+            layout_state != nullptr &&
+            layout_state->clickable.is_hovered(press_id::kEditorScrollbar);
+        const bool scroll_active =
+            panel_state->scrollbar_dragging ||
+            (layout_state != nullptr &&
+             layout_state->clickable.is_pressed(press_id::kEditorScrollbar));
+        Element scrollbar =
+            vertical_scrollbar(file_lines, scroll, visible, rendered_lines, scroll_hovered,
+                               scroll_active) |
+            reflect(panel_state->scrollbar_box);
+        panel_state->scrollbar_layout =
+            compute_scrollbar_layout(file_lines, scroll, visible, rendered_lines);
+        const bool h_scroll_hovered =
+            layout_state != nullptr &&
+            layout_state->clickable.is_hovered(press_id::kEditorHorizontalScrollbar);
+        const bool h_scroll_active =
+            panel_state->h_scrollbar_dragging ||
+            (layout_state != nullptr &&
+             layout_state->clickable.is_pressed(press_id::kEditorHorizontalScrollbar));
+        const int total_content_width =
+            max_scroll_col > 0 ? max_scroll_col + code_width : code_width;
         Element code_column = attach_horizontal_scrollbar(
             std::move(code), total_content_width, buffer.scroll_col, code_width, h_scroll_hovered,
             h_scroll_active, panel_state.get());
@@ -6113,8 +6600,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       key_input.selection_occurrences = selection_occurrences;
       key_input.line_semantic_spans = line_semantic_spans;
       const uint64_t render_key = compute_viewport_line_render_key(
-          key_input, buffer, *panel_state, editor_focused, show_caret,
-          panel_state->mouse_selecting, helix_caret_insert, buffer.scroll_col, code_width,
+          key_input, buffer, *panel_state, editor_focused, show_caret, helix_caret_insert,
+          buffer.scroll_col, code_width,
           helix_relative, gutter_render_width, fold_gutter_enabled, gutter_markers,
           indent_guides_enabled, scope_highlight_strength, typing_burst, bracket,
           scope_bracket_ptr, colored_brace_token,
@@ -6350,8 +6837,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
   auto dispatch_editor_keys = [workspace, focus, panel_state, tab_bar_state, find_state,
                                goto_state, completion_state, diagnostic_state, git_history_state,
-                               symbols, file_indexer, symbol_indexer, layout_state, debug_model,
-                               on_command, panel_focus](Event event) {
+                               git_service, symbols, file_indexer, symbol_indexer, layout_state,
+                               debug_model, on_command, panel_focus](Event event) {
     if (tab_bar_state->overflow_open &&
         handle_tabs_overflow_keys(workspace, focus, tab_bar_state.get(), event, panel_focus)) {
       return true;
@@ -6387,6 +6874,19 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     if (event_is_ctrl_f(event)) {
       activate_find(find_state.get(), buffer, layout_state, focus, panel_focus);
+      return true;
+    }
+    if (workspace->active_tab_git_diff_view() && event.character() == "r" &&
+        git_service != nullptr) {
+      int block = panel_state->diff_revert_hover_block;
+      if (block < 0) {
+        block = diff_revert_block_for_row_index(workspace->active_diff_rows(),
+                                                workspace->buffer.primary_line());
+      }
+      if (block >= 0) {
+        revert_git_diff_block_from_panel(workspace, panel_state.get(), git_service, block,
+                                         layout_state);
+      }
       return true;
     }
     return handle_editor_keys(workspace, focus, find_state.get(), goto_state.get(),
@@ -6540,12 +7040,14 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           const VisualHighlightJobInputs vh_inputs = build_visual_highlight_job_inputs(
               panel_state.get(), workspace->buffer, code_width, visible, symbols.get(),
               find_state.get(), workspace->last_buffer_edit_ms, layout_state, find_state->open);
+          const bool selection_in_progress =
+              panel_state->mouse_selecting || panel_state->helix.mode == HelixMode::kSelect;
           UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".visual_highlight");
           const bool content_settled = editor_content_settled(*panel_state);
           tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
                                           vh_config, vh_focused, path_indexed, content_settled,
-                                          vh_now, vh_inputs);
-          if (panel_state->visual_highlight.job_inflight) {
+                                          vh_now, vh_inputs, selection_in_progress);
+          if (panel_state->visual_highlight.job_inflight && !selection_in_progress) {
             const uint64_t pending_gen = panel_state->visual_highlight.pending_generation;
             if (!visual_highlight_service().wait_for_pending_result(pending_gen)) {
               visual_highlight_service().request_completion_wake(pending_gen);
@@ -6566,10 +7068,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             panel_state->viewport_line_render_cache.clear();
           }
           if (panel_state->visual_highlight.dirty &&
-              !panel_state->visual_highlight.job_inflight) {
+              !panel_state->visual_highlight.job_inflight && !selection_in_progress) {
             tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
                                             vh_config, vh_focused, path_indexed, content_settled,
-                                            vh_now, vh_inputs);
+                                            vh_now, vh_inputs, selection_in_progress);
           }
         } else if (apply_visual_highlight_fold_regions(&workspace->buffer,
                                                        &panel_state->visual_highlight, vh_config,

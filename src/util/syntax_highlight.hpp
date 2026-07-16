@@ -31,6 +31,8 @@ struct SyntaxHighlightContext {
   // During a typing burst, re-highlight this line synchronously from the live tree;
   // all other lines keep the frozen baseline snapshot.
   int editing_line = -1;
+  // Large read-only virtualized files: tree-sitter viewport slice only (no full parse).
+  bool viewport_only_ts = false;
   // Lines edited while tree-sitter highlights are still pending a worker refresh; keeps
   // live/lite coloring even after the caret moves away (e.g. after ';' auto-newline)
   // until the async parse commits.

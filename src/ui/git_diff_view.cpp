@@ -180,7 +180,8 @@ GitDiffViewRenderResult render_git_diff_viewport(const std::vector<SideBySideDif
                                                  int scroll, int visible, int scroll_col,
                                                  int code_width,
                                                  const std::vector<TextMatch>* find_matches,
-                                                 int /*active_find_line*/) {
+                                                 int /*active_find_line*/, int hovered_block,
+                                                 int pressed_block) {
   GitDiffViewRenderResult result;
   if (rows.empty()) {
     result.body = text(i18n::tr("git.diff.no_changes")) | color(theme::Muted()) | flex;
@@ -188,18 +189,33 @@ GitDiffViewRenderResult render_git_diff_viewport(const std::vector<SideBySideDif
     return result;
   }
 
+  const std::vector<GitDiffChangeBlock> blocks = build_diff_change_blocks(rows);
+  auto block_for_row = [&](int row_index) -> int {
+    for (int block_index = 0; block_index < static_cast<int>(blocks.size()); ++block_index) {
+      const GitDiffChangeBlock& block = blocks[static_cast<std::size_t>(block_index)];
+      if (row_index == block.start_row) {
+        return block_index;
+      }
+    }
+    return -1;
+  };
+
   const int total = static_cast<int>(rows.size());
   const int end = std::min(total, scroll + std::max(visible, 1));
   const int sep_width = 1;
   const int col_width = std::max(8, (code_width - sep_width) / 2);
-  const int gutter_w = 7;
+  const int action_w = 2;
+  const int gutter_w = action_w + 7;
 
+  Elements action_rows;
   Elements gutter_rows;
   Elements left_rows;
   Elements sep_rows;
   Elements right_rows;
 
-  gutter_rows.push_back(text(std::string(static_cast<std::size_t>(gutter_w), ' ')) |
+  action_rows.push_back(text(std::string(static_cast<std::size_t>(action_w), ' ')) |
+                        bgcolor(theme::TabIdle()));
+  gutter_rows.push_back(text(std::string(static_cast<std::size_t>(gutter_w - action_w), ' ')) |
                         bgcolor(theme::TabIdle()));
   left_rows.push_back(text(" " + i18n::tr("editor.diff.head_column")) | color(theme::Header()) |
                       bgcolor(theme::TabIdle()) | size(WIDTH, EQUAL, col_width));
@@ -207,10 +223,31 @@ GitDiffViewRenderResult render_git_diff_viewport(const std::vector<SideBySideDif
   right_rows.push_back(text(i18n::tr("editor.diff.working_column") + " ") | color(theme::Header()) |
                        bgcolor(theme::TabIdle()) | size(WIDTH, EQUAL, col_width));
 
+  result.revert_block_by_viewport_row.assign(static_cast<std::size_t>(end - scroll), -1);
+
   for (int row_index = scroll; row_index < end; ++row_index) {
     const SideBySideDiffRow& row = rows[static_cast<std::size_t>(row_index)];
     const Decorator left_bg = left_bg_for_kind(row.kind);
     const Decorator right_bg = right_bg_for_kind(row.kind);
+    const int viewport_row = row_index - scroll;
+    const int block_index = block_for_row(row_index);
+
+    if (block_index >= 0) {
+      result.revert_block_by_viewport_row[static_cast<std::size_t>(viewport_row)] = block_index;
+      const bool hovered = hovered_block == block_index;
+      const bool pressed = pressed_block == block_index;
+      Color action_color = theme::Muted();
+      if (pressed) {
+        action_color = theme::Accent();
+      } else if (hovered) {
+        action_color = theme::Header();
+      }
+      action_rows.push_back(text(i18n::tr("git.diff.revert_button")) | color(action_color) |
+                            bgcolor(theme::CodeBg()) | bold);
+    } else {
+      action_rows.push_back(text(std::string(static_cast<std::size_t>(action_w), ' ')) |
+                            bgcolor(theme::CodeBg()));
+    }
 
     const std::string gutter = format_line_number(row.left_line, 3) + " " +
                                format_line_number(row.right_line, 3);
@@ -226,7 +263,8 @@ GitDiffViewRenderResult render_git_diff_viewport(const std::vector<SideBySideDif
   result.rendered_lines = end - scroll;
   result.body = vbox({
                     hbox({
-                        vbox(std::move(gutter_rows)) | size(WIDTH, EQUAL, gutter_w),
+                        vbox(std::move(action_rows)) | size(WIDTH, EQUAL, action_w),
+                        vbox(std::move(gutter_rows)) | size(WIDTH, EQUAL, gutter_w - action_w),
                         vbox(std::move(left_rows)) | size(WIDTH, EQUAL, col_width) | xflex_shrink,
                         vbox(std::move(sep_rows)) | size(WIDTH, EQUAL, sep_width),
                         vbox(std::move(right_rows)) | flex,

@@ -66,11 +66,29 @@ std::vector<SideBySideDiffRow> build_side_by_side_rows(
     const std::string& unified_diff, const std::vector<std::string>& head_lines,
     const std::vector<std::string>& working_lines);
 
+std::vector<SideBySideDiffRow> build_side_by_side_rows_from_lines(
+    const std::vector<std::string>& head_lines, const std::vector<std::string>& working_lines);
+
 struct DiffOverviewLines {
   std::unordered_set<int> add_lines;
   std::unordered_set<int> change_lines;
 };
 
 DiffOverviewLines build_diff_overview_lines(const std::vector<SideBySideDiffRow>& rows);
+
+struct GitDiffChangeBlock {
+  int start_row = 0;
+  int end_row = 0;
+};
+
+std::vector<GitDiffChangeBlock> build_diff_change_blocks(
+    const std::vector<SideBySideDiffRow>& rows);
+
+bool revert_diff_change_block(std::vector<std::string>* working_lines,
+                              const std::vector<std::string>& head_lines,
+                              const std::vector<SideBySideDiffRow>& rows, int block_index);
+
+std::vector<std::string> load_lines_from_file(const std::string& path);
+bool save_lines_to_file(const std::string& path, const std::vector<std::string>& lines);
 
 }  // namespace tgdb

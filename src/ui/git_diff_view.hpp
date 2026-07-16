@@ -12,10 +12,12 @@ namespace tgdb {
 struct GitDiffViewRenderResult {
   ftxui::Element body = ftxui::text("");
   int rendered_lines = 0;
+  std::vector<int> revert_block_by_viewport_row;
 };
 
 GitDiffViewRenderResult render_git_diff_viewport(
     const std::vector<SideBySideDiffRow>& rows, int scroll, int visible, int scroll_col,
-    int code_width, const std::vector<TextMatch>* find_matches, int active_find_line);
+    int code_width, const std::vector<TextMatch>* find_matches, int active_find_line,
+    int hovered_block, int pressed_block);
 
 }  // namespace tgdb

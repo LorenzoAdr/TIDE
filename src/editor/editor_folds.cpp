@@ -194,7 +194,8 @@ void scroll_view_by_lines_fold_aware(EditorBuffer* buffer, int delta_lines,
 }
 
 void ensure_scroll_visible_fold_aware(EditorBuffer* buffer, const std::vector<FoldRegion>& regions,
-                                      int viewport_count, int code_width) {
+                                      int viewport_count, int code_width,
+                                      int edge_margin_lines) {
   if (buffer == nullptr) {
     return;
   }
@@ -221,11 +222,14 @@ void ensure_scroll_visible_fold_aware(EditorBuffer* buffer, const std::vector<Fo
     scroll_index = static_cast<int>(visible.size()) - 1;
   }
 
-  if (primary_index < scroll_index) {
-    buffer->scroll = visible[static_cast<std::size_t>(primary_index)];
-    scroll_index = primary_index;
-  } else if (primary_index >= scroll_index + viewport_count) {
-    const int new_index = std::max(0, primary_index - viewport_count + 1);
+  const int margin =
+      std::max(0, std::min(edge_margin_lines, std::max(0, viewport_count - 1) / 2));
+  if (primary_index < scroll_index + margin) {
+    const int new_index = std::max(0, primary_index - margin);
+    buffer->scroll = visible[static_cast<std::size_t>(new_index)];
+    scroll_index = new_index;
+  } else if (primary_index >= scroll_index + viewport_count - margin) {
+    const int new_index = std::max(0, primary_index - (viewport_count - margin - 1));
     buffer->scroll = visible[static_cast<std::size_t>(new_index)];
   }
 
@@ -247,6 +251,51 @@ void ensure_scroll_visible_fold_aware(EditorBuffer* buffer, const std::vector<Fo
       static_cast<int>(buffer->lines[static_cast<std::size_t>(buffer->primary_line())].size());
   const int max_scroll_col = std::max(0, line_len - code_width + 1);
   buffer->scroll_col = std::min(buffer->scroll_col, max_scroll_col);
+}
+
+void stabilize_scroll_after_fold_change(EditorBuffer* buffer, const std::vector<FoldRegion>& regions,
+                                        int viewport_count) {
+  if (buffer == nullptr) {
+    return;
+  }
+  clamp_cursors_for_folds(buffer, regions);
+
+  const int total = static_cast<int>(buffer->lines.size());
+  if (total <= 0) {
+    return;
+  }
+  const std::vector<int> visible =
+      visible_buffer_lines(total, regions, buffer->collapsed_folds);
+  if (visible.empty()) {
+    return;
+  }
+
+  int scroll_line = buffer->scroll;
+  if (fold_line_hidden(scroll_line, regions, buffer->collapsed_folds)) {
+    for (const FoldRegion& region : regions) {
+      if (buffer->collapsed_folds.count(region.open_line) == 0) {
+        continue;
+      }
+      if (scroll_line > region.open_line && scroll_line <= region.close_line) {
+        scroll_line = region.open_line;
+        break;
+      }
+    }
+    if (fold_line_hidden(scroll_line, regions, buffer->collapsed_folds)) {
+      const int index = index_of_visible_at_or_after(visible, scroll_line);
+      scroll_line = visible[static_cast<std::size_t>(
+          std::max(0, std::min(index, static_cast<int>(visible.size()) - 1)))];
+    }
+  } else if (visible_line_index(visible, scroll_line) < 0) {
+    const int index = index_of_visible_at_or_after(visible, scroll_line);
+    scroll_line = visible[static_cast<std::size_t>(
+        std::max(0, std::min(index, static_cast<int>(visible.size()) - 1)))];
+  }
+
+  buffer->scroll = scroll_line;
+  const int max_scroll = fold_scroll_max(*buffer, regions, viewport_count);
+  buffer->scroll = std::min(buffer->scroll, max_scroll);
+  buffer->scroll = std::max(0, buffer->scroll);
 }
 
 int visible_line_index(const std::vector<int>& visible_lines, int buffer_line) {

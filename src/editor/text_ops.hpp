@@ -7,7 +7,8 @@ namespace tgdb {
 
 struct SnippetResult;
 
-void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines, int code_width = -1);
+void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines, int code_width = -1,
+                           int edge_margin_lines = kScrollEdgeMarginLines);
 void ensure_scroll_centered(EditorBuffer* buffer, int visible_lines, int code_width = -1);
 void scroll_view_by_lines(EditorBuffer* buffer, int delta_lines, int visible_lines);
 void scroll_view_by_columns(EditorBuffer* buffer, int delta_columns, int code_width);

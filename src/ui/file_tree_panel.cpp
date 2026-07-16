@@ -288,17 +288,22 @@ struct FileTreePanelState {
       return;
     }
 
+    if (loaded_workspace != workspace_root) {
+      last_revealed_path.clear();
+    }
+
     loaded_workspace = workspace_root;
     indexed_files = snapshot->files;
     indexed_skeleton_folders = snapshot->skeleton_folders;
     const std::string to_reveal = last_revealed_path;
+    const bool skeleton_preview = !snapshot->skeleton_folders.empty();
     if (snapshot->skeleton_folders.empty()) {
       root = build_file_tree_from_paths(snapshot->files);
     } else {
       root = build_file_tree_from_paths_and_folders(snapshot->files,
                                                     snapshot->skeleton_folders);
     }
-    if (!to_reveal.empty()) {
+    if (!to_reveal.empty() && !skeleton_preview) {
       reveal_file(workspace_root, to_reveal);
     } else {
       selected = 0;
@@ -723,8 +728,9 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
 
   auto renderer = Renderer([model, workspace, focus, state, indexer, layout_state, git_service] {
     const GitExplorerMarks git_marks = build_git_explorer_marks(git_service);
-    state->sync_index(indexer != nullptr ? indexer->snapshot() : nullptr,
-                      model->workspace_root);
+    const std::shared_ptr<const IndexSnapshot> snapshot =
+        indexer != nullptr ? indexer->snapshot() : nullptr;
+    state->sync_index(snapshot, model->workspace_root);
 
     const std::string active_file =
         workspace != nullptr && !workspace->active_file.empty()
@@ -732,7 +738,8 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
             : (workspace != nullptr && !workspace->buffer.path.empty()
                    ? normalize_path(workspace->buffer.path)
                    : std::string{});
-    if (!active_file.empty() && active_file != state->last_revealed_path) {
+    const bool skeleton_preview = snapshot && !snapshot->skeleton_folders.empty();
+    if (!active_file.empty() && active_file != state->last_revealed_path && !skeleton_preview) {
       state->reveal_file(model->workspace_root, active_file);
     }
 

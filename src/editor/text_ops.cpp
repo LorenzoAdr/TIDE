@@ -695,16 +695,20 @@ void delete_all_selections(EditorBuffer* buffer) {
   merge_overlapping_cursors(buffer);
 }
 
-void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines, int code_width) {
+void ensure_scroll_visible(EditorBuffer* buffer, int visible_lines, int code_width,
+                           int edge_margin_lines) {
   if (!buffer->collapsed_folds.empty()) {
-    ensure_scroll_visible_fold_aware(buffer, buffer->fold_regions, visible_lines, code_width);
+    ensure_scroll_visible_fold_aware(buffer, buffer->fold_regions, visible_lines, code_width,
+                                     edge_margin_lines);
     return;
   }
   const int primary = buffer->primary_line();
-  if (primary < buffer->scroll) {
-    buffer->scroll = primary;
-  } else if (primary >= buffer->scroll + visible_lines) {
-    buffer->scroll = std::max(0, primary - visible_lines + 1);
+  const int margin =
+      std::max(0, std::min(edge_margin_lines, std::max(0, visible_lines - 1) / 2));
+  if (primary < buffer->scroll + margin) {
+    buffer->scroll = std::max(0, primary - margin);
+  } else if (primary >= buffer->scroll + visible_lines - margin) {
+    buffer->scroll = std::max(0, primary - visible_lines + margin + 1);
   }
   buffer->scroll = std::max(
       0, std::min(buffer->scroll,

@@ -140,6 +140,37 @@ void test_completion_multi_cursor() {
   check(buffer.cursors[2].head.col == 11, "third cursor after completion");
 }
 
+void test_mouse_scroll_margin() {
+  auto buffer = make_buffer({"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"});
+  buffer.scroll = 0;
+  buffer.reset_to_single_cursor(2, 0);
+  tgdb::ensure_scroll_visible(&buffer, 5, -1);
+  check(buffer.scroll == 0, "near top keeps scroll at file start");
+
+  buffer.scroll = 0;
+  buffer.reset_to_single_cursor(4, 0);
+  tgdb::ensure_scroll_visible(&buffer, 5, -1);
+  check(buffer.scroll == 2, "cursor near bottom margin scrolls early");
+
+  buffer.scroll = 5;
+  buffer.reset_to_single_cursor(9, 0);
+  tgdb::ensure_scroll_visible(&buffer, 5, -1);
+  check(buffer.scroll == 5, "file end allows cursor at bottom edge");
+}
+
+void test_arrow_scroll_keeps_margin() {
+  auto buffer = make_buffer({"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"});
+  buffer.scroll = 0;
+  buffer.reset_to_single_cursor(0, 0);
+  constexpr int visible = 5;
+  for (int line = 1; line <= 9; ++line) {
+    buffer.reset_to_single_cursor(line, 0);
+    tgdb::ensure_scroll_visible(&buffer, visible, -1);
+  }
+  check(buffer.primary_line() == 9, "cursor reached last line");
+  check(buffer.scroll == 5, "arrow-style navigation keeps cursor off bottom edge");
+}
+
 }  // namespace
 
 int main() {
@@ -155,5 +186,7 @@ int main() {
   test_paste_replaces_selection();
   test_paste_multi_cursor();
   test_completion_multi_cursor();
+  test_mouse_scroll_margin();
+  test_arrow_scroll_keeps_margin();
   return 0;
 }

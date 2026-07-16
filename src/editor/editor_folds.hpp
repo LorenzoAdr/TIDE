@@ -5,6 +5,8 @@
 
 namespace tgdb {
 
+inline constexpr int kScrollEdgeMarginLines = 3;
+
 struct FoldRegion {
   int open_line = 0;
   int close_line = 0;
@@ -49,7 +51,11 @@ void scroll_view_by_lines_fold_aware(EditorBuffer* buffer, int delta_lines,
                                      const std::vector<FoldRegion>& regions, int viewport_count);
 
 void ensure_scroll_visible_fold_aware(EditorBuffer* buffer, const std::vector<FoldRegion>& regions,
-                                      int viewport_count, int code_width = -1);
+                                      int viewport_count, int code_width = -1,
+                                      int edge_margin_lines = kScrollEdgeMarginLines);
+
+void stabilize_scroll_after_fold_change(EditorBuffer* buffer, const std::vector<FoldRegion>& regions,
+                                        int viewport_count);
 
 int visible_line_index(const std::vector<int>& visible_lines, int buffer_line);
 

@@ -55,11 +55,14 @@ struct WorkspaceModel {
   bool navigate_cursor_forward(int visible_lines);
 
   bool active_tab_read_only() const;
+  bool active_tab_large_virtual_view() const;
   bool active_tab_git_diff_view() const;
   const std::vector<SideBySideDiffRow>& active_diff_rows() const;
   bool open_git_diff_tab(const std::string& absolute_path, GitService* git);
+  bool revert_git_diff_block(int block_index, GitService* git);
 
  private:
+  void refresh_git_diff_tabs_for_path(const std::string& absolute_path, GitService* git);
   struct PendingOpenAt {
     int line = 0;
     int col = 0;

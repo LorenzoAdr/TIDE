@@ -30,6 +30,9 @@ const std::string& SyntaxHighlightContext::joined() const {
 }
 
 const std::vector<LineHighlights>* SyntaxHighlightContext::tree_sitter_highlights() const {
+  if (viewport_only_ts) {
+    return nullptr;
+  }
   if (lines == nullptr || lines->size() == 0 || file_path.empty()) {
     return nullptr;
   }
@@ -282,8 +285,10 @@ const CachedSyntaxLineSpans* cached_syntax_spans_for_line(
     }
   }
   if ((ts_source_hl == nullptr || ts_source_hl->spans.empty()) && !ctx->file_path.empty()) {
-    if (const LineHighlights* preview = tree_sitter_service().viewport_preview_line(
-            ctx->file_path, ctx->joined(), line_index)) {
+    if (ctx->viewport_only_ts) {
+      ts_source_hl = tree_sitter_service().viewport_preview_line_virtual(ctx->file_path, line_index);
+    } else if (const LineHighlights* preview = tree_sitter_service().viewport_preview_line(
+                   ctx->file_path, ctx->joined(), line_index)) {
       ts_source_hl = preview;
     }
   }

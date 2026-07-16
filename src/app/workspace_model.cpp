@@ -42,6 +42,10 @@ bool load_tabular_placeholder(EditorBuffer* buffer, const std::string& absolute_
   return true;
 }
 
+bool load_virtual_text_placeholder(EditorBuffer* buffer, const std::string& absolute_path) {
+  return load_tabular_placeholder(buffer, absolute_path);
+}
+
 void setup_diff_tab_buffer(EditorBuffer* buffer, const std::string& absolute_path,
                            const std::vector<SideBySideDiffRow>& rows) {
   if (buffer == nullptr) {
@@ -73,12 +77,7 @@ void setup_diff_tab_buffer(EditorBuffer* buffer, const std::string& absolute_pat
 }
 
 std::vector<std::string> load_working_lines_from_disk(const std::string& absolute_path) {
-  std::ifstream input(absolute_path);
-  if (!input) {
-    return {};
-  }
-  std::string content((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-  return parse_file_lines(content);
+  return load_lines_from_file(absolute_path);
 }
 
 }  // namespace
@@ -178,6 +177,13 @@ bool WorkspaceModel::active_tab_read_only() const {
   return tabs[static_cast<std::size_t>(active_tab)].read_only;
 }
 
+bool WorkspaceModel::active_tab_large_virtual_view() const {
+  if (active_tab < 0 || active_tab >= static_cast<int>(tabs.size())) {
+    return false;
+  }
+  return tabs[static_cast<std::size_t>(active_tab)].large_virtual_view;
+}
+
 bool WorkspaceModel::active_tab_git_diff_view() const {
   if (active_tab < 0 || active_tab >= static_cast<int>(tabs.size())) {
     return false;
@@ -228,6 +234,66 @@ bool WorkspaceModel::open_git_diff_tab(const std::string& absolute_path, GitServ
   setup_diff_tab_buffer(&tab.buffer, path, tab.diff_rows);
   tabs.push_back(std::move(tab));
   switch_to_tab(static_cast<int>(tabs.size()) - 1);
+  return true;
+}
+
+void WorkspaceModel::refresh_git_diff_tabs_for_path(const std::string& absolute_path,
+                                                    GitService* git) {
+  if (git == nullptr || absolute_path.empty()) {
+    return;
+  }
+  const std::string path = normalize_path(absolute_path);
+  const GitFileDiff diff = git->file_diff(path);
+  const std::vector<std::string> working_lines = load_working_lines_from_disk(path);
+  std::vector<SideBySideDiffRow> rows =
+      build_side_by_side_rows_from_lines(diff.head_lines, working_lines);
+  git->invalidate(path);
+
+  for (EditorTab& tab : tabs) {
+    if (normalize_path(tab.path) != path) {
+      continue;
+    }
+    if (tab.git_diff_view) {
+      tab.diff_rows = rows;
+      setup_diff_tab_buffer(&tab.buffer, path, tab.diff_rows);
+    } else {
+      load_buffer_from_lines(&tab.buffer, path, working_lines);
+    }
+  }
+
+  if (active_tab >= 0 && active_tab < static_cast<int>(tabs.size())) {
+    load_active_tab_into_buffer();
+  }
+}
+
+bool WorkspaceModel::revert_git_diff_block(int block_index, GitService* git) {
+  if (git == nullptr || !active_tab_git_diff_view() || block_index < 0) {
+    return false;
+  }
+  flush_active_tab();
+  EditorTab& tab = tabs[static_cast<std::size_t>(active_tab)];
+  if (tab.path.empty()) {
+    return false;
+  }
+  const std::string path = normalize_path(tab.path);
+  const std::vector<GitDiffChangeBlock> blocks = build_diff_change_blocks(tab.diff_rows);
+  if (block_index >= static_cast<int>(blocks.size())) {
+    return false;
+  }
+
+  std::vector<std::string> working_lines = load_lines_from_file(path);
+  const GitFileDiff diff = git->file_diff(path);
+  if (!revert_diff_change_block(&working_lines, diff.head_lines, tab.diff_rows, block_index)) {
+    return false;
+  }
+  if (!save_lines_to_file(path, working_lines)) {
+    status_message = i18n::tr("git.diff.revert_failed");
+    return false;
+  }
+
+  git->invalidate(path);
+  refresh_git_diff_tabs_for_path(path, git);
+  status_message = i18n::tr("git.diff.revert_ok");
   return true;
 }
 
@@ -311,6 +377,10 @@ int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path, boo
   tab.external = external;
   if (is_tabular_path(absolute_path)) {
     load_tabular_placeholder(&tab.buffer, absolute_path);
+  } else if (should_open_as_virtual_text(absolute_path)) {
+    load_virtual_text_placeholder(&tab.buffer, absolute_path);
+    tab.large_virtual_view = true;
+    tab.read_only = true;
   } else {
     load_buffer_from_disk(&tab.buffer, absolute_path);
   }
@@ -373,13 +443,6 @@ bool WorkspaceModel::check_open_guard(const std::string& absolute_path) {
     const std::string name = fs::path(absolute_path).filename().string();
     open_file_confirm->show_binary_warning(absolute_path, name);
     status_message = i18n::tr_fmt("workspace.binary_blocked", {name});
-    return false;
-  }
-  if (assessment.kind == FileOpenKind::TooLarge) {
-    const std::string name = fs::path(absolute_path).filename().string();
-    open_file_confirm->show_too_large_warning(absolute_path, name, assessment.size_bytes);
-    status_message = i18n::tr_fmt("workspace.too_large_blocked",
-                                  {name, format_file_size(assessment.size_bytes)});
     return false;
   }
   if (assessment.kind == FileOpenKind::Large) {

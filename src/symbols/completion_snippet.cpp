@@ -1,5 +1,7 @@
 #include "symbols/completion_snippet.hpp"
 
+#include "editor/editor_state.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <string>
@@ -314,7 +316,36 @@ SnippetResult expand_snippet(const std::string& snippet) {
   }
 
   result.text = out;
+  result.placeholders.reserve(stops.size());
+  for (const TabStop& stop : stops) {
+    SnippetPlaceholder placeholder;
+    placeholder.index = stop.index;
+    placeholder.line_offset = stop.line_offset;
+    placeholder.col = stop.col;
+    placeholder.length = stop.length;
+    result.placeholders.push_back(placeholder);
+  }
   apply_tab_stop_choice(&result, stops, line, col);
+  if (!stops.empty()) {
+    int best_index = 999;
+    for (const TabStop& stop : stops) {
+      if (stop.index == 0) {
+        continue;
+      }
+      if (stop.index < best_index) {
+        best_index = stop.index;
+        result.active_placeholder_index = stop.index;
+      }
+    }
+    if (best_index == 999) {
+      for (const TabStop& stop : stops) {
+        if (stop.index == 0) {
+          result.active_placeholder_index = 0;
+          break;
+        }
+      }
+    }
+  }
   return result;
 }
 
@@ -350,6 +381,13 @@ SnippetResult adjust_snippet_for_existing_open_paren(const std::string& raw_snip
     result.sel_start_col = offset + inner.sel_start_col;
     result.sel_end_col = offset + inner.sel_end_col;
   }
+  result.placeholders = inner.placeholders;
+  for (SnippetPlaceholder& placeholder : result.placeholders) {
+    if (placeholder.line_offset == inner.caret_line_offset) {
+      placeholder.col += offset;
+    }
+  }
+  result.active_placeholder_index = inner.active_placeholder_index;
   return result;
 }
 
@@ -398,6 +436,165 @@ SnippetResult finalize_function_call_insert(const std::string& insert_text,
   }
 
   return result;
+}
+
+namespace {
+
+bool snippet_has_numbered_placeholder(const std::vector<SnippetPlaceholder>& placeholders) {
+  for (const SnippetPlaceholder& placeholder : placeholders) {
+    if (placeholder.index > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+int snippet_placeholder_sort_key(int index) {
+  return index == 0 ? 100000 : index;
+}
+
+SnippetSessionStop* current_session_placeholder(SnippetSession* session) {
+  if (session == nullptr) {
+    return nullptr;
+  }
+  for (auto& placeholder : session->placeholders) {
+    if (placeholder.index == session->current_index) {
+      return &placeholder;
+    }
+  }
+  return nullptr;
+}
+
+void reflow_snippet_placeholders_after_current_edit(EditorBuffer* buffer, SnippetSession* session) {
+  if (buffer == nullptr || session == nullptr) {
+    return;
+  }
+  SnippetSessionStop* current = current_session_placeholder(session);
+  if (current == nullptr) {
+    return;
+  }
+
+  const MultiCursor& cursor = buffer->primary();
+  int start_line = current->line;
+  int start_col = current->col;
+  int end_line = current->line;
+  int end_col = current->col;
+  if (cursor.has_selection()) {
+    cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
+  } else {
+    end_line = cursor.head.line;
+    end_col = cursor.head.col;
+  }
+
+  if (start_line != current->line || end_line != current->line) {
+    clear_snippet_session(session);
+    return;
+  }
+
+  const int new_length = std::max(0, end_col - current->col);
+  const int delta = new_length - current->length;
+  current->length = new_length;
+  if (delta == 0) {
+    return;
+  }
+
+  for (auto& placeholder : session->placeholders) {
+    if (placeholder.index == current->index) {
+      continue;
+    }
+    if (placeholder.line != current->line || placeholder.col <= current->col) {
+      continue;
+    }
+    placeholder.col += delta;
+  }
+}
+
+SnippetSessionStop absolute_placeholder(int insert_line, int insert_start_col,
+                                        const SnippetPlaceholder& rel) {
+  SnippetSessionStop abs;
+  abs.index = rel.index;
+  abs.line = insert_line + rel.line_offset;
+  abs.col = (rel.line_offset == 0 ? insert_start_col : 0) + rel.col;
+  abs.length = rel.length;
+  return abs;
+}
+
+void jump_to_snippet_placeholder(EditorBuffer* buffer, const SnippetSessionStop& placeholder) {
+  buffer->reset_to_single_cursor(placeholder.line, placeholder.col);
+  if (placeholder.length > 0) {
+    buffer->primary().anchor = {placeholder.line, placeholder.col};
+    buffer->primary().head = {placeholder.line, placeholder.col + placeholder.length};
+  }
+  clamp_all_cursors(buffer);
+}
+
+}  // namespace
+
+void begin_snippet_session(SnippetSession* session, int insert_line, int insert_start_col,
+                           const SnippetResult& snippet) {
+  clear_snippet_session(session);
+  if (session == nullptr || snippet.placeholders.empty() ||
+      !snippet_has_numbered_placeholder(snippet.placeholders)) {
+    return;
+  }
+
+  session->active = true;
+  session->current_index = snippet.active_placeholder_index;
+  session->placeholders.reserve(snippet.placeholders.size());
+  for (const SnippetPlaceholder& rel : snippet.placeholders) {
+    session->placeholders.push_back(absolute_placeholder(insert_line, insert_start_col, rel));
+  }
+}
+
+void clear_snippet_session(SnippetSession* session) {
+  if (session == nullptr) {
+    return;
+  }
+  session->active = false;
+  session->placeholders.clear();
+  session->current_index = 0;
+}
+
+bool snippet_session_active(const SnippetSession& session) {
+  return session.active && !session.placeholders.empty();
+}
+
+bool advance_snippet_session(EditorBuffer* buffer, SnippetSession* session) {
+  if (buffer == nullptr || session == nullptr || !snippet_session_active(*session)) {
+    return false;
+  }
+
+  reflow_snippet_placeholders_after_current_edit(buffer, session);
+  if (!snippet_session_active(*session)) {
+    return false;
+  }
+
+  std::vector<SnippetSessionStop> ordered = session->placeholders;
+  std::sort(ordered.begin(), ordered.end(), [](const SnippetSessionStop& a,
+                                               const SnippetSessionStop& b) {
+    return snippet_placeholder_sort_key(a.index) < snippet_placeholder_sort_key(b.index);
+  });
+
+  const SnippetSessionStop* next = nullptr;
+  for (const SnippetSessionStop& placeholder : ordered) {
+    if (snippet_placeholder_sort_key(placeholder.index) >
+        snippet_placeholder_sort_key(session->current_index)) {
+      next = &placeholder;
+      break;
+    }
+  }
+
+  if (next == nullptr) {
+    clear_snippet_session(session);
+    return false;
+  }
+
+  session->current_index = next->index;
+  jump_to_snippet_placeholder(buffer, *next);
+  if (next->index == 0) {
+    clear_snippet_session(session);
+  }
+  return true;
 }
 
 }  // namespace tgdb

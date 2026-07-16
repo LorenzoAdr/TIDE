@@ -16,10 +16,6 @@
 #include "ui/key_bindings.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
-#include "util/line_source.hpp"
-#include "util/syntax_highlight.hpp"
-#include "util/path_normalize.hpp"
-#include "util/build_file_highlight.hpp"
 #include "util/fuzzy_match.hpp"
 
 namespace tgdb {
@@ -27,10 +23,6 @@ namespace tgdb {
 using namespace ftxui;
 
 namespace {
-
-constexpr int kOpenTabScoreBonus = 1000;
-constexpr int kSameDirectoryBonus = 400;
-constexpr int kSharedPathComponentBonus = 80;
 
 std::string picker_directory_label(std::string_view label) {
   const std::size_t slash = label.find_last_of("/\\");
@@ -51,49 +43,6 @@ std::string picker_filename(std::string_view path) {
 std::size_t picker_filename_offset(std::string_view label) {
   const std::size_t slash = label.find_last_of("/\\");
   return slash == std::string::npos ? 0 : slash + 1;
-}
-
-int count_shared_path_components(std::string_view a, std::string_view b) {
-  int shared = 0;
-  std::size_t i = 0;
-  std::size_t j = 0;
-  while (i < a.size() && j < b.size()) {
-    while (i < a.size() && (a[i] == '/' || a[i] == '\\')) {
-      ++i;
-    }
-    while (j < b.size() && (b[j] == '/' || b[j] == '\\')) {
-      ++j;
-    }
-    if (i >= a.size() || j >= b.size()) {
-      break;
-    }
-
-    const std::size_t end_a = a.find_first_of("/\\", i);
-    const std::size_t end_b = b.find_first_of("/\\", j);
-    const std::size_t seg_end_a = end_a == std::string::npos ? a.size() : end_a;
-    const std::size_t seg_end_b = end_b == std::string::npos ? b.size() : end_b;
-    if (a.substr(i, seg_end_a - i) != b.substr(j, seg_end_b - j)) {
-      break;
-    }
-    ++shared;
-    i = seg_end_a;
-    j = seg_end_b;
-  }
-  return shared;
-}
-
-int path_proximity_bonus(std::string_view ref_dir, std::string_view candidate_label) {
-  if (ref_dir.empty()) {
-    return 0;
-  }
-  const std::string candidate_dir = picker_directory_label(candidate_label);
-  if (candidate_dir.empty()) {
-    return 0;
-  }
-  if (ref_dir == candidate_dir) {
-    return kSameDirectoryBonus;
-  }
-  return count_shared_path_components(ref_dir, candidate_dir) * kSharedPathComponentBonus;
 }
 
 Element render_fuzzy_chars(const std::string& segment, std::size_t label_offset,
@@ -230,24 +179,45 @@ void FilePickerState::sync_index(const std::shared_ptr<const IndexSnapshot>& sna
   }
   indexed_root = workspace_root;
   index_snapshot = snapshot;
-  all_files = snapshot->files;
-  all_files_lower = snapshot->files_lower;
-  matches_dirty = true;
+  mark_matches_dirty();
 }
 
-void FilePickerState::refresh_matches(const WorkspaceModel* workspace) {
-  if (!matches_dirty) {
+void FilePickerState::set_search_notify(std::function<void()> notify) {
+  search_notify_ = std::move(notify);
+}
+
+void FilePickerState::notify_search_tick() {
+  if (search_notify_) {
+    search_notify_();
+  }
+}
+
+void FilePickerState::refresh_empty_query_matches(const WorkspaceModel* workspace) {
+  matches.clear();
+  matches_dirty = false;
+  searching = false;
+  if (workspace == nullptr) {
     return;
   }
-  matches_dirty = false;
-  matches.clear();
-  if (query.empty() && workspace != nullptr) {
-    for (const std::string& path : workspace->open_tabs_mru_excluding_active()) {
-      matches.push_back({path, 0, {}});
-    }
-    if (selected >= static_cast<int>(matches.size())) {
-      selected = std::max(0, static_cast<int>(matches.size()) - 1);
-    }
+  for (const std::string& path : workspace->open_tabs_mru_excluding_active()) {
+    matches.push_back({path, 0, {}});
+  }
+  if (selected >= static_cast<int>(matches.size())) {
+    selected = std::max(0, static_cast<int>(matches.size()) - 1);
+  }
+}
+
+void FilePickerState::schedule_search(const WorkspaceModel* workspace) {
+  if (query.empty()) {
+    runner.cancel();
+    refresh_empty_query_matches(workspace);
+    return;
+  }
+
+  if (index_snapshot == nullptr) {
+    matches.clear();
+    matches_dirty = false;
+    searching = false;
     return;
   }
 
@@ -255,76 +225,39 @@ void FilePickerState::refresh_matches(const WorkspaceModel* workspace) {
       !indexed_root.empty() ? indexed_root
                             : (workspace != nullptr ? workspace->root : std::string{});
 
-  struct Candidate {
-    std::string path;
-    std::string label;
-    int score = 0;
-    std::vector<std::size_t> match_indices;
-  };
-  std::vector<Candidate> candidates;
-  std::unordered_set<std::string> seen;
-  const std::string query_lower = fuzzy_to_lower(query);
-
-  std::string ref_dir;
+  FilePickerSearchParams params;
+  params.workspace_root = workspace_root;
   if (workspace != nullptr && !workspace->active_file.empty()) {
-    ref_dir = picker_directory_label(picker_display_path(workspace->active_file, workspace_root));
+    params.ref_dir =
+        picker_directory_label(picker_display_path(workspace->active_file, workspace_root));
+    params.open_tabs = workspace->open_tabs_mru();
   }
 
-  const auto try_add = [&](const std::string& path, std::string_view filename,
-                           std::string_view filename_lower, int bonus) {
-    const FuzzyMatchResult result = fuzzy_match_cached(filename, filename_lower, query_lower);
-    if (!result.matched) {
-      return;
-    }
-    const auto absolute = picker_absolute_path(path, workspace_root);
-    const std::string normalized = normalize_path(absolute.string());
-    if (seen.count(normalized) != 0) {
-      return;
-    }
-    seen.insert(normalized);
+  ++search_generation;
+  searching = true;
+  runner.start(search_generation, fuzzy_to_lower(query), index_snapshot, std::move(params));
+  notify_search_tick();
+}
 
-    const std::string label = picker_display_path(path, workspace_root);
-    const std::size_t filename_offset = picker_filename_offset(label);
-    std::vector<std::size_t> label_indices;
-    label_indices.reserve(result.indices.size());
-    for (const std::size_t index : result.indices) {
-      label_indices.push_back(index + filename_offset);
-    }
-
-    const int proximity = path_proximity_bonus(ref_dir, label);
-    candidates.push_back(
-        {path, label, result.score + bonus + proximity, std::move(label_indices)});
-  };
-
-  if (workspace != nullptr) {
-    for (const std::string& path : workspace->open_tabs_mru()) {
-      const std::string filename = picker_filename(picker_display_path(path, workspace_root));
-      try_add(path, filename, fuzzy_to_lower(filename), kOpenTabScoreBonus);
-    }
+void FilePickerState::poll_search(const WorkspaceModel* workspace) {
+  if (!matches_dirty && !runner.running()) {
+    return;
   }
 
-  for (const std::string& path : all_files) {
-    const std::string filename = picker_filename(path);
-    try_add(path, filename, fuzzy_to_lower(filename), 0);
+  std::vector<FilePickerMatch> fresh;
+  if (runner.poll(search_generation, &fresh)) {
+    matches = std::move(fresh);
+    matches_dirty = false;
+    searching = false;
+    if (selected >= static_cast<int>(matches.size())) {
+      selected = std::max(0, static_cast<int>(matches.size()) - 1);
+    }
+    preview_requested_path.clear();
+    return;
   }
 
-  std::sort(candidates.begin(), candidates.end(),
-            [](const Candidate& a, const Candidate& b) {
-              if (a.score != b.score) {
-                return a.score > b.score;
-              }
-              if (a.label.size() != b.label.size()) {
-                return a.label.size() < b.label.size();
-              }
-              return a.label < b.label;
-            });
-
-  matches.reserve(candidates.size());
-  for (const Candidate& candidate : candidates) {
-    matches.push_back({candidate.path, candidate.score, candidate.match_indices});
-  }
-  if (selected >= static_cast<int>(matches.size())) {
-    selected = std::max(0, static_cast<int>(matches.size()) - 1);
+  if (matches_dirty && !runner.running()) {
+    schedule_search(workspace);
   }
 }
 
@@ -366,6 +299,10 @@ void FilePickerState::on_opened(const std::string& workspace_root) {
 }
 
 void FilePickerState::on_closed() {
+  runner.cancel();
+  searching = false;
+  matches_dirty = true;
+  matches.clear();
   cancel_ctrl_chord();
   reset_preview();
 }
@@ -413,7 +350,6 @@ void FilePickerState::open_file(DebugModel* model, WorkspaceModel* workspace,
   query.clear();
   selected = 0;
   mark_matches_dirty();
-  refresh_matches(workspace);
   on_closed();
   if (file_opened_notify) {
     file_opened_notify();
@@ -434,6 +370,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
                           model->workspace_root);
 
         if (event == Event::Custom) {
+          state->poll_search(workspace);
           return false;
         }
         if (event_is_kitty_key_release(event)) {
@@ -444,8 +381,6 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
           state->open = false;
           state->query.clear();
           state->selected = 0;
-          state->mark_matches_dirty();
-          state->refresh_matches(workspace);
           state->on_closed();
           return true;
         }
@@ -501,7 +436,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
             state->query.pop_back();
             state->selected = 0;
             state->mark_matches_dirty();
-            state->refresh_matches(workspace);
+            state->schedule_search(workspace);
             state->update_preview_for_selection(model->workspace_root);
           }
           return true;
@@ -514,7 +449,7 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
             state->query += ch;
             state->selected = 0;
             state->mark_matches_dirty();
-            state->refresh_matches(workspace);
+            state->schedule_search(workspace);
             state->update_preview_for_selection(model->workspace_root);
           }
           return true;
@@ -529,7 +464,10 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
 
         state->sync_index(indexer != nullptr ? indexer->snapshot() : nullptr,
                           model->workspace_root);
-        state->refresh_matches(workspace);
+        state->poll_search(workspace);
+        if (state->runner.running()) {
+          state->notify_search_tick();
+        }
         if (state->preview_requested_path.empty() && !state->matches.empty()) {
           state->update_preview_for_selection(model->workspace_root);
         }

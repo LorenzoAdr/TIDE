@@ -43,5 +43,6 @@ struct PathBrowserState {
 std::string canonical_browser_root(const std::string& path);
 bool is_regular_file_path(const std::string& path);
 bool is_directory_path(const std::string& path);
+std::vector<BrowserEntry> list_directory_entries(const std::string& path);
 
 }  // namespace tgdb

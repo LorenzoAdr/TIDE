@@ -96,6 +96,7 @@ add_executable(tgdb
   src/ui/binary_symbols_panel.cpp
   src/core_analyzer/output_parser.cpp
   src/ui/file_picker.cpp
+  src/ui/file_picker_match_runner.cpp
   src/ui/file_picker_preview.cpp
   src/ui/file_preview_panel.cpp
   src/ui/symbol_picker.cpp
@@ -154,6 +155,7 @@ add_executable(tgdb
   src/util/compiler_location.cpp
   src/util/nm_reader_runner.cpp
   src/util/tabular_file.cpp
+  src/util/virtual_text_file.cpp
   src/util/external_viewer.cpp
   src/search/workspace_search.cpp
   src/search/workspace_search_runner.cpp
