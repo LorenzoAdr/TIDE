@@ -167,6 +167,17 @@ std::string selected_absolute_path(const FilePickerState* state, const std::stri
       .string();
 }
 
+FilePickerCatalogEntry make_open_tab_catalog_entry(const std::string& path,
+                                                   const std::string& workspace_root) {
+  FilePickerCatalogEntry entry;
+  entry.path = path;
+  entry.display_label = picker_display_path(path, workspace_root);
+  entry.filename = picker_filename(entry.display_label);
+  entry.filename_lower = fuzzy_to_lower(entry.filename);
+  entry.dir_label = picker_directory_label(entry.display_label);
+  return entry;
+}
+
 }  // namespace
 
 void FilePickerState::sync_index(const std::shared_ptr<const IndexSnapshot>& snapshot,
@@ -199,8 +210,10 @@ void FilePickerState::refresh_empty_query_matches(const WorkspaceModel* workspac
   if (workspace == nullptr) {
     return;
   }
+  const std::string& workspace_root = workspace->root;
   for (const std::string& path : workspace->open_tabs_mru_excluding_active()) {
-    matches.push_back({path, 0, {}});
+    matches.push_back(
+        {path, picker_display_path(path, workspace_root), 0, {}});
   }
   if (selected >= static_cast<int>(matches.size())) {
     selected = std::max(0, static_cast<int>(matches.size()) - 1);
@@ -214,7 +227,7 @@ void FilePickerState::schedule_search(const WorkspaceModel* workspace) {
     return;
   }
 
-  if (index_snapshot == nullptr) {
+  if (index_snapshot == nullptr || index_snapshot->file_picker_catalog == nullptr) {
     matches.clear();
     matches_dirty = false;
     searching = false;
@@ -226,16 +239,19 @@ void FilePickerState::schedule_search(const WorkspaceModel* workspace) {
                             : (workspace != nullptr ? workspace->root : std::string{});
 
   FilePickerSearchParams params;
-  params.workspace_root = workspace_root;
   if (workspace != nullptr && !workspace->active_file.empty()) {
     params.ref_dir =
         picker_directory_label(picker_display_path(workspace->active_file, workspace_root));
-    params.open_tabs = workspace->open_tabs_mru();
+    params.open_tabs.reserve(workspace->open_tabs_mru().size());
+    for (const std::string& path : workspace->open_tabs_mru()) {
+      params.open_tabs.push_back(make_open_tab_catalog_entry(path, workspace_root));
+    }
   }
 
   ++search_generation;
   searching = true;
-  runner.start(search_generation, fuzzy_to_lower(query), index_snapshot, std::move(params));
+  runner.start(search_generation, fuzzy_to_lower(query), index_snapshot->file_picker_catalog,
+               std::move(params));
   notify_search_tick();
 }
 
@@ -243,6 +259,9 @@ void FilePickerState::poll_search(const WorkspaceModel* workspace) {
   if (!matches_dirty && !runner.running()) {
     return;
   }
+
+  const std::string workspace_root =
+      workspace != nullptr && !workspace->root.empty() ? workspace->root : indexed_root;
 
   std::vector<FilePickerMatch> fresh;
   if (runner.poll(search_generation, &fresh)) {
@@ -253,11 +272,16 @@ void FilePickerState::poll_search(const WorkspaceModel* workspace) {
       selected = std::max(0, static_cast<int>(matches.size()) - 1);
     }
     preview_requested_path.clear();
+    update_preview_for_selection(workspace_root);
     return;
   }
 
   if (matches_dirty && !runner.running()) {
     schedule_search(workspace);
+  }
+
+  if (open && preview_requested_path.empty() && !matches.empty() && !searching) {
+    update_preview_for_selection(workspace_root);
   }
 }
 
@@ -294,6 +318,16 @@ void FilePickerState::reset_preview() {
   preview.reset();
 }
 
+void FilePickerState::capture_frozen_backdrop(Element backdrop) {
+  frozen_backdrop = std::move(backdrop);
+  has_frozen_backdrop = true;
+}
+
+void FilePickerState::clear_frozen_backdrop() {
+  frozen_backdrop = Element{};
+  has_frozen_backdrop = false;
+}
+
 void FilePickerState::on_opened(const std::string& workspace_root) {
   update_preview_for_selection(workspace_root);
 }
@@ -305,6 +339,7 @@ void FilePickerState::on_closed() {
   matches.clear();
   cancel_ctrl_chord();
   reset_preview();
+  clear_frozen_backdrop();
 }
 
 void FilePickerState::arm_ctrl_chord() {
@@ -437,7 +472,6 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
             state->selected = 0;
             state->mark_matches_dirty();
             state->schedule_search(workspace);
-            state->update_preview_for_selection(model->workspace_root);
           }
           return true;
         }
@@ -450,26 +484,27 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
             state->selected = 0;
             state->mark_matches_dirty();
             state->schedule_search(workspace);
-            state->update_preview_for_selection(model->workspace_root);
           }
           return true;
         }
         return true;
       }),
       [main, model, workspace, state, indexer, layout_state] {
-        Element base = main->Render();
         if (!state->open) {
-          return base;
+          state->clear_frozen_backdrop();
+          return main->Render();
         }
+
+        if (!state->has_frozen_backdrop) {
+          state->capture_frozen_backdrop(main->Render());
+        }
+        Element base = state->frozen_backdrop;
 
         state->sync_index(indexer != nullptr ? indexer->snapshot() : nullptr,
                           model->workspace_root);
         state->poll_search(workspace);
         if (state->runner.running()) {
           state->notify_search_tick();
-        }
-        if (state->preview_requested_path.empty() && !state->matches.empty()) {
-          state->update_preview_for_selection(model->workspace_root);
         }
 
         const int term_w =
@@ -491,8 +526,9 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
             std::min(static_cast<int>(state->matches.size()), start + dims.max_rows);
         for (int i = start; i < end; ++i) {
           const auto& match = state->matches[static_cast<std::size_t>(i)];
-          const std::string label =
-              picker_display_path(match.path, model->workspace_root);
+          const std::string& label = match.display_label.empty()
+                                         ? match.path
+                                         : match.display_label;
           matches.push_back(render_fuzzy_path_label(label, match.match_indices,
                                                     i == state->selected, match_text_width));
         }

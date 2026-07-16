@@ -15,20 +15,14 @@ namespace tgdb {
 
 struct FilePickerMatch {
   std::string path;
+  std::string display_label;
   int score = 0;
   std::vector<std::size_t> match_indices;
 };
 
-struct FilePickerCatalogEntry {
-  std::string path;
-  std::string filename;
-  std::string filename_lower;
-};
-
 struct FilePickerSearchParams {
-  std::string workspace_root;
   std::string ref_dir;
-  std::vector<std::string> open_tabs;
+  std::vector<FilePickerCatalogEntry> open_tabs;
 };
 
 class FilePickerMatchRunner {
@@ -40,7 +34,8 @@ class FilePickerMatchRunner {
   FilePickerMatchRunner& operator=(const FilePickerMatchRunner&) = delete;
 
   void start(uint64_t request_id, std::string query_lower,
-             std::shared_ptr<const IndexSnapshot> snapshot, FilePickerSearchParams params);
+             std::shared_ptr<const std::vector<FilePickerCatalogEntry>> catalog,
+             FilePickerSearchParams params);
 
   void cancel();
 
@@ -52,7 +47,7 @@ class FilePickerMatchRunner {
   struct Job {
     uint64_t request_id = 0;
     std::string query_lower;
-    std::shared_ptr<const IndexSnapshot> snapshot;
+    std::shared_ptr<const std::vector<FilePickerCatalogEntry>> catalog;
     FilePickerSearchParams params;
   };
 
@@ -75,9 +70,6 @@ class FilePickerMatchRunner {
   Job pending_job_;
   bool has_ready_result_ = false;
   Result ready_result_;
-
-  std::shared_ptr<const IndexSnapshot> cached_snapshot_;
-  std::shared_ptr<const std::vector<FilePickerCatalogEntry>> cached_catalog_;
 };
 
 }  // namespace tgdb

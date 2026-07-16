@@ -1,11 +1,10 @@
 #include "ui/file_picker_match_runner.hpp"
 
 #include <algorithm>
-#include <filesystem>
 #include <unordered_set>
 
+#include "util/fuzzy_catalog_filter.hpp"
 #include "util/fuzzy_match.hpp"
-#include "util/path_normalize.hpp"
 #include "util/thread_name.hpp"
 
 namespace tgdb {
@@ -16,27 +15,6 @@ constexpr int kOpenTabScoreBonus = 1000;
 constexpr int kSameDirectoryBonus = 400;
 constexpr int kSharedPathComponentBonus = 80;
 constexpr std::size_t kMaxResults = 500;
-
-std::string picker_directory_label(std::string_view label) {
-  const std::size_t slash = label.find_last_of("/\\");
-  if (slash == std::string::npos) {
-    return {};
-  }
-  return std::string(label.substr(0, slash));
-}
-
-std::string picker_filename(std::string_view path) {
-  const std::size_t slash = path.find_last_of("/\\");
-  if (slash == std::string::npos) {
-    return std::string(path);
-  }
-  return std::string(path.substr(slash + 1));
-}
-
-std::size_t picker_filename_offset(std::string_view label) {
-  const std::size_t slash = label.find_last_of("/\\");
-  return slash == std::string::npos ? 0 : slash + 1;
-}
 
 int count_shared_path_components(std::string_view a, std::string_view b) {
   int shared = 0;
@@ -67,12 +45,8 @@ int count_shared_path_components(std::string_view a, std::string_view b) {
   return shared;
 }
 
-int path_proximity_bonus(std::string_view ref_dir, std::string_view candidate_label) {
-  if (ref_dir.empty()) {
-    return 0;
-  }
-  const std::string candidate_dir = picker_directory_label(candidate_label);
-  if (candidate_dir.empty()) {
+int path_proximity_bonus(std::string_view ref_dir, std::string_view candidate_dir) {
+  if (ref_dir.empty() || candidate_dir.empty()) {
     return 0;
   }
   if (ref_dir == candidate_dir) {
@@ -81,111 +55,87 @@ int path_proximity_bonus(std::string_view ref_dir, std::string_view candidate_la
   return count_shared_path_components(ref_dir, candidate_dir) * kSharedPathComponentBonus;
 }
 
-std::string picker_display_path(const std::string& path, const std::string& workspace_root) {
-  if (path.empty()) {
-    return path;
-  }
-  std::error_code ec;
-  const std::filesystem::path absolute = std::filesystem::path(path).is_absolute()
-                                             ? std::filesystem::path(path)
-                                             : std::filesystem::path(workspace_root) / path;
-  if (!workspace_root.empty()) {
-    const auto relative =
-        std::filesystem::relative(absolute, std::filesystem::path(workspace_root), ec);
-    if (!ec && !relative.empty()) {
-      return relative.string();
-    }
-  }
-  return absolute.filename().string();
+std::size_t filename_offset_in_label(std::string_view label) {
+  const std::size_t slash = label.find_last_of("/\\");
+  return slash == std::string::npos ? 0 : slash + 1;
 }
 
-std::filesystem::path picker_absolute_path(const std::string& match,
-                                           const std::string& workspace_root) {
-  std::error_code ec;
-  const std::filesystem::path match_path(match);
-  if (match_path.is_absolute()) {
-    return std::filesystem::absolute(match_path, ec);
+std::vector<std::size_t> label_match_indices(std::string_view label,
+                                             const std::vector<std::size_t>& filename_indices) {
+  const std::size_t offset = filename_offset_in_label(label);
+  std::vector<std::size_t> indices;
+  indices.reserve(filename_indices.size());
+  for (const std::size_t index : filename_indices) {
+    indices.push_back(index + offset);
   }
-  return std::filesystem::absolute(std::filesystem::path(workspace_root) / match, ec);
+  return indices;
 }
 
-std::shared_ptr<const std::vector<FilePickerCatalogEntry>> build_catalog(
-    const IndexSnapshot& snapshot) {
-  auto catalog = std::make_shared<std::vector<FilePickerCatalogEntry>>();
-  catalog->reserve(snapshot.files.size());
-  for (const std::string& path : snapshot.files) {
-    const std::string filename = picker_filename(path);
-    catalog->push_back({path, filename, fuzzy_to_lower(filename)});
+void try_add_catalog_hit(const FilePickerCatalogEntry& entry, int bonus, std::string_view ref_dir,
+                         std::string_view query_lower, std::unordered_set<std::string>* seen,
+                         std::vector<FilePickerMatch>* out) {
+  const FuzzyMatchResult result =
+      fuzzy_match_cached(entry.filename, entry.filename_lower, query_lower);
+  if (!result.matched) {
+    return;
   }
-  return catalog;
+  if (seen->count(entry.path) != 0) {
+    return;
+  }
+  seen->insert(entry.path);
+
+  const int proximity = path_proximity_bonus(ref_dir, entry.dir_label);
+  out->push_back({entry.path, entry.display_label, result.score + bonus + proximity,
+                  label_match_indices(entry.display_label, result.indices)});
 }
 
-std::vector<FilePickerMatch> search_files(std::string_view query_lower,
-                                          const std::vector<FilePickerCatalogEntry>& catalog,
-                                          const FilePickerSearchParams& params) {
-  struct Candidate {
-    std::string path;
-    std::string label;
-    int score = 0;
-    std::vector<std::size_t> match_indices;
-  };
-
-  std::vector<Candidate> candidates;
+std::vector<FilePickerMatch> search_files(
+    std::string_view query_lower, const std::vector<FilePickerCatalogEntry>& catalog,
+    const FilePickerSearchParams& params) {
   std::unordered_set<std::string> seen;
-  const std::string& workspace_root = params.workspace_root;
-
-  const auto try_add = [&](const std::string& path, std::string_view filename,
-                           std::string_view filename_lower, int bonus) {
-    const FuzzyMatchResult result = fuzzy_match_cached(filename, filename_lower, query_lower);
-    if (!result.matched) {
-      return;
-    }
-    const auto absolute = picker_absolute_path(path, workspace_root);
-    const std::string normalized = normalize_path(absolute.string());
-    if (seen.count(normalized) != 0) {
-      return;
-    }
-    seen.insert(normalized);
-
-    const std::string label = picker_display_path(path, workspace_root);
-    const std::size_t filename_offset = picker_filename_offset(label);
-    std::vector<std::size_t> label_indices;
-    label_indices.reserve(result.indices.size());
-    for (const std::size_t index : result.indices) {
-      label_indices.push_back(index + filename_offset);
-    }
-
-    const int proximity = path_proximity_bonus(params.ref_dir, label);
-    candidates.push_back(
-        {path, label, result.score + bonus + proximity, std::move(label_indices)});
-  };
-
-  for (const std::string& path : params.open_tabs) {
-    const std::string filename = picker_filename(picker_display_path(path, workspace_root));
-    try_add(path, filename, fuzzy_to_lower(filename), kOpenTabScoreBonus);
-  }
-
-  for (const FilePickerCatalogEntry& entry : catalog) {
-    try_add(entry.path, entry.filename, entry.filename_lower, 0);
-  }
-
-  std::sort(candidates.begin(), candidates.end(),
-            [](const Candidate& a, const Candidate& b) {
-              if (a.score != b.score) {
-                return a.score > b.score;
-              }
-              if (a.label.size() != b.label.size()) {
-                return a.label.size() < b.label.size();
-              }
-              return a.label < b.label;
-            });
-
-  const std::size_t limit = std::min(candidates.size(), kMaxResults);
   std::vector<FilePickerMatch> results;
-  results.reserve(limit);
-  for (std::size_t i = 0; i < limit; ++i) {
-    const Candidate& candidate = candidates[i];
-    results.push_back({candidate.path, candidate.score, candidate.match_indices});
+  results.reserve(kMaxResults);
+
+  if (query_lower.empty()) {
+    return results;
+  }
+
+  for (const FilePickerCatalogEntry& entry : params.open_tabs) {
+    try_add_catalog_hit(entry, kOpenTabScoreBonus, params.ref_dir, query_lower, &seen, &results);
+  }
+
+  std::vector<FuzzyCatalogEntryView> views;
+  views.reserve(catalog.size());
+  for (const FilePickerCatalogEntry& entry : catalog) {
+    views.push_back({entry.filename, entry.filename_lower});
+  }
+
+  const std::vector<FuzzyCatalogHit> hits =
+      fuzzy_filter_catalog(views, query_lower, kMaxResults, kMaxResults);
+
+  for (const FuzzyCatalogHit& hit : hits) {
+    const FilePickerCatalogEntry& entry = catalog[hit.index];
+    if (seen.count(entry.path) != 0) {
+      continue;
+    }
+    seen.insert(entry.path);
+    const int proximity = path_proximity_bonus(params.ref_dir, entry.dir_label);
+    results.push_back({entry.path, entry.display_label, hit.score + proximity,
+                       label_match_indices(entry.display_label, hit.match_indices)});
+  }
+
+  std::sort(results.begin(), results.end(), [](const FilePickerMatch& a, const FilePickerMatch& b) {
+    if (a.score != b.score) {
+      return a.score > b.score;
+    }
+    if (a.display_label.size() != b.display_label.size()) {
+      return a.display_label.size() < b.display_label.size();
+    }
+    return a.display_label < b.display_label;
+  });
+
+  if (results.size() > kMaxResults) {
+    results.resize(kMaxResults);
   }
   return results;
 }
@@ -211,14 +161,15 @@ void FilePickerMatchRunner::stop_worker() {
   }
 }
 
-void FilePickerMatchRunner::start(uint64_t request_id, std::string query_lower,
-                                  std::shared_ptr<const IndexSnapshot> snapshot,
-                                  FilePickerSearchParams params) {
+void FilePickerMatchRunner::start(
+    uint64_t request_id, std::string query_lower,
+    std::shared_ptr<const std::vector<FilePickerCatalogEntry>> catalog,
+    FilePickerSearchParams params) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
     active_request_id_ = request_id;
-    pending_job_ = Job{request_id, std::move(query_lower), std::move(snapshot),
-                       std::move(params)};
+    pending_job_ =
+        Job{request_id, std::move(query_lower), std::move(catalog), std::move(params)};
     has_pending_job_ = true;
     has_ready_result_ = false;
     running_ = true;
@@ -271,25 +222,12 @@ void FilePickerMatchRunner::worker_main() {
       has_pending_job_ = false;
     }
 
-    if (active_request_id_.load() != job.request_id || job.snapshot == nullptr) {
-      continue;
-    }
-
-    if (cached_snapshot_.get() != job.snapshot.get()) {
-      cached_catalog_ = build_catalog(*job.snapshot);
-      cached_snapshot_ = job.snapshot;
-    }
-
-    if (active_request_id_.load() != job.request_id) {
-      std::lock_guard<std::mutex> lock(mutex_);
-      if (!has_pending_job_) {
-        running_ = false;
-      }
+    if (active_request_id_.load() != job.request_id || job.catalog == nullptr) {
       continue;
     }
 
     std::vector<FilePickerMatch> matches =
-        search_files(job.query_lower, *cached_catalog_, job.params);
+        search_files(job.query_lower, *job.catalog, job.params);
 
     std::lock_guard<std::mutex> lock(mutex_);
     if (active_request_id_.load() != job.request_id) {

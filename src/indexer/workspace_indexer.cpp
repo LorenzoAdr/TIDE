@@ -113,7 +113,7 @@ void scan_workspace_skeleton(const std::string& workspace_root,
 
   snapshot->files = std::move(files);
   snapshot->skeleton_folders = std::move(folders);
-  rebuild_index_files_lower(snapshot);
+  rebuild_index_derived_fields(snapshot);
 }
 
 void scan_dir(const fs::path& root, const fs::path& current, const IndexFilterOptions& options,
@@ -137,6 +137,70 @@ void scan_dir(const fs::path& root, const fs::path& current, const IndexFilterOp
       }
     }
   }
+}
+
+void collect_workspace_directories(const fs::path& root, const fs::path& current,
+                                   const IndexFilterOptions& options,
+                                   std::vector<std::string>* folders) {
+  std::error_code ec;
+  for (const auto& entry : fs::directory_iterator(current, ec)) {
+    if (ec) {
+      break;
+    }
+    if (!entry.is_directory(ec)) {
+      continue;
+    }
+    const auto name = entry.path().filename().string();
+    if (should_skip_dir_name(name, options)) {
+      continue;
+    }
+    const fs::path rel = fs::relative(entry.path(), root, ec);
+    if (ec || rel.empty()) {
+      continue;
+    }
+    folders->push_back(rel.generic_string());
+    collect_workspace_directories(root, entry.path(), options, folders);
+  }
+}
+
+bool path_matches_prefix(const std::string& path, const std::string& prefix) {
+  if (prefix.empty()) {
+    return false;
+  }
+  if (path == prefix) {
+    return true;
+  }
+  if (path.size() <= prefix.size() || path[prefix.size()] != '/') {
+    return false;
+  }
+  return path.rfind(prefix, 0) == 0;
+}
+
+void sort_unique_strings(std::vector<std::string>* values) {
+  if (values == nullptr) {
+    return;
+  }
+  std::sort(values->begin(), values->end());
+  values->erase(std::unique(values->begin(), values->end()), values->end());
+}
+
+void merge_unique_strings(std::vector<std::string>* target, const std::vector<std::string>& extra) {
+  if (target == nullptr || extra.empty()) {
+    return;
+  }
+  target->insert(target->end(), extra.begin(), extra.end());
+  sort_unique_strings(target);
+}
+
+void insert_sorted_unique(std::vector<std::string>* values, const std::string& value) {
+  if (values == nullptr || value.empty()) {
+    return;
+  }
+  if (std::binary_search(values->begin(), values->end(), value)) {
+    return;
+  }
+  const auto it = std::lower_bound(values->begin(), values->end(), value);
+  values->insert(it, value);
 }
 
 #if defined(__linux__)
@@ -226,7 +290,19 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
       if (event->mask & IN_ISDIR) {
         if ((event->mask & (IN_CREATE | IN_MOVED_TO)) &&
             !should_skip_dir_name(event->name, filter_options)) {
-          add_directory_watch(inotify_fd, entry_path, &watch_dirs);
+          scan_directories_for_watch(inotify_fd, root, entry_path, filter_options, &watch_dirs);
+          FileIndexChange change;
+          change.kind = FileIndexChangeKind::IndexDirectory;
+          change.relative_path = rel_str;
+          change.absolute_path = entry_path.string();
+          std::lock_guard<std::mutex> lock(*changes_mutex);
+          pending_changes->push_back(std::move(change));
+        } else if (event->mask & (IN_DELETE | IN_MOVED_FROM)) {
+          FileIndexChange change;
+          change.kind = FileIndexChangeKind::RemovePrefix;
+          change.relative_path = rel_str;
+          std::lock_guard<std::mutex> lock(*changes_mutex);
+          pending_changes->push_back(std::move(change));
         }
         continue;
       }
@@ -262,6 +338,49 @@ void rebuild_index_files_lower(IndexSnapshot* snapshot) {
   for (std::size_t i = 0; i < snapshot->files.size(); ++i) {
     snapshot->files_lower[i] = fuzzy_to_lower(snapshot->files[i]);
   }
+}
+
+namespace {
+
+std::string catalog_filename(std::string_view path) {
+  const std::size_t slash = path.find_last_of("/\\");
+  if (slash == std::string::npos) {
+    return std::string(path);
+  }
+  return std::string(path.substr(slash + 1));
+}
+
+std::string catalog_dir_label(std::string_view label) {
+  const std::size_t slash = label.find_last_of("/\\");
+  if (slash == std::string::npos) {
+    return {};
+  }
+  return std::string(label.substr(0, slash));
+}
+
+}  // namespace
+
+void rebuild_index_file_picker_catalog(IndexSnapshot* snapshot) {
+  if (snapshot == nullptr) {
+    return;
+  }
+  auto catalog = std::make_shared<std::vector<FilePickerCatalogEntry>>();
+  catalog->reserve(snapshot->files.size());
+  for (const std::string& path : snapshot->files) {
+    FilePickerCatalogEntry entry;
+    entry.path = path;
+    entry.display_label = path;
+    entry.filename = catalog_filename(path);
+    entry.filename_lower = fuzzy_to_lower(entry.filename);
+    entry.dir_label = catalog_dir_label(path);
+    catalog->push_back(std::move(entry));
+  }
+  snapshot->file_picker_catalog = std::move(catalog);
+}
+
+void rebuild_index_derived_fields(IndexSnapshot* snapshot) {
+  rebuild_index_files_lower(snapshot);
+  rebuild_index_file_picker_catalog(snapshot);
 }
 
 std::vector<std::string> scan_workspace_files(const std::string& workspace_root,
@@ -373,7 +492,15 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
       std::sort(snap->files.begin(), snap->files.end());
     }
   }
-  rebuild_index_files_lower(snap.get());
+  {
+    std::error_code ec;
+    const fs::path root(workspace_root);
+    if (fs::is_directory(root, ec)) {
+      collect_workspace_directories(root, root, filter_options, &snap->folders);
+      sort_unique_strings(&snap->folders);
+    }
+  }
+  rebuild_index_derived_fields(snap.get());
   TGDB_MON("idx", "workspace_indexer.files=" + std::to_string(snap->files.size()));
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -428,16 +555,153 @@ void WorkspaceIndexer::upsert_file(const std::string& workspace_root,
     updated->workspace_root = workspace_root;
     updated->filter_options = snapshot_->filter_options;
     updated->files = snapshot_->files;
+    updated->folders = snapshot_->folders;
   }
 
   auto& files = updated->files;
   files.erase(std::remove(files.begin(), files.end(), relative_file), files.end());
   files.push_back(relative_file);
   std::sort(files.begin(), files.end());
-  rebuild_index_files_lower(updated.get());
+  rebuild_index_derived_fields(updated.get());
 
   std::lock_guard<std::mutex> lock(mutex_);
   snapshot_ = updated;
+}
+
+void WorkspaceIndexer::index_directory(const std::string& workspace_root,
+                                       const std::string& relative_dir,
+                                       const std::string& absolute_dir) {
+  IndexFilterOptions options;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
+      return;
+    }
+    options = snapshot_->filter_options;
+  }
+
+  std::error_code ec;
+  const fs::path absolute = fs::absolute(absolute_dir, ec);
+  if (!fs::is_directory(absolute, ec)) {
+    return;
+  }
+
+  auto updated = std::make_shared<IndexSnapshot>();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
+      return;
+    }
+    updated->workspace_root = workspace_root;
+    updated->filter_options = snapshot_->filter_options;
+    updated->files = snapshot_->files;
+    updated->folders = snapshot_->folders;
+  }
+
+  std::function<void(const fs::path&, const fs::path&)> walk;
+  walk = [&](const fs::path& abs_dir, const fs::path& rel_dir) {
+    const std::string rel_str = rel_dir.empty() ? std::string{} : rel_dir.generic_string();
+    if (!rel_str.empty()) {
+      insert_sorted_unique(&updated->folders, rel_str);
+    }
+
+    for (const auto& entry : fs::directory_iterator(abs_dir, ec)) {
+      if (ec) {
+        break;
+      }
+      const auto name = entry.path().filename().string();
+      if (name.empty() || name == "." || name == "..") {
+        continue;
+      }
+      const fs::path rel = rel_dir.empty() ? fs::path(name) : rel_dir / name;
+      const std::string entry_rel = rel.generic_string();
+      if (entry.is_directory(ec)) {
+        if (should_skip_dir_name(name, options)) {
+          continue;
+        }
+        walk(entry.path(), rel);
+      } else if (entry.is_regular_file(ec)) {
+        if (!should_list_workspace_path(entry_rel, options)) {
+          continue;
+        }
+        insert_sorted_unique(&updated->files, entry_rel);
+      }
+    }
+  };
+
+  const fs::path rel_dir = relative_dir.empty() ? fs::path{} : fs::path(relative_dir);
+  walk(absolute, rel_dir);
+  rebuild_index_derived_fields(updated.get());
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  snapshot_ = updated;
+}
+
+void WorkspaceIndexer::remove_path_prefix(const std::string& workspace_root,
+                                          const std::string& prefix) {
+  if (prefix.empty()) {
+    return;
+  }
+
+  auto updated = std::make_shared<IndexSnapshot>();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
+      return;
+    }
+    updated->workspace_root = workspace_root;
+    updated->filter_options = snapshot_->filter_options;
+    updated->files = snapshot_->files;
+    updated->folders = snapshot_->folders;
+  }
+
+  auto& files = updated->files;
+  files.erase(std::remove_if(files.begin(), files.end(),
+                             [&](const std::string& path) {
+                               return path_matches_prefix(path, prefix);
+                             }),
+              files.end());
+
+  auto& folders = updated->folders;
+  folders.erase(std::remove_if(folders.begin(), folders.end(),
+                                [&](const std::string& path) {
+                                  return path_matches_prefix(path, prefix);
+                                }),
+               folders.end());
+
+  rebuild_index_derived_fields(updated.get());
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  snapshot_ = updated;
+}
+
+bool WorkspaceIndexer::refresh(const std::string& workspace_root) {
+  IndexFilterOptions options;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
+      return false;
+    }
+    options = snapshot_->filter_options;
+  }
+
+  auto updated = std::make_shared<IndexSnapshot>();
+  updated->workspace_root = workspace_root;
+  updated->filter_options = options;
+  updated->files = scan_workspace_files(workspace_root, options);
+
+  std::error_code ec;
+  const fs::path root(workspace_root);
+  if (fs::is_directory(root, ec)) {
+    collect_workspace_directories(root, root, options, &updated->folders);
+    sort_unique_strings(&updated->folders);
+  }
+
+  rebuild_index_derived_fields(updated.get());
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  snapshot_ = updated;
+  return true;
 }
 
 void WorkspaceIndexer::remove_file(const std::string& workspace_root,
@@ -455,11 +719,12 @@ void WorkspaceIndexer::remove_file(const std::string& workspace_root,
     updated->workspace_root = workspace_root;
     updated->filter_options = snapshot_->filter_options;
     updated->files = snapshot_->files;
+    updated->folders = snapshot_->folders;
   }
 
   auto& files = updated->files;
   files.erase(std::remove(files.begin(), files.end(), relative_file), files.end());
-  rebuild_index_files_lower(updated.get());
+  rebuild_index_derived_fields(updated.get());
 
   std::lock_guard<std::mutex> lock(mutex_);
   snapshot_ = updated;

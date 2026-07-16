@@ -9,6 +9,7 @@
 #include "app/debug_model.hpp"
 #include "app/workspace_model.hpp"
 #include "ftxui/component/component_base.hpp"
+#include "ftxui/dom/elements.hpp"
 #include "indexer/workspace_indexer.hpp"
 #include "ui/file_picker_match_runner.hpp"
 #include "ui/file_picker_preview.hpp"
@@ -30,6 +31,8 @@ struct FilePickerState {
   uint64_t search_generation = 0;
   FilePickerMatchRunner runner;
   FilePickerPreview preview;
+  ftxui::Element frozen_backdrop;
+  bool has_frozen_backdrop = false;
   std::function<void()> repaint_notify;
   std::function<void()> file_opened_notify;
   std::string preview_requested_path;
@@ -50,6 +53,8 @@ struct FilePickerState {
   void notify_search_tick();
   void update_preview_for_selection(const std::string& workspace_root);
   void reset_preview();
+  void capture_frozen_backdrop(ftxui::Element backdrop);
+  void clear_frozen_backdrop();
   void on_opened(const std::string& workspace_root);
   void on_closed();
   void arm_ctrl_chord();
