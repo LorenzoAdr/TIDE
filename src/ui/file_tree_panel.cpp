@@ -34,6 +34,7 @@
 #include "i18n/tr.hpp"
 #include "util/filesystem_tree.hpp"
 #include "util/path_normalize.hpp"
+#include "util/ui_panel_render_cache.hpp"
 
 namespace tgdb {
 
@@ -166,6 +167,8 @@ std::string relative_path_in_workspace(const std::string& workspace_root,
   return rel.generic_string();
 }
 
+void invalidate_file_tree_panel(MainLayoutState* layout_state);
+
 struct FileTreePanelState {
   FileTreeNode root;
   std::vector<FlatEntry> flat;
@@ -214,7 +217,8 @@ struct FileTreePanelState {
                                                                       visible)));
   }
 
-  void scroll_row_into_view(int row) {
+  void scroll_row_into_view(int row, MainLayoutState* layout_state = nullptr) {
+    const int before = list_scroll;
     const int visible = visible_line_count(content_box);
     if (row < list_scroll) {
       list_scroll = row;
@@ -222,6 +226,9 @@ struct FileTreePanelState {
       list_scroll = row - visible + 1;
     }
     clamp_scroll();
+    if (layout_state != nullptr && list_scroll != before) {
+      invalidate_file_tree_panel(layout_state);
+    }
   }
 
   void center_row(int row) {
@@ -328,7 +335,7 @@ struct FileTreePanelState {
     if (entry.folder != nullptr) {
       entry.folder->expanded = !entry.folder->expanded;
       rebuild_flat();
-      scroll_row_into_view(index);
+      scroll_row_into_view(index, layout_state);
     }
   }
 
@@ -377,6 +384,29 @@ struct FileTreePanelState {
   }
 };
 
+void invalidate_file_tree_panel(MainLayoutState* layout_state) {
+  if (layout_state != nullptr) {
+    layout_state->panel_render_cache.mark_dirty(UiPanelId::FileTree);
+  }
+}
+
+void set_explorer_list_scroll(FileTreePanelState* state, MainLayoutState* layout_state,
+                              int scroll, int max_scroll = -1) {
+  if (state == nullptr) {
+    return;
+  }
+  if (max_scroll >= 0) {
+    scroll = std::max(0, std::min(scroll, max_scroll));
+  } else {
+    scroll = std::max(0, scroll);
+  }
+  if (state->list_scroll == scroll) {
+    return;
+  }
+  state->list_scroll = scroll;
+  invalidate_file_tree_panel(layout_state);
+}
+
 bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState* layout_state,
                                      const Mouse& m, int total, int visible) {
   if (state == nullptr) {
@@ -401,9 +431,9 @@ bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState*
     if (state->scrollbar_dragging && scrollable) {
       const int local_y = m.y - state->scrollbar_box.y_min;
       const int thumb_top = local_y - state->scrollbar_drag_offset;
-      state->list_scroll =
-          std::max(0, std::min(scroll_for_thumb_top(state->scrollbar_layout, thumb_top),
-                               max_scroll));
+      set_explorer_list_scroll(
+          state, layout_state,
+          scroll_for_thumb_top(state->scrollbar_layout, thumb_top), max_scroll);
       return true;
     }
     return false;
@@ -417,9 +447,9 @@ bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState*
     if (m.button == Mouse::Left && m.motion == Mouse::Moved && scrollable) {
       const int local_y = m.y - state->scrollbar_box.y_min;
       const int thumb_top = local_y - state->scrollbar_drag_offset;
-      state->list_scroll =
-          std::max(0, std::min(scroll_for_thumb_top(state->scrollbar_layout, thumb_top),
-                               max_scroll));
+      set_explorer_list_scroll(
+          state, layout_state,
+          scroll_for_thumb_top(state->scrollbar_layout, thumb_top), max_scroll);
       return true;
     }
   }
@@ -429,11 +459,11 @@ bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState*
   }
 
   if (m.button == Mouse::WheelUp) {
-    state->list_scroll = std::max(0, state->list_scroll - 3);
+    set_explorer_list_scroll(state, layout_state, state->list_scroll - 3);
     return true;
   }
   if (m.button == Mouse::WheelDown) {
-    state->list_scroll = std::min(state->list_scroll + 3, max_scroll);
+    set_explorer_list_scroll(state, layout_state, state->list_scroll + 3, max_scroll);
     return true;
   }
 
@@ -449,9 +479,9 @@ bool handle_explorer_scrollbar_mouse(FileTreePanelState* state, MainLayoutState*
       state->scrollbar_drag_offset = local_y - state->scrollbar_layout.thumb_y;
     } else {
       const int thumb_top = local_y - state->scrollbar_layout.thumb_height / 2;
-      state->list_scroll =
-          std::max(0, std::min(scroll_for_thumb_top(state->scrollbar_layout, thumb_top),
-                               max_scroll));
+      set_explorer_list_scroll(state, layout_state,
+                               scroll_for_thumb_top(state->scrollbar_layout, thumb_top),
+                               max_scroll);
       state->scrollbar_dragging = true;
       state->scrollbar_drag_offset = state->scrollbar_layout.thumb_height / 2;
     }
@@ -584,9 +614,9 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
         (state->content_box.Contain(m.x, m.y) || state->panel_box.Contain(m.x, m.y) ||
          state->scrollbar_box.Contain(m.x, m.y))) {
       if (m.button == Mouse::WheelUp) {
-        state->list_scroll = std::max(0, state->list_scroll - 3);
+        set_explorer_list_scroll(state, layout_state, state->list_scroll - 3);
       } else {
-        state->list_scroll = std::min(state->list_scroll + 3, max_scroll);
+        set_explorer_list_scroll(state, layout_state, state->list_scroll + 3, max_scroll);
       }
       return true;
     }
@@ -604,7 +634,7 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
     }
     trigger_press(layout_state, press_id::explorer_row(*row));
     state->selected = *row;
-    state->scroll_row_into_view(*row);
+    state->scroll_row_into_view(*row, layout_state);
     state->activate(model, workspace, focus, layout_state, *row);
     return true;
   }
@@ -619,12 +649,12 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
   if (event == Event::ArrowDown || event == Event::Character('j')) {
     state->selected =
         std::min(state->selected + 1, static_cast<int>(state->flat.size()) - 1);
-    state->scroll_row_into_view(state->selected);
+    state->scroll_row_into_view(state->selected, layout_state);
     return true;
   }
   if (event == Event::ArrowUp || event == Event::Character('k')) {
     state->selected = std::max(0, state->selected - 1);
-    state->scroll_row_into_view(state->selected);
+    state->scroll_row_into_view(state->selected, layout_state);
     return true;
   }
   if (event == Event::Return) {
@@ -637,7 +667,7 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
     if (!entry.is_file && entry.folder != nullptr && !entry.folder->expanded) {
       entry.folder->expanded = true;
       state->rebuild_flat();
-      state->scroll_row_into_view(state->selected);
+      state->scroll_row_into_view(state->selected, layout_state);
       return true;
     }
     return false;
@@ -647,17 +677,17 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
     if (!entry.is_file && entry.folder != nullptr && entry.folder->expanded) {
       entry.folder->expanded = false;
       state->rebuild_flat();
-      state->scroll_row_into_view(state->selected);
+      state->scroll_row_into_view(state->selected, layout_state);
       return true;
     }
     return false;
   }
   if (event == Event::PageUp) {
-    state->list_scroll = std::max(0, state->list_scroll - visible);
+    set_explorer_list_scroll(state, layout_state, state->list_scroll - visible, max_scroll);
     return true;
   }
   if (event == Event::PageDown) {
-    state->list_scroll = std::min(state->list_scroll + visible, max_scroll);
+    set_explorer_list_scroll(state, layout_state, state->list_scroll + visible, max_scroll);
     return true;
   }
   return false;
@@ -776,10 +806,10 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
     Element scrollbar =
         vertical_scrollbar(total, state->list_scroll, visible, rendered_lines,
                            layout_state != nullptr &&
-                               layout_state->clickable.is_hovered(press_id::kEditorScrollbar),
+                               layout_state->clickable.is_hovered(press_id::kExplorerScrollbar),
                            state->scrollbar_dragging ||
                                (layout_state != nullptr &&
-                                layout_state->clickable.is_pressed(press_id::kEditorScrollbar))) |
+                                layout_state->clickable.is_pressed(press_id::kExplorerScrollbar))) |
         reflect(state->scrollbar_box);
 
     auto content = vbox({hbox({list | flex, scrollbar}) | flex | bgcolor(theme::PanelBg())});
