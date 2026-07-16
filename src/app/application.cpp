@@ -698,13 +698,15 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 		drain_events();
 	}
 
-	if (plan.run_full_background) {
+		if (plan.run_full_background) {
 		if (!any_modal_open()) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "apply_pending_connection");
 			TGDB_MON_SCOPE("ui", "tick.apply_pending_connection");
 			apply_pending_connection();
 		}
-		if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
+		// File-system sync must run even while typing: deferred-panel gating used to
+		// drop inotify updates until the next idle window.
+		{
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "process_index_changes");
 			TGDB_MON_SCOPE("ui", "tick.process_index_changes");
 			process_index_changes();
@@ -2120,6 +2122,7 @@ int Application::run() {
 		}
 	};
 	git_service_.set_update_callback([] {});
+	indexer_.set_change_notify([this] { UI_WAKE(&layout_state_, "indexer.fs_change"); });
 
 	file_picker_state_.set_preview_notify([this] {
 		ui_wake_correlated(&layout_state_, ui_capture_correlation(&layout_state_),

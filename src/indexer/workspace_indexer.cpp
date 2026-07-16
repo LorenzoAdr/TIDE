@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <sstream>
 #include <unordered_map>
 
@@ -235,10 +236,18 @@ void scan_directories_for_watch(int fd, const fs::path& root, const fs::path& cu
 
 void run_inotify_loop(const std::string& workspace_root, const IndexFilterOptions& filter_options,
                       int inotify_fd, std::atomic<bool>* stop_requested,
-                      std::mutex* changes_mutex, std::vector<FileIndexChange>* pending_changes) {
+                      std::mutex* changes_mutex, std::vector<FileIndexChange>* pending_changes,
+                      const std::function<void()>& on_changes) {
   std::unordered_map<int, fs::path> watch_dirs;
   const fs::path root(workspace_root);
   scan_directories_for_watch(inotify_fd, root, root, filter_options, &watch_dirs);
+
+  auto push_change = [&](FileIndexChange change) {
+    {
+      std::lock_guard<std::mutex> lock(*changes_mutex);
+      pending_changes->push_back(std::move(change));
+    }
+  };
 
   std::vector<char> buffer(64 * 1024);
   while (!stop_requested->load()) {
@@ -249,6 +258,7 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
       continue;
     }
 
+    bool queued = false;
     ssize_t offset = 0;
     while (offset < length) {
       const auto* event =
@@ -279,7 +289,26 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
       }
       const std::string rel_str = rel.generic_string();
 
-      if (event->mask & IN_ISDIR) {
+      // IN_ISDIR is unreliable on DELETE; probe the filesystem for create/move-in.
+      bool is_directory = (event->mask & IN_ISDIR) != 0;
+      if (!is_directory && (event->mask & (IN_CREATE | IN_MOVED_TO))) {
+        is_directory = fs::is_directory(entry_path, ec);
+      }
+
+      if (event->mask & (IN_DELETE | IN_MOVED_FROM)) {
+        // RemovePrefix covers files and directories (exact path + children). IN_ISDIR is
+        // often absent on delete, so we always use the prefix form.
+        if (should_list_workspace_path(rel_str, filter_options)) {
+          FileIndexChange change;
+          change.kind = FileIndexChangeKind::RemovePrefix;
+          change.relative_path = rel_str;
+          push_change(std::move(change));
+          queued = true;
+        }
+        continue;
+      }
+
+      if (is_directory) {
         if ((event->mask & (IN_CREATE | IN_MOVED_TO)) &&
             !should_skip_dir_name(event->name, filter_options)) {
           scan_directories_for_watch(inotify_fd, root, entry_path, filter_options, &watch_dirs);
@@ -287,33 +316,29 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
           change.kind = FileIndexChangeKind::IndexDirectory;
           change.relative_path = rel_str;
           change.absolute_path = entry_path.string();
-          std::lock_guard<std::mutex> lock(*changes_mutex);
-          pending_changes->push_back(std::move(change));
-        } else if (event->mask & (IN_DELETE | IN_MOVED_FROM)) {
-          FileIndexChange change;
-          change.kind = FileIndexChangeKind::RemovePrefix;
-          change.relative_path = rel_str;
-          std::lock_guard<std::mutex> lock(*changes_mutex);
-          pending_changes->push_back(std::move(change));
+          push_change(std::move(change));
+          queued = true;
         }
         continue;
       }
 
+      if (!(event->mask & (IN_CREATE | IN_MOVED_TO | IN_MODIFY))) {
+        continue;
+      }
       if (!should_list_workspace_path(rel_str, filter_options)) {
         continue;
       }
 
       FileIndexChange change;
+      change.kind = FileIndexChangeKind::Upsert;
       change.relative_path = rel_str;
-      if (event->mask & (IN_DELETE | IN_MOVED_FROM)) {
-        change.kind = FileIndexChangeKind::Remove;
-        change.absolute_path.clear();
-      } else {
-        change.kind = FileIndexChangeKind::Upsert;
-        change.absolute_path = entry_path.string();
-      }
-      std::lock_guard<std::mutex> lock(*changes_mutex);
-      pending_changes->push_back(std::move(change));
+      change.absolute_path = entry_path.string();
+      push_change(std::move(change));
+      queued = true;
+    }
+
+    if (queued && on_changes) {
+      on_changes();
     }
   }
 }
@@ -460,6 +485,16 @@ bool WorkspaceIndexer::scanning() const {
   return scanning_.load();
 }
 
+void WorkspaceIndexer::set_change_notify(std::function<void()> callback) {
+  std::lock_guard<std::mutex> lock(changes_mutex_);
+  change_notify_ = std::move(callback);
+}
+
+bool WorkspaceIndexer::has_pending_changes() const {
+  std::lock_guard<std::mutex> lock(changes_mutex_);
+  return !pending_changes_.empty();
+}
+
 std::vector<FileIndexChange> WorkspaceIndexer::drain_changes() {
   std::lock_guard<std::mutex> lock(changes_mutex_);
   std::vector<FileIndexChange> out = std::move(pending_changes_);
@@ -509,8 +544,18 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
   if (inotify_fd_ < 0) {
     return;
   }
+  const auto on_changes = [this]() {
+    std::function<void()> notify;
+    {
+      std::lock_guard<std::mutex> lock(changes_mutex_);
+      notify = change_notify_;
+    }
+    if (notify) {
+      notify();
+    }
+  };
   run_inotify_loop(workspace_root, filter_options, inotify_fd_, &stop_requested_, &changes_mutex_,
-                   &pending_changes_);
+                   &pending_changes_, on_changes);
   if (inotify_fd_ >= 0) {
     close(inotify_fd_);
     inotify_fd_ = -1;

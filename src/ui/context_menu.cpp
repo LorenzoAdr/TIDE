@@ -555,13 +555,17 @@ bool apply_problem_quick_fix(ContextMenuState* state, WorkspaceModel* workspace,
   return true;
 }
 
-void close_tabs_for_path(WorkspaceModel* workspace, const std::string& absolute_path) {
+void close_tabs_for_path(WorkspaceModel* workspace, const std::string& absolute_path,
+                         bool is_dir) {
   if (workspace == nullptr) {
     return;
   }
   const std::string path = normalize_path(absolute_path);
+  const std::string prefix = path.empty() || path.back() == '/' ? path : path + "/";
   for (int i = static_cast<int>(workspace->tabs.size()) - 1; i >= 0; --i) {
-    if (normalize_path(workspace->tabs[static_cast<std::size_t>(i)].path) == path) {
+    const std::string tab_path =
+        normalize_path(workspace->tabs[static_cast<std::size_t>(i)].path);
+    if (tab_path == path || (is_dir && tab_path.rfind(prefix, 0) == 0)) {
       workspace->close_tab(i);
     }
   }
@@ -590,6 +594,12 @@ bool delete_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer*
   if (absolute_path.empty() || model == nullptr) {
     return false;
   }
+  if (is_dir && relative_path.empty()) {
+    if (workspace != nullptr) {
+      workspace->status_message = i18n::tr("status.delete_workspace_root");
+    }
+    return false;
+  }
   std::error_code ec;
   const bool ok = is_dir ? fs::remove_all(absolute_path, ec) > 0 : fs::remove(absolute_path, ec);
   if (!ok || ec) {
@@ -598,18 +608,12 @@ bool delete_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer*
     }
     return false;
   }
-  close_tabs_for_path(workspace, absolute_path);
+  close_tabs_for_path(workspace, absolute_path, is_dir);
   if (indexer != nullptr && !relative_path.empty()) {
     if (is_dir) {
-      if (auto snap = indexer->snapshot()) {
-        for (const auto& file : snap->files) {
-          if (file.rfind(relative_path, 0) == 0) {
-            indexer->remove_file(model->workspace_root, file);
-            if (symbol_indexer != nullptr) {
-              symbol_indexer->remove_file(model->workspace_root, file);
-            }
-          }
-        }
+      indexer->remove_path_prefix(model->workspace_root, relative_path);
+      if (symbol_indexer != nullptr) {
+        symbol_indexer->remove_path_prefix(model->workspace_root, relative_path);
       }
     } else {
       indexer->remove_file(model->workspace_root, relative_path);
@@ -964,7 +968,7 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
-  if (action_id == "delete_file") {
+  if (action_id == "delete_file" || action_id == "delete_folder") {
     open_delete_confirm(state);
     return true;
   }
@@ -1327,7 +1331,8 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
              {i18n::tr("context_menu.create_file"), "create_file"},
              {i18n::tr("context_menu.move_to"), "move_to"},
              {i18n::tr("context_menu.rename_folder"), "rename_folder"},
-             {i18n::tr("context_menu.search_in_folder"), "search_in_folder"}});
+             {i18n::tr("context_menu.search_in_folder"), "search_in_folder"},
+             {i18n::tr("context_menu.delete_folder"), "delete_folder"}});
 }
 
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
@@ -1504,10 +1509,21 @@ Element render_delete_confirm_modal(const ContextMenuState* state) {
     return text("");
   }
   const std::string name = fs::path(state->absolute_path).filename().string();
+  const bool is_folder = state->kind == ContextMenuKind::Folder;
   Element dialog = ModalWindow(
-      text(i18n::tr("context_menu.delete.title")) | color(theme::Accent()),
-      vbox({text(i18n::tr_fmt("context_menu.delete.prompt", {name})) | color(theme::Header()),
-            text(i18n::tr("common.footer.confirm_esc")) | color(theme::Muted())}));
+      text(i18n::tr(is_folder ? "context_menu.delete.folder_title"
+                              : "context_menu.delete.title")) |
+          color(theme::Accent()),
+      vbox({
+          text(i18n::tr_fmt(is_folder ? "context_menu.delete.folder_prompt"
+                                      : "context_menu.delete.prompt",
+                            {name})) |
+              color(theme::Header()),
+          is_folder ? text(i18n::tr("context_menu.delete.folder_warning")) |
+                          color(theme::Warning())
+                    : text(""),
+          text(i18n::tr("common.footer.confirm_esc")) | color(theme::Muted()),
+      }));
   return CenteredModal(std::move(dialog));
 }
 
@@ -1818,10 +1834,12 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
       return true;
     }
     if (event == Event::Return) {
+      const bool is_dir = state->kind == ContextMenuKind::Folder;
       delete_path(workspace, model, indexer, symbol_indexer, state->absolute_path,
-                  state->relative_path, false);
+                  state->relative_path, is_dir);
       context_menu_close(state, layout_state);
       if (layout_state != nullptr) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::FileTree);
         UI_WAKE(layout_state, "wake");
       }
       return true;

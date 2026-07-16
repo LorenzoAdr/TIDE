@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -56,8 +57,10 @@ class WorkspaceIndexer {
   void remove_path_prefix(const std::string& workspace_root, const std::string& prefix);
   bool refresh(const std::string& workspace_root);
   void stop();
+  void set_change_notify(std::function<void()> callback);
   std::shared_ptr<const IndexSnapshot> snapshot() const;
   bool scanning() const;
+  bool has_pending_changes() const;
   std::vector<FileIndexChange> drain_changes();
 
  private:
@@ -65,8 +68,9 @@ class WorkspaceIndexer {
 
   mutable std::mutex mutex_;
   std::shared_ptr<const IndexSnapshot> snapshot_;
-  std::mutex changes_mutex_;
+  mutable std::mutex changes_mutex_;
   std::vector<FileIndexChange> pending_changes_;
+  std::function<void()> change_notify_;
   std::thread worker_;
   std::atomic<bool> scanning_{false};
   std::atomic<bool> stop_requested_{false};
