@@ -184,14 +184,6 @@ void sort_unique_strings(std::vector<std::string>* values) {
   values->erase(std::unique(values->begin(), values->end()), values->end());
 }
 
-void merge_unique_strings(std::vector<std::string>* target, const std::vector<std::string>& extra) {
-  if (target == nullptr || extra.empty()) {
-    return;
-  }
-  target->insert(target->end(), extra.begin(), extra.end());
-  sort_unique_strings(target);
-}
-
 void insert_sorted_unique(std::vector<std::string>* values, const std::string& value) {
   if (values == nullptr || value.empty()) {
     return;

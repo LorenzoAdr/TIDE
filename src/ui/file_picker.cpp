@@ -318,18 +318,9 @@ void FilePickerState::reset_preview() {
   preview.reset();
 }
 
-void FilePickerState::capture_frozen_backdrop(Element backdrop) {
-  frozen_backdrop = std::move(backdrop);
-  has_frozen_backdrop = true;
-}
-
-void FilePickerState::clear_frozen_backdrop() {
-  frozen_backdrop = Element{};
-  has_frozen_backdrop = false;
-}
-
 void FilePickerState::on_opened(const std::string& workspace_root) {
-  update_preview_for_selection(workspace_root);
+  // Empty-query open shows MRU tabs; preview waits for selection/navigation.
+  (void)workspace_root;
 }
 
 void FilePickerState::on_closed() {
@@ -339,7 +330,6 @@ void FilePickerState::on_closed() {
   matches.clear();
   cancel_ctrl_chord();
   reset_preview();
-  clear_frozen_backdrop();
 }
 
 void FilePickerState::arm_ctrl_chord() {
@@ -491,14 +481,11 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
       }),
       [main, model, workspace, state, indexer, layout_state] {
         if (!state->open) {
-          state->clear_frozen_backdrop();
           return main->Render();
         }
 
-        if (!state->has_frozen_backdrop) {
-          state->capture_frozen_backdrop(main->Render());
-        }
-        Element base = state->frozen_backdrop;
+        // Cheap backdrop: avoid re-rendering the full IDE under the modal.
+        Element base = filler() | bgcolor(theme::PanelBg());
 
         state->sync_index(indexer != nullptr ? indexer->snapshot() : nullptr,
                           model->workspace_root);
@@ -539,7 +526,13 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
           matches.push_back(text(empty_label) | color(theme::Muted()));
         }
 
-        const FilePickerPreviewData preview = state->preview.snapshot();
+        // Skip expensive tree-sitter preview while search is in flight.
+        FilePickerPreviewData preview;
+        if (state->searching || state->runner.running()) {
+          preview.state = FilePickerPreviewState::kLoading;
+        } else {
+          preview = state->preview.snapshot();
+        }
         const std::string title =
             state->query.empty() ? i18n::tr("picker.file.open_files")
                                  : i18n::tr("picker.file.search");

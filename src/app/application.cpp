@@ -576,6 +576,17 @@ void Application::restart_workspace_indexing() {
 	indexer_.start_scan(workspace_.root, options, workspace_.root, open_hint);
 }
 
+void Application::refresh_workspace_explorer() {
+	if (workspace_.root.empty()) {
+		return;
+	}
+	if (!indexer_.refresh(workspace_.root)) {
+		return;
+	}
+	layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
+	UI_WAKE(&layout_state_, "app");
+}
+
 void Application::reindex_project() {
 	if (workspace_.root.empty()) {
 		set_workspace_status(i18n::tr("status.index_no_workspace"));
@@ -1687,15 +1698,56 @@ void Application::process_index_changes() {
 	if (workspace_.root.empty()) {
 		return;
 	}
+	bool changed = false;
+	const auto path_matches_prefix = [](const std::string& path, const std::string& prefix) {
+		if (prefix.empty()) {
+			return false;
+		}
+		if (path == prefix) {
+			return true;
+		}
+		if (path.size() <= prefix.size() || path[prefix.size()] != '/') {
+			return false;
+		}
+		return path.rfind(prefix, 0) == 0;
+	};
+
 	for (const auto &change : indexer_.drain_changes()) {
-		if (change.kind == FileIndexChangeKind::Remove) {
+		changed = true;
+		switch (change.kind) {
+		case FileIndexChangeKind::Remove:
 			indexer_.remove_file(workspace_.root, change.relative_path);
 			symbol_indexer_.remove_file(workspace_.root, change.relative_path);
-		} else {
+			break;
+		case FileIndexChangeKind::RemovePrefix:
+			indexer_.remove_path_prefix(workspace_.root, change.relative_path);
+			symbol_indexer_.remove_path_prefix(workspace_.root, change.relative_path);
+			break;
+		case FileIndexChangeKind::IndexDirectory:
+			indexer_.index_directory(workspace_.root, change.relative_path,
+			                         change.absolute_path);
+			if (auto snapshot = indexer_.snapshot()) {
+				for (const std::string &file : snapshot->files) {
+					if (!path_matches_prefix(file, change.relative_path)) {
+						continue;
+					}
+					const std::string absolute =
+					    (std::filesystem::path(workspace_.root) / file).string();
+					symbol_indexer_.reindex_file(workspace_.root, file, absolute);
+				}
+			}
+			break;
+		case FileIndexChangeKind::Upsert:
+		default:
 			indexer_.upsert_file(workspace_.root, change.relative_path, change.absolute_path);
 			symbol_indexer_.reindex_file(workspace_.root, change.relative_path,
 			                             change.absolute_path);
+			break;
 		}
+	}
+	if (changed) {
+		layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
+		UI_WAKE(&layout_state_, "app");
 	}
 }
 
@@ -1968,6 +2020,7 @@ int Application::run() {
 	};
 	layout_state_.status_open_launch = [this]() { open_launch_wizard(); };
 	layout_state_.status_reindex_project = [this]() { reindex_project(); };
+	layout_state_.explorer_refresh = [this]() { refresh_workspace_explorer(); };
 	layout_state_.status_open_source_substitute = [this]() {
 		if (app_mode_ != AppMode::kDebug || !debugging_started_) {
 			return;

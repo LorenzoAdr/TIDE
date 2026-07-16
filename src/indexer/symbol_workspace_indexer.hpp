@@ -36,6 +36,7 @@ class SymbolWorkspaceIndexer {
                     const std::string& relative_file,
                     const std::string& absolute_path);
   void remove_file(const std::string& workspace_root, const std::string& relative_file);
+  void remove_path_prefix(const std::string& workspace_root, const std::string& prefix);
   void stop();
   std::shared_ptr<const SymbolIndexSnapshot> snapshot() const;
   bool scanning() const;

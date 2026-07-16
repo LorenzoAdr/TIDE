@@ -206,6 +206,7 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> watches_key_handler;
   std::function<bool(const ftxui::Event&)> console_debug_mouse_handler;
   std::function<bool(const ftxui::Event&)> explorer_mouse_handler;
+  std::function<void()> explorer_refresh;
   std::function<bool(const ftxui::Event&)> sidebar_mouse_handler;
   std::function<bool(const ftxui::Event&)> outline_mouse_handler;
   std::function<bool(const ftxui::Event&)> status_bar_mouse_handler;

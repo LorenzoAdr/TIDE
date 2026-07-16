@@ -62,6 +62,16 @@ int max_scroll_offset(int total_lines, int visible_lines) {
   return std::max(0, total_lines - visible_lines);
 }
 
+void merge_unique_folder_paths(std::vector<std::string>* target,
+                               const std::vector<std::string>& extra) {
+  if (target == nullptr || extra.empty()) {
+    return;
+  }
+  target->insert(target->end(), extra.begin(), extra.end());
+  std::sort(target->begin(), target->end());
+  target->erase(std::unique(target->begin(), target->end()), target->end());
+}
+
 struct GitExplorerMarks {
   std::unordered_map<std::string, GitStatusEntry> files;
   std::unordered_set<std::string> dirty_folders;
@@ -174,12 +184,14 @@ struct FileTreePanelState {
   std::vector<FlatEntry> flat;
   std::vector<std::string> indexed_files;
   std::vector<std::string> indexed_skeleton_folders;
+  std::vector<std::string> indexed_folders;
   int selected = 0;
   int list_scroll = 0;
   std::string loaded_workspace;
   std::string last_revealed_path;
   Box panel_box;
   Box hide_box;
+  Box refresh_box;
   Box content_box;
   Box scrollbar_box;
   ScrollbarLayout scrollbar_layout;
@@ -270,6 +282,7 @@ struct FileTreePanelState {
       loaded_workspace.clear();
       indexed_files.clear();
       indexed_skeleton_folders.clear();
+      indexed_folders.clear();
       root = FileTreeNode{};
       root.expanded = false;
       selected = 0;
@@ -284,7 +297,8 @@ struct FileTreePanelState {
     }
 
     if (loaded_workspace == workspace_root && indexed_files == snapshot->files &&
-        indexed_skeleton_folders == snapshot->skeleton_folders) {
+        indexed_skeleton_folders == snapshot->skeleton_folders &&
+        indexed_folders == snapshot->folders) {
       return;
     }
 
@@ -295,13 +309,15 @@ struct FileTreePanelState {
     loaded_workspace = workspace_root;
     indexed_files = snapshot->files;
     indexed_skeleton_folders = snapshot->skeleton_folders;
+    indexed_folders = snapshot->folders;
     const std::string to_reveal = last_revealed_path;
     const bool skeleton_preview = !snapshot->skeleton_folders.empty();
-    if (snapshot->skeleton_folders.empty()) {
+    std::vector<std::string> tree_folders = snapshot->skeleton_folders;
+    merge_unique_folder_paths(&tree_folders, snapshot->folders);
+    if (tree_folders.empty()) {
       root = build_file_tree_from_paths(snapshot->files);
     } else {
-      root = build_file_tree_from_paths_and_folders(snapshot->files,
-                                                    snapshot->skeleton_folders);
+      root = build_file_tree_from_paths_and_folders(snapshot->files, tree_folders);
     }
     if (!to_reveal.empty() && !skeleton_preview) {
       reveal_file(workspace_root, to_reveal);
@@ -554,6 +570,13 @@ void hide_explorer_panel(MainLayoutState* layout_state, FocusManagerState* focus
   UI_WAKE(layout_state, "wake");
 }
 
+void refresh_explorer_index(MainLayoutState* layout_state) {
+  if (layout_state == nullptr || !layout_state->explorer_refresh) {
+    return;
+  }
+  layout_state->explorer_refresh();
+}
+
 bool handle_explorer_header_mouse(FileTreePanelState* state, MainLayoutState* layout_state,
                                   FocusManagerState* focus, const Mouse& mouse) {
   if (state == nullptr || layout_state == nullptr) {
@@ -561,11 +584,20 @@ bool handle_explorer_header_mouse(FileTreePanelState* state, MainLayoutState* la
   }
   if (mouse.motion == Mouse::Moved) {
     return update_panel_hover(
-        layout_state, mouse.x, mouse.y, {{press_id::kExplorerHide, &state->hide_box}},
-        [](std::string_view id) { return id == press_id::kExplorerHide; });
+        layout_state, mouse.x, mouse.y,
+        {{press_id::kExplorerRefresh, &state->refresh_box},
+         {press_id::kExplorerHide, &state->hide_box}},
+        [](std::string_view id) {
+          return id == press_id::kExplorerRefresh || id == press_id::kExplorerHide;
+        });
   }
   if (mouse.button != Mouse::Left || mouse.motion != Mouse::Pressed) {
     return false;
+  }
+  if (state->refresh_box.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kExplorerRefresh);
+    refresh_explorer_index(layout_state);
+    return true;
   }
   if (!state->hide_box.Contain(mouse.x, mouse.y)) {
     return false;
@@ -821,12 +853,21 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
 
     auto content = vbox({hbox({list | flex, scrollbar}) | flex | bgcolor(theme::PanelBg())});
 
+    const bool refresh_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kExplorerRefresh);
+    const bool refresh_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kExplorerRefresh);
     const bool hide_hovered =
         layout_state != nullptr &&
         layout_state->clickable.is_hovered(press_id::kExplorerHide);
     const bool hide_pressed =
         layout_state != nullptr &&
         layout_state->clickable.is_pressed(press_id::kExplorerHide);
+    Element refresh_btn = MakeToolbarButton(
+        text(i18n::tr("panel.explorer.refresh")) | color(theme::Muted()),
+        refresh_hovered, refresh_pressed, false, &state->refresh_box);
     Element hide_btn = MakeToolbarButton(
         text(i18n::tr("console.hide_panel")) | color(theme::Muted()),
         hide_hovered, hide_pressed, false, &state->hide_box);
@@ -835,6 +876,7 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
                hbox({
                    text(i18n::tr("panel.explorer.title")) | color(theme::Accent()) | bold,
                    filler(),
+                   refresh_btn | size(WIDTH, EQUAL, 3),
                    hide_btn | size(WIDTH, EQUAL, 3),
                }) | size(HEIGHT, EQUAL, 1) | bgcolor(theme::TabIdle()) | reflect(state->panel_box),
                separator(),

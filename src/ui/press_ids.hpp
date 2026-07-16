@@ -24,6 +24,7 @@ constexpr std::string_view kPacketMonitorRecord = "packet_monitor.record";
 constexpr std::string_view kPacketMonitorSave = "packet_monitor.save";
 constexpr std::string_view kSidebarHide = "sidebar.hide";
 constexpr std::string_view kExplorerHide = "explorer.hide";
+constexpr std::string_view kExplorerRefresh = "explorer.refresh";
 constexpr std::string_view kConsoleHide = "console.hide";
 constexpr std::string_view kStatusIndex = "status.index";
 constexpr std::string_view kStatusChgDir = "status.chg_dir";

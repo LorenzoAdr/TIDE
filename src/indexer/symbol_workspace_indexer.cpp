@@ -139,6 +139,35 @@ void SymbolWorkspaceIndexer::remove_file(const std::string& workspace_root,
   snapshot_ = updated;
 }
 
+void SymbolWorkspaceIndexer::remove_path_prefix(const std::string& workspace_root,
+                                                const std::string& prefix) {
+  if (prefix.empty()) {
+    return;
+  }
+
+  auto updated = std::make_shared<SymbolIndexSnapshot>();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!snapshot_ || snapshot_->workspace_root != workspace_root) {
+      return;
+    }
+    updated->workspace_root = workspace_root;
+    for (const auto& sym : snapshot_->symbols) {
+      if (sym.file == prefix) {
+        continue;
+      }
+      if (sym.file.size() > prefix.size() && sym.file[prefix.size()] == '/' &&
+          sym.file.rfind(prefix, 0) == 0) {
+        continue;
+      }
+      updated->symbols.push_back(sym);
+    }
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  snapshot_ = updated;
+}
+
 void SymbolWorkspaceIndexer::stop() {
   stop_requested_ = true;
   if (worker_.joinable()) {

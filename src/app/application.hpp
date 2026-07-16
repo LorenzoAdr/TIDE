@@ -127,6 +127,7 @@ class Application {
   void schedule_debounced_lsp_restart();
   IndexFilterOptions index_filter_options() const;
   void restart_workspace_indexing();
+  void refresh_workspace_explorer();
   void reindex_project();
   void enqueue_ui_task(std::function<void()> task);
   void drain_ui_tasks();

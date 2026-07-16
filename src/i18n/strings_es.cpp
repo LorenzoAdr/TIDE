@@ -413,6 +413,7 @@ const StringTable& spanish_strings() {
       {"status.shortcuts.debug", "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into"},
       {"status.shortcuts.normal", "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 git  F7 buscar  F8 outline  F9 problemas  Ctrl+Shift+S símbolos"},
       {"panel.explorer.title", "Explorador"},
+      {"panel.explorer.refresh", " ↻ "},
       {"panel.explorer.no_files", "(sin archivos)"},
       {"context_menu.analyze_symbols", "Analizar símbolos"},
       {"context_menu.open_secondary", "Abrir en panel secundario"},

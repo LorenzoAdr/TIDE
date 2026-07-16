@@ -29,7 +29,8 @@ inline void invalidate_cached_panel_chrome(MainLayoutState* layout, std::string_
   if (layout == nullptr || id.empty()) {
     return;
   }
-  if (press_id::is_explorer_hover(id) || id == press_id::kExplorerHide) {
+  if (press_id::is_explorer_hover(id) || id == press_id::kExplorerHide ||
+      id == press_id::kExplorerRefresh) {
     layout->panel_render_cache.mark_dirty(UiPanelId::FileTree);
   }
   if (press_id::is_outline_hover(id) || press_id::is_sidebar_tab_hover(id) ||
