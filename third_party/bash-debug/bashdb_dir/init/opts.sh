@@ -254,7 +254,7 @@ welcome to change it and/or distribute copies of it under certain conditions.
 if (( _Dbg_have_working_pygmentize )) && [[ -z "$_Dbg_set_highlight" ]] ; then
     # Honor DARK_BG if already set. If not set, set it.
     if [[ -z "$DARK_BG" ]] ; then
-	. "${_Dbg_libdir}/init/term-background.sh" >/dev/null
+	. "${_Dbg_libdir}/init/term-background.sh" >/dev/null 2>&1
     fi
 
     # DARK_BG is now either 0 or 1.

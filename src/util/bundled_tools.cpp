@@ -976,6 +976,22 @@ std::optional<std::string> resolve_shellcheck() {
   return find_named_binary_on_path("shellcheck");
 }
 
+std::optional<std::string> resolve_chktex() {
+  if (const auto env_path = env_executable("CHKTEX_PATH"); env_path.has_value()) {
+    return *env_path;
+  }
+#ifdef TGDB_HAS_BUNDLED_TEXLAB
+  {
+    const fs::path bundled = fs::path(bundled_cache_root()) /
+                             ("texlab-" TGDB_BUNDLED_TEXLAB_VERSION) / "bin" / "chktex";
+    if (is_executable_file(bundled.string())) {
+      return bundled.string();
+    }
+  }
+#endif
+  return find_named_binary_on_path("chktex");
+}
+
 std::optional<BashLsLocation> resolve_bash_language_server() {
   if (const auto env_path = env_executable("BASH_LANGUAGE_SERVER_PATH"); env_path.has_value()) {
     return BashLsLocation{*env_path, BashLsLocation::Source::Env};
@@ -1038,9 +1054,16 @@ std::optional<TexlabLocation> resolve_texlab() {
     const fs::path install_root =
         fs::path(bundled_cache_root()) / ("texlab-" TGDB_BUNDLED_TEXLAB_VERSION);
     const fs::path binary_path = install_root / "bin" / "texlab";
+    const fs::path chktex_path = install_root / "bin" / "chktex";
     const fs::path marker = install_root / ".installed";
     const std::string expected = std::string(TGDB_BUNDLED_TEXLAB_BLOB_SHA256) + "\n";
-    if (is_executable_file(binary_path.string())) {
+    auto install_ready = [&]() {
+      // Require chktex too: older extracts only had texlab and would stick forever if we
+      // only checked the LSP binary (Status UI / resolve hit this path every frame).
+      return is_executable_file(binary_path.string()) &&
+             is_executable_file(chktex_path.string()) && read_text_file(marker) == expected;
+    };
+    if (install_ready()) {
       return TexlabLocation{binary_path.string(), TexlabLocation::Source::Bundled};
     }
     static std::atomic<bool> install_attempted{false};
@@ -1053,7 +1076,8 @@ std::optional<TexlabLocation> resolve_texlab() {
         fs::remove_all(temp_root, ec);
         fs::create_directories(temp_root, ec);
         if (extract_tar_to_directory(*tar_data, temp_root) &&
-            is_executable_file((temp_root / "bin" / "texlab").string())) {
+            is_executable_file((temp_root / "bin" / "texlab").string()) &&
+            is_executable_file((temp_root / "bin" / "chktex").string())) {
           fs::remove_all(install_root, ec);
           fs::rename(temp_root, install_root, ec);
           if (!ec) {
@@ -1066,7 +1090,7 @@ std::optional<TexlabLocation> resolve_texlab() {
         }
       }
     }
-    if (is_executable_file(binary_path.string())) {
+    if (install_ready()) {
       return TexlabLocation{binary_path.string(), TexlabLocation::Source::Bundled};
     }
 #ifdef TGDB_DEFAULT_FORCE_BUNDLED_TEXLAB
@@ -1096,6 +1120,17 @@ std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
     const auto try_build_location = [&]() -> std::optional<BashDebugAdapterLocation> {
       if (!(readable_file(adapter_js.string()) && is_executable_file(bashdb.string()))) {
         return std::nullopt;
+      }
+      // Reject stale extracts that predate node_modules packaging (initialize hang).
+      const fs::path node_modules_marker =
+          install_root / "adapter" / "node_modules" / "vscode-debugadapter";
+      if (!fs::exists(node_modules_marker)) {
+        return std::nullopt;
+      }
+      if (fs::exists(marker)) {
+        if (read_text_file(marker) != expected) {
+          return std::nullopt;
+        }
       }
       std::string node;
 #if TGDB_BUNDLED_BASH_DAP_HAS_NODE

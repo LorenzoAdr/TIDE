@@ -46,6 +46,7 @@
 #include "ui/open_file_confirm.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/quit_confirm.hpp"
+#include "ui/debug_launch_modal.hpp"
 #include "ui/settings_modal.hpp"
 #include "util/tools_status.hpp"
 #include "ui/shutdown_overlay.hpp"
@@ -68,6 +69,7 @@
 #include "util/crash_handler.hpp"
 #include "util/docker_shell.hpp"
 #include "util/monitor_log.hpp"
+#include "util/nm_reader.hpp"
 #include "util/path_normalize.hpp"
 #include "util/shell_args.hpp"
 #include "util/thread_name.hpp"
@@ -88,6 +90,7 @@ static int64_t steady_now_ms() {
 	using namespace std::chrono;
 	return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
+
 
 bool is_significant_input_event(const Event &event) {
 	if (event == Event::Custom) {
@@ -405,6 +408,8 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	}
 
 	backend_ = std::make_unique<DapBackend>(command_queue_, event_queue_);
+	++backend_epoch_;
+	backend_->set_backend_epoch(backend_epoch_);
 }
 
 Application::~Application() {
@@ -894,15 +899,14 @@ void Application::begin_shutdown(ScreenInteractive *screen) {
 	shutdown_state_.begin(7);
 	shutdown_step_index_ = 0;
 	shutdown_state_.set_current(i18n::tr("app.shutdown.save_session"));
-	UI_WAKE(&layout_state_, "app");
 	if (screen != nullptr) {
+		// Paint the overlay with the first step label before any teardown starts.
 		screen->Post([this, screen] {
-			UI_WAKE(&layout_state_, "app.urgent");
-			screen->Post([this, screen] {
-				UI_WAKE(&layout_state_, "app.urgent");
-				screen->Post([this, screen] { schedule_next_shutdown_step(screen); });
-			});
+			ui_event_dispatcher_.post_repaint_urgent();
+			screen->Post([this, screen] { schedule_next_shutdown_step(screen); });
 		});
+	} else {
+		UI_WAKE(&layout_state_, "app");
 	}
 }
 
@@ -920,8 +924,10 @@ void Application::schedule_next_shutdown_step(ScreenInteractive *screen) {
 		if (screen == nullptr) {
 			return;
 		}
+		// Back on the UI thread: force a redraw with the completed step (and the next
+		// "current" label) before kicking off another potentially long teardown.
 		screen->Post([this, screen] {
-			UI_WAKE(&layout_state_, "app.urgent");
+			ui_event_dispatcher_.post_repaint_urgent();
 			if (shutdown_state_.is_complete()) {
 				screen->ExitLoopClosure()();
 				return;
@@ -955,7 +961,7 @@ void Application::tick_shutdown() {
 		     symbol_indexer_.stop();
 		     indexer_.stop();
 	     }},
-	    {i18n::tr("app.shutdown.close_clangd"),
+	    {i18n::tr("app.shutdown.close_lsp"),
 	     [this] {
 		     if (symbol_provider_) {
 			     symbol_provider_->on_workspace_closed();
@@ -985,7 +991,6 @@ void Application::tick_shutdown() {
 		shutdown_state_.mark_complete();
 		shutdown_performed_ = true;
 	}
-	UI_WAKE(&layout_state_, "app");
 }
 
 void Application::force_exit() {
@@ -1252,15 +1257,45 @@ void Application::invalidate_debug_ui() {
 	layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
 	layout_state_.panel_render_cache.mark_dirty(UiPanelId::EditorCenter);
 	layout_state_.focus_sync_needed = true;
-	UI_WAKE(&layout_state_, "app");
+	if (layout_state_.ui_events != nullptr) {
+		layout_state_.ui_events->post_repaint_urgent();
+	} else {
+		UI_WAKE(&layout_state_, "app");
+	}
 }
 
 void Application::ensure_backend_started() {
-	if (backend_started_ || !debug_available_) {
+	if (!debug_available_) {
 		return;
 	}
+	const DebugAdapterKind kind = debug_adapter_kind_for_program(config_.program);
+	if (backend_started_) {
+		// After inferior exit the DAP stdio session is dead but the worker may
+		// still be "started". Require a live SessionReady for reuse.
+		if (backend_ && backend_->preferred_adapter() == kind && session_ready_) {
+			return;
+		}
+		if (backend_) {
+			backend_->set_wake_callback(nullptr);
+			backend_->stop();
+		}
+		backend_started_ = false;
+		// Destroy the old backend *before* reopening the shared queues. stop() and
+		// ~DapBackend both call commands_.close(); resetting first left closed_=true
+		// so the next worker's wait_pop() returned immediately and killed the new
+		// adapter (~100ms after SessionReady → "Conexión DAP cerrada").
+		backend_.reset();
+		command_queue_.reset();
+		event_queue_.reset();
+		++backend_epoch_;
+		backend_ = std::make_unique<DapBackend>(command_queue_, event_queue_);
+		backend_->set_backend_epoch(backend_epoch_);
+		register_backend_wake_callback();
+		session_ready_ = false;
+		event_queue_.reset();
+	}
 	if (backend_) {
-		backend_->set_preferred_adapter(debug_adapter_kind_for_program(config_.program));
+		backend_->set_preferred_adapter(kind);
 		register_backend_wake_callback();
 	}
 	backend_->start();
@@ -1279,23 +1314,32 @@ void Application::set_workspace_status(const std::string &message) {
 	}
 }
 
-void Application::exit_debug_mode() {
-	if (debugging_started_) {
+void Application::exit_debug_mode(bool force_kill) {
+	if (debugging_started_ && !force_kill) {
 		if (config_.mode == SessionMode::kAttach) {
 			submit_command(UiCommand{UiCommandKind::kDetach});
 		} else {
 			submit_command(UiCommand{UiCommandKind::kDisconnect});
 		}
-		debugging_started_ = false;
-		session_ready_ = false;
 	}
+	debugging_started_ = false;
+	session_ready_ = false;
 	if (backend_started_) {
-		backend_->stop();
+		if (backend_) {
+			backend_->set_wake_callback(nullptr);
+			backend_->stop();
+		}
 		backend_started_ = false;
+		// See ensure_backend_started: destroy before reset so ~DapBackend's close()
+		// cannot leave the shared command queue permanently closed.
+		backend_.reset();
 		command_queue_.reset();
 		event_queue_.reset();
+		++backend_epoch_;
 		backend_ = std::make_unique<DapBackend>(command_queue_, event_queue_);
+		backend_->set_backend_epoch(backend_epoch_);
 		register_backend_wake_callback();
+		event_queue_.reset();
 	}
 
 	model_.stack_frames.clear();
@@ -1348,31 +1392,7 @@ void Application::sync_model_breakpoints_to_backend() {
 	}
 }
 
-void Application::apply_connection_and_start() {
-	if (!session_ready_ || debugging_started_) {
-		return;
-	}
-	if (!connection_config_complete()) {
-		return;
-	}
-
-	debugging_started_ = true;
-	dismiss_welcome_screen();
-	workspace_initialized_ = true;
-	model_.program = config_.program;
-	model_.workspace_root = config_.workspace_root;
-	model_.program_args = config_.args;
-	model_.session_mode = config_.mode;
-	model_.core_analysis_mode = config_.core_analysis;
-	model_.core_path = config_.core_path;
-	model_.is_post_mortem = config_.mode == SessionMode::kCore;
-
-	if (!workspace_.buffer.path.empty()) {
-		model_.active_file = workspace_.buffer.path;
-		model_.active_line = workspace_.buffer.primary_line() + 1;
-		model_.view_token++;
-	}
-
+void Application::enter_debug_ui_layout() {
 	app_mode_ = AppMode::kDebug;
 	focus_state_.region = FocusRegion::Terminal;
 	layout_state_.right_panel_active_section = 1;
@@ -1398,12 +1418,13 @@ void Application::apply_connection_and_start() {
 		filters.src_ip = config_.packet_monitor_filter_src;
 		filters.dst_ip = config_.packet_monitor_filter_dst;
 	}
-	model_.console_output.clear();
-	if (!config_.program.empty()) {
+	if (!config_.program.empty() && is_nm_analyzable_path(config_.program)) {
 		request_binary_symbols_panel(&layout_state_, config_.program, {}, NmBindingFilter::kAll,
 		                             false);
 	}
+}
 
+void Application::submit_debug_session_start() {
 	sync_model_breakpoints_to_backend();
 
 	if (config_.mode == SessionMode::kAttach) {
@@ -1444,15 +1465,148 @@ void Application::apply_connection_and_start() {
 		submit_command(launch);
 		set_status(i18n::tr_fmt("app.launch_program", {config_.program}));
 	}
+}
+
+bool Application::debug_launch_generation_active() const {
+	return debug_launch_modal_state_.is_generation(debug_launch_generation_);
+}
+
+void Application::open_debug_launch_modal() {
+	++debug_launch_generation_;
+	debug_launch_modal_state_.phase = DebugLaunchModalPhase::Connecting;
+	debug_launch_modal_state_.session_mode = config_.mode;
+	debug_launch_modal_state_.program = config_.program;
+	debug_launch_modal_state_.message = i18n::tr("modal.debug_launch.connecting");
+	debug_launch_modal_state_.detail.clear();
+	debug_launch_modal_state_.generation = debug_launch_generation_;
+	if (layout_state_.ui_events != nullptr) {
+		layout_state_.ui_events->post_repaint_urgent();
+	} else {
+		UI_WAKE(&layout_state_, "app");
+	}
+}
+
+void Application::cancel_debug_launch() {
+	++debug_launch_generation_;
+	debug_launch_modal_state_.reset();
+	if (debugging_started_ || backend_started_ || app_mode_ == AppMode::kDebug) {
+		// Force-kill: graceful disconnect can hang while launch is in flight.
+		exit_debug_mode(/*force_kill=*/true);
+	}
+	set_workspace_status(i18n::tr("modal.debug_launch.cancelled"));
+	if (layout_state_.ui_events != nullptr) {
+		layout_state_.ui_events->post_repaint_urgent();
+	} else {
+		UI_WAKE(&layout_state_, "app");
+	}
+}
+
+void Application::dismiss_debug_launch_error() {
+	++debug_launch_generation_;
+	debug_launch_modal_state_.reset();
+	if (debugging_started_ || backend_started_ || app_mode_ == AppMode::kDebug) {
+		exit_debug_mode(/*force_kill=*/true);
+	}
+	set_workspace_status(i18n::tr("modal.debug_launch.failed"));
+	if (layout_state_.ui_events != nullptr) {
+		layout_state_.ui_events->post_repaint_urgent();
+	} else {
+		UI_WAKE(&layout_state_, "app");
+	}
+}
+
+void Application::complete_debug_launch_success() {
+	if (!debug_launch_generation_active()) {
+		return;
+	}
+	debug_launch_modal_state_.reset();
+	if (app_mode_ != AppMode::kDebug) {
+		enter_debug_ui_layout();
+	}
+}
+
+void Application::fail_debug_launch(const std::string &message) {
+	if (!debug_launch_generation_active()) {
+		return;
+	}
+	debug_launch_modal_state_.phase = DebugLaunchModalPhase::Error;
+	debug_launch_modal_state_.message = i18n::tr("modal.debug_launch.failed");
+	debug_launch_modal_state_.detail = message;
+	if (layout_state_.ui_events != nullptr) {
+		layout_state_.ui_events->post_repaint_urgent();
+	} else {
+		UI_WAKE(&layout_state_, "app");
+	}
+}
+
+void Application::apply_connection_and_start() {
+	if (!session_ready_ || debugging_started_) {
+		return;
+	}
+	if (!connection_config_complete()) {
+		return;
+	}
+
+	debugging_started_ = true;
+	dismiss_welcome_screen();
+	workspace_initialized_ = true;
+	model_.program = config_.program;
+	model_.workspace_root = config_.workspace_root;
+	model_.program_args = config_.args;
+	model_.session_mode = config_.mode;
+	model_.core_analysis_mode = config_.core_analysis;
+	model_.core_path = config_.core_path;
+	model_.is_post_mortem = config_.mode == SessionMode::kCore;
+
+	if (!workspace_.buffer.path.empty()) {
+		model_.active_file = workspace_.buffer.path;
+		model_.active_line = workspace_.buffer.primary_line() + 1;
+		model_.view_token++;
+	}
+
+	model_.console_output.clear();
+
+	if (!debug_launch_generation_active()) {
+		open_debug_launch_modal();
+	}
+
+	debug_launch_modal_state_.phase = DebugLaunchModalPhase::Starting;
+	if (config_.mode == SessionMode::kAttach) {
+		const std::string target =
+		    config_.attach_pid > 0 ? std::to_string(config_.attach_pid) : config_.program;
+		debug_launch_modal_state_.message =
+		    i18n::tr_fmt("modal.debug_launch.starting_attach", {target});
+	} else if (config_.mode == SessionMode::kCore) {
+		debug_launch_modal_state_.message =
+		    i18n::tr_fmt("modal.debug_launch.starting_core", {config_.core_path});
+	} else {
+		debug_launch_modal_state_.message =
+		    i18n::tr_fmt("modal.debug_launch.starting_launch", {config_.program});
+	}
+	debug_launch_modal_state_.detail.clear();
+	submit_debug_session_start();
 	invalidate_debug_ui();
 }
 
 void Application::on_connection_complete(const ConnectionResult &result) {
 	pending_connection_ = result;
+	// Apply immediately: waiting for the next Custom tick leaves the launch modal
+	// invisible until an unrelated click/key posts a wake.
+	apply_pending_connection();
+	if (layout_state_.ui_events != nullptr) {
+		layout_state_.ui_events->post_repaint_urgent();
+	} else {
+		UI_WAKE(&layout_state_, "app");
+	}
 }
 
 void Application::apply_pending_connection() {
 	if (!pending_connection_.has_value()) {
+		return;
+	}
+
+	if (debug_launch_modal_state_.open()) {
+		pending_connection_.reset();
 		return;
 	}
 
@@ -1491,8 +1645,12 @@ void Application::apply_pending_connection() {
 	model_.program = config_.program;
 	model_.program_args = config_.args;
 
+	open_debug_launch_modal();
 	set_status(i18n::tr("app.connecting_dap"));
 	ensure_backend_started();
+	if (session_ready_) {
+		apply_connection_and_start();
+	}
 }
 
 void Application::open_connection_wizard() {
@@ -1505,7 +1663,8 @@ void Application::open_connection_wizard() {
 }
 
 bool Application::prepare_connection_wizard() {
-	if (connection_wizard_state_.open || workspace_wizard_state_.open) {
+	if (connection_wizard_state_.open || workspace_wizard_state_.open ||
+	    debug_launch_modal_state_.open()) {
 		return false;
 	}
 	if (!debug_available_) {
@@ -1513,8 +1672,10 @@ bool Application::prepare_connection_wizard() {
 		return false;
 	}
 
-	if (debugging_started_) {
-		exit_debug_mode();
+	// After inferior exit the DAP stdio session is dead: tear it down before
+	// opening the wizard so the next launch always gets a fresh adapter.
+	if (debugging_started_ || (backend_started_ && !session_ready_)) {
+		exit_debug_mode(/*force_kill=*/true);
 	} else if (app_mode_ == AppMode::kDebug) {
 		app_mode_ = AppMode::kNormal;
 		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
@@ -1577,8 +1738,6 @@ void Application::quick_launch_last() {
 		result.args = split_shell_args(saved->second);
 	}
 	on_connection_complete(result);
-	apply_pending_connection();
-	UI_WAKE(&layout_state_, "app");
 }
 
 void Application::quick_attach_last() {
@@ -1625,6 +1784,9 @@ void Application::refresh_all_watches() {
 }
 
 void Application::apply_event(const DebugEvent &event) {
+	if (event.backend_epoch != 0 && event.backend_epoch != backend_epoch_) {
+		return;
+	}
 	switch (event.kind) {
 	case DebugEventKind::kSessionReady:
 		session_ready_ = true;
@@ -1634,12 +1796,35 @@ void Application::apply_event(const DebugEvent &event) {
 			invalidate_debug_ui();
 			break;
 		}
+		if (debug_launch_modal_state_.phase == DebugLaunchModalPhase::Error) {
+			break;
+		}
 		apply_connection_and_start();
 		break;
 	case DebugEventKind::kOutput:
 		model_.append_console(event.text);
 		break;
 	case DebugEventKind::kStopped:
+		// bash-debug emits Stopped before setBreakpoints finish. Keep the launch
+		// modal open until kLaunchConfigured so Continue cannot race past BPs.
+		if (debug_launch_generation_active() &&
+		    debug_launch_modal_state_.phase == DebugLaunchModalPhase::Starting) {
+			model_.set_stopped(event.thread_id, event.stop_reason);
+			if (!event.text.empty() && event.stop_reason != "attach" &&
+			    event.stop_reason != "pause") {
+				model_.append_console("[stopped] " + event.text);
+			} else if (event.stop_reason == "breakpoint") {
+				model_.append_console("[stopped] breakpoint alcanzado");
+			}
+			refresh_all_watches();
+			model_.view_token++;
+			invalidate_debug_ui();
+			break;
+		}
+		if (debug_launch_generation_active() &&
+		    debug_launch_modal_state_.phase != DebugLaunchModalPhase::Error) {
+			complete_debug_launch_success();
+		}
 		model_.set_stopped(event.thread_id, event.stop_reason);
 		if (!event.text.empty() && event.stop_reason != "attach" && event.stop_reason != "pause") {
 			model_.append_console("[stopped] " + event.text);
@@ -1650,6 +1835,13 @@ void Application::apply_event(const DebugEvent &event) {
 		model_.view_token++;
 		invalidate_debug_ui();
 		break;
+	case DebugEventKind::kLaunchConfigured:
+		if (debug_launch_generation_active() &&
+		    debug_launch_modal_state_.phase == DebugLaunchModalPhase::Starting) {
+			complete_debug_launch_success();
+		}
+		invalidate_debug_ui();
+		break;
 	case DebugEventKind::kContinued:
 		model_.set_running();
 		clear_source_debug_hover(&source_state_.debug_hover);
@@ -1657,6 +1849,15 @@ void Application::apply_event(const DebugEvent &event) {
 		invalidate_debug_ui();
 		break;
 	case DebugEventKind::kTerminated:
+		session_ready_ = false;
+		if (debug_launch_generation_active() &&
+		    debug_launch_modal_state_.phase != DebugLaunchModalPhase::Error &&
+		    app_mode_ != AppMode::kDebug) {
+			fail_debug_launch(event.text.empty() ? i18n::tr("modal.debug_launch.failed")
+			                                     : event.text);
+			debugging_started_ = false;
+			break;
+		}
 		model_.set_terminated();
 		clear_source_debug_hover(&source_state_.debug_hover);
 		debugging_started_ = false;
@@ -1746,11 +1947,7 @@ void Application::apply_event(const DebugEvent &event) {
 			if (bp.verified) {
 				model_.breakpoints_by_file[bp.file].insert(bp.line);
 			} else if (bp.line > 0 && !bp.file.empty()) {
-				auto &lines = model_.breakpoints_by_file[bp.file];
-				lines.erase(bp.line);
-				if (lines.empty()) {
-					model_.breakpoints_by_file.erase(bp.file);
-				}
+				// Keep the user breakpoint marker; only surface the verification failure.
 				std::string msg =
 				    "[breakpoint] no verificado: " + bp.file + ":" + std::to_string(bp.line);
 				if (!bp.message.empty()) {
@@ -1763,6 +1960,11 @@ void Application::apply_event(const DebugEvent &event) {
 	case DebugEventKind::kError:
 		model_.append_console("[error] " + event.text);
 		model_.status_message = event.text;
+		if (debug_launch_generation_active() &&
+		    debug_launch_modal_state_.phase != DebugLaunchModalPhase::Error &&
+		    app_mode_ != AppMode::kDebug) {
+			fail_debug_launch(event.text);
+		}
 		break;
 	default:
 		break;
@@ -1837,7 +2039,8 @@ bool Application::any_modal_open() const {
 	       connection_wizard_state_.open || file_picker_state_.open || symbol_picker_state_.open ||
 	       shortcuts_modal_state_.open || settings_modal_state_.open ||
 	       source_substitute_state_.open || quit_confirm_state_.open ||
-	       open_file_confirm_state_.is_open() || context_menu_active(&layout_state_.context_menu);
+	       debug_launch_modal_state_.open() || open_file_confirm_state_.is_open() ||
+	       context_menu_active(&layout_state_.context_menu);
 }
 
 void Application::apply_app_settings() {
@@ -2329,10 +2532,14 @@ int Application::run() {
 	    MakeQuitConfirmOverlay(with_source_substitute, &quit_confirm_state_, &layout_state_,
 	                           &shutdown_state_, [this, &screen] { begin_shutdown(&screen); });
 
+	auto with_debug_launch = MakeDebugLaunchModalOverlay(
+	    with_quit_confirm, &debug_launch_modal_state_, &layout_state_, &shutdown_state_,
+	    [this] { cancel_debug_launch(); }, [this] { dismiss_debug_launch_error(); });
+
 	workspace_.open_file_confirm = &open_file_confirm_state_;
 	secondary_workspace_.open_file_confirm = &open_file_confirm_state_;
 	auto with_open_file_confirm =
-	    MakeOpenFileConfirmOverlay(with_quit_confirm, &open_file_confirm_state_, &layout_state_,
+	    MakeOpenFileConfirmOverlay(with_debug_launch, &open_file_confirm_state_, &layout_state_,
 	                               &workspace_, [this](const std::string &path, int line, int col) {
 		                               model_.active_file = path;
 		                               model_.active_line = line + 1;
@@ -2778,6 +2985,14 @@ int Application::run() {
 			    focus_state_.region == FocusRegion::Terminal &&
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.problems_key_handler && layout_state_.problems_key_handler(event)) {
+				UI_WAKE(&layout_state_, "app.custom");
+				return true;
+			}
+			if (performance_tab_active(&layout_state_) &&
+			    focus_state_.region == FocusRegion::Terminal &&
+			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
+			    layout_state_.performance_key_handler &&
+			    layout_state_.performance_key_handler(event)) {
 				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}

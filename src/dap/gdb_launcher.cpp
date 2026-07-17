@@ -115,13 +115,25 @@ bool spawn_stdio_adapter(const std::string& command, const std::vector<std::stri
 
   if (pid == 0) {
     child_die_with_parent();
+    // Detach from tgdb's controlling TTY so the adapter/inferior cannot steal
+    // the foreground process group (SIGTTIN/SIGTTOU freezes the TUI).
+    (void)::setsid();
     unsetenv("LD_PRELOAD");
     unsetenv("TGDB_PKT_FILTER_SRC");
     unsetenv("TGDB_PKT_FILTER_DST");
     unsetenv("TGDB_PKT_DISABLE");
     dup2(stdin_pipe[0], STDIN_FILENO);
     dup2(stdout_pipe[1], STDOUT_FILENO);
-    dup2(stdout_pipe[1], STDERR_FILENO);
+    // Never merge adapter stderr into the DAP stdout pipe: any non-protocol
+    // bytes (warnings, pydevd traces) corrupt framing and can tear down the
+    // session on the next client write (SIGPIPE / silent exit).
+    const int devnull = ::open("/dev/null", O_WRONLY);
+    if (devnull >= 0) {
+      dup2(devnull, STDERR_FILENO);
+      ::close(devnull);
+    } else {
+      dup2(stdout_pipe[1], STDERR_FILENO);
+    }
 
     ::close(stdin_pipe[0]);
     ::close(stdin_pipe[1]);
@@ -288,6 +300,24 @@ class StdioDebugAdapterProcess : public IDebugAdapterProcess {
   std::shared_ptr<dap::Reader> reader() const override { return reader_; }
   std::shared_ptr<dap::Writer> writer() const override { return writer_; }
   bool running() const override { return running_; }
+  bool process_alive() override {
+    if (!running_ || child_pid_ <= 0) {
+      return false;
+    }
+    int status = 0;
+    const pid_t result = waitpid(child_pid_, &status, WNOHANG);
+    if (result == child_pid_) {
+      child_pid_ = -1;
+      running_ = false;
+      return false;
+    }
+    if (result < 0 && errno != EINTR) {
+      child_pid_ = -1;
+      running_ = false;
+      return false;
+    }
+    return true;
+  }
   DebugAdapterKind kind() const override { return spec_.kind; }
   const std::string& adapter_id() const override { return spec_.id; }
 

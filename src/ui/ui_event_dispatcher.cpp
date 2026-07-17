@@ -101,6 +101,9 @@ void UiEventDispatcher::emit_debug(std::string tag, std::function<void()> pre_pa
   event.src_file = src_file;
   event.src_line = src_line;
   emit(std::move(event));
+  // DebugCritical mutates layout (mode, panels). Coalesced Custom alone may not
+  // schedule a frame; without this the UI stays stale until the next key/click.
+  request_animation_frame();
 }
 
 void UiEventDispatcher::post_repaint_custom() {

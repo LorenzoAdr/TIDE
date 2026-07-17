@@ -45,6 +45,8 @@ constexpr std::string_view kEditorProblems = "editor.problems";
 constexpr std::string_view kEditorTabOverflow = "editor.tab.overflow";
 constexpr std::string_view kQuitYes = "quit.yes";
 constexpr std::string_view kQuitNo = "quit.no";
+constexpr std::string_view kDebugLaunchCancel = "debug_launch.cancel";
+constexpr std::string_view kDebugLaunchClose = "debug_launch.close";
 constexpr std::string_view kShutdownForceExit = "shutdown.force_exit";
 constexpr std::string_view kOpenFileYes = "open_file.yes";
 constexpr std::string_view kOpenFileNo = "open_file.no";
@@ -166,6 +168,10 @@ inline bool is_sidebar_tab_hover(std::string_view id) {
 
 inline bool is_quit_hover(std::string_view id) {
   return id == kQuitYes || id == kQuitNo;
+}
+
+inline bool is_debug_launch_hover(std::string_view id) {
+  return id == kDebugLaunchCancel || id == kDebugLaunchClose;
 }
 
 inline bool is_shutdown_hover(std::string_view id) {

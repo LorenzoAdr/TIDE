@@ -25,7 +25,7 @@ option(TGDB_FORCE_BUNDLED_PYTHON_TOOLS
 option(TGDB_BUNDLE_BASH_LS "Embed bash-language-server + Node" OFF)
 option(TGDB_FORCE_BUNDLED_BASH_LS
        "Prefer embedded bash-language-server (requires TGDB_BUNDLE_BASH_LS)" OFF)
-option(TGDB_BUNDLE_TEXLAB "Embed TexLab Linux x86_64 release" OFF)
+option(TGDB_BUNDLE_TEXLAB "Embed TexLab + ChkTeX Linux x86_64 release" OFF)
 option(TGDB_FORCE_BUNDLED_TEXLAB
        "Prefer embedded TexLab (requires TGDB_BUNDLE_TEXLAB)" OFF)
 option(TGDB_BUNDLE_BASH_DAP "Embed Bash DAP adapter + bashdb (+ Node unless BASH_LS)" OFF)
@@ -43,6 +43,10 @@ set(TGDB_PYTHON_STANDALONE_VERSION "3.12.13" CACHE STRING
 set(TGDB_PYTHON_STANDALONE_TAG "20260623" CACHE STRING
     "python-build-standalone release tag (full only)")
 set(TGDB_TEXLAB_VERSION "5.26.0" CACHE STRING "TexLab release version to bundle")
+set(TGDB_CHKTEX_VERSION "1.7.10-1" CACHE STRING "Debian chktex package version to bundle with TexLab")
+# Avoid '~' in the version: CMake/make then wrap KEY=VALUE in quotes and curl sees a bad URL.
+set(TGDB_PCRE2_VERSION "10.47-2" CACHE STRING
+    "Debian libpcre2 package version bundled with chktex")
 set(TGDB_BASH_LS_NPM_VERSION "5.6.0" CACHE STRING "bash-language-server npm version")
 set(TGDB_BASH_LS_VERSION "${TGDB_BASH_LS_NPM_VERSION}" CACHE STRING "bash-ls bundle tag")
 set(TGDB_BASH_DAP_VERSION "0.3.9" CACHE STRING "bash DAP adapter bundle tag")

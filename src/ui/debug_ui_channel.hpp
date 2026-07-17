@@ -36,6 +36,9 @@ inline void DebugUiChannel::on_debug_event(DebugEventKind kind, std::function<vo
     case DebugEventKind::kSessionReady:
       tag = "debug.session_ready";
       break;
+    case DebugEventKind::kLaunchConfigured:
+      tag = "debug.launch_configured";
+      break;
     case DebugEventKind::kContinued:
       tag = "debug.continued";
       break;

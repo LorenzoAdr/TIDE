@@ -6,11 +6,15 @@ DAP_IMPLEMENT_STRUCT_TYPEINFO_EXT(GdbLaunchRequest, LaunchRequest, "launch",
                                   DAP_FIELD(program, "program"),
                                   DAP_FIELD(cwd, "cwd"), DAP_FIELD(args, "args"),
                                   DAP_FIELD(stopAtBeginningOfMainSubprogram,
-                                            "stopAtBeginningOfMainSubprogram"));
+                                            "stopAtBeginningOfMainSubprogram"),
+                                  DAP_FIELD(stopOnEntry, "stopOnEntry"),
+                                  DAP_FIELD(console, "console"));
 
 DAP_IMPLEMENT_STRUCT_TYPEINFO_EXT(BashdbLaunchRequest, LaunchRequest, "launch",
                                   DAP_FIELD(program, "program"),
                                   DAP_FIELD(cwd, "cwd"), DAP_FIELD(args, "args"),
+                                  DAP_FIELD(argsString, "argsString"),
+                                  DAP_FIELD(env, "env"),
                                   DAP_FIELD(pathBash, "pathBash"),
                                   DAP_FIELD(pathBashdb, "pathBashdb"),
                                   DAP_FIELD(pathBashdbLib, "pathBashdbLib"),
@@ -26,5 +30,8 @@ DAP_IMPLEMENT_STRUCT_TYPEINFO_EXT(GdbAttachRequest, AttachRequest, "attach",
                                   DAP_FIELD(coreFile, "coreFile"));
 
 DAP_IMPLEMENT_STRUCT_TYPEINFO(GdbTerminatedEvent, "terminated");
+
+DAP_IMPLEMENT_STRUCT_TYPEINFO(DebugpyWaitingForServerEvent, "debugpyWaitingForServer",
+                              DAP_FIELD(host, "host"), DAP_FIELD(port, "port"));
 
 }  // namespace dap

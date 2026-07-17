@@ -63,7 +63,7 @@ Opciones:
   --no-bundle-bash-ls        No embeber bash-language-server
   --force-bundled-bash-ls    Forzar bash-language-server embebido en runtime (requiere bundle)
   --no-force-bundled-bash-ls Permitir fallback a bash-language-server en PATH
-  --bundle-texlab            Embeber TexLab (LSP LaTeX)
+  --bundle-texlab            Embeber TexLab + chktex (LSP LaTeX)
   --no-bundle-texlab         No embeber TexLab
   --force-bundled-texlab     Forzar TexLab embebido en runtime (requiere bundle)
   --no-force-bundled-texlab  Permitir fallback a texlab en PATH
@@ -362,6 +362,8 @@ cmake_bundle_args() {
   fi
   if [[ "${BUNDLE_TEXLAB}" == "1" ]]; then
     args+=(-DTGDB_BUNDLE_TEXLAB=ON)
+    # Pin versions without '~' — CMake/make quote KEY=VALUE oddly and curl rejects the URL.
+    args+=(-DTGDB_CHKTEX_VERSION=1.7.10-1 -DTGDB_PCRE2_VERSION=10.47-2)
     if [[ "${BUNDLE_TEXLAB_FORCE}" == "1" ]]; then
       args+=(-DTGDB_FORCE_BUNDLED_TEXLAB=ON)
     else
@@ -623,18 +625,18 @@ check_command cmake
 check_command g++
 
 if [[ "${SKIP_WIZARD}" == "0" ]]; then
-  log "configurando CMake (paso inicial)..."
+  # Configure with the current .bundle-config (or defaults), not with all
+  # bundles forced OFF. An OFF→ON dance rewrites tgdb's flags.make and makes
+  # Make rebuild every translation unit even when the wizard selection is unchanged.
+  load_bundle_config
+  sync_gdb_bundle_flags
+  sync_python_bundle_flags
+  sync_bash_tex_bundle_flags
+  mapfile -t CMAKE_BUNDLE_ARGS < <(cmake_bundle_args)
   mapfile -t CMAKE_EXTRA_ARGS < <(cmake_extra_args)
+  log "configurando CMake (asistente)..."
   # shellcheck disable=SC2068
-  cmake -S "${ROOT}" -B "${BUILD_DIR}" \
-    -DTGDB_BUNDLE_CLANGD=OFF -DTGDB_FORCE_BUNDLED_CLANGD=OFF \
-    -DTGDB_BUNDLE_GDB=OFF -DTGDB_FORCE_BUNDLED_GDB=OFF \
-    -DTGDB_BUNDLE_PYTHON_LSP_MIN=OFF -DTGDB_BUNDLE_PYTHON_TOOLS=OFF \
-    -DTGDB_FORCE_BUNDLED_PYTHON_TOOLS=OFF \
-    -DTGDB_BUNDLE_BASH_LS=OFF -DTGDB_FORCE_BUNDLED_BASH_LS=OFF \
-    -DTGDB_BUNDLE_TEXLAB=OFF -DTGDB_FORCE_BUNDLED_TEXLAB=OFF \
-    -DTGDB_BUNDLE_BASH_DAP=OFF -DTGDB_FORCE_BUNDLED_BASH_DAP=OFF \
-    ${CMAKE_EXTRA_ARGS[@]}
+  cmake -S "${ROOT}" -B "${BUILD_DIR}" ${CMAKE_BUNDLE_ARGS[@]} ${CMAKE_EXTRA_ARGS[@]}
   log "compilando asistente de bundles..."
   cmake --build "${BUILD_DIR}" --target tgdb-bundle-wizard -j "${JOBS}"
   run_wizard
@@ -711,7 +713,7 @@ else
   log "  bash-language-server embebido: no"
 fi
 if [[ "${BUNDLE_TEXLAB}" == "1" ]]; then
-  log "  texlab embebido: sí (force=${BUNDLE_TEXLAB_FORCE})"
+  log "  texlab+chktex embebido: sí (force=${BUNDLE_TEXLAB_FORCE})"
 else
   log "  texlab embebido: no"
 fi

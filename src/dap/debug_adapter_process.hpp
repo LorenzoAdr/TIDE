@@ -18,6 +18,8 @@ class IDebugAdapterProcess {
   virtual std::shared_ptr<dap::Reader> reader() const = 0;
   virtual std::shared_ptr<dap::Writer> writer() const = 0;
   virtual bool running() const = 0;
+  // True while the OS child process has not exited (waitpid WNOHANG).
+  virtual bool process_alive() = 0;
   virtual DebugAdapterKind kind() const = 0;
   virtual const std::string& adapter_id() const = 0;
 };

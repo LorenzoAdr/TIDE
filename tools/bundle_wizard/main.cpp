@@ -326,7 +326,7 @@ int main(int argc, char** argv) {
             {"Forzar bash-language-server embebido",
              "Ignora bash-language-server en PATH salvo BASH_LANGUAGE_SERVER_PATH"},
             {"Incluir TexLab en el binario",
-             "LSP para LaTeX (.tex, .sty, .cls)"},
+             "LSP LaTeX + chktex (.tex, .sty, .cls)"},
             {"Forzar TexLab embebido",
              "Ignora texlab en PATH salvo TEXLAB_PATH"},
             {"Incluir adaptador Bash DAP en el binario",

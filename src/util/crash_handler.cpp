@@ -9,6 +9,7 @@
 #include "i18n/tr.hpp"
 
 #if defined(__linux__) || defined(__APPLE__)
+#include <fcntl.h>
 #include <execinfo.h>
 #include <unistd.h>
 #endif
@@ -59,6 +60,10 @@ void on_fatal_signal(int sig) {
   print_backtrace_to_stderr(name);
   _exit(128 + sig);
 }
+
+void on_tty_job_signal(int /*sig*/) {
+  // Ignore: a DAP child stealing the TTY must not stop tgdb (default SIGTTIN/SIGTTOU).
+}
 #endif
 
 }  // namespace
@@ -69,6 +74,11 @@ void install_crash_handlers() {
     std::abort();
   });
 #if defined(__linux__) || defined(__APPLE__)
+  // Writing to a closed DAP/stdio pipe raises SIGPIPE by default and kills the
+  // process with no backtrace. Ignore it so Writer::write can return false.
+  std::signal(SIGPIPE, SIG_IGN);
+  std::signal(SIGTTIN, on_tty_job_signal);
+  std::signal(SIGTTOU, on_tty_job_signal);
   std::signal(SIGSEGV, on_fatal_signal);
   std::signal(SIGABRT, on_fatal_signal);
   std::signal(SIGFPE, on_fatal_signal);

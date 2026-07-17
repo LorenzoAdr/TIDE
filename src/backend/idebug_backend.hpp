@@ -111,6 +111,7 @@ struct UiCommand {
 
 enum class DebugEventKind {
   kSessionReady,
+  kLaunchConfigured,
   kOutput,
   kStopped,
   kContinued,
@@ -131,6 +132,7 @@ enum class DebugEventKind {
 struct DebugEvent {
   DebugEventKind kind = DebugEventKind::kError;
   std::string text;
+  uint64_t backend_epoch = 0;
   int inferior_pid = 0;
   int thread_id = 1;
   std::string stop_reason;

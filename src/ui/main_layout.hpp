@@ -229,6 +229,7 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> console_key_handler;
   std::function<bool(const ftxui::Event&)> console_mouse_handler;
   std::function<bool(const ftxui::Event&)> split_mouse_handler;
+  std::function<bool(const ftxui::Event&)> performance_key_handler;
   std::function<bool(const ftxui::Event&)> search_key_handler;
   std::function<bool(const ftxui::Event&)> call_hierarchy_key_handler;
   std::function<bool(const ftxui::Event&)> problems_key_handler;
@@ -252,6 +253,11 @@ struct MainLayoutState {
   std::unique_ptr<packet_monitor::PacketMonitorService> packet_monitor_service;
   std::function<void()> packet_monitor_tick_callback;
 };
+
+inline bool performance_tab_active(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kPerformance;
+}
 
 inline bool problems_tab_active(const MainLayoutState* layout_state) {
   return layout_state != nullptr && layout_state->console_visible &&

@@ -53,7 +53,9 @@ class RawPtyScreen {
   void skip_escape(const char*& p, const char* end);
   void ensure_current_width();
   void reset_sgr();
-  TerminalStyledRow spans_from_cells(const std::vector<ScreenCell>& cells) const;
+  // preserve_cols: do not trim trailing spaces before this column (active cursor).
+  TerminalStyledRow spans_from_cells(const std::vector<ScreenCell>& cells,
+                                     int preserve_cols = 0) const;
   std::vector<TerminalStyledRow> build_all_rows() const;
   std::vector<TerminalStyledRow> build_visible_rows() const;
   void rebuild_cache() const;

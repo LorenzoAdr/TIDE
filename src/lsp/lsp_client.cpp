@@ -224,6 +224,12 @@ bool LspClient::start(const LanguageServerSpec& spec) {
   if (spec.workspace_root.empty() || spec.command.empty()) {
     return false;
   }
+  // Handlers must be installed *after* transport_.start(): start() calls stop() which
+  // clears notification/eof handlers to make reader join safe during teardown.
+  if (!spawn_language_server(spec)) {
+    stop();
+    return false;
+  }
   transport_.set_notification_handler([this](const std::string& method,
                                              const nlohmann::json& params) {
     on_lsp_notification(method, params);
@@ -241,10 +247,6 @@ bool LspClient::start(const LanguageServerSpec& spec) {
     completion_request_ids_.erase(it);
     return response_id >= latest;
   });
-  if (!spawn_language_server(spec)) {
-    stop();
-    return false;
-  }
   transport_.set_reader_eof_handler([this] { on_transport_reader_eof(); });
   workspace_root_ = spec.workspace_root;
   server_id_ = spec.id;
@@ -276,19 +278,21 @@ bool LspClient::start(const std::string& workspace_root,
 }
 
 void LspClient::stop() {
+  std::lock_guard<std::mutex> stop_lock(stop_mutex_);
   intentionally_stopping_.store(true, std::memory_order_release);
   ready_ = false;
 
-  transport_.stop();
-
-  stdin_write_fd_ = -1;
-  stdout_read_fd_ = -1;
-
+  // Kill the language server *before* joining the reader. basedpyright/node and
+  // similar servers can keep producing huge diagnostics; closing pipes alone has
+  // raced with blocking reads, and callbacks during join can re-enter the app.
+  // transport_.stop() clears notification handlers so the reader cannot call back
+  // into the app while we join — keep diagnostics_notify_callback_ so a later
+  // start() still notifies the UI without the provider having to rebind it.
   if (child_pid_ > 0) {
     int status = 0;
-    // clangd may be SIGSTOP'd while the UI is inhibited; resume so SIGTERM can land.
     kill(child_pid_, SIGCONT);
-    for (int i = 0; i < 10; ++i) {
+    kill(child_pid_, SIGTERM);
+    for (int i = 0; i < 20; ++i) {
       const pid_t result = waitpid(child_pid_, &status, WNOHANG);
       if (result == child_pid_ || result < 0) {
         child_pid_ = -1;
@@ -297,8 +301,8 @@ void LspClient::stop() {
       usleep(50000);
     }
     if (child_pid_ > 0) {
-      kill(child_pid_, SIGTERM);
-      for (int i = 0; i < 20; ++i) {
+      kill(child_pid_, SIGKILL);
+      for (int i = 0; i < 40; ++i) {
         const pid_t result = waitpid(child_pid_, &status, WNOHANG);
         if (result == child_pid_ || result < 0) {
           child_pid_ = -1;
@@ -306,13 +310,16 @@ void LspClient::stop() {
         }
         usleep(50000);
       }
-    }
-    if (child_pid_ > 0) {
-      kill(child_pid_, SIGKILL);
-      waitpid(child_pid_, &status, 0);
-      child_pid_ = -1;
+      if (child_pid_ > 0) {
+        child_pid_ = -1;
+      }
     }
   }
+
+  transport_.stop();
+
+  stdin_write_fd_ = -1;
+  stdout_read_fd_ = -1;
 
   next_request_id_ = 1;
   inflight_completion_request_id_.store(0, std::memory_order_release);
@@ -2186,37 +2193,41 @@ void LspClient::on_lsp_notification(const std::string& method, const nlohmann::j
     return;
   }
   const std::string path = doc.path;
-  std::lock_guard<std::mutex> lock(mutex_);
-  const auto existing = diagnostics_.find(path);
-  const bool has_items = !doc.items.empty();
-  auto mark_diagnostics_current = [&]() {
-    const auto it = documents_.find(path);
-    if (it == documents_.end()) {
+  std::function<void(const std::string&)> notify;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto existing = diagnostics_.find(path);
+    const bool has_items = !doc.items.empty();
+    auto mark_diagnostics_current = [&]() {
+      const auto it = documents_.find(path);
+      if (it == documents_.end()) {
+        return;
+      }
+      int diag_version = -1;
+      if (params.contains("version") && params["version"].is_number_integer()) {
+        diag_version = params["version"].get<int>();
+      }
+      if (diag_version < 0 || diag_version == it->second.version) {
+        it->second.diagnostics_generation = it->second.generation;
+      }
+    };
+
+    if (existing != diagnostics_.end() && diagnostics_items_equal(existing->second.items, doc.items)) {
+      mark_diagnostics_current();
       return;
     }
-    int diag_version = -1;
-    if (params.contains("version") && params["version"].is_number_integer()) {
-      diag_version = params["version"].get<int>();
+    if (!has_items) {
+      diagnostics_.erase(path);
+    } else {
+      diagnostics_[path] = std::move(doc);
     }
-    if (diag_version < 0 || diag_version == it->second.version) {
-      it->second.diagnostics_generation = it->second.generation;
-    }
-  };
-
-  if (existing != diagnostics_.end() && diagnostics_items_equal(existing->second.items, doc.items)) {
     mark_diagnostics_current();
-    return;
-  }
-  if (!has_items) {
-    diagnostics_.erase(path);
-  } else {
-    diagnostics_[path] = std::move(doc);
-  }
-  mark_diagnostics_current();
 
-  diagnostics_revision_.fetch_add(1, std::memory_order_release);
-  if (diagnostics_notify_callback_) {
-    diagnostics_notify_callback_(path);
+    diagnostics_revision_.fetch_add(1, std::memory_order_release);
+    notify = diagnostics_notify_callback_;
+  }
+  if (notify) {
+    notify(path);
   }
 }
 

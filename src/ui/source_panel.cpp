@@ -408,6 +408,10 @@ int execution_line_for_view(const DebugModel& model) {
   if (model.state != DebugState::kStopped || model.stack_frames.empty()) {
     return -1;
   }
+  if (model.selected_frame < 0 ||
+      static_cast<std::size_t>(model.selected_frame) >= model.stack_frames.size()) {
+    return -1;
+  }
   const auto& frame = model.stack_frames[static_cast<std::size_t>(model.selected_frame)];
   if (normalize_path(model.active_file) != normalize_path(frame.file)) {
     return -1;

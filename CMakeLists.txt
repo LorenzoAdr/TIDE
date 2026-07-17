@@ -108,6 +108,7 @@ add_executable(tgdb
   src/ui/symbol_picker.cpp
   src/ui/symbol_picker_match_runner.cpp
   src/ui/quit_confirm.cpp
+  src/ui/debug_launch_modal.cpp
   src/ui/shutdown_overlay.cpp
   src/ui/open_file_confirm.cpp
   src/ui/shortcuts_modal.cpp

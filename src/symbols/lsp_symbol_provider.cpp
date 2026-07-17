@@ -91,6 +91,17 @@ void configure_bash_language_server(LspClient* client) {
   client->did_change_workspace_configuration({{"bashIde", std::move(bash_settings)}});
 }
 
+void configure_texlab_language_server(LspClient* client) {
+  if (client == nullptr || !client->ready()) {
+    return;
+  }
+  // TexLab defaults leave chktex off; enable lint on open/save/edit (needs `chktex` on PATH).
+  nlohmann::json texlab_settings = {
+      {"chktex", {{"onOpenAndSave", true}, {"onEdit", true}}},
+  };
+  client->did_change_workspace_configuration({{"texlab", std::move(texlab_settings)}});
+}
+
 }  // namespace
 
 int64_t LspSymbolProvider::steady_now_ms() {
@@ -180,10 +191,7 @@ void LspSymbolProvider::join_tex_startup_thread() {
 
 void LspSymbolProvider::finish_python_lsp_start_locked(bool ok, bool binary_missing) {
   if (shutting_down_.load(std::memory_order_acquire)) {
-    if (python_client_) {
-      python_client_->stop();
-      python_client_.reset();
-    }
+    // stop_lsp() owns process/thread teardown; never stop() while holding mutex_.
     return;
   }
   if (!ok) {
@@ -197,9 +205,6 @@ void LspSymbolProvider::finish_python_lsp_start_locked(bool ok, bool binary_miss
   notify_lsp_status("status.basedpyright_started");
   if (diagnostics_notify_callback_) {
     python_client_->set_diagnostics_notify_callback(diagnostics_notify_callback_);
-  }
-  if (!async_worker_.joinable()) {
-    start_async_worker_locked();
   }
   open_lazy_lsp_buffers(python_client_.get(), "python", open_buffers_,
                         [this](const std::string& path) { return buffer_text_for_path(path); });
@@ -261,21 +266,24 @@ void LspSymbolProvider::ensure_python_lsp_async() {
       python_lsp_starting_.store(false, std::memory_order_release);
       return;
     }
-    std::lock_guard<std::mutex> lock(mutex_);
-    python_lsp_starting_.store(false, std::memory_order_release);
-    if (ok) {
-      python_client_ = std::move(client);
+    bool want_worker = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      python_lsp_starting_.store(false, std::memory_order_release);
+      if (ok) {
+        python_client_ = std::move(client);
+      }
+      finish_python_lsp_start_locked(ok, binary_missing);
+      want_worker = ok && use_lsp_;
     }
-    finish_python_lsp_start_locked(ok, binary_missing);
+    if (want_worker) {
+      ensure_async_worker_running();
+    }
   });
 }
 
 void LspSymbolProvider::finish_bash_lsp_start_locked(bool ok, bool binary_missing) {
   if (shutting_down_.load(std::memory_order_acquire)) {
-    if (bash_client_) {
-      bash_client_->stop();
-      bash_client_.reset();
-    }
     return;
   }
   if (!ok) {
@@ -290,9 +298,6 @@ void LspSymbolProvider::finish_bash_lsp_start_locked(bool ok, bool binary_missin
   configure_bash_language_server(bash_client_.get());
   if (diagnostics_notify_callback_) {
     bash_client_->set_diagnostics_notify_callback(diagnostics_notify_callback_);
-  }
-  if (!async_worker_.joinable()) {
-    start_async_worker_locked();
   }
   open_lazy_lsp_buffers(bash_client_.get(), "shellscript", open_buffers_,
                         [this](const std::string& path) { return buffer_text_for_path(path); });
@@ -354,21 +359,24 @@ void LspSymbolProvider::ensure_bash_lsp_async() {
       bash_lsp_starting_.store(false, std::memory_order_release);
       return;
     }
-    std::lock_guard<std::mutex> lock(mutex_);
-    bash_lsp_starting_.store(false, std::memory_order_release);
-    if (ok) {
-      bash_client_ = std::move(client);
+    bool want_worker = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      bash_lsp_starting_.store(false, std::memory_order_release);
+      if (ok) {
+        bash_client_ = std::move(client);
+      }
+      finish_bash_lsp_start_locked(ok, binary_missing);
+      want_worker = ok && use_lsp_;
     }
-    finish_bash_lsp_start_locked(ok, binary_missing);
+    if (want_worker) {
+      ensure_async_worker_running();
+    }
   });
 }
 
 void LspSymbolProvider::finish_tex_lsp_start_locked(bool ok, bool binary_missing) {
   if (shutting_down_.load(std::memory_order_acquire)) {
-    if (tex_client_) {
-      tex_client_->stop();
-      tex_client_.reset();
-    }
     return;
   }
   if (!ok) {
@@ -380,11 +388,9 @@ void LspSymbolProvider::finish_tex_lsp_start_locked(bool ok, bool binary_missing
   use_lsp_ = true;
   lsp_ready_since_ms_ = steady_now_ms();
   notify_lsp_status("status.texlab_started");
+  configure_texlab_language_server(tex_client_.get());
   if (diagnostics_notify_callback_) {
     tex_client_->set_diagnostics_notify_callback(diagnostics_notify_callback_);
-  }
-  if (!async_worker_.joinable()) {
-    start_async_worker_locked();
   }
   open_lazy_lsp_buffers(tex_client_.get(), "latex", open_buffers_,
                         [this](const std::string& path) { return buffer_text_for_path(path); });
@@ -446,12 +452,19 @@ void LspSymbolProvider::ensure_tex_lsp_async() {
       tex_lsp_starting_.store(false, std::memory_order_release);
       return;
     }
-    std::lock_guard<std::mutex> lock(mutex_);
-    tex_lsp_starting_.store(false, std::memory_order_release);
-    if (ok) {
-      tex_client_ = std::move(client);
+    bool want_worker = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      tex_lsp_starting_.store(false, std::memory_order_release);
+      if (ok) {
+        tex_client_ = std::move(client);
+      }
+      finish_tex_lsp_start_locked(ok, binary_missing);
+      want_worker = ok && use_lsp_;
     }
-    finish_tex_lsp_start_locked(ok, binary_missing);
+    if (want_worker) {
+      ensure_async_worker_running();
+    }
   });
 }
 
@@ -518,7 +531,6 @@ void LspSymbolProvider::finish_lsp_start_locked(bool ok) {
     return;
   }
   lsp_ready_since_ms_ = steady_now_ms();
-  start_async_worker_locked();
   if (ui_inhibited_ && use_background_index_) {
     client_.set_background_paused(true);
   }
@@ -569,9 +581,10 @@ void LspSymbolProvider::start_lsp_async(const std::string& compile_commands_dir)
     background_index = use_background_index_;
   }
 
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    stop_async_worker_locked();
+  // Join outside mutex_: the async worker takes mutex_ while running jobs.
+  stop_async_worker();
+  if (shutting_down_.load(std::memory_order_acquire)) {
+    return;
   }
 
   lsp_starting_.store(true, std::memory_order_release);
@@ -583,9 +596,16 @@ void LspSymbolProvider::start_lsp_async(const std::string& compile_commands_dir)
       lsp_starting_.store(false, std::memory_order_release);
       return;
     }
-    std::lock_guard<std::mutex> lock(mutex_);
-    lsp_starting_.store(false, std::memory_order_release);
-    finish_lsp_start_locked(ok);
+    bool want_worker = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      lsp_starting_.store(false, std::memory_order_release);
+      finish_lsp_start_locked(ok);
+      want_worker = ok && use_lsp_;
+    }
+    if (want_worker) {
+      ensure_async_worker_running();
+    }
   });
 }
 
@@ -632,11 +652,6 @@ bool LspSymbolProvider::tex_lsp_starting() const {
   return tex_lsp_starting_.load(std::memory_order_acquire);
 }
 
-void LspSymbolProvider::stop_lsp_locked() {
-  async_stop_ = true;
-  async_jobs_.close();
-}
-
 void LspSymbolProvider::stop_lsp_locked_finalize() {
   async_stop_ = false;
   async_jobs_.reset();
@@ -656,19 +671,52 @@ void LspSymbolProvider::stop_lsp_locked_finalize() {
 }
 
 void LspSymbolProvider::stop_lsp() {
+  // Join any restart thread *before* claiming stop_lsp_in_progress_. Otherwise the
+  // restart body can block in stop_lsp() waiting for that flag while we wait on join.
+  pending_transport_restart_.store(false, std::memory_order_release);
+  std::thread restart_to_join;
+  {
+    std::lock_guard<std::mutex> life(lifecycle_mutex_);
+    restart_to_join = std::move(lsp_restart_thread_);
+  }
+  join_thread_if_joinable(restart_to_join);
+  lsp_restart_in_progress_.store(false, std::memory_order_release);
+
+  {
+    std::unique_lock<std::mutex> life(lifecycle_mutex_);
+    if (stop_lsp_in_progress_.load(std::memory_order_acquire)) {
+      lifecycle_cv_.wait(life, [this] {
+        return !stop_lsp_in_progress_.load(std::memory_order_acquire);
+      });
+      return;
+    }
+    stop_lsp_in_progress_.store(true, std::memory_order_release);
+  }
+
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    stop_lsp_locked();
+    signal_async_worker_stop_locked();
+  }
+  // Snapshot lazy clients under the provider lock, then stop outside it. Stopping a
+  // language server joins its reader thread and must never run while holding mutex_.
+  LspClient* python = nullptr;
+  LspClient* bash = nullptr;
+  LspClient* tex = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    python = python_client_.get();
+    bash = bash_client_.get();
+    tex = tex_client_.get();
   }
   client_.stop();
-  if (python_client_) {
-    python_client_->stop();
+  if (python != nullptr) {
+    python->stop();
   }
-  if (bash_client_) {
-    bash_client_->stop();
+  if (bash != nullptr) {
+    bash->stop();
   }
-  if (tex_client_) {
-    tex_client_->stop();
+  if (tex != nullptr) {
+    tex->stop();
   }
   join_thread_if_joinable(lsp_startup_thread_);
   lsp_starting_.store(false, std::memory_order_release);
@@ -678,16 +726,29 @@ void LspSymbolProvider::stop_lsp() {
   bash_lsp_starting_.store(false, std::memory_order_release);
   join_thread_if_joinable(tex_lsp_startup_thread_);
   tex_lsp_starting_.store(false, std::memory_order_release);
-  join_thread_if_joinable(async_worker_);
-  std::lock_guard<std::mutex> lock(mutex_);
-  python_client_.reset();
-  bash_client_.reset();
-  tex_client_.reset();
-  stop_lsp_locked_finalize();
+  {
+    std::lock_guard<std::mutex> life(lifecycle_mutex_);
+    join_thread_if_joinable(async_worker_);
+  }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    python_client_.reset();
+    bash_client_.reset();
+    tex_client_.reset();
+    reset_async_queues_locked();
+    stop_lsp_locked_finalize();
+  }
+
+  {
+    std::lock_guard<std::mutex> life(lifecycle_mutex_);
+    stop_lsp_in_progress_.store(false, std::memory_order_release);
+  }
+  lifecycle_cv_.notify_all();
 }
 
 void LspSymbolProvider::restart_lsp_after_transport_failure() {
-  if (shutting_down_.load(std::memory_order_acquire)) {
+  if (shutting_down_.load(std::memory_order_acquire) ||
+      stop_lsp_in_progress_.load(std::memory_order_acquire)) {
     return;
   }
   if (async_worker_.joinable() && std::this_thread::get_id() == async_worker_.get_id()) {
@@ -711,11 +772,16 @@ void LspSymbolProvider::restart_lsp_after_transport_failure() {
     compile_dir = compile_commands_dir_;
   }
   stop_lsp();
+  if (shutting_down_.load(std::memory_order_acquire) ||
+      stop_lsp_in_progress_.load(std::memory_order_acquire)) {
+    return;
+  }
   start_lsp_async(compile_dir);
 }
 
 void LspSymbolProvider::process_pending_transport_restart() {
   if (shutting_down_.load(std::memory_order_acquire) ||
+      stop_lsp_in_progress_.load(std::memory_order_acquire) ||
       !pending_transport_restart_.load(std::memory_order_acquire)) {
     return;
   }
@@ -729,15 +795,81 @@ void LspSymbolProvider::process_pending_transport_restart() {
     return;
   }
   pending_transport_restart_.store(false, std::memory_order_release);
-  std::thread([this]() {
-    set_current_thread_name("lsp-restart");
-    restart_lsp_after_transport_failure();
-    lsp_restart_in_progress_.store(false, std::memory_order_release);
-  }).detach();
+  std::thread previous;
+  {
+    std::lock_guard<std::mutex> life(lifecycle_mutex_);
+    if (shutting_down_.load(std::memory_order_acquire) ||
+        stop_lsp_in_progress_.load(std::memory_order_acquire)) {
+      lsp_restart_in_progress_.store(false, std::memory_order_release);
+      return;
+    }
+    previous = std::move(lsp_restart_thread_);
+  }
+  join_thread_if_joinable(previous);
+  {
+    std::lock_guard<std::mutex> life(lifecycle_mutex_);
+    if (shutting_down_.load(std::memory_order_acquire) ||
+        stop_lsp_in_progress_.load(std::memory_order_acquire)) {
+      lsp_restart_in_progress_.store(false, std::memory_order_release);
+      return;
+    }
+    lsp_restart_thread_ = std::thread([this]() {
+      set_current_thread_name("lsp-restart");
+      restart_lsp_after_transport_failure();
+      lsp_restart_in_progress_.store(false, std::memory_order_release);
+    });
+  }
 }
 
-void LspSymbolProvider::start_async_worker_locked() {
-  stop_async_worker_locked();
+void LspSymbolProvider::start_async_worker() {
+  stop_async_worker();
+  if (shutting_down_.load(std::memory_order_acquire) ||
+      stop_lsp_in_progress_.load(std::memory_order_acquire)) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    async_stop_ = false;
+    async_jobs_.reset();
+    async_results_.reset();
+    {
+      std::lock_guard<std::mutex> inflight(inflight_mutex_);
+      inflight_symbols_.clear();
+      inflight_semantic_.clear();
+      inflight_hover_.clear();
+      inflight_completion_.clear();
+    }
+  }
+  {
+    std::lock_guard<std::mutex> life(lifecycle_mutex_);
+    if (shutting_down_.load(std::memory_order_acquire) ||
+        stop_lsp_in_progress_.load(std::memory_order_acquire) || async_worker_.joinable()) {
+      return;
+    }
+    async_worker_ = std::thread([this] {
+      set_current_thread_name("lsp-async");
+      async_worker_main();
+    });
+  }
+}
+
+void LspSymbolProvider::ensure_async_worker_running() {
+  if (shutting_down_.load(std::memory_order_acquire) ||
+      stop_lsp_in_progress_.load(std::memory_order_acquire)) {
+    return;
+  }
+  if (async_worker_.joinable()) {
+    return;
+  }
+  start_async_worker();
+}
+
+void LspSymbolProvider::signal_async_worker_stop_locked() {
+  async_stop_ = true;
+  async_jobs_.close();
+}
+
+void LspSymbolProvider::reset_async_queues_locked() {
   async_stop_ = false;
   async_jobs_.reset();
   async_results_.reset();
@@ -748,29 +880,21 @@ void LspSymbolProvider::start_async_worker_locked() {
     inflight_hover_.clear();
     inflight_completion_.clear();
   }
-  async_worker_ = std::thread([this] {
-    set_current_thread_name("lsp-async");
-    async_worker_main();
-  });
 }
 
-void LspSymbolProvider::stop_async_worker_locked() {
-  async_stop_ = true;
-  async_jobs_.close();
-  if (async_worker_.joinable()) {
-    if (async_worker_.get_id() == std::this_thread::get_id()) {
-      return;
-    }
-    async_worker_.join();
-  }
-  async_stop_ = false;
-  async_jobs_.reset();
-  async_results_.reset();
+void LspSymbolProvider::stop_async_worker() {
   {
-    std::lock_guard<std::mutex> lock(inflight_mutex_);
-    inflight_symbols_.clear();
-    inflight_semantic_.clear();
-    inflight_hover_.clear();
+    std::lock_guard<std::mutex> lock(mutex_);
+    signal_async_worker_stop_locked();
+  }
+  // Serialize joins so stop_lsp / restart never join the same thread concurrently.
+  {
+    std::lock_guard<std::mutex> life(lifecycle_mutex_);
+    join_thread_if_joinable(async_worker_);
+  }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    reset_async_queues_locked();
   }
 }
 

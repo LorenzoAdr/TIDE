@@ -225,15 +225,19 @@ void RawPtyScreen::append_char(char ch) {
   cache_valid_ = false;
 }
 
-TerminalStyledRow RawPtyScreen::spans_from_cells(const std::vector<ScreenCell>& cells) const {
+TerminalStyledRow RawPtyScreen::spans_from_cells(const std::vector<ScreenCell>& cells,
+                                                 int preserve_cols) const {
   TerminalStyledRow spans;
   if (cells.empty()) {
     spans.push_back(TerminalStyledSpan{});
     return spans;
   }
 
+  // Trim padding spaces past the preserved cursor column so typed trailing
+  // spaces (e.g. before the next argument) stay visible and move the caret.
+  const int min_end = std::max(0, std::min(preserve_cols, static_cast<int>(cells.size())));
   int end = static_cast<int>(cells.size());
-  while (end > 0 && cells[static_cast<std::size_t>(end - 1)].ch == ' ') {
+  while (end > min_end && cells[static_cast<std::size_t>(end - 1)].ch == ' ') {
     --end;
   }
   if (end <= 0) {
@@ -267,7 +271,7 @@ TerminalStyledRow RawPtyScreen::spans_from_cells(const std::vector<ScreenCell>& 
 }
 
 void RawPtyScreen::newline() {
-  lines_.push_back(spans_from_cells(current_cells_));
+  lines_.push_back(spans_from_cells(current_cells_, cursor_col_));
   current_cells_.assign(static_cast<std::size_t>(cols_), ScreenCell{});
   cursor_col_ = 0;
   trim_lines();
@@ -351,7 +355,7 @@ std::vector<TerminalStyledRow> RawPtyScreen::build_all_rows() const {
   std::vector<TerminalStyledRow> all;
   all.reserve(lines_.size() + 1);
   all.insert(all.end(), lines_.begin(), lines_.end());
-  all.push_back(spans_from_cells(current_cells_));
+  all.push_back(spans_from_cells(current_cells_, cursor_col_));
   return all;
 }
 
@@ -365,7 +369,7 @@ std::vector<TerminalStyledRow> RawPtyScreen::build_visible_rows() const {
     visible.insert(visible.end(), lines_.begin(), lines_.end());
   }
 
-  visible.push_back(spans_from_cells(current_cells_));
+  visible.push_back(spans_from_cells(current_cells_, cursor_col_));
 
   while (static_cast<int>(visible.size()) < rows_) {
     visible.insert(visible.begin(), TerminalStyledRow{TerminalStyledSpan{}});
@@ -388,7 +392,11 @@ void RawPtyScreen::rebuild_cache() const {
     for (const TerminalStyledSpan& span : visible[static_cast<std::size_t>(row)]) {
       line += span.text;
     }
-    line = trim_trailing_spaces(std::move(line));
+    // Keep trailing spaces on the active (last) row so typed spaces update
+    // display_text() and the UI caret can advance.
+    if (row + 1 < rows_) {
+      line = trim_trailing_spaces(std::move(line));
+    }
     if (line.empty()) {
       line = " ";
     }

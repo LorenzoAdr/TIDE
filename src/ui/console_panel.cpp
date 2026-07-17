@@ -637,6 +637,13 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
       if (is_search_input_focus(layout_state->text_input_focus)) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
+    } else if (tab == ConsolePanelTabs::kPerformance) {
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      if (is_search_input_focus(layout_state->text_input_focus)) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
     } else if (tab == ConsolePanelTabs::kCoreAnalyzer) {
       if (focus != nullptr) {
         focus->region = FocusRegion::Terminal;
@@ -964,8 +971,15 @@ Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool sh
     }
   }
   if (draw_cursor && cursor_col >= 0 && !cursor_placed && (max_cols <= 0 || cursor_col < max_cols)) {
-    parts.push_back(text(" ") | cursor_cell);
-    cursor_placed = true;
+    // Pad to the real cursor column so trailing spaces still move the caret.
+    while (col < cursor_col && (max_cols <= 0 || col < max_cols)) {
+      parts.push_back(text(" "));
+      ++col;
+    }
+    if (max_cols <= 0 || col < max_cols) {
+      parts.push_back(text(" ") | cursor_cell);
+      cursor_placed = true;
+    }
   }
   if (parts.empty()) {
     parts.push_back(text(" ") | (draw_cursor && cursor_col >= 0 ? cursor_cell
@@ -1509,10 +1523,15 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
                                         call_hierarchy_panel, git_panel, git_service,
                                         git_panel_state, core_analyzer_panel,
                                         binary_symbols_panel, packet_monitor_state,
-                                        packet_monitor](Event event) {
+                                        packet_monitor, performance_panel](Event event) {
     const bool editor_chrome_input =
         layout_state != nullptr &&
         is_editor_chrome_input_focus(layout_state->text_input_focus);
+    if (performance_tab_active(app_mode, layout_state) && !editor_chrome_input &&
+        (focus == nullptr || focus->region == FocusRegion::Terminal) &&
+        performance_panel->OnEvent(event)) {
+      return true;
+    }
     if (problems_tab_active_console(app_mode, layout_state) && !editor_chrome_input &&
         (focus == nullptr || focus->region == FocusRegion::Terminal) &&
         diagnostics_panel->OnEvent(event)) {
@@ -1694,8 +1713,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
                                  shell_launch_config, diagnostics_panel, search_panel,
                                  call_hierarchy_panel, git_panel, git_service,
                                  git_panel_state, core_analyzer_panel, binary_symbols_panel,
+                                 performance_panel,
                                  dispatch_packet_monitor_mouse](Event event) -> bool {
     if (event.is_mouse()) {
+      if (performance_tab_active(app_mode, layout_state) &&
+          performance_panel->OnEvent(event)) {
+        return true;
+      }
       if (problems_tab_active_console(app_mode, layout_state) &&
           layout_state != nullptr && layout_state->problems_key_handler &&
           layout_state->problems_key_handler(event)) {
@@ -1737,6 +1761,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     layout_state->console_key_handler = dispatch_console_keys;
     layout_state->console_mouse_handler = dispatch_console_mouse;
     layout_state->console_debug_mouse_handler = dispatch_console_mouse;
+    layout_state->performance_key_handler = [performance_panel](const Event& event) {
+      return performance_panel->OnEvent(event);
+    };
     layout_state->packet_monitor_key_handler = dispatch_packet_monitor_keys;
     layout_state->packet_monitor_mouse_handler = dispatch_packet_monitor_mouse;
     layout_state->terminal_follow_input_callback = [state, layout_state]() {

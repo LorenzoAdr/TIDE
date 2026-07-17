@@ -158,6 +158,22 @@ ToolsStatusSnapshot collect_tools_status(const LspRuntimeFlags& lsp) {
       "texlab", "settings.status.tool.texlab", lsp.lsp_enabled, lsp.tex_ready, lsp.tex_starting,
       tex_detail, tex_bin));
 
+  if (const auto chktex = resolve_chktex(); chktex.has_value()) {
+    ToolStatusEntry entry;
+    entry.id = "chktex";
+    entry.name_i18n_key = "settings.status.tool.chktex";
+    entry.state = ToolRuntimeState::kIdle;
+    entry.detail = *chktex;
+    snap.language_servers.push_back(std::move(entry));
+  } else {
+    ToolStatusEntry entry;
+    entry.id = "chktex";
+    entry.name_i18n_key = "settings.status.tool.chktex";
+    entry.state = ToolRuntimeState::kUnavailable;
+    entry.detail = "";  // texlab lint needs this
+    snap.language_servers.push_back(std::move(entry));
+  }
+
   if (const auto gdb = resolve_gdb(); gdb.has_value()) {
     if (gdb_supports_dap_at(gdb->binary_path)) {
       snap.debug_adapters.push_back(make_dap_entry("gdb", "settings.status.tool.gdb", true,

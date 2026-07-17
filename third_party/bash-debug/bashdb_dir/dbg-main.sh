@@ -35,9 +35,12 @@ for _Dbg_file in "${_Dbg_libdir}/lib/"*.sh "${_Dbg_libdir}/command/"*.sh ; do
     source "$_Dbg_file"
 done
 
-if [[ -r /dev/stdin ]] ; then
+# When launched via vscode-bash-debug FIFOs, stdin is a pipe (not a TTY).
+# Sourcing /dev/stdin then fails with "No such device" and confuses the
+# command loop. Only pull commands from stdin when it is a real terminal.
+if [[ -t 0 ]] && [[ -r /dev/stdin ]] ; then
     _Dbg_do_source /dev/stdin
-elif [[ $(tty) != 'not a tty' ]] ; then
+elif [[ -t 0 ]] && [[ $(tty 2>/dev/null) != 'not a tty' ]] ; then
     _Dbg_do_source "$(tty)"
 fi
 

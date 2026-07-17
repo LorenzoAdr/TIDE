@@ -322,11 +322,18 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
   const std::string dump_path = sampler != nullptr ? sampler->dump_file_path() : std::string{};
   constexpr int kUiSectionLines = 11;
   constexpr int kMinHeightForSystem = 12;
+  // Overhead: UI block + process label + separator(s). System adds another sep+label.
+  constexpr int kProcessChrome = 2;  // separator + "tgdb" label
+  constexpr int kSystemChrome = 2;   // separator + "System" label
   const bool show_system = total_height >= kMinHeightForSystem + kUiSectionLines;
   const int ui_height = std::min(kUiSectionLines, std::max(2, total_height / 6));
+  const int remaining =
+      std::max(3, total_height - ui_height - kProcessChrome -
+                      (show_system ? kSystemChrome : 0));
   const int process_height =
-      show_system ? std::max(4, (total_height - ui_height) * 2 / 3)
-                  : std::max(3, total_height - ui_height - 1);
+      show_system ? std::max(4, remaining * 2 / 3) : remaining;
+  const int system_height =
+      show_system ? std::max(2, remaining - process_height) : 0;
 
   Element process_body =
       render_process_section(snapshot, process_height, panel_width, state);
@@ -341,7 +348,6 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
   layout.push_back(process_body | size(HEIGHT, EQUAL, process_height) | bgcolor(theme::PanelBg()));
 
   if (show_system) {
-    const int system_height = std::max(2, total_height - process_height - 2);
     Element system_body =
         render_system_section(snapshot, system_height, panel_width);
     layout.push_back(separator() | color(theme::AccentDim()) | size(HEIGHT, EQUAL, 1));
@@ -355,7 +361,7 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
 
 Component MakePerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,
                                std::shared_ptr<PerformancePanelState> state) {
-  return CatchEvent(Renderer([] { return text(""); }), [sampler, ui_perf, state](const Event& event) {
+  return CatchEvent(Renderer([] { return text(""); }), [sampler, ui_perf, state](Event event) {
     if (state == nullptr) {
       return false;
     }
@@ -366,6 +372,24 @@ Component MakePerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
     if (event == Event::Character('k') || event == Event::ArrowUp) {
       state->thread_scroll = std::max(0, state->thread_scroll - 1);
       return true;
+    }
+    if (event == Event::PageDown) {
+      state->thread_scroll += 5;
+      return true;
+    }
+    if (event == Event::PageUp) {
+      state->thread_scroll = std::max(0, state->thread_scroll - 5);
+      return true;
+    }
+    if (event.is_mouse() && event.mouse().motion == Mouse::Pressed) {
+      if (event.mouse().button == Mouse::WheelDown) {
+        state->thread_scroll += 3;
+        return true;
+      }
+      if (event.mouse().button == Mouse::WheelUp) {
+        state->thread_scroll = std::max(0, state->thread_scroll - 3);
+        return true;
+      }
     }
     (void)sampler;
     (void)ui_perf;

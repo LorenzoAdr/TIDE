@@ -1,8 +1,11 @@
 #include "lsp/language_server_spec.hpp"
 
 #include <cstdlib>
+#include <filesystem>
 
 #include "util/bundled_tools.hpp"
+
+namespace fs = std::filesystem;
 
 namespace tgdb {
 
@@ -132,6 +135,18 @@ std::optional<LanguageServerSpec> make_texlab_spec(const std::string& workspace_
   spec.command = location->binary_path;
   spec.workspace_root = workspace_root;
   spec.language_ids = {"latex", "plaintex", "bibtex"};
+  // TexLab invokes `chktex` from PATH; ensure CHKTEX_PATH (or a non-PATH resolve) is visible.
+  if (const auto chktex = resolve_chktex(); chktex.has_value()) {
+    const fs::path chktex_dir = fs::path(*chktex).parent_path();
+    if (!chktex_dir.empty()) {
+      std::string path_env = "PATH=" + chktex_dir.string();
+      if (const char* old_path = std::getenv("PATH"); old_path != nullptr && old_path[0] != '\0') {
+        path_env.push_back(':');
+        path_env += old_path;
+      }
+      spec.env.emplace_back(std::move(path_env));
+    }
+  }
   return spec;
 }
 

@@ -47,6 +47,24 @@ cp -a "${TGDB_BASH_DEBUG_SRC}/out/." "${TGDB_BASH_DAP_PAYLOAD_DIR}/adapter/"
 cp -aL "${TGDB_BASH_DEBUG_SRC}/bashdb_dir/." "${TGDB_BASH_DAP_PAYLOAD_DIR}/bashdb/"
 chmod +x "${TGDB_BASH_DAP_PAYLOAD_DIR}/bashdb/bashdb" || true
 
+# bashDebug.js requires vscode-debugadapter / shell-quote / … at runtime. Without
+# these next to the script, node exits immediately and DAP initialize hangs forever.
+src_nm="${TGDB_BASH_DEBUG_SRC}/node_modules"
+dst_nm="${TGDB_BASH_DAP_PAYLOAD_DIR}/adapter/node_modules"
+[[ -d "${src_nm}" ]] || die "falta ${src_nm} (cd third_party/bash-debug && npm install)"
+mkdir -p "${dst_nm}"
+# Production deps + transitive closures needed by out/bashDebug.js
+for pkg in \
+  vscode-debugadapter vscode-debugprotocol shell-quote \
+  npm-which child-process which isexe commander minimist mkdirp npm-path
+do
+  if [[ -d "${src_nm}/${pkg}" ]]; then
+    cp -a "${src_nm}/${pkg}" "${dst_nm}/${pkg}"
+  else
+    die "falta dependencia npm: ${pkg}"
+  fi
+done
+
 if [[ "${TGDB_BASH_DAP_INCLUDE_NODE}" == "1" ]]; then
   if [[ ! -f "${TGDB_NODE_TAR_PATH}" ]]; then
     mkdir -p "$(dirname "${TGDB_NODE_TAR_PATH}")"

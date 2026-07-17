@@ -77,5 +77,6 @@ std::optional<BashLsLocation> resolve_bash_language_server();
 std::optional<TexlabLocation> resolve_texlab();
 std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter();
 std::optional<std::string> resolve_shellcheck();
+std::optional<std::string> resolve_chktex();
 
 }  // namespace tgdb

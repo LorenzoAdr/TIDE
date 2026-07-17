@@ -30,6 +30,7 @@
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/quit_confirm.hpp"
+#include "ui/debug_launch_modal.hpp"
 #include "ui/shutdown_overlay.hpp"
 #include "ui/open_file_confirm.hpp"
 #include "ui/settings_modal.hpp"
@@ -84,6 +85,14 @@ class Application {
   void submit_command(const UiCommand& command);
   void refresh_all_watches();
   void apply_connection_and_start();
+  void enter_debug_ui_layout();
+  void submit_debug_session_start();
+  void open_debug_launch_modal();
+  void cancel_debug_launch();
+  void dismiss_debug_launch_error();
+  void complete_debug_launch_success();
+  void fail_debug_launch(const std::string& message);
+  bool debug_launch_generation_active() const;
   void dismiss_welcome_screen();
   bool prepare_connection_wizard();
   void open_connection_wizard();
@@ -105,7 +114,7 @@ class Application {
                      const WorkspaceDetectResult* detect = nullptr,
                      const std::string& open_file_hint = {});
   WorkspaceDetectResult resolve_workspace_for_anchor(const std::string& anchor) const;
-  void exit_debug_mode();
+  void exit_debug_mode(bool force_kill = false);
   bool connection_config_complete() const;
   void ensure_backend_started();
   void register_backend_wake_callback();
@@ -151,6 +160,8 @@ class Application {
   FilePickerState file_picker_state_;
   SymbolPickerState symbol_picker_state_;
   QuitConfirmState quit_confirm_state_;
+  DebugLaunchModalState debug_launch_modal_state_;
+  uint64_t debug_launch_generation_ = 0;
   ShutdownState shutdown_state_;
   ShutdownOverlayState shutdown_overlay_state_;
   std::thread shutdown_thread_;
@@ -189,6 +200,7 @@ class Application {
   bool debugging_started_ = false;
   bool backend_started_ = false;
   bool debug_available_ = false;
+  uint64_t backend_epoch_ = 0;
   bool workspace_initialized_ = false;
   std::map<std::string, std::string> workspace_launch_args_;
   std::string last_launch_program_;

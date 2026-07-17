@@ -178,6 +178,7 @@ class LspClient {
 
   LspTransport transport_;
   std::mutex transport_io_mutex_;
+  std::mutex stop_mutex_;
   std::atomic<bool> ready_{false};
   std::atomic<bool> intentionally_stopping_{false};
   pid_t child_pid_ = -1;

@@ -2169,6 +2169,7 @@ Element make_breadcrumb_bar(const std::vector<BreadcrumbItem>& crumbs,
                   text(" "),
                   hbox(std::move(segments)),
                   text(meta) | color(theme::Muted()),
+                  filler(),
                   hbox(std::move(problems_row)),
               }) |
               size(HEIGHT, EQUAL, 1) | bgcolor(theme::TabIdle()) |

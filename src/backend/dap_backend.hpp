@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -33,6 +34,8 @@ class DapBackend : public IDebugBackend {
   void submit(const UiCommand& command) override;
   void set_wake_callback(DebugWakeCallback callback);
   void set_preferred_adapter(DebugAdapterKind kind);
+  void set_backend_epoch(uint64_t epoch) { backend_epoch_.store(epoch, std::memory_order_release); }
+  uint64_t backend_epoch() const { return backend_epoch_.load(std::memory_order_acquire); }
   DebugAdapterKind preferred_adapter() const { return preferred_adapter_; }
 
  private:
@@ -52,7 +55,12 @@ class DapBackend : public IDebugBackend {
   void notify_stopped(const std::string& reason, int thread_id = -1);
   void notify_continued(int thread_id = -1);
   void send_breakpoints_locked(const std::string& normalized_file,
-                               const std::vector<int>& lines);
+                               const std::vector<int>& lines,
+                               bool require_stopped = true);
+  bool wait_for_initialized_event(int timeout_ms);
+  bool launch_debugpy(const UiCommand& command);
+  bool launch_bashdb(const UiCommand& command);
+  bool finish_late_configuration_unlocked(bool send_configuration_done = true);
   bool pause_inferior_locked();
   bool continue_inferior_locked();
   void refresh_active_thread_locked();
@@ -70,6 +78,8 @@ class DapBackend : public IDebugBackend {
   void push_event(DebugEvent event);
   void push_error(const std::string& message);
   bool adapter_is_gdb() const;
+  bool adapter_is_debugpy() const;
+  bool adapter_is_bashdb() const;
 
   ThreadSafeQueue<UiCommand>& commands_;
   ThreadSafeQueue<DebugEvent>& events_;
@@ -78,11 +88,15 @@ class DapBackend : public IDebugBackend {
 
   std::thread worker_;
   std::atomic<bool> running_{false};
+  std::atomic<uint64_t> backend_epoch_{0};
   DebugAdapterKind preferred_adapter_ = DebugAdapterKind::kGdb;
 
   std::unique_ptr<IDebugAdapterProcess> adapter_;
   std::unique_ptr<dap::Session> session_;
-  std::mutex session_mutex_;
+  // Invalidated in stop() before killing the adapter so a late cppdap onClose
+  // cannot push "connection closed" into a replacement DapBackend (UAF/reuse).
+  std::shared_ptr<std::atomic<bool>> session_close_guard_;
+  std::recursive_mutex session_mutex_;
   int active_thread_id_ = 1;
   bool inferior_attached_ = false;
   bool inferior_launched_ = false;
@@ -95,6 +109,12 @@ class DapBackend : public IDebugBackend {
   bool configuration_done_ = false;
   std::atomic<int> reported_inferior_pid_{0};
   std::unordered_map<std::string, std::vector<int>> breakpoints_by_file_;
+
+  // debugpy/bashdb: "initialized" arrives after launch is received (not after
+  // initialize). launch_debugpy waits on this before setBreakpoints + configurationDone.
+  std::mutex dap_initialized_mutex_;
+  std::condition_variable dap_initialized_cv_;
+  bool dap_initialized_event_ = false;
 };
 
 }  // namespace tgdb

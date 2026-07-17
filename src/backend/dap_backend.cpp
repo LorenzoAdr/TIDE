@@ -1,6 +1,8 @@
 #include "backend/dap_backend.hpp"
 
+#include <chrono>
 #include <cctype>
+#include <cstdio>
 #include <filesystem>
 #include <optional>
 #include <regex>
@@ -23,6 +25,7 @@
 namespace tgdb {
 
 namespace {
+
 
 const char* ui_command_kind_name(UiCommandKind kind) {
   switch (kind) {
@@ -127,24 +130,44 @@ void DapBackend::start() {
 }
 
 void DapBackend::stop() {
-  if (!running_.exchange(false)) {
-    return;
+  // Kill the adapter *before* joining the worker. Otherwise the UI thread
+  // deadlocks: join waits for session_->send(...).get(), which waits for the
+  // adapter, which is only killed after join.
+  {
+    std::lock_guard<std::mutex> lock(wake_mutex_);
+    wake_callback_ = nullptr;
   }
-  commands_.close();
+  // Invalidate bind onClose before tearing pipes so a late callback cannot
+  // publish kTerminated into a newly constructed DapBackend at the same address.
+  if (session_close_guard_) {
+    session_close_guard_->store(false, std::memory_order_release);
+  }
+  running_.store(false, std::memory_order_release);
+  dap_initialized_cv_.notify_all();
+
+  // Only close the shared command queue once per live worker/adapter. A second
+  // stop() from ~DapBackend after Application already reset() the queue must not
+  // flip closed_ back to true.
+  const bool close_commands = worker_.joinable() || static_cast<bool>(adapter_);
+
+  if (adapter_) {
+    adapter_->stop(true);
+  }
+
+  if (close_commands) {
+    commands_.close();
+  }
 
   if (worker_.joinable()) {
     worker_.join();
   }
 
-  if (adapter_) {
-    adapter_->stop(true);
-  }
   {
-    std::lock_guard<std::mutex> lock(session_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(session_mutex_);
     session_.reset();
   }
-
   adapter_.reset();
+  session_close_guard_.reset();
 }
 
 void DapBackend::submit(const UiCommand& command) {
@@ -157,12 +180,14 @@ void DapBackend::set_wake_callback(DebugWakeCallback callback) {
 }
 
 void DapBackend::push_event(DebugEvent event) {
+  event.backend_epoch = backend_epoch_.load(std::memory_order_acquire);
   const DebugEventKind kind = event.kind;
   events_.push(std::move(event));
   // kContinued must wake the UI so drain_events can apply set_running() and
   // clear the stopped-line highlight / play→pause toolbar state.
   if (kind == DebugEventKind::kStopped || kind == DebugEventKind::kTerminated ||
-      kind == DebugEventKind::kSessionReady || kind == DebugEventKind::kContinued) {
+      kind == DebugEventKind::kSessionReady || kind == DebugEventKind::kLaunchConfigured ||
+      kind == DebugEventKind::kContinued || kind == DebugEventKind::kError) {
     std::lock_guard<std::mutex> lock(wake_mutex_);
     if (wake_callback_) {
       wake_callback_(kind);
@@ -181,10 +206,20 @@ void DapBackend::setup_session() {
   session_ = dap::Session::create();
 
   session_->registerHandler([&](const dap::InitializedEvent&) {
-    DebugEvent event;
-    event.kind = DebugEventKind::kSessionReady;
-    event.text = i18n::tr("debug.dap.session_ready");
-    push_event(std::move(event));
+    {
+      std::lock_guard<std::mutex> lock(dap_initialized_mutex_);
+      dap_initialized_event_ = true;
+    }
+    dap_initialized_cv_.notify_all();
+
+    // GDB sends initialized after initialize; debugpy/bashdb send it after launch
+    // (SessionReady for those is emitted from initialize_session instead).
+    if (adapter_is_gdb()) {
+      DebugEvent event;
+      event.kind = DebugEventKind::kSessionReady;
+      event.text = i18n::tr("debug.dap.session_ready");
+      push_event(std::move(event));
+    }
   });
 
   session_->registerHandler([&](const dap::StoppedEvent& e) {
@@ -306,14 +341,24 @@ void DapBackend::setup_session() {
   session_->registerHandler([&](const dap::ProgressEndEvent&) {});
   session_->registerHandler([&](const dap::InvalidatedEvent&) {});
   session_->registerHandler([&](const dap::MemoryEvent&) {});
+  session_->registerHandler([&](const dap::DebugpyWaitingForServerEvent&) {});
 
   session_->onError([&](const char* message) {
-    push_error(i18n::tr_fmt("debug.dap.error", {message}));
+    push_error(i18n::tr_fmt("debug.dap.error",
+                            {message != nullptr ? message : "unknown"}));
   });
 }
 
 bool DapBackend::adapter_is_gdb() const {
   return adapter_ != nullptr && adapter_->kind() == DebugAdapterKind::kGdb;
+}
+
+bool DapBackend::adapter_is_debugpy() const {
+  return adapter_ != nullptr && adapter_->kind() == DebugAdapterKind::kDebugpy;
+}
+
+bool DapBackend::adapter_is_bashdb() const {
+  return adapter_ != nullptr && adapter_->kind() == DebugAdapterKind::kBashdb;
 }
 
 void DapBackend::set_preferred_adapter(DebugAdapterKind kind) {
@@ -323,14 +368,57 @@ void DapBackend::set_preferred_adapter(DebugAdapterKind kind) {
 bool DapBackend::initialize_session() {
   dap::InitializeRequest request;
   request.adapterID = adapter_ ? adapter_->adapter_id() : std::string(kDapAdapterGdb);
+  request.clientID = "tgdb";
+  request.clientName = "tgdb";
   request.linesStartAt1 = true;
   request.columnsStartAt1 = true;
+  request.pathFormat = "path";
+  request.supportsRunInTerminalRequest = dap::boolean(false);
 
-  const auto response = session_->send(request).get();
+
+  // Never use bare .get(): if the adapter dies (e.g. missing node_modules) the
+  // future never completes and cancel deadlocks on worker join.
+  auto init_future = session_->send(request);
+  constexpr int kTimeoutMs = 8000;
+  constexpr int kSliceMs = 100;
+  int waited = 0;
+  while (init_future.wait_for(std::chrono::milliseconds(kSliceMs)) != dap::future_status::ready) {
+    waited += kSliceMs;
+    if (!running_.load(std::memory_order_acquire)) {
+      return false;
+    }
+    if (adapter_ && !adapter_->process_alive()) {
+      if (preferred_adapter_ == DebugAdapterKind::kBashdb) {
+        push_error(i18n::tr("debug.dap.bashdb_start_failed"));
+      } else if (preferred_adapter_ == DebugAdapterKind::kDebugpy) {
+        push_error(i18n::tr("debug.dap.debugpy_start_failed"));
+      } else {
+        push_error(i18n::tr("debug.dap.gdb_start_failed"));
+      }
+      return false;
+    }
+    if (waited >= kTimeoutMs) {
+      push_error(i18n::tr_fmt("debug.dap.initialize_failed", {"timeout"}));
+      return false;
+    }
+  }
+
+  const auto response = init_future.get();
   if (response.error) {
     push_error(i18n::tr_fmt("debug.dap.initialize_failed",
                             {response.error.message}));
     return false;
+  }
+
+  // debugpy and bashdb send DAP "initialized" only after receiving launch/attach
+  // (non-spec; see debugpy adapter clients.py / vscode-bash-debug). Waiting for
+  // that event before launch deadlocks. GDB still signals SessionReady from the
+  // InitializedEvent handler.
+  if (!adapter_is_gdb()) {
+    DebugEvent event;
+    event.kind = DebugEventKind::kSessionReady;
+    event.text = i18n::tr("debug.dap.session_ready");
+    push_event(std::move(event));
   }
   return true;
 }
@@ -339,8 +427,13 @@ void DapBackend::refresh_stack(int thread_id) {
   int top_frame_id = 0;
   bool have_frames = false;
   {
-    std::lock_guard<std::mutex> lock(session_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(session_mutex_);
     if (!session_) {
+      return;
+    }
+    // debugpy may answer stackTrace while running, but scopes/variables often
+    // hang. Skip the whole refresh if we already resumed.
+    if (!inferior_stopped_.load(std::memory_order_acquire)) {
       return;
     }
 
@@ -388,14 +481,17 @@ void DapBackend::refresh_stack(int thread_id) {
     }
   }
 
-  if (have_frames) {
+  if (have_frames && inferior_stopped_.load(std::memory_order_acquire)) {
     refresh_variables(top_frame_id);
   }
 }
 
 void DapBackend::refresh_variables(int frame_id) {
-  std::lock_guard<std::mutex> lock(session_mutex_);
+  std::lock_guard<std::recursive_mutex> lock(session_mutex_);
   if (!session_) {
+    return;
+  }
+  if (!inferior_stopped_.load(std::memory_order_acquire)) {
     return;
   }
 
@@ -462,7 +558,7 @@ std::string child_expression(const std::string& parent,
 void DapBackend::fetch_variable_children(int variables_reference,
                                            const std::string& parent_expression,
                                            int parent_depth) {
-  std::lock_guard<std::mutex> lock(session_mutex_);
+  std::lock_guard<std::recursive_mutex> lock(session_mutex_);
   if (!session_) {
     return;
   }
@@ -532,8 +628,14 @@ void DapBackend::notify_continued(int thread_id) {
 }
 
 bool DapBackend::continue_inferior_locked() {
+  if (!session_) {
+    return false;
+  }
   dap::ContinueRequest request;
   request.threadId = active_thread_id_ > 0 ? active_thread_id_ : 1;
+  // Mark running before waiting so a queued RefreshStack/FetchVariables that
+  // races after Play does not block the worker on hung scopes (debugpy).
+  inferior_stopped_.store(false, std::memory_order_release);
   const auto response = session_->send(request).get();
   if (response.error) {
     // GDB responde notStopped si el inferior ya está en ejecución.
@@ -541,6 +643,7 @@ bool DapBackend::continue_inferior_locked() {
       notify_continued(request.threadId);
       return true;
     }
+    inferior_stopped_.store(true, std::memory_order_release);
     return false;
   }
   notify_continued(request.threadId);
@@ -571,81 +674,144 @@ void DapBackend::refresh_active_thread_locked() {
 
 void DapBackend::on_inferior_launched() {
   inferior_attached_ = true;
-  std::lock_guard<std::mutex> lock(session_mutex_);
-  if (!session_) {
-    return;
-  }
-
-  refresh_active_thread_locked();
-
-  if (reported_inferior_pid_.load(std::memory_order_acquire) <= 0) {
-    emit_inferior_pid(fetch_inferior_pid_locked(true));
-  }
-
-  if (inferior_stopped_.load(std::memory_order_acquire)) {
-    for (const auto& [file, lines] : breakpoints_by_file_) {
-      send_breakpoints_locked(file, lines);
+  std::vector<std::pair<std::string, std::vector<int>>> pending_bps;
+  {
+    std::lock_guard<std::recursive_mutex> lock(session_mutex_);
+    if (!session_) {
+      return;
     }
-  } else if (!breakpoints_by_file_.empty()) {
-    breakpoints_pending_sync_ = true;
+
+    refresh_active_thread_locked();
+
+    // "info proc" is GDB-only; debugpy gets the PID from ProcessEvent.
+    if (adapter_is_gdb() && reported_inferior_pid_.load(std::memory_order_acquire) <= 0) {
+      emit_inferior_pid(fetch_inferior_pid_locked(true));
+    }
+
+    // debugpy/bashdb already installed breakpoints in the late configuration phase.
+    if (!adapter_is_gdb()) {
+      return;
+    }
+
+    if (inferior_stopped_.load(std::memory_order_acquire)) {
+      pending_bps.assign(breakpoints_by_file_.begin(), breakpoints_by_file_.end());
+    } else if (!breakpoints_by_file_.empty()) {
+      breakpoints_pending_sync_ = true;
+    }
+  }
+  for (const auto& [file, lines] : pending_bps) {
+    send_breakpoints_locked(file, lines);
   }
 }
 
 void DapBackend::on_inferior_attached() {
   inferior_attached_ = true;
-  std::lock_guard<std::mutex> lock(session_mutex_);
-  if (!session_) {
-    return;
-  }
+  std::vector<std::pair<std::string, std::vector<int>>> pending_bps;
+  {
+    std::lock_guard<std::recursive_mutex> lock(session_mutex_);
+    if (!session_) {
+      return;
+    }
 
-  refresh_active_thread_locked();
+    refresh_active_thread_locked();
 
-  if (reported_inferior_pid_.load(std::memory_order_acquire) <= 0) {
-    emit_inferior_pid(fetch_inferior_pid_locked(true));
-  }
+    if (reported_inferior_pid_.load(std::memory_order_acquire) <= 0) {
+      emit_inferior_pid(fetch_inferior_pid_locked(true));
+    }
 
-  expecting_stop_after_pause_ = true;
-  bool stopped = pause_inferior_locked();
-  if (!stopped) {
-    dap::EvaluateRequest interrupt;
-    interrupt.expression = "-exec interrupt";
-    interrupt.context = "repl";
-    const auto interrupt_response = session_->send(interrupt).get();
-    stopped = !interrupt_response.error;
-  }
-  if (!stopped) {
-    expecting_stop_after_pause_ = false;
-    inferior_stopped_.store(false, std::memory_order_release);
-    push_error(i18n::tr("debug.dap.attach_still_running"));
-    notify_continued();
-    return;
-  }
+    expecting_stop_after_pause_ = true;
+    bool stopped = pause_inferior_locked();
+    if (!stopped) {
+      dap::EvaluateRequest interrupt;
+      interrupt.expression = "-exec interrupt";
+      interrupt.context = "repl";
+      const auto interrupt_response = session_->send(interrupt).get();
+      stopped = !interrupt_response.error;
+    }
+    if (!stopped) {
+      expecting_stop_after_pause_ = false;
+      inferior_stopped_.store(false, std::memory_order_release);
+      push_error(i18n::tr("debug.dap.attach_still_running"));
+      notify_continued();
+      return;
+    }
 
-  inferior_stopped_.store(true, std::memory_order_release);
-  for (const auto& [file, lines] : breakpoints_by_file_) {
+    inferior_stopped_.store(true, std::memory_order_release);
+    pending_bps.assign(breakpoints_by_file_.begin(), breakpoints_by_file_.end());
+    notify_stopped("attach");
+  }
+  for (const auto& [file, lines] : pending_bps) {
     send_breakpoints_locked(file, lines);
   }
-  notify_stopped("attach");
 }
 
 void DapBackend::apply_pending_breakpoints_locked() {
   if (!inferior_stopped_.load(std::memory_order_acquire)) {
     return;
   }
-  for (const auto& [file, lines] : breakpoints_by_file_) {
-    send_breakpoints_locked(file, lines);
-  }
+  std::vector<std::pair<std::string, std::vector<int>>> pending(
+      breakpoints_by_file_.begin(), breakpoints_by_file_.end());
   breakpoints_pending_sync_ = false;
   const bool resume = resume_after_breakpoint_sync_;
   resume_after_breakpoint_sync_ = false;
+  // Caller may hold session_mutex_; unlock is the caller's responsibility before
+  // this if they need send(). Prefer copying then sending without the lock.
+  for (const auto& [file, lines] : pending) {
+    send_breakpoints_locked(file, lines);
+  }
   if (resume) {
-    continue_inferior_locked();
+    std::lock_guard<std::recursive_mutex> lock(session_mutex_);
+    if (session_) {
+      continue_inferior_locked();
+    }
+  }
+}
+
+void DapBackend::update_breakpoints(const std::string& file,
+                                    const std::vector<int>& lines) {
+  const std::string normalized = normalize_path(file);
+  if (lines.empty()) {
+    breakpoints_by_file_.erase(normalized);
+  } else {
+    breakpoints_by_file_[normalized] = lines;
+  }
+
+  if (!inferior_attached_) {
+    return;
+  }
+
+  bool send_now = false;
+  {
+    std::lock_guard<std::recursive_mutex> lock(session_mutex_);
+    if (!session_) {
+      return;
+    }
+
+    if (inferior_stopped_.load(std::memory_order_acquire)) {
+      breakpoints_pending_sync_ = false;
+      resume_after_breakpoint_sync_ = false;
+      send_now = true;
+    } else {
+      breakpoints_pending_sync_ = true;
+      resume_after_breakpoint_sync_ = true;
+      expecting_interrupt_for_breakpoints_ = true;
+      if (!pause_inferior_locked()) {
+        expecting_interrupt_for_breakpoints_ = false;
+        breakpoints_pending_sync_ = false;
+        resume_after_breakpoint_sync_ = false;
+        push_error(i18n::tr("debug.dap.interrupt_for_breakpoints_failed"));
+      }
+    }
+  }
+  if (send_now) {
+    send_breakpoints_locked(normalized, lines);
   }
 }
 
 void DapBackend::send_breakpoints_locked(const std::string& normalized_file,
-                                         const std::vector<int>& lines) {
-  if (!inferior_stopped_.load(std::memory_order_acquire)) {
+                                         const std::vector<int>& lines,
+                                         bool require_stopped) {
+  if (require_stopped && !inferior_stopped_.load(std::memory_order_acquire)) {
     push_error(i18n::tr("debug.dap.set_breakpoints_not_stopped"));
     return;
   }
@@ -663,12 +829,21 @@ void DapBackend::send_breakpoints_locked(const std::string& normalized_file,
   }
   request.breakpoints = breakpoints;
 
-  const auto response = session_->send(request).get();
+  // Must not hold session_mutex_ across .get(): bash setBreakpoints waits on
+  // debugger I/O and may emit events that also take the mutex.
+  std::unique_lock<std::recursive_mutex> lock(session_mutex_);
+  if (!session_) {
+    return;
+  }
+  auto response_future = session_->send(request);
+  lock.unlock();
+  const auto response = response_future.get();
   if (response.error) {
     push_error(i18n::tr_fmt("debug.dap.set_breakpoints_failed",
                             {response.error.message}));
     return;
   }
+
 
   DebugEvent event;
   event.kind = DebugEventKind::kBreakpointsUpdated;
@@ -686,7 +861,6 @@ void DapBackend::send_breakpoints_locked(const std::string& normalized_file,
         info.message = *bp.reason;
       }
     }
-    event.breakpoints.push_back(std::move(info));
 
     DebugEvent log;
     log.kind = DebugEventKind::kOutput;
@@ -708,49 +882,199 @@ void DapBackend::send_breakpoints_locked(const std::string& normalized_file,
     if (!log.text.empty()) {
       push_event(std::move(log));
     }
+    event.breakpoints.push_back(std::move(info));
   }
   push_event(std::move(event));
 }
 
-void DapBackend::update_breakpoints(const std::string& file,
-                                    const std::vector<int>& lines) {
-  const std::string normalized = normalize_path(file);
-  if (lines.empty()) {
-    breakpoints_by_file_.erase(normalized);
-  } else {
-    breakpoints_by_file_[normalized] = lines;
+bool DapBackend::wait_for_initialized_event(int timeout_ms) {
+  std::unique_lock<std::mutex> lock(dap_initialized_mutex_);
+  return dap_initialized_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&] {
+    return dap_initialized_event_ || !running_.load(std::memory_order_acquire);
+  }) && dap_initialized_event_;
+}
+
+bool DapBackend::finish_late_configuration_unlocked(bool send_configuration_done) {
+  // Caller must NOT hold session_mutex_. Late DAP sequence for debugpy/bashdb.
+  std::vector<std::pair<std::string, std::vector<int>>> pending;
+  {
+    std::lock_guard<std::recursive_mutex> lock(session_mutex_);
+    if (!session_) {
+      return false;
+    }
+    pending.assign(breakpoints_by_file_.begin(), breakpoints_by_file_.end());
+  }
+  for (const auto& [file, lines] : pending) {
+    // Do not hold session_mutex_ across send().get(): bash setBreakpoints is
+    // async and may emit events whose handlers also need the mutex.
+    {
+      std::lock_guard<std::recursive_mutex> lock(session_mutex_);
+      if (!session_) {
+        return false;
+      }
+    }
+    send_breakpoints_locked(file, lines, /*require_stopped=*/false);
   }
 
-  if (!inferior_attached_) {
-    return;
+  if (!send_configuration_done) {
+    // vscode-bash-debug: supportsConfigurationDoneRequest = false.
+    breakpoints_pending_sync_ = false;
+    return true;
   }
 
-  std::lock_guard<std::mutex> lock(session_mutex_);
+  // configurationDone must not run while session_mutex_ is held: debugpy responds
+  // to the pending launch and emits process/thread/stopped in the same turn.
+  std::unique_lock<std::recursive_mutex> lock(session_mutex_);
   if (!session_) {
-    return;
+    return false;
+  }
+  if (configuration_done_) {
+    return true;
+  }
+  breakpoints_pending_sync_ = false;
+  dap::ConfigurationDoneRequest done;
+  auto done_future = session_->send(done);
+  lock.unlock();
+
+  const auto done_response = done_future.get();
+  if (done_response.error) {
+    push_error(i18n::tr_fmt("debug.dap.configuration_done_failed",
+                            {done_response.error.message}));
+    return false;
+  }
+  {
+    std::lock_guard<std::recursive_mutex> done_lock(session_mutex_);
+    configuration_done_ = true;
+  }
+  return true;
+}
+
+bool DapBackend::launch_debugpy(const UiCommand& command) {
+  // debugpy sequence (non-spec): initialize → launch → initialized event →
+  // setBreakpoints → configurationDone → launch response.
+  {
+    std::lock_guard<std::mutex> lock(dap_initialized_mutex_);
+    dap_initialized_event_ = false;
+  }
+  configuration_done_ = false;
+
+  dap::GdbLaunchRequest launch;
+  launch.program = command.launch.program;
+  launch.cwd = command.launch.cwd;
+  if (!command.launch.args.empty()) {
+    launch.args = command.launch.args;
+  }
+  // Avoid runInTerminal reverse-requests (tgdb has no handler); keep DAP stdio clean.
+  launch.console = dap::string("internalConsole");
+  // Mirror GDB "stop at main" so a pre-set breakpoint / first line is reachable.
+  if (command.launch.stop_at_main) {
+    launch.stopOnEntry = dap::boolean(true);
   }
 
-  if (inferior_stopped_.load(std::memory_order_acquire)) {
-    breakpoints_pending_sync_ = false;
-    resume_after_breakpoint_sync_ = false;
-    send_breakpoints_locked(normalized, lines);
-    return;
+  std::unique_lock<std::recursive_mutex> lock(session_mutex_);
+  if (!session_) {
+    return false;
+  }
+  auto launch_future = session_->send(launch);
+  lock.unlock();
+
+  if (!wait_for_initialized_event(15000)) {
+    push_error(i18n::tr("debug.dap.initialize_failed"));
+    return false;
   }
 
-  breakpoints_pending_sync_ = true;
-  resume_after_breakpoint_sync_ = true;
-  expecting_interrupt_for_breakpoints_ = true;
-  if (!pause_inferior_locked()) {
-    expecting_interrupt_for_breakpoints_ = false;
-    breakpoints_pending_sync_ = false;
-    resume_after_breakpoint_sync_ = false;
-    push_error(i18n::tr("debug.dap.interrupt_for_breakpoints_failed"));
+  if (!finish_late_configuration_unlocked(/*send_configuration_done=*/true)) {
+    return false;
   }
+
+  const auto response = launch_future.get();
+  if (response.error) {
+    push_error(i18n::tr_fmt("debug.dap.launch_failed", {response.error.message}));
+    return false;
+  }
+  inferior_launched_ = true;
+  on_inferior_launched();
+  {
+    DebugEvent configured;
+    configured.kind = DebugEventKind::kLaunchConfigured;
+    configured.text = i18n::tr("debug.dap.session_ready");
+    push_event(std::move(configured));
+  }
+  return true;
+}
+
+bool DapBackend::launch_bashdb(const UiCommand& command) {
+  // vscode-bash-debug: initialize → launch → (launch response) → InitializedEvent.
+  // Unlike debugpy, supportsConfigurationDoneRequest is false.
+  const auto bash_loc = resolve_bash_debug_adapter();
+  if (!bash_loc.has_value()) {
+    push_error(i18n::tr("debug.dap.bashdb_start_failed"));
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(dap_initialized_mutex_);
+    dap_initialized_event_ = false;
+  }
+  configuration_done_ = false;
+
+  dap::BashdbLaunchRequest launch;
+  launch.program = command.launch.program;
+  launch.cwd = command.launch.cwd;
+  // extension.ts resolveDebugConfiguration defaults — Object.keys(env) crashes if missing.
+  launch.args = command.launch.args;
+  launch.argsString = "";
+  launch.env = dap::object{};
+  launch.pathBash = bash_loc->bash_path;
+  launch.pathBashdb = bash_loc->bashdb_path;
+  launch.pathBashdbLib = bash_loc->bashdb_lib_path;
+  launch.pathCat = "/bin/cat";
+  launch.pathMkfifo = "/usr/bin/mkfifo";
+  launch.pathPkill = "/usr/bin/pkill";
+  launch.terminalKind = "debugConsole";
+
+  std::unique_lock<std::recursive_mutex> lock(session_mutex_);
+  if (!session_) {
+    return false;
+  }
+  auto launch_future = session_->send(launch);
+  lock.unlock();
+
+  if (!wait_for_initialized_event(15000)) {
+    if (!running_.load(std::memory_order_acquire)) {
+      return false;
+    }
+    push_error(i18n::tr("debug.dap.initialize_failed"));
+    return false;
+  }
+
+  // Breakpoints only — do not send configurationDone (unsupported by bash-debug).
+  if (!finish_late_configuration_unlocked(/*send_configuration_done=*/false)) {
+    return false;
+  }
+
+  const auto response = launch_future.get();
+  if (response.error) {
+    push_error(i18n::tr_fmt("debug.dap.launch_failed", {response.error.message}));
+    return false;
+  }
+  inferior_launched_ = true;
+  on_inferior_launched();
+  {
+    DebugEvent configured;
+    configured.kind = DebugEventKind::kLaunchConfigured;
+    configured.text = i18n::tr("debug.dap.session_ready");
+    push_event(std::move(configured));
+  }
+  return true;
 }
 
 bool DapBackend::send_configuration_done() {
   if (configuration_done_) {
     return true;
+  }
+  if (!session_) {
+    return false;
   }
   dap::ConfigurationDoneRequest done;
   const auto done_response = session_->send(done).get();
@@ -880,7 +1204,7 @@ void DapBackend::on_inferior_core_loaded() {
   inferior_attached_ = true;
   inferior_launched_ = false;
   inferior_stopped_.store(true, std::memory_order_release);
-  std::lock_guard<std::mutex> lock(session_mutex_);
+  std::lock_guard<std::recursive_mutex> lock(session_mutex_);
   if (!session_) {
     return;
   }
@@ -902,7 +1226,7 @@ void DapBackend::handle_command(const UiCommand& command) {
     return;
   }
   if (command.kind == UiCommandKind::kSyncBreakpoints) {
-    std::lock_guard<std::mutex> lock(session_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(session_mutex_);
     if (session_) {
       apply_pending_breakpoints_locked();
     }
@@ -915,25 +1239,31 @@ void DapBackend::handle_command(const UiCommand& command) {
       push_error(i18n::tr("debug.source_substitute.invalid_paths"));
       return;
     }
-    std::lock_guard<std::mutex> lock(session_mutex_);
-    if (!session_) {
-      push_error(i18n::tr("debug.source_substitute.no_session"));
-      return;
-    }
-    const std::string gdb_cmd =
-        "set substitute-path " + shell_quote(from) + " " + shell_quote(to);
-    if (!exec_repl_locked(gdb_cmd, true)) {
-      push_error(i18n::tr("debug.source_substitute.failed"));
-      return;
-    }
-    DebugEvent applied;
-    applied.kind = DebugEventKind::kOutput;
-    applied.text = i18n::tr_fmt("debug.source_substitute.applied", {from, to});
-    push_event(std::move(applied));
-    if (inferior_attached_ && inferior_stopped_.load(std::memory_order_acquire)) {
-      for (const auto& [file, lines] : breakpoints_by_file_) {
-        send_breakpoints_locked(file, lines);
+    std::vector<std::pair<std::string, std::vector<int>>> pending_bps;
+    {
+      std::lock_guard<std::recursive_mutex> lock(session_mutex_);
+      if (!session_) {
+        push_error(i18n::tr("debug.source_substitute.no_session"));
+        return;
       }
+      const std::string gdb_cmd =
+          "set substitute-path " + shell_quote(from) + " " + shell_quote(to);
+      if (!exec_repl_locked(gdb_cmd, true)) {
+        push_error(i18n::tr("debug.source_substitute.failed"));
+        return;
+      }
+      DebugEvent applied;
+      applied.kind = DebugEventKind::kOutput;
+      applied.text = i18n::tr_fmt("debug.source_substitute.applied", {from, to});
+      push_event(std::move(applied));
+      if (inferior_attached_ && inferior_stopped_.load(std::memory_order_acquire)) {
+        pending_bps.assign(breakpoints_by_file_.begin(), breakpoints_by_file_.end());
+      }
+    }
+    for (const auto& [file, lines] : pending_bps) {
+      send_breakpoints_locked(file, lines);
+    }
+    if (!pending_bps.empty()) {
       refresh_stack(active_thread_id_);
     }
     return;
@@ -943,10 +1273,16 @@ void DapBackend::handle_command(const UiCommand& command) {
     return;
   }
   if (command.kind == UiCommandKind::kFetchVariables) {
+    if (!inferior_stopped_.load(std::memory_order_acquire)) {
+      return;
+    }
     refresh_variables(command.frame_id);
     return;
   }
   if (command.kind == UiCommandKind::kFetchVariableChildren) {
+    if (!inferior_stopped_.load(std::memory_order_acquire)) {
+      return;
+    }
     fetch_variable_children(command.variables_reference, command.parent_expression,
                             command.variable_depth);
     return;
@@ -965,7 +1301,7 @@ void DapBackend::handle_command(const UiCommand& command) {
       push_error(i18n::tr("debug.dap.hardware_watch_gdb_only"));
       return;
     }
-    std::lock_guard<std::mutex> lock(session_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(session_mutex_);
     if (!session_) {
       return;
     }
@@ -1010,53 +1346,14 @@ void DapBackend::handle_command(const UiCommand& command) {
   }
 
   if (command.kind == UiCommandKind::kLaunch) {
-    if (preferred_adapter_ == DebugAdapterKind::kBashdb) {
-      const auto bash_loc = resolve_bash_debug_adapter();
-      if (!bash_loc.has_value()) {
-        push_error(i18n::tr("debug.dap.bashdb_start_failed"));
-        return;
-      }
-      dap::BashdbLaunchRequest launch;
-      launch.program = command.launch.program;
-      launch.cwd = command.launch.cwd;
-      if (!command.launch.args.empty()) {
-        launch.args = command.launch.args;
-      }
-      launch.pathBash = bash_loc->bash_path;
-      launch.pathBashdb = bash_loc->bashdb_path;
-      launch.pathBashdbLib = bash_loc->bashdb_lib_path;
-      launch.pathCat = "/bin/cat";
-      launch.pathMkfifo = "/usr/bin/mkfifo";
-      launch.pathPkill = "/usr/bin/pkill";
-      launch.terminalKind = "debugConsole";
-
-      std::unique_lock<std::mutex> lock(session_mutex_);
-      if (!session_) {
-        return;
-      }
-      auto launch_future = session_->send(launch);
-      if (!send_configuration_done()) {
-        return;
-      }
-      lock.unlock();
-
-      const auto response = launch_future.get();
-      bool inferior_started = false;
-      {
-        std::lock_guard<std::mutex> lock(session_mutex_);
-        if (!session_) {
-          return;
-        }
-        if (response.error) {
-          push_error(i18n::tr_fmt("debug.dap.launch_failed", {response.error.message}));
-        } else {
-          inferior_started = true;
-        }
-      }
-      if (inferior_started) {
-        inferior_launched_ = true;
-        on_inferior_launched();
-      }
+    // Route by the *running* adapter, not preferred_adapter_ alone — a stale
+    // preferred flag must not send GDB's early configurationDone to debugpy.
+    if (adapter_is_debugpy()) {
+      launch_debugpy(command);
+      return;
+    }
+    if (adapter_is_bashdb()) {
+      launch_bashdb(command);
       return;
     }
 
@@ -1071,7 +1368,7 @@ void DapBackend::handle_command(const UiCommand& command) {
       launch.args = command.launch.args;
     }
 
-    std::unique_lock<std::mutex> lock(session_mutex_);
+    std::unique_lock<std::recursive_mutex> lock(session_mutex_);
     if (!session_) {
       return;
     }
@@ -1087,7 +1384,7 @@ void DapBackend::handle_command(const UiCommand& command) {
     const auto response = launch_future.get();
     bool inferior_started = false;
     {
-      std::lock_guard<std::mutex> lock(session_mutex_);
+      std::lock_guard<std::recursive_mutex> lock(session_mutex_);
       if (!session_) {
         return;
       }
@@ -1106,6 +1403,13 @@ void DapBackend::handle_command(const UiCommand& command) {
   }
 
   if (command.kind == UiCommandKind::kAttach) {
+    if (!adapter_is_gdb()) {
+      // debugpy attach needs processId/listen/connect + late configurationDone;
+      // GdbAttachRequest (pid/target) is GDB-only and triggers
+      // debugpyWaitingForServer + rejected configurationDone.
+      push_error(i18n::tr("debug.dap.attach_gdb_only"));
+      return;
+    }
     dap::GdbAttachRequest attach;
     attach.program = command.attach.program;
     if (command.attach.pid > 0) {
@@ -1115,7 +1419,7 @@ void DapBackend::handle_command(const UiCommand& command) {
       attach.target = command.attach.target;
     }
 
-    std::unique_lock<std::mutex> lock(session_mutex_);
+    std::unique_lock<std::recursive_mutex> lock(session_mutex_);
     if (!session_) {
       return;
     }
@@ -1128,7 +1432,7 @@ void DapBackend::handle_command(const UiCommand& command) {
     const auto attach_response = attach_future.get();
     bool attach_started = false;
     {
-      std::lock_guard<std::mutex> lock(session_mutex_);
+      std::lock_guard<std::recursive_mutex> lock(session_mutex_);
       if (!session_) {
         return;
       }
@@ -1160,7 +1464,7 @@ void DapBackend::handle_command(const UiCommand& command) {
       attach.program = command.core.program;
     }
 
-    std::unique_lock<std::mutex> lock(session_mutex_);
+    std::unique_lock<std::recursive_mutex> lock(session_mutex_);
     if (!session_) {
       return;
     }
@@ -1176,7 +1480,7 @@ void DapBackend::handle_command(const UiCommand& command) {
     const auto attach_response = attach_future.get();
     bool loaded = false;
     {
-      std::lock_guard<std::mutex> lock(session_mutex_);
+      std::lock_guard<std::recursive_mutex> lock(session_mutex_);
       if (!session_) {
         return;
       }
@@ -1194,7 +1498,7 @@ void DapBackend::handle_command(const UiCommand& command) {
   }
 
   {
-    std::lock_guard<std::mutex> lock(session_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(session_mutex_);
     if (!session_) {
       return;
     }
@@ -1251,6 +1555,11 @@ void DapBackend::handle_command(const UiCommand& command) {
       break;
     }
     case UiCommandKind::kEvaluate: {
+      if ((command.evaluate_context == EvaluateContext::kWatch ||
+           command.evaluate_context == EvaluateContext::kHover) &&
+          !inferior_stopped_.load(std::memory_order_acquire)) {
+        break;
+      }
       dap::EvaluateRequest request;
       request.expression = command.expression;
       if (command.frame_id >= 0) {
@@ -1396,7 +1705,13 @@ void DapBackend::worker_main() {
   }
 
   setup_session();
-  session_->bind(adapter_->reader(), adapter_->writer(), [&] {
+  session_close_guard_ = std::make_shared<std::atomic<bool>>(true);
+  const auto close_guard = session_close_guard_;
+  session_->bind(adapter_->reader(), adapter_->writer(), [this, close_guard] {
+    if (!close_guard || !close_guard->load(std::memory_order_acquire) ||
+        !running_.load(std::memory_order_acquire)) {
+      return;
+    }
     DebugEvent event;
     event.kind = DebugEventKind::kTerminated;
     event.text = i18n::tr("debug.dap.connection_closed");
@@ -1417,10 +1732,17 @@ void DapBackend::worker_main() {
     if (command->kind == UiCommandKind::kQuit) {
       break;
     }
-    handle_command(*command);
+    try {
+      handle_command(*command);
+    } catch (const std::exception& ex) {
+      push_error(std::string("DAP worker exception: ") + ex.what());
+    } catch (...) {
+      push_error("DAP worker unknown exception");
+    }
   }
 
-  if (session_ && adapter_ && adapter_->running() && inferior_attached_) {
+  if (running_.load(std::memory_order_acquire) && session_ && adapter_ &&
+      adapter_->running() && inferior_attached_) {
     dap::DisconnectRequest disconnect;
     disconnect.terminateDebuggee = inferior_launched_;
     session_->send(disconnect).get();

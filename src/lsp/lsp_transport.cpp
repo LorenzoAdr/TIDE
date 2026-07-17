@@ -1,7 +1,9 @@
 #include "lsp/lsp_transport.hpp"
 
+#include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <poll.h>
 #include <sstream>
 #include <unistd.h>
 
@@ -9,6 +11,35 @@
 #include "util/thread_name.hpp"
 
 namespace tgdb {
+
+namespace {
+
+constexpr int kReadPollTimeoutMs = 50;
+
+bool wait_fd_readable(int fd, std::atomic<bool>& running) {
+  while (running.load(std::memory_order_acquire)) {
+    if (fd < 0) {
+      return false;
+    }
+    pollfd pfd{};
+    pfd.fd = fd;
+    pfd.events = POLLIN | POLLHUP | POLLERR;
+    const int rc = ::poll(&pfd, 1, kReadPollTimeoutMs);
+    if (rc < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return false;
+    }
+    if (rc == 0) {
+      continue;
+    }
+    return (pfd.revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)) != 0;
+  }
+  return false;
+}
+
+}  // namespace
 
 LspTransport::~LspTransport() {
   stop();
@@ -27,18 +58,25 @@ bool LspTransport::start(int stdin_write_fd, int stdout_read_fd) {
     reader_loop();
   });
   return true;
-
-
 }
 
 void LspTransport::stop() {
-  running_.store(false);
+  running_.store(false, std::memory_order_release);
+  {
+    std::lock_guard<std::mutex> lock(handler_mutex_);
+    notification_handler_ = nullptr;
+  }
+  {
+    std::lock_guard<std::mutex> lock(eof_handler_mutex_);
+    reader_eof_handler_ = nullptr;
+  }
   {
     std::lock_guard<std::mutex> lock(pending_mutex_);
     pending_responses_.clear();
   }
   pending_cv_.notify_all();
 
+  // Closing the fds unblocks a stuck read; poll-based reads also observe running_==false.
   if (stdout_fd_ >= 0) {
     ::close(stdout_fd_);
     stdout_fd_ = -1;
@@ -84,7 +122,13 @@ std::optional<std::string> LspTransport::read_message(ReadFailKind* fail_kind) {
 
   std::string header;
   char ch = 0;
-  while (running_.load()) {
+  while (running_.load(std::memory_order_acquire)) {
+    if (!wait_fd_readable(stdout_fd_, running_)) {
+      if (fail_kind != nullptr) {
+        *fail_kind = ReadFailKind::Eof;
+      }
+      return std::nullopt;
+    }
     const ssize_t n = ::read(stdout_fd_, &ch, 1);
     if (n <= 0) {
       if (fail_kind != nullptr) {
@@ -104,7 +148,7 @@ std::optional<std::string> LspTransport::read_message(ReadFailKind* fail_kind) {
     }
   }
 
-  if (!running_.load()) {
+  if (!running_.load(std::memory_order_acquire)) {
     if (fail_kind != nullptr) {
       *fail_kind = ReadFailKind::Eof;
     }
@@ -157,7 +201,13 @@ std::optional<std::string> LspTransport::read_message(ReadFailKind* fail_kind) {
   std::string body;
   body.resize(content_length);
   std::size_t read_total = 0;
-  while (read_total < content_length && running_.load()) {
+  while (read_total < content_length && running_.load(std::memory_order_acquire)) {
+    if (!wait_fd_readable(stdout_fd_, running_)) {
+      if (fail_kind != nullptr) {
+        *fail_kind = ReadFailKind::Eof;
+      }
+      return std::nullopt;
+    }
     const ssize_t n = ::read(stdout_fd_, body.data() + read_total,
                              content_length - read_total);
     if (n <= 0) {
@@ -167,6 +217,12 @@ std::optional<std::string> LspTransport::read_message(ReadFailKind* fail_kind) {
       return std::nullopt;
     }
     read_total += static_cast<std::size_t>(n);
+  }
+  if (read_total < content_length) {
+    if (fail_kind != nullptr) {
+      *fail_kind = ReadFailKind::Eof;
+    }
+    return std::nullopt;
   }
   return body;
 }

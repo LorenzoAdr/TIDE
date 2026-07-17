@@ -73,6 +73,10 @@ exit_if_not_sourced() {
 # User should set up RGB_fg and RGB_bg arrays
 xterm_compatible_fg_bg() {
     typeset fg bg junk
+    # No controlling TTY (DAP debugConsole / FIFOs): stty ioctl fails noisily.
+    if [[ ! -t 0 ]] ; then
+	return 1
+    fi
     stty -echo
     # Issue command to get both foreground and
     # background color

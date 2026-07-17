@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -149,12 +150,14 @@ class LspSymbolProvider : public ISymbolProvider {
   void join_bash_startup_thread();
   void join_tex_startup_thread();
   void stop_lsp();
-  void stop_lsp_locked();
   void stop_lsp_locked_finalize();
   void restart_lsp_after_transport_failure();
   void process_pending_transport_restart();
-  void start_async_worker_locked();
-  void stop_async_worker_locked();
+  void start_async_worker();
+  void ensure_async_worker_running();
+  void stop_async_worker();
+  void signal_async_worker_stop_locked();
+  void reset_async_queues_locked();
   void async_worker_main();
   void enqueue_document_symbols_locked(const std::string& path, bool force = false);
   void enqueue_semantic_tokens_locked(const std::string& path, bool force = false);
@@ -230,6 +233,10 @@ class LspSymbolProvider : public ISymbolProvider {
   std::atomic<bool> pending_transport_restart_{false};
   std::atomic<bool> lsp_restart_in_progress_{false};
   std::atomic<bool> shutting_down_{false};
+  std::mutex lifecycle_mutex_;
+  std::condition_variable lifecycle_cv_;
+  std::atomic<bool> stop_lsp_in_progress_{false};
+  std::thread lsp_restart_thread_;
   int64_t last_lsp_failure_restart_ms_ = 0;
   int64_t lsp_ready_since_ms_ = 0;
   bool async_drain_invalidates_view_ = true;
