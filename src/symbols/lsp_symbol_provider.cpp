@@ -125,7 +125,11 @@ void open_lazy_lsp_buffers(LspClient* client, const std::string& language_id,
     return;
   }
   for (const auto& entry : open_buffers) {
-    if (language_id_for_path(entry.first) != language_id) {
+    const std::string lang = language_id_for_path(entry.first);
+    const bool lang_ok =
+        lang == language_id ||
+        (language_id == "typescript" && (lang == "javascript" || lang == "typescript"));
+    if (!lang_ok) {
       continue;
     }
     std::string text = entry.second;
@@ -597,7 +601,12 @@ void LspSymbolProvider::finish_simple_lazy_lsp_start_locked(std::unique_ptr<LspC
   open_lazy_lsp_buffers(client.get(), cfg.language_id, open_buffers_,
                         [this](const std::string& path) { return buffer_text_for_path(path); });
   for (const auto& entry : open_buffers_) {
-    if (language_id_for_path(entry.first) != cfg.language_id) {
+    const std::string lang = language_id_for_path(entry.first);
+    const bool lang_ok =
+        lang == cfg.language_id ||
+        (std::string(cfg.language_id) == "typescript" &&
+         (lang == "javascript" || lang == "typescript"));
+    if (!lang_ok) {
       continue;
     }
     if (!is_lsp_trackable_path(entry.first, entry.second.empty() ? buffer_text_for_path(entry.first)

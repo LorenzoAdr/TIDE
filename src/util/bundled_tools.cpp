@@ -954,22 +954,58 @@ bool should_force_bundled_python_tools() {
 namespace {
 
 std::optional<std::string> find_named_binary_on_path(const std::string& name) {
-  const char* path_env = std::getenv("PATH");
-  if (path_env == nullptr || path_env[0] == '\0' || name.empty()) {
+  if (name.empty()) {
     return std::nullopt;
   }
-  std::stringstream stream(path_env);
-  std::string dir;
-  while (std::getline(stream, dir, ':')) {
-    if (dir.empty()) {
-      continue;
+  const char* path_env = std::getenv("PATH");
+  if (path_env != nullptr && path_env[0] != '\0') {
+    std::stringstream stream(path_env);
+    std::string dir;
+    while (std::getline(stream, dir, ':')) {
+      if (dir.empty()) {
+        continue;
+      }
+      const fs::path candidate = fs::path(dir) / name;
+      if (is_executable_file(candidate.string())) {
+        return candidate.string();
+      }
     }
-    const fs::path candidate = fs::path(dir) / name;
-    if (is_executable_file(candidate.string())) {
-      return candidate.string();
+  }
+  // Desktop / IDE launches often omit ~/.cargo/bin and ~/.local/bin from PATH.
+  if (const char* home = std::getenv("HOME"); home != nullptr && home[0] != '\0') {
+    const fs::path home_path(home);
+    const fs::path extras[] = {
+        home_path / ".cargo" / "bin" / name,
+        home_path / "go" / "bin" / name,
+        home_path / ".local" / "bin" / name,
+    };
+    for (const fs::path& candidate : extras) {
+      if (is_executable_file(candidate.string())) {
+        return candidate.string();
+      }
     }
   }
   return std::nullopt;
+}
+
+// rust-analyzer on PATH is often a rustup shim; reject it unless `--version` works.
+bool executable_responds_to_version(const std::string& path) {
+  if (!is_executable_file(path)) {
+    return false;
+  }
+  static std::mutex mu;
+  static std::unordered_map<std::string, bool> cache;
+  {
+    std::lock_guard<std::mutex> lock(mu);
+    if (const auto it = cache.find(path); it != cache.end()) {
+      return it->second;
+    }
+  }
+  const std::string cmd = "\"" + path + "\" --version >/dev/null 2>&1";
+  const bool ok = std::system(cmd.c_str()) == 0;
+  std::lock_guard<std::mutex> lock(mu);
+  cache[path] = ok;
+  return ok;
 }
 
 std::optional<std::string> env_executable(const char* var_name) {
@@ -1248,8 +1284,18 @@ std::optional<TexlabLocation> resolve_texlab() {
 }
 
 std::optional<RustAnalyzerLocation> resolve_rust_analyzer() {
+  auto accept = [](const std::string& path,
+                   RustAnalyzerLocation::Source source) -> std::optional<RustAnalyzerLocation> {
+    if (!executable_responds_to_version(path)) {
+      return std::nullopt;
+    }
+    return RustAnalyzerLocation{path, source};
+  };
+
   if (const auto env_path = env_executable("TGDB_RUST_ANALYZER"); env_path.has_value()) {
-    return RustAnalyzerLocation{*env_path, RustAnalyzerLocation::Source::Env};
+    if (auto loc = accept(*env_path, RustAnalyzerLocation::Source::Env)) {
+      return loc;
+    }
   }
 #ifdef TGDB_HAS_BUNDLED_RUST_ANALYZER
   {
@@ -1261,7 +1307,9 @@ std::optional<RustAnalyzerLocation> resolve_rust_analyzer() {
     if (lazy_extract_bundled_tree(install_root, "bin/rust-analyzer", expected,
                                   _binary_rust_analyzer_blob_zst_start,
                                   _binary_rust_analyzer_blob_zst_end, install_attempted)) {
-      return RustAnalyzerLocation{binary_path.string(), RustAnalyzerLocation::Source::Bundled};
+      if (auto loc = accept(binary_path.string(), RustAnalyzerLocation::Source::Bundled)) {
+        return loc;
+      }
     }
 #ifdef TGDB_DEFAULT_FORCE_BUNDLED_RUST_ANALYZER
     return std::nullopt;
@@ -1269,7 +1317,9 @@ std::optional<RustAnalyzerLocation> resolve_rust_analyzer() {
   }
 #endif
   if (const auto path_bin = find_named_binary_on_path("rust-analyzer"); path_bin.has_value()) {
-    return RustAnalyzerLocation{*path_bin, RustAnalyzerLocation::Source::SystemPath};
+    if (auto loc = accept(*path_bin, RustAnalyzerLocation::Source::SystemPath)) {
+      return loc;
+    }
   }
   return std::nullopt;
 }

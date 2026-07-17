@@ -881,7 +881,7 @@ const StringTable& spanish_strings() {
       {"status.texlab_missing", "texlab no encontrado (instalar desde GitHub releases). Coloreado tree-sitter activo; sin completions LSP."},
       {"status.texlab_started", "texlab listo"},
       {"status.texlab_failed", "texlab no pudo iniciarse"},
-      {"status.rust_analyzer_missing", "rust-analyzer no encontrado (instalar vía rustup o PATH). Coloreado tree-sitter activo; sin completions LSP."},
+      {"status.rust_analyzer_missing", "rust-analyzer no encontrado (instalar: rustup component add rust-analyzer). Coloreado tree-sitter activo; sin completions LSP."},
       {"status.rust_analyzer_started", "rust-analyzer listo"},
       {"status.rust_analyzer_failed", "rust-analyzer no pudo iniciarse"},
       {"status.gopls_missing", "gopls no encontrado (go install golang.org/x/tools/gopls@latest). Coloreado tree-sitter activo; sin completions LSP."},
