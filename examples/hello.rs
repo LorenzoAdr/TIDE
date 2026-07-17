@@ -1,6 +1,7 @@
 //! Ejemplo mínimo para outline / LSP rust-analyzer en tgdb.
-//! Compilar: rustc -g hello.rs
-//! O con cargo: cargo new hello && reemplazar src/main.rs
+//! Requiere el `Cargo.toml` de este directorio (`examples/`).
+//! Compilar: `cargo build --manifest-path examples/Cargo.toml --bin hello`
+//! O: `rustc -g hello.rs`
 
 fn greet(name: &str) {
     println!("hello, {name}");

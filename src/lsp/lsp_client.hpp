@@ -48,6 +48,7 @@ class LspClient {
   bool supports_declaration() const { return declaration_supported_; }
   bool supports_implementation() const { return implementation_supported_; }
   const std::string& server_id() const { return server_id_; }
+  const std::string& workspace_root() const { return workspace_root_; }
 
   void did_open(const std::string& absolute_path, const std::string& text);
   void did_change(const std::string& absolute_path, const std::string& text);

@@ -159,7 +159,16 @@ bool LspClient::spawn_clangd(const std::string& workspace_root,
 bool LspClient::initialize(const std::string& workspace_root) {
   nlohmann::json params;
   params["processId"] = static_cast<int>(getpid());
-  params["rootUri"] = path_to_uri(workspace_root);
+  const std::string root_uri = path_to_uri(workspace_root);
+  params["rootUri"] = root_uri;
+  // rust-analyzer / gopls prefer workspaceFolders; rootUri alone often yields an empty project.
+  if (!root_uri.empty()) {
+    const std::string folder_name = fs::path(workspace_root).filename().string();
+    params["workspaceFolders"] = nlohmann::json::array(
+        {{{"uri", root_uri},
+          {"name", folder_name.empty() ? std::string("workspace") : folder_name}}});
+  }
+  params["capabilities"]["workspace"]["workspaceFolders"] = true;
   params["capabilities"]["textDocument"]["documentSymbol"]["hierarchicalDocumentSymbolSupport"] =
       true;
   params["capabilities"]["textDocument"]["publishDiagnostics"] = nlohmann::json::object();
@@ -2209,6 +2218,10 @@ void LspClient::on_lsp_notification(const std::string& method, const nlohmann::j
       }
       if (diag_version < 0 || diag_version == it->second.version) {
         it->second.diagnostics_generation = it->second.generation;
+        // clangd signals readiness via $/clangd/fileStatus; other servers (rust-analyzer,
+        // gopls, …) typically do not. Treat a matching diagnostics publish as "idle" so
+        // wait_for_completion_ready does not burn its full timeout.
+        it->second.idle_generation = it->second.generation;
       }
     };
 

@@ -771,12 +771,65 @@ void LspSymbolProvider::finish_typescript_lsp_start_locked(bool ok, bool binary_
   }
 }
 
-void LspSymbolProvider::ensure_rust_lsp_async() {
+void LspSymbolProvider::ensure_rust_lsp_async(const std::string& hint_path) {
+  std::string root;
+  std::string discovered_hint = hint_path;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!lsp_enabled_ || workspace_root_.empty()) {
+      return;
+    }
+    root = workspace_root_;
+    if (discovered_hint.empty()) {
+      for (const auto& entry : open_buffers_) {
+        if (language_id_is_rust(language_id_for_path(entry.first))) {
+          discovered_hint = entry.first;
+          break;
+        }
+      }
+    }
+  }
+  std::string cargo_root =
+      discovered_hint.empty() ? std::string{}
+                              : discover_project_root_with_marker(discovered_hint, "Cargo.toml");
+  if (cargo_root.empty()) {
+    cargo_root = discover_project_root_with_marker(root, "Cargo.toml");
+  }
+  if (cargo_root.empty()) {
+    cargo_root = root;
+  }
+
+  // If rust-analyzer is already running against the wrong project root (e.g. a CMake
+  // workspace with no Cargo.toml), restart it with the discovered cargo root.
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (rust_client_ && rust_client_->ready()) {
+      const std::string current = normalize_lsp_path(rust_client_->workspace_root());
+      const std::string wanted = normalize_lsp_path(cargo_root);
+      if (!current.empty() && !wanted.empty() && current == wanted) {
+        return;
+      }
+      if (!wanted.empty() && current != wanted) {
+        // Fall through after releasing the lock to stop+restart.
+      } else {
+        return;
+      }
+    }
+  }
+  if (rust_client_) {
+    join_rust_startup_thread();
+    if (rust_client_) {
+      rust_client_->stop();
+      std::lock_guard<std::mutex> lock(mutex_);
+      rust_client_.reset();
+    }
+  }
+
   ensure_simple_lazy_lsp_async(
       rust_client_, rust_lsp_starting_, rust_lsp_startup_thread_,
       {"lsp-rust-start", "rust", "status.rust_analyzer_missing", "status.rust_analyzer_failed",
        "status.rust_analyzer_started", "rust-analyzer start failed or binary missing",
-       make_rust_analyzer_spec},
+       [cargo_root](const std::string&) { return make_rust_analyzer_spec(cargo_root); }},
       &LspSymbolProvider::finish_rust_lsp_start_locked);
 }
 
@@ -2157,7 +2210,7 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
     } else if (language_id_is_latex(lang)) {
       ensure_tex_lsp_async();
     } else if (language_id_is_rust(lang)) {
-      ensure_rust_lsp_async();
+      ensure_rust_lsp_async(path);
     } else if (language_id_is_go(lang)) {
       ensure_go_lsp_async();
     } else if (language_id_is_zig(lang)) {
@@ -2214,7 +2267,7 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
     } else if (language_id_is_latex(lang)) {
       ensure_tex_lsp_async();
     } else if (language_id_is_rust(lang)) {
-      ensure_rust_lsp_async();
+      ensure_rust_lsp_async(path);
     } else if (language_id_is_go(lang)) {
       ensure_go_lsp_async();
     } else if (language_id_is_zig(lang)) {
@@ -2255,9 +2308,9 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
         ensure_bash_lsp_async();
       } else if (language_id_is_latex(lang)) {
         ensure_tex_lsp_async();
-      } else if (language_id_is_rust(lang)) {
-        ensure_rust_lsp_async();
-      } else if (language_id_is_go(lang)) {
+      } else   if (language_id_is_rust(lang)) {
+    ensure_rust_lsp_async(path);
+  } else if (language_id_is_go(lang)) {
         ensure_go_lsp_async();
       } else if (language_id_is_zig(lang)) {
         ensure_zig_lsp_async();
@@ -2562,8 +2615,8 @@ void LspSymbolProvider::ensure_lazy_lsp_for_path(const std::string& path) {
     ensure_bash_lsp_async();
   } else if (language_id_is_latex(lang)) {
     ensure_tex_lsp_async();
-  } else if (language_id_is_rust(lang)) {
-    ensure_rust_lsp_async();
+  } else   if (language_id_is_rust(lang)) {
+    ensure_rust_lsp_async(path);
   } else if (language_id_is_go(lang)) {
     ensure_go_lsp_async();
   } else if (language_id_is_zig(lang)) {

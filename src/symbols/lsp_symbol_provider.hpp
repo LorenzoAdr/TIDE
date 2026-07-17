@@ -153,7 +153,7 @@ class LspSymbolProvider : public ISymbolProvider {
   void ensure_python_lsp_async();
   void ensure_bash_lsp_async();
   void ensure_tex_lsp_async();
-  void ensure_rust_lsp_async();
+  void ensure_rust_lsp_async(const std::string& hint_path = {});
   void ensure_go_lsp_async();
   void ensure_zig_lsp_async();
   void ensure_fortran_lsp_async();

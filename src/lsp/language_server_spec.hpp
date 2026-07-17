@@ -56,6 +56,10 @@ std::optional<LanguageServerSpec> make_bash_ls_spec(const std::string& workspace
 
 std::optional<LanguageServerSpec> make_texlab_spec(const std::string& workspace_root);
 
+// Walks up from path (file or directory) looking for Cargo.toml / go.mod / etc.
+std::string discover_project_root_with_marker(const std::string& start_path,
+                                              const char* marker_filename);
+
 std::optional<LanguageServerSpec> make_rust_analyzer_spec(const std::string& workspace_root);
 
 std::optional<LanguageServerSpec> make_gopls_spec(const std::string& workspace_root);

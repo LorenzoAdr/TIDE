@@ -200,16 +200,48 @@ std::optional<LanguageServerSpec> make_texlab_spec(const std::string& workspace_
   return spec;
 }
 
+std::string discover_project_root_with_marker(const std::string& start_path,
+                                              const char* marker_filename) {
+  if (start_path.empty() || marker_filename == nullptr || marker_filename[0] == '\0') {
+    return {};
+  }
+  std::error_code ec;
+  fs::path current = fs::absolute(start_path, ec);
+  if (ec) {
+    current = fs::path(start_path);
+  }
+  if (fs::is_regular_file(current, ec)) {
+    current = current.parent_path();
+  }
+  while (!current.empty()) {
+    if (fs::exists(current / marker_filename, ec) && !ec) {
+      return current.string();
+    }
+    const fs::path parent = current.parent_path();
+    if (parent == current) {
+      break;
+    }
+    current = parent;
+  }
+  return {};
+}
+
 std::optional<LanguageServerSpec> make_rust_analyzer_spec(const std::string& workspace_root) {
   const auto location = resolve_rust_analyzer();
   if (!location.has_value()) {
     return std::nullopt;
   }
 
+  // rust-analyzer requires a Cargo project; prefer nearest Cargo.toml over the editor workspace.
+  std::string cargo_root = discover_project_root_with_marker(workspace_root, "Cargo.toml");
+  if (cargo_root.empty()) {
+    cargo_root = workspace_root;
+  }
+
   LanguageServerSpec spec;
   spec.id = kLspServerRustAnalyzer;
   spec.command = location->binary_path;
-  spec.workspace_root = workspace_root;
+  spec.workspace_root = cargo_root;
   spec.language_ids = {"rust"};
   return spec;
 }
