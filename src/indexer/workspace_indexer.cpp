@@ -57,6 +57,10 @@ void list_directory_skeleton(const fs::path& workspace_root, const fs::path& dir
     const std::string rel_str = rel.generic_string();
 
     if (entry.is_directory(ec)) {
+      if (should_show_lazy_stub(name, options)) {
+        folders->push_back(rel_str);
+        continue;
+      }
       if (should_skip_dir_name(name, options)) {
         continue;
       }
@@ -161,6 +165,27 @@ void collect_workspace_directories(const fs::path& root, const fs::path& current
     }
     folders->push_back(rel.generic_string());
     collect_workspace_directories(root, entry.path(), options, folders);
+  }
+}
+
+void append_lazy_stub_folders(const fs::path& root, const IndexFilterOptions& options,
+                              std::vector<std::string>* folders) {
+  if (folders == nullptr || !options.show_all_files) {
+    return;
+  }
+  std::error_code ec;
+  for (const auto& entry : fs::directory_iterator(root, ec)) {
+    if (ec) {
+      break;
+    }
+    if (!entry.is_directory(ec)) {
+      continue;
+    }
+    const auto name = entry.path().filename().string();
+    if (!should_show_lazy_stub(name, options)) {
+      continue;
+    }
+    folders->push_back(name);
   }
 }
 
@@ -524,6 +549,7 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
     const fs::path root(workspace_root);
     if (fs::is_directory(root, ec)) {
       collect_workspace_directories(root, root, filter_options, &snap->folders);
+      append_lazy_stub_folders(root, filter_options, &snap->folders);
       sort_unique_strings(&snap->folders);
     }
   }
@@ -666,6 +692,12 @@ void WorkspaceIndexer::index_directory(const std::string& workspace_root,
       const fs::path rel = rel_dir.empty() ? fs::path(name) : rel_dir / name;
       const std::string entry_rel = rel.generic_string();
       if (entry.is_directory(ec)) {
+        if (is_lazy_stub_dir_name(name)) {
+          if (should_show_lazy_stub(name, options)) {
+            insert_sorted_unique(&updated->folders, entry_rel);
+          }
+          continue;
+        }
         if (should_skip_dir_name(name, options)) {
           continue;
         }
@@ -744,6 +776,7 @@ bool WorkspaceIndexer::refresh(const std::string& workspace_root) {
   const fs::path root(workspace_root);
   if (fs::is_directory(root, ec)) {
     collect_workspace_directories(root, root, options, &updated->folders);
+    append_lazy_stub_folders(root, options, &updated->folders);
     sort_unique_strings(&updated->folders);
   }
 

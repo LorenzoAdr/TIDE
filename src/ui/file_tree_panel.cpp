@@ -15,6 +15,7 @@
 #include "git/git_service.hpp"
 #include "git/git_status.hpp"
 #include "indexer/index_rules.hpp"
+#include "indexer/workspace_indexer.hpp"
 #include "util/nm_reader.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
@@ -340,6 +341,7 @@ struct FileTreePanelState {
     } else {
       root = build_file_tree_from_paths_and_folders(snapshot->files, tree_folders);
     }
+    mark_lazy_stub_folders(&root, snapshot->filter_options);
     if (!to_reveal.empty() && !skeleton_preview) {
       reveal_file(workspace_root, to_reveal);
     } else {
@@ -349,8 +351,26 @@ struct FileTreePanelState {
     }
   }
 
+  IndexFilterOptions filter_options_from(WorkspaceIndexer* indexer) const {
+    if (indexer != nullptr) {
+      if (auto snap = indexer->snapshot()) {
+        return snap->filter_options;
+      }
+    }
+    return {};
+  }
+
+  void ensure_lazy_folder_loaded(FileTreeNode* folder, const std::string& relative_dir,
+                                 const std::string& workspace_root,
+                                 const IndexFilterOptions& options) {
+    if (folder == nullptr || !folder->lazy || folder->children_loaded) {
+      return;
+    }
+    populate_lazy_folder_children(folder, workspace_root, relative_dir, options);
+  }
+
   void activate(DebugModel* model, WorkspaceModel* workspace, FocusManagerState* focus,
-                MainLayoutState* layout_state, int index) {
+                MainLayoutState* layout_state, WorkspaceIndexer* indexer, int index) {
     if (index < 0 || index >= static_cast<int>(flat.size())) {
       return;
     }
@@ -375,7 +395,13 @@ struct FileTreePanelState {
       return;
     }
     if (entry.folder != nullptr) {
-      entry.folder->expanded = !entry.folder->expanded;
+      if (!entry.folder->expanded) {
+        ensure_lazy_folder_loaded(entry.folder, entry.relative_path, model->workspace_root,
+                                  filter_options_from(indexer));
+        entry.folder->expanded = true;
+      } else {
+        entry.folder->expanded = false;
+      }
       rebuild_flat();
       scroll_row_into_view(index, layout_state);
     }
@@ -653,7 +679,7 @@ bool update_explorer_hover(FileTreePanelState* state, MainLayoutState* layout_st
 
 bool handle_navigation(FileTreePanelState* state, DebugModel* model,
                        WorkspaceModel* workspace, FocusManagerState* focus,
-                       MainLayoutState* layout_state, Event event) {
+                       MainLayoutState* layout_state, WorkspaceIndexer* indexer, Event event) {
   const int total = static_cast<int>(state->flat.size());
   const int visible = state->last_visible_lines;
   const int max_scroll = max_scroll_offset(total, visible);
@@ -693,7 +719,7 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
     trigger_press(layout_state, press_id::explorer_row(*row));
     state->selected = *row;
     state->scroll_row_into_view(*row, layout_state);
-    state->activate(model, workspace, focus, layout_state, *row);
+    state->activate(model, workspace, focus, layout_state, indexer, *row);
     return true;
   }
 
@@ -717,12 +743,14 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
   }
   if (event == Event::Return) {
     trigger_press(layout_state, press_id::explorer_row(state->selected));
-    state->activate(model, workspace, focus, layout_state, state->selected);
+    state->activate(model, workspace, focus, layout_state, indexer, state->selected);
     return true;
   }
   if (event == Event::ArrowRight) {
     const auto& entry = state->flat[static_cast<std::size_t>(state->selected)];
     if (!entry.is_file && entry.folder != nullptr && !entry.folder->expanded) {
+      state->ensure_lazy_folder_loaded(entry.folder, entry.relative_path, model->workspace_root,
+                                       state->filter_options_from(indexer));
       entry.folder->expanded = true;
       state->rebuild_flat();
       state->scroll_row_into_view(state->selected, layout_state);
@@ -753,7 +781,8 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
 
 bool handle_explorer_mouse(FileTreePanelState* state, DebugModel* model,
                            WorkspaceModel* workspace, FocusManagerState* focus,
-                           MainLayoutState* layout_state, Event event) {
+                           MainLayoutState* layout_state, WorkspaceIndexer* indexer,
+                           Event event) {
   if (state == nullptr || !event.is_mouse()) {
     return false;
   }
@@ -767,7 +796,7 @@ bool handle_explorer_mouse(FileTreePanelState* state, DebugModel* model,
   if (m.button == Mouse::Right && m.motion == Mouse::Pressed) {
     return handle_explorer_context_menu(state, model, workspace, focus, layout_state, event);
   }
-  return handle_navigation(state, model, workspace, focus, layout_state, event);
+  return handle_navigation(state, model, workspace, focus, layout_state, indexer, event);
 }
 
 }  // namespace
@@ -909,17 +938,18 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
 
   if (layout_state != nullptr) {
     layout_state->explorer_mouse_handler =
-        [state, model, workspace, focus, layout_state](const Event& event) {
+        [state, model, workspace, focus, layout_state, indexer](const Event& event) {
           return handle_explorer_mouse(state.get(), model, workspace, focus, layout_state,
-                                       event);
+                                       indexer, event);
         };
   }
 
-  return WrapFocusable(CatchEvent(renderer, [model, workspace, focus, state, layout_state](Event event) {
+  return WrapFocusable(CatchEvent(renderer, [model, workspace, focus, state, layout_state,
+                                             indexer](Event event) {
     if (event.is_mouse() && mouse_over_explorer(state.get(), event.mouse().x, event.mouse().y)) {
       return false;
     }
-    return handle_navigation(state.get(), model, workspace, focus, layout_state, event);
+    return handle_navigation(state.get(), model, workspace, focus, layout_state, indexer, event);
   }));
 }
 

@@ -95,6 +95,15 @@ class LspSymbolProvider : public ISymbolProvider {
   bool lsp_active() const { return use_lsp_; }
   bool lsp_loading() const override;
 
+  bool clangd_ready() const;
+  bool python_lsp_ready() const;
+  bool bash_lsp_ready() const;
+  bool tex_lsp_ready() const;
+  bool clangd_starting() const;
+  bool python_lsp_starting() const;
+  bool bash_lsp_starting() const;
+  bool tex_lsp_starting() const;
+
   void set_lsp_enabled(bool enabled);
   bool lsp_enabled() const;
   void set_workspace_clangd_options(bool use_gcc_query_driver, bool background_index);
@@ -103,6 +112,7 @@ class LspSymbolProvider : public ISymbolProvider {
   void set_async_job_ready_callback(std::function<void(LspAsyncJobKind)> callback);
   void set_diagnostics_notify_callback(std::function<void(const std::string& path)> callback);
   void set_did_change_debounce_callback(std::function<void()> callback);
+  void set_lsp_status_callback(std::function<void(const std::string& i18n_key)> callback);
 
  private:
   enum class AsyncJobKind { DocumentSymbols, SemanticTokens, Hover, Completion };
@@ -127,10 +137,17 @@ class LspSymbolProvider : public ISymbolProvider {
   void refresh_diagnostics_cache_locked() const;
   void start_lsp_async(const std::string& compile_commands_dir);
   void ensure_python_lsp_async();
+  void ensure_bash_lsp_async();
+  void ensure_tex_lsp_async();
   void finish_lsp_start_locked(bool ok);
-  void finish_python_lsp_start_locked(bool ok);
+  void finish_python_lsp_start_locked(bool ok, bool binary_missing);
+  void finish_bash_lsp_start_locked(bool ok, bool binary_missing);
+  void finish_tex_lsp_start_locked(bool ok, bool binary_missing);
+  void notify_lsp_status(const char* i18n_key);
   void join_startup_thread();
   void join_python_startup_thread();
+  void join_bash_startup_thread();
+  void join_tex_startup_thread();
   void stop_lsp();
   void stop_lsp_locked();
   void stop_lsp_locked_finalize();
@@ -157,11 +174,16 @@ class LspSymbolProvider : public ISymbolProvider {
   LspClient* client_for_path(const std::string& path);
   const LspClient* client_for_path(const std::string& path) const;
   bool any_lsp_ready() const;
+  void ensure_lazy_lsp_for_path(const std::string& path);
+  bool wait_for_client_for_path(const std::string& path, int timeout_ms);
+  LspClient* prepare_lsp_client(const std::string& path, std::string& text);
   static int64_t steady_now_ms();
 
   mutable std::mutex mutex_;
   LspClient client_;  // clangd (C/C++)
   std::unique_ptr<LspClient> python_client_;  // basedpyright (lazy)
+  std::unique_ptr<LspClient> bash_client_;    // bash-language-server (lazy)
+  std::unique_ptr<LspClient> tex_client_;     // texlab (lazy)
   TreeSitterSymbolProvider fallback_;
   bool lsp_enabled_ = true;
   bool use_gcc_query_driver_ = true;
@@ -180,8 +202,12 @@ class LspSymbolProvider : public ISymbolProvider {
   std::thread async_worker_;
   std::thread lsp_startup_thread_;
   std::thread python_lsp_startup_thread_;
+  std::thread bash_lsp_startup_thread_;
+  std::thread tex_lsp_startup_thread_;
   std::atomic<bool> lsp_starting_{false};
   std::atomic<bool> python_lsp_starting_{false};
+  std::atomic<bool> bash_lsp_starting_{false};
+  std::atomic<bool> tex_lsp_starting_{false};
   std::atomic<bool> async_stop_{false};
   mutable std::mutex inflight_mutex_;
   std::unordered_set<std::string> inflight_symbols_;
@@ -211,6 +237,8 @@ class LspSymbolProvider : public ISymbolProvider {
   std::mutex async_job_ready_callback_mutex_;
   std::function<void(const std::string& path)> diagnostics_notify_callback_;
   std::function<void()> did_change_debounce_callback_;
+  std::function<void(const std::string& i18n_key)> lsp_status_callback_;
+  std::mutex lsp_status_callback_mutex_;
   std::mutex did_change_debounce_callback_mutex_;
   std::thread did_change_timer_;
   std::atomic<bool> did_change_timer_stop_{false};

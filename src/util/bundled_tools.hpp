@@ -34,6 +34,25 @@ struct DebugpyLocation {
   enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
 };
 
+struct BashLsLocation {
+  std::string binary_path;
+  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+};
+
+struct TexlabLocation {
+  std::string binary_path;
+  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+};
+
+struct BashDebugAdapterLocation {
+  std::string node_path;
+  std::string adapter_js_path;
+  std::string bash_path;
+  std::string bashdb_path;
+  std::string bashdb_lib_path;
+  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+};
+
 bool has_bundled_clangd();
 bool has_bundled_gdb();
 bool has_bundled_rg();
@@ -54,5 +73,9 @@ std::optional<GdbLocation> resolve_gdb();
 std::optional<RgLocation> resolve_rg();
 std::optional<BasedpyrightLocation> resolve_basedpyright();
 std::optional<DebugpyLocation> resolve_debugpy();
+std::optional<BashLsLocation> resolve_bash_language_server();
+std::optional<TexlabLocation> resolve_texlab();
+std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter();
+std::optional<std::string> resolve_shellcheck();
 
 }  // namespace tgdb

@@ -16,7 +16,13 @@ constexpr int kGdbKind = 2;
 constexpr int kForceGdb = 3;
 constexpr int kPythonKind = 4;
 constexpr int kForcePython = 5;
-constexpr int kOptionCount = 6;
+constexpr int kBundleBashLs = 6;
+constexpr int kForceBashLs = 7;
+constexpr int kBundleTexlab = 8;
+constexpr int kForceTexlab = 9;
+constexpr int kBundleBashDap = 10;
+constexpr int kForceBashDap = 11;
+constexpr int kOptionCount = 12;
 
 constexpr int kGdbNone = 0;
 constexpr int kGdbStatic = 1;
@@ -33,6 +39,12 @@ struct BundleConfig {
   bool force_gdb = false;
   int python_kind = kPythonNone;
   bool force_python = false;
+  bool bundle_bash_ls = false;
+  bool force_bash_ls = false;
+  bool bundle_texlab = false;
+  bool force_texlab = false;
+  bool bundle_bash_dap = false;
+  bool force_bash_dap = false;
 };
 
 struct WizardState {
@@ -101,6 +113,18 @@ void load_bundle_config(const std::string& path, BundleConfig* config) {
       }
     } else if (line.rfind("BUNDLE_PYTHON_FORCE=", 0) == 0) {
       config->force_python = line.substr(20) == "1";
+    } else if (line.rfind("BUNDLE_BASH_LS=", 0) == 0) {
+      config->bundle_bash_ls = line.substr(15) == "1";
+    } else if (line.rfind("BUNDLE_BASH_LS_FORCE=", 0) == 0) {
+      config->force_bash_ls = line.substr(21) == "1";
+    } else if (line.rfind("BUNDLE_TEXLAB=", 0) == 0) {
+      config->bundle_texlab = line.substr(14) == "1";
+    } else if (line.rfind("BUNDLE_TEXLAB_FORCE=", 0) == 0) {
+      config->force_texlab = line.substr(20) == "1";
+    } else if (line.rfind("BUNDLE_BASH_DAP=", 0) == 0) {
+      config->bundle_bash_dap = line.substr(16) == "1";
+    } else if (line.rfind("BUNDLE_BASH_DAP_FORCE=", 0) == 0) {
+      config->force_bash_dap = line.substr(22) == "1";
     }
   }
   if (config->gdb_kind == kGdbNone && legacy_bundle_gdb) {
@@ -132,6 +156,12 @@ bool save_bundle_config(const std::string& path, const BundleConfig& config) {
   output << "BUNDLE_GDB_FORCE=" << (config.force_gdb ? "1" : "0") << '\n';
   output << "PYTHON_BUNDLE_KIND=" << python_kind_name << '\n';
   output << "BUNDLE_PYTHON_FORCE=" << (config.force_python ? "1" : "0") << '\n';
+  output << "BUNDLE_BASH_LS=" << (config.bundle_bash_ls ? "1" : "0") << '\n';
+  output << "BUNDLE_BASH_LS_FORCE=" << (config.force_bash_ls ? "1" : "0") << '\n';
+  output << "BUNDLE_TEXLAB=" << (config.bundle_texlab ? "1" : "0") << '\n';
+  output << "BUNDLE_TEXLAB_FORCE=" << (config.force_texlab ? "1" : "0") << '\n';
+  output << "BUNDLE_BASH_DAP=" << (config.bundle_bash_dap ? "1" : "0") << '\n';
+  output << "BUNDLE_BASH_DAP_FORCE=" << (config.force_bash_dap ? "1" : "0") << '\n';
   return static_cast<bool>(output);
 }
 
@@ -147,6 +177,16 @@ bool option_enabled(const WizardState& state, int index) {
       return state.draft.gdb_kind != kGdbNone;
     case kForcePython:
       return state.draft.python_kind != kPythonNone;
+    case kBundleBashLs:
+    case kBundleTexlab:
+    case kBundleBashDap:
+      return true;
+    case kForceBashLs:
+      return state.draft.bundle_bash_ls;
+    case kForceTexlab:
+      return state.draft.bundle_texlab;
+    case kForceBashDap:
+      return state.draft.bundle_bash_dap;
     default:
       return false;
   }
@@ -207,6 +247,42 @@ void toggle_option(WizardState* state, int index) {
     case kForcePython:
       state->draft.force_python = !state->draft.force_python;
       break;
+    case kBundleBashLs:
+      state->draft.bundle_bash_ls = !state->draft.bundle_bash_ls;
+      if (state->draft.bundle_bash_ls && !state->draft.force_bash_ls) {
+        state->draft.force_bash_ls = true;
+      }
+      if (!state->draft.bundle_bash_ls) {
+        state->draft.force_bash_ls = false;
+      }
+      break;
+    case kForceBashLs:
+      state->draft.force_bash_ls = !state->draft.force_bash_ls;
+      break;
+    case kBundleTexlab:
+      state->draft.bundle_texlab = !state->draft.bundle_texlab;
+      if (state->draft.bundle_texlab && !state->draft.force_texlab) {
+        state->draft.force_texlab = true;
+      }
+      if (!state->draft.bundle_texlab) {
+        state->draft.force_texlab = false;
+      }
+      break;
+    case kForceTexlab:
+      state->draft.force_texlab = !state->draft.force_texlab;
+      break;
+    case kBundleBashDap:
+      state->draft.bundle_bash_dap = !state->draft.bundle_bash_dap;
+      if (state->draft.bundle_bash_dap && !state->draft.force_bash_dap) {
+        state->draft.force_bash_dap = true;
+      }
+      if (!state->draft.bundle_bash_dap) {
+        state->draft.force_bash_dap = false;
+      }
+      break;
+    case kForceBashDap:
+      state->draft.force_bash_dap = !state->draft.force_bash_dap;
+      break;
     default:
       break;
   }
@@ -245,6 +321,18 @@ int main(int argc, char** argv) {
              "Espacio alterna: ninguna → A (LSP min) → B (completo)"},
             {"Forzar herramientas Python embebidas",
              "Ignora basedpyright/debugpy del sistema salvo overrides de entorno"},
+            {"Incluir bash-language-server en el binario",
+             "LSP para .sh/.bash (~+Node + npm package)"},
+            {"Forzar bash-language-server embebido",
+             "Ignora bash-language-server en PATH salvo BASH_LANGUAGE_SERVER_PATH"},
+            {"Incluir TexLab en el binario",
+             "LSP para LaTeX (.tex, .sty, .cls)"},
+            {"Forzar TexLab embebido",
+             "Ignora texlab en PATH salvo TEXLAB_PATH"},
+            {"Incluir adaptador Bash DAP en el binario",
+             "Depuración de scripts shell (bashdb + Node; requiere bash del host)"},
+            {"Forzar Bash DAP embebido",
+             "Ignora adaptador Bash DAP del sistema salvo overrides de entorno"},
         };
 
         for (int i = 0; i < kOptionCount; ++i) {
@@ -257,11 +345,17 @@ int main(int argc, char** argv) {
             label += ": " + python_kind_label(state.draft.python_kind);
           } else {
             const bool checked =
-                i == kBundleClangd   ? state.draft.bundle_clangd
-                : i == kForceClangd  ? state.draft.force_clangd
-                : i == kForceGdb     ? state.draft.force_gdb
-                : i == kForcePython  ? state.draft.force_python
-                                     : false;
+                i == kBundleClangd    ? state.draft.bundle_clangd
+                : i == kForceClangd   ? state.draft.force_clangd
+                : i == kForceGdb      ? state.draft.force_gdb
+                : i == kForcePython   ? state.draft.force_python
+                : i == kBundleBashLs  ? state.draft.bundle_bash_ls
+                : i == kForceBashLs   ? state.draft.force_bash_ls
+                : i == kBundleTexlab  ? state.draft.bundle_texlab
+                : i == kForceTexlab   ? state.draft.force_texlab
+                : i == kBundleBashDap ? state.draft.bundle_bash_dap
+                : i == kForceBashDap  ? state.draft.force_bash_dap
+                                      : false;
             label = std::string(checked ? "[x] " : "[ ] ") + label;
           }
           Element title = text(label) |

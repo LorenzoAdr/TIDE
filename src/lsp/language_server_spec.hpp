@@ -21,9 +21,13 @@ struct LanguageServerSpec {
 
 inline constexpr const char* kLspServerClangd = "clangd";
 inline constexpr const char* kLspServerBasedpyright = "basedpyright";
+inline constexpr const char* kLspServerBash = "bash-language-server";
+inline constexpr const char* kLspServerTexlab = "texlab";
 
 bool language_id_is_cpp_family(const std::string& language_id);
 bool language_id_is_python(const std::string& language_id);
+bool language_id_is_shellscript(const std::string& language_id);
+bool language_id_is_latex(const std::string& language_id);
 
 std::string language_server_id_for_language(const std::string& language_id);
 
@@ -33,6 +37,10 @@ std::optional<LanguageServerSpec> make_clangd_spec(const std::string& workspace_
                                                    bool background_index);
 
 std::optional<LanguageServerSpec> make_basedpyright_spec(const std::string& workspace_root);
+
+std::optional<LanguageServerSpec> make_bash_ls_spec(const std::string& workspace_root);
+
+std::optional<LanguageServerSpec> make_texlab_spec(const std::string& workspace_root);
 
 std::optional<LanguageServerSpec> make_language_server_spec(
     const std::string& server_id, const std::string& workspace_root,

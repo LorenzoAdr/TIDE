@@ -16,6 +16,9 @@ DebugAdapterKind debug_adapter_kind_for_program(const std::string& program_path)
   if (ext == ".py" || ext == ".pyw") {
     return DebugAdapterKind::kDebugpy;
   }
+  if (ext == ".sh" || ext == ".bash") {
+    return DebugAdapterKind::kBashdb;
+  }
   return DebugAdapterKind::kGdb;
 }
 
@@ -45,9 +48,25 @@ std::optional<DebugAdapterSpec> make_debugpy_adapter_spec() {
   return spec;
 }
 
+std::optional<DebugAdapterSpec> make_bashdb_adapter_spec() {
+  const auto location = resolve_bash_debug_adapter();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+  DebugAdapterSpec spec;
+  spec.kind = DebugAdapterKind::kBashdb;
+  spec.id = kDapAdapterBashdb;
+  spec.command = location->node_path;
+  spec.args = {location->adapter_js_path};
+  return spec;
+}
+
 std::optional<DebugAdapterSpec> make_debug_adapter_spec(const DebugAdapterKind kind) {
   if (kind == DebugAdapterKind::kDebugpy) {
     return make_debugpy_adapter_spec();
+  }
+  if (kind == DebugAdapterKind::kBashdb) {
+    return make_bashdb_adapter_spec();
   }
   return make_gdb_adapter_spec();
 }

@@ -15,6 +15,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "indexer/index_rules.hpp"
 #include "util/child_process_guard.hpp"
 
 namespace fs = std::filesystem;
@@ -81,6 +82,29 @@ void append_glob_args(const std::string& patterns, bool exclude,
   }
 }
 
+void append_always_skip_dir_globs(std::vector<std::string>* args) {
+  static constexpr const char* kAlwaysSkip[] = {
+      ".git",
+      "build",
+      "cmake-build-debug",
+      "cmake-build-release",
+      "node_modules",
+      "_deps",
+      ".cache",
+      "dist",
+      "out",
+      ".venv",
+      "venv",
+      "__pycache__",
+  };
+  for (const char* dir : kAlwaysSkip) {
+    args->push_back("-g");
+    args->push_back(std::string("!") + dir + "/**");
+    args->push_back("-g");
+    args->push_back(std::string("!**/") + dir + "/**");
+  }
+}
+
 fs::path search_root_for(const WorkspaceSearchOptions& opts) {
   fs::path root(opts.workspace_root);
   const std::string filter = normalize_filter(opts.path_filter);
@@ -141,6 +165,11 @@ bool parse_match_line(const std::string& line, const fs::path& workspace_root,
   if (!rel.has_value()) {
     return true;
   }
+  for (const auto& part : fs::path(*rel)) {
+    if (is_lazy_stub_dir_name(part.string())) {
+      return true;
+    }
+  }
 
   int col = 1;
   if (data.contains("submatches") && data["submatches"].is_array() &&
@@ -183,6 +212,7 @@ bool search_workspace_rg(const WorkspaceSearchOptions& opts, const std::string& 
   args_storage.emplace_back("--threads");
   const unsigned hw = std::thread::hardware_concurrency();
   args_storage.emplace_back(std::to_string(hw > 0 ? hw : 4U));
+  append_always_skip_dir_globs(&args_storage);
   append_glob_args(opts.include_pattern, false, &args_storage);
   append_glob_args(opts.exclude_pattern, true, &args_storage);
   args_storage.emplace_back(opts.needle);

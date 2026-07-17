@@ -13,7 +13,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <mutex>
 #include <signal.h>
+#include <string>
+#include <unordered_map>
 #include <unistd.h>
 
 #include <sys/types.h>
@@ -156,6 +159,15 @@ bool probe_dap(const std::string& gdb_path) {
     return false;
   }
 
+  static std::mutex mu;
+  static std::unordered_map<std::string, bool> cache;
+  {
+    std::lock_guard<std::mutex> lock(mu);
+    if (const auto it = cache.find(gdb_path); it != cache.end()) {
+      return it->second;
+    }
+  }
+
   const pid_t pid = fork();
   if (pid < 0) {
     return false;
@@ -185,11 +197,37 @@ bool probe_dap(const std::string& gdb_path) {
     _exit(127);
   }
 
-  int status = 0;
-  if (waitpid(pid, &status, 0) < 0) {
-    return false;
+  // Bound the probe: a stuck gdb must not freeze the UI (e.g. on settings close).
+  bool ok = false;
+  constexpr int kTimeoutMs = 1500;
+  constexpr int kPollMs = 20;
+  int waited_ms = 0;
+  for (;;) {
+    int status = 0;
+    const pid_t result = waitpid(pid, &status, WNOHANG);
+    if (result == pid) {
+      ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+      break;
+    }
+    if (result < 0) {
+      ok = false;
+      break;
+    }
+    if (waited_ms >= kTimeoutMs) {
+      kill(pid, SIGKILL);
+      waitpid(pid, &status, 0);
+      ok = false;
+      break;
+    }
+    usleep(static_cast<useconds_t>(kPollMs) * 1000);
+    waited_ms += kPollMs;
   }
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+
+  {
+    std::lock_guard<std::mutex> lock(mu);
+    cache[gdb_path] = ok;
+  }
+  return ok;
 }
 
 class StdioDebugAdapterProcess : public IDebugAdapterProcess {
@@ -275,6 +313,8 @@ bool gdb_supports_dap() {
 }
 
 bool debugpy_available() { return resolve_debugpy().has_value(); }
+
+bool bashdb_dap_available() { return resolve_bash_debug_adapter().has_value(); }
 
 GdbProcess::GdbProcess() = default;
 

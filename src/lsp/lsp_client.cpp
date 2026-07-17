@@ -182,8 +182,14 @@ bool LspClient::initialize(const std::string& workspace_root) {
         "typeParameter", "parameter", "variable", "property", "enumMember", "event",
         "function",      "method",    "macro",  "keyword",    "modifier",   "comment",
         "string",        "number",    "regexp", "operator",   "decorator"}},
+      // TexLab deserializes SemanticTokensClientCapabilities strictly (serde); omit
+      // tokenModifiers and the initialize handshake fails with "missing field".
+      {"tokenModifiers", nlohmann::json::array()},
       {"formats", nlohmann::json::array({"relative"})}};
-  params["capabilities"]["workspace"]["symbol"]["resolveSupport"] = nlohmann::json::object();
+  // Same strictness: ResolveSupportClientCapabilities.properties is required when the
+  // resolveSupport object is present (empty {} crashes TexLab).
+  params["capabilities"]["workspace"]["symbol"]["resolveSupport"] = {
+      {"properties", nlohmann::json::array({"location"})}};
   params["clientInfo"]["name"] = "tgdb";
   params["clientInfo"]["version"] = "0.1.0";
 
@@ -197,6 +203,17 @@ bool LspClient::initialize(const std::string& workspace_root) {
     const auto& caps = result["capabilities"];
     semantic_tokens_supported_ =
         caps.contains("semanticTokensProvider") && caps["semanticTokensProvider"].is_object();
+    definition_supported_ = !caps.contains("definitionProvider") ||
+                            !(caps["definitionProvider"].is_boolean() &&
+                              caps["definitionProvider"].get<bool>() == false);
+    declaration_supported_ =
+        caps.contains("declarationProvider") &&
+        !(caps["declarationProvider"].is_boolean() &&
+          caps["declarationProvider"].get<bool>() == false);
+    implementation_supported_ =
+        caps.contains("implementationProvider") &&
+        !(caps["implementationProvider"].is_boolean() &&
+          caps["implementationProvider"].get<bool>() == false);
   }
   send_lsp_notification("initialized", nlohmann::json::object());
   return true;
@@ -211,12 +228,17 @@ bool LspClient::start(const LanguageServerSpec& spec) {
                                              const nlohmann::json& params) {
     on_lsp_notification(method, params);
   });
+  // Only drop superseded *completion* responses. Dropping any older request id while a
+  // completion is in flight used to discard definition/hover replies issued earlier,
+  // which made Ctrl+click wait the full timeout and then fail.
   transport_.set_response_acceptance_filter([this](int response_id) {
-    const int inflight = inflight_completion_request_id_.load(std::memory_order_acquire);
-    if (inflight <= 0) {
+    const int latest = latest_completion_request_id_.load(std::memory_order_acquire);
+    std::lock_guard<std::mutex> lock(completion_ids_mutex_);
+    const auto it = completion_request_ids_.find(response_id);
+    if (it == completion_request_ids_.end()) {
       return true;
     }
-    const int latest = latest_completion_request_id_.load(std::memory_order_acquire);
+    completion_request_ids_.erase(it);
     return response_id >= latest;
   });
   if (!spawn_language_server(spec)) {
@@ -295,6 +317,10 @@ void LspClient::stop() {
   next_request_id_ = 1;
   inflight_completion_request_id_.store(0, std::memory_order_release);
   latest_completion_request_id_.store(0, std::memory_order_release);
+  {
+    std::lock_guard<std::mutex> ids_lock(completion_ids_mutex_);
+    completion_request_ids_.clear();
+  }
   server_id_.clear();
 
   std::lock_guard<std::mutex> lock(mutex_);
@@ -306,6 +332,9 @@ void LspClient::stop() {
   diagnostics_revision_.store(0, std::memory_order_release);
   semantic_token_types_.clear();
   semantic_tokens_supported_ = false;
+  definition_supported_ = true;
+  declaration_supported_ = true;
+  implementation_supported_ = true;
   workspace_root_.clear();
 }
 
@@ -373,8 +402,14 @@ bool LspClient::send_completion_request(nlohmann::json params, int timeout_ms,
     id = next_request_id_++;
     latest_completion_request_id_.store(id, std::memory_order_release);
     inflight_completion_request_id_.store(id, std::memory_order_release);
+    {
+      std::lock_guard<std::mutex> ids_lock(completion_ids_mutex_);
+      completion_request_ids_.insert(id);
+    }
     if (!transport_.write_request(id, "textDocument/completion", std::move(params))) {
       inflight_completion_request_id_.store(0, std::memory_order_release);
+      std::lock_guard<std::mutex> ids_lock(completion_ids_mutex_);
+      completion_request_ids_.erase(id);
       return false;
     }
     if (request_counter_ != nullptr) {
@@ -588,6 +623,14 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
   nlohmann::json params = {{"textDocument", {{"uri", doc.uri}, {"version", doc.version}}},
                            {"contentChanges", std::move(content_changes)}};
   send_lsp_notification("textDocument/didChange", std::move(params));
+}
+
+void LspClient::did_change_workspace_configuration(const nlohmann::json& settings) {
+  if (!ready_.load() || settings.is_null()) {
+    return;
+  }
+  nlohmann::json params = {{"settings", settings}};
+  send_lsp_notification("workspace/didChangeConfiguration", std::move(params));
 }
 
 void LspClient::did_close(const std::string& absolute_path) {
@@ -1096,18 +1139,30 @@ SourceLocation LspClient::request_location(const std::string& method,
 SourceLocation LspClient::goto_definition(const std::string& absolute_path,
                                           const std::string& text, int line,
                                           int character) {
+  if (!definition_supported_) {
+    return {};
+  }
+  cancel_inflight_completion();
   return request_location("textDocument/definition", absolute_path, text, line, character);
 }
 
 SourceLocation LspClient::goto_declaration(const std::string& absolute_path,
                                            const std::string& text, int line,
                                            int character) {
+  if (!declaration_supported_) {
+    return {};
+  }
+  cancel_inflight_completion();
   return request_location("textDocument/declaration", absolute_path, text, line, character);
 }
 
 SourceLocation LspClient::goto_implementation(const std::string& absolute_path,
                                               const std::string& text, int line,
                                               int character) {
+  if (!implementation_supported_) {
+    return {};
+  }
+  cancel_inflight_completion();
   return request_location("textDocument/implementation", absolute_path, text, line, character);
 }
 
@@ -2133,22 +2188,12 @@ void LspClient::on_lsp_notification(const std::string& method, const nlohmann::j
   const std::string path = doc.path;
   std::lock_guard<std::mutex> lock(mutex_);
   const auto existing = diagnostics_.find(path);
-  const bool had_items = existing != diagnostics_.end() && !existing->second.items.empty();
   const bool has_items = !doc.items.empty();
-  if (existing != diagnostics_.end() && diagnostics_items_equal(existing->second.items, doc.items)) {
-    return;
-  }
-  if (!had_items && !has_items) {
-    return;
-  }
-  if (!has_items) {
-    diagnostics_.erase(path);
-  } else {
-    diagnostics_[path] = std::move(doc);
-  }
-
-  const auto it = documents_.find(path);
-  if (it != documents_.end()) {
+  auto mark_diagnostics_current = [&]() {
+    const auto it = documents_.find(path);
+    if (it == documents_.end()) {
+      return;
+    }
     int diag_version = -1;
     if (params.contains("version") && params["version"].is_number_integer()) {
       diag_version = params["version"].get<int>();
@@ -2156,7 +2201,18 @@ void LspClient::on_lsp_notification(const std::string& method, const nlohmann::j
     if (diag_version < 0 || diag_version == it->second.version) {
       it->second.diagnostics_generation = it->second.generation;
     }
+  };
+
+  if (existing != diagnostics_.end() && diagnostics_items_equal(existing->second.items, doc.items)) {
+    mark_diagnostics_current();
+    return;
   }
+  if (!has_items) {
+    diagnostics_.erase(path);
+  } else {
+    diagnostics_[path] = std::move(doc);
+  }
+  mark_diagnostics_current();
 
   diagnostics_revision_.fetch_add(1, std::memory_order_release);
   if (diagnostics_notify_callback_) {

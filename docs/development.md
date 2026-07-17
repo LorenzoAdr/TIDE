@@ -82,7 +82,24 @@ B supersedes A if both are set. Blobs extract to `$XDG_CACHE_HOME/tgdb/bundled/p
 ./tools/compile.sh --no-bundle-python -y        # PATH / venv only
 ```
 
-Build-time tools (when bundling): `curl` or `wget`, `zstd`, `objcopy`, `sha256sum`; for clangd also `unzip`, `strip`, `ldd`; for option A also host `python3` (venv + pip).
+Bash and LaTeX language servers can be embedded independently (Linux x86_64):
+
+| CMake option | Contents | Runtime |
+|--------------|----------|---------|
+| `TGDB_BUNDLE_BASH_LS` | bash-language-server + Node | LSP for shell scripts |
+| `TGDB_BUNDLE_TEXLAB` | TexLab release binary | LSP for LaTeX |
+| `TGDB_BUNDLE_BASH_DAP` | bash-debug adapter + bashdb (+ Node unless BASH_LS) | DAP for shell scripts |
+
+Bash DAP still requires a host `bash` (and typically `bashdb` on PATH if not fully bundled). Node is shared with the Bash LS bundle when both are enabled.
+
+```bash
+./tools/compile.sh --bundle-bash-ls -y
+./tools/compile.sh --bundle-texlab -y
+./tools/compile.sh --bundle-bash-dap -y
+./tools/compile.sh --no-bundle-bash-ls --no-bundle-texlab --no-bundle-bash-dap -y
+```
+
+Build-time tools (when bundling): `curl` or `wget`, `zstd`, `objcopy`, `sha256sum`; for clangd also `unzip`, `strip`, `ldd`; for option A also host `python3` (venv + pip); for Bash LS / Bash DAP also host `npm` (unless sources are prebuilt).
 
 ### Install (no build)
 
@@ -123,11 +140,24 @@ Environment variables:
 | `GDB_PATH` | Override path to gdb binary (highest priority) |
 | `BASEDPYRIGHT_PATH` | Override path to basedpyright / pyright language server (highest priority) |
 | `PYRIGHT_LANGSERVER_PATH` | Alternate override for the Python language server binary |
+| `BASH_LANGUAGE_SERVER_PATH` | Override path to bash-language-server |
+| `TEXLAB_PATH` | Override path to texlab |
 | `DEBUGPY_PYTHON` | Python interpreter used to run `python -m debugpy.adapter` |
 | `PYTHON` | Fallback interpreter probed for the `debugpy` module |
 | `TGDB_FORCE_BUNDLED_PYTHON_TOOLS` | `1`/`0` override for preferring the embedded Python tools blob |
 
 Without an embedded Python blob (and without basedpyright on `PATH`), `.py` files still get tree-sitter syntax highlighting; completions/diagnostics/hover require the language server. Option A still needs a host `python3` to run the extracted langserver. Option B embeds CPython and debugpy for DAP.
+
+Shell (`.sh`, `.bash`) and LaTeX (`.tex`, `.sty`, `.cls`) use tree-sitter for syntax highlighting and outline; LSP completions/diagnostics/hover require optional language servers on `PATH` (or env overrides):
+
+```bash
+npm install -g bash-language-server   # Node.js; binary: bash-language-server
+# or: export BASH_LANGUAGE_SERVER_PATH=/path/to/bash-language-server
+
+# TexLab: download a release binary from https://github.com/latex-lsp/texlab/releases
+# and put `texlab` on PATH, or:
+export TEXLAB_PATH=/path/to/texlab
+```
 
 Install basedpyright/debugpy on the host only when not bundling:
 

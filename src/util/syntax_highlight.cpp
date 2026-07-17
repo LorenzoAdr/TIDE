@@ -558,8 +558,34 @@ bool keyword_lite_python(std::string_view word) {
   return false;
 }
 
-bool path_looks_python(const std::string& path) {
-  return language_id_for_path(path) == "python";
+bool keyword_lite_bash(std::string_view word) {
+  static constexpr const char* kWords[] = {
+      "if",     "then",   "else",   "elif",    "fi",      "case",   "in",     "esac",
+      "for",    "do",     "done",   "select",  "until",   "while",  "function","export",
+      "local",  "declare","readonly","typeset","unset",   "return", "break",  "continue",
+      "shift",  "eval",   "exec",   "source",  "time",    "coproc"};
+  for (const char* kw : kWords) {
+    if (word == kw) {
+      return true;
+    }
+  }
+  return false;
+}
+
+enum class LiteLang { kCpp, kPython, kBash, kLatex };
+
+LiteLang lite_lang_for_path(const std::string& path) {
+  const std::string id = language_id_for_path(path);
+  if (id == "python") {
+    return LiteLang::kPython;
+  }
+  if (id == "shellscript") {
+    return LiteLang::kBash;
+  }
+  if (id == "latex") {
+    return LiteLang::kLatex;
+  }
+  return LiteLang::kCpp;
 }
 
 Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator cursor_style) {
@@ -568,7 +594,7 @@ Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator
 
 Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator cursor_style,
                               const std::string& file_path) {
-  const bool python = path_looks_python(file_path);
+  const LiteLang lite_lang = lite_lang_for_path(file_path);
   if (line.empty()) {
     if (cursor_col == 0 && cursor_style) {
       return text(" ") | cursor_style;
@@ -622,15 +648,19 @@ Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator
       continue;
     }
 
-    if (python && c == '#') {
+    if ((lite_lang == LiteLang::kPython || lite_lang == LiteLang::kBash) && c == '#') {
       lex = Lex::kLineComment;
       continue;
     }
-    if (!python && c == '/' && i + 1 < line.size() && line[i + 1] == '/') {
+    if (lite_lang == LiteLang::kLatex && c == '%') {
       lex = Lex::kLineComment;
       continue;
     }
-    if (!python && c == '/' && i + 1 < line.size() && line[i + 1] == '*') {
+    if (lite_lang == LiteLang::kCpp && c == '/' && i + 1 < line.size() && line[i + 1] == '/') {
+      lex = Lex::kLineComment;
+      continue;
+    }
+    if (lite_lang == LiteLang::kCpp && c == '/' && i + 1 < line.size() && line[i + 1] == '*') {
       parts.push_back(text("/*") | color(theme::SyntaxComment()) | dim);
       i += 2;
       lex = Lex::kBlockComment;
@@ -664,7 +694,21 @@ Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator
         ++i;
       }
       const std::string_view word(line.data() + start, i - start);
-      const bool is_kw = python ? keyword_lite_python(word) : keyword_lite(word);
+      bool is_kw = false;
+      switch (lite_lang) {
+        case LiteLang::kPython:
+          is_kw = keyword_lite_python(word);
+          break;
+        case LiteLang::kBash:
+          is_kw = keyword_lite_bash(word);
+          break;
+        case LiteLang::kLatex:
+          is_kw = false;
+          break;
+        case LiteLang::kCpp:
+          is_kw = keyword_lite(word);
+          break;
+      }
       if (is_kw) {
         parts.push_back(text(std::string(word)) | color(theme::SyntaxKeyword()) | bold);
       } else {

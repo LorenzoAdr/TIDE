@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
+#include <sstream>
 
 #include "editor/editor_context.hpp"
 #include "parser/tree_sitter_blocks.hpp"
@@ -591,6 +593,72 @@ HoverInfo TreeSitterService::hover_at(const HoverParams& params) {
   }
   info.valid = true;
   return info;
+}
+
+namespace {
+
+std::string strip_symbol_kind_prefix(const std::string& name) {
+  static const char* const prefixes[] = {"ns ", "C ", "S ", "M ", "v ", "f "};
+  for (const char* prefix : prefixes) {
+    const std::size_t len = std::strlen(prefix);
+    if (name.size() >= len && name.compare(0, len, prefix) == 0) {
+      return name.substr(len);
+    }
+  }
+  return name;
+}
+
+}  // namespace
+
+SourceLocation TreeSitterService::definition_at(const NavigationParams& params) {
+  SourceLocation loc;
+  if (params.path.empty() || params.text.empty()) {
+    return loc;
+  }
+  std::istringstream input(params.text);
+  std::vector<std::string> lines;
+  std::string line;
+  while (std::getline(input, line)) {
+    lines.push_back(line);
+  }
+  if (params.line < 0 || params.line >= static_cast<int>(lines.size())) {
+    return loc;
+  }
+  const std::string word =
+      word_at_line_col_local(lines[static_cast<std::size_t>(params.line)], params.character);
+  if (word.empty()) {
+    return loc;
+  }
+
+  // Ensure a parse is scheduled, then use whatever symbols are already ready.
+  prepare_document(params.path, params.text);
+  std::vector<SymbolInfo> symbols = symbols_for_file(params.path, params.text);
+  if (symbols.empty()) {
+    DocumentPtr doc = document_for(params.path, params.text);
+    if (doc != nullptr && doc->parse_ready && doc->tree != nullptr && doc->source == normalize_editor_source(params.text)) {
+      symbols = extract_symbols_from_tree(ts_tree_root_node(doc->tree), doc->source, params.path);
+    }
+  }
+
+  SourceLocation same_line;
+  for (const SymbolInfo& sym : symbols) {
+    const std::string name = strip_symbol_kind_prefix(sym.name);
+    if (name != word) {
+      continue;
+    }
+    SourceLocation candidate;
+    candidate.path = sym.file.empty() ? params.path : sym.file;
+    candidate.line = std::max(0, sym.line - 1);  // SymbolInfo is 1-based
+    candidate.character = 0;
+    candidate.valid = true;
+    if (candidate.line != params.line) {
+      return candidate;
+    }
+    if (!same_line.valid) {
+      same_line = candidate;
+    }
+  }
+  return same_line;
 }
 
 void TreeSitterService::invalidate(const std::string& path) { cache_.invalidate(cache_key_for(path)); }

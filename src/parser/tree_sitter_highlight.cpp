@@ -227,6 +227,132 @@ const char* kEmbeddedPythonHighlightsQuery = R"scm(
 ] @operator
 )scm";
 
+const char* kEmbeddedBashHighlightsQuery = R"scm(
+; Tree-sitter highlight query for Bash (no #match? / #eq? predicates).
+
+[
+  (string)
+  (raw_string)
+  (ansi_c_string)
+  (heredoc_body)
+] @string
+
+[
+  (heredoc_start)
+  (heredoc_end)
+] @label
+
+(comment) @comment
+(number) @number
+(test_operator) @operator
+
+(command_name) @function
+(function_definition name: (word) @function)
+
+(simple_expansion) @variable
+(expansion) @variable
+(special_variable_name) @constant
+
+[
+  "if"
+  "then"
+  "else"
+  "elif"
+  "fi"
+  "case"
+  "in"
+  "esac"
+  "for"
+  "do"
+  "done"
+  "select"
+  "until"
+  "while"
+  "declare"
+  "typeset"
+  "readonly"
+  "local"
+  "unset"
+  "unsetenv"
+  "export"
+  "function"
+  "time"
+  "coproc"
+] @keyword
+
+[
+  ">"
+  ">>"
+  "<"
+  "<<"
+  "&&"
+  "|"
+  "|&"
+  "||"
+  "="
+  "+="
+  "=~"
+  "=="
+  "!="
+  "!"
+] @operator
+)scm";
+
+const char* kEmbeddedLatexHighlightsQuery = R"scm(
+; Tree-sitter highlight query for LaTeX (no #match? / #eq? predicates).
+
+[
+  (comment)
+  (line_comment)
+  (block_comment)
+] @comment
+
+(command_name) @function
+
+(begin
+  command: _ @function.builtin
+  name: (curly_group_text (text) @function.macro))
+
+(end
+  command: _ @function.builtin
+  name: (curly_group_text (text) @function.macro))
+
+(section
+  command: _ @function.macro
+  text: (_) @type)
+
+(subsection
+  command: _ @function.macro
+  text: (_) @type)
+
+(subsubsection
+  command: _ @function.macro
+  text: (_) @type)
+
+(chapter
+  command: _ @function.macro
+  text: (_) @type)
+
+(part
+  command: _ @function.macro
+  text: (_) @type)
+
+(label_definition
+  command: _ @function.macro
+  name: (curly_group_text (_) @label))
+
+(label_reference
+  command: _ @function.macro
+  names: (curly_group_text_list (_) @label))
+
+(math_environment) @string
+(inline_formula) @string
+(displayed_equation) @string
+
+[(operator) "="] @operator
+["[" "]" "{" "}"] @punctuation.bracket
+)scm";
+
 TSQuery* highlight_query_for_lang(TreeSitterLangKind lang) {
   if (lang == TreeSitterLangKind::kPython) {
     static TSQuery* py_query = nullptr;
@@ -238,6 +364,28 @@ TSQuery* highlight_query_for_lang(TreeSitterLangKind lang) {
                              &py_error_offset, &py_error_type);
     }
     return py_query;
+  }
+  if (lang == TreeSitterLangKind::kBash) {
+    static TSQuery* bash_query = nullptr;
+    static uint32_t bash_error_offset = 0;
+    static TSQueryError bash_error_type = TSQueryErrorNone;
+    if (bash_query == nullptr) {
+      bash_query = ts_query_new(tree_sitter_bash_language(), kEmbeddedBashHighlightsQuery,
+                                static_cast<uint32_t>(std::strlen(kEmbeddedBashHighlightsQuery)),
+                                &bash_error_offset, &bash_error_type);
+    }
+    return bash_query;
+  }
+  if (lang == TreeSitterLangKind::kLatex) {
+    static TSQuery* latex_query = nullptr;
+    static uint32_t latex_error_offset = 0;
+    static TSQueryError latex_error_type = TSQueryErrorNone;
+    if (latex_query == nullptr) {
+      latex_query = ts_query_new(tree_sitter_latex_language(), kEmbeddedLatexHighlightsQuery,
+                                 static_cast<uint32_t>(std::strlen(kEmbeddedLatexHighlightsQuery)),
+                                 &latex_error_offset, &latex_error_type);
+    }
+    return latex_query;
   }
   static TSQuery* query = nullptr;
   static uint32_t error_offset = 0;

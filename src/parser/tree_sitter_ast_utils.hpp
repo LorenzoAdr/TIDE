@@ -27,7 +27,8 @@ inline std::string ts_identifier_name(TSNode node, const std::string& source) {
     return {};
   }
   if (std::strcmp(type, "identifier") == 0 || std::strcmp(type, "field_identifier") == 0 ||
-      std::strcmp(type, "namespace_identifier") == 0 || std::strcmp(type, "type_identifier") == 0) {
+      std::strcmp(type, "namespace_identifier") == 0 || std::strcmp(type, "type_identifier") == 0 ||
+      std::strcmp(type, "word") == 0 || std::strcmp(type, "label") == 0) {
     return ts_node_text(node, source);
   }
   const uint32_t count = ts_node_child_count(node);

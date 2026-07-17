@@ -119,7 +119,20 @@ bool file_included(const std::string& relative_path, const std::string& include_
   return false;
 }
 
+bool path_under_always_skipped_dir(const std::string& relative_path) {
+  for (const auto& part : fs::path(relative_path)) {
+    if (is_lazy_stub_dir_name(part.string())) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool file_excluded(const std::string& relative_path, const std::string& exclude_pattern) {
+  if (path_under_always_skipped_dir(relative_path)) {
+    return true;
+  }
+
   const std::string trimmed = normalize_filter(exclude_pattern);
   if (trimmed.empty()) {
     return false;

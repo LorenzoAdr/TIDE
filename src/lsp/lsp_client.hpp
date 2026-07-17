@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -43,11 +44,15 @@ class LspClient {
   bool process_alive() const;
   bool clangd_process_alive() const { return process_alive(); }
   bool semantic_tokens_supported() const { return semantic_tokens_supported_; }
+  bool supports_definition() const { return definition_supported_; }
+  bool supports_declaration() const { return declaration_supported_; }
+  bool supports_implementation() const { return implementation_supported_; }
   const std::string& server_id() const { return server_id_; }
 
   void did_open(const std::string& absolute_path, const std::string& text);
   void did_change(const std::string& absolute_path, const std::string& text);
   void did_close(const std::string& absolute_path);
+  void did_change_workspace_configuration(const nlohmann::json& settings);
 
   std::vector<SymbolInfo> document_symbols(const std::string& absolute_path);
   bool has_cached_document_symbols(const std::string& absolute_path) const;
@@ -190,10 +195,15 @@ class LspClient {
   std::atomic<uint64_t> diagnostics_revision_{0};
   std::vector<std::string> semantic_token_types_;
   bool semantic_tokens_supported_ = false;
+  bool definition_supported_ = true;
+  bool declaration_supported_ = true;
+  bool implementation_supported_ = true;
   int next_request_id_ = 1;
   std::atomic<uint64_t>* request_counter_ = nullptr;
   std::atomic<int> inflight_completion_request_id_{0};
   std::atomic<int> latest_completion_request_id_{0};
+  mutable std::mutex completion_ids_mutex_;
+  std::unordered_set<int> completion_request_ids_;
   std::function<void(const std::string& path)> diagnostics_notify_callback_;
 };
 

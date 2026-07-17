@@ -3,6 +3,8 @@
 .cache/
 .bundle-config
 third_party/bundled/
+third_party/bash-debug/node_modules/
+third_party/bash-debug/.git/
 compile_commands.json
 .tgdb/
 *.o

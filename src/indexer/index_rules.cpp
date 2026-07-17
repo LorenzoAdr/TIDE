@@ -29,30 +29,76 @@ const std::unordered_set<std::string>& binary_extensions() {
   return kExtensions;
 }
 
+const std::unordered_set<std::string>& lazy_stub_dir_names() {
+  static const std::unordered_set<std::string> kNames = {
+      ".git",
+      "build",
+      "cmake-build-debug",
+      "cmake-build-release",
+      "node_modules",
+      "_deps",
+      ".cache",
+      "dist",
+      "out",
+      ".venv",
+      "venv",
+      "__pycache__",
+  };
+  return kNames;
+}
+
+bool path_has_lazy_stub_component(const std::string& relative_path) {
+  for (const auto& part : fs::path(relative_path)) {
+    if (is_lazy_stub_dir_name(part.string())) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
-bool should_skip_dir_name(const std::string& name, const IndexFilterOptions& options) {
-  if (options.show_all_files) {
-    return name.empty() || name == "." || name == "..";
+bool is_lazy_stub_dir_name(const std::string& name) {
+  return lazy_stub_dir_names().count(name) > 0;
+}
+
+bool should_show_lazy_stub(const std::string& name, const IndexFilterOptions& options) {
+  if (!is_lazy_stub_dir_name(name)) {
+    return false;
   }
-  if (name.empty() || name[0] == '.') {
+  return options.show_all_files;
+}
+
+bool should_skip_dir_name(const std::string& name, const IndexFilterOptions& options) {
+  if (name.empty() || name == "." || name == "..") {
     return true;
   }
-  return name == "build" || name == "cmake-build-debug" ||
-         name == "cmake-build-release" || name == "node_modules" ||
-         name == "_deps" || name == ".cache" || name == "dist" || name == "out" ||
-         name == ".venv" || name == "venv" || name == "__pycache__";
+  if (is_lazy_stub_dir_name(name)) {
+    return true;
+  }
+  if (options.show_all_files) {
+    return false;
+  }
+  if (name[0] == '.') {
+    return true;
+  }
+  return false;
 }
 
 bool is_indexed_source_path(const std::string& path) {
   const auto ext = fs::path(path).extension().string();
   return ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".h" ||
-         ext == ".hpp" || ext == ".c" || ext == ".py" || ext == ".pyi" || ext == ".pyw";
+         ext == ".hpp" || ext == ".c" || ext == ".py" || ext == ".pyi" || ext == ".pyw" ||
+         ext == ".sh" || ext == ".bash" || ext == ".tex" || ext == ".sty" || ext == ".cls";
 }
 
 bool should_list_workspace_path(const std::string& relative_path,
                                 const IndexFilterOptions& options) {
   if (relative_path.empty()) {
+    return false;
+  }
+  // Nunca indexar en bulk rutas bajo stubs pesados (build/, .git/, …).
+  if (path_has_lazy_stub_component(relative_path)) {
     return false;
   }
   if (options.show_all_files) {

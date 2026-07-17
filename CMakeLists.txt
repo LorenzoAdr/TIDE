@@ -23,6 +23,8 @@ set(TGDB_TREE_SITTER_INCLUDE_DIRS
   ${tree_sitter_SOURCE_DIR}/lib/include
   ${tree_sitter_cpp_SOURCE_DIR}/bindings/c
   ${tree_sitter_python_SOURCE_DIR}/bindings/c
+  ${tree_sitter_bash_SOURCE_DIR}/bindings/c
+  ${tree_sitter_latex_SOURCE_DIR}/bindings/c
 )
 
 set(TGDB_TREE_SITTER_SOURCES
@@ -53,7 +55,8 @@ function(tgdb_link_tree_sitter target)
     ${cppdap_SOURCE_DIR}/include
     ${cppdap_SOURCE_DIR}/third_party/json/include
   )
-  target_link_libraries(${target} PRIVATE tree-sitter tree-sitter-cpp tree-sitter-python ftxui::dom)
+  target_link_libraries(${target} PRIVATE
+    tree-sitter tree-sitter-cpp tree-sitter-python tree-sitter-bash tree-sitter-latex ftxui::dom)
 endfunction()
 
 add_executable(tgdb
@@ -220,6 +223,7 @@ add_executable(tgdb
   src/build/build_environment_service.cpp
   src/build/build_artifact_watcher.cpp
   src/util/bundled_tools.cpp
+  src/util/tools_status.cpp
   src/util/core_analyzer_support.cpp
   src/util/process_list.cpp
   src/util/system_stats.cpp
@@ -256,7 +260,17 @@ target_link_libraries(tgdb PRIVATE
   tree-sitter
   tree-sitter-cpp
   tree-sitter-python
+  tree-sitter-bash
+  tree-sitter-latex
   Threads::Threads
+)
+
+# Dev/default paths for Bash DAP (vscode-bash-debug + vendored bashdb_dir).
+set(TGDB_BASH_DEBUG_ROOT "${CMAKE_SOURCE_DIR}/third_party/bash-debug")
+target_compile_definitions(tgdb PRIVATE
+  "TGDB_BASH_DEBUG_ADAPTER_JS=\"${TGDB_BASH_DEBUG_ROOT}/out/bashDebug.js\""
+  "TGDB_BASHDB_PATH=\"${TGDB_BASH_DEBUG_ROOT}/bashdb_dir/bashdb\""
+  "TGDB_BASHDB_LIB=\"${TGDB_BASH_DEBUG_ROOT}/bashdb_dir\""
 )
 
 set(TGDB_CPPDAP_ARCHIVE "${CMAKE_BINARY_DIR}/_deps/cppdap-build/libcppdap.a")
@@ -302,6 +316,15 @@ if(TGDB_BUNDLE_PYTHON_TOOLS)
   include(cmake/BundlePythonTools.cmake)
 elseif(TGDB_BUNDLE_PYTHON_LSP_MIN)
   include(cmake/BundlePythonLspMin.cmake)
+endif()
+if(TGDB_BUNDLE_BASH_LS)
+  include(cmake/BundleBashLs.cmake)
+endif()
+if(TGDB_BUNDLE_TEXLAB)
+  include(cmake/BundleTexlab.cmake)
+endif()
+if(TGDB_BUNDLE_BASH_DAP)
+  include(cmake/BundleBashDap.cmake)
 endif()
 
 add_executable(tgdb-bundle-wizard tools/bundle_wizard/main.cpp)

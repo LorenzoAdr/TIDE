@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <thread>
 #include <unistd.h>
@@ -46,6 +47,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/quit_confirm.hpp"
 #include "ui/settings_modal.hpp"
+#include "util/tools_status.hpp"
 #include "ui/shutdown_overlay.hpp"
 #include "ui/source_substitute_modal.hpp"
 #include "ui/source_panel.hpp"
@@ -333,7 +335,10 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 			dispatch(layout_state_.secondary_editor);
 		};
 		ui_event_dispatcher_.emit_urgent(std::move(event));
-	}); 
+	});
+	symbol_provider_->set_lsp_status_callback([this](const std::string& i18n_key) {
+		set_workspace_status(i18n::tr(i18n_key));
+	});
 	app_settings_ = AppSettings::load();
 	i18n::set_locale(app_settings_.ui_locale);
 	set_animations_enabled(app_settings_.animations_enabled);
@@ -352,7 +357,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
 	monitor_log::set_enabled(app_settings_.monitor_enabled);
 	layout_state_.performance_sampler.set_file_dump_enabled(app_settings_.perf_dump_enabled);
-	debug_available_ = gdb_supports_dap() || debugpy_available();
+	debug_available_ = gdb_supports_dap() || debugpy_available() || bashdb_dap_available();
 	workspace_.open_file_confirm = &open_file_confirm_state_;
 	secondary_workspace_.open_file_confirm = &open_file_confirm_state_;
 	const auto wire_ui_tasks = [this](WorkspaceModel *workspace) {
@@ -797,6 +802,38 @@ void Application::sync_activity_phase_effects() {
 }
 
 void Application::apply_workspace_settings(const WorkspaceConfig &config) {
+	const WorkspaceConfig previous = workspace_config_;
+	const bool clangd_changed =
+	    previous.clangd_use_gcc_query_driver != config.clangd_use_gcc_query_driver ||
+	    previous.clangd_background_index != config.clangd_background_index ||
+	    previous.clangd_extra_include_paths != config.clangd_extra_include_paths ||
+	    previous.compile_commands.mode != config.compile_commands.mode ||
+	    previous.compile_commands.source_path != config.compile_commands.source_path ||
+	    previous.compile_commands.docker_container != config.compile_commands.docker_container ||
+	    previous.compile_commands.docker_compile_commands_path !=
+	        config.compile_commands.docker_compile_commands_path ||
+	    previous.compile_commands.docker_detect_mounts !=
+	        config.compile_commands.docker_detect_mounts ||
+	    previous.compile_commands.path_mappings.size() !=
+	        config.compile_commands.path_mappings.size();
+	bool lsp_restart_needed = clangd_changed;
+	if (!lsp_restart_needed) {
+		for (std::size_t i = 0; i < previous.compile_commands.path_mappings.size(); ++i) {
+			if (previous.compile_commands.path_mappings[i].from !=
+			        config.compile_commands.path_mappings[i].from ||
+			    previous.compile_commands.path_mappings[i].to !=
+			        config.compile_commands.path_mappings[i].to) {
+				lsp_restart_needed = true;
+				break;
+			}
+		}
+	}
+	const bool shell_restart_needed =
+	    previous.build_environments.active_environment_id !=
+	        config.build_environments.active_environment_id ||
+	    previous.compile_commands.mode != config.compile_commands.mode ||
+	    previous.compile_commands.docker_container != config.compile_commands.docker_container;
+
 	workspace_config_ = config;
 	if (workspace_config_.ui_colors_preset == theme::UiColorPreset::kCustom) {
 		theme::apply_color_preset(theme::UiColorPreset::kCustom, workspace_config_.ui_colors);
@@ -808,14 +845,18 @@ void Application::apply_workspace_settings(const WorkspaceConfig &config) {
 		return;
 	}
 	workspace_config_.save(workspace_.root);
-	invalidate_docker_mount_cache();
-	rebuild_shell_launch_config();
-	apply_clangd_workspace_config(workspace_.root, workspace_config_);
-	shell_session_.stop();
-	request_terminal_autostart();
-	restart_lsp_for_workspace();
-	setup_build_environment_watching();
-	sync_symbol_workspace_indexer();
+	if (shell_restart_needed) {
+		invalidate_docker_mount_cache();
+		rebuild_shell_launch_config();
+		shell_session_.stop();
+		request_terminal_autostart();
+		setup_build_environment_watching();
+	}
+	if (lsp_restart_needed) {
+		apply_clangd_workspace_config(workspace_.root, workspace_config_);
+		restart_lsp_for_workspace();
+		sync_symbol_workspace_indexer();
+	}
 	workspace_.buffer.view_token++;
 	UI_WAKE(&layout_state_, "app");
 }
@@ -1807,7 +1848,16 @@ void Application::apply_app_settings() {
 	}
 	if (has_bundled_gdb()) {
 		set_runtime_force_bundled_gdb(app_settings_.force_bundled_gdb);
-		debug_available_ = gdb_supports_dap() || debugpy_available();
+	}
+	// Availability probes (fork gdb / python -c) are cached inside the resolvers; keep this
+	// off the hot path when nothing debug-related changed.
+	static bool probed = false;
+	static bool last_force_gdb = false;
+	const bool force_gdb = app_settings_.force_bundled_gdb;
+	if (!probed || force_gdb != last_force_gdb) {
+		debug_available_ = gdb_supports_dap() || debugpy_available() || bashdb_dap_available();
+		probed = true;
+		last_force_gdb = force_gdb;
 	}
 	if (symbol_provider_) {
 		symbol_provider_->set_lsp_enabled(app_settings_.lsp_enabled);
@@ -1817,8 +1867,17 @@ void Application::apply_app_settings() {
 	layout_state_.activity_gate.set_passive_enabled(app_settings_.passive_mode_enabled);
 	layout_state_.activity_gate.set_grace_window_ms(app_settings_.grace_window_ms);
 	configure_glyphs(resolve_icon_mode(app_settings_.icon_mode));
+	static std::optional<bool> last_show_all_files;
+	const bool show_all = app_settings_.show_all_workspace_files;
+	const bool filter_changed =
+	    !last_show_all_files.has_value() || *last_show_all_files != show_all;
+	last_show_all_files = show_all;
+	// Avoid a full explorer rescan on every F10→Esc; start_scan joins the indexer and scans the
+	// skeleton synchronously on the UI thread.
 	sync_symbol_workspace_indexer();
-	restart_workspace_indexing();
+	if (filter_changed) {
+		restart_workspace_indexing();
+	}
 	if (!app_settings_.secondary_panel_enabled && focus_state_.region == FocusRegion::RightPanel) {
 		focus_state_.region = FocusRegion::Editor;
 		layout_state_.text_input_focus = TextInputFocus::None;
@@ -2235,6 +2294,22 @@ int Application::run() {
 	auto with_settings =
 	    MakeSettingsModalOverlay(with_shortcuts, &settings_modal_state_, &app_settings_,
 	                             on_settings_apply, on_workspace_apply, on_clang_format_apply);
+	settings_modal_state_.tools_status_provider = [this]() {
+		LspRuntimeFlags flags;
+		flags.lsp_enabled = app_settings_.lsp_enabled;
+		if (symbol_provider_) {
+			flags.lsp_enabled = symbol_provider_->lsp_enabled();
+			flags.clangd_ready = symbol_provider_->clangd_ready();
+			flags.clangd_starting = symbol_provider_->clangd_starting();
+			flags.python_ready = symbol_provider_->python_lsp_ready();
+			flags.python_starting = symbol_provider_->python_lsp_starting();
+			flags.bash_ready = symbol_provider_->bash_lsp_ready();
+			flags.bash_starting = symbol_provider_->bash_lsp_starting();
+			flags.tex_ready = symbol_provider_->tex_lsp_ready();
+			flags.tex_starting = symbol_provider_->tex_lsp_starting();
+		}
+		return collect_tools_status(flags);
+	};
 
 	SourceSubstituteApplyCallback on_source_substitute_apply =
 	    [this](const std::string &from, const std::string &to) {

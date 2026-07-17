@@ -95,6 +95,12 @@ std::string language_id_for_path(const std::string& path) {
   if (ext == ".py" || ext == ".pyi" || ext == ".pyw") {
     return "python";
   }
+  if (ext == ".sh" || ext == ".bash") {
+    return "shellscript";
+  }
+  if (ext == ".tex" || ext == ".sty" || ext == ".cls") {
+    return "latex";
+  }
   return "plaintext";
 }
 

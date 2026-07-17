@@ -11,7 +11,7 @@
 //   3. LspDiagnostics       — publishDiagnostics / errores de compilación
 //   4. LspHover             — información de símbolo clangd (p. ej. menú «Información»)
 //   5. EditorNavigation     — ir a definición / implementación (navegación diferida)
-//   6. DebugCritical        — parada en breakpoint, sesión terminada, sesión lista
+//   6. DebugCritical        — parada, reanudación, sesión terminada, sesión lista
 //   7. TerminalOutput       — salida PTY línea a línea
 //
 // Fuentes secundarias (wake explícito, mismo mecanismo):
@@ -25,7 +25,6 @@
 //   - GitIndexerUpdated     — panel git; callback vacío
 //   - WorkspaceIndexUpdated — cambios del indexador de workspace
 //   - DebugOutput           — consola GDB entre paradas (batch al parar)
-//   - DebugContinued        — reanudación (sin repaint dedicado)
 //   - DebugStackVariables   — stack/variables (batch con parada)
 
 #include <string_view>
@@ -46,6 +45,7 @@ enum class UiWakeReason {
   EditorNavigationScheduled,
   EditorNavigationComplete,
   DebugStopped,
+  DebugContinued,
   DebugTerminated,
   DebugSessionReady,
   TerminalOutput,
@@ -79,6 +79,8 @@ inline UiWakeSpec ui_wake_spec(UiWakeReason reason) {
       return {"editor.navigation.complete", UiEventKind::InputCorrelated};
     case UiWakeReason::DebugStopped:
       return {"debug.stopped", UiEventKind::DebugCritical};
+    case UiWakeReason::DebugContinued:
+      return {"debug.continued", UiEventKind::DebugCritical};
     case UiWakeReason::DebugTerminated:
       return {"debug.terminated", UiEventKind::DebugCritical};
     case UiWakeReason::DebugSessionReady:

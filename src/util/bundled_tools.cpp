@@ -1,14 +1,17 @@
 #include "util/bundled_tools.hpp"
 
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <unistd.h>
@@ -57,6 +60,44 @@ extern const unsigned char _binary_rg_blob_zst_end[];
 extern "C" {
 extern const unsigned char _binary_python_tools_blob_zst_start[];
 extern const unsigned char _binary_python_tools_blob_zst_end[];
+}
+#endif
+
+#ifdef TGDB_HAS_BUNDLED_TEXLAB
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS)
+#include <zstd.h>
+#endif
+#include "bundled_texlab_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_texlab_blob_zst_start[];
+extern const unsigned char _binary_texlab_blob_zst_end[];
+}
+#endif
+
+#ifdef TGDB_HAS_BUNDLED_BASH_LS
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TGDB_HAS_BUNDLED_TEXLAB)
+#include <zstd.h>
+#endif
+#include "bundled_bash_ls_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_bash_ls_blob_zst_start[];
+extern const unsigned char _binary_bash_ls_blob_zst_end[];
+}
+#endif
+
+#ifdef TGDB_HAS_BUNDLED_BASH_DAP
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS)
+#include <zstd.h>
+#endif
+#include "bundled_bash_dap_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_bash_dap_blob_zst_start[];
+extern const unsigned char _binary_bash_dap_blob_zst_end[];
 }
 #endif
 
@@ -162,7 +203,9 @@ std::optional<std::string> gdb_from_env() {
 }
 
 #if defined(TGDB_HAS_BUNDLED_CLANGD) || defined(TGDB_HAS_BUNDLED_GDB) || \
-    defined(TGDB_HAS_BUNDLED_RG) || defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS)
+    defined(TGDB_HAS_BUNDLED_RG) || defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) || \
+    defined(TGDB_HAS_BUNDLED_TEXLAB) || defined(TGDB_HAS_BUNDLED_BASH_LS) || \
+    defined(TGDB_HAS_BUNDLED_BASH_DAP)
 std::optional<std::vector<unsigned char>> decompress_zstd_blob(const unsigned char* start,
                                                                  const unsigned char* end) {
   const std::size_t compressed_size = static_cast<std::size_t>(end - start);
@@ -801,8 +844,22 @@ bool python_module_importable(const std::string& python_bin, const std::string& 
   if (python_bin.empty() || module.empty()) {
     return false;
   }
+  const std::string key = python_bin + '\n' + module;
+  static std::mutex mu;
+  static std::unordered_map<std::string, bool> cache;
+  {
+    std::lock_guard<std::mutex> lock(mu);
+    if (const auto it = cache.find(key); it != cache.end()) {
+      return it->second;
+    }
+  }
   const std::string cmd = "\"" + python_bin + "\" -c \"import " + module + "\" >/dev/null 2>&1";
-  return std::system(cmd.c_str()) == 0;
+  const bool ok = std::system(cmd.c_str()) == 0;
+  {
+    std::lock_guard<std::mutex> lock(mu);
+    cache[key] = ok;
+  }
+  return ok;
 }
 
 }  // namespace
@@ -900,6 +957,298 @@ std::optional<DebugpyLocation> resolve_debugpy() {
     }
   }
   return std::nullopt;
+}
+
+std::optional<std::string> resolve_shellcheck() {
+  if (const auto env_path = env_executable("SHELLCHECK_PATH"); env_path.has_value()) {
+    return *env_path;
+  }
+#ifdef TGDB_HAS_BUNDLED_BASH_LS
+  {
+    const fs::path bundled =
+        fs::path(bundled_cache_root()) / ("bash-ls-" TGDB_BUNDLED_BASH_LS_VERSION) / "bin" /
+        "shellcheck";
+    if (is_executable_file(bundled.string())) {
+      return bundled.string();
+    }
+  }
+#endif
+  return find_named_binary_on_path("shellcheck");
+}
+
+std::optional<BashLsLocation> resolve_bash_language_server() {
+  if (const auto env_path = env_executable("BASH_LANGUAGE_SERVER_PATH"); env_path.has_value()) {
+    return BashLsLocation{*env_path, BashLsLocation::Source::Env};
+  }
+#ifdef TGDB_HAS_BUNDLED_BASH_LS
+  {
+    const fs::path install_root =
+        fs::path(bundled_cache_root()) / ("bash-ls-" TGDB_BUNDLED_BASH_LS_VERSION);
+    const fs::path binary_path = install_root / "bin" / "bash-language-server";
+    const fs::path marker = install_root / ".installed";
+    const std::string expected = std::string(TGDB_BUNDLED_BASH_LS_BLOB_SHA256) + "\n";
+    // Prefer an existing install immediately. Marker mismatch used to force a synchronous
+    // re-extract (100MB+ tar) on every resolve — Status UI calls this every frame.
+    if (is_executable_file(binary_path.string())) {
+      return BashLsLocation{binary_path.string(), BashLsLocation::Source::Bundled};
+    }
+    static std::atomic<bool> install_attempted{false};
+    if (!install_attempted.exchange(true, std::memory_order_acq_rel)) {
+      const auto tar_data =
+          decompress_zstd_blob(_binary_bash_ls_blob_zst_start, _binary_bash_ls_blob_zst_end);
+      if (tar_data.has_value()) {
+        const fs::path temp_root = install_root.string() + ".tmp";
+        std::error_code ec;
+        fs::remove_all(temp_root, ec);
+        fs::create_directories(temp_root, ec);
+        if (extract_tar_to_directory(*tar_data, temp_root) &&
+            is_executable_file((temp_root / "bin" / "bash-language-server").string())) {
+          fs::remove_all(install_root, ec);
+          fs::rename(temp_root, install_root, ec);
+          if (!ec) {
+            write_text_file(marker, expected);
+          } else {
+            fs::remove_all(temp_root, ec);
+          }
+        } else {
+          fs::remove_all(temp_root, ec);
+        }
+      }
+    }
+    if (is_executable_file(binary_path.string())) {
+      return BashLsLocation{binary_path.string(), BashLsLocation::Source::Bundled};
+    }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_BASH_LS
+    return std::nullopt;
+#endif
+  }
+#endif
+  if (const auto path_bin = find_named_binary_on_path("bash-language-server"); path_bin.has_value()) {
+    return BashLsLocation{*path_bin, BashLsLocation::Source::SystemPath};
+  }
+  return std::nullopt;
+}
+
+std::optional<TexlabLocation> resolve_texlab() {
+  if (const auto env_path = env_executable("TEXLAB_PATH"); env_path.has_value()) {
+    return TexlabLocation{*env_path, TexlabLocation::Source::Env};
+  }
+#ifdef TGDB_HAS_BUNDLED_TEXLAB
+  {
+    const fs::path install_root =
+        fs::path(bundled_cache_root()) / ("texlab-" TGDB_BUNDLED_TEXLAB_VERSION);
+    const fs::path binary_path = install_root / "bin" / "texlab";
+    const fs::path marker = install_root / ".installed";
+    const std::string expected = std::string(TGDB_BUNDLED_TEXLAB_BLOB_SHA256) + "\n";
+    if (is_executable_file(binary_path.string())) {
+      return TexlabLocation{binary_path.string(), TexlabLocation::Source::Bundled};
+    }
+    static std::atomic<bool> install_attempted{false};
+    if (!install_attempted.exchange(true, std::memory_order_acq_rel)) {
+      const auto tar_data =
+          decompress_zstd_blob(_binary_texlab_blob_zst_start, _binary_texlab_blob_zst_end);
+      if (tar_data.has_value()) {
+        const fs::path temp_root = install_root.string() + ".tmp";
+        std::error_code ec;
+        fs::remove_all(temp_root, ec);
+        fs::create_directories(temp_root, ec);
+        if (extract_tar_to_directory(*tar_data, temp_root) &&
+            is_executable_file((temp_root / "bin" / "texlab").string())) {
+          fs::remove_all(install_root, ec);
+          fs::rename(temp_root, install_root, ec);
+          if (!ec) {
+            write_text_file(marker, expected);
+          } else {
+            fs::remove_all(temp_root, ec);
+          }
+        } else {
+          fs::remove_all(temp_root, ec);
+        }
+      }
+    }
+    if (is_executable_file(binary_path.string())) {
+      return TexlabLocation{binary_path.string(), TexlabLocation::Source::Bundled};
+    }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_TEXLAB
+    return std::nullopt;
+#endif
+  }
+#endif
+  if (const auto path_bin = find_named_binary_on_path("texlab"); path_bin.has_value()) {
+    return TexlabLocation{*path_bin, TexlabLocation::Source::SystemPath};
+  }
+  return std::nullopt;
+}
+
+bool readable_file(const std::string& path) {
+  return !path.empty() && ::access(path.c_str(), R_OK) == 0;
+}
+
+std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
+#ifdef TGDB_HAS_BUNDLED_BASH_DAP
+  {
+    const fs::path install_root =
+        fs::path(bundled_cache_root()) / ("bash-dap-" TGDB_BUNDLED_BASH_DAP_VERSION);
+    const fs::path adapter_js = install_root / "adapter" / "bashDebug.js";
+    const fs::path bashdb = install_root / "bashdb" / "bashdb";
+    const fs::path marker = install_root / ".installed";
+    const std::string expected = std::string(TGDB_BUNDLED_BASH_DAP_BLOB_SHA256) + "\n";
+    const auto try_build_location = [&]() -> std::optional<BashDebugAdapterLocation> {
+      if (!(readable_file(adapter_js.string()) && is_executable_file(bashdb.string()))) {
+        return std::nullopt;
+      }
+      std::string node;
+#if TGDB_BUNDLED_BASH_DAP_HAS_NODE
+      const fs::path node_path = install_root / "node" / "bin" / "node";
+      if (is_executable_file(node_path.string())) {
+        node = node_path.string();
+      }
+#endif
+      if (node.empty()) {
+#ifdef TGDB_HAS_BUNDLED_BASH_LS
+        if (const auto ls = resolve_bash_language_server();
+            ls.has_value() && ls->source == BashLsLocation::Source::Bundled) {
+          const fs::path n = fs::path(ls->binary_path).parent_path() / "node";
+          if (is_executable_file(n.string())) {
+            node = n.string();
+          }
+        }
+#endif
+      }
+      if (node.empty()) {
+        if (const auto env = env_executable("TGDB_NODE_BIN"); env.has_value()) {
+          node = *env;
+        } else if (const auto path_bin = find_named_binary_on_path("node"); path_bin.has_value()) {
+          node = *path_bin;
+        }
+      }
+      const auto bash = find_named_binary_on_path("bash");
+      if (node.empty() || !bash.has_value()) {
+        return std::nullopt;
+      }
+      BashDebugAdapterLocation loc;
+      loc.node_path = node;
+      loc.adapter_js_path = adapter_js.string();
+      loc.bash_path = *bash;
+      loc.bashdb_path = bashdb.string();
+      loc.bashdb_lib_path = (install_root / "bashdb").string();
+      loc.source = BashDebugAdapterLocation::Source::Bundled;
+      return loc;
+    };
+
+    // Prefer an existing install immediately (Status UI resolves this every refresh).
+    if (auto existing = try_build_location(); existing.has_value()) {
+      return existing;
+    }
+
+    static std::atomic<bool> install_attempted{false};
+    if (!install_attempted.exchange(true, std::memory_order_acq_rel)) {
+      const auto tar_data =
+          decompress_zstd_blob(_binary_bash_dap_blob_zst_start, _binary_bash_dap_blob_zst_end);
+      if (tar_data.has_value()) {
+        const fs::path temp_root = install_root.string() + ".tmp";
+        std::error_code ec;
+        fs::remove_all(temp_root, ec);
+        fs::create_directories(temp_root, ec);
+        if (extract_tar_to_directory(*tar_data, temp_root) &&
+            readable_file((temp_root / "adapter" / "bashDebug.js").string()) &&
+            is_executable_file((temp_root / "bashdb" / "bashdb").string())) {
+          fs::remove_all(install_root, ec);
+          fs::rename(temp_root, install_root, ec);
+          if (!ec) {
+            write_text_file(marker, expected);
+          } else {
+            fs::remove_all(temp_root, ec);
+          }
+        } else {
+          fs::remove_all(temp_root, ec);
+        }
+      }
+    }
+    if (auto installed = try_build_location(); installed.has_value()) {
+      return installed;
+    }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_BASH_DAP
+    return std::nullopt;
+#endif
+  }
+#endif
+
+  const auto node = [&]() -> std::optional<std::string> {
+    if (const auto env = env_executable("TGDB_NODE_BIN"); env.has_value()) {
+      return env;
+    }
+    return find_named_binary_on_path("node");
+  }();
+  if (!node.has_value()) {
+    return std::nullopt;
+  }
+
+  const auto bash = [&]() -> std::optional<std::string> {
+    if (const auto env = env_executable("BASH_PATH"); env.has_value()) {
+      return env;
+    }
+    return find_named_binary_on_path("bash");
+  }();
+  if (!bash.has_value()) {
+    return std::nullopt;
+  }
+
+  std::string adapter_js;
+  if (const char* raw = std::getenv("BASH_DEBUG_ADAPTER"); raw != nullptr && raw[0] != '\0') {
+    if (readable_file(raw)) {
+      adapter_js = raw;
+    }
+  }
+#ifdef TGDB_BASH_DEBUG_ADAPTER_JS
+  if (adapter_js.empty() && readable_file(TGDB_BASH_DEBUG_ADAPTER_JS)) {
+    adapter_js = TGDB_BASH_DEBUG_ADAPTER_JS;
+  }
+#endif
+  if (adapter_js.empty()) {
+    return std::nullopt;
+  }
+
+  std::string bashdb;
+  std::string bashdb_lib;
+  if (const char* raw = std::getenv("BASHDB_PATH"); raw != nullptr && raw[0] != '\0' &&
+      is_executable_file(raw)) {
+    bashdb = raw;
+  }
+#ifdef TGDB_BASHDB_PATH
+  if (bashdb.empty() && is_executable_file(TGDB_BASHDB_PATH)) {
+    bashdb = TGDB_BASHDB_PATH;
+  }
+#endif
+  if (bashdb.empty()) {
+    if (const auto path_bin = find_named_binary_on_path("bashdb"); path_bin.has_value()) {
+      bashdb = *path_bin;
+    }
+  }
+  if (bashdb.empty()) {
+    return std::nullopt;
+  }
+
+  if (const char* raw = std::getenv("BASHDB_LIB"); raw != nullptr && raw[0] != '\0') {
+    bashdb_lib = raw;
+  }
+#ifdef TGDB_BASHDB_LIB
+  if (bashdb_lib.empty()) {
+    bashdb_lib = TGDB_BASHDB_LIB;
+  }
+#endif
+  if (bashdb_lib.empty()) {
+    bashdb_lib = (fs::path(bashdb).parent_path()).string();
+  }
+
+  BashDebugAdapterLocation loc;
+  loc.node_path = *node;
+  loc.adapter_js_path = std::move(adapter_js);
+  loc.bash_path = *bash;
+  loc.bashdb_path = std::move(bashdb);
+  loc.bashdb_lib_path = std::move(bashdb_lib);
+  loc.source = BashDebugAdapterLocation::Source::SystemPath;
+  return loc;
 }
 
 }  // namespace tgdb

@@ -19,16 +19,24 @@ void expect(bool condition, const char* message) {
 }  // namespace
 
 int main() {
-  tgdb::IndexFilterOptions hidden;
-  hidden.show_all_files = false;
-  expect(tgdb::should_skip_dir_name(".git", hidden), "hidden dirs skipped by default");
-  expect(!tgdb::should_list_workspace_path(".git/config", hidden), "hidden paths excluded");
-
   tgdb::IndexFilterOptions show_all;
   show_all.show_all_files = true;
-  expect(!tgdb::should_skip_dir_name(".git", show_all), "show all keeps dot dirs");
-  expect(tgdb::should_list_workspace_path(".git/config", show_all), "show all includes dot paths");
-  expect(tgdb::should_list_workspace_path("build/obj.o", show_all), "show all includes build dirs");
+  expect(tgdb::should_skip_dir_name(".git", show_all), "git always skipped in deep scan");
+  expect(tgdb::should_skip_dir_name("build", show_all), "build always skipped in deep scan");
+  expect(!tgdb::should_list_workspace_path(".git/config", show_all), "git paths never listed");
+  expect(!tgdb::should_list_workspace_path("build/obj.o", show_all),
+         "build paths never listed in bulk");
+  expect(tgdb::should_show_lazy_stub(".git", show_all), "git stub visible with show all");
+  expect(tgdb::should_show_lazy_stub("build", show_all), "build stub visible with show all");
+  expect(tgdb::should_list_workspace_path(".tgdb/settings.json", show_all),
+         "show all includes other dot paths");
+  expect(tgdb::should_list_workspace_path(".clangd", show_all), "show all includes .clangd");
+
+  tgdb::IndexFilterOptions hidden;
+  hidden.show_all_files = false;
+  expect(!tgdb::should_show_lazy_stub("build", hidden), "stubs hidden without show all");
+  expect(tgdb::should_skip_dir_name(".git", hidden), "hidden dirs skipped by default");
+  expect(!tgdb::should_list_workspace_path(".git/config", hidden), "hidden paths excluded");
 
   const std::vector<std::string> csv_lines = {
       "name,age,city",

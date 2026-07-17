@@ -259,8 +259,24 @@ void ShellSession::stop() {
   if (child_pid_ > 0) {
     kill(child_pid_, SIGHUP);
     int status = 0;
-    waitpid(child_pid_, &status, 0);
-    child_pid_ = -1;
+    constexpr int kTimeoutMs = 1500;
+    constexpr int kPollMs = 20;
+    int waited_ms = 0;
+    for (;;) {
+      const pid_t result = waitpid(child_pid_, &status, WNOHANG);
+      if (result == child_pid_ || result < 0) {
+        child_pid_ = -1;
+        break;
+      }
+      if (waited_ms >= kTimeoutMs) {
+        kill(child_pid_, SIGKILL);
+        waitpid(child_pid_, &status, 0);
+        child_pid_ = -1;
+        break;
+      }
+      usleep(static_cast<useconds_t>(kPollMs) * 1000);
+      waited_ms += kPollMs;
+    }
   }
   if (reader_thread_ && reader_thread_->joinable()) {
     reader_thread_->join();

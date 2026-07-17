@@ -1,6 +1,10 @@
 #include "util/filesystem_tree.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
+
+namespace fs = std::filesystem;
 
 namespace tgdb {
 
@@ -96,6 +100,24 @@ void insert_folder_path(FileTreeNode* tree_root, const std::string& rel_str) {
   }
 }
 
+void mark_lazy_stub_folders_recursive(FileTreeNode* node, const IndexFilterOptions& options) {
+  if (node == nullptr) {
+    return;
+  }
+  for (auto& child : node->children) {
+    if (child.is_file) {
+      continue;
+    }
+    if (should_show_lazy_stub(child.name, options)) {
+      child.lazy = true;
+      child.children_loaded = false;
+      child.children.clear();
+      continue;
+    }
+    mark_lazy_stub_folders_recursive(&child, options);
+  }
+}
+
 }  // namespace
 
 FileTreeNode build_file_tree_from_paths(const std::vector<std::string>& relative_paths) {
@@ -129,6 +151,66 @@ FileTreeNode build_file_tree_from_paths_and_folders(
 
   sort_tree_nodes(&tree_root);
   return tree_root;
+}
+
+void mark_lazy_stub_folders(FileTreeNode* root, const IndexFilterOptions& options) {
+  if (root == nullptr) {
+    return;
+  }
+  mark_lazy_stub_folders_recursive(root, options);
+}
+
+bool populate_lazy_folder_children(FileTreeNode* folder, const std::string& workspace_root,
+                                   const std::string& relative_dir,
+                                   const IndexFilterOptions& options) {
+  if (folder == nullptr || workspace_root.empty()) {
+    return false;
+  }
+
+  std::error_code ec;
+  const fs::path absolute = fs::path(workspace_root) / relative_dir;
+  if (!fs::is_directory(absolute, ec)) {
+    folder->children.clear();
+    folder->children_loaded = true;
+    return false;
+  }
+
+  folder->children.clear();
+  for (const auto& entry : fs::directory_iterator(absolute, ec)) {
+    if (ec) {
+      break;
+    }
+    const auto name = entry.path().filename().string();
+    if (name.empty() || name == "." || name == "..") {
+      continue;
+    }
+    const fs::path rel =
+        relative_dir.empty() ? fs::path(name) : fs::path(relative_dir) / name;
+    const std::string rel_str = rel.generic_string();
+
+    if (entry.is_directory(ec)) {
+      if (!options.show_all_files && !name.empty() && name[0] == '.') {
+        continue;
+      }
+      FileTreeNode child;
+      child.name = name;
+      child.is_file = false;
+      child.expanded = false;
+      child.lazy = true;
+      child.children_loaded = false;
+      folder->children.push_back(std::move(child));
+    } else if (entry.is_regular_file(ec)) {
+      FileTreeNode file;
+      file.name = name;
+      file.relative_path = rel_str;
+      file.is_file = true;
+      folder->children.push_back(std::move(file));
+    }
+  }
+
+  sort_tree_nodes(folder);
+  folder->children_loaded = true;
+  return true;
 }
 
 FileTreeNode* find_folder_child(FileTreeNode* parent, const std::string& name) {

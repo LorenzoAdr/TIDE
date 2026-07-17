@@ -103,6 +103,8 @@ class TreeSitterService {
 
   std::vector<CompletionItem> local_completions_at(const CompletionParams& params);
   HoverInfo hover_at(const HoverParams& params);
+  // Local goto-definition from tree-sitter outline symbols (bash/python/latex/C++).
+  SourceLocation definition_at(const NavigationParams& params);
 
   void invalidate(const std::string& path);
   uint64_t revision_for(const std::string& path) const;

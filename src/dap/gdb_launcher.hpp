@@ -10,6 +10,7 @@ namespace tgdb {
 bool gdb_supports_dap_at(const std::string& gdb_path);
 bool gdb_supports_dap();
 bool debugpy_available();
+bool bashdb_dap_available();
 
 class GdbProcess {
  public:

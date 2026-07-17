@@ -13,6 +13,12 @@ BUNDLE_GDB=0
 BUNDLE_GDB_FORCE=0
 PYTHON_BUNDLE_KIND=none
 BUNDLE_PYTHON_FORCE=0
+BUNDLE_BASH_LS=0
+BUNDLE_BASH_LS_FORCE=0
+BUNDLE_TEXLAB=0
+BUNDLE_TEXLAB_FORCE=0
+BUNDLE_BASH_DAP=0
+BUNDLE_BASH_DAP_FORCE=0
 BUILD_GDB_CA=0
 STATIC_LIBSTDCXX=0
 INTERACTIVE=1
@@ -53,6 +59,18 @@ Opciones:
   --no-bundle-python         No embeber herramientas Python
   --force-bundled-python     Forzar herramientas Python embebidas en runtime
   --no-force-bundled-python  Permitir fallback a PATH / venv del host
+  --bundle-bash-ls           Embeber bash-language-server + Node
+  --no-bundle-bash-ls        No embeber bash-language-server
+  --force-bundled-bash-ls    Forzar bash-language-server embebido en runtime (requiere bundle)
+  --no-force-bundled-bash-ls Permitir fallback a bash-language-server en PATH
+  --bundle-texlab            Embeber TexLab (LSP LaTeX)
+  --no-bundle-texlab         No embeber TexLab
+  --force-bundled-texlab     Forzar TexLab embebido en runtime (requiere bundle)
+  --no-force-bundled-texlab  Permitir fallback a texlab en PATH
+  --bundle-bash-dap          Embeber adaptador Bash DAP + bashdb
+  --no-bundle-bash-dap       No embeber Bash DAP
+  --force-bundled-bash-dap   Forzar Bash DAP embebido en runtime (requiere bundle)
+  --no-force-bundled-bash-dap Permitir fallback a adaptador Bash DAP en PATH
   --static-libstdc++         Enlazar libstdc++/libgcc estáticamente (menos deps en runtime)
   -h, --help                 Mostrar esta ayuda
 
@@ -88,6 +106,18 @@ sync_python_bundle_flags() {
   esac
   if [[ "${PYTHON_BUNDLE_KIND}" == "none" ]]; then
     BUNDLE_PYTHON_FORCE=0
+  fi
+}
+
+sync_bash_tex_bundle_flags() {
+  if [[ "${BUNDLE_BASH_LS}" != "1" ]]; then
+    BUNDLE_BASH_LS_FORCE=0
+  fi
+  if [[ "${BUNDLE_TEXLAB}" != "1" ]]; then
+    BUNDLE_TEXLAB_FORCE=0
+  fi
+  if [[ "${BUNDLE_BASH_DAP}" != "1" ]]; then
+    BUNDLE_BASH_DAP_FORCE=0
   fi
 }
 
@@ -172,6 +202,12 @@ load_bundle_config() {
   BUNDLE_GDB_FORCE=0
   PYTHON_BUNDLE_KIND=none
   BUNDLE_PYTHON_FORCE=0
+  BUNDLE_BASH_LS=0
+  BUNDLE_BASH_LS_FORCE=0
+  BUNDLE_TEXLAB=0
+  BUNDLE_TEXLAB_FORCE=0
+  BUNDLE_BASH_DAP=0
+  BUNDLE_BASH_DAP_FORCE=0
   if [[ ! -f "${CONFIG_FILE}" ]]; then
     return
   fi
@@ -194,6 +230,18 @@ load_bundle_config() {
       PYTHON_BUNDLE_KIND=none) PYTHON_BUNDLE_KIND=none ;;
       BUNDLE_PYTHON_FORCE=1) BUNDLE_PYTHON_FORCE=1 ;;
       BUNDLE_PYTHON_FORCE=0) BUNDLE_PYTHON_FORCE=0 ;;
+      BUNDLE_BASH_LS=1) BUNDLE_BASH_LS=1 ;;
+      BUNDLE_BASH_LS=0) BUNDLE_BASH_LS=0 ;;
+      BUNDLE_BASH_LS_FORCE=1) BUNDLE_BASH_LS_FORCE=1 ;;
+      BUNDLE_BASH_LS_FORCE=0) BUNDLE_BASH_LS_FORCE=0 ;;
+      BUNDLE_TEXLAB=1) BUNDLE_TEXLAB=1 ;;
+      BUNDLE_TEXLAB=0) BUNDLE_TEXLAB=0 ;;
+      BUNDLE_TEXLAB_FORCE=1) BUNDLE_TEXLAB_FORCE=1 ;;
+      BUNDLE_TEXLAB_FORCE=0) BUNDLE_TEXLAB_FORCE=0 ;;
+      BUNDLE_BASH_DAP=1) BUNDLE_BASH_DAP=1 ;;
+      BUNDLE_BASH_DAP=0) BUNDLE_BASH_DAP=0 ;;
+      BUNDLE_BASH_DAP_FORCE=1) BUNDLE_BASH_DAP_FORCE=1 ;;
+      BUNDLE_BASH_DAP_FORCE=0) BUNDLE_BASH_DAP_FORCE=0 ;;
     esac
   done < "${CONFIG_FILE}"
   if [[ "${GDB_BUNDLE_KIND}" == "none" && "${legacy_bundle_gdb}" == "1" ]]; then
@@ -201,6 +249,7 @@ load_bundle_config() {
   fi
   sync_gdb_bundle_flags
   sync_python_bundle_flags
+  sync_bash_tex_bundle_flags
   # Migrar configs antiguas sin GDB_BUNDLE_KIND explícito.
   if [[ "${legacy_bundle_gdb}" == "1" ]] && ! grep -q '^GDB_BUNDLE_KIND=' "${CONFIG_FILE}" 2>/dev/null; then
     save_bundle_config
@@ -211,6 +260,7 @@ load_bundle_config() {
 save_bundle_config() {
   sync_gdb_bundle_flags
   sync_python_bundle_flags
+  sync_bash_tex_bundle_flags
   cat > "${CONFIG_FILE}" <<EOF
 BUNDLE_CLANGD=${BUNDLE_CLANGD}
 BUNDLE_CLANGD_FORCE=${BUNDLE_CLANGD_FORCE}
@@ -219,6 +269,12 @@ BUNDLE_GDB=${BUNDLE_GDB}
 BUNDLE_GDB_FORCE=${BUNDLE_GDB_FORCE}
 PYTHON_BUNDLE_KIND=${PYTHON_BUNDLE_KIND}
 BUNDLE_PYTHON_FORCE=${BUNDLE_PYTHON_FORCE}
+BUNDLE_BASH_LS=${BUNDLE_BASH_LS}
+BUNDLE_BASH_LS_FORCE=${BUNDLE_BASH_LS_FORCE}
+BUNDLE_TEXLAB=${BUNDLE_TEXLAB}
+BUNDLE_TEXLAB_FORCE=${BUNDLE_TEXLAB_FORCE}
+BUNDLE_BASH_DAP=${BUNDLE_BASH_DAP}
+BUNDLE_BASH_DAP_FORCE=${BUNDLE_BASH_DAP_FORCE}
 EOF
 }
 
@@ -294,6 +350,36 @@ cmake_bundle_args() {
              -DTGDB_FORCE_BUNDLED_PYTHON_TOOLS=OFF)
       ;;
   esac
+  if [[ "${BUNDLE_BASH_LS}" == "1" ]]; then
+    args+=(-DTGDB_BUNDLE_BASH_LS=ON)
+    if [[ "${BUNDLE_BASH_LS_FORCE}" == "1" ]]; then
+      args+=(-DTGDB_FORCE_BUNDLED_BASH_LS=ON)
+    else
+      args+=(-DTGDB_FORCE_BUNDLED_BASH_LS=OFF)
+    fi
+  else
+    args+=(-DTGDB_BUNDLE_BASH_LS=OFF -DTGDB_FORCE_BUNDLED_BASH_LS=OFF)
+  fi
+  if [[ "${BUNDLE_TEXLAB}" == "1" ]]; then
+    args+=(-DTGDB_BUNDLE_TEXLAB=ON)
+    if [[ "${BUNDLE_TEXLAB_FORCE}" == "1" ]]; then
+      args+=(-DTGDB_FORCE_BUNDLED_TEXLAB=ON)
+    else
+      args+=(-DTGDB_FORCE_BUNDLED_TEXLAB=OFF)
+    fi
+  else
+    args+=(-DTGDB_BUNDLE_TEXLAB=OFF -DTGDB_FORCE_BUNDLED_TEXLAB=OFF)
+  fi
+  if [[ "${BUNDLE_BASH_DAP}" == "1" ]]; then
+    args+=(-DTGDB_BUNDLE_BASH_DAP=ON)
+    if [[ "${BUNDLE_BASH_DAP_FORCE}" == "1" ]]; then
+      args+=(-DTGDB_FORCE_BUNDLED_BASH_DAP=ON)
+    else
+      args+=(-DTGDB_FORCE_BUNDLED_BASH_DAP=OFF)
+    fi
+  else
+    args+=(-DTGDB_BUNDLE_BASH_DAP=OFF -DTGDB_FORCE_BUNDLED_BASH_DAP=OFF)
+  fi
   printf '%s\n' "${args[@]}"
 }
 
@@ -427,6 +513,96 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE=0
       shift
       ;;
+    --bundle-bash-ls)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_BASH_LS=1
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-bundle-bash-ls)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_BASH_LS=0
+      BUNDLE_BASH_LS_FORCE=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --force-bundled-bash-ls)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_BASH_LS_FORCE=1
+      BUNDLE_BASH_LS=1
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-force-bundled-bash-ls)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_BASH_LS_FORCE=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --bundle-texlab)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_TEXLAB=1
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-bundle-texlab)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_TEXLAB=0
+      BUNDLE_TEXLAB_FORCE=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --force-bundled-texlab)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_TEXLAB_FORCE=1
+      BUNDLE_TEXLAB=1
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-force-bundled-texlab)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_TEXLAB_FORCE=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --bundle-bash-dap)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_BASH_DAP=1
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-bundle-bash-dap)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_BASH_DAP=0
+      BUNDLE_BASH_DAP_FORCE=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --force-bundled-bash-dap)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_BASH_DAP_FORCE=1
+      BUNDLE_BASH_DAP=1
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-force-bundled-bash-dap)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_BASH_DAP_FORCE=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
     --static-libstdc++)
       STATIC_LIBSTDCXX=1
       shift
@@ -455,6 +631,9 @@ if [[ "${SKIP_WIZARD}" == "0" ]]; then
     -DTGDB_BUNDLE_GDB=OFF -DTGDB_FORCE_BUNDLED_GDB=OFF \
     -DTGDB_BUNDLE_PYTHON_LSP_MIN=OFF -DTGDB_BUNDLE_PYTHON_TOOLS=OFF \
     -DTGDB_FORCE_BUNDLED_PYTHON_TOOLS=OFF \
+    -DTGDB_BUNDLE_BASH_LS=OFF -DTGDB_FORCE_BUNDLED_BASH_LS=OFF \
+    -DTGDB_BUNDLE_TEXLAB=OFF -DTGDB_FORCE_BUNDLED_TEXLAB=OFF \
+    -DTGDB_BUNDLE_BASH_DAP=OFF -DTGDB_FORCE_BUNDLED_BASH_DAP=OFF \
     ${CMAKE_EXTRA_ARGS[@]}
   log "compilando asistente de bundles..."
   cmake --build "${BUILD_DIR}" --target tgdb-bundle-wizard -j "${JOBS}"
@@ -468,6 +647,7 @@ fi
 
 sync_gdb_bundle_flags
 sync_python_bundle_flags
+sync_bash_tex_bundle_flags
 
 warn_gdb_dap
 ensure_gdb_ca_tarball
@@ -525,6 +705,21 @@ case "${PYTHON_BUNDLE_KIND}" in
     log "  python embebido: no"
     ;;
 esac
+if [[ "${BUNDLE_BASH_LS}" == "1" ]]; then
+  log "  bash-language-server embebido: sí (force=${BUNDLE_BASH_LS_FORCE})"
+else
+  log "  bash-language-server embebido: no"
+fi
+if [[ "${BUNDLE_TEXLAB}" == "1" ]]; then
+  log "  texlab embebido: sí (force=${BUNDLE_TEXLAB_FORCE})"
+else
+  log "  texlab embebido: no"
+fi
+if [[ "${BUNDLE_BASH_DAP}" == "1" ]]; then
+  log "  bash DAP embebido: sí (force=${BUNDLE_BASH_DAP_FORCE})"
+else
+  log "  bash DAP embebido: no"
+fi
 if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
   log "  libstdc++ estático: sí"
 fi

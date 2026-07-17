@@ -22,6 +22,16 @@ option(TGDB_BUNDLE_PYTHON_TOOLS
 option(TGDB_FORCE_BUNDLED_PYTHON_TOOLS
        "At runtime, prefer bundled Python tools (requires A or B)" OFF)
 
+option(TGDB_BUNDLE_BASH_LS "Embed bash-language-server + Node" OFF)
+option(TGDB_FORCE_BUNDLED_BASH_LS
+       "Prefer embedded bash-language-server (requires TGDB_BUNDLE_BASH_LS)" OFF)
+option(TGDB_BUNDLE_TEXLAB "Embed TexLab Linux x86_64 release" OFF)
+option(TGDB_FORCE_BUNDLED_TEXLAB
+       "Prefer embedded TexLab (requires TGDB_BUNDLE_TEXLAB)" OFF)
+option(TGDB_BUNDLE_BASH_DAP "Embed Bash DAP adapter + bashdb (+ Node unless BASH_LS)" OFF)
+option(TGDB_FORCE_BUNDLED_BASH_DAP
+       "Prefer embedded Bash DAP (requires TGDB_BUNDLE_BASH_DAP)" OFF)
+
 set(TGDB_CLANGD_VERSION "19.1.2" CACHE STRING "clangd release version to bundle")
 set(TGDB_GDB_STATIC_VERSION "v16.3-static" CACHE STRING "gdb-static release tag")
 set(TGDB_GDB_CA_VERSION "16.3-ca" CACHE STRING "gdb+core_analyzer bundle version tag")
@@ -32,6 +42,11 @@ set(TGDB_PYTHON_STANDALONE_VERSION "3.12.13" CACHE STRING
     "CPython version from python-build-standalone (full only)")
 set(TGDB_PYTHON_STANDALONE_TAG "20260623" CACHE STRING
     "python-build-standalone release tag (full only)")
+set(TGDB_TEXLAB_VERSION "5.26.0" CACHE STRING "TexLab release version to bundle")
+set(TGDB_BASH_LS_NPM_VERSION "5.6.0" CACHE STRING "bash-language-server npm version")
+set(TGDB_BASH_LS_VERSION "${TGDB_BASH_LS_NPM_VERSION}" CACHE STRING "bash-ls bundle tag")
+set(TGDB_BASH_DAP_VERSION "0.3.9" CACHE STRING "bash DAP adapter bundle tag")
+set(TGDB_NODE_VERSION "22.16.0" CACHE STRING "Node.js version for Bash LS/DAP blobs")
 
 if(TGDB_BUNDLE_PYTHON_TOOLS AND TGDB_BUNDLE_PYTHON_LSP_MIN)
   message(WARNING
@@ -105,5 +120,24 @@ if(TGDB_BUNDLE_PYTHON_LSP_MIN OR TGDB_BUNDLE_PYTHON_TOOLS)
   endif()
   if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
     message(FATAL_ERROR "Python tooling bundles are only supported on x86_64")
+  endif()
+endif()
+
+if(TGDB_FORCE_BUNDLED_BASH_LS AND NOT TGDB_BUNDLE_BASH_LS)
+  message(FATAL_ERROR "TGDB_FORCE_BUNDLED_BASH_LS requires TGDB_BUNDLE_BASH_LS=ON")
+endif()
+if(TGDB_FORCE_BUNDLED_TEXLAB AND NOT TGDB_BUNDLE_TEXLAB)
+  message(FATAL_ERROR "TGDB_FORCE_BUNDLED_TEXLAB requires TGDB_BUNDLE_TEXLAB=ON")
+endif()
+if(TGDB_FORCE_BUNDLED_BASH_DAP AND NOT TGDB_BUNDLE_BASH_DAP)
+  message(FATAL_ERROR "TGDB_FORCE_BUNDLED_BASH_DAP requires TGDB_BUNDLE_BASH_DAP=ON")
+endif()
+
+if(TGDB_BUNDLE_BASH_LS OR TGDB_BUNDLE_TEXLAB OR TGDB_BUNDLE_BASH_DAP)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "Bash/TeX tooling bundles are only supported on Linux")
+  endif()
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    message(FATAL_ERROR "Bash/TeX tooling bundles are only supported on x86_64")
   endif()
 endif()

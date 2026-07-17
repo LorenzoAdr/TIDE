@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <string>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "ftxui/component/event.hpp"
 #include "ui/path_browser.hpp"
 #include "util/clang_format_config.hpp"
+#include "util/tools_status.hpp"
 
 namespace tgdb {
 
@@ -19,6 +21,7 @@ enum class SettingsPanel {
   kVisualHighlight,
   kWorkspace,
   kFormat,
+  kStatus,
   kIncludePaths,
   kCompileCommands,
   kPathMappings,
@@ -34,6 +37,7 @@ enum class PathBrowserPurpose {
 using SettingsApplyCallback = std::function<void(const AppSettings&)>;
 using WorkspaceSettingsApplyCallback = std::function<void(const WorkspaceConfig&)>;
 using ClangFormatApplyCallback = std::function<void(const ClangFormatConfig&)>;
+using ToolsStatusProvider = std::function<ToolsStatusSnapshot()>;
 
 struct SettingsModalState {
   bool open = false;
@@ -97,6 +101,7 @@ struct SettingsModalState {
   ftxui::Box tab_visual_highlight_box;
   ftxui::Box tab_workspace_box;
   ftxui::Box tab_format_box;
+  ftxui::Box tab_status_box;
   ftxui::Box body_box;
   SettingsPanel click_layout_panel = SettingsPanel::kGeneral;
   struct ClickTarget {
@@ -106,6 +111,14 @@ struct SettingsModalState {
   std::vector<ClickTarget> click_targets;
   int ui_palette_row_start = -1;
   int ui_palette_row_count = 0;
+  ToolsStatusProvider tools_status_provider;
+  ToolsStatusSnapshot tools_status_cache;
+  bool tools_status_cache_valid = false;
+  std::chrono::steady_clock::time_point tools_status_fetched_at{};
+  // Snapshot at open — used to avoid restarting LSP/shell/index on Escape with no edits.
+  WorkspaceConfig workspace_baseline;
+  ClangFormatConfig clang_format_baseline;
+  bool show_all_workspace_files_baseline = false;
 };
 
 bool settings_modal_handle_mouse(SettingsModalState* state, ftxui::Event event);

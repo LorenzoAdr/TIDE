@@ -18,6 +18,7 @@
 #include "util/monitor_log.hpp"
 #include "util/shell_utils.hpp"
 #include "util/thread_name.hpp"
+#include "util/bundled_tools.hpp"
 
 namespace tgdb {
 
@@ -158,8 +159,10 @@ void DapBackend::set_wake_callback(DebugWakeCallback callback) {
 void DapBackend::push_event(DebugEvent event) {
   const DebugEventKind kind = event.kind;
   events_.push(std::move(event));
+  // kContinued must wake the UI so drain_events can apply set_running() and
+  // clear the stopped-line highlight / play→pause toolbar state.
   if (kind == DebugEventKind::kStopped || kind == DebugEventKind::kTerminated ||
-      kind == DebugEventKind::kSessionReady) {
+      kind == DebugEventKind::kSessionReady || kind == DebugEventKind::kContinued) {
     std::lock_guard<std::mutex> lock(wake_mutex_);
     if (wake_callback_) {
       wake_callback_(kind);
@@ -1007,6 +1010,56 @@ void DapBackend::handle_command(const UiCommand& command) {
   }
 
   if (command.kind == UiCommandKind::kLaunch) {
+    if (preferred_adapter_ == DebugAdapterKind::kBashdb) {
+      const auto bash_loc = resolve_bash_debug_adapter();
+      if (!bash_loc.has_value()) {
+        push_error(i18n::tr("debug.dap.bashdb_start_failed"));
+        return;
+      }
+      dap::BashdbLaunchRequest launch;
+      launch.program = command.launch.program;
+      launch.cwd = command.launch.cwd;
+      if (!command.launch.args.empty()) {
+        launch.args = command.launch.args;
+      }
+      launch.pathBash = bash_loc->bash_path;
+      launch.pathBashdb = bash_loc->bashdb_path;
+      launch.pathBashdbLib = bash_loc->bashdb_lib_path;
+      launch.pathCat = "/bin/cat";
+      launch.pathMkfifo = "/usr/bin/mkfifo";
+      launch.pathPkill = "/usr/bin/pkill";
+      launch.terminalKind = "debugConsole";
+
+      std::unique_lock<std::mutex> lock(session_mutex_);
+      if (!session_) {
+        return;
+      }
+      auto launch_future = session_->send(launch);
+      if (!send_configuration_done()) {
+        return;
+      }
+      lock.unlock();
+
+      const auto response = launch_future.get();
+      bool inferior_started = false;
+      {
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        if (!session_) {
+          return;
+        }
+        if (response.error) {
+          push_error(i18n::tr_fmt("debug.dap.launch_failed", {response.error.message}));
+        } else {
+          inferior_started = true;
+        }
+      }
+      if (inferior_started) {
+        inferior_launched_ = true;
+        on_inferior_launched();
+      }
+      return;
+    }
+
     dap::GdbLaunchRequest launch;
     launch.program = command.launch.program;
     launch.cwd = command.launch.cwd;
@@ -1333,6 +1386,8 @@ void DapBackend::worker_main() {
   if (!adapter_ || !adapter_->start()) {
     if (preferred_adapter_ == DebugAdapterKind::kDebugpy) {
       push_error(i18n::tr("debug.dap.debugpy_start_failed"));
+    } else if (preferred_adapter_ == DebugAdapterKind::kBashdb) {
+      push_error(i18n::tr("debug.dap.bashdb_start_failed"));
     } else {
       push_error(i18n::tr("debug.dap.gdb_start_failed"));
     }
