@@ -318,6 +318,262 @@ void walk_latex_symbols(TSNode node, const std::string& source, int /*depth*/,
   }
 }
 
+std::string field_or_node_name(TSNode node, const std::string& source, const char* field) {
+  if (!ts_node_is_null(node) && field != nullptr) {
+    TSNode named = ts_node_child_by_field_name(node, field, static_cast<uint32_t>(std::strlen(field)));
+    if (!ts_node_is_null(named)) {
+      const std::string from_field = ts_identifier_name(named, source);
+      if (!from_field.empty()) {
+        return from_field;
+      }
+      return ts_node_text(named, source);
+    }
+  }
+  return ts_identifier_name(node, source);
+}
+
+std::string first_identifier_text(TSNode node, const std::string& source) {
+  if (ts_node_is_null(node)) {
+    return {};
+  }
+  const char* type = ts_node_type(node);
+  if (type != nullptr &&
+      (std::strcmp(type, "identifier") == 0 || std::strcmp(type, "name") == 0 ||
+       std::strcmp(type, "IDENTIFIER") == 0 || std::strcmp(type, "type_identifier") == 0)) {
+    return ts_node_text(node, source);
+  }
+  const uint32_t count = ts_node_child_count(node);
+  for (uint32_t i = 0; i < count; ++i) {
+    const std::string nested = first_identifier_text(ts_node_child(node, i), source);
+    if (!nested.empty()) {
+      return nested;
+    }
+  }
+  return {};
+}
+
+void walk_children(void (*walk)(TSNode, const std::string&, int, const std::string&,
+                                std::vector<SymbolInfo>*),
+                   TSNode node, const std::string& source, int depth, const std::string& file_path,
+                   std::vector<SymbolInfo>* out) {
+  if (ts_node_is_null(node)) {
+    return;
+  }
+  const uint32_t count = ts_node_child_count(node);
+  for (uint32_t i = 0; i < count; ++i) {
+    walk(ts_node_child(node, i), source, depth, file_path, out);
+  }
+}
+
+void walk_rust_symbols(TSNode node, const std::string& source, int depth,
+                       const std::string& file_path, std::vector<SymbolInfo>* out) {
+  if (ts_node_is_null(node)) {
+    return;
+  }
+  const char* type = ts_node_type(node);
+  if (type == nullptr) {
+    return;
+  }
+
+  if (std::strcmp(type, "mod_item") == 0) {
+    append_symbol(out, SymbolKind::kNamespace, field_or_node_name(node, source, "name"), node,
+                  depth, file_path);
+    walk_children(walk_rust_symbols, ts_node_child_by_field_name(node, "body", 4), source,
+                  depth + 1, file_path, out);
+    return;
+  }
+  if (std::strcmp(type, "struct_item") == 0) {
+    append_symbol(out, SymbolKind::kStruct, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    return;
+  }
+  if (std::strcmp(type, "enum_item") == 0) {
+    append_symbol(out, SymbolKind::kClass, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    return;
+  }
+  if (std::strcmp(type, "trait_item") == 0) {
+    append_symbol(out, SymbolKind::kClass, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    walk_children(walk_rust_symbols, ts_node_child_by_field_name(node, "body", 4), source,
+                  depth + 1, file_path, out);
+    return;
+  }
+  if (std::strcmp(type, "impl_item") == 0) {
+    TSNode type_node = ts_node_child_by_field_name(node, "type", 4);
+    TSNode trait_node = ts_node_child_by_field_name(node, "trait", 5);
+    std::string name = ts_node_text(type_node, source);
+    if (!ts_node_is_null(trait_node)) {
+      name = ts_node_text(trait_node, source) + " for " + name;
+    }
+    if (name.empty()) {
+      name = "impl";
+    }
+    append_symbol(out, SymbolKind::kClass, name, node, depth, file_path);
+    walk_children(walk_rust_symbols, ts_node_child_by_field_name(node, "body", 4), source,
+                  depth + 1, file_path, out);
+    return;
+  }
+  if (std::strcmp(type, "function_item") == 0 ||
+      std::strcmp(type, "function_signature_item") == 0) {
+    append_symbol(out, SymbolKind::kFunction, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    return;
+  }
+
+  walk_children(walk_rust_symbols, node, source, depth, file_path, out);
+}
+
+void walk_go_symbols(TSNode node, const std::string& source, int depth,
+                     const std::string& file_path, std::vector<SymbolInfo>* out) {
+  if (ts_node_is_null(node)) {
+    return;
+  }
+  const char* type = ts_node_type(node);
+  if (type == nullptr) {
+    return;
+  }
+
+  if (std::strcmp(type, "function_declaration") == 0) {
+    append_symbol(out, SymbolKind::kFunction, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    return;
+  }
+  if (std::strcmp(type, "method_declaration") == 0) {
+    append_symbol(out, SymbolKind::kMethod, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    return;
+  }
+  if (std::strcmp(type, "type_spec") == 0 || std::strcmp(type, "type_alias") == 0) {
+    append_symbol(out, SymbolKind::kClass, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    return;
+  }
+
+  walk_children(walk_go_symbols, node, source, depth, file_path, out);
+}
+
+void walk_zig_symbols(TSNode node, const std::string& source, int depth,
+                      const std::string& file_path, std::vector<SymbolInfo>* out) {
+  if (ts_node_is_null(node)) {
+    return;
+  }
+  const char* type = ts_node_type(node);
+  if (type == nullptr) {
+    return;
+  }
+
+  if (std::strcmp(type, "FnProto") == 0) {
+    append_symbol(out, SymbolKind::kFunction, field_or_node_name(node, source, "function"), node,
+                  depth, file_path);
+    return;
+  }
+  if (std::strcmp(type, "TestDecl") == 0) {
+    const std::string name = first_identifier_text(node, source);
+    append_symbol(out, SymbolKind::kFunction, name.empty() ? "test" : name, node, depth, file_path);
+    return;
+  }
+
+  walk_children(walk_zig_symbols, node, source, depth, file_path, out);
+}
+
+void walk_fortran_symbols(TSNode node, const std::string& source, int depth,
+                          const std::string& file_path, std::vector<SymbolInfo>* out) {
+  if (ts_node_is_null(node)) {
+    return;
+  }
+  const char* type = ts_node_type(node);
+  if (type == nullptr) {
+    return;
+  }
+
+  if (std::strcmp(type, "program_statement") == 0 || std::strcmp(type, "module_statement") == 0 ||
+      std::strcmp(type, "submodule_statement") == 0) {
+    std::string name = field_or_node_name(node, source, "name");
+    if (name.empty()) {
+      name = first_identifier_text(node, source);
+    }
+    append_symbol(out, SymbolKind::kNamespace, name, node, depth, file_path);
+  } else if (std::strcmp(type, "function_statement") == 0) {
+    append_symbol(out, SymbolKind::kFunction, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+  } else if (std::strcmp(type, "subroutine_statement") == 0) {
+    append_symbol(out, SymbolKind::kFunction, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+  }
+
+  walk_children(walk_fortran_symbols, node, source, depth, file_path, out);
+}
+
+void walk_lua_symbols(TSNode node, const std::string& source, int depth,
+                      const std::string& file_path, std::vector<SymbolInfo>* out) {
+  if (ts_node_is_null(node)) {
+    return;
+  }
+  const char* type = ts_node_type(node);
+  if (type == nullptr) {
+    return;
+  }
+
+  if (std::strcmp(type, "function_declaration") == 0) {
+    append_symbol(out, SymbolKind::kFunction, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    walk_children(walk_lua_symbols, ts_node_child_by_field_name(node, "body", 4), source, depth + 1,
+                  file_path, out);
+    return;
+  }
+
+  walk_children(walk_lua_symbols, node, source, depth, file_path, out);
+}
+
+void walk_js_ts_symbols(TSNode node, const std::string& source, int depth,
+                        const std::string& file_path, std::vector<SymbolInfo>* out) {
+  if (ts_node_is_null(node)) {
+    return;
+  }
+  const char* type = ts_node_type(node);
+  if (type == nullptr) {
+    return;
+  }
+
+  if (std::strcmp(type, "class_declaration") == 0 ||
+      std::strcmp(type, "abstract_class_declaration") == 0) {
+    append_symbol(out, SymbolKind::kClass, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    walk_children(walk_js_ts_symbols, ts_node_child_by_field_name(node, "body", 4), source,
+                  depth + 1, file_path, out);
+    return;
+  }
+  if (std::strcmp(type, "function_declaration") == 0 ||
+      std::strcmp(type, "generator_function_declaration") == 0) {
+    append_symbol(out, SymbolKind::kFunction, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    return;
+  }
+  if (std::strcmp(type, "method_definition") == 0 ||
+      std::strcmp(type, "abstract_method_signature") == 0) {
+    append_symbol(out, SymbolKind::kMethod, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    return;
+  }
+  if (std::strcmp(type, "enum_declaration") == 0 ||
+      std::strcmp(type, "interface_declaration") == 0 ||
+      std::strcmp(type, "type_alias_declaration") == 0) {
+    append_symbol(out, SymbolKind::kClass, field_or_node_name(node, source, "name"), node, depth,
+                  file_path);
+    return;
+  }
+  if (std::strcmp(type, "export_statement") == 0) {
+    TSNode decl = ts_node_child_by_field_name(node, "declaration", 12);
+    if (!ts_node_is_null(decl)) {
+      walk_js_ts_symbols(decl, source, depth, file_path, out);
+      return;
+    }
+  }
+
+  walk_children(walk_js_ts_symbols, node, source, depth, file_path, out);
+}
+
 std::vector<SymbolInfo> sort_symbols(std::vector<SymbolInfo> symbols) {
   std::sort(symbols.begin(), symbols.end(), [](const SymbolInfo& a, const SymbolInfo& b) {
     if (a.line != b.line) {
@@ -344,12 +600,23 @@ std::vector<SymbolInfo> extract_symbols_from_tree(TSNode root, const std::string
       walk_latex_symbols(root, source, 0, file_path, &symbols);
       break;
     case TreeSitterLangKind::kRust:
+      walk_rust_symbols(root, source, 0, file_path, &symbols);
+      break;
     case TreeSitterLangKind::kGo:
+      walk_go_symbols(root, source, 0, file_path, &symbols);
+      break;
     case TreeSitterLangKind::kZig:
+      walk_zig_symbols(root, source, 0, file_path, &symbols);
+      break;
     case TreeSitterLangKind::kFortran:
+      walk_fortran_symbols(root, source, 0, file_path, &symbols);
+      break;
     case TreeSitterLangKind::kLua:
+      walk_lua_symbols(root, source, 0, file_path, &symbols);
+      break;
     case TreeSitterLangKind::kJavaScript:
     case TreeSitterLangKind::kTypeScript:
+      walk_js_ts_symbols(root, source, 0, file_path, &symbols);
       break;
     case TreeSitterLangKind::kCpp:
     case TreeSitterLangKind::kNone:

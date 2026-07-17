@@ -208,8 +208,7 @@ foreach(_query_spec
     "zig|${tree_sitter_zig_SOURCE_DIR}/queries/highlights.scm"
     "fortran|${tree_sitter_fortran_SOURCE_DIR}/queries/highlights.scm"
     "lua|${tree_sitter_lua_SOURCE_DIR}/queries/highlights.scm"
-    "javascript|${tree_sitter_javascript_SOURCE_DIR}/queries/highlights.scm"
-    "typescript|${tree_sitter_typescript_SOURCE_DIR}/queries/highlights.scm")
+    "javascript|${tree_sitter_javascript_SOURCE_DIR}/queries/highlights.scm")
   string(REPLACE "|" ";" _parts "${_query_spec}")
   list(GET _parts 0 _lang)
   list(GET _parts 1 _query_file)
@@ -229,4 +228,23 @@ ${_query_content})TGDBQ_${_lang}\";
 ")
   endif()
 endforeach()
+# TypeScript highlights are incremental on top of JavaScript; combine both.
+set(_tgdb_js_hl "${tree_sitter_javascript_SOURCE_DIR}/queries/highlights.scm")
+set(_tgdb_ts_hl "${tree_sitter_typescript_SOURCE_DIR}/queries/highlights.scm")
+set(_tgdb_ts_combined "")
+if(EXISTS "${_tgdb_js_hl}")
+  file(READ "${_tgdb_js_hl}" _tgdb_js_hl_content)
+  string(APPEND _tgdb_ts_combined "${_tgdb_js_hl_content}\n")
+endif()
+if(EXISTS "${_tgdb_ts_hl}")
+  file(READ "${_tgdb_ts_hl}" _tgdb_ts_hl_content)
+  string(APPEND _tgdb_ts_combined "${_tgdb_ts_hl_content}\n")
+endif()
+file(APPEND "${TGDB_TREE_SITTER_QUERY_HPP}"
+"inline const char* typescript() {
+  return R\"TGDBQ_typescript(
+${_tgdb_ts_combined})TGDBQ_typescript\";
+}
+
+")
 file(APPEND "${TGDB_TREE_SITTER_QUERY_HPP}" "}  // namespace tgdb::tree_sitter_queries\n")
