@@ -25,6 +25,38 @@ bool language_id_is_latex(const std::string& language_id) {
   return language_id == "latex";
 }
 
+bool language_id_is_rust(const std::string& language_id) {
+  return language_id == "rust";
+}
+
+bool language_id_is_go(const std::string& language_id) {
+  return language_id == "go";
+}
+
+bool language_id_is_zig(const std::string& language_id) {
+  return language_id == "zig";
+}
+
+bool language_id_is_fortran(const std::string& language_id) {
+  return language_id == "fortran";
+}
+
+bool language_id_is_lua(const std::string& language_id) {
+  return language_id == "lua";
+}
+
+bool language_id_is_javascript(const std::string& language_id) {
+  return language_id == "javascript";
+}
+
+bool language_id_is_typescript(const std::string& language_id) {
+  return language_id == "typescript";
+}
+
+bool language_id_is_js_ts(const std::string& language_id) {
+  return language_id_is_javascript(language_id) || language_id_is_typescript(language_id);
+}
+
 std::string language_server_id_for_language(const std::string& language_id) {
   if (language_id_is_python(language_id)) {
     return kLspServerBasedpyright;
@@ -34,6 +66,24 @@ std::string language_server_id_for_language(const std::string& language_id) {
   }
   if (language_id_is_latex(language_id)) {
     return kLspServerTexlab;
+  }
+  if (language_id_is_rust(language_id)) {
+    return kLspServerRustAnalyzer;
+  }
+  if (language_id_is_go(language_id)) {
+    return kLspServerGopls;
+  }
+  if (language_id_is_zig(language_id)) {
+    return kLspServerZls;
+  }
+  if (language_id_is_fortran(language_id)) {
+    return kLspServerFortls;
+  }
+  if (language_id_is_lua(language_id)) {
+    return kLspServerLuaLs;
+  }
+  if (language_id_is_js_ts(language_id)) {
+    return kLspServerTypescriptLs;
   }
   if (language_id_is_cpp_family(language_id)) {
     return kLspServerClangd;
@@ -150,6 +200,101 @@ std::optional<LanguageServerSpec> make_texlab_spec(const std::string& workspace_
   return spec;
 }
 
+std::optional<LanguageServerSpec> make_rust_analyzer_spec(const std::string& workspace_root) {
+  const auto location = resolve_rust_analyzer();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+
+  LanguageServerSpec spec;
+  spec.id = kLspServerRustAnalyzer;
+  spec.command = location->binary_path;
+  spec.workspace_root = workspace_root;
+  spec.language_ids = {"rust"};
+  return spec;
+}
+
+std::optional<LanguageServerSpec> make_gopls_spec(const std::string& workspace_root) {
+  const auto location = resolve_gopls();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+
+  LanguageServerSpec spec;
+  spec.id = kLspServerGopls;
+  spec.command = location->binary_path;
+  spec.workspace_root = workspace_root;
+  spec.language_ids = {"go"};
+  return spec;
+}
+
+std::optional<LanguageServerSpec> make_zls_spec(const std::string& workspace_root) {
+  const auto location = resolve_zls();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+
+  LanguageServerSpec spec;
+  spec.id = kLspServerZls;
+  spec.command = location->binary_path;
+  spec.workspace_root = workspace_root;
+  spec.language_ids = {"zig"};
+  return spec;
+}
+
+std::optional<LanguageServerSpec> make_fortls_spec(const std::string& workspace_root) {
+  const auto location = resolve_fortls();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+
+  LanguageServerSpec spec;
+  spec.id = kLspServerFortls;
+  spec.command = location->binary_path;
+  spec.workspace_root = workspace_root;
+  spec.language_ids = {"fortran"};
+  if (location->use_python_module) {
+    spec.args.emplace_back("-m");
+    spec.args.push_back(location->python_module.empty() ? "fortls" : location->python_module);
+  }
+  spec.args.emplace_back("--enable_code_actions");
+  return spec;
+}
+
+std::optional<LanguageServerSpec> make_lua_ls_spec(const std::string& workspace_root) {
+  const auto location = resolve_lua_language_server();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+
+  LanguageServerSpec spec;
+  spec.id = kLspServerLuaLs;
+  spec.command = location->binary_path;
+  spec.workspace_root = workspace_root;
+  spec.language_ids = {"lua"};
+  return spec;
+}
+
+std::optional<LanguageServerSpec> make_typescript_ls_spec(const std::string& workspace_root) {
+  const auto location = resolve_typescript_language_server();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+
+  LanguageServerSpec spec;
+  spec.id = kLspServerTypescriptLs;
+  spec.command = location->binary_path;
+  spec.workspace_root = workspace_root;
+  spec.language_ids = {"javascript", "typescript"};
+  if (location->use_node_script) {
+    spec.args.push_back(location->script_path);
+    spec.args.emplace_back("--stdio");
+  } else if (location->needs_stdio_flag) {
+    spec.args.emplace_back("--stdio");
+  }
+  return spec;
+}
+
 std::optional<LanguageServerSpec> make_language_server_spec(
     const std::string& server_id, const std::string& workspace_root,
     const std::string& compile_commands_dir, const bool use_gcc_query_driver,
@@ -166,6 +311,24 @@ std::optional<LanguageServerSpec> make_language_server_spec(
   }
   if (server_id == kLspServerTexlab) {
     return make_texlab_spec(workspace_root);
+  }
+  if (server_id == kLspServerRustAnalyzer) {
+    return make_rust_analyzer_spec(workspace_root);
+  }
+  if (server_id == kLspServerGopls) {
+    return make_gopls_spec(workspace_root);
+  }
+  if (server_id == kLspServerZls) {
+    return make_zls_spec(workspace_root);
+  }
+  if (server_id == kLspServerFortls) {
+    return make_fortls_spec(workspace_root);
+  }
+  if (server_id == kLspServerLuaLs) {
+    return make_lua_ls_spec(workspace_root);
+  }
+  if (server_id == kLspServerTypescriptLs) {
+    return make_typescript_ls_spec(workspace_root);
   }
   return std::nullopt;
 }

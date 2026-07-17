@@ -343,6 +343,14 @@ std::vector<SymbolInfo> extract_symbols_from_tree(TSNode root, const std::string
     case TreeSitterLangKind::kLatex:
       walk_latex_symbols(root, source, 0, file_path, &symbols);
       break;
+    case TreeSitterLangKind::kRust:
+    case TreeSitterLangKind::kGo:
+    case TreeSitterLangKind::kZig:
+    case TreeSitterLangKind::kFortran:
+    case TreeSitterLangKind::kLua:
+    case TreeSitterLangKind::kJavaScript:
+    case TreeSitterLangKind::kTypeScript:
+      break;
     case TreeSitterLangKind::kCpp:
     case TreeSitterLangKind::kNone:
       walk_cpp_symbols(root, source, 0, file_path, &symbols);

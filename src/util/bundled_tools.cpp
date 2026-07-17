@@ -101,6 +101,96 @@ extern const unsigned char _binary_bash_dap_blob_zst_end[];
 }
 #endif
 
+#ifdef TGDB_HAS_BUNDLED_RUST_ANALYZER
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
+    !defined(TGDB_HAS_BUNDLED_BASH_DAP)
+#include <zstd.h>
+#endif
+#include "bundled_rust_analyzer_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_rust_analyzer_blob_zst_start[];
+extern const unsigned char _binary_rust_analyzer_blob_zst_end[];
+}
+#endif
+
+#ifdef TGDB_HAS_BUNDLED_GOPLS
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
+    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER)
+#include <zstd.h>
+#endif
+#include "bundled_gopls_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_gopls_blob_zst_start[];
+extern const unsigned char _binary_gopls_blob_zst_end[];
+}
+#endif
+
+#ifdef TGDB_HAS_BUNDLED_ZLS
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
+    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TGDB_HAS_BUNDLED_GOPLS)
+#include <zstd.h>
+#endif
+#include "bundled_zls_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_zls_blob_zst_start[];
+extern const unsigned char _binary_zls_blob_zst_end[];
+}
+#endif
+
+#ifdef TGDB_HAS_BUNDLED_LUA_LS
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
+    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TGDB_HAS_BUNDLED_GOPLS) && !defined(TGDB_HAS_BUNDLED_ZLS)
+#include <zstd.h>
+#endif
+#include "bundled_lua_ls_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_lua_ls_blob_zst_start[];
+extern const unsigned char _binary_lua_ls_blob_zst_end[];
+}
+#endif
+
+#ifdef TGDB_HAS_BUNDLED_FORTLS
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
+    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TGDB_HAS_BUNDLED_GOPLS) && !defined(TGDB_HAS_BUNDLED_ZLS) && \
+    !defined(TGDB_HAS_BUNDLED_LUA_LS)
+#include <zstd.h>
+#endif
+#include "bundled_fortls_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_fortls_blob_zst_start[];
+extern const unsigned char _binary_fortls_blob_zst_end[];
+}
+#endif
+
+#ifdef TGDB_HAS_BUNDLED_TSSERVER
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
+    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TGDB_HAS_BUNDLED_GOPLS) && !defined(TGDB_HAS_BUNDLED_ZLS) && \
+    !defined(TGDB_HAS_BUNDLED_LUA_LS) && !defined(TGDB_HAS_BUNDLED_FORTLS)
+#include <zstd.h>
+#endif
+#include "bundled_typescript_ls_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_typescript_ls_blob_zst_start[];
+extern const unsigned char _binary_typescript_ls_blob_zst_end[];
+}
+#endif
+
 namespace fs = std::filesystem;
 
 namespace tgdb {
@@ -172,6 +262,10 @@ bool is_executable_file(const std::string& path) {
   return !path.empty() && ::access(path.c_str(), X_OK) == 0;
 }
 
+bool readable_file(const std::string& path) {
+  return !path.empty() && ::access(path.c_str(), R_OK) == 0;
+}
+
 std::optional<std::string> find_gdb_on_path() {
   const char* path_env = std::getenv("PATH");
   if (path_env == nullptr || path_env[0] == '\0') {
@@ -205,7 +299,10 @@ std::optional<std::string> gdb_from_env() {
 #if defined(TGDB_HAS_BUNDLED_CLANGD) || defined(TGDB_HAS_BUNDLED_GDB) || \
     defined(TGDB_HAS_BUNDLED_RG) || defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) || \
     defined(TGDB_HAS_BUNDLED_TEXLAB) || defined(TGDB_HAS_BUNDLED_BASH_LS) || \
-    defined(TGDB_HAS_BUNDLED_BASH_DAP)
+    defined(TGDB_HAS_BUNDLED_BASH_DAP) || defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) || \
+    defined(TGDB_HAS_BUNDLED_GOPLS) || defined(TGDB_HAS_BUNDLED_ZLS) || \
+    defined(TGDB_HAS_BUNDLED_LUA_LS) || defined(TGDB_HAS_BUNDLED_FORTLS) || \
+    defined(TGDB_HAS_BUNDLED_TSSERVER)
 std::optional<std::vector<unsigned char>> decompress_zstd_blob(const unsigned char* start,
                                                                  const unsigned char* end) {
   const std::size_t compressed_size = static_cast<std::size_t>(end - start);
@@ -227,6 +324,52 @@ std::optional<std::vector<unsigned char>> decompress_zstd_blob(const unsigned ch
     return std::nullopt;
   }
   return output;
+}
+#endif
+
+#if defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) || defined(TGDB_HAS_BUNDLED_GOPLS) || \
+    defined(TGDB_HAS_BUNDLED_ZLS) || defined(TGDB_HAS_BUNDLED_LUA_LS) || \
+    defined(TGDB_HAS_BUNDLED_FORTLS) || defined(TGDB_HAS_BUNDLED_TSSERVER)
+bool bundled_tree_ready(const fs::path& install_root, const fs::path& binary_path,
+                        const std::string& expected_marker) {
+  const fs::path marker = install_root / ".installed";
+  return is_executable_file(binary_path.string()) &&
+         read_text_file(marker) == expected_marker;
+}
+
+bool lazy_extract_bundled_tree(const fs::path& install_root, const char* binary_rel,
+                               const std::string& expected_marker,
+                               const unsigned char* blob_start,
+                               const unsigned char* blob_end,
+                               std::atomic<bool>& install_attempted) {
+  const fs::path binary_path = install_root / binary_rel;
+  if (bundled_tree_ready(install_root, binary_path, expected_marker)) {
+    return true;
+  }
+  if (install_attempted.exchange(true, std::memory_order_acq_rel)) {
+    return bundled_tree_ready(install_root, binary_path, expected_marker);
+  }
+  const auto tar_data = decompress_zstd_blob(blob_start, blob_end);
+  if (!tar_data.has_value()) {
+    return false;
+  }
+  const fs::path temp_root = install_root.string() + ".tmp";
+  std::error_code ec;
+  fs::remove_all(temp_root, ec);
+  fs::create_directories(temp_root, ec);
+  if (!extract_tar_to_directory(*tar_data, temp_root) ||
+      !is_executable_file((temp_root / binary_rel).string())) {
+    fs::remove_all(temp_root, ec);
+    return false;
+  }
+  fs::remove_all(install_root, ec);
+  fs::rename(temp_root, install_root, ec);
+  if (ec) {
+    fs::remove_all(temp_root, ec);
+    return false;
+  }
+  write_text_file(install_root / ".installed", expected_marker);
+  return bundled_tree_ready(install_root, binary_path, expected_marker);
 }
 #endif
 
@@ -1104,8 +1247,223 @@ std::optional<TexlabLocation> resolve_texlab() {
   return std::nullopt;
 }
 
-bool readable_file(const std::string& path) {
-  return !path.empty() && ::access(path.c_str(), R_OK) == 0;
+std::optional<RustAnalyzerLocation> resolve_rust_analyzer() {
+  if (const auto env_path = env_executable("TGDB_RUST_ANALYZER"); env_path.has_value()) {
+    return RustAnalyzerLocation{*env_path, RustAnalyzerLocation::Source::Env};
+  }
+#ifdef TGDB_HAS_BUNDLED_RUST_ANALYZER
+  {
+    const fs::path install_root = fs::path(bundled_cache_root()) /
+                                  ("rust-analyzer-" TGDB_BUNDLED_RUST_ANALYZER_VERSION);
+    const fs::path binary_path = install_root / "bin" / "rust-analyzer";
+    const std::string expected = std::string(TGDB_BUNDLED_RUST_ANALYZER_BLOB_SHA256) + "\n";
+    static std::atomic<bool> install_attempted{false};
+    if (lazy_extract_bundled_tree(install_root, "bin/rust-analyzer", expected,
+                                  _binary_rust_analyzer_blob_zst_start,
+                                  _binary_rust_analyzer_blob_zst_end, install_attempted)) {
+      return RustAnalyzerLocation{binary_path.string(), RustAnalyzerLocation::Source::Bundled};
+    }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_RUST_ANALYZER
+    return std::nullopt;
+#endif
+  }
+#endif
+  if (const auto path_bin = find_named_binary_on_path("rust-analyzer"); path_bin.has_value()) {
+    return RustAnalyzerLocation{*path_bin, RustAnalyzerLocation::Source::SystemPath};
+  }
+  return std::nullopt;
+}
+
+std::optional<GoplsLocation> resolve_gopls() {
+  if (const auto env_path = env_executable("TGDB_GOPLS"); env_path.has_value()) {
+    return GoplsLocation{*env_path, GoplsLocation::Source::Env};
+  }
+#ifdef TGDB_HAS_BUNDLED_GOPLS
+  {
+    const fs::path install_root =
+        fs::path(bundled_cache_root()) / ("gopls-" TGDB_BUNDLED_GOPLS_VERSION);
+    const fs::path binary_path = install_root / "bin" / "gopls";
+    const std::string expected = std::string(TGDB_BUNDLED_GOPLS_BLOB_SHA256) + "\n";
+    static std::atomic<bool> install_attempted{false};
+    if (lazy_extract_bundled_tree(install_root, "bin/gopls", expected,
+                                  _binary_gopls_blob_zst_start, _binary_gopls_blob_zst_end,
+                                  install_attempted)) {
+      return GoplsLocation{binary_path.string(), GoplsLocation::Source::Bundled};
+    }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_GOPLS
+    return std::nullopt;
+#endif
+  }
+#endif
+  if (const auto path_bin = find_named_binary_on_path("gopls"); path_bin.has_value()) {
+    return GoplsLocation{*path_bin, GoplsLocation::Source::SystemPath};
+  }
+  return std::nullopt;
+}
+
+std::optional<ZlsLocation> resolve_zls() {
+  if (const auto env_path = env_executable("TGDB_ZLS"); env_path.has_value()) {
+    return ZlsLocation{*env_path, ZlsLocation::Source::Env};
+  }
+#ifdef TGDB_HAS_BUNDLED_ZLS
+  {
+    const fs::path install_root =
+        fs::path(bundled_cache_root()) / ("zls-" TGDB_BUNDLED_ZLS_VERSION);
+    const fs::path binary_path = install_root / "bin" / "zls";
+    const std::string expected = std::string(TGDB_BUNDLED_ZLS_BLOB_SHA256) + "\n";
+    static std::atomic<bool> install_attempted{false};
+    if (lazy_extract_bundled_tree(install_root, "bin/zls", expected, _binary_zls_blob_zst_start,
+                                  _binary_zls_blob_zst_end, install_attempted)) {
+      return ZlsLocation{binary_path.string(), ZlsLocation::Source::Bundled};
+    }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_ZLS
+    return std::nullopt;
+#endif
+  }
+#endif
+  if (const auto path_bin = find_named_binary_on_path("zls"); path_bin.has_value()) {
+    return ZlsLocation{*path_bin, ZlsLocation::Source::SystemPath};
+  }
+  return std::nullopt;
+}
+
+std::optional<FortlsLocation> resolve_fortls() {
+  if (const auto env_path = env_executable("TGDB_FORTLS"); env_path.has_value()) {
+    FortlsLocation loc;
+    loc.binary_path = *env_path;
+    loc.source = FortlsLocation::Source::Env;
+    return loc;
+  }
+#ifdef TGDB_HAS_BUNDLED_FORTLS
+  {
+    const fs::path install_root =
+        fs::path(bundled_cache_root()) / ("fortls-" TGDB_BUNDLED_FORTLS_VERSION);
+    const fs::path binary_path = install_root / "bin" / "fortls";
+    const std::string expected = std::string(TGDB_BUNDLED_FORTLS_BLOB_SHA256) + "\n";
+    static std::atomic<bool> install_attempted{false};
+    if (lazy_extract_bundled_tree(install_root, "bin/fortls", expected,
+                                  _binary_fortls_blob_zst_start, _binary_fortls_blob_zst_end,
+                                  install_attempted)) {
+      return FortlsLocation{binary_path.string(), false, {}, FortlsLocation::Source::Bundled};
+    }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_FORTLS
+    return std::nullopt;
+#endif
+  }
+#endif
+  if (const auto path_bin = find_named_binary_on_path("fortls"); path_bin.has_value()) {
+    return FortlsLocation{*path_bin, false, {}, FortlsLocation::Source::SystemPath};
+  }
+  static const char* kPythons[] = {"python3", "python"};
+  for (const char* name : kPythons) {
+    if (const auto path_bin = find_named_binary_on_path(name); path_bin.has_value()) {
+      if (python_module_importable(*path_bin, "fortls")) {
+        FortlsLocation loc;
+        loc.binary_path = *path_bin;
+        loc.use_python_module = true;
+        loc.python_module = "fortls";
+        loc.source = FortlsLocation::Source::SystemPath;
+        return loc;
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<LuaLsLocation> resolve_lua_language_server() {
+  if (const auto env_path = env_executable("TGDB_LUA_LS"); env_path.has_value()) {
+    return LuaLsLocation{*env_path, LuaLsLocation::Source::Env};
+  }
+#ifdef TGDB_HAS_BUNDLED_LUA_LS
+  {
+    const fs::path install_root =
+        fs::path(bundled_cache_root()) / ("lua-language-server-" TGDB_BUNDLED_LUA_LS_VERSION);
+    const fs::path binary_path = install_root / "bin" / "lua-language-server";
+    const std::string expected = std::string(TGDB_BUNDLED_LUA_LS_BLOB_SHA256) + "\n";
+    static std::atomic<bool> install_attempted{false};
+    if (lazy_extract_bundled_tree(install_root, "bin/lua-language-server", expected,
+                                  _binary_lua_ls_blob_zst_start, _binary_lua_ls_blob_zst_end,
+                                  install_attempted)) {
+      return LuaLsLocation{binary_path.string(), LuaLsLocation::Source::Bundled};
+    }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_LUA_LS
+    return std::nullopt;
+#endif
+  }
+#endif
+  static const char* kCandidates[] = {"lua-language-server", "lua-language-server.exe"};
+  for (const char* name : kCandidates) {
+    if (const auto path_bin = find_named_binary_on_path(name); path_bin.has_value()) {
+      return LuaLsLocation{*path_bin, LuaLsLocation::Source::SystemPath};
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<TypescriptLsLocation> resolve_typescript_language_server() {
+  if (const auto env_path = env_executable("TGDB_TYPESCRIPT_LS"); env_path.has_value()) {
+    TypescriptLsLocation loc;
+    loc.binary_path = *env_path;
+    loc.needs_stdio_flag = true;
+    loc.source = TypescriptLsLocation::Source::Env;
+    return loc;
+  }
+#ifdef TGDB_HAS_BUNDLED_TSSERVER
+  {
+    const fs::path install_root = fs::path(bundled_cache_root()) /
+                                  ("typescript-ls-" TGDB_BUNDLED_TYPESCRIPT_LS_VERSION);
+    const fs::path binary_path = install_root / "bin" / "typescript-language-server";
+    const std::string expected = std::string(TGDB_BUNDLED_TYPESCRIPT_LS_BLOB_SHA256) + "\n";
+    static std::atomic<bool> install_attempted{false};
+    if (lazy_extract_bundled_tree(install_root, "bin/typescript-language-server", expected,
+                                  _binary_typescript_ls_blob_zst_start,
+                                  _binary_typescript_ls_blob_zst_end, install_attempted)) {
+      TypescriptLsLocation loc;
+      loc.binary_path = binary_path.string();
+      loc.needs_stdio_flag = true;
+      loc.source = TypescriptLsLocation::Source::Bundled;
+      return loc;
+    }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_TSSERVER
+    return std::nullopt;
+#endif
+  }
+#endif
+  if (const auto path_bin = find_named_binary_on_path("typescript-language-server");
+      path_bin.has_value()) {
+    TypescriptLsLocation loc;
+    loc.binary_path = *path_bin;
+    loc.needs_stdio_flag = true;
+    loc.source = TypescriptLsLocation::Source::SystemPath;
+    return loc;
+  }
+  const auto node = [&]() -> std::optional<std::string> {
+    if (const auto env = env_executable("TGDB_NODE_BIN"); env.has_value()) {
+      return env;
+    }
+    return find_named_binary_on_path("node");
+  }();
+  if (node.has_value()) {
+    const fs::path node_path = *node;
+    const std::array<fs::path, 3> candidates = {
+        node_path.parent_path().parent_path() / "lib" / "node_modules" /
+            "typescript-language-server" / "lib" / "cli.js",
+        node_path.parent_path() / "node_modules" / "typescript-language-server" / "lib" / "cli.js",
+        fs::path("/usr/lib/node_modules/typescript-language-server/lib/cli.js"),
+    };
+    for (const fs::path& script : candidates) {
+      if (readable_file(script.string())) {
+        TypescriptLsLocation loc;
+        loc.binary_path = *node;
+        loc.needs_stdio_flag = false;
+        loc.use_node_script = true;
+        loc.script_path = script.string();
+        loc.source = TypescriptLsLocation::Source::SystemPath;
+        return loc;
+      }
+    }
+  }
+  return std::nullopt;
 }
 
 std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {

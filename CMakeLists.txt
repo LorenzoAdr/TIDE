@@ -25,6 +25,29 @@ set(TGDB_TREE_SITTER_INCLUDE_DIRS
   ${tree_sitter_python_SOURCE_DIR}/bindings/c
   ${tree_sitter_bash_SOURCE_DIR}/bindings/c
   ${tree_sitter_latex_SOURCE_DIR}/bindings/c
+  ${tree_sitter_rust_SOURCE_DIR}/bindings/c
+  ${tree_sitter_go_SOURCE_DIR}/bindings/c
+  ${tree_sitter_zig_SOURCE_DIR}/bindings/c
+  ${tree_sitter_fortran_SOURCE_DIR}/bindings/c
+  ${tree_sitter_lua_SOURCE_DIR}/bindings/c
+  ${tree_sitter_javascript_SOURCE_DIR}/bindings/c
+  ${tree_sitter_typescript_SOURCE_DIR}/bindings/c
+  ${CMAKE_BINARY_DIR}/generated
+)
+
+set(TGDB_TREE_SITTER_GRAMMAR_LIBS
+  tree-sitter
+  tree-sitter-cpp
+  tree-sitter-python
+  tree-sitter-bash
+  tree-sitter-latex
+  tree-sitter-rust
+  tree-sitter-go
+  tree-sitter-zig
+  tree-sitter-fortran
+  tree-sitter-lua
+  tree-sitter-javascript
+  tree-sitter-typescript
 )
 
 set(TGDB_TREE_SITTER_SOURCES
@@ -56,7 +79,7 @@ function(tgdb_link_tree_sitter target)
     ${cppdap_SOURCE_DIR}/third_party/json/include
   )
   target_link_libraries(${target} PRIVATE
-    tree-sitter tree-sitter-cpp tree-sitter-python tree-sitter-bash tree-sitter-latex ftxui::dom)
+    ${TGDB_TREE_SITTER_GRAMMAR_LIBS} ftxui::dom)
 endfunction()
 
 add_executable(tgdb
@@ -258,11 +281,7 @@ target_link_libraries(tgdb PRIVATE
   ftxui::dom
   ftxui::screen
   cppdap
-  tree-sitter
-  tree-sitter-cpp
-  tree-sitter-python
-  tree-sitter-bash
-  tree-sitter-latex
+  ${TGDB_TREE_SITTER_GRAMMAR_LIBS}
   Threads::Threads
 )
 
@@ -326,6 +345,24 @@ if(TGDB_BUNDLE_TEXLAB)
 endif()
 if(TGDB_BUNDLE_BASH_DAP)
   include(cmake/BundleBashDap.cmake)
+endif()
+if(TGDB_BUNDLE_RUST_ANALYZER)
+  include(cmake/BundleRustAnalyzer.cmake)
+endif()
+if(TGDB_BUNDLE_GOPLS)
+  include(cmake/BundleGopls.cmake)
+endif()
+if(TGDB_BUNDLE_ZLS)
+  include(cmake/BundleZls.cmake)
+endif()
+if(TGDB_BUNDLE_LUA_LS)
+  include(cmake/BundleLuaLs.cmake)
+endif()
+if(TGDB_BUNDLE_FORTLS)
+  include(cmake/BundleFortls.cmake)
+endif()
+if(TGDB_BUNDLE_TSSERVER)
+  include(cmake/BundleTypescriptLs.cmake)
 endif()
 
 add_executable(tgdb-bundle-wizard tools/bundle_wizard/main.cpp)

@@ -7,6 +7,7 @@
 #include <set>
 
 #include "ftxui/dom/elements.hpp"
+#include "tree_sitter_grammar_queries.gen.hpp"
 #include "parser/tree_sitter_language.hpp"
 #include "util/syntax_highlight.hpp"
 #include "util/syntax_scope.hpp"
@@ -354,48 +355,61 @@ const char* kEmbeddedLatexHighlightsQuery = R"scm(
 )scm";
 
 TSQuery* highlight_query_for_lang(TreeSitterLangKind lang) {
-  if (lang == TreeSitterLangKind::kPython) {
-    static TSQuery* py_query = nullptr;
-    static uint32_t py_error_offset = 0;
-    static TSQueryError py_error_type = TSQueryErrorNone;
-    if (py_query == nullptr) {
-      py_query = ts_query_new(tree_sitter_python_language(), kEmbeddedPythonHighlightsQuery,
-                             static_cast<uint32_t>(std::strlen(kEmbeddedPythonHighlightsQuery)),
-                             &py_error_offset, &py_error_type);
+  auto cached_query = [](TSQuery** slot, const TSLanguage* language, const char* source) -> TSQuery* {
+    if (*slot == nullptr && source != nullptr && source[0] != '\0') {
+      uint32_t error_offset = 0;
+      TSQueryError error_type = TSQueryErrorNone;
+      *slot = ts_query_new(language, source, static_cast<uint32_t>(std::strlen(source)), &error_offset,
+                           &error_type);
     }
-    return py_query;
+    return *slot;
+  };
+
+  if (lang == TreeSitterLangKind::kPython) {
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_python_language(), kEmbeddedPythonHighlightsQuery);
   }
   if (lang == TreeSitterLangKind::kBash) {
-    static TSQuery* bash_query = nullptr;
-    static uint32_t bash_error_offset = 0;
-    static TSQueryError bash_error_type = TSQueryErrorNone;
-    if (bash_query == nullptr) {
-      bash_query = ts_query_new(tree_sitter_bash_language(), kEmbeddedBashHighlightsQuery,
-                                static_cast<uint32_t>(std::strlen(kEmbeddedBashHighlightsQuery)),
-                                &bash_error_offset, &bash_error_type);
-    }
-    return bash_query;
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_bash_language(), kEmbeddedBashHighlightsQuery);
   }
   if (lang == TreeSitterLangKind::kLatex) {
-    static TSQuery* latex_query = nullptr;
-    static uint32_t latex_error_offset = 0;
-    static TSQueryError latex_error_type = TSQueryErrorNone;
-    if (latex_query == nullptr) {
-      latex_query = ts_query_new(tree_sitter_latex_language(), kEmbeddedLatexHighlightsQuery,
-                                 static_cast<uint32_t>(std::strlen(kEmbeddedLatexHighlightsQuery)),
-                                 &latex_error_offset, &latex_error_type);
-    }
-    return latex_query;
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_latex_language(), kEmbeddedLatexHighlightsQuery);
+  }
+  if (lang == TreeSitterLangKind::kRust) {
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_rust_language(), tree_sitter_queries::rust());
+  }
+  if (lang == TreeSitterLangKind::kGo) {
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_go_language(), tree_sitter_queries::go());
+  }
+  if (lang == TreeSitterLangKind::kZig) {
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_zig_language(), tree_sitter_queries::zig());
+  }
+  if (lang == TreeSitterLangKind::kFortran) {
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_fortran_language(), tree_sitter_queries::fortran());
+  }
+  if (lang == TreeSitterLangKind::kLua) {
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_lua_language(), tree_sitter_queries::lua());
+  }
+  if (lang == TreeSitterLangKind::kJavaScript) {
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_javascript_language(), tree_sitter_queries::javascript());
+  }
+  if (lang == TreeSitterLangKind::kTypeScript) {
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_typescript_language(), tree_sitter_queries::typescript());
+  }
+  if (lang == TreeSitterLangKind::kNone) {
+    return nullptr;
   }
   static TSQuery* query = nullptr;
-  static uint32_t error_offset = 0;
-  static TSQueryError error_type = TSQueryErrorNone;
-  if (query == nullptr) {
-    query = ts_query_new(tree_sitter_cpp_language(), kEmbeddedHighlightsQuery,
-                         static_cast<uint32_t>(std::strlen(kEmbeddedHighlightsQuery)), &error_offset,
-                         &error_type);
-  }
-  return query;
+  return cached_query(&query, tree_sitter_cpp_language(), kEmbeddedHighlightsQuery);
 }
 
 TSQuery* highlight_query() {

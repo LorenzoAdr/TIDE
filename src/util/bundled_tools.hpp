@@ -44,6 +44,41 @@ struct TexlabLocation {
   enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
 };
 
+struct RustAnalyzerLocation {
+  std::string binary_path;
+  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+};
+
+struct GoplsLocation {
+  std::string binary_path;
+  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+};
+
+struct ZlsLocation {
+  std::string binary_path;
+  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+};
+
+struct FortlsLocation {
+  std::string binary_path;
+  bool use_python_module = false;
+  std::string python_module;
+  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+};
+
+struct LuaLsLocation {
+  std::string binary_path;
+  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+};
+
+struct TypescriptLsLocation {
+  std::string binary_path;
+  bool needs_stdio_flag = true;
+  bool use_node_script = false;
+  std::string script_path;
+  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+};
+
 struct BashDebugAdapterLocation {
   std::string node_path;
   std::string adapter_js_path;
@@ -75,6 +110,12 @@ std::optional<BasedpyrightLocation> resolve_basedpyright();
 std::optional<DebugpyLocation> resolve_debugpy();
 std::optional<BashLsLocation> resolve_bash_language_server();
 std::optional<TexlabLocation> resolve_texlab();
+std::optional<RustAnalyzerLocation> resolve_rust_analyzer();
+std::optional<GoplsLocation> resolve_gopls();
+std::optional<ZlsLocation> resolve_zls();
+std::optional<FortlsLocation> resolve_fortls();
+std::optional<LuaLsLocation> resolve_lua_language_server();
+std::optional<TypescriptLsLocation> resolve_typescript_language_server();
 std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter();
 std::optional<std::string> resolve_shellcheck();
 std::optional<std::string> resolve_chktex();

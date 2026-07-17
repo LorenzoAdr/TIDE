@@ -35,6 +35,18 @@ struct LspRuntimeFlags {
   bool bash_starting = false;
   bool tex_ready = false;
   bool tex_starting = false;
+  bool rust_ready = false;
+  bool rust_starting = false;
+  bool go_ready = false;
+  bool go_starting = false;
+  bool zig_ready = false;
+  bool zig_starting = false;
+  bool fortran_ready = false;
+  bool fortran_starting = false;
+  bool lua_ready = false;
+  bool lua_starting = false;
+  bool typescript_ready = false;
+  bool typescript_starting = false;
 };
 
 // Resolves binaries and combines with live LSP runtime flags.

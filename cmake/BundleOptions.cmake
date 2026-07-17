@@ -32,6 +32,26 @@ option(TGDB_BUNDLE_BASH_DAP "Embed Bash DAP adapter + bashdb (+ Node unless BASH
 option(TGDB_FORCE_BUNDLED_BASH_DAP
        "Prefer embedded Bash DAP (requires TGDB_BUNDLE_BASH_DAP)" OFF)
 
+option(TGDB_BUNDLE_RUST_ANALYZER "Embed rust-analyzer Linux x86_64 release" OFF)
+option(TGDB_FORCE_BUNDLED_RUST_ANALYZER
+       "Prefer embedded rust-analyzer (requires TGDB_BUNDLE_RUST_ANALYZER)" OFF)
+option(TGDB_BUNDLE_GOPLS "Embed gopls Linux x86_64 (go install at bundle time)" OFF)
+option(TGDB_FORCE_BUNDLED_GOPLS
+       "Prefer embedded gopls (requires TGDB_BUNDLE_GOPLS)" OFF)
+option(TGDB_BUNDLE_ZLS "Embed zls Linux x86_64 release" OFF)
+option(TGDB_FORCE_BUNDLED_ZLS
+       "Prefer embedded zls (requires TGDB_BUNDLE_ZLS)" OFF)
+option(TGDB_BUNDLE_LUA_LS "Embed lua-language-server Linux x86_64 release" OFF)
+option(TGDB_FORCE_BUNDLED_LUA_LS
+       "Prefer embedded lua-language-server (requires TGDB_BUNDLE_LUA_LS)" OFF)
+option(TGDB_BUNDLE_FORTLS "Embed fortls (site-packages; host python3 at runtime)" OFF)
+option(TGDB_FORCE_BUNDLED_FORTLS
+       "Prefer embedded fortls (requires TGDB_BUNDLE_FORTLS)" OFF)
+option(TGDB_BUNDLE_TSSERVER
+       "Embed typescript-language-server + Node Linux x86_64" OFF)
+option(TGDB_FORCE_BUNDLED_TSSERVER
+       "Prefer embedded typescript-language-server (requires TGDB_BUNDLE_TSSERVER)" OFF)
+
 set(TGDB_CLANGD_VERSION "19.1.2" CACHE STRING "clangd release version to bundle")
 set(TGDB_GDB_STATIC_VERSION "v16.3-static" CACHE STRING "gdb-static release tag")
 set(TGDB_GDB_CA_VERSION "16.3-ca" CACHE STRING "gdb+core_analyzer bundle version tag")
@@ -51,6 +71,18 @@ set(TGDB_BASH_LS_NPM_VERSION "5.6.0" CACHE STRING "bash-language-server npm vers
 set(TGDB_BASH_LS_VERSION "${TGDB_BASH_LS_NPM_VERSION}" CACHE STRING "bash-ls bundle tag")
 set(TGDB_BASH_DAP_VERSION "0.3.9" CACHE STRING "bash DAP adapter bundle tag")
 set(TGDB_NODE_VERSION "22.16.0" CACHE STRING "Node.js version for Bash LS/DAP blobs")
+set(TGDB_RUST_ANALYZER_VERSION "2025-12-29" CACHE STRING
+    "rust-analyzer dated release tag to bundle")
+set(TGDB_GOPLS_VERSION "v0.23.0" CACHE STRING "gopls module version (go install)")
+set(TGDB_ZLS_VERSION "0.16.0" CACHE STRING "zls release version to bundle")
+set(TGDB_LUA_LS_VERSION "3.18.2" CACHE STRING "lua-language-server release version to bundle")
+set(TGDB_FORTLS_VERSION "3.2.2" CACHE STRING "fortls PyPI version to bundle")
+set(TGDB_TYPESCRIPT_LS_NPM_VERSION "5.3.0" CACHE STRING
+    "typescript-language-server npm version")
+set(TGDB_TYPESCRIPT_VERSION "7.0.2" CACHE STRING "typescript npm version bundled with tsserver")
+set(TGDB_TYPESCRIPT_LS_VERSION
+    "${TGDB_TYPESCRIPT_LS_NPM_VERSION}+ts${TGDB_TYPESCRIPT_VERSION}" CACHE STRING
+    "typescript-language-server bundle tag")
 
 if(TGDB_BUNDLE_PYTHON_TOOLS AND TGDB_BUNDLE_PYTHON_LSP_MIN)
   message(WARNING
@@ -137,11 +169,32 @@ if(TGDB_FORCE_BUNDLED_BASH_DAP AND NOT TGDB_BUNDLE_BASH_DAP)
   message(FATAL_ERROR "TGDB_FORCE_BUNDLED_BASH_DAP requires TGDB_BUNDLE_BASH_DAP=ON")
 endif()
 
-if(TGDB_BUNDLE_BASH_LS OR TGDB_BUNDLE_TEXLAB OR TGDB_BUNDLE_BASH_DAP)
+if(TGDB_FORCE_BUNDLED_RUST_ANALYZER AND NOT TGDB_BUNDLE_RUST_ANALYZER)
+  message(FATAL_ERROR "TGDB_FORCE_BUNDLED_RUST_ANALYZER requires TGDB_BUNDLE_RUST_ANALYZER=ON")
+endif()
+if(TGDB_FORCE_BUNDLED_GOPLS AND NOT TGDB_BUNDLE_GOPLS)
+  message(FATAL_ERROR "TGDB_FORCE_BUNDLED_GOPLS requires TGDB_BUNDLE_GOPLS=ON")
+endif()
+if(TGDB_FORCE_BUNDLED_ZLS AND NOT TGDB_BUNDLE_ZLS)
+  message(FATAL_ERROR "TGDB_FORCE_BUNDLED_ZLS requires TGDB_BUNDLE_ZLS=ON")
+endif()
+if(TGDB_FORCE_BUNDLED_LUA_LS AND NOT TGDB_BUNDLE_LUA_LS)
+  message(FATAL_ERROR "TGDB_FORCE_BUNDLED_LUA_LS requires TGDB_BUNDLE_LUA_LS=ON")
+endif()
+if(TGDB_FORCE_BUNDLED_FORTLS AND NOT TGDB_BUNDLE_FORTLS)
+  message(FATAL_ERROR "TGDB_FORCE_BUNDLED_FORTLS requires TGDB_BUNDLE_FORTLS=ON")
+endif()
+if(TGDB_FORCE_BUNDLED_TSSERVER AND NOT TGDB_BUNDLE_TSSERVER)
+  message(FATAL_ERROR "TGDB_FORCE_BUNDLED_TSSERVER requires TGDB_BUNDLE_TSSERVER=ON")
+endif()
+
+if(TGDB_BUNDLE_BASH_LS OR TGDB_BUNDLE_TEXLAB OR TGDB_BUNDLE_BASH_DAP
+   OR TGDB_BUNDLE_RUST_ANALYZER OR TGDB_BUNDLE_GOPLS OR TGDB_BUNDLE_ZLS
+   OR TGDB_BUNDLE_LUA_LS OR TGDB_BUNDLE_FORTLS OR TGDB_BUNDLE_TSSERVER)
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "Bash/TeX tooling bundles are only supported on Linux")
+    message(FATAL_ERROR "Embedded tooling bundles are only supported on Linux")
   endif()
   if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
-    message(FATAL_ERROR "Bash/TeX tooling bundles are only supported on x86_64")
+    message(FATAL_ERROR "Embedded tooling bundles are only supported on x86_64")
   endif()
 endif()

@@ -158,6 +158,80 @@ ToolsStatusSnapshot collect_tools_status(const LspRuntimeFlags& lsp) {
       "texlab", "settings.status.tool.texlab", lsp.lsp_enabled, lsp.tex_ready, lsp.tex_starting,
       tex_detail, tex_bin));
 
+  std::optional<std::string> rust_detail;
+  bool rust_bin = false;
+  if (const auto loc = resolve_rust_analyzer(); loc.has_value()) {
+    rust_bin = true;
+    rust_detail = detail_from_location(*loc);
+  }
+  snap.language_servers.push_back(make_lsp_entry(
+      "rust-analyzer", "settings.status.tool.rust_analyzer", lsp.lsp_enabled, lsp.rust_ready,
+      lsp.rust_starting, rust_detail, rust_bin));
+
+  std::optional<std::string> go_detail;
+  bool go_bin = false;
+  if (const auto loc = resolve_gopls(); loc.has_value()) {
+    go_bin = true;
+    go_detail = detail_from_location(*loc);
+  }
+  snap.language_servers.push_back(make_lsp_entry(
+      "gopls", "settings.status.tool.gopls", lsp.lsp_enabled, lsp.go_ready, lsp.go_starting,
+      go_detail, go_bin));
+
+  std::optional<std::string> zig_detail;
+  bool zig_bin = false;
+  if (const auto loc = resolve_zls(); loc.has_value()) {
+    zig_bin = true;
+    zig_detail = detail_from_location(*loc);
+  }
+  snap.language_servers.push_back(make_lsp_entry(
+      "zls", "settings.status.tool.zls", lsp.lsp_enabled, lsp.zig_ready, lsp.zig_starting,
+      zig_detail, zig_bin));
+
+  std::optional<std::string> fortran_detail;
+  bool fortran_bin = false;
+  if (const auto loc = resolve_fortls(); loc.has_value()) {
+    fortran_bin = true;
+    fortran_detail = loc->binary_path;
+    if (loc->use_python_module) {
+      fortran_detail = *fortran_detail + " -m " + (loc->python_module.empty() ? "fortls" : loc->python_module);
+    }
+    const std::string src = source_label<FortlsLocation>(loc->source);
+    if (!src.empty()) {
+      *fortran_detail += "  [" + src + "]";
+    }
+  }
+  snap.language_servers.push_back(make_lsp_entry(
+      "fortls", "settings.status.tool.fortls", lsp.lsp_enabled, lsp.fortran_ready,
+      lsp.fortran_starting, fortran_detail, fortran_bin));
+
+  std::optional<std::string> lua_detail;
+  bool lua_bin = false;
+  if (const auto loc = resolve_lua_language_server(); loc.has_value()) {
+    lua_bin = true;
+    lua_detail = detail_from_location(*loc);
+  }
+  snap.language_servers.push_back(make_lsp_entry(
+      "lua-language-server", "settings.status.tool.lua_ls", lsp.lsp_enabled, lsp.lua_ready,
+      lsp.lua_starting, lua_detail, lua_bin));
+
+  std::optional<std::string> typescript_detail;
+  bool typescript_bin = false;
+  if (const auto loc = resolve_typescript_language_server(); loc.has_value()) {
+    typescript_bin = true;
+    typescript_detail = loc->binary_path;
+    if (loc->use_node_script && !loc->script_path.empty()) {
+      typescript_detail = *typescript_detail + " " + loc->script_path;
+    }
+    const std::string src = source_label<TypescriptLsLocation>(loc->source);
+    if (!src.empty()) {
+      *typescript_detail += "  [" + src + "]";
+    }
+  }
+  snap.language_servers.push_back(make_lsp_entry(
+      "typescript-language-server", "settings.status.tool.typescript_ls", lsp.lsp_enabled,
+      lsp.typescript_ready, lsp.typescript_starting, typescript_detail, typescript_bin));
+
   if (const auto chktex = resolve_chktex(); chktex.has_value()) {
     ToolStatusEntry entry;
     entry.id = "chktex";

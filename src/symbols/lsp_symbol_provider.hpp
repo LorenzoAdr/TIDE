@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -100,10 +101,22 @@ class LspSymbolProvider : public ISymbolProvider {
   bool python_lsp_ready() const;
   bool bash_lsp_ready() const;
   bool tex_lsp_ready() const;
+  bool rust_lsp_ready() const;
+  bool go_lsp_ready() const;
+  bool zig_lsp_ready() const;
+  bool fortran_lsp_ready() const;
+  bool lua_lsp_ready() const;
+  bool typescript_lsp_ready() const;
   bool clangd_starting() const;
   bool python_lsp_starting() const;
   bool bash_lsp_starting() const;
   bool tex_lsp_starting() const;
+  bool rust_lsp_starting() const;
+  bool go_lsp_starting() const;
+  bool zig_lsp_starting() const;
+  bool fortran_lsp_starting() const;
+  bool lua_lsp_starting() const;
+  bool typescript_lsp_starting() const;
 
   void set_lsp_enabled(bool enabled);
   bool lsp_enabled() const;
@@ -140,15 +153,49 @@ class LspSymbolProvider : public ISymbolProvider {
   void ensure_python_lsp_async();
   void ensure_bash_lsp_async();
   void ensure_tex_lsp_async();
+  void ensure_rust_lsp_async();
+  void ensure_go_lsp_async();
+  void ensure_zig_lsp_async();
+  void ensure_fortran_lsp_async();
+  void ensure_lua_lsp_async();
+  void ensure_typescript_lsp_async();
   void finish_lsp_start_locked(bool ok);
   void finish_python_lsp_start_locked(bool ok, bool binary_missing);
   void finish_bash_lsp_start_locked(bool ok, bool binary_missing);
   void finish_tex_lsp_start_locked(bool ok, bool binary_missing);
+  void finish_rust_lsp_start_locked(bool ok, bool binary_missing);
+  void finish_go_lsp_start_locked(bool ok, bool binary_missing);
+  void finish_zig_lsp_start_locked(bool ok, bool binary_missing);
+  void finish_fortran_lsp_start_locked(bool ok, bool binary_missing);
+  void finish_lua_lsp_start_locked(bool ok, bool binary_missing);
+  void finish_typescript_lsp_start_locked(bool ok, bool binary_missing);
   void notify_lsp_status(const char* i18n_key);
   void join_startup_thread();
   void join_python_startup_thread();
   void join_bash_startup_thread();
   void join_tex_startup_thread();
+  void join_rust_startup_thread();
+  void join_go_startup_thread();
+  void join_zig_startup_thread();
+  void join_fortran_startup_thread();
+  void join_lua_startup_thread();
+  void join_typescript_startup_thread();
+  struct SimpleLazyLspConfig {
+    const char* thread_name;
+    const char* language_id;
+    const char* missing_i18n;
+    const char* failed_i18n;
+    const char* started_i18n;
+    const char* monitor_message;
+    std::function<std::optional<LanguageServerSpec>(const std::string&)> make_spec;
+  };
+  void finish_simple_lazy_lsp_start_locked(std::unique_ptr<LspClient>& client,
+                                           const SimpleLazyLspConfig& cfg, bool ok,
+                                           bool binary_missing);
+  void ensure_simple_lazy_lsp_async(std::unique_ptr<LspClient>& client,
+                                    std::atomic<bool>& starting, std::thread& startup_thread,
+                                    const SimpleLazyLspConfig& cfg,
+                                    void (LspSymbolProvider::*finish_fn)(bool, bool));
   void stop_lsp();
   void stop_lsp_locked_finalize();
   void restart_lsp_after_transport_failure();
@@ -187,6 +234,12 @@ class LspSymbolProvider : public ISymbolProvider {
   std::unique_ptr<LspClient> python_client_;  // basedpyright (lazy)
   std::unique_ptr<LspClient> bash_client_;    // bash-language-server (lazy)
   std::unique_ptr<LspClient> tex_client_;     // texlab (lazy)
+  std::unique_ptr<LspClient> rust_client_;
+  std::unique_ptr<LspClient> go_client_;
+  std::unique_ptr<LspClient> zig_client_;
+  std::unique_ptr<LspClient> fortran_client_;
+  std::unique_ptr<LspClient> lua_client_;
+  std::unique_ptr<LspClient> typescript_client_;
   TreeSitterSymbolProvider fallback_;
   bool lsp_enabled_ = true;
   bool use_gcc_query_driver_ = true;
@@ -207,10 +260,22 @@ class LspSymbolProvider : public ISymbolProvider {
   std::thread python_lsp_startup_thread_;
   std::thread bash_lsp_startup_thread_;
   std::thread tex_lsp_startup_thread_;
+  std::thread rust_lsp_startup_thread_;
+  std::thread go_lsp_startup_thread_;
+  std::thread zig_lsp_startup_thread_;
+  std::thread fortran_lsp_startup_thread_;
+  std::thread lua_lsp_startup_thread_;
+  std::thread typescript_lsp_startup_thread_;
   std::atomic<bool> lsp_starting_{false};
   std::atomic<bool> python_lsp_starting_{false};
   std::atomic<bool> bash_lsp_starting_{false};
   std::atomic<bool> tex_lsp_starting_{false};
+  std::atomic<bool> rust_lsp_starting_{false};
+  std::atomic<bool> go_lsp_starting_{false};
+  std::atomic<bool> zig_lsp_starting_{false};
+  std::atomic<bool> fortran_lsp_starting_{false};
+  std::atomic<bool> lua_lsp_starting_{false};
+  std::atomic<bool> typescript_lsp_starting_{false};
   std::atomic<bool> async_stop_{false};
   mutable std::mutex inflight_mutex_;
   std::unordered_set<std::string> inflight_symbols_;

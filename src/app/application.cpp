@@ -2510,6 +2510,18 @@ int Application::run() {
 			flags.bash_starting = symbol_provider_->bash_lsp_starting();
 			flags.tex_ready = symbol_provider_->tex_lsp_ready();
 			flags.tex_starting = symbol_provider_->tex_lsp_starting();
+			flags.rust_ready = symbol_provider_->rust_lsp_ready();
+			flags.rust_starting = symbol_provider_->rust_lsp_starting();
+			flags.go_ready = symbol_provider_->go_lsp_ready();
+			flags.go_starting = symbol_provider_->go_lsp_starting();
+			flags.zig_ready = symbol_provider_->zig_lsp_ready();
+			flags.zig_starting = symbol_provider_->zig_lsp_starting();
+			flags.fortran_ready = symbol_provider_->fortran_lsp_ready();
+			flags.fortran_starting = symbol_provider_->fortran_lsp_starting();
+			flags.lua_ready = symbol_provider_->lua_lsp_ready();
+			flags.lua_starting = symbol_provider_->lua_lsp_starting();
+			flags.typescript_ready = symbol_provider_->typescript_lsp_ready();
+			flags.typescript_starting = symbol_provider_->typescript_lsp_starting();
 		}
 		return collect_tools_status(flags);
 	};

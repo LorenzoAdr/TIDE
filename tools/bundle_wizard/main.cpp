@@ -1,7 +1,7 @@
 #include <cstdio>
 #include <fstream>
 #include <string>
-#include <utility>
+#include <vector>
 
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
@@ -10,19 +10,20 @@
 
 namespace {
 
-constexpr int kBundleClangd = 0;
-constexpr int kForceClangd = 1;
-constexpr int kGdbKind = 2;
-constexpr int kForceGdb = 3;
-constexpr int kPythonKind = 4;
-constexpr int kForcePython = 5;
-constexpr int kBundleBashLs = 6;
-constexpr int kForceBashLs = 7;
-constexpr int kBundleTexlab = 8;
-constexpr int kForceTexlab = 9;
-constexpr int kBundleBashDap = 10;
-constexpr int kForceBashDap = 11;
-constexpr int kOptionCount = 12;
+constexpr int kLspClangd = 0;
+constexpr int kLspBashLs = 1;
+constexpr int kLspTexlab = 2;
+constexpr int kLspRustAnalyzer = 3;
+constexpr int kLspGopls = 4;
+constexpr int kLspZls = 5;
+constexpr int kLspFortls = 6;
+constexpr int kLspLuaLs = 7;
+constexpr int kLspTsserver = 8;
+constexpr int kDapGdb = 9;
+constexpr int kDapPython = 10;
+constexpr int kDapBashDap = 11;
+constexpr int kForceBundled = 12;
+constexpr int kOptionCount = 13;
 
 constexpr int kGdbNone = 0;
 constexpr int kGdbStatic = 1;
@@ -34,17 +35,18 @@ constexpr int kPythonFull = 2;
 
 struct BundleConfig {
   bool bundle_clangd = false;
-  bool force_clangd = false;
-  int gdb_kind = kGdbNone;
-  bool force_gdb = false;
-  int python_kind = kPythonNone;
-  bool force_python = false;
   bool bundle_bash_ls = false;
-  bool force_bash_ls = false;
   bool bundle_texlab = false;
-  bool force_texlab = false;
+  bool bundle_rust_analyzer = false;
+  bool bundle_gopls = false;
+  bool bundle_zls = false;
+  bool bundle_fortls = false;
+  bool bundle_lua_ls = false;
+  bool bundle_tsserver = false;
+  int gdb_kind = kGdbNone;
+  int python_kind = kPythonNone;
   bool bundle_bash_dap = false;
-  bool force_bash_dap = false;
+  bool force_bundled = false;
 };
 
 struct WizardState {
@@ -55,9 +57,9 @@ struct WizardState {
 std::string gdb_kind_label(int kind) {
   switch (kind) {
     case kGdbStatic:
-      return "gdb-static (musl, sin deps, sin Core Analyzer)";
+      return "gdb-static (musl)";
     case kGdbCoreAnalyzer:
-      return "gdb + Core Analyzer (obj/ref/heap, deps dinámicas)";
+      return "gdb + Core Analyzer";
     default:
       return "ninguno (gdb del sistema)";
   }
@@ -66,12 +68,16 @@ std::string gdb_kind_label(int kind) {
 std::string python_kind_label(int kind) {
   switch (kind) {
     case kPythonLspMin:
-      return "A: basedpyright (~+70–90 MB; Python del host)";
+      return "A: basedpyright (~+70–90 MB)";
     case kPythonFull:
       return "B: CPython + basedpyright + debugpy (~+90–120 MB)";
     default:
-      return "ninguno (herramientas Python del sistema)";
+      return "ninguno (herramientas del sistema)";
   }
+}
+
+bool parse_bool_value(const std::string& value) {
+  return value == "1";
 }
 
 void load_bundle_config(const std::string& path, BundleConfig* config) {
@@ -84,11 +90,12 @@ void load_bundle_config(const std::string& path, BundleConfig* config) {
   }
   std::string line;
   bool legacy_bundle_gdb = false;
+  bool legacy_force = false;
   while (std::getline(input, line)) {
     if (line.rfind("BUNDLE_CLANGD=", 0) == 0) {
-      config->bundle_clangd = line.substr(14) == "1";
+      config->bundle_clangd = parse_bool_value(line.substr(14));
     } else if (line.rfind("BUNDLE_CLANGD_FORCE=", 0) == 0) {
-      config->force_clangd = line.substr(20) == "1";
+      legacy_force = legacy_force || parse_bool_value(line.substr(20));
     } else if (line.rfind("GDB_BUNDLE_KIND=", 0) == 0) {
       const std::string kind = line.substr(16);
       if (kind == "static") {
@@ -99,9 +106,9 @@ void load_bundle_config(const std::string& path, BundleConfig* config) {
         config->gdb_kind = kGdbNone;
       }
     } else if (line.rfind("BUNDLE_GDB=", 0) == 0) {
-      legacy_bundle_gdb = line.substr(11) == "1";
+      legacy_bundle_gdb = parse_bool_value(line.substr(11));
     } else if (line.rfind("BUNDLE_GDB_FORCE=", 0) == 0) {
-      config->force_gdb = line.substr(17) == "1";
+      legacy_force = legacy_force || parse_bool_value(line.substr(17));
     } else if (line.rfind("PYTHON_BUNDLE_KIND=", 0) == 0) {
       const std::string kind = line.substr(19);
       if (kind == "lsp_min") {
@@ -112,23 +119,40 @@ void load_bundle_config(const std::string& path, BundleConfig* config) {
         config->python_kind = kPythonNone;
       }
     } else if (line.rfind("BUNDLE_PYTHON_FORCE=", 0) == 0) {
-      config->force_python = line.substr(20) == "1";
+      legacy_force = legacy_force || parse_bool_value(line.substr(20));
     } else if (line.rfind("BUNDLE_BASH_LS=", 0) == 0) {
-      config->bundle_bash_ls = line.substr(15) == "1";
+      config->bundle_bash_ls = parse_bool_value(line.substr(15));
     } else if (line.rfind("BUNDLE_BASH_LS_FORCE=", 0) == 0) {
-      config->force_bash_ls = line.substr(21) == "1";
+      legacy_force = legacy_force || parse_bool_value(line.substr(21));
     } else if (line.rfind("BUNDLE_TEXLAB=", 0) == 0) {
-      config->bundle_texlab = line.substr(14) == "1";
+      config->bundle_texlab = parse_bool_value(line.substr(14));
     } else if (line.rfind("BUNDLE_TEXLAB_FORCE=", 0) == 0) {
-      config->force_texlab = line.substr(20) == "1";
+      legacy_force = legacy_force || parse_bool_value(line.substr(20));
     } else if (line.rfind("BUNDLE_BASH_DAP=", 0) == 0) {
-      config->bundle_bash_dap = line.substr(16) == "1";
+      config->bundle_bash_dap = parse_bool_value(line.substr(16));
     } else if (line.rfind("BUNDLE_BASH_DAP_FORCE=", 0) == 0) {
-      config->force_bash_dap = line.substr(22) == "1";
+      legacy_force = legacy_force || parse_bool_value(line.substr(22));
+    } else if (line.rfind("BUNDLE_RUST_ANALYZER=", 0) == 0) {
+      config->bundle_rust_analyzer = parse_bool_value(line.substr(21));
+    } else if (line.rfind("BUNDLE_GOPLS=", 0) == 0) {
+      config->bundle_gopls = parse_bool_value(line.substr(13));
+    } else if (line.rfind("BUNDLE_ZLS=", 0) == 0) {
+      config->bundle_zls = parse_bool_value(line.substr(11));
+    } else if (line.rfind("BUNDLE_FORTLS=", 0) == 0) {
+      config->bundle_fortls = parse_bool_value(line.substr(14));
+    } else if (line.rfind("BUNDLE_LUA_LS=", 0) == 0) {
+      config->bundle_lua_ls = parse_bool_value(line.substr(14));
+    } else if (line.rfind("BUNDLE_TSSERVER=", 0) == 0) {
+      config->bundle_tsserver = parse_bool_value(line.substr(16));
+    } else if (line.rfind("FORCE_BUNDLED=", 0) == 0) {
+      config->force_bundled = parse_bool_value(line.substr(14));
     }
   }
   if (config->gdb_kind == kGdbNone && legacy_bundle_gdb) {
     config->gdb_kind = kGdbStatic;
+  }
+  if (legacy_force) {
+    config->force_bundled = true;
   }
 }
 
@@ -150,45 +174,89 @@ bool save_bundle_config(const std::string& path, const BundleConfig& config) {
     python_kind_name = "full";
   }
   output << "BUNDLE_CLANGD=" << (config.bundle_clangd ? "1" : "0") << '\n';
-  output << "BUNDLE_CLANGD_FORCE=" << (config.force_clangd ? "1" : "0") << '\n';
   output << "GDB_BUNDLE_KIND=" << kind_name << '\n';
   output << "BUNDLE_GDB=" << (config.gdb_kind != kGdbNone ? "1" : "0") << '\n';
-  output << "BUNDLE_GDB_FORCE=" << (config.force_gdb ? "1" : "0") << '\n';
   output << "PYTHON_BUNDLE_KIND=" << python_kind_name << '\n';
-  output << "BUNDLE_PYTHON_FORCE=" << (config.force_python ? "1" : "0") << '\n';
   output << "BUNDLE_BASH_LS=" << (config.bundle_bash_ls ? "1" : "0") << '\n';
-  output << "BUNDLE_BASH_LS_FORCE=" << (config.force_bash_ls ? "1" : "0") << '\n';
   output << "BUNDLE_TEXLAB=" << (config.bundle_texlab ? "1" : "0") << '\n';
-  output << "BUNDLE_TEXLAB_FORCE=" << (config.force_texlab ? "1" : "0") << '\n';
   output << "BUNDLE_BASH_DAP=" << (config.bundle_bash_dap ? "1" : "0") << '\n';
-  output << "BUNDLE_BASH_DAP_FORCE=" << (config.force_bash_dap ? "1" : "0") << '\n';
+  output << "BUNDLE_RUST_ANALYZER=" << (config.bundle_rust_analyzer ? "1" : "0") << '\n';
+  output << "BUNDLE_GOPLS=" << (config.bundle_gopls ? "1" : "0") << '\n';
+  output << "BUNDLE_ZLS=" << (config.bundle_zls ? "1" : "0") << '\n';
+  output << "BUNDLE_FORTLS=" << (config.bundle_fortls ? "1" : "0") << '\n';
+  output << "BUNDLE_LUA_LS=" << (config.bundle_lua_ls ? "1" : "0") << '\n';
+  output << "BUNDLE_TSSERVER=" << (config.bundle_tsserver ? "1" : "0") << '\n';
+  output << "FORCE_BUNDLED=" << (config.force_bundled ? "1" : "0") << '\n';
   return static_cast<bool>(output);
 }
 
-bool option_enabled(const WizardState& state, int index) {
+bool option_enabled(int /*index*/) {
+  return true;
+}
+
+bool option_is_checkbox(int index) {
+  return index != kDapGdb && index != kDapPython;
+}
+
+bool option_checked(const WizardState& state, int index) {
   switch (index) {
-    case kBundleClangd:
-    case kGdbKind:
-    case kPythonKind:
-      return true;
-    case kForceClangd:
+    case kLspClangd:
       return state.draft.bundle_clangd;
-    case kForceGdb:
-      return state.draft.gdb_kind != kGdbNone;
-    case kForcePython:
-      return state.draft.python_kind != kPythonNone;
-    case kBundleBashLs:
-    case kBundleTexlab:
-    case kBundleBashDap:
-      return true;
-    case kForceBashLs:
+    case kLspBashLs:
       return state.draft.bundle_bash_ls;
-    case kForceTexlab:
+    case kLspTexlab:
       return state.draft.bundle_texlab;
-    case kForceBashDap:
+    case kLspRustAnalyzer:
+      return state.draft.bundle_rust_analyzer;
+    case kLspGopls:
+      return state.draft.bundle_gopls;
+    case kLspZls:
+      return state.draft.bundle_zls;
+    case kLspFortls:
+      return state.draft.bundle_fortls;
+    case kLspLuaLs:
+      return state.draft.bundle_lua_ls;
+    case kLspTsserver:
+      return state.draft.bundle_tsserver;
+    case kDapBashDap:
       return state.draft.bundle_bash_dap;
+    case kForceBundled:
+      return state.draft.force_bundled;
     default:
       return false;
+  }
+}
+
+std::string option_label(const WizardState& state, int index) {
+  switch (index) {
+    case kLspClangd:
+      return "clangd";
+    case kLspBashLs:
+      return "bash-language-server";
+    case kLspTexlab:
+      return "TexLab";
+    case kLspRustAnalyzer:
+      return "rust-analyzer";
+    case kLspGopls:
+      return "gopls";
+    case kLspZls:
+      return "zls";
+    case kLspFortls:
+      return "fortls";
+    case kLspLuaLs:
+      return "lua-language-server";
+    case kLspTsserver:
+      return "typescript-ls";
+    case kDapGdb:
+      return "GDB: " + gdb_kind_label(state.draft.gdb_kind);
+    case kDapPython:
+      return "Python: " + python_kind_label(state.draft.python_kind);
+    case kDapBashDap:
+      return "Bash DAP";
+    case kForceBundled:
+      return "Forzar todos los componentes ON";
+    default:
+      return "";
   }
 }
 
@@ -197,12 +265,6 @@ void cycle_gdb_kind(WizardState* state) {
     return;
   }
   state->draft.gdb_kind = (state->draft.gdb_kind + 1) % 3;
-  if (state->draft.gdb_kind != kGdbNone && !state->draft.force_gdb) {
-    state->draft.force_gdb = true;
-  }
-  if (state->draft.gdb_kind == kGdbNone) {
-    state->draft.force_gdb = false;
-  }
 }
 
 void cycle_python_kind(WizardState* state) {
@@ -210,82 +272,84 @@ void cycle_python_kind(WizardState* state) {
     return;
   }
   state->draft.python_kind = (state->draft.python_kind + 1) % 3;
-  if (state->draft.python_kind != kPythonNone && !state->draft.force_python) {
-    state->draft.force_python = true;
-  }
-  if (state->draft.python_kind == kPythonNone) {
-    state->draft.force_python = false;
-  }
 }
 
 void toggle_option(WizardState* state, int index) {
-  if (state == nullptr || !option_enabled(*state, index)) {
+  if (state == nullptr || !option_enabled(index)) {
     return;
   }
   switch (index) {
-    case kBundleClangd:
+    case kLspClangd:
       state->draft.bundle_clangd = !state->draft.bundle_clangd;
-      if (state->draft.bundle_clangd && !state->draft.force_clangd) {
-        state->draft.force_clangd = true;
-      }
-      if (!state->draft.bundle_clangd) {
-        state->draft.force_clangd = false;
-      }
       break;
-    case kForceClangd:
-      state->draft.force_clangd = !state->draft.force_clangd;
+    case kLspBashLs:
+      state->draft.bundle_bash_ls = !state->draft.bundle_bash_ls;
       break;
-    case kGdbKind:
+    case kLspTexlab:
+      state->draft.bundle_texlab = !state->draft.bundle_texlab;
+      break;
+    case kLspRustAnalyzer:
+      state->draft.bundle_rust_analyzer = !state->draft.bundle_rust_analyzer;
+      break;
+    case kLspGopls:
+      state->draft.bundle_gopls = !state->draft.bundle_gopls;
+      break;
+    case kLspZls:
+      state->draft.bundle_zls = !state->draft.bundle_zls;
+      break;
+    case kLspFortls:
+      state->draft.bundle_fortls = !state->draft.bundle_fortls;
+      break;
+    case kLspLuaLs:
+      state->draft.bundle_lua_ls = !state->draft.bundle_lua_ls;
+      break;
+    case kLspTsserver:
+      state->draft.bundle_tsserver = !state->draft.bundle_tsserver;
+      break;
+    case kDapGdb:
       cycle_gdb_kind(state);
       break;
-    case kForceGdb:
-      state->draft.force_gdb = !state->draft.force_gdb;
-      break;
-    case kPythonKind:
+    case kDapPython:
       cycle_python_kind(state);
       break;
-    case kForcePython:
-      state->draft.force_python = !state->draft.force_python;
-      break;
-    case kBundleBashLs:
-      state->draft.bundle_bash_ls = !state->draft.bundle_bash_ls;
-      if (state->draft.bundle_bash_ls && !state->draft.force_bash_ls) {
-        state->draft.force_bash_ls = true;
-      }
-      if (!state->draft.bundle_bash_ls) {
-        state->draft.force_bash_ls = false;
-      }
-      break;
-    case kForceBashLs:
-      state->draft.force_bash_ls = !state->draft.force_bash_ls;
-      break;
-    case kBundleTexlab:
-      state->draft.bundle_texlab = !state->draft.bundle_texlab;
-      if (state->draft.bundle_texlab && !state->draft.force_texlab) {
-        state->draft.force_texlab = true;
-      }
-      if (!state->draft.bundle_texlab) {
-        state->draft.force_texlab = false;
-      }
-      break;
-    case kForceTexlab:
-      state->draft.force_texlab = !state->draft.force_texlab;
-      break;
-    case kBundleBashDap:
+    case kDapBashDap:
       state->draft.bundle_bash_dap = !state->draft.bundle_bash_dap;
-      if (state->draft.bundle_bash_dap && !state->draft.force_bash_dap) {
-        state->draft.force_bash_dap = true;
-      }
-      if (!state->draft.bundle_bash_dap) {
-        state->draft.force_bash_dap = false;
-      }
       break;
-    case kForceBashDap:
-      state->draft.force_bash_dap = !state->draft.force_bash_dap;
+    case kForceBundled:
+      state->draft.force_bundled = !state->draft.force_bundled;
       break;
     default:
       break;
   }
+}
+
+ftxui::Element render_option_row(const WizardState& state, int index, bool checkbox) {
+  using namespace ftxui;
+  const bool selected = index == state.selected;
+  const bool enabled = option_enabled(index);
+  std::string label = option_label(state, index);
+  if (checkbox) {
+    label = std::string(option_checked(state, index) ? "[x] " : "[ ] ") + label;
+  }
+  Element row = text(label) |
+                color(enabled ? (selected ? Color::Cyan : Color::White) : Color::GrayDark) |
+                bold;
+  if (selected && enabled) {
+    row = row | inverted;
+  }
+  return row;
+}
+
+ftxui::Element render_panel(const char* title, const std::vector<int>& indices,
+                            const WizardState& state) {
+  using namespace ftxui;
+  Elements rows;
+  rows.push_back(text(title) | bold);
+  rows.push_back(separator());
+  for (int index : indices) {
+    rows.push_back(render_option_row(state, index, option_is_checkbox(index)));
+  }
+  return vbox(std::move(rows)) | border;
 }
 
 }  // namespace
@@ -305,79 +369,28 @@ int main(int argc, char** argv) {
 
   auto screen = ScreenInteractive::Fullscreen();
 
+  const std::vector<int> kLspIndices = {kLspClangd,     kLspBashLs,   kLspTexlab,
+                                        kLspRustAnalyzer, kLspGopls,    kLspZls,
+                                        kLspFortls,     kLspLuaLs,    kLspTsserver};
+  const std::vector<int> kDapIndices = {kDapGdb, kDapPython, kDapBashDap};
+  const std::vector<int> kForceIndices = {kForceBundled};
+
   auto component = CatchEvent(
       Renderer([&] {
-        Elements rows;
-        const std::pair<const char*, const char*> options[kOptionCount] = {
-            {"Incluir clangd en el binario",
-             "Release oficial (~+35 MB comprimido, ~87 MB total con clangd)"},
-            {"Forzar clangd embebido (sin fallback al sistema)",
-             "Ignora clangd en PATH salvo CLANGD_PATH"},
-            {"GDB embebido",
-             "Espacio alterna: ninguno → gdb-static → gdb+Core Analyzer"},
-            {"Forzar gdb embebido (sin fallback al sistema)",
-             "Ignora gdb en PATH salvo GDB_PATH"},
-            {"Herramientas Python embebidas",
-             "Espacio alterna: ninguna → A (LSP min) → B (completo)"},
-            {"Forzar herramientas Python embebidas",
-             "Ignora basedpyright/debugpy del sistema salvo overrides de entorno"},
-            {"Incluir bash-language-server en el binario",
-             "LSP para .sh/.bash (~+Node + npm package)"},
-            {"Forzar bash-language-server embebido",
-             "Ignora bash-language-server en PATH salvo BASH_LANGUAGE_SERVER_PATH"},
-            {"Incluir TexLab en el binario",
-             "LSP LaTeX + chktex (.tex, .sty, .cls)"},
-            {"Forzar TexLab embebido",
-             "Ignora texlab en PATH salvo TEXLAB_PATH"},
-            {"Incluir adaptador Bash DAP en el binario",
-             "Depuración de scripts shell (bashdb + Node; requiere bash del host)"},
-            {"Forzar Bash DAP embebido",
-             "Ignora adaptador Bash DAP del sistema salvo overrides de entorno"},
-        };
-
-        for (int i = 0; i < kOptionCount; ++i) {
-          const bool enabled = option_enabled(state, i);
-          const bool selected = i == state.selected;
-          std::string label = options[i].first;
-          if (i == kGdbKind) {
-            label += ": " + gdb_kind_label(state.draft.gdb_kind);
-          } else if (i == kPythonKind) {
-            label += ": " + python_kind_label(state.draft.python_kind);
-          } else {
-            const bool checked =
-                i == kBundleClangd    ? state.draft.bundle_clangd
-                : i == kForceClangd   ? state.draft.force_clangd
-                : i == kForceGdb      ? state.draft.force_gdb
-                : i == kForcePython   ? state.draft.force_python
-                : i == kBundleBashLs  ? state.draft.bundle_bash_ls
-                : i == kForceBashLs   ? state.draft.force_bash_ls
-                : i == kBundleTexlab  ? state.draft.bundle_texlab
-                : i == kForceTexlab   ? state.draft.force_texlab
-                : i == kBundleBashDap ? state.draft.bundle_bash_dap
-                : i == kForceBashDap  ? state.draft.force_bash_dap
-                                      : false;
-            label = std::string(checked ? "[x] " : "[ ] ") + label;
-          }
-          Element title = text(label) |
-                          color(enabled ? (selected ? Color::Cyan : Color::White)
-                                        : Color::GrayDark) |
-                          bold;
-          if (selected && enabled) {
-            title = title | inverted;
-          }
-          rows.push_back(title);
-          rows.push_back(text(std::string("    ") + options[i].second) | color(Color::GrayLight));
-          rows.push_back(text(""));
-        }
-        if (!rows.empty()) {
-          rows.pop_back();
-        }
+        const Element lsp_panel = render_panel("LSP", kLspIndices, state);
+        const Element dap_panel = render_panel("DAP", kDapIndices, state);
+        const Element force_panel = render_panel("Forzar embebido", kForceIndices, state);
+        const Element right_column = vbox({dap_panel, text(""), force_panel});
 
         return window(text("tgdb — componentes embebidos") | bold | center,
                       vbox({
                           text("Selecciona qué incluir en el binario de tgdb:"),
                           separator(),
-                          vbox(std::move(rows)),
+                          hbox({
+                              lsp_panel | flex,
+                              text("  "),
+                              right_column | flex,
+                          }),
                           separator(),
                           text("↑↓ j/k  Espacio alternar   Enter confirmar   Esc cancelar") |
                               color(Color::GrayLight),

@@ -101,6 +101,27 @@ std::string language_id_for_path(const std::string& path) {
   if (ext == ".tex" || ext == ".sty" || ext == ".cls") {
     return "latex";
   }
+  if (ext == ".rs") {
+    return "rust";
+  }
+  if (ext == ".go") {
+    return "go";
+  }
+  if (ext == ".zig") {
+    return "zig";
+  }
+  if (ext == ".f" || ext == ".f90" || ext == ".f95" || ext == ".for") {
+    return "fortran";
+  }
+  if (ext == ".lua") {
+    return "lua";
+  }
+  if (ext == ".js" || ext == ".mjs" || ext == ".cjs") {
+    return "javascript";
+  }
+  if (ext == ".ts" || ext == ".tsx") {
+    return "typescript";
+  }
   return "plaintext";
 }
 

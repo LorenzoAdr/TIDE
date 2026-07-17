@@ -572,7 +572,7 @@ bool keyword_lite_bash(std::string_view word) {
   return false;
 }
 
-enum class LiteLang { kCpp, kPython, kBash, kLatex };
+enum class LiteLang { kCpp, kPython, kBash, kLatex, kPlain };
 
 LiteLang lite_lang_for_path(const std::string& path) {
   const std::string id = language_id_for_path(path);
@@ -585,7 +585,14 @@ LiteLang lite_lang_for_path(const std::string& path) {
   if (id == "latex") {
     return LiteLang::kLatex;
   }
-  return LiteLang::kCpp;
+  if (id == "c" || id == "cpp") {
+    return LiteLang::kCpp;
+  }
+  if (id == "rust" || id == "go" || id == "zig" || id == "fortran" || id == "lua" ||
+      id == "javascript" || id == "typescript") {
+    return LiteLang::kPlain;
+  }
+  return LiteLang::kPlain;
 }
 
 Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator cursor_style) {
@@ -703,6 +710,9 @@ Element HighlightCodeLineLite(const std::string& line, int cursor_col, Decorator
           is_kw = keyword_lite_bash(word);
           break;
         case LiteLang::kLatex:
+          is_kw = false;
+          break;
+        case LiteLang::kPlain:
           is_kw = false;
           break;
         case LiteLang::kCpp:
