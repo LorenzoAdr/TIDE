@@ -9,9 +9,24 @@
 
 # tuide
 
-Terminal IDE with an integrated Visual Studio–style debugger. Built with [FTXUI](https://github.com/ArthurSonzogni/FTXUI), connected to debug adapters through the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) (GDB, debugpy, bash-debug, …).
+**A full IDE in the terminal** — multi-language indexing via [LSP](https://microsoft.github.io/language-server-protocol/), debugging via [DAP](https://microsoft.github.io/debug-adapter-protocol/), and a complete mouse-and-keyboard UI built with [FTXUI](https://github.com/ArthurSonzogni/FTXUI).
 
-Launch with no arguments to open a workspace and edit code. Press **F2** to start debugging; the UI switches to source view with breakpoints, watches, and a debug console.
+tuide sits between ultra-light terminal editors (Neovim, Helix) and full graphical IDEs (VS Code): you keep the speed and footprint of a TUI — typically **20–30 MB of RAM** and very low CPU use — while still getting a comfortable, complete interface for everyday work. Setup is meant to stay out of the way: install and configure without deep tooling knowledge.
+
+A **fully autonomous embedded terminal** runs inside the IDE (real interactive shell over a PTY), so you can build, run tools, and keep a working session without leaving the editor — including while debugging.
+
+Beyond editing and debugging, tuide includes practical forensic tooling for native binaries:
+
+- **Symbol forensics (`nm`)** — inspect compiled libraries and objects (`.o`, `.a`, `.so`), jump from symbols straight into source, and filter for problematic cases such as **undefined** references.
+- **Core dump forensics** — post-mortem analysis of crashes, with an optional embedded [Core Analyzer](https://github.com/yanqi27/core_analyzer) build and a simple UI for heap searches and related CA commands (`obj`, `ref`, `heap`, …).
+
+Day-to-day version control is covered too: a **simple Git interface** (status, commit, branches, push/pull) without leaving the IDE.
+
+Prefer a self-contained binary? Build one that embeds the LSP and DAP packages you need as a blob — few system dependencies, almost autonomous. The same bundling path can include GDB with Core Analyzer.
+
+Example: a C++ developer can ship a single binary with **clangd**, **bash-language-server**, **TexLab**, **neocmakelsp**, and **lua-language-server** already inside — and optionally Core Analyzer for crash forensics.
+
+Launch with no arguments to open a workspace and edit. Press **F2** to start debugging or load a core; **F4** focuses the terminal; **F5** opens Git.
 
 ## Languages
 
