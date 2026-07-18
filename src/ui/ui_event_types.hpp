@@ -4,7 +4,7 @@
 #include <functional>
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 enum class UiEventKind {
   UserInput,
@@ -34,4 +34,4 @@ struct UiEventDrainPlan {
 
 const char* ui_event_kind_label(UiEventKind kind);
 
-}  // namespace tgdb
+}  // namespace tuide

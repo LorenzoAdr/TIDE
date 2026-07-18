@@ -8,7 +8,7 @@
 
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -518,4 +518,4 @@ std::string TabularFileStore::row_at(int index) {
   return read_row_unlocked(index);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

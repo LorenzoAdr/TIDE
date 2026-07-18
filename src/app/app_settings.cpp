@@ -10,11 +10,11 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
-constexpr const char* kConfigDir = ".config/tgdb";
+constexpr const char* kConfigDir = ".config/tuide";
 constexpr const char* kConfigFile = "settings.json";
 
 }  // namespace
@@ -29,16 +29,16 @@ std::string AppSettings::config_path() {
 
 AppSettings AppSettings::load() {
   AppSettings settings;
-#ifdef TGDB_DEFAULT_UI_LOCALE_TAG
-  settings.ui_locale = i18n::parse_locale(TGDB_DEFAULT_UI_LOCALE_TAG);
+#ifdef TUIDE_DEFAULT_UI_LOCALE_TAG
+  settings.ui_locale = i18n::parse_locale(TUIDE_DEFAULT_UI_LOCALE_TAG);
 #endif
-#ifdef TGDB_DEFAULT_HELIX_MODE
+#ifdef TUIDE_DEFAULT_HELIX_MODE
   settings.helix_mode_enabled = true;
 #endif
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_CLANGD
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_CLANGD
   settings.force_bundled_clangd = true;
 #endif
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_GDB
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_GDB
   settings.force_bundled_gdb = true;
 #endif
   const std::string path = config_path();
@@ -254,4 +254,4 @@ bool AppSettings::save() const {
   return static_cast<bool>(output);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

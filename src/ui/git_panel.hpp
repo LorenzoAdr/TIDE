@@ -8,7 +8,7 @@
 #include "git/git_service.hpp"
 #include "ui/focus_manager.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct MainLayoutState;
 struct WorkspaceModel;
@@ -67,4 +67,4 @@ void GitPanelEnsureSelectedDiff(GitService* git, GitPanelState* state);
 
 void GitPanelActivate(GitService* git, GitPanelState* state);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -6,7 +6,7 @@
 #include "editor/editor_state.hpp"
 #include "git/git_diff.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct EditorTab {
   std::string path;
@@ -37,4 +37,4 @@ TabVisibleRange compute_visible_tab_range(int tab_count, int active_tab, int bar
 
 std::string format_editor_tab_overflow_button(int hidden_count);
 
-}  // namespace tgdb
+}  // namespace tuide

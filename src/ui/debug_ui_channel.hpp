@@ -6,7 +6,7 @@
 #include "backend/idebug_backend.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 class DebugUiChannel {
  public:
@@ -54,4 +54,4 @@ inline void DebugUiChannel::on_debug_event(DebugEventKind kind, std::function<vo
   layout_->ui_events->emit_debug(std::move(tag), std::move(pre_paint), __FILE__, __LINE__);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

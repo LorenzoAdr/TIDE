@@ -17,7 +17,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -86,7 +86,7 @@ std::string WorkspaceModel::normalize_path(const std::string& path) {
   if (path.empty()) {
     return {};
   }
-  return tgdb::normalize_path(path);
+  return tuide::normalize_path(path);
 }
 
 bool WorkspaceModel::load_buffer_from_disk(EditorBuffer* buffer,
@@ -684,4 +684,4 @@ bool WorkspaceModel::navigate_cursor_forward(int visible_lines) {
   return cursor_history.go_forward(this, visible_lines);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

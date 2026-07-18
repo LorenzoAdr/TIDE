@@ -4,7 +4,7 @@
 #include <cstring>
 #include <filesystem>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -281,4 +281,4 @@ std::string resolve_compiler_path(const std::string& path, const std::string& wo
   return path;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

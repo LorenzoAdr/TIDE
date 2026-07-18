@@ -8,7 +8,7 @@
 #include "util/include_tree.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -162,4 +162,4 @@ std::string build_diagnostic_suffix(const std::vector<Diagnostic>& items, int ma
   return suffix;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

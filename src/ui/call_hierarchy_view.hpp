@@ -9,7 +9,7 @@
 #include "symbols/symbol_provider.hpp"
 #include "ui/focus_manager.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct MainLayoutState;
 struct RightSidebarState;
@@ -55,4 +55,4 @@ std::string call_hierarchy_node_location(const CallHierarchyTreeNode& node);
 std::string call_hierarchy_node_chain(const CallHierarchyViewState& view, int node_index);
 std::vector<int> call_hierarchy_chain_indices(const CallHierarchyViewState& view, int node_index);
 
-}  // namespace tgdb
+}  // namespace tuide

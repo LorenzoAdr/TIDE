@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct FuzzyCatalogEntryView {
   std::string_view text;
@@ -21,4 +21,4 @@ std::vector<FuzzyCatalogHit> fuzzy_filter_catalog(
     const std::vector<FuzzyCatalogEntryView>& entries, std::string_view query_lower,
     std::size_t max_results, std::size_t max_empty_results = 150);
 
-}  // namespace tgdb
+}  // namespace tuide

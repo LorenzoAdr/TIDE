@@ -8,7 +8,7 @@
 
 #include "ui/focus_manager.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using CommandCallback = std::function<void(const struct UiCommand&)>;
 
@@ -19,4 +19,4 @@ ftxui::Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
                                   const std::function<void()>& on_stop_debug,
                                   FocusManagerState* focus, AppMode* app_mode);
 
-}  // namespace tgdb
+}  // namespace tuide

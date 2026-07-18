@@ -6,7 +6,7 @@
 #include <cstring>
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -70,7 +70,7 @@ bool env_truthy(const char* name) {
 }
 
 bool nerd_font_hint_env() {
-  return env_truthy("NERD_FONT") || env_truthy("TGDB_NERD_FONT");
+  return env_truthy("NERD_FONT") || env_truthy("TUIDE_NERD_FONT");
 }
 
 bool terminal_likely_has_nerd_font() {
@@ -177,12 +177,12 @@ bool is_makefile_name(const std::string& lower_name) {
 }  // namespace
 
 IconMode parse_icon_mode_env() {
-  return parse_icon_mode_string(std::getenv("TGDB_ICONS"));
+  return parse_icon_mode_string(std::getenv("TUIDE_ICONS"));
 }
 
 IconMode resolve_icon_mode(IconMode settings_mode) {
   const IconMode env_mode = parse_icon_mode_env();
-  const char* raw = std::getenv("TGDB_ICONS");
+  const char* raw = std::getenv("TUIDE_ICONS");
   if (raw != nullptr && raw[0] != '\0') {
     return env_mode;
   }
@@ -284,4 +284,4 @@ std::string folder_glyph(bool expanded) {
   return expanded ? "v" : ">";
 }
 
-}  // namespace tgdb
+}  // namespace tuide

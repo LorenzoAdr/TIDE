@@ -4,7 +4,7 @@
 #include "ftxui/component/screen_interactive.hpp"
 #include "ui/ui_event_trace.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -195,4 +195,4 @@ UiEventTrace& UiEventDispatcher::trace() { return trace_; }
 
 const UiEventTrace& UiEventDispatcher::trace() const { return trace_; }
 
-}  // namespace tgdb
+}  // namespace tuide

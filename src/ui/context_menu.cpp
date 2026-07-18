@@ -34,7 +34,7 @@
 #include "util/clang_format_config.hpp"
 #include "util/path_normalize.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 namespace fs = std::filesystem;
@@ -2423,4 +2423,4 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
                   });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

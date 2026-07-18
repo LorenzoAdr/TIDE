@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 struct WorkspaceDetectResult {
   std::string workspace_root;
@@ -16,4 +16,4 @@ constexpr int kDefaultWorkspaceDetectMaxDepth = 20;
 WorkspaceDetectResult detect_workspace_root(const std::string& anchor_path,
                                             int max_depth = kDefaultWorkspaceDetectMaxDepth);
 
-}  // namespace tgdb
+}  // namespace tuide

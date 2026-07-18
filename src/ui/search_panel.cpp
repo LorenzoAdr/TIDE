@@ -24,7 +24,7 @@
 #include "ui/key_bindings.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -360,7 +360,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       return false;
     }
 
-    if (event_is_tide_global_shortcut(event)) {
+    if (event_is_tuide_global_shortcut(event)) {
       return false;
     }
 
@@ -637,4 +637,4 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       handler));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

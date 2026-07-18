@@ -9,7 +9,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/path_browser.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct ExternalFileWizardState {
   bool open = false;
@@ -33,4 +33,4 @@ ftxui::Component MakeExternalFileWizardOverlay(
     ftxui::Component main, ExternalFileWizardState* state, MainLayoutState* layout_state,
     ExternalFileCompleteCallback on_open);
 
-}  // namespace tgdb
+}  // namespace tuide

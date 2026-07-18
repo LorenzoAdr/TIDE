@@ -6,7 +6,7 @@
 
 #include "symbols/symbol_kind.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct CallHierarchyItem {
   bool valid = false;
@@ -29,4 +29,4 @@ struct CallHierarchyParams {
   int character = 0;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

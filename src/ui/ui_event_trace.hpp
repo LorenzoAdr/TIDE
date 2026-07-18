@@ -8,7 +8,7 @@
 
 #include "ui/ui_event_types.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct UiEventTraceEntry {
   uint64_t seq = 0;
@@ -40,4 +40,4 @@ class UiEventTrace {
   std::array<uint64_t, 4> kind_counts_{};
 };
 
-}  // namespace tgdb
+}  // namespace tuide

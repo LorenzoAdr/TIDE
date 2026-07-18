@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -149,4 +149,4 @@ const char* ui_activity_phase_label(UiActivityPhase phase) {
   return "unknown";
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -9,7 +9,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class TabBarHitKind { Tab, Close, Overflow };
 
@@ -60,4 +60,4 @@ bool handle_tabs_overflow_keys(WorkspaceModel* workspace, FocusManagerState* foc
                                EditorTabBarState* state, const ftxui::Event& event,
                                FocusRegion panel_focus = FocusRegion::Editor);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -7,10 +7,10 @@ die() {
   exit 1
 }
 
-GDB_VERSION="${TGDB_GDB_CA_GDB_VERSION:-16.3}"
-CORE_ANALYZER_REF="${TGDB_CORE_ANALYZER_REF:-master}"
+GDB_VERSION="${TUIDE_GDB_CA_GDB_VERSION:-16.3}"
+CORE_ANALYZER_REF="${TUIDE_CORE_ANALYZER_REF:-master}"
 OUTPUT_TAR_GZ="${1:-}"
-BUILD_ROOT="${TGDB_GDB_CA_BUILD_ROOT:-$(pwd)/third_party/bundled/gdb-ca-build}"
+BUILD_ROOT="${TUIDE_GDB_CA_BUILD_ROOT:-$(pwd)/third_party/bundled/gdb-ca-build}"
 INSTALL_PREFIX="${BUILD_ROOT}/install"
 CORE_ANALYZER_DIR="${BUILD_ROOT}/core_analyzer"
 GDB_SRC_DIR="${BUILD_ROOT}/gdb-${GDB_VERSION}"

@@ -19,7 +19,7 @@
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -351,4 +351,4 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
       handler));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

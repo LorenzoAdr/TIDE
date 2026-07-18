@@ -4,7 +4,7 @@
 
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 void HelixEditorState::clear_pending() {
   pending_keys.clear();
@@ -97,4 +97,4 @@ void reset_helix_editor_state(HelixEditorState* helix) {
   helix->help_open = false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

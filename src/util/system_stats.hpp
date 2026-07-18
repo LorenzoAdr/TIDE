@@ -12,7 +12,7 @@
 #include "util/ui_activity_gate.hpp"
 #include "util/ui_perf_monitor.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct ThreadSample {
   int tid = 0;
@@ -103,4 +103,4 @@ class PerformanceSampler {
   const UiPerfMonitor* ui_perf_monitor_ = nullptr;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

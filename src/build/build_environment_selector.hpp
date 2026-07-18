@@ -5,7 +5,7 @@
 
 #include "build/build_environment.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct EnvironmentSelectionResult {
   BuildEnvironment environment;
@@ -19,4 +19,4 @@ EnvironmentSelectionResult select_active_environment(
 int score_environment(const BuildEnvironment& env, const EnvironmentSelectionHints& hints,
                       const std::string& previous_environment_id);
 
-}  // namespace tgdb
+}  // namespace tuide

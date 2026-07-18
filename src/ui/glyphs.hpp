@@ -4,7 +4,7 @@
 
 #include "symbols/symbol_kind.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class IconMode { Auto, Always, Never };
 
@@ -20,4 +20,4 @@ std::string strip_symbol_kind_prefix(const std::string& prefixed_name);
 IconMode parse_icon_mode_env();
 IconMode resolve_icon_mode(IconMode settings_mode);
 
-}  // namespace tgdb
+}  // namespace tuide

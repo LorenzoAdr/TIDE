@@ -6,7 +6,7 @@
 #include "app/workspace_config.hpp"
 #include "build/build_environment.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct CompileCommandsGenerationResult {
   bool success = false;
@@ -21,4 +21,4 @@ CompileCommandsGenerationResult generate_compile_commands(
 
 bool compile_commands_exists(const std::string& compile_dir);
 
-}  // namespace tgdb
+}  // namespace tuide

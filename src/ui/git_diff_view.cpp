@@ -7,7 +7,7 @@
 #include "ui/theme.hpp"
 #include "util/syntax_highlight.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -274,4 +274,4 @@ GitDiffViewRenderResult render_git_diff_viewport(const std::vector<SideBySideDif
   return result;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -21,7 +21,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -529,7 +529,7 @@ std::vector<FileIndexChange> WorkspaceIndexer::drain_changes() {
 
 void WorkspaceIndexer::worker_main(std::string workspace_root,
                                      IndexFilterOptions filter_options) {
-  TGDB_MON_SCOPE("idx", "workspace_indexer.scan");
+  TUIDE_MON_SCOPE("idx", "workspace_indexer.scan");
   auto snap = std::make_shared<IndexSnapshot>();
   snap->workspace_root = workspace_root;
   snap->filter_options = filter_options;
@@ -554,7 +554,7 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
     }
   }
   rebuild_index_derived_fields(snap.get());
-  TGDB_MON("idx", "workspace_indexer.files=" + std::to_string(snap->files.size()));
+  TUIDE_MON("idx", "workspace_indexer.files=" + std::to_string(snap->files.size()));
   {
     std::lock_guard<std::mutex> lock(mutex_);
     snapshot_ = snap;
@@ -813,4 +813,4 @@ void WorkspaceIndexer::remove_file(const std::string& workspace_root,
   snapshot_ = updated;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

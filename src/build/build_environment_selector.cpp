@@ -7,7 +7,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -134,4 +134,4 @@ EnvironmentSelectionResult select_active_environment(
   return result;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -5,7 +5,7 @@
 
 #include "app/workspace_config.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct FileIndexerPaths {
   std::string compile_commands_dir;
@@ -26,4 +26,4 @@ FileIndexerPaths lookup_file_indexer_paths(const std::string& workspace_root,
                                            const WorkspaceConfig& config,
                                            const std::string& host_absolute_path);
 
-}  // namespace tgdb
+}  // namespace tuide

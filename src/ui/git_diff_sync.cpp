@@ -9,7 +9,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 bool open_git_diff_view(WorkspaceModel* workspace, GitService* git, FocusManagerState* focus,
                         const std::string& workspace_rel_path) {
@@ -36,4 +36,4 @@ bool open_git_diff_view(WorkspaceModel* workspace, GitService* git, FocusManager
   return true;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

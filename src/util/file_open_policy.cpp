@@ -9,7 +9,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -78,4 +78,4 @@ std::string format_file_size(std::uintmax_t bytes) {
   return std::to_string(bytes) + " B";
 }
 
-}  // namespace tgdb
+}  // namespace tuide

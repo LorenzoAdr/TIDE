@@ -81,7 +81,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -492,8 +492,8 @@ void Application::maybe_show_lsp_missing_toast(const std::string& status_i18n_ke
 	}
 	lsp_missing_notified_servers_.insert(info->server_id);
 
-	if (!tgdb_source_root_probed_) {
-		tgdb_source_root_probed_ = true;
+	if (!tuide_source_root_probed_) {
+		tuide_source_root_probed_ = true;
 		std::vector<std::string> roots;
 		if (!workspace_.root.empty()) {
 			roots.push_back(workspace_.root);
@@ -501,9 +501,9 @@ void Application::maybe_show_lsp_missing_toast(const std::string& status_i18n_ke
 		if (!config_.launch_directory.empty()) {
 			roots.push_back(config_.launch_directory);
 		}
-		cached_tgdb_source_root_ = find_tgdb_source_root(roots);
+		cached_tuide_source_root_ = find_tuide_source_root(roots);
 	}
-	const bool can_bundle = cached_tgdb_source_root_.has_value();
+	const bool can_bundle = cached_tuide_source_root_.has_value();
 	lsp_missing_toast_state_.show(*info, can_bundle);
 	UI_WAKE(&layout_state_, "app");
 }
@@ -525,14 +525,14 @@ void Application::on_lsp_missing_bundle() {
 	if (!lsp_missing_toast_state_.open || !lsp_missing_toast_state_.show_bundle_action) {
 		return;
 	}
-	if (!cached_tgdb_source_root_.has_value()) {
+	if (!cached_tuide_source_root_.has_value()) {
 		lsp_missing_toast_state_.close();
 		set_workspace_status(i18n::tr("lsp_toast.bundle_failed"));
 		return;
 	}
 	const LspMissingPromptInfo info = lsp_missing_toast_state_.info;
 	lsp_missing_toast_state_.close();
-	if (!enable_bundle_option_in_config(*cached_tgdb_source_root_, info)) {
+	if (!enable_bundle_option_in_config(*cached_tuide_source_root_, info)) {
 		set_workspace_status(i18n::tr("lsp_toast.bundle_failed"));
 		return;
 	}
@@ -556,7 +556,7 @@ void Application::on_lsp_missing_bundle() {
 	save_dirty(secondary_workspace_);
 
 	PostExitShellRequest request;
-	request.cwd = *cached_tgdb_source_root_;
+	request.cwd = *cached_tuide_source_root_;
 	request.command = compile_command_after_bundle_config();
 	request_post_exit_shell(std::move(request));
 	lsp_missing_toast_suppressed_ = true;
@@ -830,26 +830,26 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 
 	if (plan.run_debug) {
 		UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_events");
-		TGDB_MON_SCOPE("ui", "tick.drain_events");
+		TUIDE_MON_SCOPE("ui", "tick.drain_events");
 		drain_events();
 	}
 
 		if (plan.run_full_background) {
 		if (!any_modal_open()) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "apply_pending_connection");
-			TGDB_MON_SCOPE("ui", "tick.apply_pending_connection");
+			TUIDE_MON_SCOPE("ui", "tick.apply_pending_connection");
 			apply_pending_connection();
 		}
 		// File-system sync must run even while typing: deferred-panel gating used to
 		// drop inotify updates until the next idle window.
 		{
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "process_index_changes");
-			TGDB_MON_SCOPE("ui", "tick.process_index_changes");
+			TUIDE_MON_SCOPE("ui", "tick.process_index_changes");
 			process_index_changes();
 		}
 		if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "process_build_environment");
-			TGDB_MON_SCOPE("ui", "tick.process_build_environment_updates");
+			TUIDE_MON_SCOPE("ui", "tick.process_build_environment_updates");
 			process_build_environment_updates();
 		}
 		if (layout_state_.source_tick_callback && app_mode_ == AppMode::kDebug) {
@@ -857,7 +857,7 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 		}
 		if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "git");
-			TGDB_MON_SCOPE("ui", "tick.git");
+			TUIDE_MON_SCOPE("ui", "tick.git");
 			git_service_.tick();
 		}
 	}
@@ -865,29 +865,29 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 	if (plan.run_terminal && layout_state_.console_visible &&
 	    layout_state_.terminal_tick_callback) {
 		UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal");
-		TGDB_MON_SCOPE("ui", "tick.terminal");
+		TUIDE_MON_SCOPE("ui", "tick.terminal");
 		layout_state_.terminal_tick_callback();
 	}
 
 	if (plan.run_editor) {
 		if (layout_state_.outline_tick_callback && !layout_state_.welcome_visible) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "outline");
-			TGDB_MON_SCOPE("ui", "tick.outline");
+			TUIDE_MON_SCOPE("ui", "tick.outline");
 			layout_state_.outline_tick_callback();
 		}
 		if (layout_state_.primary_editor.tick_callback && !layout_state_.welcome_visible) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "primary_editor");
-			TGDB_MON_SCOPE("ui", "tick.primary_editor");
+			TUIDE_MON_SCOPE("ui", "tick.primary_editor");
 			layout_state_.primary_editor.tick_callback();
 		}
 		if (layout_state_.secondary_editor.tick_callback && !layout_state_.welcome_visible) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "secondary_editor");
-			TGDB_MON_SCOPE("ui", "tick.secondary_editor");
+			TUIDE_MON_SCOPE("ui", "tick.secondary_editor");
 			layout_state_.secondary_editor.tick_callback();
 		}
 		if (symbol_provider_ && layout_state_.activity_gate.allows_lsp_ui()) {
 			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_async_results");
-			TGDB_MON_SCOPE("ui", "tick.drain_async_results");
+			TUIDE_MON_SCOPE("ui", "tick.drain_async_results");
 			if (symbol_provider_->drain_async_results() &&
 			    symbol_provider_->async_drain_invalidates_view()) {
 				workspace_.buffer.view_token++;
@@ -2366,7 +2366,7 @@ int Application::run() {
 		ensure_backend_started();
 	}
 
-	const bool ui_smoke = std::getenv("TGDB_UI_SMOKE") != nullptr;
+	const bool ui_smoke = std::getenv("TUIDE_UI_SMOKE") != nullptr;
 	auto screen = ui_smoke ? ScreenInteractive::TerminalOutput() : ScreenInteractive::Fullscreen();
 	active_screen_ = &screen;
 	screen.TrackMouse(false);
@@ -2779,10 +2779,10 @@ int Application::run() {
 				std::ostringstream key_msg;
 				key_msg << "key event=" << event.input()
 				        << " focus=" << focus_state_.region_label();
-				TGDB_MON("ui", key_msg.str());
+				TUIDE_MON("ui", key_msg.str());
 			}
 
-			// Tide app shortcuts must run before any_modal_open() and editor interceptors.
+			// Tuide app shortcuts must run before any_modal_open() and editor interceptors.
 			if (event_is_quick_open(event)) {
 				if (event_is_kitty_key_release(event)) {
 					return false;
@@ -3077,7 +3077,7 @@ int Application::run() {
 			                                  shell_session_.running();
 		if ((layout_state_.text_input_focus == TextInputFocus::Console ||
 		     shell_terminal_focus) &&
-		    !event_is_tide_global_shortcut(event) && layout_state_.console_key_handler &&
+		    !event_is_tuide_global_shortcut(event) && layout_state_.console_key_handler &&
 		    layout_state_.console_key_handler(event)) {
 			UI_WAKE(&layout_state_, "app.custom");
 			return true;
@@ -3212,7 +3212,7 @@ int Application::run() {
 			if (layout_state_.editor_helix_prefix_pending &&
 			    is_editor_focus_region(focus_state_.region) && editor_browse_active &&
 			    !event_has_ctrl_modifier(event) && event != Event::CtrlP &&
-			    !event_is_ctrl_p(event) && !event_is_tide_app_shortcut(event)) {
+			    !event_is_ctrl_p(event) && !event_is_tuide_app_shortcut(event)) {
 				return true;
 			}
 
@@ -3451,4 +3451,4 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 	return 0;
 }
 
-} // namespace tgdb
+} // namespace tuide

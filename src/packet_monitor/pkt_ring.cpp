@@ -11,7 +11,7 @@
 
 #include "packet_monitor/pkt_protocol.hpp"
 
-namespace tgdb::packet_monitor {
+namespace tuide::packet_monitor {
 
 namespace {
 
@@ -36,7 +36,7 @@ std::string runtime_dir_path() {
 }
 
 std::string shm_path_for_pid(int pid) {
-  return runtime_dir_path() + "/tgdb-pkt-" + std::to_string(pid) + ".mmap";
+  return runtime_dir_path() + "/tuide-pkt-" + std::to_string(pid) + ".mmap";
 }
 
 std::string format_ipv4(uint32_t addr) {
@@ -95,12 +95,12 @@ bool PacketRingReader::open_for_pid(int pid) {
     return false;
   }
 
-  header_ = static_cast<TgdbPktHeader*>(mapped_);
-  if (header_->magic != TGDB_PKT_MAGIC || header_->capacity == 0) {
+  header_ = static_cast<TuidePktHeader*>(mapped_);
+  if (header_->magic != TUIDE_PKT_MAGIC || header_->capacity == 0) {
     close();
     return false;
   }
-  entries_ = tgdb_pkt_entries(header_);
+  entries_ = tuide_pkt_entries(header_);
   read_idx_ = header_->write_idx;
   pid_ = pid;
   return true;
@@ -127,8 +127,8 @@ std::vector<PacketRecord> PacketRingReader::poll_new_packets() {
 
   const uint32_t write_idx = header_->write_idx;
   while (read_idx_ < write_idx) {
-    const uint32_t slot = tgdb_pkt_slot_index(read_idx_, header_->capacity);
-    const TgdbPktEntry& entry = entries_[slot];
+    const uint32_t slot = tuide_pkt_slot_index(read_idx_, header_->capacity);
+    const TuidePktEntry& entry = entries_[slot];
     PacketRecord record;
     record.timestamp_ns = entry.timestamp_ns;
     record.direction = entry.direction;
@@ -183,4 +183,4 @@ bool packet_matches_filters(const PacketRecord& packet, const CaptureFilters& fi
   return true;
 }
 
-}  // namespace tgdb::packet_monitor
+}  // namespace tuide::packet_monitor

@@ -18,7 +18,7 @@
 #include "i18n/tr.hpp"
 #include "util/fuzzy_match.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -562,4 +562,4 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
       });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

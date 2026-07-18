@@ -2,7 +2,7 @@
 
 #include <atomic>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -20,4 +20,4 @@ bool editor_scope_effects_enabled(bool scope_highlight_enabled) {
   return animations_enabled() && scope_highlight_enabled;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

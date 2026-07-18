@@ -6,7 +6,7 @@
 #include "editor/bracket_match.hpp"
 #include "editor/text_ops.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -217,4 +217,4 @@ bool helix_goto_block_start(const HelixScopeNavContext& ctx) {
   return true;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

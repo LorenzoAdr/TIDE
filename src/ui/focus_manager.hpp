@@ -3,7 +3,7 @@
 #include <functional>
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 enum class FocusRegion { Explorer, Editor, SecondaryEditor, RightPanel, Terminal };
 
@@ -27,4 +27,4 @@ struct FocusManagerState {
   bool secondary_visible() const;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

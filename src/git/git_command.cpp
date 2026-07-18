@@ -10,7 +10,7 @@
 
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {    
 
@@ -69,4 +69,4 @@ bool git_available() {
   return result.success();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

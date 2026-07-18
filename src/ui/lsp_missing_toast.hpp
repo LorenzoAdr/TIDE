@@ -8,7 +8,7 @@
 #include "ui/main_layout.hpp"
 #include "util/lsp_missing_prompt.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct LspMissingToastState {
   bool open = false;
@@ -29,4 +29,4 @@ ftxui::Component MakeLspMissingToastOverlay(
     std::function<void()> on_install, std::function<void()> on_bundle,
     std::function<void()> on_ignore);
 
-}  // namespace tgdb
+}  // namespace tuide

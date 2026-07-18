@@ -20,7 +20,7 @@
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -580,4 +580,4 @@ Component MakeCoreAnalyzerPanel(DebugModel* model, CommandCallback on_command,
   return panel;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

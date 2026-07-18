@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct GitCommandResult {
   int exit_code = -1;
@@ -16,4 +16,4 @@ GitCommandResult run_git(const std::string& cwd, const std::vector<std::string>&
 
 bool git_available();
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -5,7 +5,7 @@
 
 #include "util/thread_name.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 NmReaderRunner::NmReaderRunner() = default;
 
@@ -74,4 +74,4 @@ void NmReaderRunner::worker_main(uint64_t generation, std::string binary_path) {
   running_ = false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

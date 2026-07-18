@@ -5,7 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 // Descriptor of a stdio language server. clangd and basedpyright are specs, not
 // forks of LspClient.
@@ -87,4 +87,4 @@ std::optional<LanguageServerSpec> make_language_server_spec(
     const std::string& compile_commands_dir = {}, bool use_gcc_query_driver = true,
     bool background_index = false);
 
-}  // namespace tgdb
+}  // namespace tuide

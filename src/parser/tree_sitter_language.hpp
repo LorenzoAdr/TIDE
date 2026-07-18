@@ -6,7 +6,7 @@ extern "C" {
 #include <tree_sitter/api.h>
 }
 
-namespace tgdb {
+namespace tuide {
 
 enum class TreeSitterLangKind {
   kCpp,
@@ -42,4 +42,4 @@ const TSLanguage* tree_sitter_make_language();
 TreeSitterLangKind tree_sitter_lang_kind_for_path(const std::string& path);
 const TSLanguage* tree_sitter_language_for_path(const std::string& path);
 
-}  // namespace tgdb
+}  // namespace tuide

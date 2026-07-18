@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <climits>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -134,4 +134,4 @@ const SymbolInfo* innermost_scope_symbol(const std::vector<SymbolInfo>& symbols,
   return nullptr;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

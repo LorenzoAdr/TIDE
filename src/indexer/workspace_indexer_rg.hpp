@@ -7,7 +7,7 @@
 
 #include "indexer/index_rules.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 // Lists workspace files via `rg --files`. Returns false if rg is unavailable or fails.
 bool list_workspace_files_rg(const std::string& workspace_root,
@@ -16,4 +16,4 @@ bool list_workspace_files_rg(const std::string& workspace_root,
                              const std::function<bool()>& should_cancel = {},
                              std::atomic<pid_t>* child_pid = nullptr);
 
-}  // namespace tgdb
+}  // namespace tuide

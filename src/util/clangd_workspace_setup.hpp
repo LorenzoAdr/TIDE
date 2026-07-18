@@ -2,7 +2,7 @@
 
 #include "app/workspace_config.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 // Writes or removes the workspace .clangd file (background index + extra include paths).
 void apply_clangd_workspace_config(const std::string& workspace_root,
@@ -12,4 +12,4 @@ void apply_clangd_workspace_config(const std::string& workspace_root,
 std::vector<std::string> expand_recursive_include_flags(
     const std::vector<std::string>& root_paths);
 
-}  // namespace tgdb
+}  // namespace tuide

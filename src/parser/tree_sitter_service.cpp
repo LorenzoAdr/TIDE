@@ -15,7 +15,7 @@
 
 #include "util/csv_viewer.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -511,33 +511,33 @@ BracketPairHighlight TreeSitterService::enclosing_bracket_pair(const std::string
                                                              const std::string& source, int line,
                                                              int col, char open_ch) {
   const TSNode root = cached_root_for(path, source);
-  return tgdb::enclosing_bracket_pair(root, source, line, col, open_ch);
+  return tuide::enclosing_bracket_pair(root, source, line, col, open_ch);
 }
 
 BracketPairHighlight TreeSitterService::enclosing_bracket_pair_for_block_nav(
     const std::string& path, const std::string& source, int line, int col, char open_ch,
     bool jump_to_start) {
   const TSNode root = cached_root_for(path, source);
-  return tgdb::enclosing_bracket_pair_for_block_nav(root, source, line, col, open_ch,
+  return tuide::enclosing_bracket_pair_for_block_nav(root, source, line, col, open_ch,
                                                     jump_to_start);
 }
 
 TextSpan TreeSitterService::enclosing_quote_pair(const std::string& path, const std::string& source,
                                                  int line, int col, char quote_ch) {
   const TSNode root = cached_root_for(path, source);
-  return tgdb::enclosing_quote_pair(root, source, line, col, quote_ch);
+  return tuide::enclosing_quote_pair(root, source, line, col, quote_ch);
 }
 
 TextSpan TreeSitterService::enclosing_line_comment(const std::string& path,
                                                  const std::string& source, int line, int col) {
   const TSNode root = cached_root_for(path, source);
-  return tgdb::enclosing_line_comment(root, source, line, col);
+  return tuide::enclosing_line_comment(root, source, line, col);
 }
 
 TextSpan TreeSitterService::enclosing_block_comment(const std::string& path,
                                                   const std::string& source, int line, int col) {
   const TSNode root = cached_root_for(path, source);
-  return tgdb::enclosing_block_comment(root, source, line, col);
+  return tuide::enclosing_block_comment(root, source, line, col);
 }
 
 bool TreeSitterService::cursor_in_code(const std::string& path, const std::string& source, int line,
@@ -560,7 +560,7 @@ std::vector<CompletionItem> TreeSitterService::local_completions_at(
   if (doc == nullptr || doc->tree == nullptr || !doc->parse_ready) {
     return {};
   }
-  return tgdb::local_completions_at(ts_tree_root_node(doc->tree), doc->source, params);
+  return tuide::local_completions_at(ts_tree_root_node(doc->tree), doc->source, params);
 }
 
 HoverInfo TreeSitterService::hover_at(const HoverParams& params) {
@@ -681,4 +681,4 @@ TreeSitterService::HighlightTreeSnapshot TreeSitterService::snapshot_for_highlig
   return cache_.snapshot_for_highlight(cache_key_for(path), canonical, expected_revision);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

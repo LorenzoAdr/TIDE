@@ -14,18 +14,18 @@ void check(bool condition, const char* message) {
 }
 
 void test_rebuild_files_lower() {
-  tgdb::IndexSnapshot snapshot;
+  tuide::IndexSnapshot snapshot;
   snapshot.files = {"Src/Main.cpp", "src/app/Application.cpp"};
-  tgdb::rebuild_index_files_lower(&snapshot);
+  tuide::rebuild_index_files_lower(&snapshot);
   check(snapshot.files_lower.size() == snapshot.files.size(), "parallel size");
   check(snapshot.files_lower[0] == "src/main.cpp", "first lower");
   check(snapshot.files_lower[1] == "src/app/application.cpp", "second lower");
 }
 
 void test_rebuild_file_picker_catalog() {
-  tgdb::IndexSnapshot snapshot;
+  tuide::IndexSnapshot snapshot;
   snapshot.files = {"src/main.cpp", "src/app/application.cpp"};
-  tgdb::rebuild_index_file_picker_catalog(&snapshot);
+  tuide::rebuild_index_file_picker_catalog(&snapshot);
   check(snapshot.file_picker_catalog != nullptr, "catalog exists");
   check(snapshot.file_picker_catalog->size() == 2, "catalog size");
   check((*snapshot.file_picker_catalog)[0].filename == "main.cpp", "first filename");

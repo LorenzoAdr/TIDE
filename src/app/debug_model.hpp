@@ -8,7 +8,7 @@
 
 #include "backend/idebug_backend.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct CoreAnalyzerInstance {
   std::string address_hex;
@@ -101,4 +101,4 @@ struct DebugModel {
   std::unordered_map<std::string, std::unordered_set<int>> disabled_breakpoints;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

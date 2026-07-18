@@ -5,7 +5,7 @@
 #include "i18n/locale.hpp"
 #include "ui/glyphs.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct AppSettings {
   bool lsp_enabled = true;
@@ -48,4 +48,4 @@ struct AppSettings {
   static std::string config_path();
 };
 
-}  // namespace tgdb
+}  // namespace tuide

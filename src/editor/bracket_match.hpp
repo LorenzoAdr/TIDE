@@ -2,7 +2,7 @@
 
 #include "editor/editor_state.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct BracketPairHighlight {
   bool valid = false;
@@ -54,4 +54,4 @@ TextSpan find_enclosing_block_comment(const EditorBuffer& buffer, int line, int 
 // True when the cursor sits in normal code (not in a comment or string literal).
 bool cursor_in_code(const EditorBuffer& buffer, int line, int col);
 
-}  // namespace tgdb
+}  // namespace tuide

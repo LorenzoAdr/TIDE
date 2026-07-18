@@ -6,7 +6,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -191,4 +191,4 @@ bool line_is_commented(const std::string& line, const LineCommentStyle& style) {
   return false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

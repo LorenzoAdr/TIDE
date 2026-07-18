@@ -1,6 +1,6 @@
 #pragma once
 
-namespace tgdb {
+namespace tuide {
 
 void enable_extended_key_reporting();
 void disable_extended_key_reporting();
@@ -9,4 +9,4 @@ void disable_extended_key_reporting();
 void enable_click_drag_mouse_reporting();
 void disable_click_drag_mouse_reporting();
 
-}  // namespace tgdb
+}  // namespace tuide

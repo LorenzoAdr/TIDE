@@ -7,7 +7,7 @@
 #include <sys/prctl.h>
 #endif
 
-namespace tgdb {
+namespace tuide {
 
 void child_die_with_parent(const int signal) {
 #if defined(__linux__)
@@ -21,4 +21,4 @@ void child_die_with_parent(const int signal) {
 #endif
 }
 
-}  // namespace tgdb
+}  // namespace tuide

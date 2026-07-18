@@ -8,7 +8,7 @@
 
 #include "search/workspace_search.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 // Busca con ripgrep (--json). Devuelve false si rg falla (el caller puede hacer fallback).
 bool search_workspace_rg(const WorkspaceSearchOptions& opts, const std::string& rg_binary,
@@ -16,4 +16,4 @@ bool search_workspace_rg(const WorkspaceSearchOptions& opts, const std::string& 
                          std::atomic<pid_t>* child_pid, std::vector<WorkspaceSearchResult>* results,
                          int* files_scanned);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 class IndentGuideTracker {
  public:
@@ -44,4 +44,4 @@ std::string expand_tabs_for_display(const std::string& line, int tab_size);
 
 std::string build_blank_line_guides(int tab_size, int guide_depth, int max_width);
 
-}  // namespace tgdb
+}  // namespace tuide

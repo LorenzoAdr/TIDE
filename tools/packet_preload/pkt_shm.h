@@ -6,17 +6,17 @@
 extern "C" {
 #endif
 
-#define TGDB_PKT_MAGIC 0x54474442u /* 'TGDB' little-endian */
-#define TGDB_PKT_VERSION 1u
-#define TGDB_PKT_CAPACITY 256u
-#define TGDB_PKT_MAX_PAYLOAD 1500u
+#define TUIDE_PKT_MAGIC 0x44495554u /* 'TUID' little-endian */
+#define TUIDE_PKT_VERSION 1u
+#define TUIDE_PKT_CAPACITY 256u
+#define TUIDE_PKT_MAX_PAYLOAD 1500u
 
-enum TgdbPktDirection {
-  TGDB_PKT_IN = 0,
-  TGDB_PKT_OUT = 1,
+enum TuidePktDirection {
+  TUIDE_PKT_IN = 0,
+  TUIDE_PKT_OUT = 1,
 };
 
-typedef struct TgdbPktEntry {
+typedef struct TuidePktEntry {
   uint64_t timestamp_ns;
   uint8_t direction;
   uint8_t reserved0;
@@ -26,10 +26,10 @@ typedef struct TgdbPktEntry {
   uint32_t dst_ipv4;
   uint16_t payload_len;
   uint16_t reserved1;
-  uint8_t payload[TGDB_PKT_MAX_PAYLOAD];
-} TgdbPktEntry;
+  uint8_t payload[TUIDE_PKT_MAX_PAYLOAD];
+} TuidePktEntry;
 
-typedef struct TgdbPktHeader {
+typedef struct TuidePktHeader {
   uint32_t magic;
   uint32_t version;
   uint32_t capacity;
@@ -37,13 +37,13 @@ typedef struct TgdbPktHeader {
   uint32_t pid;
   uint32_t reserved;
   uint32_t write_idx;
-} TgdbPktHeader;
+} TuidePktHeader;
 
-static inline TgdbPktEntry* tgdb_pkt_entries(TgdbPktHeader* header) {
-  return (TgdbPktEntry*)(header + 1);
+static inline TuidePktEntry* tuide_pkt_entries(TuidePktHeader* header) {
+  return (TuidePktEntry*)(header + 1);
 }
 
-static inline uint32_t tgdb_pkt_slot_index(uint32_t write_idx, uint32_t capacity) {
+static inline uint32_t tuide_pkt_slot_index(uint32_t write_idx, uint32_t capacity) {
   return write_idx % capacity;
 }
 

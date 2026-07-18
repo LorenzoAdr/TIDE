@@ -14,7 +14,7 @@
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -426,4 +426,4 @@ bool handle_tabs_overflow_keys(WorkspaceModel* workspace, FocusManagerState* foc
   return false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

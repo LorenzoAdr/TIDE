@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <iostream>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -145,4 +145,4 @@ std::string get_system_clipboard() {
   return {};
 }
 
-}  // namespace tgdb
+}  // namespace tuide

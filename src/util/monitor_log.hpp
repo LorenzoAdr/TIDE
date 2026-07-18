@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace tgdb::monitor_log {
+namespace tuide::monitor_log {
 
 void set_enabled(bool on);
 bool enabled();
@@ -27,18 +27,18 @@ class MonitorScope {
   bool active_ = false;
 };
 
-}  // namespace tgdb::monitor_log
+}  // namespace tuide::monitor_log
 
-#define TGDB_MON(cat, msg)                                                     \
+#define TUIDE_MON(cat, msg)                                                     \
   do {                                                                         \
-    if (tgdb::monitor_log::enabled()) {                                        \
-      tgdb::monitor_log::event((cat), (msg));                                  \
+    if (tuide::monitor_log::enabled()) {                                        \
+      tuide::monitor_log::event((cat), (msg));                                  \
     }                                                                          \
   } while (false)
 
-#define TGDB_MON_SCOPE(cat, name)                                              \
-  tgdb::monitor_log::MonitorScope TGDB_MON_SCOPE_CONCAT(_tgdb_mon_, __LINE__)( \
+#define TUIDE_MON_SCOPE(cat, name)                                              \
+  tuide::monitor_log::MonitorScope TUIDE_MON_SCOPE_CONCAT(_tuide_mon_, __LINE__)( \
       (cat), (name))
 
-#define TGDB_MON_SCOPE_CONCAT(a, b) TGDB_MON_SCOPE_CONCAT_IMPL(a, b)
-#define TGDB_MON_SCOPE_CONCAT_IMPL(a, b) a##b
+#define TUIDE_MON_SCOPE_CONCAT(a, b) TUIDE_MON_SCOPE_CONCAT_IMPL(a, b)
+#define TUIDE_MON_SCOPE_CONCAT_IMPL(a, b) a##b

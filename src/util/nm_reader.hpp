@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 enum class NmBindingFilter {
   kAll,
@@ -62,4 +62,4 @@ bool nm_symbol_matches_filter(const NmSymbol& symbol, const std::string& query,
 void filter_nm_symbol_indices(const std::vector<NmSymbol>& symbols, const std::string& query,
                               NmBindingFilter binding_filter, std::vector<int>* out_indices);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -13,7 +13,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -66,7 +66,7 @@ void BuildArtifactWatcher::worker_loop() {
 
   constexpr int kMask = IN_CREATE | IN_DELETE | IN_MODIFY | IN_MOVED_TO | IN_CLOSE_WRITE;
   std::vector<std::string> unique_dirs;
-  unique_dirs.push_back((fs::path(workspace_root_) / ".tgdb" / "environments").string());
+  unique_dirs.push_back((fs::path(workspace_root_) / ".tuide" / "environments").string());
   for (const auto& dir : watch_dirs_) {
     if (!dir.empty()) {
       unique_dirs.push_back(dir);
@@ -119,4 +119,4 @@ void BuildArtifactWatcher::worker_loop() {
   running_.store(false, std::memory_order_release);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

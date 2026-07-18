@@ -7,7 +7,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 ftxui::Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
                                  FocusManagerState* focus, MainLayoutState* layout_state,
@@ -15,4 +15,4 @@ ftxui::Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
 
 void clear_search_input_focus(MainLayoutState* layout_state);
 
-}  // namespace tgdb
+}  // namespace tuide

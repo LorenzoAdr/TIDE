@@ -7,7 +7,7 @@
 
 #include "ftxui/dom/elements.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class UiPanelId : std::uint8_t {
   FileTree = 0,
@@ -50,4 +50,4 @@ struct UiPanelRenderCache {
   }
 };
 
-}  // namespace tgdb
+}  // namespace tuide

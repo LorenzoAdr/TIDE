@@ -8,7 +8,7 @@
 #include "ui/cursor_blink_ui.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -123,4 +123,4 @@ inline Element SplitSeparatorHorizontal() {
   return separatorCharacter("─") | color(theme::AccentDim()) | bgcolor(theme::PanelBg());
 }
 
-}  // namespace tgdb
+}  // namespace tuide

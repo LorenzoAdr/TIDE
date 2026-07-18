@@ -3,7 +3,7 @@
 #include "editor/line_comment.hpp"
 #include "editor/editor_state.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct SnippetResult;
 
@@ -77,4 +77,4 @@ void indent_lines(EditorBuffer* buffer);
 void unindent_lines(EditorBuffer* buffer);
 bool any_cursor_has_selection(const EditorBuffer& buffer);
 
-}  // namespace tgdb
+}  // namespace tuide

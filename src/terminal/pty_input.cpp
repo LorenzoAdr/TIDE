@@ -2,7 +2,7 @@
 
 #include "ui/key_bindings.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -168,4 +168,4 @@ std::optional<std::string> event_to_pty_bytes(const Event& event) {
   return std::nullopt;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -7,7 +7,7 @@
 
 #include "editor/editor_state.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct TextMatch {
   int line = 0;
@@ -61,4 +61,4 @@ bool match_occupied(const TextMatch& match, const EditorBuffer& buffer);
 void add_next_selection_match(EditorBuffer* buffer, int visible_lines);
 void select_all_matches(EditorBuffer* buffer, const TextRange* scope = nullptr);
 
-}  // namespace tgdb
+}  // namespace tuide

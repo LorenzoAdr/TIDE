@@ -21,7 +21,7 @@
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 namespace fs = std::filesystem;
@@ -452,4 +452,4 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
   return WrapFocusable(CatchEvent(renderer, handler));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

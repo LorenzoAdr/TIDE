@@ -10,7 +10,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -305,4 +305,4 @@ ResolvedGitPath resolve_git_path(const std::string& workspace_root,
   return resolved;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

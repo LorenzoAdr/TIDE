@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct GitCommitEntry {
   std::string hash;
@@ -31,4 +31,4 @@ std::vector<GitBranchEntry> parse_git_branches(const std::string& output);
 std::vector<GitCommitFileEntry> parse_commit_name_status(const std::string& output);
 std::vector<std::string> split_git_graph_lines(const std::string& output);
 
-}  // namespace tgdb
+}  // namespace tuide

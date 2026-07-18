@@ -2,7 +2,7 @@
 
 #include <sstream>
 
-namespace tgdb {
+namespace tuide {
 
 std::vector<GitCommitEntry> parse_git_log_oneline(const std::string& output) {
   std::vector<GitCommitEntry> entries;
@@ -167,4 +167,4 @@ std::vector<GitBranchEntry> parse_git_branches(const std::string& output) {
   return entries;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -4,7 +4,7 @@
 #include <cctype>
 #include <sstream>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -132,9 +132,9 @@ std::vector<std::string> extract_compile_flags_from_make_vars(
 
   const auto cross = variables.find("CROSS_COMPILE");
   if (cross != variables.end() && !cross->second.empty()) {
-    flags.push_back("-D TGDB_CROSS_COMPILE=" + cross->second);
+    flags.push_back("-D TUIDE_CROSS_COMPILE=" + cross->second);
   }
   return flags;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

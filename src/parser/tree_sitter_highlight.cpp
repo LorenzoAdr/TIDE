@@ -12,7 +12,7 @@
 #include "util/syntax_highlight.hpp"
 #include "util/syntax_scope.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -703,4 +703,4 @@ Element HighlightTreeSitterLine(const std::string& line, int line_index, const s
                                  cursor_style, col_offset);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

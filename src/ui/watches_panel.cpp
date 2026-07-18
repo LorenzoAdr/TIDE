@@ -28,7 +28,7 @@
 #include "i18n/tr.hpp"
 #include "util/ui_panel_render_cache.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -1505,4 +1505,4 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
   return panel;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -8,7 +8,7 @@
 #include "editor/editor_context.hpp"
 #include "editor/text_ops.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -483,4 +483,4 @@ bool helix_select_around_quote(const HelixTextObjectContext& ctx, char quote_ch)
   return true;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

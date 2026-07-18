@@ -14,7 +14,7 @@
 #include <unistd.h>
 #endif
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -62,7 +62,7 @@ void on_fatal_signal(int sig) {
 }
 
 void on_tty_job_signal(int /*sig*/) {
-  // Ignore: a DAP child stealing the TTY must not stop tgdb (default SIGTTIN/SIGTTOU).
+  // Ignore: a DAP child stealing the TTY must not stop tuide (default SIGTTIN/SIGTTOU).
 }
 #endif
 
@@ -95,4 +95,4 @@ void print_current_backtrace(const char* reason) {
 #endif
 }
 
-}  // namespace tgdb
+}  // namespace tuide

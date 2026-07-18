@@ -8,7 +8,7 @@
 #include "editor/find_match_runner.hpp"
 #include "editor/text_search.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct EditorFindState {
   bool open = false;
@@ -33,4 +33,4 @@ struct EditorFindState {
 void open_find_bar(EditorFindState* find, EditorBuffer* buffer);
 void close_find_bar(EditorFindState* find);
 
-}  // namespace tgdb
+}  // namespace tuide

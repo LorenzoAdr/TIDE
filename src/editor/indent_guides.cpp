@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -215,4 +215,4 @@ int indent_guide_depth_for_line(const std::vector<std::string>& lines, int line_
   return tracker.current_depth();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

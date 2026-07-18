@@ -1,6 +1,6 @@
 #pragma once
 
-namespace tgdb {
+namespace tuide {
 
 enum class HelixCommand {
   kNone,
@@ -107,4 +107,4 @@ enum class HelixCommand {
   kTillCharBackward,
 };
 
-}  // namespace tgdb
+}  // namespace tuide

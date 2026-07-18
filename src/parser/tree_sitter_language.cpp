@@ -20,7 +20,7 @@ extern "C" TSLanguage* tree_sitter_cpp(void);
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 const TSLanguage* tree_sitter_cpp_language() { return tree_sitter_cpp(); }
 
@@ -126,4 +126,4 @@ const TSLanguage* tree_sitter_language_for_path(const std::string& path) {
   return nullptr;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

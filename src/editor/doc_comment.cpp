@@ -10,7 +10,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 namespace {
 
 constexpr int kBannerWidth = 79;
@@ -596,4 +596,4 @@ DocCommentInsertPlan plan_doc_comment_insert(const DocCommentRequest& request, i
   return plan;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -7,7 +7,7 @@
 #include "build/build_environment.hpp"
 #include "build/build_environment_state.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 std::vector<BuildEnvironment> discover_build_environments(
     const std::string& workspace_root, const WorkspaceConfig& config,
@@ -21,4 +21,4 @@ std::vector<std::string> discover_recent_artifact_paths(const std::string& works
                                                       const std::vector<std::string>& roots,
                                                       int max_results = 32);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -8,11 +8,11 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 ftxui::Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                         MainLayoutState* layout_state,
                                         RightSidebarState* sidebar,
                                         const std::shared_ptr<ISymbolProvider>& symbols);
 
-}  // namespace tgdb
+}  // namespace tuide

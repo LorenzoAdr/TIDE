@@ -2,7 +2,7 @@
 
 #include "editor/text_ops.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -146,4 +146,4 @@ void close_find_bar(EditorFindState* find) {
   find->reset_search_state();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -740,15 +740,15 @@ bool event_has_ctrl_modifier(const ftxui::Event& event) {
          event_is_ctrl_i(event) || event_is_ctrl_p(event) || event_is_ctrl_o(event);
 }
 
-bool event_is_tide_global_shortcut(const ftxui::Event& event) {
+bool event_is_tuide_global_shortcut(const ftxui::Event& event) {
   return event_is_quick_open(event) || event == ftxui::Event::CtrlT ||
          event_is_ctrl_o(event) || event == ftxui::Event::CtrlQ ||
          event == ftxui::Event::CtrlA || event == ftxui::Event::CtrlE ||
          event == ftxui::Event::CtrlB;
 }
 
-bool event_is_tide_app_shortcut(const ftxui::Event& event) {
-  if (event_is_tide_global_shortcut(event)) {
+bool event_is_tuide_app_shortcut(const ftxui::Event& event) {
+  if (event_is_tuide_global_shortcut(event)) {
     return true;
   }
   if (event_is_f1(event) || event_is_alt_e(event) || event_is_open_shortcuts_modal(event)) {
@@ -791,4 +791,4 @@ bool editor_priority_key(const ftxui::Event& event) {
          event_is_alt_left(event) || event_is_alt_right(event);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

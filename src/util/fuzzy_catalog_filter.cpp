@@ -4,7 +4,7 @@
 
 #include "util/fuzzy_match.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -73,4 +73,4 @@ std::vector<FuzzyCatalogHit> fuzzy_filter_catalog(
   return results;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -7,11 +7,12 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
-constexpr const char* kClangdMarker = "# tgdb: workspace config (auto-generated)";
+constexpr const char* kClangdMarker = "# tuide: workspace config (auto-generated)";
+constexpr const char* kLegacyClangdMarker = "# tgdb: workspace config (auto-generated)";
 
 bool path_is_directory(const std::string& path) {
   std::error_code ec;
@@ -44,7 +45,7 @@ void collect_recursive_include_flags(const std::string& root,
   }
 }
 
-bool clangd_file_is_tgdb_managed(const std::string& path) {
+bool clangd_file_is_tuide_managed(const std::string& path) {
   std::ifstream input(path);
   if (!input) {
     return false;
@@ -53,15 +54,15 @@ bool clangd_file_is_tgdb_managed(const std::string& path) {
   if (!std::getline(input, line)) {
     return false;
   }
-  return line == kClangdMarker;
+  return line == kClangdMarker || line == kLegacyClangdMarker;
 }
 
-void remove_tgdb_clangd_file(const fs::path& clangd_path) {
+void remove_tuide_clangd_file(const fs::path& clangd_path) {
   std::error_code ec;
   if (!fs::is_regular_file(clangd_path, ec)) {
     return;
   }
-  if (!clangd_file_is_tgdb_managed(clangd_path.string())) {
+  if (!clangd_file_is_tuide_managed(clangd_path.string())) {
     return;
   }
   fs::remove(clangd_path, ec);
@@ -93,13 +94,13 @@ void apply_clangd_workspace_config(const std::string& workspace_root,
   const bool needs_file = skip_background || !include_flags.empty();
 
   if (!needs_file) {
-    remove_tgdb_clangd_file(clangd_path);
+    remove_tuide_clangd_file(clangd_path);
     return;
   }
 
   std::error_code ec;
   if (fs::is_regular_file(clangd_path, ec) &&
-      !clangd_file_is_tgdb_managed(clangd_path.string())) {
+      !clangd_file_is_tuide_managed(clangd_path.string())) {
     return;
   }
 
@@ -122,4 +123,4 @@ void apply_clangd_workspace_config(const std::string& workspace_root,
   output << out.str();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

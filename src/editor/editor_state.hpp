@@ -10,7 +10,7 @@
 #include "editor/editor_folds.hpp"
 #include "editor/editor_text.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct CursorPos {
   int line = 0;
@@ -90,4 +90,4 @@ void merge_overlapping_cursors(EditorBuffer* buffer);
 void sort_cursors_for_edit(std::vector<MultiCursor>* cursors);
 void exit_multi_cursor_mode(EditorBuffer* buffer);
 
-}  // namespace tgdb
+}  // namespace tuide

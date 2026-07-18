@@ -21,7 +21,7 @@
 #include "util/clang_format_config.hpp"
 #include "util/compile_commands_remap.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -142,14 +142,14 @@ constexpr int kHelixMode = 7;
 constexpr int kWorkspaceAutoDetect = 8;
 constexpr int kBaseOptions = 9;
 
-#ifdef TGDB_HAS_BUNDLED_CLANGD
+#ifdef TUIDE_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
 constexpr int kAfterClangd = kBaseOptions + 1;
 #else
 constexpr int kAfterClangd = kBaseOptions;
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_GDB
+#ifdef TUIDE_HAS_BUNDLED_GDB
 constexpr int kForceBundledGdb = kAfterClangd;
 constexpr int kGlobalOptionCount = kAfterClangd + 1;
 #else
@@ -385,11 +385,11 @@ std::vector<SettingsOption> global_settings_options() {
        i18n::tr("settings.general.helix_mode.description")},
       {i18n::tr("settings.general.workspace_auto_detect.label"),
        i18n::tr("settings.general.workspace_auto_detect.description")},
-#ifdef TGDB_HAS_BUNDLED_CLANGD
+#ifdef TUIDE_HAS_BUNDLED_CLANGD
       {i18n::tr("settings.general.force_bundled_clangd.label"),
        i18n::tr("settings.general.force_bundled_clangd.description")},
 #endif
-#ifdef TGDB_HAS_BUNDLED_GDB
+#ifdef TUIDE_HAS_BUNDLED_GDB
       {i18n::tr("settings.general.force_bundled_gdb.label"),
        i18n::tr("settings.general.force_bundled_gdb.description")},
 #endif
@@ -628,11 +628,11 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_helix_mode_enabled;
     case kWorkspaceAutoDetect:
       return state->draft_workspace_auto_detect_enabled;
-#ifdef TGDB_HAS_BUNDLED_CLANGD
+#ifdef TUIDE_HAS_BUNDLED_CLANGD
     case kForceBundledClangd:
       return state->draft_force_bundled_clangd;
 #endif
-#ifdef TGDB_HAS_BUNDLED_GDB
+#ifdef TUIDE_HAS_BUNDLED_GDB
     case kForceBundledGdb:
       return state->draft_force_bundled_gdb;
 #endif
@@ -686,12 +686,12 @@ void toggle_option(SettingsModalState* state, int index) {
       state->draft_workspace_auto_detect_enabled =
           !state->draft_workspace_auto_detect_enabled;
       break;
-#ifdef TGDB_HAS_BUNDLED_CLANGD
+#ifdef TUIDE_HAS_BUNDLED_CLANGD
     case kForceBundledClangd:
       state->draft_force_bundled_clangd = !state->draft_force_bundled_clangd;
       break;
 #endif
-#ifdef TGDB_HAS_BUNDLED_GDB
+#ifdef TUIDE_HAS_BUNDLED_GDB
     case kForceBundledGdb:
       state->draft_force_bundled_gdb = !state->draft_force_bundled_gdb;
       break;
@@ -2810,4 +2810,4 @@ bool settings_modal_handle_mouse(SettingsModalState* state, Event event) {
   return handle_settings_mouse(state, event);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

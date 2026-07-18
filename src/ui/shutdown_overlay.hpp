@@ -10,7 +10,7 @@
 #include "ftxui/screen/box.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct ShutdownState {
   void begin(int total_steps);
@@ -56,4 +56,4 @@ ftxui::Component MakeShutdownOverlay(ftxui::Component main, ShutdownState* shutd
                                      MainLayoutState* layout_state,
                                      std::function<void()> on_force_exit);
 
-}  // namespace tgdb
+}  // namespace tuide

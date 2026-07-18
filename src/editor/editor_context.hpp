@@ -5,7 +5,7 @@
 
 #include "symbols/symbol_provider.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct BreadcrumbItem {
   std::string label;
@@ -38,4 +38,4 @@ std::vector<StickyLine> sticky_lines_for_scroll(const std::vector<SymbolInfo>& s
 
 std::string truncate_line_preview(const std::string& line, int max_cols = 120);
 
-}  // namespace tgdb
+}  // namespace tuide

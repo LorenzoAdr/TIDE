@@ -5,7 +5,7 @@
 #include <regex>
 #include <sstream>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -101,4 +101,4 @@ CoreAnalyzerParseResult parse_ref_command_output(const std::string& output) {
   return parse_obj_command_output(output);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

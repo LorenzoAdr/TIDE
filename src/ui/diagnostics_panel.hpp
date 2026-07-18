@@ -9,11 +9,11 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 ftxui::Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                       std::shared_ptr<ISymbolProvider> symbols,
                                       MainLayoutState* layout_state,
                                       WorkspaceIndexer* indexer);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -7,7 +7,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -212,4 +212,4 @@ bool apply_path_tab_completion(std::string* line, const std::string& cwd) {
   return true;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

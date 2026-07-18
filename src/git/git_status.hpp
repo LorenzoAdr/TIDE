@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 enum class GitFileStatus {
   kUnmodified,
@@ -32,4 +32,4 @@ struct GitStatusSnapshot {
 
 GitStatusSnapshot parse_git_status_porcelain(const std::string& output);
 
-}  // namespace tgdb
+}  // namespace tuide

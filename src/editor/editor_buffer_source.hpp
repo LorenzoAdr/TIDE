@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct EditorBuffer;
 
@@ -71,4 +71,4 @@ void editor_buffer_note_line_joined(EditorBuffer* buffer, int line, int join_col
 // cycle -- see mark_editor_content_edited().
 std::optional<EditorTextEditHint> editor_buffer_take_edit_hint(EditorBuffer* buffer);
 
-}  // namespace tgdb
+}  // namespace tuide

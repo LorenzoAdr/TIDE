@@ -37,30 +37,30 @@ release:
 all:
 )";
 
-  const tgdb::MakeQpInfo info = tgdb::parse_make_qp_output(make_qp);
+  const tuide::MakeQpInfo info = tuide::parse_make_qp_output(make_qp);
   expect_true(info.variables.at("CFLAGS").find("-Iinclude") != std::string::npos,
               "CFLAGS parsed");
   expect_true(info.variables.at("BUILD_DIR") == "build", "BUILD_DIR parsed");
   expect_true(!info.compile_flags.empty(), "compile flags extracted");
 
-  tgdb::BuildEnvironment env_a;
+  tuide::BuildEnvironment env_a;
   env_a.working_dir = "/tmp/project";
   env_a.make_command = "make";
-  env_a.id = tgdb::build_environment_id(env_a);
+  env_a.id = tuide::build_environment_id(env_a);
 
-  tgdb::BuildEnvironment env_b = env_a;
+  tuide::BuildEnvironment env_b = env_a;
   env_b.make_command = "make debug";
-  env_b.id = tgdb::build_environment_id(env_b);
+  env_b.id = tuide::build_environment_id(env_b);
   expect_true(env_a.id != env_b.id, "environment ids differ by make command");
 
-  std::vector<tgdb::BuildEnvironment> candidates = {env_a, env_b};
-  tgdb::EnvironmentSelectionHints hints;
+  std::vector<tuide::BuildEnvironment> candidates = {env_a, env_b};
+  tuide::EnvironmentSelectionHints hints;
   hints.active_file_path = "/tmp/project/build/main.o";
 
-  const auto selection = tgdb::select_active_environment(candidates, "auto", hints, env_a.id);
+  const auto selection = tuide::select_active_environment(candidates, "auto", hints, env_a.id);
   expect_eq(selection.environment.id, env_a.id, "hysteresis keeps previous environment");
 
-  const auto forced = tgdb::select_active_environment(candidates, env_b.id, hints, env_a.id);
+  const auto forced = tuide::select_active_environment(candidates, env_b.id, hints, env_a.id);
   expect_eq(forced.environment.id, env_b.id, "forced environment selected");
 
   if (failures == 0) {

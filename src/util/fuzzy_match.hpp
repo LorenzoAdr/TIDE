@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct FuzzyMatchResult {
   bool matched = false;
@@ -20,4 +20,4 @@ std::string fuzzy_to_lower(std::string_view text);
 FuzzyMatchResult fuzzy_match_cached(std::string_view haystack, std::string_view haystack_lower,
                                     std::string_view query_lower);
 
-}  // namespace tgdb
+}  // namespace tuide

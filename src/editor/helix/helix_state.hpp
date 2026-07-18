@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 enum class HelixMode {
   kNormal,
@@ -51,4 +51,4 @@ struct HelixStatusSnapshot {
   std::string pending;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

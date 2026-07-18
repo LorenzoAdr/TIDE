@@ -6,7 +6,7 @@
 #include "ftxui/screen/box.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct WelcomeScreenState {
   ftxui::Box external_file_action_box;
@@ -21,4 +21,4 @@ ftxui::Component MakeWelcomeScreen(MainLayoutState* layout_state, WelcomeScreenS
                                    std::function<void()> on_debug,
                                    std::function<void()> on_workspace);
 
-}  // namespace tgdb
+}  // namespace tuide

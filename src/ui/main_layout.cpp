@@ -36,7 +36,7 @@
 #include "util/ui_panel_render_cache.hpp"
 #include "util/ui_perf_monitor.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -1389,4 +1389,4 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   return layout_root;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

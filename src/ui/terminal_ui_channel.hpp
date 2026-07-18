@@ -6,7 +6,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/ui_event_dispatcher.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 class TerminalUiChannel {
  public:
@@ -29,4 +29,4 @@ inline void TerminalUiChannel::on_pty_output(std::function<void()> pre_paint) {
                                     __LINE__);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

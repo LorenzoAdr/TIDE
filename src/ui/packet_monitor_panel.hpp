@@ -9,7 +9,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct PacketMonitorPanelState {
   int protocol_selected = 0;
@@ -30,4 +30,4 @@ ftxui::Component MakePacketMonitorPanel(packet_monitor::PacketMonitorService* se
                                          std::shared_ptr<PacketMonitorPanelState> state,
                                          MainLayoutState* layout_state);
 
-}  // namespace tgdb
+}  // namespace tuide

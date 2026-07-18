@@ -3,7 +3,7 @@
 #include "editor/editor_state.hpp"
 #include "parser/tree_sitter_document.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -303,4 +303,4 @@ std::optional<EditorTextEditHint> editor_buffer_take_edit_hint(EditorBuffer* buf
   return hint;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

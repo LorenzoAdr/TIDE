@@ -3,7 +3,7 @@
 #include <set>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 inline constexpr int kScrollEdgeMarginLines = 3;
 
@@ -59,4 +59,4 @@ void stabilize_scroll_after_fold_change(EditorBuffer* buffer, const std::vector<
 
 int visible_line_index(const std::vector<int>& visible_lines, int buffer_line);
 
-}  // namespace tgdb
+}  // namespace tuide

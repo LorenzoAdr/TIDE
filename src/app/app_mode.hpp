@@ -1,7 +1,7 @@
 #pragma once
 
-namespace tgdb {
+namespace tuide {
 
 enum class AppMode { kNormal, kDebug };
 
-}  // namespace tgdb
+}  // namespace tuide

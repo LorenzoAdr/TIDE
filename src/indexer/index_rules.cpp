@@ -7,7 +7,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -194,4 +194,4 @@ bool is_lsp_trackable_path(const std::string& path, const std::string& text) {
   return true;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -11,7 +11,7 @@
 #include "parser/tree_sitter_symbols.hpp"
 #include "util/thread_name.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -1234,4 +1234,4 @@ bool ts_point_in_node(TSNode node, TSPoint point) {
   return true;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

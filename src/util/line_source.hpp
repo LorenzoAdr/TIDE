@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 // Minimal read-only line-indexed text abstraction. This lets code that only
 // ever needs `size()`/`at(i)` (e.g. syntax highlighting) work uniformly
@@ -30,4 +30,4 @@ class VectorLineSource : public LineSource {
   const std::vector<std::string>* lines_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

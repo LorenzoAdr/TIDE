@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace tgdb {
+namespace tuide {
 
 bool MouseVelocityTracker::on_mouse_move(int x, int y, int64_t now_ms) {
   if (last_ms_ <= 0) {
@@ -32,4 +32,4 @@ bool MouseVelocityTracker::on_mouse_move(int x, int y, int64_t now_ms) {
   return prev == SpeedZone::kHigh && zone_ == SpeedZone::kLow;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

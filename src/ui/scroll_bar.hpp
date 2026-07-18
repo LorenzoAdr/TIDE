@@ -6,7 +6,7 @@
 #include "ftxui/screen/box.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -177,4 +177,4 @@ inline Element horizontal_scrollbar(int total_width, int scroll_col, int visible
   return hbox(std::move(track));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

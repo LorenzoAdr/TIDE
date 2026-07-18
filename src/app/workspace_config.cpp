@@ -7,11 +7,12 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
-constexpr const char* kConfigDir = ".tgdb";
+constexpr const char* kConfigDir = ".tuide";
+constexpr const char* kLegacyConfigDir = ".tgdb";
 constexpr const char* kConfigFile = "config.json";
 constexpr const char* kLegacyConfigFile = ".tgdb.json";
 
@@ -136,21 +137,29 @@ void parse_build_environment_settings(const nlohmann::json& doc,
 }
 
 void migrate_legacy_config(const fs::path& workspace_root) {
-  const fs::path legacy = workspace_root / kLegacyConfigFile;
   const fs::path config_dir = workspace_root / kConfigDir;
   const fs::path modern = config_dir / kConfigFile;
+  const fs::path legacy_dir = workspace_root / kLegacyConfigDir;
+  const fs::path legacy_flat = workspace_root / kLegacyConfigFile;
   std::error_code ec;
+
+  // Prefer renaming the old workspace private dir (.tgdb → .tuide) when present.
+  if (!fs::exists(config_dir, ec) && fs::is_directory(legacy_dir, ec)) {
+    ec.clear();
+    fs::rename(legacy_dir, config_dir, ec);
+  }
+
   if (fs::exists(modern, ec)) {
     return;
   }
-  if (!fs::exists(legacy, ec)) {
+  if (!fs::exists(legacy_flat, ec)) {
     return;
   }
   fs::create_directories(config_dir, ec);
   ec.clear();
-  fs::copy_file(legacy, modern, fs::copy_options::overwrite_existing, ec);
+  fs::copy_file(legacy_flat, modern, fs::copy_options::overwrite_existing, ec);
   if (!ec) {
-    fs::remove(legacy, ec);
+    fs::remove(legacy_flat, ec);
   }
 }
 
@@ -369,4 +378,4 @@ bool WorkspaceConfig::save(const std::string& workspace_root) const {
   return static_cast<bool>(output);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

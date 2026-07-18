@@ -16,7 +16,7 @@
 
 #include <unistd.h>
 
-#ifdef TGDB_HAS_BUNDLED_CLANGD
+#ifdef TUIDE_HAS_BUNDLED_CLANGD
 #include <zstd.h>
 #include "bundled_clangd_manifest.hpp"
 
@@ -26,8 +26,8 @@ extern const unsigned char _binary_clangd_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_GDB
-#ifndef TGDB_HAS_BUNDLED_CLANGD
+#ifdef TUIDE_HAS_BUNDLED_GDB
+#ifndef TUIDE_HAS_BUNDLED_CLANGD
 #include <zstd.h>
 #endif
 #include "bundled_gdb_manifest.hpp"
@@ -38,8 +38,8 @@ extern const unsigned char _binary_gdb_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_RG
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB)
+#ifdef TUIDE_HAS_BUNDLED_RG
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB)
 #include <zstd.h>
 #endif
 #include "bundled_rg_manifest.hpp"
@@ -50,9 +50,9 @@ extern const unsigned char _binary_rg_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_PYTHON_TOOLS
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG)
+#ifdef TUIDE_HAS_BUNDLED_PYTHON_TOOLS
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG)
 #include <zstd.h>
 #endif
 #include "bundled_python_tools_manifest.hpp"
@@ -63,9 +63,9 @@ extern const unsigned char _binary_python_tools_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_TEXLAB
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS)
+#ifdef TUIDE_HAS_BUNDLED_TEXLAB
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS)
 #include <zstd.h>
 #endif
 #include "bundled_texlab_manifest.hpp"
@@ -75,10 +75,10 @@ extern const unsigned char _binary_texlab_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_BASH_LS
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
-    !defined(TGDB_HAS_BUNDLED_TEXLAB)
+#ifdef TUIDE_HAS_BUNDLED_BASH_LS
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB)
 #include <zstd.h>
 #endif
 #include "bundled_bash_ls_manifest.hpp"
@@ -88,10 +88,10 @@ extern const unsigned char _binary_bash_ls_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_BASH_DAP
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
-    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS)
+#ifdef TUIDE_HAS_BUNDLED_BASH_DAP
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB) && !defined(TUIDE_HAS_BUNDLED_BASH_LS)
 #include <zstd.h>
 #endif
 #include "bundled_bash_dap_manifest.hpp"
@@ -101,11 +101,11 @@ extern const unsigned char _binary_bash_dap_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_RUST_ANALYZER
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
-    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
-    !defined(TGDB_HAS_BUNDLED_BASH_DAP)
+#ifdef TUIDE_HAS_BUNDLED_RUST_ANALYZER
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB) && !defined(TUIDE_HAS_BUNDLED_BASH_LS) && \
+    !defined(TUIDE_HAS_BUNDLED_BASH_DAP)
 #include <zstd.h>
 #endif
 #include "bundled_rust_analyzer_manifest.hpp"
@@ -115,11 +115,11 @@ extern const unsigned char _binary_rust_analyzer_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_GOPLS
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
-    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
-    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER)
+#ifdef TUIDE_HAS_BUNDLED_GOPLS
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB) && !defined(TUIDE_HAS_BUNDLED_BASH_LS) && \
+    !defined(TUIDE_HAS_BUNDLED_BASH_DAP) && !defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER)
 #include <zstd.h>
 #endif
 #include "bundled_gopls_manifest.hpp"
@@ -129,12 +129,12 @@ extern const unsigned char _binary_gopls_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_ZLS
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
-    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
-    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
-    !defined(TGDB_HAS_BUNDLED_GOPLS)
+#ifdef TUIDE_HAS_BUNDLED_ZLS
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB) && !defined(TUIDE_HAS_BUNDLED_BASH_LS) && \
+    !defined(TUIDE_HAS_BUNDLED_BASH_DAP) && !defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TUIDE_HAS_BUNDLED_GOPLS)
 #include <zstd.h>
 #endif
 #include "bundled_zls_manifest.hpp"
@@ -144,12 +144,12 @@ extern const unsigned char _binary_zls_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_LUA_LS
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
-    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
-    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
-    !defined(TGDB_HAS_BUNDLED_GOPLS) && !defined(TGDB_HAS_BUNDLED_ZLS)
+#ifdef TUIDE_HAS_BUNDLED_LUA_LS
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB) && !defined(TUIDE_HAS_BUNDLED_BASH_LS) && \
+    !defined(TUIDE_HAS_BUNDLED_BASH_DAP) && !defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TUIDE_HAS_BUNDLED_GOPLS) && !defined(TUIDE_HAS_BUNDLED_ZLS)
 #include <zstd.h>
 #endif
 #include "bundled_lua_ls_manifest.hpp"
@@ -159,13 +159,13 @@ extern const unsigned char _binary_lua_ls_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_FORTLS
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
-    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
-    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
-    !defined(TGDB_HAS_BUNDLED_GOPLS) && !defined(TGDB_HAS_BUNDLED_ZLS) && \
-    !defined(TGDB_HAS_BUNDLED_LUA_LS)
+#ifdef TUIDE_HAS_BUNDLED_FORTLS
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB) && !defined(TUIDE_HAS_BUNDLED_BASH_LS) && \
+    !defined(TUIDE_HAS_BUNDLED_BASH_DAP) && !defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TUIDE_HAS_BUNDLED_GOPLS) && !defined(TUIDE_HAS_BUNDLED_ZLS) && \
+    !defined(TUIDE_HAS_BUNDLED_LUA_LS)
 #include <zstd.h>
 #endif
 #include "bundled_fortls_manifest.hpp"
@@ -175,13 +175,13 @@ extern const unsigned char _binary_fortls_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_TSSERVER
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
-    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
-    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
-    !defined(TGDB_HAS_BUNDLED_GOPLS) && !defined(TGDB_HAS_BUNDLED_ZLS) && \
-    !defined(TGDB_HAS_BUNDLED_LUA_LS) && !defined(TGDB_HAS_BUNDLED_FORTLS)
+#ifdef TUIDE_HAS_BUNDLED_TSSERVER
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB) && !defined(TUIDE_HAS_BUNDLED_BASH_LS) && \
+    !defined(TUIDE_HAS_BUNDLED_BASH_DAP) && !defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TUIDE_HAS_BUNDLED_GOPLS) && !defined(TUIDE_HAS_BUNDLED_ZLS) && \
+    !defined(TUIDE_HAS_BUNDLED_LUA_LS) && !defined(TUIDE_HAS_BUNDLED_FORTLS)
 #include <zstd.h>
 #endif
 #include "bundled_typescript_ls_manifest.hpp"
@@ -191,14 +191,14 @@ extern const unsigned char _binary_typescript_ls_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_NEOCMAKELSP
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
-    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
-    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
-    !defined(TGDB_HAS_BUNDLED_GOPLS) && !defined(TGDB_HAS_BUNDLED_ZLS) && \
-    !defined(TGDB_HAS_BUNDLED_LUA_LS) && !defined(TGDB_HAS_BUNDLED_FORTLS) && \
-    !defined(TGDB_HAS_BUNDLED_TSSERVER)
+#ifdef TUIDE_HAS_BUNDLED_NEOCMAKELSP
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB) && !defined(TUIDE_HAS_BUNDLED_BASH_LS) && \
+    !defined(TUIDE_HAS_BUNDLED_BASH_DAP) && !defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TUIDE_HAS_BUNDLED_GOPLS) && !defined(TUIDE_HAS_BUNDLED_ZLS) && \
+    !defined(TUIDE_HAS_BUNDLED_LUA_LS) && !defined(TUIDE_HAS_BUNDLED_FORTLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TSSERVER)
 #include <zstd.h>
 #endif
 #include "bundled_neocmakelsp_manifest.hpp"
@@ -208,14 +208,14 @@ extern const unsigned char _binary_neocmakelsp_blob_zst_end[];
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_MAKE_LS
-#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
-    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
-    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
-    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
-    !defined(TGDB_HAS_BUNDLED_GOPLS) && !defined(TGDB_HAS_BUNDLED_ZLS) && \
-    !defined(TGDB_HAS_BUNDLED_LUA_LS) && !defined(TGDB_HAS_BUNDLED_FORTLS) && \
-    !defined(TGDB_HAS_BUNDLED_TSSERVER) && !defined(TGDB_HAS_BUNDLED_NEOCMAKELSP)
+#ifdef TUIDE_HAS_BUNDLED_MAKE_LS
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB) && !defined(TUIDE_HAS_BUNDLED_BASH_LS) && \
+    !defined(TUIDE_HAS_BUNDLED_BASH_DAP) && !defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TUIDE_HAS_BUNDLED_GOPLS) && !defined(TUIDE_HAS_BUNDLED_ZLS) && \
+    !defined(TUIDE_HAS_BUNDLED_LUA_LS) && !defined(TUIDE_HAS_BUNDLED_FORTLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TSSERVER) && !defined(TUIDE_HAS_BUNDLED_NEOCMAKELSP)
 #include <zstd.h>
 #endif
 #include "bundled_make_ls_manifest.hpp"
@@ -227,7 +227,7 @@ extern const unsigned char _binary_make_ls_blob_zst_end[];
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -264,11 +264,11 @@ std::optional<bool> parse_env_bool(const char* name) {
 std::string bundled_cache_root() {
   const char* xdg = std::getenv("XDG_CACHE_HOME");
   if (xdg != nullptr && xdg[0] != '\0') {
-    return (fs::path(xdg) / "tgdb" / "bundled").string();
+    return (fs::path(xdg) / "tuide" / "bundled").string();
   }
   const char* home = std::getenv("HOME");
   if (home != nullptr && home[0] != '\0') {
-    return (fs::path(home) / ".cache" / "tgdb" / "bundled").string();
+    return (fs::path(home) / ".cache" / "tuide" / "bundled").string();
   }
   return {};
 }
@@ -330,13 +330,13 @@ std::optional<std::string> gdb_from_env() {
   return std::string(raw);
 }
 
-#if defined(TGDB_HAS_BUNDLED_CLANGD) || defined(TGDB_HAS_BUNDLED_GDB) || \
-    defined(TGDB_HAS_BUNDLED_RG) || defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) || \
-    defined(TGDB_HAS_BUNDLED_TEXLAB) || defined(TGDB_HAS_BUNDLED_BASH_LS) || \
-    defined(TGDB_HAS_BUNDLED_BASH_DAP) || defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) || \
-    defined(TGDB_HAS_BUNDLED_GOPLS) || defined(TGDB_HAS_BUNDLED_ZLS) || \
-    defined(TGDB_HAS_BUNDLED_LUA_LS) || defined(TGDB_HAS_BUNDLED_FORTLS) || \
-    defined(TGDB_HAS_BUNDLED_TSSERVER)
+#if defined(TUIDE_HAS_BUNDLED_CLANGD) || defined(TUIDE_HAS_BUNDLED_GDB) || \
+    defined(TUIDE_HAS_BUNDLED_RG) || defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) || \
+    defined(TUIDE_HAS_BUNDLED_TEXLAB) || defined(TUIDE_HAS_BUNDLED_BASH_LS) || \
+    defined(TUIDE_HAS_BUNDLED_BASH_DAP) || defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) || \
+    defined(TUIDE_HAS_BUNDLED_GOPLS) || defined(TUIDE_HAS_BUNDLED_ZLS) || \
+    defined(TUIDE_HAS_BUNDLED_LUA_LS) || defined(TUIDE_HAS_BUNDLED_FORTLS) || \
+    defined(TUIDE_HAS_BUNDLED_TSSERVER)
 std::optional<std::vector<unsigned char>> decompress_zstd_blob(const unsigned char* start,
                                                                  const unsigned char* end) {
   const std::size_t compressed_size = static_cast<std::size_t>(end - start);
@@ -365,9 +365,9 @@ std::optional<std::vector<unsigned char>> decompress_zstd_blob(const unsigned ch
 bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
                               const fs::path& output_dir);
 
-#if defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) || defined(TGDB_HAS_BUNDLED_GOPLS) || \
-    defined(TGDB_HAS_BUNDLED_ZLS) || defined(TGDB_HAS_BUNDLED_LUA_LS) || \
-    defined(TGDB_HAS_BUNDLED_FORTLS) || defined(TGDB_HAS_BUNDLED_TSSERVER)
+#if defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) || defined(TUIDE_HAS_BUNDLED_GOPLS) || \
+    defined(TUIDE_HAS_BUNDLED_ZLS) || defined(TUIDE_HAS_BUNDLED_LUA_LS) || \
+    defined(TUIDE_HAS_BUNDLED_FORTLS) || defined(TUIDE_HAS_BUNDLED_TSSERVER)
 bool bundled_tree_ready(const fs::path& install_root, const fs::path& binary_path,
                         const std::string& expected_marker) {
   const fs::path marker = install_root / ".installed";
@@ -584,7 +584,7 @@ bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
   return true;
 }
 
-#ifdef TGDB_HAS_BUNDLED_CLANGD
+#ifdef TUIDE_HAS_BUNDLED_CLANGD
 std::optional<std::string> find_bundled_resource_dir(const fs::path& install_root) {
   std::error_code ec;
   const fs::path clang_base = install_root / "lib" / "clang";
@@ -599,7 +599,7 @@ std::optional<std::string> find_bundled_resource_dir(const fs::path& install_roo
     }
   }
 
-  const fs::path manifest_dir = install_root / TGDB_BUNDLED_CLANGD_RESOURCE_SUBDIR;
+  const fs::path manifest_dir = install_root / TUIDE_BUNDLED_CLANGD_RESOURCE_SUBDIR;
   if (fs::is_directory(manifest_dir / "include", ec)) {
     return manifest_dir.string();
   }
@@ -608,10 +608,10 @@ std::optional<std::string> find_bundled_resource_dir(const fs::path& install_roo
 
 std::optional<ClangdLocation> resolve_bundled_clangd() {
   const fs::path install_root =
-      fs::path(bundled_cache_root()) / ("clangd-" TGDB_BUNDLED_CLANGD_VERSION);
+      fs::path(bundled_cache_root()) / ("clangd-" TUIDE_BUNDLED_CLANGD_VERSION);
   const fs::path binary_path = install_root / "bin" / "clangd";
   const fs::path marker = install_root / ".installed";
-  const std::string expected_marker = std::string(TGDB_BUNDLED_CLANGD_BLOB_SHA256) + "\n";
+  const std::string expected_marker = std::string(TUIDE_BUNDLED_CLANGD_BLOB_SHA256) + "\n";
 
   if (is_executable_file(binary_path.string()) && read_text_file(marker) == expected_marker) {
     if (const auto resource_dir = find_bundled_resource_dir(install_root); resource_dir.has_value()) {
@@ -661,13 +661,13 @@ std::optional<ClangdLocation> resolve_bundled_clangd() {
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_GDB
+#ifdef TUIDE_HAS_BUNDLED_GDB
 std::optional<GdbLocation> resolve_bundled_gdb() {
   const fs::path install_root =
-      fs::path(bundled_cache_root()) / ("gdb-" TGDB_BUNDLED_GDB_VERSION);
+      fs::path(bundled_cache_root()) / ("gdb-" TUIDE_BUNDLED_GDB_VERSION);
   const fs::path binary_path = install_root / "bin" / "gdb";
   const fs::path marker = install_root / ".installed";
-  const std::string expected_marker = std::string(TGDB_BUNDLED_GDB_BLOB_SHA256) + "\n";
+  const std::string expected_marker = std::string(TUIDE_BUNDLED_GDB_BLOB_SHA256) + "\n";
 
   if (is_executable_file(binary_path.string()) && read_text_file(marker) == expected_marker) {
     return GdbLocation{binary_path.string(), GdbLocation::Source::Bundled};
@@ -709,12 +709,12 @@ std::optional<GdbLocation> resolve_bundled_gdb() {
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_RG
+#ifdef TUIDE_HAS_BUNDLED_RG
 std::optional<RgLocation> resolve_bundled_rg() {
-  const fs::path install_root = fs::path(bundled_cache_root()) / ("rg-" TGDB_BUNDLED_RG_VERSION);
+  const fs::path install_root = fs::path(bundled_cache_root()) / ("rg-" TUIDE_BUNDLED_RG_VERSION);
   const fs::path binary_path = install_root / "bin" / "rg";
   const fs::path marker = install_root / ".installed";
-  const std::string expected_marker = std::string(TGDB_BUNDLED_RG_BLOB_SHA256) + "\n";
+  const std::string expected_marker = std::string(TUIDE_BUNDLED_RG_BLOB_SHA256) + "\n";
 
   if (is_executable_file(binary_path.string()) && read_text_file(marker) == expected_marker) {
     return RgLocation{binary_path.string(), RgLocation::Source::Bundled};
@@ -755,13 +755,13 @@ std::optional<RgLocation> resolve_bundled_rg() {
 }
 #endif
 
-#ifdef TGDB_HAS_BUNDLED_PYTHON_TOOLS
+#ifdef TUIDE_HAS_BUNDLED_PYTHON_TOOLS
 std::optional<fs::path> ensure_bundled_python_tools_root() {
   const fs::path install_root =
-      fs::path(bundled_cache_root()) / ("python-tools-" TGDB_BUNDLED_PYTHON_TOOLS_VERSION);
+      fs::path(bundled_cache_root()) / ("python-tools-" TUIDE_BUNDLED_PYTHON_TOOLS_VERSION);
   const fs::path langserver = install_root / "bin" / "basedpyright-langserver";
   const fs::path marker = install_root / ".installed";
-  const std::string expected_marker = std::string(TGDB_BUNDLED_PYTHON_TOOLS_BLOB_SHA256) + "\n";
+  const std::string expected_marker = std::string(TUIDE_BUNDLED_PYTHON_TOOLS_BLOB_SHA256) + "\n";
 
   if (is_executable_file(langserver.string()) && read_text_file(marker) == expected_marker) {
     return install_root;
@@ -814,7 +814,7 @@ std::optional<BasedpyrightLocation> resolve_bundled_basedpyright() {
   return loc;
 }
 
-#if TGDB_BUNDLED_PYTHON_TOOLS_KIND_FULL
+#if TUIDE_BUNDLED_PYTHON_TOOLS_KIND_FULL
 std::optional<DebugpyLocation> resolve_bundled_debugpy() {
   const auto root = ensure_bundled_python_tools_root();
   if (!root.has_value()) {
@@ -832,7 +832,7 @@ std::optional<DebugpyLocation> resolve_bundled_debugpy() {
 }  // namespace
 
 bool has_bundled_clangd() {
-#ifdef TGDB_HAS_BUNDLED_CLANGD
+#ifdef TUIDE_HAS_BUNDLED_CLANGD
   return true;
 #else
   return false;
@@ -842,13 +842,13 @@ bool has_bundled_clangd() {
 void set_runtime_force_bundled_clangd(bool value) { g_runtime_force_bundled_clangd = value; }
 
 bool should_force_bundled_clangd() {
-  if (const auto env = parse_env_bool("TGDB_FORCE_BUNDLED_CLANGD"); env.has_value()) {
+  if (const auto env = parse_env_bool("TUIDE_FORCE_BUNDLED_CLANGD"); env.has_value()) {
     return *env;
   }
   if (g_runtime_force_bundled_clangd.has_value()) {
     return *g_runtime_force_bundled_clangd;
   }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_CLANGD
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_CLANGD
   return true;
 #else
   return false;
@@ -856,7 +856,7 @@ bool should_force_bundled_clangd() {
 }
 
 bool has_bundled_gdb() {
-#ifdef TGDB_HAS_BUNDLED_GDB
+#ifdef TUIDE_HAS_BUNDLED_GDB
   return true;
 #else
   return false;
@@ -866,13 +866,13 @@ bool has_bundled_gdb() {
 void set_runtime_force_bundled_gdb(bool value) { g_runtime_force_bundled_gdb = value; }
 
 bool should_force_bundled_gdb() {
-  if (const auto env = parse_env_bool("TGDB_FORCE_BUNDLED_GDB"); env.has_value()) {
+  if (const auto env = parse_env_bool("TUIDE_FORCE_BUNDLED_GDB"); env.has_value()) {
     return *env;
   }
   if (g_runtime_force_bundled_gdb.has_value()) {
     return *g_runtime_force_bundled_gdb;
   }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_GDB
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_GDB
   return true;
 #else
   return false;
@@ -884,7 +884,7 @@ std::optional<ClangdLocation> resolve_clangd() {
     return ClangdLocation{*env_path, {}, ClangdLocation::Source::Env};
   }
 
-#ifdef TGDB_HAS_BUNDLED_CLANGD
+#ifdef TUIDE_HAS_BUNDLED_CLANGD
   if (const auto bundled = resolve_bundled_clangd(); bundled.has_value()) {
     return bundled;
   }
@@ -904,7 +904,7 @@ std::optional<GdbLocation> resolve_gdb() {
     return GdbLocation{*env_path, GdbLocation::Source::Env};
   }
 
-#ifdef TGDB_HAS_BUNDLED_GDB
+#ifdef TUIDE_HAS_BUNDLED_GDB
   if (const auto bundled = resolve_bundled_gdb(); bundled.has_value()) {
     return bundled;
   }
@@ -920,7 +920,7 @@ std::optional<GdbLocation> resolve_gdb() {
 }
 
 bool has_bundled_rg() {
-#ifdef TGDB_HAS_BUNDLED_RG
+#ifdef TUIDE_HAS_BUNDLED_RG
   return true;
 #else
   return false;
@@ -930,13 +930,13 @@ bool has_bundled_rg() {
 void set_runtime_force_bundled_rg(bool value) { g_runtime_force_bundled_rg = value; }
 
 bool should_force_bundled_rg() {
-  if (const auto env = parse_env_bool("TGDB_FORCE_BUNDLED_RG"); env.has_value()) {
+  if (const auto env = parse_env_bool("TUIDE_FORCE_BUNDLED_RG"); env.has_value()) {
     return *env;
   }
   if (g_runtime_force_bundled_rg.has_value()) {
     return *g_runtime_force_bundled_rg;
   }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_RG
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_RG
   return true;
 #else
   return false;
@@ -948,7 +948,7 @@ std::optional<RgLocation> resolve_rg() {
     return RgLocation{*env_path, RgLocation::Source::Env};
   }
 
-#ifdef TGDB_HAS_BUNDLED_RG
+#ifdef TUIDE_HAS_BUNDLED_RG
   if (const auto bundled = resolve_bundled_rg(); bundled.has_value()) {
     return bundled;
   }
@@ -964,7 +964,7 @@ std::optional<RgLocation> resolve_rg() {
 }
 
 bool has_bundled_python_tools() {
-#ifdef TGDB_HAS_BUNDLED_PYTHON_TOOLS
+#ifdef TUIDE_HAS_BUNDLED_PYTHON_TOOLS
   return true;
 #else
   return false;
@@ -976,13 +976,13 @@ void set_runtime_force_bundled_python_tools(bool value) {
 }
 
 bool should_force_bundled_python_tools() {
-  if (const auto env = parse_env_bool("TGDB_FORCE_BUNDLED_PYTHON_TOOLS"); env.has_value()) {
+  if (const auto env = parse_env_bool("TUIDE_FORCE_BUNDLED_PYTHON_TOOLS"); env.has_value()) {
     return *env;
   }
   if (g_runtime_force_bundled_python_tools.has_value()) {
     return *g_runtime_force_bundled_python_tools;
   }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_PYTHON_TOOLS
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_PYTHON_TOOLS
   return true;
 #else
   return false;
@@ -1097,7 +1097,7 @@ std::optional<BasedpyrightLocation> resolve_basedpyright() {
     return loc;
   }
 
-#ifdef TGDB_HAS_BUNDLED_PYTHON_TOOLS
+#ifdef TUIDE_HAS_BUNDLED_PYTHON_TOOLS
   if (const auto bundled = resolve_bundled_basedpyright(); bundled.has_value()) {
     return bundled;
   }
@@ -1156,7 +1156,7 @@ std::optional<DebugpyLocation> resolve_debugpy() {
     }
   }
 
-#if defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && TGDB_BUNDLED_PYTHON_TOOLS_KIND_FULL
+#if defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && TUIDE_BUNDLED_PYTHON_TOOLS_KIND_FULL
   if (const auto bundled = resolve_bundled_debugpy(); bundled.has_value()) {
     return bundled;
   }
@@ -1180,10 +1180,10 @@ std::optional<std::string> resolve_shellcheck() {
   if (const auto env_path = env_executable("SHELLCHECK_PATH"); env_path.has_value()) {
     return *env_path;
   }
-#ifdef TGDB_HAS_BUNDLED_BASH_LS
+#ifdef TUIDE_HAS_BUNDLED_BASH_LS
   {
     const fs::path bundled =
-        fs::path(bundled_cache_root()) / ("bash-ls-" TGDB_BUNDLED_BASH_LS_VERSION) / "bin" /
+        fs::path(bundled_cache_root()) / ("bash-ls-" TUIDE_BUNDLED_BASH_LS_VERSION) / "bin" /
         "shellcheck";
     if (is_executable_file(bundled.string())) {
       return bundled.string();
@@ -1197,10 +1197,10 @@ std::optional<std::string> resolve_chktex() {
   if (const auto env_path = env_executable("CHKTEX_PATH"); env_path.has_value()) {
     return *env_path;
   }
-#ifdef TGDB_HAS_BUNDLED_TEXLAB
+#ifdef TUIDE_HAS_BUNDLED_TEXLAB
   {
     const fs::path bundled = fs::path(bundled_cache_root()) /
-                             ("texlab-" TGDB_BUNDLED_TEXLAB_VERSION) / "bin" / "chktex";
+                             ("texlab-" TUIDE_BUNDLED_TEXLAB_VERSION) / "bin" / "chktex";
     if (is_executable_file(bundled.string())) {
       return bundled.string();
     }
@@ -1213,7 +1213,7 @@ std::optional<std::string> resolve_gfortran() {
   if (const auto env_path = env_executable("GFORTRAN_PATH"); env_path.has_value()) {
     return *env_path;
   }
-  if (const auto env_path = env_executable("TGDB_GFORTRAN"); env_path.has_value()) {
+  if (const auto env_path = env_executable("TUIDE_GFORTRAN"); env_path.has_value()) {
     return *env_path;
   }
   static const char* kCandidates[] = {"gfortran", "gfortran-14", "gfortran-13", "gfortran-12"};
@@ -1229,13 +1229,13 @@ std::optional<BashLsLocation> resolve_bash_language_server() {
   if (const auto env_path = env_executable("BASH_LANGUAGE_SERVER_PATH"); env_path.has_value()) {
     return BashLsLocation{*env_path, BashLsLocation::Source::Env};
   }
-#ifdef TGDB_HAS_BUNDLED_BASH_LS
+#ifdef TUIDE_HAS_BUNDLED_BASH_LS
   {
     const fs::path install_root =
-        fs::path(bundled_cache_root()) / ("bash-ls-" TGDB_BUNDLED_BASH_LS_VERSION);
+        fs::path(bundled_cache_root()) / ("bash-ls-" TUIDE_BUNDLED_BASH_LS_VERSION);
     const fs::path binary_path = install_root / "bin" / "bash-language-server";
     const fs::path marker = install_root / ".installed";
-    const std::string expected = std::string(TGDB_BUNDLED_BASH_LS_BLOB_SHA256) + "\n";
+    const std::string expected = std::string(TUIDE_BUNDLED_BASH_LS_BLOB_SHA256) + "\n";
     // Prefer an existing install immediately. Marker mismatch used to force a synchronous
     // re-extract (100MB+ tar) on every resolve — Status UI calls this every frame.
     if (is_executable_file(binary_path.string())) {
@@ -1267,7 +1267,7 @@ std::optional<BashLsLocation> resolve_bash_language_server() {
     if (is_executable_file(binary_path.string())) {
       return BashLsLocation{binary_path.string(), BashLsLocation::Source::Bundled};
     }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_BASH_LS
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_BASH_LS
     return std::nullopt;
 #endif
   }
@@ -1282,14 +1282,14 @@ std::optional<TexlabLocation> resolve_texlab() {
   if (const auto env_path = env_executable("TEXLAB_PATH"); env_path.has_value()) {
     return TexlabLocation{*env_path, TexlabLocation::Source::Env};
   }
-#ifdef TGDB_HAS_BUNDLED_TEXLAB
+#ifdef TUIDE_HAS_BUNDLED_TEXLAB
   {
     const fs::path install_root =
-        fs::path(bundled_cache_root()) / ("texlab-" TGDB_BUNDLED_TEXLAB_VERSION);
+        fs::path(bundled_cache_root()) / ("texlab-" TUIDE_BUNDLED_TEXLAB_VERSION);
     const fs::path binary_path = install_root / "bin" / "texlab";
     const fs::path chktex_path = install_root / "bin" / "chktex";
     const fs::path marker = install_root / ".installed";
-    const std::string expected = std::string(TGDB_BUNDLED_TEXLAB_BLOB_SHA256) + "\n";
+    const std::string expected = std::string(TUIDE_BUNDLED_TEXLAB_BLOB_SHA256) + "\n";
     auto install_ready = [&]() {
       // Require chktex too: older extracts only had texlab and would stick forever if we
       // only checked the LSP binary (Status UI / resolve hit this path every frame).
@@ -1326,7 +1326,7 @@ std::optional<TexlabLocation> resolve_texlab() {
     if (install_ready()) {
       return TexlabLocation{binary_path.string(), TexlabLocation::Source::Bundled};
     }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_TEXLAB
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_TEXLAB
     return std::nullopt;
 #endif
   }
@@ -1346,17 +1346,17 @@ std::optional<RustAnalyzerLocation> resolve_rust_analyzer() {
     return RustAnalyzerLocation{path, source};
   };
 
-  if (const auto env_path = env_executable("TGDB_RUST_ANALYZER"); env_path.has_value()) {
+  if (const auto env_path = env_executable("TUIDE_RUST_ANALYZER"); env_path.has_value()) {
     if (auto loc = accept(*env_path, RustAnalyzerLocation::Source::Env)) {
       return loc;
     }
   }
-#ifdef TGDB_HAS_BUNDLED_RUST_ANALYZER
+#ifdef TUIDE_HAS_BUNDLED_RUST_ANALYZER
   {
     const fs::path install_root = fs::path(bundled_cache_root()) /
-                                  ("rust-analyzer-" TGDB_BUNDLED_RUST_ANALYZER_VERSION);
+                                  ("rust-analyzer-" TUIDE_BUNDLED_RUST_ANALYZER_VERSION);
     const fs::path binary_path = install_root / "bin" / "rust-analyzer";
-    const std::string expected = std::string(TGDB_BUNDLED_RUST_ANALYZER_BLOB_SHA256) + "\n";
+    const std::string expected = std::string(TUIDE_BUNDLED_RUST_ANALYZER_BLOB_SHA256) + "\n";
     static std::atomic<bool> install_attempted{false};
     if (lazy_extract_bundled_tree(install_root, "bin/rust-analyzer", expected,
                                   _binary_rust_analyzer_blob_zst_start,
@@ -1365,7 +1365,7 @@ std::optional<RustAnalyzerLocation> resolve_rust_analyzer() {
         return loc;
       }
     }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_RUST_ANALYZER
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_RUST_ANALYZER
     return std::nullopt;
 #endif
   }
@@ -1379,22 +1379,22 @@ std::optional<RustAnalyzerLocation> resolve_rust_analyzer() {
 }
 
 std::optional<GoplsLocation> resolve_gopls() {
-  if (const auto env_path = env_executable("TGDB_GOPLS"); env_path.has_value()) {
+  if (const auto env_path = env_executable("TUIDE_GOPLS"); env_path.has_value()) {
     return GoplsLocation{*env_path, GoplsLocation::Source::Env};
   }
-#ifdef TGDB_HAS_BUNDLED_GOPLS
+#ifdef TUIDE_HAS_BUNDLED_GOPLS
   {
     const fs::path install_root =
-        fs::path(bundled_cache_root()) / ("gopls-" TGDB_BUNDLED_GOPLS_VERSION);
+        fs::path(bundled_cache_root()) / ("gopls-" TUIDE_BUNDLED_GOPLS_VERSION);
     const fs::path binary_path = install_root / "bin" / "gopls";
-    const std::string expected = std::string(TGDB_BUNDLED_GOPLS_BLOB_SHA256) + "\n";
+    const std::string expected = std::string(TUIDE_BUNDLED_GOPLS_BLOB_SHA256) + "\n";
     static std::atomic<bool> install_attempted{false};
     if (lazy_extract_bundled_tree(install_root, "bin/gopls", expected,
                                   _binary_gopls_blob_zst_start, _binary_gopls_blob_zst_end,
                                   install_attempted)) {
       return GoplsLocation{binary_path.string(), GoplsLocation::Source::Bundled};
     }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_GOPLS
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_GOPLS
     return std::nullopt;
 #endif
   }
@@ -1406,21 +1406,21 @@ std::optional<GoplsLocation> resolve_gopls() {
 }
 
 std::optional<ZlsLocation> resolve_zls() {
-  if (const auto env_path = env_executable("TGDB_ZLS"); env_path.has_value()) {
+  if (const auto env_path = env_executable("TUIDE_ZLS"); env_path.has_value()) {
     return ZlsLocation{*env_path, ZlsLocation::Source::Env};
   }
-#ifdef TGDB_HAS_BUNDLED_ZLS
+#ifdef TUIDE_HAS_BUNDLED_ZLS
   {
     const fs::path install_root =
-        fs::path(bundled_cache_root()) / ("zls-" TGDB_BUNDLED_ZLS_VERSION);
+        fs::path(bundled_cache_root()) / ("zls-" TUIDE_BUNDLED_ZLS_VERSION);
     const fs::path binary_path = install_root / "bin" / "zls";
-    const std::string expected = std::string(TGDB_BUNDLED_ZLS_BLOB_SHA256) + "\n";
+    const std::string expected = std::string(TUIDE_BUNDLED_ZLS_BLOB_SHA256) + "\n";
     static std::atomic<bool> install_attempted{false};
     if (lazy_extract_bundled_tree(install_root, "bin/zls", expected, _binary_zls_blob_zst_start,
                                   _binary_zls_blob_zst_end, install_attempted)) {
       return ZlsLocation{binary_path.string(), ZlsLocation::Source::Bundled};
     }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_ZLS
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_ZLS
     return std::nullopt;
 #endif
   }
@@ -1432,25 +1432,25 @@ std::optional<ZlsLocation> resolve_zls() {
 }
 
 std::optional<FortlsLocation> resolve_fortls() {
-  if (const auto env_path = env_executable("TGDB_FORTLS"); env_path.has_value()) {
+  if (const auto env_path = env_executable("TUIDE_FORTLS"); env_path.has_value()) {
     FortlsLocation loc;
     loc.binary_path = *env_path;
     loc.source = FortlsLocation::Source::Env;
     return loc;
   }
-#ifdef TGDB_HAS_BUNDLED_FORTLS
+#ifdef TUIDE_HAS_BUNDLED_FORTLS
   {
     const fs::path install_root =
-        fs::path(bundled_cache_root()) / ("fortls-" TGDB_BUNDLED_FORTLS_VERSION);
+        fs::path(bundled_cache_root()) / ("fortls-" TUIDE_BUNDLED_FORTLS_VERSION);
     const fs::path binary_path = install_root / "bin" / "fortls";
-    const std::string expected = std::string(TGDB_BUNDLED_FORTLS_BLOB_SHA256) + "\n";
+    const std::string expected = std::string(TUIDE_BUNDLED_FORTLS_BLOB_SHA256) + "\n";
     static std::atomic<bool> install_attempted{false};
     if (lazy_extract_bundled_tree(install_root, "bin/fortls", expected,
                                   _binary_fortls_blob_zst_start, _binary_fortls_blob_zst_end,
                                   install_attempted)) {
       return FortlsLocation{binary_path.string(), false, {}, FortlsLocation::Source::Bundled};
     }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_FORTLS
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_FORTLS
     return std::nullopt;
 #endif
   }
@@ -1475,22 +1475,22 @@ std::optional<FortlsLocation> resolve_fortls() {
 }
 
 std::optional<LuaLsLocation> resolve_lua_language_server() {
-  if (const auto env_path = env_executable("TGDB_LUA_LS"); env_path.has_value()) {
+  if (const auto env_path = env_executable("TUIDE_LUA_LS"); env_path.has_value()) {
     return LuaLsLocation{*env_path, LuaLsLocation::Source::Env};
   }
-#ifdef TGDB_HAS_BUNDLED_LUA_LS
+#ifdef TUIDE_HAS_BUNDLED_LUA_LS
   {
     const fs::path install_root =
-        fs::path(bundled_cache_root()) / ("lua-language-server-" TGDB_BUNDLED_LUA_LS_VERSION);
+        fs::path(bundled_cache_root()) / ("lua-language-server-" TUIDE_BUNDLED_LUA_LS_VERSION);
     const fs::path binary_path = install_root / "bin" / "lua-language-server";
-    const std::string expected = std::string(TGDB_BUNDLED_LUA_LS_BLOB_SHA256) + "\n";
+    const std::string expected = std::string(TUIDE_BUNDLED_LUA_LS_BLOB_SHA256) + "\n";
     static std::atomic<bool> install_attempted{false};
     if (lazy_extract_bundled_tree(install_root, "bin/lua-language-server", expected,
                                   _binary_lua_ls_blob_zst_start, _binary_lua_ls_blob_zst_end,
                                   install_attempted)) {
       return LuaLsLocation{binary_path.string(), LuaLsLocation::Source::Bundled};
     }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_LUA_LS
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_LUA_LS
     return std::nullopt;
 #endif
   }
@@ -1505,19 +1505,19 @@ std::optional<LuaLsLocation> resolve_lua_language_server() {
 }
 
 std::optional<TypescriptLsLocation> resolve_typescript_language_server() {
-  if (const auto env_path = env_executable("TGDB_TYPESCRIPT_LS"); env_path.has_value()) {
+  if (const auto env_path = env_executable("TUIDE_TYPESCRIPT_LS"); env_path.has_value()) {
     TypescriptLsLocation loc;
     loc.binary_path = *env_path;
     loc.needs_stdio_flag = true;
     loc.source = TypescriptLsLocation::Source::Env;
     return loc;
   }
-#ifdef TGDB_HAS_BUNDLED_TSSERVER
+#ifdef TUIDE_HAS_BUNDLED_TSSERVER
   {
     const fs::path install_root = fs::path(bundled_cache_root()) /
-                                  ("typescript-ls-" TGDB_BUNDLED_TYPESCRIPT_LS_VERSION);
+                                  ("typescript-ls-" TUIDE_BUNDLED_TYPESCRIPT_LS_VERSION);
     const fs::path binary_path = install_root / "bin" / "typescript-language-server";
-    const std::string expected = std::string(TGDB_BUNDLED_TYPESCRIPT_LS_BLOB_SHA256) + "\n";
+    const std::string expected = std::string(TUIDE_BUNDLED_TYPESCRIPT_LS_BLOB_SHA256) + "\n";
     static std::atomic<bool> install_attempted{false};
     if (lazy_extract_bundled_tree(install_root, "bin/typescript-language-server", expected,
                                   _binary_typescript_ls_blob_zst_start,
@@ -1528,7 +1528,7 @@ std::optional<TypescriptLsLocation> resolve_typescript_language_server() {
       loc.source = TypescriptLsLocation::Source::Bundled;
       return loc;
     }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_TSSERVER
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_TSSERVER
     return std::nullopt;
 #endif
   }
@@ -1542,7 +1542,7 @@ std::optional<TypescriptLsLocation> resolve_typescript_language_server() {
     return loc;
   }
   const auto node = [&]() -> std::optional<std::string> {
-    if (const auto env = env_executable("TGDB_NODE_BIN"); env.has_value()) {
+    if (const auto env = env_executable("TUIDE_NODE_BIN"); env.has_value()) {
       return env;
     }
     return find_named_binary_on_path("node");
@@ -1571,22 +1571,22 @@ std::optional<TypescriptLsLocation> resolve_typescript_language_server() {
 }
 
 std::optional<NeocmakelspLocation> resolve_neocmakelsp() {
-  if (const auto env_path = env_executable("TGDB_NEOCMAKELSP"); env_path.has_value()) {
+  if (const auto env_path = env_executable("TUIDE_NEOCMAKELSP"); env_path.has_value()) {
     return NeocmakelspLocation{*env_path, NeocmakelspLocation::Source::Env};
   }
-#ifdef TGDB_HAS_BUNDLED_NEOCMAKELSP
+#ifdef TUIDE_HAS_BUNDLED_NEOCMAKELSP
   {
     const fs::path install_root =
-        fs::path(bundled_cache_root()) / ("neocmakelsp-" TGDB_BUNDLED_NEOCMAKELSP_VERSION);
+        fs::path(bundled_cache_root()) / ("neocmakelsp-" TUIDE_BUNDLED_NEOCMAKELSP_VERSION);
     const fs::path binary_path = install_root / "bin" / "neocmakelsp";
-    const std::string expected = std::string(TGDB_BUNDLED_NEOCMAKELSP_BLOB_SHA256) + "\n";
+    const std::string expected = std::string(TUIDE_BUNDLED_NEOCMAKELSP_BLOB_SHA256) + "\n";
     static std::atomic<bool> install_attempted{false};
     if (lazy_extract_bundled_tree(install_root, "bin/neocmakelsp", expected,
                                   _binary_neocmakelsp_blob_zst_start,
                                   _binary_neocmakelsp_blob_zst_end, install_attempted)) {
       return NeocmakelspLocation{binary_path.string(), NeocmakelspLocation::Source::Bundled};
     }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_NEOCMAKELSP
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_NEOCMAKELSP
     return std::nullopt;
 #endif
   }
@@ -1598,22 +1598,22 @@ std::optional<NeocmakelspLocation> resolve_neocmakelsp() {
 }
 
 std::optional<MakeLsLocation> resolve_make_ls() {
-  if (const auto env_path = env_executable("TGDB_MAKE_LS"); env_path.has_value()) {
+  if (const auto env_path = env_executable("TUIDE_MAKE_LS"); env_path.has_value()) {
     return MakeLsLocation{*env_path, MakeLsLocation::Source::Env};
   }
-#ifdef TGDB_HAS_BUNDLED_MAKE_LS
+#ifdef TUIDE_HAS_BUNDLED_MAKE_LS
   {
     const fs::path install_root =
-        fs::path(bundled_cache_root()) / ("make-ls-" TGDB_BUNDLED_MAKE_LS_VERSION);
+        fs::path(bundled_cache_root()) / ("make-ls-" TUIDE_BUNDLED_MAKE_LS_VERSION);
     const fs::path binary_path = install_root / "bin" / "make-ls";
-    const std::string expected = std::string(TGDB_BUNDLED_MAKE_LS_BLOB_SHA256) + "\n";
+    const std::string expected = std::string(TUIDE_BUNDLED_MAKE_LS_BLOB_SHA256) + "\n";
     static std::atomic<bool> install_attempted{false};
     if (lazy_extract_bundled_tree(install_root, "bin/make-ls", expected,
                                   _binary_make_ls_blob_zst_start, _binary_make_ls_blob_zst_end,
                                   install_attempted)) {
       return MakeLsLocation{binary_path.string(), MakeLsLocation::Source::Bundled};
     }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_MAKE_LS
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_MAKE_LS
     return std::nullopt;
 #endif
   }
@@ -1625,14 +1625,14 @@ std::optional<MakeLsLocation> resolve_make_ls() {
 }
 
 std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
-#ifdef TGDB_HAS_BUNDLED_BASH_DAP
+#ifdef TUIDE_HAS_BUNDLED_BASH_DAP
   {
     const fs::path install_root =
-        fs::path(bundled_cache_root()) / ("bash-dap-" TGDB_BUNDLED_BASH_DAP_VERSION);
+        fs::path(bundled_cache_root()) / ("bash-dap-" TUIDE_BUNDLED_BASH_DAP_VERSION);
     const fs::path adapter_js = install_root / "adapter" / "bashDebug.js";
     const fs::path bashdb = install_root / "bashdb" / "bashdb";
     const fs::path marker = install_root / ".installed";
-    const std::string expected = std::string(TGDB_BUNDLED_BASH_DAP_BLOB_SHA256) + "\n";
+    const std::string expected = std::string(TUIDE_BUNDLED_BASH_DAP_BLOB_SHA256) + "\n";
     const auto try_build_location = [&]() -> std::optional<BashDebugAdapterLocation> {
       if (!(readable_file(adapter_js.string()) && is_executable_file(bashdb.string()))) {
         return std::nullopt;
@@ -1649,14 +1649,14 @@ std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
         }
       }
       std::string node;
-#if TGDB_BUNDLED_BASH_DAP_HAS_NODE
+#if TUIDE_BUNDLED_BASH_DAP_HAS_NODE
       const fs::path node_path = install_root / "node" / "bin" / "node";
       if (is_executable_file(node_path.string())) {
         node = node_path.string();
       }
 #endif
       if (node.empty()) {
-#ifdef TGDB_HAS_BUNDLED_BASH_LS
+#ifdef TUIDE_HAS_BUNDLED_BASH_LS
         if (const auto ls = resolve_bash_language_server();
             ls.has_value() && ls->source == BashLsLocation::Source::Bundled) {
           const fs::path n = fs::path(ls->binary_path).parent_path() / "node";
@@ -1667,7 +1667,7 @@ std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
 #endif
       }
       if (node.empty()) {
-        if (const auto env = env_executable("TGDB_NODE_BIN"); env.has_value()) {
+        if (const auto env = env_executable("TUIDE_NODE_BIN"); env.has_value()) {
           node = *env;
         } else if (const auto path_bin = find_named_binary_on_path("node"); path_bin.has_value()) {
           node = *path_bin;
@@ -1719,14 +1719,14 @@ std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
     if (auto installed = try_build_location(); installed.has_value()) {
       return installed;
     }
-#ifdef TGDB_DEFAULT_FORCE_BUNDLED_BASH_DAP
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_BASH_DAP
     return std::nullopt;
 #endif
   }
 #endif
 
   const auto node = [&]() -> std::optional<std::string> {
-    if (const auto env = env_executable("TGDB_NODE_BIN"); env.has_value()) {
+    if (const auto env = env_executable("TUIDE_NODE_BIN"); env.has_value()) {
       return env;
     }
     return find_named_binary_on_path("node");
@@ -1751,9 +1751,9 @@ std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
       adapter_js = raw;
     }
   }
-#ifdef TGDB_BASH_DEBUG_ADAPTER_JS
-  if (adapter_js.empty() && readable_file(TGDB_BASH_DEBUG_ADAPTER_JS)) {
-    adapter_js = TGDB_BASH_DEBUG_ADAPTER_JS;
+#ifdef TUIDE_BASH_DEBUG_ADAPTER_JS
+  if (adapter_js.empty() && readable_file(TUIDE_BASH_DEBUG_ADAPTER_JS)) {
+    adapter_js = TUIDE_BASH_DEBUG_ADAPTER_JS;
   }
 #endif
   if (adapter_js.empty()) {
@@ -1766,9 +1766,9 @@ std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
       is_executable_file(raw)) {
     bashdb = raw;
   }
-#ifdef TGDB_BASHDB_PATH
-  if (bashdb.empty() && is_executable_file(TGDB_BASHDB_PATH)) {
-    bashdb = TGDB_BASHDB_PATH;
+#ifdef TUIDE_BASHDB_PATH
+  if (bashdb.empty() && is_executable_file(TUIDE_BASHDB_PATH)) {
+    bashdb = TUIDE_BASHDB_PATH;
   }
 #endif
   if (bashdb.empty()) {
@@ -1783,9 +1783,9 @@ std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
   if (const char* raw = std::getenv("BASHDB_LIB"); raw != nullptr && raw[0] != '\0') {
     bashdb_lib = raw;
   }
-#ifdef TGDB_BASHDB_LIB
+#ifdef TUIDE_BASHDB_LIB
   if (bashdb_lib.empty()) {
-    bashdb_lib = TGDB_BASHDB_LIB;
+    bashdb_lib = TUIDE_BASHDB_LIB;
   }
 #endif
   if (bashdb_lib.empty()) {
@@ -1802,4 +1802,4 @@ std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
   return loc;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

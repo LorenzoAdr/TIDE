@@ -12,7 +12,7 @@
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -282,4 +282,4 @@ Component MakeShortcutsModalOverlay(Component main, ShortcutsModalState* state) 
       });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -1,4 +1,4 @@
-// Demo para el monitor de paquetes de tgdb.
+// Demo para el monitor de paquetes de tuide.
 // Simula una app (puerto 5555) y un periférico (puerto 5556) en un solo proceso.
 // Cada ciclo genera tráfico OUT e IN capturable con LD_PRELOAD.
 
@@ -111,7 +111,7 @@ int main() {
             << "  app:        " << kLoopback << ":" << kAppPort << "\n"
             << "  periferico: " << kLoopback << ":" << kPeripheralPort << "\n"
             << "  protocolo:  examples/protocols/hello_sensor.json\n"
-            << "  tgdb: F2 Launch -> m (monitor ON) -> Continue -> pestaña Paquetes\n"
+            << "  tuide: F2 Launch -> m (monitor ON) -> Continue -> pestaña Paquetes\n"
             << std::flush;
 
   uint16_t sequence = 0;

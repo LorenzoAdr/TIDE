@@ -3,7 +3,7 @@
 #include <string>
 #include <string_view>
 
-namespace tgdb::i18n {
+namespace tuide::i18n {
 
 enum class UiLocale {
   kEs,
@@ -20,4 +20,4 @@ UiLocale effective_locale();
 const char* locale_tag(UiLocale locale);
 UiLocale parse_locale(std::string_view tag);
 
-}  // namespace tgdb::i18n
+}  // namespace tuide::i18n

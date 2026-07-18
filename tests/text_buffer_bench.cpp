@@ -16,7 +16,7 @@
 #include "editor/text_rope.hpp"
 #include "editor/undo_stack.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -219,7 +219,7 @@ BenchResult bench_vector_insert_at(int line_count, int at_line, int iterations) 
 }
 
 BenchResult bench_rope_insert_at(int line_count, int at_line, int iterations) {
-  tgdb::TextRope rope;
+  tuide::TextRope rope;
   {
     std::vector<std::string> lines;
     lines.reserve(static_cast<std::size_t>(line_count));
@@ -257,7 +257,7 @@ BenchResult bench_vector_erase_at(int line_count, int at_line, int iterations) {
 }
 
 BenchResult bench_rope_erase_at(int line_count, int at_line, int iterations) {
-  tgdb::TextRope rope;
+  tuide::TextRope rope;
   {
     std::vector<std::string> lines;
     lines.reserve(static_cast<std::size_t>(line_count + iterations));
@@ -305,7 +305,7 @@ BenchResult bench_rope_erase_range(int line_count, int at_line, int span, int it
   for (int i = 0; i < line_count; ++i) {
     lines.push_back(synthetic_line(i));
   }
-  tgdb::TextRope rope(std::move(lines));
+  tuide::TextRope rope(std::move(lines));
   iterations = std::min(iterations, (line_count - at_line - 1) / std::max(1, span));
   const auto start = Clock::now();
   for (int i = 0; i < iterations; ++i) {
@@ -347,11 +347,11 @@ BenchResult bench_rope_full_clone(int line_count, int iterations) {
   for (int i = 0; i < line_count; ++i) {
     lines.push_back(synthetic_line(i));
   }
-  tgdb::TextRope rope(std::move(lines));
+  tuide::TextRope rope(std::move(lines));
   const auto start = Clock::now();
   volatile int sink = 0;
   for (int i = 0; i < iterations; ++i) {
-    tgdb::TextRope snapshot = rope.clone();  // O(1): shares the root
+    tuide::TextRope snapshot = rope.clone();  // O(1): shares the root
     sink += snapshot.line_count();
   }
   BenchResult result;
@@ -404,7 +404,7 @@ void run_for_size(int line_count) {
 
 }  // namespace
 
-}  // namespace tgdb
+}  // namespace tuide
 
 int main(int argc, char** argv) {
   std::vector<int> sizes;
@@ -415,13 +415,13 @@ int main(int argc, char** argv) {
     sizes = {1000, 10000, 100000};
   }
 
-  std::printf("tgdb text_buffer_bench -- EditorText backend=rope (vector<string> retired, Fase 5)\n");
+  std::printf("tuide text_buffer_bench -- EditorText backend=rope (vector<string> retired, Fase 5)\n");
 
   for (int size : sizes) {
-    tgdb::run_for_size(size);
+    tuide::run_for_size(size);
   }
   for (int size : sizes) {
-    tgdb::run_storage_comparison(size);
+    tuide::run_storage_comparison(size);
   }
   return 0;
 }

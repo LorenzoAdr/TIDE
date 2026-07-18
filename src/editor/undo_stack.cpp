@@ -3,7 +3,7 @@
 #include "editor/editor_buffer_source.hpp"
 #include "ui/cursor_blink.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -114,4 +114,4 @@ void clear_undo(EditorBuffer* buffer) {
   buffer->undo_coalesce_open = false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

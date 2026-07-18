@@ -17,7 +17,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -282,7 +282,7 @@ bool generate_with_docker_bear(const BuildEnvironment& environment, const Worksp
       !command_exists("bear")) {
     return false;
   }
-  const std::string container_output = "/tmp/tgdb_compile_commands.json";
+  const std::string container_output = "/tmp/tuide_compile_commands.json";
   const std::string make_cmd = environment.make_command + make_target_suffix(config);
   const std::string remote_command = "bear --output " + shell_quote(container_output) + " -- " +
                                      make_cmd;
@@ -394,4 +394,4 @@ CompileCommandsGenerationResult generate_compile_commands(
   return result;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

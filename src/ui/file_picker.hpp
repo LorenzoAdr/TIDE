@@ -14,7 +14,7 @@
 #include "ui/file_picker_preview.hpp"
 #include "ui/focus_manager.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct MainLayoutState;
 
@@ -69,4 +69,4 @@ ftxui::Component MakeFilePickerOverlay(ftxui::Component main, DebugModel* model,
                                       WorkspaceIndexer* indexer,
                                       MainLayoutState* layout_state);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -37,7 +37,7 @@
 #include "util/path_normalize.hpp"
 #include "util/ui_panel_render_cache.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 namespace fs = std::filesystem;
@@ -953,4 +953,4 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
   }));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

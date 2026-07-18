@@ -3,7 +3,7 @@
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/component_base.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -18,4 +18,4 @@ Component WrapFocusable(Component child) {
   return Make<FocusableWrapper>(std::move(child));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -12,7 +12,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace tgdb {
+namespace tuide {
 
 class LspTransport {
  public:
@@ -66,4 +66,4 @@ class LspTransport {
   ResponseAcceptanceFilter response_acceptance_filter_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

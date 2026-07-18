@@ -9,7 +9,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/path_browser.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct SourceSubstituteModalState {
   bool open = false;
@@ -27,4 +27,4 @@ ftxui::Component MakeSourceSubstituteModalOverlay(
     ftxui::Component main, SourceSubstituteModalState* state, MainLayoutState* layout_state,
     SourceSubstituteApplyCallback on_apply);
 
-}  // namespace tgdb
+}  // namespace tuide

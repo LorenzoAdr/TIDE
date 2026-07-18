@@ -20,7 +20,7 @@
 #include "editor/editor_state.hpp"
 #include "editor/text_ops.hpp"
 
-namespace tgdb {
+namespace tuide {
 namespace {
 
 EditorBuffer make_buffer(std::initializer_list<const char*> lines) {
@@ -922,45 +922,45 @@ void test_normalize_editor_source_trailing_newline() {
 }
 
 }  // namespace
-}  // namespace tgdb
+}  // namespace tuide
 
 int main() {
-  tgdb::test_parse_symbols();
-  tgdb::test_parse_python_symbols();
-  tgdb::test_simple_pair();
-  tgdb::test_nested();
-  tgdb::test_ignores_string();
-  tgdb::test_empty_lines_no_hang();
-  tgdb::test_empty_string_literal_cursor();
-  tgdb::test_hello_cpp_anonymous_namespace();
-  tgdb::test_highlights_after_prepare();
-  tgdb::test_hello_cpp_highlights_from_disk();
-  tgdb::test_highlight_overlapping_spans_do_not_duplicate();
-  tgdb::test_highlight_col_offset_indent();
-  tgdb::test_incremental_parse_after_single_edit();
-  tgdb::test_cursor_in_code_uses_ast_when_ready();
-  tgdb::test_cursor_in_code_optimistic_when_parse_stale();
-  tgdb::test_locals_scope_chain();
-  tgdb::test_innermost_scope_range();
-  tgdb::test_innermost_scope_while_loop();
-  tgdb::test_innermost_scope_declaration_in_if();
-  tgdb::test_fold_regions_from_tree();
-  tgdb::test_editor_fold_visibility();
-  tgdb::test_fold_scroll_stable_on_collapse();
-  tgdb::test_colored_curly_braces_depths();
-  tgdb::test_local_completions_include_parameters();
-  tgdb::test_symbols_refresh_after_sync_edit();
-  tgdb::test_sync_edit_keeps_ast_before_worker();
-  tgdb::test_editing_line_highlights_sync();
-  tgdb::test_stale_highlights_tolerate_trailing_newline_buffer_line_count();
-  tgdb::test_parse_debounce_coalesces_edits();
-  tgdb::test_duplicate_line_highlights_escape_string();
-  tgdb::test_edit_hint_matches_diff_on_char_insert();
-  tgdb::test_edit_hint_matches_diff_on_newline_insert();
-  tgdb::test_edit_hint_matches_diff_on_backspace_join();
-  tgdb::test_edit_hint_poisoned_by_multiple_edits_falls_back_correctly();
-  tgdb::test_viewport_preview_before_full_parse();
-  tgdb::test_normalize_editor_source_trailing_newline();
+  tuide::test_parse_symbols();
+  tuide::test_parse_python_symbols();
+  tuide::test_simple_pair();
+  tuide::test_nested();
+  tuide::test_ignores_string();
+  tuide::test_empty_lines_no_hang();
+  tuide::test_empty_string_literal_cursor();
+  tuide::test_hello_cpp_anonymous_namespace();
+  tuide::test_highlights_after_prepare();
+  tuide::test_hello_cpp_highlights_from_disk();
+  tuide::test_highlight_overlapping_spans_do_not_duplicate();
+  tuide::test_highlight_col_offset_indent();
+  tuide::test_incremental_parse_after_single_edit();
+  tuide::test_cursor_in_code_uses_ast_when_ready();
+  tuide::test_cursor_in_code_optimistic_when_parse_stale();
+  tuide::test_locals_scope_chain();
+  tuide::test_innermost_scope_range();
+  tuide::test_innermost_scope_while_loop();
+  tuide::test_innermost_scope_declaration_in_if();
+  tuide::test_fold_regions_from_tree();
+  tuide::test_editor_fold_visibility();
+  tuide::test_fold_scroll_stable_on_collapse();
+  tuide::test_colored_curly_braces_depths();
+  tuide::test_local_completions_include_parameters();
+  tuide::test_symbols_refresh_after_sync_edit();
+  tuide::test_sync_edit_keeps_ast_before_worker();
+  tuide::test_editing_line_highlights_sync();
+  tuide::test_stale_highlights_tolerate_trailing_newline_buffer_line_count();
+  tuide::test_parse_debounce_coalesces_edits();
+  tuide::test_duplicate_line_highlights_escape_string();
+  tuide::test_edit_hint_matches_diff_on_char_insert();
+  tuide::test_edit_hint_matches_diff_on_newline_insert();
+  tuide::test_edit_hint_matches_diff_on_backspace_join();
+  tuide::test_edit_hint_poisoned_by_multiple_edits_falls_back_correctly();
+  tuide::test_viewport_preview_before_full_parse();
+  tuide::test_normalize_editor_source_trailing_newline();
   std::cout << "tree_sitter_test ok\n";
   return 0;
 }

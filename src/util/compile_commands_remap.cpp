@@ -17,7 +17,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -465,4 +465,4 @@ CompileCommandsSetupResult ensure_compile_commands_for_clangd(
   return result;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

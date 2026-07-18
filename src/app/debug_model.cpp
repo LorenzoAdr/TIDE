@@ -6,7 +6,7 @@
 #include "util/path_normalize.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 void DebugModel::append_console(const std::string& line) {
   console_output.push_back(line);
@@ -241,4 +241,4 @@ void DebugModel::clear_hardware_watches() {
   hardware_watches.clear();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

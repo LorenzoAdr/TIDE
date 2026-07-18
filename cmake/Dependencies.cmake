@@ -120,7 +120,7 @@ FetchContent_MakeAvailable(ftxui cppdap tree_sitter tree_sitter_cpp)
 
 # Manual add: several grammar CMakeLists define a conflicting `ts-test` target
 # with tree-sitter-cpp, so we only fetch sources and build the libraries ourselves.
-function(tgdb_add_tree_sitter_grammar name source_dir)
+function(tuide_add_tree_sitter_grammar name source_dir)
   if(TARGET tree-sitter-${name})
     return()
   endif()
@@ -150,19 +150,19 @@ endforeach()
 
 # tree-sitter-latex does not ship generated parser.c; generate at configure time.
 if(NOT EXISTS "${tree_sitter_latex_SOURCE_DIR}/src/parser.c")
-  find_program(TGDB_NPX npx)
-  if(NOT TGDB_NPX)
+  find_program(TUIDE_NPX npx)
+  if(NOT TUIDE_NPX)
     message(FATAL_ERROR "tree-sitter-latex needs 'npx' to generate parser.c (npm)")
   endif()
   message(STATUS "Generating tree-sitter-latex parser.c...")
   execute_process(
-    COMMAND "${TGDB_NPX}" --yes tree-sitter-cli@0.25.8 generate
+    COMMAND "${TUIDE_NPX}" --yes tree-sitter-cli@0.25.8 generate
     WORKING_DIRECTORY "${tree_sitter_latex_SOURCE_DIR}"
-    RESULT_VARIABLE _tgdb_latex_gen_rc
-    OUTPUT_VARIABLE _tgdb_latex_gen_out
-    ERROR_VARIABLE _tgdb_latex_gen_err)
-  if(NOT _tgdb_latex_gen_rc EQUAL 0 OR NOT EXISTS "${tree_sitter_latex_SOURCE_DIR}/src/parser.c")
-    message(FATAL_ERROR "Failed to generate tree-sitter-latex parser.c:\n${_tgdb_latex_gen_out}\n${_tgdb_latex_gen_err}")
+    RESULT_VARIABLE _tuide_latex_gen_rc
+    OUTPUT_VARIABLE _tuide_latex_gen_out
+    ERROR_VARIABLE _tuide_latex_gen_err)
+  if(NOT _tuide_latex_gen_rc EQUAL 0 OR NOT EXISTS "${tree_sitter_latex_SOURCE_DIR}/src/parser.c")
+    message(FATAL_ERROR "Failed to generate tree-sitter-latex parser.c:\n${_tuide_latex_gen_out}\n${_tuide_latex_gen_err}")
   endif()
 endif()
 
@@ -184,7 +184,7 @@ const TSLanguage *tree_sitter_latex(void);
 ")
 endif()
 
-function(tgdb_ensure_tree_sitter_c_header name function_name source_dir)
+function(tuide_ensure_tree_sitter_c_header name function_name source_dir)
   string(TOUPPER "${name}" _name_upper)
   set(_header "${source_dir}/bindings/c/tree-sitter-${name}.h")
   if(EXISTS "${_header}")
@@ -206,18 +206,18 @@ const TSLanguage *${function_name}(void);
 ")
 endfunction()
 
-tgdb_ensure_tree_sitter_c_header(zig tree_sitter_zig ${tree_sitter_zig_SOURCE_DIR})
-tgdb_ensure_tree_sitter_c_header(cmake tree_sitter_cmake ${tree_sitter_cmake_SOURCE_DIR})
-tgdb_ensure_tree_sitter_c_header(make tree_sitter_make ${tree_sitter_make_SOURCE_DIR})
+tuide_ensure_tree_sitter_c_header(zig tree_sitter_zig ${tree_sitter_zig_SOURCE_DIR})
+tuide_ensure_tree_sitter_c_header(cmake tree_sitter_cmake ${tree_sitter_cmake_SOURCE_DIR})
+tuide_ensure_tree_sitter_c_header(make tree_sitter_make ${tree_sitter_make_SOURCE_DIR})
 
 foreach(_gram python bash latex rust go zig fortran lua javascript cmake make)
-  tgdb_add_tree_sitter_grammar(${_gram} ${tree_sitter_${_gram}_SOURCE_DIR})
+  tuide_add_tree_sitter_grammar(${_gram} ${tree_sitter_${_gram}_SOURCE_DIR})
 endforeach()
-tgdb_add_tree_sitter_grammar(typescript ${tree_sitter_typescript_SOURCE_DIR}/typescript)
+tuide_add_tree_sitter_grammar(typescript ${tree_sitter_typescript_SOURCE_DIR}/typescript)
 
-set(TGDB_TREE_SITTER_QUERY_HPP "${CMAKE_BINARY_DIR}/generated/tree_sitter_grammar_queries.gen.hpp")
+set(TUIDE_TREE_SITTER_QUERY_HPP "${CMAKE_BINARY_DIR}/generated/tree_sitter_grammar_queries.gen.hpp")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
-file(WRITE "${TGDB_TREE_SITTER_QUERY_HPP}" "#pragma once\n\nnamespace tgdb::tree_sitter_queries {\n\n")
+file(WRITE "${TUIDE_TREE_SITTER_QUERY_HPP}" "#pragma once\n\nnamespace tuide::tree_sitter_queries {\n\n")
 foreach(_query_spec
     "rust|${tree_sitter_rust_SOURCE_DIR}/queries/highlights.scm"
     "go|${tree_sitter_go_SOURCE_DIR}/queries/highlights.scm"
@@ -232,37 +232,37 @@ foreach(_query_spec
   list(GET _parts 1 _query_file)
   if(EXISTS "${_query_file}")
     file(READ "${_query_file}" _query_content)
-    file(APPEND "${TGDB_TREE_SITTER_QUERY_HPP}"
+    file(APPEND "${TUIDE_TREE_SITTER_QUERY_HPP}"
 "inline const char* ${_lang}() {
-  return R\"TGDBQ_${_lang}(
-${_query_content})TGDBQ_${_lang}\";
+  return R\"TQ_${_lang}(
+${_query_content})TQ_${_lang}\";
 }
 
 ")
   else()
-    file(APPEND "${TGDB_TREE_SITTER_QUERY_HPP}"
+    file(APPEND "${TUIDE_TREE_SITTER_QUERY_HPP}"
 "inline const char* ${_lang}() { return \"\"; }
 
 ")
   endif()
 endforeach()
 # TypeScript highlights are incremental on top of JavaScript; combine both.
-set(_tgdb_js_hl "${tree_sitter_javascript_SOURCE_DIR}/queries/highlights.scm")
-set(_tgdb_ts_hl "${tree_sitter_typescript_SOURCE_DIR}/queries/highlights.scm")
-set(_tgdb_ts_combined "")
-if(EXISTS "${_tgdb_js_hl}")
-  file(READ "${_tgdb_js_hl}" _tgdb_js_hl_content)
-  string(APPEND _tgdb_ts_combined "${_tgdb_js_hl_content}\n")
+set(_tuide_js_hl "${tree_sitter_javascript_SOURCE_DIR}/queries/highlights.scm")
+set(_tuide_ts_hl "${tree_sitter_typescript_SOURCE_DIR}/queries/highlights.scm")
+set(_tuide_ts_combined "")
+if(EXISTS "${_tuide_js_hl}")
+  file(READ "${_tuide_js_hl}" _tuide_js_hl_content)
+  string(APPEND _tuide_ts_combined "${_tuide_js_hl_content}\n")
 endif()
-if(EXISTS "${_tgdb_ts_hl}")
-  file(READ "${_tgdb_ts_hl}" _tgdb_ts_hl_content)
-  string(APPEND _tgdb_ts_combined "${_tgdb_ts_hl_content}\n")
+if(EXISTS "${_tuide_ts_hl}")
+  file(READ "${_tuide_ts_hl}" _tuide_ts_hl_content)
+  string(APPEND _tuide_ts_combined "${_tuide_ts_hl_content}\n")
 endif()
-file(APPEND "${TGDB_TREE_SITTER_QUERY_HPP}"
+file(APPEND "${TUIDE_TREE_SITTER_QUERY_HPP}"
 "inline const char* typescript() {
-  return R\"TGDBQ_typescript(
-${_tgdb_ts_combined})TGDBQ_typescript\";
+  return R\"TQ_ts(
+${_tuide_ts_combined})TQ_ts\";
 }
 
 ")
-file(APPEND "${TGDB_TREE_SITTER_QUERY_HPP}" "}  // namespace tgdb::tree_sitter_queries\n")
+file(APPEND "${TUIDE_TREE_SITTER_QUERY_HPP}" "}  // namespace tuide::tree_sitter_queries\n")

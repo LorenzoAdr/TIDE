@@ -9,7 +9,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/shutdown_overlay.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct QuitConfirmState {
   bool open = false;
@@ -24,4 +24,4 @@ ftxui::Component MakeQuitConfirmOverlay(ftxui::Component main, QuitConfirmState*
                                         ShutdownState* shutdown_state,
                                         std::function<void()> on_confirm);
 
-}  // namespace tgdb
+}  // namespace tuide

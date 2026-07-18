@@ -7,7 +7,7 @@
 
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -594,4 +594,4 @@ Element HighlightBuildFileLine(BuildFileKind kind, const std::string& line, int 
   return content;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

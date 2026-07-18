@@ -10,7 +10,7 @@
 
 #include "editor/text_search.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct FindMatchKey {
   std::string query;
@@ -71,4 +71,4 @@ class FindMatchRunner {
   Result ready_result_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

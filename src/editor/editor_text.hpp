@@ -8,7 +8,7 @@
 #include "editor/text_rope.hpp"
 #include "util/line_source.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 // Line-oriented text storage for EditorBuffer, backed by a TextRope (see
 // text_rope.hpp) behind a small, stable API so that:
@@ -22,7 +22,7 @@ namespace tgdb {
 //    supported.
 //
 // This used to also support a std::vector<std::string> backend, selectable
-// at runtime via the TGDB_TEXT_BACKEND env var, to A/B the rope against the
+// at runtime via the TUIDE_TEXT_BACKEND env var, to A/B the rope against the
 // original implementation while the migration was being verified (see the
 // "Fase 2-4" migration plan). That backend has been retired (Fase 5) now
 // that the rope has been verified to be a strict improvement for editing
@@ -86,4 +86,4 @@ class EditorText : public LineSource {
   TextRope rope_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

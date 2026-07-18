@@ -8,7 +8,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using CommandCallback = std::function<void(const struct UiCommand&)>;
 
@@ -29,4 +29,4 @@ void add_watch_for_core_instance(const CoreAnalyzerInstance& instance,
                                  const std::string& type_query, DebugModel* model,
                                  CommandCallback on_command);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -3,7 +3,7 @@
 #include <string>
 #include <string_view>
 
-namespace tgdb::press_id {
+namespace tuide::press_id {
 
 constexpr std::string_view kWatchesPlay = "watches.play";
 constexpr std::string_view kWatchesStop = "watches.stop";
@@ -239,4 +239,4 @@ inline bool is_packet_monitor_hover(std::string_view id) {
   return id == kPacketMonitorRecord || id == kPacketMonitorSave;
 }
 
-}  // namespace tgdb::press_id
+}  // namespace tuide::press_id

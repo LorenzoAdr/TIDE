@@ -5,7 +5,7 @@
 #include <optional>
 #include <queue>
 
-namespace tgdb {
+namespace tuide {
 
 template <typename T>
 class ThreadSafeQueue {
@@ -93,4 +93,4 @@ class ThreadSafeQueue {
   bool closed_ = false;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -23,7 +23,7 @@ extern "C" {
 #include "symbols/symbol_provider.hpp"
 #include "util/line_source.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 constexpr int kTreeSitterParseDebounceMs = 120;
 
@@ -181,4 +181,4 @@ class TreeSitterDocumentCache {
 TSPoint make_ts_point(int line_0, int col);
 bool ts_point_in_node(TSNode node, TSPoint point);
 
-}  // namespace tgdb
+}  // namespace tuide

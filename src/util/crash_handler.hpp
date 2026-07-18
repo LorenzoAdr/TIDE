@@ -1,8 +1,8 @@
 #pragma once
 
-namespace tgdb {
+namespace tuide {
 
 void install_crash_handlers();
 void print_current_backtrace(const char* reason);
 
-}  // namespace tgdb
+}  // namespace tuide

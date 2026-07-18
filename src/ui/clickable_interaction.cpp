@@ -4,7 +4,7 @@
 
 #include "ui/hover_effects.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 void ClickableInteractionTracker::set_hover(std::string_view id) {
   if (!hover_effects_enabled()) {
@@ -106,4 +106,4 @@ bool ClickableInteractionTracker::tick() {
   return presses_.size() != before;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

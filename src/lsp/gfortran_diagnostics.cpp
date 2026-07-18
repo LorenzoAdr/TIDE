@@ -16,7 +16,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 namespace {
 
 bool is_fixed_form_extension(const std::string& ext) {
@@ -141,7 +141,7 @@ std::optional<DocumentDiagnostics> run_gfortran_diagnostics(const std::string& a
 
   const std::string ext = fs::path(absolute_path).extension().string();
   const std::string suffix = temp_suffix_for_path(absolute_path);
-  std::string mk_template = (fs::temp_directory_path() / ("tgdb-gf-XXXXXX" + suffix)).string();
+  std::string mk_template = (fs::temp_directory_path() / ("tuide-gf-XXXXXX" + suffix)).string();
   std::vector<char> mk_buf(mk_template.begin(), mk_template.end());
   mk_buf.push_back('\0');
   const int fd = mkstemps(mk_buf.data(), static_cast<int>(suffix.size()));
@@ -177,4 +177,4 @@ std::optional<DocumentDiagnostics> run_gfortran_diagnostics(const std::string& a
   return doc;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

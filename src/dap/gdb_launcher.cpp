@@ -22,7 +22,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -115,13 +115,13 @@ bool spawn_stdio_adapter(const std::string& command, const std::vector<std::stri
 
   if (pid == 0) {
     child_die_with_parent();
-    // Detach from tgdb's controlling TTY so the adapter/inferior cannot steal
+    // Detach from tuide's controlling TTY so the adapter/inferior cannot steal
     // the foreground process group (SIGTTIN/SIGTTOU freezes the TUI).
     (void)::setsid();
     unsetenv("LD_PRELOAD");
-    unsetenv("TGDB_PKT_FILTER_SRC");
-    unsetenv("TGDB_PKT_FILTER_DST");
-    unsetenv("TGDB_PKT_DISABLE");
+    unsetenv("TUIDE_PKT_FILTER_SRC");
+    unsetenv("TUIDE_PKT_FILTER_DST");
+    unsetenv("TUIDE_PKT_DISABLE");
     dup2(stdin_pipe[0], STDIN_FILENO);
     dup2(stdout_pipe[1], STDOUT_FILENO);
     // Never merge adapter stderr into the DAP stdout pipe: any non-protocol
@@ -420,4 +420,4 @@ std::unique_ptr<IDebugAdapterProcess> create_debug_adapter_process_for_program(
   return create_debug_adapter_process(debug_adapter_kind_for_program(program_path));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

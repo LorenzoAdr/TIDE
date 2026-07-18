@@ -29,9 +29,9 @@ ln -sf build/compile_commands.json .
 | `tools/compile.sh` | Interactive bundle wizard (default), configure, build |
 | `tools/build-portable.sh` | Full pack build inside Docker (old glibc baseline) |
 | `tools/verify-glibc.sh` | Report max GLIBC/GLIBCXX symbols and `ldd` deps |
-| `tools/launch.sh` | Run `tgdb` with sensible defaults and path resolution |
+| `tools/launch.sh` | Run `tuide` with sensible defaults and path resolution |
 
-`compile.sh` without arguments opens a TUI to choose embedded components (clangd). Use `-y` to skip the wizard and reuse `.bundle-config`.
+`compile.sh` without arguments opens a TUI to choose embedded components (clangd, gdb, Python tools, rust-analyzer, gopls, …). Use `-y` to skip the wizard and reuse `.bundle-config`.
 
 ```bash
 ./tools/compile.sh                      # TUI: choose bundles
@@ -42,11 +42,11 @@ ln -sf build/compile_commands.json .
 ./tools/compile.sh --help
 ```
 
-When `TGDB_BUNDLE_CLANGD=ON`, the build downloads the official [clangd/clangd](https://github.com/clangd/clangd/releases) Linux x86_64 release, strips it, compresses it, and embeds it in `tgdb` (+~35 MB compressed, ~87 MB total). At runtime the blob is extracted once to `$XDG_CACHE_HOME/tgdb/bundled/clangd-<version>/`.
+When `TUIDE_BUNDLE_CLANGD=ON`, the build downloads the official [clangd/clangd](https://github.com/clangd/clangd/releases) Linux x86_64 release, strips it, compresses it, and embeds it in `tuide` (+~35 MB compressed). At runtime the blob is extracted once to `$XDG_CACHE_HOME/tuide/bundled/clangd-<version>/`.
 
-When `TGDB_BUNDLE_GDB=ON`, choose the bundled gdb kind at compile time:
+When `TUIDE_BUNDLE_GDB=ON`, choose the bundled gdb kind at compile time:
 
-| `TGDB_GDB_BUNDLE_KIND` | Runtime | Core Analyzer UI |
+| `TUIDE_GDB_BUNDLE_KIND` | Runtime | Core Analyzer UI |
 |------------------------|---------|------------------|
 | `static` | gdb-static (musl, no deps) | disabled |
 | `core_analyzer` | GDB 16.3 + CA (dynamic deps) | enabled |
@@ -59,7 +59,7 @@ Use `./tools/compile.sh` (TUI wizard) or flags:
 ./tools/compile.sh --no-bundle-gdb -y       # system gdb on PATH
 ```
 
-Static bundle downloads [gdb-static Full](https://github.com/guyush1/gdb-static/releases). Core Analyzer bundle uses a cached tarball or `-DTGDB_BUILD_GDB_CA=ON` / `docker/Dockerfile.gdb-ca`. Runtime extraction: `$XDG_CACHE_HOME/tgdb/bundled/gdb-<version>/`.
+Static bundle downloads [gdb-static Full](https://github.com/guyush1/gdb-static/releases). Core Analyzer bundle uses a cached tarball or `-DTUIDE_BUILD_GDB_CA=ON` / `docker/Dockerfile.gdb-ca`. Runtime extraction: `$XDG_CACHE_HOME/tuide/bundled/gdb-<version>/`.
 
 Native gdb+CA build requires dev packages (Debian/Ubuntu):
 
@@ -71,10 +71,10 @@ Python tooling can be embedded the same way (Linux x86_64). Choose **one** of:
 
 | CMake option | Contents | Runtime |
 |--------------|----------|---------|
-| `TGDB_BUNDLE_PYTHON_LSP_MIN` (A) | basedpyright + Node wheel | needs host `python3`; no embedded debugpy |
-| `TGDB_BUNDLE_PYTHON_TOOLS` (B) | portable CPython + basedpyright + debugpy | self-contained LSP + DAP |
+| `TUIDE_BUNDLE_PYTHON_LSP_MIN` (A) | basedpyright + Node wheel | needs host `python3`; no embedded debugpy |
+| `TUIDE_BUNDLE_PYTHON_TOOLS` (B) | portable CPython + basedpyright + debugpy | self-contained LSP + DAP |
 
-B supersedes A if both are set. Blobs extract to `$XDG_CACHE_HOME/tgdb/bundled/python-tools-<version>/`.
+B supersedes A if both are set. Blobs extract to `$XDG_CACHE_HOME/tuide/bundled/python-tools-<version>/`.
 
 ```bash
 ./tools/compile.sh --bundle-python-lsp-min -y   # A
@@ -86,9 +86,9 @@ Bash and LaTeX language servers can be embedded independently (Linux x86_64):
 
 | CMake option | Contents | Runtime |
 |--------------|----------|---------|
-| `TGDB_BUNDLE_BASH_LS` | bash-language-server + Node | LSP for shell scripts |
-| `TGDB_BUNDLE_TEXLAB` | TexLab release binary | LSP for LaTeX |
-| `TGDB_BUNDLE_BASH_DAP` | bash-debug adapter + bashdb (+ Node unless BASH_LS) | DAP for shell scripts |
+| `TUIDE_BUNDLE_BASH_LS` | bash-language-server + Node | LSP for shell scripts |
+| `TUIDE_BUNDLE_TEXLAB` | TexLab release binary | LSP for LaTeX |
+| `TUIDE_BUNDLE_BASH_DAP` | bash-debug adapter + bashdb (+ Node unless BASH_LS) | DAP for shell scripts |
 
 Bash DAP still requires a host `bash` (and typically `bashdb` on PATH if not fully bundled). Node is shared with the Bash LS bundle when both are enabled.
 
@@ -103,31 +103,31 @@ Build-time tools (when bundling): `curl` or `wget`, `zstd`, `objcopy`, `sha256su
 
 ### Install (no build)
 
-`tools/install.sh` only copies an existing `build/tgdb` to `/usr/opt/tide` and adds the `tide` alias to `~/.bashrc`. Compile first with `tools/compile.sh`.
+`tools/install.sh` only copies an existing `build/tuide` to `/usr/opt/tuide` and adds the `tuide` alias to `~/.bashrc`. Compile first with `tools/compile.sh`.
 
 ### Portable build (legacy glibc)
 
-Building on a modern host (e.g. Ubuntu 24.04) pins `tgdb` to a recent glibc (e.g. `GLIBC_2.38`). To ship a binary that runs on older distros, use the Docker-based portable build:
+Building on a modern host (e.g. Ubuntu 24.04) pins `tuide` to a recent glibc (e.g. `GLIBC_2.38`). To ship a binary that runs on older distros, use the Docker-based portable build:
 
 ```bash
 ./tools/build-portable.sh                      # Ubuntu 20.04, glibc ~2.31 baseline
 ./tools/build-portable.sh --static-libstdc++   # also link libstdc++/libgcc statically
 ./tools/build-portable.sh --bionic             # Ubuntu 18.04, glibc ~2.27 (optional)
-./tools/verify-glibc.sh build/tgdb             # inspect symbols/deps only
+./tools/verify-glibc.sh build/tuide             # inspect symbols/deps only
 ```
 
-Output lands in `dist/tgdb-x86_64-glibc<version>[-static-libstdc++]` plus `dist/portable-report.txt`.
+Output lands in `dist/tuide-x86_64-glibc<version>[-static-libstdc++]` plus `dist/portable-report.txt`.
 
 Runtime requirements for the **full pack** (embedded clangd + gdb):
 
 | Component | Dynamic deps at runtime | Typical glibc floor |
 |-----------|------------------------|---------------------|
-| `tgdb` | `libc`, `libm`, optional `libstdc++`/`libgcc_s` | Set by Docker image (~2.31 focal, ~2.27 bionic) |
+| `tuide` | `libc`, `libm`, optional `libstdc++`/`libgcc_s` | Set by Docker image (~2.31 focal, ~2.27 bionic) |
 | Embedded clangd | `libc`, `libm`, `libpthread`, `librt`, `libdl` | **≥ 2.18** (official LLVM release) |
 | Embedded gdb-static | none (musl static) | none |
 | Embedded gdb + Core Analyzer | depends on build | varies |
 
-`--static-libstdc++` (also available in `compile.sh`) removes the `libstdc++.so.6` runtime dependency from `tgdb`; glibc is still required from the host.
+`--static-libstdc++` (also available in `compile.sh`) removes the `libstdc++.so.6` runtime dependency from `tuide`; glibc is still required from the host.
 
 Requires Docker. The script reuses `tools/compile.sh` inside the container with all bundles enabled.
 
@@ -144,7 +144,7 @@ Environment variables:
 | `TEXLAB_PATH` | Override path to texlab |
 | `DEBUGPY_PYTHON` | Python interpreter used to run `python -m debugpy.adapter` |
 | `PYTHON` | Fallback interpreter probed for the `debugpy` module |
-| `TGDB_FORCE_BUNDLED_PYTHON_TOOLS` | `1`/`0` override for preferring the embedded Python tools blob |
+| `TUIDE_FORCE_BUNDLED_PYTHON_TOOLS` | `1`/`0` override for preferring the embedded Python tools blob |
 
 Without an embedded Python blob (and without basedpyright on `PATH`), `.py` files still get tree-sitter syntax highlighting; completions/diagnostics/hover require the language server. Option A still needs a host `python3` to run the extracted langserver. Option B embeds CPython and debugpy for DAP.
 
@@ -162,14 +162,14 @@ export TEXLAB_PATH=/path/to/texlab
 Install basedpyright/debugpy on the host only when not bundling:
 
 ```bash
-python3 -m venv ~/.venvs/tgdb-tools
-~/.venvs/tgdb-tools/bin/pip install basedpyright debugpy
-export PATH="$HOME/.venvs/tgdb-tools/bin:$PATH"
-# or: export BASEDPYRIGHT_PATH=$HOME/.venvs/tgdb-tools/bin/basedpyright-langserver
+python3 -m venv ~/.venvs/tuide-tools
+~/.venvs/tuide-tools/bin/pip install basedpyright debugpy
+export PATH="$HOME/.venvs/tuide-tools/bin:$PATH"
+# or: export BASEDPYRIGHT_PATH=$HOME/.venvs/tuide-tools/bin/basedpyright-langserver
 ```
-| `TGDB_FORCE_BUNDLED_CLANGD` | `1` = use only embedded clangd; `0` = allow `PATH` fallback |
-| `TGDB_FORCE_BUNDLED_GDB` | `1` = use only embedded gdb; `0` = allow `PATH` fallback |
-| `TGDB_UI_SMOKE` | Headless UI smoke test (exits quickly, no fullscreen) |
+| `TUIDE_FORCE_BUNDLED_CLANGD` | `1` = use only embedded clangd; `0` = allow `PATH` fallback |
+| `TUIDE_FORCE_BUNDLED_GDB` | `1` = use only embedded gdb; `0` = allow `PATH` fallback |
+| `TUIDE_UI_SMOKE` | Headless UI smoke test (exits quickly, no fullscreen) |
 
 ### Running tests
 
@@ -183,14 +183,16 @@ cmake --build build --target text_ops_test
 ## Project layout
 
 ```
-tgdb/
+tuide/
 ├── CMakeLists.txt          # Main build definition
 ├── cmake/
 │   └── Dependencies.cmake  # FetchContent: FTXUI, cppdap, json
 ├── docs/                   # Documentation (this folder)
 ├── examples/
-│   ├── hello.cpp           # Sample C++ debug target (UDP demo)
-│   └── hello.py            # Sample Python debug target (same UDP demo)
+│   ├── hello.cpp           # Sample C++ debug target
+│   ├── hello.py            # Sample Python debug target
+│   ├── hello.rs / .go / …  # Other language samples
+│   └── protocols/          # Packet-monitor protocol JSON
 ├── src/
 │   ├── main.cpp            # Entry point, CLI parsing
 │   ├── app/                # Application orchestration
@@ -235,7 +237,7 @@ Keep all `DebugModel` mutations on the UI thread.
 ## Key conventions
 
 - **C++17**, no extensions beyond the standard
-- **Namespace:** `tgdb`
+- **Namespace:** `tuide`
 - **UI strings:** use `i18n::tr("key")` / `i18n::tr_fmt("key", {args})`; catalogs in `src/i18n/strings_es.cpp` and `strings_en.cpp` (generated from `tools/i18n_generate.py` + `tools/i18n_catalog_extra.py`). Do not add user-facing literals in UI code.
 - **Locale:** `AppSettings::ui_locale` (`auto` / `es` / `en`); selector in F10 settings. Auto reads `$LANG`.
 - **Thread safety:** background threads push to `ThreadSafeQueue`; UI drains on `Event::Custom`
@@ -255,12 +257,12 @@ python3 tools/i18n_generate.py
 - **Audit:** `./tools/i18n_audit.sh` — grep for stray literals before merging UI changes
 - **Tests:** `build/i18n_test`
 
-## Debugging tgdb itself
+## Debugging tuide itself
 
 Run under GDB:
 
 ```bash
-gdb --args ./build/tgdb --cwd . ./build/hello
+gdb --args ./build/tuide --cwd . ./build/hello
 ```
 
 Crash backtraces are printed via `util/crash_handler.cpp` (`-rdynamic` enabled on Unix).

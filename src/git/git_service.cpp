@@ -14,7 +14,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -118,7 +118,7 @@ void GitService::worker_main() {
       queue_.pop_front();
     }
     if (task) {
-      TGDB_MON_SCOPE("git", "worker_task");
+      TUIDE_MON_SCOPE("git", "worker_task");
       task();
     }
     pending_tasks_.fetch_sub(1);
@@ -962,7 +962,7 @@ void GitService::pull(CompletionCallback on_done) {
 }
 
 void GitService::tick() {
-  TGDB_MON_SCOPE("git", "tick");
+  TUIDE_MON_SCOPE("git", "tick");
   std::deque<std::function<void()>> completions;
   {
     std::lock_guard<std::mutex> lock(completion_mutex_);
@@ -1353,4 +1353,4 @@ std::string GitService::context_repo_root_unlocked() const {
   return {};
 }
 
-}  // namespace tgdb
+}  // namespace tuide

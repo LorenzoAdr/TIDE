@@ -54,7 +54,7 @@ namespace ftxui {
 class ScreenInteractive;
 }
 
-namespace tgdb {
+namespace tuide {
 
 struct AppConfig {
   SessionMode mode = SessionMode::kLaunch;
@@ -182,8 +182,8 @@ class Application {
   bool lsp_missing_toast_suppressed_ = false;
   std::unordered_set<std::string> lsp_missing_notified_servers_;
   std::string pending_terminal_inject_;
-  std::optional<std::string> cached_tgdb_source_root_;
-  bool tgdb_source_root_probed_ = false;
+  std::optional<std::string> cached_tuide_source_root_;
+  bool tuide_source_root_probed_ = false;
   ShortcutsModalState shortcuts_modal_state_;
   SettingsModalState settings_modal_state_;
   SourceSubstituteModalState source_substitute_state_;
@@ -232,4 +232,4 @@ class Application {
   std::map<std::string, uint64_t> tree_sitter_last_wake_revision_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

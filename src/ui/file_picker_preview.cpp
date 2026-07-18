@@ -15,7 +15,7 @@
 #include "parser/tree_sitter_document.hpp"
 #include "parser/tree_sitter_service.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -198,4 +198,4 @@ void FilePickerPreview::publish(FilePickerPreviewData data, std::uint64_t reques
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

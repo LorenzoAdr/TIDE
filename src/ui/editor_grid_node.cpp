@@ -7,7 +7,7 @@
 #include "ftxui/screen/screen.hpp"
 #include "util/ui_perf_monitor.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -92,4 +92,4 @@ Element MakeEditorPixelGrid(std::vector<std::shared_ptr<EditorPixelRow>> rows, i
                                           std::move(perf_phase));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

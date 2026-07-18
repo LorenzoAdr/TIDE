@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 enum class ToolRuntimeState {
   kDisabled,     // feature off (e.g. LSP disabled in settings)
@@ -58,4 +58,4 @@ ToolsStatusSnapshot collect_tools_status(const LspRuntimeFlags& lsp);
 
 const char* tool_runtime_state_i18n_key(ToolRuntimeState state);
 
-}  // namespace tgdb
+}  // namespace tuide

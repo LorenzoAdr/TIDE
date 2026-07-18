@@ -1,4 +1,4 @@
-// Demo post-mortem para Core Analyzer (tgdb).
+// Demo post-mortem para Core Analyzer (tuide).
 //
 // Escenario:
 //   - Crash en ConsoleSink::on_event (vtable de IEventSink).
@@ -8,8 +8,8 @@
 // Generar core:
 //   ./tools/generate_core_demo.sh
 //
-// Probar en tgdb:
-//   ./build/tgdb --core examples/cores/core_analyzer_demo.core ./build/core_analyzer_demo --core-analyzer
+// Probar en tuide:
+//   ./build/tuide --core examples/cores/core_analyzer_demo.core ./build/core_analyzer_demo --core-analyzer
 //
 // Comandos útiles en la pestaña CoreAn:
 //   obj (MetricStore*)0          → instancias por vtable

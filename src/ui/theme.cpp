@@ -8,7 +8,7 @@
 #include <optional>
 #include <string>
 
-namespace tgdb::theme {
+namespace tuide::theme {
 
 namespace {
 
@@ -782,4 +782,4 @@ Color ColorForSymbolKind(SymbolKind kind) {
 Color BuildFileLineBg() { return current_palette().build_file_line_bg; }
 Color BuildFileKeyword() { return current_palette().build_file_keyword; }
 
-}  // namespace tgdb::theme
+}  // namespace tuide::theme

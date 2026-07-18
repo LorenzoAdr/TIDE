@@ -9,7 +9,7 @@
 #include "ui/cursor_blink_ui.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -82,4 +82,4 @@ inline InputOption MakeBlinkInputOption(StringRef content, StringRef placeholder
   return opt;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

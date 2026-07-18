@@ -5,7 +5,7 @@
 
 #include "dap/io.h"
 
-namespace tgdb {
+namespace tuide {
 
 bool gdb_supports_dap_at(const std::string& gdb_path);
 bool gdb_supports_dap();
@@ -36,4 +36,4 @@ class GdbProcess {
   bool running_ = false;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

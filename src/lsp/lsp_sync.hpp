@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace tgdb {
+namespace tuide {
 
 // These used to be a single shared 1000ms constant. Splitting them (and staggering the
 // values) avoids the didChange flush, the diagnostics reveal, ui_activity_gate's deferred
@@ -28,4 +28,4 @@ constexpr bool kLspSemanticTokensStandby = true;
 // (scope cache + resolved-key short-circuit). For experiments only; keep the code paths.
 constexpr bool kDisableLspCompletionScopeCacheForTest = false;
 
-}  // namespace tgdb
+}  // namespace tuide

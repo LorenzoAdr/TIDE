@@ -3,7 +3,7 @@
 #include <atomic>
 #include <cstdint>
 
-namespace tgdb {
+namespace tuide {
 
 enum class UiActivityPhase { kInteractive, kGraceWindow, kInhibited };
 
@@ -51,4 +51,4 @@ class UiActivityGate {
 
 const char* ui_activity_phase_label(UiActivityPhase phase);
 
-}  // namespace tgdb
+}  // namespace tuide

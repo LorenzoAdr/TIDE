@@ -48,7 +48,7 @@ usage() {
 Uso: tools/compile.sh [opciones]
 
 Sin opciones: primero la TUI de componentes embebidos; luego una sola
-compilación de tgdb con la selección elegida.
+compilación de tuide con la selección elegida.
 
 Opciones:
   -y, --yes                  Usar .bundle-config sin TUI (o defaults si no existe)
@@ -197,8 +197,8 @@ ensure_gdb_ca_tarball() {
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     log "tarball gdb+Core Analyzer no encontrado: ${tarball}"
     log "generando con docker/Dockerfile.gdb-ca (puede tardar 30+ min)..."
-    if docker build -f "${ROOT}/docker/Dockerfile.gdb-ca" -t tgdb-gdb-ca "${ROOT}"; then
-      docker run --rm tgdb-gdb-ca > "${tarball}"
+    if docker build -f "${ROOT}/docker/Dockerfile.gdb-ca" -t tuide-gdb-ca "${ROOT}"; then
+      docker run --rm tuide-gdb-ca > "${tarball}"
       log "tarball generado: ${tarball}"
       return 0
     fi
@@ -342,7 +342,7 @@ wizard_bin_fresh() {
 
 find_fresh_wizard_bin() {
   local candidate
-  for candidate in "${BUILD_DIR}/tgdb-bundle-wizard" "${WIZARD_BUILD_DIR}/tgdb-bundle-wizard"; do
+  for candidate in "${BUILD_DIR}/tuide-bundle-wizard" "${WIZARD_BUILD_DIR}/tuide-bundle-wizard"; do
     if wizard_bin_fresh "${candidate}"; then
       printf '%s\n' "${candidate}"
       return 0
@@ -371,8 +371,8 @@ build_wizard_isolated() {
   log "preparando asistente de bundles (proyecto mínimo, solo ftxui)..."
   # shellcheck disable=SC2068
   cmake -S "${ROOT}/tools/bundle_wizard" -B "${WIZARD_BUILD_DIR}" ${cmake_args[@]}
-  cmake --build "${WIZARD_BUILD_DIR}" --target tgdb-bundle-wizard -j "${JOBS}"
-  WIZARD_BIN="${WIZARD_BUILD_DIR}/tgdb-bundle-wizard"
+  cmake --build "${WIZARD_BUILD_DIR}" --target tuide-bundle-wizard -j "${JOBS}"
+  WIZARD_BIN="${WIZARD_BUILD_DIR}/tuide-bundle-wizard"
   [[ -x "${WIZARD_BIN}" ]] || die "no se generó ${WIZARD_BIN}"
 }
 
@@ -387,8 +387,8 @@ ensure_bundle_wizard() {
   # sin reconfigurar flags de bundles.
   if [[ -f "${BUILD_DIR}/CMakeCache.txt" ]]; then
     log "actualizando asistente de bundles en ${BUILD_DIR}..."
-    cmake --build "${BUILD_DIR}" --target tgdb-bundle-wizard -j "${JOBS}"
-    WIZARD_BIN="${BUILD_DIR}/tgdb-bundle-wizard"
+    cmake --build "${BUILD_DIR}" --target tuide-bundle-wizard -j "${JOBS}"
+    WIZARD_BIN="${BUILD_DIR}/tuide-bundle-wizard"
     if [[ -x "${WIZARD_BIN}" ]]; then
       return 0
     fi
@@ -412,7 +412,7 @@ cmake_extra_args() {
     args+=(-DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
   fi
   if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
-    args+=(-DTGDB_STATIC_LIBSTDCXX=ON)
+    args+=(-DTUIDE_STATIC_LIBSTDCXX=ON)
   fi
   printf '%s\n' "${args[@]}"
 }
@@ -422,104 +422,104 @@ cmake_bundle_args() {
   local force
   force="$(force_bundled_cmake)"
   if [[ "${BUNDLE_CLANGD}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_CLANGD=ON -DTGDB_FORCE_BUNDLED_CLANGD="${force}")
+    args+=(-DTUIDE_BUNDLE_CLANGD=ON -DTUIDE_FORCE_BUNDLED_CLANGD="${force}")
   else
-    args+=(-DTGDB_BUNDLE_CLANGD=OFF -DTGDB_FORCE_BUNDLED_CLANGD=OFF)
+    args+=(-DTUIDE_BUNDLE_CLANGD=OFF -DTUIDE_FORCE_BUNDLED_CLANGD=OFF)
   fi
   if [[ "${BUNDLE_GDB}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_GDB=ON -DTGDB_GDB_BUNDLE_KIND="${GDB_BUNDLE_KIND}")
+    args+=(-DTUIDE_BUNDLE_GDB=ON -DTUIDE_GDB_BUNDLE_KIND="${GDB_BUNDLE_KIND}")
     if [[ "${GDB_BUNDLE_KIND}" == "core_analyzer" ]]; then
       if [[ "${BUILD_GDB_CA}" == "1" ]] || [[ ! -f "$(gdb_ca_tarball_path)" ]]; then
-        args+=(-DTGDB_BUILD_GDB_CA=ON)
+        args+=(-DTUIDE_BUILD_GDB_CA=ON)
       else
-        args+=(-DTGDB_BUILD_GDB_CA=OFF)
+        args+=(-DTUIDE_BUILD_GDB_CA=OFF)
       fi
     else
-      args+=(-DTGDB_BUILD_GDB_CA=OFF)
+      args+=(-DTUIDE_BUILD_GDB_CA=OFF)
     fi
-    args+=(-DTGDB_FORCE_BUNDLED_GDB="${force}")
+    args+=(-DTUIDE_FORCE_BUNDLED_GDB="${force}")
   else
-    args+=(-DTGDB_BUNDLE_GDB=OFF -DTGDB_FORCE_BUNDLED_GDB=OFF)
+    args+=(-DTUIDE_BUNDLE_GDB=OFF -DTUIDE_FORCE_BUNDLED_GDB=OFF)
   fi
   case "${PYTHON_BUNDLE_KIND}" in
     lsp_min)
-      args+=(-DTGDB_BUNDLE_PYTHON_LSP_MIN=ON -DTGDB_BUNDLE_PYTHON_TOOLS=OFF)
-      args+=(-DTGDB_FORCE_BUNDLED_PYTHON_TOOLS="${force}")
+      args+=(-DTUIDE_BUNDLE_PYTHON_LSP_MIN=ON -DTUIDE_BUNDLE_PYTHON_TOOLS=OFF)
+      args+=(-DTUIDE_FORCE_BUNDLED_PYTHON_TOOLS="${force}")
       ;;
     full)
-      args+=(-DTGDB_BUNDLE_PYTHON_TOOLS=ON -DTGDB_BUNDLE_PYTHON_LSP_MIN=OFF)
-      args+=(-DTGDB_FORCE_BUNDLED_PYTHON_TOOLS="${force}")
+      args+=(-DTUIDE_BUNDLE_PYTHON_TOOLS=ON -DTUIDE_BUNDLE_PYTHON_LSP_MIN=OFF)
+      args+=(-DTUIDE_FORCE_BUNDLED_PYTHON_TOOLS="${force}")
       ;;
     *)
-      args+=(-DTGDB_BUNDLE_PYTHON_LSP_MIN=OFF -DTGDB_BUNDLE_PYTHON_TOOLS=OFF \
-             -DTGDB_FORCE_BUNDLED_PYTHON_TOOLS=OFF)
+      args+=(-DTUIDE_BUNDLE_PYTHON_LSP_MIN=OFF -DTUIDE_BUNDLE_PYTHON_TOOLS=OFF \
+             -DTUIDE_FORCE_BUNDLED_PYTHON_TOOLS=OFF)
       ;;
   esac
   if [[ "${BUNDLE_BASH_LS}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_BASH_LS=ON -DTGDB_FORCE_BUNDLED_BASH_LS="${force}")
+    args+=(-DTUIDE_BUNDLE_BASH_LS=ON -DTUIDE_FORCE_BUNDLED_BASH_LS="${force}")
   else
-    args+=(-DTGDB_BUNDLE_BASH_LS=OFF -DTGDB_FORCE_BUNDLED_BASH_LS=OFF)
+    args+=(-DTUIDE_BUNDLE_BASH_LS=OFF -DTUIDE_FORCE_BUNDLED_BASH_LS=OFF)
   fi
   if [[ "${BUNDLE_TEXLAB}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_TEXLAB=ON)
+    args+=(-DTUIDE_BUNDLE_TEXLAB=ON)
     # Pin versions without '~' — CMake/make quote KEY=VALUE oddly and curl rejects the URL.
-    args+=(-DTGDB_CHKTEX_VERSION=1.7.10-1 -DTGDB_PCRE2_VERSION=10.47-2)
-    args+=(-DTGDB_FORCE_BUNDLED_TEXLAB="${force}")
+    args+=(-DTUIDE_CHKTEX_VERSION=1.7.10-1 -DTUIDE_PCRE2_VERSION=10.47-2)
+    args+=(-DTUIDE_FORCE_BUNDLED_TEXLAB="${force}")
   else
-    args+=(-DTGDB_BUNDLE_TEXLAB=OFF -DTGDB_FORCE_BUNDLED_TEXLAB=OFF)
+    args+=(-DTUIDE_BUNDLE_TEXLAB=OFF -DTUIDE_FORCE_BUNDLED_TEXLAB=OFF)
   fi
   if [[ "${BUNDLE_BASH_DAP}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_BASH_DAP=ON -DTGDB_FORCE_BUNDLED_BASH_DAP="${force}")
+    args+=(-DTUIDE_BUNDLE_BASH_DAP=ON -DTUIDE_FORCE_BUNDLED_BASH_DAP="${force}")
   else
-    args+=(-DTGDB_BUNDLE_BASH_DAP=OFF -DTGDB_FORCE_BUNDLED_BASH_DAP=OFF)
+    args+=(-DTUIDE_BUNDLE_BASH_DAP=OFF -DTUIDE_FORCE_BUNDLED_BASH_DAP=OFF)
   fi
   if [[ "${BUNDLE_RUST_ANALYZER}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_RUST_ANALYZER=ON -DTGDB_FORCE_BUNDLED_RUST_ANALYZER="${force}")
+    args+=(-DTUIDE_BUNDLE_RUST_ANALYZER=ON -DTUIDE_FORCE_BUNDLED_RUST_ANALYZER="${force}")
   else
-    args+=(-DTGDB_BUNDLE_RUST_ANALYZER=OFF -DTGDB_FORCE_BUNDLED_RUST_ANALYZER=OFF)
+    args+=(-DTUIDE_BUNDLE_RUST_ANALYZER=OFF -DTUIDE_FORCE_BUNDLED_RUST_ANALYZER=OFF)
   fi
   if [[ "${BUNDLE_GOPLS}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_GOPLS=ON -DTGDB_FORCE_BUNDLED_GOPLS="${force}")
+    args+=(-DTUIDE_BUNDLE_GOPLS=ON -DTUIDE_FORCE_BUNDLED_GOPLS="${force}")
   else
-    args+=(-DTGDB_BUNDLE_GOPLS=OFF -DTGDB_FORCE_BUNDLED_GOPLS=OFF)
+    args+=(-DTUIDE_BUNDLE_GOPLS=OFF -DTUIDE_FORCE_BUNDLED_GOPLS=OFF)
   fi
   if [[ "${BUNDLE_ZLS}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_ZLS=ON -DTGDB_FORCE_BUNDLED_ZLS="${force}")
+    args+=(-DTUIDE_BUNDLE_ZLS=ON -DTUIDE_FORCE_BUNDLED_ZLS="${force}")
   else
-    args+=(-DTGDB_BUNDLE_ZLS=OFF -DTGDB_FORCE_BUNDLED_ZLS=OFF)
+    args+=(-DTUIDE_BUNDLE_ZLS=OFF -DTUIDE_FORCE_BUNDLED_ZLS=OFF)
   fi
   if [[ "${BUNDLE_FORTLS}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_FORTLS=ON -DTGDB_FORCE_BUNDLED_FORTLS="${force}")
+    args+=(-DTUIDE_BUNDLE_FORTLS=ON -DTUIDE_FORCE_BUNDLED_FORTLS="${force}")
   else
-    args+=(-DTGDB_BUNDLE_FORTLS=OFF -DTGDB_FORCE_BUNDLED_FORTLS=OFF)
+    args+=(-DTUIDE_BUNDLE_FORTLS=OFF -DTUIDE_FORCE_BUNDLED_FORTLS=OFF)
   fi
   if [[ "${BUNDLE_LUA_LS}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_LUA_LS=ON -DTGDB_FORCE_BUNDLED_LUA_LS="${force}")
+    args+=(-DTUIDE_BUNDLE_LUA_LS=ON -DTUIDE_FORCE_BUNDLED_LUA_LS="${force}")
   else
-    args+=(-DTGDB_BUNDLE_LUA_LS=OFF -DTGDB_FORCE_BUNDLED_LUA_LS=OFF)
+    args+=(-DTUIDE_BUNDLE_LUA_LS=OFF -DTUIDE_FORCE_BUNDLED_LUA_LS=OFF)
   fi
   if [[ "${BUNDLE_TSSERVER}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_TSSERVER=ON -DTGDB_FORCE_BUNDLED_TSSERVER="${force}")
+    args+=(-DTUIDE_BUNDLE_TSSERVER=ON -DTUIDE_FORCE_BUNDLED_TSSERVER="${force}")
   else
-    args+=(-DTGDB_BUNDLE_TSSERVER=OFF -DTGDB_FORCE_BUNDLED_TSSERVER=OFF)
+    args+=(-DTUIDE_BUNDLE_TSSERVER=OFF -DTUIDE_FORCE_BUNDLED_TSSERVER=OFF)
   fi
   if [[ "${BUNDLE_NEOCMAKELSP}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_NEOCMAKELSP=ON -DTGDB_FORCE_BUNDLED_NEOCMAKELSP="${force}")
+    args+=(-DTUIDE_BUNDLE_NEOCMAKELSP=ON -DTUIDE_FORCE_BUNDLED_NEOCMAKELSP="${force}")
   else
-    args+=(-DTGDB_BUNDLE_NEOCMAKELSP=OFF -DTGDB_FORCE_BUNDLED_NEOCMAKELSP=OFF)
+    args+=(-DTUIDE_BUNDLE_NEOCMAKELSP=OFF -DTUIDE_FORCE_BUNDLED_NEOCMAKELSP=OFF)
   fi
   if [[ "${BUNDLE_MAKE_LS}" == "1" ]]; then
-    args+=(-DTGDB_BUNDLE_MAKE_LS=ON -DTGDB_FORCE_BUNDLED_MAKE_LS="${force}")
+    args+=(-DTUIDE_BUNDLE_MAKE_LS=ON -DTUIDE_FORCE_BUNDLED_MAKE_LS="${force}")
   else
-    args+=(-DTGDB_BUNDLE_MAKE_LS=OFF -DTGDB_FORCE_BUNDLED_MAKE_LS=OFF)
+    args+=(-DTUIDE_BUNDLE_MAKE_LS=OFF -DTUIDE_FORCE_BUNDLED_MAKE_LS=OFF)
   fi
   case "${UI_LOCALE}" in
-    es) args+=(-DTGDB_DEFAULT_UI_LOCALE=es) ;;
-    *) args+=(-DTGDB_DEFAULT_UI_LOCALE=en) ;;
+    es) args+=(-DTUIDE_DEFAULT_UI_LOCALE=es) ;;
+    *) args+=(-DTUIDE_DEFAULT_UI_LOCALE=en) ;;
   esac
   case "${EDITOR_MODE}" in
-    helix) args+=(-DTGDB_DEFAULT_HELIX_MODE=ON) ;;
-    *) args+=(-DTGDB_DEFAULT_HELIX_MODE=OFF) ;;
+    helix) args+=(-DTUIDE_DEFAULT_HELIX_MODE=ON) ;;
+    *) args+=(-DTUIDE_DEFAULT_HELIX_MODE=OFF) ;;
   esac
   printf '%s\n' "${args[@]}"
 }
@@ -950,8 +950,8 @@ cmake -S "${ROOT}" -B "${BUILD_DIR}" ${CMAKE_BUNDLE_ARGS[@]} ${CMAKE_EXTRA_ARGS[
 log "compilando (${JOBS} hilos)..."
 cmake --build "${BUILD_DIR}" -j "${JOBS}"
 
-if [[ ! -x "${BUILD_DIR}/tgdb" ]]; then
-  die "no se generó ${BUILD_DIR}/tgdb"
+if [[ ! -x "${BUILD_DIR}/tuide" ]]; then
+  die "no se generó ${BUILD_DIR}/tuide"
 fi
 
 if [[ ! -x "${BUILD_DIR}/hello" ]]; then
@@ -959,7 +959,7 @@ if [[ ! -x "${BUILD_DIR}/hello" ]]; then
 fi
 
 log "listo."
-log "  tgdb:  ${BUILD_DIR}/tgdb ($(du -h "${BUILD_DIR}/tgdb" | awk '{print $1}'))"
+log "  tuide:  ${BUILD_DIR}/tuide ($(du -h "${BUILD_DIR}/tuide" | awk '{print $1}'))"
 log "  hello: ${BUILD_DIR}/hello"
 if [[ "${BUNDLE_CLANGD}" == "1" ]]; then
   log "  clangd embebido: sí"

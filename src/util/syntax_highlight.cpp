@@ -12,7 +12,7 @@
 #include "util/syntax_scope.hpp"
 #include "lsp/lsp_uri.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -792,4 +792,4 @@ Element HighlightCodeLine(const std::string& line, int line_index,
                                  semantic_tokens);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

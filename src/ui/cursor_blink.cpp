@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-namespace tgdb::cursor_blink {
+namespace tuide::cursor_blink {
 
 namespace {
 
@@ -41,4 +41,4 @@ void show() {
   last_toggle_ms_ = now;
 }
 
-}  // namespace tgdb::cursor_blink
+}  // namespace tuide::cursor_blink

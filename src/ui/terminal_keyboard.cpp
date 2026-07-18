@@ -2,7 +2,7 @@
 
 #include <iostream>
 
-namespace tgdb {
+namespace tuide {
 
 void enable_extended_key_reporting() {
   // xterm/VTE modifyOtherKeys: Ctrl+letter as CSI (not raw 0x01-0x1F).
@@ -39,4 +39,4 @@ void disable_click_drag_mouse_reporting() {
   std::cout.flush();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

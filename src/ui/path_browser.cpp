@@ -9,7 +9,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 using ftxui::Event;
 
@@ -210,4 +210,4 @@ bool PathBrowserState::handle_list_navigation(const Event& event, int page_size)
   return false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

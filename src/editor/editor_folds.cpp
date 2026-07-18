@@ -4,7 +4,7 @@
 
 #include "editor/editor_state.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -307,4 +307,4 @@ int visible_line_index(const std::vector<int>& visible_lines, int buffer_line) {
   return -1;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

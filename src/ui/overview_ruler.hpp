@@ -11,7 +11,7 @@
 #include "lsp/diagnostics.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -253,4 +253,4 @@ inline bool overview_ruler_contains(const Box& box, int x, int y) {
   return box.Contain(x, y);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

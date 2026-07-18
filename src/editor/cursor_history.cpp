@@ -3,7 +3,7 @@
 #include "app/workspace_model.hpp"
 #include "editor/text_ops.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -87,4 +87,4 @@ void CursorHistory::clear() {
   forward_.clear();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

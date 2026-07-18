@@ -14,7 +14,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -189,4 +189,4 @@ Component MakeWorkspaceWizardOverlay(Component main, WorkspaceWizardState* state
       });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

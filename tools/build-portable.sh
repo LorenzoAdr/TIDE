@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${ROOT}/dist"
-IMAGE_TAG="tgdb-portable-builder"
+IMAGE_TAG="tuide-portable-builder"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 USE_BIONIC=0
 STATIC_LIBSTDCXX=0
@@ -24,7 +24,7 @@ usage() {
   cat <<'EOF'
 Uso: tools/build-portable.sh [opciones]
 
-Compila tgdb con pack completo (clangd + gdb embebidos) dentro de Docker
+Compila tuide con pack completo (clangd + gdb embebidos) dentro de Docker
 usando una distro con glibc antigua para maximizar compatibilidad en runtime.
 
 Opciones:
@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
     --bionic)
       USE_BIONIC=1
       MAX_GLIBC="2.27"
-      IMAGE_TAG="tgdb-portable-builder-bionic"
+      IMAGE_TAG="tuide-portable-builder-bionic"
       shift
       ;;
     --static-libstdc++)
@@ -141,11 +141,11 @@ docker run --rm \
   "${IMAGE_TAG}" \
   ./tools/compile.sh "${COMPILE_ARGS[@]}"
 
-[[ -x "${ROOT}/build/tgdb" ]] || die "no se generó build/tgdb"
+[[ -x "${ROOT}/build/tuide" ]] || die "no se generó build/tuide"
 
 if [[ "${SKIP_VERIFY}" == "0" ]]; then
   log "verificando dependencias de runtime..."
-  "${ROOT}/tools/verify-glibc.sh" --max-glibc "${MAX_GLIBC}" "${ROOT}/build/tgdb"
+  "${ROOT}/tools/verify-glibc.sh" --max-glibc "${MAX_GLIBC}" "${ROOT}/build/tuide"
 fi
 
 mkdir -p "${DIST_DIR}"
@@ -153,8 +153,8 @@ suffix="x86_64-glibc$(glibc_label)"
 if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
   suffix="${suffix}-static-libstdc++"
 fi
-OUT="${DIST_DIR}/tgdb-${suffix}"
-cp -f "${ROOT}/build/tgdb" "${OUT}"
+OUT="${DIST_DIR}/tuide-${suffix}"
+cp -f "${ROOT}/build/tuide" "${OUT}"
 chmod +x "${OUT}"
 
 log "artefacto: ${OUT} ($(du -h "${OUT}" | awk '{print $1}'))"

@@ -22,7 +22,7 @@
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -627,7 +627,7 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
     return false;
   }
 
-  if (event_is_tide_global_shortcut(event)) {
+  if (event_is_tuide_global_shortcut(event)) {
     return false;
   }
 
@@ -1486,4 +1486,4 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
   }));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

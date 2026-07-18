@@ -5,7 +5,7 @@
 #include "parser/tree_sitter_document.hpp"
 #include "parser/tree_sitter_service.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 BracketPairHighlight find_bracket_pair_highlight(const EditorBuffer& buffer, int line, int col) {
   const std::string& source = editor_buffer_joined_source(buffer);
@@ -69,4 +69,4 @@ bool cursor_in_code(const EditorBuffer& buffer, int line, int col) {
   return tree_sitter_service().cursor_in_code(buffer.path, source, line, col);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

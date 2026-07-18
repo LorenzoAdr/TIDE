@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace tgdb {
+namespace tuide {
 
 const char* ui_event_kind_label(UiEventKind kind) {
   switch (kind) {
@@ -55,4 +55,4 @@ std::array<uint64_t, 4> UiEventTrace::counts_by_kind() const {
   return kind_counts_;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

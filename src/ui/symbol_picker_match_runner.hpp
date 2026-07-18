@@ -11,7 +11,7 @@
 
 #include "symbols/symbol_provider.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct SymbolCatalogEntry {
   SymbolInfo symbol;
@@ -69,4 +69,4 @@ class SymbolPickerMatchRunner {
   Result ready_result_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

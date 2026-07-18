@@ -5,7 +5,7 @@
 
 #include "indexer/index_rules.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct FileTreeNode {
   std::string name;
@@ -35,4 +35,4 @@ bool populate_lazy_folder_children(FileTreeNode* folder, const std::string& work
 // Devuelve true si el archivo existe en el árbol.
 bool expand_relative_path(FileTreeNode* root, const std::string& relative_path);
 
-}  // namespace tgdb
+}  // namespace tuide

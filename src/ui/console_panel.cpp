@@ -46,7 +46,7 @@
 #include "util/compiler_location.hpp"
 #include "util/monitor_log.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -1094,7 +1094,7 @@ void refresh_terminal_view(ShellSession* shell, ConsolePanelState* state) {
   if (shell == nullptr || state == nullptr) {
     return;
   }
-  TGDB_MON_SCOPE("shell", "refresh_terminal_view");
+  TUIDE_MON_SCOPE("shell", "refresh_terminal_view");
   state->shell_ui_active = shell->running();
   if (!state->shell_ui_active) {
     state->terminal_view_valid = false;
@@ -1107,7 +1107,7 @@ void refresh_terminal_view(ShellSession* shell, ConsolePanelState* state) {
     drained += shell->drain_output_bytes(8192);
   }
   if (drained > 0) {
-    TGDB_MON("shell", "terminal drained_bytes=" + std::to_string(drained));
+    TUIDE_MON("shell", "terminal drained_bytes=" + std::to_string(drained));
   }
   const std::string text = shell->display_text();
   if (text.empty() && drained == 0 && !pending && queue_before == 0) {
@@ -1137,7 +1137,7 @@ bool forward_pty_key(ShellSession* shell, const Event& event, ConsolePanelState*
   if (shell == nullptr || !shell->running()) {
     return false;
   }
-  if (event.is_mouse() || event_is_tide_global_shortcut(event)) {
+  if (event.is_mouse() || event_is_tuide_global_shortcut(event)) {
     return false;
   }
   const std::optional<std::string> bytes = event_to_pty_bytes(event);
@@ -1351,7 +1351,7 @@ bool handle_gdb_console_keys(AppMode* app_mode, DebugModel* model, ConsolePanelS
   }
 
   if (console_input_active(layout_state)) {
-    if (!event.is_mouse() && event != Event::Custom && !event_is_tide_global_shortcut(event)) {
+    if (!event.is_mouse() && event != Event::Custom && !event_is_tuide_global_shortcut(event)) {
       cursor_blink::show();
       if (input_box) {
         input_box->TakeFocus();
@@ -1627,7 +1627,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     }
 
     if (terminal_pty_input_active(layout_state, focus, shell) && on_terminal_tab) {
-      if (!event_is_tide_global_shortcut(event) &&
+      if (!event_is_tuide_global_shortcut(event) &&
           forward_pty_key(shell, event, state.get(), layout_state)) {
         return true;
       }
@@ -1670,7 +1670,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     if (!terminal_pty_input_active(layout_state, focus, shell)) {
       return false;
     }
-    if (event_is_tide_global_shortcut(event)) {
+    if (event_is_tuide_global_shortcut(event)) {
       return false;
     }
     if (event_is_ctrl_c(event)) {
@@ -1938,4 +1938,4 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -3,7 +3,7 @@
 #include <cassert>
 #include <iostream>
 
-namespace tgdb {
+namespace tuide {
 namespace {
 
 void test_caret_column_after_leading_tabs() {
@@ -30,11 +30,11 @@ void test_body_source_byte_after_tabs() {
 }
 
 }  // namespace
-}  // namespace tgdb
+}  // namespace tuide
 
 int main() {
-  tgdb::test_caret_column_after_leading_tabs();
-  tgdb::test_body_source_byte_after_tabs();
+  tuide::test_caret_column_after_leading_tabs();
+  tuide::test_body_source_byte_after_tabs();
   std::cout << "indent_guides_test: ok\n";
   return 0;
 }

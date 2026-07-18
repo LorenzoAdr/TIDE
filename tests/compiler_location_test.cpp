@@ -13,7 +13,7 @@ void expect(bool condition, const char* message) {
 }
 
 void test_gcc_with_column() {
-  const auto match = tgdb::find_compiler_location(
+  const auto match = tuide::find_compiler_location(
       "src/app/application.cpp:42:10: error: 'foo' was not declared in this scope");
   expect(match.has_value(), "gcc error with column");
   expect(match->path == "src/app/application.cpp", "gcc path");
@@ -25,7 +25,7 @@ void test_gcc_with_column() {
 
 void test_gcc_without_column() {
   const auto match =
-      tgdb::find_compiler_location("main.cpp:7: warning: unused variable 'x'");
+      tuide::find_compiler_location("main.cpp:7: warning: unused variable 'x'");
   expect(match.has_value(), "gcc warning without column");
   expect(match->path == "main.cpp", "gcc path short");
   expect(match->line == 7, "gcc line short");
@@ -33,7 +33,7 @@ void test_gcc_without_column() {
 }
 
 void test_absolute_path() {
-  const auto match = tgdb::find_compiler_location(
+  const auto match = tuide::find_compiler_location(
       "/home/user/project/src/main.cpp:100:5: fatal error: no such file");
   expect(match.has_value(), "absolute path");
   expect(match->path == "/home/user/project/src/main.cpp", "absolute path value");
@@ -43,7 +43,7 @@ void test_absolute_path() {
 
 void test_msvc_style() {
   const auto match =
-      tgdb::find_compiler_location("C:\\project\\main.cpp(42,5): error C2065: undeclared");
+      tuide::find_compiler_location("C:\\project\\main.cpp(42,5): error C2065: undeclared");
   expect(match.has_value(), "msvc error");
   expect(match->path == "C:\\project\\main.cpp", "msvc path");
   expect(match->line == 42, "msvc line");
@@ -51,7 +51,7 @@ void test_msvc_style() {
 }
 
 void test_included_from() {
-  const auto match = tgdb::find_compiler_location(
+  const auto match = tuide::find_compiler_location(
       "In file included from include/header.hpp:12:");
   expect(match.has_value(), "included from");
   expect(match->path == "include/header.hpp", "included path");
@@ -59,8 +59,8 @@ void test_included_from() {
 }
 
 void test_no_match() {
-  expect(!tgdb::find_compiler_location("make[2]: *** [target] Error 1").has_value(), "make error");
-  expect(!tgdb::find_compiler_location("").has_value(), "empty line");
+  expect(!tuide::find_compiler_location("make[2]: *** [target] Error 1").has_value(), "make error");
+  expect(!tuide::find_compiler_location("").has_value(), "empty line");
 }
 
 }  // namespace

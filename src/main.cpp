@@ -16,14 +16,14 @@
 
 namespace {
 
-bool config_is_complete(const tgdb::AppConfig &config) {
+bool config_is_complete(const tuide::AppConfig &config) {
   if (config.program.empty()) {
     return false;
   }
-  if (config.mode == tgdb::SessionMode::kAttach) {
+  if (config.mode == tuide::SessionMode::kAttach) {
     return config.attach_pid > 0 || !config.attach_target.empty();
   }
-  if (config.mode == tgdb::SessionMode::kCore) {
+  if (config.mode == tuide::SessionMode::kCore) {
     return !config.core_path.empty();
   }
   return true;   
@@ -78,7 +78,7 @@ bool path_is_ide_open_file(const std::string &path) {
 }
 
 void print_usage() {
-  using tgdb::i18n::tr;
+  using tuide::i18n::tr;
   std::cerr << tr("cli.usage") << '\n'
             << tr("cli.options_header") << '\n'
             << tr("cli.opt.cwd") << '\n'
@@ -112,9 +112,9 @@ int main(int argc, char **argv) {
   }
 #endif
 
-  tgdb::i18n::set_locale(tgdb::i18n::UiLocale::kAuto);
+  tuide::i18n::set_locale(tuide::i18n::UiLocale::kAuto);
 
-  tgdb::AppConfig config;
+  tuide::AppConfig config;
 
   {
     std::error_code ec;
@@ -134,22 +134,22 @@ int main(int argc, char **argv) {
       continue;
     }
     if (arg == "--attach" && i + 1 < argc) {
-      config.mode = tgdb::SessionMode::kAttach;
+      config.mode = tuide::SessionMode::kAttach;
       config.attach_pid = std::stoi(argv[++i]);
       continue;
     }
     if (arg == "--target" && i + 1 < argc) {
-      config.mode = tgdb::SessionMode::kAttach;
+      config.mode = tuide::SessionMode::kAttach;
       config.attach_target = argv[++i];
       continue;
     }
     if (arg == "--core" && i + 1 < argc) {
-      config.mode = tgdb::SessionMode::kCore;
+      config.mode = tuide::SessionMode::kCore;
       config.core_path = argv[++i];
       continue;
     }
     if (arg == "--core-analyzer") {
-      config.core_analysis = tgdb::CoreAnalysisMode::kCoreAnalyzer;
+      config.core_analysis = tuide::CoreAnalysisMode::kCoreAnalyzer;
       continue;
     }
     if (arg == "--args") {
@@ -159,7 +159,7 @@ int main(int argc, char **argv) {
       break;
     }
     if (arg.rfind('-', 0) == 0) {
-      std::cerr << tgdb::i18n::tr_fmt("cli.unknown_option", {arg}) << '\n';
+      std::cerr << tuide::i18n::tr_fmt("cli.unknown_option", {arg}) << '\n';
       print_usage();
       return 1;
     }
@@ -170,7 +170,7 @@ int main(int argc, char **argv) {
     }
     if (path_is_ide_open_file(arg)) {
       if (!config.initial_file.empty()) {
-        std::cerr << tgdb::i18n::tr("cli.too_many_args") << '\n';
+        std::cerr << tuide::i18n::tr("cli.too_many_args") << '\n';
         print_usage();
         return 1;
       }
@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
       continue;
     }
     if (!config.program.empty()) {
-      std::cerr << tgdb::i18n::tr("cli.too_many_args") << '\n';
+      std::cerr << tuide::i18n::tr("cli.too_many_args") << '\n';
       print_usage();
       return 1;
     }
@@ -204,35 +204,35 @@ int main(int argc, char **argv) {
   if (!config.program.empty()) {
     config.program = std::filesystem::absolute(config.program, ec).string();
     if (!std::filesystem::exists(config.program)) {
-      std::cerr << tgdb::i18n::tr_fmt("cli.program_not_found", {config.program}) << '\n';
+      std::cerr << tuide::i18n::tr_fmt("cli.program_not_found", {config.program}) << '\n';
       return 1;
     }
     if (!std::filesystem::is_regular_file(config.program)) {
-      std::cerr << tgdb::i18n::tr_fmt("cli.program_not_file", {config.program}) << '\n';
+      std::cerr << tuide::i18n::tr_fmt("cli.program_not_file", {config.program}) << '\n';
       return 1;
     }
   }
   if (!config.core_path.empty()) {
     config.core_path = std::filesystem::absolute(config.core_path, ec).string();
     if (!std::filesystem::exists(config.core_path)) {
-      std::cerr << tgdb::i18n::tr_fmt("cli.core_not_found", {config.core_path}) << '\n';
+      std::cerr << tuide::i18n::tr_fmt("cli.core_not_found", {config.core_path}) << '\n';
       return 1;
     }
   }
-  if (config.core_analysis == tgdb::CoreAnalysisMode::kCoreAnalyzer &&
-      !tgdb::core_analyzer_supported()) {
-    std::cerr << tgdb::i18n::tr("cli.core_analyzer_unavailable") << '\n';
+  if (config.core_analysis == tuide::CoreAnalysisMode::kCoreAnalyzer &&
+      !tuide::core_analyzer_supported()) {
+    std::cerr << tuide::i18n::tr("cli.core_analyzer_unavailable") << '\n';
     return 1;
   }
   if (!config.initial_file.empty()) {
     config.initial_file =
         std::filesystem::absolute(config.initial_file, ec).string();
     if (!std::filesystem::exists(config.initial_file)) {
-      std::cerr << tgdb::i18n::tr_fmt("cli.file_not_found", {config.initial_file}) << '\n';
+      std::cerr << tuide::i18n::tr_fmt("cli.file_not_found", {config.initial_file}) << '\n';
       return 1;
     }
     if (!std::filesystem::is_regular_file(config.initial_file)) {
-      std::cerr << tgdb::i18n::tr_fmt("cli.not_a_file", {config.initial_file}) << '\n';
+      std::cerr << tuide::i18n::tr_fmt("cli.not_a_file", {config.initial_file}) << '\n';
       return 1;
     }
     if (config.workspace_root.empty()) {
@@ -244,31 +244,31 @@ int main(int argc, char **argv) {
     config.workspace_root =
         std::filesystem::absolute(config.workspace_root, ec).string();
     if (!std::filesystem::is_directory(config.workspace_root)) {
-      std::cerr << tgdb::i18n::tr_fmt("cli.cwd_not_directory", {config.workspace_root}) << '\n';
+      std::cerr << tuide::i18n::tr_fmt("cli.cwd_not_directory", {config.workspace_root}) << '\n';
       return 1;
     }
   }
 
-  tgdb::install_crash_handlers();
+  tuide::install_crash_handlers();
 
   try {
-    tgdb::Application app(std::move(config));
+    tuide::Application app(std::move(config));
     const int code = app.run();
-    if (auto post_exit = tgdb::consume_post_exit_shell_request()) {
-      const std::string script = tgdb::make_post_exit_bash_script(*post_exit);
+    if (auto post_exit = tuide::consume_post_exit_shell_request()) {
+      const std::string script = tuide::make_post_exit_bash_script(*post_exit);
       execlp("bash", "bash", "-c", script.c_str(), static_cast<char*>(nullptr));
-      std::cerr << tgdb::i18n::tr_fmt("cli.fatal_error", {"execlp(bash) failed"}) << '\n';
+      std::cerr << tuide::i18n::tr_fmt("cli.fatal_error", {"execlp(bash) failed"}) << '\n';
       std::cerr << "cd " << post_exit->cwd << " && " << post_exit->command << '\n';
       return 1;
     }
     return code;
   } catch (const std::exception &e) {
-    std::cerr << tgdb::i18n::tr_fmt("cli.fatal_error", {e.what()}) << '\n';
-    tgdb::print_current_backtrace(e.what());
+    std::cerr << tuide::i18n::tr_fmt("cli.fatal_error", {e.what()}) << '\n';
+    tuide::print_current_backtrace(e.what());
     return 1;
   } catch (...) {
-    std::cerr << tgdb::i18n::tr("cli.fatal_unknown") << '\n';
-    tgdb::print_current_backtrace("unknown");
+    std::cerr << tuide::i18n::tr("cli.fatal_unknown") << '\n';
+    tuide::print_current_backtrace("unknown");
     return 1;
   }
 }

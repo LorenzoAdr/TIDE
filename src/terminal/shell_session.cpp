@@ -28,7 +28,7 @@
 #endif
 #endif
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -39,7 +39,7 @@ std::string write_terminal_init_script(const ShellLaunchConfig& config) {
     return {};
   }
   const std::filesystem::path init_path =
-      std::filesystem::path(config.host_cwd) / ".tgdb" / "terminal_init.sh";
+      std::filesystem::path(config.host_cwd) / ".tuide" / "terminal_init.sh";
   std::error_code ec;
   std::filesystem::create_directories(init_path.parent_path(), ec);
   std::ofstream output(init_path);
@@ -47,7 +47,7 @@ std::string write_terminal_init_script(const ShellLaunchConfig& config) {
     return {};
   }
   output << "#!/bin/bash\n";
-  output << "# tgdb: integrated terminal (auto-generated)\n";
+  output << "# tuide: integrated terminal (auto-generated)\n";
   output << "export PATH=\"${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}\"\n";
   for (const auto& entry : config.env_vars) {
     output << "export " << entry.first << '=' << shell_quote(entry.second) << '\n';
@@ -184,7 +184,7 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
       args.emplace_back(config.docker_container);
       args.emplace_back(shell_bin);
       if (!init_script.empty() && !config.docker_cwd.empty()) {
-        const std::string container_init = config.docker_cwd + "/.tgdb/terminal_init.sh";
+        const std::string container_init = config.docker_cwd + "/.tuide/terminal_init.sh";
         args.emplace_back("--rcfile");
         args.emplace_back(container_init);
         args.emplace_back("-i");
@@ -401,7 +401,7 @@ void ShellSession::reader_loop() {
     }
     const ssize_t bytes = read(master, buffer.data(), buffer.size());
     if (bytes > 0) {
-      TGDB_MON("shell", "pty_read bytes=" + std::to_string(bytes));
+      TUIDE_MON("shell", "pty_read bytes=" + std::to_string(bytes));
       output_chunks_.push(
           std::string(buffer.data(), static_cast<std::size_t>(bytes)));
       output_pending_.store(true, std::memory_order_release);
@@ -517,4 +517,4 @@ std::string ShellSession::screen_text() {
   return terminal_.text();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

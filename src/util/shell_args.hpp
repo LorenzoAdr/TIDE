@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 std::vector<std::string> split_shell_args(const std::string& command);
 
@@ -13,4 +13,4 @@ std::vector<std::string> path_completions(const std::string& cwd, const std::str
 
 bool apply_path_tab_completion(std::string* line, const std::string& cwd);
 
-}  // namespace tgdb
+}  // namespace tuide

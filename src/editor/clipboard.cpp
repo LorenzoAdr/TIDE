@@ -4,7 +4,7 @@
 #include "editor/undo_stack.hpp"
 #include "util/system_clipboard.hpp"
 
-namespace tgdb {
+namespace tuide {
 // sdkfjsldkjf
 std::string& editor_clipboard() {
   static std::string clipboard;
@@ -95,4 +95,4 @@ void paste_text(EditorBuffer* buffer, const std::string& text) {
   paste_at_primary(buffer, text);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

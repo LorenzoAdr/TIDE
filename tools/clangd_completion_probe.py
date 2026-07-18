@@ -9,7 +9,7 @@ from pathlib import Path
 
 WORKSPACE = Path("/home/lorenzo/workspace/tgdb")
 FILE = WORKSPACE / "src/app/application.cpp"
-COMPILE_DIR = WORKSPACE / ".tgdb"
+COMPILE_DIR = WORKSPACE / ".tuide"
 
 
 def read_message(stream) -> dict:

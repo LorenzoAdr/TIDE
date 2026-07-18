@@ -6,7 +6,7 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/screen/box.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct BrowserEntry {
   std::string name;
@@ -45,4 +45,4 @@ bool is_regular_file_path(const std::string& path);
 bool is_directory_path(const std::string& path);
 std::vector<BrowserEntry> list_directory_entries(const std::string& path);
 
-}  // namespace tgdb
+}  // namespace tuide

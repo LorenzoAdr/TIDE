@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -186,4 +186,4 @@ void UiPerfMonitor::refresh_fps(int64_t now_ms, bool is_paint) {
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

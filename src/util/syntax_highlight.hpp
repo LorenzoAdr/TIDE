@@ -12,7 +12,7 @@
 #include "parser/tree_sitter_document.hpp"
 #include "util/line_source.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct CachedSyntaxLineSpans {
   LineHighlights ts_display_spans;
@@ -63,4 +63,4 @@ ftxui::Element HighlightCodeLineLite(const std::string& line, int cursor_col = -
 ftxui::Element HighlightCodeLineLite(const std::string& line, int cursor_col,
                                      ftxui::Decorator cursor_style, const std::string& file_path);
 
-}  // namespace tgdb
+}  // namespace tuide

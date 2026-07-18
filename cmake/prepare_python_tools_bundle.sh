@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Empaqueta CPython portable + basedpyright + debugpy (opción B / TGDB_BUNDLE_PYTHON_TOOLS).
+# Empaqueta CPython portable + basedpyright + debugpy (opción B / TUIDE_BUNDLE_PYTHON_TOOLS).
 set -euo pipefail
 
 die() {
@@ -20,31 +20,31 @@ require_var() {
   fi
 }
 
-require_var TGDB_PYTHON_TOOLS_VERSION
-require_var TGDB_BASEDPYRIGHT_VERSION
-require_var TGDB_DEBUGPY_VERSION
-require_var TGDB_PYTHON_STANDALONE_URL
-require_var TGDB_PYTHON_STANDALONE_TAR_PATH
-require_var TGDB_PYTHON_TOOLS_STAGING_DIR
-require_var TGDB_PYTHON_TOOLS_PAYLOAD_DIR
-require_var TGDB_PYTHON_TOOLS_TAR_PATH
-require_var TGDB_PYTHON_TOOLS_ZST_PATH
-require_var TGDB_PYTHON_TOOLS_MANIFEST_PATH
-require_var TGDB_PYTHON_TOOLS_MANIFEST_HPP
-require_var TGDB_PYTHON_TOOLS_BLOB_OBJ
+require_var TUIDE_PYTHON_TOOLS_VERSION
+require_var TUIDE_BASEDPYRIGHT_VERSION
+require_var TUIDE_DEBUGPY_VERSION
+require_var TUIDE_PYTHON_STANDALONE_URL
+require_var TUIDE_PYTHON_STANDALONE_TAR_PATH
+require_var TUIDE_PYTHON_TOOLS_STAGING_DIR
+require_var TUIDE_PYTHON_TOOLS_PAYLOAD_DIR
+require_var TUIDE_PYTHON_TOOLS_TAR_PATH
+require_var TUIDE_PYTHON_TOOLS_ZST_PATH
+require_var TUIDE_PYTHON_TOOLS_MANIFEST_PATH
+require_var TUIDE_PYTHON_TOOLS_MANIFEST_HPP
+require_var TUIDE_PYTHON_TOOLS_BLOB_OBJ
 
-TGDB_PYTHON_TOOLS_VERSION="$(strip_cmake_quotes "${TGDB_PYTHON_TOOLS_VERSION}")"
-TGDB_BASEDPYRIGHT_VERSION="$(strip_cmake_quotes "${TGDB_BASEDPYRIGHT_VERSION}")"
-TGDB_DEBUGPY_VERSION="$(strip_cmake_quotes "${TGDB_DEBUGPY_VERSION}")"
-TGDB_PYTHON_STANDALONE_URL="$(strip_cmake_quotes "${TGDB_PYTHON_STANDALONE_URL}")"
-TGDB_PYTHON_STANDALONE_TAR_PATH="$(strip_cmake_quotes "${TGDB_PYTHON_STANDALONE_TAR_PATH}")"
-TGDB_PYTHON_TOOLS_STAGING_DIR="$(strip_cmake_quotes "${TGDB_PYTHON_TOOLS_STAGING_DIR}")"
-TGDB_PYTHON_TOOLS_PAYLOAD_DIR="$(strip_cmake_quotes "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}")"
-TGDB_PYTHON_TOOLS_TAR_PATH="$(strip_cmake_quotes "${TGDB_PYTHON_TOOLS_TAR_PATH}")"
-TGDB_PYTHON_TOOLS_ZST_PATH="$(strip_cmake_quotes "${TGDB_PYTHON_TOOLS_ZST_PATH}")"
-TGDB_PYTHON_TOOLS_MANIFEST_PATH="$(strip_cmake_quotes "${TGDB_PYTHON_TOOLS_MANIFEST_PATH}")"
-TGDB_PYTHON_TOOLS_MANIFEST_HPP="$(strip_cmake_quotes "${TGDB_PYTHON_TOOLS_MANIFEST_HPP}")"
-TGDB_PYTHON_TOOLS_BLOB_OBJ="$(strip_cmake_quotes "${TGDB_PYTHON_TOOLS_BLOB_OBJ}")"
+TUIDE_PYTHON_TOOLS_VERSION="$(strip_cmake_quotes "${TUIDE_PYTHON_TOOLS_VERSION}")"
+TUIDE_BASEDPYRIGHT_VERSION="$(strip_cmake_quotes "${TUIDE_BASEDPYRIGHT_VERSION}")"
+TUIDE_DEBUGPY_VERSION="$(strip_cmake_quotes "${TUIDE_DEBUGPY_VERSION}")"
+TUIDE_PYTHON_STANDALONE_URL="$(strip_cmake_quotes "${TUIDE_PYTHON_STANDALONE_URL}")"
+TUIDE_PYTHON_STANDALONE_TAR_PATH="$(strip_cmake_quotes "${TUIDE_PYTHON_STANDALONE_TAR_PATH}")"
+TUIDE_PYTHON_TOOLS_STAGING_DIR="$(strip_cmake_quotes "${TUIDE_PYTHON_TOOLS_STAGING_DIR}")"
+TUIDE_PYTHON_TOOLS_PAYLOAD_DIR="$(strip_cmake_quotes "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}")"
+TUIDE_PYTHON_TOOLS_TAR_PATH="$(strip_cmake_quotes "${TUIDE_PYTHON_TOOLS_TAR_PATH}")"
+TUIDE_PYTHON_TOOLS_ZST_PATH="$(strip_cmake_quotes "${TUIDE_PYTHON_TOOLS_ZST_PATH}")"
+TUIDE_PYTHON_TOOLS_MANIFEST_PATH="$(strip_cmake_quotes "${TUIDE_PYTHON_TOOLS_MANIFEST_PATH}")"
+TUIDE_PYTHON_TOOLS_MANIFEST_HPP="$(strip_cmake_quotes "${TUIDE_PYTHON_TOOLS_MANIFEST_HPP}")"
+TUIDE_PYTHON_TOOLS_BLOB_OBJ="$(strip_cmake_quotes "${TUIDE_PYTHON_TOOLS_BLOB_OBJ}")"
 
 for tool in zstd sha256sum objcopy tar; do
   if ! command -v "${tool}" >/dev/null 2>&1; then
@@ -52,51 +52,51 @@ for tool in zstd sha256sum objcopy tar; do
   fi
 done
 
-if [[ ! -f "${TGDB_PYTHON_STANDALONE_TAR_PATH}" ]]; then
-  printf 'descargando %s...\n' "${TGDB_PYTHON_STANDALONE_URL}"
-  mkdir -p "$(dirname "${TGDB_PYTHON_STANDALONE_TAR_PATH}")"
+if [[ ! -f "${TUIDE_PYTHON_STANDALONE_TAR_PATH}" ]]; then
+  printf 'descargando %s...\n' "${TUIDE_PYTHON_STANDALONE_URL}"
+  mkdir -p "$(dirname "${TUIDE_PYTHON_STANDALONE_TAR_PATH}")"
   if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 3 -o "${TGDB_PYTHON_STANDALONE_TAR_PATH}" "${TGDB_PYTHON_STANDALONE_URL}"
+    curl -fL --retry 3 -o "${TUIDE_PYTHON_STANDALONE_TAR_PATH}" "${TUIDE_PYTHON_STANDALONE_URL}"
   elif command -v wget >/dev/null 2>&1; then
-    wget -O "${TGDB_PYTHON_STANDALONE_TAR_PATH}" "${TGDB_PYTHON_STANDALONE_URL}"
+    wget -O "${TUIDE_PYTHON_STANDALONE_TAR_PATH}" "${TUIDE_PYTHON_STANDALONE_URL}"
   else
     die "curl o wget requerido"
   fi
 fi
 
-rm -rf "${TGDB_PYTHON_TOOLS_STAGING_DIR}" "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}"
-mkdir -p "${TGDB_PYTHON_TOOLS_STAGING_DIR}" "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}"
+rm -rf "${TUIDE_PYTHON_TOOLS_STAGING_DIR}" "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}"
+mkdir -p "${TUIDE_PYTHON_TOOLS_STAGING_DIR}" "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}"
 
-tar -xzf "${TGDB_PYTHON_STANDALONE_TAR_PATH}" -C "${TGDB_PYTHON_TOOLS_STAGING_DIR}"
+tar -xzf "${TUIDE_PYTHON_STANDALONE_TAR_PATH}" -C "${TUIDE_PYTHON_TOOLS_STAGING_DIR}"
 
 # install_only layout: python/bin/python3
-python_bin="$(find "${TGDB_PYTHON_TOOLS_STAGING_DIR}" -type f -path '*/bin/python3' | head -n1)"
+python_bin="$(find "${TUIDE_PYTHON_TOOLS_STAGING_DIR}" -type f -path '*/bin/python3' | head -n1)"
 [[ -n "${python_bin}" && -x "${python_bin}" ]] || die "no se encontró bin/python3 en el standalone"
 python_root="$(dirname "$(dirname "${python_bin}")")"
 
 "${python_bin}" -m ensurepip --upgrade >/dev/null 2>&1 || true
 "${python_bin}" -m pip install --upgrade pip
 "${python_bin}" -m pip install \
-  "basedpyright==${TGDB_BASEDPYRIGHT_VERSION}" \
-  "debugpy==${TGDB_DEBUGPY_VERSION}"
+  "basedpyright==${TUIDE_BASEDPYRIGHT_VERSION}" \
+  "debugpy==${TUIDE_DEBUGPY_VERSION}"
 
 # Flatten into payload root (bin/, lib/, ...) with dereferenced symlinks.
-cp -aL "${python_root}/." "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}/"
+cp -aL "${python_root}/." "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}/"
 
 # Normalize launcher names.
-if [[ ! -x "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}/bin/python3" ]]; then
-  if [[ -x "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}/bin/python" ]]; then
-    ln -sf python "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}/bin/python3"
+if [[ ! -x "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}/bin/python3" ]]; then
+  if [[ -x "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}/bin/python" ]]; then
+    ln -sf python "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}/bin/python3"
   else
     die "payload sin bin/python3"
   fi
 fi
 
-[[ -x "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}/bin/basedpyright-langserver" ]] \
+[[ -x "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}/bin/basedpyright-langserver" ]] \
   || die "pip no instaló basedpyright-langserver"
 
 # Replace any remaining symlinks under bin with real files when possible.
-find "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}/bin" -type l | while read -r link; do
+find "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}/bin" -type l | while read -r link; do
   target="$(readlink -f "${link}" || true)"
   if [[ -n "${target}" && -f "${target}" ]]; then
     rm -f "${link}"
@@ -105,49 +105,49 @@ find "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}/bin" -type l | while read -r link; do
   fi
 done
 
-find "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}" -type f \( -name 'node' -o -name 'nodejs' -o -name 'python*' \) \
+find "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}" -type f \( -name 'node' -o -name 'nodejs' -o -name 'python*' \) \
   -exec chmod +x {} + 2>/dev/null || true
 
-rm -f "${TGDB_PYTHON_TOOLS_TAR_PATH}"
+rm -f "${TUIDE_PYTHON_TOOLS_TAR_PATH}"
 # Prefer hard-dereference if supported.
 if tar --help 2>&1 | grep -q -- '--hard-dereference'; then
-  tar --hard-dereference -cf "${TGDB_PYTHON_TOOLS_TAR_PATH}" -C "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}" .
+  tar --hard-dereference -cf "${TUIDE_PYTHON_TOOLS_TAR_PATH}" -C "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}" .
 else
-  tar -h -cf "${TGDB_PYTHON_TOOLS_TAR_PATH}" -C "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}" . 2>/dev/null \
-    || tar -cf "${TGDB_PYTHON_TOOLS_TAR_PATH}" -C "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}" .
+  tar -h -cf "${TUIDE_PYTHON_TOOLS_TAR_PATH}" -C "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}" . 2>/dev/null \
+    || tar -cf "${TUIDE_PYTHON_TOOLS_TAR_PATH}" -C "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}" .
 fi
-zstd -f -19 -q "${TGDB_PYTHON_TOOLS_TAR_PATH}" -o "${TGDB_PYTHON_TOOLS_ZST_PATH}"
+zstd -f -19 -q "${TUIDE_PYTHON_TOOLS_TAR_PATH}" -o "${TUIDE_PYTHON_TOOLS_ZST_PATH}"
 
-blob_sha="$(sha256sum "${TGDB_PYTHON_TOOLS_ZST_PATH}" | awk '{print $1}')"
-bin_sha="$(sha256sum "${TGDB_PYTHON_TOOLS_PAYLOAD_DIR}/bin/basedpyright-langserver" | awk '{print $1}')"
+blob_sha="$(sha256sum "${TUIDE_PYTHON_TOOLS_ZST_PATH}" | awk '{print $1}')"
+bin_sha="$(sha256sum "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}/bin/basedpyright-langserver" | awk '{print $1}')"
 
-cat > "${TGDB_PYTHON_TOOLS_MANIFEST_PATH}" <<EOF
+cat > "${TUIDE_PYTHON_TOOLS_MANIFEST_PATH}" <<EOF
 {
-  "version": "${TGDB_PYTHON_TOOLS_VERSION}",
+  "version": "${TUIDE_PYTHON_TOOLS_VERSION}",
   "kind": "full",
   "blob_sha256": "${blob_sha}",
   "binary_sha256": "${bin_sha}",
-  "basedpyright_version": "${TGDB_BASEDPYRIGHT_VERSION}",
-  "debugpy_version": "${TGDB_DEBUGPY_VERSION}"
+  "basedpyright_version": "${TUIDE_BASEDPYRIGHT_VERSION}",
+  "debugpy_version": "${TUIDE_DEBUGPY_VERSION}"
 }
 EOF
 
-cat > "${TGDB_PYTHON_TOOLS_MANIFEST_HPP}" <<EOF
+cat > "${TUIDE_PYTHON_TOOLS_MANIFEST_HPP}" <<EOF
 #pragma once
-#define TGDB_BUNDLED_PYTHON_TOOLS_VERSION "${TGDB_PYTHON_TOOLS_VERSION}"
-#define TGDB_BUNDLED_PYTHON_TOOLS_BLOB_SHA256 "${blob_sha}"
-#define TGDB_BUNDLED_PYTHON_TOOLS_BINARY_SHA256 "${bin_sha}"
-#define TGDB_BUNDLED_PYTHON_TOOLS_KIND_LSP_MIN 0
-#define TGDB_BUNDLED_PYTHON_TOOLS_KIND_FULL 1
+#define TUIDE_BUNDLED_PYTHON_TOOLS_VERSION "${TUIDE_PYTHON_TOOLS_VERSION}"
+#define TUIDE_BUNDLED_PYTHON_TOOLS_BLOB_SHA256 "${blob_sha}"
+#define TUIDE_BUNDLED_PYTHON_TOOLS_BINARY_SHA256 "${bin_sha}"
+#define TUIDE_BUNDLED_PYTHON_TOOLS_KIND_LSP_MIN 0
+#define TUIDE_BUNDLED_PYTHON_TOOLS_KIND_FULL 1
 EOF
 
-blob_dir="$(dirname "${TGDB_PYTHON_TOOLS_BLOB_OBJ}")"
+blob_dir="$(dirname "${TUIDE_PYTHON_TOOLS_BLOB_OBJ}")"
 (
   cd "${blob_dir}"
   objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
     --rename-section .data=.rodata,alloc,load,readonly,data,contents \
-    "$(basename "${TGDB_PYTHON_TOOLS_ZST_PATH}")" "$(basename "${TGDB_PYTHON_TOOLS_BLOB_OBJ}")"
+    "$(basename "${TUIDE_PYTHON_TOOLS_ZST_PATH}")" "$(basename "${TUIDE_PYTHON_TOOLS_BLOB_OBJ}")"
 )
 
 printf 'python tools (full) bundle listo: %s (%s bytes)\n' \
-  "${TGDB_PYTHON_TOOLS_ZST_PATH}" "$(wc -c < "${TGDB_PYTHON_TOOLS_ZST_PATH}")"
+  "${TUIDE_PYTHON_TOOLS_ZST_PATH}" "$(wc -c < "${TUIDE_PYTHON_TOOLS_ZST_PATH}")"

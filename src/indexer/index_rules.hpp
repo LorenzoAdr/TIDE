@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct IndexFilterOptions {
   bool show_all_files = false;
@@ -27,4 +27,4 @@ bool should_list_workspace_path(const std::string& relative_path,
 bool should_index_relative_path(const std::string& relative_path,
                                 const IndexFilterOptions& options = {});
 
-}  // namespace tgdb
+}  // namespace tuide

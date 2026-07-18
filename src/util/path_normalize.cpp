@@ -2,7 +2,7 @@
 
 #include <filesystem>
 
-namespace tgdb {
+namespace tuide {
 
 std::string normalize_path(const std::string& path) {
   if (path.empty()) {
@@ -13,4 +13,4 @@ std::string normalize_path(const std::string& path) {
   return ec ? path : canonical.string();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

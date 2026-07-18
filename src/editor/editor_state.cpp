@@ -4,7 +4,7 @@
 
 #include "ui/cursor_blink.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 void MultiCursor::normalized_range(int* start_line, int* start_col, int* end_line,
                                    int* end_col) const {
@@ -123,4 +123,4 @@ void exit_multi_cursor_mode(EditorBuffer* buffer) {
   buffer->cursors = {collapsed};
 }
 
-}  // namespace tgdb
+}  // namespace tuide

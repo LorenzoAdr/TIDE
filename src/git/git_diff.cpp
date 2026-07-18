@@ -5,7 +5,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -534,4 +534,4 @@ bool save_lines_to_file(const std::string& path, const std::vector<std::string>&
   return static_cast<bool>(output);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

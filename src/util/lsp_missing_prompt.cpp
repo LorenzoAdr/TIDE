@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 namespace {
 
 namespace fs = std::filesystem;
@@ -47,12 +47,12 @@ bool command_on_path(const char* name) {
   return false;
 }
 
-std::string tgdb_tools_venv_pip_install(const char* package) {
-  return std::string("python3 -m venv ~/.venvs/tgdb-tools && "
-                     "~/.venvs/tgdb-tools/bin/pip install ") +
+std::string tuide_tools_venv_pip_install(const char* package) {
+  return std::string("python3 -m venv ~/.venvs/tuide-tools && "
+                     "~/.venvs/tuide-tools/bin/pip install ") +
          package +
-         " && export PATH=\"$HOME/.venvs/tgdb-tools/bin:$PATH\" && "
-         "echo \"Reinicia tgdb o asegúrate de que ~/.venvs/tgdb-tools/bin está en PATH\"";
+         " && export PATH=\"$HOME/.venvs/tuide-tools/bin:$PATH\" && "
+         "echo \"Reinicia tuide o asegúrate de que ~/.venvs/tuide-tools/bin está en PATH\"";
 }
 
 std::string prefer_apt(const char* apt_package, const std::string& fallback) {
@@ -69,7 +69,7 @@ const std::vector<LspMissingPromptInfo>& catalog() {
         "basedpyright",
         "lsp_toast.lang.python",
         "status.basedpyright_missing",
-        tgdb_tools_venv_pip_install("basedpyright"),
+        tuide_tools_venv_pip_install("basedpyright"),
         "--bundle-python-lsp-min",
         "PYTHON_BUNDLE_KIND",
         "lsp_min",
@@ -127,7 +127,7 @@ const std::vector<LspMissingPromptInfo>& catalog() {
         "fortls",
         "lsp_toast.lang.fortran",
         "status.fortls_missing",
-        tgdb_tools_venv_pip_install("fortls"),
+        tuide_tools_venv_pip_install("fortls"),
         "--bundle-fortls",
         "BUNDLE_FORTLS",
         "1",
@@ -259,7 +259,7 @@ bool is_lsp_missing_status_key(const std::string& i18n_key) {
   return lsp_missing_prompt_for_status_key(i18n_key).has_value();
 }
 
-bool looks_like_tgdb_source_root(const std::string& path) {
+bool looks_like_tuide_source_root(const std::string& path) {
   if (path.empty()) {
     return false;
   }
@@ -270,14 +270,14 @@ bool looks_like_tgdb_source_root(const std::string& path) {
          fs::is_regular_file(root / "tools" / "compile.sh", ec);
 }
 
-std::optional<std::string> find_tgdb_source_root(const std::vector<std::string>& search_roots) {
+std::optional<std::string> find_tuide_source_root(const std::vector<std::string>& search_roots) {
   auto walk = [](fs::path start) -> std::optional<std::string> {
     std::error_code ec;
     if (!start.empty()) {
       start = fs::absolute(start, ec);
     }
     for (int depth = 0; depth < 10 && !start.empty(); ++depth) {
-      if (looks_like_tgdb_source_root(start.string())) {
+      if (looks_like_tuide_source_root(start.string())) {
         return start.string();
       }
       const fs::path parent = start.parent_path();
@@ -308,11 +308,11 @@ std::optional<std::string> find_tgdb_source_root(const std::vector<std::string>&
   return std::nullopt;
 }
 
-bool enable_bundle_option_in_config(const std::string& tgdb_root, const LspMissingPromptInfo& info) {
-  if (tgdb_root.empty() || info.bundle_config_key.empty()) {
+bool enable_bundle_option_in_config(const std::string& tuide_root, const LspMissingPromptInfo& info) {
+  if (tuide_root.empty() || info.bundle_config_key.empty()) {
     return false;
   }
-  const fs::path config_path = fs::path(tgdb_root) / ".bundle-config";
+  const fs::path config_path = fs::path(tuide_root) / ".bundle-config";
   ConfigMap map = load_bundle_config_map(config_path);
 
   if (info.bundle_config_key == "PYTHON_BUNDLE_KIND") {
@@ -351,7 +351,7 @@ std::string make_post_exit_bash_script(const PostExitShellRequest& request) {
   script << "cd " << shell_single_quote(request.cwd) << " || exit 1; "
          << "printf '%s\\n' "
          << shell_single_quote(
-                "tgdb: pulsa Enter para compilar con el proveedor LSP embebido "
+                "tuide: pulsa Enter para compilar con el proveedor LSP embebido "
                 "(Ctrl+C cancela):")
          << "; "
          << "read -e -i " << shell_single_quote(request.command) << " LINE || exit 1; "
@@ -359,4 +359,4 @@ std::string make_post_exit_bash_script(const PostExitShellRequest& request) {
   return script.str();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

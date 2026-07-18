@@ -18,7 +18,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -237,4 +237,4 @@ bool list_workspace_files_rg(const std::string& workspace_root,
   return true;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

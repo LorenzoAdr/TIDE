@@ -6,7 +6,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "symbols/symbol_kind.hpp"
 
-namespace tgdb::theme {
+namespace tuide::theme {
 
 using ftxui::Color;
 
@@ -133,4 +133,4 @@ Color BuildFileKeyword();
 ThemeMode parse_theme_name(const std::string& name);
 const char* theme_name(ThemeMode mode);
 
-}  // namespace tgdb::theme
+}  // namespace tuide::theme

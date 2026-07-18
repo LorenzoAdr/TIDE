@@ -7,7 +7,7 @@
 #include "packet_monitor/pkt_protocol.hpp"
 #include "packet_monitor/pkt_ring.hpp"
 
-namespace tgdb::packet_monitor {
+namespace tuide::packet_monitor {
 
 struct DisplayPacket {
   PacketRecord record;
@@ -68,4 +68,4 @@ class PacketMonitorService {
   std::vector<std::string> protocol_files_;
 };
 
-}  // namespace tgdb::packet_monitor
+}  // namespace tuide::packet_monitor

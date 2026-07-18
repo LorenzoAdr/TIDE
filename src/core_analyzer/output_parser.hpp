@@ -5,7 +5,7 @@
 
 #include "app/debug_model.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct CoreAnalyzerParseResult {
   std::vector<CoreAnalyzerInstance> instances;
@@ -17,4 +17,4 @@ CoreAnalyzerParseResult parse_ref_command_output(const std::string& output);
 
 std::string build_obj_search_command(const std::string& type_query);
 
-}  // namespace tgdb
+}  // namespace tuide

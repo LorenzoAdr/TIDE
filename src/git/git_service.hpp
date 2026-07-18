@@ -16,7 +16,7 @@
 #include "git/git_status.hpp"
 #include "git/git_subrepos.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct GitRepoInfo {
   bool valid = false;
@@ -163,4 +163,4 @@ class GitService {
   std::atomic<int> pending_tasks_{0};
 };
 
-}  // namespace tgdb
+}  // namespace tuide

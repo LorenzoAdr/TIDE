@@ -22,7 +22,7 @@
 #include "symbols/hover_info.hpp"
 #include "symbols/symbol_provider.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 class LspClient {
  public:
@@ -216,4 +216,4 @@ class LspClient {
   std::function<void(const std::string& path)> diagnostics_notify_callback_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -7,7 +7,7 @@
 #include "ui/press_ids.hpp"
 #include "util/ui_panel_render_cache.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 void set_animations_enabled(bool enabled);
 bool animations_enabled();
@@ -64,4 +64,4 @@ inline bool apply_hover_repaint(MainLayoutState* layout, std::string_view before
   return false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

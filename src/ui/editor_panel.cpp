@@ -83,7 +83,7 @@
 #include "ui/source_panel.hpp"
 #include "util/path_normalize.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -2811,7 +2811,7 @@ struct CompletionState {
                     const std::shared_ptr<ISymbolProvider>& symbols,
                     SymbolWorkspaceIndexer* symbol_indexer, bool allow_lsp = false) {
     (void)symbol_indexer;
-    TGDB_MON_SCOPE("editor", "completion.sync_symbols");
+    TUIDE_MON_SCOPE("editor", "completion.sync_symbols");
     const std::string path =
         workspace->buffer.path.empty() ? workspace->active_file : workspace->buffer.path;
     workspace->buffer.ensure_cursors();
@@ -4642,7 +4642,7 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
                      SymbolWorkspaceIndexer* symbol_indexer, EditorBuffer* buffer,
                      EditorFindState* find, MainLayoutState* layout_state,
                      EditorPanelState* panel = nullptr) {
-  TGDB_MON_SCOPE("editor", "open_completion");
+  TUIDE_MON_SCOPE("editor", "open_completion");
   if (completion == nullptr) {
     return;
   }
@@ -5227,7 +5227,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (helix_on) {
-    if (event_is_tide_app_shortcut(event) || event_is_ctrl_key_release(event)) {
+    if (event_is_tuide_app_shortcut(event) || event_is_ctrl_key_release(event)) {
       return false;
     }
     HelixDispatchContext hctx =
@@ -5244,7 +5244,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     if (panel->helix.mode != HelixMode::kInsert) {
       sync_helix_layout_status(layout_state, &panel->helix, true);
-      if (event_has_ctrl_modifier(event) || event_is_tide_app_shortcut(event) ||
+      if (event_has_ctrl_modifier(event) || event_is_tuide_app_shortcut(event) ||
           event_is_ctrl_key_release(event)) {
         return false;
       }
@@ -7065,7 +7065,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     handlers->tick_callback = [workspace, panel_state, find_state, symbols, layout_state,
                                file_indexer, git_service, focus, panel_focus,
                                completion_state]() {
-      TGDB_MON_SCOPE("editor", "tick_callback");
+      TUIDE_MON_SCOPE("editor", "tick_callback");
       UiPerfMonitor* ui_perf =
           layout_state != nullptr ? &layout_state->ui_perf_monitor : nullptr;
       const std::string panel_tag =
@@ -7248,4 +7248,4 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
   }));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

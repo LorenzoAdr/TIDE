@@ -5,7 +5,7 @@
 
 #include "symbols/symbol_kind.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct DocCommentRequest {
   std::string path;
@@ -33,4 +33,4 @@ std::string build_file_header_snippet(const std::string& path);
 // Convenience: pick insert line/col for a doc comment given the symbol line (0-based).
 DocCommentInsertPlan plan_doc_comment_insert(const DocCommentRequest& request, int symbol_line);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -7,7 +7,7 @@
 
 #include "packet_monitor/pkt_store.hpp"
 
-namespace tgdb::packet_monitor {
+namespace tuide::packet_monitor {
 
 namespace fs = std::filesystem;
 
@@ -214,7 +214,7 @@ std::vector<DisplayPacket> PacketMonitorService::display_packets() const {
     DisplayPacket row;
     row.record = record;
     std::ostringstream summary;
-    summary << (record.direction == TGDB_PKT_OUT ? "OUT" : "IN") << ' '
+    summary << (record.direction == TUIDE_PKT_OUT ? "OUT" : "IN") << ' '
             << format_timestamp(record.timestamp_ns) << ' ' << record.payload.size() << "B "
             << format_ipv4(record.src_ipv4) << ':' << record.src_port << " -> "
             << format_ipv4(record.dst_ipv4) << ':' << record.dst_port << ' '
@@ -228,4 +228,4 @@ std::vector<DisplayPacket> PacketMonitorService::display_packets() const {
   return rows;
 }
 
-}  // namespace tgdb::packet_monitor
+}  // namespace tuide::packet_monitor

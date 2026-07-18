@@ -14,7 +14,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -199,4 +199,4 @@ std::unordered_set<std::string> build_include_tree(
   return tree;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

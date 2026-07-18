@@ -33,7 +33,7 @@
 #include "ui/ui_event_types.hpp"
 #include "ui/ui_wake.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class UiWakeReason {
   LspCompletion,
@@ -104,4 +104,4 @@ inline void ui_wake_reason(MainLayoutState* layout, UiWakeReason reason) {
 
 #define UI_WAKE_REASON(layout, reason) ui_wake_reason((layout), (reason))
 
-}  // namespace tgdb
+}  // namespace tuide

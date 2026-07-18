@@ -11,7 +11,7 @@
 
 #include "search/workspace_search.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 class WorkspaceSearchRunner {
  public:
@@ -50,4 +50,4 @@ class WorkspaceSearchRunner {
   std::atomic<pid_t> child_pid_{-1};
 };
 
-}  // namespace tgdb
+}  // namespace tuide

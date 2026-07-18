@@ -7,7 +7,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -19,7 +19,7 @@ std::string WorkspaceSession::session_path(const std::string& workspace_root) {
   if (workspace_root.empty()) {
     return {};
   }
-  return (fs::path(workspace_root) / ".tgdb" / kSessionFile).string();
+  return (fs::path(workspace_root) / ".tuide" / kSessionFile).string();
 }
 
 WorkspaceSession WorkspaceSession::load(const std::string& workspace_root) {
@@ -75,7 +75,7 @@ bool WorkspaceSession::save(const std::string& workspace_root) const {
   }
 
   std::error_code ec;
-  fs::create_directories(fs::path(workspace_root) / ".tgdb", ec);
+  fs::create_directories(fs::path(workspace_root) / ".tuide", ec);
 
   nlohmann::json doc;
   doc["open_tabs"] = open_tabs;
@@ -98,4 +98,4 @@ bool WorkspaceSession::save(const std::string& workspace_root) const {
   return static_cast<bool>(output);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

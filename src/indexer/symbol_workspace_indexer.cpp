@@ -12,7 +12,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -188,7 +188,7 @@ bool SymbolWorkspaceIndexer::scanning() const {
 void SymbolWorkspaceIndexer::worker_main(std::string workspace_root,
                                          std::shared_ptr<ISymbolProvider> provider,
                                          WorkspaceIndexer* file_indexer) {
-  TGDB_MON_SCOPE("idx", "symbol_workspace_indexer.scan");
+  TUIDE_MON_SCOPE("idx", "symbol_workspace_indexer.scan");
   TreeSitterSymbolProvider ts_provider;
   const bool use_ts_bulk = provider != nullptr && !provider->indexes_workspace_bulk();
 
@@ -251,4 +251,4 @@ void SymbolWorkspaceIndexer::worker_main(std::string workspace_root,
   running_ = false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

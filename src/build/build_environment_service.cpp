@@ -12,7 +12,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -204,4 +204,4 @@ void BuildEnvironmentService::shutdown() {
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

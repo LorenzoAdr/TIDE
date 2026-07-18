@@ -4,7 +4,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 class ISymbolProvider;
 
@@ -51,4 +51,4 @@ bool diagnostics_display_allowed(int64_t last_content_edit_ms, ISymbolProvider* 
 bool diagnostics_reveal_allowed(int64_t last_content_edit_ms, ISymbolProvider* symbols,
                                 const std::string& path, bool lsp_ui_allowed = true);
 
-}  // namespace tgdb
+}  // namespace tuide

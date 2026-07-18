@@ -10,7 +10,7 @@
 
 #include "indexer/index_rules.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct FilePickerCatalogEntry {
   std::string path;
@@ -87,4 +87,4 @@ void rebuild_index_files_lower(IndexSnapshot* snapshot);
 void rebuild_index_file_picker_catalog(IndexSnapshot* snapshot);
 void rebuild_index_derived_fields(IndexSnapshot* snapshot);
 
-}  // namespace tgdb
+}  // namespace tuide

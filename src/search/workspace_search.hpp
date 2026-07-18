@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct WorkspaceSearchResult {
   std::string file;
@@ -39,4 +39,4 @@ std::vector<WorkspaceSearchResult> search_workspace(const WorkspaceSearchOptions
 WorkspaceReplaceResult replace_in_workspace(const WorkspaceSearchOptions& opts,
                                             const std::string& replacement);
 
-}  // namespace tgdb
+}  // namespace tuide

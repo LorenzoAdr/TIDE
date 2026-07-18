@@ -5,7 +5,7 @@
 
 #include "lsp/diagnostics.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 // Run `gfortran -fsyntax-only` on buffer contents (temp file) and parse stderr into
 // diagnostics. Returns nullopt if gfortran is unavailable or the run fails to start.
@@ -17,4 +17,4 @@ std::optional<DocumentDiagnostics> run_gfortran_diagnostics(const std::string& a
 std::vector<Diagnostic> parse_gfortran_stderr(const std::string& stderr_text,
                                               const std::string& source_path);
 
-}  // namespace tgdb
+}  // namespace tuide

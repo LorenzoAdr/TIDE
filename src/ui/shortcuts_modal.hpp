@@ -2,7 +2,7 @@
 
 #include "ftxui/component/component_base.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct ShortcutsModalState {
   bool open = false;
@@ -12,4 +12,4 @@ struct ShortcutsModalState {
 ftxui::Component MakeShortcutsModalOverlay(ftxui::Component main,
                                          ShortcutsModalState* state);
 
-}  // namespace tgdb
+}  // namespace tuide

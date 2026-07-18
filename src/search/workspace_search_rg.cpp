@@ -20,7 +20,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -329,4 +329,4 @@ bool search_workspace_rg(const WorkspaceSearchOptions& opts, const std::string& 
   return false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

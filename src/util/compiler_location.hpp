@@ -3,7 +3,7 @@
 #include <optional>
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 struct CompilerLocationMatch {
   std::string path;
@@ -18,4 +18,4 @@ std::optional<CompilerLocationMatch> find_compiler_location(const std::string& l
 std::string resolve_compiler_path(const std::string& path, const std::string& workspace_root,
                                   const std::string& cwd);
 
-}  // namespace tgdb
+}  // namespace tuide

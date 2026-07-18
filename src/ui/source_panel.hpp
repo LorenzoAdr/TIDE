@@ -12,7 +12,7 @@
 
 #include "ui/focus_manager.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct MainLayoutState;
 
@@ -50,4 +50,4 @@ ftxui::Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
                                  MainLayoutState* layout_state,
                                  std::shared_ptr<ISymbolProvider> symbols);
 
-}  // namespace tgdb
+}  // namespace tuide

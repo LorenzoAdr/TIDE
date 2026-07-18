@@ -17,7 +17,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -117,7 +117,7 @@ void launch_pdf_viewer_async(const std::string& absolute_path,
 
     if (!has_graphical_display()) {
       result.message = i18n::tr("pdf.no_display");
-      TGDB_MON("pdf", result.message + " path=" + absolute_path);
+      TUIDE_MON("pdf", result.message + " path=" + absolute_path);
       if (on_finished) {
         on_finished(result);
       }
@@ -127,7 +127,7 @@ void launch_pdf_viewer_async(const std::string& absolute_path,
     const std::string evince = resolve_evince_command();
     if (!command_exists(evince)) {
       result.message = i18n::tr("pdf.evince_not_in_path");
-      TGDB_MON("pdf", result.message + " path=" + absolute_path);
+      TUIDE_MON("pdf", result.message + " path=" + absolute_path);
       if (on_finished) {
         on_finished(result);
       }
@@ -139,10 +139,10 @@ void launch_pdf_viewer_async(const std::string& absolute_path,
     if (launch.ok) {
       result.message = i18n::tr_fmt(
           "pdf.opened", {fs::path(absolute_path).filename().string()});
-      TGDB_MON("pdf", "launched path=" + absolute_path);
+      TUIDE_MON("pdf", "launched path=" + absolute_path);
     } else {
       result.message = launch.message;
-      TGDB_MON("pdf", "launch failed: " + launch.message + " path=" + absolute_path);
+      TUIDE_MON("pdf", "launch failed: " + launch.message + " path=" + absolute_path);
     }
     if (on_finished) {
       on_finished(result);
@@ -150,4 +150,4 @@ void launch_pdf_viewer_async(const std::string& absolute_path,
   }).detach();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

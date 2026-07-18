@@ -10,7 +10,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/shutdown_overlay.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class DebugLaunchModalPhase {
   Closed,
@@ -45,4 +45,4 @@ ftxui::Component MakeDebugLaunchModalOverlay(ftxui::Component main, DebugLaunchM
                                              std::function<void()> on_cancel,
                                              std::function<void()> on_dismiss_error);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -37,7 +37,7 @@ generate_with_gdb() {
 
 if command -v gdb >/dev/null 2>&1; then
   generate_with_gdb gdb
-elif [[ -x "${BUILD}/tgdb" ]]; then
+elif [[ -x "${BUILD}/tuide" ]]; then
   die "gdb no está en PATH; instala gdb o usa: gdb -batch -ex run -ex 'gcore ${CORE_NAME}' ${BINARY}"
 else
   ulimit -c unlimited
@@ -57,7 +57,7 @@ fi
 
 [[ -f "${CORE_PATH}" ]] || die "no se encontró ${CORE_PATH}"
 
-printf '\nCore generado:\n  %s\n\nBinario:\n  %s\n\nProbar en tgdb:\n  %s/build/tgdb --core %s %s --core-analyzer\n\nNota: Core Analyzer necesita símbolos de debug de glibc\n  (Ubuntu/Debian: sudo apt install libc6-dbg)\n\nComandos Core Analyzer sugeridos:\n  obj (ConsoleSink*)0\n  obj (MetricStore*)0\n  ref 0x<dirección del MetricStore>\n  p *(ca_demo::MetricStore*)0x...\n' \
+printf '\nCore generado:\n  %s\n\nBinario:\n  %s\n\nProbar en tuide:\n  %s/build/tuide --core %s %s --core-analyzer\n\nNota: Core Analyzer necesita símbolos de debug de glibc\n  (Ubuntu/Debian: sudo apt install libc6-dbg)\n\nComandos Core Analyzer sugeridos:\n  obj (ConsoleSink*)0\n  obj (MetricStore*)0\n  ref 0x<dirección del MetricStore>\n  p *(ca_demo::MetricStore*)0x...\n' \
   "${CORE_PATH}" \
   "${BINARY}" \
   "${ROOT}" "${CORE_PATH}" "${BINARY}"

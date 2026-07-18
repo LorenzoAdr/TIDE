@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 struct LineCommentStyle {
   std::string prefix;
@@ -15,4 +15,4 @@ void comment_line_text(std::string* line, const LineCommentStyle& style);
 bool uncomment_line_text(std::string* line, const LineCommentStyle& style);
 bool line_is_commented(const std::string& line, const LineCommentStyle& style);
 
-}  // namespace tgdb
+}  // namespace tuide

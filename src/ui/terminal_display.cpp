@@ -6,7 +6,7 @@
 #include <unistd.h>
 #endif
 
-namespace tgdb {
+namespace tuide {
 
 void nudge_terminal_repaint() {
   // Alternar visibilidad del cursor fuerza a muchos emuladores (p. ej. ConPTY, SSH)
@@ -20,4 +20,4 @@ void nudge_terminal_repaint() {
 #endif
 }
 
-}  // namespace tgdb
+}  // namespace tuide

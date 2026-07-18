@@ -6,7 +6,7 @@
 #include "i18n/tr.hpp"
 #include "lsp/lsp_uri.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -396,4 +396,4 @@ bool structure_snippet_prefix_active(const std::string& prefix) {
   return structure_snippet_prefix_active_for_path({}, prefix);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

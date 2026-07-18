@@ -10,7 +10,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -197,4 +197,4 @@ bool HandleStatusLayoutPopoverKeys(StatusLayoutPopoverState* popover, Event even
   return false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

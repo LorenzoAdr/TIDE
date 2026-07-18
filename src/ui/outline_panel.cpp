@@ -26,7 +26,7 @@
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -591,4 +591,4 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
   }));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

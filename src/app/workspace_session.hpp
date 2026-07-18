@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct WorkspaceSession {
   std::vector<std::string> open_tabs;
@@ -18,4 +18,4 @@ struct WorkspaceSession {
   bool save(const std::string& workspace_root) const;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

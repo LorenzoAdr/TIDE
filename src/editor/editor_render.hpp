@@ -13,7 +13,7 @@
 #include "ui/theme.hpp"
 #include "util/syntax_highlight.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct EditorDecoration {
   int start_col = 0;
@@ -87,4 +87,4 @@ ftxui::Element RenderEditorLine(const std::string& line, int line_index,
                                ftxui::Color cursor_cell_bg = theme::CursorCell(),
                                const std::vector<ColoredBraceMarker>* colored_braces = nullptr);
 
-}  // namespace tgdb
+}  // namespace tuide

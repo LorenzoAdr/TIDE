@@ -6,7 +6,7 @@
 
 #include "ftxui/screen/color.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct TerminalStyledSpan {
   std::string text;
@@ -73,4 +73,4 @@ class RawPtyScreen {
   mutable bool cache_valid_ = false;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

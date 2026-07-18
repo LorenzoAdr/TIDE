@@ -6,7 +6,7 @@
 #include "dap/debug_adapter_spec.hpp"
 #include "dap/io.h"
 
-namespace tgdb {
+namespace tuide {
 
 // Stdio DAP adapter process (gdb -i=dap, debugpy.adapter, ...).
 class IDebugAdapterProcess {
@@ -28,4 +28,4 @@ std::unique_ptr<IDebugAdapterProcess> create_debug_adapter_process(DebugAdapterK
 std::unique_ptr<IDebugAdapterProcess> create_debug_adapter_process_for_program(
     const std::string& program_path);
 
-}  // namespace tgdb
+}  // namespace tuide

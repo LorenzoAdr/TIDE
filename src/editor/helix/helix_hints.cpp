@@ -5,7 +5,7 @@
 #include "ui/panel.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -87,7 +87,7 @@ std::vector<std::pair<std::string, std::string>> helix_help_sections() {
       {"g g + g e", i18n::tr("helix.help.select_whole_file")},
       {"%", i18n::tr("helix.help.select_whole_file_percent")},
       {"Alt+s", i18n::tr("helix.help.split_selection_on_newline")},
-      {"Ctrl+D / Ctrl+Alt+L", i18n::tr("helix.help.tide_multicursor")},
+      {"Ctrl+D / Ctrl+Alt+L", i18n::tr("helix.help.tuide_multicursor")},
       {"g d", i18n::tr("helix.help.goto_definition")},
       {"z u / z d", i18n::tr("helix.help.scroll")},
       {"m i w / m a w", i18n::tr("helix.help.text_objects_word")},
@@ -105,7 +105,7 @@ std::vector<std::pair<std::string, std::string>> helix_help_sections() {
       {"space ?", i18n::tr("helix.help.help_overlay")},
       {": w / : q", i18n::tr("helix.help.command_mode")},
       {"Esc", i18n::tr("helix.help.escape")},
-      {"Ctrl+*", i18n::tr("helix.help.tide_shortcuts")},
+      {"Ctrl+*", i18n::tr("helix.help.tuide_shortcuts")},
   };
 }
 
@@ -137,4 +137,4 @@ Element make_helix_help_overlay(const HelixEditorState& helix) {
   return ScreenModalOverlay(text(""), panel);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

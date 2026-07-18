@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-namespace tgdb::spinner {
+namespace tuide::spinner {
 
 namespace {
 
@@ -21,4 +21,4 @@ std::string glyph() {
   return kFrames[idx];
 }
 
-}  // namespace tgdb::spinner
+}  // namespace tuide::spinner

@@ -21,7 +21,7 @@
 #include "i18n/tr.hpp"
 #include "util/fuzzy_match.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -487,4 +487,4 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
       });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

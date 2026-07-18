@@ -11,7 +11,7 @@ extern "C" {
 #include <tree_sitter/api.h>
 }
 
-namespace tgdb {
+namespace tuide {
 
 struct ScopeLineRange {
   int start_line = 0;
@@ -40,4 +40,4 @@ std::vector<FoldRegion> fold_regions_from_tree(TSNode root, const std::string& s
 std::vector<std::string> visible_local_names_at(TSNode root, const std::string& source, int line,
                                                 int col);
 
-}  // namespace tgdb
+}  // namespace tuide

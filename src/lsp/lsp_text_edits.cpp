@@ -7,7 +7,7 @@
 #include "lsp/lsp_uri.hpp"
 #include "util/path_normalize.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -239,4 +239,4 @@ nlohmann::json lsp_content_change_json(const LspTextEdit& edit) {
           {"text", edit.new_text}};
 }
 
-}  // namespace tgdb
+}  // namespace tuide

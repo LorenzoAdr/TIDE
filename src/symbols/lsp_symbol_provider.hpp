@@ -18,7 +18,7 @@
 #include "symbols/symbol_provider.hpp"
 #include "util/thread_safe_queue.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class LspAsyncJobKind { DocumentSymbols, SemanticTokens, Hover, Completion };
 
@@ -340,4 +340,4 @@ class LspSymbolProvider : public ISymbolProvider {
   int64_t did_change_timer_fire_at_ms_ = 0;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -12,7 +12,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -155,4 +155,4 @@ std::string ensure_host_compile_commands_dir(const std::string& workspace_root) 
   return {};
 }
 
-}  // namespace tgdb
+}  // namespace tuide

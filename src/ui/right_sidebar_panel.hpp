@@ -3,8 +3,8 @@
 #include "ui/main_layout.hpp"
 #include "ftxui/component/component_base.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 ftxui::Component MakeRightSidebarPanel(ftxui::Component outline, MainLayoutState* layout_state);
 
-}  // namespace tgdb
+}  // namespace tuide

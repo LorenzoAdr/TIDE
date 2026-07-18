@@ -6,7 +6,7 @@
 #include "parser/tree_sitter_ast_utils.hpp"
 #include "parser/tree_sitter_language.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -629,4 +629,4 @@ std::vector<SymbolInfo> extract_symbols_from_tree(TSNode root, const std::string
   return sort_symbols(std::move(symbols));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

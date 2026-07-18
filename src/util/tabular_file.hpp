@@ -10,7 +10,7 @@
 
 #include "util/csv_viewer.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class TabularFileState { kIdle, kIndexing, kReady, kError };
 
@@ -66,4 +66,4 @@ class TabularFileStore {
   std::string error_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

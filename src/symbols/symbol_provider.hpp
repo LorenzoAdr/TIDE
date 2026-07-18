@@ -15,7 +15,7 @@
 
 #include "util/path_normalize.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct SymbolInfo {
   std::string name;
@@ -298,4 +298,4 @@ inline SourceLocation resolve_implementation_navigation(ISymbolProvider& symbols
   return symbols.goto_declaration(params);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

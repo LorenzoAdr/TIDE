@@ -2,7 +2,7 @@
 
 #include "ftxui/component/event.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 bool event_is_shift_home(const ftxui::Event& event);
 bool event_is_shift_end(const ftxui::Event& event);
@@ -88,9 +88,9 @@ bool event_input_has_shift_release(const ftxui::Event& event);
 
 bool editor_priority_key(const ftxui::Event& event);
 
-bool event_is_tide_global_shortcut(const ftxui::Event& event);
+bool event_is_tuide_global_shortcut(const ftxui::Event& event);
 
 // App-level shortcuts that must not be consumed by Helix normal mode or prefix pending.
-bool event_is_tide_app_shortcut(const ftxui::Event& event);
+bool event_is_tuide_app_shortcut(const ftxui::Event& event);
 
-}  // namespace tgdb
+}  // namespace tuide

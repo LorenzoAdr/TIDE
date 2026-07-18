@@ -7,7 +7,7 @@
 
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -336,4 +336,4 @@ ftxui::Element render_tabular_row_viewport(const std::vector<std::string>& cells
   return hbox(std::move(parts));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

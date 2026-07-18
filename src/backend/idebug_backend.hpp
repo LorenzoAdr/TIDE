@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct StackFrameInfo {
   int id = 0;
@@ -158,4 +158,4 @@ class IDebugBackend {
   virtual void submit(const UiCommand& command) = 0;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

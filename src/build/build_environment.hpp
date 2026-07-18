@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 enum class BuildSystemKind {
   kUnknown,
@@ -77,4 +77,4 @@ std::string environment_compile_dir(const std::string& workspace_root,
 std::string environment_compile_commands_path(const std::string& workspace_root,
                                                 const std::string& environment_id);
 
-}  // namespace tgdb
+}  // namespace tuide

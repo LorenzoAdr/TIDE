@@ -2,7 +2,7 @@
 
 #include <cctype>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -95,4 +95,4 @@ FuzzyMatchResult fuzzy_match_cached(std::string_view haystack, std::string_view 
   return fuzzy_match_impl(haystack, haystack_lower, query_lower);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

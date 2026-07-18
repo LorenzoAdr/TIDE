@@ -8,7 +8,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 bool language_id_is_cpp_family(const std::string& language_id) {
   return language_id == "c" || language_id == "cpp";
@@ -446,4 +446,4 @@ std::optional<LanguageServerSpec> make_language_server_spec(
   return std::nullopt;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

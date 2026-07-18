@@ -1,6 +1,6 @@
 #include "lsp/lsp_position.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 int lsp_utf16_column(const std::string& line, int byte_col) {
   int utf16 = 0;
@@ -48,4 +48,4 @@ nlohmann::json make_lsp_position(const std::string& text, int line, int byte_col
   return {{"line", line}, {"character", lsp_utf16_column(line_text, byte_col)}};
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -10,7 +10,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using CommandCallback = std::function<void(const struct UiCommand&)>;
 
@@ -21,4 +21,4 @@ ftxui::Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
                                    MainLayoutState* layout_state,
                                    GitService* git_service);
 
-}  // namespace tgdb
+}  // namespace tuide

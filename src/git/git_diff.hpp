@@ -5,7 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 enum class GitLineChange {
   kAdded,
@@ -91,4 +91,4 @@ bool revert_diff_change_block(std::vector<std::string>* working_lines,
 std::vector<std::string> load_lines_from_file(const std::string& path);
 bool save_lines_to_file(const std::string& path, const std::vector<std::string>& lines);
 
-}  // namespace tgdb
+}  // namespace tuide

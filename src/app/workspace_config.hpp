@@ -7,7 +7,7 @@
 #include "build/build_environment.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class CompileCommandsMode {
   kAuto,
@@ -51,4 +51,4 @@ struct WorkspaceConfig {
 std::string compile_commands_mode_name(CompileCommandsMode mode);
 CompileCommandsMode parse_compile_commands_mode(const std::string& value);
 
-}  // namespace tgdb
+}  // namespace tuide

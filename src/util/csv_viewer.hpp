@@ -5,7 +5,7 @@
 
 #include "ftxui/dom/elements.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class TabularDelimiter { kComma, kTab, kSemicolon };
 
@@ -40,4 +40,4 @@ ftxui::Element render_tabular_row_viewport(const std::vector<std::string>& cells
                                            const TabularTableLayout& layout, bool header,
                                            int scroll_col, int view_width);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(tgdb VERSION 0.1.0 LANGUAGES CXX C)
+project(tuide VERSION 0.1.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,20 +7,20 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Threads REQUIRED)
 
-function(tgdb_link_pthread target)
+function(tuide_link_pthread target)
   if(UNIX)
     target_link_libraries(${target} PRIVATE pthread)
   endif()
 endfunction()
 
 if(UNIX)
-  find_library(TGDB_UTIL_LIBRARY util)
+  find_library(TUIDE_UTIL_LIBRARY util)
 endif()
 
 
 include(cmake/Dependencies.cmake)
 
-set(TGDB_TREE_SITTER_INCLUDE_DIRS
+set(TUIDE_TREE_SITTER_INCLUDE_DIRS
   ${tree_sitter_SOURCE_DIR}/lib/include
   ${tree_sitter_cpp_SOURCE_DIR}/bindings/c
   ${tree_sitter_python_SOURCE_DIR}/bindings/c
@@ -38,7 +38,7 @@ set(TGDB_TREE_SITTER_INCLUDE_DIRS
   ${CMAKE_BINARY_DIR}/generated
 )
 
-set(TGDB_TREE_SITTER_GRAMMAR_LIBS
+set(TUIDE_TREE_SITTER_GRAMMAR_LIBS
   tree-sitter
   tree-sitter-cpp
   tree-sitter-python
@@ -55,7 +55,7 @@ set(TGDB_TREE_SITTER_GRAMMAR_LIBS
   tree-sitter-make
 )
 
-set(TGDB_TREE_SITTER_SOURCES
+set(TUIDE_TREE_SITTER_SOURCES
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_document.cpp
   src/parser/tree_sitter_symbols.cpp
@@ -76,18 +76,18 @@ set(TGDB_TREE_SITTER_SOURCES
   src/lsp/lsp_uri.cpp
 )
 
-function(tgdb_link_tree_sitter target)
-  target_sources(${target} PRIVATE ${TGDB_TREE_SITTER_SOURCES})
+function(tuide_link_tree_sitter target)
+  target_sources(${target} PRIVATE ${TUIDE_TREE_SITTER_SOURCES})
   target_include_directories(${target} PRIVATE
-    ${TGDB_TREE_SITTER_INCLUDE_DIRS}
+    ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
     ${cppdap_SOURCE_DIR}/include
     ${cppdap_SOURCE_DIR}/third_party/json/include
   )
   target_link_libraries(${target} PRIVATE
-    ${TGDB_TREE_SITTER_GRAMMAR_LIBS} ftxui::dom)
+    ${TUIDE_TREE_SITTER_GRAMMAR_LIBS} ftxui::dom)
 endfunction()
 
-add_executable(tgdb
+add_executable(tuide
   src/main.cpp
   src/app/application.cpp
   src/app/app_settings.cpp
@@ -278,35 +278,35 @@ add_executable(tgdb
   src/terminal/pty_input.cpp
 )
 
-target_include_directories(tgdb PRIVATE
+target_include_directories(tuide PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/packet_preload
-  ${TGDB_TREE_SITTER_INCLUDE_DIRS}
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
 )
 
-target_link_libraries(tgdb PRIVATE
+target_link_libraries(tuide PRIVATE
   ftxui::component
   ftxui::dom
   ftxui::screen
   cppdap
-  ${TGDB_TREE_SITTER_GRAMMAR_LIBS}
+  ${TUIDE_TREE_SITTER_GRAMMAR_LIBS}
   Threads::Threads
 )
 
 # Dev/default paths for Bash DAP (vscode-bash-debug + vendored bashdb_dir).
-set(TGDB_BASH_DEBUG_ROOT "${CMAKE_SOURCE_DIR}/third_party/bash-debug")
-target_compile_definitions(tgdb PRIVATE
-  "TGDB_BASH_DEBUG_ADAPTER_JS=\"${TGDB_BASH_DEBUG_ROOT}/out/bashDebug.js\""
-  "TGDB_BASHDB_PATH=\"${TGDB_BASH_DEBUG_ROOT}/bashdb_dir/bashdb\""
-  "TGDB_BASHDB_LIB=\"${TGDB_BASH_DEBUG_ROOT}/bashdb_dir\""
+set(TUIDE_BASH_DEBUG_ROOT "${CMAKE_SOURCE_DIR}/third_party/bash-debug")
+target_compile_definitions(tuide PRIVATE
+  "TUIDE_BASH_DEBUG_ADAPTER_JS=\"${TUIDE_BASH_DEBUG_ROOT}/out/bashDebug.js\""
+  "TUIDE_BASHDB_PATH=\"${TUIDE_BASH_DEBUG_ROOT}/bashdb_dir/bashdb\""
+  "TUIDE_BASHDB_LIB=\"${TUIDE_BASH_DEBUG_ROOT}/bashdb_dir\""
 )
 
-set(TGDB_CPPDAP_ARCHIVE "${CMAKE_BINARY_DIR}/_deps/cppdap-build/libcppdap.a")
+set(TUIDE_CPPDAP_ARCHIVE "${CMAKE_BINARY_DIR}/_deps/cppdap-build/libcppdap.a")
 add_custom_command(
   OUTPUT "${CMAKE_BINARY_DIR}/cppdap_archive_verified.stamp"
   COMMAND ${CMAKE_COMMAND}
-    -DARCHIVE=${TGDB_CPPDAP_ARCHIVE}
+    -DARCHIVE=${TUIDE_CPPDAP_ARCHIVE}
     -DEXPECTED=13
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/VerifyCppdapArchive.cmake
   COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/cppdap_archive_verified.stamp"
@@ -315,100 +315,100 @@ add_custom_command(
   VERBATIM)
 add_custom_target(cppdap_archive_verify
   DEPENDS "${CMAKE_BINARY_DIR}/cppdap_archive_verified.stamp")
-add_dependencies(tgdb cppdap_archive_verify)
-tgdb_link_pthread(tgdb)
-if(TGDB_UTIL_LIBRARY)
-  target_link_libraries(tgdb PRIVATE ${TGDB_UTIL_LIBRARY})
+add_dependencies(tuide cppdap_archive_verify)
+tuide_link_pthread(tuide)
+if(TUIDE_UTIL_LIBRARY)
+  target_link_libraries(tuide PRIVATE ${TUIDE_UTIL_LIBRARY})
 endif()
 
 if(UNIX)
-  target_link_options(tgdb PRIVATE -rdynamic)
+  target_link_options(tuide PRIVATE -rdynamic)
 endif()
 
-option(TGDB_STATIC_LIBSTDCXX
+option(TUIDE_STATIC_LIBSTDCXX
        "Link libstdc++ and libgcc statically (reduces runtime libstdc++.so dependency)" OFF)
-if(TGDB_STATIC_LIBSTDCXX)
-  target_link_options(tgdb PRIVATE -static-libstdc++ -static-libgcc)
+if(TUIDE_STATIC_LIBSTDCXX)
+  target_link_options(tuide PRIVATE -static-libstdc++ -static-libgcc)
 endif()
 
 include(cmake/BundleOptions.cmake)
-target_compile_definitions(tgdb PRIVATE
-  "TGDB_DEFAULT_UI_LOCALE_TAG=\"${TGDB_DEFAULT_UI_LOCALE}\""
+target_compile_definitions(tuide PRIVATE
+  "TUIDE_DEFAULT_UI_LOCALE_TAG=\"${TUIDE_DEFAULT_UI_LOCALE}\""
 )
-if(TGDB_DEFAULT_HELIX_MODE)
-  target_compile_definitions(tgdb PRIVATE TGDB_DEFAULT_HELIX_MODE=1)
+if(TUIDE_DEFAULT_HELIX_MODE)
+  target_compile_definitions(tuide PRIVATE TUIDE_DEFAULT_HELIX_MODE=1)
 endif()
-if(TGDB_BUNDLE_CLANGD)
+if(TUIDE_BUNDLE_CLANGD)
   include(cmake/BundleClangd.cmake)
 endif()
-if(TGDB_BUNDLE_GDB)
+if(TUIDE_BUNDLE_GDB)
   include(cmake/BundleGdb.cmake)
 endif()
-if(TGDB_BUNDLE_RG)
+if(TUIDE_BUNDLE_RG)
   include(cmake/BundleRg.cmake)
 endif()
-if(TGDB_BUNDLE_PYTHON_TOOLS)
+if(TUIDE_BUNDLE_PYTHON_TOOLS)
   include(cmake/BundlePythonTools.cmake)
-elseif(TGDB_BUNDLE_PYTHON_LSP_MIN)
+elseif(TUIDE_BUNDLE_PYTHON_LSP_MIN)
   include(cmake/BundlePythonLspMin.cmake)
 endif()
-if(TGDB_BUNDLE_BASH_LS)
+if(TUIDE_BUNDLE_BASH_LS)
   include(cmake/BundleBashLs.cmake)
 endif()
-if(TGDB_BUNDLE_TEXLAB)
+if(TUIDE_BUNDLE_TEXLAB)
   include(cmake/BundleTexlab.cmake)
 endif()
-if(TGDB_BUNDLE_BASH_DAP)
+if(TUIDE_BUNDLE_BASH_DAP)
   include(cmake/BundleBashDap.cmake)
 endif()
-if(TGDB_BUNDLE_RUST_ANALYZER)
+if(TUIDE_BUNDLE_RUST_ANALYZER)
   include(cmake/BundleRustAnalyzer.cmake)
 endif()
-if(TGDB_BUNDLE_GOPLS)
+if(TUIDE_BUNDLE_GOPLS)
   include(cmake/BundleGopls.cmake)
 endif()
-if(TGDB_BUNDLE_ZLS)
+if(TUIDE_BUNDLE_ZLS)
   include(cmake/BundleZls.cmake)
 endif()
-if(TGDB_BUNDLE_LUA_LS)
+if(TUIDE_BUNDLE_LUA_LS)
   include(cmake/BundleLuaLs.cmake)
 endif()
-if(TGDB_BUNDLE_FORTLS)
+if(TUIDE_BUNDLE_FORTLS)
   include(cmake/BundleFortls.cmake)
 endif()
-if(TGDB_BUNDLE_TSSERVER)
+if(TUIDE_BUNDLE_TSSERVER)
   include(cmake/BundleTypescriptLs.cmake)
 endif()
-if(TGDB_BUNDLE_NEOCMAKELSP)
+if(TUIDE_BUNDLE_NEOCMAKELSP)
   include(cmake/BundleNeocmakelsp.cmake)
 endif()
-if(TGDB_BUNDLE_MAKE_LS)
+if(TUIDE_BUNDLE_MAKE_LS)
   include(cmake/BundleMakeLs.cmake)
 endif()
 
-add_executable(tgdb-bundle-wizard tools/bundle_wizard/main.cpp)
-target_link_libraries(tgdb-bundle-wizard PRIVATE ftxui::component ftxui::dom ftxui::screen)
+add_executable(tuide-bundle-wizard tools/bundle_wizard/main.cpp)
+target_link_libraries(tuide-bundle-wizard PRIVATE ftxui::component ftxui::dom ftxui::screen)
 
 add_executable(hello examples/hello.cpp)
 target_compile_options(hello PRIVATE -g -O0)
 target_link_libraries(hello PRIVATE Threads::Threads)
-tgdb_link_pthread(hello)
+tuide_link_pthread(hello)
 
 add_executable(packet_monitor_demo examples/packet_monitor_demo.cpp)
 target_compile_options(packet_monitor_demo PRIVATE -g -O0)
 target_link_libraries(packet_monitor_demo PRIVATE Threads::Threads)
-tgdb_link_pthread(packet_monitor_demo)
+tuide_link_pthread(packet_monitor_demo)
 
-add_library(tgdb_pkt_preload SHARED tools/packet_preload/pkt_hook.c)
-target_include_directories(tgdb_pkt_preload PRIVATE tools/packet_preload)
-set_target_properties(tgdb_pkt_preload PROPERTIES
-  OUTPUT_NAME tgdb_pkt
+add_library(tuide_pkt_preload SHARED tools/packet_preload/pkt_hook.c)
+target_include_directories(tuide_pkt_preload PRIVATE tools/packet_preload)
+set_target_properties(tuide_pkt_preload PROPERTIES
+  OUTPUT_NAME tuide_pkt
   PREFIX "lib"
   POSITION_INDEPENDENT_CODE ON
 )
-add_custom_command(TARGET tgdb_pkt_preload POST_BUILD
+add_custom_command(TARGET tuide_pkt_preload POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/lib
-  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:tgdb_pkt_preload> ${CMAKE_BINARY_DIR}/lib/
+  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:tuide_pkt_preload> ${CMAKE_BINARY_DIR}/lib/
 )
 
 add_executable(core_analyzer_demo examples/core_analyzer_demo.cpp)
@@ -436,13 +436,14 @@ add_executable(text_ops_test
   src/editor/undo_stack.cpp
   src/editor/clipboard.cpp
   src/editor/bracket_match.cpp
+  src/symbols/completion_snippet.cpp
   src/ui/cursor_blink.cpp
   src/util/clang_format_config.cpp
   src/util/shell_utils.cpp
   src/util/system_clipboard.cpp
 )
 target_include_directories(text_ops_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-tgdb_link_tree_sitter(text_ops_test)
+tuide_link_tree_sitter(text_ops_test)
 
 add_executable(text_rope_test
   tests/text_rope_test.cpp
@@ -469,7 +470,7 @@ add_executable(text_buffer_bench
   src/util/system_clipboard.cpp
 )
 target_include_directories(text_buffer_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-tgdb_link_tree_sitter(text_buffer_bench)
+tuide_link_tree_sitter(text_buffer_bench)
 
 add_executable(tree_sitter_test
   tests/tree_sitter_test.cpp
@@ -490,7 +491,7 @@ add_executable(tree_sitter_test
   src/ui/cursor_blink.cpp
 )
 target_include_directories(tree_sitter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-tgdb_link_tree_sitter(tree_sitter_test)
+tuide_link_tree_sitter(tree_sitter_test)
 
 add_executable(bracket_match_test
   tests/bracket_match_test.cpp
@@ -503,7 +504,7 @@ add_executable(bracket_match_test
   src/ui/cursor_blink.cpp
 )
 target_include_directories(bracket_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-tgdb_link_tree_sitter(bracket_match_test)
+tuide_link_tree_sitter(bracket_match_test)
 
 add_executable(indent_guides_test
   tests/indent_guides_test.cpp
@@ -657,7 +658,7 @@ target_include_directories(pkt_protocol_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 target_compile_definitions(pkt_protocol_test PRIVATE
-  TGDB_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  TUIDE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 add_executable(lsp_completion_probe
@@ -681,11 +682,11 @@ target_include_directories(lsp_completion_probe PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 target_compile_definitions(lsp_completion_probe PRIVATE
-  TGDB_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  TUIDE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 target_link_libraries(lsp_completion_probe PRIVATE ftxui::dom)
 
-set(TGDB_TEST_TARGETS
+set(TUIDE_TEST_TARGETS
   i18n_test
   text_ops_test
   text_buffer_bench
@@ -709,6 +710,6 @@ set(TGDB_TEST_TARGETS
   pkt_protocol_test
   lsp_completion_probe
 )
-foreach(_tgdb_test_target IN LISTS TGDB_TEST_TARGETS)
-  tgdb_link_pthread(${_tgdb_test_target})
+foreach(_tuide_test_target IN LISTS TUIDE_TEST_TARGETS)
+  tuide_link_pthread(${_tuide_test_target})
 endforeach()

@@ -7,7 +7,7 @@
 #include "build/build_environment_service.hpp"
 #include "util/compile_commands_remap.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -94,4 +94,4 @@ ShellLaunchConfig resolve_shell_launch_config(const std::string& workspace_root,
   return launch;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

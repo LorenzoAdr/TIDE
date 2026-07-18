@@ -2,7 +2,7 @@
 
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 bool FocusManagerState::secondary_visible() const {
   return secondary_editor_visible && secondary_editor_visible();
@@ -94,4 +94,4 @@ std::string FocusManagerState::region_label() const {
   return {};
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -1,10 +1,10 @@
 [package]
-name = "tgdb-examples"
+name = "tuide-examples"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
-# Binario de prueba para rust-analyzer / GDB (abrir examples/hello.rs en tgdb).
+# Binario de prueba para rust-analyzer / GDB (abrir examples/hello.rs en tuide).
 [[bin]]
 name = "hello"
 path = "hello.rs"

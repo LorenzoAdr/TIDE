@@ -21,7 +21,7 @@
 #include "util/path_normalize.hpp"
 #include "util/shell_args.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 namespace fs = std::filesystem;
@@ -922,4 +922,4 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
       });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

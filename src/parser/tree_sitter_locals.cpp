@@ -7,7 +7,7 @@
 #include "parser/tree_sitter_ast_utils.hpp"
 #include "parser/tree_sitter_language.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -552,4 +552,4 @@ std::vector<std::string> visible_local_names_at(TSNode root, const std::string& 
   return names;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

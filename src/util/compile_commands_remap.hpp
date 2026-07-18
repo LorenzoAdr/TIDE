@@ -5,7 +5,7 @@
 
 #include "app/workspace_config.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct CompileCommandsSetupResult {
   std::string compile_dir;
@@ -25,4 +25,4 @@ std::string container_path_for_host_path(const std::string& host_path,
 CompileCommandsSetupResult ensure_compile_commands_for_clangd(
     const std::string& workspace_root, const WorkspaceConfig& config);
 
-}  // namespace tgdb
+}  // namespace tuide

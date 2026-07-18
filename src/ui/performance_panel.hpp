@@ -11,7 +11,7 @@
 #include "util/ui_activity_gate.hpp"
 #include "ui/ui_event_trace.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct PerformancePanelState {
   int thread_scroll = 0;
@@ -26,4 +26,4 @@ ftxui::Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor
 ftxui::Component MakePerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,
                                         std::shared_ptr<PerformancePanelState> state);
 
-}  // namespace tgdb
+}  // namespace tuide

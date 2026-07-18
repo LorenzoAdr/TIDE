@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb::packet_monitor {
+namespace tuide::packet_monitor {
 
 struct UdpConnectionEntry {
   std::string local_address;
@@ -13,4 +13,4 @@ struct UdpConnectionEntry {
 
 std::vector<UdpConnectionEntry> list_udp_connections(int pid);
 
-}  // namespace tgdb::packet_monitor
+}  // namespace tuide::packet_monitor

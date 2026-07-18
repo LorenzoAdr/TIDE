@@ -14,7 +14,7 @@
 #include "ui/spinner.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -195,4 +195,4 @@ Component MakeShutdownOverlay(Component main, ShutdownState* shutdown_state,
       });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -8,7 +8,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -103,4 +103,4 @@ std::vector<ProcessEntry> filter_processes(const std::vector<ProcessEntry>& all,
   return matches;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

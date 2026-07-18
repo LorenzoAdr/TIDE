@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 
-namespace tgdb::i18n {
+namespace tuide::i18n {
 
 namespace {
 
@@ -83,4 +83,4 @@ UiLocale parse_locale(std::string_view tag) {
   return UiLocale::kAuto;
 }
 
-}  // namespace tgdb::i18n
+}  // namespace tuide::i18n

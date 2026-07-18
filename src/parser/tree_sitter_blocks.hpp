@@ -10,7 +10,7 @@ extern "C" {
 #include <tree_sitter/api.h>
 }
 
-namespace tgdb {
+namespace tuide {
 
 bool cursor_in_code_node(TSNode root, const std::string& source, int line, int col);
 
@@ -32,4 +32,4 @@ TextSpan enclosing_block_comment(TSNode root, const std::string& source, int lin
 
 std::vector<ColoredBraceMarker> colored_curly_braces(TSNode root, const std::string& source);
 
-}  // namespace tgdb
+}  // namespace tuide

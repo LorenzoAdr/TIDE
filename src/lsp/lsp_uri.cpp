@@ -6,7 +6,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -143,4 +143,4 @@ std::string normalize_lsp_path(const std::string& path) {
   return ec ? path : canonical.string();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

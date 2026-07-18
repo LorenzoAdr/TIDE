@@ -8,7 +8,7 @@
 #include "ftxui/screen/box.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class OpenFileConfirmMode { Closed, LargeFile, BinaryWarning, TooLarge };
 
@@ -39,4 +39,4 @@ ftxui::Component MakeOpenFileConfirmOverlay(
     ftxui::Component main, OpenFileConfirmState* state, MainLayoutState* layout_state,
     WorkspaceModel* workspace, std::function<void(const std::string& path, int line, int col)> on_opened);
 
-}  // namespace tgdb
+}  // namespace tuide

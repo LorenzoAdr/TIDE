@@ -8,7 +8,7 @@
 #include "editor/clipboard.hpp"
 #include "editor/text_ops.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 bool is_ident_char(char c) {
   return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
@@ -562,4 +562,4 @@ void select_all_matches(EditorBuffer* buffer, const TextRange* scope) {
   merge_overlapping_cursors(buffer);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

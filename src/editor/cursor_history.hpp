@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct WorkspaceModel;
 
@@ -34,4 +34,4 @@ class CursorHistory {
                    int visible_lines);
 };
 
-}  // namespace tgdb
+}  // namespace tuide

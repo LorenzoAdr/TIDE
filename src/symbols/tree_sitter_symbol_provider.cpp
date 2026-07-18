@@ -4,7 +4,7 @@
 #include "parser/tree_sitter_service.hpp"
 #include "util/csv_viewer.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 std::vector<SymbolInfo> TreeSitterSymbolProvider::symbols_for_file(const std::string& path) {
   if (path.empty() || is_tabular_path(path)) {
@@ -24,4 +24,4 @@ std::vector<CompletionItem> TreeSitterSymbolProvider::completions_at(
   return tree_sitter_service().local_completions_at(params);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

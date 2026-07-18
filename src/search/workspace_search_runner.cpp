@@ -13,7 +13,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -168,7 +168,7 @@ void WorkspaceSearchRunner::search_inprocess(uint64_t generation,
 }
 
 void WorkspaceSearchRunner::worker_main(uint64_t generation, WorkspaceSearchOptions opts) {
-  TGDB_MON_SCOPE("idx", "workspace_search");
+  TUIDE_MON_SCOPE("idx", "workspace_search");
   std::vector<WorkspaceSearchResult> results;
   int files_scanned = 0;
   bool cancelled = false;
@@ -206,4 +206,4 @@ void WorkspaceSearchRunner::worker_main(uint64_t generation, WorkspaceSearchOpti
   running_ = false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -3,7 +3,7 @@
 #include <cassert>
 #include <utility>
 
-namespace tgdb {
+namespace tuide {
 
 // Implementation note: this is an "implicit treap" (a randomized balanced
 // binary search tree ordered purely by position, not by key) rather than a
@@ -271,4 +271,4 @@ std::vector<std::string> TextRope::to_vector() const {
   return out;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

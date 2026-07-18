@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb::packet_monitor {
+namespace tuide::packet_monitor {
 
 enum class FieldType {
   kU8,
@@ -74,4 +74,4 @@ DecodedPacket decode_packet(const std::vector<uint8_t>& payload,
                             const ProtocolDefinition& protocol,
                             const std::string& variant_key = "");
 
-}  // namespace tgdb::packet_monitor
+}  // namespace tuide::packet_monitor

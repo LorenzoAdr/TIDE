@@ -10,7 +10,7 @@
 
 #include "util/ui_activity_gate.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class UiPerfEventKind {
   kKeyboard = 0,
@@ -98,4 +98,4 @@ class UiSyncPhaseScope {
   std::chrono::steady_clock::time_point start_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

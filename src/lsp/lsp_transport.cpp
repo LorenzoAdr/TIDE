@@ -10,7 +10,7 @@
 #include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -401,12 +401,12 @@ bool LspTransport::send_request(int id, const std::string& method, nlohmann::jso
   monitor_log::MonitorScope request_scope("lsp", scope_name.str());
 
   if (!write_request(id, method, std::move(params))) {
-    TGDB_MON("lsp", "send_request write_failed method=" + method);
+    TUIDE_MON("lsp", "send_request write_failed method=" + method);
     return false;
   }
 
   if (!wait_response(id, timeout_ms, out)) {
-    TGDB_MON("lsp", "send_request timeout method=" + method + " id=" + std::to_string(id));
+    TUIDE_MON("lsp", "send_request timeout method=" + method + " id=" + std::to_string(id));
     return false;
   }
   return true;
@@ -449,4 +449,4 @@ void LspTransport::send_notification(const std::string& method, nlohmann::json p
   write_message(notification.dump());
 }
 
-}  // namespace tgdb
+}  // namespace tuide

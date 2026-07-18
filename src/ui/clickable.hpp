@@ -13,7 +13,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -168,4 +168,4 @@ inline bool interaction_active(const MainLayoutState* layout, std::string_view i
           layout->clickable.is_pressed(id));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -7,7 +7,7 @@
 
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -423,4 +423,4 @@ std::string VirtualTextFileStore::line_at(int index) {
   return read_line_unlocked(index);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

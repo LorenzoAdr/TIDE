@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct SemanticTokenSpan {
   int start_col = 0;
@@ -49,4 +49,4 @@ inline uint64_t hash_semantic_token_line(const std::vector<SemanticTokenSpan>* s
   return h;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

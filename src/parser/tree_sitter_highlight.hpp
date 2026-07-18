@@ -12,7 +12,7 @@ extern "C" {
 #include "parser/tree_sitter_document.hpp"
 #include "parser/tree_sitter_language.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 LineHighlights highlights_for_line(TSNode root, const std::string& source, int line_0,
                                    TreeSitterLangKind lang = TreeSitterLangKind::kCpp);
@@ -38,4 +38,4 @@ ftxui::Element HighlightTreeSitterLine(const std::string& line, int line_index,
                                        ftxui::Decorator cursor_style = {}, int col_offset = 0,
                                        TreeSitterLangKind lang = TreeSitterLangKind::kCpp);
 
-}  // namespace tgdb
+}  // namespace tuide

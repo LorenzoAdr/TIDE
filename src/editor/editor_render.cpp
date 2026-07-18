@@ -14,7 +14,7 @@
 #include "util/build_file_highlight.hpp"
 #include "util/clang_format_config.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -749,4 +749,4 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
   return wrap_with_suffix(std::move(content), line_bg, diagnostic_suffix, suffix_color);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

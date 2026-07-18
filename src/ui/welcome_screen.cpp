@@ -11,7 +11,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -200,4 +200,4 @@ Component MakeWelcomeScreen(MainLayoutState* layout_state, WelcomeScreenState* s
   });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

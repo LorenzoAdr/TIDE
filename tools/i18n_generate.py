@@ -124,7 +124,7 @@ def write_table(path: Path, fn_name: str, column: int) -> None:
     lines = [
         '#include "i18n/strings_internal.hpp"',
         "",
-        "namespace tgdb::i18n {",
+        "namespace tuide::i18n {",
         "",
         f"const StringTable& {fn_name}() {{",
         "  static const StringTable table = {",
@@ -132,7 +132,7 @@ def write_table(path: Path, fn_name: str, column: int) -> None:
     for key, es, en in CATALOG:
         value = es if column == 0 else en
         lines.append(f'      {{"{key}", "{cpp_escape(value)}"}},')
-    lines.extend(["  };", "  return table;", "}", "", "}  // namespace tgdb::i18n", ""])
+    lines.extend(["  };", "  return table;", "}", "", "}  // namespace tuide::i18n", ""])
     path.write_text("\n".join(lines), encoding="utf-8")
 
 

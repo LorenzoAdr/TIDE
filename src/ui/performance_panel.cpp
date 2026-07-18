@@ -16,7 +16,7 @@
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -265,7 +265,7 @@ Element render_ui_thread_section(const UiPerfSnapshot& ui, int panel_width,
          << ui_activity_phase_label(ui.activity_phase) << " " << ui.ms_in_phase << "ms";
   lines.push_back(text(header.str()) | color(theme::Header()));
   if (ui.activity_phase == UiActivityPhase::kInhibited && !dump_path.empty()) {
-    lines.push_back(text("inhibido: ver /tmp/tgdb-perf-<pid>.log (100ms, hilo perf-sampler)") |
+    lines.push_back(text("inhibido: ver /tmp/tuide-perf-<pid>.log (100ms, hilo perf-sampler)") |
                     color(theme::Muted()));
   }
 
@@ -328,7 +328,7 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
   constexpr int kUiSectionLines = 11;
   constexpr int kMinHeightForSystem = 12;
   // Overhead: UI block + process label + separator(s). System adds another sep+label.
-  constexpr int kProcessChrome = 2;  // separator + "tgdb" label
+  constexpr int kProcessChrome = 2;  // separator + "tuide" label
   constexpr int kSystemChrome = 2;   // separator + "System" label
   const bool show_system = total_height >= kMinHeightForSystem + kUiSectionLines;
   const int ui_height = std::min(kUiSectionLines, std::max(2, total_height / 6));
@@ -412,4 +412,4 @@ Component MakePerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
   });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

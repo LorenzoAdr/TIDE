@@ -4,7 +4,7 @@
 
 #include "util/nm_reader.hpp"
 
-using namespace tgdb;
+using namespace tuide;
 
 namespace {
 

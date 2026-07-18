@@ -8,7 +8,7 @@
 #include "lsp/diagnostics.hpp"
 #include "lsp/lsp_text_edits.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct CodeActionParams {
   std::string path;
@@ -26,4 +26,4 @@ struct CodeActionItem {
   nlohmann::json lsp_payload = nlohmann::json::object();
 };
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -6,7 +6,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -254,4 +254,4 @@ bool expand_relative_path(FileTreeNode* root, const std::string& relative_path) 
   return false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

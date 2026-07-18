@@ -15,7 +15,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -339,4 +339,4 @@ FileIndexerPaths lookup_file_indexer_paths(const std::string& workspace_root,
   return result;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

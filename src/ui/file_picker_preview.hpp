@@ -10,7 +10,7 @@
 
 #include "util/build_file_highlight.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class FilePickerPreviewState {
   kIdle,
@@ -70,4 +70,4 @@ class FilePickerPreview {
   FilePickerPreviewData data_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

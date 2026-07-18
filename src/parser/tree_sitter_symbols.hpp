@@ -10,9 +10,9 @@ extern "C" {
 #include <tree_sitter/api.h>
 }
 
-namespace tgdb {
+namespace tuide {
 
 std::vector<SymbolInfo> extract_symbols_from_tree(TSNode root, const std::string& source,
                                                     const std::string& file_path);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -25,8 +25,8 @@ typedef ssize_t (*sendto_fn)(int, const void*, size_t, int, const struct sockadd
 
 static recvfrom_fn real_recvfrom = NULL;
 static sendto_fn real_sendto = NULL;
-static TgdbPktHeader* g_header = NULL;
-static TgdbPktEntry* g_entries = NULL;
+static TuidePktHeader* g_header = NULL;
+static TuidePktEntry* g_entries = NULL;
 static bool g_enabled = false;
 static uint32_t g_filter_src = 0;
 static uint32_t g_filter_dst = 0;
@@ -76,8 +76,8 @@ static void record_packet(uint8_t direction, const struct sockaddr* addr, sockle
   if (!g_enabled || g_header == NULL || g_entries == NULL || payload == NULL || payload_len == 0) {
     return;
   }
-  if (payload_len > TGDB_PKT_MAX_PAYLOAD) {
-    payload_len = TGDB_PKT_MAX_PAYLOAD;
+  if (payload_len > TUIDE_PKT_MAX_PAYLOAD) {
+    payload_len = TUIDE_PKT_MAX_PAYLOAD;
   }
 
   uint32_t peer_ipv4 = 0;
@@ -94,7 +94,7 @@ static void record_packet(uint8_t direction, const struct sockaddr* addr, sockle
   uint32_t dst_ipv4 = 0;
   uint16_t src_port = 0;
   uint16_t dst_port = 0;
-  if (direction == TGDB_PKT_IN) {
+  if (direction == TUIDE_PKT_IN) {
     src_ipv4 = peer_ipv4;
     src_port = peer_port;
     dst_port = local_port_hint;
@@ -110,7 +110,7 @@ static void record_packet(uint8_t direction, const struct sockaddr* addr, sockle
 
   const uint32_t index =
       atomic_fetch_add((atomic_uint*)&g_header->write_idx, 1u) % g_header->capacity;
-  TgdbPktEntry* entry = &g_entries[index];
+  TuidePktEntry* entry = &g_entries[index];
   memset(entry, 0, sizeof(*entry));
   entry->timestamp_ns = now_ns();
   entry->direction = direction;
@@ -127,15 +127,15 @@ static void init_shm(void) {
     return;
   }
 
-  const char* disable = getenv("TGDB_PKT_DISABLE");
+  const char* disable = getenv("TUIDE_PKT_DISABLE");
   if (disable != NULL && disable[0] == '1') {
     return;
   }
 
   uint32_t src = 0;
   uint32_t dst = 0;
-  const char* filter_src = getenv("TGDB_PKT_FILTER_SRC");
-  const char* filter_dst = getenv("TGDB_PKT_FILTER_DST");
+  const char* filter_src = getenv("TUIDE_PKT_FILTER_SRC");
+  const char* filter_dst = getenv("TUIDE_PKT_FILTER_DST");
   if (parse_ipv4(filter_src, &src)) {
     g_filter_src = src;
     g_has_filter_src = true;
@@ -146,10 +146,10 @@ static void init_shm(void) {
   }
 
   char path[512];
-  snprintf(path, sizeof(path), "%s/tgdb-pkt-%d.mmap", runtime_dir(), getpid());
+  snprintf(path, sizeof(path), "%s/tuide-pkt-%d.mmap", runtime_dir(), getpid());
 
   const size_t map_size =
-      sizeof(TgdbPktHeader) + (size_t)TGDB_PKT_CAPACITY * sizeof(TgdbPktEntry);
+      sizeof(TuidePktHeader) + (size_t)TUIDE_PKT_CAPACITY * sizeof(TuidePktEntry);
   const int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
   if (fd < 0) {
     return;
@@ -165,14 +165,14 @@ static void init_shm(void) {
     return;
   }
 
-  g_header = (TgdbPktHeader*)mapped;
+  g_header = (TuidePktHeader*)mapped;
   memset(g_header, 0, sizeof(*g_header));
-  g_header->magic = TGDB_PKT_MAGIC;
-  g_header->version = TGDB_PKT_VERSION;
-  g_header->capacity = TGDB_PKT_CAPACITY;
-  g_header->entry_stride = (uint32_t)sizeof(TgdbPktEntry);
+  g_header->magic = TUIDE_PKT_MAGIC;
+  g_header->version = TUIDE_PKT_VERSION;
+  g_header->capacity = TUIDE_PKT_CAPACITY;
+  g_header->entry_stride = (uint32_t)sizeof(TuidePktEntry);
   g_header->pid = (uint32_t)getpid();
-  g_entries = tgdb_pkt_entries(g_header);
+  g_entries = tuide_pkt_entries(g_header);
   g_enabled = true;
 }
 
@@ -190,7 +190,7 @@ ssize_t recvfrom(int sockfd, void* buf, size_t len, int flags, struct sockaddr* 
   const ssize_t result =
       real_recvfrom != NULL ? real_recvfrom(sockfd, buf, len, flags, src_addr, addrlen) : -1;
   if (result > 0) {
-    record_packet(TGDB_PKT_IN, (const struct sockaddr*)src_addr,
+    record_packet(TUIDE_PKT_IN, (const struct sockaddr*)src_addr,
                   addrlen != NULL ? *addrlen : 0, buf, (size_t)result, 0);
   }
   return result;
@@ -204,7 +204,7 @@ ssize_t sendto(int sockfd, const void* buf, size_t len, int flags, const struct 
   const ssize_t result =
       real_sendto != NULL ? real_sendto(sockfd, buf, len, flags, dest_addr, addrlen) : -1;
   if (result > 0) {
-    record_packet(TGDB_PKT_OUT, dest_addr, addrlen, buf, (size_t)result, 0);
+    record_packet(TUIDE_PKT_OUT, dest_addr, addrlen, buf, (size_t)result, 0);
   }
   return result;
 }

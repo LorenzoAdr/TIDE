@@ -2,7 +2,7 @@
 
 #include <cctype>
 
-namespace tgdb {
+namespace tuide {
 
 std::string symbol_insert_name(const std::string& display_name) {
   std::string name = display_name;
@@ -52,4 +52,4 @@ std::string symbol_insert_name(const std::string& display_name) {
   return out.empty() ? name : out;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

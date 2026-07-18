@@ -11,7 +11,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -291,4 +291,4 @@ Component MakePacketMonitorPanel(packet_monitor::PacketMonitorService* service,
   });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

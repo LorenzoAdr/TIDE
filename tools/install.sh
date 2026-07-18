@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
-# Instala el ejecutable en /usr/opt/tide y registra el alias "tide" en el shell.
-# No compila: usa el binario ya generado en build/tgdb (o TGDB_BIN).
+# Instala el ejecutable en /usr/opt/tuide y registra el alias "tuide" en el shell.
+# No compila: usa el binario ya generado en build/tuide (o TUIDE_BIN).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_BIN="${TGDB_BIN:-${ROOT}/build/tgdb}"
+BUILD_BIN="${TUIDE_BIN:-${ROOT}/build/tuide}"
 INSTALL_DIR="/usr/opt"
-INSTALL_BIN="${INSTALL_DIR}/tide"
-MARKER_BEGIN="# >>> tide (tgdb) >>>"
-MARKER_END="# <<< tide (tgdb) <<<"
-ALIAS_LINE='alias tide="/usr/opt/tide"'
+INSTALL_BIN="${INSTALL_DIR}/tuide"
+MARKER_BEGIN="# >>> tuide >>>"
+MARKER_END="# <<< tuide <<<"
+ALIAS_LINE='alias tuide="/usr/opt/tuide"'
 
 usage() {
   cat <<EOF
 Uso: $(basename "$0") [opciones]
 
-Copia el binario a ${INSTALL_BIN} y añade el alias "tide" a ~/.bashrc.
+Copia el binario a ${INSTALL_BIN} y añade el alias "tuide" a ~/.bashrc.
 No compila; el binario debe existir de antemano (p. ej. tras tools/compile.sh).
 
 Opciones:
   -h, --help   Muestra esta ayuda
 
 Variables de entorno:
-  TGDB_BIN     Ruta al ejecutable a instalar (default: build/tgdb)
+  TUIDE_BIN     Ruta al ejecutable a instalar (default: build/tuide)
 
 Requiere permisos de administrador (sudo) para copiar en ${INSTALL_DIR}.
 EOF
@@ -111,9 +111,9 @@ fi
 
 log "listo."
 log "  ejecutable: ${INSTALL_BIN}"
-log "  alias:      tide"
+log "  alias:      tuide"
 log ""
 log "Activa el alias en esta sesión con:"
 log "  source ${RC}"
 log "o abre una terminal nueva y ejecuta:"
-log "  tide"
+log "  tuide"

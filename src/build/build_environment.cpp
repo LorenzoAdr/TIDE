@@ -6,7 +6,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -98,7 +98,7 @@ std::string environment_compile_dir(const std::string& workspace_root,
   if (workspace_root.empty() || environment_id.empty()) {
     return {};
   }
-  return (fs::path(workspace_root) / ".tgdb" / "environments" / environment_id).string();
+  return (fs::path(workspace_root) / ".tuide" / "environments" / environment_id).string();
 }
 
 std::string environment_compile_commands_path(const std::string& workspace_root,
@@ -110,4 +110,4 @@ std::string environment_compile_commands_path(const std::string& workspace_root,
   return (fs::path(dir) / "compile_commands.json").string();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

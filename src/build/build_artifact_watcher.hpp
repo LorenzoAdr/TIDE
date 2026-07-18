@@ -7,7 +7,7 @@
 #include <thread>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 class BuildArtifactWatcher {
  public:
@@ -31,4 +31,4 @@ class BuildArtifactWatcher {
   std::mutex callback_mutex_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

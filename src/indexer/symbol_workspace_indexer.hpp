@@ -10,7 +10,7 @@
 #include "indexer/workspace_indexer.hpp"
 #include "symbols/symbol_provider.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct IndexedSymbol {
   std::string display_name;
@@ -54,4 +54,4 @@ class SymbolWorkspaceIndexer {
   std::atomic<bool> stop_requested_{false};
 };
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -30,7 +30,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -167,14 +167,14 @@ bool parse_ppid_from_stat(const fs::path& stat_path, int* ppid) {
   return true;
 }
 
-// "gdb" as a path/binary token, not the substring inside "tgdb".
+// "gdb" as a path/binary token, not the substring inside "tuide".
 bool haystack_has_gdb_token(const std::string& haystack) {
   std::size_t pos = 0;
   while ((pos = haystack.find("gdb", pos)) != std::string::npos) {
     const bool left_ok =
         pos == 0 || !std::isalnum(static_cast<unsigned char>(haystack[pos - 1]));
     if (left_ok) {
-      // Matches gdb, gdbserver, gdb-multiarch, … — not tgdb.
+      // Matches gdb, gdbserver, gdb-multiarch, … — not tuide.
       return true;
     }
     pos += 3;
@@ -382,7 +382,7 @@ bool read_process_cpu(ProcessCpuState* state) {
 
 std::string read_thread_comm(const fs::path& task_dir) {
   std::string comm = read_file_trimmed(task_dir / "comm");
-  if (comm != "tgdb") {
+  if (comm != "tuide") {
     return comm;
   }
   std::ifstream input(task_dir / "status");
@@ -401,7 +401,7 @@ std::string read_thread_comm(const fs::path& task_dir) {
     while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) {
       name.pop_back();
     }
-    if (!name.empty() && name != "tgdb") {
+    if (!name.empty() && name != "tuide") {
       return name;
     }
     break;
@@ -556,7 +556,7 @@ int worker_display_rank(const ThreadSample& sample) {
       return 10 + i;
     }
   }
-  if (sample.comm == "tgdb") {
+  if (sample.comm == "tuide") {
     return 100;
   }
   return 50;
@@ -806,16 +806,16 @@ std::string PerformanceSampler::dump_file_path() const {
 
 void PerformanceSampler::open_dump_file() {
 #ifdef __linux__
-  dump_path_ = "/tmp/tgdb-perf-" + std::to_string(getpid()) + ".log";
+  dump_path_ = "/tmp/tuide-perf-" + std::to_string(getpid()) + ".log";
 #else
-  dump_path_ = "/tmp/tgdb-perf.log";
+  dump_path_ = "/tmp/tuide-perf.log";
 #endif
   std::ofstream out(dump_path_, std::ios::trunc);
   if (!out) {
     dump_path_.clear();
     return;
   }
-  out << "# tgdb perf dump interval_ms=100 columns:\n";
+  out << "# tuide perf dump interval_ms=100 columns:\n";
   out << "# ts_ms phase proc_cpu% proc_rss_kb paints ticks sync_phases "
          "threads(tid:name:cpu% ...)\n";
   out << "# sync_phases: name@p95_us,... (top sync tasks: tick + render)\n";
@@ -933,4 +933,4 @@ void PerformanceSampler::sampler_loop() {
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

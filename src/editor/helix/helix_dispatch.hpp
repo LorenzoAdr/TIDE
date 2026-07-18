@@ -11,7 +11,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 class ISymbolProvider;
 
@@ -52,4 +52,4 @@ std::string helix_format_line_number(int line_idx, int primary_line, int width, 
 void sync_helix_layout_status(MainLayoutState* layout_state, const HelixEditorState* helix,
                               bool enabled);
 
-}  // namespace tgdb
+}  // namespace tuide

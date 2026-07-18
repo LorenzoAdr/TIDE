@@ -37,7 +37,7 @@ std::string write_file(const fs::path& path, const std::string& contents) {
 }  // namespace
 
 int main() {
-  const fs::path base = fs::temp_directory_path() / "tgdb_workspace_detect_test";
+  const fs::path base = fs::temp_directory_path() / "tuide_workspace_detect_test";
   std::error_code ec;
   fs::remove_all(base, ec);
   fs::create_directories(base, ec);
@@ -48,8 +48,8 @@ int main() {
   const std::string nested = write_file(base / "proj" / "src" / "main.cpp", "int main() {}\n");
 
   {
-    const tgdb::WorkspaceDetectResult result =
-        tgdb::detect_workspace_root(base / "proj" / "src");
+    const tuide::WorkspaceDetectResult result =
+        tuide::detect_workspace_root(base / "proj" / "src");
     expect_true(result.marker_found, "finds CMakeLists.txt in parent");
     expect_eq(result.marker, "CMakeLists.txt", "cmake marker name");
     expect_eq(result.workspace_root, fs::path(project).parent_path().string(),
@@ -60,8 +60,8 @@ int main() {
   fs::create_directories(make_base / "lib", ec);
   write_file(make_base / "Makefile", "all:\n");
   {
-    const tgdb::WorkspaceDetectResult result =
-        tgdb::detect_workspace_root(make_base / "lib");
+    const tuide::WorkspaceDetectResult result =
+        tuide::detect_workspace_root(make_base / "lib");
     expect_true(result.marker_found, "finds Makefile in parent");
     expect_eq(result.marker, "Makefile", "make marker name");
     expect_eq(result.workspace_root, fs::absolute(make_base, ec).string(),
@@ -71,7 +71,7 @@ int main() {
   const fs::path plain = base / "plain" / "docs";
   fs::create_directories(plain, ec);
   {
-    const tgdb::WorkspaceDetectResult result = tgdb::detect_workspace_root(plain);
+    const tuide::WorkspaceDetectResult result = tuide::detect_workspace_root(plain);
     expect_true(!result.marker_found, "no marker falls back to anchor");
     expect_eq(result.workspace_root, fs::absolute(plain, ec).string(), "fallback anchor path");
   }
@@ -85,8 +85,8 @@ int main() {
     fs::create_directories(deep_anchor, ec);
   }
   {
-    const tgdb::WorkspaceDetectResult result =
-        tgdb::detect_workspace_root(deep_anchor, 5);
+    const tuide::WorkspaceDetectResult result =
+        tuide::detect_workspace_root(deep_anchor, 5);
     expect_true(!result.marker_found, "max depth stops before project root");
     expect_eq(result.workspace_root, fs::absolute(deep_anchor, ec).string(),
               "max depth fallback to anchor");

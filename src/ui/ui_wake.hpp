@@ -9,7 +9,7 @@
 #include "ui/ui_event_dispatcher.hpp"
 #include "ui/ui_event_types.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 inline UiEventDispatcher* ui_event_dispatcher(MainLayoutState* layout) {
   return layout != nullptr ? layout->ui_events : nullptr;
@@ -59,4 +59,4 @@ inline void ui_wake_correlated(MainLayoutState* layout, uint64_t correlation_id,
 #define UI_WAKE(layout, tag) ui_wake((layout), (tag))
 #define UI_WAKE_FN(layout, tag, fn) ui_wake((layout), (tag), UiEventKind::InputCorrelated, (fn))
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -14,7 +14,7 @@
 #include "util/clang_format_config.hpp"
 #include "util/tools_status.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class SettingsPanel {
   kGeneral,
@@ -136,4 +136,4 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
                           WorkspaceSettingsApplyCallback on_workspace_apply,
                           ClangFormatApplyCallback on_clang_format_apply = {});
 
-}  // namespace tgdb
+}  // namespace tuide

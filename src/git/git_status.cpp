@@ -1,6 +1,6 @@
 #include "git/git_status.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -63,4 +63,4 @@ GitStatusSnapshot parse_git_status_porcelain(const std::string& output) {
   return snapshot;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

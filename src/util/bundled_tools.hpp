@@ -3,7 +3,7 @@
 #include <optional>
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 struct ClangdLocation {
   std::string binary_path;
@@ -133,4 +133,4 @@ std::optional<std::string> resolve_shellcheck();
 std::optional<std::string> resolve_chktex();
 std::optional<std::string> resolve_gfortran();
 
-}  // namespace tgdb
+}  // namespace tuide

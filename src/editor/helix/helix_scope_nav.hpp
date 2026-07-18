@@ -3,7 +3,7 @@
 #include "editor/editor_state.hpp"
 #include "symbols/symbol_provider.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct HelixScopeNavContext {
   EditorBuffer* buffer = nullptr;
@@ -20,4 +20,4 @@ bool helix_goto_prev_paragraph(const HelixScopeNavContext& ctx);
 bool helix_goto_block_end(const HelixScopeNavContext& ctx);
 bool helix_goto_block_start(const HelixScopeNavContext& ctx);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Equivalente de examples/hello.cpp: bucle UDP con paquetes heartbeat/sensor.
 
-Útil para probar LSP (basedpyright) y DAP (debugpy) en tgdb.
+Útil para probar LSP (basedpyright) y DAP (debugpy) en tuide.
 Launch con packet monitor activo para capturar tráfico (solo aplica a binarios
 nativos vía LD_PRELOAD; en Python el tráfico UDP sigue siendo visible en la red).
 """

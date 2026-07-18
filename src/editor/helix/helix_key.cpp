@@ -2,7 +2,7 @@
 
 #include "ui/key_bindings.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -93,4 +93,4 @@ bool helix_event_is_printable(const ftxui::Event& event, char* out_char) {
   return false;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

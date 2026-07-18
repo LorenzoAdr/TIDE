@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 enum class DebugAdapterKind { kGdb, kDebugpy, kBashdb };
 
@@ -26,4 +26,4 @@ std::optional<DebugAdapterSpec> make_debugpy_adapter_spec();
 std::optional<DebugAdapterSpec> make_bashdb_adapter_spec();
 std::optional<DebugAdapterSpec> make_debug_adapter_spec(DebugAdapterKind kind);
 
-}  // namespace tgdb
+}  // namespace tuide

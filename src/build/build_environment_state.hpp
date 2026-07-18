@@ -4,7 +4,7 @@
 
 #include "build/build_environment.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 class BuildEnvironmentStateStore {
  public:
@@ -14,4 +14,4 @@ class BuildEnvironmentStateStore {
   static bool save(const std::string& workspace_root, const BuildEnvironmentState& state);
 };
 
-}  // namespace tgdb
+}  // namespace tuide

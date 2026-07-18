@@ -5,7 +5,7 @@
 
 #include "packet_monitor/pkt_ring.hpp"
 
-namespace tgdb::packet_monitor {
+namespace tuide::packet_monitor {
 
 struct CaptureFileHeader {
   std::string protocol_path;
@@ -20,4 +20,4 @@ bool load_capture_file(const std::string& path, CaptureFileHeader* header,
 
 std::string default_capture_dir();
 
-}  // namespace tgdb::packet_monitor
+}  // namespace tuide::packet_monitor

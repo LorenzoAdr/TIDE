@@ -4,7 +4,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace tgdb::packet_monitor {
+namespace tuide::packet_monitor {
 
 namespace {
 
@@ -78,4 +78,4 @@ std::vector<UdpConnectionEntry> list_udp_connections(int pid) {
   return entries;
 }
 
-}  // namespace tgdb::packet_monitor
+}  // namespace tuide::packet_monitor

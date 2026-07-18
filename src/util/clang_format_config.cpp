@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace tgdb {
+namespace tuide {
 
 namespace fs = std::filesystem;
 
@@ -794,4 +794,4 @@ void cycle_clang_short_functions(ClangFormatConfig* config) {
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

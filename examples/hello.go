@@ -1,4 +1,4 @@
-// Ejemplo mínimo para outline / LSP gopls en tgdb.
+// Ejemplo mínimo para outline / LSP gopls en tuide.
 // Compilar: go build -gcflags="all=-N -l" -o hello hello.go
 
 package main
@@ -10,6 +10,6 @@ func greet(name string) {
 }
 
 func main() {
-	greet("tide")
+	greet("tuide")
 	greet("sdf")
 }

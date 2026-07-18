@@ -9,7 +9,7 @@
 #include "editor/helix/helix_commands.hpp"
 #include "editor/helix/helix_state.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct HelixKeyTrieNode {
   std::optional<HelixCommand> command;
@@ -36,4 +36,4 @@ std::vector<std::pair<std::string, std::string>> helix_hint_entries(HelixMode mo
 
 std::string helix_command_label(HelixCommand command);
 
-}  // namespace tgdb
+}  // namespace tuide

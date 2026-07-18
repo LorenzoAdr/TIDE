@@ -15,14 +15,14 @@
 ┌───────────────┐  ┌────────────────┐  ┌──────────────────────────┐
 │  DAP thread   │  │ Indexer threads│  │  Language servers (LSP)  │
 │  DapBackend   │  │ WorkspaceIndexer│  │  LspClient × N (stdio)   │
-│  cppdap ↔     │  │ SymbolIndexer  │  │  clangd / basedpyright   │
-│  GDB|debugpy  │  └────────────────┘  └──────────────────────────┘
-└───────────────┘
+│  cppdap ↔     │  │ SymbolIndexer  │  │  clangd / basedpyright / │
+│  GDB|debugpy  │  └────────────────┘  │  rust-analyzer / gopls…  │
+└───────────────┘                      └──────────────────────────┘
 ```
 
 All UI state lives on a single FTXUI thread. Background workers communicate through thread-safe queues or callbacks posted back to the UI loop via `Event::Custom`.
 
-Language servers are described by `LanguageServerSpec` and started lazily (clangd on workspace open for C/C++; basedpyright when a `.py` file is opened). Debug adapters use `DebugAdapterSpec` / `IDebugAdapterProcess` (`gdb -i=dap` for native binaries, `python -m debugpy.adapter` for `.py`).
+Language servers are described by `LanguageServerSpec` and started lazily per language (e.g. clangd for C/C++, basedpyright for Python, rust-analyzer for Rust, gopls for Go, …). Debug adapters use `DebugAdapterSpec` / `IDebugAdapterProcess` (`gdb -i=dap` for native binaries, `python -m debugpy.adapter` for `.py`, bash-debug for shell scripts).
 
 ## Application modes
 
@@ -81,18 +81,21 @@ Breakpoints are tracked per normalized file path in `DebugModel`. When the user 
 
 ## LSP integration
 
-`LspSymbolProvider` implements `ISymbolProvider`:
+`LspSymbolProvider` implements `ISymbolProvider` and can host **multiple** `LspClient` instances (one per language server):
 
-1. On workspace open, tries to spawn `clangd` (`CLANGD_PATH` or `PATH`)
-2. Sends `textDocument/didOpen`, `didChange`, `didClose` for editor buffers
-3. Queries `documentSymbol`, completion, hover, semantic tokens
-4. Receives `textDocument/publishDiagnostics` for live errors/warnings (clangd)
+1. Resolves a `LanguageServerSpec` for the buffer language (`language_server_id_for_language`)
+2. Spawns the server lazily (`CLANGD_PATH` / `PATH` / bundled blob)
+3. Sends `textDocument/didOpen`, `didChange`, `didClose` for editor buffers
+4. Queries `documentSymbol`, completion, hover, semantic tokens, go-to-definition
+5. Receives `textDocument/publishDiagnostics` for live errors/warnings
 
-If clangd is unavailable, `TreeSitterSymbolProvider` provides immediate syntactic symbols, highlighting, scopes, and local completion from the C++ AST.
+Supported server ids include clangd, basedpyright, bash-language-server, texlab, rust-analyzer, gopls, zls, fortls, lua-language-server, typescript-language-server, neocmakelsp, and make-ls.
+
+If no LSP server is available for a file, `TreeSitterSymbolProvider` provides immediate syntactic symbols, highlighting, scopes, and local completion from the language grammar.
 
 ### Tree-sitter document cache
 
-`TreeSitterService` owns a `TreeSitterDocumentCache` that parses C++ off the UI thread (`ts-parse` worker):
+`TreeSitterService` owns a `TreeSitterDocumentCache` that parses off the UI thread (`ts-parse` worker). Grammars cover C/C++, Python, Bash, LaTeX, Rust, Go, Zig, Fortran, Lua, JavaScript/TypeScript, CMake, and Make:
 
 | Piece | Role |
 |-------|------|
@@ -206,7 +209,7 @@ Overlays (stacked on top):
 | `src/editor/` | Buffer, text ops, undo, find, render |
 | `src/lsp/` | LSP transport and client |
 | `src/symbols/` | Symbol providers (LSP + Tree-sitter) |
-| `src/parser/` | Tree-sitter C++ parsing (highlight, symbols, scopes, blocks) |
+| `src/parser/` | Tree-sitter multi-language parsing (highlight, symbols, scopes, blocks) |
 | `src/indexer/` | Workspace and symbol indexing |
 | `src/terminal/` | PTY shell session, `RawPtyScreen`, PTY key encoding |
 | `src/search/` | Workspace text search |
@@ -222,7 +225,7 @@ Fetched via CMake `FetchContent` (see `cmake/Dependencies.cmake`):
 | [cppdap](https://github.com/google/cppdap) | DAP client |
 | [nlohmann/json](https://github.com/nlohmann/json) v3.11.3 | JSON parsing |
 
-Runtime: GDB (DAP), optionally clangd (LSP).
+Runtime: optional language servers (LSP) and debug adapters (GDB / debugpy / bash-debug).
 
 ## See also
 

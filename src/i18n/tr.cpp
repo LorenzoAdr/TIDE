@@ -5,7 +5,7 @@
 #include "i18n/locale.hpp"
 #include "i18n/strings_internal.hpp"
 
-namespace tgdb::i18n {
+namespace tuide::i18n {
 
 namespace {
 
@@ -49,4 +49,4 @@ std::string tr_fmt(std::string_view key, const std::vector<std::string>& args) {
   return text;
 }
 
-}  // namespace tgdb::i18n
+}  // namespace tuide::i18n

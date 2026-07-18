@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -424,4 +424,4 @@ std::vector<TerminalStyledRow> RawPtyScreen::styled_rows() const {
   return cached_styled_rows_;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

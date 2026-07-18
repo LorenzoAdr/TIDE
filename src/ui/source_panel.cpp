@@ -34,7 +34,7 @@
 #include "util/clang_format_config.hpp"
 #include "util/syntax_highlight.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -834,4 +834,4 @@ Component MakeSourcePanel(DebugModel* model, SourceViewState* view_state,
   }));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

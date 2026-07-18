@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(tgdb-bundle-wizard LANGUAGES CXX)
+project(tuide-bundle-wizard LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,5 +14,5 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(ftxui)
 
-add_executable(tgdb-bundle-wizard main.cpp)
-target_link_libraries(tgdb-bundle-wizard PRIVATE ftxui::component ftxui::dom ftxui::screen)
+add_executable(tuide-bundle-wizard main.cpp)
+target_link_libraries(tuide-bundle-wizard PRIVATE ftxui::component ftxui::dom ftxui::screen)

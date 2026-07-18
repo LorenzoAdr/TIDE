@@ -4,7 +4,7 @@
 #include <pthread.h>
 #endif
 
-namespace tgdb {
+namespace tuide {
 
 inline void set_current_thread_name(const char* name) {
 #ifdef __linux__
@@ -16,4 +16,4 @@ inline void set_current_thread_name(const char* name) {
 #endif
 }
 
-}  // namespace tgdb
+}  // namespace tuide

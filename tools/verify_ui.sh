@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Comprueba que tgdb pinta la interfaz (no pantalla negra).
+# Comprueba que tuide pinta la interfaz (no pantalla negra).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${ROOT}/build"
-TGDB="${BUILD}/tgdb"
+TUIDE="${BUILD}/tuide"
 OUT="$(mktemp)"
 
-if [[ ! -x "${TGDB}" ]]; then
+if [[ ! -x "${TUIDE}" ]]; then
   echo "verify_ui: compila primero (cmake --build build)" >&2
   exit 1
 fi
@@ -15,10 +15,10 @@ fi
 cleanup() { rm -f "${OUT}"; }
 trap cleanup EXIT
 
-timeout 5 env TGDB_UI_SMOKE=1 "${TGDB}" --cwd "${ROOT}" > "${OUT}" 2>/dev/null || true
+timeout 5 env TUIDE_UI_SMOKE=1 "${TUIDE}" --cwd "${ROOT}" > "${OUT}" 2>/dev/null || true
 
-if ! grep -q 'tide' "${OUT}"; then
-  echo "verify_ui: FALLO — no se encontró 'tide'" >&2
+if ! grep -q 'tuide' "${OUT}"; then
+  echo "verify_ui: FALLO — no se encontró 'tuide'" >&2
   echo "verify_ui: bytes: $(wc -c < "${OUT}")" >&2
   exit 1
 fi

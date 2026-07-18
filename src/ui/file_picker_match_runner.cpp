@@ -7,7 +7,7 @@
 #include "util/fuzzy_match.hpp"
 #include "util/thread_name.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -245,4 +245,4 @@ void FilePickerMatchRunner::worker_main() {
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 enum class VirtualTextFileState { kIdle, kIndexing, kReady, kError };
 
@@ -55,4 +55,4 @@ class VirtualTextFileStore {
   std::string error_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

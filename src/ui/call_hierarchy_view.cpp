@@ -13,7 +13,7 @@
 #include "util/monitor_log.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace fs = std::filesystem;
 
@@ -233,7 +233,7 @@ bool try_prepare_enclosing_call_hierarchy(const std::shared_ptr<ISymbolProvider>
 
   params->line = enclosing_line;
   params->character = enclosing_col;
-  TGDB_MON_SCOPE("editor", "call_hierarchy.prepare_enclosing");
+  TUIDE_MON_SCOPE("editor", "call_hierarchy.prepare_enclosing");
   *out_roots = symbols->prepare_call_hierarchy(*params);
   if (out_roots->empty()) {
     return false;
@@ -340,7 +340,7 @@ void load_node_children(CallHierarchyViewState* view, int node_index,
     return;
   }
 
-  TGDB_MON_SCOPE("editor", "call_hierarchy.incoming_calls");
+  TUIDE_MON_SCOPE("editor", "call_hierarchy.incoming_calls");
   const std::vector<CallHierarchyItem> items = symbols->incoming_calls(node.item);
   std::vector<int> new_children;
   new_children.reserve(items.size());
@@ -524,7 +524,7 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
   params.line = resolved_line;
   params.character = resolved_col;
 
-  TGDB_MON_SCOPE("editor", "call_hierarchy.prepare");
+  TUIDE_MON_SCOPE("editor", "call_hierarchy.prepare");
   std::vector<CallHierarchyItem> roots = symbols->prepare_call_hierarchy(params);
   if (roots.empty()) {
     try_prepare_enclosing_call_hierarchy(symbols, &params, line, col, workspace->buffer, &roots,
@@ -592,4 +592,4 @@ void navigate_to_call_hierarchy_node(WorkspaceModel* workspace, FocusManagerStat
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

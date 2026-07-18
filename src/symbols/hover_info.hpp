@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct HoverParams {
   std::string path;
@@ -18,4 +18,4 @@ struct HoverInfo {
   std::vector<std::string> body_lines;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

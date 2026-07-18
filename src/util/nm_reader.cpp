@@ -10,7 +10,7 @@
 #include "util/shell_utils.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -548,4 +548,4 @@ void filter_nm_symbol_indices(const std::vector<NmSymbol>& symbols, const std::s
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstdint>
 
-namespace tgdb {
+namespace tuide {
 
 class MouseVelocityTracker {
  public:
@@ -21,4 +21,4 @@ class MouseVelocityTracker {
   static constexpr double kExitLowPxPerSec = 150.0;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

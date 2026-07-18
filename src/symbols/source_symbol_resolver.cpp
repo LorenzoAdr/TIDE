@@ -7,7 +7,7 @@
 
 #include "search/workspace_search.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace fs = std::filesystem;
 
@@ -206,4 +206,4 @@ std::optional<SourceLocation> resolve_nm_symbol_in_workspace(
   return lookup_with_search(symbol, workspace_root, file_indexer);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

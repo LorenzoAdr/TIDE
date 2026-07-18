@@ -6,7 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace tgdb {
+namespace tuide {
 
 struct LspTextEdit {
   int start_line = 0;
@@ -29,4 +29,4 @@ std::optional<LspTextEdit> single_lsp_edit_between(const std::string& old_source
                                                    const std::string& new_source);
 nlohmann::json lsp_content_change_json(const LspTextEdit& edit);
 
-}  // namespace tgdb
+}  // namespace tuide

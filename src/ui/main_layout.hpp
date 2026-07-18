@@ -34,7 +34,7 @@
 #include "util/nm_reader.hpp"
 #include "util/path_normalize.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 class UiEventDispatcher;
 
@@ -420,4 +420,4 @@ ftxui::Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                                 std::function<void()> on_welcome_debug,
                                 std::function<void()> on_welcome_workspace);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -15,7 +15,7 @@
 
 #include "util/clang_format_config.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -1934,4 +1934,4 @@ void toggle_comment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

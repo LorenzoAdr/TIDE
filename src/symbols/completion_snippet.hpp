@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct EditorBuffer;
 
@@ -50,4 +50,4 @@ void clear_snippet_session(SnippetSession* session);
 bool snippet_session_active(const SnippetSession& session);
 bool advance_snippet_session(EditorBuffer* buffer, SnippetSession* session);
 
-}  // namespace tgdb
+}  // namespace tuide

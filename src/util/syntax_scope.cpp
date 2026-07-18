@@ -2,7 +2,7 @@
 
 #include "ui/theme.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -142,4 +142,4 @@ bool SyntaxScopeUsesInvertedCursor(SyntaxScope scope) {
   return scope == SyntaxScope::kKeyword || scope == SyntaxScope::kType;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

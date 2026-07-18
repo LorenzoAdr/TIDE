@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct GitSubrepoInfo {
   std::string root;
@@ -37,4 +37,4 @@ ResolvedGitPath resolve_git_path(const std::string& workspace_root,
                                  const std::vector<GitSubrepoInfo>& subrepos,
                                  const std::string& path);
 
-}  // namespace tgdb
+}  // namespace tuide

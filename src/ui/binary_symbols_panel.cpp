@@ -29,7 +29,7 @@
 #include "util/nm_reader_runner.hpp"
 #include "util/thread_name.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 namespace fs = std::filesystem;
@@ -1118,4 +1118,4 @@ Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* model,
       handler));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 enum class ClangBasedOnStyle {
   kLLVM,
@@ -114,4 +114,4 @@ void cycle_clang_pointer_alignment(ClangFormatConfig* config);
 void cycle_clang_include_blocks(ClangFormatConfig* config);
 void cycle_clang_short_functions(ClangFormatConfig* config);
 
-}  // namespace tgdb
+}  // namespace tuide

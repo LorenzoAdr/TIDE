@@ -11,7 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace tgdb::packet_monitor {
+namespace tuide::packet_monitor {
 
 namespace fs = std::filesystem;
 
@@ -339,7 +339,7 @@ std::vector<std::string> list_protocol_files(const std::string& workspace_root) 
     return files;
   }
   std::error_code ec;
-  const fs::path primary = fs::path(workspace_root) / ".tgdb" / "protocols";
+  const fs::path primary = fs::path(workspace_root) / ".tuide" / "protocols";
   const fs::path fallback = fs::path(workspace_root) / "examples" / "protocols";
   const fs::path dir = fs::exists(primary, ec) ? primary : fallback;
   if (!fs::exists(dir, ec)) {
@@ -428,4 +428,4 @@ DecodedPacket decode_packet(const std::vector<uint8_t>& payload, const ProtocolD
   return decoded;
 }
 
-}  // namespace tgdb::packet_monitor
+}  // namespace tuide::packet_monitor

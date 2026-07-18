@@ -3,7 +3,7 @@
 #include <functional>
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 bool is_pdf_path(const std::string& path);
 
@@ -18,4 +18,4 @@ using PdfViewerFinishedCallback = std::function<void(const PdfLaunchResult&)>;
 void launch_pdf_viewer_async(const std::string& absolute_path,
                              PdfViewerFinishedCallback on_finished = {});
 
-}  // namespace tgdb
+}  // namespace tuide

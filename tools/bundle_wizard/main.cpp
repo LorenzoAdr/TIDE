@@ -68,7 +68,7 @@ struct WizardState {
   int selected = 0;
 };
 
-// Tamaños aproximados del blob .zst embebido (MB). Base incluye tgdb + ripgrep.
+// Tamaños aproximados del blob .zst embebido (MB). Base incluye tuide + ripgrep.
 constexpr int kBaseBinaryMb = 50;
 constexpr int kSizeClangdMb = 34;
 constexpr int kSizeBashLsMb = 38;
@@ -140,8 +140,8 @@ int estimated_binary_mb(const BundleConfig& config) {
 
 std::string format_estimated_size(const BundleConfig& config) {
   const char* prefix = config.ui_locale == kLocaleEs
-                           ? "Tamaño estimado del binario tgdb: ~"
-                           : "Estimated tgdb binary size: ~";
+                           ? "Tamaño estimado del binario tuide: ~"
+                           : "Estimated tuide binary size: ~";
   return std::string(prefix) + std::to_string(estimated_binary_mb(config)) + " MB";
 }
 
@@ -646,12 +646,12 @@ int main(int argc, char** argv) {
             vbox({dap_panel, text(""), force_panel, text(""), defaults_panel});
 
         const Element menu_body = vbox({
-            centered_row(text(tr(locale, "tgdb — componentes embebidos",
-                                 "tgdb — bundled components")) |
+            centered_row(text(tr(locale, "tuide — componentes embebidos",
+                                 "tuide — bundled components")) |
                          bold | color(wiz_theme::Accent())),
             text(""),
-            centered_row(text(tr(locale, "Selecciona qué incluir en el binario de tgdb:",
-                                 "Select what to include in the tgdb binary:")) |
+            centered_row(text(tr(locale, "Selecciona qué incluir en el binario de tuide:",
+                                 "Select what to include in the tuide binary:")) |
                          color(wiz_theme::Muted())),
             text(""),
             render_author_footer(),
@@ -716,8 +716,8 @@ int main(int argc, char** argv) {
   }
   if (!save_bundle_config(config_path, state.draft)) {
     const char* msg = state.draft.ui_locale == kLocaleEs
-                          ? "tgdb-bundle-wizard: no se pudo escribir %s\n"
-                          : "tgdb-bundle-wizard: could not write %s\n";
+                          ? "tuide-bundle-wizard: no se pudo escribir %s\n"
+                          : "tuide-bundle-wizard: could not write %s\n";
     std::fprintf(stderr, msg, config_path.c_str());
     return 1;
   }

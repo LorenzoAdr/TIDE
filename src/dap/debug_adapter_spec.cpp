@@ -6,7 +6,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 DebugAdapterKind debug_adapter_kind_for_program(const std::string& program_path) {
   if (program_path.empty()) {
@@ -71,4 +71,4 @@ std::optional<DebugAdapterSpec> make_debug_adapter_spec(const DebugAdapterKind k
   return make_gdb_adapter_spec();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

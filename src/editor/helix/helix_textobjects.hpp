@@ -4,7 +4,7 @@
 #include "editor/editor_state.hpp"
 #include "symbols/symbol_provider.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct HelixTextObjectContext {
   EditorBuffer* buffer = nullptr;
@@ -25,4 +25,4 @@ bool helix_select_around_quote(const HelixTextObjectContext& ctx, char quote_ch)
 void helix_apply_delimited_selection(EditorBuffer* buffer, const TextSpan& span, bool around,
                                      int inner_skip_start, int inner_skip_end);
 
-}  // namespace tgdb
+}  // namespace tuide

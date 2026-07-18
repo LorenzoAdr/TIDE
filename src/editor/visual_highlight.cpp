@@ -18,7 +18,7 @@
 #include "parser/tree_sitter_service.hpp"
 #include "util/thread_name.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -725,4 +725,4 @@ bool apply_visual_highlight_fold_regions(EditorBuffer* buffer, VisualHighlightPa
   return changed;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

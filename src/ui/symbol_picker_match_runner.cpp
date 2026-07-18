@@ -3,7 +3,7 @@
 #include "util/fuzzy_catalog_filter.hpp"
 #include "util/thread_name.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -130,4 +130,4 @@ void SymbolPickerMatchRunner::worker_main() {
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

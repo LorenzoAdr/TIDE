@@ -8,7 +8,7 @@
 #include "parser/tree_sitter_ast_utils.hpp"
 #include "parser/tree_sitter_document.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -396,4 +396,4 @@ std::vector<ColoredBraceMarker> colored_curly_braces(TSNode root, const std::str
   return markers;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

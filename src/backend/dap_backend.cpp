@@ -22,7 +22,7 @@
 #include "util/thread_name.hpp"
 #include "util/bundled_tools.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -368,8 +368,8 @@ void DapBackend::set_preferred_adapter(DebugAdapterKind kind) {
 bool DapBackend::initialize_session() {
   dap::InitializeRequest request;
   request.adapterID = adapter_ ? adapter_->adapter_id() : std::string(kDapAdapterGdb);
-  request.clientID = "tgdb";
-  request.clientName = "tgdb";
+  request.clientID = "tuide";
+  request.clientName = "tuide";
   request.linesStartAt1 = true;
   request.columnsStartAt1 = true;
   request.pathFormat = "path";
@@ -964,7 +964,7 @@ bool DapBackend::launch_debugpy(const UiCommand& command) {
   if (!command.launch.args.empty()) {
     launch.args = command.launch.args;
   }
-  // Avoid runInTerminal reverse-requests (tgdb has no handler); keep DAP stdio clean.
+  // Avoid runInTerminal reverse-requests (tuide has no handler); keep DAP stdio clean.
   launch.console = dap::string("internalConsole");
   // Mirror GDB "stop at main" so a pre-set breakpoint / first line is reachable.
   if (command.launch.stop_at_main) {
@@ -1136,8 +1136,8 @@ void DapBackend::emit_inferior_pid(int pid) {
 bool DapBackend::configure_packet_monitor_env_locked(const LaunchConfig& launch) {
   if (!launch.packet_monitor_enabled) {
     exec_repl_locked("unset environment LD_PRELOAD", false);
-    exec_repl_locked("unset environment TGDB_PKT_FILTER_SRC", false);
-    exec_repl_locked("unset environment TGDB_PKT_FILTER_DST", false);
+    exec_repl_locked("unset environment TUIDE_PKT_FILTER_SRC", false);
+    exec_repl_locked("unset environment TUIDE_PKT_FILTER_DST", false);
     return true;
   }
 
@@ -1151,22 +1151,22 @@ bool DapBackend::configure_packet_monitor_env_locked(const LaunchConfig& launch)
     return false;
   }
   if (!launch.packet_monitor_filter_src.empty()) {
-    if (!exec_repl_locked("set environment TGDB_PKT_FILTER_SRC " +
+    if (!exec_repl_locked("set environment TUIDE_PKT_FILTER_SRC " +
                               launch.packet_monitor_filter_src,
                           false)) {
       return false;
     }
   } else {
-    exec_repl_locked("unset environment TGDB_PKT_FILTER_SRC", false);
+    exec_repl_locked("unset environment TUIDE_PKT_FILTER_SRC", false);
   }
   if (!launch.packet_monitor_filter_dst.empty()) {
-    if (!exec_repl_locked("set environment TGDB_PKT_FILTER_DST " +
+    if (!exec_repl_locked("set environment TUIDE_PKT_FILTER_DST " +
                               launch.packet_monitor_filter_dst,
                           false)) {
       return false;
     }
   } else {
-    exec_repl_locked("unset environment TGDB_PKT_FILTER_DST", false);
+    exec_repl_locked("unset environment TUIDE_PKT_FILTER_DST", false);
   }
   return true;
 }
@@ -1756,4 +1756,4 @@ void DapBackend::worker_main() {
   running_.store(false);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

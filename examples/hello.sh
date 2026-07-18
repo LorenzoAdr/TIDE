@@ -8,7 +8,7 @@ greet() {
 }
 
 main() {
-  greet "tide"
+  greet "tuide"
 }
 
 main "$@"

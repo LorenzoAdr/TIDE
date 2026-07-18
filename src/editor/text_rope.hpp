@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 // A persistent (immutable-node, copy-on-write) balanced binary tree whose
 // leaves are whole lines of text -- a "rope of lines" rather than a general
@@ -97,4 +97,4 @@ class TextRope {
   std::shared_ptr<const Node> root_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

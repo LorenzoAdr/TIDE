@@ -15,7 +15,7 @@
 #include "git/git_service.hpp"
 #include "terminal/shell_session.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using CommandCallback = std::function<void(const struct UiCommand&)>;
 
@@ -39,4 +39,4 @@ bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, 
                        AppMode* app_mode, GitService* git = nullptr,
                        GitPanelState* git_state = nullptr);
 
-}  // namespace tgdb
+}  // namespace tuide

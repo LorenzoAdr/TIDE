@@ -16,13 +16,13 @@ void expect(bool condition, const char* message) {
 }  // namespace
 
 int main() {
-  expect(tgdb::is_pdf_path("/tmp/report.PDF"), "pdf extension case insensitive");
-  expect(!tgdb::is_pdf_path("/tmp/report.txt"), "non-pdf rejected");
+  expect(tuide::is_pdf_path("/tmp/report.PDF"), "pdf extension case insensitive");
+  expect(!tuide::is_pdf_path("/tmp/report.txt"), "non-pdf rejected");
 
   bool finished = false;
-  tgdb::PdfLaunchResult result;
-  tgdb::launch_pdf_viewer_async("/tmp/tgdb-nonexistent-test.pdf",
-                                [&](const tgdb::PdfLaunchResult& launch) {
+  tuide::PdfLaunchResult result;
+  tuide::launch_pdf_viewer_async("/tmp/tuide-nonexistent-test.pdf",
+                                [&](const tuide::PdfLaunchResult& launch) {
                                   result = launch;
                                   finished = true;
                                 });

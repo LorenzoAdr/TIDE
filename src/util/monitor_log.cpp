@@ -22,7 +22,7 @@
 #include <pthread.h>
 #endif
 
-namespace tgdb::monitor_log {
+namespace tuide::monitor_log {
 
 namespace {
 
@@ -32,7 +32,7 @@ constexpr auto kTrimInterval = std::chrono::milliseconds(200);
 constexpr auto kFreezeThreshold = std::chrono::milliseconds(500);
 constexpr std::int64_t kSlowThresholdUs = 16'000;  // 16 ms — un frame UI a 60 Hz
 
-constexpr const char* kConfigDir = ".config/tgdb";
+constexpr const char* kConfigDir = ".config/tuide";
 constexpr const char* kLogFile = "monitor.log";
 
 std::atomic<bool> g_enabled{false};
@@ -331,4 +331,4 @@ MonitorScope::~MonitorScope() {
   event(category_, msg.str());
 }
 
-}  // namespace tgdb::monitor_log
+}  // namespace tuide::monitor_log

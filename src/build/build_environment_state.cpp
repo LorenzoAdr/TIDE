@@ -7,7 +7,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -116,7 +116,7 @@ std::string BuildEnvironmentStateStore::state_path(const std::string& workspace_
   if (workspace_root.empty()) {
     return {};
   }
-  return (fs::path(workspace_root) / ".tgdb" / kStateFile).string();
+  return (fs::path(workspace_root) / ".tuide" / kStateFile).string();
 }
 
 BuildEnvironmentState BuildEnvironmentStateStore::load(const std::string& workspace_root) {
@@ -161,7 +161,7 @@ bool BuildEnvironmentStateStore::save(const std::string& workspace_root,
   }
 
   std::error_code ec;
-  fs::create_directories(fs::path(workspace_root) / ".tgdb", ec);
+  fs::create_directories(fs::path(workspace_root) / ".tuide", ec);
 
   nlohmann::json discovered = nlohmann::json::array();
   for (const auto& env : state.discovered_environments) {
@@ -183,4 +183,4 @@ bool BuildEnvironmentStateStore::save(const std::string& workspace_root,
   return static_cast<bool>(output);
 }
 
-}  // namespace tgdb
+}  // namespace tuide

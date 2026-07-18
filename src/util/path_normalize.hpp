@@ -2,8 +2,8 @@
 
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 std::string normalize_path(const std::string& path);
 
-}  // namespace tgdb
+}  // namespace tuide

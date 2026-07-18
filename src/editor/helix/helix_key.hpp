@@ -5,11 +5,11 @@
 
 #include "ftxui/component/event.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 // Serialized key token used in the keymap trie (Helix-style).
 std::optional<std::string> helix_key_token(const ftxui::Event& event);
 
 bool helix_event_is_printable(const ftxui::Event& event, char* out_char);
 
-}  // namespace tgdb
+}  // namespace tuide

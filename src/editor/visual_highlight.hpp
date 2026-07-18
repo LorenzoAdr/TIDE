@@ -18,7 +18,7 @@
 #include "ui/main_layout.hpp"
 #include "util/thread_safe_queue.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct EditorBuffer;
 
@@ -215,4 +215,4 @@ inline VisualHighlightService& visual_highlight_service() {
   return VisualHighlightService::instance();
 }
 
-}  // namespace tgdb
+}  // namespace tuide

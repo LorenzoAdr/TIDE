@@ -9,7 +9,7 @@
 
 #include "util/nm_reader.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 class NmReaderRunner {
  public:
@@ -39,4 +39,4 @@ class NmReaderRunner {
   std::atomic<bool> cancel_requested_{false};
 };
 
-}  // namespace tgdb
+}  // namespace tuide

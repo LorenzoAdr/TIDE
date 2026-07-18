@@ -27,7 +27,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -208,7 +208,7 @@ bool LspClient::initialize(const std::string& workspace_root,
   // resolveSupport object is present (empty {} crashes TexLab).
   params["capabilities"]["workspace"]["symbol"]["resolveSupport"] = {
       {"properties", nlohmann::json::array({"location"})}};
-  params["clientInfo"]["name"] = "tgdb";
+  params["clientInfo"]["name"] = "tuide";
   params["clientInfo"]["version"] = "0.1.0";
   if (!initialization_options_json.empty()) {
     try {
@@ -918,21 +918,30 @@ std::vector<SymbolInfo> LspClient::workspace_symbols(const std::string& workspac
 }
 
 SymbolKind LspClient::map_completion_kind(int kind) {
+  // LSP CompletionItemKind (distinct from document SymbolKind numbering):
+  // Text=1 Method=2 Function=3 Constructor=4 Field=5 Variable=6 Class=7
+  // Interface=8 Module=9 Property=10 Value=12 Enum=13 EnumMember=20
+  // Constant=21 Struct=22 TypeParameter=25
   switch (kind) {
-    case 3:
+    case 9:  // Module
       return SymbolKind::kNamespace;
-    case 5:
-    case 7:
+    case 7:   // Class
+    case 8:   // Interface
+    case 13:  // Enum
       return SymbolKind::kClass;
-    case 22:
-    case 23:
+    case 22:  // Struct
       return SymbolKind::kStruct;
-    case 2:
-    case 6:
+    case 2:  // Method
       return SymbolKind::kMethod;
-    case 4:
-    case 12:
+    case 3:  // Function
+    case 4:  // Constructor
       return SymbolKind::kFunction;
+    case 5:   // Field
+    case 6:   // Variable
+    case 10:  // Property
+    case 12:  // Value
+    case 20:  // EnumMember
+    case 21:  // Constant
     default:
       return SymbolKind::kVariable;
   }
@@ -2340,4 +2349,4 @@ std::vector<DocumentDiagnostics> LspClient::all_diagnostics() const {
   return out;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

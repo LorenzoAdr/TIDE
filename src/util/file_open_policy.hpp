@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 enum class FileOpenKind { Allowed, Binary, Large };
 
@@ -21,4 +21,4 @@ FileOpenAssessment assess_file_open(const std::string& absolute_path);
 bool should_open_as_virtual_text(const std::string& absolute_path);
 std::string format_file_size(std::uintmax_t bytes);
 
-}  // namespace tgdb
+}  // namespace tuide

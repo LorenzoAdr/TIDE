@@ -34,7 +34,7 @@ void join_thread_if_joinable(std::thread& worker) {
 
 }  // namespace
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -1815,7 +1815,7 @@ bool LspSymbolProvider::drain_async_results() {
   }
   async_drain_invalidates_view_ = invalidates_view;
   if (drained > 0) {
-    TGDB_MON("lsp", "drain_async_results count=" + std::to_string(drained));
+    TUIDE_MON("lsp", "drain_async_results count=" + std::to_string(drained));
   }
   return updated;
 }
@@ -3429,4 +3429,4 @@ std::vector<CallHierarchyItem> LspSymbolProvider::outgoing_calls(
   return {};
 }
 
-}  // namespace tgdb
+}  // namespace tuide

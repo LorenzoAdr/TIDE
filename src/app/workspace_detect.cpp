@@ -7,7 +7,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -78,4 +78,4 @@ WorkspaceDetectResult detect_workspace_root(const std::string& anchor_path, int 
   return result;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

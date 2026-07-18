@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 class ClickableInteractionTracker {
  public:
@@ -31,4 +31,4 @@ class ClickableInteractionTracker {
   std::vector<std::pair<std::string, std::chrono::steady_clock::time_point>> presses_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

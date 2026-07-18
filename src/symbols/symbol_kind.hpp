@@ -1,7 +1,7 @@
 #pragma once
 
-namespace tgdb {
+namespace tuide {
 
 enum class SymbolKind { kNamespace, kClass, kStruct, kFunction, kMethod, kVariable };
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -10,7 +10,7 @@
 
 namespace {
 
-using tgdb::TextRope;
+using tuide::TextRope;
 
 int g_failures = 0;
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT}/build"
-TGDB="${BUILD_DIR}/tgdb"
+TUIDE="${BUILD_DIR}/tuide"
 HELLO="${BUILD_DIR}/hello"
 
 usage() {
@@ -76,8 +76,8 @@ is_ide_open_file() {
   [[ ! -x "${resolved}" ]]
 }
 
-if [[ ! -x "${TGDB}" ]]; then
-  die "no existe ${TGDB}. Ejecuta primero: ${ROOT}/tools/compile.sh"
+if [[ ! -x "${TUIDE}" ]]; then
+  die "no existe ${TUIDE}. Ejecuta primero: ${ROOT}/tools/compile.sh"
 fi
 
 if ! command -v gdb >/dev/null 2>&1; then
@@ -90,7 +90,7 @@ export TERM="${TERM:-xterm-256color}"
 export COLORTERM="${COLORTERM:-truecolor}"
 
 if [[ $# -eq 0 ]]; then
-  exec "${TGDB}"
+  exec "${TUIDE}"
 fi
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -171,11 +171,11 @@ if [[ -z "${PROGRAM}" ]]; then
       PASSTHROUGH+=(--cwd "${WORKSPACE}")
     fi
     PASSTHROUGH+=("${IDE_FILE}")
-    exec "${TGDB}" "${PASSTHROUGH[@]}"
+    exec "${TUIDE}" "${PASSTHROUGH[@]}"
   fi
   [[ -e "${WORKSPACE}" ]] || die "workspace no existe: ${WORKSPACE}"
   [[ -d "${WORKSPACE}" ]] || die "workspace debe ser un directorio: ${WORKSPACE}"
-  exec "${TGDB}" --cwd "${WORKSPACE}"
+  exec "${TUIDE}" --cwd "${WORKSPACE}"
 fi
 
 if [[ -n "${ATTACH_PID}" && -n "${ATTACH_TARGET}" ]]; then
@@ -210,4 +210,4 @@ if [[ ${#PROGRAM_ARGS[@]} -gt 0 ]]; then
   PASSTHROUGH+=(--args "${PROGRAM_ARGS[@]}")
 fi
 
-exec "${TGDB}" "${PASSTHROUGH[@]}"
+exec "${TUIDE}" "${PASSTHROUGH[@]}"

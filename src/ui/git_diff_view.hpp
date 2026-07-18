@@ -7,7 +7,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "git/git_diff.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct GitDiffViewRenderResult {
   ftxui::Element body = ftxui::text("");
@@ -20,4 +20,4 @@ GitDiffViewRenderResult render_git_diff_viewport(
     int code_width, const std::vector<TextMatch>* find_matches, int active_find_line,
     int hovered_block, int pressed_block);
 
-}  // namespace tgdb
+}  // namespace tuide

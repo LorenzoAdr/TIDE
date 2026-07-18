@@ -6,7 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace tgdb::packet_monitor {
+namespace tuide::packet_monitor {
 
 namespace fs = std::filesystem;
 
@@ -87,19 +87,19 @@ PacketRecord packet_from_json(const nlohmann::json& node) {
 std::string default_capture_dir() {
   const char* xdg_cache = std::getenv("XDG_CACHE_HOME");
   if (xdg_cache != nullptr && xdg_cache[0] != '\0') {
-    return std::string(xdg_cache) + "/tgdb/captures";
+    return std::string(xdg_cache) + "/tuide/captures";
   }
   const char* home = std::getenv("HOME");
   if (home == nullptr || home[0] == '\0') {
-    return "/tmp/tgdb/captures";
+    return "/tmp/tuide/captures";
   }
-  return std::string(home) + "/.cache/tgdb/captures";
+  return std::string(home) + "/.cache/tuide/captures";
 }
 
 bool save_capture_file(const std::string& path, const CaptureFileHeader& header,
                        const std::vector<PacketRecord>& packets, std::string* error) {
   nlohmann::json doc;
-  doc["magic"] = "TGDB_PKT_CAP";
+  doc["magic"] = "TUIDE_PKT_CAP";
   doc["version"] = 1;
   doc["protocol_path"] = header.protocol_path;
   doc["filters"] = filters_to_json(header.filters);
@@ -162,4 +162,4 @@ bool load_capture_file(const std::string& path, CaptureFileHeader* header,
   return true;
 }
 
-}  // namespace tgdb::packet_monitor
+}  // namespace tuide::packet_monitor

@@ -11,7 +11,7 @@
 
 #include "indexer/workspace_indexer.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct FilePickerMatch {
   std::string path;
@@ -72,4 +72,4 @@ class FilePickerMatchRunner {
   Result ready_result_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -2,7 +2,7 @@
 
 #include "util/thread_name.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 FindMatchRunner::FindMatchRunner() {
   worker_ = std::thread([this] { worker_main(); });
@@ -109,4 +109,4 @@ void FindMatchRunner::worker_main() {
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

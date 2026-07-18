@@ -14,7 +14,7 @@
 #include "terminal/raw_pty_screen.hpp"
 #include "util/thread_safe_queue.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct ShellLaunchConfig {
   std::string host_cwd;
@@ -97,4 +97,4 @@ class ShellSession {
   std::function<void()> output_notify_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

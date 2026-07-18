@@ -4,7 +4,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct MainLayoutState;
 
@@ -27,4 +27,4 @@ bool HandleStatusLayoutPopoverMouse(StatusLayoutPopoverState* popover,
 
 bool HandleStatusLayoutPopoverKeys(StatusLayoutPopoverState* popover, ftxui::Event event);
 
-}  // namespace tgdb
+}  // namespace tuide

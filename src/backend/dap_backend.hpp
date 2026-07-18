@@ -19,7 +19,7 @@ namespace dap {
 class Session;
 }
 
-namespace tgdb {
+namespace tuide {
 
 using DebugWakeCallback = std::function<void(DebugEventKind)>;
 
@@ -117,4 +117,4 @@ class DapBackend : public IDebugBackend {
   bool dap_initialized_event_ = false;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

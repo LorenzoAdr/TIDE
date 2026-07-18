@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -597,4 +597,4 @@ bool advance_snippet_session(EditorBuffer* buffer, SnippetSession* session) {
   return true;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

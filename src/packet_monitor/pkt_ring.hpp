@@ -7,11 +7,11 @@
 
 #include "pkt_shm.h"
 
-namespace tgdb::packet_monitor {
+namespace tuide::packet_monitor {
 
 struct PacketRecord {
   uint64_t timestamp_ns = 0;
-  uint8_t direction = TGDB_PKT_IN;
+  uint8_t direction = TUIDE_PKT_IN;
   uint16_t src_port = 0;
   uint16_t dst_port = 0;
   uint32_t src_ipv4 = 0;
@@ -23,7 +23,7 @@ struct CaptureFilters {
   std::string src_ip;
   std::string dst_ip;
   std::size_t min_size = 0;
-  std::size_t max_size = TGDB_PKT_MAX_PAYLOAD;
+  std::size_t max_size = TUIDE_PKT_MAX_PAYLOAD;
   std::string variant_key;  // empty = any
 };
 
@@ -41,8 +41,8 @@ class PacketRingReader {
   std::string path_;
   void* mapped_ = nullptr;
   std::size_t mapped_size_ = 0;
-  TgdbPktHeader* header_ = nullptr;
-  TgdbPktEntry* entries_ = nullptr;
+  TuidePktHeader* header_ = nullptr;
+  TuidePktEntry* entries_ = nullptr;
   uint32_t read_idx_ = 0;
 };
 
@@ -54,4 +54,4 @@ std::string runtime_dir_path();
 bool packet_matches_filters(const PacketRecord& packet, const CaptureFilters& filters,
                             const class ProtocolDefinition* protocol);
 
-}  // namespace tgdb::packet_monitor
+}  // namespace tuide::packet_monitor

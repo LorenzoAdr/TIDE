@@ -2,7 +2,7 @@
 
 #include "symbols/symbol_provider.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 class TreeSitterSymbolProvider : public ISymbolProvider {
  public:
@@ -12,4 +12,4 @@ class TreeSitterSymbolProvider : public ISymbolProvider {
   std::vector<CompletionItem> completions_at(const CompletionParams& params) override;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

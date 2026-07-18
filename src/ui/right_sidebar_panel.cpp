@@ -11,7 +11,7 @@
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -108,4 +108,4 @@ Component MakeRightSidebarPanel(Component outline, MainLayoutState* layout_state
   return WrapFocusable(std::move(panel));
 }
 
-}  // namespace tgdb
+}  // namespace tuide

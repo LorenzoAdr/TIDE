@@ -14,7 +14,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/symbol_picker_match_runner.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct MainLayoutState;
 
@@ -59,4 +59,4 @@ ftxui::Component MakeSymbolPickerOverlay(
     FocusManagerState* focus, std::shared_ptr<ISymbolProvider> symbols,
     SymbolWorkspaceIndexer* symbol_indexer, MainLayoutState* layout_state);
 
-}  // namespace tgdb
+}  // namespace tuide

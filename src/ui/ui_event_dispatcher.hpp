@@ -15,7 +15,7 @@ class ScreenInteractive;
 class Event;
 }  // namespace ftxui
 
-namespace tgdb {
+namespace tuide {
 
 class UiEventDispatcher {
  public:
@@ -58,4 +58,4 @@ class UiEventDispatcher {
   UiEventTrace trace_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

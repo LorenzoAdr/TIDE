@@ -15,7 +15,7 @@
 #include "ui/main_layout.hpp"
 #include "util/nm_reader.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 void request_binary_symbols_panel(MainLayoutState* layout_state, const std::string& binary_path,
                                   const std::string& name_filter = {},
@@ -34,4 +34,4 @@ ftxui::Component MakeBinarySymbolsPanel(WorkspaceModel* workspace, DebugModel* m
                                         WorkspaceIndexer* file_indexer,
                                         ShellSession* shell);
 
-}  // namespace tgdb
+}  // namespace tuide

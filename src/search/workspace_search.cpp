@@ -10,7 +10,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -284,4 +284,4 @@ WorkspaceReplaceResult replace_in_workspace(const WorkspaceSearchOptions& opts,
   return result;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

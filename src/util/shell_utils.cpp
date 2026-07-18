@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace tgdb {
+namespace tuide {
 
 std::string shell_quote(const std::string& value) {
   std::string quoted = "'";
@@ -66,4 +66,4 @@ bool command_exists(const std::string& command) {
   return std::system(probe.c_str()) == 0;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

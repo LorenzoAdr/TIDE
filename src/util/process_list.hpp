@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace tgdb {
+namespace tuide {
 
 struct ProcessEntry {
   int pid = 0;
@@ -15,4 +15,4 @@ std::vector<ProcessEntry> list_processes();
 std::vector<ProcessEntry> filter_processes(const std::vector<ProcessEntry>& all,
                                            const std::string& query);
 
-}  // namespace tgdb
+}  // namespace tuide

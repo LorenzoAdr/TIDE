@@ -11,7 +11,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -159,4 +159,4 @@ std::vector<BuildEnvironment> discover_docker_environments(const std::string& wo
   return environments;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

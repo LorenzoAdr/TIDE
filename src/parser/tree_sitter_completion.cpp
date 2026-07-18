@@ -7,7 +7,7 @@
 #include "parser/tree_sitter_locals.hpp"
 #include "parser/tree_sitter_symbols.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -82,4 +82,4 @@ std::vector<CompletionItem> local_completions_at(TSNode root, const std::string&
   return items;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

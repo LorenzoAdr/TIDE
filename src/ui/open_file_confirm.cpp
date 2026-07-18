@@ -17,7 +17,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -269,4 +269,4 @@ Component MakeOpenFileConfirmOverlay(
       });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

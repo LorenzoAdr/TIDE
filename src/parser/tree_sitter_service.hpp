@@ -16,7 +16,7 @@
 #include "symbols/hover_info.hpp"
 #include "symbols/symbol_provider.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 class TreeSitterService {
  public:
@@ -125,4 +125,4 @@ class TreeSitterService {
 
 inline TreeSitterService& tree_sitter_service() { return TreeSitterService::instance(); }
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Press **F1** inside tgdb to open the in-app shortcuts dialog (scrollable). This page is the full reference.
+Press **F1** inside tuide to open the in-app shortcuts dialog (scrollable). This page is the full reference.
 
 ## Global
 

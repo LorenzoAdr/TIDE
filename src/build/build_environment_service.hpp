@@ -11,7 +11,7 @@
 #include "build/build_environment_state.hpp"
 #include "util/compile_commands_remap.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 class BuildEnvironmentService {
  public:
@@ -54,4 +54,4 @@ class BuildEnvironmentService {
 
 BuildEnvironmentService& global_build_environment_service();
 
-}  // namespace tgdb
+}  // namespace tuide

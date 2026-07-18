@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <string>
 
-namespace tgdb {
+namespace tuide {
 
 TabVisibleRange compute_visible_tab_range(int tab_count, int active_tab, int bar_width_chars) {
   TabVisibleRange range;
@@ -36,4 +36,4 @@ std::string format_editor_tab_overflow_button(int hidden_count) {
   return out;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

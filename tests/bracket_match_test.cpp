@@ -10,7 +10,7 @@
 #include "parser/tree_sitter_document.hpp"
 #include "parser/tree_sitter_service.hpp"
 
-namespace tgdb {
+namespace tuide {
 namespace {
 
 EditorBuffer prepare_buffer(const std::string& path, std::initializer_list<const char*> lines) {
@@ -104,15 +104,15 @@ void test_application_cpp_tail_cursor_in_code() {
 }
 
 }  // namespace
-}  // namespace tgdb
+}  // namespace tuide
 
 int main() {
-  tgdb::test_simple_pair();
-  tgdb::test_nested();
-  tgdb::test_ignores_string();
-  tgdb::test_empty_lines_no_hang();
-  tgdb::test_empty_string_literal_cursor();
-  tgdb::test_application_cpp_tail_cursor_in_code();
+  tuide::test_simple_pair();
+  tuide::test_nested();
+  tuide::test_ignores_string();
+  tuide::test_empty_lines_no_hang();
+  tuide::test_empty_string_literal_cursor();
+  tuide::test_application_cpp_tail_cursor_in_code();
   std::cout << "bracket_match_test ok\n";
   return 0;
 }

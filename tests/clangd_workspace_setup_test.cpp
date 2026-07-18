@@ -30,14 +30,14 @@ void expect_eq(std::size_t actual, std::size_t expected, const char* message) {
 }  // namespace
 
 int main() {
-  const fs::path temp_root = fs::temp_directory_path() / "tgdb-clangd-setup-test";
+  const fs::path temp_root = fs::temp_directory_path() / "tuide-clangd-setup-test";
   std::error_code ec;
   fs::remove_all(temp_root, ec);
   fs::create_directories(temp_root / "include" / "nested", ec);
   fs::create_directories(temp_root / "other", ec);
 
   const std::vector<std::string> roots = {(temp_root / "include").string()};
-  const std::vector<std::string> flags = tgdb::expand_recursive_include_flags(roots);
+  const std::vector<std::string> flags = tuide::expand_recursive_include_flags(roots);
 
   // Root + immediate child "nested", not deeper levels or sibling "other".
   expect_eq(flags.size(), 2, "include flags bounded to root and direct children");

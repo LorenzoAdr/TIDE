@@ -5,7 +5,7 @@
 #include "dap/gdb_launcher.hpp"
 #include "util/bundled_tools.hpp"
 
-namespace tgdb {
+namespace tuide {
 namespace {
 
 template <typename Location>
@@ -323,4 +323,4 @@ ToolsStatusSnapshot collect_tools_status(const LspRuntimeFlags& lsp) {
   return snap;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

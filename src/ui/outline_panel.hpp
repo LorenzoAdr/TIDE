@@ -7,9 +7,9 @@
 #include "ui/focus_manager.hpp"
 #include "ui/main_layout.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 ftxui::Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
                                   MainLayoutState* layout_state);
 
-}  // namespace tgdb
+}  // namespace tuide

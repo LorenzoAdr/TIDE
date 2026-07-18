@@ -14,7 +14,7 @@
 
 namespace fs = std::filesystem;
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -191,4 +191,4 @@ Component MakeSourceSubstituteModalOverlay(Component main, SourceSubstituteModal
       });
 }
 
-}  // namespace tgdb
+}  // namespace tuide

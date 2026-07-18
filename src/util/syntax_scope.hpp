@@ -4,7 +4,7 @@
 
 #include "ftxui/dom/elements.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 // Canonical highlighting scope. The tree-sitter highlighter and the LSP
 // semantic-tokens highlighter each speak their own vocabulary of capture /
@@ -46,4 +46,4 @@ ftxui::Decorator DecoratorForSyntaxScope(SyntaxScope scope);
 // normal cursor decorator.
 bool SyntaxScopeUsesInvertedCursor(SyntaxScope scope);
 
-}  // namespace tgdb
+}  // namespace tuide

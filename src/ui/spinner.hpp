@@ -2,9 +2,9 @@
 
 #include <string>
 
-namespace tgdb::spinner {
+namespace tuide::spinner {
 
 // ASCII spinner frames: | / - backslash
 std::string glyph();
 
-}  // namespace tgdb::spinner
+}  // namespace tuide::spinner

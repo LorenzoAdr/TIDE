@@ -13,7 +13,7 @@
 #include "ui/path_browser.hpp"
 #include "util/process_list.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 enum class WizardStep {
   ChooseMode,
@@ -86,4 +86,4 @@ ftxui::Component MakeConnectionWizardOverlay(
     MainLayoutState* layout_state, ConnectionCompleteCallback on_complete,
     std::function<void()> on_request_quit = {});
 
-}  // namespace tgdb
+}  // namespace tuide

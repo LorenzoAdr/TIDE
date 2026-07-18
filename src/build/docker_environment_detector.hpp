@@ -5,8 +5,8 @@
 
 #include "build/build_environment.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 std::vector<BuildEnvironment> discover_docker_environments(const std::string& workspace_root);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -2,7 +2,7 @@
 
 #include "i18n/tr.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 namespace {
 
@@ -472,4 +472,4 @@ std::string helix_command_label(HelixCommand command) {
   }
 }
 
-}  // namespace tgdb
+}  // namespace tuide

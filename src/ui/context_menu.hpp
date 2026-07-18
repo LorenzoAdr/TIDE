@@ -19,7 +19,7 @@
 #include "ui/path_browser.hpp"
 #include "ui/source_panel.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct MainLayoutState;
 
@@ -132,4 +132,4 @@ ftxui::Component MakeContextMenuOverlay(
     const WorkspaceConfig* workspace_config, std::function<int()> editor_visible_lines,
     CommandCallback on_command);
 
-}  // namespace tgdb
+}  // namespace tuide

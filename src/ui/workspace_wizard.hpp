@@ -7,7 +7,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/path_browser.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct WorkspaceWizardState {
   bool open = false;
@@ -24,4 +24,4 @@ ftxui::Component MakeWorkspaceWizardOverlay(
     WorkspaceCompleteCallback on_complete,
     std::function<void()> on_request_quit = {});
 
-}  // namespace tgdb
+}  // namespace tuide

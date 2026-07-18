@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Depura tgdb bajo GDB y captura el stack en el punto exacto del throw.
+# Depura tuide bajo GDB y captura el stack en el punto exacto del throw.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD="${ROOT}/build"
-TGDB="${BUILD}/tgdb"
+TUIDE="${BUILD}/tuide"
 HELLO="${BUILD}/hello"
 
-if [[ ! -x "${TGDB}" ]]; then
+if [[ ! -x "${TUIDE}" ]]; then
   echo "Compila primero: cmake --build ${BUILD}" >&2
   exit 1
 fi
@@ -40,4 +40,4 @@ exec gdb -iex "set pagination off" \
   -ex "bt 40" \
   -ex "frame 4" \
   -ex "list" \
-  --args "${TGDB}" --cwd "${ROOT}" --attach "${HELLO_PID}" "${HELLO}"
+  --args "${TUIDE}" --cwd "${ROOT}" --attach "${HELLO_PID}" "${HELLO}"

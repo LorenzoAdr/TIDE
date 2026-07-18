@@ -7,7 +7,7 @@ extern "C" {
 #include <tree_sitter/api.h>
 }
 
-namespace tgdb {
+namespace tuide {
 
 inline std::string ts_node_text(TSNode node, const std::string& source) {
   const uint32_t start = ts_node_start_byte(node);
@@ -88,4 +88,4 @@ inline bool ts_node_contains_point(TSNode node, int line, int col) {
   return true;
 }
 
-}  // namespace tgdb
+}  // namespace tuide

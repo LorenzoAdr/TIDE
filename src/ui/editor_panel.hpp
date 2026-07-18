@@ -13,7 +13,7 @@
 #include "ui/focus_manager.hpp"
 #include "ui/panel.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct MainLayoutState;
 struct EditorPanelHandlers;
@@ -33,4 +33,4 @@ void flash_symbol_at_buffer_pos(WorkspaceModel* workspace, MainLayoutState* layo
 
 bool editor_deferred_sync_allowed(MainLayoutState* layout_state);
 
-}  // namespace tgdb
+}  // namespace tuide

@@ -9,7 +9,7 @@
 #include "editor/cursor_history.hpp"
 #include "editor/editor_state.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 struct OpenFileConfirmState;
 struct GitService;
@@ -87,4 +87,4 @@ struct WorkspaceModel {
   PendingOpenAt pending_open_at_;
 };
 
-}  // namespace tgdb
+}  // namespace tuide

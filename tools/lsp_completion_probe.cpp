@@ -34,7 +34,7 @@ int col_after_token(const std::string& text, int line, const char* token) {
   return 0;
 }
 
-void probe_line(tgdb::LspClient& client, const std::string& path, const std::string& text,
+void probe_line(tuide::LspClient& client, const std::string& path, const std::string& text,
                 int line, int col, const char* label) {
   const auto items = client.completions_at(path, text, line, col);
   std::cout << label << " line=" << line << " col=" << col << " items=" << items.size() << '\n';
@@ -45,7 +45,7 @@ void probe_line(tgdb::LspClient& client, const std::string& path, const std::str
 int main(int argc, char** argv) {
   const std::string workspace = argc > 1 ? argv[1] : "/home/lorenzo/workspace/tgdb";
   const std::string file = argc > 2 ? argv[2] : workspace + "/src/app/application.cpp";
-  const std::string compile_dir = argc > 3 ? argv[3] : workspace + "/.tgdb";
+  const std::string compile_dir = argc > 3 ? argv[3] : workspace + "/.tuide";
 
   const std::string text = read_file(file);
   if (text.empty()) {
@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  tgdb::LspClient client;
+  tuide::LspClient client;
   if (!client.start(workspace, compile_dir, true, false)) {
     std::cerr << "LspClient::start failed\n";
     return 1;

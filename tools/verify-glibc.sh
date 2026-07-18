@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TGDB_BIN="${TGDB_BIN:-${ROOT}/build/tgdb}"
+TUIDE_BIN="${TUIDE_BIN:-${ROOT}/build/tuide}"
 REPORT="${REPORT:-${ROOT}/build/portable-report.txt}"
 MAX_GLIBC="${MAX_GLIBC:-}"
 FAIL_ON_EXCEED=1
@@ -18,13 +18,13 @@ die() {
 
 usage() {
   cat <<'EOF'
-Uso: tools/verify-glibc.sh [opciones] [ruta/a/tgdb]
+Uso: tools/verify-glibc.sh [opciones] [ruta/a/tuide]
 
-Analiza dependencias de runtime (ldd + símbolos GLIBC/GLIBCXX) de tgdb y,
+Analiza dependencias de runtime (ldd + símbolos GLIBC/GLIBCXX) de tuide y,
 si existen, los binarios embebidos clangd/gdb en build/generated/bundled/.
 
 Opciones:
-  --max-glibc VERSION   Fallar si tgdb requiere glibc > VERSION (ej. 2.31)
+  --max-glibc VERSION   Fallar si tuide requiere glibc > VERSION (ej. 2.31)
   --no-fail             Solo informar; no salir con error
   --report PATH         Ruta del informe (default: build/portable-report.txt)
   -h, --help            Mostrar esta ayuda
@@ -76,39 +76,39 @@ while [[ $# -gt 0 ]]; do
       die "opción desconocida: $1"
       ;;
     *)
-      TGDB_BIN="$1"
+      TUIDE_BIN="$1"
       shift
       ;;
   esac
 done
 
-[[ -f "${TGDB_BIN}" ]] || die "no existe: ${TGDB_BIN}"
+[[ -f "${TUIDE_BIN}" ]] || die "no existe: ${TUIDE_BIN}"
 command -v objdump >/dev/null 2>&1 || die "objdump no encontrado en PATH"
 command -v ldd >/dev/null 2>&1 || die "ldd no encontrado en PATH"
 
 mkdir -p "$(dirname "${REPORT}")"
 : > "${REPORT}"
 
-append_report "# Informe portable tgdb"
+append_report "# Informe portable tuide"
 append_report "fecha: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-append_report "binario: ${TGDB_BIN}"
+append_report "binario: ${TUIDE_BIN}"
 append_report ""
 
-tgdb_max_glibc="$(max_symbol_version "${TGDB_BIN}" "GLIBC")"
-tgdb_max_glibcxx="$(max_symbol_version "${TGDB_BIN}" "GLIBCXX")"
-tgdb_ldd="$(ldd "${TGDB_BIN}" 2>/dev/null || true)"
+tuide_max_glibc="$(max_symbol_version "${TUIDE_BIN}" "GLIBC")"
+tuide_max_glibcxx="$(max_symbol_version "${TUIDE_BIN}" "GLIBCXX")"
+tuide_ldd="$(ldd "${TUIDE_BIN}" 2>/dev/null || true)"
 
-append_report "## tgdb"
-append_report "GLIBC máx: ${tgdb_max_glibc:-ninguno}"
-append_report "GLIBCXX máx: ${tgdb_max_glibcxx:-ninguno}"
+append_report "## tuide"
+append_report "GLIBC máx: ${tuide_max_glibc:-ninguno}"
+append_report "GLIBCXX máx: ${tuide_max_glibcxx:-ninguno}"
 append_report ""
 append_report "### ldd"
-append_report "${tgdb_ldd}"
+append_report "${tuide_ldd}"
 append_report ""
 
-log "tgdb: GLIBC máx ${tgdb_max_glibc:-desconocido}, GLIBCXX máx ${tgdb_max_glibcxx:-desconocido}"
-log "tgdb ldd:"
-printf '%s\n' "${tgdb_ldd}" | sed 's/^/  /'
+log "tuide: GLIBC máx ${tuide_max_glibc:-desconocido}, GLIBCXX máx ${tuide_max_glibcxx:-desconocido}"
+log "tuide ldd:"
+printf '%s\n' "${tuide_ldd}" | sed 's/^/  /'
 
 clangd="$(find "${ROOT}/build/generated/bundled" -path '*/clangd_payload/bin/clangd' -type f 2>/dev/null | head -n1 || true)"
 append_report "## clangd"
@@ -143,15 +143,15 @@ else
   fi
 fi
 
-if [[ -n "${MAX_GLIBC}" && -n "${tgdb_max_glibc}" ]]; then
-  if version_gt "GLIBC_${tgdb_max_glibc}" "GLIBC_${MAX_GLIBC}"; then
-    msg="tgdb requiere GLIBC_${tgdb_max_glibc} (> ${MAX_GLIBC} permitido)"
+if [[ -n "${MAX_GLIBC}" && -n "${tuide_max_glibc}" ]]; then
+  if version_gt "GLIBC_${tuide_max_glibc}" "GLIBC_${MAX_GLIBC}"; then
+    msg="tuide requiere GLIBC_${tuide_max_glibc} (> ${MAX_GLIBC} permitido)"
     if [[ "${FAIL_ON_EXCEED}" == "1" ]]; then
       die "${msg}"
     fi
     log "aviso: ${msg}"
   else
-    log "GLIBC_${tgdb_max_glibc} <= ${MAX_GLIBC} (OK)"
+    log "GLIBC_${tuide_max_glibc} <= ${MAX_GLIBC} (OK)"
   fi
 fi
 

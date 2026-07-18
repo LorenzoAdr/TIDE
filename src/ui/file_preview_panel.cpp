@@ -14,7 +14,7 @@
 #include "util/syntax_highlight.hpp"
 #include "util/build_file_highlight.hpp"
 
-namespace tgdb {
+namespace tuide {
 
 using namespace ftxui;
 
@@ -199,4 +199,4 @@ Element RenderFolderPreviewPanel(const std::vector<BrowserEntry>& entries,
          size(WIDTH, EQUAL, pane_width) | size(HEIGHT, EQUAL, pane_height);
 }
 
-}  // namespace tgdb
+}  // namespace tuide
