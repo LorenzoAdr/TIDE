@@ -44,6 +44,7 @@
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/open_file_confirm.hpp"
+#include "ui/lsp_missing_toast.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/quit_confirm.hpp"
 #include "ui/debug_launch_modal.hpp"
@@ -341,6 +342,10 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	});
 	symbol_provider_->set_lsp_status_callback([this](const std::string& i18n_key) {
 		set_workspace_status(i18n::tr(i18n_key));
+		if (is_lsp_missing_status_key(i18n_key)) {
+			enqueue_ui_task([this, i18n_key]() { maybe_show_lsp_missing_toast(i18n_key); });
+			UI_WAKE(&layout_state_, "app");
+		}
 	});
 	app_settings_ = AppSettings::load();
 	i18n::set_locale(app_settings_.ui_locale);
@@ -444,6 +449,124 @@ void Application::request_terminal_autostart() {
 	}
 	layout_state_.console_visible = true;
 	layout_state_.terminal_start_requested = true;
+}
+
+void Application::inject_terminal_command(const std::string& command) {
+	if (command.empty()) {
+		return;
+	}
+	focus_state_.region = FocusRegion::Terminal;
+	layout_state_.console_visible = true;
+	layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
+	layout_state_.text_input_focus = TextInputFocus::Console;
+	layout_state_.terminal_start_requested = true;
+	layout_state_.focus_sync_needed = true;
+	pending_terminal_inject_ = command;
+	try_flush_terminal_inject();
+	UI_WAKE(&layout_state_, "app");
+}
+
+void Application::try_flush_terminal_inject() {
+	if (pending_terminal_inject_.empty()) {
+		return;
+	}
+	if (!shell_session_.running()) {
+		layout_state_.console_visible = true;
+		layout_state_.terminal_start_requested = true;
+		return;
+	}
+	shell_session_.write_raw(pending_terminal_inject_);
+	pending_terminal_inject_.clear();
+}
+
+void Application::maybe_show_lsp_missing_toast(const std::string& status_i18n_key) {
+	if (lsp_missing_toast_suppressed_ || lsp_missing_toast_state_.open) {
+		return;
+	}
+	const auto info = lsp_missing_prompt_for_status_key(status_i18n_key);
+	if (!info.has_value()) {
+		return;
+	}
+	if (lsp_missing_notified_servers_.count(info->server_id) > 0) {
+		return;
+	}
+	lsp_missing_notified_servers_.insert(info->server_id);
+
+	if (!tgdb_source_root_probed_) {
+		tgdb_source_root_probed_ = true;
+		std::vector<std::string> roots;
+		if (!workspace_.root.empty()) {
+			roots.push_back(workspace_.root);
+		}
+		if (!config_.launch_directory.empty()) {
+			roots.push_back(config_.launch_directory);
+		}
+		cached_tgdb_source_root_ = find_tgdb_source_root(roots);
+	}
+	const bool can_bundle = cached_tgdb_source_root_.has_value();
+	lsp_missing_toast_state_.show(*info, can_bundle);
+	UI_WAKE(&layout_state_, "app");
+}
+
+void Application::on_lsp_missing_install() {
+	if (!lsp_missing_toast_state_.open) {
+		return;
+	}
+	const std::string command = lsp_missing_toast_state_.info.install_command;
+	lsp_missing_toast_state_.close();
+	if (command.empty()) {
+		return;
+	}
+	inject_terminal_command(command);
+	set_workspace_status(i18n::tr("lsp_toast.install_ready"));
+}
+
+void Application::on_lsp_missing_bundle() {
+	if (!lsp_missing_toast_state_.open || !lsp_missing_toast_state_.show_bundle_action) {
+		return;
+	}
+	if (!cached_tgdb_source_root_.has_value()) {
+		lsp_missing_toast_state_.close();
+		set_workspace_status(i18n::tr("lsp_toast.bundle_failed"));
+		return;
+	}
+	const LspMissingPromptInfo info = lsp_missing_toast_state_.info;
+	lsp_missing_toast_state_.close();
+	if (!enable_bundle_option_in_config(*cached_tgdb_source_root_, info)) {
+		set_workspace_status(i18n::tr("lsp_toast.bundle_failed"));
+		return;
+	}
+
+	auto save_dirty = [](WorkspaceModel& ws) {
+		ws.flush_active_tab();
+		const std::vector<std::string> dirty = ws.dirty_open_paths();
+		const int previous = ws.active_tab;
+		for (const std::string& path : dirty) {
+			const int idx = ws.find_tab(path);
+			if (idx >= 0) {
+				ws.switch_to_tab(idx);
+				ws.save_buffer();
+			}
+		}
+		if (previous >= 0 && previous < static_cast<int>(ws.tabs.size())) {
+			ws.switch_to_tab(previous);
+		}
+	};
+	save_dirty(workspace_);
+	save_dirty(secondary_workspace_);
+
+	PostExitShellRequest request;
+	request.cwd = *cached_tgdb_source_root_;
+	request.command = compile_command_after_bundle_config();
+	request_post_exit_shell(std::move(request));
+	lsp_missing_toast_suppressed_ = true;
+	begin_shutdown(active_screen_);
+}
+
+void Application::on_lsp_missing_ignore() {
+	lsp_missing_toast_suppressed_ = true;
+	lsp_missing_toast_state_.close();
+	UI_WAKE(&layout_state_, "app");
 }
 
 void Application::rebuild_shell_launch_config() {
@@ -689,6 +812,7 @@ void Application::run_input_sync_drain(int64_t now_ms) {
 		}
 	}
 	drain_ui_tasks();
+	try_flush_terminal_inject();
 }
 
 void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan &plan,
@@ -778,6 +902,7 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 	if (plan.run_ui_tasks) {
 		drain_ui_tasks();
 	}
+	try_flush_terminal_inject();
 
 	if (git_tab_active(&layout_state_)) {
 		GitPanelEnsureSelectedDiff(&git_service_, &git_panel_state_);
@@ -2040,7 +2165,7 @@ bool Application::any_modal_open() const {
 	       shortcuts_modal_state_.open || settings_modal_state_.open ||
 	       source_substitute_state_.open || quit_confirm_state_.open ||
 	       debug_launch_modal_state_.open() || open_file_confirm_state_.is_open() ||
-	       context_menu_active(&layout_state_.context_menu);
+	       lsp_missing_toast_state_.open || context_menu_active(&layout_state_.context_menu);
 }
 
 void Application::apply_app_settings() {
@@ -2243,6 +2368,7 @@ int Application::run() {
 
 	const bool ui_smoke = std::getenv("TGDB_UI_SMOKE") != nullptr;
 	auto screen = ui_smoke ? ScreenInteractive::TerminalOutput() : ScreenInteractive::Fullscreen();
+	active_screen_ = &screen;
 	screen.TrackMouse(false);
 	if (!ui_smoke) {
 		screen.ForceHandleCtrlC(false);
@@ -2570,7 +2696,12 @@ int Application::run() {
 		    return 24;
 	    }, on_command);
 
-	auto inner_root = CatchEvent(with_context_menu, [this, &screen, on_command](const Event &event) {
+	auto with_lsp_missing_toast = MakeLspMissingToastOverlay(
+	    with_context_menu, &lsp_missing_toast_state_, &layout_state_,
+	    [this] { on_lsp_missing_install(); }, [this] { on_lsp_missing_bundle(); },
+	    [this] { on_lsp_missing_ignore(); });
+
+	auto inner_root = CatchEvent(with_lsp_missing_toast, [this, &screen, on_command](const Event &event) {
 		try {
 			const bool editor_browse_active = app_mode_ == AppMode::kNormal ||
 			                                  model_.is_post_mortem || app_mode_ == AppMode::kDebug;
@@ -3312,6 +3443,7 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 		backend_->stop();
 		backend_started_ = false;
 	}
+	active_screen_ = nullptr;
 	return 0;
 }
 

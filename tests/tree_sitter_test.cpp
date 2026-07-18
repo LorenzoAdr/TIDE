@@ -647,6 +647,25 @@ void test_editing_line_highlights_sync() {
   assert(stale->size() >= 2);
 }
 
+void test_stale_highlights_tolerate_trailing_newline_buffer_line_count() {
+  // Buffer representation of a file that ends with '\n' includes a trailing
+  // empty line, so lines.size() is one higher than the normalized tree-sitter
+  // document. Incremental syntax highlighting must still reuse the baseline.
+  const std::string path = "trailing_nl_stale.cpp";
+  const std::string initial = "int foo() { return 0; }\nint bar() { return 0; }\n";
+  wait_document_ready(path, initial);
+
+  const std::vector<LineHighlights>* by_doc_lines =
+      tree_sitter_service().stale_highlights_for(path, 2);
+  assert(by_doc_lines != nullptr);
+  assert(by_doc_lines->size() == 2);
+
+  const std::vector<LineHighlights>* by_buffer_lines =
+      tree_sitter_service().stale_highlights_for(path, 3);
+  assert(by_buffer_lines != nullptr);
+  assert(by_buffer_lines->size() == 2);
+}
+
 void test_parse_debounce_coalesces_edits() {
   const std::string path = "debounce.cpp";
   const std::string initial = "int value = 0;\n";
@@ -933,6 +952,7 @@ int main() {
   tgdb::test_symbols_refresh_after_sync_edit();
   tgdb::test_sync_edit_keeps_ast_before_worker();
   tgdb::test_editing_line_highlights_sync();
+  tgdb::test_stale_highlights_tolerate_trailing_newline_buffer_line_count();
   tgdb::test_parse_debounce_coalesces_edits();
   tgdb::test_duplicate_line_highlights_escape_string();
   tgdb::test_edit_hint_matches_diff_on_char_insert();

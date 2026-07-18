@@ -66,6 +66,14 @@ struct ContextMenuState {
   bool indexer_paths_open = false;
   bool move_browser_open = false;
   bool move_is_dir = false;
+  bool template_picker_open = false;
+  int template_picker_selected = 0;
+  int template_picker_scroll = 0;
+  std::vector<std::string> template_picker_labels;
+  std::vector<std::string> template_picker_details;
+  std::vector<std::string> template_picker_bodies;
+  std::vector<ftxui::Box> template_picker_row_boxes;
+  ftxui::Box template_picker_list_box;
   PathBrowserState move_browser;
   int indexer_paths_scroll = 0;
   std::vector<std::string> indexer_paths_lines;

@@ -519,9 +519,13 @@ void TreeSitterDocumentCache::request_prepare(const std::string& path, const std
         if (layout_edit.has_value() && !entry->line_highlights.empty()) {
           remap_line_highlights_for_count_change(&entry->line_highlights, *layout_edit,
                                                  old_line_count, new_line_count);
-        } else {
+        } else if (old_line_count != new_line_count) {
+          // Layout changed without a usable remap edit -- drop the baseline
+          // rather than leave shifted colors on the wrong rows.
           entry->line_highlights.clear();
         }
+        // Same-line edit: keep the pre-edit baseline so incremental rendering
+        // can keep coloring non-caret lines until the worker refreshes.
         entry->parse_ready = false;
         entry->highlights_ready = false;
         entry->symbols_ready = false;

@@ -40,6 +40,9 @@ bool diagnostics_reveal_allowed(const int64_t last_content_edit_ms, ISymbolProvi
   if (!lsp_ui_allowed || path.empty() || symbols == nullptr || !symbols->supports_diagnostics()) {
     return false;
   }
+  if (symbols->document_sync_pending(path)) {
+    return false;
+  }
   if (symbols->diagnostics_display_ready(path)) {
     return true;
   }

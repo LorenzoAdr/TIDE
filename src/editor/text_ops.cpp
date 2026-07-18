@@ -202,6 +202,8 @@ void delete_range(EditorBuffer* buffer, int start_line, int start_col, int end_l
   buffer->semantic_layout_dirty_from_line = std::min(buffer->semantic_layout_dirty_from_line, start_line);
 }
 
+}  // namespace
+
 bool any_cursor_has_selection(const EditorBuffer& buffer) {
   for (const auto& cursor : buffer.cursors) {
     if (cursor.has_selection()) {
@@ -210,6 +212,8 @@ bool any_cursor_has_selection(const EditorBuffer& buffer) {
   }
   return false;
 }
+
+namespace {
 
 char closing_for_open_char(char open) {
   switch (open) {
@@ -1703,6 +1707,111 @@ std::size_t comment_insert_column(const std::string& line) {
   return index;
 }
 
+namespace {
+
+std::string indent_prefix_unit() {
+  if (editor_indent::use_tab_char()) {
+    return "\t";
+  }
+  return std::string(static_cast<std::size_t>(std::max(1, editor_indent::width())), ' ');
+}
+
+int unindent_prefix_length(const std::string& line) {
+  if (line.empty()) {
+    return 0;
+  }
+  if (line.front() == '\t') {
+    return 1;
+  }
+  const int width = std::max(1, editor_indent::width());
+  int removed = 0;
+  while (removed < width && static_cast<std::size_t>(removed) < line.size() &&
+         line[static_cast<std::size_t>(removed)] == ' ') {
+    ++removed;
+  }
+  return removed;
+}
+
+}  // namespace
+
+void indent_lines(EditorBuffer* buffer) {
+  if (buffer == nullptr || buffer->lines.empty()) {
+    return;
+  }
+
+  std::vector<int> lines;
+  collect_affected_lines(*buffer, &lines);
+  if (lines.empty()) {
+    return;
+  }
+
+  const std::string unit = indent_prefix_unit();
+  const int delta = static_cast<int>(unit.size());
+  commit_undo_group(buffer);
+  push_undo(buffer);
+  for (int line_index : lines) {
+    if (line_index < 0 || line_index >= static_cast<int>(buffer->lines.size())) {
+      continue;
+    }
+    std::string line = buffer->lines[static_cast<std::size_t>(line_index)];
+    line.insert(0, unit);
+    buffer->lines.set_line(line_index, std::move(line));
+    adjust_cursors_after_line_edit(buffer, line_index, 0, delta);
+  }
+
+  clamp_all_cursors(buffer);
+  merge_overlapping_cursors(buffer);
+  editor_buffer_invalidate_joined(buffer);
+  mark_dirty(buffer);
+}
+
+void unindent_lines(EditorBuffer* buffer) {
+  if (buffer == nullptr || buffer->lines.empty()) {
+    return;
+  }
+
+  std::vector<int> lines;
+  collect_affected_lines(*buffer, &lines);
+  if (lines.empty()) {
+    return;
+  }
+
+  bool any_removable = false;
+  for (int line_index : lines) {
+    if (line_index < 0 || line_index >= static_cast<int>(buffer->lines.size())) {
+      continue;
+    }
+    if (unindent_prefix_length(buffer->lines[static_cast<std::size_t>(line_index)]) > 0) {
+      any_removable = true;
+      break;
+    }
+  }
+  if (!any_removable) {
+    return;
+  }
+
+  commit_undo_group(buffer);
+  push_undo(buffer);
+  for (int line_index : lines) {
+    if (line_index < 0 || line_index >= static_cast<int>(buffer->lines.size())) {
+      continue;
+    }
+    std::string line = buffer->lines[static_cast<std::size_t>(line_index)];
+    const int removed = unindent_prefix_length(line);
+    if (removed <= 0) {
+      continue;
+    }
+    line.erase(0, static_cast<std::size_t>(removed));
+    buffer->lines.set_line(line_index, std::move(line));
+    adjust_cursors_after_line_edit(buffer, line_index, 0, -removed);
+  }
+
+  clamp_all_cursors(buffer);
+  merge_overlapping_cursors(buffer);
+  editor_buffer_invalidate_joined(buffer);
+  mark_dirty(buffer);
+}
+
 void comment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
   if (buffer == nullptr || buffer->lines.empty()) {
     return;
@@ -1736,6 +1845,10 @@ void comment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
   }
   clamp_all_cursors(buffer);
   merge_overlapping_cursors(buffer);
+  // set_line() above bypasses editor_buffer_note_*; without invalidating, the
+  // joined cache (and thus tree-sitter) keeps the pre-comment text while the
+  // UI paints the new lines — stale highlight spans shift over the prefix.
+  editor_buffer_invalidate_joined(buffer);
   mark_dirty(buffer);
 }
 
@@ -1771,6 +1884,7 @@ void uncomment_lines(EditorBuffer* buffer, const LineCommentStyle& style) {
   }
   clamp_all_cursors(buffer);
   merge_overlapping_cursors(buffer);
+  editor_buffer_invalidate_joined(buffer);
   mark_dirty(buffer);
 }
 

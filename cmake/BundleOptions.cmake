@@ -52,6 +52,12 @@ option(TGDB_BUNDLE_TSSERVER
 option(TGDB_FORCE_BUNDLED_TSSERVER
        "Prefer embedded typescript-language-server (requires TGDB_BUNDLE_TSSERVER)" OFF)
 
+set(TGDB_DEFAULT_UI_LOCALE "es" CACHE STRING "Default UI locale baked into the binary: es|en")
+set_property(CACHE TGDB_DEFAULT_UI_LOCALE PROPERTY STRINGS es en)
+if(NOT TGDB_DEFAULT_UI_LOCALE MATCHES "^(es|en)$")
+  message(FATAL_ERROR "TGDB_DEFAULT_UI_LOCALE must be 'es' or 'en'")
+endif()
+
 set(TGDB_CLANGD_VERSION "19.1.2" CACHE STRING "clangd release version to bundle")
 set(TGDB_GDB_STATIC_VERSION "v16.3-static" CACHE STRING "gdb-static release tag")
 set(TGDB_GDB_CA_VERSION "16.3-ca" CACHE STRING "gdb+core_analyzer bundle version tag")
@@ -74,6 +80,8 @@ set(TGDB_NODE_VERSION "22.16.0" CACHE STRING "Node.js version for Bash LS/DAP bl
 set(TGDB_RUST_ANALYZER_VERSION "2025-12-29" CACHE STRING
     "rust-analyzer dated release tag to bundle")
 set(TGDB_GOPLS_VERSION "v0.23.0" CACHE STRING "gopls module version (go install)")
+set(TGDB_GO_VERSION "1.26.5" CACHE STRING
+    "Go toolchain version bootstrapped to build gopls when go is not on PATH")
 set(TGDB_ZLS_VERSION "0.16.0" CACHE STRING "zls release version to bundle")
 set(TGDB_LUA_LS_VERSION "3.18.2" CACHE STRING "lua-language-server release version to bundle")
 set(TGDB_FORTLS_VERSION "3.2.2" CACHE STRING "fortls PyPI version to bundle")

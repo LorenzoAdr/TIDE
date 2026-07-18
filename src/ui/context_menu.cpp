@@ -9,6 +9,8 @@
 #include <fstream>
 #include <sstream>
 
+#include "editor/doc_comment.hpp"
+#include "editor/code_snippets.hpp"
 #include "editor/text_ops.hpp"
 #include "editor/text_search.hpp"
 #include "editor/undo_stack.hpp"
@@ -17,6 +19,7 @@
 #include "ftxui/dom/elements.hpp"
 #include "indexer/index_rules.hpp"
 #include "lsp/lsp_text_edits.hpp"
+#include "parser/tree_sitter_service.hpp"
 #include "symbols/code_action.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/clickable.hpp"
@@ -96,6 +99,7 @@ void set_items(ContextMenuState* state, ContextMenuKind kind,
   state->row_boxes.clear();
   state->selected = 0;
   state->delete_confirm_open = false;
+  state->template_picker_open = false;
   for (const auto& item : items) {
     state->labels.push_back(item.first);
     state->action_ids.push_back(item.second);
@@ -124,6 +128,47 @@ void assign_watch_frame(UiCommand* command, const DebugModel* model) {
   }
 }
 
+std::string indent_snippet_body(const std::string& body, int indent_cols) {
+  if (indent_cols <= 0 || body.empty()) {
+    return body;
+  }
+  const std::string pad(static_cast<std::size_t>(indent_cols), ' ');
+  std::string out;
+  out.reserve(body.size() + static_cast<std::size_t>(indent_cols) * 8);
+  bool at_line_start = true;
+  for (char c : body) {
+    if (at_line_start) {
+      out += pad;
+      at_line_start = false;
+    }
+    out.push_back(c);
+    if (c == '\n') {
+      at_line_start = true;
+    }
+  }
+  return out;
+}
+
+void open_template_picker(ContextMenuState* state, const std::string& path) {
+  if (state == nullptr) {
+    return;
+  }
+  state->template_picker_open = true;
+  state->template_picker_selected = 0;
+  state->template_picker_scroll = 0;
+  state->template_picker_labels.clear();
+  state->template_picker_details.clear();
+  state->template_picker_bodies.clear();
+  state->template_picker_row_boxes.clear();
+  state->open = false;
+  for (const CodeTemplate& tmpl : code_templates_for_path(path)) {
+    state->template_picker_labels.push_back(tmpl.label);
+    state->template_picker_details.push_back(tmpl.detail);
+    state->template_picker_bodies.push_back(tmpl.body);
+    state->template_picker_row_boxes.push_back(Box{});
+  }
+}
+
 void append_debug_watch_items(ContextMenuState* state, bool show_hardware_watch) {
   if (state == nullptr) {
     return;
@@ -136,6 +181,147 @@ void append_debug_watch_items(ContextMenuState* state, bool show_hardware_watch)
     state->action_ids.push_back("hardware_watch");
     state->row_boxes.push_back(Box{});
   }
+}
+
+void append_menu_item(ContextMenuState* state, const std::string& label, const char* action_id) {
+  if (state == nullptr || action_id == nullptr) {
+    return;
+  }
+  state->labels.push_back(label);
+  state->action_ids.push_back(action_id);
+  state->row_boxes.push_back(Box{});
+}
+
+void append_doc_comment_items(ContextMenuState* state, bool include_doc_comment) {
+  if (include_doc_comment) {
+    append_menu_item(state, i18n::tr("context_menu.add_doc_comment"), "add_doc_comment");
+  }
+  append_menu_item(state, i18n::tr("context_menu.add_separator"), "add_separator");
+  append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
+  append_menu_item(state, i18n::tr("context_menu.insert_template"), "insert_template");
+}
+
+int leading_indent_cols(const std::string& line) {
+  int cols = 0;
+  for (char c : line) {
+    if (c == ' ') {
+      ++cols;
+    } else if (c == '\t') {
+      cols += 4;
+    } else {
+      break;
+    }
+  }
+  return cols;
+}
+
+std::string declaration_near_line(const EditorBuffer& buffer, int line) {
+  if (line < 0 || line >= buffer.lines.size()) {
+    return {};
+  }
+  std::string decl = buffer.lines[static_cast<std::size_t>(line)];
+  if (decl.find('(') != std::string::npos && decl.find(')') != std::string::npos) {
+    return decl;
+  }
+  for (int i = 1; i < 6 && line + i < buffer.lines.size(); ++i) {
+    decl.push_back(' ');
+    decl += buffer.lines[static_cast<std::size_t>(line + i)];
+    if (decl.find(')') != std::string::npos) {
+      break;
+    }
+  }
+  return decl;
+}
+
+SymbolKind resolve_symbol_kind_at(const EditorBuffer& buffer, int line,
+                                  const std::string& symbol_name) {
+  const auto chain =
+      tree_sitter_service().scope_chain_at(buffer.path, buffer.lines.to_vector(), line);
+  for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+    if (it->name == symbol_name) {
+      return it->kind;
+    }
+  }
+  const auto symbols =
+      tree_sitter_service().symbols_for_buffer(buffer.path, buffer.lines.to_vector());
+  for (const SymbolInfo& sym : symbols) {
+    if (sym.name == symbol_name && std::abs((sym.line - 1) - line) <= 2) {
+      return sym.kind;
+    }
+  }
+  if (!chain.empty()) {
+    return chain.back().kind;
+  }
+  return SymbolKind::kVariable;
+}
+
+int resolve_symbol_start_line(const EditorBuffer& buffer, int line,
+                              const std::string& symbol_name) {
+  const auto symbols =
+      tree_sitter_service().symbols_for_buffer(buffer.path, buffer.lines.to_vector());
+  for (const SymbolInfo& sym : symbols) {
+    if (sym.name == symbol_name && std::abs((sym.line - 1) - line) <= 2) {
+      return std::max(0, sym.line - 1);
+    }
+  }
+  return line;
+}
+
+WorkspaceModel* workspace_for_editor_action(WorkspaceModel* workspace,
+                                            WorkspaceModel* secondary_workspace,
+                                            FocusManagerState* focus) {
+  if (focus != nullptr && focus->region == FocusRegion::SecondaryEditor &&
+      secondary_workspace != nullptr) {
+    return secondary_workspace;
+  }
+  return workspace;
+}
+
+EditorPanelHandlers* handlers_for_editor_action(MainLayoutState* layout_state,
+                                                FocusManagerState* focus) {
+  if (layout_state == nullptr) {
+    return nullptr;
+  }
+  if (focus != nullptr && focus->region == FocusRegion::SecondaryEditor) {
+    return &layout_state->secondary_editor;
+  }
+  return &layout_state->primary_editor;
+}
+
+bool insert_snippet_via_handlers(MainLayoutState* layout_state, FocusManagerState* focus,
+                                 int insert_line, int insert_col, const std::string& snippet) {
+  EditorPanelHandlers* handlers = handlers_for_editor_action(layout_state, focus);
+  if (handlers == nullptr || !handlers->insert_snippet_at) {
+    return false;
+  }
+  return handlers->insert_snippet_at(insert_line, insert_col, snippet);
+}
+
+bool apply_selected_template(ContextMenuState* state, WorkspaceModel* workspace,
+                             WorkspaceModel* secondary_workspace, FocusManagerState* focus,
+                             MainLayoutState* layout_state) {
+  if (state == nullptr || !state->template_picker_open) {
+    return false;
+  }
+  if (state->template_picker_selected < 0 ||
+      state->template_picker_selected >=
+          static_cast<int>(state->template_picker_bodies.size())) {
+    return false;
+  }
+  WorkspaceModel* target = workspace_for_editor_action(workspace, secondary_workspace, focus);
+  if (target == nullptr) {
+    return false;
+  }
+  target->ensure_buffer();
+  EditorBuffer& buffer = target->buffer;
+  int indent = 0;
+  if (state->editor_line >= 0 && state->editor_line < buffer.lines.size()) {
+    indent = leading_indent_cols(buffer.lines[static_cast<std::size_t>(state->editor_line)]);
+  }
+  const std::string& raw =
+      state->template_picker_bodies[static_cast<std::size_t>(state->template_picker_selected)];
+  const std::string snippet = indent_snippet_body(raw, indent);
+  return insert_snippet_via_handlers(layout_state, focus, state->editor_line, 0, snippet);
 }
 
 NavigationParams navigation_params_at(WorkspaceModel* workspace, int line, int col) {
@@ -1121,6 +1307,102 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
+  if (action_id == "add_doc_comment") {
+    WorkspaceModel* target =
+        workspace_for_editor_action(workspace, secondary_workspace, focus);
+    if (target == nullptr) {
+      return true;
+    }
+    target->ensure_buffer();
+    EditorBuffer& buffer = target->buffer;
+    const int symbol_line =
+        resolve_symbol_start_line(buffer, state->editor_line, state->symbol_name);
+    DocCommentRequest request;
+    request.path = buffer.path.empty() ? state->absolute_path : buffer.path;
+    request.kind = resolve_symbol_kind_at(buffer, symbol_line, state->symbol_name);
+    request.symbol_name = state->symbol_name;
+    request.declaration_line = declaration_near_line(buffer, symbol_line);
+    if (symbol_line >= 0 && symbol_line < buffer.lines.size()) {
+      request.indent_cols =
+          leading_indent_cols(buffer.lines[static_cast<std::size_t>(symbol_line)]);
+    }
+    const DocCommentInsertPlan plan = plan_doc_comment_insert(request, symbol_line);
+    insert_snippet_via_handlers(layout_state, focus, plan.insert_line, plan.insert_col,
+                                plan.snippet);
+    if (focus != nullptr) {
+      focus->region = focus->region == FocusRegion::SecondaryEditor
+                          ? FocusRegion::SecondaryEditor
+                          : FocusRegion::Editor;
+    }
+    return true;
+  }
+
+  if (action_id == "add_separator") {
+    WorkspaceModel* target =
+        workspace_for_editor_action(workspace, secondary_workspace, focus);
+    if (target == nullptr) {
+      return true;
+    }
+    target->ensure_buffer();
+    EditorBuffer& buffer = target->buffer;
+    int indent = 0;
+    if (state->editor_line >= 0 && state->editor_line < buffer.lines.size()) {
+      indent = leading_indent_cols(buffer.lines[static_cast<std::size_t>(state->editor_line)]);
+    }
+    const std::string path = buffer.path.empty() ? state->absolute_path : buffer.path;
+    const std::string snippet = build_separator_snippet(path, indent);
+    insert_snippet_via_handlers(layout_state, focus, state->editor_line, 0, snippet);
+    if (focus != nullptr) {
+      focus->region = focus->region == FocusRegion::SecondaryEditor
+                          ? FocusRegion::SecondaryEditor
+                          : FocusRegion::Editor;
+    }
+    return true;
+  }
+
+  if (action_id == "add_file_header") {
+    const bool from_explorer = state->kind == ContextMenuKind::File;
+    WorkspaceModel* target = workspace;
+    FocusManagerState local_focus;
+    local_focus.region = FocusRegion::Editor;
+    FocusManagerState* insert_focus = focus;
+    if (from_explorer) {
+      if (workspace == nullptr || state->absolute_path.empty()) {
+        return true;
+      }
+      workspace->open_file(state->absolute_path);
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Editor;
+      }
+      insert_focus = &local_focus;
+      target = workspace;
+    } else {
+      target = workspace_for_editor_action(workspace, secondary_workspace, focus);
+    }
+    if (target == nullptr) {
+      return true;
+    }
+    target->ensure_buffer();
+    const std::string path =
+        target->buffer.path.empty() ? state->absolute_path : target->buffer.path;
+    const std::string snippet = build_file_header_snippet(path);
+    insert_snippet_via_handlers(layout_state, insert_focus, 0, 0, snippet);
+    return true;
+  }
+
+  if (action_id == "insert_template") {
+    WorkspaceModel* target =
+        workspace_for_editor_action(workspace, secondary_workspace, focus);
+    const std::string path =
+        !state->absolute_path.empty()
+            ? state->absolute_path
+            : (target != nullptr
+                   ? (target->buffer.path.empty() ? target->active_file : target->buffer.path)
+                   : std::string{});
+    open_template_picker(state, path);
+    return true;
+  }
+
   return false;
 }
 
@@ -1192,7 +1474,8 @@ void focus_search_with_filter(MainLayoutState* layout_state, const std::string& 
 
 bool context_menu_active(const ContextMenuState* state) {
   return state != nullptr && (state->open || state->rename_open || state->delete_confirm_open ||
-                              state->indexer_paths_open || state->move_browser_open);
+                              state->indexer_paths_open || state->move_browser_open ||
+                              state->template_picker_open);
 }
 
 void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) {
@@ -1204,6 +1487,13 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
   state->delete_confirm_open = false;
   state->indexer_paths_open = false;
   state->move_browser_open = false;
+  state->template_picker_open = false;
+  state->template_picker_selected = 0;
+  state->template_picker_scroll = 0;
+  state->template_picker_labels.clear();
+  state->template_picker_details.clear();
+  state->template_picker_bodies.clear();
+  state->template_picker_row_boxes.clear();
   state->indexer_paths_scroll = 0;
   state->indexer_paths_lines.clear();
   state->rename_skip_return = false;
@@ -1272,6 +1562,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
                  {i18n::tr("context_menu.move_to"), "move_to"},
                  {i18n::tr("context_menu.delete_file"), "delete_file"}});
     }
+    append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
     return;
   }
   if (show_format) {
@@ -1293,6 +1584,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
                  {i18n::tr("context_menu.move_to"), "move_to"},
                  {i18n::tr("context_menu.delete_file"), "delete_file"}});
     }
+    append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
     return;
   }
   if (show_secondary_open) {
@@ -1303,6 +1595,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
                {i18n::tr("context_menu.rename_file"), "rename_file"},
                {i18n::tr("context_menu.move_to"), "move_to"},
                {i18n::tr("context_menu.delete_file"), "delete_file"}});
+    append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
     return;
   }
   set_items(state, ContextMenuKind::File,
@@ -1311,6 +1604,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
              {i18n::tr("context_menu.rename_file"), "rename_file"},
              {i18n::tr("context_menu.move_to"), "move_to"},
              {i18n::tr("context_menu.delete_file"), "delete_file"}});
+  append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
 }
 
 void context_menu_open_folder(ContextMenuState* state, int x, int y,
@@ -1376,12 +1670,7 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
                  {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
                  {i18n::tr("context_menu.find_references"), "find_references"}});
     }
-    if (show_debug) {
-      append_debug_watch_items(state, show_hw);
-    }
-    return;
-  }
-  if (show_format) {
+  } else if (show_format) {
     set_items(state, ContextMenuKind::EditorSymbol,
               {{i18n::tr("context_menu.go_definition"), "go_definition"},
                {i18n::tr("context_menu.symbol_info"), "symbol_info"},
@@ -1397,6 +1686,7 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
                {i18n::tr("context_menu.rename_symbol"), "rename_symbol"},
                {i18n::tr("context_menu.find_references"), "find_references"}});
   }
+  append_doc_comment_items(state, true);
   if (show_debug) {
     append_debug_watch_items(state, show_hw);
   }
@@ -1445,10 +1735,11 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
     set_items(state, ContextMenuKind::EditorBackground,
               {{i18n::tr("context_menu.call_hierarchy"), "call_hierarchy"},
                {i18n::tr("context_menu.format_file"), "format_file"}});
-    return;
+  } else {
+    set_items(state, ContextMenuKind::EditorBackground,
+              {{i18n::tr("context_menu.format_file"), "format_file"}});
   }
-  set_items(state, ContextMenuKind::EditorBackground,
-            {{i18n::tr("context_menu.format_file"), "format_file"}});
+  append_doc_comment_items(state, false);
 }
 
 void context_menu_open_problem(ContextMenuState* state, int x, int y, const std::string& path,
@@ -1549,6 +1840,60 @@ Element render_rename_modal(ContextMenuState* state) {
   return CenteredModal(std::move(dialog));
 }
 
+Element render_template_picker_modal(ContextMenuState* state, MainLayoutState* layout_state) {
+  if (state == nullptr || !state->template_picker_open) {
+    return text("");
+  }
+  constexpr int kVisibleLines = 16;
+  const int total = static_cast<int>(state->template_picker_labels.size());
+  const int max_scroll = std::max(0, total - kVisibleLines);
+  state->template_picker_scroll =
+      std::max(0, std::min(state->template_picker_scroll, max_scroll));
+  if (state->template_picker_selected < state->template_picker_scroll) {
+    state->template_picker_scroll = state->template_picker_selected;
+  }
+  if (state->template_picker_selected >= state->template_picker_scroll + kVisibleLines) {
+    state->template_picker_scroll = state->template_picker_selected - kVisibleLines + 1;
+  }
+
+  Elements rows;
+  state->template_picker_row_boxes.resize(static_cast<std::size_t>(std::max(0, total)));
+  if (total == 0) {
+    rows.push_back(text(i18n::tr("common.no_data")) | color(theme::Muted()));
+  } else {
+    const int start = state->template_picker_scroll;
+    const int end = std::min(total, start + kVisibleLines);
+    for (int i = start; i < end; ++i) {
+      const std::string row_id = press_id::template_picker_row(i);
+      const bool hovered =
+          layout_state != nullptr && layout_state->clickable.is_hovered(row_id);
+      const bool pressed =
+          layout_state != nullptr && layout_state->clickable.is_pressed(row_id);
+      const std::string& label = state->template_picker_labels[static_cast<std::size_t>(i)];
+      const std::string& detail = state->template_picker_details[static_cast<std::size_t>(i)];
+      Element row =
+          hbox({
+              text(" " + label + " ") | bold | color(theme::Header()),
+              text(detail) | color(theme::Muted()),
+              filler(),
+          }) |
+          bgcolor(theme::PanelBg());
+      row = StyleListRow(std::move(row), i == state->template_picker_selected, hovered, pressed);
+      rows.push_back(row | reflect(state->template_picker_row_boxes[static_cast<std::size_t>(i)]));
+    }
+  }
+
+  Element dialog = ModalWindow(
+      text(i18n::tr("context_menu.template_picker.title")) | color(theme::Accent()),
+      vbox({
+          vbox(std::move(rows)) | bgcolor(theme::PanelBg()) |
+              reflect(state->template_picker_list_box),
+          separator() | color(theme::AccentDim()),
+          text(i18n::tr("context_menu.template_picker.footer")) | color(theme::Muted()),
+      }));
+  return CenteredModal(std::move(dialog));
+}
+
 void activate_move_browser_row(ContextMenuState* state, MainLayoutState* layout_state, int row) {
   if (state == nullptr || row < 0 || row >= static_cast<int>(state->move_browser.entries.size())) {
     return;
@@ -1641,6 +1986,11 @@ Element render_context_menu_overlay(ContextMenuState* state, MainLayoutState* la
 
   if (state->indexer_paths_open) {
     return ScreenModalOverlay(std::move(base), render_indexer_paths_modal(state));
+  }
+
+  if (state->template_picker_open) {
+    return ScreenModalOverlay(std::move(base),
+                              render_template_picker_modal(state, layout_state));
   }
 
   if (state->move_browser_open) {
@@ -1782,6 +2132,42 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
     return true;
   }
 
+  if (state->template_picker_open) {
+    if (event == Event::Escape) {
+      context_menu_close(state, layout_state);
+      return true;
+    }
+    const int total = static_cast<int>(state->template_picker_labels.size());
+    if (event == Event::ArrowDown || event == Event::Character('j')) {
+      state->template_picker_selected =
+          std::min(state->template_picker_selected + 1, std::max(0, total - 1));
+      return true;
+    }
+    if (event == Event::ArrowUp || event == Event::Character('k')) {
+      state->template_picker_selected = std::max(0, state->template_picker_selected - 1);
+      return true;
+    }
+    if (event == Event::PageDown) {
+      state->template_picker_selected =
+          std::min(state->template_picker_selected + 12, std::max(0, total - 1));
+      return true;
+    }
+    if (event == Event::PageUp) {
+      state->template_picker_selected = std::max(0, state->template_picker_selected - 12);
+      return true;
+    }
+    if (event == Event::Return) {
+      trigger_press(layout_state, press_id::template_picker_row(state->template_picker_selected));
+      apply_selected_template(state, workspace, secondary_workspace, focus, layout_state);
+      context_menu_close(state, layout_state);
+      if (layout_state != nullptr) {
+        UI_WAKE(layout_state, "wake");
+      }
+      return true;
+    }
+    return true;
+  }
+
   if (state->move_browser_open) {
     state->move_browser.ensure_browser_entries();
     if (event == Event::Escape) {
@@ -1903,7 +2289,7 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
                      secondary_workspace, model, focus, layout_state, symbols, indexer,
                      symbol_indexer, workspace_config, editor_visible_lines, on_command);
       if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open &&
-          !state->move_browser_open) {
+          !state->move_browser_open && !state->template_picker_open) {
         context_menu_close(state, layout_state);
       }
       if (layout_state != nullptr) {
@@ -1933,7 +2319,7 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
                    secondary_workspace, model, focus, layout_state, symbols, indexer,
                    symbol_indexer, workspace_config, visible, on_command);
     if (!state->rename_open && !state->delete_confirm_open && !state->indexer_paths_open &&
-        !state->move_browser_open) {
+        !state->move_browser_open && !state->template_picker_open) {
       context_menu_close(state, layout_state);
     }
     if (layout_state != nullptr) {
@@ -1957,6 +2343,47 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
             const int row = state->move_browser.browser_list_start +
                             (m.y - state->move_browser.browser_list_box.y_min);
             activate_move_browser_row(state, layout_state, row);
+          }
+          return true;
+        }
+        return true;
+      }
+      if (state->template_picker_open) {
+        const auto& m = event.mouse();
+        if (m.motion == Mouse::Moved) {
+          if (layout_state != nullptr) {
+            const std::string_view before = layout_state->clickable.hovered_id();
+            int hovered_row = -1;
+            for (int i = 0; i < static_cast<int>(state->template_picker_row_boxes.size()); ++i) {
+              if (state->template_picker_row_boxes[static_cast<std::size_t>(i)].Contain(m.x,
+                                                                                          m.y)) {
+                hovered_row = i;
+                break;
+              }
+            }
+            if (hovered_row >= 0) {
+              layout_state->clickable.set_hover(press_id::template_picker_row(hovered_row));
+            } else {
+              layout_state->clickable.clear_hover_if(press_id::is_context_menu_hover);
+            }
+            if (layout_state->clickable.hovered_id() != before) {
+              UI_WAKE(layout_state, "wake");
+            }
+          }
+          return true;
+        }
+        if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+          for (int i = 0; i < static_cast<int>(state->template_picker_row_boxes.size()); ++i) {
+            if (state->template_picker_row_boxes[static_cast<std::size_t>(i)].Contain(m.x, m.y)) {
+              state->template_picker_selected = i;
+              trigger_press(layout_state, press_id::template_picker_row(i));
+              apply_selected_template(state, workspace, secondary_workspace, focus, layout_state);
+              context_menu_close(state, layout_state);
+              if (layout_state != nullptr) {
+                UI_WAKE(layout_state, "wake");
+              }
+              return true;
+            }
           }
           return true;
         }
@@ -1988,7 +2415,8 @@ Component MakeContextMenuOverlay(Component main, ContextMenuState* state, Worksp
                     }
                     Element overlay = render_context_menu_overlay(state, layout_state, base);
                     if (state->rename_open || state->delete_confirm_open ||
-                        state->indexer_paths_open || state->move_browser_open) {
+                        state->indexer_paths_open || state->move_browser_open ||
+                        state->template_picker_open) {
                       return overlay;
                     }
                     return dbox({std::move(base), std::move(overlay)});

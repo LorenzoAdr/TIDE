@@ -290,6 +290,8 @@ std::optional<LanguageServerSpec> make_fortls_spec(const std::string& workspace_
     spec.args.push_back(location->python_module.empty() ? "fortls" : location->python_module);
   }
   spec.args.emplace_back("--enable_code_actions");
+  // Avoid fortls trying to pip-install updates into the (possibly bundled) env.
+  spec.args.emplace_back("--disable_autoupdate");
   return spec;
 }
 

@@ -50,6 +50,9 @@ constexpr std::string_view kDebugLaunchClose = "debug_launch.close";
 constexpr std::string_view kShutdownForceExit = "shutdown.force_exit";
 constexpr std::string_view kOpenFileYes = "open_file.yes";
 constexpr std::string_view kOpenFileNo = "open_file.no";
+constexpr std::string_view kLspToastInstall = "lsp_toast.install";
+constexpr std::string_view kLspToastBundle = "lsp_toast.bundle";
+constexpr std::string_view kLspToastIgnore = "lsp_toast.ignore";
 constexpr std::string_view kWelcomeExternalFile = "welcome.external_file";
 constexpr std::string_view kWelcomeDebug = "welcome.debug";
 constexpr std::string_view kWelcomeWorkspace = "welcome.workspace";
@@ -103,6 +106,10 @@ inline bool is_core_analyzer_hover(std::string_view id) {
 
 inline std::string context_menu_row(int index) {
   return "context_menu.row." + std::to_string(index);
+}
+
+inline std::string template_picker_row(int index) {
+  return "template_picker.row." + std::to_string(index);
 }
 
 inline std::string f2_mode(int index) {
@@ -182,6 +189,10 @@ inline bool is_open_file_hover(std::string_view id) {
   return id == kOpenFileYes || id == kOpenFileNo;
 }
 
+inline bool is_lsp_toast_hover(std::string_view id) {
+  return id == kLspToastInstall || id == kLspToastBundle || id == kLspToastIgnore;
+}
+
 inline bool is_explorer_hover(std::string_view id) {
   return id.rfind("explorer.row.", 0) == 0;
 }
@@ -191,7 +202,7 @@ inline bool is_outline_hover(std::string_view id) {
 }
 
 inline bool is_context_menu_hover(std::string_view id) {
-  return id.rfind("context_menu.row.", 0) == 0;
+  return id.rfind("context_menu.row.", 0) == 0 || id.rfind("template_picker.row.", 0) == 0;
 }
 
 inline bool is_scrollbar_hover(std::string_view id) {

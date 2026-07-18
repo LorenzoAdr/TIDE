@@ -9,6 +9,8 @@
 #include <thread>
 #include <vector>
 
+#include <sys/types.h>
+
 #include "terminal/raw_pty_screen.hpp"
 #include "util/thread_safe_queue.hpp"
 
@@ -81,8 +83,10 @@ class ShellSession {
   std::atomic<bool> start_in_progress_{false};
   std::atomic<bool> start_failed_{false};
   std::atomic<bool> stop_requested_{false};
-  int master_fd_ = -1;
-  pid_t child_pid_ = -1;
+  // Atomic so stop() / reader_loop / bootstrap never race into kill(-1, …)
+  // (which signals every process of the user and can tear down the desktop).
+  std::atomic<int> master_fd_{-1};
+  std::atomic<pid_t> child_pid_{-1};
   std::unique_ptr<std::thread> reader_thread_;
   ThreadSafeQueue<std::string> output_chunks_;
   std::string display_text_;

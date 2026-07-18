@@ -134,6 +134,7 @@ add_executable(tgdb
   src/ui/debug_launch_modal.cpp
   src/ui/shutdown_overlay.cpp
   src/ui/open_file_confirm.cpp
+  src/ui/lsp_missing_toast.cpp
   src/ui/shortcuts_modal.cpp
   src/ui/settings_modal.cpp
   src/ui/source_substitute_modal.cpp
@@ -166,6 +167,7 @@ add_executable(tgdb
   src/lsp/language_server_spec.cpp
   src/lsp/lsp_client.cpp
   src/lsp/diagnostics.cpp
+  src/lsp/gfortran_diagnostics.cpp
   src/symbols/lsp_symbol_provider.cpp
   src/symbols/tree_sitter_symbol_provider.cpp
   src/symbols/completion_snippet.cpp
@@ -199,6 +201,7 @@ add_executable(tgdb
   src/editor/cursor_history.cpp
   src/editor/text_ops.cpp
   src/editor/line_comment.cpp
+  src/editor/doc_comment.cpp
   src/editor/indent_guides.cpp
   src/editor/text_search.cpp
   src/editor/find_match_runner.cpp
@@ -248,6 +251,7 @@ add_executable(tgdb
   src/build/build_artifact_watcher.cpp
   src/util/bundled_tools.cpp
   src/util/tools_status.cpp
+  src/util/lsp_missing_prompt.cpp
   src/util/core_analyzer_support.cpp
   src/util/process_list.cpp
   src/util/system_stats.cpp
@@ -323,6 +327,9 @@ if(TGDB_STATIC_LIBSTDCXX)
 endif()
 
 include(cmake/BundleOptions.cmake)
+target_compile_definitions(tgdb PRIVATE
+  "TGDB_DEFAULT_UI_LOCALE_TAG=\"${TGDB_DEFAULT_UI_LOCALE}\""
+)
 if(TGDB_BUNDLE_CLANGD)
   include(cmake/BundleClangd.cmake)
 endif()
@@ -539,6 +546,7 @@ add_executable(csv_index_test
   src/indexer/index_rules.cpp
   src/util/csv_viewer.cpp
   src/editor/code_snippets.cpp
+  src/lsp/lsp_uri.cpp
   src/ui/theme.cpp
   src/i18n/locale.cpp
   src/i18n/tr.cpp
@@ -593,6 +601,21 @@ add_executable(compiler_location_test
   src/util/compiler_location.cpp
 )
 target_include_directories(compiler_location_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(gfortran_diagnostics_test
+  tests/gfortran_diagnostics_test.cpp
+  src/lsp/gfortran_diagnostics.cpp
+  src/util/shell_utils.cpp
+)
+target_include_directories(gfortran_diagnostics_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(doc_comment_test
+  tests/doc_comment_test.cpp
+  src/editor/doc_comment.cpp
+  src/lsp/lsp_uri.cpp
+  src/util/path_normalize.cpp
+)
+target_include_directories(doc_comment_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_executable(nm_reader_test
   tests/nm_reader_test.cpp
@@ -665,6 +688,8 @@ set(TGDB_TEST_TARGETS
   tabular_file_test
   glyphs_test
   compiler_location_test
+  gfortran_diagnostics_test
+  doc_comment_test
   nm_reader_test
   git_diff_test
   pkt_protocol_test

@@ -72,4 +72,9 @@ void comment_lines(EditorBuffer* buffer, const LineCommentStyle& style);
 void uncomment_lines(EditorBuffer* buffer, const LineCommentStyle& style);
 void toggle_comment_lines(EditorBuffer* buffer, const LineCommentStyle& style);
 
+// Indent/outdent every line touched by any cursor selection (or the cursor line).
+void indent_lines(EditorBuffer* buffer);
+void unindent_lines(EditorBuffer* buffer);
+bool any_cursor_has_selection(const EditorBuffer& buffer);
+
 }  // namespace tgdb

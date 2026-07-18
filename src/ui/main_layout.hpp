@@ -87,6 +87,9 @@ struct EditorPanelHandlers {
       diagnostics_received_handler;
   std::function<void(ISymbolProvider* symbols)> completion_received_handler;
   std::function<int()> visible_line_count;
+  // Insert a VS Code/LSP snippet at (line, col) and start Tab placeholder session.
+  std::function<bool(int insert_line, int insert_col, const std::string& snippet_text)>
+      insert_snippet_at;
 };
 
 struct ConsolePanelTabs {

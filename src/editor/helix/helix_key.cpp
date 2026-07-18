@@ -34,6 +34,9 @@ std::optional<std::string> helix_key_token(const ftxui::Event& event) {
   if (event == ftxui::Event::Tab) {
     return "<tab>";
   }
+  if (event == ftxui::Event::TabReverse) {
+    return "<s-tab>";
+  }
   if (event == ftxui::Event::Delete) {
     return "<del>";
   }

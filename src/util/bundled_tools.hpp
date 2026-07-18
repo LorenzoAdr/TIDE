@@ -119,5 +119,6 @@ std::optional<TypescriptLsLocation> resolve_typescript_language_server();
 std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter();
 std::optional<std::string> resolve_shellcheck();
 std::optional<std::string> resolve_chktex();
+std::optional<std::string> resolve_gfortran();
 
 }  // namespace tgdb

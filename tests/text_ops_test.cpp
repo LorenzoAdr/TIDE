@@ -4,7 +4,9 @@
 #include <vector>
 
 #include "editor/clipboard.hpp"
+#include "editor/editor_buffer_source.hpp"
 #include "editor/editor_state.hpp"
+#include "editor/line_comment.hpp"
 #include "editor/text_ops.hpp"
 #include "symbols/completion_snippet.hpp"
 #include "editor/text_search.hpp"
@@ -171,6 +173,59 @@ void test_arrow_scroll_keeps_margin() {
   check(buffer.scroll == 5, "arrow-style navigation keeps cursor off bottom edge");
 }
 
+void test_comment_lines_updates_joined_source() {
+  auto buffer = make_buffer({"int foo;", "return 0;"});
+  buffer.path = "hello.cpp";
+  (void)tgdb::editor_buffer_joined_source(buffer);
+  check(buffer.joined_source_cache.valid, "joined cache warm before comment");
+  check(tgdb::editor_buffer_joined_source(buffer) == "int foo;\nreturn 0;",
+        "joined matches lines before comment");
+
+  const tgdb::LineCommentStyle style = tgdb::line_comment_style_for_path(buffer.path);
+  buffer.reset_to_single_cursor(0, 0);
+  tgdb::comment_lines(&buffer, style);
+  check(buffer.lines[0] == "// int foo;", "line commented");
+  check(tgdb::editor_buffer_joined_source(buffer) == "// int foo;\nreturn 0;",
+        "joined cache tracks comment prefix for tree-sitter");
+
+  tgdb::uncomment_lines(&buffer, style);
+  check(buffer.lines[0] == "int foo;", "line uncommented");
+  check(tgdb::editor_buffer_joined_source(buffer) == "int foo;\nreturn 0;",
+        "joined cache tracks uncomment");
+}
+
+void test_indent_unindent_selection() {
+  auto buffer = make_buffer({"alpha", "beta", "gamma"});
+  buffer.primary().anchor = {0, 0};
+  buffer.primary().head = {2, 5};
+  check(tgdb::any_cursor_has_selection(buffer), "multi-line selection active");
+
+  tgdb::indent_lines(&buffer);
+  check(buffer.lines[0] == "    alpha", "first line indented");
+  check(buffer.lines[1] == "    beta", "second line indented");
+  check(buffer.lines[2] == "    gamma", "third line indented");
+  check(buffer.primary().anchor.col == 4, "anchor shifted by indent");
+  check(buffer.primary().head.col == 9, "head shifted by indent");
+  check(tgdb::any_cursor_has_selection(buffer), "selection preserved after indent");
+
+  tgdb::unindent_lines(&buffer);
+  check(buffer.lines[0] == "alpha", "first line unindented");
+  check(buffer.lines[1] == "beta", "second line unindented");
+  check(buffer.lines[2] == "gamma", "third line unindented");
+  check(buffer.primary().anchor.col == 0, "anchor restored");
+  check(buffer.primary().head.col == 5, "head restored");
+}
+
+void test_indent_single_line_selection() {
+  auto buffer = make_buffer({"hello world"});
+  buffer.primary().anchor = {0, 0};
+  buffer.primary().head = {0, 5};
+  tgdb::indent_lines(&buffer);
+  check(buffer.lines[0] == "    hello world", "single-line selection indents whole line");
+  check(buffer.primary().anchor.col == 4, "anchor after indent prefix");
+  check(buffer.primary().head.col == 9, "head after indent prefix");
+}
+
 }  // namespace
 
 int main() {
@@ -188,5 +243,8 @@ int main() {
   test_completion_multi_cursor();
   test_mouse_scroll_margin();
   test_arrow_scroll_keeps_margin();
+  test_comment_lines_updates_joined_source();
+  test_indent_unindent_selection();
+  test_indent_single_line_selection();
   return 0;
 }

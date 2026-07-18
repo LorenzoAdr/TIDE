@@ -12,10 +12,16 @@ set(TGDB_GOPLS_ZST_PATH "${TGDB_BUNDLED_GEN_DIR}/gopls_blob.zst")
 set(TGDB_GOPLS_BLOB_OBJ "${TGDB_BUNDLED_GEN_DIR}/gopls_blob.o")
 set(TGDB_GOPLS_MANIFEST_HPP "${TGDB_BUNDLED_GEN_DIR}/bundled_gopls_manifest.hpp")
 
-find_program(TGDB_GO go)
-foreach(_tool TGDB_GO objcopy zstd sha256sum)
-  if(NOT ${_tool})
-    message(FATAL_ERROR "TGDB_BUNDLE_GOPLS requires '${_tool}' (Go must be on PATH at bundle time)")
+# Toolchain Go temporal si el host no tiene `go` (solo para construir gopls).
+# URL directa a dl.google.com (evita el redirect HTML de go.dev/dl).
+set(TGDB_GO_TAR_NAME "go${TGDB_GO_VERSION}.linux-amd64.tar.gz")
+set(TGDB_GO_URL "https://dl.google.com/go/${TGDB_GO_TAR_NAME}")
+set(TGDB_GO_TAR_PATH "${TGDB_BUNDLED_CACHE_DIR}/${TGDB_GO_TAR_NAME}")
+
+foreach(_tool objcopy zstd sha256sum)
+  find_program(_tgdb_gopls_${_tool} ${_tool})
+  if(NOT _tgdb_gopls_${_tool})
+    message(FATAL_ERROR "TGDB_BUNDLE_GOPLS requires '${_tool}'")
   endif()
 endforeach()
 
@@ -32,9 +38,13 @@ add_custom_command(
           TGDB_GOPLS_ZST_PATH="${TGDB_GOPLS_ZST_PATH}"
           TGDB_GOPLS_MANIFEST_HPP="${TGDB_GOPLS_MANIFEST_HPP}"
           TGDB_GOPLS_BLOB_OBJ="${TGDB_GOPLS_BLOB_OBJ}"
+          TGDB_BUNDLED_CACHE_DIR="${TGDB_BUNDLED_CACHE_DIR}"
+          TGDB_GO_VERSION="${TGDB_GO_VERSION}"
+          TGDB_GO_URL="${TGDB_GO_URL}"
+          TGDB_GO_TAR_PATH="${TGDB_GO_TAR_PATH}"
           bash "${TGDB_PREPARE_GOPLS_SCRIPT}"
   DEPENDS "${TGDB_PREPARE_GOPLS_SCRIPT}"
-  COMMENT "Preparing embedded gopls ${TGDB_GOPLS_VERSION} (go install)"
+  COMMENT "Preparing embedded gopls ${TGDB_GOPLS_VERSION} (go install; bootstraps Go if needed)"
   VERBATIM)
 
 add_custom_target(tgdb_gopls_bundle DEPENDS

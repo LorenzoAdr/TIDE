@@ -167,6 +167,21 @@ bool parse_ppid_from_stat(const fs::path& stat_path, int* ppid) {
   return true;
 }
 
+// "gdb" as a path/binary token, not the substring inside "tgdb".
+bool haystack_has_gdb_token(const std::string& haystack) {
+  std::size_t pos = 0;
+  while ((pos = haystack.find("gdb", pos)) != std::string::npos) {
+    const bool left_ok =
+        pos == 0 || !std::isalnum(static_cast<unsigned char>(haystack[pos - 1]));
+    if (left_ok) {
+      // Matches gdb, gdbserver, gdb-multiarch, … — not tgdb.
+      return true;
+    }
+    pos += 3;
+  }
+  return false;
+}
+
 std::string friendly_process_name(int pid, const std::string& comm,
                                   const std::string& cmdline) {
   const std::string haystack = comm + " " + cmdline;
@@ -174,7 +189,18 @@ std::string friendly_process_name(int pid, const std::string& comm,
       haystack.find("clangd") != std::string::npos) {
     return "clangd";
   }
-  if (haystack.find("gdb") != std::string::npos) {
+  if (haystack.find("basedpyright") != std::string::npos ||
+      haystack.find("pyright-langserver") != std::string::npos ||
+      haystack.find("pyright.langserver") != std::string::npos) {
+    return "basedpyright";
+  }
+  if (haystack.find("rust-analyzer") != std::string::npos) {
+    return "rust-analyzer";
+  }
+  if (haystack.find("gopls") != std::string::npos) {
+    return "gopls";
+  }
+  if (comm == "gdb" || comm.rfind("gdb", 0) == 0 || haystack_has_gdb_token(haystack)) {
     return "gdb";
   }
   if (haystack.find("bash") != std::string::npos || haystack.find("/sh") != std::string::npos) {
@@ -503,9 +529,14 @@ bool comm_is_clangd(const std::string& comm) {
   return comm == "clangd" || comm.rfind("clangd", 0) == 0;
 }
 
+bool comm_is_language_server(const std::string& comm) {
+  return comm_is_clangd(comm) || comm == "basedpyright" || comm == "rust-analyzer" ||
+         comm == "gopls";
+}
+
 int worker_display_rank(const ThreadSample& sample) {
   if (sample.is_child_process) {
-    if (comm_is_clangd(sample.comm)) {
+    if (comm_is_language_server(sample.comm)) {
       return 0;
     }
     if (sample.comm == "gdb") {

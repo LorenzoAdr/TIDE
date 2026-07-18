@@ -11,4 +11,5 @@ func greet(name string) {
 
 func main() {
 	greet("tide")
+	greet("sdf")
 }

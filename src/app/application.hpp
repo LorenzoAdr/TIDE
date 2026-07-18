@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "app/app_mode.hpp"
@@ -33,6 +34,7 @@
 #include "ui/debug_launch_modal.hpp"
 #include "ui/shutdown_overlay.hpp"
 #include "ui/open_file_confirm.hpp"
+#include "ui/lsp_missing_toast.hpp"
 #include "ui/settings_modal.hpp"
 #include "ui/shortcuts_modal.hpp"
 #include "ui/source_substitute_modal.hpp"
@@ -46,6 +48,7 @@
 #include "ui/welcome_screen.hpp"
 #include "ui/external_file_wizard.hpp"
 #include "util/thread_safe_queue.hpp"
+#include "util/lsp_missing_prompt.hpp"
 
 namespace ftxui {
 class ScreenInteractive;
@@ -132,6 +135,12 @@ class Application {
   void set_status(const std::string& message);
   void set_workspace_status(const std::string& message);
   void request_terminal_autostart();
+  void inject_terminal_command(const std::string& command);
+  void try_flush_terminal_inject();
+  void maybe_show_lsp_missing_toast(const std::string& status_i18n_key);
+  void on_lsp_missing_install();
+  void on_lsp_missing_bundle();
+  void on_lsp_missing_ignore();
   void rebuild_shell_launch_config();
   void setup_build_environment_watching();
   void process_build_environment_updates();
@@ -151,6 +160,7 @@ class Application {
   void sync_activity_phase_effects();
   void run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan& plan, uint64_t paint_before);
 
+  ftxui::ScreenInteractive* active_screen_ = nullptr;
   AppConfig config_;
   AppMode app_mode_ = AppMode::kNormal;
   DebugModel model_;
@@ -168,6 +178,12 @@ class Application {
   int shutdown_step_index_ = 0;
   bool shutdown_performed_ = false;
   OpenFileConfirmState open_file_confirm_state_;
+  LspMissingToastState lsp_missing_toast_state_;
+  bool lsp_missing_toast_suppressed_ = false;
+  std::unordered_set<std::string> lsp_missing_notified_servers_;
+  std::string pending_terminal_inject_;
+  std::optional<std::string> cached_tgdb_source_root_;
+  bool tgdb_source_root_probed_ = false;
   ShortcutsModalState shortcuts_modal_state_;
   SettingsModalState settings_modal_state_;
   SourceSubstituteModalState source_substitute_state_;

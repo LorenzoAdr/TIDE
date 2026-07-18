@@ -23,7 +23,8 @@ constexpr int kDapGdb = 9;
 constexpr int kDapPython = 10;
 constexpr int kDapBashDap = 11;
 constexpr int kForceBundled = 12;
-constexpr int kOptionCount = 13;
+constexpr int kUiLocale = 13;
+constexpr int kOptionCount = 14;
 
 constexpr int kGdbNone = 0;
 constexpr int kGdbStatic = 1;
@@ -32,6 +33,9 @@ constexpr int kGdbCoreAnalyzer = 2;
 constexpr int kPythonNone = 0;
 constexpr int kPythonLspMin = 1;
 constexpr int kPythonFull = 2;
+
+constexpr int kLocaleEs = 0;
+constexpr int kLocaleEn = 1;
 
 struct BundleConfig {
   bool bundle_clangd = false;
@@ -47,6 +51,7 @@ struct BundleConfig {
   int python_kind = kPythonNone;
   bool bundle_bash_dap = false;
   bool force_bundled = false;
+  int ui_locale = kLocaleEs;
 };
 
 struct WizardState {
@@ -54,12 +59,79 @@ struct WizardState {
   int selected = 0;
 };
 
+// Tamaños aproximados del blob .zst embebido (MB). Base incluye tgdb + ripgrep.
+constexpr int kBaseBinaryMb = 50;
+constexpr int kSizeClangdMb = 34;
+constexpr int kSizeBashLsMb = 38;
+constexpr int kSizeTexlabMb = 10;
+constexpr int kSizeRustAnalyzerMb = 16;
+constexpr int kSizeGoplsMb = 19;
+constexpr int kSizeZlsMb = 5;
+constexpr int kSizeFortlsMb = 3;
+constexpr int kSizeLuaLsMb = 3;
+constexpr int kSizeTsserverMb = 40;
+constexpr int kSizeGdbStaticMb = 16;
+constexpr int kSizeGdbCoreAnalyzerMb = 30;
+constexpr int kSizePythonLspMinMb = 42;
+constexpr int kSizePythonFullMb = 90;
+constexpr int kSizeBashDapMb = 1;
+
+int estimated_binary_mb(const BundleConfig& config) {
+  int mb = kBaseBinaryMb;
+  if (config.bundle_clangd) {
+    mb += kSizeClangdMb;
+  }
+  if (config.bundle_bash_ls) {
+    mb += kSizeBashLsMb;
+  }
+  if (config.bundle_texlab) {
+    mb += kSizeTexlabMb;
+  }
+  if (config.bundle_rust_analyzer) {
+    mb += kSizeRustAnalyzerMb;
+  }
+  if (config.bundle_gopls) {
+    mb += kSizeGoplsMb;
+  }
+  if (config.bundle_zls) {
+    mb += kSizeZlsMb;
+  }
+  if (config.bundle_fortls) {
+    mb += kSizeFortlsMb;
+  }
+  if (config.bundle_lua_ls) {
+    mb += kSizeLuaLsMb;
+  }
+  if (config.bundle_tsserver) {
+    mb += kSizeTsserverMb;
+  }
+  if (config.gdb_kind == kGdbStatic) {
+    mb += kSizeGdbStaticMb;
+  } else if (config.gdb_kind == kGdbCoreAnalyzer) {
+    mb += kSizeGdbCoreAnalyzerMb;
+  }
+  if (config.python_kind == kPythonLspMin) {
+    mb += kSizePythonLspMinMb;
+  } else if (config.python_kind == kPythonFull) {
+    mb += kSizePythonFullMb;
+  }
+  if (config.bundle_bash_dap) {
+    mb += kSizeBashDapMb;
+  }
+  return mb;
+}
+
+std::string format_estimated_size(const BundleConfig& config) {
+  return "Tamaño estimado del binario tgdb: ~" + std::to_string(estimated_binary_mb(config)) +
+         " MB";
+}
+
 std::string gdb_kind_label(int kind) {
   switch (kind) {
     case kGdbStatic:
-      return "gdb-static (musl)";
+      return "gdb-static (musl) (~+" + std::to_string(kSizeGdbStaticMb) + " MB)";
     case kGdbCoreAnalyzer:
-      return "gdb + Core Analyzer";
+      return "gdb + Core Analyzer (~+" + std::to_string(kSizeGdbCoreAnalyzerMb) + " MB)";
     default:
       return "ninguno (gdb del sistema)";
   }
@@ -68,12 +140,40 @@ std::string gdb_kind_label(int kind) {
 std::string python_kind_label(int kind) {
   switch (kind) {
     case kPythonLspMin:
-      return "A: basedpyright (~+70–90 MB)";
+      return "A: basedpyright (~+" + std::to_string(kSizePythonLspMinMb) + " MB)";
     case kPythonFull:
-      return "B: CPython + basedpyright + debugpy (~+90–120 MB)";
+      return "B: CPython + basedpyright + debugpy (~+" + std::to_string(kSizePythonFullMb) +
+             " MB)";
     default:
       return "ninguno (herramientas del sistema)";
   }
+}
+
+std::string ui_locale_label(int locale) {
+  switch (locale) {
+    case kLocaleEn:
+      return "English";
+    case kLocaleEs:
+    default:
+      return "Español";
+  }
+}
+
+const char* ui_locale_tag(int locale) {
+  switch (locale) {
+    case kLocaleEn:
+      return "en";
+    case kLocaleEs:
+    default:
+      return "es";
+  }
+}
+
+int parse_ui_locale(const std::string& tag) {
+  if (tag == "en") {
+    return kLocaleEn;
+  }
+  return kLocaleEs;
 }
 
 bool parse_bool_value(const std::string& value) {
@@ -146,6 +246,8 @@ void load_bundle_config(const std::string& path, BundleConfig* config) {
       config->bundle_tsserver = parse_bool_value(line.substr(16));
     } else if (line.rfind("FORCE_BUNDLED=", 0) == 0) {
       config->force_bundled = parse_bool_value(line.substr(14));
+    } else if (line.rfind("UI_LOCALE=", 0) == 0) {
+      config->ui_locale = parse_ui_locale(line.substr(10));
     }
   }
   if (config->gdb_kind == kGdbNone && legacy_bundle_gdb) {
@@ -187,6 +289,7 @@ bool save_bundle_config(const std::string& path, const BundleConfig& config) {
   output << "BUNDLE_LUA_LS=" << (config.bundle_lua_ls ? "1" : "0") << '\n';
   output << "BUNDLE_TSSERVER=" << (config.bundle_tsserver ? "1" : "0") << '\n';
   output << "FORCE_BUNDLED=" << (config.force_bundled ? "1" : "0") << '\n';
+  output << "UI_LOCALE=" << ui_locale_tag(config.ui_locale) << '\n';
   return static_cast<bool>(output);
 }
 
@@ -195,7 +298,7 @@ bool option_enabled(int /*index*/) {
 }
 
 bool option_is_checkbox(int index) {
-  return index != kDapGdb && index != kDapPython;
+  return index != kDapGdb && index != kDapPython && index != kUiLocale;
 }
 
 bool option_checked(const WizardState& state, int index) {
@@ -255,6 +358,8 @@ std::string option_label(const WizardState& state, int index) {
       return "Bash DAP";
     case kForceBundled:
       return "Forzar todos los componentes ON";
+    case kUiLocale:
+      return "Idioma: " + ui_locale_label(state.draft.ui_locale);
     default:
       return "";
   }
@@ -272,6 +377,13 @@ void cycle_python_kind(WizardState* state) {
     return;
   }
   state->draft.python_kind = (state->draft.python_kind + 1) % 3;
+}
+
+void cycle_ui_locale(WizardState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->draft.ui_locale = (state->draft.ui_locale + 1) % 2;
 }
 
 void toggle_option(WizardState* state, int index) {
@@ -318,6 +430,9 @@ void toggle_option(WizardState* state, int index) {
     case kForceBundled:
       state->draft.force_bundled = !state->draft.force_bundled;
       break;
+    case kUiLocale:
+      cycle_ui_locale(state);
+      break;
     default:
       break;
   }
@@ -352,6 +467,33 @@ ftxui::Element render_panel(const char* title, const std::vector<int>& indices,
   return vbox(std::move(rows)) | border;
 }
 
+ftxui::Element render_tuide_logo() {
+  using namespace ftxui;
+  // Mismo arte que RenderTuideLogo() en la pantalla de bienvenida / editor vacío.
+  static const std::vector<std::string> lines = {
+      "████████╗██╗   ██╗██╗██████╗ ███████╗",
+      "╚══██╔══╝██║   ██║██║██╔══██╗██╔════╝",
+      "   ██║   ██║   ██║██║██║  ██║█████╗  ",
+      "   ██║   ██║   ██║██║██║  ██║██╔══╝  ",
+      "   ██║   ╚██████╔╝██║██████╔╝███████╗",
+      "   ╚═╝    ╚═════╝ ╚═╝╚═════╝ ╚══════╝",
+  };
+  Elements logo_rows;
+  for (const auto& line : lines) {
+    logo_rows.push_back(text(line) | color(Color::Cyan) | bold);
+  }
+  return vbox(std::move(logo_rows));
+}
+
+ftxui::Element render_author_footer() {
+  using namespace ftxui;
+  return vbox({
+      text("Lorenzo Arias del Real") | color(Color::GrayLight),
+      text("lorenzo.adr@proton.me") | color(Color::GrayLight),
+      text("Apache License 2.0") | color(Color::GrayLight),
+  });
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -374,28 +516,43 @@ int main(int argc, char** argv) {
                                         kLspFortls,     kLspLuaLs,    kLspTsserver};
   const std::vector<int> kDapIndices = {kDapGdb, kDapPython, kDapBashDap};
   const std::vector<int> kForceIndices = {kForceBundled};
+  const std::vector<int> kLocaleIndices = {kUiLocale};
 
   auto component = CatchEvent(
       Renderer([&] {
         const Element lsp_panel = render_panel("LSP", kLspIndices, state);
         const Element dap_panel = render_panel("DAP", kDapIndices, state);
         const Element force_panel = render_panel("Forzar embebido", kForceIndices, state);
-        const Element right_column = vbox({dap_panel, text(""), force_panel});
+        const Element locale_panel = render_panel("Idioma de la aplicación", kLocaleIndices, state);
+        const Element right_column =
+            vbox({dap_panel, text(""), force_panel, text(""), locale_panel});
 
-        return window(text("tgdb — componentes embebidos") | bold | center,
-                      vbox({
-                          text("Selecciona qué incluir en el binario de tgdb:"),
-                          separator(),
-                          hbox({
-                              lsp_panel | flex,
-                              text("  "),
-                              right_column | flex,
-                          }),
-                          separator(),
-                          text("↑↓ j/k  Espacio alternar   Enter confirmar   Esc cancelar") |
-                              color(Color::GrayLight),
-                      })) |
-               border;
+        const Element menu = window(text("tgdb — componentes embebidos") | bold | center,
+                                    vbox({
+                                        text("Selecciona qué incluir en el binario de tgdb:"),
+                                        separator(),
+                                        hbox({
+                                            lsp_panel | flex,
+                                            text("  "),
+                                            right_column | flex,
+                                        }),
+                                        separator(),
+                                        text(format_estimated_size(state.draft)) | bold |
+                                            color(Color::Yellow),
+                                        text("↑↓ j/k  Espacio alternar   Enter confirmar   Esc "
+                                             "cancelar") |
+                                            color(Color::GrayLight),
+                                    })) |
+                             border;
+
+        return vbox({
+                   menu,
+                   filler(),
+                   hbox({filler(), render_tuide_logo(), filler()}),
+                   text(""),
+                   hbox({filler(), render_author_footer(), text("  ")}),
+               }) |
+               flex;
       }),
       [&](Event event) {
         if (event == Event::Escape) {

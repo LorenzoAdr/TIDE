@@ -139,6 +139,7 @@ HelixKeyTrieNode build_normal_map() {
   bind_cmd(&root, "<", HelixCommand::kUnindent);
   bind_cmd(&root, "=", HelixCommand::kIndent);
   bind_cmd(&root, "<tab>", HelixCommand::kIndent);
+  bind_cmd(&root, "<s-tab>", HelixCommand::kUnindent);
   bind_cmd(&root, ":", HelixCommand::kCommandMode);
   bind_cmd(&root, "G", HelixCommand::kGotoLinePrompt);
   bind_cmd(&root, "<esc>", HelixCommand::kNormalMode);
@@ -180,6 +181,7 @@ HelixKeyTrieNode build_insert_map() {
   bind_cmd(&root, "<del>", HelixCommand::kDeleteCharForward);
   bind_cmd(&root, "<ret>", HelixCommand::kInsertNewline);
   bind_cmd(&root, "<tab>", HelixCommand::kIndent);
+  bind_cmd(&root, "<s-tab>", HelixCommand::kUnindent);
   return root;
 }
 

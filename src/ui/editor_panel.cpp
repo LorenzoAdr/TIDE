@@ -1180,20 +1180,22 @@ const DocumentDiagnostics& cached_file_diagnostics(EditorPanelState* panel,
       path.empty() || !is_lsp_trackable_path(path)) {
     return kEmpty;
   }
+  const std::string path_key = normalize_lsp_path(path);
   const bool lsp_ui_allowed =
       layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
   const bool allow_refresh =
       diagnostics_reveal_allowed(last_edit_ms, symbols, path, lsp_ui_allowed);
   const uint64_t revision = symbols->diagnostics_revision();
   if (allow_refresh &&
-      (revision != panel->cached_file_diag_revision || panel->cached_file_diag.path != path)) {
+      (revision != panel->cached_file_diag_revision ||
+       normalize_lsp_path(panel->cached_file_diag.path) != path_key)) {
     panel->cached_file_diag = symbols->diagnostics_for_file(path);
     if (panel->cached_file_diag.path.empty()) {
-      panel->cached_file_diag.path = path;
+      panel->cached_file_diag.path = path_key;
     }
     panel->cached_file_diag_revision = revision;
   }
-  if (panel->cached_file_diag.path == path) {
+  if (normalize_lsp_path(panel->cached_file_diag.path) == path_key) {
     return panel->cached_file_diag;
   }
   return kEmpty;
@@ -1213,13 +1215,17 @@ bool push_active_file_diagnostics_from_cache(EditorPanelState* panel, ISymbolPro
   }
   const DocumentDiagnostics& file_diag =
       cached_file_diagnostics(panel, symbols, path, last_edit_ms, layout_state);
-  if (file_diag.path != path) {
+  if (normalize_lsp_path(file_diag.path) != normalize_lsp_path(path)) {
     return false;
   }
   const bool lsp_ui_allowed =
       layout_state == nullptr || layout_state->activity_gate.allows_lsp_ui();
+  // Avoid flickering empty→stale mid-edit, but once the LSP has published diagnostics for
+  // the current document version (including an empty set), always apply — otherwise deleting
+  // the erroneous line leaves underlines until save / debounce timeout.
   if (file_diag.items.empty() && !panel->diagnostics_by_line.empty() &&
-      !diagnostics_display_allowed(last_edit_ms, symbols, path, lsp_ui_allowed)) {
+      !diagnostics_display_allowed(last_edit_ms, symbols, path, lsp_ui_allowed) &&
+      !symbols->diagnostics_display_ready(path)) {
     return false;
   }
   const uint64_t prev_by_line_revision = panel->diagnostics_by_line_revision;
@@ -4715,11 +4721,17 @@ bool accept_completion(CompletionState* completion, EditorBuffer* buffer,
   const std::string raw_insert =
       item.insert_text.empty() ? symbol_insert_name(item.label) : item.insert_text;
 
-  const int repl_line =
-      item.has_replace_range ? item.replace_line : completion->replace_line;
-  const int repl_start =
-      item.has_replace_range ? item.replace_start : completion->replace_start;
-  const int repl_end = item.has_replace_range ? item.replace_end : completion->replace_end;
+  // Recompute the live identifier span at accept time. LSP textEdit ranges are captured when
+  // the completion was requested; if the user typed more characters afterward (gre → greet),
+  // a stale replace_end leaves those trailing chars in the buffer (greete / print!()in).
+  prepare_completion_at_cursor(completion, buffer, panel);
+  int repl_line = completion->replace_line;
+  int repl_start = completion->replace_start;
+  int repl_end = completion->replace_end;
+  if (item.has_replace_range && item.replace_line == repl_line) {
+    repl_start = std::min(repl_start, item.replace_start);
+    repl_end = std::max(repl_end, item.replace_end);
+  }
 
   bool paren_already_there = false;
   if (repl_line >= 0 && repl_line < static_cast<int>(buffer->lines.size())) {
@@ -5030,8 +5042,9 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   const bool helix_on = helix_editor_active(layout_state, tabular_view, large_virtual_view) && !read_only;
 
   if (read_only && (event_is_ctrl_x(event) || event_is_ctrl_v(event) || event_is_plain_tab(event) ||
-                    event == Event::CtrlS || event == Event::Backspace || event == Event::Delete ||
-                    event == Event::Return || event.is_character())) {
+                    event == Event::TabReverse || event == Event::CtrlS ||
+                    event == Event::Backspace || event == Event::Delete || event == Event::Return ||
+                    event.is_character())) {
     return true;
   }
 
@@ -5142,12 +5155,29 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (event_is_plain_tab(event)) {
+    // Snippet placeholders win over block-indent so Tab keeps walking stops.
     if (snippet_session_active(panel->snippet_session) &&
         advance_snippet_session(buffer, &panel->snippet_session)) {
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       return true;
     }
-    insert_tab_stop(buffer);
+    const bool helix_non_insert =
+        helix_on && panel != nullptr && panel->helix.mode != HelixMode::kInsert;
+    if (any_cursor_has_selection(*buffer) || helix_non_insert) {
+      indent_lines(buffer);
+    } else {
+      insert_tab_stop(buffer);
+    }
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+    notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
+    return true;
+  }
+  if (event == Event::TabReverse) {
+    // Avoid shifting snippet placeholder ranges while a Tab-stop session is live.
+    if (snippet_session_active(panel->snippet_session)) {
+      return true;
+    }
+    unindent_lines(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     return true;
@@ -6348,28 +6378,26 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       if (diagnostics_reveal) {
         file_diag = cached_file_diagnostics(panel_state.get(), symbols.get(), buffer.path,
                                             workspace->last_buffer_edit_ms, layout_state);
-        if (file_diag.path == buffer.path) {
-          if (!file_diag.items.empty() &&
-              (panel_state->diagnostics_by_line_path != buffer.path ||
-               panel_state->diagnostics_by_line.empty())) {
-            push_active_file_diagnostics_from_cache(panel_state.get(), symbols.get(), workspace,
-                                                    layout_state, workspace->last_buffer_edit_ms);
-          } else if (panel_state->diagnostics_by_line_path != buffer.path) {
-            panel_state->diagnostics_by_line_path = buffer.path;
-            panel_state->diagnostics_by_line.clear();
-            panel_state->diagnostic_suffix_by_line.clear();
-            panel_state->diagnostics_by_line_revision = 0;
-            panel_state->diagnostic_suffix_code_width = 0;
-            panel_state->diagnostic_suffix_view_token = 0;
-            panel_state->diagnostic_suffix_revision = 0;
-          } else if (!panel_state->diagnostics_by_line.empty() && file_diag.items.empty()) {
+        if (normalize_lsp_path(file_diag.path) == normalize_lsp_path(buffer.path)) {
+          const bool path_mismatch = panel_state->diagnostics_by_line_path != buffer.path &&
+                                     normalize_lsp_path(panel_state->diagnostics_by_line_path) !=
+                                         normalize_lsp_path(buffer.path);
+          const bool revision_mismatch =
+              panel_state->diagnostics_by_line_revision != panel_state->cached_file_diag_revision;
+          const bool need_apply =
+              path_mismatch || revision_mismatch ||
+              (file_diag.items.empty() != panel_state->diagnostics_by_line.empty()) ||
+              (panel_state->diagnostics_by_line.empty() && !file_diag.items.empty());
+          if (need_apply) {
             push_active_file_diagnostics_from_cache(panel_state.get(), symbols.get(), workspace,
                                                     layout_state, workspace->last_buffer_edit_ms);
           }
         }
       }
       const bool has_applied_diagnostics =
-          panel_state->diagnostics_by_line_path == buffer.path &&
+          (panel_state->diagnostics_by_line_path == buffer.path ||
+           normalize_lsp_path(panel_state->diagnostics_by_line_path) ==
+               normalize_lsp_path(buffer.path)) &&
           !panel_state->diagnostics_by_line.empty();
       show_diagnostics = allow_lsp_diagnostics_ui && has_applied_diagnostics;
       const bool deferred_sync = editor_deferred_sync_allowed(layout_state);
@@ -6978,6 +7006,42 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     handlers->visible_line_count = [panel_state]() {
       return visible_line_count(panel_state->code_box);
     };
+    handlers->insert_snippet_at =
+        [workspace, panel_state, symbols, layout_state,
+         panel_focus](int insert_line, int insert_col, const std::string& snippet_text) {
+          if (workspace == nullptr || snippet_text.empty()) {
+            return false;
+          }
+          workspace->ensure_buffer();
+          EditorBuffer& buffer = workspace->buffer;
+          if (buffer.lines.empty()) {
+            buffer.lines.push_back("");
+          }
+          while (buffer.lines.size() <= insert_line) {
+            buffer.lines.push_back("");
+          }
+          insert_line = std::max(0, std::min(insert_line, buffer.lines.size() - 1));
+          const std::string& line_text = buffer.lines[insert_line];
+          insert_col =
+              std::max(0, std::min(insert_col, static_cast<int>(line_text.size())));
+
+          const SnippetResult snippet = expand_snippet(snippet_text);
+          if (snippet.text.empty()) {
+            return false;
+          }
+          replace_text_range_with_caret(&buffer, insert_line, insert_col, insert_col, snippet.text,
+                                        snippet.caret_line_offset, snippet.caret_col,
+                                        snippet.sel_start_col, snippet.sel_end_col);
+          begin_snippet_session(&panel_state->snippet_session, insert_line, insert_col, snippet);
+          const int visible = visible_line_count(panel_state->code_box);
+          ensure_scroll_visible(&buffer, visible, panel_state->code_width_chars);
+          notify_editor_buffer_changed(workspace, panel_state.get(), symbols, layout_state);
+          if (layout_state != nullptr) {
+            invalidate_editor_view(layout_state);
+          }
+          (void)panel_focus;
+          return true;
+        };
   }
 
   if (layout_state != nullptr) {

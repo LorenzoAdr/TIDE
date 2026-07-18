@@ -84,13 +84,14 @@ bool ShellSession::start_failed() const { return start_failed_.load(std::memory_
 
 void ShellSession::apply_winsize() {
 #if defined(__linux__)
-  if (master_fd_ < 0) {
+  const int master = master_fd_.load(std::memory_order_acquire);
+  if (master < 0) {
     return;
   }
   struct winsize ws = {};
   ws.ws_row = static_cast<unsigned short>(rows_);
   ws.ws_col = static_cast<unsigned short>(cols_);
-  ioctl(master_fd_, TIOCSWINSZ, &ws);
+  ioctl(master, TIOCSWINSZ, &ws);
 #endif
 }
 
@@ -99,7 +100,8 @@ void ShellSession::request_start(const ShellLaunchConfig& config, int cols, int 
     return;
   }
 #if defined(__linux__)
-  if (master_fd_ >= 0 || child_pid_ > 0) {
+  if (master_fd_.load(std::memory_order_acquire) >= 0 ||
+      child_pid_.load(std::memory_order_acquire) > 0) {
     stop();
   }
 #endif
@@ -145,16 +147,19 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
     return;
   }
 
-  master_fd_ = -1;
-  child_pid_ = forkpty(&master_fd_, nullptr, nullptr, nullptr);
-  if (child_pid_ < 0) {
-    master_fd_ = -1;
+  int master = -1;
+  const pid_t pid = forkpty(&master, nullptr, nullptr, nullptr);
+  master_fd_.store(master, std::memory_order_release);
+  child_pid_.store(pid, std::memory_order_release);
+  if (pid < 0) {
+    master_fd_.store(-1, std::memory_order_release);
+    child_pid_.store(-1, std::memory_order_release);
     start_failed_.store(true, std::memory_order_release);
     start_in_progress_.store(false, std::memory_order_release);
     return;
   }
 
-  if (child_pid_ == 0) {
+  if (pid == 0) {
     child_die_with_parent();
     setenv("TERM", "xterm-256color", 1);
     setenv("COLORTERM", "truecolor", 1);
@@ -210,29 +215,35 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
 
   apply_winsize();
 
-  const int flags = fcntl(master_fd_, F_GETFL, 0);
+  const int flags = fcntl(master, F_GETFL, 0);
   if (flags >= 0) {
-    fcntl(master_fd_, F_SETFL, flags | O_NONBLOCK);
+    fcntl(master, F_SETFL, flags | O_NONBLOCK);
   }
 
   if (stop_requested_.load(std::memory_order_acquire)) {
-    close(master_fd_);
-    master_fd_ = -1;
-    kill(child_pid_, SIGHUP);
-    int status = 0;
-    waitpid(child_pid_, &status, 0);
-    child_pid_ = -1;
+    const int fd = master_fd_.exchange(-1, std::memory_order_acq_rel);
+    if (fd >= 0) {
+      close(fd);
+    }
+    const pid_t child = child_pid_.exchange(-1, std::memory_order_acq_rel);
+    if (child > 1) {
+      kill(child, SIGHUP);
+      int status = 0;
+      waitpid(child, &status, 0);
+    }
     start_in_progress_.store(false, std::memory_order_release);
     return;
   }
 
   std::this_thread::sleep_for(std::chrono::milliseconds(30));
   int status = 0;
-  const pid_t exited = waitpid(child_pid_, &status, WNOHANG);
-  if (exited == child_pid_) {
-    close(master_fd_);
-    master_fd_ = -1;
-    child_pid_ = -1;
+  const pid_t exited = waitpid(pid, &status, WNOHANG);
+  if (exited == pid) {
+    const int fd = master_fd_.exchange(-1, std::memory_order_acq_rel);
+    if (fd >= 0) {
+      close(fd);
+    }
+    child_pid_.store(-1, std::memory_order_release);
     start_failed_.store(true, std::memory_order_release);
     start_in_progress_.store(false, std::memory_order_release);
     return;
@@ -252,36 +263,40 @@ void ShellSession::stop() {
   stop_requested_.store(true, std::memory_order_release);
   start_in_progress_.store(false, std::memory_order_release);
 
-  if (master_fd_ >= 0) {
-    close(master_fd_);
-    master_fd_ = -1;
+  // Close the PTY first so the reader unblocks, then join it *before* reaping
+  // the child. The reader must never clear child_pid_ while stop() still uses it:
+  // kill(-1, SIGHUP/SIGKILL) broadcasts to every process of the user (can kill
+  // the whole desktop session).
+  const int master = master_fd_.exchange(-1, std::memory_order_acq_rel);
+  if (master >= 0) {
+    close(master);
   }
-  if (child_pid_ > 0) {
-    kill(child_pid_, SIGHUP);
+  if (reader_thread_ && reader_thread_->joinable()) {
+    reader_thread_->join();
+  }
+  reader_thread_.reset();
+
+  const pid_t pid = child_pid_.exchange(-1, std::memory_order_acq_rel);
+  if (pid > 1) {
+    kill(pid, SIGHUP);
     int status = 0;
     constexpr int kTimeoutMs = 1500;
     constexpr int kPollMs = 20;
     int waited_ms = 0;
     for (;;) {
-      const pid_t result = waitpid(child_pid_, &status, WNOHANG);
-      if (result == child_pid_ || result < 0) {
-        child_pid_ = -1;
+      const pid_t result = waitpid(pid, &status, WNOHANG);
+      if (result == pid || result < 0) {
         break;
       }
       if (waited_ms >= kTimeoutMs) {
-        kill(child_pid_, SIGKILL);
-        waitpid(child_pid_, &status, 0);
-        child_pid_ = -1;
+        kill(pid, SIGKILL);
+        waitpid(pid, &status, 0);
         break;
       }
       usleep(static_cast<useconds_t>(kPollMs) * 1000);
       waited_ms += kPollMs;
     }
   }
-  if (reader_thread_ && reader_thread_->joinable()) {
-    reader_thread_->join();
-  }
-  reader_thread_.reset();
 #endif
   running_.store(false, std::memory_order_release);
   start_failed_.store(false, std::memory_order_release);
@@ -337,14 +352,15 @@ void ShellSession::resize(int cols, int rows) {
 
 void ShellSession::write_raw(const std::string& data) {
 #if defined(__linux__)
-  if (!running() || master_fd_ < 0 || data.empty()) {
+  const int master = master_fd_.load(std::memory_order_acquire);
+  if (!running() || master < 0 || data.empty()) {
     return;
   }
   const char* buf = data.c_str();
   std::size_t remaining = data.size();
   int retries = 32;
   while (remaining > 0 && retries-- > 0) {
-    const ssize_t written = write(master_fd_, buf, remaining);
+    const ssize_t written = write(master, buf, remaining);
     if (written > 0) {
       buf += written;
       remaining -= static_cast<std::size_t>(written);
@@ -379,10 +395,11 @@ void ShellSession::reader_loop() {
 #if defined(__linux__)
   std::vector<char> buffer(4096);
   while (!stop_requested_.load(std::memory_order_acquire)) {
-    if (master_fd_ < 0) {
+    const int master = master_fd_.load(std::memory_order_acquire);
+    if (master < 0) {
       break;
     }
-    const ssize_t bytes = read(master_fd_, buffer.data(), buffer.size());
+    const ssize_t bytes = read(master, buffer.data(), buffer.size());
     if (bytes > 0) {
       TGDB_MON("shell", "pty_read bytes=" + std::to_string(bytes));
       output_chunks_.push(
@@ -409,14 +426,11 @@ void ShellSession::reader_loop() {
     break;
   }
 
-  if (master_fd_ >= 0) {
-    close(master_fd_);
-    master_fd_ = -1;
-  }
-  if (child_pid_ > 0) {
-    int status = 0;
-    waitpid(child_pid_, &status, WNOHANG);
-    child_pid_ = -1;
+  // Only close if we still own the fd; stop() may have closed it already.
+  // Do not waitpid/clear child_pid_ here — stop() alone reaps the shell.
+  const int leftover = master_fd_.exchange(-1, std::memory_order_acq_rel);
+  if (leftover >= 0) {
+    close(leftover);
   }
 #endif
   running_.store(false, std::memory_order_release);

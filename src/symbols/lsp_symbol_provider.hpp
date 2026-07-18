@@ -157,6 +157,7 @@ class LspSymbolProvider : public ISymbolProvider {
   void ensure_go_lsp_async();
   void ensure_zig_lsp_async();
   void ensure_fortran_lsp_async();
+  void refresh_fortran_compiler_diagnostics(const std::string& path, const std::string& text);
   void ensure_lua_lsp_async();
   void ensure_typescript_lsp_async();
   void finish_lsp_start_locked(bool ok);
@@ -238,6 +239,9 @@ class LspSymbolProvider : public ISymbolProvider {
   std::unique_ptr<LspClient> go_client_;
   std::unique_ptr<LspClient> zig_client_;
   std::unique_ptr<LspClient> fortran_client_;
+  // fortls is not a compiler; overlay gfortran -fsyntax-only diagnostics (VS Code parity).
+  std::unordered_map<std::string, DocumentDiagnostics> fortran_compiler_diagnostics_;
+  std::atomic<uint64_t> fortran_compiler_diag_revision_{0};
   std::unique_ptr<LspClient> lua_client_;
   std::unique_ptr<LspClient> typescript_client_;
   TreeSitterSymbolProvider fallback_;

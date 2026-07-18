@@ -5,12 +5,14 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 #include "i18n/locale.hpp"
 #include "i18n/tr.hpp"
 #include "util/core_analyzer_support.hpp"
 #include "util/crash_handler.hpp"
+#include "util/lsp_missing_prompt.hpp"
 
 namespace {
 
@@ -251,7 +253,15 @@ int main(int argc, char **argv) {
 
   try {
     tgdb::Application app(std::move(config));
-    return app.run();
+    const int code = app.run();
+    if (auto post_exit = tgdb::consume_post_exit_shell_request()) {
+      const std::string script = tgdb::make_post_exit_bash_script(*post_exit);
+      execlp("bash", "bash", "-c", script.c_str(), static_cast<char*>(nullptr));
+      std::cerr << tgdb::i18n::tr_fmt("cli.fatal_error", {"execlp(bash) failed"}) << '\n';
+      std::cerr << "cd " << post_exit->cwd << " && " << post_exit->command << '\n';
+      return 1;
+    }
+    return code;
   } catch (const std::exception &e) {
     std::cerr << tgdb::i18n::tr_fmt("cli.fatal_error", {e.what()}) << '\n';
     tgdb::print_current_backtrace(e.what());

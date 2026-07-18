@@ -3,8 +3,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT}/build"
+# Árbol CMake aislado solo para el asistente TUI: no toca flags ni objetos de build/.
+WIZARD_BUILD_DIR="${ROOT}/build-wizard"
+WIZARD_SRC="${ROOT}/tools/bundle_wizard/main.cpp"
 CONFIG_FILE="${ROOT}/.bundle-config"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
+WIZARD_BIN=""
 
 BUNDLE_CLANGD=0
 GDB_BUNDLE_KIND=none
@@ -20,6 +24,7 @@ BUNDLE_FORTLS=0
 BUNDLE_LUA_LS=0
 BUNDLE_TSSERVER=0
 FORCE_BUNDLED=0
+UI_LOCALE=es
 BUILD_GDB_CA=0
 STATIC_LIBSTDCXX=0
 INTERACTIVE=1
@@ -39,7 +44,8 @@ usage() {
   cat <<'EOF'
 Uso: tools/compile.sh [opciones]
 
-Sin opciones: TUI interactiva para elegir componentes embebidos.
+Sin opciones: primero la TUI de componentes embebidos; luego una sola
+compilación de tgdb con la selección elegida.
 
 Opciones:
   -y, --yes                  Usar .bundle-config sin TUI (o defaults si no existe)
@@ -74,6 +80,7 @@ Opciones:
   --no-force-bundled-bash-dap Permitir fallback a adaptador Bash DAP en PATH
   --force-bundled            Forzar todos los componentes seleccionados (sin fallback PATH)
   --no-force-bundled         Permitir fallback al sistema para componentes embebidos
+  --ui-locale=es|en          Idioma por defecto de la aplicación (español / inglés)
   --bundle-rust-analyzer     Embeber rust-analyzer
   --no-bundle-rust-analyzer  No embeber rust-analyzer
   --bundle-gopls             Embeber gopls
@@ -215,6 +222,7 @@ load_bundle_config() {
   BUNDLE_LUA_LS=0
   BUNDLE_TSSERVER=0
   FORCE_BUNDLED=0
+  UI_LOCALE=es
   if [[ ! -f "${CONFIG_FILE}" ]]; then
     return
   fi
@@ -258,6 +266,8 @@ load_bundle_config() {
       BUNDLE_TSSERVER=0) BUNDLE_TSSERVER=0 ;;
       FORCE_BUNDLED=1) FORCE_BUNDLED=1 ;;
       FORCE_BUNDLED=0) FORCE_BUNDLED=0 ;;
+      UI_LOCALE=es) UI_LOCALE=es ;;
+      UI_LOCALE=en) UI_LOCALE=en ;;
     esac
   done < "${CONFIG_FILE}"
   if [[ "${GDB_BUNDLE_KIND}" == "none" && "${legacy_bundle_gdb}" == "1" ]]; then
@@ -266,6 +276,10 @@ load_bundle_config() {
   if [[ "${legacy_force}" == "1" ]]; then
     FORCE_BUNDLED=1
   fi
+  case "${UI_LOCALE}" in
+    es|en) ;;
+    *) UI_LOCALE=es ;;
+  esac
   sync_gdb_bundle_flags
   sync_python_bundle_flags
   # Migrar configs antiguas sin GDB_BUNDLE_KIND explícito.
@@ -293,12 +307,76 @@ BUNDLE_FORTLS=${BUNDLE_FORTLS}
 BUNDLE_LUA_LS=${BUNDLE_LUA_LS}
 BUNDLE_TSSERVER=${BUNDLE_TSSERVER}
 FORCE_BUNDLED=${FORCE_BUNDLED}
+UI_LOCALE=${UI_LOCALE}
 EOF
 }
 
+wizard_bin_fresh() {
+  local candidate="$1"
+  [[ -x "${candidate}" && "${candidate}" -nt "${WIZARD_SRC}" ]]
+}
+
+find_fresh_wizard_bin() {
+  local candidate
+  for candidate in "${BUILD_DIR}/tgdb-bundle-wizard" "${WIZARD_BUILD_DIR}/tgdb-bundle-wizard"; do
+    if wizard_bin_fresh "${candidate}"; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Compila el asistente en un proyecto mínimo (solo FTXUI) para no tocar build/
+# ni arrastrar tree-sitter/cppdap/bundles antes de la selección.
+build_wizard_isolated() {
+  if [[ -f "${WIZARD_BUILD_DIR}/CMakeCache.txt" ]]; then
+    local cached_home
+    cached_home="$(grep -E '^CMAKE_HOME_DIRECTORY:' "${WIZARD_BUILD_DIR}/CMakeCache.txt" \
+      | head -1 | cut -d= -f2- || true)"
+    if [[ -n "${cached_home}" && "${cached_home}" != "${ROOT}/tools/bundle_wizard" ]]; then
+      log "limpiando ${WIZARD_BUILD_DIR} (CMake de otro proyecto)..."
+      rm -rf "${WIZARD_BUILD_DIR}"
+    fi
+  fi
+  local cmake_args=()
+  # Reutilizar el sources de ftxui del build principal si ya existe (evita reclonar).
+  if [[ -d "${BUILD_DIR}/_deps/ftxui-src" ]]; then
+    cmake_args+=(-DFETCHCONTENT_SOURCE_DIR_FTXUI="${BUILD_DIR}/_deps/ftxui-src")
+  fi
+  log "preparando asistente de bundles (proyecto mínimo, solo ftxui)..."
+  # shellcheck disable=SC2068
+  cmake -S "${ROOT}/tools/bundle_wizard" -B "${WIZARD_BUILD_DIR}" ${cmake_args[@]}
+  cmake --build "${WIZARD_BUILD_DIR}" --target tgdb-bundle-wizard -j "${JOBS}"
+  WIZARD_BIN="${WIZARD_BUILD_DIR}/tgdb-bundle-wizard"
+  [[ -x "${WIZARD_BIN}" ]] || die "no se generó ${WIZARD_BIN}"
+}
+
+ensure_bundle_wizard() {
+  local found
+  if found="$(find_fresh_wizard_bin)"; then
+    WIZARD_BIN="${found}"
+    log "asistente listo: ${WIZARD_BIN}"
+    return 0
+  fi
+  # Si build/ ya está configurado, recompilar solo el wizard ahí (reutiliza ftxui)
+  # sin reconfigurar flags de bundles.
+  if [[ -f "${BUILD_DIR}/CMakeCache.txt" ]]; then
+    log "actualizando asistente de bundles en ${BUILD_DIR}..."
+    cmake --build "${BUILD_DIR}" --target tgdb-bundle-wizard -j "${JOBS}"
+    WIZARD_BIN="${BUILD_DIR}/tgdb-bundle-wizard"
+    if [[ -x "${WIZARD_BIN}" ]]; then
+      return 0
+    fi
+    log "aviso: no se pudo actualizar el asistente en build/; probando proyecto mínimo"
+  fi
+  build_wizard_isolated
+}
+
 run_wizard() {
+  ensure_bundle_wizard
   log "lanzando asistente de componentes embebidos..."
-  if ! "${BUILD_DIR}/tgdb-bundle-wizard" "${CONFIG_FILE}"; then
+  if ! "${WIZARD_BIN}" "${CONFIG_FILE}"; then
     die "asistente cancelado"
   fi
   load_bundle_config
@@ -401,6 +479,10 @@ cmake_bundle_args() {
   else
     args+=(-DTGDB_BUNDLE_TSSERVER=OFF -DTGDB_FORCE_BUNDLED_TSSERVER=OFF)
   fi
+  case "${UI_LOCALE}" in
+    en) args+=(-DTGDB_DEFAULT_UI_LOCALE=en) ;;
+    *) args+=(-DTGDB_DEFAULT_UI_LOCALE=es) ;;
+  esac
   printf '%s\n' "${args[@]}"
 }
 
@@ -720,6 +802,20 @@ while [[ $# -gt 0 ]]; do
       STATIC_LIBSTDCXX=1
       shift
       ;;
+    --ui-locale=es|--ui-locale=en)
+      UI_LOCALE="${1#--ui-locale=}"
+      shift
+      ;;
+    --ui-locale)
+      if [[ $# -lt 2 ]]; then
+        die "--ui-locale requiere es o en"
+      fi
+      case "$2" in
+        es|en) UI_LOCALE="$2" ;;
+        *) die "--ui-locale debe ser es o en" ;;
+      esac
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -736,19 +832,9 @@ check_command cmake
 check_command g++
 
 if [[ "${SKIP_WIZARD}" == "0" ]]; then
-  # Configure with the current .bundle-config (or defaults), not with all
-  # bundles forced OFF. An OFF→ON dance rewrites tgdb's flags.make and makes
-  # Make rebuild every translation unit even when the wizard selection is unchanged.
-  load_bundle_config
-  sync_gdb_bundle_flags
-  sync_python_bundle_flags
-  mapfile -t CMAKE_BUNDLE_ARGS < <(cmake_bundle_args)
-  mapfile -t CMAKE_EXTRA_ARGS < <(cmake_extra_args)
-  log "configurando CMake (asistente)..."
-  # shellcheck disable=SC2068
-  cmake -S "${ROOT}" -B "${BUILD_DIR}" ${CMAKE_BUNDLE_ARGS[@]} ${CMAKE_EXTRA_ARGS[@]}
-  log "compilando asistente de bundles..."
-  cmake --build "${BUILD_DIR}" --target tgdb-bundle-wizard -j "${JOBS}"
+  # TUI primero (reutiliza wizard existente o lo compila en build-wizard/).
+  # Así build/ solo se configura una vez, con la selección final: sin
+  # recompilar por un baile OFF→ON ni por un configure previo con otras flags.
   run_wizard
   save_bundle_config
 else
@@ -862,6 +948,7 @@ else
   log "  typescript-ls embebido: no"
 fi
 log "  forzar embebidos: ${FORCE_BUNDLED}"
+log "  idioma por defecto: ${UI_LOCALE}"
 if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
   log "  libstdc++ estático: sí"
 fi

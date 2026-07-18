@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Empaqueta gopls vía `go install` (no hay tarball oficial en GitHub releases).
+# Empaqueta gopls vía `go install`.
+# Si no hay `go` en PATH, descarga un toolchain oficial de Go solo para el build
+# (no se embebe Go; solo el binario gopls).
 set -euo pipefail
 
 die() { printf 'prepare_gopls_bundle: error: %s\n' "$*" >&2; exit 1; }
@@ -13,6 +15,49 @@ strip_cmake_quotes() {
 
 require_var() { [[ -n "${!1:-}" ]] || die "variable requerida: $1"; }
 
+# Descarga atómica a dest (parcial + mv). Reintenta si el fichero es demasiado pequeño.
+download_file() {
+  local url="$1"
+  local dest="$2"
+  local min_bytes="${3:-0}"
+  local partial="${dest}.partial"
+  local size=0
+
+  mkdir -p "$(dirname "${dest}")"
+
+  if [[ -f "${dest}" ]]; then
+    size="$(wc -c < "${dest}" | tr -d ' ')"
+    if [[ "${min_bytes}" -gt 0 && "${size}" -lt "${min_bytes}" ]]; then
+      printf 'prepare_gopls_bundle: caché incompleta (%s bytes < %s); redescargando\n' \
+        "${size}" "${min_bytes}"
+      rm -f "${dest}"
+    else
+      return 0
+    fi
+  fi
+
+  rm -f "${partial}"
+  if command -v curl >/dev/null; then
+    curl -fL --retry 5 --retry-delay 2 --connect-timeout 30 \
+      -o "${partial}" "${url}" \
+      || die "falló la descarga: ${url}"
+  elif command -v wget >/dev/null; then
+    wget -O "${partial}" "${url}" || die "falló la descarga: ${url}"
+  else
+    die "hace falta curl o wget para descargar Go/gopls"
+  fi
+
+  [[ -f "${partial}" ]] || die "curl/wget no creó ${partial}"
+  size="$(wc -c < "${partial}" | tr -d ' ')"
+  if [[ "${min_bytes}" -gt 0 && "${size}" -lt "${min_bytes}" ]]; then
+    rm -f "${partial}"
+    die "descarga incompleta de ${url} (${size} bytes < ${min_bytes})"
+  fi
+  mv -f "${partial}" "${dest}"
+  [[ -f "${dest}" ]] || die "no se pudo mover la descarga a ${dest}"
+  printf 'prepare_gopls_bundle: descargado %s (%s bytes)\n' "${dest}" "${size}"
+}
+
 require_var TGDB_GOPLS_VERSION
 require_var TGDB_GOPLS_STAGING_DIR
 require_var TGDB_GOPLS_PAYLOAD_DIR
@@ -20,6 +65,10 @@ require_var TGDB_GOPLS_TAR_PATH
 require_var TGDB_GOPLS_ZST_PATH
 require_var TGDB_GOPLS_MANIFEST_HPP
 require_var TGDB_GOPLS_BLOB_OBJ
+require_var TGDB_BUNDLED_CACHE_DIR
+require_var TGDB_GO_VERSION
+require_var TGDB_GO_URL
+require_var TGDB_GO_TAR_PATH
 
 TGDB_GOPLS_VERSION="$(strip_cmake_quotes "${TGDB_GOPLS_VERSION}")"
 TGDB_GOPLS_STAGING_DIR="$(strip_cmake_quotes "${TGDB_GOPLS_STAGING_DIR}")"
@@ -28,22 +77,63 @@ TGDB_GOPLS_TAR_PATH="$(strip_cmake_quotes "${TGDB_GOPLS_TAR_PATH}")"
 TGDB_GOPLS_ZST_PATH="$(strip_cmake_quotes "${TGDB_GOPLS_ZST_PATH}")"
 TGDB_GOPLS_MANIFEST_HPP="$(strip_cmake_quotes "${TGDB_GOPLS_MANIFEST_HPP}")"
 TGDB_GOPLS_BLOB_OBJ="$(strip_cmake_quotes "${TGDB_GOPLS_BLOB_OBJ}")"
+TGDB_BUNDLED_CACHE_DIR="$(strip_cmake_quotes "${TGDB_BUNDLED_CACHE_DIR}")"
+TGDB_GO_VERSION="$(strip_cmake_quotes "${TGDB_GO_VERSION}")"
+TGDB_GO_URL="$(strip_cmake_quotes "${TGDB_GO_URL}")"
+TGDB_GO_TAR_PATH="$(strip_cmake_quotes "${TGDB_GO_TAR_PATH}")"
 
-for tool in zstd sha256sum objcopy go; do
-  command -v "${tool}" >/dev/null || die "falta ${tool} (gopls requiere Go en PATH en tiempo de bundle)"
+for tool in zstd sha256sum objcopy tar; do
+  command -v "${tool}" >/dev/null || die "falta ${tool}"
 done
 
 rm -rf "${TGDB_GOPLS_STAGING_DIR}" "${TGDB_GOPLS_PAYLOAD_DIR}"
-mkdir -p "${TGDB_GOPLS_STAGING_DIR}/bin" "${TGDB_GOPLS_PAYLOAD_DIR}/bin"
+mkdir -p "${TGDB_GOPLS_STAGING_DIR}/bin" "${TGDB_GOPLS_PAYLOAD_DIR}/bin" \
+  "${TGDB_BUNDLED_CACHE_DIR}"
+
+GO_BIN=""
+if command -v go >/dev/null 2>&1; then
+  GO_BIN="$(command -v go)"
+  printf 'prepare_gopls_bundle: usando Go del sistema: %s (%s)\n' \
+    "${GO_BIN}" "$("${GO_BIN}" version 2>/dev/null || echo '?')"
+else
+  # ~75 MB; rechazar restos truncados de descargas interrumpidas.
+  local_min_go_bytes=50000000
+  printf 'prepare_gopls_bundle: Go no está en PATH; descargando toolchain %s...\n' \
+    "${TGDB_GO_VERSION}"
+  printf 'prepare_gopls_bundle: URL=%s\n' "${TGDB_GO_URL}"
+  printf 'prepare_gopls_bundle: dest=%s\n' "${TGDB_GO_TAR_PATH}"
+  download_file "${TGDB_GO_URL}" "${TGDB_GO_TAR_PATH}" "${local_min_go_bytes}"
+  [[ -f "${TGDB_GO_TAR_PATH}" ]] || die "falta el tarball tras descargar: ${TGDB_GO_TAR_PATH}"
+
+  local_go_root="${TGDB_GOPLS_STAGING_DIR}/go_toolchain"
+  mkdir -p "${local_go_root}"
+  tar -xzf "${TGDB_GO_TAR_PATH}" -C "${local_go_root}" \
+    || die "no se pudo extraer ${TGDB_GO_TAR_PATH} (¿caché corrupta? bórrala y reintenta)"
+  # El tarball oficial crea go/ en la raíz.
+  if [[ -x "${local_go_root}/go/bin/go" ]]; then
+    GO_BIN="${local_go_root}/go/bin/go"
+  else
+    die "no se encontró go tras extraer ${TGDB_GO_TAR_PATH}"
+  fi
+  export GOROOT="${local_go_root}/go"
+  printf 'prepare_gopls_bundle: toolchain temporal: %s\n' "$("${GO_BIN}" version)"
+fi
 
 export GOBIN="${TGDB_GOPLS_STAGING_DIR}/bin"
 export GO111MODULE=on
-go install "golang.org/x/tools/gopls@${TGDB_GOPLS_VERSION}"
+export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
+# Aislar el módulo cache del host.
+export GOPATH="${TGDB_GOPLS_STAGING_DIR}/gopath"
+export GOCACHE="${TGDB_GOPLS_STAGING_DIR}/gocache"
+mkdir -p "${GOPATH}" "${GOCACHE}"
+
+"${GO_BIN}" install "golang.org/x/tools/gopls@${TGDB_GOPLS_VERSION}"
 
 [[ -x "${GOBIN}/gopls" ]] || die "go install no produjo gopls en ${GOBIN}"
 cp -a "${GOBIN}/gopls" "${TGDB_GOPLS_PAYLOAD_DIR}/bin/gopls"
 chmod +x "${TGDB_GOPLS_PAYLOAD_DIR}/bin/gopls"
 
+# Blob interno de gopls (no confundir con el tarball de Go en caché).
 rm -f "${TGDB_GOPLS_TAR_PATH}"
 tar -cf "${TGDB_GOPLS_TAR_PATH}" -C "${TGDB_GOPLS_PAYLOAD_DIR}" .
 zstd -f -19 -q "${TGDB_GOPLS_TAR_PATH}" -o "${TGDB_GOPLS_ZST_PATH}"

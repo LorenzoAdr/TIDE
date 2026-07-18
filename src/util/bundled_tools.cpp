@@ -327,6 +327,10 @@ std::optional<std::vector<unsigned char>> decompress_zstd_blob(const unsigned ch
 }
 #endif
 
+// Usado por lazy_extract_bundled_tree (definido más abajo).
+bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
+                              const fs::path& output_dir);
+
 #if defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) || defined(TGDB_HAS_BUNDLED_GOPLS) || \
     defined(TGDB_HAS_BUNDLED_ZLS) || defined(TGDB_HAS_BUNDLED_LUA_LS) || \
     defined(TGDB_HAS_BUNDLED_FORTLS) || defined(TGDB_HAS_BUNDLED_TSSERVER)
@@ -1169,6 +1173,22 @@ std::optional<std::string> resolve_chktex() {
   }
 #endif
   return find_named_binary_on_path("chktex");
+}
+
+std::optional<std::string> resolve_gfortran() {
+  if (const auto env_path = env_executable("GFORTRAN_PATH"); env_path.has_value()) {
+    return *env_path;
+  }
+  if (const auto env_path = env_executable("TGDB_GFORTRAN"); env_path.has_value()) {
+    return *env_path;
+  }
+  static const char* kCandidates[] = {"gfortran", "gfortran-14", "gfortran-13", "gfortran-12"};
+  for (const char* name : kCandidates) {
+    if (const auto path_bin = find_named_binary_on_path(name); path_bin.has_value()) {
+      return *path_bin;
+    }
+  }
+  return std::nullopt;
 }
 
 std::optional<BashLsLocation> resolve_bash_language_server() {

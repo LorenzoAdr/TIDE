@@ -49,12 +49,17 @@ std::string format_fps(double fps) {
 }
 
 std::string summarize_lsp_workers(const std::vector<ThreadSample>& workers) {
-  bool has_clangd = false;
+  std::vector<std::string> child_servers;
   std::vector<std::string> names;
   for (const ThreadSample& worker : workers) {
     if (worker.is_child_process) {
-      if (worker.comm == "clangd" || worker.comm.rfind("clangd", 0) == 0) {
-        has_clangd = true;
+      if (worker.comm == "clangd" || worker.comm.rfind("clangd", 0) == 0 ||
+          worker.comm == "basedpyright" || worker.comm == "rust-analyzer" ||
+          worker.comm == "gopls") {
+        if (std::find(child_servers.begin(), child_servers.end(), worker.comm) ==
+            child_servers.end()) {
+          child_servers.push_back(worker.comm);
+        }
       }
       continue;
     }
@@ -62,13 +67,13 @@ std::string summarize_lsp_workers(const std::vector<ThreadSample>& workers) {
       names.push_back(worker.comm);
     }
   }
-  if (!has_clangd && names.empty()) {
+  if (child_servers.empty() && names.empty()) {
     return "";
   }
   std::ostringstream out;
   out << i18n::tr("panel.performance.lsp_prefix");
-  if (has_clangd) {
-    out << " clangd";
+  for (const std::string& server : child_servers) {
+    out << " " << server;
   }
   for (const std::string& name : names) {
     out << " " << name;

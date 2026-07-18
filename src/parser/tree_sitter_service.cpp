@@ -184,7 +184,16 @@ const std::vector<LineHighlights>* TreeSitterService::stale_highlights_for(
   if (doc == nullptr || doc->line_highlights.empty() || line_count <= 0) {
     return nullptr;
   }
-  if (static_cast<int>(doc->line_highlights.size()) == line_count) {
+  const int hl_lines = static_cast<int>(doc->line_highlights.size());
+  if (hl_lines == line_count) {
+    return &doc->line_highlights;
+  }
+  // Callers pass buffer.lines.size(). normalize_editor_source() strips one
+  // trailing '\n', so a file that ends with a newline keeps an empty last
+  // buffer line and hl_lines == line_count - 1 once highlights are ready.
+  // Rejecting that stable mismatch blanks every non-caret line during
+  // incremental highlighting (Lua/JS/etc. fall back to plain text).
+  if (hl_lines == source_line_count(doc->source)) {
     return &doc->line_highlights;
   }
   // Worker refresh pending: prefer stale colors over a full plain-text flash.

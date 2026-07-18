@@ -420,93 +420,6 @@ void match_brackets(EditorBuffer* buffer) {
   clamp_all_cursors(buffer);
 }
 
-void indent_lines(EditorBuffer* buffer) {
-  if (buffer == nullptr || buffer->lines.empty()) {
-    return;
-  }
-  push_undo(buffer);
-  const int tab = std::max(1, 4);
-  for (auto& cursor : buffer->cursors) {
-    int start_line = 0;
-    int start_col = 0;
-    int end_line = 0;
-    int end_col = 0;
-    if (cursor.has_selection()) {
-      cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
-    } else {
-      start_line = end_line = cursor.head.line;
-    }
-    for (int line = start_line; line <= end_line; ++line) {
-      if (line < 0 || line >= static_cast<int>(buffer->lines.size())) {
-        continue;
-      }
-      {
-        std::string indented = buffer->lines[static_cast<std::size_t>(line)];
-        indented.insert(0, static_cast<std::size_t>(tab), ' ');
-        buffer->lines.set_line(line, std::move(indented));
-      }
-      for (auto& other : buffer->cursors) {
-        if (other.head.line == line && other.head.col >= 0) {
-          other.head.col += tab;
-        }
-        if (other.anchor.line == line && other.anchor.col >= 0) {
-          other.anchor.col += tab;
-        }
-      }
-    }
-  }
-  clamp_all_cursors(buffer);
-  buffer->dirty = true;
-  buffer->view_token++;
-}
-
-void unindent_lines(EditorBuffer* buffer) {
-  if (buffer == nullptr || buffer->lines.empty()) {
-    return;
-  }
-  push_undo(buffer);
-  for (auto& cursor : buffer->cursors) {
-    int start_line = 0;
-    int start_col = 0;
-    int end_line = 0;
-    int end_col = 0;
-    if (cursor.has_selection()) {
-      cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
-    } else {
-      start_line = end_line = cursor.head.line;
-    }
-    for (int line = start_line; line <= end_line; ++line) {
-      if (line < 0 || line >= static_cast<int>(buffer->lines.size())) {
-        continue;
-      }
-      std::string text = buffer->lines[static_cast<std::size_t>(line)];
-      int removed = 0;
-      while (removed < 4 && !text.empty() && text.front() == ' ') {
-        text.erase(text.begin());
-        ++removed;
-      }
-      if (removed == 0 && !text.empty() && text.front() == '\t') {
-        text.erase(text.begin());
-        removed = 1;
-      }
-      if (removed > 0) {
-        buffer->lines.set_line(line, std::move(text));
-        for (auto& other : buffer->cursors) {
-          if (other.head.line == line) {
-            other.head.col = std::max(0, other.head.col - removed);
-          }
-          if (other.anchor.line == line) {
-            other.anchor.col = std::max(0, other.anchor.col - removed);
-          }
-        }
-      }
-    }
-  }
-  clamp_all_cursors(buffer);
-  buffer->dirty = true;
-  buffer->view_token++;
-}
-
 void delete_char_at_cursor(EditorBuffer* buffer, bool forward) {
   if (buffer == nullptr) {
     return;
@@ -892,7 +805,11 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
           ensure_view(ctx);
           return true;
         }
-        insert_tab_stop(buffer);
+        if (any_cursor_has_selection(*buffer)) {
+          indent_lines(buffer);
+        } else {
+          insert_tab_stop(buffer);
+        }
       } else {
         indent_lines(buffer);
       }
@@ -900,6 +817,10 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
       notify(ctx);
       return true;
     case HelixCommand::kUnindent:
+      if (helix->mode == HelixMode::kInsert && ctx.snippet_session != nullptr &&
+          snippet_session_active(*ctx.snippet_session)) {
+        return true;
+      }
       unindent_lines(buffer);
       ensure_view(ctx);
       notify(ctx);

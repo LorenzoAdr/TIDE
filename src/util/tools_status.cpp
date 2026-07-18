@@ -205,6 +205,22 @@ ToolsStatusSnapshot collect_tools_status(const LspRuntimeFlags& lsp) {
       "fortls", "settings.status.tool.fortls", lsp.lsp_enabled, lsp.fortran_ready,
       lsp.fortran_starting, fortran_detail, fortran_bin));
 
+  if (const auto gf = resolve_gfortran(); gf.has_value()) {
+    ToolStatusEntry gfortran;
+    gfortran.id = "gfortran";
+    gfortran.name_i18n_key = "settings.status.tool.gfortran";
+    gfortran.state = ToolRuntimeState::kIdle;
+    gfortran.detail = *gf;
+    snap.language_servers.push_back(std::move(gfortran));
+  } else {
+    ToolStatusEntry gfortran;
+    gfortran.id = "gfortran";
+    gfortran.name_i18n_key = "settings.status.tool.gfortran";
+    gfortran.state = ToolRuntimeState::kUnavailable;
+    gfortran.detail = "";
+    snap.language_servers.push_back(std::move(gfortran));
+  }
+
   std::optional<std::string> lua_detail;
   bool lua_bin = false;
   if (const auto loc = resolve_lua_language_server(); loc.has_value()) {

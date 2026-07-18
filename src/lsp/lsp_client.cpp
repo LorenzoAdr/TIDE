@@ -100,7 +100,9 @@ bool LspClient::spawn_language_server(const LanguageServerSpec& spec) {
     // Do not use child_die_with_parent() here: fork from the lsp-start thread plus
     // PR_SET_PDEATHSIG inherited by the server after exec causes immediate SIGTERM.
     if (!spec.workspace_root.empty()) {
-      ::chdir(spec.workspace_root.c_str());
+      if (::chdir(spec.workspace_root.c_str()) != 0) {
+        _exit(127);
+      }
     }
     for (const std::string& entry : spec.env) {
       ::putenv(const_cast<char*>(entry.c_str()));
@@ -172,6 +174,8 @@ bool LspClient::initialize(const std::string& workspace_root) {
   params["capabilities"]["textDocument"]["documentSymbol"]["hierarchicalDocumentSymbolSupport"] =
       true;
   params["capabilities"]["textDocument"]["publishDiagnostics"] = nlohmann::json::object();
+  params["capabilities"]["textDocument"]["synchronization"] = {
+      {"didSave", true}, {"willSave", false}, {"willSaveWaitUntil", false}};
   params["capabilities"]["textDocument"]["completion"]["completionItem"]["snippetSupport"] =
       true;
   params["capabilities"]["textDocument"]["definition"] = nlohmann::json::object();
@@ -641,6 +645,33 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
   send_lsp_notification("textDocument/didChange", std::move(params));
 }
 
+void LspClient::did_save(const std::string& absolute_path, const std::string& text) {
+  if (!ready_.load() || absolute_path.empty() || !is_lsp_trackable_path(absolute_path, text)) {
+    return;
+  }
+
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return;
+  }
+
+  std::string uri;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = documents_.find(key);
+    if (it == documents_.end()) {
+      return;
+    }
+    uri = it->second.uri;
+  }
+
+  nlohmann::json params = {{"textDocument", {{"uri", uri}}}};
+  if (!text.empty()) {
+    params["text"] = text;
+  }
+  send_lsp_notification("textDocument/didSave", std::move(params));
+}
+
 void LspClient::did_change_workspace_configuration(const nlohmann::json& settings) {
   if (!ready_.load() || settings.is_null()) {
     return;
@@ -924,9 +955,10 @@ CompletionItem LspClient::parse_completion_item(const nlohmann::json& item) {
 
   if (item.contains("insertText") && item["insertText"].is_string()) {
     out.insert_text = item["insertText"].get<std::string>();
-  } else if (item.contains("textEdit") && item["textEdit"].is_object()) {
+  }
+  if (item.contains("textEdit") && item["textEdit"].is_object()) {
     const auto& edit = item["textEdit"];
-    if (edit.contains("newText") && edit["newText"].is_string()) {
+    if (out.insert_text.empty() && edit.contains("newText") && edit["newText"].is_string()) {
       out.insert_text = edit["newText"].get<std::string>();
     }
     if (out.insert_format == InsertTextFormat::kPlain && edit.contains("insertTextFormat") &&
@@ -935,13 +967,21 @@ CompletionItem LspClient::parse_completion_item(const nlohmann::json& item) {
       out.insert_format =
           format == 2 ? InsertTextFormat::kSnippet : InsertTextFormat::kPlain;
     }
+    // TextEdit uses "range"; InsertReplaceEdit uses "replace" (prefer replace on accept).
+    const nlohmann::json* range = nullptr;
     if (edit.contains("range") && edit["range"].is_object()) {
-      const auto& range = edit["range"];
-      if (range.contains("start") && range.contains("end")) {
+      range = &edit["range"];
+    } else if (edit.contains("replace") && edit["replace"].is_object()) {
+      range = &edit["replace"];
+    }
+    if (range != nullptr && range->contains("start") && range->contains("end")) {
+      const auto& start = (*range)["start"];
+      const auto& end = (*range)["end"];
+      if (start.contains("line") && start.contains("character") && end.contains("character")) {
         out.has_replace_range = true;
-        out.replace_line = range["start"]["line"].get<int>();
-        out.replace_start = range["start"]["character"].get<int>();
-        out.replace_end = range["end"]["character"].get<int>();
+        out.replace_line = start["line"].get<int>();
+        out.replace_start = start["character"].get<int>();
+        out.replace_end = end["character"].get<int>();
       }
     }
   }

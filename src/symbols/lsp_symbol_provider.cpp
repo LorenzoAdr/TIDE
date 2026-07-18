@@ -17,6 +17,7 @@
 #include "util/bundled_tools.hpp"
 #include "util/thread_name.hpp"
 #include "util/monitor_log.hpp"
+#include "lsp/gfortran_diagnostics.hpp"
 namespace fs = std::filesystem;
 
 namespace {
@@ -92,6 +93,22 @@ void append_client_diagnostics(std::vector<DocumentDiagnostics>& out,
   out.insert(out.end(), docs.begin(), docs.end());
 }
 
+void merge_document_diagnostics(std::vector<DocumentDiagnostics>& out,
+                                const DocumentDiagnostics& extra) {
+  if (extra.path.empty()) {
+    return;
+  }
+  for (auto& doc : out) {
+    if (doc.path == extra.path) {
+      doc.items.insert(doc.items.end(), extra.items.begin(), extra.items.end());
+      return;
+    }
+  }
+  if (!extra.items.empty()) {
+    out.push_back(extra);
+  }
+}
+
 uint64_t client_diagnostics_revision(const std::unique_ptr<LspClient>& client, int shift) {
   if (!client) {
     return 0;
@@ -152,6 +169,18 @@ void configure_bash_language_server(LspClient* client) {
     bash_settings["shellcheckPath"] = *shellcheck;
   }
   client->did_change_workspace_configuration({{"bashIde", std::move(bash_settings)}});
+}
+
+void configure_rust_analyzer(LspClient* client) {
+  if (client == nullptr || !client->ready()) {
+    return;
+  }
+  // Prefer check-on-save (default) and keep native diagnostics enabled so buffer edits
+  // update quickly; unresolved-name / rustc findings still arrive after save.
+  nlohmann::json ra = nlohmann::json::object();
+  ra["checkOnSave"] = true;
+  ra["diagnostics"] = {{"enable", true}, {"experimental", {{"enable", true}}}};
+  client->did_change_workspace_configuration({{"rust-analyzer", std::move(ra)}});
 }
 
 void configure_texlab_language_server(LspClient* client) {
@@ -598,6 +627,9 @@ void LspSymbolProvider::finish_simple_lazy_lsp_start_locked(std::unique_ptr<LspC
   if (diagnostics_notify_callback_) {
     client->set_diagnostics_notify_callback(diagnostics_notify_callback_);
   }
+  if (std::string(cfg.language_id) == "rust") {
+    configure_rust_analyzer(client.get());
+  }
   open_lazy_lsp_buffers(client.get(), cfg.language_id, open_buffers_,
                         [this](const std::string& path) { return buffer_text_for_path(path); });
   for (const auto& entry : open_buffers_) {
@@ -616,6 +648,9 @@ void LspSymbolProvider::finish_simple_lazy_lsp_start_locked(std::unique_ptr<LspC
     enqueue_semantic_tokens_locked(normalize_lsp_path(entry.first));
   }
   semantic_highlight_revision_.fetch_add(1, std::memory_order_relaxed);
+  // Wake the debounce timer so edits queued while this server was starting are flushed
+  // (flush keeps pending until client_for_path succeeds).
+  schedule_did_change_debounce_wake();
 }
 
 void LspSymbolProvider::ensure_simple_lazy_lsp_async(
@@ -735,6 +770,41 @@ void LspSymbolProvider::finish_fortran_lsp_start_locked(bool ok, bool binary_mis
       {"lsp-fortran-start", "fortran", "status.fortls_missing", "status.fortls_failed",
        "status.fortls_started", "fortls start failed or binary missing"},
       ok, binary_missing);
+}
+
+void LspSymbolProvider::refresh_fortran_compiler_diagnostics(const std::string& path,
+                                                             const std::string& text) {
+  if (path.empty() || !language_id_is_fortran(language_id_for_path(path))) {
+    return;
+  }
+  const auto gfortran = resolve_gfortran();
+  if (!gfortran.has_value()) {
+    return;
+  }
+  const std::string key = normalize_lsp_path(path);
+  if (key.empty()) {
+    return;
+  }
+  auto doc = run_gfortran_diagnostics(path, text, *gfortran);
+  std::function<void(const std::string&)> notify;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (shutting_down_.load(std::memory_order_acquire)) {
+      return;
+    }
+    if (doc.has_value()) {
+      doc->path = key;
+      fortran_compiler_diagnostics_[key] = std::move(*doc);
+    } else {
+      fortran_compiler_diagnostics_.erase(key);
+    }
+    fortran_compiler_diag_revision_.fetch_add(1, std::memory_order_acq_rel);
+    cached_diag_revision_ = 0;
+    notify = diagnostics_notify_callback_;
+  }
+  if (notify) {
+    notify(path);
+  }
 }
 
 void LspSymbolProvider::finish_lua_lsp_start_locked(bool ok, bool binary_missing) {
@@ -886,6 +956,7 @@ void LspSymbolProvider::refresh_diagnostics_cache_locked() const {
   revision ^= client_diagnostics_revision(fortran_client_, 7);
   revision ^= client_diagnostics_revision(lua_client_, 8);
   revision ^= client_diagnostics_revision(typescript_client_, 9);
+  revision ^= fortran_compiler_diag_revision_.load(std::memory_order_acquire) << 10;
   if (revision == cached_diag_revision_) {
     return;
   }
@@ -899,6 +970,9 @@ void LspSymbolProvider::refresh_diagnostics_cache_locked() const {
   append_client_diagnostics(cached_diagnostics_, fortran_client_);
   append_client_diagnostics(cached_diagnostics_, lua_client_);
   append_client_diagnostics(cached_diagnostics_, typescript_client_);
+  for (const auto& entry : fortran_compiler_diagnostics_) {
+    merge_document_diagnostics(cached_diagnostics_, entry.second);
+  }
   cached_diag_revision_ = revision;
 }
 
@@ -1246,6 +1320,8 @@ void LspSymbolProvider::stop_lsp() {
     go_client_.reset();
     zig_client_.reset();
     fortran_client_.reset();
+    fortran_compiler_diagnostics_.clear();
+    fortran_compiler_diag_revision_.store(0, std::memory_order_release);
     lua_client_.reset();
     typescript_client_.reset();
     reset_async_queues_locked();
@@ -1677,13 +1753,15 @@ void LspSymbolProvider::flush_pending_did_change_for_key(const std::string& key)
   }
   std::string path_to_send;
   std::string text_to_send;
-  bool send = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!use_lsp_) {
+      pending_did_change_.erase(key);
       return;
     }
-    pending_did_change_.erase(key);
+    if (pending_did_change_.find(key) == pending_did_change_.end()) {
+      return;
+    }
     for (const auto& entry : open_buffers_) {
       if (normalize_lsp_path(entry.first) == key) {
         path_to_send = entry.first;
@@ -1691,34 +1769,49 @@ void LspSymbolProvider::flush_pending_did_change_for_key(const std::string& key)
         break;
       }
     }
-    if (!path_to_send.empty() && is_lsp_trackable_path(path_to_send, text_to_send)) {
-      send = true;
+    if (path_to_send.empty() || !is_lsp_trackable_path(path_to_send, text_to_send)) {
+      pending_did_change_.erase(key);
+      return;
     }
   }
-  if (!send) {
+
+  LspClient* lsp = client_for_path(path_to_send);
+  if (lsp == nullptr) {
+    // Server still starting (common for lazy rust-analyzer). Keep pending and retry.
+    schedule_did_change_debounce_wake();
     return;
   }
-  if (LspClient* lsp = client_for_path(path_to_send)) {
-    lsp->did_change(path_to_send, text_to_send);
-  }
+  lsp->did_change(path_to_send, text_to_send);
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    pending_did_change_.erase(key);
     pending_content_refresh_[key] = steady_now_ms();
+  }
+  if (language_id_is_fortran(language_id_for_path(path_to_send))) {
+    refresh_fortran_compiler_diagnostics(path_to_send, text_to_send);
   }
 }
 
 void LspSymbolProvider::flush_pending_did_change_for_key_locked(const std::string& key) {
-  flush_pending_did_change_for_key(key);
+  // Never call the locking flush while mutex_ is held (deadlock). Collect under the
+  // caller's lock, then send after release — callers that hold the lock should use
+  // flush_all_pending_did_change_locked's key snapshot pattern, or call the unlocked
+  // flush_pending_did_change_for_key after releasing.
+  (void)key;
 }
 
 void LspSymbolProvider::flush_all_pending_did_change_locked() {
-  if (!use_lsp_ || pending_did_change_.empty()) {
-    return;
-  }
+  // Assumes mutex_ is NOT held. Name kept for callers; gathers keys then flushes unlocked.
   std::vector<std::string> keys;
-  keys.reserve(pending_did_change_.size());
-  for (const auto& entry : pending_did_change_) {
-    keys.push_back(entry.first);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!use_lsp_ || pending_did_change_.empty()) {
+      return;
+    }
+    keys.reserve(pending_did_change_.size());
+    for (const auto& entry : pending_did_change_) {
+      keys.push_back(entry.first);
+    }
   }
   for (const std::string& key : keys) {
     flush_pending_did_change_for_key(key);
@@ -1726,50 +1819,36 @@ void LspSymbolProvider::flush_all_pending_did_change_locked() {
 }
 
 void LspSymbolProvider::tick_pending_did_change_locked() {
-  if (!use_lsp_ || pending_did_change_.empty()) {
-    return;
-  }
-  const int64_t now = steady_now_ms();
-  constexpr int64_t kDebounceMs = kLspDidChangeDebounceMs;
-  std::vector<std::string> due;
-  for (const auto& entry : pending_did_change_) {
-    if (now - entry.second >= kDebounceMs) {
-      due.push_back(entry.first);
-    }
-  }
-  for (const std::string& key : due) {
-    flush_pending_did_change_for_key(key);
-  }
+  // Legacy helper: do not hold mutex_ across didChange I/O.
+  tick_debounced_updates();
 }
 
 void LspSymbolProvider::tick_debounced_updates() {
   process_pending_transport_restart();
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (ui_inhibited_) {
-      return;
-    }
-  }
   std::vector<std::string> due;
+  bool run_content_refresh = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!use_lsp_ || pending_did_change_.empty()) {
-      tick_content_refresh_locked();
-      return;
-    }
-    const int64_t now = steady_now_ms();
-    constexpr int64_t kDebounceMs = kLspDidChangeDebounceMs;
-    for (const auto& entry : pending_did_change_) {
-      if (now - entry.second >= kDebounceMs) {
-        due.push_back(entry.first);
+    // Always flush document sync — even while UI is inhibited. Blocking didChange here
+    // left language servers (especially rust-analyzer) stuck on the open-time buffer.
+    if (use_lsp_ && !pending_did_change_.empty()) {
+      const int64_t now = steady_now_ms();
+      constexpr int64_t kDebounceMs = kLspDidChangeDebounceMs;
+      for (const auto& entry : pending_did_change_) {
+        if (now - entry.second >= kDebounceMs) {
+          due.push_back(entry.first);
+        }
       }
     }
+    run_content_refresh = !ui_inhibited_;
   }
   for (const std::string& key : due) {
     flush_pending_did_change_for_key(key);
   }
-  std::lock_guard<std::mutex> lock(mutex_);
-  tick_content_refresh_locked();
+  if (run_content_refresh) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    tick_content_refresh_locked();
+  }
 }
 
 bool LspSymbolProvider::sync_document_for_completion(const std::string& path,
@@ -1823,13 +1902,11 @@ void LspSymbolProvider::flush_document_sync(const std::string& path) {
   }
   std::string path_to_send;
   std::string text_to_send;
-  bool send = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!use_lsp_) {
       return;
     }
-    pending_did_change_.erase(key);
     for (const auto& entry : open_buffers_) {
       if (normalize_lsp_path(entry.first) == key) {
         path_to_send = entry.first;
@@ -1837,19 +1914,20 @@ void LspSymbolProvider::flush_document_sync(const std::string& path) {
         break;
       }
     }
-    if (!path_to_send.empty() && is_lsp_trackable_path(path_to_send, text_to_send)) {
-      send = true;
+    if (path_to_send.empty() || !is_lsp_trackable_path(path_to_send, text_to_send)) {
+      pending_did_change_.erase(key);
+      return;
     }
-  }
-  if (!send) {
-    return;
   }
   if (LspClient* lsp = client_for_path(path_to_send)) {
     lsp->did_change(path_to_send, text_to_send);
-  }
-  {
     std::lock_guard<std::mutex> lock(mutex_);
+    pending_did_change_.erase(key);
     pending_content_refresh_[key] = steady_now_ms();
+  } else {
+    std::lock_guard<std::mutex> lock(mutex_);
+    pending_did_change_[key] = steady_now_ms();
+    schedule_did_change_debounce_wake();
   }
 }
 
@@ -2111,8 +2189,8 @@ void LspSymbolProvider::set_ui_inhibited(const bool inhibited) {
     typescript_client_->set_background_paused(false);
   }
   if (should_flush) {
-    std::lock_guard<std::mutex> lock(mutex_);
     flush_all_pending_did_change_locked();
+    std::lock_guard<std::mutex> lock(mutex_);
     tick_content_refresh_locked();
   }
 }
@@ -2288,9 +2366,7 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
     if (use_lsp_ && is_cpp_header_path(path)) {
       open_companion_sources_for_clangd_locked(path);
     }
-    return;
-  }
-  if (open_header) {
+  } else if (open_header) {
     if (LspClient* lsp = client_for_path(path)) {
       lsp->did_open(path, text);
     }
@@ -2322,6 +2398,9 @@ void LspSymbolProvider::on_document_opened(const std::string& path, const std::s
         ensure_typescript_lsp_async();
       }
     }
+  }
+  if (language_id_is_fortran(lang) && is_lsp_trackable_path(path, text)) {
+    refresh_fortran_compiler_diagnostics(path, text);
   }
 }
 
@@ -2366,7 +2445,11 @@ void LspSymbolProvider::on_document_saved(const std::string& path) {
   }
   flush_document_sync(path);
   if (LspClient* lsp = client_for_path(path)) {
+    lsp->did_save(path, saved_text);
     lsp->invalidate_semantic_tokens_for_file(path);
+  }
+  if (language_id_is_fortran(language_id_for_path(path))) {
+    refresh_fortran_compiler_diagnostics(path, saved_text);
   }
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -2947,6 +3030,7 @@ uint64_t LspSymbolProvider::diagnostics_revision() const {
   revision ^= client_diagnostics_revision(fortran_client_, 7);
   revision ^= client_diagnostics_revision(lua_client_, 8);
   revision ^= client_diagnostics_revision(typescript_client_, 9);
+  revision ^= fortran_compiler_diag_revision_.load(std::memory_order_acquire) << 10;
   return revision;
 }
 
@@ -2970,7 +3054,20 @@ bool LspSymbolProvider::diagnostics_display_ready(const std::string& path) const
   if (!use_lsp_) {
     return true;
   }
+  const std::string key = normalize_lsp_path(path);
+  if (!key.empty() && pending_did_change_.find(key) != pending_did_change_.end()) {
+    return false;
+  }
+  // gfortran overlay is authoritative for compiler diagnostics; don't wait for fortls
+  // (which often omits a versioned publishDiagnostics after didChange).
+  if (!key.empty() && fortran_compiler_diagnostics_.find(key) != fortran_compiler_diagnostics_.end()) {
+    return true;
+  }
   if (const LspClient* lsp = client_for_path(path)) {
+    const std::string text = buffer_text_for_path(path);
+    if (!text.empty() && !lsp->document_has_text(path, text)) {
+      return false;
+    }
     return lsp->document_diagnostics_current(path);
   }
   return true;

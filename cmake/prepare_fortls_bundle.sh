@@ -60,6 +60,27 @@ _lib = os.path.join(_root, "lib", "python")
 if _lib not in sys.path:
     sys.path.insert(0, _lib)
 
+# fortls only publishes diagnostics on didOpen/didSave; patch didChange so edits
+# refresh squiggles without requiring a save (matches editor expectations).
+from fortls.langserver import LangServer
+
+_orig_on_change = LangServer.serve_onChange
+
+
+def _on_change_with_diagnostics(self, request):
+    _orig_on_change(self, request)
+    if getattr(self, "disable_diagnostics", False):
+        return
+    try:
+        uri = request.get("params", {}).get("textDocument", {}).get("uri")
+    except Exception:
+        return
+    if uri:
+        self.send_diagnostics(uri)
+
+
+LangServer.serve_onChange = _on_change_with_diagnostics
+
 from fortls import main
 
 if __name__ == "__main__":

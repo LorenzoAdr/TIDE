@@ -52,6 +52,7 @@ class LspClient {
 
   void did_open(const std::string& absolute_path, const std::string& text);
   void did_change(const std::string& absolute_path, const std::string& text);
+  void did_save(const std::string& absolute_path, const std::string& text = {});
   void did_close(const std::string& absolute_path);
   void did_change_workspace_configuration(const nlohmann::json& settings);
 

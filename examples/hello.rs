@@ -9,4 +9,6 @@ fn greet(name: &str) {
 
 fn main() {
     greet("tide");
+   
+    
 }
