@@ -47,6 +47,10 @@ struct LspRuntimeFlags {
   bool lua_starting = false;
   bool typescript_ready = false;
   bool typescript_starting = false;
+  bool cmake_ready = false;
+  bool cmake_starting = false;
+  bool make_ready = false;
+  bool make_starting = false;
 };
 
 // Resolves binaries and combines with live LSP runtime flags.

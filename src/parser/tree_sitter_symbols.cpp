@@ -618,6 +618,9 @@ std::vector<SymbolInfo> extract_symbols_from_tree(TSNode root, const std::string
     case TreeSitterLangKind::kTypeScript:
       walk_js_ts_symbols(root, source, 0, file_path, &symbols);
       break;
+    case TreeSitterLangKind::kCmake:
+    case TreeSitterLangKind::kMake:
+      break;
     case TreeSitterLangKind::kCpp:
     case TreeSitterLangKind::kNone:
       walk_cpp_symbols(root, source, 0, file_path, &symbols);

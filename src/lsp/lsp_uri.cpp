@@ -84,7 +84,16 @@ std::string uri_to_path(const std::string& uri) {
 }
 
 std::string language_id_for_path(const std::string& path) {
-  const auto ext = fs::path(path).extension().string();
+  const fs::path file_path(path);
+  const auto filename = file_path.filename().string();
+  const auto ext = file_path.extension().string();
+  if (filename == "CMakeLists.txt" || ext == ".cmake") {
+    return "cmake";
+  }
+  if (filename == "Makefile" || filename == "makefile" || filename == "GNUmakefile" ||
+      ext == ".mk") {
+    return "make";
+  }
   if (ext == ".c") {
     return "c";
   }

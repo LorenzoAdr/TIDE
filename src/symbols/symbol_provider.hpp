@@ -105,9 +105,11 @@ class ISymbolProvider {
     return {};
   }
   virtual bool completion_uses_async_fetch() const { return false; }
-  virtual void request_completion(const CompletionParams& params, const std::string& cache_key) {
+  // Returns true if an async completion job was queued (or satisfied from cache).
+  virtual bool request_completion(const CompletionParams& params, const std::string& cache_key) {
     (void)params;
     (void)cache_key;
+    return false;
   }
   virtual void cancel_completion_fetch() {}
   virtual void cancel_hover_fetch() {}

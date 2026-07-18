@@ -39,7 +39,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool supports_semantic_completion() const override;
   std::vector<CompletionItem> completions_at(const CompletionParams& params) override;
   bool completion_uses_async_fetch() const override;
-  void request_completion(const CompletionParams& params, const std::string& cache_key) override;
+  bool request_completion(const CompletionParams& params, const std::string& cache_key) override;
   void cancel_completion_fetch() override;
   void cancel_hover_fetch() override;
   std::optional<std::vector<CompletionItem>> poll_completion(
@@ -107,6 +107,8 @@ class LspSymbolProvider : public ISymbolProvider {
   bool fortran_lsp_ready() const;
   bool lua_lsp_ready() const;
   bool typescript_lsp_ready() const;
+  bool cmake_lsp_ready() const;
+  bool make_lsp_ready() const;
   bool clangd_starting() const;
   bool python_lsp_starting() const;
   bool bash_lsp_starting() const;
@@ -117,6 +119,8 @@ class LspSymbolProvider : public ISymbolProvider {
   bool fortran_lsp_starting() const;
   bool lua_lsp_starting() const;
   bool typescript_lsp_starting() const;
+  bool cmake_lsp_starting() const;
+  bool make_lsp_starting() const;
 
   void set_lsp_enabled(bool enabled);
   bool lsp_enabled() const;
@@ -160,6 +164,8 @@ class LspSymbolProvider : public ISymbolProvider {
   void refresh_fortran_compiler_diagnostics(const std::string& path, const std::string& text);
   void ensure_lua_lsp_async();
   void ensure_typescript_lsp_async();
+  void ensure_cmake_lsp_async();
+  void ensure_make_lsp_async();
   void finish_lsp_start_locked(bool ok);
   void finish_python_lsp_start_locked(bool ok, bool binary_missing);
   void finish_bash_lsp_start_locked(bool ok, bool binary_missing);
@@ -170,6 +176,8 @@ class LspSymbolProvider : public ISymbolProvider {
   void finish_fortran_lsp_start_locked(bool ok, bool binary_missing);
   void finish_lua_lsp_start_locked(bool ok, bool binary_missing);
   void finish_typescript_lsp_start_locked(bool ok, bool binary_missing);
+  void finish_cmake_lsp_start_locked(bool ok, bool binary_missing);
+  void finish_make_lsp_start_locked(bool ok, bool binary_missing);
   void notify_lsp_status(const char* i18n_key);
   void join_startup_thread();
   void join_python_startup_thread();
@@ -181,6 +189,8 @@ class LspSymbolProvider : public ISymbolProvider {
   void join_fortran_startup_thread();
   void join_lua_startup_thread();
   void join_typescript_startup_thread();
+  void join_cmake_startup_thread();
+  void join_make_startup_thread();
   struct SimpleLazyLspConfig {
     const char* thread_name;
     const char* language_id;
@@ -227,6 +237,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool any_lsp_ready() const;
   void ensure_lazy_lsp_for_path(const std::string& path);
   bool wait_for_client_for_path(const std::string& path, int timeout_ms);
+  bool lazy_lsp_starting_for_path(const std::string& path) const;
   LspClient* prepare_lsp_client(const std::string& path, std::string& text);
   static int64_t steady_now_ms();
 
@@ -244,6 +255,8 @@ class LspSymbolProvider : public ISymbolProvider {
   std::atomic<uint64_t> fortran_compiler_diag_revision_{0};
   std::unique_ptr<LspClient> lua_client_;
   std::unique_ptr<LspClient> typescript_client_;
+  std::unique_ptr<LspClient> cmake_client_;
+  std::unique_ptr<LspClient> make_client_;
   TreeSitterSymbolProvider fallback_;
   bool lsp_enabled_ = true;
   bool use_gcc_query_driver_ = true;
@@ -270,6 +283,8 @@ class LspSymbolProvider : public ISymbolProvider {
   std::thread fortran_lsp_startup_thread_;
   std::thread lua_lsp_startup_thread_;
   std::thread typescript_lsp_startup_thread_;
+  std::thread cmake_lsp_startup_thread_;
+  std::thread make_lsp_startup_thread_;
   std::atomic<bool> lsp_starting_{false};
   std::atomic<bool> python_lsp_starting_{false};
   std::atomic<bool> bash_lsp_starting_{false};
@@ -280,6 +295,8 @@ class LspSymbolProvider : public ISymbolProvider {
   std::atomic<bool> fortran_lsp_starting_{false};
   std::atomic<bool> lua_lsp_starting_{false};
   std::atomic<bool> typescript_lsp_starting_{false};
+  std::atomic<bool> cmake_lsp_starting_{false};
+  std::atomic<bool> make_lsp_starting_{false};
   std::atomic<bool> async_stop_{false};
   mutable std::mutex inflight_mutex_;
   std::unordered_set<std::string> inflight_symbols_;

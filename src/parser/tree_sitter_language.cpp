@@ -3,10 +3,12 @@
 #include <filesystem>
 
 #include "lsp/lsp_uri.hpp"
+#include "tree-sitter-cmake.h"
 #include "tree-sitter-fortran.h"
 #include "tree-sitter-go.h"
 #include "tree-sitter-javascript.h"
 #include "tree-sitter-latex.h"
+#include "tree-sitter-make.h"
 #include "tree-sitter-python.h"
 #include "tree-sitter-rust.h"
 #include "tree-sitter-typescript.h"
@@ -42,6 +44,10 @@ const TSLanguage* tree_sitter_javascript_language() { return tree_sitter_javascr
 
 const TSLanguage* tree_sitter_typescript_language() { return tree_sitter_typescript(); }
 
+const TSLanguage* tree_sitter_cmake_language() { return tree_sitter_cmake(); }
+
+const TSLanguage* tree_sitter_make_language() { return tree_sitter_make(); }
+
 TreeSitterLangKind tree_sitter_lang_kind_for_path(const std::string& path) {
   const std::string lang = language_id_for_path(path);
   if (lang == "python") {
@@ -74,6 +80,12 @@ TreeSitterLangKind tree_sitter_lang_kind_for_path(const std::string& path) {
   if (lang == "typescript") {
     return TreeSitterLangKind::kTypeScript;
   }
+  if (lang == "cmake") {
+    return TreeSitterLangKind::kCmake;
+  }
+  if (lang == "make") {
+    return TreeSitterLangKind::kMake;
+  }
   if (lang == "c" || lang == "cpp") {
     return TreeSitterLangKind::kCpp;
   }
@@ -102,6 +114,10 @@ const TSLanguage* tree_sitter_language_for_path(const std::string& path) {
       return tree_sitter_javascript_language();
     case TreeSitterLangKind::kTypeScript:
       return tree_sitter_typescript_language();
+    case TreeSitterLangKind::kCmake:
+      return tree_sitter_cmake_language();
+    case TreeSitterLangKind::kMake:
+      return tree_sitter_make_language();
     case TreeSitterLangKind::kCpp:
       return tree_sitter_cpp_language();
     case TreeSitterLangKind::kNone:

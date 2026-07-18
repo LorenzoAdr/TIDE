@@ -20,6 +20,8 @@ enum class TreeSitterLangKind {
   kLua,
   kJavaScript,
   kTypeScript,
+  kCmake,
+  kMake,
   kNone,
 };
 
@@ -34,6 +36,8 @@ const TSLanguage* tree_sitter_fortran_language();
 const TSLanguage* tree_sitter_lua_language();
 const TSLanguage* tree_sitter_javascript_language();
 const TSLanguage* tree_sitter_typescript_language();
+const TSLanguage* tree_sitter_cmake_language();
+const TSLanguage* tree_sitter_make_language();
 
 TreeSitterLangKind tree_sitter_lang_kind_for_path(const std::string& path);
 const TSLanguage* tree_sitter_language_for_path(const std::string& path);

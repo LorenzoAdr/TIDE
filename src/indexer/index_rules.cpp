@@ -86,13 +86,19 @@ bool should_skip_dir_name(const std::string& name, const IndexFilterOptions& opt
 }
 
 bool is_indexed_source_path(const std::string& path) {
-  const auto ext = fs::path(path).extension().string();
+  const fs::path file_path(path);
+  const auto filename = file_path.filename().string();
+  if (filename == "CMakeLists.txt" || filename == "Makefile" || filename == "makefile" ||
+      filename == "GNUmakefile") {
+    return true;
+  }
+  const auto ext = file_path.extension().string();
   return ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".h" ||
          ext == ".hpp" || ext == ".c" || ext == ".py" || ext == ".pyi" || ext == ".pyw" ||
          ext == ".sh" || ext == ".bash" || ext == ".tex" || ext == ".sty" || ext == ".cls" ||
          ext == ".rs" || ext == ".go" || ext == ".zig" || ext == ".f" || ext == ".f90" ||
          ext == ".f95" || ext == ".for" || ext == ".lua" || ext == ".js" || ext == ".mjs" ||
-         ext == ".cjs" || ext == ".ts" || ext == ".tsx";
+         ext == ".cjs" || ext == ".ts" || ext == ".tsx" || ext == ".cmake" || ext == ".mk";
 }
 
 bool should_list_workspace_path(const std::string& relative_path,

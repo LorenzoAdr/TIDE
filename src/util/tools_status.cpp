@@ -248,6 +248,26 @@ ToolsStatusSnapshot collect_tools_status(const LspRuntimeFlags& lsp) {
       "typescript-language-server", "settings.status.tool.typescript_ls", lsp.lsp_enabled,
       lsp.typescript_ready, lsp.typescript_starting, typescript_detail, typescript_bin));
 
+  std::optional<std::string> cmake_detail;
+  bool cmake_bin = false;
+  if (const auto loc = resolve_neocmakelsp(); loc.has_value()) {
+    cmake_bin = true;
+    cmake_detail = detail_from_location(*loc);
+  }
+  snap.language_servers.push_back(make_lsp_entry(
+      "neocmakelsp", "settings.status.tool.neocmakelsp", lsp.lsp_enabled, lsp.cmake_ready,
+      lsp.cmake_starting, cmake_detail, cmake_bin));
+
+  std::optional<std::string> make_detail;
+  bool make_bin = false;
+  if (const auto loc = resolve_make_ls(); loc.has_value()) {
+    make_bin = true;
+    make_detail = detail_from_location(*loc);
+  }
+  snap.language_servers.push_back(make_lsp_entry(
+      "make-ls", "settings.status.tool.make_ls", lsp.lsp_enabled, lsp.make_ready,
+      lsp.make_starting, make_detail, make_bin));
+
   if (const auto chktex = resolve_chktex(); chktex.has_value()) {
     ToolStatusEntry entry;
     entry.id = "chktex";

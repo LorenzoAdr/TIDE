@@ -191,6 +191,40 @@ extern const unsigned char _binary_typescript_ls_blob_zst_end[];
 }
 #endif
 
+#ifdef TGDB_HAS_BUNDLED_NEOCMAKELSP
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
+    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TGDB_HAS_BUNDLED_GOPLS) && !defined(TGDB_HAS_BUNDLED_ZLS) && \
+    !defined(TGDB_HAS_BUNDLED_LUA_LS) && !defined(TGDB_HAS_BUNDLED_FORTLS) && \
+    !defined(TGDB_HAS_BUNDLED_TSSERVER)
+#include <zstd.h>
+#endif
+#include "bundled_neocmakelsp_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_neocmakelsp_blob_zst_start[];
+extern const unsigned char _binary_neocmakelsp_blob_zst_end[];
+}
+#endif
+
+#ifdef TGDB_HAS_BUNDLED_MAKE_LS
+#if !defined(TGDB_HAS_BUNDLED_CLANGD) && !defined(TGDB_HAS_BUNDLED_GDB) && \
+    !defined(TGDB_HAS_BUNDLED_RG) && !defined(TGDB_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TGDB_HAS_BUNDLED_TEXLAB) && !defined(TGDB_HAS_BUNDLED_BASH_LS) && \
+    !defined(TGDB_HAS_BUNDLED_BASH_DAP) && !defined(TGDB_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TGDB_HAS_BUNDLED_GOPLS) && !defined(TGDB_HAS_BUNDLED_ZLS) && \
+    !defined(TGDB_HAS_BUNDLED_LUA_LS) && !defined(TGDB_HAS_BUNDLED_FORTLS) && \
+    !defined(TGDB_HAS_BUNDLED_TSSERVER) && !defined(TGDB_HAS_BUNDLED_NEOCMAKELSP)
+#include <zstd.h>
+#endif
+#include "bundled_make_ls_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_make_ls_blob_zst_start[];
+extern const unsigned char _binary_make_ls_blob_zst_end[];
+}
+#endif
+
 namespace fs = std::filesystem;
 
 namespace tgdb {
@@ -1532,6 +1566,60 @@ std::optional<TypescriptLsLocation> resolve_typescript_language_server() {
         return loc;
       }
     }
+  }
+  return std::nullopt;
+}
+
+std::optional<NeocmakelspLocation> resolve_neocmakelsp() {
+  if (const auto env_path = env_executable("TGDB_NEOCMAKELSP"); env_path.has_value()) {
+    return NeocmakelspLocation{*env_path, NeocmakelspLocation::Source::Env};
+  }
+#ifdef TGDB_HAS_BUNDLED_NEOCMAKELSP
+  {
+    const fs::path install_root =
+        fs::path(bundled_cache_root()) / ("neocmakelsp-" TGDB_BUNDLED_NEOCMAKELSP_VERSION);
+    const fs::path binary_path = install_root / "bin" / "neocmakelsp";
+    const std::string expected = std::string(TGDB_BUNDLED_NEOCMAKELSP_BLOB_SHA256) + "\n";
+    static std::atomic<bool> install_attempted{false};
+    if (lazy_extract_bundled_tree(install_root, "bin/neocmakelsp", expected,
+                                  _binary_neocmakelsp_blob_zst_start,
+                                  _binary_neocmakelsp_blob_zst_end, install_attempted)) {
+      return NeocmakelspLocation{binary_path.string(), NeocmakelspLocation::Source::Bundled};
+    }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_NEOCMAKELSP
+    return std::nullopt;
+#endif
+  }
+#endif
+  if (const auto path_bin = find_named_binary_on_path("neocmakelsp"); path_bin.has_value()) {
+    return NeocmakelspLocation{*path_bin, NeocmakelspLocation::Source::SystemPath};
+  }
+  return std::nullopt;
+}
+
+std::optional<MakeLsLocation> resolve_make_ls() {
+  if (const auto env_path = env_executable("TGDB_MAKE_LS"); env_path.has_value()) {
+    return MakeLsLocation{*env_path, MakeLsLocation::Source::Env};
+  }
+#ifdef TGDB_HAS_BUNDLED_MAKE_LS
+  {
+    const fs::path install_root =
+        fs::path(bundled_cache_root()) / ("make-ls-" TGDB_BUNDLED_MAKE_LS_VERSION);
+    const fs::path binary_path = install_root / "bin" / "make-ls";
+    const std::string expected = std::string(TGDB_BUNDLED_MAKE_LS_BLOB_SHA256) + "\n";
+    static std::atomic<bool> install_attempted{false};
+    if (lazy_extract_bundled_tree(install_root, "bin/make-ls", expected,
+                                  _binary_make_ls_blob_zst_start, _binary_make_ls_blob_zst_end,
+                                  install_attempted)) {
+      return MakeLsLocation{binary_path.string(), MakeLsLocation::Source::Bundled};
+    }
+#ifdef TGDB_DEFAULT_FORCE_BUNDLED_MAKE_LS
+    return std::nullopt;
+#endif
+  }
+#endif
+  if (const auto path_bin = find_named_binary_on_path("make-ls"); path_bin.has_value()) {
+    return MakeLsLocation{*path_bin, MakeLsLocation::Source::SystemPath};
   }
   return std::nullopt;
 }

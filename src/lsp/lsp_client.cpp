@@ -158,7 +158,8 @@ bool LspClient::spawn_clangd(const std::string& workspace_root,
   return spawn_language_server(*spec);
 }
 
-bool LspClient::initialize(const std::string& workspace_root) {
+bool LspClient::initialize(const std::string& workspace_root,
+                           const std::string& initialization_options_json) {
   nlohmann::json params;
   params["processId"] = static_cast<int>(getpid());
   const std::string root_uri = path_to_uri(workspace_root);
@@ -171,6 +172,10 @@ bool LspClient::initialize(const std::string& workspace_root) {
           {"name", folder_name.empty() ? std::string("workspace") : folder_name}}});
   }
   params["capabilities"]["workspace"]["workspaceFolders"] = true;
+  // neocmakelsp dynamically registers watched-files / configuration; advertise support.
+  params["capabilities"]["workspace"]["didChangeWatchedFiles"] = {
+      {"dynamicRegistration", true}};
+  params["capabilities"]["workspace"]["configuration"] = true;
   params["capabilities"]["textDocument"]["documentSymbol"]["hierarchicalDocumentSymbolSupport"] =
       true;
   params["capabilities"]["textDocument"]["publishDiagnostics"] = nlohmann::json::object();
@@ -205,6 +210,13 @@ bool LspClient::initialize(const std::string& workspace_root) {
       {"properties", nlohmann::json::array({"location"})}};
   params["clientInfo"]["name"] = "tgdb";
   params["clientInfo"]["version"] = "0.1.0";
+  if (!initialization_options_json.empty()) {
+    try {
+      params["initializationOptions"] = nlohmann::json::parse(initialization_options_json);
+    } catch (...) {
+      // Keep initialize usable even if a spec ships malformed options.
+    }
+  }
 
   nlohmann::json result;
   if (!send_lsp_request("initialize", std::move(params), 15000, &result)) {
@@ -212,6 +224,7 @@ bool LspClient::initialize(const std::string& workspace_root) {
   }
 
   load_semantic_legend(result);
+  document_sync_kind_ = 2;
   if (result.contains("capabilities") && result["capabilities"].is_object()) {
     const auto& caps = result["capabilities"];
     semantic_tokens_supported_ =
@@ -227,9 +240,30 @@ bool LspClient::initialize(const std::string& workspace_root) {
         caps.contains("implementationProvider") &&
         !(caps["implementationProvider"].is_boolean() &&
           caps["implementationProvider"].get<bool>() == false);
+    if (caps.contains("textDocumentSync")) {
+      const auto& sync = caps["textDocumentSync"];
+      if (sync.is_number_integer()) {
+        document_sync_kind_ = sync.get<int>();
+      } else if (sync.is_object() && sync.contains("change") && sync["change"].is_number_integer()) {
+        document_sync_kind_ = sync["change"].get<int>();
+      }
+    }
   }
   send_lsp_notification("initialized", nlohmann::json::object());
   return true;
+}
+
+nlohmann::json LspClient::make_did_change_content(const std::string& previous_text,
+                                                  const std::string& text) const {
+  // TextDocumentSyncKind.Incremental == 2. Full (1) / None (0) require whole-document updates.
+  // Sending ranged edits to Full-only servers (neocmakelsp, make-ls) desyncs the buffer and
+  // yields null completion results at the edit site.
+  if (document_sync_kind_ == 2) {
+    if (const std::optional<LspTextEdit> edit = single_lsp_edit_between(previous_text, text)) {
+      return nlohmann::json::array({lsp_content_change_json(*edit)});
+    }
+  }
+  return nlohmann::json::array({{{"text", text}}});
 }
 
 bool LspClient::start(const LanguageServerSpec& spec) {
@@ -264,7 +298,7 @@ bool LspClient::start(const LanguageServerSpec& spec) {
   workspace_root_ = spec.workspace_root;
   server_id_ = spec.id;
   intentionally_stopping_.store(false, std::memory_order_release);
-  if (!initialize(spec.workspace_root)) {
+  if (!initialize(spec.workspace_root, spec.initialization_options_json)) {
     stop();
     return false;
   }
@@ -355,6 +389,7 @@ void LspClient::stop() {
   definition_supported_ = true;
   declaration_supported_ = true;
   implementation_supported_ = true;
+  document_sync_kind_ = 2;
   workspace_root_.clear();
 }
 
@@ -587,14 +622,9 @@ void LspClient::did_open(const std::string& absolute_path, const std::string& te
           {"text", doc.text}}}};
     send_lsp_notification("textDocument/didOpen", std::move(params));
   } else if (notify_change) {
-    nlohmann::json content_changes;
-    if (const std::optional<LspTextEdit> edit = single_lsp_edit_between(previous_text, text)) {
-      content_changes = nlohmann::json::array({lsp_content_change_json(*edit)});
-    } else {
-      content_changes = nlohmann::json::array({{{"text", doc.text}}});
-    }
-    nlohmann::json params = {{"textDocument", {{"uri", doc.uri}, {"version", doc.version}}},
-                             {"contentChanges", std::move(content_changes)}};
+    nlohmann::json params = {
+        {"textDocument", {{"uri", doc.uri}, {"version", doc.version}}},
+        {"contentChanges", make_did_change_content(previous_text, doc.text)}};
     send_lsp_notification("textDocument/didChange", std::move(params));
   }
 }
@@ -634,14 +664,8 @@ void LspClient::did_change(const std::string& absolute_path, const std::string& 
     return;
   }
 
-  nlohmann::json content_changes;
-  if (const std::optional<LspTextEdit> edit = single_lsp_edit_between(previous_text, text)) {
-    content_changes = nlohmann::json::array({lsp_content_change_json(*edit)});
-  } else {
-    content_changes = nlohmann::json::array({{{"text", doc.text}}});
-  }
   nlohmann::json params = {{"textDocument", {{"uri", doc.uri}, {"version", doc.version}}},
-                           {"contentChanges", std::move(content_changes)}};
+                           {"contentChanges", make_did_change_content(previous_text, doc.text)}};
   send_lsp_notification("textDocument/didChange", std::move(params));
 }
 

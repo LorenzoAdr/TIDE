@@ -258,10 +258,13 @@ void LspTransport::reader_loop() {
       continue;
     }
 
-    if (!json.contains("id") || json["id"].is_null()) {
-      if (json.contains("method") && json["method"].is_string()) {
-        const std::string method = json["method"].get<std::string>();
-        nlohmann::json params = json.contains("params") ? json["params"] : nlohmann::json::object();
+    // Server → client request: has both method and id. Must not be treated as a
+    // response to our requests (neocmakelsp sends client/registerCapability with
+    // id 0; colliding ids would make wait_response fail and break completions).
+    if (json.contains("method") && json["method"].is_string()) {
+      const std::string method = json["method"].get<std::string>();
+      nlohmann::json params = json.contains("params") ? json["params"] : nlohmann::json::object();
+      if (!json.contains("id") || json["id"].is_null()) {
         NotificationHandler handler;
         {
           std::lock_guard<std::mutex> lock(handler_mutex_);
@@ -270,7 +273,33 @@ void LspTransport::reader_loop() {
         if (handler) {
           handler(method, params);
         }
+        continue;
       }
+
+      nlohmann::json result = nullptr;
+      if (method == "workspace/configuration") {
+        const std::size_t n =
+            params.is_object() && params.contains("items") && params["items"].is_array()
+                ? params["items"].size()
+                : 0;
+        result = nlohmann::json::array();
+        for (std::size_t i = 0; i < n; ++i) {
+          result.push_back(nlohmann::json::object());
+        }
+      } else if (method == "workspace/applyEdit") {
+        result = {{"applied", false}};
+      } else if (method == "window/workDoneProgress/create" ||
+                 method == "client/registerCapability" ||
+                 method == "client/unregisterCapability") {
+        result = nullptr;
+      } else {
+        result = nullptr;
+      }
+      write_response(json["id"], std::move(result));
+      continue;
+    }
+
+    if (!json.contains("id") || json["id"].is_null()) {
       continue;
     }
 
@@ -320,6 +349,14 @@ bool LspTransport::write_request(int id, const std::string& method, nlohmann::js
   }
 
   return write_message(request.dump());
+}
+
+bool LspTransport::write_response(const nlohmann::json& id, nlohmann::json result) {
+  if (!running_.load()) {
+    return false;
+  }
+  nlohmann::json response = {{"jsonrpc", "2.0"}, {"id", id}, {"result", std::move(result)}};
+  return write_message(response.dump());
 }
 
 bool LspTransport::wait_response(int id, int timeout_ms, nlohmann::json* out) {

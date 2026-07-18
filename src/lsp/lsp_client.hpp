@@ -141,7 +141,10 @@ class LspClient {
   bool spawn_language_server(const LanguageServerSpec& spec);
   bool spawn_clangd(const std::string& workspace_root, const std::string& compile_commands_dir,
                     bool use_gcc_query_driver, bool background_index);
-  bool initialize(const std::string& workspace_root);
+  bool initialize(const std::string& workspace_root,
+                  const std::string& initialization_options_json = {});
+  nlohmann::json make_did_change_content(const std::string& previous_text,
+                                         const std::string& text) const;
   void invalidate_cache(const std::string& absolute_path);
   void invalidate_semantic_tokens(const std::string& absolute_path);
   void mark_semantic_tokens_stale(const std::string& absolute_path);
@@ -201,6 +204,9 @@ class LspClient {
   bool definition_supported_ = true;
   bool declaration_supported_ = true;
   bool implementation_supported_ = true;
+  // LSP TextDocumentSyncKind: None=0, Full=1, Incremental=2. Default Incremental so
+  // clangd-style servers keep ranged didChange when the field is omitted.
+  int document_sync_kind_ = 2;
   int next_request_id_ = 1;
   std::atomic<uint64_t>* request_counter_ = nullptr;
   std::atomic<int> inflight_completion_request_id_{0};

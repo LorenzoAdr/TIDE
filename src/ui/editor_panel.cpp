@@ -3697,7 +3697,10 @@ void completion_lsp_tick(CompletionState* completion, WorkspaceModel* workspace,
   params.line = completion->lsp_fetch_line;
   params.character = completion->lsp_fetch_col;
   symbols->flush_document_sync(buffer.path);
-  symbols->request_completion(params, completion->lsp_pending_key);
+  if (!symbols->request_completion(params, completion->lsp_pending_key)) {
+    // Lazy LSP not ready/starting yet — keep pending so a later tick retries.
+    return;
+  }
   completion->lsp_inflight_key = completion->lsp_pending_key;
   completion->lsp_last_request_ms = now_ms;
   completion->lsp_last_fetched_scope_key = completion->scope_key_for(buffer);

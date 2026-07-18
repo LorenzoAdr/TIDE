@@ -23,8 +23,11 @@ BUNDLE_ZLS=0
 BUNDLE_FORTLS=0
 BUNDLE_LUA_LS=0
 BUNDLE_TSSERVER=0
+BUNDLE_NEOCMAKELSP=0
+BUNDLE_MAKE_LS=0
 FORCE_BUNDLED=0
-UI_LOCALE=es
+UI_LOCALE=en
+EDITOR_MODE=normal
 BUILD_GDB_CA=0
 STATIC_LIBSTDCXX=0
 INTERACTIVE=1
@@ -81,6 +84,7 @@ Opciones:
   --force-bundled            Forzar todos los componentes seleccionados (sin fallback PATH)
   --no-force-bundled         Permitir fallback al sistema para componentes embebidos
   --ui-locale=es|en          Idioma por defecto de la aplicación (español / inglés)
+  --editor-mode=normal|helix Modo de editor por defecto (Normal / Helix)
   --bundle-rust-analyzer     Embeber rust-analyzer
   --no-bundle-rust-analyzer  No embeber rust-analyzer
   --bundle-gopls             Embeber gopls
@@ -93,6 +97,10 @@ Opciones:
   --no-bundle-lua-ls         No embeber lua-language-server
   --bundle-tsserver          Embeber typescript-language-server
   --no-bundle-tsserver       No embeber typescript-language-server
+  --bundle-neocmakelsp       Embeber neocmakelsp
+  --no-bundle-neocmakelsp    No embeber neocmakelsp
+  --bundle-make-ls           Embeber make-ls
+  --no-bundle-make-ls        No embeber make-ls
   --static-libstdc++         Enlazar libstdc++/libgcc estáticamente (menos deps en runtime)
   -h, --help                 Mostrar esta ayuda
 
@@ -221,8 +229,11 @@ load_bundle_config() {
   BUNDLE_FORTLS=0
   BUNDLE_LUA_LS=0
   BUNDLE_TSSERVER=0
+  BUNDLE_NEOCMAKELSP=0
+  BUNDLE_MAKE_LS=0
   FORCE_BUNDLED=0
-  UI_LOCALE=es
+  UI_LOCALE=en
+  EDITOR_MODE=normal
   if [[ ! -f "${CONFIG_FILE}" ]]; then
     return
   fi
@@ -264,10 +275,16 @@ load_bundle_config() {
       BUNDLE_LUA_LS=0) BUNDLE_LUA_LS=0 ;;
       BUNDLE_TSSERVER=1) BUNDLE_TSSERVER=1 ;;
       BUNDLE_TSSERVER=0) BUNDLE_TSSERVER=0 ;;
+      BUNDLE_NEOCMAKELSP=1) BUNDLE_NEOCMAKELSP=1 ;;
+      BUNDLE_NEOCMAKELSP=0) BUNDLE_NEOCMAKELSP=0 ;;
+      BUNDLE_MAKE_LS=1) BUNDLE_MAKE_LS=1 ;;
+      BUNDLE_MAKE_LS=0) BUNDLE_MAKE_LS=0 ;;
       FORCE_BUNDLED=1) FORCE_BUNDLED=1 ;;
       FORCE_BUNDLED=0) FORCE_BUNDLED=0 ;;
       UI_LOCALE=es) UI_LOCALE=es ;;
       UI_LOCALE=en) UI_LOCALE=en ;;
+      EDITOR_MODE=normal) EDITOR_MODE=normal ;;
+      EDITOR_MODE=helix) EDITOR_MODE=helix ;;
     esac
   done < "${CONFIG_FILE}"
   if [[ "${GDB_BUNDLE_KIND}" == "none" && "${legacy_bundle_gdb}" == "1" ]]; then
@@ -278,7 +295,11 @@ load_bundle_config() {
   fi
   case "${UI_LOCALE}" in
     es|en) ;;
-    *) UI_LOCALE=es ;;
+    *) UI_LOCALE=en ;;
+  esac
+  case "${EDITOR_MODE}" in
+    normal|helix) ;;
+    *) EDITOR_MODE=normal ;;
   esac
   sync_gdb_bundle_flags
   sync_python_bundle_flags
@@ -306,8 +327,11 @@ BUNDLE_ZLS=${BUNDLE_ZLS}
 BUNDLE_FORTLS=${BUNDLE_FORTLS}
 BUNDLE_LUA_LS=${BUNDLE_LUA_LS}
 BUNDLE_TSSERVER=${BUNDLE_TSSERVER}
+BUNDLE_NEOCMAKELSP=${BUNDLE_NEOCMAKELSP}
+BUNDLE_MAKE_LS=${BUNDLE_MAKE_LS}
 FORCE_BUNDLED=${FORCE_BUNDLED}
 UI_LOCALE=${UI_LOCALE}
+EDITOR_MODE=${EDITOR_MODE}
 EOF
 }
 
@@ -479,9 +503,23 @@ cmake_bundle_args() {
   else
     args+=(-DTGDB_BUNDLE_TSSERVER=OFF -DTGDB_FORCE_BUNDLED_TSSERVER=OFF)
   fi
+  if [[ "${BUNDLE_NEOCMAKELSP}" == "1" ]]; then
+    args+=(-DTGDB_BUNDLE_NEOCMAKELSP=ON -DTGDB_FORCE_BUNDLED_NEOCMAKELSP="${force}")
+  else
+    args+=(-DTGDB_BUNDLE_NEOCMAKELSP=OFF -DTGDB_FORCE_BUNDLED_NEOCMAKELSP=OFF)
+  fi
+  if [[ "${BUNDLE_MAKE_LS}" == "1" ]]; then
+    args+=(-DTGDB_BUNDLE_MAKE_LS=ON -DTGDB_FORCE_BUNDLED_MAKE_LS="${force}")
+  else
+    args+=(-DTGDB_BUNDLE_MAKE_LS=OFF -DTGDB_FORCE_BUNDLED_MAKE_LS=OFF)
+  fi
   case "${UI_LOCALE}" in
-    en) args+=(-DTGDB_DEFAULT_UI_LOCALE=en) ;;
-    *) args+=(-DTGDB_DEFAULT_UI_LOCALE=es) ;;
+    es) args+=(-DTGDB_DEFAULT_UI_LOCALE=es) ;;
+    *) args+=(-DTGDB_DEFAULT_UI_LOCALE=en) ;;
+  esac
+  case "${EDITOR_MODE}" in
+    helix) args+=(-DTGDB_DEFAULT_HELIX_MODE=ON) ;;
+    *) args+=(-DTGDB_DEFAULT_HELIX_MODE=OFF) ;;
   esac
   printf '%s\n' "${args[@]}"
 }
@@ -798,6 +836,34 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE=0
       shift
       ;;
+    --bundle-neocmakelsp)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_NEOCMAKELSP=1
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-bundle-neocmakelsp)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_NEOCMAKELSP=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --bundle-make-ls)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_MAKE_LS=1
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-bundle-make-ls)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_MAKE_LS=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
     --static-libstdc++)
       STATIC_LIBSTDCXX=1
       shift
@@ -813,6 +879,20 @@ while [[ $# -gt 0 ]]; do
       case "$2" in
         es|en) UI_LOCALE="$2" ;;
         *) die "--ui-locale debe ser es o en" ;;
+      esac
+      shift 2
+      ;;
+    --editor-mode=normal|--editor-mode=helix)
+      EDITOR_MODE="${1#--editor-mode=}"
+      shift
+      ;;
+    --editor-mode)
+      if [[ $# -lt 2 ]]; then
+        die "--editor-mode requiere normal o helix"
+      fi
+      case "$2" in
+        normal|helix) EDITOR_MODE="$2" ;;
+        *) die "--editor-mode debe ser normal o helix" ;;
       esac
       shift 2
       ;;
@@ -947,8 +1027,19 @@ if [[ "${BUNDLE_TSSERVER}" == "1" ]]; then
 else
   log "  typescript-ls embebido: no"
 fi
+if [[ "${BUNDLE_NEOCMAKELSP}" == "1" ]]; then
+  log "  neocmakelsp embebido: sí"
+else
+  log "  neocmakelsp embebido: no"
+fi
+if [[ "${BUNDLE_MAKE_LS}" == "1" ]]; then
+  log "  make-ls embebido: sí"
+else
+  log "  make-ls embebido: no"
+fi
 log "  forzar embebidos: ${FORCE_BUNDLED}"
 log "  idioma por defecto: ${UI_LOCALE}"
+log "  editor por defecto: ${EDITOR_MODE}"
 if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
   log "  libstdc++ estático: sí"
 fi

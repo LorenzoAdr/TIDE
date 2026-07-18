@@ -32,6 +32,9 @@ AppSettings AppSettings::load() {
 #ifdef TGDB_DEFAULT_UI_LOCALE_TAG
   settings.ui_locale = i18n::parse_locale(TGDB_DEFAULT_UI_LOCALE_TAG);
 #endif
+#ifdef TGDB_DEFAULT_HELIX_MODE
+  settings.helix_mode_enabled = true;
+#endif
 #ifdef TGDB_DEFAULT_FORCE_BUNDLED_CLANGD
   settings.force_bundled_clangd = true;
 #endif

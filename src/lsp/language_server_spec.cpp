@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 
 #include "util/bundled_tools.hpp"
 
@@ -57,6 +58,14 @@ bool language_id_is_js_ts(const std::string& language_id) {
   return language_id_is_javascript(language_id) || language_id_is_typescript(language_id);
 }
 
+bool language_id_is_cmake(const std::string& language_id) {
+  return language_id == "cmake";
+}
+
+bool language_id_is_make(const std::string& language_id) {
+  return language_id == "make";
+}
+
 std::string language_server_id_for_language(const std::string& language_id) {
   if (language_id_is_python(language_id)) {
     return kLspServerBasedpyright;
@@ -84,6 +93,12 @@ std::string language_server_id_for_language(const std::string& language_id) {
   }
   if (language_id_is_js_ts(language_id)) {
     return kLspServerTypescriptLs;
+  }
+  if (language_id_is_cmake(language_id)) {
+    return kLspServerNeocmakelsp;
+  }
+  if (language_id_is_make(language_id)) {
+    return kLspServerMakeLs;
   }
   if (language_id_is_cpp_family(language_id)) {
     return kLspServerClangd;
@@ -329,6 +344,64 @@ std::optional<LanguageServerSpec> make_typescript_ls_spec(const std::string& wor
   return spec;
 }
 
+std::optional<LanguageServerSpec> make_neocmakelsp_spec(const std::string& workspace_root) {
+  const auto location = resolve_neocmakelsp();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+
+  // neocmakelsp only emits useful diagnostics when a lint config exists (project
+  // `.neocmake.toml` or user config). Seed a user default once so lint.enable
+  // actually surfaces findings without requiring every workspace to opt in.
+  {
+    fs::path config_dir;
+    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && xdg[0] != '\0') {
+      config_dir = fs::path(xdg) / "neocmakelsp";
+    } else if (const char* home = std::getenv("HOME"); home != nullptr && home[0] != '\0') {
+      config_dir = fs::path(home) / ".config" / "neocmakelsp";
+    }
+    if (!config_dir.empty()) {
+      const fs::path config_path = config_dir / "config.toml";
+      std::error_code ec;
+      if (!fs::exists(config_path, ec)) {
+        fs::create_directories(config_dir, ec);
+        if (!ec) {
+          std::ofstream out(config_path);
+          if (out) {
+            out << "command_case = \"lower_case\"\n";
+            out << "line_max_words = 120\n";
+          }
+        }
+      }
+    }
+  }
+
+  LanguageServerSpec spec;
+  spec.id = kLspServerNeocmakelsp;
+  spec.command = location->binary_path;
+  spec.args = {"stdio"};
+  spec.workspace_root = workspace_root;
+  spec.language_ids = {"cmake"};
+  // Lint is off unless enabled here; semantic_token off — Tree-sitter owns highlighting.
+  spec.initialization_options_json =
+      R"({"lint":{"enable":true},"format":{"enable":true},"semantic_token":false})";
+  return spec;
+}
+
+std::optional<LanguageServerSpec> make_make_ls_spec(const std::string& workspace_root) {
+  const auto location = resolve_make_ls();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+
+  LanguageServerSpec spec;
+  spec.id = kLspServerMakeLs;
+  spec.command = location->binary_path;
+  spec.workspace_root = workspace_root;
+  spec.language_ids = {"make"};
+  return spec;
+}
+
 std::optional<LanguageServerSpec> make_language_server_spec(
     const std::string& server_id, const std::string& workspace_root,
     const std::string& compile_commands_dir, const bool use_gcc_query_driver,
@@ -363,6 +436,12 @@ std::optional<LanguageServerSpec> make_language_server_spec(
   }
   if (server_id == kLspServerTypescriptLs) {
     return make_typescript_ls_spec(workspace_root);
+  }
+  if (server_id == kLspServerNeocmakelsp) {
+    return make_neocmakelsp_spec(workspace_root);
+  }
+  if (server_id == kLspServerMakeLs) {
+    return make_make_ls_spec(workspace_root);
   }
   return std::nullopt;
 }

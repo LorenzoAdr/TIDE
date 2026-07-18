@@ -2648,6 +2648,10 @@ int Application::run() {
 			flags.lua_starting = symbol_provider_->lua_lsp_starting();
 			flags.typescript_ready = symbol_provider_->typescript_lsp_ready();
 			flags.typescript_starting = symbol_provider_->typescript_lsp_starting();
+			flags.cmake_ready = symbol_provider_->cmake_lsp_ready();
+			flags.cmake_starting = symbol_provider_->cmake_lsp_starting();
+			flags.make_ready = symbol_provider_->make_lsp_ready();
+			flags.make_starting = symbol_provider_->make_lsp_starting();
 		}
 		return collect_tools_status(flags);
 	};

@@ -19,12 +19,15 @@ constexpr int kLspZls = 5;
 constexpr int kLspFortls = 6;
 constexpr int kLspLuaLs = 7;
 constexpr int kLspTsserver = 8;
-constexpr int kDapGdb = 9;
-constexpr int kDapPython = 10;
-constexpr int kDapBashDap = 11;
-constexpr int kForceBundled = 12;
-constexpr int kUiLocale = 13;
-constexpr int kOptionCount = 14;
+constexpr int kLspNeocmakelsp = 9;
+constexpr int kLspMakeLs = 10;
+constexpr int kDapGdb = 11;
+constexpr int kDapPython = 12;
+constexpr int kDapBashDap = 13;
+constexpr int kForceBundled = 14;
+constexpr int kUiLocale = 15;
+constexpr int kEditorMode = 16;
+constexpr int kOptionCount = 17;
 
 constexpr int kGdbNone = 0;
 constexpr int kGdbStatic = 1;
@@ -37,6 +40,9 @@ constexpr int kPythonFull = 2;
 constexpr int kLocaleEs = 0;
 constexpr int kLocaleEn = 1;
 
+constexpr int kEditorNormal = 0;
+constexpr int kEditorHelix = 1;
+
 struct BundleConfig {
   bool bundle_clangd = false;
   bool bundle_bash_ls = false;
@@ -47,11 +53,14 @@ struct BundleConfig {
   bool bundle_fortls = false;
   bool bundle_lua_ls = false;
   bool bundle_tsserver = false;
+  bool bundle_neocmakelsp = false;
+  bool bundle_make_ls = false;
   int gdb_kind = kGdbNone;
   int python_kind = kPythonNone;
   bool bundle_bash_dap = false;
   bool force_bundled = false;
-  int ui_locale = kLocaleEs;
+  int ui_locale = kLocaleEn;
+  int editor_mode = kEditorNormal;
 };
 
 struct WizardState {
@@ -70,6 +79,8 @@ constexpr int kSizeZlsMb = 5;
 constexpr int kSizeFortlsMb = 3;
 constexpr int kSizeLuaLsMb = 3;
 constexpr int kSizeTsserverMb = 40;
+constexpr int kSizeNeocmakelspMb = 3;
+constexpr int kSizeMakeLsMb = 3;
 constexpr int kSizeGdbStaticMb = 16;
 constexpr int kSizeGdbCoreAnalyzerMb = 30;
 constexpr int kSizePythonLspMinMb = 42;
@@ -105,6 +116,12 @@ int estimated_binary_mb(const BundleConfig& config) {
   if (config.bundle_tsserver) {
     mb += kSizeTsserverMb;
   }
+  if (config.bundle_neocmakelsp) {
+    mb += kSizeNeocmakelspMb;
+  }
+  if (config.bundle_make_ls) {
+    mb += kSizeMakeLsMb;
+  }
   if (config.gdb_kind == kGdbStatic) {
     mb += kSizeGdbStaticMb;
   } else if (config.gdb_kind == kGdbCoreAnalyzer) {
@@ -122,22 +139,28 @@ int estimated_binary_mb(const BundleConfig& config) {
 }
 
 std::string format_estimated_size(const BundleConfig& config) {
-  return "Tamaño estimado del binario tgdb: ~" + std::to_string(estimated_binary_mb(config)) +
-         " MB";
+  const char* prefix = config.ui_locale == kLocaleEs
+                           ? "Tamaño estimado del binario tgdb: ~"
+                           : "Estimated tgdb binary size: ~";
+  return std::string(prefix) + std::to_string(estimated_binary_mb(config)) + " MB";
 }
 
-std::string gdb_kind_label(int kind) {
+const char* tr(int locale, const char* es, const char* en) {
+  return locale == kLocaleEs ? es : en;
+}
+
+std::string gdb_kind_label(int locale, int kind) {
   switch (kind) {
     case kGdbStatic:
       return "gdb-static (musl) (~+" + std::to_string(kSizeGdbStaticMb) + " MB)";
     case kGdbCoreAnalyzer:
       return "gdb + Core Analyzer (~+" + std::to_string(kSizeGdbCoreAnalyzerMb) + " MB)";
     default:
-      return "ninguno (gdb del sistema)";
+      return tr(locale, "ninguno (gdb del sistema)", "none (system gdb)");
   }
 }
 
-std::string python_kind_label(int kind) {
+std::string python_kind_label(int locale, int kind) {
   switch (kind) {
     case kPythonLspMin:
       return "A: basedpyright (~+" + std::to_string(kSizePythonLspMinMb) + " MB)";
@@ -145,35 +168,62 @@ std::string python_kind_label(int kind) {
       return "B: CPython + basedpyright + debugpy (~+" + std::to_string(kSizePythonFullMb) +
              " MB)";
     default:
-      return "ninguno (herramientas del sistema)";
+      return tr(locale, "ninguno (herramientas del sistema)", "none (system tools)");
   }
 }
 
 std::string ui_locale_label(int locale) {
   switch (locale) {
-    case kLocaleEn:
-      return "English";
     case kLocaleEs:
-    default:
       return "Español";
+    case kLocaleEn:
+    default:
+      return "English";
   }
 }
 
 const char* ui_locale_tag(int locale) {
   switch (locale) {
-    case kLocaleEn:
-      return "en";
     case kLocaleEs:
-    default:
       return "es";
+    case kLocaleEn:
+    default:
+      return "en";
   }
 }
 
 int parse_ui_locale(const std::string& tag) {
-  if (tag == "en") {
-    return kLocaleEn;
+  if (tag == "es") {
+    return kLocaleEs;
   }
-  return kLocaleEs;
+  return kLocaleEn;
+}
+
+std::string editor_mode_label(int mode) {
+  switch (mode) {
+    case kEditorHelix:
+      return "Helix";
+    case kEditorNormal:
+    default:
+      return "Normal";
+  }
+}
+
+const char* editor_mode_tag(int mode) {
+  switch (mode) {
+    case kEditorHelix:
+      return "helix";
+    case kEditorNormal:
+    default:
+      return "normal";
+  }
+}
+
+int parse_editor_mode(const std::string& tag) {
+  if (tag == "helix") {
+    return kEditorHelix;
+  }
+  return kEditorNormal;
 }
 
 bool parse_bool_value(const std::string& value) {
@@ -242,12 +292,18 @@ void load_bundle_config(const std::string& path, BundleConfig* config) {
       config->bundle_fortls = parse_bool_value(line.substr(14));
     } else if (line.rfind("BUNDLE_LUA_LS=", 0) == 0) {
       config->bundle_lua_ls = parse_bool_value(line.substr(14));
+    } else if (line.rfind("BUNDLE_NEOCMAKELSP=", 0) == 0) {
+      config->bundle_neocmakelsp = parse_bool_value(line.substr(19));
+    } else if (line.rfind("BUNDLE_MAKE_LS=", 0) == 0) {
+      config->bundle_make_ls = parse_bool_value(line.substr(15));
     } else if (line.rfind("BUNDLE_TSSERVER=", 0) == 0) {
       config->bundle_tsserver = parse_bool_value(line.substr(16));
     } else if (line.rfind("FORCE_BUNDLED=", 0) == 0) {
       config->force_bundled = parse_bool_value(line.substr(14));
     } else if (line.rfind("UI_LOCALE=", 0) == 0) {
       config->ui_locale = parse_ui_locale(line.substr(10));
+    } else if (line.rfind("EDITOR_MODE=", 0) == 0) {
+      config->editor_mode = parse_editor_mode(line.substr(12));
     }
   }
   if (config->gdb_kind == kGdbNone && legacy_bundle_gdb) {
@@ -288,8 +344,11 @@ bool save_bundle_config(const std::string& path, const BundleConfig& config) {
   output << "BUNDLE_FORTLS=" << (config.bundle_fortls ? "1" : "0") << '\n';
   output << "BUNDLE_LUA_LS=" << (config.bundle_lua_ls ? "1" : "0") << '\n';
   output << "BUNDLE_TSSERVER=" << (config.bundle_tsserver ? "1" : "0") << '\n';
+  output << "BUNDLE_NEOCMAKELSP=" << (config.bundle_neocmakelsp ? "1" : "0") << '\n';
+  output << "BUNDLE_MAKE_LS=" << (config.bundle_make_ls ? "1" : "0") << '\n';
   output << "FORCE_BUNDLED=" << (config.force_bundled ? "1" : "0") << '\n';
   output << "UI_LOCALE=" << ui_locale_tag(config.ui_locale) << '\n';
+  output << "EDITOR_MODE=" << editor_mode_tag(config.editor_mode) << '\n';
   return static_cast<bool>(output);
 }
 
@@ -298,7 +357,7 @@ bool option_enabled(int /*index*/) {
 }
 
 bool option_is_checkbox(int index) {
-  return index != kDapGdb && index != kDapPython && index != kUiLocale;
+  return index != kDapGdb && index != kDapPython && index != kUiLocale && index != kEditorMode;
 }
 
 bool option_checked(const WizardState& state, int index) {
@@ -321,6 +380,10 @@ bool option_checked(const WizardState& state, int index) {
       return state.draft.bundle_lua_ls;
     case kLspTsserver:
       return state.draft.bundle_tsserver;
+    case kLspNeocmakelsp:
+      return state.draft.bundle_neocmakelsp;
+    case kLspMakeLs:
+      return state.draft.bundle_make_ls;
     case kDapBashDap:
       return state.draft.bundle_bash_dap;
     case kForceBundled:
@@ -331,35 +394,44 @@ bool option_checked(const WizardState& state, int index) {
 }
 
 std::string option_label(const WizardState& state, int index) {
+  const int locale = state.draft.ui_locale;
   switch (index) {
     case kLspClangd:
-      return "clangd";
+      return "clangd (C/C++)";
     case kLspBashLs:
-      return "bash-language-server";
+      return "bash-language-server (Bash)";
     case kLspTexlab:
-      return "TexLab";
+      return "TexLab (LaTeX)";
     case kLspRustAnalyzer:
-      return "rust-analyzer";
+      return "rust-analyzer (Rust)";
     case kLspGopls:
-      return "gopls";
+      return "gopls (Go)";
     case kLspZls:
-      return "zls";
+      return "zls (Zig)";
     case kLspFortls:
-      return "fortls";
+      return "fortls (Fortran)";
     case kLspLuaLs:
-      return "lua-language-server";
+      return "lua-language-server (Lua)";
     case kLspTsserver:
-      return "typescript-ls";
+      return "typescript-ls (JS/TS)";
+    case kLspNeocmakelsp:
+      return "neocmakelsp (CMake)";
+    case kLspMakeLs:
+      return "make-ls (Makefile)";
     case kDapGdb:
-      return "GDB: " + gdb_kind_label(state.draft.gdb_kind);
+      return std::string("GDB: ") + gdb_kind_label(locale, state.draft.gdb_kind);
     case kDapPython:
-      return "Python: " + python_kind_label(state.draft.python_kind);
+      return std::string("Python: ") + python_kind_label(locale, state.draft.python_kind);
     case kDapBashDap:
       return "Bash DAP";
     case kForceBundled:
-      return "Forzar todos los componentes ON";
+      return tr(locale, "Forzar todos los componentes ON", "Force all selected components ON");
     case kUiLocale:
-      return "Idioma: " + ui_locale_label(state.draft.ui_locale);
+      return std::string(tr(locale, "Idioma: ", "Language: ")) +
+             ui_locale_label(state.draft.ui_locale);
+    case kEditorMode:
+      return std::string(tr(locale, "Editor: ", "Editor: ")) +
+             editor_mode_label(state.draft.editor_mode);
     default:
       return "";
   }
@@ -384,6 +456,13 @@ void cycle_ui_locale(WizardState* state) {
     return;
   }
   state->draft.ui_locale = (state->draft.ui_locale + 1) % 2;
+}
+
+void cycle_editor_mode(WizardState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->draft.editor_mode = (state->draft.editor_mode + 1) % 2;
 }
 
 void toggle_option(WizardState* state, int index) {
@@ -418,6 +497,12 @@ void toggle_option(WizardState* state, int index) {
     case kLspTsserver:
       state->draft.bundle_tsserver = !state->draft.bundle_tsserver;
       break;
+    case kLspNeocmakelsp:
+      state->draft.bundle_neocmakelsp = !state->draft.bundle_neocmakelsp;
+      break;
+    case kLspMakeLs:
+      state->draft.bundle_make_ls = !state->draft.bundle_make_ls;
+      break;
     case kDapGdb:
       cycle_gdb_kind(state);
       break;
@@ -433,9 +518,29 @@ void toggle_option(WizardState* state, int index) {
     case kUiLocale:
       cycle_ui_locale(state);
       break;
+    case kEditorMode:
+      cycle_editor_mode(state);
+      break;
     default:
       break;
   }
+}
+
+// Paleta Dark Classic (tema por defecto de la pantalla de bienvenida sin workspace).
+namespace wiz_theme {
+using ftxui::Color;
+inline Color PanelBg() { return Color::RGB(28, 32, 42); }
+inline Color Accent() { return Color::RGB(90, 170, 255); }
+inline Color AccentDim() { return Color::RGB(50, 90, 140); }
+inline Color Header() { return Color::RGB(180, 200, 255); }
+inline Color Muted() { return Color::RGB(130, 140, 160); }
+inline Color Warning() { return Color::RGB(255, 200, 80); }
+inline Color TabHover() { return Color::RGB(48, 58, 72); }
+}  // namespace wiz_theme
+
+ftxui::Element centered_row(ftxui::Element row) {
+  using namespace ftxui;
+  return hbox({filler(), std::move(row), filler()});
 }
 
 ftxui::Element render_option_row(const WizardState& state, int index, bool checkbox) {
@@ -446,11 +551,16 @@ ftxui::Element render_option_row(const WizardState& state, int index, bool check
   if (checkbox) {
     label = std::string(option_checked(state, index) ? "[x] " : "[ ] ") + label;
   }
-  Element row = text(label) |
-                color(enabled ? (selected ? Color::Cyan : Color::White) : Color::GrayDark) |
-                bold;
+  Color fg = wiz_theme::Muted();
+  if (enabled) {
+    fg = selected ? wiz_theme::Accent() : wiz_theme::Header();
+  }
+  Element row = text(label) | color(fg);
+  if (enabled) {
+    row = row | bold;
+  }
   if (selected && enabled) {
-    row = row | inverted;
+    row = row | bgcolor(wiz_theme::TabHover());
   }
   return row;
 }
@@ -459,17 +569,17 @@ ftxui::Element render_panel(const char* title, const std::vector<int>& indices,
                             const WizardState& state) {
   using namespace ftxui;
   Elements rows;
-  rows.push_back(text(title) | bold);
-  rows.push_back(separator());
+  rows.push_back(text(title) | bold | color(wiz_theme::Accent()));
+  rows.push_back(separator() | color(wiz_theme::AccentDim()));
   for (int index : indices) {
     rows.push_back(render_option_row(state, index, option_is_checkbox(index)));
   }
-  return vbox(std::move(rows)) | border;
+  return vbox(std::move(rows)) | border | color(wiz_theme::AccentDim()) |
+         bgcolor(wiz_theme::PanelBg());
 }
 
 ftxui::Element render_tuide_logo() {
   using namespace ftxui;
-  // Mismo arte que RenderTuideLogo() en la pantalla de bienvenida / editor vacío.
   static const std::vector<std::string> lines = {
       "████████╗██╗   ██╗██╗██████╗ ███████╗",
       "╚══██╔══╝██║   ██║██║██╔══██╗██╔════╝",
@@ -480,17 +590,20 @@ ftxui::Element render_tuide_logo() {
   };
   Elements logo_rows;
   for (const auto& line : lines) {
-    logo_rows.push_back(text(line) | color(Color::Cyan) | bold);
+    logo_rows.push_back(text(line) | color(wiz_theme::Accent()) | bold);
   }
   return vbox(std::move(logo_rows));
 }
 
 ftxui::Element render_author_footer() {
   using namespace ftxui;
+  auto line = [](const char* s) {
+    return text(s) | color(wiz_theme::Muted());
+  };
   return vbox({
-      text("Lorenzo Arias del Real") | color(Color::GrayLight),
-      text("lorenzo.adr@proton.me") | color(Color::GrayLight),
-      text("Apache License 2.0") | color(Color::GrayLight),
+      hbox({filler(), line("Lorenzo Arias del Real")}),
+      hbox({filler(), line("lorenzo.adr@proton.me")}),
+      hbox({filler(), line("Apache License 2.0")}),
   });
 }
 
@@ -513,46 +626,63 @@ int main(int argc, char** argv) {
 
   const std::vector<int> kLspIndices = {kLspClangd,     kLspBashLs,   kLspTexlab,
                                         kLspRustAnalyzer, kLspGopls,    kLspZls,
-                                        kLspFortls,     kLspLuaLs,    kLspTsserver};
+                                        kLspFortls,     kLspLuaLs,    kLspTsserver,
+                                        kLspNeocmakelsp, kLspMakeLs};
   const std::vector<int> kDapIndices = {kDapGdb, kDapPython, kDapBashDap};
   const std::vector<int> kForceIndices = {kForceBundled};
-  const std::vector<int> kLocaleIndices = {kUiLocale};
+  const std::vector<int> kDefaultsIndices = {kUiLocale, kEditorMode};
 
   auto component = CatchEvent(
       Renderer([&] {
+        const int locale = state.draft.ui_locale;
         const Element lsp_panel = render_panel("LSP", kLspIndices, state);
         const Element dap_panel = render_panel("DAP", kDapIndices, state);
-        const Element force_panel = render_panel("Forzar embebido", kForceIndices, state);
-        const Element locale_panel = render_panel("Idioma de la aplicación", kLocaleIndices, state);
+        const Element force_panel =
+            render_panel(tr(locale, "Forzar embebido", "Force bundled"), kForceIndices, state);
+        const Element defaults_panel = render_panel(
+            tr(locale, "Preferencias por defecto", "Default preferences"), kDefaultsIndices,
+            state);
         const Element right_column =
-            vbox({dap_panel, text(""), force_panel, text(""), locale_panel});
+            vbox({dap_panel, text(""), force_panel, text(""), defaults_panel});
 
-        const Element menu = window(text("tgdb — componentes embebidos") | bold | center,
-                                    vbox({
-                                        text("Selecciona qué incluir en el binario de tgdb:"),
-                                        separator(),
-                                        hbox({
-                                            lsp_panel | flex,
-                                            text("  "),
-                                            right_column | flex,
-                                        }),
-                                        separator(),
-                                        text(format_estimated_size(state.draft)) | bold |
-                                            color(Color::Yellow),
-                                        text("↑↓ j/k  Espacio alternar   Enter confirmar   Esc "
-                                             "cancelar") |
-                                            color(Color::GrayLight),
-                                    })) |
-                             border;
+        const Element menu_body = vbox({
+            centered_row(text(tr(locale, "tgdb — componentes embebidos",
+                                 "tgdb — bundled components")) |
+                         bold | color(wiz_theme::Accent())),
+            text(""),
+            centered_row(text(tr(locale, "Selecciona qué incluir en el binario de tgdb:",
+                                 "Select what to include in the tgdb binary:")) |
+                         color(wiz_theme::Muted())),
+            text(""),
+            render_author_footer(),
+            hbox({
+                lsp_panel | flex,
+                text("  "),
+                right_column | flex,
+            }),
+            text(""),
+            separator() | color(wiz_theme::AccentDim()),
+            text(format_estimated_size(state.draft)) | bold | color(wiz_theme::Warning()),
+            text(tr(locale, "↑↓ j/k  Espacio alternar   Enter confirmar   Esc cancelar",
+                    "↑↓ j/k  Space toggle   Enter confirm   Esc cancel")) |
+                color(wiz_theme::Muted()),
+        });
 
+        const Element hero = vbox({
+            centered_row(render_tuide_logo()),
+            text(""),
+            centered_row(text(tr(locale, "asistente de compilación", "build assistant")) |
+                         color(wiz_theme::Muted())),
+        });
+
+        // Logo centrado arriba; menú pegado abajo.
         return vbox({
-                   menu,
                    filler(),
-                   hbox({filler(), render_tuide_logo(), filler()}),
-                   text(""),
-                   hbox({filler(), render_author_footer(), text("  ")}),
+                   std::move(hero),
+                   filler(),
+                   std::move(menu_body),
                }) |
-               flex;
+               flex | bgcolor(wiz_theme::PanelBg());
       }),
       [&](Event event) {
         if (event == Event::Escape) {
@@ -585,7 +715,10 @@ int main(int argc, char** argv) {
     return 1;
   }
   if (!save_bundle_config(config_path, state.draft)) {
-    std::fprintf(stderr, "tgdb-bundle-wizard: no se pudo escribir %s\n", config_path.c_str());
+    const char* msg = state.draft.ui_locale == kLocaleEs
+                          ? "tgdb-bundle-wizard: no se pudo escribir %s\n"
+                          : "tgdb-bundle-wizard: could not write %s\n";
+    std::fprintf(stderr, msg, config_path.c_str());
     return 1;
   }
   return 0;

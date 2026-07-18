@@ -361,7 +361,11 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
     layout.push_back(system_body | size(HEIGHT, EQUAL, system_height) | bgcolor(theme::PanelBg()));
   }
 
-  return vbox(std::move(layout)) | flex | bgcolor(theme::PanelBg());
+  Element root = vbox(std::move(layout)) | flex | bgcolor(theme::PanelBg());
+  if (state != nullptr) {
+    root = std::move(root) | reflect(state->panel_box);
+  }
+  return root;
 }
 
 Component MakePerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,
@@ -386,12 +390,18 @@ Component MakePerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
       state->thread_scroll = std::max(0, state->thread_scroll - 5);
       return true;
     }
-    if (event.is_mouse() && event.mouse().motion == Mouse::Pressed) {
-      if (event.mouse().button == Mouse::WheelDown) {
+    if (event.is_mouse()) {
+      const auto& m = event.mouse();
+      // Solo consumir rueda si el cursor está sobre el panel; si no, el editor
+      // (u otro panel) debe recibir el scroll.
+      if (!state->panel_box.Contain(m.x, m.y)) {
+        return false;
+      }
+      if (m.button == Mouse::WheelDown) {
         state->thread_scroll += 3;
         return true;
       }
-      if (event.mouse().button == Mouse::WheelUp) {
+      if (m.button == Mouse::WheelUp) {
         state->thread_scroll = std::max(0, state->thread_scroll - 3);
         return true;
       }

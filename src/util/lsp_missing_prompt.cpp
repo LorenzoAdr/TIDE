@@ -152,6 +152,28 @@ const std::vector<LspMissingPromptInfo>& catalog() {
         "BUNDLE_TSSERVER",
         "1",
     });
+    entries.push_back({
+        "neocmakelsp",
+        "lsp_toast.lang.cmake",
+        "status.neocmakelsp_missing",
+        prefer_apt(nullptr,
+                   "echo \"Descarga neocmakelsp desde "
+                   "https://github.com/neocmakelsp/neocmakelsp/releases y colócalo en PATH\""),
+        "--bundle-neocmakelsp",
+        "BUNDLE_NEOCMAKELSP",
+        "1",
+    });
+    entries.push_back({
+        "make-ls",
+        "lsp_toast.lang.make",
+        "status.make_ls_missing",
+        prefer_apt(nullptr,
+                   "echo \"Descarga make-ls desde https://github.com/owenrumney/make-ls/releases "
+                   "y colócalo en PATH\""),
+        "--bundle-make-ls",
+        "BUNDLE_MAKE_LS",
+        "1",
+    });
     return entries;
   }();
   return kCatalog;
@@ -215,8 +237,11 @@ void write_bundle_config_map(const fs::path& path, const ConfigMap& map) {
   output << "BUNDLE_FORTLS=" << get("BUNDLE_FORTLS", "0") << '\n';
   output << "BUNDLE_LUA_LS=" << get("BUNDLE_LUA_LS", "0") << '\n';
   output << "BUNDLE_TSSERVER=" << get("BUNDLE_TSSERVER", "0") << '\n';
+  output << "BUNDLE_NEOCMAKELSP=" << get("BUNDLE_NEOCMAKELSP", "0") << '\n';
+  output << "BUNDLE_MAKE_LS=" << get("BUNDLE_MAKE_LS", "0") << '\n';
   output << "FORCE_BUNDLED=" << get("FORCE_BUNDLED", "0") << '\n';
-  output << "UI_LOCALE=" << get("UI_LOCALE", "es") << '\n';
+  output << "UI_LOCALE=" << get("UI_LOCALE", "en") << '\n';
+  output << "EDITOR_MODE=" << get("EDITOR_MODE", "normal") << '\n';
 }
 
 }  // namespace

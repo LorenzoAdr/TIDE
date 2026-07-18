@@ -10,6 +10,8 @@
 #include "util/file_open_policy.hpp"
 #include "util/thread_name.hpp"
 #include "indexer/index_rules.hpp"
+#include "lsp/language_server_spec.hpp"
+#include "lsp/lsp_uri.hpp"
 #include "parser/tree_sitter_document.hpp"
 #include "parser/tree_sitter_service.hpp"
 
@@ -148,6 +150,12 @@ void FilePickerPreview::worker_main(std::string absolute_path, int center_line,
   }
 
   result.build_file_kind = detect_build_file_kind(absolute_path);
+  const std::string lang_id = language_id_for_path(absolute_path);
+  const bool tree_sitter_build_lang =
+      language_id_is_cmake(lang_id) || language_id_is_make(lang_id);
+  if (tree_sitter_build_lang) {
+    result.build_file_kind = BuildFileKind::kNone;
+  }
   result.use_tree_sitter =
       result.build_file_kind == BuildFileKind::kNone && is_indexed_source_path(absolute_path);
 

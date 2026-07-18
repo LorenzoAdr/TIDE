@@ -17,6 +17,7 @@ if(UNIX)
   find_library(TGDB_UTIL_LIBRARY util)
 endif()
 
+
 include(cmake/Dependencies.cmake)
 
 set(TGDB_TREE_SITTER_INCLUDE_DIRS
@@ -32,6 +33,8 @@ set(TGDB_TREE_SITTER_INCLUDE_DIRS
   ${tree_sitter_lua_SOURCE_DIR}/bindings/c
   ${tree_sitter_javascript_SOURCE_DIR}/bindings/c
   ${tree_sitter_typescript_SOURCE_DIR}/bindings/c
+  ${tree_sitter_cmake_SOURCE_DIR}/bindings/c
+  ${tree_sitter_make_SOURCE_DIR}/bindings/c
   ${CMAKE_BINARY_DIR}/generated
 )
 
@@ -48,6 +51,8 @@ set(TGDB_TREE_SITTER_GRAMMAR_LIBS
   tree-sitter-lua
   tree-sitter-javascript
   tree-sitter-typescript
+  tree-sitter-cmake
+  tree-sitter-make
 )
 
 set(TGDB_TREE_SITTER_SOURCES
@@ -330,6 +335,9 @@ include(cmake/BundleOptions.cmake)
 target_compile_definitions(tgdb PRIVATE
   "TGDB_DEFAULT_UI_LOCALE_TAG=\"${TGDB_DEFAULT_UI_LOCALE}\""
 )
+if(TGDB_DEFAULT_HELIX_MODE)
+  target_compile_definitions(tgdb PRIVATE TGDB_DEFAULT_HELIX_MODE=1)
+endif()
 if(TGDB_BUNDLE_CLANGD)
   include(cmake/BundleClangd.cmake)
 endif()
@@ -370,6 +378,12 @@ if(TGDB_BUNDLE_FORTLS)
 endif()
 if(TGDB_BUNDLE_TSSERVER)
   include(cmake/BundleTypescriptLs.cmake)
+endif()
+if(TGDB_BUNDLE_NEOCMAKELSP)
+  include(cmake/BundleNeocmakelsp.cmake)
+endif()
+if(TGDB_BUNDLE_MAKE_LS)
+  include(cmake/BundleMakeLs.cmake)
 endif()
 
 add_executable(tgdb-bundle-wizard tools/bundle_wizard/main.cpp)

@@ -405,6 +405,14 @@ TSQuery* highlight_query_for_lang(TreeSitterLangKind lang) {
     static TSQuery* query = nullptr;
     return cached_query(&query, tree_sitter_typescript_language(), tree_sitter_queries::typescript());
   }
+  if (lang == TreeSitterLangKind::kCmake) {
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_cmake_language(), tree_sitter_queries::cmake());
+  }
+  if (lang == TreeSitterLangKind::kMake) {
+    static TSQuery* query = nullptr;
+    return cached_query(&query, tree_sitter_make_language(), tree_sitter_queries::make());
+  }
   if (lang == TreeSitterLangKind::kNone) {
     return nullptr;
   }

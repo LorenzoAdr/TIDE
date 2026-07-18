@@ -79,6 +79,16 @@ struct TypescriptLsLocation {
   enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
 };
 
+struct NeocmakelspLocation {
+  std::string binary_path;
+  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+};
+
+struct MakeLsLocation {
+  std::string binary_path;
+  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+};
+
 struct BashDebugAdapterLocation {
   std::string node_path;
   std::string adapter_js_path;
@@ -116,6 +126,8 @@ std::optional<ZlsLocation> resolve_zls();
 std::optional<FortlsLocation> resolve_fortls();
 std::optional<LuaLsLocation> resolve_lua_language_server();
 std::optional<TypescriptLsLocation> resolve_typescript_language_server();
+std::optional<NeocmakelspLocation> resolve_neocmakelsp();
+std::optional<MakeLsLocation> resolve_make_ls();
 std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter();
 std::optional<std::string> resolve_shellcheck();
 std::optional<std::string> resolve_chktex();

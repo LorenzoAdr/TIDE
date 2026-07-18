@@ -6,6 +6,8 @@
 #include "editor/indent_guides.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "indexer/index_rules.hpp"
+#include "lsp/language_server_spec.hpp"
+#include "lsp/lsp_uri.hpp"
 #include "ui/cursor_blink_ui.hpp"
 #include "ui/theme.hpp"
 #include "util/syntax_highlight.hpp"
@@ -657,9 +659,16 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
   const std::string& body_line =
       guide_split.prefix_byte_length > 0 ? guide_split.suffix : view_line;
   const int guide_prefix_visual = guide_split.prefix_visual_width;
-  const BuildFileKind build_file_kind = detect_build_file_kind(buffer.path);
+  const BuildFileKind detected_build_kind = detect_build_file_kind(buffer.path);
+  const std::string lang_id = language_id_for_path(buffer.path);
+  // CMake/Makefile use Tree-sitter highlighting (not the legacy build-file highlighter
+  // and not LSP semantic tokens).
+  const bool tree_sitter_build_lang =
+      language_id_is_cmake(lang_id) || language_id_is_make(lang_id);
+  const BuildFileKind build_file_kind =
+      tree_sitter_build_lang ? BuildFileKind::kNone : detected_build_kind;
   const bool is_build_file = build_file_kind != BuildFileKind::kNone;
-  const bool use_warm_line_bg = build_file_kind == BuildFileKind::kMakefile;
+  const bool use_warm_line_bg = detected_build_kind == BuildFileKind::kMakefile;
   const Decorator line_bg =
       sticky_scroll_line
           ? bgcolor(theme::TabIdle())

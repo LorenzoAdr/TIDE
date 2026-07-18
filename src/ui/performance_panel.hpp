@@ -6,6 +6,7 @@
 
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "ftxui/screen/box.hpp"
 #include "util/system_stats.hpp"
 #include "util/ui_activity_gate.hpp"
 #include "ui/ui_event_trace.hpp"
@@ -14,6 +15,7 @@ namespace tgdb {
 
 struct PerformancePanelState {
   int thread_scroll = 0;
+  ftxui::Box panel_box;
 };
 
 ftxui::Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,

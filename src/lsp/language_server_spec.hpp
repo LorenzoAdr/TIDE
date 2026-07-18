@@ -17,6 +17,8 @@ struct LanguageServerSpec {
   std::string workspace_root;
   // Optional env overrides applied in the child before exec (KEY=VALUE).
   std::vector<std::string> env;
+  // Optional JSON object for initialize.initializationOptions (empty = omit).
+  std::string initialization_options_json;
 };
 
 inline constexpr const char* kLspServerClangd = "clangd";
@@ -29,6 +31,8 @@ inline constexpr const char* kLspServerZls = "zls";
 inline constexpr const char* kLspServerFortls = "fortls";
 inline constexpr const char* kLspServerLuaLs = "lua-language-server";
 inline constexpr const char* kLspServerTypescriptLs = "typescript-language-server";
+inline constexpr const char* kLspServerNeocmakelsp = "neocmakelsp";
+inline constexpr const char* kLspServerMakeLs = "make-ls";
 
 bool language_id_is_cpp_family(const std::string& language_id);
 bool language_id_is_python(const std::string& language_id);
@@ -42,6 +46,8 @@ bool language_id_is_lua(const std::string& language_id);
 bool language_id_is_javascript(const std::string& language_id);
 bool language_id_is_typescript(const std::string& language_id);
 bool language_id_is_js_ts(const std::string& language_id);
+bool language_id_is_cmake(const std::string& language_id);
+bool language_id_is_make(const std::string& language_id);
 
 std::string language_server_id_for_language(const std::string& language_id);
 
@@ -71,6 +77,10 @@ std::optional<LanguageServerSpec> make_fortls_spec(const std::string& workspace_
 std::optional<LanguageServerSpec> make_lua_ls_spec(const std::string& workspace_root);
 
 std::optional<LanguageServerSpec> make_typescript_ls_spec(const std::string& workspace_root);
+
+std::optional<LanguageServerSpec> make_neocmakelsp_spec(const std::string& workspace_root);
+
+std::optional<LanguageServerSpec> make_make_ls_spec(const std::string& workspace_root);
 
 std::optional<LanguageServerSpec> make_language_server_spec(
     const std::string& server_id, const std::string& workspace_root,

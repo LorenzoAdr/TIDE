@@ -51,12 +51,21 @@ option(TGDB_BUNDLE_TSSERVER
        "Embed typescript-language-server + Node Linux x86_64" OFF)
 option(TGDB_FORCE_BUNDLED_TSSERVER
        "Prefer embedded typescript-language-server (requires TGDB_BUNDLE_TSSERVER)" OFF)
+option(TGDB_BUNDLE_NEOCMAKELSP "Embed neocmakelsp Linux x86_64 release" OFF)
+option(TGDB_FORCE_BUNDLED_NEOCMAKELSP
+       "Prefer embedded neocmakelsp (requires TGDB_BUNDLE_NEOCMAKELSP)" OFF)
+option(TGDB_BUNDLE_MAKE_LS "Embed make-ls Linux x86_64 release" OFF)
+option(TGDB_FORCE_BUNDLED_MAKE_LS
+       "Prefer embedded make-ls (requires TGDB_BUNDLE_MAKE_LS)" OFF)
 
-set(TGDB_DEFAULT_UI_LOCALE "es" CACHE STRING "Default UI locale baked into the binary: es|en")
+set(TGDB_DEFAULT_UI_LOCALE "en" CACHE STRING "Default UI locale baked into the binary: es|en")
 set_property(CACHE TGDB_DEFAULT_UI_LOCALE PROPERTY STRINGS es en)
 if(NOT TGDB_DEFAULT_UI_LOCALE MATCHES "^(es|en)$")
   message(FATAL_ERROR "TGDB_DEFAULT_UI_LOCALE must be 'es' or 'en'")
 endif()
+
+option(TGDB_DEFAULT_HELIX_MODE
+       "Default editor mode for new installs: ON=Helix, OFF=Normal" OFF)
 
 set(TGDB_CLANGD_VERSION "19.1.2" CACHE STRING "clangd release version to bundle")
 set(TGDB_GDB_STATIC_VERSION "v16.3-static" CACHE STRING "gdb-static release tag")
@@ -91,6 +100,8 @@ set(TGDB_TYPESCRIPT_VERSION "7.0.2" CACHE STRING "typescript npm version bundled
 set(TGDB_TYPESCRIPT_LS_VERSION
     "${TGDB_TYPESCRIPT_LS_NPM_VERSION}+ts${TGDB_TYPESCRIPT_VERSION}" CACHE STRING
     "typescript-language-server bundle tag")
+set(TGDB_NEOCMAKELSP_VERSION "v0.10.4" CACHE STRING "neocmakelsp release version to bundle")
+set(TGDB_MAKE_LS_VERSION "v0.1.16" CACHE STRING "make-ls release version to bundle")
 
 if(TGDB_BUNDLE_PYTHON_TOOLS AND TGDB_BUNDLE_PYTHON_LSP_MIN)
   message(WARNING
@@ -195,10 +206,17 @@ endif()
 if(TGDB_FORCE_BUNDLED_TSSERVER AND NOT TGDB_BUNDLE_TSSERVER)
   message(FATAL_ERROR "TGDB_FORCE_BUNDLED_TSSERVER requires TGDB_BUNDLE_TSSERVER=ON")
 endif()
+if(TGDB_FORCE_BUNDLED_NEOCMAKELSP AND NOT TGDB_BUNDLE_NEOCMAKELSP)
+  message(FATAL_ERROR "TGDB_FORCE_BUNDLED_NEOCMAKELSP requires TGDB_BUNDLE_NEOCMAKELSP=ON")
+endif()
+if(TGDB_FORCE_BUNDLED_MAKE_LS AND NOT TGDB_BUNDLE_MAKE_LS)
+  message(FATAL_ERROR "TGDB_FORCE_BUNDLED_MAKE_LS requires TGDB_BUNDLE_MAKE_LS=ON")
+endif()
 
 if(TGDB_BUNDLE_BASH_LS OR TGDB_BUNDLE_TEXLAB OR TGDB_BUNDLE_BASH_DAP
    OR TGDB_BUNDLE_RUST_ANALYZER OR TGDB_BUNDLE_GOPLS OR TGDB_BUNDLE_ZLS
-   OR TGDB_BUNDLE_LUA_LS OR TGDB_BUNDLE_FORTLS OR TGDB_BUNDLE_TSSERVER)
+   OR TGDB_BUNDLE_LUA_LS OR TGDB_BUNDLE_FORTLS OR TGDB_BUNDLE_TSSERVER
+   OR TGDB_BUNDLE_NEOCMAKELSP OR TGDB_BUNDLE_MAKE_LS)
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "Embedded tooling bundles are only supported on Linux")
   endif()
