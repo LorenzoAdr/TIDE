@@ -16,7 +16,6 @@
 #include "util/child_process_guard.hpp"
 #include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
-
 #if defined(__unix__) || defined(__linux__)
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -57,6 +56,17 @@ std::string write_terminal_init_script(const ShellLaunchConfig& config) {
     output << "source " << shell_quote(script) << " >/dev/null 2>&1 || true\n";
     output << "set +a\n";
   }
+  // bash --rcfile replaces ~/.bashrc; source the usual interactive configs so
+  // the prompt, ls --color aliases, and other user settings still apply.
+  // TERM/COLORTERM are exported above so color_prompt detection sees them.
+  // Keep going if a user's bashrc errors — an interactive shell must still start.
+  output << "set +e\n";
+  output << "if [ -f /etc/bash.bashrc ]; then\n";
+  output << "  . /etc/bash.bashrc\n";
+  output << "fi\n";
+  output << "if [ -f \"${HOME}/.bashrc\" ]; then\n";
+  output << "  . \"${HOME}/.bashrc\"\n";
+  output << "fi\n";
   output << "cd " << shell_quote(config.host_cwd) << " 2>/dev/null || true\n";
   return init_path.string();
 }
@@ -255,6 +265,9 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
     set_current_thread_name("shell-read");
     reader_loop();
   });
+  // Bootstrap finishes off the UI thread; wake so we leave "(starting...)" and
+  // refresh even if the first PTY bytes arrived before the reader was ready.
+  notify_output();
 #endif
 }
 
@@ -465,14 +478,26 @@ int ShellSession::drain_output_bytes(int max_bytes) {
 
 void ShellSession::background_drain() {
   std::lock_guard<std::mutex> lock(terminal_mutex_);
+  bool any = false;
   while (auto chunk = output_chunks_.try_pop()) {
     terminal_.feed(chunk->data(), chunk->size());
+    any = true;
+  }
+  if (any) {
+    // Keep display_* in sync so a later refresh (or a race with set_consumer_active)
+    // does not see an empty mirror while the emulator already has the prompt.
+    rebuild_display_locked();
   }
 }
 
 void ShellSession::rebuild_display_locked() {
   display_text_ = terminal_.text();
   display_styled_rows_ = terminal_.styled_rows();
+}
+
+void ShellSession::rebuild_display() {
+  std::lock_guard<std::mutex> lock(terminal_mutex_);
+  rebuild_display_locked();
 }
 
 void ShellSession::set_consumer_active(bool active) {

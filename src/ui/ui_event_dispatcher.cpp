@@ -90,6 +90,10 @@ void UiEventDispatcher::emit_terminal(std::string tag, std::function<void()> pre
   event.src_file = src_file;
   event.src_line = src_line;
   emit(std::move(event));
+  // Same as emit_debug: coalesced Custom alone may not schedule a frame, so PTY
+  // echoes and streaming compile output stay invisible until the next key/click
+  // (one-character lag / frozen scrollback).
+  request_animation_frame();
 }
 
 void UiEventDispatcher::emit_debug(std::string tag, std::function<void()> pre_paint,

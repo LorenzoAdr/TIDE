@@ -17,7 +17,7 @@ struct TerminalStyledSpan {
 using TerminalStyledRow = std::vector<TerminalStyledSpan>;
 
 // Lightweight PTY screen buffer. Handles text layout, basic cursor control and
-// common ANSI SGR colors used by bash prompts.
+// ANSI SGR colours used by shell prompts (16 / 256 / truecolor).
 class RawPtyScreen {
  public:
   RawPtyScreen(int rows = 24, int cols = 80);

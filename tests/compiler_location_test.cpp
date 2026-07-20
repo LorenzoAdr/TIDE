@@ -58,6 +58,21 @@ void test_included_from() {
   expect(match->line == 12, "included line");
 }
 
+void test_from_continuation() {
+  const auto match = tuide::find_compiler_location(
+      "                 from /home/user/project/src/main.cpp:10,");
+  expect(match.has_value(), "from continuation");
+  expect(match->path == "/home/user/project/src/main.cpp", "from continuation path");
+  expect(match->line == 10, "from continuation line");
+}
+
+void test_from_prefix_stripped() {
+  const auto match = tuide::find_compiler_location("from src/foo.cpp:42:");
+  expect(match.has_value(), "from prefix");
+  expect(match->path == "src/foo.cpp", "from prefix path");
+  expect(match->line == 42, "from prefix line");
+}
+
 void test_no_match() {
   expect(!tuide::find_compiler_location("make[2]: *** [target] Error 1").has_value(), "make error");
   expect(!tuide::find_compiler_location("").has_value(), "empty line");
@@ -71,6 +86,8 @@ int main() {
   test_absolute_path();
   test_msvc_style();
   test_included_from();
+  test_from_continuation();
+  test_from_prefix_stripped();
   test_no_match();
   std::cout << "compiler_location_test: OK\n";
   return 0;

@@ -86,6 +86,9 @@ class LspClient {
 
   std::optional<std::string> format_document(const std::string& absolute_path,
                                              const std::string& text);
+  std::optional<std::string> format_range(const std::string& absolute_path, const std::string& text,
+                                          int start_line, int start_character, int end_line,
+                                          int end_character);
 
   std::vector<LspFileEdits> rename_symbol(const std::string& absolute_path,
                                           const std::string& text, int line, int character,

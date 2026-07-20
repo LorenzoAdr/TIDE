@@ -3310,6 +3310,30 @@ std::optional<std::string> LspSymbolProvider::format_document(const FormatParams
   return std::nullopt;
 }
 
+std::optional<std::string> LspSymbolProvider::format_range(const FormatRangeParams& params) {
+  if (params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
+    return std::nullopt;
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_) {
+    return std::nullopt;
+  }
+
+  const std::string key = normalize_lsp_path(params.path);
+  if (key.empty()) {
+    return std::nullopt;
+  }
+
+  const std::string text =
+      params.text.empty() ? buffer_text_for_path(key) : params.text;
+  if (LspClient* lsp = client_for_path(params.path)) {
+    return lsp->format_range(key, text, params.start_line, params.start_character, params.end_line,
+                             params.end_character);
+  }
+  return std::nullopt;
+}
+
 bool LspSymbolProvider::supports_rename() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return use_lsp_ && any_lsp_ready();

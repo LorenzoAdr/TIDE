@@ -151,6 +151,13 @@ bool file_excluded(const std::string& relative_path, const std::string& exclude_
   return false;
 }
 
+const std::vector<std::string>& workspace_search_files(const WorkspaceSearchOptions& opts) {
+  if (opts.files_ref != nullptr && !opts.files_ref->empty()) {
+    return *opts.files_ref;
+  }
+  return opts.files;
+}
+
 bool file_in_search_path(const std::string& relative_path, const std::string& path_filter) {
   const std::string filter = normalize_filter(path_filter);
   if (filter.empty()) {
@@ -173,7 +180,7 @@ std::vector<WorkspaceSearchResult> search_workspace(const WorkspaceSearchOptions
     return results;
   }
 
-  for (const auto& rel : opts.files) {
+  for (const auto& rel : workspace_search_files(opts)) {
     if (!file_in_search_path(rel, opts.path_filter)) {
       continue;
     }
@@ -226,7 +233,7 @@ WorkspaceReplaceResult replace_in_workspace(const WorkspaceSearchOptions& opts,
     return result;
   }
 
-  for (const auto& rel : opts.files) {
+  for (const auto& rel : workspace_search_files(opts)) {
     if (!file_in_search_path(rel, opts.path_filter)) {
       continue;
     }

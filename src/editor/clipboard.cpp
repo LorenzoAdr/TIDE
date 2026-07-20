@@ -43,8 +43,15 @@ std::string extract_selection_text(const EditorBuffer& buffer, const MultiCursor
     const std::string& line = buffer.lines[static_cast<std::size_t>(start_line)];
     start_col = std::max(0, std::min(start_col, static_cast<int>(line.size())));
     end_col = std::max(start_col, std::min(end_col, static_cast<int>(line.size())));
-    return line.substr(static_cast<std::size_t>(start_col),
-                       static_cast<std::size_t>(end_col - start_col));
+    std::string out = line.substr(static_cast<std::size_t>(start_col),
+                                  static_cast<std::size_t>(end_col - start_col));
+    // Last line of the file has no following line to anchor an exclusive '\n'
+    // end on; still emit a trailing newline for a full-line (linewise) select.
+    if (start_col == 0 && end_col == static_cast<int>(line.size()) &&
+        start_line == static_cast<int>(buffer.lines.size()) - 1) {
+      out.push_back('\n');
+    }
+    return out;
   }
 
   std::string out;
@@ -62,6 +69,12 @@ std::string extract_selection_text(const EditorBuffer& buffer, const MultiCursor
     if (line < end_line) {
       out += '\n';
     }
+  }
+  // Multi-line selection ending at EOL of the last buffer line (no exclusive
+  // next-line end available): append the trailing newline for linewise paste.
+  if (start_col == 0 && end_line == static_cast<int>(buffer.lines.size()) - 1 &&
+      end_col == static_cast<int>(buffer.lines[static_cast<std::size_t>(end_line)].size())) {
+    out.push_back('\n');
   }
   return out;
 }

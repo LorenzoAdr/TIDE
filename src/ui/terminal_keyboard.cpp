@@ -39,4 +39,14 @@ void disable_click_drag_mouse_reporting() {
   std::cout.flush();
 }
 
+void enable_bracketed_paste() {
+  std::cout << "\033[?2004h";
+  std::cout.flush();
+}
+
+void disable_bracketed_paste() {
+  std::cout << "\033[?2004l";
+  std::cout.flush();
+}
+
 }  // namespace tuide

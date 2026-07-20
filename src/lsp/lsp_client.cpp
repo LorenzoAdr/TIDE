@@ -1392,6 +1392,54 @@ std::optional<std::string> LspClient::format_document(const std::string& absolut
   return apply_lsp_text_edits(text, edits);
 }
 
+std::optional<std::string> LspClient::format_range(const std::string& absolute_path,
+                                                   const std::string& text, int start_line,
+                                                   int start_character, int end_line,
+                                                   int end_character) {
+  if (!ready_.load() || absolute_path.empty() ||
+      !is_lsp_trackable_path(absolute_path, text)) {
+    return std::nullopt;
+  }
+
+  if (!text.empty()) {
+    did_change(absolute_path, text);
+  }
+
+  const std::string key = normalize_lsp_path(absolute_path);
+  if (key.empty()) {
+    return std::nullopt;
+  }
+
+  const std::string uri = path_to_uri(key);
+  const ClangFormatConfig style = load_clang_format_for_file(key, workspace_root_);
+  const int tab_size = std::max(1, style.effective_tab_width());
+  const bool insert_spaces = !style.uses_tab_char();
+  nlohmann::json params = {
+      {"textDocument", {{"uri", uri}}},
+      {"range",
+       {{"start", {{"line", start_line}, {"character", start_character}}},
+        {"end", {{"line", end_line}, {"character", end_character}}}}},
+      {"options", {{"tabSize", tab_size}, {"insertSpaces", insert_spaces}}}};
+
+  nlohmann::json result;
+  if (!send_lsp_request("textDocument/rangeFormatting", std::move(params), 30000, &result)) {
+    return std::nullopt;
+  }
+
+  if (result.is_null()) {
+    return text;
+  }
+  if (!result.is_array()) {
+    return std::nullopt;
+  }
+
+  const std::vector<LspTextEdit> edits = parse_lsp_text_edits(result);
+  if (edits.empty()) {
+    return text;
+  }
+  return apply_lsp_text_edits(text, edits);
+}
+
 std::vector<LspFileEdits> LspClient::rename_symbol(const std::string& absolute_path,
                                                    const std::string& text, int line,
                                                    int character, const std::string& new_name) {

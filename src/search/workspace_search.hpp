@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -14,12 +15,18 @@ struct WorkspaceSearchResult {
 
 struct WorkspaceSearchOptions {
   std::string workspace_root;
+  // Owned file list (e.g. after an explicit scan). Prefer files_ref when sharing an index.
   std::vector<std::string> files;
+  // Shared index file list — avoids copying tens of thousands of paths on the UI thread.
+  std::shared_ptr<const std::vector<std::string>> files_ref;
   std::string needle;
   std::string path_filter;
   std::string include_pattern;
   std::string exclude_pattern;
 };
+
+// Returns files_ref if set, otherwise files. Does not scan the workspace.
+const std::vector<std::string>& workspace_search_files(const WorkspaceSearchOptions& opts);
 
 struct WorkspaceReplaceResult {
   int files_modified = 0;

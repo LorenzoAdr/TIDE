@@ -617,6 +617,13 @@ add_executable(compiler_location_test
 )
 target_include_directories(compiler_location_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+add_executable(raw_pty_screen_test
+  tests/raw_pty_screen_test.cpp
+  src/terminal/raw_pty_screen.cpp
+)
+target_include_directories(raw_pty_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(raw_pty_screen_test PRIVATE ftxui::screen)
+
 add_executable(gfortran_diagnostics_test
   tests/gfortran_diagnostics_test.cpp
   src/lsp/gfortran_diagnostics.cpp
@@ -703,6 +710,7 @@ set(TUIDE_TEST_TARGETS
   tabular_file_test
   glyphs_test
   compiler_location_test
+  raw_pty_screen_test
   gfortran_diagnostics_test
   doc_comment_test
   nm_reader_test

@@ -71,6 +71,7 @@ class LspSymbolProvider : public ISymbolProvider {
 
   bool supports_formatting() const override;
   std::optional<std::string> format_document(const FormatParams& params) override;
+  std::optional<std::string> format_range(const FormatRangeParams& params) override;
 
   bool supports_rename() const override;
   std::vector<LspFileEdits> rename_symbol(const RenameParams& params) override;

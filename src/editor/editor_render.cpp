@@ -285,7 +285,7 @@ Element apply_decoration(Element element, const EditorDecoration* deco,
     case EditorDecoration::Kind::FindMatch:
       return element | bgcolor(theme::FindMatchBg());
     case EditorDecoration::Kind::SelectionOccurrence:
-      return element | bgcolor(theme::SelectionOccurrenceBg());
+      return element | bgcolor(theme::SelectionOccurrenceBg()) | bold;
     case EditorDecoration::Kind::DiagnosticWarning:
       return element | color(theme::Warning()) | underlined;
     case EditorDecoration::Kind::DiagnosticError:

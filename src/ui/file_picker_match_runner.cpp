@@ -79,10 +79,17 @@ void try_add_catalog_hit(const FilePickerCatalogEntry& entry, int bonus, std::st
   if (!result.matched) {
     return;
   }
-  if (seen->count(entry.path) != 0) {
+  // Dedupe by display label (relative path): open tabs use absolute paths while
+  // the workspace catalog stores relative ones.
+  const std::string& dedupe_key =
+      !entry.display_label.empty() ? entry.display_label : entry.path;
+  if (seen->count(dedupe_key) != 0 || seen->count(entry.path) != 0) {
     return;
   }
-  seen->insert(entry.path);
+  seen->insert(dedupe_key);
+  if (!entry.path.empty()) {
+    seen->insert(entry.path);
+  }
 
   const int proximity = path_proximity_bonus(ref_dir, entry.dir_label);
   out->push_back({entry.path, entry.display_label, result.score + bonus + proximity,
@@ -115,10 +122,15 @@ std::vector<FilePickerMatch> search_files(
 
   for (const FuzzyCatalogHit& hit : hits) {
     const FilePickerCatalogEntry& entry = catalog[hit.index];
-    if (seen.count(entry.path) != 0) {
+    const std::string& dedupe_key =
+        !entry.display_label.empty() ? entry.display_label : entry.path;
+    if (seen.count(dedupe_key) != 0 || seen.count(entry.path) != 0) {
       continue;
     }
-    seen.insert(entry.path);
+    seen.insert(dedupe_key);
+    if (!entry.path.empty()) {
+      seen.insert(entry.path);
+    }
     const int proximity = path_proximity_bonus(params.ref_dir, entry.dir_label);
     results.push_back({entry.path, entry.display_label, hit.score + proximity,
                        label_match_indices(entry.display_label, hit.match_indices)});

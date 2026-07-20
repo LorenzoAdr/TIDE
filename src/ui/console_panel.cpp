@@ -28,6 +28,7 @@
 #include "ui/press_ids.hpp"
 #include "ui/panel.hpp"
 #include "app/workspace_model.hpp"
+#include "editor/text_ops.hpp"
 #include "indexer/workspace_indexer.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/call_hierarchy_panel.hpp"
@@ -254,6 +255,7 @@ bool open_terminal_link(WorkspaceModel* workspace, DebugModel* model, FocusManag
   if (!workspace->open_file_at(resolved, line, col)) {
     return false;
   }
+  ensure_scroll_centered(&workspace->buffer, 24);
   workspace->status_message =
       i18n::tr_fmt("status.navigate",
                    {std::filesystem::path(resolved).filename().string(), std::to_string(match.line),
@@ -1048,7 +1050,12 @@ void tick_terminal_shell(ConsolePanelState* state, ShellSession* shell,
     return;
   }
 
+  // Workspace-root reset clears shell_start_requested; keep a same-tick autostart alive.
+  const bool start_was_requested = state->shell_start_requested;
   reset_terminal_session_state(state, launch_config.host_cwd);
+  if (start_was_requested) {
+    state->shell_start_requested = true;
+  }
 
   const int cols =
       state->layout_measured ? state->pending_terminal_cols : state->pending_terminal_cols;
@@ -1109,11 +1116,13 @@ void refresh_terminal_view(ShellSession* shell, ConsolePanelState* state) {
   if (drained > 0) {
     TUIDE_MON("shell", "terminal drained_bytes=" + std::to_string(drained));
   }
+  // request_start clears display_*; background_drain may have filled the emulator
+  // without the UI ever copying rows. Force a mirror rebuild so we never stick on "...".
+  if (state->terminal_styled_rows.empty() && drained == 0) {
+    shell->rebuild_display();
+  }
   const std::string text = shell->display_text();
   if (text.empty() && drained == 0 && !pending && queue_before == 0) {
-    return;
-  }
-  if (drained > 0 && text.empty()) {
     return;
   }
   if (text.empty()) {
@@ -1237,6 +1246,14 @@ Element render_shell_terminal(ConsolePanelState* state, DebugModel* model, Shell
                               int viewport_height, int panel_width) {
   if (model->workspace_root.empty()) {
     return render_terminal_body(text(i18n::tr("console.terminal.select_workspace")) | color(theme::Muted()));
+  }
+
+  // PTY output can wake a paint without running the terminal tick, leaving the
+  // output queue undrained and styled_rows empty ("..."). Sync the view on paint.
+  if (state != nullptr && shell != nullptr && shell->running()) {
+    update_terminal_layout(state, viewport_height, panel_width, layout_state);
+    refresh_terminal_view(shell, state);
+    state->shell_ui_active = true;
   }
 
   if (state == nullptr || !state->shell_ui_active) {
@@ -1789,12 +1806,12 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       const int panel_width = state->panel_box.x_max >= state->panel_box.x_min
                                   ? state->panel_box.x_max - state->panel_box.x_min + 1
                                   : 80;
-      if (!terminal_tab_active(app_mode, layout_state)) {
-        return;
-      }
       update_terminal_layout(state.get(), layout_height, panel_width, layout_state);
       tick_terminal_shell(state.get(), shell,
                           current_shell_launch(shell_launch_config, model));
+      if (!terminal_tab_active(app_mode, layout_state)) {
+        return;
+      }
       refresh_terminal_view(shell, state.get());
     };
   }

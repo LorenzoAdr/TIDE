@@ -6,6 +6,7 @@
 #include <signal.h>
 
 #include "indexer/index_rules.hpp"
+#include "indexer/workspace_indexer.hpp"
 #include "search/workspace_search_rg.hpp"
 #include "util/bundled_tools.hpp"
 #include "util/monitor_log.hpp"
@@ -72,24 +73,50 @@ void search_file(const WorkspaceSearchOptions& opts, const std::string& rel,
 
 }  // namespace
 
-WorkspaceSearchRunner::WorkspaceSearchRunner() = default;
+WorkspaceSearchRunner::WorkspaceSearchRunner() {
+  worker_ = std::thread([this] { worker_main(); });
+}
 
 WorkspaceSearchRunner::~WorkspaceSearchRunner() {
+  stop_worker();
+}
+
+void WorkspaceSearchRunner::stop_worker() {
   cancel();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stop_ = true;
+    wake_callback_ = nullptr;
+  }
+  cv_.notify_all();
   if (worker_.joinable()) {
     worker_.join();
   }
 }
 
-void WorkspaceSearchRunner::start(const WorkspaceSearchOptions& opts) {
-  cancel();
-  if (worker_.joinable()) {
-    worker_.join();
-  }
+void WorkspaceSearchRunner::set_wake_callback(std::function<void()> callback) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  wake_callback_ = std::move(callback);
+}
 
-  cancel_requested_ = false;
-  const uint64_t gen = generation_.load();
-  running_ = true;
+void WorkspaceSearchRunner::notify_wake() {
+  std::function<void()> wake;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    wake = wake_callback_;
+  }
+  if (wake) {
+    wake();
+  }
+}
+
+void WorkspaceSearchRunner::start(WorkspaceSearchOptions opts) {
+  // Invalidate any in-flight search without joining (worker is persistent).
+  const pid_t pid = child_pid_.load();
+  if (pid > 0) {
+    kill(pid, SIGTERM);
+  }
+  const uint64_t gen = generation_.fetch_add(1) + 1;
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -99,12 +126,10 @@ void WorkspaceSearchRunner::start(const WorkspaceSearchOptions& opts) {
     finished_ = false;
     used_rg_ = false;
     ready_generation_ = 0;
+    pending_job_ = Job{gen, std::move(opts)};
+    running_ = true;
   }
-
-  worker_ = std::thread([this, gen, opts] {
-    set_current_thread_name("ws-search");
-    worker_main(gen, opts);
-  });
+  cv_.notify_one();
 }
 
 void WorkspaceSearchRunner::cancel() {
@@ -114,6 +139,8 @@ void WorkspaceSearchRunner::cancel() {
   if (pid > 0) {
     kill(pid, SIGTERM);
   }
+  std::lock_guard<std::mutex> lock(mutex_);
+  pending_job_.reset();
 }
 
 bool WorkspaceSearchRunner::running() const {
@@ -144,12 +171,13 @@ bool WorkspaceSearchRunner::poll(std::vector<WorkspaceSearchResult>* results, bo
 
 void WorkspaceSearchRunner::search_inprocess(uint64_t generation,
                                              const WorkspaceSearchOptions& opts,
+                                             const std::vector<std::string>& files,
                                              std::vector<WorkspaceSearchResult>* results,
                                              int* files_scanned, bool* cancelled) {
   if (results == nullptr || cancelled == nullptr) {
     return;
   }
-  for (const auto& rel : opts.files) {
+  for (const auto& rel : files) {
     if (cancel_requested_.load() || generation_.load() != generation) {
       *cancelled = true;
       break;
@@ -167,7 +195,7 @@ void WorkspaceSearchRunner::search_inprocess(uint64_t generation,
   }
 }
 
-void WorkspaceSearchRunner::worker_main(uint64_t generation, WorkspaceSearchOptions opts) {
+void WorkspaceSearchRunner::run_job(uint64_t generation, WorkspaceSearchOptions opts) {
   TUIDE_MON_SCOPE("idx", "workspace_search");
   std::vector<WorkspaceSearchResult> results;
   int files_scanned = 0;
@@ -178,6 +206,15 @@ void WorkspaceSearchRunner::worker_main(uint64_t generation, WorkspaceSearchOpti
     return cancel_requested_.load() || generation_.load() != generation;
   };
 
+  auto ensure_files = [&]() -> const std::vector<std::string>& {
+    const auto& existing = workspace_search_files(opts);
+    if (!existing.empty()) {
+      return existing;
+    }
+    opts.files = scan_workspace_files(opts.workspace_root);
+    return opts.files;
+  };
+
   if (const auto rg = resolve_rg(); rg.has_value()) {
     used_rg = true;
     const bool ok = search_workspace_rg(opts, rg->binary_path, should_cancel, &child_pid_,
@@ -186,24 +223,62 @@ void WorkspaceSearchRunner::worker_main(uint64_t generation, WorkspaceSearchOpti
       results.clear();
       files_scanned = 0;
       used_rg = false;
-      search_inprocess(generation, opts, &results, &files_scanned, &cancelled);
+      search_inprocess(generation, opts, ensure_files(), &results, &files_scanned, &cancelled);
     } else if (should_cancel()) {
       cancelled = true;
     }
   } else {
-    search_inprocess(generation, opts, &results, &files_scanned, &cancelled);
+    search_inprocess(generation, opts, ensure_files(), &results, &files_scanned, &cancelled);
   }
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    results_ = std::move(results);
-    files_scanned_ = files_scanned;
-    cancelled_ = cancelled;
-    finished_ = true;
-    used_rg_ = used_rg;
-    ready_generation_ = generation;
+    if (generation_.load() != generation) {
+      if (!pending_job_.has_value()) {
+        running_ = false;
+      }
+    } else {
+      results_ = std::move(results);
+      files_scanned_ = files_scanned;
+      cancelled_ = cancelled;
+      finished_ = true;
+      used_rg_ = used_rg;
+      ready_generation_ = generation;
+      if (!pending_job_.has_value()) {
+        running_ = false;
+      }
+    }
   }
-  running_ = false;
+  // Always wake outside the mutex: either results are ready or cancel finished.
+  notify_wake();
+}
+
+void WorkspaceSearchRunner::worker_main() {
+  set_current_thread_name("ws-search");
+
+  while (true) {
+    Job job;
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      cv_.wait(lock, [this] { return stop_.load() || pending_job_.has_value(); });
+      if (stop_.load()) {
+        return;
+      }
+      job = std::move(*pending_job_);
+      pending_job_.reset();
+    }
+
+    if (generation_.load() != job.generation) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!pending_job_.has_value()) {
+        running_ = false;
+      }
+      continue;
+    }
+
+    cancel_requested_ = false;
+    run_job(job.generation, std::move(job.opts));
+  }
 }
 
 }  // namespace tuide

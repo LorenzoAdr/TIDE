@@ -1,6 +1,7 @@
 #include "app/workspace_model.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <filesystem>
 
@@ -30,6 +31,26 @@ void set_welcome_buffer(EditorBuffer* buffer) {
   buffer->dirty = false;
   buffer->lines.push_back("");
   clear_undo(buffer);
+}
+
+std::int64_t file_mtime_seconds(const std::string& absolute_path) {
+  if (absolute_path.empty()) {
+    return 0;
+  }
+  std::error_code ec;
+  const auto mtime = fs::last_write_time(absolute_path, ec);
+  if (ec) {
+    return 0;
+  }
+  return static_cast<std::int64_t>(
+      std::chrono::duration_cast<std::chrono::seconds>(mtime.time_since_epoch()).count());
+}
+
+void stamp_tab_disk_mtime(EditorTab* tab) {
+  if (tab == nullptr) {
+    return;
+  }
+  tab->disk_mtime_sec = file_mtime_seconds(tab->path);
 }
 
 bool load_tabular_placeholder(EditorBuffer* buffer, const std::string& absolute_path) {
@@ -384,6 +405,7 @@ int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path, boo
   } else {
     load_buffer_from_disk(&tab.buffer, absolute_path);
   }
+  stamp_tab_disk_mtime(&tab);
   tabs.push_back(std::move(tab));
   return static_cast<int>(tabs.size()) - 1;
 }
@@ -644,8 +666,59 @@ bool WorkspaceModel::save_buffer() {
   }
   buffer.dirty = false;
   flush_active_tab();
+  if (active_tab >= 0 && active_tab < static_cast<int>(tabs.size())) {
+    stamp_tab_disk_mtime(&tabs[static_cast<std::size_t>(active_tab)]);
+  }
   status_message = i18n::tr_fmt("workspace.saved", {fs::path(buffer.path).filename().string()});
   return true;
+}
+
+bool WorkspaceModel::reload_stale_tabs_from_disk() {
+  bool any = false;
+  std::string last_reloaded;
+  for (int i = 0; i < static_cast<int>(tabs.size()); ++i) {
+    EditorTab& tab = tabs[static_cast<std::size_t>(i)];
+    if (tab.path.empty() || tab.read_only || tab.git_diff_view || tab.large_virtual_view ||
+        is_tabular_path(tab.path)) {
+      continue;
+    }
+    if (tab.buffer.dirty) {
+      continue;
+    }
+    const std::int64_t mtime = file_mtime_seconds(tab.path);
+    if (mtime <= 0 || tab.disk_mtime_sec <= 0 || mtime <= tab.disk_mtime_sec) {
+      continue;
+    }
+    const int keep_line = tab.buffer.primary_line();
+    const int keep_col = tab.buffer.primary_col();
+    const int keep_scroll = tab.buffer.scroll;
+    if (!load_buffer_from_disk(&tab.buffer, tab.path)) {
+      continue;
+    }
+    const int clamped_line =
+        std::max(0, std::min(keep_line, static_cast<int>(tab.buffer.lines.size()) - 1));
+    const int clamped_col =
+        tab.buffer.lines.empty()
+            ? 0
+            : std::max(0, std::min(keep_col, static_cast<int>(
+                                                 tab.buffer.lines[static_cast<std::size_t>(clamped_line)]
+                                                     .size())));
+    tab.buffer.reset_to_single_cursor(clamped_line, clamped_col);
+    tab.buffer.scroll = keep_scroll;
+    tab.buffer.dirty = false;
+    stamp_tab_disk_mtime(&tab);
+    last_reloaded = tab.path;
+    any = true;
+    if (i == active_tab) {
+      load_active_tab_into_buffer();
+    }
+  }
+  if (any && !last_reloaded.empty()) {
+    status_message =
+        i18n::tr_fmt("workspace.reloaded_external",
+                     {fs::path(last_reloaded).filename().string()});
+  }
+  return any;
 }
 
 void WorkspaceModel::open_relative(const std::string& relative_path) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,9 @@ struct EditorTab {
   bool read_only = false;
   bool large_virtual_view = false;
   bool git_diff_view = false;
+  // File mtime (seconds since epoch) when the buffer was last loaded or saved.
+  // Used to detect external edits (formatters, git hooks, etc.).
+  std::int64_t disk_mtime_sec = 0;
   std::vector<SideBySideDiffRow> diff_rows;
 };
 

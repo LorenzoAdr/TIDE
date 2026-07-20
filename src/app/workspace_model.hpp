@@ -60,6 +60,9 @@ struct WorkspaceModel {
   const std::vector<SideBySideDiffRow>& active_diff_rows() const;
   bool open_git_diff_tab(const std::string& absolute_path, GitService* git);
   bool revert_git_diff_block(int block_index, GitService* git);
+  // Reload open tabs whose on-disk mtime is newer than the last load/save.
+  // Skips dirty buffers to avoid clobbering unsaved edits.
+  bool reload_stale_tabs_from_disk();
 
  private:
   void refresh_git_diff_tabs_for_path(const std::string& absolute_path, GitService* git);

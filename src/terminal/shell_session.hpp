@@ -58,6 +58,9 @@ class ShellSession {
   int drain_output_bytes(int max_bytes = 4096);
   std::size_t pending_output_chunks() const;
   std::string screen_text();
+  // Rebuild display_text_/styled_rows from the emulator buffer (e.g. after
+  // background drain while the terminal tab was hidden).
+  void rebuild_display();
 
   void set_output_notify(std::function<void()> callback);
 

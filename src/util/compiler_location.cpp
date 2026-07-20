@@ -1,8 +1,10 @@
 #include "util/compiler_location.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <filesystem>
+#include <string_view>
 
 namespace tuide {
 
@@ -227,7 +229,26 @@ std::optional<CompilerLocationMatch> find_compiler_location(const std::string& l
     }
   }
 
+  // GCC continuation lines: "                 from /path/file.cpp:12,"
+  static constexpr const char* kFrom = "from ";
+  if (const std::size_t prefix = line.find(kFrom); prefix != std::string::npos) {
+    const bool only_leading_space =
+        std::all_of(line.begin(), line.begin() + static_cast<std::ptrdiff_t>(prefix),
+                    [](unsigned char ch) { return std::isspace(ch); });
+    if (only_leading_space &&
+        parse_trailing_location(line, prefix + ::strlen(kFrom), &match)) {
+      return match;
+    }
+  }
+
   if (parse_trailing_location(line, 0, &match)) {
+    // Strip a leading "from " that survived the fallback (e.g. "from foo.cpp:1:").
+    constexpr std::string_view kFromPrefix = "from ";
+    if (match.path.size() > kFromPrefix.size() &&
+        match.path.compare(0, kFromPrefix.size(), kFromPrefix) == 0) {
+      match.path.erase(0, kFromPrefix.size());
+      match.span_start += static_cast<int>(kFromPrefix.size());
+    }
     return match;
   }
 

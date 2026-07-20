@@ -662,8 +662,9 @@ Color SelectionBg() { return current_palette().selection_bg; }
 Color FindMatchBg() { return current_palette().find_match_bg; }
 Color SelectionOccurrenceBg() {
   const ColorRgb code = effective_code_bg_rgb();
-  const ColorRgb tint = g_mode == ThemeMode::kLight ? rgb(210, 225, 245) : rgb(55, 75, 110);
-  return from_rgb(blend(code, tint, 0.45f));
+  // Stronger tint than before so other occurrences of the selection read clearly.
+  const ColorRgb tint = g_mode == ThemeMode::kLight ? rgb(160, 195, 245) : rgb(70, 110, 170);
+  return from_rgb(blend(code, tint, 0.72f));
 }
 Color BracketMatchBg() { return current_palette().bracket_match_bg; }
 

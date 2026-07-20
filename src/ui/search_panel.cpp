@@ -23,6 +23,7 @@
 #include "ui/theme.hpp"
 #include "ui/key_bindings.hpp"
 #include "i18n/tr.hpp"
+#include "editor/text_ops.hpp"
 
 namespace tuide {
 
@@ -133,15 +134,15 @@ WorkspaceSearchOptions build_options(SearchPanelState* state, WorkspaceModel* wo
     std::error_code ec;
     opts.workspace_root = std::filesystem::absolute(opts.workspace_root, ec).string();
   }
+  // Share the indexer file list without copying it on the UI thread. Scanning /
+  // fallback happens inside WorkspaceSearchRunner's worker.
   if (indexer != nullptr) {
     if (auto snap = indexer->snapshot()) {
-      if (snap->workspace_root == opts.workspace_root) {
-        opts.files = snap->files;
+      if (snap->workspace_root == opts.workspace_root && !snap->files.empty()) {
+        opts.files_ref =
+            std::shared_ptr<const std::vector<std::string>>(snap, &snap->files);
       }
     }
-  }
-  if (opts.files.empty() && !opts.workspace_root.empty()) {
-    opts.files = scan_workspace_files(opts.workspace_root);
   }
   return opts;
 }
@@ -205,7 +206,7 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
     return;
   }
   state->committed_query = state->query;
-  const auto opts = build_options(state, workspace, model, indexer);
+  auto opts = build_options(state, workspace, model, indexer);
   if (opts.workspace_root.empty()) {
     state->status = i18n::tr("search.status.no_workspace");
     return;
@@ -216,7 +217,7 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
   state->first_visible = 0;
   state->result_count = 0;
   ++state->search_generation;
-  state->runner.start(opts);
+  state->runner.start(std::move(opts));
   if (layout_state != nullptr) {
     UI_WAKE(layout_state, "wake");
   }
@@ -229,14 +230,17 @@ void run_replace_all(SearchPanelState* state, WorkspaceModel* workspace, DebugMo
     return;
   }
   state->runner.cancel();
-  const auto opts = build_options(state, workspace, model, indexer);
+  auto opts = build_options(state, workspace, model, indexer);
+  if (workspace_search_files(opts).empty() && !opts.workspace_root.empty()) {
+    opts.files = scan_workspace_files(opts.workspace_root);
+  }
   const auto result = replace_in_workspace(opts, state->replace);
   run_search(state, workspace, model, indexer, layout_state);
   state->status = i18n::tr_fmt("search.status.replaced", {std::to_string(result.replacements), std::to_string(result.files_modified)});
 
   if (workspace != nullptr && !workspace->buffer.path.empty()) {
     namespace fs = std::filesystem;
-    for (const auto& rel : opts.files) {
+    for (const auto& rel : workspace_search_files(opts)) {
       std::error_code ec;
       const auto absolute = fs::weakly_canonical(fs::path(opts.workspace_root) / rel, ec);
       if (!ec && absolute.string() == workspace->buffer.path) {
@@ -265,6 +269,7 @@ void open_result(SearchPanelState* state, WorkspaceModel* workspace, DebugModel*
                                    std::max(0, hit.col - 1))) {
         return;
       }
+      ensure_scroll_centered(&workspace->buffer, std::max(1, state->last_visible_lines));
     }
   }
   if (model != nullptr) {
@@ -286,6 +291,9 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
   state->placeholder_path = i18n::tr("search.placeholder.path");
   state->placeholder_include = i18n::tr("search.placeholder.include");
   state->placeholder_exclude = i18n::tr("search.placeholder.exclude");
+  if (layout_state != nullptr) {
+    state->runner.set_wake_callback([layout_state] { UI_WAKE(layout_state, "wake"); });
+  }
 
   auto query_input = Input(MakeBlinkInputOption(&state->query, &state->placeholder_query));
   auto replace_input = Input(MakeBlinkInputOption(&state->replace, &state->placeholder_replace));
@@ -367,7 +375,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     if (event == Event::Escape) {
       if (state->runner.running()) {
         state->runner.cancel();
-        state->status = i18n::tr("search.status.cancelling");
+        state->status = i18n::tr("search.status.cancelled");
         return true;
       }
       clear_search_input_focus(layout_state);
@@ -377,6 +385,13 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
         event.mouse().motion == Mouse::Pressed) {
       const auto& m = event.mouse();
+      const bool in_search_chrome =
+          state->query_box.Contain(m.x, m.y) || state->replace_box.Contain(m.x, m.y) ||
+          state->path_box.Contain(m.x, m.y) || state->include_box.Contain(m.x, m.y) ||
+          state->exclude_box.Contain(m.x, m.y) || state->results_box.Contain(m.x, m.y);
+      if (!in_search_chrome) {
+        return false;
+      }
       focus->region = FocusRegion::Terminal;
       if (state->query_box.Contain(m.x, m.y)) {
         activate_field(TextInputFocus::SearchQuery, query_input);

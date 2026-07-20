@@ -449,6 +449,12 @@ void Application::request_terminal_autostart() {
 	}
 	layout_state_.console_visible = true;
 	layout_state_.terminal_start_requested = true;
+	if (layout_state_.ui_events == nullptr) {
+		return;
+	}
+	UI_WAKE(&layout_state_, "terminal.autostart");
+	// Custom alone may not schedule a frame (same as emit_terminal).
+	layout_state_.ui_events->request_animation_frame();
 }
 
 void Application::inject_terminal_command(const std::string& command) {
@@ -862,8 +868,17 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 		}
 	}
 
-	if (plan.run_terminal && layout_state_.console_visible &&
-	    layout_state_.terminal_tick_callback) {
+  // TerminalOutput wakes drive steady-state PTY refresh. Autostart also needs a tick
+  // even though request_terminal_autostart only posts InputCorrelated wakes.
+  // While starting() is true, pending_shell_autostart is false — keep ticking or the
+  // UI freezes on "(starting terminal...)" until the user presses a key.
+  const bool pending_shell_autostart =
+      layout_state_.terminal_start_requested && !shell_session_.running() &&
+      !shell_session_.starting();
+  const bool shell_start_in_flight =
+      layout_state_.terminal_start_requested && shell_session_.starting();
+  if ((plan.run_terminal || pending_shell_autostart || shell_start_in_flight) &&
+      layout_state_.console_visible && layout_state_.terminal_tick_callback) {
 		UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "terminal");
 		TUIDE_MON_SCOPE("ui", "tick.terminal");
 		layout_state_.terminal_tick_callback();
@@ -1281,8 +1296,6 @@ void Application::process_pending_workspace_load() {
 	focus_state_.region = workspace_.tabs.empty() ? FocusRegion::Explorer : FocusRegion::Editor;
 	layout_state_.text_input_focus = TextInputFocus::None;
 	layout_state_.focus_sync_needed = true;
-	// No autostart shell here: bash PTY output + repaint nudges starve the UI event loop.
-	layout_state_.terminal_start_requested = false;
 	UI_WAKE(&layout_state_, "app");
 }
 
@@ -2375,6 +2388,7 @@ int Application::run() {
 		screen.ForceHandleCtrlZ(false);
 		enable_extended_key_reporting();
 		enable_click_drag_mouse_reporting();
+		enable_bracketed_paste();
 	}
 
 	std::unique_ptr<BackgroundWorker> background_worker;
@@ -3116,7 +3130,8 @@ int Application::run() {
 				return true;
 			}
 			if ((is_search_input_focus(layout_state_.text_input_focus) ||
-			     search_tab_active(&layout_state_)) &&
+			     (search_tab_active(&layout_state_) &&
+			      focus_state_.region == FocusRegion::Terminal)) &&
 			    layout_state_.search_key_handler && layout_state_.search_key_handler(event)) {
 				UI_WAKE(&layout_state_, "app.custom");
 				return true;
@@ -3389,6 +3404,13 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 
 	layout_state_.ui_events = &ui_event_dispatcher_;
 	ui_event_dispatcher_.set_screen(&screen);
+	// Do NOT UI_WAKE before Loop: PostEvent can set custom_pending_ and never drain,
+	// blocking all later wakes. Schedule the kick on the first loop iteration.
+	screen.Post([this] {
+		if (layout_state_.terminal_start_requested && layout_state_.console_visible) {
+			request_terminal_autostart();
+		}
+	});
 
 	register_backend_wake_callback();
 	tree_sitter_service().set_ready_callback([this](const std::string& path) {
@@ -3435,6 +3457,7 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 	                           [this] { return any_modal_open(); }, this));
 
 	if (!ui_smoke) {
+		disable_bracketed_paste();
 		disable_click_drag_mouse_reporting();
 		disable_extended_key_reporting();
 	}

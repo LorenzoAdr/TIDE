@@ -201,6 +201,11 @@ std::string selection_text(const EditorBuffer& buffer, const MultiCursor& cursor
   int end_col = 0;
   cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
   if (start_line != end_line) {
+    // Linewise exclusive end {line,0}->{line+1,0}: treat as that single line's text.
+    if (start_col == 0 && end_col == 0 && end_line == start_line + 1 &&
+        start_line >= 0 && start_line < static_cast<int>(buffer.lines.size())) {
+      return buffer.lines[static_cast<std::size_t>(start_line)];
+    }
     return {};
   }
   if (start_line < 0 || start_line >= static_cast<int>(buffer.lines.size())) {

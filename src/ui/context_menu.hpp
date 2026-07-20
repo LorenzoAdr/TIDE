@@ -99,7 +99,8 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
                                      int sym_start, int sym_end, const std::string& symbol,
                                      const std::string& absolute_path, bool show_call_hierarchy,
-                                     const DebugModel* model = nullptr);
+                                     const DebugModel* model = nullptr,
+                                     bool has_selection = false);
 
 void context_menu_open_debug_symbol(ContextMenuState* state, int x, int y, int line, int col,
                                     const std::string& symbol, const std::string& absolute_path,
@@ -107,7 +108,7 @@ void context_menu_open_debug_symbol(ContextMenuState* state, int x, int y, int l
 
 void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
                                          const std::string& absolute_path, int line, int col,
-                                         bool show_call_hierarchy);
+                                         bool show_call_hierarchy, bool has_selection = false);
 
 void context_menu_open_problem(ContextMenuState* state, int x, int y, const std::string& path,
                                int line, int start_col, int end_col, const std::string& message,

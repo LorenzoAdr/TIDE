@@ -55,6 +55,15 @@ struct FormatParams {
   std::string text;
 };
 
+struct FormatRangeParams {
+  std::string path;
+  std::string text;
+  int start_line = 0;
+  int start_character = 0;
+  int end_line = 0;
+  int end_character = 0;
+};
+
 struct RenameParams {
   std::string path;
   std::string text;
@@ -205,6 +214,10 @@ class ISymbolProvider {
 
   virtual bool supports_formatting() const { return false; }
   virtual std::optional<std::string> format_document(const FormatParams& params) {
+    (void)params;
+    return std::nullopt;
+  }
+  virtual std::optional<std::string> format_range(const FormatRangeParams& params) {
     (void)params;
     return std::nullopt;
   }

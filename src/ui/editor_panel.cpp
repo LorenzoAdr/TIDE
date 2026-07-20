@@ -207,6 +207,11 @@ struct EditorPanelState {
   bool word_select_drag = false;
   int word_select_anchor_line = -1;
   int word_select_anchor_col = -1;
+  // Terminal paste often arrives as a stream of Character + Return events.
+  // Bracketed paste (DEC 2004) wraps that stream; otherwise we detect a burst.
+  bool bracketed_paste_active = false;
+  std::string bracketed_paste_buffer;
+  int64_t last_insert_input_ms = 0;
   std::vector<BreadcrumbHit> breadcrumb_hits;
   std::vector<BreadcrumbItem> breadcrumbs;
   VisualHighlightPanelState visual_highlight;
@@ -559,6 +564,12 @@ void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer) {
   }
   panel->content_edit_ms = steady_now_ms();
   panel->guide_tracker_view_token = 0;
+  // Always drop paint caches on content edits (indent/format included). Indent
+  // does not flip semantic_layout_dirty, but column shifts still invalidate
+  // cached syntax spans and rasterized rows.
+  panel->viewport_line_render_cache.clear();
+  panel->line_syntax_span_cache.clear();
+  panel->last_ts_baseline_commit_token = 0;
   if (buffer.semantic_layout_dirty) {
     if (!kLspSemanticTokensStandby) {
       panel->semantic_tokens_layout_stale = true;
@@ -567,15 +578,11 @@ void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer) {
                    buffer.semantic_layout_dirty_from_line);
       panel->semantic_tokens_enqueue_pending = true;
     }
-    panel->viewport_line_render_cache.clear();
-    panel->line_syntax_span_cache.clear();
-    panel->last_ts_baseline_commit_token = 0;
     buffer.semantic_layout_dirty = false;
     buffer.semantic_layout_dirty_from_line = std::numeric_limits<int>::max();
   }
   if (is_indexed_source_path(buffer.path)) {
     panel->ts_dirty_highlight_lines.insert(buffer.primary_line());
-    panel->last_ts_baseline_commit_token = 0;
     panel->lsp_sync_pending = true;
     clear_hover_state(&panel->hover);
     const std::optional<EditorTextEditHint> edit_hint = editor_buffer_take_edit_hint(&buffer);
@@ -3314,7 +3321,7 @@ bool navigate_to_location(WorkspaceModel* workspace, MainLayoutState* layout_sta
   workspace->status_message =
       "→ " + std::filesystem::path(loc.path).filename().string() + ":" +
       std::to_string(loc.line + 1) + ":" + std::to_string(loc.character + 1);
-  ensure_scroll_visible(&workspace->buffer, visible_lines);
+  ensure_scroll_centered(&workspace->buffer, visible_lines);
   return true;
 }
 
@@ -4419,20 +4426,50 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       claim_editor_focus(focus, layout_state, panel->panel_focus);
       const CursorPos pos =
           mouse_to_cursor(m, *panel, *buffer, visible_lines);
-      buffer->reset_to_single_cursor(pos.line, pos.col);
+      const bool click_inside_selection = [&]() {
+        for (const auto& cursor : buffer->cursors) {
+          if (!cursor.has_selection()) {
+            continue;
+          }
+          int start_line = 0;
+          int start_col = 0;
+          int end_line = 0;
+          int end_col = 0;
+          cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
+          if (pos.line < start_line || pos.line > end_line) {
+            continue;
+          }
+          const int line_start = (pos.line == start_line) ? start_col : 0;
+          const int line_end =
+              (pos.line == end_line)
+                  ? end_col
+                  : static_cast<int>(buffer->lines[static_cast<std::size_t>(pos.line)].size());
+          if (pos.col >= line_start && pos.col <= line_end) {
+            return true;
+          }
+        }
+        return false;
+      }();
+      if (!click_inside_selection) {
+        buffer->reset_to_single_cursor(pos.line, pos.col);
+      }
       MultiCursor cursor = buffer->primary();
-      cursor.head = pos;
+      if (!click_inside_selection) {
+        cursor.head = pos;
+      }
       int start_col = 0;
       int end_col = 0;
       ident_range_at_cursor(*buffer, cursor, &start_col, &end_col);
       const std::string symbol = word_at_cursor(*buffer, cursor);
+      const bool has_selection = any_cursor_has_selection(*buffer);
       if (!symbol.empty() && layout_state != nullptr) {
         const bool show_call_hierarchy =
             symbols != nullptr && symbols->supports_call_hierarchy(buffer->path) &&
             is_lsp_trackable_path(buffer->path);
-        context_menu_open_editor_symbol(&layout_state->context_menu, m.x, m.y, pos.line, pos.col,
-                                        start_col, end_col, symbol, buffer->path,
-                                        show_call_hierarchy, debug_model);
+        context_menu_open_editor_symbol(&layout_state->context_menu, m.x, m.y,
+                                        cursor.head.line, cursor.head.col, start_col, end_col,
+                                        symbol, buffer->path, show_call_hierarchy, debug_model,
+                                        has_selection);
         end_mouse_selection(panel);
         return true;
       }
@@ -4441,7 +4478,8 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
         const bool show_call_hierarchy =
             symbols != nullptr && symbols->supports_call_hierarchy(buffer->path);
         context_menu_open_editor_background(&layout_state->context_menu, m.x, m.y, buffer->path,
-                                            pos.line, pos.col, show_call_hierarchy);
+                                            cursor.head.line, cursor.head.col,
+                                            show_call_hierarchy, has_selection);
         end_mouse_selection(panel);
         return true;
       }
@@ -4513,7 +4551,6 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       panel->line_select_anchor = pos.line;
       panel->line_select_commit_line = pos.line;
       begin_mouse_selection(panel, event);
-      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       return true;
     }
 
@@ -4525,7 +4562,6 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       panel->word_select_anchor_line = buffer->primary().anchor.line;
       panel->word_select_anchor_col = buffer->primary().anchor.col;
       begin_mouse_selection(panel, event);
-      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       return true;
     }
 
@@ -4556,7 +4592,6 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       buffer->primary().head = pos;
       clamp_all_cursors(buffer);
       begin_mouse_selection(panel, event);
-      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       return true;
     }
 
@@ -4570,7 +4605,6 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       buffer->primary().head = pos;
       clamp_all_cursors(buffer);
       begin_mouse_selection(panel, event);
-      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       return true;
     }
 
@@ -4579,7 +4613,8 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     buffer->reset_to_single_cursor(pos.line, pos.col);
     begin_mouse_selection(panel, event);
-    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+    // Do not apply edge-margin scroll on plain mouse presses: that jumps the
+    // viewport and can leave a dangling selection from the click.
     return true;
   }
 
@@ -5051,6 +5086,73 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
 
+  // Bracketed paste / paste-burst: terminal Ctrl+Shift+V (and similar) injects the
+  // clipboard as Character + Return events. Enter normally smart-indents, which
+  // stacks on top of the pasted indent and grows each line. Capture the stream
+  // and insert it raw instead.
+  constexpr int64_t kPasteBurstGapMs = 16;
+  const auto mark_paste_input = [&]() {
+    if (panel != nullptr) {
+      panel->last_insert_input_ms = steady_now_ms();
+    }
+  };
+  const auto in_paste_burst = [&]() {
+    if (panel == nullptr || panel->last_insert_input_ms <= 0) {
+      return false;
+    }
+    return (steady_now_ms() - panel->last_insert_input_ms) <= kPasteBurstGapMs;
+  };
+
+  if (panel != nullptr && !read_only) {
+    if (event == Event::Special("\x1B[200~")) {
+      panel->bracketed_paste_active = true;
+      panel->bracketed_paste_buffer.clear();
+      return true;
+    }
+    if (event == Event::Special("\x1B[201~")) {
+      if (panel->bracketed_paste_active) {
+        panel->bracketed_paste_active = false;
+        paste_text(buffer, panel->bracketed_paste_buffer);
+        panel->bracketed_paste_buffer.clear();
+        ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+        notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
+        mark_paste_input();
+      }
+      return true;
+    }
+    if (panel->bracketed_paste_active) {
+      if (event == Event::Return) {
+        panel->bracketed_paste_buffer.push_back('\n');
+        return true;
+      }
+      if (event == Event::Tab || event_is_plain_tab(event)) {
+        panel->bracketed_paste_buffer.push_back('\t');
+        return true;
+      }
+      if (event.is_character()) {
+        panel->bracketed_paste_buffer += event.character();
+        return true;
+      }
+      // Unexpected control key mid-paste: flush what we have and fall through.
+      if (!panel->bracketed_paste_buffer.empty()) {
+        paste_text(buffer, panel->bracketed_paste_buffer);
+        panel->bracketed_paste_buffer.clear();
+        notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
+      }
+      panel->bracketed_paste_active = false;
+    }
+
+    // Intercept Enter during an unbracketed paste burst before Helix maps it to
+    // InsertNewline (which always smart-indents).
+    if (event == Event::Return && in_paste_burst()) {
+      newline(buffer, false);
+      ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+      notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
+      mark_paste_input();
+      return true;
+    }
+  }
+
   if (helix_on && event == Event::Escape) {
     HelixDispatchContext hctx =
         build_helix_dispatch_context(workspace, panel, find, goto_state, focus, layout_state,
@@ -5146,10 +5248,11 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     return true;
   }
-  if (event_is_ctrl_v(event)) {
+  if (event_is_ctrl_v(event) || event == Event::Insert) {
     paste_text(buffer, read_clipboard_for_paste());
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
+    mark_paste_input();
     return true;
   }
   if (event_is_ctrl_u(event)) {
@@ -5457,9 +5560,12 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (event == Event::Return) {
-    newline(buffer);
+    // Paste bursts arrive as Character…Return…Character… — smart-indent on each
+    // Return would re-apply the previous line's indent on top of the pasted one.
+    newline(buffer, !in_paste_burst());
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
+    mark_paste_input();
     return true;
   }
   if (event == Event::PageDown) {
@@ -5479,11 +5585,18 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     if (ch.size() == 1 && static_cast<unsigned char>(ch[0]) >= 32 &&
         static_cast<unsigned char>(ch[0]) < 127) {
       const char typed = ch[0];
-      insert_char(buffer, typed);
+      if (in_paste_burst()) {
+        insert_char_raw(buffer, typed);
+      } else {
+        insert_char(buffer, typed);
+      }
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
-      maybe_open_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
-                                 buffer, panel, typed);
+      if (!in_paste_burst()) {
+        maybe_open_live_completion(completion, workspace, symbols, symbol_indexer, layout_state,
+                                   buffer, panel, typed);
+      }
+      mark_paste_input();
       return true;
     }
   }
@@ -7158,6 +7271,23 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->last_heavy_editor_tick_ms = now;
 
       UiSyncPhaseScope heavy_scope(ui_perf, "tick." + panel_tag + ".heavy");
+      {
+        UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.disk_reload");
+        if (workspace->reload_stale_tabs_from_disk()) {
+          panel_state->viewport_line_render_cache.clear();
+          panel_state->line_syntax_span_cache.clear();
+          panel_state->last_ts_baseline_commit_token = 0;
+          if (!workspace->buffer.path.empty() &&
+              is_indexed_source_path(workspace->buffer.path)) {
+            tree_sitter_service().invalidate(workspace->buffer.path);
+            tree_sitter_service().prepare_document(workspace->buffer.path,
+                                                   editor_buffer_joined_source(workspace->buffer));
+          }
+          if (layout_state != nullptr) {
+            UI_WAKE(layout_state, "wake");
+          }
+        }
+      }
       {
         UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.lsp_sync");
         tick_lsp_buffer_sync(panel_state.get(), workspace, symbols, layout_state);

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <vector>
 
 namespace tuide {
 
@@ -27,6 +28,29 @@ ftxui::Color ansi_base_color(int index, bool bright) {
   return bright ? bright_palette[index] : palette[index];
 }
 
+// xterm 256-color palette: 0-15 ANSI, 16-231 6x6x6 cube, 232-255 grayscale.
+ftxui::Color ansi_256_color(int index) {
+  index = std::max(0, std::min(index, 255));
+  if (index < 8) {
+    return ansi_base_color(index, false);
+  }
+  if (index < 16) {
+    return ansi_base_color(index - 8, true);
+  }
+  if (index < 232) {
+    const int cube = index - 16;
+    const int r = cube / 36;
+    const int g = (cube / 6) % 6;
+    const int b = cube % 6;
+    auto level = [](int c) { return c == 0 ? 0 : 55 + c * 40; };
+    return ftxui::Color::RGB(level(r), level(g), level(b));
+  }
+  const int gray = 8 + (index - 232) * 10;
+  return ftxui::Color::RGB(gray, gray, gray);
+}
+
+int clamp_byte(int value) { return std::max(0, std::min(value, 255)); }
+
 int parse_first_param(const std::string& params, int default_value) {
   if (params.empty()) {
     return default_value;
@@ -37,6 +61,23 @@ int parse_first_param(const std::string& params, int default_value) {
     return default_value;
   }
   return static_cast<int>(value);
+}
+
+std::vector<int> parse_sgr_params(const std::string& params) {
+  std::vector<int> codes;
+  std::size_t start = 0;
+  while (start <= params.size()) {
+    const std::size_t sep = params.find(';', start);
+    const std::string token =
+        params.substr(start, sep == std::string::npos ? std::string::npos : sep - start);
+    // Empty tokens (e.g. ";;") are treated as 0, matching typical SGR parsers.
+    codes.push_back(parse_first_param(token, 0));
+    if (sep == std::string::npos) {
+      break;
+    }
+    start = sep + 1;
+  }
+  return codes;
 }
 
 std::string trim_trailing_spaces(std::string line) {
@@ -104,37 +145,52 @@ void RawPtyScreen::apply_sgr(const std::string& params) {
     return;
   }
 
-  std::size_t start = 0;
-  while (start <= params.size()) {
-    const std::size_t sep = params.find(';', start);
-    const std::string token =
-        params.substr(start, sep == std::string::npos ? std::string::npos : sep - start);
-    const int code = parse_first_param(token, -1);
-    if (code >= 0) {
-      if (code == 0) {
-        reset_sgr();
-      } else if (code == 1) {
-        bold_ = true;
-      } else if (code == 22) {
-        bold_ = false;
-      } else if (code >= 30 && code <= 37) {
-        fg_ = ansi_base_color(code - 30, bold_);
-      } else if (code >= 90 && code <= 97) {
-        fg_ = ansi_base_color(code - 90, true);
-      } else if (code == 39) {
-        fg_ = kDefaultFg;
-      } else if (code >= 40 && code <= 47) {
-        bg_ = ansi_base_color(code - 40, bold_);
-      } else if (code >= 100 && code <= 107) {
-        bg_ = ansi_base_color(code - 100, true);
-      } else if (code == 49) {
-        bg_ = kDefaultBg;
+  const std::vector<int> codes = parse_sgr_params(params);
+  for (std::size_t i = 0; i < codes.size(); ++i) {
+    const int code = codes[i];
+    if (code == 0) {
+      reset_sgr();
+    } else if (code == 1) {
+      bold_ = true;
+    } else if (code == 22) {
+      bold_ = false;
+    } else if (code >= 30 && code <= 37) {
+      fg_ = ansi_base_color(code - 30, bold_);
+    } else if (code >= 90 && code <= 97) {
+      fg_ = ansi_base_color(code - 90, true);
+    } else if (code == 39) {
+      fg_ = kDefaultFg;
+    } else if (code >= 40 && code <= 47) {
+      bg_ = ansi_base_color(code - 40, bold_);
+    } else if (code >= 100 && code <= 107) {
+      bg_ = ansi_base_color(code - 100, true);
+    } else if (code == 49) {
+      bg_ = kDefaultBg;
+    } else if (code == 38 || code == 48) {
+      // Extended colours: 38/48 ; 5 ; n  or  38/48 ; 2 ; r ; g ; b
+      const bool is_fg = (code == 38);
+      if (i + 1 >= codes.size()) {
+        break;
+      }
+      const int mode = codes[++i];
+      if (mode == 5 && i + 1 < codes.size()) {
+        const ftxui::Color c = ansi_256_color(codes[++i]);
+        if (is_fg) {
+          fg_ = c;
+        } else {
+          bg_ = c;
+        }
+      } else if (mode == 2 && i + 3 < codes.size()) {
+        const ftxui::Color c = ftxui::Color::RGB(
+            clamp_byte(codes[i + 1]), clamp_byte(codes[i + 2]), clamp_byte(codes[i + 3]));
+        i += 3;
+        if (is_fg) {
+          fg_ = c;
+        } else {
+          bg_ = c;
+        }
       }
     }
-    if (sep == std::string::npos) {
-      break;
-    }
-    start = sep + 1;
   }
 }
 

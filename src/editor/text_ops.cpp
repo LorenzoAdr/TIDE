@@ -372,24 +372,53 @@ void insert_multiline_text_at(EditorBuffer* buffer, int line, int col, const std
   buffer->semantic_layout_dirty = true;
   buffer->semantic_layout_dirty_from_line = std::min(buffer->semantic_layout_dirty_from_line, line);
 
-  int cur_line = line;
-  int cur_col = col;
+  std::string head = buffer->lines[static_cast<std::size_t>(line)];
+  const std::string tail = head.substr(static_cast<std::size_t>(col));
+  head.erase(static_cast<std::size_t>(col));
+
+  std::vector<std::string> parts;
   std::size_t pos = 0;
-  while (pos < text.size()) {
+  while (pos <= text.size()) {
     const std::size_t next = text.find('\n', pos);
-    const std::string part =
-        next == std::string::npos ? text.substr(pos) : text.substr(pos, next - pos);
-    if (!part.empty()) {
-      insert_string_at(buffer, cur_line, cur_col, part);
-      cur_col += static_cast<int>(part.size());
-    }
     if (next == std::string::npos) {
+      parts.push_back(text.substr(pos));
       break;
     }
-    newline_at(buffer, cur_line, cur_col, false);
-    cur_line++;
-    cur_col = 0;
+    parts.push_back(text.substr(pos, next - pos));
     pos = next + 1;
+    if (pos == text.size()) {
+      parts.emplace_back();
+      break;
+    }
+  }
+  if (parts.empty()) {
+    parts.emplace_back();
+  }
+
+  parts.front().insert(0, head);
+  parts.back() += tail;
+  buffer->lines.set_line(line, std::move(parts.front()));
+  for (std::size_t i = 1; i < parts.size(); ++i) {
+    buffer->lines.insert_line(line + static_cast<int>(i), std::move(parts[i]));
+  }
+
+  const int last_line = line + static_cast<int>(parts.size()) - 1;
+  const int last_col =
+      static_cast<int>(buffer->lines[static_cast<std::size_t>(last_line)].size()) -
+      static_cast<int>(tail.size());
+  for (auto& cursor : buffer->cursors) {
+    if (cursor.head.line == line && cursor.head.col >= col) {
+      cursor.head.line = last_line;
+      cursor.head.col = last_col + (cursor.head.col - col);
+    } else if (cursor.head.line > line) {
+      cursor.head.line += static_cast<int>(parts.size()) - 1;
+    }
+    if (cursor.anchor.line == line && cursor.anchor.col >= col) {
+      cursor.anchor.line = last_line;
+      cursor.anchor.col = last_col + (cursor.anchor.col - col);
+    } else if (cursor.anchor.line > line) {
+      cursor.anchor.line += static_cast<int>(parts.size()) - 1;
+    }
   }
 }
 
@@ -647,18 +676,26 @@ void finish_move(EditorBuffer* buffer, bool extend_selection) {
 }
 
 void paste_string_at(EditorBuffer* buffer, int line, int col, const std::string& text) {
-  int cur_line = line;
-  int cur_col = col;
-  for (char c : text) {
-    if (c == '\n') {
-      newline_at(buffer, cur_line, cur_col, false);
-      ++cur_line;
-      cur_col = 0;
-    } else {
-      insert_char_at(buffer, cur_line, cur_col, c);
-      ++cur_col;
-    }
+  if (buffer == nullptr || text.empty()) {
+    return;
   }
+  // Normalize OS line endings and insert as raw text — never smart-indent.
+  // Character-by-character paste through newline_at rebuilt the joined source
+  // on every line and could explode memory/CPU on large clipboard pastes.
+  std::string normalized;
+  normalized.reserve(text.size());
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    const char c = text[i];
+    if (c == '\r') {
+      if (i + 1 < text.size() && text[i + 1] == '\n') {
+        continue;
+      }
+      normalized.push_back('\n');
+      continue;
+    }
+    normalized.push_back(c);
+  }
+  insert_multiline_text_at(buffer, line, col, normalized);
 }
 
 }  // namespace
@@ -1057,6 +1094,40 @@ void insert_char(EditorBuffer* buffer, char c) {
   mark_dirty(buffer);
 }
 
+void insert_char_raw(EditorBuffer* buffer, char c) {
+  push_undo(buffer);
+  clamp_all_cursors(buffer);
+  if (any_cursor_has_selection(*buffer)) {
+    delete_all_selections(buffer);
+  } else {
+    for (auto& cursor : buffer->cursors) {
+      cursor.collapse_to_head();
+    }
+  }
+
+  std::vector<CursorPos> positions;
+  positions.reserve(buffer->cursors.size());
+  for (const auto& cursor : buffer->cursors) {
+    positions.push_back(cursor.head);
+  }
+  std::sort(positions.begin(), positions.end(), [](const CursorPos& a, const CursorPos& b) {
+    if (a.line != b.line) {
+      return a.line > b.line;
+    }
+    return a.col > b.col;
+  });
+
+  for (const auto& pos : positions) {
+    insert_char_at(buffer, pos.line, pos.col, c);
+  }
+  for (auto& cursor : buffer->cursors) {
+    cursor.collapse_to_head();
+  }
+  clamp_all_cursors(buffer);
+  merge_overlapping_cursors(buffer);
+  mark_dirty(buffer);
+}
+
 void insert_tab_stop(EditorBuffer* buffer, int tab_size) {
   const int display_tab = std::max(1, tab_size > 0 ? tab_size : editor_indent::tab_display_width());
   push_undo(buffer);
@@ -1151,13 +1222,25 @@ void delete_word_forward(EditorBuffer* buffer) {
   mark_dirty(buffer);
 }
 
+void newline_at_plain(EditorBuffer* buffer, int line, int col) {
+  newline_at(buffer, line, col, false);
+}
+
 void newline(EditorBuffer* buffer) {
+  newline(buffer, true);
+}
+
+void newline(EditorBuffer* buffer, bool smart_indent) {
   commit_undo_group(buffer);
   push_undo(buffer);
   if (any_cursor_has_selection(*buffer)) {
     delete_all_selections(buffer);
   }
-  apply_to_all_cursors(buffer, newline_at);
+  if (smart_indent) {
+    apply_to_all_cursors(buffer, static_cast<void (*)(EditorBuffer*, int, int)>(newline_at));
+  } else {
+    apply_to_all_cursors(buffer, newline_at_plain);
+  }
   for (auto& cursor : buffer->cursors) {
     cursor.collapse_to_head();
   }
@@ -1247,10 +1330,17 @@ void select_line_at(EditorBuffer* buffer, int line) {
     return;
   }
   line = std::max(0, std::min(line, static_cast<int>(buffer->lines.size()) - 1));
-  const int len = static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size());
+  const int max_line = static_cast<int>(buffer->lines.size()) - 1;
   buffer->reset_to_single_cursor(line, 0);
   buffer->primary().anchor = {line, 0};
-  buffer->primary().head = {line, len};
+  // Exclusive end at the start of the next line so the trailing newline is
+  // part of the selection (copy/paste inserts on a new line).
+  if (line < max_line) {
+    buffer->primary().head = {line + 1, 0};
+  } else {
+    buffer->primary().head = {
+        line, static_cast<int>(buffer->lines[static_cast<std::size_t>(line)].size())};
+  }
   clamp_all_cursors(buffer);
 }
 
@@ -1263,11 +1353,14 @@ void select_lines_range(EditorBuffer* buffer, int anchor_line, int head_line) {
   head_line = std::max(0, std::min(head_line, max_line));
   const int lo = std::min(anchor_line, head_line);
   const int hi = std::max(anchor_line, head_line);
-  const int head_col =
-      static_cast<int>(buffer->lines[static_cast<std::size_t>(hi)].size());
   buffer->reset_to_single_cursor(lo, 0);
   buffer->primary().anchor = {lo, 0};
-  buffer->primary().head = {hi, head_col};
+  if (hi < max_line) {
+    buffer->primary().head = {hi + 1, 0};
+  } else {
+    buffer->primary().head = {
+        hi, static_cast<int>(buffer->lines[static_cast<std::size_t>(hi)].size())};
+  }
   clamp_all_cursors(buffer);
 }
 
@@ -1290,16 +1383,29 @@ void extend_line_below(EditorBuffer* buffer) {
     int end_line = 0;
     int end_col = 0;
     cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
+    // Linewise: full lines ending either at next-line col 0 or at EOL of last line.
+    const bool exclusive_next =
+        end_col == 0 && end_line > start_line;
+    const bool inclusive_eol =
+        end_col == line_end_col(end_line) &&
+        (end_line == max_line || !exclusive_next);
     const bool line_wise =
-        start_col == 0 && end_col == line_end_col(end_line);
+        start_col == 0 && (exclusive_next || inclusive_eol);
     const bool head_at_range_end =
         cursor.head.line == end_line && cursor.head.col == end_col;
-    if (line_wise && head_at_range_end && end_line < max_line) {
-      const int next_line = end_line + 1;
-      cursor.anchor = {start_line, 0};
-      cursor.head = {next_line, line_end_col(next_line)};
-      clamp_cursor(&cursor, *buffer);
-      return;
+    if (line_wise && head_at_range_end) {
+      int last_content_line = exclusive_next ? end_line - 1 : end_line;
+      if (last_content_line < max_line) {
+        const int next_line = last_content_line + 1;
+        cursor.anchor = {start_line, 0};
+        if (next_line < max_line) {
+          cursor.head = {next_line + 1, 0};
+        } else {
+          cursor.head = {next_line, line_end_col(next_line)};
+        }
+        clamp_cursor(&cursor, *buffer);
+        return;
+      }
     }
   }
 

@@ -1,9 +1,11 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <mutex>
-#include <string>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -21,7 +23,8 @@ class WorkspaceSearchRunner {
   WorkspaceSearchRunner(const WorkspaceSearchRunner&) = delete;
   WorkspaceSearchRunner& operator=(const WorkspaceSearchRunner&) = delete;
 
-  void start(const WorkspaceSearchOptions& opts);
+  void set_wake_callback(std::function<void()> callback);
+  void start(WorkspaceSearchOptions opts);
   void cancel();
   bool running() const;
 
@@ -30,12 +33,26 @@ class WorkspaceSearchRunner {
             bool* used_rg = nullptr);
 
  private:
-  void worker_main(uint64_t generation, WorkspaceSearchOptions opts);
+  struct Job {
+    uint64_t generation = 0;
+    WorkspaceSearchOptions opts;
+  };
+
+  void stop_worker();
+  void worker_main();
+  void run_job(uint64_t generation, WorkspaceSearchOptions opts);
   void search_inprocess(uint64_t generation, const WorkspaceSearchOptions& opts,
+                        const std::vector<std::string>& files,
                         std::vector<WorkspaceSearchResult>* results, int* files_scanned,
                         bool* cancelled);
+  void notify_wake();
 
   mutable std::mutex mutex_;
+  std::condition_variable cv_;
+  std::optional<Job> pending_job_;
+  std::atomic<bool> stop_{false};
+  std::function<void()> wake_callback_;
+
   std::vector<WorkspaceSearchResult> results_;
   int files_scanned_ = 0;
   bool cancelled_ = false;
