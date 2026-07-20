@@ -27,7 +27,9 @@ constexpr int kDapBashDap = 13;
 constexpr int kForceBundled = 14;
 constexpr int kUiLocale = 15;
 constexpr int kEditorMode = 16;
-constexpr int kOptionCount = 17;
+constexpr int kBuildBackend = 17;
+constexpr int kStaticLibstdcxx = 18;
+constexpr int kOptionCount = 19;
 
 constexpr int kGdbNone = 0;
 constexpr int kGdbStatic = 1;
@@ -42,6 +44,10 @@ constexpr int kLocaleEn = 1;
 
 constexpr int kEditorNormal = 0;
 constexpr int kEditorHelix = 1;
+
+constexpr int kBackendHost = 0;
+constexpr int kBackendDockerFocal = 1;
+constexpr int kBackendDockerBionic = 2;
 
 struct BundleConfig {
   bool bundle_clangd = false;
@@ -61,6 +67,8 @@ struct BundleConfig {
   bool force_bundled = false;
   int ui_locale = kLocaleEn;
   int editor_mode = kEditorNormal;
+  int build_backend = kBackendHost;
+  bool static_libstdcxx = false;
 };
 
 struct WizardState {
@@ -226,6 +234,42 @@ int parse_editor_mode(const std::string& tag) {
   return kEditorNormal;
 }
 
+std::string build_backend_label(int locale, int backend) {
+  switch (backend) {
+    case kBackendDockerFocal:
+      return tr(locale, "Docker (glibc 2.31 / Ubuntu 20.04)",
+                "Docker (glibc 2.31 / Ubuntu 20.04)");
+    case kBackendDockerBionic:
+      return tr(locale, "Docker (glibc 2.27 / Ubuntu 18.04)",
+                "Docker (glibc 2.27 / Ubuntu 18.04)");
+    case kBackendHost:
+    default:
+      return tr(locale, "host (sistema local)", "host (local system)");
+  }
+}
+
+const char* build_backend_tag(int backend) {
+  switch (backend) {
+    case kBackendDockerFocal:
+      return "docker_focal";
+    case kBackendDockerBionic:
+      return "docker_bionic";
+    case kBackendHost:
+    default:
+      return "host";
+  }
+}
+
+int parse_build_backend(const std::string& tag) {
+  if (tag == "docker_focal" || tag == "docker" || tag == "portable") {
+    return kBackendDockerFocal;
+  }
+  if (tag == "docker_bionic" || tag == "bionic") {
+    return kBackendDockerBionic;
+  }
+  return kBackendHost;
+}
+
 bool parse_bool_value(const std::string& value) {
   return value == "1";
 }
@@ -304,6 +348,10 @@ void load_bundle_config(const std::string& path, BundleConfig* config) {
       config->ui_locale = parse_ui_locale(line.substr(10));
     } else if (line.rfind("EDITOR_MODE=", 0) == 0) {
       config->editor_mode = parse_editor_mode(line.substr(12));
+    } else if (line.rfind("BUILD_BACKEND=", 0) == 0) {
+      config->build_backend = parse_build_backend(line.substr(14));
+    } else if (line.rfind("STATIC_LIBSTDCXX=", 0) == 0) {
+      config->static_libstdcxx = parse_bool_value(line.substr(17));
     }
   }
   if (config->gdb_kind == kGdbNone && legacy_bundle_gdb) {
@@ -349,6 +397,8 @@ bool save_bundle_config(const std::string& path, const BundleConfig& config) {
   output << "FORCE_BUNDLED=" << (config.force_bundled ? "1" : "0") << '\n';
   output << "UI_LOCALE=" << ui_locale_tag(config.ui_locale) << '\n';
   output << "EDITOR_MODE=" << editor_mode_tag(config.editor_mode) << '\n';
+  output << "BUILD_BACKEND=" << build_backend_tag(config.build_backend) << '\n';
+  output << "STATIC_LIBSTDCXX=" << (config.static_libstdcxx ? "1" : "0") << '\n';
   return static_cast<bool>(output);
 }
 
@@ -357,7 +407,8 @@ bool option_enabled(int /*index*/) {
 }
 
 bool option_is_checkbox(int index) {
-  return index != kDapGdb && index != kDapPython && index != kUiLocale && index != kEditorMode;
+  return index != kDapGdb && index != kDapPython && index != kUiLocale && index != kEditorMode &&
+         index != kBuildBackend;
 }
 
 bool option_checked(const WizardState& state, int index) {
@@ -388,6 +439,8 @@ bool option_checked(const WizardState& state, int index) {
       return state.draft.bundle_bash_dap;
     case kForceBundled:
       return state.draft.force_bundled;
+    case kStaticLibstdcxx:
+      return state.draft.static_libstdcxx;
     default:
       return false;
   }
@@ -432,6 +485,12 @@ std::string option_label(const WizardState& state, int index) {
     case kEditorMode:
       return std::string(tr(locale, "Editor: ", "Editor: ")) +
              editor_mode_label(state.draft.editor_mode);
+    case kBuildBackend:
+      return std::string(tr(locale, "Compilación: ", "Build: ")) +
+             build_backend_label(locale, state.draft.build_backend);
+    case kStaticLibstdcxx:
+      return tr(locale, "libstdc++ estático (menos deps runtime)",
+                "static libstdc++ (fewer runtime deps)");
     default:
       return "";
   }
@@ -463,6 +522,13 @@ void cycle_editor_mode(WizardState* state) {
     return;
   }
   state->draft.editor_mode = (state->draft.editor_mode + 1) % 2;
+}
+
+void cycle_build_backend(WizardState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->draft.build_backend = (state->draft.build_backend + 1) % 3;
 }
 
 void toggle_option(WizardState* state, int index) {
@@ -520,6 +586,12 @@ void toggle_option(WizardState* state, int index) {
       break;
     case kEditorMode:
       cycle_editor_mode(state);
+      break;
+    case kBuildBackend:
+      cycle_build_backend(state);
+      break;
+    case kStaticLibstdcxx:
+      state->draft.static_libstdcxx = !state->draft.static_libstdcxx;
       break;
     default:
       break;
@@ -630,7 +702,8 @@ int main(int argc, char** argv) {
                                         kLspNeocmakelsp, kLspMakeLs};
   const std::vector<int> kDapIndices = {kDapGdb, kDapPython, kDapBashDap};
   const std::vector<int> kForceIndices = {kForceBundled};
-  const std::vector<int> kDefaultsIndices = {kUiLocale, kEditorMode};
+  const std::vector<int> kDefaultsIndices = {kUiLocale, kEditorMode, kBuildBackend,
+                                             kStaticLibstdcxx};
 
   auto component = CatchEvent(
       Renderer([&] {

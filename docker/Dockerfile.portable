@@ -29,7 +29,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /src
 
-# Default build invoked by tools/build-portable.sh
-CMD ["./tools/compile.sh", "-y", \
-     "--bundle-clangd", "--force-bundled-clangd", \
-     "--bundle-gdb", "--force-bundled-gdb"]
+# Default: reuse .bundle-config from the mounted source tree.
+CMD ["./tools/compile.sh", "-y", "--build-backend=host"]

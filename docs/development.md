@@ -27,11 +27,11 @@ ln -sf build/compile_commands.json .
 | Script | Purpose |
 |--------|---------|
 | `tools/compile.sh` | Interactive bundle wizard (default), configure, build |
-| `tools/build-portable.sh` | Full pack build inside Docker (old glibc baseline) |
+| `tools/build-portable.sh` | Docker build with old glibc; respects `.bundle-config` |
 | `tools/verify-glibc.sh` | Report max GLIBC/GLIBCXX symbols and `ldd` deps |
 | `tools/launch.sh` | Run `tuide` with sensible defaults and path resolution |
 
-`compile.sh` without arguments opens a TUI to choose embedded components (clangd, gdb, Python tools, rust-analyzer, gopls, …). Use `-y` to skip the wizard and reuse `.bundle-config`.
+`compile.sh` without arguments opens a TUI to choose embedded components (clangd, gdb, Python tools, rust-analyzer, gopls, …) and where to build (**host** or **Docker** with a reduced glibc baseline). Use `-y` to skip the wizard and reuse `.bundle-config`.
 
 ```bash
 ./tools/compile.sh                      # TUI: choose bundles
@@ -107,18 +107,30 @@ Build-time tools (when bundling): `curl` or `wget`, `zstd`, `objcopy`, `sha256su
 
 ### Portable build (legacy glibc)
 
-Building on a modern host (e.g. Ubuntu 24.04) pins `tuide` to a recent glibc (e.g. `GLIBC_2.38`). To ship a binary that runs on older distros, use the Docker-based portable build:
+Building on a modern host (e.g. Ubuntu 24.04) pins `tuide` to a recent glibc (e.g. `GLIBC_2.38`). To ship a binary that runs on older distros, use the Docker-based portable build.
+
+From the **compilation TUI** (`./tools/compile.sh`), cycle **Compilación / Build** to:
+
+- `host` — local toolchain
+- `Docker (glibc 2.31 / Ubuntu 20.04)` — default portable baseline
+- `Docker (glibc 2.27 / Ubuntu 18.04)` — older baseline
+
+Optional checkbox: **static libstdc++**. Bundle checkboxes (LSP/DAP/…) are applied inside the container via `.bundle-config`.
+
+CLI equivalents:
 
 ```bash
-./tools/build-portable.sh                      # Ubuntu 20.04, glibc ~2.31 baseline
-./tools/build-portable.sh --static-libstdc++   # also link libstdc++/libgcc statically
-./tools/build-portable.sh --bionic             # Ubuntu 18.04, glibc ~2.27 (optional)
-./tools/verify-glibc.sh build/tuide             # inspect symbols/deps only
+./tools/compile.sh                      # TUI → pick Docker backend + bundles
+./tools/compile.sh -y --build-backend=docker_focal
+./tools/build-portable.sh               # same; reuses .bundle-config
+./tools/build-portable.sh --static-libstdc++
+./tools/build-portable.sh --bionic      # Ubuntu 18.04 / glibc ~2.27
+./tools/verify-glibc.sh build/tuide
 ```
 
 Output lands in `dist/tuide-x86_64-glibc<version>[-static-libstdc++]` plus `dist/portable-report.txt`.
 
-Runtime requirements for the **full pack** (embedded clangd + gdb):
+Runtime requirements (example with embedded clangd + gdb):
 
 | Component | Dynamic deps at runtime | Typical glibc floor |
 |-----------|------------------------|---------------------|
@@ -127,9 +139,9 @@ Runtime requirements for the **full pack** (embedded clangd + gdb):
 | Embedded gdb-static | none (musl static) | none |
 | Embedded gdb + Core Analyzer | depends on build | varies |
 
-`--static-libstdc++` (also available in `compile.sh`) removes the `libstdc++.so.6` runtime dependency from `tuide`; glibc is still required from the host.
+`--static-libstdc++` (wizard checkbox / `compile.sh` / `build-portable.sh`) removes the `libstdc++.so.6` runtime dependency from `tuide`; glibc is still required from the host.
 
-Requires Docker. The script reuses `tools/compile.sh` inside the container with all bundles enabled.
+Requires Docker. Inside the container, `compile.sh -y --build-backend=host` runs so nested Docker delegation cannot recurse.
 
 Environment variables:
 

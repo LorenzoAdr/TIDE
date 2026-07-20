@@ -24,8 +24,9 @@ usage() {
   cat <<'EOF'
 Uso: tools/build-portable.sh [opciones]
 
-Compila tuide con pack completo (clangd + gdb embebidos) dentro de Docker
-usando una distro con glibc antigua para maximizar compatibilidad en runtime.
+Compila tuide dentro de Docker usando una distro con glibc antigua para
+maximizar compatibilidad en runtime. Respeta la selección de .bundle-config
+(mismo contenido que el asistente TUI / compile.sh -y).
 
 Opciones:
   --bionic              Usar Ubuntu 18.04 (glibc ~2.27) en lugar de 20.04 (~2.31)
@@ -38,7 +39,8 @@ Opciones:
   -h, --help            Mostrar esta ayuda
 
 Ejemplos:
-  ./tools/build-portable.sh
+  ./tools/compile.sh                      # TUI → Compilación: Docker …
+  ./tools/build-portable.sh               # reusa .bundle-config (focal)
   ./tools/build-portable.sh --static-libstdc++
   ./tools/build-portable.sh --bionic --static-libstdc++
 EOF
@@ -110,6 +112,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 check_command docker
+if ! docker info >/dev/null 2>&1; then
+  die "Docker no responde (¿daemon arrancado? ¿permisos del usuario?)"
+fi
 
 DOCKERFILE="$(dockerfile_for_variant)"
 [[ -f "${DOCKERFILE}" ]] || die "no existe ${DOCKERFILE}"
@@ -121,21 +126,20 @@ else
   log "reusando imagen ${IMAGE_TAG}"
 fi
 
-COMPILE_ARGS=(
-  -y
-  --bundle-clangd --force-bundled-clangd
-  --bundle-gdb --force-bundled-gdb
-)
+# -y reutiliza .bundle-config (selección del wizard). No forzar packs.
+# TUIDE_IN_PORTABLE_CONTAINER evita que compile.sh vuelva a lanzar Docker.
+COMPILE_ARGS=(-y --build-backend=host)
 if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
   COMPILE_ARGS+=(--static-libstdc++)
 fi
 
-log "compilando en contenedor (${JOBS} hilos)..."
+log "compilando en contenedor (${JOBS} hilos) con .bundle-config..."
 docker run --rm \
   -u "$(id -u):$(id -g)" \
   -e HOME=/tmp \
   -e JOBS="${JOBS}" \
   -e CMAKE_BUILD_TYPE=Release \
+  -e TUIDE_IN_PORTABLE_CONTAINER=1 \
   -v "${ROOT}:/src" \
   -w /src \
   "${IMAGE_TAG}" \

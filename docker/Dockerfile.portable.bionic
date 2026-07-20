@@ -38,6 +38,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /src
 
-CMD ["./tools/compile.sh", "-y", \
-     "--bundle-clangd", "--force-bundled-clangd", \
-     "--bundle-gdb", "--force-bundled-gdb"]
+CMD ["./tools/compile.sh", "-y", "--build-backend=host"]

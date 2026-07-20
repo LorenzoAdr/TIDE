@@ -28,11 +28,16 @@ BUNDLE_MAKE_LS=0
 FORCE_BUNDLED=0
 UI_LOCALE=en
 EDITOR_MODE=normal
+BUILD_BACKEND=host
 BUILD_GDB_CA=0
 STATIC_LIBSTDCXX=0
+STATIC_LIBSTDCXX_FROM_CLI=0
+BUILD_BACKEND_FROM_CLI=0
 INTERACTIVE=1
 SKIP_WIZARD=0
 CLI_OVERRIDES_BUNDLE=0
+# Si compile.sh se ejecuta dentro de la imagen portable, no re-lanzar Docker.
+IN_PORTABLE_CONTAINER="${TUIDE_IN_PORTABLE_CONTAINER:-0}"
 
 log() {
   printf '[compile] %s\n' "$*"
@@ -101,12 +106,15 @@ Opciones:
   --no-bundle-neocmakelsp    No embeber neocmakelsp
   --bundle-make-ls           Embeber make-ls
   --no-bundle-make-ls        No embeber make-ls
+  --build-backend=host|docker_focal|docker_bionic
+                             Dónde compilar (host o Docker con glibc antigua)
   --static-libstdc++         Enlazar libstdc++/libgcc estáticamente (menos deps en runtime)
   -h, --help                 Mostrar esta ayuda
 
 Variables de entorno:
   JOBS              Hilos para cmake --build (default: nproc)
   CMAKE_BUILD_TYPE  Tipo de build CMake (ej. Release)
+  TUIDE_IN_PORTABLE_CONTAINER  1 = ya estamos en la imagen portable (no re-lanzar Docker)
 EOF
 }
 
@@ -234,6 +242,12 @@ load_bundle_config() {
   FORCE_BUNDLED=0
   UI_LOCALE=en
   EDITOR_MODE=normal
+  if [[ "${BUILD_BACKEND_FROM_CLI}" != "1" ]]; then
+    BUILD_BACKEND=host
+  fi
+  if [[ "${STATIC_LIBSTDCXX_FROM_CLI}" != "1" ]]; then
+    STATIC_LIBSTDCXX=0
+  fi
   if [[ ! -f "${CONFIG_FILE}" ]]; then
     return
   fi
@@ -285,6 +299,31 @@ load_bundle_config() {
       UI_LOCALE=en) UI_LOCALE=en ;;
       EDITOR_MODE=normal) EDITOR_MODE=normal ;;
       EDITOR_MODE=helix) EDITOR_MODE=helix ;;
+      BUILD_BACKEND=host)
+        if [[ "${BUILD_BACKEND_FROM_CLI}" != "1" ]]; then
+          BUILD_BACKEND=host
+        fi
+        ;;
+      BUILD_BACKEND=docker_focal|BUILD_BACKEND=docker|BUILD_BACKEND=portable)
+        if [[ "${BUILD_BACKEND_FROM_CLI}" != "1" ]]; then
+          BUILD_BACKEND=docker_focal
+        fi
+        ;;
+      BUILD_BACKEND=docker_bionic|BUILD_BACKEND=bionic)
+        if [[ "${BUILD_BACKEND_FROM_CLI}" != "1" ]]; then
+          BUILD_BACKEND=docker_bionic
+        fi
+        ;;
+      STATIC_LIBSTDCXX=1)
+        if [[ "${STATIC_LIBSTDCXX_FROM_CLI}" != "1" ]]; then
+          STATIC_LIBSTDCXX=1
+        fi
+        ;;
+      STATIC_LIBSTDCXX=0)
+        if [[ "${STATIC_LIBSTDCXX_FROM_CLI}" != "1" ]]; then
+          STATIC_LIBSTDCXX=0
+        fi
+        ;;
     esac
   done < "${CONFIG_FILE}"
   if [[ "${GDB_BUNDLE_KIND}" == "none" && "${legacy_bundle_gdb}" == "1" ]]; then
@@ -301,6 +340,13 @@ load_bundle_config() {
     normal|helix) ;;
     *) EDITOR_MODE=normal ;;
   esac
+  case "${BUILD_BACKEND}" in
+    host|docker_focal|docker_bionic) ;;
+    *) BUILD_BACKEND=host ;;
+  esac
+  # No forzar BUILD_BACKEND=host aquí cuando TUIDE_IN_PORTABLE_CONTAINER=1:
+  # el docker run ya pasa --build-backend=host, y un save de migración
+  # no debe reescribir la preferencia Docker del árbol montado.
   sync_gdb_bundle_flags
   sync_python_bundle_flags
   # Migrar configs antiguas sin GDB_BUNDLE_KIND explícito.
@@ -332,6 +378,8 @@ BUNDLE_MAKE_LS=${BUNDLE_MAKE_LS}
 FORCE_BUNDLED=${FORCE_BUNDLED}
 UI_LOCALE=${UI_LOCALE}
 EDITOR_MODE=${EDITOR_MODE}
+BUILD_BACKEND=${BUILD_BACKEND}
+STATIC_LIBSTDCXX=${STATIC_LIBSTDCXX}
 EOF
 }
 
@@ -404,6 +452,31 @@ run_wizard() {
     die "asistente cancelado"
   fi
   load_bundle_config
+}
+
+# Si el wizard / config pide Docker portable, delegar a build-portable.sh
+# (compila con -y respetando .bundle-config) y salir.
+maybe_delegate_portable_build() {
+  if [[ "${IN_PORTABLE_CONTAINER}" == "1" ]]; then
+    return 0
+  fi
+  case "${BUILD_BACKEND}" in
+    docker_focal|docker_bionic) ;;
+    *) return 0 ;;
+  esac
+
+  local args=()
+  if [[ "${BUILD_BACKEND}" == "docker_bionic" ]]; then
+    args+=(--bionic)
+  fi
+  if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
+    args+=(--static-libstdc++)
+  fi
+  args+=(--jobs "${JOBS}")
+
+  log "backend Docker (${BUILD_BACKEND}): delegando a tools/build-portable.sh"
+  log "  (usa .bundle-config del wizard; no fuerza packs extra)"
+  exec "${ROOT}/tools/build-portable.sh" "${args[@]}"
 }
 
 cmake_extra_args() {
@@ -866,7 +939,26 @@ while [[ $# -gt 0 ]]; do
       ;;
     --static-libstdc++)
       STATIC_LIBSTDCXX=1
+      STATIC_LIBSTDCXX_FROM_CLI=1
       shift
+      ;;
+    --build-backend=host|--build-backend=docker_focal|--build-backend=docker_bionic)
+      BUILD_BACKEND="${1#--build-backend=}"
+      BUILD_BACKEND_FROM_CLI=1
+      shift
+      ;;
+    --build-backend)
+      if [[ $# -lt 2 ]]; then
+        die "--build-backend requiere host, docker_focal o docker_bionic"
+      fi
+      case "$2" in
+        host|docker_focal|docker_bionic) BUILD_BACKEND="$2" ;;
+        docker|portable) BUILD_BACKEND=docker_focal ;;
+        bionic) BUILD_BACKEND=docker_bionic ;;
+        *) die "--build-backend debe ser host, docker_focal o docker_bionic" ;;
+      esac
+      BUILD_BACKEND_FROM_CLI=1
+      shift 2
       ;;
     --ui-locale=es|--ui-locale=en)
       UI_LOCALE="${1#--ui-locale=}"
@@ -922,6 +1014,8 @@ else
     load_bundle_config
   fi
 fi
+
+maybe_delegate_portable_build
 
 sync_gdb_bundle_flags
 sync_python_bundle_flags
