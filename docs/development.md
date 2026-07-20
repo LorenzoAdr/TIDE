@@ -143,6 +143,8 @@ Runtime requirements (example with embedded clangd + gdb):
 
 Requires Docker. Inside the container, `compile.sh -y --build-backend=host` runs so nested Docker delegation cannot recurse.
 
+If `docker info` fails with **permission denied** on `/var/run/docker.sock`, the script asks interactively whether to retry with `sudo docker` for that run (`--sudo-docker` / `TUIDE_DOCKER_SUDO=1` skips the prompt; `--no-sudo-docker` refuses sudo).
+
 Environment variables:
 
 | Variable | Effect |
