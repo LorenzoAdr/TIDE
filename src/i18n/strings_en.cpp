@@ -653,6 +653,7 @@ const StringTable& english_strings() {
       {"panel.debug.type_paren", " ({0})"},
       {"panel.problems.requires_clangd", " (requires clangd) "},
       {"panel.problems.no_problems", " (no problems) "},
+      {"panel.problems.fix", "Fix"},
       {"diagnostic.severity.error", "Error"},
       {"diagnostic.severity.warning", "Warning"},
       {"diagnostic.severity.info", "Info"},

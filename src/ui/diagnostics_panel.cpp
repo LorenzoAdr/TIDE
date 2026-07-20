@@ -4,8 +4,13 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <optional>
+#include <sstream>
+#include <string_view>
 #include <system_error>
+#include <vector>
 
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
@@ -14,10 +19,14 @@
 #include "ftxui/screen/box.hpp"
 #include "lsp/diagnostics.hpp"
 #include "editor/editor_state.hpp"
+#include "symbols/code_action.hpp"
+#include "ui/clickable.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/context_menu.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/panel.hpp"
+#include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
@@ -28,17 +37,22 @@ namespace fs = std::filesystem;
 
 namespace {
 
+enum class FixAvailability { kUnknown, kNone, kAvailable };
+
 struct DiagnosticRow {
   std::string path;
   int line = 0;
   int character = 0;
   int end_col = 0;
   std::string message;
+  std::string source;
   DiagnosticSeverity severity = DiagnosticSeverity::kError;
+  FixAvailability fix = FixAvailability::kUnknown;
 };
 
 struct DiagnosticsPanelState {
   std::vector<DiagnosticRow> rows;
+  std::vector<Box> fix_boxes;
   int selected = 0;
   int first_visible = 0;
   int last_visible_lines = 1;
@@ -137,6 +151,7 @@ std::vector<DiagnosticRow> build_rows(WorkspaceModel* workspace,
       row.character = item.start_col;
       row.end_col = item.end_col;
       row.message = item.message;
+      row.source = item.source;
       row.severity = item.severity;
       rows.push_back(std::move(row));
     }
@@ -241,9 +256,114 @@ std::array<std::string, kLinesPerProblem> wrap_problem_line(const std::string& t
   return lines;
 }
 
+bool code_actions_available(const std::shared_ptr<ISymbolProvider>& symbols,
+                            MainLayoutState* layout_state) {
+  return symbols != nullptr && symbols->supports_code_actions() &&
+         (layout_state == nullptr || layout_state->app_settings == nullptr ||
+          layout_state->app_settings->lsp_enabled);
+}
+
+std::string document_text_for_path(WorkspaceModel* workspace, const std::string& path) {
+  if (workspace == nullptr || path.empty()) {
+    return {};
+  }
+  const int tab = workspace->find_tab(path);
+  if (tab >= 0) {
+    return buffer_text(workspace->tabs[static_cast<std::size_t>(tab)].buffer);
+  }
+  if (!workspace->buffer.path.empty() && workspace->buffer.path == path) {
+    return buffer_text(workspace->buffer);
+  }
+  std::ifstream input(path);
+  if (!input) {
+    return {};
+  }
+  std::ostringstream ss;
+  ss << input.rdbuf();
+  return ss.str();
+}
+
+bool diagnostic_has_quick_fix(WorkspaceModel* workspace,
+                              const std::shared_ptr<ISymbolProvider>& symbols,
+                              const DiagnosticRow& row) {
+  if (symbols == nullptr || row.path.empty()) {
+    return false;
+  }
+  CodeActionParams params;
+  params.path = row.path;
+  params.text = document_text_for_path(workspace, row.path);
+  params.line = row.line;
+  params.start_col = row.character;
+  params.end_col = row.end_col;
+  params.diagnostic.line = row.line;
+  params.diagnostic.start_col = row.character;
+  params.diagnostic.end_col = row.end_col;
+  params.diagnostic.message = row.message;
+  params.diagnostic.source = row.source.empty() ? "clang" : row.source;
+  params.diagnostic.severity = row.severity;
+
+  const std::vector<CodeActionItem> actions = symbols->code_actions_for_diagnostic(params);
+  for (const CodeActionItem& action : actions) {
+    if (!action.file_edits.empty()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Probe at most one unknown visible row per call so the UI stays responsive.
+// Returns true if more unknowns remain in the visible window (caller should wake).
+bool probe_visible_fix_availability(DiagnosticsPanelState* state, WorkspaceModel* workspace,
+                                      const std::shared_ptr<ISymbolProvider>& symbols,
+                                      MainLayoutState* layout_state, int first_visible,
+                                      int end_visible) {
+  if (state == nullptr) {
+    return false;
+  }
+  const bool available = code_actions_available(symbols, layout_state);
+  bool probed = false;
+  bool more_unknown = false;
+  for (int i = first_visible; i < end_visible; ++i) {
+    DiagnosticRow& row = state->rows[static_cast<std::size_t>(i)];
+    if (row.fix != FixAvailability::kUnknown) {
+      continue;
+    }
+    if (probed) {
+      more_unknown = true;
+      break;
+    }
+    if (!available) {
+      row.fix = FixAvailability::kNone;
+    } else {
+      row.fix = diagnostic_has_quick_fix(workspace, symbols, row) ? FixAvailability::kAvailable
+                                                                   : FixAvailability::kNone;
+    }
+    probed = true;
+  }
+  if (!probed) {
+    return false;
+  }
+  for (int i = first_visible; i < end_visible; ++i) {
+    if (state->rows[static_cast<std::size_t>(i)].fix == FixAvailability::kUnknown) {
+      more_unknown = true;
+      break;
+    }
+  }
+  return more_unknown;
+}
+
+int fix_button_width() {
+  const std::string label = i18n::tr("panel.problems.fix");
+  // MakeToolbarButton(compact) wraps content; content includes leading/trailing spaces.
+  return static_cast<int>(label.size()) + 2;
+}
+
 Element make_problem_row_element(const DiagnosticRow& row, const std::string& workspace_root,
-                                 int panel_width, bool selected) {
-  const auto wrapped = wrap_problem_line(format_problem_line(row, workspace_root), panel_width);
+                                 int panel_width, bool selected, bool show_fix, bool fix_hovered,
+                                 bool fix_pressed, Box* fix_box) {
+  const int text_width =
+      show_fix ? std::max(1, panel_width - fix_button_width() - 1) : panel_width;
+  const auto wrapped = wrap_problem_line(format_problem_line(row, workspace_root), text_width);
   Element first = text(wrapped[0]) | size(HEIGHT, EQUAL, 1);
   Element second = text(wrapped[1]) | size(HEIGHT, EQUAL, 1);
   Element row_el = vbox({std::move(first), std::move(second)});
@@ -252,7 +372,24 @@ Element make_problem_row_element(const DiagnosticRow& row, const std::string& wo
   } else {
     row_el = row_el | color(severity_color(row.severity));
   }
-  return row_el;
+  if (!show_fix || fix_box == nullptr) {
+    return row_el;
+  }
+  Element fix_btn = MakeToolbarButton(text(" " + i18n::tr("panel.problems.fix") + " "),
+                                      fix_hovered, fix_pressed, false, fix_box, true);
+  return hbox({
+      std::move(row_el) | flex,
+      vbox({filler(), std::move(fix_btn), filler()}),
+  });
+}
+
+bool apply_fix_for_row(WorkspaceModel* workspace, DebugModel* model,
+                        MainLayoutState* layout_state,
+                        const std::shared_ptr<ISymbolProvider>& symbols,
+                        SymbolWorkspaceIndexer* symbol_indexer, const DiagnosticRow& row) {
+  return apply_diagnostic_quick_fix(workspace, model, layout_state, symbols, symbol_indexer,
+                                    row.path, row.line, row.character, row.end_col, row.message,
+                                    row.severity, row.source);
 }
 
 void clamp_scroll_viewport(DiagnosticsPanelState* state, int visible_terminal_lines) {
@@ -275,8 +412,9 @@ void ensure_selection_visible(DiagnosticsPanelState* state, int visible_terminal
 }  // namespace
 
 Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* focus,
-                                 std::shared_ptr<ISymbolProvider> symbols,
-                                 MainLayoutState* layout_state, WorkspaceIndexer* indexer) {
+                               std::shared_ptr<ISymbolProvider> symbols,
+                               MainLayoutState* layout_state, WorkspaceIndexer* indexer,
+                               DebugModel* model, SymbolWorkspaceIndexer* symbol_indexer) {
   auto state = std::make_shared<DiagnosticsPanelState>();
 
   auto renderer = Renderer([workspace, state, symbols, layout_state, indexer] {
@@ -297,10 +435,24 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       state->rows_revision = 0;
     }
 
+    state->fix_boxes.assign(state->rows.size(), Box{});
+
     const int visible = visible_line_count(state->content_box);
     state->last_visible_lines = visible;
     const int panel_width = panel_content_width(state->content_box);
     clamp_scroll_viewport(state.get(), visible);
+
+    const bool lsp_fix_capable = code_actions_available(symbols, layout_state);
+    const int visible_rows = visible_problem_count(visible);
+    const int end =
+        std::min(static_cast<int>(state->rows.size()), state->first_visible + visible_rows);
+    if (!state->rows.empty() &&
+        probe_visible_fix_availability(state.get(), workspace, symbols, layout_state,
+                                        state->first_visible, end)) {
+      if (layout_state != nullptr) {
+        UI_WAKE(layout_state, "problems.fix_probe");
+      }
+    }
 
     Elements rows;
     if (!symbols || !symbols->supports_diagnostics()) {
@@ -309,12 +461,17 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       rows.push_back(text(i18n::tr("panel.problems.no_problems")) | color(theme::Muted()));
     } else {
       const std::string workspace_root = workspace != nullptr ? workspace->root : std::string{};
-      const int visible_rows = visible_problem_count(visible);
-      const int end =
-          std::min(static_cast<int>(state->rows.size()), state->first_visible + visible_rows);
       for (int i = state->first_visible; i < end; ++i) {
         const auto& row = state->rows[static_cast<std::size_t>(i)];
-        rows.push_back(make_problem_row_element(row, workspace_root, panel_width, i == state->selected));
+        const bool show_fix = lsp_fix_capable && row.fix == FixAvailability::kAvailable;
+        const std::string fix_id = press_id::problems_fix(i);
+        const bool fix_hovered =
+            show_fix && layout_state != nullptr && layout_state->clickable.is_hovered(fix_id);
+        const bool fix_pressed =
+            show_fix && layout_state != nullptr && layout_state->clickable.is_pressed(fix_id);
+        rows.push_back(make_problem_row_element(
+            row, workspace_root, panel_width, i == state->selected, show_fix, fix_hovered,
+            fix_pressed, show_fix ? &state->fix_boxes[static_cast<std::size_t>(i)] : nullptr));
       }
     }
 
@@ -322,13 +479,47 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
            reflect(state->content_box) | bgcolor(theme::PanelBg());
   });
 
-  auto handler = [workspace, focus, state, layout_state, symbols](Event event) {
+  auto handler = [workspace, focus, state, layout_state, symbols, model, symbol_indexer](Event event) {
     if (layout_state == nullptr || !problems_tab_active(layout_state)) {
       return false;
     }
 
     if (event.is_mouse()) {
       const auto& m = event.mouse();
+
+      if (m.motion == Mouse::Moved) {
+        if (!code_actions_available(symbols, layout_state) || state->fix_boxes.empty()) {
+          return false;
+        }
+        if (layout_state == nullptr || !chrome_hover_allowed(layout_state)) {
+          return false;
+        }
+        std::optional<std::string> hit_id;
+        for (int i = 0; i < static_cast<int>(state->fix_boxes.size()); ++i) {
+          if (i >= static_cast<int>(state->rows.size()) ||
+              state->rows[static_cast<std::size_t>(i)].fix != FixAvailability::kAvailable) {
+            continue;
+          }
+          const Box& box = state->fix_boxes[static_cast<std::size_t>(i)];
+          if (!box.IsEmpty() && box.Contain(m.x, m.y)) {
+            hit_id = press_id::problems_fix(i);
+            break;
+          }
+        }
+        if (hit_id.has_value()) {
+          const std::string_view before = layout_state->clickable.hovered_id();
+          layout_state->clickable.set_hover(*hit_id);
+          return apply_hover_repaint(layout_state, before);
+        }
+        if (state->content_box.Contain(m.x, m.y) ||
+            press_id::is_problems_hover(layout_state->clickable.hovered_id())) {
+          const std::string_view before = layout_state->clickable.hovered_id();
+          layout_state->clickable.clear_hover_if(press_id::is_problems_hover);
+          return apply_hover_repaint(layout_state, before);
+        }
+        return false;
+      }
+
       if (state->content_box.Contain(m.x, m.y) &&
           (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown)) {
         if (focus != nullptr) {
@@ -363,9 +554,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
         state->selected = row;
         ensure_selection_visible(state.get(), visible);
         const DiagnosticRow& diag = state->rows[static_cast<std::size_t>(row)];
-        const bool lsp_available =
-            symbols != nullptr && symbols->supports_code_actions() &&
-            (layout_state->app_settings == nullptr || layout_state->app_settings->lsp_enabled);
+        const bool lsp_available = code_actions_available(symbols, layout_state);
         context_menu_open_problem(&layout_state->context_menu, m.x, m.y, diag.path, diag.line,
                                   diag.character, diag.end_col, diag.message, lsp_available);
         if (layout_state != nullptr) {
@@ -384,6 +573,31 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       if (!state->content_box.Contain(m.x, m.y)) {
         return false;
       }
+
+      if (code_actions_available(symbols, layout_state)) {
+        for (int i = 0; i < static_cast<int>(state->fix_boxes.size()); ++i) {
+          if (i >= static_cast<int>(state->rows.size()) ||
+              state->rows[static_cast<std::size_t>(i)].fix != FixAvailability::kAvailable) {
+            continue;
+          }
+          const Box& box = state->fix_boxes[static_cast<std::size_t>(i)];
+          if (box.IsEmpty() || !box.Contain(m.x, m.y)) {
+            continue;
+          }
+          state->selected = i;
+          trigger_press(layout_state, press_id::problems_fix(i));
+          apply_fix_for_row(workspace, model, layout_state, symbols, symbol_indexer,
+                             state->rows[static_cast<std::size_t>(i)]);
+          if (focus != nullptr) {
+            focus->region = FocusRegion::Editor;
+          }
+          if (layout_state != nullptr) {
+            UI_WAKE(layout_state, "wake");
+          }
+          return true;
+        }
+      }
+
       const int visible = visible_line_count(state->content_box);
       const int visual_row = m.y - state->content_box.y_min;
       const int row = state->first_visible + (visual_row / kLinesPerProblem);
@@ -428,6 +642,20 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       navigate_to_diagnostic(workspace, state->rows[static_cast<std::size_t>(state->selected)]);
       if (focus != nullptr) {
         focus->region = FocusRegion::Editor;
+      }
+      return true;
+    }
+    if (event == Event::Character('f') && code_actions_available(symbols, layout_state)) {
+      const DiagnosticRow& row = state->rows[static_cast<std::size_t>(state->selected)];
+      if (row.fix != FixAvailability::kAvailable) {
+        return false;
+      }
+      apply_fix_for_row(workspace, model, layout_state, symbols, symbol_indexer, row);
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Editor;
+      }
+      if (layout_state != nullptr) {
+        UI_WAKE(layout_state, "wake");
       }
       return true;
     }

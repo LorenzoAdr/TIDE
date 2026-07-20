@@ -235,6 +235,14 @@ inline bool is_welcome_hover(std::string_view id) {
   return id == kWelcomeExternalFile || id == kWelcomeDebug || id == kWelcomeWorkspace;
 }
 
+inline std::string problems_fix(int index) {
+  return "problems.fix." + std::to_string(index);
+}
+
+inline bool is_problems_hover(std::string_view id) {
+  return id.rfind("problems.fix.", 0) == 0;
+}
+
 inline bool is_packet_monitor_hover(std::string_view id) {
   return id == kPacketMonitorRecord || id == kPacketMonitorSave;
 }

@@ -784,77 +784,6 @@ bool rename_symbol_with_lsp(ContextMenuState* state, WorkspaceModel* workspace,
   return true;
 }
 
-bool apply_problem_quick_fix(ContextMenuState* state, WorkspaceModel* workspace,
-                             DebugModel* model, MainLayoutState* layout_state,
-                             const std::shared_ptr<ISymbolProvider>& symbols,
-                             SymbolWorkspaceIndexer* symbol_indexer) {
-  if (state == nullptr || workspace == nullptr) {
-    return false;
-  }
-  if (layout_state != nullptr && layout_state->app_settings != nullptr &&
-      !layout_state->app_settings->lsp_enabled) {
-    workspace->status_message = i18n::tr("status.lsp_disabled");
-    return false;
-  }
-  if (symbols == nullptr || !symbols->supports_code_actions()) {
-    workspace->status_message = i18n::tr("status.fix_unavailable");
-    return false;
-  }
-
-  const std::string path = state->problem_path;
-  if (path.empty()) {
-    workspace->status_message = i18n::tr("status.no_file_for_problem");
-    return false;
-  }
-
-  std::string text;
-  const int tab = workspace->find_tab(path);
-  if (tab >= 0) {
-    text = buffer_document_text(workspace->tabs[static_cast<std::size_t>(tab)].buffer);
-  } else if (!read_file_text(path, &text)) {
-    workspace->status_message = i18n::tr_fmt("status.read_failed",
-                                             {fs::path(path).filename().string()});
-    return false;
-  }
-
-  CodeActionParams params;
-  params.path = path;
-  params.text = text;
-  params.line = state->problem_line;
-  params.start_col = state->problem_start_col;
-  params.end_col = state->problem_end_col;
-  params.diagnostic.line = state->problem_line;
-  params.diagnostic.start_col = state->problem_start_col;
-  params.diagnostic.end_col = state->problem_end_col;
-  params.diagnostic.message = state->problem_message;
-  params.diagnostic.source = "clang";
-  params.diagnostic.severity = DiagnosticSeverity::kError;
-
-  const std::vector<CodeActionItem> actions = symbols->code_actions_for_diagnostic(params);
-  const CodeActionItem* chosen = nullptr;
-  for (const CodeActionItem& action : actions) {
-    if (!action.file_edits.empty()) {
-      chosen = &action;
-      break;
-    }
-  }
-  if (chosen == nullptr) {
-    workspace->status_message = i18n::tr("status.no_fix_available");
-    return false;
-  }
-
-  std::string status;
-  if (!apply_workspace_file_edits(workspace, model, symbols, symbol_indexer, chosen->file_edits, path,
-                                  state->problem_line, state->problem_start_col, &status)) {
-    workspace->status_message = status.empty() ? i18n::tr("status.fix_apply_failed") : status;
-    return false;
-  }
-
-  workspace->status_message =
-      i18n::tr_fmt("status.fix_applied",
-                   {chosen->title.empty() ? i18n::tr("status.fix_quickfix") : chosen->title});
-  return true;
-}
 
 void close_tabs_for_path(WorkspaceModel* workspace, const std::string& absolute_path,
                          bool is_dir) {
@@ -1402,7 +1331,9 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
   }
 
   if (action_id == "apply_fix") {
-    apply_problem_quick_fix(state, workspace, model, layout_state, symbols, symbol_indexer);
+    apply_diagnostic_quick_fix(workspace, model, layout_state, symbols, symbol_indexer,
+                                state->problem_path, state->problem_line, state->problem_start_col,
+                                state->problem_end_col, state->problem_message);
     if (focus != nullptr) {
       focus->region = FocusRegion::Editor;
     }
@@ -1586,6 +1517,78 @@ int row_index_at(const ContextMenuState& state, int x, int y) {
 }
 
 }  // namespace
+
+bool apply_diagnostic_quick_fix(WorkspaceModel* workspace, DebugModel* model,
+                                 MainLayoutState* layout_state,
+                                 const std::shared_ptr<ISymbolProvider>& symbols,
+                                 SymbolWorkspaceIndexer* symbol_indexer, const std::string& path,
+                                 int line, int start_col, int end_col, const std::string& message,
+                                 DiagnosticSeverity severity, const std::string& source) {
+  if (workspace == nullptr) {
+    return false;
+  }
+  if (layout_state != nullptr && layout_state->app_settings != nullptr &&
+      !layout_state->app_settings->lsp_enabled) {
+    workspace->status_message = i18n::tr("status.lsp_disabled");
+    return false;
+  }
+  if (symbols == nullptr || !symbols->supports_code_actions()) {
+    workspace->status_message = i18n::tr("status.fix_unavailable");
+    return false;
+  }
+  if (path.empty()) {
+    workspace->status_message = i18n::tr("status.no_file_for_problem");
+    return false;
+  }
+
+  std::string text;
+  const int tab = workspace->find_tab(path);
+  if (tab >= 0) {
+    text = buffer_document_text(workspace->tabs[static_cast<std::size_t>(tab)].buffer);
+  } else if (!read_file_text(path, &text)) {
+    workspace->status_message =
+        i18n::tr_fmt("status.read_failed", {fs::path(path).filename().string()});
+    return false;
+  }
+
+  CodeActionParams params;
+  params.path = path;
+  params.text = text;
+  params.line = line;
+  params.start_col = start_col;
+  params.end_col = end_col;
+  params.diagnostic.line = line;
+  params.diagnostic.start_col = start_col;
+  params.diagnostic.end_col = end_col;
+  params.diagnostic.message = message;
+  params.diagnostic.source = source.empty() ? "clang" : source;
+  params.diagnostic.severity = severity;
+
+  const std::vector<CodeActionItem> actions = symbols->code_actions_for_diagnostic(params);
+  const CodeActionItem* chosen = nullptr;
+  for (const CodeActionItem& action : actions) {
+    if (!action.file_edits.empty()) {
+      chosen = &action;
+      break;
+    }
+  }
+  if (chosen == nullptr) {
+    workspace->status_message = i18n::tr("status.no_fix_available");
+    return false;
+  }
+
+  std::string status;
+  if (!apply_workspace_file_edits(workspace, model, symbols, symbol_indexer, chosen->file_edits, path,
+                                  line, start_col, &status)) {
+    workspace->status_message = status.empty() ? i18n::tr("status.fix_apply_failed") : status;
+    return false;
+  }
+
+  workspace->status_message = i18n::tr_fmt(
+      "status.fix_applied",
+      {chosen->title.empty() ? i18n::tr("status.fix_quickfix") : chosen->title});
+  return true;
+}
 
 void focus_search_with_filter(MainLayoutState* layout_state, const std::string& query,
                               const std::string& path_filter) {

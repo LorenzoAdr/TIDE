@@ -1512,7 +1512,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   auto performance_panel = MakePerformancePanel(sampler, ui_perf, perf_state);
   auto packet_monitor_panel = MakePacketMonitorPanel(packet_monitor, packet_monitor_state, layout_state);
   auto diagnostics_panel =
-      MakeDiagnosticsPanel(workspace, focus, symbols, layout_state, indexer);
+      MakeDiagnosticsPanel(workspace, focus, symbols, layout_state, indexer, model,
+                           symbol_indexer);
   auto search_panel =
       MakeSearchPanel(workspace, model, focus, layout_state, indexer, sidebar);
   auto call_hierarchy_panel =

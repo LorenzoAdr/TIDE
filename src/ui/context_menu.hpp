@@ -14,6 +14,7 @@
 #include "ftxui/screen/box.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "indexer/workspace_indexer.hpp"
+#include "lsp/diagnostics.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "ui/focus_manager.hpp"
 #include "ui/path_browser.hpp"
@@ -113,6 +114,15 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
 void context_menu_open_problem(ContextMenuState* state, int x, int y, const std::string& path,
                                int line, int start_col, int end_col, const std::string& message,
                                bool lsp_available);
+
+// Request clangd quick-fix for a diagnostic and apply the first edit-bearing action.
+bool apply_diagnostic_quick_fix(WorkspaceModel* workspace, DebugModel* model,
+                                 MainLayoutState* layout_state,
+                                 const std::shared_ptr<ISymbolProvider>& symbols,
+                                 SymbolWorkspaceIndexer* symbol_indexer, const std::string& path,
+                                 int line, int start_col, int end_col, const std::string& message,
+                                 DiagnosticSeverity severity = DiagnosticSeverity::kError,
+                                 const std::string& source = "clang");
 
 bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace,
                               WorkspaceModel* secondary_workspace, DebugModel* model,

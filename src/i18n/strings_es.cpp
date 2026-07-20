@@ -653,6 +653,7 @@ const StringTable& spanish_strings() {
       {"panel.debug.type_paren", " ({0})"},
       {"panel.problems.requires_clangd", " (requiere clangd) "},
       {"panel.problems.no_problems", " (sin problemas) "},
+      {"panel.problems.fix", "Arreglar"},
       {"diagnostic.severity.error", "Error"},
       {"diagnostic.severity.warning", "Aviso"},
       {"diagnostic.severity.info", "Info"},

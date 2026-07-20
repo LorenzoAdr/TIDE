@@ -563,6 +563,7 @@ EXTRA_CATALOG: list[tuple[str, str, str]] = [
     ("panel.debug.type_paren", " ({0})", " ({0})"),
     ("panel.problems.requires_clangd", " (requiere clangd) ", " (requires clangd) "),
     ("panel.problems.no_problems", " (sin problemas) ", " (no problems) "),
+    ("panel.problems.fix", "Arreglar", "Fix"),
     ("diagnostic.severity.error", "Error", "Error"),
     ("diagnostic.severity.warning", "Aviso", "Warning"),
     ("diagnostic.severity.info", "Info", "Info"),
