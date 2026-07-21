@@ -24,8 +24,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ninja-build \
     unzip \
+    xz-utils \
     zstd \
     && rm -rf /var/lib/apt/lists/*
+
+# Node.js + npx (tree-sitter-latex genera parser.c en configure; apt de Focal es demasiado viejo).
+ARG NODE_VERSION=22.16.0
+RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    | tar -xJ -C /usr/local --strip-components=1 \
+    && node --version && npm --version && npx --version
 
 WORKDIR /src
 
