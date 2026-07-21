@@ -12,7 +12,10 @@
 namespace tuide {
 
 struct OpenFileConfirmState;
+struct ExternalFileConflictState;
 struct GitService;
+
+enum class DiskReloadResult { None, Reloaded, Conflict };
 
 struct WorkspaceModel {
   std::string root;
@@ -25,6 +28,7 @@ struct WorkspaceModel {
   int active_tab = -1;
   std::string status_message;
   OpenFileConfirmState* open_file_confirm = nullptr;
+  ExternalFileConflictState* external_file_conflict = nullptr;
   using UiTask = std::function<void()>;
   std::function<void(UiTask)> enqueue_ui_task;
 
@@ -60,9 +64,13 @@ struct WorkspaceModel {
   const std::vector<SideBySideDiffRow>& active_diff_rows() const;
   bool open_git_diff_tab(const std::string& absolute_path, GitService* git);
   bool revert_git_diff_block(int block_index, GitService* git);
-  // Reload open tabs whose on-disk mtime is newer than the last load/save.
-  // Skips dirty buffers to avoid clobbering unsaved edits.
-  bool reload_stale_tabs_from_disk();
+  // Check the active on-screen tab for a newer on-disk mtime.
+  // Clean buffers auto-reload; dirty buffers open the conflict modal.
+  DiskReloadResult reload_stale_tabs_from_disk();
+  // Discard buffer contents and reload the active tab from disk.
+  bool reload_active_tab_from_disk();
+  // Record that we have seen disk mtime for path (e.g. after dismissing the conflict).
+  void acknowledge_external_disk_mtime(const std::string& absolute_path, std::int64_t mtime_sec);
 
  private:
   void refresh_git_diff_tabs_for_path(const std::string& absolute_path, GitService* git);

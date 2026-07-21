@@ -44,6 +44,7 @@
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/open_file_confirm.hpp"
+#include "ui/external_file_conflict.hpp"
 #include "ui/lsp_missing_toast.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/quit_confirm.hpp"
@@ -368,6 +369,8 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	debug_available_ = gdb_supports_dap() || debugpy_available() || bashdb_dap_available();
 	workspace_.open_file_confirm = &open_file_confirm_state_;
 	secondary_workspace_.open_file_confirm = &open_file_confirm_state_;
+	workspace_.external_file_conflict = &external_file_conflict_state_;
+	secondary_workspace_.external_file_conflict = &external_file_conflict_state_;
 	const auto wire_ui_tasks = [this](WorkspaceModel *workspace) {
 		if (workspace == nullptr) {
 			return;
@@ -2178,6 +2181,7 @@ bool Application::any_modal_open() const {
 	       shortcuts_modal_state_.open || settings_modal_state_.open ||
 	       source_substitute_state_.open || quit_confirm_state_.open ||
 	       debug_launch_modal_state_.open() || open_file_confirm_state_.is_open() ||
+	       external_file_conflict_state_.is_open() ||
 	       lsp_missing_toast_state_.open || context_menu_active(&layout_state_.context_menu);
 }
 
@@ -2694,6 +2698,8 @@ int Application::run() {
 
 	workspace_.open_file_confirm = &open_file_confirm_state_;
 	secondary_workspace_.open_file_confirm = &open_file_confirm_state_;
+	workspace_.external_file_conflict = &external_file_conflict_state_;
+	secondary_workspace_.external_file_conflict = &external_file_conflict_state_;
 	auto with_open_file_confirm =
 	    MakeOpenFileConfirmOverlay(with_debug_launch, &open_file_confirm_state_, &layout_state_,
 	                               &workspace_, [this](const std::string &path, int line, int col) {
@@ -2703,8 +2709,18 @@ int Application::run() {
 		                               UI_WAKE(&layout_state_, "app");
 	                               });
 
+	auto with_external_conflict = MakeExternalFileConflictOverlay(
+	    with_open_file_confirm, &external_file_conflict_state_, &layout_state_,
+	    [this](WorkspaceModel *workspace) {
+		    if (workspace != nullptr && !workspace->buffer.path.empty()) {
+			    model_.active_file = workspace->buffer.path;
+		    }
+		    model_.view_token++;
+		    UI_WAKE(&layout_state_, "app");
+	    });
+
 	auto with_context_menu = MakeContextMenuOverlay(
-	    with_open_file_confirm, &layout_state_.context_menu, &workspace_, &secondary_workspace_,
+	    with_external_conflict, &layout_state_.context_menu, &workspace_, &secondary_workspace_,
 	    &model_, &focus_state_, &layout_state_, symbol_provider_, &indexer_, &symbol_indexer_,
 	    &workspace_config_, [this]() {
 		    const auto &handlers = editor_handlers_for(&layout_state_, focus_state_.region);

@@ -7,6 +7,7 @@
 
 #include "editor/undo_stack.hpp"
 #include "editor/editor_buffer_source.hpp"
+#include "ui/external_file_conflict.hpp"
 #include "ui/open_file_confirm.hpp"
 #include "util/external_viewer.hpp"
 #include "util/file_open_policy.hpp"
@@ -42,8 +43,10 @@ std::int64_t file_mtime_seconds(const std::string& absolute_path) {
   if (ec) {
     return 0;
   }
-  return static_cast<std::int64_t>(
-      std::chrono::duration_cast<std::chrono::seconds>(mtime.time_since_epoch()).count());
+  // file_clock epoch is not Unix time: values are often negative on libstdc++/Linux.
+  // 0 is reserved as the error/unreadable sentinel from this helper.
+  const auto count = std::chrono::duration_cast<std::chrono::seconds>(mtime.time_since_epoch()).count();
+  return count == 0 ? 1 : static_cast<std::int64_t>(count);
 }
 
 void stamp_tab_disk_mtime(EditorTab* tab) {
@@ -673,52 +676,93 @@ bool WorkspaceModel::save_buffer() {
   return true;
 }
 
-bool WorkspaceModel::reload_stale_tabs_from_disk() {
-  bool any = false;
-  std::string last_reloaded;
-  for (int i = 0; i < static_cast<int>(tabs.size()); ++i) {
-    EditorTab& tab = tabs[static_cast<std::size_t>(i)];
-    if (tab.path.empty() || tab.read_only || tab.git_diff_view || tab.large_virtual_view ||
-        is_tabular_path(tab.path)) {
-      continue;
-    }
-    if (tab.buffer.dirty) {
-      continue;
-    }
-    const std::int64_t mtime = file_mtime_seconds(tab.path);
-    if (mtime <= 0 || tab.disk_mtime_sec <= 0 || mtime <= tab.disk_mtime_sec) {
-      continue;
-    }
-    const int keep_line = tab.buffer.primary_line();
-    const int keep_col = tab.buffer.primary_col();
-    const int keep_scroll = tab.buffer.scroll;
-    if (!load_buffer_from_disk(&tab.buffer, tab.path)) {
-      continue;
-    }
-    const int clamped_line =
-        std::max(0, std::min(keep_line, static_cast<int>(tab.buffer.lines.size()) - 1));
-    const int clamped_col =
-        tab.buffer.lines.empty()
-            ? 0
-            : std::max(0, std::min(keep_col, static_cast<int>(
-                                                 tab.buffer.lines[static_cast<std::size_t>(clamped_line)]
-                                                     .size())));
-    tab.buffer.reset_to_single_cursor(clamped_line, clamped_col);
-    tab.buffer.scroll = keep_scroll;
-    tab.buffer.dirty = false;
-    stamp_tab_disk_mtime(&tab);
-    last_reloaded = tab.path;
-    any = true;
-    if (i == active_tab) {
-      load_active_tab_into_buffer();
+DiskReloadResult WorkspaceModel::reload_stale_tabs_from_disk() {
+  if (active_tab < 0 || active_tab >= static_cast<int>(tabs.size())) {
+    return DiskReloadResult::None;
+  }
+
+  // Sync live edits into the active tab before reading dirty/mtime state.
+  flush_active_tab();
+  EditorTab& tab = tabs[static_cast<std::size_t>(active_tab)];
+
+  if (external_file_conflict != nullptr && external_file_conflict->is_open()) {
+    // Drop a stale prompt if the user switched away from the conflicting file.
+    if (external_file_conflict->workspace == this && external_file_conflict->path != tab.path) {
+      external_file_conflict->close();
+    } else {
+      return DiskReloadResult::None;
     }
   }
-  if (any && !last_reloaded.empty()) {
-    status_message =
-        i18n::tr_fmt("workspace.reloaded_external",
-                     {fs::path(last_reloaded).filename().string()});
+
+  if (tab.path.empty() || tab.read_only || tab.git_diff_view || tab.large_virtual_view ||
+      is_tabular_path(tab.path)) {
+    return DiskReloadResult::None;
   }
-  return any;
+
+  const std::int64_t mtime = file_mtime_seconds(tab.path);
+  // 0 is the unreadable/error sentinel; valid file_clock values may be negative.
+  if (mtime == 0 || tab.disk_mtime_sec == 0 || mtime <= tab.disk_mtime_sec) {
+    return DiskReloadResult::None;
+  }
+
+  // Prefer the live working buffer's dirty flag (flush already copied it into the tab).
+  if (buffer.dirty || tab.buffer.dirty) {
+    if (external_file_conflict == nullptr || external_file_conflict->is_open()) {
+      return DiskReloadResult::None;
+    }
+    external_file_conflict->show(this, tab.path, mtime);
+    return DiskReloadResult::Conflict;
+  }
+
+  return reload_active_tab_from_disk() ? DiskReloadResult::Reloaded : DiskReloadResult::None;
+}
+
+bool WorkspaceModel::reload_active_tab_from_disk() {
+  if (active_tab < 0 || active_tab >= static_cast<int>(tabs.size())) {
+    return false;
+  }
+  EditorTab& tab = tabs[static_cast<std::size_t>(active_tab)];
+  if (tab.path.empty() || tab.read_only || tab.git_diff_view || tab.large_virtual_view ||
+      is_tabular_path(tab.path)) {
+    return false;
+  }
+
+  const int keep_line = buffer.primary_line();
+  const int keep_col = buffer.primary_col();
+  const int keep_scroll = buffer.scroll;
+  if (!load_buffer_from_disk(&tab.buffer, tab.path)) {
+    return false;
+  }
+  const int clamped_line =
+      std::max(0, std::min(keep_line, static_cast<int>(tab.buffer.lines.size()) - 1));
+  const int clamped_col =
+      tab.buffer.lines.empty()
+          ? 0
+          : std::max(0, std::min(keep_col, static_cast<int>(
+                                               tab.buffer.lines[static_cast<std::size_t>(clamped_line)]
+                                                   .size())));
+  tab.buffer.reset_to_single_cursor(clamped_line, clamped_col);
+  tab.buffer.scroll = keep_scroll;
+  tab.buffer.dirty = false;
+  stamp_tab_disk_mtime(&tab);
+  load_active_tab_into_buffer();
+  status_message =
+      i18n::tr_fmt("workspace.reloaded_external", {fs::path(tab.path).filename().string()});
+  return true;
+}
+
+void WorkspaceModel::acknowledge_external_disk_mtime(const std::string& absolute_path,
+                                                     std::int64_t mtime_sec) {
+  if (absolute_path.empty() || mtime_sec == 0) {
+    return;
+  }
+  const std::string normalized = normalize_path(absolute_path);
+  for (EditorTab& tab : tabs) {
+    if (normalize_path(tab.path) == normalized) {
+      tab.disk_mtime_sec = mtime_sec;
+      return;
+    }
+  }
 }
 
 void WorkspaceModel::open_relative(const std::string& relative_path) {

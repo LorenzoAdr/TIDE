@@ -69,7 +69,7 @@ const Palette kDarkPalette{
     rgb(28, 32, 42),             rgb(0, 0, 0),               rgb(90, 170, 255),
     rgb(180, 200, 255),          rgb(130, 140, 160),
     Color::RGB(28, 32, 42),      Color::RGB(0, 0, 0),
-    Color::RGB(26, 28, 36),     Color::RGB(90, 170, 255),
+    Color::RGB(42, 46, 62),     Color::RGB(90, 170, 255),
     Color::RGB(60, 70, 100),     Color::RGB(80, 70, 30),     Color::RGB(45, 70, 55),
     Color::RGB(55, 75, 110),     Color::RGB(48, 58, 72),     Color::RGB(70, 95, 130),
     Color::RGB(38, 42, 52),      Color::RGB(180, 200, 255),  Color::RGB(130, 140, 160),
@@ -89,7 +89,7 @@ const Palette kLightPalette{
     rgb(245, 245, 248),          rgb(255, 255, 255),         rgb(0, 102, 204),
     rgb(30, 40, 60),             rgb(100, 110, 130),
     Color::RGB(245, 245, 248),   Color::RGB(255, 255, 255),
-    Color::RGB(235, 238, 245),  Color::RGB(0, 102, 204),
+    Color::RGB(216, 224, 240),  Color::RGB(0, 102, 204),
     Color::RGB(180, 200, 255),   Color::RGB(255, 240, 180),  Color::RGB(200, 235, 210),
     Color::RGB(210, 225, 245),   Color::RGB(225, 230, 240),  Color::RGB(190, 210, 235),
     Color::RGB(220, 224, 232),   Color::RGB(30, 40, 60),     Color::RGB(100, 110, 130),
@@ -630,10 +630,18 @@ Color FileText() {
 }
 
 Color EditorLineHi() {
-  if (g_overrides.code_bg) {
-    return from_rgb(brighten(*g_overrides.code_bg, 12));
+  // Always derive from the effective code background so presets/overrides keep a
+  // visible caret-row highlight (static palette values alone sit too close to
+  // many theme code backgrounds).
+  const ColorRgb code = effective_code_bg_rgb();
+  if (luminance(code) > 140) {
+    return from_rgb(brighten(code, -28));
   }
-  return current_palette().editor_line_hi;
+  ColorRgb hi = brighten(code, 28);
+  // Cool tint so the row doesn't read as flat gray on pure-black code bg.
+  hi.g = static_cast<uint8_t>(std::min(255, static_cast<int>(hi.g) + 4));
+  hi.b = static_cast<uint8_t>(std::min(255, static_cast<int>(hi.b) + 10));
+  return from_rgb(hi);
 }
 
 Color ScopeBg(int strength_percent) {

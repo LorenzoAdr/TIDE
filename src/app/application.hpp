@@ -34,6 +34,7 @@
 #include "ui/debug_launch_modal.hpp"
 #include "ui/shutdown_overlay.hpp"
 #include "ui/open_file_confirm.hpp"
+#include "ui/external_file_conflict.hpp"
 #include "ui/lsp_missing_toast.hpp"
 #include "ui/settings_modal.hpp"
 #include "ui/shortcuts_modal.hpp"
@@ -178,6 +179,7 @@ class Application {
   int shutdown_step_index_ = 0;
   bool shutdown_performed_ = false;
   OpenFileConfirmState open_file_confirm_state_;
+  ExternalFileConflictState external_file_conflict_state_;
   LspMissingToastState lsp_missing_toast_state_;
   bool lsp_missing_toast_suppressed_ = false;
   std::unordered_set<std::string> lsp_missing_notified_servers_;

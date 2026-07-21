@@ -3872,9 +3872,9 @@ bool completion_input_active(MainLayoutState* layout_state, bool completion_open
 
 void activate_find(EditorFindState* find, EditorBuffer* buffer, MainLayoutState* layout_state,
                    FocusManagerState* focus, FocusRegion panel_focus) {
-  find->query.clear();
-  find->cursor_pos = 0;
-  find->reset_search_state();
+  // Restore the last query (if any) with the text preselected so Enter re-runs
+  // the search and typing replaces the selection.
+  find->select_all_query();
   find->open = true;
   find->request_matches(*buffer);
   if (focus != nullptr) {
@@ -3925,7 +3925,10 @@ bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, Edit
     return true;
   }
   if (event == Event::Backspace) {
-    if (find->cursor_pos > 0 && find->cursor_pos <= static_cast<int>(find->query.size())) {
+    if (find->has_query_selection()) {
+      find->replace_query_selection("");
+      find->request_matches(*buffer);
+    } else if (find->cursor_pos > 0 && find->cursor_pos <= static_cast<int>(find->query.size())) {
       find->query.erase(static_cast<std::size_t>(find->cursor_pos - 1), 1);
       --find->cursor_pos;
       find->request_matches(*buffer);
@@ -3934,7 +3937,10 @@ bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, Edit
     return true;
   }
   if (event == Event::Delete) {
-    if (find->cursor_pos >= 0 && find->cursor_pos < static_cast<int>(find->query.size())) {
+    if (find->has_query_selection()) {
+      find->replace_query_selection("");
+      find->request_matches(*buffer);
+    } else if (find->cursor_pos >= 0 && find->cursor_pos < static_cast<int>(find->query.size())) {
       find->query.erase(static_cast<std::size_t>(find->cursor_pos), 1);
       find->request_matches(*buffer);
     }
@@ -3942,19 +3948,38 @@ bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, Edit
     return true;
   }
   if (event == Event::ArrowLeft) {
-    find->cursor_pos = std::max(0, find->cursor_pos - 1);
+    if (find->has_query_selection()) {
+      int start = 0;
+      int end = 0;
+      find->query_selection_bounds(&start, &end);
+      find->cursor_pos = start;
+      find->clear_query_selection();
+    } else {
+      find->cursor_pos = std::max(0, find->cursor_pos - 1);
+    }
     cursor_blink::show();
     return true;
   }
   if (event == Event::ArrowRight) {
-    find->cursor_pos =
-        std::min(static_cast<int>(find->query.size()), find->cursor_pos + 1);
+    if (find->has_query_selection()) {
+      int start = 0;
+      int end = 0;
+      find->query_selection_bounds(&start, &end);
+      find->cursor_pos = end;
+      find->clear_query_selection();
+    } else {
+      find->cursor_pos =
+          std::min(static_cast<int>(find->query.size()), find->cursor_pos + 1);
+    }
     cursor_blink::show();
     return true;
   }
   if (event_is_ctrl_v(event)) {
     const std::string pasted = sanitize_find_paste(read_clipboard_for_paste());
-    if (!pasted.empty()) {
+    if (find->has_query_selection()) {
+      find->replace_query_selection(pasted);
+      find->request_matches(*buffer);
+    } else if (!pasted.empty()) {
       find->query.insert(static_cast<std::size_t>(find->cursor_pos), pasted);
       find->cursor_pos += static_cast<int>(pasted.size());
       find->request_matches(*buffer);
@@ -3965,8 +3990,12 @@ bool handle_find_keys(EditorFindState* find, MainLayoutState* layout_state, Edit
   if (event.is_character()) {
     const std::string ch = event.character();
     if (!ch.empty() && ch[0] >= 32 && ch[0] != 127) {
-      find->query.insert(static_cast<std::size_t>(find->cursor_pos), ch);
-      find->cursor_pos += static_cast<int>(ch.size());
+      if (find->has_query_selection()) {
+        find->replace_query_selection(ch);
+      } else {
+        find->query.insert(static_cast<std::size_t>(find->cursor_pos), ch);
+        find->cursor_pos += static_cast<int>(ch.size());
+      }
       find->request_matches(*buffer);
     }
     cursor_blink::show();
@@ -5843,9 +5872,16 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     const bool find_focused = layout_state != nullptr &&
                               layout_state->text_input_focus == TextInputFocus::EditorFind;
+    int find_sel_start = -1;
+    int find_sel_end = -1;
+    if (find_state->has_query_selection()) {
+      find_state->query_selection_bounds(&find_sel_start, &find_sel_end);
+    }
     Element find_row =
         hbox({text(i18n::tr("editor.find.label")) | color(theme::Muted()),
-              RenderBlinkInputLine(find_state->query, find_state->cursor_pos, find_focused) | flex,
+              RenderBlinkInputLine(find_state->query, find_state->cursor_pos, find_focused,
+                                   find_sel_start, find_sel_end) |
+                  flex,
               text(i18n::tr_fmt("editor.find.count",
                                 {std::to_string(find_state->matches.size())})) |
                   color(theme::Muted())}) |
@@ -7273,7 +7309,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       UiSyncPhaseScope heavy_scope(ui_perf, "tick." + panel_tag + ".heavy");
       {
         UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.disk_reload");
-        if (workspace->reload_stale_tabs_from_disk()) {
+        const DiskReloadResult disk_result = workspace->reload_stale_tabs_from_disk();
+        if (disk_result == DiskReloadResult::Reloaded) {
           panel_state->viewport_line_render_cache.clear();
           panel_state->line_syntax_span_cache.clear();
           panel_state->last_ts_baseline_commit_token = 0;
@@ -7286,6 +7323,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           if (layout_state != nullptr) {
             UI_WAKE(layout_state, "wake");
           }
+        } else if (disk_result == DiskReloadResult::Conflict && layout_state != nullptr) {
+          UI_WAKE(layout_state, "wake");
         }
       }
       {

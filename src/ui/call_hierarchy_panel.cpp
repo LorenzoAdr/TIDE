@@ -27,15 +27,14 @@ namespace {
 
 struct SegmentSpan {
   int node_index = -1;
-  int x_min = 0;
-  int x_max = 0;
+  Box box;
 };
 
 struct RowLayout {
   Box box;
   int visible_row = 0;
   int leaf_node = -1;
-  int location_x_min = 0;
+  Box location_box;
   std::vector<SegmentSpan> segments;
 };
 
@@ -58,34 +57,25 @@ std::string chain_segment_label(const CallHierarchyViewState& hierarchy, int nod
   return label;
 }
 
-int local_x_in_row(const CallHierarchyPanelState& state, const RowLayout& row, int mouse_x) {
-  if (!row.box.IsEmpty()) {
-    return mouse_x - row.box.x_min;
-  }
-  int base_x = state.results_box.x_min;
-  if (!state.results_box.IsEmpty()) {
-    base_x += 1;
-  }
-  return mouse_x - base_x;
-}
-
-int hit_node_in_row(const RowLayout& row, int local_x) {
+int hit_node_in_row(const RowLayout& row, int x, int y) {
   if (row.segments.empty()) {
     return row.leaf_node;
   }
   for (const SegmentSpan& seg : row.segments) {
-    if (local_x >= seg.x_min && local_x < seg.x_max) {
+    if (!seg.box.IsEmpty() && seg.box.Contain(x, y)) {
       return seg.node_index;
     }
   }
+  if (!row.location_box.IsEmpty() && row.location_box.Contain(x, y)) {
+    return row.leaf_node;
+  }
+
+  // Clic en flechas / huecos: el segmento más cercano a la izquierda.
   int node_index = row.segments.front().node_index;
   for (const SegmentSpan& seg : row.segments) {
-    if (local_x >= seg.x_min && local_x < row.location_x_min) {
+    if (!seg.box.IsEmpty() && x >= seg.box.x_min) {
       node_index = seg.node_index;
     }
-  }
-  if (row.location_x_min > 0 && local_x >= row.location_x_min) {
-    return row.leaf_node;
   }
   return node_index;
 }
@@ -114,8 +104,7 @@ std::optional<HierarchyHit> hierarchy_hit_at_mouse(const CallHierarchyPanelState
     return std::nullopt;
   }
   const RowLayout& row = state.row_layouts[static_cast<std::size_t>(*visible_row)];
-  const int local_x = local_x_in_row(state, row, x);
-  return HierarchyHit{*visible_row, hit_node_in_row(row, local_x)};
+  return HierarchyHit{*visible_row, hit_node_in_row(row, x, y)};
 }
 
 bool update_call_hierarchy_hover(CallHierarchyPanelState* state, MainLayoutState* layout_state,
@@ -148,21 +137,16 @@ Element render_chain_row(const CallHierarchyViewState& hierarchy, int visible_ro
 
   layout->visible_row = visible_row;
   layout->leaf_node = node_index;
-  layout->segments.clear();
+  layout->segments.assign(chain.size(), SegmentSpan{});
 
   Elements parts;
   parts.push_back(text(" "));
-  int x = 1;
   for (std::size_t s = 0; s < chain.size(); ++s) {
     const int seg_index = chain[s];
-    const std::string label = chain_segment_label(hierarchy, seg_index);
-    SegmentSpan span;
+    SegmentSpan& span = layout->segments[s];
     span.node_index = seg_index;
-    span.x_min = x;
-    span.x_max = x + static_cast<int>(label.size());
-    layout->segments.push_back(span);
-    x = span.x_max;
 
+    const std::string label = chain_segment_label(hierarchy, seg_index);
     const std::string seg_id = press_id::call_hierarchy_seg(seg_index);
     const bool hovered =
         layout_state != nullptr && layout_state->clickable.is_hovered(seg_id);
@@ -171,17 +155,15 @@ Element render_chain_row(const CallHierarchyViewState& hierarchy, int visible_ro
     const auto& seg_node = hierarchy.nodes[static_cast<std::size_t>(seg_index)];
     Element segment = text(label) | color(theme::ColorForSymbolKind(seg_node.item.kind));
     segment = StyleClickable(std::move(segment), {false, hovered, pressed, false});
-    parts.push_back(std::move(segment));
+    parts.push_back(std::move(segment) | reflect(span.box));
 
     if (s + 1 < chain.size()) {
-      constexpr std::string_view kArrow = " -> ";
-      x += static_cast<int>(kArrow.size());
-      parts.push_back(text(std::string(kArrow)) | color(theme::Muted()));
+      parts.push_back(text(" -> ") | color(theme::Muted()));
     }
   }
 
-  parts.push_back(text("  @ " + call_hierarchy_node_location(leaf)) | color(theme::Muted()));
-  layout->location_x_min = x;
+  parts.push_back(text("  @ " + call_hierarchy_node_location(leaf)) | color(theme::Muted()) |
+                  reflect(layout->location_box));
 
   Element row = hbox(std::move(parts));
   if (selected) {
@@ -308,9 +290,9 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
 
         Element header;
         Elements rows;
-        state->row_layouts.clear();
 
         if (!active) {
+          state->row_layouts.clear();
           rows.push_back(text(i18n::tr("panel.call_hierarchy.inactive")) |
                          color(theme::Muted()));
         } else {
@@ -326,17 +308,19 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
 
           const std::vector<int> visible = call_hierarchy_visible_rows(*hierarchy);
           if (visible.empty()) {
+            state->row_layouts.clear();
             rows.push_back(text(i18n::tr("common.no_results")) | color(theme::Muted()));
           } else {
+            // Preasignar layouts: reflect guarda referencias a Box que deben
+            // permanecer válidas durante el layout/render de FTXUI.
+            state->row_layouts.assign(static_cast<std::size_t>(visible.size()), RowLayout{});
             for (int i = 0; i < static_cast<int>(visible.size()); ++i) {
               const int node_index = visible[static_cast<std::size_t>(i)];
               const bool selected =
                   i == hierarchy->selected && focus != nullptr &&
                   focus->region == FocusRegion::Terminal;
-              RowLayout row_layout;
               rows.push_back(render_chain_row(*hierarchy, i, node_index, selected, layout_state,
-                                              &row_layout));
-              state->row_layouts.push_back(std::move(row_layout));
+                                              &state->row_layouts[static_cast<std::size_t>(i)]));
             }
           }
         }

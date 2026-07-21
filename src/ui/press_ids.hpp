@@ -50,6 +50,8 @@ constexpr std::string_view kDebugLaunchClose = "debug_launch.close";
 constexpr std::string_view kShutdownForceExit = "shutdown.force_exit";
 constexpr std::string_view kOpenFileYes = "open_file.yes";
 constexpr std::string_view kOpenFileNo = "open_file.no";
+constexpr std::string_view kExternalConflictOverwrite = "external_conflict.overwrite";
+constexpr std::string_view kExternalConflictLoad = "external_conflict.load";
 constexpr std::string_view kLspToastInstall = "lsp_toast.install";
 constexpr std::string_view kLspToastBundle = "lsp_toast.bundle";
 constexpr std::string_view kLspToastIgnore = "lsp_toast.ignore";
@@ -187,6 +189,10 @@ inline bool is_shutdown_hover(std::string_view id) {
 
 inline bool is_open_file_hover(std::string_view id) {
   return id == kOpenFileYes || id == kOpenFileNo;
+}
+
+inline bool is_external_conflict_hover(std::string_view id) {
+  return id == kExternalConflictOverwrite || id == kExternalConflictLoad;
 }
 
 inline bool is_lsp_toast_hover(std::string_view id) {

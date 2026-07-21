@@ -75,6 +75,9 @@ struct SearchPanelState {
   std::string placeholder_path;
   std::string placeholder_include;
   std::string placeholder_exclude;
+  // When >= 0 and different from the query input cursor, the query field has a
+  // selection spanning [min(anchor, cursor), max(anchor, cursor)).
+  int query_selection_anchor = -1;
   std::vector<WorkspaceSearchResult> results;
   int selected = 0;
   int first_visible = 0;
@@ -115,6 +118,56 @@ void clear_search_input_focus(MainLayoutState* layout_state) {
   }
   if (is_search_input_focus(layout_state->text_input_focus)) {
     layout_state->text_input_focus = TextInputFocus::None;
+  }
+}
+
+bool search_query_has_selection(const SearchPanelState& state, int cursor_pos) {
+  return state.query_selection_anchor >= 0 && state.query_selection_anchor != cursor_pos;
+}
+
+void clear_search_query_selection(SearchPanelState* state) {
+  if (state != nullptr) {
+    state->query_selection_anchor = -1;
+  }
+}
+
+void select_all_search_query(SearchPanelState* state, InputOption* query_option) {
+  if (state == nullptr) {
+    return;
+  }
+  if (state->query.empty()) {
+    state->query_selection_anchor = -1;
+    if (query_option != nullptr) {
+      query_option->cursor_position() = 0;
+    }
+    return;
+  }
+  state->query_selection_anchor = 0;
+  if (query_option != nullptr) {
+    query_option->cursor_position() = static_cast<int>(state->query.size());
+  }
+}
+
+void replace_search_query_selection(SearchPanelState* state, InputOption* query_option,
+                                    const std::string& text) {
+  if (state == nullptr) {
+    return;
+  }
+  int cursor = query_option != nullptr ? query_option->cursor_position() : 0;
+  cursor = std::max(0, std::min(cursor, static_cast<int>(state->query.size())));
+  if (search_query_has_selection(*state, cursor)) {
+    const int start = std::min(state->query_selection_anchor, cursor);
+    const int end = std::max(state->query_selection_anchor, cursor);
+    state->query.erase(static_cast<std::size_t>(start), static_cast<std::size_t>(end - start));
+    cursor = start;
+  }
+  state->query_selection_anchor = -1;
+  if (!text.empty()) {
+    state->query.insert(static_cast<std::size_t>(cursor), text);
+    cursor += static_cast<int>(text.size());
+  }
+  if (query_option != nullptr) {
+    query_option->cursor_position() = cursor;
   }
 }
 
@@ -295,7 +348,9 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     state->runner.set_wake_callback([layout_state] { UI_WAKE(layout_state, "wake"); });
   }
 
-  auto query_input = Input(MakeBlinkInputOption(&state->query, &state->placeholder_query));
+  auto query_option = std::make_shared<InputOption>(MakeBlinkInputOption(
+      &state->query, &state->placeholder_query, false, &state->query_selection_anchor));
+  auto query_input = Input(*query_option);
   auto replace_input = Input(MakeBlinkInputOption(&state->replace, &state->placeholder_replace));
   auto path_input = Input(MakeBlinkInputOption(&state->path_filter, &state->placeholder_path));
   auto include_input =
@@ -307,12 +362,19 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       {query_input | flex, replace_input | flex, path_input | flex, include_input | flex,
        exclude_input | flex});
 
-  auto activate_field = [layout_state, focus](TextInputFocus field, Component input) {
+  auto activate_field = [layout_state, focus, state, query_option](TextInputFocus field,
+                                                                  Component input) {
     if (focus != nullptr) {
       focus->region = FocusRegion::Terminal;
     }
     if (layout_state != nullptr) {
       layout_state->text_input_focus = field;
+    }
+    if (field == TextInputFocus::SearchQuery) {
+      // Restore last query with text preselected (Enter re-runs; typing replaces).
+      select_all_search_query(state.get(), query_option.get());
+    } else {
+      clear_search_query_selection(state.get());
     }
     input->TakeFocus();
   };
@@ -342,8 +404,8 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
   };
 
   auto handler = [state, workspace, model, focus, layout_state, indexer, sidebar, query_input,
-                  replace_input, path_input, include_input, exclude_input, activate_field,
-                  forward_input_event](Event event) {
+                  replace_input, path_input, include_input, exclude_input, query_option,
+                  activate_field, forward_input_event](Event event) {
     if (event == Event::Custom) {
       poll_search_results(state.get(), layout_state);
       if (state->runner.running() && layout_state != nullptr) {
@@ -356,6 +418,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       sidebar->pending_search_setup = false;
       sidebar->pending_search_query.clear();
       sidebar->pending_search_path_filter.clear();
+      select_all_search_query(state.get(), query_option.get());
       run_search(state.get(), workspace, model, indexer, layout_state);
     }
     if (event == Event::Custom && sidebar != nullptr && sidebar->pending_focus_search) {
@@ -378,6 +441,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         state->status = i18n::tr("search.status.cancelled");
         return true;
       }
+      clear_search_query_selection(state.get());
       clear_search_input_focus(layout_state);
       return true;
     }
@@ -414,6 +478,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         return true;
       }
       if (state->results_box.Contain(m.x, m.y)) {
+        clear_search_query_selection(state.get());
         clear_search_input_focus(layout_state);
         const int visible = state->last_visible_lines;
         const int visual_row = m.y - state->results_box.y_min;
@@ -453,6 +518,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     if (event.is_mouse() && event.mouse().motion == Mouse::Moved &&
         state->results_box.Contain(event.mouse().x, event.mouse().y)) {
       focus->region = FocusRegion::Terminal;
+      clear_search_query_selection(state.get());
       clear_search_input_focus(layout_state);
     }
 
@@ -485,14 +551,70 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       }
       if (event == Event::Return) {
         run_search(state.get(), workspace, model, indexer, layout_state);
+        clear_search_query_selection(state.get());
         clear_search_input_focus(layout_state);
         return true;
+      }
+      if (layout_state->text_input_focus == TextInputFocus::SearchQuery) {
+        const int cursor = query_option->cursor_position();
+        if (search_query_has_selection(*state, cursor)) {
+          if (event == Event::Backspace || event == Event::Delete) {
+            replace_search_query_selection(state.get(), query_option.get(), "");
+            cursor_blink::show();
+            if (state->query != state->committed_query && state->runner.running()) {
+              state->runner.cancel();
+              state->status = i18n::tr("search.status.enter_to_search");
+            }
+            return true;
+          }
+          if (event == Event::ArrowLeft) {
+            query_option->cursor_position() =
+                std::min(state->query_selection_anchor, cursor);
+            clear_search_query_selection(state.get());
+            cursor_blink::show();
+            return true;
+          }
+          if (event == Event::ArrowRight) {
+            query_option->cursor_position() =
+                std::max(state->query_selection_anchor, cursor);
+            clear_search_query_selection(state.get());
+            cursor_blink::show();
+            return true;
+          }
+          if (event == Event::Home) {
+            query_option->cursor_position() = 0;
+            clear_search_query_selection(state.get());
+            cursor_blink::show();
+            return true;
+          }
+          if (event == Event::End) {
+            query_option->cursor_position() = static_cast<int>(state->query.size());
+            clear_search_query_selection(state.get());
+            cursor_blink::show();
+            return true;
+          }
+          if (event.is_character()) {
+            const std::string ch = event.character();
+            if (!ch.empty() && ch[0] >= 32 && ch[0] != 127) {
+              replace_search_query_selection(state.get(), query_option.get(), ch);
+              cursor_blink::show();
+              if (state->query != state->committed_query && state->runner.running()) {
+                state->runner.cancel();
+                state->status = i18n::tr("search.status.enter_to_search");
+              }
+            }
+            return true;
+          }
+        }
       }
       if (event.is_character() || event == Event::Backspace || event == Event::Delete ||
           event == Event::ArrowLeft || event == Event::ArrowRight || event == Event::Home ||
           event == Event::End) {
         const bool handled = forward_input_event(event);
         if (handled) {
+          if (layout_state->text_input_focus == TextInputFocus::SearchQuery) {
+            clear_search_query_selection(state.get());
+          }
           cursor_blink::show();
           if (state->query != state->committed_query && state->runner.running()) {
             state->runner.cancel();

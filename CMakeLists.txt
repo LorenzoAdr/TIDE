@@ -139,6 +139,7 @@ add_executable(tuide
   src/ui/debug_launch_modal.cpp
   src/ui/shutdown_overlay.cpp
   src/ui/open_file_confirm.cpp
+  src/ui/external_file_conflict.cpp
   src/ui/lsp_missing_toast.cpp
   src/ui/shortcuts_modal.cpp
   src/ui/settings_modal.cpp

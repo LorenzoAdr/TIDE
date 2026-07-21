@@ -16,6 +16,21 @@ FindMatchKey find_match_key_from(const EditorBuffer& buffer, const std::string& 
 
 }  // namespace
 
+void EditorFindState::replace_query_selection(const std::string& text) {
+  int start = cursor_pos;
+  int end = cursor_pos;
+  if (has_query_selection()) {
+    query_selection_bounds(&start, &end);
+    query.erase(static_cast<std::size_t>(start), static_cast<std::size_t>(end - start));
+    cursor_pos = start;
+  }
+  clear_query_selection();
+  if (!text.empty()) {
+    query.insert(static_cast<std::size_t>(cursor_pos), text);
+    cursor_pos += static_cast<int>(text.size());
+  }
+}
+
 void EditorFindState::cancel_matches() {
   runner_.cancel();
   inflight_id_ = 0;
@@ -130,7 +145,7 @@ void open_find_bar(EditorFindState* find, EditorBuffer* buffer) {
   if (find == nullptr) {
     return;
   }
-  find->cursor_pos = 0;
+  find->select_all_query();
   find->open = true;
   if (buffer != nullptr) {
     find->request_matches(*buffer);
@@ -142,7 +157,8 @@ void close_find_bar(EditorFindState* find) {
     return;
   }
   find->open = false;
-  find->query.clear();
+  find->clear_query_selection();
+  // Keep query so Ctrl+F can restore the last search with it preselected.
   find->reset_search_state();
 }
 
