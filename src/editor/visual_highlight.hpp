@@ -154,8 +154,6 @@ class VisualHighlightService {
   bool debounce_wake_scheduled() const;
   void mark_debounce_wake_scheduled();
   void clear_debounce_wake_scheduled();
-  void begin_sync_result_wait(uint64_t generation);
-  bool wait_for_pending_result(uint64_t generation);
   void request_completion_wake(uint64_t generation);
   void clear_completion_wake(uint64_t generation);
 
@@ -178,11 +176,7 @@ class VisualHighlightService {
   std::atomic<bool> debounce_wake_scheduled_{false};
   VisualHighlightWakeCallback result_wake_callback_;
   VisualHighlightWakeCallback debounce_wake_callback_;
-  std::mutex result_sync_mutex_;
-  std::condition_variable result_sync_cv_;
-  std::atomic<uint64_t> sync_wait_generation_{0};
   std::atomic<uint64_t> completion_wake_generation_{0};
-  uint64_t completed_generation_ = 0;
   std::mutex wake_timer_mutex_;
   std::condition_variable wake_timer_cv_;
   int64_t wake_timer_fire_at_ms_ = 0;

@@ -100,6 +100,7 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
                                      int sym_start, int sym_end, const std::string& symbol,
                                      const std::string& absolute_path, bool show_call_hierarchy,
+                                     bool show_references = false,
                                      const DebugModel* model = nullptr,
                                      bool has_selection = false);
 

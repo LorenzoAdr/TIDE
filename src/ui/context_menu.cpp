@@ -809,10 +809,29 @@ void focus_call_hierarchy(MainLayoutState* layout_state, int line, int col,
   layout_state->console_visible = true;
   layout_state->console_tabs.selected_tab = ConsolePanelTabs::kCallHierarchy;
   layout_state->right_panel_active_section = 0;
+  layout_state->right_sidebar.pending_references = false;
   layout_state->right_sidebar.pending_call_hierarchy = true;
   layout_state->right_sidebar.pending_call_hierarchy_line = line;
   layout_state->right_sidebar.pending_call_hierarchy_col = col;
   layout_state->right_sidebar.pending_call_hierarchy_symbol = symbol;
+  layout_state->text_input_focus = TextInputFocus::None;
+  layout_state->focus_sync_needed = true;
+  UI_WAKE(layout_state, "wake");
+}
+
+void focus_references(MainLayoutState* layout_state, int line, int col,
+                      const std::string& symbol) {
+  if (layout_state == nullptr) {
+    return;
+  }
+  layout_state->console_visible = true;
+  layout_state->console_tabs.selected_tab = ConsolePanelTabs::kCallHierarchy;
+  layout_state->right_panel_active_section = 0;
+  layout_state->right_sidebar.pending_call_hierarchy = false;
+  layout_state->right_sidebar.pending_references = true;
+  layout_state->right_sidebar.pending_references_line = line;
+  layout_state->right_sidebar.pending_references_col = col;
+  layout_state->right_sidebar.pending_references_symbol = symbol;
   layout_state->text_input_focus = TextInputFocus::None;
   layout_state->focus_sync_needed = true;
   UI_WAKE(layout_state, "wake");
@@ -1285,7 +1304,7 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
   }
 
   if (action_id == "find_references") {
-    focus_search_with_filter(layout_state, state->symbol_name, std::string{});
+    focus_references(layout_state, state->editor_line, state->editor_col, state->symbol_name);
     if (focus != nullptr) {
       focus->region = FocusRegion::RightPanel;
     }
@@ -1769,7 +1788,8 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
                                      int sym_start, int sym_end, const std::string& symbol,
                                      const std::string& absolute_path, bool show_call_hierarchy,
-                                     const DebugModel* model, bool has_selection) {
+                                     bool show_references, const DebugModel* model,
+                                     bool has_selection) {
   if (state == nullptr || symbol.empty()) {
     return;
   }
@@ -1795,8 +1815,10 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
   if (show_call_hierarchy) {
     items.push_back({i18n::tr("context_menu.call_hierarchy"), "call_hierarchy"});
   }
+  if (show_references) {
+    items.push_back({i18n::tr("context_menu.find_references"), "find_references"});
+  }
   items.push_back({i18n::tr("context_menu.rename_symbol"), "rename_symbol"});
-  items.push_back({i18n::tr("context_menu.find_references"), "find_references"});
   if (show_format) {
     if (has_selection) {
       items.push_back({i18n::tr("context_menu.format_selection"), "format_selection"});

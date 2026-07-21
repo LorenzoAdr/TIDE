@@ -209,20 +209,6 @@ void VisualHighlightService::clear_debounce_wake_scheduled() {
   debounce_wake_scheduled_.store(false, std::memory_order_release);
 }
 
-void VisualHighlightService::begin_sync_result_wait(uint64_t generation) {
-  sync_wait_generation_.store(generation, std::memory_order_release);
-}
-
-bool VisualHighlightService::wait_for_pending_result(uint64_t generation) {
-  std::unique_lock<std::mutex> lock(result_sync_mutex_);
-  result_sync_cv_.wait_for(lock, std::chrono::milliseconds(3000), [this, generation] {
-    return completed_generation_ >= generation || stop_.load(std::memory_order_acquire);
-  });
-  const bool ready = completed_generation_ >= generation;
-  sync_wait_generation_.store(0, std::memory_order_release);
-  return ready;
-}
-
 void VisualHighlightService::request_completion_wake(uint64_t generation) {
   completion_wake_generation_.store(generation, std::memory_order_release);
 }
@@ -388,18 +374,8 @@ void VisualHighlightService::worker_main() {
     }
     VisualHighlightSnapshot snap = compute(latest);
     results_.push(snap);
-    {
-      std::lock_guard<std::mutex> lock(result_sync_mutex_);
-      if (snap.generation > completed_generation_) {
-        completed_generation_ = snap.generation;
-      }
-    }
-    result_sync_cv_.notify_all();
-    const uint64_t sync_gen = sync_wait_generation_.load(std::memory_order_acquire);
     const uint64_t completion_wake = completion_wake_generation_.load(std::memory_order_acquire);
-    const bool suppress_wake = snap.ready && sync_gen == snap.generation;
-    if (result_wake_callback_ && snap.ready && !suppress_wake &&
-        completion_wake == snap.generation) {
+    if (result_wake_callback_ && snap.ready && completion_wake == snap.generation) {
       completion_wake_generation_.store(0, std::memory_order_release);
       result_wake_callback_();
     }
@@ -584,8 +560,10 @@ void tick_visual_highlight_scheduler(VisualHighlightPanelState* state, const Edi
     job.config.selection_occurrences = false;
   }
 
+  // Request the VisualHighlightSync wake before enqueue so a fast worker cannot
+  // finish between enqueue and the wake flag (which would drop the wake).
   const uint64_t dispatched_gen = job.generation;
-  visual_highlight_service().begin_sync_result_wait(dispatched_gen);
+  visual_highlight_service().request_completion_wake(dispatched_gen);
   visual_highlight_service().enqueue(std::move(job));
 }
 

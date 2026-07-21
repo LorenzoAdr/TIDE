@@ -49,6 +49,11 @@ class LspSymbolProvider : public ISymbolProvider {
   SourceLocation goto_declaration(const NavigationParams& params) override;
   SourceLocation goto_implementation(const NavigationParams& params) override;
 
+  bool supports_references() const override;
+  bool supports_references(const std::string& path) const override;
+  std::vector<SourceLocation> find_references(const NavigationParams& params,
+                                              bool include_declaration = true) override;
+
   bool supports_semantic_highlight() const override;
   bool ensure_semantic_tokens(const std::string& path) override;
   SemanticTokenDocument semantic_tokens_for_file(const std::string& path) override;

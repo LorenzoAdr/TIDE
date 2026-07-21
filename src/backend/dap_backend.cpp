@@ -1398,6 +1398,12 @@ void DapBackend::handle_command(const UiCommand& command) {
     if (inferior_started) {
       inferior_launched_ = true;
       on_inferior_launched();
+      // Same signal as debugpy/bashdb: UI keeps the launch modal open through the
+      // initial Stopped until configuration (breakpoints) is finished.
+      DebugEvent configured;
+      configured.kind = DebugEventKind::kLaunchConfigured;
+      configured.text = i18n::tr("debug.dap.session_ready");
+      push_event(std::move(configured));
     }
     return;
   }
@@ -1448,6 +1454,10 @@ void DapBackend::handle_command(const UiCommand& command) {
     if (attach_started) {
       inferior_launched_ = false;
       on_inferior_attached();
+      DebugEvent configured;
+      configured.kind = DebugEventKind::kLaunchConfigured;
+      configured.text = i18n::tr("debug.dap.session_ready");
+      push_event(std::move(configured));
     }
     return;
   }
@@ -1493,6 +1503,10 @@ void DapBackend::handle_command(const UiCommand& command) {
     }
     if (loaded) {
       on_inferior_core_loaded();
+      DebugEvent configured;
+      configured.kind = DebugEventKind::kLaunchConfigured;
+      configured.text = i18n::tr("debug.dap.session_ready");
+      push_event(std::move(configured));
     }
     return;
   }

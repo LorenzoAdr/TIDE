@@ -4495,10 +4495,13 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
         const bool show_call_hierarchy =
             symbols != nullptr && symbols->supports_call_hierarchy(buffer->path) &&
             is_lsp_trackable_path(buffer->path);
+        const bool show_references =
+            symbols != nullptr && symbols->supports_references(buffer->path) &&
+            is_lsp_trackable_path(buffer->path);
         context_menu_open_editor_symbol(&layout_state->context_menu, m.x, m.y,
                                         cursor.head.line, cursor.head.col, start_col, end_col,
-                                        symbol, buffer->path, show_call_hierarchy, debug_model,
-                                        has_selection);
+                                        symbol, buffer->path, show_call_hierarchy, show_references,
+                                        debug_model, has_selection);
         end_mouse_selection(panel);
         return true;
       }
@@ -7266,12 +7269,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           tick_visual_highlight_scheduler(&panel_state->visual_highlight, workspace->buffer,
                                           vh_config, vh_focused, path_indexed, content_settled,
                                           vh_now, vh_inputs, selection_in_progress);
-          if (panel_state->visual_highlight.job_inflight && !selection_in_progress) {
-            const uint64_t pending_gen = panel_state->visual_highlight.pending_generation;
-            if (!visual_highlight_service().wait_for_pending_result(pending_gen)) {
-              visual_highlight_service().request_completion_wake(pending_gen);
-            }
-          }
           bool vh_view_invalidated = false;
           if (drain_visual_highlight_results(&panel_state->visual_highlight, workspace->buffer,
                                              layout_state, vh_focused)) {

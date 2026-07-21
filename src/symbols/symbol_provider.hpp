@@ -143,6 +143,20 @@ class ISymbolProvider {
     return {};
   }
 
+  // True when some language server that can answer textDocument/references is ready.
+  virtual bool supports_references() const { return false; }
+  // True when the language server for this path can answer textDocument/references.
+  virtual bool supports_references(const std::string& path) const {
+    (void)path;
+    return supports_references();
+  }
+  virtual std::vector<SourceLocation> find_references(const NavigationParams& params,
+                                                      bool include_declaration = true) {
+    (void)params;
+    (void)include_declaration;
+    return {};
+  }
+
   virtual void on_workspace_opened(const std::string& root,
                                    const std::string& compile_commands_dir = {}) {
     (void)root;

@@ -172,6 +172,35 @@ Element render_chain_row(const CallHierarchyViewState& hierarchy, int visible_ro
   return row | reflect(layout->box);
 }
 
+Element render_reference_row(const CallHierarchyViewState& hierarchy, int visible_row,
+                             int node_index, bool selected, MainLayoutState* layout_state,
+                             RowLayout* layout) {
+  const CallHierarchyTreeNode& node =
+      hierarchy.nodes[static_cast<std::size_t>(node_index)];
+
+  layout->visible_row = visible_row;
+  layout->leaf_node = node_index;
+  layout->segments.assign(1, SegmentSpan{});
+  layout->segments.front().node_index = node_index;
+  layout->location_box = Box{};
+
+  const std::string seg_id = press_id::call_hierarchy_seg(node_index);
+  const bool hovered =
+      layout_state != nullptr && layout_state->clickable.is_hovered(seg_id);
+  const bool pressed =
+      layout_state != nullptr && layout_state->clickable.is_pressed(seg_id);
+
+  const std::string location = call_hierarchy_node_location(node);
+  Element label = text(" " + location) | color(theme::ColorForSymbolKind(node.item.kind));
+  label = StyleClickable(std::move(label), {false, hovered, pressed, false});
+
+  Element row = std::move(label) | reflect(layout->segments.front().box);
+  if (selected) {
+    row = row | bgcolor(theme::TabIdle());
+  }
+  return row | reflect(layout->box);
+}
+
 }  // namespace
 
 Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* focus,
@@ -192,6 +221,21 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
       sidebar->pending_call_hierarchy_symbol.clear();
       open_call_hierarchy_view(&sidebar->call_hierarchy, workspace, layout_state, sidebar, symbols,
                                line, col, symbol);
+      clear_search_input_focus(layout_state);
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      return true;
+    }
+
+    if (event == Event::Custom && sidebar->pending_references) {
+      sidebar->pending_references = false;
+      const int line = sidebar->pending_references_line;
+      const int col = sidebar->pending_references_col;
+      const std::string symbol = sidebar->pending_references_symbol;
+      sidebar->pending_references_symbol.clear();
+      open_references_view(&sidebar->call_hierarchy, workspace, layout_state, sidebar, symbols, line,
+                           col, symbol);
       clear_search_input_focus(layout_state);
       if (focus != nullptr) {
         focus->region = FocusRegion::Terminal;
@@ -296,13 +340,22 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
           rows.push_back(text(i18n::tr("panel.call_hierarchy.inactive")) |
                          color(theme::Muted()));
         } else {
-          const Color root_color = hierarchy->nodes.empty()
-                                       ? theme::SyntaxFunction()
-                                       : theme::ColorForSymbolKind(hierarchy->nodes.front().item.kind);
+          const bool is_references =
+              hierarchy->kind == CallHierarchyContentKind::References;
+          const Color root_color =
+              is_references ? theme::SyntaxFunction()
+                            : (hierarchy->nodes.empty()
+                                   ? theme::SyntaxFunction()
+                                   : theme::ColorForSymbolKind(hierarchy->nodes.front().item.kind));
+          const std::string header_label =
+              is_references ? (i18n::tr("panel.references.title") + ": " + hierarchy->root_label)
+                            : hierarchy->root_label;
+          const std::string footer_key =
+              is_references ? "panel.references.footer" : "panel.call_hierarchy.footer";
           header = vbox({
-              text(" " + hierarchy->root_label) | color(root_color) | bold,
+              text(" " + header_label) | color(root_color) | bold,
               separator(),
-              text(" " + i18n::tr_fmt("panel.call_hierarchy.footer", {hierarchy->status})) |
+              text(" " + i18n::tr_fmt(footer_key, {hierarchy->status})) |
                   color(theme::Muted()) | size(HEIGHT, EQUAL, 1),
           });
 
@@ -319,8 +372,14 @@ Component MakeCallHierarchyPanel(WorkspaceModel* workspace, FocusManagerState* f
               const bool selected =
                   i == hierarchy->selected && focus != nullptr &&
                   focus->region == FocusRegion::Terminal;
-              rows.push_back(render_chain_row(*hierarchy, i, node_index, selected, layout_state,
-                                              &state->row_layouts[static_cast<std::size_t>(i)]));
+              if (is_references) {
+                rows.push_back(render_reference_row(*hierarchy, i, node_index, selected,
+                                                    layout_state,
+                                                    &state->row_layouts[static_cast<std::size_t>(i)]));
+              } else {
+                rows.push_back(render_chain_row(*hierarchy, i, node_index, selected, layout_state,
+                                                &state->row_layouts[static_cast<std::size_t>(i)]));
+              }
             }
           }
         }

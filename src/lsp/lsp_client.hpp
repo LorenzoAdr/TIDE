@@ -47,6 +47,7 @@ class LspClient {
   bool supports_definition() const { return definition_supported_; }
   bool supports_declaration() const { return declaration_supported_; }
   bool supports_implementation() const { return implementation_supported_; }
+  bool supports_references() const { return references_supported_; }
   const std::string& server_id() const { return server_id_; }
   const std::string& workspace_root() const { return workspace_root_; }
 
@@ -72,6 +73,9 @@ class LspClient {
                                   int line, int character);
   SourceLocation goto_implementation(const std::string& absolute_path, const std::string& text,
                                    int line, int character);
+  std::vector<SourceLocation> find_references(const std::string& absolute_path,
+                                              const std::string& text, int line, int character,
+                                              bool include_declaration = true);
 
   SemanticTokenDocument semantic_tokens_for_file(const std::string& absolute_path);
   bool has_ready_semantic_tokens(const std::string& absolute_path) const;
@@ -168,6 +172,7 @@ class LspClient {
   static std::string completion_label(const nlohmann::json& item);
   static SymbolKind map_completion_kind(int kind);
   static SourceLocation parse_location_result(const nlohmann::json& result);
+  static std::vector<SourceLocation> parse_locations_result(const nlohmann::json& result);
   static bool parse_single_location(const nlohmann::json& loc, SourceLocation* out);
   static HoverInfo parse_hover_result(const nlohmann::json& result);
   static void append_hover_content(const nlohmann::json& content, HoverInfo* out);
@@ -207,6 +212,7 @@ class LspClient {
   bool definition_supported_ = true;
   bool declaration_supported_ = true;
   bool implementation_supported_ = true;
+  bool references_supported_ = true;
   // LSP TextDocumentSyncKind: None=0, Full=1, Incremental=2. Default Incremental so
   // clangd-style servers keep ranged didChange when the field is omitted.
   int document_sync_kind_ = 2;

@@ -72,6 +72,10 @@ struct RightSidebarState {
   int pending_call_hierarchy_line = 0;
   int pending_call_hierarchy_col = 0;
   std::string pending_call_hierarchy_symbol;
+  bool pending_references = false;
+  int pending_references_line = 0;
+  int pending_references_col = 0;
+  std::string pending_references_symbol;
   CallHierarchyViewState call_hierarchy;
 };
 

@@ -14,6 +14,11 @@ namespace tuide {
 struct MainLayoutState;
 struct RightSidebarState;
 
+enum class CallHierarchyContentKind {
+  CallHierarchy,
+  References,
+};
+
 struct CallHierarchyTreeNode {
   CallHierarchyItem item;
   int depth = 0;
@@ -29,6 +34,7 @@ struct CallHierarchyTreeNode {
 
 struct CallHierarchyViewState {
   bool active = false;
+  CallHierarchyContentKind kind = CallHierarchyContentKind::CallHierarchy;
   int selected_tab = 0;
   int selected = 0;
   std::string root_label;
@@ -46,6 +52,11 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
                               MainLayoutState* layout_state, RightSidebarState* sidebar,
                               const std::shared_ptr<ISymbolProvider>& symbols, int line,
                               int col, const std::string& symbol_at_cursor = {});
+
+bool open_references_view(CallHierarchyViewState* view, WorkspaceModel* workspace,
+                          MainLayoutState* layout_state, RightSidebarState* sidebar,
+                          const std::shared_ptr<ISymbolProvider>& symbols, int line, int col,
+                          const std::string& symbol_at_cursor = {});
 
 void navigate_to_call_hierarchy_node(WorkspaceModel* workspace, FocusManagerState* focus,
                                      MainLayoutState* layout_state,

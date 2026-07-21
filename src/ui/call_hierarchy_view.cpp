@@ -405,6 +405,7 @@ void expand_hierarchy_tree(CallHierarchyViewState* view,
 
 void CallHierarchyViewState::clear() {
   active = false;
+  kind = CallHierarchyContentKind::CallHierarchy;
   selected_tab = 0;
   selected = 0;
   root_label.clear();
@@ -417,6 +418,13 @@ std::vector<int> call_hierarchy_visible_rows(const CallHierarchyViewState& view)
   if (!view.active || view.nodes.empty()) {
     return rows;
   }
+  if (view.kind == CallHierarchyContentKind::References) {
+    rows.reserve(view.nodes.size());
+    for (int i = 0; i < static_cast<int>(view.nodes.size()); ++i) {
+      rows.push_back(i);
+    }
+    return rows;
+  }
   std::vector<uint8_t> visited(view.nodes.size(), 0);
   append_leaf_rows(view, 0, &rows, &visited);
   return rows;
@@ -424,7 +432,8 @@ std::vector<int> call_hierarchy_visible_rows(const CallHierarchyViewState& view)
 
 void call_hierarchy_set_tab(CallHierarchyViewState* view, int tab,
                             const std::shared_ptr<ISymbolProvider>& symbols) {
-  if (view == nullptr || !view->active || view->nodes.empty() || symbols == nullptr) {
+  if (view == nullptr || !view->active || view->nodes.empty() || symbols == nullptr ||
+      view->kind != CallHierarchyContentKind::CallHierarchy) {
     return;
   }
   view->selected_tab = std::max(0, std::min(tab, 1));
@@ -536,6 +545,7 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
   }
 
   view->active = true;
+  view->kind = CallHierarchyContentKind::CallHierarchy;
   view->selected_tab = 0;
   view->selected = 0;
 
@@ -565,6 +575,96 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
     UI_WAKE(layout_state, "wake");
   }
   workspace->status_message = i18n::tr_fmt("status.call_hierarchy.active", {label});
+  return true;
+}
+
+bool open_references_view(CallHierarchyViewState* view, WorkspaceModel* workspace,
+                          MainLayoutState* layout_state, RightSidebarState* sidebar,
+                          const std::shared_ptr<ISymbolProvider>& symbols, int line, int col,
+                          const std::string& symbol_at_cursor) {
+  if (view == nullptr || workspace == nullptr || sidebar == nullptr) {
+    return false;
+  }
+  view->clear();
+
+  if (layout_state != nullptr && layout_state->app_settings != nullptr &&
+      !layout_state->app_settings->lsp_enabled) {
+    workspace->status_message = i18n::tr("status.lsp_disabled");
+    return false;
+  }
+
+  workspace->ensure_buffer();
+  NavigationParams params;
+  params.path = workspace->buffer.path.empty() ? workspace->active_file : workspace->buffer.path;
+  params.text = buffer_document_text(workspace->buffer);
+  if (params.path.empty()) {
+    workspace->status_message = i18n::tr("status.no_active_file");
+    return false;
+  }
+  if (symbols == nullptr || !symbols->supports_references(params.path)) {
+    workspace->status_message = i18n::tr("status.references.unavailable");
+    return false;
+  }
+
+  params.line = line;
+  params.character = col;
+
+  TUIDE_MON_SCOPE("editor", "references.find");
+  const std::vector<SourceLocation> locations = symbols->find_references(params, true);
+  if (locations.empty()) {
+    workspace->status_message = i18n::tr("status.references.none");
+    return false;
+  }
+
+  view->active = true;
+  view->kind = CallHierarchyContentKind::References;
+  view->selected_tab = 0;
+  view->selected = 0;
+
+  const std::string label =
+      !symbol_at_cursor.empty() ? symbol_at_cursor : i18n::tr("panel.references.untitled");
+  view->root_label = label;
+  view->status =
+      i18n::tr_fmt("status.references.count", {std::to_string(locations.size())});
+
+  view->nodes.reserve(locations.size());
+  for (const SourceLocation& loc : locations) {
+    if (!loc.valid || loc.path.empty()) {
+      continue;
+    }
+    CallHierarchyTreeNode node;
+    node.item.valid = true;
+    node.item.name = fs::path(loc.path).filename().string();
+    node.item.path = loc.path;
+    node.item.line = loc.line;
+    node.item.character = loc.character;
+    node.item.kind = SymbolKind::kVariable;
+    node.depth = 0;
+    node.parent = -1;
+    node.children_loaded = true;
+    node.has_children = false;
+    node.navigate_to_call_site = true;
+    node.nav_line = loc.line;
+    node.nav_character = loc.character;
+    node.nav_path = loc.path;
+    view->nodes.push_back(std::move(node));
+  }
+
+  if (view->nodes.empty()) {
+    view->clear();
+    workspace->status_message = i18n::tr("status.references.none");
+    return false;
+  }
+
+  if (layout_state != nullptr) {
+    layout_state->console_visible = true;
+    layout_state->console_tabs.selected_tab = ConsolePanelTabs::kCallHierarchy;
+    layout_state->right_panel_active_section = 0;
+    layout_state->text_input_focus = TextInputFocus::None;
+    layout_state->focus_sync_needed = true;
+    UI_WAKE(layout_state, "wake");
+  }
+  workspace->status_message = i18n::tr_fmt("status.references.active", {label});
   return true;
 }
 

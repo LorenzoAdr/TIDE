@@ -185,6 +185,7 @@ bool LspClient::initialize(const std::string& workspace_root,
       true;
   params["capabilities"]["textDocument"]["definition"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["declaration"] = nlohmann::json::object();
+  params["capabilities"]["textDocument"]["references"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["hover"] = {{"contentFormat", {"plaintext", "markdown"}}};
   params["capabilities"]["textDocument"]["formatting"] = nlohmann::json::object();
   params["capabilities"]["textDocument"]["rename"] = {{"prepareSupport", true}};
@@ -240,6 +241,9 @@ bool LspClient::initialize(const std::string& workspace_root,
         caps.contains("implementationProvider") &&
         !(caps["implementationProvider"].is_boolean() &&
           caps["implementationProvider"].get<bool>() == false);
+    references_supported_ = !caps.contains("referencesProvider") ||
+                            !(caps["referencesProvider"].is_boolean() &&
+                              caps["referencesProvider"].get<bool>() == false);
     if (caps.contains("textDocumentSync")) {
       const auto& sync = caps["textDocumentSync"];
       if (sync.is_number_integer()) {
@@ -389,6 +393,7 @@ void LspClient::stop() {
   definition_supported_ = true;
   declaration_supported_ = true;
   implementation_supported_ = true;
+  references_supported_ = true;
   document_sync_kind_ = 2;
   workspace_root_.clear();
 }
@@ -1200,6 +1205,28 @@ SourceLocation LspClient::parse_location_result(const nlohmann::json& result) {
   return loc;
 }
 
+std::vector<SourceLocation> LspClient::parse_locations_result(const nlohmann::json& result) {
+  std::vector<SourceLocation> locations;
+  if (result.is_null()) {
+    return locations;
+  }
+  auto append_one = [&](const nlohmann::json& entry) {
+    SourceLocation loc;
+    if (parse_single_location(entry, &loc)) {
+      locations.push_back(std::move(loc));
+    }
+  };
+  if (result.is_array()) {
+    locations.reserve(result.size());
+    for (const auto& entry : result) {
+      append_one(entry);
+    }
+    return locations;
+  }
+  append_one(result);
+  return locations;
+}
+
 SourceLocation LspClient::request_location(const std::string& method,
                                            const std::string& absolute_path,
                                            const std::string& text, int line,
@@ -1253,6 +1280,32 @@ SourceLocation LspClient::goto_implementation(const std::string& absolute_path,
   }
   cancel_inflight_completion();
   return request_location("textDocument/implementation", absolute_path, text, line, character);
+}
+
+std::vector<SourceLocation> LspClient::find_references(const std::string& absolute_path,
+                                                       const std::string& text, int line,
+                                                       int character, bool include_declaration) {
+  if (!references_supported_ || !ready_.load() || absolute_path.empty() ||
+      !is_lsp_trackable_path(absolute_path, text)) {
+    return {};
+  }
+
+  cancel_inflight_completion();
+  if (!text.empty()) {
+    did_change(absolute_path, text);
+  }
+
+  const std::string uri = path_to_uri(absolute_path);
+  nlohmann::json params = {
+      {"textDocument", {{"uri", uri}}},
+      {"position", make_lsp_position(text, line, character)},
+      {"context", {{"includeDeclaration", include_declaration}}}};
+
+  nlohmann::json result;
+  if (!send_lsp_request("textDocument/references", std::move(params), 15000, &result)) {
+    return {};
+  }
+  return parse_locations_result(result);
 }
 
 std::string LspClient::strip_markdown(const std::string& text) {

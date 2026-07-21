@@ -3034,6 +3034,33 @@ SourceLocation LspSymbolProvider::goto_implementation(const NavigationParams& pa
   return loc;
 }
 
+bool LspSymbolProvider::supports_references() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return use_lsp_ && any_lsp_ready();
+}
+
+bool LspSymbolProvider::supports_references(const std::string& path) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!use_lsp_ || path.empty() || !is_lsp_trackable_path(path)) {
+    return false;
+  }
+  const LspClient* lsp = client_for_path(path);
+  return lsp != nullptr && lsp->supports_references();
+}
+
+std::vector<SourceLocation> LspSymbolProvider::find_references(const NavigationParams& params,
+                                                               bool include_declaration) {
+  if (params.path.empty() || !is_lsp_trackable_path(params.path, params.text)) {
+    return {};
+  }
+  std::string text = params.text;
+  if (LspClient* lsp = prepare_lsp_client(params.path, text)) {
+    return lsp->find_references(params.path, text, params.line, params.character,
+                                include_declaration);
+  }
+  return {};
+}
+
 bool LspSymbolProvider::supports_semantic_highlight() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return use_lsp_;

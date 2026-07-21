@@ -2782,7 +2782,8 @@ int Application::run() {
 			const UiEventDrainPlan plan = ui_event_dispatcher_.drain_pending(now_ms);
 			run_custom_event_drain(now_ms, plan, paint_before);
 			bool swallow_call_hierarchy_custom = false;
-			if (layout_state_.right_sidebar.pending_call_hierarchy &&
+			if ((layout_state_.right_sidebar.pending_call_hierarchy ||
+			     layout_state_.right_sidebar.pending_references) &&
 			    layout_state_.call_hierarchy_key_handler) {
 				layout_state_.call_hierarchy_key_handler(event);
 				swallow_call_hierarchy_custom = true;
