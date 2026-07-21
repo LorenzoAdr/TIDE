@@ -688,14 +688,15 @@ void DapBackend::on_inferior_launched() {
       emit_inferior_pid(fetch_inferior_pid_locked(true));
     }
 
-    // debugpy/bashdb already installed breakpoints in the late configuration phase.
+    // debugpy/bashdb/GDB launch install breakpoints before configurationDone.
     if (!adapter_is_gdb()) {
       return;
     }
 
     if (inferior_stopped_.load(std::memory_order_acquire)) {
       pending_bps.assign(breakpoints_by_file_.begin(), breakpoints_by_file_.end());
-    } else if (!breakpoints_by_file_.empty()) {
+    } else if (!breakpoints_by_file_.empty() && !configuration_done_) {
+      // Only defer when BPs were not part of the pre-run DAP configuration.
       breakpoints_pending_sync_ = true;
     }
   }
@@ -966,7 +967,6 @@ bool DapBackend::launch_debugpy(const UiCommand& command) {
   }
   // Avoid runInTerminal reverse-requests (tuide has no handler); keep DAP stdio clean.
   launch.console = dap::string("internalConsole");
-  // Mirror GDB "stop at main" so a pre-set breakpoint / first line is reachable.
   if (command.launch.stop_at_main) {
     launch.stopOnEntry = dap::boolean(true);
   }
@@ -994,6 +994,9 @@ bool DapBackend::launch_debugpy(const UiCommand& command) {
   }
   inferior_launched_ = true;
   on_inferior_launched();
+  if (!inferior_stopped_.load(std::memory_order_acquire)) {
+    notify_continued();
+  }
   {
     DebugEvent configured;
     configured.kind = DebugEventKind::kLaunchConfigured;
@@ -1361,6 +1364,7 @@ void DapBackend::handle_command(const UiCommand& command) {
     launch.program = command.launch.program;
     launch.cwd = command.launch.cwd;
     if (adapter_is_gdb()) {
+      // false → GDB DAP uses `run` (no synthetic stop at main); true → `start`.
       launch.stopAtBeginningOfMainSubprogram =
           dap::boolean(command.launch.stop_at_main);
     }
@@ -1368,42 +1372,50 @@ void DapBackend::handle_command(const UiCommand& command) {
       launch.args = command.launch.args;
     }
 
-    std::unique_lock<std::recursive_mutex> lock(session_mutex_);
-    if (!session_) {
-      return;
-    }
-    if (adapter_is_gdb() && !configure_packet_monitor_env_locked(command.launch)) {
-      return;
-    }
-    auto launch_future = session_->send(launch);
-    if (!send_configuration_done()) {
-      return;
-    }
-    lock.unlock();
-
-    const auto response = launch_future.get();
-    bool inferior_started = false;
+    // GDB defers the real start until configurationDone. Send launch, install
+    // breakpoints, then configurationDone so `run` still honors editor BPs.
     {
-      std::lock_guard<std::recursive_mutex> lock(session_mutex_);
+      std::unique_lock<std::recursive_mutex> lock(session_mutex_);
       if (!session_) {
         return;
       }
-      if (response.error) {
-        push_error(i18n::tr_fmt("debug.dap.launch_failed",
-                                {response.error.message}));
-      } else {
-        inferior_started = true;
+      if (adapter_is_gdb() && !configure_packet_monitor_env_locked(command.launch)) {
+        return;
       }
-    }
-    if (inferior_started) {
-      inferior_launched_ = true;
-      on_inferior_launched();
-      // Same signal as debugpy/bashdb: UI keeps the launch modal open through the
-      // initial Stopped until configuration (breakpoints) is finished.
-      DebugEvent configured;
-      configured.kind = DebugEventKind::kLaunchConfigured;
-      configured.text = i18n::tr("debug.dap.session_ready");
-      push_event(std::move(configured));
+      configuration_done_ = false;
+      auto launch_future = session_->send(launch);
+      lock.unlock();
+
+      if (!finish_late_configuration_unlocked(/*send_configuration_done=*/true)) {
+        return;
+      }
+
+      const auto response = launch_future.get();
+      bool inferior_started = false;
+      {
+        std::lock_guard<std::recursive_mutex> response_lock(session_mutex_);
+        if (!session_) {
+          return;
+        }
+        if (response.error) {
+          push_error(i18n::tr_fmt("debug.dap.launch_failed",
+                                  {response.error.message}));
+        } else {
+          inferior_started = true;
+        }
+      }
+      if (inferior_started) {
+        inferior_launched_ = true;
+        on_inferior_launched();
+        // Without stop-at-main there may be no initial Stopped; mark running.
+        if (!inferior_stopped_.load(std::memory_order_acquire)) {
+          notify_continued();
+        }
+        DebugEvent configured;
+        configured.kind = DebugEventKind::kLaunchConfigured;
+        configured.text = i18n::tr("debug.dap.session_ready");
+        push_event(std::move(configured));
+      }
     }
     return;
   }

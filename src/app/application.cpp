@@ -1599,7 +1599,7 @@ void Application::submit_debug_session_start() {
 		launch.launch.program = config_.program;
 		launch.launch.cwd = launch_cwd_for_program(config_.program);
 		launch.launch.args = config_.args;
-		launch.launch.stop_at_main = true;
+		launch.launch.stop_at_main = false;
 		launch.launch.packet_monitor_enabled = config_.packet_monitor_enabled;
 		launch.launch.packet_monitor_filter_src = config_.packet_monitor_filter_src;
 		launch.launch.packet_monitor_filter_dst = config_.packet_monitor_filter_dst;

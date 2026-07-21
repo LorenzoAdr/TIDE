@@ -33,7 +33,7 @@ struct LaunchConfig {
   std::string program;
   std::string cwd;
   std::vector<std::string> args;
-  bool stop_at_main = true;
+  bool stop_at_main = false;
   bool packet_monitor_enabled = false;
   std::string packet_monitor_filter_src;
   std::string packet_monitor_filter_dst;
