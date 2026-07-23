@@ -913,9 +913,12 @@ VisualHighlightJobInputs build_visual_highlight_job_inputs(
   inputs.total_lines = static_cast<int>(buffer.lines.size());
   inputs.viewport_scroll = buffer.scroll;
   inputs.viewport_visible_lines = visible_lines;
-  inputs.git_baseline_ready = panel->git_baseline_ready;
-  inputs.git_untracked_all = panel->git_untracked_all_lines;
-  inputs.git_head_lines = panel->git_head_lines;
+  // Never Myers against a HEAD baseline from a different file (tab switch race).
+  if (buffer.path == panel->git_cache_path && panel->git_baseline_ready) {
+    inputs.git_baseline_ready = true;
+    inputs.git_untracked_all = panel->git_untracked_all_lines;
+    inputs.git_head_lines = panel->git_head_lines;
+  }
   if (find_open && find_state != nullptr && !find_state->matches.empty()) {
     inputs.text_matches = find_state->matches;
   }
@@ -1052,7 +1055,8 @@ void apply_myers_git_marks_to_panel(EditorPanelState* panel,
     panel->git_previous_by_line.clear();
     return;
   }
-  if (!panel->git_baseline_ready) {
+  // Never Myers against an empty HEAD: that marks every line as added.
+  if (!panel->git_baseline_ready || panel->git_head_lines.empty()) {
     return;
   }
   apply_line_diff_result_to_panel(panel, compute_line_diff(panel->git_head_lines, buffer_lines),
@@ -1065,6 +1069,16 @@ void apply_visual_highlight_git_marks(EditorPanelState* panel, const EditorBuffe
   }
   const VisualHighlightOverviewData& overview = panel->visual_highlight.snapshot.overview;
   if (!overview.git_marks_computed) {
+    return;
+  }
+  // Reject stale VH git marks after a path switch: baseline must match this buffer's cache
+  // and the HEAD line count used when the job ran.
+  if (buffer.path != panel->git_cache_path || !panel->git_baseline_ready) {
+    return;
+  }
+  if (!overview.git_untracked_all &&
+      overview.git_head_line_count >= 0 &&
+      overview.git_head_line_count != static_cast<int>(panel->git_head_lines.size())) {
     return;
   }
   panel->git_untracked_all_lines = overview.git_untracked_all;
@@ -1082,8 +1096,9 @@ void apply_git_baseline_to_panel(EditorPanelState* panel, const GitFileDiff& dif
   }
   panel->git_untracked_all_lines = diff.untracked;
   panel->git_head_lines = diff.head_lines;
-  panel->git_baseline_ready = diff.untracked || diff.loaded || !diff.head_lines.empty() ||
-                              !diff.line_changes.empty();
+  // Strict: ready only with real HEAD content or confirmed untracked. Never treat
+  // "diff loaded" / partial unified hunks as enough for Myers.
+  panel->git_baseline_ready = diff.untracked || !diff.head_lines.empty();
   if (!recompute_marks) {
     return;
   }
@@ -1098,7 +1113,7 @@ void apply_git_baseline_to_panel(EditorPanelState* panel, const GitFileDiff& dif
                                     static_cast<int>(buffer_lines.size()));
     return;
   }
-  // HEAD still loading: fall back to unified-diff line map from disk if present.
+  // HEAD still loading: provisional unified-diff marks only (no Myers / no baseline_ready).
   panel->git_changed_lines.clear();
   panel->git_previous_by_line.clear();
   panel->git_cached_line_count = static_cast<int>(buffer_lines.size());
@@ -1135,6 +1150,14 @@ void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer
     panel->git_untracked_all_lines = false;
     panel->git_baseline_ready = false;
     panel->git_cached_line_count = 0;
+    // Drop in-flight VH results that may still carry the previous file's HEAD baseline.
+    panel->visual_highlight.pending_generation = 0;
+    panel->visual_highlight.job_inflight = false;
+    panel->visual_highlight.snapshot.overview.git_marks_computed = false;
+    panel->visual_highlight.snapshot.overview.git_changed_lines.clear();
+    panel->visual_highlight.snapshot.overview.git_previous_by_line.clear();
+    panel->visual_highlight.snapshot.overview.git_untracked_all = false;
+    panel->visual_highlight.snapshot.overview.git_head_line_count = -1;
     git->refresh_file_diff(buffer.path);
     git->refresh_file_head(buffer.path);
   }
@@ -1151,13 +1174,18 @@ void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer
 
   const GitFileDiff diff = git->file_diff(buffer.path);
   if (!diff.untracked && diff.head_lines.empty()) {
+    // HEAD pending: never run Myers. Keep requesting head (and diff text if missing).
     git->refresh_file_head(buffer.path);
-    if (!diff.loaded && diff.line_changes.empty()) {
-      return;
+    if (!git->has_file_diff_text(buffer.path)) {
+      git->refresh_file_diff(buffer.path);
     }
-  } else if (!diff.loaded && !diff.untracked) {
-    git->refresh_file_diff(buffer.path, true);
-    git->refresh_file_head(buffer.path);
+    if (path_changed || revision_changed || panel->git_baseline_ready ||
+        panel->git_cache_view_token != buffer.view_token) {
+      const std::vector<std::string> buffer_lines = buffer.lines.to_vector();
+      apply_git_baseline_to_panel(panel, diff, buffer_lines, true);
+      panel->git_cache_view_token = buffer.view_token;
+      mark_visual_highlight_inputs_dirty(&panel->visual_highlight, steady_now_ms());
+    }
     return;
   }
 
@@ -1165,7 +1193,7 @@ void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer
       path_changed || revision_changed || panel->git_untracked_all_lines != diff.untracked ||
       panel->git_head_lines.size() != diff.head_lines.size() ||
       (!diff.head_lines.empty() && panel->git_head_lines != diff.head_lines) ||
-      (!panel->git_baseline_ready && (diff.loaded || diff.untracked || !diff.head_lines.empty()));
+      (!panel->git_baseline_ready && (diff.untracked || !diff.head_lines.empty()));
 
   const int line_count = static_cast<int>(buffer.lines.size());
   const bool buffer_changed = panel->git_cache_view_token != buffer.view_token ||
@@ -7381,6 +7409,26 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       const bool vh_focused = focus != nullptr && focus->region == panel_focus;
       const bool path_indexed =
           !workspace->buffer.path.empty() && is_indexed_source_path(workspace->buffer.path);
+      // Path-switch and first HEAD baseline must not wait on the deferred-sync gate:
+      // VH/gutter otherwise stay empty (or use a stale HEAD) while the user is typing.
+      if (git_service != nullptr && git_service->is_repo()) {
+        const EditorBuffer& buf = workspace->buffer;
+        const bool path_mismatch = !buf.path.empty() && panel_state->git_cache_path != buf.path;
+        const bool baseline_pending =
+            !buf.path.empty() && !workspace->active_tab_read_only() &&
+            !panel_state->git_baseline_ready;
+        if (!buf.path.empty() &&
+            (path_mismatch || baseline_pending || editor_deferred_sync_allowed(layout_state))) {
+          UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".git_cache");
+          const bool vh_live =
+              vh_focused &&
+              visual_highlight_config_from_settings(
+                  layout_state != nullptr ? layout_state->app_settings : nullptr)
+                  .enabled;
+          sync_git_cache(panel_state.get(), git_service, buf, workspace->active_tab_read_only(),
+                         vh_live);
+        }
+      }
       if (vh_focused && !workspace->buffer.path.empty()) {
         const int64_t vh_now = steady_now_ms();
         const VisualHighlightConfig vh_config = visual_highlight_config_from_settings(
@@ -7522,19 +7570,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
             }
           }
         }
-      }
-      if (git_service != nullptr && git_service->is_repo() &&
-          editor_deferred_sync_allowed(layout_state)) {
-        workspace->ensure_buffer();
-        const EditorBuffer& buf = workspace->buffer;
-        UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.git");
-        const bool vh_live =
-            vh_focused &&
-            visual_highlight_config_from_settings(
-                layout_state != nullptr ? layout_state->app_settings : nullptr)
-                .enabled;
-        sync_git_cache(panel_state.get(), git_service, buf, workspace->active_tab_read_only(),
-                       vh_live);
       }
     };
   }

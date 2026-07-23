@@ -1124,7 +1124,9 @@ void GitService::load_file_diff_text(const std::string& repo_root, const std::st
 
   auto& existing = file_diffs_[workspace_rel];
   parsed.head_lines = existing.head_lines;
-  parsed.loaded = existing.loaded || !parsed.line_changes.empty() || parsed.untracked;
+  // Baseline is complete only with HEAD content or confirmed untracked. Having
+  // unified hunks alone must not set loaded — that let Myers run against empty HEAD.
+  parsed.loaded = parsed.untracked || !parsed.head_lines.empty();
   existing = std::move(parsed);
   file_diff_texts_[workspace_rel] = diff_result.stdout_text;
 }
@@ -1155,9 +1157,18 @@ void GitService::load_file_head(const std::string& repo_root, const std::string&
     diff.loaded = true;
     diff.untracked = false;
   } else {
+    // Only treat as untracked when status confirms it. A failed/slow `git show`
+    // on a tracked file must leave the baseline pending (not all-green).
+    bool untracked = false;
+    for (const auto& entry : status_.entries) {
+      if (entry.path == workspace_rel && entry.unstaged == GitFileStatus::kUntracked) {
+        untracked = true;
+        break;
+      }
+    }
     diff.head_lines.clear();
-    diff.loaded = true;
-    diff.untracked = true;
+    diff.untracked = untracked;
+    diff.loaded = untracked;
   }
   file_diffs_[workspace_rel] = diff;
 }

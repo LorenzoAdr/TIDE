@@ -297,7 +297,13 @@ void build_git_marks_snapshot(const VisualHighlightJob& job, VisualHighlightSnap
   snap->overview.git_untracked_all = job.inputs.git_untracked_all;
   snap->overview.git_changed_lines.clear();
   snap->overview.git_previous_by_line.clear();
+  snap->overview.git_head_line_count =
+      static_cast<int>(job.inputs.git_head_lines.size());
   if (job.inputs.git_untracked_all) {
+    return;
+  }
+  // Empty HEAD must not run Myers (would mark every buffer line as added).
+  if (job.inputs.git_head_lines.empty()) {
     return;
   }
   const LineDiffResult diff = compute_line_diff(job.inputs.git_head_lines, job.lines);
@@ -651,6 +657,7 @@ bool drain_visual_highlight_results(VisualHighlightPanelState* state, const Edit
     merged.overview.git_previous_by_line = state->snapshot.overview.git_previous_by_line;
     merged.overview.git_untracked_all = state->snapshot.overview.git_untracked_all;
     merged.overview.git_marks_computed = state->snapshot.overview.git_marks_computed;
+    merged.overview.git_head_line_count = state->snapshot.overview.git_head_line_count;
   }
   if (merged.overview.total_lines == 0 && state->snapshot.overview.total_lines > 0) {
     merged.overview.total_lines = state->snapshot.overview.total_lines;

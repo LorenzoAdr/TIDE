@@ -67,6 +67,9 @@ struct VisualHighlightOverviewData {
   std::unordered_map<int, std::string> git_previous_by_line;
   bool git_untracked_all = false;
   bool git_marks_computed = false;
+  // Line count of the HEAD baseline used to compute git_changed_lines (or -1 if none).
+  // Used to reject stale VH results after a tab/path switch left an old baseline in-flight.
+  int git_head_line_count = -1;
   std::vector<TextMatch> text_matches;
   int total_lines = 0;
 };
