@@ -18,6 +18,7 @@
 #include "packet_monitor/pkt_preload_path.hpp"
 #include "util/path_normalize.hpp"
 #include "util/monitor_log.hpp"
+
 #include "util/shell_utils.hpp"
 #include "util/thread_name.hpp"
 #include "util/bundled_tools.hpp"
@@ -217,6 +218,16 @@ void DapBackend::set_wake_callback(DebugWakeCallback callback) {
   wake_callback_ = std::move(callback);
 }
 
+void DapBackend::set_run_in_terminal_handler(RunInTerminalHandler handler) {
+  std::lock_guard<std::mutex> lock(run_in_terminal_mutex_);
+  run_in_terminal_handler_ = std::move(handler);
+}
+
+void DapBackend::set_prepare_app_tty_handler(PrepareAppTtyHandler handler) {
+  std::lock_guard<std::mutex> lock(prepare_app_tty_mutex_);
+  prepare_app_tty_handler_ = std::move(handler);
+}
+
 void DapBackend::push_event(DebugEvent event) {
   event.backend_epoch = backend_epoch_.load(std::memory_order_acquire);
   const DebugEventKind kind = event.kind;
@@ -226,10 +237,12 @@ void DapBackend::push_event(DebugEvent event) {
   // kStackUpdated must also wake: stackTrace is async and usually arrives after
   // the kStopped drain/paint cycle; without a wake the editor keeps a stale
   // active_line (no ► / highlight) until the next user keypress.
+  // kOutput must wake when it carries inferior stdout/stderr so App updates
+  // without waiting for a stop (launch with no breakpoints exits immediately).
   if (kind == DebugEventKind::kStopped || kind == DebugEventKind::kTerminated ||
       kind == DebugEventKind::kSessionReady || kind == DebugEventKind::kLaunchConfigured ||
       kind == DebugEventKind::kContinued || kind == DebugEventKind::kError ||
-      kind == DebugEventKind::kStackUpdated) {
+      kind == DebugEventKind::kStackUpdated || kind == DebugEventKind::kOutput) {
     std::lock_guard<std::mutex> lock(wake_mutex_);
     if (wake_callback_) {
       wake_callback_(kind);
@@ -343,8 +356,56 @@ void DapBackend::setup_session() {
     DebugEvent event;
     event.kind = DebugEventKind::kOutput;
     event.text = e.output;
+    if (e.category.has_value()) {
+      event.output_category = *e.category;
+    }
     push_event(std::move(event));
   });
+
+  session_->registerHandler(
+      [&](const dap::RunInTerminalRequest& req)
+          -> dap::ResponseOrError<dap::RunInTerminalResponse> {
+        RunInTerminalHandler handler;
+        {
+          std::lock_guard<std::mutex> lock(run_in_terminal_mutex_);
+          handler = run_in_terminal_handler_;
+        }
+        if (!handler) {
+          return dap::Error("runInTerminal not available");
+        }
+        RunInTerminalArgs args;
+        args.cwd = req.cwd;
+        for (const auto& arg : req.args) {
+          args.args.push_back(arg);
+        }
+        if (req.env.has_value()) {
+          for (const auto& entry : *req.env) {
+            if (entry.second.is<dap::string>()) {
+              args.env[entry.first] = entry.second.get<dap::string>();
+            } else if (entry.second.is<dap::null>()) {
+              args.env[entry.first] = "";
+            }
+          }
+        }
+        if (req.kind.has_value()) {
+          args.kind = *req.kind;
+        }
+        if (req.title.has_value()) {
+          args.title = *req.title;
+        }
+        const RunInTerminalResult result = handler(args);
+        if (!result.ok) {
+          return dap::Error(result.error.empty() ? "runInTerminal failed" : result.error);
+        }
+        dap::RunInTerminalResponse response;
+        if (result.process_id > 0) {
+          response.processId = dap::integer(result.process_id);
+        }
+        if (result.shell_process_id > 0) {
+          response.shellProcessId = dap::integer(result.shell_process_id);
+        }
+        return response;
+      });
 
   session_->registerHandler([&](const dap::BreakpointEvent& e) {
     if (!e.breakpoint.verified) {
@@ -415,7 +476,7 @@ bool DapBackend::initialize_session() {
   request.linesStartAt1 = true;
   request.columnsStartAt1 = true;
   request.pathFormat = "path";
-  request.supportsRunInTerminalRequest = dap::boolean(false);
+  request.supportsRunInTerminalRequest = dap::boolean(true);
 
 
   // Never use bare .get(): if the adapter dies (e.g. missing node_modules) the
@@ -1007,8 +1068,8 @@ bool DapBackend::launch_debugpy(const UiCommand& command) {
   if (!command.launch.args.empty()) {
     launch.args = command.launch.args;
   }
-  // Avoid runInTerminal reverse-requests (tuide has no handler); keep DAP stdio clean.
-  launch.console = dap::string("internalConsole");
+  // Prefer a client PTY (App tab) via runInTerminal so ANSI colors work.
+  launch.console = dap::string("integratedTerminal");
   if (command.launch.stop_at_main) {
     launch.stopOnEntry = dap::boolean(true);
   }
@@ -1076,7 +1137,7 @@ bool DapBackend::launch_bashdb(const UiCommand& command) {
   launch.pathCat = "/bin/cat";
   launch.pathMkfifo = "/usr/bin/mkfifo";
   launch.pathPkill = "/usr/bin/pkill";
-  launch.terminalKind = "debugConsole";
+  launch.terminalKind = "integrated";
 
   std::unique_lock<std::recursive_mutex> lock(session_mutex_);
   if (!session_) {
@@ -1214,6 +1275,26 @@ bool DapBackend::configure_packet_monitor_env_locked(const LaunchConfig& launch)
     exec_repl_locked("unset environment TUIDE_PKT_FILTER_DST", false);
   }
   return true;
+}
+
+bool DapBackend::configure_inferior_app_tty_locked() {
+  PrepareAppTtyHandler handler;
+  {
+    std::lock_guard<std::mutex> lock(prepare_app_tty_mutex_);
+    handler = prepare_app_tty_handler_;
+  }
+  if (!handler) {
+    return true;
+  }
+  // GDB does not reliably honor DAP console=integratedTerminal / runInTerminal.
+  // Point the inferior at our App PTY so cout is line-buffered and streams live.
+  const std::string tty = handler(80, 24);
+  if (tty.empty()) {
+    return true;
+  }
+  exec_repl_locked("set environment TERM xterm-256color", false);
+  exec_repl_locked("set environment COLORTERM truecolor", false);
+  return exec_repl_locked("set inferior-tty " + tty, false);
 }
 
 int DapBackend::fetch_inferior_pid_locked(bool silent) {
@@ -1413,6 +1494,8 @@ void DapBackend::handle_command(const UiCommand& command) {
     if (!command.launch.args.empty()) {
       launch.args = command.launch.args;
     }
+    // Ask GDB/adapters that honor it to use runInTerminal → App tab PTY.
+    launch.console = dap::string("integratedTerminal");
 
     // Three GDB launch shapes:
     // 1) Deferred (GDB 16+/bundled): launch → setBreakpoints → configurationDone
@@ -1459,7 +1542,8 @@ void DapBackend::handle_command(const UiCommand& command) {
       if (!session_) {
         return;
       }
-      if (adapter_is_gdb() && !configure_packet_monitor_env_locked(command.launch)) {
+      if (adapter_is_gdb() && (!configure_packet_monitor_env_locked(command.launch) ||
+                               !configure_inferior_app_tty_locked())) {
         return;
       }
       configuration_done_ = false;
@@ -1478,7 +1562,8 @@ void DapBackend::handle_command(const UiCommand& command) {
         if (!session_) {
           return;
         }
-        if (adapter_is_gdb() && !configure_packet_monitor_env_locked(command.launch)) {
+        if (adapter_is_gdb() && (!configure_packet_monitor_env_locked(command.launch) ||
+                                 !configure_inferior_app_tty_locked())) {
           return;
         }
         configuration_done_ = false;
@@ -1504,7 +1589,8 @@ void DapBackend::handle_command(const UiCommand& command) {
       if (!session_) {
         return;
       }
-      if (adapter_is_gdb() && !configure_packet_monitor_env_locked(command.launch)) {
+      if (adapter_is_gdb() && (!configure_packet_monitor_env_locked(command.launch) ||
+                               !configure_inferior_app_tty_locked())) {
         return;
       }
       configuration_done_ = false;
@@ -1885,15 +1971,10 @@ void DapBackend::worker_main() {
     }
   }
 
-  if (running_.load(std::memory_order_acquire) && session_ && adapter_ &&
-      adapter_->running() && inferior_attached_) {
-    dap::DisconnectRequest disconnect;
-    disconnect.terminateDebuggee = inferior_launched_;
-    session_->send(disconnect).get();
-    inferior_attached_ = false;
-  }
+  // Do not DAP-disconnect here: send().get() can hang forever with inferior-tty
+  // when Stop force-kills from the UI thread. Adapter teardown is enough.
   if (adapter_) {
-    adapter_->stop();
+    adapter_->stop(true);
   }
   session_.reset();
   adapter_.reset();

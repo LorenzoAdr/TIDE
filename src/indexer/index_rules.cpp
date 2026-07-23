@@ -20,11 +20,13 @@ std::string lowercase_extension(const std::string& path) {
 
 const std::unordered_set<std::string>& binary_extensions() {
   static const std::unordered_set<std::string> kExtensions = {
-      ".a",    ".bin",  ".bmp",  ".bz2",  ".class", ".db",   ".dll",  ".dylib",
-      ".eot",  ".exe",  ".gif",  ".gz",   ".ico",   ".jar",  ".jpeg", ".jpg",
-      ".o",    ".obj",  ".otf",  ".pyc",  ".pyo",   ".png",  ".rar",  ".so",
-      ".sqlite", ".tar", ".ttf", ".wasm", ".webp", ".woff", ".woff2", ".xz",
-      ".zip",  ".7z",   ".pdf",  ".pptx", ".docx", ".xlsx",
+      ".a",    ".apk",  ".bin",  ".bmp",  ".bz2",  ".cab",  ".class", ".db",
+      ".deb",  ".dll",  ".dmg",  ".docx", ".dylib", ".eot",  ".exe",  ".gif",
+      ".gz",   ".ico",  ".img",  ".iso",  ".jar",  ".jpeg", ".jpg",  ".ko",
+      ".lib",  ".msi",  ".o",    ".obj",  ".otf",  ".pdf",  ".png",  ".pptx",
+      ".pyc",  ".pyo",  ".rar",  ".rlib", ".rmeta", ".rpm", ".so",   ".sqlite",
+      ".tar",  ".tbz2", ".tgz",  ".ttf",  ".wasm", ".webp", ".woff", ".woff2",
+      ".xlsx", ".xz",   ".zip",  ".7z",   ".zst",
   };
   return kExtensions;
 }
@@ -135,6 +137,17 @@ bool is_probably_binary_path(const std::string& path) {
     return false;
   }
   return binary_extensions().count(lowercase_extension(path)) > 0;
+}
+
+bool is_file_picker_candidate_path(const std::string& path) {
+  if (path.empty()) {
+    return false;
+  }
+  const std::string ext = lowercase_extension(path);
+  if (ext == ".pdf") {
+    return true;
+  }
+  return !is_probably_binary_path(path);
 }
 
 bool text_looks_binary(const std::string& text) {

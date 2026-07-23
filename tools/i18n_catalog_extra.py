@@ -470,6 +470,8 @@ EXTRA_CATALOG: list[tuple[str, str, str]] = [
     ("search.status.suffix.replace", "  Enter: buscar  R: reemplazar", "  Enter: search  R: replace"),
     ("search.loading", "(buscando…)", "(searching…)"),
     ("console.tab.terminal", "Terminal", "Terminal"),
+    ("console.tab.app", "App", "App"),
+    ("console.app.waiting", "(waiting for program output…)", "(esperando salida del programa…)"),
     ("console.tab.gdb", "GDB", "GDB"),
     ("console.tab.core_analyzer", "CoreAn", "CoreAn"),
     ("console.tab.performance", "Rendimiento", "Performance"),

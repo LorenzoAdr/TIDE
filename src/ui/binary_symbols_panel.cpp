@@ -455,9 +455,11 @@ void apply_pending_request(BinarySymbolsPanelState* state, MainLayoutState* layo
   }
 
   pending.open_tab = false;
-  if (started_analysis) {
-    pending.binary_path.clear();
-  }
+  // Always clear when this Custom tick fully handled the request. If the same
+  // binary is already loaded, has_new_binary is false and we used to leave
+  // binary_path set forever — connection_wizard then refuses to paint (F2 looks
+  // frozen after Stop → relaunch of the same program).
+  pending.binary_path.clear();
 }
 
 bool poll_runner(BinarySymbolsPanelState* state, MainLayoutState* layout_state) {

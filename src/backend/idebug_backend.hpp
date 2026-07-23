@@ -132,6 +132,8 @@ enum class DebugEventKind {
 struct DebugEvent {
   DebugEventKind kind = DebugEventKind::kError;
   std::string text;
+  // DAP OutputEvent.category: console | stdout | stderr | telemetry | …
+  std::string output_category;
   uint64_t backend_epoch = 0;
   int inferior_pid = 0;
   int thread_id = 1;

@@ -187,6 +187,7 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
       return;
     }
     if (layout_state->console_tabs.selected_tab == ConsolePanelTabs::kTerminal ||
+        layout_state->console_tabs.selected_tab == ConsolePanelTabs::kApp ||
         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kCoreAnalyzer) {
       layout_state->text_input_focus = TextInputFocus::Console;
     }
@@ -920,7 +921,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                          std::shared_ptr<ISymbolProvider> symbols,
                          CommandCallback on_command, MainLayoutState* layout_state,
                          StopDebugCallback on_stop_debug, ShellSession* shell,
-                         WorkspaceIndexer* indexer, SymbolWorkspaceIndexer* symbol_indexer,
+                         AppSession* app_session, WorkspaceIndexer* indexer,
+                         SymbolWorkspaceIndexer* symbol_indexer,
                          ShellLaunchConfigProvider shell_launch_config, GitService* git_service,
                          GitPanelState* git_panel_state, WelcomeScreenState* welcome_state,
                          std::function<void()> on_welcome_external_file,
@@ -955,8 +957,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
   auto center = MakeEditorCenterLayout(app_mode, model, editor_primary, editor_secondary, source,
                                        secondary_workspace, split_state);
 
-  auto console = MakeConsolePanel(app_mode, model, shell, on_command, layout_state, focus,
-                                  &split_state->bottom_height, shell_launch_config, workspace,
+  auto console = MakeConsolePanel(app_mode, model, shell, app_session, on_command, layout_state,
+                                  focus, &split_state->bottom_height, shell_launch_config, workspace,
                                   symbols, indexer, symbol_indexer, &layout_state->right_sidebar,
                                   git_service, git_panel_state);
   auto center_with_console =

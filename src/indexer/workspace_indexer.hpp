@@ -38,6 +38,9 @@ struct FileIndexChange {
   FileIndexChangeKind kind = FileIndexChangeKind::Upsert;
   std::string relative_path;
   std::string absolute_path;
+  // true: create/delete/rename/dir — FileTree / picker listing may change.
+  // false: content-only modify — update index on next tick, do not wake UI.
+  bool wake_ui = false;
 };
 
 class WorkspaceIndexer {
@@ -57,7 +60,12 @@ class WorkspaceIndexer {
   void remove_path_prefix(const std::string& workspace_root, const std::string& prefix);
   bool refresh(const std::string& workspace_root);
   void stop();
-  void set_change_notify(std::function<void()> callback);
+  // Callback receives whether any queued change needs a UI wake (tree listing
+  // or a modify of a file currently visible in the editor).
+  void set_change_notify(std::function<void(bool wake_ui)> callback);
+  // Optional: return true if absolute_path is shown in an editor (active tab).
+  // Called from the inotify thread on content-only modifies.
+  void set_modify_wake_predicate(std::function<bool(const std::string& absolute_path)> pred);
   std::shared_ptr<const IndexSnapshot> snapshot() const;
   bool scanning() const;
   bool has_pending_changes() const;
@@ -70,7 +78,9 @@ class WorkspaceIndexer {
   std::shared_ptr<const IndexSnapshot> snapshot_;
   mutable std::mutex changes_mutex_;
   std::vector<FileIndexChange> pending_changes_;
-  std::function<void()> change_notify_;
+  std::function<void(bool wake_ui)> change_notify_;
+  std::function<bool(const std::string& absolute_path)> modify_wake_predicate_;
+  mutable std::mutex modify_wake_mutex_;
   std::thread worker_;
   std::atomic<bool> scanning_{false};
   std::atomic<bool> stop_requested_{false};

@@ -18,6 +18,8 @@ bool should_skip_dir_name(const std::string& name,
                           const IndexFilterOptions& options = {});
 bool is_indexed_source_path(const std::string& path);
 bool is_probably_binary_path(const std::string& path);
+// Candidatos de Ctrl+P: excluye binarios conocidos; los PDF sí se incluyen (visor externo).
+bool is_file_picker_candidate_path(const std::string& path);
 bool text_looks_binary(const std::string& text);
 bool is_lsp_trackable_path(const std::string& path, const std::string& text = {});
 bool is_cpp_header_path(const std::string& path);

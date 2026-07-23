@@ -277,6 +277,7 @@ add_executable(tuide
   src/git/git_log.cpp
   src/git/git_service.cpp
   src/terminal/shell_session.cpp
+  src/terminal/app_session.cpp
   src/terminal/raw_pty_screen.cpp
   src/terminal/pty_input.cpp
 )

@@ -286,7 +286,14 @@ class StdioDebugAdapterProcess : public IDebugAdapterProcess {
       }
       if (child_pid_ > 0) {
         kill(child_pid_, SIGKILL);
-        waitpid(child_pid_, &status, 0);
+        // Timed reap only — never block the UI forever on a D-state gdb.
+        for (int i = 0; i < 40; ++i) {
+          const pid_t result = waitpid(child_pid_, &status, WNOHANG);
+          if (result == child_pid_ || result < 0) {
+            break;
+          }
+          usleep(50000);
+        }
         child_pid_ = -1;
       }
     }
@@ -395,7 +402,16 @@ void GdbProcess::stop(bool force) {
     }
     if (child_pid_ > 0) {
       kill(child_pid_, SIGKILL);
-      waitpid(child_pid_, &status, 0);
+      // Timed reap only: a gdb stuck in D-state (e.g. inferior-tty I/O) must not
+      // freeze the UI thread inside Stop forever.
+      for (int i = 0; i < 40; ++i) {
+        const pid_t result = waitpid(child_pid_, &status, WNOHANG);
+        if (result == child_pid_ || result < 0) {
+          child_pid_ = -1;
+          break;
+        }
+        usleep(50000);
+      }
       child_pid_ = -1;
     }
   }

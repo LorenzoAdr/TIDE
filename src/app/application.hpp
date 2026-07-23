@@ -28,6 +28,7 @@
 #include "indexer/workspace_indexer.hpp"
 #include "symbols/lsp_symbol_provider.hpp"
 #include "terminal/shell_session.hpp"
+#include "terminal/app_session.hpp"
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/quit_confirm.hpp"
@@ -160,6 +161,8 @@ class Application {
   void stop_all_subprocesses();
   void sync_activity_phase_effects();
   void run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan& plan, uint64_t paint_before);
+  void refresh_editor_visible_paths();
+  bool is_editor_visible_path(const std::string& absolute_path) const;
 
   ftxui::ScreenInteractive* active_screen_ = nullptr;
   AppConfig config_;
@@ -194,6 +197,7 @@ class Application {
   ClangFormatConfig clang_format_config_;
   ShellLaunchConfig cached_shell_launch_config_;
   ShellSession shell_session_;
+  AppSession app_session_;
   ConnectionWizardState connection_wizard_state_;
   WorkspaceWizardState workspace_wizard_state_;
   WelcomeScreenState welcome_screen_state_;
@@ -232,6 +236,9 @@ class Application {
   UiEventDispatcher ui_event_dispatcher_;
   mutable std::mutex tree_sitter_wake_mutex_;
   std::map<std::string, uint64_t> tree_sitter_last_wake_revision_;
+  // Active editor tab paths (normalized); read from the inotify thread via predicate.
+  mutable std::mutex editor_visible_paths_mutex_;
+  std::vector<std::string> editor_visible_abs_paths_;
 };
 
 }  // namespace tuide

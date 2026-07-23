@@ -662,7 +662,11 @@ Component MakeConnectionWizardOverlay(Component main, ConnectionWizardState* sta
       }),
       [main, state, model, layout_state] {
         Element base = main->Render();
-        if (!state->open || binary_symbols_request_pending(layout_state)) {
+        // Only yield to an explicit symbols-tab open request, not background nm
+        // preload (enter_debug sets binary_path without open_tab).
+        const bool symbols_modal_blocking =
+            layout_state != nullptr && layout_state->binary_symbols_pending.open_tab;
+        if (!state->open || symbols_modal_blocking) {
           return base;
         }
 

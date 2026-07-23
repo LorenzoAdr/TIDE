@@ -15,6 +15,7 @@
 #include "ftxui/component/event.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "terminal/shell_session.hpp"
+#include "terminal/app_session.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "indexer/workspace_indexer.hpp"
 #include "ui/call_hierarchy_view.hpp"
@@ -98,15 +99,16 @@ struct EditorPanelHandlers {
 
 struct ConsolePanelTabs {
   static constexpr int kTerminal = 0;
-  static constexpr int kDebug = 1;
-  static constexpr int kPerformance = 2;
-  static constexpr int kProblems = 3;
-  static constexpr int kSearch = 4;
-  static constexpr int kCallHierarchy = 5;
-  static constexpr int kGit = 6;
-  static constexpr int kCoreAnalyzer = 7;
-  static constexpr int kBinarySymbols = 8;
-  static constexpr int kPacketMonitor = 9;
+  static constexpr int kApp = 1;
+  static constexpr int kDebug = 2;
+  static constexpr int kPerformance = 3;
+  static constexpr int kProblems = 4;
+  static constexpr int kSearch = 5;
+  static constexpr int kCallHierarchy = 6;
+  static constexpr int kGit = 7;
+  static constexpr int kCoreAnalyzer = 8;
+  static constexpr int kBinarySymbols = 9;
+  static constexpr int kPacketMonitor = 10;
   int selected_tab = kTerminal;
 };
 
@@ -310,6 +312,7 @@ inline bool binary_symbols_request_pending(const MainLayoutState* layout_state) 
 inline bool console_panel_tab_active(const MainLayoutState* layout_state) {
   return layout_state != nullptr && layout_state->console_visible &&
          layout_state->console_tabs.selected_tab != ConsolePanelTabs::kTerminal &&
+         layout_state->console_tabs.selected_tab != ConsolePanelTabs::kApp &&
          layout_state->console_tabs.selected_tab != ConsolePanelTabs::kDebug;
 }
 
@@ -414,6 +417,7 @@ ftxui::Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                                 MainLayoutState* layout_state,
                                 StopDebugCallback on_stop_debug,
                                 ShellSession* shell,
+                                AppSession* app_session,
                                 WorkspaceIndexer* indexer,
                                 SymbolWorkspaceIndexer* symbol_indexer,
                                 ShellLaunchConfigProvider shell_launch_config,

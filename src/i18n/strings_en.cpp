@@ -559,6 +559,8 @@ const StringTable& english_strings() {
       {"search.status.suffix.replace", "  Enter: search  R: replace"},
       {"search.loading", "(searching…)"},
       {"console.tab.terminal", "Terminal"},
+      {"console.tab.app", "App"},
+      {"console.app.waiting", "(waiting for program output…)"},
       {"console.tab.gdb", "GDB"},
       {"console.tab.core_analyzer", "CoreAn"},
       {"console.tab.performance", "Performance"},

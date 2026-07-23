@@ -3,6 +3,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -23,6 +24,25 @@ namespace tuide {
 
 using DebugWakeCallback = std::function<void(DebugEventKind)>;
 
+struct RunInTerminalArgs {
+  std::string cwd;
+  std::vector<std::string> args;
+  std::map<std::string, std::string> env;
+  std::string kind;
+  std::string title;
+};
+
+struct RunInTerminalResult {
+  bool ok = false;
+  std::string error;
+  int process_id = -1;
+  int shell_process_id = -1;
+};
+
+using RunInTerminalHandler = std::function<RunInTerminalResult(const RunInTerminalArgs&)>;
+// Returns slave PTY path for GDB `set inferior-tty`, or empty to skip.
+using PrepareAppTtyHandler = std::function<std::string(int cols, int rows)>;
+
 class DapBackend : public IDebugBackend {
  public:
   DapBackend(ThreadSafeQueue<UiCommand>& commands,
@@ -33,6 +53,8 @@ class DapBackend : public IDebugBackend {
   void stop() override;
   void submit(const UiCommand& command) override;
   void set_wake_callback(DebugWakeCallback callback);
+  void set_run_in_terminal_handler(RunInTerminalHandler handler);
+  void set_prepare_app_tty_handler(PrepareAppTtyHandler handler);
   void set_preferred_adapter(DebugAdapterKind kind);
   void set_backend_epoch(uint64_t epoch) { backend_epoch_.store(epoch, std::memory_order_release); }
   uint64_t backend_epoch() const { return backend_epoch_.load(std::memory_order_acquire); }
@@ -73,6 +95,7 @@ class DapBackend : public IDebugBackend {
   bool exec_repl_capture_locked(const std::string& gdb_command, std::string* output,
                                   bool silent = false);
   bool configure_packet_monitor_env_locked(const LaunchConfig& launch);
+  bool configure_inferior_app_tty_locked();
   int fetch_inferior_pid_locked(bool silent = false);
   void emit_inferior_pid(int pid);
   void push_event(DebugEvent event);
@@ -85,6 +108,10 @@ class DapBackend : public IDebugBackend {
   ThreadSafeQueue<DebugEvent>& events_;
   DebugWakeCallback wake_callback_;
   std::mutex wake_mutex_;
+  RunInTerminalHandler run_in_terminal_handler_;
+  std::mutex run_in_terminal_mutex_;
+  PrepareAppTtyHandler prepare_app_tty_handler_;
+  std::mutex prepare_app_tty_mutex_;
 
   std::thread worker_;
   std::atomic<bool> running_{false};

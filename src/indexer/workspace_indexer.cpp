@@ -262,7 +262,8 @@ void scan_directories_for_watch(int fd, const fs::path& root, const fs::path& cu
 void run_inotify_loop(const std::string& workspace_root, const IndexFilterOptions& filter_options,
                       int inotify_fd, std::atomic<bool>* stop_requested,
                       std::mutex* changes_mutex, std::vector<FileIndexChange>* pending_changes,
-                      const std::function<void()>& on_changes) {
+                      const std::function<void(bool wake_ui)>& on_changes,
+                      const std::function<bool(const std::string&)>& modify_should_wake) {
   std::unordered_map<int, fs::path> watch_dirs;
   const fs::path root(workspace_root);
   scan_directories_for_watch(inotify_fd, root, root, filter_options, &watch_dirs);
@@ -284,6 +285,7 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
     }
 
     bool queued = false;
+    bool wake_ui = false;
     ssize_t offset = 0;
     while (offset < length) {
       const auto* event =
@@ -327,8 +329,10 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
           FileIndexChange change;
           change.kind = FileIndexChangeKind::RemovePrefix;
           change.relative_path = rel_str;
+          change.wake_ui = true;
           push_change(std::move(change));
           queued = true;
+          wake_ui = true;
         }
         continue;
       }
@@ -341,8 +345,10 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
           change.kind = FileIndexChangeKind::IndexDirectory;
           change.relative_path = rel_str;
           change.absolute_path = entry_path.string();
+          change.wake_ui = true;
           push_change(std::move(change));
           queued = true;
+          wake_ui = true;
         }
         continue;
       }
@@ -354,16 +360,43 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
         continue;
       }
 
+      const bool is_modify_only =
+          (event->mask & IN_MODIFY) != 0 &&
+          (event->mask & (IN_CREATE | IN_MOVED_TO)) == 0;
+      const std::string abs_str = entry_path.string();
+      if (is_modify_only) {
+        // Content-only writes: wake only if the file is visible in an editor so
+        // reload_stale_tabs_from_disk can run. Otherwise queue sources silently
+        // for symbol reindex, and ignore noise (logs, etc.).
+        const bool editor_visible = modify_should_wake && modify_should_wake(abs_str);
+        if (editor_visible) {
+          // fall through — queue with wake_ui
+        } else if (should_index_relative_path(rel_str, filter_options)) {
+          FileIndexChange change;
+          change.kind = FileIndexChangeKind::Upsert;
+          change.relative_path = rel_str;
+          change.absolute_path = abs_str;
+          change.wake_ui = false;
+          push_change(std::move(change));
+          queued = true;
+          continue;
+        } else {
+          continue;
+        }
+      }
+
       FileIndexChange change;
       change.kind = FileIndexChangeKind::Upsert;
       change.relative_path = rel_str;
-      change.absolute_path = entry_path.string();
+      change.absolute_path = abs_str;
+      change.wake_ui = true;
       push_change(std::move(change));
       queued = true;
+      wake_ui = true;
     }
 
     if (queued && on_changes) {
-      on_changes();
+      on_changes(wake_ui);
     }
   }
 }
@@ -409,6 +442,9 @@ void rebuild_index_file_picker_catalog(IndexSnapshot* snapshot) {
   auto catalog = std::make_shared<std::vector<FilePickerCatalogEntry>>();
   catalog->reserve(snapshot->files.size());
   for (const std::string& path : snapshot->files) {
+    if (!is_file_picker_candidate_path(path)) {
+      continue;
+    }
     FilePickerCatalogEntry entry;
     entry.path = path;
     entry.display_label = path;
@@ -510,9 +546,15 @@ bool WorkspaceIndexer::scanning() const {
   return scanning_.load();
 }
 
-void WorkspaceIndexer::set_change_notify(std::function<void()> callback) {
+void WorkspaceIndexer::set_change_notify(std::function<void(bool wake_ui)> callback) {
   std::lock_guard<std::mutex> lock(changes_mutex_);
   change_notify_ = std::move(callback);
+}
+
+void WorkspaceIndexer::set_modify_wake_predicate(
+    std::function<bool(const std::string& absolute_path)> pred) {
+  std::lock_guard<std::mutex> lock(modify_wake_mutex_);
+  modify_wake_predicate_ = std::move(pred);
 }
 
 bool WorkspaceIndexer::has_pending_changes() const {
@@ -568,13 +610,13 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
   // Avisa a la UI: el esqueleto ya no aplica y el explorador debe sincronizar el
   // snapshot completo (rg + carpetas). Sin esto el panel no se entera del cambio.
   {
-    std::function<void()> notify;
+    std::function<void(bool)> notify;
     {
       std::lock_guard<std::mutex> lock(changes_mutex_);
       notify = change_notify_;
     }
     if (notify) {
-      notify();
+      notify(true);
     }
   }
 
@@ -583,18 +625,26 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
   if (inotify_fd_ < 0) {
     return;
   }
-  const auto on_changes = [this]() {
-    std::function<void()> notify;
+  const auto on_changes = [this](bool wake_ui) {
+    std::function<void(bool)> notify;
     {
       std::lock_guard<std::mutex> lock(changes_mutex_);
       notify = change_notify_;
     }
     if (notify) {
-      notify();
+      notify(wake_ui);
     }
   };
+  const auto modify_should_wake = [this](const std::string& absolute_path) {
+    std::function<bool(const std::string&)> pred;
+    {
+      std::lock_guard<std::mutex> lock(modify_wake_mutex_);
+      pred = modify_wake_predicate_;
+    }
+    return pred && pred(absolute_path);
+  };
   run_inotify_loop(workspace_root, filter_options, inotify_fd_, &stop_requested_, &changes_mutex_,
-                   &pending_changes_, on_changes);
+                   &pending_changes_, on_changes, modify_should_wake);
   if (inotify_fd_ >= 0) {
     close(inotify_fd_);
     inotify_fd_ = -1;

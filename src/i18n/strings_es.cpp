@@ -559,6 +559,8 @@ const StringTable& spanish_strings() {
       {"search.status.suffix.replace", "  Enter: buscar  R: reemplazar"},
       {"search.loading", "(buscando…)"},
       {"console.tab.terminal", "Terminal"},
+      {"console.tab.app", "App"},
+      {"console.app.waiting", "(esperando salida del programa…)"},
       {"console.tab.gdb", "GDB"},
       {"console.tab.core_analyzer", "CoreAn"},
       {"console.tab.performance", "Rendimiento"},

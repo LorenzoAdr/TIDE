@@ -24,7 +24,8 @@
 // NO despiertan por diseño (se drenan cuando otro wake corre):
 //   - GitIndexerUpdated     — panel git; callback vacío
 //   - WorkspaceIndexUpdated — cambios del indexador de workspace
-//   - DebugOutput           — consola GDB entre paradas (batch al parar)
+//   - DebugOutput           — ahora sí despierta (kOutput) para que App pinte
+//     stdout sin esperar un stop (lanzamiento sin breakpoints).
 //
 // DebugStackVariables: stackTrace es async y llega DESPUÉS del ciclo de
 // paint de kStopped; DapBackend::push_event despierta en kStackUpdated para

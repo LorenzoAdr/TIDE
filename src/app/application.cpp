@@ -11,6 +11,8 @@
 #include <sstream>
 #include <thread>
 #include <unistd.h>
+#include <csignal>
+#include <sys/types.h>
 
 #include "app/workspace_config.hpp"
 #include "app/workspace_session.hpp"
@@ -407,7 +409,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 		if (config_.auto_debug && connection_config_complete()) {
 			if (debug_available_) {
 				app_mode_ = AppMode::kDebug;
-				layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kDebug;
+				layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kApp;
 				layout_state_.console_visible = true;
 				layout_state_.terminal_start_requested = true;
 			} else {
@@ -805,9 +807,13 @@ void Application::run_input_sync_drain(int64_t now_ms) {
 		layout_state_.ui_events->begin_input_correlation();
 	}
 	layout_state_.activity_gate.tick(now_ms);
+	refresh_editor_visible_paths();
 	shell_session_.set_consumer_active(
 	    layout_state_.console_visible &&
 	    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal);
+	app_session_.set_consumer_active(
+	    layout_state_.console_visible &&
+	    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp);
 	if (layout_state_.primary_editor.tick_callback && !layout_state_.welcome_visible) {
 		layout_state_.primary_editor.tick_callback();
 	}
@@ -829,6 +835,7 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
                                          uint64_t paint_before) {
 	layout_state_.activity_gate.tick(now_ms);
 	sync_activity_phase_effects();
+	refresh_editor_visible_paths();
 	layout_state_.ui_perf_monitor.on_custom_tick_begin(now_ms);
 	layout_state_.ui_perf_monitor.set_activity_phase(
 	    layout_state_.activity_gate.phase(),
@@ -837,6 +844,9 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 	shell_session_.set_consumer_active(
 	    layout_state_.console_visible &&
 	    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal);
+	app_session_.set_consumer_active(
+	    layout_state_.console_visible &&
+	    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp);
 
 	if (plan.run_debug) {
 		UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "drain_events");
@@ -1393,6 +1403,59 @@ void Application::register_backend_wake_callback() {
 		DebugUiChannel channel(&layout_state_);
 		channel.on_debug_event(kind);
 	});
+	backend_->set_run_in_terminal_handler([this](const RunInTerminalArgs& args) {
+		RunInTerminalResult result;
+		if (args.kind == "external") {
+			result.error = "external terminal not supported";
+			return result;
+		}
+		int cols = 80;
+		int rows = 24;
+		if (layout_state_.primary_editor.visible_line_count) {
+			rows = std::max(8, layout_state_.primary_editor.visible_line_count());
+		}
+		if (layout_state_.terminal_width) {
+			cols = std::max(20, layout_state_.terminal_width() - 4);
+		}
+		const int pid = app_session_.start_command(args.cwd, args.args, args.env, cols, rows);
+		if (pid <= 0) {
+			result.error = "failed to start app PTY";
+			return result;
+		}
+		result.ok = true;
+		result.process_id = pid;
+		layout_state_.console_visible = true;
+		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kApp;
+		layout_state_.panel_render_cache.mark_dirty(UiPanelId::Console);
+		if (layout_state_.ui_events != nullptr) {
+			layout_state_.ui_events->post_repaint_urgent();
+		} else {
+			UI_WAKE(&layout_state_, "app");
+		}
+		return result;
+	});
+	backend_->set_prepare_app_tty_handler([this](int cols, int rows) {
+		int use_cols = cols;
+		int use_rows = rows;
+		if (layout_state_.primary_editor.visible_line_count) {
+			use_rows = std::max(8, layout_state_.primary_editor.visible_line_count());
+		}
+		if (layout_state_.terminal_width) {
+			use_cols = std::max(20, layout_state_.terminal_width() - 4);
+		}
+		const std::string tty = app_session_.open_host_pty(use_cols, use_rows);
+		if (!tty.empty()) {
+			layout_state_.console_visible = true;
+			layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kApp;
+			layout_state_.panel_render_cache.mark_dirty(UiPanelId::Console);
+			if (layout_state_.ui_events != nullptr) {
+				layout_state_.ui_events->post_repaint_urgent();
+			} else {
+				UI_WAKE(&layout_state_, "app");
+			}
+		}
+		return tty;
+	});
 }
 
 void Application::invalidate_debug_ui() {
@@ -1419,6 +1482,8 @@ void Application::ensure_backend_started() {
 		}
 		if (backend_) {
 			backend_->set_wake_callback(nullptr);
+			backend_->set_run_in_terminal_handler(nullptr);
+			backend_->set_prepare_app_tty_handler(nullptr);
 			backend_->stop();
 		}
 		backend_started_ = false;
@@ -1457,18 +1522,29 @@ void Application::set_workspace_status(const std::string &message) {
 }
 
 void Application::exit_debug_mode(bool force_kill) {
-	if (debugging_started_ && !force_kill) {
-		if (config_.mode == SessionMode::kAttach) {
-			submit_command(UiCommand{UiCommandKind::kDetach});
-		} else {
-			submit_command(UiCommand{UiCommandKind::kDisconnect});
-		}
-	}
+	(void)force_kill;
+	// Never enqueue a graceful DAP Disconnect here: with inferior-tty the worker
+	// can block forever inside session_->send(disconnect).get(), freezing Stop.
+	// Tear down PTY + SIGKILL inferior, then force-kill the adapter.
 	debugging_started_ = false;
 	session_ready_ = false;
+	++debug_launch_generation_;
+	debug_launch_modal_state_.reset();
+
+	if (layout_state_.packet_monitor_service != nullptr) {
+		const int inferior_pid = layout_state_.packet_monitor_service->state().inferior_pid;
+		if (inferior_pid > 1) {
+			kill(static_cast<pid_t>(inferior_pid), SIGKILL);
+		}
+	}
+	app_session_.stop();
+	app_session_.reset_display();
+
 	if (backend_started_) {
 		if (backend_) {
 			backend_->set_wake_callback(nullptr);
+			backend_->set_run_in_terminal_handler(nullptr);
+			backend_->set_prepare_app_tty_handler(nullptr);
 			backend_->stop();
 		}
 		backend_started_ = false;
@@ -1502,7 +1578,10 @@ void Application::exit_debug_mode(bool force_kill) {
 	layout_state_.text_input_focus = TextInputFocus::None;
 	layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
 	layout_state_.show_core_analyzer_tab = false;
-	layout_state_.packet_monitor_service->reset();
+	if (layout_state_.packet_monitor_service != nullptr) {
+		layout_state_.packet_monitor_service->reset();
+	}
+	layout_state_.binary_symbols_pending = {};
 	set_workspace_status(i18n::tr("app.edit_mode"));
 	request_terminal_autostart();
 	invalidate_debug_ui();
@@ -1547,8 +1626,8 @@ void Application::enter_debug_ui_layout() {
 		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kCoreAnalyzer;
 		layout_state_.text_input_focus = TextInputFocus::Console;
 	} else {
-		layout_state_.text_input_focus = TextInputFocus::Console;
-		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kDebug;
+		layout_state_.text_input_focus = TextInputFocus::None;
+		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kApp;
 	}
 	layout_state_.console_visible = true;
 	layout_state_.terminal_start_requested = true;
@@ -1664,6 +1743,9 @@ void Application::complete_debug_launch_success() {
 	debug_launch_modal_state_.reset();
 	if (app_mode_ != AppMode::kDebug) {
 		enter_debug_ui_layout();
+	} else if (!layout_state_.show_core_analyzer_tab) {
+		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kApp;
+		layout_state_.console_visible = true;
 	}
 	// Wake before any file I/O: a failing/blocking open_file_at here used to skip
 	// invalidate and leave the modal closed while the screen never switched to debug.
@@ -1956,9 +2038,26 @@ void Application::apply_event(const DebugEvent &event) {
 		}
 		apply_connection_and_start();
 		break;
-	case DebugEventKind::kOutput:
-		model_.append_console(event.text);
+	case DebugEventKind::kOutput: {
+		const std::string& cat = event.output_category;
+		// DAP: missing category defaults to "console" (adapter chatter). stdout/stderr
+		// are inferior I/O — App tab (ANSI), unless a live runInTerminal PTY already
+		// owns that stream.
+		if (cat == "stdout" || cat == "stderr") {
+			if (!app_session_.has_live_pty()) {
+				app_session_.feed_bytes(event.text);
+				layout_state_.panel_render_cache.mark_dirty(UiPanelId::Console);
+				if (layout_state_.ui_events != nullptr) {
+					layout_state_.ui_events->post_repaint_urgent();
+				} else {
+					UI_WAKE(&layout_state_, "app");
+				}
+			}
+		} else {
+			model_.append_console(event.text);
+		}
 		break;
+	}
 	case DebugEventKind::kStopped:
 		// bash-debug emits Stopped before setBreakpoints finish. Keep the launch
 		// modal open until kLaunchConfigured so Continue cannot race past BPs.
@@ -2143,11 +2242,46 @@ void Application::drain_events() {
 	}
 }
 
+void Application::refresh_editor_visible_paths() {
+	std::vector<std::string> paths;
+	paths.reserve(2);
+	const auto add_active = [&paths](const WorkspaceModel& ws) {
+		std::string path;
+		if (ws.active_tab >= 0 && ws.active_tab < static_cast<int>(ws.tabs.size())) {
+			path = ws.tabs[static_cast<std::size_t>(ws.active_tab)].path;
+		} else if (!ws.buffer.path.empty()) {
+			path = ws.buffer.path;
+		}
+		if (path.empty()) {
+			return;
+		}
+		path = normalize_path(path);
+		if (std::find(paths.begin(), paths.end(), path) == paths.end()) {
+			paths.push_back(std::move(path));
+		}
+	};
+	add_active(workspace_);
+	add_active(secondary_workspace_);
+	std::lock_guard<std::mutex> lock(editor_visible_paths_mutex_);
+	editor_visible_abs_paths_ = std::move(paths);
+}
+
+bool Application::is_editor_visible_path(const std::string& absolute_path) const {
+	if (absolute_path.empty()) {
+		return false;
+	}
+	const std::string normalized = normalize_path(absolute_path);
+	std::lock_guard<std::mutex> lock(editor_visible_paths_mutex_);
+	return std::find(editor_visible_abs_paths_.begin(), editor_visible_abs_paths_.end(),
+	                 normalized) != editor_visible_abs_paths_.end();
+}
+
 void Application::process_index_changes() {
 	if (workspace_.root.empty()) {
 		return;
 	}
 	bool changed = false;
+	bool wake_ui = false;
 	const auto path_matches_prefix = [](const std::string& path, const std::string& prefix) {
 		if (prefix.empty()) {
 			return false;
@@ -2163,6 +2297,9 @@ void Application::process_index_changes() {
 
 	for (const auto &change : indexer_.drain_changes()) {
 		changed = true;
+		if (change.wake_ui) {
+			wake_ui = true;
+		}
 		switch (change.kind) {
 		case FileIndexChangeKind::Remove:
 			indexer_.remove_file(workspace_.root, change.relative_path);
@@ -2194,7 +2331,9 @@ void Application::process_index_changes() {
 			break;
 		}
 	}
-	if (changed) {
+	// Solo repintar cuando el listado del árbol puede haber cambiado (alta/baja/rename).
+	// Un modify silencioso (p. ej. reindex de sources) no debe forzar otro frame.
+	if (changed && wake_ui) {
 		layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
 		UI_WAKE(&layout_state_, "app");
 	}
@@ -2386,8 +2525,12 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 			layout_state_.terminal_start_requested = true;
 			if (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal ||
 			    (app_mode_ == AppMode::kDebug &&
-			     layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kDebug)) {
-				layout_state_.text_input_focus = TextInputFocus::Console;
+			     (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kDebug ||
+			      layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp))) {
+				layout_state_.text_input_focus =
+				    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp
+				        ? TextInputFocus::None
+				        : TextInputFocus::Console;
 			}
 			mark_focus_sync();
 			return true;
@@ -2446,9 +2589,9 @@ int Application::run() {
 	auto build_ui = [&]() {
 		return MakeMainLayout(
 		    &app_mode_, &model_, &workspace_, &secondary_workspace_, &source_state_, &focus_state_,
-		    symbol_provider_, on_command, &layout_state_, on_stop_debug, &shell_session_, &indexer_,
-		    &symbol_indexer_, shell_launch_config, &git_service_, &git_panel_state_,
-		    &welcome_screen_state_, [this] { open_external_file_wizard(); },
+		    symbol_provider_, on_command, &layout_state_, on_stop_debug, &shell_session_,
+		    &app_session_, &indexer_, &symbol_indexer_, shell_launch_config, &git_service_,
+		    &git_panel_state_, &welcome_screen_state_, [this] { open_external_file_wizard(); },
 		    [this] { open_connection_wizard(); }, [this] { open_workspace_wizard(); });
 	};
 
@@ -2591,10 +2734,16 @@ int Application::run() {
 		}
 	};
 	git_service_.set_update_callback([] {});
-	indexer_.set_change_notify([this] {
+	indexer_.set_change_notify([this](bool wake_ui) {
+		if (!wake_ui) {
+			return;
+		}
 		layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
 		UI_WAKE(&layout_state_, "indexer.fs_change");
 	});
+	indexer_.set_modify_wake_predicate(
+	    [this](const std::string& absolute_path) { return is_editor_visible_path(absolute_path); });
+	refresh_editor_visible_paths();
 
 	file_picker_state_.set_preview_notify([this] {
 		ui_wake_correlated(&layout_state_, ui_capture_correlation(&layout_state_),
