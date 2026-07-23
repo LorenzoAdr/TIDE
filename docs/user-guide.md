@@ -34,10 +34,11 @@ Press **F2** to open the debug connection wizard from IDE mode. When a debug ses
 | JavaScript / TypeScript | `.js`, `.ts`, `.tsx`, … | typescript-language-server | — |
 | CMake | `CMakeLists.txt`, `.cmake` | neocmakelsp | — |
 | Make | `Makefile`, `.mk` | make-ls | — |
+| YAML | `.yaml`, `.yml` | yaml-language-server | — |
 
 Without an LSP server, outline, highlighting, and local completion still work via Tree-sitter. Servers start lazily when you open a matching file (clangd may also start on workspace open for C/C++).
 
-Sample files: `examples/hello.cpp`, `hello.py`, `hello.rs`, `hello.go`, `hello.zig`, `hello.lua`, `hello.f90`, `hello.ts`, `hello.sh`, `hello.tex`.
+Sample files: `examples/hello.cpp`, `hello.py`, `hello.rs`, `hello.go`, `hello.zig`, `hello.lua`, `hello.f90`, `hello.ts`, `hello.sh`, `hello.tex`, `hello.yaml`.
 
 ## Requirements
 
@@ -74,6 +75,7 @@ Language servers and debug tools can be **system installs** on `PATH` or **embed
 | typescript-language-server | JS/TS LSP | (PATH / bundled) |
 | neocmakelsp | CMake LSP | (PATH / bundled) |
 | make-ls | Makefile LSP | (PATH / bundled) |
+| yaml-language-server | YAML LSP | (PATH / bundled) |
 | gdb | Native DAP | `GDB_PATH` |
 | debugpy | Python DAP | `DEBUGPY_PYTHON` / `PYTHON` |
 

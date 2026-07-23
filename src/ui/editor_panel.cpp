@@ -193,7 +193,9 @@ struct EditorPanelState {
   int scrollbar_drag_offset = 0;
   int h_scrollbar_drag_offset = 0;
   uint64_t last_view_token = 0;
+  uint64_t last_debug_view_token = 0;
   int last_render_caret_line = -1;
+  int last_render_execution_line = -1;
   std::string last_path;
   bool mouse_selecting = false;
   CapturedMouse captured_mouse;
@@ -259,7 +261,9 @@ struct EditorPanelState {
   uint64_t diagnostic_suffix_revision = 0;
   std::unordered_set<int> git_changed_lines;
   std::unordered_map<int, std::string> git_previous_by_line;
+  std::vector<std::string> git_head_lines;
   bool git_untracked_all_lines = false;
+  bool git_baseline_ready = false;
   int git_cached_line_count = 0;
   std::string git_cache_path;
   uint64_t git_cache_revision = 0;
@@ -298,7 +302,6 @@ struct EditorPanelState {
   uint64_t viewport_line_render_cache_colors_revision = 0;
   std::string scope_completion_cache_key;
   std::vector<CompletionItem> scope_completion_cache_items;
-  uint64_t vh_last_inputs_git_view_token = 0;
   int vh_last_inputs_code_width = -1;
   std::size_t vh_last_inputs_find_count = 0;
   Box diff_action_box;
@@ -433,6 +436,7 @@ struct ViewportLineRenderKeyInput {
   char fold_marker = '\0';
   char gutter_marker = ' ';
   bool has_breakpoint = false;
+  bool has_execution = false;
   bool in_immediate_scope_gutter = false;
   const std::string* suffix_ptr = nullptr;
   bool symbol_press_active = false;
@@ -479,6 +483,7 @@ uint64_t compute_viewport_line_render_key(const ViewportLineRenderKeyInput& line
   h = viewport_line_hash_int(h, line.fold_marker);
   h = viewport_line_hash_bool(h, gutter_markers);
   h = viewport_line_hash_bool(h, line.has_breakpoint);
+  h = viewport_line_hash_bool(h, line.has_execution);
   h = viewport_line_hash_int(h, line.gutter_marker);
   h = viewport_line_hash_bool(h, line.in_immediate_scope_gutter);
   h = viewport_line_hash_bool(h, indent_guides_enabled);
@@ -581,6 +586,8 @@ void mark_editor_content_edited(EditorPanelState* panel, EditorBuffer& buffer) {
     buffer.semantic_layout_dirty = false;
     buffer.semantic_layout_dirty_from_line = std::numeric_limits<int>::max();
   }
+  // Git gutter marks are recomputed in the visual-highlight debounce worker.
+  mark_visual_highlight_inputs_dirty(&panel->visual_highlight, panel->content_edit_ms);
   if (is_indexed_source_path(buffer.path)) {
     panel->ts_dirty_highlight_lines.insert(buffer.primary_line());
     panel->lsp_sync_pending = true;
@@ -906,8 +913,9 @@ VisualHighlightJobInputs build_visual_highlight_job_inputs(
   inputs.total_lines = static_cast<int>(buffer.lines.size());
   inputs.viewport_scroll = buffer.scroll;
   inputs.viewport_visible_lines = visible_lines;
-  inputs.git_changed_lines = panel->git_changed_lines;
+  inputs.git_baseline_ready = panel->git_baseline_ready;
   inputs.git_untracked_all = panel->git_untracked_all_lines;
+  inputs.git_head_lines = panel->git_head_lines;
   if (find_open && find_state != nullptr && !find_state->matches.empty()) {
     inputs.text_matches = find_state->matches;
   }
@@ -923,13 +931,11 @@ void maybe_mark_visual_highlight_inputs_dirty(VisualHighlightPanelState* vh,
   }
   const std::size_t find_count =
       find_open && find != nullptr ? find->matches.size() : 0;
-  const bool changed = panel->vh_last_inputs_git_view_token != panel->git_cache_view_token ||
-                       panel->vh_last_inputs_code_width != code_width ||
+  const bool changed = panel->vh_last_inputs_code_width != code_width ||
                        panel->vh_last_inputs_find_count != find_count;
   if (!changed) {
     return;
   }
-  panel->vh_last_inputs_git_view_token = panel->git_cache_view_token;
   panel->vh_last_inputs_code_width = code_width;
   panel->vh_last_inputs_find_count = find_count;
   mark_visual_highlight_inputs_dirty(vh, now_ms);
@@ -1007,77 +1013,135 @@ char line_gutter_marker(EditorPanelState* panel, int line) {
   return '\0';
 }
 
-void apply_git_diff_to_panel(EditorPanelState* panel, const GitFileDiff& diff,
-                             const std::vector<std::string>& buffer_lines) {
-  if (!diff.untracked && diff.head_lines.empty() && diff.line_changes.empty()) {
+void clear_git_panel_marks(EditorPanelState* panel) {
+  if (panel == nullptr) {
     return;
   }
   panel->git_changed_lines.clear();
   panel->git_previous_by_line.clear();
-  panel->git_cached_line_count = static_cast<int>(buffer_lines.size());
-  if (diff.untracked) {
-    panel->git_untracked_all_lines = true;
-    return;
-  }
+  panel->git_head_lines.clear();
   panel->git_untracked_all_lines = false;
-  if (!diff.head_lines.empty()) {
-    const LineDiffResult result = compute_line_diff(diff.head_lines, buffer_lines);
-    panel->git_changed_lines = result.changed_new_lines;
-    for (const auto& [line_no, content] : result.previous_content_by_new_line) {
-      panel->git_previous_by_line[line_no] = content;
-    }
+  panel->git_baseline_ready = false;
+  panel->git_cached_line_count = 0;
+  panel->git_cache_path.clear();
+  panel->git_cache_revision = 0;
+  panel->git_cache_view_token = 0;
+}
+
+void apply_line_diff_result_to_panel(EditorPanelState* panel, const LineDiffResult& result,
+                                     int line_count) {
+  if (panel == nullptr) {
     return;
   }
-  if (!diff.line_changes.empty()) {
-    for (const auto& [line_no, change] : diff.line_changes) {
-      (void)change;
-      panel->git_changed_lines.insert(line_no);
-    }
-    for (const auto& [line_no, content] : diff.previous_content_by_line) {
-      panel->git_previous_by_line[line_no] = content;
-    }
+  panel->git_changed_lines = result.changed_new_lines;
+  panel->git_previous_by_line.clear();
+  for (const auto& [line_no, content] : result.previous_content_by_new_line) {
+    panel->git_previous_by_line[line_no] = content;
+  }
+  panel->git_cached_line_count = line_count;
+}
+
+void apply_myers_git_marks_to_panel(EditorPanelState* panel,
+                                    const std::vector<std::string>& buffer_lines) {
+  if (panel == nullptr) {
+    return;
+  }
+  panel->git_cached_line_count = static_cast<int>(buffer_lines.size());
+  if (panel->git_untracked_all_lines) {
+    panel->git_changed_lines.clear();
+    panel->git_previous_by_line.clear();
+    return;
+  }
+  if (!panel->git_baseline_ready) {
+    return;
+  }
+  apply_line_diff_result_to_panel(panel, compute_line_diff(panel->git_head_lines, buffer_lines),
+                                  static_cast<int>(buffer_lines.size()));
+}
+
+void apply_visual_highlight_git_marks(EditorPanelState* panel, const EditorBuffer& buffer) {
+  if (panel == nullptr) {
+    return;
+  }
+  const VisualHighlightOverviewData& overview = panel->visual_highlight.snapshot.overview;
+  if (!overview.git_marks_computed) {
+    return;
+  }
+  panel->git_untracked_all_lines = overview.git_untracked_all;
+  panel->git_changed_lines = overview.git_changed_lines;
+  panel->git_previous_by_line = overview.git_previous_by_line;
+  panel->git_cached_line_count = static_cast<int>(buffer.lines.size());
+  panel->git_cache_view_token = buffer.view_token;
+}
+
+void apply_git_baseline_to_panel(EditorPanelState* panel, const GitFileDiff& diff,
+                                 const std::vector<std::string>& buffer_lines,
+                                 bool recompute_marks) {
+  if (panel == nullptr) {
+    return;
+  }
+  panel->git_untracked_all_lines = diff.untracked;
+  panel->git_head_lines = diff.head_lines;
+  panel->git_baseline_ready = diff.untracked || diff.loaded || !diff.head_lines.empty() ||
+                              !diff.line_changes.empty();
+  if (!recompute_marks) {
+    return;
+  }
+  if (diff.untracked) {
+    panel->git_changed_lines.clear();
+    panel->git_previous_by_line.clear();
+    panel->git_cached_line_count = static_cast<int>(buffer_lines.size());
+    return;
+  }
+  if (!diff.head_lines.empty()) {
+    apply_line_diff_result_to_panel(panel, compute_line_diff(diff.head_lines, buffer_lines),
+                                    static_cast<int>(buffer_lines.size()));
+    return;
+  }
+  // HEAD still loading: fall back to unified-diff line map from disk if present.
+  panel->git_changed_lines.clear();
+  panel->git_previous_by_line.clear();
+  panel->git_cached_line_count = static_cast<int>(buffer_lines.size());
+  for (const auto& [line_no, change] : diff.line_changes) {
+    (void)change;
+    panel->git_changed_lines.insert(line_no);
+  }
+  for (const auto& [line_no, content] : diff.previous_content_by_line) {
+    panel->git_previous_by_line[line_no] = content;
   }
 }
 
 void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer& buffer,
-                    bool read_only_tab) {
+                    bool read_only_tab, bool visual_highlight_live) {
   if (read_only_tab) {
-    if (panel != nullptr) {
-      panel->git_changed_lines.clear();
-      panel->git_previous_by_line.clear();
-      panel->git_untracked_all_lines = false;
-      panel->git_cached_line_count = 0;
-      panel->git_cache_path.clear();
-      panel->git_cache_revision = 0;
-    }
+    clear_git_panel_marks(panel);
     return;
   }
   if (panel == nullptr || git == nullptr || !git->is_repo() || buffer.path.empty()) {
-    if (panel != nullptr) {
-      panel->git_changed_lines.clear();
-      panel->git_previous_by_line.clear();
-      panel->git_untracked_all_lines = false;
-      panel->git_cached_line_count = 0;
-      panel->git_cache_path.clear();
-      panel->git_cache_revision = 0;
-    }
+    clear_git_panel_marks(panel);
     return;
   }
 
   const uint64_t revision = git->cache_revision();
+  bool path_changed = false;
   if (buffer.path != panel->git_cache_path) {
+    path_changed = true;
     panel->git_cache_path = buffer.path;
     panel->git_cache_revision = 0;
     panel->git_cache_view_token = 0;
     panel->git_changed_lines.clear();
     panel->git_previous_by_line.clear();
+    panel->git_head_lines.clear();
     panel->git_untracked_all_lines = false;
+    panel->git_baseline_ready = false;
     panel->git_cached_line_count = 0;
     git->refresh_file_diff(buffer.path);
     git->refresh_file_head(buffer.path);
   }
 
+  bool revision_changed = false;
   if (revision != panel->git_cache_revision) {
+    revision_changed = true;
     panel->git_cache_revision = revision;
     panel->git_cache_view_token = 0;
     if (!git->has_file_diff_text(buffer.path)) {
@@ -1097,17 +1161,40 @@ void sync_git_cache(EditorPanelState* panel, GitService* git, const EditorBuffer
     return;
   }
 
+  const bool baseline_changed =
+      path_changed || revision_changed || panel->git_untracked_all_lines != diff.untracked ||
+      panel->git_head_lines.size() != diff.head_lines.size() ||
+      (!diff.head_lines.empty() && panel->git_head_lines != diff.head_lines) ||
+      (!panel->git_baseline_ready && (diff.loaded || diff.untracked || !diff.head_lines.empty()));
+
   const int line_count = static_cast<int>(buffer.lines.size());
-  if (panel->git_cache_path == buffer.path && panel->git_cache_revision == revision &&
-      panel->git_cache_view_token == buffer.view_token &&
-      panel->git_cached_line_count == line_count &&
-      panel->git_untracked_all_lines == diff.untracked) {
+  const bool buffer_changed = panel->git_cache_view_token != buffer.view_token ||
+                              panel->git_cached_line_count != line_count;
+
+  if (!baseline_changed && !buffer_changed) {
     return;
   }
 
-  apply_git_diff_to_panel(panel, diff, buffer.lines.to_vector());
+  const std::vector<std::string> buffer_lines = buffer.lines.to_vector();
+  if (baseline_changed) {
+    // Real git baseline refresh (open/save/invalidate/checkout): apply marks now for
+    // snappy gutter, then let visual-highlight debounce refresh overview/async path.
+    apply_git_baseline_to_panel(panel, diff, buffer_lines, true);
+    panel->git_cache_view_token = buffer.view_token;
+    mark_visual_highlight_inputs_dirty(&panel->visual_highlight, steady_now_ms());
+    return;
+  }
+
+  // Live buffer edits: Myers runs inside the visual-highlight debounce worker.
+  // Edits already mark VH dirty via mark_editor_content_edited; do not re-dirty
+  // here or the heavy tick would keep resetting the debounce timer.
+  if (visual_highlight_live) {
+    return;
+  }
+
+  apply_git_baseline_to_panel(panel, diff, buffer_lines, false);
+  apply_myers_git_marks_to_panel(panel, buffer_lines);
   panel->git_cache_view_token = buffer.view_token;
-  mark_visual_highlight_inputs_dirty(&panel->visual_highlight, steady_now_ms());
 }
 
 const std::vector<TextMatch>* overview_selection_occurrences(
@@ -6573,6 +6660,41 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     // scratch Screen PixelRowFromElement rasterizes into, clipping it.
     const int gutter_render_width = gutter_w + (gutter_markers ? 1 : 0);
 
+    int execution_line = -1;
+    if (debug_model != nullptr && debug_model->state == DebugState::kStopped &&
+        debug_model->active_line > 0 && !buffer.path.empty()) {
+      const std::string buf_norm = normalize_path(buffer.path);
+      const std::string buf_lsp = normalize_lsp_path(buffer.path);
+      auto path_matches = [&](const std::string& debug_path) {
+        if (debug_path.empty()) {
+          return false;
+        }
+        if (buf_norm == normalize_path(debug_path)) {
+          return true;
+        }
+        return buf_lsp == normalize_lsp_path(debug_path);
+      };
+      bool matched = path_matches(debug_model->active_file);
+      if (!matched && !debug_model->stack_frames.empty()) {
+        const int frame_index = std::max(
+            0, std::min(debug_model->selected_frame,
+                        static_cast<int>(debug_model->stack_frames.size()) - 1));
+        matched =
+            path_matches(debug_model->stack_frames[static_cast<std::size_t>(frame_index)].file);
+      }
+      if (matched) {
+        execution_line = debug_model->active_line;
+      }
+    }
+    if (debug_model != nullptr &&
+        (debug_model->view_token != panel_state->last_debug_view_token ||
+         execution_line != panel_state->last_render_execution_line)) {
+      panel_state->last_debug_view_token = debug_model->view_token;
+      panel_state->last_render_execution_line = execution_line;
+      // Bust raster cache so ► / inverted execution row cannot stick to a stale key.
+      panel_state->viewport_line_render_cache.clear();
+    }
+
     const int code_width =
         code_width_from_box(panel_state->code_box, panel_state->code_width_chars);
     panel_state->code_width_chars = code_width;
@@ -6713,6 +6835,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
               : '\0';
       char gutter_marker = ' ';
       bool line_breakpoint = false;
+      const bool line_execution = execution_line > 0 && (i + 1) == execution_line;
       if (gutter_markers) {
         if (has_breakpoint_markers &&
             debug_model->has_breakpoint(normalize_path(buffer.path), i + 1)) {
@@ -6778,6 +6901,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       key_input.fold_marker = fold_marker;
       key_input.gutter_marker = gutter_marker;
       key_input.has_breakpoint = line_breakpoint;
+      key_input.has_execution = line_execution;
       key_input.in_immediate_scope_gutter = in_immediate_scope_gutter;
       key_input.suffix_ptr = suffix_ptr;
       key_input.symbol_press_active = symbol_press_active;
@@ -6807,10 +6931,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       }
 
       const Decorator gutter_bg =
-          is_primary ? bgcolor(theme::EditorLineHi())
-                     : (in_immediate_scope_gutter
-                            ? bgcolor(theme::ScopeBg(scope_highlight_strength))
-                            : bgcolor(theme::CodeBg()));
+          line_execution ? bgcolor(theme::EditorLineHi())
+                         : (is_primary ? bgcolor(theme::EditorLineHi())
+                                       : (in_immediate_scope_gutter
+                                              ? bgcolor(theme::ScopeBg(scope_highlight_strength))
+                                              : bgcolor(theme::CodeBg())));
 
       // fold_el occupies exactly the `panel_state->gutter_fold_width` column(s) that were
       // budgeted into `gutter_w` (see its computation above). When fold gutters are disabled
@@ -6828,7 +6953,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       Element gutter_row;
       if (gutter_markers) {
         std::string gutter_text;
-        if (line_breakpoint) {
+        if (line_execution) {
+          gutter_text = "►";
+        } else if (line_breakpoint) {
           gutter_text = "●";
         } else {
           gutter_text.assign(1, gutter_marker == '\0' ? ' ' : gutter_marker);
@@ -6836,7 +6963,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         gutter_text += helix_format_line_number(
             i, buffer.primary_line(), gutter_w - panel_state->gutter_fold_width, helix_relative);
         Color gutter_color = theme::Muted();
-        if (line_breakpoint) {
+        if (line_execution) {
+          gutter_color = theme::Play();
+        } else if (line_breakpoint) {
           gutter_color = Color::Red;
         } else if (gutter_marker == '!') {
           gutter_color = theme::Error();
@@ -6863,6 +6992,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
                            indent_guides_enabled, guide_depth, false, cursor_cell,
                            colored_braces_ptr) |
           xflex_shrink;
+      if (line_execution) {
+        code_row = code_row | inverted;
+      }
 
       CachedViewportLineRow cached_row;
       cached_row.key = render_key;
@@ -6914,6 +7046,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     const VisualHighlightOverviewData* overview_data = nullptr;
     if (overview_ruler_enabled) {
       overview_fallback.total_lines = static_cast<int>(buffer.lines.size());
+      // Panel marks are the live source of truth (updated on git baseline refresh and
+      // when visual-highlight Myers results drain).
       overview_fallback.git_changed_lines = panel_state->git_changed_lines;
       overview_fallback.git_untracked_all = panel_state->git_untracked_all_lines;
       const VisualHighlightOverviewData& snap_overview =
@@ -6921,8 +7055,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       if (panel_state->visual_highlight.snapshot.path == buffer.path &&
           snap_overview.total_lines > 0) {
         overview_fallback.total_lines = snap_overview.total_lines;
-        overview_fallback.git_changed_lines = snap_overview.git_changed_lines;
-        overview_fallback.git_untracked_all = snap_overview.git_untracked_all;
         overview_fallback.text_matches = snap_overview.text_matches;
       } else if (find_state->open && !find_state->matches.empty()) {
         overview_fallback.text_matches = find_state->matches;
@@ -7272,6 +7404,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           bool vh_view_invalidated = false;
           if (drain_visual_highlight_results(&panel_state->visual_highlight, workspace->buffer,
                                              layout_state, vh_focused)) {
+            apply_visual_highlight_git_marks(panel_state.get(), workspace->buffer);
             vh_view_invalidated = true;
           }
           if (apply_visual_highlight_fold_regions(&workspace->buffer,
@@ -7395,7 +7528,13 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         workspace->ensure_buffer();
         const EditorBuffer& buf = workspace->buffer;
         UiSyncPhaseScope scope(ui_perf, "tick." + panel_tag + ".heavy.git");
-        sync_git_cache(panel_state.get(), git_service, buf, workspace->active_tab_read_only());
+        const bool vh_live =
+            vh_focused &&
+            visual_highlight_config_from_settings(
+                layout_state != nullptr ? layout_state->app_settings : nullptr)
+                .enabled;
+        sync_git_cache(panel_state.get(), git_service, buf, workspace->active_tab_read_only(),
+                       vh_live);
       }
     };
   }

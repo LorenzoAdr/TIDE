@@ -35,6 +35,7 @@ set(TUIDE_TREE_SITTER_INCLUDE_DIRS
   ${tree_sitter_typescript_SOURCE_DIR}/bindings/c
   ${tree_sitter_cmake_SOURCE_DIR}/bindings/c
   ${tree_sitter_make_SOURCE_DIR}/bindings/c
+  ${tree_sitter_yaml_SOURCE_DIR}/bindings/c
   ${CMAKE_BINARY_DIR}/generated
 )
 
@@ -53,6 +54,7 @@ set(TUIDE_TREE_SITTER_GRAMMAR_LIBS
   tree-sitter-typescript
   tree-sitter-cmake
   tree-sitter-make
+  tree-sitter-yaml
 )
 
 set(TUIDE_TREE_SITTER_SOURCES
@@ -385,6 +387,9 @@ if(TUIDE_BUNDLE_NEOCMAKELSP)
 endif()
 if(TUIDE_BUNDLE_MAKE_LS)
   include(cmake/BundleMakeLs.cmake)
+endif()
+if(TUIDE_BUNDLE_YAML_LS)
+  include(cmake/BundleYamlLs.cmake)
 endif()
 
 add_executable(tuide-bundle-wizard tools/bundle_wizard/main.cpp)

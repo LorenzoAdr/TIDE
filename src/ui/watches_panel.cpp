@@ -11,6 +11,8 @@
 #include <vector>
 
 #include "backend/idebug_backend.hpp"
+#include "app/workspace_model.hpp"
+#include "editor/text_ops.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/component_options.hpp"
 #include "ftxui/component/event.hpp"
@@ -748,7 +750,8 @@ Elements render_breakpoint_hints(WatchesPanelState* state) {
 bool handle_breakpoints_tab_keys(WatchesPanelState* state, DebugModel* model,
                                  MainLayoutState* layout_state, FocusManagerState* focus,
                                  CommandCallback on_command, Event event,
-                                 const std::function<void()>& mark_watches_focus) {
+                                 const std::function<void()>& mark_watches_focus,
+                                 WorkspaceModel* workspace) {
   rebuild_breakpoint_rows(model, state);
   if (event == Event::ArrowDown || event == Event::Character('j')) {
     state->bp_selected = std::min(
@@ -799,6 +802,14 @@ bool handle_breakpoints_tab_keys(WatchesPanelState* state, DebugModel* model,
           model->active_file = bp.file;
           model->active_line = bp.line;
           model->view_token++;
+          if (workspace != nullptr && !bp.file.empty() && bp.line > 0) {
+            int visible_lines = 24;
+            if (layout_state != nullptr && layout_state->primary_editor.visible_line_count) {
+              visible_lines = std::max(1, layout_state->primary_editor.visible_line_count());
+            }
+            workspace->open_file_at(bp.file, bp.line - 1, 0);
+            ensure_scroll_centered(&workspace->buffer, visible_lines);
+          }
         }
         if (focus != nullptr) {
           focus->region = FocusRegion::Editor;
@@ -819,7 +830,8 @@ bool handle_breakpoints_tab_keys(WatchesPanelState* state, DebugModel* model,
 Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
                            MainLayoutState* layout_state,
                            const std::function<void()>& on_stop_debug,
-                           FocusManagerState* focus, AppMode* app_mode) {
+                           FocusManagerState* focus, AppMode* app_mode,
+                           WorkspaceModel* workspace) {
   auto state = std::make_shared<WatchesPanelState>();
   state->tab_titles = {i18n::tr("panel.debug.tab.watch"), i18n::tr("panel.debug.tab.vars"),
                        i18n::tr("panel.debug.tab.backtrace"), i18n::tr("panel.debug.tab.breakpoints")};
@@ -849,7 +861,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
   });
   auto inputs = Container::Vertical({inject_maybe, expr_maybe, bp_expr_maybe});
 
-  auto select_frame = [model, on_command, layout_state](int index) {
+  auto select_frame = [model, on_command, layout_state, workspace, focus](int index) {
     if (!on_command || model->stack_frames.empty()) {
       return;
     }
@@ -861,6 +873,17 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     model->view_token++;
     if (layout_state != nullptr) {
       layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+    }
+    if (workspace != nullptr && !frame.file.empty() && frame.line > 0) {
+      int visible_lines = 24;
+      if (layout_state != nullptr && layout_state->primary_editor.visible_line_count) {
+        visible_lines = std::max(1, layout_state->primary_editor.visible_line_count());
+      }
+      workspace->open_file_at(frame.file, frame.line - 1, 0);
+      ensure_scroll_centered(&workspace->buffer, visible_lines);
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Editor;
+      }
     }
     UiCommand command;
     command.kind = UiCommandKind::kFetchVariables;
@@ -892,27 +915,33 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
     }
   };
 
-  auto send_next = [on_command] {
+  auto send_next = [on_command, model] {
     if (!on_command) {
       return;
     }
     UiCommand command;
     command.kind = UiCommandKind::kNext;
+    if (model != nullptr && model->active_thread_id > 0) {
+      command.thread_id = model->active_thread_id;
+    }
     on_command(command);
   };
 
-  auto send_step = [on_command] {
+  auto send_step = [on_command, model] {
     if (!on_command) {
       return;
     }
     UiCommand command;
     command.kind = UiCommandKind::kStepIn;
+    if (model != nullptr && model->active_thread_id > 0) {
+      command.thread_id = model->active_thread_id;
+    }
     on_command(command);
   };
 
   auto handler = [model, state, layout_state, focus, select_frame, on_command, send_continue,
                   send_pause, send_stop, send_next, send_step, expr_input, bp_expr_input,
-                  inject_input, app_mode](Event event) {
+                  inject_input, app_mode, workspace](Event event) {
     const bool breakpoints_only = watches_breakpoints_only(app_mode);
     if (breakpoints_only) {
       state->selected_tab = 3;
@@ -971,7 +1000,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         return true;
       }
       if (handle_breakpoints_tab_keys(state.get(), model, layout_state, focus, on_command, event,
-                                      mark_watches_focus)) {
+                                      mark_watches_focus, workspace)) {
         return true;
       }
       return false;
@@ -1244,7 +1273,7 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         return true;
       }
       if (handle_breakpoints_tab_keys(state.get(), model, layout_state, focus, on_command, event,
-                                      mark_watches_focus)) {
+                                      mark_watches_focus, workspace)) {
         return true;
       }
       return false;
@@ -1317,14 +1346,14 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
                        size(WIDTH, EQUAL, 5);
 
     Element next_btn = MakeToolbarButton(
-        text(" ⏭ ") | bold | color(theme::Accent()),
+        text(" ↷ ") | bold | color(theme::Accent()),
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kWatchesNext),
         layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kWatchesNext),
         step_disabled, &state->next_box, true) |
                        size(WIDTH, EQUAL, 5);
 
     Element step_btn = MakeToolbarButton(
-        text(" ↳ ") | bold | color(theme::Accent()),
+        text(" ⤵ ") | bold | color(theme::Accent()),
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kWatchesStep),
         layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kWatchesStep),
         step_disabled, &state->step_box, true) |

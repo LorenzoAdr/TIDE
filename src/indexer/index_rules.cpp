@@ -98,7 +98,8 @@ bool is_indexed_source_path(const std::string& path) {
          ext == ".sh" || ext == ".bash" || ext == ".tex" || ext == ".sty" || ext == ".cls" ||
          ext == ".rs" || ext == ".go" || ext == ".zig" || ext == ".f" || ext == ".f90" ||
          ext == ".f95" || ext == ".for" || ext == ".lua" || ext == ".js" || ext == ".mjs" ||
-         ext == ".cjs" || ext == ".ts" || ext == ".tsx" || ext == ".cmake" || ext == ".mk";
+         ext == ".cjs" || ext == ".ts" || ext == ".tsx" || ext == ".cmake" || ext == ".mk" ||
+         ext == ".yaml" || ext == ".yml";
 }
 
 bool should_list_workspace_path(const std::string& relative_path,

@@ -29,6 +29,8 @@ struct CallHierarchyTreeNode {
   int nav_line = 0;
   int nav_character = 0;
   std::string nav_path;
+  // Source line preview for References rows (trimmed). Unused for call hierarchy.
+  std::string preview;
   std::vector<int> children;
 };
 

@@ -100,34 +100,141 @@ GitFileDiff parse_unified_diff(const std::string& path, const std::string& diff_
 
 LineDiffResult compute_line_diff(const std::vector<std::string>& head,
                                  const std::vector<std::string>& current) {
+  // Myers O(ND) shortest edit script between head (old) and current (new).
+  // Marks inserted/replaced lines in `current`; pure deletions do not mark a new line.
   LineDiffResult result;
-  std::size_t i = 0;
-  std::size_t j = 0;
-  while (i < current.size() && j < head.size()) {
-    if (current[i] == head[j]) {
-      ++i;
-      ++j;
-      continue;
-    }
-    if (j + 1 < head.size() && current[i] == head[j + 1]) {
-      ++j;
-      continue;
-    }
-    if (i + 1 < current.size() && current[i + 1] == head[j]) {
-      const int line = static_cast<int>(i);
-      result.changed_new_lines.insert(line);
-      ++i;
-      continue;
-    }
-    const int line = static_cast<int>(i);
-    result.changed_new_lines.insert(line);
-    result.previous_content_by_new_line[line] = head[j];
-    ++i;
-    ++j;
+  const int n = static_cast<int>(head.size());
+  const int m = static_cast<int>(current.size());
+  if (m == 0) {
+    return result;
   }
-  while (i < current.size()) {
-    result.changed_new_lines.insert(static_cast<int>(i));
-    ++i;
+  if (n == 0) {
+    for (int i = 0; i < m; ++i) {
+      result.changed_new_lines.insert(i);
+    }
+    return result;
+  }
+
+  const int max_d = n + m;
+  const int offset = max_d;
+  std::vector<std::vector<int>> trace;
+  trace.reserve(static_cast<std::size_t>(max_d) + 1);
+  std::vector<int> v(static_cast<std::size_t>(2 * max_d + 1), 0);
+
+  int d_found = -1;
+  for (int d = 0; d <= max_d; ++d) {
+    trace.push_back(v);
+    for (int k = -d; k <= d; k += 2) {
+      int x = 0;
+      if (k == -d || (k != d && v[static_cast<std::size_t>(k - 1 + offset)] <
+                                    v[static_cast<std::size_t>(k + 1 + offset)])) {
+        x = v[static_cast<std::size_t>(k + 1 + offset)];
+      } else {
+        x = v[static_cast<std::size_t>(k - 1 + offset)] + 1;
+      }
+      int y = x - k;
+      while (x < n && y < m && head[static_cast<std::size_t>(x)] ==
+                                   current[static_cast<std::size_t>(y)]) {
+        ++x;
+        ++y;
+      }
+      v[static_cast<std::size_t>(k + offset)] = x;
+      if (x >= n && y >= m) {
+        d_found = d;
+        break;
+      }
+    }
+    if (d_found >= 0) {
+      break;
+    }
+  }
+  if (d_found < 0) {
+    for (int i = 0; i < m; ++i) {
+      result.changed_new_lines.insert(i);
+    }
+    return result;
+  }
+
+  struct Edit {
+    enum class Kind { kEqual, kDelete, kInsert } kind = Kind::kEqual;
+    int old_index = -1;
+    int new_index = -1;
+  };
+  std::vector<Edit> edits;
+  edits.reserve(static_cast<std::size_t>(n + m));
+
+  int x = n;
+  int y = m;
+  for (int d = d_found; d > 0; --d) {
+    const std::vector<int>& prev = trace[static_cast<std::size_t>(d)];
+    const int k = x - y;
+    int prev_k = 0;
+    if (k == -d || (k != d && prev[static_cast<std::size_t>(k - 1 + offset)] <
+                                  prev[static_cast<std::size_t>(k + 1 + offset)])) {
+      prev_k = k + 1;
+    } else {
+      prev_k = k - 1;
+    }
+    const int prev_x = prev[static_cast<std::size_t>(prev_k + offset)];
+    const int prev_y = prev_x - prev_k;
+
+    while (x > prev_x && y > prev_y) {
+      --x;
+      --y;
+      edits.push_back({Edit::Kind::kEqual, x, y});
+    }
+    if (x > prev_x) {
+      --x;
+      edits.push_back({Edit::Kind::kDelete, x, -1});
+    } else if (y > prev_y) {
+      --y;
+      edits.push_back({Edit::Kind::kInsert, -1, y});
+    }
+  }
+  while (x > 0 && y > 0) {
+    --x;
+    --y;
+    edits.push_back({Edit::Kind::kEqual, x, y});
+  }
+  while (x > 0) {
+    --x;
+    edits.push_back({Edit::Kind::kDelete, x, -1});
+  }
+  while (y > 0) {
+    --y;
+    edits.push_back({Edit::Kind::kInsert, -1, y});
+  }
+
+  std::reverse(edits.begin(), edits.end());
+
+  std::size_t i = 0;
+  while (i < edits.size()) {
+    if (edits[i].kind == Edit::Kind::kEqual) {
+      ++i;
+      continue;
+    }
+    std::size_t j = i;
+    std::vector<int> deleted;
+    std::vector<int> inserted;
+    while (j < edits.size() && edits[j].kind != Edit::Kind::kEqual) {
+      if (edits[j].kind == Edit::Kind::kDelete) {
+        deleted.push_back(edits[j].old_index);
+      } else {
+        inserted.push_back(edits[j].new_index);
+      }
+      ++j;
+    }
+    const std::size_t paired = std::min(deleted.size(), inserted.size());
+    for (std::size_t p = 0; p < paired; ++p) {
+      const int new_line = inserted[p];
+      result.changed_new_lines.insert(new_line);
+      result.previous_content_by_new_line[new_line] =
+          head[static_cast<std::size_t>(deleted[p])];
+    }
+    for (std::size_t p = paired; p < inserted.size(); ++p) {
+      result.changed_new_lines.insert(inserted[p]);
+    }
+    i = j;
   }
   return result;
 }

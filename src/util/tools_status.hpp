@@ -51,6 +51,8 @@ struct LspRuntimeFlags {
   bool cmake_starting = false;
   bool make_ready = false;
   bool make_starting = false;
+  bool yaml_ready = false;
+  bool yaml_starting = false;
 };
 
 // Resolves binaries and combines with live LSP runtime flags.

@@ -225,6 +225,24 @@ extern const unsigned char _binary_make_ls_blob_zst_end[];
 }
 #endif
 
+#ifdef TUIDE_HAS_BUNDLED_YAML_LS
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB) && !defined(TUIDE_HAS_BUNDLED_BASH_LS) && \
+    !defined(TUIDE_HAS_BUNDLED_BASH_DAP) && !defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TUIDE_HAS_BUNDLED_GOPLS) && !defined(TUIDE_HAS_BUNDLED_ZLS) && \
+    !defined(TUIDE_HAS_BUNDLED_LUA_LS) && !defined(TUIDE_HAS_BUNDLED_FORTLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TSSERVER) && !defined(TUIDE_HAS_BUNDLED_NEOCMAKELSP) && \
+    !defined(TUIDE_HAS_BUNDLED_MAKE_LS)
+#include <zstd.h>
+#endif
+#include "bundled_yaml_ls_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_yaml_ls_blob_zst_start[];
+extern const unsigned char _binary_yaml_ls_blob_zst_end[];
+}
+#endif
+
 namespace fs = std::filesystem;
 
 namespace tuide {
@@ -336,7 +354,8 @@ std::optional<std::string> gdb_from_env() {
     defined(TUIDE_HAS_BUNDLED_BASH_DAP) || defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) || \
     defined(TUIDE_HAS_BUNDLED_GOPLS) || defined(TUIDE_HAS_BUNDLED_ZLS) || \
     defined(TUIDE_HAS_BUNDLED_LUA_LS) || defined(TUIDE_HAS_BUNDLED_FORTLS) || \
-    defined(TUIDE_HAS_BUNDLED_TSSERVER)
+    defined(TUIDE_HAS_BUNDLED_TSSERVER) || defined(TUIDE_HAS_BUNDLED_NEOCMAKELSP) || \
+    defined(TUIDE_HAS_BUNDLED_MAKE_LS) || defined(TUIDE_HAS_BUNDLED_YAML_LS)
 std::optional<std::vector<unsigned char>> decompress_zstd_blob(const unsigned char* start,
                                                                  const unsigned char* end) {
   const std::size_t compressed_size = static_cast<std::size_t>(end - start);
@@ -367,7 +386,9 @@ bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
 
 #if defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) || defined(TUIDE_HAS_BUNDLED_GOPLS) || \
     defined(TUIDE_HAS_BUNDLED_ZLS) || defined(TUIDE_HAS_BUNDLED_LUA_LS) || \
-    defined(TUIDE_HAS_BUNDLED_FORTLS) || defined(TUIDE_HAS_BUNDLED_TSSERVER)
+    defined(TUIDE_HAS_BUNDLED_FORTLS) || defined(TUIDE_HAS_BUNDLED_TSSERVER) || \
+    defined(TUIDE_HAS_BUNDLED_NEOCMAKELSP) || defined(TUIDE_HAS_BUNDLED_MAKE_LS) || \
+    defined(TUIDE_HAS_BUNDLED_YAML_LS)
 bool bundled_tree_ready(const fs::path& install_root, const fs::path& binary_path,
                         const std::string& expected_marker) {
   const fs::path marker = install_root / ".installed";
@@ -493,6 +514,10 @@ bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
     return false;
   }
 
+  // GNU tar LongLink ('L') / LongName ('K'): full path lives in the entry body and
+  // applies to the following member. npm trees hit this often (paths > 100 chars).
+  std::string pending_long_name;
+  std::string pending_long_linkname;
   std::size_t offset = 0;
   while (offset < tar_data.size()) {
     const auto* header = reinterpret_cast<const char*>(tar_data.data() + offset);
@@ -526,9 +551,6 @@ bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
         name = prefix + "/" + name;
       }
     }
-    if (name.empty()) {
-      return false;
-    }
 
     const char typeflag = header[156];
     const std::size_t file_size = parse_octal_field(header + 124, 12);
@@ -537,17 +559,58 @@ bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
       return false;
     }
 
+    auto take_payload_string = [&](std::string& out) {
+      out.assign(reinterpret_cast<const char*>(tar_data.data() + offset), file_size);
+      while (!out.empty() && out.back() == '\0') {
+        out.pop_back();
+      }
+    };
+
+    if (typeflag == 'L') {
+      take_payload_string(pending_long_name);
+      offset += padded_size;
+      continue;
+    }
+    if (typeflag == 'K') {
+      take_payload_string(pending_long_linkname);
+      offset += padded_size;
+      continue;
+    }
+    // Pax extended headers: skip body; names stay in the following ustar header.
+    if (typeflag == 'x' || typeflag == 'g' || typeflag == 'X') {
+      pending_long_name.clear();
+      pending_long_linkname.clear();
+      offset += padded_size;
+      continue;
+    }
+
+    if (!pending_long_name.empty()) {
+      name = std::move(pending_long_name);
+      pending_long_name.clear();
+    }
+    if (name.empty()) {
+      return false;
+    }
+
     const fs::path target = output_dir / name;
-    if (typeflag == '5' || (typeflag == '\0' && file_size == 0 && !name.empty() && name.back() == '/')) {
+    const bool looks_like_dir = !name.empty() && name.back() == '/';
+    if (typeflag == '5' ||
+        (looks_like_dir && file_size == 0 && (typeflag == '\0' || typeflag == '0'))) {
       std::error_code ec;
       fs::create_directories(target, ec);
+      pending_long_linkname.clear();
     } else if (typeflag == '2') {
-      // Symlink: linkname at offset 157 (100 bytes). Prefer packing without symlinks;
-      // still accept them so older/partial trees extract cleanly.
-      std::string linkname(header + 157, header + 157 + 100);
-      const auto link_null = linkname.find('\0');
-      if (link_null != std::string::npos) {
-        linkname.resize(link_null);
+      // Symlink: linkname at offset 157 (100 bytes), or GNU LongName ('K') payload.
+      std::string linkname;
+      if (!pending_long_linkname.empty()) {
+        linkname = std::move(pending_long_linkname);
+        pending_long_linkname.clear();
+      } else {
+        linkname.assign(header + 157, header + 157 + 100);
+        const auto link_null = linkname.find('\0');
+        if (link_null != std::string::npos) {
+          linkname.resize(link_null);
+        }
       }
       if (linkname.empty()) {
         return false;
@@ -560,6 +623,14 @@ bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
         return false;
       }
     } else if (typeflag == '\0' || typeflag == '0') {
+      pending_long_linkname.clear();
+      if (looks_like_dir) {
+        // Truncated LongLink names can end with '/'; never open those as files.
+        std::error_code ec;
+        fs::create_directories(target, ec);
+        offset += padded_size;
+        continue;
+      }
       std::error_code ec;
       fs::create_directories(target.parent_path(), ec);
       std::ofstream output(target, std::ios::binary | std::ios::trunc);
@@ -575,6 +646,7 @@ bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
       fs::permissions(target, fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec,
                       perm_ec);
     } else {
+      pending_long_linkname.clear();
       // Skip unsupported types (hardlinks, devices, etc.) without failing the whole extract.
       // Python trees packed with cp -aL should only contain files/dirs.
     }
@@ -1620,6 +1692,73 @@ std::optional<MakeLsLocation> resolve_make_ls() {
 #endif
   if (const auto path_bin = find_named_binary_on_path("make-ls"); path_bin.has_value()) {
     return MakeLsLocation{*path_bin, MakeLsLocation::Source::SystemPath};
+  }
+  return std::nullopt;
+}
+
+std::optional<YamlLsLocation> resolve_yaml_language_server() {
+  if (const auto env_path = env_executable("TUIDE_YAML_LS"); env_path.has_value()) {
+    YamlLsLocation loc;
+    loc.binary_path = *env_path;
+    loc.needs_stdio_flag = true;
+    loc.source = YamlLsLocation::Source::Env;
+    return loc;
+  }
+#ifdef TUIDE_HAS_BUNDLED_YAML_LS
+  {
+    const fs::path install_root =
+        fs::path(bundled_cache_root()) / ("yaml-ls-" TUIDE_BUNDLED_YAML_LS_VERSION);
+    const fs::path binary_path = install_root / "bin" / "yaml-language-server";
+    const std::string expected = std::string(TUIDE_BUNDLED_YAML_LS_BLOB_SHA256) + "\n";
+    static std::atomic<bool> install_attempted{false};
+    if (lazy_extract_bundled_tree(install_root, "bin/yaml-language-server", expected,
+                                  _binary_yaml_ls_blob_zst_start, _binary_yaml_ls_blob_zst_end,
+                                  install_attempted)) {
+      YamlLsLocation loc;
+      loc.binary_path = binary_path.string();
+      loc.needs_stdio_flag = true;
+      loc.source = YamlLsLocation::Source::Bundled;
+      return loc;
+    }
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_YAML_LS
+    return std::nullopt;
+#endif
+  }
+#endif
+  if (const auto path_bin = find_named_binary_on_path("yaml-language-server");
+      path_bin.has_value()) {
+    YamlLsLocation loc;
+    loc.binary_path = *path_bin;
+    loc.needs_stdio_flag = true;
+    loc.source = YamlLsLocation::Source::SystemPath;
+    return loc;
+  }
+  const auto node = [&]() -> std::optional<std::string> {
+    if (const auto env = env_executable("TUIDE_NODE_BIN"); env.has_value()) {
+      return env;
+    }
+    return find_named_binary_on_path("node");
+  }();
+  if (node.has_value()) {
+    const fs::path node_path = *node;
+    const std::array<fs::path, 3> candidates = {
+        node_path.parent_path().parent_path() / "lib" / "node_modules" / "yaml-language-server" /
+            "bin" / "yaml-language-server",
+        node_path.parent_path() / "node_modules" / "yaml-language-server" / "bin" /
+            "yaml-language-server",
+        fs::path("/usr/lib/node_modules/yaml-language-server/bin/yaml-language-server"),
+    };
+    for (const fs::path& script : candidates) {
+      if (readable_file(script.string())) {
+        YamlLsLocation loc;
+        loc.binary_path = *node;
+        loc.needs_stdio_flag = false;
+        loc.use_node_script = true;
+        loc.script_path = script.string();
+        loc.source = YamlLsLocation::Source::SystemPath;
+        return loc;
+      }
+    }
   }
   return std::nullopt;
 }

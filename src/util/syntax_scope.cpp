@@ -24,7 +24,7 @@ SyntaxScope SyntaxScopeForTreeSitterCaptureImpl(const std::string& capture) {
   if (base == "number") {
     return SyntaxScope::kNumber;
   }
-  if (base == "keyword" || base == "operator") {
+  if (base == "keyword" || base == "operator" || base == "boolean") {
     return SyntaxScope::kKeyword;
   }
   if (base == "macro") {

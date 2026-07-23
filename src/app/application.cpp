@@ -20,6 +20,7 @@
 #include "dap/gdb_launcher.hpp"
 #include "dap/debug_adapter_spec.hpp"
 #include "editor/editor_buffer_source.hpp"
+#include "editor/text_ops.hpp"
 #include "editor/text_search.hpp"
 #include "editor/visual_highlight.hpp"
 #include "ftxui/component/component.hpp"
@@ -1664,6 +1665,19 @@ void Application::complete_debug_launch_success() {
 	if (app_mode_ != AppMode::kDebug) {
 		enter_debug_ui_layout();
 	}
+	// Wake before any file I/O: a failing/blocking open_file_at here used to skip
+	// invalidate and leave the modal closed while the screen never switched to debug.
+	invalidate_debug_ui();
+
+	if (model_.state == DebugState::kStopped && !model_.active_file.empty() &&
+	    model_.active_line > 0) {
+		SourceLocation loc;
+		loc.valid = true;
+		loc.path = model_.active_file;
+		loc.line = std::max(0, model_.active_line - 1);
+		loc.character = 0;
+		schedule_editor_navigation(&layout_state_, loc);
+	}
 }
 
 void Application::fail_debug_launch(const std::string &message) {
@@ -2015,8 +2029,19 @@ void Application::apply_event(const DebugEvent &event) {
 			model_.active_file = model_.stack_frames.front().file;
 			model_.active_line = model_.stack_frames.front().line;
 			model_.view_token++;
+			if (!model_.active_file.empty() && model_.active_line > 0) {
+				int visible_lines = 24;
+				if (layout_state_.primary_editor.visible_line_count) {
+					visible_lines =
+					    std::max(1, layout_state_.primary_editor.visible_line_count());
+				}
+				workspace_.open_file_at(model_.active_file, model_.active_line - 1, 0);
+				ensure_scroll_centered(&workspace_.buffer, visible_lines);
+			}
 		}
-		layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+		// StackTrace is async after kStopped; DapBackend wakes on kStackUpdated so
+		// this handler runs promptly (► / line highlight without waiting for input).
+		invalidate_debug_ui();
 		break;
 	case DebugEventKind::kVariablesUpdated:
 		model_.locals = event.variables;
@@ -2670,6 +2695,8 @@ int Application::run() {
 			flags.cmake_starting = symbol_provider_->cmake_lsp_starting();
 			flags.make_ready = symbol_provider_->make_lsp_ready();
 			flags.make_starting = symbol_provider_->make_lsp_starting();
+			flags.yaml_ready = symbol_provider_->yaml_lsp_ready();
+			flags.yaml_starting = symbol_provider_->yaml_lsp_starting();
 		}
 		return collect_tools_status(flags);
 	};
@@ -3055,6 +3082,14 @@ int Application::run() {
 			return true;
 		}
 
+		if (layout_state_.console_visible && event.is_mouse() &&
+		    search_tab_active(&layout_state_) && layout_state_.search_key_handler &&
+		    layout_state_.search_key_handler(event)) {
+			post_custom_throttled();
+			layout_state_.focus_sync_needed = true;
+			return true;
+		}
+
 		if (layout_state_.console_visible && layout_state_.console_mouse_handler &&
 		    layout_state_.console_mouse_handler(event)) {
 			post_custom_throttled();
@@ -3064,10 +3099,6 @@ int Application::run() {
 
 		if (app_mode_ == AppMode::kDebug && event.is_mouse()) {
 			bool handled = false;
-			if (!model_.is_post_mortem && layout_state_.source_mouse_handler &&
-			    layout_state_.source_mouse_handler(event)) {
-				handled = true;
-			}
 			if (layout_state_.outline_mouse_handler &&
 			    layout_state_.outline_mouse_handler(event)) {
 				handled = true;
@@ -3213,14 +3244,6 @@ int Application::run() {
 				layout_state_.focus_sync_needed = true;
 				return true;
 			}
-			if (app_mode_ == AppMode::kDebug && !model_.is_post_mortem &&
-			    focus_state_.region == FocusRegion::Editor &&
-			    !is_watch_input_focus(layout_state_.text_input_focus) &&
-			    layout_state_.text_input_focus != TextInputFocus::Console &&
-			    layout_state_.source_key_handler && layout_state_.source_key_handler(event)) {
-				UI_WAKE(&layout_state_, "app.custom");
-				return true;
-			}
 			if (is_editor_focus_region(focus_state_.region) && editor_browse_active &&
 			    !is_search_input_focus(layout_state_.text_input_focus) &&
 			    !is_watch_input_focus(layout_state_.text_input_focus) &&
@@ -3317,12 +3340,11 @@ int Application::run() {
 			if (app_mode_ == AppMode::kDebug) {
 				UiCommand command;
 				if (event == Event::CtrlB) {
-					int line = model_.active_line;
-					if (!model_.is_post_mortem && source_state_.cursor_line > 0) {
-						line = source_state_.cursor_line;
-					}
-					if (!model_.active_file.empty() && line > 0) {
-						ToggleBreakpointAtLine(&model_, line, on_command);
+					workspace_.ensure_buffer();
+					if (!workspace_.buffer.path.empty()) {
+						ToggleBreakpointAtFile(&model_, workspace_.buffer.path,
+						                       workspace_.buffer.primary_line() + 1, on_command);
+						UI_WAKE(&layout_state_, "app");
 					}
 					return true;
 				}
@@ -3335,16 +3357,29 @@ int Application::run() {
 				}
 				if (event == Event::F10 && !model_.is_post_mortem) {
 					command.kind = UiCommandKind::kNext;
+					if (model_.active_thread_id > 0) {
+						command.thread_id = model_.active_thread_id;
+					}
 					submit_command(command);
+					layout_state_.clickable.trigger_press(press_id::kWatchesNext);
+					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
 				if (event == Event::F11 && !model_.is_post_mortem) {
 					command.kind = UiCommandKind::kStepIn;
+					if (model_.active_thread_id > 0) {
+						command.thread_id = model_.active_thread_id;
+					}
 					submit_command(command);
+					layout_state_.clickable.trigger_press(press_id::kWatchesStep);
+					UI_WAKE(&layout_state_, "app");
 					return true;
 				}
 				if (event == Event::Special({24}) && !model_.is_post_mortem) {
 					command.kind = UiCommandKind::kStepOut;
+					if (model_.active_thread_id > 0) {
+						command.thread_id = model_.active_thread_id;
+					}
 					submit_command(command);
 					return true;
 				}

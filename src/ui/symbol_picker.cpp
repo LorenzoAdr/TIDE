@@ -267,8 +267,7 @@ void SymbolPickerState::poll_search() {
     if (selected >= static_cast<int>(matches.size())) {
       selected = std::max(0, static_cast<int>(matches.size()) - 1);
     }
-    preview_requested_path.clear();
-    preview_requested_line = 0;
+    // Keep preview_requested_* so the same hit does not reload / flash.
     return;
   }
 
@@ -429,7 +428,7 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
         if (state->runner.running()) {
           state->notify_search_tick();
         }
-        if (state->preview_requested_path.empty() && !state->matches.empty()) {
+        if (!state->matches.empty()) {
           state->update_preview_for_selection(workspace->root);
         }
 

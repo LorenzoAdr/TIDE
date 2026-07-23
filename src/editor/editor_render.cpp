@@ -664,7 +664,7 @@ Element RenderEditorLine(const std::string& line, int line_index, const EditorBu
   // CMake/Makefile use Tree-sitter highlighting (not the legacy build-file highlighter
   // and not LSP semantic tokens).
   const bool tree_sitter_build_lang =
-      language_id_is_cmake(lang_id) || language_id_is_make(lang_id);
+      language_id_is_cmake(lang_id) || language_id_is_make(lang_id) || language_id_is_yaml(lang_id);
   const BuildFileKind build_file_kind =
       tree_sitter_build_lang ? BuildFileKind::kNone : detected_build_kind;
   const bool is_build_file = build_file_kind != BuildFileKind::kNone;

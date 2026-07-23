@@ -283,25 +283,19 @@ Component MakeModeLayout(AppMode* app_mode, Component normal_child, Component de
 
 class EditorCenterLayout : public ComponentBase {
  public:
-  EditorCenterLayout(AppMode* app_mode, DebugModel* model, Component primary_editor,
-                     Component secondary_editor, Component source_panel,
-                     WorkspaceModel* secondary_workspace,
+  EditorCenterLayout(Component primary_editor, Component secondary_editor,
+                     Component source_panel, WorkspaceModel* secondary_workspace,
                      std::shared_ptr<LayoutState> split_state)
-      : app_mode_(app_mode),
-        model_(model),
-        secondary_workspace_(secondary_workspace),
-        split_state_(std::move(split_state)) {
+      : secondary_workspace_(secondary_workspace), split_state_(std::move(split_state)) {
     Add(std::move(primary_editor));
     Add(std::move(secondary_editor));
+    // Source panel kept as child for MakeSourcePanel side-effects (handlers); never shown.
     Add(std::move(source_panel));
   }
 
   Element OnRender() override {
-    if (children_.size() < 3) {
+    if (children_.empty()) {
       return text("");
-    }
-    if (debug_source_only()) {
-      return children_[2]->Render() | flex;
     }
     const bool split =
         secondary_workspace_ != nullptr && !secondary_workspace_->tabs.empty();
@@ -326,11 +320,8 @@ class EditorCenterLayout : public ComponentBase {
   }
 
   bool OnEvent(Event event) override {
-    if (children_.size() < 3) {
+    if (children_.empty()) {
       return false;
-    }
-    if (debug_source_only()) {
-      return children_[2]->OnEvent(std::move(event));
     }
     const bool split =
         secondary_workspace_ != nullptr && !secondary_workspace_->tabs.empty();
@@ -349,33 +340,23 @@ class EditorCenterLayout : public ComponentBase {
     if (children_.empty()) {
       return nullptr;
     }
-    if (debug_source_only() && children_.size() > 2) {
-      return children_[2];
-    }
     const bool split =
         secondary_workspace_ != nullptr && !secondary_workspace_->tabs.empty();
     return split ? children_[1] : children_[0];
   }
 
  private:
-  bool debug_source_only() const {
-    return app_mode_ != nullptr && *app_mode_ == AppMode::kDebug &&
-           (model_ == nullptr || !model_->is_post_mortem);
-  }
-
-  AppMode* app_mode_;
-  DebugModel* model_;
   WorkspaceModel* secondary_workspace_;
   std::shared_ptr<LayoutState> split_state_;
 };
 
-Component MakeEditorCenterLayout(AppMode* app_mode, DebugModel* model, Component primary_editor,
-                                 Component secondary_editor, Component source_panel,
-                                 WorkspaceModel* secondary_workspace,
+Component MakeEditorCenterLayout(AppMode* /*app_mode*/, DebugModel* /*model*/,
+                                 Component primary_editor, Component secondary_editor,
+                                 Component source_panel, WorkspaceModel* secondary_workspace,
                                  std::shared_ptr<LayoutState> split_state) {
-  return Make<EditorCenterLayout>(app_mode, model, std::move(primary_editor),
-                                    std::move(secondary_editor), std::move(source_panel),
-                                    secondary_workspace, std::move(split_state));
+  return Make<EditorCenterLayout>(std::move(primary_editor), std::move(secondary_editor),
+                                  std::move(source_panel), secondary_workspace,
+                                  std::move(split_state));
 }
 
 // Panel derecho: un solo outline; en debug muestra watches debajo.
@@ -993,7 +974,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
 
   auto outline = MakeOutlinePanel(workspace, focus, layout_state);
   auto sidebar = MakeRightSidebarPanel(outline, layout_state);
-  auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug, focus, app_mode);
+  auto watches = MakeWatchesPanel(model, on_command, layout_state, on_stop_debug, focus, app_mode,
+                                  workspace);
   auto right_panel = MakeCachedPanelRender(
       layout_state, UiPanelId::RightSidebar,
       MakeRightPanel(app_mode, sidebar, watches, &split_state->outline_height, layout_state));

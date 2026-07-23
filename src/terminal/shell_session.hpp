@@ -77,6 +77,10 @@ class ShellSession {
   void notify_output();
   void background_drain();
   void rebuild_display_locked();
+  // Alimenta el emulador con bytes del PTY. Devuelve true solo si el contenido
+  // visible (texto, filas o cursor) cambió — no por el mero hecho de haber leído.
+  bool feed_pty_bytes_locked(const char* data, std::size_t len);
+  void on_pty_bytes(const char* data, std::size_t len);
 
   RawPtyScreen terminal_;
   mutable std::mutex terminal_mutex_;

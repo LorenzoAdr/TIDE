@@ -12,6 +12,7 @@
 #include "tree-sitter-python.h"
 #include "tree-sitter-rust.h"
 #include "tree-sitter-typescript.h"
+#include "tree-sitter-yaml.h"
 #include "tree-sitter-zig.h"
 #include "tree_sitter/tree-sitter-bash.h"
 #include "tree_sitter/tree-sitter-lua.h"
@@ -47,6 +48,8 @@ const TSLanguage* tree_sitter_typescript_language() { return tree_sitter_typescr
 const TSLanguage* tree_sitter_cmake_language() { return tree_sitter_cmake(); }
 
 const TSLanguage* tree_sitter_make_language() { return tree_sitter_make(); }
+
+const TSLanguage* tree_sitter_yaml_language() { return tree_sitter_yaml(); }
 
 TreeSitterLangKind tree_sitter_lang_kind_for_path(const std::string& path) {
   const std::string lang = language_id_for_path(path);
@@ -86,6 +89,9 @@ TreeSitterLangKind tree_sitter_lang_kind_for_path(const std::string& path) {
   if (lang == "make") {
     return TreeSitterLangKind::kMake;
   }
+  if (lang == "yaml") {
+    return TreeSitterLangKind::kYaml;
+  }
   if (lang == "c" || lang == "cpp") {
     return TreeSitterLangKind::kCpp;
   }
@@ -118,6 +124,8 @@ const TSLanguage* tree_sitter_language_for_path(const std::string& path) {
       return tree_sitter_cmake_language();
     case TreeSitterLangKind::kMake:
       return tree_sitter_make_language();
+    case TreeSitterLangKind::kYaml:
+      return tree_sitter_yaml_language();
     case TreeSitterLangKind::kCpp:
       return tree_sitter_cpp_language();
     case TreeSitterLangKind::kNone:

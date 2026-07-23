@@ -33,6 +33,7 @@ inline constexpr const char* kLspServerLuaLs = "lua-language-server";
 inline constexpr const char* kLspServerTypescriptLs = "typescript-language-server";
 inline constexpr const char* kLspServerNeocmakelsp = "neocmakelsp";
 inline constexpr const char* kLspServerMakeLs = "make-ls";
+inline constexpr const char* kLspServerYamlLs = "yaml-language-server";
 
 bool language_id_is_cpp_family(const std::string& language_id);
 bool language_id_is_python(const std::string& language_id);
@@ -48,6 +49,7 @@ bool language_id_is_typescript(const std::string& language_id);
 bool language_id_is_js_ts(const std::string& language_id);
 bool language_id_is_cmake(const std::string& language_id);
 bool language_id_is_make(const std::string& language_id);
+bool language_id_is_yaml(const std::string& language_id);
 
 std::string language_server_id_for_language(const std::string& language_id);
 
@@ -81,6 +83,8 @@ std::optional<LanguageServerSpec> make_typescript_ls_spec(const std::string& wor
 std::optional<LanguageServerSpec> make_neocmakelsp_spec(const std::string& workspace_root);
 
 std::optional<LanguageServerSpec> make_make_ls_spec(const std::string& workspace_root);
+
+std::optional<LanguageServerSpec> make_yaml_ls_spec(const std::string& workspace_root);
 
 std::optional<LanguageServerSpec> make_language_server_spec(
     const std::string& server_id, const std::string& workspace_root,

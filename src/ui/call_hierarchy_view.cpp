@@ -4,13 +4,16 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <unordered_map>
 #include <vector>
 
 #include "editor/editor_context.hpp"
 #include "editor/text_ops.hpp"
+#include "git/git_diff.hpp"
 #include "indexer/index_rules.hpp"
 #include "ui/main_layout.hpp"
 #include "util/monitor_log.hpp"
+#include "util/path_normalize.hpp"
 #include "i18n/tr.hpp"
 
 namespace tuide {
@@ -27,6 +30,39 @@ std::string buffer_document_text(const EditorBuffer& buffer) {
 
 bool is_ident_char(char c) {
   return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
+}
+
+std::string trim_reference_preview(const std::string& line) {
+  const auto start = line.find_first_not_of(" \t");
+  if (start == std::string::npos) {
+    return {};
+  }
+  const auto end = line.find_last_not_of(" \t");
+  return line.substr(start, end - start + 1);
+}
+
+std::string reference_line_preview(WorkspaceModel* workspace, const std::string& path,
+                                   int line_0based,
+                                   std::unordered_map<std::string, std::vector<std::string>>* cache) {
+  if (path.empty() || line_0based < 0) {
+    return {};
+  }
+  if (workspace != nullptr &&
+      normalize_path(workspace->buffer.path) == normalize_path(path) &&
+      line_0based < workspace->buffer.lines.size()) {
+    return trim_reference_preview(workspace->buffer.lines[line_0based]);
+  }
+  if (cache == nullptr) {
+    return {};
+  }
+  auto it = cache->find(path);
+  if (it == cache->end()) {
+    it = cache->emplace(path, load_lines_from_file(path)).first;
+  }
+  if (line_0based >= static_cast<int>(it->second.size())) {
+    return {};
+  }
+  return trim_reference_preview(it->second[static_cast<std::size_t>(line_0based)]);
 }
 
 std::string symbol_base_name(const SymbolInfo& sym) {
@@ -628,6 +664,7 @@ bool open_references_view(CallHierarchyViewState* view, WorkspaceModel* workspac
       i18n::tr_fmt("status.references.count", {std::to_string(locations.size())});
 
   view->nodes.reserve(locations.size());
+  std::unordered_map<std::string, std::vector<std::string>> preview_cache;
   for (const SourceLocation& loc : locations) {
     if (!loc.valid || loc.path.empty()) {
       continue;
@@ -647,6 +684,7 @@ bool open_references_view(CallHierarchyViewState* view, WorkspaceModel* workspac
     node.nav_line = loc.line;
     node.nav_character = loc.character;
     node.nav_path = loc.path;
+    node.preview = reference_line_preview(workspace, loc.path, loc.line, &preview_cache);
     view->nodes.push_back(std::move(node));
   }
 

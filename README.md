@@ -46,6 +46,7 @@ tuide is a multi-language terminal IDE. Tree-sitter powers syntax highlighting a
 | JavaScript / TypeScript | typescript-language-server | — |
 | CMake | neocmakelsp | — |
 | Make | make-ls | — |
+| YAML | yaml-language-server | — |
 
 Build with `./tools/compile.sh` to embed any of these tools in the binary, or use system installs on `PATH`.
 

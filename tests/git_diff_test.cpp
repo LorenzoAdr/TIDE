@@ -59,6 +59,24 @@ int main() {
   }
 
   {
+    // Multi-line insert must not desync and mark the rest of the file.
+    const auto head = lines({"keep0", "keep1", "keep2", "keep3", "keep4"});
+    const auto current = lines({"newA", "newB", "keep0", "keep1", "keep2", "keep3", "keep4"});
+    const auto result = tuide::compute_line_diff(head, current);
+    expect_changed(result, {0, 1});
+  }
+
+  {
+    const auto head = lines({"a", "b", "c", "d", "e"});
+    const auto current = lines({"a", "X", "Y", "Z", "e"});
+    const auto result = tuide::compute_line_diff(head, current);
+    expect_changed(result, {1, 2, 3});
+    assert(result.previous_content_by_new_line.at(1) == "b");
+    assert(result.previous_content_by_new_line.at(2) == "c");
+    assert(result.previous_content_by_new_line.at(3) == "d");
+  }
+
+  {
     const std::string diff = R"(diff --git a/foo.cpp b/foo.cpp
 --- a/foo.cpp
 +++ b/foo.cpp

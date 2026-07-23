@@ -194,7 +194,14 @@ Element render_reference_row(const CallHierarchyViewState& hierarchy, int visibl
   Element label = text(" " + location) | color(theme::ColorForSymbolKind(node.item.kind));
   label = StyleClickable(std::move(label), {false, hovered, pressed, false});
 
-  Element row = std::move(label) | reflect(layout->segments.front().box);
+  Elements parts;
+  parts.push_back(std::move(label) | reflect(layout->segments.front().box));
+  if (!node.preview.empty()) {
+    parts.push_back(text("  "));
+    parts.push_back(text(node.preview) | color(theme::Header()));
+  }
+
+  Element row = hbox(std::move(parts));
   if (selected) {
     row = row | bgcolor(theme::TabIdle());
   }

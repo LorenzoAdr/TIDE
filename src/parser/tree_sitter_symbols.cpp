@@ -620,6 +620,7 @@ std::vector<SymbolInfo> extract_symbols_from_tree(TSNode root, const std::string
       break;
     case TreeSitterLangKind::kCmake:
     case TreeSitterLangKind::kMake:
+    case TreeSitterLangKind::kYaml:
       break;
     case TreeSitterLangKind::kCpp:
     case TreeSitterLangKind::kNone:

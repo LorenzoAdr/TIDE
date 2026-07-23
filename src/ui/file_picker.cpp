@@ -271,7 +271,7 @@ void FilePickerState::poll_search(const WorkspaceModel* workspace) {
     if (selected >= static_cast<int>(matches.size())) {
       selected = std::max(0, static_cast<int>(matches.size()) - 1);
     }
-    preview_requested_path.clear();
+    // Keep preview_requested_path so the same top hit does not flash loading.
     update_preview_for_selection(workspace_root);
     return;
   }
@@ -526,13 +526,9 @@ Component MakeFilePickerOverlay(Component main, DebugModel* model,
           matches.push_back(text(empty_label) | color(theme::Muted()));
         }
 
-        // Skip expensive tree-sitter preview while search is in flight.
-        FilePickerPreviewData preview;
-        if (state->searching || state->runner.running()) {
-          preview.state = FilePickerPreviewState::kLoading;
-        } else {
-          preview = state->preview.snapshot();
-        }
+        // Keep the last ready preview while search runs — forcing kLoading each
+        // keystroke flashed CodeBg / "loading" and caused visible flicker.
+        const FilePickerPreviewData preview = state->preview.snapshot();
         const std::string title =
             state->query.empty() ? i18n::tr("picker.file.open_files")
                                  : i18n::tr("picker.file.search");

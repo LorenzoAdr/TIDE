@@ -11,6 +11,7 @@
 
 #include "editor/editor_buffer_source.hpp"
 #include "editor/text_search.hpp"
+#include "git/git_diff.hpp"
 #include "indexer/index_rules.hpp"
 #include "parser/tree_sitter_blocks.hpp"
 #include "parser/tree_sitter_document.hpp"
@@ -288,14 +289,32 @@ std::vector<VisualHighlightSnapshot> VisualHighlightService::drain_results() {
 
 namespace {
 
+void build_git_marks_snapshot(const VisualHighlightJob& job, VisualHighlightSnapshot* snap) {
+  if (snap == nullptr || !job.inputs.git_baseline_ready) {
+    return;
+  }
+  snap->overview.git_marks_computed = true;
+  snap->overview.git_untracked_all = job.inputs.git_untracked_all;
+  snap->overview.git_changed_lines.clear();
+  snap->overview.git_previous_by_line.clear();
+  if (job.inputs.git_untracked_all) {
+    return;
+  }
+  const LineDiffResult diff = compute_line_diff(job.inputs.git_head_lines, job.lines);
+  snap->overview.git_changed_lines = std::move(diff.changed_new_lines);
+  for (const auto& [line_no, content] : diff.previous_content_by_new_line) {
+    snap->overview.git_previous_by_line[line_no] = content;
+  }
+}
+
 void build_overview_snapshot(const VisualHighlightJob& job, VisualHighlightSnapshot* snap) {
-  if (snap == nullptr || !job.config.overview_ruler) {
+  if (snap == nullptr) {
     return;
   }
   snap->overview.total_lines = job.inputs.total_lines;
-  snap->overview.git_changed_lines = job.inputs.git_changed_lines;
-  snap->overview.git_untracked_all = job.inputs.git_untracked_all;
-  snap->overview.text_matches = job.inputs.text_matches;
+  if (job.config.overview_ruler) {
+    snap->overview.text_matches = job.inputs.text_matches;
+  }
 }
 
 }  // namespace
@@ -353,6 +372,7 @@ VisualHighlightSnapshot VisualHighlightService::compute(const VisualHighlightJob
     snap.fold_regions_revision = 0;
   }
 
+  build_git_marks_snapshot(job, &snap);
   build_overview_snapshot(job, &snap);
 
   if (tree_snapshot.tree_copy != nullptr) {
@@ -625,6 +645,18 @@ bool drain_visual_highlight_results(VisualHighlightPanelState* state, const Edit
   if (merged.fold_regions_revision == 0) {
     merged.fold_regions = state->snapshot.fold_regions;
     merged.fold_regions_revision = state->snapshot.fold_regions_revision;
+  }
+  if (!merged.overview.git_marks_computed) {
+    merged.overview.git_changed_lines = state->snapshot.overview.git_changed_lines;
+    merged.overview.git_previous_by_line = state->snapshot.overview.git_previous_by_line;
+    merged.overview.git_untracked_all = state->snapshot.overview.git_untracked_all;
+    merged.overview.git_marks_computed = state->snapshot.overview.git_marks_computed;
+  }
+  if (merged.overview.total_lines == 0 && state->snapshot.overview.total_lines > 0) {
+    merged.overview.total_lines = state->snapshot.overview.total_lines;
+  }
+  if (merged.overview.text_matches.empty() && !state->snapshot.overview.text_matches.empty()) {
+    merged.overview.text_matches = state->snapshot.overview.text_matches;
   }
 
   merged.ready = revision_match && cursor_match && selection_match;

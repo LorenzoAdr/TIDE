@@ -174,6 +174,15 @@ const std::vector<LspMissingPromptInfo>& catalog() {
         "BUNDLE_MAKE_LS",
         "1",
     });
+    entries.push_back({
+        "yaml-language-server",
+        "lsp_toast.lang.yaml",
+        "status.yaml_ls_missing",
+        prefer_apt(nullptr, "npm install -g yaml-language-server"),
+        "--bundle-yaml-ls",
+        "BUNDLE_YAML_LS",
+        "1",
+    });
     return entries;
   }();
   return kCatalog;

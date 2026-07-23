@@ -17,8 +17,12 @@
 #include "search/workspace_search.hpp"
 #include "search/workspace_search_runner.hpp"
 #include "ui/cursor_blink.hpp"
+#include "ui/clickable.hpp"
 #include "ui/focusable_component.hpp"
+#include "ui/hover_effects.hpp"
 #include "ui/panel.hpp"
+#include "ui/press_ids.hpp"
+#include "ui/scroll_bar.hpp"
 #include "ui/text_input_style.hpp"
 #include "ui/theme.hpp"
 #include "ui/key_bindings.hpp"
@@ -83,6 +87,11 @@ struct SearchPanelState {
   int first_visible = 0;
   int last_visible_lines = 1;
   Box results_box;
+  Box list_content_box;
+  Box scrollbar_box;
+  ScrollbarLayout scrollbar_layout;
+  bool scrollbar_dragging = false;
+  int scrollbar_drag_offset = 0;
   Box query_box;
   Box replace_box;
   Box path_box;
@@ -96,18 +105,119 @@ struct SearchPanelState {
 
 namespace {
 
-void clamp_search_scroll(SearchPanelState* state, int visible_lines) {
+void clamp_search_scroll_viewport(SearchPanelState* state, int visible_lines) {
   if (state == nullptr) {
     return;
   }
   const int total = static_cast<int>(state->results.size());
   const int max_first = std::max(0, total - visible_lines);
   state->first_visible = std::max(0, std::min(state->first_visible, max_first));
+}
+
+void ensure_search_selection_visible(SearchPanelState* state, int visible_lines) {
+  if (state == nullptr) {
+    return;
+  }
+  clamp_search_scroll_viewport(state, visible_lines);
   if (state->selected < state->first_visible) {
     state->first_visible = state->selected;
   } else if (state->selected >= state->first_visible + visible_lines) {
     state->first_visible = state->selected - visible_lines + 1;
   }
+  clamp_search_scroll_viewport(state, visible_lines);
+}
+
+bool scroll_search_by_wheel(SearchPanelState* state, int delta, int visible_lines) {
+  if (state == nullptr) {
+    return false;
+  }
+  const int total = static_cast<int>(state->results.size());
+  const int max_first = std::max(0, total - visible_lines);
+  const int next = std::max(0, std::min(state->first_visible + delta, max_first));
+  if (next == state->first_visible) {
+    return false;
+  }
+  state->first_visible = next;
+  return true;
+}
+
+bool handle_search_scrollbar_mouse(SearchPanelState* state, MainLayoutState* layout_state,
+                                   const Mouse& m, int total, int visible) {
+  if (state == nullptr) {
+    return false;
+  }
+
+  const int max_first = std::max(0, total - visible);
+  const bool in_bar = state->scrollbar_box.Contain(m.x, m.y);
+  const bool scrollable = state->scrollbar_layout.scrollable;
+
+  if (m.motion == Mouse::Moved) {
+    if (layout_state != nullptr && hover_effects_enabled()) {
+      const std::string_view before = layout_state->clickable.hovered_id();
+      if (in_bar || state->scrollbar_dragging) {
+        layout_state->clickable.set_hover(press_id::kSearchScrollbar);
+      } else {
+        layout_state->clickable.clear_hover_if(
+            [](std::string_view id) { return id == press_id::kSearchScrollbar; });
+      }
+      apply_hover_repaint(layout_state, before);
+    }
+    if (state->scrollbar_dragging && scrollable) {
+      const int local_y = m.y - state->scrollbar_box.y_min;
+      const int thumb_top = local_y - state->scrollbar_drag_offset;
+      state->first_visible =
+          std::max(0, std::min(scroll_for_thumb_top(state->scrollbar_layout, thumb_top), max_first));
+      return true;
+    }
+    return false;
+  }
+
+  if (state->scrollbar_dragging) {
+    if (m.button == Mouse::Left && m.motion == Mouse::Released) {
+      state->scrollbar_dragging = false;
+      return true;
+    }
+    if (m.button == Mouse::Left && m.motion == Mouse::Moved && scrollable) {
+      const int local_y = m.y - state->scrollbar_box.y_min;
+      const int thumb_top = local_y - state->scrollbar_drag_offset;
+      state->first_visible =
+          std::max(0, std::min(scroll_for_thumb_top(state->scrollbar_layout, thumb_top), max_first));
+      return true;
+    }
+  }
+
+  if (!in_bar) {
+    return false;
+  }
+
+  if (m.button == Mouse::WheelUp) {
+    return scroll_search_by_wheel(state, -3, visible);
+  }
+  if (m.button == Mouse::WheelDown) {
+    return scroll_search_by_wheel(state, 3, visible);
+  }
+
+  if (!scrollable) {
+    return false;
+  }
+
+  if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+    trigger_press(layout_state, press_id::kSearchScrollbar);
+    const int local_y = m.y - state->scrollbar_box.y_min;
+    if (scrollbar_thumb_hit(state->scrollbar_layout, state->scrollbar_box, m.x, m.y)) {
+      state->scrollbar_dragging = true;
+      state->scrollbar_drag_offset = local_y - state->scrollbar_layout.thumb_y;
+    } else {
+      const int thumb_top = local_y - state->scrollbar_layout.thumb_height / 2;
+      state->first_visible = std::max(
+          0, std::min(scroll_for_thumb_top(state->scrollbar_layout, thumb_top), max_first));
+      state->scrollbar_dragging = true;
+      state->scrollbar_drag_offset = state->scrollbar_layout.thumb_height / 2;
+    }
+    return true;
+  }
+
+  return false;
 }
 
 }  // namespace
@@ -446,13 +556,38 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       return true;
     }
 
+    if (event.is_mouse()) {
+      const auto& m = event.mouse();
+      const int total = static_cast<int>(state->results.size());
+      const int visible = visible_line_count(state->results_box);
+      state->last_visible_lines = visible;
+
+      if (handle_search_scrollbar_mouse(state.get(), layout_state, m, total, visible)) {
+        if (layout_state != nullptr) {
+          UI_WAKE(layout_state, "wake");
+        }
+        return true;
+      }
+
+      if ((state->list_content_box.Contain(m.x, m.y) || state->scrollbar_box.Contain(m.x, m.y)) &&
+          (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown)) {
+        const int delta = m.button == Mouse::WheelUp ? -3 : 3;
+        if (scroll_search_by_wheel(state.get(), delta, visible)) {
+          if (layout_state != nullptr) {
+            UI_WAKE(layout_state, "wake");
+          }
+        }
+        return true;
+      }
+    }
+
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
         event.mouse().motion == Mouse::Pressed) {
       const auto& m = event.mouse();
       const bool in_search_chrome =
           state->query_box.Contain(m.x, m.y) || state->replace_box.Contain(m.x, m.y) ||
           state->path_box.Contain(m.x, m.y) || state->include_box.Contain(m.x, m.y) ||
-          state->exclude_box.Contain(m.x, m.y) || state->results_box.Contain(m.x, m.y);
+          state->exclude_box.Contain(m.x, m.y) || state->list_content_box.Contain(m.x, m.y);
       if (!in_search_chrome) {
         return false;
       }
@@ -477,15 +612,15 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         activate_field(TextInputFocus::SearchExclude, exclude_input);
         return true;
       }
-      if (state->results_box.Contain(m.x, m.y)) {
+      if (state->list_content_box.Contain(m.x, m.y)) {
         clear_search_query_selection(state.get());
         clear_search_input_focus(layout_state);
         const int visible = state->last_visible_lines;
-        const int visual_row = m.y - state->results_box.y_min;
+        const int visual_row = m.y - state->list_content_box.y_min;
         const int row = visual_row + state->first_visible;
         if (row >= 0 && row < static_cast<int>(state->results.size())) {
           state->selected = row;
-          clamp_search_scroll(state.get(), visible);
+          ensure_search_selection_visible(state.get(), visible);
           open_result(state.get(), workspace, model, focus, row);
         }
         return true;
@@ -493,31 +628,12 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       return false;
     }
 
-    if (event.is_mouse() && state->results_box.Contain(event.mouse().x, event.mouse().y)) {
-      const auto& m = event.mouse();
-      const int total = static_cast<int>(state->results.size());
-      const int visible = visible_line_count(state->results_box);
-      state->last_visible_lines = visible;
-      const int max_scroll = std::max(0, total - visible);
-      if (m.button == Mouse::WheelUp) {
-        state->first_visible = std::max(0, state->first_visible - 3);
-        if (layout_state != nullptr) {
-          UI_WAKE(layout_state, "wake");
-        }
-        return true;
-      }
-      if (m.button == Mouse::WheelDown) {
-        state->first_visible = std::min(state->first_visible + 3, max_scroll);
-        if (layout_state != nullptr) {
-          UI_WAKE(layout_state, "wake");
-        }
-        return true;
-      }
-    }
-
     if (event.is_mouse() && event.mouse().motion == Mouse::Moved &&
-        state->results_box.Contain(event.mouse().x, event.mouse().y)) {
-      focus->region = FocusRegion::Terminal;
+        (state->results_box.Contain(event.mouse().x, event.mouse().y) ||
+         state->scrollbar_box.Contain(event.mouse().x, event.mouse().y))) {
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
       clear_search_query_selection(state.get());
       clear_search_input_focus(layout_state);
     }
@@ -651,14 +767,14 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       if (!state->results.empty()) {
         state->selected =
             std::min(state->selected + 1, static_cast<int>(state->results.size()) - 1);
-        clamp_search_scroll(state.get(), state->last_visible_lines);
+        ensure_search_selection_visible(state.get(), state->last_visible_lines);
         return true;
       }
       return false;
     }
     if (event == Event::ArrowUp || event == Event::Character('k')) {
       state->selected = std::max(0, state->selected - 1);
-      clamp_search_scroll(state.get(), state->last_visible_lines);
+      ensure_search_selection_visible(state.get(), state->last_visible_lines);
       return true;
     }
     if (event == Event::PageDown) {
@@ -666,7 +782,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         const int visible = state->last_visible_lines;
         state->selected =
             std::min(state->selected + visible, static_cast<int>(state->results.size()) - 1);
-        clamp_search_scroll(state.get(), visible);
+        ensure_search_selection_visible(state.get(), visible);
         return true;
       }
       return false;
@@ -675,7 +791,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
       if (!state->results.empty()) {
         const int visible = state->last_visible_lines;
         state->selected = std::max(0, state->selected - visible);
-        clamp_search_scroll(state.get(), visible);
+        ensure_search_selection_visible(state.get(), visible);
         return true;
       }
       return false;
@@ -725,16 +841,17 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         });
 
         Elements rows;
+        const int visible = visible_line_count(state->results_box);
+        state->last_visible_lines = visible;
+        clamp_search_scroll_viewport(state.get(), visible);
+        const int total = static_cast<int>(state->results.size());
+
         if (state->results.empty() && state->query.empty()) {
           rows.push_back(text(i18n::tr("common.no_results")) | color(theme::Muted()));
         } else if (state->results.empty()) {
           rows.push_back(text(state->runner.running() ? i18n::tr("search.loading") : i18n::tr("common.no_matches")) |
                          color(theme::Muted()));
         } else {
-          const int visible = visible_line_count(state->results_box);
-          state->last_visible_lines = visible;
-          clamp_search_scroll(state.get(), visible);
-          const int total = static_cast<int>(state->results.size());
           const int end = std::min(total, state->first_visible + visible);
           for (int i = state->first_visible; i < end; ++i) {
             const auto& hit = state->results[static_cast<std::size_t>(i)];
@@ -766,7 +883,21 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
           }
         }
 
-        auto results = vbox(std::move(rows)) | vscroll_indicator | frame | flex |
+        state->scrollbar_layout =
+            compute_scrollbar_layout(total, state->first_visible, visible, visible);
+        const bool scrollbar_hovered =
+            layout_state != nullptr &&
+            layout_state->clickable.is_hovered(press_id::kSearchScrollbar);
+        const bool scrollbar_active =
+            state->scrollbar_dragging ||
+            (layout_state != nullptr &&
+             layout_state->clickable.is_pressed(press_id::kSearchScrollbar));
+        Element scrollbar =
+            vertical_scrollbar(total, state->first_visible, visible, visible, scrollbar_hovered,
+                               scrollbar_active) |
+            reflect(state->scrollbar_box);
+        Element list_body = vbox(std::move(rows)) | flex | reflect(state->list_content_box);
+        auto results = hbox({std::move(list_body) | flex, std::move(scrollbar)}) | flex |
                        reflect(state->results_box) | bgcolor(theme::PanelBg());
 
         return PanelBody(vbox({std::move(form), std::move(results)}));

@@ -1128,7 +1128,8 @@ void refresh_terminal_view(ShellSession* shell, ConsolePanelState* state) {
   if (text.empty()) {
     return;
   }
-  if (drained == 0 && text == state->terminal_text && state->terminal_view_valid) {
+  // Bytes in the PTY do not imply a visual update (ignored escapes, BEL, etc.).
+  if (text == state->terminal_text && state->terminal_view_valid) {
     return;
   }
   state->terminal_text = text;
@@ -1745,6 +1746,10 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       }
       if (problems_tab_active_console(app_mode, layout_state) &&
           diagnostics_panel->OnEvent(event)) {
+        return true;
+      }
+      if (search_tab_active_console(app_mode, layout_state) && layout_state != nullptr &&
+          layout_state->search_key_handler && layout_state->search_key_handler(event)) {
         return true;
       }
       if (search_tab_active_console(app_mode, layout_state) && search_panel->OnEvent(event)) {

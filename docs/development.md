@@ -89,14 +89,16 @@ Bash and LaTeX language servers can be embedded independently (Linux x86_64):
 | `TUIDE_BUNDLE_BASH_LS` | bash-language-server + Node | LSP for shell scripts |
 | `TUIDE_BUNDLE_TEXLAB` | TexLab release binary | LSP for LaTeX |
 | `TUIDE_BUNDLE_BASH_DAP` | bash-debug adapter + bashdb (+ Node unless BASH_LS) | DAP for shell scripts |
+| `TUIDE_BUNDLE_YAML_LS` | yaml-language-server + Node | LSP for YAML |
 
-Bash DAP still requires a host `bash` (and typically `bashdb` on PATH if not fully bundled). Node is shared with the Bash LS bundle when both are enabled.
+Bash DAP still requires a host `bash` (and typically `bashdb` on PATH if not fully bundled). Node is shared with the Bash LS / YAML LS bundles when enabled.
 
 ```bash
 ./tools/compile.sh --bundle-bash-ls -y
 ./tools/compile.sh --bundle-texlab -y
 ./tools/compile.sh --bundle-bash-dap -y
-./tools/compile.sh --no-bundle-bash-ls --no-bundle-texlab --no-bundle-bash-dap -y
+./tools/compile.sh --bundle-yaml-ls -y
+./tools/compile.sh --no-bundle-bash-ls --no-bundle-texlab --no-bundle-bash-dap --no-bundle-yaml-ls -y
 ```
 
 Build-time tools (when bundling): `curl` or `wget`, `zstd`, `objcopy`, `sha256sum`; for clangd also `unzip`, `strip`, `ldd`; for option A also host `python3` (venv + pip); for Bash LS / Bash DAP also host `npm` (unless sources are prebuilt).
@@ -162,7 +164,9 @@ Environment variables:
 
 Without an embedded Python blob (and without basedpyright on `PATH`), `.py` files still get tree-sitter syntax highlighting; completions/diagnostics/hover require the language server. Option A still needs a host `python3` to run the extracted langserver. Option B embeds CPython and debugpy for DAP.
 
-Shell (`.sh`, `.bash`) and LaTeX (`.tex`, `.sty`, `.cls`) use tree-sitter for syntax highlighting and outline; LSP completions/diagnostics/hover require optional language servers on `PATH` (or env overrides):
+Shell (`.sh`, `.bash`), LaTeX (`.tex`, `.sty`, `.cls`), and YAML (`.yaml`, `.yml`) use
+tree-sitter for syntax highlighting and outline; LSP completions/diagnostics/hover require
+optional language servers on `PATH` (or env overrides):
 
 ```bash
 npm install -g bash-language-server   # Node.js; binary: bash-language-server
@@ -171,6 +175,9 @@ npm install -g bash-language-server   # Node.js; binary: bash-language-server
 # TexLab: download a release binary from https://github.com/latex-lsp/texlab/releases
 # and put `texlab` on PATH, or:
 export TEXLAB_PATH=/path/to/texlab
+
+npm install -g yaml-language-server   # or: export TUIDE_YAML_LS=/path/to/yaml-language-server
+# embed with: ./tools/compile.sh --bundle-yaml-ls -y
 ```
 
 Install basedpyright/debugpy on the host only when not bundling:

@@ -404,6 +404,45 @@ void ShellSession::send_interrupt() {
 #endif
 }
 
+bool ShellSession::feed_pty_bytes_locked(const char* data, std::size_t len) {
+  if (data == nullptr || len == 0) {
+    return false;
+  }
+  const std::string prev_text = display_text_;
+  const int prev_col = terminal_.cursor_col();
+  const int prev_row = terminal_.cursor_row();
+  const std::size_t prev_rows = display_styled_rows_.size();
+  terminal_.feed(data, len);
+  rebuild_display_locked();
+  return display_text_ != prev_text || terminal_.cursor_col() != prev_col ||
+         terminal_.cursor_row() != prev_row || display_styled_rows_.size() != prev_rows;
+}
+
+void ShellSession::on_pty_bytes(const char* data, std::size_t len) {
+  bool visual_changed = false;
+  {
+    std::lock_guard<std::mutex> lock(terminal_mutex_);
+    // Drenar restos de la cola (p. ej. tras un cambio de consumer) antes del chunk nuevo.
+    while (auto chunk = output_chunks_.try_pop()) {
+      if (feed_pty_bytes_locked(chunk->data(), chunk->size())) {
+        visual_changed = true;
+      }
+    }
+    if (feed_pty_bytes_locked(data, len)) {
+      visual_changed = true;
+    }
+  }
+  if (!visual_changed) {
+    return;
+  }
+  output_pending_.store(true, std::memory_order_release);
+  // Solo despertar la UI cuando hay un cambio visual real. Un proceso activo en el
+  // PTY (p. ej. xterm) puede generar lecturas sin alterar el buffer visible.
+  if (consumer_active_.load(std::memory_order_acquire)) {
+    notify_output();
+  }
+}
+
 void ShellSession::reader_loop() {
 #if defined(__linux__)
   std::vector<char> buffer(4096);
@@ -415,18 +454,7 @@ void ShellSession::reader_loop() {
     const ssize_t bytes = read(master, buffer.data(), buffer.size());
     if (bytes > 0) {
       TUIDE_MON("shell", "pty_read bytes=" + std::to_string(bytes));
-      output_chunks_.push(
-          std::string(buffer.data(), static_cast<std::size_t>(bytes)));
-      output_pending_.store(true, std::memory_order_release);
-      // Con la consola minimizada nadie drena la cola: la alimentamos aquí para
-      // que el emulador (con scrollback acotado) se mantenga al día y no se
-      // acumule trabajo que congelaría la UI al reabrir. Tampoco despertamos la
-      // UI en ese caso, evitando ticks innecesarios.
-      if (consumer_active_.load(std::memory_order_acquire)) {
-        notify_output();
-      } else {
-        background_drain();
-      }
+      on_pty_bytes(buffer.data(), static_cast<std::size_t>(bytes));
       continue;
     }
     if (bytes == 0) {
@@ -458,35 +486,32 @@ int ShellSession::drain_output_bytes(int max_bytes) {
     return 0;
   }
   int consumed = 0;
-  while (consumed < max_bytes) {
-    auto chunk = output_chunks_.try_pop();
-    if (!chunk) {
-      break;
-    }
-    consumed += static_cast<int>(chunk->size());
-    {
-      std::lock_guard<std::mutex> lock(terminal_mutex_);
-      terminal_.feed(chunk->data(), chunk->size());
+  bool visual_changed = false;
+  {
+    std::lock_guard<std::mutex> lock(terminal_mutex_);
+    while (consumed < max_bytes) {
+      auto chunk = output_chunks_.try_pop();
+      if (!chunk) {
+        break;
+      }
+      consumed += static_cast<int>(chunk->size());
+      if (feed_pty_bytes_locked(chunk->data(), chunk->size())) {
+        visual_changed = true;
+      }
     }
   }
-  if (consumed > 0) {
-    std::lock_guard<std::mutex> lock(terminal_mutex_);
-    rebuild_display_locked();
+  if (visual_changed) {
+    output_pending_.store(true, std::memory_order_release);
   }
   return consumed;
 }
 
 void ShellSession::background_drain() {
   std::lock_guard<std::mutex> lock(terminal_mutex_);
-  bool any = false;
   while (auto chunk = output_chunks_.try_pop()) {
-    terminal_.feed(chunk->data(), chunk->size());
-    any = true;
-  }
-  if (any) {
     // Keep display_* in sync so a later refresh (or a race with set_consumer_active)
     // does not see an empty mirror while the emulator already has the prompt.
-    rebuild_display_locked();
+    (void)feed_pty_bytes_locked(chunk->data(), chunk->size());
   }
 }
 

@@ -21,15 +21,16 @@ constexpr int kLspLuaLs = 7;
 constexpr int kLspTsserver = 8;
 constexpr int kLspNeocmakelsp = 9;
 constexpr int kLspMakeLs = 10;
-constexpr int kDapGdb = 11;
-constexpr int kDapPython = 12;
-constexpr int kDapBashDap = 13;
-constexpr int kForceBundled = 14;
-constexpr int kUiLocale = 15;
-constexpr int kEditorMode = 16;
-constexpr int kBuildBackend = 17;
-constexpr int kStaticLibstdcxx = 18;
-constexpr int kOptionCount = 19;
+constexpr int kLspYamlLs = 11;
+constexpr int kDapGdb = 12;
+constexpr int kDapPython = 13;
+constexpr int kDapBashDap = 14;
+constexpr int kForceBundled = 15;
+constexpr int kUiLocale = 16;
+constexpr int kEditorMode = 17;
+constexpr int kBuildBackend = 18;
+constexpr int kStaticLibstdcxx = 19;
+constexpr int kOptionCount = 20;
 
 constexpr int kGdbNone = 0;
 constexpr int kGdbStatic = 1;
@@ -61,6 +62,7 @@ struct BundleConfig {
   bool bundle_tsserver = false;
   bool bundle_neocmakelsp = false;
   bool bundle_make_ls = false;
+  bool bundle_yaml_ls = false;
   int gdb_kind = kGdbNone;
   int python_kind = kPythonNone;
   bool bundle_bash_dap = false;
@@ -89,6 +91,7 @@ constexpr int kSizeLuaLsMb = 3;
 constexpr int kSizeTsserverMb = 40;
 constexpr int kSizeNeocmakelspMb = 3;
 constexpr int kSizeMakeLsMb = 3;
+constexpr int kSizeYamlLsMb = 40;
 constexpr int kSizeGdbStaticMb = 16;
 constexpr int kSizeGdbCoreAnalyzerMb = 30;
 constexpr int kSizePythonLspMinMb = 42;
@@ -129,6 +132,9 @@ int estimated_binary_mb(const BundleConfig& config) {
   }
   if (config.bundle_make_ls) {
     mb += kSizeMakeLsMb;
+  }
+  if (config.bundle_yaml_ls) {
+    mb += kSizeYamlLsMb;
   }
   if (config.gdb_kind == kGdbStatic) {
     mb += kSizeGdbStaticMb;
@@ -340,6 +346,8 @@ void load_bundle_config(const std::string& path, BundleConfig* config) {
       config->bundle_neocmakelsp = parse_bool_value(line.substr(19));
     } else if (line.rfind("BUNDLE_MAKE_LS=", 0) == 0) {
       config->bundle_make_ls = parse_bool_value(line.substr(15));
+    } else if (line.rfind("BUNDLE_YAML_LS=", 0) == 0) {
+      config->bundle_yaml_ls = parse_bool_value(line.substr(15));
     } else if (line.rfind("BUNDLE_TSSERVER=", 0) == 0) {
       config->bundle_tsserver = parse_bool_value(line.substr(16));
     } else if (line.rfind("FORCE_BUNDLED=", 0) == 0) {
@@ -394,6 +402,7 @@ bool save_bundle_config(const std::string& path, const BundleConfig& config) {
   output << "BUNDLE_TSSERVER=" << (config.bundle_tsserver ? "1" : "0") << '\n';
   output << "BUNDLE_NEOCMAKELSP=" << (config.bundle_neocmakelsp ? "1" : "0") << '\n';
   output << "BUNDLE_MAKE_LS=" << (config.bundle_make_ls ? "1" : "0") << '\n';
+  output << "BUNDLE_YAML_LS=" << (config.bundle_yaml_ls ? "1" : "0") << '\n';
   output << "FORCE_BUNDLED=" << (config.force_bundled ? "1" : "0") << '\n';
   output << "UI_LOCALE=" << ui_locale_tag(config.ui_locale) << '\n';
   output << "EDITOR_MODE=" << editor_mode_tag(config.editor_mode) << '\n';
@@ -435,6 +444,8 @@ bool option_checked(const WizardState& state, int index) {
       return state.draft.bundle_neocmakelsp;
     case kLspMakeLs:
       return state.draft.bundle_make_ls;
+    case kLspYamlLs:
+      return state.draft.bundle_yaml_ls;
     case kDapBashDap:
       return state.draft.bundle_bash_dap;
     case kForceBundled:
@@ -471,6 +482,8 @@ std::string option_label(const WizardState& state, int index) {
       return "neocmakelsp (CMake)";
     case kLspMakeLs:
       return "make-ls (Makefile)";
+    case kLspYamlLs:
+      return "yaml-language-server (YAML)";
     case kDapGdb:
       return std::string("GDB: ") + gdb_kind_label(locale, state.draft.gdb_kind);
     case kDapPython:
@@ -568,6 +581,9 @@ void toggle_option(WizardState* state, int index) {
       break;
     case kLspMakeLs:
       state->draft.bundle_make_ls = !state->draft.bundle_make_ls;
+      break;
+    case kLspYamlLs:
+      state->draft.bundle_yaml_ls = !state->draft.bundle_yaml_ls;
       break;
     case kDapGdb:
       cycle_gdb_kind(state);
@@ -699,7 +715,7 @@ int main(int argc, char** argv) {
   const std::vector<int> kLspIndices = {kLspClangd,     kLspBashLs,   kLspTexlab,
                                         kLspRustAnalyzer, kLspGopls,    kLspZls,
                                         kLspFortls,     kLspLuaLs,    kLspTsserver,
-                                        kLspNeocmakelsp, kLspMakeLs};
+                                        kLspNeocmakelsp, kLspMakeLs, kLspYamlLs};
   const std::vector<int> kDapIndices = {kDapGdb, kDapPython, kDapBashDap};
   const std::vector<int> kForceIndices = {kForceBundled};
   const std::vector<int> kDefaultsIndices = {kUiLocale, kEditorMode, kBuildBackend,

@@ -22,6 +22,8 @@
 #include "util/thread_name.hpp"
 #include "util/bundled_tools.hpp"
 
+#include <array>
+
 namespace tuide {
 
 namespace {
@@ -109,6 +111,42 @@ std::optional<int> parse_watchpoint_number(const std::string& output) {
   return std::nullopt;
 }
 
+// GDB 15 (Ubuntu) runs the inferior on the launch request itself. GDB 16+ / our
+// bundled patch defers run/start until configurationDone.
+int probe_gdb_major_version(const std::string& gdb_path) {
+  if (gdb_path.empty()) {
+    return 0;
+  }
+  const std::string cmd = shell_quote(gdb_path) + " --version 2>/dev/null";
+  FILE* pipe = ::popen(cmd.c_str(), "r");
+  if (pipe == nullptr) {
+    return 0;
+  }
+  std::array<char, 256> buffer{};
+  std::string first_line;
+  if (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+    first_line = buffer.data();
+  }
+  ::pclose(pipe);
+  static const std::regex kVersion(R"((\d+)\.\d+)");
+  std::smatch match;
+  if (std::regex_search(first_line, match, kVersion) && match.size() > 1) {
+    return std::stoi(match[1].str());
+  }
+  return 0;
+}
+
+bool gdb_defers_launch_until_configuration_done() {
+  const auto location = resolve_gdb();
+  if (!location.has_value()) {
+    return false;
+  }
+  if (location->source == GdbLocation::Source::Bundled) {
+    return true;
+  }
+  return probe_gdb_major_version(location->binary_path) >= 16;
+}
+
 }  // namespace
 
 DapBackend::DapBackend(ThreadSafeQueue<UiCommand>& commands,
@@ -185,9 +223,13 @@ void DapBackend::push_event(DebugEvent event) {
   events_.push(std::move(event));
   // kContinued must wake the UI so drain_events can apply set_running() and
   // clear the stopped-line highlight / play→pause toolbar state.
+  // kStackUpdated must also wake: stackTrace is async and usually arrives after
+  // the kStopped drain/paint cycle; without a wake the editor keeps a stale
+  // active_line (no ► / highlight) until the next user keypress.
   if (kind == DebugEventKind::kStopped || kind == DebugEventKind::kTerminated ||
       kind == DebugEventKind::kSessionReady || kind == DebugEventKind::kLaunchConfigured ||
-      kind == DebugEventKind::kContinued || kind == DebugEventKind::kError) {
+      kind == DebugEventKind::kContinued || kind == DebugEventKind::kError ||
+      kind == DebugEventKind::kStackUpdated) {
     std::lock_guard<std::mutex> lock(wake_mutex_);
     if (wake_callback_) {
       wake_callback_(kind);
@@ -1363,18 +1405,56 @@ void DapBackend::handle_command(const UiCommand& command) {
     dap::GdbLaunchRequest launch;
     launch.program = command.launch.program;
     launch.cwd = command.launch.cwd;
+    const bool stop_at_main = command.launch.stop_at_main;
+    const bool deferred_launch = gdb_defers_launch_until_configuration_done();
     if (adapter_is_gdb()) {
-      // false → GDB DAP uses `run` (no synthetic stop at main); true → `start`.
-      launch.stopAtBeginningOfMainSubprogram =
-          dap::boolean(command.launch.stop_at_main);
+      launch.stopAtBeginningOfMainSubprogram = dap::boolean(stop_at_main);
     }
     if (!command.launch.args.empty()) {
       launch.args = command.launch.args;
     }
 
-    // GDB defers the real start until configurationDone. Send launch, install
-    // breakpoints, then configurationDone so `run` still honors editor BPs.
-    {
+    // Three GDB launch shapes:
+    // 1) Deferred (GDB 16+/bundled): launch → setBreakpoints → configurationDone
+    //    (configurationDone actually starts the inferior).
+    // 2) Immediate + stop_at_main: launch (tbreak+run) → configurationDone; BPs
+    //    after the synthetic stop.
+    // 3) Immediate + !stop_at_main: setBreakpoints → configurationDone → launch
+    //    so `run` already has editor BPs (otherwise the process races off and
+    //    exits before any stop, leaving the UI "ok" with a blank Play button).
+    auto complete_gdb_launch =
+        [this](dap::future<dap::ResponseOrError<dap::LaunchResponse>> launch_future) {
+          const auto response = launch_future.get();
+          bool inferior_started = false;
+          {
+            std::lock_guard<std::recursive_mutex> response_lock(session_mutex_);
+            if (!session_) {
+              return;
+            }
+            if (response.error) {
+              push_error(i18n::tr_fmt("debug.dap.launch_failed",
+                                      {response.error.message}));
+            } else {
+              inferior_started = true;
+            }
+          }
+          if (!inferior_started) {
+            return;
+          }
+          inferior_launched_ = true;
+          on_inferior_launched();
+          // Without a stop (no stop-at-main / not yet on a BP), mark running so
+          // the toolbar Play/Pause state is not left blank (Disconnected).
+          if (!inferior_stopped_.load(std::memory_order_acquire)) {
+            notify_continued();
+          }
+          DebugEvent configured;
+          configured.kind = DebugEventKind::kLaunchConfigured;
+          configured.text = i18n::tr("debug.dap.session_ready");
+          push_event(std::move(configured));
+        };
+
+    if (deferred_launch) {
       std::unique_lock<std::recursive_mutex> lock(session_mutex_);
       if (!session_) {
         return;
@@ -1385,37 +1465,55 @@ void DapBackend::handle_command(const UiCommand& command) {
       configuration_done_ = false;
       auto launch_future = session_->send(launch);
       lock.unlock();
-
       if (!finish_late_configuration_unlocked(/*send_configuration_done=*/true)) {
         return;
       }
+      complete_gdb_launch(std::move(launch_future));
+      return;
+    }
 
-      const auto response = launch_future.get();
-      bool inferior_started = false;
+    if (!stop_at_main) {
       {
-        std::lock_guard<std::recursive_mutex> response_lock(session_mutex_);
+        std::lock_guard<std::recursive_mutex> lock(session_mutex_);
         if (!session_) {
           return;
         }
-        if (response.error) {
-          push_error(i18n::tr_fmt("debug.dap.launch_failed",
-                                  {response.error.message}));
-        } else {
-          inferior_started = true;
+        if (adapter_is_gdb() && !configure_packet_monitor_env_locked(command.launch)) {
+          return;
         }
+        configuration_done_ = false;
       }
-      if (inferior_started) {
-        inferior_launched_ = true;
-        on_inferior_launched();
-        // Without stop-at-main there may be no initial Stopped; mark running.
-        if (!inferior_stopped_.load(std::memory_order_acquire)) {
-          notify_continued();
-        }
-        DebugEvent configured;
-        configured.kind = DebugEventKind::kLaunchConfigured;
-        configured.text = i18n::tr("debug.dap.session_ready");
-        push_event(std::move(configured));
+      if (!finish_late_configuration_unlocked(/*send_configuration_done=*/false)) {
+        return;
       }
+      std::unique_lock<std::recursive_mutex> lock(session_mutex_);
+      if (!session_) {
+        return;
+      }
+      if (!send_configuration_done()) {
+        return;
+      }
+      auto launch_future = session_->send(launch);
+      lock.unlock();
+      complete_gdb_launch(std::move(launch_future));
+      return;
+    }
+
+    {
+      std::unique_lock<std::recursive_mutex> lock(session_mutex_);
+      if (!session_) {
+        return;
+      }
+      if (adapter_is_gdb() && !configure_packet_monitor_env_locked(command.launch)) {
+        return;
+      }
+      configuration_done_ = false;
+      auto launch_future = session_->send(launch);
+      if (!send_configuration_done()) {
+        return;
+      }
+      lock.unlock();
+      complete_gdb_launch(std::move(launch_future));
     }
     return;
   }
@@ -1549,34 +1647,54 @@ void DapBackend::handle_command(const UiCommand& command) {
     }
     case UiCommandKind::kNext: {
       dap::NextRequest request;
-      request.threadId = command.thread_id > 0 ? command.thread_id
-                                               : active_thread_id_;
+      request.threadId = command.thread_id > 0
+                             ? command.thread_id
+                             : (active_thread_id_ > 0 ? active_thread_id_ : 1);
+      request.granularity = dap::SteppingGranularity("line");
+      // Mark running before waiting so a queued RefreshStack that races after
+      // step-over does not block the worker on hung scopes (same as continue).
+      inferior_stopped_.store(false, std::memory_order_release);
       const auto response = session_->send(request).get();
       if (response.error) {
+        inferior_stopped_.store(true, std::memory_order_release);
         push_error(i18n::tr_fmt("debug.dap.next_failed",
                                 {response.error.message}));
+      } else {
+        notify_continued(request.threadId);
       }
       break;
     }
     case UiCommandKind::kStepIn: {
       dap::StepInRequest request;
-      request.threadId = command.thread_id > 0 ? command.thread_id
-                                               : active_thread_id_;
+      request.threadId = command.thread_id > 0
+                             ? command.thread_id
+                             : (active_thread_id_ > 0 ? active_thread_id_ : 1);
+      request.granularity = dap::SteppingGranularity("line");
+      inferior_stopped_.store(false, std::memory_order_release);
       const auto response = session_->send(request).get();
       if (response.error) {
+        inferior_stopped_.store(true, std::memory_order_release);
         push_error(i18n::tr_fmt("debug.dap.step_in_failed",
                                 {response.error.message}));
+      } else {
+        notify_continued(request.threadId);
       }
       break;
     }
     case UiCommandKind::kStepOut: {
       dap::StepOutRequest request;
-      request.threadId = command.thread_id > 0 ? command.thread_id
-                                               : active_thread_id_;
+      request.threadId = command.thread_id > 0
+                             ? command.thread_id
+                             : (active_thread_id_ > 0 ? active_thread_id_ : 1);
+      request.granularity = dap::SteppingGranularity("line");
+      inferior_stopped_.store(false, std::memory_order_release);
       const auto response = session_->send(request).get();
       if (response.error) {
+        inferior_stopped_.store(true, std::memory_order_release);
         push_error(i18n::tr_fmt("debug.dap.step_out_failed",
                                 {response.error.message}));
+      } else {
+        notify_continued(request.threadId);
       }
       break;
     }

@@ -1,0 +1,10 @@
+# Sample YAML for tuide tree-sitter + yaml-language-server
+name: hello
+version: 1
+enabled: true
+items:
+  - alpha
+  - beta
+nested:
+  count: 42
+  note: "hello yaml"

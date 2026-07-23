@@ -64,7 +64,9 @@ VisualHighlightConfig visual_highlight_config_from_settings(const AppSettings* s
 
 struct VisualHighlightOverviewData {
   std::unordered_set<int> git_changed_lines;
+  std::unordered_map<int, std::string> git_previous_by_line;
   bool git_untracked_all = false;
+  bool git_marks_computed = false;
   std::vector<TextMatch> text_matches;
   int total_lines = 0;
 };
@@ -114,8 +116,9 @@ struct VisualHighlightJobInputs {
   int total_lines = 0;
   int viewport_scroll = 0;
   int viewport_visible_lines = 0;
-  std::unordered_set<int> git_changed_lines;
+  std::vector<std::string> git_head_lines;
   bool git_untracked_all = false;
+  bool git_baseline_ready = false;
   std::vector<TextMatch> text_matches;
 };
 

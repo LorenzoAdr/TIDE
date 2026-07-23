@@ -131,6 +131,9 @@ std::string language_id_for_path(const std::string& path) {
   if (ext == ".ts" || ext == ".tsx") {
     return "typescript";
   }
+  if (ext == ".yaml" || ext == ".yml") {
+    return "yaml";
+  }
   return "plaintext";
 }
 

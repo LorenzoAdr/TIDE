@@ -66,6 +66,10 @@ bool language_id_is_make(const std::string& language_id) {
   return language_id == "make";
 }
 
+bool language_id_is_yaml(const std::string& language_id) {
+  return language_id == "yaml";
+}
+
 std::string language_server_id_for_language(const std::string& language_id) {
   if (language_id_is_python(language_id)) {
     return kLspServerBasedpyright;
@@ -99,6 +103,9 @@ std::string language_server_id_for_language(const std::string& language_id) {
   }
   if (language_id_is_make(language_id)) {
     return kLspServerMakeLs;
+  }
+  if (language_id_is_yaml(language_id)) {
+    return kLspServerYamlLs;
   }
   if (language_id_is_cpp_family(language_id)) {
     return kLspServerClangd;
@@ -402,6 +409,26 @@ std::optional<LanguageServerSpec> make_make_ls_spec(const std::string& workspace
   return spec;
 }
 
+std::optional<LanguageServerSpec> make_yaml_ls_spec(const std::string& workspace_root) {
+  const auto location = resolve_yaml_language_server();
+  if (!location.has_value()) {
+    return std::nullopt;
+  }
+
+  LanguageServerSpec spec;
+  spec.id = kLspServerYamlLs;
+  spec.command = location->binary_path;
+  spec.workspace_root = workspace_root;
+  spec.language_ids = {"yaml"};
+  if (location->use_node_script) {
+    spec.args.push_back(location->script_path);
+    spec.args.emplace_back("--stdio");
+  } else if (location->needs_stdio_flag) {
+    spec.args.emplace_back("--stdio");
+  }
+  return spec;
+}
+
 std::optional<LanguageServerSpec> make_language_server_spec(
     const std::string& server_id, const std::string& workspace_root,
     const std::string& compile_commands_dir, const bool use_gcc_query_driver,
@@ -442,6 +469,9 @@ std::optional<LanguageServerSpec> make_language_server_spec(
   }
   if (server_id == kLspServerMakeLs) {
     return make_make_ls_spec(workspace_root);
+  }
+  if (server_id == kLspServerYamlLs) {
+    return make_yaml_ls_spec(workspace_root);
   }
   return std::nullopt;
 }

@@ -268,6 +268,23 @@ ToolsStatusSnapshot collect_tools_status(const LspRuntimeFlags& lsp) {
       "make-ls", "settings.status.tool.make_ls", lsp.lsp_enabled, lsp.make_ready,
       lsp.make_starting, make_detail, make_bin));
 
+  std::optional<std::string> yaml_detail;
+  bool yaml_bin = false;
+  if (const auto loc = resolve_yaml_language_server(); loc.has_value()) {
+    yaml_bin = true;
+    yaml_detail = loc->binary_path;
+    if (loc->use_node_script && !loc->script_path.empty()) {
+      yaml_detail = *yaml_detail + " " + loc->script_path;
+    }
+    const std::string src = source_label<YamlLsLocation>(loc->source);
+    if (!src.empty()) {
+      *yaml_detail += "  [" + src + "]";
+    }
+  }
+  snap.language_servers.push_back(make_lsp_entry(
+      "yaml-language-server", "settings.status.tool.yaml_ls", lsp.lsp_enabled, lsp.yaml_ready,
+      lsp.yaml_starting, yaml_detail, yaml_bin));
+
   if (const auto chktex = resolve_chktex(); chktex.has_value()) {
     ToolStatusEntry entry;
     entry.id = "chktex";

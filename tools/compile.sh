@@ -25,6 +25,7 @@ BUNDLE_LUA_LS=0
 BUNDLE_TSSERVER=0
 BUNDLE_NEOCMAKELSP=0
 BUNDLE_MAKE_LS=0
+BUNDLE_YAML_LS=0
 FORCE_BUNDLED=0
 UI_LOCALE=en
 EDITOR_MODE=normal
@@ -106,6 +107,8 @@ Opciones:
   --no-bundle-neocmakelsp    No embeber neocmakelsp
   --bundle-make-ls           Embeber make-ls
   --no-bundle-make-ls        No embeber make-ls
+  --bundle-yaml-ls           Embeber yaml-language-server
+  --no-bundle-yaml-ls        No embeber yaml-language-server
   --build-backend=host|docker_focal|docker_bionic
                              Dónde compilar (host o Docker con glibc antigua)
   --static-libstdc++         Enlazar libstdc++/libgcc estáticamente (menos deps en runtime)
@@ -239,6 +242,7 @@ load_bundle_config() {
   BUNDLE_TSSERVER=0
   BUNDLE_NEOCMAKELSP=0
   BUNDLE_MAKE_LS=0
+  BUNDLE_YAML_LS=0
   FORCE_BUNDLED=0
   UI_LOCALE=en
   EDITOR_MODE=normal
@@ -293,6 +297,8 @@ load_bundle_config() {
       BUNDLE_NEOCMAKELSP=0) BUNDLE_NEOCMAKELSP=0 ;;
       BUNDLE_MAKE_LS=1) BUNDLE_MAKE_LS=1 ;;
       BUNDLE_MAKE_LS=0) BUNDLE_MAKE_LS=0 ;;
+      BUNDLE_YAML_LS=1) BUNDLE_YAML_LS=1 ;;
+      BUNDLE_YAML_LS=0) BUNDLE_YAML_LS=0 ;;
       FORCE_BUNDLED=1) FORCE_BUNDLED=1 ;;
       FORCE_BUNDLED=0) FORCE_BUNDLED=0 ;;
       UI_LOCALE=es) UI_LOCALE=es ;;
@@ -375,6 +381,7 @@ BUNDLE_LUA_LS=${BUNDLE_LUA_LS}
 BUNDLE_TSSERVER=${BUNDLE_TSSERVER}
 BUNDLE_NEOCMAKELSP=${BUNDLE_NEOCMAKELSP}
 BUNDLE_MAKE_LS=${BUNDLE_MAKE_LS}
+BUNDLE_YAML_LS=${BUNDLE_YAML_LS}
 FORCE_BUNDLED=${FORCE_BUNDLED}
 UI_LOCALE=${UI_LOCALE}
 EDITOR_MODE=${EDITOR_MODE}
@@ -585,6 +592,11 @@ cmake_bundle_args() {
     args+=(-DTUIDE_BUNDLE_MAKE_LS=ON -DTUIDE_FORCE_BUNDLED_MAKE_LS="${force}")
   else
     args+=(-DTUIDE_BUNDLE_MAKE_LS=OFF -DTUIDE_FORCE_BUNDLED_MAKE_LS=OFF)
+  fi
+  if [[ "${BUNDLE_YAML_LS}" == "1" ]]; then
+    args+=(-DTUIDE_BUNDLE_YAML_LS=ON -DTUIDE_FORCE_BUNDLED_YAML_LS="${force}")
+  else
+    args+=(-DTUIDE_BUNDLE_YAML_LS=OFF -DTUIDE_FORCE_BUNDLED_YAML_LS=OFF)
   fi
   case "${UI_LOCALE}" in
     es) args+=(-DTUIDE_DEFAULT_UI_LOCALE=es) ;;
@@ -937,6 +949,20 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE=0
       shift
       ;;
+    --bundle-yaml-ls)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_YAML_LS=1
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-bundle-yaml-ls)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_YAML_LS=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
     --static-libstdc++)
       STATIC_LIBSTDCXX=1
       STATIC_LIBSTDCXX_FROM_CLI=1
@@ -1130,6 +1156,11 @@ if [[ "${BUNDLE_MAKE_LS}" == "1" ]]; then
   log "  make-ls embebido: sí"
 else
   log "  make-ls embebido: no"
+fi
+if [[ "${BUNDLE_YAML_LS}" == "1" ]]; then
+  log "  yaml-language-server embebido: sí"
+else
+  log "  yaml-language-server embebido: no"
 fi
 log "  forzar embebidos: ${FORCE_BUNDLED}"
 log "  idioma por defecto: ${UI_LOCALE}"

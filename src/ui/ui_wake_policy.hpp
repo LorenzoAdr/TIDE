@@ -25,7 +25,10 @@
 //   - GitIndexerUpdated     — panel git; callback vacío
 //   - WorkspaceIndexUpdated — cambios del indexador de workspace
 //   - DebugOutput           — consola GDB entre paradas (batch al parar)
-//   - DebugStackVariables   — stack/variables (batch con parada)
+//
+// DebugStackVariables: stackTrace es async y llega DESPUÉS del ciclo de
+// paint de kStopped; DapBackend::push_event despierta en kStackUpdated para
+// que el editor aplique active_line / ► sin esperar input del usuario.
 
 #include <string_view>
 

@@ -60,33 +60,49 @@ void FilePickerPreview::request(const std::string& absolute_path, int center_lin
   join_worker();
 
   const std::uint64_t request_id = next_request_id_.fetch_add(1, std::memory_order_relaxed);
+  bool notify_loading = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     data_.request_id = request_id;
-    data_.path = absolute_path;
-    data_.lines.clear();
-    data_.first_line_number = 1;
-    data_.highlight_line = center_line > 0 ? center_line : 0;
-    data_.highlight_lines.clear();
-    data_.build_file_kind = BuildFileKind::kNone;
-    data_.use_tree_sitter = false;
-    data_.unsupported_reason = FilePickerPreviewUnsupportedReason::kNone;
-    data_.error_message.clear();
-    data_.state = absolute_path.empty() ? FilePickerPreviewState::kIdle
-                                        : FilePickerPreviewState::kLoading;
+    if (absolute_path.empty()) {
+      data_ = FilePickerPreviewData{};
+      data_.request_id = request_id;
+      notify_loading = true;
+    } else {
+      // Stale-while-revalidate: keep the previous paint until the worker
+      // publishes, so switching files does not flash an empty CodeBg pane.
+      const bool keep_stale = data_.state == FilePickerPreviewState::kReady ||
+                              data_.state == FilePickerPreviewState::kUnsupported ||
+                              data_.state == FilePickerPreviewState::kError;
+      if (!keep_stale) {
+        data_.path = absolute_path;
+        data_.lines.clear();
+        data_.first_line_number = 1;
+        data_.highlight_line = center_line > 0 ? center_line : 0;
+        data_.highlight_lines.clear();
+        data_.build_file_kind = BuildFileKind::kNone;
+        data_.use_tree_sitter = false;
+        data_.unsupported_reason = FilePickerPreviewUnsupportedReason::kNone;
+        data_.error_message.clear();
+        data_.state = FilePickerPreviewState::kLoading;
+        notify_loading = true;
+      }
+    }
+  }
+
+  if (notify_loading) {
+    NotifyCallback notify;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      notify = notify_;
+    }
+    if (notify) {
+      notify();
+    }
   }
 
   if (absolute_path.empty()) {
     return;
-  }
-
-  NotifyCallback notify;
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    notify = notify_;
-  }
-  if (notify) {
-    notify();
   }
 
   worker_ = std::thread([this, absolute_path, center_line, request_id] {
@@ -152,7 +168,7 @@ void FilePickerPreview::worker_main(std::string absolute_path, int center_line,
   result.build_file_kind = detect_build_file_kind(absolute_path);
   const std::string lang_id = language_id_for_path(absolute_path);
   const bool tree_sitter_build_lang =
-      language_id_is_cmake(lang_id) || language_id_is_make(lang_id);
+      language_id_is_cmake(lang_id) || language_id_is_make(lang_id) || language_id_is_yaml(lang_id);
   if (tree_sitter_build_lang) {
     result.build_file_kind = BuildFileKind::kNone;
   }
