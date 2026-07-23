@@ -481,6 +481,7 @@ EXTRA_CATALOG: list[tuple[str, str, str]] = [
     ("console.tab.git", "Git", "Git"),
     ("console.tab.symbols", "Símbolos", "Symbols"),
     ("console.hide_panel", " × ", " × "),
+    ("console.pty.filter_placeholder", "Filtrar…", "Filter…"),
     ("console.placeholder.shell", "Shell", "Shell"),
     ("console.placeholder.gdb", "Comando GDB o -exec ...", "GDB command or -exec ..."),
     ("console.gdb.no_output", "(sin salida GDB)", "(no GDB output)"),

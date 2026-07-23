@@ -62,6 +62,7 @@ enum class TextInputFocus {
   SearchInclude,
   SearchExclude,
   BinarySymbolsFilter,
+  TerminalFilter,
 };
 
 struct RightSidebarState {
@@ -326,6 +327,10 @@ inline bool is_search_input_focus(TextInputFocus focus) {
 
 inline bool is_binary_symbols_input_focus(TextInputFocus focus) {
   return focus == TextInputFocus::BinarySymbolsFilter;
+}
+
+inline bool is_terminal_filter_focus(TextInputFocus focus) {
+  return focus == TextInputFocus::TerminalFilter;
 }
 
 inline bool is_watch_input_focus(TextInputFocus focus) {

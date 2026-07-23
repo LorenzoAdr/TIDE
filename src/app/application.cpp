@@ -3287,6 +3287,7 @@ int Application::run() {
 			                                  focus_state_.region == FocusRegion::Terminal &&
 			                                  shell_session_.running();
 		if ((layout_state_.text_input_focus == TextInputFocus::Console ||
+		     layout_state_.text_input_focus == TextInputFocus::TerminalFilter ||
 		     shell_terminal_focus) &&
 		    !event_is_tuide_global_shortcut(event) && layout_state_.console_key_handler &&
 		    layout_state_.console_key_handler(event)) {
@@ -3428,6 +3429,7 @@ int Application::run() {
 				if (terminal_tab &&
 				    layout_state_.console_tabs.selected_tab != ConsolePanelTabs::kBinarySymbols &&
 				    layout_state_.console_tabs.selected_tab != ConsolePanelTabs::kSearch &&
+				    !is_terminal_filter_focus(layout_state_.text_input_focus) &&
 				    (layout_state_.text_input_focus == TextInputFocus::Console ||
 				     (focus_state_.region == FocusRegion::Terminal && shell_session_.running())) &&
 				    shell_session_.running()) {

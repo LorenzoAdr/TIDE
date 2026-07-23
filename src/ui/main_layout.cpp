@@ -189,7 +189,9 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
     if (layout_state->console_tabs.selected_tab == ConsolePanelTabs::kTerminal ||
         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kApp ||
         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kCoreAnalyzer) {
-      layout_state->text_input_focus = TextInputFocus::Console;
+      if (!is_terminal_filter_focus(layout_state->text_input_focus)) {
+        layout_state->text_input_focus = TextInputFocus::Console;
+      }
     }
     return;
   }
@@ -215,6 +217,13 @@ void sync_panel_focus(FocusSyncState* sync, AppMode* app_mode, FocusManagerState
     case TextInputFocus::EditorGotoLine:
     case TextInputFocus::EditorCompletion:
       if (!is_editor_focus_region(focus->region)) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
+      break;
+    case TextInputFocus::TerminalFilter:
+      if (focus->region != FocusRegion::Terminal ||
+          (layout_state->console_tabs.selected_tab != ConsolePanelTabs::kTerminal &&
+           layout_state->console_tabs.selected_tab != ConsolePanelTabs::kApp)) {
         layout_state->text_input_focus = TextInputFocus::None;
       }
       break;

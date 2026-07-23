@@ -570,6 +570,7 @@ const StringTable& english_strings() {
       {"console.tab.git", "Git"},
       {"console.tab.symbols", "Symbols"},
       {"console.hide_panel", " × "},
+      {"console.pty.filter_placeholder", "Filter…"},
       {"console.placeholder.shell", "Shell"},
       {"console.placeholder.gdb", "GDB command or -exec ..."},
       {"console.gdb.no_output", "(no GDB output)"},
