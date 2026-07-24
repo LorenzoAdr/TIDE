@@ -3210,7 +3210,12 @@ int Application::run() {
 		    git_tab_active(&layout_state_) && layout_state_.git_mouse_handler &&
 		    layout_state_.git_mouse_handler(event)) {
 			post_custom_throttled();
-			layout_state_.focus_sync_needed = true;
+			// Evitar focus_sync en wheel: provoca el salto de layout.
+			Event mouse_event = event;
+			const auto button = mouse_event.mouse().button;
+			if (button != Mouse::WheelUp && button != Mouse::WheelDown) {
+				layout_state_.focus_sync_needed = true;
+			}
 			return true;
 		}
 

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <map>
 #include <unordered_set>
 #include <utility>
 
@@ -828,50 +829,100 @@ std::string GitService::previous_line_content(const std::string& absolute_path, 
 }
 
 void GitService::stage_file(const std::string& path, CompletionCallback on_done) {
-  ResolvedGitPath resolved;
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    resolved = resolve_path_unlocked(path);
-    if (resolved.valid) {
-      context_repo_root_ = resolved.repo_root;
-    }
-  }
-  if (!resolved.valid) {
-    dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
-    return;
-  }
-  enqueue([this, resolved, on_done]() {
-    const auto result = run_git(resolved.repo_root, {"add", "--", resolved.repo_rel});
-    if (result.success()) {
-      invalidate();
-      dispatch_completion(on_done, true, {});
-    } else {
-      dispatch_completion(on_done, false, result.stderr_text);
-    }
-  });
+  stage_files({path}, std::move(on_done));
 }
 
 void GitService::unstage_file(const std::string& path, CompletionCallback on_done) {
-  ResolvedGitPath resolved;
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    resolved = resolve_path_unlocked(path);
-    if (resolved.valid) {
-      context_repo_root_ = resolved.repo_root;
-    }
-  }
-  if (!resolved.valid) {
+  unstage_files({path}, std::move(on_done));
+}
+
+void GitService::stage_files(const std::vector<std::string>& paths, CompletionCallback on_done) {
+  if (paths.empty()) {
     dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
     return;
   }
-  enqueue([this, resolved, on_done]() {
-    const auto result = run_git(resolved.repo_root, {"reset", "HEAD", "--", resolved.repo_rel});
-    if (result.success()) {
-      invalidate();
-      dispatch_completion(on_done, true, {});
-    } else {
-      dispatch_completion(on_done, false, result.stderr_text);
+  struct ResolvedItem {
+    std::string repo_root;
+    std::string repo_rel;
+  };
+  std::vector<ResolvedItem> items;
+  items.reserve(paths.size());
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const std::string& path : paths) {
+      const ResolvedGitPath resolved = resolve_path_unlocked(path);
+      if (!resolved.valid) {
+        continue;
+      }
+      context_repo_root_ = resolved.repo_root;
+      items.push_back({resolved.repo_root, resolved.repo_rel});
     }
+  }
+  if (items.empty()) {
+    dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
+    return;
+  }
+  enqueue([this, items = std::move(items), on_done]() {
+    std::map<std::string, std::vector<std::string>> by_root;
+    for (const ResolvedItem& item : items) {
+      by_root[item.repo_root].push_back(item.repo_rel);
+    }
+    for (auto& [repo_root, rels] : by_root) {
+      std::vector<std::string> args = {"add", "--"};
+      args.insert(args.end(), rels.begin(), rels.end());
+      const auto result = run_git(repo_root, args);
+      if (!result.success()) {
+        dispatch_completion(on_done, false, result.stderr_text);
+        return;
+      }
+    }
+    invalidate();
+    dispatch_completion(on_done, true, {});
+  });
+}
+
+void GitService::unstage_files(const std::vector<std::string>& paths, CompletionCallback on_done) {
+  if (paths.empty()) {
+    dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
+    return;
+  }
+  struct ResolvedItem {
+    std::string repo_root;
+    std::string repo_rel;
+  };
+  std::vector<ResolvedItem> items;
+  items.reserve(paths.size());
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const std::string& path : paths) {
+      const ResolvedGitPath resolved = resolve_path_unlocked(path);
+      if (!resolved.valid) {
+        continue;
+      }
+      context_repo_root_ = resolved.repo_root;
+      items.push_back({resolved.repo_root, resolved.repo_rel});
+    }
+  }
+  if (items.empty()) {
+    dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
+    return;
+  }
+  enqueue([this, items = std::move(items), on_done]() {
+    std::map<std::string, std::vector<std::string>> by_root;
+    for (const ResolvedItem& item : items) {
+      by_root[item.repo_root].push_back(item.repo_rel);
+    }
+    for (auto& [repo_root, rels] : by_root) {
+      std::vector<std::string> args = {"reset", "HEAD", "--"};
+      args.insert(args.end(), rels.begin(), rels.end());
+      const auto result = run_git(repo_root, args);
+      if (!result.success()) {
+        dispatch_completion(on_done, false, result.stderr_text);
+        return;
+      }
+    }
+    invalidate();
+    dispatch_completion(on_done, true, {});
   });
 }
 

@@ -3,7 +3,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <set>
 #include <sstream>
+#include <vector>
 
 #include "app/workspace_model.hpp"
 #include "ftxui/component/component.hpp"
@@ -11,14 +14,13 @@
 #include "ftxui/dom/elements.hpp"
 #include "ui/clickable.hpp"
 #include "ui/cursor_blink.hpp"
-#include "ui/cursor_blink.hpp"
 #include "ui/focusable_component.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
+#include "ui/scroll_bar.hpp"
 #include "ui/spinner.hpp"
 #include "ui/text_input_style.hpp"
-#include "ui/panel.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
@@ -28,8 +30,9 @@ using namespace ftxui;
 
 namespace {
 
-constexpr int kFileListWidth = 28;
-constexpr int kActionWidth = 26;
+
+constexpr int kFileListWidthMin = 18;
+constexpr int kFileListDiffReserve = 24;
 
 constexpr const char* kGitTab0 = "git-tab-0";
 constexpr const char* kGitTab1 = "git-tab-1";
@@ -41,11 +44,26 @@ constexpr const char* kGitUnstage = "git-unstage";
 constexpr const char* kGitPush = "git-push";
 constexpr const char* kGitPull = "git-pull";
 constexpr const char* kGitCommit = "git-commit";
-constexpr const char* kGitLogSearch = "git-log-search";
+constexpr const char* kGitViewToggle = "git-view-toggle";
+constexpr const char* kGitSearch = "git-search";
+constexpr const char* kGitCommitConfirm = "git-commit-confirm";
+constexpr const char* kGitCommitCancel = "git-commit-cancel";
+constexpr const char* kGitListScrollbar = "git-list-scrollbar";
+constexpr const char* kGitDiffScrollbar = "git-diff-scrollbar";
+
+struct StatusVisualRow {
+  bool is_dir = false;
+  int depth = 0;
+  int entry_index = -1;
+  std::string name;
+  std::string dir;
+  std::string dir_prefix;
+};
 
 std::string status_badge(const GitStatusEntry& entry) {
   std::string badge;
-  if (entry.staged != GitFileStatus::kUnmodified) {
+  if (entry.staged != GitFileStatus::kUnmodified && entry.staged != GitFileStatus::kUntracked &&
+      entry.staged != GitFileStatus::kIgnored) {
     switch (entry.staged) {
       case GitFileStatus::kModified:
         badge += "M";
@@ -90,13 +108,313 @@ std::string status_badge(const GitStatusEntry& entry) {
 }
 
 Color status_color(const GitStatusEntry& entry) {
-  if (entry.unstaged == GitFileStatus::kUntracked) {
+  if (entry.unstaged == GitFileStatus::kUntracked || entry.staged == GitFileStatus::kUntracked) {
     return theme::Warning();
   }
-  if (entry.staged != GitFileStatus::kUnmodified) {
+  if (entry.staged != GitFileStatus::kUnmodified && entry.staged != GitFileStatus::kIgnored) {
     return theme::Success();
   }
   return theme::Accent();
+}
+
+bool entry_is_staged(const GitStatusEntry& entry) {
+  return entry.staged != GitFileStatus::kUnmodified && entry.staged != GitFileStatus::kUntracked &&
+         entry.staged != GitFileStatus::kIgnored;
+}
+
+bool entry_is_untracked(const GitStatusEntry& entry) {
+  return entry.unstaged == GitFileStatus::kUntracked || entry.staged == GitFileStatus::kUntracked;
+}
+
+int entry_sort_rank(const GitStatusEntry& entry) {
+  // staged → modified → untracked. Porcelain "??" sets both sides to '?'.
+  if (entry_is_untracked(entry)) {
+    return 2;
+  }
+  if (entry_is_staged(entry)) {
+    return 0;
+  }
+  return 1;
+}
+
+void split_path_display(const std::string& path, std::string* name, std::string* dir) {
+  if (name == nullptr || dir == nullptr) {
+    return;
+  }
+  const auto slash = path.find_last_of('/');
+  if (slash == std::string::npos) {
+    *name = path;
+    *dir = "";
+    return;
+  }
+  *name = path.substr(slash + 1);
+  *dir = path.substr(0, slash + 1);
+}
+
+std::string to_lower_copy(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  return value;
+}
+
+bool path_matches_filter(const std::string& path, const std::string& filter) {
+  if (filter.empty()) {
+    return true;
+  }
+  return to_lower_copy(path).find(to_lower_copy(filter)) != std::string::npos;
+}
+
+std::vector<int> visible_status_indices(const std::vector<GitStatusEntry>& entries,
+                                        const std::string& filter) {
+  std::vector<int> indices;
+  indices.reserve(entries.size());
+  for (int i = 0; i < static_cast<int>(entries.size()); ++i) {
+    if (path_matches_filter(entries[static_cast<std::size_t>(i)].path, filter)) {
+      indices.push_back(i);
+    }
+  }
+  std::stable_sort(indices.begin(), indices.end(), [&](int a, int b) {
+    const auto& left = entries[static_cast<std::size_t>(a)];
+    const auto& right = entries[static_cast<std::size_t>(b)];
+    const int rank_a = entry_sort_rank(left);
+    const int rank_b = entry_sort_rank(right);
+    if (rank_a != rank_b) {
+      return rank_a < rank_b;
+    }
+    return left.path < right.path;
+  });
+  return indices;
+}
+
+std::vector<StatusVisualRow> build_status_visual_rows(const std::vector<GitStatusEntry>& entries,
+                                                     const std::vector<int>& indices,
+                                                     bool tree_view) {
+  std::vector<StatusVisualRow> rows;
+  if (!tree_view) {
+    rows.reserve(indices.size());
+    for (int idx : indices) {
+      const auto& entry = entries[static_cast<std::size_t>(idx)];
+      StatusVisualRow row;
+      row.entry_index = idx;
+      split_path_display(entry.path, &row.name, &row.dir);
+      rows.push_back(std::move(row));
+    }
+    return rows;
+  }
+
+  std::set<std::string> inserted_dirs;
+  for (int idx : indices) {
+    const std::string& path = entries[static_cast<std::size_t>(idx)].path;
+    std::size_t start = 0;
+    int depth = 0;
+    while (true) {
+      const auto slash = path.find('/', start);
+      if (slash == std::string::npos) {
+        break;
+      }
+      const std::string dir_path = path.substr(0, slash + 1);
+      if (inserted_dirs.insert(dir_path).second) {
+        StatusVisualRow dir_row;
+        dir_row.is_dir = true;
+        dir_row.depth = depth;
+        dir_row.name = path.substr(start, slash - start) + "/";
+        dir_row.dir_prefix = dir_path;
+        rows.push_back(std::move(dir_row));
+      }
+      start = slash + 1;
+      ++depth;
+    }
+    StatusVisualRow file_row;
+    file_row.depth = depth;
+    file_row.entry_index = idx;
+    file_row.name = path.substr(start);
+    rows.push_back(std::move(file_row));
+  }
+  return rows;
+}
+
+int visual_row_for_entry(const std::vector<StatusVisualRow>& rows, int entry_index) {
+  for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
+    if (!rows[static_cast<std::size_t>(i)].is_dir &&
+        rows[static_cast<std::size_t>(i)].entry_index == entry_index) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+Element render_status_file_row(const GitStatusEntry& entry, const StatusVisualRow& row,
+                               bool selected) {
+  const Color entry_color = row.is_dir ? theme::Muted() : status_color(entry);
+  const std::string indent(static_cast<std::size_t>(std::max(0, row.depth * 2)), ' ');
+  Element content;
+  if (row.is_dir) {
+    content = hbox({
+        text(" " + indent),
+        text(row.name) | color(entry_color) | bold,
+        filler(),
+    });
+  } else if (!row.dir.empty()) {
+    content = hbox({
+        text(" " + indent + status_badge(entry) + " ") | color(entry_color),
+        text(row.name) | color(entry_color) | bold,
+        filler(),
+        text(row.dir) | color(theme::Muted()),
+    });
+  } else {
+    content = hbox({
+        text(" " + indent + status_badge(entry) + " ") | color(entry_color),
+        text(row.name) | color(entry_color) | bold,
+        filler(),
+    });
+  }
+  return StyleListRow(std::move(content), selected, false, false);
+}
+
+bool mouse_control_active(const Mouse& m, const Event& event) {
+  if (m.control) {
+    return true;
+  }
+  if (!event.is_mouse()) {
+    return false;
+  }
+  const std::string& input = event.input();
+  if (input.size() < 6 || input[0] != '\x1b' || input[1] != '[' || input[2] != '<') {
+    return false;
+  }
+  int button = 0;
+  for (std::size_t i = 3; i < input.size() && input[i] != ';' && input[i] != 'M' && input[i] != 'm';
+       ++i) {
+    button = button * 10 + (input[i] - '0');
+  }
+  return (button & 16) != 0;
+}
+
+std::vector<int> entry_indices_under_prefix(const std::vector<GitStatusEntry>& entries,
+                                            const std::vector<int>& indices,
+                                            const std::string& prefix) {
+  std::vector<int> out;
+  if (prefix.empty()) {
+    return out;
+  }
+  for (int idx : indices) {
+    if (idx < 0 || idx >= static_cast<int>(entries.size())) {
+      continue;
+    }
+    const std::string& path = entries[static_cast<std::size_t>(idx)].path;
+    if (path.size() >= prefix.size() && path.compare(0, prefix.size(), prefix) == 0) {
+      out.push_back(idx);
+    }
+  }
+  return out;
+}
+
+bool dir_row_selected(const StatusVisualRow& row, const std::vector<GitStatusEntry>& entries,
+                      const std::vector<int>& indices, const std::set<int>& multi_selected) {
+  if (!row.is_dir || row.dir_prefix.empty()) {
+    return false;
+  }
+  const auto kids = entry_indices_under_prefix(entries, indices, row.dir_prefix);
+  if (kids.empty()) {
+    return false;
+  }
+  for (int idx : kids) {
+    if (multi_selected.count(idx) == 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void clear_multi_selection(GitPanelState* state) {
+  if (state != nullptr) {
+    state->multi_selected.clear();
+  }
+}
+
+void toggle_multi_entry(GitPanelState* state, int entry_index) {
+  if (state == nullptr || entry_index < 0) {
+    return;
+  }
+  const auto it = state->multi_selected.find(entry_index);
+  if (it == state->multi_selected.end()) {
+    state->multi_selected.insert(entry_index);
+  } else {
+    state->multi_selected.erase(it);
+  }
+}
+
+void set_multi_entries(GitPanelState* state, const std::vector<int>& entry_indices, bool toggle) {
+  if (state == nullptr) {
+    return;
+  }
+  if (!toggle) {
+    state->multi_selected.clear();
+    for (int idx : entry_indices) {
+      if (idx >= 0) {
+        state->multi_selected.insert(idx);
+      }
+    }
+    return;
+  }
+  bool all_selected = !entry_indices.empty();
+  for (int idx : entry_indices) {
+    if (state->multi_selected.count(idx) == 0) {
+      all_selected = false;
+      break;
+    }
+  }
+  if (all_selected) {
+    for (int idx : entry_indices) {
+      state->multi_selected.erase(idx);
+    }
+  } else {
+    for (int idx : entry_indices) {
+      if (idx >= 0) {
+        state->multi_selected.insert(idx);
+      }
+    }
+  }
+}
+
+void clamp_selection(GitPanelState* state, int count);
+
+std::vector<std::string> paths_for_stage_action(GitService* git, GitPanelState* state) {
+  std::vector<std::string> paths;
+  if (git == nullptr || state == nullptr) {
+    return paths;
+  }
+  const GitStatusSnapshot status = git->status();
+  const auto indices = visible_status_indices(status.entries, state->search_query);
+  if (!state->multi_selected.empty()) {
+    for (int idx : state->multi_selected) {
+      if (idx >= 0 && idx < static_cast<int>(status.entries.size())) {
+        paths.push_back(status.entries[static_cast<std::size_t>(idx)].path);
+      }
+    }
+    return paths;
+  }
+  if (indices.empty()) {
+    return paths;
+  }
+  clamp_selection(state, static_cast<int>(indices.size()));
+  const int entry_index = indices[static_cast<std::size_t>(state->selected_file)];
+  if (entry_index >= 0 && entry_index < static_cast<int>(status.entries.size())) {
+    paths.push_back(status.entries[static_cast<std::size_t>(entry_index)].path);
+  }
+  return paths;
+}
+
+Element MakeCompactTabButton(const std::string& label, bool selected, bool hovered, bool pressed,
+                             Box* box) {
+  Element tab = text(" " + label + " ") | center | size(HEIGHT, EQUAL, 1);
+  tab = StyleClickable(std::move(tab), {selected, hovered, pressed, false});
+  return tab | reflect(*box);
+}
+
+Element MakeIconButton(const std::string& glyph, bool hovered, bool pressed, Box* box) {
+  return MakeToolbarButton(text(" " + glyph + " ") | bold | color(theme::Header()), hovered,
+                           pressed, false, box, true);
 }
 
 Element render_diff_lines(const std::string& diff_text, bool loading, int scroll, int height) {
@@ -237,16 +555,17 @@ bool is_double_click(int index, int* last_index, int64_t* last_ms) {
 }
 
 void open_status_file_diff(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
-                           FocusManagerState* focus, WorkspaceModel* workspace, int index) {
+                           FocusManagerState* focus, WorkspaceModel* workspace, int entry_index) {
   if (git == nullptr || state == nullptr || layout_state == nullptr || workspace == nullptr) {
     return;
   }
-  const auto entries = git->status().entries;
-  if (index < 0 || index >= static_cast<int>(entries.size())) {
+  // status() returns by value: never bind references to its members (dangling → bad_alloc).
+  const GitStatusSnapshot status = git->status();
+  if (entry_index < 0 || entry_index >= static_cast<int>(status.entries.size())) {
     return;
   }
   if (layout_state->git_open_diff_view) {
-    layout_state->git_open_diff_view(entries[static_cast<std::size_t>(index)].path);
+    layout_state->git_open_diff_view(status.entries[static_cast<std::size_t>(entry_index)].path);
     if (focus != nullptr) {
       focus->region = FocusRegion::Editor;
     }
@@ -271,7 +590,7 @@ void apply_log_search(GitService* git, GitPanelState* state) {
   if (git == nullptr || state == nullptr) {
     return;
   }
-  state->log_search_applied = state->log_search_query;
+  state->log_search_applied = state->search_query;
   state->selected_file = 0;
   state->log_scroll = 0;
   state->last_log_commit.clear();
@@ -282,7 +601,11 @@ void apply_log_search(GitService* git, GitPanelState* state) {
 }
 
 void clamp_selection(GitPanelState* state, int count) {
-  if (state == nullptr || count <= 0) {
+  if (state == nullptr) {
+    return;
+  }
+  if (count <= 0) {
+    state->selected_file = 0;
     return;
   }
   if (state->selected_file < 0) {
@@ -309,6 +632,17 @@ int* active_list_scroll(GitPanelState* state) {
   return &state->file_scroll;
 }
 
+void clamp_list_scroll(GitPanelState* state, int total, int visible) {
+  if (state == nullptr || visible <= 0) {
+    return;
+  }
+  int* scroll = active_list_scroll(state);
+  if (scroll == nullptr) {
+    return;
+  }
+  *scroll = std::max(0, std::min(*scroll, std::max(0, total - visible)));
+}
+
 void scroll_selection_into_view(GitPanelState* state, int count, int visible) {
   if (state == nullptr || visible <= 0) {
     return;
@@ -323,6 +657,25 @@ void scroll_selection_into_view(GitPanelState* state, int count, int visible) {
     *scroll = state->selected_file - visible + 1;
   }
   *scroll = std::max(0, std::min(*scroll, std::max(0, count - visible)));
+}
+
+void scroll_status_selection_into_view(GitPanelState* state,
+                                       const std::vector<StatusVisualRow>& rows, int entry_index,
+                                       int visible) {
+  if (state == nullptr || visible <= 0 || rows.empty() || entry_index < 0) {
+    return;
+  }
+  const int visual = visual_row_for_entry(rows, entry_index);
+  if (visual < 0) {
+    return;
+  }
+  if (visual < state->file_scroll) {
+    state->file_scroll = visual;
+  } else if (visual >= state->file_scroll + visible) {
+    state->file_scroll = visual - visible + 1;
+  }
+  state->file_scroll =
+      std::max(0, std::min(state->file_scroll, std::max(0, static_cast<int>(rows.size()) - visible)));
 }
 
 int count_diff_lines(const std::string& diff_text) {
@@ -463,16 +816,39 @@ void reset_diff_scroll_for_commit(GitPanelState* state, const std::string& commi
   }
 }
 
+int selected_status_entry_index(GitService* git, GitPanelState* state) {
+  if (git == nullptr || state == nullptr) {
+    return -1;
+  }
+  const GitStatusSnapshot status = git->status();
+  const auto indices = visible_status_indices(status.entries, state->search_query);
+  if (indices.empty()) {
+    return -1;
+  }
+  clamp_selection(state, static_cast<int>(indices.size()));
+  const int entry_index = indices[static_cast<std::size_t>(state->selected_file)];
+  if (entry_index < 0 || entry_index >= static_cast<int>(status.entries.size())) {
+    return -1;
+  }
+  return entry_index;
+}
+
 void ensure_selected_diff(GitService* git, GitPanelState* state) {
   if (git == nullptr || state == nullptr || state->selected_tab != GitPanelState::kTabStatus) {
     return;
   }
-  const auto entries = git->status().entries;
-  clamp_selection(state, static_cast<int>(entries.size()));
-  if (entries.empty()) {
+  // Keep one snapshot: binding refs to git->status().entries/.path is UB (dangling).
+  const GitStatusSnapshot status = git->status();
+  const auto indices = visible_status_indices(status.entries, state->search_query);
+  if (indices.empty()) {
     return;
   }
-  const std::string& path = entries[static_cast<std::size_t>(state->selected_file)].path;
+  clamp_selection(state, static_cast<int>(indices.size()));
+  const int entry_index = indices[static_cast<std::size_t>(state->selected_file)];
+  if (entry_index < 0 || entry_index >= static_cast<int>(status.entries.size())) {
+    return;
+  }
+  const std::string path = status.entries[static_cast<std::size_t>(entry_index)].path;
   git->set_context_from_path(path);
   reset_diff_scroll_for_path(state, path);
   if (!git->has_file_diff_text(path)) {
@@ -548,6 +924,11 @@ void select_tab(GitPanelState* state, GitService* git, int tab) {
   state->last_diff_path.clear();
   state->last_timeline_commit.clear();
   state->last_log_commit.clear();
+  state->search_focus = false;
+  state->search_query.clear();
+  state->search_cursor = 0;
+  state->log_search_applied.clear();
+  clear_multi_selection(state);
   if (git == nullptr) {
     return;
   }
@@ -559,22 +940,26 @@ void select_tab(GitPanelState* state, GitService* git, int tab) {
     state->timeline_file.clear();
   } else if (tab == GitPanelState::kTabGraph) {
     git->refresh_graph();
-  } else if (git != nullptr) {
+  } else {
     git->refresh_status();
     ensure_selected_diff(git, state);
   }
 }
 
 void stage_selected(GitService* git, GitPanelState* state, MainLayoutState* layout_state) {
-  const auto entries = git->status().entries;
-  clamp_selection(state, static_cast<int>(entries.size()));
-  if (state->selected_file < 0 || state->selected_file >= static_cast<int>(entries.size())) {
+  if (git == nullptr || state == nullptr) {
     return;
   }
-  const std::string path = entries[static_cast<std::size_t>(state->selected_file)].path;
+  const std::vector<std::string> paths = paths_for_stage_action(git, state);
+  if (paths.empty()) {
+    return;
+  }
   state->operation_pending = true;
-  git->stage_file(path, [state, layout_state](bool ok, const std::string& msg) {
+  git->stage_files(paths, [state, layout_state](bool ok, const std::string& msg) {
     state->operation_pending = false;
+    if (ok) {
+      clear_multi_selection(state);
+    }
     set_status(state, ok ? i18n::tr("git.status.staged") : msg);
     if (layout_state != nullptr) {
       UI_WAKE(layout_state, "wake");
@@ -583,15 +968,19 @@ void stage_selected(GitService* git, GitPanelState* state, MainLayoutState* layo
 }
 
 void unstage_selected(GitService* git, GitPanelState* state, MainLayoutState* layout_state) {
-  const auto entries = git->status().entries;
-  clamp_selection(state, static_cast<int>(entries.size()));
-  if (state->selected_file < 0 || state->selected_file >= static_cast<int>(entries.size())) {
+  if (git == nullptr || state == nullptr) {
     return;
   }
-  const std::string path = entries[static_cast<std::size_t>(state->selected_file)].path;
+  const std::vector<std::string> paths = paths_for_stage_action(git, state);
+  if (paths.empty()) {
+    return;
+  }
   state->operation_pending = true;
-  git->unstage_file(path, [state, layout_state](bool ok, const std::string& msg) {
+  git->unstage_files(paths, [state, layout_state](bool ok, const std::string& msg) {
     state->operation_pending = false;
+    if (ok) {
+      clear_multi_selection(state);
+    }
     set_status(state, ok ? i18n::tr("git.status.unstaged") : msg);
     if (layout_state != nullptr) {
       UI_WAKE(layout_state, "wake");
@@ -599,8 +988,28 @@ void unstage_selected(GitService* git, GitPanelState* state, MainLayoutState* la
   });
 }
 
+void open_commit_modal(GitPanelState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->commit_modal_open = true;
+  state->search_focus = false;
+  cursor_blink::show();
+}
+
+void close_commit_modal(GitPanelState* state, bool clear_message) {
+  if (state == nullptr) {
+    return;
+  }
+  state->commit_modal_open = false;
+  if (clear_message) {
+    state->commit_message.clear();
+    state->commit_cursor = 0;
+  }
+}
+
 void commit_message(GitService* git, GitPanelState* state, MainLayoutState* layout_state) {
-  if (state->commit_message.empty()) {
+  if (state == nullptr || state->commit_message.empty()) {
     return;
   }
   state->operation_pending = true;
@@ -608,8 +1017,7 @@ void commit_message(GitService* git, GitPanelState* state, MainLayoutState* layo
   git->commit(message, [state, layout_state](bool ok, const std::string& msg) {
     state->operation_pending = false;
     if (ok) {
-      state->commit_message.clear();
-      state->commit_cursor = 0;
+      close_commit_modal(state, true);
     }
     set_status(state, ok ? i18n::tr("git.status.commit_ok") : msg);
     if (layout_state != nullptr) {
@@ -618,17 +1026,145 @@ void commit_message(GitService* git, GitPanelState* state, MainLayoutState* layo
   });
 }
 
+bool handle_search_input(GitPanelState* state, GitService* git, Event event) {
+  if (state == nullptr || !state->search_focus) {
+    return false;
+  }
+  cursor_blink::show();
+  if (event == Event::Return) {
+    if (state->selected_tab == GitPanelState::kTabLog) {
+      apply_log_search(git, state);
+    }
+    return true;
+  }
+  if (event == Event::Escape) {
+    state->search_focus = false;
+    return true;
+  }
+  if (event == Event::Backspace) {
+    if (state->search_cursor > 0 &&
+        state->search_cursor <= static_cast<int>(state->search_query.size())) {
+      state->search_query.erase(static_cast<std::size_t>(state->search_cursor - 1), 1);
+      --state->search_cursor;
+      if (state->selected_tab == GitPanelState::kTabStatus) {
+        state->selected_file = 0;
+        state->file_scroll = 0;
+      }
+    }
+    return true;
+  }
+  if (event.is_character()) {
+    const std::string ch = event.character();
+    if (!ch.empty() && ch[0] >= 32) {
+      state->search_query.insert(static_cast<std::size_t>(state->search_cursor), ch);
+      state->search_cursor += static_cast<int>(ch.size());
+      if (state->selected_tab == GitPanelState::kTabStatus) {
+        state->selected_file = 0;
+        state->file_scroll = 0;
+      }
+    }
+    return true;
+  }
+  return true;
+}
+
+bool handle_commit_modal_keys(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
+                              Event event) {
+  if (state == nullptr || !state->commit_modal_open) {
+    return false;
+  }
+  cursor_blink::show();
+  if (event == Event::Return) {
+    commit_message(git, state, layout_state);
+    return true;
+  }
+  if (event == Event::Escape) {
+    close_commit_modal(state, false);
+    return true;
+  }
+  if (event == Event::Backspace) {
+    if (state->commit_cursor > 0 &&
+        state->commit_cursor <= static_cast<int>(state->commit_message.size())) {
+      state->commit_message.erase(static_cast<std::size_t>(state->commit_cursor - 1), 1);
+      --state->commit_cursor;
+    }
+    return true;
+  }
+  if (event == Event::ArrowLeft) {
+    state->commit_cursor = std::max(0, state->commit_cursor - 1);
+    return true;
+  }
+  if (event == Event::ArrowRight) {
+    state->commit_cursor =
+        std::min(static_cast<int>(state->commit_message.size()), state->commit_cursor + 1);
+    return true;
+  }
+  if (event.is_character()) {
+    const std::string ch = event.character();
+    if (!ch.empty() && ch[0] >= 32) {
+      state->commit_message.insert(static_cast<std::size_t>(state->commit_cursor), ch);
+      state->commit_cursor += static_cast<int>(ch.size());
+    }
+    return true;
+  }
+  return true;
+}
+
+Element render_commit_modal(GitPanelState* state, MainLayoutState* layout_state) {
+  if (state == nullptr || !state->commit_modal_open) {
+    return text("");
+  }
+  std::string line = state->commit_message;
+  if (state->commit_cursor >= 0 &&
+      state->commit_cursor <= static_cast<int>(line.size())) {
+    line.insert(static_cast<std::size_t>(state->commit_cursor), "_");
+  } else {
+    line.push_back('_');
+  }
+  const bool confirm_hovered = interaction_active(layout_state, kGitCommitConfirm);
+  const bool confirm_pressed =
+      layout_state != nullptr &&
+      layout_state->clickable.is_pressed(std::string_view(kGitCommitConfirm));
+  const bool cancel_hovered = interaction_active(layout_state, kGitCommitCancel);
+  const bool cancel_pressed =
+      layout_state != nullptr &&
+      layout_state->clickable.is_pressed(std::string_view(kGitCommitCancel));
+  Element confirm_btn =
+      MakeToolbarButton(text(" " + i18n::tr("git.commit.confirm") + " "), confirm_hovered,
+                        confirm_pressed, false, &state->commit_modal_confirm_box, true);
+  Element cancel_btn =
+      MakeToolbarButton(text(" " + i18n::tr("git.commit.cancel") + " "), cancel_hovered,
+                        cancel_pressed, false, &state->commit_modal_cancel_box, true);
+  return ModalWindow(
+      text(i18n::tr("git.commit.modal_title")) | color(theme::Accent()),
+      vbox({
+          ModalInputLine(line) | size(WIDTH, EQUAL, 56),
+          text(""),
+          hbox({std::move(confirm_btn), text(" "), std::move(cancel_btn)}),
+          text(i18n::tr("common.footer.confirm_esc")) | color(theme::Muted()),
+      }));
+}
+
 bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
                      FocusManagerState* focus, WorkspaceModel* workspace, Event event) {
   if (state == nullptr || git == nullptr || !git->is_repo()) {
     return false;
   }
   if (focus != nullptr && focus->region != FocusRegion::Terminal) {
+    state->search_focus = false;
     return false;
   }
 
   if (event_is_tuide_global_shortcut(event)) {
     return false;
+  }
+
+  if (handle_commit_modal_keys(git, state, layout_state, event)) {
+    return true;
+  }
+
+  if (state->search_focus && handle_search_input(state, git, event)) {
+    return true;
   }
 
   if (event == Event::Character('1')) {
@@ -653,60 +1189,40 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
   }
 
   if (state->selected_tab == GitPanelState::kTabStatus) {
-    const int count = static_cast<int>(git->status().entries.size());
+    const GitStatusSnapshot status = git->status();
+    const auto& entries = status.entries;
+    const auto indices = visible_status_indices(entries, state->search_query);
+    const int count = static_cast<int>(indices.size());
+    const auto rows = build_status_visual_rows(entries, indices, state->tree_view);
     const int visible = state->last_list_visible;
     if ((event == Event::ArrowUp || event == Event::Character('k')) && state->selected_file > 0) {
       --state->selected_file;
-      scroll_selection_into_view(state, count, visible);
+      clear_multi_selection(state);
+      scroll_status_selection_into_view(
+          state, rows, indices[static_cast<std::size_t>(state->selected_file)], visible);
       ensure_selected_diff(git, state);
       return true;
     }
     if ((event == Event::ArrowDown || event == Event::Character('j')) && count > 0) {
       state->selected_file = std::min(state->selected_file + 1, count - 1);
-      scroll_selection_into_view(state, count, visible);
+      clear_multi_selection(state);
+      scroll_status_selection_into_view(
+          state, rows, indices[static_cast<std::size_t>(state->selected_file)], visible);
       ensure_selected_diff(git, state);
       return true;
     }
-    if (!state->commit_input_focus) {
-      if (event == Event::Return && count > 0) {
-        open_status_file_diff(git, state, layout_state, focus, workspace, state->selected_file);
-        return true;
-      }
-      if (event == Event::PageUp) {
-        scroll_git_list(state, -visible, count, visible);
-        return true;
-      }
-      if (event == Event::PageDown) {
-        scroll_git_list(state, visible, count, visible);
-        return true;
-      }
+    if (event == Event::Return && count > 0) {
+      open_status_file_diff(git, state, layout_state, focus, workspace,
+                            indices[static_cast<std::size_t>(state->selected_file)]);
+      return true;
     }
-    if (state->commit_input_focus) {
-      cursor_blink::show();
-      if (event == Event::Return) {
-        commit_message(git, state, layout_state);
-        return true;
-      }
-      if (event == Event::Escape) {
-        state->commit_input_focus = false;
-        return true;
-      }
-      if (event == Event::Backspace) {
-        if (state->commit_cursor > 0 &&
-            state->commit_cursor <= static_cast<int>(state->commit_message.size())) {
-          state->commit_message.erase(static_cast<std::size_t>(state->commit_cursor - 1), 1);
-          --state->commit_cursor;
-        }
-        return true;
-      }
-      if (event.is_character()) {
-        const std::string ch = event.character();
-        if (!ch.empty() && ch[0] >= 32) {
-          state->commit_message.insert(static_cast<std::size_t>(state->commit_cursor), ch);
-          state->commit_cursor += static_cast<int>(ch.size());
-        }
-        return true;
-      }
+    if (event == Event::PageUp) {
+      scroll_git_list(state, -visible, static_cast<int>(rows.size()), visible);
+      return true;
+    }
+    if (event == Event::PageDown) {
+      scroll_git_list(state, visible, static_cast<int>(rows.size()), visible);
+      return true;
     }
     if (event == Event::Character('s')) {
       stage_selected(git, state, layout_state);
@@ -739,41 +1255,22 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
       return true;
     }
     if (event == Event::Character('c')) {
-      state->commit_input_focus = true;
+      open_commit_modal(state);
+      return true;
+    }
+    if (event == Event::Character('t')) {
+      state->tree_view = !state->tree_view;
+      state->file_scroll = 0;
+      return true;
+    }
+    if (event == Event::Character('/')) {
+      state->search_focus = true;
       cursor_blink::show();
       return true;
     }
   } else if (state->selected_tab == GitPanelState::kTabLog) {
-    if (state->log_search_focus) {
-      cursor_blink::show();
-      if (event == Event::Return) {
-        apply_log_search(git, state);
-        return true;
-      }
-      if (event == Event::Escape) {
-        state->log_search_focus = false;
-        return true;
-      }
-      if (event == Event::Backspace) {
-        if (state->log_search_cursor > 0 &&
-            state->log_search_cursor <= static_cast<int>(state->log_search_query.size())) {
-          state->log_search_query.erase(static_cast<std::size_t>(state->log_search_cursor - 1), 1);
-          --state->log_search_cursor;
-        }
-        return true;
-      }
-      if (event.is_character()) {
-        const std::string ch = event.character();
-        if (!ch.empty() && ch[0] >= 32) {
-          state->log_search_query.insert(static_cast<std::size_t>(state->log_search_cursor), ch);
-          state->log_search_cursor += static_cast<int>(ch.size());
-        }
-        return true;
-      }
-      return true;
-    }
     if (event == Event::Character('/')) {
-      state->log_search_focus = true;
+      state->search_focus = true;
       cursor_blink::show();
       return true;
     }
@@ -883,18 +1380,179 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
   }
 
   if (event == Event::Escape) {
-    if (state->commit_input_focus) {
-      state->commit_input_focus = false;
+    if (state->search_focus) {
+      state->search_focus = false;
       return true;
     }
-    if (state->log_search_focus) {
-      state->log_search_focus = false;
+    if (!state->multi_selected.empty()) {
+      clear_multi_selection(state);
       return true;
     }
     return false;
   }
 
   return false;
+}
+
+void clamp_file_list_width(GitPanelState* state, int panel_width) {
+  if (state == nullptr) {
+    return;
+  }
+  if (!state->file_list_width_custom) {
+    // Por defecto: lista ~1/3, diff el resto.
+    state->file_list_width = std::max(kFileListWidthMin, panel_width / 3);
+  }
+  const int max_width = std::max(kFileListWidthMin, std::max(0, panel_width - kFileListDiffReserve));
+  state->file_list_width =
+      std::max(kFileListWidthMin, std::min(state->file_list_width, max_width));
+}
+
+bool handle_git_list_scrollbar_mouse(GitPanelState* state, MainLayoutState* layout_state,
+                                     Mouse& m, int total, int visible) {
+  if (state == nullptr || !state->list_scrollbar_layout.scrollable) {
+    return false;
+  }
+  const int max_scroll = std::max(0, total - visible);
+  int* scroll = active_list_scroll(state);
+  if (scroll == nullptr) {
+    return false;
+  }
+  const bool in_bar =
+      !state->list_scrollbar_box.IsEmpty() && state->list_scrollbar_box.Contain(m.x, m.y);
+
+  if (m.motion == Mouse::Moved) {
+    if (in_bar || state->list_scrollbar_dragging) {
+      if (layout_state != nullptr) {
+        layout_state->clickable.set_hover(kGitListScrollbar);
+      }
+    }
+    if (state->list_scrollbar_dragging) {
+      const int local_y = m.y - state->list_scrollbar_box.y_min;
+      const int thumb_top = local_y - state->list_scrollbar_drag_offset;
+      *scroll = std::max(
+          0, std::min(scroll_for_thumb_top(state->list_scrollbar_layout, thumb_top), max_scroll));
+      return true;
+    }
+    return false;
+  }
+
+  if (state->list_scrollbar_dragging) {
+    if (m.button == Mouse::Left && m.motion == Mouse::Released) {
+      state->list_scrollbar_dragging = false;
+      return true;
+    }
+    if (m.motion == Mouse::Moved && m.button == Mouse::Left) {
+      const int local_y = m.y - state->list_scrollbar_box.y_min;
+      const int thumb_top = local_y - state->list_scrollbar_drag_offset;
+      *scroll = std::max(
+          0, std::min(scroll_for_thumb_top(state->list_scrollbar_layout, thumb_top), max_scroll));
+      return true;
+    }
+  }
+
+  if (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) {
+    if (!in_bar) {
+      return false;
+    }
+    const int delta = m.button == Mouse::WheelUp ? -3 : 3;
+    *scroll = std::max(0, std::min(*scroll + delta, max_scroll));
+    return true;
+  }
+
+  if (m.button != Mouse::Left || m.motion != Mouse::Pressed || !in_bar) {
+    return false;
+  }
+
+  trigger_press(layout_state, std::string_view(kGitListScrollbar));
+  const int local_y = m.y - state->list_scrollbar_box.y_min;
+  if (scrollbar_thumb_hit(state->list_scrollbar_layout, state->list_scrollbar_box, m.x, m.y)) {
+    state->list_scrollbar_dragging = true;
+    state->list_scrollbar_drag_offset = local_y - state->list_scrollbar_layout.thumb_y;
+  } else {
+    const int thumb_top = local_y - state->list_scrollbar_layout.thumb_height / 2;
+    *scroll = std::max(
+        0, std::min(scroll_for_thumb_top(state->list_scrollbar_layout, thumb_top), max_scroll));
+    state->list_scrollbar_dragging = true;
+    state->list_scrollbar_drag_offset = state->list_scrollbar_layout.thumb_height / 2;
+  }
+  return true;
+}
+
+bool handle_git_diff_scrollbar_mouse(GitPanelState* state, MainLayoutState* layout_state, Mouse& m,
+                                     int total, int visible) {
+  if (state == nullptr || !state->diff_scrollbar_layout.scrollable) {
+    return false;
+  }
+  const int max_scroll = std::max(0, total - visible);
+  int* scroll = state->selected_tab == GitPanelState::kTabGraph ? &state->graph_scroll
+                                                               : &state->diff_scroll;
+  const bool in_bar =
+      !state->diff_scrollbar_box.IsEmpty() && state->diff_scrollbar_box.Contain(m.x, m.y);
+
+  if (m.motion == Mouse::Moved) {
+    if (in_bar || state->diff_scrollbar_dragging) {
+      if (layout_state != nullptr) {
+        layout_state->clickable.set_hover(kGitDiffScrollbar);
+      }
+    }
+    if (state->diff_scrollbar_dragging) {
+      const int local_y = m.y - state->diff_scrollbar_box.y_min;
+      const int thumb_top = local_y - state->diff_scrollbar_drag_offset;
+      *scroll = std::max(
+          0, std::min(scroll_for_thumb_top(state->diff_scrollbar_layout, thumb_top), max_scroll));
+      return true;
+    }
+    return false;
+  }
+
+  if (state->diff_scrollbar_dragging) {
+    if (m.button == Mouse::Left && m.motion == Mouse::Released) {
+      state->diff_scrollbar_dragging = false;
+      return true;
+    }
+    if (m.motion == Mouse::Moved && m.button == Mouse::Left) {
+      const int local_y = m.y - state->diff_scrollbar_box.y_min;
+      const int thumb_top = local_y - state->diff_scrollbar_drag_offset;
+      *scroll = std::max(
+          0, std::min(scroll_for_thumb_top(state->diff_scrollbar_layout, thumb_top), max_scroll));
+      return true;
+    }
+  }
+
+  if (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) {
+    if (!in_bar) {
+      return false;
+    }
+    const int delta = m.button == Mouse::WheelUp ? -3 : 3;
+    *scroll = std::max(0, std::min(*scroll + delta, max_scroll));
+    return true;
+  }
+
+  if (m.button != Mouse::Left || m.motion != Mouse::Pressed || !in_bar) {
+    return false;
+  }
+
+  trigger_press(layout_state, std::string_view(kGitDiffScrollbar));
+  const int local_y = m.y - state->diff_scrollbar_box.y_min;
+  if (scrollbar_thumb_hit(state->diff_scrollbar_layout, state->diff_scrollbar_box, m.x, m.y)) {
+    state->diff_scrollbar_dragging = true;
+    state->diff_scrollbar_drag_offset = local_y - state->diff_scrollbar_layout.thumb_y;
+  } else {
+    const int thumb_top = local_y - state->diff_scrollbar_layout.thumb_height / 2;
+    *scroll = std::max(
+        0, std::min(scroll_for_thumb_top(state->diff_scrollbar_layout, thumb_top), max_scroll));
+    state->diff_scrollbar_dragging = true;
+    state->diff_scrollbar_drag_offset = state->diff_scrollbar_layout.thumb_height / 2;
+  }
+  return true;
+}
+
+bool list_area_contains(const GitPanelState* state, int x, int y) {
+  if (state == nullptr) {
+    return false;
+  }
+  return (!state->file_list_box.IsEmpty() && state->file_list_box.Contain(x, y)) ||
+         (!state->list_scrollbar_box.IsEmpty() && state->list_scrollbar_box.Contain(x, y));
 }
 
 bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
@@ -904,7 +1562,54 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
   }
 
   Mouse& m = event.mouse();
+  const bool is_wheel = m.button == Mouse::WheelUp || m.button == Mouse::WheelDown;
+  const bool is_press = m.button == Mouse::Left && m.motion == Mouse::Pressed;
+
+
+  if (state->list_sep_dragging) {
+    if (m.button == Mouse::Left && m.motion == Mouse::Released) {
+      state->list_sep_dragging = false;
+      return true;
+    }
+    if (m.motion == Mouse::Moved && m.button == Mouse::Left) {
+      const int panel_w =
+          state->panel_box.IsEmpty() ? 120 : (state->panel_box.x_max - state->panel_box.x_min + 1);
+      const int delta = m.x - state->list_sep_drag_start_x;
+      state->file_list_width_custom = true;
+      state->file_list_width = state->list_sep_drag_start_width + delta;
+      clamp_file_list_width(state, panel_w);
+      UI_WAKE(layout_state, "wake");
+      return true;
+    }
+  }
+
+  if (state->list_scrollbar_dragging &&
+      handle_git_list_scrollbar_mouse(state, layout_state, m, state->last_list_total,
+                                      state->last_list_visible)) {
+    UI_WAKE(layout_state, "wake");
+    return true;
+  }
+  if (state->diff_scrollbar_dragging &&
+      handle_git_diff_scrollbar_mouse(state, layout_state, m, state->last_diff_total,
+                                      state->last_diff_visible)) {
+    UI_WAKE(layout_state, "wake");
+    return true;
+  }
+
+  // Clic fuera del panel: soltar el buscador sin tragar el evento (el editor debe recibirlo).
+  if (!state->panel_box.Contain(m.x, m.y)) {
+    if (is_press && state->search_focus) {
+      state->search_focus = false;
+    }
+    return false;
+  }
+
   if (m.motion == Mouse::Moved) {
+    const bool sep_hit =
+        !state->list_sep_box.IsEmpty() && state->list_sep_box.Contain(m.x, m.y);
+    if (state->list_sep_hovered != sep_hit) {
+      state->list_sep_hovered = sep_hit;
+    }
     update_panel_hover(
         layout_state, m.x, m.y,
         {{kGitTab0, &state->tab_boxes[0]},
@@ -917,48 +1622,73 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
          {kGitPush, &state->push_box},
          {kGitPull, &state->pull_box},
          {kGitCommit, &state->commit_box},
-         {kGitLogSearch, &state->log_search_box}},
+         {kGitViewToggle, &state->view_toggle_box},
+         {kGitSearch, &state->search_box},
+         {kGitListScrollbar, &state->list_scrollbar_box},
+         {kGitDiffScrollbar, &state->diff_scrollbar_box},
+         {kGitCommitConfirm, &state->commit_modal_confirm_box},
+         {kGitCommitCancel, &state->commit_modal_cancel_box}},
         [](std::string_view id) {
           return id.rfind("git-", 0) == 0;
         });
     return false;
   }
 
-  if (!state->panel_box.Contain(m.x, m.y)) {
-    return false;
-  }
-
-  if (focus != nullptr) {
-    focus->region = FocusRegion::Terminal;
-  }
-
-  if (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) {
-    const int wheel_delta = m.button == Mouse::WheelUp ? -3 : 3;
-    if (state->file_list_box.Contain(m.x, m.y)) {
-      int count = 0;
-      if (state->selected_tab == GitPanelState::kTabStatus) {
-        count = static_cast<int>(git->status().entries.size());
-      } else if (state->selected_tab == GitPanelState::kTabLog) {
-        count = static_cast<int>(visible_log_commits(git, state).size());
-      } else if (state->selected_tab == GitPanelState::kTabTimeline) {
-        const std::string active_file = workspace != nullptr ? workspace->active_file : std::string{};
-        count = static_cast<int>(git->file_timeline(active_file).size());
-      } else {
-        count = static_cast<int>(git->branches().size());
+  if (state->commit_modal_open) {
+    if (is_press) {
+      if (state->commit_modal_confirm_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitCommitConfirm));
+        commit_message(git, state, layout_state);
+        return true;
       }
-      scroll_git_list(state, wheel_delta, count, state->last_list_visible);
+      if (state->commit_modal_cancel_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitCommitCancel));
+        close_commit_modal(state, false);
+        return true;
+      }
+    }
+    return true;
+  }
+
+  // Wheel: no robar foco (evita el salto de layout al sincronizar Terminal).
+  if (is_wheel) {
+    if (handle_git_list_scrollbar_mouse(state, layout_state, m, state->last_list_total,
+                                        state->last_list_visible)) {
+      return true;
+    }
+    if (handle_git_diff_scrollbar_mouse(state, layout_state, m, state->last_diff_total,
+                                        state->last_diff_visible)) {
+      return true;
+    }
+    const int wheel_delta = m.button == Mouse::WheelUp ? -3 : 3;
+    if (list_area_contains(state, m.x, m.y)) {
+      scroll_git_list(state, wheel_delta, state->last_list_total, state->last_list_visible);
       return true;
     }
     if ((state->selected_tab == GitPanelState::kTabStatus ||
-         state->selected_tab == GitPanelState::kTabTimeline) &&
-        state->diff_box.Contain(m.x, m.y)) {
-      std::string diff;
+         state->selected_tab == GitPanelState::kTabTimeline ||
+         state->selected_tab == GitPanelState::kTabLog ||
+         state->selected_tab == GitPanelState::kTabGraph) &&
+        ((!state->diff_box.IsEmpty() && state->diff_box.Contain(m.x, m.y)) ||
+         (!state->diff_scrollbar_box.IsEmpty() && state->diff_scrollbar_box.Contain(m.x, m.y)))) {
+      if (state->selected_tab == GitPanelState::kTabGraph) {
+        const int count = static_cast<int>(git->graph_lines().size());
+        scroll_git_graph(state, wheel_delta, count, state->last_diff_visible);
+        return true;
+      }
       if (state->selected_tab == GitPanelState::kTabStatus) {
-        const auto& entries = git->status().entries;
-        if (state->selected_file >= 0 && state->selected_file < static_cast<int>(entries.size())) {
-          diff = git->file_diff_text(entries[static_cast<std::size_t>(state->selected_file)].path);
+        const int entry_index = selected_status_entry_index(git, state);
+        if (entry_index >= 0) {
+          const GitStatusSnapshot status = git->status();
+          if (entry_index < static_cast<int>(status.entries.size())) {
+            const std::string& path = status.entries[static_cast<std::size_t>(entry_index)].path;
+            scroll_git_diff(state, wheel_delta, count_diff_lines(git->file_diff_text(path)),
+                            state->last_diff_visible);
+          }
         }
-      } else {
+        return true;
+      }
+      if (state->selected_tab == GitPanelState::kTabTimeline) {
         const std::string active_file = workspace != nullptr ? workspace->active_file : std::string{};
         ensure_file_timeline(git, state, active_file);
         const auto commits = git->file_timeline(active_file);
@@ -966,36 +1696,59 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
             state->selected_file < static_cast<int>(commits.size())) {
           const std::string& hash =
               commits[static_cast<std::size_t>(state->selected_file)].hash;
-          diff = git->timeline_diff_text(active_file, hash);
+          scroll_git_diff(state, wheel_delta,
+                          count_diff_lines(git->timeline_diff_text(active_file, hash)),
+                          state->last_diff_visible);
         }
+        return true;
       }
-      if (!diff.empty()) {
-        scroll_git_diff(state, wheel_delta, count_diff_lines(diff), state->last_diff_visible);
+      if (state->selected_tab == GitPanelState::kTabLog) {
+        const auto commits = visible_log_commits(git, state);
+        if (state->selected_file >= 0 &&
+            state->selected_file < static_cast<int>(commits.size())) {
+          ensure_commit_files(git, state);
+          const auto& hash = commits[static_cast<std::size_t>(state->selected_file)].hash;
+          const auto files = git->commit_files(hash);
+          const auto lines = build_log_commit_view_lines(git, hash, files);
+          scroll_git_diff(state, wheel_delta, static_cast<int>(lines.size()),
+                          state->last_diff_visible);
+        }
+        return true;
       }
-      return true;
-    }
-    if (state->selected_tab == GitPanelState::kTabLog && state->diff_box.Contain(m.x, m.y)) {
-      const auto commits = visible_log_commits(git, state);
-      if (state->selected_file >= 0 &&
-          state->selected_file < static_cast<int>(commits.size())) {
-        ensure_commit_files(git, state);
-        const auto& hash = commits[static_cast<std::size_t>(state->selected_file)].hash;
-        const auto files = git->commit_files(hash);
-        const auto lines = build_log_commit_view_lines(git, hash, files);
-        scroll_git_diff(state, wheel_delta, static_cast<int>(lines.size()), state->last_diff_visible);
-      }
-      return true;
-    }
-    if (state->selected_tab == GitPanelState::kTabGraph && state->diff_box.Contain(m.x, m.y)) {
-      const int count = static_cast<int>(git->graph_lines().size());
-      scroll_git_graph(state, wheel_delta, count, state->last_diff_visible);
-      return true;
     }
     return false;
   }
 
-  if (m.button != Mouse::Left || m.motion != Mouse::Pressed) {
+  if (is_press) {
+    // Clic dentro del panel pero fuera del buscador → salir del input.
+    if (state->search_focus &&
+        (state->search_box.IsEmpty() || !state->search_box.Contain(m.x, m.y))) {
+      state->search_focus = false;
+    }
+    if (focus != nullptr) {
+      focus->region = FocusRegion::Terminal;
+    }
+  }
+
+  if (handle_git_list_scrollbar_mouse(state, layout_state, m, state->last_list_total,
+                                      state->last_list_visible)) {
+    return true;
+  }
+  if (handle_git_diff_scrollbar_mouse(state, layout_state, m, state->last_diff_total,
+                                      state->last_diff_visible)) {
+    return true;
+  }
+
+  if (!is_press) {
     return false;
+  }
+
+  if (!state->list_sep_box.IsEmpty() && state->list_sep_box.Contain(m.x, m.y)) {
+    state->list_sep_dragging = true;
+    state->file_list_width_custom = true;
+    state->list_sep_drag_start_x = m.x;
+    state->list_sep_drag_start_width = state->file_list_width;
+    return true;
   }
 
   if (state->tab_boxes[0].Contain(m.x, m.y)) {
@@ -1024,54 +1777,22 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     return true;
   }
 
-  if (state->file_list_box.Contain(m.x, m.y) &&
-      state->selected_tab != GitPanelState::kTabGraph) {
-    const auto local = local_row_in_box(state->file_list_box, m.x, m.y);
-    if (!local.has_value()) {
-      return true;
-    }
-    const int index = list_index_from_mouse(state, *local);
-    int count = 0;
-    if (state->selected_tab == GitPanelState::kTabStatus) {
-      count = static_cast<int>(git->status().entries.size());
-    } else if (state->selected_tab == GitPanelState::kTabLog) {
-      count = static_cast<int>(visible_log_commits(git, state).size());
-    } else if (state->selected_tab == GitPanelState::kTabTimeline) {
-      const std::string active_file = workspace != nullptr ? workspace->active_file : std::string{};
-      count = static_cast<int>(git->file_timeline(active_file).size());
-    } else {
-      count = static_cast<int>(git->branches().size());
-    }
-    if (index >= 0 && index < count) {
-      const bool open_diff =
-          state->selected_tab == GitPanelState::kTabStatus &&
-          is_double_click(index, &state->last_file_click_index, &state->last_file_click_ms);
-      state->selected_file = index;
-      scroll_selection_into_view(state, count, state->last_list_visible);
-      if (state->selected_tab == GitPanelState::kTabStatus) {
-        ensure_selected_diff(git, state);
-        if (open_diff) {
-          open_status_file_diff(git, state, layout_state, focus, workspace, index);
-        }
-      } else if (state->selected_tab == GitPanelState::kTabLog) {
-        ensure_commit_files(git, state);
-      } else if (state->selected_tab == GitPanelState::kTabTimeline) {
-        const std::string active_file = workspace != nullptr ? workspace->active_file : std::string{};
-        ensure_file_timeline(git, state, active_file);
-      }
-    }
-    return true;
-  }
-
-  if (state->selected_tab == GitPanelState::kTabLog &&
-      state->log_search_box.Contain(m.x, m.y)) {
-    trigger_press(layout_state, std::string_view(kGitLogSearch));
-    state->log_search_focus = true;
+  if ((state->selected_tab == GitPanelState::kTabStatus ||
+       state->selected_tab == GitPanelState::kTabLog) &&
+      state->search_box.Contain(m.x, m.y)) {
+    trigger_press(layout_state, std::string_view(kGitSearch));
+    state->search_focus = true;
     cursor_blink::show();
     return true;
   }
 
   if (state->selected_tab == GitPanelState::kTabStatus) {
+    if (state->view_toggle_box.Contain(m.x, m.y)) {
+      trigger_press(layout_state, std::string_view(kGitViewToggle));
+      state->tree_view = !state->tree_view;
+      state->file_scroll = 0;
+      return true;
+    }
     if (state->stage_box.Contain(m.x, m.y)) {
       trigger_press(layout_state, std::string_view(kGitStage));
       stage_selected(git, state, layout_state);
@@ -1108,10 +1829,96 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     }
     if (state->commit_box.Contain(m.x, m.y)) {
       trigger_press(layout_state, std::string_view(kGitCommit));
-      state->commit_input_focus = true;
-      cursor_blink::show();
+      open_commit_modal(state);
       return true;
     }
+  }
+
+  if (list_area_contains(state, m.x, m.y) && state->selected_tab != GitPanelState::kTabGraph) {
+    const auto local = local_row_in_box(state->file_list_box, m.x, m.y);
+    if (!local.has_value()) {
+      return true;
+    }
+    const int index = list_index_from_mouse(state, *local);
+    if (state->selected_tab == GitPanelState::kTabStatus) {
+      const GitStatusSnapshot status = git->status();
+      const auto& entries = status.entries;
+      const auto indices = visible_status_indices(entries, state->search_query);
+      const auto rows = build_status_visual_rows(entries, indices, state->tree_view);
+      if (index < 0 || index >= static_cast<int>(rows.size())) {
+        return true;
+      }
+      const auto& row = rows[static_cast<std::size_t>(index)];
+      const bool ctrl = mouse_control_active(m, event);
+
+      if (row.is_dir) {
+        const auto kids = entry_indices_under_prefix(entries, indices, row.dir_prefix);
+        set_multi_entries(state, kids, ctrl);
+        if (!kids.empty()) {
+          int selected_pos = 0;
+          for (int i = 0; i < static_cast<int>(indices.size()); ++i) {
+            if (indices[static_cast<std::size_t>(i)] == kids.front()) {
+              selected_pos = i;
+              break;
+            }
+          }
+          state->selected_file = selected_pos;
+          scroll_status_selection_into_view(state, rows, kids.front(), state->last_list_visible);
+          ensure_selected_diff(git, state);
+        }
+        return true;
+      }
+
+      if (row.entry_index < 0) {
+        return true;
+      }
+      int selected_pos = 0;
+      for (int i = 0; i < static_cast<int>(indices.size()); ++i) {
+        if (indices[static_cast<std::size_t>(i)] == row.entry_index) {
+          selected_pos = i;
+          break;
+        }
+      }
+      if (ctrl) {
+        toggle_multi_entry(state, row.entry_index);
+        state->selected_file = selected_pos;
+        scroll_status_selection_into_view(state, rows, row.entry_index, state->last_list_visible);
+        ensure_selected_diff(git, state);
+        return true;
+      }
+
+      const bool open_diff =
+          is_double_click(row.entry_index, &state->last_file_click_index, &state->last_file_click_ms);
+      clear_multi_selection(state);
+      state->selected_file = selected_pos;
+      scroll_status_selection_into_view(state, rows, row.entry_index, state->last_list_visible);
+      ensure_selected_diff(git, state);
+      if (open_diff) {
+        open_status_file_diff(git, state, layout_state, focus, workspace, row.entry_index);
+      }
+      return true;
+    }
+
+    int count = 0;
+    if (state->selected_tab == GitPanelState::kTabLog) {
+      count = static_cast<int>(visible_log_commits(git, state).size());
+    } else if (state->selected_tab == GitPanelState::kTabTimeline) {
+      const std::string active_file = workspace != nullptr ? workspace->active_file : std::string{};
+      count = static_cast<int>(git->file_timeline(active_file).size());
+    } else {
+      count = static_cast<int>(git->branches().size());
+    }
+    if (index >= 0 && index < count) {
+      state->selected_file = index;
+      scroll_selection_into_view(state, count, state->last_list_visible);
+      if (state->selected_tab == GitPanelState::kTabLog) {
+        ensure_commit_files(git, state);
+      } else if (state->selected_tab == GitPanelState::kTabTimeline) {
+        const std::string active_file = workspace != nullptr ? workspace->active_file : std::string{};
+        ensure_file_timeline(git, state, active_file);
+      }
+    }
+    return true;
   }
 
   return false;
@@ -1139,7 +1946,9 @@ void GitPanelActivate(GitService* git, GitPanelState* state) {
   state->last_timeline_commit.clear();
   state->last_log_commit.clear();
   state->timeline_file.clear();
-  state->commit_input_focus = false;
+  state->commit_modal_open = false;
+  state->search_focus = false;
+  clear_multi_selection(state);
   if (git != nullptr) {
     git->refresh_status();
     GitPanelEnsureSelectedDiff(git, state);
@@ -1167,13 +1976,17 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
 
     const int body_height =
         content_height != nullptr && *content_height > 0 ? *content_height : 18;
-    const int list_visible = std::max(1, body_height - 2);
-    const int diff_visible = std::max(1, body_height - 4);
+    // Clamp duro: un valor absurdo aquí puede hacer bad_alloc al construir la scrollbar.
+    constexpr int kMaxVisible = 256;
+    const int list_visible = std::max(1, std::min(kMaxVisible, body_height - 2));
+    const int diff_visible = std::max(1, std::min(kMaxVisible, body_height - 4));
     state->last_list_visible = list_visible;
     state->last_diff_visible = diff_visible;
 
-    const GitRepoInfo repo = git->has_subrepos() ? git->context_repo_info() : git->repo_info();
-    const GitRepoInfo main_repo = git->repo_info();
+
+    // Evitar context_repo_info() en cada paint: hace run_git síncrono y satura el loop.
+    const GitRepoInfo repo = git->repo_info();
+    const GitRepoInfo main_repo = repo;
     if (!repo.valid) {
       return vbox({
                  text(" " + (repo.last_error.empty() ? i18n::tr("git.not_repo")
@@ -1183,30 +1996,11 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
              flex | bgcolor(theme::PanelBg()) | reflect(state->panel_box);
     }
 
-    std::ostringstream header;
-    header << repo.branch;
+    std::ostringstream branch_text;
+    branch_text << repo.branch;
     if (main_repo.subrepo_count > 0) {
-      header << "  (" << i18n::tr_fmt("git.header.subrepos",
-                                       {std::to_string(main_repo.subrepo_count)}) << ")";
-    }
-    const GitStatusSnapshot status = git->status();
-    if (status.staged_count > 0 || status.unstaged_count > 0 || status.untracked_count > 0) {
-      header << "  ●";
-      if (status.staged_count > 0) {
-        header << i18n::tr_fmt("git.header.staged", {std::to_string(status.staged_count)});
-      }
-      if (status.unstaged_count > 0) {
-        if (status.staged_count > 0) {
-          header << ", ";
-        }
-        header << i18n::tr_fmt("git.header.modified", {std::to_string(status.unstaged_count)});
-      }
-      if (status.untracked_count > 0) {
-        if (status.staged_count > 0 || status.unstaged_count > 0) {
-          header << ", ";
-        }
-        header << i18n::tr_fmt("git.header.untracked", {std::to_string(status.untracked_count)});
-      }
+      branch_text << "  (" << i18n::tr_fmt("git.header.subrepos",
+                                            {std::to_string(main_repo.subrepo_count)}) << ")";
     }
 
     const bool hover0 = interaction_active(layout_state, kGitTab0);
@@ -1225,92 +2019,138 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
     const bool press4 =
         layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitTab4));
 
+    Elements header_left;
+    header_left.push_back(text(branch_text.str()) | bold | color(theme::Success()));
+
+    const bool show_search = state->selected_tab == GitPanelState::kTabStatus ||
+                             state->selected_tab == GitPanelState::kTabLog;
+    if (state->selected_tab == GitPanelState::kTabStatus) {
+      const bool view_hovered = interaction_active(layout_state, kGitViewToggle);
+      const bool view_pressed =
+          layout_state != nullptr &&
+          layout_state->clickable.is_pressed(std::string_view(kGitViewToggle));
+      const std::string view_glyph = state->tree_view ? "☰" : "⊞";
+      header_left.push_back(text(" "));
+      header_left.push_back(MakeIconButton(view_glyph, view_hovered, view_pressed,
+                                            &state->view_toggle_box));
+    }
+
+    if (show_search) {
+      header_left.push_back(text(" "));
+      Element search_line =
+          hbox({text(" /"),
+                RenderBlinkInputLine(state->search_query, state->search_cursor, state->search_focus),
+                text(" ")}) |
+          bgcolor(theme::TabIdle()) | size(HEIGHT, EQUAL, 1) | size(WIDTH, EQUAL, 22) |
+          reflect(state->search_box);
+      header_left.push_back(std::move(search_line));
+    }
+
+    if (state->selected_tab == GitPanelState::kTabStatus) {
+      const bool pull_h = interaction_active(layout_state, kGitPull);
+      const bool push_h = interaction_active(layout_state, kGitPush);
+      const bool stage_h = interaction_active(layout_state, kGitStage);
+      const bool unstage_h = interaction_active(layout_state, kGitUnstage);
+      const bool commit_h = interaction_active(layout_state, kGitCommit);
+      const bool pull_p =
+          layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitPull));
+      const bool push_p =
+          layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitPush));
+      const bool stage_p =
+          layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitStage));
+      const bool unstage_p = layout_state != nullptr &&
+                             layout_state->clickable.is_pressed(std::string_view(kGitUnstage));
+      const bool commit_p = layout_state != nullptr &&
+                            layout_state->clickable.is_pressed(std::string_view(kGitCommit));
+      header_left.push_back(text(" "));
+      header_left.push_back(MakeIconButton("↓", pull_h, pull_p, &state->pull_box));
+      header_left.push_back(MakeIconButton("↑", push_h, push_p, &state->push_box));
+      header_left.push_back(MakeIconButton("+", stage_h, stage_p, &state->stage_box));
+      header_left.push_back(MakeIconButton("−", unstage_h, unstage_p, &state->unstage_box));
+      header_left.push_back(MakeIconButton("✓", commit_h, commit_p, &state->commit_box));
+    }
+
+    if (!state->status_message.empty()) {
+      header_left.push_back(text("  " + state->status_message) | color(theme::Warning()));
+    }
+
     Element tabs = hbox({
-        text(header.str()) | bold | color(theme::Success()),
+        hbox(std::move(header_left)),
         filler(),
-        MakeTabButton(i18n::tr("git.tab.status"), state->selected_tab == GitPanelState::kTabStatus, hover0, press0,
-                      &state->tab_boxes[0]),
-        MakeTabButton(i18n::tr("git.tab.log"), state->selected_tab == GitPanelState::kTabLog, hover1, press1,
-                      &state->tab_boxes[1]),
-        MakeTabButton(i18n::tr("git.tab.branches"), state->selected_tab == GitPanelState::kTabBranches, hover2,
-                      press2, &state->tab_boxes[2]),
-        MakeTabButton(i18n::tr("git.tab.timeline"), state->selected_tab == GitPanelState::kTabTimeline, hover3,
-                      press3, &state->tab_boxes[3]),
-        MakeTabButton(i18n::tr("git.tab.graph"), state->selected_tab == GitPanelState::kTabGraph, hover4, press4,
-                      &state->tab_boxes[4]),
+        MakeCompactTabButton(i18n::tr("git.tab.status"),
+                             state->selected_tab == GitPanelState::kTabStatus, hover0, press0,
+                             &state->tab_boxes[0]),
+        MakeCompactTabButton(i18n::tr("git.tab.log"), state->selected_tab == GitPanelState::kTabLog,
+                             hover1, press1, &state->tab_boxes[1]),
+        MakeCompactTabButton(i18n::tr("git.tab.branches"),
+                             state->selected_tab == GitPanelState::kTabBranches, hover2, press2,
+                             &state->tab_boxes[2]),
+        MakeCompactTabButton(i18n::tr("git.tab.timeline"),
+                             state->selected_tab == GitPanelState::kTabTimeline, hover3, press3,
+                             &state->tab_boxes[3]),
+        MakeCompactTabButton(i18n::tr("git.tab.graph"),
+                             state->selected_tab == GitPanelState::kTabGraph, hover4, press4,
+                             &state->tab_boxes[4]),
         state->operation_pending ? text(" " + std::string(spinner::glyph())) | color(theme::Accent())
-                               : text(""),
+                                 : text(""),
     });
 
     Elements left_rows;
     Elements center_rows;
-    Elements action_rows;
+    const GitStatusSnapshot status = git->status();
+    int list_total = 0;
 
     if (state->selected_tab == GitPanelState::kTabStatus) {
       const auto& entries = status.entries;
-      clamp_selection(state, static_cast<int>(entries.size()));
-      if (entries.empty()) {
+      const auto indices = visible_status_indices(entries, state->search_query);
+      clamp_selection(state, static_cast<int>(indices.size()));
+      const auto rows = build_status_visual_rows(entries, indices, state->tree_view);
+      list_total = static_cast<int>(rows.size());
+      if (rows.empty()) {
         left_rows.push_back(text(i18n::tr("git.working_tree_clean")) | color(theme::Muted()));
       }
-      const int visible = list_visible;
-      clamp_selection(state, static_cast<int>(entries.size()));
-      scroll_selection_into_view(state, static_cast<int>(entries.size()), visible);
-      const int end = std::min(static_cast<int>(entries.size()), state->file_scroll + visible);
+      const int selected_entry =
+          indices.empty() ? -1 : indices[static_cast<std::size_t>(state->selected_file)];
+      // No mover el scroll en render: provoca feedback layout → bad_alloc/flickeo.
+      clamp_list_scroll(state, list_total, list_visible);
+      const int end = std::min(list_total, state->file_scroll + list_visible);
       for (int i = state->file_scroll; i < end; ++i) {
-        const auto& entry = entries[static_cast<std::size_t>(i)];
-        const bool selected = i == state->selected_file;
-        Element row = text(" " + status_badge(entry) + " " + entry.path) |
-                      color(status_color(entry));
-        left_rows.push_back(StyleListRow(std::move(row), selected, false, false));
+        const auto& row = rows[static_cast<std::size_t>(i)];
+        if (row.is_dir) {
+          const bool selected = dir_row_selected(row, entries, indices, state->multi_selected);
+          left_rows.push_back(render_status_file_row(GitStatusEntry{}, row, selected));
+          continue;
+        }
+        const auto& entry = entries[static_cast<std::size_t>(row.entry_index)];
+        const bool selected = row.entry_index == selected_entry ||
+                              state->multi_selected.count(row.entry_index) > 0;
+        left_rows.push_back(render_status_file_row(entry, row, selected));
       }
 
-      if (!entries.empty() && state->selected_file >= 0 &&
-          state->selected_file < static_cast<int>(entries.size())) {
-        const std::string& path = entries[static_cast<std::size_t>(state->selected_file)].path;
-        center_rows.push_back(text(i18n::tr_fmt("git.diff.title", {path})) | color(theme::Accent()) | bold);
+      if (selected_entry >= 0) {
+        const std::string& path = entries[static_cast<std::size_t>(selected_entry)].path;
+        center_rows.push_back(text(i18n::tr_fmt("git.diff.title", {path})) | color(theme::Accent()) |
+                              bold);
         center_rows.push_back(separator() | color(theme::AccentDim()));
         const std::string diff = git->file_diff_text(path);
         const bool loading = diff.empty() && git->busy();
         const int diff_lines = count_diff_lines(diff);
         clamp_diff_scroll(state, diff_lines, diff_visible);
-        center_rows.push_back(render_diff_lines(diff, loading, state->diff_scroll, diff_visible));
+        state->last_diff_total = diff_lines;
+        center_rows.push_back(render_diff_lines(diff, loading, state->diff_scroll, diff_visible) |
+                              flex);
       } else {
+        state->last_diff_total = 0;
         center_rows.push_back(text(i18n::tr("git.select_file")) | color(theme::Muted()));
       }
-
-      const auto btn = [&](const char* id, const std::string& label, Box* box) {
-        const bool hovered = interaction_active(layout_state, id);
-        const bool pressed =
-            layout_state != nullptr &&
-            layout_state->clickable.is_pressed(std::string_view(id));
-        return MakeToolbarButton(text(label), hovered, pressed, false, box) |
-               size(HEIGHT, EQUAL, 1);
-      };
-
-      action_rows.push_back(text(i18n::tr("git.actions.title")) | color(theme::Accent()) | bold);
-      action_rows.push_back(separator() | color(theme::AccentDim()));
-      action_rows.push_back(btn(kGitStage, i18n::tr("git.actions.stage"), &state->stage_box));
-      action_rows.push_back(btn(kGitUnstage, i18n::tr("git.actions.unstage"), &state->unstage_box));
-      action_rows.push_back(btn(kGitPush, i18n::tr("git.actions.push"), &state->push_box));
-      action_rows.push_back(btn(kGitPull, i18n::tr("git.actions.pull"), &state->pull_box));
-      action_rows.push_back(text(""));
-      action_rows.push_back(text(i18n::tr("git.commit.label")) | color(theme::Accent()) | bold);
-      const bool commit_focused = state->commit_input_focus;
-      Element commit_line =
-          hbox({text(" "), RenderBlinkInputLine(state->commit_message, state->commit_cursor,
-                                                commit_focused)}) |
-          bgcolor(theme::TabIdle()) | size(HEIGHT, EQUAL, 1) | reflect(state->commit_box);
-      action_rows.push_back(std::move(commit_line));
-      action_rows.push_back(text(i18n::tr("git.commit.confirm_hint")) | color(theme::Muted()));
-      action_rows.push_back(text(i18n::tr("git.status.open_diff_hint")) | color(theme::Muted()));
     } else if (state->selected_tab == GitPanelState::kTabLog) {
       const auto commits = visible_log_commits(git, state);
+      list_total = static_cast<int>(commits.size());
       const bool search_loading =
           !state->log_search_applied.empty() && !git->log_search_ready(state->log_search_applied);
-      clamp_selection(state, static_cast<int>(commits.size()));
-      const int visible = list_visible;
-      scroll_selection_into_view(state, static_cast<int>(commits.size()), visible);
-      const int end = std::min(static_cast<int>(commits.size()), state->log_scroll + visible);
+      clamp_selection(state, list_total);
+      clamp_list_scroll(state, list_total, list_visible);
+      const int end = std::min(list_total, state->log_scroll + list_visible);
       for (int i = state->log_scroll; i < end; ++i) {
         const auto& entry = commits[static_cast<std::size_t>(i)];
         const bool selected = i == state->selected_file;
@@ -1325,45 +2165,40 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
                             color(theme::Muted()));
       }
 
-      const bool search_focused = state->log_search_focus;
-      action_rows.push_back(text(i18n::tr("git.log.search.label")) | color(theme::Accent()) | bold);
-      action_rows.push_back(separator() | color(theme::AccentDim()));
-      Element search_line =
-          hbox({text(" "), RenderBlinkInputLine(state->log_search_query, state->log_search_cursor,
-                                                search_focused)}) |
-          bgcolor(theme::TabIdle()) | size(HEIGHT, EQUAL, 1) | reflect(state->log_search_box);
-      action_rows.push_back(std::move(search_line));
-      action_rows.push_back(text(i18n::tr("git.log.search.hint")) | color(theme::Muted()));
-
       ensure_commit_files(git, state);
       if (!commits.empty() && state->selected_file >= 0 &&
           state->selected_file < static_cast<int>(commits.size())) {
         const auto& entry = commits[static_cast<std::size_t>(state->selected_file)];
-        center_rows.push_back(text(entry.short_hash + " " + entry.message) | color(theme::Accent()) | bold);
+        center_rows.push_back(text(entry.short_hash + " " + entry.message) | color(theme::Accent()) |
+                              bold);
         center_rows.push_back(separator() | color(theme::AccentDim()));
         const auto files = git->commit_files(entry.hash);
         const bool files_loading = files.empty() && git->busy() && !git->has_commit_files(entry.hash);
         if (files_loading) {
+          state->last_diff_total = 0;
           center_rows.push_back(text(i18n::tr("git.diff.loading")) | color(theme::Muted()));
         } else if (files.empty()) {
+          state->last_diff_total = 0;
           center_rows.push_back(text(i18n::tr("git.log.no_files")) | color(theme::Muted()));
         } else {
           const auto lines = build_log_commit_view_lines(git, entry.hash, files);
           clamp_diff_scroll(state, static_cast<int>(lines.size()), diff_visible);
-          center_rows.push_back(render_log_commit_view(lines, state->diff_scroll, diff_visible));
+          state->last_diff_total = static_cast<int>(lines.size());
+          center_rows.push_back(
+              render_log_commit_view(lines, state->diff_scroll, diff_visible) | flex);
         }
       } else {
+        state->last_diff_total = 0;
         center_rows.push_back(text(i18n::tr("git.log.title")) | color(theme::Accent()) | bold);
         center_rows.push_back(text(i18n::tr("git.log.navigate_hint")) | color(theme::Muted()));
       }
     } else if (state->selected_tab == GitPanelState::kTabBranches) {
+      state->last_diff_total = 0;
       const auto branches = git->branches();
-      clamp_selection(state, static_cast<int>(branches.size()));
-      const int visible = list_visible;
-      clamp_selection(state, static_cast<int>(branches.size()));
-      scroll_selection_into_view(state, static_cast<int>(branches.size()), visible);
-      const int end =
-          std::min(static_cast<int>(branches.size()), state->branch_scroll + visible);
+      list_total = static_cast<int>(branches.size());
+      clamp_selection(state, list_total);
+      clamp_list_scroll(state, list_total, list_visible);
+      const int end = std::min(list_total, state->branch_scroll + list_visible);
       for (int i = state->branch_scroll; i < end; ++i) {
         const auto& branch = branches[static_cast<std::size_t>(i)];
         const bool selected = i == state->selected_file;
@@ -1381,15 +2216,16 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
       const std::string active_file = workspace != nullptr ? workspace->active_file : std::string{};
       ensure_file_timeline(git, state, active_file);
       if (active_file.empty()) {
+        state->last_diff_total = 0;
         left_rows.push_back(text(i18n::tr("git.timeline.no_file")) | color(theme::Muted()));
         center_rows.push_back(text(i18n::tr("git.timeline.title")) | color(theme::Accent()) | bold);
         center_rows.push_back(text(i18n::tr("git.timeline.no_file_hint")) | color(theme::Muted()));
       } else {
         const auto commits = git->file_timeline(active_file);
-        clamp_selection(state, static_cast<int>(commits.size()));
-        const int visible = list_visible;
-        scroll_selection_into_view(state, static_cast<int>(commits.size()), visible);
-        const int end = std::min(static_cast<int>(commits.size()), state->timeline_scroll + visible);
+        list_total = static_cast<int>(commits.size());
+        clamp_selection(state, list_total);
+        clamp_list_scroll(state, list_total, list_visible);
+        const int end = std::min(list_total, state->timeline_scroll + list_visible);
         for (int i = state->timeline_scroll; i < end; ++i) {
           const auto& entry = commits[static_cast<std::size_t>(i)];
           const bool selected = i == state->selected_file;
@@ -1403,84 +2239,123 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
                               color(theme::Muted()));
         }
 
-        action_rows.push_back(text(i18n::tr("git.timeline.file")) | color(theme::Accent()) | bold);
-        action_rows.push_back(separator() | color(theme::AccentDim()));
-        action_rows.push_back(paragraphAlignLeft(" " + active_file) | color(theme::Header()));
-        action_rows.push_back(text(""));
-        action_rows.push_back(text(i18n::tr("git.timeline.navigate_hint")) | color(theme::Muted()));
-
+        center_rows.push_back(text(i18n::tr_fmt("git.timeline.file_title", {active_file})) |
+                              color(theme::Accent()) | bold);
         if (!commits.empty() && state->selected_file >= 0 &&
             state->selected_file < static_cast<int>(commits.size())) {
           const auto& entry = commits[static_cast<std::size_t>(state->selected_file)];
-          center_rows.push_back(text(entry.short_hash + " " + entry.message) | color(theme::Accent()) |
-                                bold);
+          center_rows.push_back(text(entry.short_hash + " " + entry.message) | color(theme::Header()));
           center_rows.push_back(text(entry.author + " · " + entry.date) | color(theme::Muted()));
           center_rows.push_back(separator() | color(theme::AccentDim()));
           const std::string diff = git->timeline_diff_text(active_file, entry.hash);
           const bool loading = diff.empty() && git->busy();
           const int diff_lines = count_diff_lines(diff);
           clamp_diff_scroll(state, diff_lines, diff_visible);
-          center_rows.push_back(render_diff_lines(diff, loading, state->diff_scroll, diff_visible));
+          state->last_diff_total = diff_lines;
+          center_rows.push_back(
+              render_diff_lines(diff, loading, state->diff_scroll, diff_visible) | flex);
         } else if (!commits.empty()) {
+          state->last_diff_total = 0;
           center_rows.push_back(text(i18n::tr("git.timeline.select_commit")) | color(theme::Muted()));
-        } else {
-          center_rows.push_back(text(i18n::tr("git.timeline.title")) | color(theme::Accent()) | bold);
         }
       }
     } else {
       git->refresh_graph();
       left_rows.push_back(text(i18n::tr("git.graph.title")) | color(theme::Accent()) | bold);
       left_rows.push_back(text(i18n::tr("git.graph.scroll_hint")) | color(theme::Muted()));
+      left_rows.push_back(text(""));
+      left_rows.push_back(text(i18n::tr("git.graph.legend")) | color(theme::Accent()) | bold);
+      left_rows.push_back(text(i18n::tr("git.graph.legend_branches")) | color(theme::Success()));
+      left_rows.push_back(text(i18n::tr("git.graph.legend_graph")) | color(theme::Accent()));
       const auto lines = git->graph_lines();
       center_rows.push_back(text(i18n::tr("git.graph.title")) | color(theme::Accent()) | bold);
       center_rows.push_back(separator() | color(theme::AccentDim()));
       if (lines.empty()) {
+        state->last_diff_total = 0;
         const bool loading = !git->graph_loaded() && git->busy();
         center_rows.push_back(text(loading ? i18n::tr("git.diff.loading") : i18n::tr("git.graph.empty")) |
-                            color(theme::Muted()));
+                              color(theme::Muted()));
       } else {
+        state->last_diff_total = static_cast<int>(lines.size());
         const int end = std::min(static_cast<int>(lines.size()), state->graph_scroll + diff_visible);
-        state->graph_scroll =
-            std::max(0, std::min(state->graph_scroll, std::max(0, static_cast<int>(lines.size()) - diff_visible)));
+        state->graph_scroll = std::max(
+            0, std::min(state->graph_scroll, std::max(0, static_cast<int>(lines.size()) - diff_visible)));
         for (int i = state->graph_scroll; i < end; ++i) {
           center_rows.push_back(render_graph_line(lines[static_cast<std::size_t>(i)]));
         }
       }
-      action_rows.push_back(text(i18n::tr("git.graph.legend")) | color(theme::Accent()) | bold);
-      action_rows.push_back(separator() | color(theme::AccentDim()));
-      action_rows.push_back(text(i18n::tr("git.graph.legend_branches")) | color(theme::Success()));
-      action_rows.push_back(text(i18n::tr("git.graph.legend_graph")) | color(theme::Accent()));
     }
 
-    if (!state->status_message.empty()) {
-      action_rows.push_back(text(""));
-      action_rows.push_back(paragraphAlignLeft(" " + state->status_message) |
-                          color(theme::Warning()));
-    }
+    // flex hace que la hitbox ocupe toda la altura; no rellenar con N filas vacías.
+    const int panel_w =
+        state->panel_box.IsEmpty() ? 120 : (state->panel_box.x_max - state->panel_box.x_min + 1);
+    clamp_file_list_width(state, panel_w);
+
+    state->last_list_total = list_total;
+    const int rendered_lines = std::max(1, list_visible);
+    state->list_scrollbar_layout =
+        compute_scrollbar_layout(list_total, list_scroll_offset(state), list_visible, rendered_lines);
+    const bool scrollbar_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(std::string_view(kGitListScrollbar));
+    const bool scrollbar_active =
+        state->list_scrollbar_dragging ||
+        (layout_state != nullptr &&
+         layout_state->clickable.is_pressed(std::string_view(kGitListScrollbar)));
+
+    const int diff_scroll_pos =
+        state->selected_tab == GitPanelState::kTabGraph ? state->graph_scroll : state->diff_scroll;
+    state->diff_scrollbar_layout = compute_scrollbar_layout(
+        state->last_diff_total, diff_scroll_pos, diff_visible, std::max(1, diff_visible));
+    const bool diff_scrollbar_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(std::string_view(kGitDiffScrollbar));
+    const bool diff_scrollbar_active =
+        state->diff_scrollbar_dragging ||
+        (layout_state != nullptr &&
+         layout_state->clickable.is_pressed(std::string_view(kGitDiffScrollbar)));
+
+    Element list = vbox(std::move(left_rows)) | reflect(state->file_list_box) | flex |
+                   bgcolor(theme::CodeBg());
+    Element scrollbar =
+        vertical_scrollbar(list_total, list_scroll_offset(state), list_visible, rendered_lines,
+                           scrollbar_hovered, scrollbar_active) |
+        reflect(state->list_scrollbar_box);
+
+    Element diff_pane = vbox(std::move(center_rows)) | reflect(state->diff_box) | flex |
+                        bgcolor(theme::CodeBg());
+    Element diff_scrollbar =
+        vertical_scrollbar(state->last_diff_total, diff_scroll_pos, diff_visible,
+                           std::max(1, diff_visible), diff_scrollbar_hovered, diff_scrollbar_active) |
+        reflect(state->diff_scrollbar_box);
 
     Element body = hbox({
-        vbox(std::move(left_rows)) | reflect(state->file_list_box) |
-            size(WIDTH, EQUAL, kFileListWidth) | bgcolor(theme::CodeBg()) | border,
-        separator(),
-        vbox(std::move(center_rows)) | reflect(state->diff_box) | flex | bgcolor(theme::CodeBg()) |
-            border,
-        separator(),
-        vbox(std::move(action_rows)) | size(WIDTH, EQUAL, kActionWidth) | bgcolor(theme::PanelBg()) |
-            border,
+        hbox({std::move(list) | flex, std::move(scrollbar)}) |
+            size(WIDTH, EQUAL, state->file_list_width) | bgcolor(theme::CodeBg()) | border,
+        SplitSeparatorVertical(state->list_sep_hovered, state->list_sep_dragging,
+                               &state->list_sep_box),
+        hbox({std::move(diff_pane) | flex, std::move(diff_scrollbar)}) | flex |
+            bgcolor(theme::CodeBg()) | border,
     });
 
     Element result = vbox({
-               tabs | size(HEIGHT, EQUAL, 1),
-               separator(),
-               std::move(body) | flex,
-           }) |
-           flex | bgcolor(theme::PanelBg()) | reflect(state->panel_box);
+                         tabs | size(HEIGHT, EQUAL, 1),
+                         separator(),
+                         std::move(body) | flex,
+                     }) |
+                     flex | bgcolor(theme::PanelBg()) | reflect(state->panel_box);
+
+    if (state->commit_modal_open) {
+      result = ScreenModalOverlay(std::move(result), render_commit_modal(state, layout_state));
+    }
     return result;
   });
 
-  return WrapFocusable(CatchEvent(panel, [dispatch_keys, dispatch_mouse](Event event) {
-    if (dispatch_mouse(event)) {
-      return true;
+  return WrapFocusable(CatchEvent(panel, [dispatch_keys](Event event) {
+    // El ratón lo gestiona solo git_mouse_handler (application); duplicarlo aquí
+    // reentra en hover/scroll y puede disparar wakes en bucle.
+    if (event.is_mouse()) {
+      return false;
     }
     return dispatch_keys(event);
   }));
