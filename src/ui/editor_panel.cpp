@@ -48,6 +48,7 @@
 #include "editor/line_comment.hpp"
 #include "editor/text_ops.hpp"
 #include "editor/text_search.hpp"
+#include "editor/undo_stack.hpp"
 #include "ftxui/component/component.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "indexer/index_rules.hpp"
@@ -1610,6 +1611,7 @@ bool handle_breadcrumb_click(WorkspaceModel* workspace, FocusManagerState* focus
   for (const auto& hit : panel->breadcrumb_hits) {
     if (m.x >= hit.x_min && m.x <= hit.x_max) {
       workspace->ensure_buffer();
+      commit_undo_group(&workspace->buffer);
       workspace->buffer.reset_to_single_cursor(hit.line, 0);
       workspace->buffer.scroll = std::max(0, hit.line - 2);
       workspace->buffer.view_token++;
@@ -1632,6 +1634,7 @@ void navigate_editor_to_line(WorkspaceModel* workspace, EditorPanelState* panel,
     return;
   }
   line = std::max(0, std::min(line, static_cast<int>(buffer->lines.size()) - 1));
+  commit_undo_group(buffer);
   buffer->reset_to_single_cursor(line, 0);
   buffer->scroll = std::max(0, line - visible_lines / 3);
   buffer->view_token++;
@@ -4595,6 +4598,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
         return false;
       }();
       if (!click_inside_selection) {
+        commit_undo_group(buffer);
         buffer->reset_to_single_cursor(pos.line, pos.col);
       }
       MultiCursor cursor = buffer->primary();
@@ -4678,6 +4682,10 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
         mouse_to_cursor(m, *panel, *buffer, visible_lines);
     const bool shift_click = mouse_shift_active(m, event);
     const bool alt_click = mouse_alt_active(m, event);
+
+    // Match keyboard cursor moves: close the current undo coalesce group so the
+    // next edit after a mouse reposition becomes its own undo step.
+    commit_undo_group(buffer);
 
     const int64_t now_ms = steady_now_ms();
     const bool same_spot = is_same_click_spot(*panel, pos.line, pos.col, now_ms);
@@ -6187,7 +6195,6 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         !caret_baseline_ts_trustworthy;
     const bool caret_live_highlight = caret_needs_live_syntax;
     const bool typing_edit_mode = typing_burst && indexed_cpp;
-    const bool defer_sticky_scroll = typing_edit_mode;
     // "Rich session" bundles non-highlight editor extras (diagnostic suffixes/underlines,
     // symbol-press flash, search/selection highlighting, code folding, sticky scroll) behind
     // a single switch so it can be turned off for extra performance.
@@ -6621,12 +6628,14 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         scope_bracket_ptr = &panel_state->visual_highlight.snapshot.scope_braces;
       }
 
+      // Keep sticky scroll visible during typing bursts. Deferring it for the settle
+      // window made the overlay vanish/reappear on every keystroke.
       const std::vector<SymbolInfo>& sticky_symbol_source =
           cached_file_symbols(panel_state.get(), buffer.path, symbols.get());
       const bool vh_sticky_ready =
           vh_config.enabled && vh_config.sticky_scroll && !sticky_symbol_source.empty();
       sticky_lines =
-          defer_sticky_scroll || !vh_config.enabled || !vh_config.sticky_scroll || !vh_sticky_ready
+          !vh_config.enabled || !vh_config.sticky_scroll || !vh_sticky_ready
               ? std::vector<StickyLine>{}
               : sticky_lines_for_scroll(sticky_symbol_source, buffer.lines.to_vector(),
                                         buffer.scroll, 3);
