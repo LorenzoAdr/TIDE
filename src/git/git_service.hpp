@@ -82,6 +82,8 @@ class GitService {
   void unstage_file(const std::string& path, CompletionCallback on_done);
   void stage_files(const std::vector<std::string>& paths, CompletionCallback on_done);
   void unstage_files(const std::vector<std::string>& paths, CompletionCallback on_done);
+  // Descarta cambios locales (restore a HEAD / clean de untracked).
+  void discard_files(const std::vector<std::string>& paths, CompletionCallback on_done);
   void commit(const std::string& message, CompletionCallback on_done);
   void checkout_branch(const std::string& branch, CompletionCallback on_done);
   void push(CompletionCallback on_done);

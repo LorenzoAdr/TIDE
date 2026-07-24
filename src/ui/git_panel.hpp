@@ -57,6 +57,7 @@ struct GitPanelState {
   std::string log_search_applied;
   std::string commit_message;
   int commit_cursor = 0;
+  int commit_modal_file_scroll = 0;
   std::string status_message;
   bool commit_modal_open = false;
   bool operation_pending = false;
@@ -77,16 +78,22 @@ struct GitPanelState {
   ftxui::Box search_box;
   ftxui::Box stage_box;
   ftxui::Box unstage_box;
+  ftxui::Box discard_box;
   ftxui::Box push_box;
   ftxui::Box pull_box;
   ftxui::Box commit_box;
   ftxui::Box commit_modal_confirm_box;
   ftxui::Box commit_modal_cancel_box;
+  ftxui::Box commit_modal_files_box;
 };
 
 ftxui::Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
                               FocusManagerState* focus, WorkspaceModel* workspace,
                               int* content_height = nullptr);
+
+// Overlay a pantalla completa para centrar el modal de commit como el resto.
+ftxui::Component MakeGitCommitModalOverlay(ftxui::Component main, GitService* git,
+                                           GitPanelState* state, MainLayoutState* layout_state);
 
 void GitPanelEnsureSelectedDiff(GitService* git, GitPanelState* state);
 

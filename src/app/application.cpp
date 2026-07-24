@@ -2864,8 +2864,11 @@ int Application::run() {
 	auto with_source_substitute = MakeSourceSubstituteModalOverlay(
 	    with_settings, &source_substitute_state_, &layout_state_, on_source_substitute_apply);
 
+	auto with_git_commit = MakeGitCommitModalOverlay(with_source_substitute, &git_service_,
+	                                                 &git_panel_state_, &layout_state_);
+
 	auto with_quit_confirm =
-	    MakeQuitConfirmOverlay(with_source_substitute, &quit_confirm_state_, &layout_state_,
+	    MakeQuitConfirmOverlay(with_git_commit, &quit_confirm_state_, &layout_state_,
 	                           &shutdown_state_, [this, &screen] { begin_shutdown(&screen); });
 
 	auto with_debug_launch = MakeDebugLaunchModalOverlay(

@@ -41,6 +41,7 @@ constexpr const char* kGitTab3 = "git-tab-3";
 constexpr const char* kGitTab4 = "git-tab-4";
 constexpr const char* kGitStage = "git-stage";
 constexpr const char* kGitUnstage = "git-unstage";
+constexpr const char* kGitDiscard = "git-discard";
 constexpr const char* kGitPush = "git-push";
 constexpr const char* kGitPull = "git-pull";
 constexpr const char* kGitCommit = "git-commit";
@@ -988,11 +989,33 @@ void unstage_selected(GitService* git, GitPanelState* state, MainLayoutState* la
   });
 }
 
+void discard_selected(GitService* git, GitPanelState* state, MainLayoutState* layout_state) {
+  if (git == nullptr || state == nullptr) {
+    return;
+  }
+  const std::vector<std::string> paths = paths_for_stage_action(git, state);
+  if (paths.empty()) {
+    return;
+  }
+  state->operation_pending = true;
+  git->discard_files(paths, [state, layout_state](bool ok, const std::string& msg) {
+    state->operation_pending = false;
+    if (ok) {
+      clear_multi_selection(state);
+    }
+    set_status(state, ok ? i18n::tr("git.status.discarded") : msg);
+    if (layout_state != nullptr) {
+      UI_WAKE(layout_state, "wake");
+    }
+  });
+}
+
 void open_commit_modal(GitPanelState* state) {
   if (state == nullptr) {
     return;
   }
   state->commit_modal_open = true;
+  state->commit_modal_file_scroll = 0;
   state->search_focus = false;
   cursor_blink::show();
 }
@@ -1082,6 +1105,22 @@ bool handle_commit_modal_keys(GitService* git, GitPanelState* state, MainLayoutS
     close_commit_modal(state, false);
     return true;
   }
+  if (event == Event::ArrowUp) {
+    state->commit_modal_file_scroll = std::max(0, state->commit_modal_file_scroll - 1);
+    return true;
+  }
+  if (event == Event::ArrowDown) {
+    state->commit_modal_file_scroll += 1;
+    return true;
+  }
+  if (event == Event::PageUp) {
+    state->commit_modal_file_scroll = std::max(0, state->commit_modal_file_scroll - 8);
+    return true;
+  }
+  if (event == Event::PageDown) {
+    state->commit_modal_file_scroll += 8;
+    return true;
+  }
   if (event == Event::Backspace) {
     if (state->commit_cursor > 0 &&
         state->commit_cursor <= static_cast<int>(state->commit_message.size())) {
@@ -1110,7 +1149,22 @@ bool handle_commit_modal_keys(GitService* git, GitPanelState* state, MainLayoutS
   return true;
 }
 
-Element render_commit_modal(GitPanelState* state, MainLayoutState* layout_state) {
+std::vector<GitStatusEntry> staged_entries_for_commit(GitService* git) {
+  std::vector<GitStatusEntry> out;
+  if (git == nullptr) {
+    return out;
+  }
+  const GitStatusSnapshot status = git->status();
+  for (const GitStatusEntry& entry : status.entries) {
+    if (entry.staged != GitFileStatus::kUnmodified && entry.staged != GitFileStatus::kUntracked &&
+        entry.staged != GitFileStatus::kIgnored) {
+      out.push_back(entry);
+    }
+  }
+  return out;
+}
+
+Element render_commit_modal(GitService* git, GitPanelState* state, MainLayoutState* layout_state) {
   if (state == nullptr || !state->commit_modal_open) {
     return text("");
   }
@@ -1135,14 +1189,53 @@ Element render_commit_modal(GitPanelState* state, MainLayoutState* layout_state)
   Element cancel_btn =
       MakeToolbarButton(text(" " + i18n::tr("git.commit.cancel") + " "), cancel_hovered,
                         cancel_pressed, false, &state->commit_modal_cancel_box, true);
-  return ModalWindow(
-      text(i18n::tr("git.commit.modal_title")) | color(theme::Accent()),
-      vbox({
-          ModalInputLine(line) | size(WIDTH, EQUAL, 56),
-          text(""),
-          hbox({std::move(confirm_btn), text(" "), std::move(cancel_btn)}),
-          text(i18n::tr("common.footer.confirm_esc")) | color(theme::Muted()),
+
+  const int term_w =
+      layout_state != nullptr ? terminal_width_or_default(layout_state->terminal_width) : 120;
+  const int term_h =
+      layout_state != nullptr ? terminal_height_or_default(layout_state->terminal_height) : 40;
+  const LargeModalLayout dims = compute_large_modal_layout(term_w, term_h);
+  const int input_width = std::max(40, dims.modal_width - 6);
+  const int file_rows_visible = std::max(6, dims.max_rows - 6);
+
+  const auto staged = staged_entries_for_commit(git);
+  const int total_files = static_cast<int>(staged.size());
+  const int max_scroll = std::max(0, total_files - file_rows_visible);
+  state->commit_modal_file_scroll =
+      std::max(0, std::min(state->commit_modal_file_scroll, max_scroll));
+
+  Elements file_rows;
+  if (staged.empty()) {
+    file_rows.push_back(text(" " + i18n::tr("git.commit.no_staged")) | color(theme::Muted()));
+  } else {
+    const int start = state->commit_modal_file_scroll;
+    const int end = std::min(total_files, start + file_rows_visible);
+    for (int i = start; i < end; ++i) {
+      const GitStatusEntry& entry = staged[static_cast<std::size_t>(i)];
+      file_rows.push_back(hbox({
+          text(" " + status_badge(entry) + " ") | color(status_color(entry)),
+          text(entry.path) | color(theme::Header()),
+          filler(),
       }));
+    }
+  }
+
+  Elements body;
+  body.push_back(text(i18n::tr("git.commit.message_label")) | color(theme::Muted()));
+  body.push_back(ModalInputLine(line) | size(WIDTH, EQUAL, input_width));
+  body.push_back(text(""));
+  body.push_back(text(i18n::tr_fmt("git.commit.files_header", {std::to_string(total_files)})) |
+                 color(theme::Accent()) | bold);
+  body.push_back(separator() | color(theme::AccentDim()));
+  body.push_back(vbox(std::move(file_rows)) | flex | bgcolor(theme::CodeBg()) |
+                 reflect(state->commit_modal_files_box));
+  body.push_back(separator() | color(theme::AccentDim()));
+  body.push_back(hbox({std::move(confirm_btn), text(" "), std::move(cancel_btn)}));
+  body.push_back(text(i18n::tr("common.footer.confirm_esc")) | color(theme::Muted()));
+
+  return ModalWindow(text(i18n::tr("git.commit.modal_title")) | color(theme::Accent()),
+                     vbox(std::move(body)) | size(WIDTH, EQUAL, dims.modal_width) |
+                         size(HEIGHT, EQUAL, dims.modal_height));
 }
 
 bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
@@ -1596,6 +1689,42 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     return true;
   }
 
+  // Modal de commit: centrado a pantalla completa; manejar antes del hit-test del panel.
+  if (state->commit_modal_open) {
+    if (m.motion == Mouse::Moved) {
+      update_panel_hover(
+          layout_state, m.x, m.y,
+          {{kGitCommitConfirm, &state->commit_modal_confirm_box},
+           {kGitCommitCancel, &state->commit_modal_cancel_box}},
+          [](std::string_view id) {
+            return id == kGitCommitConfirm || id == kGitCommitCancel;
+          });
+      return true;
+    }
+    if (is_wheel) {
+      const bool in_files = !state->commit_modal_files_box.IsEmpty() &&
+                            state->commit_modal_files_box.Contain(m.x, m.y);
+      if (in_files) {
+        const int delta = m.button == Mouse::WheelUp ? -3 : 3;
+        state->commit_modal_file_scroll = std::max(0, state->commit_modal_file_scroll + delta);
+      }
+      return true;
+    }
+    if (is_press) {
+      if (state->commit_modal_confirm_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitCommitConfirm));
+        commit_message(git, state, layout_state);
+        return true;
+      }
+      if (state->commit_modal_cancel_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitCommitCancel));
+        close_commit_modal(state, false);
+        return true;
+      }
+    }
+    return true;
+  }
+
   // Clic fuera del panel: soltar el buscador sin tragar el evento (el editor debe recibirlo).
   if (!state->panel_box.Contain(m.x, m.y)) {
     if (is_press && state->search_focus) {
@@ -1619,35 +1748,18 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
          {kGitTab4, &state->tab_boxes[4]},
          {kGitStage, &state->stage_box},
          {kGitUnstage, &state->unstage_box},
+         {kGitDiscard, &state->discard_box},
          {kGitPush, &state->push_box},
          {kGitPull, &state->pull_box},
          {kGitCommit, &state->commit_box},
          {kGitViewToggle, &state->view_toggle_box},
          {kGitSearch, &state->search_box},
          {kGitListScrollbar, &state->list_scrollbar_box},
-         {kGitDiffScrollbar, &state->diff_scrollbar_box},
-         {kGitCommitConfirm, &state->commit_modal_confirm_box},
-         {kGitCommitCancel, &state->commit_modal_cancel_box}},
+         {kGitDiffScrollbar, &state->diff_scrollbar_box}},
         [](std::string_view id) {
           return id.rfind("git-", 0) == 0;
         });
     return false;
-  }
-
-  if (state->commit_modal_open) {
-    if (is_press) {
-      if (state->commit_modal_confirm_box.Contain(m.x, m.y)) {
-        trigger_press(layout_state, std::string_view(kGitCommitConfirm));
-        commit_message(git, state, layout_state);
-        return true;
-      }
-      if (state->commit_modal_cancel_box.Contain(m.x, m.y)) {
-        trigger_press(layout_state, std::string_view(kGitCommitCancel));
-        close_commit_modal(state, false);
-        return true;
-      }
-    }
-    return true;
   }
 
   // Wheel: no robar foco (evita el salto de layout al sincronizar Terminal).
@@ -1801,6 +1913,11 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     if (state->unstage_box.Contain(m.x, m.y)) {
       trigger_press(layout_state, std::string_view(kGitUnstage));
       unstage_selected(git, state, layout_state);
+      return true;
+    }
+    if (state->discard_box.Contain(m.x, m.y)) {
+      trigger_press(layout_state, std::string_view(kGitDiscard));
+      discard_selected(git, state, layout_state);
       return true;
     }
     if (state->push_box.Contain(m.x, m.y)) {
@@ -2051,6 +2168,7 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
       const bool push_h = interaction_active(layout_state, kGitPush);
       const bool stage_h = interaction_active(layout_state, kGitStage);
       const bool unstage_h = interaction_active(layout_state, kGitUnstage);
+      const bool discard_h = interaction_active(layout_state, kGitDiscard);
       const bool commit_h = interaction_active(layout_state, kGitCommit);
       const bool pull_p =
           layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitPull));
@@ -2060,6 +2178,8 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
           layout_state != nullptr && layout_state->clickable.is_pressed(std::string_view(kGitStage));
       const bool unstage_p = layout_state != nullptr &&
                              layout_state->clickable.is_pressed(std::string_view(kGitUnstage));
+      const bool discard_p = layout_state != nullptr &&
+                             layout_state->clickable.is_pressed(std::string_view(kGitDiscard));
       const bool commit_p = layout_state != nullptr &&
                             layout_state->clickable.is_pressed(std::string_view(kGitCommit));
       header_left.push_back(text(" "));
@@ -2067,6 +2187,7 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
       header_left.push_back(MakeIconButton("↑", push_h, push_p, &state->push_box));
       header_left.push_back(MakeIconButton("+", stage_h, stage_p, &state->stage_box));
       header_left.push_back(MakeIconButton("−", unstage_h, unstage_p, &state->unstage_box));
+      header_left.push_back(MakeIconButton("↺", discard_h, discard_p, &state->discard_box));
       header_left.push_back(MakeIconButton("✓", commit_h, commit_p, &state->commit_box));
     }
 
@@ -2345,9 +2466,6 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
                      }) |
                      flex | bgcolor(theme::PanelBg()) | reflect(state->panel_box);
 
-    if (state->commit_modal_open) {
-      result = ScreenModalOverlay(std::move(result), render_commit_modal(state, layout_state));
-    }
     return result;
   });
 
@@ -2359,6 +2477,17 @@ Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* l
     }
     return dispatch_keys(event);
   }));
+}
+
+Component MakeGitCommitModalOverlay(Component main, GitService* git, GitPanelState* state,
+                                    MainLayoutState* layout_state) {
+  return Renderer(main, [main, git, state, layout_state] {
+    Element base = main->Render();
+    if (state == nullptr || !state->commit_modal_open) {
+      return base;
+    }
+    return ScreenModalOverlay(std::move(base), render_commit_modal(git, state, layout_state));
+  });
 }
 
 }  // namespace tuide
