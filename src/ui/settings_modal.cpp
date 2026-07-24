@@ -36,6 +36,10 @@ struct SettingsBodyContent {
   std::vector<std::pair<int, int>> click_targets;
 };
 
+void append_top_level_tabs_header(SettingsBodyContent* content, SettingsModalState* state);
+void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel);
+bool handle_top_level_tab_keys(SettingsModalState* state, Event event);
+
 void add_click_target(SettingsBodyContent* content, int index) {
   if (content == nullptr) {
     return;
@@ -160,8 +164,7 @@ constexpr int kWorkspaceGccQueryDriver = 0;
 constexpr int kWorkspaceBackgroundIndex = 1;
 constexpr int kWorkspaceIncludePaths = 2;
 constexpr int kWorkspaceCompileCommands = 3;
-constexpr int kWorkspaceUiColors = 4;
-constexpr int kWorkspaceOptionCount = 5;
+constexpr int kWorkspaceOptionCount = 4;
 
 constexpr int kFormatBasedOnStyle = 0;
 constexpr int kFormatIndentWidth = 1;
@@ -174,7 +177,8 @@ constexpr int kFormatSortIncludes = 7;
 constexpr int kFormatIncludeBlocks = 8;
 constexpr int kFormatIndentCaseLabels = 9;
 constexpr int kFormatShortFunctions = 10;
-constexpr int kFormatOptionCount = 11;
+constexpr int kFormatSaveToFile = 11;
+constexpr int kFormatOptionCount = 12;
 
 constexpr int kUiColorsPanelBg = theme::kListedPresetCount + 0;
 constexpr int kUiColorsCodeBg = theme::kListedPresetCount + 1;
@@ -228,14 +232,14 @@ constexpr int kVisualHighlightOptionCount = 12;
 
 bool is_top_level_panel(SettingsPanel panel) {
   return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kVisualHighlight ||
-         panel == SettingsPanel::kWorkspace || panel == SettingsPanel::kFormat ||
-         panel == SettingsPanel::kStatus;
+         panel == SettingsPanel::kWorkspace || panel == SettingsPanel::kUiColors ||
+         panel == SettingsPanel::kFormat || panel == SettingsPanel::kStatus;
 }
 
 int top_level_panel_count(const SettingsModalState* state) {
-  // General + Visual + Status always; Workspace + Format when a workspace is open.
+  // General + Visual + Status always; Workspace + Theme + Format when a workspace is open.
   if (state != nullptr && state->has_workspace) {
-    return 5;
+    return 6;
   }
   return 3;
 }
@@ -252,6 +256,9 @@ SettingsPanel top_level_panel_at(const SettingsModalState* state, int index) {
       return SettingsPanel::kWorkspace;
     }
     if (index == 3) {
+      return SettingsPanel::kUiColors;
+    }
+    if (index == 4) {
       return SettingsPanel::kFormat;
     }
     return SettingsPanel::kStatus;
@@ -267,10 +274,12 @@ int top_level_panel_index(const SettingsModalState* state, SettingsPanel panel) 
       return 1;
     case SettingsPanel::kWorkspace:
       return state != nullptr && state->has_workspace ? 2 : 1;
+    case SettingsPanel::kUiColors:
+      return state != nullptr && state->has_workspace ? 3 : 1;
     case SettingsPanel::kFormat:
-      return state != nullptr && state->has_workspace ? 3 : 2;
-    case SettingsPanel::kStatus:
       return state != nullptr && state->has_workspace ? 4 : 2;
+    case SettingsPanel::kStatus:
+      return state != nullptr && state->has_workspace ? 5 : 2;
     default:
       return 0;
   }
@@ -289,8 +298,7 @@ void cycle_top_level_panel(SettingsModalState* state, int delta) {
     index += count;
   }
   index %= count;
-  state->panel = top_level_panel_at(state, index);
-  state->selected = 0;
+  switch_top_level_tab(state, top_level_panel_at(state, index));
 }
 
 std::string compile_commands_mode_label(CompileCommandsMode mode) {
@@ -717,8 +725,30 @@ void toggle_workspace_option(SettingsModalState* state, int index) {
   }
 }
 
+bool clang_format_eq(const ClangFormatConfig& a, const ClangFormatConfig& b);
+
+void save_format_to_clang_format_file(SettingsModalState* state) {
+  if (state == nullptr || !state->has_workspace || state->workspace_root.empty()) {
+    return;
+  }
+  normalize_clang_format_config(&state->draft_clang_format);
+  if (!save_clang_format(state->workspace_root, state->draft_clang_format)) {
+    return;
+  }
+  state->clang_format_file_exists = true;
+  state->clang_format_baseline = state->draft_clang_format;
+  editor_indent::apply(state->draft_clang_format);
+  if (state->clang_format_changed_callback) {
+    state->clang_format_changed_callback(state->draft_clang_format);
+  }
+}
+
 void toggle_format_option(SettingsModalState* state, int index) {
   if (state == nullptr) {
+    return;
+  }
+  if (index == kFormatSaveToFile) {
+    save_format_to_clang_format_file(state);
     return;
   }
   switch (index) {
@@ -759,13 +789,9 @@ void toggle_format_option(SettingsModalState* state, int index) {
       break;
   }
   normalize_clang_format_config(&state->draft_clang_format);
-  editor_indent::apply(state->draft_clang_format);
-  if (state->has_workspace && !state->workspace_root.empty()) {
-    save_clang_format(state->workspace_root, state->draft_clang_format);
-    state->clang_format_file_exists = true;
-    if (state->clang_format_changed_callback) {
-      state->clang_format_changed_callback(state->draft_clang_format);
-    }
+  // Indent guides / tab display apply immediately; .clang-format only on explicit save.
+  if (index == kFormatIndentWidth || index == kFormatTabWidth || index == kFormatUseTab) {
+    editor_indent::apply(state->draft_clang_format);
   }
 }
 
@@ -954,7 +980,6 @@ void open_ui_colors_panel(SettingsModalState* state) {
     return;
   }
   ensure_draft_ui_colors_complete(state);
-  state->panel = SettingsPanel::kUiColors;
   state->ui_colors_selected = 0;
   state->ui_colors_editing = false;
   state->ui_colors_edit_row = -1;
@@ -1166,6 +1191,10 @@ bool handle_ui_colors_keys(SettingsModalState* state, Event event) {
     return true;
   }
 
+  if (handle_top_level_tab_keys(state, event)) {
+    return true;
+  }
+
   if (event == Event::ArrowDown || event == Event::Character('j')) {
     state->ui_colors_selected += 1;
     clamp_ui_colors_selection(state);
@@ -1193,7 +1222,7 @@ bool handle_ui_colors_keys(SettingsModalState* state, Event event) {
 
 SettingsBodyContent build_ui_colors_panel(SettingsModalState* state) {
   SettingsBodyContent content;
-  content.rows.push_back(text(i18n::tr("settings.title.ui_colors")) | color(theme::Accent()) | bold);
+  append_top_level_tabs_header(&content, state);
   content.rows.push_back(text(i18n::tr("settings.ui_colors.syntax_note")) | color(theme::Muted()));
   content.rows.push_back(separator());
 
@@ -1377,9 +1406,14 @@ void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel) {
   if (state == nullptr || !is_top_level_panel(panel)) {
     return;
   }
-  if ((panel == SettingsPanel::kWorkspace || panel == SettingsPanel::kFormat) &&
+  if ((panel == SettingsPanel::kWorkspace || panel == SettingsPanel::kFormat ||
+       panel == SettingsPanel::kUiColors) &&
       !state->has_workspace) {
     return;
+  }
+  if (state->panel == SettingsPanel::kUiColors && panel != SettingsPanel::kUiColors &&
+      state->ui_colors_editing) {
+    cancel_ui_color_edit(state);
   }
   state->panel = panel;
   state->selected = 0;
@@ -1387,6 +1421,9 @@ void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel) {
   if (panel == SettingsPanel::kStatus) {
     // Force a fresh probe when entering the tab; later frames reuse the cache.
     state->tools_status_cache_valid = false;
+  }
+  if (panel == SettingsPanel::kUiColors) {
+    open_ui_colors_panel(state);
   }
 }
 
@@ -1420,10 +1457,6 @@ void activate_workspace_option(SettingsModalState* state, int index) {
   }
   if (index == kWorkspaceCompileCommands) {
     open_compile_commands_panel(state);
-    return;
-  }
-  if (index == kWorkspaceUiColors) {
-    open_ui_colors_panel(state);
     return;
   }
   toggle_workspace_option(state, index);
@@ -1551,6 +1584,10 @@ bool handle_settings_mouse(SettingsModalState* state, Event event) {
       switch_top_level_tab(state, SettingsPanel::kWorkspace);
       return true;
     }
+    if (state->has_workspace && state->tab_theme_box.Contain(m.x, m.y)) {
+      switch_top_level_tab(state, SettingsPanel::kUiColors);
+      return true;
+    }
     if (state->has_workspace && state->tab_format_box.Contain(m.x, m.y)) {
       switch_top_level_tab(state, SettingsPanel::kFormat);
       return true;
@@ -1670,10 +1707,6 @@ bool handle_workspace_settings_keys(SettingsModalState* state, Event event) {
       open_compile_commands_panel(state);
       return true;
     }
-    if (state->selected == kWorkspaceUiColors) {
-      open_ui_colors_panel(state);
-      return true;
-    }
     toggle_workspace_option(state, state->selected);
     return true;
   }
@@ -1684,10 +1717,6 @@ bool handle_workspace_settings_keys(SettingsModalState* state, Event event) {
     }
     if (state->selected == kWorkspaceCompileCommands) {
       open_compile_commands_panel(state);
-      return true;
-    }
-    if (state->selected == kWorkspaceUiColors) {
-      open_ui_colors_panel(state);
       return true;
     }
     toggle_workspace_option(state, state->selected);
@@ -1993,6 +2022,9 @@ Element render_top_level_tabs(SettingsModalState* state) {
                               i18n::tr("settings.tab.workspace").c_str(),
                               &state->tab_workspace_box));
     tabs.push_back(text("  "));
+    tabs.push_back(render_tab(SettingsPanel::kUiColors, i18n::tr("settings.tab.theme").c_str(),
+                              &state->tab_theme_box));
+    tabs.push_back(text("  "));
     tabs.push_back(render_tab(SettingsPanel::kFormat, i18n::tr("settings.tab.format").c_str(),
                               &state->tab_format_box));
   }
@@ -2233,23 +2265,6 @@ SettingsBodyContent build_workspace_settings(SettingsModalState* state) {
     content.rows.push_back(text(""));
   }
 
-  {
-    const bool selected = state->selected == kWorkspaceUiColors;
-    const std::string label = i18n::tr_fmt(
-        "settings.workspace.ui_colors.label",
-        {theme::ui_color_preset_label(state->draft_ui_colors_preset)});
-    Element title = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
-    if (selected) {
-      content.focus_row = static_cast<int>(content.rows.size());
-      title = title | inverted;
-    }
-    add_click_target(&content, kWorkspaceUiColors);
-    content.rows.push_back(title);
-    content.rows.push_back(text("    " + i18n::tr("settings.workspace.ui_colors.description")) |
-                   color(theme::Muted()));
-    content.rows.push_back(text(""));
-  }
-
   if (!content.rows.empty()) {
     content.rows.pop_back();
   }
@@ -2264,6 +2279,7 @@ SettingsBodyContent build_format_settings(SettingsModalState* state) {
       state->clang_format_file_exists ? i18n::tr("settings.format.file_exists")
                                       : i18n::tr("settings.format.file_will_create");
   content.rows.push_back(text(file_note) | color(theme::Muted()));
+  content.rows.push_back(text(i18n::tr("settings.format.live_indent_note")) | color(theme::Muted()));
   content.rows.push_back(text(""));
 
   const auto& config = state->draft_clang_format;
@@ -2299,6 +2315,24 @@ SettingsBodyContent build_format_settings(SettingsModalState* state) {
       "");
   row(kFormatShortFunctions, i18n::tr("settings.format.short_functions"),
       clang_short_functions_name(config.allow_short_functions_on_a_single_line));
+
+  content.rows.push_back(separator());
+  content.rows.push_back(text(""));
+  {
+    const bool selected = state->selected == kFormatSaveToFile;
+    const bool dirty = !clang_format_eq(state->draft_clang_format, state->clang_format_baseline);
+    const std::string label = dirty ? i18n::tr("settings.format.save_to_file")
+                                    : i18n::tr("settings.format.save_to_file_saved");
+    Element line = text(label) | color(selected ? theme::Accent() : theme::Header()) | bold;
+    if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
+      line = line | inverted;
+    }
+    add_click_target(&content, kFormatSaveToFile);
+    content.rows.push_back(line);
+    content.rows.push_back(text("    " + i18n::tr("settings.format.save_to_file_description")) |
+                           color(theme::Muted()));
+  }
 
   return content;
 }
@@ -2646,14 +2680,6 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
     theme::apply_color_preset(state->draft_ui_colors_preset);
   }
 
-  if (state->has_workspace &&
-      !clang_format_eq(state->draft_clang_format, state->clang_format_baseline)) {
-    save_clang_format(state->workspace_root, state->draft_clang_format);
-    if (on_clang_format_apply) {
-      on_clang_format_apply(state->draft_clang_format);
-    }
-  }
-
   state->open = false;
   state->panel = SettingsPanel::kGeneral;
   state->body_scroll = 0;
@@ -2689,8 +2715,15 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
               return true;
             case SettingsPanel::kIncludePaths:
             case SettingsPanel::kCompileCommands:
-            case SettingsPanel::kUiColors:
               state->panel = SettingsPanel::kWorkspace;
+              return true;
+            case SettingsPanel::kUiColors:
+              if (state->ui_colors_editing) {
+                cancel_ui_color_edit(state);
+                return true;
+              }
+              close_settings_modal(state, settings, on_apply, on_workspace_apply,
+                                   on_clang_format_apply);
               return true;
             case SettingsPanel::kGeneral:
             case SettingsPanel::kVisualHighlight:
@@ -2764,7 +2797,6 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
             break;
           case SettingsPanel::kUiColors:
             title = i18n::tr("settings.title.ui_colors");
-            footer = "";
             content = build_ui_colors_panel(state);
             break;
         }

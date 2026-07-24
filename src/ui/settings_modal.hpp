@@ -101,6 +101,7 @@ struct SettingsModalState {
   ftxui::Box tab_general_box;
   ftxui::Box tab_visual_highlight_box;
   ftxui::Box tab_workspace_box;
+  ftxui::Box tab_theme_box;
   ftxui::Box tab_format_box;
   ftxui::Box tab_status_box;
   ftxui::Box body_box;

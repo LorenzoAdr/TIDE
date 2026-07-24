@@ -1224,13 +1224,6 @@ void Application::set_workspace(const std::string &workspace_root,
 	}
 	const ClangFormatConfig format_config = load_clang_format(absolute);
 	clang_format_config_ = format_config;
-	{
-		const std::string format_path = clang_format_path(absolute);
-		std::error_code format_ec;
-		if (!format_path.empty() && !fs::is_regular_file(format_path, format_ec)) {
-			save_clang_format(absolute, format_config);
-		}
-	}
 	invalidate_docker_mount_cache();
 	rebuild_shell_launch_config();
 	apply_clangd_workspace_config(absolute, workspace_config_);

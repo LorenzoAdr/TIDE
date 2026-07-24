@@ -534,17 +534,6 @@ bool format_file_at_path(WorkspaceModel* workspace, MainLayoutState* layout_stat
     return false;
   }
 
-  if (!workspace->root.empty()) {
-    const ClangFormatConfig* active =
-        layout_state != nullptr ? layout_state->workspace_clang_format : nullptr;
-    sync_clang_format_file_for_formatting(workspace->root, active);
-  } else {
-    const std::string format_root = clang_format_root_for_file(absolute_path);
-    if (!format_root.empty()) {
-      save_clang_format(format_root, load_clang_format_from_disk(format_root));
-    }
-  }
-
   workspace->flush_active_tab();
   const std::string path = normalize_path(absolute_path);
   const int tab = workspace->find_tab(path);
@@ -628,12 +617,6 @@ bool format_selection_at_path(WorkspaceModel* workspace, MainLayoutState* layout
   int end_col = 0;
   tab_buffer.primary().normalized_range(&start_line, &start_col, &end_line, &end_col);
   const std::string text = buffer_document_text(tab_buffer);
-
-  if (!workspace->root.empty()) {
-    const ClangFormatConfig* active =
-        layout_state != nullptr ? layout_state->workspace_clang_format : nullptr;
-    sync_clang_format_file_for_formatting(workspace->root, active);
-  }
 
   FormatRangeParams params;
   params.path = path;

@@ -98,9 +98,9 @@ CLI: `tuide --core /path/to/core ./build/app` or add `--core-analyzer` for the C
 
 Requires debug info (`-g`) on the binary and shared libraries. Continue/step are disabled in post-mortem mode.
 
-### Interface colors (per workspace)
+### Theme (per workspace)
 
-Open **F10 → Configuración → Colores de interfaz** (with a workspace open) to pick a preset or tune individual colors. Settings are saved in `.tuide/config.json` under `ui_colors_preset` and `ui_colors`.
+Open **F10 → Configuración → Tema** (with a workspace open) to pick a preset or tune individual colors. Settings are saved in `.tuide/config.json` under `ui_colors_preset` and `ui_colors`.
 
 | Preset | Use case |
 |--------|----------|
