@@ -20,15 +20,17 @@ bool is_blank_line(const std::string& line) {
 }
 
 bool is_guide_boundary_column(int col, int tab_size) {
-  return tab_size > 0 && col > 0 && ((col + 1) % tab_size) == 0;
+  // Align with the parent's first column (start of each indent unit), not the
+  // last column of the previous unit.
+  return tab_size > 0 && col > 0 && (col % tab_size) == 0;
 }
 
 char guide_cell_at_column(int col, int tab_size, int guide_depth) {
   if (guide_depth <= 0 || !is_guide_boundary_column(col, tab_size)) {
     return ' ';
   }
-  const int level = col / tab_size;
-  if (level >= guide_depth) {
+  const int level = (col / tab_size) - 1;
+  if (level < 0 || level >= guide_depth) {
     return ' ';
   }
   return kGuideChar;
@@ -116,13 +118,15 @@ int IndentGuideTracker::advance(const std::string& line, int tab_size) {
     tab_size = 4;
   }
   const int indent_cols = leading_indent_columns(line, tab_size);
+  int indent_levels = 0;
   if (is_blank_line(line)) {
-    current_depth_ = prev_indent_cols_ / tab_size;
+    indent_levels = prev_indent_cols_ / tab_size;
   } else {
-    current_depth_ =
-        indent_cols > 0 ? (indent_cols + tab_size - 1) / tab_size : 0;
+    indent_levels = indent_cols > 0 ? (indent_cols + tab_size - 1) / tab_size : 0;
     prev_indent_cols_ = indent_cols;
   }
+  // Draw parent indent stops only — not the stop immediately before the text.
+  current_depth_ = indent_levels > 0 ? indent_levels - 1 : 0;
   return current_depth_;
 }
 

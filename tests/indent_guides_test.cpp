@@ -29,12 +29,32 @@ void test_body_source_byte_after_tabs() {
   assert(source_byte == 1);
 }
 
+void test_guides_show_parent_levels_only() {
+  const int tab = 4;
+  const std::vector<std::string> lines = {
+      "std::error_code ec;",
+      "\tif (fs::is_regular_file(dir / \"CMakeLists.txt\", ec)) {",
+      "\t\treturn \"CMakeLists.txt\";",
+      "\t}",
+  };
+
+  assert(indent_guide_depth_for_line(lines, 0, tab) == 0);
+  assert(indent_guide_depth_for_line(lines, 1, tab) == 0);
+  assert(indent_guide_depth_for_line(lines, 2, tab) == 1);
+  assert(indent_guide_depth_for_line(lines, 3, tab) == 0);
+
+  const auto split = split_indent_guide_prefix(lines[2], tab, 1);
+  assert(split.guide_text == "    |   ");
+  assert(split.suffix == "return \"CMakeLists.txt\";");
+}
+
 }  // namespace
 }  // namespace tuide
 
 int main() {
   tuide::test_caret_column_after_leading_tabs();
   tuide::test_body_source_byte_after_tabs();
+  tuide::test_guides_show_parent_levels_only();
   std::cout << "indent_guides_test: ok\n";
   return 0;
 }
