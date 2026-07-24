@@ -868,13 +868,22 @@ void rebuild_diagnostic_suffix_cache(EditorPanelState* panel, const EditorBuffer
   panel->diagnostic_suffix_view_token = buffer.view_token;
   panel->diagnostic_suffix_revision = revision;
   panel->diagnostic_suffix_by_line.clear();
+  const int tab_size = std::max(1, editor_indent::tab_display_width());
   for (const auto& entry : panel->diagnostics_by_line) {
     const int line = entry.first;
     if (line < 0 || line >= static_cast<int>(buffer.lines.size())) {
       continue;
     }
-    const int max_suffix =
-        code_width - static_cast<int>(buffer.lines[static_cast<std::size_t>(line)].size()) - 2;
+    // Budget against the *visible* display width (tabs expanded, horizontal scroll),
+    // not raw byte length -- otherwise a fitting suffix still overflows the raster
+    // width and FTXUI shrinks underline segments.
+    const std::string& raw = buffer.lines[static_cast<std::size_t>(line)];
+    const int display_cols =
+        byte_index_to_visual_column(raw, static_cast<int>(raw.size()), tab_size);
+    const int scroll_vis = byte_index_to_visual_column(raw, buffer.scroll_col, tab_size);
+    const int visible_cols = std::max(0, std::min(display_cols - scroll_vis, code_width));
+    // Reserve one column for an EOL caret cell that rich rendering may append.
+    const int max_suffix = code_width - visible_cols - 3;
     const std::string suffix = build_diagnostic_suffix(entry.second, max_suffix);
     if (!suffix.empty()) {
       panel->diagnostic_suffix_by_line[line] = suffix;

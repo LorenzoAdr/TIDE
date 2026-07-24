@@ -289,7 +289,10 @@ Element apply_decoration(Element element, const EditorDecoration* deco,
     case EditorDecoration::Kind::DiagnosticWarning:
       return element | color(theme::Warning()) | underlined;
     case EditorDecoration::Kind::DiagnosticError:
-      return element | color(theme::Error()) | underlined | bold;
+      // Avoid bold: some terminals draw bold glyphs wider and overwrite the previous
+      // cell (e.g. the '+' before an undeclared identifier), which looks like a missing
+      // character. Color + underline is enough to mark the error span.
+      return element | color(theme::Error()) | underlined;
     case EditorDecoration::Kind::MatchingBracket:
       return element | bgcolor(theme::BracketMatchBg()) | bold;
     case EditorDecoration::Kind::ScopeBrace:
@@ -336,10 +339,16 @@ Element wrap_with_suffix(Element line_content, const Decorator& line_bg,
   }
   // hbox sin filler: el suffix va pegado al final de la línea. filler()+reflect anidados
   // en el vbox del panel cuelgan FTXUI al destruir el DOM.
+  //
+  // Critical: when code + suffix exceeds the raster width, FTXUI's hbox shrinks
+  // non-flex children proportionally. Rich diagnostic underlines split the line into
+  // several text nodes, so that shrink eats the last character of each segment
+  // (e.g. the '+' in "(prueba1+prueba2)"). Keep the code notflex and only allow the
+  // suffix to shrink/clip.
   const Color suffix_color =
       line_diagnostics != nullptr ? suffix_color_for(*line_diagnostics) : theme::Muted();
-  return hbox({std::move(line_content),
-               text(*diagnostic_suffix) | color(suffix_color) | dim}) |
+  return hbox({std::move(line_content) | notflex,
+               text(*diagnostic_suffix) | color(suffix_color) | dim | xflex_shrink}) |
          line_bg;
 }
 

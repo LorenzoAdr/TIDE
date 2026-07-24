@@ -1,5 +1,6 @@
 #include "lsp/diagnostics.hpp"
 
+#include <algorithm>
 #include <chrono>
 
 #include "lsp/lsp_sync.hpp"
@@ -153,11 +154,23 @@ std::string build_diagnostic_suffix(const std::vector<Diagnostic>& items, int ma
     }
     suffix += items[i].message;
   }
+  // Keep the whole suffix (including UTF-8 ellipsis) within max_chars bytes so the
+  // editor row never overflows its raster width and shrinks underline segments.
   if (static_cast<int>(suffix.size()) > max_chars) {
-    suffix.resize(static_cast<std::size_t>(max_chars - 1));
-    suffix.push_back('\xE2');
-    suffix.push_back('\x80');
-    suffix.push_back('\xA6');
+    constexpr const char* kEllipsis = "\xE2\x80\xA6";  // …
+    constexpr int kEllipsisBytes = 3;
+    if (max_chars <= kEllipsisBytes) {
+      return {};
+    }
+    suffix.resize(static_cast<std::size_t>(max_chars - kEllipsisBytes));
+    while (!suffix.empty() &&
+           (static_cast<unsigned char>(suffix.back()) & 0xC0) == 0x80) {
+      suffix.pop_back();
+    }
+    if (suffix.empty()) {
+      return {};
+    }
+    suffix += kEllipsis;
   }
   return suffix;
 }
