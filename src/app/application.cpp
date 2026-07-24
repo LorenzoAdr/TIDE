@@ -3562,20 +3562,9 @@ int Application::run() {
 				open_workspace_wizard();
 				return true;
 			}
-			if (app_mode_ != AppMode::kDebug && event == Event::F5) {
-				if (!layout_state_.console_visible) {
-					layout_state_.console_visible = true;
-				} else if (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kGit) {
-					layout_state_.console_visible = false;
-					layout_state_.focus_sync_needed = true;
-					return true;
-				}
-				layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kGit;
-				GitPanelActivate(&git_service_, &git_panel_state_);
-				focus_state_.region = FocusRegion::Terminal;
-				layout_state_.text_input_focus = TextInputFocus::None;
-				layout_state_.focus_sync_needed = true;
-				UI_WAKE(&layout_state_, "app");
+			if (event == Event::F5) {
+				layout_state_.clickable.trigger_press(press_id::kStatusLaunchQuick);
+				quick_launch_last();
 				return true;
 			}
 			if (event == Event::F9) {

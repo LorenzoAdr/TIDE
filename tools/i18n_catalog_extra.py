@@ -364,7 +364,7 @@ EXTRA_CATALOG: list[tuple[str, str, str]] = [
     ("status.helix.pending", " '{0}'", " '{0}'"),
     ("status.shortcuts.welcome", "F1 archivo  Alt+F1/Shift+F1 atajos  F2 depurar  F3 workspace", "F1 file  Alt+F1/Shift+F1 shortcuts  F2 debug  F3 workspace"),
     ("status.shortcuts.debug", "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F5 continuar  F7 buscar  F8 outline  F10 step  F11 into", "F1 external  Alt+F1/Shift+F1 shortcuts  F2 debug  F3 workspace  F5 continue  F7 search  F8 outline  F10 step  F11 into"),
-    ("status.shortcuts.normal", "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 git  F7 buscar  F8 outline  F9 problemas  Ctrl+Shift+S símbolos", "F1 external  Alt+F1/Shift+F1 shortcuts  F2 debug  F3 workspace  F4 terminal  F5 git  F7 search  F8 outline  F9 problems  Ctrl+Shift+S symbols"),
+    ("status.shortcuts.normal", "F1 externo  Alt+F1/Shift+F1 atajos  F2 debug  F3 workspace  F4 terminal  F5 launch  F7 buscar  F8 outline  F9 problemas  Ctrl+Shift+S símbolos", "F1 external  Alt+F1/Shift+F1 shortcuts  F2 debug  F3 workspace  F4 terminal  F5 launch  F7 search  F8 outline  F9 problems  Ctrl+Shift+S symbols"),
     ("panel.explorer.title", "Explorador", "Explorer"),
     ("panel.explorer.no_files", "(sin archivos)", "(no files)"),
     ("context_menu.analyze_symbols", "Analizar símbolos", "Analyze symbols"),

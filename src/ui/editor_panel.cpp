@@ -270,7 +270,6 @@ struct EditorPanelState {
   uint64_t git_cache_revision = 0;
   uint64_t git_cache_view_token = 0;
   int last_render_scroll = 0;
-  int64_t last_scroll_change_ms = 0;
   IndentGuideTracker guide_tracker_cache;
   int guide_tracker_scroll = -1;
   int guide_tracker_tab_width = 0;
@@ -326,7 +325,6 @@ static bool hover_key_same_position(std::string_view fetch_key, std::string_view
          fetch_key.compare(0, prefix.size(), prefix) == 0;
 }
 
-constexpr int kSuffixScrollSettleMs = 150;
 constexpr int kEditorContentSettleMs = 120;
 constexpr int kHeavyEditorTickIntervalMs = 200;
 constexpr int kLiveCompletionLspWaitTimeoutMs = 2500;
@@ -891,10 +889,6 @@ void rebuild_diagnostic_suffix_cache(EditorPanelState* panel, const EditorBuffer
   }
 }
 
-bool scroll_suffixes_settled(const EditorPanelState& panel) {
-  return steady_now_ms() - panel.last_scroll_change_ms >= kSuffixScrollSettleMs;
-}
-
 void track_editor_scroll(EditorPanelState* panel, int scroll, MainLayoutState* layout_state,
                          bool scroll_driven_redraw) {
   if (panel == nullptr) {
@@ -905,7 +899,6 @@ void track_editor_scroll(EditorPanelState* panel, int scroll, MainLayoutState* l
     return;
   }
   panel->last_render_scroll = scroll;
-  panel->last_scroll_change_ms = steady_now_ms();
   if (layout_state != nullptr && scroll_driven_redraw) {
     UI_WAKE(layout_state, "editor.scroll");
   }
@@ -959,19 +952,10 @@ const std::unordered_map<int, std::string>* active_diagnostic_suffix_map(
   return &panel.diagnostic_suffix_by_line;
 }
 
-bool show_diagnostic_suffix_on_line(const EditorPanelState& panel, int line,
-                                    const EditorBuffer& buffer, bool suffixes_enabled,
+bool show_diagnostic_suffix_on_line(int line, bool suffixes_enabled,
                                     const std::unordered_map<int, std::string>* suffix_map) {
-  if (!suffixes_enabled || suffix_map == nullptr) {
-    return false;
-  }
-  if (suffix_map->find(line) == suffix_map->end()) {
-    return false;
-  }
-  if (scroll_suffixes_settled(panel)) {
-    return true;
-  }
-  return line == buffer.primary_line();
+  return suffixes_enabled && suffix_map != nullptr &&
+         suffix_map->find(line) != suffix_map->end();
 }
 
 const std::vector<Diagnostic>* diagnostics_for_editor_line(EditorPanelState* panel, int line) {
@@ -6896,7 +6880,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       const std::vector<Diagnostic>* suffix_color_ptr = nullptr;
       const std::vector<Diagnostic>* line_diagnostics =
           diagnostics_for_editor_line(panel_state.get(), i);
-      if (show_diagnostic_suffix_on_line(*panel_state, i, buffer, suffixes_enabled, suffix_map)) {
+      if (show_diagnostic_suffix_on_line(i, suffixes_enabled, suffix_map)) {
         const auto suffix_it = suffix_map->find(i);
         if (suffix_it != suffix_map->end()) {
           suffix_ptr = &suffix_it->second;

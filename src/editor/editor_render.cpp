@@ -59,25 +59,67 @@ int caret_visual_in_view(const std::string& line, int primary_col, int scroll_co
   return std::max(0, primary_vis - scroll_vis);
 }
 
+// guide_text cells are ASCII space (1 byte) or UTF-8 "│" (3 bytes).
+std::size_t advance_guide_cell_bytes(const std::string& guide_text, std::size_t i) {
+  if (i >= guide_text.size()) {
+    return i;
+  }
+  const unsigned char c = static_cast<unsigned char>(guide_text[i]);
+  if (c < 0x80) {
+    return i + 1;
+  }
+  if ((c & 0xF0) == 0xE0 && i + 2 < guide_text.size()) {
+    return i + 3;
+  }
+  if ((c & 0xE0) == 0xC0 && i + 1 < guide_text.size()) {
+    return i + 2;
+  }
+  if ((c & 0xF8) == 0xF0 && i + 3 < guide_text.size()) {
+    return i + 4;
+  }
+  return i + 1;
+}
+
+std::size_t guide_byte_offset_at_visual(const std::string& guide_text, int visual_col) {
+  if (visual_col <= 0) {
+    return 0;
+  }
+  int col = 0;
+  std::size_t i = 0;
+  while (i < guide_text.size() && col < visual_col) {
+    i = advance_guide_cell_bytes(guide_text, i);
+    ++col;
+  }
+  return i;
+}
+
+int guide_visual_width(const std::string& guide_text) {
+  int width = 0;
+  for (std::size_t i = 0; i < guide_text.size(); i = advance_guide_cell_bytes(guide_text, i)) {
+    ++width;
+  }
+  return width;
+}
+
 Element render_guide_with_caret(const std::string& guide_text, int caret_vis_in_guide,
                                 const Decorator& primary_cursor) {
-  if (caret_vis_in_guide < 0 || caret_vis_in_guide >= static_cast<int>(guide_text.size())) {
+  const int vis_width = guide_visual_width(guide_text);
+  if (caret_vis_in_guide < 0 || caret_vis_in_guide >= vis_width) {
     return text(guide_text) | color(theme::AccentDim());
   }
   Elements parts;
+  const std::size_t caret_byte = guide_byte_offset_at_visual(guide_text, caret_vis_in_guide);
   if (caret_vis_in_guide > 0) {
-    parts.push_back(text(guide_text.substr(0, static_cast<std::size_t>(caret_vis_in_guide))) |
-                    color(theme::AccentDim()));
+    parts.push_back(text(guide_text.substr(0, caret_byte)) | color(theme::AccentDim()));
   }
   if (cursor_blink::visible()) {
     parts.push_back(text(" ") | primary_cursor);
   } else {
     parts.push_back(text(" "));
   }
-  if (caret_vis_in_guide + 1 < static_cast<int>(guide_text.size())) {
-    parts.push_back(
-        text(guide_text.substr(static_cast<std::size_t>(caret_vis_in_guide + 1))) |
-        color(theme::AccentDim()));
+  if (caret_vis_in_guide + 1 < vis_width) {
+    const std::size_t after_byte = guide_byte_offset_at_visual(guide_text, caret_vis_in_guide + 1);
+    parts.push_back(text(guide_text.substr(after_byte)) | color(theme::AccentDim()));
   }
   return hbox(std::move(parts));
 }

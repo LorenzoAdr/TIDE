@@ -93,6 +93,7 @@ CATALOG: list[tuple[str, str, str]] = [
     ("shortcuts.general.change_workspace", "Cambiar directorio de trabajo", "Change working directory"),
     ("shortcuts.general.terminal_tab", "Pestaña Terminal (shell)", "Terminal tab (shell)"),
     ("shortcuts.general.git_page", "Página Git (status, commit, ramas)", "Git page (status, commit, branches)"),
+    ("shortcuts.general.quick_launch", "Relanzar último launch (▸ junto a Lanzar)", "Relaunch last launch (▸ next to Launch)"),
     ("shortcuts.general.search_panel", "Panel de búsqueda en workspace", "Workspace search panel"),
     ("shortcuts.general.outline_panel", "Panel outline (símbolos del archivo)", "Outline panel (file symbols)"),
     ("shortcuts.general.problems_panel", "Mostrar / ocultar panel de problemas (clangd)", "Show / hide problems panel (clangd)"),

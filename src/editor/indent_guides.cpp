@@ -1,12 +1,15 @@
 #include "editor/indent_guides.hpp"
 
 #include <algorithm>
+#include <string_view>
 
 namespace tuide {
 
 namespace {
 
-constexpr char kGuideChar = '|';
+// Box-drawing vertical line — joins across rows better than ASCII '|'.
+constexpr std::string_view kGuideGlyph = "│";
+constexpr std::string_view kGuideSpace = " ";
 
 bool is_whitespace_char(unsigned char c) { return c == ' ' || c == '\t'; }
 
@@ -25,15 +28,15 @@ bool is_guide_boundary_column(int col, int tab_size) {
   return tab_size > 0 && col > 0 && (col % tab_size) == 0;
 }
 
-char guide_cell_at_column(int col, int tab_size, int guide_depth) {
+std::string_view guide_cell_at_column(int col, int tab_size, int guide_depth) {
   if (guide_depth <= 0 || !is_guide_boundary_column(col, tab_size)) {
-    return ' ';
+    return kGuideSpace;
   }
   const int level = (col / tab_size) - 1;
   if (level < 0 || level >= guide_depth) {
-    return ' ';
+    return kGuideSpace;
   }
-  return kGuideChar;
+  return kGuideGlyph;
 }
 
 }  // namespace
@@ -171,13 +174,13 @@ IndentGuideSplit split_indent_guide_prefix(const std::string& view_line, int tab
     }
 
     if (c == ' ') {
-      split.guide_text += guide_cell_at_column(col, tab_size, guide_depth);
+      split.guide_text.append(guide_cell_at_column(col, tab_size, guide_depth));
       ++col;
       ++byte_index;
     } else {
       const int width = tab_size - (col % tab_size);
       for (int i = 0; i < width; ++i) {
-        split.guide_text += guide_cell_at_column(col, tab_size, guide_depth);
+        split.guide_text.append(guide_cell_at_column(col, tab_size, guide_depth));
         ++col;
       }
       ++byte_index;
@@ -201,7 +204,7 @@ std::string build_blank_line_guides(int tab_size, int guide_depth, int max_width
   std::string out;
   out.reserve(static_cast<std::size_t>(width));
   for (int col = 0; col < width; ++col) {
-    out += guide_cell_at_column(col, tab_size, guide_depth);
+    out.append(guide_cell_at_column(col, tab_size, guide_depth));
   }
   return out;
 }

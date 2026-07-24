@@ -10,6 +10,7 @@ Press **F1** inside tuide to open the in-app shortcuts dialog (scrollable). This
 | F2 | Debug connection wizard / stop debug session |
 | F3 | Change workspace directory |
 | F4 | Focus terminal tab (shell) |
+| F5 | Relaunch last launch (status-bar ▸ next to Launch); Continue while debugging |
 | F7 | Open workspace search panel |
 | F8 | Open outline panel |
 | Ctrl+P | Quick open (file picker) |

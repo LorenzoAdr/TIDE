@@ -45,7 +45,7 @@ struct AppSettings {
   static AppSettings load();
   bool save() const;
 
-  static std::string config_path();
+  static std::string  config_path();
 };
 
 }  // namespace tuide

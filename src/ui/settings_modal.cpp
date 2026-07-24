@@ -1008,9 +1008,11 @@ void apply_palette_selection(SettingsModalState* state) {
   const theme::ColorRgb& chosen =
       kUIColorPalette[static_cast<std::size_t>(state->ui_colors_palette_selected)];
   if (auto* field = mutable_ui_color_field(state, state->ui_colors_edit_row)) {
+    // Keep the draft built by begin_ui_color_edit / ensure_draft_ui_colors_complete.
+    // Reloading from current_ui_overrides() would discard `chosen` while a named
+    // preset is still active (g_overrides still mirrors that preset).
     *field = chosen;
     state->draft_ui_colors_preset = theme::UiColorPreset::kCustom;
-    state->draft_ui_colors = theme::current_ui_overrides();
     apply_draft_ui_colors(state);
   }
 }
@@ -1061,6 +1063,7 @@ void begin_ui_color_edit(SettingsModalState* state, int row) {
   ensure_draft_ui_colors_complete(state);
   state->ui_colors_editing = true;
   state->ui_colors_edit_row = row;
+  state->ui_colors_edit_original_preset = state->draft_ui_colors_preset;
   if (auto* field = mutable_ui_color_field(state, row)) {
     if (field->has_value()) {
       state->ui_colors_edit_original = **field;
@@ -1087,9 +1090,16 @@ void cancel_ui_color_edit(SettingsModalState* state) {
   if (state == nullptr) {
     return;
   }
-  if (state->ui_colors_editing && state->ui_colors_edit_original.has_value()) {
-    if (auto* field = mutable_ui_color_field(state, state->ui_colors_edit_row)) {
-      *field = *state->ui_colors_edit_original;
+  if (state->ui_colors_editing) {
+    if (state->ui_colors_edit_original.has_value()) {
+      if (auto* field = mutable_ui_color_field(state, state->ui_colors_edit_row)) {
+        *field = *state->ui_colors_edit_original;
+      }
+    }
+    state->draft_ui_colors_preset = state->ui_colors_edit_original_preset;
+    if (state->draft_ui_colors_preset != theme::UiColorPreset::kCustom) {
+      apply_ui_color_preset(state, state->draft_ui_colors_preset);
+    } else {
       apply_draft_ui_colors(state);
     }
   }
@@ -1569,6 +1579,7 @@ bool handle_settings_mouse(SettingsModalState* state, Event event) {
       const int palette_index = rel * kPaletteCols + col;
       if (palette_index >= 0 && palette_index < kPaletteCount) {
         state->ui_colors_palette_selected = palette_index;
+        apply_palette_selection(state);
         return true;
       }
     }

@@ -12,6 +12,9 @@ struct TerminalStyledSpan {
   std::string text;
   ftxui::Color fg = ftxui::Color::RGB(200, 230, 255);
   ftxui::Color bg = ftxui::Color::RGB(0, 0, 0);
+  // True when SGR left the background at ANSI "default" (reset / 49). Renderers
+  // should map this to the theme terminal background instead of opaque black.
+  bool bg_default = true;
 };
 
 using TerminalStyledRow = std::vector<TerminalStyledSpan>;
@@ -39,6 +42,7 @@ class RawPtyScreen {
     char ch = ' ';
     ftxui::Color fg = ftxui::Color::RGB(200, 230, 255);
     ftxui::Color bg = ftxui::Color::RGB(0, 0, 0);
+    bool bg_default = true;
   };
 
   void append_char(char ch);
@@ -66,6 +70,7 @@ class RawPtyScreen {
   bool bold_ = false;
   ftxui::Color fg_;
   ftxui::Color bg_;
+  bool bg_default_ = true;
   std::vector<TerminalStyledRow> lines_;
   std::vector<ScreenCell> current_cells_;
   mutable std::string cached_text_;

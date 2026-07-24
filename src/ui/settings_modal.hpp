@@ -84,6 +84,7 @@ struct SettingsModalState {
   int ui_colors_edit_row = -1;
   int ui_colors_palette_selected = 0;
   std::optional<theme::ColorRgb> ui_colors_edit_original;
+  theme::UiColorPreset ui_colors_edit_original_preset = theme::UiColorPreset::kDarkClassic;
   CompileCommandsSettings draft_compile_commands;
   std::vector<std::string> draft_clangd_extra_include_paths;
   ClangFormatConfig draft_clang_format;

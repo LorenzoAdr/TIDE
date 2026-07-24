@@ -41,7 +41,7 @@ std::vector<ShortcutSection> shortcut_sections() {
            {"F2", i18n::tr("shortcuts.general.debug_wizard")},
            {"F3", i18n::tr("shortcuts.general.change_workspace")},
            {"F4", i18n::tr("shortcuts.general.terminal_tab")},
-           {"F5", i18n::tr("shortcuts.general.git_page")},
+           {"F5", i18n::tr("shortcuts.general.quick_launch")},
            {"F7", i18n::tr("shortcuts.general.search_panel")},
            {"F8", i18n::tr("shortcuts.general.outline_panel")},
            {"F9", i18n::tr("shortcuts.general.problems_panel")},
@@ -153,7 +153,6 @@ std::vector<ShortcutSection> shortcut_sections() {
        }},
       {i18n::tr("shortcuts.section.git"),
        {
-           {"F5", i18n::tr("shortcuts.git.toggle_page")},
            {"1 / 2 / 3", i18n::tr("shortcuts.git.tabs")},
            {"s / u", i18n::tr("shortcuts.git.stage_unstage")},
            {"p / P", i18n::tr("shortcuts.git.push_pull")},

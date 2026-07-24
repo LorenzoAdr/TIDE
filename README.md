@@ -26,7 +26,7 @@ Prefer a self-contained binary? Build one that embeds the LSP and DAP packages y
 
 Example: a C++ developer can ship a single binary with **clangd**, **bash-language-server**, **TexLab**, **neocmakelsp**, and **lua-language-server** already inside — and optionally Core Analyzer for crash forensics.
 
-Launch with no arguments to open a workspace and edit. Press **F2** to start debugging or load a core; **F4** focuses the terminal; **F5** opens Git.
+Launch with no arguments to open a workspace and edit. Press **F2** to start debugging or load a core; **F4** focuses the terminal; **F5** relaunches the last launch (or Continue while debugging).
 
 ## Languages
 

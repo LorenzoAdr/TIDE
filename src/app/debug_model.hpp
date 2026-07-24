@@ -16,8 +16,9 @@ struct CoreAnalyzerInstance {
   std::size_t size = 0;
   std::string type_name;
   std::string reference_summary;
-};
-
+}; 
+   
+   
 struct WatchEntry {
   std::string expression;
   std::string value;

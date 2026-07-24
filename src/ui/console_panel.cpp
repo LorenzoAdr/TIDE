@@ -1124,7 +1124,12 @@ Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool sh
           cell = cell | bold;
         }
       } else {
-        cell = cell | color(span.fg) | bgcolor(span.bg);
+        cell = cell | color(span.fg);
+        if (span.bg_default) {
+          cell = cell | bgcolor(theme::CodeBg());
+        } else {
+          cell = cell | bgcolor(span.bg);
+        }
       }
       parts.push_back(std::move(cell));
       ++col;

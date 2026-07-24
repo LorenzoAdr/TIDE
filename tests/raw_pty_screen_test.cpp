@@ -70,6 +70,21 @@ void test_256_background() {
   const auto rows = screen.styled_rows();
   expect(!rows.empty() && !rows.back().empty(), "bg rows");
   expect(rows.back()[0].bg == ftxui::Color::RGB(255, 0, 0), "256 bg red");
+  expect(!rows.back()[0].bg_default, "256 bg not default");
+}
+
+void test_default_background_flag() {
+  tuide::RawPtyScreen screen(4, 40);
+  const std::string input = "\033[48;5;196mx\033[49my\033[0mz";
+  screen.feed(input.data(), input.size());
+  const auto rows = screen.styled_rows();
+  expect(!rows.empty() && rows.back().size() >= 2, "default bg spans");
+  expect(rows.back()[0].text == "x" && !rows.back()[0].bg_default, "explicit red bg");
+  // SGR 49 and SGR 0 both restore default bg with the same fg, so "y"/"z" merge.
+  expect(rows.back()[1].text.find('y') != std::string::npos && rows.back()[1].bg_default,
+         "sgr 49 default bg");
+  expect(rows.back()[1].text.find('z') != std::string::npos && rows.back()[1].bg_default,
+         "sgr 0 default bg");
 }
 
 }  // namespace
@@ -79,6 +94,7 @@ int main() {
   test_256_color_prompt();
   test_truecolor();
   test_256_background();
+  test_default_background_flag();
   std::cout << "raw_pty_screen_test: ok\n";
   return 0;
 }

@@ -98,6 +98,7 @@ void RawPtyScreen::reset_sgr() {
   bold_ = false;
   fg_ = kDefaultFg;
   bg_ = kDefaultBg;
+  bg_default_ = true;
 }
 
 void RawPtyScreen::reset(int rows, int cols) {
@@ -162,10 +163,13 @@ void RawPtyScreen::apply_sgr(const std::string& params) {
       fg_ = kDefaultFg;
     } else if (code >= 40 && code <= 47) {
       bg_ = ansi_base_color(code - 40, bold_);
+      bg_default_ = false;
     } else if (code >= 100 && code <= 107) {
       bg_ = ansi_base_color(code - 100, true);
+      bg_default_ = false;
     } else if (code == 49) {
       bg_ = kDefaultBg;
+      bg_default_ = true;
     } else if (code == 38 || code == 48) {
       // Extended colours: 38/48 ; 5 ; n  or  38/48 ; 2 ; r ; g ; b
       const bool is_fg = (code == 38);
@@ -179,6 +183,7 @@ void RawPtyScreen::apply_sgr(const std::string& params) {
           fg_ = c;
         } else {
           bg_ = c;
+          bg_default_ = false;
         }
       } else if (mode == 2 && i + 3 < codes.size()) {
         const ftxui::Color c = ftxui::Color::RGB(
@@ -188,6 +193,7 @@ void RawPtyScreen::apply_sgr(const std::string& params) {
           fg_ = c;
         } else {
           bg_ = c;
+          bg_default_ = false;
         }
       }
     }
@@ -277,6 +283,7 @@ void RawPtyScreen::append_char(char ch) {
   cell.ch = ch;
   cell.fg = fg_;
   cell.bg = bg_;
+  cell.bg_default = bg_default_;
   ++cursor_col_;
   cache_valid_ = false;
 }
@@ -304,16 +311,21 @@ TerminalStyledRow RawPtyScreen::spans_from_cells(const std::vector<ScreenCell>& 
   TerminalStyledSpan current;
   current.fg = cells[0].fg;
   current.bg = cells[0].bg;
+  current.bg_default = cells[0].bg_default;
   for (int col = 0; col < end; ++col) {
     const ScreenCell& cell = cells[static_cast<std::size_t>(col)];
-    if (!current.text.empty() && (cell.fg != current.fg || cell.bg != current.bg)) {
+    if (!current.text.empty() &&
+        (cell.fg != current.fg || cell.bg != current.bg ||
+         cell.bg_default != current.bg_default)) {
       spans.push_back(current);
       current = TerminalStyledSpan{};
       current.fg = cell.fg;
       current.bg = cell.bg;
+      current.bg_default = cell.bg_default;
     } else if (current.text.empty()) {
       current.fg = cell.fg;
       current.bg = cell.bg;
+      current.bg_default = cell.bg_default;
     }
     current.text.push_back(cell.ch);
   }

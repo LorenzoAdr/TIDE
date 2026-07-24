@@ -14,7 +14,7 @@ namespace {
 constexpr const char* kSessionFile = "session.json";
 
 }  // namespace
-
+ 
 std::string WorkspaceSession::session_path(const std::string& workspace_root) {
   if (workspace_root.empty()) {
     return {};
