@@ -100,6 +100,7 @@ add_executable(tuide
   src/app/workspace_detect.cpp
   src/app/workspace_config.cpp
   src/app/workspace_session.cpp
+  src/app/recent_projects.cpp
   src/app/debug_model.cpp
   src/app/workspace_model.cpp
   src/app/editor_tabs.cpp
@@ -542,6 +543,16 @@ add_executable(workspace_detect_test
 )
 target_include_directories(workspace_detect_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+add_executable(recent_projects_test
+  tests/recent_projects_test.cpp
+  src/app/recent_projects.cpp
+  src/util/path_normalize.cpp
+)
+target_include_directories(recent_projects_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${cppdap_SOURCE_DIR}/third_party/json/include
+)
+
 add_executable(fuzzy_match_test
   tests/fuzzy_match_test.cpp
   src/util/fuzzy_match.cpp
@@ -710,6 +721,7 @@ set(TUIDE_TEST_TARGETS
   indent_guides_test
   build_environment_test
   workspace_detect_test
+  recent_projects_test
   fuzzy_match_test
   workspace_indexer_test
   csv_index_test

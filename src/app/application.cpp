@@ -16,6 +16,7 @@
 
 #include "app/workspace_config.hpp"
 #include "app/workspace_session.hpp"
+#include "app/recent_projects.hpp"
 #include "backend/idebug_backend.hpp"
 #include "build/build_environment.hpp"
 #include "build/build_environment_service.hpp"
@@ -391,6 +392,9 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 		layout_state_.terminal_start_requested = false;
 		workspace_.status_message = i18n::tr("workspace.welcome");
 		workspace_.clear_tabs();
+		welcome_screen_state_.recent_projects = RecentProjects::load().existing_paths();
+		welcome_screen_state_.selected_recent =
+		    welcome_screen_state_.recent_projects.empty() ? -1 : 0;
 	} else {
 		std::string anchor = config_.workspace_root;
 		if (!config_.initial_file.empty()) {
@@ -1274,6 +1278,7 @@ void Application::set_workspace(const std::string &workspace_root,
 	notify_file_tree_reveal();
 	sync_symbol_workspace_indexer();
 	git_service_.open(absolute);
+	RecentProjects::load().remember(absolute);
 }
 
 WorkspaceDetectResult Application::resolve_workspace_for_anchor(const std::string &anchor) const {
@@ -2585,7 +2590,8 @@ int Application::run() {
 		    symbol_provider_, on_command, &layout_state_, on_stop_debug, &shell_session_,
 		    &app_session_, &indexer_, &symbol_indexer_, shell_launch_config, &git_service_,
 		    &git_panel_state_, &welcome_screen_state_, [this] { open_external_file_wizard(); },
-		    [this] { open_connection_wizard(); }, [this] { open_workspace_wizard(); });
+		    [this] { open_connection_wizard(); }, [this] { open_workspace_wizard(); },
+		    [this](const std::string& path) { on_workspace_complete(path, nullptr); });
 	};
 
 	auto layout = build_ui();
