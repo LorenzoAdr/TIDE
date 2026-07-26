@@ -13,6 +13,8 @@ std::string source_label(typename Location::Source source) {
   switch (source) {
     case Location::Source::Env:
       return "env";
+    case Location::Source::Toolpack:
+      return "toolpack";
     case Location::Source::SystemPath:
       return "PATH";
     case Location::Source::Bundled:

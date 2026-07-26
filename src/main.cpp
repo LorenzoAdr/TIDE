@@ -10,6 +10,7 @@
 
 #include "i18n/locale.hpp"
 #include "i18n/tr.hpp"
+#include "toolpacks/cli.hpp"
 #include "util/core_analyzer_support.hpp"
 #include "util/crash_handler.hpp"
 #include "util/lsp_missing_prompt.hpp"
@@ -113,6 +114,10 @@ int main(int argc, char **argv) {
 #endif
 
   tuide::i18n::set_locale(tuide::i18n::UiLocale::kAuto);
+
+  if (argc >= 2 && std::string(argv[1]) == "toolpacks") {
+    return tuide::toolpacks::run_cli(argc - 1, argv + 1);
+  }
 
   tuide::AppConfig config;
 

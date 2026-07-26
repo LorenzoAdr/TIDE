@@ -1,5 +1,7 @@
 #include "util/bundled_tools.hpp"
 
+#include "toolpacks/store.hpp"
+
 #include <array>
 #include <atomic>
 #include <cctype>
@@ -954,6 +956,12 @@ bool should_force_bundled_gdb() {
 std::optional<ClangdLocation> resolve_clangd() {
   if (const auto env_path = clangd_from_env(); env_path.has_value()) {
     return ClangdLocation{*env_path, {}, ClangdLocation::Source::Env};
+  }
+
+  // Toolpacks win over compile-time bundles and PATH (pilot: clangd).
+  if (const auto tp = toolpacks::resolve_clangd_toolpack(); tp.has_value()) {
+    return ClangdLocation{tp->binary_path, tp->resource_dir,
+                          ClangdLocation::Source::Toolpack};
   }
 
 #ifdef TUIDE_HAS_BUNDLED_CLANGD
