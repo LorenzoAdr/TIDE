@@ -3024,14 +3024,14 @@ int Application::run() {
 				return true;
 			}
 
-			if (event_is_f1(event) || event_is_alt_e(event)) {
+			if (event_is_f1(event) || event_is_ctrl_alt_e(event)) {
 				if (event_is_kitty_key_release(event)) {
 					return false;
 				}
 				if (external_file_wizard_state_.open) {
 					external_file_wizard_state_.open = false;
 				} else if (!any_modal_open()) {
-					open_external_file_wizard(event_is_alt_e(event));
+					open_external_file_wizard(event_is_ctrl_alt_e(event));
 				}
 				UI_WAKE(&layout_state_, "app");
 				return true;

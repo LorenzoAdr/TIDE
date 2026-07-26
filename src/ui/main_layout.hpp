@@ -254,6 +254,7 @@ struct MainLayoutState {
   std::function<bool(ftxui::Event&)> welcome_mouse_handler;
   bool editor_completion_open = false;
   bool editor_ctrl_modifier_held = false;
+  bool editor_alt_modifier_held = false;
   std::function<void()> terminal_tick_callback;
   std::function<void()> terminal_follow_input_callback;
   std::function<int()> terminal_width;

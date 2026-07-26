@@ -1,5 +1,6 @@
 #include "ui/key_bindings.hpp"
 
+#include <optional>
 #include <string>
 
 namespace tuide {
@@ -250,13 +251,12 @@ bool event_is_ctrl_shift_h(const ftxui::Event& event) {
 
 bool event_is_open_search_panel(const ftxui::Event& event) {
   return event == ftxui::Event::F7 || event_is_ctrl_h_csi(event) ||
-         event_is_ctrl_alt_h(event) || event_is_ctrl_shift_h(event) ||
-         event_is_alt_h(event);
+         event_is_ctrl_alt_h(event) || event_is_ctrl_shift_h(event);
 }
 
 bool event_is_open_outline_panel(const ftxui::Event& event) {
   return event == ftxui::Event::F8 || event_is_ctrl_alt_o(event) ||
-         event_is_ctrl_shift_o(event) || event_is_alt_o(event);
+         event_is_ctrl_shift_o(event);
 }
 
 bool event_is_open_binary_symbols_panel(const ftxui::Event& event) {
@@ -435,6 +435,10 @@ bool input_is_ctrl_modifier_key(const std::string& input) {
   return input.find("57442") != std::string::npos || input.find("57443") != std::string::npos;
 }
 
+bool input_is_alt_modifier_key(const std::string& input) {
+  return input.find("57440") != std::string::npos || input.find("57441") != std::string::npos;
+}
+
 bool input_is_kitty_release_event(const std::string& input) {
   return input.find(":3u") != std::string::npos;
 }
@@ -476,6 +480,22 @@ bool event_is_ctrl_key_release(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[57443;2u");
 }
 
+bool event_is_alt_key_press(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[57440u") ||
+         event == ftxui::Event::Special("\x1B[57440;1u") ||
+         event == ftxui::Event::Special("\x1B[57441u") ||
+         event == ftxui::Event::Special("\x1B[57441;1u");
+}
+
+bool event_is_alt_key_release(const ftxui::Event& event) {
+  const std::string& input = event.input();
+  if (input_is_alt_modifier_key(input) && input_is_kitty_release_event(input)) {
+    return true;
+  }
+  return event == ftxui::Event::Special("\x1B[57440;2u") ||
+         event == ftxui::Event::Special("\x1B[57441;2u");
+}
+
 bool event_is_kitty_key_release(const ftxui::Event& event) {
   return input_is_kitty_release_event(event.input());
 }
@@ -509,7 +529,7 @@ bool event_is_alt_p(const ftxui::Event& event) {
 }
 
 bool event_is_quick_open(const ftxui::Event& event) {
-  return event_is_ctrl_p(event) || event_is_alt_p(event);
+  return event_is_ctrl_p(event);
 }
 
 bool event_is_alt_e(const ftxui::Event& event) {
@@ -647,21 +667,48 @@ bool event_is_ctrl_period(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[46;5;1~");
 }
 
-bool event_is_alt_period(const ftxui::Event& event) {
-  return event == ftxui::Event::Special("\x1B.") ||
-         event == ftxui::Event::Special("\x1B[46;3u") ||
-         event == ftxui::Event::Special("\x1B[27;3;46~");
+bool event_is_ctrl_alt_period(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return csi_key_any_modifier(event, mods, 1, 46) ||
+         event == ftxui::Event::Special("\x1B[46;7u") ||
+         event == ftxui::Event::Special("\x1B[27;7;46~");
 }
 
-bool event_is_alt_slash(const ftxui::Event& event) {
-  return event == ftxui::Event::Special("\x1B/") ||
-         event == ftxui::Event::Special("\x1B[47;3u") ||
-         event == ftxui::Event::Special("\x1B[47;5u");
+bool event_is_ctrl_alt_slash(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return csi_key_any_modifier(event, mods, 1, 47) ||
+         event == ftxui::Event::Special("\x1B[47;7u") ||
+         event == ftxui::Event::Special("\x1B[27;7;47~");
+}
+
+bool event_is_ctrl_alt_e(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return event == ftxui::Event::CtrlAltE ||
+         csi_key_any_modifier(event, mods, 1, 69) ||
+         csi_key_any_modifier(event, mods, 1, 101) ||
+         event == ftxui::Event::Special("\x1B[27;7;69~") ||
+         event == ftxui::Event::Special("\x1B[27;7;101~") ||
+         event == ftxui::Event::Special("\x1B[69;7u") ||
+         event == ftxui::Event::Special("\x1B[101;7u");
+}
+
+bool event_is_cursor_history_back(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return csi_key_any_modifier(event, mods, 1, 91) ||
+         event == ftxui::Event::Special("\x1B[91;7u") ||
+         event == ftxui::Event::Special("\x1B[27;7;91~");
+}
+
+bool event_is_cursor_history_forward(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return csi_key_any_modifier(event, mods, 1, 93) ||
+         event == ftxui::Event::Special("\x1B[93;7u") ||
+         event == ftxui::Event::Special("\x1B[27;7;93~");
 }
 
 bool event_is_completion(const ftxui::Event& event) {
   return event_is_ctrl_space(event) || event_is_ctrl_period(event) ||
-         event_is_alt_period(event) || event_is_alt_slash(event);
+         event_is_ctrl_alt_period(event) || event_is_ctrl_alt_slash(event);
 }
 
 bool event_is_completion_trigger(const ftxui::Event& event, bool ctrl_modifier_held) {
@@ -751,7 +798,7 @@ bool event_is_tuide_app_shortcut(const ftxui::Event& event) {
   if (event_is_tuide_global_shortcut(event)) {
     return true;
   }
-  if (event_is_f1(event) || event_is_alt_e(event) || event_is_open_shortcuts_modal(event)) {
+  if (event_is_f1(event) || event_is_ctrl_alt_e(event) || event_is_open_shortcuts_modal(event)) {
     return true;
   }
   if (event_is_open_search_panel(event) || event_is_open_outline_panel(event) ||
@@ -788,7 +835,155 @@ bool editor_priority_key(const ftxui::Event& event) {
          event_is_ctrl_alt_l(event) || event_is_ctrl_shift_l(event) ||
          event_is_completion(event) || event_is_go_to_definition(event) ||
          event_is_go_to_declaration(event) ||
-         event_is_alt_left(event) || event_is_alt_right(event);
+         event_is_cursor_history_back(event) || event_is_cursor_history_forward(event);
+}
+
+bool event_has_alt_modifier(const ftxui::Event& event) {
+  if (event_is_alt_key_press(event) || event_is_alt_key_release(event)) {
+    return true;
+  }
+  if (event == ftxui::Event::AltH || event == ftxui::Event::AltO || event == ftxui::Event::AltP ||
+      event == ftxui::Event::AltE || event == ftxui::Event::AltS) {
+    return true;
+  }
+  if (event_is_alt_left(event) || event_is_alt_right(event)) {
+    return true;
+  }
+  if (event == ftxui::Event::Special("\x1B[1;3A") || event == ftxui::Event::Special("\x1B[1;3B")) {
+    return true;
+  }
+  const std::string& input = event.input();
+  if (input.size() == 2 && input[0] == '\x1B' && static_cast<unsigned char>(input[1]) >= 32) {
+    return true;
+  }
+  if (input.find(";3u") != std::string::npos || input.find(";3~") != std::string::npos ||
+      input.find("[1;3") != std::string::npos || input.find("[27;3;") != std::string::npos) {
+    return !event_has_ctrl_modifier(event);
+  }
+  return false;
+}
+
+bool event_is_helix_overlay_exempt(const ftxui::Event& event) {
+  return event_is_open_shortcuts_modal(event);
+}
+
+namespace {
+
+std::optional<ftxui::Event> kitty_alt_key_event(int keycode) {
+  switch (keycode) {
+    case 13:
+      return ftxui::Event::Return;
+    case 27:
+      return ftxui::Event::Escape;
+    case 32:
+      return ftxui::Event::Character(' ');
+    case 8:
+      return ftxui::Event::Backspace;
+    case 9:
+      return ftxui::Event::Tab;
+    case 127:
+      return ftxui::Event::Delete;
+    case 57399:
+      return ftxui::Event::Home;
+    case 57400:
+      return ftxui::Event::End;
+    case 57421:
+      return ftxui::Event::PageUp;
+    case 57422:
+      return ftxui::Event::PageDown;
+    case 57416:
+      return ftxui::Event::ArrowUp;
+    case 57414:
+      return ftxui::Event::ArrowDown;
+    case 57415:
+      return ftxui::Event::ArrowLeft;
+    case 57417:
+      return ftxui::Event::ArrowRight;
+    default:
+      break;
+  }
+  if (keycode >= 97 && keycode <= 122) {
+    return ftxui::Event::Character(static_cast<char>(keycode));
+  }
+  if (keycode >= 65 && keycode <= 90) {
+    return ftxui::Event::Character(static_cast<char>(keycode));
+  }
+  if (keycode >= 48 && keycode <= 57) {
+    return ftxui::Event::Character(static_cast<char>(keycode));
+  }
+  if (keycode >= 33 && keycode <= 126) {
+    return ftxui::Event::Character(static_cast<char>(keycode));
+  }
+  return std::nullopt;
+}
+
+bool parse_kitty_alt_only_keycode(const std::string& input, int* out_keycode) {
+  if (input.size() < 5 || input[0] != '\x1B' || input[1] != '[') {
+    return false;
+  }
+  const std::size_t semi = input.find(';');
+  if (semi == std::string::npos || input.back() != 'u') {
+    return false;
+  }
+  const std::string modifier = input.substr(semi + 1, input.size() - semi - 2);
+  if (modifier != "3") {
+    return false;
+  }
+  try {
+    *out_keycode = std::stoi(input.substr(2, semi - 2));
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+}  // namespace
+
+std::optional<ftxui::Event> strip_alt_modifier_for_helix(const ftxui::Event& event) {
+  if (event_is_alt_key_press(event) || event_is_alt_key_release(event) ||
+      event_is_helix_overlay_exempt(event) || event_has_ctrl_modifier(event)) {
+    return std::nullopt;
+  }
+
+  if (event == ftxui::Event::AltH) {
+    return ftxui::Event::Character('h');
+  }
+  if (event == ftxui::Event::AltO) {
+    return ftxui::Event::Character('o');
+  }
+  if (event == ftxui::Event::AltP) {
+    return ftxui::Event::Character('p');
+  }
+  if (event == ftxui::Event::AltE) {
+    return ftxui::Event::Character('e');
+  }
+  if (event == ftxui::Event::AltS) {
+    return ftxui::Event::Character('s');
+  }
+  if (event_is_alt_left(event)) {
+    return ftxui::Event::ArrowLeft;
+  }
+  if (event_is_alt_right(event)) {
+    return ftxui::Event::ArrowRight;
+  }
+  if (event == ftxui::Event::Special("\x1B[1;3A")) {
+    return ftxui::Event::ArrowUp;
+  }
+  if (event == ftxui::Event::Special("\x1B[1;3B")) {
+    return ftxui::Event::ArrowDown;
+  }
+
+  const std::string& input = event.input();
+  if (input.size() == 2 && input[0] == '\x1B' && static_cast<unsigned char>(input[1]) >= 32) {
+    return ftxui::Event::Character(input[1]);
+  }
+
+  int keycode = 0;
+  if (parse_kitty_alt_only_keycode(input, &keycode)) {
+    return kitty_alt_key_event(keycode);
+  }
+
+  return std::nullopt;
 }
 
 }  // namespace tuide

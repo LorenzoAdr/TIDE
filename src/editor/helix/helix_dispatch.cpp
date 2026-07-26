@@ -1033,7 +1033,8 @@ bool dispatch_helix_keys(const HelixDispatchContext& ctx, const ftxui::Event& ev
     return false;
   }
 
-  if (event_is_tuide_app_shortcut(event) || event_is_ctrl_key_release(event)) {
+  if (event_is_tuide_app_shortcut(event) || event_is_ctrl_key_release(event) ||
+      event_is_alt_key_release(event)) {
     return false;
   }
 

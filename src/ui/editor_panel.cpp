@@ -5158,6 +5158,24 @@ bool helix_editor_active(MainLayoutState* layout_state, bool tabular_view, bool 
          layout_state->app_settings->helix_mode_enabled && !tabular_view && !virtual_view;
 }
 
+bool helix_overlay_available(MainLayoutState* layout_state, bool tabular_view, bool virtual_view,
+                             bool read_only) {
+  return layout_state != nullptr && layout_state->app_settings != nullptr &&
+         !layout_state->app_settings->helix_mode_enabled && !tabular_view && !virtual_view &&
+         !read_only;
+}
+
+void reset_helix_overlay_state(EditorPanelState* panel, MainLayoutState* layout_state) {
+  if (panel == nullptr) {
+    return;
+  }
+  reset_helix_editor_state(&panel->helix);
+  if (layout_state != nullptr) {
+    layout_state->editor_alt_modifier_held = false;
+    sync_helix_layout_status(layout_state, &panel->helix, false);
+  }
+}
+
 bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
                         EditorFindState* find, GotoLineState* goto_state,
                         CompletionState* completion, EditorPanelState* panel,
@@ -5185,20 +5203,53 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     cancel_live_lsp_on_cursor_move(completion, symbols, layout_state, panel);
   };
 
-  if (event_is_alt_left(event)) {
+  if (event_is_cursor_history_back(event)) {
     if (workspace->navigate_cursor_back(visible_lines)) {
       cancel_completion_on_cursor_move();
       return true;
     }
     return false;
   }
-  if (event_is_alt_right(event)) {
+  if (event_is_cursor_history_forward(event)) {
     if (workspace->navigate_cursor_forward(visible_lines)) {
       cancel_completion_on_cursor_move();
       return true;
     }
     return false;
   }
+
+  const bool helix_persistent =
+      helix_editor_active(layout_state, tabular_view, large_virtual_view) && !read_only;
+  const bool helix_overlay_capable =
+      helix_overlay_available(layout_state, tabular_view, large_virtual_view, read_only);
+  bool helix_overlay = false;
+  Event helix_dispatch_event = event;
+
+  if (helix_overlay_capable && layout_state != nullptr && panel != nullptr) {
+    if (event_is_alt_key_release(event)) {
+      layout_state->editor_alt_modifier_held = false;
+      if (!layout_state->editor_helix_prefix_pending) {
+        reset_helix_overlay_state(panel, layout_state);
+      }
+      return true;
+    }
+    if (event_is_alt_key_press(event)) {
+      return true;
+    }
+
+    if (layout_state->editor_alt_modifier_held && !event_has_ctrl_modifier(event) &&
+        !event_is_tuide_app_shortcut(event) && !event_is_alt_key_press(event)) {
+      helix_overlay = true;
+    } else if (const auto stripped = strip_alt_modifier_for_helix(event)) {
+      helix_dispatch_event = *stripped;
+      helix_overlay = true;
+      layout_state->editor_alt_modifier_held = true;
+    } else if (layout_state->editor_helix_prefix_pending) {
+      helix_overlay = true;
+    }
+  }
+
+  const bool helix_on = helix_persistent || helix_overlay;
 
   if (completion != nullptr && completion->open &&
       event_is_completion_trigger(event, layout_state != nullptr &&
@@ -5224,8 +5275,6 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return handle_goto_line_keys(goto_state, layout_state, workspace, buffer, event,
                                  visible_lines);
   }
-
-  const bool helix_on = helix_editor_active(layout_state, tabular_view, large_virtual_view) && !read_only;
 
   if (read_only && (event_is_ctrl_x(event) || event_is_ctrl_v(event) || event_is_plain_tab(event) ||
                     event == Event::TabReverse || event == Event::CtrlS ||
@@ -5305,7 +5354,8 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     HelixDispatchContext hctx =
         build_helix_dispatch_context(workspace, panel, find, goto_state, focus, layout_state,
                                      symbols, visible_lines);
-    if (dispatch_helix_keys(hctx, event)) {
+    const Event& dispatch_event = helix_overlay ? helix_dispatch_event : event;
+    if (dispatch_helix_keys(hctx, dispatch_event)) {
       sync_helix_layout_status(layout_state, &panel->helix, true);
       return true;
     }
@@ -5478,13 +5528,15 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (helix_on) {
-    if (event_is_tuide_app_shortcut(event) || event_is_ctrl_key_release(event)) {
+    if (event_is_tuide_app_shortcut(event) || event_is_ctrl_key_release(event) ||
+        event_is_alt_key_release(event)) {
       return false;
     }
     HelixDispatchContext hctx =
         build_helix_dispatch_context(workspace, panel, find, goto_state, focus, layout_state,
                                      symbols, visible_lines);
-    if (dispatch_helix_keys(hctx, event)) {
+    const Event& dispatch_event = helix_overlay ? helix_dispatch_event : event;
+    if (dispatch_helix_keys(hctx, dispatch_event)) {
       sync_helix_layout_status(layout_state, &panel->helix, true);
       if (panel->helix.mode == HelixMode::kInsert && completion != nullptr && completion->open &&
           (event == Event::Backspace || event == Event::Delete)) {
@@ -5496,7 +5548,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     if (panel->helix.mode != HelixMode::kInsert) {
       sync_helix_layout_status(layout_state, &panel->helix, true);
       if (event_has_ctrl_modifier(event) || event_is_tuide_app_shortcut(event) ||
-          event_is_ctrl_key_release(event)) {
+          event_is_ctrl_key_release(event) || event_is_alt_key_release(event)) {
         return false;
       }
       return true;
@@ -5952,8 +6004,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     if (tab_bar_state->overflow_open) {
       return make_tabs_overflow_modal(workspace, tab_bar_state.get());
     }
-    if (layout_state != nullptr && layout_state->app_settings != nullptr &&
-        layout_state->app_settings->helix_mode_enabled) {
+    if (layout_state != nullptr && layout_state->helix_status.active) {
       if (panel_state->helix.help_open) {
         return make_helix_help_overlay(panel_state->helix);
       }
@@ -7297,6 +7348,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       layout_state->editor_ctrl_modifier_held = true;
     } else if (event_is_ctrl_key_release(event)) {
       layout_state->editor_ctrl_modifier_held = false;
+    }
+    if (event_is_alt_key_press(event)) {
+      layout_state->editor_alt_modifier_held = true;
+    } else if (event_is_alt_key_release(event)) {
+      layout_state->editor_alt_modifier_held = false;
     }
   };
 
