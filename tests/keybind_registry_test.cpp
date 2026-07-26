@@ -9,6 +9,7 @@
 #include "ui/key_bindings.hpp"
 #include "ui/keybind/key_action.hpp"
 #include "ui/keybind/key_binding_registry.hpp"
+#include "ui/keybind/key_chord_util.hpp"
 
 namespace {
 
@@ -75,16 +76,43 @@ int main() {
   expect(found_alt_left, "reports alt+left Editor/Global dual use");
   expect(found_f5, "reports f5 QuickLaunch/DebugContinue dual use");
 
-  nlohmann::json exported = registry.export_overrides();
-  expect(exported.contains("bindings"), "export_overrides has bindings object");
-  std::string err;
+  // Phase 2: record-style override round-trip via inputs.
   KeyBindingRegistry mutable_registry = KeyBindingRegistry::with_defaults();
-  expect(mutable_registry.import_overrides(exported, &err), "import empty overrides succeeds");
-  expect(err.empty(), "import empty overrides has no error");
+  const auto recorded = make_chord_from_inputs("Ctrl+Shift+P", {"\x1B[112;6u"});
+  mutable_registry.set_override(KeyAction::QuickOpen, {recorded});
+  expect(mutable_registry.matches(KeyAction::QuickOpen, ftxui::Event::Special("\x1B[112;6u")),
+         "override matches recorded input");
+  expect(!mutable_registry.matches(KeyAction::QuickOpen, ftxui::Event::CtrlP),
+         "override replaces default Ctrl+P");
+
+  nlohmann::json exported = mutable_registry.export_overrides();
+  expect(exported.contains("bindings"), "export_overrides has bindings object");
+  expect(exported["bindings"].contains("quick_open"), "exports quick_open override");
+  expect(exported["bindings"]["quick_open"].is_array() &&
+             exported["bindings"]["quick_open"][0].contains("inputs"),
+         "export uses {canonical,inputs} objects");
+
+  std::string err;
+  KeyBindingRegistry roundtrip = KeyBindingRegistry::with_defaults();
+  expect(roundtrip.import_overrides(exported, &err), "import recorded overrides succeeds");
+  expect(err.empty(), "import recorded overrides has no error");
+  expect(roundtrip.matches(KeyAction::QuickOpen, ftxui::Event::Special("\x1B[112;6u")),
+         "imported override still matches");
+
+  // Canonical string form still works for known keys.
+  nlohmann::json canonical_doc = nlohmann::json::object();
+  canonical_doc["bindings"] = nlohmann::json::object(
+      {{"go_to_symbol", nlohmann::json::array({"ctrl+o"})}});
+  KeyBindingRegistry from_canonical = KeyBindingRegistry::with_defaults();
+  expect(from_canonical.import_overrides(canonical_doc, &err),
+         "import canonical string succeeds");
+  expect(from_canonical.matches(KeyAction::GoToSymbol, ftxui::Event::CtrlO),
+         "canonical ctrl+o matches");
 
   nlohmann::json bad = nlohmann::json::object();
   bad["bindings"] = nlohmann::json::object({{"not_a_real_action", nlohmann::json::array({"x"})}});
-  expect(!mutable_registry.import_overrides(bad, &err), "unknown action id rejected");
+  expect(!KeyBindingRegistry::with_defaults().import_overrides(bad, &err),
+         "unknown action id rejected");
   expect(!err.empty(), "unknown action reports error");
 
   if (failures != 0) {

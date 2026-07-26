@@ -45,6 +45,7 @@
 #include "ui/glyphs.hpp"
 #include "ui/hover_effects.hpp"
 #include "ui/key_bindings.hpp"
+#include "ui/keybind/bindings_store.hpp"
 #include "ui/keybind/key_binding_registry.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/open_file_confirm.hpp"
@@ -345,6 +346,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 		}
 	});
 	app_settings_ = AppSettings::load();
+	load_key_bindings_file(&keybind_registry());
 	i18n::set_locale(app_settings_.ui_locale);
 	set_animations_enabled(app_settings_.animations_enabled);
 	workspace_.status_message = i18n::tr("workspace.select");

@@ -156,6 +156,8 @@ add_executable(tuide
   src/ui/key_bindings.cpp
   src/ui/keybind/key_action.cpp
   src/ui/keybind/key_binding_registry.cpp
+  src/ui/keybind/key_chord_util.cpp
+  src/ui/keybind/bindings_store.cpp
   src/ui/terminal_keyboard.cpp
   src/ui/terminal_display.cpp
   src/ui/focusable_component.cpp
@@ -555,6 +557,8 @@ add_executable(keybind_registry_test
   src/ui/key_bindings.cpp
   src/ui/keybind/key_action.cpp
   src/ui/keybind/key_binding_registry.cpp
+  src/ui/keybind/key_chord_util.cpp
+  src/ui/keybind/bindings_store.cpp
 )
 target_include_directories(keybind_registry_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src

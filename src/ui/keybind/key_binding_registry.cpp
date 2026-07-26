@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include "ui/key_bindings.hpp"
+#include "ui/keybind/key_chord_util.hpp"
 
 namespace tuide {
 namespace {
@@ -328,21 +329,28 @@ const KeyBindingEntry* KeyBindingRegistry::find(KeyAction action) const {
   return nullptr;
 }
 
-const KeyBindingEntry* KeyBindingRegistry::effective_entry(KeyAction action) const {
-  return find(action);
+const std::vector<KeyChordSpec>* KeyBindingRegistry::chords_for(KeyAction action) const {
+  for (const auto& override_entry : overrides_) {
+    if (override_entry.action == action) {
+      return &override_entry.chords;
+    }
+  }
+  const KeyBindingEntry* entry = find(action);
+  return entry != nullptr ? &entry->chords : nullptr;
+}
+
+std::vector<KeyChordSpec> KeyBindingRegistry::effective_chords(KeyAction action) const {
+  const std::vector<KeyChordSpec>* chords = chords_for(action);
+  if (chords == nullptr) {
+    return {};
+  }
+  return *chords;
 }
 
 bool KeyBindingRegistry::matches(KeyAction action, const ftxui::Event& event) const {
-  const KeyBindingEntry* entry = find(action);
-  if (entry == nullptr) {
+  const std::vector<KeyChordSpec>* chords = chords_for(action);
+  if (chords == nullptr) {
     return false;
-  }
-  const std::vector<KeyChordSpec>* chords = &entry->chords;
-  for (const auto& override_entry : overrides_) {
-    if (override_entry.action == action) {
-      chords = &override_entry.chords;
-      break;
-    }
   }
   for (const auto& chord : *chords) {
     if (chord_matches_single(chord, event)) {
@@ -395,7 +403,7 @@ void KeyBindingRegistry::set_override(KeyAction action, std::vector<KeyChordSpec
     if (override_entry.action == action) {
       if (chords.empty()) {
         overrides_.erase(std::remove_if(overrides_.begin(), overrides_.end(),
-                                        [action](const Override& o) {
+                                        [action](const KeyBindingOverride& o) {
                                           return o.action == action;
                                         }),
                          overrides_.end());
@@ -406,7 +414,7 @@ void KeyBindingRegistry::set_override(KeyAction action, std::vector<KeyChordSpec
     }
   }
   if (!chords.empty()) {
-    overrides_.push_back(Override{action, std::move(chords)});
+    overrides_.push_back(KeyBindingOverride{action, std::move(chords)});
   }
 }
 
@@ -425,12 +433,9 @@ std::vector<KeyBindingConflict> KeyBindingRegistry::find_conflicts() const {
   std::vector<Seen> seen;
 
   for (const auto& entry : entries_) {
-    const std::vector<KeyChordSpec>* chords = &entry.chords;
-    for (const auto& override_entry : overrides_) {
-      if (override_entry.action == entry.action) {
-        chords = &override_entry.chords;
-        break;
-      }
+    const std::vector<KeyChordSpec>* chords = chords_for(entry.action);
+    if (chords == nullptr) {
+      continue;
     }
     for (const auto& chord : *chords) {
       if (chord.strokes.size() != 1) {
@@ -457,11 +462,21 @@ std::vector<KeyBindingConflict> KeyBindingRegistry::find_conflicts() const {
 
 nlohmann::json KeyBindingRegistry::export_overrides() const {
   nlohmann::json doc = nlohmann::json::object();
+  doc["version"] = 1;
   nlohmann::json bindings = nlohmann::json::object();
   for (const auto& override_entry : overrides_) {
     nlohmann::json chords = nlohmann::json::array();
     for (const auto& chord : override_entry.chords) {
-      chords.push_back(chord.canonical);
+      nlohmann::json item = nlohmann::json::object();
+      item["canonical"] = chord.canonical;
+      nlohmann::json inputs = nlohmann::json::array();
+      if (!chord.strokes.empty()) {
+        for (const auto& input : chord.strokes.front().inputs) {
+          inputs.push_back(input);
+        }
+      }
+      item["inputs"] = std::move(inputs);
+      chords.push_back(std::move(item));
     }
     bindings[std::string(key_action_id(override_entry.action))] = std::move(chords);
   }
@@ -488,8 +503,7 @@ bool KeyBindingRegistry::import_overrides(const nlohmann::json& doc, std::string
     return false;
   }
 
-  // Phase 1: accept structure and clear; full chord parsing lands in phase 2.
-  clear_overrides();
+  std::vector<KeyBindingOverride> loaded;
   for (auto it = bindings.begin(); it != bindings.end(); ++it) {
     const KeyAction action = key_action_from_id(it.key());
     if (action == KeyAction::Count) {
@@ -500,12 +514,63 @@ bool KeyBindingRegistry::import_overrides(const nlohmann::json& doc, std::string
     }
     if (!it.value().is_array()) {
       if (error != nullptr) {
-        *error = "binding value must be an array of chord strings";
+        *error = "binding value must be an array";
       }
       return false;
     }
-    // Validated but not applied until phase 2 can rebuild matchers from canonical forms.
+
+    std::vector<KeyChordSpec> chords;
+    for (const auto& item : it.value()) {
+      if (item.is_string()) {
+        auto parsed = try_parse_canonical_chord(item.get<std::string>());
+        if (!parsed.has_value()) {
+          if (error != nullptr) {
+            *error = "unsupported canonical chord: " + item.get<std::string>();
+          }
+          return false;
+        }
+        chords.push_back(std::move(*parsed));
+        continue;
+      }
+      if (!item.is_object() || !item.contains("canonical") || !item["canonical"].is_string()) {
+        if (error != nullptr) {
+          *error = "chord item must be a string or {canonical,inputs}";
+        }
+        return false;
+      }
+      const std::string canonical = item["canonical"].get<std::string>();
+      std::vector<std::string> inputs;
+      if (item.contains("inputs") && item["inputs"].is_array()) {
+        for (const auto& input : item["inputs"]) {
+          if (!input.is_string()) {
+            if (error != nullptr) {
+              *error = "inputs must be strings";
+            }
+            return false;
+          }
+          inputs.push_back(input.get<std::string>());
+        }
+      }
+      if (!inputs.empty()) {
+        chords.push_back(make_chord_from_inputs(canonical, std::move(inputs)));
+      } else {
+        auto parsed = try_parse_canonical_chord(canonical);
+        if (!parsed.has_value()) {
+          if (error != nullptr) {
+            *error = "chord missing inputs and unsupported canonical: " + canonical;
+          }
+          return false;
+        }
+        chords.push_back(std::move(*parsed));
+      }
+    }
+    if (!chords.empty()) {
+      loaded.push_back(KeyBindingOverride{action, std::move(chords)});
+    }
   }
+
+  clear_overrides();
+  overrides_ = std::move(loaded);
   return true;
 }
 
