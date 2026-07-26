@@ -1,5 +1,7 @@
 #include "toolpacks/catalog.hpp"
 #include "toolpacks/download.hpp"
+#include "toolpacks/embed.hpp"
+#include "toolpacks/export_portable.hpp"
 #include "toolpacks/install.hpp"
 #include "toolpacks/manifest.hpp"
 #include "toolpacks/paths.hpp"
@@ -179,6 +181,69 @@ void test_install_from_local_catalog(const fs::path& root) {
   expect(!tuide::toolpacks::resolve_clangd_toolpack().has_value(), "gone after remove");
 }
 
+void test_export_portable_embed(const fs::path& root) {
+  // Reuse install fixture path structure.
+  const fs::path fixture = root / "fixture";
+  const fs::path store = root / "store";
+  const fs::path payload = fixture / "payload";
+  std::error_code ec;
+  fs::create_directories(store, ec);
+
+  write_file(payload / "bin" / "clangd", "#!/bin/sh\necho embedded-clangd\n");
+  fs::permissions(payload / "bin" / "clangd",
+                  fs::perms::owner_all | fs::perms::group_exec | fs::perms::others_exec);
+  write_file(payload / "lib" / "clang" / "19" / "include" / ".keep", "");
+  write_file(payload / "toolpack.json", R"({
+  "schema": 1,
+  "id": "clangd",
+  "version": "19.1.2",
+  "entry": { "type": "executable", "path": "bin/clangd" }
+})");
+  const fs::path archive = fixture / "clangd-19.1.2-linux-x86_64.tar.zst";
+  expect(run_shell(("tar -C " + payload.string() + " -cf - . | zstd -q -o " + archive.string())
+                       .c_str()) == 0,
+         "archive");
+  const std::string sha = tuide::toolpacks::file_sha256(archive.string());
+  const fs::path catalog_path = fixture / "catalog.json";
+  write_file(catalog_path,
+             std::string("{\"schema\":1,\"toolpacks\":[{\"id\":\"clangd\",\"version\":\"19.1.2\",") +
+                 "\"arch\":[\"x86_64\"],\"os\":[\"linux\"],\"url\":\"file://" + archive.string() +
+                 "\",\"sha256\":\"" + sha + "\"}]}");
+
+  setenv("TUIDE_TOOLPACKS_ROOT", store.string().c_str(), 1);
+  setenv("TUIDE_TOOLPACKS_CATALOG_URL", catalog_path.string().c_str(), 1);
+  expect(tuide::toolpacks::install_toolpack("clangd").ok, "install for export");
+
+  // Use a tiny fake "clean core" binary (not a real ELF — trailer logic is format-agnostic).
+  const fs::path fake_core = root / "fake-core";
+  write_file(fake_core, std::string("FAKECORE") + std::string(64, 'x'));
+  fs::permissions(fake_core, fs::perms::owner_all | fs::perms::group_exec | fs::perms::others_exec);
+
+  const fs::path out = root / "exported";
+  const auto exported =
+      tuide::toolpacks::export_portable(fake_core.string(), out.string(), {"clangd"});
+  expect(exported.ok, exported.message.c_str());
+  expect(tuide::toolpacks::binary_has_toolpack_embed(out.string()), "has embed");
+
+  const auto blocked =
+      tuide::toolpacks::export_portable(out.string(), (root / "exported2").string(), {"clangd"});
+  expect(!blocked.ok, "re-export blocked");
+  expect(blocked.message.find("nucleo limpio") != std::string::npos ||
+             blocked.message.find("embebidos") != std::string::npos,
+         "blocked message");
+
+  const auto index = tuide::toolpacks::read_embed_index(out.string());
+  expect(index.has_value(), "read index");
+  expect(index->entries.size() == 1, "one entry");
+  expect(index->entries[0].id == "clangd", "clangd id");
+
+  const fs::path extract_dir = root / "extracted";
+  const std::string extract_err =
+      tuide::toolpacks::extract_embedded_toolpack(out.string(), index->entries[0], extract_dir.string());
+  expect(extract_err.empty(), extract_err.c_str());
+  expect(fs::is_regular_file(extract_dir / "bin" / "clangd"), "extracted binary");
+}
+
 }  // namespace
 
 int main() {
@@ -186,6 +251,7 @@ int main() {
   test_manifest_roundtrip(root / "manifest");
   test_resolve_clangd_toolpack(root / "resolve");
   test_install_from_local_catalog(root / "install");
+  test_export_portable_embed(root / "export");
   std::error_code ec;
   fs::remove_all(root, ec);
   std::cout << "toolpacks_test: OK\n";

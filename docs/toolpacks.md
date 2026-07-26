@@ -68,10 +68,10 @@ tuide export-portable [--toolpacks clangd | --all-installed] [-o path]
 ## Export (embed)
 
 - Takes a **clean** core binary (no embedded toolpacks) and embeds selected toolpacks.
-- If the source binary already contains an embed trailer, export is **blocked**.
+- If the source binary already contains an embed trailer (`TUIDTPK1`), export is **blocked**.
 - Output is a new ELF under `dist/` (never overwrite the running binary).
 - Runtime of an exported binary resolves embedded toolpacks like a local toolpack
-  (still below `CLANGD_PATH`).
+  (still below `CLANGD_PATH`; local toolpacks still win over embedded).
 
 ## Transition from CMake bundles
 

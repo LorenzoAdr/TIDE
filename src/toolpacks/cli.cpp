@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 
+#include "toolpacks/embed.hpp"
 #include "toolpacks/install.hpp"
 #include "toolpacks/manifest.hpp"
 #include "toolpacks/paths.hpp"
@@ -50,10 +51,16 @@ int cmd_doctor() {
 
   const auto tp = resolve_clangd_toolpack();
   if (tp.has_value()) {
-    std::cout << "clangd toolpack: " << tp->version << '\n';
+    std::cout << "clangd toolpack: " << tp->version << "  [local]\n";
     std::cout << "  binary:       " << tp->binary_path << '\n';
     if (!tp->resource_dir.empty()) {
       std::cout << "  resource_dir: " << tp->resource_dir << '\n';
+    }
+  } else if (const auto embedded = resolve_embedded_clangd_toolpack(); embedded.has_value()) {
+    std::cout << "clangd toolpack: " << embedded->version << "  [embedded]\n";
+    std::cout << "  binary:       " << embedded->binary_path << '\n';
+    if (!embedded->resource_dir.empty()) {
+      std::cout << "  resource_dir: " << embedded->resource_dir << '\n';
     }
   } else {
     std::cout << "clangd toolpack: (no instalado o invalido)\n";
