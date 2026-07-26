@@ -3,6 +3,8 @@
 #include <optional>
 #include <string>
 
+#include "ui/keybind/key_binding_registry.hpp"
+
 namespace tuide {
 
 namespace {
@@ -797,28 +799,11 @@ bool event_has_ctrl_modifier(const ftxui::Event& event) {
 }
 
 bool event_is_tuide_global_shortcut(const ftxui::Event& event) {
-  return event_is_quick_open(event) || event == ftxui::Event::CtrlT ||
-         event_is_ctrl_o(event) || event == ftxui::Event::CtrlQ ||
-         event == ftxui::Event::CtrlA || event == ftxui::Event::CtrlE ||
-         event == ftxui::Event::CtrlB;
+  return keybind_registry().is_global_reserved(event);
 }
 
 bool event_is_tuide_app_shortcut(const ftxui::Event& event) {
-  if (event_is_tuide_global_shortcut(event)) {
-    return true;
-  }
-  if (event_is_f1(event) || event_is_ctrl_alt_e(event) || event_is_open_shortcuts_modal(event)) {
-    return true;
-  }
-  if (event_is_open_search_panel(event) || event_is_open_outline_panel(event) ||
-      event_is_open_binary_symbols_panel(event) || event_is_ctrl_shift_s(event)) {
-    return true;
-  }
-  return event == ftxui::Event::F2 || event == ftxui::Event::F3 ||
-         event == ftxui::Event::F4 || event == ftxui::Event::F5 ||
-         event == ftxui::Event::F6 || event == ftxui::Event::F9 ||
-         event == ftxui::Event::F10 || event == ftxui::Event::F11 ||
-         event == ftxui::Event::Special({24});
+  return keybind_registry().is_app_reserved(event);
 }
 
 bool editor_priority_key(const ftxui::Event& event) {

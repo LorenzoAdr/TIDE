@@ -154,6 +154,8 @@ add_executable(tuide
   src/ui/path_browser.cpp
   src/ui/focus_manager.cpp
   src/ui/key_bindings.cpp
+  src/ui/keybind/key_action.cpp
+  src/ui/keybind/key_binding_registry.cpp
   src/ui/terminal_keyboard.cpp
   src/ui/terminal_display.cpp
   src/ui/focusable_component.cpp
@@ -548,6 +550,18 @@ add_executable(fuzzy_match_test
 )
 target_include_directories(fuzzy_match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+add_executable(keybind_registry_test
+  tests/keybind_registry_test.cpp
+  src/ui/key_bindings.cpp
+  src/ui/keybind/key_action.cpp
+  src/ui/keybind/key_binding_registry.cpp
+)
+target_include_directories(keybind_registry_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+target_link_libraries(keybind_registry_test PRIVATE ftxui::component ftxui::dom ftxui::screen)
+
 add_executable(workspace_indexer_test
   tests/workspace_indexer_test.cpp
   src/indexer/workspace_indexer.cpp
@@ -711,6 +725,7 @@ set(TUIDE_TEST_TARGETS
   build_environment_test
   workspace_detect_test
   fuzzy_match_test
+  keybind_registry_test
   workspace_indexer_test
   csv_index_test
   external_viewer_test

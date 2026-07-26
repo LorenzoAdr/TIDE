@@ -74,6 +74,7 @@
 #include "ui/cursor_blink.hpp"
 #include "ui/glyphs.hpp"
 #include "ui/key_bindings.hpp"
+#include "ui/keybind/key_binding_registry.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/panel.hpp"
 #include "ui/welcome_screen.hpp"
@@ -5384,17 +5385,17 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
                     panel);
     return true;
   }
-  if (event_is_go_to_definition(event)) {
+  if (keybind_matches(KeyAction::GoToDefinition, event)) {
     try_go_to_symbol(workspace, layout_state, panel, symbols, buffer->primary_line(), buffer->primary_col(),
                      false, visible_lines);
     return true;
   }
-  if (event_is_go_to_declaration(event)) {
+  if (keybind_matches(KeyAction::GoToDeclaration, event)) {
     try_go_to_symbol(workspace, layout_state, panel, symbols, buffer->primary_line(), buffer->primary_col(),
                      true, visible_lines);
     return true;
   }
-  if (event_is_ctrl_g(event)) {
+  if (keybind_matches(KeyAction::GoToLine, event)) {
     if (goto_state != nullptr) {
       goto_state->open = true;
       goto_state->query.clear();
@@ -5404,14 +5405,14 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     }
     return true;
   }
-  if (event_is_ctrl_alt_z(event) || event_is_ctrl_shift_z(event) || event_is_ctrl_y(event)) {
+  if (keybind_matches(KeyAction::Redo, event)) {
     if (redo_edit(buffer)) {
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
     }
     return true;
   }
-  if (event_is_ctrl_z(event) && !event_input_has_shift_modifier(event)) {
+  if (keybind_matches(KeyAction::Undo, event)) {
     undo_edit(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
@@ -5508,7 +5509,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     panel->viewport_line_render_cache.clear();
     return true;
   }
-  if (event == Event::CtrlS) {
+  if (keybind_matches(KeyAction::SaveFile, event)) {
     workspace->save_buffer();
     if (!workspace->root.empty() && !workspace->buffer.path.empty()) {
       if (layout_state != nullptr && layout_state->on_file_saved) {
