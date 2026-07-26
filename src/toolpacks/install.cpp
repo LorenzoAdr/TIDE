@@ -88,8 +88,9 @@ InstallResult install_toolpack(const std::string& id_spec) {
     result.message = "id de toolpack vacio";
     return result;
   }
-  if (id != "clangd") {
-    result.message = "piloto: solo se soporta el toolpack 'clangd' (recibido: " + id + ")";
+  if (id != "clangd" && id != "gdb") {
+    result.message =
+        "piloto: toolpacks soportados: clangd, gdb (recibido: " + id + ")";
     return result;
   }
 

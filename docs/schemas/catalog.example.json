@@ -1,7 +1,6 @@
 {
   "schema": 1,
   "tuide_min_version": "0.1.0",
-  "plugins_note": "Field name is toolpacks; 'plugins' is not used.",
   "toolpacks": [
     {
       "id": "clangd",
@@ -12,10 +11,25 @@
       "arch": ["x86_64"],
       "os": ["linux"],
       "url": "https://github.com/LorenzoAdr/TIDE/releases/download/catalog-latest/clangd-19.1.2-linux-x86_64.tar.zst",
-      "sha256": "REPLACE_WITH_REAL_SHA256",
-      "size_bytes": 0,
-      "license": "Apache-2.0",
+      "sha256": "eae0e3533a1ac53a224df04b062424f293bcc2ec2f211c89919f22d575c279a9",
+      "size_bytes": 34156545,
+      "license": "Apache-2.0 WITH LLVM-exception",
       "recommends_system": ["clangd"]
+    },
+    {
+      "id": "gdb",
+      "display_name": "GDB",
+      "kind": "dap",
+      "languages": ["c", "cpp", "rust", "go", "zig", "fortran"],
+      "version": "16.3-static",
+      "arch": ["x86_64"],
+      "os": ["linux"],
+      "url": "https://github.com/LorenzoAdr/TIDE/releases/download/catalog-latest/gdb-16.3-static-linux-x86_64.tar.zst",
+      "sha256": "bbf1dc5ad60756163856a63583572d80c8ad0a6b6925339c3303f2d62f395ea2",
+      "size_bytes": 16497222,
+      "license": "GPL-3.0-or-later",
+      "recommends_system": ["gdb"],
+      "shared": true
     }
   ]
 }

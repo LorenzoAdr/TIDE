@@ -54,16 +54,26 @@ See examples under [`schemas/`](schemas/):
 
 `schema` field is an integer; readers accept `1`.
 
-## CLI
+## Language packs (UI)
 
-```text
-tuide toolpacks list
-tuide toolpacks doctor
-tuide toolpacks install clangd[@version]
-tuide toolpacks update [clangd]
-tuide toolpacks remove clangd
-tuide export-portable [--toolpacks clangd | --all-installed] [-o path]
+F10 → **Toolpacks** lists languages. Pilot:
+
+| Language | LSP | Debug |
+|----------|-----|-------|
+| C / C++ | `clangd` | `gdb` (shared) |
+
+`gdb` is shared: later compiled languages reuse the same toolpack. Removing a language pack removes only its LSP; shared GDB stays.
+
+CLI: `tuide toolpacks install cpp` installs both missing components.
+
+## Publishing the catalog
+
+```bash
+./tools/publish_toolpack_catalog.sh
+# builds clangd 19.1.2 + gdb-static into dist/catalog/ and prints gh release commands
 ```
+
+Current clangd version matches `TUIDE_CLANGD_VERSION` (19.1.2).
 
 ## Export (embed)
 

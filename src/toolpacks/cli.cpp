@@ -5,6 +5,7 @@
 
 #include "toolpacks/embed.hpp"
 #include "toolpacks/install.hpp"
+#include "toolpacks/language_packs.hpp"
 #include "toolpacks/manifest.hpp"
 #include "toolpacks/paths.hpp"
 #include "toolpacks/store.hpp"
@@ -20,9 +21,9 @@ void print_usage() {
       << "Comandos:\n"
       << "  list                 Lista toolpacks instalados\n"
       << "  doctor               Diagnostico de resolucion (clangd piloto)\n"
-      << "  install <id[@ver]>   Instala desde el catalogo\n"
+      << "  install <id[@ver]|lang> Instala toolpack o language pack (cpp)\n"
       << "  update [id]          Actualiza toolpack(s) desde el catalogo\n"
-      << "  remove <id>          Elimina un toolpack instalado\n"
+      << "  remove <id|lang>     Elimina toolpack o LSP del language pack\n"
       << "\n"
       << "Variables:\n"
       << "  TUIDE_TOOLPACKS_ROOT          Directorio de toolpacks\n"
@@ -118,21 +119,32 @@ int run_cli(int argc, char** argv) {
   }
   if (cmd == "install") {
     if (argc < 3) {
-      std::cerr << "Uso: tuide toolpacks install <id[@version]>\n";
+      std::cerr << "Uso: tuide toolpacks install <id[@version]|cpp>\n";
       return 2;
     }
-    return print_install_result(install_toolpack(argv[2]));
+    const std::string spec = argv[2];
+    if (find_language_pack(spec) != nullptr) {
+      return print_install_result(install_language_pack(spec));
+    }
+    return print_install_result(install_toolpack(spec));
   }
   if (cmd == "update") {
     const std::string id = argc >= 3 ? argv[2] : "clangd";
+    if (find_language_pack(id) != nullptr) {
+      return print_install_result(install_language_pack(id));
+    }
     return print_install_result(update_toolpack(id));
   }
   if (cmd == "remove") {
     if (argc < 3) {
-      std::cerr << "Uso: tuide toolpacks remove <id>\n";
+      std::cerr << "Uso: tuide toolpacks remove <id|cpp>\n";
       return 2;
     }
-    return print_install_result(remove_toolpack(argv[2]));
+    const std::string id = argv[2];
+    if (find_language_pack(id) != nullptr) {
+      return print_install_result(remove_language_pack(id));
+    }
+    return print_install_result(remove_toolpack(id));
   }
   std::cerr << "Comando desconocido: " << cmd << '\n';
   print_usage();

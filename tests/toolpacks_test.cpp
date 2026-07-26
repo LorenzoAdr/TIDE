@@ -3,6 +3,7 @@
 #include "toolpacks/embed.hpp"
 #include "toolpacks/export_portable.hpp"
 #include "toolpacks/install.hpp"
+#include "toolpacks/language_packs.hpp"
 #include "toolpacks/manifest.hpp"
 #include "toolpacks/paths.hpp"
 #include "toolpacks/store.hpp"
@@ -244,6 +245,33 @@ void test_export_portable_embed(const fs::path& root) {
   expect(fs::is_regular_file(extract_dir / "bin" / "clangd"), "extracted binary");
 }
 
+void test_language_pack_cpp_status(const fs::path& root) {
+  setenv("TUIDE_TOOLPACKS_ROOT", root.string().c_str(), 1);
+  const auto* pack = tuide::toolpacks::find_language_pack("cpp");
+  expect(pack != nullptr, "cpp pack exists");
+  auto status = tuide::toolpacks::language_pack_status(*pack);
+  expect(status.status == tuide::toolpacks::LanguagePackStatus::kMissing, "missing initially");
+  expect(status.missing_ids.size() == 2, "clangd+gdb missing");
+
+  // Install only clangd layout manually → partial
+  const fs::path clangd = root / "clangd" / "19.1.2";
+  write_file(clangd / "bin" / "clangd", "#!/bin/sh\n");
+  fs::permissions(clangd / "bin" / "clangd",
+                  fs::perms::owner_all | fs::perms::group_exec | fs::perms::others_exec);
+  write_file(clangd / "toolpack.json", R"({"schema":1,"id":"clangd","version":"19.1.2","entry":{"type":"executable","path":"bin/clangd"}})");
+  tuide::toolpacks::Manifest manifest;
+  tuide::toolpacks::ManifestEntry entry;
+  entry.id = "clangd";
+  entry.version = "19.1.2";
+  entry.active = true;
+  entry.path = "clangd/19.1.2";
+  manifest.installed.push_back(entry);
+  expect(tuide::toolpacks::save_manifest((root / "manifest.json").string(), manifest), "manifest");
+
+  status = tuide::toolpacks::language_pack_status(*pack);
+  expect(status.status == tuide::toolpacks::LanguagePackStatus::kPartial, "partial");
+}
+
 }  // namespace
 
 int main() {
@@ -252,6 +280,7 @@ int main() {
   test_resolve_clangd_toolpack(root / "resolve");
   test_install_from_local_catalog(root / "install");
   test_export_portable_embed(root / "export");
+  test_language_pack_cpp_status(root / "langpack");
   std::error_code ec;
   fs::remove_all(root, ec);
   std::cout << "toolpacks_test: OK\n";

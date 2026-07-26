@@ -2,8 +2,11 @@
 
 #include <chrono>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
+#include <atomic>
 
 #include "app/app_settings.hpp"
 #include "app/workspace_config.hpp"
@@ -21,6 +24,7 @@ enum class SettingsPanel {
   kVisualHighlight,
   kWorkspace,
   kFormat,
+  kToolpacks,
   kStatus,
   kIncludePaths,
   kCompileCommands,
@@ -103,6 +107,7 @@ struct SettingsModalState {
   ftxui::Box tab_workspace_box;
   ftxui::Box tab_theme_box;
   ftxui::Box tab_format_box;
+  ftxui::Box tab_toolpacks_box;
   ftxui::Box tab_status_box;
   ftxui::Box body_box;
   SettingsPanel click_layout_panel = SettingsPanel::kGeneral;
@@ -117,6 +122,14 @@ struct SettingsModalState {
   ToolsStatusSnapshot tools_status_cache;
   bool tools_status_cache_valid = false;
   std::chrono::steady_clock::time_point tools_status_fetched_at{};
+  struct ToolpackJob {
+    std::atomic<bool> running{false};
+    std::mutex mu;
+    std::string message;
+    bool ok = false;
+    bool finished = false;
+  };
+  std::shared_ptr<ToolpackJob> toolpack_job;
   // Snapshot at open — used to avoid restarting LSP/shell/index on Escape with no edits.
   WorkspaceConfig workspace_baseline;
   ClangFormatConfig clang_format_baseline;

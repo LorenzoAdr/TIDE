@@ -91,8 +91,9 @@ ExportResult export_portable(const std::string& source_binary,
   fs::create_directories(work, ec);
 
   for (const auto& id : ids) {
-    if (id != "clangd") {
-      result.message = "piloto: solo se puede embeber 'clangd' (recibido: " + id + ")";
+    if (id != "clangd" && id != "gdb") {
+      result.message =
+          "piloto: solo se puede embeber 'clangd' o 'gdb' (recibido: " + id + ")";
       return result;
     }
     const auto resolved = resolve_installed_toolpack(id);

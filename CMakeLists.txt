@@ -269,6 +269,7 @@ add_executable(tuide
   src/toolpacks/catalog.cpp
   src/toolpacks/download.cpp
   src/toolpacks/install.cpp
+  src/toolpacks/language_packs.cpp
   src/toolpacks/embed.cpp
   src/toolpacks/export_portable.cpp
   src/toolpacks/cli.cpp
@@ -727,6 +728,7 @@ add_executable(toolpacks_test
   src/toolpacks/catalog.cpp
   src/toolpacks/download.cpp
   src/toolpacks/install.cpp
+  src/toolpacks/language_packs.cpp
   src/toolpacks/embed.cpp
   src/toolpacks/export_portable.cpp
   src/util/bundled_tools.cpp
