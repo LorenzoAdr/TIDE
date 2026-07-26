@@ -339,11 +339,9 @@ Component MakeWelcomeScreen(MainLayoutState* layout_state, WelcomeScreenState* s
               return open_recent_at(state, layout_state, state->selected_recent,
                                     on_recent_project);
             }
-            if (event.is_character()) {
-              const std::string& ch = event.character();
-              if (ch.size() == 1 && ch[0] >= '1' && ch[0] <= '5') {
-                const int index = ch[0] - '1';
-                return open_recent_at(state, layout_state, index, on_recent_project);
+            for (int digit = 1; digit <= 5; ++digit) {
+              if (event == Event::Character(static_cast<char>('0' + digit))) {
+                return open_recent_at(state, layout_state, digit - 1, on_recent_project);
               }
             }
           }

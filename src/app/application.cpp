@@ -392,7 +392,12 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 		layout_state_.terminal_start_requested = false;
 		workspace_.status_message = i18n::tr("workspace.welcome");
 		workspace_.clear_tabs();
-		welcome_screen_state_.recent_projects = RecentProjects::load().existing_paths();
+		RecentProjects recent = RecentProjects::load();
+		welcome_screen_state_.recent_projects = recent.existing_paths();
+		if (welcome_screen_state_.recent_projects.size() != recent.paths.size()) {
+			recent.paths = welcome_screen_state_.recent_projects;
+			recent.save();
+		}
 		welcome_screen_state_.selected_recent =
 		    welcome_screen_state_.recent_projects.empty() ? -1 : 0;
 	} else {
