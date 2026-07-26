@@ -82,7 +82,7 @@ std::vector<ShortcutSection> shortcut_sections() {
            {"Ctrl+Shift+Space", i18n::tr("shortcuts.editor.complete_alt")},
            {i18n::tr("shortcuts.key.while_typing"), i18n::tr("shortcuts.editor.auto_complete")},
            {"F12", i18n::tr("shortcuts.editor.go_to_definition")},
-           {"Ctrl+Alt+[ / Ctrl+Alt+]", i18n::tr("shortcuts.editor.cursor_history")},
+           {"Alt+← / →", i18n::tr("shortcuts.editor.cursor_history")},
            {i18n::tr("shortcuts.key.alt_helix"), i18n::tr("shortcuts.editor.helix_overlay")},
            {"Shift+F12 / Ctrl+Alt+F12 / Ctrl+Shift+F12", i18n::tr("shortcuts.editor.go_to_declaration")},
            {i18n::tr("shortcuts.key.alt_click"), i18n::tr("shortcuts.editor.select_to_click")},

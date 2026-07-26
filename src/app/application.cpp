@@ -145,14 +145,6 @@ bool should_block_inhibited_mouse_motion(const MainLayoutState *layout, const Ev
 	return false;
 }
 
-bool event_is_alt_up(const Event &event) {
-	return event == Event::Special("\x1B[1;3A");
-}
-
-bool event_is_alt_down(const Event &event) {
-	return event == Event::Special("\x1B[1;3B");
-}
-
 class BackgroundWorker {
   public:
 	using MainThreadTask = std::function<void()>;

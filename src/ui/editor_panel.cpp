@@ -5203,14 +5203,16 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     cancel_live_lsp_on_cursor_move(completion, symbols, layout_state, panel);
   };
 
-  if (event_is_cursor_history_back(event)) {
+  if (event_is_editor_cursor_history_back(
+          event, layout_state != nullptr && layout_state->editor_alt_modifier_held)) {
     if (workspace->navigate_cursor_back(visible_lines)) {
       cancel_completion_on_cursor_move();
       return true;
     }
     return false;
   }
-  if (event_is_cursor_history_forward(event)) {
+  if (event_is_editor_cursor_history_forward(
+          event, layout_state != nullptr && layout_state->editor_alt_modifier_held)) {
     if (workspace->navigate_cursor_forward(visible_lines)) {
       cancel_completion_on_cursor_move();
       return true;
@@ -5238,7 +5240,9 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     }
 
     if (layout_state->editor_alt_modifier_held && !event_has_ctrl_modifier(event) &&
-        !event_is_tuide_app_shortcut(event) && !event_is_alt_key_press(event)) {
+        !event_is_tuide_app_shortcut(event) && !event_is_alt_key_press(event) &&
+        !event_is_editor_cursor_history_back(event, true) &&
+        !event_is_editor_cursor_history_forward(event, true)) {
       helix_overlay = true;
     } else if (const auto stripped = strip_alt_modifier_for_helix(event)) {
       helix_dispatch_event = *stripped;

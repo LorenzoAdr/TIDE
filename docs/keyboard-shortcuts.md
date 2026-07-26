@@ -47,8 +47,8 @@ Press **F1** inside tuide to open the in-app shortcuts dialog (scrollable). This
 | Ctrl+. | Code completion (LSP) |
 | Ctrl+Space | Code completion (LSP) |
 | Ctrl+Alt+. / Ctrl+Alt+/ | Code completion (recommended) |
-| Alt + key | Temporary Helix mode (e.g. Alt+Space for space menu) |
-| Ctrl+Alt+[ / Ctrl+Alt+] | Previous / next cursor position |
+| Alt + key | Temporary Helix mode (e.g. Alt+Space for space menu; arrows excluded) |
+| Alt+← / → | Previous / next cursor position |
 | F6 | Code completion (LSP) |
 | Tab | Indent (does not cycle panel focus) |
 | Shift+arrows | Extend selection |

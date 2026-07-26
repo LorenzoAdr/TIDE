@@ -156,6 +156,29 @@ bool event_is_alt_right(const ftxui::Event& event) {
   return event == ftxui::Event::Special("\x1B[1;3C");
 }
 
+bool event_is_alt_up(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;3A");
+}
+
+bool event_is_alt_down(const ftxui::Event& event) {
+  return event == ftxui::Event::Special("\x1B[1;3B");
+}
+
+bool event_is_alt_arrow(const ftxui::Event& event) {
+  return event_is_alt_left(event) || event_is_alt_right(event) || event_is_alt_up(event) ||
+         event_is_alt_down(event);
+}
+
+bool event_is_editor_cursor_history_back(const ftxui::Event& event, bool alt_modifier_held) {
+  return event_is_alt_left(event) ||
+         (alt_modifier_held && event == ftxui::Event::ArrowLeft);
+}
+
+bool event_is_editor_cursor_history_forward(const ftxui::Event& event, bool alt_modifier_held) {
+  return event_is_alt_right(event) ||
+         (alt_modifier_held && event == ftxui::Event::ArrowRight);
+}
+
 bool event_is_ctrl_alt_up(const ftxui::Event& event) {
   return event == ftxui::Event::Special("\x1B[1;7A");
 }
@@ -692,20 +715,6 @@ bool event_is_ctrl_alt_e(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[101;7u");
 }
 
-bool event_is_cursor_history_back(const ftxui::Event& event) {
-  const int mods[] = {7};
-  return csi_key_any_modifier(event, mods, 1, 91) ||
-         event == ftxui::Event::Special("\x1B[91;7u") ||
-         event == ftxui::Event::Special("\x1B[27;7;91~");
-}
-
-bool event_is_cursor_history_forward(const ftxui::Event& event) {
-  const int mods[] = {7};
-  return csi_key_any_modifier(event, mods, 1, 93) ||
-         event == ftxui::Event::Special("\x1B[93;7u") ||
-         event == ftxui::Event::Special("\x1B[27;7;93~");
-}
-
 bool event_is_completion(const ftxui::Event& event) {
   return event_is_ctrl_space(event) || event_is_ctrl_period(event) ||
          event_is_ctrl_alt_period(event) || event_is_ctrl_alt_slash(event);
@@ -835,7 +844,7 @@ bool editor_priority_key(const ftxui::Event& event) {
          event_is_ctrl_alt_l(event) || event_is_ctrl_shift_l(event) ||
          event_is_completion(event) || event_is_go_to_definition(event) ||
          event_is_go_to_declaration(event) ||
-         event_is_cursor_history_back(event) || event_is_cursor_history_forward(event);
+         event_is_alt_left(event) || event_is_alt_right(event);
 }
 
 bool event_has_alt_modifier(const ftxui::Event& event) {
@@ -864,7 +873,7 @@ bool event_has_alt_modifier(const ftxui::Event& event) {
 }
 
 bool event_is_helix_overlay_exempt(const ftxui::Event& event) {
-  return event_is_open_shortcuts_modal(event);
+  return event_is_open_shortcuts_modal(event) || event_is_alt_arrow(event);
 }
 
 namespace {
@@ -892,13 +901,10 @@ std::optional<ftxui::Event> kitty_alt_key_event(int keycode) {
     case 57422:
       return ftxui::Event::PageDown;
     case 57416:
-      return ftxui::Event::ArrowUp;
     case 57414:
-      return ftxui::Event::ArrowDown;
     case 57415:
-      return ftxui::Event::ArrowLeft;
     case 57417:
-      return ftxui::Event::ArrowRight;
+      return std::nullopt;
     default:
       break;
   }
@@ -959,18 +965,6 @@ std::optional<ftxui::Event> strip_alt_modifier_for_helix(const ftxui::Event& eve
   }
   if (event == ftxui::Event::AltS) {
     return ftxui::Event::Character('s');
-  }
-  if (event_is_alt_left(event)) {
-    return ftxui::Event::ArrowLeft;
-  }
-  if (event_is_alt_right(event)) {
-    return ftxui::Event::ArrowRight;
-  }
-  if (event == ftxui::Event::Special("\x1B[1;3A")) {
-    return ftxui::Event::ArrowUp;
-  }
-  if (event == ftxui::Event::Special("\x1B[1;3B")) {
-    return ftxui::Event::ArrowDown;
   }
 
   const std::string& input = event.input();
