@@ -2,8 +2,8 @@
 
 #include <iostream>
 #include <string>
-#include <vector>
 
+#include "toolpacks/install.hpp"
 #include "toolpacks/manifest.hpp"
 #include "toolpacks/paths.hpp"
 #include "toolpacks/store.hpp"
@@ -19,13 +19,13 @@ void print_usage() {
       << "Comandos:\n"
       << "  list                 Lista toolpacks instalados\n"
       << "  doctor               Diagnostico de resolucion (clangd piloto)\n"
-      << "  install <id[@ver]>   Instala desde el catalogo (P2)\n"
-      << "  update [id]          Actualiza toolpack(s) (P2)\n"
-      << "  remove <id>          Elimina un toolpack instalado (P2)\n"
+      << "  install <id[@ver]>   Instala desde el catalogo\n"
+      << "  update [id]          Actualiza toolpack(s) desde el catalogo\n"
+      << "  remove <id>          Elimina un toolpack instalado\n"
       << "\n"
       << "Variables:\n"
       << "  TUIDE_TOOLPACKS_ROOT          Directorio de toolpacks\n"
-      << "  TUIDE_TOOLPACKS_CATALOG_URL   URL de catalog.json\n";
+      << "  TUIDE_TOOLPACKS_CATALOG_URL   URL o ruta de catalog.json\n";
 }
 
 int cmd_list() {
@@ -82,10 +82,13 @@ int cmd_doctor() {
   return 0;
 }
 
-int cmd_not_ready(const char* name) {
-  std::cerr << "Comando '" << name
-            << "' aun no disponible en esta fase (llega en P2).\n";
-  return 2;
+int print_install_result(const InstallResult& result) {
+  if (result.ok) {
+    std::cout << result.message << '\n';
+    return 0;
+  }
+  std::cerr << "error: " << result.message << '\n';
+  return 1;
 }
 
 }  // namespace
@@ -107,13 +110,22 @@ int run_cli(int argc, char** argv) {
     return cmd_doctor();
   }
   if (cmd == "install") {
-    return cmd_not_ready("install");
+    if (argc < 3) {
+      std::cerr << "Uso: tuide toolpacks install <id[@version]>\n";
+      return 2;
+    }
+    return print_install_result(install_toolpack(argv[2]));
   }
   if (cmd == "update") {
-    return cmd_not_ready("update");
+    const std::string id = argc >= 3 ? argv[2] : "clangd";
+    return print_install_result(update_toolpack(id));
   }
   if (cmd == "remove") {
-    return cmd_not_ready("remove");
+    if (argc < 3) {
+      std::cerr << "Uso: tuide toolpacks remove <id>\n";
+      return 2;
+    }
+    return print_install_result(remove_toolpack(argv[2]));
   }
   std::cerr << "Comando desconocido: " << cmd << '\n';
   print_usage();

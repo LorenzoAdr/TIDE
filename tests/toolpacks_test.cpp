@@ -1,3 +1,6 @@
+#include "toolpacks/catalog.hpp"
+#include "toolpacks/download.hpp"
+#include "toolpacks/install.hpp"
 #include "toolpacks/manifest.hpp"
 #include "toolpacks/paths.hpp"
 #include "toolpacks/store.hpp"
@@ -20,8 +23,8 @@ void expect(bool condition, const char* message) {
   }
 }
 
-fs::path make_temp_root() {
-  const auto base = fs::temp_directory_path() / "tuide-toolpacks-test";
+fs::path make_temp_root(const char* name) {
+  const auto base = fs::temp_directory_path() / name;
   std::error_code ec;
   fs::remove_all(base, ec);
   fs::create_directories(base, ec);
@@ -36,7 +39,15 @@ void write_file(const fs::path& path, const std::string& text) {
   out << text;
 }
 
+int run_shell(const std::string& cmd) {
+  return std::system(cmd.c_str());
+}
+
 void test_manifest_roundtrip(const fs::path& root) {
+  std::error_code ec;
+  fs::create_directories(root, ec);
+  expect(!ec, "create manifest root");
+
   tuide::toolpacks::Manifest manifest;
   manifest.schema = 1;
   tuide::toolpacks::ManifestEntry entry;
@@ -99,7 +110,6 @@ void test_resolve_clangd_toolpack(const fs::path& root) {
   expect(loc->source == tuide::ClangdLocation::Source::Toolpack, "source toolpack");
   expect(loc->binary_path == bin.string(), "resolve path");
 
-  // Env still wins over toolpack.
   setenv("CLANGD_PATH", "/bin/true", 1);
   const auto env_loc = tuide::resolve_clangd();
   expect(env_loc.has_value(), "env resolve");
@@ -107,12 +117,75 @@ void test_resolve_clangd_toolpack(const fs::path& root) {
   unsetenv("CLANGD_PATH");
 }
 
+void test_install_from_local_catalog(const fs::path& root) {
+  const fs::path fixture = root / "fixture";
+  const fs::path store = root / "store";
+  const fs::path payload = fixture / "payload";
+  std::error_code ec;
+  fs::create_directories(store, ec);
+  fs::create_directories(payload, ec);
+
+  write_file(payload / "bin" / "clangd", "#!/bin/sh\necho toolpack-clangd\n");
+  fs::permissions(payload / "bin" / "clangd",
+                  fs::perms::owner_all | fs::perms::group_exec | fs::perms::others_exec);
+  write_file(payload / "lib" / "clang" / "19" / "include" / ".keep", "");
+  write_file(payload / "toolpack.json", R"({
+  "schema": 1,
+  "id": "clangd",
+  "version": "19.1.2",
+  "entry": { "type": "executable", "path": "bin/clangd" }
+})");
+
+  const fs::path archive = fixture / "clangd-19.1.2-linux-x86_64.tar.zst";
+  const std::string tar_cmd =
+      "tar -C " + payload.string() + " -cf - . | zstd -q -o " + archive.string();
+  expect(run_shell(tar_cmd.c_str()) == 0, "create tar.zst");
+
+  const std::string sha = tuide::toolpacks::file_sha256(archive.string());
+  expect(sha.size() == 64, "sha256");
+
+  const fs::path catalog_path = fixture / "catalog.json";
+  write_file(catalog_path,
+             std::string("{\n") +
+                 "  \"schema\": 1,\n"
+                 "  \"toolpacks\": [{\n"
+                 "    \"id\": \"clangd\",\n"
+                 "    \"version\": \"19.1.2\",\n"
+                 "    \"arch\": [\"x86_64\"],\n"
+                 "    \"os\": [\"linux\"],\n"
+                 "    \"url\": \"file://" +
+                 archive.string() +
+                 "\",\n"
+                 "    \"sha256\": \"" +
+                 sha +
+                 "\"\n"
+                 "  }]\n"
+                 "}\n");
+
+  setenv("TUIDE_TOOLPACKS_ROOT", store.string().c_str(), 1);
+  setenv("TUIDE_TOOLPACKS_CATALOG_URL", catalog_path.string().c_str(), 1);
+  unsetenv("CLANGD_PATH");
+
+  const auto installed = tuide::toolpacks::install_toolpack("clangd");
+  expect(installed.ok, installed.message.c_str());
+  expect(installed.version == "19.1.2", "installed version");
+
+  const auto loc = tuide::resolve_clangd();
+  expect(loc.has_value(), "resolve after install");
+  expect(loc->source == tuide::ClangdLocation::Source::Toolpack, "toolpack source");
+
+  const auto removed = tuide::toolpacks::remove_toolpack("clangd");
+  expect(removed.ok, removed.message.c_str());
+  expect(!tuide::toolpacks::resolve_clangd_toolpack().has_value(), "gone after remove");
+}
+
 }  // namespace
 
 int main() {
-  const fs::path root = make_temp_root();
-  test_manifest_roundtrip(root);
-  test_resolve_clangd_toolpack(root);
+  const fs::path root = make_temp_root("tuide-toolpacks-test");
+  test_manifest_roundtrip(root / "manifest");
+  test_resolve_clangd_toolpack(root / "resolve");
+  test_install_from_local_catalog(root / "install");
   std::error_code ec;
   fs::remove_all(root, ec);
   std::cout << "toolpacks_test: OK\n";

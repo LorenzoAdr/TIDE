@@ -1,9 +1,12 @@
 #include "toolpacks/manifest.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
 #include <nlohmann/json.hpp>
+
+namespace fs = std::filesystem;
 
 namespace tuide::toolpacks {
 namespace {
@@ -52,6 +55,8 @@ std::optional<Manifest> load_manifest(const std::string& path) {
 }
 
 bool save_manifest(const std::string& path, const Manifest& manifest) {
+  std::error_code ec;
+  fs::create_directories(fs::path(path).parent_path(), ec);
   nlohmann::json doc;
   doc["schema"] = manifest.schema;
   doc["installed"] = nlohmann::json::array();
