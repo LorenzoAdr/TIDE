@@ -782,12 +782,7 @@ bool execute_helix_command(const HelixDispatchContext& ctx, HelixCommand command
       begin_char_find(helix, HelixCharFindKind::kTillBack);
       return true;
     case HelixCommand::kSelectAll:
-      if (!buffer->lines.empty()) {
-        buffer->reset_to_single_cursor(0, 0);
-        auto& cursor = buffer->primary();
-        const int last = static_cast<int>(buffer->lines.size()) - 1;
-        cursor.head = {last, static_cast<int>(buffer->lines.back().size())};
-      }
+      select_all(buffer);
       ensure_view(ctx);
       return true;
     case HelixCommand::kExtendLineBelow:

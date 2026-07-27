@@ -62,6 +62,7 @@ bool event_is_ctrl_alt_d(const ftxui::Event& event);
 bool event_is_ctrl_shift_d(const ftxui::Event& event);
 bool event_is_ctrl_backspace(const ftxui::Event& event);
 bool event_is_ctrl_a(const ftxui::Event& event);
+bool event_is_ctrl_alt_a(const ftxui::Event& event);
 bool event_is_ctrl_delete(const ftxui::Event& event);
 bool event_is_ctrl_space(const ftxui::Event& event);
 bool event_is_completion(const ftxui::Event& event);

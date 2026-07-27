@@ -5454,6 +5454,12 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     panel->viewport_line_render_cache.clear();
     return true;
   }
+  if (event_is_ctrl_a(event)) {
+    select_all(buffer);
+    ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+    panel->viewport_line_render_cache.clear();
+    return true;
+  }
   if (event == Event::CtrlS) {
     workspace->save_buffer();
     if (!workspace->root.empty() && !workspace->buffer.path.empty()) {
