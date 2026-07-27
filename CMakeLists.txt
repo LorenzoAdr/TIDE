@@ -270,7 +270,7 @@ add_executable(tuide
   src/toolpacks/download.cpp
   src/toolpacks/install.cpp
   src/toolpacks/language_packs.cpp
-  src/toolpacks/embed.cpp
+  src/toolpacks/packaged.cpp
   src/toolpacks/export_portable.cpp
   src/toolpacks/cli.cpp
   src/packet_monitor/pkt_ring.cpp
@@ -569,7 +569,7 @@ add_executable(workspace_indexer_test
   src/toolpacks/paths.cpp
   src/toolpacks/manifest.cpp
   src/toolpacks/store.cpp
-  src/toolpacks/embed.cpp
+  src/toolpacks/packaged.cpp
   src/toolpacks/download.cpp
   src/util/child_process_guard.cpp
 )
@@ -704,7 +704,7 @@ add_executable(lsp_completion_probe
   src/toolpacks/paths.cpp
   src/toolpacks/manifest.cpp
   src/toolpacks/store.cpp
-  src/toolpacks/embed.cpp
+  src/toolpacks/packaged.cpp
   src/toolpacks/download.cpp
   src/util/child_process_guard.cpp
   src/util/monitor_log.cpp
@@ -729,7 +729,7 @@ add_executable(toolpacks_test
   src/toolpacks/download.cpp
   src/toolpacks/install.cpp
   src/toolpacks/language_packs.cpp
-  src/toolpacks/embed.cpp
+  src/toolpacks/packaged.cpp
   src/toolpacks/export_portable.cpp
   src/util/bundled_tools.cpp
   src/util/child_process_guard.cpp

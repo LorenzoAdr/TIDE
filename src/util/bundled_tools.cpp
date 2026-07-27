@@ -1,6 +1,5 @@
 #include "util/bundled_tools.hpp"
 
-#include "toolpacks/embed.hpp"
 #include "toolpacks/store.hpp"
 
 #include <array>
@@ -962,11 +961,6 @@ std::optional<ClangdLocation> resolve_clangd() {
   // Toolpacks win over compile-time bundles and PATH (pilot: clangd).
   if (const auto tp = toolpacks::resolve_clangd_toolpack(); tp.has_value()) {
     return ClangdLocation{tp->binary_path, tp->resource_dir,
-                          ClangdLocation::Source::Toolpack};
-  }
-  if (const auto embedded = toolpacks::resolve_embedded_clangd_toolpack();
-      embedded.has_value()) {
-    return ClangdLocation{embedded->binary_path, embedded->resource_dir,
                           ClangdLocation::Source::Toolpack};
   }
 

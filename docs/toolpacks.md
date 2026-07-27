@@ -2,13 +2,13 @@
 
 Toolpacks are versioned LSP/DAP tool payloads installed in user space and resolved
 at runtime. The IDE **core** (including Tree-sitter and **rg**) ships without them.
-The pilot toolpack is **clangd** only (Linux **x86_64**).
+Pilot toolpacks: **clangd** + shared **gdb** (Linux **x86_64**).
 
-## Resolution order (clangd)
+## Resolution order (clangd / gdb)
 
-1. `CLANGD_PATH` (environment)
-2. Active **toolpack**
-3. Compile-time **bundled** blob (temporary; deprecated when toolpacks are stable)
+1. Env override (`CLANGD_PATH` / `GDB_PATH`)
+2. Active **toolpack** (`TUIDE_TOOLPACKS_ROOT` or XDG data)
+3. Compile-time **bundled** blob (temporary)
 4. `PATH`
 5. Missing
 
@@ -17,73 +17,79 @@ The pilot toolpack is **clangd** only (Linux **x86_64**).
 ```text
 $XDG_DATA_HOME/tuide/toolpacks/     # default ~/.local/share/tuide/toolpacks
   manifest.json
-  clangd/<version>/
-    toolpack.json
-    bin/clangd
-    lib/clang/...                   # resource-dir (optional but expected for clangd)
+  clangd/<version>/…
+  gdb/<version>/…
 
 $XDG_CACHE_HOME/tuide/
-  downloads/                        # catalog / tarball cache
-  export-work/                      # export scratch
+  downloads/
+  export-work/
 
 Override root: TUIDE_TOOLPACKS_ROOT
 ```
 
-## Catalog (GitHub Releases, separate tags)
+## Catalog (GitHub Releases)
 
-- Tags: `catalog-vN` or `catalog-YYYY.MM.DD`; maintain a movable `catalog-latest`.
-- Assets (pilot):
-  - `catalog.json`
-  - `clangd-<version>-linux-x86_64.tar.zst`
-  - `SHA256SUMS` (or per-asset `.sha256`)
-- Default fetch:
-  `https://github.com/LorenzoAdr/TIDE/releases/download/catalog-latest/catalog.json`
+- Tags: `catalog-YYYY.MM.DD` + movable `catalog-latest`
+- Assets: `catalog.json`, `clangd-…tar.zst`, `gdb-…tar.zst`, `SHA256SUMS`
+- Default: `https://github.com/LorenzoAdr/TIDE/releases/download/catalog-latest/catalog.json`
 - Override: `TUIDE_TOOLPACKS_CATALOG_URL`
-
-Toolpacks stay on GitHub; they are **not** required on the PPA (PPA = core only).
-
-## Schemas
-
-See examples under [`schemas/`](schemas/):
-
-| File | Role |
-|------|------|
-| `catalog.example.json` | Remote index |
-| `manifest.example.json` | Local install state |
-| `toolpack.clangd.example.json` | Payload metadata inside a version dir |
-
-`schema` field is an integer; readers accept `1`.
 
 ## Language packs (UI)
 
-F10 → **Toolpacks** lists languages. Pilot:
-
-| Language | LSP | Debug |
-|----------|-----|-------|
-| C / C++ | `clangd` | `gdb` (shared) |
-
-`gdb` is shared: later compiled languages reuse the same toolpack. Removing a language pack removes only its LSP; shared GDB stays.
-
-CLI: `tuide toolpacks install cpp` installs both missing components.
-
-## Publishing the catalog
+F10 → **Toolpacks**. Pilot: **C / C++** = `clangd` + shared `gdb`.
 
 ```bash
+tuide toolpacks install cpp
 ./tools/publish_toolpack_catalog.sh
-# builds clangd 19.1.2 + gdb-static into dist/catalog/ and prints gh release commands
 ```
 
-Current clangd version matches `TUIDE_CLANGD_VERSION` (19.1.2).
+## Export (AppImage)
 
-## Export (embed)
+Portable export builds an **AppDir** (and optionally a Type‑2 **AppImage**), not an ELF blob.
 
-- Takes a **clean** core binary (no embedded toolpacks) and embeds selected toolpacks.
-- If the source binary already contains an embed trailer (`TUIDTPK1`), export is **blocked**.
-- Output is a new ELF under `dist/` (never overwrite the running binary).
-- Runtime of an exported binary resolves embedded toolpacks like a local toolpack
-  (still below `CLANGD_PATH`; local toolpacks still win over embedded).
+```text
+tuide-x86_64.AppImage  (or tuide.AppDir/)
+└─ AppDir/
+   ├─ AppRun
+   ├─ tuide.desktop
+   └─ usr/
+      ├─ bin/tuide
+      └─ share/tuide/toolpacks/   # copied from the local store
+```
 
-## Transition from CMake bundles
+`AppRun` sets `TUIDE_TOOLPACKS_ROOT` to the embedded toolpacks tree and execs `usr/bin/tuide`.
 
-`TUIDE_BUNDLE_CLANGD` remains available during testing. When toolpack install +
-resolve + export are validated, that bundle path is deprecated for clangd.
+### Clean core only
+
+Export is **blocked** if the source is already packaged:
+
+- legacy ELF trailer `TUIDTPK1`, or
+- `*.AppImage`, or
+- an AppDir (`AppRun` + `usr/bin/tuide`)
+
+Use a slim core (PPA / build without export packaging).
+
+### CLI
+
+```bash
+tuide export-portable -o dist/tuide-x86_64.AppImage
+tuide export-portable --format=appdir -o dist/tuide.AppDir
+tuide export-portable --toolpacks clangd,gdb --binary ./build/tuide
+```
+
+`--format=appimage` (default) requires `appimagetool` on `PATH` (or `APPIMAGETOOL`),
+plus host helpers `file` and `mksquashfs` (`squashfs-tools`).
+Export sets `ARCH=x86_64` and, if `mksquashfs` sits next to `appimagetool`, prepends that
+directory to `PATH` (typical when using the official appimagetool AppImage extract).
+`--format=appdir` always writes a runnable directory (no appimagetool).
+
+```bash
+# Example: extracted appimagetool
+export APPIMAGETOOL=/path/to/squashfs-root/usr/bin/appimagetool
+tuide export-portable -o dist/tuide-x86_64.AppImage --binary ./build/tuide
+```
+
+## Transition from CMake bundles / ELF trailer
+
+- `TUIDE_BUNDLE_CLANGD` remains during testing; deprecate when toolpacks are default.
+- ELF embed trailer export is **removed**; old trailers are only detected to block re-export.
