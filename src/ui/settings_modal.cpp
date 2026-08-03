@@ -14,8 +14,12 @@
 #include "i18n/locale.hpp"
 #include "i18n/tr.hpp"
 #include "ui/clickable.hpp"
+#include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
 #include "ui/glyphs.hpp"
+#include "ui/keybind/bindings_store.hpp"
+#include "ui/keybind/key_action.hpp"
+#include "ui/keybind/key_chord_util.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
 #include "util/clang_format_config.hpp"
@@ -39,6 +43,11 @@ struct SettingsBodyContent {
 void append_top_level_tabs_header(SettingsBodyContent* content, SettingsModalState* state);
 void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel);
 bool handle_top_level_tab_keys(SettingsModalState* state, Event event);
+void cancel_shortcut_recording(SettingsModalState* state);
+void clamp_shortcuts_selection(SettingsModalState* state);
+void activate_shortcuts_option(SettingsModalState* state, int index);
+bool handle_shortcuts_settings_keys(SettingsModalState* state, Event event);
+SettingsBodyContent build_shortcuts_settings(SettingsModalState* state);
 
 void add_click_target(SettingsBodyContent* content, int index) {
   if (content == nullptr) {
@@ -233,15 +242,16 @@ constexpr int kVisualHighlightOptionCount = 12;
 bool is_top_level_panel(SettingsPanel panel) {
   return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kVisualHighlight ||
          panel == SettingsPanel::kWorkspace || panel == SettingsPanel::kUiColors ||
-         panel == SettingsPanel::kFormat || panel == SettingsPanel::kStatus;
+         panel == SettingsPanel::kFormat || panel == SettingsPanel::kShortcuts ||
+         panel == SettingsPanel::kStatus;
 }
 
 int top_level_panel_count(const SettingsModalState* state) {
-  // General + Visual + Status always; Workspace + Theme + Format when a workspace is open.
+  // General + Visual + Shortcuts + Status always; Workspace + Theme + Format with workspace.
   if (state != nullptr && state->has_workspace) {
-    return 6;
+    return 7;
   }
-  return 3;
+  return 4;
 }
 
 SettingsPanel top_level_panel_at(const SettingsModalState* state, int index) {
@@ -261,7 +271,13 @@ SettingsPanel top_level_panel_at(const SettingsModalState* state, int index) {
     if (index == 4) {
       return SettingsPanel::kFormat;
     }
+    if (index == 5) {
+      return SettingsPanel::kShortcuts;
+    }
     return SettingsPanel::kStatus;
+  }
+  if (index == 2) {
+    return SettingsPanel::kShortcuts;
   }
   return SettingsPanel::kStatus;
 }
@@ -278,8 +294,10 @@ int top_level_panel_index(const SettingsModalState* state, SettingsPanel panel) 
       return state != nullptr && state->has_workspace ? 3 : 1;
     case SettingsPanel::kFormat:
       return state != nullptr && state->has_workspace ? 4 : 2;
-    case SettingsPanel::kStatus:
+    case SettingsPanel::kShortcuts:
       return state != nullptr && state->has_workspace ? 5 : 2;
+    case SettingsPanel::kStatus:
+      return state != nullptr && state->has_workspace ? 6 : 3;
     default:
       return 0;
   }
@@ -840,6 +858,9 @@ void clamp_top_level_selection(SettingsModalState* state) {
       break;
     case SettingsPanel::kFormat:
       clamp_format_selection(state);
+      break;
+    case SettingsPanel::kShortcuts:
+      clamp_shortcuts_selection(state);
       break;
     default:
       break;
@@ -1415,6 +1436,10 @@ void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel) {
       state->ui_colors_editing) {
     cancel_ui_color_edit(state);
   }
+  if (state->panel == SettingsPanel::kShortcuts && panel != SettingsPanel::kShortcuts &&
+      state->shortcuts_recording) {
+    cancel_shortcut_recording(state);
+  }
   state->panel = panel;
   state->selected = 0;
   state->body_scroll = 0;
@@ -1424,6 +1449,11 @@ void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel) {
   }
   if (panel == SettingsPanel::kUiColors) {
     open_ui_colors_panel(state);
+  }
+  if (panel == SettingsPanel::kShortcuts) {
+    state->shortcuts_selected = 0;
+    state->shortcuts_message.clear();
+    state->shortcuts_recording = false;
   }
 }
 
@@ -1513,6 +1543,9 @@ void activate_settings_click(SettingsModalState* state, int index, int mouse_x) 
     case SettingsPanel::kFormat:
       activate_format_option(state, index);
       break;
+    case SettingsPanel::kShortcuts:
+      activate_shortcuts_option(state, index);
+      break;
     case SettingsPanel::kStatus:
       break;
     case SettingsPanel::kIncludePaths:
@@ -1590,6 +1623,10 @@ bool handle_settings_mouse(SettingsModalState* state, Event event) {
     }
     if (state->has_workspace && state->tab_format_box.Contain(m.x, m.y)) {
       switch_top_level_tab(state, SettingsPanel::kFormat);
+      return true;
+    }
+    if (state->tab_shortcuts_box.Contain(m.x, m.y)) {
+      switch_top_level_tab(state, SettingsPanel::kShortcuts);
       return true;
     }
     if (state->tab_status_box.Contain(m.x, m.y)) {
@@ -1974,6 +2011,8 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
       return handle_format_settings_keys(state, event);
     case SettingsPanel::kStatus:
       return handle_top_level_tab_keys(state, event);
+    case SettingsPanel::kShortcuts:
+      return handle_shortcuts_settings_keys(state, event);
     case SettingsPanel::kIncludePaths:
       return handle_include_paths_keys(state, event);
     case SettingsPanel::kCompileCommands:
@@ -2028,6 +2067,9 @@ Element render_top_level_tabs(SettingsModalState* state) {
     tabs.push_back(render_tab(SettingsPanel::kFormat, i18n::tr("settings.tab.format").c_str(),
                               &state->tab_format_box));
   }
+  tabs.push_back(text("  "));
+  tabs.push_back(render_tab(SettingsPanel::kShortcuts, i18n::tr("settings.tab.shortcuts").c_str(),
+                            &state->tab_shortcuts_box));
   tabs.push_back(text("  "));
   tabs.push_back(render_tab(SettingsPanel::kStatus, i18n::tr("settings.tab.status").c_str(),
                             &state->tab_status_box));
@@ -2500,6 +2542,277 @@ bool path_mappings_eq(const std::vector<PathMapping>& a, const std::vector<PathM
   return true;
 }
 
+std::vector<KeyAction> remappable_shortcut_actions() {
+  std::vector<KeyAction> actions;
+  for (const auto& entry : keybind_registry().entries()) {
+    if (entry.remappable) {
+      actions.push_back(entry.action);
+    }
+  }
+  return actions;
+}
+
+std::vector<KeyChordSpec> draft_effective_chords(const SettingsModalState* state, KeyAction action) {
+  if (state != nullptr) {
+    for (const auto& override_entry : state->draft_key_overrides) {
+      if (override_entry.action == action) {
+        return override_entry.chords;
+      }
+    }
+  }
+  return keybind_registry().effective_chords(action);
+}
+
+bool draft_has_override(const SettingsModalState* state, KeyAction action) {
+  if (state == nullptr) {
+    return false;
+  }
+  for (const auto& override_entry : state->draft_key_overrides) {
+    if (override_entry.action == action) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void set_draft_override(SettingsModalState* state, KeyAction action,
+                        std::vector<KeyChordSpec> chords) {
+  if (state == nullptr) {
+    return;
+  }
+  for (auto& override_entry : state->draft_key_overrides) {
+    if (override_entry.action == action) {
+      if (chords.empty()) {
+        state->draft_key_overrides.erase(
+            std::remove_if(state->draft_key_overrides.begin(), state->draft_key_overrides.end(),
+                           [action](const KeyBindingOverride& o) { return o.action == action; }),
+            state->draft_key_overrides.end());
+      } else {
+        override_entry.chords = std::move(chords);
+      }
+      return;
+    }
+  }
+  if (!chords.empty()) {
+    state->draft_key_overrides.push_back(KeyBindingOverride{action, std::move(chords)});
+  }
+}
+
+void clamp_shortcuts_selection(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  const int count = static_cast<int>(remappable_shortcut_actions().size());
+  if (count <= 0) {
+    state->shortcuts_selected = 0;
+    return;
+  }
+  state->shortcuts_selected = std::max(0, std::min(state->shortcuts_selected, count - 1));
+}
+
+std::string scope_label(KeyScope scope) {
+  switch (scope) {
+    case KeyScope::Global:
+      return i18n::tr("settings.shortcuts.scope.global");
+    case KeyScope::Editor:
+      return i18n::tr("settings.shortcuts.scope.editor");
+    case KeyScope::Debug:
+      return i18n::tr("settings.shortcuts.scope.debug");
+    default:
+      return "";
+  }
+}
+
+std::string draft_conflict_message(const SettingsModalState* state, KeyAction action,
+                                   const std::string& chord_canonical) {
+  KeyBindingRegistry scratch = KeyBindingRegistry::with_defaults();
+  scratch.clear_overrides();
+  if (state != nullptr) {
+    for (const auto& override_entry : state->draft_key_overrides) {
+      scratch.set_override(override_entry.action, override_entry.chords);
+    }
+  }
+  for (const auto& conflict : scratch.find_conflicts()) {
+    if (conflict.chord_canonical != chord_canonical) {
+      continue;
+    }
+    if (conflict.first != action && conflict.second != action) {
+      continue;
+    }
+    const KeyAction other = conflict.first == action ? conflict.second : conflict.first;
+    std::string msg = i18n::tr("settings.shortcuts.conflict");
+    msg += " ";
+    msg += i18n::tr(std::string(key_action_label_key(other)));
+    if (conflict.context_dependent) {
+      msg += " ";
+      msg += i18n::tr("settings.shortcuts.conflict_context");
+    }
+    return msg;
+  }
+  return {};
+}
+
+void start_shortcut_recording(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  clamp_shortcuts_selection(state);
+  state->shortcuts_recording = true;
+  state->shortcuts_message = i18n::tr("settings.shortcuts.recording");
+}
+
+void cancel_shortcut_recording(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->shortcuts_recording = false;
+  state->shortcuts_message.clear();
+}
+
+void apply_recorded_shortcut(SettingsModalState* state, const Event& event) {
+  if (state == nullptr) {
+    return;
+  }
+  const auto actions = remappable_shortcut_actions();
+  clamp_shortcuts_selection(state);
+  if (state->shortcuts_selected < 0 ||
+      state->shortcuts_selected >= static_cast<int>(actions.size())) {
+    cancel_shortcut_recording(state);
+    return;
+  }
+  const KeyAction action = actions[static_cast<std::size_t>(state->shortcuts_selected)];
+  KeyChordSpec chord = make_chord_from_event(event);
+  if (chord.strokes.empty() || chord.strokes.front().inputs.empty()) {
+    state->shortcuts_message = i18n::tr("settings.shortcuts.record_failed");
+    state->shortcuts_recording = false;
+    return;
+  }
+  set_draft_override(state, action, {chord});
+  state->shortcuts_recording = false;
+  state->shortcuts_message = draft_conflict_message(state, action, chord.canonical);
+  if (state->shortcuts_message.empty()) {
+    state->shortcuts_message = i18n::tr("settings.shortcuts.changed");
+  }
+}
+
+void reset_selected_shortcut(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  const auto actions = remappable_shortcut_actions();
+  clamp_shortcuts_selection(state);
+  if (state->shortcuts_selected < 0 ||
+      state->shortcuts_selected >= static_cast<int>(actions.size())) {
+    return;
+  }
+  const KeyAction action = actions[static_cast<std::size_t>(state->shortcuts_selected)];
+  set_draft_override(state, action, {});
+  state->shortcuts_message = i18n::tr("settings.shortcuts.reset");
+}
+
+void activate_shortcuts_option(SettingsModalState* state, int index) {
+  if (state == nullptr) {
+    return;
+  }
+  state->shortcuts_selected = index;
+  clamp_shortcuts_selection(state);
+  start_shortcut_recording(state);
+}
+
+SettingsBodyContent build_shortcuts_settings(SettingsModalState* state) {
+  SettingsBodyContent content;
+  append_top_level_tabs_header(&content, state);
+
+  content.rows.push_back(text(i18n::tr("settings.shortcuts.help")) | color(theme::Muted()));
+  content.rows.push_back(text(""));
+
+  const auto actions = remappable_shortcut_actions();
+  clamp_shortcuts_selection(state);
+  for (int i = 0; i < static_cast<int>(actions.size()); ++i) {
+    const KeyAction action = actions[static_cast<std::size_t>(i)];
+    const KeyBindingEntry* entry = keybind_registry().find(action);
+    const bool selected = state != nullptr && i == state->shortcuts_selected;
+    const bool customized = draft_has_override(state, action);
+    const std::string label = i18n::tr(std::string(key_action_label_key(action)));
+    const std::string keys = format_chords_label(draft_effective_chords(state, action));
+    const std::string scope =
+        entry != nullptr ? scope_label(entry->scope) : std::string{};
+
+    Element row = hbox({
+        text(selected ? "▸ " : "  ") | color(selected ? theme::Accent() : theme::Muted()),
+        text(label) | color(selected ? theme::Accent() : theme::Header()) | bold | size(WIDTH, EQUAL, 36),
+        text(" ") | flex,
+        text(keys) | color(customized ? theme::Success() : theme::UiText()) | size(WIDTH, EQUAL, 28),
+        text("  "),
+        text(scope) | color(theme::Muted()) | size(WIDTH, EQUAL, 10),
+        text(customized ? " *" : "  ") | color(theme::Accent()),
+    });
+    if (selected && state != nullptr && state->shortcuts_recording) {
+      row = row | inverted;
+    }
+    add_click_target(&content, i);
+    content.rows.push_back(std::move(row));
+  }
+
+  if (state != nullptr) {
+    content.focus_row = 2 + state->shortcuts_selected;
+    if (!state->shortcuts_message.empty()) {
+      content.rows.push_back(text(""));
+      content.rows.push_back(text(state->shortcuts_message) | color(theme::Warning()));
+    }
+  }
+  return content;
+}
+
+bool handle_shortcuts_settings_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr) {
+    return true;
+  }
+  if (state->shortcuts_recording) {
+    if (event == Event::Escape) {
+      cancel_shortcut_recording(state);
+      return true;
+    }
+    if (event.is_mouse() || event_is_kitty_key_release(event) || event_is_alt_key_press(event) ||
+        event_is_ctrl_key_press(event) || event_is_shift_key_press(event) ||
+        event_is_alt_key_release(event) || event_is_ctrl_key_release(event) ||
+        event_is_shift_key_release(event)) {
+      return true;
+    }
+    apply_recorded_shortcut(state, event);
+    return true;
+  }
+
+  if (handle_top_level_tab_keys(state, event)) {
+    return true;
+  }
+  if (handle_settings_body_scroll_keys(state, event)) {
+    return true;
+  }
+
+  const int count = static_cast<int>(remappable_shortcut_actions().size());
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    if (count > 0) {
+      state->shortcuts_selected = std::min(state->shortcuts_selected + 1, count - 1);
+    }
+    return true;
+  }
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    state->shortcuts_selected = std::max(0, state->shortcuts_selected - 1);
+    return true;
+  }
+  if (event == Event::Return || event == Event::Character(' ') ||
+      event == Event::Character('c') || event == Event::Character('C')) {
+    start_shortcut_recording(state);
+    return true;
+  }
+  if (event == Event::Character('r') || event == Event::Character('R')) {
+    reset_selected_shortcut(state);
+    return true;
+  }
+  return true;
+}
+
 bool compile_commands_eq(const CompileCommandsSettings& a, const CompileCommandsSettings& b) {
   return a.mode == b.mode && a.source_path == b.source_path &&
          a.docker_container == b.docker_container &&
@@ -2589,6 +2902,10 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->workspace_root = workspace_root;
   state->has_workspace = !workspace_root.empty();
   state->workspace_baseline = workspace_config;
+  state->draft_key_overrides = keybind_registry().overrides();
+  state->shortcuts_selected = 0;
+  state->shortcuts_recording = false;
+  state->shortcuts_message.clear();
   if (state->has_workspace) {
     state->draft_ui_colors_preset = workspace_config.ui_colors_preset;
     if (!workspace_config.ui_colors.empty()) {
@@ -2666,6 +2983,12 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
     on_apply(*settings);
   }
 
+  keybind_registry().clear_overrides();
+  for (const auto& override_entry : state->draft_key_overrides) {
+    keybind_registry().set_override(override_entry.action, override_entry.chords);
+  }
+  save_key_bindings_file(keybind_registry());
+
   if (state->has_workspace && on_workspace_apply) {
     const WorkspaceConfig workspace = workspace_config_from_draft(*state);
     // Closing settings used to always restart LSP + kill the terminal shell — that freezes
@@ -2725,6 +3048,14 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
               close_settings_modal(state, settings, on_apply, on_workspace_apply,
                                    on_clang_format_apply);
               return true;
+            case SettingsPanel::kShortcuts:
+              if (state->shortcuts_recording) {
+                cancel_shortcut_recording(state);
+                return true;
+              }
+              close_settings_modal(state, settings, on_apply, on_workspace_apply,
+                                   on_clang_format_apply);
+              return true;
             case SettingsPanel::kGeneral:
             case SettingsPanel::kVisualHighlight:
             case SettingsPanel::kWorkspace:
@@ -2774,6 +3105,13 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
           case SettingsPanel::kStatus:
             title = i18n::tr("settings.title.status");
             content = build_status_settings(state);
+            break;
+          case SettingsPanel::kShortcuts:
+            title = i18n::tr("settings.title.shortcuts");
+            footer = state->shortcuts_recording
+                         ? i18n::tr("settings.shortcuts.footer_recording")
+                         : i18n::tr("settings.shortcuts.footer");
+            content = build_shortcuts_settings(state);
             break;
           case SettingsPanel::kIncludePaths:
             title = i18n::tr("settings.title.include_paths");

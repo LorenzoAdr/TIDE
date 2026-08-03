@@ -1148,13 +1148,16 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     const bool editor_focus =
         focus != nullptr && is_editor_focus_region(focus->region);
     const bool helix_on =
-        layout_state != nullptr && layout_state->app_settings != nullptr &&
-        layout_state->app_settings->helix_mode_enabled &&
-        layout_state->helix_status.active;
+        layout_state != nullptr && layout_state->helix_status.active;
 
     std::string editor_mode_indicator;
     if (editor_focus && helix_on) {
-      editor_mode_indicator = i18n::tr("status.editor_mode.helix");
+      const bool helix_overlay =
+          layout_state->app_settings != nullptr &&
+          !layout_state->app_settings->helix_mode_enabled;
+      editor_mode_indicator =
+          i18n::tr(helix_overlay ? "status.editor_mode.helix_overlay"
+                                 : "status.editor_mode.helix");
       if (!layout_state->helix_status.mode.empty()) {
         editor_mode_indicator += " " + layout_state->helix_status.mode;
       }

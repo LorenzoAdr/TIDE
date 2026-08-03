@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "ftxui/component/event.hpp"
 
 namespace tuide {
@@ -20,6 +22,11 @@ bool event_is_shift_up(const ftxui::Event& event);
 bool event_is_shift_down(const ftxui::Event& event);
 bool event_is_alt_left(const ftxui::Event& event);
 bool event_is_alt_right(const ftxui::Event& event);
+bool event_is_alt_up(const ftxui::Event& event);
+bool event_is_alt_down(const ftxui::Event& event);
+bool event_is_alt_arrow(const ftxui::Event& event);
+bool event_is_editor_cursor_history_back(const ftxui::Event& event, bool alt_modifier_held);
+bool event_is_editor_cursor_history_forward(const ftxui::Event& event, bool alt_modifier_held);
 bool event_is_alt_s(const ftxui::Event& event);
 bool event_is_ctrl_alt_up(const ftxui::Event& event);
 bool event_is_ctrl_alt_down(const ftxui::Event& event);
@@ -73,7 +80,15 @@ bool event_is_shift_key_press(const ftxui::Event& event);
 bool event_is_shift_key_release(const ftxui::Event& event);
 bool event_is_ctrl_key_press(const ftxui::Event& event);
 bool event_is_ctrl_key_release(const ftxui::Event& event);
+bool event_is_alt_key_press(const ftxui::Event& event);
+bool event_is_alt_key_release(const ftxui::Event& event);
 bool event_is_kitty_key_release(const ftxui::Event& event);
+bool event_has_alt_modifier(const ftxui::Event& event);
+bool event_is_helix_overlay_exempt(const ftxui::Event& event);
+std::optional<ftxui::Event> strip_alt_modifier_for_helix(const ftxui::Event& event);
+bool event_is_ctrl_alt_e(const ftxui::Event& event);
+bool event_is_ctrl_alt_period(const ftxui::Event& event);
+bool event_is_ctrl_alt_slash(const ftxui::Event& event);
 bool event_is_ctrl_p(const ftxui::Event& event);
 bool event_is_alt_p(const ftxui::Event& event);
 bool event_is_quick_open(const ftxui::Event& event);

@@ -14,6 +14,7 @@ Press **F1** inside tuide to open the in-app shortcuts dialog (scrollable). This
 | F7 | Open workspace search panel |
 | F8 | Open outline panel |
 | Ctrl+P | Quick open (file picker) |
+| Ctrl+Alt+E | Open external file wizard |
 | Ctrl+O | Go to symbol |
 | Ctrl+T | Show / hide bottom panel |
 | Ctrl+Q | Quit (with confirmation) |
@@ -45,6 +46,9 @@ Press **F1** inside tuide to open the in-app shortcuts dialog (scrollable). This
 | Ctrl+Alt+F / Ctrl+Shift+F | Search selection in workspace |
 | Ctrl+. | Code completion (LSP) |
 | Ctrl+Space | Code completion (LSP) |
+| Ctrl+Alt+. / Ctrl+Alt+/ | Code completion (recommended) |
+| Alt + key | Temporary Helix mode (e.g. Alt+Space for space menu; arrows excluded) |
+| Alt+← / → | Previous / next cursor position |
 | F6 | Code completion (LSP) |
 | Tab | Indent (does not cycle panel focus) |
 | Shift+arrows | Extend selection |

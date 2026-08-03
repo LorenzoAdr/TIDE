@@ -45,6 +45,8 @@
 #include "ui/glyphs.hpp"
 #include "ui/hover_effects.hpp"
 #include "ui/key_bindings.hpp"
+#include "ui/keybind/bindings_store.hpp"
+#include "ui/keybind/key_binding_registry.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/open_file_confirm.hpp"
 #include "ui/external_file_conflict.hpp"
@@ -143,14 +145,6 @@ bool should_block_inhibited_mouse_motion(const MainLayoutState *layout, const Ev
 		return true;
 	}
 	return false;
-}
-
-bool event_is_alt_up(const Event &event) {
-	return event == Event::Special("\x1B[1;3A");
-}
-
-bool event_is_alt_down(const Event &event) {
-	return event == Event::Special("\x1B[1;3B");
 }
 
 class BackgroundWorker {
@@ -352,6 +346,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 		}
 	});
 	app_settings_ = AppSettings::load();
+	load_key_bindings_file(&keybind_registry());
 	i18n::set_locale(app_settings_.ui_locale);
 	set_animations_enabled(app_settings_.animations_enabled);
 	workspace_.status_message = i18n::tr("workspace.select");
@@ -2415,7 +2410,7 @@ void Application::toggle_helix_mode() {
 bool Application::handle_focus_shortcuts(const Event &event) {
 	auto mark_focus_sync = [this] { layout_state_.focus_sync_needed = true; };
 
-	if (event == Event::CtrlA) {
+	if (event == Event::CtrlA || keybind_matches(KeyAction::FocusExplorer, event)) {
 		if (!layout_state_.explorer_visible) {
 			layout_state_.explorer_visible = true;
 			UI_WAKE(&layout_state_, "app");
@@ -2424,13 +2419,13 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		mark_focus_sync();
 		return true;
 	}
-	if (event == Event::CtrlE) {
+	if (event == Event::CtrlE || keybind_matches(KeyAction::FocusEditor, event)) {
 		focus_state_.region = FocusRegion::Editor;
 		layout_state_.text_input_focus = TextInputFocus::None;
 		mark_focus_sync();
 		return true;
 	}
-	if (event_is_open_outline_panel(event)) {
+	if (keybind_matches(KeyAction::OpenOutlinePanel, event)) {
 		if (!app_settings_.secondary_panel_enabled) {
 			app_settings_.secondary_panel_enabled = true;
 			app_settings_.save();
@@ -2442,7 +2437,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		mark_focus_sync();
 		return true;
 	}
-	if (event_is_open_search_panel(event)) {
+	if (keybind_matches(KeyAction::OpenSearchPanel, event)) {
 		layout_state_.console_visible = true;
 		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kSearch;
 		focus_state_.region = FocusRegion::Terminal;
@@ -2451,7 +2446,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		mark_focus_sync();
 		return true;
 	}
-	if (event_is_open_binary_symbols_panel(event)) {
+	if (keybind_matches(KeyAction::OpenBinarySymbolsPanel, event)) {
 		layout_state_.console_visible = true;
 		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kBinarySymbols;
 		focus_state_.region = FocusRegion::Terminal;
@@ -2463,7 +2458,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		mark_focus_sync();
 		return true;
 	}
-	if (event == Event::F4) {
+	if (keybind_matches(KeyAction::FocusTerminalTab, event)) {
 		focus_state_.region = FocusRegion::Terminal;
 		layout_state_.console_visible = true;
 		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
@@ -2986,7 +2981,7 @@ int Application::run() {
 			}
 
 			// Tuide app shortcuts must run before any_modal_open() and editor interceptors.
-			if (event_is_quick_open(event)) {
+			if (keybind_matches(KeyAction::QuickOpen, event)) {
 				if (event_is_kitty_key_release(event)) {
 					return false;
 				}
@@ -3000,7 +2995,7 @@ int Application::run() {
 				open_quick_file_picker(event_is_ctrl_p(event));
 				return true;
 			}
-			if (event_is_ctrl_o(event)) {
+			if (keybind_matches(KeyAction::GoToSymbol, event)) {
 				if (event_is_kitty_key_release(event)) {
 					return false;
 				}
@@ -3024,20 +3019,22 @@ int Application::run() {
 				return true;
 			}
 
-			if (event_is_f1(event) || event_is_alt_e(event)) {
+			if (keybind_matches(KeyAction::OpenExternalFile, event) ||
+			    keybind_matches(KeyAction::OpenExternalFileHere, event)) {
 				if (event_is_kitty_key_release(event)) {
 					return false;
 				}
 				if (external_file_wizard_state_.open) {
 					external_file_wizard_state_.open = false;
 				} else if (!any_modal_open()) {
-					open_external_file_wizard(event_is_alt_e(event));
+					open_external_file_wizard(
+					    keybind_matches(KeyAction::OpenExternalFileHere, event));
 				}
 				UI_WAKE(&layout_state_, "app");
 				return true;
 			}
 
-			if (event_is_open_shortcuts_modal(event)) {
+			if (keybind_matches(KeyAction::OpenShortcutsModal, event)) {
 				if (shortcuts_modal_state_.open) {
 					shortcuts_modal_state_.open = false;
 					shortcuts_modal_state_.first_visible = 0;
@@ -3049,7 +3046,8 @@ int Application::run() {
 				return true;
 			}
 
-			if (app_mode_ == AppMode::kNormal && event == Event::F10) {
+			if (app_mode_ == AppMode::kNormal &&
+			    keybind_matches(KeyAction::OpenSettings, event)) {
 				if (settings_modal_state_.open) {
 					close_settings_modal(
 					    &settings_modal_state_, &app_settings_,
@@ -3066,7 +3064,8 @@ int Application::run() {
 				return true;
 			}
 
-			if (app_mode_ == AppMode::kNormal && event == Event::F6) {
+			if (app_mode_ == AppMode::kNormal &&
+			    keybind_matches(KeyAction::ToggleHelixMode, event)) {
 				toggle_helix_mode();
 				return true;
 			}

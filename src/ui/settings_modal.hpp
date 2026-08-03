@@ -10,6 +10,7 @@
 #include "i18n/locale.hpp"
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/component/event.hpp"
+#include "ui/keybind/key_binding_registry.hpp"
 #include "ui/path_browser.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/tools_status.hpp"
@@ -22,6 +23,7 @@ enum class SettingsPanel {
   kWorkspace,
   kFormat,
   kStatus,
+  kShortcuts,
   kIncludePaths,
   kCompileCommands,
   kPathMappings,
@@ -103,6 +105,7 @@ struct SettingsModalState {
   ftxui::Box tab_workspace_box;
   ftxui::Box tab_theme_box;
   ftxui::Box tab_format_box;
+  ftxui::Box tab_shortcuts_box;
   ftxui::Box tab_status_box;
   ftxui::Box body_box;
   SettingsPanel click_layout_panel = SettingsPanel::kGeneral;
@@ -121,6 +124,12 @@ struct SettingsModalState {
   WorkspaceConfig workspace_baseline;
   ClangFormatConfig clang_format_baseline;
   bool show_all_workspace_files_baseline = false;
+
+  // Shortcuts tab (non-Helix keybindings).
+  std::vector<KeyBindingOverride> draft_key_overrides;
+  int shortcuts_selected = 0;
+  bool shortcuts_recording = false;
+  std::string shortcuts_message;
 };
 
 bool settings_modal_handle_mouse(SettingsModalState* state, ftxui::Event event);
