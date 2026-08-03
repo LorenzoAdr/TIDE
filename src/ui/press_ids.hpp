@@ -60,6 +60,10 @@ constexpr std::string_view kWelcomeExternalFile = "welcome.external_file";
 constexpr std::string_view kWelcomeDebug = "welcome.debug";
 constexpr std::string_view kWelcomeWorkspace = "welcome.workspace";
 
+inline std::string welcome_recent(int index) {
+  return "welcome.recent." + std::to_string(index);
+}
+
 constexpr std::string_view kWatchesTab0 = "watches.tab.0";
 constexpr std::string_view kWatchesTab1 = "watches.tab.1";
 constexpr std::string_view kWatchesTab2 = "watches.tab.2";
@@ -241,7 +245,8 @@ inline bool is_f1_hover(std::string_view id) {
 }
 
 inline bool is_welcome_hover(std::string_view id) {
-  return id == kWelcomeExternalFile || id == kWelcomeDebug || id == kWelcomeWorkspace;
+  return id == kWelcomeExternalFile || id == kWelcomeDebug || id == kWelcomeWorkspace ||
+         id.rfind("welcome.recent.", 0) == 0;
 }
 
 inline std::string problems_fix(int index) {

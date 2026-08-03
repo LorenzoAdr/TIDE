@@ -31,6 +31,8 @@ const StringTable& spanish_strings() {
       {"welcome.action.open_external", "F1   Abrir archivo suelto"},
       {"welcome.action.start_debug", "F2   Iniciar depuración"},
       {"welcome.action.open_workspace", "F3   Abrir workspace"},
+      {"welcome.recent.title", "Proyectos recientes"},
+      {"welcome.recent.hint", "↑↓ / j k  Enter abrir  1-5"},
       {"welcome.shortcuts_hint", "Alt+F1 / Shift+F1 atajos de teclado"},
       {"welcome.author", "Lorenzo Arias del Real"},
       {"welcome.email", "lorenzo.adr@proton.me"},

@@ -31,6 +31,8 @@ const StringTable& english_strings() {
       {"welcome.action.open_external", "F1   Open external file"},
       {"welcome.action.start_debug", "F2   Start debugging"},
       {"welcome.action.open_workspace", "F3   Open workspace"},
+      {"welcome.recent.title", "Recent projects"},
+      {"welcome.recent.hint", "↑↓ / j k  Enter open  1-5"},
       {"welcome.shortcuts_hint", "Alt+F1 / Shift+F1 keyboard shortcuts"},
       {"welcome.author", "Lorenzo Arias del Real"},
       {"welcome.email", "lorenzo.adr@proton.me"},

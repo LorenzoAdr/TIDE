@@ -432,6 +432,7 @@ ftxui::Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                                 WelcomeScreenState* welcome_state,
                                 std::function<void()> on_welcome_external_file,
                                 std::function<void()> on_welcome_debug,
-                                std::function<void()> on_welcome_workspace);
+                                std::function<void()> on_welcome_workspace,
+                                std::function<void(const std::string&)> on_welcome_recent_project);
 
 }  // namespace tuide

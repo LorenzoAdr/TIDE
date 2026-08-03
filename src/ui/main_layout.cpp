@@ -936,7 +936,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
                          GitPanelState* git_panel_state, WelcomeScreenState* welcome_state,
                          std::function<void()> on_welcome_external_file,
                          std::function<void()> on_welcome_debug,
-                         std::function<void()> on_welcome_workspace) {
+                         std::function<void()> on_welcome_workspace,
+                         std::function<void(const std::string&)> on_welcome_recent_project) {
   auto split_state = std::make_shared<LayoutState>();
   auto focus_sync = std::make_shared<FocusSyncState>();
   split_state->left_width = 22;
@@ -981,7 +982,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
 
   auto welcome_screen =
       MakeWelcomeScreen(layout_state, welcome_state, on_welcome_external_file, on_welcome_debug,
-                        on_welcome_workspace);
+                        on_welcome_workspace, on_welcome_recent_project);
 
   auto outline = MakeOutlinePanel(workspace, focus, layout_state);
   auto sidebar = MakeRightSidebarPanel(outline, layout_state);
