@@ -634,6 +634,17 @@ bool event_is_ctrl_a(const ftxui::Event& event) {
          input == "\x1B[27;5;65~";
 }
 
+bool event_is_ctrl_alt_a(const ftxui::Event& event) {
+  const int mods[] = {7};
+  return event == ftxui::Event::CtrlAltA ||
+         csi_key_any_modifier(event, mods, 1, 65) ||
+         csi_key_any_modifier(event, mods, 1, 97) ||
+         event == ftxui::Event::Special("\x1B[27;7;65~") ||
+         event == ftxui::Event::Special("\x1B[27;7;97~") ||
+         event == ftxui::Event::Special("\x1B[65;7u") ||
+         event == ftxui::Event::Special("\x1B[97;7u");
+}
+
 bool event_is_ctrl_backspace(const ftxui::Event& event) {
   // Ctrl+W is the de-facto delete-word-backward in many terminals.
   if (event == ftxui::Event::CtrlW) {
@@ -792,6 +803,7 @@ bool event_has_ctrl_modifier(const ftxui::Event& event) {
          event_is_ctrl_alt_f(event) || event_is_ctrl_shift_f(event) ||
          event_is_ctrl_shift_s(event) ||
          event_is_ctrl_h(event) ||
+         event_is_ctrl_a(event) || event_is_ctrl_alt_a(event) ||
          event == ftxui::Event::CtrlS ||
          event == ftxui::Event::CtrlQ ||
          event == ftxui::Event::CtrlB || event == ftxui::Event::CtrlW ||
@@ -826,6 +838,7 @@ bool editor_priority_key(const ftxui::Event& event) {
          event_is_ctrl_alt_d(event) || event_is_ctrl_shift_d(event) ||
          event_is_ctrl_backspace(event) ||
          event_is_ctrl_delete(event) || event == ftxui::Event::CtrlS ||
+         event_is_ctrl_a(event) ||
          event_is_ctrl_alt_l(event) || event_is_ctrl_shift_l(event) ||
          event_is_completion(event) || event_is_go_to_definition(event) ||
          event_is_go_to_declaration(event) ||

@@ -18,7 +18,7 @@ Press **F1** inside tuide to open the in-app shortcuts dialog (scrollable). This
 | Ctrl+O | Go to symbol |
 | Ctrl+T | Show / hide bottom panel |
 | Ctrl+Q | Quit (with confirmation) |
-| Ctrl+A | Focus file explorer |
+| Ctrl+Alt+A | Focus file explorer |
 | Ctrl+E | Focus editor |
 | Alt+← / → | Move focus left / right |
 | Alt+↑ / ↓ | Move focus up / to terminal |
@@ -41,6 +41,7 @@ Press **F1** inside tuide to open the in-app shortcuts dialog (scrollable). This
 | Ctrl+I | Half page down (moves cursor) |
 | Ctrl+Backspace | Delete previous word |
 | Ctrl+Delete | Delete next word |
+| Ctrl+A | Select all |
 | Ctrl+D / Ctrl+Alt+D / Ctrl+Shift+D | Select next match (multi-cursor) |
 | Ctrl+Alt+L / Ctrl+Shift+L | Select all matches |
 | Ctrl+Alt+F / Ctrl+Shift+F | Search selection in workspace |
@@ -108,7 +109,7 @@ Focus cycles through four regions: **Explorer → Editor → Right panel → Ter
 | Alt+↓ | Any (except editor arrows) | Move to terminal |
 | Alt+↑ | Terminal | Move to editor |
 | F4 | Any | Jump to terminal |
-| Ctrl+A | Any | Jump to explorer |
+| Ctrl+Alt+A | Any | Jump to explorer |
 | Ctrl+E | Any | Jump to editor |
 
 Tab never cycles between panels. In the editor it inserts a tab character; in the terminal it sends a tab to the shell.

@@ -108,6 +108,7 @@ const StringTable& english_strings() {
       {"shortcuts.editor.half_page_down", "Half page down (cursor + scroll)"},
       {"shortcuts.editor.delete_word_backward", "Delete previous word"},
       {"shortcuts.editor.delete_word_forward", "Delete next word"},
+      {"shortcuts.editor.select_all", "Select all"},
       {"shortcuts.editor.select_next_match", "Select next match (multi-cursor)"},
       {"shortcuts.editor.select_all_matches", "Select all matches (multi-cursor)"},
       {"shortcuts.editor.complete_recommended", "Code completion (recommended)"},

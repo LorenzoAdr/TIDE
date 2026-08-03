@@ -134,6 +134,9 @@ std::string describe_key_event(const ftxui::Event& event) {
   if (event_is_ctrl_alt_e(event)) {
     return "Ctrl+Alt+E";
   }
+  if (event_is_ctrl_alt_a(event)) {
+    return "Ctrl+Alt+A";
+  }
   if (event_is_ctrl_alt_f(event)) {
     return "Ctrl+Alt+F";
   }
@@ -283,6 +286,9 @@ std::optional<KeyChordSpec> try_parse_canonical_chord(const std::string& canonic
   }
   if (key == "ctrl+a") {
     return wrap([](const ftxui::Event& e) { return e == ftxui::Event::CtrlA; });
+  }
+  if (key == "ctrl+alt+a") {
+    return wrap([](const ftxui::Event& e) { return event_is_ctrl_alt_a(e); });
   }
   if (key == "ctrl+e") {
     return wrap([](const ftxui::Event& e) { return e == ftxui::Event::CtrlE; });

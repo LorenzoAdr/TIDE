@@ -52,6 +52,18 @@ void test_select_all_matches() {
   check(buffer.cursors.size() == 2, "two foo matches");
 }
 
+void test_select_all() {
+  auto buffer = make_buffer({"alpha", "beta", "gamma"});
+  buffer.reset_to_single_cursor(1, 2);
+  tuide::select_all(&buffer);
+  check(buffer.cursors.size() == 1, "single cursor after select all");
+  check(buffer.primary().anchor.line == 0 && buffer.primary().anchor.col == 0,
+        "anchor at start of file");
+  check(buffer.primary().head.line == 2 && buffer.primary().head.col == 5,
+        "head at end of file");
+  check(buffer.primary().has_selection(), "select all creates a selection");
+}
+
 void test_exit_multi_cursor() {
   auto buffer = make_buffer({"a b a"});
   buffer.cursors = {{{0, 0}, {0, 0}}, {{0, 4}, {0, 4}}};
@@ -251,6 +263,7 @@ int main() {
   test_insert_multi_cursor();
   test_find_all_matches();
   test_select_all_matches();
+  test_select_all();
   test_exit_multi_cursor();
   test_backspace_multi();
   test_replace_selection_on_type();

@@ -108,6 +108,7 @@ const StringTable& spanish_strings() {
       {"shortcuts.editor.half_page_down", "Media página abajo (cursor + scroll)"},
       {"shortcuts.editor.delete_word_backward", "Borrar palabra anterior"},
       {"shortcuts.editor.delete_word_forward", "Borrar palabra siguiente"},
+      {"shortcuts.editor.select_all", "Seleccionar todo el archivo"},
       {"shortcuts.editor.select_next_match", "Seleccionar siguiente coincidencia (multicursor)"},
       {"shortcuts.editor.select_all_matches", "Seleccionar todas las coincidencias (multicursor)"},
       {"shortcuts.editor.complete_recommended", "Completar código (recomendado)"},

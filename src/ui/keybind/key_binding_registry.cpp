@@ -124,7 +124,7 @@ KeyBindingRegistry KeyBindingRegistry::with_defaults() {
       true, true));
   e.push_back(make_entry(
       KeyAction::FocusExplorer, KeyScope::Global,
-      {chord1("ctrl+a", [](const ftxui::Event& ev) { return ev == ftxui::Event::CtrlA; })}, true,
+      {chord1("ctrl+alt+a", [](const ftxui::Event& ev) { return event_is_ctrl_alt_a(ev); })}, true,
       true, true));
   e.push_back(make_entry(
       KeyAction::FocusEditor, KeyScope::Global,

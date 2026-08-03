@@ -50,6 +50,7 @@ void move_primary_word_left(EditorBuffer* buffer, bool extend_selection = false)
 void move_primary_word_right(EditorBuffer* buffer, bool extend_selection = false);
 
 void clear_primary_selection(EditorBuffer* buffer);
+void select_all(EditorBuffer* buffer);
 void select_word_at(EditorBuffer* buffer, int line, int col);
 void select_words_range(EditorBuffer* buffer, int anchor_line, int anchor_col, int head_line,
                         int head_col);

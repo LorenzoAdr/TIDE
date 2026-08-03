@@ -1293,6 +1293,18 @@ void clear_primary_selection(EditorBuffer* buffer) {
   buffer->primary().collapse_to_head();
 }
 
+void select_all(EditorBuffer* buffer) {
+  if (buffer == nullptr || buffer->lines.empty()) {
+    return;
+  }
+  buffer->reset_to_single_cursor(0, 0);
+  auto& cursor = buffer->primary();
+  cursor.anchor = {0, 0};
+  const int last = static_cast<int>(buffer->lines.size()) - 1;
+  cursor.head = {last, static_cast<int>(buffer->lines.back().size())};
+  clamp_all_cursors(buffer);
+}
+
 void select_word_at(EditorBuffer* buffer, int line, int col) {
   int start = 0;
   int end = 0;

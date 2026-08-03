@@ -2420,7 +2420,7 @@ void Application::toggle_helix_mode() {
 bool Application::handle_focus_shortcuts(const Event &event) {
 	auto mark_focus_sync = [this] { layout_state_.focus_sync_needed = true; };
 
-	if (event == Event::CtrlA || keybind_matches(KeyAction::FocusExplorer, event)) {
+	if (event_is_ctrl_alt_a(event) || keybind_matches(KeyAction::FocusExplorer, event)) {
 		if (!layout_state_.explorer_visible) {
 			layout_state_.explorer_visible = true;
 			UI_WAKE(&layout_state_, "app");

@@ -14,6 +14,7 @@ EXTRA_CATALOG: list[tuple[str, str, str]] = [
     ("shortcuts.editor.half_page_down", "Media página abajo (cursor + scroll)", "Half page down (cursor + scroll)"),
     ("shortcuts.editor.delete_word_backward", "Borrar palabra anterior", "Delete previous word"),
     ("shortcuts.editor.delete_word_forward", "Borrar palabra siguiente", "Delete next word"),
+    ("shortcuts.editor.select_all", "Seleccionar todo el archivo", "Select all"),
     ("shortcuts.editor.select_next_match", "Seleccionar siguiente coincidencia (multicursor)", "Select next match (multi-cursor)"),
     ("shortcuts.editor.select_all_matches", "Seleccionar todas las coincidencias (multicursor)", "Select all matches (multi-cursor)"),
     ("shortcuts.editor.complete_recommended", "Completar código (recomendado)", "Code completion (recommended)"),
