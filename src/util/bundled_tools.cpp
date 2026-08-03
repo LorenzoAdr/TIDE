@@ -1,5 +1,7 @@
 #include "util/bundled_tools.hpp"
 
+#include "toolpacks/store.hpp"
+
 #include <array>
 #include <atomic>
 #include <cctype>
@@ -956,6 +958,12 @@ std::optional<ClangdLocation> resolve_clangd() {
     return ClangdLocation{*env_path, {}, ClangdLocation::Source::Env};
   }
 
+  // Toolpacks win over compile-time bundles and PATH (pilot: clangd).
+  if (const auto tp = toolpacks::resolve_clangd_toolpack(); tp.has_value()) {
+    return ClangdLocation{tp->binary_path, tp->resource_dir,
+                          ClangdLocation::Source::Toolpack};
+  }
+
 #ifdef TUIDE_HAS_BUNDLED_CLANGD
   if (const auto bundled = resolve_bundled_clangd(); bundled.has_value()) {
     return bundled;
@@ -974,6 +982,11 @@ std::optional<ClangdLocation> resolve_clangd() {
 std::optional<GdbLocation> resolve_gdb() {
   if (const auto env_path = gdb_from_env(); env_path.has_value()) {
     return GdbLocation{*env_path, GdbLocation::Source::Env};
+  }
+
+  // Toolpacks win over compile-time bundles and PATH.
+  if (const auto tp = toolpacks::resolve_installed_toolpack("gdb"); tp.has_value()) {
+    return GdbLocation{tp->binary_path, GdbLocation::Source::Toolpack};
   }
 
 #ifdef TUIDE_HAS_BUNDLED_GDB
