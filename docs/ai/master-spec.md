@@ -556,8 +556,8 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 
 ### Dudas menores restantes (no bloquean el diseño)
 
-1. ¿Si Phi-4-mini falla en tools reales de tuide, subir L1 a Qwen2.5-7B-Instruct (más peso) manteniendo L2 = Coder-7B?
-2. ¿Ofrecer tier ligero (L1 Qwen-1.5B + L2 Coder-1.5B) además del default agent/coder?
+1. ¿Selector de tier L1 en UI (1.5B / Phi-4 / 7B) desde el primer día?
+2. ¿Tier L2 ligero (Coder-1.5B) además del Coder-7B default?
 3. ¿El azul AI del gutter reutiliza un token del theme o `theme.ai_gutter`?
 
 ---
@@ -588,6 +588,6 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 - [x] UI chat = tab en consola inferior (**D15**)
 - [x] Roadmap estricto Bases → L0 → L1 → L2-dry-run → L2 (**D16**)
 - [x] ContextPack sin RAG = QuerySeed (L1) + rg/TS/LSP (**D17**)
-- [x] Licencias: redistribuible en GitHub (D18); defaults Phi-4-mini + Coder-7B; **no** Qwen Research 3B
+- [x] Licencias redistribuibles (D18); L1 default **1.5B** + upgrade Phi-4; L2 **Coder-7B**; no Qwen Research 3B
 - [ ] (Opcional) Checklist de issues por fase cuando se abra implementación
 - [ ] Sin código de producto en esta rama hasta que se pida explícitamente
