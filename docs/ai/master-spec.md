@@ -26,7 +26,7 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D6 | Atribución UI | Journal (+ Myers opcional debounce 150 ms). Gutter: **humano = verde**, **AI = azul** (D11) |
 | D7 | Nivel 2 (código) | **Qwen2.5-Coder-7B-Instruct** Q4 (Apache, codegen). Alt Coder-1.5B. Evitar Coder-3B (no comercial) y no usar Instruct genérico como L2 por defecto |
 | D8 | llama.cpp | Bundle CMake; runtime **MIT**. Pesos según **D18** (redistribuibles) |
-| D9 | Nivel 1 (tools) | **Phi-4-mini-instruct** Q4 (MIT, agent/tools/seeds). Alt Qwen2.5-7B-Instruct si hace falta más tools. **No** usar Coder como L1. Evitar Qwen2.5-3B (no comercial) |
+| D9 | Nivel 1 (tools) | Default **ligero:** **Qwen2.5-1.5B-Instruct** Q4 (~1 GB, Apache) — tools/seeds con L0 delante. **Upgrade** si falla eval: **Phi-4-mini-instruct** (~2.5 GB, MIT) o Qwen2.5-7B-Instruct. **No** Coder como L1. Evitar Qwen2.5-3B (no comercial). El “3B” inicial era techo orientativo; con L0+L2 ya no hace falta ese peso por defecto |
 | D10 | Task Runner / shell | Solo comandos en una **whitelist** (config + defaults). Por defecto entran **compile** y **launch** (auto-detect / tasks del proyecto). Fuera de la lista → **no se ejecuta**; la UI puede ofrecer “añadir a la whitelist” de forma explícita |
 | D11 | Gutter | Un color **AI** (p.ej. **azul**), distinto del humano (verde). No hace falta tono distinto L1 vs L2 en MVP; el nivel puede ir en tooltip |
 | D12 | Search/Replace | Formato **estilo Aider** adaptado a C++ (bloques SEARCH/REPLACE en texto). Fácil de validar y de depurar; JSON como transporte opcional solo si un backend remoto lo exige |
@@ -104,18 +104,20 @@ Flujo:
 
 **Rol L1 (no es un coder):** tool-calling, QuerySeeds (D17), escalado a L2, resumir diagnostics/tasks. Métrica = **fiabilidad de tools/JSON/planes**, no HumanEval.
 
-Default: **Phi-4-mini-instruct** Q4_K_M (~2.5 GB, MIT) + decoding acotado (JSON/grammar).
+**Revisión de potencia:** el techo “~3B” (Q-A antigua) tenía sentido cuando L1 parecía el cerebro único. Con **L0** + **L2 coder**, L1 es un **traductor/orquestador**. Un **1.5B-class** suele bastar con grammar/JSON constrained; subir de peso solo si el eval de seeds/tools falla.
 
-| Candidato L1 | Licencia | Releases | Q4 | Encaje rol agent/tools |
+| Tier | Modelo L1 | Licencia | Q4 | Cuándo |
 |---|---|---|---|---|
-| **Phi-4-mini-instruct** (default) | MIT | Sí | ~2.5 GB | Instruct/reasoning; buen default de peso |
-| Qwen2.5-7B-Instruct | Apache-2.0 | Sí | ~4.5 GB | Subir aquí si Phi falla en tools reales |
-| Qwen2.5-1.5B-Instruct | Apache-2.0 | Sí | ~1.0 GB | Tier ligero; seeds/tools más frágiles |
-| Llama-3.2-3B-Instruct | Llama Community | Sí* | ~2.0 GB | *“Built with Llama” + NOTICE |
-| ~~Qwen2.5-Coder-* como L1~~ | — | — | — | **No:** coder ≠ agent router |
-| ~~Qwen2.5-3B-Instruct~~ | Qwen Research | No | ~1.9 GB | No comercial |
+| **Default (ligero)** | **Qwen2.5-1.5B-Instruct** | Apache-2.0 | ~1.0 GB | Partir aquí (Releases/RAM) |
+| Upgrade | **Phi-4-mini-instruct** | MIT | ~2.5 GB | Si 1.5B falla tools/seeds en fixtures tuide |
+| Potencia | Qwen2.5-7B-Instruct | Apache-2.0 | ~4.5 GB | Solo si hace falta más techo de agent |
+| Alt | Llama-3.2-3B-Instruct | Llama Community | ~2.0 GB | Con “Built with Llama” + NOTICE |
+| ~~Coder como L1~~ | — | — | — | **No:** rol incorrecto |
+| ~~Qwen2.5-3B / 0.5B~~ | Research / débil | — | — | 3B no comercial; 0.5B frágil para seeds conceptuales |
 
-L1 usa `ToolRegistry` + Task Runner; **no** sustituye rg/LSP.
+Siempre: **decoding acotado** (JSON schema / grammar). L1 usa `ToolRegistry` + Task Runner; **no** sustituye rg/LSP.
+
+**Criterio de subida de tier:** en Fase C medir (a) tool calls válidos multi-paso, (b) calidad de QuerySeeds en frases tipo §7.0. Si falla → Phi-4-mini; si aún falla → 7B.
 
 ### 3.3 Nivel 2 — Generador de código (D7, D18)
 
@@ -468,7 +470,7 @@ Infraestructura compartida por todos los niveles.
 ### Fase C — Nivel 1 (agent LLM local)
 
 1. Bundle/backend llama.cpp + ModelStore (D8, D18).
-2. GGUF L1 default: **Phi-4-mini-instruct Q4_K_M** (D9); alts Qwen2.5-1.5B/7B Apache.
+2. GGUF L1 default: **Qwen2.5-1.5B-Instruct** Q4 (D9); upgrade Phi-4-mini / Qwen-7B si el eval lo pide.
 3. Agent loop: tool-calling + grammar/JSON constrained, max_steps, cancel, whitelist.
 4. L0 delante; L1 dicta QuerySeeds en NL conceptual (D17).
 5. Intención `needs_level2` sin llamar aún al coder.
@@ -512,7 +514,7 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 |---|---|---|
 | A Bases | — | Tab AI, tools, tasks, journal, ContextPack vacío-de-RAG |
 | B L0 | A | Router sin LLM |
-| C L1 | A+B | Agent Phi-4-mini (MIT) + tools |
+| C L1 | A+B | Agent 1.5B (upgrade Phi-4/7B) + tools |
 | D Dry-run | C | Preview del envío a L2 en consola |
 | E L2 | D (validado) | Coder-7B Apache / API + Search/Replace |
 | F RAG | E (o en paralelo tras D si el pack está estable) | Embeddings |
@@ -545,7 +547,7 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 
 | Id | Pregunta | Resolución |
 |---|---|---|
-| Q-A | Modelo L1 | **Phi-4-mini** MIT Q4 (sustituye el 3B Qwen Research) (**D9**, **D18**) |
+| Q-A | Modelo L1 | Revisado: default **1.5B** Instruct; Phi-4-mini/7B como upgrade (**D9**) |
 | Q-B | Shell del agent | **Whitelist** de comandos; compile/launch por defecto; fuera = deny / “añadir a whitelist” (**D10**) |
 | Q-C | Color gutter | AI = **azul**; humano = verde (**D11**) |
 | Q-D | Formato S/R | **Aider-text** adaptado a C++; JSON solo si hace falta (**D12**) |
