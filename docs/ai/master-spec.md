@@ -34,7 +34,7 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D14 | Enrutado L0 | **Todo** el chat pasa primero por Nivel 0 (puerta barata). L0 resuelve o escala a L1. Slash commands son atajos L0 (p.ej. `/build` → task runner sin LLM) |
 | D15 | UI chat | Tab **AI** en el panel inferior (`ConsolePanelTabs`), junto a Terminal / Problems / Git / …. Transcript tipo terminal/chat (estilo Cursor): respuestas de texto, tool/status y **stdout/stderr de comandos** del Task Runner. Los cambios de código se aplican **en el editor** (auto + journal/gutter), no se vuelcan como archivos enteros en el chat |
 | D16 | Roadmap por etapas | Implementar en orden estricto: **Bases → L0 → L1 → L2-dry-run → L2**. Antes del modelo L2, el Nivel 1 **imprime en el tab AI** el paquete que enviaría a L2 (`ContextPack` + instrucción) para validar fragmentos y prompts a ojo |
-| D17 | ContextPack sin RAG | Ensamblado **estructural**: rg → cuerpos Tree-sitter → LSP (def/hover/refs) + **call hierarchy incoming** → headers/declaración e includes **directos** relevantes; presupuesto de tokens; RAG solo añade candidatos después (Fase F) |
+| D17 | ContextPack sin RAG | (1) **QuerySeed**: cursor/selección → extract L0 de ids → `workspace_symbols` → **L1 propone términos** si el NL es conceptual → (futuro) RAG. (2) Con esos seeds: rg → cuerpos TS → LSP + incoming calls → headers directos. Sin embeddings, **rg no busca la frase**: busca los seeds |
 
 ---
 
@@ -270,31 +270,55 @@ Appends al transcript solo vía cola + `UI_WAKE`; respetar `UiActivityGate` (no 
 
 RAG vectorial queda en **Fase F**. Hasta entonces el contexto para L1/L2 (y el dry-run) se arma con el **IDE que ya tenemos**: ripgrep + Tree-sitter + LSP (incl. call hierarchy) + headers relevantes.
 
-### 7.1 Pipeline de ensamblado del ContextPack (v1, sin embeddings)
+### 7.0 El problema real: ¿qué string pasamos a ripgrep?
+
+`rg` no entiende “¿dónde se gestionan las conexiones?”. Solo busca **términos léxicos**. Sin embeddings, **alguien tiene que proponer seeds** (palabras/identificadores) a partir del intent. Eso es lo que antes quedó implícito y es el hueco.
+
+**Propuesta (D17 ampliada): capas de `QuerySeed`, de más barata a más cara**
+
+| Capa | Quién | Qué busca `rg` / LSP | Cuándo |
+|---|---|---|---|
+| **S0 Cursor** | Editor | Identificador bajo cursor / selección literal | Siempre que haya selección o símbolo en cursor (P0; a menudo **ni hace falta** rg) |
+| **S1 Extract L0** | Nivel 0 C++ | Tokens del mensaje: `` `backticks` ``, `"quotes"`, `snake_case`, `CamelCase`, `paths/foo.cpp`, códigos de error | Mensaje trae nombres propios |
+| **S2 Keywords L0** | Nivel 0 | Mapa chico intent→términos de dominio del **proyecto abierto** (heurístico) + stopwords EN/ES (“dónde”, “gestionan”, “el”, …) | Solo ayuda marginal; **no** es un tesauro mágico |
+| **S3 workspace_symbols** | LSP | Query fuzzy con seeds S0/S1 (no es rg, pero mismo rol: anclar símbolo) | Preferible a rg a ciegas cuando hay clangd/… |
+| **S4 Seeds L1** | Nivel 1 (LLM) | L1 propone 3–8 **términos de búsqueda** / símbolos candidatos → `rg` + `workspace_symbols` | NL conceptual sin identificadores (“conexiones”, “auth”, …) |
+| **S5 RAG** | Fase F | Chunks por similitud semántica | Cuando S1–S4 fallen en recall |
+
+**Orden práctico de ensamblado:**
+
+1. Si hay **selección/cursor** → ancla directa (TS body + LSP + callers). `rg` opcional para usos del mismo símbolo.
+2. Si el mensaje trae **identificadores** → L0 los extrae → `workspace_symbols` y/o `rg` exact/word.
+3. Si el mensaje es **solo conceptual** → **escalar a L1** para que emita seeds (`search_terms: ["connection", "connect", "socket", …]`) y **entonces** corre rg/LSP.
+4. Si tras S4 el pack sigue pobre → (futuro) RAG; no fingir que rg solo “entiende” el español.
+
+En resumen: **sin RAG, ripgrep busca lo que L0 extrae o lo que L1 inventa como keywords**; no hay magia léxica sobre la frase entera.
+
+### 7.1 Pipeline completo (seed → pack)
 
 ```
-Query / intent (L0 o L1)
+Intent usuario
         │
-        ├─1─ ripgrep (WorkspaceSearch) → hits (path, line, preview)
+        ├─0─ QuerySeed (S0…S4) → lista de términos / símbolos ancla
         │
-        ├─2─ Tree-sitter → expandir cada hit al cuerpo semántico
-        │      (function / method / class / struct que contiene la línea)
+        ├─1─ Por cada seed:
+        │      · LSP workspace_symbols / definition (preferente)
+        │      · ripgrep word/regex acotado (WorkspaceSearch)
+        │
+        ├─2─ Tree-sitter → cuerpo semántico del hit
+        │      (function / method / class / struct)
         │
         ├─3─ LSP en el símbolo ancla
-        │      · hover / signature
-        │      · definition / declaration
+        │      · hover / signature / definition
         │      · references (muestra acotada)
-        │      · call hierarchy: incoming (+ outgoing si aporta)
+        │      · call hierarchy incoming (+ outgoing si aporta)
         │
-        ├─4─ Headers / includes de relevancia
-        │      · includes del archivo ancla (Tree-sitter / include graph)
-        │      · declaración del símbolo si vive en .h/.hpp
-        │      · no volcar todos los transitivos a ciegas
+        ├─4─ Headers / includes de relevancia (declaración + directos)
         │
-        └─5─ Presupuesto de tokens → recortar / priorizar → ContextPack
+        └─5─ Presupuesto de tokens → ContextPack
 ```
 
-Esto es exactamente el sustituto práctico de RAG en las fases A–E: **búsqueda léxica + extracción estructural + grafo de llamadas**, no similitud vectorial.
+Sustituto de RAG en A–E = **seed léxico (L0/L1) + extracción estructural + grafo de llamadas**, no similitud vectorial sobre la frase.
 
 ### 7.2 Qué va en el pack (prioridad)
 
@@ -302,12 +326,12 @@ Esto es exactamente el sustituto práctico de RAG en las fases A–E: **búsqued
 |---|---|---|
 | P0 | Selección del usuario + archivo/cursor activos | Editor |
 | P0 | Diagnostics del archivo (y relacionados) | LSP `publishDiagnostics` |
-| P1 | Cuerpos TS de hits rg (no solo la línea) | `TreeSitterService` / symbols AST |
+| P1 | Seeds usados + justificación breve (para dry-run) | L0/L1 |
+| P1 | Cuerpos TS de hits (no solo la línea) | `TreeSitterService` |
 | P1 | Definición + firma del símbolo | LSP hover / definition |
-| P2 | **Incoming** call hierarchy (quién llama) | LSP call hierarchy (UI ya existe) |
-| P2 | Header/declaración del símbolo + includes directos del TU | LSP + parse includes / `include_tree` |
-| P3 | Outgoing calls / referencias extra | LSP (solo si cabe en presupuesto) |
-| P3 | Tabs abiertos vecinos | Heurística débil |
+| P2 | **Incoming** call hierarchy | LSP call hierarchy |
+| P2 | Header/declaración + includes directos | LSP + includes / `include_tree` |
+| P3 | Outgoing / refs extra / tabs vecinos | Solo si cabe presupuesto |
 
 ### 7.3 Headers: sí, pero con freno
 
@@ -327,11 +351,11 @@ Para codegen/autofix suele importar más **incoming** (callers) que outgoing. De
 
 ### 7.5 Relación con dry-run (D16)
 
-En Fase D, el tab AI muestra este pack ya ensamblado (hits rg → cuerpos → callers → headers). Si se ve ruido (demasiados headers, callers irrelevantes), se ajusta el ensamblador **antes** de enchufar L2 o RAG.
+El tab AI debe mostrar **también los seeds** (“busqué: `connect`, `ConnectionManager`, …”) + hits + cuerpos + callers. Así se ve si el fallo fue **mala query** (capa seed) o **mala expansión** (TS/LSP).
 
 ### 7.6 Cuando llegue RAG (Fase F)
 
-`RagProvider` solo añade candidatos extra al **mismo** `ContextPack` (chunks por similitud). El pipeline rg/TS/LSP **sigue** siendo la base; RAG no lo reemplaza.
+Ahí sí la frase conceptual puede recuperar chunks sin pasar por keywords perfectas. `RagProvider` aporta candidatos al mismo `ContextPack`; **no** elimina S0–S4 (siguen siendo más precisos cuando hay un símbolo claro).
 
 ---
 
