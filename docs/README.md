@@ -21,6 +21,7 @@ Terminal IDE with multi-language editing and an integrated debugger. This folder
 | [Keyboard shortcuts](keyboard-shortcuts.md) | Complete key binding reference |
 | [Architecture](architecture.md) | Threads, models, DAP/LSP integration, UI layout |
 | [Development](development.md) | Building, project layout, conventions for contributors |
+| [AI Master Spec](ai/master-spec.md) | Plan de arquitectura IA (2 niveles + atribución); sin implementar aún |
 
 ## Quick links
 
