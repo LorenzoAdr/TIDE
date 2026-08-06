@@ -34,7 +34,7 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D14 | Enrutado L0 | **Todo** el chat pasa primero por Nivel 0 (puerta barata). L0 resuelve o escala a L1. Slash commands son atajos L0 (p.ej. `/build` → task runner sin LLM) |
 | D15 | UI chat | Tab **AI** en el panel inferior (`ConsolePanelTabs`), junto a Terminal / Problems / Git / …. Transcript tipo terminal/chat (estilo Cursor): respuestas de texto, tool/status y **stdout/stderr de comandos** del Task Runner. Los cambios de código se aplican **en el editor** (auto + journal/gutter), no se vuelcan como archivos enteros en el chat |
 | D16 | Roadmap por etapas | Implementar en orden estricto: **Bases → L0 → L1 → L2-dry-run → L2**. Antes del modelo L2, el Nivel 1 **imprime en el tab AI** el paquete que enviaría a L2 (`ContextPack` + instrucción) para validar fragmentos y prompts a ojo |
-| D17 | ContextPack sin RAG | (1) **QuerySeed**: cursor/selección → extract L0 de ids → `workspace_symbols` → **L1 propone términos** si el NL es conceptual → (futuro) RAG. (2) Con esos seeds: rg → cuerpos TS → LSP + incoming calls → headers directos. Sin embeddings, **rg no busca la frase**: busca los seeds |
+| D17 | ContextPack sin RAG | Seeds: S0 cursor / S1 literales L0 / **S4 L1 traduce NL→ids de código + plan multi-paso** (nunca grepear la frase en español). Luego rg/LSP solo con seeds **confirmados** → TS bodies → callers → headers. S2 (tokenizar la frase) descartado. RAG = S5 Fase F |
 
 ---
 
@@ -270,29 +270,57 @@ Appends al transcript solo vía cola + `UI_WAKE`; respetar `UiActivityGate` (no 
 
 RAG vectorial queda en **Fase F**. Hasta entonces el contexto para L1/L2 (y el dry-run) se arma con el **IDE que ya tenemos**: ripgrep + Tree-sitter + LSP (incl. call hierarchy) + headers relevantes.
 
-### 7.0 El problema real: ¿qué string pasamos a ripgrep?
+### 7.0 El problema real: ¿quién dicta lo que busca ripgrep?
 
-`rg` no entiende “¿dónde se gestionan las conexiones?”. Solo busca **términos léxicos**. Sin embeddings, **alguien tiene que proponer seeds** (palabras/identificadores) a partir del intent. Eso es lo que antes quedó implícito y es el hueco.
+`rg` no entiende  
+“oye búscame dónde se haga la construcción de la estructura que enviamos a X sistema”.
 
-**Propuesta (D17 ampliada): capas de `QuerySeed`, de más barata a más cara**
+**Partir esa frase y grepear `construcción` / `estructura` / `enviamos` / `sistema` no basta** (y suele ser peor): en el repo vivirán nombres tipo `PayloadBuilder`, `MakeXRequest`, `serialize_order()`, `XClient::send()` — vocabulario de **código**, no de la frase en español.
 
-| Capa | Quién | Qué busca `rg` / LSP | Cuándo |
-|---|---|---|---|
-| **S0 Cursor** | Editor | Identificador bajo cursor / selección literal | Siempre que haya selección o símbolo en cursor (P0; a menudo **ni hace falta** rg) |
-| **S1 Extract L0** | Nivel 0 C++ | Tokens del mensaje: `` `backticks` ``, `"quotes"`, `snake_case`, `CamelCase`, `paths/foo.cpp`, códigos de error | Mensaje trae nombres propios |
-| **S2 Keywords L0** | Nivel 0 | Mapa chico intent→términos de dominio del **proyecto abierto** (heurístico) + stopwords EN/ES (“dónde”, “gestionan”, “el”, …) | Solo ayuda marginal; **no** es un tesauro mágico |
-| **S3 workspace_symbols** | LSP | Query fuzzy con seeds S0/S1 (no es rg, pero mismo rol: anclar símbolo) | Preferible a rg a ciegas cuando hay clangd/… |
-| **S4 Seeds L1** | Nivel 1 (LLM) | L1 propone 3–8 **términos de búsqueda** / símbolos candidatos → `rg` + `workspace_symbols` | NL conceptual sin identificadores (“conexiones”, “auth”, …) |
-| **S5 RAG** | Fase F | Chunks por similitud semántica | Cuando S1–S4 fallen en recall |
+Sin embeddings hace falta un paso explícito **intent → seeds de código**. Eso no lo hace `rg`.
 
-**Orden práctico de ensamblado:**
+#### Quién dicta los seeds
 
-1. Si hay **selección/cursor** → ancla directa (TS body + LSP + callers). `rg` opcional para usos del mismo símbolo.
-2. Si el mensaje trae **identificadores** → L0 los extrae → `workspace_symbols` y/o `rg` exact/word.
-3. Si el mensaje es **solo conceptual** → **escalar a L1** para que emita seeds (`search_terms: ["connection", "connect", "socket", …]`) y **entonces** corre rg/LSP.
-4. Si tras S4 el pack sigue pobre → (futuro) RAG; no fingir que rg solo “entiende” el español.
+| Situación | Quién dicta | Qué ocurre |
+|---|---|---|
+| Cursor/selección en un símbolo | **Editor (S0)** | Ancla directa; a menudo ni hace falta rg |
+| El mensaje ya trae ids/paths (`` `OrderPayload` ``, `foo.cpp`) | **L0 extract (S1)** | Solo literales; no “comprende” la frase |
+| Frase conceptual en NL (el ejemplo de arriba) | **L1 (S4) — obligatorio** | L1 **traduce** a identificadores/plan de búsqueda |
+| L1 no conoce el argot interno del repo | **RAG (S5, Fase F)** | Similitud semántica sobre chunks |
 
-En resumen: **sin RAG, ripgrep busca lo que L0 extrae o lo que L1 inventa como keywords**; no hay magia léxica sobre la frase entera.
+**Regla dura:** si S0/S1 no dan ancla léxica clara → **prohibido** lanzar `rg` sobre tokens de la frase del usuario. Escalar a **L1** para que dicte seeds.
+
+#### Qué debe emitir L1 (no es grep de la frase)
+
+```text
+intent: find where we build the struct/payload sent to system X
+seeds_primary: ["X", "XClient", "XApi", "send_to_X", "XRequest"]
+seeds_structural: ["Builder", "make_", "build_", "serialize", "encode", "Payload", "Request"]
+search_plan:
+  1. anclar dominio X (workspace_symbols / rg de seeds_primary)
+  2. sobre tipos/archivos hallados → buscar construcción (Builder/make_/serialize…)
+  3. expandir con TS bodies + call hierarchy + headers
+reject_as_noise: ["construcción", "estructura", "enviamos", "búscame", "dónde"]
+```
+
+L1 **inventa candidatos de código** y un **plan multi-paso**; el runtime solo ejecuta tools. Los seeds que no confirmen `workspace_symbols`/rg se **descartan** (anti-alucinación).
+
+#### Por qué multi-paso
+
+Una sola query no cubre el ejemplo: primero localizar “sistema X”, luego “construcción del payload” en ese vecindario, luego callers/headers. El dry-run (D16) debe mostrar seeds + plan + hits para ver si falló la **traducción** o la **expansión**.
+
+#### Capas QuerySeed (actualizado)
+
+| Capa | Quién | Rol |
+|---|---|---|
+| **S0** | Editor | Cursor / selección |
+| **S1** | L0 | Solo literales del mensaje |
+| **S2** | — | **No usar** tokenizar/grepear la frase NL como estrategia |
+| **S3** | LSP | `workspace_symbols` para **confirmar** seeds |
+| **S4** | L1 | Dicta seeds de código + plan (caso conceptual) |
+| **S5** | RAG Fase F | Cuando S4 no recupera nombres internos |
+
+**Orden:** ancla editor → literales L0 → si NL conceptual **L1 dicta seeds** → rg/LSP solo con seeds confirmados → pack; si sigue pobre → RAG más adelante.
 
 ### 7.1 Pipeline completo (seed → pack)
 
@@ -318,7 +346,7 @@ Intent usuario
         └─5─ Presupuesto de tokens → ContextPack
 ```
 
-Sustituto de RAG en A–E = **seed léxico (L0/L1) + extracción estructural + grafo de llamadas**, no similitud vectorial sobre la frase.
+Sustituto de RAG en A–E = **L1 (o anclas literales) dicta seeds de código** + rg/LSP de confirmación + extracción estructural + grafo de llamadas. **No** es “grep de las palabras del prompt”.
 
 ### 7.2 Qué va en el pack (prioridad)
 
