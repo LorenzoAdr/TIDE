@@ -24,9 +24,9 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D4 | Build / tools | Crear un **Task Runner** real (no confundir con `src/build/` de `compile_commands`) para que Nivel 1 ejecute “compila el proyecto”, tests, scripts |
 | D5 | Buffers | **Un solo** `EditorBuffer` + **Edit Journal** por autor. No dual-buffer paralelo |
 | D6 | Atribución UI | Journal (+ Myers opcional debounce 150 ms). Gutter: **humano = verde**, **AI = azul** (D11) |
-| D7 | Nivel 2 | Default local: **Qwen2.5-Coder-7B-Instruct Q4_K_M** (~4.5 GB, **Apache-2.0**). Alt ligera: Coder-**1.5B** Instruct Q4 (~1 GB, Apache). **Prohibido** Coder-**3B** (Qwen Research, no Apache). Remoto opcional: API OpenAI-compatible |
-| D8 | llama.cpp | Bundle CMake como el resto; runtime **MIT** (llama.cpp). Modelos solo MIT/Apache-2.0 redistribuibles en GitHub Releases (**D18**) |
-| D9 | Modelo L1 | Default: **Phi-4-mini-instruct Q4_K_M** (~3.8B, ~2.5 GB, **MIT**) para tools/seeds. Alt Apache: **Qwen2.5-1.5B-Instruct** (ligero) o **Qwen2.5-7B-Instruct** (más capaz, ~4.5 GB). **Prohibido** Qwen2.5-**3B** (Qwen Research) |
+| D7 | Nivel 2 | Default local: **Qwen2.5-Coder-7B-Instruct Q4_K_M** (~4.5 GB, Apache-2.0, redistribuible). Alt ligera: Coder-**1.5B**. **Evitar** Coder-**3B** (Qwen Research = **no comercial** → no apto para Releases de producto). Remoto opcional |
+| D8 | llama.cpp | Bundle CMake; runtime **MIT**. Pesos según **D18** (redistribuibles) |
+| D9 | Modelo L1 | Default: **Phi-4-mini-instruct Q4** (~2.5 GB, MIT). Alts: Qwen2.5-**1.5B**/ **7B** Instruct (Apache); Llama-3.2-3B (Community, OK con “Built with Llama”). **Evitar** Qwen2.5-**3B** (Research / no comercial) |
 | D10 | Task Runner / shell | Solo comandos en una **whitelist** (config + defaults). Por defecto entran **compile** y **launch** (auto-detect / tasks del proyecto). Fuera de la lista → **no se ejecuta**; la UI puede ofrecer “añadir a la whitelist” de forma explícita |
 | D11 | Gutter | Un color **AI** (p.ej. **azul**), distinto del humano (verde). No hace falta tono distinto L1 vs L2 en MVP; el nivel puede ir en tooltip |
 | D12 | Search/Replace | Formato **estilo Aider** adaptado a C++ (bloques SEARCH/REPLACE en texto). Fácil de validar y de depurar; JSON como transporte opcional solo si un backend remoto lo exige |
@@ -34,7 +34,7 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D14 | Enrutado L0 | **Todo** el chat pasa primero por Nivel 0 (puerta barata). L0 resuelve o escala a L1. Slash commands son atajos L0 (p.ej. `/build` → task runner sin LLM) |
 | D15 | UI chat | Tab **AI** en el panel inferior (`ConsolePanelTabs`), junto a Terminal / Problems / Git / …. Transcript tipo terminal/chat (estilo Cursor): respuestas de texto, tool/status y **stdout/stderr de comandos** del Task Runner. Los cambios de código se aplican **en el editor** (auto + journal/gutter), no se vuelcan como archivos enteros en el chat |
 | D16 | Roadmap por etapas | Implementar en orden estricto: **Bases → L0 → L1 → L2-dry-run → L2**. Antes del modelo L2, el Nivel 1 **imprime en el tab AI** el paquete que enviaría a L2 (`ContextPack` + instrucción) para validar fragmentos y prompts a ojo |
-| D18 | Licencias IA | Solo pesos **MIT** o **Apache-2.0** (redistribuibles en GitHub Releases). **Excluir** GPLv3, Qwen Research, Llama Community, Gemma ToU, RAIL-NC, etc. Adjuntar `LICENSE`/`NOTICE` del modelo en el asset. Runtime: llama.cpp MIT |
+| D18 | Licencias IA | Criterio práctico: la licencia debe **permitir redistribuir los pesos en GitHub Releases** y que la app los descargue/use. No hace falta que sea MIT/Apache. **Rechazar** si: prohíbe redistribución, es **solo no-comercial** (p.ej. Qwen Research), o impone copyleft viral tipo **GPLv3** sobre el binario de tuide. **Aceptable** con condiciones de atribución: MIT, Apache-2.0, Llama Community (“Built with Llama” + NOTICE), etc. |
 
 ---
 
@@ -106,29 +106,29 @@ Default recomendado: **Phi-4-mini-instruct** Q4_K_M (~2.5 GB, **MIT**).
 
 Motivos: tamaño similar al “3B” que queríamos, licencia limpia para attach en GitHub Releases, buen razonamiento/structured output; encaja con dictar QuerySeeds (S4) y tool calls. Emparejar siempre con **decoding acotado** (JSON schema / grammar) en el runtime.
 
-| Candidato L1 | Licencia | Q4 approx. | Notas |
-|---|---|---|---|
-| **Phi-4-mini-instruct** (default) | **MIT** | ~2.5 GB | Mejor equilibrio tools/peso/licencia |
-| Qwen2.5-1.5B-Instruct | Apache-2.0 | ~1.0 GB | Más ligero; tools/seeds más débiles |
-| Qwen2.5-7B-Instruct | Apache-2.0 | ~4.5 GB | Más capaz; descarga/RAM mayores |
-| ~~Qwen2.5-3B-Instruct~~ | **Qwen Research** | ~1.9 GB | **Descartado** — no MIT/Apache |
-| Llama 3.2 / 3.x | Llama Community | — | **Descartado** — no MIT/Apache |
-| Gemma | Gemma ToU | — | **Descartado** |
+| Candidato L1 | Licencia | ¿GitHub Releases? | Q4 approx. | Notas |
+|---|---|---|---|---|
+| **Phi-4-mini-instruct** (default) | MIT | Sí | ~2.5 GB | Mejor equilibrio tools/peso |
+| Qwen2.5-1.5B-Instruct | Apache-2.0 | Sí | ~1.0 GB | Más ligero |
+| Qwen2.5-7B-Instruct | Apache-2.0 | Sí | ~4.5 GB | Más capaz |
+| Llama-3.2-3B-Instruct | Llama Community | Sí* | ~2.0 GB | *Atribución “Built with Llama” + NOTICE; gated HF al bajar origen |
+| ~~Qwen2.5-3B-Instruct~~ | Qwen Research | **No (uso comercial)** | ~1.9 GB | Solo no-comercial → no para producto/Releases generales |
+| Gemma | Gemma ToU | Revisar ToU | — | Posible con condiciones; no default |
 
 Nivel 1 **no** sustituye rg/LSP: los llama vía `ToolRegistry`.  
 Nivel 1 **sí** posee el Task Runner (whitelist — D10) y dicta seeds en NL conceptual (D17).
 
 ### 3.3 Nivel 2 — Generador pesado (D7, D18)
 
-Default local: **Qwen2.5-Coder-7B-Instruct** Q4_K_M (~4.5 GB, **Apache-2.0**).  
-Alt ligera: **Qwen2.5-Coder-1.5B-Instruct** Q4 (~1 GB, Apache) si se prioriza descarga.
+Default local: **Qwen2.5-Coder-7B-Instruct** Q4_K_M (~4.5 GB, Apache-2.0).  
+Alt ligera: **Qwen2.5-Coder-1.5B-Instruct** Q4 (~1 GB).
 
-| Candidato L2 | Licencia | Q4 approx. | Notas |
-|---|---|---|---|
-| **Qwen2.5-Coder-7B-Instruct** (default) | **Apache-2.0** | ~4.5 GB | Mejor codegen Apache en rango descargable |
-| Qwen2.5-Coder-1.5B-Instruct | Apache-2.0 | ~1.0 GB | Fallback ligero / machines flojas |
-| ~~Qwen2.5-Coder-3B-Instruct~~ | **Qwen Research** | ~1.9 GB | **Descartado** — misma trampa que el 3B general |
-| Remoto (user opt-in) | N/A (API) | 0 local | DeepSeek / Claude / OpenAI-compatible (D3) |
+| Candidato L2 | Licencia | ¿GitHub Releases? | Q4 approx. | Notas |
+|---|---|---|---|---|
+| **Qwen2.5-Coder-7B-Instruct** (default) | Apache-2.0 | Sí | ~4.5 GB | Mejor codegen redistribuible en este rango |
+| Qwen2.5-Coder-1.5B-Instruct | Apache-2.0 | Sí | ~1.0 GB | Tier ligero |
+| ~~Qwen2.5-Coder-3B-Instruct~~ | Qwen Research | **No (uso comercial)** | ~1.9 GB | Misma trampa no-comercial que el 3B general |
+| Remoto (opt-in) | N/A (API) | N/A | 0 local | DeepSeek / Claude / OpenAI-compatible (D3) |
 
 Carga **solo** bajo demanda. Remoto opcional (D3).
 
@@ -140,12 +140,22 @@ Carga **solo** bajo demanda. Remoto opcional (D3).
 4. Si no matchea o es ambiguo → error a L1/L2, sin escritura parcial.
 5. JSON `{path,search,replace}` solo como adaptador si un proveedor remoto lo exige.
 
-### 3.4 Empaquetado en GitHub Releases
+### 3.4 Empaquetado en GitHub Releases (D18)
 
-- Assets tipados: `tuide-model-l1-phi4-mini-q4_k_m.gguf`, `tuide-model-l2-qwen25-coder-7b-q4_k_m.gguf` (+ `.LICENSE` / `NOTICE`).
-- La app descarga a `$XDG_CACHE_HOME/tuide/models/` con checksum.
-- No embeber GGUF en el binario slim; mismo espíritu que bundles opcionales.
-- Checklist legal por asset: licencia del peso ∈ {MIT, Apache-2.0}; runtime llama.cpp = MIT; **cero** GPLv3 en la cadena de IA.
+Criterio legal (no es “solo MIT/Apache”):
+
+1. ¿Puedo **subir el GGUF** a un Release de este repo y que la app lo descargue?
+2. ¿Pueden usarlo usuarios (incl. en empresas) sin violar “non-commercial only”?
+3. ¿La licencia **no contagia** GPLv3 al binario `tuide`? (llama.cpp = MIT → OK)
+
+| Tipo | Ejemplos | Veredicto |
+|---|---|---|
+| MIT / Apache-2.0 | Phi-4-mini, Qwen2.5-1.5B/7B/Coder-7B | Ideal |
+| Llama Community | Llama-3.2-3B | OK si se cumple atribución (“Built with Llama”, NOTICE, copia de licencia) |
+| Qwen Research | Qwen2.5-**3B**, Coder-**3B** | **No** para Releases de producto (cláusula no-comercial) |
+| GPLv3 (código/runtime) | — | Evitar en la cadena que enlace con `tuide` |
+
+Assets: `tuide-model-l1-….gguf` + licencia/NOTICE + checksum → `$XDG_CACHE_HOME/tuide/models/`.
 
 ---
 
@@ -573,6 +583,6 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 - [x] UI chat = tab en consola inferior (**D15**)
 - [x] Roadmap estricto Bases → L0 → L1 → L2-dry-run → L2 (**D16**)
 - [x] ContextPack sin RAG = QuerySeed (L1) + rg/TS/LSP (**D17**)
-- [x] Licencias MIT/Apache + modelos L1/L2 revisados (**D18**; **no** Qwen 3B)
+- [x] Licencias: redistribuible en GitHub (D18); defaults Phi-4-mini + Coder-7B; **no** Qwen Research 3B
 - [ ] (Opcional) Checklist de issues por fase cuando se abra implementación
 - [ ] Sin código de producto en esta rama hasta que se pida explícitamente
