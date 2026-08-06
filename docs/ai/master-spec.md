@@ -523,7 +523,7 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 2. Dual-buffer paralelo al `EditorBuffer`.
 3. Git blame/polling para atribución.
 4. RAG obligatorio en v1.
-5. Qwen 0.5B / **Qwen2.5·Coder 3B (Qwen Research)** u otros pesos no MIT/Apache como cerebro.
+5. Pesos **solo no-comercial** (Qwen Research 3B) o runtimes **GPLv3** que contagien el binario; Qwen 0.5B como único cerebro de tools.
 6. Devolver archivos enteros desde L2.
 7. Myers en el hilo UI en cada tecla.
 8. Introducir `.tuide.json` en la raíz.
