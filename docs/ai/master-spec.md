@@ -1,6 +1,6 @@
 # Master Spec: Arquitectura de IA en 2 Niveles + Sistema de Atribución (tuide)
 
-> **Estado:** plan de diseño (sin implementación) — **decisiones de producto incorporadas**.  
+> **Estado:** plan de diseño (sin implementación) — **decisiones D1–D14 cerradas**.  
 > **Origen:** propuesta Gemini contrastada contra el código real de tuide (`main`).  
 > **Rama:** `feature/IA` · PR de seguimiento del plan.
 
@@ -27,7 +27,7 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D7 | Nivel 2 | Qwen2.5-Coder-3B-Instruct Q4 (~1.9 GB) local bajo demanda, o remoto; protocolo **Search/Replace**, no archivos enteros |
 | D8 | llama.cpp | Como el **resto de bundles** CMake (`TUIDE_BUNDLE_LLAMA` / extracción a `$XDG_CACHE_HOME/tuide/…`), no link obligatorio en el binario slim |
 | D9 | Modelo L1 | Default **Qwen2.5-3B-Instruct Q4** (tool-calling). Puede compartir familia/descarga con L2 coder 3B; si en la práctica un solo 3B-Coder cubre agent+codegen, unificar más adelante |
-| D10 | Task Runner / shell | `run_command` **libre** permitido, pero el usuario **debe autorizar** todo comando que no sea **compilar** ni **lanzar** (allowlist de tareas seguras + prompt de confirmación para el resto) |
+| D10 | Task Runner / shell | Solo comandos en una **whitelist** (config + defaults). Por defecto entran **compile** y **launch** (auto-detect / tasks del proyecto). Fuera de la lista → **no se ejecuta**; la UI puede ofrecer “añadir a la whitelist” de forma explícita |
 | D11 | Gutter | Un color **AI** (p.ej. **azul**), distinto del humano (verde). No hace falta tono distinto L1 vs L2 en MVP; el nivel puede ir en tooltip |
 | D12 | Search/Replace | Formato **estilo Aider** adaptado a C++ (bloques SEARCH/REPLACE en texto). Fácil de validar y de depurar; JSON como transporte opcional solo si un backend remoto lo exige |
 | D13 | Journal persistente | **Sidecar** bajo `.tuide/` (por path/archivo) para sobrevivir al reabrir el proyecto; no mezclar con Git |
@@ -109,7 +109,7 @@ Nota de empaquetado: L2 propone `Qwen2.5-Coder-3B`. Son pesos distintos (~mismo 
 Decisión de producto ahora: **partir con Instruct 3B en L1**; medir si Coder-3B puede sustituirlo antes de GA. No bloquear el diseño por unificar aún.
 
 Nivel 1 **no** sustituye rg/LSP: los llama vía `ToolRegistry`.  
-Nivel 1 **sí** posee el Task Runner (compile, launch, `run_command` con auth — D10).
+Nivel 1 **sí** posee el Task Runner (compile, launch y demás **solo si están en la whitelist** — D10).
 
 ### 3.3 Nivel 2 — Generador pesado (Gemini Fase 3, aceptada con matices)
 
@@ -205,14 +205,15 @@ Distinto de `src/build/` (entornos + `compile_commands` para clangd).
 | Pieza | Rol |
 |---|---|
 | `TaskRunner` / `BuildTaskService` | Subprocess async, stdout/stderr, `exit_code`, cancel |
-| Config | En **`.tuide/config.json`**: tasks nombradas (`build`, `launch`/`run`, `test`, …) |
-| Auto-detect | Fallback: `cmake --build …`, `make`, binario de launch del wizard, etc. |
-| Tools Nivel 1 | `run_task(name)`, `run_command(cmdline)` |
-| Política de auth (D10) | **Sin prompt:** tareas clasificadas como **compile** y **launch**. **Con autorización UI:** cualquier otro `run_command` / task no segura (rm, curl, scripts arbitrarios, …). Recordar “allow once / allow for session / deny” |
-| Autofix loop | L1 aplica edit → `run_task("build")` → si falla, limpia stderr → reintento ≤3 → rollback journal/`undo` |
-| UI | Progreso vía eventos + `UI_WAKE`; no pintar desde el hilo del proceso |
+| Config | En **`.tuide/config.json`**: tasks nombradas + **`ai.command_whitelist`** (patrones o argv exactos) |
+| Defaults de whitelist | Al menos **compile** y **launch** (auto-detect CMake/Make / binario del wizard). El usuario amplía la lista (p.ej. `ctest`, `./tools/…`) |
+| Tools Nivel 1 | `run_task(name)`, `run_command(cmdline)` **solo si pasa el matcher de whitelist** |
+| Política (D10) | **No hay shell libre.** Comando no listado → rechazo + mensaje; opcional modal “¿Añadir este comando a la whitelist del workspace?” (nunca ejecución silenciosa) |
+| Matching | Preferir argv tokenizado / prefijos controlados (evitar que `make` autorice `make clean && rm -rf /` por substring ingenuo) |
+| Autofix loop | L1 aplica edit → `run_task("build")` (en whitelist) → stderr → reintento ≤3 → rollback |
+| UI | Progreso vía `UI_WAKE`; gestión de whitelist en settings / modal |
 
-La PTY del terminal integrado **no** sustituye al Task Runner (sigue siendo shell interactivo del usuario).
+La PTY del terminal integrado **no** sustituye al Task Runner: el usuario sigue pudiendo escribir lo que quiera en la shell; el **agent** no.
 
 ---
 
@@ -255,12 +256,12 @@ Alineado a bundles existentes (`BundleClangd`, `BundleRg`, …):
 ### Fase 1 — Task Runner + atribución journal
 
 1. `TaskRunner` + tasks en config + auto-detect build/launch.
-2. Auth UI para comandos no-compile/no-launch (D10).
+2. Whitelist de comandos (defaults compile/launch + ampliación en config; modal “añadir”) (D10).
 3. Edit Journal + mapa gutter Human/AI + **sidecar `.tuide/`** (D13).
 4. Apply path único: edits → undo group → journal.
-5. Tool `run_task` / `run_command` cableados al panel/agent stub.
+5. Tools `run_task` / `run_command` (gateados por whitelist) en el panel/agent stub.
 
-**Done:** “compila el proyecto” sin prompt; “curl …” pide autorización; gutter azul/verde sobrevive reopen.
+**Done:** “compila el proyecto” si está en whitelist; “curl …” se rechaza (o pide añadir a whitelist); gutter azul/verde sobrevive reopen.
 
 ### Fase 2 — Nivel 1 LLM local (bundle llama)
 
@@ -312,7 +313,7 @@ Accept/reject hunks, theme gutter, docs usuario, i18n, telemetría local off-by-
 | Id | Pregunta | Resolución |
 |---|---|---|
 | Q-A | Modelo L1 | **3B** Instruct Q4 por defecto (**D9**) |
-| Q-B | Shell libre | Sí, con **auth** salvo compile/launch (**D10**) |
+| Q-B | Shell del agent | **Whitelist** de comandos; compile/launch por defecto; fuera = deny / “añadir a whitelist” (**D10**) |
 | Q-C | Color gutter | AI = **azul**; humano = verde (**D11**) |
 | Q-D | Formato S/R | **Aider-text** adaptado a C++; JSON solo si hace falta (**D12**) |
 | Q-E | Persistencia | **Sidecar** en `.tuide/` (**D13**) |
@@ -321,7 +322,7 @@ Accept/reject hunks, theme gutter, docs usuario, i18n, telemetría local off-by-
 ### Dudas menores restantes (no bloquean el diseño)
 
 1. ¿Unificar L1 Instruct-3B y L2 Coder-3B en un solo GGUF tras un eval corto, o mantener dos roles?
-2. ¿Persistir también “comandos ya autorizados esta sesión/workspace” en `.tuide/` o solo en memoria de sesión?
+2. ¿La whitelist se edita solo en `.tuide/config.json` o también desde un panel de settings en la TUI?
 3. ¿El azul AI del gutter reutiliza un token del theme actual o se añade `theme.ai_gutter`?
 
 ---
