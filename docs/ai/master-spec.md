@@ -23,9 +23,15 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D3 | Offline / red | **Capacidad búnker:** todo ejecutable en local. **Escape hatch:** el usuario puede derivar el **Nivel 2** a API remota (DeepSeek / Claude / OpenAI-compatible) |
 | D4 | Build / tools | Crear un **Task Runner** real (no confundir con `src/build/` de `compile_commands`) para que Nivel 1 ejecute “compila el proyecto”, tests, scripts |
 | D5 | Buffers | **Un solo** `EditorBuffer` + **Edit Journal** por autor. No dual-buffer paralelo |
-| D6 | Atribución UI | Journal + (opcional) Myers diff debounce 150 ms para gutter Human vs L1 vs L2 |
+| D6 | Atribución UI | Journal (+ Myers opcional debounce 150 ms). Gutter: **humano = verde**, **AI = azul** (D11) |
 | D7 | Nivel 2 | Qwen2.5-Coder-3B-Instruct Q4 (~1.9 GB) local bajo demanda, o remoto; protocolo **Search/Replace**, no archivos enteros |
 | D8 | llama.cpp | Como el **resto de bundles** CMake (`TUIDE_BUNDLE_LLAMA` / extracción a `$XDG_CACHE_HOME/tuide/…`), no link obligatorio en el binario slim |
+| D9 | Modelo L1 | Default **Qwen2.5-3B-Instruct Q4** (tool-calling). Puede compartir familia/descarga con L2 coder 3B; si en la práctica un solo 3B-Coder cubre agent+codegen, unificar más adelante |
+| D10 | Task Runner / shell | `run_command` **libre** permitido, pero el usuario **debe autorizar** todo comando que no sea **compilar** ni **lanzar** (allowlist de tareas seguras + prompt de confirmación para el resto) |
+| D11 | Gutter | Un color **AI** (p.ej. **azul**), distinto del humano (verde). No hace falta tono distinto L1 vs L2 en MVP; el nivel puede ir en tooltip |
+| D12 | Search/Replace | Formato **estilo Aider** adaptado a C++ (bloques SEARCH/REPLACE en texto). Fácil de validar y de depurar; JSON como transporte opcional solo si un backend remoto lo exige |
+| D13 | Journal persistente | **Sidecar** bajo `.tuide/` (por path/archivo) para sobrevivir al reabrir el proyecto; no mezclar con Git |
+| D14 | Enrutado L0 | **Todo** el chat pasa primero por Nivel 0 (puerta barata). L0 resuelve o escala a L1. Slash commands son atajos L0 (p.ej. `/build` → task runner sin LLM) |
 
 ---
 
@@ -75,38 +81,47 @@ Usuario (NL / slash / UI)
 └───────────────────┘
 ```
 
-### 3.1 Nivel 0 — Barrera determinista
+### 3.1 Nivel 0 — Barrera determinista (siempre primero — D14)
+
+**Por qué conviene pasar todo por L0** (frente a mandar el chat directo a L1):
+
+1. Latencia y CPU: “compila”, “busca X”, “ve a la definición” no necesitan 3B.
+2. Determinismo: menos alucinaciones de paths/comandos en lo operativo.
+3. Cancelación clara: L0 puede mapear slash → tool sin gastar tokens.
+4. Mismo tubo de entrada: un solo panel de chat; L0 decide `resolve` vs `escalate_to_level1`.
+
+Flujo:
 
 - Entrada: texto del usuario + contexto mínimo (archivo activo, selección, diagnostics visibles).
-- Salida: tool call directa **o** “escalate_to_level1”.
-- Ejemplos sin LLM: “busca `UiActivityGate`”, “ve a la definición”, “lista errores”, “git status”.
-- Objetivo: latencia &lt;100 ms y 0 inferencia para el grueso operativo.
+- Salida: tool call directa **o** `escalate_to_level1` (con el mensaje intacto + hints).
+- Slash (`/build`, `/test`, `/explain`…): atajos L0; `/explain` tipicamente escala a L1/L2.
+- Confianza baja / NL ambiguo → L1 siempre.
 
-### 3.2 Nivel 1 — Agent tool-calling (más potente que 0.5B)
+### 3.2 Nivel 1 — Agent tool-calling (3B — D9)
 
-El 0.5B de Gemini queda **descartado** como cerebro de tools (D1).
+Default: **Qwen2.5-3B-Instruct Q4** (descartado 0.5B/1.5B como cerebro de tools).
 
-**Candidatos a evaluar antes de fijar el GGUF** (benchmark interno de tool-calling JSON + multi-step sobre fixtures tuide):
+Nota de empaquetado: L2 propone `Qwen2.5-Coder-3B`. Son pesos distintos (~mismo orden de GB). Opciones:
 
-| Candidato | Tamaño Q4 (aprox.) | Nota |
-|---|---|---|
-| Qwen2.5-1.5B-Instruct | ~1 GB | Compromiso latencia/calidad |
-| Qwen2.5-3B-Instruct | ~1.9 GB | Mejor tools; solapa tamaño con L2 coder |
-| Qwen2.5-Coder-1.5B / 3B solo para L1 | varía | Si L1 y L2 comparten familia, unificar descarga |
+1. **Dos GGUF** (Instruct agent + Coder generate) — más calidad por rol, más disco.
+2. **Unificar** en Coder-3B para ambos si el eval de tool-calling es aceptable — menos descarga.
+
+Decisión de producto ahora: **partir con Instruct 3B en L1**; medir si Coder-3B puede sustituirlo antes de GA. No bloquear el diseño por unificar aún.
 
 Nivel 1 **no** sustituye rg/LSP: los llama vía `ToolRegistry`.  
-Nivel 1 **sí** posee el Task Runner (compile, test, script custom).
+Nivel 1 **sí** posee el Task Runner (compile, launch, `run_command` con auth — D10).
 
 ### 3.3 Nivel 2 — Generador pesado (Gemini Fase 3, aceptada con matices)
 
 - Modelo local default propuesto: `Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf` (~1.9 GB).
 - Carga **solo** cuando L1 (o el usuario) activa generación compleja.
 - Remoto opcional: OpenAI-compatible / DeepSeek / Claude según config.
-- **Protocolo Search/Replace** (no full-file):
-  1. L2 emite bloques `SEARCH` / `REPLACE` (o equivalente estructurado).
-  2. Motor C++ (Nivel 1 / apply layer) valida que `SEARCH` existe de forma única en el buffer.
-  3. Aplica en el **único** `EditorBuffer`, `push_undo`, registra journal `Author::Level2_AI`.
-  4. Si `SEARCH` no matchea o es ambiguo → error a L1/L2, no escritura parcial silenciosa.
+- **Protocolo Search/Replace (D12), estilo Aider adaptado a C++:**
+  1. L2 emite bloques texto `SEARCH` / `REPLACE` (gramática compatible con la de Aider; parser propio en C++).
+  2. Motor C++ valida que `SEARCH` existe de forma **única** en el buffer (o path indicado).
+  3. Aplica en el **único** `EditorBuffer`, `push_undo`, journal `Author::Level2_AI`.
+  4. Si no matchea o es ambiguo → error a L1/L2, sin escritura parcial.
+  5. JSON `{path,search,replace}` solo como adaptador si un proveedor remoto no habla Aider-text.
 
 ---
 
@@ -151,7 +166,7 @@ struct TextEdit {
 
 Más una estructura derivada **por línea** (o por intervalo coalescido) para el gutter: `line → Author` (última escritura gana), invalidada de forma perezosa.
 
-Autores L1 vs L2 permiten UI distinta (p.ej. violeta vs magenta) si se desea; MVP puede colapsar ambos a “AI” en color y distinguir en hover/tooltip.
+Autores L1 vs L2 se guardan en el journal (telemetry / tooltip). **Gutter MVP (D11):** humano = verde; cualquier AI = **azul**. Sin segundo tono L1/L2.
 
 ### 4.2 ¿Myers Diff hace falta? (desacuerdo parcial con Gemini §2.3)
 
@@ -165,32 +180,39 @@ Gemini: debounce 150 ms + Myers(`Base Snapshot`, `Active Buffer`) + cruce con jo
 
 **Recomendación de implementación:**
 
-1. MVP atribución: journal → mapa de líneas → gutter (Human / L1 / L2).
+1. MVP atribución: journal → mapa de líneas → gutter (Human verde / AI azul).
 2. “Base snapshot” = contenido en el **último save a disco** (ya alineado con `WorkspaceModel` load/save), no un segundo editor.
 3. Myers opcional en fase UX, off-UI thread, debounce ≥150 ms, coalesced wake.
-
-Colores propuestos (configurables en theme): Human = verde; L1/L2 = violeta/púrpura (o dos tonos).
 
 ### 4.3 Coalescing humano
 
 Igual que `undo_coalesce_open`: tecleo continuo = un `op_id` Human hasta pausa / cambio de cursor lejano / blur.
 
+### 4.4 Sidecar de persistencia (D13)
+
+- Ruta tentativa: `.tuide/ai/attribution/<hash-or-relpath>.json` (o un store compacto binario si el JSON crece).
+- Se escribe debounce al save del buffer / al cerrar tab / al salir.
+- Al reabrir: cargar journal → repintar gutter; si el fichero en disco no coincide con el hash guardado, **invalidar** (no mentir en el gutter).
+- `.tuide/` ya es el lugar de config del workspace; añadir a reglas de skip del indexer si hace falta.
+- **No** commitear atribución a Git por defecto (documentar; opcional en `.gitignore` del usuario).
+
 ---
 
-## 5. Task Runner (nuevo — D4)
+## 5. Task Runner (nuevo — D4, D10)
 
 Distinto de `src/build/` (entornos + `compile_commands` para clangd).
 
 | Pieza | Rol |
 |---|---|
 | `TaskRunner` / `BuildTaskService` | Subprocess async, stdout/stderr, `exit_code`, cancel |
-| Config | En **`.tuide/config.json`**: tasks nombradas (`build`, `test`, …) y/o script |
-| Auto-detect | Fallback: `cmake --build build`, `make`, etc. (similar espíritu a detección actual CMake/Make) |
-| Tools Nivel 1 | `run_task(name)`, `run_command` (allowlist / confirmación) |
+| Config | En **`.tuide/config.json`**: tasks nombradas (`build`, `launch`/`run`, `test`, …) |
+| Auto-detect | Fallback: `cmake --build …`, `make`, binario de launch del wizard, etc. |
+| Tools Nivel 1 | `run_task(name)`, `run_command(cmdline)` |
+| Política de auth (D10) | **Sin prompt:** tareas clasificadas como **compile** y **launch**. **Con autorización UI:** cualquier otro `run_command` / task no segura (rm, curl, scripts arbitrarios, …). Recordar “allow once / allow for session / deny” |
 | Autofix loop | L1 aplica edit → `run_task("build")` → si falla, limpia stderr → reintento ≤3 → rollback journal/`undo` |
 | UI | Progreso vía eventos + `UI_WAKE`; no pintar desde el hilo del proceso |
 
-Pregunta residual: ¿`run_command` arbitrario está permitido al agent o solo tasks declaradas? (ver Q-A abajo).
+La PTY del terminal integrado **no** sustituye al Task Runner (sigue siendo shell interactivo del usuario).
 
 ---
 
@@ -232,30 +254,31 @@ Alineado a bundles existentes (`BundleClangd`, `BundleRg`, …):
 
 ### Fase 1 — Task Runner + atribución journal
 
-1. `TaskRunner` + tasks en config + auto-detect build.
-2. Edit Journal + mapa gutter (MVP sin Myers).
-3. Apply path único: edits → undo group → journal `Level1_AI`/`Level2_AI` (L2 puede ser stub).
-4. Tool `run_task` cableado al panel/agent stub.
+1. `TaskRunner` + tasks en config + auto-detect build/launch.
+2. Auth UI para comandos no-compile/no-launch (D10).
+3. Edit Journal + mapa gutter Human/AI + **sidecar `.tuide/`** (D13).
+4. Apply path único: edits → undo group → journal.
+5. Tool `run_task` / `run_command` cableados al panel/agent stub.
 
-**Done:** “compila el proyecto” vía task; gutter Human vs AI tras apply simulado.
+**Done:** “compila el proyecto” sin prompt; “curl …” pide autorización; gutter azul/verde sobrevive reopen.
 
 ### Fase 2 — Nivel 1 LLM local (bundle llama)
 
 1. Backend LLM + ModelStore (download).
-2. Elegir GGUF L1 tras eval tool-calling (ver §3.2).
-3. Agent loop: tools + max_steps + cancel.
-4. Escalado “needs_level2” como tool/result explícito.
+2. GGUF L1: **Qwen2.5-3B-Instruct Q4** (D9).
+3. Agent loop: tools + max_steps + cancel + escalate L2.
+4. L0 siempre delante del chat (D14); slash → L0.
 
 **Done:** chat agent offline que usa tools reales del IDE.
 
 ### Fase 3 — Nivel 2 + Search/Replace + remoto opcional
 
-1. L2 local 3B coder lazy **o** endpoint remoto (D3).
-2. Validador Search/Replace + apply + journal `Level2_AI`.
+1. L2 local Coder-3B lazy **o** endpoint remoto (D3).
+2. Parser/validador **estilo Aider** (D12) + apply + journal `Level2_AI`.
 3. Autofix: diagnostics LSP y/o `run_task("build")`, ≤3 reintentos, rollback.
 4. Myers diff opcional (worker) para diff vs disco / UX.
 
-**Done:** “reescribe este algoritmo” produce hunks validados; usuario puede elegir L2 remoto.
+**Done:** “reescribe este algoritmo” produce hunks validados; L2 remoto opcional.
 
 ### Fase 4 — RAG provider
 
@@ -284,39 +307,22 @@ Accept/reject hunks, theme gutter, docs usuario, i18n, telemetría local off-by-
 
 ---
 
-## 10. Dudas pendientes (nuevas)
+## 10. Decisiones Q-A … Q-F (cerradas)
 
-Con D1–D8 cerrados, quedan estos puntos antes de codificar:
+| Id | Pregunta | Resolución |
+|---|---|---|
+| Q-A | Modelo L1 | **3B** Instruct Q4 por defecto (**D9**) |
+| Q-B | Shell libre | Sí, con **auth** salvo compile/launch (**D10**) |
+| Q-C | Color gutter | AI = **azul**; humano = verde (**D11**) |
+| Q-D | Formato S/R | **Aider-text** adaptado a C++; JSON solo si hace falta (**D12**) |
+| Q-E | Persistencia | **Sidecar** en `.tuide/` (**D13**) |
+| Q-F | ¿Todo por L0? | **Sí** — más conveniente (latencia, CPU, determinismo); slash = atajos L0 (**D14**) |
 
-### Q-A — Modelo concreto del Nivel 1
+### Dudas menores restantes (no bloquean el diseño)
 
-¿Evalúamos **1.5B Instruct** como default L1, o preferís ir directos a **3B** (más RAM, mejor tools), aceptando solape de tamaño con L2 coder?
-
-### Q-B — Allowlist del Task Runner
-
-Ante “ejecuta lo que haga falta”:
-
-- **A)** Solo tasks declaradas en `.tuide/config.json` (+ auto-detect `build`/`test`).
-- **B)** También `run_command` libre con confirmación UI.
-- **C)** Libre en workspace sin confirmación (más agente, más riesgo).
-
-Recomendación: **A** en MVP, **B** después.
-
-### Q-C — Colores L1 vs L2 en gutter
-
-¿Dos tonos de violeta, o un solo “AI” + tooltip con el nivel?
-
-### Q-D — Formato exacto Search/Replace
-
-¿Texto estilo Aider (`<<<<<<< SEARCH` / `>>>>>>> REPLACE`), JSON estructurado `{path, search, replace}`, o ambos (L2 remoto a veces prefiere JSON)?
-
-### Q-E — Persistencia del journal
-
-¿Solo RAM mientras el tab está abierto, o sidecar (p.ej. bajo `.tuide/`) para sobrevivir restart sin mezclarse con Git?
-
-### Q-F — Cuándo L0 escala a L1
-
-¿Slash commands (`/build`, `/explain`) fuerzan L0/L1 explícito, o todo el chat pasa por L0 primero siempre?
+1. ¿Unificar L1 Instruct-3B y L2 Coder-3B en un solo GGUF tras un eval corto, o mantener dos roles?
+2. ¿Persistir también “comandos ya autorizados esta sesión/workspace” en `.tuide/` o solo en memoria de sesión?
+3. ¿El azul AI del gutter reutiliza un token del theme actual o se añade `theme.ai_gutter`?
 
 ---
 
@@ -340,6 +346,7 @@ Recomendación: **A** en MVP, **B** después.
 ## 12. Entregables de esta rama
 
 - [x] Spec contrastado v1
-- [x] Decisiones D1–D8 + resto del plan Gemini (§2.2–3.2) integrados
-- [ ] Respuestas Q-A … Q-F
-- [ ] Tras eso: issues/checklist de implementación por fase (sigue sin código de producto hasta acuerdo)
+- [x] Decisiones D1–D8 + resto del plan Gemini (§2.2–3.2)
+- [x] Decisiones Q-A … Q-F → D9–D14
+- [ ] (Opcional) Checklist de issues por fase cuando se abra implementación
+- [ ] Sin código de producto en esta rama hasta que se pida explícitamente
