@@ -100,37 +100,40 @@ Flujo:
 - Slash (`/build`, `/test`, `/explain`…): atajos L0; `/explain` tipicamente escala a L1/L2.
 - Confianza baja / NL ambiguo → L1 siempre.
 
-### 3.2 Nivel 1 — Agent tool-calling (D9, D18)
+### 3.2 Nivel 1 — Agent / tools (D9, D18)
 
-Default recomendado: **Phi-4-mini-instruct** Q4_K_M (~2.5 GB, **MIT**).
+**Rol L1 (no es un coder):** tool-calling, QuerySeeds (D17), escalado a L2, resumir diagnostics/tasks. Métrica = **fiabilidad de tools/JSON/planes**, no HumanEval.
 
-Motivos: tamaño similar al “3B” que queríamos, licencia limpia para attach en GitHub Releases, buen razonamiento/structured output; encaja con dictar QuerySeeds (S4) y tool calls. Emparejar siempre con **decoding acotado** (JSON schema / grammar) en el runtime.
+Default: **Phi-4-mini-instruct** Q4_K_M (~2.5 GB, MIT) + decoding acotado (JSON/grammar).
 
-| Candidato L1 | Licencia | ¿GitHub Releases? | Q4 approx. | Notas |
+| Candidato L1 | Licencia | Releases | Q4 | Encaje rol agent/tools |
 |---|---|---|---|---|
-| **Phi-4-mini-instruct** (default) | MIT | Sí | ~2.5 GB | Mejor equilibrio tools/peso |
-| Qwen2.5-1.5B-Instruct | Apache-2.0 | Sí | ~1.0 GB | Más ligero |
-| Qwen2.5-7B-Instruct | Apache-2.0 | Sí | ~4.5 GB | Más capaz |
-| Llama-3.2-3B-Instruct | Llama Community | Sí* | ~2.0 GB | *Atribución “Built with Llama” + NOTICE; gated HF al bajar origen |
-| ~~Qwen2.5-3B-Instruct~~ | Qwen Research | **No (uso comercial)** | ~1.9 GB | Solo no-comercial → no para producto/Releases generales |
-| Gemma | Gemma ToU | Revisar ToU | — | Posible con condiciones; no default |
+| **Phi-4-mini-instruct** (default) | MIT | Sí | ~2.5 GB | Instruct/reasoning; buen default de peso |
+| Qwen2.5-7B-Instruct | Apache-2.0 | Sí | ~4.5 GB | Subir aquí si Phi falla en tools reales |
+| Qwen2.5-1.5B-Instruct | Apache-2.0 | Sí | ~1.0 GB | Tier ligero; seeds/tools más frágiles |
+| Llama-3.2-3B-Instruct | Llama Community | Sí* | ~2.0 GB | *“Built with Llama” + NOTICE |
+| ~~Qwen2.5-Coder-* como L1~~ | — | — | — | **No:** coder ≠ agent router |
+| ~~Qwen2.5-3B-Instruct~~ | Qwen Research | No | ~1.9 GB | No comercial |
 
-Nivel 1 **no** sustituye rg/LSP: los llama vía `ToolRegistry`.  
-Nivel 1 **sí** posee el Task Runner (whitelist — D10) y dicta seeds en NL conceptual (D17).
+L1 usa `ToolRegistry` + Task Runner; **no** sustituye rg/LSP.
 
-### 3.3 Nivel 2 — Generador pesado (D7, D18)
+### 3.3 Nivel 2 — Generador de código (D7, D18)
 
-Default local: **Qwen2.5-Coder-7B-Instruct** Q4_K_M (~4.5 GB, Apache-2.0).  
-Alt ligera: **Qwen2.5-Coder-1.5B-Instruct** Q4 (~1 GB).
+**Rol L2:** codegen / rewrites / Search-Replace de calidad. Métrica = **código**, no chat general.
 
-| Candidato L2 | Licencia | ¿GitHub Releases? | Q4 approx. | Notas |
+Default: **Qwen2.5-Coder-7B-Instruct** Q4_K_M (~4.5 GB, Apache-2.0).
+
+| Candidato L2 | Licencia | Releases | Q4 | Encaje rol código |
 |---|---|---|---|---|
-| **Qwen2.5-Coder-7B-Instruct** (default) | Apache-2.0 | Sí | ~4.5 GB | Mejor codegen redistribuible en este rango |
+| **Qwen2.5-Coder-7B-Instruct** (default) | Apache-2.0 | Sí | ~4.5 GB | Especializado código |
 | Qwen2.5-Coder-1.5B-Instruct | Apache-2.0 | Sí | ~1.0 GB | Tier ligero |
-| ~~Qwen2.5-Coder-3B-Instruct~~ | Qwen Research | **No (uso comercial)** | ~1.9 GB | Misma trampa no-comercial que el 3B general |
-| Remoto (opt-in) | N/A (API) | N/A | 0 local | DeepSeek / Claude / OpenAI-compatible (D3) |
+| ~~Qwen2.5-Coder-3B~~ | Qwen Research | No | ~1.9 GB | No comercial |
+| ~~Phi / Instruct genérico como L2~~ | — | — | — | **No default:** inferior a Coder-7B en edits |
+| Remoto (opt-in) | API | N/A | 0 | DeepSeek / Claude / OpenAI-compatible |
 
-Carga **solo** bajo demanda. Remoto opcional (D3).
+**Dos assets a propósito:** L1=instruct/agent, L2=coder. No unificar en un solo modelo salvo hardware extremo.
+
+Carga L2 solo bajo demanda. Remoto opcional (D3).
 
 **Protocolo Search/Replace (D12), estilo Aider adaptado a C++:**
 
@@ -551,9 +554,9 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 
 ### Dudas menores restantes (no bloquean el diseño)
 
-1. ¿Mantener L1 Phi-4-mini + L2 Coder-7B, o unificar en un solo Qwen2.5-7B Instruct/Coder para menos assets?
-2. ¿Ofrecer en UI el tier ligero (L1 Qwen-1.5B + L2 Coder-1.5B) además del default?
-3. ¿El azul AI del gutter reutiliza un token del theme actual o se añade `theme.ai_gutter`?
+1. ¿Si Phi-4-mini falla en tools reales de tuide, subir L1 a Qwen2.5-7B-Instruct (más peso) manteniendo L2 = Coder-7B?
+2. ¿Ofrecer tier ligero (L1 Qwen-1.5B + L2 Coder-1.5B) además del default agent/coder?
+3. ¿El azul AI del gutter reutiliza un token del theme o `theme.ai_gutter`?
 
 ---
 
