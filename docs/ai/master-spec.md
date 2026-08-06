@@ -534,7 +534,7 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 13. Python runtime para IA.
 14. Saltar a L2/modelo coder sin pasar por **dry-run** del payload en el tab AI (D16).
 15. Implementar L1 antes de tener Bases + L0 operativos.
-16. Adjuntar en GitHub Releases modelos GPLv3 / Llama / Gemma / Qwen Research.
+16. Adjuntar en Releases pesos que **prohíban redistribución** o sean **solo no-comercial** (p.ej. Qwen Research).
 
 ---
 
