@@ -79,8 +79,8 @@ Usuario (NL / slash / UI)
           │
           ▼  (futuro)
 ┌───────────────────┐
-│ RAG / Context     │  No en v1; misma interfaz `ContextPack` que hoy
-│ Pack              │  rellenan LSP+rg+TS (+ embeddings después)
+│ ContextPack (D17) │  rg → TS bodies → LSP + incoming calls → headers
+│ (+ RAG en Fase F) │  mismo contrato para dry-run y L2
 └───────────────────┘
 ```
 
