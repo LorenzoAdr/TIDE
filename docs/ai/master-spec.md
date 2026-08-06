@@ -24,9 +24,9 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D4 | Build / tools | Crear un **Task Runner** real (no confundir con `src/build/` de `compile_commands`) para que Nivel 1 ejecute “compila el proyecto”, tests, scripts |
 | D5 | Buffers | **Un solo** `EditorBuffer` + **Edit Journal** por autor. No dual-buffer paralelo |
 | D6 | Atribución UI | Journal (+ Myers opcional debounce 150 ms). Gutter: **humano = verde**, **AI = azul** (D11) |
-| D7 | Nivel 2 | Qwen2.5-Coder-3B-Instruct Q4 (~1.9 GB) local bajo demanda, o remoto; protocolo **Search/Replace**, no archivos enteros |
-| D8 | llama.cpp | Como el **resto de bundles** CMake (`TUIDE_BUNDLE_LLAMA` / extracción a `$XDG_CACHE_HOME/tuide/…`), no link obligatorio en el binario slim |
-| D9 | Modelo L1 | Default **Qwen2.5-3B-Instruct Q4** (tool-calling). Puede compartir familia/descarga con L2 coder 3B; si en la práctica un solo 3B-Coder cubre agent+codegen, unificar más adelante |
+| D7 | Nivel 2 | Default local: **Qwen2.5-Coder-7B-Instruct Q4_K_M** (~4.5 GB, **Apache-2.0**). Alt ligera: Coder-**1.5B** Instruct Q4 (~1 GB, Apache). **Prohibido** Coder-**3B** (Qwen Research, no Apache). Remoto opcional: API OpenAI-compatible |
+| D8 | llama.cpp | Bundle CMake como el resto; runtime **MIT** (llama.cpp). Modelos solo MIT/Apache-2.0 redistribuibles en GitHub Releases (**D18**) |
+| D9 | Modelo L1 | Default: **Phi-4-mini-instruct Q4_K_M** (~3.8B, ~2.5 GB, **MIT**) para tools/seeds. Alt Apache: **Qwen2.5-1.5B-Instruct** (ligero) o **Qwen2.5-7B-Instruct** (más capaz, ~4.5 GB). **Prohibido** Qwen2.5-**3B** (Qwen Research) |
 | D10 | Task Runner / shell | Solo comandos en una **whitelist** (config + defaults). Por defecto entran **compile** y **launch** (auto-detect / tasks del proyecto). Fuera de la lista → **no se ejecuta**; la UI puede ofrecer “añadir a la whitelist” de forma explícita |
 | D11 | Gutter | Un color **AI** (p.ej. **azul**), distinto del humano (verde). No hace falta tono distinto L1 vs L2 en MVP; el nivel puede ir en tooltip |
 | D12 | Search/Replace | Formato **estilo Aider** adaptado a C++ (bloques SEARCH/REPLACE en texto). Fácil de validar y de depurar; JSON como transporte opcional solo si un backend remoto lo exige |
@@ -34,7 +34,7 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D14 | Enrutado L0 | **Todo** el chat pasa primero por Nivel 0 (puerta barata). L0 resuelve o escala a L1. Slash commands son atajos L0 (p.ej. `/build` → task runner sin LLM) |
 | D15 | UI chat | Tab **AI** en el panel inferior (`ConsolePanelTabs`), junto a Terminal / Problems / Git / …. Transcript tipo terminal/chat (estilo Cursor): respuestas de texto, tool/status y **stdout/stderr de comandos** del Task Runner. Los cambios de código se aplican **en el editor** (auto + journal/gutter), no se vuelcan como archivos enteros en el chat |
 | D16 | Roadmap por etapas | Implementar en orden estricto: **Bases → L0 → L1 → L2-dry-run → L2**. Antes del modelo L2, el Nivel 1 **imprime en el tab AI** el paquete que enviaría a L2 (`ContextPack` + instrucción) para validar fragmentos y prompts a ojo |
-| D17 | ContextPack sin RAG | Seeds: S0 cursor / S1 literales L0 / **S4 L1 traduce NL→ids de código + plan multi-paso** (nunca grepear la frase en español). Luego rg/LSP solo con seeds **confirmados** → TS bodies → callers → headers. S2 (tokenizar la frase) descartado. RAG = S5 Fase F |
+| D18 | Licencias IA | Solo pesos **MIT** o **Apache-2.0** (redistribuibles en GitHub Releases). **Excluir** GPLv3, Qwen Research, Llama Community, Gemma ToU, RAIL-NC, etc. Adjuntar `LICENSE`/`NOTICE` del modelo en el asset. Runtime: llama.cpp MIT |
 
 ---
 
@@ -100,31 +100,44 @@ Flujo:
 - Slash (`/build`, `/test`, `/explain`…): atajos L0; `/explain` tipicamente escala a L1/L2.
 - Confianza baja / NL ambiguo → L1 siempre.
 
-### 3.2 Nivel 1 — Agent tool-calling (3B — D9)
+### 3.2 Nivel 1 — Agent tool-calling (D9, D18)
 
-Default: **Qwen2.5-3B-Instruct Q4** (descartado 0.5B/1.5B como cerebro de tools).
+Default recomendado: **Phi-4-mini-instruct** Q4_K_M (~2.5 GB, **MIT**).
 
-Nota de empaquetado: L2 propone `Qwen2.5-Coder-3B`. Son pesos distintos (~mismo orden de GB). Opciones:
+Motivos: tamaño similar al “3B” que queríamos, licencia limpia para attach en GitHub Releases, buen razonamiento/structured output; encaja con dictar QuerySeeds (S4) y tool calls. Emparejar siempre con **decoding acotado** (JSON schema / grammar) en el runtime.
 
-1. **Dos GGUF** (Instruct agent + Coder generate) — más calidad por rol, más disco.
-2. **Unificar** en Coder-3B para ambos si el eval de tool-calling es aceptable — menos descarga.
-
-Decisión de producto ahora: **partir con Instruct 3B en L1**; medir si Coder-3B puede sustituirlo antes de GA. No bloquear el diseño por unificar aún.
+| Candidato L1 | Licencia | Q4 approx. | Notas |
+|---|---|---|---|
+| **Phi-4-mini-instruct** (default) | **MIT** | ~2.5 GB | Mejor equilibrio tools/peso/licencia |
+| Qwen2.5-1.5B-Instruct | Apache-2.0 | ~1.0 GB | Más ligero; tools/seeds más débiles |
+| Qwen2.5-7B-Instruct | Apache-2.0 | ~4.5 GB | Más capaz; descarga/RAM mayores |
+| ~~Qwen2.5-3B-Instruct~~ | **Qwen Research** | ~1.9 GB | **Descartado** — no MIT/Apache |
+| Llama 3.2 / 3.x | Llama Community | — | **Descartado** — no MIT/Apache |
+| Gemma | Gemma ToU | — | **Descartado** |
 
 Nivel 1 **no** sustituye rg/LSP: los llama vía `ToolRegistry`.  
-Nivel 1 **sí** posee el Task Runner (compile, launch y demás **solo si están en la whitelist** — D10).
+Nivel 1 **sí** posee el Task Runner (whitelist — D10) y dicta seeds en NL conceptual (D17).
 
-### 3.3 Nivel 2 — Generador pesado (Gemini Fase 3, aceptada con matices)
+### 3.3 Nivel 2 — Generador pesado (D7, D18)
 
-- Modelo local default propuesto: `Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf` (~1.9 GB).
-- Carga **solo** cuando L1 (o el usuario) activa generación compleja.
-- Remoto opcional: OpenAI-compatible / DeepSeek / Claude según config.
-- **Protocolo Search/Replace (D12), estilo Aider adaptado a C++:**
-  1. L2 emite bloques texto `SEARCH` / `REPLACE` (gramática compatible con la de Aider; parser propio en C++).
-  2. Motor C++ valida que `SEARCH` existe de forma **única** en el buffer (o path indicado).
-  3. Aplica en el **único** `EditorBuffer`, `push_undo`, journal `Author::Level2_AI`.
-  4. Si no matchea o es ambiguo → error a L1/L2, sin escritura parcial.
-  5. JSON `{path,search,replace}` solo como adaptador si un proveedor remoto no habla Aider-text.
+Default local: **Qwen2.5-Coder-7B-Instruct** Q4_K_M (~4.5 GB, **Apache-2.0**).  
+Alt ligera: **Qwen2.5-Coder-1.5B-Instruct** Q4 (~1 GB, Apache) si se prioriza descarga.
+
+| Candidato L2 | Licencia | Q4 approx. | Notas |
+|---|---|---|---|
+| **Qwen2.5-Coder-7B-Instruct** (default) | **Apache-2.0** | ~4.5 GB | Mejor codegen Apache en rango descargable |
+| Qwen2.5-Coder-1.5B-Instruct | Apache-2.0 | ~1.0 GB | Fallback ligero / machines flojas |
+| ~~Qwen2.5-Coder-3B-Instruct~~ | **Qwen Research** | ~1.9 GB | **Descartado** — misma trampa que el 3B general |
+| Remoto (user opt-in) | N/A (API) | 0 local | DeepSeek / Claude / OpenAI-compatible (D3) |
+
+Carga **solo** bajo demanda. Protocolo Search/Replace estilo Aider (D12); L1 valida y aplica + journal `Level2_AI`.
+
+### 3.4 Empaquetado en GitHub Releases
+
+- Assets tipados: `tuide-model-l1-phi4-mini-q4_k_m.gguf`, `tuide-model-l2-qwen25-coder-7b-q4_k_m.gguf` (+ `.LICENSE` / `NOTICE`).
+- La app descarga a `$XDG_CACHE_HOME/tuide/models/` con checksum.
+- No embeber GGUF en el binario slim; mismo espíritu que bundles opcionales.
+- Checklist legal por asset: licencia del peso ∈ {MIT, Apache-2.0}; runtime llama.cpp = MIT; **cero** GPLv3 en la cadena de IA.
 
 ---
 
