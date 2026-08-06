@@ -1,6 +1,6 @@
 # Master Spec: Arquitectura de IA en 2 Niveles + Sistema de Atribución (tuide)
 
-> **Estado:** plan de diseño (sin implementación) — **decisiones D1–D17 cerradas**.  
+> **Estado:** plan de diseño (sin implementación) — **decisiones D1–D18 cerradas**.  
 > **Origen:** propuesta Gemini contrastada contra el código real de tuide (`main`).  
 > **Rama:** `feature/IA` · PR de seguimiento del plan.
 
@@ -74,7 +74,7 @@ Usuario (NL / slash / UI)
           ▼
 ┌───────────────────┐
 │ L2 dry-run (D16)  │  L1 imprime en tab AI el payload (pack + instrucción)
-│ luego L2 real     │  Local 3B Q4 **o** API remota; Search/Replace validado
+│ luego L2 real     │  Coder-7B Apache Q4 **o** API remota; Search/Replace
 └───────────────────┘
           │
           ▼  (futuro)
@@ -130,7 +130,15 @@ Alt ligera: **Qwen2.5-Coder-1.5B-Instruct** Q4 (~1 GB, Apache) si se prioriza de
 | ~~Qwen2.5-Coder-3B-Instruct~~ | **Qwen Research** | ~1.9 GB | **Descartado** — misma trampa que el 3B general |
 | Remoto (user opt-in) | N/A (API) | 0 local | DeepSeek / Claude / OpenAI-compatible (D3) |
 
-Carga **solo** bajo demanda. Protocolo Search/Replace estilo Aider (D12); L1 valida y aplica + journal `Level2_AI`.
+Carga **solo** bajo demanda. Remoto opcional (D3).
+
+**Protocolo Search/Replace (D12), estilo Aider adaptado a C++:**
+
+1. L2 emite bloques texto `SEARCH` / `REPLACE` (parser C++ propio).
+2. Validar que `SEARCH` existe de forma **única** en el buffer.
+3. Apply en el único `EditorBuffer`, `push_undo`, journal `Author::Level2_AI`.
+4. Si no matchea o es ambiguo → error a L1/L2, sin escritura parcial.
+5. JSON `{path,search,replace}` solo como adaptador si un proveedor remoto lo exige.
 
 ### 3.4 Empaquetado en GitHub Releases
 
@@ -446,39 +454,36 @@ Infraestructura compartida por todos los niveles.
 
 ### Fase C — Nivel 1 (agent LLM local)
 
-1. Bundle/backend llama.cpp + ModelStore (D8).
-2. GGUF L1: **Qwen2.5-3B-Instruct Q4** (D9).
-3. Agent loop: tool-calling sobre el registry real, max_steps, cancel, auth whitelist.
-4. L0 sigue delante; solo escala a L1 cuando hace falta.
-5. Capacidad de **pedir L2** como intención interna (`needs_level2`) — en esta fase **aún no** llama a un modelo L2.
+1. Bundle/backend llama.cpp + ModelStore (D8, D18).
+2. GGUF L1 default: **Phi-4-mini-instruct Q4_K_M** (D9); alts Qwen2.5-1.5B/7B Apache.
+3. Agent loop: tool-calling + grammar/JSON constrained, max_steps, cancel, whitelist.
+4. L0 delante; L1 dicta QuerySeeds en NL conceptual (D17).
+5. Intención `needs_level2` sin llamar aún al coder.
 
-**Done:** chat agent offline que usa tools/tasks del IDE; respuestas NL + logs de tools en el tab AI; edits de L1 (si los hay) con journal `Level1_AI`.
+**Done:** agent offline con tools reales; seeds + tools visibles en tab AI.
 
 ### Fase D — Puente L2 dry-run (sin modelo complejo)  ← estadio intermedio clave
 
-Objetivo: validar **qué contexto e instrucción** mandaríamos al generador pesado **antes** de gastar integración/RAM en Coder-3B o APIs.
+Objetivo: validar el payload hacia L2 **antes** de descargar Coder-7B (~4.5 GB) o configurar API.
 
-Cuando L1 decide `needs_level2` (o el usuario fuerza `/l2` / “genera…”):
+Cuando L1 decide `needs_level2` (o `/l2`):
 
-1. L1 **ensambla** el payload L2: instrucción + `ContextPack` (fragmentos de código, paths, diagnostics, restricciones Search/Replace).
-2. En lugar de inferir con L2, **vuelca el payload al tab AI** en formato legible (y opcionalmente un dump en `.tuide/ai/dry-run/` para diff).
-3. El usuario revisa a ojo: ¿van los fragmentos buenos? ¿sobra ruido? ¿la instrucción es ejecutable?
-4. Modo config: `ai.level2.mode = dry_run` (default hasta Fase E).
-5. Opcional: plantilla exacta del prompt Aider-style que vería L2 (D12), sin apply automático de código “inventado”.
+1. L1 ensambla instrucción + `ContextPack` (+ restricciones Search/Replace).
+2. Vuelca el payload al tab AI (y opcional dump `.tuide/ai/dry-run/`).
+3. Usuario audita fragments/seeds/instrucción.
+4. `ai.level2.mode = dry_run` por defecto hasta Fase E.
 
-**Done:** en escenarios reales del repo se puede auditar la calidad del puente L1→L2 sin descargar/cargar el modelo 3B-Coder ni configurar API remota.
-
-**Criterio para pasar a E:** dry-runs revisados en N casos (navegación, bugfix, refactor pequeño) con contexto e instrucción aceptables.
+**Done:** dry-runs revisados en casos reales sin peso L2.
 
 ### Fase E — Nivel 2 real
 
-1. Activar backend L2: GGUF **Qwen2.5-Coder-3B** local lazy **y/o** API remota (D3, D7).
-2. `ai.level2.mode = local | remote` (dry_run permanece como opción de debug).
-3. Parser/validador Search/Replace estilo Aider (D12) → apply en editor + journal `Level2_AI`.
+1. Backend L2: **Qwen2.5-Coder-7B-Instruct** Q4 (o Coder-1.5B) **y/o** API remota (D3, D7, D18).
+2. `ai.level2.mode = local | remote` (dry_run sigue como debug).
+3. Parser Search/Replace (D12) → apply + journal `Level2_AI`.
 4. Autofix acotado: build whitelisted + ≤3 reintentos + rollback.
-5. Myers opcional (worker) para UX diff vs disco.
+5. Myers opcional (worker).
 
-**Done:** generación compleja aplica hunks validados; dry-run sigue disponible para depurar el pack.
+**Done:** hunks validados; dry-run disponible.
 
 ### Fase F — RAG (roadmap, no bloquea E)
 
@@ -494,9 +499,9 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 |---|---|---|
 | A Bases | — | Tab AI, tools, tasks, journal, ContextPack vacío-de-RAG |
 | B L0 | A | Router sin LLM |
-| C L1 | A+B | Agent 3B + tools |
+| C L1 | A+B | Agent Phi-4-mini (MIT) + tools |
 | D Dry-run | C | Preview del envío a L2 en consola |
-| E L2 | D (validado) | Coder/API + Search/Replace |
+| E L2 | D (validado) | Coder-7B Apache / API + Search/Replace |
 | F RAG | E (o en paralelo tras D si el pack está estable) | Embeddings |
 | G UX | E+ | Pulido |
 
@@ -508,7 +513,7 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 2. Dual-buffer paralelo al `EditorBuffer`.
 3. Git blame/polling para atribución.
 4. RAG obligatorio en v1.
-5. Qwen 0.5B como cerebro de tool-calling.
+5. Qwen 0.5B / **Qwen2.5·Coder 3B (Qwen Research)** u otros pesos no MIT/Apache como cerebro.
 6. Devolver archivos enteros desde L2.
 7. Myers en el hilo UI en cada tecla.
 8. Introducir `.tuide.json` en la raíz.
@@ -516,8 +521,10 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 10. Panel de chat lateral o flotante aparte del host de tabs de consola (D15: tab **AI** abajo).
 11. Volcar archivos enteros o diffs enormes en el transcript (el código va al editor).
 12. Enviar keystrokes del tab AI a la PTY del Terminal.
+13. Python runtime para IA.
 14. Saltar a L2/modelo coder sin pasar por **dry-run** del payload en el tab AI (D16).
 15. Implementar L1 antes de tener Bases + L0 operativos.
+16. Adjuntar en GitHub Releases modelos GPLv3 / Llama / Gemma / Qwen Research.
 
 ---
 
@@ -525,7 +532,7 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 
 | Id | Pregunta | Resolución |
 |---|---|---|
-| Q-A | Modelo L1 | **3B** Instruct Q4 por defecto (**D9**) |
+| Q-A | Modelo L1 | **Phi-4-mini** MIT Q4 (sustituye el 3B Qwen Research) (**D9**, **D18**) |
 | Q-B | Shell del agent | **Whitelist** de comandos; compile/launch por defecto; fuera = deny / “añadir a whitelist” (**D10**) |
 | Q-C | Color gutter | AI = **azul**; humano = verde (**D11**) |
 | Q-D | Formato S/R | **Aider-text** adaptado a C++; JSON solo si hace falta (**D12**) |
@@ -534,8 +541,8 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 
 ### Dudas menores restantes (no bloquean el diseño)
 
-1. ¿Unificar L1 Instruct-3B y L2 Coder-3B en un solo GGUF tras un eval corto, o mantener dos roles?
-2. ¿La whitelist se edita solo en `.tuide/config.json` o también desde un panel de settings en la TUI?
+1. ¿Mantener L1 Phi-4-mini + L2 Coder-7B, o unificar en un solo Qwen2.5-7B Instruct/Coder para menos assets?
+2. ¿Ofrecer en UI el tier ligero (L1 Qwen-1.5B + L2 Coder-1.5B) además del default?
 3. ¿El azul AI del gutter reutiliza un token del theme actual o se añade `theme.ai_gutter`?
 
 ---
@@ -565,6 +572,7 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 - [x] Decisiones Q-A … Q-F → D9–D14
 - [x] UI chat = tab en consola inferior (**D15**)
 - [x] Roadmap estricto Bases → L0 → L1 → L2-dry-run → L2 (**D16**)
-- [x] ContextPack sin RAG = rg + TS + LSP/call hierarchy + headers (**D17**)
+- [x] ContextPack sin RAG = QuerySeed (L1) + rg/TS/LSP (**D17**)
+- [x] Licencias MIT/Apache + modelos L1/L2 revisados (**D18**; **no** Qwen 3B)
 - [ ] (Opcional) Checklist de issues por fase cuando se abra implementación
 - [ ] Sin código de producto en esta rama hasta que se pida explícitamente
