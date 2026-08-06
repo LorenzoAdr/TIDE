@@ -24,9 +24,9 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D4 | Build / tools | Crear un **Task Runner** real (no confundir con `src/build/` de `compile_commands`) para que Nivel 1 ejecute “compila el proyecto”, tests, scripts |
 | D5 | Buffers | **Un solo** `EditorBuffer` + **Edit Journal** por autor. No dual-buffer paralelo |
 | D6 | Atribución UI | Journal (+ Myers opcional debounce 150 ms). Gutter: **humano = verde**, **AI = azul** (D11) |
-| D7 | Nivel 2 | Default local: **Qwen2.5-Coder-7B-Instruct Q4_K_M** (~4.5 GB, Apache-2.0, redistribuible). Alt ligera: Coder-**1.5B**. **Evitar** Coder-**3B** (Qwen Research = **no comercial** → no apto para Releases de producto). Remoto opcional |
+| D7 | Nivel 2 (código) | **Qwen2.5-Coder-7B-Instruct** Q4 (Apache, codegen). Alt Coder-1.5B. Evitar Coder-3B (no comercial) y no usar Instruct genérico como L2 por defecto |
 | D8 | llama.cpp | Bundle CMake; runtime **MIT**. Pesos según **D18** (redistribuibles) |
-| D9 | Modelo L1 | Default: **Phi-4-mini-instruct Q4** (~2.5 GB, MIT). Alts: Qwen2.5-**1.5B**/ **7B** Instruct (Apache); Llama-3.2-3B (Community, OK con “Built with Llama”). **Evitar** Qwen2.5-**3B** (Research / no comercial) |
+| D9 | Nivel 1 (tools) | **Phi-4-mini-instruct** Q4 (MIT, agent/tools/seeds). Alt Qwen2.5-7B-Instruct si hace falta más tools. **No** usar Coder como L1. Evitar Qwen2.5-3B (no comercial) |
 | D10 | Task Runner / shell | Solo comandos en una **whitelist** (config + defaults). Por defecto entran **compile** y **launch** (auto-detect / tasks del proyecto). Fuera de la lista → **no se ejecuta**; la UI puede ofrecer “añadir a la whitelist” de forma explícita |
 | D11 | Gutter | Un color **AI** (p.ej. **azul**), distinto del humano (verde). No hace falta tono distinto L1 vs L2 en MVP; el nivel puede ir en tooltip |
 | D12 | Search/Replace | Formato **estilo Aider** adaptado a C++ (bloques SEARCH/REPLACE en texto). Fácil de validar y de depurar; JSON como transporte opcional solo si un backend remoto lo exige |
