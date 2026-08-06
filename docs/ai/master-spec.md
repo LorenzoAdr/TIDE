@@ -1,6 +1,6 @@
 # Master Spec: Arquitectura de IA en 2 Niveles + Sistema de Atribución (tuide)
 
-> **Estado:** plan de diseño (sin implementación) — **decisiones D1–D15 cerradas**.  
+> **Estado:** plan de diseño (sin implementación) — **decisiones D1–D16 cerradas**.  
 > **Origen:** propuesta Gemini contrastada contra el código real de tuide (`main`).  
 > **Rama:** `feature/IA` · PR de seguimiento del plan.
 
@@ -33,6 +33,7 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D13 | Journal persistente | **Sidecar** bajo `.tuide/` (por path/archivo) para sobrevivir al reabrir el proyecto; no mezclar con Git |
 | D14 | Enrutado L0 | **Todo** el chat pasa primero por Nivel 0 (puerta barata). L0 resuelve o escala a L1. Slash commands son atajos L0 (p.ej. `/build` → task runner sin LLM) |
 | D15 | UI chat | Tab **AI** en el panel inferior (`ConsolePanelTabs`), junto a Terminal / Problems / Git / …. Transcript tipo terminal/chat (estilo Cursor): respuestas de texto, tool/status y **stdout/stderr de comandos** del Task Runner. Los cambios de código se aplican **en el editor** (auto + journal/gutter), no se vuelcan como archivos enteros en el chat |
+| D16 | Roadmap por etapas | Implementar en orden estricto: **Bases → L0 → L1 → L2-dry-run → L2**. Antes del modelo L2, el Nivel 1 **imprime en el tab AI** el paquete que enviaría a L2 (`ContextPack` + instrucción) para validar fragmentos y prompts a ojo |
 
 ---
 
@@ -71,8 +72,8 @@ Usuario (NL / slash / UI)
           │ razonamiento / rewrite profundo
           ▼
 ┌───────────────────┐
-│ Nivel 2 — Coder   │  Local 3B Q4 **o** API remota (user choice)
-│ (bajo demanda)    │  emite Search/Replace; L1 valida y aplica + journal
+│ L2 dry-run (D16)  │  L1 imprime en tab AI el payload (pack + instrucción)
+│ luego L2 real     │  Local 3B Q4 **o** API remota; Search/Replace validado
 └───────────────────┘
           │
           ▼  (futuro)
@@ -288,55 +289,94 @@ Alineado a bundles existentes (`BundleClangd`, `BundleRg`, …):
 
 ---
 
-## 9. Plan por fases (actualizado)
+## 9. Plan por fases (orden estricto — D16)
 
-### Fase 0 — Cimientos sin modelo
+Principio: **no saltar etapas**. Cada fase desbloquea la siguiente con un criterio de salida comprobable. El modelo pesado (L2) es lo último; antes hay un estadio de **dry-run** donde L1 solo muestra qué mandaría a L2.
 
-1. `ToolRegistry` + tools lectura: FS (vía workspace), search, LSP symbols/hover/diagnostics.
-2. Nivel 0 router (heurísticas / slash).
-3. Tab **AI** stub en `ConsolePanelTabs` + input + `UI_WAKE` (D15).
-4. Bloque `"ai"` en `.tuide/config.json`.
-5. Esqueleto `ContextPack` (sin RAG).
+```
+Fase A Bases ──► B Nivel 0 ──► C Nivel 1 ──► D L2 dry-run ──► E Nivel 2
+                                                              │
+                                         (luego) RAG / UX ────┘
+```
 
-**Done:** transcript operativo en la consola inferior; tools de lectura sin LLM.
+### Fase A — Bases (sin router NL completo, sin LLM)
 
-### Fase 1 — Task Runner + atribución journal
+Infraestructura compartida por todos los niveles.
 
-1. `TaskRunner` + tasks en config + auto-detect build/launch.
-2. Whitelist de comandos (defaults compile/launch + ampliación en config; modal “añadir”) (D10).
-3. Edit Journal + mapa gutter Human/AI + **sidecar `.tuide/`** (D13).
-4. Apply path único: edits → undo group → journal.
-5. Tools `run_task` / `run_command` (gateados por whitelist); su salida va al **transcript del tab AI** (D15).
+1. Tab **AI** en `ConsolePanelTabs` + transcript scrollback + línea de input + `UI_WAKE` (D15).
+2. Bloque `"ai"` en `.tuide/config.json` (enabled, paths, whitelist vacía/defaults).
+3. `ToolRegistry` + tools de **lectura**: FS workspace, search/rg, LSP symbols/hover/diagnostics.
+4. `TaskRunner` + **whitelist** (compile/launch por defecto) + volcado stdout/stderr al tab AI (D10).
+5. Edit Journal + apply path (undo group) + gutter Human/AI + sidecar `.tuide/` (D5, D11, D13).
+6. Esqueleto `ContextPack` (selección, archivo activo, diagnostics, snippets por tools) — **sin** embeddings.
 
-**Done:** “compila el proyecto” si está en whitelist (log en tab AI); “curl …” se rechaza (o pide añadir a whitelist); gutter azul/verde sobrevive reopen.
+**Done:** desde el tab AI se pueden invocar tools/tasks de forma manual o por comandos stub; la salida se ve como consola; un apply simulado pinta gutter azul y persiste al reopen.
 
-### Fase 2 — Nivel 1 LLM local (bundle llama)
+**No incluye:** heurísticas NL de L0, ni llama.cpp, ni L2.
 
-1. Backend LLM + ModelStore (download).
+### Fase B — Nivel 0 (router determinista)
+
+1. Clasificador/heurísticas + slash (`/build`, `/search`, `/diag`, …).
+2. Todo input del tab AI entra por L0 (D14).
+3. `resolve` → tool/task directa; `escalate_to_level1` → mensaje claro en transcript (“requiere Nivel 1; aún no cargado” mientras C no exista).
+
+**Done:** “compila”, “busca X”, “lista errores”, “git status” (si hay tool) funcionan **sin** modelo. NL ambiguo se escala con log explícito.
+
+### Fase C — Nivel 1 (agent LLM local)
+
+1. Bundle/backend llama.cpp + ModelStore (D8).
 2. GGUF L1: **Qwen2.5-3B-Instruct Q4** (D9).
-3. Agent loop: tools + max_steps + cancel + escalate L2.
-4. L0 siempre delante del chat (D14); slash → L0.
+3. Agent loop: tool-calling sobre el registry real, max_steps, cancel, auth whitelist.
+4. L0 sigue delante; solo escala a L1 cuando hace falta.
+5. Capacidad de **pedir L2** como intención interna (`needs_level2`) — en esta fase **aún no** llama a un modelo L2.
 
-**Done:** chat agent offline que usa tools reales del IDE.
+**Done:** chat agent offline que usa tools/tasks del IDE; respuestas NL + logs de tools en el tab AI; edits de L1 (si los hay) con journal `Level1_AI`.
 
-### Fase 3 — Nivel 2 + Search/Replace + remoto opcional
+### Fase D — Puente L2 dry-run (sin modelo complejo)  ← estadio intermedio clave
 
-1. L2 local Coder-3B lazy **o** endpoint remoto (D3).
-2. Parser/validador **estilo Aider** (D12) + apply + journal `Level2_AI`.
-3. Autofix: diagnostics LSP y/o `run_task("build")`, ≤3 reintentos, rollback.
-4. Myers diff opcional (worker) para diff vs disco / UX.
+Objetivo: validar **qué contexto e instrucción** mandaríamos al generador pesado **antes** de gastar integración/RAM en Coder-3B o APIs.
 
-**Done:** “reescribe este algoritmo” produce hunks validados; L2 remoto opcional.
+Cuando L1 decide `needs_level2` (o el usuario fuerza `/l2` / “genera…”):
 
-### Fase 4 — RAG provider
+1. L1 **ensambla** el payload L2: instrucción + `ContextPack` (fragmentos de código, paths, diagnostics, restricciones Search/Replace).
+2. En lugar de inferir con L2, **vuelca el payload al tab AI** en formato legible (y opcionalmente un dump en `.tuide/ai/dry-run/` para diff).
+3. El usuario revisa a ojo: ¿van los fragmentos buenos? ¿sobra ruido? ¿la instrucción es ejecutable?
+4. Modo config: `ai.level2.mode = dry_run` (default hasta Fase E).
+5. Opcional: plantilla exacta del prompt Aider-style que vería L2 (D12), sin apply automático de código “inventado”.
 
-1. Embeddings + índice; invalidación con indexer/watchers.
-2. Inyectar en `ContextPack` sin cambiar el contrato L2.
-3. Búsqueda híbrida vector + rg + symbols.
+**Done:** en escenarios reales del repo se puede auditar la calidad del puente L1→L2 sin descargar/cargar el modelo 3B-Coder ni configurar API remota.
 
-### Fase 5 — UX producto
+**Criterio para pasar a E:** dry-runs revisados en N casos (navegación, bugfix, refactor pequeño) con contexto e instrucción aceptables.
 
-Accept/reject hunks (opcional), theme gutter azul, docs, i18n, atajo para enfocar tab AI, telemetría local off-by-default.
+### Fase E — Nivel 2 real
+
+1. Activar backend L2: GGUF **Qwen2.5-Coder-3B** local lazy **y/o** API remota (D3, D7).
+2. `ai.level2.mode = local | remote` (dry_run permanece como opción de debug).
+3. Parser/validador Search/Replace estilo Aider (D12) → apply en editor + journal `Level2_AI`.
+4. Autofix acotado: build whitelisted + ≤3 reintentos + rollback.
+5. Myers opcional (worker) para UX diff vs disco.
+
+**Done:** generación compleja aplica hunks validados; dry-run sigue disponible para depurar el pack.
+
+### Fase F — RAG (roadmap, no bloquea E)
+
+`RagProvider` rellena el mismo `ContextPack` que ya consume el dry-run y L2. Sin cambiar el contrato del puente.
+
+### Fase G — UX producto
+
+Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usuario.
+
+### Resumen de dependencias
+
+| Fase | Depende de | Entrega principal |
+|---|---|---|
+| A Bases | — | Tab AI, tools, tasks, journal, ContextPack vacío-de-RAG |
+| B L0 | A | Router sin LLM |
+| C L1 | A+B | Agent 3B + tools |
+| D Dry-run | C | Preview del envío a L2 en consola |
+| E L2 | D (validado) | Coder/API + Search/Replace |
+| F RAG | E (o en paralelo tras D si el pack está estable) | Embeddings |
+| G UX | E+ | Pulido |
 
 ---
 
@@ -354,6 +394,8 @@ Accept/reject hunks (opcional), theme gutter azul, docs, i18n, atajo para enfoca
 10. Panel de chat lateral o flotante aparte del host de tabs de consola (D15: tab **AI** abajo).
 11. Volcar archivos enteros o diffs enormes en el transcript (el código va al editor).
 12. Enviar keystrokes del tab AI a la PTY del Terminal.
+14. Saltar a L2/modelo coder sin pasar por **dry-run** del payload en el tab AI (D16).
+15. Implementar L1 antes de tener Bases + L0 operativos.
 
 ---
 
@@ -400,5 +442,6 @@ Accept/reject hunks (opcional), theme gutter azul, docs, i18n, atajo para enfoca
 - [x] Decisiones D1–D8 + resto del plan Gemini (§2.2–3.2)
 - [x] Decisiones Q-A … Q-F → D9–D14
 - [x] UI chat = tab en consola inferior (**D15**)
+- [x] Roadmap estricto Bases → L0 → L1 → L2-dry-run → L2 (**D16**)
 - [ ] (Opcional) Checklist de issues por fase cuando se abra implementación
 - [ ] Sin código de producto en esta rama hasta que se pida explícitamente
