@@ -1,6 +1,6 @@
 # Master Spec: Arquitectura de IA en 2 Niveles + Sistema de Atribución (tuide)
 
-> **Estado:** plan de diseño (sin implementación) — **decisiones D1–D16 cerradas**.  
+> **Estado:** plan de diseño (sin implementación) — **decisiones D1–D17 cerradas**.  
 > **Origen:** propuesta Gemini contrastada contra el código real de tuide (`main`).  
 > **Rama:** `feature/IA` · PR de seguimiento del plan.
 
@@ -34,6 +34,7 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D14 | Enrutado L0 | **Todo** el chat pasa primero por Nivel 0 (puerta barata). L0 resuelve o escala a L1. Slash commands son atajos L0 (p.ej. `/build` → task runner sin LLM) |
 | D15 | UI chat | Tab **AI** en el panel inferior (`ConsolePanelTabs`), junto a Terminal / Problems / Git / …. Transcript tipo terminal/chat (estilo Cursor): respuestas de texto, tool/status y **stdout/stderr de comandos** del Task Runner. Los cambios de código se aplican **en el editor** (auto + journal/gutter), no se vuelcan como archivos enteros en el chat |
 | D16 | Roadmap por etapas | Implementar en orden estricto: **Bases → L0 → L1 → L2-dry-run → L2**. Antes del modelo L2, el Nivel 1 **imprime en el tab AI** el paquete que enviaría a L2 (`ContextPack` + instrucción) para validar fragmentos y prompts a ojo |
+| D17 | ContextPack sin RAG | Ensamblado **estructural**: rg → cuerpos Tree-sitter → LSP (def/hover/refs) + **call hierarchy incoming** → headers/declaración e includes **directos** relevantes; presupuesto de tokens; RAG solo añade candidatos después (Fase F) |
 
 ---
 
@@ -265,16 +266,72 @@ Appends al transcript solo vía cola + `UI_WAKE`; respetar `UiActivityGate` (no 
 
 ---
 
-## 7. RAG: no en v1, sí en el diseño (D2)
+## 7. RAG: no en v1; ContextPack “estructural” (D2, D17)
 
-Para no pintar contra la pared cuando llegue un L2 “complejo”:
+RAG vectorial queda en **Fase F**. Hasta entonces el contexto para L1/L2 (y el dry-run) se arma con el **IDE que ya tenemos**: ripgrep + Tree-sitter + LSP (incl. call hierarchy) + headers relevantes.
 
-1. Definir desde ya `ContextPack` (archivos, símbolos, diagnostics, snippets, presupuestos de tokens).
-2. En v1, el pack lo rellenan **LSP + rg + Tree-sitter + selection + open tabs** (sin embeddings).
-3. Más adelante, un `RagProvider` añade chunks vectoriales al **mismo** pack.
-4. Chunking futuro: nodos Tree-sitter (ya disponibles), store tipo sqlite-vec bajo `$XDG_CACHE_HOME/tuide/…`.
+### 7.1 Pipeline de ensamblado del ContextPack (v1, sin embeddings)
 
-Así L2 siempre come `ContextPack`; RAG es un backend más, no un rewrite.
+```
+Query / intent (L0 o L1)
+        │
+        ├─1─ ripgrep (WorkspaceSearch) → hits (path, line, preview)
+        │
+        ├─2─ Tree-sitter → expandir cada hit al cuerpo semántico
+        │      (function / method / class / struct que contiene la línea)
+        │
+        ├─3─ LSP en el símbolo ancla
+        │      · hover / signature
+        │      · definition / declaration
+        │      · references (muestra acotada)
+        │      · call hierarchy: incoming (+ outgoing si aporta)
+        │
+        ├─4─ Headers / includes de relevancia
+        │      · includes del archivo ancla (Tree-sitter / include graph)
+        │      · declaración del símbolo si vive en .h/.hpp
+        │      · no volcar todos los transitivos a ciegas
+        │
+        └─5─ Presupuesto de tokens → recortar / priorizar → ContextPack
+```
+
+Esto es exactamente el sustituto práctico de RAG en las fases A–E: **búsqueda léxica + extracción estructural + grafo de llamadas**, no similitud vectorial.
+
+### 7.2 Qué va en el pack (prioridad)
+
+| Prioridad | Contenido | Fuente en tuide |
+|---|---|---|
+| P0 | Selección del usuario + archivo/cursor activos | Editor |
+| P0 | Diagnostics del archivo (y relacionados) | LSP `publishDiagnostics` |
+| P1 | Cuerpos TS de hits rg (no solo la línea) | `TreeSitterService` / symbols AST |
+| P1 | Definición + firma del símbolo | LSP hover / definition |
+| P2 | **Incoming** call hierarchy (quién llama) | LSP call hierarchy (UI ya existe) |
+| P2 | Header/declaración del símbolo + includes directos del TU | LSP + parse includes / `include_tree` |
+| P3 | Outgoing calls / referencias extra | LSP (solo si cabe en presupuesto) |
+| P3 | Tabs abiertos vecinos | Heurística débil |
+
+### 7.3 Headers: sí, pero con freno
+
+**Sí pasar headers de relevancia**, no el closure completo del `#include` graph:
+
+- Declaración del símbolo si está en header.
+- Includes **directos** del `.cpp`/archivo ancla que mencionan el tipo/símbolo, o el header “home” del símbolo.
+- Evitar volcar libc/STL/system headers salvo que el hit sea ahí.
+- Si el presupuesto aprieta: header de declaración > includes directos > transitivos.
+
+### 7.4 Call hierarchy: “¿de dónde se llama?”
+
+Para codegen/autofix suele importar más **incoming** (callers) que outgoing. Default del pack:
+
+1. Incoming (hasta N callers, con snippet TS del call-site).
+2. Outgoing solo si L1 lo pide explícitamente o el intent es “entender dependencias hacia abajo”.
+
+### 7.5 Relación con dry-run (D16)
+
+En Fase D, el tab AI muestra este pack ya ensamblado (hits rg → cuerpos → callers → headers). Si se ve ruido (demasiados headers, callers irrelevantes), se ajusta el ensamblador **antes** de enchufar L2 o RAG.
+
+### 7.6 Cuando llegue RAG (Fase F)
+
+`RagProvider` solo añade candidatos extra al **mismo** `ContextPack` (chunks por similitud). El pipeline rg/TS/LSP **sigue** siendo la base; RAG no lo reemplaza.
 
 ---
 
@@ -308,9 +365,9 @@ Infraestructura compartida por todos los niveles.
 3. `ToolRegistry` + tools de **lectura**: FS workspace, search/rg, LSP symbols/hover/diagnostics.
 4. `TaskRunner` + **whitelist** (compile/launch por defecto) + volcado stdout/stderr al tab AI (D10).
 5. Edit Journal + apply path (undo group) + gutter Human/AI + sidecar `.tuide/` (D5, D11, D13).
-6. Esqueleto `ContextPack` (selección, archivo activo, diagnostics, snippets por tools) — **sin** embeddings.
+6. Esqueleto `ContextPack` + ensamblador estructural (rg → TS bodies → LSP/call hierarchy → headers) sin embeddings (**D17**).
 
-**Done:** desde el tab AI se pueden invocar tools/tasks de forma manual o por comandos stub; la salida se ve como consola; un apply simulado pinta gutter azul y persiste al reopen.
+**Done:** desde el tab AI se pueden invocar tools/tasks; un apply simulado pinta gutter azul; se puede pedir un pack de contexto y ver hits+cuerpos+callers en transcript/dump.
 
 **No incluye:** heurísticas NL de L0, ni llama.cpp, ni L2.
 
@@ -443,5 +500,6 @@ Accept/reject hunks (opcional), theme gutter, i18n, atajo foco tab AI, docs usua
 - [x] Decisiones Q-A … Q-F → D9–D14
 - [x] UI chat = tab en consola inferior (**D15**)
 - [x] Roadmap estricto Bases → L0 → L1 → L2-dry-run → L2 (**D16**)
+- [x] ContextPack sin RAG = rg + TS + LSP/call hierarchy + headers (**D17**)
 - [ ] (Opcional) Checklist de issues por fase cuando se abra implementación
 - [ ] Sin código de producto en esta rama hasta que se pida explícitamente
