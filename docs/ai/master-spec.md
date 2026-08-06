@@ -1,6 +1,6 @@
 # Master Spec: Arquitectura de IA en 2 Niveles + Sistema de Atribución (tuide)
 
-> **Estado:** plan de diseño (sin implementación) — **decisiones D1–D14 cerradas**.  
+> **Estado:** plan de diseño (sin implementación) — **decisiones D1–D15 cerradas**.  
 > **Origen:** propuesta Gemini contrastada contra el código real de tuide (`main`).  
 > **Rama:** `feature/IA` · PR de seguimiento del plan.
 
@@ -32,6 +32,7 @@ Gemini acierta en búnker local, 2 niveles, Search/Replace, atribución en memor
 | D12 | Search/Replace | Formato **estilo Aider** adaptado a C++ (bloques SEARCH/REPLACE en texto). Fácil de validar y de depurar; JSON como transporte opcional solo si un backend remoto lo exige |
 | D13 | Journal persistente | **Sidecar** bajo `.tuide/` (por path/archivo) para sobrevivir al reabrir el proyecto; no mezclar con Git |
 | D14 | Enrutado L0 | **Todo** el chat pasa primero por Nivel 0 (puerta barata). L0 resuelve o escala a L1. Slash commands son atajos L0 (p.ej. `/build` → task runner sin LLM) |
+| D15 | UI chat | Tab **AI** en el panel inferior (`ConsolePanelTabs`), junto a Terminal / Problems / Git / …. Transcript tipo terminal/chat (estilo Cursor): respuestas de texto, tool/status y **stdout/stderr de comandos** del Task Runner. Los cambios de código se aplican **en el editor** (auto + journal/gutter), no se vuelcan como archivos enteros en el chat |
 
 ---
 
@@ -213,11 +214,57 @@ Distinto de `src/build/` (entornos + `compile_commands` para clangd).
 | Autofix loop | L1 aplica edit → `run_task("build")` (en whitelist) → stderr → reintento ≤3 → rollback |
 | UI | Progreso vía `UI_WAKE`; gestión de whitelist en settings / modal |
 
-La PTY del terminal integrado **no** sustituye al Task Runner: el usuario sigue pudiendo escribir lo que quiera en la shell; el **agent** no.
+La PTY del terminal integrado **no** sustituye al Task Runner: el usuario sigue pudiendo escribir lo que quiera en la shell; el **agent** no. La salida de comandos del agent va al tab **AI** (D15), no a la PTY (salvo que el usuario los teclee él mismo en Terminal).
 
 ---
 
-## 6. RAG: no en v1, sí en el diseño (D2)
+## 6. UI: tab AI en el panel de consola (D15)
+
+### 6.1 Dónde vive
+
+El panel inferior ya es un host de tabs (`ConsolePanelTabs` en `src/ui/main_layout.hpp`): Terminal, App, Debug, Performance, Problems, Search, Call Hierarchy, Git, Core Analyzer, Binary Symbols, Packet Monitor.
+
+**Añadir** `kAi` (nombre UI: **AI** / i18n) como una tab más. Misma geometría, foco `FocusRegion::Terminal` / input focus de consola, atajo opcional (p.ej. dedicarlo cuando el agent arranca o con un keybind).
+
+No abrir un panel lateral nuevo ni un modal de chat a pantalla completa: rompe el layout actual y compite con Outline/Search.
+
+### 6.2 Qué se muestra (transcript tipo terminal)
+
+Scrollback de líneas/eventos, sensación de “salida de consola + chat”, no un feed de cards:
+
+| Evento | En el tab AI | En el editor |
+|---|---|---|
+| Mensaje del usuario | Sí (prompt) | — |
+| Respuesta NL de L0/L1/L2 | Sí (streaming si aplica) | — |
+| Tool call / status (“search…”, “compile…”) | Sí (línea de log breve) | — |
+| `run_task` / `run_command` (whitelist) | **Sí: stdout/stderr + exit code** | — |
+| Apply Search/Replace / edits | Log breve (“applied N hunks in foo.cpp”) | **Texto aplicado** + journal + gutter azul |
+| Deny whitelist | Sí (motivo + oferta “añadir a whitelist”) | — |
+| Error / cancel | Sí | — |
+
+Los diffs grandes **no** se pegan enteros en el chat; el usuario los ve en el buffer (y más adelante accept/reject hunk si se añade en Fase 5).
+
+### 6.3 Input
+
+- Línea de entrada abajo del transcript (como el input de Debug/GDB o un prompt de chat).
+- Slash commands (`/build`, …) y NL libre → siempre L0 primero (D14).
+- Separado de la PTY: escribir en AI **no** envía bytes al bash embebido.
+
+### 6.4 Relación con Terminal PTY
+
+| | Tab Terminal | Tab AI |
+|---|---|---|
+| Quién escribe comandos | Usuario (shell real) | Agent vía Task Runner (whitelist) |
+| Salida | PTY | Transcript AI |
+| Edits de código | No | Dispara apply en editor |
+
+### 6.5 Wake / idle
+
+Appends al transcript solo vía cola + `UI_WAKE`; respetar `UiActivityGate` (no spamear frames en idle si no hay texto nuevo). Streaming de tokens: coalescer updates.
+
+---
+
+## 7. RAG: no en v1, sí en el diseño (D2)
 
 Para no pintar contra la pared cuando llegue un L2 “complejo”:
 
@@ -230,7 +277,7 @@ Así L2 siempre come `ContextPack`; RAG es un backend más, no un rewrite.
 
 ---
 
-## 7. Empaquetado llama.cpp (D8)
+## 8. Empaquetado llama.cpp (D8)
 
 Alineado a bundles existentes (`BundleClangd`, `BundleRg`, …):
 
@@ -241,17 +288,17 @@ Alineado a bundles existentes (`BundleClangd`, `BundleRg`, …):
 
 ---
 
-## 8. Plan por fases (actualizado)
+## 9. Plan por fases (actualizado)
 
 ### Fase 0 — Cimientos sin modelo
 
 1. `ToolRegistry` + tools lectura: FS (vía workspace), search, LSP symbols/hover/diagnostics.
 2. Nivel 0 router (heurísticas / slash).
-3. Panel AI stub + `UI_WAKE`.
+3. Tab **AI** stub en `ConsolePanelTabs` + input + `UI_WAKE` (D15).
 4. Bloque `"ai"` en `.tuide/config.json`.
 5. Esqueleto `ContextPack` (sin RAG).
 
-**Done:** preguntas operativas del IDE respondidas sin LLM.
+**Done:** transcript operativo en la consola inferior; tools de lectura sin LLM.
 
 ### Fase 1 — Task Runner + atribución journal
 
@@ -259,9 +306,9 @@ Alineado a bundles existentes (`BundleClangd`, `BundleRg`, …):
 2. Whitelist de comandos (defaults compile/launch + ampliación en config; modal “añadir”) (D10).
 3. Edit Journal + mapa gutter Human/AI + **sidecar `.tuide/`** (D13).
 4. Apply path único: edits → undo group → journal.
-5. Tools `run_task` / `run_command` (gateados por whitelist) en el panel/agent stub.
+5. Tools `run_task` / `run_command` (gateados por whitelist); su salida va al **transcript del tab AI** (D15).
 
-**Done:** “compila el proyecto” si está en whitelist; “curl …” se rechaza (o pide añadir a whitelist); gutter azul/verde sobrevive reopen.
+**Done:** “compila el proyecto” si está en whitelist (log en tab AI); “curl …” se rechaza (o pide añadir a whitelist); gutter azul/verde sobrevive reopen.
 
 ### Fase 2 — Nivel 1 LLM local (bundle llama)
 
@@ -289,11 +336,11 @@ Alineado a bundles existentes (`BundleClangd`, `BundleRg`, …):
 
 ### Fase 5 — UX producto
 
-Accept/reject hunks, theme gutter, docs usuario, i18n, telemetría local off-by-default.
+Accept/reject hunks (opcional), theme gutter azul, docs, i18n, atajo para enfocar tab AI, telemetría local off-by-default.
 
 ---
 
-## 9. Qué NO hacer
+## 10. Qué NO hacer
 
 1. Reescribir LSP, Tree-sitter, rg, Git, wake UI.
 2. Dual-buffer paralelo al `EditorBuffer`.
@@ -304,11 +351,13 @@ Accept/reject hunks, theme gutter, docs usuario, i18n, telemetría local off-by-
 7. Myers en el hilo UI en cada tecla.
 8. Introducir `.tuide.json` en la raíz.
 9. Confundir `src/build/` (compile_commands) con el Task Runner.
-10. Python runtime para IA.
+10. Panel de chat lateral o flotante aparte del host de tabs de consola (D15: tab **AI** abajo).
+11. Volcar archivos enteros o diffs enormes en el transcript (el código va al editor).
+12. Enviar keystrokes del tab AI a la PTY del Terminal.
 
 ---
 
-## 10. Decisiones Q-A … Q-F (cerradas)
+## 11. Decisiones Q-A … Q-F (cerradas)
 
 | Id | Pregunta | Resolución |
 |---|---|---|
@@ -327,7 +376,7 @@ Accept/reject hunks, theme gutter, docs usuario, i18n, telemetría local off-by-
 
 ---
 
-## 11. Inventario de APIs a reutilizar
+## 12. Inventario de APIs a reutilizar
 
 | Necesidad | API existente |
 |---|---|
@@ -338,16 +387,18 @@ Accept/reject hunks, theme gutter, docs usuario, i18n, telemetría local off-by-
 | Wake / idle | `UI_WAKE`, `UiEventDispatcher`, `UiActivityGate` |
 | Config | `.tuide/config.json` |
 | Cache | `$XDG_CACHE_HOME/tuide/` (bundled, captures, → models) |
-| Shell (no sustituye Task Runner) | `ShellSession` PTY |
+| Shell (no sustituye Task Runner) | `ShellSession` PTY — tab Terminal |
+| Host de tabs inferior | `ConsolePanelTabs` / `ConsolePanel` — añadir `kAi` |
 | Git | `GitService` |
 | compile_commands / clangd env | `src/build/*` (sigue siendo para LSP, no tasks) |
 
 ---
 
-## 12. Entregables de esta rama
+## 13. Entregables de esta rama
 
 - [x] Spec contrastado v1
 - [x] Decisiones D1–D8 + resto del plan Gemini (§2.2–3.2)
 - [x] Decisiones Q-A … Q-F → D9–D14
+- [x] UI chat = tab en consola inferior (**D15**)
 - [ ] (Opcional) Checklist de issues por fase cuando se abra implementación
 - [ ] Sin código de producto en esta rama hasta que se pida explícitamente
