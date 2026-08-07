@@ -1,7 +1,7 @@
 # Plan: dirty por panel + invalidación declarativa + rate-limit de status
 
 **Estado:** pendiente de implementación  
-**Fecha:** 2026-08-07  
+**Fecha:** 2026-08-07 (rev. busy strip / sin app name)  
 **Rama de diseño:** `cursor/panel-invalidation-plan-39c9`  
 **Alcance:** diseño normativo; este documento no implementa el sistema.
 
@@ -27,9 +27,12 @@ Hoy:
 ### Fuera de alcance (explícito)
 
 - Fork / parche de FTXUI para dirty-rows o diff de frame.
-- Bypass ANSI a la última fila fuera del framebuffer de FTXUI.
+- Reservar `H−1` filas (FTXUI dueño de toda la terminal menos la última).
+- Sustituir la status bar entera (botones/popover) por solo texto.
 - Rate-limit en editor o terminal en v1 (la API queda lista).
-- Tickers / refresco fijo / vsync de status.
+- Porcentajes animados en el busy strip (verbos sí; `%` no es requisito).
+
+**En alcance (ornamental):** ANSI solo sobre la **celda del spinner** del busy strip (ver §14), no un bypass de fila completa.
 
 ## 2. Objetivos
 
@@ -37,7 +40,7 @@ Hoy:
 2. **Dirty por panel:** solo se regenera el `Element` de paneles marcados dirty.
 3. **Invalidación declarativa:** cada tipo de evento mapea a un set fijo de paneles (tabla normativa).
 4. **Rate-limit genérico por panel:** en v1 solo status a **2 Hz**; el resto `nullopt` (ilimitado).
-5. **Status:** cacheado; si el texto no cambia → 0 wakes; si cambia → dirty + techo 2 Hz con coalesce del último valor.
+5. **Status / busy strip:** el mensaje de estado deja de ser un `text | flex` libre; pasa a franja fija con spinner Braille (ver §14). Cambio de **label** → dirty/rate-limit; frames del spinner → ANSI sin wake.
 6. Dejar el sistema montado para aplicar techos futuros (p. ej. output de terminal).
 
 ## 3. Principios
@@ -236,16 +239,18 @@ Regla: lo no listado **no** se marca dirty.
 | Git UI interactiva | Console (tab git) y/o FT (badges) | | |
 | GitIndexerUpdated async | **no wake** (como hoy) | | dirty FT si revision cambia en próximo paint con otro wake |
 
-### 6.6 Status
+### 6.6 Status / busy strip
 
 | `UiInvalidation` | Dirty | Rate |
 |------------------|-------|------|
-| `StatusText` | `StatusOnly` | max 2 Hz, dedupe, coalesce |
-| texto igual | **0** | |
-| `StatusChrome` | StatusBar | inmediato |
+| `StatusText` (cambio de **label** del strip) | `StatusOnly` | max 2 Hz, dedupe, coalesce |
+| label igual | **0** wakes | |
+| Tick del spinner Braille | **ninguno** | ANSI a 1 celda; sin `UI_WAKE` |
+| `StatusChrome` (hover/press botones) | StatusBar | inmediato |
 | `StatusTextUrgent` | StatusBar | `force_immediate` |
 
-Gate actual `if (!editor_focus)` oculta `status_msg` al editar: decisión de producto aparte (progreso sticky vs cambiar gate). Documentar al migrar progress de index.
+Chrome de la fila (producto): **foco + busy strip + botones**. Sin `status.app_name`.  
+Gate actual `if (!editor_focus)` sobre el mensaje: reevaluar al montar el strip (el busy de index/download debe poder verse también al editar).
 
 ### 6.7 Chrome global
 
@@ -284,12 +289,13 @@ Gate actual `if (!editor_focus)` oculta `status_msg` al editar: decisión de pro
 | **2** | Cablear `MakeCachedPanelRender` en FT/Ed/Console + cache Element StatusBar | Frames status no rebuild de otros paneles |
 | **3** | Migrar invalidaciones gordas: OpenFile, Jump*, TreeSitterActiveFile, StatusText, TerminalOutput, DebugStopped | Call sites principales sin `"wake"` |
 | **4** | Romper `invalidate_editor_view`; migrar completion/hover/diagnostics/VH/find | Invalidación fina |
-| **5** | Migrar `Application::set_status` / `set_workspace_status` + barrido `status_message =` | Una sola vía de status |
+| **5** | Migrar `Application::set_status` / `set_workspace_status` → API del busy strip + barrido `status_message =` | Una sola vía de mensaje |
+| **5b** | Busy strip en layout: quitar app name; foco + strip fijo + botones; ticker ANSI del Braille | Liveness sin wake |
 | **6** | Tests golden: cada `UiInvalidation` → set exacto de paneles dirty | Tabla ejecutable |
 | **7** | Docs: este plan + sección en `architecture.md`; checklist PR anti-`"wake"` | Normativa visible |
 | **8** *(futuro)* | `Console` con `max_hz` opcional en policy table | Sin rediseñar pipeline |
 
-Orden sugerido: 1 → 2 → 3 → 6 (smoke) → 4 → 5 → 7 → 8.
+Orden sugerido: 1 → 2 → 3 → 6 (smoke) → 4 → 5 → **5b** → 7 → 8.
 
 ## 10. Tests y criterios de éxito
 
@@ -308,15 +314,16 @@ Orden sugerido: 1 → 2 → 3 → 6 (smoke) → 4 → 5 → 7 → 8.
 
 - Abrir archivo no rebuild de terminal (generation Console igual).
 - TS ready del activo despierta outline sin tocar Console/Status.
-- Spam de `%` en status ≤ 2 wakes/s; resto de panels quietos.
+- Cambio de label del busy strip ≤ 2 wakes/s; ticks Braille **0** wakes.
 - Input (teclas, hover toolbar status) sin retraso artificial de 500 ms.
 - Añadir techo a Console = cambiar un `optional<int>` en la tabla de policies.
+- Status bar sin app name; strip visible con actividad larga sin sensación de UI congelada.
 
 ### Regresiones a vigilar
 
 - Hover/click botones status, popover Layout.
-- Contadores diagnostics en status.
 - Helix mode en focus label.
+- Truncate/i18n del label del strip; columna del spinner estable tras resize.
 - Reveal en file tree al abrir.
 - Debug ► / active line tras stop.
 - Typing burst: outline diferido pero eventualmente consistente.
@@ -347,4 +354,58 @@ Orden sugerido: 1 → 2 → 3 → 6 (smoke) → 4 → 5 → 7 → 8.
 
 ## 13. Resumen ejecutivo
 
-Sistema event-driven con **invalidación declarativa por tipo de evento**, **cache de Elements en todos los paneles** (incluido status), y **rate-limit genérico** aplicado en v1 solo al texto de status (2 Hz, dedupe, coalesce). No intenta paint parcial de FTXUI; reduce rebuild y frecuencia de wakes ruidosos, y deja una matriz evidente de qué evento despierta qué panel — incluyendo cruces como open file, jump y Tree-sitter → outline.
+Sistema event-driven con **invalidación declarativa por tipo de evento**, **cache de Elements en todos los paneles** (incluido status), y **rate-limit genérico** aplicado en v1 al **label** del status (2 Hz, dedupe, coalesce). El mensaje de la barra pasa a un **busy strip** (Braille + franja fija) actualizable barato; el chrome (foco + botones) se mantiene y se elimina el app name. No intenta paint parcial de FTXUI; reduce rebuild y wakes ruidosos, con matriz explícita de eventos cruzados (open, jump, Tree-sitter → outline).
+
+## 14. Busy strip (reemplazo del mensaje de status)
+
+### Producto
+
+Sustituir el `text(status_msg) | flex` actual por una franja de actividad. **No** se sustituye la barra entera.
+
+```text
+[Editor|Helix…]  ⠋ indexing workspace………     [Index][Launch][Debug][Layout]…
+└── foco FTXUI ──┘  └── busy strip ────────┘   └── toolbar FTXUI (igual) ──┘
+```
+
+- **Quitar** `status.app_name` (no aporta en la fila).
+- **Mantener** foco (y Helix si aplica) + botones / popover Layout.
+- **Sin `%` animados** en el strip: verbos (`indexing`, `downloading`, `saving`, …). Aceptable.
+
+### Layout del strip
+
+| Celda(s) | Contenido |
+|----------|-----------|
+| 1 | Spinner Braille (`⠋⠙⠹…`) o espacio si idle |
+| 2 | Separador (espacio) |
+| 3..3+N−1 | Label truncado con ellipsis; padding a ancho fijo N |
+
+- Braille **antes** del texto (no se separa del verbo).
+- N grande pero **fijo** (p. ej. lo que quepa entre foco y toolbar; clamp en resize). Preferir N generoso para i18n (ES: `descargando…`); 10 puede cortar de más.
+- Truncate al final del label; nunca comerse la celda del spinner.
+
+### Paint
+
+1. El `Element` FTXUI reserva el hueco fijo (spinner = espacio o glyph estático; label = string truncado).
+2. Un ticker ligero escribe **solo la celda del Braille** por ANSI (sin `UI_WAKE`).
+3. Tras cada `Draw` de FTXUI, **reasertar** el frame actual del spinner (post-hook) para no dejar un frame vacío al teclear/PTY.
+4. Idle: parar ticker; celda spinner = espacio; label vacío o mensaje idle corto vía `StatusText` si hace falta.
+
+### API prevista
+
+```text
+enum class BusyActivity { Idle, Indexing, Downloading, Saving, … };
+void set_busy_activity(MainLayoutState*, BusyActivity, string_view detail = {});
+```
+
+- Cambio de activity/label → `StatusText` (dirty + ≤2 Hz).
+- Rotación Braille → no invalidación de paneles.
+- Sustituye de facto el rol de `status_message` como “qué está pasando”; mensajes one-shot urgentes pueden reutilizar el mismo strip (`StatusTextUrgent`) o un label puntual sin spinner.
+
+### Relación con dirty/2 Hz
+
+| Señal | Mecanismo |
+|-------|-----------|
+| Nuevo verbo / detalle de actividad | Dirty StatusBar + techo 2 Hz |
+| Mismo label | 0 wakes |
+| Frame Braille | ANSI 1 celda |
+| Hover botones | `StatusChrome` inmediato |
