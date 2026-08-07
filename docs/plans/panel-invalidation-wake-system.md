@@ -1,7 +1,7 @@
 # Plan: dirty por panel + invalidación declarativa + rate-limit de status
 
 **Estado:** pendiente de implementación  
-**Fecha:** 2026-08-07 (rev. busy strip / sin app name)  
+**Fecha:** 2026-08-07 (rev. busy strip Braille|% mismo ancho)  
 **Rama de diseño:** `cursor/panel-invalidation-plan-39c9`  
 **Alcance:** diseño normativo; este documento no implementa el sistema.
 
@@ -32,7 +32,7 @@ Hoy:
 - Rate-limit en editor o terminal en v1 (la API queda lista).
 - Porcentajes **solo vía wake FTXUI a alta tasa** (el strip ANSI sí puede mostrar `%`; ver §14).
 
-**En alcance (ornamental):** ANSI solo sobre la **celda del spinner** del busy strip (ver §14), no un bypass de fila completa.
+**En alcance (ornamental):** ANSI sobre el **slot indicador fijo** del busy strip (Braille o `%`, mismo ancho W; ver §14), no un bypass de fila completa.
 
 ## 2. Objetivos
 
