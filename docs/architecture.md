@@ -227,7 +227,12 @@ Fetched via CMake `FetchContent` (see `cmake/Dependencies.cmake`):
 
 Runtime: optional language servers (LSP) and debug adapters (GDB / debugpy / bash-debug).
 
+## Planned: panel invalidation policy
+
+FTXUI always performs a full `Draw`. To keep wakes cheap and predictable, a declarative **panel dirty + optional per-panel Hz cap** system is planned (status text capped at 2 Hz; open-file / jump / tree-sitter → outline cross-invalidations made explicit). See [Panel invalidation and wake system plan](plans/panel-invalidation-wake-system.md).
+
 ## See also
 
 - [Development guide](development.md)
 - [User guide](user-guide.md)
+- [Panel invalidation plan](plans/panel-invalidation-wake-system.md)
