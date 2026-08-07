@@ -165,6 +165,8 @@ add_executable(tuide
   src/ui/clickable_interaction.cpp
   src/ui/ui_event_dispatcher.cpp
   src/ui/ui_event_trace.cpp
+  src/ui/ui_invalidation_policy.cpp
+  src/ui/busy_strip.cpp
   src/ui/mouse_velocity_tracker.cpp
   src/ui/cursor_blink.cpp
   src/ui/spinner.cpp
@@ -647,6 +649,12 @@ add_executable(glyphs_test
 )
 target_include_directories(glyphs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+add_executable(ui_invalidation_policy_test
+  tests/ui_invalidation_policy_test.cpp
+)
+target_include_directories(ui_invalidation_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(ui_invalidation_policy_test PRIVATE ftxui::dom)
+
 add_executable(compiler_location_test
   tests/compiler_location_test.cpp
   src/util/compiler_location.cpp
@@ -747,6 +755,7 @@ set(TUIDE_TEST_TARGETS
   external_viewer_test
   tabular_file_test
   glyphs_test
+  ui_invalidation_policy_test
   compiler_location_test
   raw_pty_screen_test
   gfortran_diagnostics_test

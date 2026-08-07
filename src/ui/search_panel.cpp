@@ -1,4 +1,5 @@
 #include "ui/search_panel.hpp"
+#include "ui/busy_strip.hpp"
 #include "ui/ui_wake.hpp"
 
 #include <algorithm>
@@ -311,10 +312,12 @@ WorkspaceSearchOptions build_options(SearchPanelState* state, WorkspaceModel* wo
 }
 
 void apply_search_results(SearchPanelState* state, std::vector<WorkspaceSearchResult> results,
-                          bool cancelled, int files_scanned, bool used_rg) {
+                          bool cancelled, int files_scanned, bool used_rg,
+                          MainLayoutState* layout_state = nullptr) {
   if (state == nullptr) {
     return;
   }
+  clear_busy(layout_state);
   state->results = std::move(results);
   state->result_count = static_cast<int>(state->results.size());
   state->selected = 0;
@@ -350,7 +353,7 @@ bool poll_search_results(SearchPanelState* state, MainLayoutState* layout_state)
   if (!state->runner.poll(&results, &cancelled, &files_scanned, &used_rg)) {
     return false;
   }
-  apply_search_results(state, std::move(results), cancelled, files_scanned, used_rg);
+  apply_search_results(state, std::move(results), cancelled, files_scanned, used_rg, layout_state);
   if (layout_state != nullptr) {
     UI_WAKE(layout_state, "wake");
   }
@@ -366,6 +369,7 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
     state->selected = 0;
     state->result_count = 0;
     state->status = i18n::tr("search.status.enter_query");
+    clear_busy(layout_state);
     return;
   }
   state->committed_query = state->query;
@@ -381,6 +385,7 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
   state->result_count = 0;
   ++state->search_generation;
   state->runner.start(std::move(opts));
+  set_busy_spinner(layout_state, BusyActivity::ProjectSearch);
   if (layout_state != nullptr) {
     UI_WAKE(layout_state, "wake");
   }

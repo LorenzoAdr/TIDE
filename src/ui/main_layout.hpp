@@ -27,6 +27,8 @@
 #include "git/git_service.hpp"
 #include "util/system_stats.hpp"
 #include "util/ui_activity_gate.hpp"
+#include "ui/busy_strip.hpp"
+#include "ui/ui_invalidation_policy.hpp"
 #include "util/ui_panel_render_cache.hpp"
 #include "util/ui_perf_monitor.hpp"
 #include "ui/mouse_velocity_tracker.hpp"
@@ -164,6 +166,7 @@ struct MainLayoutState {
   // -1 = unset; tracks AppMode so RightSidebar cache rebuilds on enter/exit debug.
   int panel_cache_app_mode = -1;
   UiPanelRenderCache panel_render_cache;
+  std::unique_ptr<BusyStripState> busy_strip;
   UiActivityGate activity_gate;
   UiPerfMonitor ui_perf_monitor;
   MouseVelocityTracker mouse_velocity;
@@ -347,12 +350,8 @@ inline bool is_editor_chrome_input_focus(TextInputFocus focus) {
 using EditorNavigateCallback = std::function<void(const SourceLocation&)>;
 
 inline void invalidate_editor_view(MainLayoutState* layout_state) {
-  if (layout_state == nullptr) {
-    return;
-  }
-  layout_state->focus_sync_needed = true;
-  layout_state->panel_render_cache.mark_dirty(UiPanelId::EditorCenter);
-  layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+  // Prefer invalidate(UiInvalidation::…) at call sites; this keeps Editor-only dirty.
+  invalidate(layout_state, UiInvalidation::EditorViewOnly);
 }
 
 void apply_editor_navigation(MainLayoutState* layout_state, const SourceLocation& loc,

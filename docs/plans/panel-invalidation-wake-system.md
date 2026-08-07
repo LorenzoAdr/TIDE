@@ -1,7 +1,7 @@
 # Plan: dirty por panel FTXUI + busy strip ANSI
 
-**Estado:** pendiente de implementación  
-**Fecha:** 2026-08-07 (rev. separación dirty paneles vs strip ANSI)  
+**Estado:** en implementación  
+**Fecha:** 2026-08-07 (rev. ejecución iniciada)  
 **Rama de diseño:** `cursor/panel-invalidation-plan-39c9`  
 **Alcance:** diseño normativo; este documento no implementa el sistema.
 

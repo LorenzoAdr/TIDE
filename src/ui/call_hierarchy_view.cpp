@@ -1,4 +1,5 @@
 #include "ui/call_hierarchy_view.hpp"
+#include "ui/busy_strip.hpp"
 #include "ui/ui_wake.hpp"
 
 #include <algorithm>
@@ -569,6 +570,7 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
   params.line = resolved_line;
   params.character = resolved_col;
 
+  set_busy_spinner(layout_state, BusyActivity::CallHierarchy);
   TUIDE_MON_SCOPE("editor", "call_hierarchy.prepare");
   std::vector<CallHierarchyItem> roots = symbols->prepare_call_hierarchy(params);
   if (roots.empty()) {
@@ -576,6 +578,7 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
                                          &resolved_line, &resolved_col);
   }
   if (roots.empty()) {
+    clear_busy(layout_state);
     workspace->status_message = i18n::tr("status.no_call_hierarchy_scope");
     return false;
   }
@@ -595,6 +598,7 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
   root.nav_character = resolved_col;
   view->nodes.push_back(std::move(root));
   expand_hierarchy_tree(view, symbols);
+  clear_busy(layout_state);
 
   std::string label = view->nodes.front().item.name;
   if (!view->nodes.front().item.detail.empty()) {
@@ -645,8 +649,10 @@ bool open_references_view(CallHierarchyViewState* view, WorkspaceModel* workspac
   params.line = line;
   params.character = col;
 
+  set_busy_spinner(layout_state, BusyActivity::FindReferences);
   TUIDE_MON_SCOPE("editor", "references.find");
   const std::vector<SourceLocation> locations = symbols->find_references(params, true);
+  clear_busy(layout_state);
   if (locations.empty()) {
     workspace->status_message = i18n::tr("status.references.none");
     return false;

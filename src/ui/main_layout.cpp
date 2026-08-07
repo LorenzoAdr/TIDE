@@ -1,6 +1,7 @@
 #include "ui/git_panel.hpp"
 #include "ui/hover_effects.hpp"
 #include "ui/main_layout.hpp"
+#include "ui/busy_strip.hpp"
 #include "ui/status_layout_popover.hpp"
 #include "ui/ui_wake_policy.hpp"
 
@@ -60,9 +61,14 @@ Component MakeCachedPanelRender(MainLayoutState* layout_state, UiPanelId panel, 
 }  // namespace
 
 MainLayoutState::MainLayoutState()
-    : packet_monitor_service(std::make_unique<packet_monitor::PacketMonitorService>()) {}
+    : packet_monitor_service(std::make_unique<packet_monitor::PacketMonitorService>()),
+      busy_strip(std::make_unique<BusyStripState>()) {}
 
-MainLayoutState::~MainLayoutState() = default;
+MainLayoutState::~MainLayoutState() {
+  if (busy_strip != nullptr) {
+    clear_busy(this);
+  }
+}
 
 void apply_editor_navigation(MainLayoutState* layout_state, const SourceLocation& loc,
                              EditorNavigateCallback navigate) {
@@ -71,8 +77,7 @@ void apply_editor_navigation(MainLayoutState* layout_state, const SourceLocation
   }
   navigate(loc);
   clear_editor_symbol_press(layout_state);
-  invalidate_editor_view(layout_state);
-  UI_WAKE_REASON(layout_state, UiWakeReason::EditorNavigationComplete);
+  invalidate(layout_state, UiInvalidation::JumpCrossFile, "editor.navigation.complete");
 }
 
 void schedule_editor_navigation(MainLayoutState* layout_state, const SourceLocation& loc) {
@@ -950,9 +955,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     };
   }
 
-  // No cachear el explorador: el primer layout aún no tiene content_box y, si se
-  // congela un Element de 1 fila, la UI se queda en la primera carpeta (.cache).
-  // Reconstruir la lista (pocas filas en raíz) es barato frente al editor.
+  // FileTree: no cachear (content_box vacío en el primer layout congela la lista).
   auto file_tree =
       MakeFileTreePanel(model, workspace, focus, indexer, on_command, layout_state, git_service);
   auto editor_primary =
@@ -964,13 +967,16 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       FocusRegion::SecondaryEditor, model, on_command,
       layout_state != nullptr ? &layout_state->secondary_editor : nullptr);
   auto source = MakeSourcePanel(model, source_state, on_command, focus, layout_state, symbols);
-  auto center = MakeEditorCenterLayout(app_mode, model, editor_primary, editor_secondary, source,
-                                       secondary_workspace, split_state);
+  auto center = MakeCachedPanelRender(
+      layout_state, UiPanelId::EditorCenter,
+      MakeEditorCenterLayout(app_mode, model, editor_primary, editor_secondary, source,
+                             secondary_workspace, split_state));
 
-  auto console = MakeConsolePanel(app_mode, model, shell, app_session, on_command, layout_state,
-                                  focus, &split_state->bottom_height, shell_launch_config, workspace,
-                                  symbols, indexer, symbol_indexer, &layout_state->right_sidebar,
-                                  git_service, git_panel_state);
+  auto console = MakeCachedPanelRender(
+      layout_state, UiPanelId::Console,
+      MakeConsolePanel(app_mode, model, shell, app_session, on_command, layout_state, focus,
+                       &split_state->bottom_height, shell_launch_config, workspace, symbols, indexer,
+                       symbol_indexer, &layout_state->right_sidebar, git_service, git_panel_state));
   auto center_with_console =
       MakeHSplitBottom(console, center, &split_state->bottom_height, split_state);
   auto center_column = Renderer([=] {
@@ -1167,30 +1173,13 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       }
     }
 
-    std::string status_msg;
-    if (!editor_focus) {
-      status_msg = model->status_message;
-      if (app_mode != nullptr && *app_mode == AppMode::kNormal && workspace != nullptr &&
-          !workspace->status_message.empty()) {
-        status_msg = workspace->status_message;
-      }
-    }
-    if (model->is_post_mortem && !model->core_path.empty()) {
-      const auto core_name = std::filesystem::path(model->core_path).filename().string();
-      const std::string mode_label =
-          model->core_analysis_mode == CoreAnalysisMode::kCoreAnalyzer
-              ? i18n::tr("status.core_mode.ca")
-              : i18n::tr("status.core_mode.gdb");
-      status_msg += i18n::tr_fmt("status.core_suffix", {core_name, mode_label});
-    }
-
-    if (!git_tab_open && symbols && symbols->supports_diagnostics() && layout_state != nullptr &&
-        !problems_tab_active(layout_state) && workspace != nullptr) {
+    // Busy strip ANSI ocupa el mensaje; diagnósticos se siguen calculando para el panel Problems.
+    if (symbols && layout_state != nullptr && !git_tab_open &&
+        symbols->supports_diagnostics() && !problems_tab_active(layout_state) &&
+        workspace != nullptr) {
       workspace->ensure_buffer();
       const uint64_t revision = symbols->diagnostics_revision();
       const std::string& active_path = workspace->buffer.path;
-      // El display de contadores no depende de la inhibición (usa datos cacheados); solo
-      // el refetch respeta allows_lsp_ui(). Así los contadores no se ponen a 0 en reposo.
       const bool diag_display_allowed =
           editor_deferred_sync_allowed(layout_state) && !active_path.empty() &&
           diagnostics_display_allowed(workspace->last_buffer_edit_ms, symbols.get(), active_path,
@@ -1219,24 +1208,6 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
             buffer_text(workspace->buffer));
         count_workspace_diagnostics(docs, &split_state->diag_errors,
                                     &split_state->diag_warnings);
-      }
-      if (split_state->diag_errors > 0 || split_state->diag_warnings > 0) {
-        status_msg += i18n::tr("status.section_separator");
-        if (split_state->diag_errors > 0) {
-          status_msg += std::to_string(split_state->diag_errors) +
-                        (split_state->diag_errors == 1
-                             ? i18n::tr("status.diagnostics.errors_one")
-                             : i18n::tr("status.diagnostics.errors_many"));
-        }
-        if (split_state->diag_warnings > 0) {
-          if (split_state->diag_errors > 0) {
-            status_msg += i18n::tr("status.diagnostics.separator");
-          }
-          status_msg += std::to_string(split_state->diag_warnings) +
-                        (split_state->diag_warnings == 1
-                             ? i18n::tr("status.diagnostics.warnings_one")
-                             : i18n::tr("status.diagnostics.warnings_many"));
-        }
       }
     }
 
@@ -1351,10 +1322,11 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
         shortcuts_hovered, shortcuts_pressed, false, &status_ui->shortcuts_box, true);
 
     Element status = hbox({
-        text(i18n::tr("status.app_name")) | bold | color(theme::Accent()),
-        text(i18n::tr("status.separator")),
         focus_status,
-        text(status_msg) | flex | color(theme::Header()),
+        text(" "),
+        MakeBusyStripPlaceholder(layout_state != nullptr ? layout_state->busy_strip.get()
+                                                         : nullptr),
+        filler(),
         hbox({
             show_chg_dir ? chg_dir_btn : emptyElement(),
             show_chg_dir ? text(" ") : emptyElement(),
@@ -1379,6 +1351,15 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     }
     if (layout_state != nullptr) {
       layout_state->ui_perf_monitor.publish_dump_phases();
+      // Reassert ANSI tras el Draw (Post corre después de ToString).
+      if (layout_state->busy_strip != nullptr && layout_state->ui_events != nullptr) {
+        BusyStripState* strip = layout_state->busy_strip.get();
+        bool expected = false;
+        if (strip->reassert_posted.compare_exchange_strong(expected, true,
+                                                           std::memory_order_acq_rel)) {
+          layout_state->ui_events->post_on_main([strip] { busy_strip_reassert_after_draw(strip); });
+        }
+      }
     }
     return chrome;
   });

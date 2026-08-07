@@ -1,6 +1,9 @@
 #include "editor/editor_state.hpp"
 #include "editor/visual_highlight.hpp"
 
+#include "ui/main_layout.hpp"
+#include "ui/ui_invalidation_policy.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
