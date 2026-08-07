@@ -227,9 +227,14 @@ Fetched via CMake `FetchContent` (see `cmake/Dependencies.cmake`):
 
 Runtime: optional language servers (LSP) and debug adapters (GDB / debugpy / bash-debug).
 
-## Planned: panel invalidation policy
+## Planned: panel dirty cache + ANSI busy strip
 
-FTXUI always performs a full `Draw`. To keep wakes cheap and predictable, a declarative **panel dirty + optional per-panel Hz cap** system is planned (status **label** capped at 2 Hz; busy-strip indicator — Braille *or* `%` in a fixed-width slot — via ANSI without wakes; open-file / jump / tree-sitter → outline cross-invalidations made explicit). Status chrome keeps focus + toolbar buttons and drops the app name. See [Panel invalidation and wake system plan](plans/panel-invalidation-wake-system.md).
+Two separate systems (see [plan](plans/panel-invalidation-wake-system.md)):
+
+1. **Declarative panel dirty + Element cache** (FileTree / Editor / Sidebar / Console) — fewer rebuilds on legitimate FTXUI wakes (e.g. editor scroll).
+2. **Busy strip** (Braille or `%` + label) **outside** that dirty path — ANSI only, no status wake/2 Hz.
+
+Status chrome keeps focus + toolbar buttons and drops the app name.
 
 ## See also
 
