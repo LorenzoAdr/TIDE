@@ -1,7 +1,7 @@
 # Plan: dirty por panel + invalidación declarativa + rate-limit de status
 
 **Estado:** pendiente de implementación  
-**Fecha:** 2026-08-07 (rev. busy strip Braille|% mismo ancho)  
+**Fecha:** 2026-08-07 (rev. batería de actividades busy strip v1)  
 **Rama de diseño:** `cursor/panel-invalidation-plan-39c9`  
 **Alcance:** diseño normativo; este documento no implementa el sistema.
 
@@ -290,7 +290,7 @@ Gate actual `if (!editor_focus)` sobre el mensaje: reevaluar al montar el strip 
 | **3** | Migrar invalidaciones gordas: OpenFile, Jump*, TreeSitterActiveFile, StatusText, TerminalOutput, DebugStopped | Call sites principales sin `"wake"` |
 | **4** | Romper `invalidate_editor_view`; migrar completion/hover/diagnostics/VH/find | Invalidación fina |
 | **5** | Migrar `Application::set_status` / `set_workspace_status` → API del busy strip + barrido `status_message =` | Una sola vía de mensaje |
-| **5b** | Busy strip: quitar app name; foco + strip (slot indicador fijo Braille\|% + label) + botones; ticker ANSI | Liveness sin wake |
+| **5b** | Busy strip UI + batería v1 (§15): Indexing, CallHierarchy, FindReferences, ProjectSearch, GitPush/Pull, OutlinePending | Liveness sin wake; hooks begin/end |
 | **6** | Tests golden: cada `UiInvalidation` → set exacto de paneles dirty | Tabla ejecutable |
 | **7** | Docs: este plan + sección en `architecture.md`; checklist PR anti-`"wake"` | Normativa visible |
 | **8** *(futuro)* | `Console` con `max_hz` opcional en policy table | Sin rediseñar pipeline |
@@ -429,3 +429,74 @@ void clear_busy(MainLayoutState*);
 | Mismo label | 0 wakes |
 | Frame Braille o nuevo `%` | ANSI sobre slot W (mismo ancho) |
 | Hover botones | `StatusChrome` inmediato |
+
+## 15. Batería de actividades del busy strip (v1)
+
+Criterio: solo operaciones **ciegas o largas** donde el usuario no tiene ya un modal/panel que monopolice la espera. Completions/diagnostics y launch DAP **fuera**. Descargas de paquetes y apertura de core → cuando se implementen en sus ramas.
+
+### Incluir en v1
+
+| Activity id | Indicador | Label (orientativo) | Cuándo empieza / termina (código) | Notas |
+|-------------|-----------|---------------------|-----------------------------------|-------|
+| `Indexing` | Spinner | `indexing` / `indexando` | `WorkspaceIndexer::start_scan` / `reindex_project` / Index button → fin de `scanning_`; opcionalmente arranque LSP “ciego” como mismo verbo | LSP index es ciego (no hay `$/progress` útil hoy). **No** mostrar “esperando sugerencias” ni “esperando errores”. |
+| `CallHierarchy` | Spinner | `call hierarchy` / `jerarquía…` | `open_call_hierarchy_view` / `expand_hierarchy_tree` (`call_hierarchy_view.cpp`) → árbol listo o error | RPC + expansión pueden ser largos; hoy poco feedback intermedio. |
+| `FindReferences` | Spinner | `references` / `referencias…` | `open_references_view` → `find_references` done | Idem; aporta. |
+| `ProjectSearch` | Spinner | `searching` / `buscando…` | `WorkspaceSearchRunner::start` / `run_search` → `!running()` | El panel ya dice searching; el strip ayuda si el foco está en el editor. Sin `%` (hay `files_scanned`, no total fiable). |
+| `GitPush` | Spinner | `git push` | `git->push(...)` (`git_panel.cpp`) → callback | Spinner del panel git es local al tab. |
+| `GitPull` | Spinner | `git pull` | `git->pull(...)` → callback | Idem. |
+| `OutlinePending` | Spinner | `outline` / `esperando outline` | Tras open/switch de archivo: `refresh_outline_symbols` / `prepare_document` mientras `!document_symbols_ready` → symbols ready + wake `outline.symbols` | Cubrir el hueco hasta que TS rellene el outline. |
+
+Prioridad de visualización si coinciden dos: **la más específica gana** (p. ej. `CallHierarchy` > `Indexing`). Cola simple o “current activity” con stack LIFO al completar.
+
+### Excluir en v1 (explícito)
+
+| Momento | Por qué |
+|---------|---------|
+| Completion / “esperando sugerencias” | Demasiado rápido; overlay local basta |
+| Diagnostics / “esperando errores” | Push async ruidoso; gutter/problems bastan |
+| Hover LSP | Corto |
+| DAP launch / attach / connecting | Ya hay `debug_launch_modal` |
+| Stage/unstage/commit git rutinarios | Cortos; spinner del panel git suficiente |
+| Refresh status/diff/log git | Cortos / inline loading |
+| Goto definition típico | Suele ser corto; no meter ruido |
+
+### Aplazar (otras ramas / más adelante)
+
+| Momento | Indicador previsto | Nota |
+|---------|-------------------|------|
+| Descarga de paquetes / bundles | **Percent** (mismo slot W) | Rama de descargas; cablear `set_busy_percent` ahí |
+| Abrir / analizar core | Spinner | Cuando se toque ese flujo |
+| Format / rename LSP (sync hasta 30s) | Spinner | Candidato fuerte en código (`context_menu.cpp`); no pedido ahora — evaluar en oleada 2 |
+| `compile_commands` generation | Spinner | Ya hay notas de status; oleada 2 |
+| Indexado archivo grande / tabular | Spinner | Editor ya muestra “Indexing…”; oleada 2 si se quiere eco global |
+| clangd `$/progress` real | Percent o spinner | Hoy el transport ACK y descarta progress |
+
+### API alineada a la batería
+
+```text
+enum class BusyActivity {
+  Idle,
+  Indexing,
+  CallHierarchy,
+  FindReferences,
+  ProjectSearch,
+  GitPush,
+  GitPull,
+  OutlinePending,
+  // oleada 2 / otras ramas:
+  // Downloading, OpeningCore, Formatting, Renaming, …
+};
+```
+
+Hooks de implementación (begin/end o RAII `BusyScope`):
+
+| Activity | Begin (aprox.) | End (aprox.) |
+|----------|----------------|--------------|
+| Indexing | `Application::reindex_project` / `WorkspaceIndexer::start_scan` | `scanning_ == false` (+ opcional LSP started si se unifica) |
+| CallHierarchy | entrada a `open_call_hierarchy_view` / expand | return tras rellenar árbol |
+| FindReferences | `open_references_view` | tras `find_references` |
+| ProjectSearch | `run_search` / `runner.start` | poll `!running()` |
+| GitPush/Pull | justo antes de `git->push/pull` | callback |
+| OutlinePending | path activo cambia y symbols no ready | `document_symbols_ready` / `outline.symbols` |
+
+Labels vía i18n (`busy.indexing`, `busy.call_hierarchy`, …), truncados al ancho N del strip.
