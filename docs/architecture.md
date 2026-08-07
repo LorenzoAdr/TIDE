@@ -229,7 +229,7 @@ Runtime: optional language servers (LSP) and debug adapters (GDB / debugpy / bas
 
 ## Planned: panel invalidation policy
 
-FTXUI always performs a full `Draw`. To keep wakes cheap and predictable, a declarative **panel dirty + optional per-panel Hz cap** system is planned (status text capped at 2 Hz; open-file / jump / tree-sitter → outline cross-invalidations made explicit). See [Panel invalidation and wake system plan](plans/panel-invalidation-wake-system.md).
+FTXUI always performs a full `Draw`. To keep wakes cheap and predictable, a declarative **panel dirty + optional per-panel Hz cap** system is planned (status **label** capped at 2 Hz; Braille busy-strip spinner via ANSI without wakes; open-file / jump / tree-sitter → outline cross-invalidations made explicit). Status chrome keeps focus + toolbar buttons and drops the app name. See [Panel invalidation and wake system plan](plans/panel-invalidation-wake-system.md).
 
 ## See also
 
