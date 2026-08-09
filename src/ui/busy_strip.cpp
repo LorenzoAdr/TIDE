@@ -66,8 +66,9 @@ std::string truncate_pad(std::string_view text, int width) {
 }
 
 std::string format_indicator(const BusyStripState& state) {
+  const char* frame = kBrailleFrames[state.spinner_frame % kBrailleFrameCount];
   if (state.kind == BusyIndicatorKind::Spinner) {
-    const char* frame = kBrailleFrames[state.spinner_frame % kBrailleFrameCount];
+    // Solo braille (tarea no cuantizable), relleno a ancho fijo.
     std::string display;
     display.append(frame);
     for (int i = 1; i < BusyStripState::kIndicatorWidth; ++i) {
@@ -76,12 +77,19 @@ std::string format_indicator(const BusyStripState& state) {
     return display;
   }
   if (state.kind == BusyIndicatorKind::Percent) {
+    // Braille + espacio + porcentaje ("⠋  42%" / "⠋ 100%").
     const int pct = std::clamp(state.percent, 0, 100);
     std::string num = std::to_string(pct) + "%";
-    if (static_cast<int>(num.size()) > BusyStripState::kIndicatorWidth) {
-      num = num.substr(num.size() - static_cast<std::size_t>(BusyStripState::kIndicatorWidth));
+    constexpr int kPercentCols = 4;  // "100%"
+    if (static_cast<int>(num.size()) > kPercentCols) {
+      num = num.substr(num.size() - static_cast<std::size_t>(kPercentCols));
     }
-    return std::string(BusyStripState::kIndicatorWidth - static_cast<int>(num.size()), ' ') + num;
+    std::string display;
+    display.append(frame);
+    display.push_back(' ');
+    display.append(static_cast<std::size_t>(kPercentCols - static_cast<int>(num.size())), ' ');
+    display.append(num);
+    return display;
   }
   return std::string(BusyStripState::kIndicatorWidth, ' ');
 }
@@ -102,8 +110,8 @@ void paint_ansi_unlocked(BusyStripState* state) {
   const int row = state->box.y_min + 1;
   const int col = state->box.x_min + 1;
   const std::string line = format_strip_line(*state);
-  // Sin SGR, el terminal pinta fondo negro por defecto y tapa el bgcolor FTXUI.
-  const std::string fg = theme::Muted().Print(/*is_background_color=*/false);
+  // Mismo color que el texto de foco a la izquierda (Header), no Muted de botones.
+  const std::string fg = theme::Header().Print(/*is_background_color=*/false);
   const std::string bg = theme::StatusBar().Print(/*is_background_color=*/true);
   std::ostringstream oss;
   oss << "\0337"
@@ -125,7 +133,8 @@ void ensure_spinner_thread(BusyStripState* state) {
     while (state->ticker_running.load(std::memory_order_acquire)) {
       std::this_thread::sleep_for(std::chrono::milliseconds(kSpinnerFrameMs));
       std::lock_guard<std::mutex> lock(state->paint_mutex);
-      if (state->kind != BusyIndicatorKind::Spinner) {
+      if (state->kind != BusyIndicatorKind::Spinner &&
+          state->kind != BusyIndicatorKind::Percent) {
         continue;
       }
       state->spinner_frame = (state->spinner_frame + 1) % kBrailleFrameCount;
@@ -159,7 +168,9 @@ int busy_strip_total_width(const BusyStripState& state) {
 
 ftxui::Element MakeBusyStripPlaceholder(BusyStripState* state) {
   using namespace ftxui;
-  const int width = state != nullptr ? busy_strip_total_width(*state) : 33;
+  const int width = state != nullptr ? busy_strip_total_width(*state)
+                                     : BusyStripState::kIndicatorWidth + 1 +
+                                           BusyStripState::kDefaultLabelWidth;
   std::string spaces(static_cast<std::size_t>(std::max(1, width)), ' ');
   Element el = text(spaces);
   if (state != nullptr) {
@@ -186,6 +197,10 @@ std::string_view busy_activity_i18n_key(BusyActivity activity) {
       return "busy.git_pull";
     case BusyActivity::OutlinePending:
       return "busy.outline_pending";
+    case BusyActivity::ToolpackInstall:
+      return "busy.toolpack_install";
+    case BusyActivity::ExportPortable:
+      return "busy.export_portable";
   }
   return "busy.idle";
 }
@@ -217,16 +232,25 @@ void set_busy_percent(MainLayoutState* layout, BusyActivity activity, int percen
     return;
   }
   BusyStripState& state = *layout->busy_strip;
-  std::lock_guard<std::mutex> lock(state.paint_mutex);
-  state.kind = BusyIndicatorKind::Percent;
-  state.activity = activity;
-  state.percent = std::clamp(percent, 0, 100);
-  if (!label.empty()) {
-    state.label = std::string(label);
-  } else if (state.label.empty()) {
-    state.label = i18n::tr(busy_activity_i18n_key(activity));
+  {
+    std::lock_guard<std::mutex> lock(state.paint_mutex);
+    const bool was_active = state.kind == BusyIndicatorKind::Spinner ||
+                            state.kind == BusyIndicatorKind::Percent;
+    state.kind = BusyIndicatorKind::Percent;
+    state.activity = activity;
+    state.percent = std::clamp(percent, 0, 100);
+    if (!label.empty()) {
+      state.label = std::string(label);
+    } else if (state.label.empty()) {
+      state.label = i18n::tr(busy_activity_i18n_key(activity));
+    }
+    if (!was_active) {
+      state.spinner_frame = 0;
+      state.last_spinner_ms = steady_now_ms();
+    }
+    paint_ansi_unlocked(&state);
   }
-  paint_ansi_unlocked(&state);
+  ensure_spinner_thread(&state);
 }
 
 void clear_busy(MainLayoutState* layout) {
@@ -243,7 +267,7 @@ void clear_busy(MainLayoutState* layout) {
     state.spinner_frame = 0;
     paint_ansi_unlocked(&state);
   }
-  // Dejar el hilo vivo pero idle (kind!=Spinner); evita join en hot path.
+  // Dejar el hilo vivo pero idle (kind==None); evita join en hot path.
 }
 
 void busy_strip_tick(BusyStripState* state, int64_t now_ms) {

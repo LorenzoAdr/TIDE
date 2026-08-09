@@ -10,6 +10,7 @@
 #include "toolpacks/download.hpp"
 #include "toolpacks/manifest.hpp"
 #include "toolpacks/paths.hpp"
+#include "toolpacks/progress.hpp"
 #include "toolpacks/store.hpp"
 
 namespace fs = std::filesystem;
@@ -79,7 +80,7 @@ void upsert_manifest_entry(Manifest* manifest, ManifestEntry entry) {
 
 }  // namespace
 
-InstallResult install_toolpack(const std::string& id_spec) {
+InstallResult install_toolpack(const std::string& id_spec, ProgressFn on_progress) {
   InstallResult result;
   std::string id;
   std::string version;
@@ -89,6 +90,7 @@ InstallResult install_toolpack(const std::string& id_spec) {
     return result;
   }
 
+  report_progress(on_progress, 0, id);
   std::string catalog_error;
   const auto catalog = fetch_catalog(&catalog_error);
   if (!catalog.has_value()) {
@@ -108,12 +110,15 @@ InstallResult install_toolpack(const std::string& id_spec) {
 
   const std::string archive_name = id + "-" + entry->version + "-linux-x86_64.tar.zst";
   const fs::path archive_path = fs::path(downloads_dir()) / archive_name;
-  const std::string dl_err = download_url(entry->url, archive_path.string());
+  report_progress(on_progress, 5, id);
+  const std::string dl_err =
+      download_url(entry->url, archive_path.string(), nest_progress(on_progress, 5, 70, id));
   if (!dl_err.empty()) {
     result.message = dl_err;
     return result;
   }
 
+  report_progress(on_progress, 78, id);
   const std::string digest = file_sha256(archive_path.string());
   if (digest.empty()) {
     result.message = "no se pudo calcular sha256 del archivo descargado";
@@ -129,12 +134,14 @@ InstallResult install_toolpack(const std::string& id_spec) {
   fs::remove_all(staging, ec);
   fs::create_directories(staging, ec);
 
+  report_progress(on_progress, 82, id);
   const std::string extract_err = extract_archive(archive_path.string(), staging.string());
   if (!extract_err.empty()) {
     fs::remove_all(staging, ec);
     result.message = extract_err;
     return result;
   }
+  report_progress(on_progress, 92, id);
 
   const fs::path payload = unwrap_payload_root(staging);
   if (!looks_like_payload_root(payload)) {
@@ -203,16 +210,17 @@ InstallResult install_toolpack(const std::string& id_spec) {
   result.version = entry->version;
   result.root_path = final_root.string();
   result.message = "instalado " + id + " " + entry->version + " en " + final_root.string();
+  report_progress(on_progress, 100, id);
   return result;
 }
 
-InstallResult update_toolpack(const std::string& id) {
+InstallResult update_toolpack(const std::string& id, ProgressFn on_progress) {
   if (id.empty()) {
     InstallResult result;
     result.message = "id de toolpack vacio";
     return result;
   }
-  return install_toolpack(id);
+  return install_toolpack(id, std::move(on_progress));
 }
 
 InstallResult remove_toolpack(const std::string& id) {

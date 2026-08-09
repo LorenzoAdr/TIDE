@@ -124,6 +124,8 @@ EXTRA_CATALOG: list[tuple[str, str, str]] = [
     ("settings.toolpacks.role.lsp", "LSP", "LSP"),
     ("settings.toolpacks.role.dap", "Debug", "Debug"),
     ("settings.toolpacks.shared", "compartido", "shared"),
+    ("busy.toolpack_install", "descargando", "downloading"),
+    ("busy.export_portable", "generando AppImage", "building AppImage"),
     ("settings.toolpacks.installing", "Descargando / instalando…", "Downloading / installing…"),
     ("settings.toolpacks.exporting", "Exportando portable…", "Exporting portable…"),
     ("settings.toolpacks.export", "Exportar portable (AppImage)", "Export portable (AppImage)"),

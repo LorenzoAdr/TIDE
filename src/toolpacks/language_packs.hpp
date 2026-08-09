@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "toolpacks/install.hpp"
+#include "toolpacks/progress.hpp"
 
 namespace tuide::toolpacks {
 
@@ -39,7 +40,8 @@ struct LanguagePackStatusInfo {
 
 LanguagePackStatusInfo language_pack_status(const LanguagePack& pack);
 
-InstallResult install_language_pack(const std::string& language_id);
+InstallResult install_language_pack(const std::string& language_id,
+                                    ProgressFn on_progress = {});
 
 // Remove language-specific components only (shared like gdb are kept).
 InstallResult remove_language_pack(const std::string& language_id);

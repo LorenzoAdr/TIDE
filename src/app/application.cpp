@@ -2820,6 +2820,7 @@ int Application::run() {
 	auto with_settings =
 	    MakeSettingsModalOverlay(with_shortcuts, &settings_modal_state_, &app_settings_,
 	                             on_settings_apply, on_workspace_apply, on_clang_format_apply);
+	settings_modal_state_.layout_state = &layout_state_;
 	settings_modal_state_.tools_status_provider = [this]() {
 		LspRuntimeFlags flags;
 		flags.lsp_enabled = app_settings_.lsp_enabled;

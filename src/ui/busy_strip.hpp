@@ -1,7 +1,7 @@
 #pragma once
 
 // Busy strip: franja fija en la status bar, fuera del dirty FTXUI.
-// Indicador (Braille o %) + label se pintan por ANSI; 0 UI_WAKE por tick.
+// Indicador (Braille; + % si es cuantizable) + label por ANSI; 0 UI_WAKE por tick.
 
 #include <atomic>
 #include <cstdint>
@@ -27,10 +27,13 @@ enum class BusyActivity : std::uint8_t {
   GitPush,
   GitPull,
   OutlinePending,
+  ToolpackInstall,
+  ExportPortable,
 };
 
 struct BusyStripState {
-  static constexpr int kIndicatorWidth = 4;  // cabe "100%"
+  // Spinner alone, or braille + space + "100%" when percent is shown.
+  static constexpr int kIndicatorWidth = 6;
   static constexpr int kDefaultLabelWidth = 28;
 
   BusyStripState();

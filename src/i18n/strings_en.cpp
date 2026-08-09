@@ -493,6 +493,8 @@ const StringTable& english_strings() {
       {"busy.git_push", "git push"},
       {"busy.git_pull", "git pull"},
       {"busy.outline_pending", "waiting outline"},
+      {"busy.toolpack_install", "downloading"},
+      {"busy.export_portable", "building AppImage"},
       {"status.focus_prefix", "[{0}] "},
       {"status.core_suffix", "  │ Core: {0} ({1})"},
       {"status.core_mode.ca", "CA"},

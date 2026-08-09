@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "toolpacks/progress.hpp"
+
 namespace tuide::toolpacks {
 
 enum class ExportFormat {
@@ -22,7 +24,8 @@ struct ExportResult {
 ExportResult export_portable(const std::string& source_binary,
                              const std::string& output_path,
                              const std::vector<std::string>& toolpack_ids,
-                             ExportFormat format = ExportFormat::kAppImage);
+                             ExportFormat format = ExportFormat::kAppImage,
+                             ProgressFn on_progress = {});
 
 int run_export_cli(int argc, char** argv);
 

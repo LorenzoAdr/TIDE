@@ -8,6 +8,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -21,6 +22,7 @@
 #include "toolpacks/export_portable.hpp"
 #include "toolpacks/manifest.hpp"
 #include "toolpacks/paths.hpp"
+#include "ui/busy_strip.hpp"
 #include "ui/clickable.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
@@ -28,8 +30,10 @@
 #include "ui/keybind/bindings_store.hpp"
 #include "ui/keybind/key_action.hpp"
 #include "ui/keybind/key_chord_util.hpp"
+#include "ui/main_layout.hpp"
 #include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
+#include "ui/ui_wake.hpp"
 #include "util/clang_format_config.hpp"
 #include "util/compile_commands_remap.hpp"
 
@@ -2287,13 +2291,26 @@ void start_language_pack_install(SettingsModalState* state, const std::string& l
   job->busy_label = i18n::tr("settings.toolpacks.installing");
   job->running = true;
   state->toolpack_job = job;
-  std::thread([job, language_id]() {
-    const auto result = toolpacks::install_language_pack(language_id);
-    std::lock_guard<std::mutex> lock(job->mu);
-    job->ok = result.ok;
-    job->message = result.message;
-    job->finished = true;
-    job->running = false;
+  MainLayoutState* layout = state->layout_state;
+  set_busy_percent(layout, BusyActivity::ToolpackInstall, 0);
+  std::thread([job, language_id, layout]() {
+    const auto result = toolpacks::install_language_pack(
+        language_id, [job, layout](int percent, std::string_view label) {
+          set_busy_percent(layout, BusyActivity::ToolpackInstall, percent, label);
+          if (!label.empty()) {
+            std::lock_guard<std::mutex> lock(job->mu);
+            job->busy_label = std::string(label);
+          }
+        });
+    {
+      std::lock_guard<std::mutex> lock(job->mu);
+      job->ok = result.ok;
+      job->message = result.message;
+      job->finished = true;
+      job->running = false;
+    }
+    clear_busy(layout);
+    UI_WAKE(layout, "toolpack");
   }).detach();
 }
 
@@ -2359,23 +2376,36 @@ void start_export_portable(SettingsModalState* state) {
   job->busy_label = i18n::tr("settings.toolpacks.exporting");
   job->running = true;
   state->toolpack_job = job;
-  std::thread([job]() {
+  MainLayoutState* layout = state->layout_state;
+  set_busy_percent(layout, BusyActivity::ExportPortable, 0);
+  std::thread([job, layout]() {
+    auto on_progress = [job, layout](int percent, std::string_view label) {
+      set_busy_percent(layout, BusyActivity::ExportPortable, percent, label);
+      if (!label.empty()) {
+        std::lock_guard<std::mutex> lock(job->mu);
+        job->busy_label = std::string(label);
+      }
+    };
     toolpacks::ExportResult result;
     if (appimagetool_available()) {
       result = toolpacks::export_portable({}, default_export_appimage_path(), {},
-                                          toolpacks::ExportFormat::kAppImage);
+                                          toolpacks::ExportFormat::kAppImage, on_progress);
     } else {
       result = toolpacks::export_portable({}, default_export_appdir_path(), {},
-                                          toolpacks::ExportFormat::kAppDir);
+                                          toolpacks::ExportFormat::kAppDir, on_progress);
       if (result.ok) {
         result.message += " (sin appimagetool; AppDir)";
       }
     }
-    std::lock_guard<std::mutex> lock(job->mu);
-    job->ok = result.ok;
-    job->message = result.message;
-    job->finished = true;
-    job->running = false;
+    {
+      std::lock_guard<std::mutex> lock(job->mu);
+      job->ok = result.ok;
+      job->message = result.message;
+      job->finished = true;
+      job->running = false;
+    }
+    clear_busy(layout);
+    UI_WAKE(layout, "toolpack");
   }).detach();
 }
 

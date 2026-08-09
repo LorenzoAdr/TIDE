@@ -493,6 +493,8 @@ const StringTable& spanish_strings() {
       {"busy.git_push", "git push"},
       {"busy.git_pull", "git pull"},
       {"busy.outline_pending", "esperando outline"},
+      {"busy.toolpack_install", "descargando"},
+      {"busy.export_portable", "generando AppImage"},
       {"status.focus_prefix", "[{0}] "},
       {"status.core_suffix", "  │ Core: {0} ({1})"},
       {"status.core_mode.ca", "CA"},

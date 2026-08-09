@@ -144,7 +144,7 @@ LanguagePackStatusInfo language_pack_status(const LanguagePack& pack) {
   return info;
 }
 
-InstallResult install_language_pack(const std::string& language_id) {
+InstallResult install_language_pack(const std::string& language_id, ProgressFn on_progress) {
   InstallResult result;
   const auto* pack = find_language_pack(language_id);
   if (pack == nullptr) {
@@ -152,26 +152,41 @@ InstallResult install_language_pack(const std::string& language_id) {
     return result;
   }
 
-  std::vector<std::string> installed_now;
+  std::vector<std::string> missing;
   for (const auto& component : pack->components) {
-    if (resolve_installed_toolpack(component.toolpack_id).has_value()) {
-      continue;
+    if (!resolve_installed_toolpack(component.toolpack_id).has_value()) {
+      missing.push_back(component.toolpack_id);
     }
-    auto one = install_toolpack(component.toolpack_id);
+  }
+
+  report_progress(on_progress, 0, language_id);
+  if (missing.empty()) {
+    result.ok = true;
+    result.id = language_id;
+    result.message = "ya instalado: " + language_id;
+    report_progress(on_progress, 100, language_id);
+    return result;
+  }
+
+  std::vector<std::string> installed_now;
+  const int n = static_cast<int>(missing.size());
+  for (int i = 0; i < n; ++i) {
+    const std::string& toolpack_id = missing[static_cast<std::size_t>(i)];
+    const int base = (i * 100) / n;
+    const int span = ((i + 1) * 100) / n - base;
+    auto one =
+        install_toolpack(toolpack_id, nest_progress(on_progress, base, span, toolpack_id));
     if (!one.ok) {
       result.message = one.message;
       return result;
     }
-    installed_now.push_back(component.toolpack_id);
+    installed_now.push_back(toolpack_id);
   }
 
   result.ok = true;
   result.id = language_id;
-  if (installed_now.empty()) {
-    result.message = "ya instalado: " + language_id;
-  } else {
-    result.message = "language pack " + language_id + " listo";
-  }
+  result.message = "language pack " + language_id + " listo";
+  report_progress(on_progress, 100, language_id);
   return result;
 }
 

@@ -11,6 +11,7 @@
 #include "toolpacks/manifest.hpp"
 #include "toolpacks/packaged.hpp"
 #include "toolpacks/paths.hpp"
+#include "toolpacks/progress.hpp"
 #include "toolpacks/store.hpp"
 
 namespace fs = std::filesystem;
@@ -71,12 +72,13 @@ std::string copy_tree(const fs::path& from, const fs::path& to) {
 }
 
 std::string build_appdir(const fs::path& appdir, const std::string& source_binary,
-                         const std::vector<std::string>& ids) {
+                         const std::vector<std::string>& ids, const ProgressFn& on_progress) {
   std::error_code ec;
   fs::remove_all(appdir, ec);
   fs::create_directories(appdir / "usr" / "bin", ec);
   fs::create_directories(appdir / "usr" / "share" / "tuide" / "toolpacks", ec);
 
+  report_progress(on_progress, 8, "nucleo");
   fs::copy_file(source_binary, appdir / "usr" / "bin" / "tuide",
                 fs::copy_options::overwrite_existing, ec);
   if (ec) {
@@ -91,7 +93,12 @@ std::string build_appdir(const fs::path& appdir, const std::string& source_binar
   out_manifest.schema = 1;
   const auto local = load_manifest(manifest_path());
 
-  for (const auto& id : ids) {
+  const int n = static_cast<int>(ids.size());
+  for (int i = 0; i < n; ++i) {
+    const auto& id = ids[static_cast<std::size_t>(i)];
+    // Copy packs occupy ~10%..65% of the overall export.
+    const int pct = n > 0 ? 10 + ((i + 1) * 55) / n : 65;
+    report_progress(on_progress, pct, id);
     const auto resolved = resolve_installed_toolpack(id);
     if (!resolved.has_value()) {
       return "toolpack no instalado: " + id;
@@ -120,6 +127,7 @@ std::string build_appdir(const fs::path& appdir, const std::string& source_binar
     out_manifest.installed.push_back(std::move(entry));
   }
 
+  report_progress(on_progress, 68, "manifest");
   if (!save_manifest(
           (appdir / "usr" / "share" / "tuide" / "toolpacks" / "manifest.json").string(),
           out_manifest)) {
@@ -159,6 +167,7 @@ std::string build_appdir(const fs::path& appdir, const std::string& source_binar
   }
 
   write_text(appdir / ".tuide-appdir", "1\n");
+  report_progress(on_progress, 72, "AppDir");
   return {};
 }
 
@@ -167,8 +176,9 @@ std::string build_appdir(const fs::path& appdir, const std::string& source_binar
 ExportResult export_portable(const std::string& source_binary,
                              const std::string& output_path,
                              const std::vector<std::string>& toolpack_ids,
-                             ExportFormat format) {
+                             ExportFormat format, ProgressFn on_progress) {
   ExportResult result;
+  report_progress(on_progress, 0);
   const std::string source =
       source_binary.empty() ? self_exe_path() : source_binary;
   if (source.empty()) {
@@ -205,11 +215,12 @@ ExportResult export_portable(const std::string& source_binary,
     return result;
   }
 
+  report_progress(on_progress, 5);
   const fs::path work = fs::path(cache_root()) / "export-work";
   fs::create_directories(work, ec);
   const fs::path staging_appdir = work / "tuide.AppDir";
 
-  const std::string build_err = build_appdir(staging_appdir, source, ids);
+  const std::string build_err = build_appdir(staging_appdir, source, ids, on_progress);
   if (!build_err.empty()) {
     fs::remove_all(staging_appdir, ec);
     result.message = build_err;
@@ -217,6 +228,7 @@ ExportResult export_portable(const std::string& source_binary,
   }
 
   if (format == ExportFormat::kAppDir) {
+    report_progress(on_progress, 85, "AppDir");
     const fs::path out_path =
         output_path.empty() ? fs::path("dist") / "tuide.AppDir" : fs::path(output_path);
     fs::create_directories(out_path.parent_path(), ec);
@@ -240,6 +252,7 @@ ExportResult export_portable(const std::string& source_binary,
     result.output_path = out_path.string();
     result.message = "exportado AppDir " + out_path.string() + " con " +
                      std::to_string(ids.size()) + " toolpack(s)";
+    report_progress(on_progress, 100, "AppDir");
     return result;
   }
 
@@ -273,6 +286,7 @@ ExportResult export_portable(const std::string& source_binary,
     }
     path_prefix = "env ARCH=x86_64 PATH=" + shell_quote(path_value) + " ";
   }
+  report_progress(on_progress, 78, "AppImage");
   const fs::path log_path = work / "appimagetool.log";
   const std::string cmd = path_prefix + shell_quote(tool) + " " +
                           shell_quote(staging_appdir.string()) + " " +
@@ -303,6 +317,7 @@ ExportResult export_portable(const std::string& source_binary,
     }
     return result;
   }
+  report_progress(on_progress, 95, "AppImage");
   fs::permissions(out_path,
                   fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
                       fs::perms::others_read | fs::perms::others_exec,
@@ -318,6 +333,7 @@ ExportResult export_portable(const std::string& source_binary,
   result.output_path = out_path.string();
   result.message = "exportado AppImage " + out_path.string() + " con " +
                    std::to_string(ids.size()) + " toolpack(s)";
+  report_progress(on_progress, 100, "AppImage");
   return result;
 }
 

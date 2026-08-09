@@ -45,6 +45,8 @@ using WorkspaceSettingsApplyCallback = std::function<void(const WorkspaceConfig&
 using ClangFormatApplyCallback = std::function<void(const ClangFormatConfig&)>;
 using ToolsStatusProvider = std::function<ToolsStatusSnapshot()>;
 
+struct MainLayoutState;
+
 struct SettingsModalState {
   bool open = false;
   SettingsPanel panel = SettingsPanel::kGeneral;
@@ -134,6 +136,8 @@ struct SettingsModalState {
     bool finished = false;
   };
   std::shared_ptr<ToolpackJob> toolpack_job;
+  // Busy strip (status bar %) during install/export — owned by Application.
+  MainLayoutState* layout_state = nullptr;
   // Snapshot at open — used to avoid restarting LSP/shell/index on Escape with no edits.
   WorkspaceConfig workspace_baseline;
   ClangFormatConfig clang_format_baseline;
