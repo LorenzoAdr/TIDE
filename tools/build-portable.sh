@@ -239,17 +239,22 @@ if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
   COMPILE_ARGS+=(--static-libstdc++)
 fi
 if [[ "${SLIM}" == "1" ]]; then
-  COMPILE_ARGS+=(--no-bundle-clangd)
-  log "modo slim: sin componentes embebidos (release core)"
+  COMPILE_ARGS+=(--no-bundle-clangd --target tuide)
+  log "modo slim: sin componentes embebidos; solo target tuide"
 fi
 
 log "compilando en contenedor (${JOBS} hilos)..."
+DOCKER_COMPILER_ENV=()
+if [[ "${USE_BIONIC}" == "1" ]]; then
+  DOCKER_COMPILER_ENV+=(-e CC=gcc-8 -e CXX=g++-8)
+fi
 docker_cmd run --rm \
   -u "$(id -u):$(id -g)" \
   -e HOME=/tmp \
   -e JOBS="${JOBS}" \
   -e CMAKE_BUILD_TYPE=Release \
   -e TUIDE_IN_PORTABLE_CONTAINER=1 \
+  "${DOCKER_COMPILER_ENV[@]}" \
   "${DOCKER_ENV_ARGS[@]}" \
   -v "${ROOT}:/src" \
   -w /src \

@@ -39,6 +39,9 @@ SKIP_WIZARD=0
 CLI_OVERRIDES_BUNDLE=0
 # Si compile.sh se ejecuta dentro de la imagen portable, no re-lanzar Docker.
 IN_PORTABLE_CONTAINER="${TUIDE_IN_PORTABLE_CONTAINER:-0}"
+# Targets opcionales para cmake --build (vacío = todo). Ej: --target tuide
+BUILD_TARGETS=()
+REQUIRE_HELLO=1
 
 log() {
   printf '[compile] %s\n' "$*"
@@ -111,6 +114,7 @@ Opciones:
   --no-bundle-yaml-ls        No embeber yaml-language-server
   --build-backend=host|docker_focal|docker_bionic
                              Dónde compilar (host o Docker con glibc antigua)
+  --target NAME              Solo compilar el target CMake (repetible; default: todos)
   --static-libstdc++         Enlazar libstdc++/libgcc estáticamente (menos deps en runtime)
   -h, --help                 Mostrar esta ayuda
 
@@ -963,6 +967,15 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE=0
       shift
       ;;
+    --target)
+      if [[ $# -lt 2 ]]; then
+        die "--target requiere un nombre de target CMake"
+      fi
+      BUILD_TARGETS+=("$2")
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift 2
+      ;;
     --static-libstdc++)
       STATIC_LIBSTDCXX=1
       STATIC_LIBSTDCXX_FROM_CLI=1
@@ -1068,13 +1081,24 @@ fi
 cmake -S "${ROOT}" -B "${BUILD_DIR}" ${CMAKE_BUNDLE_ARGS[@]} ${CMAKE_EXTRA_ARGS[@]}
 
 log "compilando (${JOBS} hilos)..."
-cmake --build "${BUILD_DIR}" -j "${JOBS}"
+if [[ ${#BUILD_TARGETS[@]} -gt 0 ]]; then
+  log "targets: ${BUILD_TARGETS[*]}"
+  cmake --build "${BUILD_DIR}" -j "${JOBS}" --target "${BUILD_TARGETS[@]}"
+  REQUIRE_HELLO=0
+  for t in "${BUILD_TARGETS[@]}"; do
+    if [[ "${t}" == "hello" ]]; then
+      REQUIRE_HELLO=1
+    fi
+  done
+else
+  cmake --build "${BUILD_DIR}" -j "${JOBS}"
+fi
 
 if [[ ! -x "${BUILD_DIR}/tuide" ]]; then
   die "no se generó ${BUILD_DIR}/tuide"
 fi
 
-if [[ ! -x "${BUILD_DIR}/hello" ]]; then
+if [[ "${REQUIRE_HELLO}" == "1" && ! -x "${BUILD_DIR}/hello" ]]; then
   die "no se generó ${BUILD_DIR}/hello"
 fi
 

@@ -5,6 +5,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# GCC 8 (Ubuntu 18.04 portable) keeps std::filesystem in libstdc++fs.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+  link_libraries(stdc++fs)
+endif()
+
 find_package(Threads REQUIRED)
 
 function(tuide_link_pthread target)
