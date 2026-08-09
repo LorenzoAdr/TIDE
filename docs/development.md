@@ -27,7 +27,8 @@ ln -sf build/compile_commands.json .
 | Script | Purpose |
 |--------|---------|
 | `tools/compile.sh` | Interactive bundle wizard (default), configure, build |
-| `tools/build-portable.sh` | Docker build with old glibc; respects `.bundle-config` |
+| `tools/build-portable.sh` | Docker build with old glibc; respects `.bundle-config` (`--slim` = no bundles) |
+| `tools/build-release-appimage.sh` | Official slim AppImage (glibc 2.27) → `dist/tuide-$VERSION.AppImage` |
 | `tools/verify-glibc.sh` | Report max GLIBC/GLIBCXX symbols and `ldd` deps |
 | `tools/launch.sh` | Run `tuide` with sensible defaults and path resolution |
 

@@ -20,12 +20,14 @@ struct ExportResult {
 
 // Export selected toolpacks with a clean core as AppDir and/or AppImage.
 // source_binary empty => /proc/self/exe
-// toolpack_ids empty => all installed active
+// toolpack_ids empty + core_only=false => all installed active (error if none)
+// core_only=true => AppImage/AppDir with no toolpacks (official slim core)
 ExportResult export_portable(const std::string& source_binary,
                              const std::string& output_path,
                              const std::vector<std::string>& toolpack_ids,
                              ExportFormat format = ExportFormat::kAppImage,
-                             ProgressFn on_progress = {});
+                             ProgressFn on_progress = {},
+                             bool core_only = false);
 
 int run_export_cli(int argc, char** argv);
 

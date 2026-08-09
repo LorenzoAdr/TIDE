@@ -87,6 +87,8 @@ When built with embedded tools, open **F10 → Configuración** to force bundled
 
 Portable full pack for older hosts: `./tools/build-portable.sh` (glibc ~2.31 on Ubuntu 20.04; `--bionic` for ~2.27). Embedded clangd needs **glibc ≥ 2.18**.
 
+**Official core AppImage** (no embedded LSP/DAP): download `tuide-$VERSION.AppImage` from [GitHub Releases](https://github.com/LorenzoAdr/TIDE/releases) (tags `v*`, glibc ≥ 2.27). Then install language packs from **F10 → Toolpacks**.
+
 ### Cargar core dumps
 
 Press **F2** and choose **Cargar core**. Select the executable (with debug symbols) and the core file, then pick:

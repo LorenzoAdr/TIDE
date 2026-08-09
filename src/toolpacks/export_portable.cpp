@@ -176,7 +176,8 @@ std::string build_appdir(const fs::path& appdir, const std::string& source_binar
 ExportResult export_portable(const std::string& source_binary,
                              const std::string& output_path,
                              const std::vector<std::string>& toolpack_ids,
-                             ExportFormat format, ProgressFn on_progress) {
+                             ExportFormat format, ProgressFn on_progress,
+                             bool core_only) {
   ExportResult result;
   report_progress(on_progress, 0);
   const std::string source =
@@ -197,22 +198,29 @@ ExportResult export_portable(const std::string& source_binary,
     return result;
   }
 
-  std::vector<std::string> ids = toolpack_ids;
-  if (ids.empty()) {
-    const auto manifest = load_manifest(manifest_path());
-    if (!manifest.has_value() || manifest->installed.empty()) {
-      result.message = "no hay toolpacks instalados para exportar";
-      return result;
-    }
-    for (const auto& entry : manifest->installed) {
-      if (entry.active) {
-        ids.push_back(entry.id);
+  std::vector<std::string> ids;
+  if (core_only) {
+    ids.clear();
+  } else {
+    ids = toolpack_ids;
+    if (ids.empty()) {
+      const auto manifest = load_manifest(manifest_path());
+      if (!manifest.has_value() || manifest->installed.empty()) {
+        result.message = "no hay toolpacks instalados para exportar "
+                         "(usa --core-only para AppImage del nucleo)";
+        return result;
+      }
+      for (const auto& entry : manifest->installed) {
+        if (entry.active) {
+          ids.push_back(entry.id);
+        }
       }
     }
-  }
-  if (ids.empty()) {
-    result.message = "lista de toolpacks vacia";
-    return result;
+    if (ids.empty()) {
+      result.message = "lista de toolpacks vacia "
+                       "(usa --core-only para AppImage del nucleo)";
+      return result;
+    }
   }
 
   report_progress(on_progress, 5);
@@ -226,6 +234,13 @@ ExportResult export_portable(const std::string& source_binary,
     result.message = build_err;
     return result;
   }
+
+  const auto packs_suffix = [&]() -> std::string {
+    if (core_only || ids.empty()) {
+      return " (solo nucleo)";
+    }
+    return " con " + std::to_string(ids.size()) + " toolpack(s)";
+  };
 
   if (format == ExportFormat::kAppDir) {
     report_progress(on_progress, 85, "AppDir");
@@ -250,8 +265,7 @@ ExportResult export_portable(const std::string& source_binary,
     }
     result.ok = true;
     result.output_path = out_path.string();
-    result.message = "exportado AppDir " + out_path.string() + " con " +
-                     std::to_string(ids.size()) + " toolpack(s)";
+    result.message = "exportado AppDir " + out_path.string() + packs_suffix();
     report_progress(on_progress, 100, "AppDir");
     return result;
   }
@@ -331,8 +345,7 @@ ExportResult export_portable(const std::string& source_binary,
 
   result.ok = true;
   result.output_path = out_path.string();
-  result.message = "exportado AppImage " + out_path.string() + " con " +
-                   std::to_string(ids.size()) + " toolpack(s)";
+  result.message = "exportado AppImage " + out_path.string() + packs_suffix();
   report_progress(on_progress, 100, "AppImage");
   return result;
 }
@@ -342,6 +355,7 @@ int run_export_cli(int argc, char** argv) {
   std::string source;
   std::vector<std::string> ids;
   ExportFormat format = ExportFormat::kAppImage;
+  bool core_only = false;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -352,7 +366,7 @@ int run_export_cli(int argc, char** argv) {
       std::cerr
           << "Uso: tuide export-portable [opciones]\n"
           << "\n"
-          << "Empaqueta un nucleo limpio + toolpacks instalados como AppImage/AppDir.\n"
+          << "Empaqueta un nucleo limpio (+ toolpacks opcionales) como AppImage/AppDir.\n"
           << "Si la fuente ya esta empaquetada, la exportacion se bloquea.\n"
           << "\n"
           << "Opciones:\n"
@@ -360,6 +374,7 @@ int run_export_cli(int argc, char** argv) {
           << "  --binary PATH              Nucleo fuente (default: este ejecutable)\n"
           << "  --toolpacks id[,id...]     Toolpacks (default: instalados activos)\n"
           << "  --all-installed            Todos los toolpacks activos\n"
+          << "  --core-only                Solo nucleo (sin toolpacks; release oficial)\n"
           << "  --format appimage|appdir   Default: appimage (requiere appimagetool)\n";
       return 0;
     }
@@ -372,6 +387,10 @@ int run_export_cli(int argc, char** argv) {
       continue;
     }
     if (arg == "--all-installed") {
+      continue;
+    }
+    if (arg == "--core-only") {
+      core_only = true;
       continue;
     }
     if (arg.rfind("--format=", 0) == 0 || arg == "--format") {
@@ -425,7 +444,12 @@ int run_export_cli(int argc, char** argv) {
     }
   }
 
-  const auto result = export_portable(source, output, ids, format);
+  if (core_only && !ids.empty()) {
+    std::cerr << "error: --core-only no admite --toolpacks\n";
+    return 2;
+  }
+
+  const auto result = export_portable(source, output, ids, format, {}, core_only);
   if (result.ok) {
     std::cout << result.message << '\n';
     return 0;

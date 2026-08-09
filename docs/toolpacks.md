@@ -79,7 +79,26 @@ or `~/tuide.AppDir` if `appimagetool` is missing). CLI:
 ```bash
 tuide export-portable --all-installed -o dist/tuide-x86_64.AppImage
 tuide export-portable --format=appdir -o dist/tuide.AppDir
+tuide export-portable --core-only -o dist/tuide-core.AppImage
 ```
+
+### Official GitHub releases (core only)
+
+Pushing a tag `v*` runs `.github/workflows/release-appimage.yml`:
+
+1. Compiles a **slim** core in Docker (Ubuntu 18.04 / glibc **2.27**, `--static-libstdc++`, no bundles).
+2. Packages `dist/tuide-${VERSION}.AppImage` via `export-portable --core-only`.
+3. Creates a GitHub Release with that AppImage + `SHA256SUMS`.
+
+Locally:
+
+```bash
+./tools/build-release-appimage.sh --version 0.1.0
+# optional: --publish  (gh release create v0.1.0 …)
+```
+
+Asset name: `tuide-0.1.0.AppImage` from tag `v0.1.0` (leading `v` stripped).
+LSP/DAP come later from the toolpack catalog (`catalog-latest`), not from this AppImage.
 
 ```text
 tuide-x86_64.AppImage  (or tuide.AppDir/)
@@ -94,6 +113,7 @@ tuide-x86_64.AppImage  (or tuide.AppDir/)
 `AppRun` sets `TUIDE_TOOLPACKS_ROOT` to the embedded toolpacks tree and execs `usr/bin/tuide`.
 
 Empty `--toolpacks` / UI export includes **all active** toolpacks in the local store.
+Use `--core-only` for a slim AppImage with **no** toolpacks (official releases).
 
 ### Clean core only
 

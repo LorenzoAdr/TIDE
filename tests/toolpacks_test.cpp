@@ -277,6 +277,19 @@ void test_export_appdir(const fs::path& root) {
   expect(blocked.message.find("empaquetado") != std::string::npos ||
              blocked.message.find("nucleo limpio") != std::string::npos,
          "blocked message");
+
+  // Core-only AppDir (no toolpacks) for official slim releases.
+  const fs::path out_core = root / "tuide-core.AppDir";
+  const auto core_only = tuide::toolpacks::export_portable(
+      fake_core.string(), out_core.string(), {}, tuide::toolpacks::ExportFormat::kAppDir, {},
+      true);
+  expect(core_only.ok, core_only.message.c_str());
+  expect(tuide::toolpacks::path_looks_like_appdir(out_core.string()), "core appdir");
+  expect(fs::is_regular_file(out_core / "usr" / "bin" / "tuide"), "core binary");
+  expect(!fs::exists(out_core / "usr" / "share" / "tuide" / "toolpacks" / "clangd"),
+         "no clangd in core-only");
+  expect(fs::is_regular_file(out_core / "usr" / "share" / "tuide" / "toolpacks" / "manifest.json"),
+         "empty manifest present");
 }
 
 void test_language_pack_cpp_status(const fs::path& root) {

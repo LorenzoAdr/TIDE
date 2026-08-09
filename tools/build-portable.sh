@@ -9,6 +9,7 @@ USE_BIONIC=0
 STATIC_LIBSTDCXX=0
 SKIP_VERIFY=0
 SKIP_BUILD_IMAGE=0
+SLIM=0
 MAX_GLIBC="2.31"
 # 0=auto, 1=forzar sudo docker, 2=nunca sudo
 DOCKER_SUDO="${TUIDE_DOCKER_SUDO:-0}"
@@ -33,6 +34,7 @@ maximizar compatibilidad en runtime. Respeta la selección de .bundle-config
 Opciones:
   --bionic              Usar Ubuntu 18.04 (glibc ~2.27) en lugar de 20.04 (~2.31)
   --static-libstdc++    Pasar --static-libstdc++ a compile.sh
+  --slim                Nucleo sin bundles (ignora .bundle-config; release AppImage)
   --jobs N              Hilos de compilación (default: nproc)
   --output DIR          Directorio de salida (default: dist/)
   --max-glibc VERSION   Umbral para verify-glibc.sh (default: 2.31, bionic: 2.27)
@@ -149,6 +151,10 @@ while [[ $# -gt 0 ]]; do
       STATIC_LIBSTDCXX=1
       shift
       ;;
+    --slim)
+      SLIM=1
+      shift
+      ;;
     --jobs)
       [[ $# -ge 2 ]] || die "--jobs requiere un número"
       JOBS="$2"
@@ -210,13 +216,18 @@ else
 fi
 
 # -y reutiliza .bundle-config (selección del wizard). No forzar packs.
+# --slim: un --no-bundle-* activa CLI_OVERRIDES_BUNDLE y deja todos los bundles en 0.
 # TUIDE_IN_PORTABLE_CONTAINER evita que compile.sh vuelva a lanzar Docker.
 COMPILE_ARGS=(-y --build-backend=host)
 if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
   COMPILE_ARGS+=(--static-libstdc++)
 fi
+if [[ "${SLIM}" == "1" ]]; then
+  COMPILE_ARGS+=(--no-bundle-clangd)
+  log "modo slim: sin componentes embebidos (release core)"
+fi
 
-log "compilando en contenedor (${JOBS} hilos) con .bundle-config..."
+log "compilando en contenedor (${JOBS} hilos)..."
 docker_cmd run --rm \
   -u "$(id -u):$(id -g)" \
   -e HOME=/tmp \
