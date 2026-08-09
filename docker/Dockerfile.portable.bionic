@@ -37,9 +37,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zstd \
     && rm -rf /var/lib/apt/lists/*
 
-# Node.js + npx (tree-sitter-latex genera parser.c en configure).
-# Los binarios oficiales de Node ≥18 exigen GLIBC 2.28; Bionic solo tiene 2.27,
-# así que usamos el build unofficial enlazado a glibc 2.17.
+# Node.js + npx: tree-sitter-latex needs parser.c at configure time.
+# Official tree-sitter-cli / GitHub binaries need GLIBC ≥ 2.28, so on Bionic
+# (2.27) generation must happen on the host via tools/pregenerate-tree-sitter-latex.sh
+# (TUIDE_TREE_SITTER_LATEX_GENERATED). Node here is only for tooling that can run
+# with the unofficial glibc-2.17 build when needed.
 ARG NODE_VERSION=22.16.0
 RUN curl -fsSL "https://unofficial-builds.nodejs.org/download/release/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64-glibc-217.tar.xz" \
     | tar -xJ -C /usr/local --strip-components=1 \

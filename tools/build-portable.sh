@@ -215,6 +215,21 @@ else
   log "reusando imagen ${IMAGE_TAG}"
 fi
 
+# Bionic (glibc 2.27): tree-sitter-cli no corre dentro del contenedor.
+# Pregenerar parser.c en el host (glibc moderna) y pasarlo al configure.
+DOCKER_ENV_ARGS=()
+if [[ "${USE_BIONIC}" == "1" ]]; then
+  log "pregenerando tree-sitter-latex en el host (requerido en glibc 2.27)..."
+  LATEX_GEN="$("${ROOT}/tools/pregenerate-tree-sitter-latex.sh" | tail -n1)"
+  [[ -f "${LATEX_GEN}/parser.c" ]] || die "falló pregenerate-tree-sitter-latex.sh"
+  if [[ "${LATEX_GEN}" == "${ROOT}/"* ]]; then
+    rel="${LATEX_GEN#"${ROOT}/"}"
+    DOCKER_ENV_ARGS+=(-e "TUIDE_TREE_SITTER_LATEX_GENERATED=/src/${rel}")
+  else
+    die "TUIDE_TREE_SITTER_LATEX_GENERATED debe estar bajo ${ROOT} (montado en /src): ${LATEX_GEN}"
+  fi
+fi
+
 # -y reutiliza .bundle-config (selección del wizard). No forzar packs.
 # --slim: un --no-bundle-* activa CLI_OVERRIDES_BUNDLE y deja todos los bundles en 0.
 # TUIDE_IN_PORTABLE_CONTAINER evita que compile.sh vuelva a lanzar Docker.
@@ -234,6 +249,7 @@ docker_cmd run --rm \
   -e JOBS="${JOBS}" \
   -e CMAKE_BUILD_TYPE=Release \
   -e TUIDE_IN_PORTABLE_CONTAINER=1 \
+  "${DOCKER_ENV_ARGS[@]}" \
   -v "${ROOT}:/src" \
   -w /src \
   "${IMAGE_TAG}" \

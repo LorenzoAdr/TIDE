@@ -22,12 +22,18 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             curl ca-certificates file squashfs-tools
 
+      - name: Setup Node (pregenerate tree-sitter-latex for bionic)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Build and package AppImage
         env:
           VERSION: ${{ github.ref_name }}
           TUIDE_DOCKER_SUDO: "2"
         run: |
-          chmod +x tools/build-portable.sh tools/build-release-appimage.sh tools/verify-glibc.sh
+          chmod +x tools/build-portable.sh tools/build-release-appimage.sh \
+            tools/verify-glibc.sh tools/pregenerate-tree-sitter-latex.sh
           ./tools/build-release-appimage.sh --version "${VERSION}"
 
       - name: Publish GitHub Release
