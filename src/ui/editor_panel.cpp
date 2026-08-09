@@ -6343,9 +6343,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     const bool path_indexed_cpp =
         !buffer.path.empty() && is_indexed_source_path(buffer.path);
+    // Reserve the fold gutter as soon as folding is enabled for this path, even before
+    // Tree-sitter has computed fold_regions. Waiting for regions caused a one-column jump
+    // of the line numbers shortly after opening a file.
     const bool fold_gutter_enabled =
-        vh_config.enabled && vh_config.code_folding && path_indexed_cpp &&
-        !buffer.fold_regions.empty();
+        vh_config.enabled && vh_config.code_folding && path_indexed_cpp;
     panel_state->gutter_fold_width = fold_gutter_enabled ? 1 : 0;
 
     const std::vector<int>& fold_visible_lines =
