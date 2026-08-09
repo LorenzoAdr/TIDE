@@ -160,11 +160,18 @@ endforeach()
 # On old glibc hosts (Ubuntu 18.04 / 2.27), npx tree-sitter-cli binaries fail
 # (need GLIBC ≥ 2.28). Prefer a host-pregenerated file via:
 #   TUIDE_TREE_SITTER_LATEX_GENERATED=/path/containing/parser.c
+# or the default cache from tools/pregenerate-tree-sitter-latex.sh:
+#   ${CMAKE_SOURCE_DIR}/.cache/tree-sitter-latex-v0.6.0/parser.c
 if(NOT EXISTS "${tree_sitter_latex_SOURCE_DIR}/src/parser.c")
   set(_tuide_latex_pregen "")
   if(DEFINED ENV{TUIDE_TREE_SITTER_LATEX_GENERATED}
      AND NOT "$ENV{TUIDE_TREE_SITTER_LATEX_GENERATED}" STREQUAL "")
     set(_tuide_latex_pregen "$ENV{TUIDE_TREE_SITTER_LATEX_GENERATED}")
+  endif()
+  # Keep tag in sync with FetchContent GIT_TAG for tree_sitter_latex above.
+  if(NOT _tuide_latex_pregen AND
+     EXISTS "${CMAKE_SOURCE_DIR}/.cache/tree-sitter-latex-v0.6.0/parser.c")
+    set(_tuide_latex_pregen "${CMAKE_SOURCE_DIR}/.cache/tree-sitter-latex-v0.6.0")
   endif()
   if(_tuide_latex_pregen AND EXISTS "${_tuide_latex_pregen}/parser.c")
     message(STATUS "Using pregenerated tree-sitter-latex parser.c from ${_tuide_latex_pregen}")
@@ -173,6 +180,13 @@ if(NOT EXISTS "${tree_sitter_latex_SOURCE_DIR}/src/parser.c")
     if(EXISTS "${_tuide_latex_pregen}/scanner.c")
       file(COPY "${_tuide_latex_pregen}/scanner.c"
            DESTINATION "${tree_sitter_latex_SOURCE_DIR}/src")
+    endif()
+    # Headers emitted by `tree-sitter generate` (parser.h, array.h, …).
+    if(EXISTS "${_tuide_latex_pregen}/tree_sitter/parser.h")
+      file(MAKE_DIRECTORY "${tree_sitter_latex_SOURCE_DIR}/src/tree_sitter")
+      file(GLOB _tuide_latex_ts_headers "${_tuide_latex_pregen}/tree_sitter/*.h")
+      file(COPY ${_tuide_latex_ts_headers}
+           DESTINATION "${tree_sitter_latex_SOURCE_DIR}/src/tree_sitter")
     endif()
   endif()
 endif()
@@ -197,6 +211,12 @@ if(NOT EXISTS "${tree_sitter_latex_SOURCE_DIR}/src/parser.c")
       "On glibc < 2.28 (e.g. Ubuntu 18.04 portable builds), run "
       "tools/pregenerate-tree-sitter-latex.sh on a newer host first.")
   endif()
+endif()
+
+if(NOT EXISTS "${tree_sitter_latex_SOURCE_DIR}/src/tree_sitter/parser.h")
+  message(FATAL_ERROR
+    "tree-sitter-latex src/tree_sitter/parser.h missing after pregenerate/generate. "
+    "Re-run tools/pregenerate-tree-sitter-latex.sh (copies tree_sitter/*.h).")
 endif()
 
 # Ensure a C bindings header exists for latex (upstream only ships Swift).

@@ -221,7 +221,8 @@ DOCKER_ENV_ARGS=()
 if [[ "${USE_BIONIC}" == "1" ]]; then
   log "pregenerando tree-sitter-latex en el host (requerido en glibc 2.27)..."
   LATEX_GEN="$("${ROOT}/tools/pregenerate-tree-sitter-latex.sh" | tail -n1)"
-  [[ -f "${LATEX_GEN}/parser.c" ]] || die "falló pregenerate-tree-sitter-latex.sh"
+  [[ -f "${LATEX_GEN}/parser.c" && -f "${LATEX_GEN}/tree_sitter/parser.h" ]] || \
+    die "falló pregenerate-tree-sitter-latex.sh (parser.c + tree_sitter/parser.h)"
   if [[ "${LATEX_GEN}" == "${ROOT}/"* ]]; then
     rel="${LATEX_GEN#"${ROOT}/"}"
     DOCKER_ENV_ARGS+=(-e "TUIDE_TREE_SITTER_LATEX_GENERATED=/src/${rel}")
