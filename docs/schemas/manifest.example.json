@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "installed": [
+    {
+      "id": "clangd",
+      "version": "19.1.2",
+      "active": true,
+      "installed_at": "2026-07-26T20:00:00Z",
+      "source": "catalog",
+      "path": "clangd/19.1.2"
+    }
+  ]
+}

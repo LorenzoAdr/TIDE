@@ -270,6 +270,16 @@ add_executable(tuide
   src/util/core_analyzer_support.cpp
   src/util/process_list.cpp
   src/util/system_stats.cpp
+  src/toolpacks/paths.cpp
+  src/toolpacks/manifest.cpp
+  src/toolpacks/store.cpp
+  src/toolpacks/catalog.cpp
+  src/toolpacks/download.cpp
+  src/toolpacks/install.cpp
+  src/toolpacks/language_packs.cpp
+  src/toolpacks/packaged.cpp
+  src/toolpacks/export_portable.cpp
+  src/toolpacks/cli.cpp
   src/packet_monitor/pkt_ring.cpp
   src/packet_monitor/pkt_protocol.cpp
   src/packet_monitor/pkt_connections.cpp
@@ -587,6 +597,11 @@ add_executable(workspace_indexer_test
   src/util/fuzzy_match.cpp
   src/util/monitor_log.cpp
   src/util/bundled_tools.cpp
+  src/toolpacks/paths.cpp
+  src/toolpacks/manifest.cpp
+  src/toolpacks/store.cpp
+  src/toolpacks/packaged.cpp
+  src/toolpacks/download.cpp
   src/util/child_process_guard.cpp
 )
 target_include_directories(workspace_indexer_test PRIVATE
@@ -723,6 +738,11 @@ add_executable(lsp_completion_probe
   src/lsp/lsp_text_edits.cpp
   src/indexer/index_rules.cpp
   src/util/bundled_tools.cpp
+  src/toolpacks/paths.cpp
+  src/toolpacks/manifest.cpp
+  src/toolpacks/store.cpp
+  src/toolpacks/packaged.cpp
+  src/toolpacks/download.cpp
   src/util/child_process_guard.cpp
   src/util/monitor_log.cpp
   src/util/path_normalize.cpp
@@ -736,6 +756,26 @@ target_compile_definitions(lsp_completion_probe PRIVATE
   TUIDE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 target_link_libraries(lsp_completion_probe PRIVATE ftxui::dom)
+
+add_executable(toolpacks_test
+  tests/toolpacks_test.cpp
+  src/toolpacks/paths.cpp
+  src/toolpacks/manifest.cpp
+  src/toolpacks/store.cpp
+  src/toolpacks/catalog.cpp
+  src/toolpacks/download.cpp
+  src/toolpacks/install.cpp
+  src/toolpacks/language_packs.cpp
+  src/toolpacks/packaged.cpp
+  src/toolpacks/export_portable.cpp
+  src/util/bundled_tools.cpp
+  src/util/child_process_guard.cpp
+  src/util/monitor_log.cpp
+)
+target_include_directories(toolpacks_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
 
 set(TUIDE_TEST_TARGETS
   i18n_test
@@ -764,6 +804,7 @@ set(TUIDE_TEST_TARGETS
   git_diff_test
   pkt_protocol_test
   lsp_completion_probe
+  toolpacks_test
 )
 foreach(_tuide_test_target IN LISTS TUIDE_TEST_TARGETS)
   tuide_link_pthread(${_tuide_test_target})

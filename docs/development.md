@@ -226,7 +226,8 @@ tuide/
 │   ├── symbols/            # Symbol providers
 │   ├── terminal/           # Shell PTY
 │   ├── ui/                 # FTXUI panels and modals
-│   └── util/               # Shared utilities
+│   ├── util/               # Shared utilities
+│   └── toolpacks/          # Toolpack store/resolve/CLI (clangd pilot)
 ├── tests/
 │   └── text_ops_test.cpp
 └── tools/

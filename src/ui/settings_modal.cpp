@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "ftxui/component/component.hpp"
@@ -13,6 +16,11 @@
 #include "ftxui/dom/elements.hpp"
 #include "i18n/locale.hpp"
 #include "i18n/tr.hpp"
+#include "toolpacks/language_packs.hpp"
+#include "toolpacks/store.hpp"
+#include "toolpacks/export_portable.hpp"
+#include "toolpacks/manifest.hpp"
+#include "toolpacks/paths.hpp"
 #include "ui/clickable.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/panel.hpp"
@@ -31,6 +39,8 @@ using namespace ftxui;
 
 namespace {
 
+namespace fs = std::filesystem;
+
 constexpr int kSettingsBodyHeight = 24;
 
 struct SettingsBodyContent {
@@ -42,6 +52,12 @@ struct SettingsBodyContent {
 
 void append_top_level_tabs_header(SettingsBodyContent* content, SettingsModalState* state);
 void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel);
+void start_language_pack_install(SettingsModalState* state, const std::string& language_id);
+void start_language_pack_remove(SettingsModalState* state, const std::string& language_id);
+void start_export_portable(SettingsModalState* state);
+int toolpacks_row_count();
+int toolpacks_export_row_index();
+bool handle_toolpacks_settings_keys(SettingsModalState* state, Event event);
 bool handle_top_level_tab_keys(SettingsModalState* state, Event event);
 void cancel_shortcut_recording(SettingsModalState* state);
 void clamp_shortcuts_selection(SettingsModalState* state);
@@ -243,15 +259,16 @@ bool is_top_level_panel(SettingsPanel panel) {
   return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kVisualHighlight ||
          panel == SettingsPanel::kWorkspace || panel == SettingsPanel::kUiColors ||
          panel == SettingsPanel::kFormat || panel == SettingsPanel::kShortcuts ||
-         panel == SettingsPanel::kStatus;
+         panel == SettingsPanel::kToolpacks || panel == SettingsPanel::kStatus;
 }
 
 int top_level_panel_count(const SettingsModalState* state) {
-  // General + Visual + Shortcuts + Status always; Workspace + Theme + Format with workspace.
+  // General + Visual + Shortcuts + Toolpacks + Status always;
+  // Workspace + Theme + Format with workspace.
   if (state != nullptr && state->has_workspace) {
-    return 7;
+    return 8;
   }
-  return 4;
+  return 5;
 }
 
 SettingsPanel top_level_panel_at(const SettingsModalState* state, int index) {
@@ -274,10 +291,16 @@ SettingsPanel top_level_panel_at(const SettingsModalState* state, int index) {
     if (index == 5) {
       return SettingsPanel::kShortcuts;
     }
+    if (index == 6) {
+      return SettingsPanel::kToolpacks;
+    }
     return SettingsPanel::kStatus;
   }
   if (index == 2) {
     return SettingsPanel::kShortcuts;
+  }
+  if (index == 3) {
+    return SettingsPanel::kToolpacks;
   }
   return SettingsPanel::kStatus;
 }
@@ -296,8 +319,10 @@ int top_level_panel_index(const SettingsModalState* state, SettingsPanel panel) 
       return state != nullptr && state->has_workspace ? 4 : 2;
     case SettingsPanel::kShortcuts:
       return state != nullptr && state->has_workspace ? 5 : 2;
-    case SettingsPanel::kStatus:
+    case SettingsPanel::kToolpacks:
       return state != nullptr && state->has_workspace ? 6 : 3;
+    case SettingsPanel::kStatus:
+      return state != nullptr && state->has_workspace ? 7 : 4;
     default:
       return 0;
   }
@@ -862,6 +887,15 @@ void clamp_top_level_selection(SettingsModalState* state) {
     case SettingsPanel::kShortcuts:
       clamp_shortcuts_selection(state);
       break;
+    case SettingsPanel::kToolpacks: {
+      const int count = toolpacks_row_count();
+      if (count <= 0) {
+        state->selected = 0;
+      } else {
+        state->selected = std::max(0, std::min(state->selected, count - 1));
+      }
+      break;
+    }
     default:
       break;
   }
@@ -1443,7 +1477,7 @@ void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel) {
   state->panel = panel;
   state->selected = 0;
   state->body_scroll = 0;
-  if (panel == SettingsPanel::kStatus) {
+  if (panel == SettingsPanel::kStatus || panel == SettingsPanel::kToolpacks) {
     // Force a fresh probe when entering the tab; later frames reuse the cache.
     state->tools_status_cache_valid = false;
   }
@@ -1546,6 +1580,17 @@ void activate_settings_click(SettingsModalState* state, int index, int mouse_x) 
     case SettingsPanel::kShortcuts:
       activate_shortcuts_option(state, index);
       break;
+    case SettingsPanel::kToolpacks:
+      state->selected = index;
+      clamp_top_level_selection(state);
+      if (index == toolpacks_export_row_index()) {
+        start_export_portable(state);
+      } else if (index >= 0 &&
+                 index < static_cast<int>(toolpacks::language_packs().size())) {
+        start_language_pack_install(
+            state, toolpacks::language_packs()[static_cast<std::size_t>(index)].id);
+      }
+      break;
     case SettingsPanel::kStatus:
       break;
     case SettingsPanel::kIncludePaths:
@@ -1627,6 +1672,10 @@ bool handle_settings_mouse(SettingsModalState* state, Event event) {
     }
     if (state->tab_shortcuts_box.Contain(m.x, m.y)) {
       switch_top_level_tab(state, SettingsPanel::kShortcuts);
+      return true;
+    }
+    if (state->tab_toolpacks_box.Contain(m.x, m.y)) {
+      switch_top_level_tab(state, SettingsPanel::kToolpacks);
       return true;
     }
     if (state->tab_status_box.Contain(m.x, m.y)) {
@@ -2009,6 +2058,8 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
       return handle_workspace_settings_keys(state, event);
     case SettingsPanel::kFormat:
       return handle_format_settings_keys(state, event);
+    case SettingsPanel::kToolpacks:
+      return handle_toolpacks_settings_keys(state, event);
     case SettingsPanel::kStatus:
       return handle_top_level_tab_keys(state, event);
     case SettingsPanel::kShortcuts:
@@ -2070,6 +2121,9 @@ Element render_top_level_tabs(SettingsModalState* state) {
   tabs.push_back(text("  "));
   tabs.push_back(render_tab(SettingsPanel::kShortcuts, i18n::tr("settings.tab.shortcuts").c_str(),
                             &state->tab_shortcuts_box));
+  tabs.push_back(text("  "));
+  tabs.push_back(render_tab(SettingsPanel::kToolpacks, i18n::tr("settings.tab.toolpacks").c_str(),
+                            &state->tab_toolpacks_box));
   tabs.push_back(text("  "));
   tabs.push_back(render_tab(SettingsPanel::kStatus, i18n::tr("settings.tab.status").c_str(),
                             &state->tab_status_box));
@@ -2196,6 +2250,271 @@ SettingsBodyContent build_status_settings(SettingsModalState* state) {
     content.rows.pop_back();
   }
   return content;
+}
+
+std::string language_pack_status_label(toolpacks::LanguagePackStatus status) {
+  switch (status) {
+    case toolpacks::LanguagePackStatus::kInstalled:
+      return i18n::tr("settings.toolpacks.status.installed");
+    case toolpacks::LanguagePackStatus::kPartial:
+      return i18n::tr("settings.toolpacks.status.partial");
+    case toolpacks::LanguagePackStatus::kMissing:
+      return i18n::tr("settings.toolpacks.status.missing");
+  }
+  return {};
+}
+
+Color language_pack_status_color(toolpacks::LanguagePackStatus status) {
+  switch (status) {
+    case toolpacks::LanguagePackStatus::kInstalled:
+      return theme::Success();
+    case toolpacks::LanguagePackStatus::kPartial:
+      return theme::Warning();
+    case toolpacks::LanguagePackStatus::kMissing:
+      return theme::Error();
+  }
+  return theme::Muted();
+}
+
+void start_language_pack_install(SettingsModalState* state, const std::string& language_id) {
+  if (state == nullptr) {
+    return;
+  }
+  if (state->toolpack_job && state->toolpack_job->running.load()) {
+    return;
+  }
+  auto job = std::make_shared<SettingsModalState::ToolpackJob>();
+  job->busy_label = i18n::tr("settings.toolpacks.installing");
+  job->running = true;
+  state->toolpack_job = job;
+  std::thread([job, language_id]() {
+    const auto result = toolpacks::install_language_pack(language_id);
+    std::lock_guard<std::mutex> lock(job->mu);
+    job->ok = result.ok;
+    job->message = result.message;
+    job->finished = true;
+    job->running = false;
+  }).detach();
+}
+
+void start_language_pack_remove(SettingsModalState* state, const std::string& language_id) {
+  if (state == nullptr) {
+    return;
+  }
+  if (state->toolpack_job && state->toolpack_job->running.load()) {
+    return;
+  }
+  auto job = std::make_shared<SettingsModalState::ToolpackJob>();
+  job->busy_label = i18n::tr("settings.toolpacks.installing");
+  job->running = true;
+  state->toolpack_job = job;
+  std::thread([job, language_id]() {
+    const auto result = toolpacks::remove_language_pack(language_id);
+    std::lock_guard<std::mutex> lock(job->mu);
+    job->ok = result.ok;
+    job->message = result.message;
+    job->finished = true;
+    job->running = false;
+  }).detach();
+}
+
+int toolpacks_export_row_index() {
+  return static_cast<int>(toolpacks::language_packs().size());
+}
+
+int toolpacks_row_count() {
+  return toolpacks_export_row_index() + 1;
+}
+
+std::string default_export_appimage_path() {
+  const char* home = std::getenv("HOME");
+  const fs::path base = (home != nullptr && home[0] != '\0') ? fs::path(home) : fs::path(".");
+  return (base / "tuide-x86_64.AppImage").string();
+}
+
+std::string default_export_appdir_path() {
+  const char* home = std::getenv("HOME");
+  const fs::path base = (home != nullptr && home[0] != '\0') ? fs::path(home) : fs::path(".");
+  return (base / "tuide.AppDir").string();
+}
+
+bool appimagetool_available() {
+  if (const char* env = std::getenv("APPIMAGETOOL"); env != nullptr && env[0] != '\0') {
+    std::error_code ec;
+    if (fs::is_regular_file(env, ec)) {
+      return true;
+    }
+  }
+  return std::system("command -v appimagetool >/dev/null 2>&1") == 0;
+}
+
+void start_export_portable(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  if (state->toolpack_job && state->toolpack_job->running.load()) {
+    return;
+  }
+  auto job = std::make_shared<SettingsModalState::ToolpackJob>();
+  job->busy_label = i18n::tr("settings.toolpacks.exporting");
+  job->running = true;
+  state->toolpack_job = job;
+  std::thread([job]() {
+    toolpacks::ExportResult result;
+    if (appimagetool_available()) {
+      result = toolpacks::export_portable({}, default_export_appimage_path(), {},
+                                          toolpacks::ExportFormat::kAppImage);
+    } else {
+      result = toolpacks::export_portable({}, default_export_appdir_path(), {},
+                                          toolpacks::ExportFormat::kAppDir);
+      if (result.ok) {
+        result.message += " (sin appimagetool; AppDir)";
+      }
+    }
+    std::lock_guard<std::mutex> lock(job->mu);
+    job->ok = result.ok;
+    job->message = result.message;
+    job->finished = true;
+    job->running = false;
+  }).detach();
+}
+
+SettingsBodyContent build_toolpacks_settings(SettingsModalState* state) {
+  SettingsBodyContent content;
+  append_top_level_tabs_header(&content, state);
+
+  content.rows.push_back(text(i18n::tr("settings.toolpacks.intro")) | color(theme::Muted()));
+  content.rows.push_back(text(""));
+
+  if (state != nullptr && state->toolpack_job) {
+    std::lock_guard<std::mutex> lock(state->toolpack_job->mu);
+    if (state->toolpack_job->running.load()) {
+      const std::string busy = state->toolpack_job->busy_label.empty()
+                                   ? i18n::tr("settings.toolpacks.installing")
+                                   : state->toolpack_job->busy_label;
+      content.rows.push_back(text(busy) | color(theme::Warning()) | bold);
+      content.rows.push_back(text(""));
+    } else if (state->toolpack_job->finished) {
+      content.rows.push_back(
+          text(state->toolpack_job->message) |
+          color(state->toolpack_job->ok ? theme::Success() : theme::Error()));
+      content.rows.push_back(text(""));
+    }
+  }
+
+  const auto& packs = toolpacks::language_packs();
+  for (int i = 0; i < static_cast<int>(packs.size()); ++i) {
+    const auto& pack = packs[static_cast<std::size_t>(i)];
+    const auto status = toolpacks::language_pack_status(pack);
+    const bool selected = state != nullptr && state->selected == i;
+    Element title =
+        text(std::string(selected ? "▸ " : "  ") + i18n::tr(pack.name_i18n_key)) |
+        color(selected ? theme::Accent() : theme::Header()) | bold;
+    if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
+      title = title | inverted;
+    }
+    add_click_target(&content, i);
+    content.rows.push_back(hbox({
+        std::move(title) | size(WIDTH, EQUAL, 28),
+        text(language_pack_status_label(status.status)) |
+            color(language_pack_status_color(status.status)) | bold,
+    }));
+
+    for (const auto& component : pack.components) {
+      const bool present =
+          toolpacks::resolve_installed_toolpack(component.toolpack_id).has_value();
+      std::string role;
+      if (component.is_lsp) {
+        role = i18n::tr("settings.toolpacks.role.lsp");
+      } else if (component.is_dap) {
+        role = i18n::tr("settings.toolpacks.role.dap");
+      }
+      std::string detail = "    " + role + ": " + component.toolpack_id;
+      if (component.shared) {
+        detail += " (" + i18n::tr("settings.toolpacks.shared") + ")";
+      }
+      detail += present ? "  ✓" : "  ·";
+      content.rows.push_back(text(detail) |
+                             color(present ? theme::Muted() : theme::Error()));
+    }
+    content.rows.push_back(text(""));
+  }
+
+  // Export action row (last selectable).
+  {
+    const int export_index = toolpacks_export_row_index();
+    const bool selected = state != nullptr && state->selected == export_index;
+    int installed_count = 0;
+    if (const auto manifest = toolpacks::load_manifest(toolpacks::manifest_path());
+        manifest.has_value()) {
+      for (const auto& entry : manifest->installed) {
+        if (entry.active) {
+          ++installed_count;
+        }
+      }
+    }
+    Element title =
+        text(std::string(selected ? "▸ " : "  ") + i18n::tr("settings.toolpacks.export")) |
+        color(selected ? theme::Accent() : theme::Header()) | bold;
+    if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
+      title = title | inverted;
+    }
+    add_click_target(&content, export_index);
+    content.rows.push_back(std::move(title));
+    content.rows.push_back(
+        text("    " + i18n::tr("settings.toolpacks.export.detail") + " (" +
+             std::to_string(installed_count) + ")") |
+        color(theme::Muted()));
+    content.rows.push_back(text(""));
+  }
+
+  content.rows.push_back(text(i18n::tr("settings.toolpacks.hint")) | color(theme::Muted()));
+  return content;
+}
+
+bool handle_toolpacks_settings_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr) {
+    return false;
+  }
+  if (handle_top_level_tab_keys(state, event)) {
+    return true;
+  }
+  const int count = toolpacks_row_count();
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    if (count > 0) {
+      state->selected = std::max(0, state->selected - 1);
+    }
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    if (count > 0) {
+      state->selected = std::min(count - 1, state->selected + 1);
+    }
+    return true;
+  }
+  if (event == Event::Return) {
+    clamp_top_level_selection(state);
+    if (state->selected == toolpacks_export_row_index()) {
+      start_export_portable(state);
+    } else if (state->selected >= 0 &&
+               state->selected < static_cast<int>(toolpacks::language_packs().size())) {
+      start_language_pack_install(
+          state, toolpacks::language_packs()[static_cast<std::size_t>(state->selected)].id);
+    }
+    return true;
+  }
+  if (event == Event::Backspace || event == Event::Delete) {
+    clamp_top_level_selection(state);
+    if (state->selected >= 0 &&
+        state->selected < static_cast<int>(toolpacks::language_packs().size())) {
+      start_language_pack_remove(
+          state, toolpacks::language_packs()[static_cast<std::size_t>(state->selected)].id);
+    }
+    return true;
+  }
+  return true;
 }
 
 SettingsBodyContent build_visual_highlight_settings(SettingsModalState* state) {
@@ -3060,6 +3379,7 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
             case SettingsPanel::kVisualHighlight:
             case SettingsPanel::kWorkspace:
             case SettingsPanel::kFormat:
+            case SettingsPanel::kToolpacks:
             case SettingsPanel::kStatus:
               close_settings_modal(state, settings, on_apply, on_workspace_apply,
                                    on_clang_format_apply);
@@ -3084,9 +3404,13 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         std::string title = i18n::tr("settings.title");
         std::string footer;
         if (is_top_level_panel(state->panel)) {
-          footer = state->panel == SettingsPanel::kStatus
-                       ? i18n::tr("settings.footer.status")
-                       : i18n::tr("settings.footer.with_tabs");
+          if (state->panel == SettingsPanel::kStatus) {
+            footer = i18n::tr("settings.footer.status");
+          } else if (state->panel == SettingsPanel::kToolpacks) {
+            footer = i18n::tr("settings.footer.toolpacks");
+          } else {
+            footer = i18n::tr("settings.footer.with_tabs");
+          }
         }
         switch (state->panel) {
           case SettingsPanel::kGeneral:
@@ -3101,6 +3425,10 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
           case SettingsPanel::kFormat:
             title = i18n::tr("settings.title.format");
             content = build_format_settings(state);
+            break;
+          case SettingsPanel::kToolpacks:
+            title = i18n::tr("settings.title.toolpacks");
+            content = build_toolpacks_settings(state);
             break;
           case SettingsPanel::kStatus:
             title = i18n::tr("settings.title.status");

@@ -8,17 +8,17 @@ namespace tuide {
 struct ClangdLocation {
   std::string binary_path;
   std::string resource_dir;
-  enum class Source { Env, SystemPath, Bundled } source = Source::Bundled;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::Bundled;
 };
 
 struct GdbLocation {
   std::string binary_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::Bundled;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::Bundled;
 };
 
 struct RgLocation {
   std::string binary_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::Bundled;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::Bundled;
 };
 
 struct BasedpyrightLocation {
@@ -26,49 +26,49 @@ struct BasedpyrightLocation {
   bool needs_stdio_flag = true;
   bool use_python_module = false;
   std::string python_module;  // e.g. basedpyright.langserver when use_python_module
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct DebugpyLocation {
   std::string python_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct BashLsLocation {
   std::string binary_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct TexlabLocation {
   std::string binary_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct RustAnalyzerLocation {
   std::string binary_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct GoplsLocation {
   std::string binary_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct ZlsLocation {
   std::string binary_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct FortlsLocation {
   std::string binary_path;
   bool use_python_module = false;
   std::string python_module;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct LuaLsLocation {
   std::string binary_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct TypescriptLsLocation {
@@ -76,17 +76,17 @@ struct TypescriptLsLocation {
   bool needs_stdio_flag = true;
   bool use_node_script = false;
   std::string script_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct NeocmakelspLocation {
   std::string binary_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct MakeLsLocation {
   std::string binary_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct YamlLsLocation {
@@ -94,7 +94,7 @@ struct YamlLsLocation {
   bool needs_stdio_flag = true;
   bool use_node_script = false;
   std::string script_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 struct BashDebugAdapterLocation {
@@ -103,7 +103,7 @@ struct BashDebugAdapterLocation {
   std::string bash_path;
   std::string bashdb_path;
   std::string bashdb_lib_path;
-  enum class Source { Env, SystemPath, Bundled } source = Source::SystemPath;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
 bool has_bundled_clangd();
