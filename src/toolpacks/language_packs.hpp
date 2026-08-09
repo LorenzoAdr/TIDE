@@ -20,7 +20,7 @@ struct LanguagePack {
   std::vector<LanguagePackComponent> components;
 };
 
-// Pilot: C/C++ only (clangd + shared gdb).
+// Language packs for F10 Toolpacks UI (LSP + optional DAP per language).
 const std::vector<LanguagePack>& language_packs();
 
 const LanguagePack* find_language_pack(const std::string& id);

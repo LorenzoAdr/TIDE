@@ -129,6 +129,7 @@ struct SettingsModalState {
     std::atomic<bool> running{false};
     std::mutex mu;
     std::string message;
+    std::string busy_label;  // shown while running (installing/exporting)
     bool ok = false;
     bool finished = false;
   };

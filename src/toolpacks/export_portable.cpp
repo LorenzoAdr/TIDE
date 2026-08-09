@@ -92,9 +92,6 @@ std::string build_appdir(const fs::path& appdir, const std::string& source_binar
   const auto local = load_manifest(manifest_path());
 
   for (const auto& id : ids) {
-    if (id != "clangd" && id != "gdb") {
-      return "piloto: solo se pueden exportar 'clangd' o 'gdb' (recibido: " + id + ")";
-    }
     const auto resolved = resolve_installed_toolpack(id);
     if (!resolved.has_value()) {
       return "toolpack no instalado: " + id;

@@ -7,6 +7,7 @@ namespace tuide::toolpacks {
 namespace {
 
 const std::vector<LanguagePack>& packs_singleton() {
+  // shared gdb is kept across remove_language_pack for compiled languages.
   static const std::vector<LanguagePack> kPacks = {
       {
           "cpp",
@@ -14,6 +15,95 @@ const std::vector<LanguagePack>& packs_singleton() {
           {
               {"clangd", false, true, false},
               {"gdb", true, false, true},
+          },
+      },
+      {
+          "python",
+          "settings.toolpacks.lang.python",
+          {
+              {"python-tools", false, true, true},
+          },
+      },
+      {
+          "bash",
+          "settings.toolpacks.lang.bash",
+          {
+              {"bash-ls", false, true, false},
+              {"bash-dap", false, false, true},
+          },
+      },
+      {
+          "latex",
+          "settings.toolpacks.lang.latex",
+          {
+              {"texlab", false, true, false},
+          },
+      },
+      {
+          "rust",
+          "settings.toolpacks.lang.rust",
+          {
+              {"rust-analyzer", false, true, false},
+              {"gdb", true, false, true},
+          },
+      },
+      {
+          "go",
+          "settings.toolpacks.lang.go",
+          {
+              {"gopls", false, true, false},
+              {"gdb", true, false, true},
+          },
+      },
+      {
+          "zig",
+          "settings.toolpacks.lang.zig",
+          {
+              {"zls", false, true, false},
+              {"gdb", true, false, true},
+          },
+      },
+      {
+          "fortran",
+          "settings.toolpacks.lang.fortran",
+          {
+              {"fortls", false, true, false},
+              {"gdb", true, false, true},
+          },
+      },
+      {
+          "lua",
+          "settings.toolpacks.lang.lua",
+          {
+              {"lua-ls", false, true, false},
+          },
+      },
+      {
+          "typescript",
+          "settings.toolpacks.lang.typescript",
+          {
+              {"typescript-ls", false, true, false},
+          },
+      },
+      {
+          "cmake",
+          "settings.toolpacks.lang.cmake",
+          {
+              {"neocmakelsp", false, true, false},
+          },
+      },
+      {
+          "make",
+          "settings.toolpacks.lang.make",
+          {
+              {"make-ls", false, true, false},
+          },
+      },
+      {
+          "yaml",
+          "settings.toolpacks.lang.yaml",
+          {
+              {"yaml-ls", false, true, false},
           },
       },
   };

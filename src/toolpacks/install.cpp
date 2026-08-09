@@ -88,11 +88,6 @@ InstallResult install_toolpack(const std::string& id_spec) {
     result.message = "id de toolpack vacio";
     return result;
   }
-  if (id != "clangd" && id != "gdb") {
-    result.message =
-        "piloto: toolpacks soportados: clangd, gdb (recibido: " + id + ")";
-    return result;
-  }
 
   std::string catalog_error;
   const auto catalog = fetch_catalog(&catalog_error);
@@ -213,7 +208,9 @@ InstallResult install_toolpack(const std::string& id_spec) {
 
 InstallResult update_toolpack(const std::string& id) {
   if (id.empty()) {
-    return install_toolpack("clangd");
+    InstallResult result;
+    result.message = "id de toolpack vacio";
+    return result;
   }
   return install_toolpack(id);
 }

@@ -2,13 +2,13 @@
 
 Toolpacks are versioned LSP/DAP tool payloads installed in user space and resolved
 at runtime. The IDE **core** (including Tree-sitter and **rg**) ships without them.
-Pilot toolpacks: **clangd** + shared **gdb** (Linux **x86_64**).
+Language packs in F10 group the toolpacks needed per language.
 
-## Resolution order (clangd / gdb)
+## Resolution order
 
-1. Env override (`CLANGD_PATH` / `GDB_PATH`)
+1. Env override (e.g. `CLANGD_PATH`, `TUIDE_RUST_ANALYZER`, …)
 2. Active **toolpack** (`TUIDE_TOOLPACKS_ROOT` or XDG data)
-3. Compile-time **bundled** blob (temporary)
+3. Compile-time **bundled** blob (`TUIDE_BUNDLE_*`, transitional)
 4. `PATH`
 5. Missing
 
@@ -18,7 +18,9 @@ Pilot toolpacks: **clangd** + shared **gdb** (Linux **x86_64**).
 $XDG_DATA_HOME/tuide/toolpacks/     # default ~/.local/share/tuide/toolpacks
   manifest.json
   clangd/<version>/…
-  gdb/<version>/…
+  rust-analyzer/<version>/…
+  python-tools/<version>/…
+  …
 
 $XDG_CACHE_HOME/tuide/
   downloads/
@@ -30,22 +32,54 @@ Override root: TUIDE_TOOLPACKS_ROOT
 ## Catalog (GitHub Releases)
 
 - Tags: `catalog-YYYY.MM.DD` + movable `catalog-latest`
-- Assets: `catalog.json`, `clangd-…tar.zst`, `gdb-…tar.zst`, `SHA256SUMS`
+- Assets: `catalog.json`, one `*-linux-x86_64.tar.zst` per toolpack, `SHA256SUMS`
 - Default: `https://github.com/LorenzoAdr/TIDE/releases/download/catalog-latest/catalog.json`
-- Override: `TUIDE_TOOLPACKS_CATALOG_URL`
+- Override: `TUIDE_TOOLPACKS_CATALOG_URL` (HTTP, `file://`, or absolute path)
 
-## Language packs (UI)
+Publish locally (does not upload):
 
-F10 → **Toolpacks**. Pilot: **C / C++** = `clangd` + shared `gdb`.
+```bash
+./tools/publish_toolpack_catalog.sh
+./tools/publish_toolpack_catalog.sh --only clangd,gdb,rust-analyzer
+```
+
+## Language packs (UI F10 → Toolpacks)
+
+| Pack | Components |
+|------|------------|
+| `cpp` | `clangd` + shared `gdb` |
+| `python` | `python-tools` (basedpyright + debugpy) |
+| `bash` | `bash-ls` (+ shellcheck) + `bash-dap` |
+| `latex` | `texlab` (+ chktex) |
+| `rust` | `rust-analyzer` + shared `gdb` |
+| `go` | `gopls` + shared `gdb` |
+| `zig` | `zls` + shared `gdb` |
+| `fortran` | `fortls` + shared `gdb` |
+| `lua` | `lua-ls` |
+| `typescript` | `typescript-ls` |
+| `cmake` | `neocmakelsp` |
+| `make` | `make-ls` |
+| `yaml` | `yaml-ls` |
+
+Removing a language pack drops its non-shared components; **gdb** stays if other packs need it.
 
 ```bash
 tuide toolpacks install cpp
+tuide toolpacks install rust-analyzer   # single toolpack id
+tuide toolpacks doctor
 ./tools/publish_toolpack_catalog.sh
 ```
 
 ## Export (AppImage)
 
 Portable export builds an **AppDir** (and optionally a Type‑2 **AppImage**), not an ELF blob.
+From F10 → Toolpacks, use **Exportar portable (AppImage)** (writes `~/tuide-x86_64.AppImage`,
+or `~/tuide.AppDir` if `appimagetool` is missing). CLI:
+
+```bash
+tuide export-portable --all-installed -o dist/tuide-x86_64.AppImage
+tuide export-portable --format=appdir -o dist/tuide.AppDir
+```
 
 ```text
 tuide-x86_64.AppImage  (or tuide.AppDir/)
@@ -58,6 +92,8 @@ tuide-x86_64.AppImage  (or tuide.AppDir/)
 ```
 
 `AppRun` sets `TUIDE_TOOLPACKS_ROOT` to the embedded toolpacks tree and execs `usr/bin/tuide`.
+
+Empty `--toolpacks` / UI export includes **all active** toolpacks in the local store.
 
 ### Clean core only
 
@@ -91,5 +127,6 @@ tuide export-portable -o dist/tuide-x86_64.AppImage --binary ./build/tuide
 
 ## Transition from CMake bundles / ELF trailer
 
-- `TUIDE_BUNDLE_CLANGD` remains during testing; deprecate when toolpacks are default.
+- `TUIDE_BUNDLE_*` remain during testing; toolpacks win over them at resolve time.
 - ELF embed trailer export is **removed**; old trailers are only detected to block re-export.
+- Prefer a slim core + `tuide toolpacks install <lang>` (or AppImage export with packs).

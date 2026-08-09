@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -231,6 +232,36 @@ void test_export_appdir(const fs::path& root) {
   expect(fs::is_regular_file(out / "usr" / "share" / "tuide" / "toolpacks" / "manifest.json"),
          "manifest");
 
+  // Non-pilot ids must export too (whitelist removed).
+  write_file(payload / "bin" / "make-ls", "#!/bin/sh\necho make-ls\n");
+  // reuse store: install make-ls via local catalog entry
+  write_file(store / "make-ls" / "v0.1.16" / "bin" / "make-ls", "#!/bin/sh\necho make-ls\n");
+  fs::permissions(store / "make-ls" / "v0.1.16" / "bin" / "make-ls",
+                  fs::perms::owner_all | fs::perms::group_exec | fs::perms::others_exec);
+  write_file(store / "make-ls" / "v0.1.16" / "toolpack.json",
+             R"({"schema":1,"id":"make-ls","version":"v0.1.16","entry":{"type":"executable","path":"bin/make-ls"}})");
+  {
+    auto manifest = tuide::toolpacks::load_manifest((store / "manifest.json").string());
+    expect(manifest.has_value(), "manifest after clangd");
+    tuide::toolpacks::ManifestEntry mk;
+    mk.id = "make-ls";
+    mk.version = "v0.1.16";
+    mk.active = true;
+    mk.path = "make-ls/v0.1.16";
+    mk.source = "test";
+    manifest->installed.push_back(mk);
+    expect(tuide::toolpacks::save_manifest((store / "manifest.json").string(), *manifest),
+           "save make-ls");
+  }
+  const fs::path out2 = root / "tuide-all.AppDir";
+  const auto exported2 = tuide::toolpacks::export_portable(
+      fake_core.string(), out2.string(), {"clangd", "make-ls"},
+      tuide::toolpacks::ExportFormat::kAppDir);
+  expect(exported2.ok, exported2.message.c_str());
+  expect(fs::is_regular_file(out2 / "usr" / "share" / "tuide" / "toolpacks" / "make-ls" /
+                             "v0.1.16" / "bin" / "make-ls"),
+         "make-ls in appdir");
+
   // Resolve via TUIDE_TOOLPACKS_ROOT pointing at AppDir toolpacks.
   setenv("TUIDE_TOOLPACKS_ROOT",
          (out / "usr" / "share" / "tuide" / "toolpacks").string().c_str(), 1);
@@ -275,6 +306,82 @@ void test_language_pack_cpp_status(const fs::path& root) {
   expect(status.status == tuide::toolpacks::LanguagePackStatus::kPartial, "partial");
 }
 
+void test_install_make_ls_and_rust_pack(const fs::path& root) {
+  const fs::path fixture = root / "fixture";
+  const fs::path store = root / "store";
+  std::error_code ec;
+  fs::create_directories(store, ec);
+
+  auto make_pack = [&](const std::string& id, const std::string& version,
+                       const std::string& bin_name) {
+    const fs::path payload = fixture / (id + "-payload");
+    write_file(payload / "bin" / bin_name, "#!/bin/sh\necho " + id + "\n");
+    fs::permissions(payload / "bin" / bin_name,
+                    fs::perms::owner_all | fs::perms::group_exec | fs::perms::others_exec);
+    write_file(payload / "toolpack.json",
+               std::string("{\"schema\":1,\"id\":\"") + id + "\",\"version\":\"" + version +
+                   "\",\"entry\":{\"type\":\"executable\",\"path\":\"bin/" + bin_name + "\"}}");
+    const fs::path archive = fixture / (id + "-" + version + "-linux-x86_64.tar.zst");
+    expect(run_shell(("tar -C " + payload.string() + " -cf - . | zstd -q -o " + archive.string())
+                         .c_str()) == 0,
+           "archive");
+    return std::make_pair(archive, tuide::toolpacks::file_sha256(archive.string()));
+  };
+
+  const auto make_ls = make_pack("make-ls", "v0.1.16", "make-ls");
+  const auto rust = make_pack("rust-analyzer", "2025-12-29", "rust-analyzer");
+  // Fake --version responder for rust-analyzer accept().
+  write_file(fixture / "rust-analyzer-payload" / "bin" / "rust-analyzer",
+             "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo rust-analyzer 1.0; exit 0; fi\n"
+             "echo ok\n");
+  fs::permissions(fixture / "rust-analyzer-payload" / "bin" / "rust-analyzer",
+                  fs::perms::owner_all | fs::perms::group_exec | fs::perms::others_exec);
+  expect(run_shell(("tar -C " + (fixture / "rust-analyzer-payload").string() +
+                    " -cf - . | zstd -f -q -o " + rust.first.string())
+                       .c_str()) == 0,
+         "rearchive rust");
+  const std::string rust_sha = tuide::toolpacks::file_sha256(rust.first.string());
+
+  const auto gdb = make_pack("gdb", "16.3-static", "gdb");
+
+  const fs::path catalog_path = fixture / "catalog.json";
+  write_file(catalog_path,
+             std::string("{\"schema\":1,\"toolpacks\":[") +
+                 "{\"id\":\"make-ls\",\"version\":\"v0.1.16\",\"arch\":[\"x86_64\"],\"os\":[\"linux\"],"
+                 "\"url\":\"file://" +
+                 make_ls.first.string() + "\",\"sha256\":\"" + make_ls.second + "\"}," +
+                 "{\"id\":\"rust-analyzer\",\"version\":\"2025-12-29\",\"arch\":[\"x86_64\"],"
+                 "\"os\":[\"linux\"],\"url\":\"file://" +
+                 rust.first.string() + "\",\"sha256\":\"" + rust_sha + "\"}," +
+                 "{\"id\":\"gdb\",\"version\":\"16.3-static\",\"arch\":[\"x86_64\"],\"os\":[\"linux\"],"
+                 "\"url\":\"file://" +
+                 gdb.first.string() + "\",\"sha256\":\"" + gdb.second + "\"}]}");
+
+  setenv("TUIDE_TOOLPACKS_ROOT", store.string().c_str(), 1);
+  setenv("TUIDE_TOOLPACKS_CATALOG_URL", catalog_path.string().c_str(), 1);
+  unsetenv("TUIDE_MAKE_LS");
+  unsetenv("TUIDE_RUST_ANALYZER");
+  unsetenv("GDB_PATH");
+
+  expect(tuide::toolpacks::find_language_pack("rust") != nullptr, "rust language pack");
+  expect(tuide::toolpacks::find_language_pack("make") != nullptr, "make language pack");
+
+  const auto make_install = tuide::toolpacks::install_toolpack("make-ls");
+  expect(make_install.ok, make_install.message.c_str());
+  const auto make_loc = tuide::resolve_make_ls();
+  expect(make_loc.has_value(), "resolve make-ls");
+  expect(make_loc->source == tuide::MakeLsLocation::Source::Toolpack, "make-ls toolpack source");
+
+  const auto rust_pack = tuide::toolpacks::install_language_pack("rust");
+  expect(rust_pack.ok, rust_pack.message.c_str());
+  const auto ra = tuide::resolve_rust_analyzer();
+  expect(ra.has_value(), "resolve rust-analyzer");
+  expect(ra->source == tuide::RustAnalyzerLocation::Source::Toolpack, "ra toolpack");
+  const auto gdb_loc = tuide::resolve_gdb();
+  expect(gdb_loc.has_value(), "resolve gdb from rust pack");
+  expect(gdb_loc->source == tuide::GdbLocation::Source::Toolpack, "gdb toolpack");
+}
+
 }  // namespace
 
 int main() {
@@ -284,6 +391,7 @@ int main() {
   test_install_from_local_catalog(root / "install");
   test_export_appdir(root / "export");
   test_language_pack_cpp_status(root / "langpack");
+  test_install_make_ls_and_rust_pack(root / "extra");
   std::error_code ec;
   fs::remove_all(root, ec);
   std::cout << "toolpacks_test: OK\n";
