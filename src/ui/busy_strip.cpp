@@ -9,6 +9,7 @@
 
 #include "i18n/tr.hpp"
 #include "ui/main_layout.hpp"
+#include "ui/theme.hpp"
 
 namespace tuide {
 namespace {
@@ -101,9 +102,14 @@ void paint_ansi_unlocked(BusyStripState* state) {
   const int row = state->box.y_min + 1;
   const int col = state->box.x_min + 1;
   const std::string line = format_strip_line(*state);
+  // Sin SGR, el terminal pinta fondo negro por defecto y tapa el bgcolor FTXUI.
+  const std::string fg = theme::Muted().Print(/*is_background_color=*/false);
+  const std::string bg = theme::StatusBar().Print(/*is_background_color=*/true);
   std::ostringstream oss;
   oss << "\0337"
-      << "\033[" << row << ";" << col << "H" << line << "\0338";
+      << "\033[" << row << ";" << col << "H"
+      << "\033[" << fg << ";" << bg << "m" << line << "\033[0m"
+      << "\0338";
   std::cout << oss.str() << std::flush;
 }
 

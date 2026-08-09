@@ -57,6 +57,10 @@ using namespace ftxui;
 
 namespace {
 
+void wake_console(MainLayoutState* layout, std::string_view tag = "wake") {
+  wake_console_panel(layout, tag);
+}
+
 struct ConsolePanelState {
   std::string input;
   std::string input_placeholder;
@@ -387,7 +391,7 @@ bool open_terminal_link(WorkspaceModel* workspace, DebugModel* model, FocusManag
   if (layout_state != nullptr) {
     layout_state->text_input_focus = TextInputFocus::None;
     layout_state->focus_sync_needed = true;
-    UI_WAKE(layout_state, "wake");
+    wake_console(layout_state);
   }
   return true;
 }
@@ -729,7 +733,7 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
   const int previous_tab = layout_state->console_tabs.selected_tab;
   layout_state->console_tabs.selected_tab = tab;
   layout_state->focus_sync_needed = true;
-  UI_WAKE(layout_state, "wake");
+  wake_console(layout_state);
   if (tab == ConsolePanelTabs::kTerminal || tab == ConsolePanelTabs::kApp) {
     layout_state->text_input_focus =
         tab == ConsolePanelTabs::kTerminal ? TextInputFocus::Console : TextInputFocus::None;
@@ -850,13 +854,13 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
       if (focus != nullptr) {
         focus->region = FocusRegion::Terminal;
       }
-      UI_WAKE(layout_state, "wake");
+      wake_console(layout_state);
     } else if (i == ConsolePanelTabs::kDebug) {
       activate_console_input(layout_state, focus, input_box);
     } else if (i == ConsolePanelTabs::kCoreAnalyzer) {
       activate_console_input(layout_state, focus, input_box);
     } else if (layout_state != nullptr) {
-      UI_WAKE(layout_state, "wake");
+      wake_console(layout_state);
     }
     return true;
   }
@@ -880,24 +884,25 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
   if (m.motion == Mouse::Moved) {
     if (on_pty_tab && state->shell_ui_active) {
       if (update_terminal_link_hover(state, layout_state, m.x, m.y)) {
-        UI_WAKE(layout_state, "wake");
+        wake_console(layout_state);
       }
     } else if (state->terminal_link_hover.has_value()) {
       state->terminal_link_hover.reset();
       if (layout_state != nullptr) {
         layout_state->clickable.clear_hover_if(
             [](std::string_view id) { return id == press_id::kTerminalLink; });
-        UI_WAKE(layout_state, "wake");
+        wake_console(layout_state);
       }
     }
     if (handle_console_tab_hover(state, layout_state, app_mode, m)) {
-      UI_WAKE(layout_state, "wake");
+      wake_console(layout_state);
       return true;
     }
     if (on_pty_tab && state->shell_ui_active) {
       const int term_total = terminal_display_total(state);
       const int term_visible = state->terminal_last_visible_lines;
       if (handle_terminal_scroll_mouse(state, layout_state, m, term_total, term_visible)) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::Console);
         return true;
       }
     }
@@ -912,7 +917,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
       state->hide_box.Contain(m.x, m.y)) {
     trigger_press(layout_state, press_id::kConsoleHide);
     layout_state->console_visible = false;
-    UI_WAKE(layout_state, "wake");
+    wake_console(layout_state);
     return true;
   }
 
@@ -920,6 +925,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
     const int term_total = terminal_display_total(state);
     const int term_visible = state->terminal_last_visible_lines;
     if (handle_terminal_scroll_mouse(state, layout_state, m, term_total, term_visible)) {
+      layout_state->panel_render_cache.mark_dirty(UiPanelId::Console);
       return true;
     }
     if (m.button == Mouse::Left && m.motion == Mouse::Pressed &&
@@ -966,7 +972,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
     }
     layout_state->text_input_focus = TextInputFocus::Console;
     layout_state->focus_sync_needed = true;
-    UI_WAKE(layout_state, "wake");
+    wake_console(layout_state);
     return true;
   }
   if (on_debug_tab && state->input_box.Contain(m.x, m.y)) {
@@ -1891,19 +1897,19 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         layout_state->text_input_focus =
             on_terminal_tab ? TextInputFocus::Console : TextInputFocus::None;
         layout_state->focus_sync_needed = true;
-        UI_WAKE(layout_state, "wake");
+        wake_console(layout_state);
         return true;
       }
       if (event == Event::Return) {
         layout_state->text_input_focus =
             on_terminal_tab ? TextInputFocus::Console : TextInputFocus::None;
         layout_state->focus_sync_needed = true;
-        UI_WAKE(layout_state, "wake");
+        wake_console(layout_state);
         return true;
       }
       if (!event.is_mouse() && filter_input->OnEvent(event)) {
         sync_pty_filter(state.get());
-        UI_WAKE(layout_state, "wake");
+        wake_console(layout_state);
         return true;
       }
       return false;
@@ -2017,7 +2023,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         layout_state->text_input_focus =
             on_terminal_tab ? TextInputFocus::Console : TextInputFocus::None;
         layout_state->focus_sync_needed = true;
-        UI_WAKE(layout_state, "wake");
+        wake_console(layout_state);
         return true;
       }
       if (event.is_character() || event == Event::Backspace || event == Event::Delete ||
@@ -2026,12 +2032,12 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         if (filter_input->OnEvent(event)) {
           sync_pty_filter(state.get());
           cursor_blink::show();
-          UI_WAKE(layout_state, "wake");
+          wake_console(layout_state);
           return true;
         }
       }
       if (state->shell_ui_active && handle_terminal_scroll_keys(state.get(), event)) {
-        UI_WAKE(layout_state, "wake");
+        wake_console(layout_state);
         return true;
       }
       return true;
@@ -2046,6 +2052,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     }
     if (state->shell_ui_active && terminal_pty_input_active(layout_state, focus, shell) &&
         handle_terminal_scroll_keys(state.get(), event)) {
+      if (layout_state != nullptr) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::Console);
+      }
       return true;
     }
     if (!terminal_pty_input_active(layout_state, focus, shell)) {
@@ -2103,7 +2112,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
            app_tab_active(app_mode, layout_state)) &&
           state->filter_box.Contain(m.x, m.y)) {
         activate_terminal_filter_input(layout_state, focus, filter_input);
-        UI_WAKE(layout_state, "wake");
+        wake_console(layout_state);
         return true;
       }
       if (performance_tab_active(app_mode, layout_state) &&

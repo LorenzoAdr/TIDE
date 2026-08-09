@@ -967,10 +967,10 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
       FocusRegion::SecondaryEditor, model, on_command,
       layout_state != nullptr ? &layout_state->secondary_editor : nullptr);
   auto source = MakeSourcePanel(model, source_state, on_command, focus, layout_state, symbols);
-  auto center = MakeCachedPanelRender(
-      layout_state, UiPanelId::EditorCenter,
-      MakeEditorCenterLayout(app_mode, model, editor_primary, editor_secondary, source,
-                             secondary_workspace, split_state));
+  // Do not cache EditorCenter: typing is often handled via application key_handler
+  // (bypassing the panel CatchEvent). Stale Elements batch rapid keystrokes.
+  auto center = MakeEditorCenterLayout(app_mode, model, editor_primary, editor_secondary, source,
+                                       secondary_workspace, split_state);
 
   auto console = MakeCachedPanelRender(
       layout_state, UiPanelId::Console,

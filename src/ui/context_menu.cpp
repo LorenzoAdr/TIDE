@@ -799,7 +799,7 @@ void focus_call_hierarchy(MainLayoutState* layout_state, int line, int col,
   layout_state->right_sidebar.pending_call_hierarchy_symbol = symbol;
   layout_state->text_input_focus = TextInputFocus::None;
   layout_state->focus_sync_needed = true;
-  UI_WAKE(layout_state, "wake");
+  wake_console_panel(layout_state);
 }
 
 void focus_references(MainLayoutState* layout_state, int line, int col,
@@ -817,7 +817,7 @@ void focus_references(MainLayoutState* layout_state, int line, int col,
   layout_state->right_sidebar.pending_references_symbol = symbol;
   layout_state->text_input_focus = TextInputFocus::None;
   layout_state->focus_sync_needed = true;
-  UI_WAKE(layout_state, "wake");
+  wake_console_panel(layout_state);
 }
 
 bool delete_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer* indexer,
@@ -1608,7 +1608,7 @@ void focus_search_with_filter(MainLayoutState* layout_state, const std::string& 
   layout_state->right_sidebar.pending_focus_search = true;
   layout_state->text_input_focus = TextInputFocus::SearchQuery;
   layout_state->focus_sync_needed = true;
-  UI_WAKE(layout_state, "wake");
+  wake_console_panel(layout_state);
 }
 
 bool context_menu_active(const ContextMenuState* state) {

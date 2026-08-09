@@ -2458,6 +2458,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		focus_state_.region = FocusRegion::Terminal;
 		layout_state_.right_sidebar.pending_focus_search = true;
 		layout_state_.text_input_focus = TextInputFocus::SearchQuery;
+		layout_state_.panel_render_cache.mark_dirty(UiPanelId::Console);
 		mark_focus_sync();
 		return true;
 	}

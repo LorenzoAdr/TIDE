@@ -612,7 +612,7 @@ bool open_call_hierarchy_view(CallHierarchyViewState* view, WorkspaceModel* work
   layout_state->text_input_focus = TextInputFocus::None;
   if (layout_state != nullptr) {
     layout_state->focus_sync_needed = true;
-    UI_WAKE(layout_state, "wake");
+    wake_console_panel(layout_state);
   }
   workspace->status_message = i18n::tr_fmt("status.call_hierarchy.active", {label});
   return true;
@@ -706,7 +706,7 @@ bool open_references_view(CallHierarchyViewState* view, WorkspaceModel* workspac
     layout_state->right_panel_active_section = 0;
     layout_state->text_input_focus = TextInputFocus::None;
     layout_state->focus_sync_needed = true;
-    UI_WAKE(layout_state, "wake");
+    wake_console_panel(layout_state);
   }
   workspace->status_message = i18n::tr_fmt("status.references.active", {label});
   return true;

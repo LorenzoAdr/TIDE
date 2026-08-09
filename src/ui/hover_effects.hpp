@@ -37,6 +37,10 @@ inline void invalidate_cached_panel_chrome(MainLayoutState* layout, std::string_
       press_id::is_watches_hover(id) || id == press_id::kSidebarHide) {
     layout->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
   }
+  if (press_id::is_console_header_hover(id) || id == press_id::kTerminalScrollbar ||
+      id == press_id::kTerminalLink) {
+    layout->panel_render_cache.mark_dirty(UiPanelId::Console);
+  }
 }
 
 inline bool chrome_hover_allowed(const MainLayoutState* layout) {

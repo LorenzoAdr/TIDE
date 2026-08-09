@@ -57,6 +57,8 @@ int main() {
          "inactive TS must not wake");
   expect(tuide::ui_invalidation_spec(UiInvalidation::OpenFile).wake, "OpenFile wakes");
   expect(tuide::ui_invalidation_spec(UiInvalidation::OpenFile).focus_sync, "OpenFile focus sync");
+  expect(!tuide::ui_invalidation_spec(UiInvalidation::EditorViewOnly).wake,
+         "EditorViewOnly must not wake (avoids tick→invalidate storm)");
 
   // Cache: dirty generation advances per panel independently.
   tuide::UiPanelRenderCache cache;

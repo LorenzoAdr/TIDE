@@ -122,7 +122,7 @@ bool update_call_hierarchy_hover(CallHierarchyPanelState* state, MainLayoutState
     layout_state->clickable.clear_hover_if(press_id::is_call_hierarchy_hover);
   }
   if (layout_state->clickable.hovered_id() != before) {
-    UI_WAKE(layout_state, "wake");
+    wake_console_panel(layout_state);
     return true;
   }
   return false;

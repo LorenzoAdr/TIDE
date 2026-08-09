@@ -43,6 +43,14 @@ inline void ui_wake(MainLayoutState* layout, std::string_view tag,
   dispatcher->emit(std::move(event));
 }
 
+// Console is cached: any tab/content change must dirty it before wake/draw.
+inline void wake_console_panel(MainLayoutState* layout, std::string_view tag = "wake") {
+  if (layout != nullptr) {
+    layout->panel_render_cache.mark_dirty(UiPanelId::Console);
+  }
+  ui_wake(layout, tag);
+}
+
 inline void ui_wake_correlated(MainLayoutState* layout, uint64_t correlation_id,
                                std::string_view tag, std::function<void()> pre_paint = {}) {
   UiEventDispatcher* dispatcher = ui_event_dispatcher(layout);

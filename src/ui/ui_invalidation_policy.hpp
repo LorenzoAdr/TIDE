@@ -116,7 +116,10 @@ inline UiInvalidationSpec ui_invalidation_spec(UiInvalidation kind) {
     case UiInvalidation::LayoutChromeChanged:
       return {kPanelChromeAll, true, false, UiEventKind::InputCorrelated, "layout.chrome"};
     case UiInvalidation::EditorViewOnly:
-      return {kPanelEditorOnly, true, true, UiEventKind::InputCorrelated, "editor.view"};
+      // Dirty only: input/tick paths already redraw. Async callers must UI_WAKE explicitly
+      // (see visual_highlight debounce/result wake callbacks). wake=true caused a Custom
+      // storm via editor tick → invalidate_editor_view → wake → tick…
+      return {kPanelEditorOnly, false, true, UiEventKind::InputCorrelated, "editor.view"};
   }
   return {0, false, false, UiEventKind::InputCorrelated, "invalidation.unknown"};
 }
