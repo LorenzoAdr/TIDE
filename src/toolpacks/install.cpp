@@ -91,6 +91,18 @@ InstallResult install_toolpack(const std::string& id_spec, ProgressFn on_progres
   }
 
   report_progress(on_progress, 0, id);
+  if (const std::string deps = toolpack_host_deps_error(); !deps.empty()) {
+    result.message = deps;
+    return result;
+  }
+  if (!toolpacks_root_is_writable()) {
+    result.message =
+        "directorio de toolpacks no escribible: " + toolpacks_root() +
+        " (en AppImage las instalaciones van a ~/.local/share/tuide/toolpacks; "
+        "no uses un TUIDE_TOOLPACKS_ROOT de solo lectura)";
+    return result;
+  }
+
   std::string catalog_error;
   const auto catalog = fetch_catalog(&catalog_error);
   if (!catalog.has_value()) {
@@ -112,7 +124,8 @@ InstallResult install_toolpack(const std::string& id_spec, ProgressFn on_progres
   const fs::path archive_path = fs::path(downloads_dir()) / archive_name;
   report_progress(on_progress, 5, id);
   const std::string dl_err =
-      download_url(entry->url, archive_path.string(), nest_progress(on_progress, 5, 70, id));
+      download_url(entry->url, archive_path.string(), nest_progress(on_progress, 5, 70, id),
+                   entry->size_bytes);
   if (!dl_err.empty()) {
     result.message = dl_err;
     return result;

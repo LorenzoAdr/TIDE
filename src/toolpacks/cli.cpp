@@ -6,6 +6,7 @@
 #include "toolpacks/install.hpp"
 #include "toolpacks/language_packs.hpp"
 #include "toolpacks/manifest.hpp"
+#include "toolpacks/download.hpp"
 #include "toolpacks/paths.hpp"
 #include "toolpacks/store.hpp"
 #include "util/bundled_tools.hpp"
@@ -25,7 +26,8 @@ void print_usage() {
       << "  remove <id|lang>     Elimina toolpack o LSP del language pack\n"
       << "\n"
       << "Variables:\n"
-      << "  TUIDE_TOOLPACKS_ROOT          Directorio de toolpacks\n"
+      << "  TUIDE_TOOLPACKS_ROOT          Directorio escribible de toolpacks\n"
+      << "  TUIDE_TOOLPACKS_BUNDLED       Store solo lectura (AppImage)\n"
       << "  TUIDE_TOOLPACKS_CATALOG_URL   URL o ruta de catalog.json\n";
 }
 
@@ -61,7 +63,14 @@ const char* source_name_clangd(ClangdLocation::Source source) {
 int cmd_doctor() {
   std::cout << "toolpacks root: " << toolpacks_root() << '\n';
   std::cout << "manifest:       " << manifest_path() << '\n';
+  if (const std::string bundled = bundled_toolpacks_root(); !bundled.empty()) {
+    std::cout << "bundled root:   " << bundled << '\n';
+  }
+  std::cout << "writable:       " << (toolpacks_root_is_writable() ? "yes" : "NO") << '\n';
   std::cout << "catalog URL:    " << default_catalog_url() << '\n';
+  if (const std::string deps = toolpack_host_deps_error(); !deps.empty()) {
+    std::cout << "host deps:      " << deps << '\n';
+  }
   std::cout << '\n';
 
   std::cout << "Language packs:\n";

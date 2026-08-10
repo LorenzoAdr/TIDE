@@ -134,10 +134,12 @@ std::string build_appdir(const fs::path& appdir, const std::string& source_binar
     return "no se pudo escribir manifest.json del AppDir";
   }
 
+  // Bundled packs are read-only inside the AppImage. Keep installs writable under
+  // XDG (~/.local/share/tuide/toolpacks) via TUIDE_TOOLPACKS_BUNDLED, not ROOT.
   write_text(appdir / "AppRun",
              "#!/bin/sh\n"
              "HERE=\"$(dirname \"$(readlink -f \"$0\")\")\"\n"
-             "export TUIDE_TOOLPACKS_ROOT=\"$HERE/usr/share/tuide/toolpacks\"\n"
+             "export TUIDE_TOOLPACKS_BUNDLED=\"$HERE/usr/share/tuide/toolpacks\"\n"
              "exec \"$HERE/usr/bin/tuide\" \"$@\"\n");
   fs::permissions(appdir / "AppRun",
                   fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |

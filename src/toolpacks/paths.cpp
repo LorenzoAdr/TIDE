@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -17,13 +18,7 @@ std::string non_empty_env(const char* name) {
   return raw;
 }
 
-}  // namespace
-
-std::string toolpacks_root() {
-  if (const std::string override_root = non_empty_env("TUIDE_TOOLPACKS_ROOT");
-      !override_root.empty()) {
-    return override_root;
-  }
+std::string default_user_toolpacks_root() {
   if (const std::string xdg = non_empty_env("XDG_DATA_HOME"); !xdg.empty()) {
     return (fs::path(xdg) / "tuide" / "toolpacks").string();
   }
@@ -33,8 +28,63 @@ std::string toolpacks_root() {
   return "tuide-toolpacks";
 }
 
+bool path_is_writable_dir(const fs::path& root) {
+  std::error_code ec;
+  fs::create_directories(root, ec);
+  if (ec) {
+    return false;
+  }
+  const fs::path probe = root / ".tuide-write-probe";
+  {
+    std::ofstream out(probe, std::ios::trunc);
+    if (!out) {
+      return false;
+    }
+    out << "ok\n";
+    if (!out) {
+      return false;
+    }
+  }
+  fs::remove(probe, ec);
+  return true;
+}
+
+}  // namespace
+
+std::string toolpacks_root() {
+  if (const std::string override_root = non_empty_env("TUIDE_TOOLPACKS_ROOT");
+      !override_root.empty()) {
+    // Old AppImages exported ROOT onto the read-only squashfs. Ignore that for
+    // installs and keep writing under XDG; resolution still sees it via bundled.
+    if (path_is_writable_dir(override_root)) {
+      return override_root;
+    }
+  }
+  return default_user_toolpacks_root();
+}
+
+std::string bundled_toolpacks_root() {
+  if (const std::string bundled = non_empty_env("TUIDE_TOOLPACKS_BUNDLED"); !bundled.empty()) {
+    return bundled;
+  }
+  // Compatibility with AppRun that only set TUIDE_TOOLPACKS_ROOT to the AppDir tree.
+  if (const std::string override_root = non_empty_env("TUIDE_TOOLPACKS_ROOT");
+      !override_root.empty() && !path_is_writable_dir(override_root)) {
+    return override_root;
+  }
+  return {};
+}
+
 std::string manifest_path() {
   return (fs::path(toolpacks_root()) / "manifest.json").string();
+}
+
+std::string bundled_manifest_path() {
+  const std::string bundled = bundled_toolpacks_root();
+  if (bundled.empty()) {
+    return {};
+  }
+  return (fs::path(bundled) / "manifest.json").string();
 }
 
 std::string cache_root() {
@@ -57,6 +107,10 @@ std::string default_catalog_url() {
     return override_url;
   }
   return "https://github.com/LorenzoAdr/TIDE/releases/download/catalog-latest/catalog.json";
+}
+
+bool toolpacks_root_is_writable() {
+  return path_is_writable_dir(toolpacks_root());
 }
 
 }  // namespace tuide::toolpacks

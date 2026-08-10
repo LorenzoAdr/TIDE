@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <utility>
 
@@ -225,6 +226,15 @@ void test_export_appdir(const fs::path& root) {
   expect(exported.ok, exported.message.c_str());
   expect(tuide::toolpacks::path_looks_like_appdir(out.string()), "is appdir");
   expect(fs::is_regular_file(out / "AppRun"), "AppRun");
+  {
+    std::ifstream apprun(out / "AppRun");
+    std::string apprun_text((std::istreambuf_iterator<char>(apprun)),
+                            std::istreambuf_iterator<char>());
+    expect(apprun_text.find("TUIDE_TOOLPACKS_BUNDLED=") != std::string::npos,
+           "AppRun exports bundled root");
+    expect(apprun_text.find("TUIDE_TOOLPACKS_ROOT=") == std::string::npos,
+           "AppRun does not force writable root onto squashfs");
+  }
   expect(fs::is_regular_file(out / "usr" / "bin" / "tuide"), "tuide binary");
   expect(fs::is_regular_file(out / "usr" / "share" / "tuide" / "toolpacks" / "clangd" / "19.1.2" /
                              "bin" / "clangd"),
@@ -262,13 +272,21 @@ void test_export_appdir(const fs::path& root) {
                              "v0.1.16" / "bin" / "make-ls"),
          "make-ls in appdir");
 
-  // Resolve via TUIDE_TOOLPACKS_ROOT pointing at AppDir toolpacks.
-  setenv("TUIDE_TOOLPACKS_ROOT",
+  // Resolve via bundled AppImage packs while user root stays empty/writable.
+  unsetenv("TUIDE_TOOLPACKS_ROOT");
+  setenv("TUIDE_TOOLPACKS_BUNDLED",
          (out / "usr" / "share" / "tuide" / "toolpacks").string().c_str(), 1);
+  setenv("XDG_DATA_HOME", (root / "xdg-data").string().c_str(), 1);
   unsetenv("CLANGD_PATH");
   const auto loc = tuide::resolve_clangd();
-  expect(loc.has_value(), "resolve from appdir toolpacks");
+  expect(loc.has_value(), "resolve from bundled toolpacks");
   expect(loc->source == tuide::ClangdLocation::Source::Toolpack, "toolpack source");
+
+  // Catalog install must land in the writable XDG root, not the bundled tree.
+  const auto installed_again = tuide::toolpacks::install_toolpack("clangd");
+  expect(installed_again.ok, installed_again.message.c_str());
+  expect(installed_again.root_path.find((root / "xdg-data").string()) != std::string::npos,
+         "install writes to XDG, not bundled");
 
   const auto blocked = tuide::toolpacks::export_portable(
       out.string(), (root / "blocked.AppDir").string(), {"clangd"},
@@ -277,6 +295,8 @@ void test_export_appdir(const fs::path& root) {
   expect(blocked.message.find("empaquetado") != std::string::npos ||
              blocked.message.find("nucleo limpio") != std::string::npos,
          "blocked message");
+
+  unsetenv("TUIDE_TOOLPACKS_BUNDLED");
 
   // Core-only AppDir (no toolpacks) for official slim releases.
   const fs::path out_core = root / "tuide-core.AppDir";
@@ -290,6 +310,35 @@ void test_export_appdir(const fs::path& root) {
          "no clangd in core-only");
   expect(fs::is_regular_file(out_core / "usr" / "share" / "tuide" / "toolpacks" / "manifest.json"),
          "empty manifest present");
+  {
+    std::ifstream apprun(out_core / "AppRun");
+    std::string apprun_text((std::istreambuf_iterator<char>(apprun)),
+                            std::istreambuf_iterator<char>());
+    expect(apprun_text.find("TUIDE_TOOLPACKS_BUNDLED=") != std::string::npos,
+           "core AppRun still exports bundled path");
+  }
+}
+
+void test_readonly_root_falls_back_to_xdg(const fs::path& root) {
+  const fs::path ro = root / "ro-store";
+  const fs::path xdg = root / "xdg-data";
+  std::error_code ec;
+  fs::create_directories(ro, ec);
+  write_file(ro / "manifest.json", R"({"schema":1,"installed":[]})");
+  fs::permissions(ro, fs::perms::owner_read | fs::perms::owner_exec | fs::perms::group_read |
+                           fs::perms::group_exec | fs::perms::others_read | fs::perms::others_exec);
+  setenv("TUIDE_TOOLPACKS_ROOT", ro.string().c_str(), 1);
+  unsetenv("TUIDE_TOOLPACKS_BUNDLED");
+  setenv("XDG_DATA_HOME", xdg.string().c_str(), 1);
+
+  expect(tuide::toolpacks::toolpacks_root().find(xdg.string()) != std::string::npos,
+         "writable root falls back to XDG");
+  expect(tuide::toolpacks::bundled_toolpacks_root() == ro.string(),
+         "RO ROOT is treated as bundled");
+  expect(tuide::toolpacks::toolpacks_root_is_writable(), "xdg root writable");
+
+  // Restore perms so temp cleanup works.
+  fs::permissions(ro, fs::perms::owner_all, ec);
 }
 
 void test_language_pack_cpp_status(const fs::path& root) {
@@ -403,6 +452,7 @@ int main() {
   test_resolve_clangd_toolpack(root / "resolve");
   test_install_from_local_catalog(root / "install");
   test_export_appdir(root / "export");
+  test_readonly_root_falls_back_to_xdg(root / "ro-fallback");
   test_language_pack_cpp_status(root / "langpack");
   test_install_make_ls_and_rust_pack(root / "extra");
   std::error_code ec;
