@@ -2,13 +2,17 @@
 
 #include <sys/wait.h>
 
+#include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -55,6 +59,20 @@ bool command_exists(const char* name) {
   return run_command(std::string("command -v ") + name + " >/dev/null 2>&1") == 0;
 }
 
+// Encode '+' in URL paths/query so GitHub release asset names with '+' resolve.
+std::string encode_download_url(const std::string& url) {
+  std::string out;
+  out.reserve(url.size() + 8);
+  for (char ch : url) {
+    if (ch == '+') {
+      out += "%2B";
+    } else {
+      out.push_back(ch);
+    }
+  }
+  return out;
+}
+
 std::optional<int> parse_percent_token(std::string_view text) {
   const auto pct = text.rfind('%');
   if (pct == std::string_view::npos || pct == 0) {
@@ -87,17 +105,41 @@ std::optional<int> parse_percent_token(std::string_view text) {
   }
 }
 
-int run_download_command(const std::string& command, const ProgressFn& on_progress) {
+int run_download_command(const std::string& command, const ProgressFn& on_progress,
+                         const fs::path& partial_path, std::uint64_t expected_size) {
   FILE* pipe = ::popen(command.c_str(), "r");
   if (pipe == nullptr) {
     return 127;
   }
+
+  std::atomic<bool> done{false};
+  std::thread size_poller;
+  if (on_progress && expected_size > 0) {
+    size_poller = std::thread([&] {
+      int last_reported = -1;
+      while (!done.load(std::memory_order_acquire)) {
+        std::error_code ec;
+        const auto sz = fs::file_size(partial_path, ec);
+        if (!ec && expected_size > 0) {
+          const int pct = static_cast<int>(
+              std::min<std::uint64_t>(100, (sz * 100) / expected_size));
+          if (pct != last_reported) {
+            last_reported = pct;
+            report_progress(on_progress, pct);
+          }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+      }
+    });
+  }
+
   // curl/wget --progress-bar rewrite the same line with '\r'; flush on CR/LF/%.
   std::string acc;
   int last_reported = -1;
   int ch = 0;
   auto flush_token = [&]() {
-    if (!on_progress || acc.empty()) {
+    if (!on_progress || acc.empty() || expected_size > 0) {
+      // Prefer size-based progress when available (avoids pipe buffering stalls).
       return;
     }
     const auto pct = parse_percent_token(acc);
@@ -124,6 +166,10 @@ int run_download_command(const std::string& command, const ProgressFn& on_progre
   }
   flush_token();
   const int status = ::pclose(pipe);
+  done.store(true, std::memory_order_release);
+  if (size_poller.joinable()) {
+    size_poller.join();
+  }
   if (status == -1) {
     return 127;
   }
@@ -135,8 +181,26 @@ int run_download_command(const std::string& command, const ProgressFn& on_progre
 
 }  // namespace
 
+std::string toolpack_host_deps_error() {
+  const bool have_curl = command_exists("curl");
+  const bool have_wget = command_exists("wget");
+  if (!have_curl && !have_wget) {
+    return "hace falta curl o wget para descargar toolpacks";
+  }
+  if (!command_exists("tar")) {
+    return "hace falta tar para extraer toolpacks";
+  }
+  if (!command_exists("zstd")) {
+    return "hace falta zstd para extraer toolpacks (.tar.zst del catalogo)";
+  }
+  if (!command_exists("sha256sum")) {
+    return "hace falta sha256sum para verificar toolpacks";
+  }
+  return {};
+}
+
 std::string download_url(const std::string& url, const std::string& dest_path,
-                         ProgressFn on_progress) {
+                         ProgressFn on_progress, std::uint64_t expected_size) {
   std::error_code ec;
   fs::create_directories(fs::path(dest_path).parent_path(), ec);
   const fs::path tmp = fs::path(dest_path).string() + ".partial";
@@ -158,19 +222,31 @@ std::string download_url(const std::string& url, const std::string& dest_path,
     return {};
   }
 
+  const std::string fetch_url = encode_download_url(url);
+
   std::string cmd;
   if (command_exists("curl")) {
-    // --progress-bar emits "##### 42.5%" on stderr even when not a TTY.
-    cmd = "curl -fL --retry 3 --progress-bar -o " + shell_quote(tmp.string()) + " " +
-          shell_quote(url) + " 2>&1";
+    // Silent transfer when we poll file size; otherwise --progress-bar on stderr→stdout.
+    if (expected_size > 0) {
+      cmd = "curl -fL --retry 3 --connect-timeout 20 --retry-delay 1 -o " +
+            shell_quote(tmp.string()) + " " + shell_quote(fetch_url) + " 2>/dev/null";
+    } else {
+      cmd = "curl -fL --retry 3 --connect-timeout 20 --progress-bar -o " +
+            shell_quote(tmp.string()) + " " + shell_quote(fetch_url) + " 2>&1";
+    }
   } else if (command_exists("wget")) {
-    cmd = "wget --progress=bar:force -O " + shell_quote(tmp.string()) + " " + shell_quote(url) +
-          " 2>&1";
+    if (expected_size > 0) {
+      cmd = "wget -q -O " + shell_quote(tmp.string()) + " " + shell_quote(fetch_url) +
+            " 2>/dev/null";
+    } else {
+      cmd = "wget --progress=bar:force -O " + shell_quote(tmp.string()) + " " +
+            shell_quote(fetch_url) + " 2>&1";
+    }
   } else {
     return "hace falta curl o wget para descargar toolpacks";
   }
 
-  const int rc = run_download_command(cmd, on_progress);
+  const int rc = run_download_command(cmd, on_progress, tmp, expected_size);
   if (rc != 0 || !fs::is_regular_file(tmp, ec)) {
     fs::remove(tmp, ec);
     return "fallo la descarga (" + std::to_string(rc) + "): " + url;

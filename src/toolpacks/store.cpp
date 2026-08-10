@@ -75,8 +75,13 @@ std::optional<ToolpackMeta> load_toolpack_meta(const std::string& toolpack_json_
   }
 }
 
-std::optional<ResolvedToolpack> resolve_installed_toolpack(const std::string& id) {
-  const auto manifest = load_manifest(manifest_path());
+std::optional<ResolvedToolpack> resolve_from_store(const std::string& id,
+                                                   const std::string& store_root,
+                                                   const std::string& manifest_file) {
+  if (store_root.empty() || manifest_file.empty()) {
+    return std::nullopt;
+  }
+  const auto manifest = load_manifest(manifest_file);
   if (!manifest.has_value()) {
     return std::nullopt;
   }
@@ -85,7 +90,7 @@ std::optional<ResolvedToolpack> resolve_installed_toolpack(const std::string& id
     return std::nullopt;
   }
 
-  const fs::path root = fs::path(toolpacks_root()) / entry->path;
+  const fs::path root = fs::path(store_root) / entry->path;
   const fs::path meta_path = root / "toolpack.json";
   const auto meta = load_toolpack_meta(meta_path.string());
   if (!meta.has_value()) {
@@ -112,6 +117,14 @@ std::optional<ResolvedToolpack> resolve_installed_toolpack(const std::string& id
     }
   }
   return resolved;
+}
+
+std::optional<ResolvedToolpack> resolve_installed_toolpack(const std::string& id) {
+  // Prefer the writable user store (catalog installs), then AppImage-bundled packs.
+  if (auto user = resolve_from_store(id, toolpacks_root(), manifest_path()); user.has_value()) {
+    return user;
+  }
+  return resolve_from_store(id, bundled_toolpacks_root(), bundled_manifest_path());
 }
 
 std::optional<ResolvedToolpack> resolve_clangd_toolpack() {

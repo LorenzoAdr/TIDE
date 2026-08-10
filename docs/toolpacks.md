@@ -7,7 +7,7 @@ Language packs in F10 group the toolpacks needed per language.
 ## Resolution order
 
 1. Env override (e.g. `CLANGD_PATH`, `TUIDE_RUST_ANALYZER`, …)
-2. Active **toolpack** (`TUIDE_TOOLPACKS_ROOT` or XDG data)
+2. Active **toolpack** (user `TUIDE_TOOLPACKS_ROOT` / XDG, then `TUIDE_TOOLPACKS_BUNDLED`)
 3. Compile-time **bundled** blob (`TUIDE_BUNDLE_*`, transitional)
 4. `PATH`
 5. Missing
@@ -26,7 +26,8 @@ $XDG_CACHE_HOME/tuide/
   downloads/
   export-work/
 
-Override root: TUIDE_TOOLPACKS_ROOT
+Override root: `TUIDE_TOOLPACKS_ROOT` (writable installs).
+Bundled (AppImage) root: `TUIDE_TOOLPACKS_BUNDLED` (read-only).
 ```
 
 ## Catalog (GitHub Releases)
@@ -70,6 +71,9 @@ tuide toolpacks doctor
 ./tools/publish_toolpack_catalog.sh
 ```
 
+Host tools required for catalog installs: `curl` (or `wget`), `tar`, `zstd`, `sha256sum`.
+On Debian/Ubuntu: `sudo apt install curl tar zstd`.
+
 ## Export (AppImage)
 
 Portable export builds an **AppDir** (and optionally a Type‑2 **AppImage**), not an ELF blob.
@@ -110,7 +114,10 @@ tuide-x86_64.AppImage  (or tuide.AppDir/)
       └─ share/tuide/toolpacks/   # copied from the local store
 ```
 
-`AppRun` sets `TUIDE_TOOLPACKS_ROOT` to the embedded toolpacks tree and execs `usr/bin/tuide`.
+`AppRun` exports `TUIDE_TOOLPACKS_BUNDLED` to the embedded (read-only) toolpacks
+tree and leaves `TUIDE_TOOLPACKS_ROOT` unset so catalog installs go to the writable
+XDG path (`~/.local/share/tuide/toolpacks`). Resolution prefers the user store,
+then the bundled AppImage packs.
 
 Empty `--toolpacks` / UI export includes **all active** toolpacks in the local store.
 Use `--core-only` for a slim AppImage with **no** toolpacks (official releases).
