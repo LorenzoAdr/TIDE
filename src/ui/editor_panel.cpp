@@ -1585,6 +1585,7 @@ bool handle_problems_button_click(MainLayoutState* layout_state, FocusManagerSta
     }
   }
   layout_state->focus_sync_needed = true;
+  layout_state->panel_render_cache.mark_dirty(UiPanelId::Console);
   UI_WAKE(layout_state, "wake");
   return true;
 }
@@ -6342,9 +6343,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
 
     const bool path_indexed_cpp =
         !buffer.path.empty() && is_indexed_source_path(buffer.path);
+    // Reserve the fold gutter as soon as folding is enabled for this path, even before
+    // Tree-sitter has computed fold_regions. Waiting for regions caused a one-column jump
+    // of the line numbers shortly after opening a file.
     const bool fold_gutter_enabled =
-        vh_config.enabled && vh_config.code_folding && path_indexed_cpp &&
-        !buffer.fold_regions.empty();
+        vh_config.enabled && vh_config.code_folding && path_indexed_cpp;
     panel_state->gutter_fold_width = fold_gutter_enabled ? 1 : 0;
 
     const std::vector<int>& fold_visible_lines =
@@ -7368,8 +7371,32 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
   };
 
   if (handlers != nullptr) {
-    handlers->key_handler = dispatch_editor_keys;
-    handlers->mouse_handler = dispatch_editor_mouse;
+    const auto mark_after_editor_input = [](MainLayoutState* layout_state) {
+      if (layout_state == nullptr) {
+        return;
+      }
+      layout_state->panel_render_cache.mark_dirty(UiPanelId::EditorCenter);
+      // Performance tab samples UI metrics; keep Console Element fresh while typing.
+      if (performance_tab_active(layout_state)) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::Console);
+      }
+    };
+    handlers->key_handler = [dispatch_editor_keys, layout_state,
+                             mark_after_editor_input](Event event) {
+      const bool handled = dispatch_editor_keys(event);
+      if (handled) {
+        mark_after_editor_input(layout_state);
+      }
+      return handled;
+    };
+    handlers->mouse_handler = [dispatch_editor_mouse, layout_state,
+                               mark_after_editor_input](Event event) {
+      const bool handled = dispatch_editor_mouse(event);
+      if (handled) {
+        mark_after_editor_input(layout_state);
+      }
+      return handled;
+    };
     handlers->chrome_mouse_handler = dispatch_editor_chrome_mouse;
     handlers->modifier_handler = dispatch_editor_modifiers;
     handlers->diagnostics_received_handler =
@@ -7646,14 +7673,22 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
   return WrapFocusable(CatchEvent(panel, [dispatch_editor_keys, dispatch_editor_mouse, workspace,
                                           focus, panel_state, tab_bar_state, find_state,
                                           layout_state, symbols, panel_focus](Event event) {
+    bool handled = false;
     if (tab_bar_state->overflow_open &&
         handle_tabs_overflow_keys(workspace, focus, tab_bar_state.get(), event, panel_focus)) {
-      return true;
+      handled = true;
+    } else if (dispatch_editor_mouse(event)) {
+      handled = true;
+    } else {
+      handled = dispatch_editor_keys(event);
     }
-    if (dispatch_editor_mouse(event)) {
-      return true;
+    if (handled && layout_state != nullptr) {
+      layout_state->panel_render_cache.mark_dirty(UiPanelId::EditorCenter);
+      if (performance_tab_active(layout_state)) {
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::Console);
+      }
     }
-    return dispatch_editor_keys(event);
+    return handled;
   }));
 }
 

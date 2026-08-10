@@ -27,7 +27,9 @@ ln -sf build/compile_commands.json .
 | Script | Purpose |
 |--------|---------|
 | `tools/compile.sh` | Interactive bundle wizard (default), configure, build |
-| `tools/build-portable.sh` | Docker build with old glibc; respects `.bundle-config` |
+| `tools/build-portable.sh` | Docker build with old glibc; respects `.bundle-config` (`--slim` = no bundles) |
+| `tools/pregenerate-tree-sitter-latex.sh` | Host-side `parser.c` for bionic (glibc 2.27) portable builds |
+| `tools/build-release-appimage.sh` | Official slim AppImage (glibc 2.27) → `dist/tuide-$VERSION.AppImage` |
 | `tools/verify-glibc.sh` | Report max GLIBC/GLIBCXX symbols and `ldd` deps |
 | `tools/launch.sh` | Run `tuide` with sensible defaults and path resolution |
 
@@ -226,7 +228,8 @@ tuide/
 │   ├── symbols/            # Symbol providers
 │   ├── terminal/           # Shell PTY
 │   ├── ui/                 # FTXUI panels and modals
-│   └── util/               # Shared utilities
+│   ├── util/               # Shared utilities
+│   └── toolpacks/          # Toolpack store/resolve/CLI (clangd pilot)
 ├── tests/
 │   └── text_ops_test.cpp
 └── tools/

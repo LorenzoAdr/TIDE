@@ -69,8 +69,8 @@ mkdir -p "${TUIDE_PYTHON_TOOLS_STAGING_DIR}" "${TUIDE_PYTHON_TOOLS_PAYLOAD_DIR}"
 
 tar -xzf "${TUIDE_PYTHON_STANDALONE_TAR_PATH}" -C "${TUIDE_PYTHON_TOOLS_STAGING_DIR}"
 
-# install_only layout: python/bin/python3
-python_bin="$(find "${TUIDE_PYTHON_TOOLS_STAGING_DIR}" -type f -path '*/bin/python3' | head -n1)"
+# install_only layout: python/bin/python3 (often a symlink to python3.X)
+python_bin="$(find "${TUIDE_PYTHON_TOOLS_STAGING_DIR}" \( -type f -o -type l \) -path '*/bin/python3' | head -n1)"
 [[ -n "${python_bin}" && -x "${python_bin}" ]] || die "no se encontró bin/python3 en el standalone"
 python_root="$(dirname "$(dirname "${python_bin}")")"
 

@@ -12,3 +12,5 @@ compile_commands.json
 *.o
 *.a
 .DS_Store
+dist/
+__pycache__/

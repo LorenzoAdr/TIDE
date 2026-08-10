@@ -1,5 +1,7 @@
 #include "util/bundled_tools.hpp"
 
+#include "toolpacks/store.hpp"
+
 #include <array>
 #include <atomic>
 #include <cctype>
@@ -956,6 +958,12 @@ std::optional<ClangdLocation> resolve_clangd() {
     return ClangdLocation{*env_path, {}, ClangdLocation::Source::Env};
   }
 
+  // Toolpacks win over compile-time bundles and PATH (pilot: clangd).
+  if (const auto tp = toolpacks::resolve_clangd_toolpack(); tp.has_value()) {
+    return ClangdLocation{tp->binary_path, tp->resource_dir,
+                          ClangdLocation::Source::Toolpack};
+  }
+
 #ifdef TUIDE_HAS_BUNDLED_CLANGD
   if (const auto bundled = resolve_bundled_clangd(); bundled.has_value()) {
     return bundled;
@@ -974,6 +982,11 @@ std::optional<ClangdLocation> resolve_clangd() {
 std::optional<GdbLocation> resolve_gdb() {
   if (const auto env_path = gdb_from_env(); env_path.has_value()) {
     return GdbLocation{*env_path, GdbLocation::Source::Env};
+  }
+
+  // Toolpacks win over compile-time bundles and PATH.
+  if (const auto tp = toolpacks::resolve_installed_toolpack("gdb"); tp.has_value()) {
+    return GdbLocation{tp->binary_path, GdbLocation::Source::Toolpack};
   }
 
 #ifdef TUIDE_HAS_BUNDLED_GDB
@@ -1169,6 +1182,14 @@ std::optional<BasedpyrightLocation> resolve_basedpyright() {
     return loc;
   }
 
+  if (const auto tp = toolpacks::resolve_installed_toolpack("python-tools"); tp.has_value()) {
+    BasedpyrightLocation loc;
+    loc.binary_path = tp->binary_path;
+    loc.needs_stdio_flag = true;
+    loc.source = BasedpyrightLocation::Source::Toolpack;
+    return loc;
+  }
+
 #ifdef TUIDE_HAS_BUNDLED_PYTHON_TOOLS
   if (const auto bundled = resolve_bundled_basedpyright(); bundled.has_value()) {
     return bundled;
@@ -1228,6 +1249,13 @@ std::optional<DebugpyLocation> resolve_debugpy() {
     }
   }
 
+  if (const auto tp = toolpacks::resolve_installed_toolpack("python-tools"); tp.has_value()) {
+    const fs::path python = fs::path(tp->root_dir) / "bin" / "python3";
+    if (is_executable_file(python.string())) {
+      return DebugpyLocation{python.string(), DebugpyLocation::Source::Toolpack};
+    }
+  }
+
 #if defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && TUIDE_BUNDLED_PYTHON_TOOLS_KIND_FULL
   if (const auto bundled = resolve_bundled_debugpy(); bundled.has_value()) {
     return bundled;
@@ -1252,6 +1280,12 @@ std::optional<std::string> resolve_shellcheck() {
   if (const auto env_path = env_executable("SHELLCHECK_PATH"); env_path.has_value()) {
     return *env_path;
   }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("bash-ls"); tp.has_value()) {
+    const fs::path bundled = fs::path(tp->root_dir) / "bin" / "shellcheck";
+    if (is_executable_file(bundled.string())) {
+      return bundled.string();
+    }
+  }
 #ifdef TUIDE_HAS_BUNDLED_BASH_LS
   {
     const fs::path bundled =
@@ -1268,6 +1302,12 @@ std::optional<std::string> resolve_shellcheck() {
 std::optional<std::string> resolve_chktex() {
   if (const auto env_path = env_executable("CHKTEX_PATH"); env_path.has_value()) {
     return *env_path;
+  }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("texlab"); tp.has_value()) {
+    const fs::path bundled = fs::path(tp->root_dir) / "bin" / "chktex";
+    if (is_executable_file(bundled.string())) {
+      return bundled.string();
+    }
   }
 #ifdef TUIDE_HAS_BUNDLED_TEXLAB
   {
@@ -1300,6 +1340,9 @@ std::optional<std::string> resolve_gfortran() {
 std::optional<BashLsLocation> resolve_bash_language_server() {
   if (const auto env_path = env_executable("BASH_LANGUAGE_SERVER_PATH"); env_path.has_value()) {
     return BashLsLocation{*env_path, BashLsLocation::Source::Env};
+  }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("bash-ls"); tp.has_value()) {
+    return BashLsLocation{tp->binary_path, BashLsLocation::Source::Toolpack};
   }
 #ifdef TUIDE_HAS_BUNDLED_BASH_LS
   {
@@ -1353,6 +1396,9 @@ std::optional<BashLsLocation> resolve_bash_language_server() {
 std::optional<TexlabLocation> resolve_texlab() {
   if (const auto env_path = env_executable("TEXLAB_PATH"); env_path.has_value()) {
     return TexlabLocation{*env_path, TexlabLocation::Source::Env};
+  }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("texlab"); tp.has_value()) {
+    return TexlabLocation{tp->binary_path, TexlabLocation::Source::Toolpack};
   }
 #ifdef TUIDE_HAS_BUNDLED_TEXLAB
   {
@@ -1423,6 +1469,11 @@ std::optional<RustAnalyzerLocation> resolve_rust_analyzer() {
       return loc;
     }
   }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("rust-analyzer"); tp.has_value()) {
+    if (auto loc = accept(tp->binary_path, RustAnalyzerLocation::Source::Toolpack)) {
+      return loc;
+    }
+  }
 #ifdef TUIDE_HAS_BUNDLED_RUST_ANALYZER
   {
     const fs::path install_root = fs::path(bundled_cache_root()) /
@@ -1454,6 +1505,9 @@ std::optional<GoplsLocation> resolve_gopls() {
   if (const auto env_path = env_executable("TUIDE_GOPLS"); env_path.has_value()) {
     return GoplsLocation{*env_path, GoplsLocation::Source::Env};
   }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("gopls"); tp.has_value()) {
+    return GoplsLocation{tp->binary_path, GoplsLocation::Source::Toolpack};
+  }
 #ifdef TUIDE_HAS_BUNDLED_GOPLS
   {
     const fs::path install_root =
@@ -1480,6 +1534,9 @@ std::optional<GoplsLocation> resolve_gopls() {
 std::optional<ZlsLocation> resolve_zls() {
   if (const auto env_path = env_executable("TUIDE_ZLS"); env_path.has_value()) {
     return ZlsLocation{*env_path, ZlsLocation::Source::Env};
+  }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("zls"); tp.has_value()) {
+    return ZlsLocation{tp->binary_path, ZlsLocation::Source::Toolpack};
   }
 #ifdef TUIDE_HAS_BUNDLED_ZLS
   {
@@ -1509,6 +1566,9 @@ std::optional<FortlsLocation> resolve_fortls() {
     loc.binary_path = *env_path;
     loc.source = FortlsLocation::Source::Env;
     return loc;
+  }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("fortls"); tp.has_value()) {
+    return FortlsLocation{tp->binary_path, false, {}, FortlsLocation::Source::Toolpack};
   }
 #ifdef TUIDE_HAS_BUNDLED_FORTLS
   {
@@ -1550,6 +1610,9 @@ std::optional<LuaLsLocation> resolve_lua_language_server() {
   if (const auto env_path = env_executable("TUIDE_LUA_LS"); env_path.has_value()) {
     return LuaLsLocation{*env_path, LuaLsLocation::Source::Env};
   }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("lua-ls"); tp.has_value()) {
+    return LuaLsLocation{tp->binary_path, LuaLsLocation::Source::Toolpack};
+  }
 #ifdef TUIDE_HAS_BUNDLED_LUA_LS
   {
     const fs::path install_root =
@@ -1582,6 +1645,13 @@ std::optional<TypescriptLsLocation> resolve_typescript_language_server() {
     loc.binary_path = *env_path;
     loc.needs_stdio_flag = true;
     loc.source = TypescriptLsLocation::Source::Env;
+    return loc;
+  }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("typescript-ls"); tp.has_value()) {
+    TypescriptLsLocation loc;
+    loc.binary_path = tp->binary_path;
+    loc.needs_stdio_flag = true;
+    loc.source = TypescriptLsLocation::Source::Toolpack;
     return loc;
   }
 #ifdef TUIDE_HAS_BUNDLED_TSSERVER
@@ -1646,6 +1716,9 @@ std::optional<NeocmakelspLocation> resolve_neocmakelsp() {
   if (const auto env_path = env_executable("TUIDE_NEOCMAKELSP"); env_path.has_value()) {
     return NeocmakelspLocation{*env_path, NeocmakelspLocation::Source::Env};
   }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("neocmakelsp"); tp.has_value()) {
+    return NeocmakelspLocation{tp->binary_path, NeocmakelspLocation::Source::Toolpack};
+  }
 #ifdef TUIDE_HAS_BUNDLED_NEOCMAKELSP
   {
     const fs::path install_root =
@@ -1672,6 +1745,9 @@ std::optional<NeocmakelspLocation> resolve_neocmakelsp() {
 std::optional<MakeLsLocation> resolve_make_ls() {
   if (const auto env_path = env_executable("TUIDE_MAKE_LS"); env_path.has_value()) {
     return MakeLsLocation{*env_path, MakeLsLocation::Source::Env};
+  }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("make-ls"); tp.has_value()) {
+    return MakeLsLocation{tp->binary_path, MakeLsLocation::Source::Toolpack};
   }
 #ifdef TUIDE_HAS_BUNDLED_MAKE_LS
   {
@@ -1702,6 +1778,13 @@ std::optional<YamlLsLocation> resolve_yaml_language_server() {
     loc.binary_path = *env_path;
     loc.needs_stdio_flag = true;
     loc.source = YamlLsLocation::Source::Env;
+    return loc;
+  }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("yaml-ls"); tp.has_value()) {
+    YamlLsLocation loc;
+    loc.binary_path = tp->binary_path;
+    loc.needs_stdio_flag = true;
+    loc.source = YamlLsLocation::Source::Toolpack;
     return loc;
   }
 #ifdef TUIDE_HAS_BUNDLED_YAML_LS
@@ -1764,6 +1847,68 @@ std::optional<YamlLsLocation> resolve_yaml_language_server() {
 }
 
 std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
+  const auto try_bash_dap_from_root =
+      [](const fs::path& install_root,
+         BashDebugAdapterLocation::Source source) -> std::optional<BashDebugAdapterLocation> {
+    const fs::path adapter_js = install_root / "adapter" / "bashDebug.js";
+    const fs::path bashdb = install_root / "bashdb" / "bashdb";
+    if (!(readable_file(adapter_js.string()) && is_executable_file(bashdb.string()))) {
+      return std::nullopt;
+    }
+    const fs::path node_modules_marker =
+        install_root / "adapter" / "node_modules" / "vscode-debugadapter";
+    if (!fs::exists(node_modules_marker)) {
+      return std::nullopt;
+    }
+    std::string node;
+    const fs::path nested_node = install_root / "node" / "bin" / "node";
+    if (is_executable_file(nested_node.string())) {
+      node = nested_node.string();
+    }
+    if (node.empty()) {
+      if (const auto ls = toolpacks::resolve_installed_toolpack("bash-ls"); ls.has_value()) {
+        const fs::path n = fs::path(ls->root_dir) / "bin" / "node";
+        if (is_executable_file(n.string())) {
+          node = n.string();
+        }
+      }
+    }
+    if (node.empty()) {
+      if (const auto ls = resolve_bash_language_server(); ls.has_value()) {
+        const fs::path n = fs::path(ls->binary_path).parent_path() / "node";
+        if (is_executable_file(n.string())) {
+          node = n.string();
+        }
+      }
+    }
+    if (node.empty()) {
+      if (const auto env = env_executable("TUIDE_NODE_BIN"); env.has_value()) {
+        node = *env;
+      } else if (const auto path_bin = find_named_binary_on_path("node"); path_bin.has_value()) {
+        node = *path_bin;
+      }
+    }
+    const auto bash = find_named_binary_on_path("bash");
+    if (node.empty() || !bash.has_value()) {
+      return std::nullopt;
+    }
+    BashDebugAdapterLocation loc;
+    loc.node_path = node;
+    loc.adapter_js_path = adapter_js.string();
+    loc.bash_path = *bash;
+    loc.bashdb_path = bashdb.string();
+    loc.bashdb_lib_path = (install_root / "bashdb").string();
+    loc.source = source;
+    return loc;
+  };
+
+  if (const auto tp = toolpacks::resolve_installed_toolpack("bash-dap"); tp.has_value()) {
+    if (auto loc = try_bash_dap_from_root(tp->root_dir, BashDebugAdapterLocation::Source::Toolpack);
+        loc.has_value()) {
+      return loc;
+    }
+  }
+
 #ifdef TUIDE_HAS_BUNDLED_BASH_DAP
   {
     const fs::path install_root =
@@ -1773,57 +1918,10 @@ std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter() {
     const fs::path marker = install_root / ".installed";
     const std::string expected = std::string(TUIDE_BUNDLED_BASH_DAP_BLOB_SHA256) + "\n";
     const auto try_build_location = [&]() -> std::optional<BashDebugAdapterLocation> {
-      if (!(readable_file(adapter_js.string()) && is_executable_file(bashdb.string()))) {
+      if (fs::exists(marker) && read_text_file(marker) != expected) {
         return std::nullopt;
       }
-      // Reject stale extracts that predate node_modules packaging (initialize hang).
-      const fs::path node_modules_marker =
-          install_root / "adapter" / "node_modules" / "vscode-debugadapter";
-      if (!fs::exists(node_modules_marker)) {
-        return std::nullopt;
-      }
-      if (fs::exists(marker)) {
-        if (read_text_file(marker) != expected) {
-          return std::nullopt;
-        }
-      }
-      std::string node;
-#if TUIDE_BUNDLED_BASH_DAP_HAS_NODE
-      const fs::path node_path = install_root / "node" / "bin" / "node";
-      if (is_executable_file(node_path.string())) {
-        node = node_path.string();
-      }
-#endif
-      if (node.empty()) {
-#ifdef TUIDE_HAS_BUNDLED_BASH_LS
-        if (const auto ls = resolve_bash_language_server();
-            ls.has_value() && ls->source == BashLsLocation::Source::Bundled) {
-          const fs::path n = fs::path(ls->binary_path).parent_path() / "node";
-          if (is_executable_file(n.string())) {
-            node = n.string();
-          }
-        }
-#endif
-      }
-      if (node.empty()) {
-        if (const auto env = env_executable("TUIDE_NODE_BIN"); env.has_value()) {
-          node = *env;
-        } else if (const auto path_bin = find_named_binary_on_path("node"); path_bin.has_value()) {
-          node = *path_bin;
-        }
-      }
-      const auto bash = find_named_binary_on_path("bash");
-      if (node.empty() || !bash.has_value()) {
-        return std::nullopt;
-      }
-      BashDebugAdapterLocation loc;
-      loc.node_path = node;
-      loc.adapter_js_path = adapter_js.string();
-      loc.bash_path = *bash;
-      loc.bashdb_path = bashdb.string();
-      loc.bashdb_lib_path = (install_root / "bashdb").string();
-      loc.source = BashDebugAdapterLocation::Source::Bundled;
-      return loc;
+      return try_bash_dap_from_root(install_root, BashDebugAdapterLocation::Source::Bundled);
     };
 
     // Prefer an existing install immediately (Status UI resolves this every refresh).

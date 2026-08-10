@@ -13,12 +13,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # GCC 8 for std::filesystem and full C++17 support.
+# build-essential later pulls g++-7; keep gcc-8/g++-8 as the defaults and set CC/CXX.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-8 \
     g++-8 \
+    libstdc++-8-dev \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 80 \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-8 80 \
+    && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-8 80 \
     && rm -rf /var/lib/apt/lists/*
+
+ENV CC=gcc-8
+ENV CXX=g++-8
 
 # CMake 3.20+ via Kitware APT.
 RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc \
@@ -35,11 +41,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     xz-utils \
     zstd \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 80 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-8 80 \
+    && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-8 80 \
     && rm -rf /var/lib/apt/lists/*
 
-# Node.js + npx (tree-sitter-latex genera parser.c en configure).
-# Los binarios oficiales de Node ≥18 exigen GLIBC 2.28; Bionic solo tiene 2.27,
-# así que usamos el build unofficial enlazado a glibc 2.17.
+# Node.js + npx: tree-sitter-latex needs parser.c at configure time.
+# Official tree-sitter-cli / GitHub binaries need GLIBC ≥ 2.28, so on Bionic
+# (2.27) generation must happen on the host via tools/pregenerate-tree-sitter-latex.sh
+# (TUIDE_TREE_SITTER_LATEX_GENERATED). Node here is only for tooling that can run
+# with the unofficial glibc-2.17 build when needed.
 ARG NODE_VERSION=22.16.0
 RUN curl -fsSL "https://unofficial-builds.nodejs.org/download/release/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64-glibc-217.tar.xz" \
     | tar -xJ -C /usr/local --strip-components=1 \

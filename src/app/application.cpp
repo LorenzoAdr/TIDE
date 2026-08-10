@@ -35,6 +35,7 @@
 #include "packet_monitor/pkt_monitor_service.hpp"
 #include "parser/tree_sitter_service.hpp"
 #include "ui/binary_symbols_panel.hpp"
+#include "ui/busy_strip.hpp"
 #include "ui/connection_wizard.hpp"
 #include "ui/console_panel.hpp"
 #include "ui/context_menu.hpp"
@@ -67,6 +68,7 @@
 #include "ui/terminal_ui_channel.hpp"
 #include "ui/debug_ui_channel.hpp"
 #include "ui/ui_event_dispatcher.hpp"
+#include "ui/ui_invalidation_policy.hpp"
 #include "ui/ui_wake.hpp"
 #include "ui/ui_wake_policy.hpp"
 #include "ui/theme.hpp"
@@ -762,10 +764,12 @@ void Application::reindex_project() {
 	}
 	if (reindex_in_progress_.exchange(true)) {
 		set_workspace_status(i18n::tr("status.index_started"));
+		set_busy_spinner(&layout_state_, BusyActivity::Indexing);
 		UI_WAKE(&layout_state_, "app");
 		return;
 	}
 	set_workspace_status(i18n::tr("status.index_started"));
+	set_busy_spinner(&layout_state_, BusyActivity::Indexing);
 	UI_WAKE(&layout_state_, "app");
 	enqueue_ui_task([this]() {
 		workspace_.flush_active_tab();
@@ -778,6 +782,7 @@ void Application::reindex_project() {
 				reopen_workspace_documents(&workspace_, symbol_provider_);
 				workspace_.buffer.view_token++;
 				reindex_in_progress_.store(false);
+				clear_busy(&layout_state_);
 				set_workspace_status(i18n::tr("status.index_started"));
 				UI_WAKE(&layout_state_, "app");
 			});
@@ -2453,6 +2458,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		focus_state_.region = FocusRegion::Terminal;
 		layout_state_.right_sidebar.pending_focus_search = true;
 		layout_state_.text_input_focus = TextInputFocus::SearchQuery;
+		layout_state_.panel_render_cache.mark_dirty(UiPanelId::Console);
 		mark_focus_sync();
 		return true;
 	}
@@ -2814,6 +2820,7 @@ int Application::run() {
 	auto with_settings =
 	    MakeSettingsModalOverlay(with_shortcuts, &settings_modal_state_, &app_settings_,
 	                             on_settings_apply, on_workspace_apply, on_clang_format_apply);
+	settings_modal_state_.layout_state = &layout_state_;
 	settings_modal_state_.tools_status_provider = [this]() {
 		LspRuntimeFlags flags;
 		flags.lsp_enabled = app_settings_.lsp_enabled;
@@ -3641,7 +3648,11 @@ auto root = MakeShutdownOverlay(inner_root, &shutdown_state_, &shutdown_overlay_
 			}
 		});
 		if (!typing_burst) {
-			UI_WAKE_REASON(&layout_state_, UiWakeReason::TreeSitterReady);
+			const bool active =
+			    path == workspace_.buffer.path || path == workspace_.active_file;
+			if (active) {
+				invalidate(&layout_state_, UiInvalidation::TreeSitterActiveFile);
+			}
 		}
 	});
 	visual_highlight_service().set_debounce_wake_callback([this]() {

@@ -5,6 +5,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# GCC 8 (Ubuntu 18.04 portable) keeps std::filesystem in libstdc++fs.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+  link_libraries(stdc++fs)
+endif()
+
 find_package(Threads REQUIRED)
 
 function(tuide_link_pthread target)
@@ -165,6 +170,8 @@ add_executable(tuide
   src/ui/clickable_interaction.cpp
   src/ui/ui_event_dispatcher.cpp
   src/ui/ui_event_trace.cpp
+  src/ui/ui_invalidation_policy.cpp
+  src/ui/busy_strip.cpp
   src/ui/mouse_velocity_tracker.cpp
   src/ui/cursor_blink.cpp
   src/ui/spinner.cpp
@@ -268,6 +275,16 @@ add_executable(tuide
   src/util/core_analyzer_support.cpp
   src/util/process_list.cpp
   src/util/system_stats.cpp
+  src/toolpacks/paths.cpp
+  src/toolpacks/manifest.cpp
+  src/toolpacks/store.cpp
+  src/toolpacks/catalog.cpp
+  src/toolpacks/download.cpp
+  src/toolpacks/install.cpp
+  src/toolpacks/language_packs.cpp
+  src/toolpacks/packaged.cpp
+  src/toolpacks/export_portable.cpp
+  src/toolpacks/cli.cpp
   src/packet_monitor/pkt_ring.cpp
   src/packet_monitor/pkt_protocol.cpp
   src/packet_monitor/pkt_connections.cpp
@@ -585,6 +602,11 @@ add_executable(workspace_indexer_test
   src/util/fuzzy_match.cpp
   src/util/monitor_log.cpp
   src/util/bundled_tools.cpp
+  src/toolpacks/paths.cpp
+  src/toolpacks/manifest.cpp
+  src/toolpacks/store.cpp
+  src/toolpacks/packaged.cpp
+  src/toolpacks/download.cpp
   src/util/child_process_guard.cpp
 )
 target_include_directories(workspace_indexer_test PRIVATE
@@ -646,6 +668,12 @@ add_executable(glyphs_test
   src/ui/glyphs.cpp
 )
 target_include_directories(glyphs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(ui_invalidation_policy_test
+  tests/ui_invalidation_policy_test.cpp
+)
+target_include_directories(ui_invalidation_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(ui_invalidation_policy_test PRIVATE ftxui::dom)
 
 add_executable(compiler_location_test
   tests/compiler_location_test.cpp
@@ -715,6 +743,11 @@ add_executable(lsp_completion_probe
   src/lsp/lsp_text_edits.cpp
   src/indexer/index_rules.cpp
   src/util/bundled_tools.cpp
+  src/toolpacks/paths.cpp
+  src/toolpacks/manifest.cpp
+  src/toolpacks/store.cpp
+  src/toolpacks/packaged.cpp
+  src/toolpacks/download.cpp
   src/util/child_process_guard.cpp
   src/util/monitor_log.cpp
   src/util/path_normalize.cpp
@@ -728,6 +761,26 @@ target_compile_definitions(lsp_completion_probe PRIVATE
   TUIDE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 target_link_libraries(lsp_completion_probe PRIVATE ftxui::dom)
+
+add_executable(toolpacks_test
+  tests/toolpacks_test.cpp
+  src/toolpacks/paths.cpp
+  src/toolpacks/manifest.cpp
+  src/toolpacks/store.cpp
+  src/toolpacks/catalog.cpp
+  src/toolpacks/download.cpp
+  src/toolpacks/install.cpp
+  src/toolpacks/language_packs.cpp
+  src/toolpacks/packaged.cpp
+  src/toolpacks/export_portable.cpp
+  src/util/bundled_tools.cpp
+  src/util/child_process_guard.cpp
+  src/util/monitor_log.cpp
+)
+target_include_directories(toolpacks_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
 
 set(TUIDE_TEST_TARGETS
   i18n_test
@@ -747,6 +800,7 @@ set(TUIDE_TEST_TARGETS
   external_viewer_test
   tabular_file_test
   glyphs_test
+  ui_invalidation_policy_test
   compiler_location_test
   raw_pty_screen_test
   gfortran_diagnostics_test
@@ -755,6 +809,7 @@ set(TUIDE_TEST_TARGETS
   git_diff_test
   pkt_protocol_test
   lsp_completion_probe
+  toolpacks_test
 )
 foreach(_tuide_test_target IN LISTS TUIDE_TEST_TARGETS)
   tuide_link_pthread(${_tuide_test_target})

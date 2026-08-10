@@ -1,0 +1,75 @@
+name: Release AppImage (core)
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    name: Build slim core AppImage (glibc 2.27)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install packaging deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            curl ca-certificates file squashfs-tools
+
+      - name: Setup Node (pregenerate tree-sitter-latex for bionic)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build and package AppImage
+        env:
+          VERSION: ${{ github.ref_name }}
+          TUIDE_DOCKER_SUDO: "2"
+        run: |
+          chmod +x tools/build-portable.sh tools/build-release-appimage.sh \
+            tools/verify-glibc.sh tools/pregenerate-tree-sitter-latex.sh
+          ./tools/build-release-appimage.sh --version "${VERSION}"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${VERSION#v}"
+          TAG="v${VERSION}"
+          APPIMAGE="dist/tuide-${VERSION}.AppImage"
+          SUMS="dist/SHA256SUMS"
+          test -f "${APPIMAGE}"
+          test -f "${SUMS}"
+          NOTES_FILE="$(mktemp)"
+          cat >"${NOTES_FILE}" <<EOF
+          ## tuide ${VERSION}
+
+          AppImage oficial del **núcleo** (sin LSP/DAP embebidos ni toolpacks).
+
+          - Baseline: glibc ≥ **2.27** (Ubuntu 18.04+), x86_64
+          - Asset: \`tuide-${VERSION}.AppImage\`
+
+          Tras instalar, añade lenguajes desde F10 → Toolpacks (catálogo GitHub).
+
+          \`\`\`bash
+          chmod +x tuide-${VERSION}.AppImage
+          ./tuide-${VERSION}.AppImage
+          \`\`\`
+          EOF
+          # Drop the accidental common indent from the YAML block.
+          sed -i 's/^          //' "${NOTES_FILE}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${APPIMAGE}" "${SUMS}" --clobber
+          else
+            gh release create "${TAG}" "${APPIMAGE}" "${SUMS}" \
+              --title "tuide ${VERSION}" \
+              --notes-file "${NOTES_FILE}"
+          fi

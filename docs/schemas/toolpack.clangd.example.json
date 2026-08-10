@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "clangd",
+  "version": "19.1.2",
+  "arch": "x86_64",
+  "os": "linux",
+  "license": "Apache-2.0",
+  "entry": {
+    "type": "executable",
+    "path": "bin/clangd",
+    "args": []
+  },
+  "resource_dir": "",
+  "env": {}
+}

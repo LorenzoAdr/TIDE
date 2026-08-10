@@ -227,7 +227,17 @@ Fetched via CMake `FetchContent` (see `cmake/Dependencies.cmake`):
 
 Runtime: optional language servers (LSP) and debug adapters (GDB / debugpy / bash-debug).
 
+## Planned: panel dirty cache + ANSI busy strip
+
+Two separate systems (see [plan](plans/panel-invalidation-wake-system.md)):
+
+1. **Declarative panel dirty + Element cache** (FileTree / Editor / Sidebar / Console) — fewer rebuilds on legitimate FTXUI wakes (e.g. editor scroll).
+2. **Busy strip** (Braille or `%` + label) **outside** that dirty path — ANSI only, no status wake/2 Hz.
+
+Status chrome keeps focus + toolbar buttons and drops the app name.
+
 ## See also
 
 - [Development guide](development.md)
 - [User guide](user-guide.md)
+- [Panel invalidation plan](plans/panel-invalidation-wake-system.md)

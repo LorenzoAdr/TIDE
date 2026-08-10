@@ -5,6 +5,7 @@
 
 #include "ui/main_layout.hpp"
 #include "ui/ui_event_dispatcher.hpp"
+#include "util/ui_panel_render_cache.hpp"
 
 namespace tuide {
 
@@ -25,6 +26,7 @@ inline void TerminalUiChannel::on_pty_output(std::function<void()> pre_paint) {
     }
     return;
   }
+  layout_->panel_render_cache.mark_dirty(UiPanelId::Console);
   layout_->ui_events->emit_terminal("terminal.pty_output", std::move(pre_paint), __FILE__,
                                     __LINE__);
 }

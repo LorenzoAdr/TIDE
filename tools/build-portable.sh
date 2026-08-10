@@ -9,6 +9,7 @@ USE_BIONIC=0
 STATIC_LIBSTDCXX=0
 SKIP_VERIFY=0
 SKIP_BUILD_IMAGE=0
+SLIM=0
 MAX_GLIBC="2.31"
 # 0=auto, 1=forzar sudo docker, 2=nunca sudo
 DOCKER_SUDO="${TUIDE_DOCKER_SUDO:-0}"
@@ -33,6 +34,7 @@ maximizar compatibilidad en runtime. Respeta la selección de .bundle-config
 Opciones:
   --bionic              Usar Ubuntu 18.04 (glibc ~2.27) en lugar de 20.04 (~2.31)
   --static-libstdc++    Pasar --static-libstdc++ a compile.sh
+  --slim                Nucleo sin bundles (ignora .bundle-config; release AppImage)
   --jobs N              Hilos de compilación (default: nproc)
   --output DIR          Directorio de salida (default: dist/)
   --max-glibc VERSION   Umbral para verify-glibc.sh (default: 2.31, bionic: 2.27)
@@ -149,6 +151,10 @@ while [[ $# -gt 0 ]]; do
       STATIC_LIBSTDCXX=1
       shift
       ;;
+    --slim)
+      SLIM=1
+      shift
+      ;;
     --jobs)
       [[ $# -ge 2 ]] || die "--jobs requiere un número"
       JOBS="$2"
@@ -209,20 +215,47 @@ else
   log "reusando imagen ${IMAGE_TAG}"
 fi
 
+# Bionic (glibc 2.27): tree-sitter-cli no corre dentro del contenedor.
+# Pregenerar parser.c en el host (glibc moderna) y pasarlo al configure.
+DOCKER_ENV_ARGS=()
+if [[ "${USE_BIONIC}" == "1" ]]; then
+  log "pregenerando tree-sitter-latex en el host (requerido en glibc 2.27)..."
+  LATEX_GEN="$("${ROOT}/tools/pregenerate-tree-sitter-latex.sh" | tail -n1)"
+  [[ -f "${LATEX_GEN}/parser.c" && -f "${LATEX_GEN}/tree_sitter/parser.h" ]] || \
+    die "falló pregenerate-tree-sitter-latex.sh (parser.c + tree_sitter/parser.h)"
+  if [[ "${LATEX_GEN}" == "${ROOT}/"* ]]; then
+    rel="${LATEX_GEN#"${ROOT}/"}"
+    DOCKER_ENV_ARGS+=(-e "TUIDE_TREE_SITTER_LATEX_GENERATED=/src/${rel}")
+  else
+    die "TUIDE_TREE_SITTER_LATEX_GENERATED debe estar bajo ${ROOT} (montado en /src): ${LATEX_GEN}"
+  fi
+fi
+
 # -y reutiliza .bundle-config (selección del wizard). No forzar packs.
+# --slim: un --no-bundle-* activa CLI_OVERRIDES_BUNDLE y deja todos los bundles en 0.
 # TUIDE_IN_PORTABLE_CONTAINER evita que compile.sh vuelva a lanzar Docker.
 COMPILE_ARGS=(-y --build-backend=host)
 if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
   COMPILE_ARGS+=(--static-libstdc++)
 fi
+if [[ "${SLIM}" == "1" ]]; then
+  COMPILE_ARGS+=(--no-bundle-clangd --target tuide)
+  log "modo slim: sin componentes embebidos; solo target tuide"
+fi
 
-log "compilando en contenedor (${JOBS} hilos) con .bundle-config..."
+log "compilando en contenedor (${JOBS} hilos)..."
+DOCKER_COMPILER_ENV=()
+if [[ "${USE_BIONIC}" == "1" ]]; then
+  DOCKER_COMPILER_ENV+=(-e CC=gcc-8 -e CXX=g++-8)
+fi
 docker_cmd run --rm \
   -u "$(id -u):$(id -g)" \
   -e HOME=/tmp \
   -e JOBS="${JOBS}" \
   -e CMAKE_BUILD_TYPE=Release \
   -e TUIDE_IN_PORTABLE_CONTAINER=1 \
+  "${DOCKER_COMPILER_ENV[@]}" \
+  "${DOCKER_ENV_ARGS[@]}" \
   -v "${ROOT}:/src" \
   -w /src \
   "${IMAGE_TAG}" \

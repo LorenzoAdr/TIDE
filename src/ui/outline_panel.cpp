@@ -1,4 +1,6 @@
 #include "ui/outline_panel.hpp"
+#include "ui/busy_strip.hpp"
+#include "ui/ui_invalidation_policy.hpp"
 #include "ui/ui_wake.hpp"
 
 #include "editor/editor_buffer_source.hpp"
@@ -243,11 +245,16 @@ void refresh_outline_symbols(OutlinePanelState* state, WorkspaceModel* workspace
                           state->loaded_symbols_revision == ts_rev;
   if (up_to_date) {
     state->symbols_loading = false;
+    if (layout_state != nullptr && layout_state->busy_strip != nullptr &&
+        layout_state->busy_strip->activity == BusyActivity::OutlinePending) {
+      clear_busy(layout_state);
+    }
     return;
   }
 
   if (!tree_sitter_service().document_symbols_ready(path, source)) {
     state->symbols_loading = true;
+    set_busy_spinner(layout_state, BusyActivity::OutlinePending);
     return;
   }
 
@@ -255,6 +262,7 @@ void refresh_outline_symbols(OutlinePanelState* state, WorkspaceModel* workspace
   state->loaded_symbols_revision = ts_rev;
   state->symbols_loading = false;
   state->rebuild_display_rows();
+  clear_busy(layout_state);
   if (layout_state != nullptr) {
     layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
     UI_WAKE(layout_state, "outline.symbols");

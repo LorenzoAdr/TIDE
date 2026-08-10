@@ -1,4 +1,5 @@
 #include "ui/git_panel.hpp"
+#include "ui/busy_strip.hpp"
 #include "ui/ui_wake.hpp"
 
 #include <algorithm>
@@ -1327,8 +1328,10 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
     }
     if (event == Event::Character('p')) {
       state->operation_pending = true;
+      set_busy_spinner(layout_state, BusyActivity::GitPush);
       git->push([state, layout_state](bool ok, const std::string& msg) {
         state->operation_pending = false;
+        clear_busy(layout_state);
         set_status(state, ok ? i18n::tr("git.status.push_ok") : msg);
         if (layout_state != nullptr) {
           UI_WAKE(layout_state, "wake");
@@ -1338,8 +1341,10 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
     }
     if (event == Event::Character('P')) {
       state->operation_pending = true;
+      set_busy_spinner(layout_state, BusyActivity::GitPull);
       git->pull([state, layout_state](bool ok, const std::string& msg) {
         state->operation_pending = false;
+        clear_busy(layout_state);
         set_status(state, ok ? i18n::tr("git.status.pull_ok") : msg);
         if (layout_state != nullptr) {
           UI_WAKE(layout_state, "wake");
@@ -1923,8 +1928,10 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     if (state->push_box.Contain(m.x, m.y)) {
       trigger_press(layout_state, std::string_view(kGitPush));
       state->operation_pending = true;
+      set_busy_spinner(layout_state, BusyActivity::GitPush);
       git->push([state, layout_state](bool ok, const std::string& msg) {
         state->operation_pending = false;
+        clear_busy(layout_state);
         set_status(state, ok ? i18n::tr("git.status.push_ok") : msg);
         if (layout_state != nullptr) {
           UI_WAKE(layout_state, "wake");
@@ -1935,8 +1942,10 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     if (state->pull_box.Contain(m.x, m.y)) {
       trigger_press(layout_state, std::string_view(kGitPull));
       state->operation_pending = true;
+      set_busy_spinner(layout_state, BusyActivity::GitPull);
       git->pull([state, layout_state](bool ok, const std::string& msg) {
         state->operation_pending = false;
+        clear_busy(layout_state);
         set_status(state, ok ? i18n::tr("git.status.pull_ok") : msg);
         if (layout_state != nullptr) {
           UI_WAKE(layout_state, "wake");
