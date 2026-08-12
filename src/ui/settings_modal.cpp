@@ -3175,7 +3175,18 @@ bool workspace_config_eq(const WorkspaceConfig& a, const WorkspaceConfig& b) {
          a.clangd_use_gcc_query_driver == b.clangd_use_gcc_query_driver &&
          a.clangd_background_index == b.clangd_background_index && a.theme == b.theme &&
          a.ui_colors_preset == b.ui_colors_preset && ui_colors_eq(a.ui_colors, b.ui_colors) &&
-         compile_commands_eq(a.compile_commands, b.compile_commands);
+         compile_commands_eq(a.compile_commands, b.compile_commands) &&
+         a.ai.enabled == b.ai.enabled && a.ai.command_whitelist == b.ai.command_whitelist &&
+         a.ai.tasks == b.ai.tasks && a.ai.level2_mode == b.ai.level2_mode &&
+         a.ai.models_cache_dir == b.ai.models_cache_dir &&
+         a.ai.level1.model_id == b.ai.level1.model_id &&
+         a.ai.level1.model_path == b.ai.level1.model_path &&
+         a.ai.level1.cli_path == b.ai.level1.cli_path &&
+         a.ai.level1.max_steps == b.ai.level1.max_steps &&
+         a.ai.level1.max_tokens == b.ai.level1.max_tokens &&
+         a.ai.level1.n_ctx == b.ai.level1.n_ctx &&
+         a.ai.level1.temperature == b.ai.level1.temperature &&
+         a.ai.level1.auto_download == b.ai.level1.auto_download;
 }
 
 bool clang_format_eq(const ClangFormatConfig& a, const ClangFormatConfig& b) {
@@ -3198,6 +3209,7 @@ WorkspaceConfig workspace_config_from_draft(const SettingsModalState& state) {
   workspace.ui_colors_preset = state.draft_ui_colors_preset;
   workspace.ui_colors = state.draft_ui_colors;
   workspace.build_environments = state.workspace_baseline.build_environments;
+  workspace.ai = state.workspace_baseline.ai;
   return workspace;
 }
 

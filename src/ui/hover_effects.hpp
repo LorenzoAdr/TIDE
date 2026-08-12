@@ -38,7 +38,7 @@ inline void invalidate_cached_panel_chrome(MainLayoutState* layout, std::string_
     layout->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
   }
   if (press_id::is_console_header_hover(id) || id == press_id::kTerminalScrollbar ||
-      id == press_id::kTerminalLink) {
+      id == press_id::kTerminalLink || id == press_id::kAiResultLink) {
     layout->panel_render_cache.mark_dirty(UiPanelId::Console);
   }
 }

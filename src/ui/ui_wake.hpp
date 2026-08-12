@@ -51,6 +51,20 @@ inline void wake_console_panel(MainLayoutState* layout, std::string_view tag = "
   ui_wake(layout, tag);
 }
 
+// Streaming console output (AI transcript, compile logs): refresh the console
+// without InputCorrelated's full background plan (index/git/editor ticks).
+// Using TerminalOutput + animation frame matches PTY streaming behaviour.
+inline void wake_console_panel_stream(MainLayoutState* layout, std::string_view tag = "wake") {
+  if (layout != nullptr) {
+    layout->panel_render_cache.mark_dirty(UiPanelId::Console);
+  }
+  UiEventDispatcher* dispatcher = ui_event_dispatcher(layout);
+  if (dispatcher == nullptr) {
+    return;
+  }
+  dispatcher->emit_terminal(std::string(tag), {}, __FILE__, __LINE__);
+}
+
 inline void ui_wake_correlated(MainLayoutState* layout, uint64_t correlation_id,
                                std::string_view tag, std::function<void()> pre_paint = {}) {
   UiEventDispatcher* dispatcher = ui_event_dispatcher(layout);

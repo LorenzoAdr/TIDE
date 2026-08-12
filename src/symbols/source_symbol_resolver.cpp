@@ -85,7 +85,7 @@ std::optional<SourceLocation> lookup_in_symbol_index(const NmSymbol& symbol,
 
   std::vector<const IndexedSymbol*> matches;
   for (const auto& indexed : snapshot->symbols) {
-    if (names_match(indexed.display_name, symbol.name)) {
+    if (names_match(indexed.display_name, symbol.name) || names_match(indexed.name, symbol.name)) {
       matches.push_back(&indexed);
     }
   }

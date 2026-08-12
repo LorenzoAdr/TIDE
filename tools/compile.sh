@@ -1042,6 +1042,13 @@ log "comprobando dependencias..."
 check_command cmake
 check_command g++
 
+if [[ "${SKIP_WIZARD}" == "0" ]] && { [[ ! -t 0 ]] || [[ ! -t 1 ]]; }; then
+  # Sin TTY (p. ej. task AI con stdout pipeado): el wizard FTXUI se quedaría colgado.
+  log "sin TTY: omitiendo asistente interactivo (usa .bundle-config / defaults; pasa -y explícito)"
+  SKIP_WIZARD=1
+  INTERACTIVE=0
+fi
+
 if [[ "${SKIP_WIZARD}" == "0" ]]; then
   # TUI primero (reutiliza wizard existente o lo compila en build-wizard/).
   # Así build/ solo se configura una vez, con la selección final: sin

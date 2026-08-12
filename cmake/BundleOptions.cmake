@@ -13,6 +13,11 @@ option(TUIDE_BUNDLE_RG "Embed official ripgrep Linux x86_64 release" ON)
 option(TUIDE_FORCE_BUNDLED_RG
        "At runtime, never fall back to rg on PATH (requires TUIDE_BUNDLE_RG)" OFF)
 
+# L1 uses llama-cli at runtime (PATH / auto-download to $XDG_CACHE_HOME/tuide/models).
+# Linking llama.cpp into the binary stays optional for a future bundle step (D8).
+option(TUIDE_BUNDLE_LLAMA
+       "Reserve CMake hook for embedding llama.cpp (OFF: runtime llama-cli)" OFF)
+
 # Python tooling: A = basedpyright only (host Python); B = CPython + basedpyright + debugpy.
 # B supersedes A when both are requested.
 option(TUIDE_BUNDLE_PYTHON_LSP_MIN

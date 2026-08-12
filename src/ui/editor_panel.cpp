@@ -1,6 +1,7 @@
 #include "ui/editor_panel.hpp"
 #include "editor/visual_highlight.hpp"
 #include "ui/ui_wake_policy.hpp"
+#include "ai/edit_journal.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -1009,6 +1010,13 @@ char line_gutter_marker(EditorPanelState* panel, int line) {
     return 'W';
   }
   return '\0';
+}
+
+bool line_ai_authored(const EditorBuffer* buffer, int line_0based) {
+  if (buffer == nullptr || buffer->path.empty()) {
+    return false;
+  }
+  return EditJournalStore::instance().line_is_ai(buffer->path, line_0based + 1);
 }
 
 void clear_git_panel_marks(EditorPanelState* panel) {
@@ -6938,6 +6946,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           gutter_marker = '\0';
         } else {
           gutter_marker = line_gutter_marker(panel_state.get(), i);
+          if (gutter_marker == '\0' && line_ai_authored(&buffer, i)) {
+            gutter_marker = 'A';
+          }
         }
       }
 
@@ -7066,6 +7077,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           gutter_color = theme::Error();
         } else if (gutter_marker == 'G') {
           gutter_color = theme::Success();
+        } else if (gutter_marker == 'A') {
+          gutter_color = theme::Accent();
         } else if (gutter_marker == 'W') {
           gutter_color = theme::Warning();
         }

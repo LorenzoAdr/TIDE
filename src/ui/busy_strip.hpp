@@ -4,6 +4,7 @@
 // Indicador (Braille; + % si es cuantizable) + label por ANSI; 0 UI_WAKE por tick.
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -29,6 +30,9 @@ enum class BusyActivity : std::uint8_t {
   OutlinePending,
   ToolpackInstall,
   ExportPortable,
+  AiThinking,
+  AiMapping,
+  AiEmbedding,
 };
 
 struct BusyStripState {
@@ -63,6 +67,16 @@ void set_busy_spinner(MainLayoutState* layout, BusyActivity activity, std::strin
 void set_busy_percent(MainLayoutState* layout, BusyActivity activity, int percent,
                       std::string_view label = {});
 void clear_busy(MainLayoutState* layout);
+// Only clears when the strip is currently showing `activity` (avoids wiping another job).
+void clear_busy_if(MainLayoutState* layout, BusyActivity activity);
+bool busy_activity_is_ai(BusyActivity activity);
+// Updates Mapping % while the symbol/repo-map index scans. Does not override Pensando
+// or unrelated busy activities (Indexing, git, …).
+void refresh_ai_mapping_busy(MainLayoutState* layout, bool scanning, std::size_t done,
+                             std::size_t total);
+// Coding-symbol corpus embeddings (after Mapping). Percent when total>0.
+void refresh_ai_embedding_busy(MainLayoutState* layout, bool active, std::size_t done,
+                               std::size_t total);
 
 void busy_strip_tick(BusyStripState* state, int64_t now_ms);
 void busy_strip_paint_ansi(BusyStripState* state);

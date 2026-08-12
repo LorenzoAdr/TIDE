@@ -40,6 +40,7 @@
 namespace tuide {
 
 class UiEventDispatcher;
+class AiController;
 
 namespace packet_monitor {
 class PacketMonitorService;
@@ -112,6 +113,7 @@ struct ConsolePanelTabs {
   static constexpr int kCoreAnalyzer = 8;
   static constexpr int kBinarySymbols = 9;
   static constexpr int kPacketMonitor = 10;
+  static constexpr int kAi = 11;
   int selected_tab = kTerminal;
 };
 
@@ -167,6 +169,8 @@ struct MainLayoutState {
   int panel_cache_app_mode = -1;
   UiPanelRenderCache panel_render_cache;
   std::unique_ptr<BusyStripState> busy_strip;
+  // Owned by MakeConsolePanel; set so Application can warm AI indexes after Mapping.
+  std::shared_ptr<AiController> ai_controller;
   UiActivityGate activity_gate;
   UiPerfMonitor ui_perf_monitor;
   MouseVelocityTracker mouse_velocity;
@@ -307,6 +311,11 @@ inline bool binary_symbols_tab_active(const MainLayoutState* layout_state) {
 inline bool packet_monitor_tab_active(const MainLayoutState* layout_state) {
   return layout_state != nullptr && layout_state->console_visible &&
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kPacketMonitor;
+}
+
+inline bool ai_tab_active(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kAi;
 }
 
 inline bool binary_symbols_request_pending(const MainLayoutState* layout_state) {

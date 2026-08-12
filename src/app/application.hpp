@@ -133,7 +133,7 @@ class Application {
   void restore_workspace_session();
   std::string launch_cwd_for_program(const std::string& program) const;
   void restart_lsp_for_workspace();
-  void sync_symbol_workspace_indexer();
+  void sync_symbol_workspace_indexer(bool force = false);
   void set_status(const std::string& message);
   void set_workspace_status(const std::string& message);
   void request_terminal_autostart();

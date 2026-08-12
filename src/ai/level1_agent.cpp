@@ -1,0 +1,1220 @@
+#include "ai/level1_agent.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <sstream>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "ai/ai_trace.hpp"
+#include "ai/coding_symbol_embed_index.hpp"
+#include "ai/embedding_backend.hpp"
+#include "ai/get_code_of.hpp"
+#include "ai/repo_map.hpp"
+#include "ai/search_needles.hpp"
+#include "indexer/symbol_workspace_indexer.hpp"
+
+#include <filesystem>
+
+namespace tuide {
+namespace {
+
+std::string relative_active_file(const WorkspaceModel* workspace) {
+  if (workspace == nullptr || workspace->buffer.path.empty()) {
+    return {};
+  }
+  if (workspace->root.empty()) {
+    return workspace->buffer.path;
+  }
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  const fs::path rel = fs::relative(fs::path(workspace->buffer.path), fs::path(workspace->root), ec);
+  if (ec || rel.empty() || rel.native().rfind("..", 0) == 0) {
+    return workspace->buffer.path;
+  }
+  return rel.generic_string();
+}
+
+RepoMap build_repo_map_from_indexer(SymbolWorkspaceIndexer* indexer, const RepoMapOptions& opts) {
+  if (indexer == nullptr) {
+    RepoMap map;
+    map.note = "sin SymbolWorkspaceIndexer";
+    return map;
+  }
+  const auto snap = indexer->snapshot();
+  return build_repo_map(snap.get(), opts);
+}
+
+}  // namespace
+
+namespace {
+
+const char* action_kind_name(Level1ActionKind kind) {
+  switch (kind) {
+    case Level1ActionKind::Tool:
+      return "tool";
+    case Level1ActionKind::Seeds:
+      return "seeds";
+    case Level1ActionKind::Final:
+      return "final";
+    case Level1ActionKind::NeedsLevel2:
+      return "needs_level2";
+    case Level1ActionKind::Error:
+      return "error";
+    case Level1ActionKind::Unknown:
+      return "unknown";
+  }
+  return "unknown";
+}
+
+}  // namespace
+
+Level1Agent::Level1Agent(Level1AgentDeps deps) : deps_(std::move(deps)) {}
+
+std::string Level1Agent::build_system_prompt() const {
+  std::ostringstream out;
+  out << "Eres el Nivel 1 (agent) de tuide: orquestas tools del IDE. NO generas parches de "
+         "código largos; eso es Nivel 2.\n"
+         "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO: markdown, ```, prosa suelta, "
+         "copiar el mensaje del usuario, o listas interminables.\n"
+         "Formatos:\n"
+         "{\"action\":\"tool\",\"name\":\"TOOL\",\"arg\":\"...\"}\n"
+         "{\"action\":\"tool\",\"name\":\"search\",\"needles\":[\"a\",\"b\",\"c\"]}\n"
+         "{\"action\":\"seeds\",\"seeds\":[\"Foo\",\"Bar\"],\"note\":\"plan breve\"}\n"
+         "{\"action\":\"final\",\"text\":\"respuesta al usuario\"}\n"
+         "{\"action\":\"needs_level2\",\"instruction\":\"qué debe hacer el coder\","
+         "\"seeds\":[\"Simbolo\"]}\n"
+         "IMPORTANTE: action SOLO tool|seeds|final|needs_level2. "
+         "El nombre de la tool va en \"name\", NUNCA en \"action\".\n"
+         "INVESTIGAR / LOCALIZAR CÓDIGO: el runtime pide needles, re-rankea REPO_MAP "
+         "(léxico + embed firmas + embed cuerpos) y entrega el mapa a L2.\n"
+         "DAME CONTEXTO / INVESTIGAR: needles + mapa rankeado (embed firmas/cuerpos) en "
+         "`.tuide/ai/map_last.md`; L2 elige qué leer. L1 NO vuelca bodies ni sustituye a L2.\n"
+         "Para un símbolo concreto: tool get_code_of con arg path:Symbol o path:line.\n"
+         "SOLO si el usuario pide estado del repo / archivos modificados / diff / commits / "
+         "ramas / pull:\n"
+         "  {\"action\":\"tool\",\"name\":\"git_status\",\"arg\":\"\"}\n"
+         "  {\"action\":\"tool\",\"name\":\"git_diff\",\"arg\":\"src\"}\n"
+         "  {\"action\":\"tool\",\"name\":\"git_log\",\"arg\":\"main 5\"}\n"
+         "  {\"action\":\"tool\",\"name\":\"git_show\",\"arg\":\"HEAD~1\"}\n"
+         "  {\"action\":\"tool\",\"name\":\"git_branches\",\"arg\":\"\"}\n"
+         "  {\"action\":\"tool\",\"name\":\"git_pull\",\"arg\":\"\"}\n"
+         "NO uses git_* para localizar implementación en el código fuente.\n"
+         "Tras observación útil: action=final con resumen breve.\n"
+         "NUNCA repitas la misma tool+arg si ya tienes OBSERVATION.\n"
+         "Tools permitidas:\n";
+  if (deps_.tools != nullptr) {
+    for (const auto& [name, help] : deps_.tools->list_tools()) {
+      out << "- " << name << ": " << help << '\n';
+    }
+  }
+  out << "También: {\"action\":\"tool\",\"name\":\"run_task\",\"arg\":\"compile\"} "
+         "(o launch).\n"
+         "Rewrites profundos: needs_level2.\n"
+         "Máximo un JSON action por turno. SOLO JSON.\n";
+  return out.str();
+}
+
+std::string Level1Agent::editor_context_snippet() const {
+  if (deps_.workspace == nullptr || deps_.workspace->buffer.path.empty()) {
+    return {};
+  }
+  const auto& buf = deps_.workspace->buffer;
+  std::ostringstream out;
+  out << "archivo_activo: " << buf.path << '\n';
+  out << "cursor: " << (buf.primary_line() + 1) << ':' << (buf.primary_col() + 1) << '\n';
+  const int line = buf.primary_line();
+  if (line >= 0 && line < buf.lines.size()) {
+    const int from = std::max(0, line - 2);
+    const int to = std::min(buf.lines.size() - 1, line + 2);
+    out << "contexto_local:\n";
+    for (int i = from; i <= to; ++i) {
+      out << (i + 1) << ": " << buf.lines[i] << '\n';
+    }
+  }
+  return out.str();
+}
+
+std::string Level1Agent::invoke_tool_logged(const std::string& name, const std::string& arg,
+                                            const LogFn& log) {
+  std::string effective_arg = arg;
+  if (name == "search") {
+    // Expand so tool_key / logs reflect the full candidate set.
+    const auto expanded = expand_search_needles(arg, 12);
+    if (!expanded.empty()) {
+      effective_arg.clear();
+      for (std::size_t i = 0; i < expanded.size(); ++i) {
+        if (i) {
+          effective_arg.push_back('|');
+        }
+        effective_arg += expanded[i];
+      }
+      if (effective_arg != arg && log) {
+        log("(needles) " + effective_arg);
+      }
+    }
+  }
+  if (deps_.on_tool) {
+    deps_.on_tool(name, effective_arg);
+  }
+  if (name == "run_task") {
+    if (deps_.tasks == nullptr) {
+      return "TaskRunner no disponible";
+    }
+    if (log) {
+      log("→ task " + effective_arg);
+    }
+    const std::string root =
+        deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+    const auto result = deps_.tasks->run(effective_arg, root, [&](const std::string& line) {
+      if (log) {
+        log(line);
+      }
+    });
+    if (!result.allowed) {
+      return "deny: " + result.deny_reason;
+    }
+    return "exit_code=" + std::to_string(result.exit_code) + "\n" + result.stdout_text;
+  }
+  if (deps_.tools == nullptr || !deps_.tools->has(name)) {
+    return "tool desconocida: " + name;
+  }
+  if (log) {
+    log("→ tool " + name + (effective_arg.empty() ? "" : (" " + effective_arg)));
+  }
+  const AiToolResult result = deps_.tools->invoke(name, effective_arg);
+  if (!result.ok) {
+    return "error: " + result.text;
+  }
+  constexpr std::size_t kMax = 6000;
+  if (result.text.size() > kMax) {
+    return result.text.substr(0, kMax) + "\n…(truncated)";
+  }
+  return result.text;
+}
+
+std::string Level1Agent::run_seeds_pack(const std::vector<std::string>& seeds, const LogFn& log) {
+  std::string arg;
+  for (std::size_t i = 0; i < seeds.size(); ++i) {
+    if (i) {
+      arg.push_back(' ');
+    }
+    arg += seeds[i];
+    if (log) {
+      log("seed: `" + seeds[i] + "`");
+    }
+  }
+  return invoke_tool_logged("context_pack", arg, log);
+}
+
+namespace {
+
+std::string ascii_lower_simple(std::string s) {
+  for (char& c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
+bool is_generic_needle_token(const std::string& raw) {
+  const std::string s = ascii_lower_simple(raw);
+  static const std::unordered_set<std::string> kGeneric = {
+      "modal", "dialog", "window", "panel", "process", "button", "manager", "view",
+      "form",  "widget", "action", "handler", "helper", "utils",  "util",   "data",
+      "item",  "list",   "tree",   "file",   "code",   "main",   "app",    "menu",
+      "popup", "page",   "tab",    "bar",    "strip",  "state",  "config", "settings",
+      "launch","attach", "run",    "start",  "stop",   "open",   "close",  "create",
+  };
+  // Bare generics are too broad ("Modal", "process"). Keep compounds / CamelCase multi-part.
+  if (s.size() >= 10) {
+    return false;
+  }
+  if (s.find('_') != std::string::npos) {
+    return false;
+  }
+  int upper = 0;
+  for (char c : raw) {
+    if (std::isupper(static_cast<unsigned char>(c))) {
+      ++upper;
+    }
+  }
+  if (upper >= 2) {
+    return false;  // DebugLaunchModal-style
+  }
+  return kGeneric.count(s) > 0;
+}
+
+// Rank file stems / symbol names from the index against the NL query (project-agnostic).
+std::vector<std::string> rank_index_needle_candidates(SymbolWorkspaceIndexer* indexer,
+                                                     const std::string& user_message,
+                                                     std::size_t max_n) {
+  std::vector<std::string> out;
+  if (indexer == nullptr || max_n == 0) {
+    return out;
+  }
+  const auto snap = indexer->snapshot();
+  if (snap == nullptr || snap->symbols.empty()) {
+    return out;
+  }
+  const auto qtoks_raw = repo_map_query_tokens(user_message, 16);
+  const auto qtoks = expand_nl_retrieval_tokens(qtoks_raw, 32);
+  // Prefer matches on specific expanded tokens over the ultra-common "modal" alone.
+  auto token_weight = [](const std::string& t) {
+    if (t == "modal" || t == "dialog" || t == "window" || t == "panel") {
+      return 1;
+    }
+    if (t.size() >= 7) {
+      return 5;
+    }
+    if (t.size() >= 5) {
+      return 3;
+    }
+    return 2;
+  };
+  std::unordered_map<std::string, int> score;
+  auto consider = [&](std::string id) {
+    if (id.size() < 4) {
+      return;
+    }
+    // Drop path prefixes; keep basename stem.
+    const auto slash = id.find_last_of("/\\");
+    if (slash != std::string::npos) {
+      id = id.substr(slash + 1);
+    }
+    const auto dot = id.find_last_of('.');
+    if (dot != std::string::npos && dot > 0) {
+      id = id.substr(0, dot);
+    }
+    if (id.size() < 4) {
+      return;
+    }
+    const std::string low = ascii_lower_simple(id);
+    if (is_generic_needle_token(id)) {
+      return;
+    }
+    int sc = 0;
+    int distinct = 0;
+    for (const auto& t : qtoks) {
+      if (t.size() < 3) {
+        continue;
+      }
+      const int w = token_weight(t);
+      if (low == t) {
+        sc += (100 + static_cast<int>(t.size()) * 4) * w;
+        ++distinct;
+      } else if (low.find(t) != std::string::npos) {
+        sc += (40 + static_cast<int>(t.size()) * 3) * w;
+        ++distinct;
+      } else if (t.find(low) != std::string::npos && low.size() >= 5) {
+        sc += 15 * w;
+        ++distinct;
+      }
+    }
+    if (sc > 0) {
+      // Reward stems that hit several distinct intent tokens (quit+confirm, etc.).
+      sc += 35 * std::max(0, distinct - 1);
+      sc += std::min(20, static_cast<int>(low.size()));
+      score[id] = std::max(score[id], sc);
+    }
+  };
+
+  for (const auto& sym : snap->symbols) {
+    if (sym.file.rfind("third_party/", 0) == 0) {
+      continue;
+    }
+    consider(sym.file);
+    if (!sym.name.empty()) {
+      consider(sym.name);
+    } else if (!sym.display_name.empty()) {
+      consider(sym.display_name);
+    }
+  }
+
+  std::vector<std::pair<int, std::string>> ranked;
+  ranked.reserve(score.size());
+  for (const auto& [id, sc] : score) {
+    ranked.push_back({sc, id});
+  }
+  std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
+    if (a.first != b.first) {
+      return a.first > b.first;
+    }
+    return a.second < b.second;
+  });
+  for (const auto& [sc, id] : ranked) {
+    (void)sc;
+    out.push_back(id);
+    if (out.size() >= max_n) {
+      break;
+    }
+  }
+  return out;
+}
+
+}  // namespace
+
+std::vector<std::string> Level1Agent::propose_investigate_needles(const std::string& user_message,
+                                                                 const LogFn& log,
+                                                                 std::atomic<bool>* cancel) {
+  std::vector<std::string> out;
+  std::unordered_set<std::string> seen;
+  auto push = [&](std::string s, bool allow_generic) {
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
+      s.erase(s.begin());
+    }
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
+      s.pop_back();
+    }
+    if (s.size() < 3) {
+      return;
+    }
+    if (!allow_generic && is_generic_needle_token(s)) {
+      return;
+    }
+    if (!seen.insert(s).second) {
+      return;
+    }
+    out.push_back(std::move(s));
+  };
+
+  const std::vector<std::string> index_candidates =
+      rank_index_needle_candidates(deps_.symbol_indexer, user_message, 28);
+  if (log && !index_candidates.empty()) {
+    std::ostringstream cs;
+    cs << "candidatos índice:";
+    for (std::size_t i = 0; i < index_candidates.size() && i < 12; ++i) {
+      cs << ' ' << index_candidates[i];
+    }
+    if (index_candidates.size() > 12) {
+      cs << " …";
+    }
+    log(cs.str());
+  }
+
+  if (deps_.backend != nullptr && deps_.backend->ready()) {
+    LlamaCompletionRequest req;
+    req.system_prompt =
+        "Eres un recuperador de código. Dada una pregunta NL sobre DÓNDE está una "
+        "funcionalidad, responde SOLO JSON:\n"
+        "{\"action\":\"seeds\",\"seeds\":[\"QuitConfirm\",\"quit_confirm\",...]}\n"
+        "Reglas:\n"
+        "- 4..10 identificadores ESPECÍFICOS (archivo/clase/función), preferible compuestos.\n"
+        "- Traduce la intención a vocabulario típico de código en inglés.\n"
+        "- Si la query combina varias palabras de UI (modal/tab/panel/dialog/settings/…), "
+        "los seeds DEBEN ser compuestos que junten ≥2 facetas "
+        "(p. ej. SettingsModal, config_tab), NUNCA solo la palabra más ambigua (Tab, Modal).\n"
+        "- cierre/cerrar/salir de la app → quit/close/exit/shutdown/confirm "
+        "(p. ej. QuitConfirm, shutdown_overlay). NO confundir con settings/shortcuts modal.\n"
+        "- compilación/compilar/build → compile/build/cmake/makefile "
+        "(p. ej. compile.sh, CMakeLists, build scripts en tools/).\n"
+        "- Si hay CANDIDATOS_DEL_INDICE, prioriza elegir de esa lista (o variantes cercanas).\n"
+        "- PROHIBIDO seeds genéricos sueltos: Modal, process, panel, dialog, button, manager, "
+        "attach, launch, file, tree, tab, tabs (sin más cualificador).\n"
+        "- PROHIBIDO: markdown, tools, prosa, rutas absolutas.\n";
+    std::ostringstream user;
+    user << "Consulta del usuario:\n" << user_message << "\n";
+    if (!index_candidates.empty()) {
+      user << "\nCANDIDATOS_DEL_INDICE (elige de aquí si encajan):\n";
+      for (const auto& c : index_candidates) {
+        user << "- " << c << '\n';
+      }
+    }
+    user << "\nJSON:";
+    req.user_prompt = user.str();
+    req.max_tokens = std::min(320, std::max(128, deps_.settings.level1.max_tokens));
+    req.n_ctx = std::max(4096, deps_.settings.level1.n_ctx);
+    req.temperature = 0.1;
+    if (log) {
+      log("L1 investigar → proponiendo needles…");
+    }
+    const auto completion = deps_.backend->complete(req, cancel);
+    if (completion.ok) {
+      if (log) {
+        log("L1 needles raw: " + completion.text);
+      }
+      ai_trace(AiTraceChannel::L1, "l1_needles_raw",
+               "{\"raw\":\"" + ai_trace_escape(completion.text) + "\"}");
+      const Level1Action action = parse_level1_action(completion.text);
+      for (const auto& s : action.seeds) {
+        push(s, false);
+      }
+      if (action.kind == Level1ActionKind::Tool &&
+          (action.tool_name == "search" || action.tool_name == "repo_map")) {
+        for (const auto& n : split_search_needles(action.arg)) {
+          push(n, false);
+        }
+      }
+    } else if (log) {
+      log("✗ L1 needles: " + completion.error);
+    }
+  }
+
+  // If the model only emitted generics / nothing, fall back to ranked index stems.
+  if (out.size() < 2) {
+    for (const auto& c : index_candidates) {
+      push(c, false);
+      if (out.size() >= 8) {
+        break;
+      }
+    }
+  }
+
+  for (const auto& t : extract_code_tokens(user_message, 8)) {
+    push(t, false);
+  }
+
+  std::vector<std::string> expanded;
+  seen.clear();
+  for (const auto& n : out) {
+    for (const auto& v : expand_identifier_variants(n)) {
+      if (v.size() < 3 || is_generic_needle_token(v) || !seen.insert(v).second) {
+        continue;
+      }
+      expanded.push_back(v);
+      if (expanded.size() >= 16) {
+        break;
+      }
+    }
+    if (expanded.size() >= 16) {
+      break;
+    }
+  }
+  // If filtering wiped everything, keep raw index candidates unfiltered-lightly.
+  if (expanded.empty()) {
+    for (const auto& c : index_candidates) {
+      if (c.size() >= 4 && seen.insert(c).second) {
+        expanded.push_back(c);
+      }
+      if (expanded.size() >= 8) {
+        break;
+      }
+    }
+  }
+  return expanded;
+}
+
+Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& log,
+                                 std::atomic<bool>* cancel) {
+  Level1RunResult out;
+  if (deps_.backend == nullptr) {
+    out.error = "sin LlamaBackend";
+    return out;
+  }
+  if (!deps_.backend->ready()) {
+    out.error = "backend L1 no listo";
+    return out;
+  }
+
+  const int max_steps = std::max(1, deps_.settings.level1.max_steps);
+  std::string history;
+  std::string user = user_message;
+  const std::string ctx = editor_context_snippet();
+  if (!ctx.empty()) {
+    user += "\n\n---\n" + ctx;
+  }
+
+  const bool context_dump =
+      query_asks_context_dump(user_message) && !query_asks_git_repo(user_message);
+  const bool code_locate =
+      (query_asks_code_location(user_message) || context_dump) &&
+      !query_asks_git_repo(user_message);
+
+  RepoMapOptions map_opts;
+  map_opts.query = user_message;
+  map_opts.active_file = relative_active_file(deps_.workspace);
+  map_opts.max_symbols = 48;
+  map_opts.max_files = 16;
+  map_opts.max_chars = 4800;
+  map_opts.max_map_tokens = 1400;
+  map_opts.prefer_git_tracked = true;
+  map_opts.use_pagerank = true;
+  if (deps_.workspace != nullptr) {
+    for (const auto& tab : deps_.workspace->tabs) {
+      if (tab.path.empty() || tab.git_diff_view) {
+        continue;
+      }
+      std::error_code ec;
+      std::string rel = tab.path;
+      if (!deps_.workspace->root.empty()) {
+        const auto r =
+            std::filesystem::relative(std::filesystem::path(tab.path),
+                                      std::filesystem::path(deps_.workspace->root), ec);
+        if (!ec && !r.empty() && r.native().rfind("..", 0) != 0) {
+          rel = r.generic_string();
+        }
+      }
+      if (rel != map_opts.active_file) {
+        map_opts.chat_files.push_back(rel);
+      }
+    }
+  }
+
+  auto map_has_query_hits = [](const RepoMap& m) {
+    return !m.entries.empty() && m.note.find("query_hits=") != std::string::npos;
+  };
+
+  // Investigate: L1 always proposes needles (shown in transcript), then REPO_MAP
+  // is re-ranked with them. Lexical-only short-circuit skipped NL like "búsqueda de
+  // strings" with weak incidental hits and never showed needles.
+  if (code_locate) {
+    if (log) {
+      log(std::string("L1 agent start (") + (context_dump ? "context_dump" : "investigate") +
+          "; max_steps=" + std::to_string(max_steps) + ")");
+    }
+
+    const auto lexical_tokens = repo_map_query_tokens(user_message, 16);
+    if (log) {
+      std::ostringstream ts;
+      ts << "tokens léxicos:";
+      if (lexical_tokens.empty()) {
+        ts << " (ninguno)";
+      } else {
+        for (const auto& t : lexical_tokens) {
+          ts << ' ' << t;
+        }
+      }
+      log(ts.str());
+    }
+
+    RepoMap lexical_map = build_repo_map_from_indexer(deps_.symbol_indexer, map_opts);
+    if (log) {
+      log("REPO_MAP lexical: " + std::to_string(lexical_map.entries.size()) +
+          " símbolos (best_score=" + std::to_string(lexical_map.best_score) +
+          (map_has_query_hits(lexical_map) ? ", query_hits" : ", sin query_hits") + ")");
+    }
+
+    const std::vector<std::string> needles =
+        propose_investigate_needles(user_message, log, cancel);
+    out.seeds = needles;
+    if (log) {
+      log("L1 needles propuestos:");
+      if (needles.empty()) {
+        log("  (vacío)");
+      } else {
+        for (const auto& n : needles) {
+          log("  • " + n);
+        }
+      }
+    }
+    ai_trace(AiTraceChannel::L1, "l1_needles", [&] {
+      std::ostringstream j;
+      j << "{\"n\":" << needles.size() << ",\"needles\":[";
+      for (std::size_t i = 0; i < needles.size(); ++i) {
+        if (i) {
+          j << ',';
+        }
+        j << '"' << ai_trace_escape(needles[i]) << '"';
+      }
+      j << "]}";
+      return j.str();
+    }());
+
+    auto emit_map_answer = [&](const RepoMap& m, const char* via) {
+      const std::string root =
+          deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+      const bool l2_active = deps_.settings.level2_mode != "dry_run";
+
+      std::vector<RepoMapEntry> candidates;
+      bool from_symbol_index = false;
+      if (deps_.coding_symbol_index != nullptr && deps_.coding_symbol_index->ready() &&
+          deps_.embed != nullptr && deps_.embed->ready()) {
+        const std::string enriched = enrich_query_for_embed(user_message, needles);
+        std::vector<float> qvec;
+        std::string qerr;
+        if (deps_.coding_symbol_index->embed_query_vec(enriched, deps_.embed, &qvec, &qerr) &&
+            !qvec.empty()) {
+          candidates = deps_.coding_symbol_index->top_entries(qvec, 48);
+          from_symbol_index = !candidates.empty();
+          if (log) {
+            log("L1 symbol_embed_index: top=" + std::to_string(candidates.size()) +
+                " / corpus=" + std::to_string(deps_.coding_symbol_index->size()));
+          }
+        } else if (log) {
+          log("L1 symbol_embed_index query fail: " + qerr);
+        }
+      }
+      if (!from_symbol_index) {
+        // Fallback: map as built (still may be small until background index finishes).
+        candidates = m.entries;
+        if (log && deps_.coding_symbol_index != nullptr && !deps_.coding_symbol_index->ready()) {
+          log("L1 symbol_embed_index: aún no listo — usando REPO_MAP (" +
+              std::to_string(candidates.size()) + ")");
+        } else if (log && deps_.coding_symbol_index == nullptr) {
+          log("L1 symbol_embed_index: no disponible — usando REPO_MAP (" +
+              std::to_string(candidates.size()) + ")");
+        }
+      }
+
+      TwoStageRerankOptions rr_opts;
+      rr_opts.query = user_message;
+      rr_opts.needles = needles;
+      rr_opts.workspace_root = root;
+      if (from_symbol_index) {
+        // Already ranked by signature cosine over the full corpus.
+        rr_opts.skip_phase_a = true;
+        rr_opts.phase_a_pool = 0;
+        rr_opts.phase_a_top = 16;  // bodies only for top-16
+        rr_opts.final_top = 24;
+        rr_opts.max_per_file = 3;
+        rr_opts.fetch_bodies = true;
+      } else {
+        rr_opts.phase_a_pool = 0;
+        rr_opts.phase_a_top = 0;
+        rr_opts.final_top = 0;
+        rr_opts.fetch_bodies = true;
+        rr_opts.max_per_file = 0;
+        rr_opts.skip_phase_a = false;
+      }
+      rr_opts.body_max_lines = 80;
+
+      if (log) {
+        log(std::string("L1 two_stage rerank") +
+            (from_symbol_index ? " (symbol_index)" : " (full map, no lex prefilter)") +
+            ": candidatos=" + std::to_string(candidates.size()) + " (via " + via + ")");
+      }
+      TwoStageRerankResult ranked =
+          rerank_map_two_stage(std::move(candidates), rr_opts, deps_.embed);
+      if (log) {
+        log("L1 embed timing: phase_a_ms=" + std::to_string(ranked.phase_a_ms) +
+            " phase_b_ms=" + std::to_string(ranked.phase_b_ms) +
+            " total_ms=" + std::to_string(ranked.total_ms) +
+            " cand_in=" + std::to_string(ranked.candidates_in) +
+            " n=" + std::to_string(ranked.entries.size()) +
+            (from_symbol_index ? " src=symbol_index" : " src=repo_map"));
+      }
+      ai_trace(AiTraceChannel::L1, "l1_embed_phase_a",
+               std::string("{\"used\":") + (ranked.used_phase_a ? "1" : "0") +
+                   ",\"ms\":" + std::to_string(ranked.phase_a_ms) +
+                   ",\"cand_in\":" + std::to_string(ranked.candidates_in) +
+                   ",\"symbol_index\":" + (from_symbol_index ? "1" : "0") + "}");
+      ai_trace(AiTraceChannel::L1, "l1_embed_phase_b",
+               std::string("{\"used\":") + (ranked.used_phase_b ? "1" : "0") +
+                   ",\"ms\":" + std::to_string(ranked.phase_b_ms) + ",\"bodies\":" +
+                   std::to_string(ranked.body_texts.size()) + "}");
+
+      std::string map_note = m.note;
+      if (!map_note.empty() && !ranked.note.empty()) {
+        map_note += "; ";
+      }
+      map_note += ranked.note;
+      if (from_symbol_index) {
+        map_note += "; src=symbol_index; corpus=" +
+                    std::to_string(deps_.coding_symbol_index->size());
+      } else {
+        map_note += "; lex_prefilter=0; src=repo_map";
+      }
+
+      RankedMapDumpOptions dump_opts;
+      dump_opts.workspace_root = root;
+      dump_opts.query = user_message;
+      dump_opts.note = map_note;
+      dump_opts.entries = ranked.entries;
+      dump_opts.body_texts.clear();
+      dump_opts.include_bodies = false;
+      dump_opts.max_entries = 0;
+      dump_opts.max_bodies = 0;
+      dump_opts.filename = "map_last.md";
+
+      std::string err;
+      const std::string path = dump_ranked_map_md(dump_opts, &err);
+      ai_trace(AiTraceChannel::L1, "l1_ranked_map",
+               std::string("{\"via\":\"") + via + "\",\"entries\":" +
+                   std::to_string(ranked.entries.size()) + ",\"path\":\"" +
+                   ai_trace_escape(path) + "\",\"note\":\"" + ai_trace_escape(map_note) +
+                   "\",\"l2\":" + (l2_active ? "1" : "0") +
+                   ",\"total_ms\":" + std::to_string(ranked.total_ms) +
+                   ",\"symbol_index\":" + (from_symbol_index ? "1" : "0") + "}");
+
+      out.ok = true;
+      std::ostringstream summary;
+      summary << "Mapa rankeado";
+      if (!path.empty()) {
+        summary << " → `.tuide/ai/map_last.md`";
+      } else if (!err.empty()) {
+        summary << " (falló escritura: " << err << ")";
+      }
+      summary << " (" << ranked.note << ")\n";
+      summary << format_ranked_map_answer(ranked.entries, 32, {});
+      out.final_text = summary.str();
+
+      if (l2_active) {
+        out.needs_level2 = true;
+        out.instruction =
+            context_dump
+                ? "Elige del mapa rankeado los símbolos relevantes y lee cuerpos con get_code_of."
+                : "Localiza en el mapa rankeado dónde está la implementación pedida.";
+        out.seeds = needles;
+        if (out.seeds.empty()) {
+          for (const auto& e : ranked.entries) {
+            if (!e.name.empty()) {
+              out.seeds.push_back(e.name);
+            }
+            if (out.seeds.size() >= 8) {
+              break;
+            }
+          }
+        }
+        if (log) {
+          log(std::string("L1 → l2_handoff via ") + via + "; path=" +
+              (path.empty() ? "(none)" : path));
+          log(out.final_text);
+        }
+        ai_trace(AiTraceChannel::L1, "l2_handoff",
+                 std::string("{\"via\":\"") + via + "\",\"entries\":" +
+                     std::to_string(ranked.entries.size()) + "}");
+        return;
+      }
+
+      if (log) {
+        log(std::string("L1 → ranked_map via ") + via + " (" +
+            std::to_string(ranked.entries.size()) + " entradas); path=" +
+            (path.empty() ? "(none)" : path));
+        log(out.final_text);
+      }
+      ai_trace(AiTraceChannel::L1, "l1_ranked_map_shown",
+               std::string("{\"via\":\"") + via + "\",\"entries\":" +
+                   std::to_string(ranked.entries.size()) + ",\"context_dump\":" +
+                   (context_dump ? "1" : "0") + "}");
+    };
+
+    RepoMap repo_map = lexical_map;
+    if (!needles.empty()) {
+      map_opts.extra_needles = needles;
+      repo_map = build_repo_map_from_indexer(deps_.symbol_indexer, map_opts);
+      if (log) {
+        log("REPO_MAP +needles: " + std::to_string(repo_map.entries.size()) +
+            " símbolos (best_score=" + std::to_string(repo_map.best_score) +
+            (map_has_query_hits(repo_map) ? ", query_hits" : ", sin query_hits") + ")");
+      }
+      if (map_has_query_hits(repo_map)) {
+        emit_map_answer(repo_map, "needles");
+        return out;
+      }
+    }
+
+    if (map_has_query_hits(lexical_map)) {
+      emit_map_answer(lexical_map, "lexical");
+      return out;
+    }
+
+    out.ok = true;
+    std::ostringstream miss;
+    miss << "No encontré métodos claros en el REPO_MAP para esa consulta.\n";
+    if (!needles.empty()) {
+      miss << "Needles intentados:\n";
+      for (const auto& n : needles) {
+        miss << "  • " << n << '\n';
+      }
+    } else {
+      miss << "(L1 no propuso needles utilizables)\n";
+    }
+    out.final_text = miss.str();
+    if (log) {
+      log("L1 investigar → sin query_hits tras needles; no se mezcla outline genérico");
+      log(out.final_text);
+    }
+    ai_trace(AiTraceChannel::L1, "l1_map_miss",
+             "{\"entries\":" + std::to_string(repo_map.entries.size()) + ",\"note\":\"" +
+                 ai_trace_escape(repo_map.note) + "\"}");
+    return out;
+  }
+
+  RepoMap repo_map = build_repo_map_from_indexer(deps_.symbol_indexer, map_opts);
+  if (!repo_map.entries.empty()) {
+    user += "\n\n---\n" + repo_map.render_text();
+  } else if (log && !repo_map.note.empty()) {
+    log("REPO_MAP: " + repo_map.note);
+  }
+
+  if (log) {
+    log("L1 agent start (max_steps=" + std::to_string(max_steps) + ")");
+    if (!repo_map.entries.empty()) {
+      log("REPO_MAP: " + std::to_string(repo_map.entries.size()) + " símbolos (best_score=" +
+          std::to_string(repo_map.best_score) +
+          (repo_map.used_pagerank ? ", PageRank" : "") + ")");
+    }
+  }
+
+  std::string last_tool_key;
+  int same_tool_streak = 0;
+  std::string last_observation;
+  const bool map_ready = !repo_map.entries.empty();
+  const std::string map_fallback =
+      map_ready ? repo_map.format_investigate_answer(16) : std::string{};
+
+  auto truncate_obs = [](std::string s, std::size_t max_n = 1500) {
+    if (s.size() > max_n) {
+      s = s.substr(0, max_n) + "\n…";
+    }
+    return s;
+  };
+
+  auto looks_like_junk_final = [](const std::string& text) {
+    if (text.empty()) {
+      return true;
+    }
+    if (text.find("/repomap") != std::string::npos || text.find("/map") != std::string::npos ||
+        text.find("git_branches") != std::string::npos ||
+        text.find("workspace_symbols") != std::string::npos) {
+      return true;
+    }
+    if (!text.empty() && text[0] == '/') {
+      return true;
+    }
+    const bool cites_path =
+        text.find("src/") != std::string::npos || text.find(".cpp") != std::string::npos ||
+        text.find(".hpp") != std::string::npos || text.find("Resultados") != std::string::npos;
+    return !cites_path && text.size() < 80;
+  };
+
+  for (int step = 1; step <= max_steps; ++step) {
+    if (cancel != nullptr && cancel->load()) {
+      out.error = "cancelado";
+      return out;
+    }
+    if (log) {
+      log("L1 step " + std::to_string(step) + "/" + std::to_string(max_steps));
+    }
+
+    LlamaCompletionRequest req;
+    req.system_prompt = build_system_prompt();
+    req.history_text = history;
+    if (step == 1) {
+      req.user_prompt = user + "\n\nResponde SOLO con un JSON action (sin prosa).";
+      if (code_locate && map_ready) {
+        req.user_prompt +=
+            "\nINVESTIGAR: emite {\"action\":\"final\",\"text\":\"...\"} listando los "
+            "métodos/firmas del REPO_MAP más relevantes a la consulta "
+            "(ruta:línea + firma). PROHIBIDO search|git_*.";
+      } else if (code_locate) {
+        req.user_prompt +=
+            "\nINVESTIGAR (mapa vacío): puedes search con needles del tema. "
+            "PROHIBIDO git_*.";
+      }
+    } else {
+      req.user_prompt =
+          "Continúa según la última OBSERVATION. "
+          "Emite SOLO un JSON action (tool|final|seeds|needs_level2), sin prosa.";
+    }
+    req.max_tokens = deps_.settings.level1.max_tokens;
+    req.n_ctx = std::max(4096, deps_.settings.level1.n_ctx);
+    req.temperature = deps_.settings.level1.temperature;
+
+    const auto completion = deps_.backend->complete(req, cancel);
+    if (!completion.ok) {
+      if (code_locate && !map_fallback.empty()) {
+        out.ok = true;
+        out.final_text = map_fallback;
+        if (log) {
+          log("✗ L1 complete: " + completion.error);
+          log("L1 final (fallback REPO_MAP): " + out.final_text);
+        }
+        return out;
+      }
+      if (!last_observation.empty() && code_locate) {
+        out.ok = true;
+        out.final_text = last_observation;
+        if (out.final_text.size() > 1200) {
+          out.final_text = out.final_text.substr(0, 1200) + "\n…";
+        }
+        if (log) {
+          log("✗ L1 complete: " + completion.error);
+          log("L1 final (fallback observación): " + out.final_text);
+        }
+        return out;
+      }
+      out.error = completion.error;
+      ai_trace(AiTraceChannel::L1, "l1_complete_fail",
+               "{\"step\":" + std::to_string(step) + ",\"error\":\"" +
+                   ai_trace_escape(completion.error) + "\"}");
+      if (log) {
+        log("✗ L1 complete: " + completion.error);
+      }
+      return out;
+    }
+    if (log) {
+      log("L1 raw: " + completion.text);
+    }
+    ai_trace(AiTraceChannel::L1, "l1_raw",
+             "{\"step\":" + std::to_string(step) + ",\"raw\":\"" +
+                 ai_trace_escape(completion.text) + "\"}");
+
+    const Level1Action action = parse_level1_action(completion.text);
+    ai_trace(AiTraceChannel::L1, "l1_action",
+             std::string("{\"step\":") + std::to_string(step) + ",\"kind\":\"" +
+                 action_kind_name(action.kind) + "\",\"tool\":\"" +
+                 ai_trace_escape(action.tool_name) + "\",\"arg\":\"" +
+                 ai_trace_escape(action.arg) + "\",\"text\":\"" +
+                 ai_trace_escape(action.text) + "\"}");
+    history += "<|im_start|>assistant\n" + completion.text.substr(0, 800) + "<|im_end|>\n";
+
+    switch (action.kind) {
+      case Level1ActionKind::Tool: {
+        if (code_locate && is_git_repo_tool_name(action.tool_name)) {
+          ai_trace(AiTraceChannel::L1, "l1_reject_tool",
+                   "{\"step\":" + std::to_string(step) + ",\"tool\":\"" +
+                       ai_trace_escape(action.tool_name) +
+                       "\",\"reason\":\"code_locate_blocks_git\"}");
+          if (log) {
+            log("✗ rechazado " + action.tool_name + " (investigar → REPO_MAP/final)");
+          }
+          history +=
+              "<|im_start|>user\nRECHAZADO git_*. Emite final con métodos del REPO_MAP "
+              "(o search solo si el mapa está vacío).<|im_end|>\n";
+          continue;
+        }
+        if (code_locate && map_ready && action.tool_name == "search") {
+          ai_trace(AiTraceChannel::L1, "l1_reject_tool",
+                   "{\"step\":" + std::to_string(step) +
+                       ",\"tool\":\"search\",\"reason\":\"map_first_no_search\"}");
+          if (log) {
+            log("✗ rechazado search (investigar con REPO_MAP → final)");
+          }
+          history +=
+              "<|im_start|>user\nRECHAZADO search. Ya tienes REPO_MAP. Emite "
+              "{\"action\":\"final\",\"text\":\"...\"} listando métodos/firmas del mapa "
+              "relevantes a la consulta.<|im_end|>\n";
+          continue;
+        }
+        if (code_locate && action.tool_name == "repo_map") {
+          ai_trace(AiTraceChannel::L1, "l1_reject_tool",
+                   "{\"step\":" + std::to_string(step) +
+                       ",\"tool\":\"repo_map\",\"reason\":\"map_already_injected\"}");
+          if (log) {
+            log("✗ rechazado repo_map (ya inyectado; emite final)");
+          }
+          if (!map_fallback.empty()) {
+            out.ok = true;
+            out.final_text = map_fallback;
+            if (log) {
+              log("L1 final (REPO_MAP tras rechazo tool): " + out.final_text);
+            }
+            return out;
+          }
+          history +=
+              "<|im_start|>user\nRECHAZADO repo_map (ya está en el prompt). Emite "
+              "{\"action\":\"final\",\"text\":\"...\"} con métodos del REPO_MAP.<|im_end|>\n";
+          continue;
+        }
+        std::string effective_arg = action.arg;
+        if (action.tool_name == "search") {
+          const auto expanded = expand_search_needles(action.arg, 12);
+          if (!expanded.empty()) {
+            effective_arg.clear();
+            for (std::size_t i = 0; i < expanded.size(); ++i) {
+              if (i) {
+                effective_arg.push_back('|');
+              }
+              effective_arg += expanded[i];
+            }
+          }
+        }
+        const std::string tool_key = action.tool_name + "\n" + effective_arg;
+        if (tool_key == last_tool_key && !last_observation.empty()) {
+          out.ok = true;
+          out.final_text = !map_fallback.empty() ? map_fallback : last_observation;
+          if (out.final_text.size() > 1200 && map_fallback.empty()) {
+            out.final_text = out.final_text.substr(0, 1200) + "\n…";
+          }
+          ai_trace(AiTraceChannel::L1, "l1_loop_break",
+                   "{\"step\":" + std::to_string(step) + ",\"tool\":\"" +
+                       ai_trace_escape(action.tool_name) + "\",\"streak\":" +
+                       std::to_string(same_tool_streak + 1) + "}");
+          if (log) {
+            log("L1 auto-final (misma tool repetida): " + action.tool_name);
+            log("L1 final: " + out.final_text);
+          }
+          return out;
+        }
+
+        const std::string observation =
+            invoke_tool_logged(action.tool_name, action.arg, log);
+        ai_trace(AiTraceChannel::L1, "l1_observation",
+                 "{\"step\":" + std::to_string(step) + ",\"tool\":\"" +
+                     ai_trace_escape(action.tool_name) + "\",\"obs\":\"" +
+                     ai_trace_escape(observation, 1200) + "\"}");
+        if (log) {
+          std::istringstream iss(observation);
+          std::string line;
+          int n = 0;
+          while (std::getline(iss, line)) {
+            log(line);
+            if (++n >= 80) {
+              log("…");
+              break;
+            }
+          }
+        }
+        if (tool_key == last_tool_key) {
+          ++same_tool_streak;
+        } else {
+          same_tool_streak = 1;
+          last_tool_key = tool_key;
+        }
+        last_observation = observation;
+        const bool zero_hits =
+            action.tool_name == "search" &&
+            (observation.find("quality:empty") != std::string::npos ||
+             observation.find("hits: 0") != std::string::npos);
+        const bool noisy =
+            action.tool_name == "search" && observation.find("quality:noisy") != std::string::npos;
+        if (zero_hits) {
+          history +=
+              "<|im_start|>user\nOBSERVATION:\n" + truncate_obs(observation) +
+              "\n\nquality:empty. Emite OTRA search con needles|DISTINTOS "
+              "(otras traducciones EN, CamelCase, sin repetir este set). "
+              "Si no hay más ideas, action=final diciendo 0 hits.<|im_end|>\n";
+        } else if (noisy) {
+          history +=
+              "<|im_start|>user\nOBSERVATION:\n" + truncate_obs(observation) +
+              "\n\nquality:noisy. Emite search más específica "
+              "(\"Foo path:src\" o ids más largos). No repitas el mismo set. "
+              "Luego final con top_files de src/.<|im_end|>\n";
+        } else {
+          history +=
+              "<|im_start|>user\nOBSERVATION:\n" + truncate_obs(observation) +
+              "\n\nResponde ahora con action=final y un text breve. "
+              "No vuelvas a llamar " +
+              action.tool_name + ".<|im_end|>\n";
+        }
+        break;
+      }
+      case Level1ActionKind::Seeds: {
+        if (action.seeds.empty()) {
+          history +=
+              "<|im_start|>user\nOBSERVATION: seeds vacíos; dicta identificadores de "
+              "código.<|im_end|>\n";
+          break;
+        }
+        if (log && !action.text.empty()) {
+          log("plan: " + action.text);
+        }
+        const std::string pack = run_seeds_pack(action.seeds, log);
+        out.seeds = action.seeds;
+        if (log) {
+          std::istringstream iss(pack);
+          std::string line;
+          int n = 0;
+          while (std::getline(iss, line)) {
+            log(line);
+            if (++n >= 120) {
+              log("…");
+              break;
+            }
+          }
+        }
+        history +=
+            "<|im_start|>user\nOBSERVATION ContextPack:\n" + truncate_obs(pack, 2000) +
+            "<|im_end|>\n";
+        break;
+      }
+      case Level1ActionKind::Final: {
+        out.ok = true;
+        out.final_text = action.text.empty() ? completion.text : action.text;
+        if ((out.final_text.find("Responde SOLO") != std::string::npos ||
+             out.final_text.find("archivo_activo:") != std::string::npos ||
+             out.final_text.find("exceeds the available context") != std::string::npos ||
+             out.final_text.find("INVESTIGAR:") != std::string::npos ||
+             (code_locate && looks_like_junk_final(out.final_text))) &&
+            !map_fallback.empty()) {
+          out.final_text = map_fallback;
+        } else if ((out.final_text.find("Responde SOLO") != std::string::npos ||
+                    out.final_text.find("archivo_activo:") != std::string::npos ||
+                    out.final_text.find("exceeds the available context") != std::string::npos) &&
+                   !last_observation.empty()) {
+          out.final_text = last_observation;
+          if (out.final_text.size() > 1200) {
+            out.final_text = out.final_text.substr(0, 1200) + "\n…";
+          }
+        }
+        if (log) {
+          log("L1 final: " + out.final_text);
+        }
+        return out;
+      }
+      case Level1ActionKind::NeedsLevel2: {
+        out.ok = true;
+        out.needs_level2 = true;
+        out.instruction = action.instruction;
+        out.seeds = action.seeds;
+        if (log) {
+          log("L1 → needs_level2 (dry-run; coder aún no cargado)");
+          if (!out.instruction.empty()) {
+            log("instruction: " + out.instruction);
+          }
+        }
+        if (!out.seeds.empty()) {
+          const std::string pack = run_seeds_pack(out.seeds, log);
+          if (log) {
+            log("=== L2 dry-run payload ===");
+            log("instruction: " + out.instruction);
+            std::istringstream iss(pack);
+            std::string line;
+            int n = 0;
+            while (std::getline(iss, line)) {
+              log(line);
+              if (++n >= 160) {
+                log("…");
+                break;
+              }
+            }
+          }
+        } else if (log) {
+          log("(sin seeds; el pack L2 quedaría pobre)");
+        }
+        out.final_text = "needs_level2 (dry-run only)";
+        return out;
+      }
+      case Level1ActionKind::Error:
+      case Level1ActionKind::Unknown:
+        if (log) {
+          log("✗ " + action.text);
+        }
+        if (code_locate && !map_fallback.empty()) {
+          out.ok = true;
+          out.final_text = map_fallback;
+          if (log) {
+            log("L1 final (fallback REPO_MAP tras JSON inválido): " + out.final_text);
+          }
+          return out;
+        }
+        if (code_locate && !last_observation.empty()) {
+          out.ok = true;
+          out.final_text = last_observation;
+          if (out.final_text.size() > 1200) {
+            out.final_text = out.final_text.substr(0, 1200) + "\n…";
+          }
+          if (log) {
+            log("L1 final (fallback tras JSON inválido): " + out.final_text);
+          }
+          return out;
+        }
+        history +=
+            "<|im_start|>user\nOBSERVATION: acción inválida (" + action.text +
+            "). Reintenta con UN objeto JSON válido "
+            "(action=tool|final|seeds|needs_level2).<|im_end|>\n";
+        break;
+    }
+  }
+
+  if (code_locate && !map_fallback.empty()) {
+    out.ok = true;
+    out.final_text = map_fallback;
+    if (log) {
+      log("L1 final (max_steps → REPO_MAP): " + out.final_text);
+    }
+    return out;
+  }
+
+  out.error = "max_steps alcanzado sin final";
+  ai_trace(AiTraceChannel::L1, "l1_max_steps",
+           "{\"max_steps\":" + std::to_string(max_steps) + "}");
+  if (log) {
+    log("✗ " + out.error);
+  }
+  return out;
+}
+
+}  // namespace tuide

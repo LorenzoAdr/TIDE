@@ -201,8 +201,19 @@ std::string_view busy_activity_i18n_key(BusyActivity activity) {
       return "busy.toolpack_install";
     case BusyActivity::ExportPortable:
       return "busy.export_portable";
+    case BusyActivity::AiThinking:
+      return "busy.ai_thinking";
+    case BusyActivity::AiMapping:
+      return "busy.ai_mapping";
+    case BusyActivity::AiEmbedding:
+      return "busy.ai_embedding";
   }
   return "busy.idle";
+}
+
+bool busy_activity_is_ai(BusyActivity activity) {
+  return activity == BusyActivity::AiThinking || activity == BusyActivity::AiMapping ||
+         activity == BusyActivity::AiEmbedding;
 }
 
 void set_busy_spinner(MainLayoutState* layout, BusyActivity activity, std::string_view label) {
@@ -212,11 +223,13 @@ void set_busy_spinner(MainLayoutState* layout, BusyActivity activity, std::strin
   BusyStripState& state = *layout->busy_strip;
   {
     std::lock_guard<std::mutex> lock(state.paint_mutex);
+    const BusyActivity previous = state.activity;
     state.kind = BusyIndicatorKind::Spinner;
     state.activity = activity;
     state.percent = 0;
-    state.label = std::string(label);
-    if (state.label.empty()) {
+    if (!label.empty()) {
+      state.label = std::string(label);
+    } else if (state.label.empty() || previous != activity) {
       state.label = i18n::tr(busy_activity_i18n_key(activity));
     }
     state.spinner_frame = 0;
@@ -236,12 +249,13 @@ void set_busy_percent(MainLayoutState* layout, BusyActivity activity, int percen
     std::lock_guard<std::mutex> lock(state.paint_mutex);
     const bool was_active = state.kind == BusyIndicatorKind::Spinner ||
                             state.kind == BusyIndicatorKind::Percent;
+    const BusyActivity previous = state.activity;
     state.kind = BusyIndicatorKind::Percent;
     state.activity = activity;
     state.percent = std::clamp(percent, 0, 100);
     if (!label.empty()) {
       state.label = std::string(label);
-    } else if (state.label.empty()) {
+    } else if (state.label.empty() || previous != activity) {
       state.label = i18n::tr(busy_activity_i18n_key(activity));
     }
     if (!was_active) {
@@ -260,6 +274,11 @@ void clear_busy(MainLayoutState* layout) {
   BusyStripState& state = *layout->busy_strip;
   {
     std::lock_guard<std::mutex> lock(state.paint_mutex);
+    // Coding-symbol embedding owns the strip until it finishes; generic clear_busy
+    // from Indexing/outline/etc. must not wipe the % between embed chunks.
+    if (state.activity == BusyActivity::AiEmbedding) {
+      return;
+    }
     state.kind = BusyIndicatorKind::None;
     state.activity = BusyActivity::Idle;
     state.percent = 0;
@@ -268,6 +287,90 @@ void clear_busy(MainLayoutState* layout) {
     paint_ansi_unlocked(&state);
   }
   // Dejar el hilo vivo pero idle (kind==None); evita join en hot path.
+}
+
+void clear_busy_if(MainLayoutState* layout, BusyActivity activity) {
+  if (layout == nullptr || layout->busy_strip == nullptr) {
+    return;
+  }
+  BusyActivity current = BusyActivity::Idle;
+  {
+    std::lock_guard<std::mutex> lock(layout->busy_strip->paint_mutex);
+    current = layout->busy_strip->activity;
+  }
+  if (current == activity) {
+    clear_busy(layout);
+  }
+}
+
+void refresh_ai_mapping_busy(MainLayoutState* layout, bool scanning, std::size_t done,
+                             std::size_t total) {
+  if (layout == nullptr || layout->busy_strip == nullptr) {
+    return;
+  }
+  BusyActivity current = BusyActivity::Idle;
+  {
+    std::lock_guard<std::mutex> lock(layout->busy_strip->paint_mutex);
+    current = layout->busy_strip->activity;
+  }
+  // Pensando has priority; Mapping may replace Indexing (more specific progress).
+  if (current == BusyActivity::AiThinking) {
+    return;
+  }
+  if (current != BusyActivity::Idle && current != BusyActivity::AiMapping &&
+      current != BusyActivity::Indexing) {
+    return;
+  }
+  if (!scanning) {
+    clear_busy_if(layout, BusyActivity::AiMapping);
+    return;
+  }
+  // Waiting for the workspace file list (total still unknown) → spinner "Mapping".
+  if (total == 0) {
+    set_busy_spinner(layout, BusyActivity::AiMapping);
+    return;
+  }
+  int pct = static_cast<int>((done * 100) / total);
+  if (pct > 100) {
+    pct = 100;
+  }
+  set_busy_percent(layout, BusyActivity::AiMapping, pct);
+}
+
+void refresh_ai_embedding_busy(MainLayoutState* layout, bool active, std::size_t done,
+                               std::size_t total) {
+  if (layout == nullptr || layout->busy_strip == nullptr) {
+    return;
+  }
+  BusyActivity current = BusyActivity::Idle;
+  {
+    std::lock_guard<std::mutex> lock(layout->busy_strip->paint_mutex);
+    current = layout->busy_strip->activity;
+  }
+  // Pensando has priority; embedding may replace Mapping / Indexing / itself.
+  if (current == BusyActivity::AiThinking) {
+    return;
+  }
+  if (!active) {
+    clear_busy_if(layout, BusyActivity::AiEmbedding);
+    return;
+  }
+  // Always take the strip while embedding is active (Indexing/outline clear_busy
+  // would otherwise leave it blank until the next embed chunk).
+  if (current != BusyActivity::Idle && current != BusyActivity::AiEmbedding &&
+      current != BusyActivity::AiMapping && current != BusyActivity::Indexing &&
+      current != BusyActivity::OutlinePending) {
+    return;
+  }
+  if (total == 0) {
+    set_busy_spinner(layout, BusyActivity::AiEmbedding);
+    return;
+  }
+  int pct = static_cast<int>((done * 100) / total);
+  if (pct > 100) {
+    pct = 100;
+  }
+  set_busy_percent(layout, BusyActivity::AiEmbedding, pct);
 }
 
 void busy_strip_tick(BusyStripState* state, int64_t now_ms) {

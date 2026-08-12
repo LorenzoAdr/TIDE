@@ -10,6 +10,7 @@
 #include <optional>
 #include <sstream>
 #include <thread>
+#include <unordered_set>
 #include <unistd.h>
 #include <csignal>
 #include <sys/types.h>
@@ -17,6 +18,7 @@
 #include "app/workspace_config.hpp"
 #include "app/workspace_session.hpp"
 #include "app/recent_projects.hpp"
+#include "ai/ai_controller.hpp"
 #include "backend/idebug_backend.hpp"
 #include "build/build_environment.hpp"
 #include "build/build_environment_service.hpp"
@@ -32,6 +34,7 @@
 #include "ftxui/component/screen_interactive.hpp"
 #include "i18n/locale.hpp"
 #include "i18n/tr.hpp"
+#include "indexer/index_rules.hpp"
 #include "packet_monitor/pkt_monitor_service.hpp"
 #include "parser/tree_sitter_service.hpp"
 #include "ui/binary_symbols_panel.hpp"
@@ -697,17 +700,55 @@ void Application::restart_lsp_for_workspace() {
 	}
 }
 
-void Application::sync_symbol_workspace_indexer() {
+void Application::sync_symbol_workspace_indexer(bool force) {
 	if (workspace_.root.empty()) {
 		symbol_indexer_.stop();
 		return;
 	}
-	// With LSP on, bulk tree-sitter indexing scans the whole tree and duplicates clangd work.
-	if (app_settings_.lsp_enabled) {
-		symbol_indexer_.stop();
-		return;
+	// Always keep a defs+refs index for AI/repo map (LSP does not populate it).
+	// Do NOT restart on every apply_app_settings (F10→Esc): that resets progress to 0/N
+	// and looks like the indexer is "stuck on the same file".
+	if (!force) {
+		const auto snap = symbol_indexer_.snapshot();
+		if (snap && snap->workspace_root == workspace_.root) {
+			if (symbol_indexer_.scanning()) {
+				return;
+			}
+			if (!snap->symbols.empty()) {
+				// Recover from a prior race that indexed only the explorer skeleton
+				// (e.g. ~32 files under the open folder) while rg was still running.
+				const auto file_snap = indexer_.snapshot();
+				if (file_snap && file_snap->workspace_root == workspace_.root &&
+				    !indexer_.scanning()) {
+					std::size_t source_files = 0;
+					for (const auto& rel : file_snap->files) {
+						if (is_indexed_source_path(rel)) {
+							++source_files;
+						}
+					}
+					std::unordered_set<std::string> mapped_files;
+					mapped_files.reserve(snap->symbols.size());
+					for (const auto& sym : snap->symbols) {
+						mapped_files.insert(sym.file);
+					}
+					if (source_files <= mapped_files.size() + 10) {
+						if (layout_state_.ai_controller != nullptr) {
+							layout_state_.ai_controller->on_symbol_map_ready();
+						}
+						return;
+					}
+					// Fall through: force a full rebuild against the complete file list.
+				} else {
+					if (layout_state_.ai_controller != nullptr) {
+						layout_state_.ai_controller->on_symbol_map_ready();
+					}
+					return;
+				}
+			}
+		}
 	}
 	symbol_indexer_.start_scan(workspace_.root, symbol_provider_, &indexer_);
+	refresh_ai_mapping_busy(&layout_state_, true, 0, 0);
 }
 
 IndexFilterOptions Application::index_filter_options() const {
@@ -776,7 +817,7 @@ void Application::reindex_project() {
 		std::thread([this]() {
 			set_current_thread_name("reindex");
 			restart_lsp_for_workspace();
-			sync_symbol_workspace_indexer();
+			sync_symbol_workspace_indexer(true);
 			restart_workspace_indexing();
 			enqueue_ui_task([this]() {
 				reopen_workspace_documents(&workspace_, symbol_provider_);
@@ -889,6 +930,16 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 			TUIDE_MON_SCOPE("ui", "tick.git");
 			git_service_.tick();
 		}
+	}
+
+	{
+		std::size_t done = 0;
+		std::size_t total = 0;
+		const bool scanning = symbol_indexer_.scanning();
+		if (scanning) {
+			symbol_indexer_.progress(&done, &total);
+		}
+		refresh_ai_mapping_busy(&layout_state_, scanning, done, total);
 	}
 
   // TerminalOutput wakes drive steady-state PTY refresh. Autostart also needs a tick
@@ -2745,6 +2796,19 @@ int Application::run() {
 		}
 		layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
 		UI_WAKE(&layout_state_, "indexer.fs_change");
+		// Full rg list just replaced the skeleton: rebuild AI map if it is stale/short.
+		if (!indexer_.scanning()) {
+			enqueue_ui_task([this]() { sync_symbol_workspace_indexer(false); });
+		}
+	});
+	symbol_indexer_.set_progress_callback([this](bool scanning, std::size_t done, std::size_t total) {
+		// ANSI busy strip: update from worker so % moves without waiting for a UI click.
+		refresh_ai_mapping_busy(&layout_state_, scanning, done, total);
+		// When the workspace symbol map completes, start coding-symbol embeddings
+		// automatically (independent of any AI query).
+		if (!scanning && layout_state_.ai_controller != nullptr) {
+			layout_state_.ai_controller->on_symbol_map_ready();
+		}
 	});
 	indexer_.set_modify_wake_predicate(
 	    [this](const std::string& absolute_path) { return is_editor_visible_path(absolute_path); });
