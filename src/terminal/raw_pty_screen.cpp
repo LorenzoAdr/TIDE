@@ -275,8 +275,9 @@ void RawPtyScreen::skip_escape(const char*& p, const char* end) {
 }
 
 void RawPtyScreen::append_char(char ch) {
+  // Soft-wrap: long lines continue on the next row instead of being truncated.
   if (cursor_col_ >= cols_) {
-    return;
+    newline();
   }
   ensure_current_width();
   ScreenCell& cell = current_cells_[static_cast<std::size_t>(cursor_col_)];

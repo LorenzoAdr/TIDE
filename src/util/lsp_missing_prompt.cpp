@@ -255,6 +255,26 @@ void write_bundle_config_map(const fs::path& path, const ConfigMap& map) {
 
 }  // namespace
 
+std::string language_pack_id_for_lsp_server(const std::string& server_id) {
+  static const std::unordered_map<std::string, std::string> kMap = {
+      {"basedpyright", "python"},
+      {"bash-language-server", "bash"},
+      {"texlab", "latex"},
+      {"rust-analyzer", "rust"},
+      {"gopls", "go"},
+      {"zls", "zig"},
+      {"fortls", "fortran"},
+      {"lua-language-server", "lua"},
+      {"typescript-language-server", "typescript"},
+      {"neocmakelsp", "cmake"},
+      {"make-ls", "make"},
+      {"yaml-language-server", "yaml"},
+      {"clangd", "cpp"},
+  };
+  const auto it = kMap.find(server_id);
+  return it == kMap.end() ? std::string{} : it->second;
+}
+
 std::optional<LspMissingPromptInfo> lsp_missing_prompt_for_status_key(const std::string& i18n_key) {
   for (const auto& entry : catalog()) {
     if (entry.status_missing_key == i18n_key) {

@@ -506,10 +506,13 @@ bool event_is_ctrl_key_release(const ftxui::Event& event) {
 }
 
 bool event_is_alt_key_press(const ftxui::Event& event) {
-  return event == ftxui::Event::Special("\x1B[57440u") ||
-         event == ftxui::Event::Special("\x1B[57440;1u") ||
-         event == ftxui::Event::Special("\x1B[57441u") ||
-         event == ftxui::Event::Special("\x1B[57441;1u");
+  const std::string& input = event.input();
+  // Kitty Alt Left/Right: CSI 57440/57441 …u — any non-release event counts as press.
+  if (input_is_alt_modifier_key(input) && input.back() == 'u' &&
+      !input_is_kitty_release_event(input)) {
+    return true;
+  }
+  return false;
 }
 
 bool event_is_alt_key_release(const ftxui::Event& event) {
@@ -929,7 +932,12 @@ bool parse_kitty_alt_only_keycode(const std::string& input, int* out_keycode) {
   if (semi == std::string::npos || input.back() != 'u') {
     return false;
   }
-  const std::string modifier = input.substr(semi + 1, input.size() - semi - 2);
+  // Modifier may be "3", "3:1" (press), etc. — only the base modifier matters.
+  std::string modifier = input.substr(semi + 1, input.size() - semi - 2);
+  const std::size_t colon = modifier.find(':');
+  if (colon != std::string::npos) {
+    modifier = modifier.substr(0, colon);
+  }
   if (modifier != "3") {
     return false;
   }

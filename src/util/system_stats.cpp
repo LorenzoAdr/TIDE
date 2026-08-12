@@ -884,11 +884,13 @@ void PerformanceSampler::sampler_loop() {
       last_sample = {};
     }
 
-    if (!dump_enabled) {
+    const bool ui_sampling = sampling_enabled_.load(std::memory_order_acquire);
+    if (!dump_enabled && !ui_sampling) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }
 
+    const auto sample_interval = dump_enabled ? kFileDumpInterval : kSampleInterval;
     if (last_sample.time_since_epoch().count() == 0) {
       last_sample = now;
       {
@@ -902,28 +904,34 @@ void PerformanceSampler::sampler_loop() {
         populate_worker_samples(&snapshot_.process, nullptr, stats_state_.get(), 0.0, 1);
         snapshot_.stats_available = true;
         snapshot_.system.available = true;
+        if (ui_sampling) {
+          last_ui_publish = now;
+        }
       }
-      std::this_thread::sleep_for(kFileDumpInterval);
+      std::this_thread::sleep_for(sample_interval);
       continue;
     }
 
     const auto since_sample = now - last_sample;
-    if (since_sample >= kFileDumpInterval) {
+    if (since_sample >= sample_interval) {
       const double elapsed_sec = std::chrono::duration<double>(since_sample).count();
       PerformanceSnapshot sample;
       SamplerStatsState curr{};
+      bool sampled = false;
       {
         std::lock_guard<std::mutex> lock(snapshot_mutex_);
-        sample_linux_stats(&sample, stats_state_.get(), &curr, elapsed_sec);
-        if (sampling_enabled_.load(std::memory_order_acquire)) {
+        sampled = sample_linux_stats(&sample, stats_state_.get(), &curr, elapsed_sec);
+        if (sampled && ui_sampling) {
           const auto since_ui = now - last_ui_publish;
           if (last_ui_publish.time_since_epoch().count() == 0 || since_ui >= kSampleInterval) {
+            const double fps = snapshot_.fps;
             snapshot_ = sample;
+            snapshot_.fps = fps;
             last_ui_publish = now;
           }
         }
       }
-      if (!dump_path_.empty()) {
+      if (sampled && dump_enabled && !dump_path_.empty()) {
         append_dump_line(sample, elapsed_sec);
       }
       last_sample = now;

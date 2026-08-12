@@ -33,6 +33,7 @@ enum class BusyActivity : std::uint8_t {
   AiThinking,
   AiMapping,
   AiEmbedding,
+  AiDownloading,
 };
 
 struct BusyStripState {

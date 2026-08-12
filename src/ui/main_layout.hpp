@@ -262,6 +262,8 @@ struct MainLayoutState {
   bool editor_completion_open = false;
   bool editor_ctrl_modifier_held = false;
   bool editor_alt_modifier_held = false;
+  // When false, the Index status button turns red (clangd down / missing).
+  bool status_index_lsp_ready = true;
   std::function<void()> terminal_tick_callback;
   std::function<void()> terminal_follow_input_callback;
   std::function<int()> terminal_width;

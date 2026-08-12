@@ -239,10 +239,16 @@ void DapBackend::push_event(DebugEvent event) {
   // active_line (no ► / highlight) until the next user keypress.
   // kOutput must wake when it carries inferior stdout/stderr so App updates
   // without waiting for a stop (launch with no breakpoints exits immediately).
+  // kWatchUpdated / kVariablesUpdated: evaluate and scopes finish after the
+  // stop wake; without these the watches panel stays on "..." until the next
+  // step/continue that happens to drain the event queue.
   if (kind == DebugEventKind::kStopped || kind == DebugEventKind::kTerminated ||
       kind == DebugEventKind::kSessionReady || kind == DebugEventKind::kLaunchConfigured ||
       kind == DebugEventKind::kContinued || kind == DebugEventKind::kError ||
-      kind == DebugEventKind::kStackUpdated || kind == DebugEventKind::kOutput) {
+      kind == DebugEventKind::kStackUpdated || kind == DebugEventKind::kOutput ||
+      kind == DebugEventKind::kWatchUpdated || kind == DebugEventKind::kVariablesUpdated ||
+      kind == DebugEventKind::kVariableChildrenUpdated || kind == DebugEventKind::kHoverValue ||
+      kind == DebugEventKind::kHardwareWatchUpdated) {
     std::lock_guard<std::mutex> lock(wake_mutex_);
     if (wake_callback_) {
       wake_callback_(kind);
@@ -1838,6 +1844,13 @@ void DapBackend::handle_command(const UiCommand& command) {
         event.kind = DebugEventKind::kWatchUpdated;
         event.watch_expression = command.expression;
         event.watch_value = response.response.result;
+        if (response.response.type.has_value()) {
+          event.watch_type = response.response.type.value();
+        }
+        if (response.response.variablesReference > 0) {
+          event.watch_variables_reference =
+              static_cast<int>(response.response.variablesReference);
+        }
       } else if (command.evaluate_context == EvaluateContext::kHover) {
         event.kind = DebugEventKind::kHoverValue;
         event.hover_key = command.correlation_id;

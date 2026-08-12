@@ -81,6 +81,7 @@
 #include "util/core_analyzer_support.hpp"
 #include "util/crash_handler.hpp"
 #include "util/docker_shell.hpp"
+#include "util/lsp_missing_prompt.hpp"
 #include "util/monitor_log.hpp"
 #include "util/nm_reader.hpp"
 #include "util/path_normalize.hpp"
@@ -88,6 +89,7 @@
 #include "util/thread_name.hpp"
 #include "util/ui_activity_gate.hpp"
 #include "util/ui_perf_monitor.hpp"
+#include "toolpacks/language_packs.hpp"
 
 #include <string>
 
@@ -533,13 +535,35 @@ void Application::on_lsp_missing_install() {
 	if (!lsp_missing_toast_state_.open) {
 		return;
 	}
-	const std::string command = lsp_missing_toast_state_.info.install_command;
+	const std::string pack_id =
+	    language_pack_id_for_lsp_server(lsp_missing_toast_state_.info.server_id);
 	lsp_missing_toast_state_.close();
-	if (command.empty()) {
+	if (pack_id.empty()) {
+		set_workspace_status(i18n::tr("lsp_toast.install_failed"));
+		UI_WAKE(&layout_state_, "app");
 		return;
 	}
-	inject_terminal_command(command);
-	set_workspace_status(i18n::tr("lsp_toast.install_ready"));
+	set_busy_percent(&layout_state_, BusyActivity::ToolpackInstall, 0);
+	set_workspace_status(i18n::tr("lsp_toast.installing"));
+	UI_WAKE(&layout_state_, "app");
+	std::thread([this, pack_id]() {
+		const auto result = toolpacks::install_language_pack(
+		    pack_id, [this](int percent, std::string_view label) {
+			    set_busy_percent(&layout_state_, BusyActivity::ToolpackInstall, percent, label);
+			    UI_WAKE(&layout_state_, "toolpack");
+		    });
+		enqueue_ui_task([this, result]() {
+			clear_busy(&layout_state_);
+			set_workspace_status(result.ok ? i18n::tr("lsp_toast.install_done")
+			                               : (result.message.empty()
+			                                      ? i18n::tr("lsp_toast.install_failed")
+			                                      : result.message));
+			if (result.ok) {
+				restart_lsp_for_workspace();
+			}
+			UI_WAKE(&layout_state_, "app");
+		});
+	}).detach();
 }
 
 void Application::on_lsp_missing_bundle() {
@@ -982,6 +1006,13 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 				workspace_.buffer.view_token++;
 				secondary_workspace_.buffer.view_token++;
 			}
+			const bool lsp_ready = symbol_provider_->clangd_index_healthy();
+			if (layout_state_.status_index_lsp_ready != lsp_ready) {
+				layout_state_.status_index_lsp_ready = lsp_ready;
+				UI_WAKE(&layout_state_, "app");
+			}
+		} else if (!app_settings_.lsp_enabled) {
+			layout_state_.status_index_lsp_ready = false;
 		}
 		if (app_mode_ == AppMode::kDebug) {
 			layout_state_.packet_monitor_service->tick();
@@ -2194,6 +2225,8 @@ void Application::apply_event(const DebugEvent &event) {
 		}
 		// StackTrace is async after kStopped; DapBackend wakes on kStackUpdated so
 		// this handler runs promptly (► / line highlight without waiting for input).
+		// Watches refreshed at kStopped often lacked a valid frameId — re-evaluate now.
+		refresh_all_watches();
 		invalidate_debug_ui();
 		break;
 	case DebugEventKind::kVariablesUpdated:
@@ -2202,6 +2235,7 @@ void Application::apply_event(const DebugEvent &event) {
 		if (event.stack_frame_id >= 0) {
 			model_.variables_frame_id = event.stack_frame_id;
 		}
+		refresh_all_watches();
 		layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
 		break;
 	case DebugEventKind::kVariableChildrenUpdated:
@@ -2243,6 +2277,8 @@ void Application::apply_event(const DebugEvent &event) {
 		for (auto &watch : model_.watches) {
 			if (watch.expression == event.watch_expression) {
 				watch.value = event.watch_value;
+				watch.type = event.watch_type;
+				watch.variables_reference = event.watch_variables_reference;
 			}
 		}
 		layout_state_.panel_render_cache.mark_dirty(UiPanelId::RightSidebar);

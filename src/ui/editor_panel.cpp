@@ -3164,7 +3164,16 @@ int visible_line_count(const Box& box) {
   return std::max(1, box.y_max - box.y_min + 1);
 }
 
-int max_scroll(int total, int visible) { return std::max(0, total - visible); }
+// File/editor scroll: allow past-EOF padding so the last line can rise.
+// Tabular/virtual callers that need a tight clamp pass through their own helpers.
+int max_scroll(int total, int /*visible*/) {
+  if (total <= 0) {
+    return 0;
+  }
+  return std::max(0, total - 1);
+}
+
+int max_scroll_tight(int total, int visible) { return std::max(0, total - visible); }
 
 int code_width_from_box(const Box& box, int fallback) {
   if (box.x_max > box.x_min) {
@@ -3183,7 +3192,7 @@ int tabular_max_allowed_scroll(EditorPanelState* panel, int visible_lines) {
   }
   const int data_total = panel->tabular_store->max_data_total();
   const int data_visible = tabular_data_visible_lines(visible_lines);
-  int allowed = max_scroll(data_total, data_visible);
+  int allowed = max_scroll_tight(data_total, data_visible);
   if (panel->tabular_scroll_locked || panel->tabular_store->loading_more()) {
     allowed = std::min(allowed, panel->tabular_scroll_limit);
   }
@@ -3210,7 +3219,7 @@ void maybe_request_tabular_chunk(EditorPanelState* panel, EditorBuffer* buffer, 
   }
   const int data_visible = tabular_data_visible_lines(visible_lines);
   const int data_total = store->max_data_total();
-  if (buffer->scroll < max_scroll(data_total, data_visible)) {
+  if (buffer->scroll < max_scroll_tight(data_total, data_visible)) {
     return;
   }
   if (store->request_load_at_end(buffer->scroll, data_visible)) {
@@ -3234,7 +3243,7 @@ bool scroll_tabular_lines(WorkspaceModel* workspace, EditorPanelState* panel, in
   const int data_total = panel->tabular_store->max_data_total();
   const int data_visible = tabular_data_visible_lines(visible_lines);
   buffer->scroll =
-      std::max(0, std::min(buffer->scroll + delta_lines, max_scroll(data_total, data_visible)));
+      std::max(0, std::min(buffer->scroll + delta_lines, max_scroll_tight(data_total, data_visible)));
   clamp_tabular_scroll(panel, buffer, visible_lines);
   maybe_request_tabular_chunk(panel, buffer, visible_lines);
   buffer->view_token++;
@@ -3257,7 +3266,7 @@ int virtual_max_allowed_scroll(EditorPanelState* panel, int visible_lines) {
     return 0;
   }
   const int total = panel->virtual_store->line_count();
-  int allowed = max_scroll(total, visible_lines);
+  int allowed = max_scroll_tight(total, visible_lines);
   if (panel->virtual_scroll_locked || panel->virtual_store->loading_more()) {
     allowed = std::min(allowed, panel->virtual_scroll_limit);
   }
@@ -3283,7 +3292,7 @@ void maybe_request_virtual_chunk(EditorPanelState* panel, EditorBuffer* buffer, 
     return;
   }
   const int total = store->line_count();
-  if (buffer->scroll < max_scroll(total, visible_lines)) {
+  if (buffer->scroll < max_scroll_tight(total, visible_lines)) {
     return;
   }
   if (store->request_load_at_end(buffer->scroll, visible_lines)) {
@@ -3301,7 +3310,7 @@ bool scroll_virtual_lines(WorkspaceModel* workspace, EditorPanelState* panel, in
   EditorBuffer* buffer = &workspace->buffer;
   const int total = panel->virtual_store->line_count();
   buffer->scroll = std::max(
-      0, std::min(buffer->scroll + delta_lines, max_scroll(total, visible_lines)));
+      0, std::min(buffer->scroll + delta_lines, max_scroll_tight(total, visible_lines)));
   clamp_virtual_scroll(panel, buffer, visible_lines);
   maybe_request_virtual_chunk(panel, buffer, visible_lines);
   buffer->view_token++;
@@ -4845,6 +4854,10 @@ void open_completion(CompletionState* completion, WorkspaceModel* workspace,
   if (find != nullptr && find->open) {
     close_find_bar(find);
   }
+  // Defensive: clear sticky Alt so completion navigation is not remapped.
+  if (layout_state != nullptr) {
+    layout_state->editor_alt_modifier_held = false;
+  }
   completion->open = true;
   completion->live_mode = false;
   completion->prefix = completion_prefix_at_cursor(*buffer, buffer->primary());
@@ -4959,7 +4972,14 @@ bool accept_completion(CompletionState* completion, EditorBuffer* buffer,
                                   snippet.caret_line_offset, snippet.caret_col,
                                   snippet.sel_start_col, snippet.sel_end_col);
     if (panel != nullptr) {
-      begin_snippet_session(&panel->snippet_session, repl_line, repl_start, snippet);
+      const bool mid_snippet = snippet_session_active(panel->snippet_session);
+      const bool new_has_stops = !snippet.placeholders.empty();
+      if (mid_snippet && !new_has_stops) {
+        // Completing a value inside an argument placeholder must keep Tab-stops alive.
+        reflow_snippet_placeholders_after_current_edit(buffer, &panel->snippet_session);
+      } else {
+        begin_snippet_session(&panel->snippet_session, repl_line, repl_start, snippet);
+      }
     }
   }
   ensure_scroll_visible(buffer, visible_lines, -1);
@@ -5257,7 +5277,9 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     } else if (const auto stripped = strip_alt_modifier_for_helix(event)) {
       helix_dispatch_event = *stripped;
       helix_overlay = true;
-      layout_state->editor_alt_modifier_held = true;
+      // Do not latch Alt from one-shot ESC+key / Alt+chord events. Only Kitty
+      // Alt press/release should drive editor_alt_modifier_held; otherwise Alt
+      // stays stuck after e.g. Alt+. opens completion.
     } else if (layout_state->editor_helix_prefix_pending) {
       helix_overlay = true;
     }
@@ -5274,6 +5296,21 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (completion != nullptr && completion->open) {
+    // Tab while filling snippet args: accept the suggestion (if any) then advance.
+    if (event == Event::Tab && panel != nullptr &&
+        snippet_session_active(panel->snippet_session)) {
+      if (!completion->matches.empty()) {
+        accept_completion(completion, buffer, layout_state, visible_lines, workspace, panel,
+                          symbols);
+      } else {
+        completion->close(layout_state);
+      }
+      if (snippet_session_active(panel->snippet_session) &&
+          advance_snippet_session(buffer, &panel->snippet_session)) {
+        ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+      }
+      return true;
+    }
     if (handle_completion_keys(completion, workspace, symbols, symbol_indexer, layout_state, panel,
                                buffer, event, visible_lines)) {
       return true;
@@ -5589,7 +5626,7 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     const int data_visible = tabular_data_visible_lines(visible_lines);
     const auto scroll_data = [&](int delta) {
       buffer->scroll = std::max(
-          0, std::min(buffer->scroll + delta, max_scroll(data_total, data_visible)));
+          0, std::min(buffer->scroll + delta, max_scroll_tight(data_total, data_visible)));
       clamp_tabular_scroll(panel, buffer, visible_lines);
       maybe_request_tabular_chunk(panel, buffer, visible_lines);
       buffer->view_token++;
@@ -6367,8 +6404,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         viewport_lines.empty() ? buffer.scroll : viewport_lines.front();
     panel_state->gutter_visible_rows = static_cast<int>(viewport_lines.size());
 
-    const int scroll_total =
+    const int scroll_total_base =
         buffer.collapsed_folds.empty() ? total : static_cast<int>(fold_visible_lines.size());
+    // Include beyond-last-line padding in the scrollbar range.
+    const int scroll_total =
+        scroll_total_base > 0 ? scroll_total_base + std::max(0, visible - 1) : 0;
     int scroll_visible_index = 0;
     if (!buffer.collapsed_folds.empty()) {
       const int found = visible_line_index(fold_visible_lines, buffer.scroll);
@@ -6464,7 +6504,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         tabular_store->ensure_viewport(buffer.scroll, data_visible);
         maybe_request_tabular_chunk(panel_state.get(), &buffer, visible);
 
-        const int data_scroll = std::max(0, std::min(buffer.scroll, max_scroll(data_total, 1)));
+        const int data_scroll = std::max(0, std::min(buffer.scroll, max_scroll_tight(data_total, 1)));
         const TabularTableLayout& layout = tabular_store->layout();
         const TabularDelimiter delimiter = tabular_store->delimiter();
         const int gutter_w = line_number_width(std::max(file_rows, 1));
@@ -6575,7 +6615,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         virtual_store->ensure_viewport(buffer.scroll, visible);
         maybe_request_virtual_chunk(panel_state.get(), &buffer, visible);
 
-        const int scroll = std::max(0, std::min(buffer.scroll, max_scroll(file_lines, visible)));
+        const int scroll = std::max(0, std::min(buffer.scroll, max_scroll_tight(file_lines, visible)));
         buffer.scroll = scroll;
         const int gutter_w = line_number_width(std::max(file_lines, 1));
         const int code_width =
@@ -7118,6 +7158,15 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->viewport_line_render_cache[i] = cached_row;
       gutter_pixel_rows.push_back(cached_row.gutter);
       code_pixel_rows.push_back(cached_row.code);
+    }
+    // Dead lines past EOF so the last buffer line can rise in the viewport.
+    while (static_cast<int>(code_pixel_rows.size()) < visible) {
+      gutter_pixel_rows.push_back(
+          PixelRowFromElement(text(std::string(static_cast<std::size_t>(gutter_render_width), ' ')) |
+                                  bgcolor(theme::CodeBg()),
+                              gutter_render_width));
+      code_pixel_rows.push_back(
+          PixelRowFromElement(text(" ") | bgcolor(theme::CodeBg()), code_width));
     }
     }
     prune_viewport_line_render_cache(panel_state.get(), viewport_lines);

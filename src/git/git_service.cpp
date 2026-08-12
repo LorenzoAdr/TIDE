@@ -1039,6 +1039,10 @@ void GitService::checkout_branch(const std::string& branch, CompletionCallback o
 }
 
 void GitService::push(CompletionCallback on_done) {
+  push(GitCredentials{}, std::move(on_done));
+}
+
+void GitService::push(const GitCredentials& credentials, CompletionCallback on_done) {
   std::string repo_root;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -1048,8 +1052,11 @@ void GitService::push(CompletionCallback on_done) {
     dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
     return;
   }
-  enqueue([this, repo_root, on_done]() {
-    const auto result = run_git(repo_root, {"push"});
+  enqueue([this, repo_root, credentials, on_done]() {
+    const auto result =
+        credentials.password.empty() && credentials.username.empty()
+            ? run_git(repo_root, {"push"})
+            : run_git_with_credentials(repo_root, {"push"}, credentials);
     if (result.success()) {
       invalidate();
       dispatch_completion(on_done, true, result.stdout_text);
@@ -1060,6 +1067,10 @@ void GitService::push(CompletionCallback on_done) {
 }
 
 void GitService::pull(CompletionCallback on_done) {
+  pull(GitCredentials{}, std::move(on_done));
+}
+
+void GitService::pull(const GitCredentials& credentials, CompletionCallback on_done) {
   std::string repo_root;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -1069,8 +1080,11 @@ void GitService::pull(CompletionCallback on_done) {
     dispatch_completion(on_done, false, i18n::tr("git.not_repo"));
     return;
   }
-  enqueue([this, repo_root, on_done]() {
-    const auto result = run_git(repo_root, {"pull"});
+  enqueue([this, repo_root, credentials, on_done]() {
+    const auto result =
+        credentials.password.empty() && credentials.username.empty()
+            ? run_git(repo_root, {"pull"})
+            : run_git_with_credentials(repo_root, {"pull"}, credentials);
     if (result.success()) {
       invalidate();
       dispatch_completion(on_done, true, result.stdout_text);

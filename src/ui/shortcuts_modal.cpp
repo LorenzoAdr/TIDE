@@ -152,6 +152,7 @@ std::vector<ShortcutSection> shortcut_sections() {
        {
            {i18n::tr("shortcuts.key.click"), i18n::tr("shortcuts.performance.open_tab")},
            {"j / k", i18n::tr("shortcuts.performance.scroll_threads")},
+           {"r", i18n::tr("shortcuts.performance.refresh")},
            {"1 / 2 / 3", i18n::tr("shortcuts.performance.bottom_tabs")},
        }},
       {i18n::tr("shortcuts.section.git"),

@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -90,6 +91,7 @@ struct WatchesPanelState {
   int watch_selected = 0;
   int bp_selected = 0;
   std::vector<FlatVariable> flat_variables;
+  std::vector<FlatVariable> flat_watches;
   std::vector<BreakpointRow> breakpoint_rows;
   Box variables_box;
   Box stack_box;
@@ -106,11 +108,14 @@ struct WatchesPanelState {
   Box step_box;
   Box clear_bp_box;
   std::unordered_set<std::string> expanded_expressions;
+  std::unordered_set<std::string> expanded_watch_expressions;
   int last_bp_click_row = -1;
   int64_t last_bp_click_ms = 0;
   int last_watch_click_row = -1;
   int64_t last_watch_click_ms = 0;
 };
+
+void rebuild_flat_watches(DebugModel* model, WatchesPanelState* state);
 
 bool watch_input_active(MainLayoutState* layout_state, int selected_tab) {
   return layout_state && selected_tab == 0 &&
@@ -148,12 +153,16 @@ void start_watch_inject(WatchesPanelState* state, DebugModel* model,
   if (model->watches.empty() || model->state != DebugState::kStopped) {
     return;
   }
+  rebuild_flat_watches(model, state);
+  if (state->flat_watches.empty()) {
+    return;
+  }
   state->watch_selected = std::max(
       0, std::min(state->watch_selected,
-                  static_cast<int>(model->watches.size()) - 1));
-  const auto& watch = model->watches[state->watch_selected];
+                  static_cast<int>(state->flat_watches.size()) - 1));
+  const auto& row = state->flat_watches[static_cast<std::size_t>(state->watch_selected)];
   state->inject_mode = true;
-  state->inject_input = watch.value;
+  state->inject_input = row.value;
   if (state->inject_input.rfind("[error]", 0) == 0) {
     state->inject_input.clear();
   }
@@ -187,13 +196,17 @@ void submit_watch_inject(WatchesPanelState* state, DebugModel* model,
   if (!on_command || !state->inject_mode || model->watches.empty()) {
     return;
   }
+  rebuild_flat_watches(model, state);
+  if (state->flat_watches.empty()) {
+    return;
+  }
   state->watch_selected = std::max(
       0, std::min(state->watch_selected,
-                  static_cast<int>(model->watches.size()) - 1));
-  const auto& watch = model->watches[state->watch_selected];
+                  static_cast<int>(state->flat_watches.size()) - 1));
+  const auto& row = state->flat_watches[static_cast<std::size_t>(state->watch_selected)];
   UiCommand command;
   command.kind = UiCommandKind::kSetWatchValue;
-  command.expression = watch.expression;
+  command.expression = row.expression;
   command.assign_value = state->inject_input;
   assign_watch_frame(&command, model);
   on_command(command);
@@ -255,41 +268,80 @@ std::string variables_frame_label(const DebugModel* model) {
 
 void rebuild_flat_variables(DebugModel* model, WatchesPanelState* state) {
   state->flat_variables.clear();
-  for (const auto& local : model->locals) {
+
+  std::function<void(const VariableInfo&, int)> append_var;
+  append_var = [&](const VariableInfo& var, int depth) {
     FlatVariable row;
-    row.expression = local.expression.empty() ? local.name : local.expression;
-    row.name = local.name;
-    row.value = local.value;
-    row.type = local.type;
-    row.depth = local.depth;
-    row.variables_reference = local.variables_reference;
-    row.expandable = local.variables_reference > 0;
+    row.expression = var.expression.empty() ? var.name : var.expression;
+    row.name = var.name;
+    row.value = var.value;
+    row.type = var.type;
+    row.depth = depth;
+    row.variables_reference = var.variables_reference;
+    row.expandable = var.variables_reference > 0;
     row.expanded = state->expanded_expressions.count(row.expression) > 0;
     state->flat_variables.push_back(row);
-
-    if (row.expanded) {
-      const auto it = model->variable_children.find(row.expression);
-      if (it != model->variable_children.end()) {
-        for (const auto& child : it->second) {
-          FlatVariable child_row;
-          child_row.expression =
-              child.expression.empty() ? child.name : child.expression;
-          child_row.name = child.name;
-          child_row.value = child.value;
-          child_row.type = child.type;
-          child_row.depth = child.depth;
-          child_row.variables_reference = child.variables_reference;
-          child_row.expandable = child.variables_reference > 0;
-          child_row.expanded =
-              state->expanded_expressions.count(child_row.expression) > 0;
-          state->flat_variables.push_back(child_row);
-        }
-      }
+    if (!row.expanded) {
+      return;
     }
+    const auto it = model->variable_children.find(row.expression);
+    if (it == model->variable_children.end()) {
+      return;
+    }
+    for (const auto& child : it->second) {
+      append_var(child, depth + 1);
+    }
+  };
+
+  for (const auto& local : model->locals) {
+    append_var(local, local.depth);
   }
   if (state->flat_selected >= static_cast<int>(state->flat_variables.size())) {
     state->flat_selected =
         std::max(0, static_cast<int>(state->flat_variables.size()) - 1);
+  }
+}
+
+void rebuild_flat_watches(DebugModel* model, WatchesPanelState* state) {
+  state->flat_watches.clear();
+  std::function<void(const std::string&, const std::string&, const std::string&,
+                     const std::string&, int, int)>
+      append_watch;
+  append_watch = [&](const std::string& expression, const std::string& name,
+                     const std::string& value, const std::string& type, int variables_reference,
+                     int depth) {
+    FlatVariable row;
+    row.expression = expression;
+    row.name = name;
+    row.value = value;
+    row.type = type;
+    row.depth = depth;
+    row.variables_reference = variables_reference;
+    row.expandable = variables_reference > 0;
+    row.expanded = state->expanded_watch_expressions.count(expression) > 0;
+    state->flat_watches.push_back(row);
+    if (!row.expanded) {
+      return;
+    }
+    const auto it = model->variable_children.find(expression);
+    if (it == model->variable_children.end()) {
+      return;
+    }
+    for (const auto& child : it->second) {
+      const std::string child_expr =
+          child.expression.empty() ? child.name : child.expression;
+      append_watch(child_expr, child.name, child.value, child.type, child.variables_reference,
+                   depth + 1);
+    }
+  };
+
+  for (const auto& watch : model->watches) {
+    append_watch(watch.expression, watch.expression, watch.value, watch.type,
+                 watch.variables_reference, 0);
+  }
+  if (state->watch_selected >= static_cast<int>(state->flat_watches.size())) {
+    state->watch_selected =
+        std::max(0, static_cast<int>(state->flat_watches.size()) - 1);
   }
 }
 
@@ -355,6 +407,35 @@ void toggle_expand(DebugModel* model, WatchesPanelState* state, int index,
     on_command(command);
   }
   rebuild_flat_variables(model, state);
+}
+
+void toggle_expand_watch(DebugModel* model, WatchesPanelState* state, int index,
+                         CommandCallback on_command) {
+  if (index < 0 || index >= static_cast<int>(state->flat_watches.size())) {
+    return;
+  }
+  const auto& row = state->flat_watches[index];
+  if (!row.expandable) {
+    return;
+  }
+  if (state->expanded_watch_expressions.count(row.expression) > 0) {
+    state->expanded_watch_expressions.erase(row.expression);
+    rebuild_flat_watches(model, state);
+    return;
+  }
+  state->expanded_watch_expressions.insert(row.expression);
+  const auto cached = model->variable_children.find(row.expression);
+  if (cached == model->variable_children.end()) {
+    if (on_command) {
+      UiCommand command;
+      command.kind = UiCommandKind::kFetchVariableChildren;
+      command.variables_reference = row.variables_reference;
+      command.parent_expression = row.expression;
+      command.variable_depth = row.depth;
+      on_command(command);
+    }
+  }
+  rebuild_flat_watches(model, state);
 }
 
 void add_flat_as_watch(WatchesPanelState* state, DebugModel* model,
@@ -630,17 +711,30 @@ bool handle_clear_breakpoints_mouse(WatchesPanelState* state, DebugModel* model,
 
 void remove_selected_watch(WatchesPanelState* state, DebugModel* model,
                            MainLayoutState* layout_state = nullptr) {
-  if (model->watches.empty()) {
+  if (model->watches.empty() || state == nullptr) {
     return;
   }
-  const int index = std::max(
-      0, std::min(state->watch_selected,
-                  static_cast<int>(model->watches.size()) - 1));
-  model->remove_watch(index);
-  if (state->watch_selected >= static_cast<int>(model->watches.size())) {
-    state->watch_selected =
-        std::max(0, static_cast<int>(model->watches.size()) - 1);
+  std::string expression;
+  if (!state->flat_watches.empty() && state->watch_selected >= 0 &&
+      state->watch_selected < static_cast<int>(state->flat_watches.size())) {
+    // Remove the nearest root watch for the selected flat row.
+    for (int i = state->watch_selected; i >= 0; --i) {
+      if (state->flat_watches[static_cast<std::size_t>(i)].depth == 0) {
+        expression = state->flat_watches[static_cast<std::size_t>(i)].expression;
+        break;
+      }
+    }
   }
+  if (expression.empty()) {
+    const int index = std::max(
+        0, std::min(state->watch_selected,
+                    static_cast<int>(model->watches.size()) - 1));
+    model->remove_watch(index);
+  } else {
+    model->remove_watch(expression);
+    state->expanded_watch_expressions.erase(expression);
+  }
+  rebuild_flat_watches(model, state);
   invalidate_watches_panel(layout_state);
 }
 
@@ -1079,14 +1173,22 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         }
         if (state->watches_box.Contain(m.x, m.y)) {
           mark_watches_focus();
+          rebuild_flat_watches(model, state.get());
           const int row = m.y - state->watches_box.y_min;
-          if (row >= 0 && row < static_cast<int>(model->watches.size())) {
+          if (row >= 0 && row < static_cast<int>(state->flat_watches.size())) {
             if (is_double_click(row, &state->last_watch_click_row,
                                 &state->last_watch_click_ms)) {
               state->watch_selected = row;
-              remove_selected_watch(state.get(), model, layout_state);
+              if (state->flat_watches[static_cast<std::size_t>(row)].expandable) {
+                toggle_expand_watch(model, state.get(), row, on_command);
+              } else {
+                remove_selected_watch(state.get(), model, layout_state);
+              }
             } else {
               state->watch_selected = row;
+              if (state->flat_watches[static_cast<std::size_t>(row)].expandable) {
+                toggle_expand_watch(model, state.get(), row, on_command);
+              }
               invalidate_watches_panel(layout_state);
             }
             return true;
@@ -1145,9 +1247,10 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
         if (!owns_watches_navigation()) {
           return false;
         }
+        rebuild_flat_watches(model, state.get());
         state->watch_selected = std::min(
             state->watch_selected + 1,
-            std::max(0, static_cast<int>(model->watches.size()) - 1));
+            std::max(0, static_cast<int>(state->flat_watches.size()) - 1));
         invalidate_watches_panel(layout_state);
         return true;
       }
@@ -1156,6 +1259,16 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
           return false;
         }
         state->watch_selected = std::max(0, state->watch_selected - 1);
+        invalidate_watches_panel(layout_state);
+        return true;
+      }
+      if (event == Event::Character(' ') || event == Event::ArrowRight ||
+          event == Event::ArrowLeft) {
+        if (!owns_watches_navigation()) {
+          return false;
+        }
+        rebuild_flat_watches(model, state.get());
+        toggle_expand_watch(model, state.get(), state->watch_selected, on_command);
         invalidate_watches_panel(layout_state);
         return true;
       }
@@ -1379,11 +1492,16 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
 
     Elements body;
     if (state->selected_tab == 0) {
+      rebuild_flat_watches(model, state.get());
       int index = 0;
-      for (const auto& watch : model->watches) {
+      for (const auto& row : state->flat_watches) {
         const bool selected = index == state->watch_selected;
-        Element line = hbox({text(watch.expression) | bold | color(theme::Accent()),
-                             text(" = "), text(watch.value)});
+        std::string indent(static_cast<std::size_t>(row.depth * 2), ' ');
+        std::string prefix = row.expandable ? (row.expanded ? "v " : "> ") : "  ";
+        Element type_part =
+            row.type.empty() ? text("") : text(i18n::tr_fmt("panel.debug.type_paren", {row.type}));
+        Element line = hbox({text(indent + prefix), text(row.name) | bold | color(theme::Accent()),
+                             type_part, text(" = "), text(row.value)});
         if (selected) {
           line = line | inverted;
         }
@@ -1451,8 +1569,11 @@ Component MakeWatchesPanel(DebugModel* model, CommandCallback on_command,
 
     Elements footer;
     if (state->selected_tab == 0) {
-      if (state->inject_mode && !model->watches.empty()) {
-        const auto& watch = model->watches[state->watch_selected];
+      if (state->inject_mode && !model->watches.empty() && !state->flat_watches.empty()) {
+        const int idx = std::max(
+            0, std::min(state->watch_selected,
+                        static_cast<int>(state->flat_watches.size()) - 1));
+        const auto& watch = state->flat_watches[static_cast<std::size_t>(idx)];
         Element inject_row;
         if (watch_inject_active(layout_state, state->selected_tab)) {
           inject_row =

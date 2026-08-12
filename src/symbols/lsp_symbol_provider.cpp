@@ -1091,11 +1091,13 @@ void LspSymbolProvider::join_startup_thread() {
 void LspSymbolProvider::finish_lsp_start_locked(bool ok) {
   if (shutting_down_.load(std::memory_order_acquire)) {
     use_lsp_ = false;
+    clangd_launched_ = false;
     return;
   }
   // Do not clear use_lsp_ if another lazy language server is already serving files.
   if (ok) {
     use_lsp_ = true;
+    clangd_launched_ = true;
   } else if (!any_lazy_lsp_client_ready(python_client_, bash_client_, tex_client_, rust_client_,
                                         go_client_, zig_client_, fortran_client_, lua_client_,
                                         typescript_client_, cmake_client_, make_client_, yaml_client_)) {
@@ -1201,6 +1203,17 @@ bool LspSymbolProvider::lsp_loading() const {
 bool LspSymbolProvider::clangd_ready() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return client_.ready();
+}
+
+bool LspSymbolProvider::clangd_index_healthy() const {
+  if (clangd_starting()) {
+    return true;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!clangd_launched_) {
+    return true;
+  }
+  return client_.ready() && client_.process_alive();
 }
 
 bool LspSymbolProvider::python_lsp_ready() const {
@@ -1327,6 +1340,7 @@ void LspSymbolProvider::stop_lsp_locked_finalize() {
     inflight_completion_.clear();
   }
   use_lsp_ = false;
+  clangd_launched_ = false;
   cached_diag_revision_ = 0;
   cached_diagnostics_.clear();
   hover_cache_.clear();

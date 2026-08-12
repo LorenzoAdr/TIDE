@@ -50,6 +50,8 @@ constexpr const char* kGitViewToggle = "git-view-toggle";
 constexpr const char* kGitSearch = "git-search";
 constexpr const char* kGitCommitConfirm = "git-commit-confirm";
 constexpr const char* kGitCommitCancel = "git-commit-cancel";
+constexpr const char* kGitAuthConfirm = "git-auth-confirm";
+constexpr const char* kGitAuthCancel = "git-auth-cancel";
 constexpr const char* kGitListScrollbar = "git-list-scrollbar";
 constexpr const char* kGitDiffScrollbar = "git-diff-scrollbar";
 
@@ -1032,6 +1034,76 @@ void close_commit_modal(GitPanelState* state, bool clear_message) {
   }
 }
 
+void open_auth_modal(GitService* git, GitPanelState* state, bool for_push) {
+  if (state == nullptr) {
+    return;
+  }
+  state->auth_modal_open = true;
+  state->auth_for_push = for_push;
+  state->auth_password.clear();
+  state->auth_pass_cursor = 0;
+  state->auth_username.clear();
+  state->auth_user_cursor = 0;
+  if (git != nullptr) {
+    const auto info = git->context_repo_info();
+    state->auth_username = git_configured_remote_username(info.root);
+    state->auth_user_cursor = static_cast<int>(state->auth_username.size());
+  }
+  state->auth_focus_password = !state->auth_username.empty();
+}
+
+void close_auth_modal(GitPanelState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->auth_modal_open = false;
+  state->auth_password.clear();
+  state->auth_pass_cursor = 0;
+}
+
+void start_git_remote_op(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
+                         bool for_push, const GitCredentials& credentials = {});
+
+void submit_auth_modal(GitService* git, GitPanelState* state, MainLayoutState* layout_state) {
+  if (state == nullptr || git == nullptr) {
+    return;
+  }
+  GitCredentials creds;
+  creds.username = state->auth_username;
+  creds.password = state->auth_password;
+  const bool for_push = state->auth_for_push;
+  close_auth_modal(state);
+  start_git_remote_op(git, state, layout_state, for_push, creds);
+}
+
+void start_git_remote_op(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
+                         bool for_push, const GitCredentials& credentials) {
+  if (git == nullptr || state == nullptr) {
+    return;
+  }
+  state->operation_pending = true;
+  set_busy_spinner(layout_state, for_push ? BusyActivity::GitPush : BusyActivity::GitPull);
+  auto on_done = [state, layout_state, git, for_push](bool ok, const std::string& msg) {
+    state->operation_pending = false;
+    clear_busy(layout_state);
+    if (!ok && git_output_requires_credentials(msg)) {
+      open_auth_modal(git, state, for_push);
+      set_status(state, i18n::tr("git.auth.needed"));
+    } else {
+      set_status(state, ok ? i18n::tr(for_push ? "git.status.push_ok" : "git.status.pull_ok")
+                           : msg);
+    }
+    if (layout_state != nullptr) {
+      UI_WAKE(layout_state, "wake");
+    }
+  };
+  if (for_push) {
+    git->push(credentials, on_done);
+  } else {
+    git->pull(credentials, on_done);
+  }
+}
+
 void commit_message(GitService* git, GitPanelState* state, MainLayoutState* layout_state) {
   if (state == nullptr || state->commit_message.empty()) {
     return;
@@ -1239,6 +1311,122 @@ Element render_commit_modal(GitService* git, GitPanelState* state, MainLayoutSta
                          size(HEIGHT, EQUAL, dims.modal_height));
 }
 
+std::string masked_password_line(const std::string& password, int cursor) {
+  std::string line(password.size(), '*');
+  if (cursor >= 0 && cursor <= static_cast<int>(line.size())) {
+    line.insert(static_cast<std::size_t>(cursor), "_");
+  } else {
+    line.push_back('_');
+  }
+  return line;
+}
+
+Element render_auth_modal(GitPanelState* state, MainLayoutState* layout_state) {
+  if (state == nullptr || !state->auth_modal_open) {
+    return text("");
+  }
+  std::string user_line = state->auth_username;
+  if (!state->auth_focus_password) {
+    if (state->auth_user_cursor >= 0 &&
+        state->auth_user_cursor <= static_cast<int>(user_line.size())) {
+      user_line.insert(static_cast<std::size_t>(state->auth_user_cursor), "_");
+    } else {
+      user_line.push_back('_');
+    }
+  }
+  const std::string pass_line =
+      state->auth_focus_password ? masked_password_line(state->auth_password, state->auth_pass_cursor)
+                                 : std::string(state->auth_password.size(), '*');
+
+  const bool confirm_hovered = interaction_active(layout_state, kGitAuthConfirm);
+  const bool confirm_pressed =
+      layout_state != nullptr &&
+      layout_state->clickable.is_pressed(std::string_view(kGitAuthConfirm));
+  const bool cancel_hovered = interaction_active(layout_state, kGitAuthCancel);
+  const bool cancel_pressed =
+      layout_state != nullptr &&
+      layout_state->clickable.is_pressed(std::string_view(kGitAuthCancel));
+  Element confirm_btn =
+      MakeToolbarButton(text(" " + i18n::tr("git.auth.confirm") + " "), confirm_hovered,
+                        confirm_pressed, false, &state->auth_modal_confirm_box, true);
+  Element cancel_btn =
+      MakeToolbarButton(text(" " + i18n::tr("git.auth.cancel") + " "), cancel_hovered,
+                        cancel_pressed, false, &state->auth_modal_cancel_box, true);
+
+  const int term_w =
+      layout_state != nullptr ? terminal_width_or_default(layout_state->terminal_width) : 120;
+  const int term_h =
+      layout_state != nullptr ? terminal_height_or_default(layout_state->terminal_height) : 40;
+  const LargeModalLayout dims = compute_large_modal_layout(term_w, term_h);
+  const int input_width = std::max(40, std::min(60, dims.modal_width - 6));
+
+  Elements body;
+  body.push_back(text(i18n::tr(state->auth_for_push ? "git.auth.push_hint" : "git.auth.pull_hint")) |
+                 color(theme::Muted()));
+  body.push_back(text(""));
+  body.push_back(text(i18n::tr("git.auth.username")) | color(theme::Muted()));
+  body.push_back(ModalInputLine(user_line) | size(WIDTH, EQUAL, input_width));
+  body.push_back(text(i18n::tr("git.auth.password")) | color(theme::Muted()));
+  body.push_back(ModalInputLine(pass_line) | size(WIDTH, EQUAL, input_width));
+  body.push_back(text(""));
+  body.push_back(hbox({std::move(confirm_btn), text(" "), std::move(cancel_btn)}));
+  body.push_back(text(i18n::tr("git.auth.footer")) | color(theme::Muted()));
+
+  return ModalWindow(text(i18n::tr("git.auth.modal_title")) | color(theme::Accent()),
+                     vbox(std::move(body)) | size(WIDTH, EQUAL, std::max(input_width + 8, 48)));
+}
+
+bool handle_auth_modal_keys(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
+                            Event event) {
+  if (state == nullptr || !state->auth_modal_open) {
+    return false;
+  }
+  cursor_blink::show();
+  if (event == Event::Escape) {
+    close_auth_modal(state);
+    return true;
+  }
+  if (event == Event::Return) {
+    if (!state->auth_focus_password) {
+      state->auth_focus_password = true;
+      return true;
+    }
+    submit_auth_modal(git, state, layout_state);
+    return true;
+  }
+  if (event == Event::Tab || event == Event::ArrowDown || event == Event::ArrowUp) {
+    state->auth_focus_password = !state->auth_focus_password;
+    return true;
+  }
+  std::string* field =
+      state->auth_focus_password ? &state->auth_password : &state->auth_username;
+  int* cursor = state->auth_focus_password ? &state->auth_pass_cursor : &state->auth_user_cursor;
+  if (event == Event::Backspace) {
+    if (*cursor > 0 && *cursor <= static_cast<int>(field->size())) {
+      field->erase(static_cast<std::size_t>(*cursor - 1), 1);
+      --(*cursor);
+    }
+    return true;
+  }
+  if (event == Event::ArrowLeft) {
+    *cursor = std::max(0, *cursor - 1);
+    return true;
+  }
+  if (event == Event::ArrowRight) {
+    *cursor = std::min(static_cast<int>(field->size()), *cursor + 1);
+    return true;
+  }
+  if (event.is_character()) {
+    const std::string ch = event.character();
+    if (!ch.empty() && static_cast<unsigned char>(ch[0]) >= 32) {
+      field->insert(static_cast<std::size_t>(*cursor), ch);
+      *cursor += static_cast<int>(ch.size());
+    }
+    return true;
+  }
+  return true;
+}
+
 bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
                      FocusManagerState* focus, WorkspaceModel* workspace, Event event) {
   if (state == nullptr || git == nullptr || !git->is_repo()) {
@@ -1253,6 +1441,9 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
     return false;
   }
 
+  if (handle_auth_modal_keys(git, state, layout_state, event)) {
+    return true;
+  }
   if (handle_commit_modal_keys(git, state, layout_state, event)) {
     return true;
   }
@@ -1327,29 +1518,11 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
       return true;
     }
     if (event == Event::Character('p')) {
-      state->operation_pending = true;
-      set_busy_spinner(layout_state, BusyActivity::GitPush);
-      git->push([state, layout_state](bool ok, const std::string& msg) {
-        state->operation_pending = false;
-        clear_busy(layout_state);
-        set_status(state, ok ? i18n::tr("git.status.push_ok") : msg);
-        if (layout_state != nullptr) {
-          UI_WAKE(layout_state, "wake");
-        }
-      });
+      start_git_remote_op(git, state, layout_state, true);
       return true;
     }
     if (event == Event::Character('P')) {
-      state->operation_pending = true;
-      set_busy_spinner(layout_state, BusyActivity::GitPull);
-      git->pull([state, layout_state](bool ok, const std::string& msg) {
-        state->operation_pending = false;
-        clear_busy(layout_state);
-        set_status(state, ok ? i18n::tr("git.status.pull_ok") : msg);
-        if (layout_state != nullptr) {
-          UI_WAKE(layout_state, "wake");
-        }
-      });
+      start_git_remote_op(git, state, layout_state, false);
       return true;
     }
     if (event == Event::Character('c')) {
@@ -1694,6 +1867,33 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     return true;
   }
 
+  // Modal de auth remoto.
+  if (state->auth_modal_open) {
+    if (m.motion == Mouse::Moved) {
+      update_panel_hover(
+          layout_state, m.x, m.y,
+          {{kGitAuthConfirm, &state->auth_modal_confirm_box},
+           {kGitAuthCancel, &state->auth_modal_cancel_box}},
+          [](std::string_view id) {
+            return id == kGitAuthConfirm || id == kGitAuthCancel;
+          });
+      return true;
+    }
+    if (is_press) {
+      if (state->auth_modal_confirm_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitAuthConfirm));
+        submit_auth_modal(git, state, layout_state);
+        return true;
+      }
+      if (state->auth_modal_cancel_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitAuthCancel));
+        close_auth_modal(state);
+        return true;
+      }
+    }
+    return true;
+  }
+
   // Modal de commit: centrado a pantalla completa; manejar antes del hit-test del panel.
   if (state->commit_modal_open) {
     if (m.motion == Mouse::Moved) {
@@ -1927,30 +2127,12 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     }
     if (state->push_box.Contain(m.x, m.y)) {
       trigger_press(layout_state, std::string_view(kGitPush));
-      state->operation_pending = true;
-      set_busy_spinner(layout_state, BusyActivity::GitPush);
-      git->push([state, layout_state](bool ok, const std::string& msg) {
-        state->operation_pending = false;
-        clear_busy(layout_state);
-        set_status(state, ok ? i18n::tr("git.status.push_ok") : msg);
-        if (layout_state != nullptr) {
-          UI_WAKE(layout_state, "wake");
-        }
-      });
+      start_git_remote_op(git, state, layout_state, true);
       return true;
     }
     if (state->pull_box.Contain(m.x, m.y)) {
       trigger_press(layout_state, std::string_view(kGitPull));
-      state->operation_pending = true;
-      set_busy_spinner(layout_state, BusyActivity::GitPull);
-      git->pull([state, layout_state](bool ok, const std::string& msg) {
-        state->operation_pending = false;
-        clear_busy(layout_state);
-        set_status(state, ok ? i18n::tr("git.status.pull_ok") : msg);
-        if (layout_state != nullptr) {
-          UI_WAKE(layout_state, "wake");
-        }
-      });
+      start_git_remote_op(git, state, layout_state, false);
       return true;
     }
     if (state->commit_box.Contain(m.x, m.y)) {
@@ -2492,7 +2674,13 @@ Component MakeGitCommitModalOverlay(Component main, GitService* git, GitPanelSta
                                     MainLayoutState* layout_state) {
   return Renderer(main, [main, git, state, layout_state] {
     Element base = main->Render();
-    if (state == nullptr || !state->commit_modal_open) {
+    if (state == nullptr) {
+      return base;
+    }
+    if (state->auth_modal_open) {
+      return ScreenModalOverlay(std::move(base), render_auth_modal(state, layout_state));
+    }
+    if (!state->commit_modal_open) {
       return base;
     }
     return ScreenModalOverlay(std::move(base), render_commit_modal(git, state, layout_state));

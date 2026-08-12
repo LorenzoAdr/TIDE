@@ -207,13 +207,15 @@ std::string_view busy_activity_i18n_key(BusyActivity activity) {
       return "busy.ai_mapping";
     case BusyActivity::AiEmbedding:
       return "busy.ai_embedding";
+    case BusyActivity::AiDownloading:
+      return "busy.ai_downloading";
   }
   return "busy.idle";
 }
 
 bool busy_activity_is_ai(BusyActivity activity) {
   return activity == BusyActivity::AiThinking || activity == BusyActivity::AiMapping ||
-         activity == BusyActivity::AiEmbedding;
+         activity == BusyActivity::AiEmbedding || activity == BusyActivity::AiDownloading;
 }
 
 void set_busy_spinner(MainLayoutState* layout, BusyActivity activity, std::string_view label) {
@@ -274,9 +276,10 @@ void clear_busy(MainLayoutState* layout) {
   BusyStripState& state = *layout->busy_strip;
   {
     std::lock_guard<std::mutex> lock(state.paint_mutex);
-    // Coding-symbol embedding owns the strip until it finishes; generic clear_busy
-    // from Indexing/outline/etc. must not wipe the % between embed chunks.
-    if (state.activity == BusyActivity::AiEmbedding) {
+    // Coding-symbol embedding / model download own the strip until they finish;
+    // generic clear_busy from Indexing/outline/etc. must not wipe the %.
+    if (state.activity == BusyActivity::AiEmbedding ||
+        state.activity == BusyActivity::AiDownloading) {
       return;
     }
     state.kind = BusyIndicatorKind::None;
@@ -313,8 +316,8 @@ void refresh_ai_mapping_busy(MainLayoutState* layout, bool scanning, std::size_t
     std::lock_guard<std::mutex> lock(layout->busy_strip->paint_mutex);
     current = layout->busy_strip->activity;
   }
-  // Pensando has priority; Mapping may replace Indexing (more specific progress).
-  if (current == BusyActivity::AiThinking) {
+  // Pensando / descarga IA tienen prioridad; Mapping may replace Indexing.
+  if (current == BusyActivity::AiThinking || current == BusyActivity::AiDownloading) {
     return;
   }
   if (current != BusyActivity::Idle && current != BusyActivity::AiMapping &&
@@ -347,8 +350,8 @@ void refresh_ai_embedding_busy(MainLayoutState* layout, bool active, std::size_t
     std::lock_guard<std::mutex> lock(layout->busy_strip->paint_mutex);
     current = layout->busy_strip->activity;
   }
-  // Pensando has priority; embedding may replace Mapping / Indexing / itself.
-  if (current == BusyActivity::AiThinking) {
+  // Pensando / descarga tienen prioridad; embedding may replace Mapping / Indexing / itself.
+  if (current == BusyActivity::AiThinking || current == BusyActivity::AiDownloading) {
     return;
   }
   if (!active) {

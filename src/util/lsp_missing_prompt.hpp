@@ -11,13 +11,16 @@ struct LspMissingPromptInfo {
   std::string server_id;           // e.g. "gopls"
   std::string language_i18n_key;   // e.g. "lsp_toast.lang.go"
   std::string status_missing_key;  // e.g. "status.gopls_missing"
-  std::string install_command;     // typed into the terminal (no trailing newline)
+  std::string install_command;     // legacy shell fallback (unused by toast install)
   std::string bundle_cli_flag;     // e.g. "--bundle-gopls" (empty if not bundleable)
   // Key written into .bundle-config (e.g. "BUNDLE_GOPLS"). Empty if not bundleable.
   std::string bundle_config_key;
   // Value for bundle_config_key, or for PYTHON_BUNDLE_KIND ("lsp_min").
   std::string bundle_config_value = "1";
 };
+
+// Map LSP server id → toolpacks language pack id (F10 catalog). Empty if unknown.
+std::string language_pack_id_for_lsp_server(const std::string& server_id);
 
 std::optional<LspMissingPromptInfo> lsp_missing_prompt_for_status_key(const std::string& i18n_key);
 
