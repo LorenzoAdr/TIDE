@@ -36,6 +36,7 @@
 #include "ui/shutdown_overlay.hpp"
 #include "ui/open_file_confirm.hpp"
 #include "ui/external_file_conflict.hpp"
+#include "ui/ai_missing_toast.hpp"
 #include "ui/lsp_missing_toast.hpp"
 #include "ui/settings_modal.hpp"
 #include "ui/shortcuts_modal.hpp"
@@ -143,6 +144,9 @@ class Application {
   void on_lsp_missing_install();
   void on_lsp_missing_bundle();
   void on_lsp_missing_ignore();
+  void maybe_show_ai_missing_toast(const std::string& pack_id);
+  void on_ai_missing_install();
+  void on_ai_missing_ignore();
   void rebuild_shell_launch_config();
   void setup_build_environment_watching();
   void process_build_environment_updates();
@@ -186,6 +190,9 @@ class Application {
   LspMissingToastState lsp_missing_toast_state_;
   bool lsp_missing_toast_suppressed_ = false;
   std::unordered_set<std::string> lsp_missing_notified_servers_;
+  AiMissingToastState ai_missing_toast_state_;
+  bool ai_missing_toast_suppressed_ = false;
+  std::unordered_set<std::string> ai_missing_notified_packs_;
   std::string pending_terminal_inject_;
   std::optional<std::string> cached_tuide_source_root_;
   bool tuide_source_root_probed_ = false;

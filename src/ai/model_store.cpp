@@ -1,10 +1,18 @@
 #include "ai/model_store.hpp"
 
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <optional>
 #include <sstream>
+#include <string_view>
+#include <thread>
 
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -127,14 +135,160 @@ AiModelInfo default_intent_embed_model() {
   return info;
 }
 
+std::optional<int> parse_download_percent_token(std::string_view text) {
+  const auto pct = text.rfind('%');
+  if (pct == std::string_view::npos || pct == 0) {
+    return std::nullopt;
+  }
+  std::size_t end = pct;
+  while (end > 0 && (std::isdigit(static_cast<unsigned char>(text[end - 1])) != 0 ||
+                     text[end - 1] == '.')) {
+    --end;
+  }
+  if (end == pct) {
+    return std::nullopt;
+  }
+  while (end < pct && std::isdigit(static_cast<unsigned char>(text[end])) == 0 &&
+         text[end] != '.') {
+    ++end;
+  }
+  if (end >= pct) {
+    return std::nullopt;
+  }
+  try {
+    const int value = static_cast<int>(std::stof(std::string(text.substr(end, pct - end))));
+    if (value < 0 || value > 100) {
+      return std::nullopt;
+    }
+    return value;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+void report_download_percent(const ModelStore::ProgressFn& on_progress, int percent) {
+  if (!on_progress) {
+    return;
+  }
+  on_progress("__pct__:" + std::to_string(std::clamp(percent, 0, 100)));
+}
+
+std::uint64_t probe_url_content_length(const std::string& url) {
+  if (!command_exists("curl")) {
+    return 0;
+  }
+  std::string out;
+  if (!run_shell("curl -fsIL --retry 2 --connect-timeout 8 " + shell_quote(url), &out)) {
+    return 0;
+  }
+  // Last Content-Length wins (redirects).
+  std::uint64_t best = 0;
+  std::istringstream iss(out);
+  std::string line;
+  while (std::getline(iss, line)) {
+    if (line.size() >= 15) {
+      std::string lower = line;
+      for (char& ch : lower) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+      }
+      if (lower.rfind("content-length:", 0) == 0) {
+        try {
+          const auto n = std::stoull(line.substr(15));
+          if (n > 1024) {
+            best = n;
+          }
+        } catch (...) {
+        }
+      }
+    }
+  }
+  return best;
+}
+
+int run_download_with_progress(const std::string& command, const ModelStore::ProgressFn& on_progress,
+                               const fs::path& partial_path, std::uint64_t expected_size) {
+  FILE* pipe = ::popen(command.c_str(), "r");
+  if (pipe == nullptr) {
+    return 127;
+  }
+
+  std::atomic<bool> done{false};
+  std::thread size_poller;
+  if (on_progress && expected_size > 0) {
+    size_poller = std::thread([&] {
+      int last_reported = -1;
+      while (!done.load(std::memory_order_acquire)) {
+        std::error_code ec;
+        const auto sz = fs::file_size(partial_path, ec);
+        if (!ec && expected_size > 0) {
+          const int pct = static_cast<int>(
+              std::min<std::uint64_t>(100, (sz * 100) / expected_size));
+          if (pct != last_reported) {
+            last_reported = pct;
+            report_download_percent(on_progress, pct);
+          }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      }
+    });
+  }
+
+  std::string acc;
+  int last_reported = -1;
+  int ch = 0;
+  auto flush_token = [&]() {
+    if (!on_progress || acc.empty() || expected_size > 0) {
+      return;
+    }
+    const auto pct = parse_download_percent_token(acc);
+    if (!pct.has_value() || *pct == last_reported) {
+      return;
+    }
+    last_reported = *pct;
+    report_download_percent(on_progress, *pct);
+  };
+  while ((ch = std::fgetc(pipe)) != EOF) {
+    if (ch == '\r' || ch == '\n') {
+      flush_token();
+      acc.clear();
+      continue;
+    }
+    acc.push_back(static_cast<char>(ch));
+    if (ch == '%') {
+      flush_token();
+    }
+    if (acc.size() > 4096) {
+      acc.erase(0, acc.size() - 256);
+    }
+  }
+  flush_token();
+  const int status = ::pclose(pipe);
+  done.store(true, std::memory_order_release);
+  if (size_poller.joinable()) {
+    size_poller.join();
+  }
+  if (status == -1) {
+    return 127;
+  }
+  if (WIFEXITED(status)) {
+    return WEXITSTATUS(status);
+  }
+  return 127;
+}
+
 bool download_url_to_file(const std::string& url, const std::string& dest,
-                          const ModelStore::ProgressFn& on_progress, std::string* error) {
+                          const ModelStore::ProgressFn& on_progress, std::string* error,
+                          std::uint64_t expected_size) {
   if (url.empty() || dest.empty()) {
     if (error) {
       *error = "url/dest vacíos";
     }
     return false;
   }
+  // Serialize model/runtime downloads so a second chat line cannot race the same .partial.
+  static std::mutex download_mu;
+  std::lock_guard<std::mutex> lock(download_mu);
+
   std::error_code ec;
   fs::create_directories(fs::path(dest).parent_path(), ec);
   const fs::path tmp = fs::path(dest).string() + ".partial";
@@ -143,13 +297,29 @@ bool download_url_to_file(const std::string& url, const std::string& dest,
   if (on_progress) {
     on_progress("descargando: " + url);
   }
+  report_download_percent(on_progress, 0);
+
+  std::uint64_t size_hint = expected_size;
+  if (size_hint == 0) {
+    size_hint = probe_url_content_length(url);
+  }
 
   std::string cmd;
   if (command_exists("curl")) {
-    cmd = "curl -fL --retry 3 --progress-bar -o " + shell_quote(tmp.string()) + " " +
-          shell_quote(url);
+    if (size_hint > 0) {
+      cmd = "curl -fL --retry 3 --connect-timeout 20 --retry-delay 1 -o " +
+            shell_quote(tmp.string()) + " " + shell_quote(url) + " 2>/dev/null";
+    } else {
+      cmd = "curl -fL --retry 3 --connect-timeout 20 --progress-bar -o " +
+            shell_quote(tmp.string()) + " " + shell_quote(url) + " 2>&1";
+    }
   } else if (command_exists("wget")) {
-    cmd = "wget -O " + shell_quote(tmp.string()) + " " + shell_quote(url);
+    if (size_hint > 0) {
+      cmd = "wget -q -O " + shell_quote(tmp.string()) + " " + shell_quote(url) + " 2>/dev/null";
+    } else {
+      cmd = "wget --progress=bar:force -O " + shell_quote(tmp.string()) + " " + shell_quote(url) +
+            " 2>&1";
+    }
   } else {
     if (error) {
       *error = "hace falta curl o wget para descargar modelos";
@@ -157,11 +327,11 @@ bool download_url_to_file(const std::string& url, const std::string& dest,
     return false;
   }
 
-  std::string out;
-  if (!run_shell(cmd, &out)) {
+  const int rc = run_download_with_progress(cmd, on_progress, tmp, size_hint);
+  if (rc != 0 || !fs::is_regular_file(tmp, ec)) {
     fs::remove(tmp, ec);
     if (error) {
-      *error = "download failed: " + out;
+      *error = "download failed (rc=" + std::to_string(rc) + ")";
     }
     return false;
   }
@@ -173,6 +343,7 @@ bool download_url_to_file(const std::string& url, const std::string& dest,
     }
     return false;
   }
+  report_download_percent(on_progress, 100);
   if (on_progress) {
     on_progress("ok: " + dest);
   }
@@ -229,7 +400,7 @@ std::string ModelStore::ensure_model(const AiModelInfo& info, bool auto_download
                 std::to_string(info.approx_bytes / (1024 * 1024)) + " MB, " + info.license_note +
                 ")");
   }
-  if (!download_url_to_file(info.url, path, on_progress, error)) {
+  if (!download_url_to_file(info.url, path, on_progress, error, info.approx_bytes)) {
     return {};
   }
   return path;
@@ -264,7 +435,7 @@ std::string ModelStore::ensure_intent_embed_model(const AiModelInfo& info, bool 
                 std::to_string(info.approx_bytes / (1024 * 1024)) + " MB, " + info.license_note +
                 ")");
   }
-  if (!download_url_to_file(info.url, path, on_progress, error)) {
+  if (!download_url_to_file(info.url, path, on_progress, error, info.approx_bytes)) {
     return {};
   }
   return path;

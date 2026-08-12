@@ -3,10 +3,12 @@
 #include <chrono>
 #include <sstream>
 
+#include "ai/ai_packages.hpp"
 #include "ai/ai_trace.hpp"
 #include "ai/level0_router.hpp"
 #include "ai/level1_agent.hpp"
 #include "ai/model_store.hpp"
+#include "i18n/tr.hpp"
 #include "ui/busy_strip.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/ui_wake.hpp"
@@ -193,6 +195,35 @@ void AiController::cancel_current() {
   wake(true);
 }
 
+void AiController::set_missing_package_handler(MissingPackageFn fn) {
+  on_missing_package_ = std::move(fn);
+}
+
+void AiController::clear_missing_package_notice(const std::string& pack_id) {
+  if (pack_id.empty()) {
+    missing_notified_.clear();
+  } else {
+    missing_notified_.erase(pack_id);
+  }
+  intent_embed_attempted_ = false;
+}
+
+void AiController::request_missing_package(const std::string& pack_id) {
+  if (pack_id.empty() || !on_missing_package_) {
+    return;
+  }
+  if (missing_notified_.count(pack_id) > 0) {
+    return;
+  }
+  missing_notified_.insert(pack_id);
+  if (const AiPackage* pack = find_ai_package(pack_id); pack != nullptr) {
+    append(i18n::tr_fmt("ai_toast.terminal_hint", {i18n::tr(pack->name_i18n_key)}));
+  } else {
+    append(i18n::tr_fmt("ai_toast.terminal_hint", {pack_id}));
+  }
+  on_missing_package_(pack_id);
+}
+
 void AiController::begin_thinking() {
   set_busy_spinner(deps_.layout, BusyActivity::AiThinking);
   wake(true);
@@ -203,22 +234,94 @@ void AiController::end_thinking() {
   wake(true);
 }
 
+void AiController::begin_download(std::string_view label) {
+  download_busy_.store(true);
+  set_busy_percent(deps_.layout, BusyActivity::AiDownloading, 0, label);
+  wake(true);
+}
+
+void AiController::update_download_percent(int percent) {
+  download_busy_.store(true);
+  // Busy strip paints via ANSI; avoid UI_WAKE spam on every percent tick.
+  set_busy_percent(deps_.layout, BusyActivity::AiDownloading, percent);
+}
+
+void AiController::end_download() {
+  const bool was = download_busy_.exchange(false);
+  clear_busy_if(deps_.layout, BusyActivity::AiDownloading);
+  // If L1 is still running after the download, restore "Pensando".
+  if (was && agent_busy_.load()) {
+    begin_thinking();
+  } else {
+    wake(true);
+  }
+}
+
+ModelStore::ProgressFn AiController::make_store_progress() {
+  return [this](const std::string& line) {
+    if (line.rfind("__pct__:", 0) == 0) {
+      try {
+        const int pct = std::stoi(line.substr(8));
+        update_download_percent(pct);
+      } catch (...) {
+      }
+      return;
+    }
+    const bool downloadish =
+        line.find("descargando") != std::string::npos ||
+        line.find("ModelStore: falta") != std::string::npos ||
+        line.find("ModelStore: descargando") != std::string::npos ||
+        line.find("ModelStore: actualizando runtime") != std::string::npos;
+    if (downloadish && !download_busy_.load()) {
+      begin_download();
+    }
+    if (line.find("extrayendo bundle") != std::string::npos) {
+      update_download_percent(100);
+    }
+    append(line);
+  };
+}
+
+bool AiController::is_cancel_input(const std::string& line) {
+  std::size_t start = 0;
+  while (start < line.size() &&
+         (line[start] == ' ' || line[start] == '\t')) {
+    ++start;
+  }
+  std::size_t end = line.size();
+  while (end > start && (line[end - 1] == ' ' || line[end - 1] == '\t')) {
+    --end;
+  }
+  const std::string_view t(line.data() + start, end - start);
+  return t == "/cancel" || t == "cancel" || t == "cancelar";
+}
+
 bool AiController::ensure_backend_ready() {
+  refresh_settings();
+  const std::string missing = first_missing_ai_package_for_l1(settings_);
+  if (!missing.empty()) {
+    request_missing_package(missing);
+    return false;
+  }
   std::string error;
-  const bool ok = backend_.ensure_ready(
-      settings_, [this](const std::string& line) { append(line); }, &error);
+  const bool ok = backend_.ensure_ready(settings_, make_store_progress(), &error);
+  end_download();
   if (!ok) {
     append("✗ L1 backend: " + error);
-    append("  /model download  — descarga GGUF L1 (~1 GB)");
-    append("  /model download_runtime — descarga llama-cli");
-    append("  o instala llama-cli en PATH / TUIDE_LLAMA_CLI");
+    append("  Instala el paquete desde F10 → Toolpacks, o /model download");
   }
   return ok;
 }
 
 void AiController::run_level1_async(const std::string& message) {
+  if (download_busy_.load()) {
+    append("Hay una descarga pendiente (modelo/runtime). Espera a que termine o /cancel.");
+    return;
+  }
   if (agent_busy_.exchange(true)) {
-    append("L1 ya está ocupado (/cancel para abortar)");
+    append(download_busy_.load()
+               ? "Hay una descarga pendiente (modelo/runtime). Espera a que termine o /cancel."
+               : "L1 ya está ocupado (/cancel para abortar)");
     return;
   }
   join_agent_thread();
@@ -245,8 +348,8 @@ void AiController::run_level1_async(const std::string& message) {
     deps.backend = &backend_;
     deps.embed = embed_backend_.ready() ? &embed_backend_ : nullptr;
     deps.coding_stem_index = coding_stem_index_.ready() ? &coding_stem_index_ : nullptr;
-    // Always pass pointer so L1 can report "aún no listo" vs corpus rank.
-    deps.coding_symbol_index = &coding_symbol_index_;
+    // Query-time lexical shortlist + two-stage embed (no full-corpus symbol index).
+    deps.coding_symbol_index = nullptr;
     deps.settings = settings_;
     deps.on_tool = [this](const std::string& name, const std::string& arg) {
       last_l0_tool_ = name;
@@ -267,9 +370,8 @@ void AiController::run_level1_async(const std::string& message) {
         append("L1: mapa sin bodies (L2 dry-run). El embed de ranking ya se aplicó al ordenar.");
       }
     }
-    // Build full-symbol signature index AFTER L1 so it does not fight the
-    // ranking embeds and progress is visible once the map is on screen.
-    maybe_start_coding_symbol_index_async();
+    // Warm stem index only (cheap); no full-corpus symbol embed.
+    maybe_start_coding_stem_warm_async();
     agent_busy_.store(false);
     end_thinking();
   });
@@ -304,13 +406,18 @@ void AiController::show_model_status() {
 }
 
 void AiController::download_models(const std::string& what) {
+  if (download_busy_.load() || agent_busy_.load()) {
+    append("Hay una operación IA en curso (descarga o L1). Espera o /cancel.");
+    return;
+  }
   begin_thinking();
   ModelStore store(settings_.models_cache_dir.empty() ? ModelStore::default_cache_dir()
                                                       : settings_.models_cache_dir);
   std::string error;
-  auto progress = [this](const std::string& line) { append(line); };
+  auto progress = make_store_progress();
   if (what == "runtime") {
     const std::string cli = store.ensure_llama_cli(true, progress, &error);
+    end_download();
     if (cli.empty()) {
       append("✗ " + error);
     } else {
@@ -326,6 +433,7 @@ void AiController::download_models(const std::string& what) {
   if (what == "embed" || what == "intent" || what == "l0") {
     const AiModelInfo emb = default_intent_embed_model();
     const std::string path = store.ensure_intent_embed_model(emb, true, progress, &error);
+    end_download();
     if (path.empty()) {
       append("✗ " + error);
     } else {
@@ -338,6 +446,7 @@ void AiController::download_models(const std::string& what) {
   }
   const AiModelInfo info = default_l1_model();
   const std::string path = store.ensure_model(info, true, progress, &error);
+  end_download();
   if (path.empty()) {
     append("✗ " + error);
   } else {
@@ -347,19 +456,31 @@ void AiController::download_models(const std::string& what) {
   end_thinking();
 }
 
-bool AiController::ensure_intent_embeddings_ready() {
+bool AiController::ensure_intent_embeddings_ready(bool prompt_if_missing) {
   if (intent_index_.ready() && embed_backend_.ready()) {
     ai_trace(AiTraceChannel::Embed, "ready_cached", "{\"index\":true,\"backend\":true}");
     return true;
   }
+  refresh_settings();
+  const std::string missing = first_missing_ai_package_for_embed(settings_);
+  if (!missing.empty()) {
+    ai_trace(AiTraceChannel::Embed, "skip_missing_pack",
+             "{\"pack\":\"" + ai_trace_escape(missing) + "\",\"prompt\":" +
+                 (prompt_if_missing ? "true" : "false") + "}");
+    if (prompt_if_missing) {
+      request_missing_package(missing);
+    }
+    return false;
+  }
   if (intent_embed_attempted_ && !settings_.level0.embeddings.auto_download) {
+    // Packages are present but a previous ensure failed (server/runtime glitch).
     ai_trace(AiTraceChannel::Embed, "skip_no_autodl",
              "{\"attempted\":true,\"auto_download\":false}");
     return false;
   }
   intent_embed_attempted_ = true;
   std::string error;
-  auto progress = [this](const std::string& line) { append(line); };
+  auto progress = make_store_progress();
   ai_trace(AiTraceChannel::Embed, "ensure_begin",
            "{\"model_id\":\"" + ai_trace_escape(settings_.level0.embeddings.model_id) +
                "\",\"model_path\":\"" + ai_trace_escape(settings_.level0.embeddings.model_path) +
@@ -367,12 +488,14 @@ bool AiController::ensure_intent_embeddings_ready() {
                (settings_.level0.embeddings.auto_download ? "true" : "false") + ",\"port\":" +
                std::to_string(settings_.level0.embeddings.server_port) + "}");
   if (!embed_backend_.ensure_ready(settings_, progress, &error)) {
+    end_download();
     ai_trace(AiTraceChannel::Embed, "backend_fail",
              "{\"error\":\"" + ai_trace_escape(error) + "\",\"model\":\"" +
                  ai_trace_escape(embed_backend_.model_path()) + "\"}");
-    append("L0 embed: " + error + " (keywords L0 activos; /model download embed)");
+    append("L0 embed: " + error + " (keywords L0 activos; F10 Toolpacks / /model download embed)");
     return false;
   }
+  end_download();
   if (!intent_index_.load_catalog(Level0IntentIndex::resolve_default_catalog_path(), &error)) {
     ai_trace(AiTraceChannel::Embed, "catalog_fail",
              "{\"error\":\"" + ai_trace_escape(error) + "\"}");
@@ -441,19 +564,19 @@ void AiController::on_symbol_map_ready() {
   if (root != symbol_embed_workspace_root_) {
     symbol_embed_workspace_root_ = root;
     if (!symbol_embed_running_.load()) {
+      coding_stem_index_.invalidate();
       coding_symbol_index_.invalidate();
       symbol_embed_started_.store(false);
     } else {
-      // A build is in flight for the previous root; mark restart and bail.
       symbol_embed_restart_pending_.store(true);
       return;
     }
   }
-  maybe_start_coding_symbol_index_async();
+  maybe_start_coding_stem_warm_async();
 }
 
-void AiController::maybe_start_coding_symbol_index_async() {
-  if (coding_symbol_index_.ready()) {
+void AiController::maybe_start_coding_stem_warm_async() {
+  if (coding_stem_index_.ready()) {
     return;
   }
   if (symbol_embed_running_.load()) {
@@ -473,15 +596,6 @@ void AiController::maybe_start_coding_symbol_index_async() {
     return;
   }
 
-  append("coding symbol embed: arrancando en background (" +
-         std::to_string(snap_probe->symbols.size()) + " símbolos en snapshot)…");
-  // Show strip immediately (stems warm + corpus embed can take minutes).
-  symbol_embed_busy_active_.store(true);
-  symbol_embed_done_.store(0);
-  symbol_embed_total_.store(0);
-  refresh_ai_embedding_busy(deps_.layout, true, 0, 0);
-  wake(true);
-
   std::lock_guard lock(symbol_embed_mu_);
   if (symbol_embed_thread_.joinable()) {
     symbol_embed_thread_.join();
@@ -497,68 +611,22 @@ void AiController::maybe_start_coding_symbol_index_async() {
       }
       const bool restart = symbol_embed_restart_pending_.exchange(false);
       if (restart) {
-        coding_symbol_index_.invalidate();
+        coding_stem_index_.invalidate();
         symbol_embed_started_.store(false);
-        // Don't call maybe_start from this thread (would join self).
-        std::thread([this] { maybe_start_coding_symbol_index_async(); }).detach();
+        std::thread([this] { maybe_start_coding_stem_warm_async(); }).detach();
       }
     };
-    // Avoid ensure_ready() here: it can take mu_+http_mu_ and race with L1 embeds.
     if (!embed_backend_.ready()) {
       if (!ensure_intent_embeddings_ready() || !embed_backend_.ready()) {
-        append("coding symbol embed: backend no listo");
+        append("coding stem embed: backend no listo");
         finish(false);
         wake(true);
         return;
       }
     }
-    if (deps_.symbol_indexer == nullptr) {
-      append("coding symbol embed: sin symbol_indexer");
-      finish(false);
-      wake(true);
-      return;
-    }
-    const auto snap = deps_.symbol_indexer->snapshot();
-    if (!snap || snap->symbols.empty()) {
-      append("coding symbol embed: snapshot vacío");
-      finish(false);
-      wake(true);
-      return;
-    }
-    std::string error;
-    const std::string cache = settings_.models_cache_dir.empty()
-                                  ? ModelStore::default_cache_dir()
-                                  : settings_.models_cache_dir;
-    auto progress = [this](const std::string& line) {
-      // Keep start/end/errors in transcript; skip per-chunk lines (busy strip owns %).
-      if (line.find("coding symbol embed: ") == 0) {
-        const bool chunk = line.find('/') != std::string::npos && line.find('%') != std::string::npos;
-        if (chunk) {
-          return;
-        }
-      }
-      append(line);
-    };
-    auto percent = [this](std::size_t done, std::size_t total) {
-      symbol_embed_done_.store(done);
-      symbol_embed_total_.store(total);
-      symbol_embed_busy_active_.store(true);
-      refresh_ai_embedding_busy(deps_.layout, true, done, total);
-    };
-    // Warm stems too (cheap if cached) so L1 does not block on first query.
-    (void)ensure_coding_stem_index_ready();
-    const auto t0 = std::chrono::steady_clock::now();
-    const bool ok = coding_symbol_index_.ensure(snap.get(), &embed_backend_, cache,
-                                                settings_.level0.embeddings.model_id, progress,
-                                                &error, percent);
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - t0)
-                        .count();
-    if (!ok) {
-      append("coding symbol embed: " + error);
-    } else {
-      append("coding symbol embed: total_ms=" + std::to_string(ms) +
-             " n=" + std::to_string(coding_symbol_index_.size()));
+    const bool ok = ensure_coding_stem_index_ready();
+    if (ok) {
+      append("coding stem embed: listo (n=" + std::to_string(coding_stem_index_.size()) + ")");
     }
     finish(ok);
     wake(true);
@@ -809,10 +877,20 @@ void AiController::handle_user_input(const std::string& line) {
   refresh_settings();
   append("> " + line);
 
+  if (download_busy_.load() && !is_cancel_input(line)) {
+    append("Hay una descarga pendiente (modelo/runtime). Espera a que termine o /cancel.");
+    return;
+  }
+
   Level0SemanticMatcher semantic;
   // Slash stays deterministic; NL benefits from embeddings when available.
+  // Skip embed ensure while L1 is busy — avoids racing a Vulkan/runtime download.
   if (!line.empty() && line[0] != '/') {
-    if (ensure_intent_embeddings_ready()) {
+    if (agent_busy_.load()) {
+      append("L1 ya está ocupado (/cancel para abortar)");
+      return;
+    }
+    if (ensure_intent_embeddings_ready(true)) {
       semantic = [this](const std::string& query) {
         std::string err;
         const Level0IntentMatch m = intent_index_.match(
@@ -837,8 +915,8 @@ void AiController::handle_user_input(const std::string& line) {
                "\",\"semantic\":" + (semantic ? "true" : "false") + ",\"kind\":" +
                std::to_string(static_cast<int>(route.kind)) + ",\"tool\":\"" +
                ai_trace_escape(route.tool_name) + "\",\"task\":\"" +
-               ai_trace_escape(route.task_name) + "\",\"arg\":\"" + ai_trace_escape(route.arg) +
-               "\"}");
+               ai_trace_escape(route.task_name) + "\",\"arg\":\"" +
+               ai_trace_escape(route.arg) + "\"}");
   if (route.kind == AiRouteKind::ResolveTool || route.kind == AiRouteKind::ResolveTask) {
     last_l0_tool_ = route.kind == AiRouteKind::ResolveTool ? route.tool_name : route.task_name;
     last_l0_arg_ = route.arg;

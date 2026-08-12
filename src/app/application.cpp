@@ -19,6 +19,7 @@
 #include "app/workspace_session.hpp"
 #include "app/recent_projects.hpp"
 #include "ai/ai_controller.hpp"
+#include "ai/ai_packages.hpp"
 #include "backend/idebug_backend.hpp"
 #include "build/build_environment.hpp"
 #include "build/build_environment_service.hpp"
@@ -55,6 +56,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/open_file_confirm.hpp"
 #include "ui/external_file_conflict.hpp"
+#include "ui/ai_missing_toast.hpp"
 #include "ui/lsp_missing_toast.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/quit_confirm.hpp"
@@ -611,6 +613,64 @@ void Application::on_lsp_missing_bundle() {
 void Application::on_lsp_missing_ignore() {
 	lsp_missing_toast_suppressed_ = true;
 	lsp_missing_toast_state_.close();
+	UI_WAKE(&layout_state_, "app");
+}
+
+void Application::maybe_show_ai_missing_toast(const std::string& pack_id) {
+	if (ai_missing_toast_suppressed_ || ai_missing_toast_state_.open ||
+	    lsp_missing_toast_state_.open) {
+		return;
+	}
+	if (pack_id.empty() || find_ai_package(pack_id) == nullptr) {
+		return;
+	}
+	if (ai_missing_notified_packs_.count(pack_id) > 0) {
+		return;
+	}
+	ai_missing_notified_packs_.insert(pack_id);
+	ai_missing_toast_state_.show(pack_id);
+	UI_WAKE(&layout_state_, "app");
+}
+
+void Application::on_ai_missing_install() {
+	if (!ai_missing_toast_state_.open) {
+		return;
+	}
+	const std::string pack_id = ai_missing_toast_state_.pack_id;
+	ai_missing_toast_state_.close();
+	if (pack_id.empty()) {
+		set_workspace_status(i18n::tr("ai_toast.install_failed"));
+		UI_WAKE(&layout_state_, "app");
+		return;
+	}
+	set_busy_percent(&layout_state_, BusyActivity::AiDownloading, 0);
+	set_workspace_status(i18n::tr("ai_toast.installing"));
+	UI_WAKE(&layout_state_, "app");
+	const AiSettings ai_settings = workspace_config_.ai;
+	std::thread([this, pack_id, ai_settings]() {
+		const auto result = install_ai_package(
+		    pack_id, ai_settings, [this](int percent, std::string_view label) {
+			    set_busy_percent(&layout_state_, BusyActivity::AiDownloading, percent, label);
+			    UI_WAKE(&layout_state_, "toolpack");
+		    });
+		enqueue_ui_task([this, result, pack_id]() {
+			clear_busy(&layout_state_);
+			set_workspace_status(result.ok ? i18n::tr("ai_toast.install_done")
+			                               : (result.message.empty()
+			                                      ? i18n::tr("ai_toast.install_failed")
+			                                      : result.message));
+			if (result.ok && layout_state_.ai_controller != nullptr) {
+				layout_state_.ai_controller->clear_missing_package_notice(pack_id);
+				ai_missing_notified_packs_.erase(pack_id);
+			}
+			UI_WAKE(&layout_state_, "app");
+		});
+	}).detach();
+}
+
+void Application::on_ai_missing_ignore() {
+	ai_missing_toast_suppressed_ = true;
+	ai_missing_toast_state_.close();
 	UI_WAKE(&layout_state_, "app");
 }
 
@@ -2436,7 +2496,8 @@ bool Application::any_modal_open() const {
 	       source_substitute_state_.open || quit_confirm_state_.open ||
 	       debug_launch_modal_state_.open() || open_file_confirm_state_.is_open() ||
 	       external_file_conflict_state_.is_open() ||
-	       lsp_missing_toast_state_.open || context_menu_active(&layout_state_.context_menu);
+	       lsp_missing_toast_state_.open || ai_missing_toast_state_.open ||
+	       context_menu_active(&layout_state_.context_menu);
 }
 
 void Application::apply_app_settings() {
@@ -2688,6 +2749,12 @@ int Application::run() {
 	};
 
 	auto layout = build_ui();
+
+	if (layout_state_.ai_controller != nullptr) {
+		layout_state_.ai_controller->set_missing_package_handler([this](const std::string& pack_id) {
+			enqueue_ui_task([this, pack_id]() { maybe_show_ai_missing_toast(pack_id); });
+		});
+	}
 
 	layout_state_.terminal_width = [&screen]() { return screen.dimx(); };
 	layout_state_.terminal_height = [&screen]() { return screen.dimy(); };
@@ -3020,7 +3087,11 @@ int Application::run() {
 	    [this] { on_lsp_missing_install(); }, [this] { on_lsp_missing_bundle(); },
 	    [this] { on_lsp_missing_ignore(); });
 
-	auto inner_root = CatchEvent(with_lsp_missing_toast, [this, &screen, on_command](const Event &event) {
+	auto with_ai_missing_toast = MakeAiMissingToastOverlay(
+	    with_lsp_missing_toast, &ai_missing_toast_state_, &layout_state_,
+	    [this] { on_ai_missing_install(); }, [this] { on_ai_missing_ignore(); });
+
+	auto inner_root = CatchEvent(with_ai_missing_toast, [this, &screen, on_command](const Event &event) {
 		try {
 			const bool editor_browse_active = app_mode_ == AppMode::kNormal ||
 			                                  model_.is_post_mortem || app_mode_ == AppMode::kDebug;

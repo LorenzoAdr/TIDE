@@ -22,8 +22,8 @@ struct CodingSymbolEmbedRow {
   std::vector<float> embedding;
 };
 
-// Full-workspace symbol signature embeddings (cached). Built in background after
-// the symbol snapshot is ready so L1 can rank without lexical map caps.
+// Optional full-corpus signature index (legacy). Prefer lexical shortlist +
+// query-time two-stage embed in L1 — corpus embed of thousands of symbols is too slow.
 class CodingSymbolEmbedIndex {
  public:
   using ProgressFn = std::function<void(const std::string& line)>;

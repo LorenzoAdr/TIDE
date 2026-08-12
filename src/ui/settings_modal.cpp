@@ -12,6 +12,8 @@
 #include <thread>
 #include <vector>
 
+#include "ai/ai_controller.hpp"
+#include "ai/ai_packages.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
@@ -57,6 +59,7 @@ struct SettingsBodyContent {
 void append_top_level_tabs_header(SettingsBodyContent* content, SettingsModalState* state);
 void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel);
 void start_language_pack_install(SettingsModalState* state, const std::string& language_id);
+void start_ai_package_install(SettingsModalState* state, const std::string& pack_id);
 void start_language_pack_remove(SettingsModalState* state, const std::string& language_id);
 void start_export_portable(SettingsModalState* state);
 int toolpacks_row_count();
@@ -1593,6 +1596,12 @@ void activate_settings_click(SettingsModalState* state, int index, int mouse_x) 
                  index < static_cast<int>(toolpacks::language_packs().size())) {
         start_language_pack_install(
             state, toolpacks::language_packs()[static_cast<std::size_t>(index)].id);
+      } else {
+        const int ai_first = static_cast<int>(toolpacks::language_packs().size());
+        const int ai_index = index - ai_first;
+        if (ai_index >= 0 && ai_index < static_cast<int>(ai_packages().size())) {
+          start_ai_package_install(state, ai_packages()[static_cast<std::size_t>(ai_index)].id);
+        }
       }
       break;
     case SettingsPanel::kStatus:
@@ -2280,6 +2289,55 @@ Color language_pack_status_color(toolpacks::LanguagePackStatus status) {
   return theme::Muted();
 }
 
+std::string format_ai_pack_size(std::size_t bytes) {
+  if (bytes >= 1024ull * 1024ull * 1024ull) {
+    return std::to_string((bytes + 512ull * 1024ull * 1024ull) / (1024ull * 1024ull * 1024ull)) +
+           " GB";
+  }
+  if (bytes >= 1024ull * 1024ull) {
+    return std::to_string((bytes + 512ull * 1024ull) / (1024ull * 1024ull)) + " MB";
+  }
+  return std::to_string(bytes) + " B";
+}
+
+void start_ai_package_install(SettingsModalState* state, const std::string& pack_id) {
+  if (state == nullptr) {
+    return;
+  }
+  if (state->toolpack_job && state->toolpack_job->running.load()) {
+    return;
+  }
+  auto job = std::make_shared<SettingsModalState::ToolpackJob>();
+  job->busy_label = i18n::tr("settings.toolpacks.ai.installing");
+  job->running = true;
+  state->toolpack_job = job;
+  MainLayoutState* layout = state->layout_state;
+  const AiSettings ai_settings = state->workspace_baseline.ai;
+  set_busy_percent(layout, BusyActivity::AiDownloading, 0);
+  std::thread([job, pack_id, layout, ai_settings]() {
+    const auto result = install_ai_package(
+        pack_id, ai_settings, [job, layout](int percent, std::string_view label) {
+          set_busy_percent(layout, BusyActivity::AiDownloading, percent, label);
+          if (!label.empty()) {
+            std::lock_guard<std::mutex> lock(job->mu);
+            job->busy_label = std::string(label);
+          }
+        });
+    {
+      std::lock_guard<std::mutex> lock(job->mu);
+      job->ok = result.ok;
+      job->message = result.message;
+      job->finished = true;
+      job->running = false;
+    }
+    clear_busy(layout);
+    if (layout != nullptr && layout->ai_controller != nullptr && result.ok) {
+      layout->ai_controller->clear_missing_package_notice(pack_id);
+    }
+    UI_WAKE(layout, "toolpack");
+  }).detach();
+}
+
 void start_language_pack_install(SettingsModalState* state, const std::string& language_id) {
   if (state == nullptr) {
     return;
@@ -2335,8 +2393,12 @@ void start_language_pack_remove(SettingsModalState* state, const std::string& la
   }).detach();
 }
 
-int toolpacks_export_row_index() {
+int toolpacks_ai_first_index() {
   return static_cast<int>(toolpacks::language_packs().size());
+}
+
+int toolpacks_export_row_index() {
+  return toolpacks_ai_first_index() + static_cast<int>(ai_packages().size());
 }
 
 int toolpacks_row_count() {
@@ -2471,6 +2533,44 @@ SettingsBodyContent build_toolpacks_settings(SettingsModalState* state) {
     content.rows.push_back(text(""));
   }
 
+  // AI model packs (ModelStore / HF — not the GitHub toolpack catalog).
+  {
+    content.rows.push_back(text(i18n::tr("settings.toolpacks.ai.section")) |
+                           color(theme::Header()) | bold);
+    content.rows.push_back(text(i18n::tr("settings.toolpacks.ai.intro")) | color(theme::Muted()));
+    content.rows.push_back(text(""));
+    const AiSettings ai_settings =
+        state != nullptr ? state->workspace_baseline.ai : AiSettings{};
+    const int ai_first = toolpacks_ai_first_index();
+    const auto& ai_packs = ai_packages();
+    for (int i = 0; i < static_cast<int>(ai_packs.size()); ++i) {
+      const auto& pack = ai_packs[static_cast<std::size_t>(i)];
+      const int row_index = ai_first + i;
+      const auto status = ai_package_status(pack.id, ai_settings);
+      const bool installed = status == AiPackageInstallStatus::Installed;
+      const bool selected = state != nullptr && state->selected == row_index;
+      Element title =
+          text(std::string(selected ? "▸ " : "  ") + i18n::tr(pack.name_i18n_key)) |
+          color(selected ? theme::Accent() : theme::Header()) | bold;
+      if (selected) {
+        content.focus_row = static_cast<int>(content.rows.size());
+        title = title | inverted;
+      }
+      add_click_target(&content, row_index);
+      content.rows.push_back(hbox({
+          std::move(title) | size(WIDTH, EQUAL, 28),
+          text(installed ? i18n::tr("settings.toolpacks.status.installed")
+                         : i18n::tr("settings.toolpacks.status.missing")) |
+              color(installed ? theme::Success() : theme::Error()) | bold,
+      }));
+      content.rows.push_back(
+          text("    " + i18n::tr(pack.detail_i18n_key) + "  (~" +
+               format_ai_pack_size(pack.approx_bytes) + ")") |
+          color(theme::Muted()));
+      content.rows.push_back(text(""));
+    }
+  }
+
   // Export action row (last selectable).
   {
     const int export_index = toolpacks_export_row_index();
@@ -2532,6 +2632,12 @@ bool handle_toolpacks_settings_keys(SettingsModalState* state, Event event) {
                state->selected < static_cast<int>(toolpacks::language_packs().size())) {
       start_language_pack_install(
           state, toolpacks::language_packs()[static_cast<std::size_t>(state->selected)].id);
+    } else {
+      const int ai_first = toolpacks_ai_first_index();
+      const int ai_index = state->selected - ai_first;
+      if (ai_index >= 0 && ai_index < static_cast<int>(ai_packages().size())) {
+        start_ai_package_install(state, ai_packages()[static_cast<std::size_t>(ai_index)].id);
+      }
     }
     return true;
   }

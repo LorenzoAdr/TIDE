@@ -28,7 +28,7 @@ struct Level1AgentDeps {
   LlamaBackend* backend = nullptr;
   EmbeddingBackend* embed = nullptr;  // optional; coding-pack semantic rerank
   CodingStemEmbedIndex* coding_stem_index = nullptr;
-  CodingSymbolEmbedIndex* coding_symbol_index = nullptr;
+  CodingSymbolEmbedIndex* coding_symbol_index = nullptr;  // unused; kept for ABI/tests
   AiSettings settings;
   // Notifica cada tool invocada (p.ej. para memoria conversacional L0).
   std::function<void(const std::string& name, const std::string& arg)> on_tool;

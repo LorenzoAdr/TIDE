@@ -59,7 +59,8 @@ struct AiRouteResult {
 struct AiLevel0EmbedSettings {
   std::string model_id = "nomic-embed-text-v1.5-q4_k_m";
   std::string model_path;
-  bool auto_download = true;
+  // Downloads only via Toolpacks / AI missing toast (never automatic).
+  bool auto_download = false;
   int server_port = 18765;
   // Per-slot context. Short signature passages (~100 chars) fit in 128–256 tokens.
   // Total KV ≈ n_ctx with non-unified slots: each slot gets n_ctx / n_parallel.
@@ -94,7 +95,8 @@ struct AiLevel1Settings {
   int max_tokens = 512;
   int n_ctx = 4096;
   float temperature = 0.2f;
-  bool auto_download = true;
+  // Downloads only via Toolpacks / AI missing toast (never automatic).
+  bool auto_download = false;
 };
 
 struct AiSettings {

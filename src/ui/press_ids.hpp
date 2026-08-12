@@ -59,6 +59,8 @@ constexpr std::string_view kExternalConflictLoad = "external_conflict.load";
 constexpr std::string_view kLspToastInstall = "lsp_toast.install";
 constexpr std::string_view kLspToastBundle = "lsp_toast.bundle";
 constexpr std::string_view kLspToastIgnore = "lsp_toast.ignore";
+constexpr std::string_view kAiToastInstall = "ai_toast.install";
+constexpr std::string_view kAiToastIgnore = "ai_toast.ignore";
 constexpr std::string_view kWelcomeExternalFile = "welcome.external_file";
 constexpr std::string_view kWelcomeDebug = "welcome.debug";
 constexpr std::string_view kWelcomeWorkspace = "welcome.workspace";
@@ -212,6 +214,10 @@ inline bool is_external_conflict_hover(std::string_view id) {
 
 inline bool is_lsp_toast_hover(std::string_view id) {
   return id == kLspToastInstall || id == kLspToastBundle || id == kLspToastIgnore;
+}
+
+inline bool is_ai_toast_hover(std::string_view id) {
+  return id == kAiToastInstall || id == kAiToastIgnore;
 }
 
 inline bool is_explorer_hover(std::string_view id) {

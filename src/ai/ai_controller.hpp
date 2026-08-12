@@ -4,9 +4,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "ai/ai_types.hpp"
@@ -57,17 +60,23 @@ class AiController {
   // Entry point for the AI tab input (always L0 first — D14).
   void handle_user_input(const std::string& line);
 
-  // Kick coding-symbol (map) embeddings after the workspace symbol map is ready.
-  // Safe to call from the indexer worker; no-ops if AI disabled / already running.
+  // After the workspace symbol map is ready: warm the (cheap) stem embed index only.
+  // Full-corpus symbol embeddings were too slow; L1 ranks a lexical shortlist at query time.
   void on_symbol_map_ready();
 
   // Cancels the current L1 agent and/or background task.
   void cancel_current();
 
+  // Shown when a user action needs an AI pack that is not installed (Toolpacks / toast).
+  using MissingPackageFn = std::function<void(const std::string& pack_id)>;
+  void set_missing_package_handler(MissingPackageFn fn);
+  void clear_missing_package_notice(const std::string& pack_id = {});
+
   bool enabled() const { return settings_.enabled; }
   bool agent_busy() const { return agent_busy_.load(); }
   bool task_busy() const { return task_busy_.load(); }
-  bool busy() const { return agent_busy() || task_busy(); }
+  bool download_busy() const { return download_busy_.load(); }
+  bool busy() const { return agent_busy() || task_busy() || download_busy(); }
 
  private:
   void ensure_tools();
@@ -82,12 +91,19 @@ class AiController {
   void show_model_status();
   void download_models(const std::string& what);
   bool ensure_backend_ready();
-  bool ensure_intent_embeddings_ready();
+  // prompt_if_missing: only for user-driven AI input (never background warm).
+  bool ensure_intent_embeddings_ready(bool prompt_if_missing = false);
   bool ensure_coding_stem_index_ready();
-  void maybe_start_coding_symbol_index_async();
+  void maybe_start_coding_stem_warm_async();
   void join_symbol_embed_thread();
   void begin_thinking();
   void end_thinking();
+  void begin_download(std::string_view label = {});
+  void update_download_percent(int percent);
+  void end_download();
+  ModelStore::ProgressFn make_store_progress();
+  void request_missing_package(const std::string& pack_id);
+  static bool is_cancel_input(const std::string& line);
   void wake(bool force = false);
   void join_agent_thread();
   void join_task_thread();
@@ -103,6 +119,8 @@ class AiController {
   CodingSymbolEmbedIndex coding_symbol_index_;
   bool tools_ready_ = false;
   bool intent_embed_attempted_ = false;
+  MissingPackageFn on_missing_package_;
+  std::unordered_set<std::string> missing_notified_;
 
   mutable std::mutex lines_mu_;
   std::vector<std::string> lines_;
@@ -114,6 +132,7 @@ class AiController {
 
   std::atomic<bool> agent_busy_{false};
   std::atomic<bool> agent_cancel_{false};
+  std::atomic<bool> download_busy_{false};
   std::thread agent_thread_;
   std::mutex agent_mu_;
 

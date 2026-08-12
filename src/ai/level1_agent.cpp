@@ -89,7 +89,7 @@ std::string Level1Agent::build_system_prompt() const {
          "IMPORTANTE: action SOLO tool|seeds|final|needs_level2. "
          "El nombre de la tool va en \"name\", NUNCA en \"action\".\n"
          "INVESTIGAR / LOCALIZAR CÓDIGO: el runtime pide needles, re-rankea REPO_MAP "
-         "(léxico + embed firmas + embed cuerpos) y entrega el mapa a L2.\n"
+         "(léxico shortlist + embed firmas + embed cuerpos) y entrega el mapa a L2.\n"
          "DAME CONTEXTO / INVESTIGAR: needles + mapa rankeado (embed firmas/cuerpos) en "
          "`.tuide/ai/map_last.md`; L2 elige qué leer. L1 NO vuelca bodies ni sustituye a L2.\n"
          "Para un símbolo concreto: tool get_code_of con arg path:Symbol o path:line.\n"
@@ -258,8 +258,8 @@ std::vector<std::string> rank_index_needle_candidates(SymbolWorkspaceIndexer* in
   if (snap == nullptr || snap->symbols.empty()) {
     return out;
   }
-  const auto qtoks_raw = repo_map_query_tokens(user_message, 16);
-  const auto qtoks = expand_nl_retrieval_tokens(qtoks_raw, 32);
+  const auto qtoks_raw = repo_map_query_tokens(user_message, 24);
+  const auto qtoks = expand_nl_retrieval_tokens(qtoks_raw, 48);
   // Prefer matches on specific expanded tokens over the ultra-common "modal" alone.
   auto token_weight = [](const std::string& t) {
     if (t == "modal" || t == "dialog" || t == "window" || t == "panel") {
@@ -380,15 +380,15 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
   };
 
   const std::vector<std::string> index_candidates =
-      rank_index_needle_candidates(deps_.symbol_indexer, user_message, 28);
+      rank_index_needle_candidates(deps_.symbol_indexer, user_message, 48);
   if (log && !index_candidates.empty()) {
     std::ostringstream cs;
     cs << "candidatos índice:";
-    for (std::size_t i = 0; i < index_candidates.size() && i < 12; ++i) {
+    for (std::size_t i = 0; i < index_candidates.size() && i < 24; ++i) {
       cs << ' ' << index_candidates[i];
     }
-    if (index_candidates.size() > 12) {
-      cs << " …";
+    if (index_candidates.size() > 24) {
+      cs << " …(+" << (index_candidates.size() - 24) << ")";
     }
     log(cs.str());
   }
@@ -400,7 +400,7 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
         "funcionalidad, responde SOLO JSON:\n"
         "{\"action\":\"seeds\",\"seeds\":[\"QuitConfirm\",\"quit_confirm\",...]}\n"
         "Reglas:\n"
-        "- 4..10 identificadores ESPECÍFICOS (archivo/clase/función), preferible compuestos.\n"
+        "- 8..16 identificadores ESPECÍFICOS (archivo/clase/función), preferible compuestos.\n"
         "- Traduce la intención a vocabulario típico de código en inglés.\n"
         "- Si la query combina varias palabras de UI (modal/tab/panel/dialog/settings/…), "
         "los seeds DEBEN ser compuestos que junten ≥2 facetas "
@@ -409,21 +409,21 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
         "(p. ej. QuitConfirm, shutdown_overlay). NO confundir con settings/shortcuts modal.\n"
         "- compilación/compilar/build → compile/build/cmake/makefile "
         "(p. ej. compile.sh, CMakeLists, build scripts en tools/).\n"
-        "- Si hay CANDIDATOS_DEL_INDICE, prioriza elegir de esa lista (o variantes cercanas).\n"
+        "- Si hay CANDIDATOS_DEL_INDICE, prioriza elegir varios de esa lista (o variantes cercanas).\n"
         "- PROHIBIDO seeds genéricos sueltos: Modal, process, panel, dialog, button, manager, "
         "attach, launch, file, tree, tab, tabs (sin más cualificador).\n"
         "- PROHIBIDO: markdown, tools, prosa, rutas absolutas.\n";
     std::ostringstream user;
     user << "Consulta del usuario:\n" << user_message << "\n";
     if (!index_candidates.empty()) {
-      user << "\nCANDIDATOS_DEL_INDICE (elige de aquí si encajan):\n";
+      user << "\nCANDIDATOS_DEL_INDICE (elige varios de aquí si encajan):\n";
       for (const auto& c : index_candidates) {
         user << "- " << c << '\n';
       }
     }
     user << "\nJSON:";
     req.user_prompt = user.str();
-    req.max_tokens = std::min(320, std::max(128, deps_.settings.level1.max_tokens));
+    req.max_tokens = std::min(480, std::max(192, deps_.settings.level1.max_tokens));
     req.n_ctx = std::max(4096, deps_.settings.level1.n_ctx);
     req.temperature = 0.1;
     if (log) {
@@ -451,17 +451,15 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
     }
   }
 
-  // If the model only emitted generics / nothing, fall back to ranked index stems.
-  if (out.size() < 2) {
-    for (const auto& c : index_candidates) {
-      push(c, false);
-      if (out.size() >= 8) {
-        break;
-      }
+  // Always merge top index stems so lexical recall is not capped by the LLM alone.
+  for (const auto& c : index_candidates) {
+    push(c, false);
+    if (out.size() >= 20) {
+      break;
     }
   }
 
-  for (const auto& t : extract_code_tokens(user_message, 8)) {
+  for (const auto& t : extract_code_tokens(user_message, 16)) {
     push(t, false);
   }
 
@@ -473,11 +471,11 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
         continue;
       }
       expanded.push_back(v);
-      if (expanded.size() >= 16) {
+      if (expanded.size() >= 32) {
         break;
       }
     }
-    if (expanded.size() >= 16) {
+    if (expanded.size() >= 32) {
       break;
     }
   }
@@ -487,7 +485,7 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
       if (c.size() >= 4 && seen.insert(c).second) {
         expanded.push_back(c);
       }
-      if (expanded.size() >= 8) {
+      if (expanded.size() >= 16) {
         break;
       }
     }
@@ -524,10 +522,10 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
   RepoMapOptions map_opts;
   map_opts.query = user_message;
   map_opts.active_file = relative_active_file(deps_.workspace);
-  map_opts.max_symbols = 48;
-  map_opts.max_files = 16;
-  map_opts.max_chars = 4800;
-  map_opts.max_map_tokens = 1400;
+  map_opts.max_symbols = 128;
+  map_opts.max_files = 32;
+  map_opts.max_chars = 9600;
+  map_opts.max_map_tokens = 2800;
   map_opts.prefer_git_tracked = true;
   map_opts.use_pagerank = true;
   if (deps_.workspace != nullptr) {
@@ -564,7 +562,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           "; max_steps=" + std::to_string(max_steps) + ")");
     }
 
-    const auto lexical_tokens = repo_map_query_tokens(user_message, 16);
+    const auto lexical_tokens = repo_map_query_tokens(user_message, 24);
     if (log) {
       std::ostringstream ts;
       ts << "tokens léxicos:";
@@ -616,63 +614,29 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
       const bool l2_active = deps_.settings.level2_mode != "dry_run";
 
-      std::vector<RepoMapEntry> candidates;
-      bool from_symbol_index = false;
-      if (deps_.coding_symbol_index != nullptr && deps_.coding_symbol_index->ready() &&
-          deps_.embed != nullptr && deps_.embed->ready()) {
-        const std::string enriched = enrich_query_for_embed(user_message, needles);
-        std::vector<float> qvec;
-        std::string qerr;
-        if (deps_.coding_symbol_index->embed_query_vec(enriched, deps_.embed, &qvec, &qerr) &&
-            !qvec.empty()) {
-          candidates = deps_.coding_symbol_index->top_entries(qvec, 48);
-          from_symbol_index = !candidates.empty();
-          if (log) {
-            log("L1 symbol_embed_index: top=" + std::to_string(candidates.size()) +
-                " / corpus=" + std::to_string(deps_.coding_symbol_index->size()));
-          }
-        } else if (log) {
-          log("L1 symbol_embed_index query fail: " + qerr);
-        }
-      }
-      if (!from_symbol_index) {
-        // Fallback: map as built (still may be small until background index finishes).
-        candidates = m.entries;
-        if (log && deps_.coding_symbol_index != nullptr && !deps_.coding_symbol_index->ready()) {
-          log("L1 symbol_embed_index: aún no listo — usando REPO_MAP (" +
-              std::to_string(candidates.size()) + ")");
-        } else if (log && deps_.coding_symbol_index == nullptr) {
-          log("L1 symbol_embed_index: no disponible — usando REPO_MAP (" +
-              std::to_string(candidates.size()) + ")");
-        }
+      // Lexical shortlist only (map already capped ~96). Embed signatures + top bodies
+      // at query time — no full-corpus CodingSymbolEmbedIndex.
+      std::vector<RepoMapEntry> candidates = m.entries;
+      if (log) {
+        log("L1 lexical shortlist: " + std::to_string(candidates.size()) +
+            " candidatos (via " + via + ")");
       }
 
       TwoStageRerankOptions rr_opts;
       rr_opts.query = user_message;
       rr_opts.needles = needles;
       rr_opts.workspace_root = root;
-      if (from_symbol_index) {
-        // Already ranked by signature cosine over the full corpus.
-        rr_opts.skip_phase_a = true;
-        rr_opts.phase_a_pool = 0;
-        rr_opts.phase_a_top = 16;  // bodies only for top-16
-        rr_opts.final_top = 24;
-        rr_opts.max_per_file = 3;
-        rr_opts.fetch_bodies = true;
-      } else {
-        rr_opts.phase_a_pool = 0;
-        rr_opts.phase_a_top = 0;
-        rr_opts.final_top = 0;
-        rr_opts.fetch_bodies = true;
-        rr_opts.max_per_file = 0;
-        rr_opts.skip_phase_a = false;
-      }
+      rr_opts.phase_a_pool = 128;
+      rr_opts.phase_a_top = 24;
+      rr_opts.final_top = 40;
+      rr_opts.max_per_file = 4;
+      rr_opts.fetch_bodies = true;
+      rr_opts.skip_phase_a = false;
       rr_opts.body_max_lines = 80;
 
       if (log) {
-        log(std::string("L1 two_stage rerank") +
-            (from_symbol_index ? " (symbol_index)" : " (full map, no lex prefilter)") +
-            ": candidatos=" + std::to_string(candidates.size()) + " (via " + via + ")");
+        log("L1 two_stage rerank (lexical shortlist → embed firmas/cuerpos): candidatos=" +
+            std::to_string(candidates.size()));
       }
       TwoStageRerankResult ranked =
           rerank_map_two_stage(std::move(candidates), rr_opts, deps_.embed);
@@ -681,14 +645,13 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
             " phase_b_ms=" + std::to_string(ranked.phase_b_ms) +
             " total_ms=" + std::to_string(ranked.total_ms) +
             " cand_in=" + std::to_string(ranked.candidates_in) +
-            " n=" + std::to_string(ranked.entries.size()) +
-            (from_symbol_index ? " src=symbol_index" : " src=repo_map"));
+            " n=" + std::to_string(ranked.entries.size()) + " src=lexical_shortlist");
       }
       ai_trace(AiTraceChannel::L1, "l1_embed_phase_a",
                std::string("{\"used\":") + (ranked.used_phase_a ? "1" : "0") +
                    ",\"ms\":" + std::to_string(ranked.phase_a_ms) +
                    ",\"cand_in\":" + std::to_string(ranked.candidates_in) +
-                   ",\"symbol_index\":" + (from_symbol_index ? "1" : "0") + "}");
+                   ",\"symbol_index\":0}");
       ai_trace(AiTraceChannel::L1, "l1_embed_phase_b",
                std::string("{\"used\":") + (ranked.used_phase_b ? "1" : "0") +
                    ",\"ms\":" + std::to_string(ranked.phase_b_ms) + ",\"bodies\":" +
@@ -699,12 +662,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
         map_note += "; ";
       }
       map_note += ranked.note;
-      if (from_symbol_index) {
-        map_note += "; src=symbol_index; corpus=" +
-                    std::to_string(deps_.coding_symbol_index->size());
-      } else {
-        map_note += "; lex_prefilter=0; src=repo_map";
-      }
+      map_note += "; lex_prefilter=1; src=lexical_shortlist";
 
       RankedMapDumpOptions dump_opts;
       dump_opts.workspace_root = root;
@@ -725,7 +683,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
                    ai_trace_escape(path) + "\",\"note\":\"" + ai_trace_escape(map_note) +
                    "\",\"l2\":" + (l2_active ? "1" : "0") +
                    ",\"total_ms\":" + std::to_string(ranked.total_ms) +
-                   ",\"symbol_index\":" + (from_symbol_index ? "1" : "0") + "}");
+                   ",\"symbol_index\":0}");
 
       out.ok = true;
       std::ostringstream summary;
@@ -736,7 +694,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
         summary << " (falló escritura: " << err << ")";
       }
       summary << " (" << ranked.note << ")\n";
-      summary << format_ranked_map_answer(ranked.entries, 32, {});
+      summary << format_ranked_map_answer(ranked.entries, 48, {});
       out.final_text = summary.str();
 
       if (l2_active) {
@@ -751,7 +709,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
             if (!e.name.empty()) {
               out.seeds.push_back(e.name);
             }
-            if (out.seeds.size() >= 8) {
+            if (out.seeds.size() >= 16) {
               break;
             }
           }

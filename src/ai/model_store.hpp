@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -76,8 +77,11 @@ class ModelStore {
   std::string cache_dir_;
 };
 
+// expected_size>0 → progreso por tamaño del .partial; si no, mejor esfuerzo (curl bar / Content-Length).
+// on_progress may receive "__pct__:N" (0..100) for UI busy-strip updates.
 bool download_url_to_file(const std::string& url, const std::string& dest,
-                          const ModelStore::ProgressFn& on_progress, std::string* error);
+                          const ModelStore::ProgressFn& on_progress, std::string* error,
+                          std::uint64_t expected_size = 0);
 
 // Sync TUIDE_LLAMA_VULKAN env from workspace ai.llama_vulkan_bundle (Linux Vulkan bundle).
 void apply_llama_bundle_preference(const AiSettings& settings);

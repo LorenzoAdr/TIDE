@@ -149,6 +149,13 @@ void CodingStemEmbedIndex::set_rows_for_test(std::vector<CodingStemEmbedRow> row
   content_hash_ = "test";
 }
 
+void CodingStemEmbedIndex::invalidate() {
+  rows_.clear();
+  by_stem_.clear();
+  content_hash_.clear();
+  ready_ = false;
+}
+
 bool CodingStemEmbedIndex::embed_query_vec(const std::string& query, EmbeddingBackend* backend,
                                            const EmbedFn& test_embed, std::vector<float>* out,
                                            std::string* error) const {

@@ -152,6 +152,7 @@ add_executable(tuide
   src/ui/open_file_confirm.cpp
   src/ui/external_file_conflict.cpp
   src/ui/lsp_missing_toast.cpp
+  src/ui/ai_missing_toast.cpp
   src/ui/shortcuts_modal.cpp
   src/ui/settings_modal.cpp
   src/ui/source_substitute_modal.cpp
@@ -317,6 +318,7 @@ add_executable(tuide
   src/ai/coding_stem_embed_index.cpp
   src/ai/coding_symbol_embed_index.cpp
   src/ai/model_store.cpp
+  src/ai/ai_packages.cpp
   src/ai/llama_backend.cpp
   src/ai/level1_action.cpp
   src/ai/level1_agent.cpp

@@ -34,6 +34,8 @@ class CodingStemEmbedIndex {
   // Precomputed rows for unit tests (no backend/cache).
   void set_rows_for_test(std::vector<CodingStemEmbedRow> rows);
 
+  void invalidate();
+
   float cosine_for_stem(const std::vector<float>& query_embedding, const std::string& stem) const;
   const std::string* passage_for(const std::string& stem) const;
 
