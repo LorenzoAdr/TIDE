@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "git/git_command.hpp"
 #include "git/git_diff.hpp"
 #include "git/git_log.hpp"
 #include "git/git_status.hpp"
@@ -88,6 +89,8 @@ class GitService {
   void checkout_branch(const std::string& branch, CompletionCallback on_done);
   void push(CompletionCallback on_done);
   void pull(CompletionCallback on_done);
+  void push(const GitCredentials& credentials, CompletionCallback on_done);
+  void pull(const GitCredentials& credentials, CompletionCallback on_done);
 
   void tick();
 

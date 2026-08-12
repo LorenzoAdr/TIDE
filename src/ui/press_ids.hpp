@@ -21,6 +21,7 @@ constexpr std::string_view kConsoleTabGit = "console.tab.git";
 constexpr std::string_view kConsoleTabCoreAnalyzer = "console.tab.core_analyzer";
 constexpr std::string_view kConsoleTabBinarySymbols = "console.tab.binary_symbols";
 constexpr std::string_view kConsoleTabPacketMonitor = "console.tab.packet_monitor";
+constexpr std::string_view kPerformanceRefresh = "performance.refresh";
 constexpr std::string_view kPacketMonitorRecord = "packet_monitor.record";
 constexpr std::string_view kPacketMonitorSave = "packet_monitor.save";
 constexpr std::string_view kSidebarHide = "sidebar.hide";
@@ -175,6 +176,10 @@ inline bool is_console_tab_hover(std::string_view id) {
 
 inline bool is_console_header_hover(std::string_view id) {
   return is_console_tab_hover(id) || id == kConsoleHide;
+}
+
+inline bool is_performance_hover(std::string_view id) {
+  return id == kPerformanceRefresh;
 }
 
 inline bool is_sidebar_tab_hover(std::string_view id) {

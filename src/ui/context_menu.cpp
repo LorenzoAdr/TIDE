@@ -983,6 +983,12 @@ bool create_path(WorkspaceModel* workspace, DebugModel* model, WorkspaceIndexer*
   }
   if (workspace != nullptr) {
     workspace->status_message = i18n::tr_fmt("status.created_file", {name});
+    workspace->open_file(target.string());
+  }
+  if (model != nullptr) {
+    model->active_file = target.string();
+    model->active_line = 0;
+    model->view_token++;
   }
   return true;
 }
@@ -1499,9 +1505,18 @@ bool commit_rename(ContextMenuState* state, WorkspaceModel* workspace, DebugMode
 
   if (state->name_prompt_kind == NamePromptKind::CreateFile ||
       state->name_prompt_kind == NamePromptKind::CreateFolder) {
-    return create_path(workspace, model, indexer, symbol_indexer, state->absolute_path,
-                       state->relative_path, new_name,
-                       state->name_prompt_kind == NamePromptKind::CreateFolder);
+    const bool is_folder = state->name_prompt_kind == NamePromptKind::CreateFolder;
+    const bool ok = create_path(workspace, model, indexer, symbol_indexer, state->absolute_path,
+                                state->relative_path, new_name, is_folder);
+    if (ok && !is_folder) {
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Editor;
+      }
+      if (layout_state != nullptr) {
+        UI_WAKE(layout_state, "wake");
+      }
+    }
+    return ok;
   }
 
   const bool is_dir = state->kind == ContextMenuKind::Folder;

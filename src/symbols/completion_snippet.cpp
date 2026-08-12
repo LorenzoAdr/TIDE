@@ -465,6 +465,27 @@ SnippetSessionStop* current_session_placeholder(SnippetSession* session) {
   return nullptr;
 }
 
+SnippetSessionStop absolute_placeholder(int insert_line, int insert_start_col,
+                                        const SnippetPlaceholder& rel) {
+  SnippetSessionStop abs;
+  abs.index = rel.index;
+  abs.line = insert_line + rel.line_offset;
+  abs.col = (rel.line_offset == 0 ? insert_start_col : 0) + rel.col;
+  abs.length = rel.length;
+  return abs;
+}
+
+void jump_to_snippet_placeholder(EditorBuffer* buffer, const SnippetSessionStop& placeholder) {
+  buffer->reset_to_single_cursor(placeholder.line, placeholder.col);
+  if (placeholder.length > 0) {
+    buffer->primary().anchor = {placeholder.line, placeholder.col};
+    buffer->primary().head = {placeholder.line, placeholder.col + placeholder.length};
+  }
+  clamp_all_cursors(buffer);
+}
+
+}  // namespace
+
 void reflow_snippet_placeholders_after_current_edit(EditorBuffer* buffer, SnippetSession* session) {
   if (buffer == nullptr || session == nullptr) {
     return;
@@ -508,27 +529,6 @@ void reflow_snippet_placeholders_after_current_edit(EditorBuffer* buffer, Snippe
     placeholder.col += delta;
   }
 }
-
-SnippetSessionStop absolute_placeholder(int insert_line, int insert_start_col,
-                                        const SnippetPlaceholder& rel) {
-  SnippetSessionStop abs;
-  abs.index = rel.index;
-  abs.line = insert_line + rel.line_offset;
-  abs.col = (rel.line_offset == 0 ? insert_start_col : 0) + rel.col;
-  abs.length = rel.length;
-  return abs;
-}
-
-void jump_to_snippet_placeholder(EditorBuffer* buffer, const SnippetSessionStop& placeholder) {
-  buffer->reset_to_single_cursor(placeholder.line, placeholder.col);
-  if (placeholder.length > 0) {
-    buffer->primary().anchor = {placeholder.line, placeholder.col};
-    buffer->primary().head = {placeholder.line, placeholder.col + placeholder.length};
-  }
-  clamp_all_cursors(buffer);
-}
-
-}  // namespace
 
 void begin_snippet_session(SnippetSession* session, int insert_line, int insert_start_col,
                            const SnippetResult& snippet) {

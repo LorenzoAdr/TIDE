@@ -1,6 +1,7 @@
 #include "ui/performance_panel.hpp"
 #include "ui/ui_event_trace.hpp"
 #include "ui/ui_event_types.hpp"
+#include "ui/ui_wake.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -13,6 +14,9 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "ftxui/screen/box.hpp"
+#include "ui/clickable.hpp"
+#include "ui/main_layout.hpp"
+#include "ui/press_ids.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
@@ -309,6 +313,7 @@ Element render_ui_thread_section(const UiPerfSnapshot& ui, int panel_width,
 
 Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,
                                PerformancePanelState* state, int width, int height,
+                               MainLayoutState* layout_state,
                                const UiEventTrace* ui_event_trace,
                                const std::atomic<uint64_t>* ui_paint_count,
                                const std::atomic<uint64_t>* ui_lsp_request_count) {
@@ -343,13 +348,27 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
   Element process_body =
       render_process_section(snapshot, process_height, panel_width, state);
 
+  const bool refresh_hovered =
+      layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kPerformanceRefresh);
+  const bool refresh_pressed =
+      layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kPerformanceRefresh);
+  Element refresh_btn =
+      MakeToolbarButton(text(i18n::tr("panel.performance.refresh")) | color(theme::Muted()),
+                        refresh_hovered, refresh_pressed, false,
+                        state != nullptr ? &state->refresh_box : nullptr, true);
+
   Elements layout;
   layout.push_back(render_ui_thread_section(ui_snapshot, panel_width, dump_path, ui_event_trace,
                                             ui_paint_count, ui_lsp_request_count) |
                    size(HEIGHT, EQUAL, ui_height) | bgcolor(theme::PanelBg()));
   layout.push_back(separator() | color(theme::AccentDim()) | size(HEIGHT, EQUAL, 1));
-  layout.push_back(text(i18n::tr("panel.performance.tab.process")) | bold | color(theme::Accent()) | bgcolor(theme::TabIdle()) |
-                   size(HEIGHT, EQUAL, 1));
+  layout.push_back(hbox({
+                       text(i18n::tr("panel.performance.tab.process")) | bold |
+                           color(theme::Accent()),
+                       filler(),
+                       refresh_btn | size(WIDTH, EQUAL, 3),
+                   }) |
+                   size(HEIGHT, EQUAL, 1) | bgcolor(theme::TabIdle()));
   layout.push_back(process_body | size(HEIGHT, EQUAL, process_height) | bgcolor(theme::PanelBg()));
 
   if (show_system) {
@@ -369,29 +388,50 @@ Element RenderPerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
 }
 
 Component MakePerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_perf,
-                               std::shared_ptr<PerformancePanelState> state) {
-  return CatchEvent(Renderer([] { return text(""); }), [sampler, ui_perf, state](Event event) {
+                               std::shared_ptr<PerformancePanelState> state,
+                               MainLayoutState* layout_state) {
+  return CatchEvent(Renderer([] { return text(""); }), [sampler, ui_perf, state,
+                                                        layout_state](Event event) {
     if (state == nullptr) {
       return false;
     }
     if (event == Event::Character('j') || event == Event::ArrowDown) {
       state->thread_scroll += 1;
+      wake_console_panel(layout_state, "perf.scroll");
       return true;
     }
     if (event == Event::Character('k') || event == Event::ArrowUp) {
       state->thread_scroll = std::max(0, state->thread_scroll - 1);
+      wake_console_panel(layout_state, "perf.scroll");
+      return true;
+    }
+    if (event == Event::Character('r') || event == Event::Character('R')) {
+      wake_console_panel(layout_state, "perf.refresh");
       return true;
     }
     if (event == Event::PageDown) {
       state->thread_scroll += 5;
+      wake_console_panel(layout_state, "perf.scroll");
       return true;
     }
     if (event == Event::PageUp) {
       state->thread_scroll = std::max(0, state->thread_scroll - 5);
+      wake_console_panel(layout_state, "perf.scroll");
       return true;
     }
     if (event.is_mouse()) {
       const auto& m = event.mouse();
+      if (m.motion == Mouse::Moved) {
+        return update_panel_hover(layout_state, m.x, m.y,
+                                  {{press_id::kPerformanceRefresh, &state->refresh_box}},
+                                  press_id::is_performance_hover);
+      }
+      if (m.motion == Mouse::Pressed && m.button == Mouse::Left &&
+          state->refresh_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, press_id::kPerformanceRefresh);
+        wake_console_panel(layout_state, "perf.refresh");
+        return true;
+      }
       // Solo consumir rueda si el cursor está sobre el panel; si no, el editor
       // (u otro panel) debe recibir el scroll.
       if (!state->panel_box.Contain(m.x, m.y)) {
@@ -399,10 +439,12 @@ Component MakePerformancePanel(PerformanceSampler* sampler, UiPerfMonitor* ui_pe
       }
       if (m.button == Mouse::WheelDown) {
         state->thread_scroll += 3;
+        wake_console_panel(layout_state, "perf.scroll");
         return true;
       }
       if (m.button == Mouse::WheelUp) {
         state->thread_scroll = std::max(0, state->thread_scroll - 3);
+        wake_console_panel(layout_state, "perf.scroll");
         return true;
       }
     }

@@ -104,6 +104,8 @@ class LspSymbolProvider : public ISymbolProvider {
   bool lsp_loading() const override;
 
   bool clangd_ready() const;
+  // True when Index button should stay muted: clangd not expected, starting, or healthy.
+  bool clangd_index_healthy() const;
   bool python_lsp_ready() const;
   bool bash_lsp_ready() const;
   bool tex_lsp_ready() const;
@@ -274,6 +276,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool use_gcc_query_driver_ = true;
   bool use_background_index_ = false;
   bool use_lsp_ = false;
+  bool clangd_launched_ = false;
   bool ui_inhibited_ = false;
   std::string workspace_root_;
   std::string compile_commands_dir_;

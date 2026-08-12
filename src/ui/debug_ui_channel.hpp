@@ -48,6 +48,18 @@ inline void DebugUiChannel::on_debug_event(DebugEventKind kind, std::function<vo
     case DebugEventKind::kVariablesUpdated:
       tag = "debug.variables_updated";
       break;
+    case DebugEventKind::kWatchUpdated:
+      tag = "debug.watch_updated";
+      break;
+    case DebugEventKind::kVariableChildrenUpdated:
+      tag = "debug.variable_children_updated";
+      break;
+    case DebugEventKind::kHoverValue:
+      tag = "debug.hover_value";
+      break;
+    case DebugEventKind::kHardwareWatchUpdated:
+      tag = "debug.hardware_watch_updated";
+      break;
     default:
       break;
   }

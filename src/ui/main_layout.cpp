@@ -623,6 +623,9 @@ bool index_clangd_ready(const MainLayoutState* layout_state) {
       !layout_state->app_settings->lsp_enabled) {
     return false;
   }
+  if (layout_state != nullptr && !layout_state->status_index_lsp_ready) {
+    return false;
+  }
   return true;
 }
 

@@ -22,6 +22,8 @@ struct CoreAnalyzerInstance {
 struct WatchEntry {
   std::string expression;
   std::string value;
+  std::string type;
+  int variables_reference = 0;
 };
 
 struct HardwareWatchEntry {

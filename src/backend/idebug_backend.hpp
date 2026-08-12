@@ -147,6 +147,8 @@ struct DebugEvent {
   std::string hover_value;
   int stack_frame_id = -1;
   std::string watch_value;
+  std::string watch_type;
+  int watch_variables_reference = 0;
   std::vector<BreakpointInfo> breakpoints;
   int hardware_watch_index = -1;
   int hardware_watch_gdb_number = -1;

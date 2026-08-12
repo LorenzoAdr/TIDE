@@ -19,7 +19,14 @@ namespace tuide {
 
 namespace {
 
-int max_scroll(int total, int visible) { return std::max(0, total - visible); }
+// Allow the last line to rise toward the top of the viewport (VS Code-like
+// scrollBeyondLastLine). Empty rows past EOF are painted by the editor render.
+int max_scroll(int total, int /*visible*/) {
+  if (total <= 0) {
+    return 0;
+  }
+  return std::max(0, total - 1);
+}
 
 void mark_dirty(EditorBuffer* buffer) {
   buffer->dirty = true;

@@ -60,6 +60,13 @@ struct GitPanelState {
   int commit_modal_file_scroll = 0;
   std::string status_message;
   bool commit_modal_open = false;
+  bool auth_modal_open = false;
+  bool auth_for_push = false;  // false = pull
+  bool auth_focus_password = false;
+  std::string auth_username;
+  std::string auth_password;
+  int auth_user_cursor = 0;
+  int auth_pass_cursor = 0;
   bool operation_pending = false;
   std::string pending_diff_path;
   int last_file_click_index = -1;
@@ -85,6 +92,8 @@ struct GitPanelState {
   ftxui::Box commit_modal_confirm_box;
   ftxui::Box commit_modal_cancel_box;
   ftxui::Box commit_modal_files_box;
+  ftxui::Box auth_modal_confirm_box;
+  ftxui::Box auth_modal_cancel_box;
 };
 
 ftxui::Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* layout_state,

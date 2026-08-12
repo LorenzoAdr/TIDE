@@ -7,6 +7,8 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -16,6 +18,7 @@
 #include <vector>
 
 #include "backend/idebug_backend.hpp"
+#include "editor/clipboard.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/component_options.hpp"
 #include "ftxui/component/event.hpp"
@@ -107,6 +110,19 @@ struct ConsolePanelState {
     }
   };
   std::optional<TerminalLinkHover> terminal_link_hover;
+
+  // Text selection in terminal / App / Debug console output (editor-like copy).
+  bool terminal_selecting = false;
+  bool terminal_has_selection = false;
+  bool terminal_selection_is_gdb = false;  // false: PTY styled rows; true: model->console_output
+  int terminal_sel_anchor_row = 0;
+  int terminal_sel_anchor_col = 0;
+  int terminal_sel_head_row = 0;
+  int terminal_sel_head_col = 0;
+  int last_term_click_row = -1;
+  int last_term_click_col = -1;
+  int64_t last_term_click_ms = 0;
+  int last_term_click_count = 0;
   std::string last_workspace_root;
   std::array<Box, 11> tab_boxes;
   Box hide_box;
@@ -316,6 +332,220 @@ bool terminal_link_at_cell(const ConsolePanelState* state, int row_index, int co
     return false;
   }
   *out = *link;
+  return true;
+}
+
+void clear_terminal_selection(ConsolePanelState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->terminal_selecting = false;
+  state->terminal_has_selection = false;
+  state->terminal_selection_is_gdb = false;
+}
+
+constexpr int kConsoleDoubleClickMs = 400;
+
+int64_t console_now_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+bool console_word_char(char c) {
+  const unsigned char u = static_cast<unsigned char>(c);
+  return std::isalnum(u) || c == '_' || c == '.' || c == '/' || c == '-' || c == ':';
+}
+
+void console_word_bounds_at(const std::string& line, int col, int* start_col, int* end_col) {
+  if (start_col == nullptr || end_col == nullptr) {
+    return;
+  }
+  const int len = static_cast<int>(line.size());
+  if (len <= 0) {
+    *start_col = 0;
+    *end_col = 0;
+    return;
+  }
+  col = std::max(0, std::min(col, len - 1));
+  int pos = col;
+  if (!console_word_char(line[static_cast<std::size_t>(pos)])) {
+    if (pos > 0 && console_word_char(line[static_cast<std::size_t>(pos - 1)])) {
+      --pos;
+    } else {
+      *start_col = col;
+      *end_col = col;
+      return;
+    }
+  }
+  int start = pos;
+  while (start > 0 && console_word_char(line[static_cast<std::size_t>(start - 1)])) {
+    --start;
+  }
+  int end = pos + 1;
+  while (end < len && console_word_char(line[static_cast<std::size_t>(end)])) {
+    ++end;
+  }
+  *start_col = start;
+  *end_col = end;
+}
+
+bool is_console_double_click(const ConsolePanelState& state, int row, int col, int64_t now_ms) {
+  if (state.last_term_click_row != row) {
+    return false;
+  }
+  if (std::abs(state.last_term_click_col - col) > 1) {
+    return false;
+  }
+  if (now_ms - state.last_term_click_ms > kConsoleDoubleClickMs) {
+    return false;
+  }
+  return state.last_term_click_count == 1;
+}
+
+void note_console_click(ConsolePanelState* state, int row, int col, int64_t now_ms) {
+  if (state == nullptr) {
+    return;
+  }
+  const bool same_spot = state->last_term_click_row == row &&
+                         std::abs(state->last_term_click_col - col) <= 1 &&
+                         now_ms - state->last_term_click_ms <= kConsoleDoubleClickMs;
+  state->last_term_click_count = same_spot ? state->last_term_click_count + 1 : 1;
+  state->last_term_click_row = row;
+  state->last_term_click_col = col;
+  state->last_term_click_ms = now_ms;
+}
+
+std::string console_selection_line(const ConsolePanelState* state, const DebugModel* model,
+                                   int row) {
+  if (state == nullptr) {
+    return {};
+  }
+  if (state->terminal_selection_is_gdb) {
+    if (model == nullptr || row < 0 ||
+        row >= static_cast<int>(model->console_output.size())) {
+      return {};
+    }
+    return model->console_output[static_cast<std::size_t>(row)];
+  }
+  if (row < 0 || row >= static_cast<int>(state->terminal_styled_rows.size())) {
+    return {};
+  }
+  return terminal_row_text(state->terminal_styled_rows[static_cast<std::size_t>(row)]);
+}
+
+int console_selection_line_count(const ConsolePanelState* state, const DebugModel* model) {
+  if (state == nullptr) {
+    return 0;
+  }
+  if (state->terminal_selection_is_gdb) {
+    return model != nullptr ? static_cast<int>(model->console_output.size()) : 0;
+  }
+  return static_cast<int>(state->terminal_styled_rows.size());
+}
+
+bool select_console_word_at(ConsolePanelState* state, const DebugModel* model, int row, int col,
+                            bool gdb) {
+  if (state == nullptr) {
+    return false;
+  }
+  state->terminal_selection_is_gdb = gdb;
+  const std::string line = console_selection_line(state, model, row);
+  if (line.empty()) {
+    return false;
+  }
+  int start = 0;
+  int end = 0;
+  console_word_bounds_at(line, col, &start, &end);
+  if (start >= end) {
+    return false;
+  }
+  state->terminal_selecting = false;
+  state->terminal_has_selection = true;
+  state->terminal_sel_anchor_row = row;
+  state->terminal_sel_anchor_col = start;
+  state->terminal_sel_head_row = row;
+  state->terminal_sel_head_col = end;
+  return true;
+}
+
+void normalize_terminal_selection(const ConsolePanelState& state, int* a_row, int* a_col,
+                                  int* b_row, int* b_col) {
+  *a_row = state.terminal_sel_anchor_row;
+  *a_col = state.terminal_sel_anchor_col;
+  *b_row = state.terminal_sel_head_row;
+  *b_col = state.terminal_sel_head_col;
+  if (*a_row > *b_row || (*a_row == *b_row && *a_col > *b_col)) {
+    std::swap(*a_row, *b_row);
+    std::swap(*a_col, *b_col);
+  }
+}
+
+bool terminal_cell_selected(const ConsolePanelState* state, int row, int col) {
+  if (state == nullptr || !state->terminal_has_selection) {
+    return false;
+  }
+  int a_row = 0;
+  int a_col = 0;
+  int b_row = 0;
+  int b_col = 0;
+  normalize_terminal_selection(*state, &a_row, &a_col, &b_row, &b_col);
+  if (row < a_row || row > b_row) {
+    return false;
+  }
+  if (a_row == b_row) {
+    return col >= a_col && col < b_col;
+  }
+  if (row == a_row) {
+    return col >= a_col;
+  }
+  if (row == b_row) {
+    return col < b_col;
+  }
+  return true;
+}
+
+std::string terminal_selected_text(const ConsolePanelState* state, const DebugModel* model) {
+  if (state == nullptr || !state->terminal_has_selection) {
+    return {};
+  }
+  const int total = console_selection_line_count(state, model);
+  if (total <= 0) {
+    return {};
+  }
+  int a_row = 0;
+  int a_col = 0;
+  int b_row = 0;
+  int b_col = 0;
+  normalize_terminal_selection(*state, &a_row, &a_col, &b_row, &b_col);
+  a_row = std::max(0, std::min(a_row, total - 1));
+  b_row = std::max(0, std::min(b_row, total - 1));
+  std::ostringstream out;
+  for (int row = a_row; row <= b_row; ++row) {
+    const std::string line = console_selection_line(state, model, row);
+    int start = 0;
+    int end = static_cast<int>(line.size());
+    if (row == a_row) {
+      start = std::max(0, std::min(a_col, end));
+    }
+    if (row == b_row) {
+      end = std::max(start, std::min(b_col, end));
+    }
+    out << line.substr(static_cast<std::size_t>(start),
+                       static_cast<std::size_t>(std::max(0, end - start)));
+    if (row < b_row) {
+      out << '\n';
+    }
+  }
+  return out.str();
+}
+
+bool copy_terminal_selection(ConsolePanelState* state, const DebugModel* model = nullptr) {
+  const std::string text = terminal_selected_text(state, model);
+  if (text.empty()) {
+    return false;
+  }
+  publish_clipboard_text(text);
   return true;
 }
 
@@ -733,6 +963,9 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
   const int previous_tab = layout_state->console_tabs.selected_tab;
   layout_state->console_tabs.selected_tab = tab;
   layout_state->focus_sync_needed = true;
+  // Start sampling as soon as the tab is selected (don't wait for the next Custom tick).
+  layout_state->performance_sampler.set_worker_sampling_enabled(tab ==
+                                                               ConsolePanelTabs::kPerformance);
   wake_console(layout_state);
   if (tab == ConsolePanelTabs::kTerminal || tab == ConsolePanelTabs::kApp) {
     layout_state->text_input_focus =
@@ -882,6 +1115,38 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
   const bool on_debug_tab = debug_tab_active(app_mode, layout_state);
 
   if (m.motion == Mouse::Moved) {
+    // Keep updating selection while dragging, even if the cursor leaves the
+    // terminal body slightly (clamp to the nearest cell).
+    if (state->terminal_selecting && !state->terminal_selection_is_gdb && on_pty_tab &&
+        state->shell_ui_active) {
+      int x = m.x;
+      int y = m.y;
+      if (!state->terminal_box.IsEmpty()) {
+        x = std::max(state->terminal_box.x_min, std::min(x, state->terminal_box.x_max));
+        y = std::max(state->terminal_box.y_min, std::min(y, state->terminal_box.y_max));
+      }
+      const int visual_row = y - state->terminal_box.y_min;
+      const int display_row = state->terminal_first_visible + visual_row;
+      state->terminal_sel_head_row = terminal_source_row(state, display_row);
+      state->terminal_sel_head_col = std::max(0, x - state->terminal_box.x_min);
+      state->terminal_has_selection = true;
+      wake_console(layout_state);
+      return true;
+    }
+    if (state->terminal_selecting && state->terminal_selection_is_gdb && on_debug_tab) {
+      int x = m.x;
+      int y = m.y;
+      if (!state->history_box.IsEmpty()) {
+        x = std::max(state->history_box.x_min, std::min(x, state->history_box.x_max));
+        y = std::max(state->history_box.y_min, std::min(y, state->history_box.y_max));
+      }
+      const int visual_row = y - state->history_box.y_min;
+      state->terminal_sel_head_row = std::max(0, state->first_visible + visual_row);
+      state->terminal_sel_head_col = std::max(0, x - state->history_box.x_min);
+      state->terminal_has_selection = true;
+      wake_console(layout_state);
+      return true;
+    }
     if (on_pty_tab && state->shell_ui_active) {
       if (update_terminal_link_hover(state, layout_state, m.x, m.y)) {
         wake_console(layout_state);
@@ -909,6 +1174,18 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
     return false;
   }
 
+  // Finish a drag-select even if the release happens outside the panel.
+  if (m.motion == Mouse::Released && state->terminal_selecting) {
+    state->terminal_selecting = false;
+    // Collapse empty click-selections so a plain click does not leave a caret-sized selection.
+    if (state->terminal_sel_anchor_row == state->terminal_sel_head_row &&
+        state->terminal_sel_anchor_col == state->terminal_sel_head_col) {
+      state->terminal_has_selection = false;
+    }
+    wake_console(layout_state);
+    return true;
+  }
+
   if (!state->panel_box.Contain(m.x, m.y)) {
     return false;
   }
@@ -934,13 +1211,40 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
       const int display_row = state->terminal_first_visible + visual_row;
       const int row_index = terminal_source_row(state, display_row);
       const int col = m.x - state->terminal_box.x_min;
+      const int64_t now_ms = console_now_ms();
+      const bool double_click = is_console_double_click(*state, row_index, col, now_ms);
+      note_console_click(state, row_index, col, now_ms);
+      if (double_click && select_console_word_at(state, model, row_index, col, false)) {
+        if (focus != nullptr) {
+          focus->region = FocusRegion::Terminal;
+        }
+        layout_state->text_input_focus = TextInputFocus::None;
+        wake_console(layout_state);
+        return true;
+      }
       CompilerLocationMatch match;
       if (terminal_link_at_cell(state, row_index, col, &match)) {
         trigger_press(layout_state, press_id::kTerminalLink);
+        clear_terminal_selection(state);
         if (open_terminal_link(workspace, model, focus, layout_state, match)) {
           return true;
         }
       }
+      state->terminal_selection_is_gdb = false;
+      state->terminal_selecting = true;
+      state->terminal_has_selection = false;
+      state->terminal_sel_anchor_row = row_index;
+      state->terminal_sel_anchor_col = std::max(0, col);
+      state->terminal_sel_head_row = state->terminal_sel_anchor_row;
+      state->terminal_sel_head_col = state->terminal_sel_anchor_col;
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      if (layout_state != nullptr) {
+        layout_state->text_input_focus = TextInputFocus::None;
+      }
+      wake_console(layout_state);
+      return true;
     }
   }
 
@@ -954,11 +1258,34 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
     return true;
   }
   if (on_debug_tab && state->history_box.Contain(m.x, m.y)) {
+    const int visual_row = m.y - state->history_box.y_min;
+    const int row_index = state->first_visible + visual_row;
+    const int col = std::max(0, m.x - state->history_box.x_min);
+    const int64_t now_ms = console_now_ms();
+    const bool double_click = is_console_double_click(*state, row_index, col, now_ms);
+    note_console_click(state, row_index, col, now_ms);
+    if (double_click && select_console_word_at(state, model, row_index, col, true)) {
+      layout_state->text_input_focus = TextInputFocus::None;
+      layout_state->focus_sync_needed = true;
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      wake_console(layout_state);
+      return true;
+    }
+    state->terminal_selection_is_gdb = true;
+    state->terminal_selecting = true;
+    state->terminal_has_selection = false;
+    state->terminal_sel_anchor_row = std::max(0, row_index);
+    state->terminal_sel_anchor_col = col;
+    state->terminal_sel_head_row = state->terminal_sel_anchor_row;
+    state->terminal_sel_head_col = state->terminal_sel_anchor_col;
     layout_state->text_input_focus = TextInputFocus::None;
     layout_state->focus_sync_needed = true;
     if (focus != nullptr) {
       focus->region = FocusRegion::Terminal;
     }
+    wake_console(layout_state);
     return true;
   }
   if (on_terminal_tab && terminal_body_contains(state, m.x, m.y)) {
@@ -1103,7 +1430,8 @@ Element render_terminal_body(Element content) {
 
 Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool show_cursor,
                            int max_cols, const std::optional<CompilerLocationMatch>& link,
-                           bool link_hovered) {
+                           bool link_hovered, int absolute_row,
+                           const ConsolePanelState* state) {
   const Decorator cursor_cell = cursor_blink::cell_decorator();
   const bool draw_cursor = show_cursor;
 
@@ -1119,11 +1447,14 @@ Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool sh
         break;
       }
       Element cell = text(std::string(1, ch));
+      const bool selected = terminal_cell_selected(state, absolute_row, col);
       const bool in_link =
           link.has_value() && col >= link->span_start && col < link->span_end;
       if (draw_cursor && cursor_col >= 0 && col == cursor_col) {
         cell = cell | cursor_cell;
         cursor_placed = true;
+      } else if (selected) {
+        cell = cell | bgcolor(theme::SelectionBg()) | color(theme::UiText());
       } else if (in_link) {
         cell = cell | color(theme::Accent()) | underlined;
         if (link_hovered) {
@@ -1186,7 +1517,7 @@ Element render_terminal_styled(const std::vector<TerminalStyledRow>& rows, int f
                               state->terminal_link_hover->span_end == link->span_end;
     lines.push_back(render_styled_line(rows[static_cast<std::size_t>(row)], line_cursor,
                                        show_cursor && row == cursor_row, max_cols, link,
-                                       link_hovered));
+                                       link_hovered, row, state));
   }
   if (lines.empty()) {
     if (pty_filter_active(state)) {
@@ -1332,9 +1663,26 @@ bool forward_pty_key(ShellSession* shell, const Event& event, ConsolePanelState*
   if (event.is_mouse() || event_is_tuide_global_shortcut(event)) {
     return false;
   }
+  if (state != nullptr && state->terminal_has_selection &&
+      (event_is_ctrl_c(event) || event == Event::Special("\x1B[99;6u") ||
+       event == Event::Special("\x1B[67;6u"))) {
+    if (copy_terminal_selection(state)) {
+      clear_terminal_selection(state);
+      wake_console(layout_state);
+      return true;
+    }
+  }
+  if (state != nullptr && state->terminal_has_selection && event == Event::Escape) {
+    clear_terminal_selection(state);
+    wake_console(layout_state);
+    return true;
+  }
   const std::optional<std::string> bytes = event_to_pty_bytes(event);
   if (!bytes.has_value()) {
     return false;
+  }
+  if (state != nullptr && state->terminal_has_selection) {
+    clear_terminal_selection(state);
   }
   shell->write_raw(*bytes);
   follow_terminal_on_input(state);
@@ -1411,7 +1759,21 @@ Element render_gdb_console(ConsolePanelState* state, DebugModel* model, AppMode*
   Elements history;
   for (int i = state->first_visible; i < end; ++i) {
     const std::string& line = terminal_lines[static_cast<std::size_t>(i)];
-    history.push_back(text(line.empty() ? " " : line) | color(theme::Header()));
+    if (state->terminal_has_selection && state->terminal_selection_is_gdb && !line.empty()) {
+      Elements parts;
+      for (int col = 0; col < static_cast<int>(line.size()); ++col) {
+        Element cell = text(std::string(1, line[static_cast<std::size_t>(col)]));
+        if (terminal_cell_selected(state, i, col)) {
+          cell = cell | bgcolor(theme::SelectionBg()) | color(theme::UiText());
+        } else {
+          cell = cell | color(theme::Header());
+        }
+        parts.push_back(std::move(cell));
+      }
+      history.push_back(hbox(std::move(parts)));
+    } else {
+      history.push_back(text(line.empty() ? " " : line) | color(theme::Header()));
+    }
   }
   if (history.empty()) {
     history.push_back(text(i18n::tr("console.gdb.no_output")) | color(theme::Muted()));
@@ -1789,7 +2151,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   UiPerfMonitor* ui_perf = layout_state != nullptr ? &layout_state->ui_perf_monitor : nullptr;
   packet_monitor::PacketMonitorService* packet_monitor =
       layout_state != nullptr ? layout_state->packet_monitor_service.get() : nullptr;
-  auto performance_panel = MakePerformancePanel(sampler, ui_perf, perf_state);
+  auto performance_panel = MakePerformancePanel(sampler, ui_perf, perf_state, layout_state);
   auto packet_monitor_panel = MakePacketMonitorPanel(packet_monitor, packet_monitor_state, layout_state);
   auto diagnostics_panel =
       MakeDiagnosticsPanel(workspace, focus, symbols, layout_state, indexer, model,
@@ -1942,6 +2304,11 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
     if (terminal_pty_input_active(layout_state, focus, shell) && on_terminal_tab &&
         event_is_ctrl_c(event)) {
+      if (state->terminal_has_selection && copy_terminal_selection(state.get(), model)) {
+        clear_terminal_selection(state.get());
+        wake_console(layout_state);
+        return true;
+      }
       if (shell != nullptr && shell->running()) {
         shell->send_interrupt();
       }
@@ -1950,7 +2317,28 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
 
     if (on_app_tab && app_session != nullptr && app_session->has_live_pty() &&
         event_is_ctrl_c(event) && !terminal_filter_input_active(layout_state)) {
+      if (state->terminal_has_selection && copy_terminal_selection(state.get(), model)) {
+        clear_terminal_selection(state.get());
+        wake_console(layout_state);
+        return true;
+      }
       app_session->send_interrupt();
+      return true;
+    }
+
+    if (on_debug_tab && state->terminal_has_selection && state->terminal_selection_is_gdb &&
+        event_is_ctrl_c(event)) {
+      if (copy_terminal_selection(state.get(), model)) {
+        clear_terminal_selection(state.get());
+        wake_console(layout_state);
+        return true;
+      }
+    }
+
+    if (on_debug_tab && state->terminal_has_selection && state->terminal_selection_is_gdb &&
+        event == Event::Escape) {
+      clear_terminal_selection(state.get());
+      wake_console(layout_state);
       return true;
     }
 
@@ -2064,6 +2452,11 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       return false;
     }
     if (event_is_ctrl_c(event)) {
+      if (state->terminal_has_selection && copy_terminal_selection(state.get(), model)) {
+        clear_terminal_selection(state.get());
+        wake_console(layout_state);
+        return true;
+      }
       if (shell != nullptr && shell->running()) {
         shell->send_interrupt();
       }
@@ -2360,6 +2753,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       body = core_analyzer_panel->Render() | flex;
     } else if (selected_tab == ConsolePanelTabs::kPerformance) {
       body = RenderPerformancePanel(sampler, ui_perf, perf_state.get(), panel_width, body_height,
+                                    layout_state,
                                     layout_state != nullptr && layout_state->ui_events != nullptr
                                         ? &layout_state->ui_events->trace()
                                         : nullptr,

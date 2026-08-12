@@ -160,10 +160,9 @@ int fold_scroll_max(const EditorBuffer& buffer, const std::vector<FoldRegion>& r
   if (visible.empty()) {
     return 0;
   }
-  if (static_cast<int>(visible.size()) <= viewport_count) {
-    return visible.front();
-  }
-  return visible[visible.size() - static_cast<std::size_t>(viewport_count)];
+  // Match scrollBeyondLastLine: last visible buffer line may rise to the top.
+  (void)viewport_count;
+  return visible.back();
 }
 
 void scroll_view_by_lines_fold_aware(EditorBuffer* buffer, int delta_lines,

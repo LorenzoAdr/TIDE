@@ -49,5 +49,8 @@ void begin_snippet_session(SnippetSession* session, int insert_line, int insert_
 void clear_snippet_session(SnippetSession* session);
 bool snippet_session_active(const SnippetSession& session);
 bool advance_snippet_session(EditorBuffer* buffer, SnippetSession* session);
+// After editing the current placeholder (type / accept completion), adjust sibling
+// placeholder columns on the same line so Tab still lands correctly.
+void reflow_snippet_placeholders_after_current_edit(EditorBuffer* buffer, SnippetSession* session);
 
 }  // namespace tuide
