@@ -72,6 +72,7 @@ set(TUIDE_TREE_SITTER_SOURCES
   src/parser/tree_sitter_blocks.cpp
   src/parser/tree_sitter_completion.cpp
   src/parser/tree_sitter_service.cpp
+  src/symbols/symbol_utils.cpp
   src/util/syntax_highlight.cpp
   src/util/syntax_scope.cpp
   src/editor/editor_context.cpp
@@ -757,6 +758,7 @@ add_executable(level0_intent_index_test
   tests/level0_intent_index_test.cpp
   src/ai/level0_intent_index.cpp
   src/ai/level0_router.cpp
+  src/ai/search_needles.cpp
   src/ai/embedding_backend.cpp
   src/ai/model_store.cpp
   src/ai/ai_trace.cpp
