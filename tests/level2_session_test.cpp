@@ -95,6 +95,65 @@ int main() {
     expect(!tuide::find_unique_span("a a", "a", &sp, &e), "ambiguous reject");
   }
 
+  // Tail truncation keeps last lines
+  {
+    std::ostringstream long_log;
+    for (int i = 1; i <= 100; ++i) {
+      long_log << "line " << i << '\n';
+    }
+    const std::string trunc = Level2Session::truncate_observation_tail(long_log.str(), 40);
+    expect(trunc.find("showing last 40 of 100") != std::string::npos, "tail marker");
+    expect(trunc.find("line 61\n") != std::string::npos, "includes line 61");
+    expect(trunc.find("line 100\n") != std::string::npos, "includes line 100");
+    expect(trunc.find("line 60\n") == std::string::npos, "drops early lines");
+  }
+
+  // Compile fail stores stderr tail only (no full 200-line dump)
+  {
+    const fs::path root3 = fs::temp_directory_path() / "tuide_l2_compile_tail_test";
+    fs::remove_all(root3, ec);
+    fs::create_directories(root3 / ".tuide" / "ai", ec);
+    fs::create_directories(root3 / "src", ec);
+    {
+      std::ofstream map(root3 / ".tuide" / "ai" / "map_last.md");
+      map << "query: compile fail\n";
+    }
+    {
+      std::ofstream foo(root3 / "src" / "foo.cpp");
+      foo << "int value = 1;\n";
+    }
+    Level2SessionDeps deps{&tools, {}, [](std::string* out) {
+      std::ostringstream log;
+      for (int i = 1; i <= 80; ++i) {
+        log << "noise " << i << '\n';
+      }
+      log << "error: boom at end\n";
+      if (out) {
+        *out = log.str();
+      }
+      return 1;
+    }};
+    Level2Session sess3(deps);
+    Level2BootstrapOpts opts3;
+    opts3.workspace_root = root3.string();
+    opts3.query = "fix compile";
+    expect(sess3.bootstrap(opts3, &err), "bootstrap3 " + err);
+    expect(sess3.mark_done(root3.string(), "ready", "edit").ok, "to edit");
+    SearchReplaceHunk h;
+    h.path = "src/foo.cpp";
+    h.search = "int value = 1;\n";
+    h.replace = "int value = 3;\n";
+    const auto tr = sess3.apply_edit(root3.string(), {h});
+    expect(!tr.ok || tr.phase == "edit", "stays edit after fail");
+    const std::string session = read_all(Level2Session::session_path(root3.string()));
+    expect(session.find("compile_feedback") != std::string::npos, "compile_feedback block");
+    expect(session.find("stderr (tail)") != std::string::npos, "stderr tail label");
+    expect(session.find("error: boom at end") != std::string::npos, "keeps error tail");
+    expect(session.find("noise 1\n") == std::string::npos, "drops early noise");
+    expect(session.find("showing last") != std::string::npos, "shows last N marker");
+    fs::remove_all(root3, ec);
+  }
+
   // Explore fail → clarify (no edit)
   {
     const fs::path root2 = fs::temp_directory_path() / "tuide_l2_clarify_test";

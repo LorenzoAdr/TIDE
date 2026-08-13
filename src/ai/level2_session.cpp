@@ -219,6 +219,33 @@ std::string Level2Session::truncate_observation(const std::string& text, int max
   return out.str();
 }
 
+std::string Level2Session::truncate_observation_tail(const std::string& text, int max_lines) {
+  if (max_lines <= 0 || text.empty()) {
+    return text;
+  }
+  std::vector<std::string> lines;
+  lines.reserve(static_cast<std::size_t>(max_lines) + 8);
+  std::istringstream in(text);
+  std::string line;
+  while (std::getline(in, line)) {
+    lines.push_back(line);
+  }
+  if (static_cast<int>(lines.size()) <= max_lines) {
+    std::ostringstream out;
+    for (const auto& l : lines) {
+      out << l << '\n';
+    }
+    return out.str();
+  }
+  std::ostringstream out;
+  out << "… (showing last " << max_lines << " of " << lines.size() << " lines)\n";
+  const std::size_t start = lines.size() - static_cast<std::size_t>(max_lines);
+  for (std::size_t i = start; i < lines.size(); ++i) {
+    out << lines[i] << '\n';
+  }
+  return out.str();
+}
+
 std::string Level2Session::trim_session_body(std::string body) {
   if (body.size() <= kCharBudget) {
     return body;
@@ -591,21 +618,22 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     output = read_file(log);
   }
 
-  const std::string trunc = truncate_observation(output, kMaxObservationLines);
+  const std::string trunc = truncate_observation_tail(output, kMaxCompileLogLines);
   std::ostringstream block;
-  block << "### turn " << st.turn << " — compile\n\n";
-  block << "attempt: " << st.compile_attempt << "/" << kMaxCompileAttempts
-        << "  exit_code: " << exit_code << "\n\n";
-  block << "```\n" << trunc;
-  if (!trunc.empty() && trunc.back() != '\n') {
-    block << '\n';
-  }
-  block << "```\n\n";
-
-  std::string err;
-  append_observation(workspace_root, block.str(), &out.session_chars, &err);
-
   if (exit_code == 0) {
+    block << "### turn " << st.turn << " — compile\n\n";
+    block << "attempt: " << st.compile_attempt << "/" << kMaxCompileAttempts
+          << "  exit_code: " << exit_code << "\n\n";
+    // Success: keep log tiny (compiler noise rarely needed).
+    const std::string ok_log = truncate_observation_tail(output, 12);
+    block << "```\n" << ok_log;
+    if (!ok_log.empty() && ok_log.back() != '\n') {
+      block << '\n';
+    }
+    block << "```\n\n";
+    std::string err;
+    append_observation(workspace_root, block.str(), &out.session_chars, &err);
+
     st.phase = "done";
     st.done = true;
     st.last_action = "compile_ok";
@@ -630,23 +658,26 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     return out;
   }
 
-  // Fail path.
-  std::ostringstream fb;
-  fb << "### turn " << st.turn << " — compile_feedback\n\n";
-  fb << "attempt: " << st.compile_attempt << "/" << kMaxCompileAttempts << "\n";
-  fb << "exit_code: " << exit_code << "\n\n";
-  fb << "```stderr\n" << trunc << "```\n\n";
+  // Fail: single observation (no duplicate stderr) — tail only + old/new hunks.
+  block << "### turn " << st.turn << " — compile_feedback\n\n";
+  block << "attempt: " << st.compile_attempt << "/" << kMaxCompileAttempts << "\n";
+  block << "exit_code: " << exit_code << "\n\n";
+  block << "```stderr (tail)\n" << trunc;
+  if (!trunc.empty() && trunc.back() != '\n') {
+    block << '\n';
+  }
+  block << "```\n\n";
   for (std::size_t i = 0; i < st.pending.size(); ++i) {
     const auto& p = st.pending[i];
-    fb << "## old (hunk " << (i + 1) << " `" << p.path << "`)\n\n```\n"
-       << truncate_observation(p.old_text, 80) << "```\n\n";
-    fb << "## new (hunk " << (i + 1) << " `" << p.path << "`)\n\n```\n"
-       << truncate_observation(p.new_text, 80) << "```\n\n";
+    block << "## old (hunk " << (i + 1) << " `" << p.path << "`)\n\n```\n"
+          << truncate_observation(p.old_text, 24) << "```\n\n";
+    block << "## new (hunk " << (i + 1) << " `" << p.path << "`)\n\n```\n"
+          << truncate_observation(p.new_text, 24) << "```\n\n";
   }
-  fb << "Reemite `action=edit` corrigiendo el error (o el runtime hará rollback si se agotan "
-        "intentos).\n\n";
-  // Note: compile observation already appended; append feedback as same turn continuation.
-  append_observation(workspace_root, fb.str(), &out.session_chars, &err);
+  block << "Reemite `action=edit` corrigiendo el error (o el runtime hará rollback si se agotan "
+           "intentos).\n\n";
+  std::string err;
+  append_observation(workspace_root, block.str(), &out.session_chars, &err);
 
   if (st.compile_attempt >= kMaxCompileAttempts) {
     // Rollback files to before.

@@ -432,6 +432,8 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
     req.max_tokens = std::min(480, std::max(192, deps_.settings.level1.max_tokens));
     req.n_ctx = std::max(4096, deps_.settings.level1.n_ctx);
     req.temperature = 0.1;
+    req.context_role = "L1";
+    req.n_ctx_setting_hint = "ai.level1.n_ctx";
     if (log) {
       log("L1 investigar → proponiendo needles…");
     }
@@ -983,6 +985,8 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
     req.max_tokens = deps_.settings.level1.max_tokens;
     req.n_ctx = std::max(4096, deps_.settings.level1.n_ctx);
     req.temperature = deps_.settings.level1.temperature;
+    req.context_role = "L1";
+    req.n_ctx_setting_hint = "ai.level1.n_ctx";
 
     const auto completion = deps_.backend->complete(req, cancel);
     if (!completion.ok) {

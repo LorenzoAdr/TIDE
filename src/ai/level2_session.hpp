@@ -43,6 +43,8 @@ class Level2Session {
  public:
   static constexpr std::size_t kCharBudget = 140000;
   static constexpr int kMaxObservationLines = 200;
+  // Compile stderr kept as a short TAIL (errors are usually at the end).
+  static constexpr int kMaxCompileLogLines = 40;
   static constexpr int kMaxCompileAttempts = 3;
 
   explicit Level2Session(Level2SessionDeps deps);
@@ -58,6 +60,10 @@ class Level2Session {
 
   static std::string tool_guide_markdown();
   static bool tool_allowed(const std::string& name);
+
+  // Keep first max_lines (tools). Keep last max_lines (compile stderr).
+  static std::string truncate_observation(const std::string& text, int max_lines);
+  static std::string truncate_observation_tail(const std::string& text, int max_lines);
 
   bool bootstrap(const Level2BootstrapOpts& opts, std::string* err_out = nullptr);
 
@@ -99,7 +105,6 @@ class Level2Session {
   static bool save_state(const std::string& workspace_root, const State& st, std::string* err);
   static std::string read_file(const std::string& path);
   static bool write_file(const std::string& path, const std::string& body, std::string* err);
-  static std::string truncate_observation(const std::string& text, int max_lines);
   static std::string trim_session_body(std::string body);
   static void append_trace(const std::string& workspace_root, const std::string& json_line);
   static void write_response_json(const std::string& workspace_root, bool ok,

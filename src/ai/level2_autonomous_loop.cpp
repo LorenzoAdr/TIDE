@@ -9,7 +9,31 @@
 namespace tuide {
 namespace {
 
-constexpr std::size_t kMaxPromptChars = 100000;
+constexpr std::size_t kMaxPromptCharsExplore = 24000;
+constexpr std::size_t kMaxPromptCharsEdit = 12000;
+
+std::string read_file_tail(const std::string& path, std::size_t max_chars) {
+  std::ifstream in(path);
+  if (!in) {
+    return {};
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  std::string body = ss.str();
+  if (body.size() <= max_chars) {
+    return body;
+  }
+  // Prefer session header (query/instruction) + recent Observations tail.
+  const std::string obs_mark = "## Observations";
+  const auto obs_pos = body.find(obs_mark);
+  if (obs_pos != std::string::npos && obs_pos < max_chars / 3) {
+    const std::string head = body.substr(0, std::min(obs_pos + obs_mark.size() + 2, max_chars / 4));
+    const std::size_t tail_budget = max_chars > head.size() + 40 ? max_chars - head.size() - 40 : max_chars / 2;
+    const std::string tail = body.substr(body.size() - tail_budget);
+    return head + "\n\n…[observations medias omitidas]…\n\n" + tail;
+  }
+  return "…[session head omitida]…\n\n" + body.substr(body.size() - max_chars);
+}
 
 std::string read_file_limited(const std::string& path, std::size_t max_chars) {
   std::ifstream in(path);
@@ -62,8 +86,14 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
                               int step) {
   std::ostringstream out;
   out << "phase=" << phase << " step=" << step << "\n\n";
-  out << "Lee la sesión y emite la siguiente acción JSON.\n\n";
-  out << read_file_limited(Level2Session::session_path(workspace_root), kMaxPromptChars);
+  if (phase == "edit") {
+    out << "Corrige con action=edit (Search/Replace único) usando el feedback reciente "
+           "(stderr tail + old/new). No pidas la traza completa.\n\n";
+    out << read_file_tail(Level2Session::session_path(workspace_root), kMaxPromptCharsEdit);
+  } else {
+    out << "Lee la sesión y emite la siguiente acción JSON.\n\n";
+    out << read_file_limited(Level2Session::session_path(workspace_root), kMaxPromptCharsExplore);
+  }
   return out.str();
 }
 

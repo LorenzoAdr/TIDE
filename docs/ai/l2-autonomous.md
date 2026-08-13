@@ -65,6 +65,12 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
 5. Verificar streaming de fases y compile; `git diff` sin anomalías.
 6. `/model` debe listar estado L2.
 
+## Contexto / compile feedback
+
+- Tras compile fail, Observations guarda **cola** del stderr (`kMaxCompileLogLines`, ~40) + old/new de hunks (no el log completo).
+- En `phase=edit` el prompt al brain usa cola de sesión (~12k chars), no el `session.md` entero.
+- Si el modelo se queda sin contexto, el error cita `ai.level2.n_ctx` (no L1).
+
 ## Tests sin modelo
 
 ```bash

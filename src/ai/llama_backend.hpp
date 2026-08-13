@@ -17,6 +17,10 @@ struct LlamaCompletionRequest {
   int max_tokens = 512;
   int n_ctx = 2048;
   float temperature = 0.2f;
+  // Shown in context-overflow errors ("L1" / "L2").
+  std::string context_role = "L1";
+  // Config key hint, e.g. ai.level1.n_ctx / ai.level2.n_ctx.
+  std::string n_ctx_setting_hint = "ai.level1.n_ctx";
 };
 
 struct LlamaCompletionResult {

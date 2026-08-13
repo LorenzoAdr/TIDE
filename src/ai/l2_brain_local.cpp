@@ -86,6 +86,8 @@ L2BrainResult LocalL2Brain::propose(const L2BrainRequest& req, std::atomic<bool>
   creq.max_tokens = req.max_tokens;
   creq.n_ctx = req.n_ctx;
   creq.temperature = req.temperature;
+  creq.context_role = "L2";
+  creq.n_ctx_setting_hint = "ai.level2.n_ctx";
   const LlamaCompletionResult cr = backend_->complete(creq, cancel);
   out.ok = cr.ok;
   out.text = cr.text;

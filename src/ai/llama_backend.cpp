@@ -354,8 +354,11 @@ LlamaCompletionResult LlamaBackend::complete(const LlamaCompletionRequest& req,
       err_text.find("exceeds the available context") != std::string::npos ||
       text.find("exceeds the available context") != std::string::npos;
   if (context_blow) {
-    result.error =
-        "contexto L1 insuficiente (sube ai.level1.n_ctx; default ahora 4096)";
+    const std::string role = req.context_role.empty() ? "L1" : req.context_role;
+    const std::string hint =
+        req.n_ctx_setting_hint.empty() ? std::string("ai.level1.n_ctx") : req.n_ctx_setting_hint;
+    result.error = "contexto " + role + " insuficiente (sube " + hint + "; usado -c " +
+                   std::to_string(n_ctx) + ")";
     return result;
   }
 
