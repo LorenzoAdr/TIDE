@@ -73,20 +73,28 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
 - Prompt L2 cabe en `ai.level2.n_ctx` (p. ej. 8192): explore ~**10k** chars de sesión + system;
   edit ~**8k**. No se manda `session.md` entero.
 - **Tool guide solo en system prompt** (no se duplica en `session.md`).
-- Explore slim del mapa en el prompt: detalle/snippet solo en el **top‑5**; el resto es
-  línea de nombre. Tras tools, compactación en disco (detalle solo en stems tocados).
+- **Flujo plan → pack:** en explore la primera mirada preferida es
+  `{"action":"plan","targets":["path:Symbol",…]}` (máx. 16). El runtime baja **todos** los
+  fragmentos (`get_code_of`) + **1 `file_outline` por archivo único** (+ `headers_of` si cabe)
+  a `.tuide/ai/l2/pack.md` bajo presupuesto (~9k chars). Tras el pack, el prompt es
+  **Instruction + pack** (sin mapa rankeado completo). `tools` (máx. 4) queda para extras.
+- **Truncado de cuerpos:** `get_code_of` por defecto usa **head+tail** si el símbolo supera
+  `max_lines` (~120). Marca `[TRUNCATED]` con `symbol_span` / `missing_lines` / `refetch`.
+  Ventanas: `path:Symbol#head|#mid|#tail` y `path:A-B`. El pack añade `## Truncated` con
+  hints accionables; el truncado por presupuesto de chars también es head+tail.
+- Bootstrap guarda `.tuide/ai/l2/map_initial.md` (mapa completo).
+- Explore slim del mapa en el prompt (antes del pack): detalle solo top‑5; resto nombres.
 - Observations en explore: cola ~3.5k chars.
-- **Batch de tools:** `{"action":"tools","calls":[…]}` (máx. 4) en un solo propose.
-  Si un cuerpo viene `[truncated]`, el runtime indica pedir `get_code_of path:Metodo`
-  del recorte concreto (no inventar código).
-- Tras `edit` OK el runtime compila. **Compile OK no cierra** la sesión: vuelve a
-  `phase=edit` con observation `compile_ok`; el modelo debe emitir más `edit` si faltan
-  archivos, o `{"action":"done","summary":"…"}` (sin `next`) cuando la Instruction esté cubierta.
+- Si un cuerpo viene `[truncated]`, pedir `get_code_of path:Metodo` (no inventar código).
+- Tras `edit` OK el runtime compila. **Compile OK no cierra**: restaura el **mapa inicial**
+  en la sesión, marca `map_review` y pregunta **«¿algo más?»** (`plan` / `edit` /
+  `done` sin `next`).
 - Tras compile fail, Observations guarda **cola** del stderr (`kMaxCompileLogLines`, ~40) + old/new de hunks (no el log completo).
 - Tras **edit apply fail** (search no encontrado/ambiguo), Observations guarda `edit_feedback` con error + search/replace; el tab muestra el error. Así el modelo no reemite el mismo hunk a ciegas.
 - Si el modelo se queda sin contexto, el error cita `ai.level2.n_ctx` (no L1).
-- **Compactación del mapa (disco):** tras cada tool en explore (y al pasar a `edit`), el
+- **Compactación del mapa (disco):** tras tools/plan en explore, el
   `## Ranked map` queda en líneas de nombre salvo stems/paths ya tocados; se descarta `## Bodies`.
+  Tras compile OK se reinyecta el mapa inicial completo.
 
 ## Timing en `trace.ndjson`
 
@@ -118,8 +126,10 @@ Al terminar el loop autónomo (`done` / `clarify` / error / cancel):
 ## Handoff code_edit (modificar código)
 
 1. L1 detecta pedido de cambio → elabora **mapa rankeado completo** (catálogo ancho, sin bodies).
-2. Escribe `.tuide/ai/map_last.md` y siembra `session.md` con ese mapa como `## Ranked map`.
-3. L2 en **explore** usa ese mapa como punto de partida (prioriza score alto), lee cuerpos con tools y decide el edit.
+2. Escribe `.tuide/ai/map_last.md` y siembra `session.md` con ese mapa como `## Ranked map`
+   (y copia en `l2/map_initial.md`).
+3. L2 en **explore** elige targets con `action=plan`; el runtime arma el **code pack** y
+   decide edit; tras compile OK revisa el mapa inicial («¿algo más?»).
 
 ## Tests sin modelo
 

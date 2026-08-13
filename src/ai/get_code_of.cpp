@@ -188,37 +188,114 @@ const SymbolInfo* pick_symbol(const std::vector<SymbolInfo>& syms, const std::st
   return nullptr;
 }
 
+bool parse_positive_int(const std::string& s, int* out) {
+  if (s.empty() || out == nullptr) {
+    return false;
+  }
+  int v = 0;
+  for (char ch : s) {
+    if (!std::isdigit(static_cast<unsigned char>(ch))) {
+      return false;
+    }
+    v = v * 10 + (ch - '0');
+  }
+  if (v <= 0) {
+    return false;
+  }
+  *out = v;
+  return true;
+}
+
+bool parse_line_range_token(const std::string& s, int* a, int* b) {
+  const auto dash = s.find('-');
+  if (dash == std::string::npos || dash == 0 || dash + 1 >= s.size()) {
+    return false;
+  }
+  return parse_positive_int(s.substr(0, dash), a) && parse_positive_int(s.substr(dash + 1), b) &&
+         *a <= *b;
+}
+
+bool path_looks_like_file(const std::string& left) {
+  return left.find('/') != std::string::npos || left.find('\\') != std::string::npos ||
+         left.find('.') != std::string::npos;
+}
+
+std::string relative_display_path(const std::string& abs_or_rel, const std::string& workspace_root) {
+  if (workspace_root.empty() || abs_or_rel.empty()) {
+    return abs_or_rel;
+  }
+  std::error_code ec;
+  const fs::path abs = fs::weakly_canonical(abs_or_rel, ec);
+  const fs::path root = fs::weakly_canonical(workspace_root, ec);
+  if (ec || abs.empty() || root.empty()) {
+    return abs_or_rel;
+  }
+  const std::string a = abs.string();
+  const std::string r = root.string();
+  if (a.size() > r.size() && a.compare(0, r.size(), r) == 0 &&
+      (a[r.size()] == '/' || a[r.size()] == '\\')) {
+    return a.substr(r.size() + 1);
+  }
+  return abs_or_rel;
+}
+
+// Read [start_1, end_1] without an extra max_lines cap (caller clamps).
+std::string read_lines_inclusive(const std::string& path, int start_1, int end_1) {
+  bool dummy = false;
+  const int span = std::max(1, end_1 - start_1 + 1);
+  return read_lines_range(path, start_1, end_1, span + 8, &dummy);
+}
+
 }  // namespace
 
 GetCodeOfRequest parse_get_code_of_arg(const std::string& arg, const std::string& workspace_root) {
   GetCodeOfRequest req;
   req.workspace_root = workspace_root;
-  const std::string trimmed = trim_copy(arg);
+  std::string trimmed = trim_copy(arg);
   if (trimmed.empty()) {
     return req;
   }
 
-  // Prefer "path:Symbol" / "path:42" when the left side looks like a path.
+  // Optional window suffix: #head | #mid | #tail
+  {
+    const auto hash = trimmed.rfind('#');
+    if (hash != std::string::npos && hash + 1 < trimmed.size()) {
+      std::string w = ascii_lower(trimmed.substr(hash + 1));
+      while (!w.empty() && std::isspace(static_cast<unsigned char>(w.back()))) {
+        w.pop_back();
+      }
+      if (w == "head") {
+        req.window = GetCodeOfWindow::Head;
+        trimmed = trim_copy(trimmed.substr(0, hash));
+      } else if (w == "mid") {
+        req.window = GetCodeOfWindow::Mid;
+        trimmed = trim_copy(trimmed.substr(0, hash));
+      } else if (w == "tail") {
+        req.window = GetCodeOfWindow::Tail;
+        trimmed = trim_copy(trimmed.substr(0, hash));
+      }
+    }
+  }
+  if (trimmed.empty()) {
+    return req;
+  }
+
+  // Prefer "path:Symbol" / "path:42" / "path:10-50" when the left side looks like a path.
   const auto colon = trimmed.rfind(':');
   if (colon != std::string::npos && colon > 0 && colon + 1 < trimmed.size()) {
     const std::string left = trimmed.substr(0, colon);
     const std::string right = trimmed.substr(colon + 1);
-    const bool left_looks_path =
-        left.find('/') != std::string::npos || left.find('\\') != std::string::npos ||
-        left.find('.') != std::string::npos;
-    if (left_looks_path) {
+    if (path_looks_like_file(left)) {
       req.file = left;
-      bool all_digits = !right.empty();
-      int line = 0;
-      for (char ch : right) {
-        if (!std::isdigit(static_cast<unsigned char>(ch))) {
-          all_digits = false;
-          break;
-        }
-        line = line * 10 + (ch - '0');
-      }
-      if (all_digits && line > 0) {
-        req.line = line;
+      int a = 0;
+      int b = 0;
+      if (parse_line_range_token(right, &a, &b)) {
+        req.window = GetCodeOfWindow::Range;
+        req.range_start = a;
+        req.range_end = b;
+        req.line = a;
+      } else if (parse_positive_int(right, &a)) {
+        req.line = a;
       } else {
         req.symbol = right;
       }
@@ -226,7 +303,7 @@ GetCodeOfRequest parse_get_code_of_arg(const std::string& arg, const std::string
     }
   }
 
-  if (trimmed.find('/') != std::string::npos || trimmed.find('.') != std::string::npos) {
+  if (path_looks_like_file(trimmed)) {
     req.file = trimmed;
   } else {
     req.symbol = trimmed;
@@ -240,7 +317,6 @@ GetCodeOfResult get_code_of(const GetCodeOfRequest& req) {
 
   std::string abs = resolve_abs_path(req.workspace_root, req.file);
   if (abs.empty() && !req.symbol.empty() && !req.workspace_root.empty()) {
-    // Symbol-only: cannot resolve without an index here; caller should set file.
     out.error = "get_code_of: falta archivo (usa path:Symbol o path:line)";
     return out;
   }
@@ -278,38 +354,157 @@ GetCodeOfResult get_code_of(const GetCodeOfRequest& req) {
   if (picked != nullptr) {
     out.name = symbol_insert_name(picked->name);
     out.kind = picked->kind;
-    out.start_line = std::max(1, picked->line);
-    out.end_line = picked->end_line > 0 ? picked->end_line : out.start_line;
+    out.symbol_start = std::max(1, picked->line);
+    out.symbol_end = picked->end_line > 0 ? picked->end_line : out.symbol_start;
+  } else if (req.window == GetCodeOfWindow::Range && req.range_start > 0) {
+    out.name = req.symbol.empty() ? fs::path(abs).stem().string() : req.symbol;
+    out.symbol_start = std::max(1, req.range_start);
+    out.symbol_end = std::min(total_lines, std::max(req.range_end, req.range_start));
   } else if (req.line > 0) {
-    // Fallback: window around the line.
     out.name = req.symbol.empty() ? fs::path(abs).stem().string() : req.symbol;
-    out.start_line = std::max(1, req.line - 2);
-    out.end_line = std::min(total_lines, req.line + max_lines - 1);
+    out.symbol_start = std::max(1, req.line - 2);
+    out.symbol_end = std::min(total_lines, req.line + max_lines - 1);
   } else {
-    // File-level: start of file (scripts / no matching symbol).
     out.name = req.symbol.empty() ? fs::path(abs).stem().string() : req.symbol;
-    out.start_line = 1;
-    out.end_line = std::min(total_lines, max_lines);
+    out.symbol_start = 1;
+    out.symbol_end = std::min(total_lines, std::max(1, total_lines));
   }
 
-  if (out.end_line < out.start_line) {
-    out.end_line = out.start_line;
+  if (out.symbol_end < out.symbol_start) {
+    out.symbol_end = out.symbol_start;
   }
-  const int span = out.end_line - out.start_line + 1;
-  if (span > max_lines) {
-    out.end_line = out.start_line + max_lines - 1;
-    out.truncated = true;
+  out.symbol_start = std::max(1, std::min(out.symbol_start, total_lines));
+  out.symbol_end = std::max(out.symbol_start, std::min(out.symbol_end, total_lines));
+
+  const int sym_span = out.symbol_end - out.symbol_start + 1;
+  const std::string disp = relative_display_path(abs, req.workspace_root);
+  const std::string hint_base =
+      !out.name.empty() && picked != nullptr ? (disp + ":" + out.name) : disp;
+
+  auto set_contiguous = [&](int a, int b, bool trunc) {
+    out.sent_start = a;
+    out.sent_end = b;
+    out.start_line = a;
+    out.end_line = b;
+    out.truncated = trunc;
+    out.omitted_start = 0;
+    out.omitted_end = 0;
+    out.text = read_lines_inclusive(abs, a, b);
+  };
+
+  if (req.window == GetCodeOfWindow::Range && req.range_start > 0) {
+    int a = std::max(1, req.range_start);
+    int b = std::max(a, req.range_end);
+    a = std::min(a, total_lines);
+    b = std::min(b, total_lines);
+    const int span = b - a + 1;
+    if (span > max_lines) {
+      b = a + max_lines - 1;
+      set_contiguous(a, b, true);
+      out.refetch_hint = disp + ":" + std::to_string(b + 1) + "-" +
+                         std::to_string(std::min(total_lines, b + max_lines));
+    } else {
+      set_contiguous(a, b, false);
+    }
+  } else if (sym_span <= max_lines) {
+    set_contiguous(out.symbol_start, out.symbol_end, false);
+  } else if (req.window == GetCodeOfWindow::Head) {
+    set_contiguous(out.symbol_start, out.symbol_start + max_lines - 1, true);
+    out.refetch_hint = hint_base + "#tail";
+  } else if (req.window == GetCodeOfWindow::Tail) {
+    set_contiguous(out.symbol_end - max_lines + 1, out.symbol_end, true);
+    out.refetch_hint = hint_base + "#head";
+  } else if (req.window == GetCodeOfWindow::Mid) {
+    const int mid = out.symbol_start + (sym_span - 1) / 2;
+    int a = mid - max_lines / 2;
+    int b = a + max_lines - 1;
+    if (a < out.symbol_start) {
+      a = out.symbol_start;
+      b = a + max_lines - 1;
+    }
+    if (b > out.symbol_end) {
+      b = out.symbol_end;
+      a = std::max(out.symbol_start, b - max_lines + 1);
+    }
+    set_contiguous(a, b, true);
+    out.refetch_hint = disp + ":" + std::to_string(out.symbol_start) + "-" +
+                       std::to_string(out.symbol_start + max_lines - 1);
+  } else {
+    // Auto: head + tail (signature + closing region).
+    int head_n = std::max(1, (max_lines * 55) / 100);
+    int tail_n = std::max(1, max_lines - head_n);
+    if (head_n + tail_n >= sym_span) {
+      set_contiguous(out.symbol_start, out.symbol_end, false);
+    } else {
+      const int head_end = out.symbol_start + head_n - 1;
+      const int tail_start = out.symbol_end - tail_n + 1;
+      const int miss_lo = head_end + 1;
+      const int miss_hi = tail_start - 1;
+      std::ostringstream body;
+      body << read_lines_inclusive(abs, out.symbol_start, head_end);
+      body << "… [omitted lines " << miss_lo << "-" << miss_hi << "; refetch "
+           << disp << ":" << miss_lo << "-" << std::min(miss_hi, miss_lo + max_lines - 1)
+           << " or " << hint_base << "#mid] …\n";
+      body << read_lines_inclusive(abs, tail_start, out.symbol_end);
+      out.text = body.str();
+      out.truncated = true;
+      out.omitted_start = miss_lo;
+      out.omitted_end = miss_hi;
+      out.sent_start = out.symbol_start;
+      out.sent_end = out.symbol_end;
+      out.start_line = out.symbol_start;
+      out.end_line = out.symbol_end;
+      out.refetch_hint = disp + ":" + std::to_string(miss_lo) + "-" +
+                         std::to_string(std::min(miss_hi, miss_lo + max_lines - 1));
+    }
   }
 
-  bool trunc = out.truncated;
-  out.text = read_lines_range(abs, out.start_line, out.end_line, max_lines, &trunc);
-  out.truncated = trunc || out.truncated;
   if (out.text.empty()) {
     out.error = "get_code_of: cuerpo vacío";
     return out;
   }
   out.ok = true;
   return out;
+}
+
+std::string format_get_code_of_result(const GetCodeOfResult& got, const std::string& display_path) {
+  const std::string path = !display_path.empty() ? display_path : got.path;
+  std::ostringstream out;
+  if (got.truncated && got.omitted_start > 0 && got.omitted_end >= got.omitted_start) {
+    out << path << ':' << got.symbol_start << '-' << got.symbol_end;
+  } else {
+    out << path << ':' << got.sent_start << '-' << got.sent_end;
+  }
+  if (!got.name.empty()) {
+    out << " (" << got.name << ")";
+  }
+  if (got.truncated) {
+    out << " [TRUNCATED]";
+  }
+  out << '\n';
+  if (got.symbol_start > 0 && got.symbol_end >= got.symbol_start) {
+    out << "symbol_span: " << got.symbol_start << '-' << got.symbol_end << '\n';
+  }
+  if (got.truncated && got.omitted_start > 0 && got.omitted_end >= got.omitted_start) {
+    out << "sent: " << got.symbol_start << '-' << (got.omitted_start - 1) << " + "
+        << (got.omitted_end + 1) << '-' << got.symbol_end << '\n';
+    out << "missing_lines: " << got.omitted_start << '-' << got.omitted_end << '\n';
+  } else if (got.truncated) {
+    out << "sent: " << got.sent_start << '-' << got.sent_end << '\n';
+    if (got.symbol_end > got.sent_end) {
+      out << "missing_lines: " << (got.sent_end + 1) << '-' << got.symbol_end << '\n';
+    } else if (got.sent_start > got.symbol_start) {
+      out << "missing_lines: " << got.symbol_start << '-' << (got.sent_start - 1) << '\n';
+    }
+  }
+  if (got.truncated) {
+    const std::string hint =
+        !got.refetch_hint.empty() ? got.refetch_hint : (path + ":" + std::to_string(got.sent_end + 1));
+    out << "refetch: get_code_of `" << hint << "` (o `#head`/`#mid`/`#tail` / `path:A-B`)\n";
+    out << "note: cuerpo incompleto — usa refetch; no inventes el código omitido.\n";
+  }
+  out << got.text;
+  return out.str();
 }
 
 namespace {

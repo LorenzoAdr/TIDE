@@ -750,6 +750,16 @@ int main() {
     expect(b.file == "src/ui/foo.cpp" && b.line == 42 && b.symbol.empty(), "path:line");
     const auto c = parse_get_code_of_arg("OnlySymbol", "/tmp/ws");
     expect(c.symbol == "OnlySymbol" && c.file.empty(), "bare symbol");
+    const auto d = parse_get_code_of_arg("src/ui/foo.cpp:10-40", "/tmp/ws");
+    expect(d.file == "src/ui/foo.cpp" && d.window == tuide::GetCodeOfWindow::Range &&
+               d.range_start == 10 && d.range_end == 40,
+           "path:A-B range");
+    const auto e = parse_get_code_of_arg("src/ui/foo.cpp:Bar#tail", "/tmp/ws");
+    expect(e.file == "src/ui/foo.cpp" && e.symbol == "Bar" &&
+               e.window == tuide::GetCodeOfWindow::Tail,
+           "path:Symbol#tail");
+    const auto f = parse_get_code_of_arg("src/ui/foo.cpp:Bar#mid", "/tmp/ws");
+    expect(f.window == tuide::GetCodeOfWindow::Mid && f.symbol == "Bar", "path:Symbol#mid");
   }
 
   fs::path tmp = fs::temp_directory_path() / "tuide_get_code_of_test";
@@ -796,6 +806,57 @@ int main() {
     const auto got = get_code_of(req);
     expect(got.ok, "get_code_of by line ok");
     expect(got.text.find("paint") != std::string::npos, "line pick finds paint");
+  }
+
+  {
+    const fs::path long_cpp = tmp / "long_fn.cpp";
+    {
+      std::ofstream out(long_cpp);
+      out << "int long_fn() {\n";
+      for (int i = 1; i <= 80; ++i) {
+        out << "  int x" << i << " = " << i << ";\n";
+      }
+      out << "  return 99;\n}\n";
+    }
+    GetCodeOfRequest req;
+    req.workspace_root = tmp.string();
+    req.file = "long_fn.cpp";
+    req.symbol = "long_fn";
+    req.max_lines = 20;
+    req.window = tuide::GetCodeOfWindow::Auto;
+    const auto got = get_code_of(req);
+    expect(got.ok, "long_fn ok");
+    expect(got.truncated, "long_fn truncated");
+    expect(got.omitted_start > 0 && got.omitted_end >= got.omitted_start, "omitted span");
+    expect(got.text.find("int long_fn()") != std::string::npos, "keeps head/signature");
+    expect(got.text.find("return 99") != std::string::npos, "keeps tail");
+    expect(got.text.find("omitted lines") != std::string::npos, "omitted marker");
+    expect(!got.refetch_hint.empty(), "refetch hint");
+    const std::string formatted = tuide::format_get_code_of_result(got, "long_fn.cpp");
+    expect(formatted.find("[TRUNCATED]") != std::string::npos, "format TRUNCATED");
+    expect(formatted.find("missing_lines:") != std::string::npos, "format missing_lines");
+    expect(formatted.find("refetch:") != std::string::npos, "format refetch");
+
+    GetCodeOfRequest tail_req = req;
+    tail_req.window = tuide::GetCodeOfWindow::Tail;
+    const auto tail = get_code_of(tail_req);
+    expect(tail.ok && tail.truncated, "tail window");
+    expect(tail.text.find("return 99") != std::string::npos, "tail has return");
+    expect(tail.text.find("int long_fn()") == std::string::npos, "tail skips signature");
+
+    GetCodeOfRequest range_req;
+    range_req.workspace_root = tmp.string();
+    range_req.file = "long_fn.cpp";
+    range_req.window = tuide::GetCodeOfWindow::Range;
+    range_req.range_start = 40;
+    range_req.range_end = 45;
+    range_req.max_lines = 120;
+    const auto ranged = get_code_of(range_req);
+    expect(ranged.ok, "range ok");
+    expect(ranged.text.find("x39") != std::string::npos ||
+               ranged.text.find("x40") != std::string::npos,
+           "range includes mid vars");
+    expect(!ranged.truncated, "small range not truncated");
   }
 
   {

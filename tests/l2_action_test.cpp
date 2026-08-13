@@ -54,6 +54,34 @@ int main() {
     const auto a = parse_l2_action(R"({"action":"tools","calls":[]})");
     expect(a.kind == L2ActionKind::Error, "empty calls error");
   }
+  {
+    const auto a = parse_l2_action(
+        R"({"action":"plan","targets":["src/a.cpp:Foo","src/b.cpp:10","src/c.hpp"],"summary":"hot"})");
+    expect(a.kind == L2ActionKind::Plan, "plan kind");
+    expect(a.targets.size() == 3, "3 targets");
+    expect(a.targets[0] == "src/a.cpp:Foo", "target0");
+    expect(a.summary == "hot", "plan summary");
+  }
+  {
+    const auto a = parse_l2_action(
+        R"({"action":"watchlist","targets":[{"path":"src/x.cpp","symbol":"Bar"}]})");
+    expect(a.kind == L2ActionKind::Plan, "watchlist alias");
+    expect(a.targets.size() == 1 && a.targets[0] == "src/x.cpp:Bar", "object target");
+  }
+  {
+    // Cap plan targets
+    std::string json = R"({"action":"plan","targets":[)";
+    for (int i = 0; i < tuide::kL2MaxPlanTargets + 4; ++i) {
+      if (i) {
+        json += ",";
+      }
+      json += "\"src/f.cpp:S" + std::to_string(i) + "\"";
+    }
+    json += "]}";
+    const auto a = parse_l2_action(json);
+    expect(a.kind == L2ActionKind::Plan, "plan capped kind");
+    expect(static_cast<int>(a.targets.size()) == tuide::kL2MaxPlanTargets, "plan capped");
+  }
 
   if (failures) {
     std::cerr << failures << " failure(s)\n";

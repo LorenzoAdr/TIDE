@@ -49,8 +49,9 @@ class Level2Session {
   // Compile stderr kept as a short TAIL (errors are usually at the end).
   static constexpr int kMaxCompileLogLines = 40;
   static constexpr int kMaxCompileAttempts = 3;
-  // Tighter per-tool observation when several tools run in one propose.
   static constexpr int kMaxObservationLinesBatch = 80;
+  // Code pack for plan targets (fragments + outlines) kept under this size.
+  static constexpr std::size_t kMaxPackChars = 9000;
 
   explicit Level2Session(Level2SessionDeps deps);
   explicit Level2Session(ToolRegistry* tools);
@@ -62,6 +63,8 @@ class Level2Session {
   static std::string trace_path(const std::string& workspace_root);
   static std::string state_path(const std::string& workspace_root);
   static std::string pending_edits_path(const std::string& workspace_root);
+  static std::string map_initial_path(const std::string& workspace_root);
+  static std::string pack_path(const std::string& workspace_root);
 
   static std::string tool_guide_markdown();
   static bool tool_allowed(const std::string& name);
@@ -88,6 +91,10 @@ class Level2Session {
   // Several read tools in one turn (max kL2MaxToolBatch). Compacts map once at the end.
   Level2TurnResult apply_tools(const std::string& workspace_root,
                                const std::vector<L2ToolCall>& calls);
+  // Watchlist → runtime fetches all targets + per-file outlines into pack.md (budgeted).
+  Level2TurnResult apply_plan(const std::string& workspace_root,
+                              const std::vector<std::string>& targets,
+                              const std::string& summary = {});
   Level2TurnResult apply_edit(const std::string& workspace_root,
                               const std::vector<SearchReplaceHunk>& hunks);
   Level2TurnResult run_compile(const std::string& workspace_root);
@@ -117,6 +124,8 @@ class Level2Session {
     int edit_attempt = 0;
     int compile_attempt = 0;
     int clarify_pushback = 0;
+    bool has_pack = false;
+    bool map_review = false;  // after compile_ok: full map restored, ask "algo más?"
     uint64_t last_op_id = 0;
     std::vector<PendingHunk> pending;
   };

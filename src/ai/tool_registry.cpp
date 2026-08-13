@@ -219,7 +219,8 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
 
   registry->register_tool(
       "get_code_of",
-      "Extrae cuerpo de clase/función vía tree-sitter. Arg: path:Symbol | path:line | Symbol",
+      "Extrae cuerpo vía tree-sitter. Arg: path:Symbol | path:line | path:A-B | "
+      "path:Symbol#head|#mid|#tail (default=head+tail si excede max_lines)",
       [ctx](const std::string& arg) {
         GetCodeOfRequest req = parse_get_code_of_arg(arg, ctx.workspace_root);
         req.workspace_root = ctx.workspace_root;
@@ -250,7 +251,7 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
           }
         }
         if (req.file.empty()) {
-          return AiToolResult{false, "get_code_of: indica path:Symbol, path:line o un símbolo del índice"};
+          return AiToolResult{false, "get_code_of: indica path:Symbol, path:line, path:A-B o un símbolo del índice"};
         }
         const std::string abs = resolve_workspace_path(ctx.workspace_root, req.file);
         if (!path_inside_workspace(ctx.workspace_root, abs)) {
@@ -261,19 +262,15 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
         if (!got.ok) {
           return AiToolResult{false, got.error.empty() ? "get_code_of falló" : got.error};
         }
-        std::ostringstream out;
-        out << got.path << ':' << got.start_line << '-' << got.end_line;
-        if (!got.name.empty()) {
-          out << " (" << got.name << ")";
+        std::string display = req.file;
+        if (!ctx.workspace_root.empty() && display.size() > ctx.workspace_root.size() &&
+            display.compare(0, ctx.workspace_root.size(), ctx.workspace_root) == 0) {
+          const std::size_t skip = ctx.workspace_root.size();
+          if (skip < display.size() && (display[skip] == '/' || display[skip] == '\\')) {
+            display = display.substr(skip + 1);
+          }
         }
-        if (got.truncated) {
-          out << " [truncated]";
-          out << "\nnote: cuerpo incompleto — pide `get_code_of "
-              << (got.path.empty() ? std::string("path") : got.path) << ":NombreMetodo` "
-                 "(o path:line) del método/recorte que necesites completo; no inventes código.";
-        }
-        out << '\n' << got.text;
-        return AiToolResult{true, out.str()};
+        return AiToolResult{true, format_get_code_of_result(got, display)};
       });
 
   registry->register_tool("list_files", "Lista archivos del índice / directorio",

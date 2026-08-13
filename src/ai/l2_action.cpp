@@ -86,6 +86,56 @@ bool parse_calls_array(const nlohmann::json& j, std::vector<L2ToolCall>* out, st
   return true;
 }
 
+bool parse_targets_array(const nlohmann::json& j, std::vector<std::string>* out, std::string* err) {
+  if (out == nullptr) {
+    return false;
+  }
+  out->clear();
+  if (!j.contains("targets") || !j["targets"].is_array()) {
+    if (err) {
+      *err = "plan sin array targets";
+    }
+    return false;
+  }
+  for (const auto& t : j["targets"]) {
+    std::string target;
+    if (t.is_string()) {
+      target = t.get<std::string>();
+    } else if (t.is_object()) {
+      const std::string path = t.value("path", "");
+      const std::string sym = t.value("symbol", t.value("name", ""));
+      const int line = t.value("line", 0);
+      if (!path.empty() && !sym.empty()) {
+        target = path + ":" + sym;
+      } else if (!path.empty() && line > 0) {
+        target = path + ":" + std::to_string(line);
+      } else {
+        target = path;
+      }
+    }
+    while (!target.empty() && (target.front() == ' ' || target.front() == '`')) {
+      target.erase(target.begin());
+    }
+    while (!target.empty() && (target.back() == ' ' || target.back() == '`')) {
+      target.pop_back();
+    }
+    if (target.empty()) {
+      continue;
+    }
+    out->push_back(std::move(target));
+    if (static_cast<int>(out->size()) >= kL2MaxPlanTargets) {
+      break;
+    }
+  }
+  if (out->empty()) {
+    if (err) {
+      *err = "plan.targets vacío";
+    }
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 const char* l2_action_kind_name(L2ActionKind kind) {
@@ -94,6 +144,8 @@ const char* l2_action_kind_name(L2ActionKind kind) {
       return "tool";
     case L2ActionKind::Tools:
       return "tools";
+    case L2ActionKind::Plan:
+      return "plan";
     case L2ActionKind::Done:
       return "done";
     case L2ActionKind::Edit:
@@ -118,6 +170,16 @@ L2Action parse_l2_action(const std::string& model_text) {
   try {
     const auto j = nlohmann::json::parse(json_text);
     const std::string action = j.value("action", "");
+    if (action == "plan" || action == "watchlist") {
+      out.kind = L2ActionKind::Plan;
+      out.summary = j.value("summary", "");
+      std::string err;
+      if (!parse_targets_array(j, &out.targets, &err)) {
+        out.kind = L2ActionKind::Error;
+        out.error = err;
+      }
+      return out;
+    }
     if (action == "tools") {
       out.kind = L2ActionKind::Tools;
       std::string err;
@@ -128,7 +190,6 @@ L2Action parse_l2_action(const std::string& model_text) {
       return out;
     }
     if (action == "tool") {
-      // Prefer batch if model sent calls[] with action=tool.
       if (j.contains("calls") && j["calls"].is_array()) {
         out.kind = L2ActionKind::Tools;
         std::string err;

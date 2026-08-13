@@ -57,9 +57,21 @@ int main() {
   fs::permissions(root / "tools" / "compile.sh", fs::perms::owner_all, ec);
 
   ToolRegistry tools;
-  tools.register_tool("get_code_of", "stub", [](const std::string& arg) {
-    return AiToolResult{true, "body " + arg};
-  });
+    tools.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      // Simulate a truncated long body with structured metadata.
+      if (arg.find("huge") != std::string::npos) {
+        return AiToolResult{
+            true,
+            std::string("src/foo.cpp:1-200 (huge) [TRUNCATED]\n") +
+                "symbol_span: 1-200\n"
+                "sent: 1-66 + 155-200\n"
+                "missing_lines: 67-154\n"
+                "refetch: get_code_of `src/foo.cpp:67-120` (o `#head`/`#mid`/`#tail` / `path:A-B`)\n"
+                "note: cuerpo incompleto\n"
+                "int huge() {\n  // head\n… [omitted lines 67-154] …\n  return 0;\n}\n"};
+      }
+      return AiToolResult{true, "body " + arg};
+    });
 
   Level2Session session(Level2SessionDeps{&tools, {}, {}});
   Level2BootstrapOpts opts;
@@ -346,6 +358,75 @@ int main() {
     const auto tr = sessz.mark_done(rootz.string(), "need info", "clarify");
     expect(tr.ok && tr.phase == "clarify", "max=0 accepts clarify");
     fs::remove_all(rootz, ec);
+  }
+
+  // plan → pack + map_initial; compile_ok → map_review
+  {
+    const fs::path rootp = fs::temp_directory_path() / "tuide_l2_plan_pack_test";
+    fs::remove_all(rootp, ec);
+    fs::create_directories(rootp / ".tuide" / "ai", ec);
+    fs::create_directories(rootp / "src", ec);
+    {
+      std::ofstream map(rootp / ".tuide" / "ai" / "map_last.md");
+      map << "query: plan\n\n## Ranked entries\n\n"
+             "1. src/foo.cpp:1 — `value` score=9\n"
+             "   snippet: int value\n\n"
+             "2. src/bar.cpp:1 — `bar` score=3\n";
+    }
+    {
+      std::ofstream foo(rootp / "src" / "foo.cpp");
+      foo << "int value = 1;\n";
+    }
+    if (!tools.has("file_outline")) {
+      tools.register_tool("file_outline", "stub", [](const std::string& arg) {
+        return AiToolResult{true, "outline " + arg + " symbols=1\n"};
+      });
+    }
+    Level2SessionDeps deps{&tools, {}, [](std::string*) { return 0; }};
+    Level2Session sessp(deps);
+    Level2BootstrapOpts optsp;
+    optsp.workspace_root = rootp.string();
+    optsp.query = "plan pack";
+    optsp.instruction = "bump value";
+    expect(sessp.bootstrap(optsp, &err), "bootstrap plan " + err);
+    expect(!read_all(Level2Session::map_initial_path(rootp.string())).empty(), "map_initial saved");
+    {
+      const auto tr =
+          sessp.apply_plan(rootp.string(), {"src/foo.cpp:value", "src/foo.cpp:huge"}, "watch");
+      expect(tr.ok, "apply_plan ok: " + tr.error);
+      expect(tr.summary.find("pack=") != std::string::npos, "pack summary");
+      const std::string pack = read_all(Level2Session::pack_path(rootp.string()));
+      expect(pack.find("## Fragments") != std::string::npos, "pack fragments");
+      expect(pack.find("## Outlines") != std::string::npos, "pack outlines");
+      expect(pack.find("get_code_of") != std::string::npos, "pack get_code_of");
+      expect(pack.find("## Truncated") != std::string::npos, "pack Truncated index");
+      expect(pack.find("src/foo.cpp:67-120") != std::string::npos ||
+                 pack.find("#mid") != std::string::npos,
+             "pack refetch hint");
+      expect(sessp.status_text(rootp.string()).find("has_pack: yes") != std::string::npos,
+             "has_pack yes");
+    }
+    expect(sessp.mark_done(rootp.string(), "ready", "edit").ok, "to edit after plan");
+    {
+      SearchReplaceHunk h;
+      h.path = "src/foo.cpp";
+      h.search = "int value = 1;\n";
+      h.replace = "int value = 7;\n";
+      const auto tr = sessp.apply_edit(rootp.string(), {h});
+      expect(tr.ok && tr.phase == "edit", "edit+compile after plan");
+      expect(tr.summary.find("map_review") != std::string::npos ||
+                 sessp.status_text(rootp.string()).find("map_review: yes") != std::string::npos,
+             "map_review after compile_ok");
+      const std::string sess = read_all(Level2Session::session_path(rootp.string()));
+      expect(sess.find("¿Algo más?") != std::string::npos ||
+                 sess.find("Algo más") != std::string::npos,
+             "algo más hint in session");
+      // Restored map should bring back the initial ranked entry detail.
+      expect(sess.find("score=9") != std::string::npos ||
+                 sess.find("`value`") != std::string::npos,
+             "initial map restored into session");
+    }
+    fs::remove_all(rootp, ec);
   }
 
   fs::remove_all(root, ec);

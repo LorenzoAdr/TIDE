@@ -57,6 +57,141 @@ std::string trim_ws(std::string_view s) {
   return std::string(s);
 }
 
+// path from "path:Symbol" / "path:42" / "path:A-B" / "path:Sym#tail" / bare path.
+std::string path_from_plan_target(const std::string& target) {
+  std::string t = trim_ws(target);
+  if (t.empty()) {
+    return {};
+  }
+  const auto hash = t.rfind('#');
+  if (hash != std::string::npos && hash + 1 < t.size()) {
+    std::string w = t.substr(hash + 1);
+    for (char& c : w) {
+      if (c >= 'A' && c <= 'Z') {
+        c = static_cast<char>(c - 'A' + 'a');
+      }
+    }
+    if (w == "head" || w == "mid" || w == "tail") {
+      t = trim_ws(t.substr(0, hash));
+    }
+  }
+  const auto colon = t.rfind(':');
+  if (colon != std::string::npos && colon > 0 && colon + 1 < t.size()) {
+    const std::string left = t.substr(0, colon);
+    if (left.find('/') != std::string::npos || left.find('\\') != std::string::npos ||
+        left.find('.') != std::string::npos) {
+      return left;
+    }
+  }
+  return t;
+}
+
+bool replace_ranked_map_in_session(const std::string& session_path, const std::string& map_body,
+                                   std::string* err) {
+  std::ifstream in(session_path);
+  if (!in) {
+    if (err) {
+      *err = "session.md ausente";
+    }
+    return false;
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  std::string session = ss.str();
+  const std::string map_mark = "## Ranked map";
+  const std::string obs_mark = "## Observations";
+  const auto map_pos = session.find(map_mark);
+  if (map_pos == std::string::npos) {
+    if (err) {
+      *err = "sin ## Ranked map";
+    }
+    return false;
+  }
+  const auto obs_pos = session.find(obs_mark, map_pos);
+  std::string new_map = map_body;
+  if (!new_map.empty() && new_map.back() != '\n') {
+    new_map.push_back('\n');
+  }
+  const std::string replacement = map_mark + "\n\n" + new_map + "\n";
+  if (obs_pos == std::string::npos) {
+    session = session.substr(0, map_pos) + replacement;
+  } else {
+    session = session.substr(0, map_pos) + replacement + session.substr(obs_pos);
+  }
+  std::ofstream out(session_path, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    if (err) {
+      *err = "no se pudo escribir session.md";
+    }
+    return false;
+  }
+  out << session;
+  return true;
+}
+
+std::string truncate_to_budget(std::string text, std::size_t max_chars, const std::string& hint) {
+  if (text.size() <= max_chars) {
+    return text;
+  }
+  if (max_chars < 80) {
+    return text.substr(0, max_chars);
+  }
+  // Head + tail so Search/Replace keeps signature and closing region.
+  const std::size_t head = (max_chars * 55) / 100;
+  const std::size_t tail = max_chars > head + 70 ? max_chars - head - 70 : max_chars / 4;
+  std::ostringstream out;
+  out << text.substr(0, head);
+  out << "\n…[truncated en pack";
+  if (!hint.empty()) {
+    out << "; refetch get_code_of `" << hint << "` (o `#tail` / `path:A-B`)";
+  }
+  out << "]…\n";
+  out << text.substr(text.size() - tail);
+  return out.str();
+}
+
+bool text_looks_truncated(const std::string& text) {
+  return text.find("[TRUNCATED]") != std::string::npos ||
+         text.find("[truncated]") != std::string::npos ||
+         text.find("omitted lines") != std::string::npos ||
+         text.find("missing_lines:") != std::string::npos;
+}
+
+std::string extract_refetch_hint(const std::string& text, const std::string& fallback_target) {
+  const std::string marker = "refetch: get_code_of `";
+  const auto p = text.find(marker);
+  if (p != std::string::npos) {
+    const auto start = p + marker.size();
+    const auto end = text.find('`', start);
+    if (end != std::string::npos && end > start) {
+      return text.substr(start, end - start);
+    }
+  }
+  const auto omit = text.find("omitted lines ");
+  if (omit != std::string::npos) {
+    // "omitted lines A-B; refetch path:A-B ..."
+    const auto refetch = text.find("refetch ", omit);
+    if (refetch != std::string::npos) {
+      auto s = refetch + 8;
+      while (s < text.size() && (text[s] == ' ' || text[s] == '`')) {
+        ++s;
+      }
+      auto e = s;
+      while (e < text.size() && text[e] != ' ' && text[e] != '`' && text[e] != ';' &&
+             text[e] != ']' && text[e] != '\n') {
+        ++e;
+      }
+      if (e > s) {
+        return text.substr(s, e - s);
+      }
+    }
+  }
+  if (!fallback_target.empty()) {
+    return fallback_target + "#mid";
+  }
+  return {};
+}
+
 std::string to_lower_copy(std::string s) {
   for (char& c : s) {
     if (c >= 'A' && c <= 'Z') {
@@ -387,6 +522,14 @@ std::string Level2Session::pending_edits_path(const std::string& workspace_root)
   return (fs::path(dir_for(workspace_root)) / "pending_edits.json").string();
 }
 
+std::string Level2Session::map_initial_path(const std::string& workspace_root) {
+  return (fs::path(dir_for(workspace_root)) / "map_initial.md").string();
+}
+
+std::string Level2Session::pack_path(const std::string& workspace_root) {
+  return (fs::path(dir_for(workspace_root)) / "pack.md").string();
+}
+
 bool Level2Session::tool_allowed(const std::string& name) {
   return l2_whitelist().count(name) > 0;
 }
@@ -394,46 +537,48 @@ bool Level2Session::tool_allowed(const std::string& name) {
 std::string Level2Session::tool_guide_markdown() {
   return R"(## Tool guide
 
-Fases: **explore** → (éxito) **edit** ↔ **compile** → **done** (solo con `action=done` explícito).
-Compile OK **no** finaliza: puede hacer falta editar más archivos. Si explore **no** localiza
-el código: **clarify**. No inventar edits.
+Fases: **explore** (mapa → **plan** → pack) → **edit** ↔ **compile** → **map_review** →
+**done** (solo con `action=done` explícito). Compile OK **no** finaliza: restaura el mapa
+inicial y pregunta si falta algo. Si explore **no** localiza el código: **clarify**.
 
-### Explore / edit (lectura)
-Preferir `get_code_of` / `file_outline` / `search` antes que `read_file`.
-Se pueden pedir **varias tools a la vez** (`action=tools`, máx. 4) para ahorrar pasos.
-Si un resultado dice `[truncated]`, pide otra vez `get_code_of path:NombreMetodo` (o `path:line`)
-del método/recorte que necesites completo — no inventes el cuerpo.
+### Explore (primera mirada = plan)
+Con el ## Ranked map, emite **un plan** de targets (no ad-hoc un archivo). El runtime baja
+**todos** los fragmentos + **1 outline por archivo** a `pack.md` (presupuesto de chars).
+
+```json
+{"action":"plan","targets":["src/a.cpp:Foo","src/b.cpp:42","src/c.hpp"],"summary":"…"}
+```
+Máx. 16 targets. Tras el pack, el prompt pasa a Instruction+pack (sin mapa completo).
+Extras ad-hoc: `tools` (máx. 4) si el pack no basta. Si `[TRUNCATED]`, usa el `refetch`
+(`path:A-B` / `path:Symbol#mid|#tail`); no inventes el cuerpo.
 
 | tool | arg | ejemplo |
 |------|-----|---------|
-| get_code_of | path:Symbol \| path:line | `src/ai/ai_controller.cpp:wake` |
+| get_code_of | path:Symbol \| path:line \| path:A-B \| #head/#mid/#tail | `src/ai/ai_controller.cpp:wake#tail` |
 | file_outline | path | `src/ui/console_panel.cpp` |
 | search | needles | `on_pty_output` |
 | headers_of / definition / references | ver help | — |
 
-### Acciones JSON (`request.json`)
+### Acciones JSON
 
-Explore:
+Explore (con mapa):
 ```json
-{"action":"tool","name":"get_code_of","arg":"…"}
-{"action":"tools","calls":[{"name":"get_code_of","arg":"src/a.cpp:Foo"},{"name":"file_outline","arg":"src/b.cpp"}]}
-{"action":"done","summary":"código localizado en …","next":"edit"}
-{"action":"done","summary":"no encontré X; ¿puedes concretar Y?","next":"clarify"}
+{"action":"plan","targets":["src/a.cpp:Foo","src/b.cpp:Bar"]}
+{"action":"tools","calls":[{"name":"search","arg":"wake"}]}
+{"action":"done","summary":"código localizado…","next":"edit"}
+{"action":"done","summary":"no encontré X","next":"clarify"}
 ```
-- `next=edit` solo si hay evidencia en Observations (paths:líneas).
-- `next=clarify` / `abort` cancela el arreglo y pide más explicaciones al usuario.
-  Clarify prematuro se rechaza hasta `ai.level2.clarify_pushback_max` (default 3): debes
-  pedir más código (`tools`/`get_code_of`) antes de que se acepte.
+- Preferir `plan` en el primer paso. `next=edit` con evidencia en pack/Observations.
+- Clarify prematuro: pushback hasta `ai.level2.clarify_pushback_max` (default 3).
 
-Edit (tras compile_ok o listo para cerrar):
+Edit / tras pack:
 ```json
 {"action":"edit","hunks":[{"path":"src/foo.cpp","search":"…exact…","replace":"…"}]}
-{"action":"tool","name":"get_code_of","arg":"…"}
-{"action":"tools","calls":[{"name":"get_code_of","arg":"…"}]}
+{"action":"plan","targets":["…"]}
 {"action":"done","summary":"cambios listos: paths…"}
 ```
-- Tras `edit` OK el runtime compila. Compile OK → sigues en **edit**: más hunks o `done`.
-- Compile fail (≤3): observation con stderr + old/new; reemite `edit`.
+- Tras `edit` OK → compile. Compile OK → **mapa inicial** + «¿algo más?» (`plan` / `edit` / `done`).
+- Compile fail (≤3): stderr + old/new; reemite `edit`.
 )";
 }
 
@@ -483,6 +628,8 @@ Level2Session::State Level2Session::load_state(const std::string& workspace_root
     st.edit_attempt = j.value("edit_attempt", 0);
     st.compile_attempt = j.value("compile_attempt", 0);
     st.clarify_pushback = j.value("clarify_pushback", 0);
+    st.has_pack = j.value("has_pack", false);
+    st.map_review = j.value("map_review", false);
     st.last_op_id = j.value("last_op_id", static_cast<uint64_t>(0));
     if (j.contains("pending") && j["pending"].is_array()) {
       for (const auto& p : j["pending"]) {
@@ -517,6 +664,8 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
                       {"edit_attempt", st.edit_attempt},
                       {"compile_attempt", st.compile_attempt},
                       {"clarify_pushback", st.clarify_pushback},
+                      {"has_pack", st.has_pack},
+                      {"map_review", st.map_review},
                       {"last_op_id", st.last_op_id},
                       {"pending", pending}};
   return write_file(state_path(workspace_root), j.dump(2) + "\n", err);
@@ -716,25 +865,31 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
     }
     md << "\n\n";
   }
-  md << "Fase inicial: **explore**. El ## Ranked map es el punto de partida: elige qué leer "
-        "con tools y decide el cambio. Al terminar: "
-        "`{\"action\":\"done\",\"summary\":\"…\",\"next\":\"edit\"}`.\n\n";
+  md << "Fase inicial: **explore**. Primera mirada = `action=plan` con targets del ## Ranked map "
+        "(path:Symbol). El runtime arma un pack (fragmentos + outlines). Luego "
+        "`{\"action\":\"done\",\"summary\":\"…\",\"next\":\"edit\"}` o `edit` directo.\n\n";
   md << "## Ranked map\n\n";
   md << map_body;
   if (!map_body.empty() && map_body.back() != '\n') {
     md << '\n';
   }
   md << "\n## Observations\n\n";
-  md << "(vacío — L2 pide tools)\n";
+  md << "(vacío — L2 pide plan/tools)\n";
 
   std::string body = trim_session_body(md.str());
   if (!write_file(session_path(opts.workspace_root), body, err_out)) {
+    return false;
+  }
+  // Full map snapshot for post-compile "¿algo más?" review.
+  if (!write_file(map_initial_path(opts.workspace_root), map_body, err_out)) {
     return false;
   }
 
   State st;
   st.phase = "explore";
   st.last_action = "bootstrap";
+  st.has_pack = false;
+  st.map_review = false;
   if (!save_state(opts.workspace_root, st, err_out)) {
     return false;
   }
@@ -805,9 +960,11 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
   if (!obs_text.empty() && obs_text.back() != '\n') {
     block << '\n';
   }
-  if (tr.text.find("[truncated]") != std::string::npos || obs_text.size() + 20 < tr.text.size()) {
-    block << "note: [truncated] — si necesitas el cuerpo completo, pide "
-             "`get_code_of path:NombreMetodo` o `path:line` del método concreto.\n";
+  if (tr.text.find("[TRUNCATED]") != std::string::npos ||
+      tr.text.find("[truncated]") != std::string::npos ||
+      obs_text.size() + 20 < tr.text.size()) {
+    block << "note: [TRUNCATED] — usa `refetch` del resultado (`path:A-B` / "
+             "`path:Symbol#mid|#tail`); no inventes el cuerpo.\n";
   }
   block << "```\n\n";
 
@@ -908,12 +1065,12 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
 
     std::string obs_text = truncate_observation(tr.text, kMaxObservationLinesBatch);
     const bool was_truncated =
+        tr.text.find("[TRUNCATED]") != std::string::npos ||
         tr.text.find("[truncated]") != std::string::npos || obs_text.size() < tr.text.size();
     if (was_truncated) {
       obs_text +=
-          "\nnote: [truncated] — si necesitas el cuerpo completo, pide "
-          "`get_code_of path:NombreMetodo` o `path:line` del método/recorte concreto "
-          "(no inventes código).\n";
+          "\nnote: [TRUNCATED] — usa `refetch` (`path:A-B` / `path:Symbol#mid|#tail`); "
+          "no inventes código.\n";
     }
 
     batch_block << "### turn " << st.turn << " — `" << call.name << "`";
@@ -979,6 +1136,323 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
   return out;
 }
 
+Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
+                                           const std::vector<std::string>& targets,
+                                           const std::string& summary) {
+  Level2TurnResult out;
+  out.action = "plan";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  if (targets.empty()) {
+    out.error = "plan.targets vacío";
+    return out;
+  }
+  if (st.done || st.phase == "done") {
+    out.error = "sesión done; reinicia con bootstrap";
+    return out;
+  }
+  if (st.phase != "explore" && st.phase != "edit") {
+    out.error = "plan solo en phase explore|edit (ahora=" + st.phase + ")";
+    write_response_json(workspace_root, false, "error", "plan", "", "", out.error, st.turn,
+                        st.phase);
+    return out;
+  }
+  if (deps_.tools == nullptr) {
+    out.error = "tools no registrados";
+    return out;
+  }
+
+  std::vector<std::string> uniq_targets;
+  std::unordered_set<std::string> seen_t;
+  for (const auto& raw : targets) {
+    if (static_cast<int>(uniq_targets.size()) >= kL2MaxPlanTargets) {
+      break;
+    }
+    std::string t = trim_ws(raw);
+    if (t.empty() || !seen_t.insert(t).second) {
+      continue;
+    }
+    uniq_targets.push_back(std::move(t));
+  }
+  if (uniq_targets.empty()) {
+    out.error = "plan.targets vacío tras dedupe";
+    return out;
+  }
+
+  std::vector<std::string> uniq_paths;
+  std::unordered_set<std::string> seen_paths;
+  for (const auto& t : uniq_targets) {
+    const std::string p = path_from_plan_target(t);
+    if (!p.empty() && seen_paths.insert(p).second) {
+      uniq_paths.push_back(p);
+    }
+  }
+
+  struct Frag {
+    std::string target;
+    std::string text;
+    bool ok = false;
+    bool truncated = false;
+    std::string refetch;
+  };
+  struct Outline {
+    std::string path;
+    std::string text;
+    bool ok = false;
+  };
+
+  const auto plan_t0 = std::chrono::steady_clock::now();
+  std::vector<Frag> frags;
+  frags.reserve(uniq_targets.size());
+  for (const auto& t : uniq_targets) {
+    Frag f;
+    f.target = t;
+    if (!deps_.tools->has("get_code_of")) {
+      f.text = "error: get_code_of no registrado";
+    } else {
+      const AiToolResult tr = deps_.tools->invoke("get_code_of", t);
+      f.ok = tr.ok;
+      f.text = tr.text.empty() ? (tr.ok ? "(vacío)" : "error get_code_of") : tr.text;
+      f.truncated = text_looks_truncated(f.text);
+      if (f.truncated) {
+        f.refetch = extract_refetch_hint(f.text, t);
+      }
+    }
+    frags.push_back(std::move(f));
+  }
+
+  std::vector<Outline> outlines;
+  outlines.reserve(uniq_paths.size());
+  for (const auto& p : uniq_paths) {
+    Outline o;
+    o.path = p;
+    if (!deps_.tools->has("file_outline")) {
+      o.text = "error: file_outline no registrado";
+    } else {
+      const AiToolResult tr = deps_.tools->invoke("file_outline", p);
+      o.ok = tr.ok;
+      o.text = tr.text.empty() ? (tr.ok ? "(vacío)" : "error file_outline") : tr.text;
+    }
+    outlines.push_back(std::move(o));
+  }
+
+  // Optional headers if budget remains after primary pack.
+  std::vector<Outline> headers;
+  if (deps_.tools->has("headers_of")) {
+    for (const auto& p : uniq_paths) {
+      const AiToolResult tr = deps_.tools->invoke("headers_of", p);
+      if (!tr.ok || tr.text.empty()) {
+        continue;
+      }
+      Outline h;
+      h.path = p;
+      h.ok = true;
+      h.text = tr.text;
+      headers.push_back(std::move(h));
+    }
+  }
+
+  const std::size_t budget = kMaxPackChars;
+  const std::size_t outline_reserve =
+      std::min<std::size_t>(budget / 3, 2500 + uniq_paths.size() * 200);
+  std::size_t frag_budget = budget > outline_reserve + 200 ? budget - outline_reserve : budget / 2;
+
+  std::ostringstream pack;
+  pack << "# L2 code pack\n\n";
+  if (!summary.empty()) {
+    pack << "plan_summary: " << summary << "\n\n";
+  }
+  pack << "targets (" << uniq_targets.size() << "):";
+  for (const auto& t : uniq_targets) {
+    pack << " `" << t << "`";
+  }
+  pack << "\n\n## Fragments\n\n";
+
+  std::size_t used_frags = 0;
+  int frag_ok = 0;
+  std::vector<std::string> trunc_index;
+  for (std::size_t i = 0; i < frags.size(); ++i) {
+    const auto& f = frags[i];
+    if (f.ok) {
+      ++frag_ok;
+    }
+    const std::size_t remaining =
+        frag_budget > used_frags ? frag_budget - used_frags : 0;
+    if (remaining < 80) {
+      pack << "_pack: fragmentos restantes omitidos por presupuesto (" << (frags.size() - i)
+           << ")._\n\n";
+      for (std::size_t j = i; j < frags.size(); ++j) {
+        trunc_index.push_back("- `" + frags[j].target +
+                              "` — omitido por presupuesto pack; refetch get_code_of `" +
+                              frags[j].target + "`");
+      }
+      break;
+    }
+    const std::size_t per =
+        std::max<std::size_t>(120, remaining / std::max<std::size_t>(1, frags.size() - i));
+    const bool pack_trunc = f.text.size() > per;
+    std::string body = truncate_to_budget(f.text, per, f.truncated ? f.refetch : f.target);
+    const bool is_trunc = f.truncated || pack_trunc;
+    if (is_trunc) {
+      std::string tip = !f.refetch.empty() ? f.refetch : (f.target + "#mid");
+      trunc_index.push_back("- `" + f.target + "` — truncated; refetch `get_code_of " + tip +
+                            "` (también `#tail` / `path:A-B`)");
+    }
+    std::ostringstream sec;
+    sec << "### get_code_of `" << f.target << "`";
+    if (!f.ok) {
+      sec << " (fail)";
+    } else if (is_trunc) {
+      sec << " [TRUNCATED]";
+    }
+    sec << "\n\n```\n" << body;
+    if (!body.empty() && body.back() != '\n') {
+      sec << '\n';
+    }
+    sec << "```\n\n";
+    pack << sec.str();
+    used_frags += sec.str().size();
+  }
+
+  pack << "## Outlines\n\n";
+  std::size_t outline_budget =
+      budget > pack.str().size() ? budget - pack.str().size() : 0;
+  int outline_ok = 0;
+  for (std::size_t i = 0; i < outlines.size(); ++i) {
+    const auto& o = outlines[i];
+    if (o.ok) {
+      ++outline_ok;
+    }
+    if (outline_budget < 60) {
+      pack << "_pack: outlines restantes omitidos por presupuesto._\n\n";
+      break;
+    }
+    const std::size_t per =
+        std::max<std::size_t>(80, outline_budget / std::max<std::size_t>(1, outlines.size() - i));
+    std::string body = truncate_to_budget(o.text, per, {});
+    std::ostringstream sec;
+    sec << "### file_outline `" << o.path << "`" << (o.ok ? "" : " (fail)") << "\n\n```\n"
+        << body;
+    if (!body.empty() && body.back() != '\n') {
+      sec << '\n';
+    }
+    sec << "```\n\n";
+    const std::string s = sec.str();
+    if (s.size() > outline_budget) {
+      pack << truncate_to_budget(s, outline_budget, {}) << "\n";
+      outline_budget = 0;
+      break;
+    }
+    pack << s;
+    outline_budget -= s.size();
+  }
+
+  if (!headers.empty() && outline_budget > 120) {
+    pack << "## Headers\n\n";
+    for (const auto& h : headers) {
+      if (outline_budget < 60) {
+        break;
+      }
+      std::string body = truncate_to_budget(h.text, std::min<std::size_t>(outline_budget, 400), {});
+      std::ostringstream sec;
+      sec << "### headers_of `" << h.path << "`\n\n```\n" << body;
+      if (!body.empty() && body.back() != '\n') {
+        sec << '\n';
+      }
+      sec << "```\n\n";
+      const std::string s = sec.str();
+      if (s.size() > outline_budget) {
+        break;
+      }
+      pack << s;
+      outline_budget -= s.size();
+    }
+  }
+
+  if (!trunc_index.empty()) {
+    pack << "## Truncated (refetch before editing these)\n\n";
+    pack << "Cuerpos incompletos (" << trunc_index.size() << "). No inventes código. "
+            "Pide el hueco con `get_code_of path:A-B` o `path:Symbol#mid|#tail`.\n\n";
+    for (const auto& line : trunc_index) {
+      pack << line << "\n";
+    }
+    pack << "\n";
+  }
+
+  std::string pack_body = pack.str();
+  if (pack_body.size() > budget) {
+    pack_body = truncate_to_budget(std::move(pack_body), budget, {});
+  }
+  std::string err;
+  if (!write_file(pack_path(workspace_root), pack_body, &err)) {
+    out.error = err.empty() ? "no se pudo escribir pack.md" : err;
+    return out;
+  }
+
+  ++st.turn;
+  st.last_action = "plan";
+  st.has_pack = true;
+  st.map_review = false;
+  out.turn = st.turn;
+
+  std::ostringstream block;
+  block << "### turn " << st.turn << " — plan\n\n";
+  if (!summary.empty()) {
+    block << summary << "\n\n";
+  }
+  block << "targets: " << uniq_targets.size() << "  fragments_ok: " << frag_ok << "/"
+        << uniq_targets.size() << "  outlines_ok: " << outline_ok << "/" << uniq_paths.size()
+        << "  truncated: " << trunc_index.size() << "  pack_chars: " << pack_body.size() << "/"
+        << budget << "\n";
+  block << "Archivo: `.tuide/ai/l2/pack.md`. El siguiente prompt usa Instruction+pack "
+           "(mapa fuera). ";
+  if (!trunc_index.empty()) {
+    block << "**pack_incomplete:** " << trunc_index.size()
+          << " símbolo(s) truncado(s) — mira `## Truncated` y refetch antes de edit. ";
+  }
+  block << "Emite `done next=edit`, `edit`, o amplía con otro `plan`/`tools`.\n\n";
+  if (!append_observation(workspace_root, block.str(), &out.session_chars, &err)) {
+    out.error = err;
+    return out;
+  }
+
+  // Map less useful once pack exists; shrink disk session.
+  compact_session_context(workspace_root, nullptr);
+  out.session_chars = read_file(session_path(workspace_root)).size();
+
+  save_state(workspace_root, st, nullptr);
+  write_response_json(workspace_root, frag_ok > 0, "plan", "", "",
+                      "pack " + std::to_string(pack_body.size()) + " chars",
+                      frag_ok > 0 ? "" : "ningún fragmento OK", st.turn, st.phase);
+
+  const auto plan_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - plan_t0)
+                           .count();
+  append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                   ",\"event\":\"plan\",\"targets\":" +
+                                   std::to_string(uniq_targets.size()) + ",\"frag_ok\":" +
+                                   std::to_string(frag_ok) + ",\"outlines\":" +
+                                   std::to_string(outline_ok) + ",\"pack_chars\":" +
+                                   std::to_string(pack_body.size()) + ",\"ms\":" +
+                                   std::to_string(plan_ms) + "}");
+  ai_trace(AiTraceChannel::L2, "l2_plan",
+           "{\"turn\":" + std::to_string(st.turn) + ",\"targets\":" +
+               std::to_string(uniq_targets.size()) + ",\"pack_chars\":" +
+               std::to_string(pack_body.size()) + ",\"duration_ms\":" + std::to_string(plan_ms) +
+               "}");
+
+  out.ok = true;
+  out.phase = st.phase;
+  out.summary = "plan pack=" + std::to_string(pack_body.size()) + " targets=" +
+                std::to_string(uniq_targets.size());
+  return out;
+}
+
 Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
                                            const std::vector<SearchReplaceHunk>& hunks) {
   Level2TurnResult out;
@@ -996,6 +1470,7 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
     write_response_json(workspace_root, false, "error", "edit", "", "", out.error, st.turn, st.phase);
     return out;
   }
+  st.map_review = false;
   auto record_edit_failure = [&](const std::string& err_msg, const std::string& path,
                                  const std::string& search, const std::string& replace) {
     const auto ms = edit_ms();
@@ -1167,28 +1642,41 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
       block << '\n';
     }
     block << "```\n\n";
-    block << "Compile OK **no** cierra la tarea. Revisa la Instruction:\n"
-             "- Si faltan más archivos/cambios → `action=edit` (o tools + edit).\n"
-             "- Si la petición ya está cubierta → "
+    block << "Compile OK **no** cierra la tarea. Se restauró el **mapa inicial completo**.\n"
+             "¿Algo más?\n"
+             "- Más sitios → `action=plan` con nuevos targets (arma otro pack).\n"
+             "- Más cambios → `action=edit` (o tools + edit).\n"
+             "- Instruction cubierta → "
              "`{\"action\":\"done\",\"summary\":\"…qué cambiaste…\"}` (sin next).\n\n";
     std::string err;
     append_observation(workspace_root, block.str(), &out.session_chars, &err);
+
+    // Restore full initial map for "¿algo más?" review.
+    const std::string initial_map = read_file(map_initial_path(workspace_root));
+    if (!initial_map.empty()) {
+      std::string map_err;
+      if (replace_ranked_map_in_session(session_path(workspace_root), initial_map, &map_err)) {
+        out.session_chars = read_file(session_path(workspace_root)).size();
+      }
+    }
 
     // Build gate only: return to edit so the model can continue or explicitly done.
     st.phase = "edit";
     st.done = false;
     st.last_action = "compile_ok";
+    st.map_review = true;
     st.pending.clear();
     st.compile_attempt = 0;  // fresh fail budget for the next edit batch
     save_state(workspace_root, st, nullptr);
-    write_response_json(workspace_root, true, "compile", "", "", "compile ok; continue or done",
-                        "", st.turn, "edit");
+    write_response_json(workspace_root, true, "compile", "", "",
+                        "compile ok; map restored — ¿algo más?", "", st.turn, "edit");
     append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
                                      ",\"event\":\"compile_ok\",\"exit\":0,\"ms\":" +
-                                     std::to_string(compile_ms) + ",\"resume\":\"edit\"}");
+                                     std::to_string(compile_ms) +
+                                     ",\"resume\":\"edit\",\"map_review\":1}");
     out.ok = true;
     out.action = "compile";
-    out.summary = "OK compile; phase=edit (done solo si el modelo lo emite)";
+    out.summary = "OK compile; map_review (¿algo más?)";
     out.phase = "edit";
     out.turn = st.turn;
     return out;
@@ -1329,8 +1817,8 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
       block << "### turn " << st.turn << " — clarify_pushback (" << st.clarify_pushback << "/"
             << max_push << ")\n\n";
       block << "Clarify prematuro rechazado. Motivo del modelo: " << summary << "\n\n";
-      block << "No cierres aún. Emite `action=tools` o `action=tool` para pedir **más código** "
-               "(otros stems/paths del ## Ranked map: `get_code_of path:Symbol`, "
+      block << "No cierres aún. Emite `action=plan` (más targets) o `action=tools`/`tool` para "
+               "pedir **más código** (otros stems del ## Ranked map: `get_code_of path:Symbol`, "
                "`file_outline`, `search`). Solo tras explorar más puedes usar "
                "`done next=clarify` de nuevo"
             << (st.clarify_pushback >= max_push
@@ -1451,6 +1939,31 @@ Level2TurnResult Level2Session::process_request_file(const std::string& workspac
       }
       return apply_tools(workspace_root, calls);
     }
+    if (action == "plan" || action == "watchlist") {
+      std::vector<std::string> targets;
+      if (j.contains("targets") && j["targets"].is_array()) {
+        for (const auto& t : j["targets"]) {
+          if (t.is_string()) {
+            targets.push_back(t.get<std::string>());
+          } else if (t.is_object()) {
+            const std::string path = t.value("path", "");
+            const std::string sym = t.value("symbol", t.value("name", ""));
+            const int line = t.value("line", 0);
+            if (!path.empty() && !sym.empty()) {
+              targets.push_back(path + ":" + sym);
+            } else if (!path.empty() && line > 0) {
+              targets.push_back(path + ":" + std::to_string(line));
+            } else if (!path.empty()) {
+              targets.push_back(path);
+            }
+          }
+          if (static_cast<int>(targets.size()) >= kL2MaxPlanTargets) {
+            break;
+          }
+        }
+      }
+      return apply_plan(workspace_root, targets, j.value("summary", ""));
+    }
     if (action == "done") {
       return mark_done(workspace_root, j.value("summary", ""), j.value("next", ""));
     }
@@ -1488,6 +2001,8 @@ std::string Level2Session::status_text(const std::string& workspace_root) const 
       << "\n";
   out << "edit_attempt=" << st.edit_attempt << " compile_attempt=" << st.compile_attempt
       << " pending_hunks=" << st.pending.size() << "\n";
+  out << "has_pack: " << (st.has_pack ? "yes" : "no")
+      << "  map_review: " << (st.map_review ? "yes" : "no") << "\n";
   out << "last: " << (st.last_action.empty() ? "-" : st.last_action) << '\n';
   const std::string session = read_file(session_path(workspace_root));
   out << "session.md: "
