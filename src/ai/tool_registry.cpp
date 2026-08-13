@@ -1265,7 +1265,15 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
       "file_outline",
       "Outline Tree-sitter de un path (símbolos). Uso: file_outline <path>",
       [ctx](const std::string& arg) {
-        const std::string trimmed = trim_copy(arg);
+        std::string trimmed = trim_copy(arg);
+        // Models often wrap paths as (path) or "path".
+        if (trimmed.size() >= 2) {
+          const char a = trimmed.front();
+          const char b = trimmed.back();
+          if ((a == '(' && b == ')') || (a == '"' && b == '"') || (a == '\'' && b == '\'')) {
+            trimmed = trim_copy(trimmed.substr(1, trimmed.size() - 2));
+          }
+        }
         if (trimmed.empty()) {
           return AiToolResult{false, "uso: file_outline <path>"};
         }
@@ -1279,9 +1287,17 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
         }
         const std::string source((std::istreambuf_iterator<char>(in)),
                                  std::istreambuf_iterator<char>());
-        const auto syms = TreeSitterService::instance().symbols_for_file(abs, source);
+        bool timed_out = false;
+        const auto syms =
+            TreeSitterService::instance().symbols_for_file_wait(abs, source, 4000, &timed_out);
         std::ostringstream out;
-        out << "outline: " << trimmed << "  symbols=" << syms.size() << '\n';
+        out << "outline: " << trimmed << "  symbols=" << syms.size();
+        if (timed_out && syms.empty()) {
+          out << "  (parse async timeout — archivo OK; reintenta o usa get_code_of)";
+        } else if (syms.empty()) {
+          out << "  (archivo OK; sin símbolos Tree-sitter — usa get_code_of/search)";
+        }
+        out << '\n';
         const int limit = std::min<int>(120, static_cast<int>(syms.size()));
         for (int i = 0; i < limit; ++i) {
           const auto& s = syms[static_cast<std::size_t>(i)];

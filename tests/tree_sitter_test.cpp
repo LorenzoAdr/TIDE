@@ -82,6 +82,24 @@ void baz() {}
   assert(found_foo);
 }
 
+void test_symbols_for_file_wait_cold() {
+  // Cold path: no prepare_document beforehand — mirrors AI file_outline.
+  const std::string path = "wait_cold_outline.cpp";
+  const std::string source = "int alpha() { return 1; }\nint beta() { return 2; }\n";
+  tree_sitter_service().invalidate(path);
+  bool timed_out = true;
+  const auto syms = tree_sitter_service().symbols_for_file_wait(path, source, 4000, &timed_out);
+  assert(!timed_out);
+  assert(!syms.empty());
+  bool saw_alpha = false;
+  for (const auto& s : syms) {
+    if (s.name == "alpha") {
+      saw_alpha = true;
+    }
+  }
+  assert(saw_alpha);
+}
+
 void test_parse_python_symbols() {
   const std::string source = R"py(
 class Foo:
@@ -926,6 +944,7 @@ void test_normalize_editor_source_trailing_newline() {
 
 int main() {
   tuide::test_parse_symbols();
+  tuide::test_symbols_for_file_wait_cold();
   tuide::test_parse_python_symbols();
   tuide::test_simple_pair();
   tuide::test_nested();

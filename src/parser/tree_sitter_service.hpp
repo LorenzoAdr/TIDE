@@ -32,6 +32,11 @@ class TreeSitterService {
   std::vector<SymbolInfo> symbols_for_file(const std::string& path, const std::string& source);
   std::vector<SymbolInfo> symbols_for_buffer(const std::string& path,
                                                const std::vector<std::string>& lines);
+  // Kick async prepare and wait until symbols_ready (or timeout). For AI tools / one-shot
+  // callers that cannot poll across frames like the Outline panel.
+  std::vector<SymbolInfo> symbols_for_file_wait(const std::string& path, const std::string& source,
+                                                 int timeout_ms = 4000,
+                                                 bool* timed_out = nullptr);
 
   const std::vector<LineHighlights>* highlights_for(const std::string& path,
                                                       const std::string& source);

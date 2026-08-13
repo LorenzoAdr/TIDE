@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstring>
 #include <sstream>
+#include <thread>
 
 #include "editor/editor_context.hpp"
 #include "parser/tree_sitter_blocks.hpp"
@@ -104,6 +106,37 @@ std::vector<SymbolInfo> TreeSitterService::symbols_for_file(const std::string& p
     return {};
   }
   return doc->symbols;
+}
+
+std::vector<SymbolInfo> TreeSitterService::symbols_for_file_wait(const std::string& path,
+                                                                  const std::string& source,
+                                                                  int timeout_ms,
+                                                                  bool* timed_out) {
+  if (timed_out != nullptr) {
+    *timed_out = false;
+  }
+  if (path.empty() || source.empty()) {
+    return {};
+  }
+  // Kick the async worker.
+  (void)symbols_for_file(path, source);
+  if (document_symbols_ready(path, source)) {
+    return symbols_for_file(path, source);
+  }
+  const int budget = timeout_ms > 0 ? timeout_ms : 4000;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(budget);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (document_symbols_ready(path, source)) {
+      return symbols_for_file(path, source);
+    }
+    prepare_document(path, source);
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+  if (timed_out != nullptr) {
+    *timed_out = !document_symbols_ready(path, source);
+  }
+  return symbols_for_file(path, source);
 }
 
 std::vector<SymbolInfo> TreeSitterService::symbols_for_buffer(

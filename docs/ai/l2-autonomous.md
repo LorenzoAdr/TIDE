@@ -85,6 +85,8 @@ Eventos con `duration_ms` (también `propose_ms` / `action_ms` / `total_ms`):
 | `l2_tool` / `l2_edit` / `l2_compile` | cada fase de sesión |
 | `l1_complete` / `l1_needles_complete` | respuesta L1 |
 
+`file_outline` espera al parse Tree-sitter (async) antes de responder; ya no devuelve `symbols=0` en frío.
+
 ## Handoff code_edit (modificar código)
 
 1. L1 detecta pedido de cambio → elabora **mapa rankeado completo** (catálogo ancho, sin bodies).
