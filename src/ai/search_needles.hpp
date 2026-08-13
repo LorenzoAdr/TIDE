@@ -28,6 +28,8 @@ int score_search_hit(const std::string& relative_path, const std::string& matchi
 bool query_asks_code_location(const std::string& text);
 // "dame contexto" / "give me context" → dump top matches with code bodies.
 bool query_asks_context_dump(const std::string& text);
+// "añade un tab/pestaña", "cambia el label", implement UI → L2 edit (not git_*).
+bool query_asks_code_edit(const std::string& text);
 bool query_asks_git_repo(const std::string& text);
 bool is_git_repo_tool_name(const std::string& name);
 

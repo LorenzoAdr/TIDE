@@ -325,6 +325,17 @@ int main() {
     expect(has_ch, "extract call_hierarchy");
     expect(has_lsp, "extract LSP");
   }
+  {
+    const char* q =
+        "añade en el panel de terminal, una nueva pestaña que se llame tem y que "
+        "dentro tenga el texto X";
+    expect(tuide::query_asks_code_edit(q), "añade pestaña → code_edit");
+    expect(!tuide::query_asks_git_repo(q), "añade pestaña ≠ git");
+    expect(!tuide::query_asks_code_edit("muéstrame el git diff"), "git diff ≠ code_edit");
+    expect(!tuide::query_asks_code_edit("qué archivos he modificado"), "modified ≠ code_edit");
+    const auto r = tuide::route_level0(q);
+    expect(r.kind == tuide::AiRouteKind::EscalateLevel1, "code_edit → escalate L1");
+  }
 
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";

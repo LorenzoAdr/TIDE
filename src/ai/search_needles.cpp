@@ -425,6 +425,48 @@ bool query_asks_context_dump(const std::string& text) {
          followed_by_ident("context of ");
 }
 
+bool query_asks_code_edit(const std::string& text) {
+  const std::string lower = ascii_lower(text);
+
+  // Pure VCS / status must not become "edit".
+  const bool vcs =
+      lower.find("git status") != std::string::npos || lower.find("git diff") != std::string::npos ||
+      lower.find("git pull") != std::string::npos || lower.find("git commit") != std::string::npos ||
+      (lower.find("commit") != std::string::npos && lower.find("git") != std::string::npos) ||
+      lower.find("working tree") != std::string::npos ||
+      lower.find("archivos modific") != std::string::npos;
+  if (vcs) {
+    return false;
+  }
+
+  auto has = [&](std::string_view tok) { return lower.find(tok) != std::string::npos; };
+
+  const bool addish = has("añade") || has("anade") || has("agrega") || has("agregar") ||
+                      has("añadir") || has("anadir") || has("crea ") || has("crear ") ||
+                      has("implementa") || has("implement ") || has("pon ") || has("poner ") ||
+                      has("mete ") || has("inserta") || has("new tab") || has("add a tab") ||
+                      has("add tab") || has("add a new");
+  const bool changeish = has("cambia") || has("cambiar") || has("modifica") || has("modificar") ||
+                         has("renombra") || has("rename") || has("actualiza el label") ||
+                         has("change the") || has("update the label");
+  const bool uish = has("pestaña") || has("pestana") || has("tab ") || has(" tab") ||
+                    has("nuevo tab") || has("nueva pest") || has("panel") || has("consola") ||
+                    has("terminal") || has("botón") || has("boton") || has("texto fijo") ||
+                    has("label") || has("console.tab") || has("ui ");
+  const bool codeish = has("código") || has("codigo") || has("fuente") || has("archivo .cpp") ||
+                       has("en el código") || has("en el codigo") || has("src/");
+
+  if ((addish || changeish) && (uish || codeish)) {
+    return true;
+  }
+  // "haz que el panel muestre X" / "quiero un tab llamado…"
+  if ((has("quiero") || has("necesito") || has("haz que")) && uish &&
+      (addish || changeish || has("llamad") || has("llame") || has("nombre"))) {
+    return true;
+  }
+  return false;
+}
+
 bool query_asks_git_repo(const std::string& text) {
   const std::string lower = ascii_lower(text);
   const bool vcs_op = lower.find("commit") != std::string::npos ||

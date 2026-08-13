@@ -879,6 +879,11 @@ AiRouteResult route_level0(const std::string& raw_input, const std::string& prev
     return escalate("contexto: Nivel 1 elabora mapa rankeado (sin bodies; L2 elige)");
   }
 
+  // Añadir/cambiar pestaña/panel/UI → L1 → L2 (nunca git_diff por un nombre tipo "tem").
+  if (query_asks_code_edit(lower)) {
+    return escalate("edición UI/código: Nivel 1 escala a L2 (no git_*)");
+  }
+
   // Localizar / investigar código → L1 con REPO_MAP (no ripgrep L0).
   if (asks_code_location(lower) || asks_conceptual_code_topic(lower)) {
     return escalate("investigar: Nivel 1 responde con métodos del REPO_MAP");
@@ -892,6 +897,8 @@ AiRouteResult route_level0(const std::string& raw_input, const std::string& prev
       // "dónde está el código que gestiona git" no debe matchear git_status por embeddings.
       if (asks_code_location(lower) && is_git_repo_tool(m.name)) {
         // fall through
+      } else if (query_asks_code_edit(lower) && is_git_repo_tool(m.name)) {
+        return escalate("edición UI/código: Nivel 1 escala a L2 (no git_*)");
       } else if (m.arg_policy == "seeds") {
         const auto seeds = extract_literal_seeds(input);
         if (!seeds.empty()) {

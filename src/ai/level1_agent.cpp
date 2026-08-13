@@ -104,6 +104,10 @@ std::string Level1Agent::build_system_prompt() const {
          "  {\"action\":\"tool\",\"name\":\"git_branches\",\"arg\":\"\"}\n"
          "  {\"action\":\"tool\",\"name\":\"git_pull\",\"arg\":\"\"}\n"
          "NO uses git_* para localizar implementación en el código fuente.\n"
+         "NO uses git_* si el usuario pide AÑADIR/CAMBIAR UI o código (pestaña, tab, panel, "
+         "texto fijo, label, feature): eso es needs_level2.\n"
+         "Ejemplos needs_level2: \"añade una pestaña…\", \"pon un texto fijo…\", "
+         "\"cambia el label del tab…\", \"implementa X en console_panel\".\n"
          "Tras observación útil: action=final con resumen breve.\n"
          "NUNCA repitas la misma tool+arg si ya tienes OBSERVATION.\n"
          "Tools permitidas:\n";
@@ -517,9 +521,11 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
 
   const bool context_dump =
       query_asks_context_dump(user_message) && !query_asks_git_repo(user_message);
+  const bool code_edit =
+      query_asks_code_edit(user_message) && !query_asks_git_repo(user_message);
   const bool code_locate =
       (query_asks_code_location(user_message) || context_dump) &&
-      !query_asks_git_repo(user_message);
+      !query_asks_git_repo(user_message) && !code_edit;
 
   RepoMapOptions map_opts;
   map_opts.query = user_message;
@@ -563,6 +569,82 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
   auto map_has_query_hits = [](const RepoMap& m) {
     return !m.entries.empty() && m.note.find("query_hits=") != std::string::npos;
   };
+
+  // Product/UI edit requests ("añade una pestaña…"): never git_*; hand off to L2 with map.
+  if (code_edit) {
+    if (log) {
+      log("L1 agent start (code_edit → needs_level2; max_steps skipped)");
+    }
+    std::vector<std::string> needles = {"ConsolePanelTabs", "console.tab", "make_tab_button",
+                                        "console_panel", "press_id"};
+    for (const auto& t : extract_code_tokens(user_message, 8)) {
+      needles.push_back(t);
+    }
+    for (const auto& t : expand_nl_retrieval_tokens(repo_map_query_tokens(user_message, 12), 24)) {
+      needles.push_back(t);
+    }
+    map_opts.extra_needles = needles;
+    map_opts.max_symbols = 256;
+    RepoMap repo_map = build_repo_map_from_indexer(deps_.symbol_indexer, map_opts);
+
+    const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+    TwoStageRerankOptions rr_opts;
+    rr_opts.query = user_message;
+    rr_opts.needles = needles;
+    rr_opts.workspace_root = root;
+    rr_opts.phase_a_pool = 256;
+    rr_opts.phase_a_top = 96;
+    rr_opts.final_top = 120;
+    rr_opts.max_per_file = 8;
+    rr_opts.fetch_bodies = false;
+    TwoStageRerankResult ranked =
+        rerank_map_two_stage(repo_map.entries, rr_opts, deps_.embed);
+    apply_ranked_map_priors(user_message, &ranked.entries, deps_.coding_stem_index, deps_.embed);
+    if (!ranked.note.empty()) {
+      ranked.note += "; ";
+    }
+    ranked.note += "code_edit=1";
+
+    RankedMapDumpOptions dump_opts;
+    dump_opts.workspace_root = root;
+    dump_opts.query = user_message;
+    dump_opts.note = ranked.note.empty() ? repo_map.note : ranked.note;
+    dump_opts.entries = ranked.entries.empty() ? repo_map.entries : ranked.entries;
+    dump_opts.include_bodies = false;
+    dump_opts.filename = "map_last.md";
+    std::string err;
+    const std::string path = dump_ranked_map_md(dump_opts, &err);
+
+    out.ok = true;
+    out.needs_level2 = true;
+    out.instruction = user_message;
+    out.seeds = needles;
+    const auto& seed_entries = dump_opts.entries;
+    for (const auto& e : seed_entries) {
+      if (!e.name.empty()) {
+        out.seeds.push_back(e.name);
+      }
+      if (out.seeds.size() >= 32) {
+        break;
+      }
+    }
+    std::ostringstream summary;
+    summary << "Cambio de UI/código detectado → L2 (sin git_*).\n";
+    if (!path.empty()) {
+      summary << "Mapa → `.tuide/ai/map_last.md`\n";
+    } else if (!err.empty()) {
+      summary << "Mapa (aviso): " << err << '\n';
+    }
+    summary << format_ranked_map_answer(dump_opts.entries, 48, {});
+    out.final_text = summary.str();
+    if (log) {
+      log("L1 → needs_level2 (code_edit); instruction=user query");
+      log(out.final_text);
+    }
+    ai_trace(AiTraceChannel::L1, "l2_handoff",
+             "{\"via\":\"code_edit\",\"entries\":" + std::to_string(dump_opts.entries.size()) + "}");
+    return out;
+  }
 
   // Investigate: L1 always proposes needles (shown in transcript), then REPO_MAP
   // is re-ranked with them. Lexical-only short-circuit skipped NL like "búsqueda de
