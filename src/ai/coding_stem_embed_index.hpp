@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -48,10 +49,13 @@ class CodingStemEmbedIndex {
                        std::vector<float>* out, std::string* error) const;
 
  private:
+  void set_rows_unlocked(std::vector<CodingStemEmbedRow> rows, const std::string& content_hash);
+
   bool ready_ = false;
   std::string content_hash_;
   std::vector<CodingStemEmbedRow> rows_;
   std::unordered_map<std::string, std::size_t> by_stem_;
+  mutable std::mutex mu_;
 };
 
 // Build a stable passage for a stem from sample paths/names (used by index + tests).

@@ -19,8 +19,23 @@ struct RepoMapEntry {
   std::string name;
   SymbolKind kind = SymbolKind::kFunction;
   int line = 0;
-  int score = 0;  // scaled rank (PageRank * 1e6 + lexical)
+  int score = 0;  // scaled rank (PageRank * 1e6 + lexical + embed boosts)
   std::string signature;
+
+  // L2 selection hints (optional; filled by enrich / two-stage rerank).
+  int score_base = 0;       // score before embed boosts
+  float sig_cos = -1.0f;    // signature cosine; <0 = n/a
+  float body_cos = -1.0f;   // body cosine; <0 = n/a
+  std::string stem;         // basename stem of file
+  int stem_sem_rank = 0;    // 1-based rank in stem-index top-K; 0 = n/a
+  std::string doc_line;     // nearby // or /// comment
+  int refs_in = 0;          // incoming IndexedRef count for name
+  std::vector<std::string> related_names;  // up to 3 co-file ref names
+  int file_rank = 0;        // 1-based among entries sharing this file
+  int file_count = 0;       // how many entries from this file in the list
+  bool dup_stem = false;    // same stem appears under >1 path in the list
+  std::string snippet;      // 3–5 source lines (top-N only)
+  std::string role_hint;    // pty-out | ui-wake | bridge | fd-wake | input | host-nudge | tool | …
 };
 
 struct RepoMapOptions {

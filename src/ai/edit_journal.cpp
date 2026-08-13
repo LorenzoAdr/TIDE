@@ -11,6 +11,7 @@
 #include "editor/editor_buffer_source.hpp"
 #include "editor/text_ops.hpp"
 #include "editor/undo_stack.hpp"
+#include "lsp/lsp_text_edits.hpp"
 
 namespace fs = std::filesystem;
 
@@ -156,23 +157,42 @@ bool EditJournalStore::apply_replace(WorkspaceModel* workspace, const std::strin
   }
 
   push_undo(buffer);
-  // text_ops uses 0-based lines; convert if callers pass 1-based — our API is 1-based lines,
-  // 1-based cols like LSP, but replace_text_range uses 0-based line/col.
+  // API is 1-based lines/cols (LSP-like); operate on joined source for reliable multiline.
   const int sl = std::max(0, start_line - 1);
   const int el = std::max(0, end_line - 1);
   const int sc = std::max(0, start_col - 1);
   const int ec = std::max(0, end_col - 1);
-  if (sl == el) {
-    replace_text_range(buffer, sl, sc, ec, new_text);
-  } else {
-    // Multi-line: replace from start through end via joined apply.
-    std::string text = editor_buffer_joined_source(*buffer);
-    // Fallback: replace first line range only for MVP safety.
-    replace_text_range(buffer, sl, sc, static_cast<int>(buffer->lines[sl].size()), new_text);
-    (void)el;
-    (void)ec;
-    (void)text;
+  if (sl >= buffer->lines.size() || el >= buffer->lines.size()) {
+    if (error) {
+      *error = "rango fuera de buffer";
+    }
+    return false;
   }
+
+  std::string text = editor_buffer_joined_source(*buffer);
+  auto offset_at = [&](int line0, int col0) -> std::size_t {
+    std::size_t off = 0;
+    for (int i = 0; i < line0; ++i) {
+      off += buffer->lines[static_cast<std::size_t>(i)].size();
+      off += 1;  // '\n' in joined source
+    }
+    const auto& ln = buffer->lines[static_cast<std::size_t>(line0)];
+    return off + static_cast<std::size_t>(std::min(col0, static_cast<int>(ln.size())));
+  };
+  const std::size_t begin = offset_at(sl, sc);
+  const std::size_t end = offset_at(el, ec);
+  if (begin > text.size() || end > text.size() || end < begin) {
+    if (error) {
+      *error = "offsets inválidos";
+    }
+    return false;
+  }
+  text.replace(begin, end - begin, new_text);
+  buffer->lines.assign(lines_from_document_text(text));
+  if (buffer->lines.empty()) {
+    buffer->lines.push_back("");
+  }
+  buffer->reset_to_single_cursor(sl, sc);
   commit_undo_group(buffer);
   buffer->dirty = true;
   buffer->view_token++;
@@ -189,7 +209,6 @@ bool EditJournalStore::apply_replace(WorkspaceModel* workspace, const std::strin
   edit.timestamp_ms = now_ms();
   record_edit(buffer->path, edit);
 
-  // Approximate lines touched by new_text newlines.
   int new_lines = 1;
   for (char c : new_text) {
     if (c == '\n') {

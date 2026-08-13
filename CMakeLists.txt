@@ -322,6 +322,12 @@ add_executable(tuide
   src/ai/llama_backend.cpp
   src/ai/level1_action.cpp
   src/ai/level1_agent.cpp
+  src/ai/level2_session.cpp
+  src/ai/search_replace.cpp
+  src/ai/l2_action.cpp
+  src/ai/l2_brain_local.cpp
+  src/ai/l2_brain_remote.cpp
+  src/ai/level2_autonomous_loop.cpp
   src/ai/ai_controller.cpp
   src/terminal/shell_session.cpp
   src/terminal/app_session.cpp
@@ -782,6 +788,71 @@ target_include_directories(level1_agent_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(level2_session_test
+  tests/level2_session_test.cpp
+  tests/tool_registry_stub.cpp
+  src/ai/level2_session.cpp
+  src/ai/search_replace.cpp
+  src/ai/ai_trace.cpp
+)
+target_include_directories(level2_session_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(level2_autonomous_loop_test
+  tests/level2_autonomous_loop_test.cpp
+  tests/tool_registry_stub.cpp
+  src/ai/level2_session.cpp
+  src/ai/search_replace.cpp
+  src/ai/l2_action.cpp
+  src/ai/level2_autonomous_loop.cpp
+  src/ai/ai_trace.cpp
+)
+target_include_directories(level2_autonomous_loop_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(search_replace_test
+  tests/search_replace_test.cpp
+  src/ai/search_replace.cpp
+)
+target_include_directories(search_replace_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_harness_cli
+  tools/l2_harness_cli.cpp
+  tests/tool_registry_stub.cpp
+  src/ai/level2_session.cpp
+  src/ai/search_replace.cpp
+  src/ai/get_code_of.cpp
+  src/ai/repo_map.cpp
+  src/ai/coding_embed_rerank.cpp
+  src/ai/coding_stem_embed_index.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+  src/ai/search_needles.cpp
+  src/git/git_command.cpp
+  src/symbols/symbol_utils.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_harness_cli PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_harness_cli PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+
 add_executable(repo_map_test
   tests/repo_map_test.cpp
   src/ai/repo_map.cpp
@@ -927,6 +998,9 @@ set(TUIDE_TEST_TARGETS
   level0_router_test
   level0_intent_index_test
   level1_agent_test
+  level2_session_test
+  level2_autonomous_loop_test
+  search_replace_test
   repo_map_test
   get_code_of_test
   pkt_protocol_test

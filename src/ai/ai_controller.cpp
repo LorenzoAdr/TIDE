@@ -1,19 +1,76 @@
 #include "ai/ai_controller.hpp"
 
+#include <cctype>
 #include <chrono>
+#include <cstring>
+#include <fstream>
 #include <sstream>
+#include <thread>
+#include <vector>
 
 #include "ai/ai_packages.hpp"
 #include "ai/ai_trace.hpp"
+#include "ai/edit_journal.hpp"
+#include "ai/l2_brain.hpp"
 #include "ai/level0_router.hpp"
 #include "ai/level1_agent.hpp"
+#include "ai/level2_autonomous_loop.hpp"
+#include "ai/level2_session.hpp"
 #include "ai/model_store.hpp"
+#include "ai/search_replace.hpp"
 #include "i18n/tr.hpp"
 #include "ui/busy_strip.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/ui_wake.hpp"
 
 namespace tuide {
+namespace {
+
+Level2SessionDeps make_l2_deps(AiController* self, ToolRegistry* tools, WorkspaceModel* workspace,
+                               TaskRunner* tasks, const AiSettings& settings) {
+  Level2SessionDeps l2deps;
+  l2deps.tools = tools;
+  l2deps.sync_edit = [self, workspace](const ApplyHunkResult& applied) {
+    if (workspace == nullptr || !applied.ok) {
+      return;
+    }
+    std::string err;
+    (void)EditJournalStore::instance().apply_replace(
+        workspace, applied.abs_path, applied.span.start_line, applied.span.start_col,
+        applied.span.end_line, applied.span.end_col, applied.new_text, AiAuthor::Level2_AI, &err);
+    (void)self;
+  };
+  l2deps.run_compile = [self, workspace, tasks, settings](std::string* combined) {
+    const std::string root = workspace != nullptr ? workspace->root : std::string{};
+    tasks->ensure_default_tasks(root);
+    tasks->set_whitelist(settings.command_whitelist.empty()
+                             ? std::vector<std::string>{"compile", "launch"}
+                             : settings.command_whitelist);
+    std::ostringstream captured;
+    const TaskRunnerResult tr = tasks->run("compile", root, [&](const std::string& line) {
+      captured << line << '\n';
+      if (self != nullptr) {
+        self->append(line);
+      }
+    });
+    if (combined) {
+      *combined = captured.str();
+      if (!tr.stderr_text.empty()) {
+        *combined += tr.stderr_text;
+      }
+      if (!tr.allowed) {
+        *combined += "deny: " + tr.deny_reason + "\n";
+      }
+    }
+    if (!tr.allowed && tr.exit_code == 0) {
+      return 1;
+    }
+    return tr.exit_code;
+  };
+  return l2deps;
+}
+
+}  // namespace
 
 AiController::AiController(AiControllerDeps deps) : deps_(std::move(deps)) {
   refresh_settings();
@@ -338,8 +395,8 @@ void AiController::run_level1_async(const std::string& message) {
       end_thinking();
       return;
     }
-    // Best-effort: warm stem embed index for coding-pack semantic recall.
-    ensure_coding_stem_index_ready();
+    // Best-effort: embeddings for map rerank / stem hints (do not block if missing packs).
+    (void)ensure_intent_embeddings_ready(false);
     Level1AgentDeps deps;
     deps.tools = &tools_;
     deps.tasks = &tasks_;
@@ -363,11 +420,35 @@ void AiController::run_level1_async(const std::string& message) {
     if (!result.ok && !result.error.empty()) {
       append("L1 terminó con error: " + result.error);
     } else if (result.needs_level2) {
-      append("L1 listo: payload L2 en dry-run (Fase D/E pendiente para coder real).");
+      if (settings_.level2_mode == "harness") {
+        bootstrap_level2_session(message, result.instruction, result.seeds);
+        append("L1 listo → L2 harness: `.tuide/ai/l2/session.md`");
+        append("Escribe `request.json` y corre `/l2_turn` (ver /help).");
+      } else if (level2_mode_is_autonomous()) {
+        bootstrap_level2_session(message, result.instruction, result.seeds);
+        append("L1 listo → L2 autónomo (" + settings_.level2_mode + ")");
+        run_level2_autonomous_inline("needs_level2");
+      } else {
+        append("L1 listo: payload L2 en dry-run (ai.level2.mode=dry_run).");
+      }
     } else if (!result.final_text.empty()) {
       append("L1 done.");
       if (settings_.level2_mode == "dry_run") {
         append("L1: mapa sin bodies (L2 dry-run). El embed de ranking ya se aplicó al ordenar.");
+      } else if (settings_.level2_mode == "harness") {
+        // Mapa escrito aunque needs_level2 no viniera del handoff JSON: sembrar sesión.
+        bootstrap_level2_session(message, result.instruction.empty()
+                                              ? "Elige del mapa y lee cuerpos con get_code_of."
+                                              : result.instruction,
+                                 result.seeds);
+        append("L2 harness: sesión sembrada en `.tuide/ai/l2/session.md`");
+      } else if (level2_mode_is_autonomous()) {
+        bootstrap_level2_session(message, result.instruction.empty()
+                                              ? "Elige del mapa y lee cuerpos con get_code_of."
+                                              : result.instruction,
+                                 result.seeds);
+        append("L2 autónomo: sesión sembrada; arrancando loop…");
+        run_level2_autonomous_inline("l1_final_seed");
       }
     }
     // Warm stem index only (cheap); no full-corpus symbol embed.
@@ -403,6 +484,24 @@ void AiController::show_model_status() {
          " catalog=" + intent_index_.catalog_path());
   append(embed_backend_.status_text());
   append(ai_trace_status_text());
+
+  append("=== L2 coder ===");
+  append("mode=" + settings_.level2_mode);
+  const AiModelInfo l2 = (settings_.level2.model_id == default_l2_model_small().id)
+                             ? default_l2_model_small()
+                             : default_l2_model();
+  append("default: " + l2.id + " (" + l2.license_note + ")");
+  append("gguf: " + store.l2_model_path(l2) +
+         (store.has_l2_model(l2) ? " [present]" : " [missing]"));
+  if (settings_.level2_mode == "remote") {
+    append("api_base=" + settings_.level2.api_base);
+    append("api_model=" + settings_.level2.api_model);
+    append("api_key=" +
+           std::string(settings_.level2.api_key.empty() ? "(env TUIDE_L2_API_KEY / none)"
+                                                        : "(set in config)"));
+  }
+  append("max_steps=" + std::to_string(settings_.level2.max_steps) +
+         " n_ctx=" + std::to_string(settings_.level2.n_ctx));
 }
 
 void AiController::download_models(const std::string& what) {
@@ -444,6 +543,21 @@ void AiController::download_models(const std::string& what) {
     end_thinking();
     return;
   }
+  if (what == "l2" || what == "coder") {
+    AiModelInfo info = default_l2_model();
+    if (settings_.level2.model_id == default_l2_model_small().id) {
+      info = default_l2_model_small();
+    }
+    const std::string path = store.ensure_l2_model(info, true, progress, &error);
+    end_download();
+    if (path.empty()) {
+      append("✗ " + error);
+    } else {
+      append("L2 model: " + path);
+    }
+    end_thinking();
+    return;
+  }
   const AiModelInfo info = default_l1_model();
   const std::string path = store.ensure_model(info, true, progress, &error);
   end_download();
@@ -472,12 +586,7 @@ bool AiController::ensure_intent_embeddings_ready(bool prompt_if_missing) {
     }
     return false;
   }
-  if (intent_embed_attempted_ && !settings_.level0.embeddings.auto_download) {
-    // Packages are present but a previous ensure failed (server/runtime glitch).
-    ai_trace(AiTraceChannel::Embed, "skip_no_autodl",
-             "{\"attempted\":true,\"auto_download\":false}");
-    return false;
-  }
+  // Packs are on disk — always retry ensure (port races / stale server are transient).
   intent_embed_attempted_ = true;
   std::string error;
   auto progress = make_store_progress();
@@ -601,6 +710,8 @@ void AiController::maybe_start_coding_stem_warm_async() {
     symbol_embed_thread_.join();
   }
   symbol_embed_running_.store(true);
+  symbol_embed_busy_active_.store(true);
+  refresh_ai_embedding_busy(deps_.layout, true, 0, 0);
   symbol_embed_thread_ = std::thread([this] {
     auto finish = [this](bool ok) {
       symbol_embed_busy_active_.store(false);
@@ -624,8 +735,54 @@ void AiController::maybe_start_coding_stem_warm_async() {
         return;
       }
     }
-    const bool ok = ensure_coding_stem_index_ready();
-    if (ok) {
+    // Yield the embed HTTP lock to L1 while an agent turn is running.
+    for (int i = 0; i < 600 && agent_busy_.load(); ++i) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    auto progress = [this](const std::string& line) {
+      append(line);
+      // Parse "coding stem embed: N/M" for busy %.
+      const auto slash = line.rfind('/');
+      const auto colon = line.rfind(':');
+      if (slash != std::string::npos && colon != std::string::npos && slash > colon) {
+        try {
+          const int done = std::stoi(line.substr(colon + 1, slash - colon - 1));
+          const int total = std::stoi(line.substr(slash + 1));
+          if (total > 0) {
+            symbol_embed_done_.store(static_cast<std::size_t>(done));
+            symbol_embed_total_.store(static_cast<std::size_t>(total));
+            refresh_ai_embedding_busy(deps_.layout, true, static_cast<std::size_t>(done),
+                                      static_cast<std::size_t>(total));
+          }
+        } catch (...) {
+        }
+      }
+    };
+    // Temporary progress hook via ensure_coding_stem — override append-only path.
+    if (coding_stem_index_.ready() && embed_backend_.ready()) {
+      finish(true);
+      wake(true);
+      return;
+    }
+    if (deps_.symbol_indexer == nullptr) {
+      finish(false);
+      wake(true);
+      return;
+    }
+    const auto snap = deps_.symbol_indexer->snapshot();
+    if (!snap || snap->symbols.empty()) {
+      finish(false);
+      wake(true);
+      return;
+    }
+    std::string error;
+    const std::string cache =
+        settings_.models_cache_dir.empty() ? ModelStore::default_cache_dir() : settings_.models_cache_dir;
+    const bool ok = coding_stem_index_.ensure(snap.get(), &embed_backend_, cache,
+                                              settings_.level0.embeddings.model_id, progress, &error);
+    if (!ok) {
+      append("coding stem embed: " + error);
+    } else {
       append("coding stem embed: listo (n=" + std::to_string(coding_stem_index_.size()) + ")");
     }
     finish(ok);
@@ -776,6 +933,9 @@ void AiController::handle_route(const AiRouteResult& route, const std::string& o
       case AiRouteKind::Error:
         kind = "error";
         break;
+      case AiRouteKind::Level2Harness:
+        kind = "l2_harness";
+        break;
     }
     ai_trace(AiTraceChannel::L0, "dispatch",
              std::string("{\"kind\":\"") + kind + "\",\"tool\":\"" +
@@ -792,10 +952,13 @@ void AiController::handle_route(const AiRouteResult& route, const std::string& o
       append("  /context [seeds…]  /contextdump [q]  /codeof <path:Sym>  /repomap [query|status]");
       append("  /apply_demo  /tools");
       append("  /l1 <msg>  /explain <msg>  /model […]  /trace [status|on|off|tail|clear]  /cancel");
+      append("  /l2_session [status|bootstrap]  /l2_turn  /l2_tool <name> [arg…]");
+      append("  /l2_run  /l2_done [summary] [--edit|--clarify]");
       append("NL rápida: \"compila\", \"busca Foo\", \"lista errores\", \"git status\", "
              "\"git pull\", \"últimos commits\", \"dame contexto de …\"");
       append("NL ambigua → Nivel 1. Compile/launch en background (/cancel aborta). "
-             "Trace: .tuide/ai/trace.ndjson (/trace status); mapa: .tuide/ai/map_last.md");
+             "Trace: .tuide/ai/trace.ndjson (/trace status); mapa: .tuide/ai/map_last.md; "
+             "L2: .tuide/ai/l2/ (ai.level2.mode=harness|local|remote)");
       break;
     }
     case AiRouteKind::ResolveTool:
@@ -862,10 +1025,238 @@ void AiController::handle_route(const AiRouteResult& route, const std::string& o
       }
       break;
     }
+    case AiRouteKind::Level2Harness:
+      handle_level2_harness(route.arg);
+      break;
     case AiRouteKind::Error:
       append("✗ " + route.message);
       break;
   }
+}
+
+void AiController::bootstrap_level2_session(const std::string& query,
+                                            const std::string& instruction,
+                                            const std::vector<std::string>& seeds) {
+  ensure_tools();
+  const std::string root =
+      deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+  if (root.empty()) {
+    append("L2 harness: sin workspace root");
+    return;
+  }
+  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_));
+  Level2BootstrapOpts opts;
+  opts.workspace_root = root;
+  opts.query = query;
+  opts.instruction = instruction;
+  opts.seeds = seeds;
+  std::string err;
+  if (!session.bootstrap(opts, &err)) {
+    append("L2 harness bootstrap falló: " + err);
+    return;
+  }
+  append(session.status_text(root));
+}
+
+bool AiController::level2_mode_is_autonomous() const {
+  return settings_.level2_mode == "local" || settings_.level2_mode == "remote";
+}
+
+void AiController::run_level2_autonomous_inline(const std::string& reason) {
+  ensure_tools();
+  refresh_settings();
+  const std::string root =
+      deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+  if (root.empty()) {
+    append("L2 autónomo: sin workspace root");
+    return;
+  }
+  if (!level2_mode_is_autonomous()) {
+    append("L2 autónomo: ai.level2.mode debe ser local|remote (ahora=" + settings_.level2_mode +
+           ")");
+    return;
+  }
+
+  append("L2 ▸ arranque autónomo (" + settings_.level2_mode + ") motivo=" + reason);
+
+  if (settings_.level2_mode == "local") {
+    const std::string missing = first_missing_ai_package_for_l2(settings_);
+    if (!missing.empty()) {
+      append("L2 local: falta paquete `" + missing + "` (Toolpacks o /model download l2)");
+      request_missing_package(missing);
+      return;
+    }
+  }
+
+  auto brain = make_l2_brain(settings_.level2_mode, nullptr);
+  if (!brain) {
+    append("L2: no se pudo crear brain para mode=" + settings_.level2_mode);
+    return;
+  }
+  std::string err;
+  auto progress = [this](const std::string& line) { append(line); };
+  if (!brain->ensure_ready(settings_, progress, &err)) {
+    append("L2 brain ensure_ready ✗ " + err);
+    if (settings_.level2_mode == "local") {
+      request_missing_package("ai-l2");
+    }
+    return;
+  }
+
+  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_));
+  Level2AutonomousLoopOpts opts;
+  opts.workspace_root = root;
+  opts.settings = settings_.level2;
+  const auto result =
+      run_level2_autonomous(session, *brain, opts,
+                            [this](const std::string& line) { append(line); }, &agent_cancel_);
+  if (result.ok) {
+    append("L2 ▸ finalizado phase=" + result.phase + " steps=" + std::to_string(result.steps) +
+           (result.summary.empty() ? "" : (" — " + result.summary)));
+  } else {
+    append("L2 ▸ terminó con error phase=" + result.phase + " steps=" +
+           std::to_string(result.steps) + " — " +
+           (result.error.empty() ? result.summary : result.error));
+  }
+}
+
+void AiController::handle_level2_harness(const std::string& arg) {
+  ensure_tools();
+  const std::string root =
+      deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+  if (root.empty()) {
+    append("L2 harness: sin workspace root");
+    return;
+  }
+  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_));
+
+  std::string cmd;
+  std::string rest;
+  {
+    std::istringstream iss(arg);
+    iss >> cmd;
+    std::getline(iss, rest);
+    auto begin = rest.find_first_not_of(" \t");
+    if (begin == std::string::npos) {
+      rest.clear();
+    } else if (begin > 0) {
+      rest.erase(0, begin);
+    }
+  }
+  for (char& c : cmd) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+
+  if (cmd.empty() || cmd == "status" || cmd == "session") {
+    append(session.status_text(root));
+    return;
+  }
+  if (cmd == "bootstrap") {
+    bootstrap_level2_session(rest.empty() ? std::string("(manual bootstrap)") : rest,
+                             "Elige del mapa rankeado y lee cuerpos con get_code_of / "
+                             "file_outline / references.",
+                             {});
+    return;
+  }
+  if (cmd == "run" || cmd == "auto" || cmd == "start") {
+    if (!level2_mode_is_autonomous()) {
+      append("uso: fija ai.level2.mode=local|remote y luego /l2_run");
+      return;
+    }
+    // If no session yet, bootstrap from rest/query.
+    const std::string root =
+        deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
+    if (!root.empty()) {
+      const auto st_path = Level2Session::state_path(root);
+      std::ifstream in(st_path);
+      if (!in) {
+        bootstrap_level2_session(rest.empty() ? std::string("(l2_run)") : rest,
+                                 "Elige del mapa y lee cuerpos con tools; luego edit.", {});
+      }
+    }
+    // Run on a worker if we're on the UI thread (slash command).
+    if (agent_busy_.load()) {
+      append("L2: ya hay un agente en curso; espera o /cancel.");
+      return;
+    }
+    begin_thinking();
+    agent_busy_.store(true);
+    agent_cancel_.store(false);
+    join_agent_thread();
+    agent_thread_ = std::thread([this]() {
+      run_level2_autonomous_inline("slash_l2_run");
+      agent_busy_.store(false);
+      end_thinking();
+    });
+    return;
+  }
+  if (cmd == "turn") {
+    const Level2TurnResult tr = session.process_request_file(root);
+    append("L2 turn: action=" + tr.action + " phase=" + tr.phase +
+           " turn=" + std::to_string(tr.turn) + (tr.ok ? " ok" : " …") +
+           (tr.summary.empty() ? "" : (" — " + tr.summary)));
+    if (!tr.ok && !tr.error.empty() && tr.phase != "edit") {
+      append("L2 turn detail: " + tr.error);
+    }
+    return;
+  }
+  if (cmd == "tool") {
+    std::string name;
+    std::string tool_arg;
+    {
+      std::istringstream iss(rest);
+      iss >> name;
+      std::getline(iss, tool_arg);
+      auto begin = tool_arg.find_first_not_of(" \t");
+      if (begin == std::string::npos) {
+        tool_arg.clear();
+      } else if (begin > 0) {
+        tool_arg.erase(0, begin);
+      }
+    }
+    if (name.empty()) {
+      append("uso: /l2_tool <name> [arg…]");
+      return;
+    }
+    const Level2TurnResult tr = session.apply_tool(root, name, tool_arg);
+    if (!tr.ok) {
+      append("L2 tool ✗ " + tr.error);
+    } else {
+      append("L2 tool ok: " + name + " turn=" + std::to_string(tr.turn) +
+             " phase=" + tr.phase);
+    }
+    return;
+  }
+  if (cmd == "done") {
+    std::ostringstream summary;
+    std::string next;
+    std::istringstream iss(rest);
+    std::string tok;
+    while (iss >> tok) {
+      if (tok == "--edit" || tok == "next=edit") {
+        next = "edit";
+      } else if (tok == "--clarify" || tok == "next=clarify" || tok == "next=abort") {
+        next = "clarify";
+      } else {
+        if (!summary.str().empty()) {
+          summary << ' ';
+        }
+        summary << tok;
+      }
+    }
+    const Level2TurnResult tr = session.mark_done(root, summary.str(), next);
+    if (!tr.ok) {
+      append("L2 done ✗ " + tr.error);
+    } else if (tr.phase == "clarify") {
+      append("L2: arreglo cancelado — hace falta más detalle del usuario:");
+      append(tr.summary);
+    } else {
+      append("L2 done turn=" + std::to_string(tr.turn) + " phase=" + tr.phase);
+    }
+    return;
+  }
+  append("uso: /l2_session | /l2_turn | /l2_tool <name> [arg] | /l2_run | "
+         "/l2_done [summary] [--edit|--clarify]");
 }
 
 void AiController::handle_user_input(const std::string& line) {

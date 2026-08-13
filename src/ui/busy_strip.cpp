@@ -254,7 +254,11 @@ void set_busy_percent(MainLayoutState* layout, BusyActivity activity, int percen
     const BusyActivity previous = state.activity;
     state.kind = BusyIndicatorKind::Percent;
     state.activity = activity;
-    state.percent = std::clamp(percent, 0, 100);
+    // Negative percent (legacy "indeterminate") → keep 0 but prefer spinner via label-only callers.
+    state.percent = percent < 0 ? 0 : std::clamp(percent, 0, 100);
+    if (percent < 0) {
+      state.kind = BusyIndicatorKind::Spinner;
+    }
     if (!label.empty()) {
       state.label = std::string(label);
     } else if (state.label.empty() || previous != activity) {

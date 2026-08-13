@@ -133,23 +133,30 @@ std::string build_coding_stem_index_passage(const std::string& stem,
     out.push_back(' ');
     out += names[i];
   }
-  if (out.size() > 1500) {
-    out.resize(1500);
+  if (out.size() > 480) {
+    out.resize(480);
   }
   return out;
 }
 
-void CodingStemEmbedIndex::set_rows_for_test(std::vector<CodingStemEmbedRow> rows) {
+void CodingStemEmbedIndex::set_rows_unlocked(std::vector<CodingStemEmbedRow> rows,
+                                              const std::string& content_hash) {
   rows_ = std::move(rows);
   by_stem_.clear();
   for (std::size_t i = 0; i < rows_.size(); ++i) {
     by_stem_[rows_[i].stem] = i;
   }
   ready_ = !rows_.empty();
-  content_hash_ = "test";
+  content_hash_ = content_hash;
+}
+
+void CodingStemEmbedIndex::set_rows_for_test(std::vector<CodingStemEmbedRow> rows) {
+  std::lock_guard<std::mutex> lock(mu_);
+  set_rows_unlocked(std::move(rows), "test");
 }
 
 void CodingStemEmbedIndex::invalidate() {
+  std::lock_guard<std::mutex> lock(mu_);
   rows_.clear();
   by_stem_.clear();
   content_hash_.clear();
@@ -219,6 +226,7 @@ std::vector<std::pair<std::string, float>> CodingStemEmbedIndex::top_k(
 bool CodingStemEmbedIndex::ensure(const SymbolIndexSnapshot* snapshot, EmbeddingBackend* backend,
                                   const std::string& cache_dir, const std::string& model_id,
                                   const ProgressFn& on_progress, std::string* error) {
+  std::lock_guard<std::mutex> lock(mu_);
   if (snapshot == nullptr || snapshot->symbols.empty()) {
     if (error) {
       *error = "snapshot vacío";
@@ -319,9 +327,7 @@ bool CodingStemEmbedIndex::ensure(const SymbolIndexSnapshot* snapshot, Embedding
           }
         }
         if (loaded.size() == built.size()) {
-          set_rows_for_test(std::move(loaded));
-          content_hash_ = content_hash;
-          ready_ = true;
+          set_rows_unlocked(std::move(loaded), content_hash);
           ai_trace(AiTraceChannel::Embed, "coding_stem_cache_hit",
                    "{\"n\":" + std::to_string(rows_.size()) + ",\"file\":\"" +
                        ai_trace_escape(cache_file) + "\"}");
@@ -340,23 +346,29 @@ bool CodingStemEmbedIndex::ensure(const SymbolIndexSnapshot* snapshot, Embedding
     on_progress("coding stem embed: indexing " + std::to_string(built.size()) + " stems…");
   }
   {
-    std::vector<std::string> passages;
-    passages.reserve(built.size());
-    for (const auto& row : built) {
-      passages.push_back(row.passage);
-    }
-    std::vector<std::vector<float>> vecs;
-    std::string emb_err;
-    if (!backend->embed_passages(passages, &vecs, &emb_err) || vecs.size() != built.size()) {
-      if (error) {
-        *error = "embed stems batch falló: " + emb_err;
+    // Chunk so the UI gets N/M progress; pause briefly if L1 is using the embed server.
+    constexpr std::size_t kChunk = 16;
+    for (std::size_t base = 0; base < built.size(); base += kChunk) {
+      const std::size_t n = std::min(kChunk, built.size() - base);
+      std::vector<std::string> passages;
+      passages.reserve(n);
+      for (std::size_t i = 0; i < n; ++i) {
+        passages.push_back(built[base + i].passage);
       }
-      return false;
-    }
-    for (std::size_t i = 0; i < built.size(); ++i) {
-      built[i].embedding = std::move(vecs[i]);
-      if (on_progress && (i + 1) % 40 == 0) {
-        on_progress("coding stem embed: " + std::to_string(i + 1) + "/" +
+      std::vector<std::vector<float>> vecs;
+      std::string emb_err;
+      if (!backend->embed_passages(passages, &vecs, &emb_err) || vecs.size() != n) {
+        if (error) {
+          *error = "embed stems batch falló: " + emb_err + " @" + std::to_string(base) + "/" +
+                   std::to_string(built.size());
+        }
+        return false;
+      }
+      for (std::size_t i = 0; i < n; ++i) {
+        built[base + i].embedding = std::move(vecs[i]);
+      }
+      if (on_progress) {
+        on_progress("coding stem embed: " + std::to_string(base + n) + "/" +
                     std::to_string(built.size()));
       }
     }
@@ -379,9 +391,7 @@ bool CodingStemEmbedIndex::ensure(const SymbolIndexSnapshot* snapshot, Embedding
     on_progress("coding stem embed: cache " + cache_file);
   }
 
-  set_rows_for_test(std::move(built));
-  content_hash_ = content_hash;
-  ready_ = true;
+  set_rows_unlocked(std::move(built), content_hash);
   return true;
 }
 

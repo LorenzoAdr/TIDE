@@ -88,6 +88,12 @@ class AiController {
   void run_level1_async(const std::string& message);
   void cancel_level1();
   void cancel_all();
+  void handle_level2_harness(const std::string& arg);
+  void bootstrap_level2_session(const std::string& query, const std::string& instruction,
+                                const std::vector<std::string>& seeds);
+  // After bootstrap when mode=local|remote: run autonomous loop (same agent thread).
+  void run_level2_autonomous_inline(const std::string& reason);
+  bool level2_mode_is_autonomous() const;
   void show_model_status();
   void download_models(const std::string& what);
   bool ensure_backend_ready();

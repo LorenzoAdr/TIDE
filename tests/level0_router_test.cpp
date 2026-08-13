@@ -56,6 +56,20 @@ int main() {
     expect(r.kind == AiRouteKind::CancelAgent, "/cancel");
   }
   {
+    const auto r = route_level0("/l2_turn");
+    expect(r.kind == AiRouteKind::Level2Harness && r.arg == "turn", "/l2_turn");
+  }
+  {
+    const auto r = route_level0("/l2_tool get_code_of src/ai/x.cpp:Foo");
+    expect(r.kind == AiRouteKind::Level2Harness &&
+               r.arg == "tool get_code_of src/ai/x.cpp:Foo",
+           "/l2_tool");
+  }
+  {
+    const auto r = route_level0("/l2_session status");
+    expect(r.kind == AiRouteKind::Level2Harness && r.arg == "status", "/l2_session");
+  }
+  {
     const auto r = route_level0("como está el repo, hay mucho cambio?");
     expect(r.kind == AiRouteKind::ResolveTool && r.tool_name == "git_status" && r.arg.empty(),
            "como está el repo");

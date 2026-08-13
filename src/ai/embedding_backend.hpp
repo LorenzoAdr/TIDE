@@ -79,6 +79,9 @@ class EmbeddingBackend {
   int port_ = 18765;
   int http_batch_ = 64;
   int n_parallel_ = 8;
+  int n_ctx_ = 1024;
+  // Soft char cap per input ≈ (n_ctx/n_parallel)*chars_per_token with headroom.
+  std::size_t max_embed_chars_ = 400;
   pid_t server_pid_ = -1;
   std::atomic<bool> ready_{false};
   mutable int http_fd_ = -1;

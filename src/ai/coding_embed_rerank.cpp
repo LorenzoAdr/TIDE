@@ -4,6 +4,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <sstream>
 #include <unordered_map>
 
@@ -12,7 +13,11 @@
 #include "ai/get_code_of.hpp"
 #include "ai/repo_map.hpp"
 #include "ai/vector_math.hpp"
+#include "indexer/symbol_workspace_indexer.hpp"
 #include "symbols/symbol_kind.hpp"
+
+#include <filesystem>
+#include <fstream>
 
 namespace tuide {
 namespace {
@@ -570,6 +575,12 @@ TwoStageRerankResult rerank_map_two_stage(std::vector<RepoMapEntry> candidates,
     return out;
   }
 
+  for (auto& e : candidates) {
+    e.score_base = e.score;
+    e.sig_cos = -1.0f;
+    e.body_cos = -1.0f;
+  }
+
   // Keep input order loosely by existing score only as a stable starting point; embed decides.
   std::stable_sort(candidates.begin(), candidates.end(),
                    [](const RepoMapEntry& a, const RepoMapEntry& b) {
@@ -615,6 +626,7 @@ TwoStageRerankResult rerank_map_two_stage(std::vector<RepoMapEntry> candidates,
         }
         const float c = cosine_similarity(qvec, pvecs[i]);
         sig_cos[i] = c;
+        candidates[i].sig_cos = c;
         candidates[i].score +=
             clamp_boost(static_cast<int>(std::lround(static_cast<double>(c) * 400.0)), -100, 400);
       }
@@ -627,6 +639,7 @@ TwoStageRerankResult rerank_map_two_stage(std::vector<RepoMapEntry> candidates,
         }
         const float c = cosine_similarity(qvec, pvec);
         sig_cos[i] = c;
+        e.sig_cos = c;
         e.score += clamp_boost(static_cast<int>(std::lround(static_cast<double>(c) * 400.0)), -100,
                                400);
       }
@@ -722,6 +735,7 @@ TwoStageRerankResult rerank_map_two_stage(std::vector<RepoMapEntry> candidates,
         }
         const float c = cosine_similarity(qvec, pvecs[j]);
         body_cos[i] = c;
+        candidates[i].body_cos = c;
         candidates[i].score +=
             clamp_boost(static_cast<int>(std::lround(static_cast<double>(c) * 2000.0)), -200, 2000);
       }
@@ -734,6 +748,7 @@ TwoStageRerankResult rerank_map_two_stage(std::vector<RepoMapEntry> candidates,
         }
         const float c = cosine_similarity(qvec, pvec);
         body_cos[i] = c;
+        candidates[i].body_cos = c;
         candidates[i].score +=
             clamp_boost(static_cast<int>(std::lround(static_cast<double>(c) * 2000.0)), -200, 2000);
       }
@@ -825,6 +840,532 @@ TwoStageRerankResult rerank_map_two_stage(std::vector<RepoMapEntry> candidates,
   return out;
 }
 
+namespace {
+
+std::string file_stem_of(const std::string& file) {
+  if (file.empty()) {
+    return {};
+  }
+  std::string base = file;
+  const auto slash = base.find_last_of("/\\");
+  if (slash != std::string::npos) {
+    base = base.substr(slash + 1);
+  }
+  const auto dot = base.find_last_of('.');
+  if (dot != std::string::npos && dot > 0) {
+    base = base.substr(0, dot);
+  }
+  return base;
+}
+
+std::string trim_hint(std::string s, std::size_t max_n) {
+  while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) {
+    s.erase(s.begin());
+  }
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) {
+    s.pop_back();
+  }
+  if (s.size() > max_n) {
+    s.resize(max_n);
+    s += "…";
+  }
+  return s;
+}
+
+bool looks_like_doc_comment(const std::string& line) {
+  std::size_t i = 0;
+  while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) {
+    ++i;
+  }
+  if (i >= line.size()) {
+    return false;
+  }
+  if (line.compare(i, 3, "///") == 0 || line.compare(i, 3, "//!") == 0) {
+    return true;
+  }
+  if (line.compare(i, 2, "//") == 0) {
+    return true;
+  }
+  if (line.compare(i, 2, "/*") == 0 || line.compare(i, 1, "*") == 0) {
+    return true;
+  }
+  return false;
+}
+
+struct FileLinesCache {
+  std::vector<std::string> lines;  // 1-based content in [1..] with [0] unused
+  bool loaded = false;
+};
+
+FileLinesCache& load_file_lines(std::unordered_map<std::string, FileLinesCache>* cache,
+                                const std::string& abs_path) {
+  auto& slot = (*cache)[abs_path];
+  if (slot.loaded) {
+    return slot;
+  }
+  slot.loaded = true;
+  std::ifstream in(abs_path);
+  if (!in) {
+    return slot;
+  }
+  slot.lines.emplace_back();
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    slot.lines.push_back(std::move(line));
+  }
+  return slot;
+}
+
+std::string extract_doc_near(const FileLinesCache& fl, int line) {
+  if (line <= 1 || fl.lines.size() <= 1) {
+    return {};
+  }
+  const int start = std::max(1, line - 4);
+  for (int i = line - 1; i >= start; --i) {
+    if (i <= 0 || static_cast<std::size_t>(i) >= fl.lines.size()) {
+      continue;
+    }
+    const std::string& L = fl.lines[static_cast<std::size_t>(i)];
+    if (L.find_first_not_of(" \t") == std::string::npos) {
+      continue;
+    }
+    if (looks_like_doc_comment(L)) {
+      return trim_hint(L, 140);
+    }
+    // Stop at first non-comment code above the def (other than blank).
+    break;
+  }
+  return {};
+}
+
+std::string extract_snippet(const FileLinesCache& fl, int line, int max_lines) {
+  if (line <= 0 || fl.lines.size() <= 1) {
+    return {};
+  }
+  std::ostringstream out;
+  int taken = 0;
+  for (int i = line; static_cast<std::size_t>(i) < fl.lines.size() && taken < max_lines; ++i) {
+    const std::string& L = fl.lines[static_cast<std::size_t>(i)];
+    if (taken > 0 && L.find_first_not_of(" \t") == std::string::npos) {
+      break;
+    }
+    if (taken) {
+      out << '\n';
+    }
+    out << trim_hint(L, 120);
+    ++taken;
+  }
+  return out.str();
+}
+
+std::string snippet_from_body(const std::string& body, int max_lines) {
+  if (body.empty()) {
+    return {};
+  }
+  std::istringstream iss(body);
+  std::string line;
+  std::ostringstream out;
+  int taken = 0;
+  while (std::getline(iss, line) && taken < max_lines) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    if (taken > 0 && line.find_first_not_of(" \t") == std::string::npos) {
+      break;
+    }
+    if (taken) {
+      out << '\n';
+    }
+    out << trim_hint(line, 120);
+    ++taken;
+  }
+  return out.str();
+}
+
+}  // namespace
+
+std::string format_entry_hints_line(const RepoMapEntry& e) {
+  std::ostringstream why;
+  why << "why:";
+  bool any = false;
+  auto add = [&](const std::string& part) {
+    if (part.empty()) {
+      return;
+    }
+    why << (any ? " · " : " ") << part;
+    any = true;
+  };
+
+  {
+    std::string sc = "base=" + std::to_string(e.score_base);
+    char buf[32];
+    if (e.sig_cos >= 0.0f) {
+      std::snprintf(buf, sizeof(buf), " sig=%.2f", static_cast<double>(e.sig_cos));
+      sc += buf;
+    }
+    if (e.body_cos >= 0.0f) {
+      std::snprintf(buf, sizeof(buf), " body=%.2f", static_cast<double>(e.body_cos));
+      sc += buf;
+    }
+    add(sc);
+  }
+  if (!e.stem.empty()) {
+    std::string s = "stem=" + e.stem;
+    if (e.stem_sem_rank > 0) {
+      s += "#" + std::to_string(e.stem_sem_rank);
+    }
+    if (e.dup_stem) {
+      s += " dup_stem";
+    }
+    add(s);
+  }
+  if (e.file_rank > 0 && e.file_count > 0) {
+    add("file_rank=" + std::to_string(e.file_rank) + "/" + std::to_string(e.file_count));
+  }
+  if (e.refs_in > 0) {
+    add("refs≈" + std::to_string(e.refs_in));
+  }
+  if (!e.related_names.empty()) {
+    std::string r = "related=";
+    for (std::size_t i = 0; i < e.related_names.size(); ++i) {
+      if (i) {
+        r += ',';
+      }
+      r += e.related_names[i];
+    }
+    add(r);
+  }
+  if (!e.role_hint.empty()) {
+    add("role=" + e.role_hint);
+  }
+  if (!any) {
+    return {};
+  }
+  return why.str();
+}
+
+namespace {
+
+std::string ascii_lower_hint(std::string s) {
+  for (char& c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
+bool query_has_any(const std::string& q, std::initializer_list<const char*> words) {
+  for (const char* w : words) {
+    if (q.find(w) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string path_stem_hint(const std::string& file) {
+  if (file.empty()) {
+    return {};
+  }
+  std::string base = file;
+  const auto slash = base.find_last_of("/\\");
+  if (slash != std::string::npos) {
+    base = base.substr(slash + 1);
+  }
+  const auto dot = base.find_last_of('.');
+  if (dot != std::string::npos && dot > 0) {
+    base = base.substr(0, dot);
+  }
+  return base;
+}
+
+bool ends_with_ci(const std::string& s, const char* suf) {
+  const std::string lower = ascii_lower_hint(s);
+  const std::string suffix = ascii_lower_hint(suf);
+  return lower.size() >= suffix.size() &&
+         lower.compare(lower.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+}  // namespace
+
+void apply_ranked_map_priors(const std::string& query, std::vector<RepoMapEntry>* entries,
+                             CodingStemEmbedIndex* stem_index, EmbeddingBackend* embed) {
+  if (entries == nullptr || entries->empty()) {
+    return;
+  }
+  const std::string q = ascii_lower_hint(query);
+  const bool wants_ui_wake =
+      query_has_any(q, {"wake", "repaint", "actualizar", "refresh", "dirty", "invalidat"}) &&
+      query_has_any(q, {"ui", "panel", "console", "terminal", "pty", "texto", "salida", "output",
+                        "stream", "saca"});
+  const bool wants_pty_out =
+      query_has_any(q, {"pty", "terminal"}) &&
+      query_has_any(q, {"texto", "salida", "output", "saca", "bytes", "stream", "repaint", "wake",
+                        "gestion", "gestión"});
+  const bool mentions_ai =
+      query_has_any(q, {" ai", "ia ", "agent", "llm", "nivel 1", "level1", "embed"});
+
+  std::unordered_map<std::string, int> stem_sem_rank;
+  if (stem_index != nullptr && stem_index->ready() && embed != nullptr && embed->ready() &&
+      !query.empty()) {
+    std::vector<float> qvec;
+    std::string err;
+    if (stem_index->embed_query_vec(query, embed, {}, &qvec, &err) && !qvec.empty()) {
+      const auto top = stem_index->top_k(qvec, 16);
+      for (std::size_t i = 0; i < top.size(); ++i) {
+        stem_sem_rank[top[i].first] = static_cast<int>(i + 1);
+      }
+    }
+  }
+
+  // Prefer .cpp definition over .hpp declaration for the same symbol name.
+  std::unordered_map<std::string, int> name_cpp_count;
+  std::unordered_map<std::string, int> name_hpp_count;
+  for (const auto& e : *entries) {
+    if (e.name.empty()) {
+      continue;
+    }
+    if (ends_with_ci(e.file, ".cpp") || ends_with_ci(e.file, ".cc") || ends_with_ci(e.file, ".cxx")) {
+      ++name_cpp_count[e.name];
+    } else if (ends_with_ci(e.file, ".hpp") || ends_with_ci(e.file, ".h") ||
+               ends_with_ci(e.file, ".hh")) {
+      ++name_hpp_count[e.name];
+    }
+  }
+
+  for (auto& e : *entries) {
+    const std::string name_l = ascii_lower_hint(e.name);
+    const std::string file_l = ascii_lower_hint(e.file);
+    const std::string stem = path_stem_hint(e.file);
+    int delta = 0;
+    std::string role;
+
+    const bool is_tool_script =
+        (file_l.find("tools/") != std::string::npos || file_l.find("/tools/") != std::string::npos) &&
+        (ends_with_ci(e.file, ".sh") || ends_with_ci(e.file, ".py") || name_l.find("check_") == 0);
+    const bool is_fd_wake =
+        name_l.find("wake_fd") != std::string::npos || name_l.find("drain_wake") != std::string::npos ||
+        name_l.find("signal_reader_wake") != std::string::npos ||
+        name_l.find("ensure_wake_fd") != std::string::npos ||
+        (name_l.find("wake") != std::string::npos && file_l.find("session") != std::string::npos &&
+         (name_l.find("_fd") != std::string::npos || name_l.find("reader") != std::string::npos));
+    const bool is_host_nudge =
+        name_l.find("nudge_terminal_repaint") != std::string::npos ||
+        (name_l.find("nudge") != std::string::npos && name_l.find("repaint") != std::string::npos);
+    const bool is_input_dir =
+        name_l.find("event_to_pty") != std::string::npos || name_l.find("pty_input") != std::string::npos ||
+        name_l.find("looks_like_terminal_mouse") != std::string::npos ||
+        (name_l.find("input_active") != std::string::npos && name_l.find("filter") == std::string::npos);
+    const bool is_ai_wake =
+        (name_l == "wake" || name_l.rfind("::wake") != std::string::npos) &&
+        (file_l.find("ai_controller") != std::string::npos || file_l.find("/ai/") != std::string::npos);
+    const bool is_bridge =
+        name_l.find("request_terminal_repaint") != std::string::npos ||
+        name_l.find("on_pty_output") != std::string::npos ||
+        name_l.find("tick_terminal_shell") != std::string::npos;
+    const bool is_ui_wake =
+        name_l.find("wake_console") != std::string::npos || name_l == "ui_wake" ||
+        name_l.find("wake_console_panel") != std::string::npos ||
+        name_l.find("emit_terminal") != std::string::npos ||
+        name_l.find("ui_wake_correlated") != std::string::npos;
+    const bool is_pty_out =
+        name_l.find("on_pty_bytes") != std::string::npos ||
+        name_l.find("feed_pty_bytes") != std::string::npos ||
+        name_l.find("pty_output") != std::string::npos;
+
+    if (is_tool_script) {
+      delta -= 2'500'000;
+      role = "tool";
+    } else if (is_fd_wake && wants_ui_wake) {
+      delta -= 2'000'000;
+      role = "fd-wake";
+    } else if (is_host_nudge && (wants_ui_wake || wants_pty_out)) {
+      delta -= 1'800'000;
+      role = "host-nudge";
+    } else if (is_ai_wake && !mentions_ai) {
+      delta -= 1'600'000;
+      role = "ai-wake";
+    } else if (is_input_dir && wants_pty_out) {
+      delta -= 1'200'000;
+      role = "input";
+    } else if (is_bridge) {
+      delta += 1'500'000;
+      role = "bridge";
+    } else if (is_ui_wake && (wants_ui_wake || wants_pty_out)) {
+      delta += 1'200'000;
+      role = "ui-wake";
+    } else if (is_pty_out && wants_pty_out) {
+      delta += 1'200'000;
+      role = "pty-out";
+    }
+
+    if (!name_l.empty() && name_hpp_count[e.name] > 0 && name_cpp_count[e.name] > 0) {
+      if (ends_with_ci(e.file, ".hpp") || ends_with_ci(e.file, ".h") || ends_with_ci(e.file, ".hh")) {
+        delta -= 80'000;
+      } else if (ends_with_ci(e.file, ".cpp") || ends_with_ci(e.file, ".cc")) {
+        delta += 120'000;
+      }
+    }
+
+    if (!stem.empty()) {
+      auto it = stem_sem_rank.find(stem);
+      if (it != stem_sem_rank.end()) {
+        // Higher boost for better stem ranks (#1 → +900k … #16 → +50k).
+        delta += 950'000 - (it->second - 1) * 60'000;
+        e.stem_sem_rank = it->second;
+        if (role.empty()) {
+          role = "stem-hit";
+        }
+      }
+    }
+
+    e.score += delta;
+    if (!role.empty()) {
+      e.role_hint = role;
+    }
+  }
+
+  std::stable_sort(entries->begin(), entries->end(),
+                   [](const RepoMapEntry& a, const RepoMapEntry& b) {
+                     if (a.score != b.score) {
+                       return a.score > b.score;
+                     }
+                     if (a.file != b.file) {
+                       return a.file < b.file;
+                     }
+                     return a.line < b.line;
+                   });
+}
+
+void enrich_ranked_map_hints(std::vector<RepoMapEntry>* entries, const std::string& workspace_root,
+                             const std::string& query, const SymbolIndexSnapshot* snapshot,
+                             CodingStemEmbedIndex* stem_index, EmbeddingBackend* embed,
+                             const std::vector<std::string>* body_texts,
+                             std::size_t snippet_top_n) {
+  if (entries == nullptr || entries->empty()) {
+    return;
+  }
+
+  std::unordered_map<std::string, int> ref_count;
+  std::unordered_map<std::string, std::vector<std::pair<std::string, int>>> refs_by_file;
+  if (snapshot != nullptr) {
+    for (const auto& r : snapshot->refs) {
+      if (r.name.empty()) {
+        continue;
+      }
+      ref_count[r.name] += std::max(1, r.count);
+      if (!r.file.empty()) {
+        refs_by_file[r.file].push_back({r.name, std::max(1, r.count)});
+      }
+    }
+  }
+
+  std::unordered_map<std::string, int> stem_sem;
+  if (stem_index != nullptr && stem_index->ready() && embed != nullptr && embed->ready() &&
+      !query.empty()) {
+    std::vector<float> qvec;
+    std::string err;
+    if (stem_index->embed_query_vec(query, embed, {}, &qvec, &err) && !qvec.empty()) {
+      const auto top = stem_index->top_k(qvec, 16);
+      for (std::size_t i = 0; i < top.size(); ++i) {
+        stem_sem[top[i].first] = static_cast<int>(i + 1);
+      }
+    }
+  }
+
+  std::unordered_map<std::string, int> file_totals;
+  std::unordered_map<std::string, int> file_seen;
+  std::unordered_map<std::string, std::vector<std::string>> stem_files;
+  for (const auto& e : *entries) {
+    ++file_totals[e.file];
+    const std::string st = file_stem_of(e.file);
+    if (!st.empty()) {
+      auto& paths = stem_files[st];
+      bool found = false;
+      for (const auto& p : paths) {
+        if (p == e.file) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        paths.push_back(e.file);
+      }
+    }
+  }
+
+  namespace fs = std::filesystem;
+  std::unordered_map<std::string, FileLinesCache> file_cache;
+
+  for (std::size_t idx = 0; idx < entries->size(); ++idx) {
+    auto& e = (*entries)[idx];
+    e.stem = file_stem_of(e.file);
+    if (!e.stem.empty()) {
+      auto it = stem_sem.find(e.stem);
+      if (it != stem_sem.end()) {
+        e.stem_sem_rank = it->second;
+      }
+      auto sf = stem_files.find(e.stem);
+      e.dup_stem = sf != stem_files.end() && sf->second.size() > 1;
+    }
+    e.file_count = file_totals[e.file];
+    e.file_rank = ++file_seen[e.file];
+    if (!e.name.empty()) {
+      auto rc = ref_count.find(e.name);
+      if (rc != ref_count.end()) {
+        e.refs_in = rc->second;
+      }
+    }
+    e.related_names.clear();
+    auto rf = refs_by_file.find(e.file);
+    if (rf != refs_by_file.end()) {
+      auto names = rf->second;
+      std::stable_sort(names.begin(), names.end(),
+                       [](const auto& a, const auto& b) { return a.second > b.second; });
+      for (const auto& kv : names) {
+        if (kv.first == e.name) {
+          continue;
+        }
+        bool seen = false;
+        for (const auto& n : e.related_names) {
+          if (n == kv.first) {
+            seen = true;
+            break;
+          }
+        }
+        if (seen) {
+          continue;
+        }
+        e.related_names.push_back(kv.first);
+        if (e.related_names.size() >= 3) {
+          break;
+        }
+      }
+    }
+
+    const bool want_snippet = idx < snippet_top_n;
+    if ((want_snippet || e.doc_line.empty()) && !workspace_root.empty() && !e.file.empty()) {
+      fs::path abs = fs::path(e.file);
+      if (!abs.is_absolute()) {
+        abs = fs::path(workspace_root) / e.file;
+      }
+      const auto& fl = load_file_lines(&file_cache, abs.lexically_normal().string());
+      if (e.doc_line.empty()) {
+        e.doc_line = extract_doc_near(fl, e.line);
+      }
+      if (want_snippet && e.snippet.empty()) {
+        if (body_texts != nullptr && idx < body_texts->size() && !(*body_texts)[idx].empty()) {
+          e.snippet = snippet_from_body((*body_texts)[idx], 5);
+        } else {
+          e.snippet = extract_snippet(fl, e.line, 5);
+        }
+      }
+    }
+  }
+}
+
 std::string format_ranked_map_answer(const std::vector<RepoMapEntry>& entries, std::size_t max_n,
                                      const std::string& note) {
   std::ostringstream out;
@@ -846,6 +1387,7 @@ std::string format_ranked_map_answer(const std::vector<RepoMapEntry>& entries, s
     if (e.line > 0) {
       out << ':' << e.line;
     }
+    out << "  [" << kind_label_short(e.kind) << "]";
     out << "  [score=" << e.score << "]\n";
     out << "    ";
     if (!e.signature.empty()) {
@@ -854,6 +1396,20 @@ std::string format_ranked_map_answer(const std::vector<RepoMapEntry>& entries, s
       out << kind_label_short(e.kind) << ' ' << e.name;
     }
     out << '\n';
+    const std::string why = format_entry_hints_line(e);
+    if (!why.empty()) {
+      out << "    " << why << '\n';
+    }
+    if (!e.doc_line.empty()) {
+      out << "    doc: " << e.doc_line << '\n';
+    }
+    if (!e.snippet.empty() && shown <= 12) {
+      std::istringstream sn(e.snippet);
+      std::string sl;
+      while (std::getline(sn, sl)) {
+        out << "    | " << sl << '\n';
+      }
+    }
   }
   if (shown == 0) {
     out << "(sin firmas útiles)\n";

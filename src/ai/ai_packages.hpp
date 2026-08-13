@@ -41,6 +41,8 @@ AiPackageInstallStatus ai_package_status(const std::string& id, const AiSettings
 std::string first_missing_ai_package_for_embed(const AiSettings& settings);
 // First missing dependency for L1 agent (model + runtime).
 std::string first_missing_ai_package_for_l1(const AiSettings& settings);
+// First missing dependency for L2 local coder (model + runtime).
+std::string first_missing_ai_package_for_l2(const AiSettings& settings);
 
 // Force-download the pack (and runtime if needed). Safe to call from a worker thread.
 AiPackageInstallResult install_ai_package(const std::string& id, const AiSettings& settings,

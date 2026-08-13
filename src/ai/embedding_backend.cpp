@@ -411,7 +411,18 @@ bool http_recv_response(int fd, std::string* response, std::string* error) {
   }
   if (status < 200 || status >= 300) {
     if (error) {
-      *error = "HTTP embeddings status " + std::to_string(status);
+      std::string detail = resp_body;
+      if (detail.size() > 240) {
+        detail.resize(240);
+        detail += "…";
+      }
+      for (char& ch : detail) {
+        if (ch == '\n' || ch == '\r') {
+          ch = ' ';
+        }
+      }
+      *error = "HTTP embeddings status " + std::to_string(status) +
+               (detail.empty() ? std::string() : (": " + detail));
     }
     return false;
   }
@@ -594,7 +605,18 @@ bool EmbeddingBackend::http_exchange_unlocked(const std::string& method, const s
   }
   if (status < 200 || status >= 300) {
     if (error) {
-      *error = "HTTP embeddings status " + std::to_string(status);
+      std::string detail = resp_body;
+      if (detail.size() > 240) {
+        detail.resize(240);
+        detail += "…";
+      }
+      for (char& ch : detail) {
+        if (ch == '\n' || ch == '\r') {
+          ch = ' ';
+        }
+      }
+      *error = "HTTP embeddings status " + std::to_string(status) +
+               (detail.empty() ? std::string() : (": " + detail));
     }
     return false;
   }
@@ -916,6 +938,15 @@ bool EmbeddingBackend::ensure_ready(const AiSettings& settings, const ProgressFn
   http_batch_ = settings.level0.embeddings.http_batch > 0 ? settings.level0.embeddings.http_batch
                                                           : kEmbedBatchChunkDefault;
   n_parallel_ = settings.level0.embeddings.n_parallel > 0 ? settings.level0.embeddings.n_parallel : 8;
+  n_ctx_ = settings.level0.embeddings.n_ctx > 0 ? settings.level0.embeddings.n_ctx : 1024;
+  // llama-server splits KV across slots: each input must fit in n_ctx/n_parallel tokens.
+  // ~3 chars/token is conservative for code identifiers; leave room for task prefix.
+  {
+    const int slots = std::max(1, n_parallel_);
+    const int slot_tokens = std::max(32, n_ctx_ / slots);
+    const int usable = std::max(24, slot_tokens - 16);
+    max_embed_chars_ = static_cast<std::size_t>(usable) * 3u;
+  }
 
   // Resolve model path early so stamp matches reuse checks.
   AiModelInfo info = default_intent_embed_model();
@@ -1055,13 +1086,18 @@ bool EmbeddingBackend::embed_many_raw(const std::vector<std::string>& texts,
   out->assign(texts.size(), {});
   const std::size_t chunk_n =
       http_batch_ > 0 ? static_cast<std::size_t>(http_batch_) : static_cast<std::size_t>(kEmbedBatchChunkDefault);
+  const std::size_t max_chars = max_embed_chars_ > 0 ? max_embed_chars_ : 400;
 
   // One keep-alive connection, large batches. Parallel HTTP clients contend on llama-server.
   for (std::size_t base = 0; base < texts.size(); base += chunk_n) {
     const std::size_t n = std::min(chunk_n, texts.size() - base);
     nlohmann::json arr = nlohmann::json::array();
     for (std::size_t i = 0; i < n; ++i) {
-      arr.push_back(texts[base + i]);
+      std::string t = texts[base + i];
+      if (t.size() > max_chars) {
+        t.resize(max_chars);
+      }
+      arr.push_back(std::move(t));
     }
     const std::string payload = nlohmann::json{{"input", std::move(arr)}}.dump();
 

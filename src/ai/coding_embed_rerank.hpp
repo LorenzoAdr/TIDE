@@ -8,6 +8,7 @@
 namespace tuide {
 
 struct RepoMapEntry;
+struct SymbolIndexSnapshot;
 class EmbeddingBackend;
 class CodingStemEmbedIndex;
 
@@ -110,6 +111,25 @@ TwoStageRerankResult rerank_map_two_stage(std::vector<RepoMapEntry> candidates,
                                           const TwoStageRerankOptions& opts,
                                           EmbeddingBackend* backend,
                                           const CodingEmbedFn& test_embed = {});
+
+// Fill medium/low-priority L2 hints (stem, doc, refs, diversity, snippet, …).
+// snapshot/stem_index/embed optional; snippet_top_n caps expensive body/file reads.
+void enrich_ranked_map_hints(std::vector<RepoMapEntry>* entries,
+                             const std::string& workspace_root, const std::string& query,
+                             const SymbolIndexSnapshot* snapshot = nullptr,
+                             CodingStemEmbedIndex* stem_index = nullptr,
+                             EmbeddingBackend* embed = nullptr,
+                             const std::vector<std::string>* body_texts = nullptr,
+                             std::size_t snippet_top_n = 40);
+
+// Soft re-score for L2: demote wake_fd / host-nudge / input-direction / tools noise;
+// boost PTY-output→UI bridge; optional stem-index recall. Re-sorts by score.
+void apply_ranked_map_priors(const std::string& query, std::vector<RepoMapEntry>* entries,
+                             CodingStemEmbedIndex* stem_index = nullptr,
+                             EmbeddingBackend* embed = nullptr);
+
+// Compact one-line "why" for map dump / transcript.
+std::string format_entry_hints_line(const RepoMapEntry& e);
 
 // Human-readable ranked list for investigate / L1 fallback.
 std::string format_ranked_map_answer(const std::vector<RepoMapEntry>& entries,

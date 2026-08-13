@@ -97,6 +97,40 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
     if (level2.contains("mode") && level2["mode"].is_string()) {
       settings->level2_mode = level2["mode"].get<std::string>();
     }
+    auto& l2 = settings->level2;
+    if (level2.contains("model_id") && level2["model_id"].is_string()) {
+      l2.model_id = level2["model_id"].get<std::string>();
+    }
+    if (level2.contains("model_path") && level2["model_path"].is_string()) {
+      l2.model_path = level2["model_path"].get<std::string>();
+    }
+    if (level2.contains("cli_path") && level2["cli_path"].is_string()) {
+      l2.cli_path = level2["cli_path"].get<std::string>();
+    }
+    if (level2.contains("api_base") && level2["api_base"].is_string()) {
+      l2.api_base = level2["api_base"].get<std::string>();
+    }
+    if (level2.contains("api_key") && level2["api_key"].is_string()) {
+      l2.api_key = level2["api_key"].get<std::string>();
+    }
+    if (level2.contains("api_model") && level2["api_model"].is_string()) {
+      l2.api_model = level2["api_model"].get<std::string>();
+    }
+    if (level2.contains("max_steps") && level2["max_steps"].is_number_integer()) {
+      l2.max_steps = level2["max_steps"].get<int>();
+    }
+    if (level2.contains("max_tokens") && level2["max_tokens"].is_number_integer()) {
+      l2.max_tokens = level2["max_tokens"].get<int>();
+    }
+    if (level2.contains("n_ctx") && level2["n_ctx"].is_number_integer()) {
+      l2.n_ctx = level2["n_ctx"].get<int>();
+    }
+    if (level2.contains("temperature") && level2["temperature"].is_number()) {
+      l2.temperature = level2["temperature"].get<float>();
+    }
+    if (level2.contains("auto_download") && level2["auto_download"].is_boolean()) {
+      l2.auto_download = level2["auto_download"].get<bool>();
+    }
   } else if (doc.contains("level2_mode") && doc["level2_mode"].is_string()) {
     settings->level2_mode = doc["level2_mode"].get<std::string>();
   }
@@ -201,7 +235,19 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
       {"enabled", settings.enabled},
       {"command_whitelist", settings.command_whitelist},
       {"tasks", std::move(tasks)},
-      {"level2", {{"mode", settings.level2_mode}}},
+      {"level2",
+       {{"mode", settings.level2_mode},
+        {"model_id", settings.level2.model_id},
+        {"model_path", settings.level2.model_path},
+        {"cli_path", settings.level2.cli_path},
+        {"api_base", settings.level2.api_base},
+        {"api_key", settings.level2.api_key},
+        {"api_model", settings.level2.api_model},
+        {"max_steps", settings.level2.max_steps},
+        {"max_tokens", settings.level2.max_tokens},
+        {"n_ctx", settings.level2.n_ctx},
+        {"temperature", settings.level2.temperature},
+        {"auto_download", settings.level2.auto_download}}},
       {"models", {{"cache_dir", settings.models_cache_dir}}},
       {"trace",
        {{"enabled", settings.trace_enabled}, {"path", settings.trace_path}}},

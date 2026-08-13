@@ -45,6 +45,7 @@ enum class AiRouteKind {
   Trace,
   Help,
   Error,
+  Level2Harness,
 };
 
 struct AiRouteResult {
@@ -99,12 +100,30 @@ struct AiLevel1Settings {
   bool auto_download = false;
 };
 
+// Fase E — coder L2 (local GGUF via llama-cli, or OpenAI-compatible remote).
+struct AiLevel2Settings {
+  // dry_run | harness | local | remote  (mirrors AiSettings::level2_mode; kept in sync on load)
+  std::string model_id = "qwen2.5-coder-7b-instruct-q4_k_m";
+  std::string model_path;  // empty → ModelStore cache/l2/
+  std::string cli_path;    // empty → same runtime as L1
+  // Remote (mode=remote): OpenAI-compatible chat completions.
+  std::string api_base = "http://127.0.0.1:8080/v1";
+  std::string api_key;     // or env TUIDE_L2_API_KEY
+  std::string api_model = "qwen2.5-coder-7b-instruct";
+  int max_steps = 32;
+  int max_tokens = 2048;
+  int n_ctx = 8192;
+  float temperature = 0.1f;
+  bool auto_download = false;
+};
+
 struct AiSettings {
   bool enabled = true;
   std::vector<std::string> command_whitelist = {"compile", "launch"};
   // Named tasks: name -> argv string (shell-tokenized).
   std::vector<std::pair<std::string, std::string>> tasks;
-  std::string level2_mode = "dry_run";
+  std::string level2_mode = "dry_run";  // dry_run | harness | local | remote
+  AiLevel2Settings level2;
   std::string models_cache_dir;
   // Official AI level trace → <workspace>/.tuide/ai/trace.ndjson
   bool trace_enabled = true;

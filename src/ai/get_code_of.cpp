@@ -605,6 +605,22 @@ std::string dump_ranked_map_md(const RankedMapDumpOptions& opts, std::string* er
     if (!e.signature.empty()) {
       md << "    `" << e.signature << "`\n";
     }
+    const std::string why = format_entry_hints_line(e);
+    if (!why.empty()) {
+      md << "    " << why << '\n';
+    }
+    if (!e.doc_line.empty()) {
+      md << "    doc: " << e.doc_line << '\n';
+    }
+    if (!e.snippet.empty()) {
+      md << "    ```\n";
+      std::istringstream sn(e.snippet);
+      std::string sl;
+      while (std::getline(sn, sl)) {
+        md << "    " << sl << '\n';
+      }
+      md << "    ```\n";
+    }
   }
   if (shown == 0) {
     md << "(vacío)\n";

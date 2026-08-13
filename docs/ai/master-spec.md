@@ -483,22 +483,23 @@ Objetivo: validar el payload hacia L2 **antes** de descargar Coder-7B (~4.5 GB) 
 
 Cuando L1 decide `needs_level2` (o `/l2`):
 
-1. L1 ensambla instrucción + `ContextPack` (+ restricciones Search/Replace).
-2. Vuelca el payload al tab AI (y opcional dump `.tuide/ai/dry-run/`).
-3. Usuario audita fragments/seeds/instrucción.
-4. `ai.level2.mode = dry_run` por defecto hasta Fase E.
+1. L1 ensambla instrucción + mapa rankeado (`map_last.md`) sin bodies.
+2. Con `ai.level2.mode = dry_run` (default): auditar mapa en tab AI / `.tuide/ai/map_last.md`.
+3. Con `ai.level2.mode = harness`: bootstrap de `.tuide/ai/l2/session.md` (tool guide + instruction + mapa + observations). Un agente Cursor escribe `request.json`; tuide ejecuta `/l2_turn` / `/l2_tool` y acumula observaciones (trim de las más antiguas). Ver `docs/ai/l2-harness-prompt.md` y `tools/l2_harness.sh`.
+4. `edit` / coder real quedan para Fase E (`local` | `remote`).
 
-**Done:** dry-runs revisados en casos reales sin peso L2.
+**Done:** dry-runs / harness revisados en casos reales sin peso L2.
 
 ### Fase E — Nivel 2 real
 
 1. Backend L2: **Qwen2.5-Coder-7B-Instruct** Q4 (o Coder-1.5B) **y/o** API remota (D3, D7, D18).
-2. `ai.level2.mode = local | remote` (dry_run sigue como debug).
-3. Parser Search/Replace (D12) → apply + journal `Level2_AI`.
-4. Autofix acotado: build whitelisted + ≤3 reintentos + rollback.
-5. Myers opcional (worker).
+2. `ai.level2.mode = local | remote` (dry_run / harness siguen como debug).
+3. Parser Search/Replace (D12) → apply + journal `Level2_AI` — **implementado**.
+4. Autofix acotado: compile post-edit + ≤3 reintentos + rollback + feedback old/new — **implementado**.
+5. Loop autónomo + streaming de fases al tab AI — **implementado** (`run_level2_autonomous`, `/l2_run`). Ver `docs/ai/l2-autonomous.md`.
+6. Myers opcional (worker) — pendiente.
 
-**Done:** hunks validados; dry-run disponible.
+**Done (código):** cerebros `LocalL2Brain` / `RemoteL2Brain`, paquete `ai-l2`, config `ai.level2.*`. Validar en máquina con RAM/GPU o API remote.
 
 ### Fase F — RAG (roadmap, no bloquea E)
 

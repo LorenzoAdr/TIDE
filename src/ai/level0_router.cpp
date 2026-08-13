@@ -783,9 +783,16 @@ AiRouteResult route_level0(const std::string& raw_input, const std::string& prev
         r.arg = "embed";
         return r;
       }
+      if (to_lower(arg) == "download_l2" || to_lower(arg) == "l2" || to_lower(arg) == "coder") {
+        AiRouteResult r;
+        r.kind = AiRouteKind::ModelDownload;
+        r.arg = "l2";
+        return r;
+      }
       AiRouteResult r;
       r.kind = AiRouteKind::Error;
-      r.message = "uso: /model [status|download|download_runtime|download_embed]";
+      r.message =
+          "uso: /model [status|download|download_runtime|download_embed|download_l2]";
       return r;
     }
     if (cmd == "trace") {
@@ -801,7 +808,45 @@ AiRouteResult route_level0(const std::string& raw_input, const std::string& prev
       return r;
     }
     if (cmd == "l2") {
-      return escalate("L2 coder: usa L1 (needs_level2) o /l1; dry-run hasta Fase E");
+      AiRouteResult r;
+      r.kind = AiRouteKind::Level2Harness;
+      r.arg = arg.empty() ? std::string("status") : arg;
+      return r;
+    }
+    if (cmd == "l2_session" || cmd == "l2session") {
+      AiRouteResult r;
+      r.kind = AiRouteKind::Level2Harness;
+      r.arg = arg.empty() ? std::string("status") : arg;
+      return r;
+    }
+    if (cmd == "l2_turn" || cmd == "l2turn") {
+      AiRouteResult r;
+      r.kind = AiRouteKind::Level2Harness;
+      r.arg = "turn";
+      return r;
+    }
+    if (cmd == "l2_tool" || cmd == "l2tool") {
+      AiRouteResult r;
+      r.kind = AiRouteKind::Level2Harness;
+      if (arg.empty()) {
+        r.kind = AiRouteKind::Error;
+        r.message = "uso: /l2_tool <name> [arg…]";
+        return r;
+      }
+      r.arg = "tool " + arg;
+      return r;
+    }
+    if (cmd == "l2_done" || cmd == "l2done") {
+      AiRouteResult r;
+      r.kind = AiRouteKind::Level2Harness;
+      r.arg = arg.empty() ? std::string("done") : ("done " + arg);
+      return r;
+    }
+    if (cmd == "l2_run" || cmd == "l2run") {
+      AiRouteResult r;
+      r.kind = AiRouteKind::Level2Harness;
+      r.arg = arg.empty() ? std::string("run") : ("run " + arg);
+      return r;
     }
     AiRouteResult r;
     r.kind = AiRouteKind::Error;

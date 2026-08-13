@@ -17,7 +17,9 @@
 #include "ai/search_needles.hpp"
 #include "git/git_command.hpp"
 #include "git/git_log.hpp"
+#include "parser/tree_sitter_service.hpp"
 #include "search/workspace_search.hpp"
+#include "util/include_tree.hpp"
 
 namespace fs = std::filesystem;
 
@@ -116,6 +118,44 @@ bool path_inside_workspace(const std::string& root, const std::string& path) {
   const auto base = fs::path(root).lexically_normal();
   const auto rel = fs::relative(abs, base);
   return !rel.empty() && rel.native().rfind("..", 0) != 0;
+}
+
+const char* symbol_kind_short(SymbolKind kind) {
+  switch (kind) {
+    case SymbolKind::kNamespace:
+      return "ns";
+    case SymbolKind::kClass:
+      return "class";
+    case SymbolKind::kStruct:
+      return "struct";
+    case SymbolKind::kFunction:
+      return "fn";
+    case SymbolKind::kMethod:
+      return "method";
+    case SymbolKind::kVariable:
+      return "var";
+  }
+  return "?";
+}
+
+// Parse path:line:col (line 1-based in UI dumps; LSP params use 0-based line).
+bool parse_path_line_col(const std::string& root, const std::string& arg, std::string* abs_path,
+                         int* line1, int* col0) {
+  if (arg.empty() || abs_path == nullptr || line1 == nullptr || col0 == nullptr) {
+    return false;
+  }
+  const auto c2 = arg.rfind(':');
+  if (c2 == std::string::npos || c2 == 0) {
+    return false;
+  }
+  const auto c1 = arg.rfind(':', c2 - 1);
+  if (c1 == std::string::npos || c1 == 0) {
+    return false;
+  }
+  *abs_path = resolve_workspace_path(root, arg.substr(0, c1));
+  *line1 = std::atoi(arg.substr(c1 + 1, c2 - c1 - 1).c_str());
+  *col0 = std::atoi(arg.substr(c2 + 1).c_str());
+  return !abs_path->empty() && *line1 > 0;
 }
 
 }  // namespace
@@ -1217,6 +1257,193 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
             out << ' ' << n;
           }
           out << '\n';
+        }
+        return AiToolResult{true, out.str()};
+      });
+
+  registry->register_tool(
+      "file_outline",
+      "Outline Tree-sitter de un path (símbolos). Uso: file_outline <path>",
+      [ctx](const std::string& arg) {
+        const std::string trimmed = trim_copy(arg);
+        if (trimmed.empty()) {
+          return AiToolResult{false, "uso: file_outline <path>"};
+        }
+        const std::string abs = resolve_workspace_path(ctx.workspace_root, trimmed);
+        if (abs.empty() || !fs::exists(abs)) {
+          return AiToolResult{false, "no existe: " + trimmed};
+        }
+        std::ifstream in(abs);
+        if (!in) {
+          return AiToolResult{false, "no se pudo leer " + abs};
+        }
+        const std::string source((std::istreambuf_iterator<char>(in)),
+                                 std::istreambuf_iterator<char>());
+        const auto syms = TreeSitterService::instance().symbols_for_file(abs, source);
+        std::ostringstream out;
+        out << "outline: " << trimmed << "  symbols=" << syms.size() << '\n';
+        const int limit = std::min<int>(120, static_cast<int>(syms.size()));
+        for (int i = 0; i < limit; ++i) {
+          const auto& s = syms[static_cast<std::size_t>(i)];
+          for (int d = 0; d < s.depth && d < 8; ++d) {
+            out << "  ";
+          }
+          out << symbol_kind_short(s.kind) << ' ' << s.name;
+          if (s.line > 0) {
+            out << "  :" << s.line;
+            if (s.end_line > s.line) {
+              out << '-' << s.end_line;
+            }
+          }
+          out << '\n';
+        }
+        if (static_cast<int>(syms.size()) > limit) {
+          out << "… (" << (syms.size() - static_cast<std::size_t>(limit)) << " más)\n";
+        }
+        return AiToolResult{true, out.str()};
+      });
+
+  registry->register_tool(
+      "headers_of",
+      "Includes/headers relevantes de un path. Uso: headers_of <path>",
+      [ctx](const std::string& arg) {
+        const std::string trimmed = trim_copy(arg);
+        if (trimmed.empty()) {
+          return AiToolResult{false, "uso: headers_of <path>"};
+        }
+        const std::string abs = resolve_workspace_path(ctx.workspace_root, trimmed);
+        if (abs.empty() || !fs::exists(abs)) {
+          return AiToolResult{false, "no existe: " + trimmed};
+        }
+        std::vector<std::string> workspace_files;
+        if (ctx.indexer != nullptr) {
+          const auto snap = ctx.indexer->snapshot();
+          if (snap) {
+            workspace_files = snap->files;
+          }
+        }
+        const auto headers =
+            build_include_tree(abs, ctx.workspace_root, workspace_files, /*override*/ {});
+        std::ostringstream out;
+        out << "headers_of: " << trimmed << "  n=" << headers.size() << '\n';
+        int n = 0;
+        for (const auto& h : headers) {
+          if (h == abs) {
+            continue;
+          }
+          std::string rel = h;
+          if (!ctx.workspace_root.empty()) {
+            std::error_code ec;
+            const auto r = fs::relative(fs::path(h), fs::path(ctx.workspace_root), ec);
+            if (!ec && !r.empty() && r.native().rfind("..", 0) != 0) {
+              rel = r.generic_string();
+            }
+          }
+          out << "- " << rel << '\n';
+          const std::string preview = read_file_limited(h, 24);
+          if (!preview.empty()) {
+            std::istringstream iss(preview);
+            std::string line;
+            int shown = 0;
+            while (std::getline(iss, line) && shown < 8) {
+              if (line.find("#include") != std::string::npos || shown < 3) {
+                out << "    " << line << '\n';
+                ++shown;
+              }
+            }
+          }
+          if (++n >= 12) {
+            out << "…\n";
+            break;
+          }
+        }
+        if (n == 0) {
+          out << "(sin headers workspace alcanzables)\n";
+        }
+        return AiToolResult{true, out.str()};
+      });
+
+  registry->register_tool(
+      "definition",
+      "LSP goto definition. Uso: definition <path:line:col> (line 1-based, col 0-based)",
+      [ctx](const std::string& arg) {
+        if (!ctx.symbols) {
+          return AiToolResult{false, "sin ISymbolProvider"};
+        }
+        std::string abs;
+        int line1 = 0;
+        int col0 = 0;
+        if (!parse_path_line_col(ctx.workspace_root, trim_copy(arg), &abs, &line1, &col0)) {
+          return AiToolResult{false, "uso: definition <path:line:col>"};
+        }
+        if (!ctx.symbols->supports_navigation()) {
+          return AiToolResult{false, "navigation/LSP no disponible"};
+        }
+        NavigationParams params;
+        params.path = abs;
+        params.text = read_file_limited(abs, 20000);
+        params.line = std::max(0, line1 - 1);
+        params.character = std::max(0, col0);
+        const SourceLocation loc = ctx.symbols->goto_definition(params);
+        std::ostringstream out;
+        if (!loc.valid) {
+          out << "(sin definition)\n";
+          return AiToolResult{true, out.str()};
+        }
+        std::string rel = loc.path;
+        if (!ctx.workspace_root.empty()) {
+          std::error_code ec;
+          const auto r = fs::relative(fs::path(loc.path), fs::path(ctx.workspace_root), ec);
+          if (!ec && !r.empty() && r.native().rfind("..", 0) != 0) {
+            rel = r.generic_string();
+          }
+        }
+        out << rel << ':' << (loc.line + 1) << ':' << loc.character << '\n';
+        return AiToolResult{true, out.str()};
+      });
+
+  registry->register_tool(
+      "references",
+      "LSP find references. Uso: references <path:line:col> (line 1-based, col 0-based)",
+      [ctx](const std::string& arg) {
+        if (!ctx.symbols) {
+          return AiToolResult{false, "sin ISymbolProvider"};
+        }
+        std::string abs;
+        int line1 = 0;
+        int col0 = 0;
+        if (!parse_path_line_col(ctx.workspace_root, trim_copy(arg), &abs, &line1, &col0)) {
+          return AiToolResult{false, "uso: references <path:line:col>"};
+        }
+        if (!ctx.symbols->supports_references(abs)) {
+          return AiToolResult{false, "references/LSP no disponible para este path"};
+        }
+        NavigationParams params;
+        params.path = abs;
+        params.text = read_file_limited(abs, 20000);
+        params.line = std::max(0, line1 - 1);
+        params.character = std::max(0, col0);
+        const auto refs = ctx.symbols->find_references(params, true);
+        std::ostringstream out;
+        out << "references: " << refs.size() << '\n';
+        const int limit = std::min<int>(40, static_cast<int>(refs.size()));
+        for (int i = 0; i < limit; ++i) {
+          const auto& loc = refs[static_cast<std::size_t>(i)];
+          if (!loc.valid) {
+            continue;
+          }
+          std::string rel = loc.path;
+          if (!ctx.workspace_root.empty()) {
+            std::error_code ec;
+            const auto r = fs::relative(fs::path(loc.path), fs::path(ctx.workspace_root), ec);
+            if (!ec && !r.empty() && r.native().rfind("..", 0) != 0) {
+              rel = r.generic_string();
+            }
+          }
+          out << rel << ':' << (loc.line + 1) << ':' << loc.character << '\n';
+        }
+        if (refs.empty()) {
+          out << "(ninguna)\n";
         }
         return AiToolResult{true, out.str()};
       });

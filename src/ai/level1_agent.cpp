@@ -9,9 +9,11 @@
 #include <vector>
 
 #include "ai/ai_trace.hpp"
+#include "ai/coding_embed_rerank.hpp"
 #include "ai/coding_symbol_embed_index.hpp"
 #include "ai/embedding_backend.hpp"
 #include "ai/get_code_of.hpp"
+#include "ai/level1_action.hpp"
 #include "ai/repo_map.hpp"
 #include "ai/search_needles.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
@@ -522,10 +524,19 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
   RepoMapOptions map_opts;
   map_opts.query = user_message;
   map_opts.active_file = relative_active_file(deps_.workspace);
-  map_opts.max_symbols = 128;
-  map_opts.max_files = 32;
-  map_opts.max_chars = 9600;
-  map_opts.max_map_tokens = 2800;
+  // Context dump: L1 ranking is a weak prior — pass a wide catalog to L2.
+  // Investigate: still broader than before, but keep embed body cost bounded.
+  if (context_dump) {
+    map_opts.max_symbols = 400;
+    map_opts.max_files = 120;
+    map_opts.max_chars = 120000;
+    map_opts.max_map_tokens = 32000;
+  } else {
+    map_opts.max_symbols = 256;
+    map_opts.max_files = 80;
+    map_opts.max_chars = 48000;
+    map_opts.max_map_tokens = 12000;
+  }
   map_opts.prefer_git_tracked = true;
   map_opts.use_pagerank = true;
   if (deps_.workspace != nullptr) {
@@ -614,8 +625,8 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
       const bool l2_active = deps_.settings.level2_mode != "dry_run";
 
-      // Lexical shortlist only (map already capped ~96). Embed signatures + top bodies
-      // at query time — no full-corpus CodingSymbolEmbedIndex.
+      // Lexical shortlist from the (now wider) map. Embed reorders; do not cut hard —
+      // L2 discerns. Context: signatures only + large final list. Investigate: light body pass.
       std::vector<RepoMapEntry> candidates = m.entries;
       if (log) {
         log("L1 lexical shortlist: " + std::to_string(candidates.size()) +
@@ -626,13 +637,23 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
       rr_opts.query = user_message;
       rr_opts.needles = needles;
       rr_opts.workspace_root = root;
-      rr_opts.phase_a_pool = 128;
-      rr_opts.phase_a_top = 24;
-      rr_opts.final_top = 40;
-      rr_opts.max_per_file = 4;
-      rr_opts.fetch_bodies = true;
-      rr_opts.skip_phase_a = false;
-      rr_opts.body_max_lines = 80;
+      if (context_dump) {
+        rr_opts.phase_a_pool = 400;
+        rr_opts.phase_a_top = 280;
+        rr_opts.final_top = 280;
+        rr_opts.max_per_file = 14;
+        rr_opts.fetch_bodies = false;  // L2 lee cuerpos; ahorrar embed B
+        rr_opts.skip_phase_a = false;
+        rr_opts.body_max_lines = 80;
+      } else {
+        rr_opts.phase_a_pool = 256;
+        rr_opts.phase_a_top = 96;
+        rr_opts.final_top = 120;
+        rr_opts.max_per_file = 8;
+        rr_opts.fetch_bodies = true;
+        rr_opts.skip_phase_a = false;
+        rr_opts.body_max_lines = 80;
+      }
 
       if (log) {
         log("L1 two_stage rerank (lexical shortlist → embed firmas/cuerpos): candidatos=" +
@@ -645,8 +666,28 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
             " phase_b_ms=" + std::to_string(ranked.phase_b_ms) +
             " total_ms=" + std::to_string(ranked.total_ms) +
             " cand_in=" + std::to_string(ranked.candidates_in) +
-            " n=" + std::to_string(ranked.entries.size()) + " src=lexical_shortlist");
+            " n=" + std::to_string(ranked.entries.size()) +
+            " embed=" + (deps_.embed != nullptr && deps_.embed->ready() ? "1" : "0") +
+            " src=lexical_shortlist");
       }
+      apply_ranked_map_priors(user_message, &ranked.entries, deps_.coding_stem_index, deps_.embed);
+      if (!ranked.note.empty()) {
+        ranked.note += "; ";
+      }
+      ranked.note += "priors=1";
+
+      {
+        const SymbolIndexSnapshot* snap_ptr = nullptr;
+        std::shared_ptr<const SymbolIndexSnapshot> snap_keep;
+        if (deps_.symbol_indexer != nullptr) {
+          snap_keep = deps_.symbol_indexer->snapshot();
+          snap_ptr = snap_keep.get();
+        }
+        enrich_ranked_map_hints(&ranked.entries, root, user_message, snap_ptr,
+                                deps_.coding_stem_index, deps_.embed, &ranked.body_texts,
+                                context_dump ? 48 : 32);
+      }
+
       ai_trace(AiTraceChannel::L1, "l1_embed_phase_a",
                std::string("{\"used\":") + (ranked.used_phase_a ? "1" : "0") +
                    ",\"ms\":" + std::to_string(ranked.phase_a_ms) +
@@ -694,7 +735,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
         summary << " (falló escritura: " << err << ")";
       }
       summary << " (" << ranked.note << ")\n";
-      summary << format_ranked_map_answer(ranked.entries, 48, {});
+      summary << format_ranked_map_answer(ranked.entries, context_dump ? 120 : 64, {});
       out.final_text = summary.str();
 
       if (l2_active) {
@@ -705,11 +746,12 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
                 : "Localiza en el mapa rankeado dónde está la implementación pedida.";
         out.seeds = needles;
         if (out.seeds.empty()) {
+          const std::size_t seed_cap = context_dump ? 48 : 24;
           for (const auto& e : ranked.entries) {
             if (!e.name.empty()) {
               out.seeds.push_back(e.name);
             }
-            if (out.seeds.size() >= 16) {
+            if (out.seeds.size() >= seed_cap) {
               break;
             }
           }

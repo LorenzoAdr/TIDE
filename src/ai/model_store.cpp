@@ -122,6 +122,30 @@ AiModelInfo default_l1_model() {
   return info;
 }
 
+AiModelInfo default_l2_model() {
+  AiModelInfo info;
+  info.id = "qwen2.5-coder-7b-instruct-q4_k_m";
+  info.filename = "qwen2.5-coder-7b-instruct-q4_k_m.gguf";
+  info.url =
+      "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/"
+      "qwen2.5-coder-7b-instruct-q4_k_m.gguf";
+  info.license_note = "Apache-2.0 (Qwen2.5-Coder)";
+  info.approx_bytes = 4680000000ull;
+  return info;
+}
+
+AiModelInfo default_l2_model_small() {
+  AiModelInfo info;
+  info.id = "qwen2.5-coder-1.5b-instruct-q4_k_m";
+  info.filename = "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
+  info.url =
+      "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/"
+      "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
+  info.license_note = "Apache-2.0 (Qwen2.5-Coder)";
+  info.approx_bytes = 1100000000ull;
+  return info;
+}
+
 AiModelInfo default_intent_embed_model() {
   AiModelInfo info;
   // Converted for llama.cpp (not CrispEmbed). Multilingual enough for ES/EN intents.
@@ -406,6 +430,59 @@ std::string ModelStore::ensure_model(const AiModelInfo& info, bool auto_download
   return path;
 }
 
+std::string ModelStore::l2_model_path(const AiModelInfo& info) const {
+  return (fs::path(cache_dir_) / "l2" / info.filename).string();
+}
+
+std::string ModelStore::l2_model_path_for_id(const std::string& id) const {
+  if (id.empty() || id == default_l2_model().id) {
+    return l2_model_path(default_l2_model());
+  }
+  if (id == default_l2_model_small().id) {
+    return l2_model_path(default_l2_model_small());
+  }
+  std::string filename = id;
+  if (filename.find(".gguf") == std::string::npos) {
+    filename += ".gguf";
+  }
+  return (fs::path(cache_dir_) / "l2" / filename).string();
+}
+
+bool ModelStore::has_l2_model(const AiModelInfo& info) const {
+  std::error_code ec;
+  const auto p = l2_model_path(info);
+  return fs::is_regular_file(p, ec) && fs::file_size(p, ec) > 1024 * 1024;
+}
+
+std::string ModelStore::ensure_l2_model(const AiModelInfo& info, bool auto_download,
+                                        const ProgressFn& on_progress, std::string* error) const {
+  const std::string path = l2_model_path(info);
+  if (has_l2_model(info)) {
+    return path;
+  }
+  if (!auto_download) {
+    if (error) {
+      *error = "modelo L2 ausente: " + path + " (ai.level2.auto_download=false)";
+    }
+    return {};
+  }
+  if (info.url.empty()) {
+    if (error) {
+      *error = "modelo L2 sin URL de descarga: " + info.id;
+    }
+    return {};
+  }
+  if (on_progress) {
+    on_progress("ModelStore L2: falta " + info.filename + " (~" +
+                std::to_string(info.approx_bytes / (1024 * 1024)) + " MB, " + info.license_note +
+                ")");
+  }
+  if (!download_url_to_file(info.url, path, on_progress, error, info.approx_bytes)) {
+    return {};
+  }
+  return path;
+}
+
 std::string ModelStore::intent_embed_model_path(const AiModelInfo& info) const {
   return (fs::path(cache_dir_) / "embed" / "intent" / info.filename).string();
 }
@@ -629,8 +706,16 @@ std::string ModelStore::ensure_llama_bundle(const bool vulkan, const bool auto_d
       return {};
     }
   }
+  // Already have a working bundle (e.g. previous extract) — do not re-tar on a full disk.
+  if (has_llama_bundle(vulkan)) {
+    if (on_progress) {
+      on_progress("ok: " + llama_cli_path_for(vulkan));
+    }
+    return llama_cli_path_for(vulkan);
+  }
   if (on_progress) {
     on_progress("extrayendo bundle llama-cli + llama-server…");
+    on_progress("__pct__:90");
   }
   const std::string extract_cmd =
       "tar -xzf " + shell_quote(archive.string()) + " -C " + shell_quote(runtime_dir());
@@ -640,6 +725,9 @@ std::string ModelStore::ensure_llama_bundle(const bool vulkan, const bool auto_d
       *error = "extract failed: " + out;
     }
     return {};
+  }
+  if (on_progress) {
+    on_progress("__pct__:100");
   }
 
   const fs::path inner = fs::path(runtime_dir()) / (std::string("llama-") + kLlamaReleaseTag);

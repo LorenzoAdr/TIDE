@@ -19,6 +19,11 @@ struct AiModelInfo {
 // Default L1 (D9): Qwen2.5-1.5B-Instruct Q4_K_M (~1 GB, Apache-2.0).
 AiModelInfo default_l1_model();
 
+// Default L2 coder (Fase E): Qwen2.5-Coder-7B-Instruct Q4_K_M (~4.7 GB, Apache-2.0).
+AiModelInfo default_l2_model();
+// Smaller alternate for weaker machines (~1 GB).
+AiModelInfo default_l2_model_small();
+
 // L0 intent embeddings: multilingual-e5-small Q8_0 (~126 MB, MIT).
 AiModelInfo default_intent_embed_model();
 
@@ -38,6 +43,13 @@ class ModelStore {
   // Downloads GGUF if missing. Returns absolute path or empty + error.
   std::string ensure_model(const AiModelInfo& info, bool auto_download, const ProgressFn& on_progress,
                            std::string* error) const;
+
+  // L2 coder GGUF under cache/l2/.
+  std::string l2_model_path(const AiModelInfo& info) const;
+  std::string l2_model_path_for_id(const std::string& id) const;
+  bool has_l2_model(const AiModelInfo& info) const;
+  std::string ensure_l2_model(const AiModelInfo& info, bool auto_download,
+                              const ProgressFn& on_progress, std::string* error) const;
 
   // Intent embed GGUF under cache/embed/intent/.
   std::string intent_embed_model_path(const AiModelInfo& info) const;
