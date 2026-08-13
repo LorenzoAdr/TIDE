@@ -46,6 +46,9 @@ std::string build_system_prompt(const std::string& extra) {
          "{\"action\":\"done\",\"summary\":\"no encontré X; ¿concretas?\",\"next\":\"clarify\"}\n"
          "{\"action\":\"edit\",\"hunks\":[{\"path\":\"src/foo.cpp\",\"search\":\"exacto único\","
          "\"replace\":\"nuevo\"}]}\n"
+         "Fases: en explore SOLO tool|done (preferible done next=edit al cerrar). "
+         "action=edit es para phase=edit; si emites edit aún en explore el runtime "
+         "auto-promueve a edit y aplica. "
          "Reglas: next=edit solo con evidencia en Observations; search debe ser único en el "
          "archivo; no inventes paths; tras compile fail reemite edit corrigiendo.\n";
   out << Level2Session::tool_guide_markdown();
@@ -155,6 +158,23 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
            action.summary.substr(0, 120));
       tr = session.mark_done(opts.workspace_root, action.summary, action.next);
     } else if (action.kind == L2ActionKind::Edit) {
+      // Opción B: si el modelo salta done next=edit estando en explore, auto-promover.
+      if (phase == "explore") {
+        emit("L2 ▸ edit en explore → auto phase=edit (skip done next=edit)");
+        ai_trace(AiTraceChannel::L2, "l2_auto_phase_edit",
+                 "{\"step\":" + std::to_string(step) + ",\"reason\":\"edit_while_explore\"}");
+        const auto promo = session.mark_done(
+            opts.workspace_root,
+            "auto: modelo emitió edit en explore; promoviendo a phase=edit", "edit");
+        if (!promo.ok) {
+          emit("L2 ▸ auto phase=edit falló: " + promo.error);
+          result.steps = step;
+          result.phase = promo.phase.empty() ? phase : promo.phase;
+          result.error = promo.error;
+          continue;
+        }
+        phase = "edit";
+      }
       emit("L2 ▸ edit hunks=" + std::to_string(action.hunks.size()) + " (apply+compile)…");
       tr = session.apply_edit(opts.workspace_root, action.hunks);
       emit(std::string("L2 ▸ tras edit: phase=") + tr.phase + " ok=" + (tr.ok ? "1" : "0") +

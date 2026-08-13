@@ -126,6 +126,67 @@ int main() {
   }
   expect(saw_phase, "phase streaming lines");
 
+  // Caso B: el modelo salta done next=edit y emite edit aún en explore.
+  {
+    const fs::path root2 = fs::temp_directory_path() / "tuide_l2_auto_promo_test";
+    fs::remove_all(root2, ec);
+    fs::create_directories(root2 / ".tuide" / "ai", ec);
+    fs::create_directories(root2 / "src", ec);
+    fs::create_directories(root2 / "tools", ec);
+    {
+      std::ofstream map(root2 / ".tuide" / "ai" / "map_last.md");
+      map << "# Ranked map\nquery: bump\n";
+    }
+    {
+      std::ofstream foo(root2 / "src" / "foo.cpp");
+      foo << "int value = 1;\n";
+    }
+    {
+      std::ofstream sh(root2 / "tools" / "compile.sh");
+      sh << "#!/bin/sh\nexit 0\n";
+    }
+    fs::permissions(root2 / "tools" / "compile.sh", fs::perms::owner_all, ec);
+
+    ToolRegistry tools2;
+    tools2.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "int value = 1;\n — " + arg};
+    });
+    Level2Session session2(Level2SessionDeps{&tools2, {}, {}});
+    Level2BootstrapOpts b2;
+    b2.workspace_root = root2.string();
+    b2.query = "bump";
+    b2.instruction = "edit";
+    expect(session2.bootstrap(b2, &err), "bootstrap promo " + err);
+
+    ScriptedBrain brain2({
+        R"({"action":"tool","name":"get_code_of","arg":"src/foo.cpp:value"})",
+        // Salta done next=edit → runtime debe auto-promover.
+        R"({"action":"edit","hunks":[{"path":"src/foo.cpp","search":"int value = 1;","replace":"int value = 3;"}]})",
+    });
+    Level2AutonomousLoopOpts opts2;
+    opts2.workspace_root = root2.string();
+    opts2.settings.max_steps = 8;
+    std::vector<std::string> logs2;
+    const auto r2 = run_level2_autonomous(
+        session2, brain2, opts2, [&](const std::string& line) { logs2.push_back(line); }, nullptr);
+    expect(r2.ok, "promo loop ok");
+    expect(r2.phase == "done", "promo phase done got=" + r2.phase);
+    {
+      std::ifstream in(root2 / "src" / "foo.cpp");
+      std::ostringstream ss;
+      ss << in.rdbuf();
+      expect(ss.str().find("int value = 3;") != std::string::npos, "promo file edited");
+    }
+    bool saw_auto = false;
+    for (const auto& line : logs2) {
+      if (line.find("auto phase=edit") != std::string::npos) {
+        saw_auto = true;
+        break;
+      }
+    }
+    expect(saw_auto, "saw auto phase=edit log");
+  }
+
   if (failures == 0) {
     std::cout << "level2_autonomous_loop_test OK\n";
     return 0;
