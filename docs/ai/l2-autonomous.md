@@ -68,6 +68,7 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
 ## Contexto / compile feedback
 
 - Tras compile fail, Observations guarda **cola** del stderr (`kMaxCompileLogLines`, ~40) + old/new de hunks (no el log completo).
+- Tras **edit apply fail** (search no encontrado/ambiguo), Observations guarda `edit_feedback` con error + search/replace; el tab muestra el error. Así el modelo no reemite el mismo hunk a ciegas.
 - En `phase=edit` el prompt al brain usa cola de sesión (~12k chars), no el `session.md` entero.
 - Si el modelo se queda sin contexto, el error cita `ai.level2.n_ctx` (no L1).
 

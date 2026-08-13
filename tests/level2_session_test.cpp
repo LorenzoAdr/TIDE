@@ -154,6 +154,45 @@ int main() {
     fs::remove_all(root3, ec);
   }
 
+  // Edit apply fail → edit_feedback observation (breaks same-hunk resonance)
+  {
+    const fs::path root4 = fs::temp_directory_path() / "tuide_l2_edit_fail_obs_test";
+    fs::remove_all(root4, ec);
+    fs::create_directories(root4 / ".tuide" / "ai", ec);
+    fs::create_directories(root4 / "src", ec);
+    {
+      std::ofstream map(root4 / ".tuide" / "ai" / "map_last.md");
+      map << "query: edit fail\n";
+    }
+    {
+      std::ofstream foo(root4 / "src" / "foo.cpp");
+      foo << "int value = 1;\n";
+    }
+    Level2Session sess4(Level2SessionDeps{&tools, {}, [](std::string*) { return 0; }});
+    Level2BootstrapOpts opts4;
+    opts4.workspace_root = root4.string();
+    opts4.query = "bad hunk";
+    expect(sess4.bootstrap(opts4, &err), "bootstrap4 " + err);
+    expect(sess4.mark_done(root4.string(), "ready", "edit").ok, "to edit4");
+    SearchReplaceHunk bad;
+    bad.path = "src/foo.cpp";
+    bad.search = "this_string_does_not_exist_xyz\n";
+    bad.replace = "int value = 9;\n";
+    const auto tr = sess4.apply_edit(root4.string(), {bad});
+    expect(!tr.ok && tr.phase == "edit", "edit fail stays edit");
+    expect(tr.error.find("no encontrado") != std::string::npos ||
+               tr.error.find("hunk falló") != std::string::npos,
+           "error mentions fail: " + tr.error);
+    const std::string session = read_all(Level2Session::session_path(root4.string()));
+    expect(session.find("edit_feedback") != std::string::npos, "edit_feedback block");
+    expect(session.find("this_string_does_not_exist_xyz") != std::string::npos,
+           "keeps failed search in obs");
+    expect(session.find("No repitas el mismo hunk") != std::string::npos, "retry hint");
+    expect(read_all(root4 / "src" / "foo.cpp").find("value = 1") != std::string::npos,
+           "file untouched");
+    fs::remove_all(root4, ec);
+  }
+
   // Explore fail → clarify (no edit)
   {
     const fs::path root2 = fs::temp_directory_path() / "tuide_l2_clarify_test";

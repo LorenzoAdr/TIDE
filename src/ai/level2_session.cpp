@@ -515,8 +515,45 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
     write_response_json(workspace_root, false, "error", "edit", "", "", out.error, st.turn, st.phase);
     return out;
   }
+  auto record_edit_failure = [&](const std::string& err_msg, const std::string& path,
+                                 const std::string& search, const std::string& replace) {
+    ++st.turn;
+    st.last_action = "edit_feedback";
+    out.turn = st.turn;
+    out.error = err_msg;
+    out.summary = err_msg;
+    out.ok = false;
+    out.phase = "edit";
+
+    std::ostringstream block;
+    block << "### turn " << st.turn << " — edit_feedback\n\n";
+    block << "error: " << err_msg << "\n\n";
+    if (!path.empty()) {
+      block << "path: `" << path << "`\n\n";
+    }
+    if (!search.empty()) {
+      block << "## search (failed)\n\n```\n"
+            << truncate_observation(search, 24) << "```\n\n";
+    }
+    if (!replace.empty()) {
+      block << "## replace (intended)\n\n```\n"
+            << truncate_observation(replace, 24) << "```\n\n";
+    }
+    block << "Reemite `action=edit` con `search` exacto y único (get_code_of si hace falta). "
+             "No repitas el mismo hunk fallido.\n\n";
+    std::string obs_err;
+    append_observation(workspace_root, block.str(), &out.session_chars, &obs_err);
+    save_state(workspace_root, st, nullptr);
+    write_response_json(workspace_root, false, "edit", "", path, block.str(), err_msg, st.turn,
+                        "edit");
+    append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                     ",\"event\":\"edit_fail\",\"turn\":" +
+                                     std::to_string(st.turn) + ",\"error\":\"" +
+                                     json_escape(err_msg) + "\"}");
+  };
+
   if (hunks.empty()) {
-    out.error = "hunks vacío";
+    record_edit_failure("hunks vacío", "", "", "");
     return out;
   }
 
@@ -529,9 +566,7 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
       for (auto it = applied.rbegin(); it != applied.rend(); ++it) {
         write_text_file(it->abs_path, it->before, nullptr);
       }
-      out.error = "hunk falló (" + h.path + "): " + r.error;
-      write_response_json(workspace_root, false, "error", "edit", h.path, "", out.error, st.turn,
-                          st.phase);
+      record_edit_failure("hunk falló (" + h.path + "): " + r.error, h.path, h.search, h.replace);
       return out;
     }
     if (deps_.sync_edit) {

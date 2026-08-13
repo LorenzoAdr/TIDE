@@ -125,7 +125,9 @@ std::string build_system_prompt(const std::string& extra) {
          "action=edit es para phase=edit; si emites edit aún en explore el runtime "
          "auto-promueve a edit y aplica. "
          "Reglas: next=edit solo con evidencia en Observations; search debe ser único en el "
-         "archivo; no inventes paths; tras compile fail reemite edit corrigiendo.\n";
+         "archivo; no inventes paths; tras edit_feedback (search no encontrado/ambiguo) "
+         "corrige el search (get_code_of si hace falta) y NO repitas el mismo hunk; "
+         "tras compile fail reemite edit corrigiendo.\n";
   out << Level2Session::tool_guide_markdown();
   if (!extra.empty()) {
     out << "\n" << extra << "\n";
@@ -139,7 +141,9 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
   out << "phase=" << phase << " step=" << step << "\n\n";
   if (phase == "edit") {
     out << "Corrige con action=edit (Search/Replace único) usando el feedback reciente "
-           "(stderr tail + old/new). No pidas la traza completa.\n\n";
+           "(edit_feedback: search no encontrado/ambiguo, o stderr tail + old/new). "
+           "Si falló el apply, cambia el search; no repitas el hunk idéntico. "
+           "No pidas la traza completa.\n\n";
     out << read_file_tail(Level2Session::session_path(workspace_root), kMaxPromptCharsEdit);
   } else {
     out << "El ## Ranked map es tu base. Explora (tools) y decide la siguiente acción JSON.\n\n";
@@ -260,7 +264,9 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       emit("L2 ▸ edit hunks=" + std::to_string(action.hunks.size()) + " (apply+compile)…");
       tr = session.apply_edit(opts.workspace_root, action.hunks);
       emit(std::string("L2 ▸ tras edit: phase=") + tr.phase + " ok=" + (tr.ok ? "1" : "0") +
-           " — " + tr.summary.substr(0, 160));
+           " — " +
+           (tr.ok ? tr.summary.substr(0, 160)
+                  : (tr.error.empty() ? tr.summary : tr.error).substr(0, 200)));
     } else {
       emit("L2 ▸ acción inválida; reintentando. " + action.error);
       result.steps = step;
@@ -269,7 +275,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
 
     result.steps = step;
     result.phase = tr.phase;
-    if (!tr.ok && !tr.error.empty() && tr.phase != "edit") {
+    if (!tr.ok && !tr.error.empty()) {
       emit("L2 ▸ turn error: " + tr.error);
     }
     if (tr.phase == "done" || tr.phase == "clarify") {
