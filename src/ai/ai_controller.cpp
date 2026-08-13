@@ -15,6 +15,7 @@
 #include "ai/level0_router.hpp"
 #include "ai/level1_agent.hpp"
 #include "ai/level2_autonomous_loop.hpp"
+#include "ai/level2_debrief.hpp"
 #include "ai/level2_session.hpp"
 #include "ai/model_store.hpp"
 #include "ai/search_replace.hpp"
@@ -25,6 +26,51 @@
 
 namespace tuide {
 namespace {
+
+std::string trim_debrief_text(std::string s) {
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\n' || s.back() == '\r' || s.back() == '\t')) {
+    s.pop_back();
+  }
+  std::size_t i = 0;
+  while (i < s.size() && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t')) {
+    ++i;
+  }
+  return s.substr(i);
+}
+
+// Optional L1 rewrite of deterministic facts. Empty on skip/fail; never invents causes.
+std::string polish_level2_debrief_l1(LlamaBackend& backend, const AiSettings& settings,
+                                     const Level2Debrief& debrief, std::atomic<bool>* cancel) {
+  if (!backend.ready() || debrief.facts.empty()) {
+    return {};
+  }
+  std::ostringstream facts_block;
+  facts_block << "outcome_tag: " << debrief.outcome_tag << "\n";
+  for (const auto& f : debrief.facts) {
+    facts_block << "- " << f.tag << ": " << f.detail << "\n";
+  }
+  LlamaCompletionRequest req;
+  req.system_prompt =
+      "Eres un narrador técnico. Recibirás HECHOS ya verificados de una sesión L2.\n"
+      "Escribe 3–6 frases en español claro resumiendo qué pasó.\n"
+      "REGLAS ESTRICTAS:\n"
+      "- Usa SOLO esos hechos. No inventes causas, archivos faltantes ni fallos no listados.\n"
+      "- Si un hecho dice symbols=0 y «archivo OK», NO digas que el archivo no existe.\n"
+      "- Si falta información, dilo sin especular.\n"
+      "- No propongas nuevos edits ni comandos.\n"
+      "- Sin markdown de código salvo nombres de path ya presentes.";
+  req.user_prompt = "HECHOS:\n" + facts_block.str() + "\nResumen:";
+  req.max_tokens = 320;
+  req.n_ctx = settings.level1.n_ctx > 0 ? settings.level1.n_ctx : 2048;
+  req.temperature = 0.1f;
+  req.context_role = "L1";
+  req.n_ctx_setting_hint = "ai.level1.n_ctx";
+  const auto completion = backend.complete(req, cancel);
+  if (!completion.ok) {
+    return {};
+  }
+  return trim_debrief_text(completion.text);
+}
 
 Level2SessionDeps make_l2_deps(AiController* self, ToolRegistry* tools, WorkspaceModel* workspace,
                                TaskRunner* tasks, const AiSettings& settings) {
@@ -1117,6 +1163,40 @@ void AiController::run_level2_autonomous_inline(const std::string& reason) {
     append("L2 ▸ terminó con error phase=" + result.phase + " steps=" +
            std::to_string(result.steps) + " — " +
            (result.error.empty() ? result.summary : result.error));
+  }
+
+  // Deterministic post-run debrief (facts from session/trace). Optional L1 polish.
+  {
+    const Level2Debrief debrief = build_level2_debrief(root, result);
+    const std::string facts_md = format_level2_debrief(debrief);
+    {
+      std::istringstream iss(facts_md);
+      std::string line;
+      while (std::getline(iss, line)) {
+        append(line);
+      }
+    }
+    {
+      const std::string debrief_path = Level2Session::dir_for(root) + "/debrief.md";
+      std::ofstream out(debrief_path);
+      if (out) {
+        out << facts_md;
+      }
+    }
+    if (!(agent_cancel_.load()) && backend_.ready()) {
+      const std::string narrative =
+          polish_level2_debrief_l1(backend_, settings_, debrief, &agent_cancel_);
+      if (!narrative.empty()) {
+        append("L2 ▸ debrief (L1, solo redacta hechos):");
+        std::istringstream iss(narrative);
+        std::string line;
+        while (std::getline(iss, line)) {
+          if (!line.empty()) {
+            append(line);
+          }
+        }
+      }
+    }
   }
 }
 

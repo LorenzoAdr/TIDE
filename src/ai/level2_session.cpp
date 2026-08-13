@@ -1,10 +1,13 @@
 #include "ai/level2_session.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -42,7 +45,315 @@ std::string now_ms_str() {
   return std::to_string(ms);
 }
 
+std::string trim_ws(std::string_view s) {
+  while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\n' ||
+                        s.front() == '\r')) {
+    s.remove_prefix(1);
+  }
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\n' ||
+                        s.back() == '\r')) {
+    s.remove_suffix(1);
+  }
+  return std::string(s);
+}
+
+std::string to_lower_copy(std::string s) {
+  for (char& c : s) {
+    if (c >= 'A' && c <= 'Z') {
+      c = static_cast<char>(c - 'A' + 'a');
+    }
+  }
+  return s;
+}
+
+std::string path_stem_key(std::string_view path) {
+  std::string p(path);
+  // Drop trailing :line / :Symbol for get_code_of args.
+  const auto colon = p.find(':');
+  if (colon != std::string::npos) {
+    // Keep Windows drive? We use unix paths in workspace.
+    p = p.substr(0, colon);
+  }
+  const auto slash = p.find_last_of("/\\");
+  std::string base = slash == std::string::npos ? p : p.substr(slash + 1);
+  const auto dot = base.find_last_of('.');
+  if (dot != std::string::npos && dot > 0) {
+    base = base.substr(0, dot);
+  }
+  return to_lower_copy(base);
+}
+
+void push_hot(std::vector<std::string>& hot, std::unordered_set<std::string>& seen,
+              std::string key) {
+  key = trim_ws(key);
+  if (key.empty()) {
+    return;
+  }
+  const std::string low = to_lower_copy(key);
+  if (!seen.insert(low).second) {
+    return;
+  }
+  hot.push_back(std::move(key));
+}
+
+bool is_ranked_entry_start(const std::string& line) {
+  if (line.empty() || !std::isdigit(static_cast<unsigned char>(line[0]))) {
+    return false;
+  }
+  std::size_t i = 0;
+  while (i < line.size() && std::isdigit(static_cast<unsigned char>(line[i]))) {
+    ++i;
+  }
+  return i < line.size() && line[i] == '.' && (i + 1 >= line.size() || line[i + 1] == ' ');
+}
+
+bool entry_matches_hot(const std::string& entry, const std::vector<std::string>& hot_keys) {
+  if (hot_keys.empty()) {
+    return false;
+  }
+  const std::string low = to_lower_copy(entry);
+  for (const auto& raw : hot_keys) {
+    const std::string h = to_lower_copy(raw);
+    if (h.empty()) {
+      continue;
+    }
+    if (low.find(h) != std::string::npos) {
+      return true;
+    }
+    // stem=foo in why lines, or bare stem
+    if (low.find("stem=" + h) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string first_line_of(const std::string& entry) {
+  const auto nl = entry.find('\n');
+  std::string line = nl == std::string::npos ? entry : entry.substr(0, nl);
+  return trim_ws(line);
+}
+
 }  // namespace
+
+std::vector<std::string> Level2Session::hot_keys_from_observations(const std::string& observations) {
+  std::vector<std::string> hot;
+  std::unordered_set<std::string> seen;
+
+  // ### turn N — `tool` `arg`
+  for (std::size_t pos = 0; (pos = observations.find("### turn ", pos)) != std::string::npos;) {
+    const auto eol = observations.find('\n', pos);
+    const std::string header =
+        observations.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
+    pos = eol == std::string::npos ? observations.size() : eol + 1;
+
+    // Prefer last backtick-quoted token as arg.
+    std::vector<std::string> ticks;
+    for (std::size_t i = 0; i < header.size();) {
+      const auto a = header.find('`', i);
+      if (a == std::string::npos) {
+        break;
+      }
+      const auto b = header.find('`', a + 1);
+      if (b == std::string::npos) {
+        break;
+      }
+      ticks.push_back(header.substr(a + 1, b - a - 1));
+      i = b + 1;
+    }
+    if (ticks.size() >= 2) {
+      const std::string& arg = ticks.back();
+      push_hot(hot, seen, arg);
+      // path without :Symbol
+      const auto colon = arg.find(':');
+      if (colon != std::string::npos && colon > 0) {
+        push_hot(hot, seen, arg.substr(0, colon));
+        const std::string sym = arg.substr(colon + 1);
+        // Skip pure line numbers as hot keys (too broad vs scores).
+        const bool all_digit =
+            !sym.empty() &&
+            std::all_of(sym.begin(), sym.end(),
+                        [](unsigned char c) { return std::isdigit(c) != 0; });
+        if (!all_digit) {
+          push_hot(hot, seen, sym);
+        }
+      }
+      push_hot(hot, seen, path_stem_key(arg));
+    } else if (ticks.size() == 1 && ticks[0].find('/') != std::string::npos) {
+      push_hot(hot, seen, ticks[0]);
+      push_hot(hot, seen, path_stem_key(ticks[0]));
+    }
+  }
+
+  // outline: path …
+  for (std::size_t pos = 0; (pos = observations.find("outline:", pos)) != std::string::npos;) {
+    const auto eol = observations.find('\n', pos);
+    std::string line =
+        observations.substr(pos + 8, eol == std::string::npos ? std::string::npos : eol - (pos + 8));
+    pos = eol == std::string::npos ? observations.size() : eol + 1;
+    const auto sym = line.find("symbols=");
+    if (sym != std::string::npos) {
+      line = line.substr(0, sym);
+    }
+    line = trim_ws(line);
+    if (!line.empty()) {
+      push_hot(hot, seen, line);
+      push_hot(hot, seen, path_stem_key(line));
+    }
+  }
+
+  return hot;
+}
+
+std::string Level2Session::compact_ranked_map_markdown(const std::string& map_section,
+                                                       const std::vector<std::string>& hot_keys) {
+  // map_section includes leading "## Ranked map" or starts after it.
+  std::string body = map_section;
+  std::string header;
+  const std::string mark = "## Ranked map";
+  if (body.rfind(mark, 0) == 0) {
+    header = mark;
+    body = body.substr(mark.size());
+    if (!body.empty() && body[0] == '\n') {
+      body.erase(body.begin());
+    }
+  }
+
+  // Drop ## Bodies (and anything after) — detail for hot stems stays in Ranked entries / Observations.
+  const auto bodies = body.find("\n## Bodies");
+  if (bodies != std::string::npos) {
+    body = body.substr(0, bodies);
+  }
+  const auto bodies_at0 = body.rfind("## Bodies", 0) == 0 ? std::size_t{0} : std::string::npos;
+  if (bodies_at0 == 0) {
+    body.clear();
+  }
+
+  // Split into preamble (query/note/## Ranked entries) + numbered entries.
+  std::vector<std::string> entries;
+  std::string preamble;
+  {
+    std::istringstream in(body);
+    std::string line;
+    std::ostringstream pre;
+    std::ostringstream cur;
+    bool in_entry = false;
+    auto flush_entry = [&]() {
+      if (!in_entry) {
+        return;
+      }
+      std::string e = cur.str();
+      while (!e.empty() && (e.back() == '\n' || e.back() == '\r')) {
+        e.pop_back();
+      }
+      if (!e.empty()) {
+        entries.push_back(std::move(e));
+      }
+      cur.str("");
+      cur.clear();
+    };
+    while (std::getline(in, line)) {
+      if (is_ranked_entry_start(line)) {
+        if (!in_entry) {
+          preamble = pre.str();
+        }
+        flush_entry();
+        in_entry = true;
+        cur << line << '\n';
+      } else if (in_entry) {
+        cur << line << '\n';
+      } else {
+        pre << line << '\n';
+      }
+    }
+    flush_entry();
+    if (!in_entry) {
+      preamble = pre.str();
+    }
+  }
+
+  int kept_detail = 0;
+  std::ostringstream out;
+  if (!header.empty()) {
+    out << header << "\n\n";
+  }
+  out << preamble;
+  if (preamble.find("## Ranked entries") == std::string::npos && !entries.empty()) {
+    out << "## Ranked entries\n\n";
+  }
+  for (const auto& e : entries) {
+    if (entry_matches_hot(e, hot_keys)) {
+      out << e << "\n\n";
+      ++kept_detail;
+    } else {
+      out << first_line_of(e) << "\n";
+    }
+  }
+  out << "\n<!-- map compacted: full detail for " << kept_detail << " hot stem(s); "
+      << "other entries are name-only -->\n";
+  return out.str();
+}
+
+bool Level2Session::compact_session_context(const std::string& workspace_root,
+                                            std::string* err_out) {
+  if (workspace_root.empty()) {
+    if (err_out) {
+      *err_out = "workspace_root vacío";
+    }
+    return false;
+  }
+  std::string session = read_file(session_path(workspace_root));
+  if (session.empty()) {
+    if (err_out) {
+      *err_out = "session.md ausente";
+    }
+    return false;
+  }
+
+  const std::string map_mark = "## Ranked map";
+  const std::string obs_mark = "## Observations";
+  const auto map_pos = session.find(map_mark);
+  if (map_pos == std::string::npos) {
+    return true;  // nothing to compact
+  }
+  const auto obs_pos = session.find(obs_mark, map_pos);
+  const std::string before = session.substr(0, map_pos);
+  std::string map_section;
+  std::string after;
+  if (obs_pos != std::string::npos) {
+    map_section = session.substr(map_pos, obs_pos - map_pos);
+    after = session.substr(obs_pos);
+  } else {
+    map_section = session.substr(map_pos);
+  }
+
+  // Skip if already compacted and no new hot keys would change cold entries... still cheap to redo.
+  const auto hot = hot_keys_from_observations(after);
+  // If explore has no observations yet, keep full map (caller shouldn't invoke, but be safe).
+  if (hot.empty() && after.find("### turn ") == std::string::npos) {
+    return true;
+  }
+
+  const std::string compact_map = compact_ranked_map_markdown(map_section, hot);
+  session = before + compact_map;
+  if (!after.empty()) {
+    if (session.empty() || session.back() != '\n') {
+      session.push_back('\n');
+    }
+    session += after;
+  }
+  session = trim_session_body(std::move(session));
+  if (!write_file(session_path(workspace_root), session, err_out)) {
+    return false;
+  }
+  append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                   ",\"event\":\"map_compact\",\"hot\":" +
+                                   std::to_string(hot.size()) + "}");
+  ai_trace(AiTraceChannel::L2, "l2_map_compact",
+           "{\"hot\":" + std::to_string(hot.size()) +
+               ",\"session_chars\":" + std::to_string(session.size()) + "}");
+  return true;
+}
 
 Level2Session::Level2Session(Level2SessionDeps deps) : deps_(std::move(deps)) {}
 
@@ -503,6 +814,11 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
            "{\"turn\":" + std::to_string(st.turn) + ",\"name\":\"" + ai_trace_escape(name) +
                "\",\"ok\":" + (tr.ok ? "1" : "0") + ",\"duration_ms\":" + std::to_string(ms) +
                ",\"phase\":\"" + st.phase + "\",\"arg\":\"" + ai_trace_escape(arg, 120) + "\"}");
+  // Shrink ranked map: name-only except stems/paths this explore already touched.
+  if (st.phase == "explore") {
+    compact_session_context(workspace_root, nullptr);
+    out.session_chars = read_file(session_path(workspace_root)).size();
+  }
   out.ok = true;
   out.summary = "tool turn=" + std::to_string(st.turn);
   return out;
@@ -822,6 +1138,8 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
       out.error = "next=edit solo desde explore";
       return out;
     }
+    // Drop full map bodies before edit phase prompts (keep detail only for hot stems).
+    compact_session_context(workspace_root, nullptr);
     ++st.turn;
     st.phase = "edit";
     st.last_action = "ready_to_edit";

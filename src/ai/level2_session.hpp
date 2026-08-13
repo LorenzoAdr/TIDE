@@ -67,6 +67,17 @@ class Level2Session {
 
   bool bootstrap(const Level2BootstrapOpts& opts, std::string* err_out = nullptr);
 
+  // After explore tools (or when entering edit): shrink ## Ranked map to name lines,
+  // keeping full entry detail only for stems/paths L2 already touched in Observations.
+  // Also drops ## Bodies (code lives in Observations). Idempotent.
+  static bool compact_session_context(const std::string& workspace_root,
+                                      std::string* err_out = nullptr);
+
+  // Pure helpers (also used by tests).
+  static std::string compact_ranked_map_markdown(const std::string& map_section,
+                                                 const std::vector<std::string>& hot_keys);
+  static std::vector<std::string> hot_keys_from_observations(const std::string& observations);
+
   Level2TurnResult apply_tool(const std::string& workspace_root, const std::string& name,
                               const std::string& arg);
   Level2TurnResult apply_edit(const std::string& workspace_root,

@@ -55,6 +55,7 @@ std::string read_file_limited(const std::string& path, std::size_t max_chars) {
 
 // Explore: keep instruction header + top of ## Ranked map (highest scores), then a short
 // Observations tail if present. Dropping low-ranked map tail is intentional.
+// After tools, session map is compacted on disk (name-only except hot stems).
 std::string read_session_for_explore(const std::string& path, std::size_t max_chars) {
   std::ifstream in(path);
   if (!in) {
@@ -86,9 +87,12 @@ std::string read_session_for_explore(const std::string& path, std::size_t max_ch
     map_body = body.substr(map_pos + map_mark.size());
   }
 
-  constexpr std::size_t kObsBudget = 4000;
+  // Prefer recent observations (tool bodies) over map filler once explore has started.
+  constexpr std::size_t kObsBudget = 6000;
   if (obs_body.size() > kObsBudget) {
-    obs_body = obs_body.substr(0, kObsBudget) + "\n…[observations truncadas]…\n";
+    const std::string obs_head = obs_body.substr(0, obs_mark.size() + 2);
+    obs_body = obs_head + "\n…[observations medias omitidas]…\n\n" +
+               obs_body.substr(obs_body.size() - (kObsBudget - 80));
   }
 
   const std::size_t reserved = header.size() + obs_body.size() + 80;
@@ -96,10 +100,56 @@ std::string read_session_for_explore(const std::string& path, std::size_t max_ch
       max_chars > reserved ? max_chars - reserved : max_chars / 2;
   if (map_body.size() > map_budget) {
     map_body = map_body.substr(0, map_budget) +
-               "\n\n…[ranked map cola omitida; prioriza entradas con score alto]…\n";
+               "\n\n…[ranked map cola omitida; prioriza entradas con score alto / hot stems]…\n";
   }
 
   return header + map_body + obs_body;
+}
+
+// Edit: instruction + (compact) map if small + Observations tail with feedback.
+std::string read_session_for_edit(const std::string& path, std::size_t max_chars) {
+  std::ifstream in(path);
+  if (!in) {
+    return {};
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  std::string body = ss.str();
+  if (body.size() <= max_chars) {
+    return body;
+  }
+
+  const std::string map_mark = "## Ranked map";
+  const std::string obs_mark = "## Observations";
+  const auto map_pos = body.find(map_mark);
+  const auto obs_pos = body.find(obs_mark);
+  if (map_pos == std::string::npos || obs_pos == std::string::npos || obs_pos <= map_pos) {
+    return read_file_tail(path, max_chars);
+  }
+
+  // Keep Instruction (skip long tool guide): from ## Instruction or map_pos head slice.
+  const std::string instr_mark = "## Instruction";
+  auto instr_pos = body.find(instr_mark);
+  if (instr_pos == std::string::npos || instr_pos > map_pos) {
+    instr_pos = map_pos;
+  }
+  std::string head = body.substr(instr_pos, obs_pos - instr_pos);
+  constexpr std::size_t kMapCap = 8000;
+  if (head.size() > kMapCap) {
+    // Keep Instruction + start of map (hot stems are usually near the top after compact).
+    const std::string instr =
+        body.substr(instr_pos, std::min(map_pos - instr_pos + map_mark.size() + 2, kMapCap / 4));
+    head = instr + body.substr(map_pos + map_mark.size(), kMapCap - instr.size());
+    head += "\n…[map cola omitida]…\n";
+  }
+
+  const std::size_t tail_budget =
+      max_chars > head.size() + 60 ? max_chars - head.size() - 60 : max_chars / 2;
+  std::string tail = body.substr(body.size() - std::min(tail_budget, body.size()));
+  if (tail.find(obs_mark) == std::string::npos) {
+    tail = std::string(obs_mark) + "\n\n…\n\n" + tail;
+  }
+  return head + "\n…\n\n" + tail;
 }
 
 std::string phase_banner(const std::string& phase, int step, int max_steps) {
@@ -144,10 +194,14 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
     out << "Corrige con action=edit (Search/Replace único) usando el feedback reciente "
            "(edit_feedback: search no encontrado/ambiguo, o stderr tail + old/new). "
            "Si falló el apply, cambia el search; no repitas el hunk idéntico. "
-           "No pidas la traza completa.\n\n";
-    out << read_file_tail(Level2Session::session_path(workspace_root), kMaxPromptCharsEdit);
+           "No pidas la traza completa. El mapa está compactado (detalle solo en stems "
+           "ya explorados).\n\n";
+    out << read_session_for_edit(Level2Session::session_path(workspace_root),
+                                 kMaxPromptCharsEdit);
   } else {
-    out << "El ## Ranked map es tu base. Explora (tools) y decide la siguiente acción JSON.\n\n";
+    out << "El ## Ranked map es tu base. Explora (tools) y decide la siguiente acción JSON. "
+           "Tras el primer tool el mapa se compacta: nombres para el resto, detalle solo "
+           "en stems que ya leíste.\n\n";
     out << read_session_for_explore(Level2Session::session_path(workspace_root),
                                     kMaxPromptCharsExplore);
   }

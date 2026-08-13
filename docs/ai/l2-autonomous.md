@@ -71,6 +71,10 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
 - Tras **edit apply fail** (search no encontrado/ambiguo), Observations guarda `edit_feedback` con error + search/replace; el tab muestra el error. Así el modelo no reemite el mismo hunk a ciegas.
 - En `phase=edit` el prompt al brain usa cola de sesión (~12k chars), no el `session.md` entero.
 - Si el modelo se queda sin contexto, el error cita `ai.level2.n_ctx` (no L1).
+- **Compactación del mapa:** tras cada tool en explore (y al pasar a `edit`), el `## Ranked map`
+  se reduce a **líneas de nombre** (`path:line — symbol`). Solo conservan snippet/why/detalle
+  los stems/paths que L2 ya tocó en Observations (`get_code_of`, `file_outline`, …).
+  La sección `## Bodies` del mapa se descarta (el código vive en Observations).
 
 ## Timing en `trace.ndjson`
 
@@ -87,6 +91,18 @@ Eventos con `duration_ms` (también `propose_ms` / `action_ms` / `total_ms`):
 
 `file_outline` espera al parse Tree-sitter (async) antes de responder; ya no devuelve `symbols=0` en frío.
 
+## Debrief post-run (hechos + L1 opcional)
+
+Al terminar el loop autónomo (`done` / `clarify` / error / cancel):
+
+1. El runtime arma **hechos deterministas** desde `state.json`, Observations (`session.md`) y `l2/trace.ndjson`
+   (outline `symbols=N`, `edit_fail`, compile ok/fail + ms, clarify, counts).
+2. Se muestran siempre en el tab AI (`### L2 resumen (hechos)`) y se escriben en
+   `.tuide/ai/l2/debrief.md`.
+3. Si el backend L1 ya está `ready`, opcionalmente **redacta** esos hechos en español
+   (`L2 ▸ debrief (L1, solo redacta hechos)`). No inventa causas: el prompt prohíbe
+   reinterpretar `symbols=0` / «archivo OK» como «archivo no existe».
+
 ## Handoff code_edit (modificar código)
 
 1. L1 detecta pedido de cambio → elabora **mapa rankeado completo** (catálogo ancho, sin bodies).
@@ -98,5 +114,6 @@ Eventos con `duration_ms` (también `propose_ms` / `action_ms` / `total_ms`):
 ```bash
 ./build/level2_autonomous_loop_test
 ./build/level2_session_test
+./build/level2_debrief_test
 ./build/search_replace_test
 ```

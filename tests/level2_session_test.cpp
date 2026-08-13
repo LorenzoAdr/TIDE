@@ -193,6 +193,58 @@ int main() {
     fs::remove_all(root4, ec);
   }
 
+  // Map compaction: after tool, cold entries → name-only; hot stem keeps detail.
+  {
+    const fs::path rootc = fs::temp_directory_path() / "tuide_l2_compact_test";
+    fs::remove_all(rootc, ec);
+    fs::create_directories(rootc / ".tuide" / "ai", ec);
+    fs::create_directories(rootc / "src", ec);
+    {
+      std::ofstream map(rootc / ".tuide" / "ai" / "map_last.md");
+      map << "query: compact\n\n## Ranked entries\n\n";
+      map << "1. src/hot.cpp:10  [score=99] — `hot_fn`\n";
+      map << "    `void hot_fn() {`\n";
+      map << "    why: stem=hot · role=core\n";
+      map << "    ```\n    void hot_fn() { return; }\n    ```\n";
+      map << "2. src/cold.cpp:1  [score=1] — `cold_fn`\n";
+      map << "    `void cold_fn() {`\n";
+      map << "    why: stem=cold\n";
+      map << "    ```\n    void cold_fn() { return; }\n    ```\n";
+    }
+    {
+      std::ofstream f(rootc / "src" / "hot.cpp");
+      f << "void hot_fn() {}\n";
+    }
+    Level2Session sessc(Level2SessionDeps{&tools, {}, {}});
+    Level2BootstrapOpts optsc;
+    optsc.workspace_root = rootc.string();
+    optsc.query = "compact map";
+    expect(sessc.bootstrap(optsc, &err), "bootstrap compact " + err);
+    const auto before = read_all(Level2Session::session_path(rootc.string()));
+    expect(before.find("void cold_fn() { return; }") != std::string::npos, "cold body pre");
+    expect(sessc.apply_tool(rootc.string(), "get_code_of", "src/hot.cpp:hot_fn").ok,
+           "tool hot");
+    const auto after = read_all(Level2Session::session_path(rootc.string()));
+    expect(after.find("map compacted") != std::string::npos, "compact marker");
+    expect(after.find("void hot_fn() { return; }") != std::string::npos, "hot detail kept");
+    expect(after.find("void cold_fn() { return; }") == std::string::npos,
+           "cold body stripped");
+    expect(after.find("2. src/cold.cpp:1  [score=1] — `cold_fn`") != std::string::npos,
+           "cold name line kept");
+    // Pure helper
+    const auto hot_keys = Level2Session::hot_keys_from_observations(
+        "### turn 1 — `get_code_of` `src/hot.cpp:hot_fn`\n");
+    expect(!hot_keys.empty(), "hot keys non-empty");
+    bool has_hot = false;
+    for (const auto& k : hot_keys) {
+      if (k.find("hot") != std::string::npos) {
+        has_hot = true;
+      }
+    }
+    expect(has_hot, "hot key mentions hot");
+    fs::remove_all(rootc, ec);
+  }
+
   // Explore fail → clarify (no edit)
   {
     const fs::path root2 = fs::temp_directory_path() / "tuide_l2_clarify_test";

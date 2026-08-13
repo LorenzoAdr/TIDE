@@ -328,6 +328,7 @@ add_executable(tuide
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
   src/ai/level2_autonomous_loop.cpp
+  src/ai/level2_debrief.cpp
   src/ai/ai_controller.cpp
   src/terminal/shell_session.cpp
   src/terminal/app_session.cpp
@@ -814,6 +815,19 @@ target_include_directories(level2_autonomous_loop_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(level2_debrief_test
+  tests/level2_debrief_test.cpp
+  tests/tool_registry_stub.cpp
+  src/ai/level2_debrief.cpp
+  src/ai/level2_session.cpp
+  src/ai/search_replace.cpp
+  src/ai/ai_trace.cpp
+)
+target_include_directories(level2_debrief_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
 add_executable(search_replace_test
   tests/search_replace_test.cpp
   src/ai/search_replace.cpp
@@ -1000,6 +1014,7 @@ set(TUIDE_TEST_TARGETS
   level1_agent_test
   level2_session_test
   level2_autonomous_loop_test
+  level2_debrief_test
   search_replace_test
   repo_map_test
   get_code_of_test
