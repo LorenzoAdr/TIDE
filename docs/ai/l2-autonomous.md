@@ -74,14 +74,19 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
   edit ~**8k**. No se manda `session.md` entero.
 - **Tool guide solo en system prompt** (no se duplica en `session.md`).
 - **Flujo plan → pack:** en explore la primera mirada preferida es
-  `{"action":"plan","targets":["path:Symbol",…]}` (máx. 16). El runtime baja **todos** los
-  fragmentos (`get_code_of`) + **1 `file_outline` por archivo único** (+ `headers_of` si cabe)
-  a `.tuide/ai/l2/pack.md` bajo presupuesto (~9k chars). Tras el pack, el prompt es
-  **Instruction + pack** (sin mapa rankeado completo). `tools` (máx. 4) queda para extras.
+  `{"action":"plan","targets":["path:Symbol","path:A-B",…]}` (máx. 16; evitar path bare).
+  El runtime **merge** watchlists (plan2 no pisa plan1), normaliza bare→símbolo por overlap
+  con Instruction, prioriza fragmentos pequeños, tope ~25%/pieza, **auto-refetch** de huecos
+  truncados, y escribe `.tuide/ai/l2/pack.md` (~9k chars) + outlines/headers. Si quedan
+  truncados → `pack_incomplete` (pushback en `done next=edit`). Tras el pack, el prompt es
+  **Instruction + pack**. `tools` (máx. 4) para extras.
+- **map_stale:** si la `query:` del `map_last` solapa poco la Instruction, bootstrap marca
+  `map_stale` y el prompt pide no confiar en el top del mapa (search/plan anclado).
 - **Truncado de cuerpos:** `get_code_of` por defecto usa **head+tail** si el símbolo supera
-  `max_lines` (~120). Marca `[TRUNCATED]` con `symbol_span` / `missing_lines` / `refetch`.
-  Ventanas: `path:Symbol#head|#mid|#tail` y `path:A-B`. El pack añade `## Truncated` con
-  hints accionables; el truncado por presupuesto de chars también es head+tail.
+  `max_lines` (~120). Con `path:line` dentro de un símbolo grande → **ventana** alrededor
+  de la línea. Marca `[TRUNCATED]` con `symbol_span` / `missing_lines` / `refetch`.
+  Ventanas: `path:Symbol#head|#mid|#tail` y `path:A-B`. El pack añade `## Truncated`;
+  WARN `wrong_symbol` si el nombre resuelto no solapa needles de la Instruction.
 - Bootstrap guarda `.tuide/ai/l2/map_initial.md` (mapa completo).
 - Explore slim del mapa en el prompt (antes del pack): detalle solo top‑5; resto nombres.
 - Observations en explore: cola ~3.5k chars.

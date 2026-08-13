@@ -76,24 +76,25 @@ std::string shell_quote(const std::string& s) {
 
 void register_read_tools(ToolRegistry* reg, const std::string& root) {
   reg->register_tool("get_code_of", "body", [root](const std::string& arg) {
-    const GetCodeOfRequest req = parse_get_code_of_arg(arg, root);
+    GetCodeOfRequest req = parse_get_code_of_arg(arg, root);
+    req.workspace_root = root;
+    if (req.max_lines <= 0) {
+      req.max_lines = 120;
+    }
+    if (!req.file.empty() && !fs::path(req.file).is_absolute()) {
+      req.file = (fs::path(root) / req.file).lexically_normal().string();
+    }
     const auto got = get_code_of(req);
     if (!got.ok) {
       return AiToolResult{false, got.error.empty() ? "get_code_of failed" : got.error};
     }
-    std::ostringstream out;
-    out << got.path;
-    if (got.start_line > 0) {
-      out << ':' << got.start_line;
-      if (got.end_line > got.start_line) {
-        out << '-' << got.end_line;
-      }
+    std::string display = got.path;
+    if (!root.empty() && display.size() > root.size() &&
+        display.compare(0, root.size(), root) == 0 &&
+        (display[root.size()] == '/' || display[root.size()] == '\\')) {
+      display = display.substr(root.size() + 1);
     }
-    if (!got.name.empty()) {
-      out << " — " << got.name;
-    }
-    out << '\n' << got.text;
-    return AiToolResult{true, out.str()};
+    return AiToolResult{true, tuide::format_get_code_of_result(got, display)};
   });
 
   reg->register_tool("file_outline", "outline", [root](const std::string& arg) {
@@ -133,7 +134,8 @@ void register_read_tools(ToolRegistry* reg, const std::string& root) {
 }
 
 void usage() {
-  std::cerr << "Usage: l2_harness_cli bootstrap|tool|turn|done|edit|compile|status …\n"
+  std::cerr << "Usage: l2_harness_cli bootstrap|tool|plan|turn|done|edit|compile|status …\n"
+            << "  plan target [target…]   // watchlist → pack.md\n"
             << "  done [summary] [--edit|--clarify]\n"
             << "  edit <hunks.json>\n";
 }
@@ -208,6 +210,27 @@ int main(int argc, char** argv) {
       return 1;
     }
     std::cout << "ok turn=" << tr.turn << " phase=" << tr.phase << " — " << tr.summary << '\n';
+    return 0;
+  }
+  if (cmd == "plan") {
+    if (argc < 3) {
+      usage();
+      return 2;
+    }
+    std::vector<std::string> targets;
+    for (int i = 2; i < argc; ++i) {
+      targets.emplace_back(argv[i]);
+    }
+    const auto tr = session.apply_plan(root, targets, "harness cli plan");
+    if (!tr.ok) {
+      std::cerr << "plan failed: " << tr.error << '\n';
+      return 1;
+    }
+    std::cout << "ok plan turn=" << tr.turn << " phase=" << tr.phase << " — " << tr.summary
+              << '\n';
+    const std::string pack =
+        read_file(fs::path(root) / ".tuide" / "ai" / "l2" / "pack.md");
+    std::cout << "pack_chars=" << pack.size() << '\n';
     return 0;
   }
   if (cmd == "turn") {

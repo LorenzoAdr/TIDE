@@ -857,6 +857,22 @@ int main() {
                ranged.text.find("x40") != std::string::npos,
            "range includes mid vars");
     expect(!ranged.truncated, "small range not truncated");
+
+    // path:line inside a huge symbol → window around the line (not whole-method head+tail).
+    GetCodeOfRequest line_win;
+    line_win.workspace_root = tmp.string();
+    line_win.file = "long_fn.cpp";
+    line_win.line = 45;  // mid of long_fn
+    line_win.max_lines = 20;
+    line_win.window = tuide::GetCodeOfWindow::Auto;
+    const auto around = get_code_of(line_win);
+    expect(around.ok && around.truncated, "line-window truncated huge symbol");
+    expect(around.text.find("line-window") != std::string::npos, "line-window marker");
+    expect(around.text.find("x45") != std::string::npos ||
+               around.text.find("x44") != std::string::npos,
+           "line-window keeps mid vars");
+    expect(around.text.find("int long_fn()") == std::string::npos, "line-window skips signature");
+    expect(around.text.find("return 99") == std::string::npos, "line-window skips return");
   }
 
   {

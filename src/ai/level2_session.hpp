@@ -40,6 +40,8 @@ struct Level2SessionDeps {
   std::function<int(std::string* combined_output)> run_compile;
   // Reject clarify this many times (force more code tools) before accepting. 0 = never push back.
   int clarify_pushback_max = 3;
+  // Reject done next=edit while pack still has unresolved truncations (default 2).
+  int pack_incomplete_pushback_max = 2;
 };
 
 class Level2Session {
@@ -52,6 +54,8 @@ class Level2Session {
   static constexpr int kMaxObservationLinesBatch = 80;
   // Code pack for plan targets (fragments + outlines) kept under this size.
   static constexpr std::size_t kMaxPackChars = 9000;
+  // Soft cap per fragment (~25% of pack) so one huge body cannot dominate.
+  static constexpr std::size_t kMaxFragShareChars = 2250;
 
   explicit Level2Session(Level2SessionDeps deps);
   explicit Level2Session(ToolRegistry* tools);
@@ -124,9 +128,13 @@ class Level2Session {
     int edit_attempt = 0;
     int compile_attempt = 0;
     int clarify_pushback = 0;
+    int pack_incomplete_pushback = 0;
     bool has_pack = false;
+    bool pack_incomplete = false;  // truncated gaps remain; prefer refetch before edit
+    bool map_stale = false;        // map_last query poorly overlaps session Instruction
     bool map_review = false;  // after compile_ok: full map restored, ask "algo más?"
     uint64_t last_op_id = 0;
+    std::vector<std::string> watchlist;  // merged plan targets
     std::vector<PendingHunk> pending;
   };
 

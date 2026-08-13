@@ -408,6 +408,34 @@ GetCodeOfResult get_code_of(const GetCodeOfRequest& req) {
     }
   } else if (sym_span <= max_lines) {
     set_contiguous(out.symbol_start, out.symbol_end, false);
+  } else if (req.window == GetCodeOfWindow::Auto && req.line > 0 &&
+             req.line >= out.symbol_start && req.line <= out.symbol_end &&
+             sym_span > max_lines) {
+    // Line hint inside a huge symbol: window around the line (not whole-method head+tail).
+    const int half = max_lines / 2;
+    int a = std::max(out.symbol_start, req.line - half);
+    int b = std::min(out.symbol_end, a + max_lines - 1);
+    if (b - a + 1 < max_lines) {
+      a = std::max(out.symbol_start, b - max_lines + 1);
+    }
+    set_contiguous(a, b, true);
+    out.refetch_hint = disp + ":" + std::to_string(out.symbol_start) + "-" +
+                       std::to_string(std::min(out.symbol_end, out.symbol_start + max_lines - 1));
+    if (a > out.symbol_start || b < out.symbol_end) {
+      std::ostringstream note;
+      note << "… [line-window inside " << (picked ? out.name : std::string("symbol"))
+           << " " << out.symbol_start << "-" << out.symbol_end << "; omitted outside "
+           << a << "-" << b << "; refetch " << out.refetch_hint << " or " << hint_base
+           << "#head|#tail] …\n";
+      out.text = note.str() + out.text;
+      if (a > out.symbol_start) {
+        out.omitted_start = out.symbol_start;
+        out.omitted_end = a - 1;
+      } else if (b < out.symbol_end) {
+        out.omitted_start = b + 1;
+        out.omitted_end = out.symbol_end;
+      }
+    }
   } else if (req.window == GetCodeOfWindow::Head) {
     set_contiguous(out.symbol_start, out.symbol_start + max_lines - 1, true);
     out.refetch_hint = hint_base + "#tail";

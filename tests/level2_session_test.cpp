@@ -405,8 +405,22 @@ int main() {
              "pack refetch hint");
       expect(sessp.status_text(rootp.string()).find("has_pack: yes") != std::string::npos,
              "has_pack yes");
+      expect(sessp.status_text(rootp.string()).find("pack_incomplete: yes") != std::string::npos,
+             "pack_incomplete yes after truncated");
     }
-    expect(sessp.mark_done(rootp.string(), "ready", "edit").ok, "to edit after plan");
+    {
+      const auto push = sessp.mark_done(rootp.string(), "ready", "edit");
+      expect(push.ok, "pushback returns ok");
+      expect(push.summary.find("pack_incomplete_pushback") != std::string::npos,
+             "pack_incomplete pushback on next=edit");
+      expect(push.phase == "explore", "still explore after pushback");
+    }
+    // Exhaust pushbacks → allow phase=edit.
+    expect(sessp.mark_done(rootp.string(), "retry", "edit").ok, "second pushback");
+    {
+      const auto tr = sessp.mark_done(rootp.string(), "force edit", "edit");
+      expect(tr.ok && tr.phase == "edit", "to edit after pushback max");
+    }
     {
       SearchReplaceHunk h;
       h.path = "src/foo.cpp";
@@ -427,6 +441,82 @@ int main() {
              "initial map restored into session");
     }
     fs::remove_all(rootp, ec);
+  }
+
+  // map_stale when map_last query poorly overlaps Instruction.
+  {
+    const fs::path roots = root.parent_path() / "tuide_l2_map_stale";
+    fs::remove_all(roots, ec);
+    fs::create_directories(roots / ".tuide" / "ai", ec);
+    {
+      std::ofstream map(roots / ".tuide" / "ai" / "map_last.md");
+      map << "# Ranked map\n\nquery: pty wakes terminal scrollback\n\n"
+             "## Ranked entries\n\n1. src/pty.cpp:1 — `on_pty_output`\n";
+    }
+    ToolRegistry tools_s;
+    Level2Session sesss(Level2SessionDeps{&tools_s, {}, {}});
+    Level2BootstrapOpts optss;
+    optss.workspace_root = roots.string();
+    optss.query = "añade pestaña temporal";
+    optss.instruction = "add temporary tab with fixed text";
+    expect(sesss.bootstrap(optss, &err), "bootstrap map_stale " + err);
+    const std::string sess = read_all(Level2Session::session_path(roots.string()));
+    expect(sess.find("map_stale=1") != std::string::npos, "session warns map_stale");
+    expect(sesss.status_text(roots.string()).find("map_stale: yes") != std::string::npos,
+           "status map_stale yes");
+    fs::remove_all(roots, ec);
+  }
+
+  // Merge packs + bare-path normalize via outline needles.
+  {
+    const fs::path rootm = root.parent_path() / "tuide_l2_plan_merge";
+    fs::remove_all(rootm, ec);
+    fs::create_directories(rootm / ".tuide" / "ai", ec);
+    fs::create_directories(rootm / "src", ec);
+    {
+      std::ofstream map(rootm / ".tuide" / "ai" / "map_last.md");
+      map << "# Ranked map\n\nquery: bump helper value\n\n## Ranked entries\n\n"
+             "1. src/foo.cpp:1 — `helper_value`\n";
+    }
+    {
+      std::ofstream foo(rootm / "src" / "foo.cpp");
+      foo << "int helper_value = 1;\nint other_thing = 2;\n";
+    }
+    ToolRegistry toolsm;
+    toolsm.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "src/foo.cpp:1-1 (helper_value)\nbody " + arg};
+    });
+    toolsm.register_tool("file_outline", "stub", [](const std::string&) {
+      return AiToolResult{true, "symbols=2\n  helper_value\n  other_thing\n"};
+    });
+    Level2Session sessm(Level2SessionDeps{&toolsm, {}, {}});
+    Level2BootstrapOpts optsm;
+    optsm.workspace_root = rootm.string();
+    optsm.query = "bump helper value";
+    optsm.instruction = "change helper_value constant";
+    expect(sessm.bootstrap(optsm, &err), "bootstrap merge " + err);
+    expect(sessm.status_text(rootm.string()).find("map_stale: no") != std::string::npos,
+           "aligned map not stale");
+    {
+      const auto tr = sessm.apply_plan(rootm.string(), {"src/foo.cpp"}, "bare");
+      expect(tr.ok, "plan bare ok: " + tr.error);
+      const std::string pack = read_all(Level2Session::pack_path(rootm.string()));
+      expect(pack.find("## Target normalize") != std::string::npos, "normalize section");
+      expect(pack.find("helper_value") != std::string::npos, "bare → helper_value");
+      expect(sessm.status_text(rootm.string()).find("pack_incomplete: no") != std::string::npos,
+             "no truncated → pack complete");
+    }
+    {
+      const auto tr = sessm.apply_plan(rootm.string(), {"src/foo.cpp:other_thing"}, "merge");
+      expect(tr.ok, "plan2 merge ok");
+      const std::string pack = read_all(Level2Session::pack_path(rootm.string()));
+      expect(pack.find("helper_value") != std::string::npos, "keeps plan1 target");
+      expect(pack.find("other_thing") != std::string::npos, "adds plan2 target");
+    }
+    expect(sessm.mark_done(rootm.string(), "ready", "edit").ok &&
+               sessm.status_text(rootm.string()).find("phase: edit") != std::string::npos,
+           "complete pack → edit without pushback");
+    fs::remove_all(rootm, ec);
   }
 
   fs::remove_all(root, ec);

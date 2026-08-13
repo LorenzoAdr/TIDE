@@ -439,11 +439,15 @@ std::string build_system_prompt(const std::string& extra) {
          "{\"action\":\"done\",\"summary\":\"cambios listos en paths…\"}  // fin real (sin next)\n"
          "{\"action\":\"edit\",\"hunks\":[{\"path\":\"src/foo.cpp\",\"search\":\"exacto único\","
          "\"replace\":\"nuevo\"}]}\n"
-         "Fases: en explore la PRIMERA mirada es action=plan (watchlist path:Symbol). "
-         "El runtime baja todos los targets + 1 outline/archivo a un pack bajo presupuesto. "
+         "Fases: en explore la PRIMERA mirada es action=plan (watchlist path:Symbol|path:A-B; "
+         "evitar path bare). "
+         "El runtime normaliza bare→símbolo por needles, merge de packs, prioriza fragmentos "
+         "pequeños, auto-refetch de truncados y marca pack_incomplete. "
+         "Si map_stale=1 no confíes en el top del mapa. "
          "Tras el pack el prompt es Instruction+pack (sin mapa). "
          "Extras: tools máx 4. Si [TRUNCATED], usa refetch path:A-B o path:Symbol#mid|#tail "
-         "(default de get_code_of largo = head+tail). "
+         "(default de get_code_of largo = head+tail; path:line en símbolo enorme = ventana). "
+         "done next=edit con pack_incomplete puede rechazarse (pushback). "
          "action=edit es para phase=edit; si emites edit en explore el runtime auto-promueve. "
          "Tras edit el runtime compila: compile OK restaura el mapa inicial y pregunta "
          "«¿algo más?» (plan / edit / done). Clarify prematuro: pushback "
@@ -459,7 +463,8 @@ std::string build_system_prompt(const std::string& extra) {
 }
 
 std::string build_user_prompt(const std::string& workspace_root, const std::string& phase,
-                              int step, bool has_pack, bool map_review) {
+                              int step, bool has_pack, bool map_review, bool map_stale,
+                              bool pack_incomplete) {
   std::ostringstream out;
   out << "phase=" << phase << " step=" << step;
   if (map_review) {
@@ -467,6 +472,12 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
   }
   if (has_pack) {
     out << " has_pack=1";
+  }
+  if (map_stale) {
+    out << " map_stale=1";
+  }
+  if (pack_incomplete) {
+    out << " pack_incomplete=1";
   }
   out << "\n\n";
 
@@ -482,11 +493,14 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
       out << "phase=edit. Opciones:\n"
              "- edit_feedback / compile_feedback → corrige con action=edit.\n"
              "- Instruction cubierta → done sin next.\n"
+             "- Zona [TRUNCATED] en pack → refetch path:A-B / #mid antes de inventar.\n"
              "- Falta contexto → plan o tools.\n"
              "Contexto: Instruction + Code pack (sin mapa rankeado completo).\n\n";
     } else {
-      out << "Ya hay Code pack. Decide: done next=edit, edit, ampliar plan, o tools extras.\n"
-             "Contexto: Instruction + pack (mapa omitido).\n\n";
+      out << "Ya hay Code pack"
+          << (pack_incomplete ? " (**incomplete**: hay Truncated)" : "")
+          << ". Decide: done next=edit, edit, ampliar plan, o tools extras.\n"
+             "Preferir path:Symbol / path:A-B. Contexto: Instruction + pack.\n\n";
     }
     out << read_session_for_pack(workspace_root, kMaxPromptCharsEdit);
   } else if (phase == "edit") {
@@ -494,9 +508,12 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
     out << read_session_for_edit(Level2Session::session_path(workspace_root),
                                  kMaxPromptCharsEdit);
   } else {
-    out << "El ## Ranked map es tu base. Primera acción preferida: "
-           "{\"action\":\"plan\",\"targets\":[\"path:Symbol\",…]} (máx 16). "
-           "El runtime arma el pack. Tools ad-hoc solo si hace falta buscar.\n\n";
+    out << "El ## Ranked map es tu base"
+        << (map_stale ? " (**map_stale**: poco alineado a la Instruction; prioriza search/plan)"
+                      : "")
+        << ". Primera acción preferida: "
+           "{\"action\":\"plan\",\"targets\":[\"path:Symbol\",…]} (máx 16; no path bare). "
+           "El runtime arma el pack (merge + auto-refetch truncados).\n\n";
     out << read_session_for_explore(Level2Session::session_path(workspace_root),
                                     kMaxPromptCharsExplore);
   }
@@ -548,6 +565,8 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     std::string phase = "explore";
     bool has_pack = false;
     bool map_review = false;
+    bool map_stale = false;
+    bool pack_incomplete = false;
     {
       const auto p = status.find("phase: ");
       if (p != std::string::npos) {
@@ -556,6 +575,8 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       }
       has_pack = status.find("has_pack: yes") != std::string::npos;
       map_review = status.find("map_review: yes") != std::string::npos;
+      map_stale = status.find("map_stale: yes") != std::string::npos;
+      pack_incomplete = status.find("pack_incomplete: yes") != std::string::npos;
     }
     if (status.find("done: yes") != std::string::npos || phase == "done" || phase == "clarify") {
       result.ok = phase == "done" || phase == "clarify";
@@ -589,7 +610,9 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
 
     L2BrainRequest breq;
     breq.system_prompt = system;
-    breq.user_prompt = build_user_prompt(opts.workspace_root, phase, step, has_pack, map_review);
+    breq.user_prompt =
+        build_user_prompt(opts.workspace_root, phase, step, has_pack, map_review, map_stale,
+                          pack_incomplete);
     breq.phase = phase;
     breq.max_tokens = opts.settings.max_tokens;
     breq.n_ctx = opts.settings.n_ctx;
@@ -651,6 +674,9 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       tr = session.mark_done(opts.workspace_root, action.summary, action.next);
       if (tr.summary.find("clarify_pushback") != std::string::npos) {
         emit("L2 ▸ clarify prematuro → " + tr.summary + " (pide más código)");
+      }
+      if (tr.summary.find("pack_incomplete_pushback") != std::string::npos) {
+        emit("L2 ▸ pack incompleto → " + tr.summary + " (refetch truncados)");
       }
     } else if (action.kind == L2ActionKind::Edit) {
       // Opción B: si el modelo salta done next=edit estando en explore, auto-promover.
