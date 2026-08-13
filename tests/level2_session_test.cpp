@@ -68,6 +68,13 @@ int main() {
   opts.instruction = "edit value";
   std::string err;
   expect(session.bootstrap(opts, &err), "bootstrap " + err);
+  {
+    const std::string sess0 = read_all(Level2Session::session_path(root.string()));
+    expect(sess0.find("## Tool guide") == std::string::npos,
+           "bootstrap session must not duplicate tool guide (lives in system prompt)");
+    expect(sess0.find("## Instruction") != std::string::npos, "has Instruction");
+    expect(sess0.find("## Ranked map") != std::string::npos, "has Ranked map");
+  }
 
   {
     const auto tr = session.apply_tool(root.string(), "get_code_of", "src/foo.cpp:value");

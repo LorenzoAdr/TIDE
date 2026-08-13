@@ -67,14 +67,17 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
 
 ## Contexto / compile feedback
 
+- Prompt L2 cabe en `ai.level2.n_ctx` (p. ej. 8192): explore ~**10k** chars de sesión + system;
+  edit ~**8k**. No se manda `session.md` entero.
+- **Tool guide solo en system prompt** (no se duplica en `session.md`).
+- Explore slim del mapa en el prompt: detalle/snippet solo en el **top‑5**; el resto es
+  línea de nombre. Tras tools, compactación en disco (detalle solo en stems tocados).
+- Observations en explore: cola ~3.5k chars.
 - Tras compile fail, Observations guarda **cola** del stderr (`kMaxCompileLogLines`, ~40) + old/new de hunks (no el log completo).
 - Tras **edit apply fail** (search no encontrado/ambiguo), Observations guarda `edit_feedback` con error + search/replace; el tab muestra el error. Así el modelo no reemite el mismo hunk a ciegas.
-- En `phase=edit` el prompt al brain usa cola de sesión (~12k chars), no el `session.md` entero.
 - Si el modelo se queda sin contexto, el error cita `ai.level2.n_ctx` (no L1).
-- **Compactación del mapa:** tras cada tool en explore (y al pasar a `edit`), el `## Ranked map`
-  se reduce a **líneas de nombre** (`path:line — symbol`). Solo conservan snippet/why/detalle
-  los stems/paths que L2 ya tocó en Observations (`get_code_of`, `file_outline`, …).
-  La sección `## Bodies` del mapa se descarta (el código vive en Observations).
+- **Compactación del mapa (disco):** tras cada tool en explore (y al pasar a `edit`), el
+  `## Ranked map` queda en líneas de nombre salvo stems/paths ya tocados; se descarta `## Bodies`.
 
 ## Timing en `trace.ndjson`
 

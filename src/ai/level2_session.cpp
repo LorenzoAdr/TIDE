@@ -692,8 +692,8 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   }
 
   std::ostringstream md;
-  md << "# L2 session (harness)\n\n";
-  md << tool_guide_markdown() << "\n";
+  md << "# L2 session\n\n";
+  // Tool guide lives only in the L2 system prompt (avoid duplicating ~1.3k chars into n_ctx).
   md << "## Instruction\n\n";
   md << "query: " << opts.query << "\n\n";
   if (!opts.instruction.empty()) {

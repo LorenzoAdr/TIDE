@@ -3,6 +3,7 @@
 #include <chrono>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 #include "ai/ai_trace.hpp"
 #include "ai/l2_action.hpp"
@@ -10,8 +11,114 @@
 namespace tuide {
 namespace {
 
-constexpr std::size_t kMaxPromptCharsExplore = 24000;
-constexpr std::size_t kMaxPromptCharsEdit = 12000;
+constexpr std::size_t kMaxPromptCharsExplore = 10000;  // fits ai.level2.n_ctx=8192 with system
+constexpr std::size_t kMaxPromptCharsEdit = 8000;
+constexpr std::size_t kExploreObsBudget = 3500;
+constexpr int kExploreMapDetailTop = 5;  // full snippet only for top-N ranked entries in prompt
+
+bool is_map_entry_start_line(const std::string& line) {
+  if (line.empty() || line[0] < '0' || line[0] > '9') {
+    return false;
+  }
+  std::size_t i = 0;
+  while (i < line.size() && line[i] >= '0' && line[i] <= '9') {
+    ++i;
+  }
+  return i < line.size() && line[i] == '.';
+}
+
+std::string first_line_only(const std::string& entry) {
+  const auto nl = entry.find('\n');
+  std::string line = nl == std::string::npos ? entry : entry.substr(0, nl);
+  while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) {
+    line.pop_back();
+  }
+  return line;
+}
+
+// Prompt-time slim: keep detail for first keep_detail entries; name line for the rest.
+// Does not mutate session.md (disk compact still runs after tools).
+std::string slim_ranked_map_for_prompt(const std::string& map_body, int keep_detail,
+                                       std::size_t max_chars) {
+  std::string body = map_body;
+  const auto bodies = body.find("\n## Bodies");
+  if (bodies != std::string::npos) {
+    body = body.substr(0, bodies);
+  }
+
+  std::vector<std::string> entries;
+  std::string preamble;
+  {
+    std::istringstream in(body);
+    std::string line;
+    std::ostringstream pre;
+    std::ostringstream cur;
+    bool in_entry = false;
+    auto flush = [&]() {
+      if (!in_entry) {
+        return;
+      }
+      std::string e = cur.str();
+      while (!e.empty() && (e.back() == '\n' || e.back() == '\r')) {
+        e.pop_back();
+      }
+      if (!e.empty()) {
+        entries.push_back(std::move(e));
+      }
+      cur.str("");
+      cur.clear();
+    };
+    while (std::getline(in, line)) {
+      if (is_map_entry_start_line(line)) {
+        if (!in_entry) {
+          preamble = pre.str();
+        }
+        flush();
+        in_entry = true;
+        cur << line << '\n';
+      } else if (in_entry) {
+        cur << line << '\n';
+      } else {
+        pre << line << '\n';
+      }
+    }
+    flush();
+    if (!in_entry) {
+      preamble = pre.str();
+    }
+  }
+
+  std::ostringstream out;
+  out << preamble;
+  if (preamble.find("## Ranked entries") == std::string::npos && !entries.empty()) {
+    out << "## Ranked entries\n\n";
+  }
+  for (std::size_t i = 0; i < entries.size(); ++i) {
+    if (static_cast<int>(i) < keep_detail) {
+      out << entries[i] << "\n\n";
+    } else {
+      out << first_line_only(entries[i]) << "\n";
+    }
+  }
+  std::string slim = out.str();
+  if (slim.size() > max_chars) {
+    slim = slim.substr(0, max_chars) +
+           "\n…[map prompt truncado; prioriza score alto / usa tools]…\n";
+  }
+  return slim;
+}
+
+std::string session_prompt_header(const std::string& body, std::size_t map_pos) {
+  // Prefer ## Instruction (skip legacy duplicated ## Tool guide in old sessions).
+  const std::string instr_mark = "## Instruction";
+  const auto instr_pos = body.find(instr_mark);
+  if (instr_pos != std::string::npos && instr_pos < map_pos) {
+    return body.substr(instr_pos, map_pos - instr_pos);
+  }
+  // Fallback: short slice before map.
+  const std::size_t start = map_pos > 800 ? map_pos - 800 : 0;
+  return body.substr(start, map_pos - start);
+}
 
 std::string read_file_tail(const std::string& path, std::size_t max_chars) {
   std::ifstream in(path);
@@ -24,12 +131,12 @@ std::string read_file_tail(const std::string& path, std::size_t max_chars) {
   if (body.size() <= max_chars) {
     return body;
   }
-  // Prefer session header (query/instruction) + recent Observations tail.
   const std::string obs_mark = "## Observations";
   const auto obs_pos = body.find(obs_mark);
   if (obs_pos != std::string::npos && obs_pos < max_chars / 3) {
     const std::string head = body.substr(0, std::min(obs_pos + obs_mark.size() + 2, max_chars / 4));
-    const std::size_t tail_budget = max_chars > head.size() + 40 ? max_chars - head.size() - 40 : max_chars / 2;
+    const std::size_t tail_budget =
+        max_chars > head.size() + 40 ? max_chars - head.size() - 40 : max_chars / 2;
     const std::string tail = body.substr(body.size() - tail_budget);
     return head + "\n\n…[observations medias omitidas]…\n\n" + tail;
   }
@@ -53,9 +160,7 @@ std::string read_file_limited(const std::string& path, std::size_t max_chars) {
          body.substr(body.size() - tail);
 }
 
-// Explore: keep instruction header + top of ## Ranked map (highest scores), then a short
-// Observations tail if present. Dropping low-ranked map tail is intentional.
-// After tools, session map is compacted on disk (name-only except hot stems).
+// Explore: Instruction + slim map (detail only top-N) + short Observations tail.
 std::string read_session_for_explore(const std::string& path, std::size_t max_chars) {
   std::ifstream in(path);
   if (!in) {
@@ -64,9 +169,6 @@ std::string read_session_for_explore(const std::string& path, std::size_t max_ch
   std::ostringstream ss;
   ss << in.rdbuf();
   std::string body = ss.str();
-  if (body.size() <= max_chars) {
-    return body;
-  }
 
   const std::string map_mark = "## Ranked map";
   const std::string obs_mark = "## Observations";
@@ -74,10 +176,15 @@ std::string read_session_for_explore(const std::string& path, std::size_t max_ch
   const auto obs_pos = body.find(obs_mark);
 
   if (map_pos == std::string::npos) {
+    if (body.size() <= max_chars) {
+      return body;
+    }
     return read_file_limited(path, max_chars);
   }
 
-  const std::string header = body.substr(0, map_pos + map_mark.size());
+  std::string header = session_prompt_header(body, map_pos);
+  header += map_mark;
+
   std::string map_body;
   std::string obs_body;
   if (obs_pos != std::string::npos && obs_pos > map_pos) {
@@ -87,26 +194,32 @@ std::string read_session_for_explore(const std::string& path, std::size_t max_ch
     map_body = body.substr(map_pos + map_mark.size());
   }
 
-  // Prefer recent observations (tool bodies) over map filler once explore has started.
-  constexpr std::size_t kObsBudget = 6000;
-  if (obs_body.size() > kObsBudget) {
-    const std::string obs_head = obs_body.substr(0, obs_mark.size() + 2);
-    obs_body = obs_head + "\n…[observations medias omitidas]…\n\n" +
-               obs_body.substr(obs_body.size() - (kObsBudget - 80));
+  if (obs_body.size() > kExploreObsBudget) {
+    const std::string obs_head = obs_mark + "\n\n";
+    const std::size_t keep = kExploreObsBudget > 100 ? kExploreObsBudget - 80 : kExploreObsBudget / 2;
+    obs_body = obs_head + "…[observations medias omitidas]…\n\n" +
+               obs_body.substr(obs_body.size() - std::min(keep, obs_body.size()));
   }
 
-  const std::size_t reserved = header.size() + obs_body.size() + 80;
+  const std::size_t reserved = header.size() + obs_body.size() + 100;
   const std::size_t map_budget =
-      max_chars > reserved ? max_chars - reserved : max_chars / 2;
-  if (map_body.size() > map_budget) {
-    map_body = map_body.substr(0, map_budget) +
-               "\n\n…[ranked map cola omitida; prioriza entradas con score alto / hot stems]…\n";
-  }
+      max_chars > reserved ? max_chars - reserved : max_chars / 3;
+  map_body = slim_ranked_map_for_prompt(map_body, kExploreMapDetailTop, map_budget);
 
-  return header + map_body + obs_body;
+  std::string out = header + "\n" + map_body;
+  if (!obs_body.empty()) {
+    if (out.empty() || out.back() != '\n') {
+      out.push_back('\n');
+    }
+    out += obs_body;
+  }
+  if (out.size() > max_chars) {
+    out = out.substr(0, max_chars) + "\n…[explore prompt truncado]…\n";
+  }
+  return out;
 }
 
-// Edit: instruction + (compact) map if small + Observations tail with feedback.
+// Edit: instruction + compact map slice + Observations tail (feedback).
 std::string read_session_for_edit(const std::string& path, std::size_t max_chars) {
   std::ifstream in(path);
   if (!in) {
@@ -116,6 +229,12 @@ std::string read_session_for_edit(const std::string& path, std::size_t max_chars
   ss << in.rdbuf();
   std::string body = ss.str();
   if (body.size() <= max_chars) {
+    // Still drop legacy tool guide if present.
+    const std::string instr_mark = "## Instruction";
+    const auto instr_pos = body.find(instr_mark);
+    if (instr_pos != std::string::npos && instr_pos > 0) {
+      return body.substr(instr_pos);
+    }
     return body;
   }
 
@@ -127,21 +246,13 @@ std::string read_session_for_edit(const std::string& path, std::size_t max_chars
     return read_file_tail(path, max_chars);
   }
 
-  // Keep Instruction (skip long tool guide): from ## Instruction or map_pos head slice.
-  const std::string instr_mark = "## Instruction";
-  auto instr_pos = body.find(instr_mark);
-  if (instr_pos == std::string::npos || instr_pos > map_pos) {
-    instr_pos = map_pos;
-  }
-  std::string head = body.substr(instr_pos, obs_pos - instr_pos);
-  constexpr std::size_t kMapCap = 8000;
-  if (head.size() > kMapCap) {
-    // Keep Instruction + start of map (hot stems are usually near the top after compact).
-    const std::string instr =
-        body.substr(instr_pos, std::min(map_pos - instr_pos + map_mark.size() + 2, kMapCap / 4));
-    head = instr + body.substr(map_pos + map_mark.size(), kMapCap - instr.size());
-    head += "\n…[map cola omitida]…\n";
-  }
+  std::string head = session_prompt_header(body, map_pos);
+  head += map_mark;
+  std::string map_body =
+      body.substr(map_pos + map_mark.size(), obs_pos - (map_pos + map_mark.size()));
+  constexpr std::size_t kMapCap = 4000;
+  map_body = slim_ranked_map_for_prompt(map_body, 3, kMapCap);
+  head += "\n" + map_body;
 
   const std::size_t tail_budget =
       max_chars > head.size() + 60 ? max_chars - head.size() - 60 : max_chars / 2;
@@ -199,9 +310,9 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
     out << read_session_for_edit(Level2Session::session_path(workspace_root),
                                  kMaxPromptCharsEdit);
   } else {
-    out << "El ## Ranked map es tu base. Explora (tools) y decide la siguiente acción JSON. "
-           "Tras el primer tool el mapa se compacta: nombres para el resto, detalle solo "
-           "en stems que ya leíste.\n\n";
+    out << "El ## Ranked map es tu base (en el prompt: detalle solo top‑5, resto nombres). "
+           "Explora con tools y decide la siguiente acción JSON. Tras el primer tool el mapa "
+           "en disco se compacta (detalle solo en stems leídos).\n\n";
     out << read_session_for_explore(Level2Session::session_path(workspace_root),
                                     kMaxPromptCharsExplore);
   }
