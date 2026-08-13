@@ -52,6 +52,55 @@ std::string read_file_limited(const std::string& path, std::size_t max_chars) {
          body.substr(body.size() - tail);
 }
 
+// Explore: keep instruction header + top of ## Ranked map (highest scores), then a short
+// Observations tail if present. Dropping low-ranked map tail is intentional.
+std::string read_session_for_explore(const std::string& path, std::size_t max_chars) {
+  std::ifstream in(path);
+  if (!in) {
+    return {};
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  std::string body = ss.str();
+  if (body.size() <= max_chars) {
+    return body;
+  }
+
+  const std::string map_mark = "## Ranked map";
+  const std::string obs_mark = "## Observations";
+  const auto map_pos = body.find(map_mark);
+  const auto obs_pos = body.find(obs_mark);
+
+  if (map_pos == std::string::npos) {
+    return read_file_limited(path, max_chars);
+  }
+
+  const std::string header = body.substr(0, map_pos + map_mark.size());
+  std::string map_body;
+  std::string obs_body;
+  if (obs_pos != std::string::npos && obs_pos > map_pos) {
+    map_body = body.substr(map_pos + map_mark.size(), obs_pos - (map_pos + map_mark.size()));
+    obs_body = body.substr(obs_pos);
+  } else {
+    map_body = body.substr(map_pos + map_mark.size());
+  }
+
+  constexpr std::size_t kObsBudget = 4000;
+  if (obs_body.size() > kObsBudget) {
+    obs_body = obs_body.substr(0, kObsBudget) + "\n…[observations truncadas]…\n";
+  }
+
+  const std::size_t reserved = header.size() + obs_body.size() + 80;
+  const std::size_t map_budget =
+      max_chars > reserved ? max_chars - reserved : max_chars / 2;
+  if (map_body.size() > map_budget) {
+    map_body = map_body.substr(0, map_budget) +
+               "\n\n…[ranked map cola omitida; prioriza entradas con score alto]…\n";
+  }
+
+  return header + map_body + obs_body;
+}
+
 std::string phase_banner(const std::string& phase, int step, int max_steps) {
   return "L2 ▸ fase=" + phase + " paso=" + std::to_string(step) + "/" +
          std::to_string(max_steps);
@@ -71,6 +120,8 @@ std::string build_system_prompt(const std::string& extra) {
          "{\"action\":\"edit\",\"hunks\":[{\"path\":\"src/foo.cpp\",\"search\":\"exacto único\","
          "\"replace\":\"nuevo\"}]}\n"
          "Fases: en explore SOLO tool|done (preferible done next=edit al cerrar). "
+         "El ## Ranked map de la sesión es el punto de partida: prioriza entradas altas y "
+         "decide qué leer. "
          "action=edit es para phase=edit; si emites edit aún en explore el runtime "
          "auto-promueve a edit y aplica. "
          "Reglas: next=edit solo con evidencia en Observations; search debe ser único en el "
@@ -91,8 +142,9 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
            "(stderr tail + old/new). No pidas la traza completa.\n\n";
     out << read_file_tail(Level2Session::session_path(workspace_root), kMaxPromptCharsEdit);
   } else {
-    out << "Lee la sesión y emite la siguiente acción JSON.\n\n";
-    out << read_file_limited(Level2Session::session_path(workspace_root), kMaxPromptCharsExplore);
+    out << "El ## Ranked map es tu base. Explora (tools) y decide la siguiente acción JSON.\n\n";
+    out << read_session_for_explore(Level2Session::session_path(workspace_root),
+                                    kMaxPromptCharsExplore);
   }
   return out.str();
 }

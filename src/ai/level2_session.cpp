@@ -395,7 +395,8 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
     }
     md << "\n\n";
   }
-  md << "Fase inicial: **explore**. Al terminar: "
+  md << "Fase inicial: **explore**. El ## Ranked map es el punto de partida: elige qué leer "
+        "con tools y decide el cambio. Al terminar: "
         "`{\"action\":\"done\",\"summary\":\"…\",\"next\":\"edit\"}`.\n\n";
   md << "## Ranked map\n\n";
   md << map_body;

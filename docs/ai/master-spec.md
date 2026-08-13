@@ -484,6 +484,8 @@ Objetivo: validar el payload hacia L2 **antes** de descargar Coder-7B (~4.5 GB) 
 Cuando L1 decide `needs_level2` (o `/l2`):
 
 1. L1 ensambla instrucción + mapa rankeado (`map_last.md`) sin bodies.
+   En pedidos de **modificar código** (`code_edit`) elabora el mapa completo (catálogo ancho);
+   ese mapa es la base de exploración de L2.
 2. Con `ai.level2.mode = dry_run` (default): auditar mapa en tab AI / `.tuide/ai/map_last.md`.
 3. Con `ai.level2.mode = harness`: bootstrap de `.tuide/ai/l2/session.md` (tool guide + instruction + mapa + observations). Un agente Cursor escribe `request.json`; tuide ejecuta `/l2_turn` / `/l2_tool` y acumula observaciones (trim de las más antiguas). Ver `docs/ai/l2-harness-prompt.md` y `tools/l2_harness.sh`.
 4. `edit` / coder real quedan para Fase E (`local` | `remote`).

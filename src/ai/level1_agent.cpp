@@ -105,7 +105,8 @@ std::string Level1Agent::build_system_prompt() const {
          "  {\"action\":\"tool\",\"name\":\"git_pull\",\"arg\":\"\"}\n"
          "NO uses git_* para localizar implementación en el código fuente.\n"
          "NO uses git_* si el usuario pide AÑADIR/CAMBIAR UI o código (pestaña, tab, panel, "
-         "texto fijo, label, feature): eso es needs_level2.\n"
+         "texto fijo, label, feature): el runtime elabora el mapa rankeado completo y escala "
+         "a L2 (needs_level2); L2 decide qué leer/editar.\n"
          "Ejemplos needs_level2: \"añade una pestaña…\", \"pon un texto fijo…\", "
          "\"cambia el label del tab…\", \"implementa X en console_panel\".\n"
          "Tras observación útil: action=final con resumen breve.\n"
@@ -525,16 +526,17 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
       query_asks_context_dump(user_message) && !query_asks_git_repo(user_message);
   const bool code_edit =
       query_asks_code_edit(user_message) && !query_asks_git_repo(user_message);
+  // code_edit uses the same ranked-map pipeline: full map is L2's explore base.
   const bool code_locate =
-      (query_asks_code_location(user_message) || context_dump) &&
-      !query_asks_git_repo(user_message) && !code_edit;
+      (query_asks_code_location(user_message) || context_dump || code_edit) &&
+      !query_asks_git_repo(user_message);
 
   RepoMapOptions map_opts;
   map_opts.query = user_message;
   map_opts.active_file = relative_active_file(deps_.workspace);
-  // Context dump: L1 ranking is a weak prior — pass a wide catalog to L2.
-  // Investigate: still broader than before, but keep embed body cost bounded.
-  if (context_dump) {
+  // Context dump / code edit: wide catalog — L2 decides from the ranked map.
+  // Investigate-only: still broad, but keep embed body cost bounded.
+  if (context_dump || code_edit) {
     map_opts.max_symbols = 400;
     map_opts.max_files = 120;
     map_opts.max_chars = 120000;
@@ -572,88 +574,14 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
     return !m.entries.empty() && m.note.find("query_hits=") != std::string::npos;
   };
 
-  // Product/UI edit requests ("añade una pestaña…"): never git_*; hand off to L2 with map.
-  if (code_edit) {
-    if (log) {
-      log("L1 agent start (code_edit → needs_level2; max_steps skipped)");
-    }
-    std::vector<std::string> needles = {"ConsolePanelTabs", "console.tab", "make_tab_button",
-                                        "console_panel", "press_id"};
-    for (const auto& t : extract_code_tokens(user_message, 8)) {
-      needles.push_back(t);
-    }
-    for (const auto& t : expand_nl_retrieval_tokens(repo_map_query_tokens(user_message, 12), 24)) {
-      needles.push_back(t);
-    }
-    map_opts.extra_needles = needles;
-    map_opts.max_symbols = 256;
-    RepoMap repo_map = build_repo_map_from_indexer(deps_.symbol_indexer, map_opts);
-
-    const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
-    TwoStageRerankOptions rr_opts;
-    rr_opts.query = user_message;
-    rr_opts.needles = needles;
-    rr_opts.workspace_root = root;
-    rr_opts.phase_a_pool = 256;
-    rr_opts.phase_a_top = 96;
-    rr_opts.final_top = 120;
-    rr_opts.max_per_file = 8;
-    rr_opts.fetch_bodies = false;
-    TwoStageRerankResult ranked =
-        rerank_map_two_stage(repo_map.entries, rr_opts, deps_.embed);
-    apply_ranked_map_priors(user_message, &ranked.entries, deps_.coding_stem_index, deps_.embed);
-    if (!ranked.note.empty()) {
-      ranked.note += "; ";
-    }
-    ranked.note += "code_edit=1";
-
-    RankedMapDumpOptions dump_opts;
-    dump_opts.workspace_root = root;
-    dump_opts.query = user_message;
-    dump_opts.note = ranked.note.empty() ? repo_map.note : ranked.note;
-    dump_opts.entries = ranked.entries.empty() ? repo_map.entries : ranked.entries;
-    dump_opts.include_bodies = false;
-    dump_opts.filename = "map_last.md";
-    std::string err;
-    const std::string path = dump_ranked_map_md(dump_opts, &err);
-
-    out.ok = true;
-    out.needs_level2 = true;
-    out.instruction = user_message;
-    out.seeds = needles;
-    const auto& seed_entries = dump_opts.entries;
-    for (const auto& e : seed_entries) {
-      if (!e.name.empty()) {
-        out.seeds.push_back(e.name);
-      }
-      if (out.seeds.size() >= 32) {
-        break;
-      }
-    }
-    std::ostringstream summary;
-    summary << "Cambio de UI/código detectado → L2 (sin git_*).\n";
-    if (!path.empty()) {
-      summary << "Mapa → `.tuide/ai/map_last.md`\n";
-    } else if (!err.empty()) {
-      summary << "Mapa (aviso): " << err << '\n';
-    }
-    summary << format_ranked_map_answer(dump_opts.entries, 48, {});
-    out.final_text = summary.str();
-    if (log) {
-      log("L1 → needs_level2 (code_edit); instruction=user query");
-      log(out.final_text);
-    }
-    ai_trace(AiTraceChannel::L1, "l2_handoff",
-             "{\"via\":\"code_edit\",\"entries\":" + std::to_string(dump_opts.entries.size()) + "}");
-    return out;
-  }
-
-  // Investigate: L1 always proposes needles (shown in transcript), then REPO_MAP
-  // is re-ranked with them. Lexical-only short-circuit skipped NL like "búsqueda de
-  // strings" with weak incidental hits and never showed needles.
+  // Investigate / context dump / code edit: needles → REPO_MAP → ranked map → L2 (edit).
+  // Lexical-only short-circuit skipped NL like "búsqueda de strings" with weak incidental
+  // hits and never showed needles.
   if (code_locate) {
     if (log) {
-      log(std::string("L1 agent start (") + (context_dump ? "context_dump" : "investigate") +
+      const char* via_label =
+          code_edit ? "code_edit" : (context_dump ? "context_dump" : "investigate");
+      log(std::string("L1 agent start (") + via_label +
           "; max_steps=" + std::to_string(max_steps) + ")");
     }
 
@@ -721,12 +649,13 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
       rr_opts.query = user_message;
       rr_opts.needles = needles;
       rr_opts.workspace_root = root;
-      if (context_dump) {
+      if (context_dump || code_edit) {
+        // Full ranked map as L2 explore base (signatures only; L2 reads bodies).
         rr_opts.phase_a_pool = 400;
         rr_opts.phase_a_top = 280;
         rr_opts.final_top = 280;
         rr_opts.max_per_file = 14;
-        rr_opts.fetch_bodies = false;  // L2 lee cuerpos; ahorrar embed B
+        rr_opts.fetch_bodies = false;
         rr_opts.skip_phase_a = false;
         rr_opts.body_max_lines = 80;
       } else {
@@ -769,7 +698,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
         }
         enrich_ranked_map_hints(&ranked.entries, root, user_message, snap_ptr,
                                 deps_.coding_stem_index, deps_.embed, &ranked.body_texts,
-                                context_dump ? 48 : 32);
+                                (context_dump || code_edit) ? 48 : 32);
       }
 
       ai_trace(AiTraceChannel::L1, "l1_embed_phase_a",
@@ -788,6 +717,9 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
       }
       map_note += ranked.note;
       map_note += "; lex_prefilter=1; src=lexical_shortlist";
+      if (code_edit) {
+        map_note += "; code_edit=1";
+      }
 
       RankedMapDumpOptions dump_opts;
       dump_opts.workspace_root = root;
@@ -807,30 +739,46 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
                    std::to_string(ranked.entries.size()) + ",\"path\":\"" +
                    ai_trace_escape(path) + "\",\"note\":\"" + ai_trace_escape(map_note) +
                    "\",\"l2\":" + (l2_active ? "1" : "0") +
+                   ",\"code_edit\":" + (code_edit ? "1" : "0") +
                    ",\"total_ms\":" + std::to_string(ranked.total_ms) +
                    ",\"symbol_index\":0}");
 
       out.ok = true;
       std::ostringstream summary;
-      summary << "Mapa rankeado";
+      if (code_edit) {
+        summary << "Cambio de código → mapa rankeado completo para L2";
+      } else {
+        summary << "Mapa rankeado";
+      }
       if (!path.empty()) {
         summary << " → `.tuide/ai/map_last.md`";
       } else if (!err.empty()) {
         summary << " (falló escritura: " << err << ")";
       }
       summary << " (" << ranked.note << ")\n";
-      summary << format_ranked_map_answer(ranked.entries, context_dump ? 120 : 64, {});
+      summary << format_ranked_map_answer(ranked.entries,
+                                          (context_dump || code_edit) ? 120 : 64, {});
       out.final_text = summary.str();
 
-      if (l2_active) {
+      // code_edit always hands off: the ranked map is L2's explore base.
+      if (l2_active || code_edit) {
         out.needs_level2 = true;
-        out.instruction =
-            context_dump
-                ? "Elige del mapa rankeado los símbolos relevantes y lee cuerpos con get_code_of."
-                : "Localiza en el mapa rankeado dónde está la implementación pedida.";
+        if (code_edit) {
+          out.instruction =
+              "El ## Ranked map es tu base de exploración. Elige candidatos, lee cuerpos "
+              "con get_code_of/search/file_outline y decide qué editar con Search/Replace. "
+              "Pedido del usuario:\n" +
+              user_message;
+        } else if (context_dump) {
+          out.instruction =
+              "Elige del mapa rankeado los símbolos relevantes y lee cuerpos con get_code_of.";
+        } else {
+          out.instruction =
+              "Localiza en el mapa rankeado dónde está la implementación pedida.";
+        }
         out.seeds = needles;
         if (out.seeds.empty()) {
-          const std::size_t seed_cap = context_dump ? 48 : 24;
+          const std::size_t seed_cap = (context_dump || code_edit) ? 48 : 24;
           for (const auto& e : ranked.entries) {
             if (!e.name.empty()) {
               out.seeds.push_back(e.name);
@@ -841,13 +789,15 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           }
         }
         if (log) {
-          log(std::string("L1 → l2_handoff via ") + via + "; path=" +
+          log(std::string("L1 → l2_handoff via ") + via +
+              (code_edit ? " (code_edit)" : "") + "; path=" +
               (path.empty() ? "(none)" : path));
           log(out.final_text);
         }
         ai_trace(AiTraceChannel::L1, "l2_handoff",
                  std::string("{\"via\":\"") + via + "\",\"entries\":" +
-                     std::to_string(ranked.entries.size()) + "}");
+                     std::to_string(ranked.entries.size()) +
+                     ",\"code_edit\":" + (code_edit ? "1" : "0") + "}");
         return;
       }
 
@@ -860,7 +810,8 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
       ai_trace(AiTraceChannel::L1, "l1_ranked_map_shown",
                std::string("{\"via\":\"") + via + "\",\"entries\":" +
                    std::to_string(ranked.entries.size()) + ",\"context_dump\":" +
-                   (context_dump ? "1" : "0") + "}");
+                   (context_dump ? "1" : "0") + ",\"code_edit\":" +
+                   (code_edit ? "1" : "0") + "}");
     };
 
     RepoMap repo_map = lexical_map;

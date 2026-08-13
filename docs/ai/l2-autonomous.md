@@ -71,6 +71,12 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
 - En `phase=edit` el prompt al brain usa cola de sesión (~12k chars), no el `session.md` entero.
 - Si el modelo se queda sin contexto, el error cita `ai.level2.n_ctx` (no L1).
 
+## Handoff code_edit (modificar código)
+
+1. L1 detecta pedido de cambio → elabora **mapa rankeado completo** (catálogo ancho, sin bodies).
+2. Escribe `.tuide/ai/map_last.md` y siembra `session.md` con ese mapa como `## Ranked map`.
+3. L2 en **explore** usa ese mapa como punto de partida (prioriza score alto), lee cuerpos con tools y decide el edit.
+
 ## Tests sin modelo
 
 ```bash
