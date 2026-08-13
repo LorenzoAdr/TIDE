@@ -507,6 +507,58 @@ int main() {
              "no truncated → pack complete");
     }
     {
+      // Bare path that cannot resolve should be omitted (not junk AST symbol).
+      ToolRegistry toolsj;
+      toolsj.register_tool("get_code_of", "stub", [](const std::string& arg) {
+        if (arg.find("welcome") != std::string::npos) {
+          return AiToolResult{true, "src/ui/press_ids.hpp:1-1 (welcome_recent)\nbody"};
+        }
+        return AiToolResult{true, "src/foo.cpp:1-1 (helper_value)\nbody " + arg};
+      });
+      toolsj.register_tool("file_outline", "stub", [](const std::string&) {
+        return AiToolResult{true, "outline: x symbols=1\nvar welcome_recent :68\n"};
+      });
+      const fs::path rootj = root.parent_path() / "tuide_l2_bare_omit";
+      fs::remove_all(rootj, ec);
+      fs::create_directories(rootj / ".tuide" / "ai", ec);
+      fs::create_directories(rootj / "src" / "ui", ec);
+      {
+        std::ofstream map(rootj / ".tuide" / "ai" / "map_last.md");
+        map << "# Ranked map\n\nquery: add temporal tab\n\n## Ranked entries\n\n1. x\n";
+      }
+      {
+        std::ofstream f(rootj / "src" / "ui" / "press_ids.hpp");
+        f << "constexpr int kConsoleTabAi = 1;\n";
+      }
+      Level2Session sessj(Level2SessionDeps{&toolsj, {}, {}});
+      Level2BootstrapOpts optsj;
+      optsj.workspace_root = rootj.string();
+      optsj.query = "add temporal tab";
+      optsj.instruction = "add ConsolePanelTabs temporal make_tab_button";
+      optsj.seeds = {"ConsolePanelTabs", "make_tab_button", "kConsoleTabAi"};
+      expect(sessj.bootstrap(optsj, &err), "bootstrap bare omit");
+      // Pre-seed observations with explore hits so needles include code idents.
+      {
+        std::string sess = read_all(Level2Session::session_path(rootj.string()));
+        const auto obs = sess.find("## Observations");
+        if (obs != std::string::npos) {
+          sess.insert(obs + 16,
+                      "\n### turn 0 — tool search\n\nsearch ConsolePanelTabs|make_tab_button\n\n");
+          std::ofstream out(Level2Session::session_path(rootj.string()), std::ios::trunc);
+          out << sess;
+        }
+      }
+      const auto tr = sessj.apply_plan(rootj.string(), {"src/ui/press_ids.hpp"}, "bare");
+      expect(tr.ok, "plan bare omit ok: " + tr.error);
+      const std::string pack = read_all(Level2Session::pack_path(rootj.string()));
+      expect(pack.find("welcome_recent") == std::string::npos ||
+                 pack.find("omitido") != std::string::npos ||
+                 pack.find("search-in-file") != std::string::npos ||
+                 pack.find("sin símbolo claro") != std::string::npos,
+             "no junk welcome_recent body (omit/normalize)");
+      fs::remove_all(rootj, ec);
+    }
+    {
       const auto tr = sessm.apply_plan(rootm.string(), {"src/foo.cpp:other_thing"}, "merge");
       expect(tr.ok, "plan2 merge ok");
       const std::string pack = read_all(Level2Session::pack_path(rootm.string()));

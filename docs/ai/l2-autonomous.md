@@ -75,18 +75,22 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
 - **Tool guide solo en system prompt** (no se duplica en `session.md`).
 - **Flujo plan → pack:** en explore la primera mirada preferida es
   `{"action":"plan","targets":["path:Symbol","path:A-B",…]}` (máx. 16; evitar path bare).
-  El runtime **merge** watchlists (plan2 no pisa plan1), normaliza bare→símbolo por overlap
-  con Instruction, prioriza fragmentos pequeños, tope ~25%/pieza, **auto-refetch** de huecos
-  truncados, y escribe `.tuide/ai/l2/pack.md` (~9k chars) + outlines/headers. Si quedan
-  truncados → `pack_incomplete` (pushback en `done next=edit`). Tras el pack, el prompt es
-  **Instruction + pack**. `tools` (máx. 4) para extras.
+  El runtime **merge** watchlists (plan2 no pisa plan1), normaliza bare→símbolo/ventana por
+  outline + **search-in-file**, prioriza por **roles** (decl/id_const/layout/control/api_fn)
+  con slot mínimo por rol (layout×2 temprano: decl boxes + click-targets), tope ~25%/pieza,
+  **auto-refetch** anclado a `path:line`, y escribe `.tuide/ai/l2/pack.md` (~9k chars).
+  Overflow del pack **no** hace head+tail del documento entero (borra el medio): recorta
+  outlines/headers/truncated. Bare sin resolución se **omite**. Ruido merge débil se
+  aplaza. Si quedan truncados → `pack_incomplete`.
 - **map_stale:** si la `query:` del `map_last` solapa poco la Instruction, bootstrap marca
   `map_stale` y el prompt pide no confiar en el top del mapa (search/plan anclado).
+- **Needles del pack:** Instruction + seeds + idents de Observations (`search` /
+  `get_code_of`). `wrong_symbol` no dispara si el nombre coincide con el `path:Symbol`
+  pedido o con `path:line`.
 - **Truncado de cuerpos:** `get_code_of` por defecto usa **head+tail** si el símbolo supera
   `max_lines` (~120). Con `path:line` dentro de un símbolo grande → **ventana** alrededor
-  de la línea. Marca `[TRUNCATED]` con `symbol_span` / `missing_lines` / `refetch`.
-  Ventanas: `path:Symbol#head|#mid|#tail` y `path:A-B`. El pack añade `## Truncated`;
-  WARN `wrong_symbol` si el nombre resuelto no solapa needles de la Instruction.
+  de la línea (refetch = ventana adyacente). Marca `[TRUNCATED]` con `symbol_span` /
+  `missing_lines` / `refetch`. Outlines en pack se filtran por needles.
 - Bootstrap guarda `.tuide/ai/l2/map_initial.md` (mapa completo).
 - Explore slim del mapa en el prompt (antes del pack): detalle solo top‑5; resto nombres.
 - Observations en explore: cola ~3.5k chars.

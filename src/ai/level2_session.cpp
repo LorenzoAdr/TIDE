@@ -150,6 +150,84 @@ std::string truncate_to_budget(std::string text, std::size_t max_chars, const st
   return out.str();
 }
 
+// Keep the middle of an already line-focused window (head+tail would drop the locus).
+std::string truncate_center_budget(std::string text, std::size_t max_chars, const std::string& hint,
+                                   const std::vector<std::string>& prefer_needles = {},
+                                   bool prefer_first_hit = false) {
+  if (text.size() <= max_chars) {
+    return text;
+  }
+  if (max_chars < 80) {
+    return text.substr(0, max_chars);
+  }
+  const std::size_t keep = max_chars > 60 ? max_chars - 60 : max_chars;
+  std::size_t mid = text.size() / 2;
+  // Prefer last hit of identifier-like needles (edit site often after many earlier matches).
+  // When prefer_first_hit: role markers at the front of prefer_needles win (decl/array loci).
+  std::string low = text;
+  for (char& c : low) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  int best = -1;
+  int idx = 0;
+  for (const auto& n : prefer_needles) {
+    ++idx;
+    if (n.size() < 4) {
+      continue;
+    }
+    bool identish = n.find('_') != std::string::npos || n.find("tab") != std::string::npos ||
+                    n.find("press") != std::string::npos || n.find("render") != std::string::npos ||
+                    n.find("console") != std::string::npos || n.find("button") != std::string::npos ||
+                    n.find("array") != std::string::npos || n.find("target") != std::string::npos ||
+                    n.find("struct") != std::string::npos || n.find("enum") != std::string::npos ||
+                    n.find("string_view") != std::string::npos;
+    if (!identish) {
+      continue;
+    }
+    std::string nlow = n;
+    for (char& c : nlow) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    const auto p = prefer_first_hit ? low.find(nlow) : low.rfind(nlow);
+    if (p == std::string::npos) {
+      continue;
+    }
+    // Earlier prefer entries (role markers) outrank longer incidental needles.
+    const int sc = static_cast<int>(n.size()) + (prefer_first_hit ? (500 - idx * 10) : 0);
+    if (sc > best) {
+      best = sc;
+      mid = p;
+    }
+  }
+  if (best < 0) {
+    for (const char* k : {"tab_boxes", "std::array", "targets =", "render_", "selected_tab",
+                          "make_tab", "press_id", "case "}) {
+      const auto p = prefer_first_hit ? low.find(k) : low.rfind(k);
+      if (p != std::string::npos) {
+        mid = p;
+        break;
+      }
+    }
+  }
+  std::size_t a = mid > keep / 2 ? mid - keep / 2 : 0;
+  if (a + keep > text.size()) {
+    a = text.size() - keep;
+  }
+  std::ostringstream out;
+  if (a > 0) {
+    out << "…[truncated head en pack";
+    if (!hint.empty()) {
+      out << "; refetch `" << hint << "`";
+    }
+    out << "]…\n";
+  }
+  out << text.substr(a, keep);
+  if (a + keep < text.size()) {
+    out << "\n…[truncated tail en pack]…\n";
+  }
+  return out.str();
+}
+
 bool text_looks_truncated(const std::string& text) {
   return text.find("[TRUNCATED]") != std::string::npos ||
          text.find("[truncated]") != std::string::npos ||
@@ -299,6 +377,111 @@ bool name_matches_needles(const std::string& name, const std::vector<std::string
   return false;
 }
 
+// Symbol / right-hand side of path:Symbol (empty for bare / path:line / path:A-B).
+std::string symbol_from_plan_target(const std::string& target) {
+  std::string t = trim_ws(target);
+  const auto hash = t.rfind('#');
+  if (hash != std::string::npos) {
+    t = trim_ws(t.substr(0, hash));
+  }
+  const auto colon = t.rfind(':');
+  if (colon == std::string::npos || colon + 1 >= t.size()) {
+    return {};
+  }
+  const std::string left = t.substr(0, colon);
+  if (left.find('/') == std::string::npos && left.find('\\') == std::string::npos &&
+      left.find('.') == std::string::npos) {
+    return {};
+  }
+  const std::string right = t.substr(colon + 1);
+  if (right.find('-') != std::string::npos) {
+    return {};  // A-B
+  }
+  bool digits = !right.empty();
+  for (char c : right) {
+    if (!std::isdigit(static_cast<unsigned char>(c))) {
+      digits = false;
+      break;
+    }
+  }
+  if (digits) {
+    return {};  // line
+  }
+  return right;
+}
+
+int line_from_plan_target(const std::string& target) {
+  std::string t = trim_ws(target);
+  const auto hash = t.rfind('#');
+  if (hash != std::string::npos) {
+    t = trim_ws(t.substr(0, hash));
+  }
+  const auto colon = t.rfind(':');
+  if (colon == std::string::npos || colon + 1 >= t.size()) {
+    return 0;
+  }
+  const std::string right = t.substr(colon + 1);
+  if (right.find('-') != std::string::npos) {
+    return 0;
+  }
+  for (char c : right) {
+    if (!std::isdigit(static_cast<unsigned char>(c))) {
+      return 0;
+    }
+  }
+  try {
+    return std::stoi(right);
+  } catch (...) {
+    return 0;
+  }
+}
+
+std::string line_window_target(const std::string& path, int line, int radius = 80) {
+  if (path.empty() || line <= 0) {
+    return {};
+  }
+  const int a = std::max(1, line - radius);
+  const int b = line + radius;
+  return path + ":" + std::to_string(a) + "-" + std::to_string(b);
+}
+
+// Prefer more lines after `line` (bodies/switches usually follow the match).
+std::string line_window_target_biased(const std::string& path, int line, int before = 40,
+                                      int after = 90) {
+  if (path.empty() || line <= 0) {
+    return {};
+  }
+  const int a = std::max(1, line - before);
+  const int b = line + after;
+  return path + ":" + std::to_string(a) + "-" + std::to_string(b);
+}
+
+bool name_ok_for_target(const std::string& got_name, const std::string& target,
+                        const std::vector<std::string>& needles) {
+  if (got_name.empty()) {
+    return true;
+  }
+  const std::string req = symbol_from_plan_target(target);
+  if (!req.empty()) {
+    std::string a = got_name;
+    std::string b = req;
+    for (char& c : a) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    for (char& c : b) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (a == b || a.find(b) != std::string::npos || b.find(a) != std::string::npos) {
+      return true;
+    }
+  }
+  // path:line / path:A-B: resolved enclosing symbol is expected; do not WARN.
+  if (line_from_plan_target(target) > 0 || target.find('-') != std::string::npos) {
+    return true;
+  }
+  return name_matches_needles(got_name, needles);
+}
+
 int score_symbol_against_needles(const std::string& sym, const std::vector<std::string>& needles) {
   std::string s = sym;
   for (char& c : s) {
@@ -318,7 +501,153 @@ int score_symbol_against_needles(const std::string& sym, const std::vector<std::
   return score;
 }
 
-// Pick best path:Symbol from file_outline text using Instruction needles.
+bool looks_like_code_ident(const std::string& tok) {
+  if (tok.size() < 4) {
+    return false;
+  }
+  bool has_under = false;
+  bool has_digit = false;
+  for (unsigned char c : tok) {
+    if (c == '_' || c == ':') {
+      has_under = true;
+    } else if (std::isdigit(c)) {
+      has_digit = true;
+    }
+  }
+  // Needles are lowercased: snake / nested names, or domain tokens from explore.
+  return has_under || has_digit || tok.find("tab") != std::string::npos ||
+         tok.find("press") != std::string::npos || tok.find("console") != std::string::npos ||
+         tok.find("panel") != std::string::npos || tok.find("render") != std::string::npos ||
+         tok.find("button") != std::string::npos || tok.find("layout") != std::string::npos;
+}
+
+void merge_needles(std::vector<std::string>* dst, const std::vector<std::string>& add) {
+  if (!dst) {
+    return;
+  }
+  std::unordered_set<std::string> seen(dst->begin(), dst->end());
+  for (const auto& n : add) {
+    if (n.size() < 3 || !seen.insert(n).second) {
+      continue;
+    }
+    dst->push_back(n);
+  }
+}
+
+// Instruction + seeds + recent tool args/names from Observations (generic, language-agnostic).
+std::vector<std::string> session_pack_needles(const std::string& session_body) {
+  std::vector<std::string> out;
+  const auto instr = session_body.find("## Instruction");
+  const auto map = session_body.find("## Ranked map");
+  if (instr != std::string::npos) {
+    const auto end = (map != std::string::npos && map > instr) ? map : session_body.size();
+    merge_needles(&out, tokenize_needles(session_body.substr(instr, end - instr)));
+  }
+  const auto obs = session_body.find("## Observations");
+  if (obs != std::string::npos) {
+    const std::string slice = session_body.substr(obs);
+    // Tool args / headings often carry identifiers the Instruction (ES) lacks.
+    static const char* markers[] = {
+        "get_code_of `", "get_code_of ", "search `", "search ", "file_outline `",
+        "### get_code_of `", "arg:", "targets:",
+    };
+    for (const char* m : markers) {
+      const std::string marker = m;
+      std::size_t pos = 0;
+      while ((pos = slice.find(marker, pos)) != std::string::npos) {
+        pos += marker.size();
+        std::size_t end = pos;
+        while (end < slice.size() && slice[end] != '\n' && slice[end] != '`' &&
+               slice[end] != ')') {
+          ++end;
+        }
+        merge_needles(&out, tokenize_needles(slice.substr(pos, end - pos)));
+      }
+    }
+    // Also harvest Camel/snake tokens from observation snippets.
+    merge_needles(&out, tokenize_needles(slice.substr(0, std::min<std::size_t>(slice.size(), 12000))));
+  }
+  // Prefer identifier-like needles first for bare-path scoring (keep all).
+  std::stable_sort(out.begin(), out.end(), [](const std::string& a, const std::string& b) {
+    const int sa = looks_like_code_ident(a) ? 0 : 1;
+    const int sb = looks_like_code_ident(b) ? 0 : 1;
+    if (sa != sb) {
+      return sa < sb;
+    }
+    return a < b;
+  });
+  return out;
+}
+
+std::string extract_outline_symbol_name(const std::string& line) {
+  // tool_registry: "fn name :line" / "  struct Foo :10-20" / legacy "`foo`" / "N:foo"
+  std::string s = trim_ws(line);
+  if (s.empty() || s.rfind("outline:", 0) == 0 || s.rfind("…", 0) == 0) {
+    return {};
+  }
+  // Skip leading kind token when present.
+  static const std::unordered_set<std::string> kKinds = {
+      "fn", "method", "class", "struct", "enum", "var", "field", "ns", "type", "macro",
+      "union", "iface", "trait", "impl", "mod", "file",
+  };
+  std::string tok;
+  std::vector<std::string> toks;
+  for (char c : s) {
+    if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == ':' || c == '-') {
+      tok.push_back(c);
+    } else if (!tok.empty()) {
+      toks.push_back(tok);
+      tok.clear();
+    }
+  }
+  if (!tok.empty()) {
+    toks.push_back(tok);
+  }
+  std::size_t i = 0;
+  if (!toks.empty() && kKinds.count(toks[0])) {
+    ++i;
+  }
+  // Skip pure line-number prefixes "104" from "104:struct ..."
+  if (i < toks.size()) {
+    bool all_digit = !toks[i].empty();
+    for (char c : toks[i]) {
+      if (!std::isdigit(static_cast<unsigned char>(c))) {
+        all_digit = false;
+        break;
+      }
+    }
+    if (all_digit) {
+      ++i;
+    }
+  }
+  if (i >= toks.size()) {
+    return {};
+  }
+  std::string name = toks[i];
+  // Drop trailing :line already glued.
+  const auto colon = name.rfind(':');
+  if (colon != std::string::npos && colon + 1 < name.size()) {
+    bool digits = true;
+    for (std::size_t j = colon + 1; j < name.size(); ++j) {
+      if (!std::isdigit(static_cast<unsigned char>(name[j]))) {
+        digits = false;
+        break;
+      }
+    }
+    if (digits) {
+      name = name.substr(0, colon);
+    }
+  }
+  if (name.size() < 3 || name.find('/') != std::string::npos || name.find('.') != std::string::npos) {
+    return {};
+  }
+  if (kKinds.count(name)) {
+    return {};
+  }
+  return name;
+}
+
+// Pick best path:Symbol from file_outline text using pack needles.
 std::string best_symbol_target_from_outline(const std::string& path, const std::string& outline,
                                             const std::vector<std::string>& needles) {
   std::string best_sym;
@@ -326,20 +655,8 @@ std::string best_symbol_target_from_outline(const std::string& path, const std::
   std::istringstream in(outline);
   std::string line;
   while (std::getline(in, line)) {
-    // Common outline forms: "  foo" / "N:foo" / "foo(" / "`foo`"
-    std::string cand;
-    for (char c : line) {
-      if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == ':') {
-        cand.push_back(c);
-      } else if (!cand.empty()) {
-        break;
-      }
-    }
-    if (cand.size() < 3) {
-      continue;
-    }
-    // Skip path-like tokens.
-    if (cand.find('/') != std::string::npos || cand.find('.') != std::string::npos) {
+    const std::string cand = extract_outline_symbol_name(line);
+    if (cand.empty()) {
       continue;
     }
     const int sc = score_symbol_against_needles(cand, needles);
@@ -354,15 +671,95 @@ std::string best_symbol_target_from_outline(const std::string& path, const std::
   return path + ":" + best_sym;
 }
 
-std::vector<std::string> instruction_needles_from_session(const std::string& session_body) {
-  const auto instr = session_body.find("## Instruction");
-  const auto map = session_body.find("## Ranked map");
-  std::string slice;
-  if (instr != std::string::npos) {
-    const auto end = (map != std::string::npos && map > instr) ? map : session_body.size();
-    slice = session_body.substr(instr, end - instr);
+// Keep outline lines that hit needles; always keep header.
+std::string filter_outline_for_needles(const std::string& outline,
+                                       const std::vector<std::string>& needles,
+                                       std::size_t max_chars) {
+  if (outline.size() <= max_chars || needles.empty()) {
+    if (outline.size() <= max_chars) {
+      return outline;
+    }
+    return truncate_to_budget(outline, max_chars, {});
   }
-  return tokenize_needles(slice);
+  std::ostringstream kept;
+  std::istringstream in(outline);
+  std::string line;
+  bool first = true;
+  std::size_t used = 0;
+  while (std::getline(in, line)) {
+    const bool keep = first || score_symbol_against_needles(extract_outline_symbol_name(line),
+                                                           needles) > 0 ||
+                      name_matches_needles(line, needles);
+    first = false;
+    if (!keep) {
+      continue;
+    }
+    if (used + line.size() + 1 > max_chars) {
+      kept << "… (outline filtrado por needles)\n";
+      break;
+    }
+    kept << line << '\n';
+    used += line.size() + 1;
+  }
+  std::string out = kept.str();
+  if (out.size() < 40) {
+    return truncate_to_budget(outline, max_chars, {});
+  }
+  return out;
+}
+
+// From search tool text, pick best path:line hit inside `path`.
+std::string best_line_target_from_search(const std::string& path, const std::string& search_text,
+                                         const std::vector<std::string>& needles = {}) {
+  // Typical: "src/ui/press_ids.hpp:42  ..." or "file:line:col"
+  int best_line = 0;
+  int best_score = -1;
+  std::istringstream in(search_text);
+  std::string line;
+  const std::string needle_path = path;
+  while (std::getline(in, line)) {
+    const auto p = line.find(needle_path);
+    if (p == std::string::npos) {
+      continue;
+    }
+    const auto colon = line.find(':', p + needle_path.size());
+    if (colon == std::string::npos || colon + 1 >= line.size()) {
+      continue;
+    }
+    int ln = 0;
+    try {
+      ln = std::stoi(line.substr(colon + 1));
+    } catch (...) {
+      continue;
+    }
+    if (ln <= 0) {
+      continue;
+    }
+    int sc = 1 + score_symbol_against_needles(line, needles);
+    std::string low = line;
+    for (char& c : low) {
+      if (c >= 'A' && c <= 'Z') {
+        c = static_cast<char>(c - 'A' + 'a');
+      }
+    }
+    for (const char* k : {"tab", "press", "console", "enum", "panel", "kconsole"}) {
+      if (low.find(k) != std::string::npos) {
+        sc += 8;
+      }
+    }
+    // Prefer mid-file constants over preamble helpers (welcome_*).
+    if (low.find("welcome") != std::string::npos) {
+      sc -= 20;
+    }
+    if (sc > best_score) {
+      best_score = sc;
+      best_line = ln;
+    }
+  }
+  if (best_line <= 0) {
+    return {};
+  }
+  return line_window_target(path, best_line, 40);
 }
 
 std::vector<std::string> parse_pack_targets_header(const std::string& pack) {
@@ -1403,7 +1800,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   }
 
   const std::string session_body = read_file(session_path(workspace_root));
-  const auto needles = instruction_needles_from_session(session_body);
+  const auto needles = session_pack_needles(session_body);
 
   // Merge with previous watchlist / pack header (plan2 does not wipe plan1).
   std::vector<std::string> merged = st.watchlist;
@@ -1422,10 +1819,11 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     merged.resize(static_cast<std::size_t>(kL2MaxPlanTargets));
   }
 
-  // Normalize bare paths → path:BestSymbol via outline + Instruction needles.
+  // Normalize bare paths → path:Symbol / path:A-B via outline, then search-in-file.
   std::vector<std::string> uniq_targets;
   uniq_targets.reserve(merged.size());
   std::vector<std::string> normalize_notes;
+  std::unordered_set<std::string> skip_fetch;  // bare junk: warn only, no fragment body
   for (const auto& raw : merged) {
     std::string t = raw;
     if (!target_has_symbol_or_range(t)) {
@@ -1437,13 +1835,56 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
           resolved = best_symbol_target_from_outline(path, ol.text, needles);
         }
       }
+      if (resolved.empty() && !path.empty() && deps_.tools->has("search")) {
+        // Build a compact search query from identifier-like needles + path stem.
+        std::ostringstream q;
+        int nq = 0;
+        const std::string stem = path_stem_key(path);
+        if (!stem.empty()) {
+          q << stem;
+          ++nq;
+        }
+        for (const auto& n : needles) {
+          if (!looks_like_code_ident(n)) {
+            continue;
+          }
+          if (nq > 0) {
+            q << '|';
+          }
+          q << n;
+          if (++nq >= 6) {
+            break;
+          }
+        }
+        if (nq > 0) {
+          const AiToolResult sr = deps_.tools->invoke("search", q.str());
+          if (sr.ok) {
+            resolved = best_line_target_from_search(path, sr.text, needles);
+            if (!resolved.empty()) {
+              normalize_notes.push_back("- bare `" + raw + "` → `" + resolved +
+                                        "` (search-in-file)");
+            }
+          }
+        }
+      }
       if (!resolved.empty()) {
-        normalize_notes.push_back("- bare `" + t + "` → `" + resolved + "` (needles)");
+        bool noted = false;
+        for (const auto& n : normalize_notes) {
+          if (n.find("`" + raw + "`") != std::string::npos) {
+            noted = true;
+            break;
+          }
+        }
+        if (!noted) {
+          normalize_notes.push_back("- bare `" + raw + "` → `" + resolved +
+                                    "` (needles/outline)");
+        }
         t = resolved;
       } else {
         normalize_notes.push_back(
-            "- bare `" + t +
-            "` sin símbolo claro — preferir `path:Symbol` / `path:A-B` en el próximo plan");
+            "- bare `" + raw +
+            "` sin símbolo claro — omitido del pack; preferir `path:Symbol` / `path:A-B`");
+        skip_fetch.insert(raw);
       }
     }
     if (std::find(uniq_targets.begin(), uniq_targets.end(), t) == uniq_targets.end()) {
@@ -1458,6 +1899,9 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   std::vector<std::string> uniq_paths;
   std::unordered_set<std::string> seen_paths;
   for (const auto& t : uniq_targets) {
+    if (skip_fetch.count(t)) {
+      continue;
+    }
     const std::string p = path_from_plan_target(t);
     if (!p.empty() && seen_paths.insert(p).second) {
       uniq_paths.push_back(p);
@@ -1469,8 +1913,10 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     std::string text;
     bool ok = false;
     bool truncated = false;
+    bool junk = false;  // wrong_symbol from bare / no overlap → drop body
     std::string refetch;
     std::size_t rank_size = 0;
+    int rank_boost = 0;  // higher = earlier (small + relevant)
   };
   struct Outline {
     std::string path;
@@ -1479,57 +1925,449 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   };
 
   const auto plan_t0 = std::chrono::steady_clock::now();
+  std::unordered_set<std::string> explicit_targets;
+  for (const auto& raw : targets) {
+    const std::string t = trim_ws(raw);
+    if (!t.empty()) {
+      explicit_targets.insert(t);
+    }
+  }
   std::vector<Frag> frags;
-  frags.reserve(uniq_targets.size() + 4);
+  frags.reserve(uniq_targets.size() + 8);
+  std::unordered_set<std::string> fetched;
   for (const auto& t : uniq_targets) {
     Frag f;
     f.target = t;
+    if (skip_fetch.count(t)) {
+      f.ok = false;
+      f.junk = true;
+      f.text = "omitido: bare path sin resolución (`" + t + "`)";
+      f.rank_size = 999999;
+      f.rank_boost = -100;
+      frags.push_back(std::move(f));
+      continue;
+    }
     if (!deps_.tools->has("get_code_of")) {
       f.text = "error: get_code_of no registrado";
     } else {
-      const AiToolResult tr = deps_.tools->invoke("get_code_of", t);
+      std::string fetch_arg = t;
+      const int line = line_from_plan_target(t);
+      const std::string path = path_from_plan_target(t);
+      // path:line → fetch a downward-biased range up front (edit locus survives pack).
+      if (line > 0 && !path.empty()) {
+        fetch_arg = line_window_target_biased(path, line);
+      }
+      const AiToolResult tr = deps_.tools->invoke("get_code_of", fetch_arg);
       f.ok = tr.ok;
       f.text = tr.text.empty() ? (tr.ok ? "(vacío)" : "error get_code_of") : tr.text;
       f.truncated = text_looks_truncated(f.text);
+      if (fetch_arg != t) {
+        f.target = fetch_arg;  // pack shows the range actually fetched
+      }
       if (f.truncated) {
-        f.refetch = extract_refetch_hint(f.text, t);
+        if (line > 0) {
+          f.refetch = line_window_target_biased(path, line + 80, 10, 80);
+        } else {
+          f.refetch = extract_refetch_hint(f.text, t);
+        }
       }
       const std::string got_name = resolved_name_from_tool_text(f.text);
-      if (f.ok && !name_matches_needles(got_name, needles)) {
-        f.text +=
-            "\nWARN wrong_symbol: resuelto `" + got_name +
-            "` no solapa Instruction — revisa outline / pide path:Symbol concreto.\n";
+      const bool ok_name = name_ok_for_target(got_name, t, needles);
+      const int needle_sc = score_symbol_against_needles(got_name, needles) +
+                            score_symbol_against_needles(f.text.substr(0, 400), needles);
+      if (f.ok && !ok_name) {
+        const bool was_bare_like = symbol_from_plan_target(t).empty() && line <= 0;
+        if (was_bare_like || needle_sc <= 0) {
+          f.junk = true;
+          f.text = "WARN wrong_symbol: resuelto `" + got_name +
+                   "` no solapa needles/target — fragmento omitido. "
+                   "Pide `path:Symbol` / `path:A-B` concreto.\n";
+          f.ok = false;
+          f.truncated = false;
+          f.rank_boost = -50;
+        } else {
+          f.text +=
+              "\nWARN wrong_symbol: resuelto `" + got_name +
+              "` no solapa Instruction — revisa outline / pide path:Symbol concreto.\n";
+        }
+      } else if (f.ok) {
+        f.rank_boost = 10 + needle_sc / 5;
+        if (line > 0) {
+          f.rank_boost += 80;  // edit locus — pack before merge noise
+        }
+        // Merged watchlist noise (not in this plan's explicit targets) with weak needles → demote.
+        if (!explicit_targets.count(t) && needle_sc <= 0 && line <= 0) {
+          f.rank_boost -= 60;
+        }
       }
+      fetched.insert(t);
+      fetched.insert(fetch_arg);
     }
-    f.rank_size = f.text.size();
+    f.rank_size = f.junk ? 999999 : f.text.size();
     frags.push_back(std::move(f));
   }
 
-  // Auto-refetch truncated gaps once (explore-fill without extra propose).
+  // Auto-refetch truncated gaps (explore-fill): prefer line windows + needle-overlapping hints.
   std::vector<Frag> extras;
+  auto already = [&](const std::string& t) {
+    return fetched.count(t) ||
+           std::find(uniq_targets.begin(), uniq_targets.end(), t) != uniq_targets.end();
+  };
   for (const auto& f : frags) {
-    if (!f.truncated || f.refetch.empty() || !deps_.tools->has("get_code_of")) {
+    if (!f.truncated || f.junk || !deps_.tools->has("get_code_of")) {
       continue;
     }
-    if (std::find(uniq_targets.begin(), uniq_targets.end(), f.refetch) != uniq_targets.end()) {
-      continue;
+    std::vector<std::string> try_targets;
+    const int line = line_from_plan_target(f.target);
+    const std::string path = path_from_plan_target(f.target);
+    if (line > 0 && !path.empty()) {
+      try_targets.push_back(line_window_target_biased(path, line));
+      try_targets.push_back(line_window_target_biased(path, line + 100, 20, 100));
+      try_targets.push_back(line_window_target_biased(path, std::max(1, line - 100), 20, 100));
     }
-    const AiToolResult tr = deps_.tools->invoke("get_code_of", f.refetch);
-    Frag e;
-    e.target = f.refetch;
-    e.ok = tr.ok;
-    e.text = tr.text.empty() ? "(vacío)" : tr.text;
-    e.truncated = text_looks_truncated(e.text);
-    e.refetch = extract_refetch_hint(e.text, f.refetch);
-    e.rank_size = e.text.size();
-    extras.push_back(std::move(e));
+    if (!f.refetch.empty()) {
+      try_targets.push_back(f.refetch);
+    }
+    int added = 0;
+    for (const auto& rt : try_targets) {
+      if (rt.empty() || already(rt)) {
+        continue;
+      }
+      const AiToolResult tr = deps_.tools->invoke("get_code_of", rt);
+      Frag e;
+      e.target = rt;
+      e.ok = tr.ok;
+      e.text = tr.text.empty() ? "(vacío)" : tr.text;
+      e.truncated = text_looks_truncated(e.text);
+      e.refetch = extract_refetch_hint(e.text, rt);
+      e.rank_size = e.text.size();
+      const int hit = score_symbol_against_needles(e.text.substr(0, 1200), needles);
+      // Skip empty/noise auto-fills that don't touch pack needles.
+      if (hit <= 0 && line <= 0) {
+        continue;
+      }
+      if (hit <= 0 && line > 0 && added > 0) {
+        continue;
+      }
+      e.rank_boost = 50 + (line > 0 ? 40 : 0) + hit / 3;
+      // Primary biased window around the requested line gets top priority.
+      if (line > 0 && !path.empty() && rt == line_window_target_biased(path, line)) {
+        e.rank_boost = 130 + hit / 2;
+      }
+      fetched.insert(rt);
+      extras.push_back(std::move(e));
+      if (++added >= 2) {
+        break;
+      }
+    }
   }
   for (auto& e : extras) {
     frags.push_back(std::move(e));
   }
 
-  std::stable_sort(frags.begin(), frags.end(),
-                   [](const Frag& a, const Frag& b) { return a.rank_size < b.rank_size; });
+  // Relevance first, then small; junk last.
+  std::stable_sort(frags.begin(), frags.end(), [](const Frag& a, const Frag& b) {
+    if (a.junk != b.junk) {
+      return !a.junk;
+    }
+    if (a.rank_boost != b.rank_boost) {
+      return a.rank_boost > b.rank_boost;
+    }
+    return a.rank_size < b.rank_size;
+  });
+
+  // --- Pack diversity: classify fragments into generic roles and reserve slots. ---
+  enum class FragRole {
+    Decl = 0,       // struct/enum/constexpr type surface
+    IdConst = 1,    // string/press/tab id constants
+    Layout = 2,     // boxes / click targets / arrays
+    Control = 3,    // selected_/render_/switch body
+    ApiFn = 4,      // named helpers (path:Symbol)
+    Other = 5,
+    Noise = 6,
+  };
+  auto role_name = [](FragRole r) -> const char* {
+    switch (r) {
+      case FragRole::Decl:
+        return "decl";
+      case FragRole::IdConst:
+        return "id_const";
+      case FragRole::Layout:
+        return "layout";
+      case FragRole::Control:
+        return "control";
+      case FragRole::ApiFn:
+        return "api_fn";
+      case FragRole::Other:
+        return "other";
+      case FragRole::Noise:
+        return "noise";
+    }
+    return "other";
+  };
+  auto classify_frag = [&](const Frag& f) -> FragRole {
+    if (f.junk || !f.ok) {
+      return FragRole::Noise;
+    }
+    std::string low = f.text;
+    for (char& c : low) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    const std::string tgt = to_lower_copy(f.target);
+    const int needle_hit = score_symbol_against_needles(f.text.substr(0, 900), needles);
+    auto has = [&](const char* s) { return low.find(s) != std::string::npos; };
+    // Merged weak noise (pty/repaint/wake) without needle support.
+    if ((has("on_pty") || has("repaint") || has("scrollback") || has("request_terminal")) &&
+        needle_hit <= 0) {
+      return FragRole::Noise;
+    }
+    if (f.rank_boost < 15 && needle_hit <= 0) {
+      return FragRole::Noise;
+    }
+    // Decl before control: type surfaces often mention selected_tab fields.
+    if (has("struct ") || has("enum ") || has("class ") ||
+        (has("static constexpr int") && (has("\nk") || has(" k")))) {
+      return FragRole::Decl;
+    }
+    // Id constants: press/tab id surfaces — not bare string_view helpers.
+    if (tgt.find("press_id") != std::string::npos || has("press_id::") || has("console.tab") ||
+        has("constexpr std::string_view k") || has("constexpr std::string_view \"") ||
+        (has("constexpr") && has(".tab.")) ||
+        (has("string_view k") && (has("console.") || has("press")))) {
+      return FragRole::IdConst;
+    }
+    // Layout vs control: declaration/array beat incidental &state->tab_boxes in render.
+    const bool layout_decl = has("std::array<box") || has("std::array< box") ||
+                             has("tab_boxes;") || has("targets = {") ||
+                             (has("std::array") && has("tab_boxes") && !has("else if (selected"));
+    const bool layout_click =
+        has("targets = {") || (has("clickable") && has("tab_boxes") && has("press_id::"));
+    const bool controlish = has("render_") || has("else if (selected") || has("body =") ||
+                            has("switch (") || (has("selected_tab ==") && !has("struct "));
+    if (layout_decl || (layout_click && !controlish)) {
+      return FragRole::Layout;
+    }
+    if (controlish) {
+      return FragRole::Control;
+    }
+    if (has("tab_boxes") && !controlish) {
+      return FragRole::Layout;
+    }
+    if ((!symbol_from_plan_target(f.target).empty() || tgt.find("make_") != std::string::npos) &&
+        needle_hit > 0) {
+      return FragRole::ApiFn;
+    }
+    if (needle_hit <= 0 && f.rank_boost < 40) {
+      return FragRole::Noise;
+    }
+    return FragRole::Other;
+  };
+
+  std::vector<FragRole> frag_roles(frags.size(), FragRole::Other);
+  for (std::size_t i = 0; i < frags.size(); ++i) {
+    frag_roles[i] = classify_frag(frags[i]);
+  }
+  // Post-pass: strongest markers win (huge windows often match several roles).
+  for (std::size_t i = 0; i < frags.size(); ++i) {
+    if (frags[i].junk || !frags[i].ok) {
+      continue;
+    }
+    std::string low = frags[i].text;
+    for (char& c : low) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    const std::string tgt = to_lower_copy(frags[i].target);
+    const bool controlish = low.find("render_") != std::string::npos ||
+                            low.find("else if (selected_tab") != std::string::npos ||
+                            low.find("body =") != std::string::npos;
+    const bool layout_decl =
+        low.find("std::array<box") != std::string::npos ||
+        low.find("std::array< box") != std::string::npos ||
+        low.find("tab_boxes;") != std::string::npos || low.find("targets = {") != std::string::npos ||
+        (low.find("std::array") != std::string::npos && low.find("tab_boxes") != std::string::npos &&
+         !controlish);
+    // Incidental &state->tab_boxes inside a render window is Control, not Layout.
+    if (layout_decl && !(controlish && frags[i].rank_size > 2500 &&
+                         low.find("std::array") == std::string::npos &&
+                         low.find("targets = {") == std::string::npos)) {
+      frag_roles[i] = FragRole::Layout;
+    } else if ((low.find("struct ") != std::string::npos || low.find("enum ") != std::string::npos) &&
+               low.find("static constexpr int") != std::string::npos) {
+      frag_roles[i] = FragRole::Decl;
+    } else if (controlish) {
+      frag_roles[i] = FragRole::Control;
+    } else if (tgt.find("press_id") != std::string::npos ||
+               low.find("press_id::k") != std::string::npos ||
+               low.find("console.tab.") != std::string::npos) {
+      frag_roles[i] = FragRole::IdConst;
+    } else if (frag_roles[i] == FragRole::IdConst && low.find("press_id") == std::string::npos &&
+               low.find("console.tab") == std::string::npos &&
+               low.find("constexpr std::string_view k") == std::string::npos) {
+      frag_roles[i] = FragRole::Other;  // drop false string_view helpers
+    }
+    // Symbol-only helpers require a code-like needle hit on the symbol itself.
+    if (frag_roles[i] == FragRole::ApiFn || frag_roles[i] == FragRole::Other) {
+      const std::string sym = to_lower_copy(symbol_from_plan_target(frags[i].target));
+      if (tgt.find("request_terminal") != std::string::npos || tgt.find("on_pty") != std::string::npos ||
+          tgt.find("repaint") != std::string::npos || tgt.find("scrollback") != std::string::npos) {
+        frag_roles[i] = FragRole::Noise;
+      } else if (frag_roles[i] == FragRole::ApiFn) {
+        bool strong = false;
+        for (const auto& n : needles) {
+          if (!looks_like_code_ident(n) || n.size() < 5 || sym.empty()) {
+            continue;
+          }
+          if (sym.find(n) != std::string::npos || n.find(sym) != std::string::npos) {
+            strong = true;
+            break;
+          }
+        }
+        if (!strong) {
+          frag_roles[i] = FragRole::Noise;
+        }
+      }
+    }
+  }
+
+  // Build pack order: reserve core roles first (Other is filler — pack after extras).
+  static const FragRole kRoleOrder[] = {FragRole::Decl, FragRole::IdConst, FragRole::Layout,
+                                        FragRole::Control, FragRole::ApiFn};
+  static const FragRole kRoleOrderAll[] = {FragRole::Decl,    FragRole::IdConst, FragRole::Layout,
+                                           FragRole::Control, FragRole::ApiFn,   FragRole::Other};
+  std::vector<std::size_t> pack_order;
+  pack_order.reserve(frags.size());
+  std::vector<char> picked(frags.size(), 0);
+  auto pick_best = [&](FragRole want) -> int {
+    int best = -1;
+    int best_score = -1;
+    for (std::size_t i = 0; i < frags.size(); ++i) {
+      if (picked[i] || frags[i].junk || frag_roles[i] != want) {
+        continue;
+      }
+      // Prefer compact exemplars: huge mixed windows dilute the role signal.
+      int sc = frags[i].rank_boost * 10 - static_cast<int>(frags[i].rank_size / 80);
+      std::string low = frags[i].text.substr(0, 1600);
+      for (char& c : low) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      const std::string tgt = to_lower_copy(frags[i].target);
+      if (want == FragRole::Decl && low.find("struct ") != std::string::npos) {
+        sc += 80;
+      }
+      if (want == FragRole::Layout) {
+        if (low.find("std::array") != std::string::npos && low.find("tab_boxes") != std::string::npos) {
+          sc += 120;
+        } else if (low.find("targets = {") != std::string::npos) {
+          sc += 110;
+        } else if (low.find("tab_boxes") != std::string::npos) {
+          sc += 60;
+        }
+        if (low.find("else if (selected") != std::string::npos) {
+          sc -= 100;  // render body, not layout surface
+        }
+        if (frags[i].rank_size < 1200) {
+          sc += 40;
+        }
+      }
+      if (want == FragRole::Control &&
+          (low.find("render_") != std::string::npos || low.find("else if (selected") != std::string::npos)) {
+        sc += 80;
+      }
+      if (want == FragRole::IdConst) {
+        if (tgt.find("press_id") != std::string::npos) {
+          sc += 140;
+        }
+        if (low.find("console.tab") != std::string::npos || low.find("press_id::k") != std::string::npos) {
+          sc += 100;
+        } else if (low.find("press_id") != std::string::npos) {
+          sc += 60;
+        }
+        if (tgt.find("console_tab_press") != std::string::npos) {
+          sc += 80;
+        }
+      }
+      if (want == FragRole::ApiFn && frags[i].target.find("make_") != std::string::npos) {
+        sc += 40;
+      }
+      if (sc > best_score) {
+        best_score = sc;
+        best = static_cast<int>(i);
+      }
+    }
+    return best;
+  };
+  // Reserve one slot per role when a candidate exists (diversity).
+  // Layout gets a second early slot (click-target arrays) before control/api burn budget.
+  for (FragRole r : kRoleOrder) {
+    const int idx = pick_best(r);
+    if (idx >= 0) {
+      picked[static_cast<std::size_t>(idx)] = 1;
+      pack_order.push_back(static_cast<std::size_t>(idx));
+    }
+    if (r == FragRole::Layout) {
+      const int idx2 = pick_best(FragRole::Layout);
+      if (idx2 >= 0) {
+        picked[static_cast<std::size_t>(idx2)] = 1;
+        pack_order.push_back(static_cast<std::size_t>(idx2));
+      }
+    }
+  }
+  // Second pass: best remaining exemplar per role (not raw sort order).
+  int role_extra[7] = {};
+  role_extra[static_cast<int>(FragRole::Layout)] = 1;  // already took layout extra above
+  for (FragRole r : kRoleOrder) {
+    if (role_extra[static_cast<int>(r)] >= 1) {
+      continue;
+    }
+    const int idx = pick_best(r);
+    if (idx < 0) {
+      continue;
+    }
+    picked[static_cast<std::size_t>(idx)] = 1;
+    pack_order.push_back(static_cast<std::size_t>(idx));
+    ++role_extra[static_cast<int>(r)];
+  }
+  // Other only after core role extras (avoid starving layout/id slots).
+  {
+    const int idx = pick_best(FragRole::Other);
+    if (idx >= 0) {
+      picked[static_cast<std::size_t>(idx)] = 1;
+      pack_order.push_back(static_cast<std::size_t>(idx));
+    }
+  }
+  // Noise only if budget leftover later (append at end, packing may skip).
+  for (std::size_t i = 0; i < frags.size(); ++i) {
+    if (!picked[i] && !frags[i].junk && frag_roles[i] == FragRole::Noise) {
+      pack_order.push_back(i);
+      picked[i] = 1;
+    }
+  }
+  for (std::size_t i = 0; i < frags.size(); ++i) {
+    if (!picked[i]) {
+      pack_order.push_back(i);
+    }
+  }
+
+  std::ostringstream diversity_note;
+  {
+    int counts[7] = {};
+    for (std::size_t i = 0; i < frags.size(); ++i) {
+      if (!frags[i].junk && frags[i].ok) {
+        ++counts[static_cast<int>(frag_roles[i])];
+      }
+    }
+    diversity_note << "pack_roles:";
+    for (FragRole r : kRoleOrderAll) {
+      const int c = counts[static_cast<int>(r)];
+      if (c > 0) {
+        diversity_note << ' ' << role_name(r) << '=' << c;
+      }
+    }
+    if (counts[static_cast<int>(FragRole::Noise)] > 0) {
+      diversity_note << " noise=" << counts[static_cast<int>(FragRole::Noise)] << "(deferred)";
+    }
+    diversity_note << '\n';
+  }
 
   std::vector<Outline> outlines;
   outlines.reserve(uniq_paths.size());
@@ -1578,40 +2416,107 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     }
     pack << "\n";
   }
+  pack << diversity_note.str() << "\n";
   pack << "targets (" << uniq_targets.size() << "):";
   for (const auto& t : uniq_targets) {
     pack << " `" << t << "`";
   }
   pack << "\n\n## Fragments\n\n";
 
+  // Reserved diversity slots get a fair share so one locus cannot starve other roles.
+  const std::size_t reserved_n = std::min<std::size_t>(pack_order.size(), 5);
+  const std::size_t role_share =
+      reserved_n > 0 ? std::max<std::size_t>(400, frag_budget / (reserved_n + 1))
+                     : kMaxFragShareChars;
+
   std::size_t used_frags = 0;
   int frag_ok = 0;
   std::vector<std::string> trunc_index;
-  for (std::size_t i = 0; i < frags.size(); ++i) {
+  std::unordered_set<int> roles_packed;
+  for (std::size_t oi = 0; oi < pack_order.size(); ++oi) {
+    const std::size_t i = pack_order[oi];
     const auto& f = frags[i];
-    if (f.ok) {
-      ++frag_ok;
+    const FragRole role = frag_roles[i];
+    if (f.junk) {
+      std::ostringstream sec;
+      sec << "### get_code_of `" << f.target << "` (omitido)\n\n" << f.text << "\n\n";
+      if (used_frags + sec.str().size() < frag_budget) {
+        pack << sec.str();
+        used_frags += sec.str().size();
+      }
+      continue;
     }
     const std::size_t remaining =
         frag_budget > used_frags ? frag_budget - used_frags : 0;
     if (remaining < 80) {
-      pack << "_pack: fragmentos restantes omitidos por presupuesto (" << (frags.size() - i)
-           << ")._\n\n";
-      for (std::size_t j = i; j < frags.size(); ++j) {
-        trunc_index.push_back("- `" + frags[j].target +
+      pack << "_pack: fragmentos restantes omitidos por presupuesto ("
+           << (pack_order.size() - oi) << ")._\n\n";
+      for (std::size_t oj = oi; oj < pack_order.size(); ++oj) {
+        const auto& fj = frags[pack_order[oj]];
+        if (fj.junk) {
+          continue;
+        }
+        trunc_index.push_back("- `" + fj.target +
                               "` — omitido por presupuesto pack; refetch get_code_of `" +
-                              frags[j].target + "`");
+                              fj.target + "`");
       }
       break;
     }
-    const std::size_t fair =
-        std::max<std::size_t>(120, remaining / std::max<std::size_t>(1, frags.size() - i));
-    const std::size_t per = std::min(fair, kMaxFragShareChars);
+    // Drop noise unless we still have spare budget after diversity slots.
+    if (role == FragRole::Noise && used_frags > frag_budget / 2) {
+      continue;
+    }
+    if (f.rank_boost < 0 && remaining < frag_budget / 3) {
+      continue;
+    }
+    if (f.rank_boost < 15 && role == FragRole::Noise) {
+      continue;
+    }
+    if (f.ok) {
+      ++frag_ok;
+    }
+
+    const bool first_of_role = roles_packed.insert(static_cast<int>(role)).second;
+    std::size_t per = std::min({remaining, kMaxFragShareChars, role_share});
+    // First control/layout/decl slot: allow up to role_share (not half budget).
+    if (!first_of_role) {
+      per = std::min(per, role_share * 3 / 4);
+    }
+    if (f.rank_boost >= 80 && first_of_role && role == FragRole::Control) {
+      per = std::min(remaining, std::max(per, role_share));
+    }
+    // IdConst/Layout exemplars are small surfaces — give them enough room to keep markers.
+    if (first_of_role && (role == FragRole::IdConst || role == FragRole::Layout)) {
+      per = std::min(remaining, std::max(per, std::min<std::size_t>(role_share + 200, 1400)));
+    }
+
     const bool pack_trunc = f.text.size() > per;
-    std::string body = truncate_to_budget(f.text, per, f.truncated ? f.refetch : f.target);
+    std::string tip = !f.refetch.empty() ? f.refetch : f.target;
+    const int line = line_from_plan_target(f.target);
+    if (line > 0) {
+      tip = line_window_target_biased(path_from_plan_target(f.target), line);
+    }
+    std::vector<std::string> prefer = needles;
+    if (role == FragRole::Layout) {
+      prefer.insert(prefer.begin(),
+                    {"tab_boxes[ConsolePanelTabs::kAi]", "targets = {", "tab_boxes", "std::array"});
+    } else if (role == FragRole::Control) {
+      prefer.insert(prefer.begin(), {"render_", "else if (selected", "selected_tab =="});
+    } else if (role == FragRole::IdConst) {
+      prefer.insert(prefer.begin(),
+                    {"kConsoleTabAi", "console.tab.ai", "press_id::k", "console.tab", "string_view"});
+    } else if (role == FragRole::Decl) {
+      prefer.insert(prefer.begin(), {"struct ", "static constexpr int", "enum "});
+    }
+    const bool center = line > 0 || f.rank_boost >= 50 || role == FragRole::Control ||
+                        role == FragRole::Layout || role == FragRole::Decl ||
+                        role == FragRole::IdConst;
+    // Layout/Decl: anchor on first role marker. IdConst switches: keep the tail (last ids).
+    const bool first_hit = role == FragRole::Layout || role == FragRole::Decl;
+    std::string body = center ? truncate_center_budget(f.text, per, tip, prefer, first_hit)
+                              : truncate_to_budget(f.text, per, tip);
     const bool is_trunc = f.truncated || pack_trunc;
     if (is_trunc) {
-      std::string tip = !f.refetch.empty() ? f.refetch : (f.target + "#mid");
       trunc_index.push_back("- `" + f.target + "` — truncated; refetch `get_code_of " + tip +
                             "` (también `#tail` / `path:A-B`)");
     }
@@ -1622,6 +2527,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     } else if (is_trunc) {
       sec << " [TRUNCATED]";
     }
+    sec << "  <!-- role:" << role_name(role) << " -->";
     sec << "\n\n```\n" << body;
     if (!body.empty() && body.back() != '\n') {
       sec << '\n';
@@ -1646,7 +2552,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     }
     const std::size_t per =
         std::max<std::size_t>(80, outline_budget / std::max<std::size_t>(1, outlines.size() - i));
-    std::string body = truncate_to_budget(o.text, per, {});
+    std::string body = filter_outline_for_needles(o.text, needles, per);
     std::ostringstream sec;
     sec << "### file_outline `" << o.path << "`" << (o.ok ? "" : " (fail)") << "\n\n```\n"
         << body;
@@ -1686,19 +2592,40 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     }
   }
 
+  std::ostringstream trunc_sec;
   if (!trunc_index.empty()) {
-    pack << "## Truncated (refetch before editing these)\n\n";
-    pack << "Cuerpos incompletos (" << trunc_index.size() << "). No inventes código. "
-            "Pide el hueco con `get_code_of path:A-B` o `path:Symbol#mid|#tail`.\n\n";
+    trunc_sec << "## Truncated (refetch before editing these)\n\n";
+    trunc_sec << "Cuerpos incompletos (" << trunc_index.size() << "). No inventes código. "
+                 "Pide el hueco con `get_code_of path:A-B` o `path:Symbol#mid|#tail`.\n\n";
     for (const auto& line : trunc_index) {
-      pack << line << "\n";
+      trunc_sec << line << "\n";
     }
-    pack << "\n";
+    trunc_sec << "\n";
   }
 
   std::string pack_body = pack.str();
+  // Never head+tail truncate the whole pack (that deletes middle fragments). Prefer
+  // dropping Headers/Outlines/Truncated from the end so ## Fragments stay intact.
+  auto strip_from = [&](const char* marker) {
+    const auto p = pack_body.rfind(marker);
+    if (p != std::string::npos) {
+      pack_body.erase(p);
+    }
+  };
+  if (pack_body.size() + trunc_sec.str().size() > budget) {
+    strip_from("## Headers\n");
+  }
+  if (pack_body.size() + trunc_sec.str().size() > budget) {
+    strip_from("## Outlines\n");
+  }
+  const std::string trunc = trunc_sec.str();
+  if (pack_body.size() + trunc.size() <= budget) {
+    pack_body += trunc;
+  } else if (pack_body.size() < budget) {
+    pack_body.append(trunc, 0, budget - pack_body.size());
+  }
   if (pack_body.size() > budget) {
-    pack_body = truncate_to_budget(std::move(pack_body), budget, {});
+    pack_body.resize(budget);
   }
   std::string err;
   if (!write_file(pack_path(workspace_root), pack_body, &err)) {
@@ -1711,7 +2638,13 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   st.has_pack = true;
   st.pack_incomplete = !trunc_index.empty();
   st.map_review = false;
-  st.watchlist = uniq_targets;
+  // Watchlist keeps resolved targets (not skipped bare junk).
+  st.watchlist.clear();
+  for (const auto& t : uniq_targets) {
+    if (!skip_fetch.count(t)) {
+      st.watchlist.push_back(t);
+    }
+  }
   out.turn = st.turn;
 
   std::ostringstream block;

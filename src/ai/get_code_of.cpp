@@ -412,28 +412,46 @@ GetCodeOfResult get_code_of(const GetCodeOfRequest& req) {
              req.line >= out.symbol_start && req.line <= out.symbol_end &&
              sym_span > max_lines) {
     // Line hint inside a huge symbol: window around the line (not whole-method head+tail).
-    const int half = max_lines / 2;
-    int a = std::max(out.symbol_start, req.line - half);
+    // Bias downward: edit loci (switch/body) usually sit after the matched line.
+    const int before = std::max(1, max_lines / 3);
+    const int half = max_lines / 2;  // used in refetch note
+    int a = std::max(out.symbol_start, req.line - before);
     int b = std::min(out.symbol_end, a + max_lines - 1);
     if (b - a + 1 < max_lines) {
       a = std::max(out.symbol_start, b - max_lines + 1);
     }
     set_contiguous(a, b, true);
-    out.refetch_hint = disp + ":" + std::to_string(out.symbol_start) + "-" +
-                       std::to_string(std::min(out.symbol_end, out.symbol_start + max_lines - 1));
+    // Prefer adjacent window around the same line (not the symbol head).
+    if (a > out.symbol_start) {
+      const int prev_b = a - 1;
+      const int prev_a = std::max(out.symbol_start, prev_b - max_lines + 1);
+      out.refetch_hint = disp + ":" + std::to_string(prev_a) + "-" + std::to_string(prev_b);
+    } else if (b < out.symbol_end) {
+      const int next_a = b + 1;
+      const int next_b = std::min(out.symbol_end, next_a + max_lines - 1);
+      out.refetch_hint = disp + ":" + std::to_string(next_a) + "-" + std::to_string(next_b);
+    } else {
+      out.refetch_hint = disp + ":" + std::to_string(a) + "-" + std::to_string(b);
+    }
     if (a > out.symbol_start || b < out.symbol_end) {
       std::ostringstream note;
       note << "… [line-window inside " << (picked ? out.name : std::string("symbol"))
-           << " " << out.symbol_start << "-" << out.symbol_end << "; omitted outside "
-           << a << "-" << b << "; refetch " << out.refetch_hint << " or " << hint_base
+           << " " << out.symbol_start << "-" << out.symbol_end << "; sent " << a << "-" << b
+           << "; refetch " << out.refetch_hint << " or " << disp << ":"
+           << std::max(out.symbol_start, req.line - half) << "-"
+           << std::min(out.symbol_end, req.line + half) << " or " << hint_base
            << "#head|#tail] …\n";
       out.text = note.str() + out.text;
-      if (a > out.symbol_start) {
+      // Prefer recording the larger omitted side for missing_lines metadata.
+      if (a > out.symbol_start && (out.symbol_end - b) <= (a - out.symbol_start)) {
         out.omitted_start = out.symbol_start;
         out.omitted_end = a - 1;
       } else if (b < out.symbol_end) {
         out.omitted_start = b + 1;
         out.omitted_end = out.symbol_end;
+      } else if (a > out.symbol_start) {
+        out.omitted_start = out.symbol_start;
+        out.omitted_end = a - 1;
       }
     }
   } else if (req.window == GetCodeOfWindow::Head) {
@@ -498,7 +516,10 @@ GetCodeOfResult get_code_of(const GetCodeOfRequest& req) {
 std::string format_get_code_of_result(const GetCodeOfResult& got, const std::string& display_path) {
   const std::string path = !display_path.empty() ? display_path : got.path;
   std::ostringstream out;
-  if (got.truncated && got.omitted_start > 0 && got.omitted_end >= got.omitted_start) {
+  // Always show the span actually sent when available (line-windows are not full symbols).
+  if (got.sent_start > 0 && got.sent_end >= got.sent_start) {
+    out << path << ':' << got.sent_start << '-' << got.sent_end;
+  } else if (got.truncated && got.symbol_start > 0) {
     out << path << ':' << got.symbol_start << '-' << got.symbol_end;
   } else {
     out << path << ':' << got.sent_start << '-' << got.sent_end;
@@ -513,17 +534,21 @@ std::string format_get_code_of_result(const GetCodeOfResult& got, const std::str
   if (got.symbol_start > 0 && got.symbol_end >= got.symbol_start) {
     out << "symbol_span: " << got.symbol_start << '-' << got.symbol_end << '\n';
   }
-  if (got.truncated && got.omitted_start > 0 && got.omitted_end >= got.omitted_start) {
+  if (got.truncated && got.sent_start > 0 && got.sent_end >= got.sent_start) {
+    out << "sent: " << got.sent_start << '-' << got.sent_end << '\n';
+    if (got.omitted_start > 0 && got.omitted_end >= got.omitted_start) {
+      out << "missing_lines: " << got.omitted_start << '-' << got.omitted_end << '\n';
+    } else if (got.symbol_end > got.sent_end) {
+      out << "missing_lines: " << (got.sent_end + 1) << '-' << got.symbol_end << '\n';
+    } else if (got.sent_start > got.symbol_start && got.symbol_start > 0) {
+      out << "missing_lines: " << got.symbol_start << '-' << (got.sent_start - 1) << '\n';
+    }
+  } else if (got.truncated && got.omitted_start > 0 && got.omitted_end >= got.omitted_start) {
     out << "sent: " << got.symbol_start << '-' << (got.omitted_start - 1) << " + "
         << (got.omitted_end + 1) << '-' << got.symbol_end << '\n';
     out << "missing_lines: " << got.omitted_start << '-' << got.omitted_end << '\n';
   } else if (got.truncated) {
     out << "sent: " << got.sent_start << '-' << got.sent_end << '\n';
-    if (got.symbol_end > got.sent_end) {
-      out << "missing_lines: " << (got.sent_end + 1) << '-' << got.symbol_end << '\n';
-    } else if (got.sent_start > got.symbol_start) {
-      out << "missing_lines: " << got.symbol_start << '-' << (got.sent_start - 1) << '\n';
-    }
   }
   if (got.truncated) {
     const std::string hint =

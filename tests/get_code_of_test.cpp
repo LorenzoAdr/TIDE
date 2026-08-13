@@ -873,6 +873,12 @@ int main() {
            "line-window keeps mid vars");
     expect(around.text.find("int long_fn()") == std::string::npos, "line-window skips signature");
     expect(around.text.find("return 99") == std::string::npos, "line-window skips return");
+    expect(!around.refetch_hint.empty(), "line-window refetch");
+    expect(around.refetch_hint.find("long_fn.cpp:1-") == std::string::npos ||
+               around.refetch_hint.find("-20") == std::string::npos,
+           "refetch not forced to symbol head only");
+    // Prefer adjacent window near the requested line.
+    expect(around.refetch_hint.find(':') != std::string::npos, "refetch is path:range");
   }
 
   {
