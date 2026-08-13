@@ -1,5 +1,6 @@
 #include "ai/level2_autonomous_loop.hpp"
 
+#include <chrono>
 #include <fstream>
 #include <sstream>
 
@@ -159,9 +160,11 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
                                                  const Level2AutonomousLoopOpts& opts,
                                                  const Level2PhaseLogFn& log,
                                                  std::atomic<bool>* cancel) {
+  using clock = std::chrono::steady_clock;
   Level2AutonomousLoopResult result;
   const int max_steps = opts.settings.max_steps > 0 ? opts.settings.max_steps : 32;
   const std::string system = build_system_prompt(opts.system_prompt_extra);
+  const auto run_t0 = clock::now();
 
   auto emit = [&](const std::string& line) {
     if (log) {
@@ -169,10 +172,23 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     }
   };
 
+  auto elapsed_ms = [](clock::time_point t0) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t0).count();
+  };
+
+  ai_trace(AiTraceChannel::L2, "l2_run_begin",
+           "{\"backend\":\"" + ai_trace_escape(brain.name()) + "\",\"max_steps\":" +
+               std::to_string(max_steps) + ",\"n_ctx\":" + std::to_string(opts.settings.n_ctx) +
+               "}");
+
   for (int step = 1; step <= max_steps; ++step) {
     if (cancel != nullptr && cancel->load()) {
       result.error = "cancelado";
       result.phase = "cancelled";
+      result.steps = step - 1;
+      ai_trace(AiTraceChannel::L2, "l2_run_end",
+               "{\"ok\":0,\"phase\":\"cancelled\",\"steps\":" + std::to_string(result.steps) +
+                   ",\"total_ms\":" + std::to_string(elapsed_ms(run_t0)) + "}");
       emit("L2 ▸ cancelado");
       return result;
     }
@@ -193,23 +209,30 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       result.phase = phase;
       result.steps = step - 1;
       result.summary = phase == "clarify" ? "clarify (hace falta más detalle)" : "sesión terminada";
+      ai_trace(AiTraceChannel::L2, "l2_run_end",
+               std::string("{\"ok\":") + (result.ok ? "1" : "0") + ",\"phase\":\"" + phase +
+                   "\",\"steps\":" + std::to_string(result.steps) +
+                   ",\"total_ms\":" + std::to_string(elapsed_ms(run_t0)) + "}");
       emit(phase_banner(phase, step - 1, max_steps) + " — fin (" + result.summary + ")");
       return result;
     }
     // compile is runtime-owned after edit; if stuck in compile, poke run_compile.
     if (phase == "compile") {
       emit(phase_banner(phase, step, max_steps) + " — compilando…");
+      const auto t_comp = clock::now();
       const auto tr = session.run_compile(opts.workspace_root);
+      ai_trace(AiTraceChannel::L2, "l2_compile_step",
+               "{\"step\":" + std::to_string(step) + ",\"ok\":" + (tr.ok ? "1" : "0") +
+                   ",\"duration_ms\":" + std::to_string(elapsed_ms(t_comp)) + ",\"phase\":\"" +
+                   tr.phase + "\"}");
       emit(std::string("L2 ▸ compile ") + (tr.ok ? "OK" : "FAIL") + " — " + tr.summary);
       result.steps = step;
       continue;
     }
 
+    const auto step_t0 = clock::now();
     emit(phase_banner(phase, step, max_steps) + " — pidiendo acción al modelo (" + brain.name() +
          ")…");
-    ai_trace(AiTraceChannel::L2, "l2_step",
-             "{\"step\":" + std::to_string(step) + ",\"phase\":\"" + phase + "\",\"backend\":\"" +
-                 brain.name() + "\"}");
 
     L2BrainRequest breq;
     breq.system_prompt = system;
@@ -219,7 +242,16 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     breq.n_ctx = opts.settings.n_ctx;
     breq.temperature = opts.settings.temperature;
 
+    const auto propose_t0 = clock::now();
     const L2BrainResult br = brain.propose(breq, cancel);
+    const auto propose_ms = elapsed_ms(propose_t0);
+    ai_trace(AiTraceChannel::L2, "l2_propose",
+             "{\"step\":" + std::to_string(step) + ",\"phase\":\"" + phase + "\",\"backend\":\"" +
+                 ai_trace_escape(brain.name()) + "\",\"ok\":" + (br.ok ? "1" : "0") +
+                 ",\"duration_ms\":" + std::to_string(propose_ms) + ",\"prompt_chars\":" +
+                 std::to_string(breq.system_prompt.size() + breq.user_prompt.size()) +
+                 ",\"reply_chars\":" + std::to_string(br.text.size()) +
+                 (br.ok ? "" : (",\"error\":\"" + ai_trace_escape(br.error) + "\"")) + "}");
     if (!br.ok) {
       emit("L2 ▸ modelo error: " + br.error);
       result.error = br.error;
@@ -235,6 +267,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
          (action.error.empty() ? "" : (" err=" + action.error)));
 
     Level2TurnResult tr;
+    const auto action_t0 = clock::now();
     if (action.kind == L2ActionKind::Tool) {
       emit("L2 ▸ tool " + action.name +
            (action.arg.empty() ? "" : ("(" + action.arg.substr(0, 80) + ")")));
@@ -272,6 +305,23 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       result.steps = step;
       continue;
     }
+    const auto action_ms = elapsed_ms(action_t0);
+    const auto step_ms = elapsed_ms(step_t0);
+
+    ai_trace(AiTraceChannel::L2, "l2_action",
+             "{\"step\":" + std::to_string(step) + ",\"phase\":\"" + phase + "\",\"kind\":\"" +
+                 l2_action_kind_name(action.kind) + "\",\"name\":\"" +
+                 ai_trace_escape(action.name) + "\",\"ok\":" + (tr.ok ? "1" : "0") +
+                 ",\"result_phase\":\"" + tr.phase + "\",\"duration_ms\":" +
+                 std::to_string(action_ms) +
+                 (tr.error.empty() ? "" : (",\"error\":\"" + ai_trace_escape(tr.error) + "\"")) +
+                 "}");
+    ai_trace(AiTraceChannel::L2, "l2_step",
+             "{\"step\":" + std::to_string(step) + ",\"phase\":\"" + phase + "\",\"backend\":\"" +
+                 ai_trace_escape(brain.name()) + "\",\"kind\":\"" +
+                 l2_action_kind_name(action.kind) + "\",\"propose_ms\":" +
+                 std::to_string(propose_ms) + ",\"action_ms\":" + std::to_string(action_ms) +
+                 ",\"total_ms\":" + std::to_string(step_ms) + "}");
 
     result.steps = step;
     result.phase = tr.phase;
@@ -281,6 +331,10 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     if (tr.phase == "done" || tr.phase == "clarify") {
       result.ok = true;
       result.summary = tr.summary.empty() ? action.summary : tr.summary;
+      ai_trace(AiTraceChannel::L2, "l2_run_end",
+               std::string("{\"ok\":1,\"phase\":\"") + tr.phase + "\",\"steps\":" +
+                   std::to_string(result.steps) +
+                   ",\"total_ms\":" + std::to_string(elapsed_ms(run_t0)) + "}");
       emit(phase_banner(tr.phase, step, max_steps) + " — " +
            (tr.phase == "clarify" ? "clarify" : "éxito"));
       return result;
@@ -289,6 +343,9 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
 
   result.error = "max_steps agotados (" + std::to_string(max_steps) + ")";
   result.phase = "timeout";
+  ai_trace(AiTraceChannel::L2, "l2_run_end",
+           "{\"ok\":0,\"phase\":\"timeout\",\"steps\":" + std::to_string(max_steps) +
+               ",\"total_ms\":" + std::to_string(elapsed_ms(run_t0)) + "}");
   emit("L2 ▸ " + result.error);
   return result;
 }

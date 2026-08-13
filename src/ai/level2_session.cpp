@@ -499,6 +499,10 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
      << ",\"name\":\"" << json_escape(name) << "\",\"ok\":" << (tr.ok ? "true" : "false")
      << ",\"ms\":" << ms << ",\"phase\":\"" << st.phase << "\"}";
   append_trace(workspace_root, tj.str());
+  ai_trace(AiTraceChannel::L2, "l2_tool",
+           "{\"turn\":" + std::to_string(st.turn) + ",\"name\":\"" + ai_trace_escape(name) +
+               "\",\"ok\":" + (tr.ok ? "1" : "0") + ",\"duration_ms\":" + std::to_string(ms) +
+               ",\"phase\":\"" + st.phase + "\",\"arg\":\"" + ai_trace_escape(arg, 120) + "\"}");
   out.ok = true;
   out.summary = "tool turn=" + std::to_string(st.turn);
   return out;
@@ -510,6 +514,12 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
   out.action = "edit";
   State st = load_state(workspace_root);
   out.phase = st.phase;
+  const auto edit_t0 = std::chrono::steady_clock::now();
+  auto edit_ms = [&]() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+                                                                 edit_t0)
+        .count();
+  };
   if (st.phase != "edit") {
     out.error = "action=edit solo en phase=edit (ahora=" + st.phase + ")";
     write_response_json(workspace_root, false, "error", "edit", "", "", out.error, st.turn, st.phase);
@@ -517,6 +527,7 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
   }
   auto record_edit_failure = [&](const std::string& err_msg, const std::string& path,
                                  const std::string& search, const std::string& replace) {
+    const auto ms = edit_ms();
     ++st.turn;
     st.last_action = "edit_feedback";
     out.turn = st.turn;
@@ -548,8 +559,12 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
                         "edit");
     append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
                                      ",\"event\":\"edit_fail\",\"turn\":" +
-                                     std::to_string(st.turn) + ",\"error\":\"" +
-                                     json_escape(err_msg) + "\"}");
+                                     std::to_string(st.turn) + ",\"ms\":" + std::to_string(ms) +
+                                     ",\"error\":\"" + json_escape(err_msg) + "\"}");
+    ai_trace(AiTraceChannel::L2, "l2_edit",
+             "{\"turn\":" + std::to_string(st.turn) + ",\"ok\":0,\"hunks\":" +
+                 std::to_string(hunks.size()) + ",\"duration_ms\":" + std::to_string(ms) +
+                 ",\"error\":\"" + ai_trace_escape(err_msg) + "\"}");
   };
 
   if (hunks.empty()) {
@@ -607,9 +622,15 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
   }
   save_state(workspace_root, st, nullptr);
   write_response_json(workspace_root, true, "edit", "", "", block.str(), "", st.turn, "edit");
+  const auto apply_ms = edit_ms();
   append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
                                    ",\"event\":\"edit\",\"turn\":" + std::to_string(st.turn) +
-                                   ",\"hunks\":" + std::to_string(applied.size()) + "}");
+                                   ",\"hunks\":" + std::to_string(applied.size()) +
+                                   ",\"ms\":" + std::to_string(apply_ms) + "}");
+  ai_trace(AiTraceChannel::L2, "l2_edit",
+           "{\"turn\":" + std::to_string(st.turn) + ",\"ok\":1,\"hunks\":" +
+               std::to_string(applied.size()) + ",\"duration_ms\":" + std::to_string(apply_ms) +
+               "}");
   out.ok = true;
   out.summary = "edit applied; compiling…";
   return after_successful_edit(workspace_root, st);
@@ -633,6 +654,7 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
   st.last_action = "compile";
   out.turn = st.turn;
 
+  const auto compile_t0 = std::chrono::steady_clock::now();
   int exit_code = -1;
   std::string output;
   if (deps_.run_compile) {
@@ -653,6 +675,14 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     }
     output = read_file(log);
   }
+  const auto compile_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - compile_t0)
+                              .count();
+  ai_trace(AiTraceChannel::L2, "l2_compile",
+           "{\"turn\":" + std::to_string(st.turn) + ",\"attempt\":" +
+               std::to_string(st.compile_attempt) + ",\"exit\":" + std::to_string(exit_code) +
+               ",\"ok\":" + (exit_code == 0 ? "1" : "0") +
+               ",\"duration_ms\":" + std::to_string(compile_ms) + "}");
 
   const std::string trunc = truncate_observation_tail(output, kMaxCompileLogLines);
   std::ostringstream block;
@@ -685,7 +715,8 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     write_response_json(workspace_root, true, "done", "compile", "", summary.str(), "", st.turn,
                         "done");
     append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
-                                     ",\"event\":\"compile_ok\",\"exit\":0}");
+                                     ",\"event\":\"compile_ok\",\"exit\":0,\"ms\":" +
+                                     std::to_string(compile_ms) + "}");
     out.ok = true;
     out.action = "done";
     out.summary = summary.str();
@@ -751,7 +782,8 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
   append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
                                    ",\"event\":\"compile_fail\",\"exit\":" +
                                    std::to_string(exit_code) + ",\"attempt\":" +
-                                   std::to_string(st.compile_attempt) + "}");
+                                   std::to_string(st.compile_attempt) + ",\"ms\":" +
+                                   std::to_string(compile_ms) + "}");
   out.ok = false;
   out.summary = "compile failed; phase=edit again";
   out.phase = "edit";

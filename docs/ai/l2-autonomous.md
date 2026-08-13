@@ -72,6 +72,19 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
 - En `phase=edit` el prompt al brain usa cola de sesión (~12k chars), no el `session.md` entero.
 - Si el modelo se queda sin contexto, el error cita `ai.level2.n_ctx` (no L1).
 
+## Timing en `trace.ndjson`
+
+Eventos con `duration_ms` (también `propose_ms` / `action_ms` / `total_ms`):
+
+| event | qué mide |
+|-------|----------|
+| `l2_run_begin` / `l2_run_end` | loop autónomo completo (`total_ms`) |
+| `l2_propose` | latencia del brain (modelo) |
+| `l2_action` | tool / done / edit+compile runtime |
+| `l2_step` | propose + action del paso |
+| `l2_tool` / `l2_edit` / `l2_compile` | cada fase de sesión |
+| `l1_complete` / `l1_needles_complete` | respuesta L1 |
+
 ## Handoff code_edit (modificar código)
 
 1. L1 detecta pedido de cambio → elabora **mapa rankeado completo** (catálogo ancho, sin bodies).

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -438,7 +439,15 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
     if (log) {
       log("L1 investigar → proponiendo needles…");
     }
+    const auto needles_t0 = std::chrono::steady_clock::now();
     const auto completion = deps_.backend->complete(req, cancel);
+    const auto needles_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - needles_t0)
+                                .count();
+    ai_trace(AiTraceChannel::L1, "l1_needles_complete",
+             "{\"ok\":" + std::string(completion.ok ? "1" : "0") +
+                 ",\"duration_ms\":" + std::to_string(needles_ms) + ",\"reply_chars\":" +
+                 std::to_string(completion.text.size()) + "}");
     if (completion.ok) {
       if (log) {
         log("L1 needles raw: " + completion.text);
@@ -939,7 +948,19 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
     req.context_role = "L1";
     req.n_ctx_setting_hint = "ai.level1.n_ctx";
 
+    const auto complete_t0 = std::chrono::steady_clock::now();
     const auto completion = deps_.backend->complete(req, cancel);
+    const auto complete_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - complete_t0)
+                                 .count();
+    ai_trace(AiTraceChannel::L1, "l1_complete",
+             "{\"step\":" + std::to_string(step) + ",\"ok\":" + (completion.ok ? "1" : "0") +
+                 ",\"duration_ms\":" + std::to_string(complete_ms) + ",\"reply_chars\":" +
+                 std::to_string(completion.text.size()) +
+                 (completion.ok
+                      ? ""
+                      : (",\"error\":\"" + ai_trace_escape(completion.error) + "\"")) +
+                 "}");
     if (!completion.ok) {
       if (code_locate && !map_fallback.empty()) {
         out.ok = true;
