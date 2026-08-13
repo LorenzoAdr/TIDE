@@ -487,15 +487,33 @@ int score_symbol_against_needles(const std::string& sym, const std::vector<std::
   for (char& c : s) {
     c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   }
+  // Reject common C++ / outline junk that substring-matches needles (const⊂control).
+  static const std::unordered_set<std::string> kJunk = {
+      "const", "constexpr", "int", "void", "bool", "char", "auto", "return", "true", "false",
+      "null", "this", "class", "struct", "enum", "union", "namespace", "using", "public",
+      "private", "protected", "static", "inline", "virtual", "template", "typename", "std",
+      "string", "size", "type", "file", "line", "name", "data", "value", "state", "path",
+  };
+  if (kJunk.count(s) || s.size() < 4) {
+    return 0;
+  }
   int score = 0;
   for (const auto& n : needles) {
-    if (n.size() < 3) {
+    if (n.size() < 4) {
       continue;
     }
     if (s == n) {
       score += 100;
-    } else if (s.find(n) != std::string::npos || n.find(s) != std::string::npos) {
-      score += 40;
+    } else if (s.find(n) != std::string::npos) {
+      // needle inside symbol — require a substantial needle (avoid key⊂KeyChordSpec)
+      if (n.size() >= 5) {
+        score += 40;
+      }
+    } else if (n.find(s) != std::string::npos) {
+      // symbol inside needle only if almost as long (avoid const⊂control)
+      if (s.size() >= 6 && s.size() * 2 >= n.size()) {
+        score += 30;
+      }
     }
   }
   return score;
@@ -668,6 +686,10 @@ std::string best_symbol_target_from_outline(const std::string& path, const std::
   if (best <= 0 || best_sym.empty()) {
     return {};
   }
+  // Require a real needle hit (best>0 already); reject ultra-generic short names.
+  if (best_sym.size() < 6) {
+    return {};
+  }
   return path + ":" + best_sym;
 }
 
@@ -709,6 +731,8 @@ std::string filter_outline_for_needles(const std::string& outline,
 }
 
 // From search tool text, pick best path:line hit inside `path`.
+// Requires a strong needle hit on the line — weak path-only matches are rejected
+// (avoids bare → file preamble windows like strings_es:1-80).
 std::string best_line_target_from_search(const std::string& path, const std::string& search_text,
                                          const std::vector<std::string>& needles = {}) {
   // Typical: "src/ui/press_ids.hpp:42  ..." or "file:line:col"
@@ -735,31 +759,53 @@ std::string best_line_target_from_search(const std::string& path, const std::str
     if (ln <= 0) {
       continue;
     }
-    int sc = 1 + score_symbol_against_needles(line, needles);
+    int sc = score_symbol_against_needles(line, needles);
     std::string low = line;
     for (char& c : low) {
       if (c >= 'A' && c <= 'Z') {
         c = static_cast<char>(c - 'A' + 'a');
       }
     }
-    for (const char* k : {"tab", "press", "console", "enum", "panel", "kconsole"}) {
-      if (low.find(k) != std::string::npos) {
-        sc += 8;
+    // Prefer lines that hit strong identifier needles (no domain-hardcoded boosts).
+    int strong_hits = 0;
+    for (const auto& n : needles) {
+      if (!looks_like_code_ident(n) || n.size() < 5) {
+        continue;
       }
+      if (low.find(n) != std::string::npos) {
+        sc += static_cast<int>(std::min<std::size_t>(n.size(), 24));
+        ++strong_hits;
+      }
+    }
+    // Code-shaped edit loci beat prose / preamble.
+    if (low.find("shortcuts.") != std::string::npos || low.find("keyaction::") != std::string::npos ||
+        low.find("press_id::") != std::string::npos || low.find("::") != std::string::npos) {
+      sc += 25;
+      ++strong_hits;
+    }
+    if (low.find('_') != std::string::npos) {
+      sc += 8;
     }
     // Prefer mid-file constants over preamble helpers (welcome_*).
     if (low.find("welcome") != std::string::npos) {
       sc -= 20;
+    }
+    // Path stem alone is not enough — require a real needle/code hit.
+    if (strong_hits <= 0 && sc < 40) {
+      continue;
     }
     if (sc > best_score) {
       best_score = sc;
       best_line = ln;
     }
   }
-  if (best_line <= 0) {
+  // Threshold: reject "first line in file" noise.
+  if (best_line <= 0 || best_score < 20) {
     return {};
   }
-  return line_window_target(path, best_line, 40);
+  // Tighter window around a confident hit (edit locus, not ±80 of preamble).
+  const int radius = best_score >= 60 ? 30 : 40;
+  return line_window_target(path, best_line, radius);
 }
 
 std::vector<std::string> parse_pack_targets_header(const std::string& pack) {
@@ -1520,6 +1566,12 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   st.map_stale = map_stale;
   st.map_review = false;
   st.watchlist.clear();
+  // Hard reset prior pack so plan1 cannot merge stale targets (path:Symbol del prompt viejo).
+  {
+    std::string pack_err;
+    write_file(pack_path(opts.workspace_root),
+               "# L2 code pack\n\n_(vacío — bootstrap; sin plan aún)_\n", &pack_err);
+  }
   if (!save_state(opts.workspace_root, st, err_out)) {
     return false;
   }
@@ -1803,8 +1855,10 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   const auto needles = session_pack_needles(session_body);
 
   // Merge with previous watchlist / pack header (plan2 does not wipe plan1).
+  // Only reuse pack.md targets when this session actually wrote a pack (has_pack).
+  // Otherwise a stale pack from a prior bootstrap pollutes the new plan.
   std::vector<std::string> merged = st.watchlist;
-  if (merged.empty()) {
+  if (merged.empty() && st.has_pack) {
     merged = parse_pack_targets_header(read_file(pack_path(workspace_root)));
   }
   std::unordered_set<std::string> seen_t(merged.begin(), merged.end());
@@ -1835,55 +1889,50 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
           resolved = best_symbol_target_from_outline(path, ol.text, needles);
         }
       }
-      if (resolved.empty() && !path.empty() && deps_.tools->has("search")) {
-        // Build a compact search query from identifier-like needles + path stem.
+      std::string from_search;
+      if (!path.empty() && deps_.tools->has("search")) {
+        // Needles first (edit idents); path stem last — stem-alone matches pollute ranking.
         std::ostringstream q;
         int nq = 0;
-        const std::string stem = path_stem_key(path);
-        if (!stem.empty()) {
-          q << stem;
-          ++nq;
-        }
         for (const auto& n : needles) {
-          if (!looks_like_code_ident(n)) {
+          if (!looks_like_code_ident(n) || n.size() < 5) {
             continue;
           }
           if (nq > 0) {
             q << '|';
           }
           q << n;
-          if (++nq >= 6) {
+          if (++nq >= 8) {
             break;
           }
+        }
+        const std::string stem = path_stem_key(path);
+        if (nq > 0 && !stem.empty() && stem.size() >= 4) {
+          q << '|' << stem;
+          ++nq;
+        } else if (nq == 0 && !stem.empty()) {
+          q << stem;
+          ++nq;
         }
         if (nq > 0) {
           const AiToolResult sr = deps_.tools->invoke("search", q.str());
           if (sr.ok) {
-            resolved = best_line_target_from_search(path, sr.text, needles);
-            if (!resolved.empty()) {
-              normalize_notes.push_back("- bare `" + raw + "` → `" + resolved +
-                                        "` (search-in-file)");
-            }
+            from_search = best_line_target_from_search(path, sr.text, needles);
           }
         }
       }
-      if (!resolved.empty()) {
-        bool noted = false;
-        for (const auto& n : normalize_notes) {
-          if (n.find("`" + raw + "`") != std::string::npos) {
-            noted = true;
-            break;
-          }
-        }
-        if (!noted) {
-          normalize_notes.push_back("- bare `" + raw + "` → `" + resolved +
-                                    "` (needles/outline)");
-        }
+      // Prefer search-in-file only when the hit is strong; else outline; else omit.
+      if (!from_search.empty()) {
+        resolved = from_search;
+        normalize_notes.push_back("- bare `" + raw + "` → `" + resolved + "` (search-in-file)");
+        t = resolved;
+      } else if (!resolved.empty()) {
+        normalize_notes.push_back("- bare `" + raw + "` → `" + resolved + "` (needles/outline)");
         t = resolved;
       } else {
         normalize_notes.push_back(
             "- bare `" + raw +
-            "` sin símbolo claro — omitido del pack; preferir `path:Symbol` / `path:A-B`");
+            "` sin hit fuerte — omitido; preferir `path:Symbol` / `path:line`");
         skip_fetch.insert(raw);
       }
     }
@@ -1914,6 +1963,8 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     bool ok = false;
     bool truncated = false;
     bool junk = false;  // wrong_symbol from bare / no overlap → drop body
+    bool explicit_locus = false;  // from this plan's targets (path:line/Symbol)
+    int plan_line = 0;            // original path:line before window expand
     std::string refetch;
     std::size_t rank_size = 0;
     int rank_boost = 0;  // higher = earlier (small + relevant)
@@ -1926,12 +1977,36 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
 
   const auto plan_t0 = std::chrono::steady_clock::now();
   std::unordered_set<std::string> explicit_targets;
+  std::unordered_set<std::string> explicit_paths;
   for (const auto& raw : targets) {
     const std::string t = trim_ws(raw);
     if (!t.empty()) {
       explicit_targets.insert(t);
+      const std::string ep = path_from_plan_target(t);
+      if (!ep.empty()) {
+        explicit_paths.insert(ep);
+      }
     }
   }
+  // Helper: path overlaps any pack needle (stem or filename).
+  auto path_touches_needles = [&](const std::string& path) -> bool {
+    if (path.empty()) {
+      return false;
+    }
+    const std::string stem = path_stem_key(path);
+    const std::string low = to_lower_copy(path);
+    for (const auto& n : needles) {
+      if (n.size() < 4) {
+        continue;
+      }
+      if ((!stem.empty() && (stem.find(n) != std::string::npos || n.find(stem) != std::string::npos)) ||
+          low.find(n) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   std::vector<Frag> frags;
   frags.reserve(uniq_targets.size() + 8);
   std::unordered_set<std::string> fetched;
@@ -1953,20 +2028,28 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       std::string fetch_arg = t;
       const int line = line_from_plan_target(t);
       const std::string path = path_from_plan_target(t);
-      // path:line → fetch a downward-biased range up front (edit locus survives pack).
+      f.plan_line = line;
+      f.explicit_locus = explicit_targets.count(t) > 0 ||
+                         (line > 0 && explicit_paths.count(path) > 0);
+      // path:line → fetch a downward-biased range (tighter for explicit edit loci).
       if (line > 0 && !path.empty()) {
-        fetch_arg = line_window_target_biased(path, line);
+        fetch_arg = f.explicit_locus ? line_window_target_biased(path, line, 25, 55)
+                                     : line_window_target_biased(path, line);
       }
       const AiToolResult tr = deps_.tools->invoke("get_code_of", fetch_arg);
       f.ok = tr.ok;
       f.text = tr.text.empty() ? (tr.ok ? "(vacío)" : "error get_code_of") : tr.text;
       f.truncated = text_looks_truncated(f.text);
-      if (fetch_arg != t) {
-        f.target = fetch_arg;  // pack shows the range actually fetched
+      // Keep explicit path:line label when possible (don't rewrite to a huge A-B only).
+      if (f.explicit_locus && line > 0) {
+        f.target = path + ":" + std::to_string(line);
+        f.refetch = fetch_arg;
+      } else if (fetch_arg != t) {
+        f.target = fetch_arg;
       }
-      if (f.truncated) {
+      if (f.truncated && f.refetch.empty()) {
         if (line > 0) {
-          f.refetch = line_window_target_biased(path, line + 80, 10, 80);
+          f.refetch = line_window_target_biased(path, line + 60, 10, 70);
         } else {
           f.refetch = extract_refetch_hint(f.text, t);
         }
@@ -1995,13 +2078,23 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
         if (line > 0) {
           f.rank_boost += 80;  // edit locus — pack before merge noise
         }
+        if (f.explicit_locus) {
+          f.rank_boost += 50;
+        }
         // Merged watchlist noise (not in this plan's explicit targets) with weak needles → demote.
-        if (!explicit_targets.count(t) && needle_sc <= 0 && line <= 0) {
+        if (!f.explicit_locus && needle_sc <= 0 && line <= 0) {
           f.rank_boost -= 60;
+        }
+        // Path unrelated to Instruction needles and not explicit → hard demote / noise.
+        if (!f.explicit_locus && !path_touches_needles(path) && needle_sc <= 0) {
+          f.rank_boost -= 80;
         }
       }
       fetched.insert(t);
       fetched.insert(fetch_arg);
+      if (f.explicit_locus && line > 0) {
+        fetched.insert(path + ":" + std::to_string(line));
+      }
     }
     f.rank_size = f.junk ? 999999 : f.text.size();
     frags.push_back(std::move(f));
@@ -2124,16 +2217,23 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     if (f.rank_boost < 15 && needle_hit <= 0) {
       return FragRole::Noise;
     }
+    // Unrelated merge path with no needle support → noise (drops terminal noise on shortcut tasks).
+    if (!f.explicit_locus && needle_hit <= 0 &&
+        !path_touches_needles(path_from_plan_target(f.target))) {
+      return FragRole::Noise;
+    }
     // Decl before control: type surfaces often mention selected_tab fields.
     if (has("struct ") || has("enum ") || has("class ") ||
         (has("static constexpr int") && (has("\nk") || has(" k")))) {
       return FragRole::Decl;
     }
-    // Id constants: press/tab id surfaces — not bare string_view helpers.
+    // Id constants: press/tab ids OR shortcut/i18n string tables / action meta.
     if (tgt.find("press_id") != std::string::npos || has("press_id::") || has("console.tab") ||
-        has("constexpr std::string_view k") || has("constexpr std::string_view \"") ||
-        (has("constexpr") && has(".tab.")) ||
-        (has("string_view k") && (has("console.") || has("press")))) {
+        has("constexpr std::string_view k") || (has("constexpr") && has(".tab.")) ||
+        (has("string_view k") && (has("console.") || has("press"))) ||
+        has("shortcuts.") || has("{\"shortcuts.") || tgt.find("strings_") != std::string::npos ||
+        has("kactionmeta") || has("key_action_label") ||
+        (has("toggle_") && (has("shortcut") || has("keyaction")))) {
       return FragRole::IdConst;
     }
     // Layout vs control: declaration/array beat incidental &state->tab_boxes in render.
@@ -2198,10 +2298,13 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       frag_roles[i] = FragRole::Control;
     } else if (tgt.find("press_id") != std::string::npos ||
                low.find("press_id::k") != std::string::npos ||
-               low.find("console.tab.") != std::string::npos) {
+               low.find("console.tab.") != std::string::npos ||
+               low.find("shortcuts.") != std::string::npos ||
+               tgt.find("strings_") != std::string::npos) {
       frag_roles[i] = FragRole::IdConst;
     } else if (frag_roles[i] == FragRole::IdConst && low.find("press_id") == std::string::npos &&
                low.find("console.tab") == std::string::npos &&
+               low.find("shortcuts.") == std::string::npos &&
                low.find("constexpr std::string_view k") == std::string::npos) {
       frag_roles[i] = FragRole::Other;  // drop false string_view helpers
     }
@@ -2274,8 +2377,11 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
         sc += 80;
       }
       if (want == FragRole::IdConst) {
-        if (tgt.find("press_id") != std::string::npos) {
+        if (tgt.find("press_id") != std::string::npos || tgt.find("strings_") != std::string::npos) {
           sc += 140;
+        }
+        if (low.find("shortcuts.") != std::string::npos) {
+          sc += 120;
         }
         if (low.find("console.tab") != std::string::npos || low.find("press_id::k") != std::string::npos) {
           sc += 100;
@@ -2285,8 +2391,14 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
         if (tgt.find("console_tab_press") != std::string::npos) {
           sc += 80;
         }
+        if (frags[i].explicit_locus) {
+          sc += 60;
+        }
       }
       if (want == FragRole::ApiFn && frags[i].target.find("make_") != std::string::npos) {
+        sc += 40;
+      }
+      if (frags[i].explicit_locus) {
         sc += 40;
       }
       if (sc > best_score) {
@@ -2309,6 +2421,48 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       if (idx2 >= 0) {
         picked[static_cast<std::size_t>(idx2)] = 1;
         pack_order.push_back(static_cast<std::size_t>(idx2));
+      }
+    }
+  }
+  // Diversity by file: one best remaining fragment per distinct path (scattered edits).
+  {
+    std::unordered_set<std::string> paths_seen;
+    for (std::size_t oi = 0; oi < pack_order.size(); ++oi) {
+      const std::string p = path_from_plan_target(frags[pack_order[oi]].target);
+      if (!p.empty()) {
+        paths_seen.insert(p);
+      }
+    }
+    std::vector<std::pair<int, std::size_t>> by_path;  // score, index
+    for (std::size_t i = 0; i < frags.size(); ++i) {
+      if (picked[i] || frags[i].junk || frag_roles[i] == FragRole::Noise) {
+        continue;
+      }
+      const std::string p = path_from_plan_target(frags[i].target);
+      if (p.empty() || paths_seen.count(p)) {
+        continue;
+      }
+      int sc = frags[i].rank_boost * 10 - static_cast<int>(frags[i].rank_size / 100);
+      if (frags[i].explicit_locus) {
+        sc += 80;
+      }
+      by_path.push_back({sc, i});
+    }
+    std::sort(by_path.begin(), by_path.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+    for (const auto& pr : by_path) {
+      const std::size_t i = pr.second;
+      if (picked[i]) {
+        continue;
+      }
+      const std::string p = path_from_plan_target(frags[i].target);
+      if (p.empty() || !paths_seen.insert(p).second) {
+        continue;
+      }
+      picked[i] = 1;
+      pack_order.push_back(i);
+      if (paths_seen.size() >= 8) {
+        break;
       }
     }
   }
@@ -2492,27 +2646,35 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
 
     const bool pack_trunc = f.text.size() > per;
     std::string tip = !f.refetch.empty() ? f.refetch : f.target;
-    const int line = line_from_plan_target(f.target);
+    const int line = f.plan_line > 0 ? f.plan_line : line_from_plan_target(f.target);
     if (line > 0) {
-      tip = line_window_target_biased(path_from_plan_target(f.target), line);
+      tip = f.explicit_locus ? line_window_target_biased(path_from_plan_target(f.target), line, 25, 55)
+                             : line_window_target_biased(path_from_plan_target(f.target), line);
     }
     std::vector<std::string> prefer = needles;
     if (role == FragRole::Layout) {
       prefer.insert(prefer.begin(),
                     {"tab_boxes[ConsolePanelTabs::kAi]", "targets = {", "tab_boxes", "std::array"});
     } else if (role == FragRole::Control) {
-      prefer.insert(prefer.begin(), {"render_", "else if (selected", "selected_tab =="});
+      prefer.insert(prefer.begin(),
+                    {"keybind_matches", "ToggleBreakpoint", "render_", "else if (selected",
+                     "selected_tab =="});
     } else if (role == FragRole::IdConst) {
       prefer.insert(prefer.begin(),
-                    {"kConsoleTabAi", "console.tab.ai", "press_id::k", "console.tab", "string_view"});
+                    {"shortcuts.", "toggle_breakpoint", "toggle_line_mark", "kConsoleTabAi",
+                     "console.tab.ai", "press_id::k", "console.tab", "string_view"});
     } else if (role == FragRole::Decl) {
-      prefer.insert(prefer.begin(), {"struct ", "static constexpr int", "enum "});
+      prefer.insert(prefer.begin(),
+                    {"ToggleBreakpoint", "KeyAction", "struct ", "static constexpr int", "enum "});
+    } else if (role == FragRole::ApiFn) {
+      prefer.insert(prefer.begin(), {"toggle_breakpoint", "KeyAction::", "make_"});
     }
     const bool center = line > 0 || f.rank_boost >= 50 || role == FragRole::Control ||
                         role == FragRole::Layout || role == FragRole::Decl ||
                         role == FragRole::IdConst;
-    // Layout/Decl: anchor on first role marker. IdConst switches: keep the tail (last ids).
-    const bool first_hit = role == FragRole::Layout || role == FragRole::Decl;
+    // Layout/Decl: first marker. IdConst with shortcuts.: first hit. Switches of press ids: last.
+    const bool first_hit = role == FragRole::Layout || role == FragRole::Decl ||
+                           (role == FragRole::IdConst && f.text.find("shortcuts.") != std::string::npos);
     std::string body = center ? truncate_center_budget(f.text, per, tip, prefer, first_hit)
                               : truncate_to_budget(f.text, per, tip);
     const bool is_trunc = f.truncated || pack_trunc;
@@ -3040,8 +3202,50 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
             << st.pack_incomplete_pushback << "/" << max_pack_push << ")\n\n";
       block << "Pack incompleto (truncados pendientes). Motivo del modelo: " << summary << "\n\n";
       block << "Antes de `done next=edit`, refetch huecos (`get_code_of path:A-B` / "
-               "`path:Symbol#mid`) o amplía con `action=plan`. Mira `## Truncated` en pack.md.\n\n";
-      std::string err;
+               "`path:Symbol#mid`) o amplía con `action=plan`. Mira `## Truncated` en pack.md.\n";
+      {
+        const std::string pack = read_file(pack_path(workspace_root));
+        const std::string sess = read_file(session_path(workspace_root));
+        const auto needles = session_pack_needles(sess);
+        std::vector<std::string> hints;
+        auto need = [&](bool missing, const char* tip) {
+          if (missing) {
+            hints.push_back(tip);
+          }
+        };
+        const bool has_shortcut = pack.find("shortcuts.") != std::string::npos;
+        const bool has_keyaction = pack.find("KeyAction") != std::string::npos;
+        const bool has_registry =
+            pack.find("key_binding_registry") != std::string::npos || pack.find("ctrl+") != std::string::npos;
+        const bool has_i18n =
+            pack.find("strings_es") != std::string::npos || pack.find("strings_en") != std::string::npos;
+        bool wants_shortcut = false;
+        for (const auto& n : needles) {
+          if (n.find("shortcut") != std::string::npos || n.find("keyaction") != std::string::npos ||
+              n.find("toggle_") != std::string::npos || n.find("keybind") != std::string::npos) {
+            wants_shortcut = true;
+            break;
+          }
+        }
+        if (wants_shortcut) {
+          need(!has_keyaction, "`src/ui/keybind/key_action.hpp:KeyAction` / `…:ToggleBreakpoint`");
+          need(!has_registry, "`src/ui/keybind/key_binding_registry.cpp` + search `ToggleBreakpoint`");
+          need(!has_shortcut || !has_i18n,
+               "`src/i18n/strings_es.cpp` / `strings_en.cpp` con `shortcuts.` (path:line)");
+          need(pack.find("keybind_matches") == std::string::npos &&
+                   pack.find("ToggleBreakpointAtFile") == std::string::npos,
+               "handler: `editor_panel` / `application` cerca del atajo existente");
+        }
+        if (!hints.empty()) {
+          block << "\nSugerencias de plan (gaps Instruction vs pack):\n";
+          for (const auto& h : hints) {
+            block << "- " << h << "\n";
+          }
+          block << "\n";
+        } else {
+          block << "\n";
+        }
+      }      std::string err;
       append_observation(workspace_root, block.str(), &out.session_chars, &err);
       save_state(workspace_root, st, nullptr);
       write_response_json(workspace_root, false, "done", "pack_incomplete_pushback", "",

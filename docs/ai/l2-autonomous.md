@@ -75,13 +75,16 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
 - **Tool guide solo en system prompt** (no se duplica en `session.md`).
 - **Flujo plan → pack:** en explore la primera mirada preferida es
   `{"action":"plan","targets":["path:Symbol","path:A-B",…]}` (máx. 16; evitar path bare).
-  El runtime **merge** watchlists (plan2 no pisa plan1), normaliza bare→símbolo/ventana por
-  outline + **search-in-file**, prioriza por **roles** (decl/id_const/layout/control/api_fn)
+  El runtime **merge** watchlists (plan2 no pisa plan1; bootstrap resetea `pack.md` /
+  watchlist — no reinyecta targets de una sesión previa), normaliza bare→símbolo/ventana por
+  outline + **search-in-file** (prioriza search; rechaza símbolos basura tipo `const`),
+  prioriza por **roles** (decl/id_const/layout/control/api_fn)
   con slot mínimo por rol (layout×2 temprano: decl boxes + click-targets), tope ~25%/pieza,
   **auto-refetch** anclado a `path:line`, y escribe `.tuide/ai/l2/pack.md` (~9k chars).
   Overflow del pack **no** hace head+tail del documento entero (borra el medio): recorta
-  outlines/headers/truncated. Bare sin resolución se **omite**. Ruido merge débil se
-  aplaza. Si quedan truncados → `pack_incomplete`.
+  outlines/headers/truncated. Bare sin hit fuerte se **omite**. Diversidad también por
+  **archivo** (1 fragmento/path). `path:line` explícito se preserva. Ruido merge débil se
+  aplaza. Si quedan truncados → `pack_incomplete` (pushback con gaps sugeridos).
 - **map_stale:** si la `query:` del `map_last` solapa poco la Instruction, bootstrap marca
   `map_stale` y el prompt pide no confiar en el top del mapa (search/plan anclado).
 - **Needles del pack:** Instruction + seeds + idents de Observations (`search` /

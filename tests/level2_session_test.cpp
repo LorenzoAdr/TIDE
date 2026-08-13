@@ -498,6 +498,21 @@ int main() {
     expect(sessm.status_text(rootm.string()).find("map_stale: no") != std::string::npos,
            "aligned map not stale");
     {
+      // Stale pack.md from a prior session must not leak into plan1 after bootstrap.
+      {
+        std::ofstream stale(Level2Session::pack_path(rootm.string()));
+        stale << "# L2 code pack\n\ntargets (2): `src/ui/console_panel.cpp:make_tab_button` "
+                 "`src/ui/press_ids.hpp:kConsoleTabAi`\n";
+      }
+      expect(sessm.bootstrap(optsm, &err), "bootstrap clears stale pack");
+      const auto tr0 = sessm.apply_plan(rootm.string(), {"src/foo.cpp:helper_value"}, "fresh");
+      expect(tr0.ok, "plan after stale pack clear: " + tr0.error);
+      const std::string pack0 = read_all(Level2Session::pack_path(rootm.string()));
+      expect(pack0.find("make_tab_button") == std::string::npos,
+             "stale pack targets not merged after bootstrap");
+      expect(pack0.find("helper_value") != std::string::npos, "fresh plan target present");
+    }
+    {
       const auto tr = sessm.apply_plan(rootm.string(), {"src/foo.cpp"}, "bare");
       expect(tr.ok, "plan bare ok: " + tr.error);
       const std::string pack = read_all(Level2Session::pack_path(rootm.string()));
