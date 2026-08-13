@@ -76,6 +76,7 @@ Level2SessionDeps make_l2_deps(AiController* self, ToolRegistry* tools, Workspac
                                TaskRunner* tasks, const AiSettings& settings) {
   Level2SessionDeps l2deps;
   l2deps.tools = tools;
+  l2deps.clarify_pushback_max = settings.level2.clarify_pushback_max;
   l2deps.sync_edit = [self, workspace](const ApplyHunkResult& applied) {
     if (workspace == nullptr || !applied.ok) {
       return;

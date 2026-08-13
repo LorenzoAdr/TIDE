@@ -292,7 +292,7 @@ int main() {
     fs::remove_all(rootb, ec);
   }
 
-  // Explore fail → clarify (no edit)
+  // Explore fail → clarify pushback then accept
   {
     const fs::path root2 = fs::temp_directory_path() / "tuide_l2_clarify_test";
     fs::remove_all(root2, ec);
@@ -301,15 +301,51 @@ int main() {
       std::ofstream map(root2 / ".tuide" / "ai" / "map_last.md");
       map << "query: vague\n";
     }
+    Level2SessionDeps deps{&tools, {}, {}, /*clarify_pushback_max=*/2};
+    Level2Session sess2(deps);
     Level2BootstrapOpts opts2;
     opts2.workspace_root = root2.string();
     opts2.query = "algo vago";
-    expect(session.bootstrap(opts2, &err), "bootstrap2");
-    const auto tr = session.mark_done(root2.string(), "no encontré el símbolo; ¿módulo?", "clarify");
-    expect(tr.ok && tr.phase == "clarify", "clarify phase");
-    expect(read_all(Level2Session::session_path(root2.string())).find("clarify") != std::string::npos,
-           "clarify in session");
+    expect(sess2.bootstrap(opts2, &err), "bootstrap2");
+    {
+      const auto tr = sess2.mark_done(root2.string(), "no encontré; ¿módulo?", "clarify");
+      expect(tr.ok && tr.phase == "explore", "first clarify → pushback stay explore");
+      expect(tr.summary.find("clarify_pushback") != std::string::npos, "pushback summary");
+      expect(read_all(Level2Session::session_path(root2.string())).find("clarify_pushback") !=
+                 std::string::npos,
+             "pushback in session");
+    }
+    {
+      const auto tr = sess2.mark_done(root2.string(), "aún no", "clarify");
+      expect(tr.ok && tr.phase == "explore", "second clarify → pushback 2/2");
+    }
+    {
+      const auto tr = sess2.mark_done(root2.string(), "definitivo ¿módulo?", "clarify");
+      expect(tr.ok && tr.phase == "clarify", "third clarify accepted");
+      expect(read_all(Level2Session::session_path(root2.string())).find("arreglo cancelado") !=
+                 std::string::npos,
+             "final clarify in session");
+    }
     fs::remove_all(root2, ec);
+  }
+
+  // clarify_pushback_max=0 accepts immediately
+  {
+    const fs::path rootz = fs::temp_directory_path() / "tuide_l2_clarify_zero";
+    fs::remove_all(rootz, ec);
+    fs::create_directories(rootz / ".tuide" / "ai", ec);
+    {
+      std::ofstream map(rootz / ".tuide" / "ai" / "map_last.md");
+      map << "query: z\n";
+    }
+    Level2Session sessz(Level2SessionDeps{&tools, {}, {}, 0});
+    Level2BootstrapOpts optsz;
+    optsz.workspace_root = rootz.string();
+    optsz.query = "z";
+    expect(sessz.bootstrap(optsz, &err), "bootstrapz");
+    const auto tr = sessz.mark_done(rootz.string(), "need info", "clarify");
+    expect(tr.ok && tr.phase == "clarify", "max=0 accepts clarify");
+    fs::remove_all(rootz, ec);
   }
 
   fs::remove_all(root, ec);

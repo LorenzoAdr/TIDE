@@ -422,6 +422,8 @@ Explore:
 ```
 - `next=edit` solo si hay evidencia en Observations (paths:líneas).
 - `next=clarify` / `abort` cancela el arreglo y pide más explicaciones al usuario.
+  Clarify prematuro se rechaza hasta `ai.level2.clarify_pushback_max` (default 3): debes
+  pedir más código (`tools`/`get_code_of`) antes de que se acepte.
 
 Edit (tras compile_ok o listo para cerrar):
 ```json
@@ -480,6 +482,7 @@ Level2Session::State Level2Session::load_state(const std::string& workspace_root
     st.phase = j.value("phase", "explore");
     st.edit_attempt = j.value("edit_attempt", 0);
     st.compile_attempt = j.value("compile_attempt", 0);
+    st.clarify_pushback = j.value("clarify_pushback", 0);
     st.last_op_id = j.value("last_op_id", static_cast<uint64_t>(0));
     if (j.contains("pending") && j["pending"].is_array()) {
       for (const auto& p : j["pending"]) {
@@ -513,6 +516,7 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
                       {"phase", st.phase},
                       {"edit_attempt", st.edit_attempt},
                       {"compile_attempt", st.compile_attempt},
+                      {"clarify_pushback", st.clarify_pushback},
                       {"last_op_id", st.last_op_id},
                       {"pending", pending}};
   return write_file(state_path(workspace_root), j.dump(2) + "\n", err);
@@ -1313,6 +1317,44 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
   if (next == "clarify" || next == "abort" || next == "need_info") {
     if (st.phase != "explore" && st.phase != "edit") {
       out.error = "next=clarify solo desde explore|edit";
+      return out;
+    }
+    const int max_push = deps_.clarify_pushback_max;
+    if (max_push > 0 && st.clarify_pushback < max_push) {
+      ++st.clarify_pushback;
+      ++st.turn;
+      st.last_action = "clarify_pushback";
+      out.turn = st.turn;
+      std::ostringstream block;
+      block << "### turn " << st.turn << " — clarify_pushback (" << st.clarify_pushback << "/"
+            << max_push << ")\n\n";
+      block << "Clarify prematuro rechazado. Motivo del modelo: " << summary << "\n\n";
+      block << "No cierres aún. Emite `action=tools` o `action=tool` para pedir **más código** "
+               "(otros stems/paths del ## Ranked map: `get_code_of path:Symbol`, "
+               "`file_outline`, `search`). Solo tras explorar más puedes usar "
+               "`done next=clarify` de nuevo"
+            << (st.clarify_pushback >= max_push
+                    ? ""
+                    : (" (quedan " + std::to_string(max_push - st.clarify_pushback) +
+                       " pushbacks)."))
+            << "\n\n";
+      std::string err;
+      append_observation(workspace_root, block.str(), &out.session_chars, &err);
+      save_state(workspace_root, st, nullptr);
+      write_response_json(workspace_root, false, "done", "clarify_pushback", "", block.str(),
+                          "clarify prematuro; pide más código", st.turn, st.phase);
+      append_trace(workspace_root,
+                   std::string("{\"ts\":") + now_ms_str() +
+                       ",\"event\":\"clarify_pushback\",\"n\":" +
+                       std::to_string(st.clarify_pushback) + ",\"max\":" +
+                       std::to_string(max_push) + "}");
+      ai_trace(AiTraceChannel::L2, "l2_clarify_pushback",
+               "{\"n\":" + std::to_string(st.clarify_pushback) +
+                   ",\"max\":" + std::to_string(max_push) + "}");
+      out.ok = true;
+      out.phase = st.phase;
+      out.summary = "clarify_pushback " + std::to_string(st.clarify_pushback) + "/" +
+                    std::to_string(max_push);
       return out;
     }
     ++st.turn;

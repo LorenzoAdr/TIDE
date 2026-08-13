@@ -115,6 +115,8 @@ struct AiLevel2Settings {
   int n_ctx = 8192;
   float temperature = 0.1f;
   bool auto_download = false;
+  // Reject premature clarify this many times (force more get_code_of/tools) before accepting.
+  int clarify_pushback_max = 3;
 };
 
 struct AiSettings {

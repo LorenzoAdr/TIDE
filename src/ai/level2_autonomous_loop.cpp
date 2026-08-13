@@ -294,6 +294,8 @@ std::string build_system_prompt(const std::string& extra) {
          "auto-promueve a edit y aplica. "
          "Tras edit el runtime compila: compile OK NO es fin — sigue en edit; "
          "emite más edit si faltan archivos, o done (sin next) cuando la Instruction esté cubierta. "
+         "Clarify prematuro: el runtime puede rechazarlo y pedirte más get_code_of/tools "
+         "(ai.level2.clarify_pushback_max). "
          "Reglas: next=edit solo con evidencia en Observations; search debe ser único en el "
          "archivo; no inventes paths; tras edit_feedback (search no encontrado/ambiguo) "
          "corrige el search (get_code_of si hace falta) y NO repitas el mismo hunk; "
@@ -464,6 +466,9 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       emit("L2 ▸ done next=" + (action.next.empty() ? "(none)" : action.next) + " — " +
            action.summary.substr(0, 120));
       tr = session.mark_done(opts.workspace_root, action.summary, action.next);
+      if (tr.summary.find("clarify_pushback") != std::string::npos) {
+        emit("L2 ▸ clarify prematuro → " + tr.summary + " (pide más código)");
+      }
     } else if (action.kind == L2ActionKind::Edit) {
       // Opción B: si el modelo salta done next=edit estando en explore, auto-promover.
       if (phase == "explore") {

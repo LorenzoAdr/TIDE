@@ -17,12 +17,15 @@ con el test scripted y en el **equipo preparado** con modelo real.
     "max_tokens": 2048,
     "n_ctx": 8192,
     "temperature": 0.1,
-    "auto_download": false
+    "auto_download": false,
+    "clarify_pushback_max": 3
   }
 }
 ```
 
 Máquinas más justas: `"model_id": "qwen2.5-coder-1.5b-instruct-q4_k_m"`.
+`clarify_pushback_max`: cuántas veces se rechaza un `done next=clarify` prematuro
+(pidiendo más `get_code_of`/tools) antes de aceptar el clarify. `0` = sin pushback.
 
 Descarga:
 - Toolpacks → **AI coder model (L2)** (`ai-l2`)

@@ -38,6 +38,8 @@ struct Level2SessionDeps {
   std::function<void(const ApplyHunkResult&)> sync_edit;
   // Returns process exit code; fills combined stdout/stderr.
   std::function<int(std::string* combined_output)> run_compile;
+  // Reject clarify this many times (force more code tools) before accepting. 0 = never push back.
+  int clarify_pushback_max = 3;
 };
 
 class Level2Session {
@@ -114,6 +116,7 @@ class Level2Session {
     std::string phase = "explore";
     int edit_attempt = 0;
     int compile_attempt = 0;
+    int clarify_pushback = 0;
     uint64_t last_op_id = 0;
     std::vector<PendingHunk> pending;
   };

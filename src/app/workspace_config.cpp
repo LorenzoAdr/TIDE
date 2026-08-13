@@ -131,6 +131,9 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
     if (level2.contains("auto_download") && level2["auto_download"].is_boolean()) {
       l2.auto_download = level2["auto_download"].get<bool>();
     }
+    if (level2.contains("clarify_pushback_max") && level2["clarify_pushback_max"].is_number_integer()) {
+      l2.clarify_pushback_max = level2["clarify_pushback_max"].get<int>();
+    }
   } else if (doc.contains("level2_mode") && doc["level2_mode"].is_string()) {
     settings->level2_mode = doc["level2_mode"].get<std::string>();
   }
@@ -247,7 +250,8 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
         {"max_tokens", settings.level2.max_tokens},
         {"n_ctx", settings.level2.n_ctx},
         {"temperature", settings.level2.temperature},
-        {"auto_download", settings.level2.auto_download}}},
+        {"auto_download", settings.level2.auto_download},
+        {"clarify_pushback_max", settings.level2.clarify_pushback_max}}},
       {"models", {{"cache_dir", settings.models_cache_dir}}},
       {"trace",
        {{"enabled", settings.trace_enabled}, {"path", settings.trace_path}}},
