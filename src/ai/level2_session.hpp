@@ -8,6 +8,7 @@
 
 #include "ai/search_replace.hpp"
 #include "ai/tool_registry.hpp"
+#include "ai/l2_action.hpp"
 
 namespace tuide {
 
@@ -46,6 +47,8 @@ class Level2Session {
   // Compile stderr kept as a short TAIL (errors are usually at the end).
   static constexpr int kMaxCompileLogLines = 40;
   static constexpr int kMaxCompileAttempts = 3;
+  // Tighter per-tool observation when several tools run in one propose.
+  static constexpr int kMaxObservationLinesBatch = 80;
 
   explicit Level2Session(Level2SessionDeps deps);
   explicit Level2Session(ToolRegistry* tools);
@@ -80,6 +83,9 @@ class Level2Session {
 
   Level2TurnResult apply_tool(const std::string& workspace_root, const std::string& name,
                               const std::string& arg);
+  // Several read tools in one turn (max kL2MaxToolBatch). Compacts map once at the end.
+  Level2TurnResult apply_tools(const std::string& workspace_root,
+                               const std::vector<L2ToolCall>& calls);
   Level2TurnResult apply_edit(const std::string& workspace_root,
                               const std::vector<SearchReplaceHunk>& hunks);
   Level2TurnResult run_compile(const std::string& workspace_root);

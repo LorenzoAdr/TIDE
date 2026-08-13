@@ -51,12 +51,49 @@ std::string extract_json_object(const std::string& text) {
   return {};
 }
 
+bool parse_calls_array(const nlohmann::json& j, std::vector<L2ToolCall>* out, std::string* err) {
+  if (out == nullptr) {
+    return false;
+  }
+  out->clear();
+  if (!j.contains("calls") || !j["calls"].is_array()) {
+    if (err) {
+      *err = "tools sin array calls";
+    }
+    return false;
+  }
+  for (const auto& c : j["calls"]) {
+    if (!c.is_object()) {
+      continue;
+    }
+    L2ToolCall call;
+    call.name = c.value("name", "");
+    call.arg = c.value("arg", "");
+    if (call.name.empty()) {
+      continue;
+    }
+    out->push_back(std::move(call));
+    if (static_cast<int>(out->size()) >= kL2MaxToolBatch) {
+      break;
+    }
+  }
+  if (out->empty()) {
+    if (err) {
+      *err = "tools.calls vacío o sin name";
+    }
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 const char* l2_action_kind_name(L2ActionKind kind) {
   switch (kind) {
     case L2ActionKind::Tool:
       return "tool";
+    case L2ActionKind::Tools:
+      return "tools";
     case L2ActionKind::Done:
       return "done";
     case L2ActionKind::Edit:
@@ -81,14 +118,35 @@ L2Action parse_l2_action(const std::string& model_text) {
   try {
     const auto j = nlohmann::json::parse(json_text);
     const std::string action = j.value("action", "");
+    if (action == "tools") {
+      out.kind = L2ActionKind::Tools;
+      std::string err;
+      if (!parse_calls_array(j, &out.calls, &err)) {
+        out.kind = L2ActionKind::Error;
+        out.error = err;
+      }
+      return out;
+    }
     if (action == "tool") {
+      // Prefer batch if model sent calls[] with action=tool.
+      if (j.contains("calls") && j["calls"].is_array()) {
+        out.kind = L2ActionKind::Tools;
+        std::string err;
+        if (!parse_calls_array(j, &out.calls, &err)) {
+          out.kind = L2ActionKind::Error;
+          out.error = err;
+        }
+        return out;
+      }
       out.kind = L2ActionKind::Tool;
       out.name = j.value("name", "");
       out.arg = j.value("arg", "");
       if (out.name.empty()) {
         out.kind = L2ActionKind::Error;
         out.error = "tool sin name";
+        return out;
       }
+      out.calls.push_back(L2ToolCall{out.name, out.arg});
       return out;
     }
     if (action == "done") {

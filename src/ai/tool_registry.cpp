@@ -268,6 +268,9 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
         }
         if (got.truncated) {
           out << " [truncated]";
+          out << "\nnote: cuerpo incompleto — pide `get_code_of "
+              << (got.path.empty() ? std::string("path") : got.path) << ":NombreMetodo` "
+                 "(o path:line) del método/recorte que necesites completo; no inventes código.";
         }
         out << '\n' << got.text;
         return AiToolResult{true, out.str()};

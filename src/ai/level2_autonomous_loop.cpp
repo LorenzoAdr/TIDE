@@ -275,17 +275,25 @@ std::string build_system_prompt(const std::string& extra) {
          "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
          "Formatos:\n"
          "{\"action\":\"tool\",\"name\":\"get_code_of\",\"arg\":\"src/foo.cpp:Symbol\"}\n"
+         "{\"action\":\"tools\",\"calls\":[{\"name\":\"get_code_of\",\"arg\":\"src/a.cpp:Foo\"},"
+         "{\"name\":\"file_outline\",\"arg\":\"src/b.cpp\"}]}  // máx 4\n"
          "{\"action\":\"tool\",\"name\":\"search\",\"arg\":\"needle\"}\n"
          "{\"action\":\"tool\",\"name\":\"file_outline\",\"arg\":\"src/foo.cpp\"}\n"
          "{\"action\":\"done\",\"summary\":\"evidencia paths:líneas\",\"next\":\"edit\"}\n"
          "{\"action\":\"done\",\"summary\":\"no encontré X; ¿concretas?\",\"next\":\"clarify\"}\n"
+         "{\"action\":\"done\",\"summary\":\"cambios listos en paths…\"}  // fin real (sin next)\n"
          "{\"action\":\"edit\",\"hunks\":[{\"path\":\"src/foo.cpp\",\"search\":\"exacto único\","
          "\"replace\":\"nuevo\"}]}\n"
-         "Fases: en explore SOLO tool|done (preferible done next=edit al cerrar). "
+         "Fases: en explore SOLO tool|tools|done (preferible done next=edit al cerrar). "
+         "Usa action=tools para leer varios archivos/símbolos en UN paso. "
+         "Si una observation marca [truncated], pide get_code_of path:Metodo del recorte "
+         "que falte (no inventes el cuerpo). "
          "El ## Ranked map de la sesión es el punto de partida: prioriza entradas altas y "
          "decide qué leer. "
          "action=edit es para phase=edit; si emites edit aún en explore el runtime "
          "auto-promueve a edit y aplica. "
+         "Tras edit el runtime compila: compile OK NO es fin — sigue en edit; "
+         "emite más edit si faltan archivos, o done (sin next) cuando la Instruction esté cubierta. "
          "Reglas: next=edit solo con evidencia en Observations; search debe ser único en el "
          "archivo; no inventes paths; tras edit_feedback (search no encontrado/ambiguo) "
          "corrige el search (get_code_of si hace falta) y NO repitas el mismo hunk; "
@@ -302,11 +310,14 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
   std::ostringstream out;
   out << "phase=" << phase << " step=" << step << "\n\n";
   if (phase == "edit") {
-    out << "Corrige con action=edit (Search/Replace único) usando el feedback reciente "
-           "(edit_feedback: search no encontrado/ambiguo, o stderr tail + old/new). "
-           "Si falló el apply, cambia el search; no repitas el hunk idéntico. "
-           "No pidas la traza completa. El mapa está compactado (detalle solo en stems "
-           "ya explorados).\n\n";
+    out << "Estás en phase=edit. Opciones:\n"
+           "- Si hay edit_feedback / compile_feedback: corrige con action=edit "
+           "(search único; no repitas el hunk fallido).\n"
+           "- Si acabas de ver compile_ok: compile OK no cierra la tarea. "
+           "Si la Instruction pide más archivos/cambios → otro edit (o tools). "
+           "Si ya está cubierta → {\"action\":\"done\",\"summary\":\"…\"} sin next.\n"
+           "- Varios paths: puedes meter varios hunks en un solo edit.\n"
+           "El mapa está compactado (detalle solo en stems ya explorados).\n\n";
     out << read_session_for_edit(Level2Session::session_path(workspace_root),
                                  kMaxPromptCharsEdit);
   } else {
@@ -433,10 +444,22 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
 
     Level2TurnResult tr;
     const auto action_t0 = clock::now();
-    if (action.kind == L2ActionKind::Tool) {
-      emit("L2 ▸ tool " + action.name +
-           (action.arg.empty() ? "" : ("(" + action.arg.substr(0, 80) + ")")));
-      tr = session.apply_tool(opts.workspace_root, action.name, action.arg);
+    if (action.kind == L2ActionKind::Tool || action.kind == L2ActionKind::Tools) {
+      const std::vector<L2ToolCall>& calls =
+          !action.calls.empty()
+              ? action.calls
+              : std::vector<L2ToolCall>{L2ToolCall{action.name, action.arg}};
+      if (calls.size() == 1) {
+        emit("L2 ▸ tool " + calls[0].name +
+             (calls[0].arg.empty() ? "" : ("(" + calls[0].arg.substr(0, 80) + ")")));
+        tr = session.apply_tool(opts.workspace_root, calls[0].name, calls[0].arg);
+      } else {
+        emit("L2 ▸ tools batch n=" + std::to_string(calls.size()));
+        for (const auto& c : calls) {
+          emit("  · " + c.name + (c.arg.empty() ? "" : ("(" + c.arg.substr(0, 60) + ")")));
+        }
+        tr = session.apply_tools(opts.workspace_root, calls);
+      }
     } else if (action.kind == L2ActionKind::Done) {
       emit("L2 ▸ done next=" + (action.next.empty() ? "(none)" : action.next) + " — " +
            action.summary.substr(0, 120));

@@ -73,6 +73,12 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
 - Explore slim del mapa en el prompt: detalle/snippet solo en el **top‑5**; el resto es
   línea de nombre. Tras tools, compactación en disco (detalle solo en stems tocados).
 - Observations en explore: cola ~3.5k chars.
+- **Batch de tools:** `{"action":"tools","calls":[…]}` (máx. 4) en un solo propose.
+  Si un cuerpo viene `[truncated]`, el runtime indica pedir `get_code_of path:Metodo`
+  del recorte concreto (no inventar código).
+- Tras `edit` OK el runtime compila. **Compile OK no cierra** la sesión: vuelve a
+  `phase=edit` con observation `compile_ok`; el modelo debe emitir más `edit` si faltan
+  archivos, o `{"action":"done","summary":"…"}` (sin `next`) cuando la Instruction esté cubierta.
 - Tras compile fail, Observations guarda **cola** del stderr (`kMaxCompileLogLines`, ~40) + old/new de hunks (no el log completo).
 - Tras **edit apply fail** (search no encontrado/ambiguo), Observations guarda `edit_feedback` con error + search/replace; el tab muestra el error. Así el modelo no reemite el mismo hunk a ciegas.
 - Si el modelo se queda sin contexto, el error cita `ai.level2.n_ctx` (no L1).
@@ -118,5 +124,6 @@ Al terminar el loop autónomo (`done` / `clarify` / error / cancel):
 ./build/level2_autonomous_loop_test
 ./build/level2_session_test
 ./build/level2_debrief_test
+./build/l2_action_test
 ./build/search_replace_test
 ```

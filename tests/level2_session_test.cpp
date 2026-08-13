@@ -91,8 +91,14 @@ int main() {
     h.replace = "int value = 2;\n";
     const auto tr = session.apply_edit(root.string(), {h});
     expect(tr.ok, "edit+compile ok: " + tr.error + " / " + tr.summary);
-    expect(tr.phase == "done" || tr.action == "done", "ended done");
+    expect(tr.phase == "edit", "compile ok resumes edit, got=" + tr.phase);
     expect(read_all(root / "src" / "foo.cpp").find("value = 2") != std::string::npos, "file edited");
+    const std::string sess = read_all(Level2Session::session_path(root.string()));
+    expect(sess.find("compile_ok") != std::string::npos, "compile_ok observation");
+    expect(sess.find("cierra la tarea") != std::string::npos,
+           "hint that compile is not task end");
+    const auto fin = session.mark_done(root.string(), "value bumped in foo.cpp", "");
+    expect(fin.ok && fin.phase == "done", "explicit done ends session");
   }
 
   // Ambiguous / unique parser
@@ -250,6 +256,40 @@ int main() {
     }
     expect(has_hot, "hot key mentions hot");
     fs::remove_all(rootc, ec);
+  }
+
+  // Batch tools in one propose
+  {
+    const fs::path rootb = fs::temp_directory_path() / "tuide_l2_tools_batch_test";
+    fs::remove_all(rootb, ec);
+    fs::create_directories(rootb / ".tuide" / "ai", ec);
+    fs::create_directories(rootb / "src", ec);
+    {
+      std::ofstream map(rootb / ".tuide" / "ai" / "map_last.md");
+      map << "query: batch\n\n## Ranked entries\n\n1. src/a.cpp:1 — `a`\n";
+    }
+    tools.register_tool("file_outline", "stub", [](const std::string& arg) {
+      return tuide::AiToolResult{true, "outline: " + arg + "  symbols=1\n"};
+    });
+    Level2Session sessb(Level2SessionDeps{&tools, {}, {}});
+    Level2BootstrapOpts optsb;
+    optsb.workspace_root = rootb.string();
+    optsb.query = "batch tools";
+    expect(sessb.bootstrap(optsb, &err), "bootstrap batch " + err);
+    std::vector<tuide::L2ToolCall> calls = {{"get_code_of", "src/foo.cpp:value"},
+                                            {"file_outline", "src/foo.cpp"}};
+    // Ensure foo exists for get_code_of stub (registry stub returns body)
+    {
+      std::ofstream f(rootb / "src" / "foo.cpp");
+      f << "int value = 1;\n";
+    }
+    const auto tr = sessb.apply_tools(rootb.string(), calls);
+    expect(tr.ok, "apply_tools ok");
+    expect(tr.summary.find("n=2") != std::string::npos, "summary n=2: " + tr.summary);
+    const std::string sess = read_all(Level2Session::session_path(rootb.string()));
+    expect(sess.find("`get_code_of`") != std::string::npos, "obs get_code_of");
+    expect(sess.find("`file_outline`") != std::string::npos, "obs file_outline");
+    fs::remove_all(rootb, ec);
   }
 
   // Explore fail → clarify (no edit)

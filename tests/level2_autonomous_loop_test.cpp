@@ -96,6 +96,8 @@ int main() {
       R"({"action":"tool","name":"get_code_of","arg":"src/foo.cpp:value"})",
       R"({"action":"done","summary":"src/foo.cpp:1 value","next":"edit"})",
       R"({"action":"edit","hunks":[{"path":"src/foo.cpp","search":"int value = 1;","replace":"int value = 2;"}]})",
+      // compile OK returns to edit; model must explicitly done
+      R"({"action":"done","summary":"value=2 in src/foo.cpp"})",
   });
 
   Level2AutonomousLoopOpts opts;
@@ -162,10 +164,11 @@ int main() {
         R"({"action":"tool","name":"get_code_of","arg":"src/foo.cpp:value"})",
         // Salta done next=edit → runtime debe auto-promover.
         R"({"action":"edit","hunks":[{"path":"src/foo.cpp","search":"int value = 1;","replace":"int value = 3;"}]})",
+        R"({"action":"done","summary":"value=3"})",
     });
     Level2AutonomousLoopOpts opts2;
     opts2.workspace_root = root2.string();
-    opts2.settings.max_steps = 8;
+    opts2.settings.max_steps = 10;
     std::vector<std::string> logs2;
     const auto r2 = run_level2_autonomous(
         session2, brain2, opts2, [&](const std::string& line) { logs2.push_back(line); }, nullptr);

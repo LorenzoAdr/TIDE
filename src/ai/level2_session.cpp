@@ -394,11 +394,15 @@ bool Level2Session::tool_allowed(const std::string& name) {
 std::string Level2Session::tool_guide_markdown() {
   return R"(## Tool guide
 
-Fases: **explore** → (éxito) **edit** → **compile** → **done**.
-Si explore **no** localiza el código: **clarify** (cancelar arreglo; pedir más detalle al usuario). No inventar edits.
+Fases: **explore** → (éxito) **edit** ↔ **compile** → **done** (solo con `action=done` explícito).
+Compile OK **no** finaliza: puede hacer falta editar más archivos. Si explore **no** localiza
+el código: **clarify**. No inventar edits.
 
 ### Explore / edit (lectura)
 Preferir `get_code_of` / `file_outline` / `search` antes que `read_file`.
+Se pueden pedir **varias tools a la vez** (`action=tools`, máx. 4) para ahorrar pasos.
+Si un resultado dice `[truncated]`, pide otra vez `get_code_of path:NombreMetodo` (o `path:line`)
+del método/recorte que necesites completo — no inventes el cuerpo.
 
 | tool | arg | ejemplo |
 |------|-----|---------|
@@ -412,20 +416,22 @@ Preferir `get_code_of` / `file_outline` / `search` antes que `read_file`.
 Explore:
 ```json
 {"action":"tool","name":"get_code_of","arg":"…"}
+{"action":"tools","calls":[{"name":"get_code_of","arg":"src/a.cpp:Foo"},{"name":"file_outline","arg":"src/b.cpp"}]}
 {"action":"done","summary":"código localizado en …","next":"edit"}
 {"action":"done","summary":"no encontré X; ¿puedes concretar Y?","next":"clarify"}
 ```
 - `next=edit` solo si hay evidencia en Observations (paths:líneas).
 - `next=clarify` / `abort` cancela el arreglo y pide más explicaciones al usuario.
-- `next` omitido = fin solo-lectura (sin edit).
 
-Edit:
+Edit (tras compile_ok o listo para cerrar):
 ```json
 {"action":"edit","hunks":[{"path":"src/foo.cpp","search":"…exact…","replace":"…"}]}
 {"action":"tool","name":"get_code_of","arg":"…"}
+{"action":"tools","calls":[{"name":"get_code_of","arg":"…"}]}
+{"action":"done","summary":"cambios listos: paths…"}
 ```
-
-Tras `edit` OK el runtime compila solo. Si falla (≤3): observation con stderr + old/new; reemite `edit`.
+- Tras `edit` OK el runtime compila. Compile OK → sigues en **edit**: más hunks o `done`.
+- Compile fail (≤3): observation con stderr + old/new; reemite `edit`.
 )";
 }
 
@@ -795,6 +801,10 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
   if (!obs_text.empty() && obs_text.back() != '\n') {
     block << '\n';
   }
+  if (tr.text.find("[truncated]") != std::string::npos || obs_text.size() + 20 < tr.text.size()) {
+    block << "note: [truncated] — si necesitas el cuerpo completo, pide "
+             "`get_code_of path:NombreMetodo` o `path:line` del método concreto.\n";
+  }
   block << "```\n\n";
 
   std::string err;
@@ -821,6 +831,147 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
   }
   out.ok = true;
   out.summary = "tool turn=" + std::to_string(st.turn);
+  return out;
+}
+
+Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
+                                            const std::vector<L2ToolCall>& calls) {
+  Level2TurnResult out;
+  out.action = "tools";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  if (calls.empty()) {
+    out.error = "tools.calls vacío";
+    return out;
+  }
+  if (st.done || st.phase == "done") {
+    out.error = "sesión done; reinicia con bootstrap";
+    return out;
+  }
+  if (st.phase != "explore" && st.phase != "edit") {
+    out.error = "tools solo en phase explore|edit (ahora=" + st.phase + ")";
+    return out;
+  }
+  if (deps_.tools == nullptr) {
+    out.error = "tools no registrados";
+    return out;
+  }
+
+  const int n = std::min(static_cast<int>(calls.size()), kL2MaxToolBatch);
+  std::ostringstream batch_block;
+  int ok_n = 0;
+  int fail_n = 0;
+  const auto batch_t0 = std::chrono::steady_clock::now();
+
+  for (int i = 0; i < n; ++i) {
+    const auto& call = calls[static_cast<std::size_t>(i)];
+    if (!tool_allowed(call.name)) {
+      ++st.turn;
+      batch_block << "### turn " << st.turn << " — `" << call.name << "`";
+      if (!call.arg.empty()) {
+        batch_block << " `" << call.arg << "`";
+      }
+      batch_block << "\n\n```\nerror: tool no permitido: " << call.name << "\n```\n\n";
+      ++fail_n;
+      continue;
+    }
+    if (!deps_.tools->has(call.name)) {
+      ++st.turn;
+      batch_block << "### turn " << st.turn << " — `" << call.name << "`";
+      if (!call.arg.empty()) {
+        batch_block << " `" << call.arg << "`";
+      }
+      batch_block << "\n\n```\nerror: tool no registrado: " << call.name << "\n```\n\n";
+      ++fail_n;
+      continue;
+    }
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const AiToolResult tr = deps_.tools->invoke(call.name, call.arg);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - t0)
+                        .count();
+    ++st.turn;
+    st.last_action = "tool:" + call.name;
+    out.turn = st.turn;
+    out.name = call.name;
+    out.arg = call.arg;
+
+    std::string obs_text = truncate_observation(tr.text, kMaxObservationLinesBatch);
+    const bool was_truncated =
+        tr.text.find("[truncated]") != std::string::npos || obs_text.size() < tr.text.size();
+    if (was_truncated) {
+      obs_text +=
+          "\nnote: [truncated] — si necesitas el cuerpo completo, pide "
+          "`get_code_of path:NombreMetodo` o `path:line` del método/recorte concreto "
+          "(no inventes código).\n";
+    }
+
+    batch_block << "### turn " << st.turn << " — `" << call.name << "`";
+    if (!call.arg.empty()) {
+      batch_block << " `" << call.arg << "`";
+    }
+    batch_block << "\n\n```\n" << obs_text;
+    if (!obs_text.empty() && obs_text.back() != '\n') {
+      batch_block << '\n';
+    }
+    batch_block << "```\n\n";
+
+    if (tr.ok) {
+      ++ok_n;
+    } else {
+      ++fail_n;
+    }
+
+    std::ostringstream tj;
+    tj << "{\"ts\":" << now_ms_str() << ",\"event\":\"tool\",\"turn\":" << st.turn
+       << ",\"name\":\"" << json_escape(call.name) << "\",\"ok\":" << (tr.ok ? "true" : "false")
+       << ",\"ms\":" << ms << ",\"phase\":\"" << st.phase << "\",\"batch\":1}";
+    append_trace(workspace_root, tj.str());
+    ai_trace(AiTraceChannel::L2, "l2_tool",
+             "{\"turn\":" + std::to_string(st.turn) + ",\"name\":\"" + ai_trace_escape(call.name) +
+                 "\",\"ok\":" + (tr.ok ? "1" : "0") + ",\"duration_ms\":" + std::to_string(ms) +
+                 ",\"phase\":\"" + st.phase + "\",\"batch\":1,\"arg\":\"" +
+                 ai_trace_escape(call.arg, 120) + "\"}");
+  }
+
+  if (static_cast<int>(calls.size()) > kL2MaxToolBatch) {
+    batch_block << "_nota: se ejecutaron " << n << "/" << calls.size()
+                << " calls (máx. " << kL2MaxToolBatch << ")._\n\n";
+  }
+
+  std::string err;
+  if (!append_observation(workspace_root, batch_block.str(), &out.session_chars, &err)) {
+    out.error = err;
+    return out;
+  }
+  save_state(workspace_root, st, nullptr);
+  write_response_json(workspace_root, fail_n == 0, "tools", out.name, out.arg, batch_block.str(),
+                      fail_n == 0 ? "" : "algunas tools fallaron", st.turn, st.phase);
+
+  const auto batch_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - batch_t0)
+                            .count();
+  append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                   ",\"event\":\"tools_batch\",\"n\":" + std::to_string(n) +
+                                   ",\"ok\":" + std::to_string(ok_n) +
+                                   ",\"fail\":" + std::to_string(fail_n) +
+                                   ",\"ms\":" + std::to_string(batch_ms) + "}");
+
+  if (st.phase == "explore") {
+    compact_session_context(workspace_root, nullptr);
+    out.session_chars = read_file(session_path(workspace_root)).size();
+  }
+
+  out.ok = true;  // batch accepted; individual fails are in Observations
+  out.phase = st.phase;
+  out.summary = "tools batch n=" + std::to_string(n) + " ok=" + std::to_string(ok_n) +
+                " fail=" + std::to_string(fail_n);
   return out;
 }
 
@@ -1003,40 +1154,38 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
   const std::string trunc = truncate_observation_tail(output, kMaxCompileLogLines);
   std::ostringstream block;
   if (exit_code == 0) {
-    block << "### turn " << st.turn << " — compile\n\n";
+    block << "### turn " << st.turn << " — compile_ok\n\n";
     block << "attempt: " << st.compile_attempt << "/" << kMaxCompileAttempts
           << "  exit_code: " << exit_code << "\n\n";
-    // Success: keep log tiny (compiler noise rarely needed).
     const std::string ok_log = truncate_observation_tail(output, 12);
     block << "```\n" << ok_log;
     if (!ok_log.empty() && ok_log.back() != '\n') {
       block << '\n';
     }
     block << "```\n\n";
+    block << "Compile OK **no** cierra la tarea. Revisa la Instruction:\n"
+             "- Si faltan más archivos/cambios → `action=edit` (o tools + edit).\n"
+             "- Si la petición ya está cubierta → "
+             "`{\"action\":\"done\",\"summary\":\"…qué cambiaste…\"}` (sin next).\n\n";
     std::string err;
     append_observation(workspace_root, block.str(), &out.session_chars, &err);
 
-    st.phase = "done";
-    st.done = true;
+    // Build gate only: return to edit so the model can continue or explicitly done.
+    st.phase = "edit";
+    st.done = false;
     st.last_action = "compile_ok";
     st.pending.clear();
+    st.compile_attempt = 0;  // fresh fail budget for the next edit batch
     save_state(workspace_root, st, nullptr);
-    std::ostringstream summary;
-    summary << "OK compile. edit_attempts=" << st.edit_attempt
-            << " compile_attempts=" << st.compile_attempt;
-    std::ostringstream done_block;
-    done_block << "### turn " << (++st.turn) << " — done\n\n" << summary.str() << "\n\n";
-    append_observation(workspace_root, done_block.str(), &out.session_chars, &err);
-    save_state(workspace_root, st, nullptr);
-    write_response_json(workspace_root, true, "done", "compile", "", summary.str(), "", st.turn,
-                        "done");
+    write_response_json(workspace_root, true, "compile", "", "", "compile ok; continue or done",
+                        "", st.turn, "edit");
     append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
                                      ",\"event\":\"compile_ok\",\"exit\":0,\"ms\":" +
-                                     std::to_string(compile_ms) + "}");
+                                     std::to_string(compile_ms) + ",\"resume\":\"edit\"}");
     out.ok = true;
-    out.action = "done";
-    out.summary = summary.str();
-    out.phase = "done";
+    out.action = "compile";
+    out.summary = "OK compile; phase=edit (done solo si el modelo lo emite)";
+    out.phase = "edit";
     out.turn = st.turn;
     return out;
   }
@@ -1220,7 +1369,45 @@ Level2TurnResult Level2Session::process_request_file(const std::string& workspac
     out.phase = st.phase;
 
     if (action == "tool") {
+      if (j.contains("calls") && j["calls"].is_array()) {
+        std::vector<L2ToolCall> calls;
+        for (const auto& c : j["calls"]) {
+          if (!c.is_object()) {
+            continue;
+          }
+          L2ToolCall call;
+          call.name = c.value("name", "");
+          call.arg = c.value("arg", "");
+          if (!call.name.empty()) {
+            calls.push_back(std::move(call));
+          }
+          if (static_cast<int>(calls.size()) >= kL2MaxToolBatch) {
+            break;
+          }
+        }
+        return apply_tools(workspace_root, calls);
+      }
       return apply_tool(workspace_root, j.value("name", ""), j.value("arg", ""));
+    }
+    if (action == "tools") {
+      std::vector<L2ToolCall> calls;
+      if (j.contains("calls") && j["calls"].is_array()) {
+        for (const auto& c : j["calls"]) {
+          if (!c.is_object()) {
+            continue;
+          }
+          L2ToolCall call;
+          call.name = c.value("name", "");
+          call.arg = c.value("arg", "");
+          if (!call.name.empty()) {
+            calls.push_back(std::move(call));
+          }
+          if (static_cast<int>(calls.size()) >= kL2MaxToolBatch) {
+            break;
+          }
+        }
+      }
+      return apply_tools(workspace_root, calls);
     }
     if (action == "done") {
       return mark_done(workspace_root, j.value("summary", ""), j.value("next", ""));
