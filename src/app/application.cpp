@@ -2619,6 +2619,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		} else {
 			request_binary_symbols_panel(&layout_state_, std::string{});
 		}
+		wake_console_panel(&layout_state_, "app.focus.symbols");
 		mark_focus_sync();
 		return true;
 	}
@@ -2628,6 +2629,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
 		layout_state_.text_input_focus = TextInputFocus::Console;
 		layout_state_.terminal_start_requested = true;
+		wake_console_panel(&layout_state_, "app.focus.terminal");
 		mark_focus_sync();
 		return true;
 	}
@@ -2684,6 +2686,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 				        ? TextInputFocus::None
 				        : TextInputFocus::Console;
 			}
+			wake_console_panel(&layout_state_, "app.focus.console");
 			mark_focus_sync();
 			return true;
 		}
@@ -3386,7 +3389,7 @@ int Application::run() {
 		}
 
 		if (handle_focus_shortcuts(event)) {
-			UI_WAKE(&layout_state_, "app.custom");
+			wake_console_panel(&layout_state_, "app.focus");
 			return true;
 		}
 
@@ -3399,7 +3402,7 @@ int Application::run() {
 		if (layout_state_.console_visible && event.is_mouse() &&
 		    git_tab_active(&layout_state_) && layout_state_.git_mouse_handler &&
 		    layout_state_.git_mouse_handler(event)) {
-			post_custom_throttled();
+			wake_console_panel(&layout_state_, "app.git.mouse");
 			// Evitar focus_sync en wheel: provoca el salto de layout.
 			Event mouse_event = event;
 			const auto button = mouse_event.mouse().button;

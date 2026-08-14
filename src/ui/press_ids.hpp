@@ -183,6 +183,10 @@ inline bool is_console_header_hover(std::string_view id) {
   return is_console_tab_hover(id) || id == kConsoleHide || id == kConsoleAiStop;
 }
 
+inline bool is_git_panel_hover(std::string_view id) {
+  return id.rfind("git-", 0) == 0;
+}
+
 inline bool is_performance_hover(std::string_view id) {
   return id == kPerformanceRefresh;
 }

@@ -37,7 +37,8 @@ inline void invalidate_cached_panel_chrome(MainLayoutState* layout, std::string_
       press_id::is_watches_hover(id) || id == press_id::kSidebarHide) {
     layout->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
   }
-  if (press_id::is_console_header_hover(id) || id == press_id::kTerminalScrollbar ||
+  if (press_id::is_console_header_hover(id) || press_id::is_git_panel_hover(id) ||
+      id == press_id::kTerminalScrollbar || id == press_id::kSearchScrollbar ||
       id == press_id::kTerminalLink || id == press_id::kAiResultLink) {
     layout->panel_render_cache.mark_dirty(UiPanelId::Console);
   }

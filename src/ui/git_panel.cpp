@@ -573,7 +573,7 @@ void open_status_file_diff(GitService* git, GitPanelState* state, MainLayoutStat
     if (focus != nullptr) {
       focus->region = FocusRegion::Editor;
     }
-    UI_WAKE(layout_state, "git.diff.open");
+    wake_console_panel(layout_state, "git.diff.open");
   }
 }
 
@@ -966,7 +966,7 @@ void stage_selected(GitService* git, GitPanelState* state, MainLayoutState* layo
     }
     set_status(state, ok ? i18n::tr("git.status.staged") : msg);
     if (layout_state != nullptr) {
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "wake");
     }
   });
 }
@@ -987,7 +987,7 @@ void unstage_selected(GitService* git, GitPanelState* state, MainLayoutState* la
     }
     set_status(state, ok ? i18n::tr("git.status.unstaged") : msg);
     if (layout_state != nullptr) {
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "wake");
     }
   });
 }
@@ -1008,7 +1008,7 @@ void discard_selected(GitService* git, GitPanelState* state, MainLayoutState* la
     }
     set_status(state, ok ? i18n::tr("git.status.discarded") : msg);
     if (layout_state != nullptr) {
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "wake");
     }
   });
 }
@@ -1117,7 +1117,7 @@ void commit_message(GitService* git, GitPanelState* state, MainLayoutState* layo
     }
     set_status(state, ok ? i18n::tr("git.status.commit_ok") : msg);
     if (layout_state != nullptr) {
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "wake");
     }
   });
 }
@@ -1601,7 +1601,7 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
           state->operation_pending = false;
           set_status(state, ok ? i18n::tr("git.status.branch_switched") : msg);
           if (layout_state != nullptr) {
-            UI_WAKE(layout_state, "wake");
+            wake_console_panel(layout_state, "wake");
           }
         });
       }
@@ -1853,7 +1853,7 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
       state->file_list_width_custom = true;
       state->file_list_width = state->list_sep_drag_start_width + delta;
       clamp_file_list_width(state, panel_w);
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "wake");
       return true;
     }
   }
@@ -1861,13 +1861,13 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
   if (state->list_scrollbar_dragging &&
       handle_git_list_scrollbar_mouse(state, layout_state, m, state->last_list_total,
                                       state->last_list_visible)) {
-    UI_WAKE(layout_state, "wake");
+    wake_console_panel(layout_state, "wake");
     return true;
   }
   if (state->diff_scrollbar_dragging &&
       handle_git_diff_scrollbar_mouse(state, layout_state, m, state->last_diff_total,
                                       state->last_diff_visible)) {
-    UI_WAKE(layout_state, "wake");
+    wake_console_panel(layout_state, "wake");
     return true;
   }
 
@@ -2270,10 +2270,18 @@ void GitPanelActivate(GitService* git, GitPanelState* state) {
 Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
                        FocusManagerState* focus, WorkspaceModel* workspace, int* content_height) {
   auto dispatch_keys = [git, state, layout_state, focus, workspace](Event event) {
-    return handle_git_keys(git, state, layout_state, focus, workspace, event);
+    const bool handled = handle_git_keys(git, state, layout_state, focus, workspace, event);
+    if (handled) {
+      wake_console_panel(layout_state, "git.keys");
+    }
+    return handled;
   };
   auto dispatch_mouse = [git, state, layout_state, focus, workspace](Event event) {
-    return handle_git_mouse(git, state, layout_state, focus, workspace, event);
+    const bool handled = handle_git_mouse(git, state, layout_state, focus, workspace, event);
+    if (handled) {
+      wake_console_panel(layout_state, "git.mouse");
+    }
+    return handled;
   };
 
   if (layout_state != nullptr) {
