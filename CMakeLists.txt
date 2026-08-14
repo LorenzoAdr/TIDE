@@ -980,6 +980,36 @@ target_include_directories(stem_embed_battery PRIVATE
 target_link_libraries(stem_embed_battery PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
 tuide_link_pthread(stem_embed_battery)
 
+add_executable(stem_boost_battery
+  tools/stem_boost_battery.cpp
+  src/ai/coding_stem_embed_index.cpp
+  src/ai/coding_embed_rerank.cpp
+  src/ai/repo_map.cpp
+  src/ai/get_code_of.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+  src/ai/search_needles.cpp
+  src/indexer/index_rules.cpp
+  src/parser/tree_sitter_tags.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/lsp/lsp_uri.cpp
+  src/git/git_command.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(stem_boost_battery PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(stem_boost_battery PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+tuide_link_pthread(stem_boost_battery)
+
 add_executable(pkt_protocol_test
   tests/pkt_protocol_test.cpp
   src/packet_monitor/pkt_protocol.cpp

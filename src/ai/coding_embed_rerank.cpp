@@ -12,6 +12,7 @@
 #include "ai/embedding_backend.hpp"
 #include "ai/get_code_of.hpp"
 #include "ai/repo_map.hpp"
+#include "ai/search_needles.hpp"
 #include "ai/vector_math.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "symbols/symbol_kind.hpp"
@@ -41,6 +42,50 @@ bool embed_text(bool is_query, const std::string& text, EmbeddingBackend* backen
 }
 
 constexpr int kSemanticWeight = 4000000;
+// Soft boost when underscore tokens of the stem appear in the query (module identity).
+constexpr long long kStemTokenHitWeight = 550000;
+// Prefer ui_wake_policy over ui_wake when the query mentions the extra token.
+constexpr long long kStemSpecificityBonus = 350000;
+
+std::string ascii_lower_copy_local(std::string s) {
+  for (char& c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
+int stem_query_token_hits(const std::string& stem, const std::string& query_l) {
+  if (stem.empty() || query_l.empty()) {
+    return 0;
+  }
+  int hits = 0;
+  std::string tok;
+  auto flush = [&] {
+    if (tok.size() >= 3 && query_l.find(tok) != std::string::npos) {
+      ++hits;
+    }
+    tok.clear();
+  };
+  for (char ch : stem) {
+    if (ch == '_' || ch == '-') {
+      flush();
+    } else {
+      tok.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+  }
+  flush();
+  return hits;
+}
+
+bool stem_extends_other(const std::string& longer, const std::string& shorter) {
+  if (longer.size() <= shorter.size() + 1) {
+    return false;
+  }
+  if (longer.compare(0, shorter.size(), shorter) != 0) {
+    return false;
+  }
+  return longer[shorter.size()] == '_' || longer[shorter.size()] == '-';
+}
 
 std::string coding_stem_family_key(const std::string& stem) {
   const auto u = stem.find('_');
@@ -280,6 +325,17 @@ std::vector<CodingStemShortlistItem> build_fused_stem_shortlist(
   }
 
   out.reserve(by_stem.size());
+  // Expand NL synonyms into the query haystack so stem tokens like "policy" /
+  // "performance" match Spanish prompts (politica / rendimiento).
+  std::string query_l = ascii_lower_copy_local(query);
+  for (const auto& fac : extract_query_facets(query, 16)) {
+    for (const auto& ex : expand_nl_retrieval_tokens({fac}, 12)) {
+      if (ex.size() >= 3 && query_l.find(ex) == std::string::npos) {
+        query_l.push_back(' ');
+        query_l += ex;
+      }
+    }
+  }
   for (const auto& kv : by_stem) {
     const auto& c = kv.second;
     CodingStemShortlistItem item;
@@ -289,12 +345,51 @@ std::vector<CodingStemShortlistItem> build_fused_stem_shortlist(
     item.fused_score =
         static_cast<long long>(c.lexical_score) +
         static_cast<long long>(std::lround(static_cast<double>(c.semantic_cos) * kSemanticWeight));
+    const int hits = stem_query_token_hits(c.stem, query_l);
+    item.fused_score += static_cast<long long>(hits) * kStemTokenHitWeight;
     item.hint = c.passage.empty() ? c.stem : c.passage;
     if (item.hint.size() > 180) {
       item.hint.resize(180);
       item.hint += "…";
     }
     out.push_back(std::move(item));
+  }
+  // Specificity: prefer ui_wake_policy over ui_wake when both are candidates and the
+  // query mentions the extra segment (policy / politica already folded into query_l).
+  for (auto& item : out) {
+    for (const auto& other : out) {
+      if (other.stem == item.stem) {
+        continue;
+      }
+      if (!stem_extends_other(item.stem, other.stem)) {
+        continue;
+      }
+      const std::string extra = item.stem.substr(other.stem.size() + 1);
+      if (extra.size() >= 3 && query_l.find(ascii_lower_copy_local(extra)) != std::string::npos) {
+        item.fused_score += kStemSpecificityBonus;
+        break;
+      }
+    }
+  }
+  // Bare/generic panel layout: prefer stem "panel" over *_panel when the query is
+  // about a generic layout panel (not performance/search/git/…).
+  {
+    const bool mentions_panel = query_l.find("panel") != std::string::npos;
+    const bool mentions_generic =
+        query_l.find("generico") != std::string::npos || query_l.find("generic") != std::string::npos ||
+        query_l.find("layout") != std::string::npos;
+    const bool mentions_specific =
+        query_l.find("performance") != std::string::npos || query_l.find("rendimiento") != std::string::npos ||
+        query_l.find("search") != std::string::npos || query_l.find("git") != std::string::npos ||
+        query_l.find("diagnost") != std::string::npos || query_l.find("packet") != std::string::npos ||
+        query_l.find("paquete") != std::string::npos;
+    if (mentions_panel && mentions_generic && !mentions_specific) {
+      for (auto& item : out) {
+        if (item.stem == "panel") {
+          item.fused_score += kStemSpecificityBonus;
+        }
+      }
+    }
   }
   std::stable_sort(out.begin(), out.end(),
                    [](const CodingStemShortlistItem& a, const CodingStemShortlistItem& b) {

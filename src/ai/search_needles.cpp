@@ -653,20 +653,25 @@ std::vector<std::string> expand_nl_retrieval_tokens(const std::vector<std::strin
   add_if_has({"menu", "menus"}, {"settings", "config", "preferences"});
   add_if_has({"atajos", "shortcuts", "keymap"}, {"shortcut", "shortcuts", "keybind"});
   add_if_has({"modal", "dialog", "dialogs"}, {"modal", "dialog", "overlay"});
-  // I/O / wire path: recepción/paquetes → transport/message layer (not provider lifecycle).
+  // Performance / threads UI (ES→EN stem tokens).
+  add_if_has({"rendimiento", "rendimientos", "performance", "cpu", "hilo", "hilos", "thread",
+               "threads"},
+              {"performance", "thread", "threads", "cpu"});
+  // I/O / wire path: recepción → transport; paquetes/monitor → packet monitor UI.
   add_if_has({"recepcion", "recepciones", "recibir", "recibo", "receive", "received", "recv",
                "incoming"},
               {"transport", "notification", "message", "incoming", "receive", "reader"});
-  add_if_has({"paquete", "paquetes", "packet", "packets", "frame", "frames", "payload"},
-             {"transport", "message", "packet", "frame", "payload", "notification"});
+  add_if_has({"paquete", "paquetes", "packet", "packets", "frame", "frames", "payload", "monitor"},
+             {"packet", "monitor", "pkt", "frame", "payload", "message"});
   // Syntax coloring: coloreado/resaltado → highlight layer (not symbol provider APIs).
   add_if_has({"coloreado", "colorear", "coloracion", "resaltado", "resaltar", "highlight",
                "highlighting", "highlighter", "syntax"},
               {"highlight", "highlighter", "syntax", "highlights"});
   // Async UI redraw / invalidation (mechanism), not LSP protocol providers.
   add_if_has({"wake", "wakes", "despierta", "despertar", "despertando", "redibuj", "redibujar",
-               "redibujado", "invalidate", "invalidacion", "invalidar", "repaint", "refresh_ui"},
-              {"wake", "ui_wake", "invalidation", "repaint"});
+               "redibujado", "redraw", "async", "asincron", "asincrono", "asincronos", "invalidate",
+               "invalidacion", "invalidar", "repaint", "refresh_ui", "politica", "policy"},
+              {"wake", "ui_wake", "policy", "invalidation", "repaint"});
 
   if (out.size() > max_n) {
     out.resize(max_n);

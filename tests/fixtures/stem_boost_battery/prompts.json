@@ -1,0 +1,62 @@
+[
+  {
+    "id": "01_perf_vs_panel",
+    "prompt": "panel de rendimiento informacion de hilos",
+    "expected_stems": ["performance_panel"],
+    "trap_stems": ["panel", "editor_panel"]
+  },
+  {
+    "id": "02_wake_policy",
+    "prompt": "politica de wake para eventos asincronos de la UI",
+    "expected_stems": ["ui_wake_policy"],
+    "trap_stems": ["ui_wake"]
+  },
+  {
+    "id": "03_wake_redraw",
+    "prompt": "which async events force a UI redraw",
+    "expected_stems": ["ui_wake_policy", "ui_wake"],
+    "trap_stems": []
+  },
+  {
+    "id": "04_settings",
+    "prompt": "modal de ajustes y preferencias de la aplicacion",
+    "expected_stems": ["settings_modal", "app_settings"],
+    "trap_stems": ["panel"]
+  },
+  {
+    "id": "05_search_replace",
+    "prompt": "aplicar search replace en un archivo del agente L2",
+    "expected_stems": ["search_replace"],
+    "trap_stems": ["search_panel", "text_search"]
+  },
+  {
+    "id": "06_stem_index",
+    "prompt": "indice de embeddings por stem de archivo",
+    "expected_stems": ["coding_stem_embed_index"],
+    "trap_stems": ["coding_symbol_embed_index", "embedding_backend"]
+  },
+  {
+    "id": "07_repo_map",
+    "prompt": "mapa rankeado del repositorio PageRank simbolos",
+    "expected_stems": ["repo_map"],
+    "trap_stems": ["coding_embed_rerank"]
+  },
+  {
+    "id": "08_packet",
+    "prompt": "monitor de paquetes de red o protocolo",
+    "expected_stems": ["packet_monitor_panel"],
+    "trap_stems": ["panel"]
+  },
+  {
+    "id": "09_lsp",
+    "prompt": "cliente LSP clangd transport",
+    "expected_stems": ["lsp_client", "lsp_transport"],
+    "trap_stems": []
+  },
+  {
+    "id": "10_generic_panel",
+    "prompt": "panel generico de layout UI",
+    "expected_stems": ["panel"],
+    "trap_stems": ["performance_panel"]
+  }
+]
