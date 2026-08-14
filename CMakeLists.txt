@@ -862,6 +862,10 @@ add_executable(l2_harness_cli
   tests/tool_registry_stub.cpp
   src/ai/level2_session.cpp
   src/ai/search_replace.cpp
+  src/ai/l2_action.cpp
+  src/ai/level2_autonomous_loop.cpp
+  src/ai/l2_brain_local.cpp
+  src/ai/llama_backend.cpp
   src/ai/get_code_of.cpp
   src/ai/repo_map.cpp
   src/ai/coding_embed_rerank.cpp
@@ -886,6 +890,7 @@ target_include_directories(l2_harness_cli PRIVATE
   ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
 )
 target_link_libraries(l2_harness_cli PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+tuide_link_pthread(l2_harness_cli)
 
 add_executable(repo_map_test
   tests/repo_map_test.cpp

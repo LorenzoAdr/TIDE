@@ -40,7 +40,7 @@ struct Level2SessionDeps {
   std::function<int(std::string* combined_output)> run_compile;
   // Reject clarify this many times (force more code tools) before accepting. 0 = never push back.
   int clarify_pushback_max = 3;
-  // Reject done next=edit while pack still has unresolved truncations (default 2).
+  // Reject done next=edit while pack has Instruction gaps or no pack (default 2).
   int pack_incomplete_pushback_max = 2;
 };
 
@@ -52,6 +52,15 @@ class Level2Session {
   static constexpr int kMaxCompileLogLines = 40;
   static constexpr int kMaxCompileAttempts = 3;
   static constexpr int kMaxObservationLinesBatch = 80;
+  // After a pack exists, each tool dump is much smaller (section cap is ~8k).
+  static constexpr int kMaxObservationLinesPacked = 40;
+  static constexpr std::size_t kMaxObservationCharsPerTurnPacked = 2400;
+  // Soft nudge after this many explore tools without a plan.
+  static constexpr int kExplorePlanNudgeAfter = 8;
+  // Soft nudge after this many extras once pack covers Instruction (no gaps).
+  static constexpr int kPostPackEditNudgeAfter = 8;
+  // After a pack exists, keep Observations under this (prompt uses a short tail anyway).
+  static constexpr std::size_t kMaxObservationCharsPacked = 8000;
   // Code pack for plan targets (fragments + outlines) kept under this size.
   static constexpr std::size_t kMaxPackChars = 9000;
   // Soft cap per fragment (~25% of pack) so one huge body cannot dominate.
@@ -74,7 +83,9 @@ class Level2Session {
   static bool tool_allowed(const std::string& name);
 
   // Keep first max_lines (tools). Keep last max_lines (compile stderr).
-  static std::string truncate_observation(const std::string& text, int max_lines);
+  // max_chars > 0 also hard-caps the result (post-pack per-turn budget).
+  static std::string truncate_observation(const std::string& text, int max_lines,
+                                          std::size_t max_chars = 0);
   static std::string truncate_observation_tail(const std::string& text, int max_lines);
 
   bool bootstrap(const Level2BootstrapOpts& opts, std::string* err_out = nullptr);
@@ -108,6 +119,8 @@ class Level2Session {
   Level2TurnResult rollback_pending(const std::string& workspace_root);
 
   std::string status_text(const std::string& workspace_root) const;
+  // One-line flags for harness CLI (avoids extra `status` roundtrips).
+  std::string status_flags(const std::string& workspace_root) const;
 
  private:
   Level2SessionDeps deps_;
@@ -129,8 +142,12 @@ class Level2Session {
     int compile_attempt = 0;
     int clarify_pushback = 0;
     int pack_incomplete_pushback = 0;
+    int explore_tool_count = 0;       // tools before first successful plan
+    bool plan_nudge_sent = false;     // soft nudge after N explore tools without plan
+    int post_pack_tool_count = 0;     // tools after pack, still in explore
+    bool edit_nudge_sent = false;     // soft nudge to done next=edit / edit
     bool has_pack = false;
-    bool pack_incomplete = false;  // truncated gaps remain; prefer refetch before edit
+    bool pack_incomplete = false;  // Instruction gaps vs pack (not mere truncation)
     bool map_stale = false;        // map_last query poorly overlaps session Instruction
     bool map_review = false;  // after compile_ok: full map restored, ask "algo más?"
     uint64_t last_op_id = 0;
@@ -151,7 +168,11 @@ class Level2Session {
 
   bool append_observation(const std::string& workspace_root, const std::string& block,
                           std::size_t* session_chars, std::string* err);
+  void compact_observations_after_pack(const std::string& workspace_root, const State& st,
+                                       std::size_t* session_chars);
   Level2TurnResult after_successful_edit(const std::string& workspace_root, State st);
+  // Increments explore/post-pack counters; returns observation block if a nudge fires.
+  static std::string maybe_tool_nudge(State& st, int tools_added);
 };
 
 }  // namespace tuide

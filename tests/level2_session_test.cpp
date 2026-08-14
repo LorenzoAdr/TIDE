@@ -93,6 +93,10 @@ int main() {
     expect(tr.ok && tr.phase == "explore", "explore tool");
   }
   {
+    const auto tr = session.apply_plan(root.string(), {"src/foo.cpp:value"}, "ready");
+    expect(tr.ok, "plan before edit: " + tr.error);
+  }
+  {
     const auto tr = session.mark_done(root.string(), "ready", "edit");
     expect(tr.ok && tr.phase == "edit", "phase edit");
   }
@@ -158,6 +162,7 @@ int main() {
       }
       return 1;
     }};
+    deps.pack_incomplete_pushback_max = 0;
     Level2Session sess3(deps);
     Level2BootstrapOpts opts3;
     opts3.workspace_root = root3.string();
@@ -193,7 +198,9 @@ int main() {
       std::ofstream foo(root4 / "src" / "foo.cpp");
       foo << "int value = 1;\n";
     }
-    Level2Session sess4(Level2SessionDeps{&tools, {}, [](std::string*) { return 0; }});
+    Level2SessionDeps deps4{&tools, {}, [](std::string*) { return 0; }};
+    deps4.pack_incomplete_pushback_max = 0;
+    Level2Session sess4(deps4);
     Level2BootstrapOpts opts4;
     opts4.workspace_root = root4.string();
     opts4.query = "bad hunk";
@@ -405,21 +412,14 @@ int main() {
              "pack refetch hint");
       expect(sessp.status_text(rootp.string()).find("has_pack: yes") != std::string::npos,
              "has_pack yes");
-      expect(sessp.status_text(rootp.string()).find("pack_incomplete: yes") != std::string::npos,
-             "pack_incomplete yes after truncated");
+      // Truncation alone does not mark incomplete when Instruction facets are covered.
+      expect(sessp.status_text(rootp.string()).find("pack_incomplete: no") != std::string::npos,
+             "pack_incomplete no despite truncated");
+      expect(tr.summary.find("incomplete=1") == std::string::npos, "summary not incomplete");
     }
     {
-      const auto push = sessp.mark_done(rootp.string(), "ready", "edit");
-      expect(push.ok, "pushback returns ok");
-      expect(push.summary.find("pack_incomplete_pushback") != std::string::npos,
-             "pack_incomplete pushback on next=edit");
-      expect(push.phase == "explore", "still explore after pushback");
-    }
-    // Exhaust pushbacks → allow phase=edit.
-    expect(sessp.mark_done(rootp.string(), "retry", "edit").ok, "second pushback");
-    {
-      const auto tr = sessp.mark_done(rootp.string(), "force edit", "edit");
-      expect(tr.ok && tr.phase == "edit", "to edit after pushback max");
+      const auto tr = sessp.mark_done(rootp.string(), "ready", "edit");
+      expect(tr.ok && tr.phase == "edit", "truncated-only pack → edit without pushback");
     }
     {
       SearchReplaceHunk h;
@@ -443,6 +443,137 @@ int main() {
     fs::remove_all(rootp, ec);
   }
 
+  // pack_incomplete from Instruction gaps (not truncation) → pushback on done --edit.
+  {
+    const fs::path rootg = root.parent_path() / "tuide_l2_pack_gaps";
+    fs::remove_all(rootg, ec);
+    fs::create_directories(rootg / ".tuide" / "ai", ec);
+    fs::create_directories(rootg / "src", ec);
+    {
+      std::ofstream map(rootg / ".tuide" / "ai" / "map_last.md");
+      map << "query: shortcut\n\n## Ranked entries\n\n1. src/foo.cpp:1 — `value`\n";
+    }
+    {
+      std::ofstream foo(rootg / "src" / "foo.cpp");
+      foo << "int value = 1;\n";
+    }
+    ToolRegistry toolsg;
+    toolsg.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "src/foo.cpp:1-1 (value)\nbody " + arg};
+    });
+    toolsg.register_tool("file_outline", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "outline " + arg + " symbols=1\n"};
+    });
+    Level2Session sessg(Level2SessionDeps{&toolsg, {}, [](std::string*) { return 0; }});
+    Level2BootstrapOpts optsg;
+    optsg.workspace_root = rootg.string();
+    optsg.query = "Ctrl+Shift+M ToggleLineMark shortcut";
+    optsg.instruction = "add keybind shortcut ToggleLineMark";
+    expect(sessg.bootstrap(optsg, &err), "bootstrap gaps " + err);
+    {
+      const auto tr = sessg.apply_plan(rootg.string(), {"src/foo.cpp:value"}, "thin");
+      expect(tr.ok, "plan gaps ok: " + tr.error);
+      expect(sessg.status_text(rootg.string()).find("pack_incomplete: yes") != std::string::npos,
+             "pack_incomplete yes from missing Instruction idents");
+      expect(tr.summary.find("incomplete=1") != std::string::npos, "summary incomplete");
+    }
+    {
+      const auto push = sessg.mark_done(rootg.string(), "ready", "edit");
+      expect(push.ok, "pushback returns ok");
+      expect(push.summary.find("pack_incomplete_pushback") != std::string::npos,
+             "pack_incomplete pushback on next=edit");
+      expect(push.phase == "explore", "still explore after pushback");
+      const std::string sess = read_all(Level2Session::session_path(rootg.string()));
+      expect(sess.find("togglelinemark") != std::string::npos ||
+                 sess.find("ToggleLineMark") != std::string::npos ||
+                 sess.find("re-plan anclado") != std::string::npos,
+             "pushback lists missing Instruction idents");
+    }
+    expect(sessg.mark_done(rootg.string(), "retry", "edit").ok, "second pushback");
+    {
+      const auto tr = sessg.mark_done(rootg.string(), "force edit", "edit");
+      expect(tr.ok && tr.phase == "edit", "to edit after pushback max");
+    }
+    fs::remove_all(rootg, ec);
+  }
+
+  // Soft plan nudge after 8 explore tools without plan.
+  {
+    const fs::path rootn = root.parent_path() / "tuide_l2_plan_nudge";
+    fs::remove_all(rootn, ec);
+    fs::create_directories(rootn / ".tuide" / "ai", ec);
+    fs::create_directories(rootn / "src", ec);
+    {
+      std::ofstream map(rootn / ".tuide" / "ai" / "map_last.md");
+      map << "query: nudge\n\n## Ranked entries\n\n1. src/foo.cpp:1 — `value`\n";
+    }
+    {
+      std::ofstream foo(rootn / "src" / "foo.cpp");
+      foo << "int value = 1;\n";
+    }
+    ToolRegistry toolsn;
+    toolsn.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "body " + arg};
+    });
+    Level2Session sessn(Level2SessionDeps{&toolsn, {}, {}});
+    Level2BootstrapOpts optsn;
+    optsn.workspace_root = rootn.string();
+    optsn.query = "nudge plan";
+    optsn.instruction = "find code";
+    expect(sessn.bootstrap(optsn, &err), "bootstrap nudge " + err);
+    for (int i = 0; i < Level2Session::kExplorePlanNudgeAfter; ++i) {
+      expect(sessn.apply_tool(rootn.string(), "get_code_of", "src/foo.cpp:value").ok,
+             "nudge tool " + std::to_string(i));
+    }
+    const std::string sess = read_all(Level2Session::session_path(rootn.string()));
+    expect(sess.find("_nudge:_") != std::string::npos, "session contains plan nudge");
+    expect(sess.find("action=plan") != std::string::npos, "nudge asks for plan");
+    fs::remove_all(rootn, ec);
+  }
+
+  // Soft edit nudge after 8 extras once pack covers Instruction.
+  {
+    const fs::path roote = root.parent_path() / "tuide_l2_edit_nudge";
+    fs::remove_all(roote, ec);
+    fs::create_directories(roote / ".tuide" / "ai", ec);
+    fs::create_directories(roote / "src", ec);
+    {
+      std::ofstream map(roote / ".tuide" / "ai" / "map_last.md");
+      map << "query: bump helper_value\n\n## Ranked entries\n\n1. src/foo.cpp:1 — `helper_value`\n";
+    }
+    {
+      std::ofstream foo(roote / "src" / "foo.cpp");
+      foo << "int helper_value = 1;\n";
+    }
+    ToolRegistry toolse;
+    toolse.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "src/foo.cpp:1-1 (helper_value)\nint helper_value = 1;\n"};
+    });
+    toolse.register_tool("file_outline", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "outline " + arg + " symbols=1\n  helper_value\n"};
+    });
+    Level2Session sesse(Level2SessionDeps{&toolse, {}, {}});
+    Level2BootstrapOpts optse;
+    optse.workspace_root = roote.string();
+    optse.query = "bump helper_value";
+    optse.instruction = "change helper_value";
+    expect(sesse.bootstrap(optse, &err), "bootstrap edit nudge " + err);
+    expect(sesse.apply_plan(roote.string(), {"src/foo.cpp:helper_value"}, "ready").ok,
+           "plan for edit nudge");
+    expect(sesse.status_text(roote.string()).find("pack_incomplete: no") != std::string::npos,
+           "covering pack");
+    expect(read_all(Level2Session::session_path(roote.string())).find("_nudge:_") == std::string::npos,
+           "no nudge yet after covering plan");
+    for (int i = 0; i < Level2Session::kPostPackEditNudgeAfter; ++i) {
+      expect(sesse.apply_tool(roote.string(), "get_code_of", "src/foo.cpp:helper_value").ok,
+             "post-pack tool " + std::to_string(i));
+    }
+    const std::string sess = read_all(Level2Session::session_path(roote.string()));
+    expect(sess.find("_nudge:_") != std::string::npos, "session contains edit nudge");
+    expect(sess.find("done next=edit") != std::string::npos, "nudge asks for edit");
+    fs::remove_all(roote, ec);
+  }
+
   // map_stale when map_last query poorly overlaps Instruction.
   {
     const fs::path roots = root.parent_path() / "tuide_l2_map_stale";
@@ -462,6 +593,11 @@ int main() {
     expect(sesss.bootstrap(optss, &err), "bootstrap map_stale " + err);
     const std::string sess = read_all(Level2Session::session_path(roots.string()));
     expect(sess.find("map_stale=1") != std::string::npos, "session warns map_stale");
+    expect(sess.find("omitido") != std::string::npos, "stale map not injected into session");
+    expect(sess.find("on_pty_output") == std::string::npos, "stale ranked entries omitted");
+    expect(read_all(Level2Session::map_initial_path(roots.string())).find("on_pty_output") !=
+               std::string::npos,
+           "map_initial still has full stale map");
     expect(sesss.status_text(roots.string()).find("map_stale: yes") != std::string::npos,
            "status map_stale yes");
     fs::remove_all(roots, ec);
@@ -584,6 +720,143 @@ int main() {
                sessm.status_text(rootm.string()).find("phase: edit") != std::string::npos,
            "complete pack → edit without pushback");
     fs::remove_all(rootm, ec);
+  }
+
+  // Sibling .hpp is packed with the .cpp (decl / #include surface).
+  {
+    const fs::path roots = fs::temp_directory_path() / "tuide_l2_sibling_hdr";
+    fs::remove_all(roots, ec);
+    fs::create_directories(roots / ".tuide" / "ai", ec);
+    fs::create_directories(roots / "src", ec);
+    {
+      std::ofstream map(roots / ".tuide" / "ai" / "map_last.md");
+      map << "query: helper_value\n\n## Ranked entries\n\n1. src/foo.cpp:1 — `helper_value`\n";
+    }
+    {
+      std::ofstream foo(roots / "src" / "foo.cpp");
+      foo << "int helper_value() { return 1; }\n";
+    }
+    {
+      std::ofstream hdr(roots / "src" / "foo.hpp");
+      hdr << "#pragma once\n#include <cstdint>\nint helper_value();\nstruct FooDecl { int x; };\n";
+    }
+    ToolRegistry tools_s;
+    tools_s.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      if (arg.find(".hpp") != std::string::npos) {
+        return AiToolResult{true, "src/foo.hpp:1-20 (FooDecl)\n#pragma once\n#include <cstdint>\n"
+                                  "int helper_value();\nstruct FooDecl { int x; };\n"};
+      }
+      return AiToolResult{true, "src/foo.cpp:1-10 (helper_value)\nint helper_value() { return 1; }\n"};
+    });
+    tools_s.register_tool("file_outline", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "outline " + arg + "\nhelper_value\nFooDecl\n"};
+    });
+    tools_s.register_tool("headers_of", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "headers_of: " + arg + "\n#include <cstdint>\nsibling: src/foo.hpp\n"};
+    });
+    Level2Session sesss(Level2SessionDeps{&tools_s, {}, {}});
+    Level2BootstrapOpts optss;
+    optss.workspace_root = roots.string();
+    optss.query = "helper_value";
+    optss.instruction = "bump helper_value declaration";
+    expect(sesss.bootstrap(optss, &err), "bootstrap sibling " + err);
+    const auto tr = sesss.apply_plan(roots.string(), {"src/foo.cpp:helper_value"}, "sib");
+    expect(tr.ok, "plan sibling: " + tr.error);
+    const std::string pack = read_all(Level2Session::pack_path(roots.string()));
+    expect(pack.find("src/foo.hpp") != std::string::npos, "pack mentions sibling hpp");
+    expect(pack.find("sibling header") != std::string::npos, "normalize note for sibling");
+    expect(pack.find("FooDecl") != std::string::npos || pack.find("#include") != std::string::npos,
+           "pack keeps decl/include");
+    expect(pack.find("## Headers") != std::string::npos, "Headers section present");
+    fs::remove_all(roots, ec);
+  }
+
+  // Post-pack tool dumps are capped per turn (not 200 lines).
+  {
+    const fs::path rooto = fs::temp_directory_path() / "tuide_l2_obs_packed";
+    fs::remove_all(rooto, ec);
+    fs::create_directories(rooto / ".tuide" / "ai", ec);
+    fs::create_directories(rooto / "src", ec);
+    {
+      std::ofstream map(rooto / ".tuide" / "ai" / "map_last.md");
+      map << "query: helper_value\n";
+    }
+    {
+      std::ofstream foo(rooto / "src" / "foo.cpp");
+      foo << "int helper_value = 1;\n";
+    }
+    ToolRegistry toolso;
+    toolso.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      if (arg.find("fat") != std::string::npos) {
+        std::ostringstream o;
+        for (int i = 1; i <= 200; ++i) {
+          o << "FATLINE_" << i << " helper_value padding\n";
+        }
+        return AiToolResult{true, o.str()};
+      }
+      return AiToolResult{true, "int helper_value = 1;\n"};
+    });
+    toolso.register_tool("file_outline", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "outline " + arg + "\nhelper_value\n"};
+    });
+    Level2Session sesso(Level2SessionDeps{&toolso, {}, {}});
+    Level2BootstrapOpts optso;
+    optso.workspace_root = rooto.string();
+    optso.query = "helper_value";
+    optso.instruction = "touch helper_value";
+    expect(sesso.bootstrap(optso, &err), "bootstrap obs packed " + err);
+    expect(sesso.apply_plan(rooto.string(), {"src/foo.cpp:helper_value"}, "p").ok, "plan obs");
+    const auto tr = sesso.apply_tool(rooto.string(), "get_code_of", "src/foo.cpp:fat");
+    expect(tr.ok, "fat tool ok");
+    const std::string session = read_all(Level2Session::session_path(rooto.string()));
+    expect(session.find("FATLINE_1 ") != std::string::npos, "keeps start of fat obs");
+    expect(session.find("FATLINE_80 ") == std::string::npos, "drops far fat lines");
+    expect(session.find("observation truncated") != std::string::npos ||
+               session.find("packed observations truncated") != std::string::npos,
+           "truncation marker post-pack");
+    expect(session.size() < 20000, "session stays well under pre-pack 51k dumps");
+    fs::remove_all(rooto, ec);
+  }
+
+  // Compile undeclared identifier → sibling-header hint.
+  {
+    const fs::path rootu = fs::temp_directory_path() / "tuide_l2_undecl_hint";
+    fs::remove_all(rootu, ec);
+    fs::create_directories(rootu / ".tuide" / "ai", ec);
+    fs::create_directories(rootu / "src", ec);
+    {
+      std::ofstream map(rootu / ".tuide" / "ai" / "map_last.md");
+      map << "query: undecl\n";
+    }
+    {
+      std::ofstream foo(rootu / "src" / "foo.cpp");
+      foo << "int value = 1;\n";
+    }
+    Level2SessionDeps depsu{&tools, {}, [](std::string* out) {
+      if (out) {
+        *out = "foo.cpp:3:10: error: 'ToggleLineMark' was not declared in this scope\n";
+      }
+      return 1;
+    }};
+    depsu.pack_incomplete_pushback_max = 0;
+    Level2Session sessu(depsu);
+    Level2BootstrapOpts optsu;
+    optsu.workspace_root = rootu.string();
+    optsu.query = "fix undecl";
+    expect(sessu.bootstrap(optsu, &err), "bootstrap undecl " + err);
+    expect(sessu.mark_done(rootu.string(), "ready", "edit").ok, "to edit undecl");
+    SearchReplaceHunk h;
+    h.path = "src/foo.cpp";
+    h.search = "int value = 1;\n";
+    h.replace = "int value = 4;\n";
+    const auto tr = sessu.apply_edit(rootu.string(), {h});
+    expect(!tr.ok || tr.phase == "edit", "stays edit after undecl");
+    const std::string session = read_all(Level2Session::session_path(rootu.string()));
+    expect(session.find("compile_feedback") != std::string::npos, "compile_feedback undecl");
+    expect(session.find("Símbolos no declarados") != std::string::npos, "undeclared banner");
+    expect(session.find("ToggleLineMark") != std::string::npos, "keeps ident");
+    expect(session.find("header hermano") != std::string::npos, "sibling header hint");
+    fs::remove_all(rootu, ec);
   }
 
   fs::remove_all(root, ec);

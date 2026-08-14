@@ -200,8 +200,7 @@ std::string truncate_center_budget(std::string text, std::size_t max_chars, cons
     }
   }
   if (best < 0) {
-    for (const char* k : {"tab_boxes", "std::array", "targets =", "render_", "selected_tab",
-                          "make_tab", "press_id", "case "}) {
+    for (const char* k : {"::", "constexpr", "std::", "struct ", "enum ", "case "}) {
       const auto p = prefer_first_hit ? low.find(k) : low.rfind(k);
       if (p != std::string::npos) {
         mid = p;
@@ -520,7 +519,7 @@ int score_symbol_against_needles(const std::string& sym, const std::vector<std::
 }
 
 bool looks_like_code_ident(const std::string& tok) {
-  if (tok.size() < 4) {
+  if (tok.size() < 5) {
     return false;
   }
   bool has_under = false;
@@ -532,11 +531,8 @@ bool looks_like_code_ident(const std::string& tok) {
       has_digit = true;
     }
   }
-  // Needles are lowercased: snake / nested names, or domain tokens from explore.
-  return has_under || has_digit || tok.find("tab") != std::string::npos ||
-         tok.find("press") != std::string::npos || tok.find("console") != std::string::npos ||
-         tok.find("panel") != std::string::npos || tok.find("render") != std::string::npos ||
-         tok.find("button") != std::string::npos || tok.find("layout") != std::string::npos;
+  // snake / nested / numbered, or smashed CamelCase (ToggleLineMark → togglelinemark).
+  return has_under || has_digit || tok.size() >= 10;
 }
 
 void merge_needles(std::vector<std::string>* dst, const std::vector<std::string>& add) {
@@ -552,19 +548,42 @@ void merge_needles(std::vector<std::string>* dst, const std::vector<std::string>
   }
 }
 
-// Instruction + seeds + recent tool args/names from Observations (generic, language-agnostic).
+void merge_labeled_line(const std::string& section, const char* label,
+                        std::vector<std::string>* out) {
+  if (!out || label == nullptr) {
+    return;
+  }
+  const std::string lab = label;
+  std::size_t pos = 0;
+  while ((pos = section.find(lab, pos)) != std::string::npos) {
+    const bool at_line = (pos == 0) || section[pos - 1] == '\n';
+    if (!at_line) {
+      pos += lab.size();
+      continue;
+    }
+    const auto eol = section.find('\n', pos);
+    const auto from = pos + lab.size();
+    const auto n = (eol == std::string::npos ? section.size() : eol) - from;
+    merge_needles(out, tokenize_needles(section.substr(from, n)));
+    pos = eol == std::string::npos ? section.size() : eol + 1;
+  }
+}
+
+// query/instruction/seeds + tool args from Observations (not the bootstrap guide paragraph).
 std::vector<std::string> session_pack_needles(const std::string& session_body) {
   std::vector<std::string> out;
   const auto instr = session_body.find("## Instruction");
   const auto map = session_body.find("## Ranked map");
   if (instr != std::string::npos) {
     const auto end = (map != std::string::npos && map > instr) ? map : session_body.size();
-    merge_needles(&out, tokenize_needles(session_body.substr(instr, end - instr)));
+    const std::string section = session_body.substr(instr, end - instr);
+    merge_labeled_line(section, "query:", &out);
+    merge_labeled_line(section, "instruction:", &out);
+    merge_labeled_line(section, "seeds:", &out);
   }
   const auto obs = session_body.find("## Observations");
   if (obs != std::string::npos) {
     const std::string slice = session_body.substr(obs);
-    // Tool args / headings often carry identifiers the Instruction (ES) lacks.
     static const char* markers[] = {
         "get_code_of `", "get_code_of ", "search `", "search ", "file_outline `",
         "### get_code_of `", "arg:", "targets:",
@@ -582,10 +601,7 @@ std::vector<std::string> session_pack_needles(const std::string& session_body) {
         merge_needles(&out, tokenize_needles(slice.substr(pos, end - pos)));
       }
     }
-    // Also harvest Camel/snake tokens from observation snippets.
-    merge_needles(&out, tokenize_needles(slice.substr(0, std::min<std::size_t>(slice.size(), 12000))));
   }
-  // Prefer identifier-like needles first for bare-path scoring (keep all).
   std::stable_sort(out.begin(), out.end(), [](const std::string& a, const std::string& b) {
     const int sa = looks_like_code_ident(a) ? 0 : 1;
     const int sb = looks_like_code_ident(b) ? 0 : 1;
@@ -777,18 +793,13 @@ std::string best_line_target_from_search(const std::string& path, const std::str
         ++strong_hits;
       }
     }
-    // Code-shaped edit loci beat prose / preamble.
-    if (low.find("shortcuts.") != std::string::npos || low.find("keyaction::") != std::string::npos ||
-        low.find("press_id::") != std::string::npos || low.find("::") != std::string::npos) {
+    // Code-shaped edit loci beat prose / preamble (generic: nested names, not domain words).
+    if (low.find("::") != std::string::npos) {
       sc += 25;
       ++strong_hits;
     }
     if (low.find('_') != std::string::npos) {
       sc += 8;
-    }
-    // Prefer mid-file constants over preamble helpers (welcome_*).
-    if (low.find("welcome") != std::string::npos) {
-      sc -= 20;
     }
     // Path stem alone is not enough — require a real needle/code hit.
     if (strong_hits <= 0 && sc < 40) {
@@ -840,6 +851,78 @@ std::string to_lower_copy(std::string s) {
     }
   }
   return s;
+}
+
+bool is_source_ext(std::string ext) {
+  ext = to_lower_copy(std::move(ext));
+  return ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".c" || ext == ".mm";
+}
+
+bool is_header_ext(std::string ext) {
+  ext = to_lower_copy(std::move(ext));
+  return ext == ".hpp" || ext == ".h" || ext == ".hh" || ext == ".hxx";
+}
+
+bool path_looks_like_header(const std::string& path) {
+  const auto dot = path.find_last_of('.');
+  if (dot == std::string::npos || dot + 1 >= path.size()) {
+    return false;
+  }
+  return is_header_ext(path.substr(dot));
+}
+
+// Same-stem .hpp/.h next to a .cpp (declaration / include surface for edits).
+std::string sibling_header_rel(const std::string& workspace_root, const std::string& rel) {
+  fs::path p(rel);
+  if (!is_source_ext(p.extension().string())) {
+    return {};
+  }
+  static const char* kExts[] = {".hpp", ".h", ".hh", ".hxx"};
+  for (const char* hext : kExts) {
+    fs::path cand = p;
+    cand.replace_extension(hext);
+    std::error_code ec;
+    if (fs::exists(fs::path(workspace_root) / cand, ec) && !ec) {
+      return cand.generic_string();
+    }
+  }
+  return {};
+}
+
+std::vector<std::string> compile_undeclared_idents(const std::string& log) {
+  std::vector<std::string> out;
+  std::unordered_set<std::string> seen;
+  std::istringstream in(log);
+  std::string line;
+  while (std::getline(in, line) && out.size() < 8) {
+    const std::string ll = to_lower_copy(line);
+    if (ll.find("undeclared") == std::string::npos &&
+        ll.find("not declared") == std::string::npos &&
+        ll.find("has not been declared") == std::string::npos) {
+      continue;
+    }
+    for (char q : {'\'', '`'}) {
+      std::size_t a = 0;
+      while ((a = line.find(q, a)) != std::string::npos) {
+        const auto b = line.find(q, a + 1);
+        if (b == std::string::npos || b <= a + 1) {
+          break;
+        }
+        std::string id = line.substr(a + 1, b - a - 1);
+        const auto colon = id.rfind("::");
+        if (colon != std::string::npos && colon + 2 < id.size()) {
+          id = id.substr(colon + 2);
+        }
+        if (id.size() >= 2 && id.size() <= 80 &&
+            (std::isalpha(static_cast<unsigned char>(id[0])) || id[0] == '_') &&
+            seen.insert(id).second) {
+          out.push_back(id);
+        }
+        a = b + 1;
+      }
+    }
+  }
+  return out;
 }
 
 std::string path_stem_key(std::string_view path) {
@@ -908,6 +991,94 @@ std::string first_line_of(const std::string& entry) {
   const auto nl = entry.find('\n');
   std::string line = nl == std::string::npos ? entry : entry.substr(0, nl);
   return trim_ws(line);
+}
+
+// Idents from Instruction missing in pack (generic: no domain facets).
+std::vector<std::string> pack_instruction_gaps(const std::string& pack,
+                                               const std::vector<std::string>& needles) {
+  std::vector<std::string> missing;
+  int strong = 0;
+  int strong_hit = 0;
+  const std::string pack_low = to_lower_copy(pack);
+  for (const auto& n : needles) {
+    if (!looks_like_code_ident(n) || n.size() < 8) {
+      continue;
+    }
+    // Ignore leftover path:Symbol tokens if a tool arg leaked in.
+    if (n.rfind("path:", 0) == 0) {
+      continue;
+    }
+    ++strong;
+    const auto low = to_lower_copy(n);
+    if (pack_low.find(low) != std::string::npos) {
+      ++strong_hit;
+    } else {
+      missing.push_back(n);
+    }
+  }
+  std::vector<std::string> gaps;
+  if (strong >= 1 && strong_hit == 0) {
+    std::ostringstream tip;
+    tip << "ningún ident de Instruction aparece en el pack";
+    const int show = std::min(static_cast<int>(missing.size()), 6);
+    if (show > 0) {
+      tip << " (";
+      for (int i = 0; i < show; ++i) {
+        if (i) {
+          tip << ", ";
+        }
+        tip << '`' << missing[static_cast<std::size_t>(i)] << '`';
+      }
+      tip << ") — re-plan anclado";
+    } else {
+      tip << " — re-plan anclado";
+    }
+    gaps.push_back(tip.str());
+  }
+  return gaps;
+}
+
+std::string trim_observations_section(std::string obs_section, std::size_t max_chars) {
+  if (max_chars == 0 || obs_section.size() <= max_chars) {
+    return obs_section;
+  }
+  std::vector<std::size_t> turns;
+  std::size_t pos = 0;
+  while (true) {
+    const auto p = obs_section.find("\n### turn ", pos);
+    if (p == std::string::npos) {
+      break;
+    }
+    turns.push_back(p + 1);
+    pos = p + 1;
+  }
+  const auto p0 = obs_section.find("### turn ");
+  if (p0 != std::string::npos && (turns.empty() || turns.front() != p0)) {
+    turns.insert(turns.begin(), p0);
+  }
+  std::size_t drop = 0;
+  while (drop + 1 < turns.size() && obs_section.size() > max_chars) {
+    ++drop;
+    std::ostringstream rebuilt;
+    rebuilt << "## Observations\n\n<!-- older observations trimmed (" << drop << ") -->\n\n";
+    rebuilt << obs_section.substr(turns[drop]);
+    obs_section = rebuilt.str();
+  }
+  // One remaining turn can still blow the budget (e.g. 200-line get_code_of).
+  if (obs_section.size() > max_chars) {
+    std::string keep = obs_section.substr(0, max_chars);
+    const auto nl = keep.rfind('\n');
+    if (nl != std::string::npos && nl + 40 < keep.size()) {
+      keep.resize(nl + 1);
+    }
+    keep += "… (packed observations truncated)\n";
+    obs_section = std::move(keep);
+  }
+  if (obs_section.size() > max_chars) {
+    obs_section.resize(max_chars);
+    obs_section += "\n<!-- observations truncated -->\n";
+  }
+  return obs_section;
 }
 
 }  // namespace
@@ -1180,19 +1351,23 @@ std::string Level2Session::tool_guide_markdown() {
 
 Fases: **explore** (mapa → **plan** → pack) → **edit** ↔ **compile** → **map_review** →
 **done** (solo con `action=done` explícito). Compile OK **no** finaliza: restaura el mapa
-inicial y pregunta si falta algo. Si explore **no** localiza el código: **clarify**.
+inicial (salvo `map_stale`) y pregunta si falta algo. Si explore **no** localiza el código: **clarify**.
 
 ### Explore (primera mirada = plan)
-Con el ## Ranked map, emite **un plan** `path:Symbol` o `path:A-B` (evitar path bare). El
-runtime **merge** de packs, prioriza fragmentos pequeños, tope ~25%/pieza, **auto-refetch**
-de truncados y marca `pack_incomplete` si quedan huecos. Si `map_stale=1`, no confíes en
-el top del mapa: `search` / plan anclado a la Instruction.
+Preferir `plan` en el **primer** paso: 4–8 `path:Symbol` / `path:line` anclados a la
+Instruction (evitar path bare). Máx. ~8 tools sueltos antes del primer plan (el runtime
+puede emitir un soft `_nudge:_`). Tras pack cubierto: extras con `tools` batch (máx. 4);
+si sigues leyendo, otro `_nudge:_` pide `done next=edit`. No repetir el mismo path con
+ventanas solapadas. Si `[TRUNCATED]`, refetch tip (`path:A-B` / `#mid|#tail`), no shotgun.
+Truncado ≠ bloqueo de edit si no hay gaps Instruction.
+`pack_incomplete` = gaps Instruction↔pack (o cero fragmentos), no meros truncados.
+Sin facetas hardcoded: un ident de `query:`/`instruction:` debe aparecer en el pack.
+Si `map_stale=1` el mapa rankeado **no** se inyecta: `search` / `plan` anclado.
 
 ```json
 {"action":"plan","targets":["src/a.cpp:Foo","src/b.cpp:42","src/c.hpp:Bar"],"summary":"…"}
 ```
-Máx. 16 targets. Tras el pack → Instruction+pack (sin mapa completo). Extras: `tools` (máx. 4).
-Si `[TRUNCATED]` / `## Truncated`: refetch `path:A-B` / `#mid|#tail` antes de inventar.
+Máx. 16 targets. Tras el pack → Instruction+pack (sin mapa completo).
 
 | tool | arg | ejemplo |
 |------|-----|---------|
@@ -1212,7 +1387,7 @@ Explore (con mapa):
 ```
 - Preferir `plan` en el primer paso. `next=edit` con evidencia en pack/Observations.
 - Clarify prematuro: pushback hasta `ai.level2.clarify_pushback_max` (default 3).
-- `done next=edit` con `pack_incomplete` puede rechazarse (pushback; refetch truncados).
+- `done next=edit` sin pack o con `pack_incomplete` (gaps) puede rechazarse (pushback).
 
 Edit / tras pack:
 ```json
@@ -1220,7 +1395,7 @@ Edit / tras pack:
 {"action":"plan","targets":["…"]}
 {"action":"done","summary":"cambios listos: paths…"}
 ```
-- Zona en Truncated → refetch antes del hunk.
+- Zona en Truncated → refetch antes del hunk (no inventes).
 - Tras `edit` OK → compile. Compile OK → **mapa inicial** + «¿algo más?» (`plan` / `edit` / `done`).
 - Compile fail (≤3): stderr + old/new; reemite `edit`.
 )";
@@ -1273,6 +1448,10 @@ Level2Session::State Level2Session::load_state(const std::string& workspace_root
     st.compile_attempt = j.value("compile_attempt", 0);
     st.clarify_pushback = j.value("clarify_pushback", 0);
     st.pack_incomplete_pushback = j.value("pack_incomplete_pushback", 0);
+    st.explore_tool_count = j.value("explore_tool_count", 0);
+    st.plan_nudge_sent = j.value("plan_nudge_sent", false);
+    st.post_pack_tool_count = j.value("post_pack_tool_count", 0);
+    st.edit_nudge_sent = j.value("edit_nudge_sent", false);
     st.has_pack = j.value("has_pack", false);
     st.pack_incomplete = j.value("pack_incomplete", false);
     st.map_stale = j.value("map_stale", false);
@@ -1319,6 +1498,10 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
                       {"compile_attempt", st.compile_attempt},
                       {"clarify_pushback", st.clarify_pushback},
                       {"pack_incomplete_pushback", st.pack_incomplete_pushback},
+                      {"explore_tool_count", st.explore_tool_count},
+                      {"plan_nudge_sent", st.plan_nudge_sent},
+                      {"post_pack_tool_count", st.post_pack_tool_count},
+                      {"edit_nudge_sent", st.edit_nudge_sent},
                       {"has_pack", st.has_pack},
                       {"pack_incomplete", st.pack_incomplete},
                       {"map_stale", st.map_stale},
@@ -1329,22 +1512,34 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
   return write_file(state_path(workspace_root), j.dump(2) + "\n", err);
 }
 
-std::string Level2Session::truncate_observation(const std::string& text, int max_lines) {
+std::string Level2Session::truncate_observation(const std::string& text, int max_lines,
+                                                std::size_t max_chars) {
+  std::string result;
   if (max_lines <= 0) {
-    return text;
-  }
-  std::istringstream in(text);
-  std::ostringstream out;
-  std::string line;
-  int n = 0;
-  while (std::getline(in, line)) {
-    out << line << '\n';
-    if (++n >= max_lines) {
-      out << "… (observation truncated at " << max_lines << " lines)\n";
-      break;
+    result = text;
+  } else {
+    std::istringstream in(text);
+    std::ostringstream out;
+    std::string line;
+    int n = 0;
+    while (std::getline(in, line)) {
+      out << line << '\n';
+      if (++n >= max_lines) {
+        out << "… (observation truncated at " << max_lines << " lines)\n";
+        break;
+      }
     }
+    result = out.str();
   }
-  return out.str();
+  if (max_chars > 0 && result.size() > max_chars) {
+    result.resize(max_chars);
+    const auto nl = result.rfind('\n');
+    if (nl != std::string::npos && nl + 40 < result.size()) {
+      result.resize(nl + 1);
+    }
+    result += "… (observation truncated at " + std::to_string(max_chars) + " chars)\n";
+  }
+  return result;
 }
 
 std::string Level2Session::truncate_observation_tail(const std::string& text, int max_lines) {
@@ -1384,31 +1579,9 @@ std::string Level2Session::trim_session_body(std::string body) {
     return body.substr(0, kCharBudget) + "\n\n<!-- truncated hard -->\n";
   }
   const std::string head = body.substr(0, obs_pos);
-  std::string obs_section = body.substr(obs_pos);
-  std::vector<std::size_t> turns;
-  std::size_t pos = 0;
-  while (true) {
-    const auto p = obs_section.find("\n### turn ", pos);
-    if (p == std::string::npos) {
-      break;
-    }
-    turns.push_back(p + 1);
-    pos = p + 1;
-  }
-  const auto p0 = obs_section.find("### turn ");
-  if (p0 != std::string::npos && (turns.empty() || turns.front() != p0)) {
-    turns.insert(turns.begin(), p0);
-  }
-  std::size_t drop = 0;
-  while (drop < turns.size() && head.size() + obs_section.size() > kCharBudget) {
-    ++drop;
-    std::ostringstream rebuilt;
-    rebuilt << "## Observations\n\n<!-- older observations trimmed (" << drop << ") -->\n\n";
-    if (drop < turns.size()) {
-      rebuilt << obs_section.substr(turns[drop]);
-    }
-    obs_section = rebuilt.str();
-  }
+  const std::size_t obs_budget =
+      kCharBudget > head.size() ? kCharBudget - head.size() : kCharBudget / 4;
+  std::string obs_section = trim_observations_section(body.substr(obs_pos), obs_budget);
   body = head + obs_section;
   if (body.size() > kCharBudget) {
     body.resize(kCharBudget);
@@ -1448,6 +1621,38 @@ void Level2Session::write_response_json(const std::string& workspace_root, bool 
   write_file(response_path(workspace_root), j.dump(2) + "\n", &err);
 }
 
+std::string Level2Session::maybe_tool_nudge(State& st, int tools_added) {
+  if (st.phase != "explore" || tools_added <= 0) {
+    return {};
+  }
+  if (!st.has_pack) {
+    st.explore_tool_count += tools_added;
+    if (!st.plan_nudge_sent && st.explore_tool_count >= kExplorePlanNudgeAfter) {
+      st.plan_nudge_sent = true;
+      std::ostringstream nudge;
+      nudge << "_nudge:_ Llevas " << st.explore_tool_count
+            << " tools sin `plan`. Emite `action=plan` con 4–8 `path:Symbol`/`path:line` "
+               "anclados a la Instruction (evitar path bare).\n\n";
+      return nudge.str();
+    }
+    return {};
+  }
+  // Pack already covers Instruction: extras should be refetch tips, then edit.
+  if (st.pack_incomplete) {
+    return {};
+  }
+  st.post_pack_tool_count += tools_added;
+  if (!st.edit_nudge_sent && st.post_pack_tool_count >= kPostPackEditNudgeAfter) {
+    st.edit_nudge_sent = true;
+    std::ostringstream nudge;
+    nudge << "_nudge:_ Llevas " << st.post_pack_tool_count
+          << " tools tras pack (Instruction cubierta). Emite `done next=edit` o `edit` "
+             "(refetch solo gaps / `## Truncated` tip; no shotgun).\n\n";
+    return nudge.str();
+  }
+  return {};
+}
+
 bool Level2Session::append_observation(const std::string& workspace_root, const std::string& block,
                                        std::size_t* session_chars, std::string* err) {
   std::string session = read_file(session_path(workspace_root));
@@ -1472,6 +1677,24 @@ bool Level2Session::append_observation(const std::string& workspace_root, const 
     *session_chars = session.size();
   }
   return write_file(session_path(workspace_root), session, err);
+}
+
+void Level2Session::compact_observations_after_pack(const std::string& workspace_root,
+                                                    const State& st, std::size_t* session_chars) {
+  if (!st.has_pack) {
+    return;
+  }
+  std::string session = read_file(session_path(workspace_root));
+  const auto obs_pos = session.find("## Observations");
+  if (obs_pos == std::string::npos) {
+    return;
+  }
+  const std::string head = session.substr(0, obs_pos);
+  session = head + trim_observations_section(session.substr(obs_pos), kMaxObservationCharsPacked);
+  write_file(session_path(workspace_root), session, nullptr);
+  if (session_chars) {
+    *session_chars = session.size();
+  }
 }
 
 bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_out) {
@@ -1533,18 +1756,26 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
     md << "\n\n";
   }
   if (map_stale) {
-    md << "**map_stale=1**: el ## Ranked map parece de otra query (`" << map_query
+    md << "**map_stale=1**: el mapa rankeado parece de otra query (`" << map_query
        << "`; overlap=" << static_cast<int>(overlap * 100)
-       << "%). No confíes en el top del mapa: usa `search` / `plan` anclado a esta Instruction.\n\n";
+       << "%). No se inyecta el mapa completo. Usa `search` / `plan` anclado a esta "
+          "Instruction.\n\n";
   }
-  md << "Fase inicial: **explore**. Primera mirada = `action=plan` con targets "
-        "`path:Symbol` o `path:A-B` (evitar path bare). El runtime arma un pack "
-        "(fragmentos + outlines; merge si ya había pack). Luego "
-        "`{\"action\":\"done\",\"summary\":\"…\",\"next\":\"edit\"}` o `edit` directo.\n\n";
+  md << "Fase inicial: **explore**. Preferir `action=plan` en el **primer** paso con "
+        "4–8 targets `path:Symbol`/`path:line` (evitar path bare). Máx. ~8 tools sueltos "
+        "antes del primer plan. Tras pack cubierto: extras con `tools` batch (máx. 4); "
+        "luego `{\"action\":\"done\",\"summary\":\"…\",\"next\":\"edit\"}` o `edit` directo. "
+        "Truncado ≠ bloqueo de edit si no hay gaps Instruction.\n\n";
   md << "## Ranked map\n\n";
-  md << map_body;
-  if (!map_body.empty() && map_body.back() != '\n') {
-    md << '\n';
+  if (map_stale) {
+    md << "_(omitido — map_stale; query del mapa: `" << map_query
+       << "`; overlap=" << static_cast<int>(overlap * 100)
+       << "%. Usa `search` / `plan` anclado a la Instruction.)_\n";
+  } else {
+    md << map_body;
+    if (!map_body.empty() && map_body.back() != '\n') {
+      md << '\n';
+    }
   }
   md << "\n## Observations\n\n";
   md << "(vacío — L2 pide plan/tools)\n";
@@ -1563,6 +1794,10 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   st.last_action = "bootstrap";
   st.has_pack = false;
   st.pack_incomplete = false;
+  st.explore_tool_count = 0;
+  st.plan_nudge_sent = false;
+  st.post_pack_tool_count = 0;
+  st.edit_nudge_sent = false;
   st.map_stale = map_stale;
   st.map_review = false;
   st.watchlist.clear();
@@ -1634,7 +1869,9 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
   st.last_action = "tool:" + name;
   out.turn = st.turn;
 
-  const std::string obs_text = truncate_observation(tr.text, kMaxObservationLines);
+  const int max_lines = st.has_pack ? kMaxObservationLinesPacked : kMaxObservationLines;
+  const std::size_t max_chars = st.has_pack ? kMaxObservationCharsPerTurnPacked : 0;
+  const std::string obs_text = truncate_observation(tr.text, max_lines, max_chars);
   std::ostringstream block;
   block << "### turn " << st.turn << " — `" << name << "`";
   if (!arg.empty()) {
@@ -1657,6 +1894,15 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
     out.error = err;
     return out;
   }
+
+  // Soft nudges: plan early, or stop extras after a covering pack.
+  if (const std::string nudge = maybe_tool_nudge(st, 1); !nudge.empty()) {
+    if (!append_observation(workspace_root, nudge, &out.session_chars, &err)) {
+      out.error = err;
+      return out;
+    }
+  }
+
   save_state(workspace_root, st, nullptr);
   write_response_json(workspace_root, tr.ok, "tool", name, arg, obs_text,
                       tr.ok ? "" : "tool failed", st.turn, st.phase);
@@ -1669,11 +1915,14 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
            "{\"turn\":" + std::to_string(st.turn) + ",\"name\":\"" + ai_trace_escape(name) +
                "\",\"ok\":" + (tr.ok ? "1" : "0") + ",\"duration_ms\":" + std::to_string(ms) +
                ",\"phase\":\"" + st.phase + "\",\"arg\":\"" + ai_trace_escape(arg, 120) + "\"}");
-  // Shrink ranked map: name-only except stems/paths this explore already touched.
+  // Shrink ranked map in explore; always compact Observations once a pack exists.
   if (st.phase == "explore") {
     compact_session_context(workspace_root, nullptr);
-    out.session_chars = read_file(session_path(workspace_root)).size();
   }
+  if (st.has_pack) {
+    compact_observations_after_pack(workspace_root, st, &out.session_chars);
+  }
+  out.session_chars = read_file(session_path(workspace_root)).size();
   out.ok = true;
   out.summary = "tool turn=" + std::to_string(st.turn);
   return out;
@@ -1747,7 +1996,9 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
     out.name = call.name;
     out.arg = call.arg;
 
-    std::string obs_text = truncate_observation(tr.text, kMaxObservationLinesBatch);
+    std::string obs_text = truncate_observation(
+        tr.text, st.has_pack ? kMaxObservationLinesPacked : kMaxObservationLinesBatch,
+        st.has_pack ? kMaxObservationCharsPerTurnPacked : 0);
     const bool was_truncated =
         tr.text.find("[TRUNCATED]") != std::string::npos ||
         tr.text.find("[truncated]") != std::string::npos || obs_text.size() < tr.text.size();
@@ -1795,6 +2046,14 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
     out.error = err;
     return out;
   }
+
+  if (const std::string nudge = maybe_tool_nudge(st, n); !nudge.empty()) {
+    if (!append_observation(workspace_root, nudge, &out.session_chars, &err)) {
+      out.error = err;
+      return out;
+    }
+  }
+
   save_state(workspace_root, st, nullptr);
   write_response_json(workspace_root, fail_n == 0, "tools", out.name, out.arg, batch_block.str(),
                       fail_n == 0 ? "" : "algunas tools fallaron", st.turn, st.phase);
@@ -1810,8 +2069,11 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
 
   if (st.phase == "explore") {
     compact_session_context(workspace_root, nullptr);
-    out.session_chars = read_file(session_path(workspace_root)).size();
   }
+  if (st.has_pack) {
+    compact_observations_after_pack(workspace_root, st, &out.session_chars);
+  }
+  out.session_chars = read_file(session_path(workspace_root)).size();
 
   out.ok = true;  // batch accepted; individual fails are in Observations
   out.phase = st.phase;
@@ -1957,6 +2219,27 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     }
   }
 
+  // Sibling .hpp/.h next to a .cpp: declaration / #include surface for edits that compile.
+  {
+    const std::vector<std::string> paths_copy = uniq_paths;
+    for (const auto& p : paths_copy) {
+      const std::string sib = sibling_header_rel(workspace_root, p);
+      if (sib.empty()) {
+        continue;
+      }
+      if (seen_paths.insert(sib).second) {
+        uniq_paths.push_back(sib);
+      }
+      const std::string t = sib + ":1";
+      if (std::find(uniq_targets.begin(), uniq_targets.end(), t) == uniq_targets.end() &&
+          std::find(uniq_targets.begin(), uniq_targets.end(), sib) == uniq_targets.end()) {
+        uniq_targets.push_back(t);
+        normalize_notes.push_back("- sibling header `" + p + "` → `" + t +
+                                  "` (decl / #include)");
+      }
+    }
+  }
+
   struct Frag {
     std::string target;
     std::string text;
@@ -2060,7 +2343,9 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
                             score_symbol_against_needles(f.text.substr(0, 400), needles);
       if (f.ok && !ok_name) {
         const bool was_bare_like = symbol_from_plan_target(t).empty() && line <= 0;
-        if (was_bare_like || needle_sc <= 0) {
+        const bool sibling_preamble =
+            !f.explicit_locus && line == 1 && path_looks_like_header(path);
+        if ((was_bare_like || needle_sc <= 0) && !sibling_preamble) {
           f.junk = true;
           f.text = "WARN wrong_symbol: resuelto `" + got_name +
                    "` no solapa needles/target — fragmento omitido. "
@@ -2072,6 +2357,9 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
           f.text +=
               "\nWARN wrong_symbol: resuelto `" + got_name +
               "` no solapa Instruction — revisa outline / pide path:Symbol concreto.\n";
+          if (!f.explicit_locus && line == 1 && path_looks_like_header(path)) {
+            f.rank_boost = 75;
+          }
         }
       } else if (f.ok) {
         f.rank_boost = 10 + needle_sc / 5;
@@ -2088,6 +2376,10 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
         // Path unrelated to Instruction needles and not explicit → hard demote / noise.
         if (!f.explicit_locus && !path_touches_needles(path) && needle_sc <= 0) {
           f.rank_boost -= 80;
+        }
+        // Injected sibling.hpp:1 is decl surface, not an edit locus — keep but don't steal Control.
+        if (!f.explicit_locus && line == 1 && path_looks_like_header(path)) {
+          f.rank_boost = 75 + std::max(0, needle_sc) / 5;
         }
       }
       fetched.insert(t);
@@ -2307,6 +2599,12 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
                low.find("shortcuts.") == std::string::npos &&
                low.find("constexpr std::string_view k") == std::string::npos) {
       frag_roles[i] = FragRole::Other;  // drop false string_view helpers
+    }
+    const std::string pth = to_lower_copy(path_from_plan_target(frags[i].target));
+    if ((frag_roles[i] == FragRole::Other || frag_roles[i] == FragRole::ApiFn ||
+         frag_roles[i] == FragRole::Noise) &&
+        path_looks_like_header(pth)) {
+      frag_roles[i] = FragRole::Decl;
     }
     // Symbol-only helpers require a code-like needle hit on the symbol itself.
     if (frag_roles[i] == FragRole::ApiFn || frag_roles[i] == FragRole::Other) {
@@ -2640,7 +2938,8 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       per = std::min(remaining, std::max(per, role_share));
     }
     // IdConst/Layout exemplars are small surfaces — give them enough room to keep markers.
-    if (first_of_role && (role == FragRole::IdConst || role == FragRole::Layout)) {
+    if (first_of_role &&
+        (role == FragRole::IdConst || role == FragRole::Layout || role == FragRole::Decl)) {
       per = std::min(remaining, std::max(per, std::min<std::size_t>(role_share + 200, 1400)));
     }
 
@@ -2699,6 +2998,36 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     used_frags += sec.str().size();
   }
 
+  // Headers before outlines so overflow drops outlines first (decl/#include stay).
+  const std::size_t header_budget_cap = std::min<std::size_t>(1000, budget / 8);
+  std::size_t after_frags = pack.str().size();
+  std::size_t header_budget =
+      budget > after_frags + 400
+          ? std::min(header_budget_cap, budget - after_frags - 400)
+          : 0;
+  if (!headers.empty() && header_budget > 80) {
+    pack << "## Headers\n\n";
+    for (const auto& h : headers) {
+      if (header_budget < 60) {
+        break;
+      }
+      std::string body =
+          truncate_to_budget(h.text, std::min<std::size_t>(header_budget, 400), {});
+      std::ostringstream sec;
+      sec << "### headers_of `" << h.path << "`\n\n```\n" << body;
+      if (!body.empty() && body.back() != '\n') {
+        sec << '\n';
+      }
+      sec << "```\n\n";
+      const std::string s = sec.str();
+      if (s.size() > header_budget) {
+        break;
+      }
+      pack << s;
+      header_budget -= s.size();
+    }
+  }
+
   pack << "## Outlines\n\n";
   std::size_t outline_budget =
       budget > pack.str().size() ? budget - pack.str().size() : 0;
@@ -2732,28 +3061,6 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     outline_budget -= s.size();
   }
 
-  if (!headers.empty() && outline_budget > 120) {
-    pack << "## Headers\n\n";
-    for (const auto& h : headers) {
-      if (outline_budget < 60) {
-        break;
-      }
-      std::string body = truncate_to_budget(h.text, std::min<std::size_t>(outline_budget, 400), {});
-      std::ostringstream sec;
-      sec << "### headers_of `" << h.path << "`\n\n```\n" << body;
-      if (!body.empty() && body.back() != '\n') {
-        sec << '\n';
-      }
-      sec << "```\n\n";
-      const std::string s = sec.str();
-      if (s.size() > outline_budget) {
-        break;
-      }
-      pack << s;
-      outline_budget -= s.size();
-    }
-  }
-
   std::ostringstream trunc_sec;
   if (!trunc_index.empty()) {
     trunc_sec << "## Truncated (refetch before editing these)\n\n";
@@ -2767,7 +3074,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
 
   std::string pack_body = pack.str();
   // Never head+tail truncate the whole pack (that deletes middle fragments). Prefer
-  // dropping Headers/Outlines/Truncated from the end so ## Fragments stay intact.
+  // dropping Outlines then Truncated; keep Headers (decl / #include) with Fragments.
   auto strip_from = [&](const char* marker) {
     const auto p = pack_body.rfind(marker);
     if (p != std::string::npos) {
@@ -2775,10 +3082,10 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     }
   };
   if (pack_body.size() + trunc_sec.str().size() > budget) {
-    strip_from("## Headers\n");
+    strip_from("## Outlines\n");
   }
   if (pack_body.size() + trunc_sec.str().size() > budget) {
-    strip_from("## Outlines\n");
+    strip_from("## Headers\n");
   }
   const std::string trunc = trunc_sec.str();
   if (pack_body.size() + trunc.size() <= budget) {
@@ -2798,7 +3105,12 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   ++st.turn;
   st.last_action = "plan";
   st.has_pack = true;
-  st.pack_incomplete = !trunc_index.empty();
+  const auto gaps = pack_instruction_gaps(pack_body, needles);
+  st.pack_incomplete = (frag_ok == 0) || !gaps.empty();
+  st.explore_tool_count = 0;
+  st.plan_nudge_sent = false;
+  st.post_pack_tool_count = 0;
+  st.edit_nudge_sent = false;
   st.map_review = false;
   // Watchlist keeps resolved targets (not skipped bare junk).
   st.watchlist.clear();
@@ -2821,8 +3133,18 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   block << "Archivo: `.tuide/ai/l2/pack.md`. El siguiente prompt usa Instruction+pack "
            "(mapa fuera). ";
   if (st.pack_incomplete) {
-    block << "**pack_incomplete=1:** quedan truncados — refetch / otro `plan` antes de "
-             "`done next=edit` (pushback activo). ";
+    block << "**pack_incomplete=1:** gaps Instruction↔pack"
+          << (frag_ok == 0 ? " (cero fragmentos OK)" : "")
+          << " — amplía `plan` antes de `done next=edit` (pushback activo). ";
+    if (!gaps.empty()) {
+      block << "\nGaps:\n";
+      for (const auto& g : gaps) {
+        block << "- " << g << "\n";
+      }
+    }
+  } else if (!trunc_index.empty()) {
+    block << "Hay truncados en `## Truncated` (refetch tip); no bloquean edit si Instruction "
+             "está cubierta. ";
   }
   block << "Emite `done next=edit`, `edit`, o amplía con otro `plan`/`tools`.\n\n";
   if (!append_observation(workspace_root, block.str(), &out.session_chars, &err)) {
@@ -2831,6 +3153,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   }
 
   compact_session_context(workspace_root, nullptr);
+  compact_observations_after_pack(workspace_root, st, &out.session_chars);
   out.session_chars = read_file(session_path(workspace_root)).size();
 
   save_state(workspace_root, st, nullptr);
@@ -2907,10 +3230,14 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
       block << "## replace (intended)\n\n```\n"
             << truncate_observation(replace, 24) << "```\n\n";
     }
-    block << "Reemite `action=edit` con `search` exacto y único (get_code_of si hace falta). "
-             "No repitas el mismo hunk fallido.\n\n";
+    block << "Reemite `action=edit` con `search` exacto y único (get_code_of del entorno si "
+             "hace falta). No repitas el mismo hunk fallido. Si el cambio introduce un símbolo "
+             "nuevo, incluye también el hunk de declaración en el `.hpp`/`.h` hermano.\n\n";
     std::string obs_err;
     append_observation(workspace_root, block.str(), &out.session_chars, &obs_err);
+    if (st.has_pack) {
+      compact_observations_after_pack(workspace_root, st, &out.session_chars);
+    }
     save_state(workspace_root, st, nullptr);
     write_response_json(workspace_root, false, "edit", "", path, block.str(), err_msg, st.turn,
                         "edit");
@@ -3053,7 +3380,7 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
       block << '\n';
     }
     block << "```\n\n";
-    block << "Compile OK **no** cierra la tarea. Se restauró el **mapa inicial completo**.\n"
+    block << "Compile OK **no** cierra la tarea.\n"
              "¿Algo más?\n"
              "- Más sitios → `action=plan` con nuevos targets (arma otro pack).\n"
              "- Más cambios → `action=edit` (o tools + edit).\n"
@@ -3062,12 +3389,14 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     std::string err;
     append_observation(workspace_root, block.str(), &out.session_chars, &err);
 
-    // Restore full initial map for "¿algo más?" review.
-    const std::string initial_map = read_file(map_initial_path(workspace_root));
-    if (!initial_map.empty()) {
-      std::string map_err;
-      if (replace_ranked_map_in_session(session_path(workspace_root), initial_map, &map_err)) {
-        out.session_chars = read_file(session_path(workspace_root)).size();
+    // Restore full initial map for "¿algo más?" — skip if it was a stale (wrong-query) map.
+    if (!st.map_stale) {
+      const std::string initial_map = read_file(map_initial_path(workspace_root));
+      if (!initial_map.empty()) {
+        std::string map_err;
+        if (replace_ranked_map_in_session(session_path(workspace_root), initial_map, &map_err)) {
+          out.session_chars = read_file(session_path(workspace_root)).size();
+        }
       }
     }
 
@@ -3102,6 +3431,15 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     block << '\n';
   }
   block << "```\n\n";
+  const auto undecl = compile_undeclared_idents(trunc);
+  if (!undecl.empty()) {
+    block << "Símbolos no declarados:";
+    for (const auto& id : undecl) {
+      block << " `" << id << "`";
+    }
+    block << "\nDeclara en el header hermano (mismo stem `.hpp`/`.h`) y/o añade `#include`; "
+             "un hunk solo en el `.cpp` no basta.\n\n";
+  }
   for (std::size_t i = 0; i < st.pending.size(); ++i) {
     const auto& p = st.pending[i];
     block << "## old (hunk " << (i + 1) << " `" << p.path << "`)\n\n```\n"
@@ -3113,6 +3451,9 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
            "intentos).\n\n";
   std::string err;
   append_observation(workspace_root, block.str(), &out.session_chars, &err);
+  if (st.has_pack) {
+    compact_observations_after_pack(workspace_root, st, &out.session_chars);
+  }
 
   if (st.compile_attempt >= kMaxCompileAttempts) {
     // Rollback files to before.
@@ -3191,8 +3532,10 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
       return out;
     }
     const int max_pack_push = deps_.pack_incomplete_pushback_max;
-    if (st.pack_incomplete && max_pack_push > 0 &&
-        st.pack_incomplete_pushback < max_pack_push) {
+    const bool need_pack_push =
+        (!st.has_pack || st.pack_incomplete) && max_pack_push > 0 &&
+        st.pack_incomplete_pushback < max_pack_push;
+    if (need_pack_push) {
       ++st.pack_incomplete_pushback;
       ++st.turn;
       st.last_action = "pack_incomplete_pushback";
@@ -3200,42 +3543,19 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
       std::ostringstream block;
       block << "### turn " << st.turn << " — pack_incomplete_pushback ("
             << st.pack_incomplete_pushback << "/" << max_pack_push << ")\n\n";
-      block << "Pack incompleto (truncados pendientes). Motivo del modelo: " << summary << "\n\n";
-      block << "Antes de `done next=edit`, refetch huecos (`get_code_of path:A-B` / "
-               "`path:Symbol#mid`) o amplía con `action=plan`. Mira `## Truncated` en pack.md.\n";
-      {
+      if (!st.has_pack) {
+        block << "Sin pack. Motivo del modelo: " << summary << "\n\n";
+        block << "Antes de `done next=edit`, emite `action=plan` con 4–8 "
+                 "`path:Symbol`/`path:line` anclados a la Instruction.\n\n";
+      } else {
+        block << "Pack incompleto (gaps Instruction↔pack). Motivo del modelo: " << summary
+              << "\n\n";
+        block << "Antes de `done next=edit`, amplía con `action=plan` (anclado). Truncados "
+                 "en `## Truncated` se refetchan con tip; no bastan solos para este pushback.\n";
         const std::string pack = read_file(pack_path(workspace_root));
         const std::string sess = read_file(session_path(workspace_root));
         const auto needles = session_pack_needles(sess);
-        std::vector<std::string> hints;
-        auto need = [&](bool missing, const char* tip) {
-          if (missing) {
-            hints.push_back(tip);
-          }
-        };
-        const bool has_shortcut = pack.find("shortcuts.") != std::string::npos;
-        const bool has_keyaction = pack.find("KeyAction") != std::string::npos;
-        const bool has_registry =
-            pack.find("key_binding_registry") != std::string::npos || pack.find("ctrl+") != std::string::npos;
-        const bool has_i18n =
-            pack.find("strings_es") != std::string::npos || pack.find("strings_en") != std::string::npos;
-        bool wants_shortcut = false;
-        for (const auto& n : needles) {
-          if (n.find("shortcut") != std::string::npos || n.find("keyaction") != std::string::npos ||
-              n.find("toggle_") != std::string::npos || n.find("keybind") != std::string::npos) {
-            wants_shortcut = true;
-            break;
-          }
-        }
-        if (wants_shortcut) {
-          need(!has_keyaction, "`src/ui/keybind/key_action.hpp:KeyAction` / `…:ToggleBreakpoint`");
-          need(!has_registry, "`src/ui/keybind/key_binding_registry.cpp` + search `ToggleBreakpoint`");
-          need(!has_shortcut || !has_i18n,
-               "`src/i18n/strings_es.cpp` / `strings_en.cpp` con `shortcuts.` (path:line)");
-          need(pack.find("keybind_matches") == std::string::npos &&
-                   pack.find("ToggleBreakpointAtFile") == std::string::npos,
-               "handler: `editor_panel` / `application` cerca del atajo existente");
-        }
+        const auto hints = pack_instruction_gaps(pack, needles);
         if (!hints.empty()) {
           block << "\nSugerencias de plan (gaps Instruction vs pack):\n";
           for (const auto& h : hints) {
@@ -3245,16 +3565,21 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
         } else {
           block << "\n";
         }
-      }      std::string err;
+      }
+      std::string err;
       append_observation(workspace_root, block.str(), &out.session_chars, &err);
       save_state(workspace_root, st, nullptr);
       write_response_json(workspace_root, false, "done", "pack_incomplete_pushback", "",
-                          block.str(), "pack incomplete; refetch truncados", st.turn, st.phase);
+                          block.str(),
+                          st.has_pack ? "pack incomplete; cover Instruction gaps"
+                                      : "sin pack; emite plan",
+                          st.turn, st.phase);
       append_trace(workspace_root,
                    std::string("{\"ts\":") + now_ms_str() +
                        ",\"event\":\"pack_incomplete_pushback\",\"n\":" +
                        std::to_string(st.pack_incomplete_pushback) + ",\"max\":" +
-                       std::to_string(max_pack_push) + "}");
+                       std::to_string(max_pack_push) +
+                       ",\"has_pack\":" + (st.has_pack ? "1" : "0") + "}");
       out.ok = true;
       out.phase = st.phase;
       out.summary = "pack_incomplete_pushback " + std::to_string(st.pack_incomplete_pushback) +
@@ -3493,6 +3818,16 @@ std::string Level2Session::status_text(const std::string& workspace_root) const 
   const std::string session = read_file(session_path(workspace_root));
   out << "session.md: "
       << (session.empty() ? "missing" : (std::to_string(session.size()) + " chars")) << '\n';
+  return out.str();
+}
+
+std::string Level2Session::status_flags(const std::string& workspace_root) const {
+  const State st = load_state(workspace_root);
+  std::ostringstream out;
+  out << "phase=" << st.phase << " turn=" << st.turn
+      << " has_pack=" << (st.has_pack ? "yes" : "no")
+      << " pack_incomplete=" << (st.pack_incomplete ? "yes" : "no")
+      << " map_stale=" << (st.map_stale ? "yes" : "no");
   return out.str();
 }
 

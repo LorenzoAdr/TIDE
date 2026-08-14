@@ -9,20 +9,27 @@
 #include <vector>
 
 #include "ai/get_code_of.hpp"
+#include "ai/l2_brain.hpp"
+#include "ai/level2_autonomous_loop.hpp"
 #include "ai/level2_session.hpp"
 #include "ai/search_replace.hpp"
 #include "ai/tool_registry.hpp"
+#include "ai/ai_types.hpp"
 
 #include <nlohmann/json.hpp>
 
 namespace fs = std::filesystem;
+using tuide::AiSettings;
 using tuide::AiToolResult;
 using tuide::GetCodeOfRequest;
+using tuide::Level2AutonomousLoopOpts;
 using tuide::Level2BootstrapOpts;
 using tuide::Level2Session;
+using tuide::LocalL2Brain;
 using tuide::ToolRegistry;
 using tuide::get_code_of;
 using tuide::parse_get_code_of_arg;
+using tuide::run_level2_autonomous;
 
 namespace {
 
@@ -128,16 +135,118 @@ void register_read_tools(ToolRegistry* reg, const std::string& root) {
     return AiToolResult{true, "q=" + arg + "\n" + body};
   });
 
+  reg->register_tool("headers_of", "headers", [root](const std::string& arg) {
+    const std::string trimmed = trim(arg);
+    fs::path abs = trimmed;
+    if (!abs.is_absolute()) {
+      abs = fs::path(root) / trimmed;
+    }
+    abs = abs.lexically_normal();
+    if (!fs::exists(abs)) {
+      return AiToolResult{false, "no existe: " + trimmed};
+    }
+    std::ostringstream out;
+    out << "headers_of: " << trimmed << '\n';
+    std::ifstream in(abs);
+    std::string line;
+    int n = 0;
+    while (in && std::getline(in, line) && n < 24) {
+      if (line.find("#include") != std::string::npos) {
+        out << line << '\n';
+        ++n;
+      }
+    }
+    fs::path sib = abs;
+    const std::string ext = sib.extension().string();
+    std::string low = ext;
+    for (char& c : low) {
+      if (c >= 'A' && c <= 'Z') {
+        c = static_cast<char>(c - 'A' + 'a');
+      }
+    }
+    if (low == ".cpp" || low == ".cc" || low == ".cxx" || low == ".c") {
+      for (const char* hext : {".hpp", ".h", ".hh", ".hxx"}) {
+        fs::path cand = sib;
+        cand.replace_extension(hext);
+        if (fs::exists(cand)) {
+          std::string rel = cand.string();
+          if (!root.empty() && rel.size() > root.size() &&
+              rel.compare(0, root.size(), root) == 0 &&
+              (rel[root.size()] == '/' || rel[root.size()] == '\\')) {
+            rel = rel.substr(root.size() + 1);
+          }
+          out << "sibling: " << rel << '\n';
+          break;
+        }
+      }
+    }
+    if (n == 0) {
+      out << "(sin #include)\n";
+    }
+    return AiToolResult{true, out.str()};
+  });
+
   reg->register_tool("list_tools", "list", [](const std::string&) {
-    return AiToolResult{true, "get_code_of\nfile_outline\nsearch\nlist_tools\n"};
+    return AiToolResult{true, "get_code_of\nfile_outline\nsearch\nheaders_of\nlist_tools\n"};
   });
 }
 
+void print_ok_line(const tuide::Level2TurnResult& tr, tuide::Level2Session& session,
+                   const std::string& root, const std::string& prefix) {
+  std::cout << prefix << " turn=" << tr.turn << " phase=" << tr.phase << " — " << tr.summary
+            << '\n';
+  std::cout << session.status_flags(root) << '\n';
+}
+
 void usage() {
-  std::cerr << "Usage: l2_harness_cli bootstrap|tool|plan|turn|done|edit|compile|status …\n"
+  std::cerr << "Usage: l2_harness_cli bootstrap|tool|tools|plan|turn|done|edit|compile|status|run …\n"
             << "  plan target [target…]   // watchlist → pack.md\n"
+            << "  tools <calls.json>      // batch [{name,arg},…] o {\"calls\":[…]}\n"
             << "  done [summary] [--edit|--clarify]\n"
-            << "  edit <hunks.json>\n";
+            << "  edit <hunks.json>\n"
+            << "  run                     // loop autónomo L2 local (llama-cli)\n";
+}
+
+AiSettings load_ai_settings(const std::string& root) {
+  AiSettings s;
+  s.level2_mode = "local";
+  s.models_cache_dir = "/opt/workspace/tuide-models";
+  s.level2.model_id = "qwen2.5-coder-1.5b-instruct-q4_k_m";
+  s.level2.n_ctx = 4096;
+  s.level2.max_steps = 32;
+  s.level2.max_tokens = 1024;
+  s.level2.temperature = 0.1f;
+  const std::string cfg = read_file(fs::path(root) / ".tuide" / "config.json");
+  if (cfg.empty()) {
+    return s;
+  }
+  try {
+    const auto j = nlohmann::json::parse(cfg);
+    if (!j.contains("ai") || !j["ai"].is_object()) {
+      return s;
+    }
+    const auto& ai = j["ai"];
+    if (ai.contains("models") && ai["models"].is_object() &&
+        ai["models"].contains("cache_dir") && ai["models"]["cache_dir"].is_string()) {
+      s.models_cache_dir = ai["models"]["cache_dir"].get<std::string>();
+    }
+    if (ai.contains("level2") && ai["level2"].is_object()) {
+      const auto& l2 = ai["level2"];
+      s.level2_mode = l2.value("mode", s.level2_mode);
+      s.level2.model_id = l2.value("model_id", s.level2.model_id);
+      s.level2.model_path = l2.value("model_path", s.level2.model_path);
+      s.level2.cli_path = l2.value("cli_path", s.level2.cli_path);
+      s.level2.max_steps = l2.value("max_steps", s.level2.max_steps);
+      s.level2.max_tokens = l2.value("max_tokens", s.level2.max_tokens);
+      s.level2.n_ctx = l2.value("n_ctx", s.level2.n_ctx);
+      s.level2.temperature = l2.value("temperature", s.level2.temperature);
+      s.level2.auto_download = l2.value("auto_download", s.level2.auto_download);
+      s.level2.clarify_pushback_max =
+          l2.value("clarify_pushback_max", s.level2.clarify_pushback_max);
+    }
+  } catch (...) {
+  }
+  return s;
 }
 
 }  // namespace
@@ -209,7 +318,59 @@ int main(int argc, char** argv) {
       std::cerr << "tool failed: " << tr.error << '\n';
       return 1;
     }
-    std::cout << "ok turn=" << tr.turn << " phase=" << tr.phase << " — " << tr.summary << '\n';
+    print_ok_line(tr, session, root, "ok");
+    return 0;
+  }
+  if (cmd == "tools") {
+    if (argc < 3) {
+      usage();
+      return 2;
+    }
+    const std::string raw = read_file(argv[2]);
+    if (raw.empty()) {
+      std::cerr << "tools: no se pudo leer " << argv[2] << '\n';
+      return 1;
+    }
+    std::vector<tuide::L2ToolCall> calls;
+    try {
+      const auto j = nlohmann::json::parse(raw);
+      const nlohmann::json* arr = nullptr;
+      if (j.is_array()) {
+        arr = &j;
+      } else if (j.is_object() && j.contains("calls") && j["calls"].is_array()) {
+        arr = &j["calls"];
+      } else {
+        std::cerr << "tools: JSON debe ser array [{name,arg},…] o {\"calls\":[…]}\n";
+        return 2;
+      }
+      for (const auto& c : *arr) {
+        tuide::L2ToolCall call;
+        call.name = c.value("name", "");
+        if (c.contains("arg")) {
+          if (c["arg"].is_string()) {
+            call.arg = c["arg"].get<std::string>();
+          } else {
+            call.arg = c["arg"].dump();
+          }
+        }
+        if (!call.name.empty()) {
+          calls.push_back(std::move(call));
+        }
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "tools: JSON inválido: " << e.what() << '\n';
+      return 1;
+    }
+    if (calls.empty()) {
+      std::cerr << "tools: calls vacío\n";
+      return 1;
+    }
+    const auto tr = session.apply_tools(root, calls);
+    if (!tr.ok) {
+      std::cerr << "tools failed: " << tr.error << '\n';
+      return 1;
+    }
+    print_ok_line(tr, session, root, "ok tools");
     return 0;
   }
   if (cmd == "plan") {
@@ -226,8 +387,7 @@ int main(int argc, char** argv) {
       std::cerr << "plan failed: " << tr.error << '\n';
       return 1;
     }
-    std::cout << "ok plan turn=" << tr.turn << " phase=" << tr.phase << " — " << tr.summary
-              << '\n';
+    print_ok_line(tr, session, root, "ok plan");
     const std::string pack =
         read_file(fs::path(root) / ".tuide" / "ai" / "l2" / "pack.md");
     std::cout << "pack_chars=" << pack.size() << '\n';
@@ -237,6 +397,7 @@ int main(int argc, char** argv) {
     const auto tr = session.process_request_file(root);
     std::cout << "action=" << tr.action << " turn=" << tr.turn << " phase=" << tr.phase
               << " ok=" << (tr.ok ? 1 : 0) << '\n';
+    std::cout << session.status_flags(root) << '\n';
     if (!tr.ok && tr.action != "compile") {
       std::cerr << "turn failed: " << tr.error << '\n';
       return 1;
@@ -266,11 +427,7 @@ int main(int argc, char** argv) {
       std::cerr << "done failed: " << tr.error << '\n';
       return 1;
     }
-    std::cout << "ok done turn=" << tr.turn << " phase=" << tr.phase;
-    if (tr.phase == "clarify") {
-      std::cout << " — need user clarification";
-    }
-    std::cout << '\n';
+    print_ok_line(tr, session, root, "ok done");
     return 0;
   }
   if (cmd == "edit") {
@@ -295,13 +452,40 @@ int main(int argc, char** argv) {
     const auto tr = session.apply_edit(root, hunks);
     std::cout << "edit action=" << tr.action << " phase=" << tr.phase << " ok=" << (tr.ok ? 1 : 0)
               << " — " << tr.summary << '\n';
+    std::cout << session.status_flags(root) << '\n';
     return tr.ok ? 0 : 1;
   }
   if (cmd == "compile") {
     const auto tr = session.run_compile(root);
     std::cout << "compile action=" << tr.action << " phase=" << tr.phase
               << " ok=" << (tr.ok ? 1 : 0) << '\n';
+    std::cout << session.status_flags(root) << '\n';
     return tr.ok ? 0 : 1;
+  }
+  if (cmd == "run") {
+    const AiSettings settings = load_ai_settings(root);
+    if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
+      std::cerr << "run: ai.level2.mode debe ser local|remote (ahora=" << settings.level2_mode
+                << ")\n";
+      return 2;
+    }
+    LocalL2Brain brain;
+    std::string err;
+    auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+    if (!brain.ensure_ready(settings, progress, &err)) {
+      std::cerr << "L2 brain ensure_ready: " << err << '\n';
+      return 1;
+    }
+    Level2AutonomousLoopOpts opts;
+    opts.workspace_root = root;
+    opts.settings = settings.level2;
+    const auto result = run_level2_autonomous(
+        session, brain, opts, [](const std::string& line) { std::cout << line << std::endl; });
+    std::cout << "run ok=" << (result.ok ? 1 : 0) << " phase=" << result.phase
+              << " steps=" << result.steps << " — "
+              << (result.error.empty() ? result.summary : result.error) << '\n';
+    std::cout << session.status_flags(root) << '\n';
+    return result.ok ? 0 : 1;
   }
   usage();
   return 2;

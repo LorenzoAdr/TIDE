@@ -73,8 +73,11 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
 - Prompt L2 cabe en `ai.level2.n_ctx` (p. ej. 8192): explore ~**10k** chars de sesión + system;
   edit ~**8k**. No se manda `session.md` entero.
 - **Tool guide solo en system prompt** (no se duplica en `session.md`).
-- **Flujo plan → pack:** en explore la primera mirada preferida es
-  `{"action":"plan","targets":["path:Symbol","path:A-B",…]}` (máx. 16; evitar path bare).
+- **Flujo plan → pack:** en explore preferir `plan` en el **primer** paso
+  (`{"action":"plan","targets":["path:Symbol","path:A-B",…]}`; máx. 16; evitar path bare;
+  4–8 targets anclados). Máx. ~8 tools sueltos antes del primer plan (soft `_nudge:_`).
+  Tras pack cubierto: extras con `tools` batch (máx. 4); si siguen las tools, otro
+  `_nudge:_` pide `done next=edit`. No repetir path con ventanas solapadas.
   El runtime **merge** watchlists (plan2 no pisa plan1; bootstrap resetea `pack.md` /
   watchlist — no reinyecta targets de una sesión previa), normaliza bare→símbolo/ventana por
   outline + **search-in-file** (prioriza search; rechaza símbolos basura tipo `const`),
@@ -82,31 +85,41 @@ Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `
   con slot mínimo por rol (layout×2 temprano: decl boxes + click-targets), tope ~25%/pieza,
   **auto-refetch** anclado a `path:line`, y escribe `.tuide/ai/l2/pack.md` (~9k chars).
   Overflow del pack **no** hace head+tail del documento entero (borra el medio): recorta
-  outlines/headers/truncated. Bare sin hit fuerte se **omite**. Diversidad también por
-  **archivo** (1 fragmento/path). `path:line` explícito se preserva. Ruido merge débil se
-  aplaza. Si quedan truncados → `pack_incomplete` (pushback con gaps sugeridos).
+  outlines primero; conserva **Headers** (decl / `#include`) con Fragments. Si el plan
+  apunta a un `.cpp`, el runtime añade el **header hermano** (mismo stem `.hpp`/`.h`)
+  como fragmento `path:1` (preámbulo de declaraciones). Bare sin hit fuerte se **omite**.
+  Diversidad también por **archivo** (1 fragmento/path). `path:line` explícito se preserva.
+  Ruido merge débil se aplaza. **`pack_incomplete`** = cero fragmentos, o ningún ident de
+  `query:`/`instruction:` (snake / `path:Sym` / CamelCase largo) aparece en el pack. Sin
+  facetas hardcoded (tab/shortcut/i18n). Pushback lista los idents que faltan. Truncado ≠
+  bloqueo si hay hit.
 - **map_stale:** si la `query:` del `map_last` solapa poco la Instruction, bootstrap marca
-  `map_stale` y el prompt pide no confiar en el top del mapa (search/plan anclado).
-- **Needles del pack:** Instruction + seeds + idents de Observations (`search` /
-  `get_code_of`). `wrong_symbol` no dispara si el nombre coincide con el `path:Symbol`
-  pedido o con `path:line`.
+  `map_stale`, **no inyecta** el mapa rankeado en `session.md` (stub + aviso) y el prompt
+  pide `search`/`plan` anclado. `map_initial.md` guarda el mapa completo por si hace falta;
+  tras compile OK **no** se restaura en sesión si era stale.
+- **Needles del pack:** solo líneas `query:` / `instruction:` / `seeds:` más args de
+  tools en Observations (no el párrafo de guía). `wrong_symbol` no dispara si el nombre
+  coincide con el `path:Symbol` pedido o con `path:line`.
 - **Truncado de cuerpos:** `get_code_of` por defecto usa **head+tail** si el símbolo supera
   `max_lines` (~120). Con `path:line` dentro de un símbolo grande → **ventana** alrededor
   de la línea (refetch = ventana adyacente). Marca `[TRUNCATED]` con `symbol_span` /
   `missing_lines` / `refetch`. Outlines en pack se filtran por needles.
 - Bootstrap guarda `.tuide/ai/l2/map_initial.md` (mapa completo).
 - Explore slim del mapa en el prompt (antes del pack): detalle solo top‑5; resto nombres.
-- Observations en explore: cola ~3.5k chars.
+- Observations en explore: cola ~3.5k chars en el prompt; en disco, tras pack, se recortan
+  a ~8k (`kMaxObservationCharsPacked`). Cada tool post-pack se recorta por turno
+  (~40 líneas / ~2.4k chars); si un solo turn sigue inflando la sección, se trunca el
+  cuerpo. Compactación también en `phase=edit`.
 - Si un cuerpo viene `[truncated]`, pedir `get_code_of path:Metodo` (no inventar código).
 - Tras `edit` OK el runtime compila. **Compile OK no cierra**: restaura el **mapa inicial**
   en la sesión, marca `map_review` y pregunta **«¿algo más?»** (`plan` / `edit` /
   `done` sin `next`).
-- Tras compile fail, Observations guarda **cola** del stderr (`kMaxCompileLogLines`, ~40) + old/new de hunks (no el log completo).
-- Tras **edit apply fail** (search no encontrado/ambiguo), Observations guarda `edit_feedback` con error + search/replace; el tab muestra el error. Así el modelo no reemite el mismo hunk a ciegas.
+- Tras compile fail, Observations guarda **cola** del stderr (`kMaxCompileLogLines`, ~40) + old/new de hunks (no el log completo). Si el log cita símbolos *undeclared*, el feedback pide declaración en el `.hpp` hermano.
+- Tras **edit apply fail** (search no encontrado/ambiguo), Observations guarda `edit_feedback` con error + search/replace + pista de declaración hermana; el tab muestra el error. Así el modelo no reemite el mismo hunk a ciegas.
 - Si el modelo se queda sin contexto, el error cita `ai.level2.n_ctx` (no L1).
 - **Compactación del mapa (disco):** tras tools/plan en explore, el
   `## Ranked map` queda en líneas de nombre salvo stems/paths ya tocados; se descarta `## Bodies`.
-  Tras compile OK se reinyecta el mapa inicial completo.
+  Tras compile OK se reinyecta el mapa inicial completo (salvo `map_stale`).
 
 ## Timing en `trace.ndjson`
 
