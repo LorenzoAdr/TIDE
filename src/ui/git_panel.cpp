@@ -1094,7 +1094,7 @@ void start_git_remote_op(GitService* git, GitPanelState* state, MainLayoutState*
                            : msg);
     }
     if (layout_state != nullptr) {
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "git.remote");
     }
   };
   if (for_push) {
@@ -1429,7 +1429,18 @@ bool handle_auth_modal_keys(GitService* git, GitPanelState* state, MainLayoutSta
 
 bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
                      FocusManagerState* focus, WorkspaceModel* workspace, Event event) {
-  if (state == nullptr || git == nullptr || !git->is_repo()) {
+  if (state == nullptr || git == nullptr) {
+    return false;
+  }
+
+  if (handle_auth_modal_keys(git, state, layout_state, event)) {
+    return true;
+  }
+  if (handle_commit_modal_keys(git, state, layout_state, event)) {
+    return true;
+  }
+
+  if (!git->is_repo()) {
     return false;
   }
   if (focus != nullptr && focus->region != FocusRegion::Terminal) {
@@ -1439,13 +1450,6 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
 
   if (event_is_tuide_global_shortcut(event)) {
     return false;
-  }
-
-  if (handle_auth_modal_keys(git, state, layout_state, event)) {
-    return true;
-  }
-  if (handle_commit_modal_keys(git, state, layout_state, event)) {
-    return true;
   }
 
   if (state->search_focus && handle_search_input(state, git, event)) {

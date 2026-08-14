@@ -3390,6 +3390,12 @@ int Application::run() {
 			return true;
 		}
 
+		if (git_panel_state_.auth_modal_open && event.is_mouse() &&
+		    layout_state_.git_mouse_handler && layout_state_.git_mouse_handler(event)) {
+			wake_console_panel(&layout_state_, "app.git.auth.mouse");
+			return true;
+		}
+
 		if (layout_state_.console_visible && event.is_mouse() &&
 		    git_tab_active(&layout_state_) && layout_state_.git_mouse_handler &&
 		    layout_state_.git_mouse_handler(event)) {
@@ -3423,7 +3429,7 @@ int Application::run() {
 		if (layout_state_.console_visible && event.is_mouse() &&
 		    search_tab_active(&layout_state_) && layout_state_.search_key_handler &&
 		    layout_state_.search_key_handler(event)) {
-			post_custom_throttled();
+			wake_console_panel(&layout_state_, "app.search.mouse");
 			layout_state_.focus_sync_needed = true;
 			return true;
 		}
@@ -3520,7 +3526,7 @@ int Application::run() {
 			     (search_tab_active(&layout_state_) &&
 			      focus_state_.region == FocusRegion::Terminal)) &&
 			    layout_state_.search_key_handler && layout_state_.search_key_handler(event)) {
-				UI_WAKE(&layout_state_, "app.custom");
+				wake_console_panel(&layout_state_, "app.search");
 				return true;
 			}
 			if (call_hierarchy_tab_active(&layout_state_) &&
@@ -3553,10 +3559,12 @@ int Application::run() {
 				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
-			if (git_tab_active(&layout_state_) && focus_state_.region == FocusRegion::Terminal &&
+			if ((git_panel_state_.auth_modal_open ||
+			     (git_tab_active(&layout_state_) &&
+			      focus_state_.region == FocusRegion::Terminal)) &&
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.git_key_handler && layout_state_.git_key_handler(event)) {
-				UI_WAKE(&layout_state_, "app.custom");
+				wake_console_panel(&layout_state_, "app.git");
 				return true;
 			}
 			if (core_analyzer_tab_active(&layout_state_) &&

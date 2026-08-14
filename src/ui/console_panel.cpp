@@ -67,6 +67,8 @@ void wake_console(MainLayoutState* layout, std::string_view tag = "wake") {
   wake_console_panel(layout, tag);
 }
 
+enum class ConsoleSelectionKind { kPty, kGdb, kAi };
+
 struct ConsolePanelState {
   std::string input;
   std::string input_placeholder;
@@ -122,10 +124,12 @@ struct ConsolePanelState {
   std::optional<TerminalLinkHover> terminal_link_hover;
   std::optional<int> ai_result_hover_row;  // absolute transcript line index
 
-  // Text selection in terminal / App / Debug console output (editor-like copy).
+  // Text selection in terminal / App / Debug / AI console output (editor-like copy).
   bool terminal_selecting = false;
   bool terminal_has_selection = false;
-  bool terminal_selection_is_gdb = false;  // false: PTY styled rows; true: model->console_output
+  bool terminal_line_select_drag = false;
+  ConsoleSelectionKind terminal_selection_kind = ConsoleSelectionKind::kPty;
+  int terminal_line_select_anchor = 0;
   int terminal_sel_anchor_row = 0;
   int terminal_sel_anchor_col = 0;
   int terminal_sel_head_row = 0;
@@ -134,6 +138,7 @@ struct ConsolePanelState {
   int last_term_click_col = -1;
   int64_t last_term_click_ms = 0;
   int last_term_click_count = 0;
+  std::vector<std::string> ai_line_cache;
   std::string last_workspace_root;
   std::array<Box, 12> tab_boxes;
   Box hide_box;
@@ -352,7 +357,9 @@ void clear_terminal_selection(ConsolePanelState* state) {
   }
   state->terminal_selecting = false;
   state->terminal_has_selection = false;
-  state->terminal_selection_is_gdb = false;
+  state->terminal_line_select_drag = false;
+  state->terminal_line_select_anchor = 0;
+  state->terminal_selection_kind = ConsoleSelectionKind::kPty;
 }
 
 constexpr int kConsoleDoubleClickMs = 400;
@@ -401,30 +408,40 @@ void console_word_bounds_at(const std::string& line, int col, int* start_col, in
   *end_col = end;
 }
 
-bool is_console_double_click(const ConsolePanelState& state, int row, int col, int64_t now_ms) {
+bool console_same_click_spot(const ConsolePanelState& state, int row, int col, int64_t now_ms) {
   if (state.last_term_click_row != row) {
     return false;
   }
   if (std::abs(state.last_term_click_col - col) > 1) {
     return false;
   }
-  if (now_ms - state.last_term_click_ms > kConsoleDoubleClickMs) {
-    return false;
-  }
-  return state.last_term_click_count == 1;
+  return now_ms - state.last_term_click_ms <= kConsoleDoubleClickMs;
+}
+
+bool is_console_double_click(const ConsolePanelState& state, int row, int col, int64_t now_ms) {
+  return console_same_click_spot(state, row, col, now_ms) && state.last_term_click_count == 1;
+}
+
+bool is_console_triple_click(const ConsolePanelState& state, int row, int col, int64_t now_ms) {
+  return console_same_click_spot(state, row, col, now_ms) && state.last_term_click_count >= 2;
 }
 
 void note_console_click(ConsolePanelState* state, int row, int col, int64_t now_ms) {
   if (state == nullptr) {
     return;
   }
-  const bool same_spot = state->last_term_click_row == row &&
-                         std::abs(state->last_term_click_col - col) <= 1 &&
-                         now_ms - state->last_term_click_ms <= kConsoleDoubleClickMs;
+  const bool same_spot = console_same_click_spot(*state, row, col, now_ms);
   state->last_term_click_count = same_spot ? state->last_term_click_count + 1 : 1;
   state->last_term_click_row = row;
   state->last_term_click_col = col;
   state->last_term_click_ms = now_ms;
+}
+
+void refresh_ai_line_cache(ConsolePanelState* state, AiController* ai) {
+  if (state == nullptr || ai == nullptr) {
+    return;
+  }
+  state->ai_line_cache = ai->snapshot_lines();
 }
 
 std::string console_selection_line(const ConsolePanelState* state, const DebugModel* model,
@@ -432,12 +449,18 @@ std::string console_selection_line(const ConsolePanelState* state, const DebugMo
   if (state == nullptr) {
     return {};
   }
-  if (state->terminal_selection_is_gdb) {
+  if (state->terminal_selection_kind == ConsoleSelectionKind::kGdb) {
     if (model == nullptr || row < 0 ||
         row >= static_cast<int>(model->console_output.size())) {
       return {};
     }
     return model->console_output[static_cast<std::size_t>(row)];
+  }
+  if (state->terminal_selection_kind == ConsoleSelectionKind::kAi) {
+    if (row < 0 || row >= static_cast<int>(state->ai_line_cache.size())) {
+      return {};
+    }
+    return state->ai_line_cache[static_cast<std::size_t>(row)];
   }
   if (row < 0 || row >= static_cast<int>(state->terminal_styled_rows.size())) {
     return {};
@@ -449,18 +472,36 @@ int console_selection_line_count(const ConsolePanelState* state, const DebugMode
   if (state == nullptr) {
     return 0;
   }
-  if (state->terminal_selection_is_gdb) {
+  if (state->terminal_selection_kind == ConsoleSelectionKind::kGdb) {
     return model != nullptr ? static_cast<int>(model->console_output.size()) : 0;
+  }
+  if (state->terminal_selection_kind == ConsoleSelectionKind::kAi) {
+    return static_cast<int>(state->ai_line_cache.size());
   }
   return static_cast<int>(state->terminal_styled_rows.size());
 }
 
+void begin_console_drag_selection(ConsolePanelState* state, int row, int col,
+                                  ConsoleSelectionKind kind) {
+  if (state == nullptr) {
+    return;
+  }
+  state->terminal_selection_kind = kind;
+  state->terminal_selecting = true;
+  state->terminal_line_select_drag = false;
+  state->terminal_has_selection = false;
+  state->terminal_sel_anchor_row = std::max(0, row);
+  state->terminal_sel_anchor_col = std::max(0, col);
+  state->terminal_sel_head_row = state->terminal_sel_anchor_row;
+  state->terminal_sel_head_col = state->terminal_sel_anchor_col;
+}
+
 bool select_console_word_at(ConsolePanelState* state, const DebugModel* model, int row, int col,
-                            bool gdb) {
+                            ConsoleSelectionKind kind) {
   if (state == nullptr) {
     return false;
   }
-  state->terminal_selection_is_gdb = gdb;
+  state->terminal_selection_kind = kind;
   const std::string line = console_selection_line(state, model, row);
   if (line.empty()) {
     return false;
@@ -472,12 +513,99 @@ bool select_console_word_at(ConsolePanelState* state, const DebugModel* model, i
     return false;
   }
   state->terminal_selecting = false;
+  state->terminal_line_select_drag = false;
   state->terminal_has_selection = true;
   state->terminal_sel_anchor_row = row;
   state->terminal_sel_anchor_col = start;
   state->terminal_sel_head_row = row;
   state->terminal_sel_head_col = end;
   return true;
+}
+
+bool select_console_line_at(ConsolePanelState* state, const DebugModel* model, int row,
+                            ConsoleSelectionKind kind) {
+  if (state == nullptr) {
+    return false;
+  }
+  state->terminal_selection_kind = kind;
+  const int total = console_selection_line_count(state, model);
+  if (row < 0 || row >= total) {
+    return false;
+  }
+  const std::string line = console_selection_line(state, model, row);
+  state->terminal_selecting = true;
+  state->terminal_line_select_drag = true;
+  state->terminal_line_select_anchor = row;
+  state->terminal_has_selection = true;
+  state->terminal_sel_anchor_row = row;
+  state->terminal_sel_anchor_col = 0;
+  // Exclusive end at the start of the next line so copy includes the newline.
+  if (row + 1 < total) {
+    state->terminal_sel_head_row = row + 1;
+    state->terminal_sel_head_col = 0;
+  } else {
+    state->terminal_sel_head_row = row;
+    state->terminal_sel_head_col = static_cast<int>(line.size());
+  }
+  return true;
+}
+
+void apply_console_line_drag(ConsolePanelState* state, const DebugModel* model, int row) {
+  if (state == nullptr || !state->terminal_line_select_drag) {
+    return;
+  }
+  const int total = console_selection_line_count(state, model);
+  if (total <= 0) {
+    return;
+  }
+  row = std::max(0, std::min(row, total - 1));
+  const int a = std::min(state->terminal_line_select_anchor, row);
+  const int b = std::max(state->terminal_line_select_anchor, row);
+  const std::string end_line = console_selection_line(state, model, b);
+  state->terminal_sel_anchor_row = a;
+  state->terminal_sel_anchor_col = 0;
+  if (b + 1 < total) {
+    state->terminal_sel_head_row = b + 1;
+    state->terminal_sel_head_col = 0;
+  } else {
+    state->terminal_sel_head_row = b;
+    state->terminal_sel_head_col = static_cast<int>(end_line.size());
+  }
+  state->terminal_has_selection = true;
+}
+
+void update_console_drag_head(ConsolePanelState* state, const DebugModel* model, int row,
+                              int col) {
+  if (state == nullptr) {
+    return;
+  }
+  if (state->terminal_line_select_drag) {
+    apply_console_line_drag(state, model, row);
+    return;
+  }
+  state->terminal_sel_head_row = std::max(0, row);
+  state->terminal_sel_head_col = std::max(0, col);
+  state->terminal_has_selection = true;
+}
+
+enum class ConsoleMultiClick { kNone, kWord, kLine };
+
+ConsoleMultiClick apply_console_multi_click(ConsolePanelState* state, const DebugModel* model,
+                                            int row, int col, int64_t now_ms,
+                                            ConsoleSelectionKind kind) {
+  if (state == nullptr) {
+    return ConsoleMultiClick::kNone;
+  }
+  const bool triple_click = is_console_triple_click(*state, row, col, now_ms);
+  const bool double_click = is_console_double_click(*state, row, col, now_ms);
+  note_console_click(state, row, col, now_ms);
+  if (triple_click && select_console_line_at(state, model, row, kind)) {
+    return ConsoleMultiClick::kLine;
+  }
+  if (double_click && select_console_word_at(state, model, row, col, kind)) {
+    return ConsoleMultiClick::kWord;
+  }
+  return ConsoleMultiClick::kNone;
 }
 
 void normalize_terminal_selection(const ConsolePanelState& state, int* a_row, int* a_col,
@@ -490,6 +618,27 @@ void normalize_terminal_selection(const ConsolePanelState& state, int* a_row, in
     std::swap(*a_row, *b_row);
     std::swap(*a_col, *b_col);
   }
+}
+
+bool console_line_in_selection(const ConsolePanelState* state, ConsoleSelectionKind kind,
+                               int row) {
+  if (state == nullptr || !state->terminal_has_selection ||
+      state->terminal_selection_kind != kind) {
+    return false;
+  }
+  int a_row = 0;
+  int a_col = 0;
+  int b_row = 0;
+  int b_col = 0;
+  normalize_terminal_selection(*state, &a_row, &a_col, &b_row, &b_col);
+  if (row < a_row || row > b_row) {
+    return false;
+  }
+  // Exclusive end at column 0 of b_row means that line is not part of the span.
+  if (row == b_row && b_col == 0) {
+    return false;
+  }
+  return true;
 }
 
 bool terminal_cell_selected(const ConsolePanelState* state, int row, int col) {
@@ -514,6 +663,29 @@ bool terminal_cell_selected(const ConsolePanelState* state, int row, int col) {
     return col < b_col;
   }
   return true;
+}
+
+Element render_plain_line_with_selection(const std::string& line, int row,
+                                         const ConsolePanelState* state,
+                                         ConsoleSelectionKind kind, Color fg) {
+  if (line.empty()) {
+    return text(" ") | color(fg);
+  }
+  if (!console_line_in_selection(state, kind, row)) {
+    return text(line) | color(fg);
+  }
+  Elements parts;
+  parts.reserve(line.size());
+  for (int col = 0; col < static_cast<int>(line.size()); ++col) {
+    Element cell = text(std::string(1, line[static_cast<std::size_t>(col)]));
+    if (terminal_cell_selected(state, row, col)) {
+      cell = cell | bgcolor(theme::SelectionBg()) | color(theme::UiText());
+    } else {
+      cell = cell | color(fg);
+    }
+    parts.push_back(std::move(cell));
+  }
+  return hbox(std::move(parts));
 }
 
 std::string terminal_selected_text(const ConsolePanelState* state, const DebugModel* model) {
@@ -551,7 +723,12 @@ std::string terminal_selected_text(const ConsolePanelState* state, const DebugMo
   return out.str();
 }
 
-bool copy_terminal_selection(ConsolePanelState* state, const DebugModel* model = nullptr) {
+bool copy_terminal_selection(ConsolePanelState* state, const DebugModel* model = nullptr,
+                             AiController* ai = nullptr) {
+  if (state != nullptr && state->terminal_selection_kind == ConsoleSelectionKind::kAi &&
+      ai != nullptr) {
+    refresh_ai_line_cache(state, ai);
+  }
   const std::string text = terminal_selected_text(state, model);
   if (text.empty()) {
     return false;
@@ -1250,7 +1427,8 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
   if (m.motion == Mouse::Moved) {
     // Keep updating selection while dragging, even if the cursor leaves the
     // terminal body slightly (clamp to the nearest cell).
-    if (state->terminal_selecting && !state->terminal_selection_is_gdb && on_pty_tab &&
+    if (state->terminal_selecting &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kPty && on_pty_tab &&
         state->shell_ui_active) {
       int x = m.x;
       int y = m.y;
@@ -1260,13 +1438,13 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
       }
       const int visual_row = y - state->terminal_box.y_min;
       const int display_row = state->terminal_first_visible + visual_row;
-      state->terminal_sel_head_row = terminal_source_row(state, display_row);
-      state->terminal_sel_head_col = std::max(0, x - state->terminal_box.x_min);
-      state->terminal_has_selection = true;
+      update_console_drag_head(state, model, terminal_source_row(state, display_row),
+                               std::max(0, x - state->terminal_box.x_min));
       wake_console(layout_state);
       return true;
     }
-    if (state->terminal_selecting && state->terminal_selection_is_gdb && on_debug_tab) {
+    if (state->terminal_selecting &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kGdb && on_debug_tab) {
       int x = m.x;
       int y = m.y;
       if (!state->history_box.IsEmpty()) {
@@ -1274,9 +1452,23 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
         y = std::max(state->history_box.y_min, std::min(y, state->history_box.y_max));
       }
       const int visual_row = y - state->history_box.y_min;
-      state->terminal_sel_head_row = std::max(0, state->first_visible + visual_row);
-      state->terminal_sel_head_col = std::max(0, x - state->history_box.x_min);
-      state->terminal_has_selection = true;
+      update_console_drag_head(state, model, state->first_visible + visual_row,
+                               std::max(0, x - state->history_box.x_min));
+      wake_console(layout_state);
+      return true;
+    }
+    if (state->terminal_selecting &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kAi &&
+        ai_tab_active(layout_state)) {
+      int x = m.x;
+      int y = m.y;
+      if (!state->ai_history_box.IsEmpty()) {
+        x = std::max(state->ai_history_box.x_min, std::min(x, state->ai_history_box.x_max));
+        y = std::max(state->ai_history_box.y_min, std::min(y, state->ai_history_box.y_max));
+      }
+      const int visual_row = y - state->ai_history_box.y_min;
+      update_console_drag_head(state, model, state->ai_first_visible + visual_row,
+                               std::max(0, x - state->ai_history_box.x_min));
       wake_console(layout_state);
       return true;
     }
@@ -1292,11 +1484,15 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
         wake_console(layout_state);
       }
     }
-    if (ai_tab_active(layout_state)) {
+    if (ai_tab_active(layout_state) &&
+        !(state->terminal_selecting &&
+          state->terminal_selection_kind == ConsoleSelectionKind::kAi)) {
       if (update_ai_result_hover(state, layout_state, ai, m.x, m.y)) {
         wake_console(layout_state, "ai.result.hover");
       }
-    } else if (state->ai_result_hover_row.has_value()) {
+    } else if (state->ai_result_hover_row.has_value() &&
+               !(state->terminal_selecting &&
+                 state->terminal_selection_kind == ConsoleSelectionKind::kAi)) {
       state->ai_result_hover_row.reset();
       layout_state->clickable.clear_hover_if(
           [](std::string_view id) { return id == press_id::kAiResultLink; });
@@ -1320,6 +1516,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
   // Finish a drag-select even if the release happens outside the panel.
   if (m.motion == Mouse::Released && state->terminal_selecting) {
     state->terminal_selecting = false;
+    state->terminal_line_select_drag = false;
     // Collapse empty click-selections so a plain click does not leave a caret-sized selection.
     if (state->terminal_sel_anchor_row == state->terminal_sel_head_row &&
         state->terminal_sel_anchor_col == state->terminal_sel_head_col) {
@@ -1368,9 +1565,10 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
       const int row_index = terminal_source_row(state, display_row);
       const int col = m.x - state->terminal_box.x_min;
       const int64_t now_ms = console_now_ms();
-      const bool double_click = is_console_double_click(*state, row_index, col, now_ms);
-      note_console_click(state, row_index, col, now_ms);
-      if (double_click && select_console_word_at(state, model, row_index, col, false)) {
+      const ConsoleMultiClick multi =
+          apply_console_multi_click(state, model, row_index, col, now_ms,
+                                    ConsoleSelectionKind::kPty);
+      if (multi != ConsoleMultiClick::kNone) {
         if (focus != nullptr) {
           focus->region = FocusRegion::Terminal;
         }
@@ -1386,13 +1584,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
           return true;
         }
       }
-      state->terminal_selection_is_gdb = false;
-      state->terminal_selecting = true;
-      state->terminal_has_selection = false;
-      state->terminal_sel_anchor_row = row_index;
-      state->terminal_sel_anchor_col = std::max(0, col);
-      state->terminal_sel_head_row = state->terminal_sel_anchor_row;
-      state->terminal_sel_head_col = state->terminal_sel_anchor_col;
+      begin_console_drag_selection(state, row_index, col, ConsoleSelectionKind::kPty);
       if (focus != nullptr) {
         focus->region = FocusRegion::Terminal;
       }
@@ -1418,9 +1610,10 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
     const int row_index = state->first_visible + visual_row;
     const int col = std::max(0, m.x - state->history_box.x_min);
     const int64_t now_ms = console_now_ms();
-    const bool double_click = is_console_double_click(*state, row_index, col, now_ms);
-    note_console_click(state, row_index, col, now_ms);
-    if (double_click && select_console_word_at(state, model, row_index, col, true)) {
+    const ConsoleMultiClick multi =
+        apply_console_multi_click(state, model, row_index, col, now_ms,
+                                  ConsoleSelectionKind::kGdb);
+    if (multi != ConsoleMultiClick::kNone) {
       layout_state->text_input_focus = TextInputFocus::None;
       layout_state->focus_sync_needed = true;
       if (focus != nullptr) {
@@ -1429,13 +1622,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
       wake_console(layout_state);
       return true;
     }
-    state->terminal_selection_is_gdb = true;
-    state->terminal_selecting = true;
-    state->terminal_has_selection = false;
-    state->terminal_sel_anchor_row = std::max(0, row_index);
-    state->terminal_sel_anchor_col = col;
-    state->terminal_sel_head_row = state->terminal_sel_anchor_row;
-    state->terminal_sel_head_col = state->terminal_sel_anchor_col;
+    begin_console_drag_selection(state, row_index, col, ConsoleSelectionKind::kGdb);
     layout_state->text_input_focus = TextInputFocus::None;
     layout_state->focus_sync_needed = true;
     if (focus != nullptr) {
@@ -1464,16 +1651,33 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
     return true;
   }
   if (ai_tab_active(layout_state) && state->ai_history_box.Contain(m.x, m.y)) {
-    if (m.button == Mouse::Left && m.motion == Mouse::Pressed &&
-        try_open_ai_result_at(state, ai, workspace, model, focus, layout_state, m.x, m.y)) {
+    refresh_ai_line_cache(state, ai);
+    const int visual_row = m.y - state->ai_history_box.y_min;
+    const int row_index = state->ai_first_visible + visual_row;
+    const int col = std::max(0, m.x - state->ai_history_box.x_min);
+    const int64_t now_ms = console_now_ms();
+    const ConsoleMultiClick multi =
+        apply_console_multi_click(state, model, row_index, col, now_ms,
+                                  ConsoleSelectionKind::kAi);
+    if (multi != ConsoleMultiClick::kNone) {
+      layout_state->text_input_focus = TextInputFocus::None;
+      layout_state->focus_sync_needed = true;
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      wake_console(layout_state, "ai.select");
       return true;
     }
+    if (try_open_ai_result_at(state, ai, workspace, model, focus, layout_state, m.x, m.y)) {
+      return true;
+    }
+    begin_console_drag_selection(state, row_index, col, ConsoleSelectionKind::kAi);
     layout_state->text_input_focus = TextInputFocus::None;
     layout_state->focus_sync_needed = true;
     if (focus != nullptr) {
       focus->region = FocusRegion::Terminal;
     }
-    wake_console(layout_state, "ai.focus");
+    wake_console(layout_state, "ai.select");
     return true;
   }
   if (ai_tab_active(layout_state) && state->ai_input_box.Contain(m.x, m.y)) {
@@ -1627,7 +1831,9 @@ Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool sh
         break;
       }
       Element cell = text(std::string(1, ch));
-      const bool selected = terminal_cell_selected(state, absolute_row, col);
+      const bool selected =
+          state != nullptr && state->terminal_selection_kind == ConsoleSelectionKind::kPty &&
+          terminal_cell_selected(state, absolute_row, col);
       const bool in_link =
           link.has_value() && col >= link->span_start && col < link->span_end;
       if (draw_cursor && cursor_col >= 0 && col == cursor_col) {
@@ -1939,21 +2145,9 @@ Element render_gdb_console(ConsolePanelState* state, DebugModel* model, AppMode*
   Elements history;
   for (int i = state->first_visible; i < end; ++i) {
     const std::string& line = terminal_lines[static_cast<std::size_t>(i)];
-    if (state->terminal_has_selection && state->terminal_selection_is_gdb && !line.empty()) {
-      Elements parts;
-      for (int col = 0; col < static_cast<int>(line.size()); ++col) {
-        Element cell = text(std::string(1, line[static_cast<std::size_t>(col)]));
-        if (terminal_cell_selected(state, i, col)) {
-          cell = cell | bgcolor(theme::SelectionBg()) | color(theme::UiText());
-        } else {
-          cell = cell | color(theme::Header());
-        }
-        parts.push_back(std::move(cell));
-      }
-      history.push_back(hbox(std::move(parts)));
-    } else {
-      history.push_back(text(line.empty() ? " " : line) | color(theme::Header()));
-    }
+    history.push_back(
+        render_plain_line_with_selection(line, i, state, ConsoleSelectionKind::kGdb,
+                                         theme::Header()));
   }
   if (history.empty()) {
     history.push_back(text(i18n::tr("console.gdb.no_output")) | color(theme::Muted()));
@@ -2286,6 +2480,7 @@ Element render_ai_console(ConsolePanelState* state, AiController* ai,
     return text(i18n::tr("console.ai.no_output")) | color(theme::Muted()) | flex;
   }
   const std::vector<std::string> terminal_lines = ai->snapshot_lines();
+  state->ai_line_cache = terminal_lines;
   const int total = static_cast<int>(terminal_lines.size());
 
   int visible = visible_line_count(state->ai_history_box);
@@ -2311,6 +2506,11 @@ Element render_ai_console(ConsolePanelState* state, AiController* ai,
   Elements history;
   for (int i = state->ai_first_visible; i < end; ++i) {
     const std::string& line = terminal_lines[static_cast<std::size_t>(i)];
+    if (console_line_in_selection(state, ConsoleSelectionKind::kAi, i)) {
+      history.push_back(render_plain_line_with_selection(line, i, state, ConsoleSelectionKind::kAi,
+                                                         theme::Header()));
+      continue;
+    }
     const bool hovered =
         state->ai_result_hover_row.has_value() && *state->ai_result_hover_row == i;
     history.push_back(render_ai_transcript_line(line, hovered));
@@ -2369,6 +2569,23 @@ bool handle_ai_console_keys(AiController* ai, ConsolePanelState* state,
   if (event == Event::Custom && console_input_active(layout_state) && input_box) {
     input_box->TakeFocus();
     return false;
+  }
+
+  if (state->terminal_has_selection &&
+      state->terminal_selection_kind == ConsoleSelectionKind::kAi) {
+    if (event_is_ctrl_c(event) || event == Event::Special("\x1B[99;6u") ||
+        event == Event::Special("\x1B[67;6u")) {
+      if (copy_terminal_selection(state, nullptr, ai)) {
+        clear_terminal_selection(state);
+        wake_console(layout_state, "ai.copy");
+        return true;
+      }
+    }
+    if (event == Event::Escape) {
+      clear_terminal_selection(state);
+      wake_console(layout_state, "ai.select");
+      return true;
+    }
   }
 
   if (event == Event::Escape) {
@@ -2720,7 +2937,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       return true;
     }
 
-    if (on_debug_tab && state->terminal_has_selection && state->terminal_selection_is_gdb &&
+    if (on_debug_tab && state->terminal_has_selection &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kGdb &&
         event_is_ctrl_c(event)) {
       if (copy_terminal_selection(state.get(), model)) {
         clear_terminal_selection(state.get());
@@ -2729,7 +2947,26 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       }
     }
 
-    if (on_debug_tab && state->terminal_has_selection && state->terminal_selection_is_gdb &&
+    if (on_debug_tab && state->terminal_has_selection &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kGdb &&
+        event == Event::Escape) {
+      clear_terminal_selection(state.get());
+      wake_console(layout_state);
+      return true;
+    }
+
+    if (on_ai_tab && state->terminal_has_selection &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kAi &&
+        event_is_ctrl_c(event)) {
+      if (copy_terminal_selection(state.get(), model, ai.get())) {
+        clear_terminal_selection(state.get());
+        wake_console(layout_state);
+        return true;
+      }
+    }
+
+    if (on_ai_tab && state->terminal_has_selection &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kAi &&
         event == Event::Escape) {
       clear_terminal_selection(state.get());
       wake_console(layout_state);

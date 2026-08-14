@@ -805,8 +805,18 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     return false;
   };
 
+  auto wrapped_handler = [handler, layout_state](Event event) {
+    const bool handled = handler(event);
+    if (handled) {
+      // Console is cached: typing/navigation must dirty the panel or the
+      // Input Element is reused and the caret/text look stuck until Enter.
+      wake_console_panel(layout_state, "search.input");
+    }
+    return handled;
+  };
+
   if (layout_state != nullptr) {
-    layout_state->search_key_handler = handler;
+    layout_state->search_key_handler = wrapped_handler;
   }
 
   return WrapFocusable(CatchEvent(
@@ -907,7 +917,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
 
         return PanelBody(vbox({std::move(form), std::move(results)}));
       }),
-      handler));
+      wrapped_handler));
 }
 
 }  // namespace tuide

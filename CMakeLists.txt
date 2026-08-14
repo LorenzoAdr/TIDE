@@ -753,6 +753,16 @@ add_executable(git_diff_test
 )
 target_include_directories(git_diff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+add_executable(git_command_test
+  tests/git_command_test.cpp
+  src/git/git_command.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(git_command_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 add_executable(level0_router_test
   tests/level0_router_test.cpp
   src/ai/level0_router.cpp
@@ -1019,6 +1029,7 @@ set(TUIDE_TEST_TARGETS
   doc_comment_test
   nm_reader_test
   git_diff_test
+  git_command_test
   level0_router_test
   level0_intent_index_test
   level1_agent_test
