@@ -1009,9 +1009,12 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 		if (layout_state_.source_tick_callback && app_mode_ == AppMode::kDebug) {
 			layout_state_.source_tick_callback();
 		}
-		if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
-			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "git");
-			TUIDE_MON_SCOPE("ui", "tick.git");
+		}
+	{
+		UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "git");
+		TUIDE_MON_SCOPE("ui", "tick.git");
+		git_service_.drain_ui();
+		if (plan.run_full_background && layout_state_.activity_gate.allows_deferred_panel_tick()) {
 			git_service_.tick();
 		}
 	}
@@ -2895,7 +2898,11 @@ int Application::run() {
 			UI_WAKE(&layout_state_, "app");
 		}
 	};
-	git_service_.set_update_callback([] {});
+	git_service_.set_update_callback([this] {
+		ui_wake(&layout_state_, "git.update", UiEventKind::InputCorrelated, [this] {
+			layout_state_.panel_render_cache.mark_dirty(UiPanelId::Console);
+		});
+	});
 	indexer_.set_change_notify([this](bool wake_ui) {
 		if (!wake_ui) {
 			return;
@@ -3393,7 +3400,7 @@ int Application::run() {
 			return true;
 		}
 
-		if (git_panel_state_.auth_modal_open && event.is_mouse() &&
+		if (git_panel_state_.git_overlay_open() && event.is_mouse() &&
 		    layout_state_.git_mouse_handler && layout_state_.git_mouse_handler(event)) {
 			wake_console_panel(&layout_state_, "app.git.auth.mouse");
 			return true;
@@ -3562,7 +3569,7 @@ int Application::run() {
 				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
-			if ((git_panel_state_.auth_modal_open ||
+			if ((git_panel_state_.git_overlay_open() ||
 			     (git_tab_active(&layout_state_) &&
 			      focus_state_.region == FocusRegion::Terminal)) &&
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&

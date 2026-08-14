@@ -2,6 +2,8 @@
 
 #include <array>
 #include <cctype>
+#include <cerrno>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -10,6 +12,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -70,11 +73,25 @@ void apply_noninteractive_git_env(
   }
 }
 
+void signal_git_tree(pid_t pid, int sig) {
+  if (pid <= 0) {
+    return;
+  }
+  ::kill(-pid, sig);
+  ::kill(pid, sig);
+}
+
 GitCommandResult run_git_argv(const std::string& cwd, const std::vector<std::string>& args,
-                              const std::vector<std::pair<std::string, std::string>>& extra_env) {
+                              const std::vector<std::pair<std::string, std::string>>& extra_env,
+                              GitCommandCancel* cancel) {
   GitCommandResult result;
   if (cwd.empty()) {
     result.stderr_text = i18n::tr("git.empty_workspace");
+    return result;
+  }
+  if (cancel != nullptr && cancel->requested.load(std::memory_order_acquire)) {
+    result.cancelled = true;
+    result.stderr_text = i18n::tr("git.remote.cancelled");
     return result;
   }
 
@@ -127,24 +144,81 @@ GitCommandResult run_git_argv(const std::string& cwd, const std::vector<std::str
   }
 
   ::close(pipefd[1]);
+  if (cancel != nullptr) {
+    cancel->pid.store(pid, std::memory_order_release);
+    if (cancel->requested.load(std::memory_order_acquire)) {
+      signal_git_tree(pid, SIGTERM);
+    }
+  }
+
   std::string output;
   std::array<char, 4096> buffer{};
+  int cancel_wait_ticks = 0;
   while (true) {
-    const ssize_t n = ::read(pipefd[0], buffer.data(), buffer.size());
-    if (n <= 0) {
+    const bool cancel_requested =
+        cancel != nullptr && cancel->requested.load(std::memory_order_acquire);
+    if (cancel_requested) {
+      if (cancel_wait_ticks == 0) {
+        signal_git_tree(pid, SIGTERM);
+      } else if (cancel_wait_ticks == 5) {
+        signal_git_tree(pid, SIGKILL);
+      }
+    }
+
+    pollfd pfd{};
+    pfd.fd = pipefd[0];
+    pfd.events = POLLIN;
+    const int pr = ::poll(&pfd, 1, 100);
+    if (pr < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
       break;
     }
-    output.append(buffer.data(), static_cast<std::size_t>(n));
+    if (pr == 0) {
+      if (cancel_requested) {
+        ++cancel_wait_ticks;
+      }
+      continue;
+    }
+    if ((pfd.revents & POLLIN) != 0) {
+      const ssize_t n = ::read(pipefd[0], buffer.data(), buffer.size());
+      if (n < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        break;
+      }
+      if (n == 0) {
+        break;
+      }
+      output.append(buffer.data(), static_cast<std::size_t>(n));
+      continue;
+    }
+    if ((pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) != 0) {
+      break;
+    }
   }
   ::close(pipefd[0]);
 
   int status = 0;
   if (::waitpid(pid, &status, 0) < 0) {
     result.stderr_text = i18n::tr("git.exec_failed");
+    if (cancel != nullptr) {
+      cancel->pid.store(0, std::memory_order_release);
+    }
     return result;
+  }
+  if (cancel != nullptr) {
+    cancel->pid.store(0, std::memory_order_release);
   }
   result.stdout_text = output;
   result.stderr_text = output;
+  result.cancelled =
+      cancel != nullptr && cancel->requested.load(std::memory_order_acquire);
+  if (result.cancelled && result.stderr_text.empty()) {
+    result.stderr_text = i18n::tr("git.remote.cancelled");
+  }
   if (WIFEXITED(status)) {
     result.exit_code = WEXITSTATUS(status);
   } else if (WIFSIGNALED(status)) {
@@ -185,16 +259,23 @@ void cleanup_askpass_script(const std::string& script_path) {
 
 }  // namespace
 
-GitCommandResult run_git(const std::string& cwd, const std::vector<std::string>& args) {
-  return run_git_argv(cwd, args, {});
+GitCommandResult run_git(const std::string& cwd, const std::vector<std::string>& args,
+                         GitCommandCancel* cancel) {
+  return run_git_argv(cwd, args, {}, cancel);
 }
 
 GitCommandResult run_git_with_credentials(const std::string& cwd,
                                           const std::vector<std::string>& args,
-                                          const GitCredentials& credentials) {
+                                          const GitCredentials& credentials,
+                                          GitCommandCancel* cancel) {
   GitCommandResult result;
   if (cwd.empty()) {
     result.stderr_text = i18n::tr("git.empty_workspace");
+    return result;
+  }
+  if (cancel != nullptr && cancel->requested.load(std::memory_order_acquire)) {
+    result.cancelled = true;
+    result.stderr_text = i18n::tr("git.remote.cancelled");
     return result;
   }
   const std::string askpass = write_askpass_script(credentials);
@@ -202,9 +283,22 @@ GitCommandResult run_git_with_credentials(const std::string& cwd,
     result.stderr_text = i18n::tr("git.exec_failed");
     return result;
   }
-  result = run_git_argv(cwd, args, {{"GIT_ASKPASS", askpass}, {"SSH_ASKPASS", askpass}});
+  result = run_git_argv(cwd, args, {{"GIT_ASKPASS", askpass}, {"SSH_ASKPASS", askpass}}, cancel);
   cleanup_askpass_script(askpass);
   return result;
+}
+
+void request_git_cancel(GitCommandCancel* cancel) {
+  if (cancel == nullptr) {
+    return;
+  }
+  cancel->requested.store(true, std::memory_order_release);
+  const pid_t pid = cancel->pid.load(std::memory_order_acquire);
+  if (pid <= 0) {
+    return;
+  }
+  ::kill(-pid, SIGTERM);
+  ::kill(pid, SIGTERM);
 }
 
 bool git_available() {

@@ -38,6 +38,12 @@ int main() {
              "error: Your local changes to the following files would be overwritten by merge\n"),
          "merge conflict is not auth");
 
+  {
+    tuide::GitCommandCancel cancel;
+    const auto version = tuide::run_git(".", {"--version"}, &cancel);
+    expect(version.success() && !version.cancelled, "git --version with idle cancel handle");
+  }
+
   std::cout << "git_command_test OK\n";
   return 0;
 }
