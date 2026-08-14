@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "symbols/symbol_kind.hpp"
+
 namespace tuide {
 
 class EmbeddingBackend;
@@ -17,6 +19,38 @@ struct CodingStemEmbedRow {
   std::vector<float> embedding;
 };
 
+// Passage composition variants for coding-stem embeddings (battery + production).
+enum class StemPassageProfileId {
+  Baseline = 0,
+  TypeFirst,
+  SigSnip,
+  HdrDoc,
+  ModuleBlurb,
+  Rich480,
+  Rich720,
+  KitchenSink,
+};
+
+struct StemPassageSymbol {
+  std::string name;
+  SymbolKind kind = SymbolKind::kFunction;
+  std::string signature;
+  int line = 0;
+  std::string file;  // workspace-relative
+};
+
+struct StemPassageBuildInput {
+  std::string stem;
+  std::vector<std::string> paths;
+  std::vector<StemPassageSymbol> symbols;
+  std::string workspace_root;
+};
+
+StemPassageProfileId parse_stem_passage_profile(const std::string& name);
+const char* stem_passage_profile_name(StemPassageProfileId id);
+// Default production profile (may change after battery).
+StemPassageProfileId default_stem_passage_profile();
+
 // Workspace stem/file passages embedded once and cached for coding-pack recall.
 class CodingStemEmbedIndex {
  public:
@@ -26,11 +60,20 @@ class CodingStemEmbedIndex {
 
   bool ready() const { return ready_; }
   std::size_t size() const { return rows_.size(); }
+  StemPassageProfileId profile() const { return profile_; }
+  const std::string& content_hash() const { return content_hash_; }
+  const std::vector<CodingStemEmbedRow>& rows() const { return rows_; }
 
   // Build/refresh from snapshot symbols. Caches under cache_dir/embed/coding_stems/.
+  // Profile id is part of the content hash so variants never share cache rows.
   bool ensure(const SymbolIndexSnapshot* snapshot, EmbeddingBackend* backend,
               const std::string& cache_dir, const std::string& model_id,
-              const ProgressFn& on_progress, std::string* error);
+              const ProgressFn& on_progress, std::string* error,
+              StemPassageProfileId profile = StemPassageProfileId::Baseline);
+
+  // Build passages only (no embed/cache). Useful for cost stats and unit tests.
+  static std::vector<CodingStemEmbedRow> build_passages(const SymbolIndexSnapshot* snapshot,
+                                                        StemPassageProfileId profile);
 
   // Precomputed rows for unit tests (no backend/cache).
   void set_rows_for_test(std::vector<CodingStemEmbedRow> rows);
@@ -49,18 +92,24 @@ class CodingStemEmbedIndex {
                        std::vector<float>* out, std::string* error) const;
 
  private:
-  void set_rows_unlocked(std::vector<CodingStemEmbedRow> rows, const std::string& content_hash);
+  void set_rows_unlocked(std::vector<CodingStemEmbedRow> rows, const std::string& content_hash,
+                         StemPassageProfileId profile);
 
   bool ready_ = false;
+  StemPassageProfileId profile_ = StemPassageProfileId::Baseline;
   std::string content_hash_;
   std::vector<CodingStemEmbedRow> rows_;
   std::unordered_map<std::string, std::size_t> by_stem_;
   mutable std::mutex mu_;
 };
 
-// Build a stable passage for a stem from sample paths/names (used by index + tests).
+// Legacy/simple builder (baseline shape: stem + paths + bare names, cap 480).
 std::string build_coding_stem_index_passage(const std::string& stem,
                                             const std::vector<std::string>& paths,
                                             const std::vector<std::string>& names);
+
+// Profile-aware builder (classes, sigs, twin-header docs, module blurb, …).
+std::string build_coding_stem_index_passage(const StemPassageBuildInput& in,
+                                            StemPassageProfileId profile);
 
 }  // namespace tuide

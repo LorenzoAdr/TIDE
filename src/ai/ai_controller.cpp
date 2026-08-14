@@ -694,7 +694,8 @@ bool AiController::ensure_coding_stem_index_ready() {
   const std::string cache =
       settings_.models_cache_dir.empty() ? ModelStore::default_cache_dir() : settings_.models_cache_dir;
   if (!coding_stem_index_.ensure(snap.get(), &embed_backend_, cache,
-                                 settings_.level0.embeddings.model_id, progress, &error)) {
+                                 settings_.level0.embeddings.model_id, progress, &error,
+                                 default_stem_passage_profile())) {
     append("coding stem embed: " + error);
     return false;
   }
@@ -826,7 +827,8 @@ void AiController::maybe_start_coding_stem_warm_async() {
     const std::string cache =
         settings_.models_cache_dir.empty() ? ModelStore::default_cache_dir() : settings_.models_cache_dir;
     const bool ok = coding_stem_index_.ensure(snap.get(), &embed_backend_, cache,
-                                              settings_.level0.embeddings.model_id, progress, &error);
+                                              settings_.level0.embeddings.model_id, progress, &error,
+                                              default_stem_passage_profile());
     if (!ok) {
       append("coding stem embed: " + error);
     } else {

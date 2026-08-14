@@ -1,0 +1,212 @@
+[
+  {
+    "id": "perf_threads_es",
+    "query": "panel de rendimiento informacion de hilos",
+    "expected_stems": ["performance_panel"],
+    "hard_negatives": ["panel", "editor_panel"]
+  },
+  {
+    "id": "perf_cpu_en",
+    "query": "where is the CPU and thread performance monitor UI",
+    "expected_stems": ["performance_panel"],
+    "hard_negatives": ["ui_perf_monitor", "panel"]
+  },
+  {
+    "id": "wake_policy_es",
+    "query": "politica de wake para eventos asincronos de la UI",
+    "expected_stems": ["ui_wake_policy"],
+    "hard_negatives": ["ui_wake"]
+  },
+  {
+    "id": "wake_redraw_en",
+    "query": "which async events force a UI redraw",
+    "expected_stems": ["ui_wake_policy", "ui_wake"],
+    "hard_negatives": []
+  },
+  {
+    "id": "settings_modal_es",
+    "query": "modal de ajustes y preferencias de la aplicacion",
+    "expected_stems": ["settings_modal", "app_settings"],
+    "hard_negatives": ["panel"]
+  },
+  {
+    "id": "search_panel_es",
+    "query": "panel de busqueda en el workspace",
+    "expected_stems": ["search_panel", "workspace_search"],
+    "hard_negatives": ["search_replace", "search_needles"]
+  },
+  {
+    "id": "search_replace_es",
+    "query": "aplicar search replace en un archivo del agente L2",
+    "expected_stems": ["search_replace"],
+    "hard_negatives": ["search_panel", "text_search"]
+  },
+  {
+    "id": "git_panel_es",
+    "query": "panel git estado del repositorio",
+    "expected_stems": ["git_panel", "git_status"],
+    "hard_negatives": ["git_diff_view"]
+  },
+  {
+    "id": "git_diff_es",
+    "query": "vista de diff de git en la UI",
+    "expected_stems": ["git_diff_view", "git_diff"],
+    "hard_negatives": ["git_panel"]
+  },
+  {
+    "id": "outline_es",
+    "query": "outline de simbolos del archivo abierto",
+    "expected_stems": ["outline_panel"],
+    "hard_negatives": ["binary_symbols_panel"]
+  },
+  {
+    "id": "diagnostics_es",
+    "query": "panel de diagnosticos y errores de compilacion",
+    "expected_stems": ["diagnostics_panel"],
+    "hard_negatives": ["console_panel"]
+  },
+  {
+    "id": "console_pty_es",
+    "query": "consola terminal pty salida",
+    "expected_stems": ["console_panel", "raw_pty_screen", "pty_input"],
+    "hard_negatives": []
+  },
+  {
+    "id": "packet_monitor_es",
+    "query": "monitor de paquetes de red o protocolo",
+    "expected_stems": ["packet_monitor_panel"],
+    "hard_negatives": ["panel"]
+  },
+  {
+    "id": "file_tree_es",
+    "query": "arbol de archivos del explorador",
+    "expected_stems": ["file_tree_panel"],
+    "hard_negatives": ["file_preview_panel"]
+  },
+  {
+    "id": "file_preview_es",
+    "query": "vista previa de archivo en el picker",
+    "expected_stems": ["file_preview_panel"],
+    "hard_negatives": ["file_tree_panel"]
+  },
+  {
+    "id": "editor_panel_es",
+    "query": "panel principal del editor de codigo",
+    "expected_stems": ["editor_panel"],
+    "hard_negatives": ["panel", "source_panel"]
+  },
+  {
+    "id": "stem_embed_index_es",
+    "query": "indice de embeddings por stem de archivo",
+    "expected_stems": ["coding_stem_embed_index"],
+    "hard_negatives": ["coding_symbol_embed_index", "embedding_backend"]
+  },
+  {
+    "id": "symbol_embed_es",
+    "query": "embeddings de simbolos legacy coding pack",
+    "expected_stems": ["coding_symbol_embed_index"],
+    "hard_negatives": ["coding_stem_embed_index"]
+  },
+  {
+    "id": "embed_rerank_es",
+    "query": "fusion lexica y coseno para rerank de stems",
+    "expected_stems": ["coding_embed_rerank"],
+    "hard_negatives": ["repo_map"]
+  },
+  {
+    "id": "repo_map_es",
+    "query": "mapa rankeado del repositorio PageRank simbolos",
+    "expected_stems": ["repo_map"],
+    "hard_negatives": ["coding_embed_rerank"]
+  },
+  {
+    "id": "level0_intent_es",
+    "query": "clasificacion de intenciones L0 con embeddings",
+    "expected_stems": ["level0_intent_index", "level0_router"],
+    "hard_negatives": []
+  },
+  {
+    "id": "level1_agent_es",
+    "query": "agente level1 pick stem y tools",
+    "expected_stems": ["level1_agent", "level1_action"],
+    "hard_negatives": ["level2_session"]
+  },
+  {
+    "id": "level2_session_es",
+    "query": "sesion autonoma L2 edit loop",
+    "expected_stems": ["level2_session", "level2_autonomous_loop"],
+    "hard_negatives": ["level1_agent"]
+  },
+  {
+    "id": "lsp_client_es",
+    "query": "cliente LSP clangd transport",
+    "expected_stems": ["lsp_client", "lsp_transport"],
+    "hard_negatives": []
+  },
+  {
+    "id": "visual_highlight_es",
+    "query": "resaltado visual de coincidencias en el editor",
+    "expected_stems": ["visual_highlight", "syntax_highlight"],
+    "hard_negatives": ["tree_sitter_highlight"]
+  },
+  {
+    "id": "syntax_highlight_es",
+    "query": "resaltado de sintaxis tree-sitter colores",
+    "expected_stems": ["tree_sitter_highlight", "syntax_highlight"],
+    "hard_negatives": ["visual_highlight"]
+  },
+  {
+    "id": "call_hierarchy_es",
+    "query": "jerarquia de llamadas call hierarchy panel",
+    "expected_stems": ["call_hierarchy_panel"],
+    "hard_negatives": ["outline_panel"]
+  },
+  {
+    "id": "watches_es",
+    "query": "watches del debugger variables observadas",
+    "expected_stems": ["watches_panel"],
+    "hard_negatives": ["diagnostics_panel"]
+  },
+  {
+    "id": "binary_symbols_es",
+    "query": "simbolos de binario ELF panel",
+    "expected_stems": ["binary_symbols_panel"],
+    "hard_negatives": ["outline_panel"]
+  },
+  {
+    "id": "core_analyzer_es",
+    "query": "analizador de core dump panel",
+    "expected_stems": ["core_analyzer_panel"],
+    "hard_negatives": ["binary_symbols_panel"]
+  },
+  {
+    "id": "workspace_search_rg_es",
+    "query": "busqueda ripgrep en el workspace",
+    "expected_stems": ["workspace_search_rg", "workspace_search"],
+    "hard_negatives": ["search_panel"]
+  },
+  {
+    "id": "embedding_backend_es",
+    "query": "servidor local llama-server para embeddings nomic",
+    "expected_stems": ["embedding_backend"],
+    "hard_negatives": ["coding_stem_embed_index"]
+  },
+  {
+    "id": "right_sidebar_es",
+    "query": "barra lateral derecha paneles UI",
+    "expected_stems": ["right_sidebar_panel"],
+    "hard_negatives": ["panel"]
+  },
+  {
+    "id": "search_needles_es",
+    "query": "extraer needles lexicos del query para el mapa",
+    "expected_stems": ["search_needles"],
+    "hard_negatives": ["search_panel", "search_replace"]
+  },
+  {
+    "id": "generic_panel_trap",
+    "query": "panel generico de layout UI",
+    "expected_stems": ["panel"],
+    "hard_negatives": ["performance_panel"]
+  }
+]
