@@ -1,9 +1,9 @@
 {
-  "pack": "p_short.json",
-  "promoted_at": "2026-08-15T21:48:23",
+  "pack": "p_multi_hunk.json",
+  "promoted_at": "2026-08-15T22:24:29",
   "metrics": {
-    "facet_recall": 0.3361111111111111,
-    "all_pass": 1,
-    "all_pass_rate": 0.16666666666666666
+    "facet_recall": 0.4611111111111111,
+    "all_pass": 2,
+    "all_pass_rate": 0.3333333333333333
   }
 }

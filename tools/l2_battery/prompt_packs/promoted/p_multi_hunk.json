@@ -1,0 +1,10 @@
+{
+  "id": "p_multi_hunk",
+  "description": "Force multi-path / multi-locus coverage before done",
+  "system_extra": "## Priority rules\n- If Instruction names ≥2 concrete src/... paths, your final successful edit batch (or consecutive edits before done) MUST touch each named path.\n- If Instruction asks for ≥2 markers/changes in one file, put them in one edit hunks[] or two edits before done — never leave one out.\n- After compile OK (map_review), re-read Instruction; if any named path/marker missing from your edits, emit edit again — do not done yet.\n",
+  "user_overlays": {
+    "edit": "Checklist: every src/ path and every required marker in Instruction must appear in applied hunks before done.",
+    "map_review": "Before done: verify Instruction paths/markers are all present in the diff you made. If not, edit again.",
+    "pack": "Plan edits for ALL Instruction loci now."
+  }
+}
