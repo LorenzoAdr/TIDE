@@ -1,0 +1,43 @@
+[
+  {
+    "id": "two_comments",
+    "prompt": "En src/util/shell_utils.hpp: (1) // L2_MR_A encima de shell_quote; (2) // L2_MR_B encima de command_exists. Ambos comentarios obligatorios.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.hpp"],
+      "diff_must_contain": ["L2_MR_A", "L2_MR_B"],
+      "min_edits": 1,
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "ktab_and_default",
+    "prompt": "En ConsolePanelTabs (src/ui/main_layout.hpp): añade kTemp=12 tras kAi Y cambia selected_tab default a kAi.",
+    "expect": {
+      "paths_touched": ["src/ui/main_layout.hpp"],
+      "diff_must_contain": ["kTemp", "selected_tab = kAi"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "cpp_two_markers",
+    "prompt": "En src/util/shell_utils.cpp: // L2_MR_C encima de shell_quote y // L2_MR_D encima de command_exists.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.cpp"],
+      "diff_must_contain": ["L2_MR_C", "L2_MR_D"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "helper_and_const",
+    "prompt": "En src/ui/main_layout.hpp: kSweep=12 tras kAi, y en ai_tab_active también aceptar kSweep.",
+    "expect": {
+      "paths_touched": ["src/ui/main_layout.hpp"],
+      "diff_must_contain": ["kSweep", "ai_tab_active"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  }
+]

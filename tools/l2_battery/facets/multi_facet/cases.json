@@ -1,0 +1,62 @@
+[
+  {
+    "id": "dual_always_true",
+    "prompt": "Añade bool always_true() en src/util/shell_utils.hpp (junto a command_exists) y su definición en src/util/shell_utils.cpp que retorne true. Debes modificar ambos archivos.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.hpp", "src/util/shell_utils.cpp"],
+      "diff_must_contain": ["always_true"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "ktab_and_helper",
+    "prompt": "En src/ui/main_layout.hpp: dentro de ConsolePanelTabs añade static constexpr int kTemp = 12; después de kAi. Luego en ai_tab_active trata kTemp como activo también (kAi o kTemp). No crees archivos nuevos.",
+    "expect": {
+      "paths_touched": ["src/ui/main_layout.hpp"],
+      "diff_must_contain": ["kTemp", "ai_tab_active"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "shell_quote_two_edits",
+    "prompt": "En src/util/shell_utils.cpp función shell_quote: añade comentario // L2_SWEEP_A encima de la firma y al inicio del cuerpo if (value.empty()) return value; Sin tocar otras funciones.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.cpp"],
+      "diff_must_contain": ["L2_SWEEP_A", "empty()"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "default_tab_and_comment",
+    "prompt": "En src/ui/main_layout.hpp ConsolePanelTabs: cambia selected_tab default a kAi y añade // L2_SWEEP_TAB encima de esa línea.",
+    "expect": {
+      "paths_touched": ["src/ui/main_layout.hpp"],
+      "diff_must_contain": ["kAi", "L2_SWEEP_TAB"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "command_exists_probe",
+    "prompt": "En src/util/shell_utils.cpp command_exists, añade // L2_SWEEP_PROBE inmediatamente antes del return que usa std::system. Solo ese archivo.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.cpp"],
+      "diff_must_contain": ["L2_SWEEP_PROBE"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "hpp_comment_shell_quote",
+    "prompt": "En src/util/shell_utils.hpp añade // L2_SWEEP_HDR justo encima de la declaración de shell_quote.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.hpp"],
+      "diff_must_contain": ["L2_SWEEP_HDR", "shell_quote"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  }
+]

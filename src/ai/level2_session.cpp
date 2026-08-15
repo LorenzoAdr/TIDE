@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include "ai/ai_trace.hpp"
+#include "ai/l2_feat.hpp"
 
 namespace fs = std::filesystem;
 
@@ -1272,6 +1273,99 @@ std::string first_line_of(const std::string& entry) {
   return trim_ws(line);
 }
 
+// Paths like src/foo/bar.cpp mentioned in Instruction (generic, no domain keywords).
+std::vector<std::string> instruction_src_paths(const std::string& workspace_root,
+                                               const std::string& session_md) {
+  std::vector<std::string> out;
+  std::unordered_set<std::string> seen;
+  const std::string& text = session_md;
+  for (std::size_t i = 0; i + 4 < text.size(); ++i) {
+    if (text.compare(i, 4, "src/") != 0) {
+      continue;
+    }
+    if (i > 0) {
+      const char prev = text[i - 1];
+      if (std::isalnum(static_cast<unsigned char>(prev)) || prev == '_' || prev == '/' ||
+          prev == '.') {
+        continue;
+      }
+    }
+    std::size_t j = i;
+    while (j < text.size()) {
+      const char c = text[j];
+      if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '/' || c == '.' ||
+          c == '-') {
+        ++j;
+        continue;
+      }
+      break;
+    }
+    std::string path = text.substr(i, j - i);
+    while (!path.empty() && (path.back() == '.' || path.back() == '/')) {
+      path.pop_back();
+    }
+    const auto dot = path.rfind('.');
+    if (dot == std::string::npos) {
+      continue;
+    }
+    const std::string ext = path.substr(dot);
+    if (ext != ".cpp" && ext != ".hpp" && ext != ".h" && ext != ".cc" && ext != ".cxx") {
+      continue;
+    }
+    if (!seen.insert(path).second) {
+      continue;
+    }
+    if (!workspace_root.empty()) {
+      std::error_code ec;
+      if (!fs::exists(fs::path(workspace_root) / path, ec)) {
+        continue;
+      }
+    }
+    out.push_back(path);
+  }
+  return out;
+}
+
+void remember_edited_path(std::vector<std::string>& edited_paths, const std::string& path) {
+  if (path.empty()) {
+    return;
+  }
+  for (const auto& p : edited_paths) {
+    if (p == path) {
+      return;
+    }
+  }
+  edited_paths.push_back(path);
+}
+
+std::vector<std::string> missing_instruction_paths(const std::string& workspace_root,
+                                                   const std::vector<std::string>& edited_paths) {
+  std::string sess;
+  {
+    std::ifstream in(Level2Session::session_path(workspace_root));
+    if (in) {
+      std::ostringstream ss;
+      ss << in.rdbuf();
+      sess = ss.str();
+    }
+  }
+  const auto want = instruction_src_paths(workspace_root, sess);
+  std::vector<std::string> missing;
+  for (const auto& p : want) {
+    bool hit = false;
+    for (const auto& e : edited_paths) {
+      if (e == p) {
+        hit = true;
+        break;
+      }
+    }
+    if (!hit) {
+      missing.push_back(p);
+    }
+  }
+  return missing;
+}
+
 // Idents from Instruction missing in pack (generic: no domain facets).
 std::vector<std::string> pack_instruction_gaps(const std::string& pack,
                                                const std::vector<std::string>& needles) {
@@ -1754,6 +1848,13 @@ Level2Session::State Level2Session::load_state(const std::string& workspace_root
         }
       }
     }
+    if (j.contains("edited_paths") && j["edited_paths"].is_array()) {
+      for (const auto& t : j["edited_paths"]) {
+        if (t.is_string()) {
+          st.edited_paths.push_back(t.get<std::string>());
+        }
+      }
+    }
     if (j.contains("pending") && j["pending"].is_array()) {
       for (const auto& p : j["pending"]) {
         PendingHunk h;
@@ -1804,6 +1905,7 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
                       {"map_review", st.map_review},
                       {"last_op_id", st.last_op_id},
                       {"watchlist", st.watchlist},
+                      {"edited_paths", st.edited_paths},
                       {"pending", pending}};
   return write_file(state_path(workspace_root), j.dump(2) + "\n", err);
 }
@@ -2074,6 +2176,11 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
        << "`; overlap=" << static_cast<int>(overlap * 100)
        << "%). No se inyecta el mapa completo. Usa `search` / `plan` anclado a esta "
           "Instruction.\n\n";
+    if (l2_feat::enabled("MAP_STALE_NUDGE")) {
+      md << "_nudge:_ map_stale activo — primera acción debe ser `action=plan` con "
+            "`path:Symbol` tomados de la Instruction (paths `src/...` explícitos), no "
+            "`done next=clarify`.\n\n";
+    }
   }
   md << "Fase inicial: **explore**. Preferir `action=plan` en el **primer** paso con "
         "4–8 targets `path:Symbol`/`path:line` (evitar path bare). Máx. ~8 tools sueltos "
@@ -3863,6 +3970,7 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
     p.new_text = applied[i].new_text;
     p.before = applied[i].before;
     st.pending.push_back(std::move(p));
+    remember_edited_path(st.edited_paths, work[i].path);
   }
   out.turn = st.turn;
 
@@ -4001,6 +4109,19 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
                                      ",\"event\":\"compile_ok\",\"exit\":0,\"ms\":" +
                                      std::to_string(compile_ms) +
                                      ",\"resume\":\"edit\",\"map_review\":1}");
+    if (l2_feat::enabled("MAP_REVIEW_PENDING")) {
+      const auto miss = missing_instruction_paths(workspace_root, st.edited_paths);
+      if (!miss.empty()) {
+        std::ostringstream pend;
+        pend << "### turn " << st.turn << " — map_review_pending\n\n";
+        pend << "Compile OK, pero la Instruction aún nombra paths sin editar:\n";
+        for (const auto& p : miss) {
+          pend << "- `" << p << "`\n";
+        }
+        pend << "\nEmite `action=edit` para esos paths o `done` solo si ya no aplican.\n\n";
+        append_observation(workspace_root, pend.str(), &out.session_chars, nullptr);
+      }
+    }
     out.ok = true;
     out.action = "compile";
     out.summary = "OK compile; map_review (¿algo más?)";
@@ -4026,6 +4147,10 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     }
     block << "\nDeclara en el header hermano (mismo stem `.hpp`/`.h`) y/o añade `#include`; "
              "un hunk solo en el `.cpp` no basta.\n\n";
+    if (l2_feat::enabled("SIBLING_UNDECL")) {
+      block << "**Siguiente acción obligatoria:** `action=edit` incluyendo el `.hpp`/`.h` "
+               "hermano (declaración) además del `.cpp` si falta.\n\n";
+    }
   }
   for (std::size_t i = 0; i < st.pending.size(); ++i) {
     const auto& p = st.pending[i];
@@ -4234,6 +4359,38 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
       out.error = "next=clarify solo desde explore|edit";
       return out;
     }
+    if (l2_feat::enabled("CLARIFY_NEED_PATH")) {
+      const std::string sess = read_file(session_path(workspace_root));
+      const auto paths = instruction_src_paths(workspace_root, sess);
+      // Explicit existing src/ paths → treat as must-edit: keep pushing clarify.
+      if (!paths.empty() && deps_.clarify_pushback_max > 0 &&
+          st.clarify_pushback < deps_.clarify_pushback_max) {
+        // fall through to normal pushback below
+      } else if (!paths.empty() && deps_.clarify_pushback_max > 0 &&
+                 st.clarify_pushback >= deps_.clarify_pushback_max) {
+        // Exhausted pushbacks but paths exist: one more hard pushback as edit nudge.
+        ++st.turn;
+        st.last_action = "clarify_need_path";
+        out.turn = st.turn;
+        std::ostringstream block;
+        block << "### turn " << st.turn << " — clarify_need_path\n\n";
+        block << "Clarify rechazado: la Instruction ya nombra paths existentes. "
+                 "Emite `plan`/`edit` sobre:\n";
+        for (const auto& p : paths) {
+          block << "- `" << p << "`\n";
+        }
+        block << "\n";
+        std::string err;
+        append_observation(workspace_root, block.str(), &out.session_chars, &err);
+        save_state(workspace_root, st, nullptr);
+        write_response_json(workspace_root, false, "done", "clarify_need_path", "", block.str(),
+                            "paths presentes; no clarify", st.turn, st.phase);
+        out.ok = true;
+        out.phase = st.phase;
+        out.summary = "clarify_need_path";
+        return out;
+      }
+    }
     const int max_push = deps_.clarify_pushback_max;
     if (max_push > 0 && st.clarify_pushback < max_push) {
       ++st.clarify_pushback;
@@ -4296,6 +4453,33 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
   }
 
   ++st.turn;
+  // Final done (no next): optional gate if Instruction named multiple src paths.
+  if (l2_feat::enabled("DONE_PATH_GATE")) {
+    const std::string sess = read_file(session_path(workspace_root));
+    const auto want = instruction_src_paths(workspace_root, sess);
+    const auto miss = missing_instruction_paths(workspace_root, st.edited_paths);
+    if (want.size() >= 2 && !miss.empty()) {
+      st.last_action = "done_path_gate";
+      out.turn = st.turn;
+      std::ostringstream block;
+      block << "### turn " << st.turn << " — done_path_gate\n\n";
+      block << "Done rechazado: faltan paths de la Instruction sin editar:\n";
+      for (const auto& p : miss) {
+        block << "- `" << p << "`\n";
+      }
+      block << "\nEmite `action=edit` para cubrirlos o aclara por qué no aplican.\n\n";
+      std::string err;
+      append_observation(workspace_root, block.str(), &out.session_chars, &err);
+      save_state(workspace_root, st, nullptr);
+      write_response_json(workspace_root, false, "done", "done_path_gate", "", block.str(),
+                          "faltan paths Instruction", st.turn, st.phase);
+      out.ok = true;
+      out.phase = st.phase;
+      out.summary = "done_path_gate";
+      out.error = "done_path_gate";
+      return out;
+    }
+  }
   st.done = true;
   st.phase = "done";
   st.last_action = "done";

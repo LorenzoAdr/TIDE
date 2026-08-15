@@ -171,6 +171,7 @@ class Level2Session {
     bool map_review = false;  // after compile_ok: full map restored, ask "algo más?"
     uint64_t last_op_id = 0;
     std::vector<std::string> watchlist;  // merged plan targets
+    std::vector<std::string> edited_paths;  // unique rel paths successfully applied
     std::vector<PendingHunk> pending;
   };
 

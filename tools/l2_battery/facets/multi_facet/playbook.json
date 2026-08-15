@@ -1,0 +1,10 @@
+{
+  "mode": "closed_loop",
+  "metric_primary": "facet_recall",
+  "rounds": [
+    {"id": "r1", "env": {"L2_FEAT_DONE_PATH_GATE": "1"}, "promote_features": ["DONE_PATH_GATE"], "description": "Gate done si faltan paths Instruction"},
+    {"id": "r2", "env": {"L2_FEAT_DONE_PATH_GATE": "1", "L2_FEAT_MAP_REVIEW_PENDING": "1"}, "promote_features": ["MAP_REVIEW_PENDING"], "description": "map_review lista paths pendientes"}
+  ],
+  "promote_if": {"relative_gain_pct": 5.0, "min_all_pass_delta": 1},
+  "revert_if_regression": true
+}

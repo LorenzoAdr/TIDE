@@ -1,0 +1,3 @@
+[
+  {"id": "unit_hunk", "prompt": "offline", "expect": {"phase_done": true}}
+]

@@ -1,0 +1,77 @@
+[
+  {
+    "id": "vague_ui",
+    "prompt": "Mejora un poco la UI de la terminal de forma mínima.",
+    "expect": {"must_clarify": true, "forbid_false_done": true}
+  },
+  {
+    "id": "vague_perf",
+    "prompt": "Haz el programa más rápido donde se pueda.",
+    "expect": {"must_clarify": true, "forbid_false_done": true}
+  },
+  {
+    "id": "vague_fix",
+    "prompt": "Hay un bug en consola; arréglalo.",
+    "expect": {"must_clarify": true, "forbid_false_done": true}
+  },
+  {
+    "id": "vague_refactor",
+    "prompt": "Refactoriza el módulo de utilidades.",
+    "expect": {"must_clarify": true, "forbid_false_done": true}
+  },
+  {
+    "id": "vague_label",
+    "prompt": "Cambia algún texto visible a L2test.",
+    "expect": {"must_clarify": true, "forbid_false_done": true}
+  },
+  {
+    "id": "edit_shell_comment",
+    "prompt": "En src/util/shell_utils.hpp añade // L2_CALIB_OK encima de shell_quote.",
+    "expect": {
+      "must_edit": true,
+      "paths_touched": ["src/util/shell_utils.hpp"],
+      "diff_must_contain": ["L2_CALIB_OK"],
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "edit_ktab",
+    "prompt": "En src/ui/main_layout.hpp ConsolePanelTabs añade static constexpr int kCalib = 12; tras kAi.",
+    "expect": {
+      "must_edit": true,
+      "paths_touched": ["src/ui/main_layout.hpp"],
+      "diff_must_contain": ["kCalib"],
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "edit_default_tab",
+    "prompt": "En src/ui/main_layout.hpp cambia selected_tab default de kTerminal a kAi.",
+    "expect": {
+      "must_edit": true,
+      "paths_touched": ["src/ui/main_layout.hpp"],
+      "diff_must_contain": ["selected_tab = kAi"],
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "edit_probe",
+    "prompt": "En src/util/shell_utils.cpp command_exists añade // L2_CALIB_PROBE antes del return con std::system.",
+    "expect": {
+      "must_edit": true,
+      "paths_touched": ["src/util/shell_utils.cpp"],
+      "diff_must_contain": ["L2_CALIB_PROBE"],
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "edit_empty_guard",
+    "prompt": "En src/util/shell_utils.cpp shell_quote, al inicio del cuerpo: if (value.empty()) return value;",
+    "expect": {
+      "must_edit": true,
+      "paths_touched": ["src/util/shell_utils.cpp"],
+      "diff_must_contain": ["empty()"],
+      "forbid_false_done": true
+    }
+  }
+]
