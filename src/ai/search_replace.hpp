@@ -38,6 +38,10 @@ struct ApplyHunkResult {
 bool find_unique_span(const std::string& haystack, const std::string& needle, SearchReplaceSpan* out,
                       std::string* err);
 
+// LLM noise: literal "\s*", "\s", "\n", "\t" → real whitespace (after JSON parse).
+std::string normalize_hunk_escape_noise(std::string text);
+void normalize_hunk_escape_noise(SearchReplaceHunk* hunk);
+
 std::vector<SearchReplaceHunk> parse_search_replace_json(const nlohmann::json& j, std::string* err);
 
 // Aider-style blocks: <<<<<<< SEARCH / ======= / >>>>>>> REPLACE (optional path: header).

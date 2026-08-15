@@ -1,0 +1,22 @@
+[
+  {
+    "id": "01_dual_always_true",
+    "prompt": "Añade bool always_true() en src/util/shell_utils.hpp (declaración junto a command_exists) y su definición en src/util/shell_utils.cpp que retorne true. Debes modificar ambos archivos. No toques otras funciones."
+  },
+  {
+    "id": "02_default_tab_ai",
+    "prompt": "En el struct ConsolePanelTabs de src/ui/main_layout.hpp, cambia el valor por defecto de selected_tab de kTerminal a kAi. Solo ese cambio de inicialización."
+  },
+  {
+    "id": "03_shell_quote_empty_guard",
+    "prompt": "En src/util/shell_utils.cpp, función shell_quote: (1) añade el comentario // L2_HARD: empty passthrough justo encima de la firma; (2) al inicio del cuerpo, si value.empty() return value; sin alterar el resto del algoritmo de quoting."
+  },
+  {
+    "id": "04_ktab_and_ai_helper",
+    "prompt": "En src/ui/main_layout.hpp: dentro de ConsolePanelTabs añade static constexpr int kTemp = 12; después de kAi. Luego en ai_tab_active, trata kTemp como activo también (mismo return true si selected_tab es kAi o kTemp). No crees archivos nuevos."
+  },
+  {
+    "id": "05_command_exists_marker",
+    "prompt": "En src/util/shell_utils.cpp, dentro de command_exists, añade una sola línea de comentario // L2_HARD_PROBE inmediatamente antes del return que llama a std::system. No cambies la lógica."
+  }
+]

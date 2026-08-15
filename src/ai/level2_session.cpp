@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -522,6 +523,10 @@ bool looks_like_code_ident(const std::string& tok) {
   if (tok.size() < 5) {
     return false;
   }
+  // Trailing ':' alone (e.g. fragments_ok: from plan stats) is not an ident.
+  if (!tok.empty() && tok.back() == ':') {
+    return false;
+  }
   bool has_under = false;
   bool has_digit = false;
   for (unsigned char c : tok) {
@@ -533,6 +538,255 @@ bool looks_like_code_ident(const std::string& tok) {
   }
   // snake / nested / numbered, or smashed CamelCase (ToggleLineMark → togglelinemark).
   return has_under || has_digit || tok.size() >= 10;
+}
+
+bool is_plan_stats_telemetry_token(const std::string& tok) {
+  std::string t = tok;
+  while (!t.empty() && t.back() == ':') {
+    t.pop_back();
+  }
+  static const std::unordered_set<std::string> kStats = {
+      "fragments_ok", "outlines_ok", "pack_chars", "truncated", "auto_refetch",
+      "target_count", "fragments", "outlines",
+  };
+  return kStats.count(t) != 0;
+}
+
+// True for path:Symbol / path:line / path:A-B style plan targets (not "3 fragments_ok…").
+bool looks_like_plan_target_token(const std::string& tok) {
+  if (tok.size() < 5 || tok.find('/') == std::string::npos) {
+    return false;
+  }
+  // Require a file-ish path before optional :anchor.
+  const auto colon = tok.find(':');
+  const std::string path = colon == std::string::npos ? tok : tok.substr(0, colon);
+  return path.find('.') != std::string::npos || path.rfind("src/", 0) == 0;
+}
+
+std::string fnv1a_hex(const std::string& s) {
+  std::uint64_t h = 14695981039346656037ull;
+  for (unsigned char c : s) {
+    h ^= c;
+    h *= 1099511628211ull;
+  }
+  std::ostringstream out;
+  out << std::hex << h;
+  return out.str();
+}
+
+std::string edit_hunks_fingerprint(const std::vector<SearchReplaceHunk>& hunks) {
+  std::ostringstream raw;
+  for (const auto& h : hunks) {
+    raw << h.path << '\n' << h.search << "\n---\n" << h.replace << "\n===\n";
+  }
+  return fnv1a_hex(raw.str());
+}
+
+// Bare identifiers / path:Symbol almost always match ≥2 times or the wrong locus.
+bool search_too_generic(const std::string& search) {
+  std::string s = trim_ws(search);
+  if (s.empty()) {
+    return true;
+  }
+  bool only_identish = true;
+  for (unsigned char c : s) {
+    if (!(std::isalnum(c) != 0 || c == '_' || c == ':' || c == '/' || c == '.' || c == '-')) {
+      only_identish = false;
+      break;
+    }
+  }
+  // "tick_terminal_shell" / "Foo::bar" without surrounding code → too generic.
+  if (only_identish) {
+    return true;
+  }
+  // Tiny fragments (even with punctuation) are rarely unique.
+  return s.size() < 12;
+}
+
+int count_content_lines(const std::string& text) {
+  int n = 0;
+  std::istringstream in(text);
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!trim_ws(line).empty()) {
+      ++n;
+    }
+  }
+  return n;
+}
+
+// Reject "struct Foo {" → full struct body (duplicates the rest of the type).
+// Search must cover the span being replaced; tiny openers expanded into blocks are poison.
+bool hunk_expands_over_opener(const SearchReplaceHunk& h) {
+  const std::string search = trim_ws(h.search);
+  const std::string replace = trim_ws(h.replace);
+  if (search.empty() || replace.size() <= search.size()) {
+    return false;
+  }
+  const int s_lines = count_content_lines(search);
+  const int r_lines = count_content_lines(replace);
+  const bool has_open = search.find('{') != std::string::npos;
+  const bool has_close = search.find('}') != std::string::npos;
+  const bool opener_only =
+      (has_open && !has_close && s_lines <= 2) ||
+      (!search.empty() && search.back() == '{' && s_lines <= 2);
+  if (!opener_only) {
+    return false;
+  }
+  // Full braced body (or many lines) replacing just the opener.
+  if (r_lines >= 4 && r_lines >= s_lines * 3) {
+    return true;
+  }
+  if (replace.find('}') != std::string::npos && replace.size() > search.size() * 4) {
+    return true;
+  }
+  return false;
+}
+
+std::string hunk_shape_error(const SearchReplaceHunk& h) {
+  if (search_too_generic(h.search)) {
+    return "search demasiado genérico (ident suelto o <12 chars; usa un bloque de código único)";
+  }
+  if (hunk_expands_over_opener(h)) {
+    return "hunk mal formado: `search` es solo el opener (`… {`) pero `replace` trae el bloque "
+           "entero — el `search` debe cubrir todo el span a sustituir (p.ej. struct completo "
+           "hasta `};`), no solo la línea de apertura";
+  }
+  return {};
+}
+
+std::vector<std::string> parse_pack_targets_header(const std::string& pack);
+
+std::string target_to_rel_path(const std::string& target) {
+  const auto colon = target.find(':');
+  if (colon == std::string::npos) {
+    return target;
+  }
+  // path:Symbol or path:12 or path:A-B — keep path (may contain drive? ignore)
+  return target.substr(0, colon);
+}
+
+void add_unique_path(std::vector<std::string>* paths, const std::string& rel) {
+  if (!paths || rel.empty()) {
+    return;
+  }
+  for (const auto& p : *paths) {
+    if (p == rel) {
+      return;
+    }
+  }
+  paths->push_back(rel);
+}
+
+std::string read_file_raw(const std::string& path) {
+  std::ifstream in(path);
+  if (!in) {
+    return {};
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+std::vector<std::string> edit_path_candidates(const std::string& workspace_root, bool has_pack,
+                                              const std::vector<std::string>& watchlist) {
+  std::vector<std::string> paths;
+  for (const auto& t : watchlist) {
+    add_unique_path(&paths, target_to_rel_path(t));
+  }
+  if (has_pack) {
+    for (const auto& t :
+         parse_pack_targets_header(read_file_raw(Level2Session::pack_path(workspace_root)))) {
+      add_unique_path(&paths, target_to_rel_path(t));
+    }
+  }
+  return paths;
+}
+
+// If search is missing in h.path but uniquely matches one pack/watchlist file, return that path.
+std::string suggest_path_for_search(const std::string& workspace_root, const SearchReplaceHunk& h,
+                                    const std::vector<std::string>& candidates) {
+  if (h.search.empty() || candidates.empty()) {
+    return {};
+  }
+  std::string unique;
+  for (const auto& rel : candidates) {
+    if (rel == h.path) {
+      continue;
+    }
+    const fs::path abs = fs::path(workspace_root) / rel;
+    if (!fs::exists(abs)) {
+      continue;
+    }
+    const std::string text = read_file_raw(abs.string());
+    std::string err;
+    if (!find_unique_span(text, h.search, nullptr, &err)) {
+      continue;
+    }
+    if (!unique.empty()) {
+      return {};  // ambiguous across candidates
+    }
+    unique = rel;
+  }
+  return unique;
+}
+
+std::string pack_span_hint(const std::string& workspace_root, const std::string& failed_path) {
+  const std::string pack = read_file_raw(Level2Session::pack_path(workspace_root));
+  if (pack.empty()) {
+    return {};
+  }
+  const std::string marker = "### get_code_of `";
+  std::size_t pos = 0;
+  std::size_t chosen = std::string::npos;
+  if (!failed_path.empty()) {
+    while ((pos = pack.find(marker, pos)) != std::string::npos) {
+      const auto end = pack.find('`', pos + marker.size());
+      if (end == std::string::npos) {
+        break;
+      }
+      const std::string target = pack.substr(pos + marker.size(), end - (pos + marker.size()));
+      const std::string tpath = target_to_rel_path(target);
+      if (target.find(failed_path) != std::string::npos ||
+          (!tpath.empty() && failed_path.find(tpath) != std::string::npos)) {
+        chosen = pos;
+        break;
+      }
+      pos = end + 1;
+    }
+  }
+  if (chosen == std::string::npos) {
+    chosen = pack.find(marker);
+  }
+  if (chosen == std::string::npos) {
+    return {};
+  }
+  const auto fence = pack.find("```", chosen);
+  if (fence == std::string::npos) {
+    return {};
+  }
+  const auto body_start = pack.find('\n', fence);
+  if (body_start == std::string::npos) {
+    return {};
+  }
+  const auto fence_end = pack.find("```", body_start + 1);
+  if (fence_end == std::string::npos) {
+    return {};
+  }
+  std::string body = pack.substr(body_start + 1, fence_end - (body_start + 1));
+  std::istringstream in(body);
+  std::ostringstream out;
+  std::string line;
+  int n = 0;
+  while (std::getline(in, line) && n < 12) {
+    if (trim_ws(line).empty()) {
+      continue;
+    }
+    out << line << '\n';
+    ++n;
+  }
+  const std::string hint = out.str();
+  return hint.size() >= 12 ? hint : std::string{};
 }
 
 void merge_needles(std::vector<std::string>* dst, const std::vector<std::string>& add) {
@@ -584,9 +838,12 @@ std::vector<std::string> session_pack_needles(const std::string& session_body) {
   const auto obs = session_body.find("## Observations");
   if (obs != std::string::npos) {
     const std::string slice = session_body.substr(obs);
+    // Tool args only. Do NOT harvest plan telemetry lines like
+    // "targets: 3  fragments_ok: 3/3  pack_chars: …" — those used to poison
+    // pack_instruction_gaps (false pack_incomplete → plan loop).
     static const char* markers[] = {
         "get_code_of `", "get_code_of ", "search `", "search ", "file_outline `",
-        "### get_code_of `", "arg:", "targets:",
+        "### get_code_of `", "arg:",
     };
     for (const char* m : markers) {
       const std::string marker = m;
@@ -599,6 +856,28 @@ std::vector<std::string> session_pack_needles(const std::string& session_body) {
           ++end;
         }
         merge_needles(&out, tokenize_needles(slice.substr(pos, end - pos)));
+      }
+    }
+    // Optional real target lists: only path-like tokens (src/foo.cpp:Sym).
+    const std::string targets_marker = "targets:";
+    std::size_t tpos = 0;
+    while ((tpos = slice.find(targets_marker, tpos)) != std::string::npos) {
+      tpos += targets_marker.size();
+      std::size_t end = tpos;
+      while (end < slice.size() && slice[end] != '\n') {
+        ++end;
+      }
+      const std::string arg = slice.substr(tpos, end - tpos);
+      // Skip plan stats: "3  fragments_ok: …" / target_count lines.
+      if (arg.find("fragments_ok") != std::string::npos ||
+          arg.find("pack_chars") != std::string::npos ||
+          arg.find("outlines_ok") != std::string::npos) {
+        continue;
+      }
+      for (const auto& tok : tokenize_needles(arg)) {
+        if (looks_like_plan_target_token(tok) && !is_plan_stats_telemetry_token(tok)) {
+          merge_needles(&out, {tok});
+        }
       }
     }
   }
@@ -1008,6 +1287,9 @@ std::vector<std::string> pack_instruction_gaps(const std::string& pack,
     if (n.rfind("path:", 0) == 0) {
       continue;
     }
+    if (is_plan_stats_telemetry_token(n)) {
+      continue;
+    }
     ++strong;
     const auto low = to_lower_copy(n);
     if (pack_low.find(low) != std::string::npos) {
@@ -1396,6 +1678,8 @@ Edit / tras pack:
 {"action":"done","summary":"cambios listos: paths…"}
 ```
 - Zona en Truncated → refetch antes del hunk (no inventes).
+- `search` debe ser un **bloque de código único** (no un ident suelto tipo `foo_bar`).
+- Hunk idéntico al último fallo → rechazado; tras varios fallos → clarify.
 - Tras `edit` OK → compile. Compile OK → **mapa inicial** + «¿algo más?» (`plan` / `edit` / `done`).
 - Compile fail (≤3): stderr + old/new; reemite `edit`.
 )";
@@ -1452,6 +1736,12 @@ Level2Session::State Level2Session::load_state(const std::string& workspace_root
     st.plan_nudge_sent = j.value("plan_nudge_sent", false);
     st.post_pack_tool_count = j.value("post_pack_tool_count", 0);
     st.edit_nudge_sent = j.value("edit_nudge_sent", false);
+    st.edit_phase_tool_count = j.value("edit_phase_tool_count", 0);
+    st.edit_phase_nudge_sent = j.value("edit_phase_nudge_sent", false);
+    st.consecutive_complete_plans = j.value("consecutive_complete_plans", 0);
+    st.edit_fail_count = j.value("edit_fail_count", 0);
+    st.identical_edit_repeats = j.value("identical_edit_repeats", 0);
+    st.last_failed_edit_fp = j.value("last_failed_edit_fp", "");
     st.has_pack = j.value("has_pack", false);
     st.pack_incomplete = j.value("pack_incomplete", false);
     st.map_stale = j.value("map_stale", false);
@@ -1502,6 +1792,12 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
                       {"plan_nudge_sent", st.plan_nudge_sent},
                       {"post_pack_tool_count", st.post_pack_tool_count},
                       {"edit_nudge_sent", st.edit_nudge_sent},
+                      {"edit_phase_tool_count", st.edit_phase_tool_count},
+                      {"edit_phase_nudge_sent", st.edit_phase_nudge_sent},
+                      {"consecutive_complete_plans", st.consecutive_complete_plans},
+                      {"edit_fail_count", st.edit_fail_count},
+                      {"identical_edit_repeats", st.identical_edit_repeats},
+                      {"last_failed_edit_fp", st.last_failed_edit_fp},
                       {"has_pack", st.has_pack},
                       {"pack_incomplete", st.pack_incomplete},
                       {"map_stale", st.map_stale},
@@ -1622,7 +1918,25 @@ void Level2Session::write_response_json(const std::string& workspace_root, bool 
 }
 
 std::string Level2Session::maybe_tool_nudge(State& st, int tools_added) {
-  if (st.phase != "explore" || tools_added <= 0) {
+  if (tools_added <= 0) {
+    return {};
+  }
+  // phase=edit: stop tool loops after edit_feedback / pack already available.
+  if (st.phase == "edit") {
+    st.edit_phase_tool_count += tools_added;
+    if (!st.edit_phase_nudge_sent &&
+        st.edit_phase_tool_count >= kEditPhaseToolNudgeAfter) {
+      st.edit_phase_nudge_sent = true;
+      std::ostringstream nudge;
+      nudge << "_nudge:_ phase=edit: llevas " << st.edit_phase_tool_count
+            << " tools. Emite **`action=edit`** ahora con `search` = span completo del "
+               "pack (p.ej. `struct Foo {` … `};`), path del fragmento. No más "
+               "`get_code_of` en bucle.\n\n";
+      return nudge.str();
+    }
+    return {};
+  }
+  if (st.phase != "explore") {
     return {};
   }
   if (!st.has_pack) {
@@ -1798,6 +2112,12 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   st.plan_nudge_sent = false;
   st.post_pack_tool_count = 0;
   st.edit_nudge_sent = false;
+  st.edit_phase_tool_count = 0;
+  st.edit_phase_nudge_sent = false;
+  st.consecutive_complete_plans = 0;
+  st.edit_fail_count = 0;
+  st.identical_edit_repeats = 0;
+  st.last_failed_edit_fp.clear();
   st.map_stale = map_stale;
   st.map_review = false;
   st.watchlist.clear();
@@ -1857,6 +2177,58 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
   if (deps_.tools == nullptr || !deps_.tools->has(name)) {
     out.error = "tool no registrado: " + name;
     write_response_json(workspace_root, false, "error", name, arg, "", out.error, st.turn, st.phase);
+    return out;
+  }
+  if (st.phase == "edit" && st.edit_phase_tool_count >= kEditPhaseToolPushbackAfter) {
+    ++st.turn;
+    st.last_action = "edit_phase_tool_pushback";
+    out.turn = st.turn;
+    std::ostringstream block;
+    block << "### turn " << st.turn << " — edit_phase_tool_pushback\n\n";
+    block << "Rechazado: " << st.edit_phase_tool_count << " tools en phase=edit (máx "
+          << kEditPhaseToolPushbackAfter << "). Emite **`action=edit`** con search = span "
+             "completo del pack; no más tools.\n\n";
+    const std::string hint = pack_span_hint(workspace_root, "");
+    if (!hint.empty()) {
+      block << "## span sugerido (pack)\n\n```\n" << hint << "```\n\n";
+    }
+    std::string err;
+    append_observation(workspace_root, block.str(), &out.session_chars, &err);
+    save_state(workspace_root, st, nullptr);
+    write_response_json(workspace_root, false, "tool", name, arg, block.str(),
+                        "edit_phase_tool_pushback", st.turn, "edit");
+    append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                     ",\"event\":\"edit_phase_tool_pushback\",\"turn\":" +
+                                     std::to_string(st.turn) + "}");
+    out.ok = true;  // turn accepted; model must pivot to edit
+    out.phase = "edit";
+    out.summary = "edit_phase_tool_pushback";
+    out.error = "edit_phase_tool_pushback";
+    return out;
+  }
+  if (st.phase == "explore" && st.has_pack && !st.pack_incomplete &&
+      st.post_pack_tool_count >= kPostPackEditPushbackAfter) {
+    ++st.turn;
+    st.last_action = "post_pack_tool_pushback";
+    out.turn = st.turn;
+    std::ostringstream block;
+    block << "### turn " << st.turn << " — post_pack_tool_pushback\n\n";
+    block << "Rechazado: " << st.post_pack_tool_count
+          << " tools extras tras pack completo (máx " << kPostPackEditPushbackAfter
+          << "). Emite `{\"action\":\"done\",\"summary\":\"…\",\"next\":\"edit\"}` o "
+             "**`action=edit`** — no más `get_code_of` en bucle.\n\n";
+    std::string err;
+    append_observation(workspace_root, block.str(), &out.session_chars, &err);
+    save_state(workspace_root, st, nullptr);
+    write_response_json(workspace_root, false, "tool", name, arg, block.str(),
+                        "post_pack_tool_pushback", st.turn, st.phase);
+    append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                     ",\"event\":\"post_pack_tool_pushback\",\"turn\":" +
+                                     std::to_string(st.turn) + "}");
+    out.ok = true;
+    out.phase = st.phase;
+    out.summary = "post_pack_tool_pushback";
+    out.error = "post_pack_tool_pushback";
     return out;
   }
 
@@ -1953,6 +2325,51 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
   }
   if (deps_.tools == nullptr) {
     out.error = "tools no registrados";
+    return out;
+  }
+  if (st.phase == "edit" && st.edit_phase_tool_count >= kEditPhaseToolPushbackAfter) {
+    ++st.turn;
+    st.last_action = "edit_phase_tool_pushback";
+    out.turn = st.turn;
+    std::ostringstream block;
+    block << "### turn " << st.turn << " — edit_phase_tool_pushback\n\n";
+    block << "Rechazado: batch tools en phase=edit tras " << st.edit_phase_tool_count
+          << " tools (máx " << kEditPhaseToolPushbackAfter
+          << "). Emite **`action=edit`** ahora.\n\n";
+    const std::string hint = pack_span_hint(workspace_root, "");
+    if (!hint.empty()) {
+      block << "## span sugerido (pack)\n\n```\n" << hint << "```\n\n";
+    }
+    std::string err;
+    append_observation(workspace_root, block.str(), &out.session_chars, &err);
+    save_state(workspace_root, st, nullptr);
+    write_response_json(workspace_root, false, "tools", "", "", block.str(),
+                        "edit_phase_tool_pushback", st.turn, "edit");
+    out.ok = true;
+    out.phase = "edit";
+    out.summary = "edit_phase_tool_pushback";
+    out.error = "edit_phase_tool_pushback";
+    return out;
+  }
+  if (st.phase == "explore" && st.has_pack && !st.pack_incomplete &&
+      st.post_pack_tool_count >= kPostPackEditPushbackAfter) {
+    ++st.turn;
+    st.last_action = "post_pack_tool_pushback";
+    out.turn = st.turn;
+    std::ostringstream block;
+    block << "### turn " << st.turn << " — post_pack_tool_pushback\n\n";
+    block << "Rechazado: batch tools extras tras pack completo (" << st.post_pack_tool_count
+          << "/" << kPostPackEditPushbackAfter
+          << "). Emite `done next=edit` o **`action=edit`**.\n\n";
+    std::string err;
+    append_observation(workspace_root, block.str(), &out.session_chars, &err);
+    save_state(workspace_root, st, nullptr);
+    write_response_json(workspace_root, false, "tools", "", "", block.str(),
+                        "post_pack_tool_pushback", st.turn, st.phase);
+    out.ok = true;
+    out.phase = st.phase;
+    out.summary = "post_pack_tool_pushback";
+    out.error = "post_pack_tool_pushback";
     return out;
   }
 
@@ -3126,7 +3543,9 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   if (!summary.empty()) {
     block << summary << "\n\n";
   }
-  block << "targets: " << uniq_targets.size() << "  fragments_ok: " << frag_ok << "/"
+  // Use target_count: (not targets:) so session_pack_needles never treats this
+  // telemetry line as Instruction idents.
+  block << "target_count: " << uniq_targets.size() << "  fragments_ok: " << frag_ok << "/"
         << frags.size() << "  outlines_ok: " << outline_ok << "/" << uniq_paths.size()
         << "  truncated: " << trunc_index.size() << "  pack_chars: " << pack_body.size() << "/"
         << budget << "  auto_refetch: " << extras.size() << "\n";
@@ -3146,7 +3565,20 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     block << "Hay truncados en `## Truncated` (refetch tip); no bloquean edit si Instruction "
              "está cubierta. ";
   }
+  if (st.pack_incomplete) {
+    st.consecutive_complete_plans = 0;
+  } else {
+    ++st.consecutive_complete_plans;
+  }
   block << "Emite `done next=edit`, `edit`, o amplía con otro `plan`/`tools`.\n\n";
+  if (!st.pack_incomplete &&
+      st.consecutive_complete_plans >= Level2Session::kRepeatedPlanEditNudgeAfter &&
+      !st.edit_nudge_sent) {
+    st.edit_nudge_sent = true;
+    block << "_nudge:_ Llevas " << st.consecutive_complete_plans
+          << " `plan` seguidos con pack cubierto. Emite `done next=edit` o `edit` "
+             "(no más `plan` sin tools/`get_code_of` nuevos).\n\n";
+  }
   if (!append_observation(workspace_root, block.str(), &out.session_chars, &err)) {
     out.error = err;
     return out;
@@ -3205,11 +3637,57 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
     return out;
   }
   st.map_review = false;
+
+  auto force_clarify = [&](const std::string& reason) {
+    // Drop any on-disk edits from a prior apply that never finished cleanly (e.g. compile
+    // fail keeps pending until max attempts — clarify must not leave the tree dirty).
+    for (const auto& p : st.pending) {
+      if (!p.before.empty() && !p.abs_path.empty()) {
+        write_text_file(p.abs_path, p.before, nullptr);
+      }
+    }
+    st.pending.clear();
+    ++st.turn;
+    st.done = true;
+    st.phase = "clarify";
+    st.last_action = "need_clarification";
+    out.turn = st.turn;
+    out.ok = true;
+    out.phase = "clarify";
+    out.summary = reason;
+    out.error.clear();
+    std::ostringstream block;
+    block << "### turn " << st.turn << " — need_clarification\n\n";
+    block << reason << "\n\n";
+    block << "Sesión cerrada en **clarify** (edits pendientes revertidos). Reformula el "
+             "cambio (path + símbolo) y relanza L2.\n\n";
+    std::string obs_err;
+    append_observation(workspace_root, block.str(), &out.session_chars, &obs_err);
+    save_state(workspace_root, st, nullptr);
+    write_response_json(workspace_root, true, "done", "clarify", "", reason, "", st.turn,
+                        "clarify");
+    append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                     ",\"event\":\"need_clarification\",\"turn\":" +
+                                     std::to_string(st.turn) + ",\"reason\":\"edit_loop\"}");
+    ai_trace(AiTraceChannel::L2, "l2_edit_clarify",
+             "{\"turn\":" + std::to_string(st.turn) + ",\"edit_fail_count\":" +
+                 std::to_string(st.edit_fail_count) + ",\"identical_repeats\":" +
+                 std::to_string(st.identical_edit_repeats) + "}");
+  };
+
   auto record_edit_failure = [&](const std::string& err_msg, const std::string& path,
-                                 const std::string& search, const std::string& replace) {
+                                 const std::string& search, const std::string& replace,
+                                 const std::string& fp, bool identical_repeat) {
     const auto ms = edit_ms();
     ++st.turn;
-    st.last_action = "edit_feedback";
+    ++st.edit_fail_count;
+    if (identical_repeat) {
+      ++st.identical_edit_repeats;
+    } else {
+      st.identical_edit_repeats = 0;
+      st.last_failed_edit_fp = fp;
+    }
+    st.last_action = identical_repeat ? "edit_repeat_pushback" : "edit_feedback";
     out.turn = st.turn;
     out.error = err_msg;
     out.summary = err_msg;
@@ -3217,8 +3695,15 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
     out.phase = "edit";
 
     std::ostringstream block;
-    block << "### turn " << st.turn << " — edit_feedback\n\n";
+    block << "### turn " << st.turn << " — "
+          << (identical_repeat ? "edit_repeat_pushback" : "edit_feedback") << "\n\n";
     block << "error: " << err_msg << "\n\n";
+    block << "edit_fail_count=" << st.edit_fail_count << "/" << kMaxEditApplyFails;
+    if (identical_repeat) {
+      block << "  identical_repeats=" << st.identical_edit_repeats << "/"
+            << kMaxIdenticalEditRepeats;
+    }
+    block << "\n\n";
     if (!path.empty()) {
       block << "path: `" << path << "`\n\n";
     }
@@ -3230,9 +3715,23 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
       block << "## replace (intended)\n\n```\n"
             << truncate_observation(replace, 24) << "```\n\n";
     }
-    block << "Reemite `action=edit` con `search` exacto y único (get_code_of del entorno si "
-             "hace falta). No repitas el mismo hunk fallido. Si el cambio introduce un símbolo "
-             "nuevo, incluye también el hunk de declaración en el `.hpp`/`.h` hermano.\n\n";
+    if (identical_repeat) {
+      block << "**Hunk idéntico rechazado.** No reemitas el mismo `search`/`replace`. "
+               "Obligatorio: `get_code_of` del locus (p.ej. `path:Symbol` o `path:A-B`) y un "
+               "`search` con bloque de código **único** (no un ident suelto).\n\n";
+    } else {
+      block << "Reemite `action=edit` con `search` exacto y único (bloque de código, no un "
+               "ident suelto; preferir multilínea). Si cambias un `struct`/`class`, el `search` "
+               "debe cubrir **todo** el span hasta `};`, no solo `struct X {`. Usa "
+               "`get_code_of`. **No repitas el mismo hunk fallido.** Si introduces un símbolo "
+               "nuevo, incluye también el hunk de declaración en el `.hpp`/`.h` hermano.\n\n";
+      block << "**Siguiente acción: `action=edit`** (evita bucle de tools).\n\n";
+      const std::string hint = pack_span_hint(workspace_root, path);
+      if (!hint.empty()) {
+        block << "## span sugerido desde pack (úsalo como base del search)\n\n```\n"
+              << hint << "```\n\n";
+      }
+    }
     std::string obs_err;
     append_observation(workspace_root, block.str(), &out.session_chars, &obs_err);
     if (st.has_pack) {
@@ -3242,30 +3741,102 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
     write_response_json(workspace_root, false, "edit", "", path, block.str(), err_msg, st.turn,
                         "edit");
     append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
-                                     ",\"event\":\"edit_fail\",\"turn\":" +
-                                     std::to_string(st.turn) + ",\"ms\":" + std::to_string(ms) +
-                                     ",\"error\":\"" + json_escape(err_msg) + "\"}");
+                                     ",\"event\":\"" +
+                                     (identical_repeat ? "edit_repeat" : "edit_fail") +
+                                     "\",\"turn\":" + std::to_string(st.turn) +
+                                     ",\"ms\":" + std::to_string(ms) + ",\"fail_count\":" +
+                                     std::to_string(st.edit_fail_count) + ",\"error\":\"" +
+                                     json_escape(err_msg) + "\"}");
     ai_trace(AiTraceChannel::L2, "l2_edit",
              "{\"turn\":" + std::to_string(st.turn) + ",\"ok\":0,\"hunks\":" +
                  std::to_string(hunks.size()) + ",\"duration_ms\":" + std::to_string(ms) +
-                 ",\"error\":\"" + ai_trace_escape(err_msg) + "\"}");
+                 ",\"identical\":" + (identical_repeat ? "1" : "0") + ",\"fail_count\":" +
+                 std::to_string(st.edit_fail_count) + ",\"error\":\"" +
+                 ai_trace_escape(err_msg) + "\"}");
+
+    if (st.identical_edit_repeats >= kMaxIdenticalEditRepeats ||
+        st.edit_fail_count >= kMaxEditApplyFails) {
+      force_clarify(
+          identical_repeat
+              ? "edit loop: mismo hunk fallido repetido; ¿puedes concretar path:símbolo y el "
+                "bloque exacto a cambiar?"
+              : "edit loop: demasiados fallos de Search/Replace; ¿puedes concretar path:símbolo "
+                "y el bloque exacto a cambiar?");
+    }
   };
 
   if (hunks.empty()) {
-    record_edit_failure("hunks vacío", "", "", "");
+    record_edit_failure("hunks vacío", "", "", "", "empty", false);
     return out;
   }
 
+  std::vector<SearchReplaceHunk> work = hunks;
+  for (auto& h : work) {
+    normalize_hunk_escape_noise(&h);
+  }
+
+  const std::string fp = edit_hunks_fingerprint(work);
+  if (!st.last_failed_edit_fp.empty() && fp == st.last_failed_edit_fp) {
+    const auto& h0 = work.front();
+    record_edit_failure("hunk idéntico al último fallo (rechazado)", h0.path, h0.search,
+                        h0.replace, fp, true);
+    return out;
+  }
+
+  for (const auto& h : work) {
+    if (const std::string shape = hunk_shape_error(h); !shape.empty()) {
+      record_edit_failure(shape, h.path, h.search, h.replace, fp, false);
+      return out;
+    }
+  }
+
+  const auto path_cands = edit_path_candidates(workspace_root, st.has_pack, st.watchlist);
+  std::vector<std::string> path_corrections;
+
   std::vector<ApplyHunkResult> applied;
-  applied.reserve(hunks.size());
-  for (const auto& h : hunks) {
+  applied.reserve(work.size());
+  for (auto& h : work) {
     ApplyHunkResult r = apply_hunk_to_workspace_file(workspace_root, h, /*write=*/true);
+    if (!r.ok && r.error.find("0 matches") != std::string::npos) {
+      const std::string alt = suggest_path_for_search(workspace_root, h, path_cands);
+      if (!alt.empty()) {
+        SearchReplaceHunk corrected = h;
+        corrected.path = alt;
+        ApplyHunkResult r2 =
+            apply_hunk_to_workspace_file(workspace_root, corrected, /*write=*/true);
+        if (r2.ok) {
+          path_corrections.push_back("`" + h.path + "` → `" + alt + "`");
+          h.path = alt;
+          r = std::move(r2);
+        } else {
+          r.error = r.error + " — el search sí está en `" + alt +
+                    "` (pack/watchlist); reemite con ese path";
+        }
+      }
+    }
     if (!r.ok) {
       // Rollback any already written hunks in this batch.
       for (auto it = applied.rbegin(); it != applied.rend(); ++it) {
         write_text_file(it->abs_path, it->before, nullptr);
       }
-      record_edit_failure("hunk falló (" + h.path + "): " + r.error, h.path, h.search, h.replace);
+      std::string err_msg = "hunk falló (" + h.path + "): " + r.error;
+      if (r.error.find("0 matches") != std::string::npos &&
+          r.error.find("pack/watchlist") == std::string::npos && !path_cands.empty()) {
+        err_msg +=
+            " — revisa path (candidates pack/watchlist: " +
+            [&]() {
+              std::ostringstream os;
+              for (std::size_t i = 0; i < path_cands.size() && i < 6; ++i) {
+                if (i) {
+                  os << ", ";
+                }
+                os << "`" << path_cands[i] << "`";
+              }
+              return os.str();
+            }() +
+            "); usa newlines reales (no `\\s*`/`\\n` literales)";
+      }
+      record_edit_failure(err_msg, h.path, h.search, h.replace, fp, false);
       return out;
     }
     if (deps_.sync_edit) {
@@ -3276,12 +3847,17 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
 
   ++st.turn;
   ++st.edit_attempt;
+  st.edit_fail_count = 0;
+  st.identical_edit_repeats = 0;
+  st.last_failed_edit_fp.clear();
+  st.edit_phase_tool_count = 0;
+  st.edit_phase_nudge_sent = false;
   st.last_action = "edit";
   st.last_op_id = static_cast<uint64_t>(st.turn);
   st.pending.clear();
   for (std::size_t i = 0; i < applied.size(); ++i) {
     PendingHunk p;
-    p.path = hunks[i].path;
+    p.path = work[i].path;
     p.abs_path = applied[i].abs_path;
     p.old_text = applied[i].old_text;
     p.new_text = applied[i].new_text;
@@ -3293,8 +3869,18 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
   std::ostringstream block;
   block << "### turn " << st.turn << " — edit\n\n";
   block << "hunks=" << applied.size() << " edit_attempt=" << st.edit_attempt << "\n\n";
+  if (!path_corrections.empty()) {
+    block << "path auto-corregido (match único en pack/watchlist): ";
+    for (std::size_t i = 0; i < path_corrections.size(); ++i) {
+      if (i) {
+        block << "; ";
+      }
+      block << path_corrections[i];
+    }
+    block << "\n\n";
+  }
   for (std::size_t i = 0; i < applied.size(); ++i) {
-    block << "#### hunk " << (i + 1) << " `" << hunks[i].path << "` @"
+    block << "#### hunk " << (i + 1) << " `" << work[i].path << "` @"
           << applied[i].span.start_line << "\n\n";
     block << "```diff\n- " << truncate_observation(applied[i].old_text, 40);
     block << "+ " << truncate_observation(applied[i].new_text, 40) << "```\n\n";
@@ -3383,7 +3969,8 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     block << "Compile OK **no** cierra la tarea.\n"
              "¿Algo más?\n"
              "- Más sitios → `action=plan` con nuevos targets (arma otro pack).\n"
-             "- Más cambios → `action=edit` (o tools + edit).\n"
+             "- Más cambios → `get_code_of` del locus **antes** de `edit` (el disco ya "
+             "cambió; no reuses el `search` del pack viejo).\n"
              "- Instruction cubierta → "
              "`{\"action\":\"done\",\"summary\":\"…qué cambiaste…\"}` (sin next).\n\n";
     std::string err;
@@ -3447,8 +4034,21 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     block << "## new (hunk " << (i + 1) << " `" << p.path << "`)\n\n```\n"
           << truncate_observation(p.new_text, 24) << "```\n\n";
   }
-  block << "Reemite `action=edit` corrigiendo el error (o el runtime hará rollback si se agotan "
-           "intentos).\n\n";
+  block << "Reemite `action=edit` corrigiendo el error. Si el fallo es redeclaración/"
+           "duplicados: el `search` debe cubrir el span completo a sustituir (p.ej. struct "
+           "entero), no solo la línea de apertura.\n\n";
+
+  // Restore disk to pre-batch immediately. Leaving the broken tree on disk made the
+  // next edit's pending.before = already-corrupt content; max-attempt "rollback"
+  // then could not recover the last compile_ok (or original) baseline.
+  for (const auto& p : st.pending) {
+    if (!p.before.empty() && !p.abs_path.empty()) {
+      write_text_file(p.abs_path, p.before, nullptr);
+    }
+  }
+  block << "Archivos restaurados al baseline pre-hunk de este intento"
+           " — reemite `edit` sobre ese estado (no sobre el árbol roto).\n\n";
+
   std::string err;
   append_observation(workspace_root, block.str(), &out.session_chars, &err);
   if (st.has_pack) {
@@ -3456,24 +4056,25 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
   }
 
   if (st.compile_attempt >= kMaxCompileAttempts) {
-    // Rollback files to before.
-    for (const auto& p : st.pending) {
-      if (!p.before.empty() && !p.abs_path.empty()) {
-        write_text_file(p.abs_path, p.before, nullptr);
-      }
-    }
+    st.pending.clear();
     st.phase = "done";
     st.done = true;
     st.last_action = "compile_fail_rollback";
     save_state(workspace_root, st, nullptr);
     std::ostringstream summary;
-    summary << "FAIL compile x" << st.compile_attempt << "; rollback aplicado.";
+    summary << "FAIL compile x" << st.compile_attempt
+            << "; rollback al baseline pre-hunk aplicado.";
     std::ostringstream done_block;
     done_block << "### turn " << (++st.turn) << " — done\n\n" << summary.str() << "\n\n";
     append_observation(workspace_root, done_block.str(), &out.session_chars, &err);
     save_state(workspace_root, st, nullptr);
     write_response_json(workspace_root, false, "done", "compile", "", summary.str(), summary.str(),
                         st.turn, "done");
+    append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                     ",\"event\":\"compile_fail\",\"exit\":" +
+                                     std::to_string(exit_code) + ",\"attempt\":" +
+                                     std::to_string(st.compile_attempt) + ",\"ms\":" +
+                                     std::to_string(compile_ms) + ",\"rollback\":1}");
     out.ok = false;
     out.action = "done";
     out.summary = summary.str();
@@ -3483,6 +4084,7 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     return out;
   }
 
+  st.pending.clear();
   st.phase = "edit";
   st.last_action = "compile_feedback";
   save_state(workspace_root, st, nullptr);
@@ -3492,7 +4094,7 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
                                    ",\"event\":\"compile_fail\",\"exit\":" +
                                    std::to_string(exit_code) + ",\"attempt\":" +
                                    std::to_string(st.compile_attempt) + ",\"ms\":" +
-                                   std::to_string(compile_ms) + "}");
+                                   std::to_string(compile_ms) + ",\"rollback\":1}");
   out.ok = false;
   out.summary = "compile failed; phase=edit again";
   out.phase = "edit";
@@ -3519,12 +4121,19 @@ Level2TurnResult Level2Session::rollback_pending(const std::string& workspace_ro
 }
 
 Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
-                                          const std::string& summary, const std::string& next) {
+                                          const std::string& summary, const std::string& next_in) {
   Level2TurnResult out;
   out.action = "done";
   out.summary = summary;
   State st = load_state(workspace_root);
   out.phase = st.phase;
+
+  std::string next = next_in;
+  // After compile_ok (phase=edit / map_review) the model often emits done next=edit
+  // meaning "finished" — treat as final done instead of error-looping until max_steps.
+  if (next == "edit" && st.phase == "edit") {
+    next.clear();
+  }
 
   if (next == "edit") {
     if (st.phase != "explore") {
@@ -3592,12 +4201,23 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
     st.phase = "edit";
     st.last_action = "ready_to_edit";
     st.pack_incomplete = false;
+    st.edit_fail_count = 0;
+    st.identical_edit_repeats = 0;
+    st.last_failed_edit_fp.clear();
+    st.edit_phase_tool_count = 0;
+    st.edit_phase_nudge_sent = false;
     out.turn = st.turn;
     std::ostringstream block;
     block << "### turn " << st.turn << " — ready_to_edit\n\n";
     block << summary << "\n\n";
     block << "Fase **edit**: emite `action=edit` con hunks Search/Replace. "
+             "Máx. ~" << kEditPhaseToolNudgeAfter
+          << " tools de refetch; luego edit obligatorio. "
              "Si el pack marcó [TRUNCATED] en la zona a editar, refetch antes.\n\n";
+    const std::string hint = pack_span_hint(workspace_root, "");
+    if (!hint.empty()) {
+      block << "## span sugerido (pack)\n\n```\n" << hint << "```\n\n";
+    }
     std::string err;
     append_observation(workspace_root, block.str(), &out.session_chars, &err);
     save_state(workspace_root, st, nullptr);

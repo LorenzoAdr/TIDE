@@ -71,6 +71,45 @@ bool find_unique_span(const std::string& haystack, const std::string& needle, Se
   return true;
 }
 
+std::string normalize_hunk_escape_noise(std::string text) {
+  std::string out;
+  out.reserve(text.size());
+  for (std::size_t i = 0; i < text.size();) {
+    if (text[i] == '\\' && i + 1 < text.size()) {
+      const char n = text[i + 1];
+      if (n == 's') {
+        out.push_back('\n');
+        i += 2;
+        if (i < text.size() && text[i] == '*') {
+          ++i;
+        }
+        continue;
+      }
+      if (n == 'n') {
+        out.push_back('\n');
+        i += 2;
+        continue;
+      }
+      if (n == 't') {
+        out.push_back('\t');
+        i += 2;
+        continue;
+      }
+    }
+    out.push_back(text[i]);
+    ++i;
+  }
+  return out;
+}
+
+void normalize_hunk_escape_noise(SearchReplaceHunk* hunk) {
+  if (!hunk) {
+    return;
+  }
+  hunk->search = normalize_hunk_escape_noise(std::move(hunk->search));
+  hunk->replace = normalize_hunk_escape_noise(std::move(hunk->replace));
+}
+
 std::vector<SearchReplaceHunk> parse_search_replace_json(const nlohmann::json& j, std::string* err) {
   std::vector<SearchReplaceHunk> out;
   nlohmann::json arr;
@@ -89,6 +128,7 @@ std::vector<SearchReplaceHunk> parse_search_replace_json(const nlohmann::json& j
     hunk.path = h.value("path", "");
     hunk.search = h.value("search", "");
     hunk.replace = h.value("replace", "");
+    normalize_hunk_escape_noise(&hunk);
     if (hunk.path.empty() || hunk.search.empty()) {
       if (err) {
         *err = "hunk sin path o search";

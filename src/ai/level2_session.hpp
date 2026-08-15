@@ -59,6 +59,19 @@ class Level2Session {
   static constexpr int kExplorePlanNudgeAfter = 8;
   // Soft nudge after this many extras once pack covers Instruction (no gaps).
   static constexpr int kPostPackEditNudgeAfter = 8;
+  // Hard reject further extras after this many post-pack tools (Instruction cubierta).
+  static constexpr int kPostPackEditPushbackAfter = 12;
+  // In phase=edit: nudge after this many tools, then reject further tools.
+  static constexpr int kEditPhaseToolNudgeAfter = 2;
+  static constexpr int kEditPhaseToolPushbackAfter = 5;
+  // Soft nudge after this many consecutive plans with a covering pack (no tools).
+  static constexpr int kRepeatedPlanEditNudgeAfter = 2;
+  // Identical failed edit fingerprint repeats before forcing clarify.
+  static constexpr int kMaxIdenticalEditRepeats = 2;
+  // Total edit apply failures (any cause) before forcing clarify.
+  static constexpr int kMaxEditApplyFails = 5;
+  // Reject Search/Replace searches shorter than this (too generic / ambiguous).
+  static constexpr std::size_t kMinEditSearchChars = 24;
   // After a pack exists, keep Observations under this (prompt uses a short tail anyway).
   static constexpr std::size_t kMaxObservationCharsPacked = 8000;
   // Code pack for plan targets (fragments + outlines) kept under this size.
@@ -146,6 +159,12 @@ class Level2Session {
     bool plan_nudge_sent = false;     // soft nudge after N explore tools without plan
     int post_pack_tool_count = 0;     // tools after pack, still in explore
     bool edit_nudge_sent = false;     // soft nudge to done next=edit / edit
+    int edit_phase_tool_count = 0;    // tools while already in phase=edit
+    bool edit_phase_nudge_sent = false;
+    int consecutive_complete_plans = 0;  // plans while pack covers Instruction
+    int edit_fail_count = 0;          // apply failures in this edit phase
+    int identical_edit_repeats = 0;   // consecutive identical failed fingerprints
+    std::string last_failed_edit_fp;  // fingerprint of last failed hunk batch
     bool has_pack = false;
     bool pack_incomplete = false;  // Instruction gaps vs pack (not mere truncation)
     bool map_stale = false;        // map_last query poorly overlaps session Instruction

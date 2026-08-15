@@ -51,6 +51,70 @@ std::string extract_json_object(const std::string& text) {
   return {};
 }
 
+// Models often emit \s / \s* (invalid JSON) or raw newlines inside strings.
+// Rewrite to legal escapes so nlohmann can parse edit hunks.
+std::string repair_json_string_escapes(const std::string& in) {
+  std::string out;
+  out.reserve(in.size() + 16);
+  bool in_string = false;
+  for (std::size_t i = 0; i < in.size(); ++i) {
+    const char c = in[i];
+    if (!in_string) {
+      out.push_back(c);
+      if (c == '"') {
+        in_string = true;
+      }
+      continue;
+    }
+    if (c == '\\' && i + 1 < in.size()) {
+      const char n = in[i + 1];
+      const bool valid = n == '"' || n == '\\' || n == '/' || n == 'b' || n == 'f' || n == 'n' ||
+                         n == 'r' || n == 't' || n == 'u';
+      if (valid) {
+        out.push_back('\\');
+        out.push_back(n);
+        ++i;
+        if (n == 'u') {
+          for (int k = 0; k < 4 && i + 1 < in.size(); ++k) {
+            out.push_back(in[++i]);
+          }
+        }
+        continue;
+      }
+      // \s or \s* → \n (common coder-model whitespace thinko)
+      if (n == 's') {
+        out.push_back('\\');
+        out.push_back('n');
+        ++i;
+        if (i + 1 < in.size() && in[i + 1] == '*') {
+          ++i;
+        }
+        continue;
+      }
+      // Other illegal escapes → treat as newline separator
+      out.push_back('\\');
+      out.push_back('n');
+      ++i;
+      continue;
+    }
+    if (c == '"') {
+      in_string = false;
+      out.push_back(c);
+      continue;
+    }
+    if (c == '\r' || c == '\n') {
+      if (c == '\r' && i + 1 < in.size() && in[i + 1] == '\n') {
+        ++i;
+      }
+      out.push_back('\\');
+      out.push_back('n');
+      continue;
+    }
+    out.push_back(c);
+  }
+  return out;
+}
+
 bool parse_calls_array(const nlohmann::json& j, std::vector<L2ToolCall>* out, std::string* err) {
   if (out == nullptr) {
     return false;
@@ -168,7 +232,12 @@ L2Action parse_l2_action(const std::string& model_text) {
     return out;
   }
   try {
-    const auto j = nlohmann::json::parse(json_text);
+    nlohmann::json j;
+    try {
+      j = nlohmann::json::parse(json_text);
+    } catch (const std::exception&) {
+      j = nlohmann::json::parse(repair_json_string_escapes(json_text));
+    }
     const std::string action = j.value("action", "");
     if (action == "plan" || action == "watchlist") {
       out.kind = L2ActionKind::Plan;

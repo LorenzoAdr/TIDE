@@ -1,0 +1,22 @@
+[
+  {
+    "id": "01_temp_tab",
+    "prompt": "cambia el código para añadir una nueva pestaña en el panel de terminal que se llame \"temp\" y dentro tenga el texto \"esto es una prueba \" sobre fondo negro."
+  },
+  {
+    "id": "02_shell_quote_comment",
+    "prompt": "En src/util/shell_utils.hpp, añade un comentario de una línea // L2_BATTERY_MARKER justo encima de la declaración de shell_quote."
+  },
+  {
+    "id": "03_ktab_const",
+    "prompt": "En src/ui/main_layout.hpp, dentro del struct ConsolePanelTabs, añade static constexpr int kTemp = 12; después de kAi, sin tocar el resto de tabs ni la UI."
+  },
+  {
+    "id": "04_always_true",
+    "prompt": "En src/util/shell_utils.hpp y src/util/shell_utils.cpp, añade bool always_true(); que devuelva true. Solo eso."
+  },
+  {
+    "id": "05_status_string",
+    "prompt": "Busca un string literal de UI relacionado con el panel de terminal o consola y cámbialo o añade un label visible 'L2test' de forma mínima (un solo sitio). No refactorices."
+  }
+]

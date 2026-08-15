@@ -45,6 +45,24 @@ int main() {
     expect(hunks.size() == 1 && hunks[0].path == "a.cpp", "json hunks");
   }
   {
+    using tuide::normalize_hunk_escape_noise;
+    expect(normalize_hunk_escape_noise("a\\s*b\\sc") == "a\nb\nc", "normalize \\s* / \\s");
+    expect(normalize_hunk_escape_noise("a\\nb\\t") == "a\nb\t", "normalize \\n \\t");
+    SearchReplaceHunk h;
+    h.search = "x\\s*y";
+    h.replace = "x\\ny";
+    normalize_hunk_escape_noise(&h);
+    expect(h.search == "x\ny" && h.replace == "x\ny", "normalize hunk");
+  }
+  {
+    // parse_search_replace_json also normalizes.
+    nlohmann::json j = {
+        {"hunks", {{{"path", "a.cpp"}, {"search", "foo\\s*bar"}, {"replace", "z"}}}}};
+    std::string err;
+    const auto hunks = parse_search_replace_json(j, &err);
+    expect(hunks.size() == 1 && hunks[0].search == "foo\nbar", "json normalize \\s*");
+  }
+  {
     const std::string aider = "src/foo.cpp\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n";
     std::string err;
     const auto hunks = parse_search_replace_aider(aider, &err);

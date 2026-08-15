@@ -82,6 +82,31 @@ int main() {
     expect(a.kind == L2ActionKind::Plan, "plan capped kind");
     expect(static_cast<int>(a.targets.size()) == tuide::kL2MaxPlanTargets, "plan capped");
   }
+  {
+    // Invalid JSON \s* inside strings → repaired then normalized to newlines.
+    const auto a = parse_l2_action(
+        "{\"action\":\"edit\",\"hunks\":[{\"path\":\"a.cpp\",\"search\":\"foo\\s*bar\","
+        "\"replace\":\"foo\\nbar\"}]}");
+    expect(a.kind == L2ActionKind::Edit, "edit with \\s* repair");
+    expect(a.hunks.size() == 1, "1 hunk");
+    expect(a.hunks[0].search == "foo\nbar", "search newlines from \\s*");
+    expect(a.hunks[0].replace == "foo\nbar", "replace newline");
+  }
+  {
+    // Valid JSON with doubled backslash \\s* → normalize after parse.
+    const auto a = parse_l2_action(
+        R"({"action":"edit","hunks":[{"path":"a.cpp","search":"foo\\s*bar","replace":"x"}]})");
+    expect(a.kind == L2ActionKind::Edit, "edit with \\\\s*");
+    expect(a.hunks.size() == 1 && a.hunks[0].search == "foo\nbar", "normalized \\\\s*");
+  }
+  {
+    // Raw newline inside JSON string repaired.
+    const auto a = parse_l2_action(
+        "{\"action\":\"edit\",\"hunks\":[{\"path\":\"a.cpp\",\"search\":\"line1\nline2\","
+        "\"replace\":\"ok\"}]}");
+    expect(a.kind == L2ActionKind::Edit, "raw newline repaired");
+    expect(a.hunks.size() == 1 && a.hunks[0].search == "line1\nline2", "kept as newline");
+  }
 
   if (failures) {
     std::cerr << failures << " failure(s)\n";

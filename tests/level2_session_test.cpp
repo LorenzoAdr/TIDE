@@ -181,7 +181,62 @@ int main() {
     expect(session.find("error: boom at end") != std::string::npos, "keeps error tail");
     expect(session.find("noise 1\n") == std::string::npos, "drops early noise");
     expect(session.find("showing last") != std::string::npos, "shows last N marker");
+    expect(session.find("baseline pre-hunk") != std::string::npos, "rollback note");
+    expect(read_all(root3 / "src" / "foo.cpp").find("value = 1") != std::string::npos,
+           "file restored after compile fail");
     fs::remove_all(root3, ec);
+  }
+
+  // compile_ok then bad edit: fail restores to last good (keeps compile_ok bytes).
+  {
+    const fs::path rootg = fs::temp_directory_path() / "tuide_l2_compile_rollback_good";
+    fs::remove_all(rootg, ec);
+    fs::create_directories(rootg / ".tuide" / "ai", ec);
+    fs::create_directories(rootg / "src", ec);
+    {
+      std::ofstream map(rootg / ".tuide" / "ai" / "map_last.md");
+      map << "query: keep good\n";
+    }
+    {
+      std::ofstream foo(rootg / "src" / "foo.cpp");
+      foo << "int value = 1;\n";
+    }
+    int compiles = 0;
+    Level2SessionDeps depsg{&tools, {}, [&](std::string* out) {
+      ++compiles;
+      if (out) {
+        *out = compiles == 1 ? "ok\n" : "error: redeclared\n";
+      }
+      return compiles == 1 ? 0 : 1;
+    }};
+    depsg.pack_incomplete_pushback_max = 0;
+    Level2Session sessg(depsg);
+    Level2BootstrapOpts optsg;
+    optsg.workspace_root = rootg.string();
+    optsg.query = "keep good";
+    expect(sessg.bootstrap(optsg, &err), "bootstrap good " + err);
+    expect(sessg.mark_done(rootg.string(), "ready", "edit").ok, "to edit good");
+    SearchReplaceHunk okh;
+    okh.path = "src/foo.cpp";
+    okh.search = "int value = 1;\n";
+    okh.replace = "int value = 2;\n";
+    expect(sessg.apply_edit(rootg.string(), {okh}).ok, "first compile ok");
+    expect(read_all(rootg / "src" / "foo.cpp").find("value = 2") != std::string::npos,
+           "good edit kept");
+    SearchReplaceHunk badh;
+    badh.path = "src/foo.cpp";
+    badh.search = "int value = 2;\n";
+    badh.replace = "int value = 2;\nint value = 2;\n";  // duplicate → "compile" fail
+    const auto trb = sessg.apply_edit(rootg.string(), {badh});
+    expect(!trb.ok && trb.phase == "edit", "second stays edit after fail");
+    expect(read_all(rootg / "src" / "foo.cpp").find("value = 2") != std::string::npos,
+           "still at compile_ok baseline");
+    expect(read_all(rootg / "src" / "foo.cpp").find("value = 2;\nint value = 2") ==
+               std::string::npos,
+           "duplicate not left on disk");
+    const std::string sess = read_all(Level2Session::session_path(rootg.string()));
+    expect(sess.find("get_code_of") != std::string::npos, "map_review asks get_code_of");
+    fs::remove_all(rootg, ec);
   }
 
   // Edit apply fail → edit_feedback observation (breaks same-hunk resonance)
@@ -208,7 +263,7 @@ int main() {
     expect(sess4.mark_done(root4.string(), "ready", "edit").ok, "to edit4");
     SearchReplaceHunk bad;
     bad.path = "src/foo.cpp";
-    bad.search = "this_string_does_not_exist_xyz\n";
+    bad.search = "int this_string_does_not_exist_xyz = 0;\n";
     bad.replace = "int value = 9;\n";
     const auto tr = sess4.apply_edit(root4.string(), {bad});
     expect(!tr.ok && tr.phase == "edit", "edit fail stays edit");
@@ -223,6 +278,232 @@ int main() {
     expect(read_all(root4 / "src" / "foo.cpp").find("value = 1") != std::string::npos,
            "file untouched");
     fs::remove_all(root4, ec);
+  }
+
+  // Short/generic search rejected; identical hunk repeat → pushback then clarify.
+  {
+    const fs::path roote = fs::temp_directory_path() / "tuide_l2_edit_anti_loop";
+    fs::remove_all(roote, ec);
+    fs::create_directories(roote / ".tuide" / "ai", ec);
+    fs::create_directories(roote / "src", ec);
+    {
+      std::ofstream map(roote / ".tuide" / "ai" / "map_last.md");
+      map << "query: anti loop\n";
+    }
+    {
+      std::ofstream foo(roote / "src" / "foo.cpp");
+      foo << "void tick_terminal_shell() {}\nvoid other() { tick_terminal_shell(); }\n";
+    }
+    Level2SessionDeps depse{&tools, {}, [](std::string*) { return 0; }};
+    depse.pack_incomplete_pushback_max = 0;
+    Level2Session sesse(depse);
+    Level2BootstrapOpts optse;
+    optse.workspace_root = roote.string();
+    optse.query = "anti loop";
+    expect(sesse.bootstrap(optse, &err), "bootstrap anti " + err);
+    expect(sesse.mark_done(roote.string(), "ready", "edit").ok, "to edit anti");
+    SearchReplaceHunk short_h;
+    short_h.path = "src/foo.cpp";
+    short_h.search = "tick_terminal_shell";
+    short_h.replace = "tick_terminal_shell\n  // bad\n";
+    {
+      const auto tr = sesse.apply_edit(roote.string(), {short_h});
+      expect(!tr.ok && tr.phase == "edit", "short search stays edit");
+      expect(tr.error.find("genérico") != std::string::npos ||
+                 tr.error.find("corto") != std::string::npos,
+             "short search error: " + tr.error);
+    }
+    {
+      const auto tr = sesse.apply_edit(roote.string(), {short_h});
+      expect(!tr.ok, "identical rejected");
+      expect(tr.error.find("idéntico") != std::string::npos, "identical error: " + tr.error);
+      const std::string sess = read_all(Level2Session::session_path(roote.string()));
+      expect(sess.find("edit_repeat_pushback") != std::string::npos, "repeat pushback obs");
+    }
+    // One more identical → clarify (kMaxIdenticalEditRepeats=2).
+    {
+      const auto tr = sesse.apply_edit(roote.string(), {short_h});
+      expect(tr.phase == "clarify", "clarify after identical repeats");
+      expect(tr.ok, "clarify ends ok");
+      expect(sesse.status_text(roote.string()).find("phase: clarify") != std::string::npos,
+             "status clarify");
+    }
+    fs::remove_all(roote, ec);
+  }
+
+  // Reject opener-only search expanded into a full braced body (struct Foo { → whole type).
+  {
+    const fs::path roots = fs::temp_directory_path() / "tuide_l2_hunk_opener";
+    fs::remove_all(roots, ec);
+    fs::create_directories(roots / ".tuide" / "ai", ec);
+    fs::create_directories(roots / "src", ec);
+    {
+      std::ofstream map(roots / ".tuide" / "ai" / "map_last.md");
+      map << "query: opener\n";
+    }
+    {
+      std::ofstream foo(roots / "src" / "panel.hpp");
+      foo << "struct ConsolePanelTabs {\n"
+             "  static constexpr int kShell = 0;\n"
+             "  static constexpr int kOutput = 1;\n"
+             "};\n";
+    }
+    Level2SessionDeps depss{&tools, {}, [](std::string*) { return 0; }};
+    depss.pack_incomplete_pushback_max = 0;
+    Level2Session sesss(depss);
+    Level2BootstrapOpts optss;
+    optss.workspace_root = roots.string();
+    optss.query = "opener shape";
+    expect(sesss.bootstrap(optss, &err), "bootstrap opener " + err);
+    expect(sesss.mark_done(roots.string(), "ready", "edit").ok, "to edit opener");
+    SearchReplaceHunk bad;
+    bad.path = "src/panel.hpp";
+    bad.search = "struct ConsolePanelTabs {";
+    bad.replace =
+        "struct ConsolePanelTabs {\n"
+        "  static constexpr int kShell = 0;\n"
+        "  static constexpr int kOutput = 1;\n"
+        "  static constexpr int kTemp = 2;\n"
+        "};\n";
+    {
+      const auto tr = sesss.apply_edit(roots.string(), {bad});
+      expect(!tr.ok && tr.phase == "edit", "opener hunk rejected");
+      expect(tr.error.find("opener") != std::string::npos ||
+                 tr.error.find("mal formado") != std::string::npos,
+             "opener error: " + tr.error);
+      const std::string body = read_all((roots / "src" / "panel.hpp").string());
+      expect(body.find("kTemp") == std::string::npos, "file unchanged after reject");
+    }
+    // Valid: search covers full struct span.
+    SearchReplaceHunk good;
+    good.path = "src/panel.hpp";
+    good.search =
+        "struct ConsolePanelTabs {\n"
+        "  static constexpr int kShell = 0;\n"
+        "  static constexpr int kOutput = 1;\n"
+        "};\n";
+    good.replace =
+        "struct ConsolePanelTabs {\n"
+        "  static constexpr int kShell = 0;\n"
+        "  static constexpr int kOutput = 1;\n"
+        "  static constexpr int kTemp = 2;\n"
+        "};\n";
+    {
+      const auto tr = sesss.apply_edit(roots.string(), {good});
+      expect(tr.ok, "full-span hunk ok: " + tr.error);
+      const std::string body = read_all((roots / "src" / "panel.hpp").string());
+      expect(body.find("kTemp") != std::string::npos, "kTemp applied");
+    }
+    fs::remove_all(roots, ec);
+  }
+
+  // Escape noise (\s*) + wrong path auto-corrected from watchlist/pack.
+  {
+    const fs::path rootp = fs::temp_directory_path() / "tuide_l2_path_escape";
+    fs::remove_all(rootp, ec);
+    fs::create_directories(rootp / ".tuide" / "ai", ec);
+    fs::create_directories(rootp / "src", ec);
+    {
+      std::ofstream map(rootp / ".tuide" / "ai" / "map_last.md");
+      map << "query: path escape\n\n## Ranked entries\n\n1. src/panel.hpp:1 — `ConsolePanelTabs`\n";
+    }
+    {
+      std::ofstream panel(rootp / "src" / "panel.hpp");
+      panel << "struct ConsolePanelTabs {\n"
+               "  static constexpr int kShell = 0;\n"
+               "  static constexpr int kOutput = 1;\n"
+               "};\n";
+    }
+    {
+      std::ofstream wrong(rootp / "src" / "wrong.hpp");
+      wrong << "// empty-ish\n";
+    }
+    ToolRegistry toolsp;
+    toolsp.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      return AiToolResult{true,
+                          "src/panel.hpp:1-5 (ConsolePanelTabs)\nstruct ConsolePanelTabs {\n"
+                          "  static constexpr int kShell = 0;\n"
+                          "  static constexpr int kOutput = 1;\n"
+                          "};\n" +
+                              arg};
+    });
+    toolsp.register_tool("file_outline", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "outline " + arg + "\nstruct ConsolePanelTabs :1\n"};
+    });
+    toolsp.register_tool("headers_of", "stub",
+                         [](const std::string& arg) { return AiToolResult{true, "hdr " + arg}; });
+    Level2SessionDeps depsp{&toolsp, {}, [](std::string*) { return 0; }};
+    depsp.pack_incomplete_pushback_max = 0;
+    Level2Session sessp(depsp);
+    Level2BootstrapOpts optsp;
+    optsp.workspace_root = rootp.string();
+    optsp.query = "add kTemp";
+    optsp.instruction = "add kTemp to ConsolePanelTabs";
+    expect(sessp.bootstrap(optsp, &err), "bootstrap path " + err);
+    expect(sessp.apply_plan(rootp.string(), {"src/panel.hpp:ConsolePanelTabs"}, "tabs").ok,
+           "plan path");
+    expect(sessp.mark_done(rootp.string(), "ready", "edit").ok, "to edit path");
+    SearchReplaceHunk bad_path;
+    bad_path.path = "src/wrong.hpp";
+    // literal \s* noise (as if JSON had \\s*)
+    bad_path.search = std::string("struct ConsolePanelTabs {") + "\\s*" +
+                      "  static constexpr int kShell = 0;" + "\\s*" +
+                      "  static constexpr int kOutput = 1;" + "\\s*" + "};";
+    bad_path.replace =
+        "struct ConsolePanelTabs {\n"
+        "  static constexpr int kShell = 0;\n"
+        "  static constexpr int kOutput = 1;\n"
+        "  static constexpr int kTemp = 2;\n"
+        "};\n";
+    {
+      const auto tr = sessp.apply_edit(rootp.string(), {bad_path});
+      expect(tr.ok, "path+escape edit ok: " + tr.error);
+      const std::string sess = read_all(Level2Session::session_path(rootp.string()));
+      expect(sess.find("path auto-corregido") != std::string::npos, "path correction noted");
+      expect(sess.find("wrong.hpp") != std::string::npos &&
+                 sess.find("panel.hpp") != std::string::npos,
+             "shows wrong→panel");
+      const std::string body = read_all((rootp / "src" / "panel.hpp").string());
+      expect(body.find("kTemp") != std::string::npos, "applied on correct file");
+      expect(read_all((rootp / "src" / "wrong.hpp").string()).find("kTemp") == std::string::npos,
+             "wrong file untouched");
+    }
+    fs::remove_all(rootp, ec);
+  }
+
+  // Repeated covering plans emit edit nudge.
+  {
+    const fs::path rootn2 = fs::temp_directory_path() / "tuide_l2_plan_repeat_nudge";
+    fs::remove_all(rootn2, ec);
+    fs::create_directories(rootn2 / ".tuide" / "ai", ec);
+    fs::create_directories(rootn2 / "src", ec);
+    {
+      std::ofstream map(rootn2 / ".tuide" / "ai" / "map_last.md");
+      map << "query: helper_value\n\n## Ranked entries\n\n1. src/foo.cpp:1 — `helper_value`\n";
+    }
+    {
+      std::ofstream foo(rootn2 / "src" / "foo.cpp");
+      foo << "int helper_value = 1;\n";
+    }
+    ToolRegistry toolsn2;
+    toolsn2.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "src/foo.cpp:1-1 (helper_value)\nint helper_value = 1;\n" + arg};
+    });
+    toolsn2.register_tool("file_outline", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "outline " + arg + "\nfn helper_value :1\n"};
+    });
+    Level2Session sessn2(Level2SessionDeps{&toolsn2, {}, [](std::string*) { return 0; }});
+    Level2BootstrapOpts optsn2;
+    optsn2.workspace_root = rootn2.string();
+    optsn2.query = "bump helper_value";
+    optsn2.instruction = "change helper_value";
+    expect(sessn2.bootstrap(optsn2, &err), "bootstrap plan nudge2 " + err);
+    expect(sessn2.apply_plan(rootn2.string(), {"src/foo.cpp:helper_value"}, "p1").ok, "plan1");
+    expect(sessn2.apply_plan(rootn2.string(), {"src/foo.cpp:helper_value"}, "p2").ok, "plan2");
+    const std::string sess = read_all(Level2Session::session_path(rootn2.string()));
+    expect(sess.find("_nudge:_") != std::string::npos, "repeat-plan edit nudge");
+    expect(sess.find("done next=edit") != std::string::npos, "nudge asks edit");
+    fs::remove_all(rootn2, ec);
   }
 
   // Map compaction: after tool, cold entries → name-only; hot stem keeps detail.
@@ -495,6 +776,59 @@ int main() {
       expect(tr.ok && tr.phase == "edit", "to edit after pushback max");
     }
     fs::remove_all(rootg, ec);
+  }
+
+  // Regression: plan telemetry in Observations must not poison pack needles
+  // (false pack_incomplete → endless re-plan). Second plan with covering pack
+  // must stay complete.
+  {
+    const fs::path rootr = root.parent_path() / "tuide_l2_pack_telem";
+    fs::remove_all(rootr, ec);
+    fs::create_directories(rootr / ".tuide" / "ai", ec);
+    fs::create_directories(rootr / "src", ec);
+    {
+      std::ofstream map(rootr / ".tuide" / "ai" / "map_last.md");
+      map << "query: helper_value\n\n## Ranked entries\n\n1. src/foo.cpp:1 — `helper_value`\n";
+    }
+    {
+      std::ofstream foo(rootr / "src" / "foo.cpp");
+      foo << "int helper_value = 1;\n";
+    }
+    ToolRegistry toolsr;
+    toolsr.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "src/foo.cpp:1-1 (helper_value)\nint helper_value = 1;\n" + arg};
+    });
+    toolsr.register_tool("file_outline", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "outline " + arg + " symbols=1\nfn helper_value :1\n"};
+    });
+    Level2Session sessr(Level2SessionDeps{&toolsr, {}, [](std::string*) { return 0; }});
+    Level2BootstrapOpts optsr;
+    optsr.workspace_root = rootr.string();
+    optsr.query = "cambia helper_value";
+    optsr.instruction = "bump helper_value";
+    expect(sessr.bootstrap(optsr, &err), "bootstrap telem " + err);
+    {
+      const auto tr = sessr.apply_plan(rootr.string(), {"src/foo.cpp:helper_value"}, "first");
+      expect(tr.ok, "plan1 telem ok: " + tr.error);
+      expect(sessr.status_text(rootr.string()).find("pack_incomplete: no") != std::string::npos,
+             "plan1 pack complete");
+    }
+    {
+      const auto tr = sessr.apply_plan(rootr.string(), {"src/foo.cpp:helper_value"}, "second");
+      expect(tr.ok, "plan2 telem ok: " + tr.error);
+      const std::string st = sessr.status_text(rootr.string());
+      expect(st.find("pack_incomplete: no") != std::string::npos,
+             "plan2 still complete (no telemetry poison)");
+      expect(tr.summary.find("incomplete=1") == std::string::npos, "plan2 summary not incomplete");
+      const std::string sess = read_all(Level2Session::session_path(rootr.string()));
+      expect(sess.find("target_count:") != std::string::npos, "obs uses target_count label");
+      expect(sess.find("fragments_ok:") != std::string::npos, "obs still has fragments_ok stats");
+      // Must not claim Instruction gaps are telemetry keys.
+      expect(sess.find("`fragments_ok:`") == std::string::npos &&
+                 sess.find("`pack_chars:`") == std::string::npos,
+             "gaps must not list plan telemetry tokens");
+    }
+    fs::remove_all(rootr, ec);
   }
 
   // Soft plan nudge after 8 explore tools without plan.

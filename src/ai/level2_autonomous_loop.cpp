@@ -491,10 +491,10 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
   } else if (has_pack) {
     if (phase == "edit") {
       out << "phase=edit. Opciones:\n"
-             "- edit_feedback / compile_feedback → corrige con action=edit.\n"
+             "- Prioridad: {\"action\":\"edit\",\"hunks\":[…]} con search = span completo del pack.\n"
+             "- edit_feedback / compile_feedback → corrige con action=edit (no tools en bucle).\n"
              "- Instruction cubierta → done sin next.\n"
-             "- Zona [TRUNCATED] en pack → refetch path:A-B / #mid antes de inventar.\n"
-             "- Falta contexto → plan o tools.\n"
+             "- Refetch: máx ~2 tools; luego edit obligatorio.\n"
              "Contexto: Instruction + Code pack (sin mapa rankeado completo).\n\n";
     } else {
       out << "Ya hay Code pack"
@@ -546,6 +546,9 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
            "{\"backend\":\"" + ai_trace_escape(brain.name()) + "\",\"max_steps\":" +
                std::to_string(max_steps) + ",\"n_ctx\":" + std::to_string(opts.settings.n_ctx) +
                "}");
+
+  int consecutive_invalid = 0;
+  int consecutive_turn_errors = 0;
 
   for (int step = 1; step <= max_steps; ++step) {
     if (cancel != nullptr && cancel->load()) {
@@ -705,8 +708,22 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     } else {
       emit("L2 ▸ acción inválida; reintentando. " + action.error);
       result.steps = step;
+      ++consecutive_invalid;
+      consecutive_turn_errors = 0;
+      if (consecutive_invalid >= 6) {
+        emit("L2 ▸ demasiadas acciones inválidas seguidas — cerrando en clarify");
+        const auto fin = session.mark_done(
+            opts.workspace_root,
+            "loop: demasiadas respuestas JSON inválidas; ¿reformulas el cambio?", "clarify");
+        result.ok = true;
+        result.phase = fin.phase.empty() ? "clarify" : fin.phase;
+        result.summary = fin.summary;
+        result.steps = step;
+        return result;
+      }
       continue;
     }
+    consecutive_invalid = 0;
     const auto action_ms = elapsed_ms(action_t0);
     const auto step_ms = elapsed_ms(step_t0);
 
@@ -729,6 +746,19 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     result.phase = tr.phase;
     if (!tr.ok && !tr.error.empty()) {
       emit("L2 ▸ turn error: " + tr.error);
+      ++consecutive_turn_errors;
+      if (consecutive_turn_errors >= 8) {
+        emit("L2 ▸ demasiados turn errors seguidos — cerrando en clarify");
+        const auto fin = session.mark_done(
+            opts.workspace_root,
+            "loop: demasiados errores de turno seguidos; ¿concretas path:símbolo?", "clarify");
+        result.ok = true;
+        result.phase = fin.phase.empty() ? "clarify" : fin.phase;
+        result.summary = fin.summary;
+        return result;
+      }
+    } else {
+      consecutive_turn_errors = 0;
     }
     if (tr.phase == "done" || tr.phase == "clarify") {
       result.ok = true;
