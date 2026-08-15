@@ -1,0 +1,9 @@
+{
+  "id": "p_sibling",
+  "description": "Sibling hpp/cpp discipline",
+  "system_extra": "## Sibling API rule\nWhen adding a new function/method:\n1) Always include a declaration hunk in the .hpp/.h sibling AND a definition hunk in the .cpp in the SAME action=edit (multiple hunks[]).\n2) Use tool sibling_of on the path if unsure of the twin file.\n3) Compile undeclared/undefined ⇒ next edit MUST include the missing sibling hunk.\n",
+  "user_overlays": {
+    "edit": "New symbols: hunks must include both .hpp and .cpp in one edit.",
+    "pack": "If adding API, pack should include sibling header; then edit both files."
+  }
+}

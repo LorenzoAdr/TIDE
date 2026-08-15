@@ -1,0 +1,8 @@
+{
+  "id": "p_map_review",
+  "description": "Stronger post-compile review",
+  "system_extra": "Compile OK is NOT success if Instruction still has unmet loci. map_review: compare Instruction vs what you changed; edit again if incomplete.",
+  "user_overlays": {
+    "map_review": "List Instruction requirements mentally. If any missing in your edits → action=edit. Only then done without next."
+  }
+}

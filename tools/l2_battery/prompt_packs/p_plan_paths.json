@@ -1,0 +1,8 @@
+{
+  "id": "p_plan_paths",
+  "description": "First plan must include every Instruction src path",
+  "system_extra": "First plan targets MUST include every concrete src/... path named in the Instruction (as path:Symbol or path:1). Missing a named path ⇒ pack will be incomplete for the task.",
+  "user_overlays": {
+    "explore": "plan targets: include ALL src/ paths from Instruction first."
+  }
+}

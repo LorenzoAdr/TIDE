@@ -1,0 +1,10 @@
+{
+  "id": "p_short_sibling_tool",
+  "description": "Short guide + sibling rules + sibling_of",
+  "tool_guide": "## Tool guide (compact)\nexplore→plan→pack→edit→compile→map_review→done.\nFirst step: plan with 4–8 path:Symbol. After pack: prefer edit. Tools max 4; refetch Truncated with path:A-B or #tail.\nJSON only. edit hunks need unique multiline search. New API: edit .hpp decl + .cpp def together.\nclarify only if Instruction has no concrete src/ path.\n| tool | arg |\n| get_code_of | path:Symbol|#tail|A-B |\n| file_outline | path |\n| search | needles |\n| headers_of | path |\n| sibling_of | path (.cpp↔.hpp) |\n",
+  "system_extra": "## Sibling API rule\nWhen adding a new function/method:\n1) Always include a declaration hunk in the .hpp/.h sibling AND a definition hunk in the .cpp in the SAME action=edit (multiple hunks[]).\n2) Use tool sibling_of on the path if unsure of the twin file.\n3) Compile undeclared/undefined ⇒ next edit MUST include the missing sibling hunk.\n\nUse sibling_of for twin paths.\n",
+  "user_overlays": {
+    "edit": "sibling_of then edit both hpp and cpp in one action.",
+    "pack": "If adding API, pack should include sibling header; then edit both files."
+  }
+}

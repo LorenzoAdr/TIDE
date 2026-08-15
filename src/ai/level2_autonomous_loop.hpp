@@ -15,6 +15,13 @@ struct Level2AutonomousLoopOpts {
   AiLevel2Settings settings;
   // Optional override; default from Level2Session::tool_guide_markdown().
   std::string system_prompt_extra;
+  // If non-empty, replaces the default tool_guide_markdown() block.
+  std::string tool_guide_override;
+  // Phase-specific user-prompt overlays (appended after the stock phase blurb).
+  std::string user_overlay_explore;
+  std::string user_overlay_pack;
+  std::string user_overlay_edit;
+  std::string user_overlay_map_review;
 };
 
 struct Level2AutonomousLoopResult {

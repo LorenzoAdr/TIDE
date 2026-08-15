@@ -424,7 +424,7 @@ std::string phase_banner(const std::string& phase, int step, int max_steps) {
          std::to_string(max_steps);
 }
 
-std::string build_system_prompt(const std::string& extra) {
+std::string build_system_prompt(const Level2AutonomousLoopOpts& opts) {
   std::ostringstream out;
   out << "Eres el Nivel 2 (coder) de tuide. Exploras el repo y emites ediciones "
          "Search/Replace de match único.\n"
@@ -455,16 +455,20 @@ std::string build_system_prompt(const std::string& extra) {
          "Reglas: next=edit solo con evidencia en pack/Observations; search único en el "
          "archivo; no inventes paths; tras edit_feedback corrige el search; "
          "tras compile fail reemite edit.\n";
-  out << Level2Session::tool_guide_markdown();
-  if (!extra.empty()) {
-    out << "\n" << extra << "\n";
+  if (!opts.tool_guide_override.empty()) {
+    out << opts.tool_guide_override;
+  } else {
+    out << Level2Session::tool_guide_markdown();
+  }
+  if (!opts.system_prompt_extra.empty()) {
+    out << "\n" << opts.system_prompt_extra << "\n";
   }
   return out.str();
 }
 
 std::string build_user_prompt(const std::string& workspace_root, const std::string& phase,
                               int step, bool has_pack, bool map_review, bool map_stale,
-                              bool pack_incomplete) {
+                              bool pack_incomplete, const Level2AutonomousLoopOpts& opts) {
   std::ostringstream out;
   out << "phase=" << phase << " step=" << step;
   if (map_review) {
@@ -487,6 +491,9 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
            "- Más código → {\"action\":\"plan\",\"targets\":[…]}\n"
            "- Más edits → {\"action\":\"edit\",\"hunks\":[…]}\n"
            "- Fin → {\"action\":\"done\",\"summary\":\"…\"} sin next.\n\n";
+    if (!opts.user_overlay_map_review.empty()) {
+      out << opts.user_overlay_map_review << "\n\n";
+    }
     out << read_session_for_map_review(workspace_root, kMaxPromptCharsEdit);
   } else if (has_pack) {
     if (phase == "edit") {
@@ -496,15 +503,24 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
              "- Instruction cubierta → done sin next.\n"
              "- Refetch: máx ~2 tools; luego edit obligatorio.\n"
              "Contexto: Instruction + Code pack (sin mapa rankeado completo).\n\n";
+      if (!opts.user_overlay_edit.empty()) {
+        out << opts.user_overlay_edit << "\n\n";
+      }
     } else {
       out << "Ya hay Code pack"
           << (pack_incomplete ? " (**incomplete**: hay Truncated)" : "")
           << ". Decide: done next=edit, edit, ampliar plan, o tools extras.\n"
              "Preferir path:Symbol / path:A-B. Contexto: Instruction + pack.\n\n";
+      if (!opts.user_overlay_pack.empty()) {
+        out << opts.user_overlay_pack << "\n\n";
+      }
     }
     out << read_session_for_pack(workspace_root, kMaxPromptCharsEdit);
   } else if (phase == "edit") {
     out << "phase=edit (sin pack aún). Corrige con edit o arma plan/tools.\n\n";
+    if (!opts.user_overlay_edit.empty()) {
+      out << opts.user_overlay_edit << "\n\n";
+    }
     out << read_session_for_edit(Level2Session::session_path(workspace_root),
                                  kMaxPromptCharsEdit);
   } else {
@@ -514,6 +530,9 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
         << ". Primera acción preferida: "
            "{\"action\":\"plan\",\"targets\":[\"path:Symbol\",…]} (máx 16; no path bare). "
            "El runtime arma el pack (merge + auto-refetch truncados).\n\n";
+    if (!opts.user_overlay_explore.empty()) {
+      out << opts.user_overlay_explore << "\n\n";
+    }
     out << read_session_for_explore(Level2Session::session_path(workspace_root),
                                     kMaxPromptCharsExplore);
   }
@@ -529,7 +548,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
   using clock = std::chrono::steady_clock;
   Level2AutonomousLoopResult result;
   const int max_steps = opts.settings.max_steps > 0 ? opts.settings.max_steps : 32;
-  const std::string system = build_system_prompt(opts.system_prompt_extra);
+  const std::string system = build_system_prompt(opts);
   const auto run_t0 = clock::now();
 
   auto emit = [&](const std::string& line) {
@@ -615,7 +634,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     breq.system_prompt = system;
     breq.user_prompt =
         build_user_prompt(opts.workspace_root, phase, step, has_pack, map_review, map_stale,
-                          pack_incomplete);
+                          pack_incomplete, opts);
     breq.phase = phase;
     breq.max_tokens = opts.settings.max_tokens;
     breq.n_ctx = opts.settings.n_ctx;

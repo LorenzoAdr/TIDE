@@ -1,0 +1,73 @@
+{
+  "metric_primary": "facet_recall",
+  "case_timeout_sec": 2700,
+  "budget_hours": 15,
+  "promote_if": {
+    "relative_gain_pct": 8.0,
+    "min_all_pass_delta": 1
+  },
+  "stop_after_no_promote": 4,
+  "baseline_pack": "baseline.json",
+  "rounds": [
+    {
+      "id": "p_short",
+      "pack": "p_short.json",
+      "description": "Shorter tool guide to free n_ctx"
+    },
+    {
+      "id": "p_multi_hunk",
+      "pack": "p_multi_hunk.json",
+      "description": "Force multi-path / multi-locus coverage before done"
+    },
+    {
+      "id": "p_sibling",
+      "pack": "p_sibling.json",
+      "description": "Sibling hpp/cpp discipline"
+    },
+    {
+      "id": "p_edit_first",
+      "pack": "p_edit_first.json",
+      "description": "Stop tool loops; edit immediately after pack"
+    },
+    {
+      "id": "p_json_strict",
+      "pack": "p_json_strict.json",
+      "description": "Stricter JSON/edit examples"
+    },
+    {
+      "id": "p_map_review",
+      "pack": "p_map_review.json",
+      "description": "Stronger post-compile review"
+    },
+    {
+      "id": "p_plan_paths",
+      "pack": "p_plan_paths.json",
+      "description": "First plan must include every Instruction src path"
+    },
+    {
+      "id": "p_short_multi",
+      "pack": "p_short_multi.json",
+      "description": "Compact guide + multi-locus (combo)"
+    },
+    {
+      "id": "p_sibling_multi",
+      "pack": "p_sibling_multi.json",
+      "description": "Sibling + multi-path combo"
+    },
+    {
+      "id": "p_aggressive_edit",
+      "pack": "p_aggressive_edit.json",
+      "description": "Bias hard to edit in one shot with multiple hunks"
+    },
+    {
+      "id": "t_sibling_guide",
+      "pack": "t_sibling_guide.json",
+      "description": "Advertise sibling_of tool heavily"
+    },
+    {
+      "id": "p_short_sibling_tool",
+      "pack": "p_short_sibling_tool.json",
+      "description": "Short guide + sibling rules + sibling_of"
+    }
+  ]
+}

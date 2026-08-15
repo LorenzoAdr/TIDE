@@ -31,6 +31,7 @@ const std::unordered_set<std::string>& l2_whitelist() {
       "context_pack",    "list_tools",
       "file_outline",    "headers_of",
       "definition",      "references",
+      "sibling_of",
   };
   return k;
 }

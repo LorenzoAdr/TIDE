@@ -186,9 +186,99 @@ void register_read_tools(ToolRegistry* reg, const std::string& root) {
     return AiToolResult{true, out.str()};
   });
 
-  reg->register_tool("list_tools", "list", [](const std::string&) {
-    return AiToolResult{true, "get_code_of\nfile_outline\nsearch\nheaders_of\nlist_tools\n"};
+  reg->register_tool("sibling_of", "sibling", [root](const std::string& arg) {
+    const std::string trimmed = trim(arg);
+    if (trimmed.empty()) {
+      return AiToolResult{false, "sibling_of: arg vacío (path relativo)"};
+    }
+    fs::path abs = trimmed;
+    if (!abs.is_absolute()) {
+      abs = fs::path(root) / trimmed;
+    }
+    abs = abs.lexically_normal();
+    const std::string ext = abs.extension().string();
+    std::string low = ext;
+    for (char& c : low) {
+      if (c >= 'A' && c <= 'Z') {
+        c = static_cast<char>(c - 'A' + 'a');
+      }
+    }
+    std::vector<const char*> cands;
+    if (low == ".cpp" || low == ".cc" || low == ".cxx" || low == ".c") {
+      cands = {".hpp", ".h", ".hh", ".hxx"};
+    } else if (low == ".hpp" || low == ".h" || low == ".hh" || low == ".hxx") {
+      cands = {".cpp", ".cc", ".cxx", ".c"};
+    } else {
+      return AiToolResult{false, "sibling_of: extensión no soportada: " + ext};
+    }
+    for (const char* hext : cands) {
+      fs::path cand = abs;
+      cand.replace_extension(hext);
+      if (!fs::exists(cand)) {
+        continue;
+      }
+      std::string rel = cand.string();
+      if (!root.empty() && rel.size() > root.size() &&
+          rel.compare(0, root.size(), root) == 0 &&
+          (rel[root.size()] == '/' || rel[root.size()] == '\\')) {
+        rel = rel.substr(root.size() + 1);
+      }
+      return AiToolResult{true, "sibling_of: " + trimmed + " → " + rel + "\n"};
+    }
+    return AiToolResult{false, "sibling_of: no hay hermano para " + trimmed};
   });
+
+  reg->register_tool("list_tools", "list", [](const std::string&) {
+    return AiToolResult{
+        true, "get_code_of\nfile_outline\nsearch\nheaders_of\nsibling_of\nlist_tools\n"};
+  });
+}
+
+bool load_prompt_pack_into_opts(Level2AutonomousLoopOpts* opts, std::string* err) {
+  if (opts == nullptr) {
+    return false;
+  }
+  const char* pack_path = std::getenv("L2_PROMPT_PACK");
+  if (pack_path == nullptr || pack_path[0] == '\0') {
+    return true;
+  }
+  const std::string raw = read_file(fs::path(pack_path));
+  if (raw.empty()) {
+    if (err) {
+      *err = std::string("L2_PROMPT_PACK vacío o ilegible: ") + pack_path;
+    }
+    return false;
+  }
+  try {
+    const auto j = nlohmann::json::parse(raw);
+    if (j.contains("system_extra") && j["system_extra"].is_string()) {
+      opts->system_prompt_extra = j["system_extra"].get<std::string>();
+    }
+    if (j.contains("tool_guide") && j["tool_guide"].is_string()) {
+      opts->tool_guide_override = j["tool_guide"].get<std::string>();
+    }
+    if (j.contains("user_overlays") && j["user_overlays"].is_object()) {
+      const auto& u = j["user_overlays"];
+      if (u.contains("explore") && u["explore"].is_string()) {
+        opts->user_overlay_explore = u["explore"].get<std::string>();
+      }
+      if (u.contains("pack") && u["pack"].is_string()) {
+        opts->user_overlay_pack = u["pack"].get<std::string>();
+      }
+      if (u.contains("edit") && u["edit"].is_string()) {
+        opts->user_overlay_edit = u["edit"].get<std::string>();
+      }
+      if (u.contains("map_review") && u["map_review"].is_string()) {
+        opts->user_overlay_map_review = u["map_review"].get<std::string>();
+      }
+    }
+  } catch (const std::exception& e) {
+    if (err) {
+      *err = std::string("L2_PROMPT_PACK JSON: ") + e.what();
+    }
+    return false;
+  }
+  return true;
 }
 
 void print_ok_line(const tuide::Level2TurnResult& tr, tuide::Level2Session& session,
@@ -479,6 +569,14 @@ int main(int argc, char** argv) {
     Level2AutonomousLoopOpts opts;
     opts.workspace_root = root;
     opts.settings = settings.level2;
+    std::string pack_err;
+    if (!load_prompt_pack_into_opts(&opts, &pack_err)) {
+      std::cerr << "prompt pack: " << pack_err << '\n';
+      return 1;
+    }
+    if (const char* pack = std::getenv("L2_PROMPT_PACK"); pack != nullptr && pack[0] != '\0') {
+      std::cerr << "L2 ▸ prompt_pack=" << pack << '\n';
+    }
     const auto result = run_level2_autonomous(
         session, brain, opts, [](const std::string& line) { std::cout << line << std::endl; });
     std::cout << "run ok=" << (result.ok ? 1 : 0) << " phase=" << result.phase
