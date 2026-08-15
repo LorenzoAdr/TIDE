@@ -4057,31 +4057,29 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
 
   if (st.compile_attempt >= kMaxCompileAttempts) {
     st.pending.clear();
-    st.phase = "done";
-    st.done = true;
     st.last_action = "compile_fail_rollback";
+    // Bypass clarify_pushback: el runtime ya agotó reintentos de compile.
+    if (deps_.clarify_pushback_max > 0) {
+      st.clarify_pushback = deps_.clarify_pushback_max;
+    }
     save_state(workspace_root, st, nullptr);
-    std::ostringstream summary;
-    summary << "FAIL compile x" << st.compile_attempt
-            << "; rollback al baseline pre-hunk aplicado.";
-    std::ostringstream done_block;
-    done_block << "### turn " << (++st.turn) << " — done\n\n" << summary.str() << "\n\n";
-    append_observation(workspace_root, done_block.str(), &out.session_chars, &err);
-    save_state(workspace_root, st, nullptr);
-    write_response_json(workspace_root, false, "done", "compile", "", summary.str(), summary.str(),
-                        st.turn, "done");
     append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
                                      ",\"event\":\"compile_fail\",\"exit\":" +
                                      std::to_string(exit_code) + ",\"attempt\":" +
                                      std::to_string(st.compile_attempt) + ",\"ms\":" +
-                                     std::to_string(compile_ms) + ",\"rollback\":1}");
-    out.ok = false;
-    out.action = "done";
-    out.summary = summary.str();
-    out.phase = "done";
-    out.turn = st.turn;
-    out.error = summary.str();
-    return out;
+                                     std::to_string(compile_ms) + ",\"rollback\":1,\"clarify\":1}");
+    std::ostringstream summary;
+    summary << "FAIL compile x" << st.compile_attempt
+            << "; rollback al baseline pre-hunk. No pude dejar el árbol compilando — "
+               "¿reformulas o acotas el cambio?";
+    // Failure, not success: close as clarify so harness/UI don't treat this as done OK.
+    Level2TurnResult fin = mark_done(workspace_root, summary.str(), "clarify");
+    fin.ok = false;
+    fin.error = summary.str();
+    if (fin.summary.empty()) {
+      fin.summary = summary.str();
+    }
+    return fin;
   }
 
   st.pending.clear();
