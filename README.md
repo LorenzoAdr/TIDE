@@ -11,6 +11,8 @@
 
 **A full IDE in the terminal** — multi-language indexing via [LSP](https://microsoft.github.io/language-server-protocol/), debugging via [DAP](https://microsoft.github.io/debug-adapter-protocol/), and a complete mouse-and-keyboard UI built with [FTXUI](https://github.com/ArthurSonzogni/FTXUI).
 
+https://github.com/LorenzoAdr/TIDE/raw/main/videos/example_main.mp4
+
 tuide sits between ultra-light terminal editors (Neovim, Helix) and full graphical IDEs (VS Code): you keep the speed and footprint of a TUI — typically **20–30 MB of RAM** and very low CPU use — while still getting a comfortable, complete interface for everyday work. Setup is meant to stay out of the way: install and configure without deep tooling knowledge.
 
 A **fully autonomous embedded terminal** runs inside the IDE (real interactive shell over a PTY), so you can build, run tools, and keep a working session without leaving the editor — including while debugging.
@@ -27,6 +29,16 @@ Prefer a self-contained binary? Build one that embeds the LSP and DAP packages y
 Example: a C++ developer can ship a single binary with **clangd**, **bash-language-server**, **TexLab**, **neocmakelsp**, and **lua-language-server** already inside — and optionally Core Analyzer for crash forensics.
 
 Launch with no arguments to open a workspace and edit. Press **F2** to start debugging or load a core; **F4** focuses the terminal; **F5** relaunches the last launch (or Continue while debugging).
+
+## More demos
+
+**Quick navigation** — move fast across files, panels, and the editor without breaking flow:
+
+https://github.com/LorenzoAdr/TIDE/raw/main/videos/quick_movements.mp4
+
+**Catalog management** — install and manage language toolpacks from the catalog with little friction:
+
+https://github.com/LorenzoAdr/TIDE/raw/main/videos/catalog.mp4
 
 ## Languages
 
