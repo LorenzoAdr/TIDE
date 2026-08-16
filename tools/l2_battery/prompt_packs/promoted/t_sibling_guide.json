@@ -1,0 +1,9 @@
+{
+  "id": "t_sibling_guide",
+  "description": "Advertise sibling_of tool heavily",
+  "system_extra": "## Tool sibling_of\nCall {\"action\":\"tool\",\"name\":\"sibling_of\",\"arg\":\"src/util/shell_utils.cpp\"} to resolve .hpp twin before editing new APIs.\nAlways use it when Instruction says add declaration+definition across header/source.\n",
+  "user_overlays": {
+    "pack": "If adding API across hpp/cpp, call sibling_of then edit both.",
+    "edit": "New API: sibling_of then hunks on both files."
+  }
+}

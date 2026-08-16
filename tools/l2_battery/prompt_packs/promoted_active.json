@@ -1,9 +1,11 @@
 {
-  "pack": "p_multi_hunk.json",
-  "promoted_at": "2026-08-15T22:24:29",
+  "pack": "t_sibling_guide.json",
+  "promoted_at": "2026-08-16T15:01:11",
   "metrics": {
-    "facet_recall": 0.4611111111111111,
-    "all_pass": 2,
-    "all_pass_rate": 0.3333333333333333
-  }
+    "facet_recall": 0.5416666666666667,
+    "all_pass": 0,
+    "all_pass_rate": 0.0
+  },
+  "sweep_dir": "/home/lariasr/workspace/TIDE/.tuide/ai/l2_prompt_sweep_cont2",
+  "cases": "/home/lariasr/workspace/TIDE/tools/l2_battery/prompt_packs/cases_hard.json"
 }
