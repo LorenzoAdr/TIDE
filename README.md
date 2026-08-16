@@ -11,11 +11,7 @@
 
 **A full IDE in the terminal** — multi-language indexing via [LSP](https://microsoft.github.io/language-server-protocol/), debugging via [DAP](https://microsoft.github.io/debug-adapter-protocol/), and a complete mouse-and-keyboard UI built with [FTXUI](https://github.com/ArthurSonzogni/FTXUI).
 
-<p align="center">
-  <video src="https://github.com/LorenzoAdr/TIDE/releases/download/demo-assets/example_main.mp4" controls muted playsinline width="900">
-    <a href="https://github.com/LorenzoAdr/TIDE/releases/download/demo-assets/example_main.mp4">Demo principal de tuide</a>
-  </video>
-</p>
+https://github.com/user-attachments/assets/27787835-8346-47c0-bfce-44a80d53ef93
 
 tuide sits between ultra-light terminal editors (Neovim, Helix) and full graphical IDEs (VS Code): you keep the speed and footprint of a TUI — typically **20–30 MB of RAM** and very low CPU use — while still getting a comfortable, complete interface for everyday work. Setup is meant to stay out of the way: install and configure without deep tooling knowledge.
 
@@ -38,19 +34,11 @@ Launch with no arguments to open a workspace and edit. Press **F2** to start deb
 
 **Quick navigation** — move fast across files, panels, and the editor without breaking flow:
 
-<p align="center">
-  <video src="https://github.com/LorenzoAdr/TIDE/releases/download/demo-assets/quick_movements.mp4" controls muted playsinline width="900">
-    <a href="https://github.com/LorenzoAdr/TIDE/releases/download/demo-assets/quick_movements.mp4">Demo de navegación rápida</a>
-  </video>
-</p>
+https://github.com/user-attachments/assets/2cdae4bb-db80-4bf4-9de5-fc13b11e30ce
 
 **Catalog management** — install and manage language toolpacks from the catalog with little friction:
 
-<p align="center">
-  <video src="https://github.com/LorenzoAdr/TIDE/releases/download/demo-assets/catalog.mp4" controls muted playsinline width="900">
-    <a href="https://github.com/LorenzoAdr/TIDE/releases/download/demo-assets/catalog.mp4">Demo de gestión del catálogo</a>
-  </video>
-</p>
+https://github.com/user-attachments/assets/a6cda53c-f753-4445-a345-87bbe6e91bb0
 
 ## Languages
 
