@@ -172,6 +172,9 @@ class Level2Session {
     uint64_t last_op_id = 0;
     std::vector<std::string> watchlist;  // merged plan targets
     std::vector<std::string> edited_paths;  // unique rel paths successfully applied
+    // Concat of applied new_text (for Instruction marker coverage); capped.
+    std::string applied_blob;
+    int coverage_gate_pushback = 0;  // done/compile coverage rejects this session
     std::vector<PendingHunk> pending;
   };
 

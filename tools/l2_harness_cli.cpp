@@ -238,14 +238,32 @@ bool load_prompt_pack_into_opts(Level2AutonomousLoopOpts* opts, std::string* err
   if (opts == nullptr) {
     return false;
   }
-  const char* pack_path = std::getenv("L2_PROMPT_PACK");
-  if (pack_path == nullptr || pack_path[0] == '\0') {
+  std::string pack_file;
+  if (const char* pack_path = std::getenv("L2_PROMPT_PACK");
+      pack_path != nullptr && pack_path[0] != '\0') {
+    pack_file = pack_path;
+  } else {
+    // Product default: tools/l2_battery/prompt_packs/DEFAULT_PACK → relative pack name.
+    const std::string pointer = read_file(fs::path("tools/l2_battery/prompt_packs/DEFAULT_PACK"));
+    std::string name = trim(pointer);
+    while (!name.empty() && (name.back() == '\n' || name.back() == '\r')) {
+      name.pop_back();
+    }
+    if (!name.empty()) {
+      fs::path p(name);
+      if (!p.is_absolute()) {
+        p = fs::path("tools/l2_battery/prompt_packs") / name;
+      }
+      pack_file = p.string();
+    }
+  }
+  if (pack_file.empty()) {
     return true;
   }
-  const std::string raw = read_file(fs::path(pack_path));
+  const std::string raw = read_file(fs::path(pack_file));
   if (raw.empty()) {
     if (err) {
-      *err = std::string("L2_PROMPT_PACK vacío o ilegible: ") + pack_path;
+      *err = "prompt pack vacío o ilegible: " + pack_file;
     }
     return false;
   }
@@ -274,7 +292,7 @@ bool load_prompt_pack_into_opts(Level2AutonomousLoopOpts* opts, std::string* err
     }
   } catch (const std::exception& e) {
     if (err) {
-      *err = std::string("L2_PROMPT_PACK JSON: ") + e.what();
+      *err = std::string("prompt pack JSON: ") + e.what();
     }
     return false;
   }
@@ -289,11 +307,12 @@ void print_ok_line(const tuide::Level2TurnResult& tr, tuide::Level2Session& sess
 }
 
 void usage() {
-  std::cerr << "Usage: l2_harness_cli bootstrap|tool|tools|plan|turn|done|edit|compile|status|run …\n"
+  std::cerr << "Usage: l2_harness_cli bootstrap|tool|tools|plan|turn|done|edit|compile|status|run|hunk-try …\n"
             << "  plan target [target…]   // watchlist → pack.md\n"
             << "  tools <calls.json>      // batch [{name,arg},…] o {\"calls\":[…]}\n"
             << "  done [summary] [--edit|--clarify]\n"
             << "  edit <hunks.json>\n"
+            << "  hunk-try <hunk.json>    // dry-run Search/Replace (no LLM, no write)\n"
             << "  run                     // loop autónomo L2 local (llama-cli)\n";
 }
 
@@ -520,6 +539,47 @@ int main(int argc, char** argv) {
     print_ok_line(tr, session, root, "ok done");
     return 0;
   }
+  if (cmd == "hunk-try") {
+    if (argc < 3) {
+      usage();
+      return 2;
+    }
+    const std::string raw = read_file(argv[2]);
+    nlohmann::json j;
+    try {
+      j = nlohmann::json::parse(raw);
+    } catch (const std::exception& ex) {
+      std::cerr << "{\"ok\":false,\"error\":\"json: " << ex.what() << "\"}\n";
+      return 1;
+    }
+    tuide::SearchReplaceHunk h;
+    h.path = j.value("path", "");
+    h.search = j.value("search", "");
+    h.replace = j.value("replace", "");
+    tuide::normalize_hunk_escape_noise(&h);
+    std::string text = j.value("text", "");
+    if (text.empty() && !h.path.empty()) {
+      fs::path p = h.path;
+      if (!p.is_absolute()) {
+        p = fs::path(root) / h.path;
+      }
+      text = read_file(p);
+    }
+    if (text.empty()) {
+      std::cout << "{\"ok\":false,\"error\":\"archivo vacío o ausente\"}\n";
+      return 1;
+    }
+    const auto r = tuide::apply_hunk_to_text(text, h);
+    nlohmann::json out;
+    out["ok"] = r.ok;
+    out["error"] = r.error;
+    out["path"] = h.path;
+    out["start_line"] = r.span.start_line;
+    out["byte_begin"] = r.span.byte_begin;
+    out["byte_end"] = r.span.byte_end;
+    std::cout << out.dump() << '\n';
+    return r.ok ? 0 : 1;
+  }
   if (cmd == "edit") {
     if (argc < 3) {
       usage();
@@ -576,6 +636,8 @@ int main(int argc, char** argv) {
     }
     if (const char* pack = std::getenv("L2_PROMPT_PACK"); pack != nullptr && pack[0] != '\0') {
       std::cerr << "L2 ▸ prompt_pack=" << pack << '\n';
+    } else if (fs::exists("tools/l2_battery/prompt_packs/DEFAULT_PACK")) {
+      std::cerr << "L2 ▸ prompt_pack=DEFAULT_PACK\n";
     }
     const auto result = run_level2_autonomous(
         session, brain, opts, [](const std::string& line) { std::cout << line << std::endl; });

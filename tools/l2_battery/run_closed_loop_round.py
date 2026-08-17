@@ -73,8 +73,10 @@ def run_case(root: Path, cli: Path, case: dict, case_dir: Path, timeout: int) ->
         cwd=root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
-    (case_dir / "bootstrap.txt").write_text(boot.stdout + boot.stderr)
+    (case_dir / "bootstrap.txt").write_text(boot.stdout + boot.stderr, errors="replace")
     if boot.returncode != 0:
         return {"id": cid, "ok": False, "error": "bootstrap", "exit": boot.returncode}
 
@@ -85,6 +87,8 @@ def run_case(root: Path, cli: Path, case: dict, case_dir: Path, timeout: int) ->
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
     timed_out = False
@@ -92,6 +96,24 @@ def run_case(root: Path, cli: Path, case: dict, case_dir: Path, timeout: int) ->
     start = time.time()
     last_out = start
     assert proc.stdout is not None
+
+    def _stop_proc(force: bool = False) -> None:
+        if proc.poll() is not None:
+            return
+        if not force:
+            proc.send_signal(signal.SIGTERM)
+            try:
+                proc.wait(timeout=10)
+                return
+            except subprocess.TimeoutExpired:
+                pass
+        proc.kill()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        kill_harness()
+
     try:
         while True:
             if time.time() - start > timeout:
@@ -109,23 +131,26 @@ def run_case(root: Path, cli: Path, case: dict, case_dir: Path, timeout: int) ->
             if proc.poll() is not None:
                 break
             time.sleep(0.2)
+    except Exception as e:
+        lines.append(f"\nrunner_error={type(e).__name__}: {e}\n")
+        timed_out = True
     finally:
-        if timed_out and proc.poll() is None:
-            proc.send_signal(signal.SIGTERM)
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-            kill_harness()
-        elif proc.poll() is None:
-            proc.wait(timeout=5)
-    log_path.write_text("".join(lines))
+        if timed_out or proc.poll() is None:
+            _stop_proc(force=timed_out)
+    log_path.write_text("".join(lines), errors="replace")
     rc = proc.returncode if proc.returncode is not None else -1
     if timed_out:
         lines.append(f"\nrun ok=0 phase=timeout steps=0 — case_timeout {timeout}s\n")
-        log_path.write_text("".join(lines))
+        log_path.write_text("".join(lines), errors="replace")
 
-    subprocess.run([str(cli), "status"], cwd=root, capture_output=True, text=True)
+    subprocess.run(
+        [str(cli), "status"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     for name in ("state.json", "session.md", "debrief.md"):
         src = root / ".tuide/ai/l2" / name
         if src.exists():
@@ -141,15 +166,19 @@ def run_case(root: Path, cli: Path, case: dict, case_dir: Path, timeout: int) ->
         cwd=root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     ).stdout
     diff_patch = subprocess.run(
         ["git", "diff", "--", "src/ui", "src/util"],
         cwd=root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     ).stdout
-    (case_dir / "diff_stat.txt").write_text(diff_stat)
-    (case_dir / "diff.patch").write_text(diff_patch)
+    (case_dir / "diff_stat.txt").write_text(diff_stat, errors="replace")
+    (case_dir / "diff.patch").write_text(diff_patch, errors="replace")
 
     st = {}
     if (case_dir / "state.json").exists():
@@ -216,13 +245,31 @@ def main() -> None:
                 print(f"skip {case['id']} (already done)", flush=True)
                 continue
             print(f"==== CASE {case['id']} ====", flush=True)
-            row = run_case(root, Path(args.cli), case, out / case["id"], args.case_timeout)
+            try:
+                row = run_case(root, Path(args.cli), case, out / case["id"], args.case_timeout)
+            except Exception as e:
+                kill_harness()
+                restore_product(root)
+                row = {
+                    "id": case["id"],
+                    "ok": False,
+                    "error": f"{type(e).__name__}: {e}",
+                    "exit": -1,
+                    "timed_out": True,
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "run_ok_line": f"run ok=0 phase=runner_error — {type(e).__name__}",
+                }
             rf.write(json.dumps(row, ensure_ascii=False) + "\n")
             rf.flush()
             print(row.get("run_ok_line") or row, flush=True)
     rows = [json.loads(l) for l in results.read_text().splitlines() if l.strip()]
     (out / "summary.json").write_text(json.dumps(rows, indent=2, ensure_ascii=False) + "\n")
     (out / "FINISHED.txt").write_text(datetime.now().isoformat(timespec="seconds") + "\n")
+    expected = {c["id"] for c in cases}
+    got = {r.get("id") for r in rows}
+    if got != expected:
+        print(f"INCOMPLETE results={sorted(got)} expected={sorted(expected)}", flush=True)
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

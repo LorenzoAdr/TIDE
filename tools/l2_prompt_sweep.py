@@ -4,11 +4,17 @@
 Runs baseline then each playbook pack against a fixed checklist eval.
 Promotes packs that clearly improve facet_recall / all_pass into
 tools/l2_battery/prompt_packs/promoted/ and records CONCLUSIONS.
+
+Env overrides (continuation / hard-only):
+  L2_PROMPT_SWEEP_DIR   default .tuide/ai/l2_prompt_sweep
+  L2_PROMPT_PLAYBOOK    default tools/l2_battery/prompt_packs/playbook.json
+  L2_PROMPT_CASES       default tools/l2_battery/prompt_packs/cases.json
 """
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,11 +24,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKS = ROOT / "tools/l2_battery/prompt_packs"
-CASES = PACKS / "cases.json"
-PLAYBOOK = PACKS / "playbook.json"
+CASES = Path(os.environ.get("L2_PROMPT_CASES") or (PACKS / "cases.json"))
+if not CASES.is_absolute():
+    CASES = ROOT / CASES
+PLAYBOOK = Path(os.environ.get("L2_PROMPT_PLAYBOOK") or (PACKS / "playbook.json"))
+if not PLAYBOOK.is_absolute():
+    PLAYBOOK = ROOT / PLAYBOOK
 PROMOTED_DIR = PACKS / "promoted"
 PROMOTED_ACTIVE = PACKS / "promoted_active.json"
-SWEEP = ROOT / ".tuide/ai/l2_prompt_sweep"
+SWEEP = Path(os.environ.get("L2_PROMPT_SWEEP_DIR") or (ROOT / ".tuide/ai/l2_prompt_sweep"))
+if not SWEEP.is_absolute():
+    SWEEP = ROOT / SWEEP
 STATE = SWEEP / "state.json"
 LOG = SWEEP / "orchestrator.log"
 CLI = ROOT / "build/l2_harness_cli"
@@ -41,7 +53,10 @@ def log(msg: str) -> None:
 def heartbeat(msg: str) -> None:
     SWEEP.mkdir(parents=True, exist_ok=True)
     (SWEEP / "HEARTBEAT.txt").write_text(datetime.now().isoformat(timespec="seconds") + "\n")
-    (SWEEP / "STATUS.md").write_text(f"# L2 prompt-pack sweep\n\n{msg}\n", encoding="utf-8")
+    (SWEEP / "STATUS.md").write_text(
+        f"# L2 prompt-pack sweep\n\nDir: `{SWEEP}`\nPlaybook: `{PLAYBOOK.name}`\nCases: `{CASES.name}`\n\n{msg}\n",
+        encoding="utf-8",
+    )
 
 
 def atomic_json(path: Path, data: dict) -> None:
@@ -63,8 +78,11 @@ def load_state() -> dict:
         "started_mono": time.monotonic(),
         "budget_hours": float(pb.get("budget_hours") or 15),
         "metrics_best": None,
-        "best_pack": "baseline.json",
+        "best_pack": pb.get("baseline_pack") or "baseline.json",
         "no_promote_streak": 0,
+        "incomplete_retries": 0,
+        "playbook": str(PLAYBOOK),
+        "cases": str(CASES),
         "history": [],
     }
 
@@ -79,6 +97,8 @@ def rebuild() -> None:
 
 
 def decide(best: dict | None, cur: dict, pb: dict) -> str:
+    if cur.get("incomplete"):
+        return "INCOMPLETE"
     if best is None:
         return "BASELINE"
     pi = pb.get("promote_if") or {}
@@ -89,8 +109,9 @@ def decide(best: dict | None, cur: dict, pb: dict) -> str:
     cv = float(cur.get(primary) or 0)
     ba = int(best.get("all_pass") or 0)
     ca = int(cur.get("all_pass") or 0)
+    if ca < 0 or ba < 0:
+        return "INCOMPLETE"
     gain = 0.0 if bv <= 0 else (cv - bv) / bv * 100.0
-    # also require not regressing all_pass
     if ca < ba:
         return "REVERT"
     if (ca - ba) >= min_delta or gain >= rel:
@@ -100,14 +121,21 @@ def decide(best: dict | None, cur: dict, pb: dict) -> str:
 
 def run_round(round_id: str, pack_rel: str, timeout: int) -> dict:
     out = SWEEP / f"round_{round_id}"
+    # Fresh tree for retries of incomplete rounds
+    if out.exists() and not (out / "FINISHED.txt").exists():
+        shutil.rmtree(out, ignore_errors=True)
+    elif out.exists() and (out / "metrics.json").exists():
+        try:
+            prev = json.loads((out / "metrics.json").read_text(encoding="utf-8"))
+            if prev.get("incomplete"):
+                shutil.rmtree(out, ignore_errors=True)
+        except Exception:
+            pass
     out.mkdir(parents=True, exist_ok=True)
     pack_path = PACKS / pack_rel
     env = os.environ.copy()
     env["L2_PROMPT_PACK"] = str(pack_path)
-    # Also stack promoted_active extras if present (cumulative winners)
-    if PROMOTED_ACTIVE.exists() and round_id != "baseline":
-        env["L2_PROMPT_PACK_STACK"] = str(PROMOTED_ACTIVE)  # reserved; single pack for now
-    log(f"round={round_id} pack={pack_path}")
+    log(f"round={round_id} pack={pack_path} cases={CASES.name}")
     cp = subprocess.run(
         [
             sys.executable,
@@ -134,7 +162,14 @@ def run_round(round_id: str, pack_rel: str, timeout: int) -> dict:
     )
     metrics_path = out / "metrics.json"
     if not metrics_path.exists():
-        return {"facet_recall": 0.0, "all_pass": 0, "all_pass_rate": 0.0, "n_cases": 0}
+        return {
+            "facet_recall": 0.0,
+            "all_pass": -1,
+            "all_pass_rate": 0.0,
+            "n_cases": 0,
+            "incomplete": True,
+            "missing_ids": ["*"],
+        }
     return json.loads(metrics_path.read_text(encoding="utf-8"))
 
 
@@ -143,7 +178,6 @@ def promote_pack(pack_rel: str, metrics: dict) -> None:
     src = PACKS / pack_rel
     dst = PROMOTED_DIR / src.name
     dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    # Active pointer: last promoted pack (orchestrator uses as new baseline reference)
     active = {
         "pack": pack_rel,
         "promoted_at": datetime.now().isoformat(timespec="seconds"),
@@ -152,9 +186,10 @@ def promote_pack(pack_rel: str, metrics: dict) -> None:
             "all_pass": metrics.get("all_pass"),
             "all_pass_rate": metrics.get("all_pass_rate"),
         },
+        "sweep_dir": str(SWEEP),
+        "cases": str(CASES),
     }
     PROMOTED_ACTIVE.write_text(json.dumps(active, indent=2) + "\n", encoding="utf-8")
-    # Prefer this pack as default for future harness runs
     default = PACKS / "DEFAULT_PACK"
     default.write_text(pack_rel + "\n", encoding="utf-8")
     subprocess.run(["git", "add", str(PROMOTED_DIR), str(PROMOTED_ACTIVE), str(default)], cwd=ROOT)
@@ -176,6 +211,8 @@ def finalize(st: dict) -> None:
     summary = {
         "finished": datetime.now().isoformat(timespec="seconds"),
         "state": st,
+        "playbook": str(PLAYBOOK),
+        "cases": str(CASES),
         "rounds": {},
     }
     for d in sorted(SWEEP.glob("round_*")):
@@ -187,6 +224,9 @@ def finalize(st: dict) -> None:
         "# L2 prompt-pack sweep CONCLUSIONS",
         "",
         f"Finished: {summary['finished']}",
+        f"sweep_dir: {SWEEP}",
+        f"playbook: {PLAYBOOK}",
+        f"cases: {CASES}",
         f"best_pack: {st.get('best_pack')}",
         f"no_promote_streak: {st.get('no_promote_streak')}",
         "",
@@ -194,7 +234,8 @@ def finalize(st: dict) -> None:
     ]
     for h in st.get("history") or []:
         lines.append(
-            f"- {h.get('id')}: decision={h.get('decision')} recall={h.get('facet_recall')} all_pass={h.get('all_pass')}"
+            f"- {h.get('id')}: decision={h.get('decision')} recall={h.get('facet_recall')} "
+            f"all_pass={h.get('all_pass')} incomplete={h.get('incomplete')}"
         )
     lines += ["", "Promoted packs in tools/l2_battery/prompt_packs/promoted/", ""]
     (SWEEP / "CONCLUSIONS.md").write_text("\n".join(lines), encoding="utf-8")
@@ -211,15 +252,20 @@ def main() -> int:
     if cmd == "status":
         print((SWEEP / "STATUS.md").read_text() if (SWEEP / "STATUS.md").exists() else "(none)")
         if STATE.exists():
-            print(json.dumps(json.loads(STATE.read_text()), indent=2)[:3000])
+            print(json.dumps(json.loads(STATE.read_text()), indent=2)[:4000])
         if (SWEEP / "FINISHED.txt").exists():
             print("FINISHED", (SWEEP / "FINISHED.txt").read_text().strip())
+        print(f"config sweep={SWEEP} playbook={PLAYBOOK} cases={CASES}")
         return 0
     if cmd not in ("start", "resume"):
         print("usage: l2_prompt_sweep.py start|resume|status", file=sys.stderr)
         return 2
 
-    subprocess.run(["pkill", "-9", "-f", "./build/l2_harness_cli run"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(
+        ["pkill", "-9", "-f", "./build/l2_harness_cli run"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     time.sleep(1)
     rebuild()
     if not CLI.exists():
@@ -227,29 +273,39 @@ def main() -> int:
         return 1
 
     pb = json.loads(PLAYBOOK.read_text(encoding="utf-8"))
-    rounds = [{"id": "baseline", "pack": pb.get("baseline_pack") or "baseline.json", "description": "baseline"}]
+    rounds = [
+        {
+            "id": "baseline",
+            "pack": pb.get("baseline_pack") or "baseline.json",
+            "description": "baseline",
+        }
+    ]
     rounds.extend(pb.get("rounds") or [])
     timeout = int(pb.get("case_timeout_sec") or 2700)
     stop_streak = int(pb.get("stop_after_no_promote") or 4)
     budget_h = float(pb.get("budget_hours") or 15)
+    max_incomplete = int(pb.get("max_incomplete_retries") or 2)
 
     st = load_state()
     if cmd == "start" and not STATE.exists():
         st["started_mono"] = time.monotonic()
         st["budget_hours"] = budget_h
+        st["playbook"] = str(PLAYBOOK)
+        st["cases"] = str(CASES)
     elif "started_mono" not in st:
-        # resume without mono: approximate remaining from wall clock started
         st["started_mono"] = time.monotonic()
         st["budget_hours"] = budget_h
     st["status"] = "running"
     atomic_json(STATE, st)
-    log(f"prompt sweep {cmd} round_index={st.get('round_index')} budget_h={budget_h}")
+    log(
+        f"prompt sweep {cmd} round_index={st.get('round_index')} budget_h={budget_h} "
+        f"sweep={SWEEP} playbook={PLAYBOOK.name} cases={CASES.name}"
+    )
 
     while True:
         st = load_state()
         idx = int(st.get("round_index") or 0)
         elapsed_h = (time.monotonic() - float(st.get("started_mono") or time.monotonic())) / 3600.0
-        # If resumed, started_mono resets — also check wall from started ISO
         try:
             started = datetime.fromisoformat(st.get("started"))
             wall_h = (datetime.now() - started).total_seconds() / 3600.0
@@ -277,8 +333,12 @@ def main() -> int:
 
         metrics = run_round(rid, pack, timeout)
         decision = "BASELINE" if rid == "baseline" else decide(st.get("metrics_best"), metrics, pb)
+        if rid == "baseline" and metrics.get("incomplete"):
+            decision = "INCOMPLETE"
         log(
-            f"decision={decision} recall={metrics.get('facet_recall')} all_pass={metrics.get('all_pass')}"
+            f"decision={decision} recall={metrics.get('facet_recall')} "
+            f"all_pass={metrics.get('all_pass')} incomplete={metrics.get('incomplete')} "
+            f"missing={metrics.get('missing_ids')}"
         )
 
         hist = {
@@ -288,6 +348,8 @@ def main() -> int:
             "facet_recall": metrics.get("facet_recall"),
             "all_pass": metrics.get("all_pass"),
             "all_pass_rate": metrics.get("all_pass_rate"),
+            "incomplete": bool(metrics.get("incomplete")),
+            "missing_ids": metrics.get("missing_ids"),
         }
         st.setdefault("history", []).append(hist)
 
@@ -298,20 +360,47 @@ def main() -> int:
                 json.dumps(
                     {
                         k: metrics.get(k)
-                        for k in ("facet_recall", "all_pass", "all_pass_rate", "n_cases")
+                        for k in (
+                            "facet_recall",
+                            "all_pass",
+                            "all_pass_rate",
+                            "n_cases",
+                            "incomplete",
+                            "missing_ids",
+                        )
                     },
                     indent=2,
                 )
             )
             af.write("\n\n")
 
+        if decision == "INCOMPLETE":
+            retries = int(st.get("incomplete_retries") or 0) + 1
+            st["incomplete_retries"] = retries
+            if retries <= max_incomplete:
+                log(f"INCOMPLETE retry {retries}/{max_incomplete} (same round, no advance)")
+                atomic_json(STATE, st)
+                continue
+            log(f"INCOMPLETE exhausted retries — skip round {rid} without promote/revert streak")
+            st["incomplete_retries"] = 0
+            st["round_index"] = idx + 1
+            atomic_json(STATE, st)
+            continue
+
+        st["incomplete_retries"] = 0
         if rid == "baseline" or decision == "BASELINE":
-            st["metrics_best"] = metrics
+            st["metrics_best"] = {
+                k: metrics.get(k)
+                for k in ("facet_recall", "all_pass", "all_pass_rate", "n_cases", "incomplete")
+            }
             st["best_pack"] = pack
             st["no_promote_streak"] = 0
         elif decision == "PROMOTE":
             promote_pack(pack, metrics)
-            st["metrics_best"] = metrics
+            st["metrics_best"] = {
+                k: metrics.get(k)
+                for k in ("facet_recall", "all_pass", "all_pass_rate", "n_cases", "incomplete")
+            }
             st["best_pack"] = pack
             st["no_promote_streak"] = 0
         else:

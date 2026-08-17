@@ -38,6 +38,24 @@ struct ApplyHunkResult {
 bool find_unique_span(const std::string& haystack, const std::string& needle, SearchReplaceSpan* out,
                       std::string* err);
 
+// Unique match ignoring blank-line runs and trailing whitespace per line (maps back to
+// original byte span). Used when exact match fails with 0 matches.
+bool find_unique_span_flex(const std::string& haystack, const std::string& needle,
+                           SearchReplaceSpan* out, std::string* err);
+
+// Exact first; on 0 matches, flex. Ambiguous exact still rejects (no flex).
+bool find_unique_span_allow_flex(const std::string& haystack, const std::string& needle,
+                                 SearchReplaceSpan* out, std::string* err);
+
+// Disk excerpt near needle's first non-empty line (or file head) for edit_feedback.
+std::string disk_excerpt_near_search(const std::string& file_text, const std::string& search,
+                                     int context_lines = 4, int max_lines = 16);
+
+// Extend span through the matching '}' of the first '{' at/after byte_begin.
+// Returns false if no brace or unbalanced.
+bool extend_span_to_matching_brace(const std::string& haystack, SearchReplaceSpan* span,
+                                   std::string* err);
+
 // LLM noise: literal "\s*", "\s", "\n", "\t" → real whitespace (after JSON parse).
 std::string normalize_hunk_escape_noise(std::string text);
 void normalize_hunk_escape_noise(SearchReplaceHunk* hunk);

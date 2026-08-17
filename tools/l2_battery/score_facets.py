@@ -103,18 +103,38 @@ def score_round(cases_path: Path, round_dir: Path) -> dict:
                 rows_by_id[r.get("id")] = r
             except Exception:
                 pass
+    expected_ids = [c["id"] for c in cases]
+    missing = [cid for cid in expected_ids if cid not in rows_by_id]
+    incomplete = len(missing) > 0
     scored = []
     for c in cases:
         cid = c["id"]
+        if cid not in rows_by_id:
+            scored.append(
+                {
+                    "id": cid,
+                    "facet_hits": 0,
+                    "facet_total": 1,
+                    "facet_recall": 0.0,
+                    "all_pass": False,
+                    "facets": [{"name": "ran", "ok": False}],
+                    "phase": None,
+                    "last_action": "missing_result",
+                }
+            )
+            continue
         scored.append(score_case(c, round_dir / cid, rows_by_id.get(cid)))
     n = len(scored) or 1
     recall = sum(s["facet_recall"] for s in scored) / n
     all_pass = sum(1 for s in scored if s["all_pass"])
     metrics = {
-        "facet_recall": recall,
-        "all_pass": all_pass,
-        "all_pass_rate": all_pass / n,
+        "facet_recall": 0.0 if incomplete else recall,
+        "all_pass": -1 if incomplete else all_pass,
+        "all_pass_rate": 0.0 if incomplete else all_pass / n,
         "n_cases": len(scored),
+        "n_results": len(rows_by_id),
+        "incomplete": incomplete,
+        "missing_ids": missing,
         "cases": scored,
     }
     (round_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False) + "\n")
@@ -127,7 +147,7 @@ def main() -> None:
     ap.add_argument("--round-dir", required=True)
     args = ap.parse_args()
     m = score_round(Path(args.cases), Path(args.round_dir))
-    print(json.dumps({k: m[k] for k in ("facet_recall", "all_pass", "all_pass_rate", "n_cases")}, indent=2))
+    print(json.dumps({k: m[k] for k in ("facet_recall", "all_pass", "all_pass_rate", "n_cases", "incomplete", "missing_ids") if k in m}, indent=2))
 
 
 if __name__ == "__main__":

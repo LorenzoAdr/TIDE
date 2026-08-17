@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -395,6 +396,143 @@ int main() {
       expect(body.find("kTemp") != std::string::npos, "kTemp applied");
     }
     fs::remove_all(roots, ec);
+  }
+
+  // Function-opener prefix insert → rewrite to after the full function (not inside `{`).
+  {
+    const fs::path rooti = fs::temp_directory_path() / "tuide_l2_insert_after_fn";
+    fs::remove_all(rooti, ec);
+    fs::create_directories(rooti / ".tuide" / "ai", ec);
+    fs::create_directories(rooti / "src" / "util", ec);
+    {
+      std::ofstream map(rooti / ".tuide" / "ai" / "map_last.md");
+      map << "query: always_true\n";
+    }
+    {
+      std::ofstream cpp(rooti / "src" / "util" / "shell_utils.cpp");
+      cpp << "#include \"util/shell_utils.hpp\"\nnamespace tuide {\n"
+             "bool command_exists(const std::string& c) {\n  return !c.empty();\n}\n}\n";
+    }
+    {
+      std::ofstream hpp(rooti / "src" / "util" / "shell_utils.hpp");
+      hpp << "#pragma once\nnamespace tuide {\nbool command_exists(const std::string& c);\n}\n";
+    }
+    Level2SessionDeps depsi{&tools, {}, [](std::string*) { return 0; }};
+    depsi.pack_incomplete_pushback_max = 0;
+    Level2Session sessi(depsi);
+    Level2BootstrapOpts optsi;
+    optsi.workspace_root = rooti.string();
+    optsi.query =
+        "Añade bool always_true(); en src/util/shell_utils.hpp y bool always_true() { return "
+        "true; } en src/util/shell_utils.cpp.";
+    expect(sessi.bootstrap(optsi, &err), "bootstrap insert-fn " + err);
+    expect(sessi.mark_done(rooti.string(), "ready", "edit").ok, "to edit insert-fn");
+    SearchReplaceHunk ins;
+    ins.path = "src/util/shell_utils.cpp";
+    ins.search = "bool command_exists(const std::string& c) {";
+    ins.replace =
+        "bool command_exists(const std::string& c) {\n\nbool always_true() {\n  return true;\n}\n";
+    const auto tr = sessi.apply_edit(rooti.string(), {ins});
+    expect(tr.ok, "function opener insert ok: " + tr.error);
+    const std::string body = read_all((rooti / "src" / "util" / "shell_utils.cpp").string());
+    expect(body.find("always_true") != std::string::npos, "always_true present");
+    expect(body.find("return !c.empty();") != std::string::npos, "keeps command_exists body");
+    const auto pos_close = body.find("return !c.empty();");
+    const auto pos_new = body.find("bool always_true()");
+    expect(pos_close != std::string::npos && pos_new != std::string::npos && pos_close < pos_new,
+           "always_true after function, not inside: " + body);
+    expect(body.find("command_exists") < body.find("always_true"), "order");
+    fs::remove_all(rooti, ec);
+  }
+
+  // Mixed decl+def on header → split definition onto sibling .cpp.
+  {
+    const fs::path rootm = fs::temp_directory_path() / "tuide_l2_split_sibling";
+    fs::remove_all(rootm, ec);
+    fs::create_directories(rootm / ".tuide" / "ai", ec);
+    fs::create_directories(rootm / "src" / "util", ec);
+    {
+      std::ofstream map(rootm / ".tuide" / "ai" / "map_last.md");
+      map << "query: l2_ps_noop\n";
+    }
+    {
+      std::ofstream hpp(rootm / "src" / "util" / "shell_utils.hpp");
+      hpp << "#pragma once\nnamespace tuide {\nbool command_exists(const std::string& c);\n}\n";
+    }
+    {
+      std::ofstream cpp(rootm / "src" / "util" / "shell_utils.cpp");
+      cpp << "#include \"util/shell_utils.hpp\"\nnamespace tuide {\n"
+             "bool command_exists(const std::string& c) { return !c.empty(); }\n}\n";
+    }
+    Level2SessionDeps depsm{&tools, {}, [](std::string*) { return 0; }};
+    depsm.pack_incomplete_pushback_max = 0;
+    Level2Session sessm(depsm);
+    Level2BootstrapOpts optsm;
+    optsm.workspace_root = rootm.string();
+    optsm.query =
+        "Añade void l2_ps_noop(); en src/util/shell_utils.hpp y void l2_ps_noop() {} en "
+        "src/util/shell_utils.cpp. Ambos archivos.";
+    expect(sessm.bootstrap(optsm, &err), "bootstrap split " + err);
+    expect(sessm.mark_done(rootm.string(), "ready", "edit").ok, "to edit split");
+    SearchReplaceHunk mix;
+    mix.path = "src/util/shell_utils.hpp";
+    mix.search = "namespace tuide {";
+    mix.replace =
+        "namespace tuide {\n\nvoid l2_ps_noop();\n\nvoid l2_ps_noop() {}\n";
+    const auto tr = sessm.apply_edit(rootm.string(), {mix});
+    expect(tr.ok, "mixed split apply ok: " + tr.error);
+    const std::string hpp = read_all((rootm / "src" / "util" / "shell_utils.hpp").string());
+    const std::string cpp = read_all((rootm / "src" / "util" / "shell_utils.cpp").string());
+    expect(hpp.find("void l2_ps_noop();") != std::string::npos, "decl in hpp");
+    expect(hpp.find("void l2_ps_noop() {}") == std::string::npos, "def not in hpp");
+    expect(cpp.find("void l2_ps_noop() {}") != std::string::npos, "def in cpp");
+    fs::remove_all(rootm, ec);
+  }
+
+  // Compile fail after one-file edit → sibling path excerpt.
+  {
+    const fs::path rootf = fs::temp_directory_path() / "tuide_l2_compile_sibling_nudge";
+    fs::remove_all(rootf, ec);
+    fs::create_directories(rootf / ".tuide" / "ai", ec);
+    fs::create_directories(rootf / "src" / "util", ec);
+    {
+      std::ofstream map(rootf / ".tuide" / "ai" / "map_last.md");
+      map << "query: always_true\n";
+    }
+    {
+      std::ofstream hpp(rootf / "src" / "util" / "shell_utils.hpp");
+      hpp << "#pragma once\nnamespace tuide {\nbool command_exists(const std::string& c);\n}\n";
+    }
+    {
+      std::ofstream cpp(rootf / "src" / "util" / "shell_utils.cpp");
+      cpp << "#include \"util/shell_utils.hpp\"\nnamespace tuide {\n"
+             "bool command_exists(const std::string& c) { return !c.empty(); }\n}\n";
+    }
+    Level2SessionDeps depsf{&tools, {}, [](std::string* out) {
+      if (out) {
+        *out = "error: 'always_true' was not declared in this scope\n";
+      }
+      return 1;
+    }};
+    depsf.pack_incomplete_pushback_max = 0;
+    Level2Session sessf(depsf);
+    Level2BootstrapOpts optsf;
+    optsf.workspace_root = rootf.string();
+    optsf.query =
+        "Añade bool always_true(); en src/util/shell_utils.hpp y bool always_true() { return "
+        "true; } en src/util/shell_utils.cpp. Ambos archivos.";
+    expect(sessf.bootstrap(optsf, &err), "bootstrap compile-sib " + err);
+    expect(sessf.mark_done(rootf.string(), "ready", "edit").ok, "to edit compile-sib");
+    SearchReplaceHunk h;
+    h.path = "src/util/shell_utils.hpp";
+    h.search = "bool command_exists(const std::string& c);\n";
+    h.replace = "bool command_exists(const std::string& c);\nbool always_true();\n";
+    const auto tr = sessf.apply_edit(rootf.string(), {h});
+    expect(!tr.ok || tr.phase == "edit", "stays edit after compile fail");
+    const std::string session = read_all(Level2Session::session_path(rootf.string()));
+    expect(session.find("shell_utils.cpp") != std::string::npos, "mentions missing cpp");
+    expect(session.find("Instruction también pide") != std::string::npos, "instruction gap banner");
+    fs::remove_all(rootf, ec);
   }
 
   // Escape noise (\s*) + wrong path auto-corrected from watchlist/pack.
@@ -1191,6 +1329,66 @@ int main() {
     expect(session.find("ToggleLineMark") != std::string::npos, "keeps ident");
     expect(session.find("header hermano") != std::string::npos, "sibling header hint");
     fs::remove_all(rootu, ec);
+  }
+
+  // Phase A: POST_EDIT_COVERAGE — reject done when Instruction markers/paths missing.
+  {
+    setenv("L2_FEAT_POST_EDIT_COVERAGE", "1", 1);
+    const fs::path rootc = fs::temp_directory_path() / "tuide_l2_coverage_gate";
+    fs::remove_all(rootc, ec);
+    fs::create_directories(rootc / ".tuide" / "ai", ec);
+    fs::create_directories(rootc / "src" / "util", ec);
+    {
+      std::ofstream map(rootc / ".tuide" / "ai" / "map_last.md");
+      map << "query: always_true shell_utils\n";
+    }
+    {
+      std::ofstream hpp(rootc / "src" / "util" / "shell_utils.hpp");
+      hpp << "#pragma once\nnamespace tuide {\nbool command_exists(const std::string& c);\n}\n";
+    }
+    {
+      std::ofstream cpp(rootc / "src" / "util" / "shell_utils.cpp");
+      cpp << "#include \"util/shell_utils.hpp\"\nnamespace tuide {\n"
+             "bool command_exists(const std::string& c) { return !c.empty(); }\n}\n";
+    }
+    Level2SessionDeps depsc{&tools, {}, [](std::string* out) {
+      if (out) {
+        *out = "ok\n";
+      }
+      return 0;
+    }};
+    depsc.pack_incomplete_pushback_max = 0;
+    Level2Session sessc(depsc);
+    Level2BootstrapOpts optsc;
+    optsc.workspace_root = rootc.string();
+    optsc.query =
+        "Añade bool always_true(); en src/util/shell_utils.hpp y bool always_true() { return "
+        "true; } en src/util/shell_utils.cpp. Ambos archivos.";
+    optsc.instruction = "edit both files";
+    expect(sessc.bootstrap(optsc, &err), "bootstrap coverage " + err);
+    expect(sessc.mark_done(rootc.string(), "ready", "edit").ok, "to edit coverage");
+    SearchReplaceHunk h;
+    h.path = "src/util/shell_utils.hpp";
+    h.search = "bool command_exists(const std::string& c);\n";
+    h.replace =
+        "bool command_exists(const std::string& c);\nbool always_true();\n";
+    const auto er = sessc.apply_edit(rootc.string(), {h});
+    expect(er.ok, "partial edit hpp ok");
+    // compile auto-runs after edit when deps.run_compile set — check observation
+    const std::string sess1 = read_all(Level2Session::session_path(rootc.string()));
+    expect(sess1.find("post_edit_coverage") != std::string::npos ||
+               sess1.find("compile_ok") != std::string::npos,
+           "compile_ok or coverage after partial edit");
+    const auto done = sessc.mark_done(rootc.string(), "all done");
+    expect(done.error == "done_coverage_gate" || done.summary == "done_coverage_gate",
+           "done rejected by coverage gate");
+    const std::string sess2 = read_all(Level2Session::session_path(rootc.string()));
+    expect(sess2.find("done_coverage_gate") != std::string::npos, "gate observation");
+    expect(sess2.find("shell_utils.cpp") != std::string::npos ||
+               sess2.find("always_true") != std::string::npos,
+           "mentions missing cpp or marker");
+    unsetenv("L2_FEAT_POST_EDIT_COVERAGE");
+    fs::remove_all(rootc, ec);
   }
 
   fs::remove_all(root, ec);

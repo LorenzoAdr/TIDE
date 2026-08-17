@@ -617,24 +617,115 @@ int count_content_lines(const std::string& text) {
   return n;
 }
 
+std::string first_content_line(const std::string& text) {
+  std::istringstream in(text);
+  std::string line;
+  while (std::getline(in, line)) {
+    const std::string t = trim_ws(line);
+    if (!t.empty()) {
+      return t;
+    }
+  }
+  return {};
+}
+
+bool replace_has_search_prefix(const std::string& search, const std::string& replace,
+                               std::string* added) {
+  if (search.empty() || replace.size() <= search.size()) {
+    return false;
+  }
+  if (replace.compare(0, search.size(), search) == 0) {
+    if (added) {
+      *added = replace.substr(search.size());
+    }
+    return true;
+  }
+  const std::string s = trim_ws(search);
+  const std::string r = trim_ws(replace);
+  if (s.empty() || r.size() <= s.size()) {
+    return false;
+  }
+  if (r.compare(0, s.size(), s) == 0) {
+    if (added) {
+      *added = r.substr(s.size());
+    }
+    return true;
+  }
+  return false;
+}
+
+bool looks_like_type_opener(const std::string& search) {
+  const std::string line = first_content_line(search);
+  return line.rfind("struct ", 0) == 0 || line.rfind("class ", 0) == 0 ||
+         line.rfind("enum ", 0) == 0 || line.rfind("union ", 0) == 0;
+}
+
+bool looks_like_namespace_opener(const std::string& search) {
+  const std::string line = first_content_line(search);
+  return line.rfind("namespace ", 0) == 0 || line == "namespace {";
+}
+
+bool looks_like_new_api_block(const std::string& added) {
+  const std::string t = trim_ws(added);
+  if (t.size() < 8) {
+    return false;
+  }
+  // Function definition or declaration in the inserted tail.
+  if (t.find(") {") != std::string::npos || t.find("){") != std::string::npos) {
+    return true;
+  }
+  if (t.find(") \n{") != std::string::npos) {
+    return true;
+  }
+  // `bool foo();` / `void bar();`
+  std::istringstream in(added);
+  std::string line;
+  while (std::getline(in, line)) {
+    const std::string s = trim_ws(line);
+    if (s.size() < 6) {
+      continue;
+    }
+    if (s.back() == ';' && s.find('(') != std::string::npos && s.find('=') == std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool opener_only_search(const std::string& search) {
+  const std::string s = trim_ws(search);
+  if (s.empty()) {
+    return false;
+  }
+  const int s_lines = count_content_lines(search);
+  const bool has_open = s.find('{') != std::string::npos;
+  const bool has_close = s.find('}') != std::string::npos;
+  return (has_open && !has_close && s_lines <= 2) ||
+         (!s.empty() && s.back() == '{' && s_lines <= 2);
+}
+
 // Reject "struct Foo {" → full struct body (duplicates the rest of the type).
 // Search must cover the span being replaced; tiny openers expanded into blocks are poison.
+// Prefix-inserts of *new* functions/decls are allowed (namespace / function openers).
 bool hunk_expands_over_opener(const SearchReplaceHunk& h) {
   const std::string search = trim_ws(h.search);
   const std::string replace = trim_ws(h.replace);
   if (search.empty() || replace.size() <= search.size()) {
     return false;
   }
-  const int s_lines = count_content_lines(search);
-  const int r_lines = count_content_lines(replace);
-  const bool has_open = search.find('{') != std::string::npos;
-  const bool has_close = search.find('}') != std::string::npos;
-  const bool opener_only =
-      (has_open && !has_close && s_lines <= 2) ||
-      (!search.empty() && search.back() == '{' && s_lines <= 2);
-  if (!opener_only) {
+  std::string added;
+  const bool prefix = replace_has_search_prefix(h.search, h.replace, &added);
+  if (prefix && looks_like_new_api_block(added)) {
+    if (looks_like_type_opener(h.search)) {
+      return true;
+    }
     return false;
   }
+  if (!opener_only_search(h.search)) {
+    return false;
+  }
+  const int s_lines = count_content_lines(search);
+  const int r_lines = count_content_lines(replace);
   // Full braced body (or many lines) replacing just the opener.
   if (r_lines >= 4 && r_lines >= s_lines * 3) {
     return true;
@@ -655,6 +746,179 @@ std::string hunk_shape_error(const SearchReplaceHunk& h) {
            "hasta `};`), no solo la línea de apertura";
   }
   return {};
+}
+
+void split_added_decl_def(const std::string& added, std::string* decls, std::string* defs) {
+  if (decls) {
+    decls->clear();
+  }
+  if (defs) {
+    defs->clear();
+  }
+  std::string acc;
+  int depth = 0;
+  for (std::size_t i = 0; i < added.size(); ++i) {
+    acc.push_back(added[i]);
+    if (added[i] == '{') {
+      ++depth;
+    } else if (added[i] == '}') {
+      if (depth > 0) {
+        --depth;
+      }
+      if (depth == 0) {
+        if (defs) {
+          *defs += acc;
+        }
+        acc.clear();
+      }
+    } else if (added[i] == ';' && depth == 0) {
+      if (decls) {
+        *decls += acc;
+      }
+      acc.clear();
+    }
+  }
+  if (!acc.empty() && defs) {
+    // Trailing whitespace / incomplete — keep with defs only if it had a brace.
+    if (acc.find('{') != std::string::npos) {
+      *defs += acc;
+    } else if (decls) {
+      *decls += acc;
+    }
+  }
+}
+
+std::string read_file_raw(const std::string& path);
+bool path_looks_like_header(const std::string& path);
+std::string sibling_header_rel(const std::string& workspace_root, const std::string& rel);
+std::string sibling_source_rel(const std::string& workspace_root, const std::string& rel);
+
+bool rewrite_function_opener_insert(const std::string& workspace_root, SearchReplaceHunk* h) {
+  if (!h) {
+    return false;
+  }
+  std::string added;
+  if (!replace_has_search_prefix(h->search, h->replace, &added) ||
+      !looks_like_new_api_block(added) || !opener_only_search(h->search) ||
+      looks_like_namespace_opener(h->search) || looks_like_type_opener(h->search)) {
+    return false;
+  }
+  fs::path abs = h->path;
+  if (!abs.is_absolute()) {
+    abs = fs::path(workspace_root) / h->path;
+  }
+  abs = abs.lexically_normal();
+  const std::string text = read_file_raw(abs.string());
+  if (text.empty()) {
+    return false;
+  }
+  SearchReplaceSpan sp;
+  std::string err;
+  if (!find_unique_span_allow_flex(text, h->search, &sp, &err)) {
+    return false;
+  }
+  if (!extend_span_to_matching_brace(text, &sp, &err)) {
+    return false;
+  }
+  const std::string full = text.substr(sp.byte_begin, sp.byte_end - sp.byte_begin);
+  if (full.size() < h->search.size()) {
+    return false;
+  }
+  h->search = full;
+  if (!added.empty() && added.front() != '\n' && (full.empty() || full.back() != '\n')) {
+    h->replace = full + "\n" + added;
+  } else {
+    h->replace = full + added;
+  }
+  return true;
+}
+
+std::string sibling_anchor_search(const std::string& file_text) {
+  const std::string ns = "namespace tuide {";
+  if (file_text.find(ns) != std::string::npos) {
+    const auto first = file_text.find(ns);
+    const auto second = file_text.find(ns, first + ns.size());
+    if (second == std::string::npos) {
+      return ns;
+    }
+  }
+  return {};
+}
+
+std::vector<SearchReplaceHunk> split_mixed_sibling_hunks(
+    const std::string& workspace_root, std::vector<SearchReplaceHunk> hunks,
+    const std::vector<std::string>& instruction_paths) {
+  bool want_both = false;
+  for (const auto& p : instruction_paths) {
+    if (path_looks_like_header(p)) {
+      want_both = true;
+    }
+  }
+  if (!want_both) {
+    for (const auto& h : hunks) {
+      const std::string twin = path_looks_like_header(h.path)
+                                   ? sibling_source_rel(workspace_root, h.path)
+                                   : sibling_header_rel(workspace_root, h.path);
+      if (!twin.empty()) {
+        want_both = true;
+        break;
+      }
+    }
+  }
+  if (!want_both) {
+    return hunks;
+  }
+
+  std::vector<SearchReplaceHunk> out;
+  out.reserve(hunks.size() + 1);
+  for (auto& h : hunks) {
+    std::string added;
+    if (!replace_has_search_prefix(h.search, h.replace, &added)) {
+      out.push_back(std::move(h));
+      continue;
+    }
+    std::string decls;
+    std::string defs;
+    split_added_decl_def(added, &decls, &defs);
+    if (trim_ws(decls).empty() || trim_ws(defs).empty()) {
+      out.push_back(std::move(h));
+      continue;
+    }
+    const bool on_header = path_looks_like_header(h.path);
+    const std::string twin = on_header ? sibling_source_rel(workspace_root, h.path)
+                                       : sibling_header_rel(workspace_root, h.path);
+    if (twin.empty()) {
+      out.push_back(std::move(h));
+      continue;
+    }
+    SearchReplaceHunk here = h;
+    SearchReplaceHunk there;
+    there.path = twin;
+    if (on_header) {
+      here.replace = h.search + decls;
+      const std::string twin_text =
+          read_file_raw((fs::path(workspace_root) / twin).lexically_normal().string());
+      std::string anchor = sibling_anchor_search(twin_text);
+      if (anchor.empty()) {
+        anchor = h.search;
+      }
+      there.search = anchor;
+      there.replace = anchor + defs;
+    } else {
+      here.replace = h.search + defs;
+      const std::string twin_text =
+          read_file_raw((fs::path(workspace_root) / twin).lexically_normal().string());
+      std::string anchor = sibling_anchor_search(twin_text);
+      if (anchor.empty()) {
+        anchor = h.search;
+      }
+      there.search = anchor;
+      there.replace = anchor + decls;
+    }
+    out.push_back(std::move(here));
+    out.push_back(std::move(there));
+  }
+  return out;
 }
 
 std::vector<std::string> parse_pack_targets_header(const std::string& pack);
@@ -722,7 +986,7 @@ std::string suggest_path_for_search(const std::string& workspace_root, const Sea
     }
     const std::string text = read_file_raw(abs.string());
     std::string err;
-    if (!find_unique_span(text, h.search, nullptr, &err)) {
+    if (!find_unique_span_allow_flex(text, h.search, nullptr, &err)) {
       continue;
     }
     if (!unique.empty()) {
@@ -776,14 +1040,12 @@ std::string pack_span_hint(const std::string& workspace_root, const std::string&
     return {};
   }
   std::string body = pack.substr(body_start + 1, fence_end - (body_start + 1));
+  // Keep blank lines — stripping them taught models collapsed searches that fail exact match.
   std::istringstream in(body);
   std::ostringstream out;
   std::string line;
   int n = 0;
-  while (std::getline(in, line) && n < 12) {
-    if (trim_ws(line).empty()) {
-      continue;
-    }
+  while (std::getline(in, line) && n < 16) {
     out << line << '\n';
     ++n;
   }
@@ -1367,6 +1629,349 @@ std::vector<std::string> missing_instruction_paths(const std::string& workspace_
   return missing;
 }
 
+constexpr int kMaxCoverageGatePushbacks = 3;
+constexpr std::size_t kMaxAppliedBlobChars = 48000;
+constexpr int kMaxCoverageBodyLines = 36;
+constexpr std::size_t kMaxCoverageBodyChars = 1800;
+
+std::string instruction_section_text(const std::string& session_md) {
+  const auto instr = session_md.find("## Instruction");
+  if (instr == std::string::npos) {
+    return {};
+  }
+  auto end = session_md.size();
+  for (const char* next : {"## Ranked map", "## Code pack", "## Observations"}) {
+    const auto p = session_md.find(next, instr + 1);
+    if (p != std::string::npos && p < end) {
+      end = p;
+    }
+  }
+  return session_md.substr(instr, end - instr);
+}
+
+bool coverage_marker_interesting(const std::string& raw) {
+  if (raw.size() < 3 || raw.size() > 64) {
+    return false;
+  }
+  std::string lower = to_lower_copy(raw);
+  static const char* kStop[] = {
+      "src",  "util", "void", "bool", "true", "false", "return", "static", "constexpr",
+      "int",  "auto", "string", "namespace", "include", "pragma", "once", "class", "struct",
+      "const", "using", "public", "private", "protected", "template", "typename", "nullptr",
+      "size", "path", "file", "edit", "done", "plan", "tool", "both", "ambos", "archivos",
+      "obligatorios", "añade", "encima", "junto", "también", "acepta", "tras", "cambia",
+      "default", "selected", "query", "instruction", "shell", "command", "exists", "quote",
+      "nullptr", "stdio", "cstdlib", "iostream", "vector", "map",
+  };
+  for (const char* s : kStop) {
+    if (lower == s) {
+      return false;
+    }
+  }
+  // Prefer distinctive tokens: L2_*, snake_case, kCamel, CamelCase-ish.
+  if (lower.rfind("l2_", 0) == 0) {
+    return true;
+  }
+  if (raw.find('_') != std::string::npos) {
+    return true;
+  }
+  if (raw.size() >= 2 && raw[0] == 'k' && std::isupper(static_cast<unsigned char>(raw[1]))) {
+    return true;
+  }
+  bool has_upper = false;
+  bool has_lower = false;
+  for (unsigned char c : raw) {
+    if (std::isupper(c)) {
+      has_upper = true;
+    }
+    if (std::islower(c)) {
+      has_lower = true;
+    }
+  }
+  if (has_upper && has_lower && raw.size() >= 6) {
+    return true;
+  }
+  return false;
+}
+
+// Distinctive idents / L2_* markers from Instruction (preserve case for display).
+std::vector<std::string> instruction_coverage_markers(const std::string& session_md) {
+  const std::string section = instruction_section_text(session_md);
+  std::vector<std::string> out;
+  std::unordered_set<std::string> seen_lower;
+  auto consider = [&](const std::string& tok) {
+    if (!coverage_marker_interesting(tok)) {
+      return;
+    }
+    const std::string key = to_lower_copy(tok);
+    if (!seen_lower.insert(key).second) {
+      return;
+    }
+    out.push_back(tok);
+  };
+  // Explicit L2_* (any case) from raw text.
+  for (std::size_t i = 0; i + 3 < section.size(); ++i) {
+    if ((section[i] == 'L' || section[i] == 'l') &&
+        (section[i + 1] == '2') && section[i + 2] == '_') {
+      std::size_t j = i;
+      while (j < section.size() &&
+             (std::isalnum(static_cast<unsigned char>(section[j])) || section[j] == '_')) {
+        ++j;
+      }
+      consider(section.substr(i, j - i));
+      i = j;
+    }
+  }
+  // Ident tokens from query: line (preserve case).
+  std::size_t qpos = 0;
+  while ((qpos = section.find("query:", qpos)) != std::string::npos) {
+    const bool at_line = (qpos == 0) || section[qpos - 1] == '\n';
+    if (!at_line) {
+      qpos += 6;
+      continue;
+    }
+    const auto eol = section.find('\n', qpos);
+    const std::string line =
+        section.substr(qpos + 6, (eol == std::string::npos ? section.size() : eol) - (qpos + 6));
+    std::string cur;
+    auto flush = [&]() {
+      if (!cur.empty()) {
+        consider(cur);
+      }
+      cur.clear();
+    };
+    for (unsigned char ch : line) {
+      if (std::isalnum(ch) || ch == '_') {
+        cur.push_back(static_cast<char>(ch));
+      } else {
+        flush();
+      }
+    }
+    flush();
+    qpos = eol == std::string::npos ? section.size() : eol + 1;
+  }
+  // Cap to avoid huge gates on long queries.
+  if (out.size() > 12) {
+    out.resize(12);
+  }
+  return out;
+}
+
+bool blob_contains_ci(const std::string& hay, const std::string& needle) {
+  if (needle.empty()) {
+    return true;
+  }
+  if (hay.size() < needle.size()) {
+    return false;
+  }
+  const std::string h = to_lower_copy(hay);
+  const std::string n = to_lower_copy(needle);
+  return h.find(n) != std::string::npos;
+}
+
+std::vector<std::string> missing_instruction_markers(const std::string& session_md,
+                                                     const std::string& applied_blob) {
+  std::vector<std::string> missing;
+  for (const auto& m : instruction_coverage_markers(session_md)) {
+    if (!blob_contains_ci(applied_blob, m)) {
+      missing.push_back(m);
+    }
+  }
+  return missing;
+}
+
+struct InstructionCoverageGaps {
+  std::vector<std::string> missing_paths;
+  std::vector<std::string> missing_markers;
+  bool empty() const { return missing_paths.empty() && missing_markers.empty(); }
+};
+
+InstructionCoverageGaps collect_instruction_coverage_gaps(
+    const std::string& workspace_root, const std::vector<std::string>& edited_paths,
+    const std::string& applied_blob) {
+  InstructionCoverageGaps g;
+  std::string sess;
+  {
+    std::ifstream in(Level2Session::session_path(workspace_root));
+    if (in) {
+      std::ostringstream ss;
+      ss << in.rdbuf();
+      sess = ss.str();
+    }
+  }
+  g.missing_paths = missing_instruction_paths(workspace_root, edited_paths);
+  g.missing_markers = missing_instruction_markers(sess, applied_blob);
+  return g;
+}
+
+bool coverage_gate_should_block(const std::string& workspace_root,
+                                const InstructionCoverageGaps& gaps) {
+  if (gaps.empty()) {
+    return false;
+  }
+  // Paths missing always block when Instruction named any src path we track.
+  if (!gaps.missing_paths.empty()) {
+    return true;
+  }
+  // Markers: block when ≥2 distinctive markers and some missing (multi-locus).
+  if (gaps.missing_markers.empty()) {
+    return false;
+  }
+  std::string sess;
+  {
+    std::ifstream in(Level2Session::session_path(workspace_root));
+    if (in) {
+      std::ostringstream ss;
+      ss << in.rdbuf();
+      sess = ss.str();
+    }
+  }
+  const auto all_markers = instruction_coverage_markers(sess);
+  if (all_markers.size() >= 2) {
+    return true;
+  }
+  return false;
+}
+
+void append_applied_blob(std::string* blob, const std::string& new_text) {
+  if (blob == nullptr || new_text.empty()) {
+    return;
+  }
+  if (!blob->empty()) {
+    blob->push_back('\n');
+  }
+  *blob += new_text;
+  if (blob->size() > kMaxAppliedBlobChars) {
+    blob->erase(0, blob->size() - kMaxAppliedBlobChars);
+  }
+}
+
+std::string sibling_source_rel(const std::string& workspace_root, const std::string& rel) {
+  fs::path p(rel);
+  if (!is_header_ext(p.extension().string())) {
+    return {};
+  }
+  static const char* kExts[] = {".cpp", ".cc", ".cxx", ".c"};
+  for (const char* sext : kExts) {
+    fs::path cand = p;
+    cand.replace_extension(sext);
+    std::error_code ec;
+    if (fs::exists(fs::path(workspace_root) / cand, ec) && !ec) {
+      return cand.generic_string();
+    }
+  }
+  return {};
+}
+
+// Best-effort fresh on-disk snippet for coverage gaps (uses get_code_of / file read).
+std::string fetch_coverage_bodies(Level2SessionDeps& deps, const std::string& workspace_root,
+                                  const InstructionCoverageGaps& gaps,
+                                  const std::vector<std::string>& edited_paths) {
+  std::ostringstream out;
+  int bodies = 0;
+  auto add_body = [&](const std::string& label, const std::string& text) {
+    if (bodies >= 2 || text.empty()) {
+      return;
+    }
+    ++bodies;
+    out << "### fresh `" << label << "`\n\n```\n";
+    out << Level2Session::truncate_observation(text, kMaxCoverageBodyLines, kMaxCoverageBodyChars);
+    if (!text.empty() && text.back() != '\n') {
+      out << '\n';
+    }
+    out << "```\n\n";
+  };
+
+  std::vector<std::string> targets;
+  for (const auto& p : gaps.missing_paths) {
+    targets.push_back(p);
+  }
+  // Marker gaps on already-edited paths: re-show those paths + sibling twin.
+  if (targets.empty() && !gaps.missing_markers.empty()) {
+    for (const auto& p : edited_paths) {
+      targets.push_back(p);
+    }
+  }
+  for (const auto& p : gaps.missing_paths) {
+    const std::string twin = sibling_header_rel(workspace_root, p);
+    if (!twin.empty()) {
+      targets.push_back(twin);
+    }
+    const std::string src = sibling_source_rel(workspace_root, p);
+    if (!src.empty()) {
+      targets.push_back(src);
+    }
+  }
+  // Dedupe preserve order.
+  std::unordered_set<std::string> seen;
+  std::vector<std::string> uniq;
+  for (const auto& t : targets) {
+    if (seen.insert(t).second) {
+      uniq.push_back(t);
+    }
+  }
+
+  for (const auto& path : uniq) {
+    if (bodies >= 2) {
+      break;
+    }
+    std::string text;
+    // Prefer marker-named symbol fetch when possible.
+    std::string arg = path;
+    if (!gaps.missing_markers.empty()) {
+      arg = path + ":" + gaps.missing_markers.front();
+    }
+    if (deps.tools != nullptr && deps.tools->has("get_code_of")) {
+      const AiToolResult tr = deps.tools->invoke("get_code_of", arg);
+      if (tr.ok && !tr.text.empty() && tr.text.find("error") != 0) {
+        text = tr.text;
+      } else if (arg != path) {
+        const AiToolResult tr2 = deps.tools->invoke("get_code_of", path);
+        if (tr2.ok) {
+          text = tr2.text;
+        }
+      }
+    }
+    if (text.empty()) {
+      text = read_file_raw((fs::path(workspace_root) / path).string());
+    }
+    add_body(arg, text);
+  }
+  return out.str();
+}
+
+std::string format_coverage_observation(int turn, const char* kind,
+                                        const InstructionCoverageGaps& gaps,
+                                        const std::string& bodies) {
+  std::ostringstream block;
+  block << "### turn " << turn << " — " << kind << "\n\n";
+  block << "Instruction coverage incompleta. No emitas `done` aún.\n\n";
+  if (!gaps.missing_paths.empty()) {
+    block << "Paths de Instruction sin editar:\n";
+    for (const auto& p : gaps.missing_paths) {
+      block << "- `" << p << "`\n";
+    }
+    block << '\n';
+  }
+  if (!gaps.missing_markers.empty()) {
+    block << "Marcadores / símbolos de Instruction aún no presentes en tus edits:\n";
+    for (const auto& m : gaps.missing_markers) {
+      block << "- `" << m << "`\n";
+    }
+    block << '\n';
+  }
+  block << "Siguiente acción obligatoria: `{\"action\":\"edit\",\"hunks\":[…]}` "
+           "cubriendo lo que falta (multi-hunk / sibling hpp+cpp OK).\n\n";
+  if (!bodies.empty()) {
+    block << "## Código fresco (disco actual)\n\n" << bodies;
+  }
+  return block.str();
+}
+
+bool post_edit_coverage_enabled() {
+  return l2_feat::enabled("POST_EDIT_COVERAGE");
+}
+
 // Idents from Instruction missing in pack (generic: no domain facets).
 std::vector<std::string> pack_instruction_gaps(const std::string& pack,
                                                const std::vector<std::string>& needles) {
@@ -1842,6 +2447,8 @@ Level2Session::State Level2Session::load_state(const std::string& workspace_root
     st.map_stale = j.value("map_stale", false);
     st.map_review = j.value("map_review", false);
     st.last_op_id = j.value("last_op_id", static_cast<uint64_t>(0));
+    st.applied_blob = j.value("applied_blob", "");
+    st.coverage_gate_pushback = j.value("coverage_gate_pushback", 0);
     if (j.contains("watchlist") && j["watchlist"].is_array()) {
       for (const auto& t : j["watchlist"]) {
         if (t.is_string()) {
@@ -1907,6 +2514,8 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
                       {"last_op_id", st.last_op_id},
                       {"watchlist", st.watchlist},
                       {"edited_paths", st.edited_paths},
+                      {"applied_blob", st.applied_blob},
+                      {"coverage_gate_pushback", st.coverage_gate_pushback},
                       {"pending", pending}};
   return write_file(state_path(workspace_root), j.dump(2) + "\n", err);
 }
@@ -3823,6 +4432,18 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
       block << "## replace (intended)\n\n```\n"
             << truncate_observation(replace, 24) << "```\n\n";
     }
+    if (!path.empty() && err_msg.find("0 matches") != std::string::npos) {
+      fs::path abs = path;
+      if (!abs.is_absolute()) {
+        abs = fs::path(workspace_root) / path;
+      }
+      const std::string on_disk = read_file_raw(abs.lexically_normal().string());
+      const std::string excerpt = disk_excerpt_near_search(on_disk, search, 3, 18);
+      if (!excerpt.empty()) {
+        block << "## on disk (copia literal al `search`; respeta líneas en blanco)\n\n```\n"
+              << truncate_observation(excerpt, 20) << "```\n\n";
+      }
+    }
     if (identical_repeat) {
       block << "**Hunk idéntico rechazado.** No reemitas el mismo `search`/`replace`. "
                "Obligatorio: `get_code_of` del locus (p.ej. `path:Symbol` o `path:A-B`) y un "
@@ -3881,6 +4502,14 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
   std::vector<SearchReplaceHunk> work = hunks;
   for (auto& h : work) {
     normalize_hunk_escape_noise(&h);
+  }
+  for (auto& h : work) {
+    rewrite_function_opener_insert(workspace_root, &h);
+  }
+  {
+    const std::string sess = read_file_raw(session_path(workspace_root));
+    const auto instr_paths = instruction_src_paths(workspace_root, sess);
+    work = split_mixed_sibling_hunks(workspace_root, std::move(work), instr_paths);
   }
 
   const std::string fp = edit_hunks_fingerprint(work);
@@ -3972,6 +4601,7 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
     p.before = applied[i].before;
     st.pending.push_back(std::move(p));
     remember_edited_path(st.edited_paths, work[i].path);
+    append_applied_blob(&st.applied_blob, applied[i].new_text);
   }
   out.turn = st.turn;
 
@@ -4085,8 +4715,14 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     std::string err;
     append_observation(workspace_root, block.str(), &out.session_chars, &err);
 
-    // Restore full initial map for "¿algo más?" — skip if it was a stale (wrong-query) map.
-    if (!st.map_stale) {
+    const bool cov_on = post_edit_coverage_enabled();
+    InstructionCoverageGaps gaps;
+    if (cov_on) {
+      gaps = collect_instruction_coverage_gaps(workspace_root, st.edited_paths, st.applied_blob);
+    }
+
+    // Restore full initial map for "¿algo más?" — skip if gaps (noise) or stale map.
+    if (gaps.empty() && !st.map_stale) {
       const std::string initial_map = read_file(map_initial_path(workspace_root));
       if (!initial_map.empty()) {
         std::string map_err;
@@ -4103,14 +4739,15 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     st.map_review = true;
     st.pending.clear();
     st.compile_attempt = 0;  // fresh fail budget for the next edit batch
-    save_state(workspace_root, st, nullptr);
-    write_response_json(workspace_root, true, "compile", "", "",
-                        "compile ok; map restored — ¿algo más?", "", st.turn, "edit");
-    append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
-                                     ",\"event\":\"compile_ok\",\"exit\":0,\"ms\":" +
-                                     std::to_string(compile_ms) +
-                                     ",\"resume\":\"edit\",\"map_review\":1}");
-    if (l2_feat::enabled("MAP_REVIEW_PENDING")) {
+
+    if (cov_on && !gaps.empty() && coverage_gate_should_block(workspace_root, gaps)) {
+      const std::string bodies =
+          fetch_coverage_bodies(deps_, workspace_root, gaps, st.edited_paths);
+      const std::string cov =
+          format_coverage_observation(st.turn, "post_edit_coverage", gaps, bodies);
+      append_observation(workspace_root, cov, &out.session_chars, nullptr);
+      st.last_action = "post_edit_coverage";
+    } else if (l2_feat::enabled("MAP_REVIEW_PENDING")) {
       const auto miss = missing_instruction_paths(workspace_root, st.edited_paths);
       if (!miss.empty()) {
         std::ostringstream pend;
@@ -4123,9 +4760,21 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
         append_observation(workspace_root, pend.str(), &out.session_chars, nullptr);
       }
     }
+
+    save_state(workspace_root, st, nullptr);
+    write_response_json(workspace_root, true, "compile", "", "",
+                        gaps.empty() ? "compile ok; map_review — ¿algo más?"
+                                     : "compile ok; coverage gaps — edit required",
+                        "", st.turn, "edit");
+    append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                     ",\"event\":\"compile_ok\",\"exit\":0,\"ms\":" +
+                                     std::to_string(compile_ms) +
+                                     ",\"resume\":\"edit\",\"map_review\":1,\"coverage_gaps\":" +
+                                     (gaps.empty() ? "0" : "1") + "}");
     out.ok = true;
     out.action = "compile";
-    out.summary = "OK compile; map_review (¿algo más?)";
+    out.summary = gaps.empty() ? "OK compile; map_review (¿algo más?)"
+                               : "OK compile; post_edit_coverage";
     out.phase = "edit";
     out.turn = st.turn;
     return out;
@@ -4151,6 +4800,42 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
     if (l2_feat::enabled("SIBLING_UNDECL")) {
       block << "**Siguiente acción obligatoria:** `action=edit` incluyendo el `.hpp`/`.h` "
                "hermano (declaración) además del `.cpp` si falta.\n\n";
+    }
+  }
+  {
+    const std::string sess = read_file_raw(session_path(workspace_root));
+    const auto want = instruction_src_paths(workspace_root, sess);
+    std::unordered_set<std::string> have;
+    for (const auto& p : st.pending) {
+      have.insert(p.path);
+    }
+    for (const auto& p : st.edited_paths) {
+      have.insert(p);
+    }
+    std::vector<std::string> miss;
+    for (const auto& p : want) {
+      if (!have.count(p)) {
+        miss.push_back(p);
+      }
+    }
+    if (!miss.empty()) {
+      block << "Instruction también pide path(s) sin hunk en este intento:";
+      for (const auto& p : miss) {
+        block << " `" << p << "`";
+      }
+      block << "\nNo mezcles declaración + definición en un solo archivo: hunk de `foo();` en "
+               "el `.hpp` y `foo() { … }` en el `.cpp` hermano.\n\n";
+      for (const auto& p : miss) {
+        if (p.size() > 1) {
+          const std::string body =
+              read_file_raw((fs::path(workspace_root) / p).lexically_normal().string());
+          const std::string excerpt = disk_excerpt_near_search(body, "namespace tuide {", 1, 14);
+          if (!excerpt.empty()) {
+            block << "## on disk `" << p << "` (base del search en el hermano)\n\n```\n"
+                  << truncate_observation(excerpt, 16) << "```\n\n";
+          }
+        }
+      }
     }
   }
   for (std::size_t i = 0; i < st.pending.size(); ++i) {
@@ -4454,8 +5139,31 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
   }
 
   ++st.turn;
-  // Final done (no next): optional gate if Instruction named multiple src paths.
-  if (l2_feat::enabled("DONE_PATH_GATE")) {
+  // Final done (no next): coverage gate (paths and/or Instruction markers).
+  if (post_edit_coverage_enabled()) {
+    const auto gaps =
+        collect_instruction_coverage_gaps(workspace_root, st.edited_paths, st.applied_blob);
+    if (coverage_gate_should_block(workspace_root, gaps) &&
+        st.coverage_gate_pushback < kMaxCoverageGatePushbacks) {
+      ++st.coverage_gate_pushback;
+      st.last_action = "done_coverage_gate";
+      out.turn = st.turn;
+      const std::string bodies =
+          fetch_coverage_bodies(deps_, workspace_root, gaps, st.edited_paths);
+      const std::string cov =
+          format_coverage_observation(st.turn, "done_coverage_gate", gaps, bodies);
+      std::string err;
+      append_observation(workspace_root, cov, &out.session_chars, &err);
+      save_state(workspace_root, st, nullptr);
+      write_response_json(workspace_root, false, "done", "done_coverage_gate", "", cov,
+                          "instruction coverage incomplete", st.turn, st.phase);
+      out.ok = true;
+      out.phase = st.phase;
+      out.summary = "done_coverage_gate";
+      out.error = "done_coverage_gate";
+      return out;
+    }
+  } else if (l2_feat::enabled("DONE_PATH_GATE")) {
     const std::string sess = read_file(session_path(workspace_root));
     const auto want = instruction_src_paths(workspace_root, sess);
     const auto miss = missing_instruction_paths(workspace_root, st.edited_paths);

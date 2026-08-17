@@ -1,0 +1,11 @@
+{
+  "id": "p_sibling_of_hard",
+  "description": "Baseline cont + forced sibling_of before dual-file edits",
+  "tool_guide": "## Tool guide (compact)\nexplore→plan→pack→edit→compile→map_review→done.\nFirst step: plan with 4–8 path:Symbol. After pack: prefer edit. Tools max 4; refetch Truncated with path:A-B or #tail.\nJSON only. edit hunks need unique multiline search. New API: edit .hpp decl + .cpp def together.\nclarify only if Instruction has no concrete src/ path.\n| tool | arg |\n| get_code_of | path:Symbol|#tail|A-B |\n| file_outline | path |\n| search | needles |\n| headers_of | path |\n| sibling_of | path (.cpp↔.hpp) |\n",
+  "system_extra": "## Priority rules\n- If Instruction names ≥2 concrete src/... paths, your final successful edit batch (or consecutive edits before done) MUST touch each named path.\n- If Instruction asks for ≥2 markers/changes in one file, put them in one edit hunks[] or two edits before done — never leave one out.\n- After compile OK (map_review), re-read Instruction; if any named path/marker missing from your edits, emit edit again — do not done yet.\n\n## Sibling API rule\nWhen Instruction names both .hpp and .cpp (or decl+def):\n1) Call sibling_of on one named path before the first edit.\n2) SAME action=edit MUST include hunks for BOTH files.\n3) Compile undeclared/undefined ⇒ next edit MUST add the missing sibling hunk.\n\nKeep JSON tiny.\n",
+  "user_overlays": {
+    "edit": "If Instruction has hpp+cpp: sibling_of first if needed, then hunks on BOTH files in this edit.",
+    "map_review": "Before done: every Instruction path/marker must be in the diff. Dual-file APIs need both files.",
+    "pack": "For dual-file APIs: resolve sibling_of then edit both loci now."
+  }
+}

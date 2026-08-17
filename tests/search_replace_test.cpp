@@ -55,6 +55,50 @@ int main() {
     expect(h.search == "x\ny" && h.replace == "x\ny", "normalize hunk");
   }
   {
+    // Flex match: model search collapses blank lines vs disk.
+    const std::string disk =
+        "#pragma once\n\n#include <string>\n\nnamespace tuide {\n\nbool command_exists();\n\n}\n";
+    const std::string collapsed =
+        "#pragma once\n#include <string>\nnamespace tuide {\nbool command_exists();\n}\n";
+    SearchReplaceSpan sp;
+    std::string err;
+    expect(!find_unique_span(disk, collapsed, &sp, &err), "exact misses blanks");
+    expect(tuide::find_unique_span_flex(disk, collapsed, &sp, &err), "flex hits blanks");
+    expect(sp.byte_begin == 0, "flex begin");
+    SearchReplaceHunk h;
+    h.path = "shell_utils.hpp";
+    h.search = collapsed;
+    h.replace = "#pragma once\n\n#include <string>\n\nnamespace tuide {\n\n"
+                "// L2_PS_A\nbool command_exists();\n\n}\n";
+    const auto r = apply_hunk_to_text(disk, h);
+    expect(r.ok, "flex apply ok");
+    expect(r.after.find("// L2_PS_A") != std::string::npos, "flex applied marker");
+    expect(r.old_text.find("\n\n") != std::string::npos, "old_text is disk span");
+  }
+  {
+    // Trailing whitespace tolerance.
+    SearchReplaceSpan sp;
+    std::string err;
+    expect(tuide::find_unique_span_flex("foo  \nbar\n", "foo\nbar\n", &sp, &err), "rstrip flex");
+  }
+  {
+    const std::string disk = "a\n\nb\n\nc\n";
+    const std::string excerpt = tuide::disk_excerpt_near_search(disk, "b\n", 2, 10);
+    expect(excerpt.find("a\n") != std::string::npos && excerpt.find("b\n") != std::string::npos,
+           "disk excerpt");
+  }
+  {
+    SearchReplaceSpan sp;
+    std::string err;
+    const std::string hay =
+        "bool command_exists() {\n  return false;\n}\nbool other() { return 1; }\n";
+    expect(find_unique_span(hay, "bool command_exists() {", &sp, &err), "opener unique");
+    expect(tuide::extend_span_to_matching_brace(hay, &sp, &err), "extend brace");
+    const std::string full = hay.substr(sp.byte_begin, sp.byte_end - sp.byte_begin);
+    expect(full.find("return false;") != std::string::npos, "includes body");
+    expect(full.find("bool other") == std::string::npos, "stops before next fn");
+  }
+  {
     // parse_search_replace_json also normalizes.
     nlohmann::json j = {
         {"hunks", {{{"path", "a.cpp"}, {"search", "foo\\s*bar"}, {"replace", "z"}}}}};
