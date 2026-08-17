@@ -3,6 +3,7 @@
 # Modos TUIDE_EXTRACT_MODE:
 #   gunzip      — descarga .gz → payload/bin/$TUIDE_BINARY_NAME
 #   tar_binary  — tar.gz/.tar.xz → busca $TUIDE_BINARY_NAME → payload/bin/
+#   zip_binary  — .zip → busca $TUIDE_ARCHIVE_BINARY_NAME (o BINARY_NAME) → payload/bin/$TUIDE_BINARY_NAME
 #   tar_tree    — extrae el tarball completo en payload/ (p. ej. lua-language-server)
 set -euo pipefail
 
@@ -48,6 +49,8 @@ TUIDE_MANIFEST_PREFIX="$(strip_cmake_quotes "${TUIDE_MANIFEST_PREFIX}")"
 for tool in zstd sha256sum objcopy tar; do
   command -v "${tool}" >/dev/null || die "falta ${tool}"
 done
+ARCHIVE_BINARY_NAME="${TUIDE_ARCHIVE_BINARY_NAME:-${TUIDE_BINARY_NAME}}"
+ARCHIVE_BINARY_NAME="$(strip_cmake_quotes "${ARCHIVE_BINARY_NAME}")"
 
 download_file() {
   local url="$1"
@@ -88,6 +91,18 @@ case "${TUIDE_EXTRACT_MODE}" in
     found_bin="$(find "${TUIDE_STAGING_DIR}" -type f -name "${TUIDE_BINARY_NAME}" | head -n1)"
     [[ -n "${found_bin}" && -f "${found_bin}" ]] \
       || die "no se encontró ${TUIDE_BINARY_NAME} en el archivo"
+    cp -a "${found_bin}" "${TUIDE_PAYLOAD_DIR}/bin/${TUIDE_BINARY_NAME}"
+    chmod +x "${TUIDE_PAYLOAD_DIR}/bin/${TUIDE_BINARY_NAME}"
+    ;;
+  zip_binary)
+    command -v unzip >/dev/null || die "falta unzip"
+    unzip -q "${TUIDE_DOWNLOAD_PATH}" -d "${TUIDE_STAGING_DIR}"
+    found_bin="$(find "${TUIDE_STAGING_DIR}" -type f -name "${ARCHIVE_BINARY_NAME}" | head -n1)"
+    if [[ -z "${found_bin}" && "${ARCHIVE_BINARY_NAME}" != "${TUIDE_BINARY_NAME}" ]]; then
+      found_bin="$(find "${TUIDE_STAGING_DIR}" -type f -name "${TUIDE_BINARY_NAME}" | head -n1)"
+    fi
+    [[ -n "${found_bin}" && -f "${found_bin}" ]] \
+      || die "no se encontró ${ARCHIVE_BINARY_NAME} en el zip"
     cp -a "${found_bin}" "${TUIDE_PAYLOAD_DIR}/bin/${TUIDE_BINARY_NAME}"
     chmod +x "${TUIDE_PAYLOAD_DIR}/bin/${TUIDE_BINARY_NAME}"
     ;;

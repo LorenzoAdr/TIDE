@@ -53,6 +53,8 @@ struct LspRuntimeFlags {
   bool make_starting = false;
   bool yaml_ready = false;
   bool yaml_starting = false;
+  bool xml_ready = false;
+  bool xml_starting = false;
 };
 
 // Resolves binaries and combines with live LSP runtime flags.

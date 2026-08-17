@@ -183,6 +183,18 @@ const std::vector<LspMissingPromptInfo>& catalog() {
         "BUNDLE_YAML_LS",
         "1",
     });
+    entries.push_back({
+        "lemminx",
+        "lsp_toast.lang.xml",
+        "status.lemminx_missing",
+        prefer_apt(nullptr,
+                   "echo \"Descarga LemMinX desde "
+                   "https://github.com/redhat-developer/vscode-xml/releases "
+                   "y colócalo en PATH como lemminx\""),
+        "--bundle-lemminx",
+        "BUNDLE_LEMMINX",
+        "1",
+    });
     return entries;
   }();
   return kCatalog;
@@ -269,6 +281,7 @@ std::string language_pack_id_for_lsp_server(const std::string& server_id) {
       {"neocmakelsp", "cmake"},
       {"make-ls", "make"},
       {"yaml-language-server", "yaml"},
+      {"lemminx", "xml"},
       {"clangd", "cpp"},
   };
   const auto it = kMap.find(server_id);

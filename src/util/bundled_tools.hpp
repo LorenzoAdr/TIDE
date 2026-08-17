@@ -89,6 +89,11 @@ struct MakeLsLocation {
   enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
 };
 
+struct LemminxLocation {
+  std::string binary_path;
+  enum class Source { Env, Toolpack, SystemPath, Bundled } source = Source::SystemPath;
+};
+
 struct YamlLsLocation {
   std::string binary_path;
   bool needs_stdio_flag = true;
@@ -136,6 +141,7 @@ std::optional<LuaLsLocation> resolve_lua_language_server();
 std::optional<TypescriptLsLocation> resolve_typescript_language_server();
 std::optional<NeocmakelspLocation> resolve_neocmakelsp();
 std::optional<MakeLsLocation> resolve_make_ls();
+std::optional<LemminxLocation> resolve_lemminx();
 std::optional<YamlLsLocation> resolve_yaml_language_server();
 std::optional<BashDebugAdapterLocation> resolve_bash_debug_adapter();
 std::optional<std::string> resolve_shellcheck();

@@ -104,6 +104,8 @@ int main() {
   opts.workspace_root = root.string();
   opts.settings.max_steps = 8;
   opts.settings.max_tokens = 256;
+  opts.budget = tuide::budget_from_n_ctx(8192, "local");
+  expect(opts.budget.prompt_explore == 10000, "injected budget explore");
 
   std::vector<std::string> log_lines;
   const auto result =

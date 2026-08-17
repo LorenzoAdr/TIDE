@@ -1,19 +1,18 @@
 #include "ai/level2_autonomous_loop.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <sstream>
 #include <vector>
 
 #include "ai/ai_trace.hpp"
+#include "ai/ai_types.hpp"
 #include "ai/l2_action.hpp"
 
 namespace tuide {
 namespace {
 
-constexpr std::size_t kMaxPromptCharsExplore = 10000;  // fits ai.level2.n_ctx=8192 with system
-constexpr std::size_t kMaxPromptCharsEdit = 8000;
-constexpr std::size_t kExploreObsBudget = 3500;
 constexpr int kExploreMapDetailTop = 5;  // full snippet only for top-N ranked entries in prompt
 
 bool is_map_entry_start_line(const std::string& line) {
@@ -161,7 +160,8 @@ std::string read_file_limited(const std::string& path, std::size_t max_chars) {
 }
 
 // Explore: Instruction + slim map (detail only top-N) + short Observations tail.
-std::string read_session_for_explore(const std::string& path, std::size_t max_chars) {
+std::string read_session_for_explore(const std::string& path, std::size_t max_chars,
+                                     std::size_t obs_budget) {
   std::ifstream in(path);
   if (!in) {
     return {};
@@ -194,9 +194,9 @@ std::string read_session_for_explore(const std::string& path, std::size_t max_ch
     map_body = body.substr(map_pos + map_mark.size());
   }
 
-  if (obs_body.size() > kExploreObsBudget) {
+  if (obs_budget > 0 && obs_body.size() > obs_budget) {
     const std::string obs_head = obs_mark + "\n\n";
-    const std::size_t keep = kExploreObsBudget > 100 ? kExploreObsBudget - 80 : kExploreObsBudget / 2;
+    const std::size_t keep = obs_budget > 100 ? obs_budget - 80 : obs_budget / 2;
     obs_body = obs_head + "…[observations medias omitidas]…\n\n" +
                obs_body.substr(obs_body.size() - std::min(keep, obs_body.size()));
   }
@@ -282,7 +282,8 @@ std::string read_instruction_only(const std::string& session_body) {
 }
 
 // Instruction + code pack (+ short Observations tail for edit_feedback / compile).
-std::string read_session_for_pack(const std::string& workspace_root, std::size_t max_chars) {
+std::string read_session_for_pack(const std::string& workspace_root, std::size_t max_chars,
+                                  std::size_t obs_tail_budget) {
   const std::string sess = [&]() {
     std::ifstream in(Level2Session::session_path(workspace_root));
     if (!in) {
@@ -313,7 +314,7 @@ std::string read_session_for_pack(const std::string& workspace_root, std::size_t
   std::string obs_tail;
   const auto obs_pos = sess.find("## Observations");
   if (obs_pos != std::string::npos) {
-    constexpr std::size_t kObsTail = 1800;
+    const std::size_t kObsTail = obs_tail_budget > 0 ? obs_tail_budget : 1800;
     const std::string obs = sess.substr(obs_pos);
     if (obs.size() > kObsTail) {
       obs_tail = "## Observations\n\n…[cola]…\n\n" +
@@ -425,36 +426,74 @@ std::string phase_banner(const std::string& phase, int step, int max_steps) {
 }
 
 std::string build_system_prompt(const Level2AutonomousLoopOpts& opts) {
+  const AiWorkflowKind workflow = parse_ai_workflow_kind(opts.workflow);
   std::ostringstream out;
-  out << "Eres el Nivel 2 (coder) de tuide. Exploras el repo y emites ediciones "
-         "Search/Replace de match único.\n"
-         "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
-         "Formatos:\n"
-         "{\"action\":\"plan\",\"targets\":[\"src/a.cpp:Foo\",\"src/b.cpp:42\"],\"summary\":\"…\"}\n"
-         "{\"action\":\"tools\",\"calls\":[{\"name\":\"get_code_of\",\"arg\":\"src/a.cpp:Foo\"},"
-         "{\"name\":\"search\",\"arg\":\"wake\"}]}  // máx 4; extras tras el pack\n"
-         "{\"action\":\"tool\",\"name\":\"get_code_of\",\"arg\":\"src/foo.cpp:Symbol\"}\n"
-         "{\"action\":\"done\",\"summary\":\"evidencia paths:líneas\",\"next\":\"edit\"}\n"
-         "{\"action\":\"done\",\"summary\":\"no encontré X; ¿concretas?\",\"next\":\"clarify\"}\n"
-         "{\"action\":\"done\",\"summary\":\"cambios listos en paths…\"}  // fin real (sin next)\n"
-         "{\"action\":\"edit\",\"hunks\":[{\"path\":\"src/foo.cpp\",\"search\":\"exacto único\","
-         "\"replace\":\"nuevo\"}]}\n"
-         "Fases: en explore la PRIMERA mirada es action=plan (watchlist path:Symbol|path:A-B; "
-         "evitar path bare). "
-         "El runtime normaliza bare→símbolo por needles, merge de packs, prioriza fragmentos "
-         "pequeños, auto-refetch de truncados y marca pack_incomplete. "
-         "Si map_stale=1 no confíes en el top del mapa. "
-         "Tras el pack el prompt es Instruction+pack (sin mapa). "
-         "Extras: tools máx 4. Si [TRUNCATED], usa refetch path:A-B o path:Symbol#mid|#tail "
-         "(default de get_code_of largo = head+tail; path:line en símbolo enorme = ventana). "
-         "done next=edit con pack_incomplete puede rechazarse (pushback). "
-         "action=edit es para phase=edit; si emites edit en explore el runtime auto-promueve. "
-         "Tras edit el runtime compila: compile OK restaura el mapa inicial y pregunta "
-         "«¿algo más?» (plan / edit / done). Clarify prematuro: pushback "
-         "(ai.level2.clarify_pushback_max). "
-         "Reglas: next=edit solo con evidencia en pack/Observations; search único en el "
-         "archivo; no inventes paths; tras edit_feedback corrige el search; "
-         "tras compile fail reemite edit.\n";
+  if (workflow == AiWorkflowKind::Ask) {
+    out << "Eres el Nivel 2 (explicador) de tuide. Exploras el repo y respondes en "
+           "lenguaje natural.\n"
+           "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+           "Formatos:\n"
+           "{\"action\":\"plan\",\"targets\":[\"src/a.cpp:Foo\"],\"summary\":\"…\"}\n"
+           "{\"action\":\"tools\",\"calls\":[{\"name\":\"get_code_of\",\"arg\":\"…\"}]}\n"
+           "{\"action\":\"tool\",\"name\":\"get_code_of\",\"arg\":\"…\"}\n"
+           "{\"action\":\"synthesize\",\"summary\":\"explicación clara al usuario\"}\n"
+           "{\"action\":\"done\",\"summary\":\"…\",\"next\":\"clarify\"}\n"
+           "Fases: explore → plan/pack → synthesize. PROHIBIDO action=edit y next=edit.\n"
+           "Tras el pack (o con suficiente evidencia) emite synthesize con la respuesta completa.\n";
+  } else if (workflow == AiWorkflowKind::Plan) {
+    out << "Eres el Nivel 2 (planificador) de tuide. Exploras el repo y propones un plan "
+           "de cambios SIN editar.\n"
+           "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+           "Formatos:\n"
+           "{\"action\":\"plan\",\"targets\":[\"src/a.cpp:Foo\"],\"summary\":\"…\"}\n"
+           "{\"action\":\"tools\",\"calls\":[{\"name\":\"get_code_of\",\"arg\":\"…\"}]}\n"
+           "{\"action\":\"tool\",\"name\":\"get_code_of\",\"arg\":\"…\"}\n"
+           "{\"action\":\"synthesize\",\"summary\":\"plan: archivos, pasos, riesgos\"}\n"
+           "{\"action\":\"done\",\"summary\":\"…\",\"next\":\"clarify\"}\n"
+           "Fases: explore → plan/pack → synthesize(plan). PROHIBIDO edit/compile.\n"
+           "El summary de synthesize debe listar paths concretos y pasos ordenados.\n";
+  } else if (workflow == AiWorkflowKind::Git) {
+    out << "Eres el Nivel 2 (analista git) de tuide. Usas ## Git context y, si hace falta, "
+           "código actual para explicar cambios del historial.\n"
+           "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+           "Formatos:\n"
+           "{\"action\":\"plan\",\"targets\":[\"src/a.cpp:Foo\"],\"summary\":\"…\"}\n"
+           "{\"action\":\"tools\",\"calls\":[{\"name\":\"get_code_of\",\"arg\":\"…\"}]}\n"
+           "{\"action\":\"tool\",\"name\":\"get_code_of\",\"arg\":\"…\"}\n"
+           "{\"action\":\"synthesize\",\"summary\":\"qué cambió, impacto, riesgos\"}\n"
+           "{\"action\":\"done\",\"summary\":\"…\",\"next\":\"clarify\"}\n"
+           "Puedes synthesize directo si el Git context basta. PROHIBIDO edit/compile.\n";
+  } else {
+    out << "Eres el Nivel 2 (coder) de tuide. Exploras el repo y emites ediciones "
+           "Search/Replace de match único.\n"
+           "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+           "Formatos:\n"
+           "{\"action\":\"plan\",\"targets\":[\"src/a.cpp:Foo\",\"src/b.cpp:42\"],\"summary\":\"…\"}\n"
+           "{\"action\":\"tools\",\"calls\":[{\"name\":\"get_code_of\",\"arg\":\"src/a.cpp:Foo\"},"
+           "{\"name\":\"search\",\"arg\":\"wake\"}]}  // máx 4; extras tras el pack\n"
+           "{\"action\":\"tool\",\"name\":\"get_code_of\",\"arg\":\"src/foo.cpp:Symbol\"}\n"
+           "{\"action\":\"done\",\"summary\":\"evidencia paths:líneas\",\"next\":\"edit\"}\n"
+           "{\"action\":\"done\",\"summary\":\"no encontré X; ¿concretas?\",\"next\":\"clarify\"}\n"
+           "{\"action\":\"done\",\"summary\":\"cambios listos en paths…\"}  // fin real (sin next)\n"
+           "{\"action\":\"edit\",\"hunks\":[{\"path\":\"src/foo.cpp\",\"search\":\"exacto único\","
+           "\"replace\":\"nuevo\"}]}\n"
+           "Fases: en explore la PRIMERA mirada es action=plan (watchlist path:Symbol|path:A-B; "
+           "evitar path bare). "
+           "El runtime normaliza bare→símbolo por needles, merge de packs, prioriza fragmentos "
+           "pequeños, auto-refetch de truncados y marca pack_incomplete. "
+           "Si map_stale=1 no confíes en el top del mapa. "
+           "Tras el pack el prompt es Instruction+pack (sin mapa). "
+           "Extras: tools máx 4. Si [TRUNCATED], usa refetch path:A-B o path:Symbol#mid|#tail "
+           "(default de get_code_of largo = head+tail; path:line en símbolo enorme = ventana). "
+           "done next=edit con pack_incomplete puede rechazarse (pushback). "
+           "action=edit es para phase=edit; si emites edit en explore el runtime auto-promueve. "
+           "Tras edit el runtime compila: compile OK restaura el mapa inicial y pregunta "
+           "«¿algo más?» (plan / edit / done). Clarify prematuro: pushback "
+           "(ai.level2.clarify_pushback_max). "
+           "Reglas: next=edit solo con evidencia en pack/Observations; search único en el "
+           "archivo; no inventes paths; tras edit_feedback corrige el search; "
+           "tras compile fail reemite edit.\n";
+  }
   if (!opts.tool_guide_override.empty()) {
     out << opts.tool_guide_override;
   } else {
@@ -463,14 +502,21 @@ std::string build_system_prompt(const Level2AutonomousLoopOpts& opts) {
   if (!opts.system_prompt_extra.empty()) {
     out << "\n" << opts.system_prompt_extra << "\n";
   }
+  out << "\nSi el user prompt marca resume=1, hay historial de un turno previo (Follow-ups / "
+         "Prior answer / pack). Prefiere atajar con synthesize o edit si basta; solo "
+         "explore/plan si falta evidencia.\n";
   return out.str();
 }
 
 std::string build_user_prompt(const std::string& workspace_root, const std::string& phase,
                               int step, bool has_pack, bool map_review, bool map_stale,
-                              bool pack_incomplete, const Level2AutonomousLoopOpts& opts) {
+                              bool pack_incomplete, bool resume, AiWorkflowKind workflow,
+                              const L2ContextBudget& budget, const Level2AutonomousLoopOpts& opts) {
   std::ostringstream out;
-  out << "phase=" << phase << " step=" << step;
+  out << "phase=" << phase << " step=" << step << " workflow=" << ai_workflow_kind_name(workflow);
+  if (resume) {
+    out << " resume=1";
+  }
   if (map_review) {
     out << " map_review=1";
   }
@@ -485,7 +531,38 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
   }
   out << "\n\n";
 
-  if (map_review) {
+  const bool readonly = ai_workflow_is_readonly(workflow);
+  const std::size_t prompt_explore =
+      budget.prompt_explore > 0 ? budget.prompt_explore : 10000;
+  const std::size_t prompt_edit = budget.prompt_edit > 0 ? budget.prompt_edit : 8000;
+  const std::size_t resume_chars = budget.resume_chars > 0 ? budget.resume_chars : 5500;
+  const std::size_t obs_tail = budget.obs_tail > 0 ? budget.obs_tail : 1800;
+  // Explore observations slice ~35% of explore prompt at baseline (3500/10000).
+  const std::size_t explore_obs =
+      std::max<std::size_t>(1200, static_cast<std::size_t>(prompt_explore * 35 / 100));
+
+  if (resume) {
+    out << "Follow-up del usuario (resume=1). Lee ## Follow-ups + Prior answer/pack.\n";
+    if (readonly) {
+      out << "Si basta el historial → action=synthesize. Si falta evidencia → plan/tools.\n"
+             "PROHIBIDO edit.\n\n";
+    } else {
+      out << "Dos vías:\n"
+             "- Historial/pack suficiente → action=edit (luego compile) o done.\n"
+             "- Falta contexto / otro módulo → plan/tools (explore normal).\n\n";
+    }
+    const std::string prior =
+        Level2Session::resume_context_markdown(workspace_root, resume_chars);
+    if (!prior.empty()) {
+      out << prior;
+      if (prior.back() != '\n') {
+        out << '\n';
+      }
+      out << '\n';
+    }
+  }
+
+  if (map_review && !readonly) {
     out << "Compile OK. Aquí tienes el **mapa inicial completo** otra vez.\n"
            "¿Algo más?\n"
            "- Más código → {\"action\":\"plan\",\"targets\":[…]}\n"
@@ -494,9 +571,9 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
     if (!opts.user_overlay_map_review.empty()) {
       out << opts.user_overlay_map_review << "\n\n";
     }
-    out << read_session_for_map_review(workspace_root, kMaxPromptCharsEdit);
+    out << read_session_for_map_review(workspace_root, prompt_edit);
   } else if (has_pack) {
-    if (phase == "edit") {
+    if (phase == "edit" && !readonly) {
       out << "phase=edit. Opciones:\n"
              "- Prioridad: {\"action\":\"edit\",\"hunks\":[…]} con search = span completo del pack.\n"
              "- edit_feedback / compile_feedback → corrige con action=edit (no tools en bucle).\n"
@@ -505,6 +582,16 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
              "Contexto: Instruction + Code pack (sin mapa rankeado completo).\n\n";
       if (!opts.user_overlay_edit.empty()) {
         out << opts.user_overlay_edit << "\n\n";
+      }
+    } else if (readonly) {
+      out << "Ya hay Code pack"
+          << (pack_incomplete ? " (**incomplete**: hay Truncated)" : "")
+          << ". Emite action=synthesize con la respuesta"
+          << (workflow == AiWorkflowKind::Plan ? " (plan de cambios)" : "")
+          << ", o amplía plan/tools si falta evidencia.\n"
+             "PROHIBIDO edit. Contexto: Instruction + pack.\n\n";
+      if (!opts.user_overlay_pack.empty()) {
+        out << opts.user_overlay_pack << "\n\n";
       }
     } else {
       out << "Ya hay Code pack"
@@ -515,26 +602,37 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
         out << opts.user_overlay_pack << "\n\n";
       }
     }
-    out << read_session_for_pack(workspace_root, kMaxPromptCharsEdit);
-  } else if (phase == "edit") {
+    out << read_session_for_pack(workspace_root, prompt_edit, obs_tail);
+  } else if (phase == "edit" && !readonly) {
     out << "phase=edit (sin pack aún). Corrige con edit o arma plan/tools.\n\n";
     if (!opts.user_overlay_edit.empty()) {
       out << opts.user_overlay_edit << "\n\n";
     }
-    out << read_session_for_edit(Level2Session::session_path(workspace_root),
-                                 kMaxPromptCharsEdit);
+    out << read_session_for_edit(Level2Session::session_path(workspace_root), prompt_edit);
   } else {
-    out << "El ## Ranked map es tu base"
-        << (map_stale ? " (**map_stale**: poco alineado a la Instruction; prioriza search/plan)"
-                      : "")
-        << ". Primera acción preferida: "
-           "{\"action\":\"plan\",\"targets\":[\"path:Symbol\",…]} (máx 16; no path bare). "
-           "El runtime arma el pack (merge + auto-refetch truncados).\n\n";
+    if (workflow == AiWorkflowKind::Git) {
+      out << "Prioriza ## Git context. Si basta para responder: "
+             "{\"action\":\"synthesize\",\"summary\":\"…\"}. "
+             "Si necesitas código actual: plan/tools sobre el ## Ranked map"
+          << (map_stale ? " (**map_stale**)" : "") << ".\n\n";
+    } else if (resume) {
+      out << "Sin pack aún en este follow-up. Si Prior answer/targets bastan para "
+          << (readonly ? "synthesize" : "edit")
+          << ", hazlo; si no, plan/tools sobre el ## Ranked map"
+          << (map_stale ? " (**map_stale**)" : "") << ".\n\n";
+    } else {
+      out << "El ## Ranked map es tu base"
+          << (map_stale ? " (**map_stale**: poco alineado a la Instruction; prioriza search/plan)"
+                        : "")
+          << ". Primera acción preferida: "
+             "{\"action\":\"plan\",\"targets\":[\"path:Symbol\",…]} (máx 16; no path bare). "
+             "El runtime arma el pack (merge + auto-refetch truncados).\n\n";
+    }
     if (!opts.user_overlay_explore.empty()) {
       out << opts.user_overlay_explore << "\n\n";
     }
-    out << read_session_for_explore(Level2Session::session_path(workspace_root),
-                                    kMaxPromptCharsExplore);
+    out << read_session_for_explore(Level2Session::session_path(workspace_root), prompt_explore,
+                                    explore_obs);
   }
   return out.str();
 }
@@ -548,8 +646,20 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
   using clock = std::chrono::steady_clock;
   Level2AutonomousLoopResult result;
   const int max_steps = opts.settings.max_steps > 0 ? opts.settings.max_steps : 32;
+  const AiWorkflowKind workflow = parse_ai_workflow_kind(opts.workflow);
   const std::string system = build_system_prompt(opts);
+  const L2ContextBudget& budget = opts.budget;
   const auto run_t0 = clock::now();
+
+  session.set_context_budget(budget);
+  {
+    std::string trim_note;
+    if (session.maybe_trim_pack_to_budget(opts.workspace_root, &trim_note) && !trim_note.empty()) {
+      if (log) {
+        log("L2 ▸ " + trim_note);
+      }
+    }
+  }
 
   auto emit = [&](const std::string& line) {
     if (log) {
@@ -563,8 +673,9 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
 
   ai_trace(AiTraceChannel::L2, "l2_run_begin",
            "{\"backend\":\"" + ai_trace_escape(brain.name()) + "\",\"max_steps\":" +
-               std::to_string(max_steps) + ",\"n_ctx\":" + std::to_string(opts.settings.n_ctx) +
-               "}");
+               std::to_string(max_steps) + ",\"n_ctx\":" + std::to_string(budget.n_ctx) +
+               ",\"pack_chars\":" + std::to_string(budget.pack_chars) +
+               ",\"workflow\":\"" + ai_workflow_kind_name(workflow) + "\"}");
 
   int consecutive_invalid = 0;
   int consecutive_turn_errors = 0;
@@ -589,6 +700,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     bool map_review = false;
     bool map_stale = false;
     bool pack_incomplete = false;
+    bool resume = false;
     {
       const auto p = status.find("phase: ");
       if (p != std::string::npos) {
@@ -599,6 +711,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       map_review = status.find("map_review: yes") != std::string::npos;
       map_stale = status.find("map_stale: yes") != std::string::npos;
       pack_incomplete = status.find("pack_incomplete: yes") != std::string::npos;
+      resume = status.find("resume: yes") != std::string::npos;
     }
     if (status.find("done: yes") != std::string::npos || phase == "done" || phase == "clarify") {
       result.ok = phase == "done" || phase == "clarify";
@@ -614,6 +727,12 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     }
     // compile is runtime-owned after edit; if stuck in compile, poke run_compile.
     if (phase == "compile") {
+      if (ai_workflow_is_readonly(workflow)) {
+        emit("L2 ▸ compile ignorado (workflow=" + std::string(ai_workflow_kind_name(workflow)) +
+             ")");
+        result.steps = step;
+        continue;
+      }
       emit(phase_banner(phase, step, max_steps) + " — compilando…");
       const auto t_comp = clock::now();
       const auto tr = session.run_compile(opts.workspace_root);
@@ -634,10 +753,10 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     breq.system_prompt = system;
     breq.user_prompt =
         build_user_prompt(opts.workspace_root, phase, step, has_pack, map_review, map_stale,
-                          pack_incomplete, opts);
+                          pack_incomplete, resume, workflow, budget, opts);
     breq.phase = phase;
     breq.max_tokens = opts.settings.max_tokens;
-    breq.n_ctx = opts.settings.n_ctx;
+    breq.n_ctx = budget.n_ctx;
     breq.temperature = opts.settings.temperature;
 
     const auto propose_t0 = clock::now();
@@ -700,20 +819,44 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       if (tr.summary.find("pack_incomplete_pushback") != std::string::npos) {
         emit("L2 ▸ pack incompleto → " + tr.summary + " (refetch truncados)");
       }
+    } else if (action.kind == L2ActionKind::Synthesize) {
+      emit("L2 ▸ synthesize — " + action.summary.substr(0, 120));
+      tr = session.apply_synthesize(opts.workspace_root, action.summary);
+      if (tr.ok && !tr.summary.empty()) {
+        emit("L2 ▸ respuesta:");
+        std::istringstream iss(tr.summary);
+        std::string line;
+        int lines = 0;
+        while (std::getline(iss, line) && lines < 80) {
+          emit(line);
+          ++lines;
+        }
+        if (lines >= 80) {
+          emit("…(respuesta truncada en consola; ver .tuide/ai/l2/answer.md)");
+        }
+      }
     } else if (action.kind == L2ActionKind::Edit) {
+      if (ai_workflow_is_readonly(workflow)) {
+        emit("L2 ▸ edit rechazado (workflow=" + std::string(ai_workflow_kind_name(workflow)) +
+             "); usa synthesize");
+        result.steps = step;
+        continue;
+      }
       // Opción B: si el modelo salta done next=edit estando en explore, auto-promover.
+      // Skip pack_incomplete pushback: the model already emitted hunks.
       if (phase == "explore") {
         emit("L2 ▸ edit en explore → auto phase=edit (skip done next=edit)");
         ai_trace(AiTraceChannel::L2, "l2_auto_phase_edit",
                  "{\"step\":" + std::to_string(step) + ",\"reason\":\"edit_while_explore\"}");
-        const auto promo = session.mark_done(
+        const auto promo = session.force_phase_edit(
             opts.workspace_root,
-            "auto: modelo emitió edit en explore; promoviendo a phase=edit", "edit");
-        if (!promo.ok) {
-          emit("L2 ▸ auto phase=edit falló: " + promo.error);
+            "auto: modelo emitió edit en explore; promoviendo a phase=edit");
+        if (!promo.ok || promo.phase != "edit") {
+          emit("L2 ▸ auto phase=edit falló: " +
+               (promo.error.empty() ? promo.summary : promo.error));
           result.steps = step;
           result.phase = promo.phase.empty() ? phase : promo.phase;
-          result.error = promo.error;
+          result.error = promo.error.empty() ? promo.summary : promo.error;
           continue;
         }
         phase = "edit";

@@ -40,16 +40,14 @@ bool LocalL2Brain::ensure_ready(const AiSettings& settings,
 
   std::string model = settings.level2.model_path;
   if (model.empty()) {
-    AiModelInfo info = default_l2_model();
-    if (settings.level2.model_id == default_l2_model_small().id) {
-      info = default_l2_model_small();
-    } else if (!settings.level2.model_id.empty() && settings.level2.model_id != info.id) {
+    const AiModelInfo info = resolve_l2_model(settings.level2);
+    if (!settings.level2.model_id.empty() && !find_l2_model(settings.level2.model_id)) {
       const std::string alt = store.l2_model_path_for_id(settings.level2.model_id);
       if (::access(alt.c_str(), R_OK) == 0) {
         model = alt;
       } else if (error) {
         *error = "L2 local: modelo custom ausente: " + alt +
-                 " (usa model_path o id qwen2.5-coder-7b/1.5b)";
+                 " (usa model_path o un id del catálogo L2)";
         return false;
       } else {
         return false;
@@ -62,7 +60,7 @@ bool LocalL2Brain::ensure_ready(const AiSettings& settings,
   if (model.empty() || ::access(model.c_str(), R_OK) != 0) {
     if (error && error->empty()) {
       *error =
-          "L2 local: modelo ausente (instala paquete ai-l2 o fija ai.level2.model_path)";
+          "L2 local: modelo ausente (instala un paquete ai-l2-* o fija ai.level2.model_path)";
     }
     return false;
   }

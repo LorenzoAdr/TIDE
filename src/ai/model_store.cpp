@@ -111,27 +111,78 @@ bool run_shell(const std::string& cmd, std::string* stderr_out) {
 }  // namespace
 
 AiModelInfo default_l1_model() {
-  AiModelInfo info;
-  info.id = "qwen2.5-1.5b-instruct-q4_k_m";
-  info.filename = "qwen2.5-1.5b-instruct-q4_k_m.gguf";
-  info.url =
-      "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/"
-      "qwen2.5-1.5b-instruct-q4_k_m.gguf";
-  info.license_note = "Apache-2.0 (Qwen2.5)";
-  info.approx_bytes = 1100000000ull;
-  return info;
+  return l1_model_catalog().front();
+}
+
+const std::vector<AiModelInfo>& l1_model_catalog() {
+  static const std::vector<AiModelInfo> kCatalog = [] {
+    std::vector<AiModelInfo> out;
+
+    AiModelInfo m15;
+    m15.id = "qwen2.5-1.5b-instruct-q4_k_m";
+    m15.filename = "qwen2.5-1.5b-instruct-q4_k_m.gguf";
+    m15.url =
+        "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/"
+        "qwen2.5-1.5b-instruct-q4_k_m.gguf";
+    m15.license_note = "Apache-2.0 (Qwen2.5)";
+    m15.approx_bytes = 1100000000ull;
+    m15.label = "1.5B";
+    out.push_back(std::move(m15));
+
+    AiModelInfo m3;
+    m3.id = "qwen2.5-3b-instruct-q4_k_m";
+    m3.filename = "qwen2.5-3b-instruct-q4_k_m.gguf";
+    m3.url =
+        "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/"
+        "qwen2.5-3b-instruct-q4_k_m.gguf";
+    m3.license_note = "Apache-2.0 (Qwen2.5)";
+    m3.approx_bytes = 2104932768ull;
+    m3.label = "3B";
+    out.push_back(std::move(m3));
+
+    // Official Q4_K_M is split into two GGUF parts; llama.cpp loads from part 1.
+    AiModelInfo m7;
+    m7.id = "qwen2.5-7b-instruct-q4_k_m";
+    m7.filename = "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf";
+    m7.url =
+        "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/"
+        "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf";
+    m7.license_note = "Apache-2.0 (Qwen2.5)";
+    m7.approx_bytes = 3993201344ull + 689872288ull;
+    m7.label = "7B";
+    m7.extra_shards.push_back(
+        {"qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf",
+         "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/"
+         "qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf",
+         689872288ull});
+    out.push_back(std::move(m7));
+
+    return out;
+  }();
+  return kCatalog;
+}
+
+std::optional<AiModelInfo> find_l1_model(const std::string& id) {
+  if (id.empty()) {
+    return std::nullopt;
+  }
+  for (const AiModelInfo& info : l1_model_catalog()) {
+    if (info.id == id) {
+      return info;
+    }
+  }
+  return std::nullopt;
+}
+
+AiModelInfo resolve_l1_model(const AiLevel1Settings& settings) {
+  if (auto found = find_l1_model(settings.model_id)) {
+    return *found;
+  }
+  return default_l1_model();
 }
 
 AiModelInfo default_l2_model() {
-  AiModelInfo info;
-  info.id = "qwen2.5-coder-7b-instruct-q4_k_m";
-  info.filename = "qwen2.5-coder-7b-instruct-q4_k_m.gguf";
-  info.url =
-      "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/"
-      "qwen2.5-coder-7b-instruct-q4_k_m.gguf";
-  info.license_note = "Apache-2.0 (Qwen2.5-Coder)";
-  info.approx_bytes = 4680000000ull;
-  return info;
+  return l2_model_catalog().front();
 }
 
 AiModelInfo default_l2_model_small() {
@@ -143,7 +194,97 @@ AiModelInfo default_l2_model_small() {
       "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
   info.license_note = "Apache-2.0 (Qwen2.5-Coder)";
   info.approx_bytes = 1100000000ull;
+  info.label = "1.5B";
   return info;
+}
+
+const std::vector<AiModelInfo>& l2_model_catalog() {
+  static const std::vector<AiModelInfo> kCatalog = [] {
+    std::vector<AiModelInfo> out;
+
+    AiModelInfo m7;
+    m7.id = "qwen2.5-coder-7b-instruct-q4_k_m";
+    m7.filename = "qwen2.5-coder-7b-instruct-q4_k_m.gguf";
+    m7.url =
+        "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/"
+        "qwen2.5-coder-7b-instruct-q4_k_m.gguf";
+    m7.license_note = "Apache-2.0 (Qwen2.5-Coder)";
+    m7.approx_bytes = 4680000000ull;
+    m7.label = "7B";
+    out.push_back(std::move(m7));
+
+    AiModelInfo m14;
+    m14.id = "qwen2.5-coder-14b-instruct-q4_k_m";
+    m14.filename = "qwen2.5-coder-14b-instruct-q4_k_m.gguf";
+    m14.url =
+        "https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/main/"
+        "qwen2.5-coder-14b-instruct-q4_k_m.gguf";
+    m14.license_note = "Apache-2.0 (Qwen2.5-Coder)";
+    m14.approx_bytes = 8988110272ull;
+    m14.label = "14B";
+    out.push_back(std::move(m14));
+
+    AiModelInfo m32;
+    m32.id = "qwen2.5-coder-32b-instruct-q4_k_m";
+    m32.filename = "qwen2.5-coder-32b-instruct-q4_k_m.gguf";
+    m32.url =
+        "https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct-GGUF/resolve/main/"
+        "qwen2.5-coder-32b-instruct-q4_k_m.gguf";
+    m32.license_note = "Apache-2.0 (Qwen2.5-Coder)";
+    m32.approx_bytes = 19851335872ull;
+    m32.label = "32B";
+    out.push_back(std::move(m32));
+
+    return out;
+  }();
+  return kCatalog;
+}
+
+std::optional<AiModelInfo> find_l2_model(const std::string& id) {
+  if (id.empty()) {
+    return std::nullopt;
+  }
+  for (const AiModelInfo& info : l2_model_catalog()) {
+    if (info.id == id) {
+      return info;
+    }
+  }
+  if (id == default_l2_model_small().id) {
+    return default_l2_model_small();
+  }
+  return std::nullopt;
+}
+
+AiModelInfo resolve_l2_model(const AiLevel2Settings& settings) {
+  if (auto found = find_l2_model(settings.model_id)) {
+    return *found;
+  }
+  return default_l2_model();
+}
+
+std::string ai_package_id_for_l1_model(const std::string& model_id) {
+  const AiModelInfo info = find_l1_model(model_id).value_or(default_l1_model());
+  if (info.label == "3B") {
+    return "ai-l1-3b";
+  }
+  if (info.label == "7B") {
+    return "ai-l1-7b";
+  }
+  return "ai-l1-1.5b";
+}
+
+std::string ai_package_id_for_l2_model(const std::string& model_id) {
+  const AiModelInfo info = find_l2_model(model_id).value_or(default_l2_model());
+  if (info.label == "14B") {
+    return "ai-l2-14b";
+  }
+  if (info.label == "32B") {
+    return "ai-l2-32b";
+  }
+  if (info.id == default_l2_model_small().id) {
+    return "ai-l2-7b";  // small is legacy-only; toast points at default pack
+  }
+  return "ai-l2-7b";
 }
 
 AiModelInfo default_intent_embed_model() {
@@ -395,16 +536,32 @@ std::string ModelStore::model_path(const AiModelInfo& info) const {
 }
 
 std::string ModelStore::model_path_for_id(const std::string& id) const {
-  if (id.empty() || id == default_l1_model().id) {
+  if (auto found = find_l1_model(id)) {
+    return model_path(*found);
+  }
+  if (id.empty()) {
     return model_path(default_l1_model());
   }
-  return (fs::path(cache_dir_) / "l1" / id).string();
+  std::string filename = id;
+  if (filename.find(".gguf") == std::string::npos) {
+    filename += ".gguf";
+  }
+  return (fs::path(cache_dir_) / "l1" / filename).string();
 }
 
 bool ModelStore::has_model(const AiModelInfo& info) const {
   std::error_code ec;
   const auto p = model_path(info);
-  return fs::is_regular_file(p, ec) && fs::file_size(p, ec) > 1024 * 1024;
+  if (!fs::is_regular_file(p, ec) || fs::file_size(p, ec) <= 1024 * 1024) {
+    return false;
+  }
+  for (const AiModelShard& shard : info.extra_shards) {
+    const auto sp = (fs::path(cache_dir_) / "l1" / shard.filename).string();
+    if (!fs::is_regular_file(sp, ec) || fs::file_size(sp, ec) <= 1024 * 1024) {
+      return false;
+    }
+  }
+  return true;
 }
 
 std::string ModelStore::ensure_model(const AiModelInfo& info, bool auto_download,
@@ -424,8 +581,27 @@ std::string ModelStore::ensure_model(const AiModelInfo& info, bool auto_download
                 std::to_string(info.approx_bytes / (1024 * 1024)) + " MB, " + info.license_note +
                 ")");
   }
-  if (!download_url_to_file(info.url, path, on_progress, error, info.approx_bytes)) {
+  std::uint64_t primary_bytes = info.approx_bytes;
+  for (const AiModelShard& shard : info.extra_shards) {
+    if (primary_bytes > shard.approx_bytes) {
+      primary_bytes -= shard.approx_bytes;
+    }
+  }
+  if (!download_url_to_file(info.url, path, on_progress, error, primary_bytes)) {
     return {};
+  }
+  for (const AiModelShard& shard : info.extra_shards) {
+    const auto sp = (fs::path(cache_dir_) / "l1" / shard.filename).string();
+    std::error_code ec;
+    if (fs::is_regular_file(sp, ec) && fs::file_size(sp, ec) > 1024 * 1024) {
+      continue;
+    }
+    if (on_progress) {
+      on_progress("ModelStore: falta shard " + shard.filename);
+    }
+    if (!download_url_to_file(shard.url, sp, on_progress, error, shard.approx_bytes)) {
+      return {};
+    }
   }
   return path;
 }
@@ -435,11 +611,11 @@ std::string ModelStore::l2_model_path(const AiModelInfo& info) const {
 }
 
 std::string ModelStore::l2_model_path_for_id(const std::string& id) const {
-  if (id.empty() || id == default_l2_model().id) {
-    return l2_model_path(default_l2_model());
+  if (auto found = find_l2_model(id)) {
+    return l2_model_path(*found);
   }
-  if (id == default_l2_model_small().id) {
-    return l2_model_path(default_l2_model_small());
+  if (id.empty()) {
+    return l2_model_path(default_l2_model());
   }
   std::string filename = id;
   if (filename.find(".gguf") == std::string::npos) {
@@ -451,7 +627,16 @@ std::string ModelStore::l2_model_path_for_id(const std::string& id) const {
 bool ModelStore::has_l2_model(const AiModelInfo& info) const {
   std::error_code ec;
   const auto p = l2_model_path(info);
-  return fs::is_regular_file(p, ec) && fs::file_size(p, ec) > 1024 * 1024;
+  if (!fs::is_regular_file(p, ec) || fs::file_size(p, ec) <= 1024 * 1024) {
+    return false;
+  }
+  for (const AiModelShard& shard : info.extra_shards) {
+    const auto sp = (fs::path(cache_dir_) / "l2" / shard.filename).string();
+    if (!fs::is_regular_file(sp, ec) || fs::file_size(sp, ec) <= 1024 * 1024) {
+      return false;
+    }
+  }
+  return true;
 }
 
 std::string ModelStore::ensure_l2_model(const AiModelInfo& info, bool auto_download,
@@ -477,8 +662,27 @@ std::string ModelStore::ensure_l2_model(const AiModelInfo& info, bool auto_downl
                 std::to_string(info.approx_bytes / (1024 * 1024)) + " MB, " + info.license_note +
                 ")");
   }
-  if (!download_url_to_file(info.url, path, on_progress, error, info.approx_bytes)) {
+  std::uint64_t primary_bytes = info.approx_bytes;
+  for (const AiModelShard& shard : info.extra_shards) {
+    if (primary_bytes > shard.approx_bytes) {
+      primary_bytes -= shard.approx_bytes;
+    }
+  }
+  if (!download_url_to_file(info.url, path, on_progress, error, primary_bytes)) {
     return {};
+  }
+  for (const AiModelShard& shard : info.extra_shards) {
+    const auto sp = (fs::path(cache_dir_) / "l2" / shard.filename).string();
+    std::error_code ec;
+    if (fs::is_regular_file(sp, ec) && fs::file_size(sp, ec) > 1024 * 1024) {
+      continue;
+    }
+    if (on_progress) {
+      on_progress("ModelStore L2: falta shard " + shard.filename);
+    }
+    if (!download_url_to_file(shard.url, sp, on_progress, error, shard.approx_bytes)) {
+      return {};
+    }
   }
   return path;
 }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sample XML for tuide tree-sitter + LemMinX -->
+<hello name="tuide" version="1" enabled="true">
+  <items>
+    <item>alpha</item>
+    <item>beta</item>
+  </items>
+  <nested>
+    <count>42</count>
+    <note>hello xml</note>
+  </nested>
+</hello>

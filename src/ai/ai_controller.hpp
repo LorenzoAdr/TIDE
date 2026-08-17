@@ -31,6 +31,13 @@ namespace tuide {
 
 struct MainLayoutState;
 
+struct AiInsertAnchor {
+  std::string path;       // absolute preferred
+  int line = 0;           // 0-based editor line
+  int col = 0;
+  std::string symbol_hint;
+};
+
 struct AiControllerDeps {
   WorkspaceModel* workspace = nullptr;
   std::shared_ptr<ISymbolProvider> symbols;
@@ -38,7 +45,7 @@ struct AiControllerDeps {
   SymbolWorkspaceIndexer* symbol_indexer = nullptr;
   GitService* git = nullptr;
   MainLayoutState* layout = nullptr;
-  const WorkspaceConfig* config = nullptr;
+  WorkspaceConfig* config = nullptr;
 };
 
 // Owns AI transcript and dispatches every user line through Nivel 0 (then L1).
@@ -56,12 +63,19 @@ class AiController {
 
   void append(const std::string& line);
   void clear();
+  // Reset chat context: wipe L2 session artifacts and optionally clear transcript.
+  void clear_ai_session(bool clear_transcript = true);
+  bool has_continuable_session() const;
 
   // Entry point for the AI tab input (always L0 first — D14).
   void handle_user_input(const std::string& line);
 
-  // After the workspace symbol map is ready: warm the (cheap) stem embed index only.
-  // Full-corpus symbol embeddings were too slow; L1 ranks a lexical shortlist at query time.
+  // Context-menu insert: stash locus, focus AI tab; next Enter runs Agent with seeded pack.
+  void begin_insert_at(const AiInsertAnchor& anchor);
+  bool has_pending_insert() const { return pending_insert_; }
+  void clear_pending_insert();
+
+  // After the workspace symbol map is ready (and AI indexes were requested): warm stem embeds.
   void on_symbol_map_ready();
 
   // Cancels the current L1 agent and/or background task.
@@ -78,6 +92,22 @@ class AiController {
   bool download_busy() const { return download_busy_.load(); }
   bool busy() const { return agent_busy() || task_busy() || download_busy(); }
 
+  // Explicit L2 workflow (agent|ask|plan|git). Persisted in workspace config when possible.
+  std::string level2_workflow() const;
+  void cycle_level2_workflow();
+  void set_level2_workflow(const std::string& workflow);
+
+  // Session override for L2 backend (local|remote). Empty → settings.level2_mode.
+  // Does not rewrite workspace defaults; dry_run/harness stay in Settings.
+  std::string level2_mode_override() const;
+  std::string effective_level2_mode() const;
+  void set_level2_mode_override(const std::string& mode);
+  void cycle_level2_mode_override();
+
+  // Directory prefixes the AI may explore (empty = unrestricted). Persisted in workspace config.
+  const std::vector<std::string>& path_scope() const;
+  void set_path_scope(std::vector<std::string> paths);
+
  private:
   void ensure_tools();
   void sync_task_runner();
@@ -86,14 +116,19 @@ class AiController {
   void run_task(const std::string& name);
   void dump_context_pack(const std::vector<std::string>& seeds);
   void run_level1_async(const std::string& message);
+  void run_insert_async(const std::string& user_message, AiInsertAnchor anchor);
   void cancel_level1();
   void cancel_all();
   void handle_level2_harness(const std::string& arg);
   void bootstrap_level2_session(const std::string& query, const std::string& instruction,
-                                const std::vector<std::string>& seeds);
+                                const std::vector<std::string>& seeds,
+                                const std::string& workflow = {},
+                                const std::string& seed_pack_markdown = {});
   // After bootstrap when mode=local|remote: run autonomous loop (same agent thread).
   void run_level2_autonomous_inline(const std::string& reason);
+  void run_level2_followup_async(const std::string& message);
   bool level2_mode_is_autonomous() const;
+  std::string build_git_context_seed(const std::string& query) const;
   void show_model_status();
   void download_models(const std::string& what);
   bool ensure_backend_ready();
@@ -159,6 +194,12 @@ class AiController {
   // Último tool L0 para follow-ups cortos ("y dentro de src?").
   std::string last_l0_tool_;
   std::string last_l0_arg_;
+
+  // Chat-session L2 backend override: "" | "local" | "remote".
+  std::string level2_mode_override_;
+
+  bool pending_insert_ = false;
+  AiInsertAnchor insert_anchor_;
 };
 
 }  // namespace tuide

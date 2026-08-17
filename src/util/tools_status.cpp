@@ -287,6 +287,16 @@ ToolsStatusSnapshot collect_tools_status(const LspRuntimeFlags& lsp) {
       "yaml-language-server", "settings.status.tool.yaml_ls", lsp.lsp_enabled, lsp.yaml_ready,
       lsp.yaml_starting, yaml_detail, yaml_bin));
 
+  std::optional<std::string> xml_detail;
+  bool xml_bin = false;
+  if (const auto loc = resolve_lemminx(); loc.has_value()) {
+    xml_bin = true;
+    xml_detail = detail_from_location(*loc);
+  }
+  snap.language_servers.push_back(make_lsp_entry(
+      "lemminx", "settings.status.tool.lemminx", lsp.lsp_enabled, lsp.xml_ready,
+      lsp.xml_starting, xml_detail, xml_bin));
+
   if (const auto chktex = resolve_chktex(); chktex.has_value()) {
     ToolStatusEntry entry;
     entry.id = "chktex";

@@ -574,6 +574,70 @@ void walk_js_ts_symbols(TSNode node, const std::string& source, int depth,
   walk_children(walk_js_ts_symbols, node, source, depth, file_path, out);
 }
 
+std::string xml_first_named_child_text(TSNode parent, const char* child_type,
+                                       const std::string& source) {
+  if (ts_node_is_null(parent) || child_type == nullptr) {
+    return {};
+  }
+  const uint32_t count = ts_node_child_count(parent);
+  for (uint32_t i = 0; i < count; ++i) {
+    TSNode child = ts_node_child(parent, i);
+    if (ts_node_is_null(child)) {
+      continue;
+    }
+    const char* type = ts_node_type(child);
+    if (type != nullptr && std::strcmp(type, child_type) == 0) {
+      return ts_node_text(child, source);
+    }
+  }
+  return {};
+}
+
+void walk_xml_symbols(TSNode node, const std::string& source, int depth,
+                      const std::string& file_path, std::vector<SymbolInfo>* out) {
+  if (ts_node_is_null(node) || depth > 256) {
+    return;
+  }
+  const char* type = ts_node_type(node);
+  if (type == nullptr) {
+    return;
+  }
+
+  if (std::strcmp(type, "element") == 0) {
+    std::string name;
+    TSNode content{};
+    bool has_content = false;
+    const uint32_t count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < count; ++i) {
+      TSNode child = ts_node_child(node, i);
+      if (ts_node_is_null(child)) {
+        continue;
+      }
+      const char* child_type = ts_node_type(child);
+      if (child_type == nullptr) {
+        continue;
+      }
+      if (name.empty() && (std::strcmp(child_type, "STag") == 0 ||
+                           std::strcmp(child_type, "EmptyElemTag") == 0)) {
+        name = xml_first_named_child_text(child, "Name", source);
+      } else if (std::strcmp(child_type, "content") == 0) {
+        content = child;
+        has_content = true;
+      }
+    }
+    append_symbol(out, SymbolKind::kClass, name, node, depth, file_path);
+    if (has_content && !ts_node_is_null(content)) {
+      walk_xml_symbols(content, source, depth + 1, file_path, out);
+    }
+    return;
+  }
+
+  const uint32_t count = ts_node_child_count(node);
+  for (uint32_t i = 0; i < count; ++i) {
+    walk_xml_symbols(ts_node_child(node, i), source, depth, file_path, out);
+  }
+}
+
 std::vector<SymbolInfo> sort_symbols(std::vector<SymbolInfo> symbols) {
   std::sort(symbols.begin(), symbols.end(), [](const SymbolInfo& a, const SymbolInfo& b) {
     if (a.line != b.line) {
@@ -621,6 +685,9 @@ std::vector<SymbolInfo> extract_symbols_from_tree(TSNode root, const std::string
     case TreeSitterLangKind::kCmake:
     case TreeSitterLangKind::kMake:
     case TreeSitterLangKind::kYaml:
+      break;
+    case TreeSitterLangKind::kXml:
+      walk_xml_symbols(root, source, 0, file_path, &symbols);
       break;
     case TreeSitterLangKind::kCpp:
     case TreeSitterLangKind::kNone:

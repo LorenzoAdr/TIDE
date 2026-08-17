@@ -531,21 +531,28 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
     user += "\n\n---\n" + ctx;
   }
 
+  const AiWorkflowKind workflow = parse_ai_workflow_kind(deps_.settings.level2_workflow);
+  out.workflow = ai_workflow_kind_name(workflow);
+
+  // Explicit workflow owns the machine: do not let git_repo heuristics block the map pipeline.
+  const bool force_l2_workflow = workflow != AiWorkflowKind::Agent;
   const bool context_dump =
-      query_asks_context_dump(user_message) && !query_asks_git_repo(user_message);
-  const bool code_edit =
-      query_asks_code_edit(user_message) && !query_asks_git_repo(user_message);
-  // code_edit uses the same ranked-map pipeline: full map is L2's explore base.
+      query_asks_context_dump(user_message) &&
+      (force_l2_workflow || !query_asks_git_repo(user_message));
+  const bool code_edit = workflow == AiWorkflowKind::Agent &&
+                         query_asks_code_edit(user_message) && !query_asks_git_repo(user_message);
+  // Ask/Plan/Git always use ranked-map explore; Agent keeps previous heuristics.
   const bool code_locate =
-      (query_asks_code_location(user_message) || context_dump || code_edit) &&
-      !query_asks_git_repo(user_message);
+      force_l2_workflow ||
+      ((query_asks_code_location(user_message) || context_dump || code_edit) &&
+       !query_asks_git_repo(user_message));
 
   RepoMapOptions map_opts;
   map_opts.query = user_message;
   map_opts.active_file = relative_active_file(deps_.workspace);
   // Context dump / code edit: wide catalog — L2 decides from the ranked map.
   // Investigate-only: still broad, but keep embed body cost bounded.
-  if (context_dump || code_edit) {
+  if (context_dump || code_edit || force_l2_workflow) {
     map_opts.max_symbols = 400;
     map_opts.max_files = 120;
     map_opts.max_chars = 120000;
@@ -558,6 +565,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
   }
   map_opts.prefer_git_tracked = true;
   map_opts.use_pagerank = true;
+  map_opts.path_scope = deps_.settings.path_scope;
   if (deps_.workspace != nullptr) {
     for (const auto& tab : deps_.workspace->tabs) {
       if (tab.path.empty() || tab.git_diff_view) {
@@ -589,8 +597,12 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
   if (code_locate) {
     if (log) {
       const char* via_label =
-          code_edit ? "code_edit" : (context_dump ? "context_dump" : "investigate");
+          code_edit ? "code_edit"
+                    : (context_dump ? "context_dump"
+                                    : (force_l2_workflow ? ai_workflow_kind_name(workflow)
+                                                         : "investigate"));
       log(std::string("L1 agent start (") + via_label +
+          "; workflow=" + out.workflow +
           "; max_steps=" + std::to_string(max_steps) + ")");
     }
 
@@ -769,10 +781,25 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
                                           (context_dump || code_edit) ? 120 : 64, {});
       out.final_text = summary.str();
 
-      // code_edit always hands off: the ranked map is L2's explore base.
-      if (l2_active || code_edit) {
+      // code_edit / explicit workflows always hand off: ranked map is L2's explore base.
+      if (l2_active || code_edit || force_l2_workflow) {
         out.needs_level2 = true;
-        if (code_edit) {
+        if (workflow == AiWorkflowKind::Ask) {
+          out.instruction =
+              "Explora el ## Ranked map, arma un pack con plan/get_code_of y responde con "
+              "action=synthesize (explicación clara). No edites. Pedido del usuario:\n" +
+              user_message;
+        } else if (workflow == AiWorkflowKind::Plan) {
+          out.instruction =
+              "Explora el ## Ranked map, arma un pack y emite action=synthesize con un plan "
+              "de cambios (archivos, pasos, riesgos). No edites ni compiles. Pedido:\n" +
+              user_message;
+        } else if (workflow == AiWorkflowKind::Git) {
+          out.instruction =
+              "Usa ## Git context (y el mapa/código si hace falta) para explicar qué cambió. "
+              "Emite action=synthesize. No edites. Pedido del usuario:\n" +
+              user_message;
+        } else if (code_edit) {
           out.instruction =
               "El ## Ranked map es tu base de exploración. Elige candidatos, lee cuerpos "
               "con get_code_of/search/file_outline y decide qué editar con Search/Replace. "
@@ -787,7 +814,8 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
         }
         out.seeds = needles;
         if (out.seeds.empty()) {
-          const std::size_t seed_cap = (context_dump || code_edit) ? 48 : 24;
+          const std::size_t seed_cap =
+              (context_dump || code_edit || force_l2_workflow) ? 48 : 24;
           for (const auto& e : ranked.entries) {
             if (!e.name.empty()) {
               out.seeds.push_back(e.name);
@@ -798,7 +826,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           }
         }
         if (log) {
-          log(std::string("L1 → l2_handoff via ") + via +
+          log(std::string("L1 → l2_handoff via ") + via + " workflow=" + out.workflow +
               (code_edit ? " (code_edit)" : "") + "; path=" +
               (path.empty() ? "(none)" : path));
           log(out.final_text);
@@ -806,7 +834,8 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
         ai_trace(AiTraceChannel::L1, "l2_handoff",
                  std::string("{\"via\":\"") + via + "\",\"entries\":" +
                      std::to_string(ranked.entries.size()) +
-                     ",\"code_edit\":" + (code_edit ? "1" : "0") + "}");
+                     ",\"code_edit\":" + (code_edit ? "1" : "0") + ",\"workflow\":\"" +
+                     out.workflow + "\"}");
         return;
       }
 
@@ -855,6 +884,34 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
       miss << "(L1 no propuso needles utilizables)\n";
     }
     out.final_text = miss.str();
+    if (force_l2_workflow) {
+      // Ask/Plan/Git still hand off: Git has seed context; Ask/Plan can explore via search.
+      out.needs_level2 = true;
+      if (workflow == AiWorkflowKind::Ask) {
+        out.instruction =
+            "El mapa rankeado no tuvo hits claros. Usa search/plan para localizar código y "
+            "responde con action=synthesize. No edites. Pedido:\n" +
+            user_message;
+      } else if (workflow == AiWorkflowKind::Plan) {
+        out.instruction =
+            "El mapa rankeado no tuvo hits claros. Explora con search/plan y emite "
+            "action=synthesize con un plan. No edites. Pedido:\n" +
+            user_message;
+      } else {
+        out.instruction =
+            "Usa ## Git context (y search si hace falta) para responder. Emite "
+            "action=synthesize. No edites. Pedido:\n" +
+            user_message;
+      }
+      out.seeds = needles;
+      if (log) {
+        log("L1 → l2_handoff via map_miss workflow=" + out.workflow);
+        log(out.final_text);
+      }
+      ai_trace(AiTraceChannel::L1, "l2_handoff",
+               std::string("{\"via\":\"map_miss\",\"workflow\":\"") + out.workflow + "\"}");
+      return out;
+    }
     if (log) {
       log("L1 investigar → sin query_hits tras needles; no se mezcla outline genérico");
       log(out.final_text);

@@ -42,8 +42,24 @@ SyntaxScope SyntaxScopeForTreeSitterCaptureImpl(const std::string& capture) {
   if (base == "parameter") {
     return SyntaxScope::kParameter;
   }
-  if (base == "property") {
+  if (base == "property" || base == "attribute") {
     return SyntaxScope::kProperty;
+  }
+  // Markup tags (HTML/XML) read like types in the editor.
+  if (base == "tag") {
+    return SyntaxScope::kType;
+  }
+  if (base == "markup" || base == "embedded") {
+    return SyntaxScope::kString;
+  }
+  if (base == "punctuation") {
+    return SyntaxScope::kOperator;
+  }
+  if (base == "label") {
+    return SyntaxScope::kVariable;
+  }
+  if (base == "error") {
+    return SyntaxScope::kKeyword;
   }
   // `nullptr` / `this`-like builtins read as keywords in both highlighters.
   if (base == "constant" || capture == "variable.builtin" || capture == "constant.builtin") {

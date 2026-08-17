@@ -9,6 +9,7 @@
 #include "ai/search_replace.hpp"
 #include "ai/tool_registry.hpp"
 #include "ai/l2_action.hpp"
+#include "ai/l2_context_budget.hpp"
 
 namespace tuide {
 
@@ -18,6 +19,14 @@ struct Level2BootstrapOpts {
   std::string instruction;
   std::vector<std::string> seeds;
   std::string map_path;
+  // agent|ask|plan|git (default agent = legacy edit/compile machine).
+  std::string workflow = "agent";
+  // Prebuilt markdown for Git workflow (## Git context body without heading).
+  std::string git_context;
+  // If non-empty, written as pack.md and State.has_pack=true after bootstrap.
+  std::string seed_pack_markdown;
+  // Directory prefixes (empty = unrestricted). Used for session prompt hint.
+  std::vector<std::string> path_scope;
 };
 
 struct Level2TurnResult {
@@ -42,6 +51,8 @@ struct Level2SessionDeps {
   int clarify_pushback_max = 3;
   // Reject done next=edit while pack has Instruction gaps or no pack (default 2).
   int pack_incomplete_pushback_max = 2;
+  // Live accessor for AI path_scope (empty = unrestricted).
+  std::function<const std::vector<std::string>&()> path_scope_fn;
 };
 
 class Level2Session {
@@ -82,6 +93,11 @@ class Level2Session {
   explicit Level2Session(Level2SessionDeps deps);
   explicit Level2Session(ToolRegistry* tools);
 
+  void set_context_budget(L2ContextBudget budget);
+  const L2ContextBudget& context_budget() const { return budget_; }
+  // If pack.md exceeds budget.pack_chars * 1.2, rewrite a compact head+tail view.
+  bool maybe_trim_pack_to_budget(const std::string& workspace_root, std::string* summary = nullptr);
+
   static std::string dir_for(const std::string& workspace_root);
   static std::string session_path(const std::string& workspace_root);
   static std::string request_path(const std::string& workspace_root);
@@ -91,6 +107,21 @@ class Level2Session {
   static std::string pending_edits_path(const std::string& workspace_root);
   static std::string map_initial_path(const std::string& workspace_root);
   static std::string pack_path(const std::string& workspace_root);
+  static std::string answer_path(const std::string& workspace_root);
+
+  // True when a prior L2 run finished (done/clarify) and may accept follow-ups without bootstrap.
+  static bool is_continuable(const std::string& workspace_root);
+  // Wipe L2 artifacts so the next NL message bootstraps a fresh session.
+  static bool clear_session(const std::string& workspace_root, std::string* err_out = nullptr);
+  // Reopen a continuable session for another user turn (preserves pack/answer/observations).
+  static bool reopen_for_followup(const std::string& workspace_root, const std::string& user_text,
+                                  const std::string& workflow_opt = {},
+                                  std::string* err_out = nullptr);
+  // Mark session continuable after a successful done/clarify close (idempotent).
+  static bool mark_continuable(const std::string& workspace_root, std::string* err_out = nullptr);
+  // Prior answer.md + pack summary for resume prompts (budgeted).
+  static std::string resume_context_markdown(const std::string& workspace_root,
+                                             std::size_t max_chars = 6000);
 
   static std::string tool_guide_markdown();
   static bool tool_allowed(const std::string& name);
@@ -129,6 +160,10 @@ class Level2Session {
   Level2TurnResult process_request_file(const std::string& workspace_root);
   Level2TurnResult mark_done(const std::string& workspace_root, const std::string& summary,
                              const std::string& next = {});
+  // Force phase=edit without pack_incomplete pushback (auto-promote when model emits edit).
+  Level2TurnResult force_phase_edit(const std::string& workspace_root, const std::string& reason);
+  // Ask/Plan/Git: write natural-language answer (or plan doc) and finish the session.
+  Level2TurnResult apply_synthesize(const std::string& workspace_root, const std::string& text);
   Level2TurnResult rollback_pending(const std::string& workspace_root);
 
   std::string status_text(const std::string& workspace_root) const;
@@ -137,6 +172,7 @@ class Level2Session {
 
  private:
   Level2SessionDeps deps_;
+  L2ContextBudget budget_ = default_l2_context_budget();
 
   struct PendingHunk {
     std::string path;
@@ -151,6 +187,7 @@ class Level2Session {
     bool done = false;
     std::string last_action;
     std::string phase = "explore";
+    std::string workflow = "agent";  // agent|ask|plan|git
     int edit_attempt = 0;
     int compile_attempt = 0;
     int clarify_pushback = 0;
@@ -169,6 +206,9 @@ class Level2Session {
     bool pack_incomplete = false;  // Instruction gaps vs pack (not mere truncation)
     bool map_stale = false;        // map_last query poorly overlaps session Instruction
     bool map_review = false;  // after compile_ok: full map restored, ask "algo más?"
+    bool continuable = false;  // after done/clarify: Enter reopens instead of bootstrap
+    bool resume = false;       // true for the duration of a follow-up autonomous run
+    int followup_count = 0;    // number of user follow-ups appended
     uint64_t last_op_id = 0;
     std::vector<std::string> watchlist;  // merged plan targets
     std::vector<std::string> edited_paths;  // unique rel paths successfully applied

@@ -214,6 +214,8 @@ const char* l2_action_kind_name(L2ActionKind kind) {
       return "done";
     case L2ActionKind::Edit:
       return "edit";
+    case L2ActionKind::Synthesize:
+      return "synthesize";
     case L2ActionKind::Error:
       return "error";
     case L2ActionKind::Unknown:
@@ -292,6 +294,16 @@ L2Action parse_l2_action(const std::string& model_text) {
       if (out.hunks.empty()) {
         out.kind = L2ActionKind::Error;
         out.error = err.empty() ? "edit sin hunks" : err;
+      }
+      return out;
+    }
+    if (action == "synthesize" || action == "answer" || action == "explain" ||
+        action == "plan_doc") {
+      out.kind = L2ActionKind::Synthesize;
+      out.summary = j.value("summary", j.value("text", j.value("answer", "")));
+      if (out.summary.empty()) {
+        out.kind = L2ActionKind::Error;
+        out.error = "synthesize sin summary/text";
       }
       return out;
     }

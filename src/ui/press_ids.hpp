@@ -23,6 +23,16 @@ constexpr std::string_view kConsoleTabBinarySymbols = "console.tab.binary_symbol
 constexpr std::string_view kConsoleTabPacketMonitor = "console.tab.packet_monitor";
 constexpr std::string_view kConsoleTabAi = "console.tab.ai";
 constexpr std::string_view kConsoleAiStop = "console.ai.stop";
+constexpr std::string_view kConsoleAiReset = "console.ai.reset";
+constexpr std::string_view kConsoleAiWorkflow = "console.ai.workflow";
+constexpr std::string_view kConsoleAiWorkflowAgent = "console.ai.workflow.agent";
+constexpr std::string_view kConsoleAiWorkflowAsk = "console.ai.workflow.ask";
+constexpr std::string_view kConsoleAiWorkflowPlan = "console.ai.workflow.plan";
+constexpr std::string_view kConsoleAiWorkflowGit = "console.ai.workflow.git";
+constexpr std::string_view kConsoleAiBackend = "console.ai.backend";
+constexpr std::string_view kConsoleAiBackendLocal = "console.ai.backend.local";
+constexpr std::string_view kConsoleAiBackendRemote = "console.ai.backend.remote";
+constexpr std::string_view kConsoleAiPathScope = "console.ai.path_scope";
 constexpr std::string_view kPerformanceRefresh = "performance.refresh";
 constexpr std::string_view kPacketMonitorRecord = "packet_monitor.record";
 constexpr std::string_view kPacketMonitorSave = "packet_monitor.save";
@@ -40,6 +50,9 @@ constexpr std::string_view kStatusLayout = "status.layout";
 constexpr std::string_view kStatusLayoutFiles = "status.layout.files";
 constexpr std::string_view kStatusLayoutOutline = "status.layout.outline";
 constexpr std::string_view kStatusLayoutTerminal = "status.layout.terminal";
+constexpr std::string_view kStatusLanguage = "status.language";
+constexpr std::string_view kStatusLanguageAuto = "status.language.auto";
+constexpr std::string_view kStatusLanguageItemPrefix = "status.language.item.";
 constexpr std::string_view kStatusSettings = "status.settings";
 constexpr std::string_view kStatusShortcuts = "status.shortcuts";
 constexpr std::string_view kSidebarTabOutline = "sidebar.tab.outline";
@@ -61,6 +74,8 @@ constexpr std::string_view kLspToastBundle = "lsp_toast.bundle";
 constexpr std::string_view kLspToastIgnore = "lsp_toast.ignore";
 constexpr std::string_view kAiToastInstall = "ai_toast.install";
 constexpr std::string_view kAiToastIgnore = "ai_toast.ignore";
+constexpr std::string_view kAiDownloadYes = "ai_download.yes";
+constexpr std::string_view kAiDownloadNo = "ai_download.no";
 constexpr std::string_view kWelcomeExternalFile = "welcome.external_file";
 constexpr std::string_view kWelcomeDebug = "welcome.debug";
 constexpr std::string_view kWelcomeWorkspace = "welcome.workspace";
@@ -180,7 +195,11 @@ inline bool is_console_tab_hover(std::string_view id) {
 }
 
 inline bool is_console_header_hover(std::string_view id) {
-  return is_console_tab_hover(id) || id == kConsoleHide || id == kConsoleAiStop;
+  return is_console_tab_hover(id) || id == kConsoleHide || id == kConsoleAiStop ||
+         id == kConsoleAiReset || id == kConsoleAiWorkflow || id == kConsoleAiWorkflowAgent ||
+         id == kConsoleAiWorkflowAsk || id == kConsoleAiWorkflowPlan ||
+         id == kConsoleAiWorkflowGit || id == kConsoleAiBackend || id == kConsoleAiBackendLocal ||
+         id == kConsoleAiBackendRemote || id == kConsoleAiPathScope;
 }
 
 inline bool is_git_panel_hover(std::string_view id) {
@@ -222,6 +241,10 @@ inline bool is_lsp_toast_hover(std::string_view id) {
 
 inline bool is_ai_toast_hover(std::string_view id) {
   return id == kAiToastInstall || id == kAiToastIgnore;
+}
+
+inline bool is_ai_download_hover(std::string_view id) {
+  return id == kAiDownloadYes || id == kAiDownloadNo;
 }
 
 inline bool is_explorer_hover(std::string_view id) {

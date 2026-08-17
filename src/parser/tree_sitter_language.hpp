@@ -23,6 +23,7 @@ enum class TreeSitterLangKind {
   kCmake,
   kMake,
   kYaml,
+  kXml,
   kNone,
 };
 
@@ -40,6 +41,7 @@ const TSLanguage* tree_sitter_typescript_language();
 const TSLanguage* tree_sitter_cmake_language();
 const TSLanguage* tree_sitter_make_language();
 const TSLanguage* tree_sitter_yaml_language();
+const TSLanguage* tree_sitter_xml_language();
 
 TreeSitterLangKind tree_sitter_lang_kind_for_path(const std::string& path);
 const TSLanguage* tree_sitter_language_for_path(const std::string& path);

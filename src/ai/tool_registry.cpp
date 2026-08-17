@@ -11,6 +11,7 @@
 
 #include "ai/context_pack.hpp"
 #include "ai/get_code_of.hpp"
+#include "ai/ai_path_scope.hpp"
 #include "ai/ai_trace.hpp"
 #include "ai/edit_journal.hpp"
 #include "ai/repo_map.hpp"
@@ -120,6 +121,18 @@ bool path_inside_workspace(const std::string& root, const std::string& path) {
   return !rel.empty() && rel.native().rfind("..", 0) != 0;
 }
 
+const std::vector<std::string>& ctx_path_scope(const AiToolContext& ctx) {
+  static const std::vector<std::string> kEmpty;
+  if (!ctx.path_scope_fn) {
+    return kEmpty;
+  }
+  return ctx.path_scope_fn();
+}
+
+bool path_allowed_by_scope(const AiToolContext& ctx, const std::string& path) {
+  return ai_path_in_scope(ctx.workspace_root, path, ctx_path_scope(ctx));
+}
+
 const char* symbol_kind_short(SymbolKind kind) {
   switch (kind) {
     case SymbolKind::kNamespace:
@@ -207,6 +220,9 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
     if (!path_inside_workspace(ctx.workspace_root, path)) {
       return AiToolResult{false, "ruta fuera del workspace"};
     }
+    if (!path_allowed_by_scope(ctx, path)) {
+      return AiToolResult{false, "ruta fuera del path_scope AI"};
+    }
     if (!fs::exists(path) || !fs::is_regular_file(path)) {
       return AiToolResult{false, "no existe: " + path};
     }
@@ -257,6 +273,9 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
         if (!path_inside_workspace(ctx.workspace_root, abs)) {
           return AiToolResult{false, "ruta fuera del workspace"};
         }
+        if (!path_allowed_by_scope(ctx, abs)) {
+          return AiToolResult{false, "ruta fuera del path_scope AI"};
+        }
         req.file = abs;
         const GetCodeOfResult got = get_code_of(req);
         if (!got.ok) {
@@ -282,6 +301,9 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
                                 const std::string filter = arg;
                                 int shown = 0;
                                 for (const auto& file : snap->files) {
+                                  if (!path_allowed_by_scope(ctx, file)) {
+                                    continue;
+                                  }
                                   if (!filter.empty() && file.find(filter) == std::string::npos) {
                                     continue;
                                   }
@@ -300,6 +322,9 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
                             const std::string dir =
                                 arg.empty() ? ctx.workspace_root
                                             : resolve_workspace_path(ctx.workspace_root, arg);
+                            if (!path_allowed_by_scope(ctx, dir)) {
+                              return AiToolResult{false, "ruta fuera del path_scope AI"};
+                            }
                             std::error_code ec;
                             if (!fs::exists(dir, ec)) {
                               return AiToolResult{false, "directorio no encontrado"};
@@ -339,7 +364,12 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
         if (ctx.indexer != nullptr) {
           const auto snap = ctx.indexer->snapshot();
           if (snap) {
-            indexed_files = snap->files;
+            indexed_files.reserve(snap->files.size());
+            for (const auto& f : snap->files) {
+              if (path_allowed_by_scope(ctx, f)) {
+                indexed_files.push_back(f);
+              }
+            }
           }
         }
 
@@ -367,6 +397,9 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
             ++needles_with_hits;
           }
           for (auto& h : hits) {
+            if (!path_allowed_by_scope(ctx, h.file)) {
+              continue;
+            }
             ScoredHit s;
             s.hit = std::move(h);
             s.needle = needle;
@@ -1200,6 +1233,7 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
         opts.max_chars = 6000;
         opts.prefer_git_tracked = true;
         opts.use_pagerank = true;
+        opts.path_scope = ctx_path_scope(ctx);
 
         if (ctx.workspace != nullptr) {
           if (!ctx.workspace->buffer.path.empty() && !ctx.workspace->root.empty()) {
@@ -1281,6 +1315,9 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
         if (abs.empty() || !fs::exists(abs)) {
           return AiToolResult{false, "no existe: " + trimmed};
         }
+        if (!path_allowed_by_scope(ctx, abs)) {
+          return AiToolResult{false, "ruta fuera del path_scope AI"};
+        }
         std::ifstream in(abs);
         if (!in) {
           return AiToolResult{false, "no se pudo leer " + abs};
@@ -1330,6 +1367,9 @@ void ToolRegistry::register_builtin_read_tools(ToolRegistry* registry, AiToolCon
         const std::string abs = resolve_workspace_path(ctx.workspace_root, trimmed);
         if (abs.empty() || !fs::exists(abs)) {
           return AiToolResult{false, "no existe: " + trimmed};
+        }
+        if (!path_allowed_by_scope(ctx, abs)) {
+          return AiToolResult{false, "ruta fuera del path_scope AI"};
         }
         std::vector<std::string> workspace_files;
         if (ctx.indexer != nullptr) {

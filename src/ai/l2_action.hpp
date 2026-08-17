@@ -13,6 +13,7 @@ enum class L2ActionKind {
   Plan,   // watchlist of path:Symbol targets → runtime builds code pack
   Done,
   Edit,
+  Synthesize,  // ask/plan/git: natural-language answer / plan doc → done
   Error,
   Unknown,
 };

@@ -29,6 +29,8 @@ struct AiToolContext {
   SymbolWorkspaceIndexer* symbol_indexer = nullptr;
   GitService* git = nullptr;
   std::string workspace_root;
+  // Live accessor so path_scope updates apply without re-registering tools.
+  std::function<const std::vector<std::string>&()> path_scope_fn;
 };
 
 class ToolRegistry {

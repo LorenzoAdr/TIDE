@@ -1,5 +1,7 @@
 #include "ai/ai_packages.hpp"
 
+#include <optional>
+
 #include "ai/model_store.hpp"
 #include "i18n/tr.hpp"
 
@@ -39,6 +41,32 @@ ModelStore::ProgressFn adapt_progress(const AiPackageProgressFn& on_progress) {
   };
 }
 
+std::optional<AiModelInfo> l1_info_for_package(const std::string& id) {
+  if (id == "ai-l1" || id == "ai-l1-1.5b") {
+    return default_l1_model();
+  }
+  if (id == "ai-l1-3b") {
+    return find_l1_model("qwen2.5-3b-instruct-q4_k_m");
+  }
+  if (id == "ai-l1-7b") {
+    return find_l1_model("qwen2.5-7b-instruct-q4_k_m");
+  }
+  return std::nullopt;
+}
+
+std::optional<AiModelInfo> l2_info_for_package(const std::string& id) {
+  if (id == "ai-l2" || id == "ai-l2-7b") {
+    return default_l2_model();
+  }
+  if (id == "ai-l2-14b") {
+    return find_l2_model("qwen2.5-coder-14b-instruct-q4_k_m");
+  }
+  if (id == "ai-l2-32b") {
+    return find_l2_model("qwen2.5-coder-32b-instruct-q4_k_m");
+  }
+  return std::nullopt;
+}
+
 }  // namespace
 
 const std::vector<AiPackage>& ai_packages() {
@@ -47,10 +75,18 @@ const std::vector<AiPackage>& ai_packages() {
        90ull * 1024ull * 1024ull},
       {"ai-embed", "settings.toolpacks.ai.embed", "settings.toolpacks.ai.embed.detail",
        84ull * 1024ull * 1024ull},
-      {"ai-l1", "settings.toolpacks.ai.l1", "settings.toolpacks.ai.l1.detail",
+      {"ai-l1-1.5b", "settings.toolpacks.ai.l1_1_5b", "settings.toolpacks.ai.l1_1_5b.detail",
        1100ull * 1024ull * 1024ull},
-      {"ai-l2", "settings.toolpacks.ai.l2", "settings.toolpacks.ai.l2.detail",
+      {"ai-l1-3b", "settings.toolpacks.ai.l1_3b", "settings.toolpacks.ai.l1_3b.detail",
+       2100ull * 1024ull * 1024ull},
+      {"ai-l1-7b", "settings.toolpacks.ai.l1_7b", "settings.toolpacks.ai.l1_7b.detail",
        4700ull * 1024ull * 1024ull},
+      {"ai-l2-7b", "settings.toolpacks.ai.l2_7b", "settings.toolpacks.ai.l2_7b.detail",
+       4700ull * 1024ull * 1024ull},
+      {"ai-l2-14b", "settings.toolpacks.ai.l2_14b", "settings.toolpacks.ai.l2_14b.detail",
+       9000ull * 1024ull * 1024ull},
+      {"ai-l2-32b", "settings.toolpacks.ai.l2_32b", "settings.toolpacks.ai.l2_32b.detail",
+       19900ull * 1024ull * 1024ull},
   };
   return kPacks;
 }
@@ -60,6 +96,16 @@ const AiPackage* find_ai_package(const std::string& id) {
     if (pack.id == id) {
       return &pack;
     }
+  }
+  // Legacy aliases still installable from toasts / CLI.
+  if (id == "ai-l1" || id == "ai-l2") {
+    static const AiPackage kLegacyL1 = {
+        "ai-l1", "settings.toolpacks.ai.l1_1_5b", "settings.toolpacks.ai.l1_1_5b.detail",
+        1100ull * 1024ull * 1024ull};
+    static const AiPackage kLegacyL2 = {
+        "ai-l2", "settings.toolpacks.ai.l2_7b", "settings.toolpacks.ai.l2_7b.detail",
+        4700ull * 1024ull * 1024ull};
+    return id == "ai-l1" ? &kLegacyL1 : &kLegacyL2;
   }
   return nullptr;
 }
@@ -76,17 +122,13 @@ AiPackageInstallStatus ai_package_status(const std::string& id, const AiSettings
                ? AiPackageInstallStatus::Installed
                : AiPackageInstallStatus::Missing;
   }
-  if (id == "ai-l1") {
-    return store.has_model(default_l1_model()) ? AiPackageInstallStatus::Installed
-                                               : AiPackageInstallStatus::Missing;
+  if (auto l1 = l1_info_for_package(id)) {
+    return store.has_model(*l1) ? AiPackageInstallStatus::Installed
+                                : AiPackageInstallStatus::Missing;
   }
-  if (id == "ai-l2") {
-    AiModelInfo info = default_l2_model();
-    if (settings.level2.model_id == default_l2_model_small().id) {
-      info = default_l2_model_small();
-    }
-    return store.has_l2_model(info) ? AiPackageInstallStatus::Installed
-                                    : AiPackageInstallStatus::Missing;
+  if (auto l2 = l2_info_for_package(id)) {
+    return store.has_l2_model(*l2) ? AiPackageInstallStatus::Installed
+                                   : AiPackageInstallStatus::Missing;
   }
   return AiPackageInstallStatus::Missing;
 }
@@ -102,8 +144,9 @@ std::string first_missing_ai_package_for_embed(const AiSettings& settings) {
 }
 
 std::string first_missing_ai_package_for_l1(const AiSettings& settings) {
-  if (ai_package_status("ai-l1", settings) == AiPackageInstallStatus::Missing) {
-    return "ai-l1";
+  const std::string pack = ai_package_id_for_l1_model(settings.level1.model_id);
+  if (ai_package_status(pack, settings) == AiPackageInstallStatus::Missing) {
+    return pack;
   }
   if (ai_package_status("ai-runtime", settings) == AiPackageInstallStatus::Missing) {
     return "ai-runtime";
@@ -112,8 +155,9 @@ std::string first_missing_ai_package_for_l1(const AiSettings& settings) {
 }
 
 std::string first_missing_ai_package_for_l2(const AiSettings& settings) {
-  if (ai_package_status("ai-l2", settings) == AiPackageInstallStatus::Missing) {
-    return "ai-l2";
+  const std::string pack = ai_package_id_for_l2_model(settings.level2.model_id);
+  if (ai_package_status(pack, settings) == AiPackageInstallStatus::Missing) {
+    return pack;
   }
   if (ai_package_status("ai-runtime", settings) == AiPackageInstallStatus::Missing) {
     return "ai-runtime";
@@ -178,7 +222,7 @@ AiPackageInstallResult install_ai_package(const std::string& id, const AiSetting
     return result;
   }
 
-  if (id == "ai-l1") {
+  if (auto l1 = l1_info_for_package(id)) {
     if (!ensure_runtime()) {
       return result;
     }
@@ -186,7 +230,7 @@ AiPackageInstallResult install_ai_package(const std::string& id, const AiSetting
       on_progress(0, i18n::tr("settings.toolpacks.ai.installing_l1"));
     }
     std::string error;
-    const std::string path = store.ensure_model(default_l1_model(), true, progress, &error);
+    const std::string path = store.ensure_model(*l1, true, progress, &error);
     if (path.empty()) {
       result.message = error.empty() ? i18n::tr("settings.toolpacks.ai.install_failed") : error;
       return result;
@@ -196,19 +240,15 @@ AiPackageInstallResult install_ai_package(const std::string& id, const AiSetting
     return result;
   }
 
-  if (id == "ai-l2") {
+  if (auto l2 = l2_info_for_package(id)) {
     if (!ensure_runtime()) {
       return result;
     }
     if (on_progress) {
       on_progress(0, i18n::tr("settings.toolpacks.ai.installing_l2"));
     }
-    AiModelInfo info = default_l2_model();
-    if (settings.level2.model_id == default_l2_model_small().id) {
-      info = default_l2_model_small();
-    }
     std::string error;
-    const std::string path = store.ensure_l2_model(info, true, progress, &error);
+    const std::string path = store.ensure_l2_model(*l2, true, progress, &error);
     if (path.empty()) {
       result.message = error.empty() ? i18n::tr("settings.toolpacks.ai.install_failed") : error;
       return result;

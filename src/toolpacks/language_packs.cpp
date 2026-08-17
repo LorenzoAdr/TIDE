@@ -106,6 +106,13 @@ const std::vector<LanguagePack>& packs_singleton() {
               {"yaml-ls", false, true, false},
           },
       },
+      {
+          "xml",
+          "settings.toolpacks.lang.xml",
+          {
+              {"lemminx", false, true, false},
+          },
+      },
   };
   return kPacks;
 }

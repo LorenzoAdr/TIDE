@@ -210,8 +210,8 @@ bool LlamaBackend::ensure_ready(const AiSettings& settings, const ProgressFn& on
   if (!settings.level1.model_path.empty()) {
     model_path_ = settings.level1.model_path;
   } else {
-    AiModelInfo info = default_l1_model();
-    if (!settings.level1.model_id.empty() && settings.level1.model_id != info.id) {
+    const AiModelInfo info = resolve_l1_model(settings.level1);
+    if (!settings.level1.model_id.empty() && !find_l1_model(settings.level1.model_id)) {
       model_path_ = store_.model_path_for_id(settings.level1.model_id);
       if (::access(model_path_.c_str(), R_OK) != 0) {
         if (error) {

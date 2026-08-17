@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "ai/ai_path_scope.hpp"
 #include "ai/search_needles.hpp"
 #include "ai/coding_embed_rerank.hpp"
 #include "ai/coding_stem_embed_index.hpp"
@@ -2082,6 +2083,9 @@ RepoMap build_repo_map(const SymbolIndexSnapshot* snapshot, const RepoMapOptions
     if (sym.file.empty()) {
       continue;
     }
+    if (!ai_path_in_scope(snapshot->workspace_root, sym.file, opts.path_scope)) {
+      continue;
+    }
     const std::string name = bare_name(sym);
     if (name.size() < 2) {
       continue;
@@ -2109,6 +2113,9 @@ RepoMap build_repo_map(const SymbolIndexSnapshot* snapshot, const RepoMapOptions
     std::unordered_set<std::string> considered;
     auto consider = [&](const std::string& file) {
       if (file.empty() || file.rfind("third_party/", 0) == 0 || !considered.insert(file).second) {
+        return;
+      }
+      if (!ai_path_in_scope(snapshot->workspace_root, file, opts.path_scope)) {
         return;
       }
       if (filename_seed_match_score(file, tokens) < 130) {

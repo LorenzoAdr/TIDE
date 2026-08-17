@@ -97,6 +97,20 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
     if (level2.contains("mode") && level2["mode"].is_string()) {
       settings->level2_mode = level2["mode"].get<std::string>();
     }
+    if (level2.contains("workflow") && level2["workflow"].is_string()) {
+      settings->level2_workflow =
+          ai_workflow_kind_name(parse_ai_workflow_kind(level2["workflow"].get<std::string>()));
+    }
+    if (level2.contains("git_log_n") && level2["git_log_n"].is_number_integer()) {
+      int n = level2["git_log_n"].get<int>();
+      if (n < 1) {
+        n = 1;
+      }
+      if (n > 50) {
+        n = 50;
+      }
+      settings->level2_git_log_n = n;
+    }
     auto& l2 = settings->level2;
     if (level2.contains("model_id") && level2["model_id"].is_string()) {
       l2.model_id = level2["model_id"].get<std::string>();
@@ -125,6 +139,9 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
     if (level2.contains("n_ctx") && level2["n_ctx"].is_number_integer()) {
       l2.n_ctx = level2["n_ctx"].get<int>();
     }
+    if (level2.contains("n_ctx_remote") && level2["n_ctx_remote"].is_number_integer()) {
+      l2.n_ctx_remote = level2["n_ctx_remote"].get<int>();
+    }
     if (level2.contains("temperature") && level2["temperature"].is_number()) {
       l2.temperature = level2["temperature"].get<float>();
     }
@@ -136,6 +153,21 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
     }
   } else if (doc.contains("level2_mode") && doc["level2_mode"].is_string()) {
     settings->level2_mode = doc["level2_mode"].get<std::string>();
+  }
+  if (doc.contains("level2_workflow") && doc["level2_workflow"].is_string()) {
+    settings->level2_workflow =
+        ai_workflow_kind_name(parse_ai_workflow_kind(doc["level2_workflow"].get<std::string>()));
+  }
+  if (doc.contains("path_scope") && doc["path_scope"].is_array()) {
+    settings->path_scope.clear();
+    for (const auto& entry : doc["path_scope"]) {
+      if (entry.is_string()) {
+        const std::string value = entry.get<std::string>();
+        if (!value.empty()) {
+          settings->path_scope.push_back(value);
+        }
+      }
+    }
   }
   if (doc.contains("models") && doc["models"].is_object() &&
       doc["models"].contains("cache_dir") && doc["models"]["cache_dir"].is_string()) {
@@ -238,8 +270,11 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
       {"enabled", settings.enabled},
       {"command_whitelist", settings.command_whitelist},
       {"tasks", std::move(tasks)},
+      {"path_scope", settings.path_scope},
       {"level2",
        {{"mode", settings.level2_mode},
+        {"workflow", ai_workflow_kind_name(parse_ai_workflow_kind(settings.level2_workflow))},
+        {"git_log_n", settings.level2_git_log_n},
         {"model_id", settings.level2.model_id},
         {"model_path", settings.level2.model_path},
         {"cli_path", settings.level2.cli_path},
@@ -249,6 +284,7 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
         {"max_steps", settings.level2.max_steps},
         {"max_tokens", settings.level2.max_tokens},
         {"n_ctx", settings.level2.n_ctx},
+        {"n_ctx_remote", settings.level2.n_ctx_remote},
         {"temperature", settings.level2.temperature},
         {"auto_download", settings.level2.auto_download},
         {"clarify_pushback_max", settings.level2.clarify_pushback_max}}},
@@ -534,6 +570,17 @@ WorkspaceConfig WorkspaceConfig::load(const std::string& workspace_root) {
     if (doc.contains("ai")) {
       parse_ai_settings(doc["ai"], &config.ai);
     }
+    if (doc.contains("language_overrides") && doc["language_overrides"].is_object()) {
+      for (auto it = doc["language_overrides"].begin(); it != doc["language_overrides"].end();
+           ++it) {
+        if (!it.key().empty() && it.value().is_string()) {
+          const std::string lang = it.value().get<std::string>();
+          if (!lang.empty()) {
+            config.language_overrides[it.key()] = lang;
+          }
+        }
+      }
+    }
     // Legacy / hand-edited: allow llama_vulkan_bundle at workspace root.
     if (doc.contains("llama_vulkan_bundle") && doc["llama_vulkan_bundle"].is_boolean()) {
       config.ai.llama_vulkan_bundle = doc["llama_vulkan_bundle"].get<bool>();
@@ -597,6 +644,15 @@ bool WorkspaceConfig::save(const std::string& workspace_root) const {
       {"profiles", std::move(profiles)},
   };
   doc["ai"] = serialize_ai_settings(ai);
+  if (!language_overrides.empty()) {
+    nlohmann::json overrides = nlohmann::json::object();
+    for (const auto& entry : language_overrides) {
+      if (!entry.first.empty() && !entry.second.empty()) {
+        overrides[entry.first] = entry.second;
+      }
+    }
+    doc["language_overrides"] = std::move(overrides);
+  }
 
   std::ofstream output(config_path(workspace_root));
   if (!output) {

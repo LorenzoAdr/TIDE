@@ -1391,6 +1391,71 @@ int main() {
     fs::remove_all(rootc, ec);
   }
 
+  // Continuable session: follow-up accumulates; Reset clears.
+  {
+    const fs::path rootf = fs::temp_directory_path() / "tuide_l2_followup_test";
+    fs::remove_all(rootf, ec);
+    fs::create_directories(rootf / ".tuide" / "ai", ec);
+    fs::create_directories(rootf / "src", ec);
+    {
+      std::ofstream map(rootf / ".tuide" / "ai" / "map_last.md");
+      map << "query: explain foo\n\n## Ranked entries\n\n1. src/foo.cpp:1 — `foo`\n";
+    }
+    {
+      std::ofstream foo(rootf / "src" / "foo.cpp");
+      foo << "int foo() { return 1; }\n";
+    }
+    Level2SessionDeps depsf{&tools, {}, {}};
+    depsf.pack_incomplete_pushback_max = 0;
+    Level2Session sessf(depsf);
+    Level2BootstrapOpts optsf;
+    optsf.workspace_root = rootf.string();
+    optsf.query = "cómo funciona foo";
+    optsf.instruction = "explica foo";
+    optsf.workflow = "ask";
+    expect(sessf.bootstrap(optsf, &err), "bootstrap ask followup " + err);
+    expect(!Level2Session::is_continuable(rootf.string()), "not continuable mid-run");
+    {
+      const auto tr = sessf.apply_plan(rootf.string(), {"src/foo.cpp:foo"}, "pack");
+      expect(tr.ok, "plan ask: " + tr.error);
+    }
+    {
+      const auto tr = sessf.apply_synthesize(rootf.string(), "foo devuelve 1");
+      expect(tr.ok && tr.phase == "done", "synthesize done");
+    }
+    expect(Level2Session::is_continuable(rootf.string()), "continuable after synthesize");
+    const std::string pack_before = read_all(Level2Session::pack_path(rootf.string()));
+    const std::string answer_before = read_all(Level2Session::answer_path(rootf.string()));
+    expect(!answer_before.empty(), "answer.md written");
+    expect(Level2Session::reopen_for_followup(rootf.string(), "arrégalo para devolver 2", "agent",
+                                              &err),
+           "reopen followup " + err);
+    expect(!Level2Session::is_continuable(rootf.string()),
+           "not continuable while follow-up run active");
+    {
+      const std::string sess = read_all(Level2Session::session_path(rootf.string()));
+      expect(sess.find("## Follow-ups") != std::string::npos, "has Follow-ups");
+      expect(sess.find("arrégalo para devolver 2") != std::string::npos, "follow-up text");
+      expect(sess.find("follow-up 1") != std::string::npos, "follow-up obs");
+      expect(sess.find("workflow: agent") != std::string::npos, "workflow switched to agent");
+    }
+    expect(read_all(Level2Session::pack_path(rootf.string())) == pack_before, "pack preserved");
+    expect(read_all(Level2Session::answer_path(rootf.string())) == answer_before,
+           "answer preserved");
+    {
+      const std::string prior = Level2Session::resume_context_markdown(rootf.string());
+      expect(prior.find("Prior answer") != std::string::npos, "prior answer in resume ctx");
+      expect(prior.find("foo devuelve 1") != std::string::npos, "answer body in resume ctx");
+    }
+    // Finish follow-up and clear.
+    expect(sessf.mark_done(rootf.string(), "fixed", "").ok, "done after followup");
+    expect(Level2Session::is_continuable(rootf.string()), "continuable again");
+    expect(Level2Session::clear_session(rootf.string(), &err), "clear_session " + err);
+    expect(!Level2Session::is_continuable(rootf.string()), "not continuable after clear");
+    expect(!fs::exists(Level2Session::session_path(rootf.string())), "session wiped");
+    fs::remove_all(rootf, ec);
+  }
+
   fs::remove_all(root, ec);
   if (failures) {
     std::cerr << failures << " failure(s)\n";

@@ -45,6 +45,7 @@ TYPESCRIPT_VERSION="${TUIDE_TYPESCRIPT_VERSION:-7.0.2}"
 TYPESCRIPT_LS_VERSION="${TUIDE_TYPESCRIPT_LS_VERSION:-${TYPESCRIPT_LS_NPM_VERSION}+ts${TYPESCRIPT_VERSION}}"
 YAML_LS_NPM_VERSION="${TUIDE_YAML_LS_NPM_VERSION:-1.24.0}"
 YAML_LS_VERSION="${TUIDE_YAML_LS_VERSION:-${YAML_LS_NPM_VERSION}}"
+LEMMINX_VERSION="${TUIDE_LEMMINX_VERSION:-0.29.3}"
 BASEDPYRIGHT_VERSION="${TUIDE_BASEDPYRIGHT_VERSION:-1.39.9}"
 DEBUGPY_VERSION="${TUIDE_DEBUGPY_VERSION:-1.8.21}"
 PYTHON_STANDALONE_VERSION="${TUIDE_PYTHON_STANDALONE_VERSION:-3.12.13}"
@@ -495,6 +496,29 @@ pack_yaml_ls() {
     "lsp" "yaml-language-server" '["yaml"]' TUIDE_YAML_LS_PAYLOAD_DIR yaml_ls
 }
 
+pack_lemminx() {
+  want_pack lemminx || return 0
+  need unzip
+  local name="lemminx-linux-x86_64.zip"
+  local dl="${CACHE_DIR}/${LEMMINX_VERSION}-${name}"
+  download "https://github.com/redhat-developer/vscode-xml/releases/download/${LEMMINX_VERSION}/${name}" "${dl}"
+  local stage="${WORK_DIR}/lemminx_stage" payload="${WORK_DIR}/lemminx_payload"
+  rm -rf "${stage}" "${payload}"
+  mkdir -p "${stage}" "${payload}/bin"
+  unzip -q "${dl}" -d "${stage}"
+  local bin
+  bin="$(find "${stage}" -type f -name lemminx-linux-x86_64 | head -n1)"
+  if [[ -z "${bin}" ]]; then
+    bin="$(find "${stage}" -type f -name 'lemminx*' | head -n1)"
+  fi
+  [[ -n "${bin}" ]] || die "no se encontro lemminx"
+  cp "${bin}" "${payload}/bin/lemminx"
+  chmod +x "${payload}/bin/lemminx"
+  pack_payload "${payload}" "lemminx" "${LEMMINX_VERSION}" "bin/lemminx" \
+    "EPL-2.0" "lsp" "LemMinX" '["xml"]'
+  cleanup_pack_workdir lemminx
+}
+
 pack_python_tools() {
   want_pack python-tools || return 0
   need python3
@@ -533,6 +557,7 @@ pack_bash_ls
 pack_bash_dap
 pack_typescript_ls
 pack_yaml_ls
+pack_lemminx
 pack_python_tools
 
 # If --only was used, fold in already-built archives in OUT_DIR so a resumed
@@ -551,7 +576,7 @@ if [[ -n "${ONLY}" ]]; then
     local_stem="${base%-linux-x86_64.tar.zst}"
     local_id=""
     local_ver=""
-    for cand in python-tools typescript-ls rust-analyzer bash-dap bash-ls yaml-ls make-ls lua-ls neocmakelsp clangd gopls fortls texlab zls gdb; do
+    for cand in python-tools typescript-ls rust-analyzer bash-dap bash-ls yaml-ls lemminx make-ls lua-ls neocmakelsp clangd gopls fortls texlab zls gdb; do
       if [[ "${local_stem}" == "${cand}-"* ]]; then
         local_id="${cand}"
         local_ver="${local_stem#${cand}-}"

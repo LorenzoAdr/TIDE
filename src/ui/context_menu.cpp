@@ -1300,6 +1300,22 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
+  if (action_id == "ai_insert") {
+    if (layout_state != nullptr && layout_state->on_ai_insert_requested) {
+      MainLayoutState::AiInsertRequest req;
+      req.absolute_path = state->absolute_path;
+      if (req.absolute_path.empty() && workspace != nullptr) {
+        req.absolute_path = workspace->active_file.empty() ? workspace->buffer.path
+                                                          : workspace->active_file;
+      }
+      req.line = state->editor_line;
+      req.col = state->editor_col;
+      req.symbol_hint = state->symbol_name;
+      layout_state->on_ai_insert_requested(req);
+    }
+    return true;
+  }
+
   if (action_id == "format_file") {
     const std::string path = state->absolute_path.empty()
                                  ? (workspace != nullptr ? workspace->active_file : std::string{})
@@ -1824,6 +1840,7 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
     items.push_back({i18n::tr("context_menu.format_file"), "format_file"});
   }
   set_items(state, ContextMenuKind::EditorSymbol, items);
+  append_menu_item(state, i18n::tr("context_menu.ai_insert"), "ai_insert");
   append_doc_comment_items(state, true);
   if (show_debug) {
     append_debug_watch_items(state, show_hw);
@@ -1878,6 +1895,7 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
   }
   items.push_back({i18n::tr("context_menu.format_file"), "format_file"});
   set_items(state, ContextMenuKind::EditorBackground, items);
+  append_menu_item(state, i18n::tr("context_menu.ai_insert"), "ai_insert");
   append_doc_comment_items(state, false);
 }
 

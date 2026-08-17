@@ -2,9 +2,67 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace tuide {
+
+// L2 interaction workflow (orthogonal to level2_mode backend: dry_run|local|remote).
+enum class AiWorkflowKind : uint8_t {
+  Agent = 0,  // explore → pack → edit ↔ compile → done
+  Ask = 1,    // explore → pack → synthesize → done
+  Plan = 2,   // explore → pack → plan_doc (synthesize) → done
+  Git = 3,    // git context (+ optional explore) → synthesize → done
+};
+
+inline const char* ai_workflow_kind_name(AiWorkflowKind kind) {
+  switch (kind) {
+    case AiWorkflowKind::Agent:
+      return "agent";
+    case AiWorkflowKind::Ask:
+      return "ask";
+    case AiWorkflowKind::Plan:
+      return "plan";
+    case AiWorkflowKind::Git:
+      return "git";
+  }
+  return "agent";
+}
+
+inline AiWorkflowKind parse_ai_workflow_kind(std::string_view s) {
+  if (s == "ask") {
+    return AiWorkflowKind::Ask;
+  }
+  if (s == "plan") {
+    return AiWorkflowKind::Plan;
+  }
+  if (s == "git") {
+    return AiWorkflowKind::Git;
+  }
+  return AiWorkflowKind::Agent;
+}
+
+inline AiWorkflowKind cycle_ai_workflow_kind(AiWorkflowKind kind) {
+  switch (kind) {
+    case AiWorkflowKind::Agent:
+      return AiWorkflowKind::Ask;
+    case AiWorkflowKind::Ask:
+      return AiWorkflowKind::Plan;
+    case AiWorkflowKind::Plan:
+      return AiWorkflowKind::Git;
+    case AiWorkflowKind::Git:
+      return AiWorkflowKind::Agent;
+  }
+  return AiWorkflowKind::Agent;
+}
+
+inline bool ai_workflow_allows_edit(AiWorkflowKind kind) {
+  return kind == AiWorkflowKind::Agent;
+}
+
+inline bool ai_workflow_is_readonly(AiWorkflowKind kind) {
+  return kind != AiWorkflowKind::Agent;
+}
 
 enum class AiAuthor : uint8_t {
   Human = 0,
@@ -113,6 +171,8 @@ struct AiLevel2Settings {
   int max_steps = 32;
   int max_tokens = 2048;
   int n_ctx = 8192;
+  // Effective context for remote prompt/pack scaling (local still uses n_ctx for llama -c).
+  int n_ctx_remote = 32768;
   float temperature = 0.1f;
   bool auto_download = false;
   // Reject premature clarify this many times (force more get_code_of/tools) before accepting.
@@ -125,6 +185,12 @@ struct AiSettings {
   // Named tasks: name -> argv string (shell-tokenized).
   std::vector<std::pair<std::string, std::string>> tasks;
   std::string level2_mode = "dry_run";  // dry_run | harness | local | remote
+  // agent | ask | plan | git — explicit L2 state machine (see AiWorkflowKind).
+  std::string level2_workflow = "agent";
+  // Relative (preferred) or absolute directory prefixes. Empty = unrestricted AI access.
+  std::vector<std::string> path_scope;
+  // Git workflow: how many recent commits to seed into the L2 session.
+  int level2_git_log_n = 20;
   AiLevel2Settings level2;
   std::string models_cache_dir;
   // Official AI level trace → <workspace>/.tuide/ai/trace.ndjson

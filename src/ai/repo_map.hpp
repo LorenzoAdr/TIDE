@@ -51,6 +51,8 @@ struct RepoMapOptions {
   int max_map_tokens = 1024;               // Aider-style budget; 0 = use max_chars only
   bool prefer_git_tracked = true;          // drop symbols not in git ls-files when available
   bool use_pagerank = true;
+  // Empty = unrestricted. Relative directory prefixes (recursive).
+  std::vector<std::string> path_scope;
 };
 
 struct RepoMap {

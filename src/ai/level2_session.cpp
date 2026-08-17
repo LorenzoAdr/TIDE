@@ -15,6 +15,8 @@
 #include <nlohmann/json.hpp>
 
 #include "ai/ai_trace.hpp"
+#include "ai/ai_types.hpp"
+#include "ai/ai_path_scope.hpp"
 #include "ai/l2_feat.hpp"
 
 namespace fs = std::filesystem;
@@ -2288,6 +2290,40 @@ Level2Session::Level2Session(Level2SessionDeps deps) : deps_(std::move(deps)) {}
 
 Level2Session::Level2Session(ToolRegistry* tools) : deps_{tools, {}, {}} {}
 
+void Level2Session::set_context_budget(L2ContextBudget budget) {
+  budget_ = std::move(budget);
+}
+
+bool Level2Session::maybe_trim_pack_to_budget(const std::string& workspace_root,
+                                              std::string* summary) {
+  const std::string path = pack_path(workspace_root);
+  std::string pack = read_file(path);
+  if (pack.empty() || pack.find("_(vacío") != std::string::npos) {
+    return false;
+  }
+  const std::size_t limit = budget_.pack_chars;
+  if (limit == 0 || pack.size() <= static_cast<std::size_t>(limit * 12 / 10)) {
+    return false;
+  }
+  const std::size_t before = pack.size();
+  // Prefer dropping ## Outlines first (code lives in Fragments); then head+tail.
+  const auto outlines = pack.find("\n## Outlines");
+  if (outlines != std::string::npos && outlines > limit / 2) {
+    pack = pack.substr(0, outlines) + "\n\n_… outlines omitidos (budget local) …_\n";
+  }
+  if (pack.size() > limit) {
+    pack = truncate_to_budget(std::move(pack), limit, "budget local");
+  }
+  if (!write_file(path, pack, nullptr)) {
+    return false;
+  }
+  if (summary) {
+    *summary = "pack recortado al budget " + budget_.backend + " (" + std::to_string(before) +
+               "→" + std::to_string(pack.size()) + " chars)";
+  }
+  return true;
+}
+
 std::string Level2Session::dir_for(const std::string& workspace_root) {
   return (fs::path(workspace_root) / ".tuide" / "ai" / "l2").lexically_normal().string();
 }
@@ -2322,6 +2358,315 @@ std::string Level2Session::map_initial_path(const std::string& workspace_root) {
 
 std::string Level2Session::pack_path(const std::string& workspace_root) {
   return (fs::path(dir_for(workspace_root)) / "pack.md").string();
+}
+
+std::string Level2Session::answer_path(const std::string& workspace_root) {
+  return (fs::path(dir_for(workspace_root)) / "answer.md").lexically_normal().string();
+}
+
+bool Level2Session::is_continuable(const std::string& workspace_root) {
+  if (workspace_root.empty()) {
+    return false;
+  }
+  const State st = load_state(workspace_root);
+  if (!st.continuable) {
+    return false;
+  }
+  return st.done || st.phase == "done" || st.phase == "clarify";
+}
+
+bool Level2Session::mark_continuable(const std::string& workspace_root, std::string* err_out) {
+  if (workspace_root.empty()) {
+    if (err_out) {
+      *err_out = "workspace_root vacío";
+    }
+    return false;
+  }
+  State st = load_state(workspace_root);
+  st.continuable = true;
+  st.resume = false;
+  return save_state(workspace_root, st, err_out);
+}
+
+bool Level2Session::clear_session(const std::string& workspace_root, std::string* err_out) {
+  if (workspace_root.empty()) {
+    if (err_out) {
+      *err_out = "workspace_root vacío";
+    }
+    return false;
+  }
+  const std::string dir = dir_for(workspace_root);
+  std::error_code ec;
+  if (fs::exists(dir, ec)) {
+    fs::remove_all(dir, ec);
+    if (ec) {
+      if (err_out) {
+        *err_out = "no se pudo borrar sesión L2: " + ec.message();
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+namespace {
+
+bool upsert_followups_section(const std::string& session_file, int followup_n,
+                              const std::string& user_text, std::string* err) {
+  std::ifstream in(session_file);
+  if (!in) {
+    if (err) {
+      *err = "session.md ausente";
+    }
+    return false;
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  std::string session = ss.str();
+
+  std::ostringstream entry;
+  entry << followup_n << ". " << user_text << "\n";
+
+  const std::string fu_mark = "## Follow-ups";
+  const std::string map_mark = "## Ranked map";
+  const std::string git_mark = "## Git context";
+  const std::string obs_mark = "## Observations";
+
+  auto insert_before = [&](std::size_t pos) {
+    std::string block = fu_mark + "\n\n" + entry.str() + "\n";
+    session = session.substr(0, pos) + block + session.substr(pos);
+  };
+
+  const auto fu_pos = session.find(fu_mark);
+  if (fu_pos != std::string::npos) {
+    // Append before the next major section after Follow-ups.
+    std::size_t next = session.find("\n## ", fu_pos + fu_mark.size());
+    if (next == std::string::npos) {
+      if (!session.empty() && session.back() != '\n') {
+        session.push_back('\n');
+      }
+      session += entry.str();
+    } else {
+      session = session.substr(0, next + 1) + entry.str() + session.substr(next + 1);
+    }
+  } else {
+    std::size_t pos = session.find(map_mark);
+    if (pos == std::string::npos) {
+      pos = session.find(git_mark);
+    }
+    if (pos == std::string::npos) {
+      pos = session.find(obs_mark);
+    }
+    if (pos == std::string::npos) {
+      if (!session.empty() && session.back() != '\n') {
+        session.push_back('\n');
+      }
+      session += "\n" + fu_mark + "\n\n" + entry.str();
+    } else {
+      insert_before(pos);
+    }
+  }
+
+  // Keep workflow: line in Instruction in sync if present (caller may rewrite separately).
+  std::ofstream out(session_file, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    if (err) {
+      *err = "no se pudo escribir session.md";
+    }
+    return false;
+  }
+  out << session;
+  return true;
+}
+
+bool rewrite_instruction_workflow_line(const std::string& session_file,
+                                       const std::string& workflow_name, std::string* err) {
+  std::ifstream in(session_file);
+  if (!in) {
+    if (err) {
+      *err = "session.md ausente";
+    }
+    return false;
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  std::string session = ss.str();
+  const std::string key = "workflow: ";
+  const auto instr = session.find("## Instruction");
+  if (instr == std::string::npos) {
+    return true;
+  }
+  const auto end_instr = session.find("\n## ", instr + 1);
+  const std::size_t search_end = end_instr == std::string::npos ? session.size() : end_instr;
+  const auto wf = session.find(key, instr);
+  if (wf != std::string::npos && wf < search_end) {
+    const auto line_end = session.find('\n', wf);
+    const std::string replacement = key + workflow_name;
+    if (line_end == std::string::npos) {
+      session = session.substr(0, wf) + replacement;
+    } else {
+      session = session.substr(0, wf) + replacement + session.substr(line_end);
+    }
+  }
+  std::ofstream out(session_file, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    if (err) {
+      *err = "no se pudo escribir session.md";
+    }
+    return false;
+  }
+  out << session;
+  return true;
+}
+
+}  // namespace
+
+bool Level2Session::reopen_for_followup(const std::string& workspace_root,
+                                        const std::string& user_text,
+                                        const std::string& workflow_opt, std::string* err_out) {
+  if (workspace_root.empty()) {
+    if (err_out) {
+      *err_out = "workspace_root vacío";
+    }
+    return false;
+  }
+  if (user_text.empty()) {
+    if (err_out) {
+      *err_out = "follow-up vacío";
+    }
+    return false;
+  }
+  if (!is_continuable(workspace_root)) {
+    if (err_out) {
+      *err_out = "sesión no continuable; usa bootstrap o Reset";
+    }
+    return false;
+  }
+
+  State st = load_state(workspace_root);
+  const std::string prev_workflow = st.workflow.empty() ? "agent" : st.workflow;
+  if (!workflow_opt.empty()) {
+    st.workflow = ai_workflow_kind_name(parse_ai_workflow_kind(workflow_opt));
+  }
+  const std::string workflow_name = st.workflow.empty() ? "agent" : st.workflow;
+  const AiWorkflowKind wf = parse_ai_workflow_kind(workflow_name);
+
+  ++st.followup_count;
+  st.done = false;
+  st.continuable = true;
+  st.resume = true;
+  st.map_review = false;
+  st.edit_attempt = 0;
+  st.compile_attempt = 0;
+  st.clarify_pushback = 0;
+  st.pack_incomplete_pushback = 0;
+  st.explore_tool_count = 0;
+  st.plan_nudge_sent = false;
+  st.post_pack_tool_count = 0;
+  st.edit_nudge_sent = false;
+  st.pending.clear();
+  st.last_action = "followup";
+
+  // Prefer short-circuit into edit when agent + pack already present.
+  if (!ai_workflow_is_readonly(wf) && st.has_pack) {
+    st.phase = "edit";
+  } else {
+    st.phase = "explore";
+  }
+
+  std::string err;
+  if (!upsert_followups_section(session_path(workspace_root), st.followup_count, user_text, &err)) {
+    if (err_out) {
+      *err_out = err.empty() ? "no se pudo actualizar Follow-ups" : err;
+    }
+    return false;
+  }
+  if (workflow_name != prev_workflow) {
+    rewrite_instruction_workflow_line(session_path(workspace_root), workflow_name, nullptr);
+  }
+
+  {
+    Level2SessionDeps deps;
+    Level2Session writer(deps);
+    std::ostringstream block;
+    block << "### turn follow-up " << st.followup_count << " — user\n\n";
+    block << user_text << "\n\n";
+    if (workflow_name != prev_workflow) {
+      block << "_workflow: " << prev_workflow << " → " << workflow_name << "_\n\n";
+    }
+    block << "Resume: si ## Follow-ups + pack/answer bastan → "
+          << (ai_workflow_is_readonly(wf) ? "`synthesize`" : "`edit`")
+          << " (o explore/plan si falta contexto).\n\n";
+    std::size_t chars = 0;
+    if (!writer.append_observation(workspace_root, block.str(), &chars, &err)) {
+      if (err_out) {
+        *err_out = err.empty() ? "no se pudo escribir observation de follow-up" : err;
+      }
+      return false;
+    }
+  }
+
+  if (!save_state(workspace_root, st, err_out)) {
+    return false;
+  }
+  write_response_json(workspace_root, true, "followup", "", "", user_text, "", st.turn, st.phase);
+  append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                   ",\"event\":\"followup\",\"n\":" +
+                                   std::to_string(st.followup_count) + ",\"phase\":\"" + st.phase +
+                                   "\",\"workflow\":\"" + workflow_name + "\",\"has_pack\":" +
+                                   (st.has_pack ? "1" : "0") + "}");
+  ai_trace(AiTraceChannel::L2, "l2_followup",
+           "{\"n\":" + std::to_string(st.followup_count) + ",\"phase\":\"" + st.phase +
+               "\",\"workflow\":\"" + workflow_name + "\"}");
+  return true;
+}
+
+std::string Level2Session::resume_context_markdown(const std::string& workspace_root,
+                                                   std::size_t max_chars) {
+  std::ostringstream out;
+  const std::string answer = read_file(answer_path(workspace_root));
+  if (!answer.empty()) {
+    out << "## Prior answer\n\n";
+    constexpr std::size_t kAnswerCap = 3500;
+    if (answer.size() > kAnswerCap) {
+      out << answer.substr(0, kAnswerCap) << "\n…[prior answer truncado]…\n\n";
+    } else {
+      out << answer;
+      if (answer.back() != '\n') {
+        out << '\n';
+      }
+      out << '\n';
+    }
+  }
+
+  const State st = load_state(workspace_root);
+  if (!st.watchlist.empty()) {
+    out << "## Prior targets\n\n";
+    for (const auto& t : st.watchlist) {
+      out << "- `" << t << "`\n";
+    }
+    out << '\n';
+  }
+
+  const std::string pack = read_file(pack_path(workspace_root));
+  if (!pack.empty() && pack.find("_(vacío") == std::string::npos) {
+    out << "## Prior changes / pack\n\n";
+    constexpr std::size_t kPackCap = 4000;
+    if (pack.size() > kPackCap) {
+      out << pack.substr(0, kPackCap) << "\n…[prior pack truncado]…\n";
+    } else {
+      out << pack;
+      if (pack.back() != '\n') {
+        out << '\n';
+      }
+    }
+  }
+
+  std::string s = out.str();
+  if (max_chars > 0 && s.size() > max_chars) {
+    s = s.substr(0, max_chars) + "\n…[resume context truncado]…\n";
+  }
+  return s;
 }
 
 bool Level2Session::tool_allowed(const std::string& name) {
@@ -2428,6 +2773,7 @@ Level2Session::State Level2Session::load_state(const std::string& workspace_root
     st.done = j.value("done", false);
     st.last_action = j.value("last_action", "");
     st.phase = j.value("phase", "explore");
+    st.workflow = j.value("workflow", "agent");
     st.edit_attempt = j.value("edit_attempt", 0);
     st.compile_attempt = j.value("compile_attempt", 0);
     st.clarify_pushback = j.value("clarify_pushback", 0);
@@ -2446,6 +2792,9 @@ Level2Session::State Level2Session::load_state(const std::string& workspace_root
     st.pack_incomplete = j.value("pack_incomplete", false);
     st.map_stale = j.value("map_stale", false);
     st.map_review = j.value("map_review", false);
+    st.continuable = j.value("continuable", false);
+    st.resume = j.value("resume", false);
+    st.followup_count = j.value("followup_count", 0);
     st.last_op_id = j.value("last_op_id", static_cast<uint64_t>(0));
     st.applied_blob = j.value("applied_blob", "");
     st.coverage_gate_pushback = j.value("coverage_gate_pushback", 0);
@@ -2493,6 +2842,7 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
                       {"done", st.done},
                       {"last_action", st.last_action},
                       {"phase", st.phase},
+                      {"workflow", st.workflow},
                       {"edit_attempt", st.edit_attempt},
                       {"compile_attempt", st.compile_attempt},
                       {"clarify_pushback", st.clarify_pushback},
@@ -2511,6 +2861,9 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
                       {"pack_incomplete", st.pack_incomplete},
                       {"map_stale", st.map_stale},
                       {"map_review", st.map_review},
+                      {"continuable", st.continuable},
+                      {"resume", st.resume},
+                      {"followup_count", st.followup_count},
                       {"last_op_id", st.last_op_id},
                       {"watchlist", st.watchlist},
                       {"edited_paths", st.edited_paths},
@@ -2663,7 +3016,7 @@ std::string Level2Session::maybe_tool_nudge(State& st, int tools_added) {
     }
     return {};
   }
-  // Pack already covers Instruction: extras should be refetch tips, then edit.
+  // Pack already covers Instruction: extras should be refetch tips, then next phase.
   if (st.pack_incomplete) {
     return {};
   }
@@ -2672,8 +3025,18 @@ std::string Level2Session::maybe_tool_nudge(State& st, int tools_added) {
     st.edit_nudge_sent = true;
     std::ostringstream nudge;
     nudge << "_nudge:_ Llevas " << st.post_pack_tool_count
-          << " tools tras pack (Instruction cubierta). Emite `done next=edit` o `edit` "
-             "(refetch solo gaps / `## Truncated` tip; no shotgun).\n\n";
+          << " tools tras pack (Instruction cubierta). ";
+    const AiWorkflowKind wf = parse_ai_workflow_kind(st.workflow);
+    if (ai_workflow_is_readonly(wf)) {
+      if (wf == AiWorkflowKind::Plan) {
+        nudge << "Emite `action=synthesize` con el plan (pasos, archivos, riesgos).\n\n";
+      } else {
+        nudge << "Emite `action=synthesize` con la explicación/respuesta al usuario.\n\n";
+      }
+    } else {
+      nudge << "Emite `done next=edit` o `edit` "
+               "(refetch solo gaps / `## Truncated` tip; no shotgun).\n\n";
+    }
     return nudge.str();
   }
   return {};
@@ -2716,7 +3079,7 @@ void Level2Session::compact_observations_after_pack(const std::string& workspace
     return;
   }
   const std::string head = session.substr(0, obs_pos);
-  session = head + trim_observations_section(session.substr(obs_pos), kMaxObservationCharsPacked);
+  session = head + trim_observations_section(session.substr(obs_pos), budget_.obs_packed);
   write_file(session_path(workspace_root), session, nullptr);
   if (session_chars) {
     *session_chars = session.size();
@@ -2766,13 +3129,23 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   const bool map_stale =
       !map_query.empty() && !intent_needles.empty() && overlap < 0.22;
 
+  const AiWorkflowKind workflow = parse_ai_workflow_kind(opts.workflow);
+  const std::string workflow_name = ai_workflow_kind_name(workflow);
+
   std::ostringstream md;
   md << "# L2 session\n\n";
   // Tool guide lives only in the L2 system prompt (avoid duplicating ~1.3k chars into n_ctx).
   md << "## Instruction\n\n";
+  md << "workflow: " << workflow_name << "\n\n";
   md << "query: " << opts.query << "\n\n";
   if (!opts.instruction.empty()) {
     md << "instruction: " << opts.instruction << "\n\n";
+  }
+  {
+    const std::string scope_line = ai_path_scope_prompt_line(opts.path_scope);
+    if (!scope_line.empty()) {
+      md << scope_line << "\n\n";
+    }
   }
   if (!opts.seeds.empty()) {
     md << "seeds:";
@@ -2792,11 +3165,37 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
             "`done next=clarify`.\n\n";
     }
   }
-  md << "Fase inicial: **explore**. Preferir `action=plan` en el **primer** paso con "
-        "4–8 targets `path:Symbol`/`path:line` (evitar path bare). Máx. ~8 tools sueltos "
-        "antes del primer plan. Tras pack cubierto: extras con `tools` batch (máx. 4); "
-        "luego `{\"action\":\"done\",\"summary\":\"…\",\"next\":\"edit\"}` o `edit` directo. "
-        "Truncado ≠ bloqueo de edit si no hay gaps Instruction.\n\n";
+  if (workflow == AiWorkflowKind::Ask) {
+    md << "Fase inicial: **explore** (workflow=ask). Preferir `action=plan` → pack, luego "
+          "`action=synthesize` con la explicación. **PROHIBIDO** edit/compile.\n\n";
+  } else if (workflow == AiWorkflowKind::Plan) {
+    md << "Fase inicial: **explore** (workflow=plan). Preferir `action=plan` → pack, luego "
+          "`action=synthesize` con un plan de cambios (archivos, pasos, riesgos). "
+          "**PROHIBIDO** edit/compile.\n\n";
+  } else if (workflow == AiWorkflowKind::Git) {
+    md << "Fase inicial: **explore** (workflow=git). Tienes ## Git context. Puedes "
+          "`action=plan`/tools si necesitas código actual, o `action=synthesize` directo "
+          "para resumir qué cambió. **PROHIBIDO** edit/compile.\n\n";
+  } else {
+    md << "Fase inicial: **explore**. Preferir `action=plan` en el **primer** paso con "
+          "4–8 targets `path:Symbol`/`path:line` (evitar path bare). Máx. ~8 tools sueltos "
+          "antes del primer plan. Tras pack cubierto: extras con `tools` batch (máx. 4); "
+          "luego `{\"action\":\"done\",\"summary\":\"…\",\"next\":\"edit\"}` o `edit` directo. "
+          "Truncado ≠ bloqueo de edit si no hay gaps Instruction.\n\n";
+  }
+  if (!opts.seed_pack_markdown.empty()) {
+    md << "**insert_pack=1**: `pack.md` ya incluye el cuerpo de la función ancla y su "
+          "header. Puedes explorar el ## Ranked map / tools si necesitas más contexto; "
+          "luego edita en el locus de la Instruction.\n\n";
+  }
+  if (workflow == AiWorkflowKind::Git && !opts.git_context.empty()) {
+    md << "## Git context\n\n";
+    md << opts.git_context;
+    if (!opts.git_context.empty() && opts.git_context.back() != '\n') {
+      md << '\n';
+    }
+    md << '\n';
+  }
   md << "## Ranked map\n\n";
   if (map_stale) {
     md << "_(omitido — map_stale; query del mapa: `" << map_query
@@ -2822,6 +3221,7 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
 
   State st;
   st.phase = "explore";
+  st.workflow = workflow_name;
   st.last_action = "bootstrap";
   st.has_pack = false;
   st.pack_incomplete = false;
@@ -2837,12 +3237,26 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   st.last_failed_edit_fp.clear();
   st.map_stale = map_stale;
   st.map_review = false;
+  st.continuable = false;
+  st.resume = false;
+  st.followup_count = 0;
   st.watchlist.clear();
   // Hard reset prior pack so plan1 cannot merge stale targets (path:Symbol del prompt viejo).
   {
     std::string pack_err;
-    write_file(pack_path(opts.workspace_root),
-               "# L2 code pack\n\n_(vacío — bootstrap; sin plan aún)_\n", &pack_err);
+    if (!opts.seed_pack_markdown.empty()) {
+      if (!write_file(pack_path(opts.workspace_root), opts.seed_pack_markdown, &pack_err)) {
+        if (err_out && err_out->empty()) {
+          *err_out = pack_err.empty() ? "no se pudo escribir pack.md (seed)" : pack_err;
+        }
+        return false;
+      }
+      st.has_pack = true;
+      st.watchlist = opts.seeds;
+    } else {
+      write_file(pack_path(opts.workspace_root),
+                 "# L2 code pack\n\n_(vacío — bootstrap; sin plan aún)_\n", &pack_err);
+    }
   }
   if (!save_state(opts.workspace_root, st, err_out)) {
     return false;
@@ -2856,11 +3270,13 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   append_trace(opts.workspace_root,
                std::string("{\"ts\":") + now_ms_str() +
                    ",\"event\":\"bootstrap\",\"query\":\"" + json_escape(opts.query) +
-                   "\",\"phase\":\"explore\",\"map_stale\":" + (map_stale ? "1" : "0") +
+                   "\",\"phase\":\"explore\",\"workflow\":\"" + workflow_name +
+                   "\",\"map_stale\":" + (map_stale ? "1" : "0") +
                    ",\"map_overlap\":" + std::to_string(overlap) + "}");
   ai_trace(AiTraceChannel::L2, "l2_bootstrap",
            std::string("{\"path\":\"") + json_escape(session_path(opts.workspace_root)) +
-               "\",\"map_stale\":" + (map_stale ? "1" : "0") + "}");
+               "\",\"workflow\":\"" + workflow_name + "\",\"map_stale\":" +
+               (map_stale ? "1" : "0") + "}");
   return true;
 }
 
@@ -2959,7 +3375,7 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
   out.turn = st.turn;
 
   const int max_lines = st.has_pack ? kMaxObservationLinesPacked : kMaxObservationLines;
-  const std::size_t max_chars = st.has_pack ? kMaxObservationCharsPerTurnPacked : 0;
+  const std::size_t max_chars = st.has_pack ? budget_.obs_per_turn : 0;
   const std::string obs_text = truncate_observation(tr.text, max_lines, max_chars);
   std::ostringstream block;
   block << "### turn " << st.turn << " — `" << name << "`";
@@ -3132,7 +3548,7 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
 
     std::string obs_text = truncate_observation(
         tr.text, st.has_pack ? kMaxObservationLinesPacked : kMaxObservationLinesBatch,
-        st.has_pack ? kMaxObservationCharsPerTurnPacked : 0);
+        st.has_pack ? budget_.obs_per_turn : 0);
     const bool was_truncated =
         tr.text.find("[TRUNCATED]") != std::string::npos ||
         tr.text.find("[truncated]") != std::string::npos || obs_text.size() < tr.text.size();
@@ -3985,7 +4401,9 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     }
   }
 
-  const std::size_t budget = kMaxPackChars;
+  const std::size_t budget = budget_.pack_chars > 0 ? budget_.pack_chars : kMaxPackChars;
+  const std::size_t frag_share_cap =
+      budget_.frag_share > 0 ? budget_.frag_share : kMaxFragShareChars;
   const std::size_t outline_reserve =
       std::min<std::size_t>(budget / 3, 2500 + uniq_paths.size() * 200);
   std::size_t frag_budget = budget > outline_reserve + 200 ? budget - outline_reserve : budget / 2;
@@ -4013,7 +4431,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   const std::size_t reserved_n = std::min<std::size_t>(pack_order.size(), 5);
   const std::size_t role_share =
       reserved_n > 0 ? std::max<std::size_t>(400, frag_budget / (reserved_n + 1))
-                     : kMaxFragShareChars;
+                     : frag_share_cap;
 
   std::size_t used_frags = 0;
   int frag_ok = 0;
@@ -4063,7 +4481,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     }
 
     const bool first_of_role = roles_packed.insert(static_cast<int>(role)).second;
-    std::size_t per = std::min({remaining, kMaxFragShareChars, role_share});
+    std::size_t per = std::min({remaining, frag_share_cap, role_share});
     // First control/layout/decl slot: allow up to role_share (not half budget).
     if (!first_of_role) {
       per = std::min(per, role_share * 3 / 4);
@@ -4353,6 +4771,11 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
     write_response_json(workspace_root, false, "error", "edit", "", "", out.error, st.turn, st.phase);
     return out;
   }
+  if (ai_workflow_is_readonly(parse_ai_workflow_kind(st.workflow))) {
+    out.error = "action=edit no permitido en workflow=" + st.workflow;
+    write_response_json(workspace_root, false, "error", "edit", "", "", out.error, st.turn, st.phase);
+    return out;
+  }
   st.map_review = false;
 
   auto force_clarify = [&](const std::string& reason) {
@@ -4497,6 +4920,18 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
   if (hunks.empty()) {
     record_edit_failure("hunks vacío", "", "", "", "empty", false);
     return out;
+  }
+  {
+    static const std::vector<std::string> kEmptyScope;
+    const std::vector<std::string>& scope =
+        deps_.path_scope_fn ? deps_.path_scope_fn() : kEmptyScope;
+    for (const auto& h : hunks) {
+      if (!ai_path_in_scope(workspace_root, h.path, scope)) {
+        record_edit_failure("ruta fuera del path_scope AI: " + h.path, h.path, h.search,
+                            h.replace);
+        return out;
+      }
+    }
   }
 
   std::vector<SearchReplaceHunk> work = hunks;
@@ -4929,6 +5364,48 @@ Level2TurnResult Level2Session::rollback_pending(const std::string& workspace_ro
   return out;
 }
 
+Level2TurnResult Level2Session::force_phase_edit(const std::string& workspace_root,
+                                                 const std::string& reason) {
+  Level2TurnResult out;
+  out.action = "done";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  if (st.done || st.phase == "done" || st.phase == "clarify") {
+    out.error = "sesión done; reinicia con bootstrap";
+    return out;
+  }
+  if (ai_workflow_is_readonly(parse_ai_workflow_kind(st.workflow))) {
+    out.error = "force_phase_edit no permitido en workflow=" + st.workflow;
+    return out;
+  }
+  compact_session_context(workspace_root, nullptr);
+  ++st.turn;
+  st.phase = "edit";
+  st.done = false;
+  st.last_action = "ready_to_edit";
+  st.pack_incomplete = false;
+  st.map_review = false;
+  out.turn = st.turn;
+  std::ostringstream block;
+  block << "### turn " << st.turn << " — ready_to_edit (force)\n\n";
+  block << (reason.empty() ? "auto phase=edit" : reason) << "\n\n";
+  std::string err;
+  append_observation(workspace_root, block.str(), &out.session_chars, &err);
+  save_state(workspace_root, st, nullptr);
+  write_response_json(workspace_root, true, "done", "force_edit", "", reason, "", st.turn, "edit");
+  append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                   ",\"event\":\"force_phase_edit\",\"turn\":" +
+                                   std::to_string(st.turn) + "}");
+  out.ok = true;
+  out.phase = "edit";
+  out.summary = "phase=edit";
+  return out;
+}
+
 Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
                                           const std::string& summary, const std::string& next_in) {
   Level2TurnResult out;
@@ -4945,6 +5422,11 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
   }
 
   if (next == "edit") {
+    if (ai_workflow_is_readonly(parse_ai_workflow_kind(st.workflow))) {
+      out.error = "next=edit no permitido en workflow=" + st.workflow +
+                  " (usa action=synthesize)";
+      return out;
+    }
     if (st.phase != "explore") {
       out.error = "next=edit solo desde explore";
       return out;
@@ -5119,11 +5601,13 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
     st.done = true;
     st.phase = "clarify";
     st.last_action = "need_clarification";
+    st.continuable = true;
+    st.resume = false;
     out.turn = st.turn;
     std::ostringstream block;
     block << "### turn " << st.turn << " — clarify (arreglo cancelado)\n\n";
     block << summary << "\n\n";
-    block << "_No se pasa a edit/compile. El usuario debe dar más detalle y relanzar._\n\n";
+    block << "_No se pasa a edit/compile. El usuario puede aclarar en un follow-up (mismo chat) o Reset._\n\n";
     std::string err;
     append_observation(workspace_root, block.str(), &out.session_chars, &err);
     save_state(workspace_root, st, nullptr);
@@ -5192,6 +5676,8 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
   st.done = true;
   st.phase = "done";
   st.last_action = "done";
+  st.continuable = true;
+  st.resume = false;
   out.turn = st.turn;
   std::ostringstream block;
   block << "### turn " << st.turn << " — done\n\n" << summary << "\n\n";
@@ -5201,6 +5687,83 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
   write_response_json(workspace_root, true, "done", "", "", summary, "", st.turn, "done");
   out.ok = true;
   out.phase = "done";
+  return out;
+}
+
+Level2TurnResult Level2Session::apply_synthesize(const std::string& workspace_root,
+                                                 const std::string& text) {
+  Level2TurnResult out;
+  out.action = "synthesize";
+  out.summary = text;
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  if (st.done || st.phase == "done" || st.phase == "clarify") {
+    out.error = "sesión ya cerrada";
+    return out;
+  }
+  const AiWorkflowKind wf = parse_ai_workflow_kind(st.workflow);
+  if (!ai_workflow_is_readonly(wf)) {
+    out.error = "synthesize solo en workflow ask|plan|git (ahora=" + st.workflow + ")";
+    return out;
+  }
+  if (st.phase != "explore" && st.phase != "edit") {
+    out.error = "synthesize solo desde explore (ahora=" + st.phase + ")";
+    return out;
+  }
+  if (text.empty()) {
+    out.error = "synthesize sin texto";
+    return out;
+  }
+
+  ++st.turn;
+  st.done = true;
+  st.phase = "done";
+  st.last_action = "synthesize";
+  st.continuable = true;
+  st.resume = false;
+  out.turn = st.turn;
+
+  const char* heading =
+      wf == AiWorkflowKind::Plan ? "plan" : (wf == AiWorkflowKind::Git ? "git_answer" : "answer");
+  std::ostringstream block;
+  block << "### turn " << st.turn << " — synthesize (" << heading << ")\n\n";
+  block << text << "\n\n";
+
+  std::string err;
+  if (!append_observation(workspace_root, block.str(), &out.session_chars, &err)) {
+    out.error = err.empty() ? "no se pudo escribir synthesize" : err;
+    return out;
+  }
+  {
+    const std::string answer_file = answer_path(workspace_root);
+    const std::string prev = read_file(answer_file);
+    std::ostringstream ans;
+    if (prev.empty()) {
+      ans << "# L2 " << heading << "\n\n" << text << "\n";
+    } else {
+      ans << prev;
+      if (prev.back() != '\n') {
+        ans << '\n';
+      }
+      ans << "\n## Follow-up answer\n\n" << text << "\n";
+    }
+    write_file(answer_file, ans.str(), nullptr);
+  }
+  save_state(workspace_root, st, nullptr);
+  write_response_json(workspace_root, true, "synthesize", heading, "", text, "", st.turn, "done");
+  append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                   ",\"event\":\"synthesize\",\"workflow\":\"" + st.workflow +
+                                   "\",\"chars\":" + std::to_string(text.size()) + "}");
+  ai_trace(AiTraceChannel::L2, "l2_synthesize",
+           "{\"workflow\":\"" + st.workflow + "\",\"chars\":" + std::to_string(text.size()) + "}");
+  out.ok = true;
+  out.phase = "done";
+  out.summary = text;
   return out;
 }
 
@@ -5287,6 +5850,11 @@ Level2TurnResult Level2Session::process_request_file(const std::string& workspac
     if (action == "done") {
       return mark_done(workspace_root, j.value("summary", ""), j.value("next", ""));
     }
+    if (action == "synthesize" || action == "answer" || action == "explain" ||
+        action == "plan_doc") {
+      return apply_synthesize(workspace_root,
+                              j.value("summary", j.value("text", j.value("answer", ""))));
+    }
     if (action == "edit") {
       std::string err;
       auto hunks = parse_search_replace_json(j, &err);
@@ -5318,13 +5886,16 @@ std::string Level2Session::status_text(const std::string& workspace_root) const 
   out << "dir: " << dir_for(workspace_root) << '\n';
   const State st = load_state(workspace_root);
   out << "phase: " << st.phase << "  turn: " << st.turn << "  done: " << (st.done ? "yes" : "no")
-      << "\n";
+      << "  workflow: " << (st.workflow.empty() ? "agent" : st.workflow) << "\n";
   out << "edit_attempt=" << st.edit_attempt << " compile_attempt=" << st.compile_attempt
       << " pending_hunks=" << st.pending.size() << "\n";
   out << "has_pack: " << (st.has_pack ? "yes" : "no")
       << "  pack_incomplete: " << (st.pack_incomplete ? "yes" : "no")
       << "  map_stale: " << (st.map_stale ? "yes" : "no")
       << "  map_review: " << (st.map_review ? "yes" : "no") << "\n";
+  out << "continuable: " << (st.continuable ? "yes" : "no")
+      << "  resume: " << (st.resume ? "yes" : "no")
+      << "  followups: " << st.followup_count << "\n";
   out << "last: " << (st.last_action.empty() ? "-" : st.last_action) << '\n';
   const std::string session = read_file(session_path(workspace_root));
   out << "session.md: "
@@ -5336,9 +5907,12 @@ std::string Level2Session::status_flags(const std::string& workspace_root) const
   const State st = load_state(workspace_root);
   std::ostringstream out;
   out << "phase=" << st.phase << " turn=" << st.turn
+      << " workflow=" << (st.workflow.empty() ? "agent" : st.workflow)
       << " has_pack=" << (st.has_pack ? "yes" : "no")
       << " pack_incomplete=" << (st.pack_incomplete ? "yes" : "no")
-      << " map_stale=" << (st.map_stale ? "yes" : "no");
+      << " map_stale=" << (st.map_stale ? "yes" : "no")
+      << " resume=" << (st.resume ? "yes" : "no")
+      << " continuable=" << (st.continuable ? "yes" : "no");
   return out.str();
 }
 

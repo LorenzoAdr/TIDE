@@ -49,7 +49,7 @@ std::string pack_display_name(const std::string& pack_id) {
   return pack_id;
 }
 
-Element render_dialog(AiMissingToastState* state, MainLayoutState* layout_state) {
+Element render_missing_dialog(AiMissingToastState* state, MainLayoutState* layout_state) {
   const std::string pack_name = pack_display_name(state->pack_id);
 
   Elements actions;
@@ -79,16 +79,58 @@ Element render_dialog(AiMissingToastState* state, MainLayoutState* layout_state)
       }));
 }
 
+Element render_confirm_dialog(AiMissingToastState* state, MainLayoutState* layout_state) {
+  const std::string pack_name = pack_display_name(state->pack_id);
+
+  Elements actions;
+  actions.push_back(render_action(
+      i18n::tr("ai_toast.confirm.action.yes"), state->selected == 0,
+      layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kAiToastInstall),
+      layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kAiToastInstall),
+      &state->install_box));
+  actions.push_back(text("  "));
+  actions.push_back(render_action(
+      i18n::tr("ai_toast.confirm.action.no"), state->selected == 1,
+      layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kAiToastIgnore),
+      layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kAiToastIgnore),
+      &state->ignore_box));
+
+  return ModalWindow(
+      text(i18n::tr("ai_toast.confirm.title")) | color(theme::Accent()),
+      vbox({
+          paragraphAlignLeft(i18n::tr_fmt("ai_toast.confirm.message", {pack_name})) |
+              color(theme::Header()) | size(WIDTH, LESS_THAN, 56),
+          text(""),
+          paragraphAlignLeft(i18n::tr("ai_toast.confirm.sources")) | color(theme::Warning()) |
+              size(WIDTH, LESS_THAN, 56),
+          text(""),
+          paragraphAlignLeft(i18n::tr("ai_toast.confirm.question")) | color(theme::Header()) |
+              size(WIDTH, LESS_THAN, 56),
+          separator(),
+          hbox(std::move(actions)),
+          text(i18n::tr("ai_toast.confirm.footer")) | color(theme::Muted()),
+      }));
+}
+
+Element render_dialog(AiMissingToastState* state, MainLayoutState* layout_state) {
+  if (state != nullptr && state->confirm_source) {
+    return render_confirm_dialog(state, layout_state);
+  }
+  return render_missing_dialog(state, layout_state);
+}
+
 }  // namespace
 
 void AiMissingToastState::show(std::string pack) {
   open = true;
+  confirm_source = false;
   pack_id = std::move(pack);
   selected = 0;
 }
 
 void AiMissingToastState::close() {
   open = false;
+  confirm_source = false;
   selected = 0;
   pack_id.clear();
 }
@@ -97,8 +139,26 @@ Component MakeAiMissingToastOverlay(Component main, AiMissingToastState* state,
                                     MainLayoutState* layout_state,
                                     std::function<void()> on_install,
                                     std::function<void()> on_ignore) {
-  auto invoke_selected = [state, on_install, on_ignore]() {
+  auto begin_source_confirm = [state]() {
     if (state == nullptr || !state->open) {
+      return;
+    }
+    state->confirm_source = true;
+    state->selected = 1;  // default Cancel
+  };
+
+  auto invoke_selected = [state, on_install, on_ignore, begin_source_confirm]() {
+    if (state == nullptr || !state->open) {
+      return;
+    }
+    if (!state->confirm_source) {
+      if (state->selected == 0) {
+        begin_source_confirm();
+        return;
+      }
+      if (on_ignore) {
+        on_ignore();
+      }
       return;
     }
     if (state->selected == 0) {
@@ -114,7 +174,8 @@ Component MakeAiMissingToastOverlay(Component main, AiMissingToastState* state,
 
   return Renderer(
       CatchEvent(main,
-                 [state, layout_state, on_install, on_ignore, invoke_selected](Event event) {
+                 [state, layout_state, on_install, on_ignore, begin_source_confirm,
+                  invoke_selected](Event event) {
                    if (state == nullptr || !state->open) {
                      return false;
                    }
@@ -130,7 +191,9 @@ Component MakeAiMissingToastOverlay(Component main, AiMissingToastState* state,
                      if (state->install_box.Contain(m.x, m.y)) {
                        state->selected = 0;
                        trigger_press(layout_state, press_id::kAiToastInstall);
-                       if (on_install) {
+                       if (!state->confirm_source) {
+                         begin_source_confirm();
+                       } else if (on_install) {
                          on_install();
                        }
                        return true;

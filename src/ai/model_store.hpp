@@ -2,11 +2,19 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "ai/ai_types.hpp"
 
 namespace tuide {
+
+struct AiModelShard {
+  std::string filename;
+  std::string url;
+  std::size_t approx_bytes = 0;
+};
 
 struct AiModelInfo {
   std::string id;
@@ -14,18 +22,34 @@ struct AiModelInfo {
   std::string url;
   std::string license_note;
   std::size_t approx_bytes = 0;
+  // Short UI label (e.g. "1.5B", "14B").
+  std::string label;
+  // Extra GGUF parts (llama.cpp multi-shard); primary is filename/url.
+  std::vector<AiModelShard> extra_shards;
 };
 
-// Default L1 (D9): Qwen2.5-1.5B-Instruct Q4_K_M (~1 GB, Apache-2.0).
+// Default L1: Qwen2.5-1.5B-Instruct Q4_K_M (~1 GB, Apache-2.0).
 AiModelInfo default_l1_model();
+// Catalog: 1.5B (default), 3B, 7B Instruct.
+const std::vector<AiModelInfo>& l1_model_catalog();
+std::optional<AiModelInfo> find_l1_model(const std::string& id);
+AiModelInfo resolve_l1_model(const AiLevel1Settings& settings);
 
-// Default L2 coder (Fase E): Qwen2.5-Coder-7B-Instruct Q4_K_M (~4.7 GB, Apache-2.0).
+// Default L2 coder: Qwen2.5-Coder-7B-Instruct Q4_K_M (~4.7 GB, Apache-2.0).
 AiModelInfo default_l2_model();
-// Smaller alternate for weaker machines (~1 GB).
+// Legacy small alternate (~1 GB) — still resolvable, not offered in download UI.
 AiModelInfo default_l2_model_small();
+// Catalog offered in UI: 7B (default), 14B, 32B Coder.
+const std::vector<AiModelInfo>& l2_model_catalog();
+std::optional<AiModelInfo> find_l2_model(const std::string& id);
+AiModelInfo resolve_l2_model(const AiLevel2Settings& settings);
 
-// L0 intent embeddings: multilingual-e5-small Q8_0 (~126 MB, MIT).
+// L0 intent embeddings: nomic-embed-text-v1.5 Q4_K_M (~84 MB, Apache-2.0).
 AiModelInfo default_intent_embed_model();
+
+// Toolpack package id for a catalog model (e.g. ai-l1-3b / ai-l2-14b).
+std::string ai_package_id_for_l1_model(const std::string& model_id);
+std::string ai_package_id_for_l2_model(const std::string& model_id);
 
 class ModelStore {
  public:

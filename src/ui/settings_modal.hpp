@@ -26,6 +26,7 @@ enum class SettingsPanel {
   kWorkspace,
   kFormat,
   kToolpacks,
+  kAi,
   kStatus,
   kShortcuts,
   kIncludePaths,
@@ -113,6 +114,7 @@ struct SettingsModalState {
   ftxui::Box tab_format_box;
   ftxui::Box tab_shortcuts_box;
   ftxui::Box tab_toolpacks_box;
+  ftxui::Box tab_ai_box;
   ftxui::Box tab_status_box;
   ftxui::Box body_box;
   SettingsPanel click_layout_panel = SettingsPanel::kGeneral;
@@ -136,12 +138,28 @@ struct SettingsModalState {
     bool finished = false;
   };
   std::shared_ptr<ToolpackJob> toolpack_job;
+  // Confirm third-party AI download (HF / llama.cpp GitHub — not project releases).
+  bool ai_download_confirm_open = false;
+  std::string ai_download_confirm_pack_id;
+  int ai_download_confirm_selected = 1;  // 0 = yes, 1 = no (default cancel)
+  ftxui::Box ai_download_yes_box;
+  ftxui::Box ai_download_no_box;
   // Busy strip (status bar %) during install/export — owned by Application.
   MainLayoutState* layout_state = nullptr;
   // Snapshot at open — used to avoid restarting LSP/shell/index on Escape with no edits.
   WorkspaceConfig workspace_baseline;
   ClangFormatConfig clang_format_baseline;
   bool show_all_workspace_files_baseline = false;
+  std::string draft_l1_model_id;
+  std::string draft_l2_model_id;
+  std::string draft_level2_mode;  // dry_run | local | remote
+  std::string draft_level2_workflow;  // agent | ask | plan | git
+  std::string draft_l2_api_base;
+  std::string draft_l2_api_model;
+  std::string draft_l2_api_key;
+  std::string draft_l2_n_ctx_remote;
+  // -1 = not editing; 4=api_base, 5=api_model, 6=api_key, 7=n_ctx_remote
+  int ai_editing_field = -1;
 
   // Shortcuts tab (non-Helix keybindings).
   std::vector<KeyBindingOverride> draft_key_overrides;

@@ -41,6 +41,7 @@ set(TUIDE_TREE_SITTER_INCLUDE_DIRS
   ${tree_sitter_cmake_SOURCE_DIR}/bindings/c
   ${tree_sitter_make_SOURCE_DIR}/bindings/c
   ${tree_sitter_yaml_SOURCE_DIR}/bindings/c
+  ${tree_sitter_xml_SOURCE_DIR}/bindings/c
   ${CMAKE_BINARY_DIR}/generated
 )
 
@@ -60,6 +61,7 @@ set(TUIDE_TREE_SITTER_GRAMMAR_LIBS
   tree-sitter-cmake
   tree-sitter-make
   tree-sitter-yaml
+  tree-sitter-xml
 )
 
 set(TUIDE_TREE_SITTER_SOURCES
@@ -106,6 +108,7 @@ add_executable(tuide
   src/i18n/strings_en.cpp
   src/app/workspace_detect.cpp
   src/app/workspace_config.cpp
+  src/app/language_override.cpp
   src/app/workspace_session.cpp
   src/app/recent_projects.cpp
   src/app/debug_model.cpp
@@ -118,6 +121,7 @@ add_executable(tuide
   src/ui/main_layout.cpp
   src/ui/hover_effects.cpp
   src/ui/status_layout_popover.cpp
+  src/ui/status_language_popover.cpp
   src/ui/file_tree_panel.cpp
   src/ui/source_panel.cpp
   src/ui/editor_panel.cpp
@@ -137,6 +141,7 @@ add_executable(tuide
   src/ui/watches_panel.cpp
   src/ui/console_panel.cpp
   src/ui/ai_transcript_view.cpp
+  src/ui/ai_path_scope_modal.cpp
   src/ui/core_analyzer_panel.cpp
   src/ui/binary_symbols_panel.cpp
   src/core_analyzer/output_parser.cpp
@@ -314,6 +319,7 @@ add_executable(tuide
   src/ai/context_pack.cpp
   src/ai/get_code_of.cpp
   src/ai/repo_map.cpp
+  src/ai/ai_path_scope.cpp
   src/ai/coding_embed_rerank.cpp
   src/ai/coding_stem_embed_index.cpp
   src/ai/coding_symbol_embed_index.cpp
@@ -327,6 +333,7 @@ add_executable(tuide
   src/ai/l2_action.cpp
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
+  src/ai/l2_context_budget.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/level2_debrief.cpp
   src/ai/ai_controller.cpp
@@ -446,6 +453,9 @@ if(TUIDE_BUNDLE_MAKE_LS)
 endif()
 if(TUIDE_BUNDLE_YAML_LS)
   include(cmake/BundleYamlLs.cmake)
+endif()
+if(TUIDE_BUNDLE_LEMMINX)
+  include(cmake/BundleLemminx.cmake)
 endif()
 
 add_executable(tuide-bundle-wizard tools/bundle_wizard/main.cpp)
@@ -803,8 +813,10 @@ add_executable(level2_session_test
   tests/level2_session_test.cpp
   tests/tool_registry_stub.cpp
   src/ai/level2_session.cpp
+  src/ai/l2_context_budget.cpp
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
+  src/ai/ai_path_scope.cpp
 )
 target_include_directories(level2_session_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -815,12 +827,23 @@ add_executable(level2_autonomous_loop_test
   tests/level2_autonomous_loop_test.cpp
   tests/tool_registry_stub.cpp
   src/ai/level2_session.cpp
+  src/ai/l2_context_budget.cpp
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/ai_trace.cpp
+  src/ai/ai_path_scope.cpp
 )
 target_include_directories(level2_autonomous_loop_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_context_budget_test
+  tests/l2_context_budget_test.cpp
+  src/ai/l2_context_budget.cpp
+)
+target_include_directories(l2_context_budget_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
@@ -840,8 +863,10 @@ add_executable(level2_debrief_test
   tests/tool_registry_stub.cpp
   src/ai/level2_debrief.cpp
   src/ai/level2_session.cpp
+  src/ai/l2_context_budget.cpp
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
+  src/ai/ai_path_scope.cpp
 )
 target_include_directories(level2_debrief_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -861,6 +886,7 @@ add_executable(l2_harness_cli
   tools/l2_harness_cli.cpp
   tests/tool_registry_stub.cpp
   src/ai/level2_session.cpp
+  src/ai/l2_context_budget.cpp
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
   src/ai/level2_autonomous_loop.cpp
@@ -1104,6 +1130,7 @@ set(TUIDE_TEST_TARGETS
   level2_session_test
   level2_autonomous_loop_test
   level2_debrief_test
+  l2_context_budget_test
   l2_action_test
   search_replace_test
   repo_map_test

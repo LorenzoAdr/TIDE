@@ -15,6 +15,7 @@
 #include <csignal>
 #include <sys/types.h>
 
+#include "app/language_override.hpp"
 #include "app/workspace_config.hpp"
 #include "app/workspace_session.hpp"
 #include "app/recent_projects.hpp"
@@ -65,7 +66,9 @@
 #include "util/tools_status.hpp"
 #include "ui/shutdown_overlay.hpp"
 #include "ui/source_substitute_modal.hpp"
+#include "ui/ai_path_scope_modal.hpp"
 #include "ui/source_panel.hpp"
+#include "ui/status_language_popover.hpp"
 #include "ui/status_layout_popover.hpp"
 #include "ui/symbol_picker.hpp"
 #include "ui/terminal_display.hpp"
@@ -789,6 +792,14 @@ void Application::sync_symbol_workspace_indexer(bool force) {
 		symbol_indexer_.stop();
 		return;
 	}
+	if (force) {
+		ai_indexes_requested_ = true;
+	}
+	// Lazy: do not build the AI symbol map / stem pipeline until the AI tab is opened
+	// (or an explicit force reindex). Code-only editing stays free of AI background work.
+	if (!force && !ai_indexes_requested_) {
+		return;
+	}
 	// Always keep a defs+refs index for AI/repo map (LSP does not populate it).
 	// Do NOT restart on every apply_app_settings (F10→Esc): that resets progress to 0/N
 	// and looks like the indexer is "stuck on the same file".
@@ -833,6 +844,18 @@ void Application::sync_symbol_workspace_indexer(bool force) {
 	}
 	symbol_indexer_.start_scan(workspace_.root, symbol_provider_, &indexer_);
 	refresh_ai_mapping_busy(&layout_state_, true, 0, 0);
+}
+
+void Application::request_ai_indexes() {
+	const bool first = !ai_indexes_requested_;
+	ai_indexes_requested_ = true;
+	if (first) {
+		sync_symbol_workspace_indexer(false);
+	}
+	// If the map is already ready (or finishes later via progress callback), warm stems.
+	if (layout_state_.ai_controller != nullptr) {
+		layout_state_.ai_controller->on_symbol_map_ready();
+	}
 }
 
 IndexFilterOptions Application::index_filter_options() const {
@@ -1370,6 +1393,7 @@ void Application::set_workspace(const std::string &workspace_root,
 	model_.console_output.clear();
 	request_terminal_autostart();
 	workspace_config_ = WorkspaceConfig::load(absolute);
+	set_language_overrides(workspace_config_.language_overrides);
 	if (workspace_config_.ui_colors_preset == theme::UiColorPreset::kCustom) {
 		theme::apply_color_preset(theme::UiColorPreset::kCustom, workspace_config_.ui_colors);
 		theme::set_mode(workspace_config_.theme);
@@ -1426,7 +1450,9 @@ void Application::set_workspace(const std::string &workspace_root,
 	// El esqueleto ya está en el snapshot; invalidar el panel cacheado para que el
 	// primer pintado del explorador muestre las carpetas raíz.
 	notify_file_tree_reveal();
-	sync_symbol_workspace_indexer();
+	// AI symbol map + stem embeds wait until the console AI tab is opened.
+	ai_indexes_requested_ = false;
+	symbol_indexer_.stop();
 	git_service_.open(absolute);
 	RecentProjects::load().remember(absolute);
 }
@@ -2496,7 +2522,7 @@ bool Application::any_modal_open() const {
 	return workspace_wizard_state_.open || external_file_wizard_state_.open ||
 	       connection_wizard_state_.open || file_picker_state_.open || symbol_picker_state_.open ||
 	       shortcuts_modal_state_.open || settings_modal_state_.open ||
-	       source_substitute_state_.open || quit_confirm_state_.open ||
+	       source_substitute_state_.open || ai_path_scope_state_.open || quit_confirm_state_.open ||
 	       debug_launch_modal_state_.open() || open_file_confirm_state_.is_open() ||
 	       external_file_conflict_state_.is_open() ||
 	       lsp_missing_toast_state_.open || ai_missing_toast_state_.open ||
@@ -2757,6 +2783,15 @@ int Application::run() {
 	auto layout = build_ui();
 
 	if (layout_state_.ai_controller != nullptr) {
+		AiControllerDeps ai_deps;
+		ai_deps.workspace = &workspace_;
+		ai_deps.symbols = symbol_provider_;
+		ai_deps.indexer = &indexer_;
+		ai_deps.symbol_indexer = &symbol_indexer_;
+		ai_deps.git = &git_service_;
+		ai_deps.layout = &layout_state_;
+		ai_deps.config = &workspace_config_;
+		layout_state_.ai_controller->set_deps(ai_deps);
 		layout_state_.ai_controller->set_missing_package_handler([this](const std::string& pack_id) {
 			enqueue_ui_task([this, pack_id]() { maybe_show_ai_missing_toast(pack_id); });
 		});
@@ -2799,6 +2834,33 @@ int Application::run() {
 	};
 	layout_state_.status_open_launch = [this]() { open_launch_wizard(); };
 	layout_state_.status_reindex_project = [this]() { reindex_project(); };
+	layout_state_.status_set_file_language = [this](const std::optional<std::string>& language_id) {
+		WorkspaceModel* ws = &workspace_;
+		if (focus_state_.region == FocusRegion::SecondaryEditor &&
+		    !secondary_workspace_.tabs.empty()) {
+			ws = &secondary_workspace_;
+		}
+		ws->ensure_buffer();
+		const std::string path = ws->buffer.path;
+		if (path.empty()) {
+			return;
+		}
+		const std::string text = editor_buffer_text(ws->buffer);
+		if (symbol_provider_) {
+			symbol_provider_->on_document_closed(path);
+		}
+		tree_sitter_service().invalidate(path);
+		set_language_override_for_path(path, language_id);
+		workspace_config_.language_overrides = language_overrides_snapshot();
+		workspace_config_.save(workspace_.root);
+		tree_sitter_service().prepare_document(path, text);
+		if (symbol_provider_) {
+			symbol_provider_->on_document_opened(path, text);
+		}
+		ws->buffer.view_token++;
+		invalidate_editor_view(&layout_state_);
+		UI_WAKE(&layout_state_, "app");
+	};
 	layout_state_.explorer_refresh = [this]() { refresh_workspace_explorer(); };
 	layout_state_.status_open_source_substitute = [this]() {
 		if (app_mode_ != AppMode::kDebug || !debugging_started_) {
@@ -2809,6 +2871,24 @@ int Application::run() {
 		} else if (!any_modal_open()) {
 			open_source_substitute_modal(&source_substitute_state_, &model_, workspace_.root);
 		}
+		UI_WAKE(&layout_state_, "app");
+	};
+	layout_state_.open_ai_path_scope = [this]() {
+		if (ai_path_scope_state_.open) {
+			ai_path_scope_state_.open = false;
+			UI_WAKE(&layout_state_, "app");
+			return;
+		}
+		if (any_modal_open()) {
+			return;
+		}
+		std::vector<std::string> current;
+		if (layout_state_.ai_controller) {
+			current = layout_state_.ai_controller->path_scope();
+		} else {
+			current = workspace_config_.ai.path_scope;
+		}
+		open_ai_path_scope_modal(&ai_path_scope_state_, workspace_.root, current);
 		UI_WAKE(&layout_state_, "app");
 	};
 	layout_state_.status_quick_launch = [this]() { quick_launch_last(); };
@@ -2910,19 +2990,31 @@ int Application::run() {
 		layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
 		UI_WAKE(&layout_state_, "indexer.fs_change");
 		// Full rg list just replaced the skeleton: rebuild AI map if it is stale/short.
-		if (!indexer_.scanning()) {
+		if (!indexer_.scanning() && ai_indexes_requested_) {
 			enqueue_ui_task([this]() { sync_symbol_workspace_indexer(false); });
 		}
 	});
 	symbol_indexer_.set_progress_callback([this](bool scanning, std::size_t done, std::size_t total) {
 		// ANSI busy strip: update from worker so % moves without waiting for a UI click.
 		refresh_ai_mapping_busy(&layout_state_, scanning, done, total);
-		// When the workspace symbol map completes, start coding-symbol embeddings
-		// automatically (independent of any AI query).
-		if (!scanning && layout_state_.ai_controller != nullptr) {
+		// When the workspace symbol map completes, warm coding-stem embeddings — only if
+		// the AI tab (or force reindex) requested the pipeline.
+		if (!scanning && ai_indexes_requested_ && layout_state_.ai_controller != nullptr) {
 			layout_state_.ai_controller->on_symbol_map_ready();
 		}
 	});
+	layout_state_.on_ai_tab_opened = [this]() { request_ai_indexes(); };
+	layout_state_.on_ai_insert_requested = [this](const MainLayoutState::AiInsertRequest& req) {
+		if (!layout_state_.ai_controller) {
+			return;
+		}
+		AiInsertAnchor anchor;
+		anchor.path = req.absolute_path;
+		anchor.line = req.line;
+		anchor.col = req.col;
+		anchor.symbol_hint = req.symbol_hint;
+		layout_state_.ai_controller->begin_insert_at(anchor);
+	};
 	indexer_.set_modify_wake_predicate(
 	    [this](const std::string& absolute_path) { return is_editor_visible_path(absolute_path); });
 	refresh_editor_visible_paths();
@@ -3029,6 +3121,8 @@ int Application::run() {
 			flags.make_starting = symbol_provider_->make_lsp_starting();
 			flags.yaml_ready = symbol_provider_->yaml_lsp_ready();
 			flags.yaml_starting = symbol_provider_->yaml_lsp_starting();
+			flags.xml_ready = symbol_provider_->xml_lsp_ready();
+			flags.xml_starting = symbol_provider_->xml_lsp_starting();
 		}
 		return collect_tools_status(flags);
 	};
@@ -3047,7 +3141,22 @@ int Application::run() {
 	auto with_source_substitute = MakeSourceSubstituteModalOverlay(
 	    with_settings, &source_substitute_state_, &layout_state_, on_source_substitute_apply);
 
-	auto with_git_commit = MakeGitCommitModalOverlay(with_source_substitute, &git_service_,
+	AiPathScopeApplyCallback on_ai_path_scope_apply =
+	    [this](std::vector<std::string> paths) {
+		    if (layout_state_.ai_controller) {
+			    layout_state_.ai_controller->set_path_scope(std::move(paths));
+		    } else {
+			    workspace_config_.ai.path_scope = std::move(paths);
+			    if (!workspace_.root.empty()) {
+				    workspace_config_.save(workspace_.root);
+			    }
+		    }
+		    UI_WAKE(&layout_state_, "app");
+	    };
+	auto with_ai_path_scope = MakeAiPathScopeModalOverlay(
+	    with_source_substitute, &ai_path_scope_state_, &layout_state_, on_ai_path_scope_apply);
+
+	auto with_git_commit = MakeGitCommitModalOverlay(with_ai_path_scope, &git_service_,
 	                                                 &git_panel_state_, &layout_state_);
 
 	auto with_quit_confirm =
@@ -3274,6 +3383,22 @@ int Application::run() {
 				if (settings_modal_handle_mouse(&settings_modal_state_, mouse_event)) {
 					UI_WAKE(&layout_state_, "app");
 					return true;
+				}
+			}
+
+			if (layout_state_.status_language_popover.open) {
+				if (HandleStatusLanguagePopoverKeys(&layout_state_.status_language_popover,
+				                                    event)) {
+					UI_WAKE(&layout_state_, "app");
+					return true;
+				}
+				if (event.is_mouse()) {
+					Event mouse_event = event;
+					if (layout_state_.status_bar_mouse_handler &&
+					    layout_state_.status_bar_mouse_handler(mouse_event)) {
+						UI_WAKE(&layout_state_, "app");
+						return true;
+					}
 				}
 			}
 

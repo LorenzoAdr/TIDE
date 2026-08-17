@@ -61,6 +61,7 @@ Publish locally (does not upload):
 | `cmake` | `neocmakelsp` |
 | `make` | `make-ls` |
 | `yaml` | `yaml-ls` |
+| `xml` | `lemminx` |
 
 Removing a language pack drops its non-shared components; **gdb** stays if other packs need it.
 

@@ -40,6 +40,8 @@ struct Level1RunResult {
   std::string final_text;
   std::string instruction;
   std::vector<std::string> seeds;
+  // agent|ask|plan|git — copied from settings at handoff (typed L1→L2).
+  std::string workflow = "agent";
   std::string error;
 };
 

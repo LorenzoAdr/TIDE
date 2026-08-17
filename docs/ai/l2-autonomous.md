@@ -42,6 +42,7 @@ GGUF en `$XDG_CACHE_HOME/tuide/models/l2/` (o `ai.models.cache_dir`).
     "api_base": "http://127.0.0.1:8080/v1",
     "api_model": "qwen2.5-coder-7b-instruct",
     "api_key": "",
+    "n_ctx_remote": 32768,
     "max_steps": 32
   }
 }
@@ -49,29 +50,61 @@ GGUF en `$XDG_CACHE_HOME/tuide/models/l2/` (o `ai.models.cache_dir`).
 
 Clave: `ai.level2.api_key` o env `TUIDE_L2_API_KEY` / `OPENAI_API_KEY`.
 Sirve `llama-server`, vLLM, DeepSeek, OpenAI, etc. (`POST {api_base}/chat/completions`).
+`n_ctx_remote` (default **32768**) escala pack/prompt ambicioso; no se auto-detecta del proveedor.
 
 ## Uso en la app
 
-1. `ai.level2.mode = local|remote`
+1. `ai.level2.mode = local|remote` (Settings) **o** override en el tab AI
 2. Prompt en tab AI (L1 escala / siembra sesión) **o** `/l2_session bootstrap <query>` + `/l2_run`
 3. El tab AI streamea líneas `L2 ▸ fase=explore|edit|compile …`
 4. `/cancel` aborta el loop
 
 Harness (`mode=harness`) sigue disponible para depurar a mano con `/l2_tool` / `request.json`.
 
+### Toggle Local / Remoto (híbrido)
+
+En el footer del tab AI (junto a Workflow) hay un selector **Local | Remoto**. Es un
+**override de sesión**: no reescribe el default de Settings. También: `/backend local|remote`.
+
+Flujo típico de handoff:
+
+1. Workflow **Plan** + backend **Remoto** → investigación con pack/prompt amplios →
+   `answer.md` + sesión continuable.
+2. Cambiar a **Local** + workflow **Agent** → Enter / follow-up → albañilería sobre el
+   mismo disco (`.tuide/ai/l2/`). El prompt se **re-corta** al budget local; no se
+   reenvía el prompt gigante del remoto.
+
+Tools / FS / compile siguen **siempre en local**; solo el `propose` del brain cambia.
+
+### Presupuesto de contexto (`L2ContextBudget`)
+
+Un solo scaler (`src/ai/l2_context_budget.*`) deriva caps de prompt/pack/obs/resume del
+`n_ctx` efectivo:
+
+| Backend | n_ctx efectivo |
+|---------|----------------|
+| local | `min(ai.level2.n_ctx, techo por MemAvailable)`; floor 4096 |
+| remote | `ai.level2.n_ctx_remote` (default 32768) |
+
+Baseline a `n_ctx=8192`: explore ~10k / edit ~8k / pack ~9k. Escala lineal y clampea
+(explore máx. 48k). En arranque local, si `pack.md` supera ~1.2× el budget, se compacta
+en disco (`L2 ▸ pack recortado…`).
+
+Banner: `L2 ▸ arranque autónomo (remote n_ctx=32768 pack≈36000) …`.
+
 ## Checklist equipo de prueba
 
 1. Instalar `ai-runtime` + `ai-l2` (o levantar API remote).
-2. Poner `mode=local` o `remote` en config.
+2. Poner `mode=local` o `remote` en config (o usar el chip del chat).
 3. Reiniciar tuide / refresh settings.
 4. Prompt: *añade un tab prueba con texto fijo…*
 5. Verificar streaming de fases y compile; `git diff` sin anomalías.
-6. `/model` debe listar estado L2.
+6. `/model` debe listar estado L2 (incluye override y `n_ctx_remote` si aplica).
 
 ## Contexto / compile feedback
 
-- Prompt L2 cabe en `ai.level2.n_ctx` (p. ej. 8192): explore ~**10k** chars de sesión + system;
-  edit ~**8k**. No se manda `session.md` entero.
+- Prompt L2 cabe en el budget del backend activo (local ≈ `n_ctx`; remote ≈ `n_ctx_remote`).
+  No se manda `session.md` entero; el disco puede ser más rico que el slice del prompt.
 - **Tool guide solo en system prompt** (no se duplica en `session.md`).
 - **Flujo plan → pack:** en explore preferir `plan` en el **primer** paso
   (`{"action":"plan","targets":["path:Symbol","path:A-B",…]}`; máx. 16; evitar path bare;
@@ -147,6 +180,12 @@ Al terminar el loop autónomo (`done` / `clarify` / error / cancel):
 3. Si el backend L1 ya está `ready`, opcionalmente **redacta** esos hechos en español
    (`L2 ▸ debrief (L1, solo redacta hechos)`). No inventa causas: el prompt prohíbe
    reinterpretar `symbols=0` / «archivo OK» como «archivo no existe».
+4. Si el cierre fue `done`/`clarify`, la sesión queda **continuable** (`continuable=true` en
+   `state.json`). El siguiente Enter en el tab AI **no** hace bootstrap: reabre L2 con
+   Instruction + `## Follow-ups` + `answer.md` / pack previos (`resume=1`). El modelo elige
+   atajo (`edit`/`synthesize`) o explore/plan. Cambiar Ask→Agent **no** resetea el contexto.
+5. **Reset** (botón en el footer del tab AI, o `/new`/`/reset`) borra `.tuide/ai/l2/` y limpia
+   el transcript: el próximo mensaje arranca L0→L1→bootstrap de cero.
 
 ## Handoff code_edit (modificar código)
 
@@ -162,6 +201,7 @@ Al terminar el loop autónomo (`done` / `clarify` / error / cancel):
 ./build/level2_autonomous_loop_test
 ./build/level2_session_test
 ./build/level2_debrief_test
+./build/l2_context_budget_test
 ./build/l2_action_test
 ./build/search_replace_test
 ```
