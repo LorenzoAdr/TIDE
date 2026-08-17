@@ -4928,7 +4928,9 @@ Level2TurnResult Level2Session::apply_edit(const std::string& workspace_root,
     for (const auto& h : hunks) {
       if (!ai_path_in_scope(workspace_root, h.path, scope)) {
         record_edit_failure("ruta fuera del path_scope AI: " + h.path, h.path, h.search,
-                            h.replace);
+                            h.replace, fnv1a_hex(h.path + "\n" + h.search + "\n---\n" +
+                                                    h.replace),
+                            false);
         return out;
       }
     }

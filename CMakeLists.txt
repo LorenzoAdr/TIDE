@@ -887,6 +887,7 @@ add_executable(l2_harness_cli
   tests/tool_registry_stub.cpp
   src/ai/level2_session.cpp
   src/ai/l2_context_budget.cpp
+  src/ai/ai_path_scope.cpp
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
   src/ai/level2_autonomous_loop.cpp
@@ -900,6 +901,7 @@ add_executable(l2_harness_cli
   src/ai/model_store.cpp
   src/ai/ai_trace.cpp
   src/ai/search_needles.cpp
+  src/app/language_override.cpp
   src/git/git_command.cpp
   src/symbols/symbol_utils.cpp
   src/parser/tree_sitter_language.cpp

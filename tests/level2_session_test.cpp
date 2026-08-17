@@ -1393,6 +1393,7 @@ int main() {
 
   // Continuable session: follow-up accumulates; Reset clears.
   {
+    setenv("L2_FEAT_POST_EDIT_COVERAGE", "0", 1);
     const fs::path rootf = fs::temp_directory_path() / "tuide_l2_followup_test";
     fs::remove_all(rootf, ec);
     fs::create_directories(rootf / ".tuide" / "ai", ec);
@@ -1453,6 +1454,7 @@ int main() {
     expect(Level2Session::clear_session(rootf.string(), &err), "clear_session " + err);
     expect(!Level2Session::is_continuable(rootf.string()), "not continuable after clear");
     expect(!fs::exists(Level2Session::session_path(rootf.string())), "session wiped");
+    unsetenv("L2_FEAT_POST_EDIT_COVERAGE");
     fs::remove_all(rootf, ec);
   }
 
