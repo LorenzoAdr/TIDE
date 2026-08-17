@@ -1,0 +1,35 @@
+{
+  "applied_blob": "static constexpr int kAi = 11;\nstatic constexpr int kPs = 12;",
+  "clarify_pushback": 0,
+  "compile_attempt": 0,
+  "consecutive_complete_plans": 2,
+  "coverage_gate_pushback": 3,
+  "done": true,
+  "edit_attempt": 1,
+  "edit_fail_count": 0,
+  "edit_nudge_sent": true,
+  "edit_phase_nudge_sent": false,
+  "edit_phase_tool_count": 0,
+  "edited_paths": [
+    "src/ui/main_layout.hpp"
+  ],
+  "explore_tool_count": 0,
+  "has_pack": true,
+  "identical_edit_repeats": 0,
+  "last_action": "done",
+  "last_failed_edit_fp": "",
+  "last_op_id": 4,
+  "map_review": true,
+  "map_stale": false,
+  "pack_incomplete": false,
+  "pack_incomplete_pushback": 0,
+  "pending": [],
+  "phase": "done",
+  "plan_nudge_sent": false,
+  "post_pack_tool_count": 0,
+  "turn": 9,
+  "watchlist": [
+    "src/ui/main_layout.hpp:ConsolePanelTabs",
+    "src/ui/main_layout.hpp:console_panel_tab_active"
+  ]
+}

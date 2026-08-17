@@ -10,13 +10,14 @@ git checkout feature/IA
 git pull
 ```
 
-Copia (o monta) al menos un round con `session.md`:
+Copia (o monta) al menos un round con `session.md`. En git (temporal):
 
-- `.tuide/ai/l2_phase_e_hard2/`
-- `.tuide/ai/l2_overnight/hard_repeat/`
-- o el smoke/hard que esté corriendo ahora (`.tuide/ai/l2_phase_s_*`)
+- `tools/l2_battery/corpus_tmp/l2_phase_e_hard2/`
+- `tools/l2_battery/corpus_tmp/hard_repeat/`
 
-Sin esos `session.md` el replay no tiene corpus.
+Equivalente local en la máquina 7B: `.tuide/ai/l2_phase_e_hard2/` y `.tuide/ai/l2_overnight/hard_repeat/`.
+
+Sin `session.md` el replay no tiene corpus.
 
 ## 1. Tests (minutos, 0 LLM)
 
@@ -37,8 +38,8 @@ Contra archivos limpios de `git HEAD` (no hace falta llama):
 
 ```bash
 python3 tools/l2_battery/replay_failed_hunks.py \
-  --round-dir .tuide/ai/l2_phase_e_hard2 \
-  --round-dir .tuide/ai/l2_overnight/hard_repeat
+  --round-dir tools/l2_battery/corpus_tmp/l2_phase_e_hard2 \
+  --round-dir tools/l2_battery/corpus_tmp/hard_repeat
 ```
 
 Con binario (flex C++ real, sigue sin LLM):
@@ -46,8 +47,8 @@ Con binario (flex C++ real, sigue sin LLM):
 ```bash
 cmake --build build -j$(nproc) --target l2_harness_cli
 python3 tools/l2_battery/replay_failed_hunks.py \
-  --round-dir .tuide/ai/l2_phase_e_hard2 \
-  --round-dir .tuide/ai/l2_overnight/hard_repeat \
+  --round-dir tools/l2_battery/corpus_tmp/l2_phase_e_hard2 \
+  --round-dir tools/l2_battery/corpus_tmp/hard_repeat \
   --cli build/l2_harness_cli
 ```
 
@@ -77,7 +78,7 @@ Anotar 1 línea por caso: *“este JSON del 7B ahora aplica / aún no y por qué
 ```bash
 python3 tools/l2_battery/score_facets.py \
   --cases tools/l2_battery/prompt_packs/cases_hard.json \
-  --round-dir .tuide/ai/l2_phase_e_hard2
+  --round-dir tools/l2_battery/corpus_tmp/l2_phase_e_hard2
 ```
 
 En cada caso: `run.log`, `state.json` (`edit_fail_count`, `coverage_gate_pushback`, `last_action`).
