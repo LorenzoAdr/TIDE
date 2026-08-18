@@ -44,6 +44,8 @@ const TSLanguage* tree_sitter_yaml_language();
 const TSLanguage* tree_sitter_xml_language();
 
 TreeSitterLangKind tree_sitter_lang_kind_for_path(const std::string& path);
+TreeSitterLangKind tree_sitter_lang_kind_for_alias(const std::string& alias);
 const TSLanguage* tree_sitter_language_for_path(const std::string& path);
+const TSLanguage* tree_sitter_language_for_kind(TreeSitterLangKind kind);
 
 }  // namespace tuide

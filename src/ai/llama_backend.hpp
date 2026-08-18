@@ -21,6 +21,8 @@ struct LlamaCompletionRequest {
   std::string context_role = "L1";
   // Config key hint, e.g. ai.level1.n_ctx / ai.level2.n_ctx.
   std::string n_ctx_setting_hint = "ai.level1.n_ctx";
+  // Optional GBNF grammar file for llama-cli --grammar-file (L2 JSON constraint).
+  std::string grammar_file;
 };
 
 struct LlamaCompletionResult {

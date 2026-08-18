@@ -1410,7 +1410,9 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     if (layout_state != nullptr) {
       layout_state->ui_perf_monitor.publish_dump_phases();
       // Reassert ANSI tras el Draw (Post corre después de ToString).
-      if (layout_state->busy_strip != nullptr && layout_state->ui_events != nullptr) {
+      if (layout_state->busy_strip != nullptr && layout_state->ui_events != nullptr &&
+          !layout_state->busy_strip->halted.load(std::memory_order_acquire) &&
+          !layout_state->shutdown_ui_poll_paused.load(std::memory_order_acquire)) {
         BusyStripState* strip = layout_state->busy_strip.get();
         bool expected = false;
         if (strip->reassert_posted.compare_exchange_strong(expected, true,

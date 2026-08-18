@@ -51,6 +51,83 @@ std::string extract_json_object(const std::string& text) {
   return {};
 }
 
+// Close truncated JSON from small models (cut mid-array / mid-string by max_tokens).
+std::string repair_truncated_json(std::string json) {
+  if (json.empty()) {
+    return json;
+  }
+  int brace = 0;
+  int bracket = 0;
+  bool in_string = false;
+  bool escape = false;
+  for (char c : json) {
+    if (in_string) {
+      if (escape) {
+        escape = false;
+      } else if (c == '\\') {
+        escape = true;
+      } else if (c == '"') {
+        in_string = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      in_string = true;
+    } else if (c == '{') {
+      ++brace;
+    } else if (c == '}') {
+      --brace;
+    } else if (c == '[') {
+      ++bracket;
+    } else if (c == ']') {
+      --bracket;
+    }
+  }
+  if (!in_string && brace == 0 && bracket == 0) {
+    return json;
+  }
+  if (in_string) {
+    json.push_back('"');
+  }
+  while (!json.empty()) {
+    const char c = json.back();
+    if (c == ',' || std::isspace(static_cast<unsigned char>(c))) {
+      json.pop_back();
+      continue;
+    }
+    break;
+  }
+  while (bracket > 0) {
+    json.push_back(']');
+    --bracket;
+  }
+  while (brace > 0) {
+    json.push_back('}');
+    --brace;
+  }
+  return json;
+}
+
+std::string strip_replacement_chars(std::string s) {
+  std::string out;
+  out.reserve(s.size());
+  for (std::size_t i = 0; i < s.size();) {
+    if (i + 2 < s.size() && static_cast<unsigned char>(s[i]) == 0xEF &&
+        static_cast<unsigned char>(s[i + 1]) == 0xBF &&
+        static_cast<unsigned char>(s[i + 2]) == 0xBD) {
+      i += 3;
+      continue;
+    }
+    if (static_cast<unsigned char>(s[i]) == 0xFF) {
+      ++i;
+      continue;
+    }
+    out.push_back(s[i]);
+    ++i;
+  }
+  return out;
+}
+
 // Models often emit \s / \s* (invalid JSON) or raw newlines inside strings.
 // Rewrite to legal escapes so nlohmann can parse edit hunks.
 std::string repair_json_string_escapes(const std::string& in) {
@@ -224,11 +301,43 @@ const char* l2_action_kind_name(L2ActionKind kind) {
   return "unknown";
 }
 
+L2Action parse_aider_edit(const std::string& text) {
+  L2Action out;
+  out.raw = text;
+  std::string err;
+  auto hunks = parse_search_replace_aider(text, &err);
+  if (!hunks.empty()) {
+    out.kind = L2ActionKind::Edit;
+    out.hunks = std::move(hunks);
+    return out;
+  }
+  out.kind = L2ActionKind::Error;
+  out.error = err.empty() ? "sin bloques SEARCH/REPLACE" : err;
+  return out;
+}
+
 L2Action parse_l2_action(const std::string& model_text) {
   L2Action out;
   out.raw = model_text;
-  const std::string json_text = extract_json_object(model_text);
+  const std::string cleaned = strip_replacement_chars(model_text);
+  if (cleaned.find("<<<<<<< SEARCH") != std::string::npos) {
+    const L2Action aider = parse_aider_edit(cleaned);
+    if (aider.kind == L2ActionKind::Edit) {
+      return aider;
+    }
+  }
+  std::string json_text = extract_json_object(cleaned);
   if (json_text.empty()) {
+    const std::size_t start = find_action_json_start(cleaned);
+    if (start != std::string::npos) {
+      json_text = repair_truncated_json(cleaned.substr(start));
+    }
+  }
+  if (json_text.empty()) {
+    const L2Action aider = parse_aider_edit(cleaned);
+    if (aider.kind == L2ActionKind::Edit) {
+      return aider;
+    }
     out.kind = L2ActionKind::Error;
     out.error = "sin objeto JSON {\"action\":…}";
     return out;
@@ -238,7 +347,11 @@ L2Action parse_l2_action(const std::string& model_text) {
     try {
       j = nlohmann::json::parse(json_text);
     } catch (const std::exception&) {
-      j = nlohmann::json::parse(repair_json_string_escapes(json_text));
+      try {
+        j = nlohmann::json::parse(repair_json_string_escapes(json_text));
+      } catch (const std::exception&) {
+        j = nlohmann::json::parse(repair_truncated_json(repair_json_string_escapes(json_text)));
+      }
     }
     const std::string action = j.value("action", "");
     if (action == "plan" || action == "watchlist") {
@@ -292,6 +405,10 @@ L2Action parse_l2_action(const std::string& model_text) {
       std::string err;
       out.hunks = parse_search_replace_json(j, &err);
       if (out.hunks.empty()) {
+        const L2Action aider = parse_aider_edit(cleaned);
+        if (aider.kind == L2ActionKind::Edit) {
+          return aider;
+        }
         out.kind = L2ActionKind::Error;
         out.error = err.empty() ? "edit sin hunks" : err;
       }
@@ -311,6 +428,10 @@ L2Action parse_l2_action(const std::string& model_text) {
     out.error = "action desconocida: " + action;
     return out;
   } catch (const std::exception& ex) {
+    const L2Action aider = parse_aider_edit(cleaned);
+    if (aider.kind == L2ActionKind::Edit) {
+      return aider;
+    }
     out.kind = L2ActionKind::Error;
     out.error = std::string("JSON inválido: ") + ex.what();
     return out;

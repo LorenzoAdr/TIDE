@@ -58,6 +58,8 @@ struct BusyStripState {
   std::mutex paint_mutex;
   std::atomic<bool> ticker_running{false};
   std::atomic<bool> reassert_posted{false};
+  // Irreversible: shutdown overlay is on screen; ANSI paints must stop.
+  std::atomic<bool> halted{false};
   std::thread ticker;
 };
 
@@ -68,6 +70,8 @@ void set_busy_spinner(MainLayoutState* layout, BusyActivity activity, std::strin
 void set_busy_percent(MainLayoutState* layout, BusyActivity activity, int percent,
                       std::string_view label = {});
 void clear_busy(MainLayoutState* layout);
+// Shutdown: wipe the strip (even Embedding/Downloading), stop ANSI paints. Irreversible.
+void halt_busy_strip(MainLayoutState* layout);
 // Only clears when the strip is currently showing `activity` (avoids wiping another job).
 void clear_busy_if(MainLayoutState* layout, BusyActivity activity);
 bool busy_activity_is_ai(BusyActivity activity);

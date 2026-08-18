@@ -1,0 +1,22 @@
+# L2 edit-phase: a complete edit object (hunks with path/search/replace) or a flex action.
+root ::= ws (edit-obj | flex-obj) ws
+
+edit-obj ::= "{" ws "\"action\"" ws ":" ws "\"edit\"" ws "," ws "\"hunks\"" ws ":" ws hunk-array ws "}"
+
+hunk-array ::= "[" ws (hunk (ws "," ws hunk)*)? ws "]"
+
+hunk ::= "{" ws "\"path\"" ws ":" ws string ws "," ws "\"search\"" ws ":" ws string ws "," ws "\"replace\"" ws ":" ws string ws "}"
+
+flex-obj ::= "{" ws "\"action\"" ws ":" ws ("\"done\"" | "\"plan\"" | "\"tool\"" | "\"tools\"" | "\"synthesize\"") ws ("," ws string ws ":" ws value)* "}"
+
+value  ::= object | array | string | number | ("true" | "false" | "null")
+
+object ::= "{" ws (string ws ":" ws value (ws "," ws string ws ":" ws value)*)? ws "}"
+
+array  ::= "[" ws (value (ws "," ws value)*)? ws "]"
+
+string ::= "\"" ([^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]))* "\""
+
+number ::= "-"? ("0" | [1-9] [0-9]*) ("." [0-9]+)? ([eE] [-+]? [0-9]+)?
+
+ws ::= [ \t\n]*

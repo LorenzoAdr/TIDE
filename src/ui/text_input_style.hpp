@@ -145,20 +145,26 @@ inline Element RenderBlinkInputLine(const std::string& content, int cursor_pos, 
   return hbox(std::move(parts));
 }
 
+inline Element BlinkInputSurface(Element inner, const Decorator& panel) {
+  return hbox({std::move(inner) | xflex_shrink, filler()}) | panel;
+}
+
 inline Element TransformBlinkInput(InputState state, const std::string& content,
                                    const std::string& placeholder, int cursor_pos,
-                                   int sel_start = -1, int sel_end = -1, int wrap_width = 0) {
-  const Decorator panel = bgcolor(theme::CodeBg());
+                                   int sel_start = -1, int sel_end = -1, int wrap_width = 0,
+                                   Color panel_bg = theme::CodeBg()) {
+  const Decorator panel = bgcolor(panel_bg);
 
   if (content.empty()) {
     if (!state.focused) {
-      return text(placeholder) | dim | panel;
+      return BlinkInputSurface(text(placeholder) | dim, panel);
     }
-    return RenderBlinkInputLine(content, 0, true) | panel;
+    return BlinkInputSurface(RenderBlinkInputLine(content, 0, true), panel);
   }
 
   if (wrap_width <= 0) {
-    return RenderBlinkInputLine(content, cursor_pos, state.focused, sel_start, sel_end) | panel;
+    return BlinkInputSurface(
+        RenderBlinkInputLine(content, cursor_pos, state.focused, sel_start, sel_end), panel);
   }
 
   const auto ranges = soft_wrap_ranges(content, wrap_width);
@@ -193,13 +199,14 @@ inline Element TransformBlinkInput(InputState state, const std::string& content,
   if (rows.empty()) {
     rows.push_back(RenderBlinkInputLine({}, 0, state.focused));
   }
-  return vbox(std::move(rows)) | panel;
+  return BlinkInputSurface(vbox(std::move(rows)), panel);
 }
 
 inline InputOption MakeBlinkInputOption(StringRef content, StringRef placeholder,
                                         bool multiline = false,
                                         int* selection_anchor = nullptr,
-                                        int* wrap_width = nullptr) {
+                                        int* wrap_width = nullptr,
+                                        Color panel_bg = theme::CodeBg()) {
   InputOption opt;
   opt.content = std::move(content);
   opt.placeholder = std::move(placeholder);
@@ -209,8 +216,8 @@ inline InputOption MakeBlinkInputOption(StringRef content, StringRef placeholder
   auto cursor = std::make_shared<int>(0);
   opt.cursor_position = Ref<int>(cursor.get());
   opt.transform = [content = opt.content, placeholder = opt.placeholder,
-                   cursor = std::move(cursor), selection_anchor,
-                   wrap_width](InputState state) {
+                   cursor = std::move(cursor), selection_anchor, wrap_width,
+                   panel_bg](InputState state) {
     int sel_start = -1;
     int sel_end = -1;
     if (selection_anchor != nullptr && *selection_anchor >= 0 &&
@@ -219,7 +226,8 @@ inline InputOption MakeBlinkInputOption(StringRef content, StringRef placeholder
       sel_end = std::max(*selection_anchor, *cursor);
     }
     const int width = wrap_width != nullptr ? *wrap_width : 0;
-    return TransformBlinkInput(state, *content, *placeholder, *cursor, sel_start, sel_end, width);
+    return TransformBlinkInput(state, *content, *placeholder, *cursor, sel_start, sel_end, width,
+                               panel_bg);
   };
   return opt;
 }

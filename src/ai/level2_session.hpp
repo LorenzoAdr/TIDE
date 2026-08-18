@@ -69,14 +69,16 @@ class Level2Session {
   // Soft nudge after this many explore tools without a plan.
   static constexpr int kExplorePlanNudgeAfter = 8;
   // Soft nudge after this many extras once pack covers Instruction (no gaps).
-  static constexpr int kPostPackEditNudgeAfter = 8;
+  static constexpr int kPostPackEditNudgeAfter = 2;
   // Hard reject further extras after this many post-pack tools (Instruction cubierta).
-  static constexpr int kPostPackEditPushbackAfter = 12;
+  static constexpr int kPostPackEditPushbackAfter = 4;
   // In phase=edit: nudge after this many tools, then reject further tools.
   static constexpr int kEditPhaseToolNudgeAfter = 2;
   static constexpr int kEditPhaseToolPushbackAfter = 5;
   // Soft nudge after this many consecutive plans with a covering pack (no tools).
   static constexpr int kRepeatedPlanEditNudgeAfter = 2;
+  // Hard pivot: N covering plans in a row → loop force_phase_edit (modelo no emite done/edit).
+  static constexpr int kRepeatedPlanEditPushbackAfter = 2;
   // Identical failed edit fingerprint repeats before forcing clarify.
   static constexpr int kMaxIdenticalEditRepeats = 2;
   // Total edit apply failures (any cause) before forcing clarify.
@@ -124,7 +126,17 @@ class Level2Session {
                                              std::size_t max_chars = 6000);
 
   static std::string tool_guide_markdown();
+  // Short system for phase=edit (no explore table) — A+B+D lean prompt.
+  static std::string tool_guide_edit_markdown();
+  // Compact explore system when EDIT_LEAN_PROMPT (avoids n_ctx blow on ranked map).
+  static std::string tool_guide_explore_markdown();
   static bool tool_allowed(const std::string& name);
+
+  // Last compile_feedback or edit_feedback turn, whole block, capped (not a byte-tail).
+  static std::string last_edit_relevant_observation(const std::string& session_md,
+                                                    std::size_t max_chars = 1600);
+  // Drop sibling "on disk" excerpts that are not the failed hunk path.
+  static std::string strip_unrelated_on_disk_excerpts(const std::string& obs);
 
   // Keep first max_lines (tools). Keep last max_lines (compile stderr).
   // max_chars > 0 also hard-caps the result (post-pack per-turn budget).
@@ -196,6 +208,7 @@ class Level2Session {
     bool plan_nudge_sent = false;     // soft nudge after N explore tools without plan
     int post_pack_tool_count = 0;     // tools after pack, still in explore
     bool edit_nudge_sent = false;     // soft nudge to done next=edit / edit
+    std::vector<std::string> seen_tool_keys;  // name\\targ already fetched this session
     int edit_phase_tool_count = 0;    // tools while already in phase=edit
     bool edit_phase_nudge_sent = false;
     int consecutive_complete_plans = 0;  // plans while pack covers Instruction

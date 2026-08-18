@@ -33,6 +33,7 @@
 #include "i18n/tr.hpp"
 #include "util/compile_commands_lookup.hpp"
 #include "util/clang_format_config.hpp"
+#include "util/external_viewer.hpp"
 #include "util/path_normalize.hpp"
 
 namespace tuide {
@@ -1191,6 +1192,13 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
+  if (action_id == "preview_markdown") {
+    if (workspace != nullptr) {
+      workspace->preview_markdown_in_browser(state->absolute_path);
+    }
+    return true;
+  }
+
   if (action_id == "analyze_symbols") {
     request_binary_symbols_panel(layout_state, state->absolute_path);
     if (focus != nullptr) {
@@ -1675,6 +1683,16 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
     layout_state->clickable.clear_hover_if(press_id::is_context_menu_hover);
     UI_WAKE(layout_state, "wake");
   }
+}
+
+void context_menu_append_item(ContextMenuState* state, const std::string& label,
+                              const std::string& action_id) {
+  if (state == nullptr || action_id.empty()) {
+    return;
+  }
+  state->labels.push_back(label);
+  state->action_ids.push_back(action_id);
+  state->row_boxes.push_back(Box{});
 }
 
 void context_menu_open_file(ContextMenuState* state, int x, int y,

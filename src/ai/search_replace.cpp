@@ -11,6 +11,30 @@ namespace fs = std::filesystem;
 namespace tuide {
 namespace {
 
+bool looks_like_aider_path(const std::string& path) {
+  if (path.empty() || path.size() > 240) {
+    return false;
+  }
+  if (path.find(' ') != std::string::npos || path.find('\t') != std::string::npos) {
+    return false;
+  }
+  if (path.find('{') != std::string::npos || path.find('`') != std::string::npos) {
+    return false;
+  }
+  const auto slash = path.find_last_of("/\\");
+  if (slash == std::string::npos || slash + 1 >= path.size()) {
+    return false;
+  }
+  const std::string name = path.substr(slash + 1);
+  return name.find('.') != std::string::npos;
+}
+
+bool aider_placeholder_search(const std::string& search) {
+  return search.find("span del pack") != std::string::npos ||
+         search.find("bloque exacto") != std::string::npos ||
+         search.find("bloque único del pack") != std::string::npos;
+}
+
 void offset_to_line_col(const std::string& text, std::size_t offset, int* line1, int* col1) {
   int line = 1;
   int col = 1;
@@ -469,31 +493,25 @@ std::vector<SearchReplaceHunk> parse_search_replace_aider(const std::string& tex
         prev.pop_back();
       }
       if (!prev.empty() && prev.find(search_mark) == std::string::npos &&
-          prev.find(end_mark) == std::string::npos) {
+          prev.find(end_mark) == std::string::npos && looks_like_aider_path(prev)) {
         current_path = prev;
       }
     }
     const auto s_nl = text.find('\n', s);
     if (s_nl == std::string::npos) {
-      if (err) {
-        *err = "SEARCH sin cuerpo";
-      }
-      return {};
+      break;
     }
+    const auto next_s = text.find(search_mark, s + 1);
     const auto mid = text.find(mid_mark, s_nl + 1);
-    if (mid == std::string::npos) {
-      if (err) {
-        *err = "falta =======";
-      }
-      return {};
+    if (mid == std::string::npos || (next_s != std::string::npos && next_s < mid)) {
+      pos = s + search_mark.size();
+      continue;
     }
     const auto mid_nl = text.find('\n', mid);
     const auto end = text.find(end_mark, mid);
-    if (end == std::string::npos) {
-      if (err) {
-        *err = "falta >>>>>>> REPLACE";
-      }
-      return {};
+    if (end == std::string::npos || (next_s != std::string::npos && next_s < end)) {
+      pos = s + search_mark.size();
+      continue;
     }
     SearchReplaceHunk hunk;
     hunk.path = current_path;
@@ -503,11 +521,9 @@ std::vector<SearchReplaceHunk> parse_search_replace_aider(const std::string& tex
     }
     const std::size_t repl_begin = mid_nl == std::string::npos ? mid + mid_mark.size() : mid_nl + 1;
     hunk.replace = text.substr(repl_begin, end - repl_begin);
-    if (hunk.path.empty()) {
-      if (err) {
-        *err = "bloque Aider sin path";
-      }
-      return {};
+    if (!looks_like_aider_path(hunk.path) || aider_placeholder_search(hunk.search)) {
+      pos = end + end_mark.size();
+      continue;
     }
     out.push_back(std::move(hunk));
     pos = end + end_mark.size();

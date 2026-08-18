@@ -17,6 +17,8 @@ struct L2BrainRequest {
   int max_tokens = 2048;
   int n_ctx = 8192;
   float temperature = 0.1f;
+  // Absolute path to GBNF grammar; empty → unconstrained decode.
+  std::string grammar_file;
 };
 
 struct L2BrainResult {

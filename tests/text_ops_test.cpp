@@ -257,6 +257,54 @@ void test_indent_single_line_selection() {
   check(buffer.primary().head.col == 9, "head after indent prefix");
 }
 
+void test_selection_span_covers_empty_lines() {
+  auto buffer = make_buffer({"alpha", "", "gamma"});
+  buffer.primary().anchor = {0, 2};
+  buffer.primary().head = {2, 1};
+
+  int start = -1;
+  int end = -1;
+  check(tuide::cursor_selection_span_on_line(buffer.primary(), 0, 5, &start, &end),
+        "first line is selected");
+  check(start == 2 && end == 5, "first line from col 2 to EOL");
+
+  check(tuide::cursor_selection_span_on_line(buffer.primary(), 1, 0, &start, &end),
+        "empty middle line is selected");
+  check(start == 0 && end == 0, "empty line has a zero-width span to paint");
+
+  check(tuide::cursor_selection_span_on_line(buffer.primary(), 2, 5, &start, &end),
+        "last line is selected");
+  check(start == 0 && end == 1, "last line up to exclusive head");
+}
+
+void test_selection_span_skips_exclusive_end_line() {
+  auto buffer = make_buffer({"alpha", "", "gamma"});
+  buffer.primary().anchor = {0, 0};
+  buffer.primary().head = {1, 0};
+
+  int start = -1;
+  int end = -1;
+  check(tuide::cursor_selection_span_on_line(buffer.primary(), 0, 5, &start, &end),
+        "start line selected through EOL");
+  check(start == 0 && end == 5, "full first line");
+  check(!tuide::cursor_selection_span_on_line(buffer.primary(), 1, 0, &start, &end),
+        "exclusive end at col 0 of empty line is not painted");
+}
+
+void test_selection_span_full_indented_line() {
+  auto buffer = make_buffer({"\t\treturn x;"});
+  buffer.primary().anchor = {0, 0};
+  buffer.primary().head = {0, static_cast<int>(buffer.lines[0].size())};
+
+  int start = -1;
+  int end = -1;
+  check(tuide::cursor_selection_span_on_line(buffer.primary(), 0,
+                                             static_cast<int>(buffer.lines[0].size()), &start, &end),
+        "full line is selected");
+  check(start == 0 && end == static_cast<int>(buffer.lines[0].size()),
+        "span includes leading tabs");
+}
+
 }  // namespace
 
 int main() {
@@ -279,5 +327,8 @@ int main() {
   test_comment_lines_updates_joined_source();
   test_indent_unindent_selection();
   test_indent_single_line_selection();
+  test_selection_span_covers_empty_lines();
+  test_selection_span_skips_exclusive_end_line();
+  test_selection_span_full_indented_line();
   return 0;
 }

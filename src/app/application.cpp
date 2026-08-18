@@ -1227,6 +1227,7 @@ void Application::begin_shutdown(ScreenInteractive *screen) {
 	quit_confirm_state_.open = false;
 	quit_confirm_state_.unsaved_paths.clear();
 	layout_state_.shutdown_ui_poll_paused.store(true, std::memory_order_release);
+	halt_busy_strip(&layout_state_);
 	shutdown_state_.begin(7);
 	shutdown_step_index_ = 0;
 	shutdown_state_.set_current(i18n::tr("app.shutdown.save_session"));

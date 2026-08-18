@@ -637,10 +637,18 @@ int main() {
     optsn2.instruction = "change helper_value";
     expect(sessn2.bootstrap(optsn2, &err), "bootstrap plan nudge2 " + err);
     expect(sessn2.apply_plan(rootn2.string(), {"src/foo.cpp:helper_value"}, "p1").ok, "plan1");
-    expect(sessn2.apply_plan(rootn2.string(), {"src/foo.cpp:helper_value"}, "p2").ok, "plan2");
+    {
+      const auto tr2 = sessn2.apply_plan(rootn2.string(), {"src/foo.cpp:helper_value"}, "p2");
+      expect(tr2.ok, "plan2");
+      expect(tr2.error == "repeated_plan_pushback",
+             "second covering plan is pushback got=" + tr2.error);
+    }
     const std::string sess = read_all(Level2Session::session_path(rootn2.string()));
     expect(sess.find("_nudge:_") != std::string::npos, "repeat-plan edit nudge");
     expect(sess.find("done next=edit") != std::string::npos, "nudge asks edit");
+    expect(sess.find("repeated_plan_pushback") != std::string::npos ||
+               sess.find("Runtime pasa a phase=edit") != std::string::npos,
+           "obs notes plan pushback");
     fs::remove_all(rootn2, ec);
   }
 
@@ -1037,13 +1045,60 @@ int main() {
     expect(read_all(Level2Session::session_path(roote.string())).find("_nudge:_") == std::string::npos,
            "no nudge yet after covering plan");
     for (int i = 0; i < Level2Session::kPostPackEditNudgeAfter; ++i) {
-      expect(sesse.apply_tool(roote.string(), "get_code_of", "src/foo.cpp:helper_value").ok,
+      const std::string arg = std::string("src/foo.cpp:helper_value#w") + std::to_string(i);
+      expect(sesse.apply_tool(roote.string(), "get_code_of", arg).ok,
              "post-pack tool " + std::to_string(i));
     }
     const std::string sess = read_all(Level2Session::session_path(roote.string()));
     expect(sess.find("_nudge:_") != std::string::npos, "session contains edit nudge");
     expect(sess.find("done next=edit") != std::string::npos, "nudge asks for edit");
     fs::remove_all(roote, ec);
+  }
+
+  // Same get_code_of arg after covering pack is rejected (anti-loop).
+  {
+    const fs::path rootd = root.parent_path() / "tuide_l2_repeat_tool";
+    fs::remove_all(rootd, ec);
+    fs::create_directories(rootd / ".tuide" / "ai", ec);
+    fs::create_directories(rootd / "src", ec);
+    {
+      std::ofstream map(rootd / ".tuide" / "ai" / "map_last.md");
+      map << "query: bump helper_value\n\n## Ranked entries\n\n1. src/foo.cpp:1 — `helper_value`\n";
+    }
+    {
+      std::ofstream foo(rootd / "src" / "foo.cpp");
+      foo << "int helper_value = 1;\n";
+    }
+    ToolRegistry toolsd;
+    int fetches = 0;
+    toolsd.register_tool("get_code_of", "stub", [&](const std::string& arg) {
+      ++fetches;
+      return AiToolResult{true, "src/foo.cpp:1-1 (helper_value)\nint helper_value = 1;\n" + arg};
+    });
+    toolsd.register_tool("file_outline", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "outline " + arg + " symbols=1\n  helper_value\n"};
+    });
+    Level2Session sessd(Level2SessionDeps{&toolsd, {}, {}});
+    Level2BootstrapOpts optsd;
+    optsd.workspace_root = rootd.string();
+    optsd.query = "bump helper_value";
+    optsd.instruction = "change helper_value";
+    expect(sessd.bootstrap(optsd, &err), "bootstrap repeat " + err);
+    expect(sessd.apply_plan(rootd.string(), {"src/foo.cpp:helper_value"}, "ready").ok,
+           "plan for repeat");
+    expect(sessd.status_text(rootd.string()).find("pack_incomplete: no") != std::string::npos,
+           "covering pack for repeat");
+    const int after_plan = fetches;
+    const auto t1 =
+        sessd.apply_tool(rootd.string(), "get_code_of", "src/foo.cpp:helper_value#tail");
+    expect(t1.ok && t1.error.empty(), "first fetch ok");
+    expect(fetches == after_plan + 1, "invoked once more after plan");
+    const auto t2 =
+        sessd.apply_tool(rootd.string(), "get_code_of", "src/foo.cpp:helper_value#tail");
+    expect(t2.ok, "dup turn accepted");
+    expect(t2.error == "post_pack_tool_pushback", "dup after pack is pushback got=" + t2.error);
+    expect(fetches == after_plan + 1, "second fetch not invoked");
+    fs::remove_all(rootd, ec);
   }
 
   // map_stale when map_last query poorly overlaps Instruction.
@@ -1329,6 +1384,66 @@ int main() {
     expect(session.find("ToggleLineMark") != std::string::npos, "keeps ident");
     expect(session.find("header hermano") != std::string::npos, "sibling header hint");
     fs::remove_all(rootu, ec);
+  }
+
+  // After kMaxCompileAttempts, stay in edit (do not leave phase=compile).
+  {
+    const fs::path rootm = fs::temp_directory_path() / "tuide_l2_compile_max_edit";
+    fs::remove_all(rootm, ec);
+    fs::create_directories(rootm / ".tuide" / "ai", ec);
+    fs::create_directories(rootm / "src", ec);
+    {
+      std::ofstream map(rootm / ".tuide" / "ai" / "map_last.md");
+      map << "query: bump\n";
+    }
+    {
+      std::ofstream foo(rootm / "src" / "foo.cpp");
+      foo << "int value = 1;\n";
+    }
+    int compiles = 0;
+    Level2SessionDeps depsm{&tools, {}, [&compiles](std::string* out) {
+      ++compiles;
+      if (out) {
+        *out = "error: boom\n";
+      }
+      return 1;
+    }};
+    depsm.pack_incomplete_pushback_max = 0;
+    Level2Session sessm(depsm);
+    Level2BootstrapOpts optsm;
+    optsm.workspace_root = rootm.string();
+    optsm.query = "bump value";
+    expect(sessm.bootstrap(optsm, &err), "bootstrap compile-max " + err);
+    expect(sessm.mark_done(rootm.string(), "ready", "edit").ok, "to edit compile-max");
+    SearchReplaceHunk hm;
+    hm.path = "src/foo.cpp";
+    hm.search = "int value = 1;\n";
+    hm.replace = "int value = 9;\n";
+    auto last = sessm.apply_edit(rootm.string(), {hm});
+    expect(!last.ok, "compile fail 1");
+    expect(last.phase == "edit", "phase edit after compile fail 0 got=" + last.phase);
+    for (int i = 1; i < Level2Session::kMaxCompileAttempts; ++i) {
+      last = sessm.apply_edit(rootm.string(), {hm});
+      expect(!last.ok, "compile fail " + std::to_string(i + 1));
+      expect(last.phase == "edit", "phase edit after compile fail " + std::to_string(i) +
+                                       " got=" + last.phase);
+    }
+    expect(compiles == Level2Session::kMaxCompileAttempts, "compiled max times");
+    expect(last.summary.find("rollback") != std::string::npos, "max fail mentions rollback");
+    const std::string stxt = sessm.status_text(rootm.string());
+    expect(stxt.find("phase: edit") != std::string::npos, "status stays edit not compile");
+    expect(stxt.find("phase: compile") == std::string::npos, "status not compile");
+    {
+      std::ifstream in(rootm / "src" / "foo.cpp");
+      std::ostringstream ss;
+      ss << in.rdbuf();
+      expect(ss.str().find("int value = 1;") != std::string::npos, "disk restored after rollback");
+    }
+    // Fresh budget: another edit still compiles instead of spinning in phase=compile.
+    const auto again = sessm.apply_edit(rootm.string(), {hm});
+    expect(again.phase == "edit", "still edit after extra compile fail got=" + again.phase);
+    expect(compiles == Level2Session::kMaxCompileAttempts + 1, "fresh compile budget after rollback");
+    fs::remove_all(rootm, ec);
   }
 
   // Phase A: POST_EDIT_COVERAGE — reject done when Instruction markers/paths missing.

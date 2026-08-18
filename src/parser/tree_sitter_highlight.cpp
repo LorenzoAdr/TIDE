@@ -355,6 +355,8 @@ const char* kEmbeddedLatexHighlightsQuery = R"scm(
 )scm";
 
 TSQuery* highlight_query_for_lang(TreeSitterLangKind lang) {
+  static std::mutex query_mu;
+  std::lock_guard<std::mutex> lock(query_mu);
   auto cached_query = [](TSQuery** slot, const TSLanguage* language, const char* source) -> TSQuery* {
     if (*slot == nullptr && source != nullptr && source[0] != '\0') {
       uint32_t error_offset = 0;

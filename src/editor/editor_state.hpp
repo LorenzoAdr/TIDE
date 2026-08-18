@@ -46,6 +46,13 @@ struct MultiCursor {
   void normalized_range(int* start_line, int* start_col, int* end_line, int* end_col) const;
 };
 
+// Byte-column span of `cursor`'s selection on `line_index` (end exclusive).
+// Returns false if that line is not part of the selection. A zero-width span
+// (`*start == *end`) means an empty selected line that still needs a synthetic
+// one-cell highlight; the exclusive endpoint line is not included.
+bool cursor_selection_span_on_line(const MultiCursor& cursor, int line_index, int line_len,
+                                   int* start, int* end);
+
 struct EditorSnapshot {
   EditorText lines;
   std::vector<MultiCursor> cursors;

@@ -13,6 +13,7 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "ftxui/dom/node.hpp"
 #include "ftxui/screen/box.hpp"
 #include "indexer/workspace_indexer.hpp"
 #include "search/workspace_search.hpp"
@@ -38,25 +39,51 @@ namespace {
 
 constexpr int kLabelWidth = 8;
 
+// Flex on X but ignore the child's natural min width. Otherwise placeholders vs
+// the focused caret change each column's min_x and hbox redistributes space.
+Element xflex_fill(Element child) {
+  class XFlexFill : public Node {
+   public:
+    explicit XFlexFill(Element child) : Node({std::move(child)}) {}
+    void ComputeRequirement() override {
+      Node::ComputeRequirement();
+      requirement_ = children_[0]->requirement();
+      requirement_.min_x = 0;
+      requirement_.flex_grow_x = 1;
+      requirement_.flex_shrink_x = 1;
+    }
+    void SetBox(Box box) override {
+      Node::SetBox(box);
+      if (!children_.empty()) {
+        children_[0]->SetBox(box);
+      }
+    }
+  };
+  return std::make_shared<XFlexFill>(std::move(child));
+}
+
 Element render_search_field(const std::string& label, const std::string& value,
                             const std::string& placeholder, bool active, Component input,
                             Box* box) {
   Element field;
   if (active) {
-    field = input->Render() | flex | border | bgcolor(theme::PanelBg());
+    // Same 1-row TabIdle chrome as ModalInputLine. A `border` grows the row;
+    // CodeBg on the typed text paints a widening black strip.
+    field = input->Render() | bgcolor(theme::TabIdle()) | size(HEIGHT, EQUAL, 1);
+    field = clear_under(std::move(field));
   } else {
     const std::string& preview = value.empty() ? placeholder : value;
-    field = ModalInputLine(preview) | flex;
+    field = ModalInputLine(preview);
     if (value.empty()) {
       field = field | dim;
     }
   }
 
   return hbox({
-             text(label) | color(theme::Muted()) | size(WIDTH, EQUAL, kLabelWidth),
-             std::move(field) | flex | reflect(*box),
+             text(label) | color(theme::Muted()) | size(WIDTH, EQUAL, kLabelWidth) | notflex,
+             std::move(field) | xflex | reflect(*box),
          }) |
-         flex;
+         xflex_fill | size(HEIGHT, EQUAL, 1);
 }
 
 int visible_line_count(const Box& box) {
@@ -464,14 +491,19 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
   }
 
   auto query_option = std::make_shared<InputOption>(MakeBlinkInputOption(
-      &state->query, &state->placeholder_query, false, &state->query_selection_anchor));
+      &state->query, &state->placeholder_query, false, &state->query_selection_anchor, nullptr,
+      theme::TabIdle()));
   auto query_input = Input(*query_option);
-  auto replace_input = Input(MakeBlinkInputOption(&state->replace, &state->placeholder_replace));
-  auto path_input = Input(MakeBlinkInputOption(&state->path_filter, &state->placeholder_path));
-  auto include_input =
-      Input(MakeBlinkInputOption(&state->include_pattern, &state->placeholder_include));
-  auto exclude_input =
-      Input(MakeBlinkInputOption(&state->exclude_pattern, &state->placeholder_exclude));
+  auto replace_input = Input(MakeBlinkInputOption(&state->replace, &state->placeholder_replace,
+                                                  false, nullptr, nullptr, theme::TabIdle()));
+  auto path_input = Input(MakeBlinkInputOption(&state->path_filter, &state->placeholder_path, false,
+                                               nullptr, nullptr, theme::TabIdle()));
+  auto include_input = Input(MakeBlinkInputOption(&state->include_pattern,
+                                                  &state->placeholder_include, false, nullptr,
+                                                  nullptr, theme::TabIdle()));
+  auto exclude_input = Input(MakeBlinkInputOption(&state->exclude_pattern,
+                                                  &state->placeholder_exclude, false, nullptr,
+                                                  nullptr, theme::TabIdle()));
 
   auto input_layers = Container::Horizontal(
       {query_input | flex, replace_input | flex, path_input | flex, include_input | flex,

@@ -99,7 +99,7 @@ std::string format_strip_line(const BusyStripState& state) {
 }
 
 void paint_ansi_unlocked(BusyStripState* state) {
-  if (state == nullptr) {
+  if (state == nullptr || state->halted.load(std::memory_order_acquire)) {
     return;
   }
   // reflect() rellena box durante el Render a Screen; vale tras el primer Draw.
@@ -122,7 +122,8 @@ void paint_ansi_unlocked(BusyStripState* state) {
 }
 
 void ensure_spinner_thread(BusyStripState* state) {
-  if (state == nullptr || state->ticker_running.load(std::memory_order_acquire)) {
+  if (state == nullptr || state->halted.load(std::memory_order_acquire) ||
+      state->ticker_running.load(std::memory_order_acquire)) {
     return;
   }
   bool expected = false;
@@ -132,9 +133,13 @@ void ensure_spinner_thread(BusyStripState* state) {
   state->ticker = std::thread([state] {
     while (state->ticker_running.load(std::memory_order_acquire)) {
       std::this_thread::sleep_for(std::chrono::milliseconds(kSpinnerFrameMs));
+      if (state->halted.load(std::memory_order_acquire)) {
+        continue;
+      }
       std::lock_guard<std::mutex> lock(state->paint_mutex);
-      if (state->kind != BusyIndicatorKind::Spinner &&
-          state->kind != BusyIndicatorKind::Percent) {
+      if (state->halted.load(std::memory_order_acquire) ||
+          (state->kind != BusyIndicatorKind::Spinner &&
+           state->kind != BusyIndicatorKind::Percent)) {
         continue;
       }
       state->spinner_frame = (state->spinner_frame + 1) % kBrailleFrameCount;
@@ -219,12 +224,16 @@ bool busy_activity_is_ai(BusyActivity activity) {
 }
 
 void set_busy_spinner(MainLayoutState* layout, BusyActivity activity, std::string_view label) {
-  if (layout == nullptr || layout->busy_strip == nullptr) {
+  if (layout == nullptr || layout->busy_strip == nullptr ||
+      layout->busy_strip->halted.load(std::memory_order_acquire)) {
     return;
   }
   BusyStripState& state = *layout->busy_strip;
   {
     std::lock_guard<std::mutex> lock(state.paint_mutex);
+    if (state.halted.load(std::memory_order_acquire)) {
+      return;
+    }
     const BusyActivity previous = state.activity;
     state.kind = BusyIndicatorKind::Spinner;
     state.activity = activity;
@@ -243,12 +252,16 @@ void set_busy_spinner(MainLayoutState* layout, BusyActivity activity, std::strin
 
 void set_busy_percent(MainLayoutState* layout, BusyActivity activity, int percent,
                       std::string_view label) {
-  if (layout == nullptr || layout->busy_strip == nullptr) {
+  if (layout == nullptr || layout->busy_strip == nullptr ||
+      layout->busy_strip->halted.load(std::memory_order_acquire)) {
     return;
   }
   BusyStripState& state = *layout->busy_strip;
   {
     std::lock_guard<std::mutex> lock(state.paint_mutex);
+    if (state.halted.load(std::memory_order_acquire)) {
+      return;
+    }
     const bool was_active = state.kind == BusyIndicatorKind::Spinner ||
                             state.kind == BusyIndicatorKind::Percent;
     const BusyActivity previous = state.activity;
@@ -280,6 +293,9 @@ void clear_busy(MainLayoutState* layout) {
   BusyStripState& state = *layout->busy_strip;
   {
     std::lock_guard<std::mutex> lock(state.paint_mutex);
+    if (state.halted.load(std::memory_order_acquire)) {
+      return;
+    }
     // Coding-symbol embedding / model download own the strip until they finish;
     // generic clear_busy from Indexing/outline/etc. must not wipe the %.
     if (state.activity == BusyActivity::AiEmbedding ||
@@ -294,6 +310,27 @@ void clear_busy(MainLayoutState* layout) {
     paint_ansi_unlocked(&state);
   }
   // Dejar el hilo vivo pero idle (kind==None); evita join en hot path.
+}
+
+void halt_busy_strip(MainLayoutState* layout) {
+  if (layout == nullptr || layout->busy_strip == nullptr) {
+    return;
+  }
+  BusyStripState& state = *layout->busy_strip;
+  {
+    std::lock_guard<std::mutex> lock(state.paint_mutex);
+    if (!state.halted.load(std::memory_order_relaxed)) {
+      state.kind = BusyIndicatorKind::None;
+      state.activity = BusyActivity::Idle;
+      state.percent = 0;
+      state.label.clear();
+      state.spinner_frame = 0;
+      paint_ansi_unlocked(&state);
+      state.halted.store(true, std::memory_order_release);
+    }
+  }
+  // No join: el overlay de cierre debe pintar ya; el destructor une el hilo.
+  state.ticker_running.store(false, std::memory_order_release);
 }
 
 void clear_busy_if(MainLayoutState* layout, BusyActivity activity) {
@@ -389,7 +426,7 @@ void busy_strip_tick(BusyStripState* state, int64_t now_ms) {
 }
 
 void busy_strip_paint_ansi(BusyStripState* state) {
-  if (state == nullptr) {
+  if (state == nullptr || state->halted.load(std::memory_order_acquire)) {
     return;
   }
   std::lock_guard<std::mutex> lock(state->paint_mutex);
@@ -401,6 +438,9 @@ void busy_strip_reassert_after_draw(BusyStripState* state) {
     return;
   }
   state->reassert_posted.store(false, std::memory_order_release);
+  if (state->halted.load(std::memory_order_acquire)) {
+    return;
+  }
   std::lock_guard<std::mutex> lock(state->paint_mutex);
   paint_ansi_unlocked(state);
 }

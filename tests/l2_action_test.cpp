@@ -107,6 +107,36 @@ int main() {
     expect(a.kind == L2ActionKind::Edit, "raw newline repaired");
     expect(a.hunks.size() == 1 && a.hunks[0].search == "line1\nline2", "kept as newline");
   }
+  {
+    const auto a = parse_l2_action(R"({"action":"edit","hunks":[)");
+    expect(a.kind == L2ActionKind::Error, "truncated hunks still error");
+    expect(a.error.find("hunks") != std::string::npos || a.error.find("JSON") != std::string::npos,
+           "truncated error mentions hunks/json");
+  }
+
+  {
+    const auto a = parse_l2_action(
+        "src/foo.cpp\n<<<<<<< SEARCH\nint x = 1;\n=======\nint x = 2;\n>>>>>>> REPLACE\n");
+    expect(a.kind == L2ActionKind::Edit, "aider edit kind");
+    expect(a.hunks.size() == 1 && a.hunks[0].path == "src/foo.cpp", "aider path");
+    expect(a.hunks[0].search == "int x = 1;\n" && a.hunks[0].replace == "int x = 2;\n",
+           "aider bodies");
+  }
+  {
+    const auto a = parse_l2_action(
+        "PROHIBIDO JSON: ni plan, ni tool, ni sibling_of.\n"
+        "Empieza con un path del pack y <<<<<<< SEARCH\n"
+        "src/foo.cpp\n<<<<<<< SEARCH\nspan del pack\n=======\nnuevo\n>>>>>>> REPLACE\n"
+        "src/util/shell_utils.hpp\n<<<<<<< SEARCH\n"
+        "bool command_exists(const std::string& command);\n"
+        "=======\n"
+        "bool command_exists(const std::string& command);\nbool always_true();\n"
+        ">>>>>>> REPLACE\n");
+    expect(a.kind == L2ActionKind::Edit, "skips echoed Aider example");
+    expect(a.hunks.size() == 1 && a.hunks[0].path == "src/util/shell_utils.hpp",
+           "keeps real path got=" + (a.hunks.empty() ? std::string("none") : a.hunks[0].path));
+    expect(a.hunks[0].replace.find("always_true") != std::string::npos, "keeps always_true replace");
+  }
 
   if (failures) {
     std::cerr << failures << " failure(s)\n";

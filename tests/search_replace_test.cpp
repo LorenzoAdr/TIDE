@@ -113,6 +113,16 @@ int main() {
     expect(hunks.size() == 1 && hunks[0].path == "src/foo.cpp", "aider path");
     expect(hunks[0].search == "old\n" && hunks[0].replace == "new\n", "aider body");
   }
+  {
+    const std::string mixed =
+        "PROHIBIDO JSON: ni plan.\n<<<<<<< SEARCH\n"
+        "src/foo.cpp\n<<<<<<< SEARCH\nspan del pack\n=======\nx\n>>>>>>> REPLACE\n"
+        "src/util/shell_utils.hpp\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n";
+    std::string err;
+    const auto hunks = parse_search_replace_aider(mixed, &err);
+    expect(hunks.size() == 1 && hunks[0].path == "src/util/shell_utils.hpp",
+           "skip echo hunks got n=" + std::to_string(hunks.size()));
+  }
   if (failures) {
     std::cerr << failures << " failures\n";
     return 1;

@@ -9,6 +9,8 @@
 #include "ai/ai_trace.hpp"
 #include "ai/ai_types.hpp"
 #include "ai/l2_action.hpp"
+#include "ai/l2_feat.hpp"
+#include "ai/l2_grammar.hpp"
 
 namespace tuide {
 namespace {
@@ -312,15 +314,19 @@ std::string read_session_for_pack(const std::string& workspace_root, std::size_t
   }
 
   std::string obs_tail;
-  const auto obs_pos = sess.find("## Observations");
-  if (obs_pos != std::string::npos) {
-    const std::size_t kObsTail = obs_tail_budget > 0 ? obs_tail_budget : 1800;
-    const std::string obs = sess.substr(obs_pos);
-    if (obs.size() > kObsTail) {
-      obs_tail = "## Observations\n\n…[cola]…\n\n" +
-                 obs.substr(obs.size() - (kObsTail - 40));
-    } else {
-      obs_tail = obs;
+  const std::size_t kObsCap = obs_tail_budget > 0 ? obs_tail_budget : 1800;
+  if (l2_feat::enabled("EDIT_LEAN_PROMPT")) {
+    obs_tail = Level2Session::last_edit_relevant_observation(sess, kObsCap);
+  } else {
+    const auto obs_pos = sess.find("## Observations");
+    if (obs_pos != std::string::npos) {
+      const std::string obs = sess.substr(obs_pos);
+      if (obs.size() > kObsCap) {
+        obs_tail = "## Observations\n\n…[cola]…\n\n" +
+                   obs.substr(obs.size() - (kObsCap - 40));
+      } else {
+        obs_tail = obs;
+      }
     }
   }
 
@@ -425,8 +431,11 @@ std::string phase_banner(const std::string& phase, int step, int max_steps) {
          std::to_string(max_steps);
 }
 
-std::string build_system_prompt(const Level2AutonomousLoopOpts& opts) {
+std::string build_system_prompt(const Level2AutonomousLoopOpts& opts,
+                                const std::string& phase = {}) {
   const AiWorkflowKind workflow = parse_ai_workflow_kind(opts.workflow);
+  const bool lean_edit = l2_feat::enabled("EDIT_LEAN_PROMPT") && phase == "edit" &&
+                         !ai_workflow_is_readonly(workflow);
   std::ostringstream out;
   if (workflow == AiWorkflowKind::Ask) {
     out << "Eres el Nivel 2 (explicador) de tuide. Exploras el repo y respondes en "
@@ -463,6 +472,26 @@ std::string build_system_prompt(const Level2AutonomousLoopOpts& opts) {
            "{\"action\":\"synthesize\",\"summary\":\"qué cambió, impacto, riesgos\"}\n"
            "{\"action\":\"done\",\"summary\":\"…\",\"next\":\"clarify\"}\n"
            "Puedes synthesize directo si el Git context basta. PROHIBIDO edit/compile.\n";
+  } else if (lean_edit) {
+    out << "Eres el Nivel 2 (coder) de tuide en phase=edit.\n"
+           "Emite hunks Search/Replace en texto plano (estilo Aider). "
+           "NO pongas código C++ dentro de JSON. PROHIBIDO action=plan.\n"
+           "Formato:\n"
+           "src/foo.cpp\n"
+           "<<<<<<< SEARCH\n"
+           "bloque exacto único del pack\n"
+           "=======\n"
+           "bloque nuevo\n"
+           ">>>>>>> REPLACE\n"
+           "También válido: {\"action\":\"done\",\"summary\":\"cambios listos\"}\n"
+           "PROHIBIDO action=plan y action=tool. Un hunk, un path.\n"
+           "Tras compile_fail: corrige el SEARCH (span del pack).\n";
+  } else if (l2_feat::enabled("EDIT_LEAN_PROMPT") && phase == "explore") {
+    out << "Eres el Nivel 2 (coder) de tuide.\n"
+           "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+           "Primer paso: {\"action\":\"plan\",\"targets\":[\"src/a.cpp:Foo\",\"src/b.hpp:Bar\"]}\n"
+           "Luego {\"action\":\"done\",\"summary\":\"…\",\"next\":\"edit\"} o action=edit. "
+           "No repitas el mismo get_code_of. Si no cabe JSON: emite SOLO el objeto, sin texto.\n";
   } else {
     out << "Eres el Nivel 2 (coder) de tuide. Exploras el repo y emites ediciones "
            "Search/Replace de match único.\n"
@@ -496,6 +525,10 @@ std::string build_system_prompt(const Level2AutonomousLoopOpts& opts) {
   }
   if (!opts.tool_guide_override.empty()) {
     out << opts.tool_guide_override;
+  } else if (lean_edit) {
+    out << Level2Session::tool_guide_edit_markdown();
+  } else if (l2_feat::enabled("EDIT_LEAN_PROMPT") && phase == "explore") {
+    out << Level2Session::tool_guide_explore_markdown();
   } else {
     out << Level2Session::tool_guide_markdown();
   }
@@ -511,7 +544,8 @@ std::string build_system_prompt(const Level2AutonomousLoopOpts& opts) {
 std::string build_user_prompt(const std::string& workspace_root, const std::string& phase,
                               int step, bool has_pack, bool map_review, bool map_stale,
                               bool pack_incomplete, bool resume, AiWorkflowKind workflow,
-                              const L2ContextBudget& budget, const Level2AutonomousLoopOpts& opts) {
+                              const L2ContextBudget& budget, const Level2AutonomousLoopOpts& opts,
+                              const std::string& recover_note = {}) {
   std::ostringstream out;
   out << "phase=" << phase << " step=" << step << " workflow=" << ai_workflow_kind_name(workflow);
   if (resume) {
@@ -530,6 +564,9 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
     out << " pack_incomplete=1";
   }
   out << "\n\n";
+  if (!recover_note.empty() && l2_feat::enabled("EDIT_LEAN_PROMPT")) {
+    out << recover_note << "\n\n";
+  }
 
   const bool readonly = ai_workflow_is_readonly(workflow);
   const std::size_t prompt_explore =
@@ -575,14 +612,15 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
   } else if (has_pack) {
     if (phase == "edit" && !readonly) {
       out << "phase=edit. Opciones:\n"
-             "- Prioridad: {\"action\":\"edit\",\"hunks\":[…]} con search = span completo del pack.\n"
-             "- edit_feedback / compile_feedback → corrige con action=edit (no tools en bucle).\n"
-             "- Instruction cubierta → done sin next.\n"
-             "- Refetch: máx ~2 tools; luego edit obligatorio.\n"
+             "- Prioridad: hunk Aider (path + SEARCH/REPLACE) con search = span del pack.\n"
+             "- PROHIBIDO action=plan y action=tool (pack ya cubre Instruction).\n"
+             "- edit_feedback / compile_feedback → corrige el SEARCH (no tools en bucle).\n"
+             "- Instruction cubierta → {\"action\":\"done\",\"summary\":\"…\"} sin next.\n"
              "Contexto: Instruction + Code pack (sin mapa rankeado completo).\n\n";
       if (!opts.user_overlay_edit.empty()) {
         out << opts.user_overlay_edit << "\n\n";
       }
+      out << "Empieza la respuesta con un path del pack y la marca SEARCH de Aider.\n\n";
     } else if (readonly) {
       out << "Ya hay Code pack"
           << (pack_incomplete ? " (**incomplete**: hay Truncated)" : "")
@@ -597,7 +635,8 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
       out << "Ya hay Code pack"
           << (pack_incomplete ? " (**incomplete**: hay Truncated)" : "")
           << ". Decide: done next=edit, edit, ampliar plan, o tools extras.\n"
-             "Preferir path:Symbol / path:A-B. Contexto: Instruction + pack.\n\n";
+             "Preferir path:Symbol / path:A-B. Contexto: Instruction + pack.\n"
+             "Pack cubierto: un segundo `plan` igual fuerza phase=edit.\n\n";
       if (!opts.user_overlay_pack.empty()) {
         out << opts.user_overlay_pack << "\n\n";
       }
@@ -631,7 +670,11 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
     if (!opts.user_overlay_explore.empty()) {
       out << opts.user_overlay_explore << "\n\n";
     }
-    out << read_session_for_explore(Level2Session::session_path(workspace_root), prompt_explore,
+    std::size_t explore_cap = prompt_explore;
+    if (!recover_note.empty() && l2_feat::enabled("EDIT_LEAN_PROMPT")) {
+      explore_cap = std::max<std::size_t>(3500, prompt_explore / 2);
+    }
+    out << read_session_for_explore(Level2Session::session_path(workspace_root), explore_cap,
                                     explore_obs);
   }
   return out.str();
@@ -647,7 +690,6 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
   Level2AutonomousLoopResult result;
   const int max_steps = opts.settings.max_steps > 0 ? opts.settings.max_steps : 32;
   const AiWorkflowKind workflow = parse_ai_workflow_kind(opts.workflow);
-  const std::string system = build_system_prompt(opts);
   const L2ContextBudget& budget = opts.budget;
   const auto run_t0 = clock::now();
 
@@ -679,6 +721,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
 
   int consecutive_invalid = 0;
   int consecutive_turn_errors = 0;
+  std::string recover_note;
 
   for (int step = 1; step <= max_steps; ++step) {
     if (cancel != nullptr && cancel->load()) {
@@ -742,6 +785,20 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
                    tr.phase + "\"}");
       emit(std::string("L2 ▸ compile ") + (tr.ok ? "OK" : "FAIL") + " — " + tr.summary);
       result.steps = step;
+      result.phase = tr.phase.empty() ? phase : tr.phase;
+      if (tr.phase == "done" || tr.phase == "clarify") {
+        result.ok = true;
+        result.summary = tr.summary;
+        return result;
+      }
+      if (!tr.ok && tr.phase == "compile") {
+        emit("L2 ▸ compile stuck → force phase=edit");
+        const auto promo = session.force_phase_edit(
+            opts.workspace_root, "compile rollback; reemite hunk Aider sobre el baseline");
+        if (promo.ok && promo.phase == "edit") {
+          result.phase = "edit";
+        }
+      }
       continue;
     }
 
@@ -750,14 +807,23 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
          ")…");
 
     L2BrainRequest breq;
-    breq.system_prompt = system;
+    breq.system_prompt = build_system_prompt(opts, phase);
     breq.user_prompt =
         build_user_prompt(opts.workspace_root, phase, step, has_pack, map_review, map_stale,
-                          pack_incomplete, resume, workflow, budget, opts);
+                          pack_incomplete, resume, workflow, budget, opts, recover_note);
     breq.phase = phase;
     breq.max_tokens = opts.settings.max_tokens;
     breq.n_ctx = budget.n_ctx;
     breq.temperature = opts.settings.temperature;
+    // Lean edit uses Aider fences; GBNF JSON de hunks se atasca en prompts reales ("hunks":[�).
+    const bool skip_grammar =
+        (phase == "edit" && l2_feat::enabled("EDIT_LEAN_PROMPT")) || consecutive_invalid >= 2;
+    if (!skip_grammar) {
+      breq.grammar_file = l2_grammar::resolve_for_phase(opts.workspace_root, phase);
+    }
+    if (!breq.grammar_file.empty()) {
+      emit("L2 ▸ grammar=" + breq.grammar_file);
+    }
 
     const auto propose_t0 = clock::now();
     const L2BrainResult br = brain.propose(breq, cancel);
@@ -768,6 +834,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
                  ",\"duration_ms\":" + std::to_string(propose_ms) + ",\"prompt_chars\":" +
                  std::to_string(breq.system_prompt.size() + breq.user_prompt.size()) +
                  ",\"reply_chars\":" + std::to_string(br.text.size()) +
+                 ",\"grammar\":" + (breq.grammar_file.empty() ? "0" : "1") +
                  (br.ok ? "" : (",\"error\":\"" + ai_trace_escape(br.error) + "\"")) + "}");
     if (!br.ok) {
       emit("L2 ▸ modelo error: " + br.error);
@@ -785,7 +852,65 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
 
     Level2TurnResult tr;
     const auto action_t0 = clock::now();
+    if (action.kind == L2ActionKind::Error || action.kind == L2ActionKind::Unknown) {
+      emit("L2 ▸ acción inválida; reintentando. " + action.error);
+      emit("L2 ▸ dump /tmp/tuide-llama-last.out");
+      result.steps = step;
+      ++consecutive_invalid;
+      consecutive_turn_errors = 0;
+      if (l2_feat::enabled("EDIT_LEAN_PROMPT")) {
+        std::ostringstream rec;
+        rec << "**JSON inválido** (intento " << consecutive_invalid
+            << "/6). El parser falló:\n```\n"
+            << action.error.substr(0, 280) << "\n```\n";
+        if (phase == "edit") {
+          rec << "Reemite un hunk Aider, NO JSON:\n"
+                 "src/foo.cpp\n<<<<<<< SEARCH\nspan del pack\n=======\nnuevo\n"
+                 ">>>>>>> REPLACE\nUn path, search corto. No copies observations.\n";
+        } else {
+          rec << "Reemite UN objeto JSON válido. En explore: "
+                 "{\"action\":\"plan\",\"targets\":[\"path:Symbol\",…]} o "
+                 "{\"action\":\"done\",\"summary\":\"…\",\"next\":\"edit\"}. "
+                 "PROHIBIDO markdown/prosa.\n";
+        }
+        recover_note = rec.str();
+      }
+      if (consecutive_invalid >= 6) {
+        emit("L2 ▸ demasiadas acciones inválidas seguidas — cerrando en clarify");
+        const auto fin = session.mark_done(
+            opts.workspace_root,
+            "loop: demasiadas respuestas JSON inválidas; ¿reformulas el cambio?", "clarify");
+        result.ok = true;
+        result.phase = fin.phase.empty() ? "clarify" : fin.phase;
+        result.summary = fin.summary;
+        result.steps = step;
+        return result;
+      }
+      continue;
+    }
     if (action.kind == L2ActionKind::Tool || action.kind == L2ActionKind::Tools) {
+      if (phase == "edit" && has_pack && !pack_incomplete && !map_review &&
+          !ai_workflow_is_readonly(workflow)) {
+        emit("L2 ▸ tool ignorado en phase=edit — pide hunk Aider");
+        ++consecutive_invalid;
+        recover_note =
+            "Pack cubierto. Emite un hunk Aider ahora (path + SEARCH/REPLACE).\n"
+            "PROHIBIDO JSON: ni plan, ni tool, ni sibling_of.\n"
+            "Empieza con un path del pack y la marca SEARCH de Aider.\n";
+        if (consecutive_invalid >= 6) {
+          emit("L2 ▸ demasiados tools en phase=edit — cerrando en clarify");
+          const auto fin = session.mark_done(
+              opts.workspace_root,
+              "loop: phase=edit sin hunk; ¿reformulas el cambio?", "clarify");
+          result.ok = true;
+          result.phase = fin.phase.empty() ? "clarify" : fin.phase;
+          result.summary = fin.summary;
+          result.steps = step;
+          return result;
+        }
+        result.steps = step;
+        continue;
+      }
       const std::vector<L2ToolCall>& calls =
           !action.calls.empty()
               ? action.calls
@@ -801,14 +926,67 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
         }
         tr = session.apply_tools(opts.workspace_root, calls);
       }
+      if ((tr.error == "post_pack_tool_pushback" || tr.error == "repeated_tool") &&
+          phase == "explore" && has_pack && !pack_incomplete &&
+          !ai_workflow_is_readonly(workflow)) {
+        emit("L2 ▸ tool loop tras pack → force phase=edit (" + tr.error + ")");
+        const auto promo = session.force_phase_edit(
+            opts.workspace_root,
+            "anti-loop: mismo get_code_of / extras tras pack cubierto; emite action=edit");
+        if (promo.ok && promo.phase == "edit") {
+          tr.phase = "edit";
+          phase = "edit";
+          recover_note =
+              "Pack cubierto. Emite un hunk Aider ahora (path + SEARCH/REPLACE).\n"
+              "PROHIBIDO JSON: ni plan, ni tool, ni sibling_of.\n"
+              "Empieza con un path del pack y la marca SEARCH de Aider.\n";
+        }
+      }
     } else if (action.kind == L2ActionKind::Plan) {
       emit("L2 ▸ plan targets=" + std::to_string(action.targets.size()) +
            (action.summary.empty() ? "" : (" — " + action.summary.substr(0, 80))));
       for (const auto& t : action.targets) {
         emit("  · " + t.substr(0, 100));
       }
+      if (phase == "edit" && has_pack && !pack_incomplete && !map_review &&
+          !ai_workflow_is_readonly(workflow)) {
+        emit("L2 ▸ plan ignorado en phase=edit — pide hunk Aider");
+        ++consecutive_invalid;
+        recover_note =
+            "Pack cubierto. Emite un hunk Aider ahora (path + SEARCH/REPLACE).\n"
+            "PROHIBIDO JSON: ni plan, ni tool, ni sibling_of.\n"
+            "Empieza con un path del pack y la marca SEARCH de Aider.\n";
+        if (consecutive_invalid >= 6) {
+          emit("L2 ▸ demasiados plan en phase=edit — cerrando en clarify");
+          const auto fin = session.mark_done(
+              opts.workspace_root,
+              "loop: phase=edit sin hunk; ¿reformulas el cambio?", "clarify");
+          result.ok = true;
+          result.phase = fin.phase.empty() ? "clarify" : fin.phase;
+          result.summary = fin.summary;
+          result.steps = step;
+          return result;
+        }
+        result.steps = step;
+        continue;
+      }
       tr = session.apply_plan(opts.workspace_root, action.targets, action.summary);
       emit(std::string("L2 ▸ pack ") + (tr.ok ? "OK" : "FAIL") + " — " + tr.summary.substr(0, 160));
+      if (tr.error == "repeated_plan_pushback" && phase == "explore" &&
+          !ai_workflow_is_readonly(workflow)) {
+        emit("L2 ▸ plan loop tras pack → force phase=edit (" + tr.error + ")");
+        const auto promo = session.force_phase_edit(
+            opts.workspace_root,
+            "anti-loop: plan repetido con pack cubierto; emite action=edit");
+        if (promo.ok && promo.phase == "edit") {
+          tr.phase = "edit";
+          phase = "edit";
+          recover_note =
+              "Pack cubierto. Emite un hunk Aider ahora (path + SEARCH/REPLACE).\n"
+              "PROHIBIDO JSON: ni plan, ni tool, ni sibling_of.\n"
+              "Empieza con un path del pack y la marca SEARCH de Aider.\n";
+        }
+      }
     } else if (action.kind == L2ActionKind::Done) {
       emit("L2 ▸ done next=" + (action.next.empty() ? "(none)" : action.next) + " — " +
            action.summary.substr(0, 120));
@@ -867,25 +1045,34 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
            " — " +
            (tr.ok ? tr.summary.substr(0, 160)
                   : (tr.error.empty() ? tr.summary : tr.error).substr(0, 200)));
+      if (!tr.ok && tr.phase == "compile") {
+        emit("L2 ▸ compile leftover tras edit → force phase=edit");
+        const auto promo = session.force_phase_edit(
+            opts.workspace_root, "compile rollback; reemite hunk Aider sobre el baseline");
+        if (promo.ok && promo.phase == "edit") {
+          tr.phase = "edit";
+          phase = "edit";
+        }
+      }
+      if (!tr.ok && l2_feat::enabled("EDIT_LEAN_PROMPT") &&
+          (tr.error.find("compile") != std::string::npos ||
+           tr.summary.find("compile") != std::string::npos ||
+           tr.summary.find("rollback") != std::string::npos)) {
+        recover_note =
+            "Compile FAIL. Reemite un hunk Aider sobre el baseline restaurado "
+            "(un path, SEARCH = span del pack / disco actual). No copies stderr entero.\n";
+      }
     } else {
-      emit("L2 ▸ acción inválida; reintentando. " + action.error);
+      emit("L2 ▸ acción no soportada; reintentando. " + action.error);
       result.steps = step;
       ++consecutive_invalid;
       consecutive_turn_errors = 0;
-      if (consecutive_invalid >= 6) {
-        emit("L2 ▸ demasiadas acciones inválidas seguidas — cerrando en clarify");
-        const auto fin = session.mark_done(
-            opts.workspace_root,
-            "loop: demasiadas respuestas JSON inválidas; ¿reformulas el cambio?", "clarify");
-        result.ok = true;
-        result.phase = fin.phase.empty() ? "clarify" : fin.phase;
-        result.summary = fin.summary;
-        result.steps = step;
-        return result;
-      }
       continue;
     }
     consecutive_invalid = 0;
+    if (tr.ok && recover_note.find("Pack cubierto") == std::string::npos) {
+      recover_note.clear();
+    }
     const auto action_ms = elapsed_ms(action_t0);
     const auto step_ms = elapsed_ms(step_t0);
 

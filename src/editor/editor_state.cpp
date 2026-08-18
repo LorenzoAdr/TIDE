@@ -20,6 +20,36 @@ void MultiCursor::normalized_range(int* start_line, int* start_col, int* end_lin
   *end_col = end.col;
 }
 
+bool cursor_selection_span_on_line(const MultiCursor& cursor, int line_index, int line_len,
+                                   int* start, int* end) {
+  if (start == nullptr || end == nullptr || !cursor.has_selection() || line_index < 0) {
+    return false;
+  }
+  int start_line = 0;
+  int start_col = 0;
+  int end_line = 0;
+  int end_col = 0;
+  cursor.normalized_range(&start_line, &start_col, &end_line, &end_col);
+  if (line_index < start_line || line_index > end_line) {
+    return false;
+  }
+  const int span_start = (line_index == start_line) ? start_col : 0;
+  const int span_end = (line_index == end_line) ? end_col : std::max(0, line_len);
+  if (span_end > span_start) {
+    *start = span_start;
+    *end = span_end;
+    return true;
+  }
+  // Empty (or otherwise zero-width) coverage that is still inside a multi-line
+  // selection. The exclusive endpoint at column 0 of `end_line` is skipped.
+  if (line_index < end_line) {
+    *start = span_start;
+    *end = span_end;
+    return true;
+  }
+  return false;
+}
+
 int EditorBuffer::primary_line() const {
   return cursors.empty() ? 0 : cursors.front().head.line;
 }

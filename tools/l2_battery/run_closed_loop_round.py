@@ -12,6 +12,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from kill_l2_runtime import kill_l2_runtime
+
 
 def seed_map(root: Path, prompt: str, map_seed_query: str | None) -> None:
     map_path = root / ".tuide/ai/map_last.md"
@@ -45,17 +47,9 @@ def restore_product(root: Path) -> None:
 
 
 def kill_harness() -> None:
-    subprocess.run(
-        ["pkill", "-9", "-f", "./build/l2_harness_cli run"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    subprocess.run(
-        ["pkill", "-9", "-f", "llama-cli.*qwen2.5-coder-7b"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    time.sleep(1)
+    # argv-exact: do not pkill -f './build/...' — that misses 'build/l2_harness_cli run'
+    # and can hit sandboxes whose cmdline merely *mentions* the binary.
+    kill_l2_runtime()
 
 
 def run_case(root: Path, cli: Path, case: dict, case_dir: Path, timeout: int) -> dict:
@@ -90,6 +84,7 @@ def run_case(root: Path, cli: Path, case: dict, case_dir: Path, timeout: int) ->
         encoding="utf-8",
         errors="replace",
         bufsize=1,
+        start_new_session=True,  # killpg covers llama-cli grandchild
     )
     timed_out = False
     lines: list[str] = []
@@ -99,19 +94,24 @@ def run_case(root: Path, cli: Path, case: dict, case_dir: Path, timeout: int) ->
 
     def _stop_proc(force: bool = False) -> None:
         if proc.poll() is not None:
+            kill_harness()
             return
-        if not force:
-            proc.send_signal(signal.SIGTERM)
+        sig = signal.SIGKILL if force else signal.SIGTERM
+        try:
+            os.killpg(proc.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            proc.wait(timeout=10 if not force else 5)
+        except subprocess.TimeoutExpired:
             try:
-                proc.wait(timeout=10)
-                return
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 pass
-        proc.kill()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            pass
         kill_harness()
 
     try:

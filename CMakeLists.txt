@@ -85,6 +85,7 @@ set(TUIDE_TREE_SITTER_SOURCES
   src/i18n/strings_es.cpp
   src/i18n/strings_en.cpp
   src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
 )
 
 function(tuide_link_tree_sitter target)
@@ -220,6 +221,7 @@ add_executable(tuide
   src/util/tabular_file.cpp
   src/util/virtual_text_file.cpp
   src/util/external_viewer.cpp
+  src/util/markdown_html.cpp
   src/search/workspace_search.cpp
   src/search/workspace_search_runner.cpp
   src/search/workspace_search_rg.cpp
@@ -335,6 +337,7 @@ add_executable(tuide
   src/ai/l2_brain_remote.cpp
   src/ai/l2_context_budget.cpp
   src/ai/level2_autonomous_loop.cpp
+  src/ai/l2_grammar.cpp
   src/ai/level2_debrief.cpp
   src/ai/ai_controller.cpp
   src/terminal/shell_session.cpp
@@ -642,6 +645,8 @@ add_executable(workspace_indexer_test
   src/indexer/workspace_indexer.cpp
   src/indexer/workspace_indexer_rg.cpp
   src/indexer/index_rules.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
   src/util/fuzzy_match.cpp
   src/util/monitor_log.cpp
   src/util/bundled_tools.cpp
@@ -651,15 +656,21 @@ add_executable(workspace_indexer_test
   src/toolpacks/packaged.cpp
   src/toolpacks/download.cpp
   src/util/child_process_guard.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(workspace_indexer_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
+tuide_link_pthread(workspace_indexer_test)
 
 add_executable(csv_index_test
   tests/csv_index_test.cpp
   src/indexer/index_rules.cpp
+  src/app/language_override.cpp
   src/util/csv_viewer.cpp
   src/editor/code_snippets.cpp
   src/lsp/lsp_uri.cpp
@@ -674,9 +685,11 @@ target_include_directories(csv_index_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 target_link_libraries(csv_index_test PRIVATE ftxui::dom)
+tuide_link_pthread(csv_index_test)
 
 add_executable(external_viewer_test
   tests/external_viewer_test.cpp
+  tests/markdown_html_stub.cpp
   src/util/external_viewer.cpp
   src/util/shell_utils.cpp
   src/util/monitor_log.cpp
@@ -712,6 +725,11 @@ add_executable(glyphs_test
 )
 target_include_directories(glyphs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+add_executable(file_tree_sticky_test
+  tests/file_tree_sticky_test.cpp
+)
+target_include_directories(file_tree_sticky_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 add_executable(ui_invalidation_policy_test
   tests/ui_invalidation_policy_test.cpp
 )
@@ -742,9 +760,15 @@ add_executable(doc_comment_test
   tests/doc_comment_test.cpp
   src/editor/doc_comment.cpp
   src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
   src/util/path_normalize.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(doc_comment_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+tuide_link_pthread(doc_comment_test)
 
 add_executable(nm_reader_test
   tests/nm_reader_test.cpp
@@ -831,6 +855,7 @@ add_executable(level2_autonomous_loop_test
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
   src/ai/level2_autonomous_loop.cpp
+  src/ai/l2_grammar.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
 )
@@ -891,6 +916,7 @@ add_executable(l2_harness_cli
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
   src/ai/level2_autonomous_loop.cpp
+  src/ai/l2_grammar.cpp
   src/ai/l2_brain_local.cpp
   src/ai/llama_backend.cpp
   src/ai/get_code_of.cpp
@@ -930,11 +956,13 @@ add_executable(repo_map_test
   src/ai/model_store.cpp
   src/ai/ai_trace.cpp
   src/ai/search_needles.cpp
+  src/ai/ai_path_scope.cpp
   src/git/git_command.cpp
   src/symbols/symbol_utils.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp
   src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
   src/i18n/locale.cpp
   src/i18n/tr.cpp
   src/i18n/strings_es.cpp
@@ -958,11 +986,13 @@ add_executable(get_code_of_test
   src/ai/model_store.cpp
   src/ai/ai_trace.cpp
   src/ai/search_needles.cpp
+  src/ai/ai_path_scope.cpp
   src/git/git_command.cpp
   src/symbols/symbol_utils.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp
   src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
   src/i18n/locale.cpp
   src/i18n/tr.cpp
   src/i18n/strings_es.cpp
@@ -999,6 +1029,11 @@ add_executable(stem_embed_battery
   src/parser/tree_sitter_symbols.cpp
   src/symbols/symbol_utils.cpp
   src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(stem_embed_battery PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -1018,12 +1053,14 @@ add_executable(stem_boost_battery
   src/ai/model_store.cpp
   src/ai/ai_trace.cpp
   src/ai/search_needles.cpp
+  src/ai/ai_path_scope.cpp
   src/indexer/index_rules.cpp
   src/parser/tree_sitter_tags.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp
   src/symbols/symbol_utils.cpp
   src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
   src/git/git_command.cpp
   src/i18n/locale.cpp
   src/i18n/tr.cpp
@@ -1057,6 +1094,7 @@ add_executable(lsp_completion_probe
   src/lsp/lsp_client.cpp
   src/lsp/lsp_transport.cpp
   src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
   src/lsp/lsp_position.cpp
   src/lsp/lsp_text_edits.cpp
   src/indexer/index_rules.cpp
@@ -1070,6 +1108,10 @@ add_executable(lsp_completion_probe
   src/util/monitor_log.cpp
   src/util/path_normalize.cpp
   src/util/clang_format_config.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(lsp_completion_probe PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -1079,6 +1121,7 @@ target_compile_definitions(lsp_completion_probe PRIVATE
   TUIDE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 target_link_libraries(lsp_completion_probe PRIVATE ftxui::dom)
+tuide_link_pthread(lsp_completion_probe)
 
 add_executable(toolpacks_test
   tests/toolpacks_test.cpp
@@ -1118,6 +1161,7 @@ set(TUIDE_TEST_TARGETS
   external_viewer_test
   tabular_file_test
   glyphs_test
+  file_tree_sticky_test
   ui_invalidation_policy_test
   compiler_location_test
   raw_pty_screen_test

@@ -261,12 +261,10 @@ def main() -> int:
         print("usage: l2_prompt_sweep.py start|resume|status", file=sys.stderr)
         return 2
 
-    subprocess.run(
-        ["pkill", "-9", "-f", "./build/l2_harness_cli run"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    time.sleep(1)
+    sys.path.insert(0, str(ROOT / "tools/l2_battery"))
+    from kill_l2_runtime import kill_l2_runtime
+
+    kill_l2_runtime()
     rebuild()
     if not CLI.exists():
         log("ERROR missing l2_harness_cli")

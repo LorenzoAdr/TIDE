@@ -1,5 +1,6 @@
 #include "ai/llama_backend.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -28,44 +29,98 @@ std::string shell_quote(const std::string& value) {
   return quoted;
 }
 
+std::size_t find_action_object_start(const std::string& raw, std::size_t from) {
+  std::size_t search = from;
+  while (search < raw.size()) {
+    const auto brace = raw.find('{', search);
+    if (brace == std::string::npos) {
+      return std::string::npos;
+    }
+    std::size_t i = brace + 1;
+    while (i < raw.size() &&
+           (raw[i] == ' ' || raw[i] == '\n' || raw[i] == '\r' || raw[i] == '\t')) {
+      ++i;
+    }
+    if (i + 8 <= raw.size() && raw.compare(i, 8, "\"action\"") == 0) {
+      return brace;
+    }
+    search = brace + 1;
+  }
+  return std::string::npos;
+}
+
+std::string scan_balanced_object(const std::string& raw, std::size_t start) {
+  int depth = 0;
+  bool in_string = false;
+  bool escape = false;
+  for (std::size_t i = start; i < raw.size(); ++i) {
+    const char c = raw[i];
+    if (in_string) {
+      if (escape) {
+        escape = false;
+      } else if (c == '\\') {
+        escape = true;
+      } else if (c == '"') {
+        in_string = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      in_string = true;
+      continue;
+    }
+    if (c == '{') {
+      ++depth;
+    } else if (c == '}') {
+      --depth;
+      if (depth == 0) {
+        return raw.substr(start, i - start + 1);
+      }
+    }
+  }
+  return {};
+}
+
 // Pull the assistant JSON (or last coherent block) out of noisy llama-cli stdout.
 std::string extract_model_text(const std::string& raw) {
+  const auto aider_mark = raw.find("<<<<<<< SEARCH");
+  if (aider_mark != std::string::npos) {
+    std::size_t begin = aider_mark;
+    std::size_t line_start = aider_mark;
+    while (line_start > 0 && raw[line_start - 1] != '\n') {
+      --line_start;
+    }
+    if (line_start > 0) {
+      std::size_t prev_end = line_start - 1;
+      std::size_t prev_start = prev_end;
+      while (prev_start > 0 && raw[prev_start - 1] != '\n') {
+        --prev_start;
+      }
+      const std::string prev = raw.substr(prev_start, prev_end - prev_start);
+      if (prev.find('/') != std::string::npos || prev.find('.') != std::string::npos) {
+        begin = prev_start;
+      }
+    }
+    auto end = raw.rfind(">>>>>>> REPLACE");
+    if (end == std::string::npos) {
+      end = raw.size();
+    } else {
+      end += std::string(">>>>>>> REPLACE").size();
+    }
+    return raw.substr(begin, end - begin);
+  }
+
   // Prefer the LAST JSON object that looks like an action (models echo the prompt).
   std::size_t search = 0;
   std::string best;
   while (search < raw.size()) {
-    const auto start = raw.find("{\"action\"", search);
+    const auto start = find_action_object_start(raw, search);
     if (start == std::string::npos) {
       break;
     }
-    int depth = 0;
-    bool in_string = false;
-    bool escape = false;
-    for (std::size_t i = start; i < raw.size(); ++i) {
-      const char c = raw[i];
-      if (in_string) {
-        if (escape) {
-          escape = false;
-        } else if (c == '\\') {
-          escape = true;
-        } else if (c == '"') {
-          in_string = false;
-        }
-        continue;
-      }
-      if (c == '"') {
-        in_string = true;
-        continue;
-      }
-      if (c == '{') {
-        ++depth;
-      } else if (c == '}') {
-        --depth;
-        if (depth == 0) {
-          best = raw.substr(start, i - start + 1);
-          break;
-        }
-      }
+    const std::string obj = scan_balanced_object(raw, start);
+    if (!obj.empty()) {
+      best = obj;
     }
     search = start + 1;
   }
@@ -75,33 +130,9 @@ std::string extract_model_text(const std::string& raw) {
 
   const auto start = raw.find('{');
   if (start != std::string::npos) {
-    int depth = 0;
-    bool in_string = false;
-    bool escape = false;
-    for (std::size_t i = start; i < raw.size(); ++i) {
-      const char c = raw[i];
-      if (in_string) {
-        if (escape) {
-          escape = false;
-        } else if (c == '\\') {
-          escape = true;
-        } else if (c == '"') {
-          in_string = false;
-        }
-        continue;
-      }
-      if (c == '"') {
-        in_string = true;
-        continue;
-      }
-      if (c == '{') {
-        ++depth;
-      } else if (c == '}') {
-        --depth;
-        if (depth == 0) {
-          return raw.substr(start, i - start + 1);
-        }
-      }
+    const std::string obj = scan_balanced_object(raw, start);
+    if (!obj.empty()) {
+      return obj;
     }
   }
 
@@ -259,6 +290,30 @@ LlamaCompletionResult LlamaBackend::complete(const LlamaCompletionRequest& req,
       fs::temp_directory_path() / ("tuide-l1-user-" + std::to_string(::getpid()) + ".txt");
   const fs::path err_path =
       fs::temp_directory_path() / ("tuide-l1-err-" + std::to_string(::getpid()) + ".txt");
+
+  const int n_ctx = req.n_ctx > 0 ? req.n_ctx : 2048;
+  int n_predict = req.max_tokens > 0 ? req.max_tokens : 512;
+  // Leave room to actually generate: llama-cli silently shrinks -n when prompt
+  // fills n_ctx, which yields empty / `"hunks":[` truncated JSON.
+  const int reserve = std::max(512, std::min(n_predict, 1024));
+  const std::size_t max_prompt_chars =
+      static_cast<std::size_t>(std::max(2048, (n_ctx - reserve) * 3));
+  std::string user_text = user.str();
+  if (req.system_prompt.size() + user_text.size() > max_prompt_chars) {
+    const std::size_t cap = max_prompt_chars > req.system_prompt.size() + 256
+                                ? max_prompt_chars - req.system_prompt.size()
+                                : 512;
+    if (user_text.size() > cap) {
+      user_text.resize(cap);
+      user_text += "\n…[user prompt recortado para dejar sitio a n_predict]…\n";
+    }
+  }
+  const int prompt_tok =
+      static_cast<int>((req.system_prompt.size() + user_text.size()) / 3 + 32);
+  if (prompt_tok + n_predict + 8 > n_ctx) {
+    n_predict = std::max(256, n_ctx - prompt_tok - 8);
+  }
+
   {
     std::ofstream sys_out(sys_path);
     std::ofstream user_out(user_path);
@@ -267,11 +322,8 @@ LlamaCompletionResult LlamaBackend::complete(const LlamaCompletionRequest& req,
       return result;
     }
     sys_out << req.system_prompt;
-    user_out << user.str();
+    user_out << user_text;
   }
-
-  const int n_ctx = req.n_ctx > 0 ? req.n_ctx : 2048;
-  const int n_predict = req.max_tokens > 0 ? req.max_tokens : 512;
 
   std::ostringstream cmd;
   if (!lib_dir_.empty()) {
@@ -292,7 +344,11 @@ LlamaCompletionResult LlamaBackend::complete(const LlamaCompletionRequest& req,
   cmd << shell_quote(cli_path_) << " -m " << shell_quote(model_path_) << " -sys \"$(cat "
       << shell_quote(sys_path.string()) << ")\" -p \"$(cat " << shell_quote(user_path.string())
       << ")\" -n " << n_predict << " -c " << n_ctx << " --temp " << req.temperature
-      << " --single-turn --simple-io --no-display-prompt 2>" << shell_quote(err_path.string());
+      << " --single-turn --simple-io --no-display-prompt";
+  if (!req.grammar_file.empty()) {
+    cmd << " --grammar-file " << shell_quote(req.grammar_file);
+  }
+  cmd << " 2>" << shell_quote(err_path.string());
 
   FILE* pipe = popen(cmd.str().c_str(), "r");
   if (pipe == nullptr) {
@@ -326,6 +382,24 @@ LlamaCompletionResult LlamaBackend::complete(const LlamaCompletionRequest& req,
       oss << err_in.rdbuf();
       err_text = oss.str();
     }
+  }
+
+  {
+    auto dump = [](const fs::path& path, const std::string& body) {
+      std::ofstream out(path, std::ios::binary | std::ios::trunc);
+      if (!out) {
+        return;
+      }
+      constexpr std::size_t kCap = 8000;
+      if (body.size() <= kCap) {
+        out << body;
+      } else {
+        out << body.substr(0, kCap / 2) << "\n…[truncated]…\n"
+            << body.substr(body.size() - kCap / 2);
+      }
+    };
+    dump("/tmp/tuide-llama-last.out", raw);
+    dump("/tmp/tuide-llama-last.err", err_text);
   }
 
   std::error_code ec;

@@ -71,9 +71,7 @@ PY
   echo "==== CASE $ID $(date -Iseconds) ====" | tee "$CASE_DIR/meta.txt"
   restore_product
   seed_map_query "$PROMPT"
-  pkill -9 -f './build/l2_harness_cli run' 2>/dev/null || true
-  pkill -9 -f 'llama-cli.*qwen2.5-coder-7b' 2>/dev/null || true
-  sleep 1
+  python3 "$ROOT/tools/l2_battery/kill_l2_runtime.py" >/dev/null
 
   "$CLI" bootstrap "$PROMPT" >"$CASE_DIR/bootstrap.txt" 2>&1 || {
     echo "{\"id\":\"$ID\",\"ok\":false,\"error\":\"bootstrap\"}" >>"$RESULTS"

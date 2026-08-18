@@ -1,3 +1,5 @@
 {
-  "POST_EDIT_COVERAGE": true
+  "POST_EDIT_COVERAGE": true,
+  "EDIT_LEAN_PROMPT": true,
+  "JSON_GRAMMAR": true
 }

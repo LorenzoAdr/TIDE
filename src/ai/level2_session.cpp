@@ -62,6 +62,24 @@ std::string trim_ws(std::string_view s) {
   return std::string(s);
 }
 
+std::string tool_call_key(const std::string& name, const std::string& arg) {
+  return name + "\t" + trim_ws(arg);
+}
+
+bool seen_tool_key(const std::vector<std::string>& keys, const std::string& key) {
+  return std::find(keys.begin(), keys.end(), key) != keys.end();
+}
+
+void remember_tool_key(std::vector<std::string>* keys, const std::string& key) {
+  if (keys == nullptr || key.empty() || seen_tool_key(*keys, key)) {
+    return;
+  }
+  keys->push_back(key);
+  if (keys->size() > 32) {
+    keys->erase(keys->begin());
+  }
+}
+
 // path from "path:Symbol" / "path:42" / "path:A-B" / "path:Sym#tail" / bare path.
 std::string path_from_plan_target(const std::string& target) {
   std::string t = trim_ws(target);
@@ -2730,6 +2748,129 @@ Edit / tras pack:
 )";
 }
 
+std::string Level2Session::tool_guide_edit_markdown() {
+  return R"(## Tool guide (edit)
+Hunks en texto plano (Aider). NO JSON con search/replace.
+src/foo.cpp
+<<<<<<< SEARCH
+bloque único del pack
+=======
+nuevo
+>>>>>>> REPLACE
+{"action":"done","summary":"cambios listos"}
+PROHIBIDO action=plan. Tras compile_fail: un hunk corto, SEARCH = span del pack.
+)";
+}
+
+std::string Level2Session::tool_guide_explore_markdown() {
+  return R"(## Tool guide (explore)
+JSON only. Primer paso:
+{"action":"plan","targets":["src/a.cpp:Foo","src/b.hpp:Bar"]}
+Tras pack: {"action":"done","summary":"localizado","next":"edit"} o action=edit.
+No repitas el mismo get_code_of. Refetch solo con path:A-B distinto.
+)";
+}
+
+std::string Level2Session::strip_unrelated_on_disk_excerpts(const std::string& obs) {
+  // Keep "## on disk `path`" only when this block is compile/edit feedback for that
+  // same path; drop sibling dumps that bloat the edit prompt.
+  std::string failed_path;
+  const auto path_mark = obs.find("path: `");
+  if (path_mark != std::string::npos) {
+    const auto start = path_mark + 7;
+    const auto end = obs.find('`', start);
+    if (end != std::string::npos) {
+      failed_path = obs.substr(start, end - start);
+    }
+  }
+  if (failed_path.empty()) {
+    const auto hunk_mark = obs.find("## old (hunk");
+    if (hunk_mark != std::string::npos) {
+      const auto tick = obs.find('`', hunk_mark);
+      if (tick != std::string::npos) {
+        const auto tick2 = obs.find('`', tick + 1);
+        if (tick2 != std::string::npos) {
+          failed_path = obs.substr(tick + 1, tick2 - tick - 1);
+        }
+      }
+    }
+  }
+
+  std::string out;
+  std::size_t pos = 0;
+  while (pos < obs.size()) {
+    const auto disk = obs.find("## on disk `", pos);
+    if (disk == std::string::npos) {
+      out.append(obs, pos, std::string::npos);
+      break;
+    }
+    out.append(obs, pos, disk - pos);
+    const auto path_b = disk + 12;
+    const auto path_e = obs.find('`', path_b);
+    std::string disk_path;
+    if (path_e != std::string::npos) {
+      disk_path = obs.substr(path_b, path_e - path_b);
+    }
+    auto next = obs.find("\n## ", path_e == std::string::npos ? disk + 1 : path_e + 1);
+    if (next == std::string::npos) {
+      next = obs.size();
+    }
+    const bool keep =
+        !failed_path.empty() && (disk_path == failed_path ||
+                                 disk_path.find(failed_path) != std::string::npos ||
+                                 failed_path.find(disk_path) != std::string::npos);
+    if (keep) {
+      out.append(obs, disk, next - disk);
+    }
+    pos = next;
+  }
+  return out;
+}
+
+std::string Level2Session::last_edit_relevant_observation(const std::string& session_md,
+                                                          std::size_t max_chars) {
+  const auto obs_pos = session_md.find("## Observations");
+  if (obs_pos == std::string::npos) {
+    return {};
+  }
+  const std::string obs = session_md.substr(obs_pos);
+  const char* kinds[] = {"compile_feedback", "edit_feedback", "edit_repeat_pushback",
+                         "json_invalid"};
+  std::size_t best = std::string::npos;
+  for (const char* k : kinds) {
+    const std::string needle = std::string(" — ") + k;
+    const auto p = obs.rfind(needle);
+    if (p == std::string::npos) {
+      continue;
+    }
+    const auto header = obs.rfind("### turn ", p);
+    if (header == std::string::npos || header > p) {
+      continue;
+    }
+    if (best == std::string::npos || header > best) {
+      best = header;
+    }
+  }
+  if (best == std::string::npos) {
+    return {};
+  }
+  auto end = obs.find("\n### turn ", best + 1);
+  if (end == std::string::npos) {
+    end = obs.size();
+  }
+  std::string block = obs.substr(best, end - best);
+  block = strip_unrelated_on_disk_excerpts(block);
+  if (max_chars > 0 && block.size() > max_chars) {
+    // Keep the header + head of the block (stderr/error), not a mid-string tail.
+    const auto nl = block.find('\n');
+    std::string head = nl == std::string::npos ? block : block.substr(0, nl + 1);
+    const std::size_t keep = max_chars > head.size() + 40 ? max_chars - 40 : max_chars / 2;
+    block = head + block.substr(nl == std::string::npos ? 0 : nl + 1, keep) +
+            "\n…[observation acotada; no copies este corte]\n";
+  }
+  return "## Observations\n\n" + block;
+}
+
 std::string Level2Session::read_file(const std::string& path) {
   std::ifstream in(path);
   if (!in) {
@@ -2782,6 +2923,13 @@ Level2Session::State Level2Session::load_state(const std::string& workspace_root
     st.plan_nudge_sent = j.value("plan_nudge_sent", false);
     st.post_pack_tool_count = j.value("post_pack_tool_count", 0);
     st.edit_nudge_sent = j.value("edit_nudge_sent", false);
+    if (j.contains("seen_tool_keys") && j["seen_tool_keys"].is_array()) {
+      for (const auto& t : j["seen_tool_keys"]) {
+        if (t.is_string()) {
+          st.seen_tool_keys.push_back(t.get<std::string>());
+        }
+      }
+    }
     st.edit_phase_tool_count = j.value("edit_phase_tool_count", 0);
     st.edit_phase_nudge_sent = j.value("edit_phase_nudge_sent", false);
     st.consecutive_complete_plans = j.value("consecutive_complete_plans", 0);
@@ -2851,6 +2999,7 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
                       {"plan_nudge_sent", st.plan_nudge_sent},
                       {"post_pack_tool_count", st.post_pack_tool_count},
                       {"edit_nudge_sent", st.edit_nudge_sent},
+                      {"seen_tool_keys", st.seen_tool_keys},
                       {"edit_phase_tool_count", st.edit_phase_tool_count},
                       {"edit_phase_nudge_sent", st.edit_phase_nudge_sent},
                       {"consecutive_complete_plans", st.consecutive_complete_plans},
@@ -3365,6 +3514,44 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
     return out;
   }
 
+  const std::string call_key = tool_call_key(name, arg);
+  const bool is_code_fetch = name == "get_code_of" || name == "read_file";
+  if (is_code_fetch && seen_tool_key(st.seen_tool_keys, call_key)) {
+    ++st.turn;
+    const bool pack_covered = st.has_pack && !st.pack_incomplete;
+    st.last_action = pack_covered ? "post_pack_tool_pushback" : "repeated_tool";
+    out.turn = st.turn;
+    std::ostringstream block;
+    block << "### turn " << st.turn << " — repeated_tool `" << name << "` `" << arg << "`\n\n";
+    block << "Rechazado: ya leíste `" << arg
+          << "`. No repitas el mismo get_code_of. ";
+    if (pack_covered) {
+      block << "Pack cubierto: emite `{\"action\":\"done\",\"summary\":\"…\",\"next\":\"edit\"}` "
+               "o **`action=edit`**. Si falta un hueco, usa un arg DISTINTO (`path:A-B`).\n\n";
+    } else {
+      block << "Usa un arg distinto (`path:A-B` / otro símbolo) o `action=plan`.\n\n";
+    }
+    std::string err;
+    append_observation(workspace_root, block.str(), &out.session_chars, &err);
+    if (pack_covered) {
+      st.post_pack_tool_count += 1;
+      st.edit_nudge_sent = true;
+    } else if (const std::string nudge = maybe_tool_nudge(st, 1); !nudge.empty()) {
+      append_observation(workspace_root, nudge, &out.session_chars, &err);
+    }
+    save_state(workspace_root, st, nullptr);
+    write_response_json(workspace_root, false, "tool", name, arg, block.str(), st.last_action,
+                        st.turn, st.phase);
+    append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
+                                     ",\"event\":\"repeated_tool\",\"turn\":" +
+                                     std::to_string(st.turn) + "}");
+    out.ok = true;
+    out.phase = st.phase;
+    out.summary = st.last_action;
+    out.error = st.last_action;
+    return out;
+  }
+
   const auto t0 = std::chrono::steady_clock::now();
   const AiToolResult tr = deps_.tools->invoke(name, arg);
   const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -3390,9 +3577,10 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
       tr.text.find("[truncated]") != std::string::npos ||
       obs_text.size() + 20 < tr.text.size()) {
     block << "note: [TRUNCATED] — usa `refetch` del resultado (`path:A-B` / "
-             "`path:Symbol#mid|#tail`); no inventes el cuerpo.\n";
+             "`path:Symbol#mid|#tail`); no inventes el cuerpo. No repitas el mismo arg.\n";
   }
   block << "```\n\n";
+  remember_tool_key(&st.seen_tool_keys, call_key);
 
   std::string err;
   if (!append_observation(workspace_root, block.str(), &out.session_chars, &err)) {
@@ -3535,6 +3723,26 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
       continue;
     }
 
+    const std::string call_key = tool_call_key(call.name, call.arg);
+    const bool is_code_fetch = call.name == "get_code_of" || call.name == "read_file";
+    if (is_code_fetch && seen_tool_key(st.seen_tool_keys, call_key)) {
+      ++st.turn;
+      batch_block << "### turn " << st.turn << " — repeated_tool `" << call.name << "` `"
+                  << call.arg << "`\n\n```\nya leíste este arg; no lo repitas. "
+                     "Emite edit / done next=edit o un path:A-B distinto.\n```\n\n";
+      ++fail_n;
+      if (st.has_pack && !st.pack_incomplete) {
+        st.last_action = "post_pack_tool_pushback";
+        out.error = "post_pack_tool_pushback";
+      } else {
+        st.last_action = "repeated_tool";
+        if (out.error.empty()) {
+          out.error = "repeated_tool";
+        }
+      }
+      continue;
+    }
+
     const auto t0 = std::chrono::steady_clock::now();
     const AiToolResult tr = deps_.tools->invoke(call.name, call.arg);
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -3570,6 +3778,7 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
 
     if (tr.ok) {
       ++ok_n;
+      remember_tool_key(&st.seen_tool_keys, call_key);
     } else {
       ++fail_n;
     }
@@ -4714,6 +4923,14 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
           << " `plan` seguidos con pack cubierto. Emite `done next=edit` o `edit` "
              "(no más `plan` sin tools/`get_code_of` nuevos).\n\n";
   }
+  const bool repeated_plan_pushback =
+      !st.pack_incomplete &&
+      st.consecutive_complete_plans >= Level2Session::kRepeatedPlanEditPushbackAfter &&
+      !ai_workflow_is_readonly(parse_ai_workflow_kind(st.workflow));
+  if (repeated_plan_pushback) {
+    block << "_pushback:_ " << st.consecutive_complete_plans
+          << " `plan` seguidos con pack cubierto. Runtime pasa a phase=edit.\n\n";
+  }
   if (!append_observation(workspace_root, block.str(), &out.session_chars, &err)) {
     out.error = err;
     return out;
@@ -4751,6 +4968,10 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   out.summary = "plan pack=" + std::to_string(pack_body.size()) + " targets=" +
                 std::to_string(uniq_targets.size()) +
                 (st.pack_incomplete ? " incomplete=1" : "");
+  if (repeated_plan_pushback) {
+    out.error = "repeated_plan_pushback";
+    out.summary += " repeated_plan_pushback";
+  }
   return out;
 }
 
@@ -5305,29 +5526,34 @@ Level2TurnResult Level2Session::run_compile(const std::string& workspace_root) {
 
   if (st.compile_attempt >= kMaxCompileAttempts) {
     st.pending.clear();
+    st.phase = "edit";
+    st.compile_attempt = 0;
+    st.map_review = false;
     st.last_action = "compile_fail_rollback";
-    // Bypass clarify_pushback: el runtime ya agotó reintentos de compile.
-    if (deps_.clarify_pushback_max > 0) {
-      st.clarify_pushback = deps_.clarify_pushback_max;
-    }
+    std::ostringstream extra;
+    extra << "### turn " << st.turn << " — compile_fail_rollback\n\n";
+    extra << "Agotados " << kMaxCompileAttempts
+          << " compiles. Baseline restaurado. Reemite un hunk Aider "
+             "(SEARCH = código actual en disco; no copies stderr entero).\n\n";
+    append_observation(workspace_root, extra.str(), &out.session_chars, &err);
     save_state(workspace_root, st, nullptr);
+    write_response_json(workspace_root, false, "compile", "", "", extra.str(),
+                        "compile rollback; re-edit", st.turn, "edit");
     append_trace(workspace_root, std::string("{\"ts\":") + now_ms_str() +
                                      ",\"event\":\"compile_fail\",\"exit\":" +
                                      std::to_string(exit_code) + ",\"attempt\":" +
-                                     std::to_string(st.compile_attempt) + ",\"ms\":" +
-                                     std::to_string(compile_ms) + ",\"rollback\":1,\"clarify\":1}");
+                                     std::to_string(kMaxCompileAttempts) + ",\"ms\":" +
+                                     std::to_string(compile_ms) +
+                                     ",\"rollback\":1,\"resume\":\"edit\"}");
     std::ostringstream summary;
-    summary << "FAIL compile x" << st.compile_attempt
-            << "; rollback al baseline pre-hunk. No pude dejar el árbol compilando — "
-               "¿reformulas o acotas el cambio?";
-    // Failure, not success: close as clarify so harness/UI don't treat this as done OK.
-    Level2TurnResult fin = mark_done(workspace_root, summary.str(), "clarify");
-    fin.ok = false;
-    fin.error = summary.str();
-    if (fin.summary.empty()) {
-      fin.summary = summary.str();
-    }
-    return fin;
+    summary << "FAIL compile x" << kMaxCompileAttempts
+            << "; rollback al baseline pre-hunk. Reemite edit sobre el baseline.";
+    out.ok = false;
+    out.phase = "edit";
+    out.summary = summary.str();
+    out.error = summary.str();
+    out.turn = st.turn;
+    return out;
   }
 
   st.pending.clear();
@@ -5525,8 +5751,8 @@ Level2TurnResult Level2Session::mark_done(const std::string& workspace_root,
   }
 
   if (next == "clarify" || next == "abort" || next == "need_info") {
-    if (st.phase != "explore" && st.phase != "edit") {
-      out.error = "next=clarify solo desde explore|edit";
+    if (st.phase != "explore" && st.phase != "edit" && st.phase != "compile") {
+      out.error = "next=clarify solo desde explore|edit|compile";
       return out;
     }
     if (l2_feat::enabled("CLARIFY_NEED_PATH")) {

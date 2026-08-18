@@ -311,9 +311,10 @@ def main() -> int:
         print("usage: l2_facet_sweep.py start|resume|status", file=sys.stderr)
         return 2
 
-    run(["pkill", "-9", "-f", "./build/l2_harness_cli run"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    run(["pkill", "-9", "-f", "llama-cli.*qwen2.5-coder-7b"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(1)
+    sys.path.insert(0, str(ROOT / "tools/l2_battery"))
+    from kill_l2_runtime import kill_l2_runtime
+
+    kill_l2_runtime()
     rebuild()
     if not CLI.exists():
         log("ERROR: l2_harness_cli missing")

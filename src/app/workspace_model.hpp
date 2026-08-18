@@ -71,6 +71,7 @@ struct WorkspaceModel {
   bool reload_active_tab_from_disk();
   // Record that we have seen disk mtime for path (e.g. after dismissing the conflict).
   void acknowledge_external_disk_mtime(const std::string& absolute_path, std::int64_t mtime_sec);
+  void preview_markdown_in_browser(const std::string& absolute_path);
 
  private:
   void refresh_git_diff_tabs_for_path(const std::string& absolute_path, GitService* git);
