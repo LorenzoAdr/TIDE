@@ -151,6 +151,15 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
     if (level2.contains("clarify_pushback_max") && level2["clarify_pushback_max"].is_number_integer()) {
       l2.clarify_pushback_max = level2["clarify_pushback_max"].get<int>();
     }
+    if (level2.contains("server_port") && level2["server_port"].is_number_integer()) {
+      l2.server_port = level2["server_port"].get<int>();
+    }
+    if (level2.contains("n_gpu_layers") && level2["n_gpu_layers"].is_number_integer()) {
+      l2.n_gpu_layers = level2["n_gpu_layers"].get<int>();
+    }
+    if (level2.contains("n_threads") && level2["n_threads"].is_number_integer()) {
+      l2.n_threads = level2["n_threads"].get<int>();
+    }
   } else if (doc.contains("level2_mode") && doc["level2_mode"].is_string()) {
     settings->level2_mode = doc["level2_mode"].get<std::string>();
   }
@@ -287,7 +296,10 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
         {"n_ctx_remote", settings.level2.n_ctx_remote},
         {"temperature", settings.level2.temperature},
         {"auto_download", settings.level2.auto_download},
-        {"clarify_pushback_max", settings.level2.clarify_pushback_max}}},
+        {"clarify_pushback_max", settings.level2.clarify_pushback_max},
+        {"server_port", settings.level2.server_port},
+        {"n_gpu_layers", settings.level2.n_gpu_layers},
+        {"n_threads", settings.level2.n_threads}}},
       {"models", {{"cache_dir", settings.models_cache_dir}}},
       {"trace",
        {{"enabled", settings.trace_enabled}, {"path", settings.trace_path}}},

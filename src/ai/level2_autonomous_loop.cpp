@@ -330,11 +330,20 @@ std::string read_session_for_pack(const std::string& workspace_root, std::size_t
     }
   }
 
+  const bool coverage_obs =
+      obs_tail.find("post_edit_coverage") != std::string::npos ||
+      obs_tail.find("edit_covered_path") != std::string::npos ||
+      obs_tail.find("covered_path_limit") != std::string::npos;
+
   std::string out = head;
   if (!out.empty() && out.back() != '\n') {
     out.push_back('\n');
   }
   out += "## Code pack\n\n";
+  if (coverage_obs) {
+    pack = "_(pack original omitido: SEARCH = bloque **fresh** de Observations. "
+           "La firma del path cubierto es referencia, no la edites.)_\n";
+  }
   const std::size_t reserved = out.size() + obs_tail.size() + 80;
   const std::size_t pack_budget = max_chars > reserved ? max_chars - reserved : max_chars / 2;
   if (pack.size() > pack_budget) {
@@ -432,7 +441,7 @@ std::string phase_banner(const std::string& phase, int step, int max_steps) {
 }
 
 std::string build_system_prompt(const Level2AutonomousLoopOpts& opts,
-                                const std::string& phase = {}) {
+                                const std::string& phase = {}, bool map_review = false) {
   const AiWorkflowKind workflow = parse_ai_workflow_kind(opts.workflow);
   const bool lean_edit = l2_feat::enabled("EDIT_LEAN_PROMPT") && phase == "edit" &&
                          !ai_workflow_is_readonly(workflow);
@@ -472,6 +481,10 @@ std::string build_system_prompt(const Level2AutonomousLoopOpts& opts,
            "{\"action\":\"synthesize\",\"summary\":\"qué cambió, impacto, riesgos\"}\n"
            "{\"action\":\"done\",\"summary\":\"…\",\"next\":\"clarify\"}\n"
            "Puedes synthesize directo si el Git context basta. PROHIBIDO edit/compile.\n";
+  } else if (lean_edit && map_review) {
+    out << "Eres el Nivel 2 (coder) de tuide. Instruction cubierta y compile OK.\n"
+           "Emite {\"action\":\"done\",\"summary\":\"…qué cambiaste…\"} sin next.\n"
+           "PROHIBIDO action=plan, action=tool y más hunks. Un edit extra cierra sin aplicar.\n";
   } else if (lean_edit) {
     out << "Eres el Nivel 2 (coder) de tuide en phase=edit.\n"
            "Emite hunks Search/Replace en texto plano (estilo Aider). "
@@ -600,15 +613,25 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
   }
 
   if (map_review && !readonly) {
-    out << "Compile OK. Aquí tienes el **mapa inicial completo** otra vez.\n"
-           "¿Algo más?\n"
-           "- Más código → {\"action\":\"plan\",\"targets\":[…]}\n"
-           "- Más edits → {\"action\":\"edit\",\"hunks\":[…]}\n"
-           "- Fin → {\"action\":\"done\",\"summary\":\"…\"} sin next.\n\n";
-    if (!opts.user_overlay_map_review.empty()) {
-      out << opts.user_overlay_map_review << "\n\n";
+    if (l2_feat::enabled("EDIT_LEAN_PROMPT")) {
+      out << "Instruction cubierta y compile OK.\n"
+             "Emite {\"action\":\"done\",\"summary\":\"…qué cambiaste…\"} sin next.\n"
+             "PROHIBIDO plan/tool JSON, mapa rankeado y hunks extra.\n\n";
+      if (!opts.user_overlay_map_review.empty()) {
+        out << opts.user_overlay_map_review << "\n\n";
+      }
+      out << read_session_for_pack(workspace_root, prompt_edit, obs_tail);
+    } else {
+      out << "Compile OK. Aquí tienes el **mapa inicial completo** otra vez.\n"
+             "¿Algo más?\n"
+             "- Más código → {\"action\":\"plan\",\"targets\":[…]}\n"
+             "- Más edits → {\"action\":\"edit\",\"hunks\":[…]}\n"
+             "- Fin → {\"action\":\"done\",\"summary\":\"…\"} sin next.\n\n";
+      if (!opts.user_overlay_map_review.empty()) {
+        out << opts.user_overlay_map_review << "\n\n";
+      }
+      out << read_session_for_map_review(workspace_root, prompt_edit);
     }
-    out << read_session_for_map_review(workspace_root, prompt_edit);
   } else if (has_pack) {
     if (phase == "edit" && !readonly) {
       out << "phase=edit. Opciones:\n"
@@ -643,11 +666,23 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
     }
     out << read_session_for_pack(workspace_root, prompt_edit, obs_tail);
   } else if (phase == "edit" && !readonly) {
-    out << "phase=edit (sin pack aún). Corrige con edit o arma plan/tools.\n\n";
-    if (!opts.user_overlay_edit.empty()) {
-      out << opts.user_overlay_edit << "\n\n";
+    if (l2_feat::enabled("EDIT_LEAN_PROMPT")) {
+      out << "phase=edit. Opciones:\n"
+             "- Prioridad: hunk Aider (path + SEARCH/REPLACE) con search = span fresco / pack.\n"
+             "- PROHIBIDO action=plan y action=tool.\n"
+             "- Instruction cubierta → {\"action\":\"done\",\"summary\":\"…\"} sin next.\n\n";
+      if (!opts.user_overlay_edit.empty()) {
+        out << opts.user_overlay_edit << "\n\n";
+      }
+      out << "Empieza la respuesta con un path y la marca SEARCH de Aider.\n\n";
+      out << read_session_for_pack(workspace_root, prompt_edit, obs_tail);
+    } else {
+      out << "phase=edit (sin pack aún). Corrige con edit o arma plan/tools.\n\n";
+      if (!opts.user_overlay_edit.empty()) {
+        out << opts.user_overlay_edit << "\n\n";
+      }
+      out << read_session_for_edit(Level2Session::session_path(workspace_root), prompt_edit);
     }
-    out << read_session_for_edit(Level2Session::session_path(workspace_root), prompt_edit);
   } else {
     if (workflow == AiWorkflowKind::Git) {
       out << "Prioriza ## Git context. Si basta para responder: "
@@ -807,7 +842,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
          ")…");
 
     L2BrainRequest breq;
-    breq.system_prompt = build_system_prompt(opts, phase);
+    breq.system_prompt = build_system_prompt(opts, phase, map_review);
     breq.user_prompt =
         build_user_prompt(opts.workspace_root, phase, step, has_pack, map_review, map_stale,
                           pack_incomplete, resume, workflow, budget, opts, recover_note);
@@ -852,12 +887,28 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
 
     Level2TurnResult tr;
     const auto action_t0 = clock::now();
+    const bool lean_closeout = l2_feat::enabled("EDIT_LEAN_PROMPT") && map_review &&
+                               !ai_workflow_is_readonly(workflow);
+    auto finish_auto_done = [&](const std::string& why) {
+      emit("L2 ▸ closeout auto-done — " + why);
+      const auto fin = session.mark_done(opts.workspace_root,
+                                         "Instruction cubierta; compile OK", "");
+      Level2AutonomousLoopResult r;
+      r.ok = true;
+      r.phase = fin.phase.empty() ? "done" : fin.phase;
+      r.summary = fin.summary.empty() ? why : fin.summary;
+      r.steps = step;
+      return r;
+    };
     if (action.kind == L2ActionKind::Error || action.kind == L2ActionKind::Unknown) {
       emit("L2 ▸ acción inválida; reintentando. " + action.error);
       emit("L2 ▸ dump /tmp/tuide-llama-last.out");
       result.steps = step;
       ++consecutive_invalid;
       consecutive_turn_errors = 0;
+      if (lean_closeout) {
+        return finish_auto_done("respuesta inválida tras Instruction cubierta");
+      }
       if (l2_feat::enabled("EDIT_LEAN_PROMPT")) {
         std::ostringstream rec;
         rec << "**JSON inválido** (intento " << consecutive_invalid
@@ -889,6 +940,9 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       continue;
     }
     if (action.kind == L2ActionKind::Tool || action.kind == L2ActionKind::Tools) {
+      if (lean_closeout) {
+        return finish_auto_done("tool tras Instruction cubierta");
+      }
       if (phase == "edit" && has_pack && !pack_incomplete && !map_review &&
           !ai_workflow_is_readonly(workflow)) {
         emit("L2 ▸ tool ignorado en phase=edit — pide hunk Aider");
@@ -948,6 +1002,9 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       for (const auto& t : action.targets) {
         emit("  · " + t.substr(0, 100));
       }
+      if (lean_closeout) {
+        return finish_auto_done("plan tras Instruction cubierta");
+      }
       if (phase == "edit" && has_pack && !pack_incomplete && !map_review &&
           !ai_workflow_is_readonly(workflow)) {
         emit("L2 ▸ plan ignorado en phase=edit — pide hunk Aider");
@@ -990,7 +1047,11 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     } else if (action.kind == L2ActionKind::Done) {
       emit("L2 ▸ done next=" + (action.next.empty() ? "(none)" : action.next) + " — " +
            action.summary.substr(0, 120));
-      tr = session.mark_done(opts.workspace_root, action.summary, action.next);
+      std::string next = action.next;
+      if (lean_closeout && (next == "clarify" || next == "abort" || next == "need_info")) {
+        next.clear();
+      }
+      tr = session.mark_done(opts.workspace_root, action.summary, next);
       if (tr.summary.find("clarify_pushback") != std::string::npos) {
         emit("L2 ▸ clarify prematuro → " + tr.summary + " (pide más código)");
       }
@@ -1014,6 +1075,9 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
         }
       }
     } else if (action.kind == L2ActionKind::Edit) {
+      if (lean_closeout) {
+        return finish_auto_done("edit extra tras Instruction cubierta");
+      }
       if (ai_workflow_is_readonly(workflow)) {
         emit("L2 ▸ edit rechazado (workflow=" + std::string(ai_workflow_kind_name(workflow)) +
              "); usa synthesize");
@@ -1072,6 +1136,23 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     consecutive_invalid = 0;
     if (tr.ok && recover_note.find("Pack cubierto") == std::string::npos) {
       recover_note.clear();
+    }
+    if (tr.ok && l2_feat::enabled("EDIT_LEAN_PROMPT") &&
+        (tr.summary.find("post_edit_coverage") != std::string::npos ||
+         tr.summary.find("edit_covered_path") != std::string::npos)) {
+      recover_note =
+          "Coverage incompleta: falta un path de Instruction (Observations / código fresco).\n"
+          "Emite UN hunk Aider de ESE path. SEARCH = líneas exactas del bloque **fresh** "
+          "(no de la firma).\n"
+          "Empieza con el path y la marca <<<<<<< SEARCH\n"
+          "PROHIBIDO JSON, plan, tool y done. No reemitas un path ya cubierto.\n";
+    }
+    if (tr.ok && l2_feat::enabled("EDIT_LEAN_PROMPT") &&
+        tr.summary.find("map_review") != std::string::npos) {
+      recover_note =
+          "Instruction cubierta. Emite {\"action\":\"done\",\"summary\":\"…qué cambiaste…\"} "
+          "sin next.\n"
+          "PROHIBIDO plan/tool/edit extra (un edit se ignora y se cierra).\n";
     }
     const auto action_ms = elapsed_ms(action_t0);
     const auto step_ms = elapsed_ms(step_t0);

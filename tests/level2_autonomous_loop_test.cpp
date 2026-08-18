@@ -465,6 +465,12 @@ ignore me
     expect(lean.find("shell_utils.hpp") != std::string::npos, "keeps failed path on disk");
     expect(lean.find("get_code_of") == std::string::npos, "drops explore tool turns");
     expect(lean.find("…[cola]…") == std::string::npos, "no byte-tail marker");
+    const std::string sess_cov = sess +
+                                 "\n### turn 6 — post_edit_coverage\n\n"
+                                 "### fresh `src/util/shell_utils.cpp`\n";
+    const std::string lean_cov = Level2Session::last_edit_relevant_observation(sess_cov, 1600);
+    expect(lean_cov.find("post_edit_coverage") != std::string::npos, "prefers latest coverage obs");
+    expect(lean_cov.find("compile_feedback") == std::string::npos, "coverage hides older compile");
     const std::string guide = Level2Session::tool_guide_edit_markdown();
     expect(guide.find("primera mirada") == std::string::npos &&
                guide.find("Ranked map") == std::string::npos,
@@ -543,6 +549,534 @@ ignore me
     expect(saw_recover, "user prompt contains JSON recover note");
     unsetenv("L2_FEAT_EDIT_LEAN_PROMPT");
     fs::remove_all(rootj, ec);
+  }
+
+  // After partial sibling edit, next prompt is Aider coverage — not ranked-map JSON.
+  {
+    setenv("L2_FEAT_EDIT_LEAN_PROMPT", "1", 1);
+    setenv("L2_FEAT_POST_EDIT_COVERAGE", "1", 1);
+    const fs::path rootc = fs::temp_directory_path() / "tuide_l2_coverage_recover_test";
+    fs::remove_all(rootc, ec);
+    fs::create_directories(rootc / ".tuide" / "ai", ec);
+    fs::create_directories(rootc / "src" / "util", ec);
+    {
+      std::ofstream map(rootc / ".tuide" / "ai" / "map_last.md");
+      map << "query: always_true\n";
+    }
+    {
+      std::ofstream hpp(rootc / "src" / "util" / "shell_utils.hpp");
+      hpp << "#pragma once\nnamespace tuide {\nbool command_exists(const std::string& c);\n}\n";
+    }
+    {
+      std::ofstream cpp(rootc / "src" / "util" / "shell_utils.cpp");
+      cpp << "#include \"util/shell_utils.hpp\"\nnamespace tuide {\n"
+             "bool command_exists(const std::string& c) { return !c.empty(); }\n}\n";
+    }
+    class CoverageBrain : public L2Brain {
+     public:
+      std::vector<std::string> users;
+      std::string name() const override { return "coverage"; }
+      bool ensure_ready(const tuide::AiSettings&, const std::function<void(const std::string&)>&,
+                        std::string*) override {
+        return true;
+      }
+      L2BrainResult propose(const L2BrainRequest& req, std::atomic<bool>*) override {
+        users.push_back(req.user_prompt);
+        L2BrainResult out;
+        out.ok = true;
+        out.backend = "coverage";
+        if (users.size() == 1) {
+          out.text =
+              "src/util/shell_utils.hpp\n<<<<<<< SEARCH\n"
+              "bool command_exists(const std::string& c);\n"
+              "=======\n"
+              "bool command_exists(const std::string& c);\nbool always_true();\n"
+              ">>>>>>> REPLACE\n";
+        } else {
+          out.text = R"({"action":"done","summary":"ok","next":"clarify"})";
+        }
+        return out;
+      }
+    };
+    ToolRegistry toolsc;
+    Level2SessionDeps depsc{&toolsc, {}, [](std::string* o) {
+      if (o) {
+        *o = "ok\n";
+      }
+      return 0;
+    }};
+    depsc.pack_incomplete_pushback_max = 0;
+    Level2Session sessionc(depsc);
+    Level2BootstrapOpts bc;
+    bc.workspace_root = rootc.string();
+    bc.query =
+        "Añade bool always_true(); en src/util/shell_utils.hpp y en src/util/shell_utils.cpp";
+    bc.instruction = "edit both";
+    expect(sessionc.bootstrap(bc, &err), "bootstrap coverage recover " + err);
+    expect(sessionc.mark_done(rootc.string(), "ready", "edit").ok, "to edit for coverage recover");
+    CoverageBrain brainc;
+    Level2AutonomousLoopOpts optsc;
+    optsc.workspace_root = rootc.string();
+    optsc.settings.max_steps = 4;
+    optsc.workflow = "agent";
+    const auto rcov = run_level2_autonomous(sessionc, brainc, optsc, nullptr, nullptr);
+    (void)rcov;
+    expect(brainc.users.size() >= 2, "second prompt after partial coverage edit");
+    bool saw_cov_note = false;
+    bool saw_map_json = false;
+    for (std::size_t i = 1; i < brainc.users.size(); ++i) {
+      if (brainc.users[i].find("Coverage incompleta") != std::string::npos) {
+        saw_cov_note = true;
+      }
+      if (brainc.users[i].find("mapa inicial completo") != std::string::npos) {
+        saw_map_json = true;
+      }
+    }
+    expect(saw_cov_note, "user prompt has Aider coverage recover note");
+    expect(!saw_map_json, "coverage follow-up is not ranked-map JSON");
+    unsetenv("L2_FEAT_EDIT_LEAN_PROMPT");
+    unsetenv("L2_FEAT_POST_EDIT_COVERAGE");
+    fs::remove_all(rootc, ec);
+  }
+
+  // After Instruction is covered, invalid JSON auto-dones (no ranked map, no clarify loop).
+  {
+    setenv("L2_FEAT_EDIT_LEAN_PROMPT", "1", 1);
+    setenv("L2_FEAT_POST_EDIT_COVERAGE", "1", 1);
+    const fs::path rootd = fs::temp_directory_path() / "tuide_l2_closeout_auto_done";
+    fs::remove_all(rootd, ec);
+    fs::create_directories(rootd / ".tuide" / "ai", ec);
+    fs::create_directories(rootd / "src" / "util", ec);
+    {
+      std::ofstream map(rootd / ".tuide" / "ai" / "map_last.md");
+      map << "query: always_true\n";
+    }
+    {
+      std::ofstream hpp(rootd / "src" / "util" / "shell_utils.hpp");
+      hpp << "#pragma once\nnamespace tuide {\nbool command_exists(const std::string& c);\n}\n";
+    }
+    {
+      std::ofstream cpp(rootd / "src" / "util" / "shell_utils.cpp");
+      cpp << "#include \"util/shell_utils.hpp\"\nnamespace tuide {\n"
+             "bool command_exists(const std::string& c) { return !c.empty(); }\n}\n";
+    }
+    class CloseoutBrain : public L2Brain {
+     public:
+      std::vector<std::string> users;
+      std::string name() const override { return "closeout"; }
+      bool ensure_ready(const tuide::AiSettings&, const std::function<void(const std::string&)>&,
+                        std::string*) override {
+        return true;
+      }
+      L2BrainResult propose(const L2BrainRequest& req, std::atomic<bool>*) override {
+        users.push_back(req.user_prompt);
+        L2BrainResult out;
+        out.ok = true;
+        out.backend = "closeout";
+        if (users.size() == 1) {
+          out.text =
+              "src/util/shell_utils.hpp\n<<<<<<< SEARCH\n"
+              "bool command_exists(const std::string& c);\n"
+              "=======\n"
+              "bool command_exists(const std::string& c);\nbool always_true();\n"
+              ">>>>>>> REPLACE\n";
+        } else if (users.size() == 2) {
+          out.text =
+              "src/util/shell_utils.cpp\n<<<<<<< SEARCH\n"
+              "bool command_exists(const std::string& c) { return !c.empty(); }\n"
+              "=======\n"
+              "bool command_exists(const std::string& c) { return !c.empty(); }\n"
+              "bool always_true() { return true; }\n"
+              ">>>>>>> REPLACE\n";
+        } else {
+          out.text = "listo, no hay JSON aqui";
+        }
+        return out;
+      }
+    };
+    ToolRegistry toolsd;
+    Level2SessionDeps depsd{&toolsd, {}, [](std::string* o) {
+      if (o) {
+        *o = "ok\n";
+      }
+      return 0;
+    }};
+    depsd.pack_incomplete_pushback_max = 0;
+    Level2Session sessiond(depsd);
+    Level2BootstrapOpts bd;
+    bd.workspace_root = rootd.string();
+    bd.query =
+        "Añade bool always_true(); en src/util/shell_utils.hpp y en src/util/shell_utils.cpp";
+    bd.instruction = "edit both";
+    expect(sessiond.bootstrap(bd, &err), "bootstrap closeout " + err);
+    expect(sessiond.mark_done(rootd.string(), "ready", "edit").ok, "to edit for closeout");
+    CloseoutBrain braind;
+    Level2AutonomousLoopOpts optsd;
+    optsd.workspace_root = rootd.string();
+    optsd.settings.max_steps = 6;
+    optsd.workflow = "agent";
+    std::vector<std::string> logd;
+    const auto rd = run_level2_autonomous(
+        sessiond, braind, optsd, [&](const std::string& line) { logd.push_back(line); }, nullptr);
+    expect(rd.ok, "closeout run ok");
+    expect(rd.phase == "done", "invalid JSON after coverage → done, got=" + rd.phase);
+    bool saw_closeout_prompt = false;
+    bool saw_map_on_closeout = false;
+    for (std::size_t i = 0; i < braind.users.size(); ++i) {
+      if (braind.users[i].find("Instruction cubierta") != std::string::npos) {
+        saw_closeout_prompt = true;
+      }
+      if (i + 1 == braind.users.size() &&
+          braind.users[i].find("mapa inicial completo") != std::string::npos) {
+        saw_map_on_closeout = true;
+      }
+    }
+    expect(saw_closeout_prompt, "closeout prompt prefers done");
+    expect(!saw_map_on_closeout, "closeout prompt has no ranked map");
+    bool saw_auto = false;
+    for (const auto& line : logd) {
+      if (line.find("closeout auto-done") != std::string::npos) {
+        saw_auto = true;
+        break;
+      }
+    }
+    expect(saw_auto, "log mentions closeout auto-done");
+    unsetenv("L2_FEAT_EDIT_LEAN_PROMPT");
+    unsetenv("L2_FEAT_POST_EDIT_COVERAGE");
+    fs::remove_all(rootd, ec);
+  }
+
+  // Extra edit after Instruction is covered → auto-done, tree kept (no duplicate decls).
+  {
+    setenv("L2_FEAT_EDIT_LEAN_PROMPT", "1", 1);
+    setenv("L2_FEAT_POST_EDIT_COVERAGE", "1", 1);
+    const fs::path roote = fs::temp_directory_path() / "tuide_l2_closeout_extra_edit";
+    fs::remove_all(roote, ec);
+    fs::create_directories(roote / ".tuide" / "ai", ec);
+    fs::create_directories(roote / "src" / "util", ec);
+    {
+      std::ofstream map(roote / ".tuide" / "ai" / "map_last.md");
+      map << "query: always_true\n";
+    }
+    {
+      std::ofstream hpp(roote / "src" / "util" / "shell_utils.hpp");
+      hpp << "#pragma once\nnamespace tuide {\nbool command_exists(const std::string& c);\n}\n";
+    }
+    {
+      std::ofstream cpp(roote / "src" / "util" / "shell_utils.cpp");
+      cpp << "#include \"util/shell_utils.hpp\"\nnamespace tuide {\n"
+             "bool command_exists(const std::string& c) { return !c.empty(); }\n}\n";
+    }
+    class ExtraEditBrain : public L2Brain {
+     public:
+      int n = 0;
+      std::string name() const override { return "extra-edit"; }
+      bool ensure_ready(const tuide::AiSettings&, const std::function<void(const std::string&)>&,
+                        std::string*) override {
+        return true;
+      }
+      L2BrainResult propose(const L2BrainRequest&, std::atomic<bool>*) override {
+        ++n;
+        L2BrainResult out;
+        out.ok = true;
+        out.backend = "extra-edit";
+        if (n == 1) {
+          out.text =
+              "src/util/shell_utils.hpp\n<<<<<<< SEARCH\n"
+              "bool command_exists(const std::string& c);\n"
+              "=======\n"
+              "bool command_exists(const std::string& c);\nbool always_true();\n"
+              ">>>>>>> REPLACE\n";
+        } else if (n == 2) {
+          out.text =
+              "src/util/shell_utils.cpp\n<<<<<<< SEARCH\n"
+              "bool command_exists(const std::string& c) { return !c.empty(); }\n"
+              "=======\n"
+              "bool command_exists(const std::string& c) { return !c.empty(); }\n"
+              "bool always_true() { return true; }\n"
+              ">>>>>>> REPLACE\n";
+        } else {
+          out.text =
+              "src/util/shell_utils.hpp\n<<<<<<< SEARCH\n"
+              "bool command_exists(const std::string& c);\nbool always_true();\n"
+              "=======\n"
+              "bool command_exists(const std::string& c);\nbool always_true();\n"
+              "bool always_true();\n"
+              ">>>>>>> REPLACE\n";
+        }
+        return out;
+      }
+    };
+    ToolRegistry toolse;
+    Level2SessionDeps depse{&toolse, {}, [](std::string* o) {
+      if (o) {
+        *o = "ok\n";
+      }
+      return 0;
+    }};
+    depse.pack_incomplete_pushback_max = 0;
+    Level2Session sessione(depse);
+    Level2BootstrapOpts be;
+    be.workspace_root = roote.string();
+    be.query =
+        "Añade bool always_true(); en src/util/shell_utils.hpp y en src/util/shell_utils.cpp";
+    be.instruction = "edit both";
+    expect(sessione.bootstrap(be, &err), "bootstrap extra-edit " + err);
+    expect(sessione.mark_done(roote.string(), "ready", "edit").ok, "to edit extra-edit");
+    ExtraEditBrain braine;
+    Level2AutonomousLoopOpts optse;
+    optse.workspace_root = roote.string();
+    optse.settings.max_steps = 8;
+    optse.workflow = "agent";
+    std::vector<std::string> loge;
+    const auto re = run_level2_autonomous(
+        sessione, braine, optse, [&](const std::string& line) { loge.push_back(line); }, nullptr);
+    expect(re.ok, "extra-edit closeout ok");
+    expect(re.phase == "done", "extra edit after coverage → done, got=" + re.phase);
+    bool saw_extra = false;
+    for (const auto& line : loge) {
+      if (line.find("edit extra tras Instruction cubierta") != std::string::npos) {
+        saw_extra = true;
+        break;
+      }
+    }
+    expect(saw_extra, "log mentions extra-edit auto-done");
+    {
+      std::ifstream in(roote / "src" / "util" / "shell_utils.hpp");
+      std::ostringstream ss;
+      ss << in.rdbuf();
+      const std::string hpp = ss.str();
+      int n = 0;
+      for (std::size_t p = 0; (p = hpp.find("always_true", p)) != std::string::npos; ++n) {
+        p += 11;
+      }
+      expect(n == 1, "hpp kept a single always_true, got " + std::to_string(n) + ": " + hpp);
+    }
+    {
+      std::ifstream in(roote / "src" / "util" / "shell_utils.cpp");
+      std::ostringstream ss;
+      ss << in.rdbuf();
+      expect(ss.str().find("return true") != std::string::npos, "cpp body kept");
+    }
+    expect(braine.n == 3, "third propose was the extra edit");
+    unsetenv("L2_FEAT_EDIT_LEAN_PROMPT");
+    unsetenv("L2_FEAT_POST_EDIT_COVERAGE");
+    fs::remove_all(roote, ec);
+  }
+
+  // Re-edit of a covered path is rejected while Instruction still has gaps.
+  {
+    setenv("L2_FEAT_EDIT_LEAN_PROMPT", "1", 1);
+    setenv("L2_FEAT_POST_EDIT_COVERAGE", "1", 1);
+    const fs::path rootg = fs::temp_directory_path() / "tuide_l2_covered_path_gap";
+    fs::remove_all(rootg, ec);
+    fs::create_directories(rootg / ".tuide" / "ai", ec);
+    fs::create_directories(rootg / "src" / "util", ec);
+    {
+      std::ofstream map(rootg / ".tuide" / "ai" / "map_last.md");
+      map << "query: always_true\n";
+    }
+    {
+      std::ofstream hpp(rootg / "src" / "util" / "shell_utils.hpp");
+      hpp << "#pragma once\nnamespace tuide {\nbool command_exists(const std::string& c);\n}\n";
+    }
+    {
+      std::ofstream cpp(rootg / "src" / "util" / "shell_utils.cpp");
+      cpp << "bool command_exists(const std::string& c) { return !c.empty(); }\n";
+    }
+    class GapBrain : public L2Brain {
+     public:
+      std::vector<std::string> users;
+      std::string name() const override { return "gap"; }
+      bool ensure_ready(const tuide::AiSettings&, const std::function<void(const std::string&)>&,
+                        std::string*) override {
+        return true;
+      }
+      L2BrainResult propose(const L2BrainRequest& req, std::atomic<bool>*) override {
+        users.push_back(req.user_prompt);
+        L2BrainResult out;
+        out.ok = true;
+        out.backend = "gap";
+        if (users.size() == 1) {
+          out.text =
+              "src/util/shell_utils.hpp\n<<<<<<< SEARCH\n"
+              "bool command_exists(const std::string& c);\n"
+              "=======\n"
+              "bool command_exists(const std::string& c);\nbool always_true();\n"
+              ">>>>>>> REPLACE\n";
+        } else if (users.size() == 2) {
+          out.text =
+              "src/util/shell_utils.hpp\n<<<<<<< SEARCH\n"
+              "bool command_exists(const std::string& c);\n"
+              "=======\n"
+              "bool command_exists(const std::string& c);\nbool always_true();\n"
+              ">>>>>>> REPLACE\n";
+        } else if (users.size() == 3) {
+          out.text =
+              "src/util/shell_utils.cpp\n<<<<<<< SEARCH\n"
+              "bool command_exists(const std::string& c) { return !c.empty(); }\n"
+              "=======\n"
+              "bool command_exists(const std::string& c) { return !c.empty(); }\n"
+              "bool always_true() { return true; }\n"
+              ">>>>>>> REPLACE\n";
+        } else {
+          out.text = R"({"action":"done","summary":"always_true en hpp y cpp"})";
+        }
+        return out;
+      }
+    };
+    ToolRegistry toolsg;
+    Level2SessionDeps depsg{&toolsg, {}, [](std::string* o) {
+      if (o) {
+        *o = "ok\n";
+      }
+      return 0;
+    }};
+    depsg.pack_incomplete_pushback_max = 0;
+    Level2Session sessiong(depsg);
+    Level2BootstrapOpts bg;
+    bg.workspace_root = rootg.string();
+    bg.query =
+        "Añade bool always_true(); en src/util/shell_utils.hpp y en src/util/shell_utils.cpp";
+    bg.instruction = "edit both";
+    expect(sessiong.bootstrap(bg, &err), "bootstrap covered-gap " + err);
+    expect(sessiong.mark_done(rootg.string(), "ready", "edit").ok, "to edit covered-gap");
+    GapBrain braing;
+    Level2AutonomousLoopOpts optsg;
+    optsg.workspace_root = rootg.string();
+    optsg.settings.max_steps = 6;
+    optsg.workflow = "agent";
+    std::vector<std::string> logg;
+    const auto rg = run_level2_autonomous(
+        sessiong, braing, optsg, [&](const std::string& line) { logg.push_back(line); }, nullptr);
+    (void)rg;
+    bool saw_covered = false;
+    for (const auto& line : logg) {
+      if (line.find("edit_covered_path") != std::string::npos) {
+        saw_covered = true;
+        break;
+      }
+    }
+    expect(saw_covered, "loop logs edit_covered_path");
+    {
+      std::ifstream in(rootg / "src" / "util" / "shell_utils.cpp");
+      std::ostringstream ss;
+      ss << in.rdbuf();
+      expect(ss.str().find("always_true") != std::string::npos,
+             "cpp edited after covered-path nudge");
+    }
+    expect(sessiong.status_text(rootg.string()).find("phase: clarify") == std::string::npos,
+           "did not clarify from hpp loop");
+    unsetenv("L2_FEAT_EDIT_LEAN_PROMPT");
+    unsetenv("L2_FEAT_POST_EDIT_COVERAGE");
+    fs::remove_all(rootg, ec);
+  }
+
+  // Covered-path loop hits the reject cap and stops without the cpp.
+  {
+    setenv("L2_FEAT_EDIT_LEAN_PROMPT", "1", 1);
+    setenv("L2_FEAT_POST_EDIT_COVERAGE", "1", 1);
+    const fs::path rootc = fs::temp_directory_path() / "tuide_l2_covered_path_cap";
+    fs::remove_all(rootc, ec);
+    fs::create_directories(rootc / ".tuide" / "ai", ec);
+    fs::create_directories(rootc / "src" / "util", ec);
+    {
+      std::ofstream map(rootc / ".tuide" / "ai" / "map_last.md");
+      map << "query: always_true\n";
+    }
+    {
+      std::ofstream hpp(rootc / "src" / "util" / "shell_utils.hpp");
+      hpp << "#pragma once\nnamespace tuide {\nbool command_exists(const std::string& c);\n}\n";
+    }
+    {
+      std::ofstream cpp(rootc / "src" / "util" / "shell_utils.cpp");
+      cpp << "bool command_exists(const std::string& c) { return !c.empty(); }\n";
+    }
+    class StubbornHppBrain : public L2Brain {
+     public:
+      int n = 0;
+      std::vector<std::string> users;
+      std::string name() const override { return "stubborn"; }
+      bool ensure_ready(const tuide::AiSettings&, const std::function<void(const std::string&)>&,
+                        std::string*) override {
+        return true;
+      }
+      L2BrainResult propose(const L2BrainRequest& req, std::atomic<bool>*) override {
+        ++n;
+        users.push_back(req.user_prompt);
+        L2BrainResult out;
+        out.ok = true;
+        out.backend = "stubborn";
+        if (n == 1) {
+          out.text =
+              "src/util/shell_utils.hpp\n<<<<<<< SEARCH\n"
+              "bool command_exists(const std::string& c);\n"
+              "=======\n"
+              "bool command_exists(const std::string& c);\nbool always_true();\n"
+              ">>>>>>> REPLACE\n";
+        } else {
+          out.text =
+              "src/util/shell_utils.hpp\n<<<<<<< SEARCH\n"
+              "bool command_exists(const std::string& c);\nbool always_true();\n"
+              "=======\n"
+              "bool command_exists(const std::string& c);\nbool always_true();\n"
+              ">>>>>>> REPLACE\n";
+        }
+        return out;
+      }
+    };
+    ToolRegistry toolsc;
+    Level2SessionDeps depsc{&toolsc, {}, [](std::string* o) {
+      if (o) {
+        *o = "ok\n";
+      }
+      return 0;
+    }};
+    depsc.pack_incomplete_pushback_max = 0;
+    Level2Session sessionc(depsc);
+    Level2BootstrapOpts bc;
+    bc.workspace_root = rootc.string();
+    bc.query =
+        "Añade bool always_true(); en src/util/shell_utils.hpp y en src/util/shell_utils.cpp";
+    bc.instruction = "edit both";
+    expect(sessionc.bootstrap(bc, &err), "bootstrap covered-cap " + err);
+    expect(sessionc.mark_done(rootc.string(), "ready", "edit").ok, "to edit covered-cap");
+    StubbornHppBrain brainc;
+    Level2AutonomousLoopOpts optsc;
+    optsc.workspace_root = rootc.string();
+    optsc.settings.max_steps = 12;
+    optsc.workflow = "agent";
+    std::vector<std::string> logc;
+    const auto rc = run_level2_autonomous(
+        sessionc, brainc, optsc, [&](const std::string& line) { logc.push_back(line); }, nullptr);
+    expect(rc.phase == "done", "cap ends in done not timeout");
+    expect(rc.summary.find("covered_path_limit") != std::string::npos,
+           "loop summary is covered_path_limit: " + rc.summary);
+    {
+      std::ifstream in(rootc / "src" / "util" / "shell_utils.cpp");
+      std::ostringstream ss;
+      ss << in.rdbuf();
+      expect(ss.str().find("always_true") == std::string::npos, "cpp not edited after cap");
+    }
+    {
+      std::ifstream in(rootc / "src" / "util" / "shell_utils.hpp");
+      std::ostringstream ss;
+      ss << in.rdbuf();
+      expect(ss.str().find("always_true") != std::string::npos, "hpp kept after cap");
+    }
+    expect(brainc.users.size() >= 2, "coverage turn was proposed");
+    if (brainc.users.size() >= 2) {
+      const std::string& u = brainc.users[1];
+      expect(u.find("pack original omitido") != std::string::npos, "omits frozen pack on coverage");
+      const auto fresh = u.find("### fresh `src/util/shell_utils.cpp`");
+      const auto firma = u.find("firma (referencia, NO edites) `src/util/shell_utils.hpp`");
+      expect(fresh != std::string::npos, "prompt has cpp fresh");
+      expect(firma != std::string::npos, "prompt has hpp firma");
+      expect(fresh < firma, "cpp before hpp firma in prompt");
+    }
+    unsetenv("L2_FEAT_EDIT_LEAN_PROMPT");
+    unsetenv("L2_FEAT_POST_EDIT_COVERAGE");
+    fs::remove_all(rootc, ec);
   }
 
   {

@@ -912,6 +912,16 @@ target_include_directories(search_replace_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(llama_backend_test
+  tests/llama_backend_test.cpp
+  src/ai/llama_backend.cpp
+  src/ai/model_store.cpp
+)
+target_include_directories(llama_backend_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
 add_executable(l2_harness_cli
   tools/l2_harness_cli.cpp
   tests/tool_registry_stub.cpp
@@ -1185,6 +1195,7 @@ set(TUIDE_TEST_TARGETS
   l2_context_budget_test
   l2_action_test
   search_replace_test
+  llama_backend_test
   repo_map_test
   get_code_of_test
   stem_passage_test

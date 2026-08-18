@@ -43,8 +43,12 @@ def _should_kill(args: str) -> bool:
         return True
     if base == "llama-cli" and "qwen2.5-coder-7b" in args:
         return True
+    if base == "llama-server" and "qwen2.5-coder-7b" in args:
+        return True
     # popen wrapper: sh -c -- LD_LIBRARY_PATH=... llama-cli ... qwen2.5-coder-7b ...
     if base in ("sh", "bash") and "llama-cli" in args and "qwen2.5-coder-7b" in args:
+        return True
+    if base in ("sh", "bash") and "llama-server" in args and "qwen2.5-coder-7b" in args:
         return True
     return False
 

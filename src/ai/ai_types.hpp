@@ -158,7 +158,7 @@ struct AiLevel1Settings {
   bool auto_download = false;
 };
 
-// Fase E — coder L2 (local GGUF via llama-cli, or OpenAI-compatible remote).
+// Fase E — coder L2 (local GGUF via llama-server, or OpenAI-compatible remote).
 struct AiLevel2Settings {
   // dry_run | harness | local | remote  (mirrors AiSettings::level2_mode; kept in sync on load)
   std::string model_id = "qwen2.5-coder-7b-instruct-q4_k_m";
@@ -177,6 +177,12 @@ struct AiLevel2Settings {
   bool auto_download = false;
   // Reject premature clarify this many times (force more get_code_of/tools) before accepting.
   int clarify_pushback_max = 3;
+  // Local llama-server (127.0.0.1). Distinct from L0 embeddings (18765).
+  int server_port = 18766;
+  // -1 = auto (99 if CUDA/Vulkan/HIP next to llama-server, else 0).
+  int n_gpu_layers = -1;
+  // 0 = auto (hardware_concurrency).
+  int n_threads = 0;
 };
 
 struct AiSettings {

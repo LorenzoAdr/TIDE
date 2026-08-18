@@ -65,6 +65,18 @@ bool LocalL2Brain::ensure_ready(const AiSettings& settings,
     return false;
   }
   backend_->set_model_path(model);
+  std::string server_err;
+  if (backend_->ensure_completion_server(settings, on_progress, &server_err)) {
+    if (on_progress) {
+      on_progress("L2 local ready: " + model + " via llama-server :" +
+                  std::to_string(backend_->completion_server_port()));
+    }
+    return true;
+  }
+  if (on_progress) {
+    on_progress("L2 local: llama-server no disponible (" + server_err +
+                "); llama-cli por turno");
+  }
   if (on_progress) {
     on_progress("L2 local ready: " + model);
   }

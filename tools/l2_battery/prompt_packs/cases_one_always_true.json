@@ -1,0 +1,18 @@
+[
+  {
+    "id": "sibling_always_true",
+    "prompt": "Añade bool always_true(); en src/util/shell_utils.hpp junto a command_exists y bool always_true() { return true; } en src/util/shell_utils.cpp. Ambos archivos obligatorios.",
+    "expect": {
+      "paths_touched": [
+        "src/util/shell_utils.hpp",
+        "src/util/shell_utils.cpp"
+      ],
+      "diff_must_contain": [
+        "always_true",
+        "return true"
+      ],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  }
+]

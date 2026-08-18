@@ -79,6 +79,8 @@ class Level2Session {
   static constexpr int kRepeatedPlanEditNudgeAfter = 2;
   // Hard pivot: N covering plans in a row → loop force_phase_edit (modelo no emite done/edit).
   static constexpr int kRepeatedPlanEditPushbackAfter = 2;
+  // Re-edits of an already-covered Instruction path while gaps remain, then stop.
+  static constexpr int kMaxCoveredPathRejects = 3;
   // Identical failed edit fingerprint repeats before forcing clarify.
   static constexpr int kMaxIdenticalEditRepeats = 2;
   // Total edit apply failures (any cause) before forcing clarify.
@@ -228,6 +230,7 @@ class Level2Session {
     // Concat of applied new_text (for Instruction marker coverage); capped.
     std::string applied_blob;
     int coverage_gate_pushback = 0;  // done/compile coverage rejects this session
+    int covered_path_rejects = 0;    // consecutive edit_covered_path while gaps remain
     std::vector<PendingHunk> pending;
   };
 

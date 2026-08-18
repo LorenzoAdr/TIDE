@@ -1187,7 +1187,9 @@ void AiController::show_model_status() {
     append("n_ctx_remote=" + std::to_string(settings_.level2.n_ctx_remote));
   }
   append("max_steps=" + std::to_string(settings_.level2.max_steps) +
-         " n_ctx=" + std::to_string(settings_.level2.n_ctx));
+         " n_ctx=" + std::to_string(settings_.level2.n_ctx) +
+         " server_port=" + std::to_string(settings_.level2.server_port));
+  append(l2_backend_.status_text());
 }
 
 void AiController::download_models(const std::string& what) {
@@ -1792,7 +1794,7 @@ void AiController::run_level2_autonomous_inline(const std::string& reason) {
     }
   }
 
-  auto brain = make_l2_brain(mode, nullptr);
+  auto brain = make_l2_brain(mode, mode == "local" ? &l2_backend_ : nullptr);
   if (!brain) {
     append("L2: no se pudo crear brain para mode=" + mode);
     return;

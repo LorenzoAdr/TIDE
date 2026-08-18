@@ -154,6 +154,7 @@ class AiController {
   ToolRegistry tools_;
   TaskRunner tasks_;
   LlamaBackend backend_;
+  LlamaBackend l2_backend_;
   EmbeddingBackend embed_backend_;
   Level0IntentIndex intent_index_;
   CodingStemEmbedIndex coding_stem_index_;
