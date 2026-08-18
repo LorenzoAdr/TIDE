@@ -65,6 +65,8 @@ int main() {
   expect_eq(tuide::file_glyph_display("README.md"), "md", "markdown ascii");
   expect_eq(tuide::folder_glyph(false), ">", "folder closed ascii");
   expect_eq(tuide::folder_glyph(true), "v", "folder open ascii");
+  expect_eq(tuide::twistie_glyph(false), "▸", "twistie collapsed");
+  expect_eq(tuide::twistie_glyph(true), "▾", "twistie expanded");
   expect_eq(tuide::strip_symbol_kind_prefix("M foo::bar"), "foo::bar", "strip method prefix");
   expect_eq(tuide::strip_symbol_kind_prefix("plain"), "plain", "strip no prefix");
   expect(!tuide::glyphs_use_nerd(), "never mode disables nerd");

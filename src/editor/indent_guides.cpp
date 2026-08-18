@@ -195,6 +195,19 @@ IndentGuideSplit split_indent_guide_prefix(const std::string& view_line, int tab
   return split;
 }
 
+std::string tree_indent_guide_prefix(int depth) {
+  if (depth <= 0) {
+    return {};
+  }
+  std::string out;
+  out.reserve(static_cast<std::size_t>(depth) * (kGuideGlyph.size() + kGuideSpace.size()));
+  for (int i = 0; i < depth; ++i) {
+    out.append(kGuideGlyph);
+    out.append(kGuideSpace);
+  }
+  return out;
+}
+
 std::string build_blank_line_guides(int tab_size, int guide_depth, int max_width) {
   if (guide_depth <= 0 || tab_size <= 0) {
     return {};

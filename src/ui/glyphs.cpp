@@ -284,4 +284,6 @@ std::string folder_glyph(bool expanded) {
   return expanded ? "v" : ">";
 }
 
+std::string twistie_glyph(bool expanded) { return expanded ? "▾" : "▸"; }
+
 }  // namespace tuide

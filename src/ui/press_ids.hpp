@@ -114,6 +114,7 @@ constexpr std::string_view kExplorerScrollbar = "scrollbar.explorer";
 constexpr std::string_view kSourceScrollbar = "scrollbar.source";
 constexpr std::string_view kTerminalScrollbar = "scrollbar.terminal";
 constexpr std::string_view kSearchScrollbar = "scrollbar.search";
+constexpr std::string_view kSearchCollapseAll = "search.collapse_all";
 constexpr std::string_view kTerminalLink = "terminal.link";
 constexpr std::string_view kAiResultLink = "ai.result.link";
 
@@ -123,6 +124,10 @@ inline std::string explorer_row(int index) {
 
 inline std::string outline_row(int index) {
   return "outline.row." + std::to_string(index);
+}
+
+inline std::string search_row(int index) {
+  return "search.row." + std::to_string(index);
 }
 
 inline std::string core_analyzer_instance(int index) {
@@ -253,6 +258,10 @@ inline bool is_explorer_hover(std::string_view id) {
 
 inline bool is_outline_hover(std::string_view id) {
   return id.rfind("outline.row.", 0) == 0;
+}
+
+inline bool is_search_hover(std::string_view id) {
+  return id == kSearchCollapseAll || id.rfind("search.row.", 0) == 0;
 }
 
 inline bool is_context_menu_hover(std::string_view id) {

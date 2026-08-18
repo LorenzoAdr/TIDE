@@ -730,6 +730,11 @@ add_executable(file_tree_sticky_test
 )
 target_include_directories(file_tree_sticky_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+add_executable(search_result_tree_test
+  tests/search_result_tree_test.cpp
+)
+target_include_directories(search_result_tree_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 add_executable(ui_invalidation_policy_test
   tests/ui_invalidation_policy_test.cpp
 )
@@ -1162,6 +1167,7 @@ set(TUIDE_TEST_TARGETS
   tabular_file_test
   glyphs_test
   file_tree_sticky_test
+  search_result_tree_test
   ui_invalidation_policy_test
   compiler_location_test
   raw_pty_screen_test
