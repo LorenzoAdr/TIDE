@@ -5047,7 +5047,7 @@ bool handle_completion_keys(CompletionState* completion, WorkspaceModel* workspa
     return accept_completion(completion, buffer, layout_state, visible_lines, workspace, panel,
                            symbols);
   }
-  if (event == Event::Tab) {
+  if (event_is_plain_tab(event)) {
     completion->selected = std::min(completion->selected + 1,
                                     static_cast<int>(completion->matches.size()) - 1);
     return true;
@@ -5327,21 +5327,8 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (completion != nullptr && completion->open) {
-    // Tab while filling snippet args: accept the suggestion (if any) then advance.
-    if (event == Event::Tab && panel != nullptr &&
-        snippet_session_active(panel->snippet_session)) {
-      if (!completion->matches.empty()) {
-        accept_completion(completion, buffer, layout_state, visible_lines, workspace, panel,
-                          symbols);
-      } else {
-        completion->close(layout_state);
-      }
-      if (snippet_session_active(panel->snippet_session) &&
-          advance_snippet_session(buffer, &panel->snippet_session)) {
-        ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-      }
-      return true;
-    }
+    // Tab cycles suggestions; Enter accepts. After the popup closes, Tab
+    // advances snippet argument placeholders (handled below).
     if (handle_completion_keys(completion, workspace, symbols, symbol_indexer, layout_state, panel,
                                buffer, event, visible_lines)) {
       return true;

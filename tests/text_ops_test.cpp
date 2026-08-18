@@ -10,6 +10,7 @@
 #include "editor/text_ops.hpp"
 #include "symbols/completion_snippet.hpp"
 #include "editor/text_search.hpp"
+#include "ui/query_edit.hpp"
 
 namespace {
 
@@ -305,9 +306,74 @@ void test_selection_span_full_indented_line() {
         "span includes leading tabs");
 }
 
+void test_auto_pair_only_at_eol() {
+  {
+    auto buffer = make_buffer({"foo"});
+    buffer.reset_to_single_cursor(0, 3);
+    tuide::insert_char(&buffer, '(');
+    check(buffer.lines[0] == "foo()", "opener at EOL inserts matching closer");
+    check(buffer.primary_col() == 4, "cursor sits between the pair");
+  }
+  {
+    auto buffer = make_buffer({"foobar"});
+    buffer.reset_to_single_cursor(0, 3);
+    tuide::insert_char(&buffer, '(');
+    check(buffer.lines[0] == "foo(bar", "opener mid-line does not insert closer");
+    check(buffer.primary_col() == 4, "cursor after opener");
+  }
+  {
+    auto buffer = make_buffer({"x = y;"});
+    buffer.reset_to_single_cursor(0, 4);
+    tuide::insert_char(&buffer, '{');
+    check(buffer.lines[0] == "x = {y;", "brace mid-line does not insert closer");
+  }
+  {
+    auto buffer = make_buffer({""});
+    buffer.reset_to_single_cursor(0, 0);
+    tuide::insert_char(&buffer, '[');
+    check(buffer.lines[0] == "[]", "opener on empty line inserts closer");
+    check(buffer.primary_col() == 1, "cursor between empty pair");
+  }
+}
+
+void test_auto_pair_skip_existing_closer() {
+  auto buffer = make_buffer({"()"});
+  buffer.reset_to_single_cursor(0, 1);
+  tuide::insert_char(&buffer, ')');
+  check(buffer.lines[0] == "()", "typing closer over matching char does not duplicate");
+  check(buffer.primary_col() == 2, "cursor advances over existing closer");
+}
+
+void test_auto_pair_wraps_selection() {
+  auto buffer = make_buffer({"hello"});
+  buffer.primary().anchor = {0, 0};
+  buffer.primary().head = {0, 5};
+  tuide::insert_char(&buffer, '(');
+  check(buffer.lines[0] == "(hello)", "opener wraps the current selection");
+  check(buffer.primary_col() == 7, "cursor after wrapped pair");
+}
+
+void test_query_edit_helpers() {
+  check(tuide::sanitize_single_line_paste("foo\nbar") == "foo", "paste keeps first line only");
+  check(tuide::sanitize_single_line_paste("a\tb") == "a b", "paste turns tab into space");
+
+  std::string query = "src/ui/file_picker";
+  tuide::delete_query_word_backward(&query);
+  check(query == "src/ui/", "ctrl+w deletes last identifier");
+  tuide::delete_query_word_backward(&query);
+  check(query == "src/", "ctrl+w then deletes slash plus previous ident");
+  query = "file_picker";
+  tuide::delete_query_word_backward(&query);
+  check(query.empty(), "ctrl+w on a single token clears the query");
+}
+
 }  // namespace
 
 int main() {
+  test_auto_pair_only_at_eol();
+  test_auto_pair_skip_existing_closer();
+  test_auto_pair_wraps_selection();
+  test_query_edit_helpers();
   test_insert_multi_cursor();
   test_find_all_matches();
   test_select_all_matches();

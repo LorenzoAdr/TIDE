@@ -6,6 +6,9 @@
 #include <memory>
 #include <unordered_set>
 
+#include "editor/clipboard.hpp"
+#include "ui/query_edit.hpp"
+
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
@@ -396,6 +399,27 @@ Component MakeSymbolPickerOverlay(Component main, WorkspaceModel* workspace,
         if (event == Event::Backspace) {
           if (!state->query.empty()) {
             state->query.pop_back();
+            state->selected = 0;
+            state->mark_matches_dirty();
+            state->schedule_search();
+            state->update_preview_for_selection(workspace->root);
+          }
+          return true;
+        }
+        if (event_is_ctrl_v(event) || event == Event::Insert) {
+          const std::string pasted = sanitize_single_line_paste(read_clipboard_for_paste());
+          if (!pasted.empty()) {
+            state->query += pasted;
+            state->selected = 0;
+            state->mark_matches_dirty();
+            state->schedule_search();
+            state->update_preview_for_selection(workspace->root);
+          }
+          return true;
+        }
+        if (event_is_ctrl_backspace(event)) {
+          if (!state->query.empty()) {
+            delete_query_word_backward(&state->query);
             state->selected = 0;
             state->mark_matches_dirty();
             state->schedule_search();
