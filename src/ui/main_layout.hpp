@@ -266,6 +266,7 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> search_key_handler;
   std::function<bool(const ftxui::Event&)> call_hierarchy_key_handler;
   std::function<bool(const ftxui::Event&)> problems_key_handler;
+  std::function<bool(int delta)> problems_scroll_handler;
   std::function<bool(const ftxui::Event&)> git_key_handler;
   std::function<bool(const ftxui::Event&)> git_mouse_handler;
   std::function<void(const std::string& workspace_rel_path)> git_open_diff_view;

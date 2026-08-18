@@ -34,6 +34,7 @@ int main() {
   using tuide::kPanelEditorOnly;
   using tuide::kPanelEditorOutline;
   using tuide::kPanelFileTreeOnly;
+  using tuide::kPanelLspDiagnostics;
   using tuide::kPanelOpenOrJump;
 
   expect_mask(UiInvalidation::OpenFile, kPanelOpenOrJump, "OpenFile");
@@ -43,6 +44,7 @@ int main() {
   expect_mask(UiInvalidation::TreeSitterInactiveFile, 0, "TreeSitterInactiveFile");
   expect_mask(UiInvalidation::LspCompletion, kPanelEditorOnly, "LspCompletion");
   expect_mask(UiInvalidation::LspHover, kPanelEditorOnly, "LspHover");
+  expect_mask(UiInvalidation::LspDiagnostics, kPanelLspDiagnostics, "LspDiagnostics");
   expect_mask(UiInvalidation::LspDocumentSymbols, 0, "LspDocumentSymbols no wake panels");
   expect_mask(UiInvalidation::VisualHighlight, kPanelEditorOnly, "VisualHighlight");
   expect_mask(UiInvalidation::FindMatches, kPanelEditorOnly, "FindMatches");

@@ -3489,6 +3489,15 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         wake_console(layout_state);
         return true;
       }
+      if (problems_tab_active_console(app_mode, layout_state) &&
+          (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) &&
+          state->panel_box.Contain(m.x, m.y) && layout_state != nullptr &&
+          layout_state->problems_scroll_handler) {
+        if (focus != nullptr) {
+          focus->region = FocusRegion::Terminal;
+        }
+        return layout_state->problems_scroll_handler(m.button == Mouse::WheelUp ? -3 : 3);
+      }
       if (performance_tab_active(app_mode, layout_state) &&
           performance_panel->OnEvent(event)) {
         return true;

@@ -65,6 +65,9 @@ constexpr std::uint8_t kPanelChromeAll =
 constexpr std::uint8_t kPanelFileTreeOnly = panel_bit(UiPanelId::FileTree);
 constexpr std::uint8_t kPanelConsoleOnly = panel_bit(UiPanelId::Console);
 constexpr std::uint8_t kPanelRightSidebarOnly = panel_bit(UiPanelId::RightSidebar);
+constexpr std::uint8_t kPanelLspDiagnostics =
+    panel_bit(UiPanelId::EditorCenter) | panel_bit(UiPanelId::RightSidebar) |
+    panel_bit(UiPanelId::Console);
 
 inline UiInvalidationSpec ui_invalidation_spec(UiInvalidation kind) {
   switch (kind) {
@@ -85,7 +88,7 @@ inline UiInvalidationSpec ui_invalidation_spec(UiInvalidation kind) {
     case UiInvalidation::LspHover:
       return {kPanelEditorOnly, true, true, UiEventKind::InputCorrelated, "lsp.hover"};
     case UiInvalidation::LspDiagnostics:
-      return {kPanelEditorOnly, true, true, UiEventKind::InputCorrelated, "lsp.diagnostics"};
+      return {kPanelLspDiagnostics, true, true, UiEventKind::InputCorrelated, "lsp.diagnostics"};
     case UiInvalidation::LspDocumentSymbols:
       return {0, false, false, UiEventKind::InputCorrelated, "lsp.document_symbols"};
     case UiInvalidation::LspSemanticTokens:

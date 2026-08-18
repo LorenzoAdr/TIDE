@@ -27,6 +27,7 @@
 #include "ui/hover_effects.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
+#include "ui/scroll_bar.hpp"
 #include "ui/theme.hpp"
 #include "i18n/tr.hpp"
 
@@ -57,6 +58,11 @@ struct DiagnosticsPanelState {
   int first_visible = 0;
   int last_visible_lines = 1;
   Box content_box;
+  Box list_content_box;
+  Box scrollbar_box;
+  ScrollbarLayout scrollbar_layout;
+  bool scrollbar_dragging = false;
+  int scrollbar_drag_offset = 0;
   uint64_t rows_revision = 0;
 };
 
@@ -190,6 +196,10 @@ int visible_line_count(const Box& box) {
   return std::max(1, box.y_max - box.y_min + 1);
 }
 
+bool content_box_laid_out(const Box& box) {
+  return box.y_max > box.y_min || box.x_max > box.x_min;
+}
+
 constexpr int kLinesPerProblem = 2;
 
 int panel_content_width(const Box& box) {
@@ -201,6 +211,21 @@ int panel_content_width(const Box& box) {
 
 int visible_problem_count(int visible_terminal_lines) {
   return std::max(1, (visible_terminal_lines + kLinesPerProblem - 1) / kLinesPerProblem);
+}
+
+int problems_visible_terminal_lines(const Box& content_box, MainLayoutState* layout_state,
+                                    int total_problems, int last_visible_lines) {
+  int visible = visible_line_count(content_box);
+  // First paint (and any rebuild before reflect): content_box is still empty, so
+  // visible_line_count returns 1. Problems sits behind UiPanelRenderCache; if we
+  // only emit one row, that Element is frozen until another panel dirties Console.
+  if (!content_box_laid_out(content_box) || (visible <= 1 && total_problems > 1)) {
+    visible = std::max({1, last_visible_lines, total_problems * kLinesPerProblem});
+    if (layout_state != nullptr && layout_state->terminal_height) {
+      visible = std::max(visible, std::max(6, layout_state->terminal_height() / 3));
+    }
+  }
+  return visible;
 }
 
 std::string format_problem_line(const DiagnosticRow& row, const std::string& workspace_root) {
@@ -399,6 +424,103 @@ void clamp_scroll_viewport(DiagnosticsPanelState* state, int visible_terminal_li
   state->first_visible = std::max(0, std::min(state->first_visible, max_first));
 }
 
+bool scroll_problems_by_delta(DiagnosticsPanelState* state, MainLayoutState* layout_state,
+                              int delta) {
+  if (state == nullptr || delta == 0) {
+    return false;
+  }
+  const int visible = problems_visible_terminal_lines(
+      state->content_box, layout_state, static_cast<int>(state->rows.size()),
+      state->last_visible_lines);
+  state->last_visible_lines = visible;
+  const int visible_rows = visible_problem_count(visible);
+  const int total = static_cast<int>(state->rows.size());
+  const int max_first = std::max(0, total - visible_rows);
+  state->first_visible = std::max(0, std::min(state->first_visible + delta, max_first));
+  clamp_scroll_viewport(state, visible);
+  wake_console_panel(layout_state, "problems.scroll");
+  return true;
+}
+
+bool handle_problems_scrollbar_mouse(DiagnosticsPanelState* state, MainLayoutState* layout_state,
+                                     const Mouse& m, int total, int visible_rows) {
+  if (state == nullptr) {
+    return false;
+  }
+
+  const int max_first = std::max(0, total - visible_rows);
+  const bool in_bar = state->scrollbar_box.Contain(m.x, m.y);
+  const bool scrollable = state->scrollbar_layout.scrollable;
+
+  if (m.motion == Mouse::Moved) {
+    if (layout_state != nullptr && hover_effects_enabled()) {
+      const std::string_view before = layout_state->clickable.hovered_id();
+      if (in_bar || state->scrollbar_dragging) {
+        layout_state->clickable.set_hover(press_id::kProblemsScrollbar);
+      } else {
+        layout_state->clickable.clear_hover_if(
+            [](std::string_view id) { return id == press_id::kProblemsScrollbar; });
+      }
+      apply_hover_repaint(layout_state, before);
+    }
+    if (state->scrollbar_dragging && scrollable) {
+      const int local_y = m.y - state->scrollbar_box.y_min;
+      const int thumb_top = local_y - state->scrollbar_drag_offset;
+      state->first_visible =
+          std::max(0, std::min(scroll_for_thumb_top(state->scrollbar_layout, thumb_top), max_first));
+      return true;
+    }
+    return false;
+  }
+
+  if (state->scrollbar_dragging) {
+    if (m.button == Mouse::Left && m.motion == Mouse::Released) {
+      state->scrollbar_dragging = false;
+      return true;
+    }
+    if (m.button == Mouse::Left && scrollable) {
+      const int local_y = m.y - state->scrollbar_box.y_min;
+      const int thumb_top = local_y - state->scrollbar_drag_offset;
+      state->first_visible =
+          std::max(0, std::min(scroll_for_thumb_top(state->scrollbar_layout, thumb_top), max_first));
+      return true;
+    }
+  }
+
+  if (!in_bar) {
+    return false;
+  }
+
+  if (m.button == Mouse::WheelUp) {
+    return scroll_problems_by_delta(state, layout_state, -3);
+  }
+  if (m.button == Mouse::WheelDown) {
+    return scroll_problems_by_delta(state, layout_state, 3);
+  }
+
+  if (!scrollable) {
+    return false;
+  }
+
+  if (m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+    trigger_press(layout_state, press_id::kProblemsScrollbar);
+    const int local_y = m.y - state->scrollbar_box.y_min;
+    if (scrollbar_thumb_hit(state->scrollbar_layout, state->scrollbar_box, m.x, m.y)) {
+      state->scrollbar_dragging = true;
+      state->scrollbar_drag_offset = local_y - state->scrollbar_layout.thumb_y;
+    } else {
+      const int thumb_top = local_y - state->scrollbar_layout.thumb_height / 2;
+      state->first_visible = std::max(
+          0, std::min(scroll_for_thumb_top(state->scrollbar_layout, thumb_top), max_first));
+      state->scrollbar_dragging = true;
+      state->scrollbar_drag_offset = state->scrollbar_layout.thumb_height / 2;
+    }
+    return true;
+  }
+
+  return false;
+}
+
 void ensure_selection_visible(DiagnosticsPanelState* state, int visible_terminal_lines) {
   clamp_scroll_viewport(state, visible_terminal_lines);
   const int visible_rows = visible_problem_count(visible_terminal_lines);
@@ -437,9 +559,14 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
 
     state->fix_boxes.assign(state->rows.size(), Box{});
 
-    const int visible = visible_line_count(state->content_box);
+    const int visible = problems_visible_terminal_lines(
+        state->content_box, layout_state, static_cast<int>(state->rows.size()),
+        state->last_visible_lines);
     state->last_visible_lines = visible;
-    const int panel_width = panel_content_width(state->content_box);
+    int panel_width = panel_content_width(state->list_content_box);
+    if (!content_box_laid_out(state->list_content_box)) {
+      panel_width = std::max(1, panel_content_width(state->content_box) - 1);
+    }
     clamp_scroll_viewport(state.get(), visible);
 
     const bool lsp_fix_capable = code_actions_available(symbols, layout_state);
@@ -450,7 +577,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
         probe_visible_fix_availability(state.get(), workspace, symbols, layout_state,
                                         state->first_visible, end)) {
       if (layout_state != nullptr) {
-        UI_WAKE(layout_state, "problems.fix_probe");
+        wake_console_panel(layout_state, "problems.fix_probe");
       }
     }
 
@@ -475,7 +602,23 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       }
     }
 
-    return vbox(std::move(rows)) | vscroll_indicator | frame | flex |
+    rows.push_back(filler());
+    const int total = static_cast<int>(state->rows.size());
+    state->scrollbar_layout =
+        compute_scrollbar_layout(total, state->first_visible, visible_rows, visible);
+    const bool scrollbar_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kProblemsScrollbar);
+    const bool scrollbar_active =
+        state->scrollbar_dragging ||
+        (layout_state != nullptr &&
+         layout_state->clickable.is_pressed(press_id::kProblemsScrollbar));
+    Element scrollbar =
+        vertical_scrollbar(total, state->first_visible, visible_rows, visible, scrollbar_hovered,
+                           scrollbar_active) |
+        reflect(state->scrollbar_box);
+    Element list_body = vbox(std::move(rows)) | flex | reflect(state->list_content_box);
+    return hbox({std::move(list_body) | flex, std::move(scrollbar)}) | flex |
            reflect(state->content_box) | bgcolor(theme::PanelBg());
   });
 
@@ -486,6 +629,15 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
 
     if (event.is_mouse()) {
       const auto& m = event.mouse();
+      const int total = static_cast<int>(state->rows.size());
+      const int visible = problems_visible_terminal_lines(
+          state->content_box, layout_state, total, state->last_visible_lines);
+      const int visible_rows = visible_problem_count(visible);
+
+      if (handle_problems_scrollbar_mouse(state.get(), layout_state, m, total, visible_rows)) {
+        wake_console_panel(layout_state, "problems.scrollbar");
+        return true;
+      }
 
       if (m.motion == Mouse::Moved) {
         if (!code_actions_available(symbols, layout_state) || state->fix_boxes.empty()) {
@@ -520,33 +672,24 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
         return false;
       }
 
-      if (state->content_box.Contain(m.x, m.y) &&
+      if ((state->content_box.Contain(m.x, m.y) || state->scrollbar_box.Contain(m.x, m.y) ||
+           state->list_content_box.Contain(m.x, m.y)) &&
           (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown)) {
         if (focus != nullptr) {
           focus->region = FocusRegion::Terminal;
         }
-        const int visible = visible_line_count(state->content_box);
-        const int visible_rows = visible_problem_count(visible);
-        const int total = static_cast<int>(state->rows.size());
-        const int max_first = std::max(0, total - visible_rows);
         const int delta = m.button == Mouse::WheelUp ? -3 : 3;
-        state->first_visible =
-            std::max(0, std::min(state->first_visible + delta, max_first));
-        clamp_scroll_viewport(state.get(), visible);
-        if (layout_state != nullptr) {
-          UI_WAKE(layout_state, "wake");
-        }
-        return true;
+        return scroll_problems_by_delta(state.get(), layout_state, delta);
       }
       if (m.button == Mouse::Right && m.motion == Mouse::Pressed) {
-        if (!state->content_box.Contain(m.x, m.y)) {
+        if (!state->list_content_box.Contain(m.x, m.y)) {
           return false;
         }
         if (focus != nullptr) {
           focus->region = FocusRegion::Terminal;
         }
-        const int visible = visible_line_count(state->content_box);
-        const int visual_row = m.y - state->content_box.y_min;
+        const int visible = visible_line_count(state->list_content_box);
+        const int visual_row = m.y - state->list_content_box.y_min;
         const int row = state->first_visible + (visual_row / kLinesPerProblem);
         if (row < 0 || row >= static_cast<int>(state->rows.size())) {
           return false;
@@ -557,9 +700,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
         const bool lsp_available = code_actions_available(symbols, layout_state);
         context_menu_open_problem(&layout_state->context_menu, m.x, m.y, diag.path, diag.line,
                                   diag.character, diag.end_col, diag.message, lsp_available);
-        if (layout_state != nullptr) {
-          UI_WAKE(layout_state, "wake");
-        }
+        wake_console_panel(layout_state, "problems.menu");
         return true;
       }
     }
@@ -570,7 +711,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       if (focus != nullptr) {
         focus->region = FocusRegion::Terminal;
       }
-      if (!state->content_box.Contain(m.x, m.y)) {
+      if (!state->list_content_box.Contain(m.x, m.y)) {
         return false;
       }
 
@@ -592,14 +733,14 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
             focus->region = FocusRegion::Editor;
           }
           if (layout_state != nullptr) {
-            UI_WAKE(layout_state, "wake");
+            wake_console_panel(layout_state, "problems.fix");
           }
           return true;
         }
       }
 
-      const int visible = visible_line_count(state->content_box);
-      const int visual_row = m.y - state->content_box.y_min;
+      const int visible = visible_line_count(state->list_content_box);
+      const int visual_row = m.y - state->list_content_box.y_min;
       const int row = state->first_visible + (visual_row / kLinesPerProblem);
       if (row >= 0 && row < static_cast<int>(state->rows.size())) {
         state->selected = row;
@@ -608,9 +749,7 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
         if (focus != nullptr) {
           focus->region = FocusRegion::Editor;
         }
-        if (layout_state != nullptr) {
-          UI_WAKE(layout_state, "wake");
-        }
+        wake_console_panel(layout_state, "problems.navigate");
         return true;
       }
       return false;
@@ -631,11 +770,13 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       state->selected =
           std::min(state->selected + 1, static_cast<int>(state->rows.size()) - 1);
       ensure_selection_visible(state.get(), visible);
+      wake_console_panel(layout_state, "problems.select");
       return true;
     }
     if (event == Event::ArrowUp || event == Event::Character('k')) {
       state->selected = std::max(0, state->selected - 1);
       ensure_selection_visible(state.get(), visible);
+      wake_console_panel(layout_state, "problems.select");
       return true;
     }
     if (event == Event::Return) {
@@ -654,20 +795,20 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
       if (focus != nullptr) {
         focus->region = FocusRegion::Editor;
       }
-      if (layout_state != nullptr) {
-        UI_WAKE(layout_state, "wake");
-      }
+      wake_console_panel(layout_state, "problems.fix");
       return true;
     }
     if (event == Event::PageDown) {
       state->selected =
           std::min(state->selected + visible_rows, static_cast<int>(state->rows.size()) - 1);
       ensure_selection_visible(state.get(), visible);
+      wake_console_panel(layout_state, "problems.select");
       return true;
     }
     if (event == Event::PageUp) {
       state->selected = std::max(0, state->selected - visible_rows);
       ensure_selection_visible(state.get(), visible);
+      wake_console_panel(layout_state, "problems.select");
       return true;
     }
     return false;
@@ -675,6 +816,9 @@ Component MakeDiagnosticsPanel(WorkspaceModel* workspace, FocusManagerState* foc
 
   if (layout_state != nullptr) {
     layout_state->problems_key_handler = handler;
+    layout_state->problems_scroll_handler = [state, layout_state](int delta) {
+      return scroll_problems_by_delta(state.get(), layout_state, delta);
+    };
   }
 
   return WrapFocusable(CatchEvent(renderer, handler));

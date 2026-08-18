@@ -219,6 +219,7 @@ struct EditorPanelState {
   int64_t last_insert_input_ms = 0;
   std::vector<BreadcrumbHit> breadcrumb_hits;
   std::vector<BreadcrumbItem> breadcrumbs;
+  std::vector<int> sticky_source_lines;
   VisualHighlightPanelState visual_highlight;
   std::vector<SymbolInfo> cached_symbols;
   std::string cached_symbols_path;
@@ -1643,6 +1644,30 @@ void navigate_editor_to_line(WorkspaceModel* workspace, EditorPanelState* panel,
   buffer->view_token++;
   clear_hover_state(&panel->hover);
   ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+}
+
+bool handle_sticky_scroll_click(WorkspaceModel* workspace, FocusManagerState* focus,
+                                MainLayoutState* layout_state, EditorPanelState* panel,
+                                const Mouse& m, int visible_lines) {
+  if (workspace == nullptr || panel == nullptr || m.button != Mouse::Left ||
+      m.motion != Mouse::Pressed) {
+    return false;
+  }
+  if (panel->sticky_source_lines.empty() || !panel->code_box.Contain(m.x, m.y)) {
+    return false;
+  }
+  const int row = m.y - panel->code_box.y_min;
+  if (row < 0 || row >= static_cast<int>(panel->sticky_source_lines.size())) {
+    return false;
+  }
+  workspace->record_cursor_jump();
+  navigate_editor_to_line(workspace, panel, panel->sticky_source_lines[static_cast<std::size_t>(row)],
+                          visible_lines);
+  claim_editor_focus(focus, layout_state, panel->panel_focus);
+  if (layout_state != nullptr) {
+    UI_WAKE(layout_state, "wake");
+  }
+  return true;
 }
 
 bool tabular_view_ready(EditorPanelState* panel, const EditorBuffer& buffer);
@@ -4663,6 +4688,12 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       completion->close(layout_state);
     }
 
+    if (in_code && handle_sticky_scroll_click(workspace, focus, layout_state, panel, m,
+                                              visible_lines)) {
+      end_mouse_selection(panel);
+      return true;
+    }
+
     if (in_gutter && handle_fold_gutter_click(panel, buffer, m, visible_lines)) {
       if (layout_state != nullptr) {
         UI_WAKE(layout_state, "wake");
@@ -6131,6 +6162,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     buffer.ensure_cursors();
 
     if (buffer.path.empty()) {
+      panel_state->sticky_source_lines.clear();
       return vbox({
                  filler(),
                  hbox({filler(), RenderTuideLogo(), filler()}),
@@ -6745,6 +6777,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
               ? std::vector<StickyLine>{}
               : sticky_lines_for_scroll(sticky_symbol_source, buffer.lines.to_vector(),
                                         buffer.scroll, 3);
+      panel_state->sticky_source_lines.clear();
+      panel_state->sticky_source_lines.reserve(sticky_lines.size());
+      for (const StickyLine& sticky : sticky_lines) {
+        panel_state->sticky_source_lines.push_back(sticky.source_line);
+      }
     }
     const BracketPairHighlight& bracket = *bracket_ptr;
 

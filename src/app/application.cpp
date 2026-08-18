@@ -3557,8 +3557,13 @@ int Application::run() {
 		if (layout_state_.console_visible && event.is_mouse() &&
 		    problems_tab_active(&layout_state_) && layout_state_.problems_key_handler &&
 		    layout_state_.problems_key_handler(event)) {
-			post_custom_throttled();
-			layout_state_.focus_sync_needed = true;
+			wake_console_panel(&layout_state_, "app.problems.mouse");
+			// Evitar focus_sync en wheel: provoca el salto de layout.
+			Event mouse_event = event;
+			const auto button = mouse_event.mouse().button;
+			if (button != Mouse::WheelUp && button != Mouse::WheelDown) {
+				layout_state_.focus_sync_needed = true;
+			}
 			return true;
 		}
 
@@ -3573,7 +3578,15 @@ int Application::run() {
 		if (layout_state_.console_visible && layout_state_.console_mouse_handler &&
 		    layout_state_.console_mouse_handler(event)) {
 			post_custom_throttled();
-			layout_state_.focus_sync_needed = true;
+			if (event.is_mouse()) {
+				Event mouse_event = event;
+				const auto button = mouse_event.mouse().button;
+				if (button != Mouse::WheelUp && button != Mouse::WheelDown) {
+					layout_state_.focus_sync_needed = true;
+				}
+			} else {
+				layout_state_.focus_sync_needed = true;
+			}
 			return true;
 		}
 
@@ -3676,7 +3689,7 @@ int Application::run() {
 			    focus_state_.region == FocusRegion::Terminal &&
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.problems_key_handler && layout_state_.problems_key_handler(event)) {
-				UI_WAKE(&layout_state_, "app.custom");
+				wake_console_panel(&layout_state_, "app.problems.keys");
 				return true;
 			}
 			if (performance_tab_active(&layout_state_) &&
