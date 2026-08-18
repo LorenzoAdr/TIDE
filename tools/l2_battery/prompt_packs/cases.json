@@ -1,0 +1,62 @@
+[
+  {
+    "id": "simple_hpp_comment",
+    "prompt": "En src/util/shell_utils.hpp añade // L2_PS_OK encima de la declaración de shell_quote.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.hpp"],
+      "diff_must_contain": ["L2_PS_OK", "shell_quote"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "simple_default_tab",
+    "prompt": "En src/ui/main_layout.hpp ConsolePanelTabs, cambia selected_tab default de kTerminal a kAi.",
+    "expect": {
+      "paths_touched": ["src/ui/main_layout.hpp"],
+      "diff_must_contain": ["selected_tab = kAi"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "multi_two_markers",
+    "prompt": "En src/util/shell_utils.hpp: (1) // L2_PS_A encima de shell_quote; (2) // L2_PS_B encima de command_exists. Ambos obligatorios.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.hpp"],
+      "diff_must_contain": ["L2_PS_A", "L2_PS_B"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "multi_ktab_helper",
+    "prompt": "En src/ui/main_layout.hpp: añade static constexpr int kPs = 12; tras kAi en ConsolePanelTabs, y en ai_tab_active acepta también kPs.",
+    "expect": {
+      "paths_touched": ["src/ui/main_layout.hpp"],
+      "diff_must_contain": ["kPs", "ai_tab_active"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "sibling_always_true",
+    "prompt": "Añade bool always_true(); en src/util/shell_utils.hpp junto a command_exists y bool always_true() { return true; } en src/util/shell_utils.cpp. Ambos archivos obligatorios.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.hpp", "src/util/shell_utils.cpp"],
+      "diff_must_contain": ["always_true", "return true"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "sibling_noop",
+    "prompt": "Añade void l2_ps_noop(); en src/util/shell_utils.hpp y void l2_ps_noop() {} en src/util/shell_utils.cpp. Ambos archivos.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.hpp", "src/util/shell_utils.cpp"],
+      "diff_must_contain": ["l2_ps_noop"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  }
+]

@@ -3,6 +3,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/busy_strip.hpp"
 #include "ui/status_layout_popover.hpp"
+#include "ui/status_language_popover.hpp"
 #include "ui/ui_wake_policy.hpp"
 
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include <filesystem>
 #include <memory>
 
+#include "app/language_override.hpp"
 #include "editor/editor_buffer_source.hpp"
 #include "parser/tree_sitter_service.hpp"
 #include "ftxui/component/component.hpp"
@@ -18,6 +20,7 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
 #include "lsp/diagnostics.hpp"
+#include "lsp/lsp_uri.hpp"
 #include "terminal/shell_session.hpp"
 #include "ui/console_panel.hpp"
 #include "ui/editor_panel.hpp"
@@ -607,12 +610,14 @@ std::string buffer_text(const EditorBuffer& buffer) { return editor_buffer_joine
 
 struct StatusBarUiState {
   Box chg_dir_box;
+  Box language_box;
   Box index_box;
   SplitToolbarButtonBoxes launch_btn;
   SplitToolbarButtonBoxes debug_btn;
   Box layout_box;
   Box settings_box;
   Box shortcuts_box;
+  std::string active_path;
 };
 
 bool index_clangd_ready(const MainLayoutState* layout_state) {
@@ -630,11 +635,11 @@ bool index_clangd_ready(const MainLayoutState* layout_state) {
 }
 
 bool status_bar_hover_id(std::string_view id) {
-  return id == press_id::kStatusChgDir || id == press_id::kStatusIndex ||
-         id == press_id::kStatusLaunch || id == press_id::kStatusLaunchQuick ||
-         id == press_id::kStatusDebug || id == press_id::kStatusDebugQuick ||
-         id == press_id::kStatusLayout || id == press_id::kStatusSettings ||
-         id == press_id::kStatusShortcuts;
+  return id == press_id::kStatusChgDir || id == press_id::kStatusLanguage ||
+         id == press_id::kStatusIndex || id == press_id::kStatusLaunch ||
+         id == press_id::kStatusLaunchQuick || id == press_id::kStatusDebug ||
+         id == press_id::kStatusDebugQuick || id == press_id::kStatusLayout ||
+         id == press_id::kStatusSettings || id == press_id::kStatusShortcuts;
 }
 
 bool handle_status_bar_mouse(StatusBarUiState* state, MainLayoutState* layout_state,
@@ -643,6 +648,12 @@ bool handle_status_bar_mouse(StatusBarUiState* state, MainLayoutState* layout_st
     return false;
   }
   const Mouse& mouse = event.mouse();
+  if (layout_state->status_language_popover.open) {
+    if (HandleStatusLanguagePopoverMouse(&layout_state->status_language_popover, layout_state,
+                                         state->language_box, event, state->active_path)) {
+      return true;
+    }
+  }
   if (layout_state->status_layout_popover.open) {
     if (HandleStatusLayoutPopoverMouse(&layout_state->status_layout_popover, layout_state,
                                        state->layout_box, event)) {
@@ -653,6 +664,7 @@ bool handle_status_bar_mouse(StatusBarUiState* state, MainLayoutState* layout_st
     return update_panel_hover(
         layout_state, mouse.x, mouse.y,
         {{press_id::kStatusChgDir, &state->chg_dir_box},
+         {press_id::kStatusLanguage, &state->language_box},
          {press_id::kStatusIndex, &state->index_box},
          {press_id::kStatusLaunch, &state->launch_btn.main},
          {press_id::kStatusLaunchQuick, &state->launch_btn.arrow},
@@ -673,8 +685,16 @@ bool handle_status_bar_mouse(StatusBarUiState* state, MainLayoutState* layout_st
     }
     return true;
   }
+  if (state->language_box.Contain(mouse.x, mouse.y)) {
+    trigger_press(layout_state, press_id::kStatusLanguage);
+    layout_state->status_layout_popover.open = false;
+    layout_state->status_language_popover.open = !layout_state->status_language_popover.open;
+    UI_WAKE(layout_state, "wake");
+    return true;
+  }
   if (state->index_box.Contain(mouse.x, mouse.y)) {
     trigger_press(layout_state, press_id::kStatusIndex);
+    layout_state->status_language_popover.open = false;
     if (layout_state->status_reindex_project) {
       layout_state->status_reindex_project();
     }
@@ -710,6 +730,7 @@ bool handle_status_bar_mouse(StatusBarUiState* state, MainLayoutState* layout_st
   }
   if (state->layout_box.Contain(mouse.x, mouse.y)) {
     trigger_press(layout_state, press_id::kStatusLayout);
+    layout_state->status_language_popover.open = false;
     layout_state->status_layout_popover.open = !layout_state->status_layout_popover.open;
     UI_WAKE(layout_state, "wake");
     return true;
@@ -1115,6 +1136,7 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
           symbols->diagnostics_revision() != layout_state->panel_cache_diagnostics_revision) {
         layout_state->panel_render_cache.mark_dirty(UiPanelId::EditorCenter);
         layout_state->panel_render_cache.mark_dirty(UiPanelId::RightSidebar);
+        layout_state->panel_render_cache.mark_dirty(UiPanelId::Console);
         layout_state->panel_cache_diagnostics_revision = symbols->diagnostics_revision();
       }
       {
@@ -1235,6 +1257,12 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     const bool index_pressed =
         layout_state != nullptr &&
         layout_state->clickable.is_pressed(press_id::kStatusIndex);
+    const bool language_hovered =
+        layout_state != nullptr &&
+        layout_state->clickable.is_hovered(press_id::kStatusLanguage);
+    const bool language_pressed =
+        layout_state != nullptr &&
+        layout_state->clickable.is_pressed(press_id::kStatusLanguage);
     const bool chg_dir_hovered =
         layout_state != nullptr &&
         layout_state->clickable.is_hovered(press_id::kStatusChgDir);
@@ -1286,6 +1314,27 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
 
     const auto muted = [](Element content) { return std::move(content) | color(theme::Muted()); };
     const bool clangd_ready = index_clangd_ready(layout_state);
+
+    // Active editor path for language button / override popover.
+    status_ui->active_path.clear();
+    if (focus != nullptr && focus->region == FocusRegion::SecondaryEditor &&
+        secondary_workspace != nullptr && !secondary_workspace->tabs.empty()) {
+      secondary_workspace->ensure_buffer();
+      status_ui->active_path = secondary_workspace->buffer.path;
+    } else if (workspace != nullptr) {
+      workspace->ensure_buffer();
+      status_ui->active_path = workspace->buffer.path;
+    }
+    const std::string language_label =
+        status_ui->active_path.empty()
+            ? i18n::tr("status.language.none")
+            : language_display_name(language_id_for_path(status_ui->active_path));
+    const bool language_active =
+        layout_state != nullptr && layout_state->status_language_popover.open;
+    Element language_btn = MakeToolbarButton(
+        text(language_label) | color(theme::Muted()) | (language_active ? bold : nothing),
+        language_hovered, language_pressed, false, &status_ui->language_box, true);
+
     Element index_label =
         text(i18n::tr("status.button.index")) |
         color(clangd_ready ? theme::Muted() : theme::Error());
@@ -1333,6 +1382,8 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
         hbox({
             show_chg_dir ? chg_dir_btn : emptyElement(),
             show_chg_dir ? text(" ") : emptyElement(),
+            language_btn,
+            text(" "),
             index_btn,
             text(" "),
             launch_btn,
@@ -1348,6 +1399,11 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     }) | bgcolor(theme::StatusBar());
 
     Element chrome = vbox({main | flex | bgcolor(theme::PanelBg()), status});
+    if (layout_state != nullptr && layout_state->status_language_popover.open) {
+      chrome = RenderStatusLanguagePopoverOverlay(
+          &layout_state->status_language_popover, layout_state, std::move(chrome),
+          status_ui->language_box, status_ui->active_path);
+    }
     if (layout_state != nullptr && layout_state->status_layout_popover.open) {
       chrome = RenderStatusLayoutPopoverOverlay(&layout_state->status_layout_popover, layout_state,
                                                 std::move(chrome), status_ui->layout_box);
@@ -1355,7 +1411,9 @@ Component MakeMainLayout(AppMode* app_mode, DebugModel* model,
     if (layout_state != nullptr) {
       layout_state->ui_perf_monitor.publish_dump_phases();
       // Reassert ANSI tras el Draw (Post corre después de ToString).
-      if (layout_state->busy_strip != nullptr && layout_state->ui_events != nullptr) {
+      if (layout_state->busy_strip != nullptr && layout_state->ui_events != nullptr &&
+          !layout_state->busy_strip->halted.load(std::memory_order_acquire) &&
+          !layout_state->shutdown_ui_poll_paused.load(std::memory_order_acquire)) {
         BusyStripState* strip = layout_state->busy_strip.get();
         bool expected = false;
         if (strip->reassert_posted.compare_exchange_strong(expected, true,

@@ -16,6 +16,11 @@ endfunction()
 # add_custom_command estándar para prepare_single_bin_bundle.sh
 function(tuide_add_single_bin_bundle_command prefix)
   set(_script "${CMAKE_SOURCE_DIR}/cmake/prepare_single_bin_bundle.sh")
+  if(DEFINED TUIDE_${prefix}_ARCHIVE_BINARY_NAME)
+    set(_archive_binary_name "${TUIDE_${prefix}_ARCHIVE_BINARY_NAME}")
+  else()
+    set(_archive_binary_name "${TUIDE_${prefix}_BINARY_NAME}")
+  endif()
   add_custom_command(
     OUTPUT "${TUIDE_${prefix}_ZST_PATH}" "${TUIDE_${prefix}_MANIFEST_HPP}"
            "${TUIDE_${prefix}_BLOB_OBJ}"
@@ -27,6 +32,7 @@ function(tuide_add_single_bin_bundle_command prefix)
             TUIDE_TOOL_VERSION="${TUIDE_${prefix}_VERSION}"
             TUIDE_EXTRACT_MODE="${TUIDE_${prefix}_EXTRACT_MODE}"
             TUIDE_BINARY_NAME="${TUIDE_${prefix}_BINARY_NAME}"
+            TUIDE_ARCHIVE_BINARY_NAME="${_archive_binary_name}"
             TUIDE_DOWNLOAD_URL="${TUIDE_${prefix}_URL}"
             TUIDE_DOWNLOAD_PATH="${TUIDE_${prefix}_DOWNLOAD_PATH}"
             TUIDE_STAGING_DIR="${TUIDE_${prefix}_STAGING_DIR}"

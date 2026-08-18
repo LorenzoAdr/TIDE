@@ -10,13 +10,17 @@
 #include <optional>
 #include <sstream>
 #include <thread>
+#include <unordered_set>
 #include <unistd.h>
 #include <csignal>
 #include <sys/types.h>
 
+#include "app/language_override.hpp"
 #include "app/workspace_config.hpp"
 #include "app/workspace_session.hpp"
 #include "app/recent_projects.hpp"
+#include "ai/ai_controller.hpp"
+#include "ai/ai_packages.hpp"
 #include "backend/idebug_backend.hpp"
 #include "build/build_environment.hpp"
 #include "build/build_environment_service.hpp"
@@ -32,6 +36,7 @@
 #include "ftxui/component/screen_interactive.hpp"
 #include "i18n/locale.hpp"
 #include "i18n/tr.hpp"
+#include "indexer/index_rules.hpp"
 #include "packet_monitor/pkt_monitor_service.hpp"
 #include "parser/tree_sitter_service.hpp"
 #include "ui/binary_symbols_panel.hpp"
@@ -52,6 +57,7 @@
 #include "ui/main_layout.hpp"
 #include "ui/open_file_confirm.hpp"
 #include "ui/external_file_conflict.hpp"
+#include "ui/ai_missing_toast.hpp"
 #include "ui/lsp_missing_toast.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/quit_confirm.hpp"
@@ -60,7 +66,9 @@
 #include "util/tools_status.hpp"
 #include "ui/shutdown_overlay.hpp"
 #include "ui/source_substitute_modal.hpp"
+#include "ui/ai_path_scope_modal.hpp"
 #include "ui/source_panel.hpp"
+#include "ui/status_language_popover.hpp"
 #include "ui/status_layout_popover.hpp"
 #include "ui/symbol_picker.hpp"
 #include "ui/terminal_display.hpp"
@@ -611,6 +619,64 @@ void Application::on_lsp_missing_ignore() {
 	UI_WAKE(&layout_state_, "app");
 }
 
+void Application::maybe_show_ai_missing_toast(const std::string& pack_id) {
+	if (ai_missing_toast_suppressed_ || ai_missing_toast_state_.open ||
+	    lsp_missing_toast_state_.open) {
+		return;
+	}
+	if (pack_id.empty() || find_ai_package(pack_id) == nullptr) {
+		return;
+	}
+	if (ai_missing_notified_packs_.count(pack_id) > 0) {
+		return;
+	}
+	ai_missing_notified_packs_.insert(pack_id);
+	ai_missing_toast_state_.show(pack_id);
+	UI_WAKE(&layout_state_, "app");
+}
+
+void Application::on_ai_missing_install() {
+	if (!ai_missing_toast_state_.open) {
+		return;
+	}
+	const std::string pack_id = ai_missing_toast_state_.pack_id;
+	ai_missing_toast_state_.close();
+	if (pack_id.empty()) {
+		set_workspace_status(i18n::tr("ai_toast.install_failed"));
+		UI_WAKE(&layout_state_, "app");
+		return;
+	}
+	set_busy_percent(&layout_state_, BusyActivity::AiDownloading, 0);
+	set_workspace_status(i18n::tr("ai_toast.installing"));
+	UI_WAKE(&layout_state_, "app");
+	const AiSettings ai_settings = workspace_config_.ai;
+	std::thread([this, pack_id, ai_settings]() {
+		const auto result = install_ai_package(
+		    pack_id, ai_settings, [this](int percent, std::string_view label) {
+			    set_busy_percent(&layout_state_, BusyActivity::AiDownloading, percent, label);
+			    UI_WAKE(&layout_state_, "toolpack");
+		    });
+		enqueue_ui_task([this, result, pack_id]() {
+			clear_busy(&layout_state_);
+			set_workspace_status(result.ok ? i18n::tr("ai_toast.install_done")
+			                               : (result.message.empty()
+			                                      ? i18n::tr("ai_toast.install_failed")
+			                                      : result.message));
+			if (result.ok && layout_state_.ai_controller != nullptr) {
+				layout_state_.ai_controller->clear_missing_package_notice(pack_id);
+				ai_missing_notified_packs_.erase(pack_id);
+			}
+			UI_WAKE(&layout_state_, "app");
+		});
+	}).detach();
+}
+
+void Application::on_ai_missing_ignore() {
+	ai_missing_toast_suppressed_ = true;
+	ai_missing_toast_state_.close();
+	UI_WAKE(&layout_state_, "app");
+}
+
 void Application::rebuild_shell_launch_config() {
 	cached_shell_launch_config_.host_cwd = workspace_.root;
 	cached_shell_launch_config_.docker_container.clear();
@@ -721,17 +787,75 @@ void Application::restart_lsp_for_workspace() {
 	}
 }
 
-void Application::sync_symbol_workspace_indexer() {
+void Application::sync_symbol_workspace_indexer(bool force) {
 	if (workspace_.root.empty()) {
 		symbol_indexer_.stop();
 		return;
 	}
-	// With LSP on, bulk tree-sitter indexing scans the whole tree and duplicates clangd work.
-	if (app_settings_.lsp_enabled) {
-		symbol_indexer_.stop();
+	if (force) {
+		ai_indexes_requested_ = true;
+	}
+	// Lazy: do not build the AI symbol map / stem pipeline until the AI tab is opened
+	// (or an explicit force reindex). Code-only editing stays free of AI background work.
+	if (!force && !ai_indexes_requested_) {
 		return;
 	}
+	// Always keep a defs+refs index for AI/repo map (LSP does not populate it).
+	// Do NOT restart on every apply_app_settings (F10→Esc): that resets progress to 0/N
+	// and looks like the indexer is "stuck on the same file".
+	if (!force) {
+		const auto snap = symbol_indexer_.snapshot();
+		if (snap && snap->workspace_root == workspace_.root) {
+			if (symbol_indexer_.scanning()) {
+				return;
+			}
+			if (!snap->symbols.empty()) {
+				// Recover from a prior race that indexed only the explorer skeleton
+				// (e.g. ~32 files under the open folder) while rg was still running.
+				const auto file_snap = indexer_.snapshot();
+				if (file_snap && file_snap->workspace_root == workspace_.root &&
+				    !indexer_.scanning()) {
+					std::size_t source_files = 0;
+					for (const auto& rel : file_snap->files) {
+						if (is_indexed_source_path(rel)) {
+							++source_files;
+						}
+					}
+					std::unordered_set<std::string> mapped_files;
+					mapped_files.reserve(snap->symbols.size());
+					for (const auto& sym : snap->symbols) {
+						mapped_files.insert(sym.file);
+					}
+					if (source_files <= mapped_files.size() + 10) {
+						if (layout_state_.ai_controller != nullptr) {
+							layout_state_.ai_controller->on_symbol_map_ready();
+						}
+						return;
+					}
+					// Fall through: force a full rebuild against the complete file list.
+				} else {
+					if (layout_state_.ai_controller != nullptr) {
+						layout_state_.ai_controller->on_symbol_map_ready();
+					}
+					return;
+				}
+			}
+		}
+	}
 	symbol_indexer_.start_scan(workspace_.root, symbol_provider_, &indexer_);
+	refresh_ai_mapping_busy(&layout_state_, true, 0, 0);
+}
+
+void Application::request_ai_indexes() {
+	const bool first = !ai_indexes_requested_;
+	ai_indexes_requested_ = true;
+	if (first) {
+		sync_symbol_workspace_indexer(false);
+	}
+	// If the map is already ready (or finishes later via progress callback), warm stems.
+	if (layout_state_.ai_controller != nullptr) {
+		layout_state_.ai_controller->on_symbol_map_ready();
+	}
 }
 
 IndexFilterOptions Application::index_filter_options() const {
@@ -800,7 +924,7 @@ void Application::reindex_project() {
 		std::thread([this]() {
 			set_current_thread_name("reindex");
 			restart_lsp_for_workspace();
-			sync_symbol_workspace_indexer();
+			sync_symbol_workspace_indexer(true);
 			restart_workspace_indexing();
 			enqueue_ui_task([this]() {
 				reopen_workspace_documents(&workspace_, symbol_provider_);
@@ -908,11 +1032,24 @@ void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan 
 		if (layout_state_.source_tick_callback && app_mode_ == AppMode::kDebug) {
 			layout_state_.source_tick_callback();
 		}
-		if (layout_state_.activity_gate.allows_deferred_panel_tick()) {
-			UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "git");
-			TUIDE_MON_SCOPE("ui", "tick.git");
+		}
+	{
+		UiSyncPhaseScope phase(&layout_state_.ui_perf_monitor, "git");
+		TUIDE_MON_SCOPE("ui", "tick.git");
+		git_service_.drain_ui();
+		if (plan.run_full_background && layout_state_.activity_gate.allows_deferred_panel_tick()) {
 			git_service_.tick();
 		}
+	}
+
+	{
+		std::size_t done = 0;
+		std::size_t total = 0;
+		const bool scanning = symbol_indexer_.scanning();
+		if (scanning) {
+			symbol_indexer_.progress(&done, &total);
+		}
+		refresh_ai_mapping_busy(&layout_state_, scanning, done, total);
 	}
 
   // TerminalOutput wakes drive steady-state PTY refresh. Autostart also needs a tick
@@ -1090,6 +1227,7 @@ void Application::begin_shutdown(ScreenInteractive *screen) {
 	quit_confirm_state_.open = false;
 	quit_confirm_state_.unsaved_paths.clear();
 	layout_state_.shutdown_ui_poll_paused.store(true, std::memory_order_release);
+	halt_busy_strip(&layout_state_);
 	shutdown_state_.begin(7);
 	shutdown_step_index_ = 0;
 	shutdown_state_.set_current(i18n::tr("app.shutdown.save_session"));
@@ -1256,6 +1394,7 @@ void Application::set_workspace(const std::string &workspace_root,
 	model_.console_output.clear();
 	request_terminal_autostart();
 	workspace_config_ = WorkspaceConfig::load(absolute);
+	set_language_overrides(workspace_config_.language_overrides);
 	if (workspace_config_.ui_colors_preset == theme::UiColorPreset::kCustom) {
 		theme::apply_color_preset(theme::UiColorPreset::kCustom, workspace_config_.ui_colors);
 		theme::set_mode(workspace_config_.theme);
@@ -1312,7 +1451,9 @@ void Application::set_workspace(const std::string &workspace_root,
 	// El esqueleto ya está en el snapshot; invalidar el panel cacheado para que el
 	// primer pintado del explorador muestre las carpetas raíz.
 	notify_file_tree_reveal();
-	sync_symbol_workspace_indexer();
+	// AI symbol map + stem embeds wait until the console AI tab is opened.
+	ai_indexes_requested_ = false;
+	symbol_indexer_.stop();
 	git_service_.open(absolute);
 	RecentProjects::load().remember(absolute);
 }
@@ -2382,10 +2523,11 @@ bool Application::any_modal_open() const {
 	return workspace_wizard_state_.open || external_file_wizard_state_.open ||
 	       connection_wizard_state_.open || file_picker_state_.open || symbol_picker_state_.open ||
 	       shortcuts_modal_state_.open || settings_modal_state_.open ||
-	       source_substitute_state_.open || quit_confirm_state_.open ||
+	       source_substitute_state_.open || ai_path_scope_state_.open || quit_confirm_state_.open ||
 	       debug_launch_modal_state_.open() || open_file_confirm_state_.is_open() ||
 	       external_file_conflict_state_.is_open() ||
-	       lsp_missing_toast_state_.open || context_menu_active(&layout_state_.context_menu);
+	       lsp_missing_toast_state_.open || ai_missing_toast_state_.open ||
+	       context_menu_active(&layout_state_.context_menu);
 }
 
 void Application::apply_app_settings() {
@@ -2507,6 +2649,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		} else {
 			request_binary_symbols_panel(&layout_state_, std::string{});
 		}
+		wake_console_panel(&layout_state_, "app.focus.symbols");
 		mark_focus_sync();
 		return true;
 	}
@@ -2516,6 +2659,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
 		layout_state_.text_input_focus = TextInputFocus::Console;
 		layout_state_.terminal_start_requested = true;
+		wake_console_panel(&layout_state_, "app.focus.terminal");
 		mark_focus_sync();
 		return true;
 	}
@@ -2572,6 +2716,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 				        ? TextInputFocus::None
 				        : TextInputFocus::Console;
 			}
+			wake_console_panel(&layout_state_, "app.focus.console");
 			mark_focus_sync();
 			return true;
 		}
@@ -2638,6 +2783,21 @@ int Application::run() {
 
 	auto layout = build_ui();
 
+	if (layout_state_.ai_controller != nullptr) {
+		AiControllerDeps ai_deps;
+		ai_deps.workspace = &workspace_;
+		ai_deps.symbols = symbol_provider_;
+		ai_deps.indexer = &indexer_;
+		ai_deps.symbol_indexer = &symbol_indexer_;
+		ai_deps.git = &git_service_;
+		ai_deps.layout = &layout_state_;
+		ai_deps.config = &workspace_config_;
+		layout_state_.ai_controller->set_deps(ai_deps);
+		layout_state_.ai_controller->set_missing_package_handler([this](const std::string& pack_id) {
+			enqueue_ui_task([this, pack_id]() { maybe_show_ai_missing_toast(pack_id); });
+		});
+	}
+
 	layout_state_.terminal_width = [&screen]() { return screen.dimx(); };
 	layout_state_.terminal_height = [&screen]() { return screen.dimy(); };
 	layout_state_.on_file_saved = [this](const std::string &path) {
@@ -2675,6 +2835,33 @@ int Application::run() {
 	};
 	layout_state_.status_open_launch = [this]() { open_launch_wizard(); };
 	layout_state_.status_reindex_project = [this]() { reindex_project(); };
+	layout_state_.status_set_file_language = [this](const std::optional<std::string>& language_id) {
+		WorkspaceModel* ws = &workspace_;
+		if (focus_state_.region == FocusRegion::SecondaryEditor &&
+		    !secondary_workspace_.tabs.empty()) {
+			ws = &secondary_workspace_;
+		}
+		ws->ensure_buffer();
+		const std::string path = ws->buffer.path;
+		if (path.empty()) {
+			return;
+		}
+		const std::string text = editor_buffer_text(ws->buffer);
+		if (symbol_provider_) {
+			symbol_provider_->on_document_closed(path);
+		}
+		tree_sitter_service().invalidate(path);
+		set_language_override_for_path(path, language_id);
+		workspace_config_.language_overrides = language_overrides_snapshot();
+		workspace_config_.save(workspace_.root);
+		tree_sitter_service().prepare_document(path, text);
+		if (symbol_provider_) {
+			symbol_provider_->on_document_opened(path, text);
+		}
+		ws->buffer.view_token++;
+		invalidate_editor_view(&layout_state_);
+		UI_WAKE(&layout_state_, "app");
+	};
 	layout_state_.explorer_refresh = [this]() { refresh_workspace_explorer(); };
 	layout_state_.status_open_source_substitute = [this]() {
 		if (app_mode_ != AppMode::kDebug || !debugging_started_) {
@@ -2685,6 +2872,24 @@ int Application::run() {
 		} else if (!any_modal_open()) {
 			open_source_substitute_modal(&source_substitute_state_, &model_, workspace_.root);
 		}
+		UI_WAKE(&layout_state_, "app");
+	};
+	layout_state_.open_ai_path_scope = [this]() {
+		if (ai_path_scope_state_.open) {
+			ai_path_scope_state_.open = false;
+			UI_WAKE(&layout_state_, "app");
+			return;
+		}
+		if (any_modal_open()) {
+			return;
+		}
+		std::vector<std::string> current;
+		if (layout_state_.ai_controller) {
+			current = layout_state_.ai_controller->path_scope();
+		} else {
+			current = workspace_config_.ai.path_scope;
+		}
+		open_ai_path_scope_modal(&ai_path_scope_state_, workspace_.root, current);
 		UI_WAKE(&layout_state_, "app");
 	};
 	layout_state_.status_quick_launch = [this]() { quick_launch_last(); };
@@ -2774,14 +2979,43 @@ int Application::run() {
 			UI_WAKE(&layout_state_, "app");
 		}
 	};
-	git_service_.set_update_callback([] {});
+	git_service_.set_update_callback([this] {
+		ui_wake(&layout_state_, "git.update", UiEventKind::InputCorrelated, [this] {
+			layout_state_.panel_render_cache.mark_dirty(UiPanelId::Console);
+		});
+	});
 	indexer_.set_change_notify([this](bool wake_ui) {
 		if (!wake_ui) {
 			return;
 		}
 		layout_state_.panel_render_cache.mark_dirty(UiPanelId::FileTree);
 		UI_WAKE(&layout_state_, "indexer.fs_change");
+		// Full rg list just replaced the skeleton: rebuild AI map if it is stale/short.
+		if (!indexer_.scanning() && ai_indexes_requested_) {
+			enqueue_ui_task([this]() { sync_symbol_workspace_indexer(false); });
+		}
 	});
+	symbol_indexer_.set_progress_callback([this](bool scanning, std::size_t done, std::size_t total) {
+		// ANSI busy strip: update from worker so % moves without waiting for a UI click.
+		refresh_ai_mapping_busy(&layout_state_, scanning, done, total);
+		// When the workspace symbol map completes, warm coding-stem embeddings — only if
+		// the AI tab (or force reindex) requested the pipeline.
+		if (!scanning && ai_indexes_requested_ && layout_state_.ai_controller != nullptr) {
+			layout_state_.ai_controller->on_symbol_map_ready();
+		}
+	});
+	layout_state_.on_ai_tab_opened = [this]() { request_ai_indexes(); };
+	layout_state_.on_ai_insert_requested = [this](const MainLayoutState::AiInsertRequest& req) {
+		if (!layout_state_.ai_controller) {
+			return;
+		}
+		AiInsertAnchor anchor;
+		anchor.path = req.absolute_path;
+		anchor.line = req.line;
+		anchor.col = req.col;
+		anchor.symbol_hint = req.symbol_hint;
+		layout_state_.ai_controller->begin_insert_at(anchor);
+	};
 	indexer_.set_modify_wake_predicate(
 	    [this](const std::string& absolute_path) { return is_editor_visible_path(absolute_path); });
 	refresh_editor_visible_paths();
@@ -2888,6 +3122,8 @@ int Application::run() {
 			flags.make_starting = symbol_provider_->make_lsp_starting();
 			flags.yaml_ready = symbol_provider_->yaml_lsp_ready();
 			flags.yaml_starting = symbol_provider_->yaml_lsp_starting();
+			flags.xml_ready = symbol_provider_->xml_lsp_ready();
+			flags.xml_starting = symbol_provider_->xml_lsp_starting();
 		}
 		return collect_tools_status(flags);
 	};
@@ -2906,7 +3142,22 @@ int Application::run() {
 	auto with_source_substitute = MakeSourceSubstituteModalOverlay(
 	    with_settings, &source_substitute_state_, &layout_state_, on_source_substitute_apply);
 
-	auto with_git_commit = MakeGitCommitModalOverlay(with_source_substitute, &git_service_,
+	AiPathScopeApplyCallback on_ai_path_scope_apply =
+	    [this](std::vector<std::string> paths) {
+		    if (layout_state_.ai_controller) {
+			    layout_state_.ai_controller->set_path_scope(std::move(paths));
+		    } else {
+			    workspace_config_.ai.path_scope = std::move(paths);
+			    if (!workspace_.root.empty()) {
+				    workspace_config_.save(workspace_.root);
+			    }
+		    }
+		    UI_WAKE(&layout_state_, "app");
+	    };
+	auto with_ai_path_scope = MakeAiPathScopeModalOverlay(
+	    with_source_substitute, &ai_path_scope_state_, &layout_state_, on_ai_path_scope_apply);
+
+	auto with_git_commit = MakeGitCommitModalOverlay(with_ai_path_scope, &git_service_,
 	                                                 &git_panel_state_, &layout_state_);
 
 	auto with_quit_confirm =
@@ -2956,7 +3207,11 @@ int Application::run() {
 	    [this] { on_lsp_missing_install(); }, [this] { on_lsp_missing_bundle(); },
 	    [this] { on_lsp_missing_ignore(); });
 
-	auto inner_root = CatchEvent(with_lsp_missing_toast, [this, &screen, on_command](const Event &event) {
+	auto with_ai_missing_toast = MakeAiMissingToastOverlay(
+	    with_lsp_missing_toast, &ai_missing_toast_state_, &layout_state_,
+	    [this] { on_ai_missing_install(); }, [this] { on_ai_missing_ignore(); });
+
+	auto inner_root = CatchEvent(with_ai_missing_toast, [this, &screen, on_command](const Event &event) {
 		try {
 			const bool editor_browse_active = app_mode_ == AppMode::kNormal ||
 			                                  model_.is_post_mortem || app_mode_ == AppMode::kDebug;
@@ -3132,6 +3387,22 @@ int Application::run() {
 				}
 			}
 
+			if (layout_state_.status_language_popover.open) {
+				if (HandleStatusLanguagePopoverKeys(&layout_state_.status_language_popover,
+				                                    event)) {
+					UI_WAKE(&layout_state_, "app");
+					return true;
+				}
+				if (event.is_mouse()) {
+					Event mouse_event = event;
+					if (layout_state_.status_bar_mouse_handler &&
+					    layout_state_.status_bar_mouse_handler(mouse_event)) {
+						UI_WAKE(&layout_state_, "app");
+						return true;
+					}
+				}
+			}
+
 			if (layout_state_.status_layout_popover.open) {
 				if (HandleStatusLayoutPopoverKeys(&layout_state_.status_layout_popover, event)) {
 					UI_WAKE(&layout_state_, "app");
@@ -3251,14 +3522,20 @@ int Application::run() {
 		}
 
 		if (handle_focus_shortcuts(event)) {
-			UI_WAKE(&layout_state_, "app.custom");
+			wake_console_panel(&layout_state_, "app.focus");
+			return true;
+		}
+
+		if (git_panel_state_.git_overlay_open() && event.is_mouse() &&
+		    layout_state_.git_mouse_handler && layout_state_.git_mouse_handler(event)) {
+			wake_console_panel(&layout_state_, "app.git.auth.mouse");
 			return true;
 		}
 
 		if (layout_state_.console_visible && event.is_mouse() &&
 		    git_tab_active(&layout_state_) && layout_state_.git_mouse_handler &&
 		    layout_state_.git_mouse_handler(event)) {
-			post_custom_throttled();
+			wake_console_panel(&layout_state_, "app.git.mouse");
 			// Evitar focus_sync en wheel: provoca el salto de layout.
 			Event mouse_event = event;
 			const auto button = mouse_event.mouse().button;
@@ -3280,15 +3557,20 @@ int Application::run() {
 		if (layout_state_.console_visible && event.is_mouse() &&
 		    problems_tab_active(&layout_state_) && layout_state_.problems_key_handler &&
 		    layout_state_.problems_key_handler(event)) {
-			post_custom_throttled();
-			layout_state_.focus_sync_needed = true;
+			wake_console_panel(&layout_state_, "app.problems.mouse");
+			// Evitar focus_sync en wheel: provoca el salto de layout.
+			Event mouse_event = event;
+			const auto button = mouse_event.mouse().button;
+			if (button != Mouse::WheelUp && button != Mouse::WheelDown) {
+				layout_state_.focus_sync_needed = true;
+			}
 			return true;
 		}
 
 		if (layout_state_.console_visible && event.is_mouse() &&
 		    search_tab_active(&layout_state_) && layout_state_.search_key_handler &&
 		    layout_state_.search_key_handler(event)) {
-			post_custom_throttled();
+			wake_console_panel(&layout_state_, "app.search.mouse");
 			layout_state_.focus_sync_needed = true;
 			return true;
 		}
@@ -3296,7 +3578,15 @@ int Application::run() {
 		if (layout_state_.console_visible && layout_state_.console_mouse_handler &&
 		    layout_state_.console_mouse_handler(event)) {
 			post_custom_throttled();
-			layout_state_.focus_sync_needed = true;
+			if (event.is_mouse()) {
+				Event mouse_event = event;
+				const auto button = mouse_event.mouse().button;
+				if (button != Mouse::WheelUp && button != Mouse::WheelDown) {
+					layout_state_.focus_sync_needed = true;
+				}
+			} else {
+				layout_state_.focus_sync_needed = true;
+			}
 			return true;
 		}
 
@@ -3385,7 +3675,7 @@ int Application::run() {
 			     (search_tab_active(&layout_state_) &&
 			      focus_state_.region == FocusRegion::Terminal)) &&
 			    layout_state_.search_key_handler && layout_state_.search_key_handler(event)) {
-				UI_WAKE(&layout_state_, "app.custom");
+				wake_console_panel(&layout_state_, "app.search");
 				return true;
 			}
 			if (call_hierarchy_tab_active(&layout_state_) &&
@@ -3399,7 +3689,7 @@ int Application::run() {
 			    focus_state_.region == FocusRegion::Terminal &&
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.problems_key_handler && layout_state_.problems_key_handler(event)) {
-				UI_WAKE(&layout_state_, "app.custom");
+				wake_console_panel(&layout_state_, "app.problems.keys");
 				return true;
 			}
 			if (performance_tab_active(&layout_state_) &&
@@ -3418,10 +3708,12 @@ int Application::run() {
 				UI_WAKE(&layout_state_, "app.custom");
 				return true;
 			}
-			if (git_tab_active(&layout_state_) && focus_state_.region == FocusRegion::Terminal &&
+			if ((git_panel_state_.git_overlay_open() ||
+			     (git_tab_active(&layout_state_) &&
+			      focus_state_.region == FocusRegion::Terminal)) &&
 			    !is_editor_chrome_input_focus(layout_state_.text_input_focus) &&
 			    layout_state_.git_key_handler && layout_state_.git_key_handler(event)) {
-				UI_WAKE(&layout_state_, "app.custom");
+				wake_console_panel(&layout_state_, "app.git");
 				return true;
 			}
 			if (core_analyzer_tab_active(&layout_state_) &&

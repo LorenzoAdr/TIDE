@@ -2,6 +2,7 @@
 #include "ui/busy_strip.hpp"
 #include "ui/ui_invalidation_policy.hpp"
 #include "ui/ui_wake.hpp"
+#include "editor/indent_guides.hpp"
 
 #include "editor/editor_buffer_source.hpp"
 #include "indexer/index_rules.hpp"
@@ -539,13 +540,18 @@ Component MakeOutlinePanel(WorkspaceModel* workspace, FocusManagerState* focus,
     } else {
       for (int i = start; i < end; ++i) {
         const auto& row = state->display_rows[static_cast<std::size_t>(i)];
-        std::string indent(static_cast<std::size_t>(row.indent), ' ');
+        const int depth = std::max(0, row.indent / 2);
         const bool is_scope = row.kind == OutlineRowKind::Scope;
         const std::string body = strip_symbol_kind_prefix(row.label);
         const std::string icon = symbol_kind_glyph(row.color_kind);
         const Color kind_color = theme::ColorForSymbolKind(row.color_kind);
-        Element line =
-            hbox({text(indent + icon + " ") | color(kind_color), text(body) | color(kind_color)});
+        Elements line_parts;
+        if (depth > 0) {
+          line_parts.push_back(text(tree_indent_guide_prefix(depth)) | color(theme::AccentDim()));
+        }
+        line_parts.push_back(text(icon + " ") | color(kind_color));
+        line_parts.push_back(text(body) | color(kind_color));
+        Element line = hbox(std::move(line_parts));
         if (is_scope) {
           line = line | dim;
         }

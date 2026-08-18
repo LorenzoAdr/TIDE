@@ -1,0 +1,22 @@
+[
+  {
+    "id": "multi_two_markers",
+    "prompt": "En src/util/shell_utils.hpp: (1) // L2_PS_A encima de shell_quote; (2) // L2_PS_B encima de command_exists. Ambos obligatorios.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.hpp"],
+      "diff_must_contain": ["L2_PS_A", "L2_PS_B"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "sibling_always_true",
+    "prompt": "Añade bool always_true(); en src/util/shell_utils.hpp junto a command_exists y bool always_true() { return true; } en src/util/shell_utils.cpp. Ambos archivos obligatorios.",
+    "expect": {
+      "paths_touched": ["src/util/shell_utils.hpp", "src/util/shell_utils.cpp"],
+      "diff_must_contain": ["always_true", "return true"],
+      "compile_ok": true,
+      "forbid_false_done": true
+    }
+  }
+]

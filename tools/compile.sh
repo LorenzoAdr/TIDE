@@ -26,6 +26,7 @@ BUNDLE_TSSERVER=0
 BUNDLE_NEOCMAKELSP=0
 BUNDLE_MAKE_LS=0
 BUNDLE_YAML_LS=0
+BUNDLE_LEMMINX=0
 FORCE_BUNDLED=0
 UI_LOCALE=en
 EDITOR_MODE=normal
@@ -112,6 +113,8 @@ Opciones:
   --no-bundle-make-ls        No embeber make-ls
   --bundle-yaml-ls           Embeber yaml-language-server
   --no-bundle-yaml-ls        No embeber yaml-language-server
+  --bundle-lemminx           Embeber LemMinX
+  --no-bundle-lemminx        No embeber LemMinX
   --build-backend=host|docker_focal|docker_bionic
                              Dónde compilar (host o Docker con glibc antigua)
   --target NAME              Solo compilar el target CMake (repetible; default: todos)
@@ -247,6 +250,7 @@ load_bundle_config() {
   BUNDLE_NEOCMAKELSP=0
   BUNDLE_MAKE_LS=0
   BUNDLE_YAML_LS=0
+  BUNDLE_LEMMINX=0
   FORCE_BUNDLED=0
   UI_LOCALE=en
   EDITOR_MODE=normal
@@ -303,6 +307,8 @@ load_bundle_config() {
       BUNDLE_MAKE_LS=0) BUNDLE_MAKE_LS=0 ;;
       BUNDLE_YAML_LS=1) BUNDLE_YAML_LS=1 ;;
       BUNDLE_YAML_LS=0) BUNDLE_YAML_LS=0 ;;
+      BUNDLE_LEMMINX=1) BUNDLE_LEMMINX=1 ;;
+      BUNDLE_LEMMINX=0) BUNDLE_LEMMINX=0 ;;
       FORCE_BUNDLED=1) FORCE_BUNDLED=1 ;;
       FORCE_BUNDLED=0) FORCE_BUNDLED=0 ;;
       UI_LOCALE=es) UI_LOCALE=es ;;
@@ -386,6 +392,7 @@ BUNDLE_TSSERVER=${BUNDLE_TSSERVER}
 BUNDLE_NEOCMAKELSP=${BUNDLE_NEOCMAKELSP}
 BUNDLE_MAKE_LS=${BUNDLE_MAKE_LS}
 BUNDLE_YAML_LS=${BUNDLE_YAML_LS}
+BUNDLE_LEMMINX=${BUNDLE_LEMMINX}
 FORCE_BUNDLED=${FORCE_BUNDLED}
 UI_LOCALE=${UI_LOCALE}
 EDITOR_MODE=${EDITOR_MODE}
@@ -601,6 +608,11 @@ cmake_bundle_args() {
     args+=(-DTUIDE_BUNDLE_YAML_LS=ON -DTUIDE_FORCE_BUNDLED_YAML_LS="${force}")
   else
     args+=(-DTUIDE_BUNDLE_YAML_LS=OFF -DTUIDE_FORCE_BUNDLED_YAML_LS=OFF)
+  fi
+  if [[ "${BUNDLE_LEMMINX}" == "1" ]]; then
+    args+=(-DTUIDE_BUNDLE_LEMMINX=ON -DTUIDE_FORCE_BUNDLED_LEMMINX="${force}")
+  else
+    args+=(-DTUIDE_BUNDLE_LEMMINX=OFF -DTUIDE_FORCE_BUNDLED_LEMMINX=OFF)
   fi
   case "${UI_LOCALE}" in
     es) args+=(-DTUIDE_DEFAULT_UI_LOCALE=es) ;;
@@ -967,6 +979,20 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE=0
       shift
       ;;
+    --bundle-lemminx)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_LEMMINX=1
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
+    --no-bundle-lemminx)
+      CLI_OVERRIDES_BUNDLE=1
+      BUNDLE_LEMMINX=0
+      SKIP_WIZARD=1
+      INTERACTIVE=0
+      shift
+      ;;
     --target)
       if [[ $# -lt 2 ]]; then
         die "--target requiere un nombre de target CMake"
@@ -1041,6 +1067,13 @@ log "proyecto: ${ROOT}"
 log "comprobando dependencias..."
 check_command cmake
 check_command g++
+
+if [[ "${SKIP_WIZARD}" == "0" ]] && { [[ ! -t 0 ]] || [[ ! -t 1 ]]; }; then
+  # Sin TTY (p. ej. task AI con stdout pipeado): el wizard FTXUI se quedaría colgado.
+  log "sin TTY: omitiendo asistente interactivo (usa .bundle-config / defaults; pasa -y explícito)"
+  SKIP_WIZARD=1
+  INTERACTIVE=0
+fi
 
 if [[ "${SKIP_WIZARD}" == "0" ]]; then
   # TUI primero (reutiliza wizard existente o lo compila en build-wizard/).
@@ -1185,6 +1218,11 @@ if [[ "${BUNDLE_YAML_LS}" == "1" ]]; then
   log "  yaml-language-server embebido: sí"
 else
   log "  yaml-language-server embebido: no"
+fi
+if [[ "${BUNDLE_LEMMINX}" == "1" ]]; then
+  log "  LemMinX embebido: sí"
+else
+  log "  LemMinX embebido: no"
 fi
 log "  forzar embebidos: ${FORCE_BUNDLED}"
 log "  idioma por defecto: ${UI_LOCALE}"

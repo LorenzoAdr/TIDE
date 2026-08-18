@@ -63,6 +63,274 @@ void parse_compile_commands_settings(const nlohmann::json& doc,
   }
 }
 
+void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
+  if (settings == nullptr || !doc.is_object()) {
+    return;
+  }
+  if (doc.contains("enabled") && doc["enabled"].is_boolean()) {
+    settings->enabled = doc["enabled"].get<bool>();
+  }
+  if (doc.contains("command_whitelist") && doc["command_whitelist"].is_array()) {
+    settings->command_whitelist.clear();
+    for (const auto& entry : doc["command_whitelist"]) {
+      if (entry.is_string()) {
+        const std::string value = entry.get<std::string>();
+        if (!value.empty()) {
+          settings->command_whitelist.push_back(value);
+        }
+      }
+    }
+  }
+  if (doc.contains("tasks") && doc["tasks"].is_object()) {
+    settings->tasks.clear();
+    for (const auto& entry : doc["tasks"].items()) {
+      if (entry.value().is_string()) {
+        settings->tasks.emplace_back(entry.key(), entry.value().get<std::string>());
+      } else if (entry.value().is_object() && entry.value().contains("command") &&
+                 entry.value()["command"].is_string()) {
+        settings->tasks.emplace_back(entry.key(), entry.value()["command"].get<std::string>());
+      }
+    }
+  }
+  if (doc.contains("level2") && doc["level2"].is_object()) {
+    const auto& level2 = doc["level2"];
+    if (level2.contains("mode") && level2["mode"].is_string()) {
+      settings->level2_mode = level2["mode"].get<std::string>();
+    }
+    if (level2.contains("workflow") && level2["workflow"].is_string()) {
+      settings->level2_workflow =
+          ai_workflow_kind_name(parse_ai_workflow_kind(level2["workflow"].get<std::string>()));
+    }
+    if (level2.contains("git_log_n") && level2["git_log_n"].is_number_integer()) {
+      int n = level2["git_log_n"].get<int>();
+      if (n < 1) {
+        n = 1;
+      }
+      if (n > 50) {
+        n = 50;
+      }
+      settings->level2_git_log_n = n;
+    }
+    auto& l2 = settings->level2;
+    if (level2.contains("model_id") && level2["model_id"].is_string()) {
+      l2.model_id = level2["model_id"].get<std::string>();
+    }
+    if (level2.contains("model_path") && level2["model_path"].is_string()) {
+      l2.model_path = level2["model_path"].get<std::string>();
+    }
+    if (level2.contains("cli_path") && level2["cli_path"].is_string()) {
+      l2.cli_path = level2["cli_path"].get<std::string>();
+    }
+    if (level2.contains("api_base") && level2["api_base"].is_string()) {
+      l2.api_base = level2["api_base"].get<std::string>();
+    }
+    if (level2.contains("api_key") && level2["api_key"].is_string()) {
+      l2.api_key = level2["api_key"].get<std::string>();
+    }
+    if (level2.contains("api_model") && level2["api_model"].is_string()) {
+      l2.api_model = level2["api_model"].get<std::string>();
+    }
+    if (level2.contains("max_steps") && level2["max_steps"].is_number_integer()) {
+      l2.max_steps = level2["max_steps"].get<int>();
+    }
+    if (level2.contains("max_tokens") && level2["max_tokens"].is_number_integer()) {
+      l2.max_tokens = level2["max_tokens"].get<int>();
+    }
+    if (level2.contains("n_ctx") && level2["n_ctx"].is_number_integer()) {
+      l2.n_ctx = level2["n_ctx"].get<int>();
+    }
+    if (level2.contains("n_ctx_remote") && level2["n_ctx_remote"].is_number_integer()) {
+      l2.n_ctx_remote = level2["n_ctx_remote"].get<int>();
+    }
+    if (level2.contains("temperature") && level2["temperature"].is_number()) {
+      l2.temperature = level2["temperature"].get<float>();
+    }
+    if (level2.contains("auto_download") && level2["auto_download"].is_boolean()) {
+      l2.auto_download = level2["auto_download"].get<bool>();
+    }
+    if (level2.contains("clarify_pushback_max") && level2["clarify_pushback_max"].is_number_integer()) {
+      l2.clarify_pushback_max = level2["clarify_pushback_max"].get<int>();
+    }
+    if (level2.contains("server_port") && level2["server_port"].is_number_integer()) {
+      l2.server_port = level2["server_port"].get<int>();
+    }
+    if (level2.contains("n_gpu_layers") && level2["n_gpu_layers"].is_number_integer()) {
+      l2.n_gpu_layers = level2["n_gpu_layers"].get<int>();
+    }
+    if (level2.contains("n_threads") && level2["n_threads"].is_number_integer()) {
+      l2.n_threads = level2["n_threads"].get<int>();
+    }
+  } else if (doc.contains("level2_mode") && doc["level2_mode"].is_string()) {
+    settings->level2_mode = doc["level2_mode"].get<std::string>();
+  }
+  if (doc.contains("level2_workflow") && doc["level2_workflow"].is_string()) {
+    settings->level2_workflow =
+        ai_workflow_kind_name(parse_ai_workflow_kind(doc["level2_workflow"].get<std::string>()));
+  }
+  if (doc.contains("path_scope") && doc["path_scope"].is_array()) {
+    settings->path_scope.clear();
+    for (const auto& entry : doc["path_scope"]) {
+      if (entry.is_string()) {
+        const std::string value = entry.get<std::string>();
+        if (!value.empty()) {
+          settings->path_scope.push_back(value);
+        }
+      }
+    }
+  }
+  if (doc.contains("models") && doc["models"].is_object() &&
+      doc["models"].contains("cache_dir") && doc["models"]["cache_dir"].is_string()) {
+    settings->models_cache_dir = doc["models"]["cache_dir"].get<std::string>();
+  }
+  if (doc.contains("trace") && doc["trace"].is_object()) {
+    const auto& tr = doc["trace"];
+    if (tr.contains("enabled") && tr["enabled"].is_boolean()) {
+      settings->trace_enabled = tr["enabled"].get<bool>();
+    }
+    if (tr.contains("path") && tr["path"].is_string()) {
+      settings->trace_path = tr["path"].get<std::string>();
+    }
+  } else if (doc.contains("trace_enabled") && doc["trace_enabled"].is_boolean()) {
+    settings->trace_enabled = doc["trace_enabled"].get<bool>();
+  }
+  if (doc.contains("llama_vulkan_bundle") && doc["llama_vulkan_bundle"].is_boolean()) {
+    settings->llama_vulkan_bundle = doc["llama_vulkan_bundle"].get<bool>();
+  }
+  if (doc.contains("level1") && doc["level1"].is_object()) {
+    const auto& l1 = doc["level1"];
+    if (l1.contains("model_id") && l1["model_id"].is_string()) {
+      settings->level1.model_id = l1["model_id"].get<std::string>();
+    }
+    if (l1.contains("model_path") && l1["model_path"].is_string()) {
+      settings->level1.model_path = l1["model_path"].get<std::string>();
+    }
+    if (l1.contains("cli_path") && l1["cli_path"].is_string()) {
+      settings->level1.cli_path = l1["cli_path"].get<std::string>();
+    }
+    if (l1.contains("max_steps") && l1["max_steps"].is_number_integer()) {
+      settings->level1.max_steps = l1["max_steps"].get<int>();
+    }
+    if (l1.contains("max_tokens") && l1["max_tokens"].is_number_integer()) {
+      settings->level1.max_tokens = l1["max_tokens"].get<int>();
+    }
+    if (l1.contains("n_ctx") && l1["n_ctx"].is_number_integer()) {
+      settings->level1.n_ctx = l1["n_ctx"].get<int>();
+    }
+    if (l1.contains("temperature") && l1["temperature"].is_number()) {
+      settings->level1.temperature = l1["temperature"].get<float>();
+    }
+    if (l1.contains("auto_download") && l1["auto_download"].is_boolean()) {
+      settings->level1.auto_download = l1["auto_download"].get<bool>();
+    }
+  }
+  if (doc.contains("level0") && doc["level0"].is_object()) {
+    const auto& l0 = doc["level0"];
+    if (l0.contains("min_score") && l0["min_score"].is_number()) {
+      settings->level0.min_score = l0["min_score"].get<float>();
+    }
+    if (l0.contains("min_margin") && l0["min_margin"].is_number()) {
+      settings->level0.min_margin = l0["min_margin"].get<float>();
+    }
+    if (l0.contains("embeddings") && l0["embeddings"].is_object()) {
+      const auto& emb = l0["embeddings"];
+      if (emb.contains("model_id") && emb["model_id"].is_string()) {
+        settings->level0.embeddings.model_id = emb["model_id"].get<std::string>();
+      }
+      if (emb.contains("model_path") && emb["model_path"].is_string()) {
+        settings->level0.embeddings.model_path = emb["model_path"].get<std::string>();
+      }
+      if (emb.contains("auto_download") && emb["auto_download"].is_boolean()) {
+        settings->level0.embeddings.auto_download = emb["auto_download"].get<bool>();
+      }
+      if (emb.contains("server_port") && emb["server_port"].is_number_integer()) {
+        settings->level0.embeddings.server_port = emb["server_port"].get<int>();
+      }
+      if (emb.contains("n_ctx") && emb["n_ctx"].is_number_integer()) {
+        settings->level0.embeddings.n_ctx = emb["n_ctx"].get<int>();
+      }
+      if (emb.contains("n_gpu_layers") && emb["n_gpu_layers"].is_number_integer()) {
+        settings->level0.embeddings.n_gpu_layers = emb["n_gpu_layers"].get<int>();
+      }
+      if (emb.contains("n_threads") && emb["n_threads"].is_number_integer()) {
+        settings->level0.embeddings.n_threads = emb["n_threads"].get<int>();
+      }
+      if (emb.contains("batch_size") && emb["batch_size"].is_number_integer()) {
+        settings->level0.embeddings.batch_size = emb["batch_size"].get<int>();
+      }
+      if (emb.contains("ubatch_size") && emb["ubatch_size"].is_number_integer()) {
+        settings->level0.embeddings.ubatch_size = emb["ubatch_size"].get<int>();
+      }
+      if (emb.contains("n_parallel") && emb["n_parallel"].is_number_integer()) {
+        settings->level0.embeddings.n_parallel = emb["n_parallel"].get<int>();
+      }
+      if (emb.contains("http_batch") && emb["http_batch"].is_number_integer()) {
+        settings->level0.embeddings.http_batch = emb["http_batch"].get<int>();
+      }
+    }
+  }
+}
+
+nlohmann::json serialize_ai_settings(const AiSettings& settings) {
+  nlohmann::json tasks = nlohmann::json::object();
+  for (const auto& [name, command] : settings.tasks) {
+    tasks[name] = {{"command", command}};
+  }
+  return nlohmann::json{
+      {"enabled", settings.enabled},
+      {"command_whitelist", settings.command_whitelist},
+      {"tasks", std::move(tasks)},
+      {"path_scope", settings.path_scope},
+      {"level2",
+       {{"mode", settings.level2_mode},
+        {"workflow", ai_workflow_kind_name(parse_ai_workflow_kind(settings.level2_workflow))},
+        {"git_log_n", settings.level2_git_log_n},
+        {"model_id", settings.level2.model_id},
+        {"model_path", settings.level2.model_path},
+        {"cli_path", settings.level2.cli_path},
+        {"api_base", settings.level2.api_base},
+        {"api_key", settings.level2.api_key},
+        {"api_model", settings.level2.api_model},
+        {"max_steps", settings.level2.max_steps},
+        {"max_tokens", settings.level2.max_tokens},
+        {"n_ctx", settings.level2.n_ctx},
+        {"n_ctx_remote", settings.level2.n_ctx_remote},
+        {"temperature", settings.level2.temperature},
+        {"auto_download", settings.level2.auto_download},
+        {"clarify_pushback_max", settings.level2.clarify_pushback_max},
+        {"server_port", settings.level2.server_port},
+        {"n_gpu_layers", settings.level2.n_gpu_layers},
+        {"n_threads", settings.level2.n_threads}}},
+      {"models", {{"cache_dir", settings.models_cache_dir}}},
+      {"trace",
+       {{"enabled", settings.trace_enabled}, {"path", settings.trace_path}}},
+      {"llama_vulkan_bundle", settings.llama_vulkan_bundle},
+      {"level0",
+       {{"min_score", settings.level0.min_score},
+        {"min_margin", settings.level0.min_margin},
+        {"embeddings",
+         {{"model_id", settings.level0.embeddings.model_id},
+          {"model_path", settings.level0.embeddings.model_path},
+          {"auto_download", settings.level0.embeddings.auto_download},
+          {"server_port", settings.level0.embeddings.server_port},
+          {"n_ctx", settings.level0.embeddings.n_ctx},
+          {"n_gpu_layers", settings.level0.embeddings.n_gpu_layers},
+          {"n_threads", settings.level0.embeddings.n_threads},
+          {"batch_size", settings.level0.embeddings.batch_size},
+          {"ubatch_size", settings.level0.embeddings.ubatch_size},
+          {"n_parallel", settings.level0.embeddings.n_parallel},
+          {"http_batch", settings.level0.embeddings.http_batch}}}}},
+      {"level1",
+       {{"model_id", settings.level1.model_id},
+        {"model_path", settings.level1.model_path},
+        {"cli_path", settings.level1.cli_path},
+        {"max_steps", settings.level1.max_steps},
+        {"max_tokens", settings.level1.max_tokens},
+        {"n_ctx", settings.level1.n_ctx},
+        {"temperature", settings.level1.temperature},
+        {"auto_download", settings.level1.auto_download}}},
+  };
+}
+
 void parse_env_vars_object(const nlohmann::json& doc, std::map<std::string, std::string>* out) {
   if (out == nullptr || !doc.is_object()) {
     return;
@@ -311,6 +579,24 @@ WorkspaceConfig WorkspaceConfig::load(const std::string& workspace_root) {
     if (doc.contains("build_environments")) {
       parse_build_environment_settings(doc["build_environments"], &config.build_environments);
     }
+    if (doc.contains("ai")) {
+      parse_ai_settings(doc["ai"], &config.ai);
+    }
+    if (doc.contains("language_overrides") && doc["language_overrides"].is_object()) {
+      for (auto it = doc["language_overrides"].begin(); it != doc["language_overrides"].end();
+           ++it) {
+        if (!it.key().empty() && it.value().is_string()) {
+          const std::string lang = it.value().get<std::string>();
+          if (!lang.empty()) {
+            config.language_overrides[it.key()] = lang;
+          }
+        }
+      }
+    }
+    // Legacy / hand-edited: allow llama_vulkan_bundle at workspace root.
+    if (doc.contains("llama_vulkan_bundle") && doc["llama_vulkan_bundle"].is_boolean()) {
+      config.ai.llama_vulkan_bundle = doc["llama_vulkan_bundle"].get<bool>();
+    }
   } catch (...) {
     return WorkspaceConfig{};
   }
@@ -369,6 +655,16 @@ bool WorkspaceConfig::save(const std::string& workspace_root) const {
       {"make_default_target", build_environments.make_default_target},
       {"profiles", std::move(profiles)},
   };
+  doc["ai"] = serialize_ai_settings(ai);
+  if (!language_overrides.empty()) {
+    nlohmann::json overrides = nlohmann::json::object();
+    for (const auto& entry : language_overrides) {
+      if (!entry.first.empty() && !entry.second.empty()) {
+        overrides[entry.first] = entry.second;
+      }
+    }
+    doc["language_overrides"] = std::move(overrides);
+  }
 
   std::ofstream output(config_path(workspace_root));
   if (!output) {

@@ -1,0 +1,10 @@
+{
+  "mode": "closed_loop",
+  "metric_primary": "facet_recall",
+  "rounds": [
+    {"id": "r1", "env": {"L2_FEAT_CLARIFY_NEED_PATH": "1"}, "promote_features": ["CLARIFY_NEED_PATH"], "description": "No clarify si Instruction tiene src/ paths"},
+    {"id": "r2", "env": {"L2_FEAT_CLARIFY_NEED_PATH": "1", "L2_FEAT_DONE_PATH_GATE": "1"}, "promote_features": ["DONE_PATH_GATE"], "description": "Clarify bar + done path gate"}
+  ],
+  "promote_if": {"relative_gain_pct": 5.0, "min_all_pass_delta": 1},
+  "revert_if_regression": true
+}

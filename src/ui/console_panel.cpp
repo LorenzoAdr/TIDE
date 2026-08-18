@@ -2,6 +2,7 @@
 #include "ui/terminal_ui_channel.hpp"
 #include "terminal/app_session.hpp"
 #include "ui/ui_wake.hpp"
+#include "ai/ai_controller.hpp"
 
 #include <algorithm>
 #include <array>
@@ -30,6 +31,7 @@
 #include "ui/key_bindings.hpp"
 #include "ui/main_layout.hpp"
 #include "ui/clickable.hpp"
+#include "ui/busy_strip.hpp"
 #include "ui/hover_effects.hpp"
 #include "ui/cursor_blink_ui.hpp"
 #include "ui/press_ids.hpp"
@@ -50,6 +52,7 @@
 #include "ui/scroll_bar.hpp"
 #include "ui/terminal_display.hpp"
 #include "ui/theme.hpp"
+#include "ui/ai_transcript_view.hpp"
 #include "i18n/tr.hpp"
 #include "util/compiler_location.hpp"
 #include "util/monitor_log.hpp"
@@ -63,6 +66,8 @@ namespace {
 void wake_console(MainLayoutState* layout, std::string_view tag = "wake") {
   wake_console_panel(layout, tag);
 }
+
+enum class ConsoleSelectionKind { kPty, kGdb, kAi };
 
 struct ConsolePanelState {
   std::string input;
@@ -83,6 +88,25 @@ struct ConsolePanelState {
   int first_visible = 0;
   std::size_t last_output_size = 0;
   bool follow_tail = true;
+  int ai_first_visible = 0;
+  std::size_t ai_last_output_size = 0;
+  bool ai_follow_tail = true;
+  int ai_last_visible_lines = 1;
+  Box ai_history_box;
+  Box ai_input_box;
+  Box ai_stop_box;
+  Box ai_reset_box;
+  Box ai_workflow_box;
+  Box ai_workflow_opt_boxes[4];
+  Box ai_backend_box;
+  Box ai_backend_opt_boxes[2];
+  Box ai_path_scope_box;
+  bool ai_workflow_menu_open = false;
+  bool ai_backend_menu_open = false;
+  // Ignore outside/button close until the next mouse move after opening (avoids
+  // double-Pressed from the same click toggling the menu shut immediately).
+  bool ai_workflow_menu_ignore_close = false;
+  bool ai_backend_menu_ignore_close = false;
   int last_terminal_cols = 0;
   int last_terminal_rows = 0;
   int pending_terminal_cols = 80;
@@ -110,11 +134,14 @@ struct ConsolePanelState {
     }
   };
   std::optional<TerminalLinkHover> terminal_link_hover;
+  std::optional<int> ai_result_hover_row;  // absolute transcript line index
 
-  // Text selection in terminal / App / Debug console output (editor-like copy).
+  // Text selection in terminal / App / Debug / AI console output (editor-like copy).
   bool terminal_selecting = false;
   bool terminal_has_selection = false;
-  bool terminal_selection_is_gdb = false;  // false: PTY styled rows; true: model->console_output
+  bool terminal_line_select_drag = false;
+  ConsoleSelectionKind terminal_selection_kind = ConsoleSelectionKind::kPty;
+  int terminal_line_select_anchor = 0;
   int terminal_sel_anchor_row = 0;
   int terminal_sel_anchor_col = 0;
   int terminal_sel_head_row = 0;
@@ -123,8 +150,9 @@ struct ConsolePanelState {
   int last_term_click_col = -1;
   int64_t last_term_click_ms = 0;
   int last_term_click_count = 0;
+  std::vector<std::string> ai_line_cache;
   std::string last_workspace_root;
-  std::array<Box, 11> tab_boxes;
+  std::array<Box, 12> tab_boxes;
   Box hide_box;
   Box filter_box;
   std::string pty_filter;
@@ -341,7 +369,9 @@ void clear_terminal_selection(ConsolePanelState* state) {
   }
   state->terminal_selecting = false;
   state->terminal_has_selection = false;
-  state->terminal_selection_is_gdb = false;
+  state->terminal_line_select_drag = false;
+  state->terminal_line_select_anchor = 0;
+  state->terminal_selection_kind = ConsoleSelectionKind::kPty;
 }
 
 constexpr int kConsoleDoubleClickMs = 400;
@@ -390,30 +420,40 @@ void console_word_bounds_at(const std::string& line, int col, int* start_col, in
   *end_col = end;
 }
 
-bool is_console_double_click(const ConsolePanelState& state, int row, int col, int64_t now_ms) {
+bool console_same_click_spot(const ConsolePanelState& state, int row, int col, int64_t now_ms) {
   if (state.last_term_click_row != row) {
     return false;
   }
   if (std::abs(state.last_term_click_col - col) > 1) {
     return false;
   }
-  if (now_ms - state.last_term_click_ms > kConsoleDoubleClickMs) {
-    return false;
-  }
-  return state.last_term_click_count == 1;
+  return now_ms - state.last_term_click_ms <= kConsoleDoubleClickMs;
+}
+
+bool is_console_double_click(const ConsolePanelState& state, int row, int col, int64_t now_ms) {
+  return console_same_click_spot(state, row, col, now_ms) && state.last_term_click_count == 1;
+}
+
+bool is_console_triple_click(const ConsolePanelState& state, int row, int col, int64_t now_ms) {
+  return console_same_click_spot(state, row, col, now_ms) && state.last_term_click_count >= 2;
 }
 
 void note_console_click(ConsolePanelState* state, int row, int col, int64_t now_ms) {
   if (state == nullptr) {
     return;
   }
-  const bool same_spot = state->last_term_click_row == row &&
-                         std::abs(state->last_term_click_col - col) <= 1 &&
-                         now_ms - state->last_term_click_ms <= kConsoleDoubleClickMs;
+  const bool same_spot = console_same_click_spot(*state, row, col, now_ms);
   state->last_term_click_count = same_spot ? state->last_term_click_count + 1 : 1;
   state->last_term_click_row = row;
   state->last_term_click_col = col;
   state->last_term_click_ms = now_ms;
+}
+
+void refresh_ai_line_cache(ConsolePanelState* state, AiController* ai) {
+  if (state == nullptr || ai == nullptr) {
+    return;
+  }
+  state->ai_line_cache = ai->snapshot_lines();
 }
 
 std::string console_selection_line(const ConsolePanelState* state, const DebugModel* model,
@@ -421,12 +461,18 @@ std::string console_selection_line(const ConsolePanelState* state, const DebugMo
   if (state == nullptr) {
     return {};
   }
-  if (state->terminal_selection_is_gdb) {
+  if (state->terminal_selection_kind == ConsoleSelectionKind::kGdb) {
     if (model == nullptr || row < 0 ||
         row >= static_cast<int>(model->console_output.size())) {
       return {};
     }
     return model->console_output[static_cast<std::size_t>(row)];
+  }
+  if (state->terminal_selection_kind == ConsoleSelectionKind::kAi) {
+    if (row < 0 || row >= static_cast<int>(state->ai_line_cache.size())) {
+      return {};
+    }
+    return state->ai_line_cache[static_cast<std::size_t>(row)];
   }
   if (row < 0 || row >= static_cast<int>(state->terminal_styled_rows.size())) {
     return {};
@@ -438,18 +484,36 @@ int console_selection_line_count(const ConsolePanelState* state, const DebugMode
   if (state == nullptr) {
     return 0;
   }
-  if (state->terminal_selection_is_gdb) {
+  if (state->terminal_selection_kind == ConsoleSelectionKind::kGdb) {
     return model != nullptr ? static_cast<int>(model->console_output.size()) : 0;
+  }
+  if (state->terminal_selection_kind == ConsoleSelectionKind::kAi) {
+    return static_cast<int>(state->ai_line_cache.size());
   }
   return static_cast<int>(state->terminal_styled_rows.size());
 }
 
+void begin_console_drag_selection(ConsolePanelState* state, int row, int col,
+                                  ConsoleSelectionKind kind) {
+  if (state == nullptr) {
+    return;
+  }
+  state->terminal_selection_kind = kind;
+  state->terminal_selecting = true;
+  state->terminal_line_select_drag = false;
+  state->terminal_has_selection = false;
+  state->terminal_sel_anchor_row = std::max(0, row);
+  state->terminal_sel_anchor_col = std::max(0, col);
+  state->terminal_sel_head_row = state->terminal_sel_anchor_row;
+  state->terminal_sel_head_col = state->terminal_sel_anchor_col;
+}
+
 bool select_console_word_at(ConsolePanelState* state, const DebugModel* model, int row, int col,
-                            bool gdb) {
+                            ConsoleSelectionKind kind) {
   if (state == nullptr) {
     return false;
   }
-  state->terminal_selection_is_gdb = gdb;
+  state->terminal_selection_kind = kind;
   const std::string line = console_selection_line(state, model, row);
   if (line.empty()) {
     return false;
@@ -461,12 +525,99 @@ bool select_console_word_at(ConsolePanelState* state, const DebugModel* model, i
     return false;
   }
   state->terminal_selecting = false;
+  state->terminal_line_select_drag = false;
   state->terminal_has_selection = true;
   state->terminal_sel_anchor_row = row;
   state->terminal_sel_anchor_col = start;
   state->terminal_sel_head_row = row;
   state->terminal_sel_head_col = end;
   return true;
+}
+
+bool select_console_line_at(ConsolePanelState* state, const DebugModel* model, int row,
+                            ConsoleSelectionKind kind) {
+  if (state == nullptr) {
+    return false;
+  }
+  state->terminal_selection_kind = kind;
+  const int total = console_selection_line_count(state, model);
+  if (row < 0 || row >= total) {
+    return false;
+  }
+  const std::string line = console_selection_line(state, model, row);
+  state->terminal_selecting = true;
+  state->terminal_line_select_drag = true;
+  state->terminal_line_select_anchor = row;
+  state->terminal_has_selection = true;
+  state->terminal_sel_anchor_row = row;
+  state->terminal_sel_anchor_col = 0;
+  // Exclusive end at the start of the next line so copy includes the newline.
+  if (row + 1 < total) {
+    state->terminal_sel_head_row = row + 1;
+    state->terminal_sel_head_col = 0;
+  } else {
+    state->terminal_sel_head_row = row;
+    state->terminal_sel_head_col = static_cast<int>(line.size());
+  }
+  return true;
+}
+
+void apply_console_line_drag(ConsolePanelState* state, const DebugModel* model, int row) {
+  if (state == nullptr || !state->terminal_line_select_drag) {
+    return;
+  }
+  const int total = console_selection_line_count(state, model);
+  if (total <= 0) {
+    return;
+  }
+  row = std::max(0, std::min(row, total - 1));
+  const int a = std::min(state->terminal_line_select_anchor, row);
+  const int b = std::max(state->terminal_line_select_anchor, row);
+  const std::string end_line = console_selection_line(state, model, b);
+  state->terminal_sel_anchor_row = a;
+  state->terminal_sel_anchor_col = 0;
+  if (b + 1 < total) {
+    state->terminal_sel_head_row = b + 1;
+    state->terminal_sel_head_col = 0;
+  } else {
+    state->terminal_sel_head_row = b;
+    state->terminal_sel_head_col = static_cast<int>(end_line.size());
+  }
+  state->terminal_has_selection = true;
+}
+
+void update_console_drag_head(ConsolePanelState* state, const DebugModel* model, int row,
+                              int col) {
+  if (state == nullptr) {
+    return;
+  }
+  if (state->terminal_line_select_drag) {
+    apply_console_line_drag(state, model, row);
+    return;
+  }
+  state->terminal_sel_head_row = std::max(0, row);
+  state->terminal_sel_head_col = std::max(0, col);
+  state->terminal_has_selection = true;
+}
+
+enum class ConsoleMultiClick { kNone, kWord, kLine };
+
+ConsoleMultiClick apply_console_multi_click(ConsolePanelState* state, const DebugModel* model,
+                                            int row, int col, int64_t now_ms,
+                                            ConsoleSelectionKind kind) {
+  if (state == nullptr) {
+    return ConsoleMultiClick::kNone;
+  }
+  const bool triple_click = is_console_triple_click(*state, row, col, now_ms);
+  const bool double_click = is_console_double_click(*state, row, col, now_ms);
+  note_console_click(state, row, col, now_ms);
+  if (triple_click && select_console_line_at(state, model, row, kind)) {
+    return ConsoleMultiClick::kLine;
+  }
+  if (double_click && select_console_word_at(state, model, row, col, kind)) {
+    return ConsoleMultiClick::kWord;
+  }
+  return ConsoleMultiClick::kNone;
 }
 
 void normalize_terminal_selection(const ConsolePanelState& state, int* a_row, int* a_col,
@@ -479,6 +630,27 @@ void normalize_terminal_selection(const ConsolePanelState& state, int* a_row, in
     std::swap(*a_row, *b_row);
     std::swap(*a_col, *b_col);
   }
+}
+
+bool console_line_in_selection(const ConsolePanelState* state, ConsoleSelectionKind kind,
+                               int row) {
+  if (state == nullptr || !state->terminal_has_selection ||
+      state->terminal_selection_kind != kind) {
+    return false;
+  }
+  int a_row = 0;
+  int a_col = 0;
+  int b_row = 0;
+  int b_col = 0;
+  normalize_terminal_selection(*state, &a_row, &a_col, &b_row, &b_col);
+  if (row < a_row || row > b_row) {
+    return false;
+  }
+  // Exclusive end at column 0 of b_row means that line is not part of the span.
+  if (row == b_row && b_col == 0) {
+    return false;
+  }
+  return true;
 }
 
 bool terminal_cell_selected(const ConsolePanelState* state, int row, int col) {
@@ -503,6 +675,29 @@ bool terminal_cell_selected(const ConsolePanelState* state, int row, int col) {
     return col < b_col;
   }
   return true;
+}
+
+Element render_plain_line_with_selection(const std::string& line, int row,
+                                         const ConsolePanelState* state,
+                                         ConsoleSelectionKind kind, Color fg) {
+  if (line.empty()) {
+    return text(" ") | color(fg);
+  }
+  if (!console_line_in_selection(state, kind, row)) {
+    return text(line) | color(fg);
+  }
+  Elements parts;
+  parts.reserve(line.size());
+  for (int col = 0; col < static_cast<int>(line.size()); ++col) {
+    Element cell = text(std::string(1, line[static_cast<std::size_t>(col)]));
+    if (terminal_cell_selected(state, row, col)) {
+      cell = cell | bgcolor(theme::SelectionBg()) | color(theme::UiText());
+    } else {
+      cell = cell | color(fg);
+    }
+    parts.push_back(std::move(cell));
+  }
+  return hbox(std::move(parts));
 }
 
 std::string terminal_selected_text(const ConsolePanelState* state, const DebugModel* model) {
@@ -540,7 +735,12 @@ std::string terminal_selected_text(const ConsolePanelState* state, const DebugMo
   return out.str();
 }
 
-bool copy_terminal_selection(ConsolePanelState* state, const DebugModel* model = nullptr) {
+bool copy_terminal_selection(ConsolePanelState* state, const DebugModel* model = nullptr,
+                             AiController* ai = nullptr) {
+  if (state != nullptr && state->terminal_selection_kind == ConsoleSelectionKind::kAi &&
+      ai != nullptr) {
+    refresh_ai_line_cache(state, ai);
+  }
   const std::string text = terminal_selected_text(state, model);
   if (text.empty()) {
     return false;
@@ -626,6 +826,89 @@ bool open_terminal_link(WorkspaceModel* workspace, DebugModel* model, FocusManag
   return true;
 }
 
+bool ai_history_box_valid(const Box& box) {
+  return !box.IsEmpty() && box.y_max >= box.y_min && box.x_max >= box.x_min;
+}
+
+std::optional<CompilerLocationMatch> ai_result_at_line(const std::string& line) {
+  const auto loc = parse_ai_result_location(line);
+  if (!loc.has_value()) {
+    return std::nullopt;
+  }
+  CompilerLocationMatch match;
+  match.path = loc->path;
+  match.line = loc->line > 0 ? loc->line : 1;
+  match.column = 0;
+  match.span_start = 0;
+  match.span_end = static_cast<int>(line.size());
+  return match;
+}
+
+bool update_ai_result_hover(ConsolePanelState* state, MainLayoutState* layout_state,
+                            AiController* ai, int x, int y) {
+  if (!hover_effects_enabled()) {
+    return false;
+  }
+  auto clear_hover = [&]() -> bool {
+    const bool had = state != nullptr && state->ai_result_hover_row.has_value();
+    if (state != nullptr) {
+      state->ai_result_hover_row.reset();
+    }
+    if (layout_state != nullptr) {
+      layout_state->clickable.clear_hover_if(
+          [](std::string_view id) { return id == press_id::kAiResultLink; });
+    }
+    return had;
+  };
+
+  if (state == nullptr || ai == nullptr || !ai_tab_active(layout_state) ||
+      !ai_history_box_valid(state->ai_history_box) || !state->ai_history_box.Contain(x, y)) {
+    return clear_hover();
+  }
+
+  const int visual_row = y - state->ai_history_box.y_min;
+  const int row_index = state->ai_first_visible + visual_row;
+  const std::vector<std::string> lines = ai->snapshot_lines();
+  std::optional<int> hover;
+  if (row_index >= 0 && row_index < static_cast<int>(lines.size()) &&
+      ai_result_at_line(lines[static_cast<std::size_t>(row_index)]).has_value()) {
+    hover = row_index;
+  }
+
+  const bool changed = hover != state->ai_result_hover_row;
+  state->ai_result_hover_row = hover;
+  if (layout_state != nullptr) {
+    if (hover.has_value()) {
+      layout_state->clickable.set_hover(press_id::kAiResultLink);
+    } else {
+      layout_state->clickable.clear_hover_if(
+          [](std::string_view id) { return id == press_id::kAiResultLink; });
+    }
+  }
+  return changed;
+}
+
+bool try_open_ai_result_at(ConsolePanelState* state, AiController* ai, WorkspaceModel* workspace,
+                           DebugModel* model, FocusManagerState* focus,
+                           MainLayoutState* layout_state, int x, int y) {
+  if (state == nullptr || ai == nullptr || workspace == nullptr ||
+      !ai_history_box_valid(state->ai_history_box) || !state->ai_history_box.Contain(x, y)) {
+    return false;
+  }
+  const int visual_row = y - state->ai_history_box.y_min;
+  const int row_index = state->ai_first_visible + visual_row;
+  const std::vector<std::string> lines = ai->snapshot_lines();
+  if (row_index < 0 || row_index >= static_cast<int>(lines.size())) {
+    return false;
+  }
+  const auto match = ai_result_at_line(lines[static_cast<std::size_t>(row_index)]);
+  if (!match.has_value()) {
+    return false;
+  }
+  trigger_press(layout_state, press_id::kAiResultLink);
+  return open_terminal_link(workspace, model, focus, layout_state, *match);
+}
+
 void scroll_to_tail(ConsolePanelState* state, int total_lines, int visible_lines) {
   state->first_visible = max_first_visible(total_lines, visible_lines);
   state->follow_tail = true;
@@ -669,6 +952,42 @@ void scroll_terminal_by_lines(ConsolePanelState* state, int delta, int total_lin
   state->terminal_first_visible =
       std::max(0, std::min(state->terminal_first_visible + delta, max_first));
   state->terminal_follow_tail = state->terminal_first_visible >= max_first;
+}
+
+void scroll_ai_by_lines(ConsolePanelState* state, int delta) {
+  if (state == nullptr || delta == 0) {
+    return;
+  }
+  const int total = static_cast<int>(state->ai_last_output_size);
+  const int visible = std::max(1, state->ai_last_visible_lines);
+  const int max_first = max_first_visible(total, visible);
+  if (delta < 0) {
+    state->ai_follow_tail = false;
+  }
+  state->ai_first_visible =
+      std::max(0, std::min(state->ai_first_visible + delta, max_first));
+  if (state->ai_first_visible >= max_first) {
+    state->ai_follow_tail = true;
+  }
+}
+
+bool handle_ai_scroll_mouse(ConsolePanelState* state, MainLayoutState* layout_state,
+                            const Mouse& m) {
+  if (state == nullptr || layout_state == nullptr || !ai_tab_active(layout_state)) {
+    return false;
+  }
+  if (m.button != Mouse::WheelUp && m.button != Mouse::WheelDown) {
+    return false;
+  }
+  // Rueda sobre el historial (o el cuerpo de la pestaña, no el prompt).
+  const bool in_history = state->ai_history_box.Contain(m.x, m.y);
+  const bool in_body = state->panel_box.Contain(m.x, m.y) && !state->ai_input_box.Contain(m.x, m.y);
+  if (!in_history && !in_body) {
+    return false;
+  }
+  scroll_ai_by_lines(state, m.button == Mouse::WheelUp ? -3 : 3);
+  wake_console(layout_state, "ai.scroll");
+  return true;
 }
 
 int terminal_viewport_lines(const ConsolePanelState* state, int viewport_height) {
@@ -906,6 +1225,8 @@ std::string_view console_tab_press_id(int tab) {
       return press_id::kConsoleTabBinarySymbols;
     case ConsolePanelTabs::kPacketMonitor:
       return press_id::kConsoleTabPacketMonitor;
+    case ConsolePanelTabs::kAi:
+      return press_id::kConsoleTabAi;
     default:
       return press_id::kConsoleTabTerminal;
   }
@@ -954,7 +1275,7 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
                         FocusManagerState* focus, int tab, GitService* git,
                         GitPanelState* git_state) {
   if (layout_state == nullptr || tab < ConsolePanelTabs::kTerminal ||
-      tab > ConsolePanelTabs::kPacketMonitor) {
+      tab > ConsolePanelTabs::kAi) {
     return false;
   }
   if (layout_state->console_tabs.selected_tab == tab) {
@@ -966,6 +1287,9 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
   // Start sampling as soon as the tab is selected (don't wait for the next Custom tick).
   layout_state->performance_sampler.set_worker_sampling_enabled(tab ==
                                                                ConsolePanelTabs::kPerformance);
+  if (tab == ConsolePanelTabs::kAi && layout_state->on_ai_tab_opened) {
+    layout_state->on_ai_tab_opened();
+  }
   wake_console(layout_state);
   if (tab == ConsolePanelTabs::kTerminal || tab == ConsolePanelTabs::kApp) {
     layout_state->text_input_focus =
@@ -989,10 +1313,11 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
     }
     if ((layout_state->text_input_focus == TextInputFocus::Console ||
          layout_state->text_input_focus == TextInputFocus::TerminalFilter) &&
-        tab != ConsolePanelTabs::kDebug && tab != ConsolePanelTabs::kCoreAnalyzer) {
+        tab != ConsolePanelTabs::kDebug && tab != ConsolePanelTabs::kCoreAnalyzer &&
+        tab != ConsolePanelTabs::kAi) {
       layout_state->text_input_focus = TextInputFocus::None;
     }
-    if (tab == ConsolePanelTabs::kDebug) {
+    if (tab == ConsolePanelTabs::kDebug || tab == ConsolePanelTabs::kAi) {
       if (focus != nullptr) {
         focus->region = FocusRegion::Terminal;
       }
@@ -1062,7 +1387,7 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
     return false;
   }
   const bool debug_mode = debug_console_mode(app_mode);
-  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kPacketMonitor; ++i) {
+  for (int i = ConsolePanelTabs::kTerminal; i <= ConsolePanelTabs::kAi; ++i) {
     if (i == ConsolePanelTabs::kApp && !debug_mode) {
       continue;
     }
@@ -1088,7 +1413,7 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
         focus->region = FocusRegion::Terminal;
       }
       wake_console(layout_state);
-    } else if (i == ConsolePanelTabs::kDebug) {
+    } else if (i == ConsolePanelTabs::kDebug || i == ConsolePanelTabs::kAi) {
       activate_console_input(layout_state, focus, input_box);
     } else if (i == ConsolePanelTabs::kCoreAnalyzer) {
       activate_console_input(layout_state, focus, input_box);
@@ -1104,7 +1429,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
                                 FocusManagerState* focus, AppMode* app_mode, DebugModel* model,
                                 WorkspaceModel* workspace, ShellSession* shell, Component input_box,
                                 const ShellLaunchConfig& launch_config, Event event,
-                                GitService* git, GitPanelState* git_state) {
+                                GitService* git, GitPanelState* git_state, AiController* ai) {
   if (state == nullptr || layout_state == nullptr || !event.is_mouse()) {
     return false;
   }
@@ -1117,7 +1442,8 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
   if (m.motion == Mouse::Moved) {
     // Keep updating selection while dragging, even if the cursor leaves the
     // terminal body slightly (clamp to the nearest cell).
-    if (state->terminal_selecting && !state->terminal_selection_is_gdb && on_pty_tab &&
+    if (state->terminal_selecting &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kPty && on_pty_tab &&
         state->shell_ui_active) {
       int x = m.x;
       int y = m.y;
@@ -1127,13 +1453,13 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
       }
       const int visual_row = y - state->terminal_box.y_min;
       const int display_row = state->terminal_first_visible + visual_row;
-      state->terminal_sel_head_row = terminal_source_row(state, display_row);
-      state->terminal_sel_head_col = std::max(0, x - state->terminal_box.x_min);
-      state->terminal_has_selection = true;
+      update_console_drag_head(state, model, terminal_source_row(state, display_row),
+                               std::max(0, x - state->terminal_box.x_min));
       wake_console(layout_state);
       return true;
     }
-    if (state->terminal_selecting && state->terminal_selection_is_gdb && on_debug_tab) {
+    if (state->terminal_selecting &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kGdb && on_debug_tab) {
       int x = m.x;
       int y = m.y;
       if (!state->history_box.IsEmpty()) {
@@ -1141,9 +1467,23 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
         y = std::max(state->history_box.y_min, std::min(y, state->history_box.y_max));
       }
       const int visual_row = y - state->history_box.y_min;
-      state->terminal_sel_head_row = std::max(0, state->first_visible + visual_row);
-      state->terminal_sel_head_col = std::max(0, x - state->history_box.x_min);
-      state->terminal_has_selection = true;
+      update_console_drag_head(state, model, state->first_visible + visual_row,
+                               std::max(0, x - state->history_box.x_min));
+      wake_console(layout_state);
+      return true;
+    }
+    if (state->terminal_selecting &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kAi &&
+        ai_tab_active(layout_state)) {
+      int x = m.x;
+      int y = m.y;
+      if (!state->ai_history_box.IsEmpty()) {
+        x = std::max(state->ai_history_box.x_min, std::min(x, state->ai_history_box.x_max));
+        y = std::max(state->ai_history_box.y_min, std::min(y, state->ai_history_box.y_max));
+      }
+      const int visual_row = y - state->ai_history_box.y_min;
+      update_console_drag_head(state, model, state->ai_first_visible + visual_row,
+                               std::max(0, x - state->ai_history_box.x_min));
       wake_console(layout_state);
       return true;
     }
@@ -1159,9 +1499,35 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
         wake_console(layout_state);
       }
     }
+    if (ai_tab_active(layout_state) &&
+        !(state->terminal_selecting &&
+          state->terminal_selection_kind == ConsoleSelectionKind::kAi)) {
+      if (update_ai_result_hover(state, layout_state, ai, m.x, m.y)) {
+        wake_console(layout_state, "ai.result.hover");
+      }
+    } else if (state->ai_result_hover_row.has_value() &&
+               !(state->terminal_selecting &&
+                 state->terminal_selection_kind == ConsoleSelectionKind::kAi)) {
+      state->ai_result_hover_row.reset();
+      layout_state->clickable.clear_hover_if(
+          [](std::string_view id) { return id == press_id::kAiResultLink; });
+      wake_console(layout_state, "ai.result.hover");
+    }
     if (handle_console_tab_hover(state, layout_state, app_mode, m)) {
+      if (ai_tab_active(layout_state) && state->ai_workflow_menu_open) {
+        state->ai_workflow_menu_ignore_close = false;
+      }
+      if (ai_tab_active(layout_state) && state->ai_backend_menu_open) {
+        state->ai_backend_menu_ignore_close = false;
+      }
       wake_console(layout_state);
       return true;
+    }
+    if (ai_tab_active(layout_state) && state->ai_workflow_menu_open) {
+      state->ai_workflow_menu_ignore_close = false;
+    }
+    if (ai_tab_active(layout_state) && state->ai_backend_menu_open) {
+      state->ai_backend_menu_ignore_close = false;
     }
     if (on_pty_tab && state->shell_ui_active) {
       const int term_total = terminal_display_total(state);
@@ -1177,6 +1543,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
   // Finish a drag-select even if the release happens outside the panel.
   if (m.motion == Mouse::Released && state->terminal_selecting) {
     state->terminal_selecting = false;
+    state->terminal_line_select_drag = false;
     // Collapse empty click-selections so a plain click does not leave a caret-sized selection.
     if (state->terminal_sel_anchor_row == state->terminal_sel_head_row &&
         state->terminal_sel_anchor_col == state->terminal_sel_head_col) {
@@ -1190,11 +1557,140 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
     return false;
   }
 
+  if (handle_ai_scroll_mouse(state, layout_state, m)) {
+    return true;
+  }
+
   if (m.button == Mouse::Left && m.motion == Mouse::Pressed &&
       state->hide_box.Contain(m.x, m.y)) {
     trigger_press(layout_state, press_id::kConsoleHide);
     layout_state->console_visible = false;
     wake_console(layout_state);
+    return true;
+  }
+
+  if (ai_tab_active(layout_state) && ai != nullptr &&
+      m.button == Mouse::Left && m.motion == Mouse::Pressed &&
+      state->ai_stop_box.Contain(m.x, m.y) && ai->busy()) {
+    trigger_press(layout_state, press_id::kConsoleAiStop);
+    ai->cancel_current();
+    wake_console(layout_state, "ai.stop");
+    return true;
+  }
+
+  if (ai_tab_active(layout_state) && ai != nullptr &&
+      m.button == Mouse::Left && m.motion == Mouse::Pressed &&
+      !state->ai_reset_box.IsEmpty() && state->ai_reset_box.Contain(m.x, m.y) && !ai->busy()) {
+    trigger_press(layout_state, press_id::kConsoleAiReset);
+    ai->clear_ai_session(true);
+    wake_console(layout_state, "ai.reset");
+    return true;
+  }
+
+  if (ai_tab_active(layout_state) && ai != nullptr &&
+      m.button == Mouse::Left && m.motion == Mouse::Pressed &&
+      state->ai_workflow_box.Contain(m.x, m.y)) {
+    trigger_press(layout_state, press_id::kConsoleAiWorkflow);
+    state->ai_backend_menu_open = false;
+    state->ai_backend_menu_ignore_close = false;
+    if (state->ai_workflow_menu_open) {
+      if (!state->ai_workflow_menu_ignore_close) {
+        state->ai_workflow_menu_open = false;
+      }
+    } else {
+      state->ai_workflow_menu_open = true;
+      state->ai_workflow_menu_ignore_close = true;
+    }
+    wake_console(layout_state, "ai.workflow");
+    return true;
+  }
+
+  if (ai_tab_active(layout_state) && ai != nullptr &&
+      m.button == Mouse::Left && m.motion == Mouse::Pressed &&
+      !state->ai_backend_box.IsEmpty() && state->ai_backend_box.Contain(m.x, m.y)) {
+    trigger_press(layout_state, press_id::kConsoleAiBackend);
+    state->ai_workflow_menu_open = false;
+    state->ai_workflow_menu_ignore_close = false;
+    if (ai->busy()) {
+      wake_console(layout_state, "ai.backend");
+      return true;
+    }
+    if (state->ai_backend_menu_open) {
+      if (!state->ai_backend_menu_ignore_close) {
+        state->ai_backend_menu_open = false;
+      }
+    } else {
+      state->ai_backend_menu_open = true;
+      state->ai_backend_menu_ignore_close = true;
+    }
+    wake_console(layout_state, "ai.backend");
+    return true;
+  }
+
+  if (ai_tab_active(layout_state) && ai != nullptr &&
+      m.button == Mouse::Left && m.motion == Mouse::Pressed &&
+      !state->ai_path_scope_box.IsEmpty() && state->ai_path_scope_box.Contain(m.x, m.y)) {
+    trigger_press(layout_state, press_id::kConsoleAiPathScope);
+    state->ai_workflow_menu_open = false;
+    state->ai_workflow_menu_ignore_close = false;
+    state->ai_backend_menu_open = false;
+    state->ai_backend_menu_ignore_close = false;
+    if (layout_state->open_ai_path_scope) {
+      layout_state->open_ai_path_scope();
+    }
+    wake_console(layout_state, "ai.path_scope");
+    return true;
+  }
+
+  if (ai_tab_active(layout_state) && ai != nullptr && state->ai_backend_menu_open &&
+      m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+    static constexpr std::string_view kOptIds[] = {press_id::kConsoleAiBackendLocal,
+                                                   press_id::kConsoleAiBackendRemote};
+    static constexpr const char* kOptValues[] = {"local", "remote"};
+    for (int i = 0; i < 2; ++i) {
+      if (!state->ai_backend_opt_boxes[i].IsEmpty() &&
+          state->ai_backend_opt_boxes[i].Contain(m.x, m.y)) {
+        trigger_press(layout_state, kOptIds[i]);
+        if (!ai->busy()) {
+          ai->set_level2_mode_override(kOptValues[i]);
+        }
+        state->ai_backend_menu_open = false;
+        state->ai_backend_menu_ignore_close = false;
+        wake_console(layout_state, "ai.backend");
+        return true;
+      }
+    }
+    if (!state->ai_backend_menu_ignore_close) {
+      state->ai_backend_menu_open = false;
+      wake_console(layout_state, "ai.backend");
+      return true;
+    }
+    return true;
+  }
+
+  if (ai_tab_active(layout_state) && ai != nullptr && state->ai_workflow_menu_open &&
+      m.button == Mouse::Left && m.motion == Mouse::Pressed) {
+    static constexpr std::string_view kOptIds[] = {
+        press_id::kConsoleAiWorkflowAgent, press_id::kConsoleAiWorkflowAsk,
+        press_id::kConsoleAiWorkflowPlan, press_id::kConsoleAiWorkflowGit};
+    static constexpr const char* kOptValues[] = {"agent", "ask", "plan", "git"};
+    for (int i = 0; i < 4; ++i) {
+      if (!state->ai_workflow_opt_boxes[i].IsEmpty() &&
+          state->ai_workflow_opt_boxes[i].Contain(m.x, m.y)) {
+        trigger_press(layout_state, kOptIds[i]);
+        ai->set_level2_workflow(kOptValues[i]);
+        state->ai_workflow_menu_open = false;
+        state->ai_workflow_menu_ignore_close = false;
+        wake_console(layout_state, "ai.workflow");
+        return true;
+      }
+    }
+    if (!state->ai_workflow_menu_ignore_close) {
+      // Click elsewhere in the AI panel closes the picker.
+      state->ai_workflow_menu_open = false;
+      wake_console(layout_state, "ai.workflow");
+      return true;
+    }
     return true;
   }
 
@@ -1212,9 +1708,10 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
       const int row_index = terminal_source_row(state, display_row);
       const int col = m.x - state->terminal_box.x_min;
       const int64_t now_ms = console_now_ms();
-      const bool double_click = is_console_double_click(*state, row_index, col, now_ms);
-      note_console_click(state, row_index, col, now_ms);
-      if (double_click && select_console_word_at(state, model, row_index, col, false)) {
+      const ConsoleMultiClick multi =
+          apply_console_multi_click(state, model, row_index, col, now_ms,
+                                    ConsoleSelectionKind::kPty);
+      if (multi != ConsoleMultiClick::kNone) {
         if (focus != nullptr) {
           focus->region = FocusRegion::Terminal;
         }
@@ -1230,13 +1727,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
           return true;
         }
       }
-      state->terminal_selection_is_gdb = false;
-      state->terminal_selecting = true;
-      state->terminal_has_selection = false;
-      state->terminal_sel_anchor_row = row_index;
-      state->terminal_sel_anchor_col = std::max(0, col);
-      state->terminal_sel_head_row = state->terminal_sel_anchor_row;
-      state->terminal_sel_head_col = state->terminal_sel_anchor_col;
+      begin_console_drag_selection(state, row_index, col, ConsoleSelectionKind::kPty);
       if (focus != nullptr) {
         focus->region = FocusRegion::Terminal;
       }
@@ -1262,9 +1753,10 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
     const int row_index = state->first_visible + visual_row;
     const int col = std::max(0, m.x - state->history_box.x_min);
     const int64_t now_ms = console_now_ms();
-    const bool double_click = is_console_double_click(*state, row_index, col, now_ms);
-    note_console_click(state, row_index, col, now_ms);
-    if (double_click && select_console_word_at(state, model, row_index, col, true)) {
+    const ConsoleMultiClick multi =
+        apply_console_multi_click(state, model, row_index, col, now_ms,
+                                  ConsoleSelectionKind::kGdb);
+    if (multi != ConsoleMultiClick::kNone) {
       layout_state->text_input_focus = TextInputFocus::None;
       layout_state->focus_sync_needed = true;
       if (focus != nullptr) {
@@ -1273,13 +1765,7 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
       wake_console(layout_state);
       return true;
     }
-    state->terminal_selection_is_gdb = true;
-    state->terminal_selecting = true;
-    state->terminal_has_selection = false;
-    state->terminal_sel_anchor_row = std::max(0, row_index);
-    state->terminal_sel_anchor_col = col;
-    state->terminal_sel_head_row = state->terminal_sel_anchor_row;
-    state->terminal_sel_head_col = state->terminal_sel_anchor_col;
+    begin_console_drag_selection(state, row_index, col, ConsoleSelectionKind::kGdb);
     layout_state->text_input_focus = TextInputFocus::None;
     layout_state->focus_sync_needed = true;
     if (focus != nullptr) {
@@ -1307,6 +1793,42 @@ bool handle_console_panel_mouse(ConsolePanelState* state, MainLayoutState* layou
     layout_state->focus_sync_needed = true;
     return true;
   }
+  if (ai_tab_active(layout_state) && state->ai_history_box.Contain(m.x, m.y)) {
+    refresh_ai_line_cache(state, ai);
+    const int visual_row = m.y - state->ai_history_box.y_min;
+    const int row_index = state->ai_first_visible + visual_row;
+    const int col = std::max(0, m.x - state->ai_history_box.x_min);
+    const int64_t now_ms = console_now_ms();
+    const ConsoleMultiClick multi =
+        apply_console_multi_click(state, model, row_index, col, now_ms,
+                                  ConsoleSelectionKind::kAi);
+    if (multi != ConsoleMultiClick::kNone) {
+      layout_state->text_input_focus = TextInputFocus::None;
+      layout_state->focus_sync_needed = true;
+      if (focus != nullptr) {
+        focus->region = FocusRegion::Terminal;
+      }
+      wake_console(layout_state, "ai.select");
+      return true;
+    }
+    if (try_open_ai_result_at(state, ai, workspace, model, focus, layout_state, m.x, m.y)) {
+      return true;
+    }
+    begin_console_drag_selection(state, row_index, col, ConsoleSelectionKind::kAi);
+    layout_state->text_input_focus = TextInputFocus::None;
+    layout_state->focus_sync_needed = true;
+    if (focus != nullptr) {
+      focus->region = FocusRegion::Terminal;
+    }
+    wake_console(layout_state, "ai.select");
+    return true;
+  }
+  if (ai_tab_active(layout_state) && state->ai_input_box.Contain(m.x, m.y)) {
+    activate_console_input(layout_state, focus, input_box);
+    layout_state->focus_sync_needed = true;
+    wake_console(layout_state, "ai.input");
+    return true;
+  }
   return false;
 }
 
@@ -1316,40 +1838,71 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
     return false;
   }
   const bool debug_mode = debug_console_mode(app_mode);
+  std::vector<HoverTarget> targets;
   if (debug_mode) {
-    return update_panel_hover(
-        layout_state, mouse.x, mouse.y,
-        {{press_id::kConsoleTabTerminal, &state->tab_boxes[ConsolePanelTabs::kTerminal]},
-         {press_id::kConsoleTabApp, &state->tab_boxes[ConsolePanelTabs::kApp]},
-         {press_id::kConsoleTabGdb, &state->tab_boxes[ConsolePanelTabs::kDebug]},
-         {press_id::kConsoleTabPacketMonitor, &state->tab_boxes[ConsolePanelTabs::kPacketMonitor]},
-         {press_id::kConsoleTabPerformance, &state->tab_boxes[ConsolePanelTabs::kPerformance]},
-         {press_id::kConsoleTabProblems, &state->tab_boxes[ConsolePanelTabs::kProblems]},
-         {press_id::kConsoleTabSearch, &state->tab_boxes[ConsolePanelTabs::kSearch]},
-         {press_id::kConsoleTabCallHierarchy,
-          &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
-         {press_id::kConsoleTabGit, &state->tab_boxes[ConsolePanelTabs::kGit]},
-         {press_id::kConsoleTabBinarySymbols,
-          &state->tab_boxes[ConsolePanelTabs::kBinarySymbols]},
-         {press_id::kConsoleHide, &state->hide_box}},
-        press_id::is_console_header_hover);
+    targets = {
+        {press_id::kConsoleTabTerminal, &state->tab_boxes[ConsolePanelTabs::kTerminal]},
+        {press_id::kConsoleTabApp, &state->tab_boxes[ConsolePanelTabs::kApp]},
+        {press_id::kConsoleTabGdb, &state->tab_boxes[ConsolePanelTabs::kDebug]},
+        {press_id::kConsoleTabPacketMonitor, &state->tab_boxes[ConsolePanelTabs::kPacketMonitor]},
+        {press_id::kConsoleTabPerformance, &state->tab_boxes[ConsolePanelTabs::kPerformance]},
+        {press_id::kConsoleTabProblems, &state->tab_boxes[ConsolePanelTabs::kProblems]},
+        {press_id::kConsoleTabSearch, &state->tab_boxes[ConsolePanelTabs::kSearch]},
+        {press_id::kConsoleTabCallHierarchy, &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
+        {press_id::kConsoleTabGit, &state->tab_boxes[ConsolePanelTabs::kGit]},
+        {press_id::kConsoleTabBinarySymbols, &state->tab_boxes[ConsolePanelTabs::kBinarySymbols]},
+        {press_id::kConsoleTabAi, &state->tab_boxes[ConsolePanelTabs::kAi]},
+        {press_id::kConsoleHide, &state->hide_box},
+    };
+  } else {
+    targets = {
+        {press_id::kConsoleTabTerminal, &state->tab_boxes[ConsolePanelTabs::kTerminal]},
+        {press_id::kConsoleTabPerformance, &state->tab_boxes[ConsolePanelTabs::kPerformance]},
+        {press_id::kConsoleTabProblems, &state->tab_boxes[ConsolePanelTabs::kProblems]},
+        {press_id::kConsoleTabSearch, &state->tab_boxes[ConsolePanelTabs::kSearch]},
+        {press_id::kConsoleTabCallHierarchy, &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
+        {press_id::kConsoleTabGit, &state->tab_boxes[ConsolePanelTabs::kGit]},
+        {press_id::kConsoleTabBinarySymbols, &state->tab_boxes[ConsolePanelTabs::kBinarySymbols]},
+        {press_id::kConsoleTabAi, &state->tab_boxes[ConsolePanelTabs::kAi]},
+        {press_id::kConsoleHide, &state->hide_box},
+    };
   }
-  return update_panel_hover(
-      layout_state, mouse.x, mouse.y,
-      {{press_id::kConsoleTabTerminal, &state->tab_boxes[ConsolePanelTabs::kTerminal]},
-       {press_id::kConsoleTabPerformance, &state->tab_boxes[ConsolePanelTabs::kPerformance]},
-       {press_id::kConsoleTabProblems, &state->tab_boxes[ConsolePanelTabs::kProblems]},
-       {press_id::kConsoleTabSearch, &state->tab_boxes[ConsolePanelTabs::kSearch]},
-       {press_id::kConsoleTabCallHierarchy,
-        &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
-       {press_id::kConsoleTabGit, &state->tab_boxes[ConsolePanelTabs::kGit]},
-       {press_id::kConsoleTabBinarySymbols,
-        &state->tab_boxes[ConsolePanelTabs::kBinarySymbols]},
-       {press_id::kConsoleHide, &state->hide_box}},
-      press_id::is_console_header_hover);
+  if (ai_tab_active(layout_state) && !state->ai_stop_box.IsEmpty()) {
+    targets.push_back({press_id::kConsoleAiStop, &state->ai_stop_box});
+  }
+  if (ai_tab_active(layout_state) && !state->ai_reset_box.IsEmpty()) {
+    targets.push_back({press_id::kConsoleAiReset, &state->ai_reset_box});
+  }
+  if (ai_tab_active(layout_state) && !state->ai_workflow_box.IsEmpty()) {
+    targets.push_back({press_id::kConsoleAiWorkflow, &state->ai_workflow_box});
+  }
+  if (ai_tab_active(layout_state) && !state->ai_backend_box.IsEmpty()) {
+    targets.push_back({press_id::kConsoleAiBackend, &state->ai_backend_box});
+  }
+  if (ai_tab_active(layout_state) && !state->ai_path_scope_box.IsEmpty()) {
+    targets.push_back({press_id::kConsoleAiPathScope, &state->ai_path_scope_box});
+  }
+  if (ai_tab_active(layout_state) && state->ai_workflow_menu_open) {
+    targets.push_back({press_id::kConsoleAiWorkflowAgent, &state->ai_workflow_opt_boxes[0]});
+    targets.push_back({press_id::kConsoleAiWorkflowAsk, &state->ai_workflow_opt_boxes[1]});
+    targets.push_back({press_id::kConsoleAiWorkflowPlan, &state->ai_workflow_opt_boxes[2]});
+    targets.push_back({press_id::kConsoleAiWorkflowGit, &state->ai_workflow_opt_boxes[3]});
+  }
+  if (ai_tab_active(layout_state) && state->ai_backend_menu_open) {
+    targets.push_back({press_id::kConsoleAiBackendLocal, &state->ai_backend_opt_boxes[0]});
+    targets.push_back({press_id::kConsoleAiBackendRemote, &state->ai_backend_opt_boxes[1]});
+  }
+  return update_panel_hover(layout_state, mouse.x, mouse.y, targets, press_id::is_console_header_hover);
 }
 
-std::string console_placeholder(AppMode* /*app_mode*/) {
+std::string console_placeholder(AppMode* /*app_mode*/, MainLayoutState* layout_state = nullptr) {
+  if (ai_tab_active(layout_state)) {
+    if (layout_state != nullptr && layout_state->ai_controller &&
+        layout_state->ai_controller->has_pending_insert()) {
+      return i18n::tr("console.ai.insert_placeholder");
+    }
+    return i18n::tr("console.placeholder.ai");
+  }
   return i18n::tr("console.placeholder.gdb");
 }
 
@@ -1447,7 +2000,9 @@ Element render_styled_line(const TerminalStyledRow& row, int cursor_col, bool sh
         break;
       }
       Element cell = text(std::string(1, ch));
-      const bool selected = terminal_cell_selected(state, absolute_row, col);
+      const bool selected =
+          state != nullptr && state->terminal_selection_kind == ConsoleSelectionKind::kPty &&
+          terminal_cell_selected(state, absolute_row, col);
       const bool in_link =
           link.has_value() && col >= link->span_start && col < link->span_end;
       if (draw_cursor && cursor_col >= 0 && col == cursor_col) {
@@ -1759,21 +2314,9 @@ Element render_gdb_console(ConsolePanelState* state, DebugModel* model, AppMode*
   Elements history;
   for (int i = state->first_visible; i < end; ++i) {
     const std::string& line = terminal_lines[static_cast<std::size_t>(i)];
-    if (state->terminal_has_selection && state->terminal_selection_is_gdb && !line.empty()) {
-      Elements parts;
-      for (int col = 0; col < static_cast<int>(line.size()); ++col) {
-        Element cell = text(std::string(1, line[static_cast<std::size_t>(col)]));
-        if (terminal_cell_selected(state, i, col)) {
-          cell = cell | bgcolor(theme::SelectionBg()) | color(theme::UiText());
-        } else {
-          cell = cell | color(theme::Header());
-        }
-        parts.push_back(std::move(cell));
-      }
-      history.push_back(hbox(std::move(parts)));
-    } else {
-      history.push_back(text(line.empty() ? " " : line) | color(theme::Header()));
-    }
+    history.push_back(
+        render_plain_line_with_selection(line, i, state, ConsoleSelectionKind::kGdb,
+                                         theme::Header()));
   }
   if (history.empty()) {
     history.push_back(text(i18n::tr("console.gdb.no_output")) | color(theme::Muted()));
@@ -2095,6 +2638,398 @@ ShellLaunchConfig current_shell_launch(const ShellLaunchConfigProvider& provider
   return fallback;
 }
 
+bool ai_console_keys_active(MainLayoutState* layout_state, FocusManagerState* focus) {
+  return ai_tab_active(layout_state) &&
+         (focus == nullptr || focus->region == FocusRegion::Terminal);
+}
+
+Element render_ai_console(ConsolePanelState* state, AiController* ai,
+                          MainLayoutState* layout_state, Component input_box,
+                          int* ai_input_wrap_width = nullptr) {
+  if (state == nullptr || ai == nullptr) {
+    return text(i18n::tr("console.ai.no_output")) | color(theme::Muted()) | flex;
+  }
+  const std::vector<std::string> terminal_lines = ai->snapshot_lines();
+  state->ai_line_cache = terminal_lines;
+  const int total = static_cast<int>(terminal_lines.size());
+
+  int visible = visible_line_count(state->ai_history_box);
+  if (visible <= 1 && state->panel_box.y_max > state->panel_box.y_min) {
+    visible = std::max(1, visible_line_count(state->panel_box) - 2);
+  }
+  state->ai_last_visible_lines = visible;
+
+  const std::size_t output_size = terminal_lines.size();
+  if (output_size > state->ai_last_output_size) {
+    if (state->ai_follow_tail) {
+      state->ai_first_visible = max_first_visible(total, visible);
+    }
+    state->ai_last_output_size = output_size;
+  } else if (output_size < state->ai_last_output_size) {
+    state->ai_last_output_size = output_size;
+    state->ai_first_visible = max_first_visible(total, visible);
+  }
+  state->ai_first_visible =
+      std::max(0, std::min(state->ai_first_visible, max_first_visible(total, visible)));
+
+  const int end = std::min(total, state->ai_first_visible + visible);
+  Elements history;
+  for (int i = state->ai_first_visible; i < end; ++i) {
+    const std::string& line = terminal_lines[static_cast<std::size_t>(i)];
+    if (console_line_in_selection(state, ConsoleSelectionKind::kAi, i)) {
+      history.push_back(render_plain_line_with_selection(line, i, state, ConsoleSelectionKind::kAi,
+                                                         theme::Header()));
+      continue;
+    }
+    const bool hovered =
+        state->ai_result_hover_row.has_value() && *state->ai_result_hover_row == i;
+    history.push_back(render_ai_transcript_line(line, hovered));
+  }
+  if (history.empty()) {
+    history.push_back(text(i18n::tr("console.ai.no_output")) | color(theme::Muted()) |
+                      bgcolor(theme::CodeBg()));
+  }
+
+  const int rendered_lines = static_cast<int>(history.size());
+  Element history_row =
+      hbox({vbox(std::move(history)) | flex | reflect(state->ai_history_box) |
+                bgcolor(theme::CodeBg()),
+            vertical_scrollbar(total, state->ai_first_visible, visible, rendered_lines)}) |
+      flex | bgcolor(theme::CodeBg());
+
+  Element input_row;
+  int wrap_w = 0;
+  if (!state->ai_input_box.IsEmpty()) {
+    wrap_w = state->ai_input_box.x_max - state->ai_input_box.x_min + 1;
+  } else if (!state->panel_box.IsEmpty()) {
+    wrap_w = state->panel_box.x_max - state->panel_box.x_min - 18;
+  }
+  wrap_w = std::max(12, wrap_w);
+  if (ai_input_wrap_width != nullptr) {
+    *ai_input_wrap_width = wrap_w;
+  }
+  const std::string preview_src =
+      state->input.empty()
+          ? (ai->has_pending_insert() ? i18n::tr("console.ai.insert_placeholder")
+                                      : i18n::tr("console.ai.placeholder"))
+          : state->input;
+  const int input_h = soft_wrap_line_count(state->input.empty() ? std::string{} : state->input,
+                                           wrap_w);
+
+  if (console_input_active(layout_state)) {
+    input_row = input_box->Render() | size(HEIGHT, EQUAL, input_h) | bgcolor(theme::CodeBg()) |
+                color(theme::WatchInput());
+  } else {
+    Elements preview_rows;
+    if (state->input.empty()) {
+      preview_rows.push_back(text(" " + preview_src + " ") | color(theme::Muted()));
+    } else {
+      for (const auto& range : soft_wrap_ranges(state->input, wrap_w)) {
+        if (static_cast<int>(preview_rows.size()) >= input_h) {
+          break;
+        }
+        const std::string segment =
+            state->input.substr(range.first, range.second - range.first);
+        preview_rows.push_back(text(" " + segment + " ") | color(theme::WatchInput()));
+      }
+      if (preview_rows.empty()) {
+        preview_rows.push_back(text(" ") | color(theme::WatchInput()));
+      }
+    }
+    input_row = vbox(std::move(preview_rows)) | size(HEIGHT, EQUAL, input_h) |
+                bgcolor(theme::CodeBg());
+  }
+  input_row = input_row | reflect(state->ai_input_box) | flex;
+
+  Elements footer_row = {std::move(input_row)};
+  {
+    const std::string wf = ai->level2_workflow();
+    const std::string label =
+        i18n::tr(std::string("console.ai.workflow.") + wf) +
+        (state->ai_workflow_menu_open ? " ▲" : " ▾");
+    const bool wf_hovered =
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleAiWorkflow);
+    const bool wf_pressed =
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleAiWorkflow);
+    footer_row.push_back(vbox({filler(), MakeToolbarButton(text(label) | color(theme::Accent()),
+                                                           wf_hovered, wf_pressed, false,
+                                                           &state->ai_workflow_box)}));
+  }
+  {
+    std::string backend = ai->effective_level2_mode();
+    if (backend != "local" && backend != "remote") {
+      backend = "local";
+    }
+    const std::string label =
+        i18n::tr(std::string("console.ai.backend.") + backend) +
+        (state->ai_backend_menu_open ? " ▲" : " ▾");
+    const bool be_hovered =
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleAiBackend);
+    const bool be_pressed =
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleAiBackend);
+    footer_row.push_back(vbox({filler(), MakeToolbarButton(text(label) | color(theme::Accent()),
+                                                           be_hovered, be_pressed, false,
+                                                           &state->ai_backend_box)}));
+  }
+  {
+    const bool scoped = !ai->path_scope().empty();
+    const std::string scope_label =
+        i18n::tr(scoped ? "console.ai.path_scope.active" : "console.ai.path_scope");
+    const bool scope_hovered =
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleAiPathScope);
+    const bool scope_pressed =
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleAiPathScope);
+    footer_row.push_back(vbox(
+        {filler(), MakeToolbarButton(text(scope_label) | color(theme::Accent()), scope_hovered,
+                                     scope_pressed, false, &state->ai_path_scope_box)}));
+  }
+  if (!ai->busy() && (ai->has_continuable_session() || !ai->snapshot_lines().empty())) {
+    const bool reset_hovered =
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleAiReset);
+    const bool reset_pressed =
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleAiReset);
+    footer_row.push_back(vbox(
+        {filler(), MakeToolbarButton(text(i18n::tr("console.ai.reset")) | color(theme::Warning()),
+                                     reset_hovered, reset_pressed, false, &state->ai_reset_box)}));
+  } else {
+    state->ai_reset_box = Box{};
+  }
+  if (ai->busy()) {
+    const bool stop_hovered =
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleAiStop);
+    const bool stop_pressed =
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleAiStop);
+    footer_row.push_back(vbox(
+        {filler(), MakeToolbarButton(text(i18n::tr("console.ai.stop")) | color(theme::Error()),
+                                     stop_hovered, stop_pressed, false, &state->ai_stop_box)}));
+  } else {
+    state->ai_stop_box = Box{};
+  }
+
+  Elements column;
+  column.push_back(history_row | flex);
+  column.push_back(separator() | size(HEIGHT, EQUAL, 1));
+
+  if (state->ai_workflow_menu_open) {
+    static constexpr std::string_view kOptIds[] = {
+        press_id::kConsoleAiWorkflowAgent, press_id::kConsoleAiWorkflowAsk,
+        press_id::kConsoleAiWorkflowPlan, press_id::kConsoleAiWorkflowGit};
+    static constexpr const char* kOptValues[] = {"agent", "ask", "plan", "git"};
+    const std::string active = ai->level2_workflow();
+    Elements mode_row = {
+        text(" " + i18n::tr("console.ai.workflow.title") + ": ") | color(theme::Muted()) |
+            bgcolor(theme::PanelBg())};
+    for (int i = 0; i < 4; ++i) {
+      const bool selected = active == kOptValues[i];
+      const bool hovered =
+          layout_state != nullptr && layout_state->clickable.is_hovered(kOptIds[i]);
+      const bool pressed =
+          layout_state != nullptr && layout_state->clickable.is_pressed(kOptIds[i]);
+      const std::string name = i18n::tr(std::string("console.ai.workflow.") + kOptValues[i]);
+      Element chip = text(std::string(selected ? " [" : "  ") + name +
+                          (selected ? "] " : "  ")) |
+                     color(selected ? theme::Accent() : theme::Header());
+      chip = MakeToolbarButton(std::move(chip), hovered, pressed, false,
+                               &state->ai_workflow_opt_boxes[i], true);
+      mode_row.push_back(std::move(chip));
+    }
+    mode_row.push_back(filler());
+    column.push_back(hbox(std::move(mode_row)) | size(HEIGHT, EQUAL, 1) |
+                     bgcolor(theme::PanelBg()));
+    column.push_back(separator() | size(HEIGHT, EQUAL, 1));
+  } else {
+    for (auto& b : state->ai_workflow_opt_boxes) {
+      b = Box{};
+    }
+  }
+
+  if (state->ai_backend_menu_open) {
+    static constexpr std::string_view kOptIds[] = {press_id::kConsoleAiBackendLocal,
+                                                   press_id::kConsoleAiBackendRemote};
+    static constexpr const char* kOptValues[] = {"local", "remote"};
+    std::string active = ai->effective_level2_mode();
+    if (active != "local" && active != "remote") {
+      active = "local";
+    }
+    Elements mode_row = {
+        text(" " + i18n::tr("console.ai.backend.title") + ": ") | color(theme::Muted()) |
+            bgcolor(theme::PanelBg())};
+    for (int i = 0; i < 2; ++i) {
+      const bool selected = active == kOptValues[i];
+      const bool hovered =
+          layout_state != nullptr && layout_state->clickable.is_hovered(kOptIds[i]);
+      const bool pressed =
+          layout_state != nullptr && layout_state->clickable.is_pressed(kOptIds[i]);
+      const std::string name = i18n::tr(std::string("console.ai.backend.") + kOptValues[i]);
+      Element chip = text(std::string(selected ? " [" : "  ") + name +
+                          (selected ? "] " : "  ")) |
+                     color(selected ? theme::Accent() : theme::Header());
+      chip = MakeToolbarButton(std::move(chip), hovered, pressed, false,
+                               &state->ai_backend_opt_boxes[i], true);
+      mode_row.push_back(std::move(chip));
+    }
+    mode_row.push_back(filler());
+    column.push_back(hbox(std::move(mode_row)) | size(HEIGHT, EQUAL, 1) |
+                     bgcolor(theme::PanelBg()));
+    column.push_back(separator() | size(HEIGHT, EQUAL, 1));
+  } else {
+    for (auto& b : state->ai_backend_opt_boxes) {
+      b = Box{};
+    }
+  }
+
+  column.push_back(hbox(std::move(footer_row)) | size(HEIGHT, EQUAL, input_h));
+
+  return vbox(std::move(column)) | flex;
+}
+
+bool handle_ai_console_keys(AiController* ai, ConsolePanelState* state,
+                            MainLayoutState* layout_state, FocusManagerState* focus,
+                            Component input_box, Event event) {
+  if (!ai_tab_active(layout_state) || ai == nullptr || state == nullptr) {
+    return false;
+  }
+
+  const int visible = state->ai_last_visible_lines;
+
+  if (event == Event::Custom && console_input_active(layout_state) && input_box) {
+    input_box->TakeFocus();
+    return false;
+  }
+
+  if (state->terminal_has_selection &&
+      state->terminal_selection_kind == ConsoleSelectionKind::kAi) {
+    if (event_is_ctrl_c(event) || event == Event::Special("\x1B[99;6u") ||
+        event == Event::Special("\x1B[67;6u")) {
+      if (copy_terminal_selection(state, nullptr, ai)) {
+        clear_terminal_selection(state);
+        wake_console(layout_state, "ai.copy");
+        return true;
+      }
+    }
+    if (event == Event::Escape) {
+      clear_terminal_selection(state);
+      wake_console(layout_state, "ai.select");
+      return true;
+    }
+  }
+
+  if (event == Event::Escape) {
+    if (state->ai_workflow_menu_open) {
+      state->ai_workflow_menu_open = false;
+      state->ai_workflow_menu_ignore_close = false;
+      wake_console(layout_state, "ai.workflow");
+      return true;
+    }
+    if (state->ai_backend_menu_open) {
+      state->ai_backend_menu_open = false;
+      state->ai_backend_menu_ignore_close = false;
+      wake_console(layout_state, "ai.backend");
+      return true;
+    }
+    if (layout_state != nullptr && layout_state->editor_completion_open) {
+      return false;
+    }
+    if (console_input_active(layout_state)) {
+      if (ai != nullptr && ai->has_pending_insert()) {
+        ai->clear_pending_insert();
+      }
+      layout_state->text_input_focus = TextInputFocus::None;
+      wake_console(layout_state, "ai.input");
+      return true;
+    }
+  }
+
+  // PageUp/PageDown y rueda deben funcionar aunque el prompt tenga foco.
+  if (ai_tab_active(layout_state) &&
+      (focus == nullptr || focus->region == FocusRegion::Terminal)) {
+    if (event == Event::PageUp) {
+      scroll_ai_by_lines(state, -visible);
+      wake_console(layout_state, "ai.scroll");
+      return true;
+    }
+    if (event == Event::PageDown) {
+      scroll_ai_by_lines(state, visible);
+      wake_console(layout_state, "ai.scroll");
+      return true;
+    }
+    if (event.is_mouse() && handle_ai_scroll_mouse(state, layout_state, event.mouse())) {
+      return true;
+    }
+  }
+
+  if (event == Event::Return) {
+    if (!ai_console_keys_active(layout_state, focus)) {
+      return false;
+    }
+    if (!console_input_active(layout_state)) {
+      activate_console_input(layout_state, focus, input_box);
+      wake_console(layout_state, "ai.input");
+      return true;
+    }
+    const std::string line = state->input;
+    state->input.clear();
+    if (!line.empty()) {
+      ai->handle_user_input(line);
+    }
+    state->ai_follow_tail = true;
+    state->ai_first_visible =
+        max_first_visible(static_cast<int>(ai->snapshot_lines().size()), visible);
+    wake_console(layout_state, "ai.submit");
+    return true;
+  }
+
+  if (console_input_active(layout_state)) {
+    if (!event.is_mouse() && event != Event::Custom && !event_is_tuide_global_shortcut(event)) {
+      cursor_blink::show();
+      if (input_box) {
+        input_box->TakeFocus();
+        if (input_box->OnEvent(event)) {
+          wake_console(layout_state, "ai.input");
+          return true;
+        }
+      }
+      if (event.is_character()) {
+        const std::string ch = event.character();
+        if (!ch.empty()) {
+          state->input += ch;
+          wake_console(layout_state, "ai.input");
+          return true;
+        }
+      }
+      if (event == Event::Backspace && !state->input.empty()) {
+        state->input.pop_back();
+        wake_console(layout_state, "ai.input");
+        return true;
+      }
+      if (event == Event::Delete && !state->input.empty()) {
+        state->input.pop_back();
+        wake_console(layout_state, "ai.input");
+        return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  if (!ai_console_keys_active(layout_state, focus)) {
+    return false;
+  }
+
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    scroll_ai_by_lines(state, -1);
+    wake_console(layout_state, "ai.scroll");
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    scroll_ai_by_lines(state, 1);
+    wake_console(layout_state, "ai.scroll");
+    return true;
+  }
+
+  return false;
+}
+
 }  // namespace
 
 bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, int delta,
@@ -2104,12 +3039,12 @@ bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, 
   }
   const bool debug_mode = app_mode != nullptr && *app_mode == AppMode::kDebug;
   int tab = layout_state->console_tabs.selected_tab;
-  for (int attempt = 0; attempt < 10; ++attempt) {
+  for (int attempt = 0; attempt < 14; ++attempt) {
     tab += delta;
     if (tab < ConsolePanelTabs::kTerminal) {
-      tab = ConsolePanelTabs::kPacketMonitor;
+      tab = ConsolePanelTabs::kAi;
     }
-    if (tab > ConsolePanelTabs::kPacketMonitor) {
+    if (tab > ConsolePanelTabs::kAi) {
       tab = ConsolePanelTabs::kTerminal;
     }
     if (!debug_mode && tab == ConsolePanelTabs::kApp) {
@@ -2146,6 +3081,18 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   state->pty_filter_placeholder = i18n::tr("console.pty.filter_placeholder");
   auto perf_state = std::make_shared<PerformancePanelState>();
   auto packet_monitor_state = std::make_shared<PacketMonitorPanelState>();
+  AiControllerDeps ai_deps;
+  ai_deps.workspace = workspace;
+  ai_deps.symbols = symbols;
+  ai_deps.indexer = indexer;
+  ai_deps.symbol_indexer = symbol_indexer;
+  ai_deps.git = git_service;
+  ai_deps.layout = layout_state;
+  auto ai = std::make_shared<AiController>(ai_deps);
+  if (layout_state != nullptr) {
+    layout_state->ai_controller = ai;
+    // Map + stem embeds start only when the AI tab is opened (on_ai_tab_opened).
+  }
   PerformanceSampler* sampler =
       layout_state != nullptr ? &layout_state->performance_sampler : nullptr;
   UiPerfMonitor* ui_perf = layout_state != nullptr ? &layout_state->ui_perf_monitor : nullptr;
@@ -2167,10 +3114,15 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   auto binary_symbols_panel =
       MakeBinarySymbolsPanel(workspace, model, focus, layout_state, symbols, symbol_indexer,
                              indexer, shell);
-  auto input_box = Input(MakeBlinkInputOption(&state->input, &state->input_placeholder));
+  auto ai_input_wrap_width = std::make_shared<int>(0);
+  auto input_option = std::make_shared<InputOption>(MakeBlinkInputOption(
+      &state->input, &state->input_placeholder, false, nullptr, ai_input_wrap_width.get()));
+  auto input_box = Input(*input_option);
   auto input_maybe = Maybe(
       input_box, [app_mode, layout_state] {
-        return debug_tab_active(app_mode, layout_state) && console_input_active(layout_state);
+        const bool on_ai = ai_tab_active(layout_state);
+        const bool on_gdb = debug_tab_active(app_mode, layout_state);
+        return (on_ai || on_gdb) && console_input_active(layout_state);
       });
   auto filter_input_option = std::make_shared<InputOption>(
       MakeBlinkInputOption(&state->pty_filter, &state->pty_filter_placeholder));
@@ -2186,7 +3138,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
        call_hierarchy_panel, git_panel, core_analyzer_panel, binary_symbols_panel,
        packet_monitor_panel});
 
-  auto wrapped = CatchEvent(component, [app_mode, model, shell, app_session, on_command, state,
+  auto wrapped = CatchEvent(component, [app_mode, model, shell, app_session, on_command, state, ai,
                                         layout_state, focus, input_box, filter_input,
                                         shell_launch_config, diagnostics_panel, search_panel,
                                         call_hierarchy_panel, git_panel, git_service,
@@ -2249,6 +3201,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     const bool on_terminal_tab = terminal_tab_active(app_mode, layout_state);
     const bool on_app_tab = app_tab_active(app_mode, layout_state);
     const bool on_debug_tab = debug_tab_active(app_mode, layout_state);
+    const bool on_ai_tab = ai_tab_active(layout_state);
 
     if (terminal_filter_input_active(layout_state) && (on_terminal_tab || on_app_tab)) {
       if (event == Event::Custom) {
@@ -2285,7 +3238,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       return false;
     }
 
-    if (on_debug_tab && event == Event::Custom && console_input_active(layout_state)) {
+    if ((on_debug_tab || on_ai_tab) && event == Event::Custom &&
+        console_input_active(layout_state)) {
       input_box->TakeFocus();
       return false;
     }
@@ -2296,7 +3250,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       if (tab == ConsolePanelTabs::kTerminal) {
         activate_shell_input(model, layout_state, focus, shell, state.get(),
                              current_shell_launch(shell_launch_config, model));
-      } else if (tab == ConsolePanelTabs::kDebug) {
+      } else if (tab == ConsolePanelTabs::kDebug || tab == ConsolePanelTabs::kAi) {
         activate_console_input(layout_state, focus, input_box);
       }
       return true;
@@ -2326,7 +3280,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       return true;
     }
 
-    if (on_debug_tab && state->terminal_has_selection && state->terminal_selection_is_gdb &&
+    if (on_debug_tab && state->terminal_has_selection &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kGdb &&
         event_is_ctrl_c(event)) {
       if (copy_terminal_selection(state.get(), model)) {
         clear_terminal_selection(state.get());
@@ -2335,7 +3290,26 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       }
     }
 
-    if (on_debug_tab && state->terminal_has_selection && state->terminal_selection_is_gdb &&
+    if (on_debug_tab && state->terminal_has_selection &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kGdb &&
+        event == Event::Escape) {
+      clear_terminal_selection(state.get());
+      wake_console(layout_state);
+      return true;
+    }
+
+    if (on_ai_tab && state->terminal_has_selection &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kAi &&
+        event_is_ctrl_c(event)) {
+      if (copy_terminal_selection(state.get(), model, ai.get())) {
+        clear_terminal_selection(state.get());
+        wake_console(layout_state);
+        return true;
+      }
+    }
+
+    if (on_ai_tab && state->terminal_has_selection &&
+        state->terminal_selection_kind == ConsoleSelectionKind::kAi &&
         event == Event::Escape) {
       clear_terminal_selection(state.get());
       wake_console(layout_state);
@@ -2394,6 +3368,10 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       return true;
     }
 
+    if (handle_ai_console_keys(ai.get(), state.get(), layout_state, focus, input_box, event)) {
+      return true;
+    }
+
     if (handle_gdb_console_keys(app_mode, model, state.get(), layout_state, focus, input_box,
                                 on_command, event)) {
       return true;
@@ -2402,7 +3380,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     return false;
   });
 
-  auto dispatch_console_keys = [app_mode, layout_state, focus, shell, state, model, on_command,
+  auto dispatch_console_keys = [app_mode, layout_state, focus, shell, state, model, on_command, ai,
                                 input_box, filter_input](Event event) -> bool {
     const bool on_terminal_tab = terminal_tab_active(app_mode, layout_state);
     const bool on_app_tab = app_tab_active(app_mode, layout_state);
@@ -2431,6 +3409,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       return true;
     }
 
+    if (handle_ai_console_keys(ai.get(), state.get(), layout_state, focus, input_box, event)) {
+      return true;
+    }
     if (handle_gdb_console_keys(app_mode, model, state.get(), layout_state, focus, input_box,
                                 on_command, event)) {
       return true;
@@ -2496,7 +3477,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
                                  filter_input, shell_launch_config, diagnostics_panel, search_panel,
                                  call_hierarchy_panel, git_panel, git_service,
                                  git_panel_state, core_analyzer_panel, binary_symbols_panel,
-                                 performance_panel,
+                                 performance_panel, ai,
                                  dispatch_packet_monitor_mouse](Event event) -> bool {
     if (event.is_mouse()) {
       const Mouse& m = event.mouse();
@@ -2507,6 +3488,15 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         activate_terminal_filter_input(layout_state, focus, filter_input);
         wake_console(layout_state);
         return true;
+      }
+      if (problems_tab_active_console(app_mode, layout_state) &&
+          (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) &&
+          state->panel_box.Contain(m.x, m.y) && layout_state != nullptr &&
+          layout_state->problems_scroll_handler) {
+        if (focus != nullptr) {
+          focus->region = FocusRegion::Terminal;
+        }
+        return layout_state->problems_scroll_handler(m.button == Mouse::WheelUp ? -3 : 3);
       }
       if (performance_tab_active(app_mode, layout_state) &&
           performance_panel->OnEvent(event)) {
@@ -2550,7 +3540,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
     }
     return handle_console_panel_mouse(
         state.get(), layout_state, focus, app_mode, model, workspace, shell, input_box,
-        current_shell_launch(shell_launch_config, model), event, git_service, git_panel_state);
+        current_shell_launch(shell_launch_config, model), event, git_service, git_panel_state,
+        ai.get());
   };
 
   if (layout_state != nullptr) {
@@ -2612,11 +3603,11 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
   }
 
   return Renderer(wrapped, [app_mode, model, shell, app_session, focus, input_box, input_maybe,
-                            filter_input, filter_maybe, filter_input_option, state, layout_state,
+                            filter_input, filter_maybe, filter_input_option, state, layout_state, ai,
                             bottom_height, perf_state, sampler, ui_perf, diagnostics_panel,
                             search_panel, call_hierarchy_panel, git_panel, core_analyzer_panel,
-                            binary_symbols_panel, packet_monitor_panel] {
-    state->input_placeholder = console_placeholder(app_mode);
+                            binary_symbols_panel, packet_monitor_panel, ai_input_wrap_width] {
+    state->input_placeholder = console_placeholder(app_mode, layout_state);
     state->pty_filter_placeholder = i18n::tr("console.pty.filter_placeholder");
     (void)input_maybe;
     (void)input_box;
@@ -2707,6 +3698,11 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         layout_state != nullptr &&
             layout_state->clickable.is_pressed(press_id::kConsoleTabBinarySymbols),
         &state->tab_boxes[ConsolePanelTabs::kBinarySymbols]));
+    tab_row.push_back(make_tab_button(
+        i18n::tr("console.tab.ai"), selected_tab == ConsolePanelTabs::kAi,
+        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabAi),
+        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabAi),
+        &state->tab_boxes[ConsolePanelTabs::kAi]));
 
     const bool hide_hovered =
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleHide);
@@ -2748,6 +3744,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
                                  panel_width) |
              flex;
     } else if (selected_tab == ConsolePanelTabs::kDebug) {
+      *ai_input_wrap_width = 0;
       body = render_gdb_console(state.get(), model, app_mode, layout_state, input_box);
     } else if (selected_tab == ConsolePanelTabs::kCoreAnalyzer) {
       body = core_analyzer_panel->Render() | flex;
@@ -2772,6 +3769,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       body = binary_symbols_panel->Render() | flex;
     } else if (selected_tab == ConsolePanelTabs::kPacketMonitor) {
       body = packet_monitor_panel->Render() | flex;
+    } else if (selected_tab == ConsolePanelTabs::kAi) {
+      body = render_ai_console(state.get(), ai.get(), layout_state, input_box,
+                               ai_input_wrap_width.get());
     } else {
       body = call_hierarchy_panel->Render() | flex;
     }

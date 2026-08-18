@@ -94,6 +94,9 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
                             bool show_format = false, bool show_secondary_open = true,
                             bool show_analyze_symbols = false);
 
+void context_menu_append_item(ContextMenuState* state, const std::string& label,
+                              const std::string& action_id);
+
 void context_menu_open_folder(ContextMenuState* state, int x, int y,
                               const std::string& absolute_path, const std::string& relative_path);
 

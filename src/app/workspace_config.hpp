@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "ai/ai_types.hpp"
 #include "build/build_environment.hpp"
 #include "ui/theme.hpp"
 
@@ -39,6 +40,9 @@ struct WorkspaceConfig {
   theme::UiColorOverrides ui_colors;
   CompileCommandsSettings compile_commands;
   BuildEnvironmentSettings build_environments;
+  AiSettings ai;
+  // path (absolute preferred) -> language_id override for ambiguous extensions.
+  std::map<std::string, std::string> language_overrides;
 
   static std::string config_dir(const std::string& workspace_root);
   static std::string private_dir(const std::string& workspace_root);

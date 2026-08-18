@@ -5,6 +5,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -91,7 +92,9 @@ class GitService {
   void pull(CompletionCallback on_done);
   void push(const GitCredentials& credentials, CompletionCallback on_done);
   void pull(const GitCredentials& credentials, CompletionCallback on_done);
+  void cancel_remote();
 
+  void drain_ui();
   void tick();
 
  private:
@@ -125,8 +128,11 @@ class GitService {
   bool timeline_diff_cached_unlocked(const std::string& rel,
                                      const std::string& commit_hash) const;
   void notify_updated();
+  void wake_ui();
   void run_on_ui_thread(std::function<void()> task);
   void dispatch_completion(CompletionCallback on_done, bool success, const std::string& message);
+  std::shared_ptr<GitCommandCancel> bind_remote_cancel();
+  void unbind_remote_cancel(const std::shared_ptr<GitCommandCancel>& cancel);
   bool diff_text_cached_unlocked(const std::string& rel) const;
 
   mutable std::mutex mutex_;
@@ -161,6 +167,8 @@ class GitService {
   std::function<void()> update_callback_;
   std::mutex completion_mutex_;
   std::deque<std::function<void()>> pending_completions_;
+  std::mutex remote_mutex_;
+  std::shared_ptr<GitCommandCancel> active_remote_cancel_;
   std::unordered_set<std::string> inflight_diffs_;
   std::unordered_set<std::string> inflight_heads_;
   std::atomic<bool> stop_{false};

@@ -1,5 +1,6 @@
 #include "parser/tree_sitter_language.hpp"
 
+#include <cctype>
 #include <filesystem>
 
 #include "lsp/lsp_uri.hpp"
@@ -12,6 +13,7 @@
 #include "tree-sitter-python.h"
 #include "tree-sitter-rust.h"
 #include "tree-sitter-typescript.h"
+#include "tree-sitter-xml.h"
 #include "tree-sitter-yaml.h"
 #include "tree-sitter-zig.h"
 #include "tree_sitter/tree-sitter-bash.h"
@@ -51,55 +53,83 @@ const TSLanguage* tree_sitter_make_language() { return tree_sitter_make(); }
 
 const TSLanguage* tree_sitter_yaml_language() { return tree_sitter_yaml(); }
 
-TreeSitterLangKind tree_sitter_lang_kind_for_path(const std::string& path) {
-  const std::string lang = language_id_for_path(path);
-  if (lang == "python") {
+const TSLanguage* tree_sitter_xml_language() { return tree_sitter_xml(); }
+
+TreeSitterLangKind tree_sitter_lang_kind_for_alias(const std::string& alias) {
+  std::string key;
+  key.reserve(alias.size());
+  for (const unsigned char c : alias) {
+    if (std::isspace(c) || c == '{' || c == '}') {
+      if (!key.empty()) {
+        break;
+      }
+      continue;
+    }
+    if (c == '.') {
+      continue;
+    }
+    key.push_back(static_cast<char>(std::tolower(c)));
+  }
+  if (key.empty()) {
+    return TreeSitterLangKind::kNone;
+  }
+  if (key == "c" || key == "cpp" || key == "c++" || key == "cc" || key == "cxx" || key == "h" ||
+      key == "hpp" || key == "hh" || key == "hxx") {
+    return TreeSitterLangKind::kCpp;
+  }
+  if (key == "python" || key == "py" || key == "python3" || key == "py3") {
     return TreeSitterLangKind::kPython;
   }
-  if (lang == "shellscript") {
+  if (key == "bash" || key == "sh" || key == "shell" || key == "shellscript" || key == "zsh" ||
+      key == "ksh") {
     return TreeSitterLangKind::kBash;
   }
-  if (lang == "latex") {
+  if (key == "latex" || key == "tex") {
     return TreeSitterLangKind::kLatex;
   }
-  if (lang == "rust") {
+  if (key == "rust" || key == "rs") {
     return TreeSitterLangKind::kRust;
   }
-  if (lang == "go") {
+  if (key == "go" || key == "golang") {
     return TreeSitterLangKind::kGo;
   }
-  if (lang == "zig") {
+  if (key == "zig") {
     return TreeSitterLangKind::kZig;
   }
-  if (lang == "fortran") {
+  if (key == "fortran" || key == "f90" || key == "f95" || key == "f03" || key == "f08" ||
+      key == "for") {
     return TreeSitterLangKind::kFortran;
   }
-  if (lang == "lua") {
+  if (key == "lua") {
     return TreeSitterLangKind::kLua;
   }
-  if (lang == "javascript") {
+  if (key == "javascript" || key == "js" || key == "jsx") {
     return TreeSitterLangKind::kJavaScript;
   }
-  if (lang == "typescript") {
+  if (key == "typescript" || key == "ts" || key == "tsx") {
     return TreeSitterLangKind::kTypeScript;
   }
-  if (lang == "cmake") {
+  if (key == "cmake") {
     return TreeSitterLangKind::kCmake;
   }
-  if (lang == "make") {
+  if (key == "make" || key == "makefile") {
     return TreeSitterLangKind::kMake;
   }
-  if (lang == "yaml") {
+  if (key == "yaml" || key == "yml") {
     return TreeSitterLangKind::kYaml;
   }
-  if (lang == "c" || lang == "cpp") {
-    return TreeSitterLangKind::kCpp;
+  if (key == "xml") {
+    return TreeSitterLangKind::kXml;
   }
   return TreeSitterLangKind::kNone;
 }
 
-const TSLanguage* tree_sitter_language_for_path(const std::string& path) {
-  switch (tree_sitter_lang_kind_for_path(path)) {
+TreeSitterLangKind tree_sitter_lang_kind_for_path(const std::string& path) {
+  return tree_sitter_lang_kind_for_alias(language_id_for_path(path));
+}
+
+const TSLanguage* tree_sitter_language_for_kind(TreeSitterLangKind kind) {
+  switch (kind) {
     case TreeSitterLangKind::kPython:
       return tree_sitter_python_language();
     case TreeSitterLangKind::kBash:
@@ -126,12 +156,18 @@ const TSLanguage* tree_sitter_language_for_path(const std::string& path) {
       return tree_sitter_make_language();
     case TreeSitterLangKind::kYaml:
       return tree_sitter_yaml_language();
+    case TreeSitterLangKind::kXml:
+      return tree_sitter_xml_language();
     case TreeSitterLangKind::kCpp:
       return tree_sitter_cpp_language();
     case TreeSitterLangKind::kNone:
       break;
   }
   return nullptr;
+}
+
+const TSLanguage* tree_sitter_language_for_path(const std::string& path) {
+  return tree_sitter_language_for_kind(tree_sitter_lang_kind_for_path(path));
 }
 
 }  // namespace tuide

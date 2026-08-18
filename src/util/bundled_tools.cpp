@@ -245,6 +245,24 @@ extern const unsigned char _binary_yaml_ls_blob_zst_end[];
 }
 #endif
 
+#ifdef TUIDE_HAS_BUNDLED_LEMMINX
+#if !defined(TUIDE_HAS_BUNDLED_CLANGD) && !defined(TUIDE_HAS_BUNDLED_GDB) && \
+    !defined(TUIDE_HAS_BUNDLED_RG) && !defined(TUIDE_HAS_BUNDLED_PYTHON_TOOLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TEXLAB) && !defined(TUIDE_HAS_BUNDLED_BASH_LS) && \
+    !defined(TUIDE_HAS_BUNDLED_BASH_DAP) && !defined(TUIDE_HAS_BUNDLED_RUST_ANALYZER) && \
+    !defined(TUIDE_HAS_BUNDLED_GOPLS) && !defined(TUIDE_HAS_BUNDLED_ZLS) && \
+    !defined(TUIDE_HAS_BUNDLED_LUA_LS) && !defined(TUIDE_HAS_BUNDLED_FORTLS) && \
+    !defined(TUIDE_HAS_BUNDLED_TSSERVER) && !defined(TUIDE_HAS_BUNDLED_NEOCMAKELSP) && \
+    !defined(TUIDE_HAS_BUNDLED_MAKE_LS) && !defined(TUIDE_HAS_BUNDLED_YAML_LS)
+#include <zstd.h>
+#endif
+#include "bundled_lemminx_manifest.hpp"
+extern "C" {
+extern const unsigned char _binary_lemminx_blob_zst_start[];
+extern const unsigned char _binary_lemminx_blob_zst_end[];
+}
+#endif
+
 namespace fs = std::filesystem;
 
 namespace tuide {
@@ -357,7 +375,8 @@ std::optional<std::string> gdb_from_env() {
     defined(TUIDE_HAS_BUNDLED_GOPLS) || defined(TUIDE_HAS_BUNDLED_ZLS) || \
     defined(TUIDE_HAS_BUNDLED_LUA_LS) || defined(TUIDE_HAS_BUNDLED_FORTLS) || \
     defined(TUIDE_HAS_BUNDLED_TSSERVER) || defined(TUIDE_HAS_BUNDLED_NEOCMAKELSP) || \
-    defined(TUIDE_HAS_BUNDLED_MAKE_LS) || defined(TUIDE_HAS_BUNDLED_YAML_LS)
+    defined(TUIDE_HAS_BUNDLED_MAKE_LS) || defined(TUIDE_HAS_BUNDLED_YAML_LS) || \
+    defined(TUIDE_HAS_BUNDLED_LEMMINX)
 std::optional<std::vector<unsigned char>> decompress_zstd_blob(const unsigned char* start,
                                                                  const unsigned char* end) {
   const std::size_t compressed_size = static_cast<std::size_t>(end - start);
@@ -390,7 +409,7 @@ bool extract_tar_to_directory(const std::vector<unsigned char>& tar_data,
     defined(TUIDE_HAS_BUNDLED_ZLS) || defined(TUIDE_HAS_BUNDLED_LUA_LS) || \
     defined(TUIDE_HAS_BUNDLED_FORTLS) || defined(TUIDE_HAS_BUNDLED_TSSERVER) || \
     defined(TUIDE_HAS_BUNDLED_NEOCMAKELSP) || defined(TUIDE_HAS_BUNDLED_MAKE_LS) || \
-    defined(TUIDE_HAS_BUNDLED_YAML_LS)
+    defined(TUIDE_HAS_BUNDLED_YAML_LS) || defined(TUIDE_HAS_BUNDLED_LEMMINX)
 bool bundled_tree_ready(const fs::path& install_root, const fs::path& binary_path,
                         const std::string& expected_marker) {
   const fs::path marker = install_root / ".installed";
@@ -1768,6 +1787,39 @@ std::optional<MakeLsLocation> resolve_make_ls() {
 #endif
   if (const auto path_bin = find_named_binary_on_path("make-ls"); path_bin.has_value()) {
     return MakeLsLocation{*path_bin, MakeLsLocation::Source::SystemPath};
+  }
+  return std::nullopt;
+}
+
+std::optional<LemminxLocation> resolve_lemminx() {
+  if (const auto env_path = env_executable("TUIDE_LEMMINX"); env_path.has_value()) {
+    return LemminxLocation{*env_path, LemminxLocation::Source::Env};
+  }
+  if (const auto env_path = env_executable("LEMMINX_PATH"); env_path.has_value()) {
+    return LemminxLocation{*env_path, LemminxLocation::Source::Env};
+  }
+  if (const auto tp = toolpacks::resolve_installed_toolpack("lemminx"); tp.has_value()) {
+    return LemminxLocation{tp->binary_path, LemminxLocation::Source::Toolpack};
+  }
+#ifdef TUIDE_HAS_BUNDLED_LEMMINX
+  {
+    const fs::path install_root =
+        fs::path(bundled_cache_root()) / ("lemminx-" TUIDE_BUNDLED_LEMMINX_VERSION);
+    const fs::path binary_path = install_root / "bin" / "lemminx";
+    const std::string expected = std::string(TUIDE_BUNDLED_LEMMINX_BLOB_SHA256) + "\n";
+    static std::atomic<bool> install_attempted{false};
+    if (lazy_extract_bundled_tree(install_root, "bin/lemminx", expected,
+                                  _binary_lemminx_blob_zst_start, _binary_lemminx_blob_zst_end,
+                                  install_attempted)) {
+      return LemminxLocation{binary_path.string(), LemminxLocation::Source::Bundled};
+    }
+#ifdef TUIDE_DEFAULT_FORCE_BUNDLED_LEMMINX
+    return std::nullopt;
+#endif
+  }
+#endif
+  if (const auto path_bin = find_named_binary_on_path("lemminx"); path_bin.has_value()) {
+    return LemminxLocation{*path_bin, LemminxLocation::Source::SystemPath};
   }
   return std::nullopt;
 }

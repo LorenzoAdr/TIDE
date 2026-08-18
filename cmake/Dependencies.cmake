@@ -124,6 +124,13 @@ FetchContent_Declare(
   GIT_SUBMODULES ""
 )
 
+FetchContent_Declare(
+  tree_sitter_xml
+  GIT_REPOSITORY https://github.com/tree-sitter-grammars/tree-sitter-xml.git
+  GIT_TAG v0.7.0
+  GIT_SHALLOW TRUE
+)
+
 FetchContent_MakeAvailable(ftxui cppdap tree_sitter tree_sitter_cpp)
 
 # Manual add: several grammar CMakeLists define a conflicting `ts-test` target
@@ -149,7 +156,7 @@ function(tuide_add_tree_sitter_grammar name source_dir)
     POSITION_INDEPENDENT_CODE ON)
 endfunction()
 
-foreach(_gram python bash latex rust go zig fortran lua javascript typescript cmake make yaml)
+foreach(_gram python bash latex rust go zig fortran lua javascript typescript cmake make yaml xml)
   FetchContent_GetProperties(tree_sitter_${_gram})
   if(NOT tree_sitter_${_gram}_POPULATED)
     FetchContent_Populate(tree_sitter_${_gram})
@@ -269,6 +276,8 @@ foreach(_gram python bash latex rust go zig fortran lua javascript cmake make ya
   tuide_add_tree_sitter_grammar(${_gram} ${tree_sitter_${_gram}_SOURCE_DIR})
 endforeach()
 tuide_add_tree_sitter_grammar(typescript ${tree_sitter_typescript_SOURCE_DIR}/typescript)
+# XML grammar lives under xml/ (DTD is a sibling; not wired yet).
+tuide_add_tree_sitter_grammar(xml ${tree_sitter_xml_SOURCE_DIR}/xml)
 
 set(TUIDE_TREE_SITTER_QUERY_HPP "${CMAKE_BINARY_DIR}/generated/tree_sitter_grammar_queries.gen.hpp")
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
@@ -282,7 +291,8 @@ foreach(_query_spec
     "javascript|${tree_sitter_javascript_SOURCE_DIR}/queries/highlights.scm"
     "cmake|${tree_sitter_cmake_SOURCE_DIR}/queries/highlights.scm"
     "make|${tree_sitter_make_SOURCE_DIR}/queries/highlights.scm"
-    "yaml|${tree_sitter_yaml_SOURCE_DIR}/queries/highlights.scm")
+    "yaml|${tree_sitter_yaml_SOURCE_DIR}/queries/highlights.scm"
+    "xml|${tree_sitter_xml_SOURCE_DIR}/queries/xml/highlights.scm")
   string(REPLACE "|" ";" _parts "${_query_spec}")
   list(GET _parts 0 _lang)
   list(GET _parts 1 _query_file)

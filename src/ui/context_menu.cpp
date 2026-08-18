@@ -33,6 +33,7 @@
 #include "i18n/tr.hpp"
 #include "util/compile_commands_lookup.hpp"
 #include "util/clang_format_config.hpp"
+#include "util/external_viewer.hpp"
 #include "util/path_normalize.hpp"
 
 namespace tuide {
@@ -1191,6 +1192,13 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
+  if (action_id == "preview_markdown") {
+    if (workspace != nullptr) {
+      workspace->preview_markdown_in_browser(state->absolute_path);
+    }
+    return true;
+  }
+
   if (action_id == "analyze_symbols") {
     request_binary_symbols_panel(layout_state, state->absolute_path);
     if (focus != nullptr) {
@@ -1296,6 +1304,22 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     focus_references(layout_state, state->editor_line, state->editor_col, state->symbol_name);
     if (focus != nullptr) {
       focus->region = FocusRegion::RightPanel;
+    }
+    return true;
+  }
+
+  if (action_id == "ai_insert") {
+    if (layout_state != nullptr && layout_state->on_ai_insert_requested) {
+      MainLayoutState::AiInsertRequest req;
+      req.absolute_path = state->absolute_path;
+      if (req.absolute_path.empty() && workspace != nullptr) {
+        req.absolute_path = workspace->active_file.empty() ? workspace->buffer.path
+                                                          : workspace->active_file;
+      }
+      req.line = state->editor_line;
+      req.col = state->editor_col;
+      req.symbol_hint = state->symbol_name;
+      layout_state->on_ai_insert_requested(req);
     }
     return true;
   }
@@ -1661,6 +1685,16 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
   }
 }
 
+void context_menu_append_item(ContextMenuState* state, const std::string& label,
+                              const std::string& action_id) {
+  if (state == nullptr || action_id.empty()) {
+    return;
+  }
+  state->labels.push_back(label);
+  state->action_ids.push_back(action_id);
+  state->row_boxes.push_back(Box{});
+}
+
 void context_menu_open_file(ContextMenuState* state, int x, int y,
                             const std::string& absolute_path, const std::string& relative_path,
                             bool show_format, bool show_secondary_open, bool show_analyze_symbols) {
@@ -1824,6 +1858,7 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
     items.push_back({i18n::tr("context_menu.format_file"), "format_file"});
   }
   set_items(state, ContextMenuKind::EditorSymbol, items);
+  append_menu_item(state, i18n::tr("context_menu.ai_insert"), "ai_insert");
   append_doc_comment_items(state, true);
   if (show_debug) {
     append_debug_watch_items(state, show_hw);
@@ -1878,6 +1913,7 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
   }
   items.push_back({i18n::tr("context_menu.format_file"), "format_file"});
   set_items(state, ContextMenuKind::EditorBackground, items);
+  append_menu_item(state, i18n::tr("context_menu.ai_insert"), "ai_insert");
   append_doc_comment_items(state, false);
 }
 

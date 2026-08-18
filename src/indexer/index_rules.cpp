@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <unordered_set>
 
+#include "app/language_override.hpp"
+
 namespace fs = std::filesystem;
 
 namespace tuide {
@@ -88,6 +90,9 @@ bool should_skip_dir_name(const std::string& name, const IndexFilterOptions& opt
 }
 
 bool is_indexed_source_path(const std::string& path) {
+  if (const auto override_id = language_override_for_path(path); override_id.has_value()) {
+    return !override_id->empty() && *override_id != "plaintext";
+  }
   const fs::path file_path(path);
   const auto filename = file_path.filename().string();
   if (filename == "CMakeLists.txt" || filename == "Makefile" || filename == "makefile" ||
@@ -101,7 +106,8 @@ bool is_indexed_source_path(const std::string& path) {
          ext == ".rs" || ext == ".go" || ext == ".zig" || ext == ".f" || ext == ".f90" ||
          ext == ".f95" || ext == ".for" || ext == ".lua" || ext == ".js" || ext == ".mjs" ||
          ext == ".cjs" || ext == ".ts" || ext == ".tsx" || ext == ".cmake" || ext == ".mk" ||
-         ext == ".yaml" || ext == ".yml";
+         ext == ".yaml" || ext == ".yml" || ext == ".xml" || ext == ".xhtml" || ext == ".svg" ||
+         ext == ".xsl" || ext == ".xslt";
 }
 
 bool should_list_workspace_path(const std::string& relative_path,

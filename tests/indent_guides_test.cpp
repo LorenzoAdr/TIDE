@@ -48,6 +48,13 @@ void test_guides_show_parent_levels_only() {
   assert(split.suffix == "return \"CMakeLists.txt\";");
 }
 
+void test_tree_indent_guide_prefix() {
+  assert(tree_indent_guide_prefix(0).empty());
+  assert(tree_indent_guide_prefix(-1).empty());
+  assert(tree_indent_guide_prefix(1) == "│ ");
+  assert(tree_indent_guide_prefix(3) == "│ │ │ ");
+}
+
 }  // namespace
 }  // namespace tuide
 
@@ -55,6 +62,7 @@ int main() {
   tuide::test_caret_column_after_leading_tabs();
   tuide::test_body_source_byte_after_tabs();
   tuide::test_guides_show_parent_levels_only();
+  tuide::test_tree_indent_guide_prefix();
   std::cout << "indent_guides_test: ok\n";
   return 0;
 }

@@ -1,0 +1,9 @@
+{
+  "id": "p_edit_first",
+  "description": "Stop tool loops; edit immediately after pack",
+  "system_extra": "After a covering pack: at most 1 tool refetch. Then MUST emit action=edit. Do not call get_code_of in a loop.",
+  "user_overlays": {
+    "pack": "STOP reading. Emit done next=edit or action=edit now.",
+    "edit": "No tools unless Truncated on the exact edit span. Prefer edit."
+  }
+}

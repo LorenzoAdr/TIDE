@@ -21,6 +21,18 @@ constexpr std::string_view kConsoleTabGit = "console.tab.git";
 constexpr std::string_view kConsoleTabCoreAnalyzer = "console.tab.core_analyzer";
 constexpr std::string_view kConsoleTabBinarySymbols = "console.tab.binary_symbols";
 constexpr std::string_view kConsoleTabPacketMonitor = "console.tab.packet_monitor";
+constexpr std::string_view kConsoleTabAi = "console.tab.ai";
+constexpr std::string_view kConsoleAiStop = "console.ai.stop";
+constexpr std::string_view kConsoleAiReset = "console.ai.reset";
+constexpr std::string_view kConsoleAiWorkflow = "console.ai.workflow";
+constexpr std::string_view kConsoleAiWorkflowAgent = "console.ai.workflow.agent";
+constexpr std::string_view kConsoleAiWorkflowAsk = "console.ai.workflow.ask";
+constexpr std::string_view kConsoleAiWorkflowPlan = "console.ai.workflow.plan";
+constexpr std::string_view kConsoleAiWorkflowGit = "console.ai.workflow.git";
+constexpr std::string_view kConsoleAiBackend = "console.ai.backend";
+constexpr std::string_view kConsoleAiBackendLocal = "console.ai.backend.local";
+constexpr std::string_view kConsoleAiBackendRemote = "console.ai.backend.remote";
+constexpr std::string_view kConsoleAiPathScope = "console.ai.path_scope";
 constexpr std::string_view kPerformanceRefresh = "performance.refresh";
 constexpr std::string_view kPacketMonitorRecord = "packet_monitor.record";
 constexpr std::string_view kPacketMonitorSave = "packet_monitor.save";
@@ -38,6 +50,9 @@ constexpr std::string_view kStatusLayout = "status.layout";
 constexpr std::string_view kStatusLayoutFiles = "status.layout.files";
 constexpr std::string_view kStatusLayoutOutline = "status.layout.outline";
 constexpr std::string_view kStatusLayoutTerminal = "status.layout.terminal";
+constexpr std::string_view kStatusLanguage = "status.language";
+constexpr std::string_view kStatusLanguageAuto = "status.language.auto";
+constexpr std::string_view kStatusLanguageItemPrefix = "status.language.item.";
 constexpr std::string_view kStatusSettings = "status.settings";
 constexpr std::string_view kStatusShortcuts = "status.shortcuts";
 constexpr std::string_view kSidebarTabOutline = "sidebar.tab.outline";
@@ -57,6 +72,10 @@ constexpr std::string_view kExternalConflictLoad = "external_conflict.load";
 constexpr std::string_view kLspToastInstall = "lsp_toast.install";
 constexpr std::string_view kLspToastBundle = "lsp_toast.bundle";
 constexpr std::string_view kLspToastIgnore = "lsp_toast.ignore";
+constexpr std::string_view kAiToastInstall = "ai_toast.install";
+constexpr std::string_view kAiToastIgnore = "ai_toast.ignore";
+constexpr std::string_view kAiDownloadYes = "ai_download.yes";
+constexpr std::string_view kAiDownloadNo = "ai_download.no";
 constexpr std::string_view kWelcomeExternalFile = "welcome.external_file";
 constexpr std::string_view kWelcomeDebug = "welcome.debug";
 constexpr std::string_view kWelcomeWorkspace = "welcome.workspace";
@@ -95,7 +114,10 @@ constexpr std::string_view kExplorerScrollbar = "scrollbar.explorer";
 constexpr std::string_view kSourceScrollbar = "scrollbar.source";
 constexpr std::string_view kTerminalScrollbar = "scrollbar.terminal";
 constexpr std::string_view kSearchScrollbar = "scrollbar.search";
+constexpr std::string_view kProblemsScrollbar = "scrollbar.problems";
+constexpr std::string_view kSearchCollapseAll = "search.collapse_all";
 constexpr std::string_view kTerminalLink = "terminal.link";
+constexpr std::string_view kAiResultLink = "ai.result.link";
 
 inline std::string explorer_row(int index) {
   return "explorer.row." + std::to_string(index);
@@ -103,6 +125,10 @@ inline std::string explorer_row(int index) {
 
 inline std::string outline_row(int index) {
   return "outline.row." + std::to_string(index);
+}
+
+inline std::string search_row(int index) {
+  return "search.row." + std::to_string(index);
 }
 
 inline std::string core_analyzer_instance(int index) {
@@ -171,11 +197,19 @@ inline bool is_console_tab_hover(std::string_view id) {
          id == kConsoleTabPerformance ||
          id == kConsoleTabProblems || id == kConsoleTabSearch || id == kConsoleTabCallHierarchy ||
          id == kConsoleTabGit || id == kConsoleTabCoreAnalyzer ||
-         id == kConsoleTabBinarySymbols || id == kConsoleTabPacketMonitor;
+         id == kConsoleTabBinarySymbols || id == kConsoleTabPacketMonitor || id == kConsoleTabAi;
 }
 
 inline bool is_console_header_hover(std::string_view id) {
-  return is_console_tab_hover(id) || id == kConsoleHide;
+  return is_console_tab_hover(id) || id == kConsoleHide || id == kConsoleAiStop ||
+         id == kConsoleAiReset || id == kConsoleAiWorkflow || id == kConsoleAiWorkflowAgent ||
+         id == kConsoleAiWorkflowAsk || id == kConsoleAiWorkflowPlan ||
+         id == kConsoleAiWorkflowGit || id == kConsoleAiBackend || id == kConsoleAiBackendLocal ||
+         id == kConsoleAiBackendRemote || id == kConsoleAiPathScope;
+}
+
+inline bool is_git_panel_hover(std::string_view id) {
+  return id.rfind("git-", 0) == 0;
 }
 
 inline bool is_performance_hover(std::string_view id) {
@@ -211,12 +245,24 @@ inline bool is_lsp_toast_hover(std::string_view id) {
   return id == kLspToastInstall || id == kLspToastBundle || id == kLspToastIgnore;
 }
 
+inline bool is_ai_toast_hover(std::string_view id) {
+  return id == kAiToastInstall || id == kAiToastIgnore;
+}
+
+inline bool is_ai_download_hover(std::string_view id) {
+  return id == kAiDownloadYes || id == kAiDownloadNo;
+}
+
 inline bool is_explorer_hover(std::string_view id) {
   return id.rfind("explorer.row.", 0) == 0;
 }
 
 inline bool is_outline_hover(std::string_view id) {
   return id.rfind("outline.row.", 0) == 0;
+}
+
+inline bool is_search_hover(std::string_view id) {
+  return id == kSearchCollapseAll || id.rfind("search.row.", 0) == 0;
 }
 
 inline bool is_context_menu_hover(std::string_view id) {
@@ -226,7 +272,8 @@ inline bool is_context_menu_hover(std::string_view id) {
 inline bool is_scrollbar_hover(std::string_view id) {
   return id == kEditorScrollbar || id == kEditorHorizontalScrollbar ||
          id == kExplorerScrollbar || id == kSourceScrollbar || id == kTerminalScrollbar ||
-         id == kSearchScrollbar || id == kTerminalLink;
+         id == kSearchScrollbar || id == kProblemsScrollbar || id == kTerminalLink ||
+         id == kAiResultLink;
 }
 
 inline bool is_f2_hover(std::string_view id) {

@@ -1,0 +1,10 @@
+{
+  "id": "p_short",
+  "description": "Shorter tool guide to free n_ctx",
+  "tool_guide": "## Tool guide (compact)\nexplore→plan→pack→edit→compile→map_review→done.\nFirst step: plan with 4–8 path:Symbol. After pack: prefer edit. Tools max 4; refetch Truncated with path:A-B or #tail.\nJSON only. edit hunks need unique multiline search. New API: edit .hpp decl + .cpp def together.\nclarify only if Instruction has no concrete src/ path.\n| tool | arg |\n| get_code_of | path:Symbol|#tail|A-B |\n| file_outline | path |\n| search | needles |\n| headers_of | path |\n| sibling_of | path (.cpp↔.hpp) |\n",
+  "system_extra": "Keep answers tiny JSON. Prefer edit over more tools once pack exists.",
+  "user_overlays": {
+    "pack": "Prefer {\"action\":\"edit\"} or done next=edit now.",
+    "edit": "Emit edit with full search span. Cover all Instruction paths before done."
+  }
+}

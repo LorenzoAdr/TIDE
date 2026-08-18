@@ -1,0 +1,8 @@
+{
+  "id": "p_json_strict",
+  "description": "Stricter JSON/edit examples",
+  "system_extra": "## JSON edit rules\n- One JSON object only. No markdown fences.\n- In search/replace strings use \\n for newlines (or keep short unique multiline blocks carefully escaped).\n- search must be a unique code block (≥2 lines preferred), never a lone identifier.\n- Example shape: {\"action\":\"edit\",\"hunks\":[{\"path\":\"src/util/shell_utils.hpp\",\"search\":\"bool command_exists(const std::string& command);\\n\",\"replace\":\"bool command_exists(const std::string& command);\\nbool always_true();\\n\"}]}\n",
+  "user_overlays": {
+    "edit": "Escape newlines as \\n inside JSON strings. Unique multiline search."
+  }
+}

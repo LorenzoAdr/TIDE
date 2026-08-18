@@ -1,0 +1,9 @@
+{
+  "id": "p_aggressive_edit",
+  "description": "Bias hard to edit in one shot with multiple hunks",
+  "system_extra": "Bias: when Instruction is clear, skip long explore. plan → done next=edit → single edit with ALL hunks needed (multi-file OK). Prefer one fat edit over many turns.\n",
+  "user_overlays": {
+    "explore": "Minimal plan then done next=edit.",
+    "edit": "Put every required change into hunks[] now (multiple paths allowed)."
+  }
+}

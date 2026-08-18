@@ -3,6 +3,7 @@
 #include <array>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/screen/box.hpp"
@@ -67,6 +68,9 @@ struct GitPanelState {
   std::string auth_password;
   int auth_user_cursor = 0;
   int auth_pass_cursor = 0;
+  bool discard_modal_open = false;
+  bool discard_focus_confirm = false;  // false = Cancelar (por defecto)
+  std::vector<std::string> discard_modal_paths;
   bool operation_pending = false;
   std::string pending_diff_path;
   int last_file_click_index = -1;
@@ -94,6 +98,11 @@ struct GitPanelState {
   ftxui::Box commit_modal_files_box;
   ftxui::Box auth_modal_confirm_box;
   ftxui::Box auth_modal_cancel_box;
+  ftxui::Box discard_modal_confirm_box;
+  ftxui::Box discard_modal_cancel_box;
+  ftxui::Box discard_modal_files_box;
+
+  bool git_overlay_open() const { return auth_modal_open || discard_modal_open; }
 };
 
 ftxui::Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* layout_state,

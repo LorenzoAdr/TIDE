@@ -1,0 +1,211 @@
+R"TUIDE({
+  "version": 1,
+  "intents": [
+    {
+      "id": "compile",
+      "kind": "task",
+      "name": "compile",
+      "arg_policy": "none",
+      "examples": [
+        "compila",
+        "compile",
+        "build",
+        "compila el proyecto",
+        "build the project",
+        "haz un build",
+        "run the build"
+      ]
+    },
+    {
+      "id": "launch",
+      "kind": "task",
+      "name": "launch",
+      "arg_policy": "none",
+      "examples": [
+        "lanza",
+        "launch",
+        "run",
+        "ejecuta la app",
+        "lanza el programa",
+        "run the app",
+        "start the target"
+      ]
+    },
+    {
+      "id": "git_status",
+      "kind": "tool",
+      "name": "git_status",
+      "arg_policy": "path_hint",
+      "examples": [
+        "git status",
+        "estado git",
+        "status",
+        "archivos modificados",
+        "qué archivos tengo modificados",
+        "que archivos modificados tengo",
+        "lista cambios",
+        "qué ha cambiado",
+        "como está el repo",
+        "cómo está el git",
+        "tengo muchos cambios",
+        "hay cambios",
+        "cuántos cambios hay",
+        "qué cambios tenemos en el repo",
+        "que cambios tenemos en el repo",
+        "working tree",
+        "modified files",
+        "what changed in the project",
+        "show unstaged files",
+        "archivos modificados del proyecto",
+        "numero de archivos modificados"
+      ]
+    },
+    {
+      "id": "git_diff",
+      "kind": "tool",
+      "name": "git_diff",
+      "arg_policy": "path_hint",
+      "examples": [
+        "git diff",
+        "qué he cambiado",
+        "que tengo cambiado",
+        "muéstrame el diff",
+        "cambios de cada archivo",
+        "qué cambios hay en el contenido",
+        "show the diff",
+        "what did I change",
+        "contenido de los cambios"
+      ]
+    },
+    {
+      "id": "git_pull",
+      "kind": "tool",
+      "name": "git_pull",
+      "arg_policy": "none",
+      "examples": [
+        "git pull",
+        "pull",
+        "actualiza el git",
+        "actualizar git",
+        "update git",
+        "haz un git pull",
+        "trae los cambios remotos",
+        "refresh from remote"
+      ]
+    },
+    {
+      "id": "git_branches",
+      "kind": "tool",
+      "name": "git_branches",
+      "arg_policy": "none",
+      "examples": [
+        "lista las ramas",
+        "qué ramas hay",
+        "ramas remotas",
+        "dime las ramas que hay en remoto",
+        "git branch",
+        "show branches",
+        "list remote branches",
+        "which branches exist"
+      ]
+    },
+    {
+      "id": "git_log",
+      "kind": "tool",
+      "name": "git_log",
+      "arg_policy": "git_log_arg",
+      "examples": [
+        "git log",
+        "últimos commits",
+        "historial de commits",
+        "cuál fue el último commit",
+        "últimos commits de main",
+        "histórico del archivo abierto",
+        "commit history",
+        "show recent commits",
+        "last commit on main"
+      ]
+    },
+    {
+      "id": "git_show",
+      "kind": "tool",
+      "name": "git_show",
+      "arg_policy": "commit_rev",
+      "examples": [
+        "qué archivos cambió ese commit",
+        "archivos del último commit",
+        "show that commit",
+        "files changed in the last commit",
+        "qué tocó el penúltimo commit"
+      ]
+    },
+    {
+      "id": "git_show_patch",
+      "kind": "tool",
+      "name": "git_show",
+      "arg_policy": "commit_rev_patch",
+      "examples": [
+        "muéstrame el patch del commit",
+        "diff de ese commit",
+        "cambios de cada archivo del commit",
+        "show the commit patch",
+        "hunks of that commit"
+      ]
+    },
+    {
+      "id": "list_files",
+      "kind": "tool",
+      "name": "list_files",
+      "arg_policy": "path_hint",
+      "examples": [
+        "lista archivos",
+        "listame los archivos que hay dentro de src",
+        "qué hay dentro de tools",
+        "listar directorio",
+        "list files in src",
+        "show directory contents"
+      ]
+    },
+    {
+      "id": "diagnostics",
+      "kind": "tool",
+      "name": "diagnostics",
+      "arg_policy": "none",
+      "examples": [
+        "lista errores",
+        "errores",
+        "problemas",
+        "diagnostics",
+        "list errors",
+        "show compiler errors",
+        "qué errores hay"
+      ]
+    },
+    {
+      "id": "search",
+      "kind": "tool",
+      "name": "search",
+      "arg_policy": "search_query",
+      "examples": [
+        "busca PayloadBuilder",
+        "search Foo",
+        "buscar connect",
+        "find symbol Bar",
+        "rg something"
+      ]
+    },
+    {
+      "id": "context_pack",
+      "kind": "tool",
+      "name": "context_pack",
+      "arg_policy": "seeds",
+      "examples": [
+        "contexto de Foo",
+        "context pack for Bar",
+        "arma el pack de ConnectionManager",
+        "pack around this symbol"
+      ]
+    }
+  ]
+}
+)TUIDE"

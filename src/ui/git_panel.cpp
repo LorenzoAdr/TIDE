@@ -52,6 +52,8 @@ constexpr const char* kGitCommitConfirm = "git-commit-confirm";
 constexpr const char* kGitCommitCancel = "git-commit-cancel";
 constexpr const char* kGitAuthConfirm = "git-auth-confirm";
 constexpr const char* kGitAuthCancel = "git-auth-cancel";
+constexpr const char* kGitDiscardConfirm = "git-discard-confirm";
+constexpr const char* kGitDiscardCancel = "git-discard-cancel";
 constexpr const char* kGitListScrollbar = "git-list-scrollbar";
 constexpr const char* kGitDiffScrollbar = "git-diff-scrollbar";
 
@@ -573,7 +575,7 @@ void open_status_file_diff(GitService* git, GitPanelState* state, MainLayoutStat
     if (focus != nullptr) {
       focus->region = FocusRegion::Editor;
     }
-    UI_WAKE(layout_state, "git.diff.open");
+    wake_console_panel(layout_state, "git.diff.open");
   }
 }
 
@@ -966,7 +968,7 @@ void stage_selected(GitService* git, GitPanelState* state, MainLayoutState* layo
     }
     set_status(state, ok ? i18n::tr("git.status.staged") : msg);
     if (layout_state != nullptr) {
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "wake");
     }
   });
 }
@@ -987,7 +989,7 @@ void unstage_selected(GitService* git, GitPanelState* state, MainLayoutState* la
     }
     set_status(state, ok ? i18n::tr("git.status.unstaged") : msg);
     if (layout_state != nullptr) {
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "wake");
     }
   });
 }
@@ -1008,9 +1010,42 @@ void discard_selected(GitService* git, GitPanelState* state, MainLayoutState* la
     }
     set_status(state, ok ? i18n::tr("git.status.discarded") : msg);
     if (layout_state != nullptr) {
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "wake");
     }
   });
+}
+
+void close_discard_modal(GitPanelState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->discard_modal_open = false;
+  state->discard_focus_confirm = false;
+  state->discard_modal_paths.clear();
+}
+
+void open_discard_modal(GitService* git, GitPanelState* state, MainLayoutState* layout_state) {
+  if (git == nullptr || state == nullptr) {
+    return;
+  }
+  const std::vector<std::string> paths = paths_for_stage_action(git, state);
+  if (paths.empty()) {
+    return;
+  }
+  state->discard_modal_open = true;
+  state->discard_focus_confirm = false;
+  state->discard_modal_paths = paths;
+  if (layout_state != nullptr) {
+    wake_console_panel(layout_state, "git.discard.open");
+  }
+}
+
+void confirm_discard_modal(GitService* git, GitPanelState* state, MainLayoutState* layout_state) {
+  if (state == nullptr) {
+    return;
+  }
+  close_discard_modal(state);
+  discard_selected(git, state, layout_state);
 }
 
 void open_commit_modal(GitPanelState* state) {
@@ -1094,7 +1129,7 @@ void start_git_remote_op(GitService* git, GitPanelState* state, MainLayoutState*
                            : msg);
     }
     if (layout_state != nullptr) {
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "git.remote");
     }
   };
   if (for_push) {
@@ -1117,7 +1152,7 @@ void commit_message(GitService* git, GitPanelState* state, MainLayoutState* layo
     }
     set_status(state, ok ? i18n::tr("git.status.commit_ok") : msg);
     if (layout_state != nullptr) {
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "wake");
     }
   });
 }
@@ -1427,9 +1462,104 @@ bool handle_auth_modal_keys(GitService* git, GitPanelState* state, MainLayoutSta
   return true;
 }
 
+Element render_discard_modal(GitPanelState* state, MainLayoutState* layout_state) {
+  if (state == nullptr || !state->discard_modal_open) {
+    return text("");
+  }
+  const bool confirm_hovered = interaction_active(layout_state, kGitDiscardConfirm) ||
+                               state->discard_focus_confirm;
+  const bool confirm_pressed =
+      layout_state != nullptr &&
+      layout_state->clickable.is_pressed(std::string_view(kGitDiscardConfirm));
+  const bool cancel_hovered =
+      interaction_active(layout_state, kGitDiscardCancel) || !state->discard_focus_confirm;
+  const bool cancel_pressed =
+      layout_state != nullptr &&
+      layout_state->clickable.is_pressed(std::string_view(kGitDiscardCancel));
+  Element confirm_btn =
+      MakeToolbarButton(text(" " + i18n::tr("git.discard.confirm") + " "), confirm_hovered,
+                        confirm_pressed, false, &state->discard_modal_confirm_box, true);
+  Element cancel_btn =
+      MakeToolbarButton(text(" " + i18n::tr("git.discard.cancel") + " "), cancel_hovered,
+                        cancel_pressed, false, &state->discard_modal_cancel_box, true);
+
+  const int term_w =
+      layout_state != nullptr ? terminal_width_or_default(layout_state->terminal_width) : 120;
+  const int term_h =
+      layout_state != nullptr ? terminal_height_or_default(layout_state->terminal_height) : 40;
+  const LargeModalLayout dims = compute_large_modal_layout(term_w, term_h);
+  const int modal_width = std::max(52, std::min(72, dims.modal_width));
+  const int file_rows_visible = std::max(4, std::min(10, dims.max_rows - 6));
+
+  Elements file_rows;
+  const int total = static_cast<int>(state->discard_modal_paths.size());
+  const int shown = std::min(total, file_rows_visible);
+  for (int i = 0; i < shown; ++i) {
+    file_rows.push_back(text(" " + state->discard_modal_paths[static_cast<std::size_t>(i)]) |
+                        color(theme::Header()));
+  }
+  if (total > shown) {
+    file_rows.push_back(text(" +" + std::to_string(total - shown) + "…") | color(theme::Muted()));
+  }
+
+  Elements body;
+  body.push_back(text(i18n::tr("git.discard.question")) | color(theme::Header()) | bold);
+  body.push_back(separator() | color(theme::AccentDim()));
+  body.push_back(vbox(std::move(file_rows)) | bgcolor(theme::CodeBg()) |
+                 reflect(state->discard_modal_files_box));
+  body.push_back(text(i18n::tr("git.discard.warning")) | color(theme::Error()));
+  body.push_back(text(""));
+  body.push_back(hbox({std::move(confirm_btn), text(" "), std::move(cancel_btn)}));
+  body.push_back(text(i18n::tr("git.discard.footer")) | color(theme::Muted()));
+
+  return ModalWindow(text(i18n::tr("git.discard.modal_title")) | color(theme::Warning()),
+                     vbox(std::move(body)) | size(WIDTH, EQUAL, modal_width));
+}
+
+bool handle_discard_modal_keys(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
+                               Event event) {
+  if (state == nullptr || !state->discard_modal_open) {
+    return false;
+  }
+  if (event == Event::Escape) {
+    close_discard_modal(state);
+    return true;
+  }
+  if (event == Event::Return) {
+    if (state->discard_focus_confirm) {
+      trigger_press(layout_state, std::string_view(kGitDiscardConfirm));
+      confirm_discard_modal(git, state, layout_state);
+    } else {
+      trigger_press(layout_state, std::string_view(kGitDiscardCancel));
+      close_discard_modal(state);
+    }
+    return true;
+  }
+  if (event == Event::Tab || event == Event::ArrowLeft || event == Event::ArrowRight ||
+      event == Event::ArrowUp || event == Event::ArrowDown) {
+    state->discard_focus_confirm = !state->discard_focus_confirm;
+    return true;
+  }
+  return true;
+}
+
 bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
                      FocusManagerState* focus, WorkspaceModel* workspace, Event event) {
-  if (state == nullptr || git == nullptr || !git->is_repo()) {
+  if (state == nullptr || git == nullptr) {
+    return false;
+  }
+
+  if (handle_discard_modal_keys(git, state, layout_state, event)) {
+    return true;
+  }
+  if (handle_auth_modal_keys(git, state, layout_state, event)) {
+    return true;
+  }
+  if (handle_commit_modal_keys(git, state, layout_state, event)) {
+    return true;
+  }
+
+  if (!git->is_repo()) {
     return false;
   }
   if (focus != nullptr && focus->region != FocusRegion::Terminal) {
@@ -1439,13 +1569,6 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
 
   if (event_is_tuide_global_shortcut(event)) {
     return false;
-  }
-
-  if (handle_auth_modal_keys(git, state, layout_state, event)) {
-    return true;
-  }
-  if (handle_commit_modal_keys(git, state, layout_state, event)) {
-    return true;
   }
 
   if (state->search_focus && handle_search_input(state, git, event)) {
@@ -1597,7 +1720,7 @@ bool handle_git_keys(GitService* git, GitPanelState* state, MainLayoutState* lay
           state->operation_pending = false;
           set_status(state, ok ? i18n::tr("git.status.branch_switched") : msg);
           if (layout_state != nullptr) {
-            UI_WAKE(layout_state, "wake");
+            wake_console_panel(layout_state, "wake");
           }
         });
       }
@@ -1849,7 +1972,7 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
       state->file_list_width_custom = true;
       state->file_list_width = state->list_sep_drag_start_width + delta;
       clamp_file_list_width(state, panel_w);
-      UI_WAKE(layout_state, "wake");
+      wake_console_panel(layout_state, "wake");
       return true;
     }
   }
@@ -1857,13 +1980,45 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
   if (state->list_scrollbar_dragging &&
       handle_git_list_scrollbar_mouse(state, layout_state, m, state->last_list_total,
                                       state->last_list_visible)) {
-    UI_WAKE(layout_state, "wake");
+    wake_console_panel(layout_state, "wake");
     return true;
   }
   if (state->diff_scrollbar_dragging &&
       handle_git_diff_scrollbar_mouse(state, layout_state, m, state->last_diff_total,
                                       state->last_diff_visible)) {
-    UI_WAKE(layout_state, "wake");
+    wake_console_panel(layout_state, "wake");
+    return true;
+  }
+
+  // Modal de confirmación de revertir.
+  if (state->discard_modal_open) {
+    if (m.motion == Mouse::Moved) {
+      update_panel_hover(
+          layout_state, m.x, m.y,
+          {{kGitDiscardConfirm, &state->discard_modal_confirm_box},
+           {kGitDiscardCancel, &state->discard_modal_cancel_box}},
+          [](std::string_view id) {
+            return id == kGitDiscardConfirm || id == kGitDiscardCancel;
+          });
+      if (state->discard_modal_confirm_box.Contain(m.x, m.y)) {
+        state->discard_focus_confirm = true;
+      } else if (state->discard_modal_cancel_box.Contain(m.x, m.y)) {
+        state->discard_focus_confirm = false;
+      }
+      return true;
+    }
+    if (is_press) {
+      if (state->discard_modal_confirm_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitDiscardConfirm));
+        confirm_discard_modal(git, state, layout_state);
+        return true;
+      }
+      if (state->discard_modal_cancel_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, std::string_view(kGitDiscardCancel));
+        close_discard_modal(state);
+        return true;
+      }
+    }
     return true;
   }
 
@@ -2122,7 +2277,7 @@ bool handle_git_mouse(GitService* git, GitPanelState* state, MainLayoutState* la
     }
     if (state->discard_box.Contain(m.x, m.y)) {
       trigger_press(layout_state, std::string_view(kGitDiscard));
-      discard_selected(git, state, layout_state);
+      open_discard_modal(git, state, layout_state);
       return true;
     }
     if (state->push_box.Contain(m.x, m.y)) {
@@ -2266,10 +2421,18 @@ void GitPanelActivate(GitService* git, GitPanelState* state) {
 Component MakeGitPanel(GitService* git, GitPanelState* state, MainLayoutState* layout_state,
                        FocusManagerState* focus, WorkspaceModel* workspace, int* content_height) {
   auto dispatch_keys = [git, state, layout_state, focus, workspace](Event event) {
-    return handle_git_keys(git, state, layout_state, focus, workspace, event);
+    const bool handled = handle_git_keys(git, state, layout_state, focus, workspace, event);
+    if (handled) {
+      wake_console_panel(layout_state, "git.keys");
+    }
+    return handled;
   };
   auto dispatch_mouse = [git, state, layout_state, focus, workspace](Event event) {
-    return handle_git_mouse(git, state, layout_state, focus, workspace, event);
+    const bool handled = handle_git_mouse(git, state, layout_state, focus, workspace, event);
+    if (handled) {
+      wake_console_panel(layout_state, "git.mouse");
+    }
+    return handled;
   };
 
   if (layout_state != nullptr) {
@@ -2676,6 +2839,9 @@ Component MakeGitCommitModalOverlay(Component main, GitService* git, GitPanelSta
     Element base = main->Render();
     if (state == nullptr) {
       return base;
+    }
+    if (state->discard_modal_open) {
+      return ScreenModalOverlay(std::move(base), render_discard_modal(state, layout_state));
     }
     if (state->auth_modal_open) {
       return ScreenModalOverlay(std::move(base), render_auth_modal(state, layout_state));

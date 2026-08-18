@@ -1,5 +1,7 @@
 #include "ui/file_tree_panel.hpp"
+#include "ui/file_tree_sticky.hpp"
 #include "ui/ui_wake.hpp"
+#include "editor/indent_guides.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -16,6 +18,7 @@
 #include "git/git_status.hpp"
 #include "indexer/index_rules.hpp"
 #include "indexer/workspace_indexer.hpp"
+#include "util/external_viewer.hpp"
 #include "util/nm_reader.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
@@ -220,6 +223,23 @@ struct FileTreePanelState {
   bool scrollbar_dragging = false;
   int scrollbar_drag_offset = 0;
   int last_visible_lines = 1;
+  int last_sticky_count = 0;
+  std::vector<int> sticky_indices;
+
+  std::vector<int> compute_sticky(int scroll, int visible) const {
+    return sticky_explorer_indices(
+        static_cast<int>(flat.size()), scroll, explorer_sticky_cap(visible),
+        [&](int i) { return flat[static_cast<std::size_t>(i)].depth; },
+        [&](int i) { return !flat[static_cast<std::size_t>(i)].is_file; });
+  }
+
+  int content_visible_lines(int visible, int sticky_count) const {
+    return std::max(1, visible - sticky_count);
+  }
+
+  int content_visible_lines() const {
+    return content_visible_lines(last_visible_lines, last_sticky_count);
+  }
 
   void rebuild_flat() {
     flat.clear();
@@ -246,18 +266,44 @@ struct FileTreePanelState {
   }
 
   void clamp_scroll() {
-    const int visible = visible_line_count(content_box);
-    list_scroll = std::max(0, std::min(list_scroll, max_scroll_offset(static_cast<int>(flat.size()),
-                                                                      visible)));
+    const int visible = std::max(1, last_visible_lines);
+    const int total = static_cast<int>(flat.size());
+    for (int n = 0; n < 3; ++n) {
+      sticky_indices = compute_sticky(list_scroll, visible);
+      last_sticky_count = static_cast<int>(sticky_indices.size());
+      const int content_vis = content_visible_lines(visible, last_sticky_count);
+      const int clamped =
+          std::max(0, std::min(list_scroll, max_scroll_offset(total, content_vis)));
+      if (clamped == list_scroll) {
+        return;
+      }
+      list_scroll = clamped;
+    }
+    sticky_indices = compute_sticky(list_scroll, visible);
+    last_sticky_count = static_cast<int>(sticky_indices.size());
+  }
+
+  bool row_is_sticky(int row) const {
+    return std::find(sticky_indices.begin(), sticky_indices.end(), row) != sticky_indices.end();
   }
 
   void scroll_row_into_view(int row, MainLayoutState* layout_state = nullptr) {
     const int before = list_scroll;
-    const int visible = visible_line_count(content_box);
+    const int visible = std::max(1, last_visible_lines);
+    if (row_is_sticky(row)) {
+      return;
+    }
+    int content_vis = content_visible_lines();
     if (row < list_scroll) {
       list_scroll = row;
-    } else if (row >= list_scroll + visible) {
-      list_scroll = row - visible + 1;
+    } else if (row >= list_scroll + content_vis) {
+      list_scroll = row - content_vis + 1;
+      sticky_indices = compute_sticky(list_scroll, visible);
+      last_sticky_count = static_cast<int>(sticky_indices.size());
+      content_vis = content_visible_lines(visible, last_sticky_count);
+      if (row >= list_scroll + content_vis) {
+        list_scroll = row - content_vis + 1;
+      }
     }
     clamp_scroll();
     if (layout_state != nullptr && list_scroll != before) {
@@ -266,10 +312,10 @@ struct FileTreePanelState {
   }
 
   void center_row(int row) {
-    const int visible = visible_line_count(content_box);
+    const int content_vis = content_visible_lines();
     list_scroll = std::max(
-        0, std::min(row - visible / 2,
-                    max_scroll_offset(static_cast<int>(flat.size()), visible)));
+        0, std::min(row - content_vis / 2,
+                    max_scroll_offset(static_cast<int>(flat.size()), content_vis)));
     clamp_scroll();
   }
 
@@ -411,7 +457,12 @@ struct FileTreePanelState {
     if (!content_box.Contain(x, y)) {
       return std::nullopt;
     }
-    const int row = list_scroll + (y - content_box.y_min);
+    const int local = y - content_box.y_min;
+    const int sticky_count = static_cast<int>(sticky_indices.size());
+    if (local < sticky_count) {
+      return sticky_indices[static_cast<std::size_t>(local)];
+    }
+    const int row = list_scroll + (local - sticky_count);
     if (row < 0 || row >= static_cast<int>(flat.size())) {
       return std::nullopt;
     }
@@ -472,6 +523,7 @@ void set_explorer_list_scroll(FileTreePanelState* state, MainLayoutState* layout
     return;
   }
   state->list_scroll = scroll;
+  state->clamp_scroll();
   invalidate_file_tree_panel(layout_state);
 }
 
@@ -587,6 +639,10 @@ bool handle_explorer_context_menu(FileTreePanelState* state, DebugModel* model,
     const bool binary = is_nm_analyzable_path(absolute.string());
     context_menu_open_file(&layout_state->context_menu, m.x, m.y, absolute.string(),
                            entry.relative_path, trackable, true, binary);
+    if (is_markdown_path(absolute.string())) {
+      context_menu_append_item(&layout_state->context_menu,
+                               i18n::tr("context_menu.preview_markdown"), "preview_markdown");
+    }
   } else {
     context_menu_open_folder(&layout_state->context_menu, m.x, m.y, absolute.string(),
                              entry.relative_path);
@@ -681,12 +737,12 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
                        WorkspaceModel* workspace, FocusManagerState* focus,
                        MainLayoutState* layout_state, WorkspaceIndexer* indexer, Event event) {
   const int total = static_cast<int>(state->flat.size());
-  const int visible = state->last_visible_lines;
-  const int max_scroll = max_scroll_offset(total, visible);
+  const int content_visible = state->content_visible_lines();
+  const int max_scroll = max_scroll_offset(total, content_visible);
 
   if (event.is_mouse()) {
     const auto& m = event.mouse();
-    if (handle_explorer_scrollbar_mouse(state, layout_state, m, total, visible)) {
+    if (handle_explorer_scrollbar_mouse(state, layout_state, m, total, content_visible)) {
       return true;
     }
     if (m.motion == Mouse::Moved) {
@@ -769,11 +825,13 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
     return false;
   }
   if (event == Event::PageUp) {
-    set_explorer_list_scroll(state, layout_state, state->list_scroll - visible, max_scroll);
+    set_explorer_list_scroll(state, layout_state, state->list_scroll - content_visible,
+                             max_scroll);
     return true;
   }
   if (event == Event::PageDown) {
-    set_explorer_list_scroll(state, layout_state, state->list_scroll + visible, max_scroll);
+    set_explorer_list_scroll(state, layout_state, state->list_scroll + content_visible,
+                             max_scroll);
     return true;
   }
   return false;
@@ -834,8 +892,56 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
     state->last_visible_lines = visible;
     state->clamp_scroll();
 
+    const int content_vis = state->content_visible_lines();
     const int start = state->list_scroll;
-    const int end = std::min(total, start + visible);
+    const int end = std::min(total, start + content_vis);
+
+    auto make_row = [&](int i, bool sticky) {
+      const auto& entry = state->flat[static_cast<std::size_t>(i)];
+      const bool active_entry =
+          entry.is_file && !active_rel.empty() && entry.relative_path == active_rel;
+      const bool selected =
+          (i == state->selected &&
+           (focus == nullptr || focus->region == FocusRegion::Explorer)) ||
+          active_entry;
+      const std::string row_id = press_id::explorer_row(i);
+      const bool hovered =
+          layout_state != nullptr && layout_state->clickable.is_hovered(row_id);
+      const bool pressed =
+          layout_state != nullptr && layout_state->clickable.is_pressed(row_id);
+
+      const std::string icon =
+          entry.is_file ? file_glyph_display(entry.label)
+                        : folder_glyph(entry.folder != nullptr && entry.folder->expanded);
+      const Color label_color = entry.is_file ? theme::FileText() : theme::DirectoryText();
+      Element row = text(icon + " " + entry.label) | color(label_color);
+      if (entry.depth > 0) {
+        row = hbox({text(tree_indent_guide_prefix(entry.depth)) | color(theme::AccentDim()),
+                    std::move(row)});
+      }
+      if (entry.is_file) {
+        const auto git_it = git_marks.files.find(entry.relative_path);
+        if (git_it != git_marks.files.end()) {
+          if (const std::optional<Color> dot = file_git_status_dot(git_it->second)) {
+            row = hbox({std::move(row) | flex, text(" ●") | color(*dot)});
+          }
+        }
+      } else if (git_marks.dirty_folders.count(entry.relative_path) > 0) {
+        row = hbox({
+            std::move(row) | flex,
+            text(" ●") | color(theme::Success()),
+        });
+      }
+      if (sticky && !selected && !hovered && !pressed) {
+        row = hbox({std::move(row), filler()}) | bgcolor(theme::TabIdle());
+      } else {
+        row = StyleListRow(std::move(row), selected, hovered, pressed);
+        if (sticky) {
+          row = hbox({std::move(row), filler()});
+        }
+      }
+      return row;
+    };
 
     Elements rows;
     if (state->flat.empty()) {
@@ -845,56 +951,22 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
                        color(theme::Muted()));
       }
     } else {
+      for (int idx : state->sticky_indices) {
+        rows.push_back(make_row(idx, true));
+      }
       for (int i = start; i < end; ++i) {
-        const auto& entry = state->flat[static_cast<std::size_t>(i)];
-        const bool active_entry = entry.is_file && !active_rel.empty() &&
-                                  entry.relative_path == active_rel;
-        const bool selected =
-            (i == state->selected &&
-             (focus == nullptr || focus->region == FocusRegion::Explorer)) ||
-            active_entry;
-        const std::string row_id = press_id::explorer_row(i);
-        const bool hovered =
-            layout_state != nullptr && layout_state->clickable.is_hovered(row_id);
-        const bool pressed =
-            layout_state != nullptr && layout_state->clickable.is_pressed(row_id);
-
-        std::string indent(static_cast<std::size_t>(entry.depth * 2), ' ');
-        const std::string icon =
-            entry.is_file ? file_glyph_display(entry.label)
-                          : folder_glyph(entry.folder != nullptr && entry.folder->expanded);
-
-        Element row;
-        if (entry.is_file) {
-          row = text(indent + icon + " " + entry.label) | color(theme::FileText());
-          const auto git_it = git_marks.files.find(entry.relative_path);
-          if (git_it != git_marks.files.end()) {
-            if (const std::optional<Color> dot = file_git_status_dot(git_it->second)) {
-              row = hbox({std::move(row) | flex, text(" ●") | color(*dot)});
-            }
-          }
-        } else {
-          row = text(indent + icon + " " + entry.label) | color(theme::DirectoryText());
-          if (git_marks.dirty_folders.count(entry.relative_path) > 0) {
-            row = hbox({
-                std::move(row) | flex,
-                text(" ●") | color(theme::Success()),
-            });
-          }
-        }
-        row = StyleListRow(std::move(row), selected, hovered, pressed);
-        rows.push_back(row);
+        rows.push_back(make_row(i, false));
       }
     }
 
     const int rendered_lines = std::max(1, static_cast<int>(rows.size()));
     state->scrollbar_layout =
-        compute_scrollbar_layout(total, state->list_scroll, visible, rendered_lines);
+        compute_scrollbar_layout(total, state->list_scroll, content_vis, rendered_lines);
 
     Element list = vbox(std::move(rows)) | reflect(state->content_box) | flex |
                    bgcolor(theme::PanelBg());
     Element scrollbar =
-        vertical_scrollbar(total, state->list_scroll, visible, rendered_lines,
+        vertical_scrollbar(total, state->list_scroll, content_vis, rendered_lines,
                            layout_state != nullptr &&
                                layout_state->clickable.is_hovered(press_id::kExplorerScrollbar),
                            state->scrollbar_dragging ||

@@ -44,4 +44,7 @@ std::string expand_tabs_for_display(const std::string& line, int tab_size);
 
 std::string build_blank_line_guides(int tab_size, int guide_depth, int max_width);
 
+// Prefijo de árbol (explorador, outline): un "│ " por nivel de ancestro.
+std::string tree_indent_guide_prefix(int depth);
+
 }  // namespace tuide

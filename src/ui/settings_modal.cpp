@@ -12,6 +12,9 @@
 #include <thread>
 #include <vector>
 
+#include "ai/ai_controller.hpp"
+#include "ai/ai_packages.hpp"
+#include "ai/model_store.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
 #include "ftxui/dom/elements.hpp"
@@ -57,12 +60,24 @@ struct SettingsBodyContent {
 void append_top_level_tabs_header(SettingsBodyContent* content, SettingsModalState* state);
 void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel);
 void start_language_pack_install(SettingsModalState* state, const std::string& language_id);
+void start_ai_package_install(SettingsModalState* state, const std::string& pack_id);
+void request_ai_package_install(SettingsModalState* state, const std::string& pack_id);
+void close_ai_download_confirm(SettingsModalState* state);
+bool handle_ai_download_confirm_keys(SettingsModalState* state, Event event);
+Element render_ai_download_confirm(SettingsModalState* state);
 void start_language_pack_remove(SettingsModalState* state, const std::string& language_id);
 void start_export_portable(SettingsModalState* state);
 int toolpacks_row_count();
 int toolpacks_export_row_index();
 bool handle_toolpacks_settings_keys(SettingsModalState* state, Event event);
+bool handle_ai_settings_keys(SettingsModalState* state, Event event);
+SettingsBodyContent build_ai_settings(SettingsModalState* state);
 bool handle_top_level_tab_keys(SettingsModalState* state, Event event);
+void cycle_draft_l1_model(SettingsModalState* state);
+void cycle_draft_l2_model(SettingsModalState* state);
+void cycle_draft_level2_mode(SettingsModalState* state);
+void cycle_draft_level2_workflow(SettingsModalState* state);
+void activate_ai_settings_option(SettingsModalState* state, int index);
 void cancel_shortcut_recording(SettingsModalState* state);
 void clamp_shortcuts_selection(SettingsModalState* state);
 void activate_shortcuts_option(SettingsModalState* state, int index);
@@ -263,14 +278,15 @@ bool is_top_level_panel(SettingsPanel panel) {
   return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kVisualHighlight ||
          panel == SettingsPanel::kWorkspace || panel == SettingsPanel::kUiColors ||
          panel == SettingsPanel::kFormat || panel == SettingsPanel::kShortcuts ||
-         panel == SettingsPanel::kToolpacks || panel == SettingsPanel::kStatus;
+         panel == SettingsPanel::kToolpacks || panel == SettingsPanel::kAi ||
+         panel == SettingsPanel::kStatus;
 }
 
 int top_level_panel_count(const SettingsModalState* state) {
   // General + Visual + Shortcuts + Toolpacks + Status always;
-  // Workspace + Theme + Format with workspace.
+  // Workspace + Theme + Format + AI with workspace.
   if (state != nullptr && state->has_workspace) {
-    return 8;
+    return 9;
   }
   return 5;
 }
@@ -297,6 +313,9 @@ SettingsPanel top_level_panel_at(const SettingsModalState* state, int index) {
     }
     if (index == 6) {
       return SettingsPanel::kToolpacks;
+    }
+    if (index == 7) {
+      return SettingsPanel::kAi;
     }
     return SettingsPanel::kStatus;
   }
@@ -325,8 +344,10 @@ int top_level_panel_index(const SettingsModalState* state, SettingsPanel panel) 
       return state != nullptr && state->has_workspace ? 5 : 2;
     case SettingsPanel::kToolpacks:
       return state != nullptr && state->has_workspace ? 6 : 3;
+    case SettingsPanel::kAi:
+      return state != nullptr && state->has_workspace ? 7 : 3;
     case SettingsPanel::kStatus:
-      return state != nullptr && state->has_workspace ? 7 : 4;
+      return state != nullptr && state->has_workspace ? 8 : 4;
     default:
       return 0;
   }
@@ -900,6 +921,9 @@ void clamp_top_level_selection(SettingsModalState* state) {
       }
       break;
     }
+    case SettingsPanel::kAi:
+      state->selected = std::max(0, std::min(state->selected, 6));
+      break;
     default:
       break;
   }
@@ -1466,7 +1490,7 @@ void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel) {
     return;
   }
   if ((panel == SettingsPanel::kWorkspace || panel == SettingsPanel::kFormat ||
-       panel == SettingsPanel::kUiColors) &&
+       panel == SettingsPanel::kUiColors || panel == SettingsPanel::kAi) &&
       !state->has_workspace) {
     return;
   }
@@ -1477,6 +1501,9 @@ void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel) {
   if (state->panel == SettingsPanel::kShortcuts && panel != SettingsPanel::kShortcuts &&
       state->shortcuts_recording) {
     cancel_shortcut_recording(state);
+  }
+  if (state->panel == SettingsPanel::kAi && panel != SettingsPanel::kAi) {
+    state->ai_editing_field = -1;
   }
   state->panel = panel;
   state->selected = 0;
@@ -1593,7 +1620,18 @@ void activate_settings_click(SettingsModalState* state, int index, int mouse_x) 
                  index < static_cast<int>(toolpacks::language_packs().size())) {
         start_language_pack_install(
             state, toolpacks::language_packs()[static_cast<std::size_t>(index)].id);
+      } else {
+        const int ai_first = static_cast<int>(toolpacks::language_packs().size());
+        const int ai_index = index - ai_first;
+        if (ai_index >= 0 && ai_index < static_cast<int>(ai_packages().size())) {
+          request_ai_package_install(state, ai_packages()[static_cast<std::size_t>(ai_index)].id);
+        }
       }
+      break;
+    case SettingsPanel::kAi:
+      state->selected = index;
+      clamp_top_level_selection(state);
+      activate_ai_settings_option(state, state->selected);
       break;
     case SettingsPanel::kStatus:
       break;
@@ -1680,6 +1718,10 @@ bool handle_settings_mouse(SettingsModalState* state, Event event) {
     }
     if (state->tab_toolpacks_box.Contain(m.x, m.y)) {
       switch_top_level_tab(state, SettingsPanel::kToolpacks);
+      return true;
+    }
+    if (state->has_workspace && state->tab_ai_box.Contain(m.x, m.y)) {
+      switch_top_level_tab(state, SettingsPanel::kAi);
       return true;
     }
     if (state->tab_status_box.Contain(m.x, m.y)) {
@@ -2064,6 +2106,8 @@ bool handle_settings_keys(SettingsModalState* state, Event event) {
       return handle_format_settings_keys(state, event);
     case SettingsPanel::kToolpacks:
       return handle_toolpacks_settings_keys(state, event);
+    case SettingsPanel::kAi:
+      return handle_ai_settings_keys(state, event);
     case SettingsPanel::kStatus:
       return handle_top_level_tab_keys(state, event);
     case SettingsPanel::kShortcuts:
@@ -2128,6 +2172,11 @@ Element render_top_level_tabs(SettingsModalState* state) {
   tabs.push_back(text("  "));
   tabs.push_back(render_tab(SettingsPanel::kToolpacks, i18n::tr("settings.tab.toolpacks").c_str(),
                             &state->tab_toolpacks_box));
+  if (state->has_workspace) {
+    tabs.push_back(text("  "));
+    tabs.push_back(render_tab(SettingsPanel::kAi, i18n::tr("settings.tab.ai").c_str(),
+                              &state->tab_ai_box));
+  }
   tabs.push_back(text("  "));
   tabs.push_back(render_tab(SettingsPanel::kStatus, i18n::tr("settings.tab.status").c_str(),
                             &state->tab_status_box));
@@ -2280,6 +2329,168 @@ Color language_pack_status_color(toolpacks::LanguagePackStatus status) {
   return theme::Muted();
 }
 
+std::string format_ai_pack_size(std::size_t bytes) {
+  if (bytes >= 1024ull * 1024ull * 1024ull) {
+    return std::to_string((bytes + 512ull * 1024ull * 1024ull) / (1024ull * 1024ull * 1024ull)) +
+           " GB";
+  }
+  if (bytes >= 1024ull * 1024ull) {
+    return std::to_string((bytes + 512ull * 1024ull) / (1024ull * 1024ull)) + " MB";
+  }
+  return std::to_string(bytes) + " B";
+}
+
+void close_ai_download_confirm(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->ai_download_confirm_open = false;
+  state->ai_download_confirm_pack_id.clear();
+  state->ai_download_confirm_selected = 1;
+}
+
+void request_ai_package_install(SettingsModalState* state, const std::string& pack_id) {
+  if (state == nullptr || pack_id.empty()) {
+    return;
+  }
+  if (state->toolpack_job && state->toolpack_job->running.load()) {
+    return;
+  }
+  state->ai_download_confirm_open = true;
+  state->ai_download_confirm_pack_id = pack_id;
+  state->ai_download_confirm_selected = 1;  // default Cancel
+}
+
+Element render_ai_download_choice(std::string_view label, bool selected, Box* box) {
+  Element row = text(std::string(label)) | color(theme::Header());
+  if (selected) {
+    row = row | inverted | bold;
+  }
+  return row | reflect(*box);
+}
+
+Element render_ai_download_confirm(SettingsModalState* state) {
+  if (state == nullptr) {
+    return text("");
+  }
+  std::string pack_name = state->ai_download_confirm_pack_id;
+  if (const AiPackage* pack = find_ai_package(state->ai_download_confirm_pack_id);
+      pack != nullptr) {
+    pack_name = i18n::tr(pack->name_i18n_key);
+  }
+
+  return ModalWindow(
+      text(i18n::tr("settings.ai.download_confirm.title")) | color(theme::Accent()),
+      vbox({
+          paragraphAlignLeft(
+              i18n::tr_fmt("settings.ai.download_confirm.message", {pack_name})) |
+              color(theme::Header()) | size(WIDTH, LESS_THAN, 58),
+          text(""),
+          paragraphAlignLeft(i18n::tr("settings.ai.download_confirm.sources")) |
+              color(theme::Warning()) | size(WIDTH, LESS_THAN, 58),
+          text(""),
+          paragraphAlignLeft(i18n::tr("settings.ai.download_confirm.question")) |
+              color(theme::Header()) | size(WIDTH, LESS_THAN, 58),
+          separator(),
+          hbox({
+              render_ai_download_choice(i18n::tr("common.yes"),
+                                        state->ai_download_confirm_selected == 0,
+                                        &state->ai_download_yes_box),
+              text("  "),
+              render_ai_download_choice(i18n::tr("common.no"),
+                                        state->ai_download_confirm_selected == 1,
+                                        &state->ai_download_no_box),
+          }),
+          text(i18n::tr("settings.ai.download_confirm.footer")) | color(theme::Muted()),
+      }));
+}
+
+bool handle_ai_download_confirm_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr || !state->ai_download_confirm_open) {
+    return false;
+  }
+
+  if (event.is_mouse() && event.mouse().button == Mouse::Left &&
+      event.mouse().motion == Mouse::Pressed) {
+    const auto& m = event.mouse();
+    if (state->ai_download_yes_box.Contain(m.x, m.y)) {
+      const std::string pack_id = state->ai_download_confirm_pack_id;
+      close_ai_download_confirm(state);
+      start_ai_package_install(state, pack_id);
+      return true;
+    }
+    if (state->ai_download_no_box.Contain(m.x, m.y)) {
+      close_ai_download_confirm(state);
+      return true;
+    }
+    return true;
+  }
+
+  if (event == Event::Escape) {
+    close_ai_download_confirm(state);
+    return true;
+  }
+  if (event == Event::Return) {
+    if (state->ai_download_confirm_selected == 0) {
+      const std::string pack_id = state->ai_download_confirm_pack_id;
+      close_ai_download_confirm(state);
+      start_ai_package_install(state, pack_id);
+    } else {
+      close_ai_download_confirm(state);
+    }
+    return true;
+  }
+  if (event == Event::ArrowLeft || event == Event::Character('h') ||
+      event == Event::Character('y') || event == Event::Character('Y')) {
+    state->ai_download_confirm_selected = 0;
+    return true;
+  }
+  if (event == Event::ArrowRight || event == Event::Character('l') ||
+      event == Event::Character('n') || event == Event::Character('N')) {
+    state->ai_download_confirm_selected = 1;
+    return true;
+  }
+  return true;
+}
+
+void start_ai_package_install(SettingsModalState* state, const std::string& pack_id) {
+  if (state == nullptr) {
+    return;
+  }
+  if (state->toolpack_job && state->toolpack_job->running.load()) {
+    return;
+  }
+  auto job = std::make_shared<SettingsModalState::ToolpackJob>();
+  job->busy_label = i18n::tr("settings.toolpacks.ai.installing");
+  job->running = true;
+  state->toolpack_job = job;
+  MainLayoutState* layout = state->layout_state;
+  const AiSettings ai_settings = state->workspace_baseline.ai;
+  set_busy_percent(layout, BusyActivity::AiDownloading, 0);
+  std::thread([job, pack_id, layout, ai_settings]() {
+    const auto result = install_ai_package(
+        pack_id, ai_settings, [job, layout](int percent, std::string_view label) {
+          set_busy_percent(layout, BusyActivity::AiDownloading, percent, label);
+          if (!label.empty()) {
+            std::lock_guard<std::mutex> lock(job->mu);
+            job->busy_label = std::string(label);
+          }
+        });
+    {
+      std::lock_guard<std::mutex> lock(job->mu);
+      job->ok = result.ok;
+      job->message = result.message;
+      job->finished = true;
+      job->running = false;
+    }
+    clear_busy(layout);
+    if (layout != nullptr && layout->ai_controller != nullptr && result.ok) {
+      layout->ai_controller->clear_missing_package_notice(pack_id);
+    }
+    UI_WAKE(layout, "toolpack");
+  }).detach();
+}
+
 void start_language_pack_install(SettingsModalState* state, const std::string& language_id) {
   if (state == nullptr) {
     return;
@@ -2335,8 +2546,12 @@ void start_language_pack_remove(SettingsModalState* state, const std::string& la
   }).detach();
 }
 
-int toolpacks_export_row_index() {
+int toolpacks_ai_first_index() {
   return static_cast<int>(toolpacks::language_packs().size());
+}
+
+int toolpacks_export_row_index() {
+  return toolpacks_ai_first_index() + static_cast<int>(ai_packages().size());
 }
 
 int toolpacks_row_count() {
@@ -2471,6 +2686,44 @@ SettingsBodyContent build_toolpacks_settings(SettingsModalState* state) {
     content.rows.push_back(text(""));
   }
 
+  // AI model packs (ModelStore / HF — not the GitHub toolpack catalog).
+  {
+    content.rows.push_back(text(i18n::tr("settings.toolpacks.ai.section")) |
+                           color(theme::Header()) | bold);
+    content.rows.push_back(text(i18n::tr("settings.toolpacks.ai.intro")) | color(theme::Muted()));
+    content.rows.push_back(text(""));
+    const AiSettings ai_settings =
+        state != nullptr ? state->workspace_baseline.ai : AiSettings{};
+    const int ai_first = toolpacks_ai_first_index();
+    const auto& ai_packs = ai_packages();
+    for (int i = 0; i < static_cast<int>(ai_packs.size()); ++i) {
+      const auto& pack = ai_packs[static_cast<std::size_t>(i)];
+      const int row_index = ai_first + i;
+      const auto status = ai_package_status(pack.id, ai_settings);
+      const bool installed = status == AiPackageInstallStatus::Installed;
+      const bool selected = state != nullptr && state->selected == row_index;
+      Element title =
+          text(std::string(selected ? "▸ " : "  ") + i18n::tr(pack.name_i18n_key)) |
+          color(selected ? theme::Accent() : theme::Header()) | bold;
+      if (selected) {
+        content.focus_row = static_cast<int>(content.rows.size());
+        title = title | inverted;
+      }
+      add_click_target(&content, row_index);
+      content.rows.push_back(hbox({
+          std::move(title) | size(WIDTH, EQUAL, 28),
+          text(installed ? i18n::tr("settings.toolpacks.status.installed")
+                         : i18n::tr("settings.toolpacks.status.missing")) |
+              color(installed ? theme::Success() : theme::Error()) | bold,
+      }));
+      content.rows.push_back(
+          text("    " + i18n::tr(pack.detail_i18n_key) + "  (~" +
+               format_ai_pack_size(pack.approx_bytes) + ")") |
+          color(theme::Muted()));
+      content.rows.push_back(text(""));
+    }
+  }
+
   // Export action row (last selectable).
   {
     const int export_index = toolpacks_export_row_index();
@@ -2532,6 +2785,12 @@ bool handle_toolpacks_settings_keys(SettingsModalState* state, Event event) {
                state->selected < static_cast<int>(toolpacks::language_packs().size())) {
       start_language_pack_install(
           state, toolpacks::language_packs()[static_cast<std::size_t>(state->selected)].id);
+    } else {
+      const int ai_first = toolpacks_ai_first_index();
+      const int ai_index = state->selected - ai_first;
+      if (ai_index >= 0 && ai_index < static_cast<int>(ai_packages().size())) {
+        request_ai_package_install(state, ai_packages()[static_cast<std::size_t>(ai_index)].id);
+      }
     }
     return true;
   }
@@ -2542,6 +2801,318 @@ bool handle_toolpacks_settings_keys(SettingsModalState* state, Event event) {
       start_language_pack_remove(
           state, toolpacks::language_packs()[static_cast<std::size_t>(state->selected)].id);
     }
+    return true;
+  }
+  return true;
+}
+
+ModelStore ai_settings_store(const SettingsModalState* state) {
+  const std::string cache =
+      (state != nullptr && !state->workspace_baseline.ai.models_cache_dir.empty())
+          ? state->workspace_baseline.ai.models_cache_dir
+          : ModelStore::default_cache_dir();
+  return ModelStore(cache);
+}
+
+std::vector<AiModelInfo> cycle_candidates_l1(const SettingsModalState* state) {
+  ModelStore store = ai_settings_store(state);
+  std::vector<AiModelInfo> installed;
+  for (const AiModelInfo& info : l1_model_catalog()) {
+    if (store.has_model(info)) {
+      installed.push_back(info);
+    }
+  }
+  if (!installed.empty()) {
+    return installed;
+  }
+  return std::vector<AiModelInfo>(l1_model_catalog().begin(), l1_model_catalog().end());
+}
+
+std::vector<AiModelInfo> cycle_candidates_l2(const SettingsModalState* state) {
+  ModelStore store = ai_settings_store(state);
+  std::vector<AiModelInfo> installed;
+  for (const AiModelInfo& info : l2_model_catalog()) {
+    if (store.has_l2_model(info)) {
+      installed.push_back(info);
+    }
+  }
+  if (!installed.empty()) {
+    return installed;
+  }
+  return std::vector<AiModelInfo>(l2_model_catalog().begin(), l2_model_catalog().end());
+}
+
+std::string ai_model_option_label(const AiModelInfo& info, bool installed, const std::string& text) {
+  const std::string status = installed ? i18n::tr("settings.ai.installed")
+                                       : i18n::tr("settings.ai.missing");
+  const std::string name = info.label.empty() ? info.id : ("Qwen2.5 " + info.label);
+  return i18n::tr_fmt("settings.icon_mode.checked", {name + " · " + status, text});
+}
+
+void cycle_draft_l1_model(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  const auto candidates = cycle_candidates_l1(state);
+  if (candidates.empty()) {
+    return;
+  }
+  for (std::size_t i = 0; i < candidates.size(); ++i) {
+    if (candidates[i].id == state->draft_l1_model_id) {
+      state->draft_l1_model_id = candidates[(i + 1) % candidates.size()].id;
+      return;
+    }
+  }
+  state->draft_l1_model_id = candidates.front().id;
+}
+
+void cycle_draft_l2_model(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  const auto candidates = cycle_candidates_l2(state);
+  if (candidates.empty()) {
+    return;
+  }
+  for (std::size_t i = 0; i < candidates.size(); ++i) {
+    if (candidates[i].id == state->draft_l2_model_id) {
+      state->draft_l2_model_id = candidates[(i + 1) % candidates.size()].id;
+      return;
+    }
+  }
+  state->draft_l2_model_id = candidates.front().id;
+}
+
+void cycle_draft_level2_mode(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  const std::string& mode = state->draft_level2_mode;
+  if (mode == "local") {
+    state->draft_level2_mode = "remote";
+  } else if (mode == "remote") {
+    state->draft_level2_mode = "dry_run";
+  } else {
+    state->draft_level2_mode = "local";
+  }
+}
+
+void cycle_draft_level2_workflow(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->draft_level2_workflow = ai_workflow_kind_name(
+      cycle_ai_workflow_kind(parse_ai_workflow_kind(state->draft_level2_workflow)));
+}
+
+std::string level2_mode_label(const std::string& mode) {
+  if (mode == "local") {
+    return i18n::tr("settings.ai.l2_mode.local");
+  }
+  if (mode == "remote") {
+    return i18n::tr("settings.ai.l2_mode.remote");
+  }
+  return i18n::tr("settings.ai.l2_mode.dry_run");
+}
+
+std::string* ai_editable_field_value(SettingsModalState* state, int field) {
+  if (state == nullptr) {
+    return nullptr;
+  }
+  switch (field) {
+    case 4:
+      return &state->draft_l2_api_base;
+    case 5:
+      return &state->draft_l2_api_model;
+    case 6:
+      return &state->draft_l2_api_key;
+    case 7:
+      return &state->draft_l2_n_ctx_remote;
+    default:
+      return nullptr;
+  }
+}
+
+void activate_ai_settings_option(SettingsModalState* state, int index) {
+  if (state == nullptr) {
+    return;
+  }
+  if (index == 0) {
+    cycle_draft_l1_model(state);
+    return;
+  }
+  if (index == 1) {
+    cycle_draft_l2_model(state);
+    return;
+  }
+  if (index == 2) {
+    cycle_draft_level2_mode(state);
+    return;
+  }
+  if (index == 3) {
+    cycle_draft_level2_workflow(state);
+    return;
+  }
+  if (index >= 4 && index <= 7) {
+    state->ai_editing_field = index;
+  }
+}
+
+SettingsBodyContent build_ai_settings(SettingsModalState* state) {
+  SettingsBodyContent content;
+  append_top_level_tabs_header(&content, state);
+
+  content.rows.push_back(text(i18n::tr("settings.ai.intro")) | color(theme::Muted()));
+  content.rows.push_back(text(""));
+
+  ModelStore store = ai_settings_store(state);
+  const AiModelInfo l1 = find_l1_model(state != nullptr ? state->draft_l1_model_id : "")
+                             .value_or(default_l1_model());
+  const AiModelInfo l2 = find_l2_model(state != nullptr ? state->draft_l2_model_id : "")
+                             .value_or(default_l2_model());
+  const bool l1_installed = store.has_model(l1);
+  const bool l2_installed = store.has_l2_model(l2);
+  const bool remote = state != nullptr && state->draft_level2_mode == "remote";
+  const bool editing = state != nullptr && state->ai_editing_field >= 0;
+
+  auto push_option = [&](int index, Element title, const std::string& detail) {
+    const bool selected = state != nullptr && state->selected == index;
+    if (selected) {
+      content.focus_row = static_cast<int>(content.rows.size());
+      title = title | inverted;
+    }
+    add_click_target(&content, index);
+    content.rows.push_back(std::move(title));
+    content.rows.push_back(text("    " + detail) | color(theme::Muted()));
+    content.rows.push_back(text(""));
+  };
+
+  {
+    const bool selected = state != nullptr && state->selected == 0;
+    Element title =
+        text(std::string(selected ? "▸ " : "  ") +
+             ai_model_option_label(l1, l1_installed, i18n::tr("settings.ai.l1_model"))) |
+        color(selected ? theme::Accent() : theme::Header()) | bold;
+    push_option(0, std::move(title),
+                i18n::tr("settings.ai.l1_model.detail") + "  (" + l1.id + ")");
+  }
+  {
+    const bool selected = state != nullptr && state->selected == 1;
+    Element title =
+        text(std::string(selected ? "▸ " : "  ") +
+             ai_model_option_label(l2, l2_installed, i18n::tr("settings.ai.l2_model"))) |
+        color(selected ? theme::Accent() : theme::Header()) | bold;
+    push_option(1, std::move(title),
+                i18n::tr("settings.ai.l2_model.detail") + "  (" + l2.id + ")");
+  }
+  {
+    const bool selected = state != nullptr && state->selected == 2;
+    const std::string mode = state != nullptr ? state->draft_level2_mode : "dry_run";
+    Element title =
+        text(std::string(selected ? "▸ " : "  ") +
+             i18n::tr_fmt("settings.icon_mode.checked",
+                         {level2_mode_label(mode), i18n::tr("settings.ai.l2_mode")})) |
+        color(selected ? theme::Accent() : theme::Header()) | bold;
+    push_option(2, std::move(title), i18n::tr("settings.ai.l2_mode.detail"));
+  }
+  {
+    const bool selected = state != nullptr && state->selected == 3;
+    const std::string wf = state != nullptr && !state->draft_level2_workflow.empty()
+                               ? state->draft_level2_workflow
+                               : "agent";
+    const std::string wf_label = i18n::tr(std::string("console.ai.workflow.") + wf);
+    Element title =
+        text(std::string(selected ? "▸ " : "  ") +
+             i18n::tr_fmt("settings.icon_mode.checked",
+                         {wf_label, i18n::tr("settings.ai.l2_workflow")})) |
+        color(selected ? theme::Accent() : theme::Header()) | bold;
+    push_option(3, std::move(title), i18n::tr("settings.ai.l2_workflow.detail"));
+  }
+
+  auto push_text_field = [&](int index, const char* label_key, const char* detail_key,
+                             const std::string& value, bool secret) {
+    const bool selected = state != nullptr && state->selected == index;
+    const bool is_editing = state != nullptr && state->ai_editing_field == index;
+    std::string shown = value;
+    if (secret && !is_editing) {
+      shown = value.empty() ? i18n::tr("settings.ai.api_key.empty")
+                            : i18n::tr("settings.ai.api_key.set");
+    }
+    if (is_editing) {
+      shown.push_back('_');
+    } else if (shown.empty()) {
+      shown = "—";
+    }
+    Element title =
+        text(std::string(selected ? "▸ " : "  ") + i18n::tr(label_key) + ": " + shown) |
+        color(selected ? theme::Accent() : (remote ? theme::Header() : theme::Muted())) | bold;
+    push_option(index, std::move(title), i18n::tr(detail_key));
+  };
+
+  push_text_field(4, "settings.ai.api_base", "settings.ai.api_base.detail",
+                  state != nullptr ? state->draft_l2_api_base : "", false);
+  push_text_field(5, "settings.ai.api_model", "settings.ai.api_model.detail",
+                  state != nullptr ? state->draft_l2_api_model : "", false);
+  push_text_field(6, "settings.ai.api_key", "settings.ai.api_key.detail",
+                  state != nullptr ? state->draft_l2_api_key : "", true);
+  push_text_field(7, "settings.ai.n_ctx_remote", "settings.ai.n_ctx_remote.detail",
+                  state != nullptr ? state->draft_l2_n_ctx_remote : "", false);
+
+  if (editing) {
+    content.rows.push_back(text(i18n::tr("settings.ai.edit_footer")) | color(theme::Muted()));
+  } else {
+    content.rows.push_back(text(i18n::tr("settings.ai.hint")) | color(theme::Muted()));
+  }
+  return content;
+}
+
+bool handle_ai_settings_keys(SettingsModalState* state, Event event) {
+  if (state == nullptr) {
+    return false;
+  }
+
+  if (state->ai_editing_field >= 0) {
+    std::string* value = ai_editable_field_value(state, state->ai_editing_field);
+    if (event == Event::Escape) {
+      state->ai_editing_field = -1;
+      return true;
+    }
+    if (event == Event::Return) {
+      state->ai_editing_field = -1;
+      return true;
+    }
+    if (event == Event::Backspace) {
+      if (value != nullptr && !value->empty()) {
+        value->pop_back();
+      }
+      return true;
+    }
+    if (event.is_character()) {
+      const std::string ch = event.character();
+      if (value != nullptr && ch.size() == 1 &&
+          static_cast<unsigned char>(ch[0]) >= 32 &&
+          static_cast<unsigned char>(ch[0]) < 127) {
+        value->push_back(ch[0]);
+      }
+      return true;
+    }
+    return true;
+  }
+
+  if (handle_top_level_tab_keys(state, event)) {
+    return true;
+  }
+  if (event == Event::ArrowUp || event == Event::Character('k')) {
+    state->selected = std::max(0, state->selected - 1);
+    return true;
+  }
+  if (event == Event::ArrowDown || event == Event::Character('j')) {
+    state->selected = std::min(7, state->selected + 1);
+    return true;
+  }
+  if (event == Event::Return) {
+    clamp_top_level_selection(state);
+    activate_ai_settings_option(state, state->selected);
     return true;
   }
   return true;
@@ -3175,7 +3746,27 @@ bool workspace_config_eq(const WorkspaceConfig& a, const WorkspaceConfig& b) {
          a.clangd_use_gcc_query_driver == b.clangd_use_gcc_query_driver &&
          a.clangd_background_index == b.clangd_background_index && a.theme == b.theme &&
          a.ui_colors_preset == b.ui_colors_preset && ui_colors_eq(a.ui_colors, b.ui_colors) &&
-         compile_commands_eq(a.compile_commands, b.compile_commands);
+         compile_commands_eq(a.compile_commands, b.compile_commands) &&
+         a.ai.enabled == b.ai.enabled && a.ai.command_whitelist == b.ai.command_whitelist &&
+         a.ai.tasks == b.ai.tasks && a.ai.level2_mode == b.ai.level2_mode &&
+         a.ai.level2_workflow == b.ai.level2_workflow &&
+         a.ai.level2_git_log_n == b.ai.level2_git_log_n &&
+         a.ai.models_cache_dir == b.ai.models_cache_dir &&
+         a.ai.level1.model_id == b.ai.level1.model_id &&
+         a.ai.level1.model_path == b.ai.level1.model_path &&
+         a.ai.level1.cli_path == b.ai.level1.cli_path &&
+         a.ai.level1.max_steps == b.ai.level1.max_steps &&
+         a.ai.level1.max_tokens == b.ai.level1.max_tokens &&
+         a.ai.level1.n_ctx == b.ai.level1.n_ctx &&
+         a.ai.level1.temperature == b.ai.level1.temperature &&
+         a.ai.level1.auto_download == b.ai.level1.auto_download &&
+         a.ai.level2.model_id == b.ai.level2.model_id &&
+         a.ai.level2.model_path == b.ai.level2.model_path &&
+         a.ai.level2.cli_path == b.ai.level2.cli_path &&
+         a.ai.level2.api_base == b.ai.level2.api_base &&
+         a.ai.level2.api_model == b.ai.level2.api_model &&
+         a.ai.level2.api_key == b.ai.level2.api_key &&
+         a.ai.level2.n_ctx_remote == b.ai.level2.n_ctx_remote;
 }
 
 bool clang_format_eq(const ClangFormatConfig& a, const ClangFormatConfig& b) {
@@ -3198,6 +3789,36 @@ WorkspaceConfig workspace_config_from_draft(const SettingsModalState& state) {
   workspace.ui_colors_preset = state.draft_ui_colors_preset;
   workspace.ui_colors = state.draft_ui_colors;
   workspace.build_environments = state.workspace_baseline.build_environments;
+  workspace.ai = state.workspace_baseline.ai;
+  workspace.ai.level1.model_id =
+      state.draft_l1_model_id.empty() ? default_l1_model().id : state.draft_l1_model_id;
+  workspace.ai.level2.model_id =
+      state.draft_l2_model_id.empty() ? default_l2_model().id : state.draft_l2_model_id;
+  workspace.ai.level2_mode =
+      state.draft_level2_mode.empty() ? std::string("dry_run") : state.draft_level2_mode;
+  workspace.ai.level2_workflow = ai_workflow_kind_name(
+      parse_ai_workflow_kind(state.draft_level2_workflow.empty() ? "agent"
+                                                                  : state.draft_level2_workflow));
+  workspace.ai.level2.api_base = state.draft_l2_api_base;
+  workspace.ai.level2.api_model = state.draft_l2_api_model;
+  workspace.ai.level2.api_key = state.draft_l2_api_key;
+  {
+    int n = 32768;
+    try {
+      if (!state.draft_l2_n_ctx_remote.empty()) {
+        n = std::stoi(state.draft_l2_n_ctx_remote);
+      }
+    } catch (...) {
+      n = 32768;
+    }
+    if (n < 1024) {
+      n = 1024;
+    }
+    if (n > 262144) {
+      n = 262144;
+    }
+    workspace.ai.level2.n_ctx_remote = n;
+  }
   return workspace;
 }
 
@@ -3251,6 +3872,25 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->workspace_root = workspace_root;
   state->has_workspace = !workspace_root.empty();
   state->workspace_baseline = workspace_config;
+  state->draft_l1_model_id = workspace_config.ai.level1.model_id.empty()
+                                 ? default_l1_model().id
+                                 : workspace_config.ai.level1.model_id;
+  state->draft_l2_model_id = workspace_config.ai.level2.model_id.empty()
+                                 ? default_l2_model().id
+                                 : workspace_config.ai.level2.model_id;
+  state->draft_level2_mode =
+      workspace_config.ai.level2_mode.empty() ? "dry_run" : workspace_config.ai.level2_mode;
+  state->draft_level2_workflow = ai_workflow_kind_name(
+      parse_ai_workflow_kind(workspace_config.ai.level2_workflow.empty()
+                                 ? "agent"
+                                 : workspace_config.ai.level2_workflow));
+  state->draft_l2_api_base = workspace_config.ai.level2.api_base;
+  state->draft_l2_api_model = workspace_config.ai.level2.api_model;
+  state->draft_l2_api_key = workspace_config.ai.level2.api_key;
+  state->draft_l2_n_ctx_remote = std::to_string(workspace_config.ai.level2.n_ctx_remote > 0
+                                                    ? workspace_config.ai.level2.n_ctx_remote
+                                                    : 32768);
+  state->ai_editing_field = -1;
   state->draft_key_overrides = keybind_registry().overrides();
   state->shortcuts_selected = 0;
   state->shortcuts_recording = false;
@@ -3375,7 +4015,14 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         if (state == nullptr || !state->open) {
           return false;
         }
+        if (state->ai_download_confirm_open) {
+          return handle_ai_download_confirm_keys(state, event);
+        }
         if (event == Event::Escape || event == Event::F10) {
+          if (state->panel == SettingsPanel::kAi && state->ai_editing_field >= 0) {
+            state->ai_editing_field = -1;
+            return true;
+          }
           switch (state->panel) {
             case SettingsPanel::kPathBrowser:
               state->panel = state->path_browser_purpose == PathBrowserPurpose::kMappingHostPath
@@ -3410,6 +4057,7 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
             case SettingsPanel::kWorkspace:
             case SettingsPanel::kFormat:
             case SettingsPanel::kToolpacks:
+            case SettingsPanel::kAi:
             case SettingsPanel::kStatus:
               close_settings_modal(state, settings, on_apply, on_workspace_apply,
                                    on_clang_format_apply);
@@ -3459,6 +4107,11 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
           case SettingsPanel::kToolpacks:
             title = i18n::tr("settings.title.toolpacks");
             content = build_toolpacks_settings(state);
+            break;
+          case SettingsPanel::kAi:
+            title = i18n::tr("settings.title.ai");
+            footer = i18n::tr("settings.footer.ai");
+            content = build_ai_settings(state);
             break;
           case SettingsPanel::kStatus:
             title = i18n::tr("settings.title.status");
@@ -3541,11 +4194,18 @@ Component MakeSettingsModalOverlay(Component main, SettingsModalState* state,
         Element dialog = ModalWindow(text(title) | color(theme::Accent()),
                                      vbox(std::move(dialog_body)));
 
-        return ScreenModalOverlay(std::move(base), std::move(dialog));
+        Element overlay = ScreenModalOverlay(std::move(base), std::move(dialog));
+        if (state->ai_download_confirm_open) {
+          return ScreenModalOverlay(std::move(overlay), render_ai_download_confirm(state));
+        }
+        return overlay;
       });
 }
 
 bool settings_modal_handle_mouse(SettingsModalState* state, Event event) {
+  if (state != nullptr && state->ai_download_confirm_open) {
+    return handle_ai_download_confirm_keys(state, event);
+  }
   return handle_settings_mouse(state, event);
 }
 

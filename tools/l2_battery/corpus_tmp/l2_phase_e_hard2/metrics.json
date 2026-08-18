@@ -1,0 +1,139 @@
+{
+  "facet_recall": 0.5916666666666667,
+  "all_pass": 1,
+  "all_pass_rate": 0.25,
+  "n_cases": 4,
+  "n_results": 4,
+  "incomplete": false,
+  "missing_ids": [],
+  "cases": [
+    {
+      "id": "multi_two_markers",
+      "facet_hits": 5,
+      "facet_total": 5,
+      "facet_recall": 1.0,
+      "all_pass": true,
+      "facets": [
+        {
+          "name": "path:src/util/shell_utils.hpp",
+          "ok": true
+        },
+        {
+          "name": "contains:L2_PS_A",
+          "ok": true
+        },
+        {
+          "name": "contains:L2_PS_B",
+          "ok": true
+        },
+        {
+          "name": "compile_ok",
+          "ok": true
+        },
+        {
+          "name": "no_false_done",
+          "ok": true
+        }
+      ],
+      "phase": "edit",
+      "last_action": "done_coverage_gate"
+    },
+    {
+      "id": "multi_ktab_helper",
+      "facet_hits": 4,
+      "facet_total": 5,
+      "facet_recall": 0.8,
+      "all_pass": false,
+      "facets": [
+        {
+          "name": "path:src/ui/main_layout.hpp",
+          "ok": true
+        },
+        {
+          "name": "contains:kPs",
+          "ok": true
+        },
+        {
+          "name": "contains:ai_tab_active",
+          "ok": false
+        },
+        {
+          "name": "compile_ok",
+          "ok": true
+        },
+        {
+          "name": "no_false_done",
+          "ok": true
+        }
+      ],
+      "phase": "done",
+      "last_action": "done"
+    },
+    {
+      "id": "sibling_always_true",
+      "facet_hits": 1,
+      "facet_total": 6,
+      "facet_recall": 0.16666666666666666,
+      "all_pass": false,
+      "facets": [
+        {
+          "name": "path:src/util/shell_utils.hpp",
+          "ok": false
+        },
+        {
+          "name": "path:src/util/shell_utils.cpp",
+          "ok": false
+        },
+        {
+          "name": "contains:always_true",
+          "ok": false
+        },
+        {
+          "name": "contains:return true",
+          "ok": false
+        },
+        {
+          "name": "compile_ok",
+          "ok": false
+        },
+        {
+          "name": "no_false_done",
+          "ok": true
+        }
+      ],
+      "phase": "edit",
+      "last_action": "clarify_pushback"
+    },
+    {
+      "id": "sibling_noop",
+      "facet_hits": 2,
+      "facet_total": 5,
+      "facet_recall": 0.4,
+      "all_pass": false,
+      "facets": [
+        {
+          "name": "path:src/util/shell_utils.hpp",
+          "ok": false
+        },
+        {
+          "name": "path:src/util/shell_utils.cpp",
+          "ok": false
+        },
+        {
+          "name": "contains:l2_ps_noop",
+          "ok": false
+        },
+        {
+          "name": "compile_ok",
+          "ok": true
+        },
+        {
+          "name": "no_false_done",
+          "ok": true
+        }
+      ],
+      "phase": "clarify",
+      "last_action": "need_clarification"
+    }
+  ]
+}

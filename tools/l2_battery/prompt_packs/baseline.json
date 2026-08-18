@@ -1,0 +1,6 @@
+{
+  "id": "baseline",
+  "description": "Stock prompts (no overlays)",
+  "system_extra": "",
+  "user_overlays": {}
+}

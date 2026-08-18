@@ -1,0 +1,33 @@
+{
+  "applied_blob": "",
+  "clarify_pushback": 1,
+  "compile_attempt": 0,
+  "consecutive_complete_plans": 2,
+  "coverage_gate_pushback": 0,
+  "done": false,
+  "edit_attempt": 0,
+  "edit_fail_count": 0,
+  "edit_nudge_sent": true,
+  "edit_phase_nudge_sent": false,
+  "edit_phase_tool_count": 0,
+  "edited_paths": [],
+  "explore_tool_count": 0,
+  "has_pack": true,
+  "identical_edit_repeats": 0,
+  "last_action": "clarify_pushback",
+  "last_failed_edit_fp": "",
+  "last_op_id": 0,
+  "map_review": false,
+  "map_stale": false,
+  "pack_incomplete": false,
+  "pack_incomplete_pushback": 0,
+  "pending": [],
+  "phase": "edit",
+  "plan_nudge_sent": false,
+  "post_pack_tool_count": 0,
+  "turn": 4,
+  "watchlist": [
+    "src/ui/main_layout.hpp:ConsolePanelTabs",
+    "src/ui/main_layout.hpp:console_panel_tab_active"
+  ]
+}

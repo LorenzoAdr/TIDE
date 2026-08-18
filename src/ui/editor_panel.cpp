@@ -1,6 +1,7 @@
 #include "ui/editor_panel.hpp"
 #include "editor/visual_highlight.hpp"
 #include "ui/ui_wake_policy.hpp"
+#include "ai/edit_journal.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -218,6 +219,7 @@ struct EditorPanelState {
   int64_t last_insert_input_ms = 0;
   std::vector<BreadcrumbHit> breadcrumb_hits;
   std::vector<BreadcrumbItem> breadcrumbs;
+  std::vector<int> sticky_source_lines;
   VisualHighlightPanelState visual_highlight;
   std::vector<SymbolInfo> cached_symbols;
   std::string cached_symbols_path;
@@ -1011,6 +1013,13 @@ char line_gutter_marker(EditorPanelState* panel, int line) {
   return '\0';
 }
 
+bool line_ai_authored(const EditorBuffer* buffer, int line_0based) {
+  if (buffer == nullptr || buffer->path.empty()) {
+    return false;
+  }
+  return EditJournalStore::instance().line_is_ai(buffer->path, line_0based + 1);
+}
+
 void clear_git_panel_marks(EditorPanelState* panel) {
   if (panel == nullptr) {
     return;
@@ -1635,6 +1644,30 @@ void navigate_editor_to_line(WorkspaceModel* workspace, EditorPanelState* panel,
   buffer->view_token++;
   clear_hover_state(&panel->hover);
   ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
+}
+
+bool handle_sticky_scroll_click(WorkspaceModel* workspace, FocusManagerState* focus,
+                                MainLayoutState* layout_state, EditorPanelState* panel,
+                                const Mouse& m, int visible_lines) {
+  if (workspace == nullptr || panel == nullptr || m.button != Mouse::Left ||
+      m.motion != Mouse::Pressed) {
+    return false;
+  }
+  if (panel->sticky_source_lines.empty() || !panel->code_box.Contain(m.x, m.y)) {
+    return false;
+  }
+  const int row = m.y - panel->code_box.y_min;
+  if (row < 0 || row >= static_cast<int>(panel->sticky_source_lines.size())) {
+    return false;
+  }
+  workspace->record_cursor_jump();
+  navigate_editor_to_line(workspace, panel, panel->sticky_source_lines[static_cast<std::size_t>(row)],
+                          visible_lines);
+  claim_editor_focus(focus, layout_state, panel->panel_focus);
+  if (layout_state != nullptr) {
+    UI_WAKE(layout_state, "wake");
+  }
+  return true;
 }
 
 bool tabular_view_ready(EditorPanelState* panel, const EditorBuffer& buffer);
@@ -4655,6 +4688,12 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
       completion->close(layout_state);
     }
 
+    if (in_code && handle_sticky_scroll_click(workspace, focus, layout_state, panel, m,
+                                              visible_lines)) {
+      end_mouse_selection(panel);
+      return true;
+    }
+
     if (in_gutter && handle_fold_gutter_click(panel, buffer, m, visible_lines)) {
       if (layout_state != nullptr) {
         UI_WAKE(layout_state, "wake");
@@ -5008,7 +5047,7 @@ bool handle_completion_keys(CompletionState* completion, WorkspaceModel* workspa
     return accept_completion(completion, buffer, layout_state, visible_lines, workspace, panel,
                            symbols);
   }
-  if (event == Event::Tab) {
+  if (event_is_plain_tab(event)) {
     completion->selected = std::min(completion->selected + 1,
                                     static_cast<int>(completion->matches.size()) - 1);
     return true;
@@ -5288,21 +5327,8 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
   }
 
   if (completion != nullptr && completion->open) {
-    // Tab while filling snippet args: accept the suggestion (if any) then advance.
-    if (event == Event::Tab && panel != nullptr &&
-        snippet_session_active(panel->snippet_session)) {
-      if (!completion->matches.empty()) {
-        accept_completion(completion, buffer, layout_state, visible_lines, workspace, panel,
-                          symbols);
-      } else {
-        completion->close(layout_state);
-      }
-      if (snippet_session_active(panel->snippet_session) &&
-          advance_snippet_session(buffer, &panel->snippet_session)) {
-        ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
-      }
-      return true;
-    }
+    // Tab cycles suggestions; Enter accepts. After the popup closes, Tab
+    // advances snippet argument placeholders (handled below).
     if (handle_completion_keys(completion, workspace, symbols, symbol_indexer, layout_state, panel,
                                buffer, event, visible_lines)) {
       return true;
@@ -6123,6 +6149,7 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
     buffer.ensure_cursors();
 
     if (buffer.path.empty()) {
+      panel_state->sticky_source_lines.clear();
       return vbox({
                  filler(),
                  hbox({filler(), RenderTuideLogo(), filler()}),
@@ -6737,6 +6764,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
               ? std::vector<StickyLine>{}
               : sticky_lines_for_scroll(sticky_symbol_source, buffer.lines.to_vector(),
                                         buffer.scroll, 3);
+      panel_state->sticky_source_lines.clear();
+      panel_state->sticky_source_lines.reserve(sticky_lines.size());
+      for (const StickyLine& sticky : sticky_lines) {
+        panel_state->sticky_source_lines.push_back(sticky.source_line);
+      }
     }
     const BracketPairHighlight& bracket = *bracket_ptr;
 
@@ -6978,6 +7010,9 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           gutter_marker = '\0';
         } else {
           gutter_marker = line_gutter_marker(panel_state.get(), i);
+          if (gutter_marker == '\0' && line_ai_authored(&buffer, i)) {
+            gutter_marker = 'A';
+          }
         }
       }
 
@@ -7106,6 +7141,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           gutter_color = theme::Error();
         } else if (gutter_marker == 'G') {
           gutter_color = theme::Success();
+        } else if (gutter_marker == 'A') {
+          gutter_color = theme::Accent();
         } else if (gutter_marker == 'W') {
           gutter_color = theme::Warning();
         }

@@ -320,7 +320,10 @@ void insert_char_at_with_pairs(EditorBuffer* buffer, int line, int col, char c) 
 
   const char close = closing_for_open_char(c);
   if (close != '\0') {
-    if (next == close) {
+    // Only insert the closer when the cursor is at end-of-line. Typing an
+    // opener in the middle of existing text must not push a matching pair.
+    const bool at_eol = col >= static_cast<int>(line_text.size());
+    if (!at_eol) {
       insert_char_at(buffer, line, col, c);
       return;
     }

@@ -4,6 +4,7 @@
 #include <initializer_list>
 #include <optional>
 #include <string_view>
+#include <vector>
 #include "ui/ui_wake.hpp"
 
 #include "ftxui/dom/elements.hpp"
@@ -39,6 +40,16 @@ inline std::optional<std::string_view> hit_test_hover(int x, int y,
   return std::nullopt;
 }
 
+inline std::optional<std::string_view> hit_test_hover(int x, int y,
+                                                      const std::vector<HoverTarget>& targets) {
+  for (const HoverTarget& target : targets) {
+    if (target.box != nullptr && !target.box->IsEmpty() && target.box->Contain(x, y)) {
+      return target.id;
+    }
+  }
+  return std::nullopt;
+}
+
 inline void trigger_press(MainLayoutState* layout, std::string_view id) {
   if (layout == nullptr || id.empty()) {
     return;
@@ -54,6 +65,25 @@ inline void trigger_press(MainLayoutState* layout, const std::string& id) {
 
 inline bool update_panel_hover(MainLayoutState* layout, int x, int y,
                                std::initializer_list<HoverTarget> targets,
+                               const std::function<bool(std::string_view)>& owns_hover) {
+  if (layout == nullptr || !chrome_hover_allowed(layout)) {
+    return false;
+  }
+
+  const auto hit = hit_test_hover(x, y, targets);
+  if (hit.has_value()) {
+    const std::string_view before = layout->clickable.hovered_id();
+    layout->clickable.set_hover(*hit);
+    return apply_hover_repaint(layout, before);
+  }
+
+  const std::string_view before = layout->clickable.hovered_id();
+  layout->clickable.clear_hover_if(owns_hover);
+  return apply_hover_repaint(layout, before);
+}
+
+inline bool update_panel_hover(MainLayoutState* layout, int x, int y,
+                               const std::vector<HoverTarget>& targets,
                                const std::function<bool(std::string_view)>& owns_hover) {
   if (layout == nullptr || !chrome_hover_allowed(layout)) {
     return false;

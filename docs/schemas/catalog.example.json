@@ -199,6 +199,19 @@
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "size_bytes": 0,
       "license": "MIT"
+    },
+    {
+      "id": "lemminx",
+      "display_name": "LemMinX",
+      "kind": "lsp",
+      "languages": ["xml"],
+      "version": "0.29.3",
+      "arch": ["x86_64"],
+      "os": ["linux"],
+      "url": "https://github.com/LorenzoAdr/TIDE/releases/download/catalog-latest/lemminx-0.29.3-linux-x86_64.tar.zst",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size_bytes": 0,
+      "license": "EPL-2.0"
     }
   ]
 }

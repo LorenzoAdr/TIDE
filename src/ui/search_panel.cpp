@@ -1,11 +1,14 @@
 #include "ui/search_panel.hpp"
 #include "ui/busy_strip.hpp"
 #include "ui/ui_wake.hpp"
+#include "ui/search_result_tree.hpp"
+#include "editor/indent_guides.hpp"
 
 #include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_set>
 
 #include "app/debug_model.hpp"
 #include "ftxui/component/component.hpp"
@@ -13,6 +16,7 @@
 #include "ftxui/component/event.hpp"
 #include "ftxui/component/mouse.hpp"
 #include "ftxui/dom/elements.hpp"
+#include "ftxui/dom/node.hpp"
 #include "ftxui/screen/box.hpp"
 #include "indexer/workspace_indexer.hpp"
 #include "search/workspace_search.hpp"
@@ -20,6 +24,7 @@
 #include "ui/cursor_blink.hpp"
 #include "ui/clickable.hpp"
 #include "ui/focusable_component.hpp"
+#include "ui/glyphs.hpp"
 #include "ui/hover_effects.hpp"
 #include "ui/panel.hpp"
 #include "ui/press_ids.hpp"
@@ -38,25 +43,51 @@ namespace {
 
 constexpr int kLabelWidth = 8;
 
+// Flex on X but ignore the child's natural min width. Otherwise placeholders vs
+// the focused caret change each column's min_x and hbox redistributes space.
+Element xflex_fill(Element child) {
+  class XFlexFill : public Node {
+   public:
+    explicit XFlexFill(Element child) : Node({std::move(child)}) {}
+    void ComputeRequirement() override {
+      Node::ComputeRequirement();
+      requirement_ = children_[0]->requirement();
+      requirement_.min_x = 0;
+      requirement_.flex_grow_x = 1;
+      requirement_.flex_shrink_x = 1;
+    }
+    void SetBox(Box box) override {
+      Node::SetBox(box);
+      if (!children_.empty()) {
+        children_[0]->SetBox(box);
+      }
+    }
+  };
+  return std::make_shared<XFlexFill>(std::move(child));
+}
+
 Element render_search_field(const std::string& label, const std::string& value,
                             const std::string& placeholder, bool active, Component input,
                             Box* box) {
   Element field;
   if (active) {
-    field = input->Render() | flex | border | bgcolor(theme::PanelBg());
+    // Same 1-row TabIdle chrome as ModalInputLine. A `border` grows the row;
+    // CodeBg on the typed text paints a widening black strip.
+    field = input->Render() | bgcolor(theme::TabIdle()) | size(HEIGHT, EQUAL, 1);
+    field = clear_under(std::move(field));
   } else {
     const std::string& preview = value.empty() ? placeholder : value;
-    field = ModalInputLine(preview) | flex;
+    field = ModalInputLine(preview);
     if (value.empty()) {
       field = field | dim;
     }
   }
 
   return hbox({
-             text(label) | color(theme::Muted()) | size(WIDTH, EQUAL, kLabelWidth),
-             std::move(field) | flex | reflect(*box),
+             text(label) | color(theme::Muted()) | size(WIDTH, EQUAL, kLabelWidth) | notflex,
+             std::move(field) | xflex | reflect(*box),
          }) |
-         flex;
+         xflex_fill | size(HEIGHT, EQUAL, 1);
 }
 
 int visible_line_count(const Box& box) {
@@ -64,6 +95,25 @@ int visible_line_count(const Box& box) {
     return 1;
   }
   return std::max(1, box.y_max - box.y_min + 1);
+}
+
+bool content_box_laid_out(const Box& box) {
+  return box.y_max > box.y_min || box.x_max > box.x_min;
+}
+
+int search_visible_rows(const Box& results_box, MainLayoutState* layout_state, int total,
+                        int last_visible_lines) {
+  int visible = visible_line_count(results_box);
+  // First paint (and any rebuild before reflect): results_box is still empty, so
+  // visible_line_count returns 1. Search sits behind UiPanelRenderCache; if we
+  // only emit one/two rows, that Element is frozen until a mouse click dirties it.
+  if (!content_box_laid_out(results_box) || (visible <= 1 && total > 1)) {
+    visible = std::max({1, total, last_visible_lines});
+    if (layout_state != nullptr && layout_state->terminal_height) {
+      visible = std::max(visible, layout_state->terminal_height() - 6);
+    }
+  }
+  return visible;
 }
 
 }  // namespace
@@ -84,6 +134,8 @@ struct SearchPanelState {
   // selection spanning [min(anchor, cursor), max(anchor, cursor)).
   int query_selection_anchor = -1;
   std::vector<WorkspaceSearchResult> results;
+  std::vector<SearchDisplayRow> display_rows;
+  std::unordered_set<std::string> collapsed_files;
   int selected = 0;
   int first_visible = 0;
   int last_visible_lines = 1;
@@ -98,6 +150,7 @@ struct SearchPanelState {
   Box path_box;
   Box include_box;
   Box exclude_box;
+  Box collapse_all_box;
   std::string status;
   int result_count = 0;
   WorkspaceSearchRunner runner;
@@ -110,7 +163,7 @@ void clamp_search_scroll_viewport(SearchPanelState* state, int visible_lines) {
   if (state == nullptr) {
     return;
   }
-  const int total = static_cast<int>(state->results.size());
+  const int total = static_cast<int>(state->display_rows.size());
   const int max_first = std::max(0, total - visible_lines);
   state->first_visible = std::max(0, std::min(state->first_visible, max_first));
 }
@@ -132,7 +185,7 @@ bool scroll_search_by_wheel(SearchPanelState* state, int delta, int visible_line
   if (state == nullptr) {
     return false;
   }
-  const int total = static_cast<int>(state->results.size());
+  const int total = static_cast<int>(state->display_rows.size());
   const int max_first = std::max(0, total - visible_lines);
   const int next = std::max(0, std::min(state->first_visible + delta, max_first));
   if (next == state->first_visible) {
@@ -219,6 +272,106 @@ bool handle_search_scrollbar_mouse(SearchPanelState* state, MainLayoutState* lay
   }
 
   return false;
+}
+
+void rebuild_search_display(SearchPanelState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  state->display_rows = flatten_search_results(state->results, state->collapsed_files);
+  const int n = static_cast<int>(state->display_rows.size());
+  if (n <= 0) {
+    state->selected = 0;
+  } else {
+    state->selected = std::max(0, std::min(state->selected, n - 1));
+  }
+}
+
+void select_search_file_row(SearchPanelState* state, const std::string& file) {
+  rebuild_search_display(state);
+  const int idx = search_file_row_index(state->display_rows, file);
+  if (idx >= 0) {
+    state->selected = idx;
+  }
+}
+
+void toggle_search_file(SearchPanelState* state, const std::string& file) {
+  if (state == nullptr) {
+    return;
+  }
+  if (state->collapsed_files.count(file) > 0) {
+    state->collapsed_files.erase(file);
+  } else {
+    state->collapsed_files.insert(file);
+  }
+  select_search_file_row(state, file);
+}
+
+void toggle_search_all_collapsed(SearchPanelState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  std::string keep_file;
+  if (state->selected >= 0 &&
+      state->selected < static_cast<int>(state->display_rows.size())) {
+    keep_file = state->display_rows[static_cast<std::size_t>(state->selected)].file;
+  }
+  const bool collapse = !search_all_files_collapsed(state->results, state->collapsed_files);
+  state->collapsed_files.clear();
+  if (collapse) {
+    for (const auto& hit : state->results) {
+      state->collapsed_files.insert(hit.file);
+    }
+  }
+  if (!keep_file.empty()) {
+    select_search_file_row(state, keep_file);
+  } else {
+    rebuild_search_display(state);
+  }
+}
+
+bool update_search_hover(SearchPanelState* state, MainLayoutState* layout_state, int x, int y) {
+  if (!hover_effects_enabled() || layout_state == nullptr || state == nullptr) {
+    return false;
+  }
+  const std::string_view before = layout_state->clickable.hovered_id();
+  if (!state->results.empty() && state->collapse_all_box.Contain(x, y)) {
+    layout_state->clickable.set_hover(press_id::kSearchCollapseAll);
+  } else {
+    const auto local = local_row_in_box(state->list_content_box, x, y);
+    if (local.has_value()) {
+      const int index = *local + state->first_visible;
+      if (index >= 0 && index < static_cast<int>(state->display_rows.size())) {
+        layout_state->clickable.set_hover(press_id::search_row(index));
+      } else {
+        layout_state->clickable.clear_hover_if(press_id::is_search_hover);
+      }
+    } else {
+      layout_state->clickable.clear_hover_if(press_id::is_search_hover);
+    }
+  }
+  return apply_hover_repaint(layout_state, before);
+}
+
+void append_highlighted_preview(Elements* parts, const std::string& preview,
+                                const std::string& highlight) {
+  if (parts == nullptr) {
+    return;
+  }
+  std::size_t pos = 0;
+  while (pos <= preview.size()) {
+    const auto found =
+        highlight.empty() ? std::string::npos : preview.find(highlight, pos);
+    if (found == std::string::npos) {
+      parts->push_back(text(preview.substr(pos)) | color(theme::Header()));
+      break;
+    }
+    if (found > pos) {
+      parts->push_back(text(preview.substr(pos, found - pos)) | color(theme::Header()));
+    }
+    parts->push_back(text(highlight) | color(theme::Stop()) | bold);
+    pos = found + highlight.size();
+  }
 }
 
 }  // namespace
@@ -320,8 +473,10 @@ void apply_search_results(SearchPanelState* state, std::vector<WorkspaceSearchRe
   clear_busy(layout_state);
   state->results = std::move(results);
   state->result_count = static_cast<int>(state->results.size());
+  state->collapsed_files.clear();
   state->selected = 0;
   state->first_visible = 0;
+  rebuild_search_display(state);
   const std::string backend = used_rg ? i18n::tr("search.status.backend.rg") : i18n::tr("search.status.backend.internal");
   if (state->results.empty()) {
     if (cancelled) {
@@ -366,9 +521,11 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
     state->runner.cancel();
     state->committed_query.clear();
     state->results.clear();
+    state->collapsed_files.clear();
     state->selected = 0;
     state->result_count = 0;
     state->status = i18n::tr("search.status.enter_query");
+    rebuild_search_display(state);
     clear_busy(layout_state);
     return;
   }
@@ -380,9 +537,11 @@ void run_search(SearchPanelState* state, WorkspaceModel* workspace, DebugModel* 
   }
   state->status = i18n::tr("search.status.searching");
   state->results.clear();
+  state->collapsed_files.clear();
   state->selected = 0;
   state->first_visible = 0;
   state->result_count = 0;
+  rebuild_search_display(state);
   ++state->search_generation;
   state->runner.start(std::move(opts));
   set_busy_spinner(layout_state, BusyActivity::ProjectSearch);
@@ -464,14 +623,19 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
   }
 
   auto query_option = std::make_shared<InputOption>(MakeBlinkInputOption(
-      &state->query, &state->placeholder_query, false, &state->query_selection_anchor));
+      &state->query, &state->placeholder_query, false, &state->query_selection_anchor, nullptr,
+      theme::TabIdle()));
   auto query_input = Input(*query_option);
-  auto replace_input = Input(MakeBlinkInputOption(&state->replace, &state->placeholder_replace));
-  auto path_input = Input(MakeBlinkInputOption(&state->path_filter, &state->placeholder_path));
-  auto include_input =
-      Input(MakeBlinkInputOption(&state->include_pattern, &state->placeholder_include));
-  auto exclude_input =
-      Input(MakeBlinkInputOption(&state->exclude_pattern, &state->placeholder_exclude));
+  auto replace_input = Input(MakeBlinkInputOption(&state->replace, &state->placeholder_replace,
+                                                  false, nullptr, nullptr, theme::TabIdle()));
+  auto path_input = Input(MakeBlinkInputOption(&state->path_filter, &state->placeholder_path, false,
+                                               nullptr, nullptr, theme::TabIdle()));
+  auto include_input = Input(MakeBlinkInputOption(&state->include_pattern,
+                                                  &state->placeholder_include, false, nullptr,
+                                                  nullptr, theme::TabIdle()));
+  auto exclude_input = Input(MakeBlinkInputOption(&state->exclude_pattern,
+                                                  &state->placeholder_exclude, false, nullptr,
+                                                  nullptr, theme::TabIdle()));
 
   auto input_layers = Container::Horizontal(
       {query_input | flex, replace_input | flex, path_input | flex, include_input | flex,
@@ -563,8 +727,9 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
 
     if (event.is_mouse()) {
       const auto& m = event.mouse();
-      const int total = static_cast<int>(state->results.size());
-      const int visible = visible_line_count(state->results_box);
+      const int total = static_cast<int>(state->display_rows.size());
+      const int visible =
+          search_visible_rows(state->results_box, layout_state, total, state->last_visible_lines);
       state->last_visible_lines = visible;
 
       if (handle_search_scrollbar_mouse(state.get(), layout_state, m, total, visible)) {
@@ -589,6 +754,12 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     if (event.is_mouse() && event.mouse().button == Mouse::Left &&
         event.mouse().motion == Mouse::Pressed) {
       const auto& m = event.mouse();
+      if (!state->results.empty() && state->collapse_all_box.Contain(m.x, m.y)) {
+        trigger_press(layout_state, press_id::kSearchCollapseAll);
+        toggle_search_all_collapsed(state.get());
+        ensure_search_selection_visible(state.get(), state->last_visible_lines);
+        return true;
+      }
       const bool in_search_chrome =
           state->query_box.Contain(m.x, m.y) || state->replace_box.Contain(m.x, m.y) ||
           state->path_box.Contain(m.x, m.y) || state->include_box.Contain(m.x, m.y) ||
@@ -623,24 +794,37 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         const int visible = state->last_visible_lines;
         const int visual_row = m.y - state->list_content_box.y_min;
         const int row = visual_row + state->first_visible;
-        if (row >= 0 && row < static_cast<int>(state->results.size())) {
+        if (row >= 0 && row < static_cast<int>(state->display_rows.size())) {
           state->selected = row;
-          ensure_search_selection_visible(state.get(), visible);
-          open_result(state.get(), workspace, model, focus, row);
+          const auto& display = state->display_rows[static_cast<std::size_t>(row)];
+          trigger_press(layout_state, press_id::search_row(row));
+          if (display.kind == SearchRowKind::File) {
+            toggle_search_file(state.get(), display.file);
+            ensure_search_selection_visible(state.get(), visible);
+          } else {
+            ensure_search_selection_visible(state.get(), visible);
+            open_result(state.get(), workspace, model, focus, display.result_index);
+          }
         }
         return true;
       }
       return false;
     }
 
-    if (event.is_mouse() && event.mouse().motion == Mouse::Moved &&
-        (state->results_box.Contain(event.mouse().x, event.mouse().y) ||
-         state->scrollbar_box.Contain(event.mouse().x, event.mouse().y))) {
-      if (focus != nullptr) {
-        focus->region = FocusRegion::Terminal;
+    if (event.is_mouse() && event.mouse().motion == Mouse::Moved) {
+      const auto& m = event.mouse();
+      if (state->collapse_all_box.Contain(m.x, m.y) ||
+          state->results_box.Contain(m.x, m.y) || state->scrollbar_box.Contain(m.x, m.y) ||
+          state->list_content_box.Contain(m.x, m.y)) {
+        update_search_hover(state.get(), layout_state, m.x, m.y);
+        if (state->results_box.Contain(m.x, m.y) || state->scrollbar_box.Contain(m.x, m.y)) {
+          if (focus != nullptr) {
+            focus->region = FocusRegion::Terminal;
+          }
+          clear_search_query_selection(state.get());
+          clear_search_input_focus(layout_state);
+        }
       }
-      clear_search_query_selection(state.get());
-      clear_search_input_focus(layout_state);
     }
 
     const bool in_input =
@@ -748,8 +932,15 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     }
 
     if (event == Event::Return) {
-      if (!state->results.empty()) {
-        open_result(state.get(), workspace, model, focus, state->selected);
+      if (!state->display_rows.empty()) {
+        const auto& display =
+            state->display_rows[static_cast<std::size_t>(state->selected)];
+        if (display.kind == SearchRowKind::File) {
+          toggle_search_file(state.get(), display.file);
+          ensure_search_selection_visible(state.get(), state->last_visible_lines);
+        } else {
+          open_result(state.get(), workspace, model, focus, display.result_index);
+        }
         return true;
       }
       run_search(state.get(), workspace, model, indexer, layout_state);
@@ -769,31 +960,66 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     }
 
     if (event == Event::ArrowDown || event == Event::Character('j')) {
-      if (!state->results.empty()) {
+      if (!state->display_rows.empty()) {
         state->selected =
-            std::min(state->selected + 1, static_cast<int>(state->results.size()) - 1);
+            std::min(state->selected + 1, static_cast<int>(state->display_rows.size()) - 1);
         ensure_search_selection_visible(state.get(), state->last_visible_lines);
         return true;
       }
       return false;
     }
     if (event == Event::ArrowUp || event == Event::Character('k')) {
-      state->selected = std::max(0, state->selected - 1);
-      ensure_search_selection_visible(state.get(), state->last_visible_lines);
-      return true;
+      if (!state->display_rows.empty()) {
+        state->selected = std::max(0, state->selected - 1);
+        ensure_search_selection_visible(state.get(), state->last_visible_lines);
+        return true;
+      }
+      return false;
+    }
+    if (event == Event::ArrowLeft) {
+      if (state->display_rows.empty()) {
+        return false;
+      }
+      const auto& display =
+          state->display_rows[static_cast<std::size_t>(state->selected)];
+      if (display.kind == SearchRowKind::Match) {
+        select_search_file_row(state.get(), display.file);
+        ensure_search_selection_visible(state.get(), state->last_visible_lines);
+        return true;
+      }
+      if (state->collapsed_files.count(display.file) == 0) {
+        toggle_search_file(state.get(), display.file);
+        ensure_search_selection_visible(state.get(), state->last_visible_lines);
+        return true;
+      }
+      return false;
+    }
+    if (event == Event::ArrowRight) {
+      if (state->display_rows.empty()) {
+        return false;
+      }
+      const auto& display =
+          state->display_rows[static_cast<std::size_t>(state->selected)];
+      if (display.kind == SearchRowKind::File &&
+          state->collapsed_files.count(display.file) > 0) {
+        toggle_search_file(state.get(), display.file);
+        ensure_search_selection_visible(state.get(), state->last_visible_lines);
+        return true;
+      }
+      return false;
     }
     if (event == Event::PageDown) {
-      if (!state->results.empty()) {
+      if (!state->display_rows.empty()) {
         const int visible = state->last_visible_lines;
-        state->selected =
-            std::min(state->selected + visible, static_cast<int>(state->results.size()) - 1);
+        state->selected = std::min(state->selected + visible,
+                                   static_cast<int>(state->display_rows.size()) - 1);
         ensure_search_selection_visible(state.get(), visible);
         return true;
       }
       return false;
     }
     if (event == Event::PageUp) {
-      if (!state->results.empty()) {
+      if (!state->display_rows.empty()) {
         const int visible = state->last_visible_lines;
         state->selected = std::max(0, state->selected - visible);
         ensure_search_selection_visible(state.get(), visible);
@@ -805,8 +1031,18 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
     return false;
   };
 
+  auto wrapped_handler = [handler, layout_state](Event event) {
+    const bool handled = handler(event);
+    if (handled) {
+      // Console is cached: typing/navigation must dirty the panel or the
+      // Input Element is reused and the caret/text look stuck until Enter.
+      wake_console_panel(layout_state, "search.input");
+    }
+    return handled;
+  };
+
   if (layout_state != nullptr) {
-    layout_state->search_key_handler = handler;
+    layout_state->search_key_handler = wrapped_handler;
   }
 
   return WrapFocusable(CatchEvent(
@@ -822,6 +1058,23 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
                        ? i18n::tr("search.status.suffix.pending")
                        : (state->replace.empty() ? i18n::tr("search.status.enter_to_search")
                                                  : i18n::tr("search.status.suffix.replace")));
+
+        const bool all_collapsed =
+            search_all_files_collapsed(state->results, state->collapsed_files);
+        const bool collapse_hovered =
+            layout_state != nullptr &&
+            layout_state->clickable.is_hovered(press_id::kSearchCollapseAll);
+        const bool collapse_pressed =
+            layout_state != nullptr &&
+            layout_state->clickable.is_pressed(press_id::kSearchCollapseAll);
+        Element status_line =
+            text(" " + state->status + status_suffix) | color(theme::Muted()) | flex;
+        if (!state->results.empty()) {
+          Element collapse_btn = MakeToolbarButton(
+              text(twistie_glyph(!all_collapsed)) | color(theme::Muted()), collapse_hovered,
+              collapse_pressed, false, &state->collapse_all_box, true);
+          status_line = hbox({std::move(status_line), collapse_btn | size(WIDTH, EQUAL, 3)});
+        }
 
         Element form = vbox({
             hbox({
@@ -841,15 +1094,16 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
                                     &state->exclude_box),
             }),
             separator(),
-            text(" " + state->status + status_suffix) | color(theme::Muted()) |
-                size(HEIGHT, EQUAL, 1),
+            std::move(status_line) | size(HEIGHT, EQUAL, 1),
         });
 
         Elements rows;
-        const int visible = visible_line_count(state->results_box);
+        rebuild_search_display(state.get());
+        const int total = static_cast<int>(state->display_rows.size());
+        const int visible =
+            search_visible_rows(state->results_box, layout_state, total, state->last_visible_lines);
         state->last_visible_lines = visible;
         clamp_search_scroll_viewport(state.get(), visible);
-        const int total = static_cast<int>(state->results.size());
 
         if (state->results.empty() && state->query.empty()) {
           rows.push_back(text(i18n::tr("common.no_results")) | color(theme::Muted()));
@@ -859,31 +1113,36 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
         } else {
           const int end = std::min(total, state->first_visible + visible);
           for (int i = state->first_visible; i < end; ++i) {
-            const auto& hit = state->results[static_cast<std::size_t>(i)];
-            const std::string location = hit.file + ":" + std::to_string(hit.line) + " ";
+            const auto& display = state->display_rows[static_cast<std::size_t>(i)];
             const bool selected =
                 i == state->selected && focus->region == FocusRegion::Terminal;
+            const std::string row_id = press_id::search_row(i);
+            const bool hovered =
+                layout_state != nullptr && layout_state->clickable.is_hovered(row_id);
+            const bool pressed =
+                layout_state != nullptr && layout_state->clickable.is_pressed(row_id);
 
-            Elements parts;
-            parts.push_back(text(" " + location) | color(theme::Accent()));
-            std::size_t pos = 0;
-            const std::string& highlight = state->committed_query;
-            while (pos <= hit.preview.size()) {
-              const auto found = highlight.empty() ? std::string::npos : hit.preview.find(highlight, pos);
-              if (found == std::string::npos) {
-                parts.push_back(text(hit.preview.substr(pos)) | color(theme::Header()));
-                break;
-              }
-              if (found > pos) {
-                parts.push_back(text(hit.preview.substr(pos, found - pos)) | color(theme::Header()));
-              }
-              parts.push_back(text(highlight) | color(theme::Stop()) | bold);
-              pos = found + highlight.size();
+            Element row;
+            if (display.kind == SearchRowKind::File) {
+              const bool expanded = state->collapsed_files.count(display.file) == 0;
+              row = hbox({
+                  text(twistie_glyph(expanded) + " ") | color(theme::Accent()),
+                  text(file_glyph_display(display.file) + " ") | color(theme::FileText()),
+                  text(display.file) | color(theme::Accent()) | bold,
+                  text(i18n::tr_fmt("search.file.match_count",
+                                    {std::to_string(display.match_count)})) |
+                      color(theme::Muted()),
+              });
+            } else {
+              const auto& hit = state->results[static_cast<std::size_t>(display.result_index)];
+              Elements parts;
+              parts.push_back(text(tree_indent_guide_prefix(display.depth)) |
+                              color(theme::AccentDim()));
+              parts.push_back(text(std::to_string(hit.line) + ": ") | color(theme::Accent()));
+              append_highlighted_preview(&parts, hit.preview, state->committed_query);
+              row = hbox(std::move(parts));
             }
-            Element row = hbox(std::move(parts));
-            if (selected) {
-              row = row | inverted | bold;
-            }
+            row = StyleListRow(std::move(row), selected, hovered, pressed);
             rows.push_back(std::move(row));
           }
         }
@@ -907,7 +1166,7 @@ Component MakeSearchPanel(WorkspaceModel* workspace, DebugModel* model,
 
         return PanelBody(vbox({std::move(form), std::move(results)}));
       }),
-      handler));
+      wrapped_handler));
 }
 
 }  // namespace tuide

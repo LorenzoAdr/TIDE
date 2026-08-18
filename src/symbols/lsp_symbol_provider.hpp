@@ -118,6 +118,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool cmake_lsp_ready() const;
   bool make_lsp_ready() const;
   bool yaml_lsp_ready() const;
+  bool xml_lsp_ready() const;
   bool clangd_starting() const;
   bool python_lsp_starting() const;
   bool bash_lsp_starting() const;
@@ -131,6 +132,7 @@ class LspSymbolProvider : public ISymbolProvider {
   bool cmake_lsp_starting() const;
   bool make_lsp_starting() const;
   bool yaml_lsp_starting() const;
+  bool xml_lsp_starting() const;
 
   void set_lsp_enabled(bool enabled);
   bool lsp_enabled() const;
@@ -177,6 +179,7 @@ class LspSymbolProvider : public ISymbolProvider {
   void ensure_cmake_lsp_async();
   void ensure_make_lsp_async();
   void ensure_yaml_lsp_async();
+  void ensure_xml_lsp_async();
   void finish_lsp_start_locked(bool ok);
   void finish_python_lsp_start_locked(bool ok, bool binary_missing);
   void finish_bash_lsp_start_locked(bool ok, bool binary_missing);
@@ -190,6 +193,7 @@ class LspSymbolProvider : public ISymbolProvider {
   void finish_cmake_lsp_start_locked(bool ok, bool binary_missing);
   void finish_make_lsp_start_locked(bool ok, bool binary_missing);
   void finish_yaml_lsp_start_locked(bool ok, bool binary_missing);
+  void finish_xml_lsp_start_locked(bool ok, bool binary_missing);
   void notify_lsp_status(const char* i18n_key);
   void join_startup_thread();
   void join_python_startup_thread();
@@ -204,6 +208,7 @@ class LspSymbolProvider : public ISymbolProvider {
   void join_cmake_startup_thread();
   void join_make_startup_thread();
   void join_yaml_startup_thread();
+  void join_xml_startup_thread();
   struct SimpleLazyLspConfig {
     const char* thread_name;
     const char* language_id;
@@ -271,6 +276,7 @@ class LspSymbolProvider : public ISymbolProvider {
   std::unique_ptr<LspClient> cmake_client_;
   std::unique_ptr<LspClient> make_client_;
   std::unique_ptr<LspClient> yaml_client_;
+  std::unique_ptr<LspClient> xml_client_;
   TreeSitterSymbolProvider fallback_;
   bool lsp_enabled_ = true;
   bool use_gcc_query_driver_ = true;
@@ -301,6 +307,7 @@ class LspSymbolProvider : public ISymbolProvider {
   std::thread cmake_lsp_startup_thread_;
   std::thread make_lsp_startup_thread_;
   std::thread yaml_lsp_startup_thread_;
+  std::thread xml_lsp_startup_thread_;
   std::atomic<bool> lsp_starting_{false};
   std::atomic<bool> python_lsp_starting_{false};
   std::atomic<bool> bash_lsp_starting_{false};
@@ -314,6 +321,7 @@ class LspSymbolProvider : public ISymbolProvider {
   std::atomic<bool> cmake_lsp_starting_{false};
   std::atomic<bool> make_lsp_starting_{false};
   std::atomic<bool> yaml_lsp_starting_{false};
+  std::atomic<bool> xml_lsp_starting_{false};
   std::atomic<bool> async_stop_{false};
   mutable std::mutex inflight_mutex_;
   std::unordered_set<std::string> inflight_symbols_;

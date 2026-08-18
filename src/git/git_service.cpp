@@ -84,6 +84,7 @@ GitService::GitService() {
 }
 
 GitService::~GitService() {
+  cancel_remote();
   stop_ = true;
   queue_cv_.notify_all();
   if (worker_.joinable()) {
@@ -138,6 +139,18 @@ uint64_t GitService::cache_revision() const { return cache_revision_.load(); }
 void GitService::notify_updated() {
   cache_revision_.fetch_add(1, std::memory_order_relaxed);
   pending_ui_notify_.store(true, std::memory_order_release);
+  wake_ui();
+}
+
+void GitService::wake_ui() {
+  std::function<void()> callback;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    callback = update_callback_;
+  }
+  if (callback) {
+    callback();
+  }
 }
 
 void GitService::run_on_ui_thread(std::function<void()> task) {
@@ -149,6 +162,7 @@ void GitService::run_on_ui_thread(std::function<void()> task) {
     pending_completions_.push_back(std::move(task));
   }
   pending_ui_notify_.store(true, std::memory_order_release);
+  wake_ui();
 }
 
 void GitService::dispatch_completion(CompletionCallback on_done, bool success,
@@ -1053,10 +1067,16 @@ void GitService::push(const GitCredentials& credentials, CompletionCallback on_d
     return;
   }
   enqueue([this, repo_root, credentials, on_done]() {
+    const auto cancel = bind_remote_cancel();
     const auto result =
         credentials.password.empty() && credentials.username.empty()
-            ? run_git(repo_root, {"push"})
-            : run_git_with_credentials(repo_root, {"push"}, credentials);
+            ? run_git(repo_root, {"push"}, cancel.get())
+            : run_git_with_credentials(repo_root, {"push"}, credentials, cancel.get());
+    unbind_remote_cancel(cancel);
+    if (result.cancelled) {
+      dispatch_completion(on_done, false, i18n::tr("git.remote.cancelled"));
+      return;
+    }
     if (result.success()) {
       invalidate();
       dispatch_completion(on_done, true, result.stdout_text);
@@ -1081,10 +1101,16 @@ void GitService::pull(const GitCredentials& credentials, CompletionCallback on_d
     return;
   }
   enqueue([this, repo_root, credentials, on_done]() {
+    const auto cancel = bind_remote_cancel();
     const auto result =
         credentials.password.empty() && credentials.username.empty()
-            ? run_git(repo_root, {"pull"})
-            : run_git_with_credentials(repo_root, {"pull"}, credentials);
+            ? run_git(repo_root, {"pull"}, cancel.get())
+            : run_git_with_credentials(repo_root, {"pull"}, credentials, cancel.get());
+    unbind_remote_cancel(cancel);
+    if (result.cancelled) {
+      dispatch_completion(on_done, false, i18n::tr("git.remote.cancelled"));
+      return;
+    }
     if (result.success()) {
       invalidate();
       dispatch_completion(on_done, true, result.stdout_text);
@@ -1094,8 +1120,31 @@ void GitService::pull(const GitCredentials& credentials, CompletionCallback on_d
   });
 }
 
-void GitService::tick() {
-  TUIDE_MON_SCOPE("git", "tick");
+std::shared_ptr<GitCommandCancel> GitService::bind_remote_cancel() {
+  auto cancel = std::make_shared<GitCommandCancel>();
+  std::lock_guard<std::mutex> lock(remote_mutex_);
+  active_remote_cancel_ = cancel;
+  return cancel;
+}
+
+void GitService::unbind_remote_cancel(const std::shared_ptr<GitCommandCancel>& cancel) {
+  std::lock_guard<std::mutex> lock(remote_mutex_);
+  if (active_remote_cancel_ == cancel) {
+    active_remote_cancel_.reset();
+  }
+}
+
+void GitService::cancel_remote() {
+  std::shared_ptr<GitCommandCancel> cancel;
+  {
+    std::lock_guard<std::mutex> lock(remote_mutex_);
+    cancel = active_remote_cancel_;
+  }
+  request_git_cancel(cancel.get());
+}
+
+void GitService::drain_ui() {
+  TUIDE_MON_SCOPE("git", "drain_ui");
   std::deque<std::function<void()>> completions;
   {
     std::lock_guard<std::mutex> lock(completion_mutex_);
@@ -1117,6 +1166,11 @@ void GitService::tick() {
       callback();
     }
   }
+}
+
+void GitService::tick() {
+  TUIDE_MON_SCOPE("git", "tick");
+  drain_ui();
 
   if (!is_repo()) {
     return;

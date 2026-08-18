@@ -1,0 +1,47 @@
+[
+  {
+    "id": "stale_edit_shell",
+    "prompt": "En src/util/shell_utils.hpp añade // L2_STALE_OK encima de shell_quote.",
+    "map_seed_query": "añadir pestaña temp en terminal con fondo negro",
+    "expect": {
+      "must_edit": true,
+      "paths_touched": ["src/util/shell_utils.hpp"],
+      "diff_must_contain": ["L2_STALE_OK"],
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "stale_edit_ktab",
+    "prompt": "En src/ui/main_layout.hpp ConsolePanelTabs añade static constexpr int kStale = 12; tras kAi.",
+    "map_seed_query": "refactorizar packet monitor y transporte",
+    "expect": {
+      "must_edit": true,
+      "paths_touched": ["src/ui/main_layout.hpp"],
+      "diff_must_contain": ["kStale"],
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "fresh_edit_shell",
+    "prompt": "En src/util/shell_utils.cpp command_exists añade // L2_FRESH_OK antes del return std::system.",
+    "map_seed_query": null,
+    "expect": {
+      "must_edit": true,
+      "paths_touched": ["src/util/shell_utils.cpp"],
+      "diff_must_contain": ["L2_FRESH_OK"],
+      "forbid_false_done": true
+    }
+  },
+  {
+    "id": "stale_no_invent",
+    "prompt": "En src/util/shell_utils.hpp añade // L2_STALE_B encima de command_exists.",
+    "map_seed_query": "wake redraw async policy terminal UI panel",
+    "expect": {
+      "must_edit": true,
+      "paths_touched": ["src/util/shell_utils.hpp"],
+      "diff_must_contain": ["L2_STALE_B"],
+      "diff_must_not_contain": ["terminal_panel.cpp"],
+      "forbid_false_done": true
+    }
+  }
+]

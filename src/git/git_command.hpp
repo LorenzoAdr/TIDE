@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <string>
+#include <sys/types.h>
 #include <vector>
 
 namespace tuide {
@@ -9,7 +11,8 @@ struct GitCommandResult {
   int exit_code = -1;
   std::string stdout_text;
   std::string stderr_text;
-  bool success() const { return exit_code == 0; }
+  bool cancelled = false;
+  bool success() const { return !cancelled && exit_code == 0; }
 };
 
 struct GitCredentials {
@@ -17,10 +20,24 @@ struct GitCredentials {
   std::string password;
 };
 
-GitCommandResult run_git(const std::string& cwd, const std::vector<std::string>& args);
+// Cooperative cancel for a running git child (process group after setsid).
+struct GitCommandCancel {
+  GitCommandCancel() = default;
+  GitCommandCancel(const GitCommandCancel&) = delete;
+  GitCommandCancel& operator=(const GitCommandCancel&) = delete;
+
+  std::atomic<bool> requested{false};
+  std::atomic<pid_t> pid{0};
+};
+
+void request_git_cancel(GitCommandCancel* cancel);
+
+GitCommandResult run_git(const std::string& cwd, const std::vector<std::string>& args,
+                         GitCommandCancel* cancel = nullptr);
 GitCommandResult run_git_with_credentials(const std::string& cwd,
                                           const std::vector<std::string>& args,
-                                          const GitCredentials& credentials);
+                                          const GitCredentials& credentials,
+                                          GitCommandCancel* cancel = nullptr);
 
 bool git_available();
 

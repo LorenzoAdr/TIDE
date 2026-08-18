@@ -4,6 +4,8 @@
 #include <filesystem>
 #include <sstream>
 
+#include "app/language_override.hpp"
+
 namespace fs = std::filesystem;
 
 namespace tuide {
@@ -84,6 +86,9 @@ std::string uri_to_path(const std::string& uri) {
 }
 
 std::string language_id_for_path(const std::string& path) {
+  if (const auto override_id = language_override_for_path(path); override_id.has_value()) {
+    return *override_id;
+  }
   const fs::path file_path(path);
   const auto filename = file_path.filename().string();
   const auto ext = file_path.extension().string();
@@ -133,6 +138,10 @@ std::string language_id_for_path(const std::string& path) {
   }
   if (ext == ".yaml" || ext == ".yml") {
     return "yaml";
+  }
+  if (ext == ".xml" || ext == ".xhtml" || ext == ".svg" || ext == ".xsl" ||
+      ext == ".xslt") {
+    return "xml";
   }
   return "plaintext";
 }

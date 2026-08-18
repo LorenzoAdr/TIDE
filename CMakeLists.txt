@@ -41,6 +41,7 @@ set(TUIDE_TREE_SITTER_INCLUDE_DIRS
   ${tree_sitter_cmake_SOURCE_DIR}/bindings/c
   ${tree_sitter_make_SOURCE_DIR}/bindings/c
   ${tree_sitter_yaml_SOURCE_DIR}/bindings/c
+  ${tree_sitter_xml_SOURCE_DIR}/bindings/c
   ${CMAKE_BINARY_DIR}/generated
 )
 
@@ -60,17 +61,20 @@ set(TUIDE_TREE_SITTER_GRAMMAR_LIBS
   tree-sitter-cmake
   tree-sitter-make
   tree-sitter-yaml
+  tree-sitter-xml
 )
 
 set(TUIDE_TREE_SITTER_SOURCES
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_document.cpp
   src/parser/tree_sitter_symbols.cpp
+  src/parser/tree_sitter_tags.cpp
   src/parser/tree_sitter_highlight.cpp
   src/parser/tree_sitter_locals.cpp
   src/parser/tree_sitter_blocks.cpp
   src/parser/tree_sitter_completion.cpp
   src/parser/tree_sitter_service.cpp
+  src/symbols/symbol_utils.cpp
   src/util/syntax_highlight.cpp
   src/util/syntax_scope.cpp
   src/editor/editor_context.cpp
@@ -81,6 +85,7 @@ set(TUIDE_TREE_SITTER_SOURCES
   src/i18n/strings_es.cpp
   src/i18n/strings_en.cpp
   src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
 )
 
 function(tuide_link_tree_sitter target)
@@ -104,6 +109,7 @@ add_executable(tuide
   src/i18n/strings_en.cpp
   src/app/workspace_detect.cpp
   src/app/workspace_config.cpp
+  src/app/language_override.cpp
   src/app/workspace_session.cpp
   src/app/recent_projects.cpp
   src/app/debug_model.cpp
@@ -116,6 +122,7 @@ add_executable(tuide
   src/ui/main_layout.cpp
   src/ui/hover_effects.cpp
   src/ui/status_layout_popover.cpp
+  src/ui/status_language_popover.cpp
   src/ui/file_tree_panel.cpp
   src/ui/source_panel.cpp
   src/ui/editor_panel.cpp
@@ -134,6 +141,8 @@ add_executable(tuide
   src/ui/right_sidebar_panel.cpp
   src/ui/watches_panel.cpp
   src/ui/console_panel.cpp
+  src/ui/ai_transcript_view.cpp
+  src/ui/ai_path_scope_modal.cpp
   src/ui/core_analyzer_panel.cpp
   src/ui/binary_symbols_panel.cpp
   src/core_analyzer/output_parser.cpp
@@ -149,6 +158,7 @@ add_executable(tuide
   src/ui/open_file_confirm.cpp
   src/ui/external_file_conflict.cpp
   src/ui/lsp_missing_toast.cpp
+  src/ui/ai_missing_toast.cpp
   src/ui/shortcuts_modal.cpp
   src/ui/settings_modal.cpp
   src/ui/source_substitute_modal.cpp
@@ -194,6 +204,7 @@ add_executable(tuide
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_document.cpp
   src/parser/tree_sitter_symbols.cpp
+  src/parser/tree_sitter_tags.cpp
   src/parser/tree_sitter_highlight.cpp
   src/parser/tree_sitter_locals.cpp
   src/parser/tree_sitter_blocks.cpp
@@ -210,6 +221,7 @@ add_executable(tuide
   src/util/tabular_file.cpp
   src/util/virtual_text_file.cpp
   src/util/external_viewer.cpp
+  src/util/markdown_html.cpp
   src/search/workspace_search.cpp
   src/search/workspace_search_runner.cpp
   src/search/workspace_search_rg.cpp
@@ -298,6 +310,36 @@ add_executable(tuide
   src/git/git_diff.cpp
   src/git/git_log.cpp
   src/git/git_service.cpp
+  src/ai/level0_router.cpp
+  src/ai/level0_intent_index.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/ai_trace.cpp
+  src/ai/search_needles.cpp
+  src/ai/tool_registry.cpp
+  src/ai/task_runner.cpp
+  src/ai/edit_journal.cpp
+  src/ai/context_pack.cpp
+  src/ai/get_code_of.cpp
+  src/ai/repo_map.cpp
+  src/ai/ai_path_scope.cpp
+  src/ai/coding_embed_rerank.cpp
+  src/ai/coding_stem_embed_index.cpp
+  src/ai/coding_symbol_embed_index.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_packages.cpp
+  src/ai/llama_backend.cpp
+  src/ai/level1_action.cpp
+  src/ai/level1_agent.cpp
+  src/ai/level2_session.cpp
+  src/ai/search_replace.cpp
+  src/ai/l2_action.cpp
+  src/ai/l2_brain_local.cpp
+  src/ai/l2_brain_remote.cpp
+  src/ai/l2_context_budget.cpp
+  src/ai/level2_autonomous_loop.cpp
+  src/ai/l2_grammar.cpp
+  src/ai/level2_debrief.cpp
+  src/ai/ai_controller.cpp
   src/terminal/shell_session.cpp
   src/terminal/app_session.cpp
   src/terminal/raw_pty_screen.cpp
@@ -326,6 +368,7 @@ target_compile_definitions(tuide PRIVATE
   "TUIDE_BASH_DEBUG_ADAPTER_JS=\"${TUIDE_BASH_DEBUG_ROOT}/out/bashDebug.js\""
   "TUIDE_BASHDB_PATH=\"${TUIDE_BASH_DEBUG_ROOT}/bashdb_dir/bashdb\""
   "TUIDE_BASHDB_LIB=\"${TUIDE_BASH_DEBUG_ROOT}/bashdb_dir\""
+  "TUIDE_LEVEL0_INTENTS_PATH=\"${CMAKE_SOURCE_DIR}/data/ai/level0_intents.json\""
 )
 
 set(TUIDE_CPPDAP_ARCHIVE "${CMAKE_BINARY_DIR}/_deps/cppdap-build/libcppdap.a")
@@ -413,6 +456,9 @@ if(TUIDE_BUNDLE_MAKE_LS)
 endif()
 if(TUIDE_BUNDLE_YAML_LS)
   include(cmake/BundleYamlLs.cmake)
+endif()
+if(TUIDE_BUNDLE_LEMMINX)
+  include(cmake/BundleLemminx.cmake)
 endif()
 
 add_executable(tuide-bundle-wizard tools/bundle_wizard/main.cpp)
@@ -599,6 +645,8 @@ add_executable(workspace_indexer_test
   src/indexer/workspace_indexer.cpp
   src/indexer/workspace_indexer_rg.cpp
   src/indexer/index_rules.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
   src/util/fuzzy_match.cpp
   src/util/monitor_log.cpp
   src/util/bundled_tools.cpp
@@ -608,15 +656,21 @@ add_executable(workspace_indexer_test
   src/toolpacks/packaged.cpp
   src/toolpacks/download.cpp
   src/util/child_process_guard.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(workspace_indexer_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
+tuide_link_pthread(workspace_indexer_test)
 
 add_executable(csv_index_test
   tests/csv_index_test.cpp
   src/indexer/index_rules.cpp
+  src/app/language_override.cpp
   src/util/csv_viewer.cpp
   src/editor/code_snippets.cpp
   src/lsp/lsp_uri.cpp
@@ -631,9 +685,11 @@ target_include_directories(csv_index_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 target_link_libraries(csv_index_test PRIVATE ftxui::dom)
+tuide_link_pthread(csv_index_test)
 
 add_executable(external_viewer_test
   tests/external_viewer_test.cpp
+  tests/markdown_html_stub.cpp
   src/util/external_viewer.cpp
   src/util/shell_utils.cpp
   src/util/monitor_log.cpp
@@ -669,6 +725,16 @@ add_executable(glyphs_test
 )
 target_include_directories(glyphs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+add_executable(file_tree_sticky_test
+  tests/file_tree_sticky_test.cpp
+)
+target_include_directories(file_tree_sticky_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(search_result_tree_test
+  tests/search_result_tree_test.cpp
+)
+target_include_directories(search_result_tree_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 add_executable(ui_invalidation_policy_test
   tests/ui_invalidation_policy_test.cpp
 )
@@ -699,9 +765,15 @@ add_executable(doc_comment_test
   tests/doc_comment_test.cpp
   src/editor/doc_comment.cpp
   src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
   src/util/path_normalize.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(doc_comment_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+tuide_link_pthread(doc_comment_test)
 
 add_executable(nm_reader_test
   tests/nm_reader_test.cpp
@@ -719,6 +791,304 @@ add_executable(git_diff_test
   src/git/git_diff.cpp
 )
 target_include_directories(git_diff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(git_command_test
+  tests/git_command_test.cpp
+  src/git/git_command.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(git_command_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(level0_router_test
+  tests/level0_router_test.cpp
+  src/ai/level0_router.cpp
+  src/ai/search_needles.cpp
+)
+target_include_directories(level0_router_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_definitions(level0_router_test PRIVATE
+  TUIDE_LEVEL0_INTENTS_PATH="${CMAKE_SOURCE_DIR}/data/ai/level0_intents.json"
+)
+
+add_executable(level0_intent_index_test
+  tests/level0_intent_index_test.cpp
+  src/ai/level0_intent_index.cpp
+  src/ai/level0_router.cpp
+  src/ai/search_needles.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+)
+target_include_directories(level0_intent_index_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+target_compile_definitions(level0_intent_index_test PRIVATE
+  TUIDE_LEVEL0_INTENTS_PATH="${CMAKE_SOURCE_DIR}/data/ai/level0_intents.json"
+)
+
+add_executable(level1_agent_test
+  tests/level1_agent_test.cpp
+  src/ai/level1_action.cpp
+)
+target_include_directories(level1_agent_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(level2_session_test
+  tests/level2_session_test.cpp
+  tests/tool_registry_stub.cpp
+  src/ai/level2_session.cpp
+  src/ai/l2_context_budget.cpp
+  src/ai/search_replace.cpp
+  src/ai/ai_trace.cpp
+  src/ai/ai_path_scope.cpp
+)
+target_include_directories(level2_session_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(level2_autonomous_loop_test
+  tests/level2_autonomous_loop_test.cpp
+  tests/tool_registry_stub.cpp
+  src/ai/level2_session.cpp
+  src/ai/l2_context_budget.cpp
+  src/ai/search_replace.cpp
+  src/ai/l2_action.cpp
+  src/ai/level2_autonomous_loop.cpp
+  src/ai/l2_grammar.cpp
+  src/ai/ai_trace.cpp
+  src/ai/ai_path_scope.cpp
+)
+target_include_directories(level2_autonomous_loop_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_context_budget_test
+  tests/l2_context_budget_test.cpp
+  src/ai/l2_context_budget.cpp
+)
+target_include_directories(l2_context_budget_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_action_test
+  tests/l2_action_test.cpp
+  src/ai/l2_action.cpp
+  src/ai/search_replace.cpp
+)
+target_include_directories(l2_action_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(level2_debrief_test
+  tests/level2_debrief_test.cpp
+  tests/tool_registry_stub.cpp
+  src/ai/level2_debrief.cpp
+  src/ai/level2_session.cpp
+  src/ai/l2_context_budget.cpp
+  src/ai/search_replace.cpp
+  src/ai/ai_trace.cpp
+  src/ai/ai_path_scope.cpp
+)
+target_include_directories(level2_debrief_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(search_replace_test
+  tests/search_replace_test.cpp
+  src/ai/search_replace.cpp
+)
+target_include_directories(search_replace_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(llama_backend_test
+  tests/llama_backend_test.cpp
+  src/ai/llama_backend.cpp
+  src/ai/model_store.cpp
+)
+target_include_directories(llama_backend_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_harness_cli
+  tools/l2_harness_cli.cpp
+  tests/tool_registry_stub.cpp
+  src/ai/level2_session.cpp
+  src/ai/l2_context_budget.cpp
+  src/ai/ai_path_scope.cpp
+  src/ai/search_replace.cpp
+  src/ai/l2_action.cpp
+  src/ai/level2_autonomous_loop.cpp
+  src/ai/l2_grammar.cpp
+  src/ai/l2_brain_local.cpp
+  src/ai/llama_backend.cpp
+  src/ai/get_code_of.cpp
+  src/ai/repo_map.cpp
+  src/ai/coding_embed_rerank.cpp
+  src/ai/coding_stem_embed_index.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+  src/ai/search_needles.cpp
+  src/app/language_override.cpp
+  src/git/git_command.cpp
+  src/symbols/symbol_utils.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_harness_cli PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_harness_cli PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+tuide_link_pthread(l2_harness_cli)
+
+add_executable(repo_map_test
+  tests/repo_map_test.cpp
+  src/ai/repo_map.cpp
+  src/ai/get_code_of.cpp
+  src/ai/coding_embed_rerank.cpp
+  src/ai/coding_stem_embed_index.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+  src/ai/search_needles.cpp
+  src/ai/ai_path_scope.cpp
+  src/git/git_command.cpp
+  src/symbols/symbol_utils.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(repo_map_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(repo_map_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+
+add_executable(get_code_of_test
+  tests/get_code_of_test.cpp
+  src/ai/get_code_of.cpp
+  src/ai/repo_map.cpp
+  src/ai/coding_embed_rerank.cpp
+  src/ai/coding_stem_embed_index.cpp
+  src/ai/coding_symbol_embed_index.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+  src/ai/search_needles.cpp
+  src/ai/ai_path_scope.cpp
+  src/git/git_command.cpp
+  src/symbols/symbol_utils.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(get_code_of_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(get_code_of_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+
+add_executable(stem_passage_test
+  tests/stem_passage_test.cpp
+  src/ai/coding_stem_embed_index.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+)
+target_include_directories(stem_passage_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(stem_embed_battery
+  tools/stem_embed_battery.cpp
+  src/ai/coding_stem_embed_index.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+  src/indexer/index_rules.cpp
+  src/parser/tree_sitter_tags.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(stem_embed_battery PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(stem_embed_battery PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+tuide_link_pthread(stem_embed_battery)
+
+add_executable(stem_boost_battery
+  tools/stem_boost_battery.cpp
+  src/ai/coding_stem_embed_index.cpp
+  src/ai/coding_embed_rerank.cpp
+  src/ai/repo_map.cpp
+  src/ai/get_code_of.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+  src/ai/search_needles.cpp
+  src/ai/ai_path_scope.cpp
+  src/indexer/index_rules.cpp
+  src/parser/tree_sitter_tags.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
+  src/git/git_command.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(stem_boost_battery PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(stem_boost_battery PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+tuide_link_pthread(stem_boost_battery)
 
 add_executable(pkt_protocol_test
   tests/pkt_protocol_test.cpp
@@ -739,6 +1109,7 @@ add_executable(lsp_completion_probe
   src/lsp/lsp_client.cpp
   src/lsp/lsp_transport.cpp
   src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
   src/lsp/lsp_position.cpp
   src/lsp/lsp_text_edits.cpp
   src/indexer/index_rules.cpp
@@ -752,6 +1123,10 @@ add_executable(lsp_completion_probe
   src/util/monitor_log.cpp
   src/util/path_normalize.cpp
   src/util/clang_format_config.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
 )
 target_include_directories(lsp_completion_probe PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -761,6 +1136,7 @@ target_compile_definitions(lsp_completion_probe PRIVATE
   TUIDE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 target_link_libraries(lsp_completion_probe PRIVATE ftxui::dom)
+tuide_link_pthread(lsp_completion_probe)
 
 add_executable(toolpacks_test
   tests/toolpacks_test.cpp
@@ -800,6 +1176,8 @@ set(TUIDE_TEST_TARGETS
   external_viewer_test
   tabular_file_test
   glyphs_test
+  file_tree_sticky_test
+  search_result_tree_test
   ui_invalidation_policy_test
   compiler_location_test
   raw_pty_screen_test
@@ -807,6 +1185,20 @@ set(TUIDE_TEST_TARGETS
   doc_comment_test
   nm_reader_test
   git_diff_test
+  git_command_test
+  level0_router_test
+  level0_intent_index_test
+  level1_agent_test
+  level2_session_test
+  level2_autonomous_loop_test
+  level2_debrief_test
+  l2_context_budget_test
+  l2_action_test
+  search_replace_test
+  llama_backend_test
+  repo_map_test
+  get_code_of_test
+  stem_passage_test
   pkt_protocol_test
   lsp_completion_probe
   toolpacks_test

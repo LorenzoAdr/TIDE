@@ -13,6 +13,11 @@ option(TUIDE_BUNDLE_RG "Embed official ripgrep Linux x86_64 release" ON)
 option(TUIDE_FORCE_BUNDLED_RG
        "At runtime, never fall back to rg on PATH (requires TUIDE_BUNDLE_RG)" OFF)
 
+# L1 uses llama-cli at runtime (PATH / auto-download to $XDG_CACHE_HOME/tuide/models).
+# Linking llama.cpp into the binary stays optional for a future bundle step (D8).
+option(TUIDE_BUNDLE_LLAMA
+       "Reserve CMake hook for embedding llama.cpp (OFF: runtime llama-cli)" OFF)
+
 # Python tooling: A = basedpyright only (host Python); B = CPython + basedpyright + debugpy.
 # B supersedes A when both are requested.
 option(TUIDE_BUNDLE_PYTHON_LSP_MIN
@@ -60,6 +65,9 @@ option(TUIDE_FORCE_BUNDLED_MAKE_LS
 option(TUIDE_BUNDLE_YAML_LS "Embed yaml-language-server + Node Linux x86_64" OFF)
 option(TUIDE_FORCE_BUNDLED_YAML_LS
        "Prefer embedded yaml-language-server (requires TUIDE_BUNDLE_YAML_LS)" OFF)
+option(TUIDE_BUNDLE_LEMMINX "Embed LemMinX Linux x86_64 release" OFF)
+option(TUIDE_FORCE_BUNDLED_LEMMINX
+       "Prefer embedded LemMinX (requires TUIDE_BUNDLE_LEMMINX)" OFF)
 
 set(TUIDE_DEFAULT_UI_LOCALE "en" CACHE STRING "Default UI locale baked into the binary: es|en")
 set_property(CACHE TUIDE_DEFAULT_UI_LOCALE PROPERTY STRINGS es en)
@@ -108,6 +116,8 @@ set(TUIDE_MAKE_LS_VERSION "v0.1.16" CACHE STRING "make-ls release version to bun
 set(TUIDE_YAML_LS_NPM_VERSION "1.24.0" CACHE STRING "yaml-language-server npm version")
 set(TUIDE_YAML_LS_VERSION "${TUIDE_YAML_LS_NPM_VERSION}" CACHE STRING
     "yaml-language-server bundle tag")
+set(TUIDE_LEMMINX_VERSION "0.29.3" CACHE STRING
+    "LemMinX / vscode-xml release version to bundle")
 
 if(TUIDE_BUNDLE_PYTHON_TOOLS AND TUIDE_BUNDLE_PYTHON_LSP_MIN)
   message(WARNING
@@ -221,11 +231,15 @@ endif()
 if(TUIDE_FORCE_BUNDLED_YAML_LS AND NOT TUIDE_BUNDLE_YAML_LS)
   message(FATAL_ERROR "TUIDE_FORCE_BUNDLED_YAML_LS requires TUIDE_BUNDLE_YAML_LS=ON")
 endif()
+if(TUIDE_FORCE_BUNDLED_LEMMINX AND NOT TUIDE_BUNDLE_LEMMINX)
+  message(FATAL_ERROR "TUIDE_FORCE_BUNDLED_LEMMINX requires TUIDE_BUNDLE_LEMMINX=ON")
+endif()
 
 if(TUIDE_BUNDLE_BASH_LS OR TUIDE_BUNDLE_TEXLAB OR TUIDE_BUNDLE_BASH_DAP
    OR TUIDE_BUNDLE_RUST_ANALYZER OR TUIDE_BUNDLE_GOPLS OR TUIDE_BUNDLE_ZLS
    OR TUIDE_BUNDLE_LUA_LS OR TUIDE_BUNDLE_FORTLS OR TUIDE_BUNDLE_TSSERVER
-   OR TUIDE_BUNDLE_NEOCMAKELSP OR TUIDE_BUNDLE_MAKE_LS OR TUIDE_BUNDLE_YAML_LS)
+   OR TUIDE_BUNDLE_NEOCMAKELSP OR TUIDE_BUNDLE_MAKE_LS OR TUIDE_BUNDLE_YAML_LS
+   OR TUIDE_BUNDLE_LEMMINX)
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "Embedded tooling bundles are only supported on Linux")
   endif()

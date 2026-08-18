@@ -1,0 +1,109 @@
+#include "ai/l2_brain.hpp"
+
+#include <cstdlib>
+#include <unistd.h>
+
+#include "ai/model_store.hpp"
+
+namespace tuide {
+
+LocalL2Brain::LocalL2Brain(LlamaBackend* backend) : backend_(backend) {
+  if (backend_ == nullptr) {
+    backend_ = &owned_;
+  }
+}
+
+bool LocalL2Brain::ensure_ready(const AiSettings& settings,
+                                const std::function<void(const std::string&)>& on_progress,
+                                std::string* error) {
+  ModelStore store(settings.models_cache_dir.empty() ? ModelStore::default_cache_dir()
+                                                     : settings.models_cache_dir);
+
+  std::string cli = settings.level2.cli_path;
+  if (cli.empty()) {
+    cli = settings.level1.cli_path;
+  }
+  if (cli.empty()) {
+    cli = store.resolve_llama_cli();
+    if (cli.empty() || !store.cli_runnable(cli)) {
+      const bool auto_dl = settings.level2.auto_download || settings.level1.auto_download;
+      cli = store.ensure_llama_cli(auto_dl, on_progress, error);
+    }
+  }
+  if (!store.cli_runnable(cli)) {
+    if (error && error->empty()) {
+      *error = "L2 local: llama-cli no ejecutable (instala ai-runtime)";
+    }
+    return false;
+  }
+  backend_->set_cli_path(cli);
+
+  std::string model = settings.level2.model_path;
+  if (model.empty()) {
+    const AiModelInfo info = resolve_l2_model(settings.level2);
+    if (!settings.level2.model_id.empty() && !find_l2_model(settings.level2.model_id)) {
+      const std::string alt = store.l2_model_path_for_id(settings.level2.model_id);
+      if (::access(alt.c_str(), R_OK) == 0) {
+        model = alt;
+      } else if (error) {
+        *error = "L2 local: modelo custom ausente: " + alt +
+                 " (usa model_path o un id del catálogo L2)";
+        return false;
+      } else {
+        return false;
+      }
+    }
+    if (model.empty()) {
+      model = store.ensure_l2_model(info, settings.level2.auto_download, on_progress, error);
+    }
+  }
+  if (model.empty() || ::access(model.c_str(), R_OK) != 0) {
+    if (error && error->empty()) {
+      *error =
+          "L2 local: modelo ausente (instala un paquete ai-l2-* o fija ai.level2.model_path)";
+    }
+    return false;
+  }
+  backend_->set_model_path(model);
+  std::string server_err;
+  if (backend_->ensure_completion_server(settings, on_progress, &server_err)) {
+    if (on_progress) {
+      on_progress("L2 local ready: " + model + " via llama-server :" +
+                  std::to_string(backend_->completion_server_port()));
+    }
+    return true;
+  }
+  if (on_progress) {
+    on_progress("L2 local: llama-server no disponible (" + server_err +
+                "); llama-cli por turno");
+  }
+  if (on_progress) {
+    on_progress("L2 local ready: " + model);
+  }
+  return true;
+}
+
+L2BrainResult LocalL2Brain::propose(const L2BrainRequest& req, std::atomic<bool>* cancel) {
+  L2BrainResult out;
+  out.backend = "local";
+  if (backend_ == nullptr || !backend_->ready()) {
+    out.error = "L2 local backend no ready";
+    return out;
+  }
+  LlamaCompletionRequest creq;
+  creq.system_prompt = req.system_prompt;
+  creq.user_prompt = req.user_prompt;
+  creq.max_tokens = req.max_tokens;
+  creq.n_ctx = req.n_ctx;
+  creq.temperature = req.temperature;
+  creq.context_role = "L2";
+  creq.n_ctx_setting_hint = "ai.level2.n_ctx";
+  creq.grammar_file = req.grammar_file;
+  const LlamaCompletionResult cr = backend_->complete(creq, cancel);
+  out.ok = cr.ok;
+  out.text = cr.text;
+  out.error = cr.error;
+  return out;
+}
+
+}  // namespace tuide

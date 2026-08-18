@@ -4,6 +4,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "app/app_mode.hpp"
@@ -24,6 +25,7 @@
 #include "ui/context_menu.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/status_layout_popover.hpp"
+#include "ui/status_language_popover.hpp"
 #include "git/git_service.hpp"
 #include "util/system_stats.hpp"
 #include "util/ui_activity_gate.hpp"
@@ -40,6 +42,7 @@
 namespace tuide {
 
 class UiEventDispatcher;
+class AiController;
 
 namespace packet_monitor {
 class PacketMonitorService;
@@ -112,6 +115,7 @@ struct ConsolePanelTabs {
   static constexpr int kCoreAnalyzer = 8;
   static constexpr int kBinarySymbols = 9;
   static constexpr int kPacketMonitor = 10;
+  static constexpr int kAi = 11;
   int selected_tab = kTerminal;
 };
 
@@ -167,6 +171,18 @@ struct MainLayoutState {
   int panel_cache_app_mode = -1;
   UiPanelRenderCache panel_render_cache;
   std::unique_ptr<BusyStripState> busy_strip;
+  // Owned by MakeConsolePanel; set so Application can warm AI indexes after Mapping.
+  std::shared_ptr<AiController> ai_controller;
+  // Fired the first time the console AI tab is selected (lazy AI map + stem embeds).
+  std::function<void()> on_ai_tab_opened;
+  // Context-menu "AI: Insert" — path/line/col/symbol from the editor click.
+  struct AiInsertRequest {
+    std::string absolute_path;
+    int line = 0;  // 0-based
+    int col = 0;
+    std::string symbol_hint;
+  };
+  std::function<void(const AiInsertRequest&)> on_ai_insert_requested;
   UiActivityGate activity_gate;
   UiPerfMonitor ui_perf_monitor;
   MouseVelocityTracker mouse_velocity;
@@ -229,6 +245,7 @@ struct MainLayoutState {
   std::function<void()> status_open_shortcuts;
   std::function<void()> status_reindex_project;
   std::function<void()> status_open_source_substitute;
+  std::function<void()> open_ai_path_scope;
   std::function<void()> status_open_launch;
   std::function<void()> status_quick_launch;
   std::function<void()> status_open_debug;
@@ -237,6 +254,9 @@ struct MainLayoutState {
   std::function<void(bool visible)> status_set_outline_visible;
   std::function<void(bool visible)> status_set_terminal_visible;
   StatusLayoutPopoverState status_layout_popover;
+  StatusLanguagePopoverState status_language_popover;
+  // nullopt = Auto (clear override); otherwise force language_id for active file.
+  std::function<void(const std::optional<std::string>& language_id)> status_set_file_language;
   std::function<void()> outline_tick_callback;
   std::function<void()> source_tick_callback;
   std::function<bool(const ftxui::Event&)> console_key_handler;
@@ -246,6 +266,7 @@ struct MainLayoutState {
   std::function<bool(const ftxui::Event&)> search_key_handler;
   std::function<bool(const ftxui::Event&)> call_hierarchy_key_handler;
   std::function<bool(const ftxui::Event&)> problems_key_handler;
+  std::function<bool(int delta)> problems_scroll_handler;
   std::function<bool(const ftxui::Event&)> git_key_handler;
   std::function<bool(const ftxui::Event&)> git_mouse_handler;
   std::function<void(const std::string& workspace_rel_path)> git_open_diff_view;
@@ -309,6 +330,11 @@ inline bool binary_symbols_tab_active(const MainLayoutState* layout_state) {
 inline bool packet_monitor_tab_active(const MainLayoutState* layout_state) {
   return layout_state != nullptr && layout_state->console_visible &&
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kPacketMonitor;
+}
+
+inline bool ai_tab_active(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->console_tabs.selected_tab == ConsolePanelTabs::kAi;
 }
 
 inline bool binary_symbols_request_pending(const MainLayoutState* layout_state) {
