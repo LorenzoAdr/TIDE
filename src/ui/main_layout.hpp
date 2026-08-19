@@ -334,6 +334,8 @@ inline bool packet_monitor_tab_active(const MainLayoutState* layout_state) {
 
 inline bool ai_tab_active(const MainLayoutState* layout_state) {
   return layout_state != nullptr && layout_state->console_visible &&
+         layout_state->app_settings != nullptr &&
+         layout_state->app_settings->development_options_enabled &&
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kAi;
 }
 

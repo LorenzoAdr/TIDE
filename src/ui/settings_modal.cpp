@@ -188,7 +188,8 @@ constexpr int kPerfDump = 5;
 constexpr int kIcons = 6;
 constexpr int kHelixMode = 7;
 constexpr int kWorkspaceAutoDetect = 8;
-constexpr int kBaseOptions = 9;
+constexpr int kDevelopmentOptions = 9;
+constexpr int kBaseOptions = 10;
 
 #ifdef TUIDE_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -274,6 +275,10 @@ constexpr int kVhCodeFolding = 10;
 constexpr int kVhIndentGuides = 11;
 constexpr int kVisualHighlightOptionCount = 12;
 
+bool development_options_enabled(const SettingsModalState* state) {
+  return state != nullptr && state->draft_development_options_enabled;
+}
+
 bool is_top_level_panel(SettingsPanel panel) {
   return panel == SettingsPanel::kGeneral || panel == SettingsPanel::kVisualHighlight ||
          panel == SettingsPanel::kWorkspace || panel == SettingsPanel::kUiColors ||
@@ -286,7 +291,7 @@ int top_level_panel_count(const SettingsModalState* state) {
   // General + Visual + Shortcuts + Toolpacks + Status always;
   // Workspace + Theme + Format + AI with workspace.
   if (state != nullptr && state->has_workspace) {
-    return 9;
+    return development_options_enabled(state) ? 9 : 8;
   }
   return 5;
 }
@@ -314,7 +319,7 @@ SettingsPanel top_level_panel_at(const SettingsModalState* state, int index) {
     if (index == 6) {
       return SettingsPanel::kToolpacks;
     }
-    if (index == 7) {
+    if (development_options_enabled(state) && index == 7) {
       return SettingsPanel::kAi;
     }
     return SettingsPanel::kStatus;
@@ -345,9 +350,12 @@ int top_level_panel_index(const SettingsModalState* state, SettingsPanel panel) 
     case SettingsPanel::kToolpacks:
       return state != nullptr && state->has_workspace ? 6 : 3;
     case SettingsPanel::kAi:
-      return state != nullptr && state->has_workspace ? 7 : 3;
+      return state != nullptr && state->has_workspace && development_options_enabled(state) ? 7 : 3;
     case SettingsPanel::kStatus:
-      return state != nullptr && state->has_workspace ? 8 : 4;
+      if (state != nullptr && state->has_workspace) {
+        return development_options_enabled(state) ? 8 : 7;
+      }
+      return 4;
     default:
       return 0;
   }
@@ -461,6 +469,8 @@ std::vector<SettingsOption> global_settings_options() {
        i18n::tr("settings.general.helix_mode.description")},
       {i18n::tr("settings.general.workspace_auto_detect.label"),
        i18n::tr("settings.general.workspace_auto_detect.description")},
+      {i18n::tr("settings.general.development_options.label"),
+       i18n::tr("settings.general.development_options.description")},
 #ifdef TUIDE_HAS_BUNDLED_CLANGD
       {i18n::tr("settings.general.force_bundled_clangd.label"),
        i18n::tr("settings.general.force_bundled_clangd.description")},
@@ -704,6 +714,8 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_helix_mode_enabled;
     case kWorkspaceAutoDetect:
       return state->draft_workspace_auto_detect_enabled;
+    case kDevelopmentOptions:
+      return state->draft_development_options_enabled;
 #ifdef TUIDE_HAS_BUNDLED_CLANGD
     case kForceBundledClangd:
       return state->draft_force_bundled_clangd;
@@ -761,6 +773,12 @@ void toggle_option(SettingsModalState* state, int index) {
     case kWorkspaceAutoDetect:
       state->draft_workspace_auto_detect_enabled =
           !state->draft_workspace_auto_detect_enabled;
+      break;
+    case kDevelopmentOptions:
+      state->draft_development_options_enabled = !state->draft_development_options_enabled;
+      if (!state->draft_development_options_enabled && state->panel == SettingsPanel::kAi) {
+        switch_top_level_tab(state, SettingsPanel::kGeneral);
+      }
       break;
 #ifdef TUIDE_HAS_BUNDLED_CLANGD
     case kForceBundledClangd:
@@ -1494,6 +1512,9 @@ void switch_top_level_tab(SettingsModalState* state, SettingsPanel panel) {
       !state->has_workspace) {
     return;
   }
+  if (panel == SettingsPanel::kAi && !development_options_enabled(state)) {
+    return;
+  }
   if (state->panel == SettingsPanel::kUiColors && panel != SettingsPanel::kUiColors &&
       state->ui_colors_editing) {
     cancel_ui_color_edit(state);
@@ -1720,7 +1741,8 @@ bool handle_settings_mouse(SettingsModalState* state, Event event) {
       switch_top_level_tab(state, SettingsPanel::kToolpacks);
       return true;
     }
-    if (state->has_workspace && state->tab_ai_box.Contain(m.x, m.y)) {
+    if (state->has_workspace && development_options_enabled(state) &&
+        state->tab_ai_box.Contain(m.x, m.y)) {
       switch_top_level_tab(state, SettingsPanel::kAi);
       return true;
     }
@@ -2172,7 +2194,7 @@ Element render_top_level_tabs(SettingsModalState* state) {
   tabs.push_back(text("  "));
   tabs.push_back(render_tab(SettingsPanel::kToolpacks, i18n::tr("settings.tab.toolpacks").c_str(),
                             &state->tab_toolpacks_box));
-  if (state->has_workspace) {
+  if (state->has_workspace && development_options_enabled(state)) {
     tabs.push_back(text("  "));
     tabs.push_back(render_tab(SettingsPanel::kAi, i18n::tr("settings.tab.ai").c_str(),
                               &state->tab_ai_box));
@@ -3859,6 +3881,7 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_secondary_panel_enabled = settings.secondary_panel_enabled;
   state->draft_helix_mode_enabled = settings.helix_mode_enabled;
   state->draft_workspace_auto_detect_enabled = settings.workspace_auto_detect_enabled;
+  state->draft_development_options_enabled = settings.development_options_enabled;
   state->draft_show_all_workspace_files = settings.show_all_workspace_files;
   state->show_all_workspace_files_baseline = settings.show_all_workspace_files;
   state->draft_force_bundled_clangd = settings.force_bundled_clangd;
@@ -3960,6 +3983,7 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->secondary_panel_enabled = state->draft_secondary_panel_enabled;
   settings->helix_mode_enabled = state->draft_helix_mode_enabled;
   settings->workspace_auto_detect_enabled = state->draft_workspace_auto_detect_enabled;
+  settings->development_options_enabled = state->draft_development_options_enabled;
   settings->show_all_workspace_files = state->draft_show_all_workspace_files;
   settings->force_bundled_clangd = state->draft_force_bundled_clangd;
   settings->force_bundled_gdb = state->draft_force_bundled_gdb;

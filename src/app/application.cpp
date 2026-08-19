@@ -620,6 +620,9 @@ void Application::on_lsp_missing_ignore() {
 }
 
 void Application::maybe_show_ai_missing_toast(const std::string& pack_id) {
+	if (!app_settings_.development_options_enabled) {
+		return;
+	}
 	if (ai_missing_toast_suppressed_ || ai_missing_toast_state_.open ||
 	    lsp_missing_toast_state_.open) {
 		return;
@@ -2582,6 +2585,14 @@ void Application::apply_app_settings() {
 	    (!focus_state_.secondary_editor_visible || !focus_state_.secondary_editor_visible())) {
 		focus_state_.region = FocusRegion::Editor;
 		layout_state_.focus_sync_needed = true;
+	}
+	if (!app_settings_.development_options_enabled) {
+		if (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kAi) {
+			layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
+		}
+		if (ai_missing_toast_state_.open) {
+			ai_missing_toast_state_.close();
+		}
 	}
 	workspace_.buffer.view_token++;
 	UI_WAKE(&layout_state_, "app");

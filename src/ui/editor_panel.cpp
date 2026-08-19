@@ -4657,7 +4657,9 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
         context_menu_open_editor_symbol(&layout_state->context_menu, m.x, m.y,
                                         cursor.head.line, cursor.head.col, start_col, end_col,
                                         symbol, buffer->path, show_call_hierarchy, show_references,
-                                        debug_model, has_selection);
+                                        debug_model, has_selection,
+                                        layout_state->app_settings != nullptr &&
+                                            layout_state->app_settings->development_options_enabled);
         end_mouse_selection(panel);
         return true;
       }
@@ -4667,7 +4669,9 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
             symbols != nullptr && symbols->supports_call_hierarchy(buffer->path);
         context_menu_open_editor_background(&layout_state->context_menu, m.x, m.y, buffer->path,
                                             cursor.head.line, cursor.head.col,
-                                            show_call_hierarchy, has_selection);
+                                            show_call_hierarchy, has_selection,
+                                            layout_state->app_settings != nullptr &&
+                                                layout_state->app_settings->development_options_enabled);
         end_mouse_selection(panel);
         return true;
       }

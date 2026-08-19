@@ -391,6 +391,8 @@ const StringTable& spanish_strings() {
       {"settings.general.force_bundled_clangd.description", "Usa solo el clangd del binario (ignora clangd en PATH salvo CLANGD_PATH)"},
       {"settings.general.force_bundled_gdb.label", "Forzar gdb embebido"},
       {"settings.general.force_bundled_gdb.description", "Usa solo el gdb del binario (ignora gdb en PATH salvo GDB_PATH)"},
+      {"settings.general.development_options.label", "Habilitar opciones en desarrollo"},
+      {"settings.general.development_options.description", "Muestra funciones experimentales de IA en la interfaz, incluida la pestaña de terminal y las descargas de modelos"},
       {"settings.icon.always", "Siempre"},
       {"settings.icon.auto", "Auto"},
       {"settings.icon.never", "Nunca"},

@@ -1309,6 +1309,10 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
   }
 
   if (action_id == "ai_insert") {
+    if (layout_state != nullptr && layout_state->app_settings != nullptr &&
+        !layout_state->app_settings->development_options_enabled) {
+      return true;
+    }
     if (layout_state != nullptr && layout_state->on_ai_insert_requested) {
       MainLayoutState::AiInsertRequest req;
       req.absolute_path = state->absolute_path;
@@ -1821,7 +1825,7 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
                                      int sym_start, int sym_end, const std::string& symbol,
                                      const std::string& absolute_path, bool show_call_hierarchy,
                                      bool show_references, const DebugModel* model,
-                                     bool has_selection) {
+                                     bool has_selection, bool ai_actions_enabled) {
   if (state == nullptr || symbol.empty()) {
     return;
   }
@@ -1858,7 +1862,9 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
     items.push_back({i18n::tr("context_menu.format_file"), "format_file"});
   }
   set_items(state, ContextMenuKind::EditorSymbol, items);
-  append_menu_item(state, i18n::tr("context_menu.ai_insert"), "ai_insert");
+  if (ai_actions_enabled) {
+    append_menu_item(state, i18n::tr("context_menu.ai_insert"), "ai_insert");
+  }
   append_doc_comment_items(state, true);
   if (show_debug) {
     append_debug_watch_items(state, show_hw);
@@ -1889,7 +1895,8 @@ void context_menu_open_debug_symbol(ContextMenuState* state, int x, int y, int l
 
 void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
                                          const std::string& absolute_path, int line, int col,
-                                         bool show_call_hierarchy, bool has_selection) {
+                                         bool show_call_hierarchy, bool has_selection,
+                                         bool ai_actions_enabled) {
   if (state == nullptr || absolute_path.empty()) {
     return;
   }
@@ -1913,7 +1920,9 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
   }
   items.push_back({i18n::tr("context_menu.format_file"), "format_file"});
   set_items(state, ContextMenuKind::EditorBackground, items);
-  append_menu_item(state, i18n::tr("context_menu.ai_insert"), "ai_insert");
+  if (ai_actions_enabled) {
+    append_menu_item(state, i18n::tr("context_menu.ai_insert"), "ai_insert");
+  }
   append_doc_comment_items(state, false);
 }
 

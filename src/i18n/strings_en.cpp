@@ -391,6 +391,8 @@ const StringTable& english_strings() {
       {"settings.general.force_bundled_clangd.description", "Uses only the bundled clangd (ignores clangd on PATH except CLANGD_PATH)"},
       {"settings.general.force_bundled_gdb.label", "Force bundled gdb"},
       {"settings.general.force_bundled_gdb.description", "Uses only the bundled gdb (ignores gdb on PATH except GDB_PATH)"},
+      {"settings.general.development_options.label", "Enable in-development options"},
+      {"settings.general.development_options.description", "Shows experimental AI features in the UI, including the terminal tab and model downloads"},
       {"settings.icon.always", "Always"},
       {"settings.icon.auto", "Auto"},
       {"settings.icon.never", "Never"},

@@ -1189,6 +1189,11 @@ bool core_analyzer_tab_active(AppMode* app_mode, MainLayoutState* layout_state) 
          layout_state->console_tabs.selected_tab == ConsolePanelTabs::kCoreAnalyzer;
 }
 
+bool ai_console_tab_visible(const MainLayoutState* layout_state) {
+  return layout_state != nullptr && layout_state->app_settings != nullptr &&
+         layout_state->app_settings->development_options_enabled;
+}
+
 bool packet_monitor_tab_active_console(AppMode* app_mode, MainLayoutState* layout_state) {
   return debug_console_mode(app_mode) && packet_monitor_tab_active(layout_state);
 }
@@ -1276,6 +1281,9 @@ bool switch_console_tab(ConsolePanelState* state, MainLayoutState* layout_state,
                         GitPanelState* git_state) {
   if (layout_state == nullptr || tab < ConsolePanelTabs::kTerminal ||
       tab > ConsolePanelTabs::kAi) {
+    return false;
+  }
+  if (tab == ConsolePanelTabs::kAi && !ai_console_tab_visible(layout_state)) {
     return false;
   }
   if (layout_state->console_tabs.selected_tab == tab) {
@@ -1399,6 +1407,9 @@ bool handle_console_tab_click(ConsolePanelState* state, MainLayoutState* layout_
     }
     if (i == ConsolePanelTabs::kCoreAnalyzer &&
         !core_analyzer_tab_visible(app_mode, layout_state)) {
+      continue;
+    }
+    if (i == ConsolePanelTabs::kAi && !ai_console_tab_visible(layout_state)) {
       continue;
     }
     if (!state->tab_boxes[static_cast<std::size_t>(i)].Contain(mouse_x, mouse_y)) {
@@ -1851,7 +1862,6 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
         {press_id::kConsoleTabCallHierarchy, &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
         {press_id::kConsoleTabGit, &state->tab_boxes[ConsolePanelTabs::kGit]},
         {press_id::kConsoleTabBinarySymbols, &state->tab_boxes[ConsolePanelTabs::kBinarySymbols]},
-        {press_id::kConsoleTabAi, &state->tab_boxes[ConsolePanelTabs::kAi]},
         {press_id::kConsoleHide, &state->hide_box},
     };
   } else {
@@ -1863,9 +1873,11 @@ bool handle_console_tab_hover(ConsolePanelState* state, MainLayoutState* layout_
         {press_id::kConsoleTabCallHierarchy, &state->tab_boxes[ConsolePanelTabs::kCallHierarchy]},
         {press_id::kConsoleTabGit, &state->tab_boxes[ConsolePanelTabs::kGit]},
         {press_id::kConsoleTabBinarySymbols, &state->tab_boxes[ConsolePanelTabs::kBinarySymbols]},
-        {press_id::kConsoleTabAi, &state->tab_boxes[ConsolePanelTabs::kAi]},
         {press_id::kConsoleHide, &state->hide_box},
     };
+  }
+  if (ai_console_tab_visible(layout_state)) {
+    targets.push_back({press_id::kConsoleTabAi, &state->tab_boxes[ConsolePanelTabs::kAi]});
   }
   if (ai_tab_active(layout_state) && !state->ai_stop_box.IsEmpty()) {
     targets.push_back({press_id::kConsoleAiStop, &state->ai_stop_box});
@@ -3060,6 +3072,9 @@ bool cycle_console_tab(MainLayoutState* layout_state, FocusManagerState* focus, 
         !layout_state->show_core_analyzer_tab) {
       continue;
     }
+    if (tab == ConsolePanelTabs::kAi && !ai_console_tab_visible(layout_state)) {
+      continue;
+    }
     break;
   }
   if (tab == layout_state->console_tabs.selected_tab) {
@@ -3698,11 +3713,13 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         layout_state != nullptr &&
             layout_state->clickable.is_pressed(press_id::kConsoleTabBinarySymbols),
         &state->tab_boxes[ConsolePanelTabs::kBinarySymbols]));
-    tab_row.push_back(make_tab_button(
-        i18n::tr("console.tab.ai"), selected_tab == ConsolePanelTabs::kAi,
-        layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabAi),
-        layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabAi),
-        &state->tab_boxes[ConsolePanelTabs::kAi]));
+    if (ai_console_tab_visible(layout_state)) {
+      tab_row.push_back(make_tab_button(
+          i18n::tr("console.tab.ai"), selected_tab == ConsolePanelTabs::kAi,
+          layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleTabAi),
+          layout_state != nullptr && layout_state->clickable.is_pressed(press_id::kConsoleTabAi),
+          &state->tab_boxes[ConsolePanelTabs::kAi]));
+    }
 
     const bool hide_hovered =
         layout_state != nullptr && layout_state->clickable.is_hovered(press_id::kConsoleHide);

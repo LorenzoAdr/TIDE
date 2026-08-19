@@ -33,6 +33,7 @@ struct AppSettings {
   bool force_bundled_gdb = false;
   bool monitor_enabled = false;
   bool perf_dump_enabled = false;
+  bool development_options_enabled = false;
   bool passive_mode_enabled = true;
   int grace_window_ms = 1000;
   bool lsp_hover_on_click_only = true;

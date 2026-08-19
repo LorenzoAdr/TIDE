@@ -80,6 +80,7 @@ struct SettingsModalState {
   bool draft_force_bundled_gdb = false;
   bool draft_monitor_enabled = false;
   bool draft_perf_dump_enabled = false;
+  bool draft_development_options_enabled = false;
   bool draft_show_all_workspace_files = false;
   i18n::UiLocale draft_ui_locale = i18n::UiLocale::kAuto;
   IconMode draft_icon_mode = IconMode::Auto;
