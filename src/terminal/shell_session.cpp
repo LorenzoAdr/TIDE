@@ -217,7 +217,11 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
   }
 
   if (pid == 0) {
-    child_die_with_parent();
+    // No llamamos child_die_with_parent() aquí: bootstrap_shell se ejecuta
+    // desde un thread detachado, y PR_SET_PDEATHSIG registra ese thread como
+    // "padre". Cuando el thread termina (tras arrancar el reader), el hijo
+    // recibe SIGTERM aunque TIDE siga corriendo — exactamente el bug que
+    // produce "docker_exec died unexpectedly signal=15".
     setenv("TERM", "xterm-256color", 1);
     setenv("COLORTERM", "truecolor", 1);
     // Asegurar que el PATH incluye los directorios habituales de herramientas
