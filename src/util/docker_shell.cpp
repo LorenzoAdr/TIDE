@@ -88,8 +88,16 @@ ShellLaunchConfig resolve_shell_launch_config(const std::string& workspace_root,
   if (launch.docker_cwd.empty()) {
     launch.docker_cwd = host_path_to_container_path(workspace_root, mappings);
   }
-  // Si no hay mapeo conocido, no forzar un directorio: docker exec usará
-  // el WORKDIR de la imagen, que siempre existe.
+  // Verificar que el directorio calculado existe dentro del contenedor.
+  // Si no existe (mapeo incorrecto o sin mounts), dejar vacío para que
+  // docker exec use el WORKDIR de la imagen, que siempre existe.
+  if (!launch.docker_cwd.empty() && !launch.docker_container.empty()) {
+    const std::string check = "docker exec " + shell_quote(launch.docker_container) +
+                              " test -d " + shell_quote(launch.docker_cwd) + " 2>/dev/null";
+    if (std::system(check.c_str()) != 0) {
+      launch.docker_cwd.clear();
+    }
+  }
   return launch;
 }
 
