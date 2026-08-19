@@ -306,6 +306,13 @@ Level1Action parse_level1_action(const std::string& model_text) {
       if (action.seeds.empty()) {
         action.seeds = json_string_array(j, "seeds_primary");
       }
+      action.semantic_tokens = json_string_array(j, "semantic_tokens");
+      if (action.semantic_tokens.empty()) {
+        action.semantic_tokens = json_string_array(j, "tokens");
+      }
+      if (action.semantic_tokens.empty()) {
+        action.semantic_tokens = json_string_array(j, "semantic");
+      }
       if (j.contains("note") && j["note"].is_string()) {
         action.text = j["note"].get<std::string>();
       } else if (j.contains("plan") && j["plan"].is_string()) {

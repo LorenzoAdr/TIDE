@@ -600,6 +600,22 @@ std::string enrich_query_for_embed(const std::string& query,
   return out.str();
 }
 
+std::string build_semantic_embed_query(const std::string& query,
+                                       const std::vector<std::string>& semantic_tokens) {
+  std::ostringstream out;
+  out << query;
+  if (!semantic_tokens.empty()) {
+    out << "\nsemantic:";
+    for (const auto& t : semantic_tokens) {
+      if (t.empty()) {
+        continue;
+      }
+      out << ' ' << t;
+    }
+  }
+  return out.str();
+}
+
 namespace {
 
 const char* kind_label_short(SymbolKind k) {
@@ -724,6 +740,210 @@ int clamp_boost(int boost, int lo, int hi) {
 }
 
 }  // namespace
+
+BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> candidates,
+                                                  const BodySemanticRerankOptions& opts,
+                                                  EmbeddingBackend* backend,
+                                                  const CodingEmbedFn& test_embed) {
+  using clock = std::chrono::steady_clock;
+  const auto t0 = clock::now();
+
+  BodySemanticRerankResult out;
+  out.candidates_in = candidates.size();
+  if (candidates.empty()) {
+    out.note = "body_semantic=0; empty_candidates";
+    return out;
+  }
+
+  for (auto& e : candidates) {
+    e.score_base = e.score;
+    e.body_cos = -1.0f;
+  }
+
+  std::stable_sort(candidates.begin(), candidates.end(),
+                   [](const RepoMapEntry& a, const RepoMapEntry& b) {
+                     if (a.score != b.score) {
+                       return a.score > b.score;
+                     }
+                     if (a.file != b.file) {
+                       return a.file < b.file;
+                     }
+                     return a.line < b.line;
+                   });
+
+  const std::size_t pool_n =
+      opts.body_pool > 0 ? std::min(opts.body_pool, candidates.size()) : candidates.size();
+  out.body_pool = pool_n;
+
+  const bool can_embed = test_embed || (backend != nullptr && backend->ready());
+  if (!can_embed || opts.workspace_root.empty() || pool_n == 0) {
+    const std::size_t final_n =
+        opts.final_top > 0 ? std::min(candidates.size(), opts.final_top) : candidates.size();
+    out.entries.assign(candidates.begin(),
+                       candidates.begin() + static_cast<std::ptrdiff_t>(final_n));
+    out.total_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t0).count();
+    out.note = "body_semantic=0; embed_off_or_no_root";
+    return out;
+  }
+
+  const std::string enriched = build_semantic_embed_query(opts.query, opts.semantic_tokens);
+  std::vector<float> qvec;
+  const auto t_q0 = clock::now();
+  if (!embed_text(true, enriched, backend, test_embed, &qvec) || qvec.empty()) {
+    const std::size_t final_n =
+        opts.final_top > 0 ? std::min(candidates.size(), opts.final_top) : candidates.size();
+    out.entries.assign(candidates.begin(),
+                       candidates.begin() + static_cast<std::ptrdiff_t>(final_n));
+    out.total_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t0).count();
+    out.note = "body_semantic=0; query_embed_fail";
+    return out;
+  }
+  out.query_embed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t_q0).count();
+
+  std::vector<std::string> bodies(candidates.size());
+  const auto t_f0 = clock::now();
+  for (std::size_t i = 0; i < pool_n; ++i) {
+    auto& e = candidates[i];
+    GetCodeOfRequest req;
+    req.workspace_root = opts.workspace_root;
+    req.file = e.file;
+    req.symbol = e.name;
+    req.line = e.line;
+    req.max_lines = std::max(20, opts.body_max_lines);
+    const GetCodeOfResult got = get_code_of(req);
+    if (!got.ok || got.text.empty()) {
+      continue;
+    }
+    std::string body = got.text;
+    constexpr std::size_t kBodyCap = 1500;
+    if (body.size() > kBodyCap) {
+      body.resize(kBodyCap);
+      body += "\n…";
+    }
+    bodies[i] = std::move(body);
+  }
+  out.body_fetch_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t_f0).count();
+
+  std::vector<std::string> body_passages;
+  std::vector<std::size_t> body_idx;
+  body_passages.reserve(pool_n);
+  body_idx.reserve(pool_n);
+  for (std::size_t i = 0; i < pool_n; ++i) {
+    if (!bodies[i].empty()) {
+      body_passages.push_back(bodies[i]);
+      body_idx.push_back(i);
+    }
+  }
+
+  const auto t_e0 = clock::now();
+  if (!body_passages.empty()) {
+    out.used_body_embed = true;
+    std::vector<std::vector<float>> pvecs;
+    bool ok_batch = false;
+    if (!test_embed && backend != nullptr && backend->ready()) {
+      std::string emb_err;
+      ok_batch = backend->embed_passages(body_passages, &pvecs, &emb_err) &&
+                 pvecs.size() == body_passages.size();
+    }
+    if (ok_batch) {
+      for (std::size_t j = 0; j < body_idx.size(); ++j) {
+        const std::size_t i = body_idx[j];
+        if (pvecs[j].empty()) {
+          continue;
+        }
+        const float c = cosine_similarity(qvec, pvecs[j]);
+        candidates[i].body_cos = c;
+        candidates[i].score +=
+            clamp_boost(static_cast<int>(std::lround(static_cast<double>(c) * 2000.0)), -200, 2000);
+      }
+    } else {
+      for (std::size_t j = 0; j < body_idx.size(); ++j) {
+        const std::size_t i = body_idx[j];
+        std::vector<float> pvec;
+        if (!embed_text(false, bodies[i], backend, test_embed, &pvec) || pvec.empty()) {
+          continue;
+        }
+        const float c = cosine_similarity(qvec, pvec);
+        candidates[i].body_cos = c;
+        candidates[i].score +=
+            clamp_boost(static_cast<int>(std::lround(static_cast<double>(c) * 2000.0)), -200, 2000);
+      }
+    }
+  }
+  out.body_embed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t_e0).count();
+
+  if (out.used_body_embed && pool_n > 1) {
+    std::vector<RepoMapEntry> pool_head(candidates.begin(),
+                                        candidates.begin() + static_cast<std::ptrdiff_t>(pool_n));
+    std::vector<RepoMapEntry> pool_tail;
+    if (candidates.size() > pool_n) {
+      pool_tail.assign(candidates.begin() + static_cast<std::ptrdiff_t>(pool_n), candidates.end());
+    }
+    std::stable_sort(pool_head.begin(), pool_head.end(),
+                     [](const RepoMapEntry& a, const RepoMapEntry& b) {
+                       if (a.body_cos >= 0.f && b.body_cos >= 0.f && a.body_cos != b.body_cos) {
+                         return a.body_cos > b.body_cos;
+                       }
+                       if (a.score != b.score) {
+                         return a.score > b.score;
+                       }
+                       return a.file < b.file;
+                     });
+    candidates.clear();
+    candidates.insert(candidates.end(), pool_head.begin(), pool_head.end());
+    candidates.insert(candidates.end(), pool_tail.begin(), pool_tail.end());
+    bodies.clear();
+    bodies.resize(candidates.size());
+  }
+
+  const std::size_t final_n =
+      opts.final_top > 0 ? std::min(candidates.size(), opts.final_top) : candidates.size();
+  if (opts.max_per_file <= 0 && opts.max_per_stem <= 0 && opts.max_per_dir <= 0) {
+    out.entries.assign(candidates.begin(),
+                       candidates.begin() + static_cast<std::ptrdiff_t>(final_n));
+    for (std::size_t i = 0; i < out.entries.size() && i < bodies.size(); ++i) {
+      if (!bodies[i].empty()) {
+        out.body_texts.push_back(bodies[i]);
+      } else {
+        out.body_texts.emplace_back();
+      }
+    }
+  } else {
+    const auto keep = select_diverse_entry_indices(candidates, final_n, opts.max_per_file,
+                                                   opts.max_per_stem, opts.max_per_dir);
+    out.entries.reserve(keep.size());
+    out.body_texts.reserve(keep.size());
+    for (std::size_t idx : keep) {
+      out.entries.push_back(std::move(candidates[idx]));
+      if (idx < bodies.size() && !bodies[idx].empty()) {
+        out.body_texts.push_back(bodies[idx]);
+      } else {
+        out.body_texts.emplace_back();
+      }
+    }
+  }
+
+  out.total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t0).count();
+
+  std::ostringstream note;
+  note << "body_semantic=1";
+  note << "; body_pool=" << pool_n;
+  note << "; embed_body=" << (out.used_body_embed ? 1 : 0);
+  note << "; semantic_tok_n=" << opts.semantic_tokens.size();
+  note << "; body_fetch_ms=" << out.body_fetch_ms;
+  note << "; query_embed_ms=" << out.query_embed_ms;
+  note << "; body_embed_ms=" << out.body_embed_ms;
+  note << "; total_ms=" << out.total_ms;
+  note << "; cand_in=" << out.candidates_in;
+  note << "; n=" << out.entries.size();
+  out.note = note.str();
+  return out;
+}
 
 TwoStageRerankResult rerank_map_two_stage(std::vector<RepoMapEntry> candidates,
                                           const TwoStageRerankOptions& opts,

@@ -247,12 +247,21 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
   for (const auto& s : result.seeds) {
     std::cout << ' ' << s;
   }
+  std::cout << "\nsemantic_tokens:";
+  for (const auto& t : result.semantic_tokens) {
+    std::cout << ' ' << t;
+  }
   std::cout << "\n";
 
   const fs::path map_path = fs::path(workspace) / ".tuide" / "ai" / "map_last.md";
   if (!seeds_out_path.empty()) {
     write_seeds_json(seeds_out_path, result.seeds);
     std::cout << "seeds_out=" << seeds_out_path << " n=" << result.seeds.size() << "\n";
+    const fs::path sem_path =
+        fs::path(seeds_out_path).parent_path() / "semantic_tokens.json";
+    write_seeds_json(sem_path.string(), result.semantic_tokens);
+    std::cout << "semantic_tokens_out=" << sem_path << " n=" << result.semantic_tokens.size()
+              << "\n";
   }
   if (!map_out_path.empty()) {
     std::error_code ec;

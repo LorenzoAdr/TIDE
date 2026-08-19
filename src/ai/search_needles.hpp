@@ -49,4 +49,18 @@ std::vector<std::string> extract_query_facets(const std::string& text, std::size
 int facet_coverage_score(const std::string& file, const std::string& name,
                          const std::string& signature, const std::vector<std::string>& facets);
 
+// Split compound identifier into lowercase parts (snake/CamelCase); strips path:Symbol prefix.
+std::vector<std::string> decompose_identifier_parts(const std::string& identifier);
+
+// Drop structural/UI noise tokens unsuitable for body semantic query (update, ensure, hover, …).
+bool is_semantic_token_noise(const std::string& token);
+
+// Filter + dedupe semantic token list.
+std::vector<std::string> filter_semantic_tokens(std::vector<std::string> tokens);
+
+// L2 loose tokens + decomposed compound seeds + distilled terms → body embed query tokens.
+std::vector<std::string> merge_semantic_tokens(const std::vector<std::string>& l2_tokens,
+                                               const std::vector<std::string>& compound_seeds,
+                                               const std::vector<std::string>& distilled_terms);
+
 }  // namespace tuide

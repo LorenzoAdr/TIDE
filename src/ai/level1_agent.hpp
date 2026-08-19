@@ -41,9 +41,15 @@ struct Level1RunResult {
   std::string final_text;
   std::string instruction;
   std::vector<std::string> seeds;
+  std::vector<std::string> semantic_tokens;
   // agent|ask|plan|git — copied from settings at handoff (typed L1→L2).
   std::string workflow = "agent";
   std::string error;
+};
+
+struct InvestigateNeedlesResult {
+  std::vector<std::string> lexical_seeds;
+  std::vector<std::string> semantic_tokens;
 };
 
 class Level1Agent {
@@ -61,10 +67,8 @@ class Level1Agent {
   std::string invoke_tool_logged(const std::string& name, const std::string& arg,
                                  const LogFn& log);
   std::string run_seeds_pack(const std::vector<std::string>& seeds, const LogFn& log);
-  // Ask L1 for probable code identifiers for an investigate query (no tools).
-  // map_outline: optional list of "stem  file" strings from the lexical map to
-  // ground the LLM — improves recall for abstract NL queries.
-  std::vector<std::string> propose_investigate_needles(
+  // Ask L1/L2 for compound seeds (lexical) + loose semantic tokens (body embed).
+  InvestigateNeedlesResult propose_investigate_needles(
       const std::string& user_message,
       const LogFn& log,
       std::atomic<bool>* cancel,

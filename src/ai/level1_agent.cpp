@@ -18,6 +18,7 @@
 #include "ai/level1_action.hpp"
 #include "ai/repo_map.hpp"
 #include "ai/search_needles.hpp"
+#include "ai/l2_feat.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 
 #include <filesystem>
@@ -555,13 +556,14 @@ std::vector<std::string> rank_index_needle_candidates(SymbolWorkspaceIndexer* in
 
 }  // namespace
 
-std::vector<std::string> Level1Agent::propose_investigate_needles(const std::string& user_message,
-                                                                 const LogFn& log,
-                                                                 std::atomic<bool>* cancel,
-                                                                 const std::vector<std::string>& map_outline) {
-  std::vector<std::string> out;
+InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
+    const std::string& user_message, const LogFn& log, std::atomic<bool>* cancel,
+    const std::vector<std::string>& map_outline) {
+  InvestigateNeedlesResult result;
+  std::vector<std::string> compound_seeds;
+  std::vector<std::string> l2_semantic_tokens;
   std::unordered_set<std::string> seen;
-  auto push = [&](std::string s, bool allow_generic) {
+  auto push_compound = [&](std::string s, bool allow_generic) {
     while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
       s.erase(s.begin());
     }
@@ -577,7 +579,7 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
     if (!seen.insert(s).second) {
       return;
     }
-    out.push_back(std::move(s));
+    compound_seeds.push_back(std::move(s));
   };
 
   const std::vector<std::string> index_candidates =
@@ -717,9 +719,16 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
         "de la intención semántica del usuario. Tu trabajo ahora es decidir DÓNDE buscar "
         "en el código y proponer needles/símbolos concretos para recuperar los fragmentos "
         "correctos. Responde SOLO JSON:\n"
-        "{\"action\":\"seeds\",\"seeds\":[\"QuitConfirm\",\"quit_confirm\",...]}\n"
-        "Reglas:\n"
+        "{\"action\":\"seeds\",\"seeds\":[\"QuitConfirm\",\"quit_confirm\",...],"
+        "\"semantic_tokens\":[\"quit\",\"confirm\",\"session\",...]}\n"
+        "Reglas seeds (compuestos — SOLO para ranking léxico de nombres de símbolo):\n"
         "- 8..16 identificadores ESPECÍFICOS (archivo/clase/función), preferible compuestos.\n"
+        "Reglas semantic_tokens (palabras sueltas — SOLO para embed semántico de cuerpos):\n"
+        "- 8..20 tokens cortos de dominio/implementación en inglés (snake parts, sin prefijos "
+        "ensure_/update_/handle_).\n"
+        "- NO repitas identificadores compuestos enteros en semantic_tokens.\n"
+        "- Incluye conceptos de estado, flujo, cancelación, lifecycle cuando aplique.\n"
+        "Reglas generales:\n"
         "- Usa la INTENCION_DESTILADA como fuente principal de verdad.\n"
         "- Usa el MAPA_RANKEADO como ancla principal para decidir por dónde buscar.\n"
         "- Prioriza stems/archivos/símbolos que aparezcan en ese mapa y encajen con la intención.\n"
@@ -808,12 +817,13 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
                "{\"raw\":\"" + ai_trace_escape(completion.text) + "\"}");
       const Level1Action action = parse_level1_action(completion.text);
       for (const auto& s : action.seeds) {
-        push(s, false);
+        push_compound(s, false);
       }
+      l2_semantic_tokens = action.semantic_tokens;
       if (action.kind == Level1ActionKind::Tool &&
           (action.tool_name == "search" || action.tool_name == "repo_map")) {
         for (const auto& n : split_search_needles(action.arg)) {
-          push(n, false);
+          push_compound(n, false);
         }
       }
     } else if (log) {
@@ -823,29 +833,15 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
 
   // Always merge top index stems so lexical recall is not capped by the LLM alone.
   for (const auto& c : index_candidates) {
-    push(c, false);
-    if (out.size() >= 20) {
+    push_compound(c, false);
+    if (compound_seeds.size() >= 20) {
       break;
-    }
-  }
-
-  for (const auto& t : extract_code_tokens(user_message, 16)) {
-    push(t, false);
-  }
-  if (distilled) {
-    for (const auto& t : distilled->search_terms) {
-      push(t, false);
-    }
-    for (const auto& f : distilled->facets) {
-      for (const auto& tok : extract_code_tokens(f, 6)) {
-        push(tok, false);
-      }
     }
   }
 
   std::vector<std::string> expanded;
   seen.clear();
-  for (const auto& n : out) {
+  for (const auto& n : compound_seeds) {
     for (const auto& v : expand_identifier_variants(n)) {
       if (v.size() < 3 || is_generic_needle_token(v) || !seen.insert(v).second) {
         continue;
@@ -870,7 +866,33 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
       }
     }
   }
-  return expanded;
+
+  std::vector<std::string> distilled_terms;
+  if (distilled) {
+    distilled_terms.insert(distilled_terms.end(), distilled->search_terms.begin(),
+                           distilled->search_terms.end());
+    for (const auto& f : distilled->facets) {
+      distilled_terms.push_back(f);
+    }
+    if (!distilled->primary_goal.empty()) {
+      distilled_terms.push_back(distilled->primary_goal);
+    }
+  }
+  result.lexical_seeds = std::move(expanded);
+  result.semantic_tokens =
+      merge_semantic_tokens(l2_semantic_tokens, compound_seeds, distilled_terms);
+  if (log && !result.semantic_tokens.empty()) {
+    std::ostringstream st;
+    st << "semantic_tokens (" << result.semantic_tokens.size() << "):";
+    for (std::size_t i = 0; i < result.semantic_tokens.size() && i < 16; ++i) {
+      st << ' ' << result.semantic_tokens[i];
+    }
+    if (result.semantic_tokens.size() > 16) {
+      st << " …";
+    }
+    log(st.str());
+  }
+  return result;
 }
 
 Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& log,
@@ -989,7 +1011,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           (map_has_query_hits(lexical_map) ? ", query_hits" : ", sin query_hits") + ")");
     }
 
-    const std::vector<std::string> needles =
+    const InvestigateNeedlesResult investigate =
         propose_investigate_needles(user_message, log, cancel, [&] {
           // Build a compact outline from the lexical map top entries so the LLM
           // can ground its seed proposals in names that actually exist in the repo.
@@ -1015,7 +1037,10 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           }
           return outline;
         }());
+    const std::vector<std::string>& needles = investigate.lexical_seeds;
+    const std::vector<std::string>& semantic_tokens = investigate.semantic_tokens;
     out.seeds = needles;
+    out.semantic_tokens = semantic_tokens;
     if (log) {
       log("L1 needles propuestos:");
       if (needles.empty()) {
@@ -1035,6 +1060,13 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
         }
         j << '"' << ai_trace_escape(needles[i]) << '"';
       }
+      j << "],\"semantic_tokens\":[";
+      for (std::size_t i = 0; i < semantic_tokens.size(); ++i) {
+        if (i) {
+          j << ',';
+        }
+        j << '"' << ai_trace_escape(semantic_tokens[i]) << '"';
+      }
       j << "]}";
       return j.str();
     }());
@@ -1052,47 +1084,93 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
             " candidatos (via " + via + ")");
       }
 
-      TwoStageRerankOptions rr_opts;
-      rr_opts.query = user_message;
-      rr_opts.needles = needles;
-      rr_opts.workspace_root = root;
-      if (context_dump || code_edit) {
-        // Full ranked map as L2 explore base (signatures only; L2 reads bodies).
-        rr_opts.phase_a_pool = 400;
-        rr_opts.phase_a_top = 280;
-        rr_opts.final_top = 280;
-        rr_opts.max_per_file = 14;
-        rr_opts.max_per_stem = 3;
-        rr_opts.max_per_dir = 20;
-        rr_opts.fetch_bodies = false;
-        rr_opts.skip_phase_a = false;
-        rr_opts.body_max_lines = 80;
+      TwoStageRerankResult ranked;
+      BodySemanticRerankResult body_ranked;
+      const bool use_body_semantic =
+          l2_feat::enabled("BODY_SEMANTIC_RERANK") && deps_.embed != nullptr && deps_.embed->ready();
+      if (use_body_semantic) {
+        BodySemanticRerankOptions bs_opts;
+        bs_opts.query = user_message;
+        bs_opts.semantic_tokens = semantic_tokens;
+        bs_opts.workspace_root = root;
+        bs_opts.body_pool = 30;
+        if (context_dump || code_edit) {
+          bs_opts.final_top = 280;
+          bs_opts.max_per_file = 14;
+          bs_opts.max_per_stem = 3;
+          bs_opts.max_per_dir = 20;
+          bs_opts.body_max_lines = 80;
+        } else {
+          bs_opts.final_top = 120;
+          bs_opts.max_per_file = 8;
+          bs_opts.max_per_stem = 2;
+          bs_opts.max_per_dir = 12;
+          bs_opts.body_max_lines = 80;
+        }
+        if (log) {
+          log("L1 body semantic rerank (lexical top-30 → embed cuerpos): candidatos=" +
+              std::to_string(candidates.size()) + " tokens=" +
+              std::to_string(semantic_tokens.size()));
+        }
+        body_ranked = rerank_map_body_semantic(std::move(candidates), bs_opts, deps_.embed);
+        ranked.entries = std::move(body_ranked.entries);
+        ranked.body_texts = std::move(body_ranked.body_texts);
+        ranked.used_phase_a = false;
+        ranked.used_phase_b = body_ranked.used_body_embed;
+        ranked.candidates_in = body_ranked.candidates_in;
+        ranked.phase_a_ms = 0;
+        ranked.phase_b_ms = body_ranked.body_embed_ms;
+        ranked.total_ms = body_ranked.total_ms;
+        ranked.note = body_ranked.note;
+        if (log) {
+          log("L1 body semantic timing: fetch_ms=" + std::to_string(body_ranked.body_fetch_ms) +
+              " query_embed_ms=" + std::to_string(body_ranked.query_embed_ms) +
+              " body_embed_ms=" + std::to_string(body_ranked.body_embed_ms) +
+              " total_ms=" + std::to_string(body_ranked.total_ms) + " pool=" +
+              std::to_string(body_ranked.body_pool) + " n=" +
+              std::to_string(ranked.entries.size()) + " embed=1");
+        }
       } else {
-        rr_opts.phase_a_pool = 256;
-        rr_opts.phase_a_top = 96;
-        rr_opts.final_top = 120;
-        rr_opts.max_per_file = 8;
-        rr_opts.max_per_stem = 2;
-        rr_opts.max_per_dir = 12;
-        rr_opts.fetch_bodies = true;
-        rr_opts.skip_phase_a = false;
-        rr_opts.body_max_lines = 80;
-      }
+        TwoStageRerankOptions rr_opts;
+        rr_opts.query = user_message;
+        rr_opts.needles = needles;
+        rr_opts.workspace_root = root;
+        if (context_dump || code_edit) {
+          rr_opts.phase_a_pool = 400;
+          rr_opts.phase_a_top = 280;
+          rr_opts.final_top = 280;
+          rr_opts.max_per_file = 14;
+          rr_opts.max_per_stem = 3;
+          rr_opts.max_per_dir = 20;
+          rr_opts.fetch_bodies = false;
+          rr_opts.skip_phase_a = false;
+          rr_opts.body_max_lines = 80;
+        } else {
+          rr_opts.phase_a_pool = 256;
+          rr_opts.phase_a_top = 96;
+          rr_opts.final_top = 120;
+          rr_opts.max_per_file = 8;
+          rr_opts.max_per_stem = 2;
+          rr_opts.max_per_dir = 12;
+          rr_opts.fetch_bodies = true;
+          rr_opts.skip_phase_a = false;
+          rr_opts.body_max_lines = 80;
+        }
 
-      if (log) {
-        log("L1 two_stage rerank (lexical shortlist → embed firmas/cuerpos): candidatos=" +
-            std::to_string(candidates.size()));
-      }
-      TwoStageRerankResult ranked =
-          rerank_map_two_stage(std::move(candidates), rr_opts, deps_.embed);
-      if (log) {
-        log("L1 embed timing: phase_a_ms=" + std::to_string(ranked.phase_a_ms) +
-            " phase_b_ms=" + std::to_string(ranked.phase_b_ms) +
-            " total_ms=" + std::to_string(ranked.total_ms) +
-            " cand_in=" + std::to_string(ranked.candidates_in) +
-            " n=" + std::to_string(ranked.entries.size()) +
-            " embed=" + (deps_.embed != nullptr && deps_.embed->ready() ? "1" : "0") +
-            " src=lexical_shortlist");
+        if (log) {
+          log("L1 two_stage rerank (lexical shortlist → embed firmas/cuerpos): candidatos=" +
+              std::to_string(candidates.size()));
+        }
+        ranked = rerank_map_two_stage(std::move(candidates), rr_opts, deps_.embed);
+        if (log) {
+          log("L1 embed timing: phase_a_ms=" + std::to_string(ranked.phase_a_ms) +
+              " phase_b_ms=" + std::to_string(ranked.phase_b_ms) +
+              " total_ms=" + std::to_string(ranked.total_ms) +
+              " cand_in=" + std::to_string(ranked.candidates_in) +
+              " n=" + std::to_string(ranked.entries.size()) +
+              " embed=" + (deps_.embed != nullptr && deps_.embed->ready() ? "1" : "0") +
+              " src=lexical_shortlist");
+        }
       }
       apply_ranked_map_priors(user_message, &ranked.entries, deps_.coding_stem_index, deps_.embed);
       if (!ranked.note.empty()) {
@@ -1127,7 +1205,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
         map_note += "; ";
       }
       map_note += ranked.note;
-      map_note += "; lex_prefilter=1; src=lexical_shortlist";
+      map_note += use_body_semantic ? "; src=body_semantic" : "; lex_prefilter=1; src=lexical_shortlist";
       if (code_edit) {
         map_note += "; code_edit=1";
       }

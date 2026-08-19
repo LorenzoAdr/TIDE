@@ -848,4 +848,120 @@ int facet_coverage_score(const std::string& file, const std::string& name,
   }
   return covered * 1000 + strength;
 }
+
+std::vector<std::string> decompose_identifier_parts(const std::string& identifier) {
+  std::vector<std::string> parts;
+  std::string norm = trim_copy(identifier);
+  if (norm.empty()) {
+    return parts;
+  }
+  const auto colon = norm.rfind(':');
+  if (colon != std::string::npos) {
+    norm = norm.substr(colon + 1);
+  }
+  const auto slash = norm.find_last_of("/\\");
+  if (slash != std::string::npos) {
+    norm = norm.substr(slash + 1);
+  }
+  const auto dot = norm.find_last_of('.');
+  if (dot != std::string::npos && dot + 1 < norm.size()) {
+    const std::string ext = ascii_lower(norm.substr(dot + 1));
+    if (ext == "cpp" || ext == "hpp" || ext == "h" || ext == "cc" || ext == "cxx") {
+      norm = norm.substr(0, dot);
+    }
+  }
+  if (norm.empty()) {
+    return parts;
+  }
+  std::string snake = norm;
+  if (looks_camel(norm)) {
+    snake = camel_to_snake(norm);
+  }
+  std::string cur;
+  auto flush = [&] {
+    if (cur.size() >= 3) {
+      parts.push_back(ascii_lower(cur));
+    }
+    cur.clear();
+  };
+  for (char ch : snake) {
+    if (ch == '_' || ch == '-' || std::isspace(static_cast<unsigned char>(ch))) {
+      flush();
+    } else if (std::isalnum(static_cast<unsigned char>(ch))) {
+      cur.push_back(ch);
+    } else {
+      flush();
+    }
+  }
+  flush();
+  return parts;
+}
+
+bool is_semantic_token_noise(const std::string& token) {
+  const std::string t = ascii_lower(trim_copy(token));
+  if (t.size() < 3) {
+    return true;
+  }
+  static const std::unordered_set<std::string> kNoise = {
+      "ensure", "update", "handle", "render", "draw", "paint", "make", "get", "set", "try",
+      "init",   "start",  "open",   "close",  "create", "destroy", "on",  "off",  "the", "and",
+      "for",    "from",   "with",   "into",   "when",   "then",    "else", "this", "that",
+      "panel",  "modal",  "dialog", "window", "button", "hover",   "drag", "head", "chrome",
+      "editor", "explorer", "console", "thread", "strip", "layout", "view", "widget", "mouse",
+      "file",   "tree",   "tab",    "tabs",   "bar",    "main",    "app",  "code", "line",
+      "row",    "col",    "box",    "item",   "list",   "menu",    "page", "form",  "helper",
+      "utils",  "util",   "data",   "process", "manager", "action", "launch", "attach",
+  };
+  return kNoise.count(t) > 0;
+}
+
+std::vector<std::string> filter_semantic_tokens(std::vector<std::string> tokens) {
+  std::vector<std::string> out;
+  std::unordered_set<std::string> seen;
+  for (auto& t : tokens) {
+    t = ascii_lower(trim_copy(t));
+    if (t.size() < 3 || is_semantic_token_noise(t) || !seen.insert(t).second) {
+      continue;
+    }
+    out.push_back(std::move(t));
+  }
+  return out;
+}
+
+std::vector<std::string> merge_semantic_tokens(const std::vector<std::string>& l2_tokens,
+                                               const std::vector<std::string>& compound_seeds,
+                                               const std::vector<std::string>& distilled_terms) {
+  std::vector<std::string> merged;
+  std::unordered_set<std::string> seen;
+  auto push = [&](std::string t) {
+    t = ascii_lower(trim_copy(t));
+    if (t.size() < 3 || is_semantic_token_noise(t) || !seen.insert(t).second) {
+      return;
+    }
+    merged.push_back(std::move(t));
+  };
+  for (const auto& t : l2_tokens) {
+    push(t);
+    for (const auto& tok : extract_code_tokens(t, 6)) {
+      push(tok);
+    }
+  }
+  for (const auto& t : distilled_terms) {
+    for (const auto& tok : extract_code_tokens(t, 8)) {
+      push(tok);
+    }
+    std::istringstream ws(t);
+    std::string word;
+    while (ws >> word) {
+      push(word);
+    }
+  }
+  for (const auto& seed : compound_seeds) {
+    for (const auto& part : decompose_identifier_parts(seed)) {
+      push(part);
+    }
+  }
+  return merged;
+}
+
 }  // namespace tuide

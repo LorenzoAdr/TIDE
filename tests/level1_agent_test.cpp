@@ -30,6 +30,13 @@ int main() {
            "seeds with prose");
   }
   {
+    const auto a = parse_level1_action(
+        R"({"action":"seeds","seeds":["set_busy_spinner"],"semantic_tokens":["busy","spinner","agent"]})");
+    expect(a.kind == Level1ActionKind::Seeds && a.seeds.size() == 1 &&
+               a.semantic_tokens.size() == 3 && a.semantic_tokens[0] == "busy",
+           "seeds + semantic_tokens");
+  }
+  {
     const auto a =
         parse_level1_action(R"({"action":"needs_level2","instruction":"rewrite foo","seeds":["Foo"]})");
     expect(a.kind == Level1ActionKind::NeedsLevel2 && a.instruction == "rewrite foo",

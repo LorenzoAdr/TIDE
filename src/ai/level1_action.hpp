@@ -20,6 +20,7 @@ struct Level1Action {
   std::string tool_name;
   std::string arg;
   std::vector<std::string> seeds;
+  std::vector<std::string> semantic_tokens;
   std::string stem;  // PickStem: basename chosen from shortlist
   std::string text;
   std::string instruction;

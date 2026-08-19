@@ -2,5 +2,6 @@
   "POST_EDIT_COVERAGE": true,
   "EDIT_LEAN_PROMPT": true,
   "JSON_GRAMMAR": true,
-  "PACK_REVIEW": true
+  "PACK_REVIEW": true,
+  "BODY_SEMANTIC_RERANK": true
 }

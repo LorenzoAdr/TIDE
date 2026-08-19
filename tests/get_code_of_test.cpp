@@ -1562,6 +1562,109 @@ int main() {
     }
   }
 
+  {
+    using tuide::BodySemanticRerankOptions;
+    using tuide::RepoMapEntry;
+    using tuide::build_semantic_embed_query;
+    using tuide::decompose_identifier_parts;
+    using tuide::merge_semantic_tokens;
+    using tuide::rerank_map_body_semantic;
+
+    const auto parts = decompose_identifier_parts("update_console_drag_head");
+    expect(parts.size() >= 3, "decompose snake parts");
+    bool has_drag = false;
+    for (const auto& p : parts) {
+      if (p == "drag") {
+        has_drag = true;
+      }
+    }
+    expect(has_drag, "decompose includes drag");
+
+    const auto merged = merge_semantic_tokens({"busy", "cancel"},
+                                              {"set_busy_spinner", "agent_busy"},
+                                              {"AI busy state"});
+    expect(!merged.empty(), "merge semantic tokens non-empty");
+    bool has_busy = false;
+    for (const auto& t : merged) {
+      if (t == "busy") {
+        has_busy = true;
+      }
+    }
+    expect(has_busy, "merge keeps busy");
+
+    const std::string sem_q = build_semantic_embed_query("spinner stuck", {"busy", "agent"});
+    expect(sem_q.find("spinner stuck") != std::string::npos, "semantic query keeps NL");
+    expect(sem_q.find("busy") != std::string::npos, "semantic query has tokens");
+    expect(sem_q.find("set_busy_spinner") == std::string::npos,
+           "semantic query excludes compound seeds");
+
+    auto mock_body_embed = [](bool is_query, const std::string& text, std::vector<float>* out) {
+      if (out == nullptr) {
+        return false;
+      }
+      out->assign(4, 0.0f);
+      std::string low = text;
+      for (char& c : low) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      auto has = [&](const char* s) { return low.find(s) != std::string::npos; };
+      if (is_query) {
+        if (has("busy") || has("agent")) {
+          (*out)[0] = 1.0f;
+        }
+      } else if (has("agent_busy") || has("busactivity")) {
+        (*out)[0] = 1.0f;
+      }
+      return (*out)[0] > 0.f;
+    };
+
+    fs::path body_tmp = tmp / "body_sem";
+    fs::create_directories(body_tmp / "src/ai", ec);
+    fs::create_directories(body_tmp / "src/ui", ec);
+    {
+      std::ofstream f(body_tmp / "src/ai/ai_controller.cpp");
+      f << "bool agent_busy() { return agent_busy_.load(); }\n";
+    }
+    {
+      std::ofstream f(body_tmp / "src/ui/console_panel.cpp");
+      f << "void update_console_drag_head() { /* hover */ }\n";
+    }
+
+    std::vector<RepoMapEntry> body_cands;
+    {
+      RepoMapEntry e;
+      e.file = "src/ui/console_panel.cpp";
+      e.name = "update_console_drag_head";
+      e.line = 1;
+      e.score = 2000000;
+      body_cands.push_back(e);
+    }
+    {
+      RepoMapEntry e;
+      e.file = "src/ai/ai_controller.cpp";
+      e.name = "agent_busy";
+      e.line = 1;
+      e.score = 1500000;
+      body_cands.push_back(e);
+    }
+
+    BodySemanticRerankOptions bs_opts;
+    bs_opts.query = "spinner IA stuck";
+    bs_opts.semantic_tokens = {"busy", "agent", "spinner", "cancel"};
+    bs_opts.workspace_root = body_tmp.string();
+    bs_opts.body_pool = 2;
+    bs_opts.final_top = 2;
+    bs_opts.max_per_file = 0;
+    bs_opts.max_per_stem = 0;
+    bs_opts.max_per_dir = 0;
+
+    auto body_ranked = rerank_map_body_semantic(body_cands, bs_opts, nullptr, mock_body_embed);
+    expect(body_ranked.used_body_embed, "body semantic used embed");
+    expect(!body_ranked.entries.empty(), "body semantic non-empty");
+    expect(body_ranked.note.find("body_semantic=1") != std::string::npos, "body semantic note");
+    fs::remove_all(body_tmp, ec);
+  }
+
   fs::remove_all(tmp, ec);
 
   if (failures) {

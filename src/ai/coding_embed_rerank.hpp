@@ -76,6 +76,41 @@ std::string validate_coding_stem_pick(const std::string& raw,
 std::string enrich_query_for_embed(const std::string& query,
                                    const std::vector<std::string>& needles);
 
+// Body semantic rerank: loose tokens only (no compound seeds).
+std::string build_semantic_embed_query(const std::string& query,
+                                       const std::vector<std::string>& semantic_tokens);
+
+struct BodySemanticRerankOptions {
+  std::string query;
+  std::vector<std::string> semantic_tokens;
+  std::string workspace_root;
+  std::size_t body_pool = 30;
+  std::size_t final_top = 120;
+  int body_max_lines = 80;
+  int max_per_file = 8;
+  int max_per_stem = 2;
+  int max_per_dir = 12;
+};
+
+struct BodySemanticRerankResult {
+  std::vector<RepoMapEntry> entries;
+  std::vector<std::string> body_texts;
+  bool used_body_embed = false;
+  std::size_t candidates_in = 0;
+  std::size_t body_pool = 0;
+  int64_t body_fetch_ms = 0;
+  int64_t query_embed_ms = 0;
+  int64_t body_embed_ms = 0;
+  int64_t total_ms = 0;
+  std::string note;
+};
+
+// Lexical order → top body_pool → embed function bodies vs semantic token query → rerank.
+BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> candidates,
+                                                  const BodySemanticRerankOptions& opts,
+                                                  EmbeddingBackend* backend,
+                                                  const CodingEmbedFn& test_embed = {});
+
 struct TwoStageRerankOptions {
   std::string query;
   std::vector<std::string> needles;
