@@ -88,9 +88,8 @@ ShellLaunchConfig resolve_shell_launch_config(const std::string& workspace_root,
   if (launch.docker_cwd.empty()) {
     launch.docker_cwd = host_path_to_container_path(workspace_root, mappings);
   }
-  if (launch.docker_cwd.empty()) {
-    launch.docker_cwd = "/workspace";
-  }
+  // Si no hay mapeo conocido, no forzar un directorio: docker exec usará
+  // el WORKDIR de la imagen, que siempre existe.
   return launch;
 }
 

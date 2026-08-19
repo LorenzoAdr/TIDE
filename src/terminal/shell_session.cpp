@@ -181,7 +181,6 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
       args.emplace_back("docker");
       args.emplace_back("exec");
       args.emplace_back("-i");
-      args.emplace_back("-t");
       if (!config.docker_cwd.empty()) {
         args.emplace_back("-w");
         args.emplace_back(config.docker_cwd);
