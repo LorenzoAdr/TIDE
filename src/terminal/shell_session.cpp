@@ -135,7 +135,13 @@ void ShellSession::apply_winsize() {
 }
 
 void ShellSession::request_start(const ShellLaunchConfig& config, int cols, int rows) {
+  TUIDE_MON("shell", "request_start container=" + config.docker_container +
+            " host_cwd=" + config.host_cwd +
+            " running=" + std::to_string(running()) +
+            " starting=" + std::to_string(start_in_progress_.load(std::memory_order_acquire)) +
+            " failed=" + std::to_string(start_failed_.load(std::memory_order_acquire)));
   if (running() || start_in_progress_.load(std::memory_order_acquire)) {
+    TUIDE_MON("shell", "request_start blocked: already running or starting");
     return;
   }
 #if defined(__linux__)
@@ -149,6 +155,7 @@ void ShellSession::request_start(const ShellLaunchConfig& config, int cols, int 
   return;
 #else
   if (!config.uses_docker() && config.host_cwd.empty()) {
+    TUIDE_MON("shell", "request_start blocked: no docker and no host_cwd");
     return;
   }
 
@@ -173,6 +180,7 @@ void ShellSession::request_start(const ShellLaunchConfig& config, int cols, int 
 
 void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
 #if defined(__linux__)
+  TUIDE_MON("shell", "bootstrap_shell start container=" + config.docker_container);
   const std::string init_script = write_terminal_init_script(config);
   const std::string shell_bin = config.uses_docker()
                                     ? detect_container_shell(config.docker_container)
