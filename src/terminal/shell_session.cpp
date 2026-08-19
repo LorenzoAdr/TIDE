@@ -94,6 +94,12 @@ bool ShellSession::starting() const { return start_in_progress_.load(std::memory
 
 bool ShellSession::start_failed() const { return start_failed_.load(std::memory_order_acquire); }
 
+void ShellSession::clear_failed() {
+  if (!running() && !start_in_progress_.load(std::memory_order_acquire)) {
+    start_failed_.store(false, std::memory_order_release);
+  }
+}
+
 void ShellSession::apply_winsize() {
 #if defined(__linux__)
   const int master = master_fd_.load(std::memory_order_acquire);

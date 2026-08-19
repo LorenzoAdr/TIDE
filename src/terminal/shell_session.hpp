@@ -39,6 +39,7 @@ class ShellSession {
 
   void request_start(const ShellLaunchConfig& config, int cols, int rows);
   void stop();
+  void clear_failed();
   bool running() const;
   bool starting() const;
   bool start_failed() const;

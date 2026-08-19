@@ -2147,12 +2147,6 @@ void tick_terminal_shell(ConsolePanelState* state, ShellSession* shell,
       return;
     }
     if (shell->start_failed()) {
-      if (state->shell_start_requested && !state->shell_start_failed) {
-        // El usuario ha pedido reintentar (shell_start_failed fue limpiado por
-        // activate_shell_input). Resetear el estado interno para poder relanzar.
-        shell->stop();
-        return;
-      }
       state->shell_start_failed = true;
       return;
     }
@@ -2300,6 +2294,9 @@ void activate_shell_input(DebugModel* model, MainLayoutState* layout_state,
   if (state != nullptr) {
     state->shell_start_requested = true;
     state->shell_start_failed = false;
+  }
+  if (shell != nullptr) {
+    shell->clear_failed();
   }
   tick_terminal_shell(state, shell, launch_config);
 }
