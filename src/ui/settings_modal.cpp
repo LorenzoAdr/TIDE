@@ -416,13 +416,14 @@ void refresh_docker_container_names(SettingsModalState* state) {
     return;
   }
   state->docker_container_names = list_running_docker_containers();
+  // Índice 0 = ninguno; índices 1..N = contenedores en docker_container_names.
   if (!state->draft_compile_commands.docker_container.empty()) {
     const auto it = std::find(state->docker_container_names.begin(),
                               state->docker_container_names.end(),
                               state->draft_compile_commands.docker_container);
     if (it != state->docker_container_names.end()) {
       state->docker_container_selected =
-          static_cast<int>(std::distance(state->docker_container_names.begin(), it));
+          1 + static_cast<int>(std::distance(state->docker_container_names.begin(), it));
       return;
     }
   }
@@ -437,11 +438,17 @@ void cycle_docker_container(SettingsModalState* state) {
     state->draft_compile_commands.docker_container.clear();
     return;
   }
-  state->docker_container_selected =
-      (state->docker_container_selected + 1) %
-      static_cast<int>(state->docker_container_names.size());
-  state->draft_compile_commands.docker_container =
-      state->docker_container_names[static_cast<std::size_t>(state->docker_container_selected)];
+  // El ciclo incluye una posición extra (índice 0) para "ninguno" (vacío).
+  // Índices 1..N corresponden a docker_container_names[0..N-1].
+  const int total = static_cast<int>(state->docker_container_names.size()) + 1;
+  state->docker_container_selected = (state->docker_container_selected + 1) % total;
+  if (state->docker_container_selected == 0) {
+    state->draft_compile_commands.docker_container.clear();
+  } else {
+    state->draft_compile_commands.docker_container =
+        state->docker_container_names[static_cast<std::size_t>(
+            state->docker_container_selected - 1)];
+  }
   invalidate_docker_mount_cache();
 }
 
