@@ -1,11 +1,13 @@
 #include "util/docker_shell.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
 #include "build/build_environment_service.hpp"
 #include "util/compile_commands_remap.hpp"
+#include "util/shell_utils.hpp"
 
 namespace tuide {
 
@@ -93,8 +95,10 @@ ShellLaunchConfig resolve_shell_launch_config(const std::string& workspace_root,
   // docker exec use el WORKDIR de la imagen, que siempre existe.
   if (!launch.docker_cwd.empty() && !launch.docker_container.empty()) {
     const std::string check = "docker exec " + shell_quote(launch.docker_container) +
-                              " test -d " + shell_quote(launch.docker_cwd) + " 2>/dev/null";
-    if (std::system(check.c_str()) != 0) {
+                              " test -d " + shell_quote(launch.docker_cwd) +
+                              " 2>/dev/null && echo ok";
+    const std::string result = run_shell_capture(check, 5);
+    if (result.find("ok") == std::string::npos) {
       launch.docker_cwd.clear();
     }
   }
