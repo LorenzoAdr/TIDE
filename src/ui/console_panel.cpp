@@ -3586,6 +3586,9 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       if (layout_state->terminal_start_requested) {
         state->shell_start_requested = true;
         state->shell_start_failed = false;
+        if (shell != nullptr) {
+          shell->clear_failed();
+        }
       }
       if (focus != nullptr && focus->region == FocusRegion::Terminal &&
           terminal_tab_active(app_mode, layout_state) &&
