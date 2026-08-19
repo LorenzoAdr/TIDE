@@ -231,14 +231,6 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
     setenv("PATH", extended_path.c_str(), 1);
 
     if (config.uses_docker()) {
-      // Construimos el comando de shell que correrá dentro del contenedor.
-      // Usamos 'script -q /dev/null' como wrapper para crear un PTY dentro
-      // del contenedor: esto evita el conflicto de TTY doble que ocurre al
-      // combinar forkpty (host) con docker exec -t (contenedor).
-      // Sin script, bash no ve un TTY y Docker lo termina con SIGTERM.
-      std::string inner_cmd = shell_bin + " -i";
-      const std::string wrapper = "script -q /dev/null " + shell_bin + " -i";
-
       std::vector<std::string> args;
       args.emplace_back("docker");
       args.emplace_back("exec");
@@ -256,12 +248,11 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
         args.emplace_back(entry.first + "=" + entry.second);
       }
       args.emplace_back(config.docker_container);
-      // script crea un PTY interno en el contenedor; bash lo ve como TTY real.
-      args.emplace_back("script");
-      args.emplace_back("-q");
-      args.emplace_back("/dev/null");
-      args.emplace_back(shell_bin);
-      args.emplace_back("-i");
+      // python3 pty.spawn crea un PTY interno en el contenedor de forma
+      // portable, evitando el conflicto de TTY doble con forkpty del host.
+      args.emplace_back("python3");
+      args.emplace_back("-c");
+      args.emplace_back("import pty; pty.spawn('" + shell_bin + "')");
 
       std::vector<char*> argv;
       argv.reserve(args.size() + 1);
