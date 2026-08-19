@@ -175,6 +175,15 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
     child_die_with_parent();
     setenv("TERM", "xterm-256color", 1);
     setenv("COLORTERM", "truecolor", 1);
+    // Asegurar que el PATH incluye los directorios habituales de herramientas
+    // del sistema; TIDE puede haber arrancado con un PATH reducido y execvp
+    // no encontraría docker o bash.
+    const char* current_path = std::getenv("PATH");
+    const std::string extended_path =
+        std::string(current_path ? current_path : "") +
+        ":/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
+        ":/usr/local/docker/bin:/snap/bin";
+    setenv("PATH", extended_path.c_str(), 1);
 
     if (config.uses_docker()) {
       std::vector<std::string> args;
@@ -251,9 +260,16 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
     child_pid_.store(-1, std::memory_order_release);
     start_failed_.store(true, std::memory_order_release);
     start_in_progress_.store(false, std::memory_order_release);
+    const int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    const int signal_num = WIFSIGNALED(status) ? WTERMSIG(status) : -1;
+    TUIDE_MON("shell", "docker_exec died in 30ms window exit=" +
+              std::to_string(exit_code) + " signal=" + std::to_string(signal_num) +
+              " container=" + config.docker_container +
+              " cwd=" + config.docker_cwd);
     return;
   }
 
+  TUIDE_MON("shell", "docker_exec alive after 30ms container=" + config.docker_container);
   running_.store(true, std::memory_order_release);
   start_in_progress_.store(false, std::memory_order_release);
   reader_thread_ = std::make_unique<std::thread>([this] {
@@ -471,6 +487,13 @@ void ShellSession::reader_loop() {
   // Si el proceso murió sin que nadie haya pedido stop(), marcarlo como fallo
   // para que la UI no entre en bucle de reintentos silenciosos.
   if (!stop_requested_.load(std::memory_order_acquire)) {
+    const pid_t dead_pid = child_pid_.load(std::memory_order_acquire);
+    int dead_status = 0;
+    const pid_t reaped = dead_pid > 1 ? waitpid(dead_pid, &dead_status, WNOHANG) : 0;
+    const int exit_code = (reaped > 0 && WIFEXITED(dead_status)) ? WEXITSTATUS(dead_status) : -1;
+    const int signal_num = (reaped > 0 && WIFSIGNALED(dead_status)) ? WTERMSIG(dead_status) : -1;
+    TUIDE_MON("shell", "docker_exec died unexpectedly exit=" +
+              std::to_string(exit_code) + " signal=" + std::to_string(signal_num));
     start_failed_.store(true, std::memory_order_release);
   }
 #endif
