@@ -239,6 +239,7 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
       args.emplace_back("docker");
       args.emplace_back("exec");
       args.emplace_back("-i");
+      args.emplace_back("-t");  // PTY en el contenedor: bash no hace eco del \t
       if (!config.docker_cwd.empty()) {
         args.emplace_back("-w");
         args.emplace_back(config.docker_cwd);
