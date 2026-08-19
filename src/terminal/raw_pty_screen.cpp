@@ -402,12 +402,17 @@ void RawPtyScreen::feed(const char* data, std::size_t len) {
       case '\x7f':
         backspace();
         break;
-      case '\t':
-        append_char(' ');
-        while (cursor_col_ % 8 != 0 && cursor_col_ < cols_) {
-          append_char(' ');
-        }
+      case '\t': {
+        // Avanza el cursor al siguiente tabstop (múltiplo de 8) sin escribir
+        // caracteres. Un terminal VT100 real mueve el cursor sin modificar
+        // las celdas existentes; bash luego reescribe la línea con \r + texto
+        // completado, y ESC[K limpia el resto. Si escribiéramos espacios,
+        // los residuos quedan visibles cuando bash no envía ESC[K.
+        const int next = (cursor_col_ / 8 + 1) * 8;
+        cursor_col_ = std::min(next, cols_);
+        cache_valid_ = false;
         break;
+      }
       case '\a':
         break;
       default:

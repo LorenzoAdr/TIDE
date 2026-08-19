@@ -188,11 +188,11 @@ void ShellSession::request_start(const ShellLaunchConfig& config, int cols, int 
 
 void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
 #if defined(__linux__)
-  shell_debug_log("bootstrap_shell start container=" + config.docker_container + " shell=" + (config.uses_docker() ? detect_container_shell(config.docker_container) : std::string(kIntegratedShell)));
   const std::string init_script = write_terminal_init_script(config);
   const std::string shell_bin = config.uses_docker()
                                     ? detect_container_shell(config.docker_container)
                                     : kIntegratedShell;
+  shell_debug_log("bootstrap_shell start container=" + config.docker_container + " shell=" + shell_bin);
 
   {
     std::lock_guard<std::mutex> lock(terminal_mutex_);
@@ -252,11 +252,8 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
         args.emplace_back(entry.first + "=" + entry.second);
       }
       args.emplace_back(config.docker_container);
-      // python3 pty.spawn crea un PTY interno en el contenedor de forma
-      // portable, evitando el conflicto de TTY doble con forkpty del host.
-      args.emplace_back("python3");
-      args.emplace_back("-c");
-      args.emplace_back("import pty; pty.spawn('" + shell_bin + "')");
+      args.emplace_back(shell_bin);
+      args.emplace_back("-i");
 
       std::vector<char*> argv;
       argv.reserve(args.size() + 1);
@@ -300,9 +297,7 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
     return;
   }
 
-  // Docker exec necesita más tiempo para establecer la conexión con el daemon.
-  std::this_thread::sleep_for(
-      config.uses_docker() ? std::chrono::milliseconds(500) : std::chrono::milliseconds(30));
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
   int status = 0;
   const pid_t exited = waitpid(pid, &status, WNOHANG);
   if (exited == pid) {
