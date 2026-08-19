@@ -67,7 +67,9 @@ std::string write_terminal_init_script(const ShellLaunchConfig& config) {
   output << "if [ -f \"${HOME}/.bashrc\" ]; then\n";
   output << "  . \"${HOME}/.bashrc\"\n";
   output << "fi\n";
-  output << "cd " << shell_quote(config.host_cwd) << " 2>/dev/null || true\n";
+  const std::string& cd_target =
+      config.uses_docker() && !config.docker_cwd.empty() ? config.docker_cwd : config.host_cwd;
+  output << "cd " << shell_quote(cd_target) << " 2>/dev/null || true\n";
   return init_path.string();
 }
 
@@ -179,6 +181,7 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
       args.emplace_back("docker");
       args.emplace_back("exec");
       args.emplace_back("-i");
+      args.emplace_back("-t");
       if (!config.docker_cwd.empty()) {
         args.emplace_back("-w");
         args.emplace_back(config.docker_cwd);
@@ -193,15 +196,8 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
       }
       args.emplace_back(config.docker_container);
       args.emplace_back(shell_bin);
-      if (!init_script.empty() && !config.docker_cwd.empty()) {
-        const std::string container_init = config.docker_cwd + "/.tuide/terminal_init.sh";
-        args.emplace_back("--rcfile");
-        args.emplace_back(container_init);
-        args.emplace_back("-i");
-      } else {
-        args.emplace_back("-l");
-        args.emplace_back("-i");
-      }
+      args.emplace_back("-l");
+      args.emplace_back("-i");
 
       std::vector<char*> argv;
       argv.reserve(args.size() + 1);
@@ -472,6 +468,11 @@ void ShellSession::reader_loop() {
   const int leftover = master_fd_.exchange(-1, std::memory_order_acq_rel);
   if (leftover >= 0) {
     close(leftover);
+  }
+  // Si el proceso murió sin que nadie haya pedido stop(), marcarlo como fallo
+  // para que la UI no entre en bucle de reintentos silenciosos.
+  if (!stop_requested_.load(std::memory_order_acquire)) {
+    start_failed_.store(true, std::memory_order_release);
   }
 #endif
   running_.store(false, std::memory_order_release);
