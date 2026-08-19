@@ -2155,6 +2155,7 @@ void tick_terminal_shell(ConsolePanelState* state, ShellSession* shell,
     }
     state->shell_launch_uses_docker = launch_config.uses_docker();
     state->shell_docker_container = launch_config.docker_container;
+    state->shell_start_requested = false;
     shell->request_start(launch_config, cols, rows);
     return;
   }
