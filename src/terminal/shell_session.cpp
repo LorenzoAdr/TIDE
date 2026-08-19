@@ -235,6 +235,7 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
       args.emplace_back("docker");
       args.emplace_back("exec");
       args.emplace_back("-i");
+      args.emplace_back("-t");
       if (!config.docker_cwd.empty()) {
         args.emplace_back("-w");
         args.emplace_back(config.docker_cwd);
@@ -249,7 +250,6 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
       }
       args.emplace_back(config.docker_container);
       args.emplace_back(shell_bin);
-      args.emplace_back("-l");
       args.emplace_back("-i");
 
       std::vector<char*> argv;
@@ -294,7 +294,9 @@ void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
     return;
   }
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  // Docker exec necesita más tiempo para establecer la conexión con el daemon.
+  std::this_thread::sleep_for(
+      config.uses_docker() ? std::chrono::milliseconds(500) : std::chrono::milliseconds(30));
   int status = 0;
   const pid_t exited = waitpid(pid, &status, WNOHANG);
   if (exited == pid) {
