@@ -644,6 +644,75 @@ std::vector<RepoMapEntry> diversify_entries_by_file(std::vector<RepoMapEntry> ra
   return out;
 }
 
+std::string diversify_stem_key(const RepoMapEntry& e) {
+  std::string stem = e.stem;
+  if (stem.empty()) {
+    stem = e.file;
+    const auto slash = stem.find_last_of("/\\");
+    if (slash != std::string::npos) {
+      stem = stem.substr(slash + 1);
+    }
+    const auto dot = stem.find_last_of('.');
+    if (dot != std::string::npos) {
+      stem = stem.substr(0, dot);
+    }
+  }
+  const auto sharp = stem.find('#');
+  if (sharp != std::string::npos) {
+    stem = stem.substr(0, sharp);
+  }
+  return stem;
+}
+
+std::string diversify_dir_key(const RepoMapEntry& e) {
+  const std::string& file = e.file;
+  const auto slash = file.find('/');
+  if (slash == std::string::npos) {
+    return file;
+  }
+  const auto slash2 = file.find('/', slash + 1);
+  if (slash2 == std::string::npos) {
+    return file;
+  }
+  return file.substr(0, slash2);
+}
+
+std::vector<std::size_t> select_diverse_entry_indices(const std::vector<RepoMapEntry>& ranked,
+                                                      std::size_t max_n, int max_per_file,
+                                                      int max_per_stem, int max_per_dir) {
+  std::vector<std::size_t> out;
+  if (max_n == 0 || ranked.empty()) {
+    return out;
+  }
+  out.reserve(std::min(max_n, ranked.size()));
+  std::unordered_map<std::string, int> file_count;
+  std::unordered_map<std::string, int> stem_count;
+  std::unordered_map<std::string, int> dir_count;
+  for (std::size_t i = 0; i < ranked.size() && out.size() < max_n; ++i) {
+    const auto& e = ranked[i];
+    if (max_per_file > 0 && file_count[e.file] >= max_per_file) {
+      continue;
+    }
+    const std::string stem = diversify_stem_key(e);
+    if (max_per_stem > 0 && !stem.empty() && stem_count[stem] >= max_per_stem) {
+      continue;
+    }
+    const std::string dir = diversify_dir_key(e);
+    if (max_per_dir > 0 && !dir.empty() && dir_count[dir] >= max_per_dir) {
+      continue;
+    }
+    ++file_count[e.file];
+    if (!stem.empty()) {
+      ++stem_count[stem];
+    }
+    if (!dir.empty()) {
+      ++dir_count[dir];
+    }
+    out.push_back(i);
+  }
+  return out;
+}
+
 int clamp_boost(int boost, int lo, int hi) {
   if (boost > hi) {
     return hi;
@@ -773,9 +842,15 @@ TwoStageRerankResult rerank_map_two_stage(std::vector<RepoMapEntry> candidates,
   if (opts.phase_a_top > 0 && candidates.size() > opts.phase_a_top) {
     candidates.resize(opts.phase_a_top);
   }
-  if (opts.max_per_file > 0) {
-    candidates = diversify_entries_by_file(std::move(candidates), candidates.size(),
-                                          opts.max_per_file);
+  if (opts.max_per_file > 0 || opts.max_per_stem > 0 || opts.max_per_dir > 0) {
+    const auto keep = select_diverse_entry_indices(candidates, candidates.size(), opts.max_per_file,
+                                                   opts.max_per_stem, opts.max_per_dir);
+    std::vector<RepoMapEntry> filtered;
+    filtered.reserve(keep.size());
+    for (std::size_t idx : keep) {
+      filtered.push_back(std::move(candidates[idx]));
+    }
+    candidates = std::move(filtered);
   }
 
   std::vector<std::string> bodies(candidates.size());
@@ -887,22 +962,18 @@ TwoStageRerankResult rerank_map_two_stage(std::vector<RepoMapEntry> candidates,
 
   const std::size_t final_n =
       opts.final_top == 0 ? candidates.size() : std::min(candidates.size(), opts.final_top);
-  if (opts.max_per_file <= 0) {
+  if (opts.max_per_file <= 0 && opts.max_per_stem <= 0 && opts.max_per_dir <= 0) {
     out.entries.assign(candidates.begin(),
                       candidates.begin() + static_cast<std::ptrdiff_t>(final_n));
     if (do_bodies) {
       out.body_texts.assign(bodies.begin(), bodies.begin() + static_cast<std::ptrdiff_t>(final_n));
     }
   } else {
-    const int max_per_file = opts.max_per_file;
     out.entries.reserve(final_n);
     out.body_texts.reserve(final_n);
-    std::unordered_map<std::string, int> file_count;
-    for (std::size_t i = 0; i < candidates.size() && out.entries.size() < final_n; ++i) {
-      if (file_count[candidates[i].file] >= max_per_file) {
-        continue;
-      }
-      ++file_count[candidates[i].file];
+    const auto keep = select_diverse_entry_indices(candidates, final_n, opts.max_per_file,
+                                                   opts.max_per_stem, opts.max_per_dir);
+    for (std::size_t i : keep) {
       out.entries.push_back(std::move(candidates[i]));
       if (do_bodies) {
         if (i < bodies.size()) {

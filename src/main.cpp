@@ -10,6 +10,7 @@
 
 #include "i18n/locale.hpp"
 #include "i18n/tr.hpp"
+#include "l1_intent_debug_cmd.hpp"
 #include "toolpacks/cli.hpp"
 #include "toolpacks/export_portable.hpp"
 #include "util/core_analyzer_support.hpp"
@@ -121,6 +122,9 @@ int main(int argc, char **argv) {
   }
   if (argc >= 2 && std::string(argv[1]) == "export-portable") {
     return tuide::toolpacks::run_export_cli(argc, argv);
+  }
+  if (argc >= 2 && std::string(argv[1]) == "l1-debug") {
+    return tuide::run_l1_intent_debug_cli(argc - 1, argv + 1);
   }
 
   tuide::AppConfig config;

@@ -1,0 +1,8 @@
+[
+  {
+    "id": "a01_settings_about_tab",
+    "prompt": "modifica el código para añadir una nueva pestaña dentro del menú de configuración de la aplicación que se llame \"sobre la app\" y dentro poner los datos de contacto como nombre y apellidos, correo y licencia.",
+    "expected_stems": ["settings_modal", "app_settings"],
+    "trap_stems": ["panel", "editor_panel", "context_menu", "main_layout"]
+  }
+]

@@ -6,11 +6,14 @@
 #include <sstream>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "ai/ai_trace.hpp"
 #include "ai/ai_types.hpp"
 #include "ai/l2_action.hpp"
 #include "ai/l2_feat.hpp"
 #include "ai/l2_grammar.hpp"
+#include "ai/l2_pack_review.hpp"
 
 namespace tuide {
 namespace {
@@ -558,7 +561,8 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
                               int step, bool has_pack, bool map_review, bool map_stale,
                               bool pack_incomplete, bool resume, AiWorkflowKind workflow,
                               const L2ContextBudget& budget, const Level2AutonomousLoopOpts& opts,
-                              const std::string& recover_note = {}) {
+                              const std::string& recover_note = {},
+                              bool pack_review_pending = false) {
   std::ostringstream out;
   out << "phase=" << phase << " step=" << step << " workflow=" << ai_workflow_kind_name(workflow);
   if (resume) {
@@ -577,7 +581,8 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
     out << " pack_incomplete=1";
   }
   out << "\n\n";
-  if (!recover_note.empty() && l2_feat::enabled("EDIT_LEAN_PROMPT")) {
+  if (!recover_note.empty() && l2_feat::enabled("EDIT_LEAN_PROMPT") &&
+      !(has_pack && pack_review_pending)) {
     out << recover_note << "\n\n";
   }
 
@@ -658,8 +663,16 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
       out << "Ya hay Code pack"
           << (pack_incomplete ? " (**incomplete**: hay Truncated)" : "")
           << ". Decide: done next=edit, edit, ampliar plan, o tools extras.\n"
-             "Preferir path:Symbol / path:A-B. Contexto: Instruction + pack.\n"
-             "Pack cubierto: un segundo `plan` igual fuerza phase=edit.\n\n";
+             "Preferir path:Symbol / path:A-B. Contexto: Instruction + pack.\n";
+      if (pack_review_pending) {
+        out << "Pack review ABIERTA: PROHIBIDO repetir targets ya en watchlist/pack.\n"
+               "Siguiente acción: `action=plan` con paths NUEVOS de MAP HITS (prioriza src/ai).\n\n";
+        if (!recover_note.empty()) {
+          out << recover_note << "\n\n";
+        }
+      } else {
+        out << "Pack cubierto: un segundo `plan` igual fuerza phase=edit.\n\n";
+      }
       if (!opts.user_overlay_pack.empty()) {
         out << opts.user_overlay_pack << "\n\n";
       }
@@ -715,6 +728,307 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
   return out.str();
 }
 
+constexpr int kMaxPackReviewCycles = 3;
+constexpr int kPushbackEscalateAfter = 3;
+
+bool pack_review_enabled() { return l2_feat::enabled("PACK_REVIEW"); }
+
+bool status_has_pack_review_ok(const std::string& flags) {
+  return flags.find("pack_review_ok=yes") != std::string::npos;
+}
+
+std::string read_path_file(const std::string& path) {
+  std::ifstream in(path);
+  if (!in) {
+    return {};
+  }
+  std::ostringstream out;
+  out << in.rdbuf();
+  return out.str();
+}
+
+void load_watchlist_rejected_from_state(const std::string& workspace_root,
+                                        std::vector<std::string>* watchlist,
+                                        std::vector<std::string>* rejected) {
+  if (watchlist == nullptr && rejected == nullptr) {
+    return;
+  }
+  const std::string st_raw =
+      read_path_file(Level2Session::state_path(workspace_root));
+  if (st_raw.empty()) {
+    return;
+  }
+  try {
+    const auto j = nlohmann::json::parse(st_raw);
+    if (watchlist != nullptr && j.contains("watchlist") && j["watchlist"].is_array()) {
+      for (const auto& t : j["watchlist"]) {
+        if (t.is_string()) {
+          watchlist->push_back(t.get<std::string>());
+        }
+      }
+    }
+    if (rejected != nullptr && j.contains("rejected_targets") &&
+        j["rejected_targets"].is_array()) {
+      for (const auto& t : j["rejected_targets"]) {
+        if (t.is_string()) {
+          rejected->push_back(t.get<std::string>());
+        }
+      }
+    }
+  } catch (...) {
+  }
+}
+
+std::string build_pushback_replan_note(const Level2AutonomousLoopOpts& opts) {
+  const std::string session_md =
+      read_path_file(Level2Session::session_path(opts.workspace_root));
+  const std::string map_last =
+      read_path_file(opts.workspace_root + "/.tuide/ai/map_last.md");
+  const std::string distilled = extract_distilled_intent_block(session_md);
+  std::vector<std::string> watchlist;
+  std::vector<std::string> rejected;
+  load_watchlist_rejected_from_state(opts.workspace_root, &watchlist, &rejected);
+  PackReviewVerdict stub;
+  stub.ok = true;
+  stub.verdict = "partial";
+  return build_pack_replan_menu(session_md, map_last, watchlist, rejected, stub, distilled,
+                                nullptr, nullptr, true);
+}
+
+// Returns true when explore should continue (expand after miss); false when covered or skipped.
+bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
+                                      const Level2AutonomousLoopOpts& opts,
+                                      const Level2PhaseLogFn& log, std::atomic<bool>* cancel,
+                                      std::string* recover_note) {
+  if (!pack_review_enabled()) {
+    return false;
+  }
+  const std::string flags0 = session.status_flags(opts.workspace_root);
+  if (flags0.find("has_pack=yes") == std::string::npos) {
+    return false;
+  }
+  if (status_has_pack_review_ok(flags0)) {
+    return false;
+  }
+  int cycles = 0;
+
+  const std::string session_md =
+      read_path_file(Level2Session::session_path(opts.workspace_root));
+  const std::string pack_md = read_path_file(Level2Session::pack_path(opts.workspace_root));
+  if (pack_md.empty()) {
+    return false;
+  }
+  const std::string instruction = extract_session_instruction_block(session_md);
+  const std::string distilled = extract_distilled_intent_block(session_md);
+  const std::string digest = build_pack_digest(pack_md);
+
+  std::vector<std::string> watchlist;
+  std::vector<std::string> rejected;
+  std::vector<std::string> used_review_terms;
+  const std::string map_last_path = opts.workspace_root + "/.tuide/ai/map_last.md";
+  const std::string map_last = read_path_file(map_last_path);
+  {
+    const std::string st_raw = read_path_file(Level2Session::state_path(opts.workspace_root));
+    if (!st_raw.empty()) {
+      try {
+        const auto j = nlohmann::json::parse(st_raw);
+        if (j.contains("watchlist") && j["watchlist"].is_array()) {
+          for (const auto& t : j["watchlist"]) {
+            if (t.is_string()) {
+              watchlist.push_back(t.get<std::string>());
+            }
+          }
+        }
+        if (j.contains("rejected_targets") && j["rejected_targets"].is_array()) {
+          for (const auto& t : j["rejected_targets"]) {
+            if (t.is_string()) {
+              rejected.push_back(t.get<std::string>());
+            }
+          }
+        }
+        if (j.contains("review_search_terms") && j["review_search_terms"].is_array()) {
+          for (const auto& t : j["review_search_terms"]) {
+            if (t.is_string()) {
+              used_review_terms.push_back(t.get<std::string>());
+            }
+          }
+        }
+        if (j.contains("pack_review_cycles")) {
+          cycles = j["pack_review_cycles"].get<int>();
+        }
+      } catch (...) {
+      }
+    }
+  }
+
+  auto build_replan_menu = [&](const PackReviewVerdict& verdict,
+                               const std::vector<std::string>& terms,
+                               const std::vector<std::string>* hits_override) -> std::string {
+    return build_pack_replan_menu(session_md, map_last, watchlist, rejected, verdict, distilled,
+                                  hits_override, terms.empty() ? nullptr : &terms, false);
+  };
+
+  if (cycles >= kMaxPackReviewCycles) {
+    if (log) {
+      log("L2 ▸ pack review: max ciclos sin covered — replan desde mapa");
+    }
+    PackReviewVerdict stub;
+    stub.ok = true;
+    stub.verdict = "partial";
+    stub.reason = "max pack_review_cycles";
+    if (recover_note) {
+      *recover_note = build_replan_menu(stub, {}, nullptr);
+    }
+    return true;
+  }
+
+  if (log) {
+    log("L2 ▸ pack review — L2 juzga cobertura semántica ES/EN…");
+  }
+  L2BrainRequest breq;
+  breq.system_prompt = pack_review_system_prompt();
+  breq.user_prompt =
+      pack_review_user_prompt(instruction, distilled, digest, watchlist);
+  breq.phase = "explore";
+  breq.max_tokens = 420;
+  breq.n_ctx = std::min(opts.budget.n_ctx, 4096);
+  breq.temperature = 0.05f;
+  const L2BrainResult br = brain.propose(breq, cancel);
+  if (!br.ok) {
+    if (log) {
+      log("L2 ▸ pack review error: " + br.error);
+    }
+    return false;
+  }
+  const PackReviewVerdict verdict = parse_pack_review_json(br.text);
+  if (log) {
+    log("L2 ▸ pack review verdict=" + verdict.verdict +
+        (verdict.reason.empty() ? "" : (" — " + verdict.reason.substr(0, 120))));
+  }
+  if (!verdict.ok) {
+    if (log) {
+      log("L2 ▸ pack review parse fail");
+    }
+    return false;
+  }
+  const bool covered = verdict.verdict == "covered";
+  if (covered) {
+    session.mark_pack_review(opts.workspace_root, true, verdict.reason);
+    return false;
+  }
+
+  std::ostringstream summary;
+  summary << "verdict=" << verdict.verdict;
+  if (!verdict.reason.empty()) {
+    summary << " reason=" << verdict.reason;
+  }
+  if (!verdict.present.empty()) {
+    summary << "\npresent:";
+    for (const auto& p : verdict.present) {
+      summary << ' ' << p;
+    }
+  }
+  if (!verdict.missing.empty()) {
+    summary << "\nmissing:";
+    for (const auto& m : verdict.missing) {
+      summary << ' ' << m;
+    }
+  }
+  session.mark_pack_review(opts.workspace_root, false, summary.str());
+
+  std::vector<std::string> reject_extra = verdict.reject;
+  {
+    const auto invented = infer_invented_rejects(verdict, map_last);
+    reject_extra.insert(reject_extra.end(), invented.begin(), invented.end());
+  }
+  if (!reject_extra.empty()) {
+    const auto pr = session.prune_watchlist_after_review(opts.workspace_root, reject_extra);
+    if (log && pr.ok) {
+      log("L2 ▸ pack prune — " + pr.summary);
+    }
+    const std::string st_raw = read_path_file(Level2Session::state_path(opts.workspace_root));
+    if (!st_raw.empty()) {
+      try {
+        const auto j = nlohmann::json::parse(st_raw);
+        watchlist.clear();
+        rejected.clear();
+        if (j.contains("watchlist") && j["watchlist"].is_array()) {
+          for (const auto& t : j["watchlist"]) {
+            if (t.is_string()) {
+              watchlist.push_back(t.get<std::string>());
+            }
+          }
+        }
+        if (j.contains("rejected_targets") && j["rejected_targets"].is_array()) {
+          for (const auto& t : j["rejected_targets"]) {
+            if (t.is_string()) {
+              rejected.push_back(t.get<std::string>());
+            }
+          }
+        }
+      } catch (...) {
+      }
+    }
+  }
+
+  const std::vector<std::string> raw_terms = review_search_terms(verdict, distilled, 3);
+  const std::vector<std::string> terms =
+      filter_unused_review_search_terms(raw_terms, used_review_terms);
+  std::vector<L2ToolCall> searches;
+  for (const auto& t : terms) {
+    searches.push_back(L2ToolCall{"search", t});
+  }
+  std::string search_blob;
+  if (!searches.empty()) {
+    if (log) {
+      log("L2 ▸ review expand — search EN " + std::to_string(searches.size()) + " términos");
+    }
+    const auto tr_search = session.apply_tools(opts.workspace_root, searches);
+    search_blob = tr_search.summary;
+    session.add_review_search_terms(opts.workspace_root, terms);
+    const std::string session_after = read_path_file(Level2Session::session_path(opts.workspace_root));
+    const auto obs = session_after.find("## Observations");
+    if (obs != std::string::npos) {
+      search_blob += "\n" + session_after.substr(obs);
+    }
+  } else if (log && !raw_terms.empty()) {
+    log("L2 ▸ review expand — términos ya buscados, omitiendo grep repetido");
+  }
+
+  std::vector<std::string> hit_menu = parse_search_hits_menu(search_blob, 12);
+  {
+    std::vector<std::string> blocklist = watchlist;
+    blocklist.insert(blocklist.end(), rejected.begin(), rejected.end());
+    hit_menu = filter_search_hits_excluding_watchlist(hit_menu, blocklist);
+  }
+  if (hit_menu.empty()) {
+    if (!map_last.empty()) {
+      hit_menu = ranked_map_replan_hits(map_last, watchlist, rejected, verdict, distilled, 12);
+    }
+    if (hit_menu.empty()) {
+      std::vector<std::string> blocklist = watchlist;
+      blocklist.insert(blocklist.end(), rejected.begin(), rejected.end());
+      hit_menu = ranked_map_fallback_hits(session_md, blocklist, verdict, distilled, 10);
+    }
+    if (log && !hit_menu.empty()) {
+      log("L2 ▸ review expand — map replan " + std::to_string(hit_menu.size()) + " entradas");
+    }
+  }
+  std::stable_sort(hit_menu.begin(), hit_menu.end(), [](const std::string& a, const std::string& b) {
+    const bool aa = a.find("src/ai/") != std::string::npos;
+    const bool ba = b.find("src/ai/") != std::string::npos;
+    if (aa != ba) {
+      return aa > ba;
+    }
+    return a < b;
+  });
+
+  if (recover_note) {
+    *recover_note = build_replan_menu(verdict, terms, &hit_menu);
+  }
+  return true;
+}
+
 }  // namespace
 
 Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain& brain,
@@ -756,6 +1070,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
 
   int consecutive_invalid = 0;
   int consecutive_turn_errors = 0;
+  int consecutive_plan_target_pushbacks = 0;
   std::string recover_note;
 
   for (int step = 1; step <= max_steps; ++step) {
@@ -779,6 +1094,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     bool map_stale = false;
     bool pack_incomplete = false;
     bool resume = false;
+    bool pack_review_pending = false;
     {
       const auto p = status.find("phase: ");
       if (p != std::string::npos) {
@@ -790,6 +1106,14 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       map_stale = status.find("map_stale: yes") != std::string::npos;
       pack_incomplete = status.find("pack_incomplete: yes") != std::string::npos;
       resume = status.find("resume: yes") != std::string::npos;
+    }
+    if (pack_review_enabled()) {
+      const std::string flags = session.status_flags(opts.workspace_root);
+      pack_review_pending =
+          flags.find("has_pack=yes") != std::string::npos &&
+          flags.find("pack_review_ok=yes") == std::string::npos &&
+          flags.find("pack_review_cycles=") != std::string::npos &&
+          flags.find("pack_review_cycles=0") == std::string::npos;
     }
     if (status.find("done: yes") != std::string::npos || phase == "done" || phase == "clarify") {
       result.ok = phase == "done" || phase == "clarify";
@@ -845,7 +1169,8 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     breq.system_prompt = build_system_prompt(opts, phase, map_review);
     breq.user_prompt =
         build_user_prompt(opts.workspace_root, phase, step, has_pack, map_review, map_stale,
-                          pack_incomplete, resume, workflow, budget, opts, recover_note);
+                          pack_incomplete, resume, workflow, budget, opts, recover_note,
+                          pack_review_pending);
     breq.phase = phase;
     breq.max_tokens = opts.settings.max_tokens;
     breq.n_ctx = budget.n_ctx;
@@ -983,6 +1308,12 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       if ((tr.error == "post_pack_tool_pushback" || tr.error == "repeated_tool") &&
           phase == "explore" && has_pack && !pack_incomplete &&
           !ai_workflow_is_readonly(workflow)) {
+        const std::string rv_flags = session.status_flags(opts.workspace_root);
+        if (pack_review_enabled() && !status_has_pack_review_ok(rv_flags)) {
+          emit("L2 ▸ tools tras pack — esperando pack review");
+          result.steps = step;
+          continue;
+        }
         emit("L2 ▸ tool loop tras pack → force phase=edit (" + tr.error + ")");
         const auto promo = session.force_phase_edit(
             opts.workspace_root,
@@ -1029,6 +1360,74 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       }
       tr = session.apply_plan(opts.workspace_root, action.targets, action.summary);
       emit(std::string("L2 ▸ pack ") + (tr.ok ? "OK" : "FAIL") + " — " + tr.summary.substr(0, 160));
+      if (tr.error == "repeated_plan_targets_pushback" && phase == "explore") {
+        emit("L2 ▸ plan repetido sin targets nuevos — pushback");
+        ++consecutive_plan_target_pushbacks;
+        if (pack_review_enabled()) {
+          recover_note = build_pushback_replan_note(opts);
+          if (recover_note.find("MAP HITS") != std::string::npos ||
+              recover_note.find("SEARCH HITS") != std::string::npos) {
+            emit("L2 ▸ pushback replan — menú MAP/SEARCH HITS re-inyectado");
+          }
+          if (consecutive_plan_target_pushbacks >= kPushbackEscalateAfter) {
+            const std::string map_last =
+                read_path_file(opts.workspace_root + "/.tuide/ai/map_last.md");
+            std::vector<std::string> watchlist;
+            std::vector<std::string> rejected;
+            load_watchlist_rejected_from_state(opts.workspace_root, &watchlist, &rejected);
+            const auto hits = ranked_map_unseen_hits(map_last, watchlist, rejected, 8);
+            const auto auto_targets = plan_targets_from_map_hits(hits, 3);
+            if (!auto_targets.empty()) {
+              emit("L2 ▸ pushback escalación — auto-plan runtime targets=" +
+                   std::to_string(auto_targets.size()));
+              for (const auto& t : auto_targets) {
+                emit("  · " + t);
+              }
+              tr = session.apply_plan(opts.workspace_root, auto_targets,
+                                      "runtime: pushback escalación MAP HITS");
+              consecutive_plan_target_pushbacks = 0;
+              emit(std::string("L2 ▸ pack ") + (tr.ok ? "OK" : "FAIL") + " — " +
+                   tr.summary.substr(0, 160));
+              if (tr.error == "repeated_plan_targets_pushback") {
+                result.steps = step;
+                continue;
+              }
+              if (tr.ok) {
+                const std::string st_flags = session.status_flags(opts.workspace_root);
+                if (st_flags.find("has_pack=yes") != std::string::npos) {
+                  if (maybe_run_pack_review_after_plan(session, brain, opts, log, cancel,
+                                                       &recover_note)) {
+                    phase = "explore";
+                    tr.phase = "explore";
+                    result.steps = step;
+                    continue;
+                  }
+                }
+              }
+              result.steps = step;
+              continue;
+            }
+          }
+        } else {
+          recover_note =
+              "Todos los targets ya están en el pack. Emite `action=plan` con paths NUEVOS "
+              "de SEARCH HITS (src/ai/…). Prioriza control de carga/cancelación del chat IA.\n";
+        }
+        result.steps = step;
+        continue;
+      }
+      consecutive_plan_target_pushbacks = 0;
+      if (tr.ok) {
+        const std::string st_flags = session.status_flags(opts.workspace_root);
+        if (st_flags.find("has_pack=yes") != std::string::npos) {
+          if (maybe_run_pack_review_after_plan(session, brain, opts, log, cancel, &recover_note)) {
+            phase = "explore";
+            tr.phase = "explore";
+            result.steps = step;
+            continue;
+          }
+        }
+      }
       if (tr.error == "repeated_plan_pushback" && phase == "explore" &&
           !ai_workflow_is_readonly(workflow)) {
         emit("L2 ▸ plan loop tras pack → force phase=edit (" + tr.error + ")");
@@ -1134,7 +1533,8 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       continue;
     }
     consecutive_invalid = 0;
-    if (tr.ok && recover_note.find("Pack cubierto") == std::string::npos) {
+    if (tr.ok && tr.error != "repeated_plan_targets_pushback" &&
+        recover_note.find("Pack cubierto") == std::string::npos) {
       recover_note.clear();
     }
     if (tr.ok && l2_feat::enabled("EDIT_LEAN_PROMPT") &&
@@ -1191,6 +1591,17 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       consecutive_turn_errors = 0;
     }
     if (tr.phase == "done" || tr.phase == "clarify") {
+      if (opts.stop_at_explore && tr.phase == "clarify") {
+        result.ok = false;
+        result.phase = "clarify";
+        result.summary = tr.summary.empty() ? action.summary : tr.summary;
+        ai_trace(AiTraceChannel::L2, "l2_run_end",
+                 std::string("{\"ok\":0,\"phase\":\"clarify\",\"steps\":") +
+                     std::to_string(result.steps) +
+                     ",\"total_ms\":" + std::to_string(elapsed_ms(run_t0)) + "}");
+        emit(phase_banner("explore", step, max_steps) + " — clarify (explore fail)");
+        return result;
+      }
       result.ok = true;
       result.summary = tr.summary.empty() ? action.summary : tr.summary;
       ai_trace(AiTraceChannel::L2, "l2_run_end",
@@ -1199,6 +1610,28 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
                    ",\"total_ms\":" + std::to_string(elapsed_ms(run_t0)) + "}");
       emit(phase_banner(tr.phase, step, max_steps) + " — " +
            (tr.phase == "clarify" ? "clarify" : "éxito"));
+      return result;
+    }
+    if (opts.stop_at_explore && tr.phase == "edit") {
+      const std::string st2 = session.status_text(opts.workspace_root);
+      const bool pack_ok = st2.find("has_pack: yes") != std::string::npos &&
+                           st2.find("pack_incomplete: yes") == std::string::npos;
+      const std::string rv_flags = session.status_flags(opts.workspace_root);
+      const bool review_ok =
+          !pack_review_enabled() || status_has_pack_review_ok(rv_flags);
+      result.ok = pack_ok && review_ok;
+      result.phase = (pack_ok && review_ok) ? "explore_ok" : "edit";
+      result.summary = pack_ok && review_ok
+                           ? "explore: pack completo → edit"
+                           : (pack_ok ? "explore→edit sin pack review OK"
+                                      : ("explore→edit sin pack completo: " + tr.summary));
+      ai_trace(AiTraceChannel::L2, "l2_run_end",
+               std::string("{\"ok\":") + (result.ok ? "1" : "0") +
+                   ",\"phase\":\"explore_ok\",\"steps\":" + std::to_string(result.steps) +
+                   ",\"total_ms\":" + std::to_string(elapsed_ms(run_t0)) + "}");
+      emit(phase_banner("explore", step, max_steps) + " — " +
+           (result.ok ? "explore OK (pack completo)"
+                      : (review_ok ? "explore incompleto" : "explore sin review OK")));
       return result;
     }
   }

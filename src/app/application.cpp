@@ -132,6 +132,8 @@ bool is_significant_input_event(const Event &event) {
 	}
 	if (mouse.motion == Mouse::Moved && mouse.button != Mouse::None) {
 		return true;
+
+
 	}
 	return false;
 }

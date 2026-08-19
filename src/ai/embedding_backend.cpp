@@ -907,15 +907,20 @@ bool EmbeddingBackend::start_server(const std::string& server_bin, const std::st
   }
   if (::kill(server_pid_, 0) != 0) {
     server_pid_ = -1;
-    if (error) {
-      if (health_ok()) {
-        *error = "llama-server en :" + std::to_string(port_) +
-                 " no es el proceso hijo (bind falló; ¿puerto ocupado?)";
-      } else {
+    if (health_ok()) {
+      // A server launched by the IDE or a prior run is already serving on this
+      // port with the same model flags.  Adopt it instead of failing — tools
+      // and battery runs that share the process space benefit from this reuse.
+      if (on_progress) {
+        on_progress("embed: adoptando llama-server existente en :" + std::to_string(port_));
+      }
+      // Fall through to ready_.store(true) below.
+    } else {
+      if (error) {
         *error = "llama-server terminó antes de quedar listo";
       }
+      return false;
     }
-    return false;
   }
   ready_.store(true);
   // Warm model + HTTP path so first corpus batch is not 3–4× slower.

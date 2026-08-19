@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <optional>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -20,6 +21,7 @@
 #include "indexer/symbol_workspace_indexer.hpp"
 
 #include <filesystem>
+#include <nlohmann/json.hpp>
 
 namespace tuide {
 namespace {
@@ -70,6 +72,196 @@ const char* action_kind_name(Level1ActionKind kind) {
       return "unknown";
   }
   return "unknown";
+}
+
+struct DistilledInvestigateIntent {
+  std::string intent;
+  std::string primary_goal;
+  std::vector<std::string> facets;
+  std::vector<std::string> ignore;
+  std::vector<std::string> search_terms;
+};
+
+bool is_surface_presentation_term(const std::string& raw);
+
+void filter_surface_terms(std::vector<std::string>* items) {
+  if (items == nullptr) {
+    return;
+  }
+  std::vector<std::string> kept;
+  kept.reserve(items->size());
+  for (const auto& s : *items) {
+    if (!is_surface_presentation_term(s)) {
+      kept.push_back(s);
+    }
+  }
+  items->swap(kept);
+}
+
+std::string semantic_query_from_distilled(const DistilledInvestigateIntent& di,
+                                          const std::string& fallback) {
+  std::ostringstream out;
+  if (!di.primary_goal.empty()) {
+    out << di.primary_goal;
+  } else if (!di.intent.empty()) {
+    out << di.intent;
+  }
+  for (const auto& f : di.facets) {
+    if (out.tellp() > 0) {
+      out << ' ';
+    }
+    out << f;
+  }
+  for (const auto& t : di.search_terms) {
+    if (out.tellp() > 0) {
+      out << ' ';
+    }
+    out << t;
+  }
+  return out.tellp() > 0 ? out.str() : fallback;
+}
+
+std::vector<std::string> outline_from_ranked_map(const RepoMap& map, std::size_t max_n = 32) {
+  std::vector<std::string> outline;
+  std::unordered_set<std::string> seen_stems;
+  for (const auto& e : map.entries) {
+    if (outline.size() >= max_n) {
+      break;
+    }
+    std::string stem = e.stem;
+    if (stem.empty()) {
+      const auto slash = e.file.find_last_of("/\\");
+      const std::string base = slash == std::string::npos ? e.file : e.file.substr(slash + 1);
+      const auto dot = base.find_last_of('.');
+      stem = dot != std::string::npos ? base.substr(0, dot) : base;
+    }
+    if (!stem.empty() && seen_stems.insert(stem).second) {
+      outline.push_back(stem + "  " + e.file + "  " + e.name);
+    }
+  }
+  return outline;
+}
+
+std::optional<DistilledInvestigateIntent> parse_distilled_intent_json(const std::string& raw) {
+  try {
+    const auto doc = nlohmann::json::parse(raw);
+    if (!doc.is_object()) {
+      return std::nullopt;
+    }
+    DistilledInvestigateIntent out;
+    out.intent = doc.value("intent", "");
+    out.primary_goal = doc.value("primary_goal", "");
+    auto read_arr = [](const nlohmann::json& j, const char* key, std::vector<std::string>* dst) {
+      if (!j.contains(key) || !j[key].is_array() || dst == nullptr) {
+        return;
+      }
+      for (const auto& it : j[key]) {
+        if (it.is_string()) {
+          dst->push_back(it.get<std::string>());
+        }
+      }
+    };
+    read_arr(doc, "facets", &out.facets);
+    read_arr(doc, "ignore", &out.ignore);
+    read_arr(doc, "search_terms", &out.search_terms);
+    if (out.intent.empty() && out.primary_goal.empty() && out.facets.empty() &&
+        out.search_terms.empty()) {
+      return std::nullopt;
+    }
+    return out;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+std::string summarize_distilled_intent(const DistilledInvestigateIntent& di) {
+  std::ostringstream out;
+  if (!di.intent.empty()) {
+    out << "intent=" << di.intent;
+  }
+  if (!di.primary_goal.empty()) {
+    if (out.tellp() > 0) {
+      out << " | ";
+    }
+    out << "goal=" << di.primary_goal;
+  }
+  if (!di.facets.empty()) {
+    if (out.tellp() > 0) {
+      out << " | ";
+    }
+    out << "facets:";
+    for (std::size_t i = 0; i < di.facets.size() && i < 5; ++i) {
+      out << (i == 0 ? ' ' : ',') << di.facets[i];
+    }
+  }
+  if (!di.search_terms.empty()) {
+    if (out.tellp() > 0) {
+      out << " | ";
+    }
+    out << "terms:";
+    for (std::size_t i = 0; i < di.search_terms.size() && i < 5; ++i) {
+      out << (i == 0 ? ' ' : ',') << di.search_terms[i];
+    }
+  }
+  return out.str();
+}
+
+bool is_surface_presentation_term(const std::string& raw) {
+  std::string low = raw;
+  for (char& c : low) {
+    if (c >= 'A' && c <= 'Z') {
+      c = static_cast<char>(c - 'A' + 'a');
+    }
+  }
+  static const std::unordered_set<std::string> kPresentationWords = {
+      "visible", "visibility", "show",     "shown",   "hide",   "hidden",
+      "open",    "opened",     "close",    "closed",  "panel",  "panels",
+      "window",  "windows",    "dialog",   "dialogs", "screen", "screens",
+      "sidebar", "sidebars",   "view",     "views",   "tab",    "tabs",
+      "line",    "lines",      "ui",       "ux",
+  };
+  static const std::unordered_set<std::string> kSemanticAnchors = {
+      "state",      "status",     "persist",   "persistent", "storage",  "store",
+      "config",     "settings",   "session",   "history",    "cache",    "snapshot",
+      "restore",    "reload",     "reopen",    "resume",     "serialize","deserialize",
+      "model",      "controller", "manager",   "registry",   "runtime",  "pipeline",
+      "document",   "buffer",     "editor",    "workspace",  "project",  "context",
+      "navigation", "selection",  "cursor",    "position",   "layout",   "metadata",
+  };
+  if (kSemanticAnchors.count(low) != 0) {
+    return false;
+  }
+  if (kPresentationWords.count(low) != 0) {
+    return true;
+  }
+  // If a phrase is mostly about presentation, keep it only when it is tied to
+  // a stronger semantic anchor like state, persistence, workflow or ownership.
+  const bool has_presentation = low.find("visible") != std::string::npos ||
+                                low.find("show") != std::string::npos ||
+                                low.find("hide") != std::string::npos ||
+                                low.find("panel") != std::string::npos ||
+                                low.find("window") != std::string::npos ||
+                                low.find("dialog") != std::string::npos ||
+                                low.find("sidebar") != std::string::npos ||
+                                low.find("screen") != std::string::npos ||
+                                low.find("tab") != std::string::npos;
+  const bool has_anchor = low.find("state") != std::string::npos ||
+                          low.find("persist") != std::string::npos ||
+                          low.find("store") != std::string::npos ||
+                          low.find("config") != std::string::npos ||
+                          low.find("session") != std::string::npos ||
+                          low.find("history") != std::string::npos ||
+                          low.find("cache") != std::string::npos ||
+                          low.find("restore") != std::string::npos ||
+                          low.find("resume") != std::string::npos ||
+                          low.find("manager") != std::string::npos ||
+                          low.find("controller") != std::string::npos ||
+                          low.find("document") != std::string::npos ||
+                          low.find("buffer") != std::string::npos ||
+                          low.find("editor") != std::string::npos ||
+                          low.find("workflow") != std::string::npos ||
+                          low.find("runtime") != std::string::npos;
+  return has_presentation && !has_anchor;
 }
 
 }  // namespace
@@ -365,7 +557,8 @@ std::vector<std::string> rank_index_needle_candidates(SymbolWorkspaceIndexer* in
 
 std::vector<std::string> Level1Agent::propose_investigate_needles(const std::string& user_message,
                                                                  const LogFn& log,
-                                                                 std::atomic<bool>* cancel) {
+                                                                 std::atomic<bool>* cancel,
+                                                                 const std::vector<std::string>& map_outline) {
   std::vector<std::string> out;
   std::unordered_set<std::string> seen;
   auto push = [&](std::string s, bool allow_generic) {
@@ -401,46 +594,205 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
     log(cs.str());
   }
 
-  if (deps_.backend != nullptr && deps_.backend->ready()) {
+  std::optional<DistilledInvestigateIntent> distilled;
+  std::vector<std::string> semantic_outline = map_outline;
+  std::vector<std::string> semantic_index_candidates = index_candidates;
+  LlamaBackend* reasoning_backend = nullptr;
+  if (deps_.l2_backend != nullptr && deps_.l2_backend->ready()) {
+    reasoning_backend = deps_.l2_backend;
+  } else if (deps_.backend != nullptr && deps_.backend->ready()) {
+    reasoning_backend = deps_.backend;
+  }
+  if (reasoning_backend != nullptr) {
+    {
+      LlamaCompletionRequest req;
+      req.system_prompt =
+          "Eres un analizador semántico para recuperación de código. Tu trabajo en esta primera "
+          "pasada es entender la intención real del prompt y separar señal de ruido. "
+          "NO elijas todavía archivos ni símbolos concretos. Responde SOLO JSON con este formato:\n"
+          "{\"intent\":\"...\",\"primary_goal\":\"...\",\"facets\":[\"...\"],"
+          "\"ignore\":[\"...\"],\"search_terms\":[\"...\"]}\n"
+          "Reglas:\n"
+          "- intent: una frase corta en inglés técnico.\n"
+          "- primary_goal: la meta principal, más abstracta que las palabras literales del prompt.\n"
+          "- Antes de escribir facets/search_terms, clasifica mentalmente la petición en una "
+          "familia de intención general, por ejemplo: persistencia/estado, navegación, "
+          "renderizado, ejecución runtime, integración externa, edición, búsqueda o UI.\n"
+          "- facets: 2..5 conceptos nucleares de IMPLEMENTACION, no palabras de superficie.\n"
+          "- ignore: 0..6 detalles superficiales que podrían desviar el retrieval.\n"
+          "- search_terms: 3..8 términos cortos de implementación.\n"
+          "- Si el prompt mezcla conceptos estructurales con detalles de presentación, "
+          "PRIORIZA lo estructural: estado, persistencia, modelo, coordinación, flujo, "
+          "almacenamiento, propietario del dato o ciclo de vida.\n"
+          "- Evita que facets/search_terms queden dominados por palabras de presentación o "
+          "visibilidad (abrir/cerrar/mostrar/ocultar/panel/ventana/pestaña/línea) salvo que "
+          "formen parte de un concepto de implementación más profundo.\n"
+          "- NO inventes nombres de archivos o símbolos todavía.\n"
+          "- Si el prompt es largo, prioriza la semántica estable frente a detalles cosméticos.\n";
+      std::ostringstream user;
+      user << "Consulta del usuario:\n" << user_message << "\n";
+      user << "\nJSON:";
+      req.user_prompt = user.str();
+      req.max_tokens = std::min(320, std::max(160, deps_.settings.level1.max_tokens / 2));
+      {
+        const int prompt_tok_est =
+            static_cast<int>((req.system_prompt.size() + req.user_prompt.size()) / 3 + 32);
+        const int needed = prompt_tok_est + req.max_tokens + 256;
+        int ctx = 512;
+        while (ctx < needed) { ctx *= 2; }
+        req.n_ctx = std::min(ctx, 2048);
+      }
+      req.temperature = 0.1;
+      req.context_role = reasoning_backend == deps_.l2_backend ? "L2" : "L1";
+      req.n_ctx_setting_hint =
+          reasoning_backend == deps_.l2_backend ? "ai.level2.n_ctx" : "ai.level1.n_ctx";
+      if (log) {
+        log(reasoning_backend == deps_.l2_backend
+                ? "L1 investigar → L2 pasada 1: destilación semántica…"
+                : "L1 investigar → destilando intención…");
+      }
+      const auto completion = reasoning_backend->complete(req, cancel);
+      if (completion.ok) {
+        if (log) {
+          log("L1 intent raw: " + completion.text);
+        }
+        distilled = parse_distilled_intent_json(completion.text);
+        if (distilled) {
+          filter_surface_terms(&distilled->facets);
+          filter_surface_terms(&distilled->search_terms);
+        }
+        if (distilled && log) {
+          log("L1 intent: " + summarize_distilled_intent(*distilled));
+        }
+      } else if (log) {
+        log("✗ L1 intent: " + completion.error);
+      }
+    }
+
+    std::vector<std::string> semantic_rank_terms;
+    if (distilled) {
+      for (const auto& t : distilled->search_terms) {
+        if (!t.empty()) {
+          semantic_rank_terms.push_back(t);
+        }
+      }
+      for (const auto& f : distilled->facets) {
+        for (const auto& tok : extract_code_tokens(f, 6)) {
+          semantic_rank_terms.push_back(tok);
+        }
+      }
+      for (const auto& tok : extract_code_tokens(distilled->primary_goal, 8)) {
+        semantic_rank_terms.push_back(tok);
+      }
+    }
+    if (semantic_rank_terms.empty()) {
+      semantic_rank_terms = extract_code_tokens(user_message, 16);
+    }
+
+    const std::string semantic_query =
+        distilled ? semantic_query_from_distilled(*distilled, user_message) : user_message;
+    RepoMapOptions semantic_opts;
+    semantic_opts.query = semantic_query;
+    semantic_opts.extra_needles = semantic_rank_terms;
+    semantic_opts.active_file = relative_active_file(deps_.workspace);
+    semantic_opts.max_symbols = 96;
+    semantic_opts.max_files = 32;
+    semantic_opts.max_chars = 4200;
+    semantic_opts.max_map_tokens = 1280;
+    semantic_opts.path_scope = deps_.settings.path_scope;
+    RepoMap semantic_map = build_repo_map_from_indexer(deps_.symbol_indexer, semantic_opts);
+    if (!semantic_map.entries.empty()) {
+      semantic_outline = outline_from_ranked_map(semantic_map, 32);
+      semantic_index_candidates =
+          rank_index_needle_candidates(deps_.symbol_indexer, semantic_query, 48);
+      if (log) {
+        log("REPO_MAP semántico: " + std::to_string(semantic_map.entries.size()) +
+            " símbolos (best_score=" + std::to_string(semantic_map.best_score) + ")");
+      }
+    }
+
     LlamaCompletionRequest req;
     req.system_prompt =
-        "Eres un recuperador de código. Dada una pregunta NL sobre DÓNDE está una "
-        "funcionalidad, responde SOLO JSON:\n"
+        "Eres un recuperador de código en segunda pasada. Ya existe un mapa rankeado a partir "
+        "de la intención semántica del usuario. Tu trabajo ahora es decidir DÓNDE buscar "
+        "en el código y proponer needles/símbolos concretos para recuperar los fragmentos "
+        "correctos. Responde SOLO JSON:\n"
         "{\"action\":\"seeds\",\"seeds\":[\"QuitConfirm\",\"quit_confirm\",...]}\n"
         "Reglas:\n"
         "- 8..16 identificadores ESPECÍFICOS (archivo/clase/función), preferible compuestos.\n"
+        "- Usa la INTENCION_DESTILADA como fuente principal de verdad.\n"
+        "- Usa el MAPA_RANKEADO como ancla principal para decidir por dónde buscar.\n"
+        "- Prioriza stems/archivos/símbolos que aparezcan en ese mapa y encajen con la intención.\n"
         "- Traduce la intención a vocabulario típico de código en inglés.\n"
-        "- Si la query combina varias palabras de UI (modal/tab/panel/dialog/settings/…), "
-        "los seeds DEBEN ser compuestos que junten ≥2 facetas "
-        "(p. ej. SettingsModal, config_tab), NUNCA solo la palabra más ambigua (Tab, Modal).\n"
-        "- cierre/cerrar/salir de la app → quit/close/exit/shutdown/confirm "
-        "(p. ej. QuitConfirm, shutdown_overlay). NO confundir con settings/shortcuts modal.\n"
-        "- compilación/compilar/build → compile/build/cmake/makefile "
-        "(p. ej. compile.sh, CMakeLists, build scripts en tools/).\n"
-        "- Si hay CANDIDATOS_DEL_INDICE, prioriza elegir varios de esa lista (o variantes cercanas).\n"
+        "- Si la query mezcla UI y semántica estructural, elige símbolos ligados a estado, "
+        "persistencia, flujo, modelo o coordinación antes que vocabulario visual.\n"
         "- PROHIBIDO seeds genéricos sueltos: Modal, process, panel, dialog, button, manager, "
         "attach, launch, file, tree, tab, tabs (sin más cualificador).\n"
         "- PROHIBIDO: markdown, tools, prosa, rutas absolutas.\n";
     std::ostringstream user;
     user << "Consulta del usuario:\n" << user_message << "\n";
-    if (!index_candidates.empty()) {
-      user << "\nCANDIDATOS_DEL_INDICE (elige varios de aquí si encajan):\n";
-      for (const auto& c : index_candidates) {
+    if (distilled) {
+      user << "\nINTENCION_DESTILADA:\n";
+      if (!distilled->intent.empty()) {
+        user << "- intent: " << distilled->intent << '\n';
+      }
+      if (!distilled->primary_goal.empty()) {
+        user << "- primary_goal: " << distilled->primary_goal << '\n';
+      }
+      if (!distilled->facets.empty()) {
+        user << "- facets:\n";
+        for (const auto& f : distilled->facets) {
+          user << "  - " << f << '\n';
+        }
+      }
+      if (!distilled->ignore.empty()) {
+        user << "- ignore:\n";
+        for (const auto& g : distilled->ignore) {
+          user << "  - " << g << '\n';
+        }
+      }
+      if (!distilled->search_terms.empty()) {
+        user << "- search_terms:\n";
+        for (const auto& t : distilled->search_terms) {
+          user << "  - " << t << '\n';
+        }
+      }
+    }
+    if (!semantic_index_candidates.empty()) {
+      user << "\nCANDIDATOS_DEL_INDICE (ya orientados por la semántica):\n";
+      for (const auto& c : semantic_index_candidates) {
         user << "- " << c << '\n';
+      }
+    }
+    if (!semantic_outline.empty()) {
+      user << "\nMAPA_RANKEADO (top stems/archivos/símbolos tras la pasada semántica):\n";
+      const int show = std::min(static_cast<int>(semantic_outline.size()), 32);
+      for (int i = 0; i < show; ++i) {
+        user << "- " << semantic_outline[static_cast<std::size_t>(i)] << '\n';
       }
     }
     user << "\nJSON:";
     req.user_prompt = user.str();
     req.max_tokens = std::min(480, std::max(192, deps_.settings.level1.max_tokens));
-    req.n_ctx = std::max(4096, deps_.settings.level1.n_ctx);
+    {
+      const int prompt_tok_est =
+          static_cast<int>((req.system_prompt.size() + req.user_prompt.size()) / 3 + 32);
+      const int needed = prompt_tok_est + req.max_tokens + 256;
+      int ctx = 512;
+      while (ctx < needed) { ctx *= 2; }
+      req.n_ctx = std::min(ctx, 2048);
+    }
     req.temperature = 0.1;
-    req.context_role = "L1";
-    req.n_ctx_setting_hint = "ai.level1.n_ctx";
+    req.context_role = reasoning_backend == deps_.l2_backend ? "L2" : "L1";
+    req.n_ctx_setting_hint =
+        reasoning_backend == deps_.l2_backend ? "ai.level2.n_ctx" : "ai.level1.n_ctx";
     if (log) {
-      log("L1 investigar → proponiendo needles…");
+      log(reasoning_backend == deps_.l2_backend
+              ? "L1 investigar → L2 pasada 2: elegir dónde buscar sobre mapa rankeado…"
+              : "L1 investigar → proponiendo needles…");
     }
     const auto needles_t0 = std::chrono::steady_clock::now();
-    const auto completion = deps_.backend->complete(req, cancel);
+    const auto completion = reasoning_backend->complete(req, cancel);
     const auto needles_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                 std::chrono::steady_clock::now() - needles_t0)
                                 .count();
@@ -479,6 +831,16 @@ std::vector<std::string> Level1Agent::propose_investigate_needles(const std::str
 
   for (const auto& t : extract_code_tokens(user_message, 16)) {
     push(t, false);
+  }
+  if (distilled) {
+    for (const auto& t : distilled->search_terms) {
+      push(t, false);
+    }
+    for (const auto& f : distilled->facets) {
+      for (const auto& tok : extract_code_tokens(f, 6)) {
+        push(tok, false);
+      }
+    }
   }
 
   std::vector<std::string> expanded;
@@ -628,7 +990,31 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
     }
 
     const std::vector<std::string> needles =
-        propose_investigate_needles(user_message, log, cancel);
+        propose_investigate_needles(user_message, log, cancel, [&] {
+          // Build a compact outline from the lexical map top entries so the LLM
+          // can ground its seed proposals in names that actually exist in the repo.
+          std::vector<std::string> outline;
+          std::unordered_set<std::string> seen_stems;
+          for (const auto& e : lexical_map.entries) {
+            if (outline.size() >= 32) {
+              break;
+            }
+            // stem is set by enrich; fall back to file basename without extension.
+            std::string stem = e.stem;
+            if (stem.empty()) {
+              const auto slash = e.file.find_last_of("/\\");
+              const std::string base =
+                  slash == std::string::npos ? e.file : e.file.substr(slash + 1);
+              const auto dot = base.find_last_of('.');
+              stem = dot != std::string::npos ? base.substr(0, dot) : base;
+            }
+            // One line per unique stem: "stem  file  topSymbol"
+            if (seen_stems.insert(stem).second) {
+              outline.push_back(stem + "  " + e.file + "  " + e.name);
+            }
+          }
+          return outline;
+        }());
     out.seeds = needles;
     if (log) {
       log("L1 needles propuestos:");
@@ -676,6 +1062,8 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
         rr_opts.phase_a_top = 280;
         rr_opts.final_top = 280;
         rr_opts.max_per_file = 14;
+        rr_opts.max_per_stem = 3;
+        rr_opts.max_per_dir = 20;
         rr_opts.fetch_bodies = false;
         rr_opts.skip_phase_a = false;
         rr_opts.body_max_lines = 80;
@@ -684,6 +1072,8 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
         rr_opts.phase_a_top = 96;
         rr_opts.final_top = 120;
         rr_opts.max_per_file = 8;
+        rr_opts.max_per_stem = 2;
+        rr_opts.max_per_dir = 12;
         rr_opts.fetch_bodies = true;
         rr_opts.skip_phase_a = false;
         rr_opts.body_max_lines = 80;

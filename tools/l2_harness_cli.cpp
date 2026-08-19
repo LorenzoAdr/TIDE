@@ -307,7 +307,8 @@ void print_ok_line(const tuide::Level2TurnResult& tr, tuide::Level2Session& sess
 }
 
 void usage() {
-  std::cerr << "Usage: l2_harness_cli bootstrap|tool|tools|plan|turn|done|edit|compile|status|run|hunk-try …\n"
+  std::cerr << "Usage: l2_harness_cli bootstrap|tool|tools|plan|turn|done|edit|compile|status|run|run-explore|hunk-try …\n"
+            << "  run-explore            // loop until pack completo → edit (no edit/compile)\n"
             << "  plan target [target…]   // watchlist → pack.md\n"
             << "  tools <calls.json>      // batch [{name,arg},…] o {\"calls\":[…]}\n"
             << "  done [summary] [--edit|--clarify]\n"
@@ -385,7 +386,58 @@ int main(int argc, char** argv) {
   if (cmd == "bootstrap") {
     Level2BootstrapOpts opts;
     opts.workspace_root = root;
-    opts.query = argc >= 3 ? argv[2] : std::string{};
+    // Parse optional flags before positional query.
+    int positional = 2;
+    for (int i = 2; i < argc; ++i) {
+      const std::string a = argv[i];
+      if (a == "--seeds" && i + 1 < argc) {
+        // Accept a JSON file path or a comma-separated list of stems.
+        ++i;
+        const std::string seeds_arg = argv[i];
+        if (!seeds_arg.empty() && seeds_arg.front() == '[') {
+          // Inline JSON array.
+          try {
+            // Simple parse: extract quoted strings between [ ].
+            std::string s = seeds_arg;
+            std::size_t p = 0;
+            while ((p = s.find('"', p)) != std::string::npos) {
+              ++p;
+              const auto e = s.find('"', p);
+              if (e == std::string::npos) { break; }
+              const std::string tok = s.substr(p, e - p);
+              if (!tok.empty()) { opts.seeds.push_back(tok); }
+              p = e + 1;
+            }
+          } catch (...) {}
+        } else if (!seeds_arg.empty() && (seeds_arg[0] == '/' || seeds_arg[0] == '.')) {
+          // File path containing a JSON array.
+          const std::string raw = read_file(seeds_arg);
+          std::size_t p = 0;
+          while ((p = raw.find('"', p)) != std::string::npos) {
+            ++p;
+            const auto e = raw.find('"', p);
+            if (e == std::string::npos) { break; }
+            const std::string tok = raw.substr(p, e - p);
+            if (!tok.empty()) { opts.seeds.push_back(tok); }
+            p = e + 1;
+          }
+        } else {
+          // Comma-separated stems.
+          std::istringstream ss(seeds_arg);
+          std::string tok;
+          while (std::getline(ss, tok, ',')) {
+            while (!tok.empty() && tok.front() == ' ') { tok.erase(0, 1); }
+            while (!tok.empty() && tok.back() == ' ') { tok.pop_back(); }
+            if (!tok.empty()) { opts.seeds.push_back(tok); }
+          }
+        }
+        positional = i + 1;
+      } else {
+        positional = i;
+        break;
+      }
+    }
+    opts.query = positional < argc ? argv[positional] : std::string{};
     if (opts.query.empty()) {
       const std::string map = read_file(fs::path(root) / ".tuide" / "ai" / "map_last.md");
       const auto qpos = map.find("query:");
@@ -642,6 +694,40 @@ int main(int argc, char** argv) {
     const auto result = run_level2_autonomous(
         session, brain, opts, [](const std::string& line) { std::cout << line << std::endl; });
     std::cout << "run ok=" << (result.ok ? 1 : 0) << " phase=" << result.phase
+              << " steps=" << result.steps << " — "
+              << (result.error.empty() ? result.summary : result.error) << '\n';
+    std::cout << session.status_flags(root) << '\n';
+    return result.ok ? 0 : 1;
+  }
+  if (cmd == "run-explore") {
+    const AiSettings settings = load_ai_settings(root);
+    if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
+      std::cerr << "run-explore: ai.level2.mode debe ser local|remote (ahora="
+                << settings.level2_mode << ")\n";
+      return 2;
+    }
+    LocalL2Brain brain;
+    std::string err;
+    auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+    if (!brain.ensure_ready(settings, progress, &err)) {
+      std::cerr << "L2 brain ensure_ready: " << err << '\n';
+      return 1;
+    }
+    Level2AutonomousLoopOpts opts;
+    opts.workspace_root = root;
+    opts.settings = settings.level2;
+    opts.stop_at_explore = true;
+    if (opts.settings.max_steps > 16) {
+      opts.settings.max_steps = 16;
+    }
+    std::string pack_err;
+    if (!load_prompt_pack_into_opts(&opts, &pack_err)) {
+      std::cerr << "prompt pack: " << pack_err << '\n';
+      return 1;
+    }
+    const auto result = run_level2_autonomous(
+        session, brain, opts, [](const std::string& line) { std::cout << line << std::endl; });
+    std::cout << "run-explore ok=" << (result.ok ? 1 : 0) << " phase=" << result.phase
               << " steps=" << result.steps << " — "
               << (result.error.empty() ? result.summary : result.error) << '\n';
     std::cout << session.status_flags(root) << '\n';

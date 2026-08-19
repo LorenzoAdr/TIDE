@@ -18,6 +18,7 @@
 #include "ai/ai_types.hpp"
 #include "ai/ai_path_scope.hpp"
 #include "ai/l2_feat.hpp"
+#include "ai/l2_pack_review.hpp"
 
 namespace fs = std::filesystem;
 
@@ -558,8 +559,12 @@ bool looks_like_code_ident(const std::string& tok) {
       has_digit = true;
     }
   }
-  // snake / nested / numbered, or smashed CamelCase (ToggleLineMark → togglelinemark).
-  return has_under || has_digit || tok.size() >= 10;
+  // snake / nested / numbered.
+  // A token must have _ or : (snake/nested) or a digit (versioned/numbered) to be
+  // treated as a code identifier.  Pure NL words in any language, even long ones
+  // (e.g. "proporciones", "razonables", "configuracion"), do NOT qualify, which
+  // prevents the pack_instruction_gaps gate from firing on abstract NL queries.
+  return has_under || has_digit;
 }
 
 bool is_plan_stats_telemetry_token(const std::string& tok) {
@@ -2181,6 +2186,9 @@ std::vector<std::string> pack_instruction_gaps(const std::string& pack,
   int strong_hit = 0;
   const std::string pack_low = to_lower_copy(pack);
   for (const auto& n : needles) {
+    // Only tokens that look like real code identifiers (snake_case / versioned) are
+    // meaningful coverage markers.  After the A1 fix looks_like_code_ident already
+    // requires _ or digit, so the size<8 guard is kept for extra safety.
     if (!looks_like_code_ident(n) || n.size() < 8) {
       continue;
     }
@@ -3129,6 +3137,22 @@ Level2Session::State Level2Session::load_state(const std::string& workspace_root
     st.applied_blob = j.value("applied_blob", "");
     st.coverage_gate_pushback = j.value("coverage_gate_pushback", 0);
     st.covered_path_rejects = j.value("covered_path_rejects", 0);
+    st.pack_review_ok = j.value("pack_review_ok", false);
+    st.pack_review_cycles = j.value("pack_review_cycles", 0);
+    if (j.contains("review_search_terms") && j["review_search_terms"].is_array()) {
+      for (const auto& t : j["review_search_terms"]) {
+        if (t.is_string()) {
+          st.review_search_terms.push_back(t.get<std::string>());
+        }
+      }
+    }
+    if (j.contains("rejected_targets") && j["rejected_targets"].is_array()) {
+      for (const auto& t : j["rejected_targets"]) {
+        if (t.is_string()) {
+          st.rejected_targets.push_back(t.get<std::string>());
+        }
+      }
+    }
     if (j.contains("watchlist") && j["watchlist"].is_array()) {
       for (const auto& t : j["watchlist"]) {
         if (t.is_string()) {
@@ -3202,6 +3226,10 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
                       {"applied_blob", st.applied_blob},
                       {"coverage_gate_pushback", st.coverage_gate_pushback},
                       {"covered_path_rejects", st.covered_path_rejects},
+                      {"pack_review_ok", st.pack_review_ok},
+                      {"pack_review_cycles", st.pack_review_cycles},
+                      {"review_search_terms", st.review_search_terms},
+                      {"rejected_targets", st.rejected_targets},
                       {"pending", pending}};
   return write_file(state_path(workspace_root), j.dump(2) + "\n", err);
 }
@@ -3487,6 +3515,9 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
     }
     md << "\n\n";
   }
+  if (!opts.distilled_intent_json.empty()) {
+    md << "## Distilled intent\n\n```json\n" << trim_ws(opts.distilled_intent_json) << "\n```\n\n";
+  }
   if (map_stale) {
     md << "**map_stale=1**: el mapa rankeado parece de otra query (`" << map_query
        << "`; overlap=" << static_cast<int>(overlap * 100)
@@ -3565,6 +3596,10 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   st.edit_phase_tool_count = 0;
   st.edit_phase_nudge_sent = false;
   st.consecutive_complete_plans = 0;
+  st.pack_review_ok = false;
+  st.pack_review_cycles = 0;
+  st.review_search_terms.clear();
+  st.rejected_targets.clear();
   st.edit_fail_count = 0;
   st.identical_edit_repeats = 0;
   st.last_failed_edit_fp.clear();
@@ -4051,6 +4086,44 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
                         st.phase);
     return out;
   }
+
+  // Anti-loop: reject plan whose explicit targets are all already on the watchlist
+  // while pack review is still open (PACK_REVIEW miss → must add NEW paths).
+  if (l2_feat::enabled("PACK_REVIEW") && st.has_pack && !st.pack_review_ok &&
+      st.pack_review_cycles > 0 && !targets.empty() && !st.watchlist.empty()) {
+    bool any_new = false;
+    for (const auto& raw : targets) {
+      const std::string t = trim_ws(raw);
+      if (t.empty()) {
+        continue;
+      }
+      if (!target_in_watchlist_normalized(t, st.watchlist)) {
+        any_new = true;
+        break;
+      }
+    }
+    if (!any_new) {
+      ++st.turn;
+      st.last_action = "repeated_plan_targets_pushback";
+      out.turn = st.turn;
+      std::ostringstream block;
+      block << "### turn " << st.turn << " — repeated_plan_targets_pushback\n\n";
+      block << "Rechazado: todos los targets del plan ya están en watchlist/pack. "
+               "Emite `action=plan` con paths NUEVOS de SEARCH HITS (p. ej. "
+               "`src/ai/ai_controller.cpp:Symbol`). No repitas spinner/editor_panel.\n\n";
+      std::string err;
+      append_observation(workspace_root, block.str(), &out.session_chars, &err);
+      save_state(workspace_root, st, nullptr);
+      write_response_json(workspace_root, false, "plan", "", "", block.str(),
+                          "repeated_plan_targets_pushback", st.turn, st.phase);
+      out.ok = true;
+      out.phase = st.phase;
+      out.summary = "repeated_plan_targets_pushback";
+      out.error = "repeated_plan_targets_pushback";
+      return out;
+    }
+  }
+
   if (deps_.tools == nullptr) {
     out.error = "tools no registrados";
     return out;
@@ -4061,6 +4134,18 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   const auto instr_paths = instruction_src_paths(workspace_root, session_body);
   std::unordered_set<std::string> instr_path_set(instr_paths.begin(), instr_paths.end());
   std::unordered_set<std::string> explicit_plan_paths;
+  const std::vector<std::string> prev_watchlist = [&]() {
+    std::vector<std::string> out;
+    for (const auto& t : st.watchlist) {
+      if (!target_in_rejected_normalized(t, st.rejected_targets)) {
+        out.push_back(t);
+      }
+    }
+    return out;
+  }();
+  const std::string existing_pack =
+      st.has_pack ? read_file(pack_path(workspace_root)) : std::string{};
+  const bool delta_fetch = st.has_pack && !prev_watchlist.empty() && !existing_pack.empty();
   for (const auto& raw : targets) {
     const std::string t = trim_ws(raw);
     if (t.empty()) {
@@ -4074,16 +4159,26 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   std::unordered_set<std::string> keep_file_window;
 
   // Merge with previous watchlist / pack header (plan2 does not wipe plan1).
-  // Only reuse pack.md targets when this session actually wrote a pack (has_pack).
-  // Otherwise a stale pack from a prior bootstrap pollutes the new plan.
-  std::vector<std::string> merged = st.watchlist;
+  // Drop rejected targets so pruned noise cannot re-enter via merge.
+  std::vector<std::string> merged;
+  merged.reserve(st.watchlist.size() + targets.size());
+  for (const auto& t : st.watchlist) {
+    if (!target_in_rejected_normalized(t, st.rejected_targets)) {
+      merged.push_back(t);
+    }
+  }
   if (merged.empty() && st.has_pack) {
-    merged = parse_pack_targets_header(read_file(pack_path(workspace_root)));
+    for (const auto& t : parse_pack_targets_header(read_file(pack_path(workspace_root)))) {
+      if (!target_in_rejected_normalized(t, st.rejected_targets)) {
+        merged.push_back(t);
+      }
+    }
   }
   std::unordered_set<std::string> seen_t(merged.begin(), merged.end());
   for (const auto& raw : targets) {
     std::string t = trim_ws(raw);
-    if (t.empty() || !seen_t.insert(t).second) {
+    if (t.empty() || target_in_rejected_normalized(t, st.rejected_targets) ||
+        !seen_t.insert(t).second) {
       continue;
     }
     merged.push_back(std::move(t));
@@ -4317,6 +4412,29 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
                                        : line_window_target_biased(path, line);
         }
       }
+      bool reused_delta = false;
+      if (delta_fetch && target_in_watchlist_normalized(t, prev_watchlist)) {
+        std::string reused = load_pack_fragment_body(existing_pack, t);
+        if (reused.empty() && fetch_arg != t) {
+          reused = load_pack_fragment_body(existing_pack, fetch_arg);
+        }
+        if (reused.empty() && !path.empty()) {
+          reused = load_pack_fragment_body(existing_pack, path + ":1");
+        }
+        if (!reused.empty()) {
+          f.ok = true;
+          f.text = reused;
+          f.truncated = text_looks_truncated(f.text);
+          reused_delta = true;
+          if (f.explicit_locus && line > 0) {
+            f.target = path + ":" + std::to_string(line);
+            f.refetch = fetch_arg;
+          } else if (fetch_arg != t) {
+            f.target = fetch_arg;
+          }
+        }
+      }
+      if (!reused_delta) {
       const AiToolResult tr = deps_.tools->invoke("get_code_of", fetch_arg);
       f.ok = tr.ok;
       f.text = tr.text.empty() ? (tr.ok ? "(vacío)" : "error get_code_of") : tr.text;
@@ -4390,6 +4508,16 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       fetched.insert(fetch_arg);
       if (f.explicit_locus && line > 0) {
         fetched.insert(path + ":" + std::to_string(line));
+      }
+      } else {
+        const int needle_sc =
+            score_symbol_against_needles(f.text.substr(0, 400), needles);
+        f.rank_boost = 5 + needle_sc / 5;
+        if (f.explicit_locus) {
+          f.rank_boost += 50;
+        }
+        fetched.insert(t);
+        fetched.insert(fetch_arg);
       }
     }
     f.rank_size = f.junk ? 999999 : f.text.size();
@@ -5111,6 +5239,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   ++st.turn;
   st.last_action = "plan";
   st.has_pack = true;
+  st.pack_review_ok = false;
   const auto gaps = pack_instruction_gaps(pack_body, needles);
   st.pack_incomplete = (frag_ok == 0) || !gaps.empty();
   st.explore_tool_count = 0;
@@ -5118,11 +5247,53 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   st.post_pack_tool_count = 0;
   st.edit_nudge_sent = false;
   st.map_review = false;
-  // Watchlist keeps resolved targets (not skipped bare junk).
+  // Watchlist: only targets with OK non-noise fragments; junk → rejected_targets.
   st.watchlist.clear();
+  std::unordered_set<std::string> wl_seen;
+  std::unordered_set<std::string> ok_paths;
+  std::unordered_set<std::string> ok_targets;
+  for (std::size_t i = 0; i < frags.size(); ++i) {
+    if (frags[i].junk || !frags[i].ok || frag_roles[i] == FragRole::Noise) {
+      continue;
+    }
+    ok_targets.insert(frags[i].target);
+    const std::string p = path_from_plan_target(frags[i].target);
+    if (!p.empty()) {
+      ok_paths.insert(p);
+    }
+  }
+  auto target_has_ok_frag = [&](const std::string& t) -> bool {
+    if (ok_targets.count(t)) {
+      return true;
+    }
+    const std::string p = path_from_plan_target(t);
+    return !p.empty() && ok_paths.count(p);
+  };
   for (const auto& t : uniq_targets) {
-    if (!skip_fetch.count(t)) {
+    if (skip_fetch.count(t) || target_in_rejected_normalized(t, st.rejected_targets)) {
+      continue;
+    }
+    if (!target_has_ok_frag(t)) {
+      if (std::find(st.rejected_targets.begin(), st.rejected_targets.end(), t) ==
+          st.rejected_targets.end()) {
+        st.rejected_targets.push_back(t);
+      }
+      continue;
+    }
+    if (wl_seen.insert(t).second) {
       st.watchlist.push_back(t);
+    }
+  }
+  for (const auto& raw : targets) {
+    const std::string t = trim_ws(raw);
+    if (t.empty()) {
+      continue;
+    }
+    if (!target_has_ok_frag(t) && !target_in_rejected_normalized(t, st.rejected_targets)) {
+      if (std::find(st.rejected_targets.begin(), st.rejected_targets.end(), t) ==
+          st.rejected_targets.end()) {
+        st.rejected_targets.push_back(t);
+      }
     }
   }
   out.turn = st.turn;
@@ -5169,7 +5340,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
              "(no más `plan` sin tools/`get_code_of` nuevos).\n\n";
   }
   const bool repeated_plan_pushback =
-      !st.pack_incomplete &&
+      !st.pack_incomplete && st.pack_review_ok &&
       st.consecutive_complete_plans >= Level2Session::kRepeatedPlanEditPushbackAfter &&
       !ai_workflow_is_readonly(parse_ai_workflow_kind(st.workflow));
   if (repeated_plan_pushback) {
@@ -5999,6 +6170,133 @@ Level2TurnResult Level2Session::rollback_pending(const std::string& workspace_ro
   return out;
 }
 
+Level2TurnResult Level2Session::mark_pack_review(const std::string& workspace_root, bool ok,
+                                                 const std::string& summary) {
+  Level2TurnResult out;
+  out.action = "review";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  ++st.pack_review_cycles;
+  st.pack_review_ok = ok;
+  st.last_action = ok ? "pack_review_ok" : "pack_review_miss";
+  if (!ok) {
+    st.consecutive_complete_plans = 0;
+    st.edit_nudge_sent = false;
+  }
+  ++st.turn;
+  out.turn = st.turn;
+  std::ostringstream block;
+  block << "### turn " << st.turn << " — pack_review " << (ok ? "covered" : "miss") << "\n\n";
+  if (!summary.empty()) {
+    block << summary << "\n\n";
+  }
+  if (!ok) {
+    block << "Review: el pack NO cubre la Instruction. Emite `action=plan` con targets NUEVOS "
+             "anclados a los hits de search abajo (path:Symbol). No repitas el mismo plan.\n\n";
+  } else {
+    block << "Review: pack cubre la Instruction. Puedes emitir `done next=edit`.\n\n";
+  }
+  std::string err;
+  append_observation(workspace_root, block.str(), &out.session_chars, &err);
+  save_state(workspace_root, st, nullptr);
+  out.ok = true;
+  out.summary = ok ? "pack_review covered" : "pack_review miss";
+  return out;
+}
+
+Level2TurnResult Level2Session::add_review_search_terms(const std::string& workspace_root,
+                                                        const std::vector<std::string>& terms) {
+  Level2TurnResult out;
+  out.action = "review_search";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty() || terms.empty()) {
+    out.ok = true;
+    return out;
+  }
+  std::unordered_set<std::string> seen;
+  for (const auto& u : st.review_search_terms) {
+    seen.insert(u);
+  }
+  for (const auto& t : terms) {
+    if (t.empty() || seen.count(t)) {
+      continue;
+    }
+    seen.insert(t);
+    st.review_search_terms.push_back(t);
+  }
+  save_state(workspace_root, st, nullptr);
+  out.ok = true;
+  out.summary = "review_search_terms +" + std::to_string(terms.size());
+  return out;
+}
+
+Level2TurnResult Level2Session::add_rejected_targets(const std::string& workspace_root,
+                                                     const std::vector<std::string>& targets) {
+  Level2TurnResult out;
+  out.action = "review_reject";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty() || targets.empty()) {
+    out.ok = true;
+    return out;
+  }
+  for (const auto& t : targets) {
+    if (t.empty()) {
+      continue;
+    }
+    if (std::find(st.rejected_targets.begin(), st.rejected_targets.end(), t) ==
+        st.rejected_targets.end()) {
+      st.rejected_targets.push_back(t);
+    }
+  }
+  save_state(workspace_root, st, nullptr);
+  out.ok = true;
+  out.summary = "rejected_targets +" + std::to_string(targets.size());
+  return out;
+}
+
+Level2TurnResult Level2Session::prune_watchlist_after_review(const std::string& workspace_root,
+                                                           const std::vector<std::string>&
+                                                               reject_extra) {
+  Level2TurnResult out;
+  out.action = "prune";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  for (const auto& t : reject_extra) {
+    if (t.empty()) {
+      continue;
+    }
+    if (std::find(st.rejected_targets.begin(), st.rejected_targets.end(), t) ==
+        st.rejected_targets.end()) {
+      st.rejected_targets.push_back(t);
+    }
+  }
+  std::vector<std::string> kept;
+  kept.reserve(st.watchlist.size());
+  for (const auto& t : st.watchlist) {
+    if (target_in_rejected_normalized(t, st.rejected_targets)) {
+      continue;
+    }
+    kept.push_back(t);
+  }
+  const int pruned = static_cast<int>(st.watchlist.size()) - static_cast<int>(kept.size());
+  st.watchlist = std::move(kept);
+  save_state(workspace_root, st, nullptr);
+  out.ok = true;
+  out.summary = "watchlist pruned=" + std::to_string(pruned) +
+                " rejected=" + std::to_string(st.rejected_targets.size());
+  return out;
+}
+
 Level2TurnResult Level2Session::force_phase_edit(const std::string& workspace_root,
                                                  const std::string& reason) {
   Level2TurnResult out;
@@ -6548,7 +6846,9 @@ std::string Level2Session::status_flags(const std::string& workspace_root) const
       << " map_stale=" << (st.map_stale ? "yes" : "no")
       << " resume=" << (st.resume ? "yes" : "no")
       << " continuable=" << (st.continuable ? "yes" : "no")
-      << " covered_path_rejects=" << st.covered_path_rejects;
+      << " covered_path_rejects=" << st.covered_path_rejects
+      << " pack_review_ok=" << (st.pack_review_ok ? "yes" : "no")
+      << " pack_review_cycles=" << st.pack_review_cycles;
   return out.str();
 }
 

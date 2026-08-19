@@ -26,6 +26,7 @@ struct Level1AgentDeps {
   WorkspaceModel* workspace = nullptr;
   SymbolWorkspaceIndexer* symbol_indexer = nullptr;
   LlamaBackend* backend = nullptr;
+  LlamaBackend* l2_backend = nullptr;   // optional; semantic two-pass retrieval
   EmbeddingBackend* embed = nullptr;  // optional; coding-pack semantic rerank
   CodingStemEmbedIndex* coding_stem_index = nullptr;
   CodingSymbolEmbedIndex* coding_symbol_index = nullptr;  // unused; kept for ABI/tests
@@ -61,9 +62,13 @@ class Level1Agent {
                                  const LogFn& log);
   std::string run_seeds_pack(const std::vector<std::string>& seeds, const LogFn& log);
   // Ask L1 for probable code identifiers for an investigate query (no tools).
-  std::vector<std::string> propose_investigate_needles(const std::string& user_message,
-                                                      const LogFn& log,
-                                                      std::atomic<bool>* cancel);
+  // map_outline: optional list of "stem  file" strings from the lexical map to
+  // ground the LLM — improves recall for abstract NL queries.
+  std::vector<std::string> propose_investigate_needles(
+      const std::string& user_message,
+      const LogFn& log,
+      std::atomic<bool>* cancel,
+      const std::vector<std::string>& map_outline = {});
 
   Level1AgentDeps deps_;
 };

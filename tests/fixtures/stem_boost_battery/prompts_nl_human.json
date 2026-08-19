@@ -1,0 +1,142 @@
+[
+  {
+    "id": "01_settings_about_tab",
+    "complexity": "muy_alta",
+    "prompt": "modifica el código para añadir una nueva pestaña dentro del menú de configuración de la aplicación que se llame \"sobre la app\" y dentro poner los datos de contacto como nombre y apellidos, correo y licencia.",
+    "expected_stems": ["settings_modal", "app_settings"],
+    "trap_stems": ["context_menu", "editor_panel", "panel"]
+  },
+  {
+    "id": "02_split_resize_behavior",
+    "complexity": "alta",
+    "prompt": "cuando el usuario redimensiona la ventana quiero que los paneles laterales y el editor mantengan proporciones razonables y que se pueda arrastrar el divisor entre paneles sin que se rompa el layout",
+    "expected_stems": ["main_layout"],
+    "trap_stems": ["panel", "editor_panel", "performance_panel"]
+  },
+  {
+    "id": "03_terminal_output_paint",
+    "complexity": "alta",
+    "prompt": "necesito entender cómo se pinta en pantalla el texto que sale del terminal cuando el proceso escribe bytes al pty y cómo se refresca la consola",
+    "expected_stems": ["console_panel", "ui_wake"],
+    "trap_stems": ["search_panel", "editor_panel", "packet_monitor_panel"]
+  },
+  {
+    "id": "04_ai_thinking_status_bar",
+    "complexity": "media_alta",
+    "prompt": "quiero que cuando el asistente de IA esté pensando o generando respuesta se vea un indicador de progreso en la barra de estado inferior de la aplicación",
+    "expected_stems": ["busy_strip", "ai_controller"],
+    "trap_stems": ["settings_modal", "status", "panel"]
+  },
+  {
+    "id": "05_shortcut_open_settings",
+    "complexity": "media",
+    "prompt": "añade un atajo de teclado para abrir directamente la ventana de configuración y preferencias desde cualquier parte de la interfaz",
+    "expected_stems": ["settings_modal", "key_binding_registry"],
+    "trap_stems": ["shortcuts_modal", "context_menu", "helix_hints"]
+  },
+  {
+    "id": "06_quit_unsaved_warning",
+    "complexity": "media",
+    "prompt": "en el diálogo de confirmación al cerrar la aplicación quiero que el mensaje avise claramente si hay archivos sin guardar antes de salir",
+    "expected_stems": ["quit_confirm"],
+    "trap_stems": ["shutdown_overlay", "settings_modal", "application"]
+  },
+  {
+    "id": "07_ai_compile_task",
+    "complexity": "media_baja",
+    "prompt": "¿dónde se lanza la compilación del proyecto cuando le pido al asistente que compile o que ejecute el build?",
+    "expected_stems": ["task_runner", "ai_controller"],
+    "trap_stems": ["compile", "launch", "build-release"]
+  },
+  {
+    "id": "08_toolpacks_install_python",
+    "complexity": "baja",
+    "prompt": "quiero instalar el paquete LSP de Python desde la pestaña de toolpacks dentro de los ajustes de la aplicación",
+    "expected_stems": ["settings_modal", "toolpacks"],
+    "trap_stems": ["lsp_client", "lsp_transport", "panel"]
+  },
+  {
+    "id": "09_console_temp_tab",
+    "complexity": "baja",
+    "prompt": "cambia el código para añadir una nueva pestaña en el panel de terminal de abajo que se llame temp y muestre un texto de prueba sobre fondo negro",
+    "expected_stems": ["main_layout"],
+    "trap_stems": ["editor_tabs", "console_panel", "search_panel"]
+  },
+  {
+    "id": "10_performance_threads_panel",
+    "complexity": "minima",
+    "prompt": "muéstrame dónde está el panel de rendimiento con información de hilos y tiempos de la interfaz",
+    "expected_stems": ["performance_panel", "ui_perf_monitor"],
+    "trap_stems": ["panel", "editor_panel"]
+  },
+  {
+    "id": "11_restore_session_state",
+    "complexity": "muy_alta",
+    "prompt": "cuando abro un proyecto que ya tenía abierto antes quiero que me recuerde exactamente en qué posición estaba el cursor, qué archivos tenía abiertos y si tenía algún panel lateral visible o cerrado",
+    "expected_stems": ["workspace_config", "app_settings", "editor_tabs"],
+    "trap_stems": ["session", "open_file"]
+  },
+  {
+    "id": "12_edit_applied_animation",
+    "complexity": "muy_alta",
+    "prompt": "quiero que cuando el asistente IA termine de editar un archivo y haga el replace en el editor, se muestre una pequeña animación o indicador visual que confirme que el cambio se aplicó correctamente antes de pasar al siguiente paso",
+    "expected_stems": ["editor_panel", "ui_invalidation_policy", "search_replace"],
+    "trap_stems": ["settings_modal", "console_panel"]
+  },
+  {
+    "id": "13_lsp_auto_restart",
+    "complexity": "muy_alta",
+    "prompt": "necesito que si el proceso del servidor de lenguaje LSP se cae o deja de responder, la aplicación lo detecte automáticamente y lo reinicie sin que el usuario tenga que hacer nada",
+    "expected_stems": ["lsp_client", "lsp_transport"],
+    "trap_stems": ["dap_backend", "shell_session"]
+  },
+  {
+    "id": "14_syntax_highlight_repaint",
+    "complexity": "alta",
+    "prompt": "hay veces que escribo muy rápido y el resaltado de sintaxis del editor se queda rezagado o parpadea, quiero entender qué controla cuándo se repinta el editor y con qué frecuencia",
+    "expected_stems": ["ui_invalidation_policy", "editor_panel"],
+    "trap_stems": ["performance_panel", "console_panel"]
+  },
+  {
+    "id": "15_welcome_message_first_launch",
+    "complexity": "alta",
+    "prompt": "quiero añadir un mensaje de bienvenida personalizado que aparezca en la barra inferior de estado solo la primera vez que el usuario abre la aplicación en un ordenador nuevo",
+    "expected_stems": ["busy_strip", "app_settings"],
+    "trap_stems": ["settings_modal", "application"]
+  },
+  {
+    "id": "16_drag_drop_file_open",
+    "complexity": "alta",
+    "prompt": "cuando el usuario arrastra un archivo desde el explorador del sistema operativo y lo suelta sobre la ventana de la aplicación, ¿qué código maneja esa acción y dónde acaba abriendo el archivo?",
+    "expected_stems": ["application", "editor_tabs"],
+    "trap_stems": ["open_file_confirm", "workspace_config"]
+  },
+  {
+    "id": "17_ai_spinner_stuck",
+    "complexity": "media_alta",
+    "prompt": "a veces el panel del chat con la IA se queda bloqueado mostrando un spinner infinito aunque el modelo ya terminó de responder, quiero saber dónde se controla ese estado de carga y cómo se cancela",
+    "expected_stems": ["ai_controller", "level2_autonomous_loop"],
+    "trap_stems": ["console_panel", "dap_backend"]
+  },
+  {
+    "id": "18_compile_error_gutter_mark",
+    "complexity": "media_alta",
+    "prompt": "quiero que los errores de compilación que aparecen en la consola inferior también se marquen con una línea roja en el margen izquierdo del editor en la línea exacta donde está el error",
+    "expected_stems": ["editor_panel", "console_panel"],
+    "trap_stems": ["search_replace", "lsp_client"]
+  },
+  {
+    "id": "19_editor_font_zoom",
+    "complexity": "media",
+    "prompt": "el usuario puede hacer zoom en el editor aumentando o disminuyendo el tamaño de fuente con ctrl+rueda del ratón, quiero saber si eso ya está implementado y dónde",
+    "expected_stems": ["editor_panel", "app_settings"],
+    "trap_stems": ["key_binding_registry", "settings_modal"]
+  },
+  {
+    "id": "20_cancel_ai_generation",
+    "complexity": "media",
+    "prompt": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+    "expected_stems": ["level2_autonomous_loop", "ai_controller"],
+    "trap_stems": ["editor_panel", "search_replace"]
+  }
+]

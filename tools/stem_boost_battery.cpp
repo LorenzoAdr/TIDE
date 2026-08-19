@@ -19,6 +19,7 @@
 #include "ai/embedding_backend.hpp"
 #include "ai/model_store.hpp"
 #include "ai/repo_map.hpp"
+#include "ai/search_needles.hpp"
 #include "indexer/index_rules.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "parser/tree_sitter_tags.hpp"
@@ -215,6 +216,156 @@ std::vector<std::string> stems_from_shortlist(const std::vector<tuide::CodingSte
   return out;
 }
 
+nlohmann::json json_string_array(const std::vector<std::string>& v) {
+  nlohmann::json arr = nlohmann::json::array();
+  for (const auto& s : v) {
+    arr.push_back(s);
+  }
+  return arr;
+}
+
+nlohmann::json json_shortlist_detail(const std::vector<tuide::CodingStemShortlistItem>& sl,
+                                     std::size_t max_n) {
+  nlohmann::json arr = nlohmann::json::array();
+  std::vector<tuide::CodingStemShortlistItem> sorted = sl;
+  std::sort(sorted.begin(), sorted.end(),
+            [](const tuide::CodingStemShortlistItem& a, const tuide::CodingStemShortlistItem& b) {
+              return a.fused_score > b.fused_score;
+            });
+  for (std::size_t i = 0; i < sorted.size() && i < max_n; ++i) {
+    const auto& item = sorted[i];
+    arr.push_back({{"rank", i + 1},
+                   {"stem", item.stem},
+                   {"lexical_score", item.lexical_score},
+                   {"semantic_cos", item.semantic_cos},
+                   {"fused_score", item.fused_score},
+                   {"hint", item.hint}});
+  }
+  return arr;
+}
+
+nlohmann::json json_stem_semantic_top(tuide::CodingStemEmbedIndex* stem_index,
+                                      tuide::EmbeddingBackend* backend,
+                                      const std::string& query, std::size_t max_n) {
+  nlohmann::json arr = nlohmann::json::array();
+  if (stem_index == nullptr || !stem_index->ready() || backend == nullptr || !backend->ready() ||
+      query.empty()) {
+    return arr;
+  }
+  std::vector<float> qvec;
+  std::string err;
+  if (!stem_index->embed_query_vec(query, backend, {}, &qvec, &err) || qvec.empty()) {
+    return arr;
+  }
+  const auto top = stem_index->top_k(qvec, max_n);
+  for (std::size_t i = 0; i < top.size(); ++i) {
+    arr.push_back(
+        {{"rank", i + 1}, {"stem", top[i].first}, {"cosine", top[i].second}});
+  }
+  return arr;
+}
+
+nlohmann::json json_map_entries_top(const std::vector<tuide::RepoMapEntry>& entries,
+                                    std::size_t max_n) {
+  nlohmann::json arr = nlohmann::json::array();
+  for (std::size_t i = 0; i < entries.size() && i < max_n; ++i) {
+    const auto& e = entries[i];
+    arr.push_back({{"rank", i + 1},
+                   {"file", e.file},
+                   {"name", e.name},
+                   {"stem", e.stem.empty() ? path_stem_of(e.file) : e.stem},
+                   {"score", e.score},
+                   {"score_base", e.score_base}});
+  }
+  return arr;
+}
+
+nlohmann::json build_lexical_diagnostics(const std::string& prompt) {
+  const auto facets = tuide::extract_query_facets(prompt, 16);
+  const auto tokens = tuide::repo_map_query_tokens(prompt, 24);
+  std::vector<std::string> nl_expanded;
+  for (const auto& fac : facets) {
+    for (const auto& ex : tuide::expand_nl_retrieval_tokens({fac}, 12)) {
+      nl_expanded.push_back(ex);
+    }
+  }
+  std::unordered_set<std::string> seen;
+  std::vector<std::string> nl_unique;
+  for (auto s : nl_expanded) {
+    if (seen.insert(s).second) {
+      nl_unique.push_back(std::move(s));
+    }
+  }
+  return {{"facets", json_string_array(facets)},
+          {"tokens", json_string_array(tokens)},
+          {"nl_expanded", json_string_array(nl_unique)}};
+}
+
+void print_verbose_case(const Case& c, const nlohmann::json& row) {
+  std::cerr << "\n========== " << c.id << " ==========\n";
+  std::cerr << "prompt: " << c.prompt << "\n\n";
+  if (row.contains("lexical")) {
+    const auto& lx = row["lexical"];
+    std::cerr << "[Léxico] facets: ";
+    for (const auto& f : lx["facets"]) {
+      std::cerr << f.get<std::string>() << " ";
+    }
+    std::cerr << "\n[Léxico] tokens: ";
+    for (const auto& t : lx["tokens"]) {
+      std::cerr << t.get<std::string>() << " ";
+    }
+    std::cerr << "\n[Léxico] NL→EN expandido: ";
+    for (const auto& t : lx["nl_expanded"]) {
+      std::cerr << t.get<std::string>() << " ";
+    }
+    std::cerr << "\n\n";
+  }
+  if (row.contains("shortlist_off_detail")) {
+    std::cerr << "--- Shortlist SIN stem boost (top 8) ---\n";
+    for (const auto& item : row["shortlist_off_detail"]) {
+      std::cerr << "  #" << item["rank"].get<int>() << " " << item["stem"].get<std::string>()
+                << " lex=" << item["lexical_score"].get<int>()
+                << " cos=" << item["semantic_cos"].get<float>()
+                << " fused=" << item["fused_score"].get<long long>() << "\n";
+    }
+  }
+  if (row.contains("shortlist_on_detail")) {
+    std::cerr << "--- Shortlist CON stem boost (top 8) ---\n";
+    for (const auto& item : row["shortlist_on_detail"]) {
+      std::cerr << "  #" << item["rank"].get<int>() << " " << item["stem"].get<std::string>()
+                << " lex=" << item["lexical_score"].get<int>()
+                << " cos=" << item["semantic_cos"].get<float>()
+                << " fused=" << item["fused_score"].get<long long>() << "\n";
+    }
+  }
+  if (row.contains("stem_semantic_top")) {
+    std::cerr << "--- Stem index semántico (top-K por cosine) ---\n";
+    for (const auto& item : row["stem_semantic_top"]) {
+      std::cerr << "  #" << item["rank"].get<int>() << " " << item["stem"].get<std::string>()
+                << " cos=" << item["cosine"].get<float>() << "\n";
+    }
+  }
+  if (row.contains("map_top_on")) {
+    std::cerr << "--- Mapa rankeado (top 12, con priors) ---\n";
+    for (const auto& item : row["map_top_on"]) {
+      std::cerr << "  #" << item["rank"].get<int>() << " " << item["stem"].get<std::string>()
+                << " " << item["file"].get<std::string>() << ":" << item["name"].get<std::string>()
+                << " score=" << item["score"].get<int>() << "\n";
+    }
+  }
+  std::cerr << "\nMétricas: shortlist " << row["rank_sl_off"].get<int>() << "->"
+            << row["rank_sl_on"].get<int>() << "  map " << row["rank_map_off"].get<int>() << "->"
+            << row["rank_map_on"].get<int>() << "  context_stem="
+            << row["context_stem"].get<std::string>()
+            << (row["trap_above"].get<bool>() ? "  TRAP" : "")
+            << (row["enrich_hit"].get<bool>() ? "  ENRICH_OK" : "") << "\n";
+  std::cerr << "Esperado: ";
+  for (const auto& e : c.expected) {
+    std::cerr << e << " ";
+  }
+  std::cerr << "\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -223,6 +374,8 @@ int main(int argc, char** argv) {
   std::string out_dir;
   std::string cache_dir = tuide::ModelStore::default_cache_dir();
   std::string label = "baseline";
+  std::string case_filter;
+  bool verbose = false;
 
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -243,6 +396,10 @@ int main(int argc, char** argv) {
       cache_dir = need("--cache");
     } else if (a == "--label") {
       label = need("--label");
+    } else if (a == "--case") {
+      case_filter = need("--case");
+    } else if (a == "--verbose" || a == "-v") {
+      verbose = true;
     } else {
       std::cerr << "unknown " << a << "\n";
       return 2;
@@ -257,10 +414,23 @@ int main(int argc, char** argv) {
   }
 
   std::string err;
-  const auto cases = load_cases(prompts_path, &err);
+  auto cases = load_cases(prompts_path, &err);
   if (cases.empty()) {
     std::cerr << "no cases: " << err << "\n";
     return 1;
+  }
+  if (!case_filter.empty()) {
+    std::vector<Case> filtered;
+    for (const auto& c : cases) {
+      if (c.id == case_filter || c.id.find(case_filter) == 0) {
+        filtered.push_back(c);
+      }
+    }
+    cases = std::move(filtered);
+    if (cases.empty()) {
+      std::cerr << "no cases match --case " << case_filter << "\n";
+      return 1;
+    }
   }
 
   std::cerr << "stem_boost_battery label=" << label << " cases=" << cases.size() << "\n";
@@ -380,10 +550,17 @@ int main(int argc, char** argv) {
         {"id", c.id},
         {"prompt", c.prompt},
         {"expected", c.expected},
+        {"traps", c.traps},
+        {"lexical", build_lexical_diagnostics(c.prompt)},
         {"shortlist_off", stems_from_shortlist(sl_off)},
         {"shortlist_on", stems_from_shortlist(sl_on)},
+        {"shortlist_off_detail", json_shortlist_detail(sl_off, 8)},
+        {"shortlist_on_detail", json_shortlist_detail(sl_on, 8)},
+        {"stem_semantic_top", json_stem_semantic_top(&stem_index, &backend, c.prompt, 12)},
         {"map_stems_off", stems_off},
         {"map_stems_on", stems_on},
+        {"map_top_off", json_map_entries_top(entries_off, 12)},
+        {"map_top_on", json_map_entries_top(map_on.entries, 12)},
         {"rank_sl_off", rank_sl_off},
         {"rank_sl_on", rank_sl_on},
         {"rank_map_off", rank_map_off},
@@ -396,6 +573,9 @@ int main(int argc, char** argv) {
         {"embed_stem_cos", map_on.embed_stem_cos},
     };
     results << row.dump() << "\n";
+    if (verbose) {
+      print_verbose_case(c, row);
+    }
     std::cerr << c.id << " sl " << rank_sl_off << "->" << rank_sl_on << " map " << rank_map_off
               << "->" << rank_map_on << " ctx=" << map_on.context_stem
               << (trap ? " TRAP" : "") << "\n";

@@ -88,6 +88,10 @@ struct TwoStageRerankOptions {
   int body_max_lines = 80;
   // <=0 disables per-file diversification (keep full list order).
   int max_per_file = 3;
+  // <=0 disables per-stem diversification.
+  int max_per_stem = 0;
+  // <=0 disables per top-level directory diversification (e.g. src/ui, src/ai).
+  int max_per_dir = 0;
   // Candidates already ranked (e.g. from CodingSymbolEmbedIndex); skip signature embed.
   bool skip_phase_a = false;
 };

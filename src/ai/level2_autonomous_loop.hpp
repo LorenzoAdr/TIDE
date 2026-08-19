@@ -27,6 +27,8 @@ struct Level2AutonomousLoopOpts {
   std::string user_overlay_map_review;
   // Prompt/pack slice sizes for the active backend (default = n_ctx 8192 baseline).
   L2ContextBudget budget = default_l2_context_budget();
+  // If true, stop when explore succeeds (pack complete → phase=edit); do not run edit/compile.
+  bool stop_at_explore = false;
 };
 
 struct Level2AutonomousLoopResult {

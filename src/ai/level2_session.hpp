@@ -25,6 +25,8 @@ struct Level2BootstrapOpts {
   std::string git_context;
   // If non-empty, written as pack.md and State.has_pack=true after bootstrap.
   std::string seed_pack_markdown;
+  // Optional JSON from L1 semantic distillation (bridges ES query → EN search_terms).
+  std::string distilled_intent_json;
   // Directory prefixes (empty = unrestricted). Used for session prompt hint.
   std::vector<std::string> path_scope;
 };
@@ -180,6 +182,17 @@ class Level2Session {
   Level2TurnResult apply_synthesize(const std::string& workspace_root, const std::string& text);
   Level2TurnResult rollback_pending(const std::string& workspace_root);
 
+  // Semantic pack review (PACK_REVIEW): persist verdict for explore close gate.
+  Level2TurnResult mark_pack_review(const std::string& workspace_root, bool ok,
+                                    const std::string& summary);
+  Level2TurnResult add_review_search_terms(const std::string& workspace_root,
+                                           const std::vector<std::string>& terms);
+  Level2TurnResult add_rejected_targets(const std::string& workspace_root,
+                                        const std::vector<std::string>& targets);
+  // Drop low-value watchlist entries after pack_review miss; persist rejected_targets.
+  Level2TurnResult prune_watchlist_after_review(const std::string& workspace_root,
+                                                const std::vector<std::string>& reject_extra);
+
   std::string status_text(const std::string& workspace_root) const;
   // One-line flags for harness CLI (avoids extra `status` roundtrips).
   std::string status_flags(const std::string& workspace_root) const;
@@ -231,6 +244,10 @@ class Level2Session {
     std::string applied_blob;
     int coverage_gate_pushback = 0;  // done/compile coverage rejects this session
     int covered_path_rejects = 0;    // consecutive edit_covered_path while gaps remain
+    bool pack_review_ok = false;     // L2 semantic pack review passed (PACK_REVIEW)
+    int pack_review_cycles = 0;      // review→expand cycles this session
+    std::vector<std::string> review_search_terms;  // review expand grep terms used
+    std::vector<std::string> rejected_targets;     // path:Symbol denylist (no re-fetch / re-plan)
     std::vector<PendingHunk> pending;
   };
 

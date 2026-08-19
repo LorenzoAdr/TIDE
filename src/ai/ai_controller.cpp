@@ -940,12 +940,23 @@ void AiController::run_level1_async(const std::string& message) {
     }
     // Best-effort: embeddings for map rerank / stem hints (do not block if missing packs).
     (void)ensure_intent_embeddings_ready(false);
+    // Best-effort: warm L2 so L1 can use it for semantic retrieval passes.
+    if (effective_level2_mode() == "local") {
+      const std::string missing_l2 = first_missing_ai_package_for_l2(settings_);
+      if (missing_l2.empty()) {
+        std::string l2_err;
+        LocalL2Brain l2_warm(&l2_backend_);
+        (void)l2_warm.ensure_ready(settings_, [this](const std::string& line) { append(line); },
+                                   &l2_err);
+      }
+    }
     Level1AgentDeps deps;
     deps.tools = &tools_;
     deps.tasks = &tasks_;
     deps.workspace = deps_.workspace;
     deps.symbol_indexer = deps_.symbol_indexer;
     deps.backend = &backend_;
+    deps.l2_backend = l2_backend_.ready() ? &l2_backend_ : nullptr;
     deps.embed = embed_backend_.ready() ? &embed_backend_ : nullptr;
     deps.coding_stem_index = coding_stem_index_.ready() ? &coding_stem_index_ : nullptr;
     // Query-time lexical shortlist + two-stage embed (no full-corpus symbol index).
@@ -1071,6 +1082,8 @@ void AiController::run_insert_async(const std::string& user_message, AiInsertAnc
     rr_opts.phase_a_top = 280;
     rr_opts.final_top = 280;
     rr_opts.max_per_file = 14;
+    rr_opts.max_per_stem = 3;
+    rr_opts.max_per_dir = 20;
     rr_opts.fetch_bodies = false;
     rr_opts.skip_phase_a = false;
     TwoStageRerankResult ranked = rerank_map_two_stage(std::move(lexical_map.entries), rr_opts,

@@ -101,6 +101,7 @@ endfunction()
 
 add_executable(tuide
   src/main.cpp
+  tools/l1_intent_debug_cmd.cpp
   src/app/application.cpp
   src/app/app_settings.cpp
   src/i18n/locale.cpp
@@ -337,6 +338,7 @@ add_executable(tuide
   src/ai/l2_brain_remote.cpp
   src/ai/l2_context_budget.cpp
   src/ai/level2_autonomous_loop.cpp
+  src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
   src/ai/level2_debrief.cpp
   src/ai/ai_controller.cpp
@@ -349,6 +351,7 @@ add_executable(tuide
 target_include_directories(tuide PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${CMAKE_CURRENT_SOURCE_DIR}/tools
   ${CMAKE_CURRENT_SOURCE_DIR}/tools/packet_preload
   ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
 )
@@ -860,6 +863,7 @@ add_executable(level2_autonomous_loop_test
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
   src/ai/level2_autonomous_loop.cpp
+  src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
@@ -931,6 +935,7 @@ add_executable(l2_harness_cli
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
   src/ai/level2_autonomous_loop.cpp
+  src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
   src/ai/l2_brain_local.cpp
   src/ai/llama_backend.cpp
@@ -1089,6 +1094,92 @@ target_include_directories(stem_boost_battery PRIVATE
 )
 target_link_libraries(stem_boost_battery PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
 tuide_link_pthread(stem_boost_battery)
+
+add_executable(map_for_query_cli
+  tools/map_for_query_cli.cpp
+  src/ai/coding_stem_embed_index.cpp
+  src/ai/coding_embed_rerank.cpp
+  src/ai/repo_map.cpp
+  src/ai/get_code_of.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+  src/ai/search_needles.cpp
+  src/ai/ai_path_scope.cpp
+  src/indexer/index_rules.cpp
+  src/parser/tree_sitter_tags.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
+  src/git/git_command.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(map_for_query_cli PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(map_for_query_cli PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+tuide_link_pthread(map_for_query_cli)
+
+add_executable(l1_intent_debug_cli
+  tools/l1_intent_debug_cli.cpp
+  src/ai/level1_agent.cpp
+  src/ai/level1_action.cpp
+  src/ai/llama_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/repo_map.cpp
+  src/ai/coding_embed_rerank.cpp
+  src/ai/coding_stem_embed_index.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/ai_trace.cpp
+  src/ai/search_needles.cpp
+  src/ai/ai_path_scope.cpp
+  src/ai/get_code_of.cpp
+  src/ai/tool_registry.cpp
+  src/ai/task_runner.cpp
+  src/indexer/index_rules.cpp
+  src/indexer/workspace_indexer.cpp
+  src/indexer/workspace_indexer_rg.cpp
+  src/indexer/symbol_workspace_indexer.cpp
+  src/parser/tree_sitter_document.cpp
+  src/parser/tree_sitter_service.cpp
+  src/parser/tree_sitter_tags.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/tree_sitter_symbol_provider.cpp
+  src/symbols/symbol_utils.cpp
+  src/editor/editor_state.cpp
+  src/editor/text_rope.cpp
+  src/lsp/lsp_uri.cpp
+  src/app/language_override.cpp
+  src/git/git_command.cpp
+  src/util/fuzzy_match.cpp
+  src/util/csv_viewer.cpp
+  src/util/monitor_log.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l1_intent_debug_cli PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${CMAKE_CURRENT_SOURCE_DIR}/tools/packet_preload
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l1_intent_debug_cli PRIVATE
+  ftxui::component
+  ftxui::dom
+  ftxui::screen
+  ${TUIDE_TREE_SITTER_GRAMMAR_LIBS}
+)
+tuide_link_pthread(l1_intent_debug_cli)
 
 add_executable(pkt_protocol_test
   tests/pkt_protocol_test.cpp
