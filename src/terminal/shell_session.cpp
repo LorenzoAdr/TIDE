@@ -16,6 +16,7 @@
 #include "util/child_process_guard.hpp"
 #include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
+#include <algorithm>
 #if defined(__unix__) || defined(__linux__)
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -32,6 +33,26 @@ namespace tuide {
 namespace {
 
 constexpr const char* kIntegratedShell = "/bin/bash";
+constexpr const char* kFallbackShell = "/bin/sh";
+
+// Detecta qué shell hay disponible en el contenedor. Primero intenta bash;
+// si no existe devuelve sh. Resultado cacheado para el nombre de contenedor.
+std::string detect_container_shell(const std::string& container) {
+  if (container.empty()) {
+    return kIntegratedShell;
+  }
+  const std::string cmd =
+      "docker exec " + shell_quote(container) +
+      " /bin/sh -c 'command -v bash || echo /bin/sh' 2>/dev/null";
+  std::string result = run_shell_capture(cmd, 5);
+  // Quitar salto de línea final
+  result.erase(std::remove(result.begin(), result.end(), '\n'), result.end());
+  result.erase(std::remove(result.begin(), result.end(), '\r'), result.end());
+  if (result.empty() || result.find('/') == std::string::npos) {
+    return kFallbackShell;
+  }
+  return result;
+}
 
 std::string write_terminal_init_script(const ShellLaunchConfig& config) {
   if (config.host_cwd.empty()) {
@@ -153,7 +174,9 @@ void ShellSession::request_start(const ShellLaunchConfig& config, int cols, int 
 void ShellSession::bootstrap_shell(const ShellLaunchConfig& config) {
 #if defined(__linux__)
   const std::string init_script = write_terminal_init_script(config);
-  const std::string shell_bin = kIntegratedShell;
+  const std::string shell_bin = config.uses_docker()
+                                    ? detect_container_shell(config.docker_container)
+                                    : kIntegratedShell;
 
   {
     std::lock_guard<std::mutex> lock(terminal_mutex_);
