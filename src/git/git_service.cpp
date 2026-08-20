@@ -64,6 +64,33 @@ bool commit_matches_query(const GitCommitEntry& entry, const std::string& query,
   return message_lower.find(query_lower) != std::string::npos;
 }
 
+bool status_marks_untracked(const GitStatusSnapshot& status, const std::string& workspace_rel) {
+  for (const auto& entry : status.entries) {
+    if (entry.path != workspace_rel) {
+      continue;
+    }
+    if (entry.unstaged == GitFileStatus::kUntracked ||
+        entry.staged == GitFileStatus::kUntracked) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// True when the path is not in the index (plain untracked or gitignored).
+// `git show HEAD:path` fails for both; porcelain status only lists the former.
+bool path_absent_from_index(const std::string& repo_root, const std::string& repo_rel) {
+  if (repo_root.empty() || repo_rel.empty()) {
+    return false;
+  }
+  const auto result = run_git(repo_root, {"ls-files", "--error-unmatch", "--", repo_rel});
+  return !result.success();
+}
+
+bool baseline_complete(const GitFileDiff& diff) {
+  return diff.loaded && (diff.untracked || !diff.head_lines.empty());
+}
+
 void merge_log_entries(std::vector<GitCommitEntry>* merged,
                        const std::vector<GitCommitEntry>& entries,
                        std::unordered_set<std::string>* seen) {
@@ -436,7 +463,8 @@ void GitService::refresh_file_head(const std::string& path) {
       return;
     }
     const auto it = file_diffs_.find(workspace_rel);
-    if (it != file_diffs_.end() && it->second.loaded && !it->second.head_lines.empty()) {
+    // Untracked/ignored baselines are complete with empty HEAD — do not re-fetch.
+    if (it != file_diffs_.end() && baseline_complete(it->second)) {
       return;
     }
     if (inflight_heads_.count(workspace_rel) > 0) {
@@ -1293,6 +1321,8 @@ void GitService::load_file_diff_text(const std::string& repo_root, const std::st
   }
 
   const auto diff_result = run_git(repo_root, {"diff", "HEAD", "--", repo_rel});
+  // Same as load_file_head: ignored paths never appear as `??` in porcelain.
+  const bool absent_from_index = path_absent_from_index(repo_root, repo_rel);
   GitFileDiff parsed = parse_unified_diff(workspace_rel, diff_result.stdout_text);
   parsed.path = workspace_rel;
 
@@ -1301,11 +1331,13 @@ void GitService::load_file_diff_text(const std::string& repo_root, const std::st
     return;
   }
 
-  parsed.untracked = false;
-  for (const auto& entry : status_.entries) {
-    if (entry.path == workspace_rel && entry.unstaged == GitFileStatus::kUntracked) {
+  parsed.untracked = status_marks_untracked(status_, workspace_rel) || absent_from_index;
+  // Keep a previously closed untracked/ignored baseline across diff-text refresh.
+  if (!parsed.untracked) {
+    const auto existing_it = file_diffs_.find(workspace_rel);
+    if (existing_it != file_diffs_.end() && existing_it->second.untracked &&
+        existing_it->second.loaded) {
       parsed.untracked = true;
-      break;
     }
   }
 
@@ -1325,6 +1357,11 @@ void GitService::load_file_head(const std::string& repo_root, const std::string&
   }
 
   const auto head_result = run_git(repo_root, {"show", "HEAD:" + repo_rel});
+  // Porcelain status lists `??` but not gitignored paths. Both fail `git show`;
+  // treat "absent from index" as an untracked baseline so the editor does not
+  // re-request HEAD forever (UI wake storm on open).
+  const bool absent_from_index =
+      !head_result.success() && path_absent_from_index(repo_root, repo_rel);
 
   std::lock_guard<std::mutex> lock(mutex_);
   if (workspace_root_.empty()) {
@@ -1344,15 +1381,10 @@ void GitService::load_file_head(const std::string& repo_root, const std::string&
     diff.loaded = true;
     diff.untracked = false;
   } else {
-    // Only treat as untracked when status confirms it. A failed/slow `git show`
-    // on a tracked file must leave the baseline pending (not all-green).
-    bool untracked = false;
-    for (const auto& entry : status_.entries) {
-      if (entry.path == workspace_rel && entry.unstaged == GitFileStatus::kUntracked) {
-        untracked = true;
-        break;
-      }
-    }
+    // Tracked paths with a failed/slow `git show` stay pending (not all-green).
+    // Untracked (`??`) and ignored paths close as untracked.
+    const bool untracked =
+        status_marks_untracked(status_, workspace_rel) || absent_from_index;
     diff.head_lines.clear();
     diff.untracked = untracked;
     diff.loaded = untracked;
