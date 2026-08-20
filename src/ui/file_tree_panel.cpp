@@ -914,22 +914,25 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
           entry.is_file ? file_glyph_display(entry.label)
                         : folder_glyph(entry.folder != nullptr && entry.folder->expanded);
       const Color label_color = entry.is_file ? theme::FileText() : theme::DirectoryText();
-      Element row = text(icon + " " + entry.label) | color(label_color);
+      // Indent must notflex: otherwise a tight panel shrinks guides with the label and
+      // long names drift left vs short siblings.
+      Element row = text(icon + " " + entry.label) | color(label_color) | xflex_shrink;
       if (entry.depth > 0) {
-        row = hbox({text(tree_indent_guide_prefix(entry.depth)) | color(theme::AccentDim()),
+        row = hbox({text(tree_indent_guide_prefix(entry.depth)) | color(theme::AccentDim()) |
+                        notflex,
                     std::move(row)});
       }
       if (entry.is_file) {
         const auto git_it = git_marks.files.find(entry.relative_path);
         if (git_it != git_marks.files.end()) {
           if (const std::optional<Color> dot = file_git_status_dot(git_it->second)) {
-            row = hbox({std::move(row) | flex, text(" ●") | color(*dot)});
+            row = hbox({std::move(row) | xflex, text(" ●") | color(*dot) | notflex});
           }
         }
       } else if (git_marks.dirty_folders.count(entry.relative_path) > 0) {
         row = hbox({
-            std::move(row) | flex,
-            text(" ●") | color(theme::Success()),
+            std::move(row) | xflex,
+            text(" ●") | color(theme::Success()) | notflex,
         });
       }
       if (sticky && !selected && !hovered && !pressed) {
