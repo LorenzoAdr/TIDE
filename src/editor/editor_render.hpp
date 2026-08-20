@@ -67,6 +67,9 @@ void collect_colored_brace_decorations(int line_index,
 void collect_diagnostic_decorations(int line_index, const std::vector<Diagnostic>& diagnostics,
                                     std::vector<EditorDecoration>* out);
 
+// Expand tabs and clip to the horizontal viewport (scroll_col is a source byte index).
+std::string slice_line_for_view(const std::string& line, int scroll_col, int view_width);
+
 ftxui::Element RenderEditorLine(const std::string& line, int line_index,
                                const EditorBuffer& buffer, bool editor_focused,
                                const std::vector<TextMatch>* find_matches = nullptr,

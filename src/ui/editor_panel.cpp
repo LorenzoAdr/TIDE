@@ -4488,6 +4488,22 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   const bool in_gutter = panel->gutter_box.Contain(m.x, m.y);
   const bool in_editor = in_code || in_gutter;
 
+  // Large virtualized files are scroll-only (placeholder buffer is one empty line).
+  // Ignore cursor/selection clicks so we do not jump the caret to (0,0).
+  if (workspace->active_tab_large_virtual_view() && m.button == Mouse::Left) {
+    if (m.motion == Mouse::Pressed && in_editor) {
+      claim_editor_focus(focus, layout_state, panel->panel_focus);
+      end_mouse_selection(panel);
+      clear_line_select_commit(panel);
+      return true;
+    }
+    if (panel->mouse_selecting || panel->line_select_commit_line >= 0) {
+      end_mouse_selection(panel);
+      clear_line_select_commit(panel);
+      return true;
+    }
+  }
+
   if (m.button == Mouse::Left && m.motion == Mouse::Released &&
       panel->line_select_commit_line >= 0) {
     if (panel->line_select_anchor >= 0) {
@@ -6665,11 +6681,15 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
           max_line_len = std::max(max_line_len, static_cast<int>(line.size()));
           gutter_rows.push_back(text(format_line_number(line_index + 1, gutter_w)) |
                               color(theme::Muted()) | row_bg);
+          // Clip before highlight: size|xflex_shrink would collapse 1-cell space
+          // segments when the full line is wider than the viewport (FTXUI shrink).
+          const std::string view_line =
+              slice_line_for_view(line, buffer.scroll_col, code_width);
           Element code_line =
               indexed_virtual
-                  ? HighlightCodeLine(line, line_index, nullptr, -1, {}, 0, &virtual_hl_ctx)
-                  : HighlightCodeLineLite(line);
-          code_rows.push_back(code_line | size(WIDTH, EQUAL, code_width) | xflex_shrink | row_bg);
+                  ? HighlightCodeLine(view_line, line_index, nullptr, -1, {}, 0, &virtual_hl_ctx)
+                  : HighlightCodeLineLite(view_line);
+          code_rows.push_back(code_line | size(WIDTH, EQUAL, code_width) | row_bg);
         }
 
         if (virtual_store->loading_more()) {

@@ -18,8 +18,6 @@ namespace tuide {
 
 using namespace ftxui;
 
-namespace {
-
 std::string slice_line_for_view(const std::string& line, int scroll_col, int view_width) {
   const int tab_size = std::max(1, editor_indent::tab_display_width());
   const int scroll_vis = byte_index_to_visual_column(line, scroll_col, tab_size);
@@ -33,6 +31,8 @@ std::string slice_line_for_view(const std::string& line, int scroll_col, int vie
   }
   return slice;
 }
+
+namespace {
 
 int body_start_visual_column(const std::string& source_line, int scroll_col,
                              int guide_prefix_visual, int tab_size) {
