@@ -384,6 +384,8 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	secondary_workspace_.open_file_confirm = &open_file_confirm_state_;
 	workspace_.external_file_conflict = &external_file_conflict_state_;
 	secondary_workspace_.external_file_conflict = &external_file_conflict_state_;
+	workspace_.app_settings = &app_settings_;
+	secondary_workspace_.app_settings = &app_settings_;
 	const auto wire_ui_tasks = [this](WorkspaceModel *workspace) {
 		if (workspace == nullptr) {
 			return;
@@ -3185,6 +3187,8 @@ int Application::run() {
 	secondary_workspace_.open_file_confirm = &open_file_confirm_state_;
 	workspace_.external_file_conflict = &external_file_conflict_state_;
 	secondary_workspace_.external_file_conflict = &external_file_conflict_state_;
+	workspace_.app_settings = &app_settings_;
+	secondary_workspace_.app_settings = &app_settings_;
 	auto with_open_file_confirm =
 	    MakeOpenFileConfirmOverlay(with_debug_launch, &open_file_confirm_state_, &layout_state_,
 	                               &workspace_, [this](const std::string &path, int line, int col) {

@@ -13,12 +13,14 @@ struct FileOpenAssessment {
 };
 
 struct FileOpenPolicy {
-  // Soft warn: opens in read-only virtualized (viewport-only) mode after confirm.
+  // Default soft warn: opens in read-only virtualized (viewport-only) mode after confirm.
   static constexpr std::uintmax_t kLargeFileBytes = 10ULL * 1024 * 1024;
 };
 
-FileOpenAssessment assess_file_open(const std::string& absolute_path);
-bool should_open_as_virtual_text(const std::string& absolute_path);
+FileOpenAssessment assess_file_open(const std::string& absolute_path,
+                                    std::uintmax_t large_file_bytes = FileOpenPolicy::kLargeFileBytes);
+bool should_open_as_virtual_text(const std::string& absolute_path,
+                                 std::uintmax_t large_file_bytes = FileOpenPolicy::kLargeFileBytes);
 std::string format_file_size(std::uintmax_t bytes);
 
 }  // namespace tuide

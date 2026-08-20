@@ -82,6 +82,7 @@ struct SettingsModalState {
   bool draft_perf_dump_enabled = false;
   bool draft_development_options_enabled = false;
   bool draft_show_all_workspace_files = false;
+  int draft_large_file_virtual_mb = 10;
   i18n::UiLocale draft_ui_locale = i18n::UiLocale::kAuto;
   IconMode draft_icon_mode = IconMode::Auto;
   bool draft_clangd_use_gcc_query_driver = true;

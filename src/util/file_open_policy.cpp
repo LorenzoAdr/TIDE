@@ -26,7 +26,8 @@ std::string read_binary_sample(const std::string& absolute_path) {
 
 }  // namespace
 
-FileOpenAssessment assess_file_open(const std::string& absolute_path) {
+FileOpenAssessment assess_file_open(const std::string& absolute_path,
+                                    std::uintmax_t large_file_bytes) {
   FileOpenAssessment result;
   if (absolute_path.empty()) {
     return result;
@@ -53,17 +54,20 @@ FileOpenAssessment assess_file_open(const std::string& absolute_path) {
     return result;
   }
 
-  if (result.size_bytes > FileOpenPolicy::kLargeFileBytes) {
+  const std::uintmax_t threshold =
+      large_file_bytes == 0 ? FileOpenPolicy::kLargeFileBytes : large_file_bytes;
+  if (result.size_bytes > threshold) {
     result.kind = FileOpenKind::Large;
   }
   return result;
 }
 
-bool should_open_as_virtual_text(const std::string& absolute_path) {
+bool should_open_as_virtual_text(const std::string& absolute_path,
+                                 std::uintmax_t large_file_bytes) {
   if (absolute_path.empty() || is_tabular_path(absolute_path)) {
     return false;
   }
-  return assess_file_open(absolute_path).kind == FileOpenKind::Large;
+  return assess_file_open(absolute_path, large_file_bytes).kind == FileOpenKind::Large;
 }
 
 std::string format_file_size(std::uintmax_t bytes) {

@@ -5,6 +5,7 @@
 #include <fstream>
 #include <filesystem>
 
+#include "app/app_settings.hpp"
 #include "editor/undo_stack.hpp"
 #include "editor/editor_buffer_source.hpp"
 #include "ui/external_file_conflict.hpp"
@@ -22,6 +23,13 @@ namespace fs = std::filesystem;
 namespace tuide {
 
 namespace {
+
+std::uintmax_t large_file_threshold_bytes(const AppSettings* settings) {
+  if (settings == nullptr) {
+    return FileOpenPolicy::kLargeFileBytes;
+  }
+  return settings->large_file_virtual_bytes();
+}
 
 void set_welcome_buffer(EditorBuffer* buffer) {
   buffer->lines.clear();
@@ -401,7 +409,7 @@ int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path, boo
   tab.external = external;
   if (is_tabular_path(absolute_path)) {
     load_tabular_placeholder(&tab.buffer, absolute_path);
-  } else if (should_open_as_virtual_text(absolute_path)) {
+  } else if (should_open_as_virtual_text(absolute_path, large_file_threshold_bytes(app_settings))) {
     load_virtual_text_placeholder(&tab.buffer, absolute_path);
     tab.large_virtual_view = true;
     tab.read_only = true;
@@ -463,7 +471,8 @@ bool WorkspaceModel::check_open_guard(const std::string& absolute_path) {
     return true;
   }
 
-  const FileOpenAssessment assessment = assess_file_open(absolute_path);
+  const FileOpenAssessment assessment =
+      assess_file_open(absolute_path, large_file_threshold_bytes(app_settings));
   if (assessment.kind == FileOpenKind::Binary) {
     const std::string name = fs::path(absolute_path).filename().string();
     open_file_confirm->show_binary_warning(absolute_path, name);

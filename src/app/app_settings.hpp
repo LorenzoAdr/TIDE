@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include "i18n/locale.hpp"
@@ -40,6 +41,8 @@ struct AppSettings {
   bool show_all_workspace_files = false;
   bool helix_mode_enabled = false;
   bool workspace_auto_detect_enabled = true;
+  // Soft large-file threshold (MB): opens read-only virtualized after confirm. Allowed: 1, 2, 5, 10.
+  int large_file_virtual_mb = 10;
   IconMode icon_mode = IconMode::Auto;
   i18n::UiLocale ui_locale = i18n::UiLocale::kAuto;
 
@@ -47,6 +50,10 @@ struct AppSettings {
   bool save() const;
 
   static std::string  config_path();
+
+  // Normalize to {1, 2, 5, 10}; unknown values snap to nearest preset (default 10).
+  static int clamp_large_file_virtual_mb(int mb);
+  std::uintmax_t large_file_virtual_bytes() const;
 };
 
 }  // namespace tuide

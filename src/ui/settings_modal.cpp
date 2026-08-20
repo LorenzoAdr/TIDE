@@ -186,10 +186,11 @@ constexpr int kShowAllFiles = 3;
 constexpr int kMonitor = 4;
 constexpr int kPerfDump = 5;
 constexpr int kIcons = 6;
-constexpr int kHelixMode = 7;
-constexpr int kWorkspaceAutoDetect = 8;
-constexpr int kDevelopmentOptions = 9;
-constexpr int kBaseOptions = 10;
+constexpr int kLargeFileVirtual = 7;
+constexpr int kHelixMode = 8;
+constexpr int kWorkspaceAutoDetect = 9;
+constexpr int kDevelopmentOptions = 10;
+constexpr int kBaseOptions = 11;
 
 #ifdef TUIDE_HAS_BUNDLED_CLANGD
 constexpr int kForceBundledClangd = kBaseOptions;
@@ -472,6 +473,8 @@ std::vector<SettingsOption> global_settings_options() {
        i18n::tr("settings.general.perf_dump.description")},
       {i18n::tr("settings.general.icons.label"),
        i18n::tr("settings.general.icons.description")},
+      {i18n::tr("settings.general.large_file_virtual.label"),
+       i18n::tr("settings.general.large_file_virtual.description")},
       {i18n::tr("settings.general.helix_mode.label"),
        i18n::tr("settings.general.helix_mode.description")},
       {i18n::tr("settings.general.workspace_auto_detect.label"),
@@ -670,6 +673,36 @@ std::string icon_mode_option_label(IconMode mode, const std::string& text) {
   return i18n::tr_fmt("settings.icon_mode.checked", {icon_mode_label(mode), text});
 }
 
+std::string large_file_virtual_label(int mb) {
+  return i18n::tr_fmt("settings.general.large_file_virtual.value",
+                      {std::to_string(AppSettings::clamp_large_file_virtual_mb(mb))});
+}
+
+std::string large_file_virtual_option_label(int mb, const std::string& text) {
+  return i18n::tr_fmt("settings.icon_mode.checked", {large_file_virtual_label(mb), text});
+}
+
+void cycle_large_file_virtual_mb(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  switch (AppSettings::clamp_large_file_virtual_mb(state->draft_large_file_virtual_mb)) {
+    case 1:
+      state->draft_large_file_virtual_mb = 2;
+      break;
+    case 2:
+      state->draft_large_file_virtual_mb = 5;
+      break;
+    case 5:
+      state->draft_large_file_virtual_mb = 10;
+      break;
+    case 10:
+    default:
+      state->draft_large_file_virtual_mb = 1;
+      break;
+  }
+}
+
 std::string scope_highlight_strength_label(int strength) {
   if (strength <= 45) {
     return i18n::tr("settings.scope_strength.subtle");
@@ -717,6 +750,8 @@ bool option_checked(const SettingsModalState* state, int index) {
       return state->draft_perf_dump_enabled;
     case kIcons:
       return state->draft_icon_mode == IconMode::Always;
+    case kLargeFileVirtual:
+      return true;
     case kHelixMode:
       return state->draft_helix_mode_enabled;
     case kWorkspaceAutoDetect:
@@ -773,6 +808,9 @@ void toggle_option(SettingsModalState* state, int index) {
           break;
       }
       configure_glyphs(resolve_icon_mode(state->draft_icon_mode));
+      break;
+    case kLargeFileVirtual:
+      cycle_large_file_virtual_mb(state);
       break;
     case kHelixMode:
       state->draft_helix_mode_enabled = !state->draft_helix_mode_enabled;
@@ -2237,6 +2275,9 @@ SettingsBodyContent build_general_settings(SettingsModalState* state) {
               color(selected ? theme::Accent() : theme::Header()) | bold;
     } else if (i == kIcons) {
       title = text(icon_mode_option_label(state->draft_icon_mode, option.label)) |
+              color(selected ? theme::Accent() : theme::Header()) | bold;
+    } else if (i == kLargeFileVirtual) {
+      title = text(large_file_virtual_option_label(state->draft_large_file_virtual_mb, option.label)) |
               color(selected ? theme::Accent() : theme::Header()) | bold;
     } else {
       title = text(checkbox_label(checked, option.label)) |
@@ -3896,6 +3937,8 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_monitor_enabled = settings.monitor_enabled;
   state->draft_perf_dump_enabled = settings.perf_dump_enabled;
   state->draft_icon_mode = settings.icon_mode;
+  state->draft_large_file_virtual_mb =
+      AppSettings::clamp_large_file_virtual_mb(settings.large_file_virtual_mb);
   state->draft_ui_locale = settings.ui_locale;
   i18n::set_locale(state->draft_ui_locale);
   state->draft_theme = workspace_config.theme;
@@ -3997,6 +4040,8 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->monitor_enabled = state->draft_monitor_enabled;
   settings->perf_dump_enabled = state->draft_perf_dump_enabled;
   settings->icon_mode = state->draft_icon_mode;
+  settings->large_file_virtual_mb =
+      AppSettings::clamp_large_file_virtual_mb(state->draft_large_file_virtual_mb);
   settings->ui_locale = state->draft_ui_locale;
   settings->save();
   if (on_apply) {

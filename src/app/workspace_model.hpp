@@ -14,6 +14,7 @@ namespace tuide {
 struct OpenFileConfirmState;
 struct ExternalFileConflictState;
 struct GitService;
+struct AppSettings;
 
 enum class DiskReloadResult { None, Reloaded, Conflict };
 
@@ -29,6 +30,7 @@ struct WorkspaceModel {
   std::string status_message;
   OpenFileConfirmState* open_file_confirm = nullptr;
   ExternalFileConflictState* external_file_conflict = nullptr;
+  AppSettings* app_settings = nullptr;
   using UiTask = std::function<void()>;
   std::function<void(UiTask)> enqueue_ui_task;
 

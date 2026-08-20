@@ -1,5 +1,6 @@
 #include "app/app_settings.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -17,7 +18,27 @@ namespace {
 constexpr const char* kConfigDir = ".config/tuide";
 constexpr const char* kConfigFile = "settings.json";
 
+constexpr int kLargeFileVirtualPresets[] = {1, 2, 5, 10};
+
 }  // namespace
+
+int AppSettings::clamp_large_file_virtual_mb(int mb) {
+  int best = kLargeFileVirtualPresets[3];
+  int best_dist = std::abs(mb - best);
+  for (int preset : kLargeFileVirtualPresets) {
+    const int dist = std::abs(mb - preset);
+    if (dist < best_dist) {
+      best = preset;
+      best_dist = dist;
+    }
+  }
+  return best;
+}
+
+std::uintmax_t AppSettings::large_file_virtual_bytes() const {
+  return static_cast<std::uintmax_t>(clamp_large_file_virtual_mb(large_file_virtual_mb)) * 1024ULL *
+         1024ULL;
+}
 
 std::string AppSettings::config_path() {
   const char* home = std::getenv("HOME");
@@ -179,6 +200,10 @@ AppSettings AppSettings::load() {
         doc["workspace_auto_detect_enabled"].is_boolean()) {
       settings.workspace_auto_detect_enabled = doc["workspace_auto_detect_enabled"].get<bool>();
     }
+    if (doc.contains("large_file_virtual_mb") && doc["large_file_virtual_mb"].is_number_integer()) {
+      settings.large_file_virtual_mb =
+          clamp_large_file_virtual_mb(doc["large_file_virtual_mb"].get<int>());
+    }
     if (doc.contains("icon_mode") && doc["icon_mode"].is_string()) {
       const std::string mode = doc["icon_mode"].get<std::string>();
       if (mode == "always") {
@@ -237,6 +262,7 @@ bool AppSettings::save() const {
   doc["show_all_workspace_files"] = show_all_workspace_files;
   doc["helix_mode_enabled"] = helix_mode_enabled;
   doc["workspace_auto_detect_enabled"] = workspace_auto_detect_enabled;
+  doc["large_file_virtual_mb"] = clamp_large_file_virtual_mb(large_file_virtual_mb);
   switch (icon_mode) {
     case IconMode::Always:
       doc["icon_mode"] = "always";
