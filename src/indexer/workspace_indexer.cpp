@@ -6,6 +6,7 @@
 #include <functional>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "indexer/index_rules.hpp"
 #include "indexer/workspace_indexer_rg.hpp"
@@ -242,7 +243,9 @@ std::vector<FileIndexChange> coalesce_file_index_changes(std::vector<FileIndexCh
   std::vector<FileIndexChange> out;
   out.reserve(changes.size());
   std::vector<std::string> pending_prefixes;
-  bool pending_wake = false;
+  std::vector<FileIndexChange> pending_upserts;
+  bool pending_remove_wake = false;
+  bool pending_upsert_wake = false;
 
   auto flush_removes = [&]() {
     if (pending_prefixes.empty()) {
@@ -253,26 +256,63 @@ std::vector<FileIndexChange> coalesce_file_index_changes(std::vector<FileIndexCh
       FileIndexChange change;
       change.kind = FileIndexChangeKind::RemovePrefix;
       change.relative_path = std::move(prefix);
-      change.wake_ui = pending_wake;
+      change.wake_ui = pending_remove_wake;
       out.push_back(std::move(change));
     }
     pending_prefixes.clear();
-    pending_wake = false;
+    pending_remove_wake = false;
+  };
+
+  auto flush_upserts = [&]() {
+    if (pending_upserts.empty()) {
+      return;
+    }
+    // Last write wins per relative path (stable order of first appearance).
+    std::vector<FileIndexChange> unique;
+    unique.reserve(pending_upserts.size());
+    std::unordered_map<std::string, std::size_t> index_by_path;
+    for (FileIndexChange& change : pending_upserts) {
+      const auto it = index_by_path.find(change.relative_path);
+      if (it == index_by_path.end()) {
+        index_by_path.emplace(change.relative_path, unique.size());
+        unique.push_back(std::move(change));
+      } else {
+        unique[it->second].absolute_path = std::move(change.absolute_path);
+        unique[it->second].wake_ui = unique[it->second].wake_ui || change.wake_ui;
+      }
+    }
+    for (FileIndexChange& change : unique) {
+      change.wake_ui = pending_upsert_wake || change.wake_ui;
+      out.push_back(std::move(change));
+    }
+    pending_upserts.clear();
+    pending_upsert_wake = false;
   };
 
   for (FileIndexChange& change : changes) {
     if (change.kind == FileIndexChangeKind::Remove ||
         change.kind == FileIndexChangeKind::RemovePrefix) {
+      flush_upserts();
       if (!change.relative_path.empty()) {
         pending_prefixes.push_back(std::move(change.relative_path));
-        pending_wake = pending_wake || change.wake_ui;
+        pending_remove_wake = pending_remove_wake || change.wake_ui;
+      }
+      continue;
+    }
+    if (change.kind == FileIndexChangeKind::Upsert) {
+      flush_removes();
+      if (!change.relative_path.empty()) {
+        pending_upsert_wake = pending_upsert_wake || change.wake_ui;
+        pending_upserts.push_back(std::move(change));
       }
       continue;
     }
     flush_removes();
+    flush_upserts();
     out.push_back(std::move(change));
   }
   flush_removes();
+  flush_upserts();
   return out;
 }
 
@@ -425,7 +465,7 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
       if (event->mask & (IN_DELETE | IN_MOVED_FROM)) {
         // RemovePrefix covers files and directories (exact path + children). IN_ISDIR is
         // often absent on delete, so we always use the prefix form.
-        if (should_list_workspace_path(rel_str, filter_options)) {
+        if (should_track_workspace_delete(rel_str, filter_options)) {
           FileIndexChange change;
           change.kind = FileIndexChangeKind::RemovePrefix;
           change.relative_path = rel_str;
@@ -763,6 +803,19 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
 void WorkspaceIndexer::upsert_file(const std::string& workspace_root,
                                    const std::string& relative_file,
                                    const std::string& absolute_path) {
+  FileIndexChange change;
+  change.kind = FileIndexChangeKind::Upsert;
+  change.relative_path = relative_file;
+  change.absolute_path = absolute_path;
+  upsert_files(workspace_root, std::vector<FileIndexChange>{std::move(change)});
+}
+
+void WorkspaceIndexer::upsert_files(const std::string& workspace_root,
+                                    const std::vector<FileIndexChange>& upserts) {
+  if (upserts.empty()) {
+    return;
+  }
+
   IndexFilterOptions options;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -770,14 +823,42 @@ void WorkspaceIndexer::upsert_file(const std::string& workspace_root,
       options = snapshot_->filter_options;
     }
   }
-  if (!should_list_workspace_path(relative_file, options)) {
-    remove_file(workspace_root, relative_file);
+
+  std::vector<std::string> to_add;
+  std::vector<std::string> to_remove;
+  to_add.reserve(upserts.size());
+  for (const FileIndexChange& change : upserts) {
+    if (change.relative_path.empty()) {
+      continue;
+    }
+    if (!should_list_workspace_path(change.relative_path, options)) {
+      to_remove.push_back(change.relative_path);
+      continue;
+    }
+    std::error_code ec;
+    if (change.absolute_path.empty() || !fs::is_regular_file(change.absolute_path, ec)) {
+      to_remove.push_back(change.relative_path);
+      continue;
+    }
+    to_add.push_back(change.relative_path);
+  }
+
+  if (to_add.empty() && to_remove.empty()) {
     return;
   }
-  std::error_code ec;
-  if (!fs::is_regular_file(absolute_path, ec)) {
-    remove_file(workspace_root, relative_file);
-    return;
+
+  // Dedupe adds (last occurrence wins) while preserving sorted insert via set erase+push.
+  std::unordered_map<std::string, std::size_t> add_index;
+  std::vector<std::string> unique_adds;
+  unique_adds.reserve(to_add.size());
+  for (std::string& path : to_add) {
+    const auto it = add_index.find(path);
+    if (it == add_index.end()) {
+      add_index.emplace(path, unique_adds.size());
+      unique_adds.push_back(std::move(path));
+    } else {
+      unique_adds[it->second] = std::move(path);
+    }
   }
 
   auto updated = std::make_shared<IndexSnapshot>();
@@ -793,8 +874,20 @@ void WorkspaceIndexer::upsert_file(const std::string& workspace_root,
   }
 
   auto& files = updated->files;
-  files.erase(std::remove(files.begin(), files.end(), relative_file), files.end());
-  files.push_back(relative_file);
+  if (!to_remove.empty() || !unique_adds.empty()) {
+    std::unordered_set<std::string> drop;
+    drop.reserve(to_remove.size() + unique_adds.size());
+    for (const std::string& path : to_remove) {
+      drop.insert(path);
+    }
+    for (const std::string& path : unique_adds) {
+      drop.insert(path);
+    }
+    files.erase(std::remove_if(files.begin(), files.end(),
+                               [&](const std::string& path) { return drop.count(path) > 0; }),
+                files.end());
+  }
+  files.insert(files.end(), unique_adds.begin(), unique_adds.end());
   std::sort(files.begin(), files.end());
   rebuild_index_derived_fields(updated.get());
 

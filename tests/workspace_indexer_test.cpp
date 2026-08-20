@@ -54,6 +54,27 @@ void test_file_picker_excludes_binaries_keeps_pdf() {
   check((*snapshot.file_picker_catalog)[1].path == "docs/guide.pdf", "pdf in catalog");
 }
 
+void test_build_noise_paths_not_listed() {
+  check(tuide::is_build_noise_path("chapters/a.aux"), "aux");
+  check(tuide::is_build_noise_path("main.log"), "log");
+  check(tuide::is_build_noise_path("main.toc"), "toc");
+  check(tuide::is_build_noise_path("main.fls"), "fls");
+  check(tuide::is_build_noise_path("main.fdb_latexmk"), "fdb");
+  check(tuide::is_build_noise_path("main.synctex.gz"), "synctex");
+  check(tuide::is_build_noise_path("main.Synctex.gz"), "synctex case");
+  check(tuide::is_build_noise_path("main.run.xml"), "run.xml");
+  check(tuide::is_build_noise_path("refs.bbl"), "bbl");
+  check(tuide::is_build_noise_path("refs.blg"), "blg");
+  check(!tuide::is_build_noise_path("main.tex"), "tex kept");
+  check(!tuide::is_build_noise_path("main.pdf"), "pdf not noise");
+
+  check(!tuide::should_list_workspace_path("chapters/a.aux"), "aux not listed");
+  check(!tuide::should_list_workspace_path("main.log"), "log not listed");
+  check(tuide::should_list_workspace_path("main.tex"), "tex listed");
+  check(tuide::should_track_workspace_delete("chapters/a.aux"), "aux delete tracked");
+  check(!tuide::should_track_workspace_delete("build/a.aux"), "stub aux delete ignored");
+}
+
 void test_index_path_matches_prefix() {
   check(tuide::index_path_matches_prefix("chapters/a.aux", "chapters/a.aux"), "exact");
   check(tuide::index_path_matches_prefix("chapters/a/x.tex", "chapters/a"), "child");
@@ -110,6 +131,33 @@ void test_coalesce_file_index_changes_drops_dominated_removes() {
   check(out[2].relative_path == "tmp.aux", "trailing path");
 }
 
+void test_coalesce_dedupes_consecutive_upserts() {
+  std::vector<tuide::FileIndexChange> changes;
+  for (int i = 0; i < 3; ++i) {
+    tuide::FileIndexChange c;
+    c.kind = tuide::FileIndexChangeKind::Upsert;
+    c.relative_path = "src/a.cpp";
+    c.absolute_path = "/tmp/a.cpp." + std::to_string(i);
+    c.wake_ui = true;
+    changes.push_back(c);
+  }
+  {
+    tuide::FileIndexChange c;
+    c.kind = tuide::FileIndexChangeKind::Upsert;
+    c.relative_path = "src/b.cpp";
+    c.absolute_path = "/tmp/b.cpp";
+    c.wake_ui = false;
+    changes.push_back(c);
+  }
+
+  const auto out = tuide::coalesce_file_index_changes(std::move(changes));
+  check(out.size() == 2, "deduped upsert size");
+  check(out[0].relative_path == "src/a.cpp", "first path");
+  check(out[0].absolute_path == "/tmp/a.cpp.2", "last absolute wins");
+  check(out[0].wake_ui, "wake preserved");
+  check(out[1].relative_path == "src/b.cpp", "second path");
+}
+
 void test_fs_change_debounce_constants() {
   check(tuide::kIndexerFsChangeDebounceMs > 0, "debounce configured");
   check(tuide::kIndexerFsChangeMaxDebounceMs > tuide::kIndexerFsChangeDebounceMs, "max > quiet");
@@ -121,8 +169,10 @@ int main() {
   test_rebuild_files_lower();
   test_rebuild_file_picker_catalog();
   test_file_picker_excludes_binaries_keeps_pdf();
+  test_build_noise_paths_not_listed();
   test_index_path_matches_prefix();
   test_coalesce_file_index_changes_drops_dominated_removes();
+  test_coalesce_dedupes_consecutive_upserts();
   test_fs_change_debounce_constants();
   return 0;
 }

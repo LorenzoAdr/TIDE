@@ -33,6 +33,30 @@ const std::unordered_set<std::string>& binary_extensions() {
   return kExtensions;
 }
 
+const std::unordered_set<std::string>& build_noise_extensions() {
+  // Single-suffix auxiliaries rewritten heavily by LaTeX/latexmk and similar toolchains.
+  static const std::unordered_set<std::string> kExtensions = {
+      ".aux", ".bbl", ".bcf", ".blg", ".fdb_latexmk", ".fls", ".glo", ".gls",
+      ".idx", ".ilg", ".ind", ".lof", ".log", ".lot", ".nav", ".out", ".snm",
+      ".toc", ".vrb", ".xdv", ".dvi", ".acn", ".acr", ".alg", ".pyg",
+  };
+  return kExtensions;
+}
+
+bool path_ends_with_ci(const std::string& path, const std::string& suffix) {
+  if (path.size() < suffix.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < suffix.size(); ++i) {
+    const unsigned char a = static_cast<unsigned char>(path[path.size() - suffix.size() + i]);
+    const unsigned char b = static_cast<unsigned char>(suffix[i]);
+    if (std::tolower(a) != std::tolower(b)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const std::unordered_set<std::string>& lazy_stub_dir_names() {
   static const std::unordered_set<std::string> kNames = {
       ".git",
@@ -110,6 +134,18 @@ bool is_indexed_source_path(const std::string& path) {
          ext == ".xsl" || ext == ".xslt";
 }
 
+bool is_build_noise_path(const std::string& path) {
+  if (path.empty()) {
+    return false;
+  }
+  // Compound suffixes (extension() only sees the last component).
+  if (path_ends_with_ci(path, ".synctex.gz") || path_ends_with_ci(path, ".synctex(busy)") ||
+      path_ends_with_ci(path, ".run.xml")) {
+    return true;
+  }
+  return build_noise_extensions().count(lowercase_extension(path)) > 0;
+}
+
 bool should_list_workspace_path(const std::string& relative_path,
                                 const IndexFilterOptions& options) {
   if (relative_path.empty()) {
@@ -117,6 +153,11 @@ bool should_list_workspace_path(const std::string& relative_path,
   }
   // Nunca indexar en bulk rutas bajo stubs pesados (build/, .git/, …).
   if (path_has_lazy_stub_component(relative_path)) {
+    return false;
+  }
+  // Always hide compile auxiliaries — even with show_all_files — so latexmk storms
+  // never enqueue explorer Upserts.
+  if (is_build_noise_path(relative_path)) {
     return false;
   }
   if (options.show_all_files) {
@@ -128,6 +169,18 @@ bool should_list_workspace_path(const std::string& relative_path,
     }
   }
   return true;
+}
+
+bool should_track_workspace_delete(const std::string& relative_path,
+                                   const IndexFilterOptions& options) {
+  if (should_list_workspace_path(relative_path, options)) {
+    return true;
+  }
+  // Noise was formerly listed; still accept deletes so make clean clears stale rows.
+  if (relative_path.empty() || path_has_lazy_stub_component(relative_path)) {
+    return false;
+  }
+  return is_build_noise_path(relative_path);
 }
 
 bool should_index_relative_path(const std::string& relative_path,

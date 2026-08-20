@@ -51,7 +51,8 @@ constexpr int kIndexerFsChangeMaxDebounceMs = 1000;
 // Path equals prefix, or is a descendant (prefix + '/').
 bool index_path_matches_prefix(const std::string& path, const std::string& prefix);
 
-// Drop RemovePrefix entries dominated by a parent remove; preserve order vs Upsert/IndexDirectory.
+// Drop dominated RemovePrefix; dedupe consecutive Upserts (last absolute wins).
+// Preserve order relative to IndexDirectory and Upsert↔Remove boundaries.
 std::vector<FileIndexChange> coalesce_file_index_changes(std::vector<FileIndexChange> changes);
 
 class WorkspaceIndexer {
@@ -65,6 +66,9 @@ class WorkspaceIndexer {
                   const std::string& open_file_path = {});
   void upsert_file(const std::string& workspace_root, const std::string& relative_file,
                    const std::string& absolute_path);
+  // One snapshot copy + one derived-fields rebuild for a create/modify storm.
+  void upsert_files(const std::string& workspace_root,
+                    const std::vector<FileIndexChange>& upserts);
   void remove_file(const std::string& workspace_root, const std::string& relative_file);
   void index_directory(const std::string& workspace_root, const std::string& relative_dir,
                        const std::string& absolute_dir);

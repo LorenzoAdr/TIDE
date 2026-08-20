@@ -2561,6 +2561,7 @@ void Application::process_index_changes() {
 	};
 
 	std::vector<std::string> pending_removes;
+	std::vector<FileIndexChange> pending_upserts;
 	auto flush_pending_removes = [&]() {
 		if (pending_removes.empty()) {
 			return;
@@ -2568,6 +2569,17 @@ void Application::process_index_changes() {
 		indexer_.remove_path_prefixes(workspace_.root, pending_removes);
 		symbol_indexer_.remove_path_prefixes(workspace_.root, pending_removes);
 		pending_removes.clear();
+	};
+	auto flush_pending_upserts = [&]() {
+		if (pending_upserts.empty()) {
+			return;
+		}
+		indexer_.upsert_files(workspace_.root, pending_upserts);
+		for (const FileIndexChange& change : pending_upserts) {
+			symbol_indexer_.reindex_file(workspace_.root, change.relative_path,
+			                             change.absolute_path);
+		}
+		pending_upserts.clear();
 	};
 
 	for (const auto &change : coalesce_file_index_changes(indexer_.drain_changes())) {
@@ -2578,12 +2590,14 @@ void Application::process_index_changes() {
 		switch (change.kind) {
 		case FileIndexChangeKind::Remove:
 		case FileIndexChangeKind::RemovePrefix:
+			flush_pending_upserts();
 			if (!change.relative_path.empty()) {
 				pending_removes.push_back(change.relative_path);
 			}
 			break;
 		case FileIndexChangeKind::IndexDirectory:
 			flush_pending_removes();
+			flush_pending_upserts();
 			indexer_.index_directory(workspace_.root, change.relative_path,
 			                         change.absolute_path);
 			if (auto snapshot = indexer_.snapshot()) {
@@ -2600,13 +2614,12 @@ void Application::process_index_changes() {
 		case FileIndexChangeKind::Upsert:
 		default:
 			flush_pending_removes();
-			indexer_.upsert_file(workspace_.root, change.relative_path, change.absolute_path);
-			symbol_indexer_.reindex_file(workspace_.root, change.relative_path,
-			                             change.absolute_path);
+			pending_upserts.push_back(change);
 			break;
 		}
 	}
 	flush_pending_removes();
+	flush_pending_upserts();
 	// Solo repintar cuando el listado del árbol puede haber cambiado (alta/baja/rename).
 	// Un modify silencioso (p. ej. reindex de sources) no debe forzar otro frame.
 	if (changed && wake_ui) {
