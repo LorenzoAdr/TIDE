@@ -144,14 +144,14 @@ Element render_indent_prefix(const std::string& guide_text, int caret_vis_in_gui
                              int sel_end, const Decorator& primary_cursor) {
   const int vis_width = guide_visual_width(guide_text);
   if (vis_width <= 0) {
-    return text(guide_text.empty() ? " " : guide_text) | color(theme::AccentDim());
+    return text(guide_text.empty() ? " " : guide_text) | color(theme::IndentGuide());
   }
   const int clipped_sel_start = std::max(0, sel_start);
   const int clipped_sel_end = std::min(vis_width, sel_end);
   const bool has_sel = clipped_sel_end > clipped_sel_start;
   const bool has_caret = caret_vis_in_guide >= 0 && caret_vis_in_guide < vis_width;
   if (!has_sel && !has_caret) {
-    return text(guide_text) | color(theme::AccentDim());
+    return text(guide_text) | color(theme::IndentGuide());
   }
 
   std::set<int> cuts;
@@ -183,7 +183,7 @@ Element render_indent_prefix(const std::string& guide_text, int caret_vis_in_gui
     } else {
       const std::size_t from = guide_byte_offset_at_visual(guide_text, prev);
       const std::size_t to = guide_byte_offset_at_visual(guide_text, bp);
-      Element cell = text(guide_text.substr(from, to - from)) | color(theme::AccentDim());
+      Element cell = text(guide_text.substr(from, to - from)) | color(theme::IndentGuide());
       if (selected) {
         cell = std::move(cell) | bgcolor(theme::SelectionBg());
       }
@@ -191,7 +191,7 @@ Element render_indent_prefix(const std::string& guide_text, int caret_vis_in_gui
     }
     prev = bp;
   }
-  return parts.empty() ? text(guide_text) | color(theme::AccentDim()) : hbox(std::move(parts));
+  return parts.empty() ? text(guide_text) | color(theme::IndentGuide()) : hbox(std::move(parts));
 }
 
 Element render_primary_caret_tail(const EditorBuffer& buffer, int line_index, bool editor_focused,

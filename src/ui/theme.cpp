@@ -729,6 +729,16 @@ Color AccentDim() {
   return current_palette().accent_dim;
 }
 
+Color IndentGuide() {
+  const ColorRgb code = effective_code_bg_rgb();
+  const ColorRgb tip = g_overrides.text ? dim(*g_overrides.text, 0.55f)
+                                        : (g_overrides.title || has_ui_color_overrides()
+                                               ? dim(effective_title_rgb(), 0.45f)
+                                               : current_palette().muted_rgb);
+  // ~20% toward muted/title keeps │ visible without pulling focus from syntax.
+  return from_rgb(blend(code, tip, 0.20f));
+}
+
 Color Play() { return current_palette().play; }
 Color Pause() { return current_palette().pause; }
 Color Stop() { return current_palette().stop; }

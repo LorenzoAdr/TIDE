@@ -97,6 +97,8 @@ Color TabIdle();
 
 Color Accent();
 Color AccentDim();
+// Editor indent guides: softer than AccentDim so they don't compete with code.
+Color IndentGuide();
 Color Play();
 Color Pause();
 Color Stop();
