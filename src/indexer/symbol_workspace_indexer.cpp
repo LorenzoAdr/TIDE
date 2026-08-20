@@ -207,6 +207,14 @@ void SymbolWorkspaceIndexer::remove_path_prefix(const std::string& workspace_roo
   if (prefix.empty()) {
     return;
   }
+  remove_path_prefixes(workspace_root, std::vector<std::string>{prefix});
+}
+
+void SymbolWorkspaceIndexer::remove_path_prefixes(const std::string& workspace_root,
+                                                  const std::vector<std::string>& prefixes) {
+  if (prefixes.empty()) {
+    return;
+  }
 
   auto updated = std::make_shared<SymbolIndexSnapshot>();
   {
@@ -216,13 +224,29 @@ void SymbolWorkspaceIndexer::remove_path_prefix(const std::string& workspace_roo
     }
     updated->workspace_root = workspace_root;
     updated->partial = snapshot_->partial;
+    updated->symbols.reserve(snapshot_->symbols.size());
+    updated->refs.reserve(snapshot_->refs.size());
     for (const auto& sym : snapshot_->symbols) {
-      if (sym.file.rfind(prefix, 0) != 0) {
+      bool drop = false;
+      for (const std::string& prefix : prefixes) {
+        if (index_path_matches_prefix(sym.file, prefix)) {
+          drop = true;
+          break;
+        }
+      }
+      if (!drop) {
         updated->symbols.push_back(sym);
       }
     }
     for (const auto& ref : snapshot_->refs) {
-      if (ref.file.rfind(prefix, 0) != 0) {
+      bool drop = false;
+      for (const std::string& prefix : prefixes) {
+        if (index_path_matches_prefix(ref.file, prefix)) {
+          drop = true;
+          break;
+        }
+      }
+      if (!drop) {
         updated->refs.push_back(ref);
       }
     }

@@ -189,7 +189,9 @@ void append_lazy_stub_folders(const fs::path& root, const IndexFilterOptions& op
   }
 }
 
-bool path_matches_prefix(const std::string& path, const std::string& prefix) {
+}  // namespace
+
+bool index_path_matches_prefix(const std::string& path, const std::string& prefix) {
   if (prefix.empty()) {
     return false;
   }
@@ -201,6 +203,80 @@ bool path_matches_prefix(const std::string& path, const std::string& prefix) {
   }
   return path.rfind(prefix, 0) == 0;
 }
+
+namespace {
+
+void coalesce_remove_prefixes(std::vector<std::string>* prefixes) {
+  if (prefixes == nullptr || prefixes->size() <= 1) {
+    return;
+  }
+  std::sort(prefixes->begin(), prefixes->end(),
+            [](const std::string& a, const std::string& b) {
+              if (a.size() != b.size()) {
+                return a.size() < b.size();
+              }
+              return a < b;
+            });
+  prefixes->erase(std::unique(prefixes->begin(), prefixes->end()), prefixes->end());
+
+  std::vector<std::string> kept;
+  kept.reserve(prefixes->size());
+  for (const std::string& prefix : *prefixes) {
+    bool dominated = false;
+    for (const std::string& parent : kept) {
+      if (index_path_matches_prefix(prefix, parent)) {
+        dominated = true;
+        break;
+      }
+    }
+    if (!dominated) {
+      kept.push_back(prefix);
+    }
+  }
+  *prefixes = std::move(kept);
+}
+
+}  // namespace
+
+std::vector<FileIndexChange> coalesce_file_index_changes(std::vector<FileIndexChange> changes) {
+  std::vector<FileIndexChange> out;
+  out.reserve(changes.size());
+  std::vector<std::string> pending_prefixes;
+  bool pending_wake = false;
+
+  auto flush_removes = [&]() {
+    if (pending_prefixes.empty()) {
+      return;
+    }
+    coalesce_remove_prefixes(&pending_prefixes);
+    for (std::string& prefix : pending_prefixes) {
+      FileIndexChange change;
+      change.kind = FileIndexChangeKind::RemovePrefix;
+      change.relative_path = std::move(prefix);
+      change.wake_ui = pending_wake;
+      out.push_back(std::move(change));
+    }
+    pending_prefixes.clear();
+    pending_wake = false;
+  };
+
+  for (FileIndexChange& change : changes) {
+    if (change.kind == FileIndexChangeKind::Remove ||
+        change.kind == FileIndexChangeKind::RemovePrefix) {
+      if (!change.relative_path.empty()) {
+        pending_prefixes.push_back(std::move(change.relative_path));
+        pending_wake = pending_wake || change.wake_ui;
+      }
+      continue;
+    }
+    flush_removes();
+    out.push_back(std::move(change));
+  }
+  flush_removes();
+  return out;
+}
+
+namespace {
 
 void sort_unique_strings(std::vector<std::string>* values) {
   if (values == nullptr) {
@@ -275,11 +351,35 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
     }
   };
 
+  const auto kQuiet = std::chrono::milliseconds(kIndexerFsChangeDebounceMs);
+  const auto kMaxWait = std::chrono::milliseconds(kIndexerFsChangeMaxDebounceMs);
+  bool debounce_pending = false;
+  bool debounce_wake_ui = false;
+  auto last_event_time = std::chrono::steady_clock::now();
+  auto storm_start_time = last_event_time;
+
+  auto flush_notify = [&]() {
+    if (!debounce_pending || !on_changes) {
+      debounce_pending = false;
+      debounce_wake_ui = false;
+      return;
+    }
+    const bool wake = debounce_wake_ui;
+    debounce_pending = false;
+    debounce_wake_ui = false;
+    on_changes(wake);
+  };
+
   std::vector<char> buffer(64 * 1024);
   while (!stop_requested->load()) {
     const ssize_t length =
         read(inotify_fd, buffer.data(), static_cast<ssize_t>(buffer.size()));
+    const auto now = std::chrono::steady_clock::now();
     if (length < 0) {
+      if (debounce_pending &&
+          (now - last_event_time >= kQuiet || now - storm_start_time >= kMaxWait)) {
+        flush_notify();
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
       continue;
     }
@@ -395,8 +495,16 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
       wake_ui = true;
     }
 
-    if (queued && on_changes) {
-      on_changes(wake_ui);
+    if (queued) {
+      if (!debounce_pending) {
+        storm_start_time = now;
+      }
+      debounce_pending = true;
+      last_event_time = now;
+      debounce_wake_ui = debounce_wake_ui || wake_ui;
+      if (now - storm_start_time >= kMaxWait) {
+        flush_notify();
+      }
     }
   }
 }
@@ -774,6 +882,19 @@ void WorkspaceIndexer::remove_path_prefix(const std::string& workspace_root,
   if (prefix.empty()) {
     return;
   }
+  remove_path_prefixes(workspace_root, std::vector<std::string>{prefix});
+}
+
+void WorkspaceIndexer::remove_path_prefixes(const std::string& workspace_root,
+                                            const std::vector<std::string>& prefixes) {
+  if (prefixes.empty()) {
+    return;
+  }
+  std::vector<std::string> effective = prefixes;
+  coalesce_remove_prefixes(&effective);
+  if (effective.empty()) {
+    return;
+  }
 
   auto updated = std::make_shared<IndexSnapshot>();
   {
@@ -787,19 +908,20 @@ void WorkspaceIndexer::remove_path_prefix(const std::string& workspace_root,
     updated->folders = snapshot_->folders;
   }
 
+  const auto matches_any = [&](const std::string& path) {
+    for (const std::string& prefix : effective) {
+      if (index_path_matches_prefix(path, prefix)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   auto& files = updated->files;
-  files.erase(std::remove_if(files.begin(), files.end(),
-                             [&](const std::string& path) {
-                               return path_matches_prefix(path, prefix);
-                             }),
-              files.end());
+  files.erase(std::remove_if(files.begin(), files.end(), matches_any), files.end());
 
   auto& folders = updated->folders;
-  folders.erase(std::remove_if(folders.begin(), folders.end(),
-                                [&](const std::string& path) {
-                                  return path_matches_prefix(path, prefix);
-                                }),
-               folders.end());
+  folders.erase(std::remove_if(folders.begin(), folders.end(), matches_any), folders.end());
 
   rebuild_index_derived_fields(updated.get());
 

@@ -43,6 +43,17 @@ struct FileIndexChange {
   bool wake_ui = false;
 };
 
+// Quiet period before waking UI for FS storms (make clean, bulk deletes).
+constexpr int kIndexerFsChangeDebounceMs = 300;
+// Flush even if events keep arriving (avoids never refreshing under sustained churn).
+constexpr int kIndexerFsChangeMaxDebounceMs = 1000;
+
+// Path equals prefix, or is a descendant (prefix + '/').
+bool index_path_matches_prefix(const std::string& path, const std::string& prefix);
+
+// Drop RemovePrefix entries dominated by a parent remove; preserve order vs Upsert/IndexDirectory.
+std::vector<FileIndexChange> coalesce_file_index_changes(std::vector<FileIndexChange> changes);
+
 class WorkspaceIndexer {
  public:
   WorkspaceIndexer();
@@ -58,6 +69,9 @@ class WorkspaceIndexer {
   void index_directory(const std::string& workspace_root, const std::string& relative_dir,
                        const std::string& absolute_dir);
   void remove_path_prefix(const std::string& workspace_root, const std::string& prefix);
+  // One snapshot copy + one derived-fields rebuild for an entire delete storm.
+  void remove_path_prefixes(const std::string& workspace_root,
+                            const std::vector<std::string>& prefixes);
   bool refresh(const std::string& workspace_root);
   void stop();
   // Callback receives whether any queued change needs a UI wake (tree listing

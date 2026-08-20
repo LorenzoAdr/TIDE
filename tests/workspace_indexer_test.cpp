@@ -54,11 +54,75 @@ void test_file_picker_excludes_binaries_keeps_pdf() {
   check((*snapshot.file_picker_catalog)[1].path == "docs/guide.pdf", "pdf in catalog");
 }
 
+void test_index_path_matches_prefix() {
+  check(tuide::index_path_matches_prefix("chapters/a.aux", "chapters/a.aux"), "exact");
+  check(tuide::index_path_matches_prefix("chapters/a/x.tex", "chapters/a"), "child");
+  check(!tuide::index_path_matches_prefix("chapters/ab", "chapters/a"), "sibling prefix");
+  check(!tuide::index_path_matches_prefix("chapters", "chapters/a"), "parent");
+}
+
+void test_coalesce_file_index_changes_drops_dominated_removes() {
+  std::vector<tuide::FileIndexChange> changes;
+  {
+    tuide::FileIndexChange c;
+    c.kind = tuide::FileIndexChangeKind::RemovePrefix;
+    c.relative_path = "out/a.aux";
+    c.wake_ui = true;
+    changes.push_back(c);
+  }
+  {
+    tuide::FileIndexChange c;
+    c.kind = tuide::FileIndexChangeKind::RemovePrefix;
+    c.relative_path = "out";
+    c.wake_ui = true;
+    changes.push_back(c);
+  }
+  {
+    tuide::FileIndexChange c;
+    c.kind = tuide::FileIndexChangeKind::RemovePrefix;
+    c.relative_path = "out/b.log";
+    c.wake_ui = true;
+    changes.push_back(c);
+  }
+  {
+    tuide::FileIndexChange c;
+    c.kind = tuide::FileIndexChangeKind::Upsert;
+    c.relative_path = "main.tex";
+    c.absolute_path = "/tmp/main.tex";
+    c.wake_ui = true;
+    changes.push_back(c);
+  }
+  {
+    tuide::FileIndexChange c;
+    c.kind = tuide::FileIndexChangeKind::RemovePrefix;
+    c.relative_path = "tmp.aux";
+    c.wake_ui = true;
+    changes.push_back(c);
+  }
+
+  const auto out = tuide::coalesce_file_index_changes(std::move(changes));
+  check(out.size() == 3, "coalesced size");
+  check(out[0].kind == tuide::FileIndexChangeKind::RemovePrefix, "first remove");
+  check(out[0].relative_path == "out", "dominated children dropped");
+  check(out[1].kind == tuide::FileIndexChangeKind::Upsert, "upsert preserved");
+  check(out[1].relative_path == "main.tex", "upsert path");
+  check(out[2].kind == tuide::FileIndexChangeKind::RemovePrefix, "trailing remove");
+  check(out[2].relative_path == "tmp.aux", "trailing path");
+}
+
+void test_fs_change_debounce_constants() {
+  check(tuide::kIndexerFsChangeDebounceMs > 0, "debounce configured");
+  check(tuide::kIndexerFsChangeMaxDebounceMs > tuide::kIndexerFsChangeDebounceMs, "max > quiet");
+}
+
 }  // namespace
 
 int main() {
   test_rebuild_files_lower();
   test_rebuild_file_picker_catalog();
   test_file_picker_excludes_binaries_keeps_pdf();
+  test_index_path_matches_prefix();
+  test_coalesce_file_index_changes_drops_dominated_removes();
+  test_fs_change_debounce_constants();
   return 0;
 }

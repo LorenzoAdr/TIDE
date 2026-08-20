@@ -2470,33 +2470,33 @@ void Application::process_index_changes() {
 	bool changed = false;
 	bool wake_ui = false;
 	const auto path_matches_prefix = [](const std::string& path, const std::string& prefix) {
-		if (prefix.empty()) {
-			return false;
-		}
-		if (path == prefix) {
-			return true;
-		}
-		if (path.size() <= prefix.size() || path[prefix.size()] != '/') {
-			return false;
-		}
-		return path.rfind(prefix, 0) == 0;
+		return index_path_matches_prefix(path, prefix);
 	};
 
-	for (const auto &change : indexer_.drain_changes()) {
+	std::vector<std::string> pending_removes;
+	auto flush_pending_removes = [&]() {
+		if (pending_removes.empty()) {
+			return;
+		}
+		indexer_.remove_path_prefixes(workspace_.root, pending_removes);
+		symbol_indexer_.remove_path_prefixes(workspace_.root, pending_removes);
+		pending_removes.clear();
+	};
+
+	for (const auto &change : coalesce_file_index_changes(indexer_.drain_changes())) {
 		changed = true;
 		if (change.wake_ui) {
 			wake_ui = true;
 		}
 		switch (change.kind) {
 		case FileIndexChangeKind::Remove:
-			indexer_.remove_file(workspace_.root, change.relative_path);
-			symbol_indexer_.remove_file(workspace_.root, change.relative_path);
-			break;
 		case FileIndexChangeKind::RemovePrefix:
-			indexer_.remove_path_prefix(workspace_.root, change.relative_path);
-			symbol_indexer_.remove_path_prefix(workspace_.root, change.relative_path);
+			if (!change.relative_path.empty()) {
+				pending_removes.push_back(change.relative_path);
+			}
 			break;
 		case FileIndexChangeKind::IndexDirectory:
+			flush_pending_removes();
 			indexer_.index_directory(workspace_.root, change.relative_path,
 			                         change.absolute_path);
 			if (auto snapshot = indexer_.snapshot()) {
@@ -2512,12 +2512,14 @@ void Application::process_index_changes() {
 			break;
 		case FileIndexChangeKind::Upsert:
 		default:
+			flush_pending_removes();
 			indexer_.upsert_file(workspace_.root, change.relative_path, change.absolute_path);
 			symbol_indexer_.reindex_file(workspace_.root, change.relative_path,
 			                             change.absolute_path);
 			break;
 		}
 	}
+	flush_pending_removes();
 	// Solo repintar cuando el listado del árbol puede haber cambiado (alta/baja/rename).
 	// Un modify silencioso (p. ej. reindex de sources) no debe forzar otro frame.
 	if (changed && wake_ui) {
