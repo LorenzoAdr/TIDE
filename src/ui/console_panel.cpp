@@ -2121,7 +2121,8 @@ void reset_terminal_session_state(ConsolePanelState* state, const std::string& w
 }
 
 void tick_terminal_shell(ConsolePanelState* state, ShellSession* shell,
-                       const ShellLaunchConfig& launch_config) {
+                       const ShellLaunchConfig& launch_config,
+                       MainLayoutState* layout_state) {
   if (state == nullptr || shell == nullptr) {
     return;
   }
@@ -2155,6 +2156,20 @@ void tick_terminal_shell(ConsolePanelState* state, ShellSession* shell,
     }
     state->shell_launch_uses_docker = launch_config.uses_docker();
     state->shell_docker_container = launch_config.docker_container;
+    if (launch_config.uses_docker() && layout_state != nullptr &&
+        layout_state->ensure_docker_ready) {
+      const DockerReadyGateResult gate =
+          layout_state->ensure_docker_ready(launch_config.docker_container);
+      if (gate == DockerReadyGateResult::Wait) {
+        return;
+      }
+      if (gate == DockerReadyGateResult::Decline) {
+        state->shell_start_requested = false;
+        state->shell_start_failed = true;
+        layout_state->terminal_start_requested = false;
+        return;
+      }
+    }
     state->shell_start_requested = false;
     shell->request_start(launch_config, cols, rows);
     return;
@@ -2292,6 +2307,9 @@ void activate_shell_input(DebugModel* model, MainLayoutState* layout_state,
                           FocusManagerState* focus, ShellSession* shell,
                           ConsolePanelState* state, const ShellLaunchConfig& launch_config) {
   activate_console_input(layout_state, focus, nullptr);
+  if (layout_state != nullptr && layout_state->reset_docker_start_gate) {
+    layout_state->reset_docker_start_gate();
+  }
   if (state != nullptr) {
     state->shell_start_requested = true;
     state->shell_start_failed = false;
@@ -2299,7 +2317,7 @@ void activate_shell_input(DebugModel* model, MainLayoutState* layout_state,
   if (shell != nullptr) {
     shell->clear_failed();
   }
-  tick_terminal_shell(state, shell, launch_config);
+  tick_terminal_shell(state, shell, launch_config, layout_state);
 }
 
 Element render_gdb_console(ConsolePanelState* state, DebugModel* model, AppMode* app_mode,
@@ -2459,6 +2477,9 @@ Element render_shell_terminal(ConsolePanelState* state, DebugModel* model, Shell
       message = state->shell_launch_uses_docker
                     ? i18n::tr_fmt("console.terminal.docker_failed", {state->shell_docker_container})
                     : i18n::tr("console.terminal.shell_unavailable");
+    } else if (layout_state != nullptr && layout_state->docker_container_starting &&
+               state != nullptr && state->shell_launch_uses_docker) {
+      message = i18n::tr_fmt("console.terminal.starting_docker", {state->shell_docker_container});
     } else if (state != nullptr && state->shell_start_requested && shell != nullptr &&
                shell->starting()) {
       message = state->shell_launch_uses_docker
@@ -3616,7 +3637,7 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
         return;
       }
       tick_terminal_shell(state.get(), shell,
-                          current_shell_launch(shell_launch_config, model));
+                          current_shell_launch(shell_launch_config, model), layout_state);
       if (!terminal_tab_active(app_mode, layout_state)) {
         return;
       }

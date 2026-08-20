@@ -154,6 +154,7 @@ add_executable(tuide
   src/ui/symbol_picker.cpp
   src/ui/symbol_picker_match_runner.cpp
   src/ui/quit_confirm.cpp
+  src/ui/docker_start_confirm.cpp
   src/ui/debug_launch_modal.cpp
   src/ui/shutdown_overlay.cpp
   src/ui/open_file_confirm.cpp

@@ -27,6 +27,7 @@
 #include "ui/status_layout_popover.hpp"
 #include "ui/status_language_popover.hpp"
 #include "git/git_service.hpp"
+#include "util/docker_shell.hpp"
 #include "util/system_stats.hpp"
 #include "util/ui_activity_gate.hpp"
 #include "ui/busy_strip.hpp"
@@ -150,6 +151,9 @@ struct MainLayoutState {
   bool diagnostics_panel_visible = false;
   int diagnostics_panel_height = 6;
   bool terminal_start_requested = true;
+  bool docker_container_starting = false;
+  std::function<DockerReadyGateResult(const std::string& container)> ensure_docker_ready;
+  std::function<void()> reset_docker_start_gate;
   UiEventDispatcher* ui_events = nullptr;
   uint64_t last_editor_correlation_id = 0;
   std::atomic<bool> custom_event_pending{false};

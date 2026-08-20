@@ -61,6 +61,7 @@
 #include "ui/lsp_missing_toast.hpp"
 #include "ui/press_ids.hpp"
 #include "ui/quit_confirm.hpp"
+#include "ui/docker_start_confirm.hpp"
 #include "ui/debug_launch_modal.hpp"
 #include "ui/settings_modal.hpp"
 #include "util/tools_status.hpp"
@@ -86,6 +87,7 @@
 #include "util/core_analyzer_support.hpp"
 #include "util/crash_handler.hpp"
 #include "util/docker_shell.hpp"
+#include "util/compile_commands_remap.hpp"
 #include "util/lsp_missing_prompt.hpp"
 #include "util/monitor_log.hpp"
 #include "util/nm_reader.hpp"
@@ -473,6 +475,7 @@ void Application::request_terminal_autostart() {
 	if (model_.workspace_root.empty()) {
 		return;
 	}
+	reset_docker_start_gate();
 	layout_state_.console_visible = true;
 	layout_state_.terminal_start_requested = true;
 	if (layout_state_.ui_events == nullptr) {
@@ -487,6 +490,7 @@ void Application::inject_terminal_command(const std::string& command) {
 	if (command.empty()) {
 		return;
 	}
+	reset_docker_start_gate();
 	focus_state_.region = FocusRegion::Terminal;
 	layout_state_.console_visible = true;
 	layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
@@ -496,6 +500,89 @@ void Application::inject_terminal_command(const std::string& command) {
 	pending_terminal_inject_ = command;
 	try_flush_terminal_inject();
 	UI_WAKE(&layout_state_, "app");
+}
+
+void Application::reset_docker_start_gate() {
+	docker_start_declined_ = false;
+	if (!docker_start_in_progress_) {
+		layout_state_.docker_container_starting = false;
+	}
+}
+
+DockerReadyGateResult Application::ensure_docker_for_terminal(const std::string& container) {
+	if (container.empty()) {
+		return DockerReadyGateResult::Proceed;
+	}
+	if (docker_start_in_progress_) {
+		return DockerReadyGateResult::Wait;
+	}
+	if (docker_start_declined_ && docker_start_pending_container_ == container) {
+		return DockerReadyGateResult::Decline;
+	}
+
+	const DockerContainerRuntimeState runtime = docker_container_runtime_state(container);
+	if (runtime == DockerContainerRuntimeState::Running) {
+		return DockerReadyGateResult::Proceed;
+	}
+	if (runtime != DockerContainerRuntimeState::Stopped) {
+		// Missing / unreachable: let docker exec fail as before.
+		return DockerReadyGateResult::Proceed;
+	}
+
+	docker_start_pending_container_ = container;
+	if (!docker_start_confirm_state_.open) {
+		docker_start_confirm_state_.show(container);
+		UI_WAKE(&layout_state_, "app");
+	}
+	return DockerReadyGateResult::Wait;
+}
+
+void Application::on_docker_start_confirm() {
+	const std::string container = docker_start_pending_container_;
+	if (container.empty()) {
+		return;
+	}
+	docker_start_declined_ = false;
+	docker_start_in_progress_ = true;
+	layout_state_.docker_container_starting = true;
+	layout_state_.terminal_start_requested = true;
+	UI_WAKE(&layout_state_, "app");
+	std::thread([this, container]() {
+		const bool ok = start_docker_container(container);
+		enqueue_ui_task([this, container, ok]() {
+			docker_start_in_progress_ = false;
+			layout_state_.docker_container_starting = false;
+			if (ok) {
+				invalidate_docker_mount_cache();
+				rebuild_shell_launch_config();
+				layout_state_.terminal_start_requested = true;
+				set_workspace_status(
+				    i18n::tr_fmt("console.terminal.connecting_docker", {container}));
+			} else {
+				docker_start_declined_ = true;
+				docker_start_pending_container_ = container;
+				// Keep requested so the next terminal tick hits Decline and marks failure.
+				layout_state_.terminal_start_requested = true;
+				set_workspace_status(
+				    i18n::tr_fmt("console.terminal.docker_failed", {container}));
+			}
+			UI_WAKE(&layout_state_, "app");
+			if (layout_state_.ui_events != nullptr) {
+				layout_state_.ui_events->request_animation_frame();
+			}
+		});
+	}).detach();
+}
+
+void Application::on_docker_start_cancel() {
+	docker_start_declined_ = true;
+	layout_state_.docker_container_starting = false;
+	// Keep requested so the next terminal tick hits Decline and marks failure.
+	layout_state_.terminal_start_requested = true;
+	UI_WAKE(&layout_state_, "app");
+	if (layout_state_.ui_events != nullptr) {
+		layout_state_.ui_events->request_animation_frame();
+	}
 }
 
 void Application::try_flush_terminal_inject() {
@@ -2533,6 +2620,7 @@ bool Application::any_modal_open() const {
 	       connection_wizard_state_.open || file_picker_state_.open || symbol_picker_state_.open ||
 	       shortcuts_modal_state_.open || settings_modal_state_.open ||
 	       source_substitute_state_.open || ai_path_scope_state_.open || quit_confirm_state_.open ||
+	       docker_start_confirm_state_.open ||
 	       debug_launch_modal_state_.open() || open_file_confirm_state_.is_open() ||
 	       external_file_conflict_state_.is_open() ||
 	       lsp_missing_toast_state_.open || ai_missing_toast_state_.open ||
@@ -2824,6 +2912,10 @@ int Application::run() {
 		}
 		UI_WAKE(&layout_state_, "app");
 	};
+	layout_state_.ensure_docker_ready = [this](const std::string &container) {
+		return ensure_docker_for_terminal(container);
+	};
+	layout_state_.reset_docker_start_gate = [this]() { reset_docker_start_gate(); };
 	layout_state_.status_open_settings = [this]() {
 		if (settings_modal_state_.open) {
 			close_settings_modal(
@@ -3181,8 +3273,12 @@ int Application::run() {
 	    MakeQuitConfirmOverlay(with_git_commit, &quit_confirm_state_, &layout_state_,
 	                           &shutdown_state_, [this, &screen] { begin_shutdown(&screen); });
 
+	auto with_docker_start_confirm = MakeDockerStartConfirmOverlay(
+	    with_quit_confirm, &docker_start_confirm_state_, &layout_state_,
+	    [this] { on_docker_start_confirm(); }, [this] { on_docker_start_cancel(); });
+
 	auto with_debug_launch = MakeDebugLaunchModalOverlay(
-	    with_quit_confirm, &debug_launch_modal_state_, &layout_state_, &shutdown_state_,
+	    with_docker_start_confirm, &debug_launch_modal_state_, &layout_state_, &shutdown_state_,
 	    [this] { cancel_debug_launch(); }, [this] { dismiss_debug_launch_error(); });
 
 	workspace_.open_file_confirm = &open_file_confirm_state_;

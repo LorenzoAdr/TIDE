@@ -32,6 +32,7 @@
 #include "ui/connection_wizard.hpp"
 #include "ui/file_picker.hpp"
 #include "ui/quit_confirm.hpp"
+#include "ui/docker_start_confirm.hpp"
 #include "ui/debug_launch_modal.hpp"
 #include "ui/shutdown_overlay.hpp"
 #include "ui/open_file_confirm.hpp"
@@ -143,6 +144,10 @@ class Application {
   void request_terminal_autostart();
   void inject_terminal_command(const std::string& command);
   void try_flush_terminal_inject();
+  DockerReadyGateResult ensure_docker_for_terminal(const std::string& container);
+  void reset_docker_start_gate();
+  void on_docker_start_confirm();
+  void on_docker_start_cancel();
   void maybe_show_lsp_missing_toast(const std::string& status_i18n_key);
   void on_lsp_missing_install();
   void on_lsp_missing_bundle();
@@ -181,6 +186,10 @@ class Application {
   FilePickerState file_picker_state_;
   SymbolPickerState symbol_picker_state_;
   QuitConfirmState quit_confirm_state_;
+  DockerStartConfirmState docker_start_confirm_state_;
+  std::string docker_start_pending_container_;
+  bool docker_start_in_progress_ = false;
+  bool docker_start_declined_ = false;
   DebugLaunchModalState debug_launch_modal_state_;
   uint64_t debug_launch_generation_ = 0;
   ShutdownState shutdown_state_;

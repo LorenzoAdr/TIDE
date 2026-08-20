@@ -105,4 +105,46 @@ ShellLaunchConfig resolve_shell_launch_config(const std::string& workspace_root,
   return launch;
 }
 
+namespace {
+
+std::string trim_trailing_ws(std::string value) {
+  while (!value.empty() &&
+         (value.back() == '\n' || value.back() == '\r' || value.back() == ' ' ||
+          value.back() == '\t')) {
+    value.pop_back();
+  }
+  return value;
+}
+
+}  // namespace
+
+DockerContainerRuntimeState docker_container_runtime_state(const std::string& container_name) {
+  if (container_name.empty() || !command_exists("docker")) {
+    return DockerContainerRuntimeState::Missing;
+  }
+  const std::string command = "docker inspect -f '{{.State.Running}}' " +
+                              shell_quote(container_name) + " 2>/dev/null";
+  const std::string output = trim_trailing_ws(run_shell_capture(command, 5));
+  if (output == "true") {
+    return DockerContainerRuntimeState::Running;
+  }
+  if (output == "false") {
+    return DockerContainerRuntimeState::Stopped;
+  }
+  return DockerContainerRuntimeState::Missing;
+}
+
+bool start_docker_container(const std::string& container_name) {
+  if (container_name.empty() || !command_exists("docker")) {
+    return false;
+  }
+  const std::string command =
+      "docker start " + shell_quote(container_name) + " >/dev/null 2>&1 && echo ok";
+  const std::string output = run_shell_capture(command, 60);
+  if (output.find("ok") == std::string::npos) {
+    return false;
+  }
+  return docker_container_runtime_state(container_name) == DockerContainerRuntimeState::Running;
+}
+
 }  // namespace tuide
