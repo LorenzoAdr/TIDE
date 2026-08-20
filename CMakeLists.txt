@@ -1131,6 +1131,7 @@ tuide_link_pthread(map_for_query_cli)
 
 add_executable(l1_intent_debug_cli
   tools/l1_intent_debug_cli.cpp
+  tests/tool_registry_stub.cpp
   src/ai/level1_agent.cpp
   src/ai/level1_action.cpp
   src/ai/llama_backend.cpp
@@ -1143,7 +1144,6 @@ add_executable(l1_intent_debug_cli
   src/ai/search_needles.cpp
   src/ai/ai_path_scope.cpp
   src/ai/get_code_of.cpp
-  src/ai/tool_registry.cpp
   src/ai/task_runner.cpp
   src/indexer/index_rules.cpp
   src/indexer/workspace_indexer.cpp
@@ -1154,16 +1154,35 @@ add_executable(l1_intent_debug_cli
   src/parser/tree_sitter_tags.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp
+  src/parser/tree_sitter_highlight.cpp
+  src/parser/tree_sitter_locals.cpp
+  src/parser/tree_sitter_blocks.cpp
+  src/parser/tree_sitter_completion.cpp
   src/symbols/tree_sitter_symbol_provider.cpp
   src/symbols/symbol_utils.cpp
   src/editor/editor_state.cpp
+  src/editor/editor_context.cpp
   src/editor/text_rope.cpp
+  src/editor/indent_guides.cpp
   src/lsp/lsp_uri.cpp
   src/app/language_override.cpp
   src/git/git_command.cpp
   src/util/fuzzy_match.cpp
   src/util/csv_viewer.cpp
   src/util/monitor_log.cpp
+  src/util/shell_args.cpp
+  src/util/bundled_tools.cpp
+  src/util/child_process_guard.cpp
+  src/util/syntax_highlight.cpp
+  src/util/syntax_scope.cpp
+  src/util/clang_format_config.cpp
+  src/toolpacks/paths.cpp
+  src/toolpacks/manifest.cpp
+  src/toolpacks/store.cpp
+  src/toolpacks/packaged.cpp
+  src/toolpacks/download.cpp
+  src/ui/cursor_blink.cpp
+  src/ui/theme.cpp
   src/i18n/locale.cpp
   src/i18n/tr.cpp
   src/i18n/strings_es.cpp
