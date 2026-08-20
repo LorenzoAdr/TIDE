@@ -2889,7 +2889,8 @@ inicial (salvo `map_stale`) y pregunta si falta algo. Si explore **no** localiza
 
 ### Explore (primera mirada = plan)
 Preferir `plan` en el **primer** paso: 4–8 `path:Symbol` / `path:line` anclados a la
-Instruction (evitar path bare). Máx. ~8 tools sueltos antes del primer plan (el runtime
+Instruction (evitar path bare). Orden de `targets` = importancia (primero = must en el pack;
+el runtime omite por la cola si no cabe presupuesto). Máx. ~8 tools sueltos antes del primer plan (el runtime
 puede emitir un soft `_nudge:_`). Tras pack cubierto: extras con `tools` batch (máx. 4);
 si sigues leyendo, otro `_nudge:_` pide `done next=edit`. No repetir el mismo path con
 ventanas solapadas. Si `[TRUNCATED]`, refetch tip (`path:A-B` / `#mid|#tail`), no shotgun.
@@ -3231,7 +3232,8 @@ bool Level2Session::save_state(const std::string& workspace_root, const State& s
                       {"review_search_terms", st.review_search_terms},
                       {"rejected_targets", st.rejected_targets},
                       {"pending", pending}};
-  return write_file(state_path(workspace_root), j.dump(2) + "\n", err);
+  return write_file(state_path(workspace_root),
+                    j.dump(2, ' ', false, nlohmann::json::error_handler_t::replace) + "\n", err);
 }
 
 std::string Level2Session::truncate_observation(const std::string& text, int max_lines,
@@ -3340,7 +3342,8 @@ void Level2Session::write_response_json(const std::string& workspace_root, bool 
                       {"text", text},
                       {"phase", phase}};
   std::string err;
-  write_file(response_path(workspace_root), j.dump(2) + "\n", &err);
+  write_file(response_path(workspace_root),
+             j.dump(2, ' ', false, nlohmann::json::error_handler_t::replace) + "\n", &err);
 }
 
 std::string Level2Session::maybe_tool_nudge(State& st, int tools_added) {
@@ -4087,30 +4090,19 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     return out;
   }
 
-  // Anti-loop: reject plan whose explicit targets are all already on the watchlist
+  // Anti-loop: reject plan whose file paths are all already on the watchlist
   // while pack review is still open (PACK_REVIEW miss → must add NEW paths).
   if (l2_feat::enabled("PACK_REVIEW") && st.has_pack && !st.pack_review_ok &&
       st.pack_review_cycles > 0 && !targets.empty() && !st.watchlist.empty()) {
-    bool any_new = false;
-    for (const auto& raw : targets) {
-      const std::string t = trim_ws(raw);
-      if (t.empty()) {
-        continue;
-      }
-      if (!target_in_watchlist_normalized(t, st.watchlist)) {
-        any_new = true;
-        break;
-      }
-    }
-    if (!any_new) {
+    if (all_plan_target_paths_in_watchlist(targets, st.watchlist)) {
       ++st.turn;
       st.last_action = "repeated_plan_targets_pushback";
       out.turn = st.turn;
       std::ostringstream block;
       block << "### turn " << st.turn << " — repeated_plan_targets_pushback\n\n";
-      block << "Rechazado: todos los targets del plan ya están en watchlist/pack. "
-               "Emite `action=plan` con paths NUEVOS de SEARCH HITS (p. ej. "
-               "`src/ai/ai_controller.cpp:Symbol`). No repitas spinner/editor_panel.\n\n";
+      block << "Rechazado: todos los paths del plan ya están en watchlist/pack. "
+               "Emite `action=plan` con paths NUEVOS de MAP/SEARCH HITS (p. ej. "
+               "`src/ai/ai_controller.cpp:Symbol`). No repitas archivos ya empaquetados.\n\n";
       std::string err;
       append_observation(workspace_root, block.str(), &out.session_chars, &err);
       save_state(workspace_root, st, nullptr);
@@ -4158,23 +4150,11 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   }
   std::unordered_set<std::string> keep_file_window;
 
-  // Merge with previous watchlist / pack header (plan2 does not wipe plan1).
-  // Drop rejected targets so pruned noise cannot re-enter via merge.
+  // Merge: NEW plan targets first (7B lists most-important first = pack priority).
+  // Prior watchlist follows; kL2MaxPlanTargets truncates the tail (least important).
   std::vector<std::string> merged;
   merged.reserve(st.watchlist.size() + targets.size());
-  for (const auto& t : st.watchlist) {
-    if (!target_in_rejected_normalized(t, st.rejected_targets)) {
-      merged.push_back(t);
-    }
-  }
-  if (merged.empty() && st.has_pack) {
-    for (const auto& t : parse_pack_targets_header(read_file(pack_path(workspace_root)))) {
-      if (!target_in_rejected_normalized(t, st.rejected_targets)) {
-        merged.push_back(t);
-      }
-    }
-  }
-  std::unordered_set<std::string> seen_t(merged.begin(), merged.end());
+  std::unordered_set<std::string> seen_t;
   for (const auto& raw : targets) {
     std::string t = trim_ws(raw);
     if (t.empty() || target_in_rejected_normalized(t, st.rejected_targets) ||
@@ -4182,6 +4162,20 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       continue;
     }
     merged.push_back(std::move(t));
+  }
+  for (const auto& t : st.watchlist) {
+    if (target_in_rejected_normalized(t, st.rejected_targets) || !seen_t.insert(t).second) {
+      continue;
+    }
+    merged.push_back(t);
+  }
+  if (merged.empty() && st.has_pack) {
+    for (const auto& t : parse_pack_targets_header(read_file(pack_path(workspace_root)))) {
+      if (target_in_rejected_normalized(t, st.rejected_targets) || !seen_t.insert(t).second) {
+        continue;
+      }
+      merged.push_back(t);
+    }
   }
   if (static_cast<int>(merged.size()) > kL2MaxPlanTargets) {
     merged.resize(static_cast<std::size_t>(kL2MaxPlanTargets));
@@ -4270,6 +4264,83 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     return out;
   }
 
+  // API siblings (clear_busy / agent_busy / cancel_all / same-file map neighbors).
+  {
+    const std::string map_last =
+        read_file((fs::path(workspace_root) / ".tuide" / "ai" / "map_last.md").string());
+    const auto siblings =
+        expand_anchor_api_siblings(uniq_targets, map_last, 8, workspace_root);
+    if (!siblings.empty()) {
+      std::vector<std::string> merged_sib;
+      merged_sib.reserve(uniq_targets.size() + siblings.size());
+      // Keep plan order for must-tier head; inject clear/cancel siblings into must head.
+      const std::size_t head_n =
+          std::min(uniq_targets.size(), static_cast<std::size_t>(kL2MustPlanTargets));
+      for (std::size_t i = 0; i < head_n; ++i) {
+        merged_sib.push_back(uniq_targets[i]);
+      }
+      std::unordered_set<std::string> seen_m(merged_sib.begin(), merged_sib.end());
+      auto try_add = [&](const std::string& s, bool prefer_front) {
+        if (target_in_rejected_normalized(s, st.rejected_targets) || !seen_m.insert(s).second) {
+          return;
+        }
+        bool dup = false;
+        for (const auto& m : merged_sib) {
+          if (to_lower_copy(m) == to_lower_copy(s)) {
+            dup = true;
+            break;
+          }
+        }
+        if (dup) {
+          return;
+        }
+        if (prefer_front) {
+          const std::size_t insert_at =
+              std::min<std::size_t>(1, merged_sib.size());  // keep #1 plan pick, then clears
+          merged_sib.insert(merged_sib.begin() + static_cast<std::ptrdiff_t>(insert_at), s);
+        } else {
+          merged_sib.push_back(s);
+        }
+        normalize_notes.push_back("- api sibling → `" + s + "`");
+      };
+      for (const auto& s : siblings) {
+        try_add(s, target_is_lifecycle_clear(s));
+      }
+      // Lifecycle clears on .hpp are decls — ensure twin .cpp:Symbol is must-front so the
+      // definition body wins budget over `void cancel_all();`.
+      {
+        std::vector<std::string> cpp_defs;
+        for (const auto& t : merged_sib) {
+          if (!target_is_lifecycle_clear(t)) {
+            continue;
+          }
+          const std::string path = path_from_plan_target(t);
+          const std::string sym = symbol_from_plan_target(t);
+          if (path.empty() || sym.empty() || !path_looks_like_header(path)) {
+            continue;
+          }
+          const std::string src = sibling_source_rel(workspace_root, path);
+          if (src.empty()) {
+            continue;
+          }
+          cpp_defs.push_back(src + ":" + sym);
+        }
+        for (const auto& d : cpp_defs) {
+          try_add(d, true);
+        }
+      }
+      for (std::size_t i = head_n; i < uniq_targets.size(); ++i) {
+        if (seen_m.insert(uniq_targets[i]).second) {
+          merged_sib.push_back(uniq_targets[i]);
+        }
+      }
+      if (static_cast<int>(merged_sib.size()) > kL2MaxPlanTargets + 6) {
+        merged_sib.resize(static_cast<std::size_t>(kL2MaxPlanTargets + 6));
+      }
+      uniq_targets = std::move(merged_sib);
+    }
+  }
+
   std::vector<std::string> uniq_paths;
   std::unordered_set<std::string> seen_paths;
   for (const auto& t : uniq_targets) {
@@ -4335,6 +4406,8 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     bool truncated = false;
     bool junk = false;  // wrong_symbol from bare / no overlap → drop body
     bool explicit_locus = false;  // from this plan's targets (path:line/Symbol)
+    bool must_keep = false;       // top of 7B plan order — pack even under budget pressure
+    int plan_pri = 999;           // lower = higher priority (index in plan/watchlist order)
     int plan_line = 0;            // original path:line before window expand
     std::string refetch;
     std::size_t rank_size = 0;
@@ -4381,12 +4454,16 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   std::vector<Frag> frags;
   frags.reserve(uniq_targets.size() + 8);
   std::unordered_set<std::string> fetched;
-  for (const auto& t : uniq_targets) {
+  for (std::size_t ti = 0; ti < uniq_targets.size(); ++ti) {
+    const auto& t = uniq_targets[ti];
     Frag f;
     f.target = t;
+    f.plan_pri = static_cast<int>(ti);
+    f.must_keep = static_cast<int>(ti) < kL2MustPlanTargets || target_is_lifecycle_clear(t);
     if (skip_fetch.count(t)) {
       f.ok = false;
       f.junk = true;
+      f.must_keep = false;
       f.text = "omitido: bare path sin resolución (`" + t + "`)";
       f.rank_size = 999999;
       f.rank_boost = -100;
@@ -4439,6 +4516,22 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       f.ok = tr.ok;
       f.text = tr.text.empty() ? (tr.ok ? "(vacío)" : "error get_code_of") : tr.text;
       f.truncated = text_looks_truncated(f.text);
+      // Huge enclosing symbol without a line locus → treat as truncated (force window refill).
+      if (f.ok && line <= 0) {
+        const auto ssp = f.text.find("symbol_span:");
+        if (ssp != std::string::npos) {
+          int span_a = 0;
+          int span_b = 0;
+          if (std::sscanf(f.text.c_str() + ssp, "symbol_span: %d-%d", &span_a, &span_b) == 2 &&
+              span_b > span_a && (span_b - span_a) > 400) {
+            f.truncated = true;
+            if (f.refetch.empty()) {
+              f.refetch = extract_refetch_hint(f.text, t);
+            }
+            f.rank_boost -= 40;
+          }
+        }
+      }
       // Keep explicit path:line label when possible (don't rewrite to a huge A-B only).
       if (f.explicit_locus && line > 0) {
         f.target = path + ":" + std::to_string(line);
@@ -4521,23 +4614,39 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       }
     }
     f.rank_size = f.junk ? 999999 : f.text.size();
+    if (f.must_keep) {
+      f.rank_boost =
+          std::max(f.rank_boost, 120 + (kL2MustPlanTargets - f.plan_pri) * 15);
+    } else if (f.plan_pri < 900) {
+      f.rank_boost += std::max(0, 40 - f.plan_pri);
+    }
+    // .cpp clear/cancel definitions beat header decls under pack budget.
+    if (target_is_lifecycle_clear(f.target)) {
+      const std::string path = path_from_plan_target(f.target);
+      if (!path.empty() && !path_looks_like_header(path)) {
+        f.rank_boost = std::max(f.rank_boost, 170);
+      }
+    }
     frags.push_back(std::move(f));
   }
 
   // Auto-refetch truncated gaps (explore-fill): prefer line windows + needle-overlapping hints.
+  // For must_keep truncations, replace the primary body when a cleaner window is found.
   std::vector<Frag> extras;
   auto already = [&](const std::string& t) {
     return fetched.count(t) ||
            std::find(uniq_targets.begin(), uniq_targets.end(), t) != uniq_targets.end();
   };
-  for (const auto& f : frags) {
+  for (std::size_t fi = 0; fi < frags.size(); ++fi) {
+    auto& f = frags[fi];
     if (!f.truncated || f.junk || !deps_.tools->has("get_code_of")) {
       continue;
     }
     std::vector<std::string> try_targets;
-    const int line = line_from_plan_target(f.target);
+    const int line = f.plan_line > 0 ? f.plan_line : line_from_plan_target(f.target);
     const std::string path = path_from_plan_target(f.target);
     if (line > 0 && !path.empty()) {
+      try_targets.push_back(line_window_target_biased(path, line, 15, 70));
       try_targets.push_back(line_window_target_biased(path, line));
       try_targets.push_back(line_window_target_biased(path, line + 100, 20, 100));
       try_targets.push_back(line_window_target_biased(path, std::max(1, line - 100), 20, 100));
@@ -4545,7 +4654,16 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     if (!f.refetch.empty()) {
       try_targets.push_back(f.refetch);
     }
+    // Must path:Symbol without line: still try refetch_hint / mid window from metadata.
+    if (f.must_keep && line <= 0 && !path.empty()) {
+      const std::string hint = extract_refetch_hint(f.text, f.target);
+      if (!hint.empty()) {
+        try_targets.push_back(hint);
+      }
+    }
     int added = 0;
+    Frag best_replace;
+    bool have_replace = false;
     for (const auto& rt : try_targets) {
       if (rt.empty() || already(rt)) {
         continue;
@@ -4558,24 +4676,61 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       e.truncated = text_looks_truncated(e.text);
       e.refetch = extract_refetch_hint(e.text, rt);
       e.rank_size = e.text.size();
+      e.must_keep = f.must_keep;
+      e.plan_pri = f.plan_pri;
+      e.explicit_locus = f.explicit_locus;
+      e.plan_line = line_from_plan_target(rt) > 0 ? line_from_plan_target(rt) : line;
       const int hit = score_symbol_against_needles(e.text.substr(0, 1200), needles);
       // Skip empty/noise auto-fills that don't touch pack needles.
-      if (hit <= 0 && line <= 0) {
+      if (hit <= 0 && line <= 0 && !f.must_keep) {
         continue;
       }
-      if (hit <= 0 && line > 0 && added > 0) {
+      if (hit <= 0 && line > 0 && added > 0 && !f.must_keep) {
         continue;
       }
       e.rank_boost = 50 + (line > 0 ? 40 : 0) + hit / 3;
       // Primary biased window around the requested line gets top priority.
-      if (line > 0 && !path.empty() && rt == line_window_target_biased(path, line)) {
+      if (line > 0 && !path.empty() &&
+          (rt == line_window_target_biased(path, line, 15, 70) ||
+           rt == line_window_target_biased(path, line))) {
         e.rank_boost = 130 + hit / 2;
       }
       fetched.insert(rt);
-      extras.push_back(std::move(e));
-      if (++added >= 2) {
+      // Must: collect candidates; replace primary below (don't double-pack windows).
+      if (f.must_keep && e.ok) {
+        const std::string sym = symbol_from_plan_target(f.target);
+        const bool has_sym =
+            sym.size() < 4 ||
+            to_lower_copy(e.text).find(to_lower_copy(sym)) != std::string::npos;
+        if (has_sym && (!have_replace || (!e.truncated && best_replace.truncated) ||
+                        e.rank_boost > best_replace.rank_boost)) {
+          best_replace = e;
+          have_replace = true;
+        }
+      } else {
+        extras.push_back(std::move(e));
+      }
+      if (++added >= (f.must_keep ? 3 : 2)) {
         break;
       }
+    }
+    if (have_replace) {
+      // Keep path:line label when we have a locus; otherwise keep original target name.
+      if (best_replace.plan_line > 0 && !path.empty()) {
+        f.target = path + ":" + std::to_string(best_replace.plan_line);
+      }
+      f.text = std::move(best_replace.text);
+      f.truncated = best_replace.truncated;
+      f.refetch = best_replace.refetch;
+      f.ok = best_replace.ok;
+      f.rank_size = f.text.size();
+      f.rank_boost = std::max(f.rank_boost, best_replace.rank_boost + 20);
+      if (f.plan_line <= 0 && best_replace.plan_line > 0) {
+        f.plan_line = best_replace.plan_line;
+      }
+    } else if (f.must_keep && added > 0) {
+      // No clean replace — still keep one extra window for pack diversity.
+      // (already skipped pushing during must loop)
     }
   }
   for (auto& e : extras) {
@@ -4739,7 +4894,10 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       frag_roles[i] = FragRole::Decl;
     }
     // Symbol-only helpers require a code-like needle hit on the symbol itself.
-    if (frag_roles[i] == FragRole::ApiFn || frag_roles[i] == FragRole::Other) {
+    // Lifecycle clear/cancel (busy/agent teardown) are exempt — NL needles rarely
+    // contain the exact identifier, and demoting them to noise drops cancel_all.cpp.
+    if ((frag_roles[i] == FragRole::ApiFn || frag_roles[i] == FragRole::Other) &&
+        !target_is_lifecycle_clear(frags[i].target)) {
       const std::string sym = to_lower_copy(symbol_from_plan_target(frags[i].target));
       if (tgt.find("request_terminal") != std::string::npos || tgt.find("on_pty") != std::string::npos ||
           tgt.find("repaint") != std::string::npos || tgt.find("scrollback") != std::string::npos) {
@@ -4758,6 +4916,15 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
         if (!strong) {
           frag_roles[i] = FragRole::Noise;
         }
+      }
+    }
+    if (target_is_lifecycle_clear(frags[i].target) && frags[i].ok && !frags[i].junk) {
+      const std::string path = path_from_plan_target(frags[i].target);
+      if (!path.empty() && !path_looks_like_header(path)) {
+        frag_roles[i] = FragRole::ApiFn;
+        frags[i].rank_boost = std::max(frags[i].rank_boost, 170);
+      } else if (frag_roles[i] != FragRole::Decl) {
+        frag_roles[i] = FragRole::Decl;  // header cancel_all() stays cheap decl slot
       }
     }
   }
@@ -4932,6 +5099,44 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     }
   }
 
+  // 7B plan order wins, but lifecycle .cpp defs (clear/cancel) beat large set windows
+  // so cancel_all bodies are not starved to empty TRUNCATED fences.
+  std::stable_sort(pack_order.begin(), pack_order.end(), [&](std::size_t a, std::size_t b) {
+    const auto& fa = frags[a];
+    const auto& fb = frags[b];
+    if (fa.must_keep != fb.must_keep) {
+      return fa.must_keep && !fb.must_keep;
+    }
+    auto life_pri = [&](const Frag& f) {
+      const bool clear = target_is_lifecycle_clear(f.target);
+      const bool set = target_is_lifecycle_set(f.target);
+      if (!clear && !set) {
+        return 0;
+      }
+      const std::string path = path_from_plan_target(f.target);
+      const bool hdr = !path.empty() && path_looks_like_header(path);
+      if (clear && !hdr) {
+        return 3;  // cancel_all.cpp / clear_busy.cpp
+      }
+      if (set && !hdr) {
+        return 2;  // set_busy_spinner body
+      }
+      if (clear || set) {
+        return 1;  // header decls
+      }
+      return 0;
+    };
+    const int la = life_pri(fa);
+    const int lb = life_pri(fb);
+    if (la != lb) {
+      return la > lb;
+    }
+    if (fa.plan_pri != fb.plan_pri) {
+      return fa.plan_pri < fb.plan_pri;
+    }
+    return false;
+  });
+
   std::ostringstream diversity_note;
   {
     int counts[7] = {};
@@ -5034,28 +5239,58 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     }
     const std::size_t remaining =
         frag_budget > used_frags ? frag_budget - used_frags : 0;
-    if (remaining < 80) {
+    if (remaining < 80 && !f.must_keep) {
       pack << "_pack: fragmentos restantes omitidos por presupuesto ("
-           << (pack_order.size() - oi) << ")._\n\n";
+           << (pack_order.size() - oi) << "; prioridad 7B cola atrás)._\n\n";
       for (std::size_t oj = oi; oj < pack_order.size(); ++oj) {
         const auto& fj = frags[pack_order[oj]];
-        if (fj.junk) {
+        if (fj.junk || fj.must_keep) {
           continue;
         }
         trunc_index.push_back("- `" + fj.target +
                               "` — omitido por presupuesto pack; refetch get_code_of `" +
                               fj.target + "`");
       }
+      // Still force-pack any remaining must_keep with a tight slice.
+      for (std::size_t oj = oi; oj < pack_order.size(); ++oj) {
+        const std::size_t ji = pack_order[oj];
+        const auto& fj = frags[ji];
+        if (fj.junk || !fj.must_keep) {
+          continue;
+        }
+        const std::size_t rem2 = frag_budget > used_frags ? frag_budget - used_frags : 0;
+        if (rem2 < 60) {
+          trunc_index.push_back("- `" + fj.target +
+                                "` — must truncado sin espacio; refetch get_code_of `" +
+                                fj.target + "`");
+          continue;
+        }
+        const std::size_t per_must = std::min({rem2, frag_share_cap, role_share + 200});
+        std::string tip = !fj.refetch.empty() ? fj.refetch : fj.target;
+        std::string body =
+            truncate_center_budget(fj.text, per_must, tip, needles, true);
+        std::ostringstream sec;
+        sec << "### get_code_of `" << fj.target << "`";
+        if (body.size() < fj.text.size()) {
+          sec << " [TRUNCATED]";
+        }
+        sec << "  <!-- role:must -->\n\n```\n" << body << "\n```\n\n";
+        pack << sec.str();
+        used_frags += sec.str().size();
+        if (fj.ok) {
+          ++frag_ok;
+        }
+      }
       break;
     }
     // Drop noise unless we still have spare budget after diversity slots.
-    if (role == FragRole::Noise && used_frags > frag_budget / 2) {
+    if (role == FragRole::Noise && used_frags > frag_budget / 2 && !f.must_keep) {
       continue;
     }
-    if (f.rank_boost < 0 && remaining < frag_budget / 3) {
+    if (f.rank_boost < 0 && remaining < frag_budget / 3 && !f.must_keep) {
       continue;
     }
-    if (f.rank_boost < 15 && role == FragRole::Noise) {
+    if (f.rank_boost < 15 && role == FragRole::Noise && !f.must_keep) {
       continue;
     }
     if (f.ok) {
@@ -5068,7 +5303,10 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     if (!first_of_role) {
       per = std::min(per, role_share * 3 / 4);
     }
-    if (f.rank_boost >= 80 && first_of_role && role == FragRole::Control) {
+    if (f.must_keep) {
+      // Must-tier: larger slice so anclas survive budget pressure; keep function bodies.
+      per = std::min(remaining, std::max(per, std::min<std::size_t>(role_share + 800, 3200)));
+    } else if (f.rank_boost >= 80 && first_of_role && role == FragRole::Control) {
       per = std::min(remaining, std::max(per, role_share));
     }
     // IdConst/Layout exemplars are small surfaces — give them enough room to keep markers.
@@ -5081,10 +5319,24 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     std::string tip = !f.refetch.empty() ? f.refetch : f.target;
     const int line = f.plan_line > 0 ? f.plan_line : line_from_plan_target(f.target);
     if (line > 0) {
-      tip = f.explicit_locus ? line_window_target_biased(path_from_plan_target(f.target), line, 25, 55)
-                             : line_window_target_biased(path_from_plan_target(f.target), line);
+      tip = f.explicit_locus || f.must_keep
+                ? line_window_target_biased(path_from_plan_target(f.target), line, 15, 70)
+                : line_window_target_biased(path_from_plan_target(f.target), line);
     }
     std::vector<std::string> prefer = needles;
+    // Must/ancla: center on the requested symbol name before generic role markers.
+    {
+      const std::string sym = symbol_from_plan_target(f.target);
+      if (sym.size() >= 4) {
+        prefer.insert(prefer.begin(), sym);
+      }
+      if (f.must_keep) {
+        for (const char* k :
+             {"set_busy_spinner", "clear_busy", "agent_busy", "cancel_all", "halted"}) {
+          prefer.insert(prefer.begin(), k);
+        }
+      }
+    }
     if (role == FragRole::Layout) {
       prefer.insert(prefer.begin(),
                     {"tab_boxes[ConsolePanelTabs::kAi]", "targets = {", "tab_boxes", "std::array"});
@@ -5102,14 +5354,31 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     } else if (role == FragRole::ApiFn) {
       prefer.insert(prefer.begin(), {"toggle_breakpoint", "KeyAction::", "make_"});
     }
-    const bool center = line > 0 || f.rank_boost >= 50 || role == FragRole::Control ||
-                        role == FragRole::Layout || role == FragRole::Decl ||
-                        role == FragRole::IdConst;
-    // Layout/Decl: first marker. IdConst with shortcuts.: first hit. Switches of press ids: last.
-    const bool first_hit = role == FragRole::Layout || role == FragRole::Decl ||
+    const bool center = line > 0 || f.must_keep || f.rank_boost >= 50 ||
+                        role == FragRole::Control || role == FragRole::Layout ||
+                        role == FragRole::Decl || role == FragRole::IdConst;
+    // Must + ApiFn: first hit of the symbol name (definition), not last incidental mention.
+    const bool first_hit = f.must_keep || role == FragRole::Layout || role == FragRole::Decl ||
                            (role == FragRole::IdConst && f.text.find("shortcuts.") != std::string::npos);
     std::string body = center ? truncate_center_budget(f.text, per, tip, prefer, first_hit)
                               : truncate_to_budget(f.text, per, tip);
+    // If must truncate dropped the symbol needle, widen once around first hit.
+    if (f.must_keep && pack_trunc) {
+      const std::string sym = symbol_from_plan_target(f.target);
+      std::string needle = sym.size() >= 4 ? sym : std::string{};
+      if (needle.empty()) {
+        for (const char* k : {"set_busy_spinner", "clear_busy", "agent_busy", "cancel_all"}) {
+          if (to_lower_copy(f.text).find(k) != std::string::npos) {
+            needle = k;
+            break;
+          }
+        }
+      }
+      if (!needle.empty() && to_lower_copy(body).find(to_lower_copy(needle)) == std::string::npos) {
+        body = truncate_center_budget(f.text, std::min(remaining, std::max(per, std::size_t{2400})),
+                                      tip, {needle}, true);
+      }
+    }
     const bool is_trunc = f.truncated || pack_trunc;
     if (is_trunc) {
       trunc_index.push_back("- `" + f.target + "` — truncated; refetch `get_code_of " + tip +
@@ -5239,9 +5508,18 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   ++st.turn;
   st.last_action = "plan";
   st.has_pack = true;
+  const bool prev_pack_review_ok = st.pack_review_ok;
   st.pack_review_ok = false;
   const auto gaps = pack_instruction_gaps(pack_body, needles);
   st.pack_incomplete = (frag_ok == 0) || !gaps.empty();
+  // Keep review-ok across refine plans when must anchors still have fence bodies.
+  if (prev_pack_review_ok && !st.pack_incomplete &&
+      pack_must_anchors_covered(pack_body, st.watchlist, 3) &&
+      (!std::any_of(st.watchlist.begin(), st.watchlist.end(),
+                    [](const std::string& t) { return target_is_lifecycle_set(t); }) ||
+       pack_has_lifecycle_pair(pack_body))) {
+    st.pack_review_ok = true;
+  }
   st.explore_tool_count = 0;
   st.plan_nudge_sent = false;
   st.post_pack_tool_count = 0;
@@ -6294,6 +6572,80 @@ Level2TurnResult Level2Session::prune_watchlist_after_review(const std::string& 
   out.ok = true;
   out.summary = "watchlist pruned=" + std::to_string(pruned) +
                 " rejected=" + std::to_string(st.rejected_targets.size());
+  return out;
+}
+
+Level2TurnResult Level2Session::unreject_matching(const std::string& workspace_root,
+                                                  const std::vector<std::string>& protect) {
+  Level2TurnResult out;
+  out.action = "unreject";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty() || protect.empty() || st.rejected_targets.empty()) {
+    out.ok = true;
+    out.summary = "unreject 0";
+    return out;
+  }
+  std::vector<std::string> kept;
+  int removed = 0;
+  for (const auto& r : st.rejected_targets) {
+    if (target_in_watchlist_normalized(r, protect) ||
+        target_in_rejected_normalized(r, protect)) {
+      ++removed;
+      continue;
+    }
+    bool hit = false;
+    for (const auto& p : protect) {
+      if (target_in_watchlist_normalized(p, {r})) {
+        hit = true;
+        break;
+      }
+    }
+    if (hit) {
+      ++removed;
+      continue;
+    }
+    kept.push_back(r);
+  }
+  st.rejected_targets = std::move(kept);
+  save_state(workspace_root, st, nullptr);
+  out.ok = true;
+  out.summary = "unreject " + std::to_string(removed);
+  return out;
+}
+
+Level2TurnResult Level2Session::reset_watchlist_priority(
+    const std::string& workspace_root, const std::vector<std::string>& priority_targets,
+    bool reset_review_cycles) {
+  Level2TurnResult out;
+  out.action = "priority_reset";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty() || priority_targets.empty()) {
+    out.error = "priority_targets vacío";
+    return out;
+  }
+  std::vector<std::string> next;
+  std::unordered_set<std::string> seen;
+  for (const auto& raw : priority_targets) {
+    const std::string t = trim_ws(raw);
+    if (t.empty() || !seen.insert(t).second) {
+      continue;
+    }
+    next.push_back(t);
+    if (static_cast<int>(next.size()) >= kL2MaxPlanTargets) {
+      break;
+    }
+  }
+  st.watchlist = std::move(next);
+  if (reset_review_cycles) {
+    st.pack_review_cycles = 0;
+    st.pack_review_ok = false;
+  }
+  save_state(workspace_root, st, nullptr);
+  out.ok = true;
+  out.summary = "watchlist priority n=" + std::to_string(st.watchlist.size()) +
+                (reset_review_cycles ? " review_cycles=0" : "");
   return out;
 }
 

@@ -1,9 +1,11 @@
 #include "ai/level2_autonomous_loop.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <fstream>
 #include <sstream>
+#include <unordered_set>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -524,6 +526,8 @@ std::string build_system_prompt(const Level2AutonomousLoopOpts& opts,
            "\"replace\":\"nuevo\"}]}\n"
            "Fases: en explore la PRIMERA mirada es action=plan (watchlist path:Symbol|path:A-B; "
            "evitar path bare). "
+           "Orden de `targets` = prioridad: primero los must (control/estado del request); "
+           "el runtime empaqueta en ese orden y omite por la cola si no cabe. "
            "El runtime normaliza bare→símbolo por needles, merge de packs, prioriza fragmentos "
            "pequeños, auto-refetch de truncados y marca pack_incomplete. "
            "Si map_stale=1 no confíes en el top del mapa. "
@@ -729,7 +733,7 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
 }
 
 constexpr int kMaxPackReviewCycles = 3;
-constexpr int kPushbackEscalateAfter = 3;
+constexpr int kPushbackEscalateAfter = 2;
 
 bool pack_review_enabled() { return l2_feat::enabled("PACK_REVIEW"); }
 
@@ -812,15 +816,14 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
   }
   int cycles = 0;
 
-  const std::string session_md =
+  std::string session_md =
       read_path_file(Level2Session::session_path(opts.workspace_root));
-  const std::string pack_md = read_path_file(Level2Session::pack_path(opts.workspace_root));
+  std::string pack_md = read_path_file(Level2Session::pack_path(opts.workspace_root));
   if (pack_md.empty()) {
     return false;
   }
   const std::string instruction = extract_session_instruction_block(session_md);
   const std::string distilled = extract_distilled_intent_block(session_md);
-  const std::string digest = build_pack_digest(pack_md);
 
   std::vector<std::string> watchlist;
   std::vector<std::string> rejected;
@@ -868,7 +871,209 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
                                   hits_override, terms.empty() ? nullptr : &terms, false);
   };
 
+  auto log_priority = [&](const char* label, const std::vector<std::string>& targets) {
+    if (!log || targets.empty()) {
+      return;
+    }
+    log(std::string("L2 ▸ prioridad ") + label + " (1=must):");
+    const int show = std::min(static_cast<int>(targets.size()), 12);
+    for (int i = 0; i < show; ++i) {
+      const char* tier = i < kL2MustPlanTargets ? "must" : "tail";
+      log("  " + std::to_string(i + 1) + ". [" + tier + "] " +
+          targets[static_cast<std::size_t>(i)]);
+    }
+  };
+
+  const std::vector<std::string> anchors =
+      retrieval_anchor_targets(map_last, session_md, 12);
+  // Prefer path-bearing watchlist head + map anchors for body checks.
+  std::vector<std::string> must_check;
+  for (const auto& w : watchlist) {
+    if (w.find('/') != std::string::npos) {
+      must_check.push_back(w);
+    }
+    if (must_check.size() >= static_cast<std::size_t>(kL2MustPlanTargets)) {
+      break;
+    }
+  }
+  for (const auto& a : anchors) {
+    if (a.find('/') != std::string::npos) {
+      must_check.push_back(a);
+    }
+  }
+  {
+    std::vector<std::string> uniq;
+    std::unordered_set<std::string> seen;
+    for (const auto& t : must_check) {
+      if (seen.insert(t).second) {
+        uniq.push_back(t);
+      }
+    }
+    must_check = std::move(uniq);
+  }
+
+  const auto missing_bodies = pack_targets_missing_bodies(pack_md, must_check);
+  const bool needs_pair = std::any_of(must_check.begin(), must_check.end(),
+                                      [](const std::string& t) { return target_is_lifecycle_set(t); });
+  const bool pair_ok = !needs_pair || pack_has_lifecycle_pair(pack_md);
+  // With a real set+clear pair, 2 must fences are enough; otherwise require 3.
+  const int min_ok = (pair_ok && needs_pair) ? 2 : 3;
+  const bool anchors_covered = pack_must_anchors_covered(pack_md, must_check, min_ok) && pair_ok;
+
+  // Generic: enough must fences + set/clear pair when the locus looks like control state.
+  if (anchors_covered) {
+    if (log) {
+      log("L2 ▸ pack review auto-covered — anclas must con cuerpo en fences");
+    }
+    session.mark_pack_review(opts.workspace_root, true,
+                             "runtime: must anchors have symbol bodies in pack fences");
+    return false;
+  }
+
+  if (!missing_bodies.empty() || (needs_pair && !pair_ok)) {
+    std::vector<std::string> priority = missing_bodies;
+    for (const auto& w : watchlist) {
+      if (w.find('/') != std::string::npos) {
+        priority.push_back(w);
+      }
+    }
+    for (const auto& a : anchors) {
+      if (a.find('/') != std::string::npos) {
+        priority.push_back(a);
+      }
+    }
+    {
+      const auto sibs =
+          expand_anchor_api_siblings(priority, map_last, 8, opts.workspace_root);
+      // Clear/cancel siblings first so pre-review pack budget prefers them.
+      std::vector<std::string> clears;
+      std::vector<std::string> other;
+      for (const auto& s : sibs) {
+        if (target_is_lifecycle_clear(s)) {
+          clears.push_back(s);
+        } else {
+          other.push_back(s);
+        }
+      }
+      priority.insert(priority.begin(), other.begin(), other.end());
+      priority.insert(priority.begin(), clears.begin(), clears.end());
+    }
+    // Prefer clear/cancel locus, then path:line, then src/.
+    std::stable_sort(priority.begin(), priority.end(),
+                     [](const std::string& a, const std::string& b) {
+                       auto score = [](const std::string& t) {
+                         int s = 0;
+                         if (target_is_lifecycle_clear(t)) {
+                           s += 50;
+                         }
+                         if (target_is_lifecycle_set(t)) {
+                           s += 40;
+                         }
+                         const auto colon = t.rfind(':');
+                         if (colon != std::string::npos && colon + 1 < t.size()) {
+                           bool digits = true;
+                           for (std::size_t i = colon + 1; i < t.size(); ++i) {
+                             if (!std::isdigit(static_cast<unsigned char>(t[i]))) {
+                               digits = false;
+                               break;
+                             }
+                           }
+                           if (digits) {
+                             s += 20;
+                           }
+                         }
+                         if (t.find("src/") != std::string::npos) {
+                           s += 5;
+                         }
+                         return s;
+                       };
+                       return score(a) > score(b);
+                     });
+    {
+      std::vector<std::string> uniq;
+      std::unordered_set<std::string> seen;
+      for (const auto& t : priority) {
+        if (t.empty() || !seen.insert(t).second) {
+          continue;
+        }
+        uniq.push_back(t);
+      }
+      priority = std::move(uniq);
+    }
+    if (priority.size() > 10) {
+      priority.resize(10);  // keep clear/set head; avoid budget thrash on noise tails
+    }
+    if (!priority.empty()) {
+      if (log) {
+        log("L2 ▸ pack pre-review: refetch anclas sin cuerpo en fences");
+      }
+      session.unreject_matching(opts.workspace_root, anchors);
+      log_priority("pre-review anclas", priority);
+      const auto tr = session.apply_plan(opts.workspace_root, priority,
+                                         "runtime: pre-review anclas path:line");
+      if (log) {
+        log(std::string("L2 ▸ pack pre-review ") + (tr.ok ? "OK" : "FAIL") + " — " +
+            tr.summary.substr(0, 160));
+      }
+      pack_md = read_path_file(Level2Session::pack_path(opts.workspace_root));
+      session_md = read_path_file(Level2Session::session_path(opts.workspace_root));
+      watchlist.clear();
+      rejected.clear();
+      load_watchlist_rejected_from_state(opts.workspace_root, &watchlist, &rejected);
+      // Re-check after refill.
+      const bool pair_ok2 = !needs_pair || pack_has_lifecycle_pair(pack_md);
+      const int min_ok2 = (pair_ok2 && needs_pair) ? 2 : 3;
+      if (pack_must_anchors_covered(pack_md, must_check, min_ok2) && pair_ok2) {
+        if (log) {
+          log("L2 ▸ pack review auto-covered — anclas must con cuerpo tras refetch");
+        }
+        session.mark_pack_review(opts.workspace_root, true,
+                                 "runtime: must anchors covered after pre-review refetch");
+        return false;
+      }
+    }
+  }
+
+  const std::string digest = build_pack_digest(pack_md);
+
   if (cycles >= kMaxPackReviewCycles) {
+    if (!pack_has_anchor_fragment(pack_md, anchors)) {
+      std::vector<std::string> priority = plan_targets_from_map_hits(
+          ranked_map_unseen_hits(map_last, {}, {}, 8), 6);
+      if (priority.empty()) {
+        for (const auto& a : anchors) {
+          if (a.find('/') != std::string::npos) {
+            priority.push_back(a);
+          }
+          if (priority.size() >= 4) {
+            break;
+          }
+        }
+      }
+      if (!priority.empty()) {
+        if (log) {
+          log("L2 ▸ pack review: max ciclos sin anclas en pack — rescue refetch");
+        }
+        session.unreject_matching(opts.workspace_root, anchors);
+        session.reset_watchlist_priority(opts.workspace_root, priority, true);
+        log_priority("rescue mapa", priority);
+        const auto tr = session.apply_plan(opts.workspace_root, priority,
+                                           "runtime: rescue anclas mapa L1");
+        if (log) {
+          log(std::string("L2 ▸ pack rescue ") + (tr.ok ? "OK" : "FAIL") + " — " +
+              tr.summary.substr(0, 160));
+        }
+        load_watchlist_rejected_from_state(opts.workspace_root, &watchlist, &rejected);
+        if (recover_note) {
+          PackReviewVerdict stub;
+          stub.ok = true;
+          stub.verdict = "partial";
+          stub.reason = "rescue anchors after max pack_review_cycles";
+          *recover_note = build_replan_menu(stub, {}, nullptr);
+        }
+        return true;
+      }
+    }
     if (log) {
       log("L2 ▸ pack review: max ciclos sin covered — replan desde mapa");
     }
@@ -913,8 +1118,17 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
   }
   const bool covered = verdict.verdict == "covered";
   if (covered) {
-    session.mark_pack_review(opts.workspace_root, true, verdict.reason);
-    return false;
+    // Don't accept covered if must anchors still lack symbol bodies / set-clear pair.
+    const bool pair_ok_llm = !needs_pair || pack_has_lifecycle_pair(pack_md);
+    const int min_ok_llm = (pair_ok_llm && needs_pair) ? 2 : 3;
+    if (!pack_must_anchors_covered(pack_md, must_check, min_ok_llm) || !pair_ok_llm) {
+      if (log) {
+        log("L2 ▸ pack review covered rechazado — anclas must sin cuerpo o sin set/clear");
+      }
+    } else {
+      session.mark_pack_review(opts.workspace_root, true, verdict.reason);
+      return false;
+    }
   }
 
   std::ostringstream summary;
@@ -940,6 +1154,18 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
   {
     const auto invented = infer_invented_rejects(verdict, map_last);
     reject_extra.insert(reject_extra.end(), invented.begin(), invented.end());
+  }
+  reject_extra = expand_review_rejects_for_watchlist(reject_extra, watchlist);
+  // Never denylist L1 map/seed anchors (ai_controller, set_busy_*, …) nor must-tier head.
+  {
+    std::vector<std::string> protected_targets = anchors;
+    if (!watchlist.empty()) {
+      const std::size_t n =
+          std::min(watchlist.size(), static_cast<std::size_t>(kL2MustPlanTargets));
+      protected_targets.insert(protected_targets.end(), watchlist.begin(),
+                               watchlist.begin() + static_cast<std::ptrdiff_t>(n));
+    }
+    reject_extra = filter_rejects_excluding_anchors(reject_extra, protected_targets);
   }
   if (!reject_extra.empty()) {
     const auto pr = session.prune_watchlist_after_review(opts.workspace_root, reject_extra);
@@ -969,6 +1195,10 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
       } catch (...) {
       }
     }
+  }
+
+  if (!watchlist.empty()) {
+    log_priority("watchlist post-review", watchlist);
   }
 
   const std::vector<std::string> raw_terms = review_search_terms(verdict, distilled, 3);
@@ -1022,6 +1252,13 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
     }
     return a < b;
   });
+
+  {
+    const auto suggested = plan_targets_from_map_hits(hit_menu, 8);
+    if (!suggested.empty()) {
+      log_priority("sugerida post-review (MAP/SEARCH)", suggested);
+    }
+  }
 
   if (recover_note) {
     *recover_note = build_replan_menu(verdict, terms, &hit_menu);
@@ -1402,6 +1639,19 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
                     result.steps = step;
                     continue;
                   }
+                  // Battery / stop_at_explore: control pack + review ok → promote to edit.
+                  const std::string flags_after =
+                      session.status_flags(opts.workspace_root);
+                  if (opts.stop_at_explore && status_has_pack_review_ok(flags_after)) {
+                    emit("L2 ▸ pack review OK → force phase=edit (stop_at_explore)");
+                    const auto promo = session.force_phase_edit(
+                        opts.workspace_root,
+                        "pack review OK; explore complete — emit action=edit");
+                    if (promo.ok) {
+                      tr.phase = "edit";
+                      phase = "edit";
+                    }
+                  }
                 }
               }
               result.steps = step;
@@ -1425,6 +1675,16 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
             tr.phase = "explore";
             result.steps = step;
             continue;
+          }
+          const std::string flags_after = session.status_flags(opts.workspace_root);
+          if (opts.stop_at_explore && status_has_pack_review_ok(flags_after)) {
+            emit("L2 ▸ pack review OK → force phase=edit (stop_at_explore)");
+            const auto promo = session.force_phase_edit(
+                opts.workspace_root, "pack review OK; explore complete — emit action=edit");
+            if (promo.ok) {
+              tr.phase = "edit";
+              phase = "edit";
+            }
           }
         }
       }

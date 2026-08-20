@@ -123,7 +123,7 @@ struct AiLevel0EmbedSettings {
   int server_port = 18765;
   // Per-slot context. Short signature passages (~100 chars) fit in 128–256 tokens.
   // Total KV ≈ n_ctx with non-unified slots: each slot gets n_ctx / n_parallel.
-  int n_ctx = 1024;
+  int n_ctx = 2048;
   // -1 = auto (99 if libggml-vulkan/CUDA/HIP next to llama-server, else 0).
   int n_gpu_layers = -1;
   // 0 = auto (hardware_concurrency).

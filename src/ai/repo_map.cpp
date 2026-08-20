@@ -935,9 +935,8 @@ int boilerplate_penalty(const IndexedSymbol& sym) {
 }
 
 void add_domain_alias_tokens(std::vector<std::string>& tokens, std::string_view query_folded) {
-  // Bilingual retrieval lexicon (compilación→compile/build/cmake, …). Project-agnostic.
-  (void)query_folded;
-  tokens = expand_nl_retrieval_tokens(tokens, std::max<std::size_t>(tokens.size() + 16, 32));
+  tokens = expand_nl_retrieval_tokens(tokens,
+                                      std::max<std::size_t>(tokens.size() + 16, 32), query_folded);
 }
 
 int lexical_score(const IndexedSymbol& sym, const std::vector<std::string>& tokens_lower,

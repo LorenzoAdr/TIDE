@@ -77,16 +77,24 @@ std::string enrich_query_for_embed(const std::string& query,
                                    const std::vector<std::string>& needles);
 
 // Body semantic rerank: loose tokens only (no compound seeds).
+// Caps to max_tokens (0 = uncapped) preferring longer, unique tokens.
 std::string build_semantic_embed_query(const std::string& query,
-                                       const std::vector<std::string>& semantic_tokens);
+                                       const std::vector<std::string>& semantic_tokens,
+                                       std::size_t max_tokens = 12);
 
 struct BodySemanticRerankOptions {
   std::string query;
   std::vector<std::string> semantic_tokens;
   std::string workspace_root;
-  std::size_t body_pool = 30;
+  std::size_t body_pool = 40;
   std::size_t final_top = 120;
   int body_max_lines = 80;
+  // Soft cap before embed backend truncate (raise with embed n_ctx).
+  std::size_t body_max_embed_chars = 1200;
+  // Max tokens appended to the embed query (noisy L1 lists dilute cosine).
+  std::size_t max_semantic_tokens = 12;
+  // Additive body_cos * scale on score_base (keeps lexical order among peers).
+  int cos_boost_scale = 1000000;
   int max_per_file = 8;
   int max_per_stem = 2;
   int max_per_dir = 12;
@@ -105,7 +113,7 @@ struct BodySemanticRerankResult {
   std::string note;
 };
 
-// Lexical order → top body_pool → embed function bodies vs semantic token query → rerank.
+// Lexical order → top body_pool → embed bodies → hybrid: score_base + cos*boost.
 BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> candidates,
                                                   const BodySemanticRerankOptions& opts,
                                                   EmbeddingBackend* backend,

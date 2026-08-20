@@ -16,6 +16,7 @@
 #include "ai/level1_agent.hpp"
 #include "ai/llama_backend.hpp"
 #include "ai/model_store.hpp"
+#include "app/workspace_config.hpp"
 #include "app/workspace_model.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 #include "indexer/workspace_indexer.hpp"
@@ -38,7 +39,8 @@ std::string read_file(const fs::path& p) {
 
 void usage() {
   std::cerr << "Usage: tuide l1-debug --query \"...\" [--workspace ROOT] [--no-stem-embed] "
-               "[--l2-distill] [--map-out PATH] [--seeds-out PATH]\n";
+               "[--l2-distill] [--map-out PATH] [--seeds-out PATH]\n"
+               "  --no-stem-embed  skip coding-stem index; still starts embed for map rerank\n";
 }
 
 void write_seeds_json(const fs::path& path, const std::vector<std::string>& seeds) {
@@ -105,8 +107,11 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
     return 2;
   }
 
-  AiSettings settings;
-  settings.models_cache_dir = ModelStore::default_cache_dir();
+  // Workspace AI settings (embed n_ctx, ports, models) so battery matches IDE.
+  AiSettings settings = WorkspaceConfig::load(workspace).ai;
+  if (settings.models_cache_dir.empty()) {
+    settings.models_cache_dir = ModelStore::default_cache_dir();
+  }
   settings.level2_workflow = "plan";
   settings.level1.max_steps = 1;
   settings.level1.temperature = 0.1f;
@@ -128,14 +133,15 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
 
   std::string err;
   auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
-  std::unique_ptr<EmbeddingBackend> embed_backend;
+  // Always warm embeddings for map body/signature rerank. --no-stem-embed only
+  // skips the coding-stem index build (expensive), not the embed server.
+  auto embed_backend = std::make_unique<EmbeddingBackend>();
+  if (!embed_backend->ensure_ready(settings, progress, &err)) {
+    std::cerr << "embed ensure_ready: " << err << '\n';
+    return 1;
+  }
   CodingStemEmbedIndex stem_index;
   if (!no_stem_embed) {
-    embed_backend = std::make_unique<EmbeddingBackend>();
-    if (!embed_backend->ensure_ready(settings, progress, &err)) {
-      std::cerr << "embed ensure_ready: " << err << '\n';
-      return 1;
-    }
     if (!stem_index.ensure(snap.get(), embed_backend.get(), settings.models_cache_dir,
                            settings.level0.embeddings.model_id, progress, &err,
                            default_stem_passage_profile())) {

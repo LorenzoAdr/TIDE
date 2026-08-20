@@ -5,8 +5,10 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "ai/coding_stem_embed_index.hpp"
 #include "ai/embedding_backend.hpp"
@@ -601,15 +603,52 @@ std::string enrich_query_for_embed(const std::string& query,
 }
 
 std::string build_semantic_embed_query(const std::string& query,
-                                       const std::vector<std::string>& semantic_tokens) {
+                                       const std::vector<std::string>& semantic_tokens,
+                                       std::size_t max_tokens) {
   std::ostringstream out;
   out << query;
-  if (!semantic_tokens.empty()) {
+  if (semantic_tokens.empty()) {
+    return out.str();
+  }
+  std::unordered_set<std::string> seen;
+  std::vector<std::string> picked;
+  picked.reserve(std::min(max_tokens == 0 ? semantic_tokens.size() : max_tokens,
+                           semantic_tokens.size()));
+  auto try_add = [&](const std::string& t) {
+    if (t.size() < 3) {
+      return;
+    }
+    std::string key = t;
+    for (char& c : key) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (!seen.insert(key).second) {
+      return;
+    }
+    picked.push_back(t);
+  };
+  // Prefer longer tokens first (implementation phrases over stop-ish crumbs).
+  std::vector<std::size_t> order(semantic_tokens.size());
+  for (std::size_t i = 0; i < order.size(); ++i) {
+    order[i] = i;
+  }
+  std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+    const auto& ta = semantic_tokens[a];
+    const auto& tb = semantic_tokens[b];
+    if (ta.size() != tb.size()) {
+      return ta.size() > tb.size();
+    }
+    return a < b;
+  });
+  for (std::size_t idx : order) {
+    if (max_tokens > 0 && picked.size() >= max_tokens) {
+      break;
+    }
+    try_add(semantic_tokens[idx]);
+  }
+  if (!picked.empty()) {
     out << "\nsemantic:";
-    for (const auto& t : semantic_tokens) {
-      if (t.empty()) {
-        continue;
-      }
+    for (const auto& t : picked) {
       out << ' ' << t;
     }
   }
@@ -775,6 +814,25 @@ BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> cand
       opts.body_pool > 0 ? std::min(opts.body_pool, candidates.size()) : candidates.size();
   out.body_pool = pool_n;
 
+  if (const char* dbg = std::getenv("L1_DEBUG_LEXICAL_POOL")) {
+    std::size_t dump_n = pool_n;
+    if (std::string(dbg) != "1" && std::string(dbg) != "true") {
+      char* end = nullptr;
+      const long parsed = std::strtol(dbg, &end, 10);
+      if (end != dbg && parsed > 0) {
+        dump_n = static_cast<std::size_t>(parsed);
+      }
+    }
+    dump_n = std::min(dump_n, candidates.size());
+    std::fprintf(stderr, "[lexical_pool pre-embed] top %zu of %zu candidates:\n", dump_n,
+                 candidates.size());
+    for (std::size_t i = 0; i < dump_n; ++i) {
+      const auto& e = candidates[i];
+      std::fprintf(stderr, "  %3zu score=%d %s:%d %s\n", i + 1, e.score, e.file.c_str(), e.line,
+                   e.name.c_str());
+    }
+  }
+
   const bool can_embed = test_embed || (backend != nullptr && backend->ready());
   if (!can_embed || opts.workspace_root.empty() || pool_n == 0) {
     const std::size_t final_n =
@@ -787,7 +845,8 @@ BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> cand
     return out;
   }
 
-  const std::string enriched = build_semantic_embed_query(opts.query, opts.semantic_tokens);
+  const std::string enriched =
+      build_semantic_embed_query(opts.query, opts.semantic_tokens, opts.max_semantic_tokens);
   std::vector<float> qvec;
   const auto t_q0 = clock::now();
   if (!embed_text(true, enriched, backend, test_embed, &qvec) || qvec.empty()) {
@@ -818,9 +877,10 @@ BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> cand
       continue;
     }
     std::string body = got.text;
-    constexpr std::size_t kBodyCap = 1500;
-    if (body.size() > kBodyCap) {
-      body.resize(kBodyCap);
+    const std::size_t body_cap =
+        opts.body_max_embed_chars > 0 ? opts.body_max_embed_chars : std::size_t{1200};
+    if (body.size() > body_cap) {
+      body.resize(body_cap);
       body += "\n…";
     }
     bodies[i] = std::move(body);
@@ -855,10 +915,7 @@ BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> cand
         if (pvecs[j].empty()) {
           continue;
         }
-        const float c = cosine_similarity(qvec, pvecs[j]);
-        candidates[i].body_cos = c;
-        candidates[i].score +=
-            clamp_boost(static_cast<int>(std::lround(static_cast<double>(c) * 2000.0)), -200, 2000);
+        candidates[i].body_cos = cosine_similarity(qvec, pvecs[j]);
       }
     } else {
       for (std::size_t j = 0; j < body_idx.size(); ++j) {
@@ -867,10 +924,7 @@ BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> cand
         if (!embed_text(false, bodies[i], backend, test_embed, &pvec) || pvec.empty()) {
           continue;
         }
-        const float c = cosine_similarity(qvec, pvec);
-        candidates[i].body_cos = c;
-        candidates[i].score +=
-            clamp_boost(static_cast<int>(std::lround(static_cast<double>(c) * 2000.0)), -200, 2000);
+        candidates[i].body_cos = cosine_similarity(qvec, pvec);
       }
     }
   }
@@ -884,13 +938,28 @@ BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> cand
     if (candidates.size() > pool_n) {
       pool_tail.assign(candidates.begin() + static_cast<std::ptrdiff_t>(pool_n), candidates.end());
     }
+    // Hybrid: keep lexical score_base, add cosine boost (does not remint away lex order).
+    const int boost_scale = opts.cos_boost_scale > 0 ? opts.cos_boost_scale : 1000000;
+    for (auto& e : pool_head) {
+      if (e.body_cos < 0.f) {
+        continue;
+      }
+      e.score = e.score_base +
+                static_cast<int>(std::lround(static_cast<double>(e.body_cos) *
+                                             static_cast<double>(boost_scale)));
+    }
     std::stable_sort(pool_head.begin(), pool_head.end(),
                      [](const RepoMapEntry& a, const RepoMapEntry& b) {
-                       if (a.body_cos >= 0.f && b.body_cos >= 0.f && a.body_cos != b.body_cos) {
-                         return a.body_cos > b.body_cos;
-                       }
                        if (a.score != b.score) {
                          return a.score > b.score;
+                       }
+                       const bool ae = a.body_cos >= 0.f;
+                       const bool be = b.body_cos >= 0.f;
+                       if (ae != be) {
+                         return ae && !be;
+                       }
+                       if (ae && be && a.body_cos != b.body_cos) {
+                         return a.body_cos > b.body_cos;
                        }
                        return a.file < b.file;
                      });
@@ -934,7 +1003,11 @@ BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> cand
   note << "body_semantic=1";
   note << "; body_pool=" << pool_n;
   note << "; embed_body=" << (out.used_body_embed ? 1 : 0);
+  note << "; hybrid_rerank=" << (out.used_body_embed ? 1 : 0);
+  note << "; pure_rerank=0";
+  note << "; cos_boost=" << (opts.cos_boost_scale > 0 ? opts.cos_boost_scale : 1000000);
   note << "; semantic_tok_n=" << opts.semantic_tokens.size();
+  note << "; semantic_tok_cap=" << opts.max_semantic_tokens;
   note << "; body_fetch_ms=" << out.body_fetch_ms;
   note << "; query_embed_ms=" << out.query_embed_ms;
   note << "; body_embed_ms=" << out.body_embed_ms;

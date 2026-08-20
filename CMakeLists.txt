@@ -894,6 +894,15 @@ target_include_directories(l2_action_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(l2_pack_review_test
+  tests/l2_pack_review_test.cpp
+  src/ai/l2_pack_review.cpp
+)
+target_include_directories(l2_pack_review_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
 add_executable(level2_debrief_test
   tests/level2_debrief_test.cpp
   tests/tool_registry_stub.cpp
@@ -1307,6 +1316,7 @@ set(TUIDE_TEST_TARGETS
   level2_debrief_test
   l2_context_budget_test
   l2_action_test
+  l2_pack_review_test
   search_replace_test
   llama_backend_test
   repo_map_test

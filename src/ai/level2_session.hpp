@@ -192,6 +192,13 @@ class Level2Session {
   // Drop low-value watchlist entries after pack_review miss; persist rejected_targets.
   Level2TurnResult prune_watchlist_after_review(const std::string& workspace_root,
                                                 const std::vector<std::string>& reject_extra);
+  // Remove denylist entries that match protected anchors (map/seeds).
+  Level2TurnResult unreject_matching(const std::string& workspace_root,
+                                     const std::vector<std::string>& protect);
+  // Replace watchlist with priority targets (purge noise) and optionally reset review cycles.
+  Level2TurnResult reset_watchlist_priority(const std::string& workspace_root,
+                                            const std::vector<std::string>& priority_targets,
+                                            bool reset_review_cycles);
 
   std::string status_text(const std::string& workspace_root) const;
   // One-line flags for harness CLI (avoids extra `status` roundtrips).

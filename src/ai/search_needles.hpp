@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace tuide {
@@ -39,7 +40,8 @@ std::vector<std::string> extract_code_tokens(const std::string& text, std::size_
 // Expand NL tokens with common bilingual code equivalents for index retrieval
 // (cierre→quit/close, buscador→search, …). Generic vocabulary only — no project file stems.
 std::vector<std::string> expand_nl_retrieval_tokens(const std::vector<std::string>& tokens,
-                                                   std::size_t max_n = 32);
+                                                   std::size_t max_n = 32,
+                                                   std::string_view query_folded = {});
 
 // Content facets from NL (folded, stopword-filtered). Used for multi-facet ranking.
 std::vector<std::string> extract_query_facets(const std::string& text, std::size_t max_n = 12);

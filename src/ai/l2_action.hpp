@@ -39,6 +39,8 @@ struct L2Action {
 // Ad-hoc tools batch size (legacy). Plan targets use kL2MaxPlanTargets.
 inline constexpr int kL2MaxToolBatch = 4;
 inline constexpr int kL2MaxPlanTargets = 16;
+// First N plan targets (7B order) are must-keep under pack budget.
+inline constexpr int kL2MustPlanTargets = 4;
 
 L2Action parse_l2_action(const std::string& model_text);
 

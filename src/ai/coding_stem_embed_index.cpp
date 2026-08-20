@@ -33,7 +33,7 @@ struct PassageOpts {
   std::size_t max_sigs = 6;
   bool include_hdr_docs = false;
   std::size_t max_docs = 3;
-  std::size_t max_doc_chars = 100;
+  std::size_t max_doc_chars = 240;
   bool include_module_blurb = false;
   std::size_t max_blurb_chars = 120;
   bool prefer_hpp_paths = false;
@@ -98,7 +98,7 @@ PassageOpts opts_for(StemPassageProfileId id) {
       o.max_names = 48;
       o.max_sigs = 12;
       o.max_docs = 6;
-      o.max_doc_chars = 140;
+      o.max_doc_chars = 280;
       o.max_blurb_chars = 200;
       o.max_sig_chars = 80;
       break;

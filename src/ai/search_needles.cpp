@@ -594,14 +594,18 @@ int score_search_hit(const std::string& relative_path, const std::string& matchi
 }
 
 std::vector<std::string> expand_nl_retrieval_tokens(const std::vector<std::string>& tokens,
-                                                   std::size_t max_n) {
+                                                   std::size_t max_n,
+                                                   std::string_view query_folded) {
   std::vector<std::string> out;
   std::unordered_set<std::string> seen;
   auto push = [&](std::string s) {
     for (char& c : s) {
       c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
-    if (s.size() < 3 || !seen.insert(s).second) {
+    if (s.size() < 2 || !seen.insert(s).second) {
+      return;
+    }
+    if (s.size() < 3 && s != "ai") {
       return;
     }
     out.push_back(std::move(s));
@@ -609,6 +613,16 @@ std::vector<std::string> expand_nl_retrieval_tokens(const std::vector<std::strin
   for (const auto& t : tokens) {
     push(t);
   }
+
+  auto folded_has_word = [&](std::string_view word) {
+    if (query_folded.empty() || word.empty()) {
+      return false;
+    }
+    const std::string padded =
+        std::string(" ") + std::string(query_folded) + " ";
+    const std::string needle = std::string(" ") + std::string(word) + " ";
+    return padded.find(needle) != std::string::npos;
+  };
 
   // General bilingual / synonym bridge for code retrieval (NOT project file aliases).
   auto add_if_has = [&](std::initializer_list<const char*> triggers,
@@ -624,8 +638,11 @@ std::vector<std::string> expand_nl_retrieval_tokens(const std::vector<std::strin
       if (hit) {
         break;
       }
+      if (folded_has_word(tr)) {
+        hit = true;
+        break;
+      }
     }
-    // Also scan raw joined form via tokens already pushed.
     if (!hit) {
       return;
     }
@@ -672,6 +689,17 @@ std::vector<std::string> expand_nl_retrieval_tokens(const std::vector<std::strin
                "redibujado", "redraw", "async", "asincron", "asincrono", "asincronos", "invalidate",
                "invalidacion", "invalidar", "repaint", "refresh_ui", "politica", "policy"},
               {"wake", "ui_wake", "policy", "invalidation", "repaint"});
+  // AI / chat assistant (ES «IA» is 2 chars — also detected via query_folded word scan).
+  add_if_has({"ia", "inteligencia", "agente", "asistente"},
+             {"ai", "agent", "ai_controller", "level1", "level2"});
+  add_if_has({"chat", "conversacion", "conversación"},
+             {"chat", "console", "console_panel"});
+  if (folded_has_word("ia") || folded_has_word("ai") || folded_has_word("agente") ||
+      folded_has_word("chat")) {
+    push("chat_ia");
+    push("agent_busy");
+    push("set_busy_spinner");
+  }
 
   if (out.size() > max_n) {
     out.resize(max_n);

@@ -4,6 +4,7 @@
 #include <string>
 
 #include "ai/repo_map.hpp"
+#include "ai/search_needles.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 
 using tuide::IndexedRef;
@@ -52,6 +53,18 @@ int main() {
     expect(has_panel, "token panel from NL");
     expect(std::find(toks.begin(), toks.end(), "donde") == toks.end(), "stopword donde filtered");
     expect(std::find(toks.begin(), toks.end(), "codigo") == toks.end(), "stopword codigo filtered");
+  }
+
+  {
+    const auto toks = repo_map_query_tokens(
+        "panel del chat con la IA se queda bloqueado mostrando spinner", 32);
+    expect(std::find(toks.begin(), toks.end(), "ai") != toks.end(),
+           "ia (2-char) query expands to ai via domain alias");
+    expect(std::find(toks.begin(), toks.end(), "ai_controller") != toks.end(),
+           "ia query expands to ai_controller");
+    const auto bare = tuide::expand_nl_retrieval_tokens({}, 16, " chat con la ia se bloquea ");
+    expect(std::find(bare.begin(), bare.end(), "ai") != bare.end(),
+           "folded ia word scan adds ai without lexical token");
   }
 
   SymbolIndexSnapshot snap;

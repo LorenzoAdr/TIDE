@@ -83,22 +83,6 @@ struct DistilledInvestigateIntent {
   std::vector<std::string> search_terms;
 };
 
-bool is_surface_presentation_term(const std::string& raw);
-
-void filter_surface_terms(std::vector<std::string>* items) {
-  if (items == nullptr) {
-    return;
-  }
-  std::vector<std::string> kept;
-  kept.reserve(items->size());
-  for (const auto& s : *items) {
-    if (!is_surface_presentation_term(s)) {
-      kept.push_back(s);
-    }
-  }
-  items->swap(kept);
-}
-
 std::string semantic_query_from_distilled(const DistilledInvestigateIntent& di,
                                           const std::string& fallback) {
   std::ostringstream out;
@@ -205,64 +189,6 @@ std::string summarize_distilled_intent(const DistilledInvestigateIntent& di) {
     }
   }
   return out.str();
-}
-
-bool is_surface_presentation_term(const std::string& raw) {
-  std::string low = raw;
-  for (char& c : low) {
-    if (c >= 'A' && c <= 'Z') {
-      c = static_cast<char>(c - 'A' + 'a');
-    }
-  }
-  static const std::unordered_set<std::string> kPresentationWords = {
-      "visible", "visibility", "show",     "shown",   "hide",   "hidden",
-      "open",    "opened",     "close",    "closed",  "panel",  "panels",
-      "window",  "windows",    "dialog",   "dialogs", "screen", "screens",
-      "sidebar", "sidebars",   "view",     "views",   "tab",    "tabs",
-      "line",    "lines",      "ui",       "ux",
-  };
-  static const std::unordered_set<std::string> kSemanticAnchors = {
-      "state",      "status",     "persist",   "persistent", "storage",  "store",
-      "config",     "settings",   "session",   "history",    "cache",    "snapshot",
-      "restore",    "reload",     "reopen",    "resume",     "serialize","deserialize",
-      "model",      "controller", "manager",   "registry",   "runtime",  "pipeline",
-      "document",   "buffer",     "editor",    "workspace",  "project",  "context",
-      "navigation", "selection",  "cursor",    "position",   "layout",   "metadata",
-  };
-  if (kSemanticAnchors.count(low) != 0) {
-    return false;
-  }
-  if (kPresentationWords.count(low) != 0) {
-    return true;
-  }
-  // If a phrase is mostly about presentation, keep it only when it is tied to
-  // a stronger semantic anchor like state, persistence, workflow or ownership.
-  const bool has_presentation = low.find("visible") != std::string::npos ||
-                                low.find("show") != std::string::npos ||
-                                low.find("hide") != std::string::npos ||
-                                low.find("panel") != std::string::npos ||
-                                low.find("window") != std::string::npos ||
-                                low.find("dialog") != std::string::npos ||
-                                low.find("sidebar") != std::string::npos ||
-                                low.find("screen") != std::string::npos ||
-                                low.find("tab") != std::string::npos;
-  const bool has_anchor = low.find("state") != std::string::npos ||
-                          low.find("persist") != std::string::npos ||
-                          low.find("store") != std::string::npos ||
-                          low.find("config") != std::string::npos ||
-                          low.find("session") != std::string::npos ||
-                          low.find("history") != std::string::npos ||
-                          low.find("cache") != std::string::npos ||
-                          low.find("restore") != std::string::npos ||
-                          low.find("resume") != std::string::npos ||
-                          low.find("manager") != std::string::npos ||
-                          low.find("controller") != std::string::npos ||
-                          low.find("document") != std::string::npos ||
-                          low.find("buffer") != std::string::npos ||
-                          low.find("editor") != std::string::npos ||
-                          low.find("workflow") != std::string::npos ||
-                          low.find("runtime") != std::string::npos;
-  return has_presentation && !has_anchor;
 }
 
 }  // namespace
@@ -626,9 +552,8 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
           "- Si el prompt mezcla conceptos estructurales con detalles de presentación, "
           "PRIORIZA lo estructural: estado, persistencia, modelo, coordinación, flujo, "
           "almacenamiento, propietario del dato o ciclo de vida.\n"
-          "- Evita que facets/search_terms queden dominados por palabras de presentación o "
-          "visibilidad (abrir/cerrar/mostrar/ocultar/panel/ventana/pestaña/línea) salvo que "
-          "formen parte de un concepto de implementación más profundo.\n"
+          "- Incluye en facets/search_terms los subsistemas que el usuario nombra "
+          "(p. ej. IA, chat, agente, terminal) aunque suenen a UI.\n"
           "- NO inventes nombres de archivos o símbolos todavía.\n"
           "- Si el prompt es largo, prioriza la semántica estable frente a detalles cosméticos.\n";
       std::ostringstream user;
@@ -659,10 +584,6 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
           log("L1 intent raw: " + completion.text);
         }
         distilled = parse_distilled_intent_json(completion.text);
-        if (distilled) {
-          filter_surface_terms(&distilled->facets);
-          filter_surface_terms(&distilled->search_terms);
-        }
         if (distilled && log) {
           log("L1 intent: " + summarize_distilled_intent(*distilled));
         }
@@ -1093,7 +1014,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
         bs_opts.query = user_message;
         bs_opts.semantic_tokens = semantic_tokens;
         bs_opts.workspace_root = root;
-        bs_opts.body_pool = 30;
+        bs_opts.body_pool = 40;
         if (context_dump || code_edit) {
           bs_opts.final_top = 280;
           bs_opts.max_per_file = 14;
@@ -1108,7 +1029,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           bs_opts.body_max_lines = 80;
         }
         if (log) {
-          log("L1 body semantic rerank (lexical top-30 → embed cuerpos): candidatos=" +
+          log("L1 body semantic rerank (lexical top-40 → embed cuerpos, hybrid cos+lex): candidatos=" +
               std::to_string(candidates.size()) + " tokens=" +
               std::to_string(semantic_tokens.size()));
         }

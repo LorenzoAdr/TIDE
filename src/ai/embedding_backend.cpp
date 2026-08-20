@@ -789,7 +789,7 @@ bool EmbeddingBackend::start_server(const std::string& server_bin, const std::st
                                     std::string* error) {
   const int ngl = resolve_n_gpu_layers(lib_dir, emb.n_gpu_layers);
   const int threads = resolve_n_threads(emb.n_threads);
-  const int n_ctx = emb.n_ctx > 0 ? emb.n_ctx : 1024;
+  const int n_ctx = emb.n_ctx > 0 ? emb.n_ctx : 2048;
   const int batch = emb.batch_size > 0 ? emb.batch_size : 2048;
   const int ubatch = emb.ubatch_size > 0 ? emb.ubatch_size : 512;
   const int n_parallel = emb.n_parallel > 0 ? emb.n_parallel : 8;
@@ -943,7 +943,7 @@ bool EmbeddingBackend::ensure_ready(const AiSettings& settings, const ProgressFn
   http_batch_ = settings.level0.embeddings.http_batch > 0 ? settings.level0.embeddings.http_batch
                                                           : kEmbedBatchChunkDefault;
   n_parallel_ = settings.level0.embeddings.n_parallel > 0 ? settings.level0.embeddings.n_parallel : 8;
-  n_ctx_ = settings.level0.embeddings.n_ctx > 0 ? settings.level0.embeddings.n_ctx : 1024;
+  n_ctx_ = settings.level0.embeddings.n_ctx > 0 ? settings.level0.embeddings.n_ctx : 2048;
   // llama-server splits KV across slots: each input must fit in n_ctx/n_parallel tokens.
   // ~3 chars/token is conservative for code identifiers; leave room for task prefix.
   {
