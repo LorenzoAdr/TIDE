@@ -57,6 +57,12 @@ std::optional<std::string> event_to_pty_bytes(const Event& event) {
   if (event == Event::ArrowRight) {
     return std::string("\x1b[C");
   }
+  if (event_is_ctrl_left(event)) {
+    return std::string("\x1b[1;5D");
+  }
+  if (event_is_ctrl_right(event)) {
+    return std::string("\x1b[1;5C");
+  }
   if (event == Event::ArrowUp) {
     return std::string("\x1b[A");
   }

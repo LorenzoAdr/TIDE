@@ -214,6 +214,8 @@ struct FileTreePanelState {
   int list_scroll = 0;
   std::string loaded_workspace;
   std::string last_revealed_path;
+  // Relative paths (workspace-rooted) selected via Ctrl+click.
+  std::unordered_set<std::string> multi_selected;
   Box panel_box;
   Box hide_box;
   Box refresh_box;
@@ -356,6 +358,7 @@ struct FileTreePanelState {
       selected = 0;
       list_scroll = 0;
       last_revealed_path.clear();
+      multi_selected.clear();
       rebuild_flat();
       return;
     }
@@ -372,6 +375,7 @@ struct FileTreePanelState {
 
     if (loaded_workspace != workspace_root) {
       last_revealed_path.clear();
+      multi_selected.clear();
     }
 
     loaded_workspace = workspace_root;
@@ -416,7 +420,8 @@ struct FileTreePanelState {
   }
 
   void activate(DebugModel* model, WorkspaceModel* workspace, FocusManagerState* focus,
-                MainLayoutState* layout_state, WorkspaceIndexer* indexer, int index) {
+                MainLayoutState* layout_state, WorkspaceIndexer* indexer, int index,
+                bool skip_reveal_center = false) {
     if (index < 0 || index >= static_cast<int>(flat.size())) {
       return;
     }
@@ -432,6 +437,11 @@ struct FileTreePanelState {
       model->active_file = absolute.string();
       model->active_line = 0;
       model->view_token++;
+      if (skip_reveal_center) {
+        // Mouse opens already keep the row under the cursor; do not let the next
+        // paint's reveal_file() recenter the explorer on this path.
+        last_revealed_path = normalize_path(absolute.string());
+      }
       if (layout_state != nullptr) {
         UI_WAKE(layout_state, "wake");
       }
@@ -474,7 +484,7 @@ struct FileTreePanelState {
       return false;
     }
     selected = row;
-    center_row(row);
+    scroll_row_into_view(row, layout_state);
     trigger_press(layout_state, press_id::explorer_row(row));
     return true;
   }
@@ -507,6 +517,68 @@ void invalidate_file_tree_panel(MainLayoutState* layout_state) {
   if (layout_state != nullptr) {
     layout_state->panel_render_cache.mark_dirty(UiPanelId::FileTree);
   }
+}
+
+bool mouse_control_active(const Mouse& m, const Event& event) {
+  if (m.control) {
+    return true;
+  }
+  if (!event.is_mouse()) {
+    return false;
+  }
+  const std::string& input = event.input();
+  if (input.size() < 6 || input[0] != '\x1b' || input[1] != '[' || input[2] != '<') {
+    return false;
+  }
+  int button = 0;
+  for (std::size_t i = 3; i < input.size() && input[i] != ';' && input[i] != 'M' && input[i] != 'm';
+       ++i) {
+    button = button * 10 + (input[i] - '0');
+  }
+  return (button & 16) != 0;
+}
+
+void toggle_explorer_multi(FileTreePanelState* state, MainLayoutState* layout_state,
+                           const std::string& relative_path) {
+  if (state == nullptr || relative_path.empty()) {
+    return;
+  }
+  const auto it = state->multi_selected.find(relative_path);
+  if (it == state->multi_selected.end()) {
+    state->multi_selected.insert(relative_path);
+  } else {
+    state->multi_selected.erase(it);
+  }
+  invalidate_file_tree_panel(layout_state);
+}
+
+std::vector<ContextMenuPathTarget> build_multi_targets(const FileTreePanelState* state,
+                                                       const std::string& workspace_root) {
+  std::vector<ContextMenuPathTarget> targets;
+  if (state == nullptr || workspace_root.empty()) {
+    return targets;
+  }
+  targets.reserve(state->multi_selected.size());
+  for (const std::string& rel : state->multi_selected) {
+    if (rel.empty()) {
+      continue;
+    }
+    std::error_code ec;
+    const auto absolute = fs::weakly_canonical(fs::path(workspace_root) / rel, ec);
+    if (ec) {
+      continue;
+    }
+    ContextMenuPathTarget target;
+    target.absolute_path = absolute.string();
+    target.relative_path = rel;
+    target.is_dir = fs::is_directory(absolute, ec);
+    targets.push_back(std::move(target));
+  }
+  std::sort(targets.begin(), targets.end(),
+            [](const ContextMenuPathTarget& a, const ContextMenuPathTarget& b) {
+              return a.relative_path < b.relative_path;
+            });
+  return targets;
 }
 
 void set_explorer_list_scroll(FileTreePanelState* state, MainLayoutState* layout_state,
@@ -634,6 +706,17 @@ bool handle_explorer_context_menu(FileTreePanelState* state, DebugModel* model,
   if (ec || layout_state == nullptr) {
     return true;
   }
+
+  if (state->multi_selected.size() >= 2 &&
+      state->multi_selected.count(entry.relative_path) > 0) {
+    auto targets = build_multi_targets(state, model->workspace_root);
+    if (targets.size() >= 2) {
+      context_menu_open_selection(&layout_state->context_menu, m.x, m.y, std::move(targets));
+      return true;
+    }
+  }
+
+  state->multi_selected.clear();
   if (entry.is_file) {
     const bool trackable = is_lsp_trackable_path(absolute.string());
     const bool binary = is_nm_analyzable_path(absolute.string());
@@ -775,7 +858,14 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
     trigger_press(layout_state, press_id::explorer_row(*row));
     state->selected = *row;
     state->scroll_row_into_view(*row, layout_state);
-    state->activate(model, workspace, focus, layout_state, indexer, *row);
+    const auto& entry = state->flat[static_cast<std::size_t>(*row)];
+    if (mouse_control_active(m, event)) {
+      toggle_explorer_multi(state, layout_state, entry.relative_path);
+      return true;
+    }
+    state->multi_selected.clear();
+    state->activate(model, workspace, focus, layout_state, indexer, *row,
+                    /*skip_reveal_center=*/true);
     return true;
   }
 
@@ -798,6 +888,7 @@ bool handle_navigation(FileTreePanelState* state, DebugModel* model,
     return true;
   }
   if (event == Event::Return) {
+    state->multi_selected.clear();
     trigger_press(layout_state, press_id::explorer_row(state->selected));
     state->activate(model, workspace, focus, layout_state, indexer, state->selected);
     return true;
@@ -872,6 +963,17 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
         indexer != nullptr ? indexer->snapshot() : nullptr;
     state->sync_index(snapshot, model->workspace_root);
 
+    if (!state->multi_selected.empty() && !model->workspace_root.empty()) {
+      for (auto it = state->multi_selected.begin(); it != state->multi_selected.end();) {
+        std::error_code ec;
+        if (!fs::exists(fs::path(model->workspace_root) / *it, ec) || ec) {
+          it = state->multi_selected.erase(it);
+        } else {
+          ++it;
+        }
+      }
+    }
+
     const std::string active_file =
         workspace != nullptr && !workspace->active_file.empty()
             ? normalize_path(workspace->active_file)
@@ -900,7 +1002,9 @@ Component MakeFileTreePanel(DebugModel* model, WorkspaceModel* workspace,
       const auto& entry = state->flat[static_cast<std::size_t>(i)];
       const bool active_entry =
           entry.is_file && !active_rel.empty() && entry.relative_path == active_rel;
+      const bool multi = state->multi_selected.count(entry.relative_path) > 0;
       const bool selected =
+          multi ||
           (i == state->selected &&
            (focus == nullptr || focus->region == FocusRegion::Explorer)) ||
           active_entry;

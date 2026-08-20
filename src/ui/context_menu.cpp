@@ -1681,6 +1681,7 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
   state->rename_skip_return = false;
   state->rename_input.clear();
   state->name_prompt_kind = NamePromptKind::Rename;
+  state->batch_targets.clear();
   state->selected = 0;
   state->row_boxes.clear();
   if (layout_state != nullptr) {
@@ -1710,6 +1711,7 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
   state->delete_confirm_open = false;
   state->indexer_paths_open = false;
   state->rename_skip_return = false;
+  state->batch_targets.clear();
   state->anchor_x = x;
   state->anchor_y = y;
   state->absolute_path = absolute_path;
@@ -1808,6 +1810,7 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
   state->rename_open = false;
   state->delete_confirm_open = false;
   state->rename_skip_return = false;
+  state->batch_targets.clear();
   state->anchor_x = x;
   state->anchor_y = y;
   state->absolute_path = absolute_path;
@@ -1819,6 +1822,28 @@ void context_menu_open_folder(ContextMenuState* state, int x, int y,
              {i18n::tr("context_menu.rename_folder"), "rename_folder"},
              {i18n::tr("context_menu.search_in_folder"), "search_in_folder"},
              {i18n::tr("context_menu.delete_folder"), "delete_folder"}});
+}
+
+void context_menu_open_selection(ContextMenuState* state, int x, int y,
+                                 std::vector<ContextMenuPathTarget> targets) {
+  if (state == nullptr || targets.size() < 2) {
+    return;
+  }
+  state->open = true;
+  state->rename_open = false;
+  state->delete_confirm_open = false;
+  state->indexer_paths_open = false;
+  state->move_browser_open = false;
+  state->rename_skip_return = false;
+  state->anchor_x = x;
+  state->anchor_y = y;
+  state->batch_targets = std::move(targets);
+  state->absolute_path = state->batch_targets.front().absolute_path;
+  state->relative_path = state->batch_targets.front().relative_path;
+  const std::string count = std::to_string(state->batch_targets.size());
+  set_items(state, ContextMenuKind::File,
+            {{i18n::tr("context_menu.move_to"), "move_to"},
+             {i18n::tr_fmt("context_menu.delete_selection", {count}), "delete_file"}});
 }
 
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
@@ -1982,6 +2007,17 @@ Element render_indexer_paths_modal(ContextMenuState* state) {
 Element render_delete_confirm_modal(const ContextMenuState* state) {
   if (state == nullptr || !state->delete_confirm_open) {
     return text("");
+  }
+  if (state->batch_targets.size() > 1) {
+    const std::string count = std::to_string(state->batch_targets.size());
+    Element dialog = ModalWindow(
+        text(i18n::tr("context_menu.delete.multi_title")) | color(theme::Accent()),
+        vbox({
+            text(i18n::tr_fmt("context_menu.delete.multi_prompt", {count})) |
+                color(theme::Header()),
+            text(i18n::tr("common.footer.confirm_esc")) | color(theme::Muted()),
+        }));
+    return CenteredModal(std::move(dialog));
   }
   const std::string name = fs::path(state->absolute_path).filename().string();
   const bool is_folder = state->kind == ContextMenuKind::Folder;
@@ -2360,11 +2396,32 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
     }
     if (event == Event::Character('a') || event == Event::Character('A')) {
       if (is_directory_path(state->move_browser.browser_path)) {
-        if (move_path(workspace, model, indexer, symbol_indexer, state->absolute_path,
-                      state->relative_path, state->move_browser.browser_path,
-                      state->move_is_dir)) {
+        const std::string dest = state->move_browser.browser_path;
+        int moved = 0;
+        if (!state->batch_targets.empty()) {
+          auto targets = state->batch_targets;
+          std::sort(targets.begin(), targets.end(),
+                    [](const ContextMenuPathTarget& a, const ContextMenuPathTarget& b) {
+                      return a.relative_path.size() > b.relative_path.size();
+                    });
+          for (const auto& target : targets) {
+            if (move_path(workspace, model, indexer, symbol_indexer, target.absolute_path,
+                          target.relative_path, dest, target.is_dir)) {
+              ++moved;
+            }
+          }
+          if (moved > 0 && workspace != nullptr) {
+            workspace->status_message =
+                i18n::tr_fmt("status.moved_n", {std::to_string(moved)});
+          }
+        } else if (move_path(workspace, model, indexer, symbol_indexer, state->absolute_path,
+                             state->relative_path, dest, state->move_is_dir)) {
+          moved = 1;
+        }
+        if (moved > 0) {
           context_menu_close(state, layout_state);
           if (layout_state != nullptr) {
+            layout_state->panel_render_cache.mark_dirty(UiPanelId::FileTree);
             UI_WAKE(layout_state, "wake");
           }
         }
@@ -2404,9 +2461,28 @@ bool handle_context_menu_keys(ContextMenuState* state, WorkspaceModel* workspace
       return true;
     }
     if (event == Event::Return) {
-      const bool is_dir = state->kind == ContextMenuKind::Folder;
-      delete_path(workspace, model, indexer, symbol_indexer, state->absolute_path,
-                  state->relative_path, is_dir);
+      int deleted = 0;
+      if (!state->batch_targets.empty()) {
+        auto targets = state->batch_targets;
+        std::sort(targets.begin(), targets.end(),
+                  [](const ContextMenuPathTarget& a, const ContextMenuPathTarget& b) {
+                    return a.relative_path.size() > b.relative_path.size();
+                  });
+        for (const auto& target : targets) {
+          if (delete_path(workspace, model, indexer, symbol_indexer, target.absolute_path,
+                          target.relative_path, target.is_dir)) {
+            ++deleted;
+          }
+        }
+        if (deleted > 0 && workspace != nullptr) {
+          workspace->status_message =
+              i18n::tr_fmt("status.deleted_n", {std::to_string(deleted)});
+        }
+      } else {
+        const bool is_dir = state->kind == ContextMenuKind::Folder;
+        delete_path(workspace, model, indexer, symbol_indexer, state->absolute_path,
+                    state->relative_path, is_dir);
+      }
       context_menu_close(state, layout_state);
       if (layout_state != nullptr) {
         layout_state->panel_render_cache.mark_dirty(UiPanelId::FileTree);

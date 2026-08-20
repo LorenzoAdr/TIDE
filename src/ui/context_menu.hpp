@@ -35,6 +35,12 @@ enum class ContextMenuKind {
 
 enum class NamePromptKind { Rename, CreateFile, CreateFolder };
 
+struct ContextMenuPathTarget {
+  std::string absolute_path;
+  std::string relative_path;
+  bool is_dir = false;
+};
+
 struct ContextMenuState {
   bool open = false;
   int anchor_x = 0;
@@ -47,6 +53,8 @@ struct ContextMenuState {
 
   std::string absolute_path;
   std::string relative_path;
+  // When size >= 2, move/delete apply to every entry (explorer multi-select).
+  std::vector<ContextMenuPathTarget> batch_targets;
 
   int editor_line = 0;
   int editor_col = 0;
@@ -99,6 +107,10 @@ void context_menu_append_item(ContextMenuState* state, const std::string& label,
 
 void context_menu_open_folder(ContextMenuState* state, int x, int y,
                               const std::string& absolute_path, const std::string& relative_path);
+
+// Explorer multi-select: only move + delete for the given targets (size >= 2).
+void context_menu_open_selection(ContextMenuState* state, int x, int y,
+                                 std::vector<ContextMenuPathTarget> targets);
 
 void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int line, int col,
                                      int sym_start, int sym_end, const std::string& symbol,
