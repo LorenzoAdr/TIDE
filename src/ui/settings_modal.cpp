@@ -232,7 +232,8 @@ constexpr int kUiColorsText = theme::kListedPresetCount + 2;
 constexpr int kUiColorsTitle = theme::kListedPresetCount + 3;
 constexpr int kUiColorsDirectory = theme::kListedPresetCount + 4;
 constexpr int kUiColorsFile = theme::kListedPresetCount + 5;
-constexpr int kUiColorsRowCount = theme::kListedPresetCount + 6;
+constexpr int kUiColorsIndentGuideStrength = theme::kListedPresetCount + 6;
+constexpr int kUiColorsRowCount = theme::kListedPresetCount + 7;
 
 constexpr int kPaletteCols = 8;
 constexpr std::array<theme::ColorRgb, 40> kUIColorPalette = {{
@@ -1205,9 +1206,44 @@ std::string ui_color_row_label(int row) {
       return i18n::tr("settings.ui_colors.row.directory");
     case 5:
       return i18n::tr("settings.ui_colors.row.file");
+    case 6:
+      return i18n::tr("settings.ui_colors.row.indent_guides");
     default:
       return {};
   }
+}
+
+std::string indent_guide_strength_label(int percent) {
+  return i18n::tr_fmt("settings.ui_colors.indent_guides.value",
+                      {std::to_string(AppSettings::clamp_indent_guide_strength_percent(percent))});
+}
+
+void cycle_indent_guide_strength(SettingsModalState* state) {
+  if (state == nullptr) {
+    return;
+  }
+  const int current =
+      AppSettings::clamp_indent_guide_strength_percent(state->draft_indent_guide_strength_percent);
+  int next = 20;
+  switch (current) {
+    case 20:
+      next = 40;
+      break;
+    case 40:
+      next = 60;
+      break;
+    case 60:
+      next = 80;
+      break;
+    case 80:
+      next = 100;
+      break;
+    default:
+      next = 20;
+      break;
+  }
+  state->draft_indent_guide_strength_percent = next;
+  theme::set_indent_guide_strength_percent(next);
 }
 
 std::string ui_color_row_value(const SettingsModalState* state, int row) {
@@ -1219,6 +1255,9 @@ std::string ui_color_row_value(const SettingsModalState* state, int row) {
                ? i18n::tr("settings.ui_colors.theme_active")
                : i18n::tr("settings.ui_colors.dash");
   }
+  if (row == kUiColorsIndentGuideStrength) {
+    return indent_guide_strength_label(state->draft_indent_guide_strength_percent);
+  }
   const auto* field =
       mutable_ui_color_field(const_cast<SettingsModalState*>(state), row);
   if (field != nullptr && field->has_value()) {
@@ -1228,7 +1267,7 @@ std::string ui_color_row_value(const SettingsModalState* state, int row) {
 }
 
 void begin_ui_color_edit(SettingsModalState* state, int row) {
-  if (state == nullptr || row < theme::kListedPresetCount) {
+  if (state == nullptr || row < theme::kListedPresetCount || row == kUiColorsIndentGuideStrength) {
     return;
   }
   ensure_draft_ui_colors_complete(state);
@@ -1358,6 +1397,10 @@ bool handle_ui_colors_keys(SettingsModalState* state, Event event) {
   if (event == Event::Return || event == Event::Character(' ')) {
     if (state->ui_colors_selected < theme::kListedPresetCount) {
       apply_ui_color_preset(state, theme::listed_preset_at(state->ui_colors_selected));
+      return true;
+    }
+    if (state->ui_colors_selected == kUiColorsIndentGuideStrength) {
+      cycle_indent_guide_strength(state);
       return true;
     }
     begin_ui_color_edit(state, state->ui_colors_selected);
@@ -1724,6 +1767,8 @@ void activate_settings_click(SettingsModalState* state, int index, int mouse_x) 
       clamp_ui_colors_selection(state);
       if (index < theme::kListedPresetCount) {
         apply_ui_color_preset(state, theme::listed_preset_at(index));
+      } else if (index == kUiColorsIndentGuideStrength) {
+        cycle_indent_guide_strength(state);
       } else {
         begin_ui_color_edit(state, index);
       }
@@ -3913,6 +3958,8 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_show_diagnostic_suffixes = settings.show_diagnostic_suffixes;
   state->draft_sticky_scroll_enabled = settings.sticky_scroll_enabled;
   state->draft_indent_guides_enabled = settings.indent_guides_enabled;
+  state->draft_indent_guide_strength_percent =
+      AppSettings::clamp_indent_guide_strength_percent(settings.indent_guide_strength_percent);
   state->draft_visual_highlight_enabled = settings.visual_highlight_enabled;
   state->draft_visual_brace_pair_colors_enabled = settings.visual_brace_pair_colors_enabled;
   state->draft_visual_matching_bracket_enabled = settings.visual_matching_bracket_enabled;
@@ -4015,6 +4062,8 @@ void close_settings_modal(SettingsModalState* state, AppSettings* settings,
   settings->show_diagnostic_suffixes = state->draft_show_diagnostic_suffixes;
   settings->sticky_scroll_enabled = state->draft_sticky_scroll_enabled;
   settings->indent_guides_enabled = state->draft_indent_guides_enabled;
+  settings->indent_guide_strength_percent =
+      AppSettings::clamp_indent_guide_strength_percent(state->draft_indent_guide_strength_percent);
   settings->visual_highlight_enabled = state->draft_visual_highlight_enabled;
   settings->visual_brace_pair_colors_enabled = state->draft_visual_brace_pair_colors_enabled;
   settings->visual_matching_bracket_enabled = state->draft_visual_matching_bracket_enabled;

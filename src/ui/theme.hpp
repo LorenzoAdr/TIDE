@@ -98,7 +98,10 @@ Color TabIdle();
 Color Accent();
 Color AccentDim();
 // Editor indent guides: softer than AccentDim so they don't compete with code.
+// Strength is 20–100 (% toward muted from the code background); see set_indent_guide_strength_percent.
 Color IndentGuide();
+void set_indent_guide_strength_percent(int percent);
+int indent_guide_strength_percent();
 Color Play();
 Color Pause();
 Color Stop();

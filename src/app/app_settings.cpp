@@ -35,6 +35,20 @@ int AppSettings::clamp_large_file_virtual_mb(int mb) {
   return best;
 }
 
+int AppSettings::clamp_indent_guide_strength_percent(int percent) {
+  static constexpr int kPresets[] = {20, 40, 60, 80, 100};
+  int best = kPresets[1];
+  int best_dist = std::abs(percent - best);
+  for (int preset : kPresets) {
+    const int dist = std::abs(percent - preset);
+    if (dist < best_dist) {
+      best = preset;
+      best_dist = dist;
+    }
+  }
+  return best;
+}
+
 std::uintmax_t AppSettings::large_file_virtual_bytes() const {
   return static_cast<std::uintmax_t>(clamp_large_file_virtual_mb(large_file_virtual_mb)) * 1024ULL *
          1024ULL;
@@ -92,6 +106,11 @@ AppSettings AppSettings::load() {
     }
     if (doc.contains("indent_guides_enabled") && doc["indent_guides_enabled"].is_boolean()) {
       settings.indent_guides_enabled = doc["indent_guides_enabled"].get<bool>();
+    }
+    if (doc.contains("indent_guide_strength_percent") &&
+        doc["indent_guide_strength_percent"].is_number_integer()) {
+      settings.indent_guide_strength_percent =
+          clamp_indent_guide_strength_percent(doc["indent_guide_strength_percent"].get<int>());
     }
     if (doc.contains("scope_highlight_enabled") && doc["scope_highlight_enabled"].is_boolean()) {
       settings.scope_highlight_enabled = doc["scope_highlight_enabled"].get<bool>();
@@ -238,6 +257,8 @@ bool AppSettings::save() const {
   doc["show_diagnostic_suffixes"] = show_diagnostic_suffixes;
   doc["sticky_scroll_enabled"] = sticky_scroll_enabled;
   doc["indent_guides_enabled"] = indent_guides_enabled;
+  doc["indent_guide_strength_percent"] =
+      clamp_indent_guide_strength_percent(indent_guide_strength_percent);
   doc["visual_highlight_enabled"] = visual_highlight_enabled;
   doc["visual_brace_pair_colors_enabled"] = visual_brace_pair_colors_enabled;
   doc["visual_matching_bracket_enabled"] = visual_matching_bracket_enabled;

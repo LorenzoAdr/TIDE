@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <optional>
 #include <string>
 
@@ -108,8 +109,23 @@ UiColorOverrides g_overrides;
 UiColorPreset g_color_preset = UiColorPreset::kDarkClassic;
 std::optional<Palette> g_preset_palette;
 uint64_t g_colors_revision = 1;
+int g_indent_guide_strength_percent = 40;
 
 void bump_colors_revision() { ++g_colors_revision; }
+
+int clamp_indent_guide_strength_percent(int percent) {
+  static constexpr int kPresets[] = {20, 40, 60, 80, 100};
+  int best = kPresets[1];
+  int best_dist = std::abs(percent - best);
+  for (int preset : kPresets) {
+    const int dist = std::abs(percent - preset);
+    if (dist < best_dist) {
+      best = preset;
+      best_dist = dist;
+    }
+  }
+  return best;
+}
 
 constexpr UiColorPreset kListedPresets[] = {
     UiColorPreset::kDarkClassic,  UiColorPreset::kDarkSoft,      UiColorPreset::kNord,
@@ -735,8 +751,23 @@ Color IndentGuide() {
                                         : (g_overrides.title || has_ui_color_overrides()
                                                ? dim(effective_title_rgb(), 0.45f)
                                                : current_palette().muted_rgb);
-  // ~20% toward muted/title keeps │ visible without pulling focus from syntax.
-  return from_rgb(blend(code, tip, 0.20f));
+  const float t =
+      static_cast<float>(clamp_indent_guide_strength_percent(g_indent_guide_strength_percent)) /
+      100.0f;
+  return from_rgb(blend(code, tip, t));
+}
+
+void set_indent_guide_strength_percent(int percent) {
+  const int clamped = clamp_indent_guide_strength_percent(percent);
+  if (clamped == g_indent_guide_strength_percent) {
+    return;
+  }
+  g_indent_guide_strength_percent = clamped;
+  bump_colors_revision();
+}
+
+int indent_guide_strength_percent() {
+  return clamp_indent_guide_strength_percent(g_indent_guide_strength_percent);
 }
 
 Color Play() { return current_palette().play; }

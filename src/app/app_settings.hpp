@@ -14,6 +14,8 @@ struct AppSettings {
   bool show_diagnostic_suffixes = true;
   bool sticky_scroll_enabled = true;
   bool indent_guides_enabled = true;
+  // Blend strength for editor indent guides: 20, 40, 60, 80, or 100 (% toward muted).
+  int indent_guide_strength_percent = 40;
   bool visual_highlight_enabled = true;
   bool visual_brace_pair_colors_enabled = true;
   bool visual_matching_bracket_enabled = true;
@@ -53,6 +55,8 @@ struct AppSettings {
 
   // Normalize to {1, 2, 5, 10}; unknown values snap to nearest preset (default 10).
   static int clamp_large_file_virtual_mb(int mb);
+  // Normalize to {20, 40, 60, 80, 100}.
+  static int clamp_indent_guide_strength_percent(int percent);
   std::uintmax_t large_file_virtual_bytes() const;
 };
 

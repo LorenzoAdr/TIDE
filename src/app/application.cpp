@@ -369,6 +369,7 @@ Application::Application(AppConfig config) : config_(std::move(config)) {
 	workspace_.status_message = i18n::tr("workspace.select");
 	model_.status_message = i18n::tr("debug.disconnected");
 	configure_glyphs(resolve_icon_mode(app_settings_.icon_mode));
+	theme::set_indent_guide_strength_percent(app_settings_.indent_guide_strength_percent);
 	layout_state_.app_settings = &app_settings_;
 	layout_state_.workspace_clang_format = &clang_format_config_;
 	layout_state_.apply_app_settings_callback = [this] { apply_app_settings(); };
@@ -2667,6 +2668,7 @@ void Application::apply_app_settings() {
 	layout_state_.activity_gate.set_passive_enabled(app_settings_.passive_mode_enabled);
 	layout_state_.activity_gate.set_grace_window_ms(app_settings_.grace_window_ms);
 	configure_glyphs(resolve_icon_mode(app_settings_.icon_mode));
+	theme::set_indent_guide_strength_percent(app_settings_.indent_guide_strength_percent);
 	static std::optional<bool> last_show_all_files;
 	const bool show_all = app_settings_.show_all_workspace_files;
 	const bool filter_changed =

@@ -62,6 +62,7 @@ struct SettingsModalState {
   bool draft_show_diagnostic_suffixes = true;
   bool draft_sticky_scroll_enabled = true;
   bool draft_indent_guides_enabled = true;
+  int draft_indent_guide_strength_percent = 40;
   bool draft_visual_highlight_enabled = true;
   bool draft_visual_brace_pair_colors_enabled = true;
   bool draft_visual_matching_bracket_enabled = true;
