@@ -73,6 +73,7 @@
 #include "ui/focusable_component.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/cursor_blink.hpp"
+#include "ui/cursor_blink_ui.hpp"
 #include "ui/glyphs.hpp"
 #include "ui/key_bindings.hpp"
 #include "ui/keybind/key_binding_registry.hpp"
@@ -290,7 +291,7 @@ struct EditorPanelState {
   int64_t last_tabular_index_tick_ms = 0;
   bool tabular_scroll_locked = false;
   int tabular_scroll_limit = 0;
-  std::unique_ptr<VirtualTextFileStore> virtual_store;
+  std::shared_ptr<VirtualTextFileStore> virtual_store;
   std::string virtual_ts_source_key;
   int64_t last_virtual_index_tick_ms = 0;
   bool virtual_scroll_locked = false;
@@ -3342,6 +3343,145 @@ bool scroll_virtual_lines(WorkspaceModel* workspace, EditorPanelState* panel, in
   return true;
 }
 
+void clamp_virtual_caret(EditorBuffer* buffer, VirtualTextFileStore* store) {
+  if (buffer == nullptr || store == nullptr || !store->ready()) {
+    return;
+  }
+  const int total = std::max(1, store->line_count());
+  int line = std::max(0, std::min(buffer->primary_line(), total - 1));
+  const std::string text = store->line_at(line);
+  int col = std::max(0, std::min(buffer->primary_col(), static_cast<int>(text.size())));
+  buffer->reset_to_single_cursor(line, col);
+}
+
+void ensure_virtual_caret_visible(EditorBuffer* buffer, EditorPanelState* panel, int visible_lines) {
+  if (buffer == nullptr || panel == nullptr || visible_lines <= 0) {
+    return;
+  }
+  const int line = buffer->primary_line();
+  if (line < buffer->scroll) {
+    buffer->scroll = line;
+  } else if (line >= buffer->scroll + visible_lines) {
+    buffer->scroll = line - visible_lines + 1;
+  }
+  clamp_virtual_scroll(panel, buffer, visible_lines);
+  maybe_request_virtual_chunk(panel, buffer, visible_lines);
+  buffer->view_token++;
+}
+
+CursorPos mouse_to_virtual_cursor(const Mouse& m, const EditorPanelState& panel,
+                                  VirtualTextFileStore* store, const EditorBuffer& buffer,
+                                  int visible_lines) {
+  const bool in_code = panel.code_box.Contain(m.x, m.y);
+  const bool in_gutter = panel.gutter_box.Contain(m.x, m.y);
+  int row = 0;
+  if (in_code) {
+    row = m.y - panel.code_box.y_min;
+  } else if (in_gutter) {
+    row = m.y - panel.gutter_box.y_min;
+  } else if (m.y < panel.code_box.y_min) {
+    row = 0;
+  } else {
+    row = visible_lines - 1;
+  }
+  const int total = std::max(1, store->line_count());
+  const int line = std::max(0, std::min(buffer.scroll + row, total - 1));
+  int col = 0;
+  if (in_code) {
+    const int tab_size = std::max(1, editor_indent::tab_display_width());
+    const std::string line_text = store->line_at(line);
+    const int scroll_visual =
+        byte_index_to_visual_column(line_text, buffer.scroll_col, tab_size);
+    const int visual_col = std::max(0, m.x - panel.code_box.x_min + scroll_visual);
+    col = visual_column_to_byte_index(line_text, visual_col, tab_size);
+    col = std::min(col, static_cast<int>(line_text.size()));
+  } else if (m.x >= panel.code_box.x_min) {
+    col = static_cast<int>(store->line_at(line).size());
+  }
+  return {line, col};
+}
+
+void mark_virtual_edited(WorkspaceModel* workspace, EditorPanelState* panel) {
+  if (workspace == nullptr) {
+    return;
+  }
+  workspace->buffer.dirty = true;
+  workspace->buffer.view_token++;
+  workspace->last_buffer_edit_ms = steady_now_ms();
+  if (panel != nullptr) {
+    panel->viewport_line_render_cache.clear();
+  }
+  if (workspace->active_tab >= 0 &&
+      workspace->active_tab < static_cast<int>(workspace->tabs.size())) {
+    workspace->tabs[static_cast<std::size_t>(workspace->active_tab)].buffer.dirty = true;
+  }
+}
+
+bool handle_virtual_edit_event(WorkspaceModel* workspace, EditorPanelState* panel,
+                               Event event, int visible_lines) {
+  if (!virtual_text_view_ready(workspace, panel)) {
+    return false;
+  }
+  VirtualTextFileStore* store = panel->virtual_store.get();
+  EditorBuffer* buffer = &workspace->buffer;
+  clamp_virtual_caret(buffer, store);
+  int line = buffer->primary_line();
+  int col = buffer->primary_col();
+
+  const auto commit_caret = [&]() {
+    buffer->reset_to_single_cursor(line, col);
+    ensure_virtual_caret_visible(buffer, panel, visible_lines);
+    mark_virtual_edited(workspace, panel);
+  };
+
+  if (event_is_ctrl_z(event)) {
+    if (store->undo(&line, &col)) {
+      commit_caret();
+    }
+    return true;
+  }
+  if (event_is_ctrl_y(event) || event_is_ctrl_shift_z(event)) {
+    if (store->redo(&line, &col)) {
+      commit_caret();
+    }
+    return true;
+  }
+  if (event == Event::Backspace) {
+    if (store->backspace_at(&line, &col)) {
+      commit_caret();
+    }
+    return true;
+  }
+  if (event == Event::Delete) {
+    if (store->delete_at(&line, &col)) {
+      commit_caret();
+    }
+    return true;
+  }
+  if (event == Event::Return) {
+    if (store->insert_newline(&line, &col)) {
+      commit_caret();
+    }
+    return true;
+  }
+  if (event == Event::Tab || event_is_plain_tab(event)) {
+    if (store->insert_utf8(line, col, "\t")) {
+      col += 1;
+      commit_caret();
+    }
+    return true;
+  }
+  if (event.is_character()) {
+    const std::string ch = event.character();
+    if (store->insert_utf8(line, col, ch)) {
+      col += static_cast<int>(ch.size());
+      commit_caret();
+    }
+    return true;
+  }
+  return false;
+}
+
 void ensure_virtual_viewport_ts(const std::string& path, VirtualTextFileStore* store, int scroll,
                                 int visible_lines) {
   if (store == nullptr || !store->ready() || path.empty() || visible_lines <= 0) {
@@ -4488,13 +4628,18 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
   const bool in_gutter = panel->gutter_box.Contain(m.x, m.y);
   const bool in_editor = in_code || in_gutter;
 
-  // Large virtualized files are scroll-only (placeholder buffer is one empty line).
-  // Ignore cursor/selection clicks so we do not jump the caret to (0,0).
+  // Large virtualized files: place caret from the virtual store (not the placeholder buffer).
   if (workspace->active_tab_large_virtual_view() && m.button == Mouse::Left) {
     if (m.motion == Mouse::Pressed && in_editor) {
       claim_editor_focus(focus, layout_state, panel->panel_focus);
       end_mouse_selection(panel);
       clear_line_select_commit(panel);
+      if (virtual_text_view_ready(workspace, panel)) {
+        const CursorPos pos =
+            mouse_to_virtual_cursor(m, *panel, panel->virtual_store.get(), *buffer, visible_lines);
+        buffer->reset_to_single_cursor(pos.line, pos.col);
+        ensure_virtual_caret_visible(buffer, panel, visible_lines);
+      }
       return true;
     }
     if (panel->mouse_selecting || panel->line_select_commit_line >= 0) {
@@ -5490,6 +5635,17 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (keybind_matches(KeyAction::Redo, event)) {
+    if (virtual_text_view_ready(workspace, panel)) {
+      VirtualTextFileStore* store = panel->virtual_store.get();
+      int line = buffer->primary_line();
+      int col = buffer->primary_col();
+      if (store->redo(&line, &col)) {
+        buffer->reset_to_single_cursor(line, col);
+        ensure_virtual_caret_visible(buffer, panel, visible_lines);
+        mark_virtual_edited(workspace, panel);
+      }
+      return true;
+    }
     if (redo_edit(buffer)) {
       ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
       notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
@@ -5497,6 +5653,17 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     return true;
   }
   if (keybind_matches(KeyAction::Undo, event)) {
+    if (virtual_text_view_ready(workspace, panel)) {
+      VirtualTextFileStore* store = panel->virtual_store.get();
+      int line = buffer->primary_line();
+      int col = buffer->primary_col();
+      if (store->undo(&line, &col)) {
+        buffer->reset_to_single_cursor(line, col);
+        ensure_virtual_caret_visible(buffer, panel, visible_lines);
+        mark_virtual_edited(workspace, panel);
+      }
+      return true;
+    }
     undo_edit(buffer);
     ensure_scroll_visible(buffer, visible_lines, panel->code_width_chars);
     notify_editor_buffer_changed(workspace, panel, symbols, layout_state);
@@ -5709,40 +5876,104 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
 
   if (large_virtual_view && panel != nullptr && panel->virtual_store != nullptr &&
       panel->virtual_store->ready()) {
-    const int file_lines = panel->virtual_store->line_count();
-    const auto scroll_data = [&](int delta) {
-      buffer->scroll =
-          std::max(0, std::min(buffer->scroll + delta, max_scroll(file_lines, visible_lines)));
-      clamp_virtual_scroll(panel, buffer, visible_lines);
-      maybe_request_virtual_chunk(panel, buffer, visible_lines);
-      buffer->view_token++;
+    VirtualTextFileStore* store = panel->virtual_store.get();
+    clamp_virtual_caret(buffer, store);
+    const int file_lines = store->line_count();
+    const auto move_caret = [&](int delta_line, bool to_line_home, bool to_line_end, bool to_file_home,
+                                bool to_file_end) {
+      int line = buffer->primary_line();
+      int col = buffer->primary_col();
+      if (to_file_home) {
+        line = 0;
+        col = 0;
+      } else if (to_file_end) {
+        line = std::max(0, file_lines - 1);
+        col = static_cast<int>(store->line_at(line).size());
+      } else if (to_line_home) {
+        col = 0;
+      } else if (to_line_end) {
+        col = static_cast<int>(store->line_at(line).size());
+      } else {
+        line = std::max(0, std::min(line + delta_line, file_lines - 1));
+        const std::string text = store->line_at(line);
+        col = std::max(0, std::min(col, static_cast<int>(text.size())));
+      }
+      buffer->reset_to_single_cursor(line, col);
+      ensure_virtual_caret_visible(buffer, panel, visible_lines);
       return true;
     };
     if (event == Event::ArrowDown || event_is_shift_down(event)) {
-      return scroll_data(1);
+      return move_caret(1, false, false, false, false);
     }
     if (event == Event::ArrowUp || event_is_shift_up(event)) {
-      return scroll_data(-1);
+      return move_caret(-1, false, false, false, false);
     }
     if (event == Event::PageDown) {
-      return scroll_data(visible_lines);
+      return move_caret(visible_lines, false, false, false, false);
     }
     if (event == Event::PageUp) {
-      return scroll_data(-visible_lines);
+      return move_caret(-visible_lines, false, false, false, false);
     }
     if (event == Event::Home || event_is_shift_home(event)) {
-      buffer->scroll = 0;
-      buffer->view_token++;
-      return true;
+      return move_caret(0, true, false, false, false);
     }
     if (event == Event::End || event_is_shift_end(event)) {
-      buffer->scroll = virtual_max_allowed_scroll(panel, visible_lines);
-      maybe_request_virtual_chunk(panel, buffer, visible_lines);
-      buffer->view_token++;
+      return move_caret(0, false, true, false, false);
+    }
+    if (event == Event::ArrowLeft || event_is_shift_left(event)) {
+      int line = buffer->primary_line();
+      int col = buffer->primary_col();
+      if (col > 0) {
+        const std::string text = store->line_at(line);
+        // Step one UTF-8 codepoint back.
+        --col;
+        while (col > 0 &&
+               (static_cast<unsigned char>(text[static_cast<std::size_t>(col)]) & 0xC0) == 0x80) {
+          --col;
+        }
+      } else if (line > 0) {
+        --line;
+        col = static_cast<int>(store->line_at(line).size());
+      }
+      buffer->reset_to_single_cursor(line, col);
+      ensure_virtual_caret_visible(buffer, panel, visible_lines);
+      return true;
+    }
+    if (event == Event::ArrowRight || event_is_shift_right(event)) {
+      int line = buffer->primary_line();
+      int col = buffer->primary_col();
+      const std::string text = store->line_at(line);
+      if (col < static_cast<int>(text.size())) {
+        ++col;
+        while (col < static_cast<int>(text.size()) &&
+               (static_cast<unsigned char>(text[static_cast<std::size_t>(col)]) & 0xC0) == 0x80) {
+          ++col;
+        }
+      } else if (line + 1 < file_lines) {
+        ++line;
+        col = 0;
+      }
+      buffer->reset_to_single_cursor(line, col);
+      ensure_virtual_caret_visible(buffer, panel, visible_lines);
+      return true;
+    }
+    if (handle_virtual_edit_event(workspace, panel, event, visible_lines)) {
       return true;
     }
   }
 
+  if (tabular_view || large_virtual_view) {
+    if (event == Event::Backspace || event == Event::Delete || event == Event::Return ||
+        event_is_ctrl_backspace(event) || event_is_ctrl_delete(event) || event.is_character() ||
+        event == Event::Tab || event_is_plain_tab(event) || event_is_ctrl_z(event) ||
+        event_is_ctrl_y(event) || event_is_ctrl_shift_z(event)) {
+      if (tabular_view) {
+        workspace->status_message = i18n::tr("editor.tabular.readonly_status");
+      }
+      // Virtual edits are handled above when the store is ready; swallow leftovers.
+      return true;
+    }
+  }
   if (event_is_ctrl_left(event) || event_is_ctrl_alt_left(event) ||
       event_is_ctrl_shift_left(event)) {
     cancel_completion_on_cursor_move();
@@ -5808,15 +6039,6 @@ bool handle_editor_keys(WorkspaceModel* workspace, FocusManagerState* focus,
     cancel_completion_on_cursor_move();
     move_primary_end(buffer, event_is_shift_end(event));
     return true;
-  }
-  if (tabular_view || large_virtual_view) {
-    if (event == Event::Backspace || event == Event::Delete || event == Event::Return ||
-        event_is_ctrl_backspace(event) || event_is_ctrl_delete(event) || event.is_character()) {
-      workspace->status_message =
-          tabular_view ? i18n::tr("editor.tabular.readonly_status")
-                       : i18n::tr("editor.virtual.readonly_status");
-      return true;
-    }
   }
   if (event_is_ctrl_backspace(event)) {
     delete_word_backward(buffer);
@@ -6212,7 +6434,8 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       panel_state->h_scrollbar_layout = {};
       clear_hover_state(&panel_state->hover);
       panel_state->document_open_pending =
-          !diff_view && !read_only_tab && !buffer.path.empty();
+          !diff_view && !read_only_tab && !buffer.path.empty() &&
+          !workspace->active_tab_large_virtual_view();
       panel_state->pending_document_open_path = buffer.path;
       panel_state->tabular_layout_path.clear();
       panel_state->tabular_layout_line_count = 0;
@@ -6227,8 +6450,15 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         panel_state->tabular_store = std::make_unique<TabularFileStore>();
         panel_state->tabular_store->open_async(buffer.path);
       } else if (workspace->active_tab_large_virtual_view()) {
-        panel_state->virtual_store = std::make_unique<VirtualTextFileStore>();
-        panel_state->virtual_store->open_async(buffer.path);
+        if (workspace->active_tab >= 0 &&
+            workspace->active_tab < static_cast<int>(workspace->tabs.size())) {
+          EditorTab& tab = workspace->tabs[static_cast<std::size_t>(workspace->active_tab)];
+          if (tab.virtual_store == nullptr) {
+            tab.virtual_store = std::make_shared<VirtualTextFileStore>();
+            tab.virtual_store->open_async(buffer.path);
+          }
+          panel_state->virtual_store = tab.virtual_store;
+        }
         panel_state->virtual_ts_source_key = virtual_document_source_key(buffer.path);
         tree_sitter_service().mark_document_viewport_only(buffer.path);
       }
@@ -6651,6 +6881,10 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
       } else {
         const int file_lines = virtual_store->line_count();
         clamp_virtual_scroll(panel_state.get(), &buffer, visible);
+        clamp_virtual_caret(&buffer, virtual_store);
+        if (virtual_store->dirty()) {
+          buffer.dirty = true;
+        }
         virtual_store->ensure_viewport(buffer.scroll, visible);
         maybe_request_virtual_chunk(panel_state.get(), &buffer, visible);
 
@@ -6660,6 +6894,11 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         const int code_width =
             code_width_from_box(panel_state->code_box, panel_state->code_width_chars);
         panel_state->code_width_chars = code_width;
+        const int tab_size = std::max(1, editor_indent::tab_display_width());
+        const bool editor_focused_now =
+            focus != nullptr && focus->region == panel_state->panel_focus;
+        const int caret_line = buffer.primary_line();
+        const int caret_col = buffer.primary_col();
 
         const bool indexed_virtual = is_indexed_source_path(buffer.path);
         if (indexed_virtual) {
@@ -6679,17 +6918,42 @@ Component MakeEditorPanel(WorkspaceModel* workspace, FocusManagerState* focus,
         for (int line_index = scroll; line_index < view_end; ++line_index) {
           const std::string line = virtual_store->line_at(line_index);
           max_line_len = std::max(max_line_len, static_cast<int>(line.size()));
+          const Decorator line_bg =
+              (editor_focused_now && line_index == caret_line) ? bgcolor(theme::EditorLineHi())
+                                                              : row_bg;
           gutter_rows.push_back(text(format_line_number(line_index + 1, gutter_w)) |
-                              color(theme::Muted()) | row_bg);
-          // Clip before highlight: size|xflex_shrink would collapse 1-cell space
-          // segments when the full line is wider than the viewport (FTXUI shrink).
+                              color(theme::Muted()) | line_bg);
           const std::string view_line =
               slice_line_for_view(line, buffer.scroll_col, code_width);
           Element code_line =
               indexed_virtual
                   ? HighlightCodeLine(view_line, line_index, nullptr, -1, {}, 0, &virtual_hl_ctx)
                   : HighlightCodeLineLite(view_line);
-          code_rows.push_back(code_line | size(WIDTH, EQUAL, code_width) | row_bg);
+          if (editor_focused_now && line_index == caret_line && cursor_blink::visible()) {
+            const int caret_vis =
+                byte_index_to_visual_column(line, caret_col, tab_size) -
+                byte_index_to_visual_column(line, buffer.scroll_col, tab_size);
+            if (caret_vis >= 0 && caret_vis <= static_cast<int>(view_line.size())) {
+              Elements caret_parts;
+              if (caret_vis > 0) {
+                caret_parts.push_back(
+                    text(view_line.substr(0, static_cast<std::size_t>(caret_vis))));
+              }
+              if (caret_vis < static_cast<int>(view_line.size())) {
+                caret_parts.push_back(
+                    text(std::string(1, view_line[static_cast<std::size_t>(caret_vis)])) |
+                    cursor_blink::cell_decorator());
+                if (caret_vis + 1 < static_cast<int>(view_line.size())) {
+                  caret_parts.push_back(
+                      text(view_line.substr(static_cast<std::size_t>(caret_vis + 1))));
+                }
+              } else {
+                caret_parts.push_back(text(" ") | cursor_blink::cell_decorator());
+              }
+              code_line = hbox(std::move(caret_parts));
+            }
+          }
+          code_rows.push_back(code_line | size(WIDTH, EQUAL, code_width) | line_bg);
         }
 
         if (virtual_store->loading_more()) {

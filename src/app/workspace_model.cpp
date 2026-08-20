@@ -403,16 +403,20 @@ std::vector<std::string> WorkspaceModel::open_tabs_mru_excluding_active() const 
   return result;
 }
 
-int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path, bool external) {
+int WorkspaceModel::open_new_tab_from_disk(const std::string& absolute_path, bool external,
+                                           bool force_full_load) {
   EditorTab tab;
   tab.path = absolute_path;
   tab.external = external;
   if (is_tabular_path(absolute_path)) {
     load_tabular_placeholder(&tab.buffer, absolute_path);
-  } else if (should_open_as_virtual_text(absolute_path, large_file_threshold_bytes(app_settings))) {
+  } else if (!force_full_load &&
+             should_open_as_virtual_text(absolute_path, large_file_threshold_bytes(app_settings))) {
     load_virtual_text_placeholder(&tab.buffer, absolute_path);
     tab.large_virtual_view = true;
-    tab.read_only = true;
+    tab.read_only = false;
+    tab.virtual_store = std::make_shared<VirtualTextFileStore>();
+    tab.virtual_store->open_async(absolute_path);
   } else {
     load_buffer_from_disk(&tab.buffer, absolute_path);
   }
@@ -491,13 +495,13 @@ bool WorkspaceModel::check_open_guard(const std::string& absolute_path) {
   return true;
 }
 
-bool WorkspaceModel::open_file_impl(const std::string& absolute_path) {
+bool WorkspaceModel::open_file_impl(const std::string& absolute_path, bool force_full_load) {
   if (absolute_path.empty()) {
     return false;
   }
   flush_active_tab();
   const std::string path = normalize_path(absolute_path);
-  const int index = open_new_tab_from_disk(path, false);
+  const int index = open_new_tab_from_disk(path, false, force_full_load);
   switch_to_tab(index);
   return true;
 }
@@ -566,12 +570,14 @@ bool WorkspaceModel::open_file(const std::string& absolute_path) {
   return open_file_impl(absolute_path);
 }
 
-bool WorkspaceModel::open_file_confirmed(const std::string& absolute_path) {
-  return open_file_impl(absolute_path);
+bool WorkspaceModel::open_file_confirmed(const std::string& absolute_path,
+                                         LargeFileOpenChoice choice) {
+  return open_file_impl(absolute_path, choice == LargeFileOpenChoice::LoadFull);
 }
 
-bool WorkspaceModel::open_file_at_impl(const std::string& absolute_path, int line, int col) {
-  if (!open_file_impl(absolute_path)) {
+bool WorkspaceModel::open_file_at_impl(const std::string& absolute_path, int line, int col,
+                                       bool force_full_load) {
+  if (!open_file_impl(absolute_path, force_full_load)) {
     return false;
   }
   buffer.reset_to_single_cursor(line, col);
@@ -581,8 +587,9 @@ bool WorkspaceModel::open_file_at_impl(const std::string& absolute_path, int lin
   return true;
 }
 
-bool WorkspaceModel::open_file_at_confirmed(const std::string& absolute_path, int line, int col) {
-  return open_file_at_impl(absolute_path, line, col);
+bool WorkspaceModel::open_file_at_confirmed(const std::string& absolute_path, int line, int col,
+                                            LargeFileOpenChoice choice) {
+  return open_file_at_impl(absolute_path, line, col, choice == LargeFileOpenChoice::LoadFull);
 }
 
 bool WorkspaceModel::open_file_at(const std::string& absolute_path, int line, int col) {
@@ -676,7 +683,27 @@ bool WorkspaceModel::load_file(const std::string& absolute_path) {
 }
 
 bool WorkspaceModel::save_buffer() {
-  if (buffer.path.empty() || buffer.lines.empty()) {
+  if (buffer.path.empty()) {
+    return false;
+  }
+
+  if (active_tab_large_virtual_view() && active_tab >= 0 &&
+      active_tab < static_cast<int>(tabs.size())) {
+    EditorTab& tab = tabs[static_cast<std::size_t>(active_tab)];
+    if (tab.virtual_store == nullptr || !tab.virtual_store->ready()) {
+      return false;
+    }
+    if (!tab.virtual_store->save(buffer.path)) {
+      return false;
+    }
+    buffer.dirty = false;
+    tab.buffer.dirty = false;
+    stamp_tab_disk_mtime(&tab);
+    status_message = i18n::tr_fmt("workspace.saved", {fs::path(buffer.path).filename().string()});
+    return true;
+  }
+
+  if (buffer.lines.empty()) {
     return false;
   }
   std::ofstream output(buffer.path, std::ios::trunc);

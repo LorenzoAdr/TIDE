@@ -68,6 +68,7 @@ constexpr std::string_view kDebugLaunchCancel = "debug_launch.cancel";
 constexpr std::string_view kDebugLaunchClose = "debug_launch.close";
 constexpr std::string_view kShutdownForceExit = "shutdown.force_exit";
 constexpr std::string_view kOpenFileYes = "open_file.yes";
+constexpr std::string_view kOpenFileLoadFull = "open_file.load_full";
 constexpr std::string_view kOpenFileNo = "open_file.no";
 constexpr std::string_view kExternalConflictOverwrite = "external_conflict.overwrite";
 constexpr std::string_view kExternalConflictLoad = "external_conflict.load";
@@ -240,7 +241,7 @@ inline bool is_shutdown_hover(std::string_view id) {
 }
 
 inline bool is_open_file_hover(std::string_view id) {
-  return id == kOpenFileYes || id == kOpenFileNo;
+  return id == kOpenFileYes || id == kOpenFileLoadFull || id == kOpenFileNo;
 }
 
 inline bool is_external_conflict_hover(std::string_view id) {

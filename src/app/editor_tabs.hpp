@@ -1,11 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "editor/editor_state.hpp"
 #include "git/git_diff.hpp"
+#include "util/virtual_text_file.hpp"
 
 namespace tuide {
 
@@ -20,6 +22,8 @@ struct EditorTab {
   // Used to detect external edits (formatters, git hooks, etc.).
   std::int64_t disk_mtime_sec = 0;
   std::vector<SideBySideDiffRow> diff_rows;
+  // Owned by the tab so virtual edits survive panel path switches.
+  std::shared_ptr<VirtualTextFileStore> virtual_store;
 };
 
 struct TabVisibleRange {

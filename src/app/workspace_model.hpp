@@ -43,8 +43,12 @@ struct WorkspaceModel {
   bool open_file(const std::string& absolute_path);
   bool open_external_file(const std::string& absolute_path);
   bool open_file_at(const std::string& absolute_path, int line, int col);
-  bool open_file_confirmed(const std::string& absolute_path);
-  bool open_file_at_confirmed(const std::string& absolute_path, int line, int col);
+  enum class LargeFileOpenChoice { Virtualize, LoadFull };
+
+  bool open_file_confirmed(const std::string& absolute_path,
+                           LargeFileOpenChoice choice = LargeFileOpenChoice::Virtualize);
+  bool open_file_at_confirmed(const std::string& absolute_path, int line, int col,
+                              LargeFileOpenChoice choice = LargeFileOpenChoice::Virtualize);
   void switch_to_tab(int index);
   bool close_tab(int index);
   void move_tab(int from, int to);
@@ -83,8 +87,9 @@ struct WorkspaceModel {
     bool active = false;
   };
 
-  bool open_file_impl(const std::string& absolute_path);
-  bool open_file_at_impl(const std::string& absolute_path, int line, int col);
+  bool open_file_impl(const std::string& absolute_path, bool force_full_load = false);
+  bool open_file_at_impl(const std::string& absolute_path, int line, int col,
+                         bool force_full_load = false);
   bool check_open_guard(const std::string& absolute_path);
   bool try_open_external_pdf(const std::string& absolute_path);
 
@@ -94,7 +99,8 @@ struct WorkspaceModel {
   static std::string normalize_path(const std::string& path);
   static bool is_path_in_workspace(const std::string& workspace_root,
                                    const std::string& absolute_path);
-  int open_new_tab_from_disk(const std::string& absolute_path, bool external);
+  int open_new_tab_from_disk(const std::string& absolute_path, bool external,
+                             bool force_full_load = false);
   void touch_tab_mru(const std::string& absolute_path);
   void remove_tab_mru(const std::string& absolute_path);
 
