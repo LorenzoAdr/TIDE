@@ -17,6 +17,7 @@
 #include "ai/ai_trace.hpp"
 #include "ai/ai_types.hpp"
 #include "ai/ai_path_scope.hpp"
+#include "ai/l2_explore_a.hpp"
 #include "ai/l2_feat.hpp"
 #include "ai/l2_pack_review.hpp"
 
@@ -2567,6 +2568,14 @@ std::string Level2Session::pack_path(const std::string& workspace_root) {
   return (fs::path(dir_for(workspace_root)) / "pack.md").string();
 }
 
+std::string Level2Session::a_state_path(const std::string& workspace_root) {
+  return (fs::path(dir_for(workspace_root)) / "a_state.json").string();
+}
+
+std::string Level2Session::a_notes_path(const std::string& workspace_root) {
+  return (fs::path(dir_for(workspace_root)) / "a_notes.md").string();
+}
+
 std::string Level2Session::answer_path(const std::string& workspace_root) {
   return (fs::path(dir_for(workspace_root)) / "answer.md").lexically_normal().string();
 }
@@ -2930,7 +2939,7 @@ Edit / tras pack:
 {"action":"plan","targets":["…"]}
 {"action":"done","summary":"cambios listos: paths…"}
 ```
-- Zona en Truncated → refetch antes del hunk (no inventes).
+- Si el hunk cae en Truncated → refetch tip de esa ventana (no inventes); Truncated no fuerza ampliar pack.
 - `search` debe ser un **bloque de código único** (no un ident suelto tipo `foo_bar`).
 - Hunk idéntico al último fallo → rechazado; tras varios fallos → clarify.
 - Tras `edit` OK → compile. Compile OK → **mapa inicial** + «¿algo más?» (`plan` / `edit` / `done`).
@@ -3587,7 +3596,7 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   }
 
   State st;
-  st.phase = "explore";
+  st.phase = l2_feat::enabled("L2_EXPLORE_PHASE_A") ? "explore_a" : "explore";
   st.workflow = workflow_name;
   st.last_action = "bootstrap";
   st.has_pack = false;
@@ -3624,9 +3633,13 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
       }
       st.has_pack = true;
       st.watchlist = opts.seeds;
-    } else {
+    } else if (!l2_feat::enabled("L2_EXPLORE_PHASE_A")) {
       write_file(pack_path(opts.workspace_root),
                  "# L2 code pack\n\n_(vacío — bootstrap; sin plan aún)_\n", &pack_err);
+    } else {
+      // Phase A: no pack.md until explore_b / plan.
+      std::error_code pec;
+      fs::remove(pack_path(opts.workspace_root), pec);
     }
   }
   if (!save_state(opts.workspace_root, st, err_out)) {
@@ -4063,6 +4076,284 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
   return out;
 }
 
+AState Level2Session::load_a_state(const std::string& workspace_root) {
+  AState st;
+  const std::string raw = read_file(a_state_path(workspace_root));
+  if (raw.empty()) {
+    return st;
+  }
+  try {
+    const auto j = nlohmann::json::parse(raw);
+    std::string err;
+    if (!a_state_from_json(j, &st, &err)) {
+      return AState{};
+    }
+  } catch (...) {
+    return AState{};
+  }
+  return st;
+}
+
+bool Level2Session::save_a_state(const std::string& workspace_root, const AState& st,
+                                 std::string* err) {
+  try {
+    const std::string body = a_state_to_json(st).dump(2);
+    if (!write_file(a_state_path(workspace_root), body, err)) {
+      return false;
+    }
+    return write_file(a_notes_path(workspace_root), a_notes_markdown(st), err);
+  } catch (const std::exception& ex) {
+    if (err) {
+      *err = ex.what();
+    }
+    return false;
+  }
+}
+
+Level2TurnResult Level2Session::seed_a_queue(const std::string& workspace_root,
+                                             const std::vector<AQueueBuildInput>& ranked,
+                                             const AQueueBuildOpts& opts) {
+  Level2TurnResult out;
+  out.action = "a_seed";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  AState ast = load_a_state(workspace_root);
+  a_state_seed_queue(&ast, ranked, opts);
+  std::string err;
+  if (!save_a_state(workspace_root, ast, &err)) {
+    out.error = err.empty() ? "no se pudo guardar a_state" : err;
+    return out;
+  }
+  if (st.phase == "explore" || st.phase.empty()) {
+    st.phase = "explore_a";
+  }
+  st.last_action = "a_seed";
+  if (!save_state(workspace_root, st, &err)) {
+    out.error = err.empty() ? "no se pudo guardar state" : err;
+    return out;
+  }
+  out.ok = true;
+  out.phase = st.phase;
+  out.summary = "a_queue n=" + std::to_string(ast.queue.size());
+  return out;
+}
+
+Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
+                                              const std::vector<AVerdict>& verdicts,
+                                              bool turn_done_hint) {
+  Level2TurnResult out;
+  out.action = "a_judge";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  if (st.phase != "explore_a" && st.phase != "explore") {
+    out.error = "a_judge solo en explore_a";
+    return out;
+  }
+  if (verdicts.empty()) {
+    out.error = "a_judge.verdicts vacío";
+    return out;
+  }
+
+  AState ast = load_a_state(workspace_root);
+  const int tranche =
+      std::min(kAMaxPeeksPerTurn, std::max(0, static_cast<int>(ast.queue.size()) - ast.cursor));
+  for (const auto& v : verdicts) {
+    ast.notes.push_back(v);
+    if (v.verdict == AVerdictKind::Reject && !v.stem.empty()) {
+      if (std::find(ast.rejected_stems.begin(), ast.rejected_stems.end(), v.stem) ==
+          ast.rejected_stems.end()) {
+        ast.rejected_stems.push_back(v.stem);
+      }
+    }
+    if (v.verdict == AVerdictKind::Useful) {
+      ALocus loc;
+      loc.stem = v.stem;
+      loc.anchor = v.anchor.empty() ? v.target : v.anchor;
+      const auto hash = loc.anchor.find('#');
+      if (hash != std::string::npos) {
+        loc.window = loc.anchor.substr(hash + 1);
+        loc.anchor = loc.anchor.substr(0, hash);
+      }
+      loc.role = v.role == ALocusRole::Unknown ? ALocusRole::Primary : v.role;
+      loc.why = v.why;
+      bool dup = false;
+      for (const auto& existing : ast.loci_draft) {
+        if (existing.anchor == loc.anchor) {
+          dup = true;
+          break;
+        }
+      }
+      if (!dup && !loc.anchor.empty()) {
+        ast.loci_draft.push_back(std::move(loc));
+      }
+    }
+  }
+  ast.peeks_used += std::max(tranche, static_cast<int>(verdicts.size()));
+  ast.cursor = std::min(static_cast<int>(ast.queue.size()), ast.cursor + std::max(tranche, 1));
+  ++ast.turns;
+
+  // Early-stop hint: enough useful with contrast, or budgets exhausted.
+  int useful = 0;
+  int reject = 0;
+  for (const auto& n : ast.notes) {
+    if (n.verdict == AVerdictKind::Useful) {
+      ++useful;
+    } else if (n.verdict == AVerdictKind::Reject) {
+      ++reject;
+    }
+  }
+  const bool budget_hit =
+      ast.peeks_used >= kAMaxPeeksTotal || ast.turns >= kAMaxTurns ||
+      ast.cursor >= static_cast<int>(ast.queue.size());
+  const bool stable = useful >= 2 && reject >= 1;
+  if ((turn_done_hint && useful >= 1) || stable || (budget_hit && useful >= 1)) {
+    // Soft: leave explore_a; model should emit a_done next. Do not auto-promote without loci.
+  }
+
+  std::string err;
+  if (!save_a_state(workspace_root, ast, &err)) {
+    out.error = err.empty() ? "no se pudo guardar a_state" : err;
+    return out;
+  }
+  st.phase = "explore_a";
+  st.last_action = "a_judge";
+  ++st.turn;
+  if (!save_state(workspace_root, st, &err)) {
+    out.error = err.empty() ? "no se pudo guardar state" : err;
+    return out;
+  }
+
+  // Observation: notes only (no peek bodies).
+  std::ostringstream obs;
+  obs << "### a_judge turn=" << ast.turns << " peeks_used=" << ast.peeks_used
+      << " cursor=" << ast.cursor << "/" << ast.queue.size() << "\n";
+  for (const auto& v : verdicts) {
+    obs << "- [" << a_verdict_kind_name(v.verdict) << "] `" << v.target << "`";
+    if (!v.why.empty()) {
+      obs << " — " << v.why;
+    }
+    obs << "\n";
+  }
+  append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
+
+  out.ok = true;
+  out.phase = st.phase;
+  out.summary = "a_judge useful=" + std::to_string(useful) + " reject=" + std::to_string(reject) +
+                " loci_draft=" + std::to_string(ast.loci_draft.size());
+  return out;
+}
+
+Level2TurnResult Level2Session::apply_a_done(const std::string& workspace_root,
+                                             const std::vector<ALocus>& loci,
+                                             const std::string& summary) {
+  Level2TurnResult out;
+  out.action = "a_done";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  if (loci.empty()) {
+    out.error = "a_done.loci vacío";
+    return out;
+  }
+
+  AState ast = load_a_state(workspace_root);
+  ast.loci_draft = loci;
+  ast.done = true;
+  std::string err;
+  if (!save_a_state(workspace_root, ast, &err)) {
+    out.error = err.empty() ? "no se pudo guardar a_state" : err;
+    return out;
+  }
+
+  // Seed watchlist from loci anchors (Phase B will plan/pack). No pack.md yet.
+  st.watchlist.clear();
+  for (const auto& loc : loci) {
+    if (!loc.anchor.empty()) {
+      st.watchlist.push_back(loc.anchor);
+    }
+  }
+  st.phase = "explore_b";
+  st.last_action = "a_done";
+  ++st.turn;
+  if (!save_state(workspace_root, st, &err)) {
+    out.error = err.empty() ? "no se pudo guardar state" : err;
+    return out;
+  }
+
+  std::ostringstream obs;
+  obs << "### a_done → explore_b loci=" << loci.size() << "\n";
+  if (!summary.empty()) {
+    obs << summary << "\n";
+  }
+  for (const auto& loc : loci) {
+    obs << "- [" << a_locus_role_name(loc.role) << "] `" << loc.anchor << "`";
+    if (!loc.stem.empty()) {
+      obs << " stem=" << loc.stem;
+    }
+    if (!loc.why.empty()) {
+      obs << " — " << loc.why;
+    }
+    obs << "\n";
+  }
+  append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
+
+  out.ok = true;
+  out.phase = "explore_b";
+  out.summary = summary.empty() ? ("loci=" + std::to_string(loci.size())) : summary;
+  return out;
+}
+
+std::string Level2Session::build_a_peek_tranche_markdown(const std::string& workspace_root,
+                                                         int max_peeks) {
+  AState ast = load_a_state(workspace_root);
+  if (ast.queue.empty() || ast.cursor >= static_cast<int>(ast.queue.size())) {
+    return "_(cola A vacía o agotada)_\n";
+  }
+  const int n = std::min(max_peeks > 0 ? max_peeks : kAMaxPeeksPerTurn,
+                         static_cast<int>(ast.queue.size()) - ast.cursor);
+  std::ostringstream out;
+  out << "## Peeks (fase A — efímeros; no acumular)\n";
+  out << "cola " << (ast.cursor + 1) << "–" << (ast.cursor + n) << " / " << ast.queue.size()
+      << " · peeks_used=" << ast.peeks_used << "\n\n";
+  for (int i = 0; i < n; ++i) {
+    const auto& item = ast.queue[static_cast<std::size_t>(ast.cursor + i)];
+    out << "### peek " << (i + 1) << " `" << item.target << "` stem=" << item.stem << "\n\n";
+    std::string body;
+    if (deps_.tools != nullptr && deps_.tools->has("get_code_of")) {
+      // Prefer ~60-line peeks for 7B judgment.
+      const AiToolResult tr = deps_.tools->invoke("get_code_of", item.target);
+      if (tr.ok) {
+        body = tr.text;
+      } else {
+        body = "(get_code_of fail: " + tr.text + ")";
+      }
+    } else {
+      body = "(sin tool get_code_of; juzga por target/stem)\n";
+    }
+    if (body.size() > 3500) {
+      body = body.substr(0, 3500) + "\n…[peek truncado]…\n";
+    }
+    out << "```\n" << body;
+    if (!body.empty() && body.back() != '\n') {
+      out << '\n';
+    }
+    out << "```\n\n";
+  }
+  out << "Responde con `a_judge` (verdicts para estos peeks) o `a_done` si loci estables.\n";
+  return out.str();
+}
+
 Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
                                            const std::vector<std::string>& targets,
                                            const std::string& summary) {
@@ -4075,6 +4366,10 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     out.error = "workspace_root vacío";
     return out;
   }
+  if (st.phase == "explore_a") {
+    out.error = "explore_a: usa a_judge/a_done (no plan/pack aún)";
+    return out;
+  }
   if (targets.empty() && st.watchlist.empty()) {
     out.error = "plan.targets vacío";
     return out;
@@ -4083,8 +4378,8 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     out.error = "sesión done; reinicia con bootstrap";
     return out;
   }
-  if (st.phase != "explore" && st.phase != "edit") {
-    out.error = "plan solo en phase explore|edit (ahora=" + st.phase + ")";
+  if (st.phase != "explore" && st.phase != "explore_b" && st.phase != "edit") {
+    out.error = "plan solo en phase explore|explore_b|edit (ahora=" + st.phase + ")";
     write_response_json(workspace_root, false, "error", "plan", "", "", out.error, st.turn,
                         st.phase);
     return out;
@@ -5466,9 +5761,10 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
 
   std::ostringstream trunc_sec;
   if (!trunc_index.empty()) {
-    trunc_sec << "## Truncated (refetch before editing these)\n\n";
-    trunc_sec << "Cuerpos incompletos (" << trunc_index.size() << "). No inventes código. "
-                 "Pide el hueco con `get_code_of path:A-B` o `path:Symbol#mid|#tail`.\n\n";
+    trunc_sec << "## Truncated (refetch tip si editas esa ventana)\n\n";
+    trunc_sec << "Ventanas incompletas (" << trunc_index.size() << "). No inventes esas líneas. "
+                 "No implica pack incompleto ni bloquea next=edit si el locus de control ya "
+                 "está en Fragments. Hueco: `get_code_of path:A-B` / `path:Symbol#mid|#tail`.\n\n";
     for (const auto& line : trunc_index) {
       trunc_sec << line << "\n";
     }

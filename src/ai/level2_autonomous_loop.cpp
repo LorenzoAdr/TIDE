@@ -13,6 +13,7 @@
 #include "ai/ai_trace.hpp"
 #include "ai/ai_types.hpp"
 #include "ai/l2_action.hpp"
+#include "ai/l2_explore_a.hpp"
 #include "ai/l2_feat.hpp"
 #include "ai/l2_grammar.hpp"
 #include "ai/l2_pack_review.hpp"
@@ -529,12 +530,14 @@ std::string build_system_prompt(const Level2AutonomousLoopOpts& opts,
            "Orden de `targets` = prioridad: primero los must (control/estado del request); "
            "el runtime empaqueta en ese orden y omite por la cola si no cabe. "
            "El runtime normaliza bare→símbolo por needles, merge de packs, prioriza fragmentos "
-           "pequeños, auto-refetch de truncados y marca pack_incomplete. "
+           "pequeños y auto-refetch de truncados. "
+           "pack_incomplete = gaps Instruction↔pack (o cero fragmentos), no meros Truncated. "
            "Si map_stale=1 no confíes en el top del mapa. "
            "Tras el pack el prompt es Instruction+pack (sin mapa). "
-           "Extras: tools máx 4. Si [TRUNCATED], usa refetch path:A-B o path:Symbol#mid|#tail "
-           "(default de get_code_of largo = head+tail; path:line en símbolo enorme = ventana). "
-           "done next=edit con pack_incomplete puede rechazarse (pushback). "
+           "Extras: tools máx 4. Si [TRUNCATED], refetch tip path:A-B / path:Symbol#mid|#tail "
+           "solo si editas esa ventana; Truncated no implica pack incompleto ni bloquea next=edit "
+           "si el locus de control/estado ya está en el pack. "
+           "done next=edit con gaps Instruction reales puede rechazarse (pushback). "
            "action=edit es para phase=edit; si emites edit en explore el runtime auto-promueve. "
            "Tras edit el runtime compila: compile OK restaura el mapa inicial y pregunta "
            "«¿algo más?» (plan / edit / done). Clarify prematuro: pushback "
@@ -655,7 +658,7 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
       out << "Empieza la respuesta con un path del pack y la marca SEARCH de Aider.\n\n";
     } else if (readonly) {
       out << "Ya hay Code pack"
-          << (pack_incomplete ? " (**incomplete**: hay Truncated)" : "")
+          << (pack_incomplete ? " (**pack_incomplete**: gaps Instruction↔pack)" : "")
           << ". Emite action=synthesize con la respuesta"
           << (workflow == AiWorkflowKind::Plan ? " (plan de cambios)" : "")
           << ", o amplía plan/tools si falta evidencia.\n"
@@ -665,9 +668,11 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
       }
     } else {
       out << "Ya hay Code pack"
-          << (pack_incomplete ? " (**incomplete**: hay Truncated)" : "")
+          << (pack_incomplete ? " (**pack_incomplete**: gaps Instruction↔pack)" : "")
           << ". Decide: done next=edit, edit, ampliar plan, o tools extras.\n"
-             "Preferir path:Symbol / path:A-B. Contexto: Instruction + pack.\n";
+             "Preferir path:Symbol / path:A-B. Contexto: Instruction + pack.\n"
+             "Truncated en el pack no basta para ampliar: si el locus está cubierto, "
+             "preferir done next=edit.\n";
       if (pack_review_pending) {
         out << "Pack review ABIERTA: PROHIBIDO repetir targets ya en watchlist/pack.\n"
                "Siguiente acción: `action=plan` con paths NUEVOS de MAP HITS (prioriza src/ai).\n\n";
@@ -920,7 +925,7 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
   const int min_ok = (pair_ok && needs_pair) ? 2 : 3;
   const bool anchors_covered = pack_must_anchors_covered(pack_md, must_check, min_ok) && pair_ok;
 
-  // Generic: enough must fences + set/clear pair when the locus looks like control state.
+  // Fence evidence beats 7B undercoverage: skip LLM when must bodies + set/clear pair are present.
   if (anchors_covered) {
     if (log) {
       log("L2 ▸ pack review auto-covered — anclas must con cuerpo en fences");
@@ -1020,7 +1025,6 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
       watchlist.clear();
       rejected.clear();
       load_watchlist_rejected_from_state(opts.workspace_root, &watchlist, &rejected);
-      // Re-check after refill.
       const bool pair_ok2 = !needs_pair || pack_has_lifecycle_pair(pack_md);
       const int min_ok2 = (pair_ok2 && needs_pair) ? 2 : 3;
       if (pack_must_anchors_covered(pack_md, must_check, min_ok2) && pair_ok2) {
@@ -1116,17 +1120,29 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
     }
     return false;
   }
-  const bool covered = verdict.verdict == "covered";
-  if (covered) {
-    // Don't accept covered if must anchors still lack symbol bodies / set-clear pair.
-    const bool pair_ok_llm = !needs_pair || pack_has_lifecycle_pair(pack_md);
-    const int min_ok_llm = (pair_ok_llm && needs_pair) ? 2 : 3;
-    if (!pack_must_anchors_covered(pack_md, must_check, min_ok_llm) || !pair_ok_llm) {
-      if (log) {
-        log("L2 ▸ pack review covered rechazado — anclas must sin cuerpo o sin set/clear");
+  {
+    // Don't accept LLM covered without fence evidence; do accept covered when fences OK
+    // even if the 7B stays on partial (undercoverage thrash in decond runs).
+    const bool pair_ok_gate = !needs_pair || pack_has_lifecycle_pair(pack_md);
+    const int min_ok_gate = (pair_ok_gate && needs_pair) ? 2 : 3;
+    const bool fences_ok =
+        pack_must_anchors_covered(pack_md, must_check, min_ok_gate) && pair_ok_gate;
+    if (verdict.verdict == "covered") {
+      if (!fences_ok) {
+        if (log) {
+          log("L2 ▸ pack review covered rechazado — anclas must sin cuerpo o sin set/clear");
+        }
+      } else {
+        session.mark_pack_review(opts.workspace_root, true, verdict.reason);
+        return false;
       }
-    } else {
-      session.mark_pack_review(opts.workspace_root, true, verdict.reason);
+    } else if (fences_ok) {
+      if (log) {
+        log("L2 ▸ pack review " + verdict.verdict +
+            " → covered por anclas must (override undercoverage)");
+      }
+      session.mark_pack_review(opts.workspace_root, true,
+                               "runtime: fence override after LLM " + verdict.verdict);
       return false;
     }
   }
@@ -1166,6 +1182,17 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
                                watchlist.begin() + static_cast<std::ptrdiff_t>(n));
     }
     reject_extra = filter_rejects_excluding_anchors(reject_extra, protected_targets);
+    // decond lesson: 7B prune often drops clear_/cancel_ locus as "noise".
+    {
+      std::vector<std::string> kept;
+      for (const auto& r : reject_extra) {
+        if (target_is_lifecycle_clear(r) || target_is_lifecycle_set(r)) {
+          continue;
+        }
+        kept.push_back(r);
+      }
+      reject_extra = std::move(kept);
+    }
   }
   if (!reject_extra.empty()) {
     const auto pr = session.prune_watchlist_after_review(opts.workspace_root, reject_extra);
@@ -1403,11 +1430,37 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
          ")…");
 
     L2BrainRequest breq;
-    breq.system_prompt = build_system_prompt(opts, phase, map_review);
+    if (phase == "explore_a") {
+      breq.system_prompt =
+          "Eres el Nivel 2 en fase explore_a (localización).\n"
+          "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+          "PROHIBIDO action=plan, tool, edit, done next=edit.\n"
+          "Formatos:\n"
+          "{\"action\":\"a_judge\",\"verdicts\":[{\"target\":\"…\",\"verdict\":\"useful|reject|"
+          "uncertain\",\"anchor\":\"path:Symbol\",\"stem\":\"…\",\"role\":\"primary\","
+          "\"why\":\"…\"}],\"done\":false}\n"
+          "{\"action\":\"a_done\",\"loci\":[{\"stem\":\"…\",\"anchor\":\"path:Symbol\","
+          "\"role\":\"primary\",\"why\":\"…\"}],\"summary\":\"…\"}\n"
+          "Juzga solo los peeks de esta vuelta. No acumules código: el runtime descarta cuerpos.\n";
+    } else {
+      breq.system_prompt = build_system_prompt(opts, phase, map_review);
+    }
     breq.user_prompt =
         build_user_prompt(opts.workspace_root, phase, step, has_pack, map_review, map_stale,
                           pack_incomplete, resume, workflow, budget, opts, recover_note,
                           pack_review_pending);
+    if (phase == "explore_a") {
+      std::ifstream nin(Level2Session::a_notes_path(opts.workspace_root));
+      if (nin) {
+        std::ostringstream nss;
+        nss << nin.rdbuf();
+        const std::string notes = nss.str();
+        if (!notes.empty()) {
+          breq.user_prompt += "\n\n" + notes;
+        }
+      }
+      breq.user_prompt += "\n" + session.build_a_peek_tranche_markdown(opts.workspace_root);
+    }
     breq.phase = phase;
     breq.max_tokens = opts.settings.max_tokens;
     breq.n_ctx = budget.n_ctx;
@@ -1502,6 +1555,15 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       continue;
     }
     if (action.kind == L2ActionKind::Tool || action.kind == L2ActionKind::Tools) {
+      if (phase == "explore_a") {
+        emit("L2 ▸ tool ignorado en explore_a — emite a_judge/a_done");
+        recover_note =
+            "Fase explore_a: PROHIBIDO tool/plan. Juzga los peeks con "
+            "{\"action\":\"a_judge\",\"verdicts\":[…]} o cierra con a_done.\n";
+        ++consecutive_invalid;
+        result.steps = step;
+        continue;
+      }
       if (lean_closeout) {
         return finish_auto_done("tool tras Instruction cubierta");
       }
@@ -1565,6 +1627,15 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
         }
       }
     } else if (action.kind == L2ActionKind::Plan) {
+      if (phase == "explore_a") {
+        emit("L2 ▸ plan rechazado en explore_a — usa a_judge/a_done");
+        recover_note =
+            "Fase explore_a: no hay pack todavía. Emite a_judge o a_done "
+            "(no action=plan).\n";
+        ++consecutive_invalid;
+        result.steps = step;
+        continue;
+      }
       emit("L2 ▸ plan targets=" + std::to_string(action.targets.size()) +
            (action.summary.empty() ? "" : (" — " + action.summary.substr(0, 80))));
       for (const auto& t : action.targets) {
@@ -1702,6 +1773,26 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
               "PROHIBIDO JSON: ni plan, ni tool, ni sibling_of.\n"
               "Empieza con un path del pack y la marca SEARCH de Aider.\n";
         }
+      }
+    } else if (action.kind == L2ActionKind::AJudge) {
+      emit("L2 ▸ a_judge verdicts=" + std::to_string(action.a_verdicts.size()));
+      for (const auto& v : action.a_verdicts) {
+        emit(std::string("  · [") + tuide::a_verdict_kind_name(v.verdict) + "] " +
+             v.target.substr(0, 80));
+      }
+      tr = session.apply_a_judge(opts.workspace_root, action.a_verdicts, action.a_turn_done);
+      emit(std::string("L2 ▸ a_judge ") + (tr.ok ? "OK" : "FAIL") + " — " +
+           (tr.ok ? tr.summary : tr.error).substr(0, 160));
+    } else if (action.kind == L2ActionKind::ADone) {
+      emit("L2 ▸ a_done loci=" + std::to_string(action.a_loci.size()) + " — " +
+           action.summary.substr(0, 100));
+      tr = session.apply_a_done(opts.workspace_root, action.a_loci, action.summary);
+      emit(std::string("L2 ▸ a_done ") + (tr.ok ? "OK → " : "FAIL — ") +
+           (tr.ok ? tr.phase : tr.error).substr(0, 120));
+      if (tr.ok) {
+        // Phase B: seed an initial plan from watchlist/loci so pack can build.
+        const auto st_flags = session.status_flags(opts.workspace_root);
+        (void)st_flags;
       }
     } else if (action.kind == L2ActionKind::Done) {
       emit("L2 ▸ done next=" + (action.next.empty() ? "(none)" : action.next) + " — " +

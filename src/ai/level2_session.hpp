@@ -114,6 +114,9 @@ class Level2Session {
   static std::string map_initial_path(const std::string& workspace_root);
   static std::string pack_path(const std::string& workspace_root);
   static std::string answer_path(const std::string& workspace_root);
+  // Phase A locate artifacts (L2_EXPLORE_PHASE_A).
+  static std::string a_state_path(const std::string& workspace_root);
+  static std::string a_notes_path(const std::string& workspace_root);
 
   // True when a prior L2 run finished (done/clarify) and may accept follow-ups without bootstrap.
   static bool is_continuable(const std::string& workspace_root);
@@ -181,6 +184,23 @@ class Level2Session {
   // Ask/Plan/Git: write natural-language answer (or plan doc) and finish the session.
   Level2TurnResult apply_synthesize(const std::string& workspace_root, const std::string& text);
   Level2TurnResult rollback_pending(const std::string& workspace_root);
+
+  // Phase A (locate): seed peek queue, judge peeks, close with loci[] → explore_b.
+  // No pack.md writes. Behind L2_EXPLORE_PHASE_A (callers should gate).
+  Level2TurnResult seed_a_queue(const std::string& workspace_root,
+                                const std::vector<AQueueBuildInput>& ranked,
+                                const AQueueBuildOpts& opts = {});
+  Level2TurnResult apply_a_judge(const std::string& workspace_root,
+                                 const std::vector<AVerdict>& verdicts,
+                                 bool turn_done_hint = false);
+  Level2TurnResult apply_a_done(const std::string& workspace_root,
+                                const std::vector<ALocus>& loci,
+                                const std::string& summary = {});
+  // Next ≤5 peek bodies for the explore_a prompt (ephemeral; not persisted as pack).
+  std::string build_a_peek_tranche_markdown(const std::string& workspace_root,
+                                            int max_peeks = kAMaxPeeksPerTurn);
+  static AState load_a_state(const std::string& workspace_root);
+  static bool save_a_state(const std::string& workspace_root, const AState& st, std::string* err);
 
   // Semantic pack review (PACK_REVIEW): persist verdict for explore close gate.
   Level2TurnResult mark_pack_review(const std::string& workspace_root, bool ok,

@@ -849,6 +849,7 @@ add_executable(level2_session_test
   src/ai/level2_session.cpp
   src/ai/l2_context_budget.cpp
   src/ai/l2_pack_review.cpp
+  src/ai/l2_explore_a.cpp
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
@@ -922,6 +923,7 @@ add_executable(level2_debrief_test
   src/ai/level2_session.cpp
   src/ai/l2_context_budget.cpp
   src/ai/l2_pack_review.cpp
+  src/ai/l2_explore_a.cpp
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp

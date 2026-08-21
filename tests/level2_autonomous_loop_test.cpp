@@ -1103,6 +1103,107 @@ ignore me
     fs::remove_all(rootg, ec);
   }
 
+  {
+    // Phase A locate: seed → a_judge → a_done without writing pack.md
+    setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "1", 1);
+    const fs::path rootA = fs::temp_directory_path() / "tuide_l2_phase_a_test";
+    std::error_code ec;
+    fs::remove_all(rootA, ec);
+    fs::create_directories(rootA / ".tuide" / "ai", ec);
+    fs::create_directories(rootA / "src", ec);
+    {
+      std::ofstream map(rootA / ".tuide" / "ai" / "map_last.md");
+      map << "# Ranked map\n\nquery: spinner\n\n## Ranked entries\n\n"
+             "1. src/busy.cpp:1 — `set_busy`\n";
+    }
+    {
+      std::ofstream f(rootA / "src" / "busy.cpp");
+      f << "void set_busy() {}\nint other() { return 0; }\n";
+    }
+    ToolRegistry toolsA;
+    toolsA.register_tool("get_code_of", "stub", [](const std::string& arg) {
+      return AiToolResult{true, "void set_busy() {}\n — " + arg};
+    });
+    Level2Session sessionA(Level2SessionDeps{&toolsA, {}, {}});
+    Level2BootstrapOpts bA;
+    bA.workspace_root = rootA.string();
+    bA.query = "spinner stuck";
+    bA.instruction = "fix spinner";
+    std::string errA;
+    expect(sessionA.bootstrap(bA, &errA), "phaseA bootstrap " + errA);
+    expect(sessionA.status_text(rootA.string()).find("phase: explore_a") != std::string::npos,
+           "bootstrap phase explore_a");
+
+    std::vector<tuide::AQueueBuildInput> ranked;
+    {
+      tuide::AQueueBuildInput in;
+      in.file = "src/busy.cpp";
+      in.name = "set_busy";
+      in.line = 1;
+      in.score = 100;
+      in.functionish = true;
+      in.body_lines = 5;
+      ranked.push_back(in);
+    }
+    {
+      tuide::AQueueBuildInput in;
+      in.file = "src/busy.cpp";
+      in.name = "other";
+      in.line = 2;
+      in.score = 50;
+      in.functionish = true;
+      in.body_lines = 3;
+      ranked.push_back(in);
+    }
+    expect(sessionA.seed_a_queue(rootA.string(), ranked).ok, "seed_a_queue");
+    expect(!sessionA.build_a_peek_tranche_markdown(rootA.string()).empty(), "peek tranche");
+
+    std::vector<tuide::AVerdict> vs;
+    {
+      tuide::AVerdict v;
+      v.target = "src/busy.cpp:set_busy";
+      v.verdict = tuide::AVerdictKind::Useful;
+      v.anchor = "src/busy.cpp:set_busy";
+      v.stem = "busy";
+      v.role = tuide::ALocusRole::Primary;
+      v.why = "sets busy flag";
+      vs.push_back(v);
+    }
+    {
+      tuide::AVerdict v;
+      v.target = "src/busy.cpp:other";
+      v.verdict = tuide::AVerdictKind::Reject;
+      v.why = "unrelated";
+      vs.push_back(v);
+    }
+    const auto jdg = sessionA.apply_a_judge(rootA.string(), vs, false);
+    expect(jdg.ok, "a_judge " + jdg.error);
+
+    // plan must be rejected during explore_a
+    const auto bad_plan =
+        sessionA.apply_plan(rootA.string(), {"src/busy.cpp:set_busy"}, "too soon");
+    expect(!bad_plan.ok, "plan blocked in explore_a");
+
+    std::vector<tuide::ALocus> loci;
+    {
+      tuide::ALocus loc;
+      loc.stem = "busy";
+      loc.anchor = "src/busy.cpp:set_busy";
+      loc.role = tuide::ALocusRole::Primary;
+      loc.why = "busy control";
+      loci.push_back(loc);
+    }
+    const auto ad = sessionA.apply_a_done(rootA.string(), loci, "locked busy");
+    expect(ad.ok && ad.phase == "explore_b", "a_done → explore_b");
+
+    const bool pack_exists = fs::exists(rootA / ".tuide" / "ai" / "l2" / "pack.md", ec);
+    expect(!pack_exists, "no pack.md after A");
+    const auto ast = Level2Session::load_a_state(rootA.string());
+    expect(ast.done && ast.loci_draft.size() == 1, "a_state loci");
+    unsetenv("L2_FEAT_L2_EXPLORE_PHASE_A");
+    fs::remove_all(rootA, ec);
+  }
+
   if (failures == 0) {
     std::cout << "level2_autonomous_loop_test OK\n";
     return 0;
