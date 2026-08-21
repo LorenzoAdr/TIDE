@@ -40,6 +40,22 @@ const std::unordered_set<std::string>& l2_whitelist() {
   return k;
 }
 
+// Phase A/B locate hot path: Tree-sitter / FS / index only (no LSP server).
+const std::unordered_set<std::string>& l2_local_locate_tools() {
+  static const std::unordered_set<std::string> k = {
+      "get_code_of", "search",     "repo_map",     "read_file", "list_files",
+      "file_outline", "headers_of", "sibling_of",   "list_tools",
+  };
+  return k;
+}
+
+bool is_lsp_locate_tool(const std::string& name) {
+  static const std::unordered_set<std::string> k = {
+      "workspace_symbols", "hover", "diagnostics", "definition", "references", "context_pack",
+  };
+  return k.count(name) > 0;
+}
+
 std::string json_escape(const std::string& s) {
   return ai_trace_escape(s, 8000);
 }
@@ -2889,6 +2905,18 @@ bool Level2Session::tool_allowed(const std::string& name) {
   return l2_whitelist().count(name) > 0;
 }
 
+bool Level2Session::tool_allowed_in_phase(const std::string& name, const std::string& phase) {
+  if (!tool_allowed(name)) {
+    return false;
+  }
+  // P5: explore_a/explore_b never need clangd for locate/pack when Phase A is on.
+  if (l2_feat::enabled("L2_EXPLORE_PHASE_A") &&
+      (phase == "explore_a" || phase == "explore_b")) {
+    return l2_local_locate_tools().count(name) > 0;
+  }
+  return true;
+}
+
 std::string Level2Session::tool_guide_markdown() {
   return R"(## Tool guide
 
@@ -3681,13 +3709,19 @@ Level2TurnResult Level2Session::apply_tool(const std::string& workspace_root,
     out.error = "sesión done; reinicia con bootstrap";
     return out;
   }
-  if (st.phase != "explore" && st.phase != "edit") {
-    out.error = "tools solo en phase explore|edit (ahora=" + st.phase + ")";
+  if (st.phase == "explore_a") {
+    out.error = "explore_a: peeks son runtime; usa a_judge/a_done (no tools)";
     write_response_json(workspace_root, false, "error", name, arg, "", out.error, st.turn, st.phase);
     return out;
   }
-  if (!tool_allowed(name)) {
-    out.error = "tool no permitido: " + name;
+  if (st.phase != "explore" && st.phase != "explore_b" && st.phase != "edit") {
+    out.error = "tools solo en phase explore|explore_b|edit (ahora=" + st.phase + ")";
+    write_response_json(workspace_root, false, "error", name, arg, "", out.error, st.turn, st.phase);
+    return out;
+  }
+  if (!tool_allowed_in_phase(name, st.phase)) {
+    out.error = std::string("tool no permitido en ") + st.phase + ": " + name +
+                (is_lsp_locate_tool(name) ? " (LSP fuera del hot path locate)" : "");
     write_response_json(workspace_root, false, "error", name, arg, "", out.error, st.turn, st.phase);
     return out;
   }
@@ -3875,8 +3909,12 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
     out.error = "sesión done; reinicia con bootstrap";
     return out;
   }
-  if (st.phase != "explore" && st.phase != "edit") {
-    out.error = "tools solo en phase explore|edit (ahora=" + st.phase + ")";
+  if (st.phase == "explore_a") {
+    out.error = "explore_a: peeks son runtime; usa a_judge/a_done (no tools)";
+    return out;
+  }
+  if (st.phase != "explore" && st.phase != "explore_b" && st.phase != "edit") {
+    out.error = "tools solo en phase explore|explore_b|edit (ahora=" + st.phase + ")";
     return out;
   }
   if (deps_.tools == nullptr) {
@@ -3937,14 +3975,14 @@ Level2TurnResult Level2Session::apply_tools(const std::string& workspace_root,
 
   for (int i = 0; i < n; ++i) {
     const auto& call = calls[static_cast<std::size_t>(i)];
-    if (!tool_allowed(call.name)) {
-      ++st.turn;
-      batch_block << "### turn " << st.turn << " — `" << call.name << "`";
-      if (!call.arg.empty()) {
-        batch_block << " `" << call.arg << "`";
-      }
-      batch_block << "\n\n```\nerror: tool no permitido: " << call.name << "\n```\n\n";
+    if (!tool_allowed_in_phase(call.name, st.phase)) {
       ++fail_n;
+      batch_block << "### tools[" << i << "] `" << call.name << "` — denied\n\n";
+      batch_block << "tool no permitido en " << st.phase << ": " << call.name;
+      if (is_lsp_locate_tool(call.name)) {
+        batch_block << " (LSP fuera del hot path locate)";
+      }
+      batch_block << "\n\n";
       continue;
     }
     if (!deps_.tools->has(call.name)) {

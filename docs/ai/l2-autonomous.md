@@ -115,8 +115,10 @@ Banner: `L2 ▸ arranque autónomo (remote n_ctx=32768 pack≈36000) …`.
 > **Experimental — Phase A locate (`L2_EXPLORE_PHASE_A`):** diseño en
 > [`docs/plans/l2-explore-phase-a-b.md`](../plans/l2-explore-phase-a-b.md). Flag **off** por
 > defecto. Cuando esté on, explore se parte en `explore_a` (peeks → `a_judge`/`a_done` →
-> `loci[]`, sin `pack.md`) y `explore_b` (pack rígido desde loci). Hoy solo están el
-> contrato JSON y tipos (`l2_explore_a`); el loop aún no cambia el camino mezclado.
+> `loci[]`, sin `pack.md`) y `explore_b` (pack rígido desde loci). El hot path A/B **no
+> usa LSP** ([degradación](l2-explore-no-lsp.md)): solo `get_code_of` / outline / search /
+> mapa local. Hoy el contrato JSON, cola, expansión y pack-from-loci están cableados;
+> el flag sigue off hasta baterías (P6/P7).
 
   El runtime **merge** watchlists (plan2 no pisa plan1; bootstrap resetea `pack.md` /
   watchlist — no reinyecta targets de una sesión previa), normaliza bare→símbolo/ventana por

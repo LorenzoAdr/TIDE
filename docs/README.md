@@ -25,6 +25,7 @@ Terminal IDE with multi-language editing and an integrated debugger. This folder
 | [Toolpacks](toolpacks.md) | Language packs, catalog, CLI, AppImage/AppDir export |
 | [Panel invalidation plan](plans/panel-invalidation-wake-system.md) | Design: FTXUI panel dirty cache + ANSI busy strip (separate systems) |
 | [L2 explore A/B plan](plans/l2-explore-phase-a-b.md) | Design: L2 explore en dos fases (localización vs pack); sin implementar aún |
+| [L2 explore without LSP](ai/l2-explore-no-lsp.md) | Phase A/B locate hot path uses Tree-sitter/index only |
 
 ## Quick links
 

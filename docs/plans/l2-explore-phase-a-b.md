@@ -556,8 +556,8 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 - [x] P2 loop A scripted. *(`explore_a` bootstrap, peeks, `a_judge`/`a_done` → `explore_b`; sin pack)*
 - [x] P3 expansión cola. *(reserve + capas 1–3 / orphans / cap expansiones)*
 - [x] P4 B ← loci + micro-A. *(watchlist must-tier, plan filtrado, auto-plan, allowlist)*
-- [ ] P5 no-LSP path.
-- [ ] P6 batteries + informe.
+- [x] P5 no-LSP path. *(whitelist local A/B; docs/ai/l2-explore-no-lsp.md; test sin clangd)*
+- [x] P6 batteries + informe. *(score_explore phase_a metrics; PHASE_A_METRICS.md)*
 - [ ] P7 promoción flag.
 
 ---

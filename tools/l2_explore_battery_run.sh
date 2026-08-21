@@ -94,6 +94,8 @@ while IFS= read -r ID; do
   cp -f .tuide/ai/l2/state.json "$CASE_DIR/state.json" 2>/dev/null || true
   cp -f .tuide/ai/l2/session.md "$CASE_DIR/session.md" 2>/dev/null || true
   cp -f .tuide/ai/l2/pack.md "$CASE_DIR/pack.md" 2>/dev/null || true
+  cp -f .tuide/ai/l2/a_state.json "$CASE_DIR/a_state.json" 2>/dev/null || true
+  cp -f .tuide/ai/l2/a_notes.md "$CASE_DIR/a_notes.md" 2>/dev/null || true
 
   python3 - <<PY >>"$OUT/results.jsonl"
 import json, re, pathlib
