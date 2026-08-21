@@ -137,6 +137,8 @@ class Level2Session {
   static std::string tool_guide_edit_markdown();
   // Compact explore system when EDIT_LEAN_PROMPT (avoids n_ctx blow on ranked map).
   static std::string tool_guide_explore_markdown();
+  static std::string tool_guide_explore_a_markdown();
+  static std::string tool_guide_explore_b_markdown();
   static bool tool_allowed(const std::string& name);
   // Phase-aware: with L2_EXPLORE_PHASE_A, explore_a/b only allow local (non-LSP) tools.
   static bool tool_allowed_in_phase(const std::string& name, const std::string& phase);

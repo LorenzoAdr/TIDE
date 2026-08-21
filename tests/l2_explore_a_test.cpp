@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 
@@ -25,9 +26,24 @@ void expect(bool cond, const std::string& msg) {
 
 int main() {
   {
-    // Flag off by default in features_promoted.json
-    expect(!tuide::l2_feat::enabled("L2_EXPLORE_PHASE_A"),
-           "L2_EXPLORE_PHASE_A default off (or unset)");
+    setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "0", 1);
+    expect(!tuide::l2_feat::enabled("L2_EXPLORE_PHASE_A"), "env 0 disables Phase A");
+    setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "1", 1);
+    expect(tuide::l2_feat::enabled("L2_EXPLORE_PHASE_A"), "env 1 enables Phase A");
+    unsetenv("L2_FEAT_L2_EXPLORE_PHASE_A");
+  }
+  {
+    const std::string map =
+        "# Ranked map\n\n## Ranked entries\n\n"
+        "1. src/ui/wake.cpp:90 — `should_wake`\n"
+        "2. src/ui/noise.cpp:1  [score=0.5] — `noise`\n"
+        "3. bare_no_path\n";
+    const auto inputs = tuide::a_queue_inputs_from_ranked_map_markdown(map, 80);
+    expect(inputs.size() == 2, "map parser keeps 2 entries");
+    expect(inputs[0].file == "src/ui/wake.cpp" && inputs[0].name == "should_wake",
+           "wake symbol");
+    expect(inputs[0].line == 90, "wake line");
+    expect(inputs[1].name == "noise", "noise symbol");
   }
   {
     nlohmann::json j = nlohmann::json::parse(R"({

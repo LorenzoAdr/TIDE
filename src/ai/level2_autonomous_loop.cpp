@@ -550,7 +550,12 @@ std::string build_system_prompt(const Level2AutonomousLoopOpts& opts,
     out << opts.tool_guide_override;
   } else if (lean_edit) {
     out << Level2Session::tool_guide_edit_markdown();
-  } else if (l2_feat::enabled("EDIT_LEAN_PROMPT") && phase == "explore") {
+  } else if (phase == "explore_a") {
+    out << Level2Session::tool_guide_explore_a_markdown();
+  } else if (phase == "explore_b" && l2_feat::enabled("L2_EXPLORE_PHASE_A")) {
+    out << Level2Session::tool_guide_explore_b_markdown();
+  } else if (l2_feat::enabled("EDIT_LEAN_PROMPT") &&
+             (phase == "explore" || phase == "explore_b")) {
     out << Level2Session::tool_guide_explore_markdown();
   } else {
     out << Level2Session::tool_guide_markdown();
@@ -716,6 +721,9 @@ std::string build_user_prompt(const std::string& workspace_root, const std::stri
           << (readonly ? "synthesize" : "edit")
           << ", hazlo; si no, plan/tools sobre el ## Ranked map"
           << (map_stale ? " (**map_stale**)" : "") << ".\n\n";
+    } else if (phase == "explore_b" && l2_feat::enabled("L2_EXPLORE_PHASE_A")) {
+      out << "Phase B: materializa pack desde ## Loci (plan vacío o targets de loci). "
+             "PROHIBIDO multi-stem fuera de loci.\n\n";
     } else {
       out << "El ## Ranked map es tu base"
           << (map_stale ? " (**map_stale**: poco alineado a la Instruction; prioriza search/plan)"

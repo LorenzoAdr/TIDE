@@ -106,20 +106,16 @@ Banner: `L2 ▸ arranque autónomo (remote n_ctx=32768 pack≈36000) …`.
 - Prompt L2 cabe en el budget del backend activo (local ≈ `n_ctx`; remote ≈ `n_ctx_remote`).
   No se manda `session.md` entero; el disco puede ser más rico que el slice del prompt.
 - **Tool guide solo en system prompt** (no se duplica en `session.md`).
-- **Flujo plan → pack:** en explore preferir `plan` en el **primer** paso
+- **Flujo plan → pack:** con **Phase A/B** (flag `L2_EXPLORE_PHASE_A` **on** por
+  defecto): `explore_a` juzga peeks (`a_judge`/`a_done` → `loci[]`, sin `pack.md`);
+  `explore_b` materializa pack desde loci. Detalle:
+  [`docs/plans/l2-explore-phase-a-b.md`](../plans/l2-explore-phase-a-b.md). Hot path A/B
+  **sin LSP** ([degradación](l2-explore-no-lsp.md)). Override: `L2_FEAT_L2_EXPLORE_PHASE_A=0`
+  restaura explore mezclado: preferir `plan` en el **primer** paso
   (`{"action":"plan","targets":["path:Symbol","path:A-B",…]}`; máx. 16; evitar path bare;
   4–8 targets anclados). Máx. ~8 tools sueltos antes del primer plan (soft `_nudge:_`).
   Tras pack cubierto: extras con `tools` batch (máx. 4); si siguen las tools, otro
   `_nudge:_` pide `done next=edit`. No repetir path con ventanas solapadas.
-
-> **Experimental — Phase A locate (`L2_EXPLORE_PHASE_A`):** diseño en
-> [`docs/plans/l2-explore-phase-a-b.md`](../plans/l2-explore-phase-a-b.md). Flag **off** por
-> defecto. Cuando esté on, explore se parte en `explore_a` (peeks → `a_judge`/`a_done` →
-> `loci[]`, sin `pack.md`) y `explore_b` (pack rígido desde loci). El hot path A/B **no
-> usa LSP** ([degradación](l2-explore-no-lsp.md)): solo `get_code_of` / outline / search /
-> mapa local. Hoy el contrato JSON, cola, expansión y pack-from-loci están cableados;
-> el flag sigue off hasta baterías (P6/P7).
-
   El runtime **merge** watchlists (plan2 no pisa plan1; bootstrap resetea `pack.md` /
   watchlist — no reinyecta targets de una sesión previa), normaliza bare→símbolo/ventana por
   outline + **search-in-file** (prioriza search; rechaza símbolos basura tipo `const`),

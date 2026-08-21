@@ -9,7 +9,7 @@
 namespace tuide {
 
 // Phase A (locate) types — see docs/plans/l2-explore-phase-a-b.md.
-// Feature flag: L2_EXPLORE_PHASE_A (off by default).
+// Feature flag: L2_EXPLORE_PHASE_A (promoted on in features_promoted.json).
 
 enum class AVerdictKind {
   Useful,
@@ -125,6 +125,11 @@ bool a_plan_target_allowed(const AState& st, const std::string& target);
 
 // Sort loci primary → secondary → suspect for must-tier watchlist.
 std::vector<ALocus> a_loci_must_ordered(std::vector<ALocus> loci);
+
+// Parse L1/L2 ranked-map markdown lines into queue inputs (best-effort).
+// Accepts: "1. src/foo.cpp:42 — `Sym`" / "1. src/foo.cpp:1  [score=…] — `name`"
+std::vector<AQueueBuildInput> a_queue_inputs_from_ranked_map_markdown(const std::string& map_md,
+                                                                      std::size_t max_n = 80);
 
 const char* a_verdict_kind_name(AVerdictKind kind);
 AVerdictKind parse_a_verdict_kind(const std::string& s);

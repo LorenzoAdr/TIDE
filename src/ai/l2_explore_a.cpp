@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <sstream>
 #include <unordered_map>
 
@@ -431,6 +432,91 @@ std::vector<ALocus> a_loci_must_ordered(std::vector<ALocus> loci) {
     return rank(a.role) < rank(b.role);
   });
   return loci;
+}
+
+std::vector<AQueueBuildInput> a_queue_inputs_from_ranked_map_markdown(const std::string& map_md,
+                                                                      std::size_t max_n) {
+  std::vector<AQueueBuildInput> out;
+  if (map_md.empty() || max_n == 0) {
+    return out;
+  }
+  std::istringstream iss(map_md);
+  std::string line;
+  int rank_score = 100000;
+  while (std::getline(iss, line)) {
+    if (line.empty() || line[0] < '0' || line[0] > '9') {
+      continue;
+    }
+    std::size_t i = 0;
+    while (i < line.size() && line[i] >= '0' && line[i] <= '9') {
+      ++i;
+    }
+    if (i >= line.size() || line[i] != '.') {
+      continue;
+    }
+    ++i;
+    while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) {
+      ++i;
+    }
+    if (i >= line.size()) {
+      continue;
+    }
+    // path or path:line or path:Symbol before space / em-dash / [
+    std::size_t path_end = i;
+    while (path_end < line.size() && line[path_end] != ' ' && line[path_end] != '\t' &&
+           line[path_end] != '[' && static_cast<unsigned char>(line[path_end]) != 0xE2) {
+      ++path_end;
+    }
+    std::string loc = line.substr(i, path_end - i);
+    while (!loc.empty() && (loc.back() == ',' || loc.back() == ';')) {
+      loc.pop_back();
+    }
+    if (loc.find('/') == std::string::npos && loc.find('.') == std::string::npos) {
+      continue;
+    }
+    AQueueBuildInput in;
+    in.score = rank_score;
+    rank_score = std::max(1, rank_score - 10);
+    const auto colon = loc.rfind(':');
+    if (colon != std::string::npos && colon + 1 < loc.size()) {
+      const std::string tail = loc.substr(colon + 1);
+      bool all_digit = !tail.empty();
+      for (char c : tail) {
+        if (c < '0' || c > '9') {
+          all_digit = false;
+          break;
+        }
+      }
+      in.file = loc.substr(0, colon);
+      if (all_digit) {
+        in.line = std::atoi(tail.c_str());
+      } else {
+        in.name = tail;
+      }
+    } else {
+      in.file = loc;
+    }
+    // Prefer backtick symbol if present
+    const auto tick0 = line.find('`', path_end);
+    if (tick0 != std::string::npos) {
+      const auto tick1 = line.find('`', tick0 + 1);
+      if (tick1 != std::string::npos && tick1 > tick0 + 1) {
+        const std::string sym = line.substr(tick0 + 1, tick1 - tick0 - 1);
+        if (!sym.empty() && looks_like_ident(sym)) {
+          in.name = sym;
+        }
+      }
+    }
+    if (in.name.empty() && in.line <= 0) {
+      continue;
+    }
+    in.functionish = true;
+    out.push_back(std::move(in));
+    if (out.size() >= max_n) {
+      break;
+    }
+  }
+  return out;
 }
 
 const char* a_verdict_kind_name(AVerdictKind kind) {

@@ -2998,6 +2998,26 @@ No repitas el mismo get_code_of. Refetch solo con path:A-B distinto.
 )";
 }
 
+std::string Level2Session::tool_guide_explore_a_markdown() {
+  return R"(## Tool guide (explore_a — localización)
+JSON only. PROHIBIDO plan/tool/edit/pack.
+Juzga peeks: {"action":"a_judge","verdicts":[{"target":"…","verdict":"useful|reject|uncertain",
+"anchor":"path:Symbol","stem":"…","role":"primary","why":"…"}],"done":false}
+Cierra: {"action":"a_done","loci":[{"stem":"…","anchor":"path:Symbol","role":"primary","why":"…"}],
+"summary":"…"}
+Máx 1–2 primary. Sin pack.md hasta explore_b.
+)";
+}
+
+std::string Level2Session::tool_guide_explore_b_markdown() {
+  return R"(## Tool guide (explore_b — pack desde loci)
+JSON only. Pack desde loci de a_done (plan vacío o targets de loci).
+{"action":"plan","targets":[]} o {"action":"plan","targets":["path:Symbol",…]}
+Tras pack: {"action":"done","summary":"…","next":"edit"} o action=edit.
+PROHIBIDO caza libre multi-stem fuera de loci / micro-A allowlist.
+)";
+}
+
 std::string Level2Session::strip_unrelated_on_disk_excerpts(const std::string& obs) {
   // Keep "## on disk `path`" only when this block is compile/edit feedback for that
   // same path; drop sibling dumps that bloat the edit prompt.
@@ -3402,10 +3422,18 @@ std::string Level2Session::maybe_tool_nudge(State& st, int tools_added) {
     }
     return {};
   }
-  if (st.phase != "explore") {
+  // Phase A: no early-plan nudge (mixed explore). explore_a has no tools.
+  if (st.phase == "explore_a") {
+    return {};
+  }
+  if (st.phase != "explore" && st.phase != "explore_b") {
     return {};
   }
   if (!st.has_pack) {
+    // explore_b pre-pack: auto-plan / loci plan — never soft-nudge classic early plan.
+    if (st.phase == "explore_b") {
+      return {};
+    }
     st.explore_tool_count += tools_added;
     if (!st.plan_nudge_sent && st.explore_tool_count >= kExplorePlanNudgeAfter) {
       st.plan_nudge_sent = true;
@@ -3580,6 +3608,10 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
     md << "Fase inicial: **explore** (workflow=git). Tienes ## Git context. Puedes "
           "`action=plan`/tools si necesitas código actual, o `action=synthesize` directo "
           "para resumir qué cambió. **PROHIBIDO** edit/compile.\n\n";
+  } else if (l2_feat::enabled("L2_EXPLORE_PHASE_A")) {
+    md << "Fase inicial: **explore_a** (localización). PROHIBIDO `plan`/tools/pack. "
+          "Juzga peeks con `a_judge` → cierra con `a_done` (`loci[]`) → **explore_b** "
+          "materializa pack desde loci. Sin caza libre multi-stem.\n\n";
   } else {
     md << "Fase inicial: **explore**. Preferir `action=plan` en el **primer** paso con "
           "4–8 targets `path:Symbol`/`path:line` (evitar path bare). Máx. ~8 tools sueltos "
@@ -3624,7 +3656,8 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   }
 
   State st;
-  st.phase = l2_feat::enabled("L2_EXPLORE_PHASE_A") ? "explore_a" : "explore";
+  const bool phase_a = l2_feat::enabled("L2_EXPLORE_PHASE_A");
+  st.phase = phase_a ? "explore_a" : "explore";
   st.workflow = workflow_name;
   st.last_action = "bootstrap";
   st.has_pack = false;
@@ -3661,7 +3694,7 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
       }
       st.has_pack = true;
       st.watchlist = opts.seeds;
-    } else if (!l2_feat::enabled("L2_EXPLORE_PHASE_A")) {
+    } else if (!phase_a) {
       write_file(pack_path(opts.workspace_root),
                  "# L2 code pack\n\n_(vacío — bootstrap; sin plan aún)_\n", &pack_err);
     } else {
@@ -3674,21 +3707,39 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
     return false;
   }
 
+  if (phase_a) {
+    AState ast;
+    if (!map_stale) {
+      const auto inputs = a_queue_inputs_from_ranked_map_markdown(map_body, 80);
+      if (!inputs.empty()) {
+        a_state_seed_queue(&ast, inputs, {});
+      }
+    }
+    std::string aerr;
+    if (!save_a_state(opts.workspace_root, ast, &aerr)) {
+      if (err_out && err_out->empty()) {
+        *err_out = aerr.empty() ? "no se pudo escribir a_state.json" : aerr;
+      }
+      return false;
+    }
+    write_file(a_notes_path(opts.workspace_root), a_notes_markdown(ast), nullptr);
+  }
+
   write_file(request_path(opts.workspace_root),
              "{\n  \"action\": \"tool\",\n  \"name\": \"get_code_of\",\n  \"arg\": \"\"\n}\n",
              nullptr);
   write_response_json(opts.workspace_root, true, "bootstrap", "", "", "session ready", "", 0,
-                      "explore");
+                      st.phase);
   append_trace(opts.workspace_root,
                std::string("{\"ts\":") + now_ms_str() +
                    ",\"event\":\"bootstrap\",\"query\":\"" + json_escape(opts.query) +
-                   "\",\"phase\":\"explore\",\"workflow\":\"" + workflow_name +
+                   "\",\"phase\":\"" + st.phase + "\",\"workflow\":\"" + workflow_name +
                    "\",\"map_stale\":" + (map_stale ? "1" : "0") +
                    ",\"map_overlap\":" + std::to_string(overlap) + "}");
   ai_trace(AiTraceChannel::L2, "l2_bootstrap",
            std::string("{\"path\":\"") + json_escape(session_path(opts.workspace_root)) +
                "\",\"workflow\":\"" + workflow_name + "\",\"map_stale\":" +
-               (map_stale ? "1" : "0") + "}");
+               (map_stale ? "1" : "0") + ",\"phase\":\"" + st.phase + "\"}");
   return true;
 }
 

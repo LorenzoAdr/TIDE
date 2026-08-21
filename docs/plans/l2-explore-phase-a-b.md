@@ -407,7 +407,7 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 
 **Trabajo:**
 
-- Flag p. ej. `L2_EXPLORE_PHASE_A` / entrada en `features_promoted.json` (off por defecto).
+- Flag p. ej. `L2_EXPLORE_PHASE_A` / entrada en `features_promoted.json` (**on** tras P7; rollback `=0`).
 - Tipos: `AVerdict`, `Locus`, `AState` (cola, cursor, peeks_used, rejected_stems).
 - Schema JSON `a_judge` / `a_done` + validación en `l2_action`.
 - Docs: este plan + nota corta en `l2-autonomous.md` (“fase A experimental”).
@@ -486,9 +486,9 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 
 **Trabajo:**
 
-- Prompt packs / harness prompt actualizados.
-- Default flag on en remote o en local según evidencia.
-- Retirar o soft-nudge del explore mezclado (tools+plan temprano) cuando Phase A está on.
+- Prompt packs / harness prompt actualizados. *(hecho)*
+- Default flag on en remote o en local según evidencia. *(`features_promoted.json` → true)*
+- Retirar o soft-nudge del explore mezclado (tools+plan temprano) cuando Phase A está on. *(nudge plan desactivado en A/B pre-pack; bootstrap auto-seed cola)*
 
 **Salida:** feature promovida; plan marcado implementado.
 
@@ -515,7 +515,7 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 | Cerrar A en el primer useful | Exigir contraste (≥1 competidor) |
 | 16 vueltas por defecto | Topes 24–32 peeks + early-stop |
 | Cola top-40 ciega | Capas de expansión + batteries fuera de top-40 |
-| Regresión single-stem fácil | Flag off default; comparar battery antes de promover |
+| Regresión single-stem fácil | Comparar battery off vs on; rollback `L2_FEAT_…=0` |
 | Reintroducir caza libre vía escape | Cap 1–2; telemetría de uso |
 | LSP “por si acaso” en hot path | P5 + test no-LSP |
 | Monogamia de stem en bugs 2-módulo | Permitir 1–2 primary; battery multi-stem |
@@ -558,9 +558,15 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 - [x] P4 B ← loci + micro-A. *(watchlist must-tier, plan filtrado, auto-plan, allowlist)*
 - [x] P5 no-LSP path. *(whitelist local A/B; docs/ai/l2-explore-no-lsp.md; test sin clangd)*
 - [x] P6 batteries + informe. *(score_explore phase_a metrics; PHASE_A_METRICS.md)*
-- [ ] P7 promoción flag.
+- [x] P7 promoción flag. *(`features_promoted.json` on; harness/prompts; auto-seed cola A; soft-nudge plan retirado en A/B)*
 
 ---
+
+## Estado
+
+**Implementado** (P0–P7). Promoción en `tools/l2_battery/features_promoted.json`.
+Gate de evidencia: ver `tools/l2_explore_battery/PHASE_A_METRICS.md` — re-correr battery
+off vs on tras cambios de modelo/cola; rollback con `L2_FEAT_L2_EXPLORE_PHASE_A=0`.
 
 ## 16. Mapa chat ↔ documento
 

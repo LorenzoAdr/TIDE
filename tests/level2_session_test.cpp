@@ -35,6 +35,9 @@ std::string read_all(const fs::path& p) {
 }
 
 int main() {
+  // Classic explore path under test (Phase A is promoted on by default).
+  setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "0", 1);
+
   const fs::path root = fs::temp_directory_path() / "tuide_l2_phase_test";
   std::error_code ec;
   fs::remove_all(root, ec);
