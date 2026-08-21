@@ -1074,6 +1074,7 @@ add_executable(stem_embed_battery
   src/ai/ai_trace.cpp
   src/indexer/index_rules.cpp
   src/parser/tree_sitter_tags.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp
   src/symbols/symbol_utils.cpp
@@ -1105,6 +1106,7 @@ add_executable(stem_boost_battery
   src/ai/ai_path_scope.cpp
   src/indexer/index_rules.cpp
   src/parser/tree_sitter_tags.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp
   src/symbols/symbol_utils.cpp
@@ -1137,6 +1139,7 @@ add_executable(map_for_query_cli
   src/ai/ai_path_scope.cpp
   src/indexer/index_rules.cpp
   src/parser/tree_sitter_tags.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/parser/tree_sitter_language.cpp
   src/parser/tree_sitter_symbols.cpp
   src/symbols/symbol_utils.cpp
