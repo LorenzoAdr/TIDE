@@ -2,6 +2,9 @@
 #include "parser/tree_sitter_locals.hpp"
 #include "parser/tree_sitter_service.hpp"
 #include "parser/tree_sitter_symbols.hpp"
+#include "parser/tree_sitter_xml_wrap.hpp"
+#include "parser/tree_sitter_highlight.hpp"
+#include "parser/tree_sitter_language.hpp"
 
 #include <cassert>
 #include <chrono>
@@ -19,6 +22,10 @@
 #include "editor/editor_folds.hpp"
 #include "editor/editor_state.hpp"
 #include "editor/text_ops.hpp"
+
+extern "C" {
+#include <tree_sitter/api.h>
+}
 
 namespace tuide {
 namespace {
@@ -933,10 +940,119 @@ void test_viewport_preview_before_full_parse() {
   assert(tree_sitter_service().viewport_preview_line(path, canonical, 0) == nullptr);
 }
 
+void test_viewport_preview_xml_multi_root_no_error_spans() {
+  const std::string path = "preview_multi_root.xml";
+  const std::string source =
+      "<title>hi</title>\n"
+      "<user>u</user>\n"
+      "<body>\n"
+      "  <item id=\"1\">x</item>\n"
+      "</body>\n";
+  const std::string canonical = normalize_editor_source(source);
+  tree_sitter_service().invalidate(path);
+  assert(!tree_sitter_service().document_highlights_ready(path, canonical));
+
+  tree_sitter_service().ensure_viewport_preview(path, canonical, {0, 1, 2, 3});
+  for (int line = 0; line <= 3; ++line) {
+    const LineHighlights* hl = tree_sitter_service().viewport_preview_line(path, canonical, line);
+    assert(hl != nullptr);
+    for (const HighlightSpan& span : hl->spans) {
+      assert(span.capture != "error");
+    }
+  }
+  const LineHighlights* line0 = tree_sitter_service().viewport_preview_line(path, canonical, 0);
+  assert(line0 != nullptr);
+  bool saw_tag = false;
+  for (const HighlightSpan& span : line0->spans) {
+    if (span.capture == "tag") {
+      saw_tag = true;
+    }
+  }
+  assert(saw_tag);
+}
+
 void test_normalize_editor_source_trailing_newline() {
   const std::string from_buffer = join_editor_lines({"int main() {}", "return 0;"});
   const std::string from_file = "int main() {}\nreturn 0;\n";
   assert(normalize_editor_source(from_buffer) == normalize_editor_source(from_file));
+}
+
+void test_xml_fragment_wrap_multi_root() {
+  const std::string source =
+      "<title>hi</title>\n"
+      "<user>u</user>\n"
+      "<body>\n"
+      "  <item id=\"1\">x</item>\n"
+      "</body>";
+  const XmlFragmentWrap wrap = xml_wrap_fragment_source(source);
+  assert(wrap.active());
+  assert(wrap.inject_point == 0);
+
+  TSParser* parser = ts_parser_new();
+  ts_parser_set_language(parser, tree_sitter_xml_language());
+  TSTree* bare = ts_parser_parse_string(parser, nullptr, source.c_str(),
+                                        static_cast<uint32_t>(source.size()));
+  assert(bare != nullptr);
+  assert(ts_node_has_error(ts_tree_root_node(bare)));
+  ts_tree_delete(bare);
+
+  TSTree* wrapped_tree = ts_parser_parse_string(parser, nullptr, wrap.wrapped.c_str(),
+                                                static_cast<uint32_t>(wrap.wrapped.size()));
+  assert(wrapped_tree != nullptr);
+  assert(!ts_node_has_error(ts_tree_root_node(wrapped_tree)));
+
+  std::vector<LineHighlights> highlights =
+      highlights_for_document(ts_tree_root_node(wrapped_tree), wrap.wrapped, TreeSitterLangKind::kXml);
+  xml_unmap_highlights_from_wrap(&highlights, wrap, source);
+  assert(highlights.size() == 5);
+  bool saw_tag = false;
+  bool saw_error = false;
+  for (const LineHighlights& line : highlights) {
+    for (const HighlightSpan& span : line.spans) {
+      if (span.capture == "tag") {
+        saw_tag = true;
+      }
+      if (span.capture == "error") {
+        saw_error = true;
+      }
+    }
+  }
+  assert(saw_tag);
+  assert(!saw_error);
+  // First tag name "title" should start at column 1 in the unwrapped buffer ("<title>...").
+  assert(!highlights[0].spans.empty());
+  bool title_ok = false;
+  for (const HighlightSpan& span : highlights[0].spans) {
+    if (span.capture == "tag" && span.start_col == 1 && span.end_col == 6) {
+      title_ok = true;
+    }
+  }
+  assert(title_ok);
+
+  ts_tree_delete(wrapped_tree);
+  ts_parser_delete(parser);
+}
+
+void test_xml_fragment_wrap_keeps_prolog_outside() {
+  const std::string source =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+      "<hello name=\"tuide\">\n"
+      "  <item>alpha</item>\n"
+      "</hello>";
+  const XmlFragmentWrap wrap = xml_wrap_fragment_source(source);
+  assert(wrap.active());
+  assert(wrap.inject_point > 0);
+  assert(wrap.wrapped.find("<?xml") == 0);
+  assert(wrap.wrapped.find(kXmlFragmentRootOpen) == wrap.inject_point);
+
+  TSParser* parser = ts_parser_new();
+  ts_parser_set_language(parser, tree_sitter_xml_language());
+  TSTree* tree = ts_parser_parse_string(parser, nullptr, wrap.wrapped.c_str(),
+                                        static_cast<uint32_t>(wrap.wrapped.size()));
+  assert(tree != nullptr);
+  assert(!ts_node_has_error(ts_tree_root_node(tree)));
+  ts_tree_delete(tree);
+  ts_parser_delete(parser);
 }
 
 }  // namespace
@@ -977,8 +1093,11 @@ int main() {
   tuide::test_edit_hint_matches_diff_on_char_insert();
   tuide::test_edit_hint_matches_diff_on_newline_insert();
   tuide::test_edit_hint_matches_diff_on_backspace_join();
+  tuide::test_xml_fragment_wrap_multi_root();
+  tuide::test_xml_fragment_wrap_keeps_prolog_outside();
   tuide::test_edit_hint_poisoned_by_multiple_edits_falls_back_correctly();
   tuide::test_viewport_preview_before_full_parse();
+  tuide::test_viewport_preview_xml_multi_root_no_error_spans();
   tuide::test_normalize_editor_source_trailing_newline();
   std::cout << "tree_sitter_test ok\n";
   return 0;

@@ -9,6 +9,7 @@
 #include "parser/tree_sitter_language.hpp"
 #include "parser/tree_sitter_locals.hpp"
 #include "parser/tree_sitter_symbols.hpp"
+#include "parser/tree_sitter_xml_wrap.hpp"
 #include "util/thread_name.hpp"
 
 namespace tuide {
@@ -680,7 +681,8 @@ std::string extract_line_range(const std::string& source, int first_line, int la
   return out;
 }
 
-TSTree* parse_tree_for_source_local(const std::string& source, const std::string& path) {
+TSTree* parse_tree_for_source_local(const std::string& source, const std::string& path,
+                                    XmlFragmentWrap* out_wrap = nullptr) {
   if (source.empty()) {
     return nullptr;
   }
@@ -688,10 +690,22 @@ TSTree* parse_tree_for_source_local(const std::string& source, const std::string
   if (language == nullptr) {
     language = tree_sitter_cpp_language();
   }
+  const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path);
+  const std::string* parse_text = &source;
+  XmlFragmentWrap local_wrap;
+  if (uses_xml_fragment_wrap(lang)) {
+    local_wrap = xml_wrap_fragment_source(source);
+    parse_text = &local_wrap.wrapped;
+    if (out_wrap != nullptr) {
+      *out_wrap = local_wrap;
+    }
+  } else if (out_wrap != nullptr) {
+    *out_wrap = {};
+  }
   TSParser* parser = ts_parser_new();
   ts_parser_set_language(parser, language);
-  TSTree* tree =
-      ts_parser_parse_string(parser, nullptr, source.c_str(), static_cast<uint32_t>(source.size()));
+  TSTree* tree = ts_parser_parse_string(parser, nullptr, parse_text->c_str(),
+                                        static_cast<uint32_t>(parse_text->size()));
   ts_parser_delete(parser);
   return tree;
 }
@@ -730,11 +744,21 @@ void TreeSitterDocumentCache::ensure_viewport_preview(const std::string& path,
     }
   }
 
-  const std::string slice = extract_line_range(canonical, first_line, last_line);
-  if (slice.empty()) {
+  const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path);
+  const TreeSitterLangKind highlight_lang =
+      lang == TreeSitterLangKind::kNone ? TreeSitterLangKind::kCpp : lang;
+  // XML (and fragment-wrapped languages) must parse the full buffer: a visible
+  // line slice cuts tags mid-tree and still yields ERROR→pink even with the
+  // synthetic root. Other languages keep the cheaper slice parse.
+  const bool parse_full_document = uses_xml_fragment_wrap(lang);
+  const std::string slice =
+      parse_full_document ? std::string{} : extract_line_range(canonical, first_line, last_line);
+  if (!parse_full_document && slice.empty()) {
     return;
   }
-  TSTree* tree = parse_tree_for_source_local(slice, path);
+
+  XmlFragmentWrap xml_wrap;
+  TSTree* tree = parse_tree_for_source_local(parse_full_document ? canonical : slice, path, &xml_wrap);
   if (tree == nullptr) {
     return;
   }
@@ -744,15 +768,17 @@ void TreeSitterDocumentCache::ensure_viewport_preview(const std::string& path,
   preview.first_line = first_line;
   preview.last_line = last_line;
   if (!ts_node_is_null(root)) {
-    const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path);
-    const std::vector<LineHighlights> slice_highlights =
-        highlights_for_document(root, slice, lang == TreeSitterLangKind::kNone
-                                   ? TreeSitterLangKind::kCpp
-                                   : lang);
+    const std::string& parse_source = parse_full_document ? canonical : slice;
+    const std::string& highlight_source = xml_wrap.active() ? xml_wrap.wrapped : parse_source;
+    std::vector<LineHighlights> doc_highlights =
+        highlights_for_document(root, highlight_source, highlight_lang);
+    if (xml_wrap.active()) {
+      xml_unmap_highlights_from_wrap(&doc_highlights, xml_wrap, parse_source);
+    }
     for (int line = first_line; line <= last_line; ++line) {
-      const int slice_line = line - first_line;
-      if (slice_line >= 0 && slice_line < static_cast<int>(slice_highlights.size())) {
-        preview.by_line.emplace(line, slice_highlights[static_cast<std::size_t>(slice_line)]);
+      const int src_line = parse_full_document ? line : (line - first_line);
+      if (src_line >= 0 && src_line < static_cast<int>(doc_highlights.size())) {
+        preview.by_line.emplace(line, doc_highlights[static_cast<std::size_t>(src_line)]);
       }
     }
   }
@@ -850,7 +876,8 @@ void TreeSitterDocumentCache::ensure_viewport_preview_slice(const std::string& p
     }
   }
 
-  TSTree* tree = parse_tree_for_source_local(slice, path);
+  XmlFragmentWrap xml_wrap;
+  TSTree* tree = parse_tree_for_source_local(slice, path, &xml_wrap);
   if (tree == nullptr) {
     return;
   }
@@ -861,10 +888,14 @@ void TreeSitterDocumentCache::ensure_viewport_preview_slice(const std::string& p
   preview.last_line = last_line;
   if (!ts_node_is_null(root)) {
     const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path);
-    const std::vector<LineHighlights> slice_highlights =
-        highlights_for_document(root, slice, lang == TreeSitterLangKind::kNone
-                                   ? TreeSitterLangKind::kCpp
-                                   : lang);
+    const TreeSitterLangKind highlight_lang =
+        lang == TreeSitterLangKind::kNone ? TreeSitterLangKind::kCpp : lang;
+    const std::string& highlight_source = xml_wrap.active() ? xml_wrap.wrapped : slice;
+    std::vector<LineHighlights> slice_highlights =
+        highlights_for_document(root, highlight_source, highlight_lang);
+    if (xml_wrap.active()) {
+      xml_unmap_highlights_from_wrap(&slice_highlights, xml_wrap, slice);
+    }
     for (int line = first_line; line <= last_line; ++line) {
       const int slice_line = line - first_line;
       if (slice_line >= 0 && slice_line < static_cast<int>(slice_highlights.size())) {
@@ -1077,7 +1108,26 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
     language = tree_sitter_cpp_language();
   }
   ts_parser_set_language(parser, language);
-  TSTree* tree = parse_source(parser, job.source, job.previous_source, parse_base);
+  const TreeSitterLangKind lang_kind = tree_sitter_lang_kind_for_path(job.path);
+  XmlFragmentWrap xml_wrap;
+  TSTree* tree = nullptr;
+  if (uses_xml_fragment_wrap(lang_kind)) {
+    // Always full-reparse wrapped XML: edit coordinates differ from the editor buffer.
+    if (parse_base != nullptr) {
+      ts_tree_delete(parse_base);
+      parse_base = nullptr;
+    }
+    if (old_tree_for_highlights != nullptr) {
+      ts_tree_delete(old_tree_for_highlights);
+      old_tree_for_highlights = nullptr;
+      previous_highlights.clear();
+    }
+    xml_wrap = xml_wrap_fragment_source(job.source);
+    tree = ts_parser_parse_string(parser, nullptr, xml_wrap.wrapped.c_str(),
+                                  static_cast<uint32_t>(xml_wrap.wrapped.size()));
+  } else {
+    tree = parse_source(parser, job.source, job.previous_source, parse_base);
+  }
   if (parse_base != nullptr) {
     ts_tree_delete(parse_base);
     parse_base = nullptr;
@@ -1091,11 +1141,11 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
   std::vector<LineHighlights> highlights;
   std::vector<SymbolInfo> symbols;
   std::vector<SymbolInfo> scopes;
-  const TreeSitterLangKind lang_kind = tree_sitter_lang_kind_for_path(job.path);
   const TreeSitterLangKind highlight_lang =
       lang_kind == TreeSitterLangKind::kNone ? TreeSitterLangKind::kCpp : lang_kind;
   if (tree != nullptr) {
     const TSNode root = ts_tree_root_node(tree);
+    const std::string& highlight_source = xml_wrap.active() ? xml_wrap.wrapped : job.source;
     if (old_tree_for_highlights != nullptr) {
       int layout_shift_from_row = -1;
       if (!job.previous_source.empty() &&
@@ -1107,13 +1157,18 @@ void TreeSitterDocumentCache::run_prepare(PrepareJob job) {
         }
       }
       highlights = highlights_after_incremental_parse(old_tree_for_highlights, tree, root,
-                                                      job.source, previous_highlights,
+                                                      highlight_source, previous_highlights,
                                                       layout_shift_from_row, highlight_lang);
     } else {
-      highlights = highlights_for_document(root, job.source, highlight_lang);
+      highlights = highlights_for_document(root, highlight_source, highlight_lang);
+    }
+    if (xml_wrap.active()) {
+      xml_unmap_highlights_from_wrap(&highlights, xml_wrap, job.source);
     }
     // Outline symbols: language-dispatched in extract_symbols_from_tree (C++/Python today).
-    symbols = extract_symbols_from_tree(root, job.source, job.path);
+    // XML walks need the wrapped source so node byte ranges resolve; the synthetic root is
+    // skipped inside walk_xml_symbols and line numbers stay aligned (no newlines in the wrap).
+    symbols = extract_symbols_from_tree(root, highlight_source, job.path);
     // Locals/scope queries remain C++-only for now.
     if (lang_kind == TreeSitterLangKind::kCpp) {
       scopes = scope_symbols_from_tree(root, job.source, job.path);

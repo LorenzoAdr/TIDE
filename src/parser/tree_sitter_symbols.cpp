@@ -625,6 +625,13 @@ void walk_xml_symbols(TSNode node, const std::string& source, int depth,
         has_content = true;
       }
     }
+    // Invisible parser root for multi-root fragments — do not show in outline.
+    if (name == "tuide_xml_root") {
+      if (has_content && !ts_node_is_null(content)) {
+        walk_xml_symbols(content, source, depth, file_path, out);
+      }
+      return;
+    }
     append_symbol(out, SymbolKind::kClass, name, node, depth, file_path);
     if (has_content && !ts_node_is_null(content)) {
       walk_xml_symbols(content, source, depth + 1, file_path, out);

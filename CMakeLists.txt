@@ -74,6 +74,7 @@ set(TUIDE_TREE_SITTER_SOURCES
   src/parser/tree_sitter_blocks.cpp
   src/parser/tree_sitter_completion.cpp
   src/parser/tree_sitter_service.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/symbols/symbol_utils.cpp
   src/util/syntax_highlight.cpp
   src/util/syntax_scope.cpp
@@ -212,6 +213,7 @@ add_executable(tuide
   src/parser/tree_sitter_blocks.cpp
   src/parser/tree_sitter_completion.cpp
   src/parser/tree_sitter_service.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/util/syntax_highlight.cpp
   src/util/syntax_scope.cpp
   src/util/clang_format_config.cpp
@@ -1183,6 +1185,7 @@ add_executable(l1_intent_debug_cli
   src/parser/tree_sitter_locals.cpp
   src/parser/tree_sitter_blocks.cpp
   src/parser/tree_sitter_completion.cpp
+  src/parser/tree_sitter_xml_wrap.cpp
   src/symbols/tree_sitter_symbol_provider.cpp
   src/symbols/symbol_utils.cpp
   src/editor/editor_state.cpp

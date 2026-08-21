@@ -10,6 +10,7 @@
 #include "parser/tree_sitter_document.hpp"
 #include "parser/tree_sitter_language.hpp"
 #include "parser/tree_sitter_symbols.hpp"
+#include "parser/tree_sitter_xml_wrap.hpp"
 #include "symbols/symbol_utils.hpp"
 
 extern "C" {
@@ -124,8 +125,16 @@ TSTree* parse_sync(const std::string& source, const std::string& path) {
   }
   TSParser* parser = ts_parser_new();
   ts_parser_set_language(parser, language);
-  TSTree* tree =
-      ts_parser_parse_string(parser, nullptr, source.c_str(), static_cast<uint32_t>(source.size()));
+  const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path);
+  TSTree* tree = nullptr;
+  if (uses_xml_fragment_wrap(lang)) {
+    const XmlFragmentWrap wrap = xml_wrap_fragment_source(source);
+    tree = ts_parser_parse_string(parser, nullptr, wrap.wrapped.c_str(),
+                                  static_cast<uint32_t>(wrap.wrapped.size()));
+  } else {
+    tree = ts_parser_parse_string(parser, nullptr, source.c_str(),
+                                  static_cast<uint32_t>(source.size()));
+  }
   ts_parser_delete(parser);
   return tree;
 }
@@ -140,6 +149,13 @@ std::vector<RepoMapTag> extract_repo_map_tags(const std::string& abs_path,
     return out;
   }
   const std::string path_for_lang = abs_path.empty() ? rel_path : abs_path;
+  const TreeSitterLangKind lang = tree_sitter_lang_kind_for_path(path_for_lang);
+  XmlFragmentWrap xml_wrap;
+  const std::string* parse_source = &source;
+  if (uses_xml_fragment_wrap(lang)) {
+    xml_wrap = xml_wrap_fragment_source(source);
+    parse_source = &xml_wrap.wrapped;
+  }
   TSTree* tree = parse_sync(source, path_for_lang);
   if (tree == nullptr) {
     return out;
@@ -150,7 +166,7 @@ std::vector<RepoMapTag> extract_repo_map_tags(const std::string& abs_path,
     return out;
   }
 
-  const auto symbols = extract_symbols_from_tree(root, source, path_for_lang);
+  const auto symbols = extract_symbols_from_tree(root, *parse_source, path_for_lang);
   std::unordered_set<std::string> def_names;
   for (const auto& sym : symbols) {
     const std::string raw = symbol_insert_name(sym.name);
@@ -170,7 +186,7 @@ std::vector<RepoMapTag> extract_repo_map_tags(const std::string& abs_path,
 
   // Refs: all identifier-like nodes except names defined in this file (reduces self-edges).
   std::vector<RepoMapTag> refs;
-  collect_identifier_refs(root, source, def_names, rel_path, &refs);
+  collect_identifier_refs(root, *parse_source, def_names, rel_path, &refs);
   // Dedupe identical (name,line) refs; keep first.
   std::unordered_set<std::string> seen_ref;
   for (auto& r : refs) {
