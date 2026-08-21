@@ -64,6 +64,7 @@
 #include "ui/docker_start_confirm.hpp"
 #include "ui/debug_launch_modal.hpp"
 #include "ui/settings_modal.hpp"
+#include "util/system_clipboard.hpp"
 #include "util/tools_status.hpp"
 #include "ui/shutdown_overlay.hpp"
 #include "ui/source_substitute_modal.hpp"
@@ -2866,6 +2867,7 @@ int Application::run() {
 		enable_extended_key_reporting();
 		enable_click_drag_mouse_reporting();
 		enable_bracketed_paste();
+		warm_system_clipboard();
 	}
 
 	std::unique_ptr<BackgroundWorker> background_worker;

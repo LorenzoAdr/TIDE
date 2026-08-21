@@ -367,6 +367,7 @@ target_link_libraries(tuide PRIVATE
   cppdap
   ${TUIDE_TREE_SITTER_GRAMMAR_LIBS}
   Threads::Threads
+  ${CMAKE_DL_LIBS}
 )
 
 # Dev/default paths for Bash DAP (vscode-bash-debug + vendored bashdb_dir).
@@ -1350,4 +1351,7 @@ set(TUIDE_TEST_TARGETS
 )
 foreach(_tuide_test_target IN LISTS TUIDE_TEST_TARGETS)
   tuide_link_pthread(${_tuide_test_target})
+  if(CMAKE_DL_LIBS)
+    target_link_libraries(${_tuide_test_target} PRIVATE ${CMAKE_DL_LIBS})
+  endif()
 endforeach()
