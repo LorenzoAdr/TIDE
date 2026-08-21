@@ -24,6 +24,7 @@ Terminal IDE with multi-language editing and an integrated debugger. This folder
 | [AI Master Spec](ai/master-spec.md) | Plan de arquitectura IA (2 niveles + atribución); sin implementar aún |
 | [Toolpacks](toolpacks.md) | Language packs, catalog, CLI, AppImage/AppDir export |
 | [Panel invalidation plan](plans/panel-invalidation-wake-system.md) | Design: FTXUI panel dirty cache + ANSI busy strip (separate systems) |
+| [L2 explore Phase A/B plan](plans/l2-explore-phase-a-b.md) | Design: split explore into localization (A) vs rigid pack (B); local structural index |
 
 ## Quick links
 
