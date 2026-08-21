@@ -1196,8 +1196,18 @@ ignore me
     const auto ad = sessionA.apply_a_done(rootA.string(), loci, "locked busy");
     expect(ad.ok && ad.phase == "explore_b", "a_done → explore_b");
 
-    const bool pack_exists = fs::exists(rootA / ".tuide" / "ai" / "l2" / "pack.md", ec);
-    expect(!pack_exists, "no pack.md after A");
+    // P4: plan outside loci rejected
+    const auto bad_b =
+        sessionA.apply_plan(rootA.string(), {"src/unrelated/foo.cpp:bar"}, "noise");
+    expect(!bad_b.ok || bad_b.error == "plan_outside_loci" ||
+               bad_b.summary.find("plan_outside_loci") != std::string::npos,
+           "plan outside loci blocked");
+
+    // Auto-plan from watchlist (empty targets) builds pack
+    const auto good_b = sessionA.apply_plan(rootA.string(), {}, "from loci");
+    expect(good_b.ok, "plan from watchlist " + good_b.error);
+    expect(fs::exists(rootA / ".tuide" / "ai" / "l2" / "pack.md", ec), "pack after B plan");
+
     const auto ast = Level2Session::load_a_state(rootA.string());
     expect(ast.done && ast.loci_draft.size() == 1, "a_state loci");
     unsetenv("L2_FEAT_L2_EXPLORE_PHASE_A");

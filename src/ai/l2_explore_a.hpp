@@ -55,15 +55,19 @@ struct AQueueItem {
 
 struct AState {
   std::vector<AQueueItem> queue;
-  int cursor = 0;           // next index into queue
+  std::vector<AQueueItem> reserve;  // ranked candidates beyond initial top-K (P3)
+  int cursor = 0;                   // next index into queue
   int peeks_used = 0;
   int turns = 0;
-  int expansions = 0;       // ranking-miss expansions used
+  int expansions = 0;               // ranking-miss expansions used (cap kAMaxExpansions)
+  int last_expand_layer = 0;        // 0 none, 1–3 last successful layer
   std::vector<ALocus> loci_draft;
   std::vector<AVerdict> notes;  // durable verdicts (bodies discarded)
   std::vector<std::string> orphans;       // Instruction facets/idents still uncovered
   std::vector<std::string> rejected_stems;
+  std::vector<std::string> b_allow_paths;  // micro-A allowlist from Phase B miss (capa 4)
   bool done = false;
+  bool expand_exhausted = false;  // hit expansion cap with still-empty useful
 };
 
 inline constexpr int kAMaxPeeksPerTurn = 5;
@@ -94,9 +98,33 @@ struct AQueueBuildOpts {
 std::vector<AQueueItem> build_a_scan_queue(const std::vector<AQueueBuildInput>& ranked,
                                            const AQueueBuildOpts& opts = {});
 
-// Seed AState.queue from ranked map-like inputs (resets cursor; keeps notes/loci).
+// Seed queue (top max_items) + reserve (next slice) for P3 expansion.
 void a_state_seed_queue(AState* st, const std::vector<AQueueBuildInput>& ranked,
                         const AQueueBuildOpts& opts = {});
+
+// Instruction needles/idents not yet covered by useful anchors/notes.
+std::vector<std::string> a_compute_orphans(const AState& st,
+                                           const std::vector<std::string>& needles);
+
+struct AExpandResult {
+  bool expanded = false;
+  int layer = 0;       // 1 = extend reserve, 2 = re-rank by orphans, 3 = recall extras
+  int added = 0;
+  bool exhausted = false;
+  std::string reason;
+};
+
+// Expand when A is empty/weak at queue end or orphans remain. Cap: kAMaxExpansions.
+// Layer 3 may inject `extra_recall` (stem/search hits from the index).
+AExpandResult maybe_expand_a_queue(AState* st, const std::vector<std::string>& orphans,
+                                   const std::vector<AQueueBuildInput>& extra_recall = {},
+                                   const AQueueBuildOpts& opts = {});
+
+// True if plan target path/stem is allowed in explore_b (loci or micro-A allowlist).
+bool a_plan_target_allowed(const AState& st, const std::string& target);
+
+// Sort loci primary → secondary → suspect for must-tier watchlist.
+std::vector<ALocus> a_loci_must_ordered(std::vector<ALocus> loci);
 
 const char* a_verdict_kind_name(AVerdictKind kind);
 AVerdictKind parse_a_verdict_kind(const std::string& s);

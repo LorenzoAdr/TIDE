@@ -128,8 +128,309 @@ void a_state_seed_queue(AState* st, const std::vector<AQueueBuildInput>& ranked,
   if (st == nullptr) {
     return;
   }
-  st->queue = build_a_scan_queue(ranked, opts);
+  // Build a wider pool (queue + reserve) without diversify starving later ranks.
+  AQueueBuildOpts wide = opts;
+  const std::size_t primary = opts.max_items == 0
+                                  ? static_cast<std::size_t>(kAMaxQueueDefault)
+                                  : opts.max_items;
+  wide.max_items = primary + primary;  // top-K + next-K for layer-1 expansion
+  wide.max_per_stem = opts.max_per_stem;
+  auto pool = build_a_scan_queue(ranked, wide);
+  st->queue.clear();
+  st->reserve.clear();
+  for (std::size_t i = 0; i < pool.size(); ++i) {
+    if (i < primary) {
+      st->queue.push_back(std::move(pool[i]));
+    } else {
+      st->reserve.push_back(std::move(pool[i]));
+    }
+  }
   st->cursor = 0;
+  st->expansions = 0;
+  st->last_expand_layer = 0;
+  st->expand_exhausted = false;
+}
+
+namespace {
+
+std::string ascii_lower(std::string s) {
+  for (char& c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
+bool item_covers_needle(const AQueueItem& it, const std::string& needle_l) {
+  if (needle_l.size() < 3) {
+    return false;
+  }
+  const std::string hay =
+      ascii_lower(it.path + " " + it.stem + " " + it.symbol + " " + it.target);
+  return hay.find(needle_l) != std::string::npos;
+}
+
+int orphan_hit_score(const AQueueItem& it, const std::vector<std::string>& orphans) {
+  int score = 0;
+  for (const auto& o : orphans) {
+    if (item_covers_needle(it, ascii_lower(o))) {
+      score += 10;
+    }
+  }
+  return score;
+}
+
+bool target_already_queued(const AState& st, const std::string& target) {
+  for (const auto& q : st.queue) {
+    if (q.target == target) {
+      return true;
+    }
+  }
+  for (const auto& q : st.reserve) {
+    if (q.target == target) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+std::vector<std::string> a_compute_orphans(const AState& st,
+                                           const std::vector<std::string>& needles) {
+  std::vector<std::string> orphans;
+  std::string covered;
+  for (const auto& n : st.notes) {
+    if (n.verdict != AVerdictKind::Useful) {
+      continue;
+    }
+    covered += " " + ascii_lower(n.target + " " + n.anchor + " " + n.stem + " " + n.why);
+  }
+  for (const auto& loc : st.loci_draft) {
+    covered += " " + ascii_lower(loc.anchor + " " + loc.stem + " " + loc.why);
+  }
+  for (const auto& needle : needles) {
+    std::string n = ascii_lower(needle);
+    while (!n.empty() && (n.front() == ' ' || n.front() == '`')) {
+      n.erase(n.begin());
+    }
+    while (!n.empty() && (n.back() == ' ' || n.back() == '`')) {
+      n.pop_back();
+    }
+    if (n.size() < 4) {
+      continue;
+    }
+    if (covered.find(n) != std::string::npos) {
+      continue;
+    }
+    orphans.push_back(needle);
+  }
+  return orphans;
+}
+
+AExpandResult maybe_expand_a_queue(AState* st, const std::vector<std::string>& orphans,
+                                   const std::vector<AQueueBuildInput>& extra_recall,
+                                   const AQueueBuildOpts& opts) {
+  AExpandResult r;
+  if (st == nullptr) {
+    r.reason = "null state";
+    return r;
+  }
+  int useful = 0;
+  for (const auto& n : st->notes) {
+    if (n.verdict == AVerdictKind::Useful) {
+      ++useful;
+    }
+  }
+  const bool queue_done = st->cursor >= static_cast<int>(st->queue.size());
+  const bool weak = useful == 0;
+  const bool has_orphans = !orphans.empty();
+  if (!queue_done && !(weak && st->turns >= 3 && has_orphans)) {
+    r.reason = "no expand signal";
+    return r;
+  }
+  if (!weak && !has_orphans) {
+    r.reason = "have useful and no orphans";
+    return r;
+  }
+  if (st->expansions >= kAMaxExpansions) {
+    r.exhausted = true;
+    st->expand_exhausted = true;
+    r.reason = "expansion cap";
+    return r;
+  }
+
+  // Layer 1: append next reserve slice (same ranking).
+  if (st->last_expand_layer < 1 && !st->reserve.empty()) {
+    const int take = std::min(static_cast<int>(st->reserve.size()), kAMaxQueueDefault);
+    for (int i = 0; i < take; ++i) {
+      st->queue.push_back(std::move(st->reserve[static_cast<std::size_t>(i)]));
+    }
+    st->reserve.erase(st->reserve.begin(),
+                      st->reserve.begin() + take);
+    st->last_expand_layer = 1;
+    ++st->expansions;
+    r.expanded = true;
+    r.layer = 1;
+    r.added = take;
+    r.reason = "layer1 extend reserve";
+    return r;
+  }
+
+  // Layer 2: re-rank remaining reserve by orphan hits and take top N.
+  if (st->last_expand_layer < 2 && !st->reserve.empty() && has_orphans) {
+    std::stable_sort(st->reserve.begin(), st->reserve.end(),
+                     [&](const AQueueItem& a, const AQueueItem& b) {
+                       const int sa = orphan_hit_score(a, orphans);
+                       const int sb = orphan_hit_score(b, orphans);
+                       if (sa != sb) {
+                         return sa > sb;
+                       }
+                       return a.score > b.score;
+                     });
+    const int take = std::min(20, static_cast<int>(st->reserve.size()));
+    int added = 0;
+    for (int i = 0; i < take; ++i) {
+      if (orphan_hit_score(st->reserve[static_cast<std::size_t>(i)], orphans) <= 0 && i >= 5) {
+        break;
+      }
+      st->queue.push_back(std::move(st->reserve[static_cast<std::size_t>(i)]));
+      ++added;
+    }
+    st->reserve.erase(st->reserve.begin(), st->reserve.begin() + added);
+    st->last_expand_layer = 2;
+    ++st->expansions;
+    r.expanded = true;
+    r.layer = 2;
+    r.added = added;
+    r.reason = "layer2 orphan rerank";
+    return r;
+  }
+
+  // Layer 3: inject extra recall (stem/search) matching orphans.
+  if (st->last_expand_layer < 3 && (!extra_recall.empty() || has_orphans)) {
+    AQueueBuildOpts o = opts;
+    o.max_items = 20;
+    o.max_per_stem = 3;
+    auto extras = build_a_scan_queue(extra_recall, o);
+    // If no extras, synthesize weak items from orphan tokens (path-like only skipped).
+    if (extras.empty()) {
+      for (const auto& orphan : orphans) {
+        if (orphan.find('/') == std::string::npos) {
+          continue;
+        }
+        AQueueItem it;
+        it.path = orphan;
+        it.target = orphan;
+        it.stem = orphan;
+        const auto slash = orphan.find_last_of('/');
+        if (slash != std::string::npos) {
+          it.stem = orphan.substr(slash + 1);
+          const auto dot = it.stem.rfind('.');
+          if (dot != std::string::npos) {
+            it.stem = it.stem.substr(0, dot);
+          }
+        }
+        it.score = 1.f;
+        extras.push_back(std::move(it));
+      }
+    }
+    int added = 0;
+    for (auto& it : extras) {
+      if (target_already_queued(*st, it.target)) {
+        continue;
+      }
+      if (!orphans.empty() && orphan_hit_score(it, orphans) <= 0) {
+        // Prefer orphan hits; still allow a few high-score recall items.
+        if (it.score < 100.f && added >= 5) {
+          continue;
+        }
+      }
+      st->queue.push_back(std::move(it));
+      ++added;
+      if (added >= 20) {
+        break;
+      }
+    }
+    st->last_expand_layer = 3;
+    ++st->expansions;
+    if (added == 0) {
+      r.exhausted = st->expansions >= kAMaxExpansions;
+      st->expand_exhausted = r.exhausted;
+      r.reason = "layer3 no new candidates";
+      return r;
+    }
+    r.expanded = true;
+    r.layer = 3;
+    r.added = added;
+    r.reason = "layer3 recall";
+    return r;
+  }
+
+  r.exhausted = true;
+  st->expand_exhausted = true;
+  r.reason = "no more layers";
+  return r;
+}
+
+bool a_plan_target_allowed(const AState& st, const std::string& target) {
+  if (target.empty()) {
+    return false;
+  }
+  const std::string tl = ascii_lower(target);
+  for (const auto& loc : st.loci_draft) {
+    if (loc.anchor.empty()) {
+      continue;
+    }
+    const std::string al = ascii_lower(loc.anchor);
+    if (tl.find(al) != std::string::npos || al.find(tl) != std::string::npos) {
+      return true;
+    }
+    // Same path prefix (path:Symbol vs path).
+    const auto colon = loc.anchor.find(':');
+    const std::string path = colon == std::string::npos ? loc.anchor : loc.anchor.substr(0, colon);
+    if (!path.empty() && tl.find(ascii_lower(path)) != std::string::npos) {
+      return true;
+    }
+    if (!loc.stem.empty() && tl.find(ascii_lower(loc.stem)) != std::string::npos) {
+      return true;
+    }
+  }
+  for (const auto& p : st.b_allow_paths) {
+    if (!p.empty() && tl.find(ascii_lower(p)) != std::string::npos) {
+      return true;
+    }
+  }
+  // Sibling header of a locus path.
+  for (const auto& loc : st.loci_draft) {
+    const auto colon = loc.anchor.find(':');
+    std::string path = colon == std::string::npos ? loc.anchor : loc.anchor.substr(0, colon);
+    if (path.size() > 4) {
+      const std::string base = path.substr(0, path.size() - 4);  // rough .cpp
+      if (tl.find(ascii_lower(base)) != std::string::npos) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+std::vector<ALocus> a_loci_must_ordered(std::vector<ALocus> loci) {
+  auto rank = [](ALocusRole r) {
+    switch (r) {
+      case ALocusRole::Primary:
+        return 0;
+      case ALocusRole::Secondary:
+        return 1;
+      case ALocusRole::Suspect:
+        return 2;
+      default:
+        return 3;
+    }
+  };
+  std::stable_sort(loci.begin(), loci.end(), [&](const ALocus& a, const ALocus& b) {
+    return rank(a.role) < rank(b.role);
+  });
+  return loci;
 }
 
 const char* a_verdict_kind_name(AVerdictKind kind) {
@@ -293,21 +594,28 @@ nlohmann::json a_state_to_json(const AState& st) {
   j["peeks_used"] = st.peeks_used;
   j["turns"] = st.turns;
   j["expansions"] = st.expansions;
+  j["last_expand_layer"] = st.last_expand_layer;
   j["done"] = st.done;
+  j["expand_exhausted"] = st.expand_exhausted;
   j["orphans"] = st.orphans;
   j["rejected_stems"] = st.rejected_stems;
+  j["b_allow_paths"] = st.b_allow_paths;
 
-  nlohmann::json queue = nlohmann::json::array();
-  for (const auto& it : st.queue) {
-    queue.push_back({{"target", it.target},
+  auto items_to_json = [](const std::vector<AQueueItem>& items) {
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& it : items) {
+      arr.push_back({{"target", it.target},
                      {"path", it.path},
                      {"stem", it.stem},
                      {"symbol", it.symbol},
                      {"line", it.line},
                      {"window_hint", it.window_hint},
                      {"score", it.score}});
-  }
-  j["queue"] = std::move(queue);
+    }
+    return arr;
+  };
+  j["queue"] = items_to_json(st.queue);
+  j["reserve"] = items_to_json(st.reserve);
 
   nlohmann::json loci = nlohmann::json::array();
   for (const auto& loc : st.loci_draft) {
@@ -344,23 +652,27 @@ bool a_state_from_json(const nlohmann::json& j, AState* out, std::string* err) {
   st.peeks_used = j.value("peeks_used", 0);
   st.turns = j.value("turns", 0);
   st.expansions = j.value("expansions", 0);
+  st.last_expand_layer = j.value("last_expand_layer", 0);
   st.done = j.value("done", false);
-  if (j.contains("orphans") && j["orphans"].is_array()) {
-    for (const auto& o : j["orphans"]) {
-      if (o.is_string()) {
-        st.orphans.push_back(o.get<std::string>());
+  st.expand_exhausted = j.value("expand_exhausted", false);
+  auto read_str_array = [&](const char* key, std::vector<std::string>* dest) {
+    if (j.contains(key) && j[key].is_array()) {
+      for (const auto& o : j[key]) {
+        if (o.is_string()) {
+          dest->push_back(o.get<std::string>());
+        }
       }
     }
-  }
-  if (j.contains("rejected_stems") && j["rejected_stems"].is_array()) {
-    for (const auto& o : j["rejected_stems"]) {
-      if (o.is_string()) {
-        st.rejected_stems.push_back(o.get<std::string>());
-      }
+  };
+  read_str_array("orphans", &st.orphans);
+  read_str_array("rejected_stems", &st.rejected_stems);
+  read_str_array("b_allow_paths", &st.b_allow_paths);
+
+  auto read_items = [&](const char* key, std::vector<AQueueItem>* dest) {
+    if (!j.contains(key) || !j[key].is_array()) {
+      return;
     }
-  }
-  if (j.contains("queue") && j["queue"].is_array()) {
-    for (const auto& it : j["queue"]) {
+    for (const auto& it : j[key]) {
       if (!it.is_object()) {
         continue;
       }
@@ -373,10 +685,13 @@ bool a_state_from_json(const nlohmann::json& j, AState* out, std::string* err) {
       q.window_hint = it.value("window_hint", "");
       q.score = it.value("score", 0.f);
       if (!q.target.empty() || !q.path.empty()) {
-        st.queue.push_back(std::move(q));
+        dest->push_back(std::move(q));
       }
     }
-  }
+  };
+  read_items("queue", &st.queue);
+  read_items("reserve", &st.reserve);
+
   if (j.contains("loci_draft") && j["loci_draft"].is_array()) {
     for (const auto& it : j["loci_draft"]) {
       ALocus loc = parse_a_locus_json(it);
@@ -402,7 +717,9 @@ std::string a_notes_markdown(const AState& st) {
   out << "# Phase A notes\n\n";
   out << "peeks_used=" << st.peeks_used << " turns=" << st.turns
       << " cursor=" << st.cursor << "/" << st.queue.size()
-      << " expansions=" << st.expansions << "\n\n";
+      << " reserve=" << st.reserve.size() << " expansions=" << st.expansions
+      << " layer=" << st.last_expand_layer
+      << (st.expand_exhausted ? " EXHAUSTED" : "") << "\n\n";
   if (!st.orphans.empty()) {
     out << "## Orphans\n";
     for (const auto& o : st.orphans) {

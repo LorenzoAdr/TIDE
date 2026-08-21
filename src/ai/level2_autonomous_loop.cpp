@@ -1166,6 +1166,26 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
   }
   session.mark_pack_review(opts.workspace_root, false, summary.str());
 
+  // P4 capa 4: pack miss/partial may name paths outside loci → micro-A allowlist.
+  if (l2_feat::enabled("L2_EXPLORE_PHASE_A")) {
+    std::vector<std::string> allow;
+    for (const auto& m : verdict.missing) {
+      if (m.find('/') != std::string::npos || m.find(".hpp") != std::string::npos ||
+          m.find(".cpp") != std::string::npos || m.find(".h") != std::string::npos) {
+        allow.push_back(m);
+      }
+    }
+    for (const auto& m : verdict.present) {
+      (void)m;
+    }
+    if (!allow.empty()) {
+      const auto ma = session.allow_micro_a_paths(opts.workspace_root, allow);
+      if (log && ma.ok) {
+        log("L2 ▸ micro-A allow — " + ma.summary);
+      }
+    }
+  }
+
   std::vector<std::string> reject_extra = verdict.reject;
   {
     const auto invented = infer_invented_rejects(verdict, map_last);
@@ -1460,6 +1480,30 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
         }
       }
       breq.user_prompt += "\n" + session.build_a_peek_tranche_markdown(opts.workspace_root);
+    } else if (phase == "explore_b" && l2_feat::enabled("L2_EXPLORE_PHASE_A")) {
+      const auto ast = Level2Session::load_a_state(opts.workspace_root);
+      std::ostringstream brief;
+      brief << "\n## Loci (Phase B — pack solo desde aquí)\n";
+      for (const auto& loc : ast.loci_draft) {
+        brief << "- [" << a_locus_role_name(loc.role) << "] `" << loc.anchor << "`";
+        if (!loc.why.empty()) {
+          brief << " — " << loc.why;
+        }
+        brief << "\n";
+      }
+      if (!ast.b_allow_paths.empty()) {
+        brief << "micro-A allow: ";
+        for (std::size_t i = 0; i < ast.b_allow_paths.size(); ++i) {
+          if (i) {
+            brief << ", ";
+          }
+          brief << "`" << ast.b_allow_paths[i] << "`";
+        }
+        brief << "\n";
+      }
+      brief << "Preferir plan vacío (runtime usa watchlist) o targets de loci. "
+               "PROHIBIDO multi-stem fuera de loci.\n";
+      breq.user_prompt += brief.str();
     }
     breq.phase = phase;
     breq.max_tokens = opts.settings.max_tokens;
@@ -1789,10 +1833,16 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       tr = session.apply_a_done(opts.workspace_root, action.a_loci, action.summary);
       emit(std::string("L2 ▸ a_done ") + (tr.ok ? "OK → " : "FAIL — ") +
            (tr.ok ? tr.phase : tr.error).substr(0, 120));
-      if (tr.ok) {
-        // Phase B: seed an initial plan from watchlist/loci so pack can build.
-        const auto st_flags = session.status_flags(opts.workspace_root);
-        (void)st_flags;
+      if (tr.ok && l2_feat::enabled("L2_EXPLORE_PHASE_A")) {
+        // P4: auto-plan from loci watchlist (must-tier) → pack.
+        emit("L2 ▸ explore_b auto-plan desde loci…");
+        const auto plan_tr =
+            session.apply_plan(opts.workspace_root, {}, "auto from loci (phase B)");
+        emit(std::string("L2 ▸ auto-plan ") + (plan_tr.ok ? "OK" : "FAIL") + " — " +
+             (plan_tr.ok ? plan_tr.summary : plan_tr.error).substr(0, 160));
+        if (plan_tr.ok) {
+          tr = plan_tr;
+        }
       }
     } else if (action.kind == L2ActionKind::Done) {
       emit("L2 ▸ done next=" + (action.next.empty() ? "(none)" : action.next) + " — " +

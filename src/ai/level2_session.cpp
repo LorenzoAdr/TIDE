@@ -4210,9 +4210,28 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
       ++reject;
     }
   }
+
+  // P3: orphans + expand when queue exhausted / weak A.
+  const std::string session_body = read_file(session_path(workspace_root));
+  const auto needles = session_pack_needles(session_body);
+  ast.orphans = a_compute_orphans(ast, needles);
+  AExpandResult exp;
+  const bool queue_done = ast.cursor >= static_cast<int>(ast.queue.size());
+  if ((queue_done || (useful == 0 && ast.turns >= 3)) && useful < 2) {
+    exp = maybe_expand_a_queue(&ast, ast.orphans);
+    if (exp.expanded) {
+      append_trace(workspace_root,
+                   std::string("{\"event\":\"a_expand\",\"layer\":") + std::to_string(exp.layer) +
+                       ",\"added\":" + std::to_string(exp.added) + ",\"expansions\":" +
+                       std::to_string(ast.expansions) + ",\"reason\":\"" +
+                       json_escape(exp.reason) + "\"}");
+    }
+  }
+
   const bool budget_hit =
       ast.peeks_used >= kAMaxPeeksTotal || ast.turns >= kAMaxTurns ||
-      ast.cursor >= static_cast<int>(ast.queue.size());
+      (ast.cursor >= static_cast<int>(ast.queue.size()) && ast.reserve.empty() &&
+       (ast.expand_exhausted || ast.expansions >= kAMaxExpansions));
   const bool stable = useful >= 2 && reject >= 1;
   if ((turn_done_hint && useful >= 1) || stable || (budget_hit && useful >= 1)) {
     // Soft: leave explore_a; model should emit a_done next. Do not auto-promote without loci.
@@ -4242,12 +4261,23 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
     }
     obs << "\n";
   }
+  if (exp.expanded) {
+    obs << "_nudge:_ expansión capa " << exp.layer << " +" << exp.added
+        << " candidatos (" << exp.reason << "). Sigue con a_judge sobre los peeks nuevos.\n";
+  } else if (ast.expand_exhausted && useful == 0) {
+    obs << "_nudge:_ expansión agotada sin useful. Emite "
+           "{\"action\":\"done\",\"summary\":\"A sin locus; orphans="
+        << ast.orphans.size() << "\",\"next\":\"clarify\"} o a_done si hay suspect débil.\n";
+  }
   append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
 
   out.ok = true;
   out.phase = st.phase;
   out.summary = "a_judge useful=" + std::to_string(useful) + " reject=" + std::to_string(reject) +
                 " loci_draft=" + std::to_string(ast.loci_draft.size());
+  if (exp.expanded) {
+    out.summary += " expand_L" + std::to_string(exp.layer) + "=+" + std::to_string(exp.added);
+  }
   return out;
 }
 
@@ -4268,7 +4298,8 @@ Level2TurnResult Level2Session::apply_a_done(const std::string& workspace_root,
   }
 
   AState ast = load_a_state(workspace_root);
-  ast.loci_draft = loci;
+  const auto ordered = a_loci_must_ordered(loci);
+  ast.loci_draft = ordered;
   ast.done = true;
   std::string err;
   if (!save_a_state(workspace_root, ast, &err)) {
@@ -4276,9 +4307,9 @@ Level2TurnResult Level2Session::apply_a_done(const std::string& workspace_root,
     return out;
   }
 
-  // Seed watchlist from loci anchors (Phase B will plan/pack). No pack.md yet.
+  // Seed watchlist from loci anchors (must-tier: primary first). No pack.md yet.
   st.watchlist.clear();
-  for (const auto& loc : loci) {
+  for (const auto& loc : ordered) {
     if (!loc.anchor.empty()) {
       st.watchlist.push_back(loc.anchor);
     }
@@ -4292,11 +4323,11 @@ Level2TurnResult Level2Session::apply_a_done(const std::string& workspace_root,
   }
 
   std::ostringstream obs;
-  obs << "### a_done → explore_b loci=" << loci.size() << "\n";
+  obs << "### a_done → explore_b loci=" << ordered.size() << "\n";
   if (!summary.empty()) {
     obs << summary << "\n";
   }
-  for (const auto& loc : loci) {
+  for (const auto& loc : ordered) {
     obs << "- [" << a_locus_role_name(loc.role) << "] `" << loc.anchor << "`";
     if (!loc.stem.empty()) {
       obs << " stem=" << loc.stem;
@@ -4306,11 +4337,56 @@ Level2TurnResult Level2Session::apply_a_done(const std::string& workspace_root,
     }
     obs << "\n";
   }
+  obs << "_nudge:_ Phase B — emite action=plan con targets de loci (must-tier) o el runtime "
+         "auto-planeará desde watchlist. PROHIBIDO planear stems fuera de loci sin miss.\n";
   append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
 
   out.ok = true;
   out.phase = "explore_b";
-  out.summary = summary.empty() ? ("loci=" + std::to_string(loci.size())) : summary;
+  out.summary = summary.empty() ? ("loci=" + std::to_string(ordered.size())) : summary;
+  return out;
+}
+
+Level2TurnResult Level2Session::allow_micro_a_paths(const std::string& workspace_root,
+                                                    const std::vector<std::string>& paths) {
+  Level2TurnResult out;
+  out.action = "micro_a_allow";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  AState ast = load_a_state(workspace_root);
+  int added = 0;
+  for (const auto& p : paths) {
+    if (p.empty()) {
+      continue;
+    }
+    if (std::find(ast.b_allow_paths.begin(), ast.b_allow_paths.end(), p) !=
+        ast.b_allow_paths.end()) {
+      continue;
+    }
+    ast.b_allow_paths.push_back(p);
+    ++added;
+    if (static_cast<int>(ast.b_allow_paths.size()) >= 12) {
+      break;
+    }
+  }
+  std::string err;
+  if (!save_a_state(workspace_root, ast, &err)) {
+    out.error = err.empty() ? "no se pudo guardar a_state" : err;
+    return out;
+  }
+  // Optionally reopen a light locate if still in explore_b with miss.
+  if (st.phase == "explore_b" && added > 0) {
+    st.last_action = "micro_a_allow";
+    save_state(workspace_root, st, nullptr);
+  }
+  out.ok = true;
+  out.phase = st.phase;
+  out.summary = "micro_a allow +" + std::to_string(added) +
+                " total=" + std::to_string(ast.b_allow_paths.size());
   return out;
 }
 
@@ -4370,7 +4446,43 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     out.error = "explore_a: usa a_judge/a_done (no plan/pack aún)";
     return out;
   }
-  if (targets.empty() && st.watchlist.empty()) {
+  // P4: in explore_b, restrict plan targets to loci (+ micro-A allowlist).
+  std::vector<std::string> filtered_targets = targets;
+  if (st.phase == "explore_b" && l2_feat::enabled("L2_EXPLORE_PHASE_A") && !targets.empty()) {
+    const AState ast = load_a_state(workspace_root);
+    std::vector<std::string> kept;
+    std::vector<std::string> dropped;
+    for (const auto& t : targets) {
+      if (a_plan_target_allowed(ast, t)) {
+        kept.push_back(t);
+      } else {
+        dropped.push_back(t);
+      }
+    }
+    if (kept.empty() && !ast.loci_draft.empty()) {
+      out.error = "explore_b: plan fuera de loci (usa anclas de a_done o micro-A allowlist)";
+      ++st.turn;
+      st.last_action = "plan_outside_loci";
+      std::ostringstream block;
+      block << "### turn " << st.turn << " — plan_outside_loci\n\n";
+      block << "Rechazado: targets fuera de loci[]. Emite plan solo con anclas de a_done "
+               "(watchlist) o paths en micro-A allowlist tras pack_review miss.\n";
+      for (const auto& d : dropped) {
+        block << "- drop `" << d << "`\n";
+      }
+      append_observation(workspace_root, block.str(), &out.session_chars, nullptr);
+      save_state(workspace_root, st, nullptr);
+      out.ok = true;
+      out.phase = st.phase;
+      out.summary = "plan_outside_loci";
+      out.error = "plan_outside_loci";
+      return out;
+    }
+    if (!dropped.empty()) {
+      filtered_targets = kept;
+    }
+  }
+  if (filtered_targets.empty() && st.watchlist.empty()) {
     out.error = "plan.targets vacío";
     return out;
   }
@@ -4388,8 +4500,8 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   // Anti-loop: reject plan whose file paths are all already on the watchlist
   // while pack review is still open (PACK_REVIEW miss → must add NEW paths).
   if (l2_feat::enabled("PACK_REVIEW") && st.has_pack && !st.pack_review_ok &&
-      st.pack_review_cycles > 0 && !targets.empty() && !st.watchlist.empty()) {
-    if (all_plan_target_paths_in_watchlist(targets, st.watchlist)) {
+      st.pack_review_cycles > 0 && !filtered_targets.empty() && !st.watchlist.empty()) {
+    if (all_plan_target_paths_in_watchlist(filtered_targets, st.watchlist)) {
       ++st.turn;
       st.last_action = "repeated_plan_targets_pushback";
       out.turn = st.turn;
@@ -4433,7 +4545,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   const std::string existing_pack =
       st.has_pack ? read_file(pack_path(workspace_root)) : std::string{};
   const bool delta_fetch = st.has_pack && !prev_watchlist.empty() && !existing_pack.empty();
-  for (const auto& raw : targets) {
+  for (const auto& raw : filtered_targets) {
     const std::string t = trim_ws(raw);
     if (t.empty()) {
       continue;
@@ -4448,9 +4560,9 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
   // Merge: NEW plan targets first (7B lists most-important first = pack priority).
   // Prior watchlist follows; kL2MaxPlanTargets truncates the tail (least important).
   std::vector<std::string> merged;
-  merged.reserve(st.watchlist.size() + targets.size());
+  merged.reserve(st.watchlist.size() + filtered_targets.size());
   std::unordered_set<std::string> seen_t;
-  for (const auto& raw : targets) {
+  for (const auto& raw : filtered_targets) {
     std::string t = trim_ws(raw);
     if (t.empty() || target_in_rejected_normalized(t, st.rejected_targets) ||
         !seen_t.insert(t).second) {

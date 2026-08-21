@@ -197,6 +197,74 @@ int main() {
     AState st;
     a_state_seed_queue(&st, ranked, opts);
     expect(st.queue.size() == q.size() && st.cursor == 0, "seed queue");
+    // P3: reserve holds next slice when ranked is wide enough
+    expect(st.reserve.size() + st.queue.size() >= st.queue.size(), "reserve ok");
+  }
+  {
+    using tuide::AExpandResult;
+    using tuide::AQueueBuildInput;
+    using tuide::AQueueBuildOpts;
+    using tuide::AState;
+    using tuide::AVerdictKind;
+    using tuide::a_compute_orphans;
+    using tuide::a_loci_must_ordered;
+    using tuide::a_plan_target_allowed;
+    using tuide::a_state_seed_queue;
+    using tuide::maybe_expand_a_queue;
+
+    std::vector<AQueueBuildInput> ranked;
+    for (int i = 0; i < 60; ++i) {
+      AQueueBuildInput in;
+      in.file = "src/mod/file" + std::to_string(i) + ".cpp";
+      in.name = "fn" + std::to_string(i);
+      in.line = 1;
+      in.score = 1000 - i;
+      in.functionish = true;
+      in.body_lines = 10;
+      ranked.push_back(in);
+    }
+    // Gold outside top-40
+    ranked[50].file = "src/gold/rescue.cpp";
+    ranked[50].name = "fix_it";
+    ranked[50].stem = "rescue";
+    ranked[50].score = 10;
+
+    AQueueBuildOpts opts;
+    opts.max_items = 40;
+    opts.max_per_stem = 2;
+    AState st;
+    a_state_seed_queue(&st, ranked, opts);
+    expect(st.queue.size() == 40, "primary 40");
+    expect(!st.reserve.empty(), "has reserve");
+
+    // Exhaust cursor with no useful → layer1 expand
+    st.cursor = static_cast<int>(st.queue.size());
+    st.turns = 1;
+    auto orphans = a_compute_orphans(st, {"fix_it", "rescue"});
+    expect(!orphans.empty(), "orphans before useful");
+    AExpandResult e1 = maybe_expand_a_queue(&st, orphans);
+    expect(e1.expanded && e1.layer == 1 && e1.added > 0, "layer1 expand");
+    expect(st.expansions == 1, "expansions=1");
+
+    bool gold_in_queue = false;
+    for (const auto& it : st.queue) {
+      if (it.path.find("rescue.cpp") != std::string::npos ||
+          it.target.find("fix_it") != std::string::npos) {
+        gold_in_queue = true;
+      }
+    }
+    expect(gold_in_queue, "gold recovered via layer1");
+
+    // plan allow
+    tuide::ALocus loc;
+    loc.anchor = "src/gold/rescue.cpp:fix_it";
+    loc.stem = "rescue";
+    loc.role = tuide::ALocusRole::Primary;
+    st.loci_draft = a_loci_must_ordered({loc});
+    expect(a_plan_target_allowed(st, "src/gold/rescue.cpp:fix_it"), "allowed locus");
+    expect(!a_plan_target_allowed(st, "src/noise/other.cpp:foo"), "blocked outside");
+    st.b_allow_paths.push_back("src/noise/other.cpp");
+    expect(a_plan_target_allowed(st, "src/noise/other.cpp:foo"), "micro-A allow");
   }
 
   if (failures) {

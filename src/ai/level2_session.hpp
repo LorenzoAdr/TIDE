@@ -196,6 +196,9 @@ class Level2Session {
   Level2TurnResult apply_a_done(const std::string& workspace_root,
                                 const std::vector<ALocus>& loci,
                                 const std::string& summary = {});
+  // Phase B miss → allow paths for a short micro-A / plan outside original loci (capa 4).
+  Level2TurnResult allow_micro_a_paths(const std::string& workspace_root,
+                                       const std::vector<std::string>& paths);
   // Next ≤5 peek bodies for the explore_a prompt (ephemeral; not persisted as pack).
   std::string build_a_peek_tranche_markdown(const std::string& workspace_root,
                                             int max_peeks = kAMaxPeeksPerTurn);

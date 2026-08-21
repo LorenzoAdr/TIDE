@@ -554,8 +554,8 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 - [x] P0 feature flag + schemas. *(flag off; `a_judge`/`a_done`; tipos `l2_explore_a`)*
 - [x] P1 cola índice local. *(`build_a_scan_queue` / diversify / `#tail` policy)*
 - [x] P2 loop A scripted. *(`explore_a` bootstrap, peeks, `a_judge`/`a_done` → `explore_b`; sin pack)*
-- [ ] P3 expansión cola.
-- [ ] P4 B ← loci + micro-A.
+- [x] P3 expansión cola. *(reserve + capas 1–3 / orphans / cap expansiones)*
+- [x] P4 B ← loci + micro-A. *(watchlist must-tier, plan filtrado, auto-plan, allowlist)*
 - [ ] P5 no-LSP path.
 - [ ] P6 batteries + informe.
 - [ ] P7 promoción flag.
