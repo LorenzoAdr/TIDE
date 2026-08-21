@@ -392,6 +392,7 @@ struct FileTreePanelState {
       root = build_file_tree_from_paths_and_folders(snapshot->files, tree_folders);
     }
     mark_lazy_stub_folders(&root, snapshot->filter_options);
+    mark_symlink_folders_lazy(&root, workspace_root);
     if (!to_reveal.empty() && !skeleton_preview) {
       reveal_file(workspace_root, to_reveal);
     } else {

@@ -122,23 +122,39 @@ void scan_workspace_skeleton(const std::string& workspace_root,
   rebuild_index_derived_fields(snapshot);
 }
 
-void scan_dir(const fs::path& root, const fs::path& current, const IndexFilterOptions& options,
-              std::vector<std::string>* out) {
+// Ruta relativa léxica: no usar fs::relative (resuelve symlinks vía weakly_canonical
+// y el enlace desaparece del explorador, p. ej. link -> src se colapsa a "src").
+fs::path lexical_workspace_relative(const fs::path& root, const fs::path& absolute) {
+  const fs::path rel = absolute.lexically_relative(root);
+  if (rel.empty() || rel == "." || (!rel.empty() && *rel.begin() == "..")) {
+    return {};
+  }
+  return rel;
+}
+
+void scan_dir(const fs::path& root, const fs::path& current, const fs::path& current_rel,
+              const IndexFilterOptions& options, std::vector<std::string>* out) {
   std::error_code ec;
   for (const auto& entry : fs::directory_iterator(current, ec)) {
     if (ec) {
       break;
     }
     const auto name = entry.path().filename().string();
+    if (name.empty() || name == "." || name == "..") {
+      continue;
+    }
+    const fs::path rel = current_rel.empty() ? fs::path(name) : current_rel / name;
     if (entry.is_directory(ec)) {
       if (should_skip_dir_name(name, options)) {
         continue;
       }
-      scan_dir(root, entry.path(), options, out);
+      // No descender por symlinks a carpetas: evita ciclos y rutas fuera del árbol.
+      if (entry.is_symlink(ec)) {
+        continue;
+      }
+      scan_dir(root, entry.path(), rel, options, out);
     } else if (entry.is_regular_file(ec)) {
-      std::error_code rel_ec;
-      const auto rel = fs::relative(entry.path(), root, rel_ec);
-      if (!rel_ec && should_list_workspace_path(rel.generic_string(), options)) {
+      if (should_list_workspace_path(rel.generic_string(), options)) {
         out->push_back(rel.generic_string());
       }
     }
@@ -146,7 +162,7 @@ void scan_dir(const fs::path& root, const fs::path& current, const IndexFilterOp
 }
 
 void collect_workspace_directories(const fs::path& root, const fs::path& current,
-                                   const IndexFilterOptions& options,
+                                   const fs::path& current_rel, const IndexFilterOptions& options,
                                    std::vector<std::string>* folders) {
   std::error_code ec;
   for (const auto& entry : fs::directory_iterator(current, ec)) {
@@ -160,12 +176,13 @@ void collect_workspace_directories(const fs::path& root, const fs::path& current
     if (should_skip_dir_name(name, options)) {
       continue;
     }
-    const fs::path rel = fs::relative(entry.path(), root, ec);
-    if (ec || rel.empty()) {
+    const fs::path rel = current_rel.empty() ? fs::path(name) : current_rel / name;
+    folders->push_back(rel.generic_string());
+    // El enlace se lista con su nombre; el contenido se carga al expandir (lazy).
+    if (entry.is_symlink(ec)) {
       continue;
     }
-    folders->push_back(rel.generic_string());
-    collect_workspace_directories(root, entry.path(), options, folders);
+    collect_workspace_directories(root, entry.path(), rel, options, folders);
   }
 }
 
@@ -371,6 +388,10 @@ void scan_directories_for_watch(int fd, const fs::path& root, const fs::path& cu
     if (should_skip_dir_name(name, options)) {
       continue;
     }
+    // No vigilar a través de symlinks (ciclos / rutas externas).
+    if (entry.is_symlink(ec)) {
+      continue;
+    }
     scan_directories_for_watch(fd, root, entry.path(), options, watch_dirs);
   }
 }
@@ -450,8 +471,8 @@ void run_inotify_loop(const std::string& workspace_root, const IndexFilterOption
 
       const fs::path entry_path = dir / event->name;
       std::error_code ec;
-      const fs::path rel = fs::relative(entry_path, root, ec);
-      if (ec || rel.empty()) {
+      const fs::path rel = lexical_workspace_relative(root, entry_path);
+      if (rel.empty()) {
         continue;
       }
       const std::string rel_str = rel.generic_string();
@@ -621,7 +642,7 @@ std::vector<std::string> scan_workspace_files(const std::string& workspace_root,
   if (!fs::is_directory(root, ec)) {
     return files;
   }
-  scan_dir(root, root, filter_options, &files);
+  scan_dir(root, root, {}, filter_options, &files);
   std::sort(files.begin(), files.end());
   return files;
 }
@@ -730,7 +751,7 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
     std::error_code ec;
     const fs::path root(workspace_root);
     if (fs::is_directory(root, ec)) {
-      scan_dir(root, root, filter_options, &snap->files);
+      scan_dir(root, root, {}, filter_options, &snap->files);
       std::sort(snap->files.begin(), snap->files.end());
     }
   }
@@ -738,7 +759,7 @@ void WorkspaceIndexer::worker_main(std::string workspace_root,
     std::error_code ec;
     const fs::path root(workspace_root);
     if (fs::is_directory(root, ec)) {
-      collect_workspace_directories(root, root, filter_options, &snap->folders);
+      collect_workspace_directories(root, root, {}, filter_options, &snap->folders);
       append_lazy_stub_folders(root, filter_options, &snap->folders);
       sort_unique_strings(&snap->folders);
     }
@@ -952,6 +973,11 @@ void WorkspaceIndexer::index_directory(const std::string& workspace_root,
         if (should_skip_dir_name(name, options)) {
           continue;
         }
+        // Symlink a carpeta: listar el enlace, no indexar el destino (lazy al expandir).
+        if (entry.is_symlink(ec)) {
+          insert_sorted_unique(&updated->folders, entry_rel);
+          continue;
+        }
         walk(entry.path(), rel);
       } else if (entry.is_regular_file(ec)) {
         if (!should_list_workspace_path(entry_rel, options)) {
@@ -1040,7 +1066,7 @@ bool WorkspaceIndexer::refresh(const std::string& workspace_root) {
   std::error_code ec;
   const fs::path root(workspace_root);
   if (fs::is_directory(root, ec)) {
-    collect_workspace_directories(root, root, options, &updated->folders);
+    collect_workspace_directories(root, root, {}, options, &updated->folders);
     append_lazy_stub_folders(root, options, &updated->folders);
     sort_unique_strings(&updated->folders);
   }

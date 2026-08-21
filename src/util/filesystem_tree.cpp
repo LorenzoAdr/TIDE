@@ -118,6 +118,31 @@ void mark_lazy_stub_folders_recursive(FileTreeNode* node, const IndexFilterOptio
   }
 }
 
+void mark_symlink_folders_lazy_recursive(FileTreeNode* node, const fs::path& workspace_root,
+                                         const fs::path& relative_dir) {
+  if (node == nullptr || workspace_root.empty()) {
+    return;
+  }
+  for (auto& child : node->children) {
+    if (child.is_file) {
+      continue;
+    }
+    const fs::path child_rel =
+        relative_dir.empty() ? fs::path(child.name) : relative_dir / child.name;
+    if (child.lazy) {
+      continue;
+    }
+    std::error_code ec;
+    if (fs::is_symlink(workspace_root / child_rel, ec)) {
+      child.lazy = true;
+      child.children_loaded = false;
+      child.children.clear();
+      continue;
+    }
+    mark_symlink_folders_lazy_recursive(&child, workspace_root, child_rel);
+  }
+}
+
 }  // namespace
 
 FileTreeNode build_file_tree_from_paths(const std::vector<std::string>& relative_paths) {
@@ -158,6 +183,13 @@ void mark_lazy_stub_folders(FileTreeNode* root, const IndexFilterOptions& option
     return;
   }
   mark_lazy_stub_folders_recursive(root, options);
+}
+
+void mark_symlink_folders_lazy(FileTreeNode* root, const std::string& workspace_root) {
+  if (root == nullptr || workspace_root.empty()) {
+    return;
+  }
+  mark_symlink_folders_lazy_recursive(root, fs::path(workspace_root), {});
 }
 
 bool populate_lazy_folder_children(FileTreeNode* folder, const std::string& workspace_root,
