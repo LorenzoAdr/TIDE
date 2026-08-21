@@ -1918,7 +1918,8 @@ std::string console_placeholder(AppMode* /*app_mode*/, MainLayoutState* layout_s
   return i18n::tr("console.placeholder.gdb");
 }
 
-constexpr int kMaxTermCols = 160;
+// Cap only as a safety bound; keep high enough for ultrawide / large monitors.
+constexpr int kMaxTermCols = 1024;
 constexpr int kMaxTermRows = 512;
 constexpr int kTerminalScrollbarWidth = 1;
 
