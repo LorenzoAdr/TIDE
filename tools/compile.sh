@@ -35,8 +35,10 @@ BUILD_GDB_CA=0
 STATIC_LIBSTDCXX=0
 STATIC_LIBSTDCXX_FROM_CLI=0
 BUILD_BACKEND_FROM_CLI=0
-INTERACTIVE=1
-SKIP_WIZARD=0
+# La TUI de bundles queda desactivada por defecto (toolpacks vía GitHub Releases).
+# Usar --wizard / --interactive para abrirla; el código del asistente se conserva.
+INTERACTIVE=0
+SKIP_WIZARD=1
 CLI_OVERRIDES_BUNDLE=0
 # Si compile.sh se ejecuta dentro de la imagen portable, no re-lanzar Docker.
 IN_PORTABLE_CONTAINER="${TUIDE_IN_PORTABLE_CONTAINER:-0}"
@@ -57,12 +59,13 @@ usage() {
   cat <<'EOF'
 Uso: tools/compile.sh [opciones]
 
-Sin opciones: primero la TUI de componentes embebidos; luego una sola
-compilación de tuide con la selección elegida.
+Sin opciones: compilación directa con .bundle-config (o defaults si no existe).
+La TUI de componentes embebidos está desactivada por defecto; ábrela con --wizard.
 
 Opciones:
   -y, --yes                  Usar .bundle-config sin TUI (o defaults si no existe)
   --non-interactive          Igual que --yes
+  --wizard, --interactive    Abrir la TUI de selección de componentes embebidos
   --bundle-clangd            Embeber clangd oficial
   --no-bundle-clangd         No embeber clangd
   --force-bundled-clangd     Forzar clangd embebido en runtime (requiere bundle)
@@ -632,6 +635,11 @@ while [[ $# -gt 0 ]]; do
       INTERACTIVE=0
       shift
       ;;
+    --wizard|--interactive)
+      SKIP_WIZARD=0
+      INTERACTIVE=1
+      shift
+      ;;
     --bundle-clangd)
       CLI_OVERRIDES_BUNDLE=1
       BUNDLE_CLANGD=1
@@ -1070,7 +1078,7 @@ check_command g++
 
 if [[ "${SKIP_WIZARD}" == "0" ]] && { [[ ! -t 0 ]] || [[ ! -t 1 ]]; }; then
   # Sin TTY (p. ej. task AI con stdout pipeado): el wizard FTXUI se quedaría colgado.
-  log "sin TTY: omitiendo asistente interactivo (usa .bundle-config / defaults; pasa -y explícito)"
+  log "sin TTY: omitiendo asistente interactivo (usa .bundle-config / defaults)"
   SKIP_WIZARD=1
   INTERACTIVE=0
 fi

@@ -26,18 +26,18 @@ ln -sf build/compile_commands.json .
 
 | Script | Purpose |
 |--------|---------|
-| `tools/compile.sh` | Interactive bundle wizard (default), configure, build |
+| `tools/compile.sh` | Configure and build (direct; optional bundle TUI with `--wizard`) |
 | `tools/build-portable.sh` | Docker build with old glibc; respects `.bundle-config` (`--slim` = no bundles) |
 | `tools/pregenerate-tree-sitter-latex.sh` | Host-side `parser.c` for bionic (glibc 2.27) portable builds |
 | `tools/build-release-appimage.sh` | Official slim AppImage (glibc 2.27) → `dist/tuide-$VERSION.AppImage` |
 | `tools/verify-glibc.sh` | Report max GLIBC/GLIBCXX symbols and `ldd` deps |
 | `tools/launch.sh` | Run `tuide` with sensible defaults and path resolution |
 
-`compile.sh` without arguments opens a TUI to choose embedded components (clangd, gdb, Python tools, rust-analyzer, gopls, …) and where to build (**host** or **Docker** with a reduced glibc baseline). Use `-y` to skip the wizard and reuse `.bundle-config`.
+`compile.sh` without arguments builds directly using `.bundle-config` (or defaults). The legacy TUI to choose embedded components is still available with `--wizard`. Toolpacks are normally installed at runtime from GitHub Releases.
 
 ```bash
-./tools/compile.sh                      # TUI: choose bundles
-./tools/compile.sh -y                   # reuse .bundle-config
+./tools/compile.sh                      # direct build (.bundle-config / defaults)
+./tools/compile.sh --wizard             # TUI: choose bundles (legacy)
 ./tools/compile.sh --bundle-clangd      # embed official clangd (Linux x86_64)
 ./tools/compile.sh --no-bundle-clangd   # slim binary (~53 MB)
 ./tools/compile.sh --bundle-gdb         # embed gdb + Core Analyzer
@@ -113,7 +113,7 @@ Build-time tools (when bundling): `curl` or `wget`, `zstd`, `objcopy`, `sha256su
 
 Building on a modern host (e.g. Ubuntu 24.04) pins `tuide` to a recent glibc (e.g. `GLIBC_2.38`). To ship a binary that runs on older distros, use the Docker-based portable build.
 
-From the **compilation TUI** (`./tools/compile.sh`), cycle **Compilación / Build** to:
+From the legacy **compilation TUI** (`./tools/compile.sh --wizard`), cycle **Compilación / Build** to:
 
 - `host` — local toolchain
 - `Docker (glibc 2.31 / Ubuntu 20.04)` — default portable baseline
@@ -124,8 +124,8 @@ Optional checkbox: **static libstdc++**. Bundle checkboxes (LSP/DAP/…) are app
 CLI equivalents:
 
 ```bash
-./tools/compile.sh                      # TUI → pick Docker backend + bundles
-./tools/compile.sh -y --build-backend=docker_focal
+./tools/compile.sh --wizard             # TUI → pick Docker backend + bundles
+./tools/compile.sh --build-backend=docker_focal
 ./tools/build-portable.sh               # same; reuses .bundle-config
 ./tools/build-portable.sh --static-libstdc++
 ./tools/build-portable.sh --bionic      # Ubuntu 18.04 / glibc ~2.27

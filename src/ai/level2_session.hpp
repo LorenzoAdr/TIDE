@@ -197,6 +197,8 @@ class Level2Session {
   Level2TurnResult apply_a_judge(const std::string& workspace_root,
                                  const std::vector<AVerdict>& verdicts,
                                  bool turn_done_hint = false);
+  Level2TurnResult apply_a_trail_judge(const std::string& workspace_root,
+                                       const std::vector<AVerdict>& verdicts);
   Level2TurnResult apply_a_done(const std::string& workspace_root,
                                 const std::vector<ALocus>& loci,
                                 const std::string& summary = {});
@@ -204,8 +206,11 @@ class Level2Session {
   Level2TurnResult allow_micro_a_paths(const std::string& workspace_root,
                                        const std::vector<std::string>& paths);
   // Next ≤5 peek bodies for the explore_a prompt (ephemeral; not persisted as pack).
+  // When trail is active, returns call-stack markdown instead of queue peeks.
   std::string build_a_peek_tranche_markdown(const std::string& workspace_root,
                                             int max_peeks = kAMaxPeeksPerTurn);
+  // Refresh pending_stacks for active trail (search + TS hops).
+  bool refresh_a_trail_stacks(const std::string& workspace_root, AState* ast, std::string* err);
   static AState load_a_state(const std::string& workspace_root);
   static bool save_a_state(const std::string& workspace_root, const AState& st, std::string* err);
 

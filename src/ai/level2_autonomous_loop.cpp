@@ -1460,16 +1460,24 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     L2BrainRequest breq;
     if (phase == "explore_a") {
       breq.system_prompt =
-          "Eres el Nivel 2 en fase explore_a (localización).\n"
+          "Eres el Nivel 2 en fase explore_a (localización + trail).\n"
           "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
           "PROHIBIDO action=plan, tool, edit, done next=edit.\n"
-          "Formatos:\n"
-          "{\"action\":\"a_judge\",\"verdicts\":[{\"target\":\"…\",\"verdict\":\"useful|reject|"
-          "uncertain\",\"anchor\":\"path:Symbol\",\"stem\":\"…\",\"role\":\"primary\","
-          "\"why\":\"…\"}],\"done\":false}\n"
+          "Objetivo: encontrar el EDIT SITE del síntoma de ## Instruction.\n"
+          "Peeks: useful = hipótesis (editarías ahí). Máx 1 useful/vuelta; resto reject|uncertain.\n"
+          "Tras useful el runtime muestra call-stacks (pilas completas entry→…→L0 con scope TS + "
+          "bloque if/switch + ±líneas del call). Entonces SOLO a_trail_judge.\n"
+          "Ejemplo interesting: {\"action\":\"a_trail_judge\",\"verdicts\":["
+          "{\"target\":\"S2\",\"verdict\":\"interesting\",\"why\":\"caller AI del spinner\"}]}\n"
+          "Ejemplo reject: {\"action\":\"a_trail_judge\",\"verdicts\":["
+          "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"reindex UI no es el síntoma\"}]}\n"
+          "verdict es EXACTAMENTE la palabra interesting o reject (nunca \"interesting|reject\").\n"
+          "interesting ≤3; runtime obliga a recorrerlos. Si TODOS reject → L0 se invalida.\n"
+          "UI/keyword → reject. a_done solo cuando un hop del trail es el edit site (≤2 primary).\n"
+          "Anclas = path:Symbol reales. Formatos peeks:\n"
+          "{\"action\":\"a_judge\",\"verdicts\":[…],\"done\":false}\n"
           "{\"action\":\"a_done\",\"loci\":[{\"stem\":\"…\",\"anchor\":\"path:Symbol\","
-          "\"role\":\"primary\",\"why\":\"…\"}],\"summary\":\"…\"}\n"
-          "Juzga solo los peeks de esta vuelta. No acumules código: el runtime descarta cuerpos.\n";
+          "\"role\":\"primary\",\"why\":\"…\"}],\"summary\":\"…\"}\n";
     } else {
       breq.system_prompt = build_system_prompt(opts, phase, map_review);
     }
@@ -1478,6 +1486,9 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
                           pack_incomplete, resume, workflow, budget, opts, recover_note,
                           pack_review_pending);
     if (phase == "explore_a") {
+      if (!recover_note.empty()) {
+        breq.user_prompt += "\n\n## Recover\n" + recover_note + "\n";
+      }
       std::ifstream nin(Level2Session::a_notes_path(opts.workspace_root));
       if (nin) {
         std::ostringstream nss;
@@ -1834,13 +1845,46 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       }
       tr = session.apply_a_judge(opts.workspace_root, action.a_verdicts, action.a_turn_done);
       emit(std::string("L2 ▸ a_judge ") + (tr.ok ? "OK" : "FAIL") + " — " +
-           (tr.ok ? tr.summary : tr.error).substr(0, 160));
+           (tr.ok ? tr.summary : tr.error).substr(0, 200));
+      if (!tr.ok && !tr.error.empty()) {
+        recover_note = "a_judge rechazado: " + tr.error +
+                       "\nReemite a_judge sobre la MISMA tranche: máx 1 useful, resto reject.\n";
+      } else if (tr.ok) {
+        recover_note.clear();
+      }
+    } else if (action.kind == L2ActionKind::ATrailJudge) {
+      emit("L2 ▸ a_trail_judge verdicts=" + std::to_string(action.a_verdicts.size()));
+      tr = session.apply_a_trail_judge(opts.workspace_root, action.a_verdicts);
+      emit(std::string("L2 ▸ a_trail_judge ") + (tr.ok ? "OK" : "FAIL") + " — " +
+           (tr.ok ? tr.summary : tr.error).substr(0, 200));
+      if (!tr.ok && !tr.error.empty()) {
+        recover_note = "a_trail_judge rechazado: " + tr.error +
+                       "\nEmite interesting|reject sobre stacks S1… (máx 3 interesting).\n";
+      } else if (tr.ok) {
+        recover_note.clear();
+      }
     } else if (action.kind == L2ActionKind::ADone) {
       emit("L2 ▸ a_done loci=" + std::to_string(action.a_loci.size()) + " — " +
            action.summary.substr(0, 100));
       tr = session.apply_a_done(opts.workspace_root, action.a_loci, action.summary);
       emit(std::string("L2 ▸ a_done ") + (tr.ok ? "OK → " : "FAIL — ") +
-           (tr.ok ? tr.phase : tr.error).substr(0, 120));
+           (tr.ok ? tr.phase : tr.error).substr(0, 160));
+      if (!tr.ok && !tr.error.empty()) {
+        recover_note = "a_done rechazado: " + tr.error + "\n";
+      }
+      if (tr.ok && opts.stop_at_phase_a) {
+        result.ok = true;
+        result.phase = "explore_a_ok";
+        result.summary = tr.summary.empty() ? action.summary : tr.summary;
+        result.steps = step;
+        ai_trace(AiTraceChannel::L2, "l2_run_end",
+                 std::string("{\"ok\":1,\"phase\":\"explore_a_ok\",\"steps\":") +
+                     std::to_string(result.steps) +
+                     ",\"total_ms\":" + std::to_string(elapsed_ms(run_t0)) + "}");
+        emit(phase_banner("explore_a", step, max_steps) +
+             " — Phase A OK (a_done; stop_at_phase_a, sin pack B)");
+        return result;
+      }
       if (tr.ok && l2_feat::enabled("L2_EXPLORE_PHASE_A")) {
         // P4: auto-plan from loci watchlist (must-tier) → pack.
         emit("L2 ▸ explore_b auto-plan desde loci…");

@@ -1289,6 +1289,14 @@ ignore me
       v.why = "policy";
       vsN.push_back(v);
     }
+    {
+      tuide::AVerdict v;
+      v.target = "src/wake.cpp:noise";
+      v.verdict = tuide::AVerdictKind::Reject;
+      v.stem = "wake";
+      v.why = "not the gate";
+      vsN.push_back(v);
+    }
     expect(sessionN.apply_a_judge(rootN.string(), vsN, false).ok, "no-lsp judge");
 
     std::vector<tuide::ALocus> lociN;

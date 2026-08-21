@@ -9,13 +9,17 @@
 #include <vector>
 
 #include "ai/get_code_of.hpp"
+#include "ai/l2_action.hpp"
 #include "ai/l2_brain.hpp"
+#include "ai/l2_explore_a.hpp"
+#include "ai/l2_feat.hpp"
 #include "ai/level2_autonomous_loop.hpp"
 #include "ai/level2_session.hpp"
 #include "ai/search_replace.hpp"
 #include "ai/tool_registry.hpp"
 #include "ai/ai_types.hpp"
 
+#include <cctype>
 #include <nlohmann/json.hpp>
 
 namespace fs = std::filesystem;
@@ -307,8 +311,12 @@ void print_ok_line(const tuide::Level2TurnResult& tr, tuide::Level2Session& sess
 }
 
 void usage() {
-  std::cerr << "Usage: l2_harness_cli bootstrap|tool|tools|plan|turn|done|edit|compile|status|run|run-explore|hunk-try …\n"
+  std::cerr << "Usage: l2_harness_cli bootstrap|tool|tools|plan|turn|done|edit|compile|status|run|run-explore|run-explore-a|trail-probe|trail-judge-shot|dataflow-probe|hunk-try …\n"
             << "  run-explore            // loop until pack completo → edit (no edit/compile)\n"
+            << "  run-explore-a          // Phase A only: peeks → a_judge/a_done (no pack B)\n"
+            << "  trail-probe SYM […]    // sin LLM: call-stacks TS de símbolos (search+scopes)\n"
+            << "  trail-judge-shot [SYM] // 1× LLM: trail mapa L0 → a_trail_judge (caso 17)\n"
+            << "  dataflow-probe VAR     // sin LLM: writes/reads/decls vía ripgrep (no LSP)\n"
             << "  plan target [target…]   // watchlist → pack.md\n"
             << "  tools <calls.json>      // batch [{name,arg},…] o {\"calls\":[…]}\n"
             << "  done [summary] [--edit|--clarify]\n"
@@ -359,6 +367,770 @@ AiSettings load_ai_settings(const std::string& root) {
   return s;
 }
 
+std::vector<tuide::ATrailSearchHit> parse_rg_hits(const std::string& body,
+                                                  const std::string& workspace_root) {
+  std::vector<tuide::ATrailSearchHit> hits;
+  std::istringstream in(body);
+  std::string line;
+  while (std::getline(in, line)) {
+    if (line.size() < 5) {
+      continue;
+    }
+    const auto colon1 = line.find(':');
+    if (colon1 == std::string::npos) {
+      continue;
+    }
+    const auto colon2 = line.find(':', colon1 + 1);
+    if (colon2 == std::string::npos) {
+      continue;
+    }
+    const std::string line_s = line.substr(colon1 + 1, colon2 - colon1 - 1);
+    bool digits = !line_s.empty();
+    for (char c : line_s) {
+      if (!std::isdigit(static_cast<unsigned char>(c))) {
+        digits = false;
+        break;
+      }
+    }
+    if (!digits) {
+      continue;
+    }
+    tuide::ATrailSearchHit h;
+    h.path = line.substr(0, colon1);
+    h.line = std::atoi(line_s.c_str());
+    h.preview = line.substr(colon2 + 1);
+    if (!workspace_root.empty() && h.path.size() > workspace_root.size() &&
+        h.path.compare(0, workspace_root.size(), workspace_root) == 0 &&
+        (h.path[workspace_root.size()] == '/' || h.path[workspace_root.size()] == '\\')) {
+      h.path = h.path.substr(workspace_root.size() + 1);
+    }
+    if (h.path.rfind("./", 0) == 0) {
+      h.path = h.path.substr(2);
+    }
+    hits.push_back(std::move(h));
+  }
+  return hits;
+}
+
+int run_trail_probe(ToolRegistry* tools, const std::string& root, int argc, char** argv) {
+  std::vector<std::string> symbols;
+  std::string path_hint;
+  bool json_out = false;
+  bool persist = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--path" && i + 1 < argc) {
+      path_hint = argv[++i];
+    } else if (a == "--json") {
+      json_out = true;
+    } else if (a == "--persist") {
+      persist = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "trail-probe SYM [SYM…] [--path hint] [--json] [--persist]\n"
+                   "  Sin LLM. search+TS → pilas entry→…→focus con scopes/control/snippet.\n"
+                   "  --persist escribe a_state.json con trail (round-trip storage).\n";
+      return 2;
+    } else if (!a.empty() && a[0] != '-') {
+      symbols.push_back(a);
+    }
+  }
+  if (symbols.empty()) {
+    std::cerr << "trail-probe: falta SYM (ej. set_busy_spinner)\n";
+    return 2;
+  }
+
+  int rc = 0;
+  for (const auto& sym : symbols) {
+    auto search_fn = [&](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
+      if (tools == nullptr || !tools->has("search") || symbol.empty()) {
+        return {};
+      }
+      AiToolResult tr = tools->invoke("search", symbol + " path:src/");
+      if (!tr.ok || tr.text.find("(sin hits)") != std::string::npos) {
+        tr = tools->invoke("search", symbol);
+      }
+      if (!tr.ok) {
+        return {};
+      }
+      return parse_rg_hits(tr.text, root);
+    };
+
+    const auto direct = search_fn(sym);
+    const auto stacks = tuide::a_trail_build_full_stacks(root, sym, path_hint, search_fn,
+                                                         tuide::kATrailMaxStacks,
+                                                         tuide::kATrailMaxDepth);
+
+    tuide::ATrail tr;
+    tr.active = true;
+    tr.awaiting_judge = true;
+    tr.root_anchor = path_hint.empty() ? sym : (path_hint + ":" + sym);
+    tr.focus_anchor = tr.root_anchor;
+    tr.focus_symbol = sym;
+    tr.root_stem = sym;
+    tr.pending_stacks = stacks;
+    tuide::ATrailHop root_hop;
+    root_hop.symbol = sym;
+    root_hop.anchor = tr.root_anchor;
+    root_hop.path = path_hint;
+    root_hop.summary = "L0 probe";
+    tr.trail.push_back(root_hop);
+
+    if (json_out) {
+      nlohmann::json j;
+      j["symbol"] = sym;
+      j["path_hint"] = path_hint;
+      j["direct_hits"] = static_cast<int>(direct.size());
+      j["stacks"] = static_cast<int>(stacks.size());
+      j["trail"] = tuide::a_trail_to_json(tr);
+      std::cout << j.dump(2) << '\n';
+    } else {
+      std::cout << "======== trail-probe `" << sym << "` ========\n";
+      std::cout << "direct_hits=" << direct.size() << " stacks=" << stacks.size()
+                << " max_depth=" << tuide::kATrailMaxDepth << "\n";
+      if (!direct.empty()) {
+        std::cout << "top direct callers:\n";
+        for (std::size_t i = 0; i < std::min<std::size_t>(8, direct.size()); ++i) {
+          const auto& h = direct[i];
+          std::cout << "  - " << h.path << ":" << h.line << "  "
+                    << h.preview.substr(0, std::min<std::size_t>(90, h.preview.size())) << "\n";
+        }
+      }
+      std::cout << "\n" << tuide::a_trail_stacks_markdown(tr);
+      // Compact chain lines
+      if (!stacks.empty()) {
+        std::cout << "### Chains (compact)\n";
+        for (const auto& s : stacks) {
+          std::cout << s.id << ": ";
+          for (std::size_t i = 0; i < s.hops.size(); ++i) {
+            if (i) {
+              std::cout << " → ";
+            }
+            const auto& h = s.hops[i];
+            std::cout << h.symbol;
+            if (!h.control_chain.empty()) {
+              std::cout << "@{" << h.control_chain << "}";
+            } else if (!h.control_kind.empty()) {
+              std::cout << "@" << h.control_kind;
+            }
+            if (!h.scope_chain.empty() && i + 1 < s.hops.size()) {
+              std::cout << " [" << h.scope_chain << "]";
+            }
+          }
+          std::cout << "\n";
+        }
+        std::cout << "\n";
+      }
+    }
+
+    if (stacks.empty() && direct.empty()) {
+      std::cerr << "trail-probe: sin hits para `" << sym << "`\n";
+      rc = 1;
+    }
+
+    if (persist) {
+      tuide::AState ast;
+      ast.trail = tr;
+      tuide::AVerdict u;
+      u.target = tr.root_anchor;
+      u.anchor = tr.root_anchor;
+      u.stem = sym;
+      u.verdict = tuide::AVerdictKind::Useful;
+      u.why = "trail-probe";
+      ast.notes.push_back(u);
+      std::string err;
+      if (!Level2Session::save_a_state(root, ast, &err)) {
+        std::cerr << "persist fail: " << err << '\n';
+        rc = 1;
+      } else {
+        const auto loaded = Level2Session::load_a_state(root);
+        std::cout << "persist ok: a_state trail.active=" << (loaded.trail.active ? 1 : 0)
+                  << " stacks=" << loaded.trail.pending_stacks.size()
+                  << " path=" << Level2Session::a_state_path(root) << "\n";
+      }
+    }
+  }
+  return rc;
+}
+
+// One LLM turn: inject trail pack for a map L0 (e.g. set_busy_spinner) and ask a_trail_judge.
+// Success heuristic for case 17: interesting on a stack whose hops mention begin_thinking / AiController.
+int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc, char** argv) {
+  std::string sym = "set_busy_spinner";
+  std::string path_hint = "src/ui/busy_strip.cpp";
+  std::string instruction;
+  std::string gold_needle = "begin_thinking";
+  std::string out_dir;
+  bool dry = false;
+  bool do_suspect = true;
+  std::string gold_var = "agent_busy_";
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--path" && i + 1 < argc) {
+      path_hint = argv[++i];
+    } else if (a == "--instruction" && i + 1 < argc) {
+      instruction = argv[++i];
+    } else if (a == "--case" && i + 1 < argc) {
+      // Load prompt from stem_boost battery JSON by id
+      const std::string case_id = argv[++i];
+      const fs::path prompts =
+          fs::path(root) / "tests/fixtures/stem_boost_battery/prompts_nl_human.json";
+      std::ifstream in(prompts);
+      if (!in) {
+        std::cerr << "trail-judge-shot: no se pudo leer " << prompts << "\n";
+        return 2;
+      }
+      nlohmann::json arr;
+      in >> arr;
+      bool found = false;
+      for (const auto& c : arr) {
+        if (c.value("id", "") == case_id) {
+          instruction = c.value("prompt", "");
+          found = true;
+          break;
+        }
+      }
+      if (!found || instruction.empty()) {
+        std::cerr << "trail-judge-shot: case id no encontrado: " << case_id << "\n";
+        return 2;
+      }
+    } else if (a == "--gold" && i + 1 < argc) {
+      gold_needle = argv[++i];
+    } else if (a == "--gold-var" && i + 1 < argc) {
+      gold_var = argv[++i];
+    } else if (a == "--out" && i + 1 < argc) {
+      out_dir = argv[++i];
+    } else if (a == "--dry") {
+      dry = true;
+    } else if (a == "--no-suspect") {
+      do_suspect = false;
+    } else if (a == "--suspect") {
+      do_suspect = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr
+          << "trail-judge-shot [SYM] [--path hint] [--case ID|--instruction TEXT]\n"
+             "                 [--gold begin_thinking] [--gold-var agent_busy_]\n"
+             "                 [--out DIR] [--dry] [--suspect|--no-suspect]\n"
+             "  1) trail → a_trail_judge  2) si interesting → ¿variable crítica?\n"
+             "     → dataflow-probe rg de las pistas (reserva para Phase B).\n";
+      return 2;
+    } else if (!a.empty() && a[0] != '-') {
+      sym = a;
+    }
+  }
+  if (instruction.empty()) {
+    // Default: case 17
+    const fs::path prompts =
+        fs::path(root) / "tests/fixtures/stem_boost_battery/prompts_nl_human.json";
+    std::ifstream in(prompts);
+    if (in) {
+      nlohmann::json arr;
+      in >> arr;
+      for (const auto& c : arr) {
+        if (c.value("id", "") == "17_ai_spinner_stuck") {
+          instruction = c.value("prompt", "");
+          break;
+        }
+      }
+    }
+  }
+  if (instruction.empty()) {
+    instruction =
+        "el spinner de la IA se queda infinito aunque el modelo ya terminó; "
+        "dónde se controla ese estado de carga";
+  }
+
+  auto search_fn = [&](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
+    if (tools == nullptr || !tools->has("search") || symbol.empty()) {
+      return {};
+    }
+    AiToolResult tr = tools->invoke("search", symbol + " path:src/");
+    if (!tr.ok || tr.text.find("(sin hits)") != std::string::npos) {
+      tr = tools->invoke("search", symbol);
+    }
+    if (!tr.ok) {
+      return {};
+    }
+    return parse_rg_hits(tr.text, root);
+  };
+
+  const auto stacks = tuide::a_trail_build_full_stacks(root, sym, path_hint, search_fn,
+                                                       tuide::kATrailMaxStacks,
+                                                       tuide::kATrailMaxDepth);
+  if (stacks.empty()) {
+    std::cerr << "trail-judge-shot: sin stacks para `" << sym << "`\n";
+    return 1;
+  }
+
+  tuide::ATrail tr;
+  tr.active = true;
+  tr.awaiting_judge = true;
+  tr.root_anchor = path_hint.empty() ? sym : (path_hint + ":" + sym);
+  tr.focus_anchor = tr.root_anchor;
+  tr.focus_symbol = sym;
+  tr.root_stem = sym;
+  tr.root_why = "hipótesis useful del mapa (target UI / busy)";
+  tr.pending_stacks = stacks;
+  tuide::ATrailHop root_hop;
+  root_hop.symbol = sym;
+  root_hop.anchor = tr.root_anchor;
+  root_hop.path = path_hint;
+  root_hop.summary = "L0 map target";
+  tr.trail.push_back(root_hop);
+
+  const std::string trail_md = tuide::a_trail_stacks_markdown(tr);
+
+  // Which stack ids contain the gold needle (for scoring)?
+  std::vector<std::string> gold_stack_ids;
+  for (const auto& s : stacks) {
+    bool hit = false;
+    for (const auto& h : s.hops) {
+      if (h.symbol.find(gold_needle) != std::string::npos ||
+          h.scope_chain.find(gold_needle) != std::string::npos ||
+          h.signature.find(gold_needle) != std::string::npos ||
+          h.anchor.find(gold_needle) != std::string::npos) {
+        hit = true;
+        break;
+      }
+    }
+    if (hit) {
+      gold_stack_ids.push_back(s.id);
+    }
+  }
+
+  std::ostringstream user;
+  user << "phase=explore_a step=1 workflow=autofix\n\n";
+  user << "## Instruction\n" << instruction << "\n\n";
+  user << "## Situación (inyección de prueba)\n"
+          "El mapa señaló el target `"
+       << sym << "` (`" << path_hint
+       << "`) como hipótesis **useful** (síntoma: spinner/busy).\n"
+          "Eso NO es aún el edit site: el runtime abrió call-stacks entry→…→L0 "
+          "con scopes TS + condición de control + snippet.\n"
+          "Tu trabajo AHORA: `a_trail_judge`. Marca **interesting** la pila cuyo "
+          "caller anidado controla el estado de carga de la IA (no UI genérica / "
+          "reindex / outline).\n"
+          "Si ves el edit site en un hop, puedes cerrar con `a_done` (≤2 primary).\n\n";
+  user << trail_md;
+
+  const std::string system =
+      "Eres el Nivel 2 en fase explore_a (localización + trail).\n"
+      "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+      "PROHIBIDO action=plan, tool, edit, done next=edit.\n"
+      "Objetivo: encontrar el EDIT SITE del síntoma de ## Instruction.\n"
+      "Tras useful el runtime muestra call-stacks. Entonces SOLO a_trail_judge.\n"
+      "Ejemplo: {\"action\":\"a_trail_judge\",\"verdicts\":["
+      "{\"target\":\"S2\",\"verdict\":\"interesting\",\"why\":\"AiController enciende el spinner\"},"
+      "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"reindex no es el síntoma IA\"}]}\n"
+      "verdict es EXACTAMENTE \"interesting\" o \"reject\" (nunca el literal "
+      "\"interesting|reject\").\n"
+      "interesting ≤3. Si TODOS reject → L0 se invalida.\n"
+      "UI genérica / reindex / search → reject salvo que sea el control de carga de la IA.\n"
+      "a_done solo cuando un hop es el edit site (≤2 primary).\n";
+
+  std::cout << "======== trail-judge-shot ========\n";
+  std::cout << "L0=" << tr.root_anchor << " stacks=" << stacks.size()
+            << " gold_needle=`" << gold_needle << "` gold_in=";
+  if (gold_stack_ids.empty()) {
+    std::cout << "(ninguna pila — el pack no contiene el gold; abort)\n";
+    return 1;
+  }
+  for (std::size_t i = 0; i < gold_stack_ids.size(); ++i) {
+    if (i) {
+      std::cout << ",";
+    }
+    std::cout << gold_stack_ids[i];
+  }
+  std::cout << "\n";
+  std::cout << "prompt_chars system=" << system.size() << " user=" << user.str().size() << "\n";
+
+  if (!out_dir.empty()) {
+    fs::create_directories(out_dir);
+    {
+      std::ofstream o(fs::path(out_dir) / "system.txt");
+      o << system;
+    }
+    {
+      std::ofstream o(fs::path(out_dir) / "user.md");
+      o << user.str();
+    }
+    {
+      std::ofstream o(fs::path(out_dir) / "trail.md");
+      o << trail_md;
+    }
+  }
+
+  if (dry) {
+    std::cout << "\n--- user.md (dry) ---\n" << user.str() << "\n";
+    std::cout << "dry: no LLM\n";
+    return 0;
+  }
+
+  const AiSettings settings = load_ai_settings(root);
+  if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
+    std::cerr << "trail-judge-shot: ai.level2.mode debe ser local|remote (ahora="
+              << settings.level2_mode << ")\n";
+    return 2;
+  }
+  // Same as run / run-explore-a: LocalL2Brain (covers local llama-server; remote
+  // path still goes through Local when mode mis-set — match existing harness).
+  tuide::LocalL2Brain brain;
+  std::string err;
+  auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+  if (!brain.ensure_ready(settings, progress, &err)) {
+    std::cerr << "trail-judge-shot: ensure_ready: " << err << "\n";
+    return 1;
+  }
+
+  tuide::L2BrainRequest breq;
+  breq.system_prompt = system;
+  breq.user_prompt = user.str();
+  breq.phase = "explore_a";
+  breq.max_tokens = settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 1024;
+  breq.n_ctx = settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192;
+  breq.temperature = 0.1f;
+
+  std::cout << "L2 ▸ trail-judge-shot pidiendo a_trail_judge (" << brain.name() << ")…\n";
+  const auto bres = brain.propose(breq, nullptr);
+  if (!bres.ok) {
+    std::cerr << "LLM FAIL: " << bres.error << "\n";
+    return 1;
+  }
+  if (!out_dir.empty()) {
+    std::ofstream o(fs::path(out_dir) / "model_raw.txt");
+    o << bres.text;
+  }
+  std::cout << "\n--- model ---\n" << bres.text << "\n---\n";
+
+  const tuide::L2Action action = tuide::parse_l2_action(bres.text);
+  std::vector<std::string> interesting_ids;
+  std::vector<std::string> reject_ids;
+  bool gold_interesting = false;
+  if (action.kind == tuide::L2ActionKind::ATrailJudge ||
+      action.name == "a_trail_judge" || action.name == "trail_judge") {
+    for (const auto& v : action.a_verdicts) {
+      if (v.verdict == tuide::AVerdictKind::Interesting) {
+        interesting_ids.push_back(v.target);
+        for (const auto& g : gold_stack_ids) {
+          if (v.target == g) {
+            gold_interesting = true;
+          }
+        }
+      } else if (v.verdict == tuide::AVerdictKind::Reject) {
+        reject_ids.push_back(v.target);
+      }
+    }
+  } else if (action.kind == tuide::L2ActionKind::ADone || action.name == "a_done") {
+    // Bonus path: model jumps to a_done naming gold
+    for (const auto& loc : action.a_loci) {
+      if (loc.anchor.find(gold_needle) != std::string::npos ||
+          loc.stem.find("ai_controller") != std::string::npos ||
+          loc.anchor.find("AiController") != std::string::npos) {
+        gold_interesting = true;
+      }
+    }
+    std::cout << "note: model emitted a_done (no a_trail_judge)\n";
+  } else {
+    std::cout << "WARN: action kind=" << static_cast<int>(action.kind) << " name=" << action.name
+              << " error=" << action.error << "\n";
+  }
+
+  auto join = [](const std::vector<std::string>& xs) {
+    std::ostringstream o;
+    for (std::size_t i = 0; i < xs.size(); ++i) {
+      if (i) {
+        o << ",";
+      }
+      o << xs[i];
+    }
+    return o.str();
+  };
+
+  std::cout << "interesting=[" << join(interesting_ids) << "] reject=[" << join(reject_ids)
+            << "]\n";
+  std::cout << "gold_stacks=[" << join(gold_stack_ids) << "] gold_marked_interesting="
+            << (gold_interesting ? 1 : 0) << "\n";
+  if (!gold_interesting) {
+    std::cout << "FAIL: no marcó interesting la pila con `" << gold_needle << "`\n";
+    return 1;
+  }
+  std::cout << "PASS: el modelo vio el control IA anidado (" << gold_needle << ")\n";
+
+  if (!do_suspect) {
+    return 0;
+  }
+
+  // --- Phase 2: critical variable? (compact; reserve for B) --------------------
+  std::ostringstream focus_md;
+  for (const auto& s : stacks) {
+    bool keep = false;
+    for (const auto& id : interesting_ids) {
+      if (s.id == id) {
+        keep = true;
+        break;
+      }
+    }
+    if (!keep) {
+      continue;
+    }
+    focus_md << "### `" << s.id << "`\n";
+    if (!s.hops.empty()) {
+      const auto& key = s.hops.front();
+      focus_md << "caller `" << key.anchor << "` line=" << key.call_line << "\n";
+      if (!key.signature.empty()) {
+        focus_md << "sig: `" << key.signature << "`\n";
+      }
+      if (!key.control_cond.empty()) {
+        focus_md << "cond: `" << key.control_cond << "`\n";
+      }
+      focus_md << "```\n" << key.snippet;
+      if (!key.snippet.empty() && key.snippet.back() != '\n') {
+        focus_md << '\n';
+      }
+      focus_md << "```\n";
+    }
+  }
+
+  const std::string sys2 =
+      "Eres el Nivel 2 (explore_a). JSON only. PROHIBIDO markdown fuera del JSON.\n"
+      "Ya marcaste pilas interesting. Ahora: ¿hay una VARIABLE/CAMPO de estado "
+      "crítica para el síntoma (spinner/busy IA que no se limpia)?\n"
+      "Responde EXACTAMENTE:\n"
+      "{\"action\":\"a_suspect_vars\",\"vars\":[{\"name\":\"agent_busy_\","
+      "\"why\":\"flag que queda true\",\"anchor\":\"src/ai/ai_controller.hpp:"
+      "agent_busy_\"}],\"none\":false}\n"
+      "o {\"action\":\"a_suspect_vars\",\"vars\":[],\"none\":true}\n"
+      "Reglas: máx 2 vars; nombre C++ real (p.ej. agent_busy_ no 'el spinner'); "
+      "si no estás seguro → none:true. No inventes paths.\n";
+
+  std::ostringstream user2;
+  user2 << "## Instruction\n" << instruction << "\n\n";
+  user2 << "## Pilas interesting (contexto)\n" << focus_md.str() << "\n";
+  user2 << "Pregunta: en ese código, ¿qué variable/campo controla el estado de carga "
+           "de la IA? Emite a_suspect_vars.\n";
+
+  if (!out_dir.empty()) {
+    std::ofstream o(fs::path(out_dir) / "suspect_user.md");
+    o << user2.str();
+    std::ofstream s2(fs::path(out_dir) / "suspect_system.txt");
+    s2 << sys2;
+  }
+
+  std::cout << "\n======== suspect-vars shot ========\n";
+  std::cout << "prompt_chars system=" << sys2.size() << " user=" << user2.str().size() << "\n";
+  std::cout << "L2 ▸ pidiendo a_suspect_vars (" << brain.name() << ")…\n";
+
+  tuide::L2BrainRequest breq2;
+  breq2.system_prompt = sys2;
+  breq2.user_prompt = user2.str();
+  breq2.phase = "explore_a";
+  breq2.max_tokens = settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 512;
+  breq2.n_ctx = settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192;
+  breq2.temperature = 0.1f;
+  const auto bres2 = brain.propose(breq2, nullptr);
+  if (!bres2.ok) {
+    std::cerr << "LLM FAIL (suspect): " << bres2.error << "\n";
+    return 1;
+  }
+  if (!out_dir.empty()) {
+    std::ofstream o(fs::path(out_dir) / "suspect_raw.txt");
+    o << bres2.text;
+  }
+  std::cout << "\n--- model (suspect) ---\n" << bres2.text << "\n---\n";
+
+  auto extract_json = [](const std::string& text) -> nlohmann::json {
+    const auto a = text.find('{');
+    const auto b = text.rfind('}');
+    if (a == std::string::npos || b == std::string::npos || b <= a) {
+      return nlohmann::json{};
+    }
+    try {
+      return nlohmann::json::parse(text.substr(a, b - a + 1));
+    } catch (...) {
+      return nlohmann::json{};
+    }
+  };
+
+  const nlohmann::json sj = extract_json(bres2.text);
+  struct Suspect {
+    std::string name;
+    std::string why;
+    std::string anchor;
+  };
+  std::vector<Suspect> suspects;
+  bool none = false;
+  if (sj.is_object()) {
+    none = sj.value("none", false);
+    if (sj.contains("vars") && sj["vars"].is_array()) {
+      for (const auto& v : sj["vars"]) {
+        if (!v.is_object()) {
+          continue;
+        }
+        Suspect s;
+        s.name = v.value("name", "");
+        s.why = v.value("why", "");
+        s.anchor = v.value("anchor", "");
+        // Strip Class:: prefix noise
+        const auto colons = s.name.rfind("::");
+        if (colons != std::string::npos) {
+          s.name = s.name.substr(colons + 2);
+        }
+        if (!s.name.empty()) {
+          suspects.push_back(std::move(s));
+        }
+      }
+    }
+  }
+
+  if (suspects.empty() && none) {
+    std::cout << "suspect: none=true (sin variable reservada)\n";
+    std::cout << "PASS_TRAIL + NO_SUSPECT\n";
+    return 0;
+  }
+  if (suspects.empty()) {
+    std::cout << "FAIL: no se pudo parsear a_suspect_vars\n";
+    return 1;
+  }
+
+  std::cout << "suspect_vars:\n";
+  for (const auto& s : suspects) {
+    std::cout << "  - `" << s.name << "`";
+    if (!s.anchor.empty()) {
+      std::cout << " @ " << s.anchor;
+    }
+    if (!s.why.empty()) {
+      std::cout << " — " << s.why;
+    }
+    std::cout << "\n";
+  }
+  if (!out_dir.empty()) {
+    nlohmann::json jar = nlohmann::json::array();
+    for (const auto& s : suspects) {
+      jar.push_back({{"name", s.name}, {"why", s.why}, {"anchor", s.anchor}});
+    }
+    std::ofstream o(fs::path(out_dir) / "suspect_vars.json");
+    o << jar.dump(2) << '\n';
+  }
+
+  auto search_df = [&](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
+    if (tools == nullptr || !tools->has("search") || symbol.empty()) {
+      return {};
+    }
+    AiToolResult tr = tools->invoke("search", symbol + " path:src/");
+    if (!tr.ok || tr.text.find("(sin hits)") != std::string::npos) {
+      tr = tools->invoke("search", symbol);
+    }
+    if (!tr.ok) {
+      return {};
+    }
+    return parse_rg_hits(tr.text, root);
+  };
+
+  auto name_matches_gold = [&](const std::string& n) {
+    if (n == gold_var) {
+      return true;
+    }
+    if (n.find(gold_var) != std::string::npos) {
+      return true;
+    }
+    // Soft gold family for case 17
+    return n.find("agent_busy") != std::string::npos || n.find("busy_") != std::string::npos ||
+           n == "download_busy_" || n.find("cancel_") != std::string::npos;
+  };
+
+  bool any_gold_var = false;
+  bool any_df_hits = false;
+  for (const auto& s : suspects) {
+    if (name_matches_gold(s.name)) {
+      any_gold_var = true;
+    }
+    std::string hint;
+    if (s.anchor.find(':') != std::string::npos) {
+      hint = s.anchor.substr(0, s.anchor.find(':'));
+    }
+    const auto report = tuide::a_dataflow_build_with_search(root, s.name, hint, search_df);
+    std::cout << "\n" << tuide::a_dataflow_markdown(report);
+    if (!out_dir.empty()) {
+      std::ofstream o(fs::path(out_dir) / ("dataflow_" + s.name + ".md"));
+      o << tuide::a_dataflow_markdown(report);
+      std::ofstream j(fs::path(out_dir) / ("dataflow_" + s.name + ".json"));
+      j << tuide::a_dataflow_to_json(report).dump(2) << '\n';
+    }
+    if (!report.writes.empty() || !report.reads.empty() || !report.decls.empty()) {
+      any_df_hits = true;
+    }
+  }
+
+  std::cout << "gold_var=`" << gold_var << "` named_gold=" << (any_gold_var ? 1 : 0)
+            << " dataflow_hits=" << (any_df_hits ? 1 : 0) << "\n";
+  if (any_gold_var && any_df_hits) {
+    std::cout << "PASS: pista de variable + data-flow rg extraído (reserva B)\n";
+    return 0;
+  }
+  if (any_df_hits) {
+    std::cout << "PARTIAL: data-flow ok pero var ≠ familia gold (`" << gold_var << "`)\n";
+    return 0;  // still useful for design feedback
+  }
+  std::cout << "FAIL: sospechosas sin sitios data-flow\n";
+  return 1;
+}
+
+int run_dataflow_probe(ToolRegistry* tools, const std::string& root, int argc, char** argv) {
+  std::vector<std::string> names;
+  std::string path_hint;
+  bool json_out = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--path" && i + 1 < argc) {
+      path_hint = argv[++i];
+    } else if (a == "--json") {
+      json_out = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "dataflow-probe VAR [VAR…] [--path hint] [--json]\n"
+                   "  Sin LLM/LSP. ripgrep + heurística write/read/decl + snippet.\n"
+                   "  Ej.: dataflow-probe agent_busy_ --path src/ai/ai_controller.cpp\n";
+      return 2;
+    } else if (!a.empty() && a[0] != '-') {
+      names.push_back(a);
+    }
+  }
+  if (names.empty()) {
+    std::cerr << "dataflow-probe: falta VAR (ej. agent_busy_)\n";
+    return 2;
+  }
+
+  auto search_fn = [&](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
+    if (tools == nullptr || !tools->has("search") || symbol.empty()) {
+      return {};
+    }
+    // Prefer src/; fall back to whole workspace
+    AiToolResult tr = tools->invoke("search", symbol + " path:src/");
+    if (!tr.ok || tr.text.find("(sin hits)") != std::string::npos) {
+      tr = tools->invoke("search", symbol);
+    }
+    if (!tr.ok) {
+      return {};
+    }
+    return parse_rg_hits(tr.text, root);
+  };
+
+  int rc = 0;
+  for (const auto& name : names) {
+    const auto report =
+        tuide::a_dataflow_build_with_search(root, name, path_hint, search_fn);
+    if (json_out) {
+      std::cout << tuide::a_dataflow_to_json(report).dump(2) << '\n';
+    } else {
+      std::cout << "======== dataflow-probe `" << name << "` ========\n";
+      std::cout << tuide::a_dataflow_markdown(report);
+    }
+    if (report.writes.empty() && report.reads.empty() && report.decls.empty()) {
+      std::cerr << "dataflow-probe: sin sitios útiles para `" << name << "`\n";
+      rc = 1;
+    }
+  }
+  return rc;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -382,6 +1154,15 @@ int main(int argc, char** argv) {
   if (cmd == "status") {
     std::cout << session.status_text(root);
     return 0;
+  }
+  if (cmd == "trail-probe") {
+    return run_trail_probe(&tools, root, argc, argv);
+  }
+  if (cmd == "trail-judge-shot") {
+    return run_trail_judge_shot(&tools, root, argc, argv);
+  }
+  if (cmd == "dataflow-probe") {
+    return run_dataflow_probe(&tools, root, argc, argv);
   }
   if (cmd == "bootstrap") {
     Level2BootstrapOpts opts;
@@ -728,6 +1509,45 @@ int main(int argc, char** argv) {
     const auto result = run_level2_autonomous(
         session, brain, opts, [](const std::string& line) { std::cout << line << std::endl; });
     std::cout << "run-explore ok=" << (result.ok ? 1 : 0) << " phase=" << result.phase
+              << " steps=" << result.steps << " — "
+              << (result.error.empty() ? result.summary : result.error) << '\n';
+    std::cout << session.status_flags(root) << '\n';
+    return result.ok ? 0 : 1;
+  }
+  if (cmd == "run-explore-a") {
+    if (!tuide::l2_feat::enabled("L2_EXPLORE_PHASE_A")) {
+      std::cerr << "run-explore-a: L2_EXPLORE_PHASE_A off — export L2_FEAT_L2_EXPLORE_PHASE_A=1\n";
+      return 2;
+    }
+    const AiSettings settings = load_ai_settings(root);
+    if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
+      std::cerr << "run-explore-a: ai.level2.mode debe ser local|remote (ahora="
+                << settings.level2_mode << ")\n";
+      return 2;
+    }
+    LocalL2Brain brain;
+    std::string err;
+    auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+    if (!brain.ensure_ready(settings, progress, &err)) {
+      std::cerr << "L2 brain ensure_ready: " << err << '\n';
+      return 1;
+    }
+    Level2AutonomousLoopOpts opts;
+    opts.workspace_root = root;
+    opts.settings = settings.level2;
+    opts.stop_at_phase_a = true;
+    // Phase A budget: peeks/turns caps live in a_state; keep loop steps modest.
+    if (opts.settings.max_steps > 10) {
+      opts.settings.max_steps = 10;
+    }
+    std::string pack_err;
+    if (!load_prompt_pack_into_opts(&opts, &pack_err)) {
+      std::cerr << "prompt pack: " << pack_err << '\n';
+      return 1;
+    }
+    const auto result = run_level2_autonomous(
+        session, brain, opts, [](const std::string& line) { std::cout << line << std::endl; });
+    std::cout << "run-explore-a ok=" << (result.ok ? 1 : 0) << " phase=" << result.phase
               << " steps=" << result.steps << " — "
               << (result.error.empty() ? result.summary : result.error) << '\n';
     std::cout << session.status_flags(root) << '\n';

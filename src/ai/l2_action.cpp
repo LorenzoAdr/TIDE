@@ -289,6 +289,8 @@ const char* l2_action_kind_name(L2ActionKind kind) {
       return "plan";
     case L2ActionKind::AJudge:
       return "a_judge";
+    case L2ActionKind::ATrailJudge:
+      return "a_trail_judge";
     case L2ActionKind::ADone:
       return "a_done";
     case L2ActionKind::Done:
@@ -374,6 +376,16 @@ L2Action parse_l2_action(const std::string& model_text) {
       out.a_turn_done = j.value("done", false);
       std::string err;
       if (!parse_a_verdicts_array(j, &out.a_verdicts, &err)) {
+        out.kind = L2ActionKind::Error;
+        out.error = err;
+      }
+      return out;
+    }
+    if (action == "a_trail_judge" || action == "trail_judge") {
+      out.kind = L2ActionKind::ATrailJudge;
+      out.summary = j.value("summary", "");
+      std::string err;
+      if (!parse_a_trail_verdicts_array(j, &out.a_verdicts, &err)) {
         out.kind = L2ActionKind::Error;
         out.error = err;
       }

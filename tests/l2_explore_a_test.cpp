@@ -282,6 +282,250 @@ int main() {
     st.b_allow_paths.push_back("src/noise/other.cpp");
     expect(a_plan_target_allowed(st, "src/noise/other.cpp:foo"), "micro-A allow");
   }
+  {
+    tuide::AVerdict v;
+    v.target = "src/ui/wake.cpp:tick#tail";
+    v.verdict = AVerdictKind::Useful;
+    v.anchor = "path:tick";
+    v.stem = "src/ui/wake.cpp:tick";
+    v.role = ALocusRole::Primary;
+    tuide::a_normalize_verdict(&v);
+    expect(v.anchor == "src/ui/wake.cpp:tick", "norm anchor from target");
+    expect(v.stem == "wake", "norm stem basename");
+    expect(tuide::a_anchor_resolvable(v.anchor), "resolvable");
+
+    tuide::ALocus loc;
+    loc.stem = "src/ui/console_panel.cpp:ConsolePanelState";
+    loc.anchor = "path:ConsolePanelState";
+    loc.role = ALocusRole::Primary;
+    tuide::a_normalize_locus(&loc);
+    expect(loc.anchor.find("console_panel") != std::string::npos, "swap stem→anchor");
+    expect(loc.stem == "console_panel", "stem basename after swap");
+
+    std::vector<tuide::ALocus> many;
+    for (int i = 0; i < 5; ++i) {
+      tuide::ALocus L;
+      L.stem = "s" + std::to_string(i);
+      L.anchor = "src/f" + std::to_string(i) + ".cpp:Sym";
+      L.role = ALocusRole::Primary;
+      many.push_back(L);
+    }
+    tuide::a_cap_locus_roles(&many);
+    int p = 0, s = 0, u = 0;
+    for (const auto& L : many) {
+      if (L.role == ALocusRole::Primary) {
+        ++p;
+      } else if (L.role == ALocusRole::Secondary) {
+        ++s;
+      } else {
+        ++u;
+      }
+    }
+    expect(p == 2 && s == 2 && u == 1, "cap 2+2+suspect");
+
+    AState st;
+    st.peeks_used = 10;
+    st.turns = 2;
+    st.notes.push_back({});
+    st.notes.back().verdict = AVerdictKind::Useful;
+    st.notes.back().target = "src/ui/wake.cpp:tick";
+    st.notes.back().stem = "wake";
+    std::string err;
+    std::vector<tuide::ALocus> one = {loc};
+    expect(!tuide::a_validate_a_done(st, one, &err), "no reject blocks a_done");
+    expect(err.find("contraste") != std::string::npos, "contrast msg");
+    st.notes.push_back({});
+    st.notes.back().verdict = AVerdictKind::Reject;
+    st.notes.back().target = "src/ai/other.cpp:x";
+    st.notes.back().stem = "other";
+    expect(tuide::a_validate_a_done(st, one, &err), "with reject ok");
+  }
+  {
+    // Path-family round-robin: high-score ui/* should not monopolize early queue.
+    std::vector<tuide::AQueueBuildInput> ranked;
+    for (int i = 0; i < 6; ++i) {
+      tuide::AQueueBuildInput in;
+      in.file = "src/ui/u" + std::to_string(i) + ".cpp";
+      in.name = "Ui" + std::to_string(i);
+      in.score = 1000 - i;
+      in.functionish = true;
+      ranked.push_back(in);
+    }
+    for (int i = 0; i < 4; ++i) {
+      tuide::AQueueBuildInput in;
+      in.file = "src/ai/a" + std::to_string(i) + ".cpp";
+      in.name = "Ai" + std::to_string(i);
+      in.score = 100 - i;  // lower than ui
+      in.functionish = true;
+      ranked.push_back(in);
+    }
+    tuide::AQueueBuildOpts opts;
+    opts.max_items = 8;
+    opts.max_per_stem = 2;
+    opts.diversify_path_family = true;
+    const auto q = tuide::build_a_scan_queue(ranked, opts);
+    expect(q.size() >= 4, "diverse queue size");
+    expect(tuide::a_path_family(q[0].path) != tuide::a_path_family(q[1].path) ||
+               q.size() < 2,
+           "early peeks alternate families when both exist");
+    bool saw_ai = false;
+    for (std::size_t i = 0; i < std::min<std::size_t>(4, q.size()); ++i) {
+      if (tuide::a_path_family(q[i].path) == "ai") {
+        saw_ai = true;
+      }
+    }
+    expect(saw_ai, "ai appears in first 4 despite lower score");
+
+    // prefer_src: tests/tools stay out of early queue
+    {
+      std::vector<tuide::AQueueBuildInput> mixed = ranked;
+      for (int i = 0; i < 5; ++i) {
+        tuide::AQueueBuildInput in;
+        in.file = "tests/t" + std::to_string(i) + ".cpp";
+        in.name = "T" + std::to_string(i);
+        in.score = 5000 - i;  // higher than ui/ai
+        mixed.push_back(in);
+      }
+      tuide::AQueueBuildOpts o2 = opts;
+      o2.prefer_src_paths = true;
+      o2.max_items = 8;
+      const auto q2 = tuide::build_a_scan_queue(mixed, o2);
+      bool early_test = false;
+      for (std::size_t i = 0; i < std::min<std::size_t>(6, q2.size()); ++i) {
+        if (q2[i].path.rfind("tests/", 0) == 0) {
+          early_test = true;
+        }
+      }
+      expect(!early_test, "tests/ not in early peeks when prefer_src");
+    }
+
+    AState early;
+    early.peeks_used = 3;
+    early.turns = 1;
+    early.notes.push_back({});
+    early.notes.back().verdict = AVerdictKind::Useful;
+    early.notes.back().target = "src/ui/u0.cpp:Ui0";
+    early.notes.back().stem = "u0";
+    early.notes.push_back({});
+    early.notes.back().verdict = AVerdictKind::Reject;
+    early.notes.back().target = "src/ui/u1.cpp:Ui1";
+    early.notes.back().stem = "u1";
+    expect(!tuide::a_enough_locate_breadth(early), "breadth blocks early");
+    early.peeks_used = 10;
+    expect(tuide::a_enough_locate_breadth(early), "breadth ok after peeks");
+    // Still need cross-module if queue has both families
+    early.queue = q;
+    std::string err2;
+    tuide::ALocus loc;
+    loc.stem = "u0";
+    loc.anchor = "src/ui/u0.cpp:Ui0";
+    loc.role = ALocusRole::Primary;
+    expect(!tuide::a_validate_a_done(early, {loc}, &err2), "cross-module gate");
+    expect(err2.find("cross-módulo") != std::string::npos ||
+               err2.find("familias") != std::string::npos,
+           "cross-module msg");
+    early.notes.push_back({});
+    early.notes.back().verdict = AVerdictKind::Reject;
+    early.notes.back().target = "src/ai/a0.cpp:Ai0";
+    early.notes.back().stem = "a0";
+    expect(tuide::a_validate_a_done(early, {loc}, &err2), "cross-module satisfied");
+  }
+  {
+    // Trail: begin → all reject → invalidate L0
+    AState st;
+    tuide::AVerdict u;
+    u.target = "src/ui/busy.cpp:set_busy_spinner";
+    u.anchor = u.target;
+    u.stem = "busy";
+    u.verdict = AVerdictKind::Useful;
+    u.why = "spinner control";
+    tuide::a_trail_begin(&st, u);
+    expect(st.trail.active, "trail active");
+    expect(st.trail.focus_symbol == "set_busy_spinner", "focus symbol");
+    st.notes.push_back(u);
+    tuide::ALocus hyp;
+    hyp.anchor = u.anchor;
+    hyp.stem = u.stem;
+    hyp.role = ALocusRole::Suspect;
+    st.loci_draft.push_back(hyp);
+
+    tuide::ATrailStack s1;
+    s1.id = "S1";
+    s1.hops.push_back({});
+    s1.hops.back().symbol = "begin_thinking";
+    s1.hops.back().anchor = "src/ai/ai_controller.cpp:begin_thinking";
+    tuide::ATrailStack s2 = s1;
+    s2.id = "S2";
+    s2.hops.back().symbol = "git_busy";
+    st.trail.pending_stacks.clear();
+    st.trail.pending_stacks.push_back(s1);
+    st.trail.pending_stacks.push_back(s2);
+    st.trail.awaiting_judge = true;
+
+    std::vector<tuide::AVerdict> rej;
+    {
+      tuide::AVerdict v;
+      v.target = "S1";
+      v.verdict = AVerdictKind::Reject;
+      rej.push_back(v);
+      v.target = "S2";
+      rej.push_back(v);
+    }
+    std::string err;
+    expect(tuide::a_trail_apply_judge(&st, rej, &err), "apply all-reject");
+    expect(!st.trail.active, "trail cleared after falsify");
+    expect(st.notes.front().verdict == AVerdictKind::Reject, "L0 demoted");
+    expect(st.loci_draft.empty(), "hyp locus dropped");
+  }
+  {
+    // Trail: interesting queues force deepen
+    AState st;
+    tuide::AVerdict u;
+    u.target = "src/ui/busy.cpp:set_busy_spinner";
+    u.anchor = u.target;
+    u.stem = "busy";
+    u.verdict = AVerdictKind::Useful;
+    tuide::a_trail_begin(&st, u);
+    tuide::ATrailStack s1;
+    s1.id = "S1";
+    s1.hops.resize(2);
+    s1.hops[0].symbol = "begin_thinking";
+    s1.hops[0].anchor = "src/ai/ai_controller.cpp:begin_thinking";
+    s1.hops[1].symbol = "set_busy_spinner";
+    st.trail.pending_stacks.clear();
+    st.trail.pending_stacks.push_back(s1);
+    st.trail.awaiting_judge = true;
+    tuide::AVerdict v;
+    v.target = "S1";
+    v.verdict = AVerdictKind::Interesting;
+    v.why = "IA sets busy";
+    std::string err;
+    std::vector<tuide::AVerdict> one = {v};
+    expect(tuide::a_trail_apply_judge(&st, one, &err), "interesting ok");
+    expect(st.trail.active, "still active");
+    expect(st.trail.force_queue.size() == 1 && st.trail.force_queue[0] == "S1", "force S1");
+    expect(tuide::parse_a_verdict_kind("interesting") == AVerdictKind::Interesting,
+           "parse interesting");
+  }
+  {
+    using tuide::ADataFlowKind;
+    using tuide::a_dataflow_classify_line;
+    expect(a_dataflow_classify_line("  agent_busy_.store(false);", "agent_busy_") ==
+               ADataFlowKind::Write,
+           "atomic store → write");
+    expect(a_dataflow_classify_line("  if (agent_busy_.load()) {", "agent_busy_") ==
+               ADataFlowKind::Read,
+           "atomic load → read");
+    expect(a_dataflow_classify_line("  if (agent_busy_.exchange(true)) {", "agent_busy_") ==
+               ADataFlowKind::Write,
+           "atomic exchange → write");
+    expect(a_dataflow_classify_line("  std::atomic<bool> agent_busy_{false};", "agent_busy_") ==
+               ADataFlowKind::Decl,
+           "member decl");
+    expect(a_dataflow_classify_line("  // agent_busy_.store(true);", "agent_busy_") ==
+               ADataFlowKind::Unknown,
+           "comment-only → unknown");
+  }
 
   if (failures) {
     std::cerr << failures << " failure(s)\n";

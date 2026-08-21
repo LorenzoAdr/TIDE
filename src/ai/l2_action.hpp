@@ -13,6 +13,7 @@ enum class L2ActionKind {
   Tools,  // ad-hoc batch (legacy / extras)
   Plan,   // watchlist of path:Symbol targets → runtime builds code pack
   AJudge, // phase A: verdicts over runtime-supplied peeks
+  ATrailJudge, // phase A: interesting/reject over call-stacks
   ADone,  // phase A: stable loci[] → handoff to pack (B)
   Done,
   Edit,

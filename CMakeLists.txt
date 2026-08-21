@@ -338,6 +338,8 @@ add_executable(tuide
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
   src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/ai/l2_explore_a_dataflow.cpp
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
   src/ai/l2_context_budget.cpp
@@ -856,6 +858,7 @@ add_executable(level2_session_test
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
+  tests/l2_explore_a_trail_stub.cpp
 )
 target_include_directories(level2_session_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -875,6 +878,7 @@ add_executable(level2_autonomous_loop_test
   src/ai/l2_grammar.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
+  tests/l2_explore_a_trail_stub.cpp
 )
 target_include_directories(level2_autonomous_loop_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -892,6 +896,7 @@ target_include_directories(l2_context_budget_test PRIVATE
 
 add_executable(l2_action_test
   tests/l2_action_test.cpp
+  tests/l2_explore_a_trail_stub.cpp
   src/ai/l2_action.cpp
   src/ai/l2_explore_a.cpp
   src/ai/search_replace.cpp
@@ -903,7 +908,9 @@ target_include_directories(l2_action_test PRIVATE
 
 add_executable(l2_explore_a_test
   tests/l2_explore_a_test.cpp
+  tests/l2_explore_a_trail_stub.cpp
   src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
 )
 target_include_directories(l2_explore_a_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -930,6 +937,7 @@ add_executable(level2_debrief_test
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
+  tests/l2_explore_a_trail_stub.cpp
 )
 target_include_directories(level2_debrief_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -964,6 +972,8 @@ add_executable(l2_harness_cli
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
   src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/ai/l2_explore_a_dataflow.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp

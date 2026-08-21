@@ -184,7 +184,8 @@ Respond ONLY with JSON:
 {"verdict":"covered|partial|miss","reason":"...","present":["..."],"missing":["..."],"reject":["path:Symbol"],"confidence":0.0}
 
 Rules:
-- verdict=covered: enough implementation context to edit or answer the request (control/state for the asked behavior is present). Prefer covered when the digest shows the real locus, even if extras are thin.
+- verdict=covered: enough implementation context to edit or answer the request (control/state for the asked behavior is present). Prefer covered when the digest shows the real locus, even if extras are thin or some windows are marked Truncated.
+- Truncated / incomplete snippet windows alone do NOT force partial or miss if the control/state locus bodies are present.
 - verdict=partial: related modules but missing key control pieces needed to edit correctly.
 - verdict=miss: mostly unrelated, wrong subsystem, or too shallow (headers-only noise).
 - present/missing: short ENGLISH implementation concepts (snake_case or technical phrases).
