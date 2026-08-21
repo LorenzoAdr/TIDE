@@ -505,6 +505,24 @@ void walk_fortran_symbols(TSNode node, const std::string& source, int depth,
   walk_children(walk_fortran_symbols, node, source, depth, file_path, out);
 }
 
+// Lua `function M.load` / `function M:reset` names are AST index expressions.
+// Shared ts_identifier_name() returns only the first identifier ("M"); use the
+// full name-field span so the outline shows "M.load" / "M:reset". Plain
+// `function foo` / `local function foo` stay on the identifier path.
+std::string lua_function_declaration_name(TSNode function_decl, const std::string& source) {
+  TSNode name = ts_node_child_by_field_name(function_decl, "name", 4);
+  if (ts_node_is_null(name)) {
+    return {};
+  }
+  const char* name_type = ts_node_type(name);
+  if (name_type != nullptr &&
+      (std::strcmp(name_type, "dot_index_expression") == 0 ||
+       std::strcmp(name_type, "method_index_expression") == 0)) {
+    return ts_node_text(name, source);
+  }
+  return ts_identifier_name(name, source);
+}
+
 void walk_lua_symbols(TSNode node, const std::string& source, int depth,
                       const std::string& file_path, std::vector<SymbolInfo>* out) {
   if (ts_node_is_null(node)) {
@@ -516,8 +534,8 @@ void walk_lua_symbols(TSNode node, const std::string& source, int depth,
   }
 
   if (std::strcmp(type, "function_declaration") == 0) {
-    append_symbol(out, SymbolKind::kFunction, field_or_node_name(node, source, "name"), node, depth,
-                  file_path);
+    append_symbol(out, SymbolKind::kFunction, lua_function_declaration_name(node, source), node,
+                  depth, file_path);
     walk_children(walk_lua_symbols, ts_node_child_by_field_name(node, "body", 4), source, depth + 1,
                   file_path, out);
     return;

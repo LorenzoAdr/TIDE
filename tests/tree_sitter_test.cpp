@@ -153,6 +153,59 @@ def baz():
   assert(nested_depth == 1);
 }
 
+void test_parse_lua_dotted_function_symbols() {
+  const std::string source = R"lua(
+local M = {}
+
+function M.load()
+end
+
+function M.reset()
+end
+
+function M:draw()
+end
+
+local function helper()
+end
+
+function plain()
+end
+)lua";
+  const auto symbols = wait_symbols("module.lua", source);
+  assert(!symbols.empty());
+  bool found_load = false;
+  bool found_reset = false;
+  bool found_draw = false;
+  bool found_helper = false;
+  bool found_plain = false;
+  for (const SymbolInfo& sym : symbols) {
+    // Regression: dotted/method names must not collapse to bare "M".
+    assert(sym.name != "f M");
+    if (sym.name == "f M.load") {
+      found_load = true;
+      assert(sym.kind == SymbolKind::kFunction);
+    }
+    if (sym.name == "f M.reset") {
+      found_reset = true;
+    }
+    if (sym.name == "f M:draw") {
+      found_draw = true;
+    }
+    if (sym.name == "f helper") {
+      found_helper = true;
+    }
+    if (sym.name == "f plain") {
+      found_plain = true;
+    }
+  }
+  assert(found_load);
+  assert(found_reset);
+  assert(found_draw);
+  assert(found_helper);
+  assert(found_plain);
+}
+
 void test_simple_pair() {
   const EditorBuffer buffer =
       prepare_buffer("brackets_simple.cpp", {"int main() {", "  return 0;", "}"});
@@ -1062,6 +1115,7 @@ int main() {
   tuide::test_parse_symbols();
   tuide::test_symbols_for_file_wait_cold();
   tuide::test_parse_python_symbols();
+  tuide::test_parse_lua_dotted_function_symbols();
   tuide::test_simple_pair();
   tuide::test_nested();
   tuide::test_ignores_string();
