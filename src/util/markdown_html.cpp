@@ -29,6 +29,31 @@ std::string escape_html(const std::string& s) {
   return out;
 }
 
+// First fence token, trimmed and lowercased (e.g. " Mermaid " -> "mermaid").
+std::string normalize_fence_lang(const std::string& raw) {
+  std::size_t start = 0;
+  while (start < raw.size() &&
+         std::isspace(static_cast<unsigned char>(raw[start]))) {
+    ++start;
+  }
+  std::size_t end = start;
+  while (end < raw.size() &&
+         !std::isspace(static_cast<unsigned char>(raw[end]))) {
+    ++end;
+  }
+  std::string out;
+  out.reserve(end - start);
+  for (std::size_t i = start; i < end; ++i) {
+    out.push_back(static_cast<char>(
+        std::tolower(static_cast<unsigned char>(raw[i]))));
+  }
+  return out;
+}
+
+bool is_mermaid_fence(const std::string& fence_alias) {
+  return normalize_fence_lang(fence_alias) == "mermaid";
+}
+
 const char* css_class_for_scope(SyntaxScope scope) {
   switch (scope) {
     case SyntaxScope::kComment:
@@ -260,6 +285,7 @@ std::string markdown_to_html_impl(const std::string& md, const std::string& titl
   bool in_ul = false;
   bool in_ol = false;
   bool in_quote = false;
+  bool has_mermaid = false;
   std::string code_lang;
   std::string code_body;
 
@@ -291,7 +317,14 @@ std::string markdown_to_html_impl(const std::string& md, const std::string& titl
     close_quote();
   };
   auto flush_code = [&]() {
-    body << "<pre><code>" << highlight_code_html(code_body, code_lang) << "</code></pre>\n";
+    if (is_mermaid_fence(code_lang)) {
+      has_mermaid = true;
+      // Mermaid reads element textContent; escape so raw <>& stay safe in HTML.
+      body << "<pre class=\"mermaid\">" << escape_html(code_body) << "</pre>\n";
+    } else {
+      body << "<pre><code>" << highlight_code_html(code_body, code_lang)
+           << "</code></pre>\n";
+    }
     code_body.clear();
     code_lang.clear();
   };
@@ -407,6 +440,25 @@ std::string markdown_to_html_impl(const std::string& md, const std::string& titl
   }
 
   const std::string escaped_title = escape_html(title);
+  std::string mermaid_tail;
+  if (has_mermaid) {
+    // CDN load requires network; offline preview keeps the source text visible.
+    mermaid_tail =
+        "<script src=\"https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js\">"
+        "</script>\n"
+        "<script>\n"
+        "(function(){\n"
+        "  var dark = window.matchMedia && "
+        "window.matchMedia('(prefers-color-scheme: dark)').matches;\n"
+        "  mermaid.initialize({\n"
+        "    startOnLoad: true,\n"
+        "    theme: dark ? 'dark' : 'default',\n"
+        "    securityLevel: 'strict'\n"
+        "  });\n"
+        "})();\n"
+        "</script>\n";
+  }
+
   return "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n"
          "<meta charset=\"UTF-8\">\n"
          "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
@@ -451,6 +503,8 @@ std::string markdown_to_html_impl(const std::string& md, const std::string& titl
          "pre{background:var(--pre-bg);border:1px solid var(--border);padding:1em 1.1em;"
          "border-radius:8px;overflow-x:auto;}\n"
          "pre code{color:var(--fg);background:none;padding:0;font-size:.88em;}\n"
+         "pre.mermaid{background:transparent;border:none;padding:1em 0;text-align:center;"
+         "overflow-x:auto;}\n"
          ".tok-comment{color:var(--tok-comment);font-style:italic;}\n"
          ".tok-string{color:var(--tok-string);}\n"
          ".tok-number{color:var(--tok-number);}\n"
@@ -468,7 +522,7 @@ std::string markdown_to_html_impl(const std::string& md, const std::string& titl
          "ul,ol{padding-left:1.6em;}\n"
          "li{margin:.25em 0;}\n"
          "hr{border:none;border-top:2px solid var(--hr);margin:1.8em 0;}\n"
-         "</style>\n</head>\n<body>\n" + body.str() + "</body>\n</html>\n";
+         "</style>\n</head>\n<body>\n" + body.str() + mermaid_tail + "</body>\n</html>\n";
 }
 
 }  // namespace
