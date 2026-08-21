@@ -287,6 +287,10 @@ const char* l2_action_kind_name(L2ActionKind kind) {
       return "tools";
     case L2ActionKind::Plan:
       return "plan";
+    case L2ActionKind::AJudge:
+      return "a_judge";
+    case L2ActionKind::ADone:
+      return "a_done";
     case L2ActionKind::Done:
       return "done";
     case L2ActionKind::Edit:
@@ -359,6 +363,27 @@ L2Action parse_l2_action(const std::string& model_text) {
       out.summary = j.value("summary", "");
       std::string err;
       if (!parse_targets_array(j, &out.targets, &err)) {
+        out.kind = L2ActionKind::Error;
+        out.error = err;
+      }
+      return out;
+    }
+    if (action == "a_judge" || action == "judge") {
+      out.kind = L2ActionKind::AJudge;
+      out.summary = j.value("summary", "");
+      out.a_turn_done = j.value("done", false);
+      std::string err;
+      if (!parse_a_verdicts_array(j, &out.a_verdicts, &err)) {
+        out.kind = L2ActionKind::Error;
+        out.error = err;
+      }
+      return out;
+    }
+    if (action == "a_done" || action == "locate_done") {
+      out.kind = L2ActionKind::ADone;
+      out.summary = j.value("summary", "");
+      std::string err;
+      if (!parse_a_loci_array(j, &out.a_loci, &err)) {
         out.kind = L2ActionKind::Error;
         out.error = err;
       }

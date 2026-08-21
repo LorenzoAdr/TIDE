@@ -550,9 +550,9 @@ Orden estricto; cada fase tiene criterio de salida comprobable. **No estimar cal
 
 ## 15. Checklist de handoff a implementación
 
-- [ ] Aprobar este plan (contratos JSON + presupuestos + gates A vs B).
-- [ ] P0 feature flag + schemas.
-- [ ] P1 cola índice local.
+- [x] Aprobar este plan (contratos JSON + presupuestos + gates A vs B). *(doc en main)*
+- [x] P0 feature flag + schemas. *(flag off; `a_judge`/`a_done`; tipos `l2_explore_a`)*
+- [x] P1 cola índice local. *(`build_a_scan_queue` / diversify / `#tail` policy)*
 - [ ] P2 loop A scripted.
 - [ ] P3 expansión cola.
 - [ ] P4 B ← loci + micro-A.

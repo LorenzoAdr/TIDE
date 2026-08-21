@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "ai/l2_explore_a.hpp"
 #include "ai/search_replace.hpp"
 
 namespace tuide {
@@ -11,6 +12,8 @@ enum class L2ActionKind {
   Tool,
   Tools,  // ad-hoc batch (legacy / extras)
   Plan,   // watchlist of path:Symbol targets → runtime builds code pack
+  AJudge, // phase A: verdicts over runtime-supplied peeks
+  ADone,  // phase A: stable loci[] → handoff to pack (B)
   Done,
   Edit,
   Synthesize,  // ask/plan/git: natural-language answer / plan doc → done
@@ -32,6 +35,9 @@ struct L2Action {
   std::string summary;
   std::string next;  // edit | clarify | empty
   std::vector<SearchReplaceHunk> hunks;
+  std::vector<AVerdict> a_verdicts;  // a_judge
+  std::vector<ALocus> a_loci;        // a_done
+  bool a_turn_done = false;          // a_judge.done hint (early-stop request)
   std::string error;
   std::string raw;
 };

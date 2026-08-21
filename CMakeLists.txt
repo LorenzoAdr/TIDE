@@ -335,6 +335,7 @@ add_executable(tuide
   src/ai/level2_session.cpp
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
+  src/ai/l2_explore_a.cpp
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
   src/ai/l2_context_budget.cpp
@@ -864,6 +865,7 @@ add_executable(level2_autonomous_loop_test
   src/ai/l2_context_budget.cpp
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
+  src/ai/l2_explore_a.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
@@ -887,9 +889,19 @@ target_include_directories(l2_context_budget_test PRIVATE
 add_executable(l2_action_test
   tests/l2_action_test.cpp
   src/ai/l2_action.cpp
+  src/ai/l2_explore_a.cpp
   src/ai/search_replace.cpp
 )
 target_include_directories(l2_action_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_explore_a_test
+  tests/l2_explore_a_test.cpp
+  src/ai/l2_explore_a.cpp
+)
+target_include_directories(l2_explore_a_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
@@ -946,6 +958,7 @@ add_executable(l2_harness_cli
   src/ai/ai_path_scope.cpp
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
+  src/ai/l2_explore_a.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
@@ -1316,6 +1329,7 @@ set(TUIDE_TEST_TARGETS
   level2_debrief_test
   l2_context_budget_test
   l2_action_test
+  l2_explore_a_test
   l2_pack_review_test
   search_replace_test
   llama_backend_test

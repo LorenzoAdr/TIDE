@@ -138,6 +138,27 @@ int main() {
     expect(a.hunks[0].replace.find("always_true") != std::string::npos, "keeps always_true replace");
   }
 
+  {
+    const auto a = parse_l2_action(
+        R"({"action":"a_judge","verdicts":[{"target":"src/a.cpp:Foo#tail","verdict":"useful",
+        "anchor":"src/a.cpp:90","stem":"a","role":"primary","why":"gate"}],"done":false})");
+    expect(a.kind == L2ActionKind::AJudge, "a_judge kind");
+    expect(a.a_verdicts.size() == 1 && a.a_verdicts[0].stem == "a", "a_judge verdict");
+    expect(!a.a_turn_done, "a_judge done false");
+  }
+  {
+    const auto a = parse_l2_action(
+        R"({"action":"a_done","loci":[{"stem":"wake","anchor":"src/ui/wake.cpp:tick","role":"primary",
+        "why":"policy"}],"summary":"locked"})");
+    expect(a.kind == L2ActionKind::ADone, "a_done kind");
+    expect(a.a_loci.size() == 1 && a.a_loci[0].anchor == "src/ui/wake.cpp:tick", "a_done locus");
+    expect(a.summary == "locked", "a_done summary");
+  }
+  {
+    const auto a = parse_l2_action(R"({"action":"a_done","loci":[]})");
+    expect(a.kind == L2ActionKind::Error, "a_done empty loci");
+  }
+
   if (failures) {
     std::cerr << failures << " failure(s)\n";
     return 1;

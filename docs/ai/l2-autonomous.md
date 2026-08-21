@@ -111,6 +111,13 @@ Banner: `L2 ▸ arranque autónomo (remote n_ctx=32768 pack≈36000) …`.
   4–8 targets anclados). Máx. ~8 tools sueltos antes del primer plan (soft `_nudge:_`).
   Tras pack cubierto: extras con `tools` batch (máx. 4); si siguen las tools, otro
   `_nudge:_` pide `done next=edit`. No repetir path con ventanas solapadas.
+
+> **Experimental — Phase A locate (`L2_EXPLORE_PHASE_A`):** diseño en
+> [`docs/plans/l2-explore-phase-a-b.md`](../plans/l2-explore-phase-a-b.md). Flag **off** por
+> defecto. Cuando esté on, explore se parte en `explore_a` (peeks → `a_judge`/`a_done` →
+> `loci[]`, sin `pack.md`) y `explore_b` (pack rígido desde loci). Hoy solo están el
+> contrato JSON y tipos (`l2_explore_a`); el loop aún no cambia el camino mezclado.
+
   El runtime **merge** watchlists (plan2 no pisa plan1; bootstrap resetea `pack.md` /
   watchlist — no reinyecta targets de una sesión previa), normaliza bare→símbolo/ventana por
   outline + **search-in-file** (prioriza search; rechaza símbolos basura tipo `const`),
