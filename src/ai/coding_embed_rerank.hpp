@@ -82,15 +82,27 @@ std::string build_semantic_embed_query(const std::string& query,
                                        const std::vector<std::string>& semantic_tokens,
                                        std::size_t max_tokens = 12);
 
+// Hybrid L1 embed query: short intent + user-named symptoms (reserved) + L1 tokens.
+// Symptoms are matched as substrings in user_message (spinner, busy, cancel, …).
+std::string build_hybrid_embed_query(const std::string& intent,
+                                     const std::string& user_message,
+                                     const std::vector<std::string>& semantic_tokens,
+                                     std::size_t max_tokens = 12);
+
+// Optional override for body-pool passages (e.g. Effect Summary cards).
+using BodyPassageFn = std::function<std::string(const RepoMapEntry& e)>;
+
 struct BodySemanticRerankOptions {
-  std::string query;
+  std::string query;  // used when hybrid_query is empty (legacy nl+tokens)
+  std::string hybrid_query;  // if set, embed this directly (skip build_semantic_embed_query)
   std::vector<std::string> semantic_tokens;
   std::string workspace_root;
   std::size_t body_pool = 40;
   std::size_t final_top = 120;
   int body_max_lines = 80;
   // Soft cap before embed backend truncate (raise with embed n_ctx).
-  std::size_t body_max_embed_chars = 1200;
+  // With n_parallel=8 / n_ctx=2048 each slot ≈256 tokens — prefer ≤500 chars.
+  std::size_t body_max_embed_chars = 500;
   // Max tokens appended to the embed query (noisy L1 lists dilute cosine).
   std::size_t max_semantic_tokens = 12;
   // Additive body_cos * scale on score_base (keeps lexical order among peers).
@@ -98,6 +110,8 @@ struct BodySemanticRerankOptions {
   int max_per_file = 8;
   int max_per_stem = 2;
   int max_per_dir = 12;
+  // If set, used instead of get_code_of for pool passages.
+  BodyPassageFn passage_fn;
 };
 
 struct BodySemanticRerankResult {

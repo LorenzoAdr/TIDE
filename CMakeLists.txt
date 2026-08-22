@@ -163,6 +163,7 @@ add_executable(tuide
   src/ui/lsp_missing_toast.cpp
   src/ui/ai_missing_toast.cpp
   src/ui/shortcuts_modal.cpp
+  src/ui/console_expand_overlay.cpp
   src/ui/settings_modal.cpp
   src/ui/source_substitute_modal.cpp
   src/ui/theme.cpp
@@ -340,6 +341,7 @@ add_executable(tuide
   src/ai/l2_explore_a.cpp
   src/ai/l2_explore_a_trail.cpp
   src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_effect_summary.cpp
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
   src/ai/l2_context_budget.cpp
@@ -855,6 +857,7 @@ add_executable(level2_session_test
   src/ai/l2_context_budget.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
@@ -873,6 +876,7 @@ add_executable(level2_autonomous_loop_test
   src/ai/search_replace.cpp
   src/ai/l2_action.cpp
   src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
@@ -917,6 +921,26 @@ target_include_directories(l2_explore_a_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(l2_trail_build_test
+  tests/l2_trail_build_test.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_trail_build_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_trail_build_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+
 add_executable(l2_pack_review_test
   tests/l2_pack_review_test.cpp
   src/ai/l2_pack_review.cpp
@@ -934,6 +958,7 @@ add_executable(level2_debrief_test
   src/ai/l2_context_budget.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
   src/ai/search_replace.cpp
   src/ai/ai_trace.cpp
   src/ai/ai_path_scope.cpp
@@ -974,6 +999,7 @@ add_executable(l2_harness_cli
   src/ai/l2_explore_a.cpp
   src/ai/l2_explore_a_trail.cpp
   src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_effect_summary.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
@@ -1349,6 +1375,7 @@ set(TUIDE_TEST_TARGETS
   l2_context_budget_test
   l2_action_test
   l2_explore_a_test
+  l2_trail_build_test
   l2_pack_review_test
   search_replace_test
   llama_backend_test

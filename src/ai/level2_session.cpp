@@ -18,6 +18,8 @@
 #include "ai/ai_types.hpp"
 #include "ai/ai_path_scope.hpp"
 #include "ai/l2_explore_a.hpp"
+#include "ai/l2_effect_summary.hpp"
+#include "ai/l2_feat.hpp"
 #include "ai/l2_feat.hpp"
 #include "ai/l2_pack_review.hpp"
 
@@ -3001,7 +3003,8 @@ No repitas el mismo get_code_of. Refetch solo con path:A-B distinto.
 std::string Level2Session::tool_guide_explore_a_markdown() {
   return R"(## Tool guide (explore_a — edit site + trail)
 JSON only. PROHIBIDO plan/tool/edit/pack.
-primary/useful = editarías una línea ahí para matar el síntoma. UI/keyword → reject.
+useful = hipótesis (estado/busy/flag/API del síntoma); el trail profundiza — no hace falta
+el edit site exacto en el peek. Getters OK. UI cosmético / cancel LSP genérico → reject.
 Máx 1 useful/vuelta → el runtime abre call-stacks (trail); no corones primary aún.
 Trail: {"action":"a_trail_judge","verdicts":[{"target":"S2","verdict":"interesting","why":"…"},
 {"target":"S1","verdict":"reject","why":"…"}]}
@@ -3714,9 +3717,20 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   if (phase_a) {
     AState ast;
     if (!map_stale) {
-      const auto inputs = a_queue_inputs_from_ranked_map_markdown(map_body, 80);
+      tuide::AQueueMapFilterOpts fopts;
+      fopts.want_n = 80;
+      fopts.orphans = opts.seeds;
+      const auto inputs =
+          tuide::a_queue_inputs_from_ranked_map_filtered(map_body, fopts, opts.workspace_root);
       if (!inputs.empty()) {
         a_state_seed_queue(&ast, inputs, {});
+      }
+    }
+    if (a_effect_summary_enabled()) {
+      ast.a_subphase = "a0_sniff";
+      ast.seeds = opts.seeds;
+      if (ast.seeds.empty() && !opts.query.empty()) {
+        ast.seeds.push_back(opts.query);
       }
     }
     std::string aerr;
@@ -4255,6 +4269,144 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
     return out;
   }
 
+  AState ast = load_a_state(workspace_root);
+
+  // --- A0 Effect Summary sniff (fichas, not body peeks) ---
+  if (a_in_a0_sniff(ast)) {
+    int batch_expand = 0;
+    int batch_reject = 0;
+    std::vector<AVerdict> normalized;
+    normalized.reserve(verdicts.size());
+    for (AVerdict v : verdicts) {
+      a_normalize_verdict(&v);
+      if (v.verdict == AVerdictKind::Useful) {
+        v.verdict = AVerdictKind::Expand;
+        if (v.expand_with == AExpandModality::None) {
+          v.expand_with = AExpandModality::Peek;
+        }
+      }
+      if (v.verdict == AVerdictKind::Expand) {
+        ++batch_expand;
+        if (v.expand_with == AExpandModality::None) {
+          v.expand_with = AExpandModality::Peek;
+        }
+        v.expand_with = a_coerce_a0_expand_modality(v.target, v.expand_with, nullptr);
+      } else if (v.verdict == AVerdictKind::Reject) {
+        ++batch_reject;
+      }
+      normalized.push_back(v);
+    }
+    if (batch_expand > kA0MaxExpandPerTurn) {
+      out.error = "a0: máx " + std::to_string(kA0MaxExpandPerTurn) + " expand/vuelta";
+    } else if (batch_expand == 0 && batch_reject == 0) {
+      out.error = "a0: marca reject en glue o expand si hot/writes/calls cuadra con seeds";
+    }
+    if (!out.error.empty()) {
+      std::ostringstream obs;
+      obs << "### a_judge A0 rechazado — " << out.error << "\n";
+      append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
+      write_response_json(workspace_root, false, "a_judge", "", "", "", out.error, st.turn,
+                          st.phase);
+      return out;
+    }
+    std::string a0err;
+    if (!a_apply_a0_verdicts(&ast, normalized, &a0err, &workspace_root)) {
+      out.error = a0err.empty() ? "a0_judge inválido" : a0err;
+      append_observation(workspace_root, std::string("### a_judge A0 — ") + out.error + "\n",
+                         &out.session_chars, nullptr);
+      write_response_json(workspace_root, false, "a_judge", "", "", "", out.error, st.turn,
+                          st.phase);
+      return out;
+    }
+    const std::string session_body = read_file(session_path(workspace_root));
+    const auto needles = session_pack_needles(session_body);
+    ast.orphans = a_compute_orphans(ast, needles);
+    if (ast.cursor >= static_cast<int>(ast.queue.size()) && ast.a1_queue.empty()) {
+      maybe_expand_a_queue(&ast, ast.orphans);
+    }
+    std::string err;
+    if (!save_a_state(workspace_root, ast, &err)) {
+      out.error = err.empty() ? "no se pudo guardar a_state" : err;
+      return out;
+    }
+    write_file(a_notes_path(workspace_root), a_notes_markdown_compact(ast), nullptr);
+    st.phase = "explore_a";
+    st.last_action = "a_judge";
+    ++st.turn;
+    if (!save_state(workspace_root, st, &err)) {
+      out.error = err.empty() ? "no se pudo guardar state" : err;
+      return out;
+    }
+    std::ostringstream obs;
+    obs << "### a_judge A0 turn=" << ast.a0_turns << " cards_used=" << ast.cards_used
+        << " cursor=" << ast.cursor << "/" << ast.queue.size();
+    if (ast.a1_active_set) {
+      obs << " → A1 " << a_expand_modality_name(ast.a1_active.modality) << " `"
+          << ast.a1_active.target << "`";
+    }
+    obs << "\n";
+    append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
+    append_trace(workspace_root,
+                 std::string("{\"event\":\"a0_judge\",\"cards_used\":") +
+                     std::to_string(ast.cards_used) + ",\"a0_turns\":" +
+                     std::to_string(ast.a0_turns) + ",\"expand_queue\":" +
+                     std::to_string(ast.a1_queue.size()) + "}");
+    out.ok = true;
+    out.phase = st.phase;
+    out.summary = "a0 expand=" + std::to_string(batch_expand) + " reject=" +
+                  std::to_string(batch_reject);
+    return out;
+  }
+
+  // --- A1 suspect vars (post-trail → dataflow queue) ---
+  if (a_effect_summary_enabled() && ast.a_subphase == "a1_suspect_vars") {
+    std::string serr;
+    if (!a_apply_a1_suspect_verdicts(&ast, verdicts, &serr)) {
+      out.error = serr.empty() ? "a1_suspect inválido" : serr;
+      append_observation(workspace_root, std::string("### a_judge A1 suspect — ") + out.error + "\n",
+                         &out.session_chars, nullptr);
+      write_response_json(workspace_root, false, "a_judge", "", "", "", out.error, st.turn,
+                          st.phase);
+      return out;
+    }
+    std::string err;
+    if (!save_a_state(workspace_root, ast, &err)) {
+      out.error = err.empty() ? "no se pudo guardar a_state" : err;
+      return out;
+    }
+    write_file(a_notes_path(workspace_root), a_notes_markdown_compact(ast), nullptr);
+    st.phase = "explore_a";
+    st.last_action = "a_judge";
+    ++st.turn;
+    if (!save_state(workspace_root, st, &err)) {
+      out.error = err.empty() ? "no se pudo guardar state" : err;
+      return out;
+    }
+    std::ostringstream obs;
+    obs << "### a_judge A1 suspect turn=" << ast.turns;
+    if (ast.a1_active_set) {
+      obs << " → dataflow `" << ast.a1_active.suspect_var << "` @ `" << ast.a1_active.target
+          << "`";
+    } else {
+      obs << " → sin vars (vuelve A0)";
+    }
+    obs << "\n";
+    append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
+    out.ok = true;
+    out.phase = st.phase;
+    out.summary = ast.a1_active_set ? "a1_suspect→dataflow" : "a1_suspect→a0";
+    return out;
+  }
+
+  // --- A1 confirm after expand (classic useful allowed) ---
+  if (a_effect_summary_enabled() && ast.a1_active_set &&
+      ast.a_subphase.rfind("a1_", 0) == 0) {
+    // Fall through to classic batch gate below, then clear a1_active at end.
+  } else if (a_effect_summary_enabled() && !ast.a_subphase.empty() &&
+             ast.a_subphase.rfind("a1_", 0) == 0) {
+    ast.a_subphase = "a0_sniff";
+  }
+
   // Strict batch gate: 7B loves "everything useful". Refuse before mutating state/cursor.
   // Peek "interesting" ≡ useful (hypothesis → trail); trail stacks use a_trail_judge.
   {
@@ -4278,20 +4430,17 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
     if (batch_useful > 1) {
       out.error =
           "a_judge: máx 1 useful/interesting por vuelta (got " + std::to_string(batch_useful) +
-          "). El resto de peeks → reject|uncertain. useful = editarías ahí para el bug.";
-    } else if (multi && batch_useful >= 1 && batch_reject == 0) {
-      out.error =
-          "a_judge: batch sin contraste (useful sin reject). Marca competidores "
-          "(UI/spinner/keyword) como reject; solo 1 useful si editarías ahí.";
+          "). Resto → reject|uncertain. useful = hipótesis (estado/busy/flag); el trail profundiza.";
     } else if (multi && batch_useful == 0 && batch_reject == 0) {
       out.error =
-          "a_judge: todos uncertain no avanza — marca reject en peeks no-editables "
-          "o 1 useful/interesting si hay locus claro.";
+          "a_judge: todos uncertain no avanza — marca reject en traps claros "
+          "o 1 useful si hay estado/API del síntoma (getter/flag OK).";
     }
+    // Contrast useful+reject ya no es obligatorio: uncertain basta; el trail falsifica.
     if (!out.error.empty()) {
       std::ostringstream obs;
       obs << "### a_judge rechazado — " << out.error << "\n"
-          << "_nudge:_ Phase A severa. Misma tranche de peeks; reemite a_judge.\n";
+          << "_nudge:_ Misma tranche; reemite a_judge. useful abre trail, no corona edit site.\n";
       append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
       write_response_json(workspace_root, false, "a_judge", "", "", "", out.error, st.turn,
                           st.phase);
@@ -4299,7 +4448,7 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
     }
   }
 
-  AState ast = load_a_state(workspace_root);
+  const bool a1_confirm = a_effect_summary_enabled() && ast.a1_active_set;
   const int tranche =
       std::min(kAMaxPeeksPerTurn, std::max(0, static_cast<int>(ast.queue.size()) - ast.cursor));
   int primary_n = 0;
@@ -4432,25 +4581,58 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
            "{\"action\":\"done\",\"summary\":\"A sin locus; orphans="
         << ast.orphans.size() << "\",\"next\":\"clarify\"} o a_done si hay suspect débil.\n";
   } else if (useful >= 2 && reject == 0) {
-    obs << "_nudge:_ tienes " << useful
-        << " useful y 0 reject. Phase A es severa: si NO editarías ahí para el bug de la "
-           "Instruction → `reject` (UI/spinner/keyword ≠ control). Solo entonces `a_done` "
-           "con ≤"
-        << kAMaxPrimaryLoci << " primary.\n";
+    obs << "_nudge:_ varios useful sin reject — el trail falsifica; sigue con a_trail_judge "
+           "o a_done con ≤"
+        << kAMaxPrimaryLoci << " primary cuando un hop sea el edit site.\n";
   } else if (stable) {
     obs << "_nudge:_ contraste OK (useful+reject). ";
     if (ast.trail.active) {
-      obs << "Trail activa — emite `a_trail_judge` sobre los stacks (interesting|reject), "
+      obs << "Trail activa — emite `a_trail_judge` (interesting|reject) sobre ramas "
+             "`ON`|`CXL`|`OFF`|`LINK` y/o pilas S*, "
              "no a_done todavía.\n";
     } else {
       obs << "Emite `a_done` con ≤" << kAMaxPrimaryLoci
-          << " primary (dónde editarías). Phase B trae el barrio.\n";
+          << " primary cuando el trail/hop diga dónde editar. Phase B trae el barrio.\n";
     }
   } else if (ast.trail.active) {
     obs << "_nudge:_ useful = hipótesis. Revisa call-stacks con `a_trail_judge` "
            "(interesting|reject). Si todos reject → L0 se invalida.\n";
   }
   append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
+
+  if (a1_confirm) {
+    bool df_backtrack = false;
+    if (ast.a_subphase == "a1_dataflow" && ast.trail.active && !ast.a1_trail_recap.empty()) {
+      for (const auto& v : verdicts) {
+        AVerdict nv = v;
+        a_normalize_verdict(&nv);
+        if (nv.verdict == AVerdictKind::Reject) {
+          df_backtrack = true;
+          break;
+        }
+      }
+    }
+    if (df_backtrack) {
+      a_a1_backtrack_to_trail(&ast);
+      save_a_state(workspace_root, ast, nullptr);
+      append_observation(workspace_root,
+                         "_nudge:_ dataflow reject — trail reabierta; profundiza pila "
+                         "interesting o elige otra var.\n",
+                         &out.session_chars, nullptr);
+      out.summary += " a1_df_reject→trail";
+    } else {
+      ast.a1_active_set = false;
+      ast.a1_active = {};
+      if (!ast.a1_queue.empty()) {
+        a_a1_begin_job(&ast, ast.a1_queue.front());
+        ast.a1_queue.erase(ast.a1_queue.begin());
+      } else {
+        a_a1_clear_trail_frame(&ast);
+        ast.a_subphase = "a0_sniff";
+      }
+      save_a_state(workspace_root, ast, nullptr);
+    }
+  }
 
   out.ok = true;
   out.phase = st.phase;
@@ -4719,6 +4901,9 @@ bool Level2Session::refresh_a_trail_stacks(const std::string& workspace_root, AS
   ast->trail.pending_stacks =
       a_trail_build_full_stacks(workspace_root, focus_sym, focus_path, search_fn,
                                 kATrailMaxStacks, kATrailMaxDepth);
+  ast->trail.cond_branches =
+      a_trail_build_cond_branches(workspace_root, focus_sym, focus_path, ast->seeds, search_fn,
+                                  ast->trail.pending_stacks);
   ast->trail.awaiting_judge = true;
   return true;
 }
@@ -4739,6 +4924,7 @@ Level2TurnResult Level2Session::apply_a_trail_judge(const std::string& workspace
   }
   AState ast = load_a_state(workspace_root);
   std::string err;
+  const std::string prev_subphase = ast.a_subphase;
   if (!a_trail_apply_judge(&ast, verdicts, &err)) {
     out.error = err.empty() ? "a_trail_judge inválido" : err;
     std::ostringstream obs;
@@ -4749,8 +4935,27 @@ Level2TurnResult Level2Session::apply_a_trail_judge(const std::string& workspace
     return out;
   }
 
-  // If trail still active with force_queue: deepen first interesting stack
-  if (ast.trail.active && !ast.trail.force_queue.empty()) {
+  // A1 trail → suspect vars before dataflow (one pass).
+  bool defer_trail_deepen = false;
+  if (a_effect_summary_enabled() && prev_subphase == "a1_trail" && !ast.a1_suspect_done) {
+    int interesting = 0;
+    for (const auto& v : verdicts) {
+      AVerdict nv = v;
+      a_normalize_verdict(&nv);
+      if (nv.verdict == AVerdictKind::Interesting) {
+        ++interesting;
+      }
+    }
+    if (interesting > 0) {
+      a_fill_a1_trail_frame(&ast, verdicts);
+      ast.a_subphase = "a1_suspect_vars";
+      ast.a1_suspect_done = true;
+      defer_trail_deepen = true;
+    }
+  }
+
+  // If trail still active with force_queue: deepen first interesting stack or cond branch
+  if (!defer_trail_deepen && ast.trail.active && !ast.trail.force_queue.empty()) {
     const std::string sid = ast.trail.force_queue.front();
     ast.trail.force_queue.erase(ast.trail.force_queue.begin());
     const ATrailStack* chosen = nullptr;
@@ -4760,7 +4965,75 @@ Level2TurnResult Level2Session::apply_a_trail_judge(const std::string& workspace
         break;
       }
     }
-    if (chosen != nullptr && chosen->hops.size() >= 2) {
+    const ATrailCondBranch* cbranch = nullptr;
+    if (chosen == nullptr) {
+      for (const auto& b : ast.trail.cond_branches) {
+        if (b.id == sid) {
+          cbranch = &b;
+          break;
+        }
+      }
+    }
+    if (cbranch != nullptr) {
+      ATrailHop parent;
+      parent.path = cbranch->path;
+      parent.symbol = cbranch->symbol;
+      parent.anchor = cbranch->anchor.empty()
+                          ? (cbranch->path + ":" + (cbranch->symbol.empty() ? cbranch->id
+                                                                              : cbranch->symbol))
+                          : cbranch->anchor;
+      if (parent.symbol.empty() && cbranch->id == "LINK") {
+        for (const auto& b : ast.trail.cond_branches) {
+          if (b.id == "CXL" && !b.symbol.empty()) {
+            parent.symbol = b.symbol;
+            if (parent.anchor.find(':') == std::string::npos && !b.path.empty()) {
+              parent.anchor = b.path + ":" + b.symbol;
+            }
+            break;
+          }
+        }
+      }
+      parent.summary =
+          cbranch->then_text.empty() ? cbranch->id : (cbranch->id + " — " + cbranch->then_text);
+      bool dup = false;
+      for (const auto& h : ast.trail.trail) {
+        if (h.anchor == parent.anchor) {
+          dup = true;
+          break;
+        }
+      }
+      if (!dup) {
+        ast.trail.trail.push_back(parent);
+      }
+      ast.trail.focus_anchor = parent.anchor;
+      ast.trail.focus_symbol =
+          parent.symbol.empty() ? ast.trail.focus_symbol : parent.symbol;
+      ++ast.trail.depth;
+      if (ast.trail.depth >= kATrailMaxDepth) {
+        ALocus loc;
+        loc.anchor = ast.trail.focus_anchor;
+        loc.role = ALocusRole::Primary;
+        loc.why = "trail depth cap — rama condicional candidata";
+        a_normalize_locus(&loc);
+        bool have = false;
+        for (auto& d : ast.loci_draft) {
+          if (d.anchor == loc.anchor || d.stem == loc.stem) {
+            d.role = ALocusRole::Primary;
+            have = true;
+            break;
+          }
+        }
+        if (!have) {
+          ast.loci_draft.push_back(std::move(loc));
+        }
+        a_cap_locus_roles(&ast.loci_draft);
+        ast.trail.awaiting_judge = false;
+        ast.trail.force_queue.clear();
+        ast.trail.pending_stacks.clear();
+      } else {
+        refresh_a_trail_stacks(workspace_root, &ast, nullptr);
+      }
+    } else if (chosen != nullptr && chosen->hops.size() >= 2) {
       // Hop just above L0 (second-to-last) becomes new focus — or frontmost interesting caller
       const ATrailHop& next = chosen->hops.front();
       // Compact previous focus into trail summaries
@@ -4864,6 +5137,184 @@ Level2TurnResult Level2Session::apply_a_trail_judge(const std::string& workspace
 std::string Level2Session::build_a_peek_tranche_markdown(const std::string& workspace_root,
                                                          int max_peeks) {
   AState ast = load_a_state(workspace_root);
+
+  // A1 expansion: one modality per turn (mutex hard).
+  if (a_effect_summary_enabled() && ast.a_subphase == "a1_suspect_vars") {
+    std::ostringstream out;
+    out << "## A1 suspect vars (post-trail)\n";
+    out << "L0 `" << ast.a1_job_root << "`";
+    if (!ast.a1_df_caller_anchor.empty()) {
+      out << " · caller interesting `" << ast.a1_df_caller_anchor << "`";
+    }
+    out << "\n\n";
+    if (!ast.a1_trail_recap.empty()) {
+      out << ast.a1_trail_recap;
+    } else if (!ast.a1_suspect_context.empty()) {
+      out << ast.a1_suspect_context;
+    } else {
+      out << "_(sin contexto de pilas)_\n";
+    }
+    out << "\n¿Qué variable/campo de estado controla el síntoma **en esa rama**?\n";
+    out << "Solo vars plausibles en el snippet; máx 2.\n";
+    out << "Responde {\"action\":\"a_judge\",\"phase\":\"a1_suspect_vars\",\"verdicts\":["
+           "{\"target\":\"src/ai/ai_controller.hpp:agent_busy_\",\"verdict\":\"expand\","
+           "\"expand_with\":\"dataflow\",\"suspect_var\":\"agent_busy_\","
+           "\"why\":\"flag en caller interesting\"}],\"done\":false}\n";
+    out << "Si ninguna clara → verdicts:[].\n";
+    return out.str();
+  }
+
+  if (a_effect_summary_enabled() && ast.a1_active_set) {
+    const AExpansionItem& item = ast.a1_active;
+    std::ostringstream out;
+    out << "## A1 confirmación (" << a_expand_modality_name(item.modality) << ")\n";
+    out << "target `" << item.target << "` — responde a_judge con useful|reject|uncertain "
+           "(useful solo tras esta evidencia).\n\n";
+
+    if (item.modality == AExpandModality::Dataflow) {
+      std::string var = item.suspect_var;
+      if (var.empty() && !ast.seeds.empty()) {
+        var = ast.seeds.front();
+      }
+      const std::string path_hint = a_a1_dataflow_path_hint(ast, item);
+      if (!ast.a1_trail_recap.empty()) {
+        out << "## Trail (hipótesis — dataflow debe cuadrar con esta rama)\n";
+        out << ast.a1_trail_recap;
+        if (!ast.a1_df_caller_anchor.empty()) {
+          out << "caller scope: `" << ast.a1_df_caller_anchor << "`\n\n";
+        }
+      }
+      out << "## Dataflow `" << var << "` scoped `" << path_hint << "`\n\n";
+      auto search_fn = [&](const std::string& symbol) -> std::vector<ATrailSearchHit> {
+        if (symbol.empty() || deps_.tools == nullptr || !deps_.tools->has("search")) {
+          return {};
+        }
+        std::string q = symbol;
+        if (!path_hint.empty()) {
+          q += " path:" + path_hint;
+        } else {
+          q += " path:src/";
+        }
+        const AiToolResult tr = deps_.tools->invoke("search", q);
+        if (!tr.ok) {
+          return {};
+        }
+        return parse_search_tool_hits(tr.text, workspace_root);
+      };
+      const auto report =
+          a_dataflow_build_with_search(workspace_root, var, path_hint, search_fn);
+      out << a_dataflow_markdown(report);
+      out << "\nResponde `a_judge`: useful solo si hits explican el síntoma **en esta rama** "
+             "(coherente con trail).\n";
+      out << "reject si la var no encaja o hits fuera del caller interesting → runtime "
+             "reabre trail.\n";
+      return out.str();
+    }
+
+    if (item.modality == AExpandModality::Trail) {
+      if (!ast.trail.active) {
+        AVerdict seed;
+        seed.target = item.target;
+        seed.verdict = AVerdictKind::Useful;
+        seed.anchor = item.target;
+        const auto hash = seed.anchor.find('#');
+        if (hash != std::string::npos) {
+          seed.anchor = seed.anchor.substr(0, hash);
+        }
+        a_trail_begin(&ast, seed);
+        refresh_a_trail_stacks(workspace_root, &ast, nullptr);
+        save_a_state(workspace_root, ast, nullptr);
+      }
+      return a_trail_stacks_markdown(ast.trail) +
+             "\nResponde `a_trail_judge` o `a_judge` si el stack confirma edit site.\n";
+    }
+
+    // Default: peek
+    out << "### peek `" << item.target << "`\n\n";
+    std::string body;
+    if (deps_.tools != nullptr && deps_.tools->has("get_code_of")) {
+      const AiToolResult tr = deps_.tools->invoke("get_code_of", item.target);
+      body = tr.ok ? tr.text : ("(get_code_of fail: " + tr.text + ")");
+    } else {
+      body = "(sin get_code_of)\n";
+    }
+    if (body.size() > 2400) {
+      body = body.substr(0, 2400) + "\n…[peek A1 truncado ~60 líneas]…\n";
+    }
+    out << "```\n" << body;
+    if (!body.empty() && body.back() != '\n') {
+      out << '\n';
+    }
+    out << "```\n\nResponde `a_judge`.\n";
+    return out.str();
+  }
+
+  // A0 sniff: Effect Summary cards (no bodies).
+  if (a_in_a0_sniff(ast)) {
+    if (ast.queue.empty() || ast.cursor >= static_cast<int>(ast.queue.size())) {
+      return "_(cola A0 vacía o agotada)_\n";
+    }
+    const int n = std::min(max_peeks > 0 ? max_peeks : kA0MaxCardsPerTurn,
+                           static_cast<int>(ast.queue.size()) - ast.cursor);
+    A0TrancheBuildOpts tr_opts;
+    std::shared_ptr<const SymbolIndexSnapshot> symbol_snap_keep;
+    if (deps_.symbol_snapshot_fn) {
+      symbol_snap_keep = deps_.symbol_snapshot_fn();
+      tr_opts.symbol_snapshot = symbol_snap_keep.get();
+    }
+    const A0TrancheShown shown =
+        a_build_a0_tranche_shown(workspace_root, ast, n, &tr_opts);
+    const std::size_t n_cards = shown.items.size();
+    std::ostringstream out;
+    out << "## Effect Summary (A0 — olfateo; NO cuerpos)\n";
+    out << "cola " << (ast.cursor + 1) << "–" << (ast.cursor + n) << " / " << ast.queue.size()
+        << " · cards_used=" << ast.cards_used << " · a0_turn=" << (ast.a0_turns + 1) << "\n";
+    out << "Juzga por seeds/nudge/hot/writes/calls; stem/map/kind/path_fam dan contexto L1.\n";
+    out << "nudge = sugerencia determinista (expand:*|likely_*|weak_seed), no veredicto.\n";
+    out << "Veredictos: expand|reject|uncertain (PROHIBIDO useful).\n\n";
+    out << "## Checklist A0 (OBLIGATORIO — N=" << n_cards << ")\n";
+    out << "- verdicts[]: EXACTAMENTE " << n_cards
+        << " objetos; copia cada target literal de la lista.\n";
+    out << "- Máximo " << kA0MaxExpandPerTurn
+        << " verdict=expand; prioriza nudge expand:trail + seeds fuertes.\n";
+    out << "- likely_* / weak_seed / no_signal → reject salvo seeds claros.\n";
+    out << "- Targets (uno por verdict):\n";
+    for (std::size_t i = 0; i < n_cards; ++i) {
+      out << "  " << (i + 1) << ". `" << shown.items[i].target << "`\n";
+    }
+    out << "\n";
+    EffectSummaryOpts es_opts;
+    es_opts.seeds = ast.seeds;
+    es_opts.orphans = ast.orphans;
+    if (es_opts.orphans.empty()) {
+      es_opts.orphans = ast.seeds;
+    }
+    if (tr_opts.symbol_snapshot != nullptr) {
+      es_opts.symbol_snapshot = tr_opts.symbol_snapshot;
+    }
+    int card_i = 0;
+    for (const auto& item : shown.items) {
+      es_opts.map_score = static_cast<int>(item.score);
+      es_opts.stem = item.stem;
+      es_opts.map_related = item.map_related;
+      es_opts.refs_in = item.refs_in;
+      es_opts.body_sem_permille = item.body_sem_permille;
+      es_opts.file_rank = item.file_rank;
+      es_opts.file_count = item.file_count;
+      es_opts.dup_stem = item.dup_stem;
+      EffectSummary es = effect_summary_for_queue_item(workspace_root, item, es_opts);
+      out << "### card " << (++card_i) << " `" << item.target << "`\n\n";
+      out << "```\n" << es.card_text << "```\n\n";
+    }
+    if (shown.char_truncated) {
+      out << "_(tranche truncada por budget " << kA0MaxCharsPerTurn << " chars; "
+          << shown.slice_n << " en slice, " << shown.items.size() << " mostradas)_\n\n";
+    }
+    out << "Responde {\"action\":\"a_judge\",\"phase\":\"a0_sniff\",\"verdicts\":[ … "
+        << n_cards << " objetos ],\"done\":false}\n";
+    return out.str();
+  }
+
   if (ast.trail.active && (ast.trail.awaiting_judge || !ast.trail.pending_stacks.empty())) {
     if (ast.trail.pending_stacks.empty()) {
       refresh_a_trail_stacks(workspace_root, &ast, nullptr);

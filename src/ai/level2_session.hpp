@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,8 @@
 #include "ai/l2_context_budget.hpp"
 
 namespace tuide {
+
+struct SymbolIndexSnapshot;
 
 struct Level2BootstrapOpts {
   std::string workspace_root;
@@ -55,6 +58,8 @@ struct Level2SessionDeps {
   int pack_incomplete_pushback_max = 2;
   // Live accessor for AI path_scope (empty = unrestricted).
   std::function<const std::vector<std::string>&()> path_scope_fn;
+  // Optional symbol index for Effect Summary callers: (A0).
+  std::function<std::shared_ptr<const SymbolIndexSnapshot>()> symbol_snapshot_fn;
 };
 
 class Level2Session {

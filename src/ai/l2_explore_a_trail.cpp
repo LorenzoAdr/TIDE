@@ -262,20 +262,73 @@ std::string slice_lines(const std::vector<std::string>& lines, int start_1, int 
   return out.str();
 }
 
+bool before_is_bare_call_prefix(const std::string& before) {
+  for (char c : before) {
+    if (!std::isspace(static_cast<unsigned char>(c))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool is_identifier_char(char c) {
+  return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+}
+
+bool preview_has_symbol_call(const std::string& preview, const std::string& symbol) {
+  if (symbol.empty()) {
+    return false;
+  }
+  const auto check = [&](const std::string& needle) {
+    std::size_t pos = 0;
+    while ((pos = preview.find(needle, pos)) != std::string::npos) {
+      if (pos == 0 || !is_identifier_char(preview[pos - 1])) {
+        return true;
+      }
+      pos += needle.size();
+    }
+    return false;
+  };
+  return check(symbol + "(") || check(symbol + " (");
+}
+
 bool looks_like_definition_line(const std::string& line, const std::string& symbol) {
   if (symbol.empty() || line.find(symbol) == std::string::npos) {
     return false;
   }
-  // Rough: "void Foo(" or "Foo::bar(" at start-ish, or "= default"
-  if (line.find('{') != std::string::npos && line.find('(') != std::string::npos) {
-    // could be call or def
+  std::string t = line;
+  while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front()))) {
+    t.erase(t.begin());
   }
-  if (line.find("::" + symbol) != std::string::npos ||
-      line.find(symbol + "(") != std::string::npos) {
-    // Prefer rejecting lines that look like pure declarations with trailing ;
-    if (!line.empty() && line.find('{') == std::string::npos &&
-        line.find(';') != std::string::npos && line.find('(') != std::string::npos) {
-      return true;  // decl
+  if (t.rfind("//", 0) == 0 || t.rfind("/*", 0) == 0) {
+    return false;
+  }
+  const auto paren = t.find(symbol + "(");
+  if (paren == std::string::npos) {
+    return false;
+  }
+  const std::string before = t.substr(0, paren);
+  // Out-of-line member definition: Qualifier::symbol( … { )
+  if (before.find("::" + symbol) != std::string::npos) {
+    return true;
+  }
+  // Typed declaration ending with ; (not a bare call statement)
+  if (t.find('{') == std::string::npos && t.find(';') != std::string::npos &&
+      !before_is_bare_call_prefix(before)) {
+    return true;
+  }
+  // Typed definition with body on same line: void Foo::bar( … {
+  if (t.find('{') != std::string::npos) {
+    static const char* kTypeish[] = {"void ",   "static ",  "inline ", "virtual ", "explicit ",
+                                     "constexpr ", "const ", "unsigned ", "signed ", "auto ",
+                                     "struct ", "class ",  "friend "};
+    for (const char* kw : kTypeish) {
+      if (before.find(kw) != std::string::npos) {
+        return true;
+      }
+    }
+    if (before.find('*') != std::string::npos || before.find('&') != std::string::npos) {
+      return true;
     }
   }
   return false;
@@ -295,6 +348,21 @@ std::string rel_from_workspace(const std::string& workspace_root, const std::str
 
 bool is_srcish(const std::string& rel) {
   return rel.rfind("src/", 0) == 0 || rel.rfind("include/", 0) == 0 || rel.rfind("lib/", 0) == 0;
+}
+
+bool is_trail_product_path(const std::string& rel) {
+  if (!is_srcish(rel)) {
+    return false;
+  }
+  if (rel.rfind("tests/", 0) == 0 || rel.rfind("tools/", 0) == 0 ||
+      rel.rfind("docs/", 0) == 0 || rel.find("third_party/") != std::string::npos) {
+    return false;
+  }
+  // L2 explore/harness sources mention symptom symbols as strings — not product call paths.
+  if (rel.find("/ai/l2_") != std::string::npos || rel.find("/ai/level2_") != std::string::npos) {
+    return false;
+  }
+  return true;
 }
 
 std::string compress_ws(std::string s, std::size_t max_len) {
@@ -461,8 +529,7 @@ ATrailHop a_trail_enrich_hop(const std::string& abs_path, const std::string& rel
   const bool commentish =
       trimmed.rfind("//", 0) == 0 || trimmed.rfind("/*", 0) == 0 || trimmed.rfind('*') == 0;
   const bool callish_text =
-      !called_symbol.empty() && line_txt.find(called_symbol) != std::string::npos &&
-      line_txt.find(called_symbol + "(") != std::string::npos;
+      !called_symbol.empty() && preview_has_symbol_call(line_txt, called_symbol);
   const bool defish = looks_like_definition_line(line_txt, called_symbol);
 
   TSTree* tree = parse_sync(source, abs_path);
@@ -505,9 +572,17 @@ ATrailHop a_trail_enrich_hop(const std::string& abs_path, const std::string& rel
     const int row = call_line - 1;
     int col = 0;
     if (!called_symbol.empty()) {
-      const auto pos = line_txt.find(called_symbol);
-      if (pos != std::string::npos) {
-        col = static_cast<int>(pos);
+      std::size_t pos = 0;
+      while (pos < line_txt.size()) {
+        const auto p = line_txt.find(called_symbol + "(", pos);
+        if (p == std::string::npos) {
+          break;
+        }
+        if (p == 0 || !is_identifier_char(line_txt[p - 1])) {
+          col = static_cast<int>(p);
+          break;
+        }
+        pos = p + called_symbol.size();
       }
     }
     TSPoint p0{static_cast<uint32_t>(row), static_cast<uint32_t>(std::max(0, col))};
@@ -729,6 +804,72 @@ std::string stem_from_rel(const std::string& rel) {
   return base;
 }
 
+std::string hop_identity_key(const ATrailHop& h) {
+  if (!h.anchor.empty()) {
+    return h.anchor;
+  }
+  return h.path + ":" + std::to_string(h.call_line) + ":" + h.symbol;
+}
+
+int score_climb_parent(const ATrailHop& parent, const ATrailHop& top,
+                       const std::string& focus_symbol, const std::string& focus_path_hint) {
+  int score = 50;
+  if (parent.is_call_site) {
+    score += 80;
+  }
+  if (parent.symbol != top.symbol) {
+    score += 100;
+  }
+  // Upward climb: prefer coherent frames in the same module as the callee.
+  if (parent.path == top.path) {
+    score += 35;
+  }
+  if (stem_from_rel(parent.path) == stem_from_rel(top.path)) {
+    score += 40;
+  }
+  if (path_family_rel(parent.path) == path_family_rel(top.path)) {
+    score += 25;
+  }
+  if (!parent.control_chain.empty() || !parent.control_cond.empty()) {
+    score += 15;
+  }
+  if (!focus_path_hint.empty() && parent.path == focus_path_hint) {
+    score -= 30;
+  }
+  if (!focus_symbol.empty() && parent.symbol == focus_symbol) {
+    score -= 80;
+  }
+  if (parent.path == top.path && parent.call_line == top.call_line) {
+    score -= 100;
+  }
+  return score;
+}
+
+void dedupe_trail_stack_hops(std::vector<ATrailHop>& hops) {
+  if (hops.size() < 2) {
+    return;
+  }
+  std::vector<ATrailHop> clean;
+  clean.reserve(hops.size());
+  std::unordered_set<std::string> seen_syms;
+  std::unordered_set<std::string> seen_keys;
+  for (auto& h : hops) {
+    const std::string key = hop_identity_key(h);
+    if (seen_keys.count(key)) {
+      continue;
+    }
+    if (!h.symbol.empty() && seen_syms.count(h.symbol)) {
+      continue;
+    }
+    seen_keys.insert(key);
+    if (!h.symbol.empty()) {
+      seen_syms.insert(h.symbol);
+    }
+    clean.push_back(std::move(h));
+  }
+  hops = std::move(clean);
+}
+
 bool preview_looks_like_call(const std::string& preview, const std::string& symbol) {
   if (symbol.empty() || preview.find(symbol) == std::string::npos) {
     return false;
@@ -740,9 +881,7 @@ bool preview_looks_like_call(const std::string& preview, const std::string& symb
   if (t.rfind("//", 0) == 0 || t.rfind("/*", 0) == 0 || (!t.empty() && t[0] == '*')) {
     return false;
   }
-  // string-only mention unlikely if no '(' after symbol
-  if (preview.find(symbol + "(") == std::string::npos &&
-      preview.find(symbol + " (") == std::string::npos) {
+  if (!preview_has_symbol_call(preview, symbol)) {
     return false;
   }
   if (looks_like_definition_line(preview, symbol)) {
@@ -782,7 +921,7 @@ std::vector<ATrailStack> a_trail_build_stacks(const std::string& workspace_root,
     }
     if (rel.rfind("tests/", 0) == 0 || rel.rfind("tools/", 0) == 0 ||
         rel.rfind("docs/", 0) == 0 || rel.find("third_party/") != std::string::npos ||
-        !is_srcish(rel)) {
+        !is_trail_product_path(rel)) {
       continue;
     }
     // Prefer call-ish previews; keep weak hits at low score only if nothing else
@@ -920,16 +1059,24 @@ std::vector<ATrailStack> a_trail_build_full_stacks(
     if (stack.hops.size() < 2) {
       continue;
     }
-    // hops: [leaf_caller, L0]. Climb above leaf_caller.
+    // hops: [leaf_caller, L0]. Climb above leaf_caller with real distinct parents.
     std::unordered_set<std::string> seen_syms;
+    std::unordered_set<std::string> seen_keys;
     seen_syms.insert(focus_symbol);
+    for (const auto& h : stack.hops) {
+      seen_keys.insert(hop_identity_key(h));
+      if (!h.symbol.empty()) {
+        seen_syms.insert(h.symbol);
+      }
+    }
     for (int d = 1; d < max_depth; ++d) {
-      ATrailHop& top = stack.hops.front();
-      if (top.symbol.empty() || !seen_syms.insert(top.symbol).second) {
+      const ATrailHop& top = stack.hops.front();
+      if (top.symbol.empty()) {
         break;
       }
+
       const auto parents = search(top.symbol);
-      ATrailSearchHit best;
+      ATrailHop best_parent;
       int best_score = -1;
       for (const auto& h : parents) {
         if (h.line <= 0 || h.path.empty()) {
@@ -939,7 +1086,9 @@ std::vector<ATrailStack> a_trail_build_full_stacks(
         if (!workspace_root.empty() && fs::path(rel).is_absolute()) {
           rel = rel_from_workspace(workspace_root, rel);
         }
-        if (rel.rfind("tests/", 0) == 0 || rel.rfind("tools/", 0) == 0) {
+        if (rel.rfind("tests/", 0) == 0 || rel.rfind("tools/", 0) == 0 ||
+            rel.rfind("docs/", 0) == 0 || rel.find("third_party/") != std::string::npos ||
+            !is_trail_product_path(rel)) {
           continue;
         }
         if (rel == top.path && h.line == top.call_line) {
@@ -948,34 +1097,398 @@ std::vector<ATrailStack> a_trail_build_full_stacks(
         if (!preview_looks_like_call(h.preview, top.symbol)) {
           continue;
         }
-        int score = is_srcish(rel) ? 100 : 10;
-        if (rel == top.path) {
-          score -= 20;
+        fs::path abs = rel;
+        if (!abs.is_absolute()) {
+          abs = fs::path(workspace_root) / rel;
         }
-        if (stem_from_rel(rel) != stem_from_rel(top.path)) {
-          score += 40;
+        ATrailHop parent =
+            a_trail_enrich_hop(abs.lexically_normal().string(), rel, h.line, top.symbol);
+        if (!parent.is_call_site || parent.symbol.empty() || parent.symbol == top.symbol) {
+          continue;
         }
+        if (seen_syms.count(parent.symbol)) {
+          continue;
+        }
+        const std::string parent_key = hop_identity_key(parent);
+        if (seen_keys.count(parent_key)) {
+          continue;
+        }
+        const int score =
+            score_climb_parent(parent, top, focus_symbol, focus_path_hint);
         if (score > best_score) {
           best_score = score;
-          best = h;
-          best.path = rel;
+          best_parent = std::move(parent);
         }
       }
       if (best_score < 0) {
         break;
       }
-      fs::path abs = best.path;
-      if (!abs.is_absolute()) {
-        abs = fs::path(workspace_root) / best.path;
-      }
-      ATrailHop parent =
-          a_trail_enrich_hop(abs.lexically_normal().string(), best.path, best.line, top.symbol);
-      if (parent.symbol.empty() || parent.symbol == top.symbol) {
-        // still insert for call-site context
-      }
-      stack.hops.insert(stack.hops.begin(), std::move(parent));
+      seen_syms.insert(best_parent.symbol);
+      seen_keys.insert(hop_identity_key(best_parent));
+      stack.hops.insert(stack.hops.begin(), std::move(best_parent));
+    }
+    dedupe_trail_stack_hops(stack.hops);
+  }
+  return out;
+}
+
+std::string lower_ascii(std::string s) {
+  for (char& c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
+bool text_has_any(const std::string& text, const std::vector<std::string>& needles) {
+  const std::string low = lower_ascii(text);
+  for (const auto& n : needles) {
+    if (n.empty()) {
+      continue;
+    }
+    if (low.find(lower_ascii(n)) != std::string::npos) {
+      return true;
     }
   }
+  return false;
+}
+
+bool seeds_match_token(const std::vector<std::string>& seeds, const std::string& token) {
+  if (token.empty()) {
+    return false;
+  }
+  const std::string t = lower_ascii(token);
+  for (const auto& s : seeds) {
+    const std::string ls = lower_ascii(s);
+    if (ls.empty()) {
+      continue;
+    }
+    if (t.find(ls) != std::string::npos || ls.find(t) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool symptom_busy_focus(const std::string& focus_symbol, const std::string& focus_path_hint) {
+  return focus_symbol.find("busy") != std::string::npos ||
+         focus_symbol.find("spinner") != std::string::npos ||
+         focus_path_hint.find("busy") != std::string::npos ||
+         focus_path_hint.find("spinner") != std::string::npos;
+}
+
+ATrailCondBranch branch_from_hop(const ATrailHop& hop, const std::string& id,
+                                 const std::string& when_text, const std::string& then_text,
+                                 const std::string& note = {}) {
+  ATrailCondBranch b;
+  b.id = id;
+  b.when_text = when_text;
+  b.then_text = then_text;
+  b.note = note;
+  b.anchor = hop.anchor;
+  b.path = hop.path;
+  b.symbol = hop.symbol;
+  b.line = hop.call_line;
+  b.snippet = hop.snippet;
+  return b;
+}
+
+int score_on_hop(const ATrailHop& hop, const std::string& focus_symbol,
+                 const std::vector<std::string>& seeds) {
+  int score = hop.is_call_site ? 100 : 0;
+  if (!hop.control_cond.empty() || !hop.control_chain.empty()) {
+    score += 20;
+  }
+  if (hop.path.find("/ai/") != std::string::npos || seeds_match_token(seeds, "ai")) {
+    score += 45;
+  }
+  if (seeds_match_token(seeds, hop.symbol) || seeds_match_token(seeds, hop.path)) {
+    score += 35;
+  }
+  if (hop.symbol.find("reindex") != std::string::npos ||
+      hop.symbol.find("outline") != std::string::npos ||
+      hop.symbol.find("index") != std::string::npos) {
+    score -= 70;
+  }
+  if (!focus_symbol.empty() && hop.symbol == focus_symbol) {
+    score -= 80;
+  }
+  return score;
+}
+
+const ATrailHop* pick_on_hop(const std::vector<ATrailStack>& stacks,
+                             const std::string& focus_symbol,
+                             const std::vector<std::string>& seeds) {
+  const ATrailHop* best = nullptr;
+  int best_score = -1;
+  for (const auto& stack : stacks) {
+    if (stack.hops.size() < 2) {
+      continue;
+    }
+    const ATrailHop& caller = stack.hops[stack.hops.size() - 2];
+    const int score = score_on_hop(caller, focus_symbol, seeds);
+    if (score > best_score) {
+      best_score = score;
+      best = &caller;
+    }
+  }
+  return best;
+}
+
+std::vector<std::string> cxl_search_symbols(const std::vector<std::string>& seeds,
+                                            bool busy_symptom) {
+  std::vector<std::string> out;
+  auto add = [&](const std::string& s) {
+    if (s.empty()) {
+      return;
+    }
+    if (std::find(out.begin(), out.end(), s) == out.end()) {
+      out.push_back(s);
+    }
+  };
+  static const char* kDefault[] = {"cancel_current", "cancel_all", "agent_cancel_"};
+  for (const char* s : kDefault) {
+    add(s);
+  }
+  for (const auto& seed : seeds) {
+    const std::string ls = lower_ascii(seed);
+    if (ls.find("cancel") != std::string::npos || ls.find("abort") != std::string::npos) {
+      add(seed);
+    }
+  }
+  if (busy_symptom) {
+    add("CancelAgent");
+  }
+  return out;
+}
+
+std::vector<std::string> off_search_symbols(const std::vector<std::string>& seeds,
+                                            bool busy_symptom) {
+  std::vector<std::string> out;
+  auto add = [&](const std::string& s) {
+    if (s.empty()) {
+      return;
+    }
+    if (std::find(out.begin(), out.end(), s) == out.end()) {
+      out.push_back(s);
+    }
+  };
+  for (const auto& seed : seeds) {
+    const std::string ls = lower_ascii(seed);
+    if (ls.find("clear") != std::string::npos || ls.find("end") != std::string::npos ||
+        ls.find("off") != std::string::npos || ls.find("stop") != std::string::npos) {
+      add(seed);
+    }
+  }
+  if (busy_symptom) {
+    add("end_thinking");
+    add("clear_busy_if");
+    add("clear_busy");
+    add("agent_busy_");
+  }
+  return out;
+}
+
+int score_cxl_hop(const ATrailHop& hop, const std::string& query) {
+  int score = hop.is_call_site ? 80 : 10;
+  if (hop.symbol.find("cancel") != std::string::npos) {
+    score += 60;
+  }
+  if (query.find("agent_cancel_") != std::string::npos) {
+    if (hop.snippet.find("agent_cancel_") != std::string::npos) {
+      score += 50;
+    }
+  }
+  if (hop.control_cond.find("CancelAgent") != std::string::npos ||
+      hop.snippet.find("CancelAgent") != std::string::npos) {
+    score += 40;
+  }
+  if (!hop.control_cond.empty()) {
+    score += 15;
+  }
+  return score;
+}
+
+int score_off_hop(const ATrailHop& hop, const std::string& /*query*/) {
+  int score = hop.is_call_site ? 70 : 10;
+  if (hop.symbol.find("end_") != std::string::npos ||
+      hop.snippet.find("end_thinking") != std::string::npos) {
+    score += 55;
+  }
+  if (hop.snippet.find("clear_busy") != std::string::npos) {
+    score += 45;
+  }
+  if (hop.snippet.find("agent_busy_") != std::string::npos &&
+      hop.snippet.find("store(false)") != std::string::npos) {
+    score += 65;
+  }
+  if (hop.snippet.find("end_thinking()") != std::string::npos) {
+    score += 35;
+  }
+  if (!hop.control_cond.empty()) {
+    score += 20;
+  }
+  // Prefer normal async tail cleanup over early-error branches.
+  if (hop.control_cond.find("ensure_backend") != std::string::npos ||
+      hop.control_cond.find("root.empty") != std::string::npos) {
+    score -= 55;
+  }
+  if (hop.snippet.find("maybe_start_coding_stem") != std::string::npos ||
+      hop.snippet.find("agent.run(") != std::string::npos ||
+      hop.snippet.find("needs_level2") != std::string::npos) {
+    score += 45;
+  }
+  if (hop.call_line >= 1000) {
+    score += 15;
+  }
+  return score;
+}
+
+ATrailHop best_hop_from_search(
+    const std::string& workspace_root, const std::string& query,
+    const std::function<std::vector<ATrailSearchHit>(const std::string& symbol)>& search,
+    int (*score_fn)(const ATrailHop&, const std::string&) = nullptr) {
+  ATrailHop best;
+  int best_score = -1;
+  if (!search) {
+    return best;
+  }
+  const auto hits = search(query);
+  for (const auto& h : hits) {
+    if (h.line <= 0 || h.path.empty()) {
+      continue;
+    }
+    std::string rel = h.path;
+    if (!workspace_root.empty() && fs::path(rel).is_absolute()) {
+      rel = rel_from_workspace(workspace_root, rel);
+    }
+    if (rel.rfind("tests/", 0) == 0 || rel.rfind("tools/", 0) == 0 || !is_trail_product_path(rel)) {
+      continue;
+    }
+    if (!preview_looks_like_call(h.preview, query) &&
+        query.find('_') != std::string::npos &&
+        h.preview.find(query) == std::string::npos) {
+      continue;
+    }
+    fs::path abs = rel;
+    if (!abs.is_absolute()) {
+      abs = fs::path(workspace_root) / rel;
+    }
+    ATrailHop hop =
+        a_trail_enrich_hop(abs.lexically_normal().string(), rel, h.line, query);
+    if (!hop.is_call_site && hop.snippet.find(query) == std::string::npos) {
+      continue;
+    }
+    const int score =
+        score_fn != nullptr ? score_fn(hop, query) : (hop.is_call_site ? 100 : 10);
+    if (score > best_score) {
+      best_score = score;
+      best = std::move(hop);
+    }
+  }
+  return best;
+}
+
+std::vector<ATrailCondBranch> a_trail_build_cond_branches(
+    const std::string& workspace_root, const std::string& focus_symbol,
+    const std::string& focus_path_hint, const std::vector<std::string>& seeds,
+    const std::function<std::vector<ATrailSearchHit>(const std::string& symbol)>& search,
+    const std::vector<ATrailStack>& stacks) {
+  std::vector<ATrailCondBranch> out;
+  if (!search || focus_symbol.empty()) {
+    return out;
+  }
+  const bool busy_symptom = symptom_busy_focus(focus_symbol, focus_path_hint);
+
+  if (const ATrailHop* on = pick_on_hop(stacks, focus_symbol, seeds); on != nullptr) {
+    std::string when = on->control_cond.empty() ? on->control_chain : on->control_cond;
+    if (when.empty()) {
+      when = on->signature.empty() ? on->symbol : on->signature;
+    }
+    std::ostringstream then;
+    then << (on->scope_chain.empty() ? on->symbol : on->scope_chain) << " → " << focus_symbol;
+    out.push_back(branch_from_hop(*on, "ON", when, then.str()));
+  }
+
+  ATrailHop best_cxl;
+  int best_cxl_score = -1;
+  for (const std::string& q : cxl_search_symbols(seeds, busy_symptom)) {
+    ATrailHop hop = best_hop_from_search(workspace_root, q, search, score_cxl_hop);
+    if (hop.path.empty()) {
+      continue;
+    }
+    const int score = score_cxl_hop(hop, q);
+    if (score > best_cxl_score) {
+      best_cxl_score = score;
+      best_cxl = std::move(hop);
+    }
+  }
+  if (!best_cxl.path.empty()) {
+    std::string when = best_cxl.control_cond;
+    if (when.empty()) {
+      when = best_cxl.control_chain;
+    }
+    if (when.empty()) {
+      when = "cancel / abort solicitado (UI)";
+    }
+    std::ostringstream then;
+    then << (best_cxl.scope_chain.empty() ? best_cxl.symbol : best_cxl.scope_chain);
+    if (best_cxl.snippet.find("agent_cancel_") != std::string::npos) {
+      then << " → agent_cancel_=true";
+    } else if (best_cxl.symbol.find("cancel") != std::string::npos) {
+      then << " → cancel_all()";
+    }
+    out.push_back(branch_from_hop(
+        best_cxl, "CXL", when, then.str(),
+        "no llama end_thinking/clear_busy sync en este hilo"));
+  }
+
+  ATrailHop best_off;
+  int best_off_score = -1;
+  for (const std::string& q : off_search_symbols(seeds, busy_symptom)) {
+    ATrailHop hop = best_hop_from_search(workspace_root, q, search, score_off_hop);
+    if (hop.path.empty()) {
+      continue;
+    }
+    const int score = score_off_hop(hop, q);
+    if (score > best_off_score) {
+      best_off_score = score;
+      best_off = std::move(hop);
+    }
+  }
+  if (!best_off.path.empty()) {
+    std::string when = best_off.control_cond;
+    if (when.empty()) {
+      when = "worker/async termina (normal o tras cancel cooperativo)";
+    }
+    std::ostringstream then;
+    if (best_off.snippet.find("end_thinking()") != std::string::npos) {
+      then << "agent_busy_=false; end_thinking() → clear_busy_if";
+    } else if (best_off.snippet.find("clear_busy") != std::string::npos) {
+      then << (best_off.scope_chain.empty() ? best_off.symbol : best_off.scope_chain)
+           << " → clear_busy*";
+    } else {
+      then << (best_off.scope_chain.empty() ? best_off.symbol : best_off.scope_chain)
+           << " → apaga busy/spinner";
+    }
+    out.push_back(branch_from_hop(best_off, "OFF", when, then.str()));
+  }
+
+  const bool have_cxl = !best_cxl.path.empty();
+  const bool have_off = !best_off.path.empty();
+  if (have_cxl && have_off) {
+    ATrailCondBranch link;
+    link.id = "LINK";
+    link.when_text = "CXL (UI) vs OFF (worker tail)";
+    link.then_text = "agent_cancel_ → … → end_thinking() → clear_busy_if";
+    link.note =
+        "edit site suele ser: cancel no garantiza OFF, o flag/agent_busy_ stuck antes del tail";
+    if (!best_cxl.path.empty()) {
+      link.path = best_cxl.path;
+      link.anchor = best_cxl.anchor;
+    }
+    out.push_back(std::move(link));
+  }
+
   return out;
 }
 

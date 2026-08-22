@@ -4,5 +4,6 @@
   "JSON_GRAMMAR": true,
   "PACK_REVIEW": true,
   "BODY_SEMANTIC_RERANK": true,
-  "L2_EXPLORE_PHASE_A": true
+  "L2_EXPLORE_PHASE_A": true,
+  "L2_EXPLORE_EFFECT_SUMMARY": true
 }

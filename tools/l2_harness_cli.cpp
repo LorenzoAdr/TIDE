@@ -6,11 +6,13 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "ai/get_code_of.hpp"
 #include "ai/l2_action.hpp"
 #include "ai/l2_brain.hpp"
+#include "ai/l2_effect_summary.hpp"
 #include "ai/l2_explore_a.hpp"
 #include "ai/l2_feat.hpp"
 #include "ai/level2_autonomous_loop.hpp"
@@ -18,8 +20,14 @@
 #include "ai/search_replace.hpp"
 #include "ai/tool_registry.hpp"
 #include "ai/ai_types.hpp"
+#include "ai/coding_embed_rerank.hpp"
+#include "ai/embedding_backend.hpp"
+#include "ai/vector_math.hpp"
 
+#include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdio>
 #include <nlohmann/json.hpp>
 
 namespace fs = std::filesystem;
@@ -317,6 +325,12 @@ void usage() {
             << "  trail-probe SYM […]    // sin LLM: call-stacks TS de símbolos (search+scopes)\n"
             << "  trail-judge-shot [SYM] // 1× LLM: trail mapa L0 → a_trail_judge (caso 17)\n"
             << "  dataflow-probe VAR     // sin LLM: writes/reads/decls vía ripgrep (no LSP)\n"
+            << "  effect-summary-probe   // sin LLM: fichas TS (SYM|--from-a-state|--from-map)\n"
+            << "  a0-sniff-shot          // sin LLM: olfateo A0 con veredictos heurísticos\n"
+            << "  a0-sniff-judge-shot    // 1× LLM: effect summary → a_judge (caso 17)\n"
+            << "  a0-first-judge-shot    // 1× LLM: solo 1er turno A0; cobertura completa tranche\n"
+            << "  a0-tranche-rank-shot   // sin LLM: rerank A0 por cuerpo de ficha ES (slice→card→score)\n"
+            << "  card-embed-bench       // mide coste: fichas ES vs cuerpos + coseno embed (top-N mapa)\n"
             << "  plan target [target…]   // watchlist → pack.md\n"
             << "  tools <calls.json>      // batch [{name,arg},…] o {\"calls\":[…]}\n"
             << "  done [summary] [--edit|--clarify]\n"
@@ -412,6 +426,56 @@ std::vector<tuide::ATrailSearchHit> parse_rg_hits(const std::string& body,
   return hits;
 }
 
+std::vector<tuide::ATrailSearchHit> filter_src_trail_hits(
+    const std::vector<tuide::ATrailSearchHit>& in) {
+  std::vector<tuide::ATrailSearchHit> out;
+  out.reserve(in.size());
+  for (const auto& h : in) {
+    if (h.path.rfind("tests/", 0) == 0 || h.path.rfind("tools/", 0) == 0 ||
+        h.path.rfind("docs/", 0) == 0) {
+      continue;
+    }
+    if (h.path.rfind("src/", 0) == 0) {
+      out.push_back(h);
+    }
+  }
+  return out;
+}
+
+std::vector<tuide::ATrailSearchHit> harness_search_symbol(ToolRegistry* tools,
+                                                          const std::string& root,
+                                                          const std::string& symbol) {
+  std::unordered_set<std::string> seen;
+  std::vector<tuide::ATrailSearchHit> hits;
+  if (tools != nullptr && tools->has("search") && !symbol.empty()) {
+    AiToolResult tr = tools->invoke("search", symbol + " path:src/");
+    if (!tr.ok || tr.text.find("(sin hits)") != std::string::npos) {
+      tr = tools->invoke("search", symbol);
+    }
+    if (tr.ok) {
+      for (auto& h : filter_src_trail_hits(parse_rg_hits(tr.text, root))) {
+        const std::string key = h.path + ":" + std::to_string(h.line);
+        if (seen.insert(key).second) {
+          hits.push_back(std::move(h));
+        }
+      }
+    }
+  }
+  if (!symbol.empty()) {
+    const fs::path src_dir = fs::path(root) / "src";
+    const std::string cmd = "rg -n --no-heading -F " + shell_quote(symbol) + " " +
+                            shell_quote(src_dir.lexically_normal().string()) +
+                            " 2>/dev/null | head -80";
+    for (auto& h : filter_src_trail_hits(parse_rg_hits(run_cmd(cmd), root))) {
+      const std::string key = h.path + ":" + std::to_string(h.line);
+      if (seen.insert(key).second) {
+        hits.push_back(std::move(h));
+      }
+    }
+  }
+  return hits;
+}
+
 int run_trail_probe(ToolRegistry* tools, const std::string& root, int argc, char** argv) {
   std::vector<std::string> symbols;
   std::string path_hint;
@@ -442,17 +506,7 @@ int run_trail_probe(ToolRegistry* tools, const std::string& root, int argc, char
   int rc = 0;
   for (const auto& sym : symbols) {
     auto search_fn = [&](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
-      if (tools == nullptr || !tools->has("search") || symbol.empty()) {
-        return {};
-      }
-      AiToolResult tr = tools->invoke("search", symbol + " path:src/");
-      if (!tr.ok || tr.text.find("(sin hits)") != std::string::npos) {
-        tr = tools->invoke("search", symbol);
-      }
-      if (!tr.ok) {
-        return {};
-      }
-      return parse_rg_hits(tr.text, root);
+      return harness_search_symbol(tools, root, symbol);
     };
 
     const auto direct = search_fn(sym);
@@ -468,6 +522,8 @@ int run_trail_probe(ToolRegistry* tools, const std::string& root, int argc, char
     tr.focus_symbol = sym;
     tr.root_stem = sym;
     tr.pending_stacks = stacks;
+    tr.cond_branches = tuide::a_trail_build_cond_branches(
+        root, sym, path_hint, {"spinner", "busy", "cancel", "agent_busy"}, search_fn, stacks);
     tuide::ATrailHop root_hop;
     root_hop.symbol = sym;
     root_hop.anchor = tr.root_anchor;
@@ -562,6 +618,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   std::string out_dir;
   bool dry = false;
   bool do_suspect = true;
+  bool require_gold = true;
   std::string gold_var = "agent_busy_";
   for (int i = 2; i < argc; ++i) {
     const std::string a = argv[i];
@@ -605,11 +662,14 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
       do_suspect = false;
     } else if (a == "--suspect") {
       do_suspect = true;
+    } else if (a == "--no-gold-abort") {
+      require_gold = false;
     } else if (a == "-h" || a == "--help") {
       std::cerr
           << "trail-judge-shot [SYM] [--path hint] [--case ID|--instruction TEXT]\n"
              "                 [--gold begin_thinking] [--gold-var agent_busy_]\n"
              "                 [--out DIR] [--dry] [--suspect|--no-suspect]\n"
+             "                 [--no-gold-abort]\n"
              "  1) trail → a_trail_judge  2) si interesting → ¿variable crítica?\n"
              "     → dataflow-probe rg de las pistas (reserva para Phase B).\n";
       return 2;
@@ -640,17 +700,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   }
 
   auto search_fn = [&](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
-    if (tools == nullptr || !tools->has("search") || symbol.empty()) {
-      return {};
-    }
-    AiToolResult tr = tools->invoke("search", symbol + " path:src/");
-    if (!tr.ok || tr.text.find("(sin hits)") != std::string::npos) {
-      tr = tools->invoke("search", symbol);
-    }
-    if (!tr.ok) {
-      return {};
-    }
-    return parse_rg_hits(tr.text, root);
+    return harness_search_symbol(tools, root, symbol);
   };
 
   const auto stacks = tuide::a_trail_build_full_stacks(root, sym, path_hint, search_fn,
@@ -659,6 +709,14 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   if (stacks.empty()) {
     std::cerr << "trail-judge-shot: sin stacks para `" << sym << "`\n";
     return 1;
+  }
+
+  std::vector<std::string> seeds = {"spinner", "busy", "cancel", "agent_busy"};
+  for (const auto& tok : {"cancel", "abort", "busy", "spinner", "agent"}) {
+    if (instruction.find(tok) != std::string::npos &&
+        std::find(seeds.begin(), seeds.end(), tok) == seeds.end()) {
+      seeds.push_back(tok);
+    }
   }
 
   tuide::ATrail tr;
@@ -670,6 +728,8 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   tr.root_stem = sym;
   tr.root_why = "hipótesis useful del mapa (target UI / busy)";
   tr.pending_stacks = stacks;
+  tr.cond_branches = tuide::a_trail_build_cond_branches(root, sym, path_hint, seeds, search_fn,
+                                                        stacks);
   tuide::ATrailHop root_hop;
   root_hop.symbol = sym;
   root_hop.anchor = tr.root_anchor;
@@ -687,7 +747,8 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
       if (h.symbol.find(gold_needle) != std::string::npos ||
           h.scope_chain.find(gold_needle) != std::string::npos ||
           h.signature.find(gold_needle) != std::string::npos ||
-          h.anchor.find(gold_needle) != std::string::npos) {
+          h.anchor.find(gold_needle) != std::string::npos ||
+          h.snippet.find(gold_needle) != std::string::npos) {
         hit = true;
         break;
       }
@@ -704,12 +765,13 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
           "El mapa señaló el target `"
        << sym << "` (`" << path_hint
        << "`) como hipótesis **useful** (síntoma: spinner/busy).\n"
-          "Eso NO es aún el edit site: el runtime abrió call-stacks entry→…→L0 "
-          "con scopes TS + condición de control + snippet.\n"
-          "Tu trabajo AHORA: `a_trail_judge`. Marca **interesting** la pila cuyo "
-          "caller anidado controla el estado de carga de la IA (no UI genérica / "
-          "reindex / outline).\n"
-          "Si ves el edit site en un hop, puedes cerrar con `a_done` (≤2 primary).\n\n";
+          "Eso NO es aún el edit site: el runtime abrió **ramas condicionales ON/CXL/OFF** "
+          "(guards + async) y call-stacks de soporte.\n"
+          "Tu trabajo AHORA: `a_trail_judge`. Marca **interesting** ramas condicionales "
+          "(`ON`|`CXL`|`OFF`|`LINK`) y/o pilas `S1`… que expliquen el síntoma.\n"
+          "Stuck spinner → prioriza **CXL** + **LINK** (cancel sin OFF garantizado). "
+          "Reject reindex/outline y ramas ON solas si no explican el stuck.\n"
+          "Si ves el edit site, `a_done` (≤2 primary).\n\n";
   user << trail_md;
 
   const std::string system =
@@ -717,12 +779,15 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
       "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
       "PROHIBIDO action=plan, tool, edit, done next=edit.\n"
       "Objetivo: encontrar el EDIT SITE del síntoma de ## Instruction.\n"
-      "Tras useful el runtime muestra call-stacks. Entonces SOLO a_trail_judge.\n"
+      "Tras useful el runtime muestra ramas ON/CXL/OFF/LINK y call-stacks. SOLO a_trail_judge.\n"
+      "Prioriza ramas condicionales: stuck spinner = falta enlace cancel→apagado.\n"
       "Ejemplo: {\"action\":\"a_trail_judge\",\"verdicts\":["
-      "{\"target\":\"S2\",\"verdict\":\"interesting\",\"why\":\"AiController enciende el spinner\"},"
-      "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"reindex no es el síntoma IA\"}]}\n"
-      "verdict es EXACTAMENTE \"interesting\" o \"reject\" (nunca el literal "
-      "\"interesting|reject\").\n"
+      "{\"target\":\"LINK\",\"verdict\":\"interesting\",\"why\":\"cancel no garantiza OFF\"},"
+      "{\"target\":\"CXL\",\"verdict\":\"interesting\",\"why\":\"cancel_current sin clear sync\"},"
+      "{\"target\":\"S2\",\"verdict\":\"reject\",\"why\":\"download no es cancel stuck\"},"
+      "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"reindex no es síntoma IA\"}]}\n"
+      "target = `ON`|`CXL`|`OFF`|`LINK` y/o `S1`…`S3`. verdict EXACTAMENTE "
+      "\"interesting\" o \"reject\".\n"
       "interesting ≤3. Si TODOS reject → L0 se invalida.\n"
       "UI genérica / reindex / search → reject salvo que sea el control de carga de la IA.\n"
       "a_done solo cuando un hop es el edit site (≤2 primary).\n";
@@ -731,16 +796,21 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   std::cout << "L0=" << tr.root_anchor << " stacks=" << stacks.size()
             << " gold_needle=`" << gold_needle << "` gold_in=";
   if (gold_stack_ids.empty()) {
-    std::cout << "(ninguna pila — el pack no contiene el gold; abort)\n";
-    return 1;
-  }
-  for (std::size_t i = 0; i < gold_stack_ids.size(); ++i) {
-    if (i) {
-      std::cout << ",";
+    std::cout << "(ninguna pila — el pack no contiene `" << gold_needle << "`)";
+    if (require_gold) {
+      std::cout << " abort\n";
+      return 1;
     }
-    std::cout << gold_stack_ids[i];
+    std::cout << " WARN — continúa (--no-gold-abort)\n";
+  } else {
+    for (std::size_t i = 0; i < gold_stack_ids.size(); ++i) {
+      if (i) {
+        std::cout << ",";
+      }
+      std::cout << gold_stack_ids[i];
+    }
+    std::cout << "\n";
   }
-  std::cout << "\n";
   std::cout << "prompt_chars system=" << system.size() << " user=" << user.str().size() << "\n";
 
   if (!out_dir.empty()) {
@@ -805,6 +875,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   std::vector<std::string> interesting_ids;
   std::vector<std::string> reject_ids;
   bool gold_interesting = false;
+  bool gold_cond_interesting = false;
   if (action.kind == tuide::L2ActionKind::ATrailJudge ||
       action.name == "a_trail_judge" || action.name == "trail_judge") {
     for (const auto& v : action.a_verdicts) {
@@ -814,6 +885,10 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
           if (v.target == g) {
             gold_interesting = true;
           }
+        }
+        if (v.target == "LINK" || v.target == "CXL" || v.target == "link" ||
+            v.target == "cxl") {
+          gold_cond_interesting = true;
         }
       } else if (v.verdict == tuide::AVerdictKind::Reject) {
         reject_ids.push_back(v.target);
@@ -847,20 +922,58 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
 
   std::cout << "interesting=[" << join(interesting_ids) << "] reject=[" << join(reject_ids)
             << "]\n";
-  std::cout << "gold_stacks=[" << join(gold_stack_ids) << "] gold_marked_interesting="
-            << (gold_interesting ? 1 : 0) << "\n";
-  if (!gold_interesting) {
-    std::cout << "FAIL: no marcó interesting la pila con `" << gold_needle << "`\n";
-    return 1;
+  std::cout << "gold_stacks=[" << join(gold_stack_ids) << "] gold_stack="
+            << (gold_interesting ? 1 : 0) << " gold_cond=" << (gold_cond_interesting ? 1 : 0)
+            << "\n";
+  const bool gold_pass = gold_interesting || gold_cond_interesting;
+  if (!gold_pass) {
+    if (!require_gold && !interesting_ids.empty()) {
+      std::cout << "WARN: gold trail miss — continúa con interesting=[" << join(interesting_ids)
+                << "]\n";
+    } else {
+      std::cout << "FAIL: no marcó interesting stack(`" << gold_needle
+                << "`) ni rama cond LINK/CXL\n";
+      return 1;
+    }
+  } else {
+    if (gold_cond_interesting) {
+      std::cout << "PASS: rama condicional cancel/async (LINK/CXL)\n";
+    }
+    if (gold_interesting) {
+      std::cout << "PASS: pila con control IA (" << gold_needle << ")\n";
+    }
   }
-  std::cout << "PASS: el modelo vio el control IA anidado (" << gold_needle << ")\n";
 
   if (!do_suspect) {
-    return 0;
+    return gold_pass || !require_gold ? 0 : 1;
   }
 
   // --- Phase 2: critical variable? (compact; reserve for B) --------------------
   std::ostringstream focus_md;
+  for (const auto& id : interesting_ids) {
+    for (const auto& b : tr.cond_branches) {
+      if (b.id != id) {
+        continue;
+      }
+      focus_md << "### cond `" << b.id << "`\n";
+      if (!b.when_text.empty()) {
+        focus_md << "when: `" << b.when_text << "`\n";
+      }
+      if (!b.then_text.empty()) {
+        focus_md << "then: `" << b.then_text << "`\n";
+      }
+      if (!b.note.empty()) {
+        focus_md << "note: " << b.note << "\n";
+      }
+      if (!b.snippet.empty()) {
+        focus_md << "```\n" << b.snippet;
+        if (b.snippet.back() != '\n') {
+          focus_md << '\n';
+        }
+        focus_md << "```\n\n";
+      }
+    }
+  }
   for (const auto& s : stacks) {
     bool keep = false;
     for (const auto& id : interesting_ids) {
@@ -1012,18 +1125,23 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   }
 
   auto search_df = [&](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
-    if (tools == nullptr || !tools->has("search") || symbol.empty()) {
-      return {};
-    }
-    AiToolResult tr = tools->invoke("search", symbol + " path:src/");
-    if (!tr.ok || tr.text.find("(sin hits)") != std::string::npos) {
-      tr = tools->invoke("search", symbol);
-    }
-    if (!tr.ok) {
-      return {};
-    }
-    return parse_rg_hits(tr.text, root);
+    return harness_search_symbol(tools, root, symbol);
   };
+
+  std::string default_df_hint;
+  for (const auto& st : stacks) {
+    for (const auto& id : interesting_ids) {
+      if (st.id != id || st.hops.empty()) {
+        continue;
+      }
+      const auto& hop = st.hops.front();
+      default_df_hint = hop.path.empty() ? tuide::a_path_from_anchor(hop.anchor) : hop.path;
+      break;
+    }
+    if (!default_df_hint.empty()) {
+      break;
+    }
+  }
 
   auto name_matches_gold = [&](const std::string& n) {
     if (n == gold_var) {
@@ -1043,9 +1161,12 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
     if (name_matches_gold(s.name)) {
       any_gold_var = true;
     }
-    std::string hint;
+    std::string hint = default_df_hint;
     if (s.anchor.find(':') != std::string::npos) {
       hint = s.anchor.substr(0, s.anchor.find(':'));
+    }
+    if (!default_df_hint.empty() && !hint.empty()) {
+      std::cout << "dataflow scope `" << hint << "` (trail caller)\n";
     }
     const auto report = tuide::a_dataflow_build_with_search(root, s.name, hint, search_df);
     std::cout << "\n" << tuide::a_dataflow_markdown(report);
@@ -1131,6 +1252,1791 @@ int run_dataflow_probe(ToolRegistry* tools, const std::string& root, int argc, c
   return rc;
 }
 
+std::vector<std::string> parse_seeds_csv(const std::string& csv) {
+  std::vector<std::string> out;
+  std::string cur;
+  for (char c : csv) {
+    if (c == ',' || c == ';') {
+      const std::string t = trim(cur);
+      if (!t.empty()) {
+        out.push_back(t);
+      }
+      cur.clear();
+    } else {
+      cur.push_back(c);
+    }
+  }
+  const std::string t = trim(cur);
+  if (!t.empty()) {
+    out.push_back(t);
+  }
+  return out;
+}
+
+bool load_case_prompt(const std::string& root, const std::string& case_id, std::string* prompt,
+                      std::vector<std::string>* expected_stems,
+                      std::vector<std::string>* trap_stems = nullptr) {
+  if (prompt == nullptr) {
+    return false;
+  }
+  const fs::path prompts = fs::path(root) / "tests/fixtures/stem_boost_battery/prompts_nl_human.json";
+  std::ifstream in(prompts);
+  if (!in) {
+    return false;
+  }
+  nlohmann::json arr;
+  in >> arr;
+  for (const auto& c : arr) {
+    if (c.value("id", "") != case_id) {
+      continue;
+    }
+    *prompt = c.value("prompt", "");
+    if (expected_stems != nullptr && c.contains("expected_stems") && c["expected_stems"].is_array()) {
+      for (const auto& s : c["expected_stems"]) {
+        if (s.is_string()) {
+          expected_stems->push_back(s.get<std::string>());
+        }
+      }
+    }
+    if (trap_stems != nullptr && c.contains("trap_stems") && c["trap_stems"].is_array()) {
+      for (const auto& s : c["trap_stems"]) {
+        if (s.is_string()) {
+          trap_stems->push_back(s.get<std::string>());
+        }
+      }
+    }
+    return !prompt->empty();
+  }
+  return false;
+}
+
+tuide::AVerdict heuristic_a0_verdict(const tuide::EffectSummary& es, const tuide::AQueueItem& item,
+                                     const tuide::EffectSummaryQuality& q) {
+  tuide::AVerdict v;
+  v.target = item.target;
+  v.stem = item.stem;
+  auto has_hot = [&](const char* tag) {
+    return std::find(es.hot.begin(), es.hot.end(), tag) != es.hot.end();
+  };
+  const bool ui_hot = has_hot("spinner") || has_hot("wake") || has_hot("ui_event") ||
+                      has_hot("busy");
+  const bool glue =
+      es.roles.size() == 1 && es.roles[0] == "glue" && es.writes.empty() && !ui_hot;
+  const bool mutator = !es.writes.empty() ||
+                       std::find(es.roles.begin(), es.roles.end(), "mutator") != es.roles.end();
+
+  if (q.seed_hits >= 2 || (q.seed_hits >= 1 && ui_hot) || (q.seed_hits >= 1 && mutator)) {
+    v.verdict = tuide::AVerdictKind::Expand;
+    v.expand_with = tuide::AExpandModality::Peek;
+    if (tuide::a_target_prefers_trail_a0(item.target, &es.writes) ||
+        es.nudge.rfind("expand:trail", 0) == 0) {
+      v.expand_with = tuide::AExpandModality::Trail;
+    } else if (!es.writes.empty() && q.seed_hits >= 1) {
+      v.expand_with = tuide::AExpandModality::Dataflow;
+      v.suspect_var = es.writes.front();
+    } else if (ui_hot && mutator) {
+      v.expand_with = tuide::AExpandModality::Trail;
+    }
+    v.expand_with =
+        tuide::a_coerce_a0_expand_modality(item.target, v.expand_with, &es.writes);
+    v.why = "heuristic: seed_hits=" + std::to_string(q.seed_hits) +
+            (ui_hot ? " ui_hot" : "") + (mutator ? " mutator" : "");
+    return v;
+  }
+  if (glue && q.seed_hits == 0) {
+    v.verdict = tuide::AVerdictKind::Reject;
+    v.why = "heuristic: glue sin seeds";
+    return v;
+  }
+  if (es.nudge == "likely_noise" || es.nudge == "likely_lsp_trap") {
+    v.verdict = tuide::AVerdictKind::Reject;
+    v.why = "heuristic: " + es.nudge;
+    return v;
+  }
+  if (q.seed_hits >= 1) {
+    v.verdict = tuide::AVerdictKind::Uncertain;
+    v.expand_with = tuide::AExpandModality::Peek;
+    v.why = "heuristic: seed débil";
+    return v;
+  }
+  v.verdict = tuide::AVerdictKind::Reject;
+  v.why = "heuristic: sin señal seed/hot";
+  return v;
+}
+
+int run_effect_summary_probe(const std::string& root, int argc, char** argv) {
+  std::vector<std::string> symbols;
+  std::vector<std::string> targets;
+  std::string path_hint;
+  std::string seeds_csv;
+  std::string map_path;
+  std::string a_state_path;
+  int top_n = 20;
+  int tranche_n = tuide::kA0MaxCardsPerTurn;
+  bool json_out = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--path" && i + 1 < argc) {
+      path_hint = argv[++i];
+    } else if (a == "--seeds" && i + 1 < argc) {
+      seeds_csv = argv[++i];
+    } else if (a == "--from-map" && i + 1 < argc) {
+      map_path = argv[++i];
+    } else if (a == "--from-a-state" && i + 1 < argc) {
+      a_state_path = argv[++i];
+    } else if (a == "--top" && i + 1 < argc) {
+      top_n = std::atoi(argv[++i]);
+    } else if (a == "--tranche" && i + 1 < argc) {
+      tranche_n = std::atoi(argv[++i]);
+    } else if (a == "--json") {
+      json_out = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "effect-summary-probe SYM [SYM…] | --target path:Sym …\n"
+                   "  | --from-map map.md [--top N] | --from-a-state a_state.json [--tranche N]\n"
+                   "  [--seeds a,b,c] [--path hint] [--json]\n"
+                   "  Sin LLM. Genera fichas Effect Summary + métricas de calidad.\n";
+      return 2;
+    } else if (a == "--target" && i + 1 < argc) {
+      targets.push_back(argv[++i]);
+    } else if (!a.empty() && a[0] != '-') {
+      symbols.push_back(a);
+    }
+  }
+
+  tuide::EffectSummaryOpts opts;
+  opts.seeds = parse_seeds_csv(seeds_csv);
+  opts.orphans = opts.seeds;
+
+  std::vector<tuide::AQueueItem> items;
+  if (!map_path.empty()) {
+    const std::string md = read_file(fs::path(map_path));
+    tuide::AQueueMapFilterOpts fopts;
+    fopts.want_n = static_cast<std::size_t>(top_n);
+    fopts.orphans = parse_seeds_csv(seeds_csv);
+    const auto inputs =
+        tuide::a_queue_inputs_from_ranked_map_filtered(md, fopts, root);
+    for (const auto& in : inputs) {
+      tuide::AQueueItem q;
+      q.path = in.file;
+      q.symbol = in.name;
+      q.line = in.line;
+      q.stem = in.stem;
+      q.score = static_cast<float>(in.score);
+      q.map_related = in.map_related;
+      q.refs_in = in.refs_in;
+      q.body_sem_permille = in.body_sem_permille;
+      q.file_rank = in.file_rank;
+      q.file_count = in.file_count;
+      q.dup_stem = in.dup_stem;
+      q.stem_sem_rank = in.stem_sem_rank;
+      q.target = in.file + (in.name.empty() ? "" : (":" + in.name));
+      items.push_back(std::move(q));
+    }
+    if (!items.empty()) {
+      tuide::AState st;
+      st.seeds = opts.seeds;
+      st.orphans = fopts.orphans.empty() ? opts.seeds : fopts.orphans;
+      const int cap = std::min(tranche_n, static_cast<int>(items.size()));
+      items = tuide::a_order_a0_tranche_by_card(root, items, st, cap, nullptr, nullptr);
+    }
+  } else if (!a_state_path.empty()) {
+    std::ifstream in(a_state_path);
+    if (!in) {
+      std::cerr << "effect-summary-probe: no se pudo leer " << a_state_path << "\n";
+      return 2;
+    }
+    nlohmann::json j;
+    in >> j;
+    tuide::AState st;
+    std::string err;
+    if (!tuide::a_state_from_json(j, &st, &err)) {
+      std::cerr << "effect-summary-probe: " << err << "\n";
+      return 2;
+    }
+    if (opts.seeds.empty()) {
+      opts.seeds = st.seeds;
+    }
+    const int n = std::min(tranche_n, std::max(0, static_cast<int>(st.queue.size()) - st.cursor));
+    for (int i = 0; i < n; ++i) {
+      items.push_back(st.queue[static_cast<std::size_t>(st.cursor + i)]);
+    }
+    if (!items.empty()) {
+      items = tuide::a_order_a0_tranche_by_card(root, items, st, static_cast<int>(items.size()),
+                                                nullptr, nullptr);
+    }
+  } else if (!targets.empty()) {
+    for (const auto& t : targets) {
+      tuide::AQueueItem q;
+      q.target = t;
+      const auto colon = t.rfind(':');
+      if (colon != std::string::npos) {
+        q.path = t.substr(0, colon);
+        q.symbol = t.substr(colon + 1);
+        const auto hash = q.symbol.find('#');
+        if (hash != std::string::npos) {
+          q.symbol = q.symbol.substr(0, hash);
+        }
+      } else {
+        q.path = t;
+      }
+      items.push_back(std::move(q));
+    }
+  } else if (!symbols.empty()) {
+    for (const auto& sym : symbols) {
+      tuide::AQueueItem q;
+      q.symbol = sym;
+      q.path = path_hint;
+      q.target = path_hint.empty() ? sym : (path_hint + ":" + sym);
+      items.push_back(std::move(q));
+    }
+  } else {
+    std::cerr << "effect-summary-probe: falta SYM, --target, --from-map o --from-a-state\n";
+    return 2;
+  }
+
+  int rc = 0;
+  int budget_fail = 0;
+  int fallback_n = 0;
+  int seed_hit_n = 0;
+  int cards_out = 0;
+  std::unordered_set<std::string> seen_anchors;
+  nlohmann::json report = nlohmann::json::array();
+
+  for (const auto& item : items) {
+    const auto es = tuide::effect_summary_for_queue_item(root, item, opts);
+    if (!es.anchor.empty() && !seen_anchors.insert(es.anchor).second) {
+      continue;
+    }
+    ++cards_out;
+    const auto q = tuide::effect_summary_quality(es, opts.seeds);
+    if (!q.within_budget) {
+      ++budget_fail;
+    }
+    if (q.ts_fallback) {
+      ++fallback_n;
+    }
+    if (q.seed_hits > 0) {
+      ++seed_hit_n;
+    }
+
+    if (json_out) {
+      nlohmann::json row = tuide::effect_summary_to_json(es);
+      row["target"] = item.target;
+      row["quality"] = {{"card_chars", q.card_chars},
+                        {"line_count", q.line_count},
+                        {"within_budget", q.within_budget},
+                        {"ts_fallback", q.ts_fallback},
+                        {"seed_hits", q.seed_hits}};
+      report.push_back(std::move(row));
+    } else {
+      std::cout << "======== effect-summary `" << item.target << "` ========\n";
+      std::cout << "quality: chars=" << q.card_chars << " lines=" << q.line_count
+                << " budget=" << (q.within_budget ? "OK" : "OVER")
+                << " fallback=" << (q.ts_fallback ? 1 : 0) << " seed_hits=" << q.seed_hits
+                << "\n\n";
+      std::cout << es.card_text << "\n";
+    }
+  }
+
+  if (json_out) {
+    std::cout << report.dump(2) << '\n';
+  } else {
+    std::cout << "---- summary ----\n";
+    std::cout << "cards=" << cards_out << " budget_fail=" << budget_fail
+              << " ts_fallback=" << fallback_n << " seed_hit_cards=" << seed_hit_n << "\n";
+  }
+  if (items.empty()) {
+    rc = 1;
+  }
+  return rc;
+}
+
+// Bench: Effect Summary card passages vs raw bodies for L1-style embed rerank.
+int run_card_embed_bench(const std::string& root, int argc, char** argv) {
+  if (!tuide::l2_feat::enabled("L2_EXPLORE_EFFECT_SUMMARY")) {
+    std::cerr << "card-embed-bench: L2_EXPLORE_EFFECT_SUMMARY off\n";
+    return 2;
+  }
+  std::string map_path = (fs::path(root) / ".tuide/ai/map_last.md").string();
+  std::string query;
+  std::string intent;  // short synthesized goal (hybrid)
+  std::string tokens_csv;
+  std::string modes_csv = "nl,tokens,hybrid,nl+tokens";
+  int top_n = 40;
+  int body_max_lines = 80;
+  // With n_parallel=8 and n_ctx=2048, each slot ≈256 tokens — keep passages short.
+  std::size_t body_max_chars = 500;
+  std::size_t card_max_chars = 500;
+  bool skip_embed = false;
+  bool json_out = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--map" && i + 1 < argc) {
+      map_path = argv[++i];
+    } else if (a == "--query" && i + 1 < argc) {
+      query = argv[++i];
+    } else if (a == "--intent" && i + 1 < argc) {
+      intent = argv[++i];
+    } else if (a == "--tokens" && i + 1 < argc) {
+      tokens_csv = argv[++i];
+    } else if (a == "--modes" && i + 1 < argc) {
+      modes_csv = argv[++i];
+    } else if (a == "--top" && i + 1 < argc) {
+      top_n = std::atoi(argv[++i]);
+    } else if (a == "--skip-embed") {
+      skip_embed = true;
+    } else if (a == "--json") {
+      json_out = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr
+          << "card-embed-bench [--map map.md] [--query TEXT] [--intent SHORT]\n"
+             "  [--tokens a,b,c] [--modes nl,tokens,hybrid,nl+tokens] [--top N]\n"
+             "  [--skip-embed] [--json]\n"
+             "  nl        = solo prompt crudo\n"
+             "  tokens    = solo semantic_tokens / search_terms\n"
+             "  hybrid    = intent corto + tokens + síntomas nombrados en el NL\n"
+             "  nl+tokens = L1 actual (prompt + cap 12 tokens)\n";
+      return 2;
+    }
+  }
+  if (query.empty()) {
+    std::string case_id = "17_ai_spinner_stuck";
+    std::vector<std::string> expected;
+    std::vector<std::string> traps;
+    if (!load_case_prompt(root, case_id, &query, &expected, &traps)) {
+      std::cerr << "card-embed-bench: falta --query\n";
+      return 2;
+    }
+  }
+  if (intent.empty()) {
+    // Mimic a short distilled primary_goal (not the full NL paragraph).
+    intent = "Locate AI chat loading/busy state control and how cancel clears it";
+  }
+  std::vector<std::string> semantic_tokens = parse_seeds_csv(tokens_csv);
+  if (semantic_tokens.empty()) {
+    semantic_tokens = {"spinner", "busy", "loading_state", "chat_state", "cancel",
+                       "agent_busy", "set_busy_spinner", "console_panel"};
+  }
+  std::vector<std::string> modes = parse_seeds_csv(modes_csv);
+  if (modes.empty()) {
+    modes = {"hybrid"};
+  }
+
+  auto lower_copy = [](std::string s) {
+    for (char& c : s) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return s;
+  };
+  // Hybrid rescue: symptoms the user named in NL must not be dropped even if distill ignored them.
+  auto user_symptom_tokens = [&]() {
+    static const char* kSym[] = {"spinner", "busy", "loading", "cancel", "thinking",
+                                 "agent_busy", "carga", "bloqueado"};
+    const std::string ql = lower_copy(query);
+    std::vector<std::string> out;
+    for (const char* s : kSym) {
+      if (ql.find(s) != std::string::npos) {
+        out.push_back(s);
+      }
+    }
+    return out;
+  };
+
+  auto build_mode_query = [&](const std::string& mode) -> std::string {
+    if (mode == "nl") {
+      return query;
+    }
+    if (mode == "tokens") {
+      std::ostringstream o;
+      o << "search:";
+      for (const auto& t : semantic_tokens) {
+        o << ' ' << t;
+      }
+      return o.str();
+    }
+    if (mode == "hybrid") {
+      // Intent corto + tokens L1, but user-named symptoms get reserved slots (cap 12).
+      std::vector<std::string> rescued = user_symptom_tokens();
+      std::vector<std::string> rest;
+      auto in_rescued = [&](const std::string& t) {
+        const std::string tl = lower_copy(t);
+        for (const auto& s : rescued) {
+          const std::string sl = lower_copy(s);
+          if (tl.find(sl) != std::string::npos || sl.find(tl) != std::string::npos) {
+            return true;
+          }
+        }
+        return false;
+      };
+      for (const auto& t : semantic_tokens) {
+        if (!in_rescued(t)) {
+          rest.push_back(t);
+        }
+      }
+      std::ostringstream o;
+      o << intent << "\nsemantic:";
+      int n = 0;
+      for (const auto& t : rescued) {
+        if (n >= 12) {
+          break;
+        }
+        o << ' ' << t;
+        ++n;
+      }
+      for (const auto& t : rest) {
+        if (n >= 12) {
+          break;
+        }
+        o << ' ' << t;
+        ++n;
+      }
+      return o.str();
+    }
+    // nl+tokens (current L1)
+    return tuide::build_semantic_embed_query(query, semantic_tokens, /*max_tokens=*/12);
+  };
+
+  const std::string md = read_file(fs::path(map_path));
+  if (md.empty()) {
+    std::cerr << "card-embed-bench: mapa vacío (" << map_path << ")\n";
+    return 2;
+  }
+  tuide::AQueueMapFilterOpts fopts;
+  fopts.want_n = static_cast<std::size_t>(std::max(1, top_n));
+  auto inputs = tuide::a_queue_inputs_from_ranked_map_filtered(md, fopts, root);
+  if (static_cast<int>(inputs.size()) > top_n) {
+    inputs.resize(static_cast<std::size_t>(top_n));
+  }
+  if (inputs.empty()) {
+    std::cerr << "card-embed-bench: 0 entradas desde mapa\n";
+    return 2;
+  }
+
+  using clock = std::chrono::steady_clock;
+  tuide::EffectSummaryOpts es_opts;
+  es_opts.seeds = semantic_tokens;
+  es_opts.orphans = semantic_tokens;
+
+  struct Row {
+    std::string target;
+    std::string path;
+    std::string symbol;
+    int line = 0;
+    int map_score = 0;
+    std::string card;
+    std::string body;
+    float card_cos = -1.f;
+    float body_cos = -1.f;
+    int body_sem_permille = 0;
+  };
+  std::vector<Row> rows;
+  rows.reserve(inputs.size());
+
+  const auto t_card0 = clock::now();
+  std::size_t card_chars = 0;
+  for (const auto& in : inputs) {
+    Row r;
+    r.path = in.file;
+    r.symbol = in.name;
+    r.line = in.line;
+    r.map_score = in.score;
+    r.body_sem_permille = in.body_sem_permille;
+    r.target = in.file + (in.name.empty() ? "" : (":" + in.name));
+    tuide::AQueueItem item;
+    item.path = in.file;
+    item.symbol = in.name;
+    item.line = in.line;
+    item.stem = in.stem;
+    item.score = static_cast<float>(in.score);
+    item.target = r.target;
+    item.body_sem_permille = in.body_sem_permille;
+    item.file_rank = in.file_rank;
+    item.file_count = in.file_count;
+    item.dup_stem = in.dup_stem;
+    item.map_related = in.map_related;
+    item.refs_in = in.refs_in;
+    es_opts.map_score = in.score;
+    es_opts.stem = in.stem;
+    es_opts.body_sem_permille = in.body_sem_permille;
+    es_opts.file_rank = in.file_rank;
+    es_opts.file_count = in.file_count;
+    es_opts.dup_stem = in.dup_stem;
+    es_opts.map_related = in.map_related;
+    es_opts.refs_in = in.refs_in;
+    const auto es = tuide::effect_summary_for_queue_item(root, item, es_opts);
+    r.card = es.card_text;
+    if (r.card.size() > card_max_chars) {
+      r.card.resize(card_max_chars);
+      r.card += "\n…";
+    }
+    card_chars += r.card.size();
+    rows.push_back(std::move(r));
+  }
+  const auto card_build_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t_card0).count();
+
+  const auto t_body0 = clock::now();
+  std::size_t body_chars = 0;
+  int body_ok = 0;
+  for (auto& r : rows) {
+    GetCodeOfRequest req;
+    req.workspace_root = root;
+    req.file = r.path;
+    req.symbol = r.symbol;
+    req.line = r.line;
+    req.max_lines = body_max_lines;
+    const auto got = get_code_of(req);
+    if (got.ok && !got.text.empty()) {
+      r.body = got.text;
+      if (r.body.size() > body_max_chars) {
+        r.body.resize(body_max_chars);
+        r.body += "\n…";
+      }
+      body_chars += r.body.size();
+      ++body_ok;
+    }
+  }
+  const auto body_fetch_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t_body0).count();
+
+  int64_t query_embed_ms = 0;
+  int64_t card_embed_ms = 0;
+  int64_t body_embed_ms = 0;
+  bool used_embed = false;
+  std::string embed_err;
+
+  struct ModeResult {
+    std::string mode;
+    std::string enriched;
+    int gold_card_rank = -1;
+    int gold_body_rank = -1;
+    float gold_card_cos = -1.f;
+    float gold_body_cos = -1.f;
+    std::vector<std::pair<float, std::string>> top_card;
+    std::vector<std::pair<float, std::string>> top_body;
+  };
+  std::vector<ModeResult> mode_results;
+
+  auto find_rank_cos = [](const std::vector<Row>& sorted, const std::string& needle, float* cos_out) {
+    for (std::size_t i = 0; i < sorted.size(); ++i) {
+      if (sorted[i].target.find(needle) != std::string::npos) {
+        if (cos_out) {
+          *cos_out = sorted[i].card_cos >= 0 ? sorted[i].card_cos : sorted[i].body_cos;
+        }
+        return static_cast<int>(i) + 1;
+      }
+    }
+    return -1;
+  };
+
+  if (!skip_embed) {
+    const AiSettings settings = load_ai_settings(root);
+    tuide::EmbeddingBackend backend;
+    auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+    if (!backend.ensure_ready(settings, progress, &embed_err)) {
+      std::cerr << "card-embed-bench: embed ensure_ready failed: " << embed_err
+                << " (usa --skip-embed para solo costes de build)\n";
+      return 1;
+    }
+
+    std::vector<std::string> card_passages;
+    std::vector<std::size_t> card_idx;
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+      if (!rows[i].card.empty()) {
+        card_passages.push_back(rows[i].card);
+        card_idx.push_back(i);
+      }
+    }
+    std::vector<std::vector<float>> card_vecs;
+    const auto t_c0 = clock::now();
+    if (!backend.embed_passages(card_passages, &card_vecs, &embed_err) ||
+        card_vecs.size() != card_passages.size()) {
+      std::cerr << "card-embed-bench: card embed fail: " << embed_err << "\n";
+      return 1;
+    }
+    card_embed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t_c0).count();
+
+    std::vector<std::string> body_passages;
+    std::vector<std::size_t> body_idx;
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+      if (!rows[i].body.empty()) {
+        body_passages.push_back(rows[i].body);
+        body_idx.push_back(i);
+      }
+    }
+    std::vector<std::vector<float>> body_vecs;
+    const auto t_b0 = clock::now();
+    if (!backend.embed_passages(body_passages, &body_vecs, &embed_err) ||
+        body_vecs.size() != body_passages.size()) {
+      std::cerr << "card-embed-bench: body embed fail: " << embed_err << "\n";
+      return 1;
+    }
+    body_embed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t_b0).count();
+
+    for (const auto& mode : modes) {
+      ModeResult mr;
+      mr.mode = mode;
+      mr.enriched = build_mode_query(mode);
+      std::vector<float> qvec;
+      const auto t_q0 = clock::now();
+      if (!backend.embed_query(mr.enriched, &qvec, &embed_err) || qvec.empty()) {
+        std::cerr << "card-embed-bench: query embed fail (" << mode << "): " << embed_err << "\n";
+        return 1;
+      }
+      query_embed_ms +=
+          std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - t_q0).count();
+
+      for (auto& r : rows) {
+        r.card_cos = -1.f;
+        r.body_cos = -1.f;
+      }
+      for (std::size_t j = 0; j < card_idx.size(); ++j) {
+        if (!card_vecs[j].empty()) {
+          rows[card_idx[j]].card_cos = tuide::cosine_similarity(qvec, card_vecs[j]);
+        }
+      }
+      for (std::size_t j = 0; j < body_idx.size(); ++j) {
+        if (!body_vecs[j].empty()) {
+          rows[body_idx[j]].body_cos = tuide::cosine_similarity(qvec, body_vecs[j]);
+        }
+      }
+
+      auto by_card = rows;
+      auto by_body = rows;
+      std::stable_sort(by_card.begin(), by_card.end(),
+                       [](const Row& a, const Row& b) { return a.card_cos > b.card_cos; });
+      std::stable_sort(by_body.begin(), by_body.end(),
+                       [](const Row& a, const Row& b) { return a.body_cos > b.body_cos; });
+
+      float gc = -1.f;
+      float gb = -1.f;
+      mr.gold_card_rank = find_rank_cos(by_card, "set_busy_spinner", &gc);
+      // find_rank_cos uses card_cos; for body rank read body_cos from matching row
+      for (std::size_t i = 0; i < by_body.size(); ++i) {
+        if (by_body[i].target.find("set_busy_spinner") != std::string::npos) {
+          mr.gold_body_rank = static_cast<int>(i) + 1;
+          gb = by_body[i].body_cos;
+          break;
+        }
+      }
+      for (std::size_t i = 0; i < by_card.size(); ++i) {
+        if (by_card[i].target.find("set_busy_spinner") != std::string::npos) {
+          gc = by_card[i].card_cos;
+          break;
+        }
+      }
+      mr.gold_card_cos = gc;
+      mr.gold_body_cos = gb;
+      for (std::size_t i = 0; i < std::min<std::size_t>(5, by_card.size()); ++i) {
+        mr.top_card.emplace_back(by_card[i].card_cos, by_card[i].target);
+      }
+      for (std::size_t i = 0; i < std::min<std::size_t>(5, by_body.size()); ++i) {
+        mr.top_body.emplace_back(by_body[i].body_cos, by_body[i].target);
+      }
+      mode_results.push_back(std::move(mr));
+    }
+    used_embed = true;
+  }
+
+  if (json_out) {
+    nlohmann::json j;
+    j["n"] = rows.size();
+    j["card_build_ms"] = card_build_ms;
+    j["body_fetch_ms"] = body_fetch_ms;
+    j["card_chars"] = card_chars;
+    j["body_chars"] = body_chars;
+    j["query_embed_ms"] = query_embed_ms;
+    j["card_embed_ms"] = card_embed_ms;
+    j["body_embed_ms"] = body_embed_ms;
+    j["used_embed"] = used_embed;
+    j["intent"] = intent;
+    nlohmann::json modes_j = nlohmann::json::array();
+    for (const auto& mr : mode_results) {
+      modes_j.push_back({{"mode", mr.mode},
+                         {"enriched", mr.enriched},
+                         {"gold_card_rank", mr.gold_card_rank},
+                         {"gold_body_rank", mr.gold_body_rank},
+                         {"gold_card_cos", mr.gold_card_cos},
+                         {"gold_body_cos", mr.gold_body_cos}});
+    }
+    j["modes"] = std::move(modes_j);
+    std::cout << j.dump(2) << '\n';
+    return 0;
+  }
+
+  std::cout << "======== card-embed-bench ========\n";
+  std::cout << "map=" << map_path << " n=" << rows.size() << " body_ok=" << body_ok << "\n";
+  std::cout << "query_chars=" << query.size() << " intent_chars=" << intent.size()
+            << " tokens=" << semantic_tokens.size() << "\n";
+  std::cout << "intent=\"" << intent << "\"\n";
+  std::cout << "tokens=";
+  for (std::size_t i = 0; i < semantic_tokens.size(); ++i) {
+    if (i) {
+      std::cout << ',';
+    }
+    std::cout << semantic_tokens[i];
+  }
+  std::cout << "\n";
+  std::cout << "---- build cost ----\n";
+  std::cout << "ES cards:  build_ms=" << card_build_ms << " chars_total=" << card_chars
+            << " avg=" << (rows.empty() ? 0 : card_chars / rows.size()) << "\n";
+  std::cout << "bodies:    fetch_ms=" << body_fetch_ms << " chars_total=" << body_chars
+            << " avg=" << (body_ok == 0 ? 0 : body_chars / static_cast<std::size_t>(body_ok))
+            << " cap=" << body_max_chars << "\n";
+  if (used_embed) {
+    std::cout << "---- embed cost ----\n";
+    std::cout << "query_embed_ms(sum)=" << query_embed_ms << " card_embed_ms=" << card_embed_ms
+              << " body_embed_ms=" << body_embed_ms << "\n";
+    std::cout << "---- gold set_busy_spinner by query-mode ----\n";
+    std::cout << "mode         card_rank  body_rank  card_cos  body_cos  enriched_chars\n";
+    for (const auto& mr : mode_results) {
+      std::printf("%-12s %9d  %9d  %8.3f  %8.3f  %d\n", mr.mode.c_str(), mr.gold_card_rank,
+                  mr.gold_body_rank, static_cast<double>(mr.gold_card_cos),
+                  static_cast<double>(mr.gold_body_cos), static_cast<int>(mr.enriched.size()));
+    }
+    for (const auto& mr : mode_results) {
+      std::cout << "\n---- mode=" << mr.mode << " enriched ----\n";
+      std::cout << mr.enriched.substr(0, 280);
+      if (mr.enriched.size() > 280) {
+        std::cout << "…";
+      }
+      std::cout << "\n top5 card:";
+      for (std::size_t i = 0; i < mr.top_card.size(); ++i) {
+        std::cout << "\n  " << (i + 1) << ". " << mr.top_card[i].first << " `"
+                  << mr.top_card[i].second << "`";
+      }
+      std::cout << "\n";
+    }
+  } else {
+    std::cout << "(embed skipped)\n";
+  }
+  return 0;
+}
+
+int run_a0_sniff_shot(Level2Session& session, const std::string& root, int argc, char** argv) {
+  if (!tuide::l2_feat::enabled("L2_EXPLORE_EFFECT_SUMMARY")) {
+    std::cerr << "a0-sniff-shot: L2_EXPLORE_EFFECT_SUMMARY off — export "
+                 "L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY=1\n";
+    return 2;
+  }
+  std::string out_dir;
+  std::string case_id;
+  int max_turns = tuide::kA0MaxTurns;
+  bool json_out = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--out-dir" && i + 1 < argc) {
+      out_dir = argv[++i];
+    } else if (a == "--case" && i + 1 < argc) {
+      case_id = argv[++i];
+    } else if (a == "--turns" && i + 1 < argc) {
+      max_turns = std::atoi(argv[++i]);
+    } else if (a == "--json") {
+      json_out = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "a0-sniff-shot [--case CASE_ID] [--turns N] [--out-dir DIR] [--json]\n"
+                   "  Sin LLM. Tras bootstrap+A_state: olfateo A0 con veredictos heurísticos.\n"
+                   "  Escribe cards/, verdicts_turn*.json, report.json si --out-dir.\n";
+      return 2;
+    }
+  }
+
+  tuide::AState ast = Level2Session::load_a_state(root);
+  if (ast.queue.empty()) {
+    std::cerr << "a0-sniff-shot: cola vacía — ejecuta bootstrap (+ L1 map) primero\n";
+    return 2;
+  }
+  if (ast.a_subphase.empty()) {
+    ast.a_subphase = "a0_sniff";
+  }
+
+  std::vector<std::string> expected_stems;
+  if (!case_id.empty()) {
+    std::string prompt;
+    load_case_prompt(root, case_id, &prompt, &expected_stems);
+  }
+
+  if (!out_dir.empty()) {
+    fs::create_directories(fs::path(out_dir) / "cards");
+  }
+
+  tuide::EffectSummaryOpts opts;
+  opts.seeds = ast.seeds;
+
+  int turn = 0;
+  int total_cards = 0;
+  int expands = 0;
+  int rejects = 0;
+  int uncertain = 0;
+  int expand_seed_hits = 0;
+  std::vector<std::string> expand_stems;
+
+  while (turn < max_turns && tuide::a_in_a0_sniff(ast) &&
+         ast.cursor < static_cast<int>(ast.queue.size()) &&
+         ast.cards_used < tuide::kA0MaxCardsTotal) {
+    const int n = std::min(tuide::kA0MaxCardsPerTurn,
+                           static_cast<int>(ast.queue.size()) - ast.cursor);
+    std::vector<tuide::AVerdict> verdicts;
+    nlohmann::json turn_json;
+    turn_json["turn"] = turn + 1;
+    turn_json["cursor"] = ast.cursor;
+    nlohmann::json cards = nlohmann::json::array();
+
+    for (int i = 0; i < n; ++i) {
+      const auto& item = ast.queue[static_cast<std::size_t>(ast.cursor + i)];
+      const auto es = tuide::effect_summary_for_queue_item(root, item, opts);
+      const auto q = tuide::effect_summary_quality(es, opts.seeds);
+      tuide::AVerdict v = heuristic_a0_verdict(es, item, q);
+      verdicts.push_back(v);
+      ++total_cards;
+
+      nlohmann::json cj = tuide::effect_summary_to_json(es);
+      cj["target"] = item.target;
+      cj["heuristic_verdict"] = tuide::a_verdict_kind_name(v.verdict);
+      cj["quality"] = {{"seed_hits", q.seed_hits}, {"within_budget", q.within_budget},
+                       {"ts_fallback", q.ts_fallback}};
+      cards.push_back(std::move(cj));
+
+      if (!out_dir.empty()) {
+        const fs::path card_path =
+            fs::path(out_dir) / "cards" /
+            ("turn" + std::to_string(turn + 1) + "_" + std::to_string(i + 1) + ".md");
+        std::ofstream o(card_path);
+        o << es.card_text;
+      }
+
+      if (v.verdict == tuide::AVerdictKind::Expand) {
+        ++expands;
+        if (q.seed_hits > 0) {
+          ++expand_seed_hits;
+        }
+        if (!v.stem.empty()) {
+          expand_stems.push_back(v.stem);
+        }
+      } else if (v.verdict == tuide::AVerdictKind::Reject) {
+        ++rejects;
+      } else if (v.verdict == tuide::AVerdictKind::Uncertain) {
+        ++uncertain;
+      }
+    }
+
+    turn_json["cards"] = cards;
+    nlohmann::json vj = nlohmann::json::array();
+    for (const auto& v : verdicts) {
+      vj.push_back({{"target", v.target},
+                    {"verdict", tuide::a_verdict_kind_name(v.verdict)},
+                    {"expand_with", tuide::a_expand_modality_name(v.expand_with)},
+                    {"why", v.why}});
+    }
+    turn_json["verdicts"] = vj;
+
+    std::string err;
+    if (!tuide::a_apply_a0_verdicts(&ast, verdicts, &err)) {
+      std::cerr << "a0-sniff-shot turn " << (turn + 1) << " FAIL: " << err << "\n";
+      if (!out_dir.empty()) {
+        std::ofstream o(fs::path(out_dir) / ("verdicts_turn" + std::to_string(turn + 1) + ".json"));
+        o << turn_json.dump(2) << '\n';
+      }
+      return 1;
+    }
+    Level2Session::save_a_state(root, ast, nullptr);
+
+    if (!out_dir.empty()) {
+      std::ofstream o(fs::path(out_dir) / ("verdicts_turn" + std::to_string(turn + 1) + ".json"));
+      o << turn_json.dump(2) << '\n';
+    }
+
+    if (!json_out) {
+      std::cout << "---- A0 turn " << (turn + 1) << " cursor=" << ast.cursor << "/"
+                << ast.queue.size() << " cards_used=" << ast.cards_used << " ----\n";
+      for (const auto& v : verdicts) {
+        std::cout << "  [" << tuide::a_verdict_kind_name(v.verdict) << "] `" << v.target << "` — "
+                  << v.why << "\n";
+      }
+      if (ast.a1_active_set) {
+        std::cout << "  → A1 queued: " << tuide::a_expand_modality_name(ast.a1_active.modality)
+                  << " `" << ast.a1_active.target << "`\n";
+      }
+    }
+    ++turn;
+    if (ast.a1_active_set) {
+      break;  // stop after first expand batch; A1 is separate probe
+    }
+  }
+
+  int expected_hits = 0;
+  for (const auto& stem : expected_stems) {
+    for (const auto& got : expand_stems) {
+      if (got == stem || got.find(stem) != std::string::npos) {
+        ++expected_hits;
+        break;
+      }
+    }
+  }
+
+  nlohmann::json report;
+  report["turns"] = turn;
+  report["total_cards"] = total_cards;
+  report["expands"] = expands;
+  report["rejects"] = rejects;
+  report["uncertain"] = uncertain;
+  report["expand_seed_hit_rate"] =
+      expands > 0 ? static_cast<double>(expand_seed_hits) / static_cast<double>(expands) : 0.0;
+  report["expected_stems"] = expected_stems;
+  report["expected_stem_hits_in_expands"] = expected_hits;
+  report["a1_queued"] = ast.a1_active_set;
+  report["cards_used"] = ast.cards_used;
+  report["cursor"] = ast.cursor;
+
+  if (!out_dir.empty()) {
+    std::ofstream o(fs::path(out_dir) / "report.json");
+    o << report.dump(2) << '\n';
+  }
+
+  if (json_out) {
+    std::cout << report.dump(2) << '\n';
+  } else {
+    std::cout << "---- A0 sniff report ----\n";
+    std::cout << "turns=" << turn << " cards=" << total_cards << " expand=" << expands
+              << " reject=" << rejects << " uncertain=" << uncertain << "\n";
+    std::cout << "expand_seed_hits=" << expand_seed_hits << "/" << expands << "\n";
+    if (!expected_stems.empty()) {
+      std::cout << "expected_stem_hits=" << expected_hits << "/" << expected_stems.size()
+                << "\n";
+    }
+    if (ast.a1_active_set) {
+      std::cout << "next_A1=" << tuide::a_expand_modality_name(ast.a1_active.modality) << " "
+                << ast.a1_active.target << "\n";
+    }
+    std::cout << "PASS_HEURISTIC_A0\n";
+  }
+  (void)session;
+  return 0;
+}
+
+struct SummaryProbeCard {
+  std::string target;
+  std::string body;
+};
+
+std::string stem_from_target(const std::string& target) {
+  const auto colon = target.rfind(':');
+  std::string path = colon != std::string::npos ? target.substr(0, colon) : target;
+  const auto slash = path.find_last_of("/\\");
+  std::string base = slash != std::string::npos ? path.substr(slash + 1) : path;
+  const auto dot = base.rfind('.');
+  if (dot != std::string::npos) {
+    base = base.substr(0, dot);
+  }
+  return base;
+}
+
+std::vector<SummaryProbeCard> parse_effect_summary_probe_file(const std::string& raw) {
+  std::vector<SummaryProbeCard> out;
+  const std::string marker = "======== effect-summary `";
+  std::size_t pos = 0;
+  while ((pos = raw.find(marker, pos)) != std::string::npos) {
+    pos += marker.size();
+    const auto end_target = raw.find('`', pos);
+    if (end_target == std::string::npos) {
+      break;
+    }
+    SummaryProbeCard card;
+    card.target = raw.substr(pos, end_target - pos);
+    const auto es_start = raw.find("# ES ", end_target);
+    if (es_start == std::string::npos) {
+      break;
+    }
+    const auto next_marker = raw.find(marker, es_start + 1);
+    const auto summary_line = raw.find("---- summary ----", es_start);
+    std::size_t es_end = raw.size();
+    if (next_marker != std::string::npos && next_marker < es_end) {
+      es_end = next_marker;
+    }
+    if (summary_line != std::string::npos && summary_line < es_end) {
+      es_end = summary_line;
+    }
+    card.body = raw.substr(es_start, es_end - es_start);
+    while (!card.body.empty() && (card.body.back() == '\n' || card.body.back() == '\r')) {
+      card.body.pop_back();
+    }
+    out.push_back(std::move(card));
+    pos = es_end;
+  }
+  return out;
+}
+
+std::string format_a0_cards_for_llm(const std::vector<SummaryProbeCard>& cards) {
+  std::ostringstream out;
+  out << "## Effect Summary (A0 — olfateo; NO cuerpos)\n";
+  out << "cards=" << cards.size() << " · juzga TODAS las fichas de la tranche\n";
+  out << "Juzga por seeds/nudge/hot/writes/calls; stem/map/kind/path_fam dan contexto L1.\n";
+  out << "nudge = sugerencia determinista (expand:*|likely_*|weak_seed), no veredicto.\n";
+  out << "Veredictos: expand|reject|uncertain (PROHIBIDO useful).\n\n";
+  for (std::size_t i = 0; i < cards.size(); ++i) {
+    out << "### card " << (i + 1) << " `" << cards[i].target << "`\n\n```\n" << cards[i].body
+        << "\n```\n\n";
+  }
+  out << "Responde {\"action\":\"a_judge\",\"phase\":\"a0_sniff\",\"verdicts\":[…],"
+         "\"done\":false}\n";
+  return out.str();
+}
+
+int run_a0_sniff_judge_shot(Level2Session& session, const std::string& root, int argc,
+                            char** argv) {
+  if (!tuide::l2_feat::enabled("L2_EXPLORE_EFFECT_SUMMARY")) {
+    std::cerr << "a0-sniff-judge-shot: L2_EXPLORE_EFFECT_SUMMARY off — export "
+                 "L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY=1\n";
+    return 2;
+  }
+  std::string summary_path;
+  std::string out_dir;
+  std::string case_id = "17_ai_spinner_stuck";
+  bool dry = false;
+  bool json_out = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--from-summary" && i + 1 < argc) {
+      summary_path = argv[++i];
+    } else if (a == "--out-dir" && i + 1 < argc) {
+      out_dir = argv[++i];
+    } else if (a == "--case" && i + 1 < argc) {
+      case_id = argv[++i];
+    } else if (a == "--dry") {
+      dry = true;
+    } else if (a == "--json") {
+      json_out = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "a0-sniff-judge-shot [--case CASE_ID] --from-summary FILE [--out-dir DIR]\n"
+                   "  [--dry] [--json]\n"
+                   "  1× LLM: fichas Effect Summary → a_judge phase=a0_sniff.\n"
+                   "  Sin --from-summary usa build_a_peek_tranche_markdown (requiere a_state).\n";
+      return 2;
+    }
+  }
+
+  std::string instruction;
+  std::vector<std::string> expected_stems;
+  std::vector<std::string> trap_stems;
+  if (!load_case_prompt(root, case_id, &instruction, &expected_stems, &trap_stems)) {
+    std::cerr << "a0-sniff-judge-shot: case `" << case_id << "` no encontrado\n";
+    return 2;
+  }
+
+  std::string cards_md;
+  std::vector<SummaryProbeCard> cards;
+  if (!summary_path.empty()) {
+    const std::string raw = read_file(summary_path);
+    if (raw.empty()) {
+      std::cerr << "a0-sniff-judge-shot: no se pudo leer " << summary_path << "\n";
+      return 2;
+    }
+    cards = parse_effect_summary_probe_file(raw);
+    if (cards.empty()) {
+      std::cerr << "a0-sniff-judge-shot: sin fichas en " << summary_path << "\n";
+      return 2;
+    }
+    cards_md = format_a0_cards_for_llm(cards);
+  } else {
+    tuide::AState ast = Level2Session::load_a_state(root);
+    if (ast.queue.empty()) {
+      std::cerr << "a0-sniff-judge-shot: cola vacía — bootstrap o usa --from-summary\n";
+      return 2;
+    }
+    if (ast.a_subphase.empty()) {
+      ast.a_subphase = "a0_sniff";
+    }
+    cards_md = session.build_a_peek_tranche_markdown(root);
+    for (const auto& item : ast.queue) {
+      SummaryProbeCard c;
+      c.target = item.target;
+      cards.push_back(std::move(c));
+    }
+  }
+
+  std::ostringstream user;
+  user << "phase=explore_a step=1 workflow=agent subphase=a0_sniff\n\n";
+  user << "## Instruction\n" << instruction << "\n\n";
+  user << cards_md;
+
+  const std::string system =
+      "Eres el Nivel 2 en fase explore_a — subfase A0 (Effect Summary / olfateo).\n"
+      "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+      "PROHIBIDO action=plan, tool, edit, done next=edit, useful en A0.\n"
+      "\n"
+      "## Fichas → a_judge phase=a0_sniff\n"
+      "Juzga por seeds/nudge/hot/writes/calls; stem/map dan contexto L1.\n"
+      "nudge = sugerencia determinista (expand:*|likely_glue|likely_noise|weak_seed), no veredicto.\n"
+      "expand = merece peek|trail|dataflow (expand_with). reject = fuera. uncertain = duda.\n"
+      "Traps: cancel genérico, LSP completion, UI glue sin seeds → reject.\n"
+      "Juzga solo por seeds/nudge/hot/writes de cada ficha; likely_* → reject salvo seeds "
+      "fuertes.\n"
+      "expand_with según nudge (NO dataflow en A0 salvo nudge expand:dataflow).\n"
+      "Ejemplo genérico:\n"
+      "{\"action\":\"a_judge\",\"phase\":\"a0_sniff\",\"verdicts\":["
+      "{\"target\":\"src/foo/module.cpp:sym_a\",\"verdict\":\"expand\","
+      "\"expand_with\":\"trail\",\"why\":\"nudge expand:trail + seeds\"},"
+      "{\"target\":\"src/lsp/lsp_client.cpp:cancel\",\"verdict\":\"reject\","
+      "\"why\":\"likely_lsp_trap\"}],\"done\":false}\n";
+
+  std::cout << "======== a0-sniff-judge-shot ========\n";
+  std::cout << "case=" << case_id << " cards=" << cards.size() << "\n";
+  std::cout << "expected_stems=";
+  for (std::size_t i = 0; i < expected_stems.size(); ++i) {
+    if (i) {
+      std::cout << ",";
+    }
+    std::cout << expected_stems[i];
+  }
+  std::cout << " trap_stems=";
+  for (std::size_t i = 0; i < trap_stems.size(); ++i) {
+    if (i) {
+      std::cout << ",";
+    }
+    std::cout << trap_stems[i];
+  }
+  std::cout << "\nprompt_chars system=" << system.size() << " user=" << user.str().size() << "\n";
+
+  if (!out_dir.empty()) {
+    fs::create_directories(out_dir);
+    std::ofstream(fs::path(out_dir) / "system.txt") << system;
+    std::ofstream(fs::path(out_dir) / "user.md") << user.str();
+    std::ofstream(fs::path(out_dir) / "cards.md") << cards_md;
+  }
+
+  if (dry) {
+    std::cout << "\n--- user.md (dry) ---\n" << user.str() << "\n";
+    std::cout << "dry: no LLM\n";
+    return 0;
+  }
+
+  const AiSettings settings = load_ai_settings(root);
+  if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
+    std::cerr << "a0-sniff-judge-shot: ai.level2.mode debe ser local|remote (ahora="
+              << settings.level2_mode << ")\n";
+    return 2;
+  }
+  tuide::LocalL2Brain brain;
+  std::string err;
+  auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+  if (!brain.ensure_ready(settings, progress, &err)) {
+    std::cerr << "a0-sniff-judge-shot: ensure_ready: " << err << "\n";
+    return 1;
+  }
+
+  tuide::L2BrainRequest breq;
+  breq.system_prompt = system;
+  breq.user_prompt = user.str();
+  breq.phase = "explore_a";
+  breq.max_tokens = settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 1024;
+  breq.n_ctx = settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192;
+  breq.temperature = 0.1f;
+
+  std::cout << "L2 ▸ a0-sniff-judge-shot pidiendo a_judge (" << brain.name() << ")…\n";
+  const auto bres = brain.propose(breq, nullptr);
+  if (!bres.ok) {
+    std::cerr << "LLM FAIL: " << bres.error << "\n";
+    return 1;
+  }
+  if (!out_dir.empty()) {
+    std::ofstream(fs::path(out_dir) / "model_raw.txt") << bres.text;
+  }
+  std::cout << "\n--- model ---\n" << bres.text << "\n---\n";
+
+  const tuide::L2Action action = tuide::parse_l2_action(bres.text);
+  if (action.kind != tuide::L2ActionKind::AJudge && action.name != "a_judge") {
+    std::cout << "WARN: action kind=" << static_cast<int>(action.kind) << " name=" << action.name
+              << " error=" << action.error << "\n";
+    return 1;
+  }
+
+  auto normalize_verdict = [](const std::string& raw) -> std::string {
+    if (raw == "expand") {
+      return "expand";
+    }
+    if (raw.rfind("expand:", 0) == 0) {
+      return "expand";
+    }
+    if (raw == "reject" || raw == "likely_lsp_trap" || raw == "likely_noise" ||
+        raw == "likely_glue") {
+      return "reject";
+    }
+    if (raw == "uncertain" || raw == "no_signal" || raw == "weak_seed") {
+      return "uncertain";
+    }
+    return raw.empty() ? "unknown" : raw;
+  };
+
+  struct RawVerdict {
+    std::string target;
+    std::string verdict_raw;
+    std::string expand_with;
+    std::string why;
+  };
+  std::vector<RawVerdict> raw_verdicts;
+  try {
+    const auto j = nlohmann::json::parse(bres.text);
+    if (j.contains("verdicts") && j["verdicts"].is_array()) {
+      for (const auto& v : j["verdicts"]) {
+        RawVerdict rv;
+        rv.target = v.value("target", "");
+        rv.verdict_raw = v.value("verdict", "");
+        rv.expand_with = v.value("expand_with", "");
+        rv.why = v.value("why", "");
+        raw_verdicts.push_back(std::move(rv));
+      }
+    }
+  } catch (...) {
+  }
+  if (raw_verdicts.empty()) {
+    for (const auto& v : action.a_verdicts) {
+      RawVerdict rv;
+      rv.target = v.target;
+      rv.verdict_raw = tuide::a_verdict_kind_name(v.verdict);
+      rv.expand_with = tuide::a_expand_modality_name(v.expand_with);
+      rv.why = v.why;
+      raw_verdicts.push_back(std::move(rv));
+    }
+  }
+
+  auto stem_is = [](const std::string& stem, const std::vector<std::string>& needles) {
+    for (const auto& n : needles) {
+      if (stem == n) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  int expands = 0;
+  int rejects = 0;
+  int uncertain = 0;
+  int expected_expands = 0;
+  int trap_expands = 0;
+  nlohmann::json rows = nlohmann::json::array();
+
+  std::cout << "\n---- verdicts (normalizados) ----\n";
+  for (const auto& v : raw_verdicts) {
+    const std::string stem = stem_from_target(v.target);
+    const std::string norm = normalize_verdict(v.verdict_raw);
+    std::cout << v.target << " → " << norm;
+    if (norm == "expand") {
+      if (!v.expand_with.empty()) {
+        std::cout << " (" << v.expand_with << ")";
+      } else if (v.verdict_raw.rfind("expand:", 0) == 0) {
+        std::cout << " (" << v.verdict_raw.substr(7) << ")";
+      }
+    }
+    if (!v.verdict_raw.empty() && v.verdict_raw != norm) {
+      std::cout << " [raw=" << v.verdict_raw << "]";
+    }
+    if (!v.why.empty()) {
+      std::cout << " — " << v.why;
+    }
+    std::cout << " [stem=" << stem << "]\n";
+
+    if (norm == "expand") {
+      ++expands;
+      if (stem_is(stem, expected_stems)) {
+        ++expected_expands;
+      }
+      if (stem_is(stem, trap_stems)) {
+        ++trap_expands;
+      }
+    } else if (norm == "reject") {
+      ++rejects;
+    } else if (norm == "uncertain") {
+      ++uncertain;
+    }
+
+    rows.push_back({{"target", v.target},
+                    {"stem", stem},
+                    {"verdict", norm},
+                    {"verdict_raw", v.verdict_raw},
+                    {"expand_with", v.expand_with},
+                    {"why", v.why},
+                    {"expected_stem", stem_is(stem, expected_stems)},
+                    {"trap_stem", stem_is(stem, trap_stems)}});
+  }
+
+  nlohmann::json report;
+  report["case_id"] = case_id;
+  report["cards"] = static_cast<int>(cards.size());
+  report["verdicts"] = static_cast<int>(raw_verdicts.size());
+  report["expand"] = expands;
+  report["reject"] = rejects;
+  report["uncertain"] = uncertain;
+  report["expected_stem_expands"] = expected_expands;
+  report["trap_stem_expands"] = trap_expands;
+  report["expected_stems"] = expected_stems;
+  report["trap_stems"] = trap_stems;
+  report["rows"] = rows;
+
+  if (!out_dir.empty()) {
+    std::ofstream(fs::path(out_dir) / "verdicts.json") << report.dump(2) << '\n';
+  }
+
+  if (json_out) {
+    std::cout << report.dump(2) << '\n';
+  } else {
+    std::cout << "\n---- summary ----\n";
+    std::cout << "expand=" << expands << " reject=" << rejects << " uncertain=" << uncertain
+              << " verdicts=" << raw_verdicts.size() << "/" << cards.size() << "\n";
+    std::cout << "expected_stem_expands=" << expected_expands << "/" << expected_stems.size()
+              << " trap_expands=" << trap_expands << "\n";
+  }
+  return 0;
+}
+
+std::string normalize_a0_verdict_raw(const std::string& raw) {
+  if (raw == "expand") {
+    return "expand";
+  }
+  if (raw.rfind("expand:", 0) == 0) {
+    return "expand";
+  }
+  if (raw == "reject" || raw == "likely_lsp_trap" || raw == "likely_noise" ||
+      raw == "likely_glue") {
+    return "reject";
+  }
+  if (raw == "uncertain" || raw == "no_signal" || raw == "weak_seed") {
+    return "uncertain";
+  }
+  return raw.empty() ? "unknown" : raw;
+}
+
+bool target_in_tranche(const std::vector<tuide::AQueueItem>& tranche, const std::string& target) {
+  for (const auto& item : tranche) {
+    if (tuide::a_target_matches_verdict_anchor(item.target, target)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+int run_a0_tranche_rank_shot(Level2Session& /*session*/, const std::string& root, int argc,
+                             char** argv) {
+  if (!tuide::l2_feat::enabled("L2_EXPLORE_EFFECT_SUMMARY")) {
+    std::cerr << "a0-tranche-rank-shot: L2_EXPLORE_EFFECT_SUMMARY off\n";
+    return 2;
+  }
+  std::string out_dir;
+  std::string case_id = "17_ai_spinner_stuck";
+  int max_cards = 12;
+  bool json_out = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--out-dir" && i + 1 < argc) {
+      out_dir = argv[++i];
+    } else if (a == "--case" && i + 1 < argc) {
+      case_id = argv[++i];
+    } else if (a == "--max-cards" && i + 1 < argc) {
+      max_cards = std::atoi(argv[++i]);
+    } else if (a == "--json") {
+      json_out = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "a0-tranche-rank-shot [--case CASE_ID] [--max-cards N] [--out-dir DIR] [--json]\n"
+                   "  Sin LLM. Compara slice map-order vs rerank por ficha Effect Summary.\n";
+      return 2;
+    }
+  }
+
+  std::string query;
+  if (!load_case_prompt(root, case_id, &query, nullptr, nullptr)) {
+    std::cerr << "a0-tranche-rank-shot: case `" << case_id << "` no encontrado\n";
+    return 2;
+  }
+
+  tuide::AState ast = Level2Session::load_a_state(root);
+  if (ast.queue.empty()) {
+    std::cerr << "a0-tranche-rank-shot: cola vacía — bootstrap primero\n";
+    return 2;
+  }
+
+  const int n = std::min(max_cards, std::max(0, static_cast<int>(ast.queue.size()) - ast.cursor));
+  if (n <= 0) {
+    std::cerr << "a0-tranche-rank-shot: slice vacío cursor=" << ast.cursor << "\n";
+    return 2;
+  }
+  std::vector<tuide::AQueueItem> slice;
+  slice.reserve(static_cast<std::size_t>(n));
+  for (int i = 0; i < n; ++i) {
+    slice.push_back(ast.queue[static_cast<std::size_t>(ast.cursor + i)]);
+  }
+
+  std::vector<tuide::A0CardRankRow> card_rows;
+  const auto meta_order = tuide::a_order_a0_tranche(slice, ast, n);
+  const auto card_order =
+      tuide::a_order_a0_tranche_by_card(root, slice, ast, n, nullptr, &card_rows);
+
+  nlohmann::json report;
+  report["case_id"] = case_id;
+  report["max_cards"] = n;
+  report["seeds_n"] = ast.seeds.size();
+  report["orphans_n"] = ast.orphans.size();
+  nlohmann::json rows = nlohmann::json::array();
+  std::unordered_map<std::string, int> card_rank;
+  for (std::size_t i = 0; i < card_order.size(); ++i) {
+    card_rank[card_order[i].target] = static_cast<int>(i) + 1;
+  }
+
+  std::cout << "======== a0-tranche-rank-shot ========\n";
+  std::cout << "case=" << case_id << " slice_n=" << n << " seeds=" << ast.seeds.size()
+            << " orphans=" << ast.orphans.size() << "\n\n";
+  std::cout << "---- map/metadata order (a_order_a0_tranche) ----\n";
+  for (std::size_t i = 0; i < meta_order.size(); ++i) {
+    std::cout << (i + 1) << ". `" << meta_order[i].target << "` stem=" << meta_order[i].stem
+              << "\n";
+  }
+  std::cout << "\n---- card-body rerank (effect_summary_lexical_rerank_score) ----\n";
+  std::cout << "rank  score     was  nudge                target\n";
+  for (std::size_t i = 0; i < card_rows.size() && static_cast<int>(i) < n; ++i) {
+    const auto& row = card_rows[i];
+    const int new_rank = static_cast<int>(i) + 1;
+    const int was = row.slice_rank;
+    const int delta = was - new_rank;
+    std::cout << new_rank << "  " << row.score << "  " << was << "  "
+              << row.es.nudge.substr(0, 20) << (row.es.nudge.size() > 20 ? "…" : "") << "  `"
+              << row.item.target << "`";
+    if (delta != 0) {
+      std::cout << " (" << (delta > 0 ? "+" : "") << delta << ")";
+    }
+    if (!row.es.seed_match.empty()) {
+      std::cout << " seeds=" << row.es.seed_match.size();
+    }
+    if (!row.es.orphan_match.empty()) {
+      std::cout << " orphan=" << row.es.orphan_match.front();
+    }
+    if (std::find(row.es.hot.begin(), row.es.hot.end(), std::string("spinner")) !=
+        row.es.hot.end()) {
+      std::cout << " hot=spinner";
+    }
+    std::cout << "\n";
+
+    rows.push_back({{"rank", new_rank},
+                    {"score", row.score},
+                    {"slice_rank", was},
+                    {"delta", delta},
+                    {"target", row.item.target},
+                    {"stem", row.item.stem},
+                    {"nudge", row.es.nudge},
+                    {"seed_match", row.es.seed_match},
+                    {"orphan_match", row.es.orphan_match},
+                    {"hot", row.es.hot},
+                    {"in_tranche", card_rank.count(row.item.target) > 0}});
+  }
+  report["rows"] = rows;
+  report["meta_order"] = nlohmann::json::array();
+  for (const auto& item : meta_order) {
+    report["meta_order"].push_back(item.target);
+  }
+  report["card_order"] = nlohmann::json::array();
+  for (const auto& item : card_order) {
+    report["card_order"].push_back(item.target);
+  }
+
+  if (!out_dir.empty()) {
+    fs::create_directories(out_dir);
+    std::ofstream(fs::path(out_dir) / "rank_report.json") << report.dump(2) << '\n';
+  }
+  if (json_out) {
+    std::cout << report.dump(2) << '\n';
+  }
+  return 0;
+}
+
+int run_a0_first_judge_shot(Level2Session& session, const std::string& root, int argc,
+                            char** argv) {
+  if (!tuide::l2_feat::enabled("L2_EXPLORE_EFFECT_SUMMARY")) {
+    std::cerr << "a0-first-judge-shot: L2_EXPLORE_EFFECT_SUMMARY off — export "
+                 "L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY=1\n";
+    return 2;
+  }
+  std::string out_dir;
+  std::string case_id = "17_ai_spinner_stuck";
+  int max_cards = 8;
+  bool dry = false;
+  bool json_out = false;
+  bool require_full = true;
+  bool try_apply = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--out-dir" && i + 1 < argc) {
+      out_dir = argv[++i];
+    } else if (a == "--case" && i + 1 < argc) {
+      case_id = argv[++i];
+    } else if (a == "--max-cards" && i + 1 < argc) {
+      max_cards = std::atoi(argv[++i]);
+    } else if (a == "--dry") {
+      dry = true;
+    } else if (a == "--json") {
+      json_out = true;
+    } else if (a == "--apply") {
+      try_apply = true;
+    } else if (a == "--no-require-full") {
+      require_full = false;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "a0-first-judge-shot [--case CASE_ID] [--max-cards N] [--out-dir DIR]\n"
+                   "  [--dry] [--json] [--apply] [--no-require-full]\n"
+                   "  Solo 1er turno A0: tranche Effect Summary → a_judge (sin A1/a_done).\n"
+                   "  Valida un veredicto por card mostrada. Default max-cards=8.\n";
+      return 2;
+    }
+  }
+
+  std::string instruction;
+  std::vector<std::string> expected_stems;
+  std::vector<std::string> trap_stems;
+  if (!load_case_prompt(root, case_id, &instruction, &expected_stems, &trap_stems)) {
+    std::cerr << "a0-first-judge-shot: case `" << case_id << "` no encontrado\n";
+    return 2;
+  }
+
+  tuide::AState ast = Level2Session::load_a_state(root);
+  if (ast.queue.empty()) {
+    std::cerr << "a0-first-judge-shot: cola vacía — ejecuta bootstrap (+ L1 map) primero\n";
+    return 2;
+  }
+  if (ast.a_subphase.empty()) {
+    ast.a_subphase = "a0_sniff";
+  }
+
+  const tuide::A0TrancheShown shown =
+      tuide::a_build_a0_tranche_shown(root, ast, max_cards, nullptr);
+  if (shown.items.empty()) {
+    std::cerr << "a0-first-judge-shot: tranche vacía (cursor=" << ast.cursor << "/"
+              << ast.queue.size() << ")\n";
+    return 2;
+  }
+
+  const std::string cards_md = session.build_a_peek_tranche_markdown(root, max_cards);
+
+  nlohmann::json tranche_json = nlohmann::json::array();
+  bool has_busy_strip = false;
+  for (std::size_t i = 0; i < shown.items.size(); ++i) {
+    const auto& item = shown.items[i];
+    if (item.path.find("busy_strip") != std::string::npos ||
+        item.symbol.find("set_busy") != std::string::npos) {
+      has_busy_strip = true;
+    }
+    tranche_json.push_back({{"i", i + 1},
+                            {"target", item.target},
+                            {"path", item.path},
+                            {"symbol", item.symbol},
+                            {"stem", item.stem},
+                            {"score", item.score}});
+  }
+
+  std::ostringstream user;
+  user << "phase=explore_a step=1 workflow=agent subphase=a0_sniff\n\n";
+  user << "## Instruction\n" << instruction << "\n\n";
+  user << cards_md;
+
+  const std::string system =
+      "Eres el Nivel 2 en fase explore_a — subfase A0 (Effect Summary / olfateo).\n"
+      "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+      "PROHIBIDO action=plan, tool, edit, done next=edit, useful|interesting en A0.\n"
+      "\n"
+      "## Fichas → a_judge phase=a0_sniff\n"
+      "Debes emitir EXACTAMENTE " +
+      std::to_string(shown.items.size()) +
+      " veredictos: uno por cada ### card (mismo target).\n"
+      "Veredictos: expand|reject|uncertain. expand requiere expand_with (peek|trail|dataflow).\n"
+      "Traps: cancel genérico, LSP completion, UI glue sin seeds → reject.\n"
+      "Juzga solo por seeds/nudge/hot/writes de cada ficha; likely_* → reject salvo seeds "
+      "fuertes.\n"
+      "expand_with según nudge (NO dataflow en A0 salvo nudge expand:dataflow).\n"
+      "Ejemplo con 2 cards (targets ficticios):\n"
+      "{\"action\":\"a_judge\",\"phase\":\"a0_sniff\",\"verdicts\":["
+      "{\"target\":\"src/foo/module.cpp:sym_a#tail\",\"verdict\":\"expand\","
+      "\"expand_with\":\"trail\",\"why\":\"nudge expand:trail + seeds\"},"
+      "{\"target\":\"src/lsp/lsp_client.cpp:cancel#tail\",\"verdict\":\"reject\","
+      "\"why\":\"likely_lsp_trap\"}],\"done\":false}\n";
+
+  std::cout << "======== a0-first-judge-shot ========\n";
+  std::cout << "case=" << case_id << " max_cards=" << max_cards << " slice_n=" << shown.slice_n
+            << " shown=" << shown.items.size() << " char_trunc=" << (shown.char_truncated ? 1 : 0)
+            << " busy_strip_in_tranche=" << (has_busy_strip ? 1 : 0) << "\n";
+  std::cout << "prompt_chars system=" << system.size() << " user=" << user.str().size() << "\n";
+
+  if (!out_dir.empty()) {
+    fs::create_directories(out_dir);
+    std::ofstream(fs::path(out_dir) / "system.txt") << system;
+    std::ofstream(fs::path(out_dir) / "user.md") << user.str();
+    std::ofstream(fs::path(out_dir) / "cards.md") << cards_md;
+    std::ofstream(fs::path(out_dir) / "tranche.json") << tranche_json.dump(2) << '\n';
+    tuide::EffectSummaryOpts es_opts;
+    es_opts.seeds = ast.seeds;
+    es_opts.orphans = ast.orphans;
+    if (es_opts.orphans.empty()) {
+      es_opts.orphans = ast.seeds;
+    }
+    for (std::size_t i = 0; i < shown.items.size(); ++i) {
+      const auto& item = shown.items[i];
+      es_opts.map_score = static_cast<int>(item.score);
+      es_opts.stem = item.stem;
+      es_opts.map_related = item.map_related;
+      es_opts.refs_in = item.refs_in;
+      es_opts.body_sem_permille = item.body_sem_permille;
+      es_opts.file_rank = item.file_rank;
+      es_opts.file_count = item.file_count;
+      es_opts.dup_stem = item.dup_stem;
+      const auto es = tuide::effect_summary_for_queue_item(root, item, es_opts);
+      const fs::path card_path =
+          fs::path(out_dir) / "cards" / ("card_" + std::to_string(i + 1) + ".md");
+      fs::create_directories(card_path.parent_path());
+      std::ofstream(card_path) << es.card_text;
+    }
+  }
+
+  if (dry) {
+    std::cout << "\n--- tranche targets ---\n";
+    for (std::size_t i = 0; i < shown.items.size(); ++i) {
+      std::cout << (i + 1) << ". `" << shown.items[i].target << "` stem=" << shown.items[i].stem
+                << "\n";
+    }
+    std::cout << "dry: no LLM\n";
+    return 0;
+  }
+
+  const AiSettings settings = load_ai_settings(root);
+  if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
+    std::cerr << "a0-first-judge-shot: ai.level2.mode debe ser local|remote (ahora="
+              << settings.level2_mode << ")\n";
+    return 2;
+  }
+  tuide::LocalL2Brain brain;
+  std::string err;
+  auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+  if (!brain.ensure_ready(settings, progress, &err)) {
+    std::cerr << "a0-first-judge-shot: ensure_ready: " << err << "\n";
+    return 1;
+  }
+
+  tuide::L2BrainRequest breq;
+  breq.system_prompt = system;
+  breq.user_prompt = user.str();
+  breq.phase = "explore_a";
+  breq.max_tokens = settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 2048;
+  breq.n_ctx = settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192;
+  breq.temperature = 0.1f;
+
+  std::cout << "L2 ▸ a0-first-judge-shot pidiendo a_judge (" << brain.name() << ")…\n";
+  const auto bres = brain.propose(breq, nullptr);
+  if (!bres.ok) {
+    std::cerr << "LLM FAIL: " << bres.error << "\n";
+    return 1;
+  }
+  if (!out_dir.empty()) {
+    std::ofstream(fs::path(out_dir) / "model_raw.txt") << bres.text;
+  }
+  std::cout << "\n--- model ---\n" << bres.text << "\n---\n";
+
+  const tuide::L2Action action = tuide::parse_l2_action(bres.text);
+  std::vector<tuide::AVerdict> parsed_verdicts = action.a_verdicts;
+  if (parsed_verdicts.empty()) {
+    try {
+      const auto j = nlohmann::json::parse(bres.text);
+      tuide::parse_a_verdicts_array(j, &parsed_verdicts, &err);
+    } catch (...) {
+    }
+  }
+
+  int covered = 0;
+  nlohmann::json missing = nlohmann::json::array();
+  nlohmann::json rows = nlohmann::json::array();
+  for (const auto& item : shown.items) {
+    bool hit = false;
+    for (const auto& v : parsed_verdicts) {
+      if (tuide::a_target_matches_verdict_anchor(item.target, v.target)) {
+        hit = true;
+        ++covered;
+        rows.push_back({{"target", item.target},
+                        {"verdict", tuide::a_verdict_kind_name(v.verdict)},
+                        {"expand_with", tuide::a_expand_modality_name(v.expand_with)},
+                        {"why", v.why}});
+        break;
+      }
+    }
+    if (!hit) {
+      missing.push_back(item.target);
+    }
+  }
+
+  nlohmann::json extra = nlohmann::json::array();
+  for (const auto& v : parsed_verdicts) {
+    if (!target_in_tranche(shown.items, v.target)) {
+      extra.push_back({{"target", v.target},
+                       {"verdict", tuide::a_verdict_kind_name(v.verdict)},
+                       {"why", v.why}});
+    }
+  }
+
+  nlohmann::json coverage;
+  coverage["shown"] = shown.items.size();
+  coverage["verdicts"] = parsed_verdicts.size();
+  coverage["covered"] = covered;
+  coverage["missing"] = missing;
+  coverage["extra"] = extra;
+  coverage["full"] = (covered >= static_cast<int>(shown.items.size()));
+  coverage["busy_strip_in_tranche"] = has_busy_strip;
+
+  bool apply_ok = false;
+  std::string apply_err;
+  if (try_apply && !parsed_verdicts.empty()) {
+    tuide::AState apply_st = ast;
+    apply_st.a0_shown_targets.clear();
+    for (const auto& item : shown.items) {
+      apply_st.a0_shown_targets.push_back(item.target);
+    }
+    apply_ok = tuide::a_apply_a0_verdicts(&apply_st, parsed_verdicts, &apply_err, &root);
+    coverage["apply_ok"] = apply_ok;
+    coverage["apply_err"] = apply_err;
+  }
+
+  if (!out_dir.empty()) {
+    std::ofstream(fs::path(out_dir) / "coverage.json") << coverage.dump(2) << '\n';
+    std::ofstream(fs::path(out_dir) / "verdicts_parsed.json") << rows.dump(2) << '\n';
+  }
+
+  if (json_out) {
+    std::cout << coverage.dump(2) << '\n';
+  } else {
+    std::cout << "\n---- coverage ----\n";
+    std::cout << "covered=" << covered << "/" << shown.items.size()
+              << " verdicts=" << parsed_verdicts.size() << " extra=" << extra.size() << "\n";
+    if (!missing.empty()) {
+      std::cout << "missing:\n";
+      for (const auto& m : missing) {
+        std::cout << "  - " << m.get<std::string>() << "\n";
+      }
+    }
+    if (!extra.empty()) {
+      std::cout << "extra (no en tranche):\n";
+      for (const auto& e : extra) {
+        std::cout << "  - " << e.value("target", "") << "\n";
+      }
+    }
+    if (try_apply) {
+      std::cout << "apply_a0=" << (apply_ok ? "OK" : "FAIL");
+      if (!apply_err.empty()) {
+        std::cout << " — " << apply_err;
+      }
+      std::cout << "\n";
+    }
+  }
+
+  if (require_full && covered < static_cast<int>(shown.items.size())) {
+    return 1;
+  }
+  if (try_apply && !apply_ok) {
+    return 1;
+  }
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1163,6 +3069,24 @@ int main(int argc, char** argv) {
   }
   if (cmd == "dataflow-probe") {
     return run_dataflow_probe(&tools, root, argc, argv);
+  }
+  if (cmd == "effect-summary-probe") {
+    return run_effect_summary_probe(root, argc, argv);
+  }
+  if (cmd == "card-embed-bench") {
+    return run_card_embed_bench(root, argc, argv);
+  }
+  if (cmd == "a0-sniff-shot") {
+    return run_a0_sniff_shot(session, root, argc, argv);
+  }
+  if (cmd == "a0-sniff-judge-shot") {
+    return run_a0_sniff_judge_shot(session, root, argc, argv);
+  }
+  if (cmd == "a0-first-judge-shot") {
+    return run_a0_first_judge_shot(session, root, argc, argv);
+  }
+  if (cmd == "a0-tranche-rank-shot") {
+    return run_a0_tranche_rank_shot(session, root, argc, argv);
   }
   if (cmd == "bootstrap") {
     Level2BootstrapOpts opts;

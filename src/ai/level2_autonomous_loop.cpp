@@ -1459,25 +1459,110 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
 
     L2BrainRequest breq;
     if (phase == "explore_a") {
-      breq.system_prompt =
-          "Eres el Nivel 2 en fase explore_a (localización + trail).\n"
-          "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
-          "PROHIBIDO action=plan, tool, edit, done next=edit.\n"
-          "Objetivo: encontrar el EDIT SITE del síntoma de ## Instruction.\n"
-          "Peeks: useful = hipótesis (editarías ahí). Máx 1 useful/vuelta; resto reject|uncertain.\n"
-          "Tras useful el runtime muestra call-stacks (pilas completas entry→…→L0 con scope TS + "
-          "bloque if/switch + ±líneas del call). Entonces SOLO a_trail_judge.\n"
-          "Ejemplo interesting: {\"action\":\"a_trail_judge\",\"verdicts\":["
-          "{\"target\":\"S2\",\"verdict\":\"interesting\",\"why\":\"caller AI del spinner\"}]}\n"
-          "Ejemplo reject: {\"action\":\"a_trail_judge\",\"verdicts\":["
-          "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"reindex UI no es el síntoma\"}]}\n"
-          "verdict es EXACTAMENTE la palabra interesting o reject (nunca \"interesting|reject\").\n"
-          "interesting ≤3; runtime obliga a recorrerlos. Si TODOS reject → L0 se invalida.\n"
-          "UI/keyword → reject. a_done solo cuando un hop del trail es el edit site (≤2 primary).\n"
-          "Anclas = path:Symbol reales. Formatos peeks:\n"
-          "{\"action\":\"a_judge\",\"verdicts\":[…],\"done\":false}\n"
-          "{\"action\":\"a_done\",\"loci\":[{\"stem\":\"…\",\"anchor\":\"path:Symbol\","
-          "\"role\":\"primary\",\"why\":\"…\"}],\"summary\":\"…\"}\n";
+      if (tuide::a_effect_summary_enabled()) {
+        const auto ast = Level2Session::load_a_state(opts.workspace_root);
+        if (ast.a_subphase == "a1_trail") {
+          breq.system_prompt =
+              "Eres el Nivel 2 en fase explore_a — subfase A1 trail (call-stacks desde L0).\n"
+              "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+              "\n"
+              "## Trail → a_trail_judge\n"
+              "interesting = rama cond (`ON`|`CXL`|`OFF`|`LINK`) y/o pila S* que "
+              "explique síntoma. reject = falso positivo.\n"
+              "Stuck spinner: prioriza CXL+LINK (cancel sin OFF sync).\n"
+              "{\"action\":\"a_trail_judge\",\"verdicts\":["
+              "{\"target\":\"LINK\",\"verdict\":\"interesting\",\"why\":\"cancel no OFF\"},"
+              "{\"target\":\"CXL\",\"verdict\":\"interesting\",\"why\":\"cancel_current\"},"
+              "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"reindex no es síntoma IA\"}]}\n"
+              "Tras interesting el runtime pedirá suspect vars → dataflow.\n";
+        } else if (ast.a_subphase == "a1_suspect_vars") {
+          breq.system_prompt =
+              "Eres el Nivel 2 en fase explore_a — subfase A1 suspect vars (post-trail).\n"
+              "Responde SIEMPRE con UN solo objeto JSON.\n"
+              "\n"
+              "## Pilas interesting → a_judge phase=a1_suspect_vars\n"
+              "¿Variable/campo C++ que controla busy/spinner IA? Máx 2.\n"
+              "{\"action\":\"a_judge\",\"phase\":\"a1_suspect_vars\",\"verdicts\":["
+              "{\"target\":\"src/ai/ai_controller.hpp:agent_busy_\",\"verdict\":\"expand\","
+              "\"expand_with\":\"dataflow\",\"suspect_var\":\"agent_busy_\","
+              "\"why\":\"flag stuck\"}],\"done\":false}\n"
+              "Si ninguna clara → verdicts:[]. Solo vars plausibles en snippet trail.\n";
+        } else if (ast.a_subphase == "a1_dataflow") {
+          breq.system_prompt =
+              "Eres el Nivel 2 en fase explore_a — subfase A1 dataflow (scoped + trail recap).\n"
+              "Responde SIEMPRE con UN solo objeto JSON.\n"
+              "\n"
+              "## Dataflow + trail → a_judge\n"
+              "El prompt incluye pilas interesting Y reporte rg scoped al caller.\n"
+              "useful solo si hits explican el síntoma EN ESA RAMA (coherente con trail).\n"
+              "reject si la var no cuadra o hits irrelevantes → runtime reabre trail.\n"
+              "Máx 1 useful/vuelta.\n";
+        } else if (ast.a_subphase.rfind("a1_", 0) == 0) {
+          breq.system_prompt =
+              "Eres el Nivel 2 en fase explore_a — subfase A1 confirmación.\n"
+              "Responde SIEMPRE con UN solo objeto JSON.\n"
+              "a_judge: useful|reject|uncertain (máx 1 useful). a_done solo con loci "
+              "confirmados.\n";
+        } else {
+          breq.system_prompt =
+              "Eres el Nivel 2 en fase explore_a — subfase A0 (Effect Summary / olfateo).\n"
+              "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+              "PROHIBIDO action=plan, tool, edit, done next=edit, useful en A0.\n"
+              "\n"
+              "## Fichas → a_judge phase=a0_sniff\n"
+              "Juzga por seeds/nudge/hot/writes/calls; stem/map dan contexto L1.\n"
+              "nudge = sugerencia determinista (expand:*|likely_glue|likely_noise|weak_seed), "
+              "no veredicto.\n"
+              "expand = merece peek|trail|dataflow (expand_with). reject = fuera. uncertain = "
+              "duda.\n"
+              "COBERTURA: el user prompt lista N cards — verdicts[] debe tener EXACTAMENTE N "
+              "objetos (un target por card, mismo string).\n"
+              "Máximo " +
+              std::to_string(tuide::kA0MaxExpandPerTurn) +
+              " expand/vuelta; resto reject|uncertain.\n"
+              "Respeta nudge/hot/seeds de cada ficha; likely_* → reject salvo seeds fuertes.\n"
+              "expand_with según nudge (expand:trail|peek|dataflow). NO dataflow en A0 salvo "
+              "nudge explícito.\n"
+              "Dataflow solo tras trail + suspect vars en A1.\n"
+              "Ejemplo genérico (2 cards; en runtime N puede ser distinto):\n"
+              "{\"action\":\"a_judge\",\"phase\":\"a0_sniff\",\"verdicts\":["
+              "{\"target\":\"src/foo/module.cpp:sym_a#tail\",\"verdict\":\"expand\","
+              "\"expand_with\":\"trail\",\"why\":\"nudge expand:trail + seeds\"},"
+              "{\"target\":\"src/lsp/lsp_client.cpp:cancel#tail\",\"verdict\":\"reject\","
+              "\"why\":\"likely_lsp_trap, sin seeds\"}],\"done\":false}\n"
+              "\n"
+              "Tras expand el runtime muestra A1 (una modalidad). Ahí sí useful|reject.\n"
+              "a_done solo con loci confirmados post-A1.\n";
+        }
+      } else {
+        breq.system_prompt =
+            "Eres el Nivel 2 en fase explore_a (localización + trail).\n"
+            "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+            "PROHIBIDO action=plan, tool, edit, done next=edit.\n"
+            "Objetivo: localizar el síntoma; el EDIT SITE puede salir del trail.\n"
+            "\n"
+            "## Peeks → a_judge\n"
+            "useful = hipótesis débil ligada al síntoma del prompt (estado, flag, API L0). "
+            "Getters/flags OK. Máx 1 useful/vuelta; resto reject|uncertain.\n"
+            "NO copies textos de ejemplos de trail. why = 1 frase propia del peek.\n"
+            "Ejemplo a_judge (targets ficticios):\n"
+            "{\"action\":\"a_judge\",\"verdicts\":["
+            "{\"target\":\"src/foo/module.cpp:sym_a\",\"verdict\":\"useful\","
+            "\"why\":\"muta estado del síntoma según peek\"},"
+            "{\"target\":\"src/lsp/lsp_client.cpp:cancel_inflight_completion\",\"verdict\":"
+            "\"reject\",\"why\":\"cancel LSP, no el síntoma\"}],"
+            "\"done\":false}\n"
+            "Reject traps claros (completion LSP, frames cosméticos, glue sin seeds).\n"
+            "\n"
+            "## Trail (solo si el runtime mostró call-stacks) → a_trail_judge\n"
+            "{\"action\":\"a_trail_judge\",\"verdicts\":["
+            "{\"target\":\"S2\",\"verdict\":\"interesting\",\"why\":\"caller pone AiThinking\"},"
+            "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"reindex no es síntoma IA\"}]}\n"
+            "verdict EXACTAMENTE interesting|reject (una palabra). interesting ≤3.\n"
+            "a_done cuando un hop del trail es el edit site (≤2 primary).\n"
+            "{\"action\":\"a_done\",\"loci\":[{\"stem\":\"…\",\"anchor\":\"path:Symbol\","
+            "\"role\":\"primary\",\"why\":\"…\"}],\"summary\":\"…\"}\n";
+      }
     } else {
       breq.system_prompt = build_system_prompt(opts, phase, map_review);
     }
@@ -1496,6 +1581,18 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
         const std::string notes = nss.str();
         if (!notes.empty()) {
           breq.user_prompt += "\n\n" + notes;
+        }
+      }
+      {
+        tuide::AState ast_snap = Level2Session::load_a_state(opts.workspace_root);
+        if (tuide::a_effect_summary_enabled() && tuide::a_in_a0_sniff(ast_snap)) {
+          const tuide::A0TrancheShown shown = tuide::a_build_a0_tranche_shown(
+              opts.workspace_root, ast_snap, tuide::kA0MaxCardsPerTurn);
+          ast_snap.a0_shown_targets.clear();
+          for (const auto& item : shown.items) {
+            ast_snap.a0_shown_targets.push_back(item.target);
+          }
+          Level2Session::save_a_state(opts.workspace_root, ast_snap, nullptr);
         }
       }
       breq.user_prompt += "\n" + session.build_a_peek_tranche_markdown(opts.workspace_root);
@@ -1847,8 +1944,31 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
       emit(std::string("L2 ▸ a_judge ") + (tr.ok ? "OK" : "FAIL") + " — " +
            (tr.ok ? tr.summary : tr.error).substr(0, 200));
       if (!tr.ok && !tr.error.empty()) {
-        recover_note = "a_judge rechazado: " + tr.error +
-                       "\nReemite a_judge sobre la MISMA tranche: máx 1 useful, resto reject.\n";
+        const tuide::AState ast_rec = Level2Session::load_a_state(opts.workspace_root);
+        if (tuide::a_effect_summary_enabled() && tuide::a_in_a0_sniff(ast_rec)) {
+          std::ostringstream rec;
+          rec << "a_judge A0 rechazado: " << tr.error << "\n";
+          rec << "Reemite phase=a0_sniff con EXACTAMENTE " << ast_rec.a0_shown_targets.size()
+              << " veredictos (expand|reject|uncertain; PROHIBIDO useful).\n";
+          rec << "Máximo " << tuide::kA0MaxExpandPerTurn << " expand; resto reject|uncertain.\n";
+          rec << "Targets que FALTAN en tu JSON anterior:\n";
+          for (const auto& t : ast_rec.a0_shown_targets) {
+            bool hit = false;
+            for (const auto& v : action.a_verdicts) {
+              if (tuide::a_target_matches_verdict_anchor(t, v.target)) {
+                hit = true;
+                break;
+              }
+            }
+            if (!hit) {
+              rec << "- `" << t << "`\n";
+            }
+          }
+          recover_note = rec.str();
+        } else {
+          recover_note = "a_judge rechazado: " + tr.error +
+                         "\nReemite a_judge: máx 1 useful (hipótesis→trail), resto reject|uncertain.\n";
+        }
       } else if (tr.ok) {
         recover_note.clear();
       }

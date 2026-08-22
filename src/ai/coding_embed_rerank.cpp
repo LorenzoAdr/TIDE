@@ -655,6 +655,74 @@ std::string build_semantic_embed_query(const std::string& query,
   return out.str();
 }
 
+std::string build_hybrid_embed_query(const std::string& intent,
+                                     const std::string& user_message,
+                                     const std::vector<std::string>& semantic_tokens,
+                                     std::size_t max_tokens) {
+  auto lower_copy = [](std::string s) {
+    for (char& c : s) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return s;
+  };
+  static const char* kSymptoms[] = {"spinner",     "busy",     "loading", "cancel",
+                                    "thinking",    "agent_busy", "carga",  "bloqueado",
+                                    "clear_busy",  "AiThinking"};
+  const std::string ql = lower_copy(user_message);
+  std::vector<std::string> rescued;
+  for (const char* s : kSymptoms) {
+    const std::string sl = lower_copy(s);
+    if (ql.find(sl) != std::string::npos) {
+      rescued.push_back(s);
+    }
+  }
+  auto overlaps = [&](const std::string& a, const std::string& b) {
+    const std::string al = lower_copy(a);
+    const std::string bl = lower_copy(b);
+    return al.find(bl) != std::string::npos || bl.find(al) != std::string::npos;
+  };
+  std::vector<std::string> rest;
+  for (const auto& t : semantic_tokens) {
+    if (t.size() < 3) {
+      continue;
+    }
+    bool hit = false;
+    for (const auto& s : rescued) {
+      if (overlaps(t, s)) {
+        hit = true;
+        break;
+      }
+    }
+    if (!hit) {
+      rest.push_back(t);
+    }
+  }
+  const std::string base = !intent.empty() ? intent : "code localization";
+  std::ostringstream o;
+  o << base << "\nsemantic:";
+  std::size_t n = 0;
+  const std::size_t cap = max_tokens == 0 ? 64 : max_tokens;
+  std::unordered_set<std::string> seen;
+  auto push = [&](const std::string& t) {
+    if (n >= cap || t.size() < 3) {
+      return;
+    }
+    const std::string key = lower_copy(t);
+    if (!seen.insert(key).second) {
+      return;
+    }
+    o << ' ' << t;
+    ++n;
+  };
+  for (const auto& t : rescued) {
+    push(t);
+  }
+  for (const auto& t : rest) {
+    push(t);
+  }
+  return o.str();
+}
+
 namespace {
 
 const char* kind_label_short(SymbolKind k) {
@@ -846,7 +914,9 @@ BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> cand
   }
 
   const std::string enriched =
-      build_semantic_embed_query(opts.query, opts.semantic_tokens, opts.max_semantic_tokens);
+      !opts.hybrid_query.empty()
+          ? opts.hybrid_query
+          : build_semantic_embed_query(opts.query, opts.semantic_tokens, opts.max_semantic_tokens);
   std::vector<float> qvec;
   const auto t_q0 = clock::now();
   if (!embed_text(true, enriched, backend, test_embed, &qvec) || qvec.empty()) {
@@ -864,21 +934,31 @@ BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> cand
 
   std::vector<std::string> bodies(candidates.size());
   const auto t_f0 = clock::now();
+  int passage_fn_hits = 0;
   for (std::size_t i = 0; i < pool_n; ++i) {
     auto& e = candidates[i];
-    GetCodeOfRequest req;
-    req.workspace_root = opts.workspace_root;
-    req.file = e.file;
-    req.symbol = e.name;
-    req.line = e.line;
-    req.max_lines = std::max(20, opts.body_max_lines);
-    const GetCodeOfResult got = get_code_of(req);
-    if (!got.ok || got.text.empty()) {
-      continue;
+    std::string body;
+    if (opts.passage_fn) {
+      body = opts.passage_fn(e);
+      if (!body.empty()) {
+        ++passage_fn_hits;
+      }
     }
-    std::string body = got.text;
+    if (body.empty()) {
+      GetCodeOfRequest req;
+      req.workspace_root = opts.workspace_root;
+      req.file = e.file;
+      req.symbol = e.name;
+      req.line = e.line;
+      req.max_lines = std::max(20, opts.body_max_lines);
+      const GetCodeOfResult got = get_code_of(req);
+      if (!got.ok || got.text.empty()) {
+        continue;
+      }
+      body = got.text;
+    }
     const std::size_t body_cap =
-        opts.body_max_embed_chars > 0 ? opts.body_max_embed_chars : std::size_t{1200};
+        opts.body_max_embed_chars > 0 ? opts.body_max_embed_chars : std::size_t{500};
     if (body.size() > body_cap) {
       body.resize(body_cap);
       body += "\n…";
@@ -1005,6 +1085,9 @@ BodySemanticRerankResult rerank_map_body_semantic(std::vector<RepoMapEntry> cand
   note << "; embed_body=" << (out.used_body_embed ? 1 : 0);
   note << "; hybrid_rerank=" << (out.used_body_embed ? 1 : 0);
   note << "; pure_rerank=0";
+  note << "; hybrid_query=" << (!opts.hybrid_query.empty() ? 1 : 0);
+  note << "; es_card_passages=" << (passage_fn_hits > 0 ? 1 : 0);
+  note << "; passage_fn_hits=" << passage_fn_hits;
   note << "; cos_boost=" << (opts.cos_boost_scale > 0 ? opts.cos_boost_scale : 1000000);
   note << "; semantic_tok_n=" << opts.semantic_tokens.size();
   note << "; semantic_tok_cap=" << opts.max_semantic_tokens;

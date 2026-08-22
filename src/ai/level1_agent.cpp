@@ -15,6 +15,7 @@
 #include "ai/coding_symbol_embed_index.hpp"
 #include "ai/embedding_backend.hpp"
 #include "ai/get_code_of.hpp"
+#include "ai/l2_effect_summary.hpp"
 #include "ai/level1_action.hpp"
 #include "ai/repo_map.hpp"
 #include "ai/search_needles.hpp"
@@ -189,6 +190,33 @@ std::string summarize_distilled_intent(const DistilledInvestigateIntent& di) {
     }
   }
   return out.str();
+}
+
+// Drop ignore[] entries that the user literally named (substring match).
+void filter_distilled_ignore(DistilledInvestigateIntent* di, const std::string& user_message) {
+  if (di == nullptr || di->ignore.empty() || user_message.empty()) {
+    return;
+  }
+  std::string ql = user_message;
+  for (char& c : ql) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  std::vector<std::string> kept;
+  kept.reserve(di->ignore.size());
+  for (const auto& g : di->ignore) {
+    if (g.size() < 3) {
+      continue;
+    }
+    std::string gl = g;
+    for (char& c : gl) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (ql.find(gl) != std::string::npos) {
+      continue;  // user named it — do not ignore
+    }
+    kept.push_back(g);
+  }
+  di->ignore = std::move(kept);
 }
 
 }  // namespace
@@ -548,6 +576,8 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
           "renderizado, ejecución runtime, integración externa, edición, búsqueda o UI.\n"
           "- facets: 2..5 conceptos nucleares de IMPLEMENTACION, no palabras de superficie.\n"
           "- ignore: 0..6 detalles superficiales que podrían desviar el retrieval.\n"
+          "- PROHIBIDO poner en ignore palabras que el usuario escribió (p. ej. spinner, "
+          "busy, cancel, carga, bloqueado, thinking).\n"
           "- search_terms: 3..8 términos cortos de implementación.\n"
           "- Si el prompt mezcla conceptos estructurales con detalles de presentación, "
           "PRIORIZA lo estructural: estado, persistencia, modelo, coordinación, flujo, "
@@ -584,6 +614,9 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
           log("L1 intent raw: " + completion.text);
         }
         distilled = parse_distilled_intent_json(completion.text);
+        if (distilled) {
+          filter_distilled_ignore(&*distilled, user_message);
+        }
         if (distilled && log) {
           log("L1 intent: " + summarize_distilled_intent(*distilled));
         }
@@ -802,6 +835,13 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
   result.lexical_seeds = std::move(expanded);
   result.semantic_tokens =
       merge_semantic_tokens(l2_semantic_tokens, compound_seeds, distilled_terms);
+  if (distilled) {
+    if (!distilled->primary_goal.empty()) {
+      result.embed_intent = distilled->primary_goal;
+    } else if (!distilled->intent.empty()) {
+      result.embed_intent = distilled->intent;
+    }
+  }
   if (log && !result.semantic_tokens.empty()) {
     std::ostringstream st;
     st << "semantic_tokens (" << result.semantic_tokens.size() << "):";
@@ -1011,10 +1051,50 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           l2_feat::enabled("BODY_SEMANTIC_RERANK") && deps_.embed != nullptr && deps_.embed->ready();
       if (use_body_semantic) {
         BodySemanticRerankOptions bs_opts;
-        bs_opts.query = user_message;
         bs_opts.semantic_tokens = semantic_tokens;
         bs_opts.workspace_root = root;
         bs_opts.body_pool = 40;
+        bs_opts.body_max_embed_chars = 500;
+        const bool hybrid_q = !l2_feat::enabled("L1_HYBRID_EMBED_OFF");
+        const bool es_cards = !l2_feat::enabled("L1_ES_CARD_EMBED_OFF");
+        if (hybrid_q) {
+          const std::string intent = !investigate.embed_intent.empty()
+                                         ? investigate.embed_intent
+                                         : std::string("Locate code for the user symptom");
+          bs_opts.hybrid_query =
+              build_hybrid_embed_query(intent, user_message, semantic_tokens, 12);
+          bs_opts.query = bs_opts.hybrid_query;  // debug / fallback path
+        } else {
+          bs_opts.query = user_message;
+        }
+        if (es_cards) {
+          bs_opts.passage_fn = [root, &semantic_tokens](const RepoMapEntry& e) -> std::string {
+            AQueueItem item;
+            item.path = e.file;
+            item.symbol = e.name;
+            item.line = e.line;
+            item.stem = e.stem;
+            item.score = static_cast<float>(e.score);
+            item.target = e.file + (e.name.empty() ? "" : (":" + e.name));
+            item.body_sem_permille =
+                e.body_cos >= 0.f ? static_cast<int>(e.body_cos * 1000.f) : 0;
+            item.file_rank = e.file_rank;
+            item.file_count = e.file_count;
+            item.dup_stem = e.dup_stem;
+            item.refs_in = e.refs_in;
+            EffectSummaryOpts es_opts;
+            es_opts.seeds = semantic_tokens;
+            es_opts.orphans = semantic_tokens;
+            es_opts.map_score = e.score;
+            es_opts.stem = e.stem;
+            es_opts.refs_in = e.refs_in;
+            es_opts.file_rank = e.file_rank;
+            es_opts.file_count = e.file_count;
+            es_opts.dup_stem = e.dup_stem;
+            const EffectSummary es = effect_summary_for_queue_item(root, item, es_opts);
+            return es.card_text;
+          };
+        }
         if (context_dump || code_edit) {
           bs_opts.final_top = 280;
           bs_opts.max_per_file = 14;
@@ -1029,7 +1109,9 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
           bs_opts.body_max_lines = 80;
         }
         if (log) {
-          log("L1 body semantic rerank (lexical top-40 → embed cuerpos, hybrid cos+lex): candidatos=" +
+          log(std::string("L1 body semantic rerank (lexical top-40 → embed ") +
+              (es_cards ? "ES cards" : "cuerpos") +
+              (hybrid_q ? ", hybrid query" : ", nl+tokens") + "): candidatos=" +
               std::to_string(candidates.size()) + " tokens=" +
               std::to_string(semantic_tokens.size()));
         }

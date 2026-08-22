@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <deque>
+#include <filesystem>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -131,6 +132,104 @@ void diversify_round_robin_by_family(std::vector<AQueueItem>* items) {
   }
 }
 
+void parse_map_why_line(const std::string& line, AQueueBuildInput* in) {
+  if (in == nullptr || line.find("why:") == std::string::npos) {
+    return;
+  }
+  auto tag_until = [&](const std::string& tag) -> std::string {
+    const std::size_t pos = line.find(tag);
+    if (pos == std::string::npos) {
+      return {};
+    }
+    std::size_t start = pos + tag.size();
+    std::size_t end = line.size();
+    const std::size_t dot = line.find("\xc2\xb7", start);
+    if (dot != std::string::npos) {
+      end = dot;
+    }
+    return trim_copy(line.substr(start, end - start));
+  };
+  const std::string stem = tag_until("stem=");
+  if (!stem.empty()) {
+    const auto hash = stem.find('#');
+    if (hash != std::string::npos) {
+      in->stem_sem_rank = std::atoi(stem.substr(hash + 1).c_str());
+      in->stem = stem.substr(0, hash);
+    } else {
+      const auto sp = stem.find(' ');
+      in->stem = sp == std::string::npos ? stem : stem.substr(0, sp);
+    }
+    if (stem.find("dup_stem") != std::string::npos) {
+      in->dup_stem = true;
+    }
+  }
+  if (line.find("dup_stem") != std::string::npos) {
+    in->dup_stem = true;
+  }
+  const std::string refs = tag_until("refs≈");
+  if (!refs.empty()) {
+    in->refs_in = std::atoi(refs.c_str());
+  }
+  const std::string body = tag_until("body=");
+  if (!body.empty()) {
+    in->body_sem_permille = static_cast<int>(std::atof(body.c_str()) * 1000.0);
+  }
+  const std::string fr = tag_until("file_rank=");
+  if (!fr.empty()) {
+    const auto slash = fr.find('/');
+    if (slash != std::string::npos) {
+      in->file_rank = std::atoi(fr.substr(0, slash).c_str());
+      in->file_count = std::atoi(fr.substr(slash + 1).c_str());
+    }
+  }
+  in->map_related = tag_until("related=");
+}
+
+bool is_file_level_map_entry(const AQueueBuildInput& in) {
+  if (in.line > 1) {
+    return false;
+  }
+  if (in.name.empty()) {
+    return true;
+  }
+  const std::string stem = in.stem.empty() ? path_file_stem(in.file) : in.stem;
+  return !stem.empty() && in.name == stem;
+}
+
+bool is_generic_cancel_name(const std::string& name) {
+  if (name == "cancel") {
+    return true;
+  }
+  return name.size() > 8 && name.compare(name.size() - 8, 8, "::cancel") == 0;
+}
+
+bool map_path_is_header(const std::string& path) {
+  if (path.size() >= 4 && path.compare(path.size() - 4, 4, ".hpp") == 0) {
+    return true;
+  }
+  return path.size() >= 2 && path.compare(path.size() - 2, 2, ".h") == 0;
+}
+
+std::string map_path_to_cpp(const std::string& path) {
+  if (path.size() >= 4 && path.compare(path.size() - 4, 4, ".hpp") == 0) {
+    return path.substr(0, path.size() - 4) + ".cpp";
+  }
+  if (path.size() >= 2 && path.compare(path.size() - 2, 2, ".h") == 0) {
+    return path.substr(0, path.size() - 2) + ".cpp";
+  }
+  return path;
+}
+
+bool map_input_skip_header_twin(const AQueueBuildInput& in, const std::string& workspace_root,
+                                bool enabled) {
+  if (!enabled || !map_path_is_header(in.file)) {
+    return false;
+  }
+  namespace fs = std::filesystem;
+  const fs::path cpp = fs::path(workspace_root) / map_path_to_cpp(in.file);
+  return fs::exists(cpp);
+}
+
 }  // namespace
 
 std::string a_path_family(const std::string& path_or_target) {
@@ -193,6 +292,13 @@ std::vector<AQueueItem> build_a_scan_queue(const std::vector<AQueueBuildInput>& 
     item.line = in.line;
     item.score = static_cast<float>(in.score);
     item.symbol = in.name;
+    item.map_related = in.map_related;
+    item.refs_in = in.refs_in;
+    item.body_sem_permille = in.body_sem_permille;
+    item.file_rank = in.file_rank;
+    item.file_count = in.file_count;
+    item.dup_stem = in.dup_stem;
+    item.stem_sem_rank = in.stem_sem_rank;
 
     std::string anchor;
     if (!in.name.empty() && looks_like_ident(in.name)) {
@@ -258,22 +364,35 @@ void a_state_seed_queue(AState* st, const std::vector<AQueueBuildInput>& ranked,
   if (st == nullptr) {
     return;
   }
-  // Build a wider pool (queue + reserve) without diversify starving later ranks.
-  AQueueBuildOpts wide = opts;
+  // Primary queue: map score order (no family RR) so top ranked L0s are actually peeked.
+  // Reserve: wider pool; optional light diversify so expansions are not one-module-only.
   const std::size_t primary = opts.max_items == 0
                                   ? static_cast<std::size_t>(kAMaxQueueDefault)
                                   : opts.max_items;
-  wide.max_items = primary + primary;  // top-K + next-K for layer-1 expansion
-  wide.max_per_stem = opts.max_per_stem;
+
+  AQueueBuildOpts prefix = opts;
+  prefix.max_items = primary;
+  prefix.diversify_path_family = false;
+  st->queue = build_a_scan_queue(ranked, prefix);
+
+  AQueueBuildOpts wide = opts;
+  wide.max_items = primary + primary;
+  wide.diversify_path_family = true;  // only for reserve / expansion pool
   auto pool = build_a_scan_queue(ranked, wide);
-  st->queue.clear();
   st->reserve.clear();
-  for (std::size_t i = 0; i < pool.size(); ++i) {
-    if (i < primary) {
-      st->queue.push_back(std::move(pool[i]));
-    } else {
-      st->reserve.push_back(std::move(pool[i]));
+  std::unordered_set<std::string> in_q;
+  for (const auto& q : st->queue) {
+    in_q.insert(q.target);
+  }
+  for (auto& it : pool) {
+    if (in_q.count(it.target)) {
+      continue;
     }
+    if (st->reserve.size() >= primary) {
+      break;
+    }
+    in_q.insert(it.target);
+    st->reserve.push_back(std::move(it));
   }
   st->cursor = 0;
   st->expansions = 0;
@@ -813,6 +932,10 @@ std::vector<AQueueBuildInput> a_queue_inputs_from_ranked_map_markdown(const std:
   std::string line;
   int rank_score = 100000;
   while (std::getline(iss, line)) {
+    if (line.find("why:") != std::string::npos && !out.empty()) {
+      parse_map_why_line(line, &out.back());
+      continue;
+    }
     if (line.empty() || line[0] < '0' || line[0] > '9') {
       continue;
     }
@@ -845,6 +968,10 @@ std::vector<AQueueBuildInput> a_queue_inputs_from_ranked_map_markdown(const std:
     }
     AQueueBuildInput in;
     in.score = rank_score;
+    const auto score_tag = line.find("[score=");
+    if (score_tag != std::string::npos) {
+      in.score = std::atoi(line.c_str() + static_cast<int>(score_tag + 7));
+    }
     rank_score = std::max(1, rank_score - 10);
     const auto colon = loc.rfind(':');
     if (colon != std::string::npos && colon + 1 < loc.size()) {
@@ -879,11 +1006,212 @@ std::vector<AQueueBuildInput> a_queue_inputs_from_ranked_map_markdown(const std:
     if (in.name.empty() && in.line <= 0) {
       continue;
     }
+    if (in.stem.empty()) {
+      in.stem = path_file_stem(in.file);
+    }
     in.functionish = true;
     out.push_back(std::move(in));
     if (out.size() >= max_n) {
       break;
     }
+  }
+  return out;
+}
+
+std::vector<AQueueBuildInput> a_queue_inputs_from_ranked_map_filtered(
+    const std::string& map_md, const AQueueMapFilterOpts& opts,
+    const std::string& workspace_root) {
+  const auto all = a_queue_inputs_from_ranked_map_markdown(map_md, 512);
+  std::unordered_set<std::string> seen;
+  int generic_cancel = 0;
+  auto matches_orphan = [&](const AQueueBuildInput& in) -> bool {
+    if (opts.orphans.empty()) {
+      return false;
+    }
+    std::string hay = in.name + " " + in.stem + " " + in.map_related + " " + in.file;
+    for (char& c : hay) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    for (const auto& o : opts.orphans) {
+      if (o.size() < 3) {
+        continue;
+      }
+      std::string ol = o;
+      for (char& c : ol) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      if (hay.find(ol) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  };
+  auto accept = [&](const AQueueBuildInput& in) -> bool {
+    if (map_input_skip_header_twin(in, workspace_root, opts.skip_header_with_cpp)) {
+      return false;
+    }
+    if (opts.skip_file_level && is_file_level_map_entry(in)) {
+      return false;
+    }
+    if (opts.skip_examples && in.file.compare(0, 9, "examples/") == 0) {
+      return false;
+    }
+    if (is_generic_cancel_name(in.name)) {
+      if (generic_cancel >= opts.max_generic_cancel) {
+        return false;
+      }
+      ++generic_cancel;
+    }
+    return true;
+  };
+  std::vector<AQueueBuildInput> orphan_pool;
+  std::vector<AQueueBuildInput> src_first;
+  std::vector<AQueueBuildInput> rest;
+  for (const auto& in : all) {
+    if (!accept(in)) {
+      continue;
+    }
+    if (matches_orphan(in)) {
+      orphan_pool.push_back(in);
+    }
+    if (opts.deprioritize_tests &&
+        (in.file.compare(0, 6, "tests/") == 0 || in.file.find("/tests/") != std::string::npos)) {
+      rest.push_back(in);
+      continue;
+    }
+    src_first.push_back(in);
+  }
+  std::unordered_map<std::string, int> stem_count;
+  std::vector<AQueueBuildInput> out;
+  out.reserve(opts.want_n);
+  auto try_take = [&](const AQueueBuildInput& in, bool force_orphan) {
+    if (out.size() >= opts.want_n) {
+      return;
+    }
+    std::string stem = in.stem;
+    if (stem.empty()) {
+      const auto slash = in.file.find_last_of('/');
+      stem = slash == std::string::npos ? in.file : in.file.substr(slash + 1);
+      const auto dot = stem.rfind('.');
+      if (dot != std::string::npos) {
+        stem = stem.substr(0, dot);
+      }
+    }
+    const bool orphan = matches_orphan(in);
+    if (!force_orphan && !orphan && opts.max_per_stem > 0 &&
+        stem_count[stem] >= opts.max_per_stem) {
+      return;
+    }
+    if (!in.name.empty()) {
+      const std::string key = in.file + ":" + in.name;
+      if (!seen.insert(key).second) {
+        return;
+      }
+    }
+    out.push_back(in);
+    ++stem_count[stem];
+  };
+  int orphan_added = 0;
+  for (const auto& in : orphan_pool) {
+    if (orphan_added >= opts.orphan_rescue_slots) {
+      break;
+    }
+    const std::size_t before = out.size();
+    try_take(in, true);
+    if (out.size() > before) {
+      ++orphan_added;
+    }
+  }
+  for (const auto& in : src_first) {
+    try_take(in, false);
+  }
+  for (const auto& in : rest) {
+    try_take(in, false);
+  }
+  return out;
+}
+
+std::vector<AQueueItem> a_order_a0_tranche(const std::vector<AQueueItem>& slice, const AState& st,
+                                           int max_n) {
+  if (max_n <= 0 || slice.empty()) {
+    return {};
+  }
+  auto needle_hit = [](const AQueueItem& it, const std::string& needle) -> bool {
+    if (needle.size() < 3) {
+      return false;
+    }
+    std::string hay = it.path + " " + it.stem + " " + it.symbol + " " + it.target + " " +
+                      it.map_related;
+    for (char& c : hay) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    std::string n = needle;
+    for (char& c : n) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return hay.find(n) != std::string::npos;
+  };
+  auto rerank_score = [&](const AQueueItem& item) -> int {
+    int s = static_cast<int>(item.score);
+    if (item.body_sem_permille > 0) {
+      s += item.body_sem_permille / 2;
+    }
+    if (item.dup_stem) {
+      s -= 80000;
+    }
+    if (item.file_rank > 1) {
+      s -= 25000 * (item.file_rank - 1);
+    }
+    for (const auto& seed : st.seeds) {
+      if (needle_hit(item, seed)) {
+        s += 120000;
+        break;
+      }
+    }
+    for (const auto& o : st.orphans) {
+      if (needle_hit(item, o)) {
+        s += 160000;
+        break;
+      }
+    }
+    const std::string fam = a_path_family(item.path);
+    if (fam == "ai" || fam == "ui") {
+      s += 50000;
+    } else if (fam == "lsp" || fam == "search") {
+      s -= 35000;
+    }
+    return s;
+  };
+  struct Row {
+    AQueueItem item;
+    int score = 0;
+  };
+  std::vector<Row> rows;
+  rows.reserve(slice.size());
+  for (const auto& item : slice) {
+    rows.push_back({item, rerank_score(item)});
+  }
+  std::stable_sort(rows.begin(), rows.end(),
+                   [](const Row& a, const Row& b) { return a.score > b.score; });
+  std::vector<AQueueItem> out;
+  out.reserve(static_cast<std::size_t>(max_n));
+  std::unordered_map<std::string, int> stem_n;
+  for (const auto& row : rows) {
+    if (static_cast<int>(out.size()) >= max_n) {
+      break;
+    }
+    bool orphan_hit = false;
+    for (const auto& o : st.orphans) {
+      if (needle_hit(row.item, o)) {
+        orphan_hit = true;
+        break;
+      }
+    }
+    if (!orphan_hit && stem_n[row.item.stem] >= 2) {
+      continue;
+    }
+    out.push_back(row.item);
+    ++stem_n[row.item.stem];
   }
   return out;
 }
@@ -898,10 +1226,271 @@ const char* a_verdict_kind_name(AVerdictKind kind) {
       return "uncertain";
     case AVerdictKind::Interesting:
       return "interesting";
+    case AVerdictKind::Expand:
+      return "expand";
     case AVerdictKind::Unknown:
       return "unknown";
   }
   return "unknown";
+}
+
+const char* a_expand_modality_name(AExpandModality m) {
+  switch (m) {
+    case AExpandModality::Peek:
+      return "peek";
+    case AExpandModality::Trail:
+      return "trail";
+    case AExpandModality::Dataflow:
+      return "dataflow";
+    default:
+      return "";
+  }
+}
+
+AExpandModality parse_a_expand_modality(const std::string& s) {
+  if (s == "peek" || s == "body" || s == "code") {
+    return AExpandModality::Peek;
+  }
+  if (s == "trail" || s == "call" || s == "hierarchy") {
+    return AExpandModality::Trail;
+  }
+  if (s == "dataflow" || s == "df" || s == "var") {
+    return AExpandModality::Dataflow;
+  }
+  return AExpandModality::None;
+}
+
+std::string a_target_symbol_name(const std::string& target) {
+  std::string sym = target;
+  const auto hash = sym.find('#');
+  if (hash != std::string::npos) {
+    sym = sym.substr(0, hash);
+  }
+  const auto colon = sym.rfind(':');
+  if (colon != std::string::npos) {
+    sym = sym.substr(colon + 1);
+  }
+  return sym;
+}
+
+bool a_is_symptom_edge_name(const std::string& name) {
+  static const char* kEdges[] = {"set_busy_spinner",
+                                  "set_busy_percent",
+                                  "clear_busy_if",
+                                  "clear_busy",
+                                  "agent_busy",
+                                  "begin_thinking",
+                                  "end_thinking",
+                                  "cancel_inflight_completion",
+                                  "cancel_inflight",
+                                  "cancel_all",
+                                  "wake",
+                                  "wake_console_panel",
+                                  "ensure_spinner_thread",
+                                  "run_level2_autonomous_loop"};
+  for (const char* e : kEdges) {
+    if (name == e) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool a_writes_suggest_trail_a0(const std::vector<std::string>& writes) {
+  for (const std::string& w : writes) {
+    if (w.rfind("strip.", 0) == 0 || w.rfind("state.", 0) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool a_target_prefers_trail_a0(const std::string& target,
+                               const std::vector<std::string>* writes) {
+  if (a_is_symptom_edge_name(a_target_symbol_name(target))) {
+    return true;
+  }
+  std::string path = target;
+  const auto hash = path.find('#');
+  if (hash != std::string::npos) {
+    path = path.substr(0, hash);
+  }
+  const auto colon = path.rfind(':');
+  if (colon != std::string::npos) {
+    path = path.substr(0, colon);
+  }
+  if (path.find("busy_strip") != std::string::npos) {
+    return true;
+  }
+  if (path.find("/ui/") != std::string::npos || path.find("ui/") == 0) {
+    const std::string sym = a_target_symbol_name(target);
+    if (sym.find("busy") != std::string::npos || sym.find("spinner") != std::string::npos ||
+        sym.find("strip") != std::string::npos) {
+      return true;
+    }
+  }
+  if (writes != nullptr && a_writes_suggest_trail_a0(*writes)) {
+    return true;
+  }
+  return false;
+}
+
+AExpandModality a_coerce_a0_expand_modality(const std::string& target, AExpandModality m,
+                                            const std::vector<std::string>* writes) {
+  if (!a_target_prefers_trail_a0(target, writes)) {
+    return m;
+  }
+  if (m == AExpandModality::Dataflow || m == AExpandModality::Peek ||
+      m == AExpandModality::None) {
+    return AExpandModality::Trail;
+  }
+  return m;
+}
+
+std::string a_path_from_anchor(const std::string& anchor) {
+  std::string p = anchor;
+  const auto hash = p.find('#');
+  if (hash != std::string::npos) {
+    p = p.substr(0, hash);
+  }
+  const auto colon = p.rfind(':');
+  if (colon != std::string::npos) {
+    p = p.substr(0, colon);
+  }
+  return p;
+}
+
+bool a_a0_dataflow_allowed_without_trail(const std::string& target,
+                                         const std::string& suspect_var) {
+  if (suspect_var.empty()) {
+    return false;
+  }
+  if (a_target_prefers_trail_a0(target, nullptr)) {
+    return false;
+  }
+  if (suspect_var.rfind("strip.", 0) == 0 || suspect_var.rfind("state.", 0) == 0) {
+    return false;
+  }
+  const std::string lower = [&]() {
+    std::string s = suspect_var;
+    for (char& c : s) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return s;
+  }();
+  if (lower.find("cancel") != std::string::npos) {
+    return false;
+  }
+  if (lower == "main" || lower.find("::") != std::string::npos) {
+    return false;
+  }
+  return suspect_var.size() >= 3 &&
+         (suspect_var.back() == '_' || lower.find("busy") != std::string::npos ||
+          lower.find("active") != std::string::npos || lower.find("pending") != std::string::npos);
+}
+
+void a_sort_a1_queue(std::vector<AExpansionItem>* queue) {
+  if (queue == nullptr || queue->size() < 2) {
+    return;
+  }
+  auto modality_rank = [](AExpandModality m) {
+    switch (m) {
+      case AExpandModality::Trail:
+        return 0;
+      case AExpandModality::Peek:
+        return 1;
+      case AExpandModality::Dataflow:
+        return 2;
+      default:
+        return 3;
+    }
+  };
+  std::stable_sort(queue->begin(), queue->end(),
+                   [&](const AExpansionItem& a, const AExpansionItem& b) {
+                     return modality_rank(a.modality) < modality_rank(b.modality);
+                   });
+}
+
+void a_a1_clear_trail_frame(AState* st) {
+  if (st == nullptr) {
+    return;
+  }
+  st->a1_trail_recap.clear();
+  st->a1_df_scope_path.clear();
+  st->a1_df_caller_anchor.clear();
+  st->a1_suspect_context.clear();
+  st->a1_job_root.clear();
+  st->a1_suspect_done = false;
+}
+
+void a_a1_begin_job(AState* st, const AExpansionItem& item) {
+  if (st == nullptr) {
+    return;
+  }
+  a_a1_clear_trail_frame(st);
+  st->a1_job_root = item.target;
+  st->a1_active = item;
+  st->a1_active_set = true;
+  switch (item.modality) {
+    case AExpandModality::Trail:
+      st->a_subphase = "a1_trail";
+      break;
+    case AExpandModality::Dataflow:
+      st->a_subphase = "a1_dataflow";
+      break;
+    default:
+      st->a_subphase = "a1_peek";
+      break;
+  }
+}
+
+void a_a1_backtrack_to_trail(AState* st) {
+  if (st == nullptr || !st->trail.active) {
+    return;
+  }
+  if (!st->a1_job_root.empty()) {
+    st->a1_active.target = st->a1_job_root;
+  }
+  st->a1_active.modality = AExpandModality::Trail;
+  st->a1_active.suspect_var.clear();
+  st->a1_active_set = true;
+  st->a_subphase = "a1_trail";
+  st->a1_suspect_done = false;
+  st->trail.awaiting_judge = true;
+}
+
+std::string a_a1_dataflow_path_hint(const AState& st, const AExpansionItem& item) {
+  if (!st.a1_df_scope_path.empty()) {
+    return st.a1_df_scope_path;
+  }
+  return a_path_from_anchor(item.target);
+}
+
+bool a_in_a0_sniff(const AState& st) {
+  if (!a_effect_summary_enabled()) {
+    return false;
+  }
+  if (st.a1_active_set) {
+    return false;
+  }
+  if (!st.a1_queue.empty()) {
+    return false;
+  }
+  return st.a_subphase.empty() || st.a_subphase == "a0_sniff";
+}
+
+float a_queue_item_score(const AState& st, const std::string& target) {
+  for (const auto& q : st.queue) {
+    if (q.target == target) {
+      return q.score;
+    }
+  }
+  for (const auto& q : st.reserve) {
+    if (q.target == target) {
+      return q.score * 0.9f;
+    }
+  }
+  return 0.f;
 }
 
 AVerdictKind parse_a_verdict_kind(const std::string& s) {
@@ -916,6 +1505,9 @@ AVerdictKind parse_a_verdict_kind(const std::string& s) {
   }
   if (s == "interesting" || s == "follow" || s == "deepen") {
     return AVerdictKind::Interesting;
+  }
+  if (s == "expand" || s == "EXPAND") {
+    return AVerdictKind::Expand;
   }
   return AVerdictKind::Unknown;
 }
@@ -958,6 +1550,12 @@ AVerdict parse_a_verdict_json(const nlohmann::json& j) {
   v.stem = trim_copy(j.value("stem", ""));
   v.role = parse_a_locus_role(j.value("role", ""));
   v.why = j.value("why", j.value("reason", ""));
+  const std::string ew = j.value("expand_with", j.value("modality", ""));
+  v.expand_with = parse_a_expand_modality(ew);
+  v.suspect_var = trim_copy(j.value("suspect_var", j.value("var", "")));
+  if (v.verdict == AVerdictKind::Useful && a_effect_summary_enabled()) {
+    // A0 must not crown useful from cards alone; caller may still downgrade.
+  }
   if (v.anchor.empty() && !v.target.empty() && v.verdict == AVerdictKind::Useful) {
     // Soft default: useful without explicit anchor → use target (strip #window).
     v.anchor = v.target;
@@ -993,6 +1591,9 @@ bool parse_a_verdicts_array(const nlohmann::json& j, std::vector<AVerdict>* out,
     }
     return false;
   }
+  const std::string phase = j.value("phase", "");
+  const bool a0 = phase == "a0_sniff" || phase == "a0";
+  const int cap = a0 ? kA0MaxCardsPerTurn + 2 : kAMaxPeeksPerTurn + 2;
   for (const auto& item : j["verdicts"]) {
     AVerdict v = parse_a_verdict_json(item);
     if (v.target.empty() && v.anchor.empty()) {
@@ -1001,8 +1602,17 @@ bool parse_a_verdicts_array(const nlohmann::json& j, std::vector<AVerdict>* out,
     if (v.verdict == AVerdictKind::Unknown) {
       continue;
     }
+    if (a0 && v.verdict == AVerdictKind::Useful) {
+      v.verdict = AVerdictKind::Expand;
+      if (v.expand_with == AExpandModality::None) {
+        v.expand_with = AExpandModality::Peek;
+      }
+    }
+    if (a0 && v.verdict == AVerdictKind::Expand && v.expand_with == AExpandModality::None) {
+      v.expand_with = AExpandModality::Peek;
+    }
     out->push_back(std::move(v));
-    if (static_cast<int>(out->size()) >= kAMaxPeeksPerTurn + 2) {
+    if (static_cast<int>(out->size()) >= cap) {
       break;
     }
   }
@@ -1070,7 +1680,14 @@ nlohmann::json a_state_to_json(const AState& st) {
                      {"symbol", it.symbol},
                      {"line", it.line},
                      {"window_hint", it.window_hint},
-                     {"score", it.score}});
+                     {"score", it.score},
+                     {"map_related", it.map_related},
+                     {"refs_in", it.refs_in},
+                     {"body_sem_permille", it.body_sem_permille},
+                     {"file_rank", it.file_rank},
+                     {"file_count", it.file_count},
+                     {"dup_stem", it.dup_stem},
+                     {"stem_sem_rank", it.stem_sem_rank}});
     }
     return arr;
   };
@@ -1098,6 +1715,44 @@ nlohmann::json a_state_to_json(const AState& st) {
   }
   j["notes"] = std::move(notes);
   j["trail"] = a_trail_to_json(st.trail);
+  j["a_subphase"] = st.a_subphase;
+  j["cards_used"] = st.cards_used;
+  j["a0_turns"] = st.a0_turns;
+  if (!st.a0_shown_targets.empty()) {
+    j["a0_shown_targets"] = st.a0_shown_targets;
+  }
+  j["seeds"] = st.seeds;
+  j["a1_active_set"] = st.a1_active_set;
+  j["a1_suspect_done"] = st.a1_suspect_done;
+  if (!st.a1_suspect_context.empty()) {
+    j["a1_suspect_context"] = st.a1_suspect_context;
+  }
+  if (!st.a1_job_root.empty()) {
+    j["a1_job_root"] = st.a1_job_root;
+  }
+  if (!st.a1_trail_recap.empty()) {
+    j["a1_trail_recap"] = st.a1_trail_recap;
+  }
+  if (!st.a1_df_scope_path.empty()) {
+    j["a1_df_scope_path"] = st.a1_df_scope_path;
+  }
+  if (!st.a1_df_caller_anchor.empty()) {
+    j["a1_df_caller_anchor"] = st.a1_df_caller_anchor;
+  }
+  if (st.a1_active_set) {
+    j["a1_active"] = {{"target", st.a1_active.target},
+                      {"modality", a_expand_modality_name(st.a1_active.modality)},
+                      {"suspect_var", st.a1_active.suspect_var},
+                      {"score", st.a1_active.score}};
+  }
+  nlohmann::json q = nlohmann::json::array();
+  for (const auto& it : st.a1_queue) {
+    q.push_back({{"target", it.target},
+                 {"modality", a_expand_modality_name(it.modality)},
+                 {"suspect_var", it.suspect_var},
+                 {"score", it.score}});
+  }
+  j["a1_queue"] = std::move(q);
   return j;
 }
 
@@ -1128,6 +1783,39 @@ bool a_state_from_json(const nlohmann::json& j, AState* out, std::string* err) {
   read_str_array("orphans", &st.orphans);
   read_str_array("rejected_stems", &st.rejected_stems);
   read_str_array("b_allow_paths", &st.b_allow_paths);
+  read_str_array("seeds", &st.seeds);
+  st.a_subphase = j.value("a_subphase", "");
+  st.cards_used = j.value("cards_used", 0);
+  st.a0_turns = j.value("a0_turns", 0);
+  read_str_array("a0_shown_targets", &st.a0_shown_targets);
+  st.a1_active_set = j.value("a1_active_set", false);
+  st.a1_suspect_done = j.value("a1_suspect_done", false);
+  st.a1_suspect_context = j.value("a1_suspect_context", "");
+  st.a1_job_root = j.value("a1_job_root", "");
+  st.a1_trail_recap = j.value("a1_trail_recap", "");
+  st.a1_df_scope_path = j.value("a1_df_scope_path", "");
+  st.a1_df_caller_anchor = j.value("a1_df_caller_anchor", "");
+  if (j.contains("a1_active") && j["a1_active"].is_object()) {
+    st.a1_active.target = j["a1_active"].value("target", "");
+    st.a1_active.modality = parse_a_expand_modality(j["a1_active"].value("modality", "peek"));
+    st.a1_active.suspect_var = j["a1_active"].value("suspect_var", "");
+    st.a1_active.score = j["a1_active"].value("score", 0.f);
+  }
+  if (j.contains("a1_queue") && j["a1_queue"].is_array()) {
+    for (const auto& o : j["a1_queue"]) {
+      if (!o.is_object()) {
+        continue;
+      }
+      AExpansionItem it;
+      it.target = o.value("target", "");
+      it.modality = parse_a_expand_modality(o.value("modality", "peek"));
+      it.suspect_var = o.value("suspect_var", "");
+      it.score = o.value("score", 0.f);
+      if (!it.target.empty()) {
+        st.a1_queue.push_back(std::move(it));
+      }
+    }
+  }
   if (j.contains("trail") && j["trail"].is_object()) {
     a_trail_from_json(j["trail"], &st.trail);
   }
@@ -1148,6 +1836,13 @@ bool a_state_from_json(const nlohmann::json& j, AState* out, std::string* err) {
       q.line = it.value("line", 0);
       q.window_hint = it.value("window_hint", "");
       q.score = it.value("score", 0.f);
+      q.map_related = it.value("map_related", "");
+      q.refs_in = it.value("refs_in", 0);
+      q.body_sem_permille = it.value("body_sem_permille", 0);
+      q.file_rank = it.value("file_rank", 0);
+      q.file_count = it.value("file_count", 0);
+      q.dup_stem = it.value("dup_stem", false);
+      q.stem_sem_rank = it.value("stem_sem_rank", 0);
       if (!q.target.empty() || !q.path.empty()) {
         dest->push_back(std::move(q));
       }
@@ -1174,6 +1869,334 @@ bool a_state_from_json(const nlohmann::json& j, AState* out, std::string* err) {
   }
   *out = std::move(st);
   return true;
+}
+
+bool a_apply_a0_verdicts(AState* st, const std::vector<AVerdict>& verdicts, std::string* err,
+                         const std::string* workspace_root) {
+  if (st == nullptr || verdicts.empty()) {
+    if (err) {
+      *err = "a0 verdicts vacío";
+    }
+    return false;
+  }
+  if (workspace_root != nullptr && !workspace_root->empty() && a_in_a0_sniff(*st)) {
+    std::vector<std::string> expected_targets = st->a0_shown_targets;
+    if (expected_targets.empty()) {
+      const A0TrancheShown shown =
+          a_build_a0_tranche_shown(*workspace_root, *st, kA0MaxCardsPerTurn);
+      for (const auto& item : shown.items) {
+        expected_targets.push_back(item.target);
+      }
+    }
+    if (!expected_targets.empty()) {
+      int covered = 0;
+      for (const auto& target : expected_targets) {
+        bool hit = false;
+        for (const auto& v : verdicts) {
+          if (a_target_matches_verdict_anchor(target, v.target)) {
+            hit = true;
+            break;
+          }
+        }
+        if (hit) {
+          ++covered;
+        }
+      }
+      if (covered < static_cast<int>(expected_targets.size())) {
+        if (err) {
+          *err = "a0: faltan veredictos (" + std::to_string(covered) + "/" +
+                 std::to_string(expected_targets.size()) +
+                 ") — emite expand|reject|uncertain por cada card mostrada";
+        }
+        return false;
+      }
+    }
+  }
+  int expands = 0;
+  int rejects = 0;
+  int queued_expands = 0;
+  for (const auto& raw : verdicts) {
+    AVerdict v = raw;
+    a_normalize_verdict(&v);
+    if (v.verdict == AVerdictKind::Useful) {
+      v.verdict = AVerdictKind::Expand;
+      if (v.expand_with == AExpandModality::None) {
+        v.expand_with = AExpandModality::Peek;
+      }
+    }
+    if (v.verdict == AVerdictKind::Reject) {
+      const float sc = a_queue_item_score(*st, v.target);
+      int rank = 0;
+      for (int qi = 0; qi < static_cast<int>(st->queue.size()); ++qi) {
+        if (st->queue[static_cast<std::size_t>(qi)].target == v.target) {
+          rank = qi + 1;
+          break;
+        }
+      }
+      if (sc >= 0.5f || (rank > 0 && rank <= 15)) {
+        v.verdict = AVerdictKind::Uncertain;
+        v.expand_with = AExpandModality::Peek;
+      }
+      ++rejects;
+    } else if (v.verdict == AVerdictKind::Expand) {
+      ++expands;
+    }
+    if (v.verdict == AVerdictKind::Expand || v.verdict == AVerdictKind::Uncertain) {
+      if (v.expand_with == AExpandModality::None) {
+        v.expand_with = AExpandModality::Peek;
+      }
+      v.expand_with = a_coerce_a0_expand_modality(v.target, v.expand_with, nullptr);
+      if (v.expand_with == AExpandModality::Dataflow &&
+          !a_a0_dataflow_allowed_without_trail(v.target, v.suspect_var)) {
+        v.expand_with = AExpandModality::Trail;
+        v.suspect_var.clear();
+      }
+      if (v.verdict == AVerdictKind::Expand) {
+        if (expands > kA0MaxExpandPerTurn ||
+            static_cast<int>(st->a1_queue.size()) >= kA0MaxExpandTotal) {
+          v.verdict = AVerdictKind::Uncertain;
+        } else {
+          AExpansionItem item;
+          item.target = v.target;
+          item.modality = v.expand_with;
+          item.suspect_var = v.suspect_var;
+          item.score = a_queue_item_score(*st, v.target);
+          st->a1_queue.push_back(std::move(item));
+          ++queued_expands;
+        }
+      }
+    }
+    if (!v.why.empty() && v.why.size() > 80) {
+      v.why = v.why.substr(0, 79) + "…";
+    }
+    st->notes.push_back(v);
+    if (v.verdict == AVerdictKind::Reject && !v.stem.empty()) {
+      if (std::find(st->rejected_stems.begin(), st->rejected_stems.end(), v.stem) ==
+          st->rejected_stems.end()) {
+        st->rejected_stems.push_back(v.stem);
+      }
+    }
+  }
+  if (expands == 0 && rejects == 0) {
+    if (err) {
+      *err = "a0: todos uncertain — marca reject en glue o expand si hot/writes cuadra";
+    }
+    return false;
+  }
+  a_sort_a1_queue(&st->a1_queue);
+  // Consume the rerank window (not only shown cards) so rescued-from-window items
+  // are not re-offered on the next A0 turn.
+  const int remain = std::max(0, static_cast<int>(st->queue.size()) - st->cursor);
+  const int window =
+      std::min({kA0RerankWindow, remain, std::max(kA0MaxCardsPerTurn, kA0MaxCardsPerTurn * 3)});
+  st->cards_used += std::max(static_cast<int>(verdicts.size()), kA0MaxCardsPerTurn);
+  st->cursor = std::min(static_cast<int>(st->queue.size()), st->cursor + std::max(window, 1));
+  ++st->a0_turns;
+  ++st->turns;
+  st->a_subphase = "a0_sniff";
+  if (!st->a1_queue.empty() && !st->a1_active_set) {
+    a_a1_begin_job(st, st->a1_queue.front());
+    st->a1_queue.erase(st->a1_queue.begin());
+  }
+  st->a0_shown_targets.clear();
+  return true;
+}
+
+void a_fill_a1_trail_frame(AState* st, const std::vector<AVerdict>& verdicts) {
+  if (st == nullptr) {
+    return;
+  }
+  st->a1_trail_recap = a_build_a1_suspect_context(*st, verdicts);
+  st->a1_suspect_context = st->a1_trail_recap;
+  st->a1_df_scope_path.clear();
+  st->a1_df_caller_anchor.clear();
+  for (const auto& v : verdicts) {
+    if (v.verdict != AVerdictKind::Interesting) {
+      continue;
+    }
+    for (const auto& b : st->trail.cond_branches) {
+      if (b.id != v.target) {
+        continue;
+      }
+      st->a1_df_caller_anchor = b.anchor.empty() ? (b.path + ":" + b.symbol) : b.anchor;
+      st->a1_df_scope_path = b.path.empty() ? a_path_from_anchor(st->a1_df_caller_anchor) : b.path;
+      return;
+    }
+    for (const auto& s : st->trail.pending_stacks) {
+      if (s.id != v.target || s.hops.empty()) {
+        continue;
+      }
+      const ATrailHop& hop = s.hops.front();
+      st->a1_df_caller_anchor = hop.anchor;
+      st->a1_df_scope_path = hop.path.empty() ? a_path_from_anchor(hop.anchor) : hop.path;
+      return;
+    }
+  }
+}
+
+std::string a_build_a1_suspect_context(const AState& st, const std::vector<AVerdict>& verdicts) {
+  std::ostringstream out;
+  for (const auto& v : verdicts) {
+    if (v.verdict != AVerdictKind::Interesting) {
+      continue;
+    }
+    bool wrote = false;
+    for (const auto& b : st.trail.cond_branches) {
+      if (b.id != v.target) {
+        continue;
+      }
+      out << "### cond `" << b.id << "`\n";
+      if (!b.when_text.empty()) {
+        out << "when: `" << b.when_text << "`\n";
+      }
+      if (!b.then_text.empty()) {
+        out << "then: `" << b.then_text << "`\n";
+      }
+      if (!b.note.empty()) {
+        out << "note: " << b.note << "\n";
+      }
+      if (!b.snippet.empty()) {
+        out << "```\n" << b.snippet;
+        if (b.snippet.back() != '\n') {
+          out << '\n';
+        }
+        out << "```\n\n";
+      }
+      wrote = true;
+      break;
+    }
+    for (const auto& s : st.trail.pending_stacks) {
+      if (s.id != v.target) {
+        continue;
+      }
+      out << "### stack `" << s.id << "`\n";
+      if (!s.hops.empty()) {
+        const auto& key = s.hops.front();
+        out << "caller `" << key.anchor << "` line=" << key.call_line << "\n";
+        if (!key.signature.empty()) {
+          out << "sig: `" << key.signature << "`\n";
+        }
+        if (!key.control_cond.empty()) {
+          out << "cond: `" << key.control_cond << "`\n";
+        }
+        out << "```\n" << key.snippet;
+        if (!key.snippet.empty() && key.snippet.back() != '\n') {
+          out << '\n';
+        }
+        out << "```\n\n";
+      }
+      wrote = true;
+      break;
+    }
+    (void)wrote;
+  }
+  return out.str();
+}
+
+bool a_apply_a1_suspect_verdicts(AState* st, const std::vector<AVerdict>& verdicts,
+                                 std::string* err) {
+  if (st == nullptr) {
+    if (err) {
+      *err = "a1_suspect state nulo";
+    }
+    return false;
+  }
+  std::string anchor_hint = st->a1_df_caller_anchor;
+  if (anchor_hint.empty()) {
+    anchor_hint = st->a1_active.target;
+  }
+  if (anchor_hint.empty() && !st->trail.pending_stacks.empty()) {
+    for (const auto& s : st->trail.pending_stacks) {
+      if (s.hops.empty()) {
+        continue;
+      }
+      anchor_hint = s.hops.front().anchor;
+      break;
+    }
+  }
+  int queued = 0;
+  for (const auto& raw : verdicts) {
+    AVerdict v = raw;
+    a_normalize_verdict(&v);
+    if (v.verdict != AVerdictKind::Expand || v.expand_with != AExpandModality::Dataflow ||
+        v.suspect_var.empty()) {
+      continue;
+    }
+    if (queued >= 2) {
+      break;
+    }
+    AExpansionItem item;
+    item.modality = AExpandModality::Dataflow;
+    item.suspect_var = v.suspect_var;
+    item.target = v.target.empty() ? anchor_hint : v.target;
+    item.score = a_queue_item_score(*st, item.target);
+    st->a1_queue.insert(st->a1_queue.begin(), std::move(item));
+    ++queued;
+  }
+  st->a1_suspect_context.clear();
+  st->a1_active_set = false;
+  st->a1_active = {};
+  if (!st->a1_queue.empty()) {
+    st->a1_active = st->a1_queue.front();
+    st->a1_queue.erase(st->a1_queue.begin());
+    st->a1_active_set = true;
+    st->a_subphase = "a1_dataflow";
+  } else if (st->trail.active && !st->a1_trail_recap.empty()) {
+    a_a1_backtrack_to_trail(st);
+  } else {
+    a_a1_clear_trail_frame(st);
+    st->a_subphase = "a0_sniff";
+  }
+  ++st->turns;
+  return true;
+}
+
+std::string a_notes_markdown_compact(const AState& st, int max_chars) {
+  std::ostringstream out;
+  out << "# A notes (compact)\n";
+  if (!st.orphans.empty()) {
+    out << "orphans: ";
+    for (std::size_t i = 0; i < st.orphans.size() && i < 6; ++i) {
+      if (i) {
+        out << ", ";
+      }
+      out << st.orphans[i];
+    }
+    out << "\n";
+  }
+  std::unordered_map<std::string, int> reject_by_stem;
+  for (const auto& v : st.notes) {
+    if (v.verdict == AVerdictKind::Reject && !v.stem.empty()) {
+      ++reject_by_stem[v.stem];
+    }
+  }
+  for (const auto& kv : reject_by_stem) {
+    if (kv.second > 1) {
+      out << "- reject×" << kv.second << " stem=" << kv.first << "\n";
+    }
+  }
+  for (const auto& v : st.notes) {
+    if (v.verdict == AVerdictKind::Reject && reject_by_stem[v.stem] > 1) {
+      continue;
+    }
+    std::string why = v.why;
+    if (why.size() > 80) {
+      why = why.substr(0, 79) + "…";
+    }
+    out << "- [" << a_verdict_kind_name(v.verdict) << "] `" << v.target << "`";
+    if (!v.stem.empty()) {
+      out << " stem=" << v.stem;
+    }
+    if (!why.empty()) {
+      out << " — " << why;
+    }
+    out << "\n";
+  }
+  std::string s = out.str();
+  if (max_chars > 0 && static_cast<int>(s.size()) > max_chars) {
+    s = s.substr(0, static_cast<std::size_t>(max_chars - 1)) + "…";
+  }
+  return s;
 }
 
 std::string a_notes_markdown(const AState& st) {
@@ -1318,6 +2341,21 @@ nlohmann::json a_trail_to_json(const ATrail& tr) {
                       {"hops", std::move(hops)}});
   }
   j["pending_stacks"] = std::move(stacks);
+  nlohmann::json cond = nlohmann::json::array();
+  for (const auto& b : tr.cond_branches) {
+    cond.push_back({{"id", b.id},
+                    {"when", b.when_text},
+                    {"then", b.then_text},
+                    {"note", b.note},
+                    {"anchor", b.anchor},
+                    {"path", b.path},
+                    {"symbol", b.symbol},
+                    {"line", b.line},
+                    {"snippet", b.snippet},
+                    {"verdict", a_verdict_kind_name(b.verdict)},
+                    {"why", b.why}});
+  }
+  j["cond_branches"] = std::move(cond);
   return j;
 }
 
@@ -1365,19 +2403,76 @@ bool a_trail_from_json(const nlohmann::json& j, ATrail* out) {
       tr.pending_stacks.push_back(std::move(s));
     }
   }
+  if (j.contains("cond_branches") && j["cond_branches"].is_array()) {
+    for (const auto& o : j["cond_branches"]) {
+      if (!o.is_object()) {
+        continue;
+      }
+      ATrailCondBranch b;
+      b.id = o.value("id", "");
+      b.when_text = o.value("when", "");
+      b.then_text = o.value("then", "");
+      b.note = o.value("note", "");
+      b.anchor = o.value("anchor", "");
+      b.path = o.value("path", "");
+      b.symbol = o.value("symbol", "");
+      b.line = o.value("line", 0);
+      b.snippet = o.value("snippet", "");
+      b.verdict = parse_a_verdict_kind(o.value("verdict", ""));
+      b.why = o.value("why", "");
+      tr.cond_branches.push_back(std::move(b));
+    }
+  }
   *out = std::move(tr);
   return true;
 }
 
 std::string a_trail_stacks_markdown(const ATrail& tr) {
   std::ostringstream out;
-  out << "## Trail call-stacks (fase A — rama acumulativa)\n";
+  out << "## Trail (fase A — rama acumulativa)\n";
   out << "L0 `" << tr.root_anchor << "`";
   if (!tr.root_why.empty()) {
     out << " — " << tr.root_why;
   }
   out << " · focus=`" << tr.focus_anchor << "` depth=" << tr.depth << "/" << kATrailMaxDepth
       << "\n\n";
+
+  if (!tr.cond_branches.empty()) {
+    out << "### Ramas condicionales (prioridad — judge ON/CXL/OFF)\n";
+    out << "El síntoma suele ser un **guard/async**: ¿falta el enlace CXL→OFF?\n";
+    out << "Call-stacks abajo = soporte; el edit site suele estar en un **when/then**.\n\n";
+    for (const auto& b : tr.cond_branches) {
+      out << "#### `" << b.id << "`";
+      if (!b.symbol.empty()) {
+        out << " · " << b.symbol;
+      }
+      if (b.verdict != AVerdictKind::Unknown) {
+        out << " · " << a_verdict_kind_name(b.verdict);
+      }
+      out << "\n";
+      if (!b.when_text.empty()) {
+        out << "- **when** `" << b.when_text << "`\n";
+      }
+      if (!b.then_text.empty()) {
+        out << "- **then** `" << b.then_text << "`\n";
+      }
+      if (!b.note.empty()) {
+        out << "- **note** " << b.note << "\n";
+      }
+      if (!b.anchor.empty()) {
+        out << "- **site** `" << b.anchor << "` line=" << b.line << "\n";
+      }
+      if (!b.snippet.empty()) {
+        out << "```\n" << b.snippet;
+        if (b.snippet.back() != '\n') {
+          out << '\n';
+        }
+        out << "```\n";
+      }
+      out << "\n";
+    }
+  }
+
   if (!tr.trail.empty()) {
     out << "### Padres (resumen)\n";
     for (std::size_t i = 0; i < tr.trail.size(); ++i) {
@@ -1403,8 +2498,8 @@ std::string a_trail_stacks_markdown(const ATrail& tr) {
     return out.str();
   }
 
-  // Compact chains first (7B-friendly)
-  out << "### Cadenas (elige ≤" << kATrailMaxInterestingPerLevel << " interesting)\n";
+  // Compact chains first (7B-friendly) — supporting evidence
+  out << "### Call-stacks (soporte — elige ≤" << kATrailMaxInterestingPerLevel << " interesting)\n";
   out << "★ = caller distinto del L0. ctrl = if/switch/…; cond = condición.\n";
   for (const auto& s : tr.pending_stacks) {
     const bool distinct =
@@ -1501,9 +2596,14 @@ std::string a_trail_stacks_markdown(const ATrail& tr) {
   }
   out << "Responde con verdict exactamente \"interesting\" o \"reject\" (nunca el literal "
          "interesting|reject):\n"
-         "{\"action\":\"a_trail_judge\",\"verdicts\":[{\"target\":\"S2\",\"verdict\":"
-         "\"interesting\",\"why\":\"…\"},{\"target\":\"S1\",\"verdict\":\"reject\","
-         "\"why\":\"…\"}]}\n"
+         "{\"action\":\"a_trail_judge\",\"verdicts\":["
+         "{\"target\":\"LINK\",\"verdict\":\"interesting\",\"why\":\"cancel no garantiza OFF\"},"
+         "{\"target\":\"CXL\",\"verdict\":\"interesting\",\"why\":\"…\"},"
+         "{\"target\":\"S2\",\"verdict\":\"interesting\",\"why\":\"…\"},"
+         "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"…\"},"
+         "{\"target\":\"ON\",\"verdict\":\"reject\",\"why\":\"solo enciende\"}]}\n"
+         "target = ramas condicionales (`ON`|`CXL`|`OFF`|`LINK`) y/o pilas `S1`…`S3`. "
+         "interesting ≤3 total.\n"
          "o `a_done` si ya ves el edit site.\n";
   return out.str();
 }
@@ -1586,6 +2686,67 @@ bool parse_a_trail_verdicts_array(const nlohmann::json& j, std::vector<AVerdict>
   return parse_a_verdicts_array(j, out, err);
 }
 
+namespace {
+
+std::string normalize_cond_target(std::string t) {
+  for (char& c : t) {
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  }
+  if (t == "CANCEL" || t == "CXL") {
+    return "CXL";
+  }
+  return t;
+}
+
+ATrailStack* find_pending_stack(ATrail& tr, const std::string& target) {
+  if (target.empty()) {
+    return nullptr;
+  }
+  for (auto& s : tr.pending_stacks) {
+    if (s.id == target || (!target.empty() && s.id == target)) {
+      return &s;
+    }
+  }
+  if (!target.empty() && target[0] == 'S') {
+    for (auto& s : tr.pending_stacks) {
+      if (s.id == target) {
+        return &s;
+      }
+    }
+  }
+  if (!target.empty() && std::isdigit(static_cast<unsigned char>(target[0]))) {
+    const int idx = std::atoi(target.c_str()) - 1;
+    if (idx >= 0 && idx < static_cast<int>(tr.pending_stacks.size())) {
+      return &tr.pending_stacks[static_cast<std::size_t>(idx)];
+    }
+  }
+  return nullptr;
+}
+
+ATrailCondBranch* find_cond_branch(ATrail& tr, const std::string& target) {
+  const std::string norm = normalize_cond_target(target);
+  if (norm.empty()) {
+    return nullptr;
+  }
+  for (auto& b : tr.cond_branches) {
+    if (b.id == target || b.id == norm || normalize_cond_target(b.id) == norm) {
+      return &b;
+    }
+  }
+  return nullptr;
+}
+
+void queue_force_branch(ATrail& tr, const std::string& id) {
+  if (id.empty()) {
+    return;
+  }
+  if (std::find(tr.force_queue.begin(), tr.force_queue.end(), id) == tr.force_queue.end()) {
+    tr.force_queue.push_back(id);
+  }
+}
+
+}  // namespace
+
 bool a_validate_a_trail_judge(const AState& st, const std::vector<AVerdict>& verdicts,
                               std::string* err) {
   auto fail = [&](const std::string& msg) {
@@ -1629,62 +2790,49 @@ bool a_trail_apply_judge(AState* st, const std::vector<AVerdict>& verdicts, std:
   for (const auto& v : verdicts) {
     AVerdict nv = v;
     a_normalize_verdict(&nv);
-    // Map target S1 → stack
-    ATrailStack* stack = nullptr;
-    for (auto& s : tr.pending_stacks) {
-      if (s.id == nv.target || (!nv.anchor.empty() && s.id == nv.anchor)) {
-        stack = &s;
-        break;
-      }
+    if (nv.verdict == AVerdictKind::Useful) {
+      nv.verdict = AVerdictKind::Interesting;
     }
-    if (stack == nullptr && !nv.target.empty() && nv.target[0] == 'S') {
-      for (auto& s : tr.pending_stacks) {
-        if (s.id == nv.target) {
-          stack = &s;
-          break;
-        }
+
+    if (ATrailCondBranch* branch = find_cond_branch(tr, nv.target); branch != nullptr) {
+      branch->verdict = nv.verdict;
+      branch->why = nv.why;
+      if (nv.verdict == AVerdictKind::Interesting) {
+        ++interesting;
+        queue_force_branch(tr, branch->id);
+      } else if (nv.verdict == AVerdictKind::Reject) {
+        ++reject;
       }
-    }
-    if (stack == nullptr) {
-      // Best-effort: index 1-based
-      if (!nv.target.empty() && std::isdigit(static_cast<unsigned char>(nv.target[0]))) {
-        const int idx = std::atoi(nv.target.c_str()) - 1;
-        if (idx >= 0 && idx < static_cast<int>(tr.pending_stacks.size())) {
-          stack = &tr.pending_stacks[static_cast<std::size_t>(idx)];
-        }
-      }
-    }
-    if (stack == nullptr) {
       continue;
     }
-    if (nv.verdict == AVerdictKind::Useful) {
-      nv.verdict = AVerdictKind::Interesting;  // useful on stack = deepen
+
+    ATrailStack* stack = find_pending_stack(tr, nv.target);
+    if (stack == nullptr) {
+      continue;
     }
     stack->verdict = nv.verdict;
     stack->why = nv.why;
     if (nv.verdict == AVerdictKind::Interesting) {
       ++interesting;
-      if (std::find(tr.force_queue.begin(), tr.force_queue.end(), stack->id) ==
-          tr.force_queue.end()) {
-        tr.force_queue.push_back(stack->id);
-      }
+      queue_force_branch(tr, stack->id);
     } else if (nv.verdict == AVerdictKind::Reject) {
       ++reject;
     }
   }
 
   const int n_stacks = static_cast<int>(tr.pending_stacks.size());
-  if (interesting == 0 && reject >= std::max(kATrailMinCallersToFalsify, n_stacks) &&
-      n_stacks >= kATrailMinCallersToFalsify) {
+  const int n_cond = static_cast<int>(tr.cond_branches.size());
+  const int n_items = n_stacks + n_cond;
+  if (interesting == 0 && reject >= std::max(kATrailMinCallersToFalsify, n_items) &&
+      n_items >= kATrailMinCallersToFalsify) {
     a_trail_invalidate_root(st, "todos los callers/stacks reject — L0 falso positivo");
-    return true;  // trail cleared; caller resumes queue
-  }
-  if (interesting == 0 && n_stacks > 0 && reject >= n_stacks) {
-    // All pending rejected (even if < min) after seeing stacks
-    a_trail_invalidate_root(st, "stacks de callers todos reject — L0 invalidado");
     return true;
   }
-  if (interesting == 0 && n_stacks == 0) {
+  if (interesting == 0 && n_items > 0 && reject >= n_items) {
+    a_trail_invalidate_root(st, "stacks/ramas todos reject — L0 invalidado");
+    return true;
+  }
+  if (interesting == 0 && n_items == 0) {
     // No callers: do not falsify; close trail softly and resume queue
     tr.active = false;
     tr.awaiting_judge = false;

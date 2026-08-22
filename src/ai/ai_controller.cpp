@@ -321,12 +321,19 @@ InsertPackBuild build_insert_pack(const std::string& root, const AiInsertAnchor&
 }
 
 Level2SessionDeps make_l2_deps(AiController* self, ToolRegistry* tools, WorkspaceModel* workspace,
-                               TaskRunner* tasks, const AiSettings& settings) {
+                               TaskRunner* tasks, const AiSettings& settings,
+                               SymbolWorkspaceIndexer* symbol_indexer) {
   Level2SessionDeps l2deps;
   l2deps.tools = tools;
   l2deps.clarify_pushback_max = settings.level2.clarify_pushback_max;
   l2deps.path_scope_fn = [self]() -> const std::vector<std::string>& {
     return self->path_scope();
+  };
+  l2deps.symbol_snapshot_fn = [symbol_indexer]() -> std::shared_ptr<const SymbolIndexSnapshot> {
+    if (symbol_indexer == nullptr) {
+      return nullptr;
+    }
+    return symbol_indexer->snapshot();
   };
   l2deps.sync_edit = [self, workspace](const ApplyHunkResult& applied) {
     if (workspace == nullptr || !applied.ok) {
@@ -1749,7 +1756,8 @@ void AiController::bootstrap_level2_session(const std::string& query,
     append("L2 harness: sin workspace root");
     return;
   }
-  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_));
+  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_,
+                                     deps_.symbol_indexer));
   Level2BootstrapOpts opts;
   opts.workspace_root = root;
   opts.query = query;
@@ -1822,7 +1830,8 @@ void AiController::run_level2_autonomous_inline(const std::string& reason) {
     return;
   }
 
-  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_));
+  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_,
+                                     deps_.symbol_indexer));
   Level2AutonomousLoopOpts opts;
   opts.workspace_root = root;
   opts.settings = settings_.level2;
@@ -1955,7 +1964,8 @@ void AiController::handle_level2_harness(const std::string& arg) {
     append("L2 harness: sin workspace root");
     return;
   }
-  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_));
+  Level2Session session(make_l2_deps(this, &tools_, deps_.workspace, &tasks_, settings_,
+                                     deps_.symbol_indexer));
 
   std::string cmd;
   std::string rest;

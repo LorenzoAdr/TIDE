@@ -46,6 +46,38 @@ int main() {
     expect(inputs[1].name == "noise", "noise symbol");
   }
   {
+    const std::string map =
+        "# Ranked map\n\n## Ranked entries\n\n"
+        "6. src/ui/busy_strip.cpp:226  [score=2326456] — `set_busy_spinner`\n"
+        "    why: base=1641032 body=0.57 · stem=busy_strip dup_stem · file_rank=1/1 · refs≈10 · "
+        "related=state,BusyActivity,layout\n";
+    const auto inputs = tuide::a_queue_inputs_from_ranked_map_markdown(map, 4);
+    expect(inputs.size() == 1, "why line parsed");
+    expect(inputs[0].stem == "busy_strip", "why stem");
+    expect(inputs[0].refs_in == 10, "why refs");
+    expect(inputs[0].body_sem_permille == 570, "why body_sem");
+    expect(inputs[0].file_rank == 1 && inputs[0].file_count == 1, "why file_rank");
+    expect(inputs[0].dup_stem, "why dup_stem");
+    expect(inputs[0].map_related.find("BusyActivity") != std::string::npos, "why related");
+  }
+  {
+    const std::string map =
+        "# Ranked map\n\n## Ranked entries\n\n"
+        "1. src/ui/busy_strip.cpp:226 — `set_busy_spinner`\n"
+        "2. src/ui/busy_strip.hpp:69 — `set_busy_spinner`\n"
+        "3. src/ui/spinner.hpp:1 — `spinner`\n"
+        "4. src/ui/spinner.cpp:1 — `spinner`\n";
+    tuide::AQueueMapFilterOpts fopts;
+    fopts.want_n = 4;
+    fopts.skip_file_level = false;
+    const char* root_env = std::getenv("TUIDE_ROOT");
+    const std::string root = root_env != nullptr ? root_env : "..";
+    const auto filtered = tuide::a_queue_inputs_from_ranked_map_filtered(map, fopts, root);
+    expect(filtered.size() == 2, "filter drops hpp when cpp exists");
+    expect(filtered[0].file == "src/ui/busy_strip.cpp", "keeps cpp busy_strip");
+    expect(filtered[1].file == "src/ui/spinner.cpp", "keeps cpp spinner");
+  }
+  {
     nlohmann::json j = nlohmann::json::parse(R"({
       "verdicts": [
         {"target":"src/ui/wake.cpp:tick#tail","verdict":"useful","anchor":"src/ui/wake.cpp:90",
@@ -508,6 +540,35 @@ int main() {
            "parse interesting");
   }
   {
+    // Cond branch interesting queues force deepen
+    tuide::AState st;
+    tuide::AVerdict u;
+    u.target = "src/ui/busy.cpp:set_busy_spinner";
+    u.anchor = u.target;
+    u.stem = "busy";
+    u.verdict = tuide::AVerdictKind::Useful;
+    tuide::a_trail_begin(&st, u);
+    tuide::ATrailCondBranch branch;
+    branch.id = "LINK";
+    branch.path = "src/ai/ai_controller.cpp";
+    branch.symbol = "cancel_current";
+    branch.anchor = "src/ai/ai_controller.cpp:cancel_current";
+    st.trail.cond_branches.push_back(branch);
+    st.trail.awaiting_judge = true;
+    tuide::AVerdict v;
+    v.target = "LINK";
+    v.verdict = tuide::AVerdictKind::Interesting;
+    v.why = "cancel no OFF";
+    std::string err;
+    std::vector<tuide::AVerdict> one = {v};
+    expect(tuide::a_trail_apply_judge(&st, one, &err), "cond interesting ok");
+    expect(st.trail.active, "trail active after cond");
+    expect(st.trail.force_queue.size() == 1 && st.trail.force_queue[0] == "LINK",
+           "force LINK");
+    expect(st.trail.cond_branches[0].verdict == tuide::AVerdictKind::Interesting,
+           "cond verdict set");
+  }
+  {
     using tuide::ADataFlowKind;
     using tuide::a_dataflow_classify_line;
     expect(a_dataflow_classify_line("  agent_busy_.store(false);", "agent_busy_") ==
@@ -525,6 +586,79 @@ int main() {
     expect(a_dataflow_classify_line("  // agent_busy_.store(true);", "agent_busy_") ==
                ADataFlowKind::Unknown,
            "comment-only → unknown");
+  }
+  {
+    expect(tuide::a_is_symptom_edge_name("set_busy_spinner"), "symptom edge name");
+    expect(tuide::a_target_prefers_trail_a0("src/ui/busy_strip.cpp:set_busy_spinner", nullptr),
+           "L0 prefers trail");
+    expect(tuide::a_coerce_a0_expand_modality("src/ui/busy_strip.cpp:set_busy_spinner",
+                                              tuide::AExpandModality::Dataflow, nullptr) ==
+               tuide::AExpandModality::Trail,
+           "coerce dataflow→trail");
+    std::vector<std::string> strip_writes = {"strip.activity", "strip.kind"};
+    expect(tuide::a_coerce_a0_expand_modality("src/x.cpp:foo", tuide::AExpandModality::Dataflow,
+                                              &strip_writes) == tuide::AExpandModality::Trail,
+           "strip writes→trail");
+    expect(!tuide::a_a0_dataflow_allowed_without_trail("src/search/x.cpp:cancel",
+                                                       "cancel_requested_"),
+           "weak A0 dataflow blocked");
+    expect(tuide::a_a0_dataflow_allowed_without_trail("src/ai/x.cpp:Foo", "agent_busy_"),
+           "strong ident ok");
+    std::vector<tuide::AExpansionItem> q;
+    tuide::AExpansionItem df;
+    df.target = "a";
+    df.modality = tuide::AExpandModality::Dataflow;
+    tuide::AExpansionItem tr;
+    tr.target = "b";
+    tr.modality = tuide::AExpandModality::Trail;
+    q.push_back(df);
+    q.push_back(tr);
+    tuide::a_sort_a1_queue(&q);
+    expect(q[0].modality == tuide::AExpandModality::Trail, "trail before dataflow");
+  }
+  {
+    nlohmann::json j = nlohmann::json::parse(R"({
+      "action":"a_judge","phase":"a0_sniff",
+      "verdicts":[
+        {"target":"src/a.cpp:Foo","verdict":"expand","expand_with":"peek","why":"hot write"},
+        {"target":"src/b.cpp:Bar","verdict":"reject","why":"glue"}
+      ]
+    })");
+    std::vector<tuide::AVerdict> vs;
+    std::string err;
+    expect(parse_a_verdicts_array(j, &vs, &err), "a0 parse");
+    expect(vs.size() == 2, "2 a0 verdicts");
+    expect(vs[0].verdict == AVerdictKind::Expand, "expand kind");
+    expect(vs[0].expand_with == tuide::AExpandModality::Peek, "peek modality");
+  }
+  {
+    setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "1", 1);
+    setenv("L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY", "1", 1);
+    expect(tuide::a_effect_summary_enabled(), "effect summary enabled");
+    AState st;
+    st.a_subphase = "a0_sniff";
+    tuide::AQueueItem q;
+    q.target = "src/x.cpp:Sym";
+    q.score = 0.9f;
+    st.queue.push_back(q);
+    std::vector<tuide::AVerdict> vs;
+    tuide::AVerdict expand;
+    expand.target = "src/x.cpp:Sym";
+    expand.verdict = AVerdictKind::Expand;
+    expand.expand_with = tuide::AExpandModality::Peek;
+    expand.why = "hot";
+    vs.push_back(expand);
+    tuide::AVerdict rej;
+    rej.target = "src/y.cpp:Glue";
+    rej.verdict = AVerdictKind::Reject;
+    rej.why = "noop";
+    vs.push_back(rej);
+    std::string err;
+    expect(tuide::a_apply_a0_verdicts(&st, vs, &err), "a0 apply");
+    expect(st.a1_active_set, "queued expand activates A1");
+    expect(st.a1_active.modality == tuide::AExpandModality::Peek, "A1 peek");
+    unsetenv("L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY");
+    unsetenv("L2_FEAT_L2_EXPLORE_PHASE_A");
   }
 
   if (failures) {

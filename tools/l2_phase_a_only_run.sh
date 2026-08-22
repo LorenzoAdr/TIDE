@@ -14,6 +14,8 @@ L2_CLI="$ROOT/build/l2_harness_cli"
 mkdir -p "$OUT"
 
 export L2_FEAT_L2_EXPLORE_PHASE_A=1
+export L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY=1
+export TUIDE_ROOT="$ROOT"
 
 if [[ ! -x "$TUIDE" || ! -x "$L2_CLI" ]]; then
   cmake --build "$ROOT/build" --target tuide l2_harness_cli -j"$(nproc)"
@@ -29,6 +31,7 @@ mkdir -p "$CASE_DIR"
   echo "case=$CASE_ID expected_stems=$EXPECTED"
   echo "prompt=$PROMPT"
   echo "L2_FEAT_L2_EXPLORE_PHASE_A=$L2_FEAT_L2_EXPLORE_PHASE_A"
+  echo "L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY=$L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY"
 } | tee "$OUT/STARTED.txt" | tee "$CASE_DIR/meta.txt"
 
 python3 "$ROOT/tools/l2_battery/kill_l2_runtime.py" >/dev/null 2>&1 || true

@@ -50,6 +50,8 @@ struct Level1RunResult {
 struct InvestigateNeedlesResult {
   std::vector<std::string> lexical_seeds;
   std::vector<std::string> semantic_tokens;
+  // Short distilled primary_goal/intent for hybrid body-embed query (may be empty).
+  std::string embed_intent;
 };
 
 class Level1Agent {
