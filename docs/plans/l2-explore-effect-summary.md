@@ -221,7 +221,7 @@ Top **40** en cola activa; **41–80** en `reserve` (expansión P3 existente). D
 | Acción | Reordenar la tranche visible / priorizar reserve |
 | Prohibido | Vectores en el prompt; passages “ricos” tipo cuerpo (battery: baseline > rich_480) |
 
-Cache: `.tuide/ai/l2/effect_summary_cache/` keyed por `path + symbol + content_hash`. Invalidar con mtime/hash del archivo.
+Cache: `.tuide/ai/l2/effect_summary_cache/` keyed por `path + symbol + content_hash` guarda la ficha **completa** (listas sin truncar). El truncado seed-first (§2.6) ocurre al **materializar** la tranche A0 (así la cache no depende de seeds). Invalidar con mtime/hash del archivo.
 
 Si embed off: orden = score' del paso 2.
 
