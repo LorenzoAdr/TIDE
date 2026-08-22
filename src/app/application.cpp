@@ -43,6 +43,7 @@
 #include "ui/busy_strip.hpp"
 #include "ui/connection_wizard.hpp"
 #include "ui/console_panel.hpp"
+#include "ui/console_expand_overlay.hpp"
 #include "ui/context_menu.hpp"
 #include "ui/core_analyzer_panel.hpp"
 #include "ui/cursor_blink.hpp"
@@ -496,7 +497,7 @@ void Application::inject_terminal_command(const std::string& command) {
 	focus_state_.region = FocusRegion::Terminal;
 	layout_state_.console_visible = true;
 	layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
-	layout_state_.text_input_focus = TextInputFocus::Console;
+	layout_state_.text_input_focus = TextInputFocus::None;
 	layout_state_.terminal_start_requested = true;
 	layout_state_.focus_sync_needed = true;
 	pending_terminal_inject_ = command;
@@ -2778,7 +2779,7 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 		focus_state_.region = FocusRegion::Terminal;
 		layout_state_.console_visible = true;
 		layout_state_.console_tabs.selected_tab = ConsolePanelTabs::kTerminal;
-		layout_state_.text_input_focus = TextInputFocus::Console;
+		layout_state_.text_input_focus = TextInputFocus::None;
 		layout_state_.terminal_start_requested = true;
 		wake_console_panel(&layout_state_, "app.focus.terminal");
 		mark_focus_sync();
@@ -2829,13 +2830,11 @@ bool Application::handle_focus_shortcuts(const Event &event) {
 			layout_state_.console_visible = true;
 			layout_state_.terminal_start_requested = true;
 			if (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal ||
-			    (app_mode_ == AppMode::kDebug &&
-			     (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kDebug ||
-			      layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp))) {
-				layout_state_.text_input_focus =
-				    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp
-				        ? TextInputFocus::None
-				        : TextInputFocus::Console;
+			    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp) {
+				layout_state_.text_input_focus = TextInputFocus::None;
+			} else if (app_mode_ == AppMode::kDebug &&
+			           layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kDebug) {
+				layout_state_.text_input_focus = TextInputFocus::Console;
 			}
 			wake_console_panel(&layout_state_, "app.focus.console");
 			mark_focus_sync();
@@ -3046,6 +3045,9 @@ int Application::run() {
 			return;
 		}
 		layout_state_.console_visible = visible;
+		if (!visible) {
+			layout_state_.console_expanded = false;
+		}
 		if (visible) {
 			layout_state_.terminal_start_requested = true;
 		}
@@ -3199,8 +3201,11 @@ int Application::run() {
 		    notify_file_tree_reveal();
 	    });
 
+	auto with_console_expand =
+	    MakeConsoleExpandOverlay(with_external_file_wizard, &layout_state_);
+
 	auto with_shortcuts =
-	    MakeShortcutsModalOverlay(with_external_file_wizard, &shortcuts_modal_state_);
+	    MakeShortcutsModalOverlay(with_console_expand, &shortcuts_modal_state_);
 
 	SettingsApplyCallback on_settings_apply = [this](const AppSettings &) { apply_app_settings(); };
 	WorkspaceSettingsApplyCallback on_workspace_apply = [this](const WorkspaceConfig &config) {
@@ -3511,6 +3516,38 @@ int Application::run() {
 				return true;
 			}
 
+			if (keybind_matches(KeyAction::ToggleConsoleExpand, event)) {
+				const bool line_submit = event_is_line_submit(event);
+				const bool alt_j = event_is_ctrl_alt_j(event);
+				const bool skip_for_terminal_line =
+				    line_submit && !alt_j &&
+				    layout_state_.console_visible &&
+				    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal;
+				if (!skip_for_terminal_line) {
+					if (layout_state_.console_toggle_expanded) {
+						layout_state_.console_toggle_expanded();
+					}
+					UI_WAKE(&layout_state_, "console.expand");
+					return true;
+				}
+			}
+
+			// Expand overlay CatchEvent sits inside this CatchEvent tree, so Escape never
+			// reaches it while console_key_handler consumes Esc. Collapse here first.
+			if (layout_state_.console_expanded) {
+				const std::string& esc_in = event.input();
+				const bool is_escape =
+				    event == Event::Escape || esc_in == "\x1b" || esc_in == "\x1B" ||
+				    esc_in == "\x1b[27u" || esc_in == "\x1B[27u" ||
+				    esc_in == "\x1b[27;1u" || esc_in == "\x1B[27;1u";
+				if (is_escape) {
+					layout_state_.console_expanded = false;
+					layout_state_.panel_render_cache.mark_dirty(UiPanelId::Console);
+					UI_WAKE(&layout_state_, "console.collapse");
+					return true;
+				}
+			}
+
 			if (settings_modal_state_.open && event.is_mouse()) {
 				Event mouse_event = event;
 				if (settings_modal_handle_mouse(&settings_modal_state_, mouse_event)) {
@@ -3604,6 +3641,20 @@ int Application::run() {
 			}
 			UI_WAKE(&layout_state_, "app.custom");
 		};
+
+		// Expanded console mouse must run before split/editor handlers: the modal is only a
+		// visual dbox overlay; hit-testing uses reflected boxes on console state.
+		if (layout_state_.console_expanded && layout_state_.console_visible &&
+		    event.is_mouse() && layout_state_.console_mouse_handler &&
+		    layout_state_.console_mouse_handler(event)) {
+			post_custom_throttled();
+			Event mouse_event = event;
+			const auto button = mouse_event.mouse().button;
+			if (button != Mouse::WheelUp && button != Mouse::WheelDown) {
+				layout_state_.focus_sync_needed = true;
+			}
+			return true;
+		}
 
 		if (event.is_mouse() && layout_state_.split_mouse_handler &&
 		    layout_state_.split_mouse_handler(event)) {
@@ -3759,14 +3810,32 @@ int Application::run() {
 			const bool terminal_tab =
 			    app_mode_ != AppMode::kDebug ||
 			    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal;
+			const bool expanded_terminal =
+			    layout_state_.console_expanded && layout_state_.console_visible &&
+			    (layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal ||
+			     layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kApp);
 			const bool shell_terminal_focus = terminal_tab &&
 			                                  focus_state_.region == FocusRegion::Terminal &&
 			                                  shell_session_.running();
-		if ((layout_state_.text_input_focus == TextInputFocus::Console ||
-		     layout_state_.text_input_focus == TextInputFocus::TerminalFilter ||
-		     shell_terminal_focus) &&
-		    !event_is_tuide_global_shortcut(event) && layout_state_.console_key_handler &&
+		const bool shell_console_keys = shell_terminal_focus || expanded_terminal;
+		const bool skip_global_for_shell_return =
+		    event == Event::Return && shell_console_keys &&
+		    layout_state_.console_tabs.selected_tab == ConsolePanelTabs::kTerminal;
+		if (skip_global_for_shell_return && layout_state_.console_key_handler &&
 		    layout_state_.console_key_handler(event)) {
+			UI_WAKE(&layout_state_, "app.custom");
+			return true;
+		}
+		const bool console_route =
+		    layout_state_.text_input_focus == TextInputFocus::Console ||
+		    layout_state_.text_input_focus == TextInputFocus::TerminalFilter ||
+		    shell_terminal_focus || expanded_terminal;
+		const bool console_handled =
+		    console_route &&
+		    (skip_global_for_shell_return || !event_is_tuide_global_shortcut(event)) &&
+		    layout_state_.console_key_handler &&
+		    layout_state_.console_key_handler(event);
+		if (console_handled) {
 			UI_WAKE(&layout_state_, "app.custom");
 			return true;
 		}
@@ -4049,6 +4118,9 @@ int Application::run() {
 				return true;
 			}
 			if (event == Event::CtrlT) {
+				if (layout_state_.console_visible) {
+					layout_state_.console_expanded = false;
+				}
 				layout_state_.console_visible = !layout_state_.console_visible;
 				return true;
 			}

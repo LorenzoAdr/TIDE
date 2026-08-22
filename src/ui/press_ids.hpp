@@ -40,6 +40,7 @@ constexpr std::string_view kSidebarHide = "sidebar.hide";
 constexpr std::string_view kExplorerHide = "explorer.hide";
 constexpr std::string_view kExplorerRefresh = "explorer.refresh";
 constexpr std::string_view kConsoleHide = "console.hide";
+constexpr std::string_view kConsoleExpand = "console.expand";
 constexpr std::string_view kStatusIndex = "status.index";
 constexpr std::string_view kStatusChgDir = "status.chg_dir";
 constexpr std::string_view kStatusLaunch = "status.launch";
@@ -204,7 +205,8 @@ inline bool is_console_tab_hover(std::string_view id) {
 }
 
 inline bool is_console_header_hover(std::string_view id) {
-  return is_console_tab_hover(id) || id == kConsoleHide || id == kConsoleAiStop ||
+  return is_console_tab_hover(id) || id == kConsoleHide || id == kConsoleExpand ||
+         id == kConsoleAiStop ||
          id == kConsoleAiReset || id == kConsoleAiWorkflow || id == kConsoleAiWorkflowAgent ||
          id == kConsoleAiWorkflowAsk || id == kConsoleAiWorkflowPlan ||
          id == kConsoleAiWorkflowGit || id == kConsoleAiBackend || id == kConsoleAiBackendLocal ||

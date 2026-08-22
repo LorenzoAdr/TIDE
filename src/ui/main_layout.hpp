@@ -14,6 +14,7 @@
 #include "editor/helix/helix_state.hpp"
 #include "ftxui/component/component_base.hpp"
 #include "ftxui/component/event.hpp"
+#include "ftxui/dom/elements.hpp"
 #include "symbols/symbol_provider.hpp"
 #include "terminal/shell_session.hpp"
 #include "terminal/app_session.hpp"
@@ -146,6 +147,9 @@ struct MainLayoutState {
   MainLayoutState& operator=(MainLayoutState&&) = default;
 
   bool console_visible = true;
+  bool console_expanded = false;
+  std::function<ftxui::Element()> console_expanded_render;
+  std::function<void()> console_toggle_expanded;
   bool explorer_visible = true;
   bool welcome_visible = false;
   bool diagnostics_panel_visible = false;

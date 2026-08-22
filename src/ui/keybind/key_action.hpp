@@ -23,6 +23,7 @@ enum class KeyAction : uint16_t {
   QuickOpen,
   GoToSymbol,
   ToggleBottomPanel,
+  ToggleConsoleExpand,
   Quit,
   FocusExplorer,
   FocusEditor,

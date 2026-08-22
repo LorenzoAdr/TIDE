@@ -74,6 +74,9 @@ std::string describe_key_event(const ftxui::Event& event) {
   if (event == ftxui::Event::CtrlT) {
     return "Ctrl+T";
   }
+  if (event == ftxui::Event::CtrlJ) {
+    return "Ctrl+J";
+  }
   if (event == ftxui::Event::CtrlA) {
     return "Ctrl+A";
   }

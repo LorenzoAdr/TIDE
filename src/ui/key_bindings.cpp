@@ -274,6 +274,33 @@ bool event_is_ctrl_shift_h(const ftxui::Event& event) {
          event == ftxui::Event::Special("\x1B[104;6u");
 }
 
+bool event_is_ctrl_alt_j(const ftxui::Event& event) {
+  const int mods[] = {7};
+  // FTXUI maps Ctrl+Alt+J to ESC+LF (\x1b\x0a); Ctrl+J alone is LF (\x0a).
+  return event == ftxui::Event::CtrlAltJ ||
+         csi_key_any_modifier(event, mods, 1, 10) ||
+         csi_key_any_modifier(event, mods, 1, 74) ||
+         csi_key_any_modifier(event, mods, 1, 106) ||
+         event == ftxui::Event::Special("\x1B[27;7;10~") ||
+         event == ftxui::Event::Special("\x1B[27;7;74~") ||
+         event == ftxui::Event::Special("\x1B[27;7;106~") ||
+         event == ftxui::Event::Special("\x1B[10;7u") ||
+         event == ftxui::Event::Special("\x1B[74;7u") ||
+         event == ftxui::Event::Special("\x1B[106;7u");
+}
+
+bool event_is_line_submit(const ftxui::Event& event) {
+  if (event == ftxui::Event::Return || event == ftxui::Event::CtrlJ ||
+      event == ftxui::Event::CtrlM) {
+    return true;
+  }
+  if (event.is_character()) {
+    const std::string ch = event.character();
+    return ch == "\n" || ch == "\r";
+  }
+  return false;
+}
+
 bool event_is_open_search_panel(const ftxui::Event& event) {
   return event == ftxui::Event::F7 || event_is_ctrl_h_csi(event) ||
          event_is_ctrl_alt_h(event) || event_is_ctrl_shift_h(event);
