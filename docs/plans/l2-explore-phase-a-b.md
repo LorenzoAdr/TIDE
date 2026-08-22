@@ -586,6 +586,7 @@ off vs on tras cambios de modelo/cola; rollback con `L2_FEAT_L2_EXPLORE_PHASE_A=
 ## 17. Referencias internas
 
 - [PR #10](https://github.com/LorenzoAdr/TIDE/pull/10) — plan original en rama `cursor/l2-explore-phase-ab-plan-0151`
+- [`l2-explore-effect-summary.md`](l2-explore-effect-summary.md) — evolución propuesta: olfateo por fichas AST (Effect Summary) antes del peek
 - `docs/ai/l2-autonomous.md` — explore/plan/pack actual
 - `docs/ai/l2-harness-prompt.md` — fases explore/edit/compile
 - `docs/ai/master-spec.md` — L0/L1/L2, ContextPack D17
