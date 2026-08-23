@@ -2017,11 +2017,10 @@ int clamp_terminal_rows(int rows) {
 }
 
 int measure_terminal_cols(const ConsolePanelState* state, int panel_width) {
-  int cols = panel_width;
-  if (state != nullptr && terminal_box_valid(state->panel_box)) {
-    cols = visible_column_count(state->panel_box);
-  }
-  cols -= kTerminalScrollbarWidth;
+  // Prefer the layout width (already border-adjusted when expanded). Avoid
+  // terminal_box feedback — it oscillates with wrap/resize and causes flicker.
+  (void)state;
+  int cols = panel_width - kTerminalScrollbarWidth;
   return clamp_terminal_cols(std::max(8, cols));
 }
 
@@ -3963,8 +3962,14 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
       // Near-fullscreen: leave a 1-cell margin so the dimmed UI behind stays visible.
       const int modal_w = std::max(80, term_w - 2);
       const int panel_h = std::max(16, term_h - 2);
-      const int body_h = std::max(1, panel_h - 2);
-      state->expanded_layout_width = modal_w;
+      // borderStyled(Color) already draws a rounded frame (+2). Do not also apply
+      // borderRounded — that nested a second border and made body/PTY disagree.
+      // Console chrome: tab row + separator (+2).
+      constexpr int kBorderChrome = 2;
+      constexpr int kConsoleHeaderChrome = 2;
+      const int body_h = std::max(1, panel_h - kBorderChrome - kConsoleHeaderChrome);
+      const int content_w = std::max(40, modal_w - kBorderChrome);
+      state->expanded_layout_width = content_w;
       state->expanded_layout_height = body_h;
       state->git_body_height = std::max(1, body_h - 2);
       // ScreenModalOverlay already centers; avoid double-center so tab hit boxes match paint.
@@ -3973,8 +3978,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
                  bottom_height, perf_state.get(), sampler, ui_perf, diagnostics_panel, search_panel,
                  call_hierarchy_panel, git_panel, core_analyzer_panel, binary_symbols_panel,
                  packet_monitor_panel, input_box, filter_input_option.get(), ai_input_wrap_width.get(),
-                 modal_w, body_h, true) |
-             borderRounded | borderStyled(theme::AccentDim()) | bgcolor(theme::PanelBg()) |
+                 content_w, body_h, true) |
+             borderStyled(theme::AccentDim()) | bgcolor(theme::PanelBg()) |
              size(WIDTH, EQUAL, modal_w) | size(HEIGHT, EQUAL, panel_h)) |
              reflect(state->panel_box);
     };
