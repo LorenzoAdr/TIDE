@@ -1,6 +1,33 @@
 # Phase A battery scoring notes (P6/P7)
 
-## Default
+## Phase A-only full NL battery (recommended)
+
+Stops at `a_done` (no pack B). Scores locate quality of A:
+
+```bash
+export L2_FEAT_L2_EXPLORE_PHASE_A=1 L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY=1 TUIDE_ROOT=$PWD
+# Overnight / long run (resume skips ids already in results.jsonl):
+nohup ./tools/l2_phase_a_battery_run.sh hybrid_a20_v1 \
+  > .tuide/ai/l2_explore_battery/round_hybrid_a20_v1/nohup.log 2>&1 &
+
+# Single case smoke:
+./tools/l2_phase_a_battery_run.sh smoke_a 17_ai_spinner_stuck only
+```
+
+Artifacts: `round_<LABEL>/{CASE}/`, `results.jsonl`, `phase_a_score.json` via
+`tools/l2_explore_battery/score_phase_a_battery.py`.
+
+| Metric | Meaning |
+|--------|---------|
+| `a_done_ok` | Phase A exited cleanly |
+| `loci_hit` | fixture `expected_stems` ∩ loci |
+| `op_loci_hit` | expected ∪ operational extras (e.g. `busy_strip` on 17/20) |
+| `gold_in_map_top15` | operational stem in L1 map top-15 |
+| `gold_expanded` | useful note / a1 expand toward gold |
+| `a0_coverage_fail` | “faltan veredictos” count |
+| `no_premature_plan` | 0 plans while in explore_a |
+
+## Default (full explore, includes pack B)
 
 `L2_EXPLORE_PHASE_A` is **promoted on** in `tools/l2_battery/features_promoted.json`.
 

@@ -151,7 +151,16 @@ int main() {
     nlohmann::json j = nlohmann::json::parse(R"({"verdicts":[]})");
     std::vector<tuide::AVerdict> vs;
     std::string err;
-    expect(!parse_a_verdicts_array(j, &vs, &err), "empty verdicts fail");
+    expect(parse_a_verdicts_array(j, &vs, &err), "empty verdicts ok at parse");
+    expect(vs.empty(), "empty vector");
+  }
+  {
+    nlohmann::json j = nlohmann::json::parse(
+        R"({"action":"a_judge","target":"src/ui/busy_strip.cpp:spinner_busy_set","verdict":"useful","why":"flag"})");
+    std::vector<tuide::AVerdict> vs;
+    std::string err;
+    expect(parse_a_verdicts_array(j, &vs, &err), "flat a_judge ok");
+    expect(vs.size() == 1 && vs[0].verdict == tuide::AVerdictKind::Useful, "flat useful");
   }
   {
     using tuide::AQueueBuildInput;
@@ -569,6 +578,119 @@ int main() {
            "cond verdict set");
   }
   {
+    // Soft-cap: 4 interesting → keep 3, do not hard-fail.
+    tuide::AState st;
+    tuide::AVerdict u;
+    u.target = "src/ui/busy.cpp:set_busy_spinner";
+    u.anchor = u.target;
+    u.stem = "busy";
+    u.verdict = tuide::AVerdictKind::Useful;
+    tuide::a_trail_begin(&st, u);
+    st.trail.pending_stacks.clear();
+    for (int i = 1; i <= 4; ++i) {
+      tuide::ATrailStack s;
+      s.id = "S" + std::to_string(i);
+      s.hops.resize(2);
+      s.hops[0].symbol = "caller" + std::to_string(i);
+      s.hops[0].anchor = "src/ai/x.cpp:caller" + std::to_string(i);
+      s.hops[1].symbol = "set_busy_spinner";
+      st.trail.pending_stacks.push_back(s);
+    }
+    st.trail.awaiting_judge = true;
+    std::vector<tuide::AVerdict> four;
+    for (int i = 1; i <= 4; ++i) {
+      tuide::AVerdict v;
+      v.target = "S" + std::to_string(i);
+      v.verdict = tuide::AVerdictKind::Interesting;
+      four.push_back(v);
+    }
+    std::string err;
+    expect(tuide::a_trail_apply_judge(&st, four, &err), "soft-cap interesting ok");
+    expect(st.trail.force_queue.size() <=
+               static_cast<std::size_t>(tuide::kATrailMaxInterestingPerLevel),
+           "force queue ≤ interesting cap");
+    expect(st.trail.force_queue.size() <= static_cast<std::size_t>(tuide::kATrailMaxBranches),
+           "force queue ≤ branch cap");
+    expect(!st.trail.force_queue.empty(), "kept some interesting");
+  }
+  {
+    // Fuzzy match symbol name → stack id.
+    tuide::AState st;
+    tuide::AVerdict u;
+    u.target = "src/ui/busy.cpp:set_busy_spinner";
+    u.anchor = u.target;
+    u.stem = "busy";
+    u.verdict = tuide::AVerdictKind::Useful;
+    tuide::a_trail_begin(&st, u);
+    tuide::ATrailStack s1;
+    s1.id = "S1";
+    s1.hops.resize(2);
+    s1.hops[0].symbol = "begin_thinking";
+    s1.hops[0].anchor = "src/ai/ai_controller.cpp:begin_thinking";
+    s1.hops[1].symbol = "set_busy_spinner";
+    st.trail.pending_stacks.clear();
+    st.trail.pending_stacks.push_back(s1);
+    st.trail.awaiting_judge = true;
+    tuide::AVerdict v;
+    v.target = "begin_thinking";  // symbol, not S1
+    v.verdict = tuide::AVerdictKind::Interesting;
+    std::string err;
+    expect(tuide::a_trail_apply_judge(&st, {v}, &err), "fuzzy symbol ok");
+    expect(st.trail.force_queue.size() == 1 && st.trail.force_queue[0] == "S1",
+           "fuzzy queued S1");
+  }
+  {
+    // Unmatched A0 symbol names must fail closed (keep awaiting; no soft-close/suspect).
+    tuide::AState st;
+    tuide::AVerdict u;
+    u.target = "src/ui/busy.cpp:set_busy_spinner";
+    u.anchor = u.target;
+    u.stem = "busy";
+    u.verdict = tuide::AVerdictKind::Useful;
+    tuide::a_trail_begin(&st, u);
+    tuide::ATrailStack s1;
+    s1.id = "S1";
+    s1.hops.resize(2);
+    s1.hops[0].symbol = "begin_thinking";
+    s1.hops[1].symbol = "set_busy_spinner";
+    st.trail.pending_stacks.clear();
+    st.trail.pending_stacks.push_back(s1);
+    tuide::ATrailCondBranch link;
+    link.id = "LINK";
+    link.symbol = "cancel_current";
+    st.trail.cond_branches.push_back(link);
+    st.trail.awaiting_judge = true;
+    tuide::AVerdict bad;
+    bad.target = "wake_console_panel";
+    bad.verdict = tuide::AVerdictKind::Interesting;
+    bad.why = "garbage A0 name";
+    std::string err;
+    expect(!tuide::a_trail_apply_judge(&st, {bad}, &err), "unmatched interesting fails");
+    expect(st.trail.active && st.trail.awaiting_judge, "trail stays open for retry");
+    expect(st.trail.force_queue.empty(), "no force from unmatched");
+    expect(!err.empty(), "err set");
+  }
+  {
+    // Dataflow begin after trail must keep recap/job_root (backtrack needs them).
+    tuide::AState st;
+    st.trail.active = true;
+    st.a1_trail_recap = "### cond `CXL`\n";
+    st.a1_job_root = "src/ui/busy.cpp:set_busy_spinner";
+    st.a1_df_caller_anchor = "src/ai/ai_controller.cpp:cancel_current";
+    st.a1_suspect_done = true;
+    tuide::AExpansionItem df;
+    df.target = "src/ai/ai_controller.hpp:agent_busy_";
+    df.modality = tuide::AExpandModality::Dataflow;
+    df.suspect_var = "agent_busy_";
+    tuide::a_a1_begin_job(&st, df);
+    expect(st.a_subphase == "a1_dataflow", "dataflow subphase");
+    expect(st.a1_job_root == "src/ui/busy.cpp:set_busy_spinner", "job_root preserved");
+    expect(st.a1_trail_recap.find("CXL") != std::string::npos, "recap preserved");
+    expect(st.a1_df_caller_anchor.find("cancel_current") != std::string::npos,
+           "caller preserved");
+    expect(st.a1_active.target.find("agent_busy_") != std::string::npos, "active is df target");
+  }
+  {
     using tuide::ADataFlowKind;
     using tuide::a_dataflow_classify_line;
     expect(a_dataflow_classify_line("  agent_busy_.store(false);", "agent_busy_") ==
@@ -630,6 +752,20 @@ int main() {
     expect(vs.size() == 2, "2 a0 verdicts");
     expect(vs[0].verdict == AVerdictKind::Expand, "expand kind");
     expect(vs[0].expand_with == tuide::AExpandModality::Peek, "peek modality");
+  }
+  {
+    AState st;
+    tuide::AQueueItem q;
+    q.target = "src/ui/busy_strip.cpp:ensure_spinner_thread#tail";
+    q.score = 2541937.f;
+    st.queue.push_back(q);
+    expect(tuide::a_queue_item_score(st, "src/ui/busy_strip.cpp:ensure_spinner_thread") >
+               2.5e6f,
+           "queue score matches without #tail");
+    expect(tuide::a_queue_item_score(st, "src/ui/busy_strip.cpp:ensure_spinner_thread#tail") >
+               2.5e6f,
+           "queue score matches with #tail");
+    expect(tuide::a_queue_item_score(st, "src/other.cpp:nope") == 0.f, "miss → 0");
   }
   {
     setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "1", 1);

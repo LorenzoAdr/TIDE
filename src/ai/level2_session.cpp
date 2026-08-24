@@ -4265,8 +4265,25 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
     return out;
   }
   if (verdicts.empty()) {
-    out.error = "a_judge.verdicts vacío";
-    return out;
+    AState ast_early = load_a_state(workspace_root);
+    // a1_suspect_vars allows verdicts:[] (= ninguna var clara).
+    if (a_effect_summary_enabled() && ast_early.a_subphase == "a1_suspect_vars") {
+      // fall through with empty
+    } else if (a_effect_summary_enabled() && ast_early.a1_active_set &&
+               ast_early.a_subphase.rfind("a1_", 0) == 0) {
+      // Bare/empty a_judge in A1 confirm → soft-reject active job and advance.
+      AVerdict rej;
+      rej.target = ast_early.a1_active.target;
+      rej.anchor = ast_early.a1_active.target;
+      rej.verdict = AVerdictKind::Reject;
+      rej.why = "a_judge vacío — avanza A1";
+      a_normalize_verdict(&rej);
+      std::vector<AVerdict> syn = {rej};
+      return apply_a_judge(workspace_root, syn, turn_done_hint);
+    } else {
+      out.error = "a_judge.verdicts vacío";
+      return out;
+    }
   }
 
   AState ast = load_a_state(workspace_root);
@@ -4296,12 +4313,34 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
       }
       normalized.push_back(v);
     }
+    // Fail-soft: too many expands → keep top-k by queue score (trail preferred), demote rest.
+    int demoted_expand = 0;
     if (batch_expand > kA0MaxExpandPerTurn) {
-      out.error = "a0: máx " + std::to_string(kA0MaxExpandPerTurn) + " expand/vuelta";
-    } else if (batch_expand == 0 && batch_reject == 0) {
-      out.error = "a0: marca reject en glue o expand si hot/writes/calls cuadra con seeds";
+      std::vector<std::size_t> expand_idx;
+      for (std::size_t i = 0; i < normalized.size(); ++i) {
+        if (normalized[i].verdict == AVerdictKind::Expand) {
+          expand_idx.push_back(i);
+        }
+      }
+      std::stable_sort(expand_idx.begin(), expand_idx.end(), [&](std::size_t a, std::size_t b) {
+        const auto& va = normalized[a];
+        const auto& vb = normalized[b];
+        const float sa = a_queue_item_score(ast, va.target) +
+                         (va.expand_with == AExpandModality::Trail ? 1000.f : 0.f);
+        const float sb = a_queue_item_score(ast, vb.target) +
+                         (vb.expand_with == AExpandModality::Trail ? 1000.f : 0.f);
+        return sa > sb;
+      });
+      for (std::size_t k = static_cast<std::size_t>(kA0MaxExpandPerTurn); k < expand_idx.size();
+           ++k) {
+        normalized[expand_idx[k]].verdict = AVerdictKind::Uncertain;
+        normalized[expand_idx[k]].expand_with = AExpandModality::Peek;
+        ++demoted_expand;
+      }
+      batch_expand = kA0MaxExpandPerTurn;
     }
-    if (!out.error.empty()) {
+    if (batch_expand == 0 && batch_reject == 0) {
+      out.error = "a0: marca reject en glue o expand si hot/writes/calls cuadra con seeds";
       std::ostringstream obs;
       obs << "### a_judge A0 rechazado — " << out.error << "\n";
       append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
@@ -4355,11 +4394,15 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
     out.phase = st.phase;
     out.summary = "a0 expand=" + std::to_string(batch_expand) + " reject=" +
                   std::to_string(batch_reject);
+    if (demoted_expand > 0) {
+      out.summary += " demoted_expand=" + std::to_string(demoted_expand);
+    }
     return out;
   }
 
   // --- A1 suspect vars (post-trail → dataflow queue) ---
   if (a_effect_summary_enabled() && ast.a_subphase == "a1_suspect_vars") {
+    // Empty verdicts = "ninguna var clara" (prompt allows it) → advance without dataflow.
     std::string serr;
     if (!a_apply_a1_suspect_verdicts(&ast, verdicts, &serr)) {
       out.error = serr.empty() ? "a1_suspect inválido" : serr;
@@ -4407,36 +4450,47 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
     ast.a_subphase = "a0_sniff";
   }
 
-  // Strict batch gate: 7B loves "everything useful". Refuse before mutating state/cursor.
+  // Strict batch gate: 7B loves "everything useful". Soft-cap to 1 useful.
   // Peek "interesting" ≡ useful (hypothesis → trail); trail stacks use a_trail_judge.
+  std::vector<AVerdict> batch_verdicts;
+  batch_verdicts.reserve(verdicts.size());
   {
     int batch_useful = 0;
     int batch_reject = 0;
-    std::vector<AVerdict> normalized;
-    normalized.reserve(verdicts.size());
     for (AVerdict v : verdicts) {
       a_normalize_verdict(&v);
       if (v.verdict == AVerdictKind::Interesting) {
         v.verdict = AVerdictKind::Useful;
       }
-      normalized.push_back(v);
+      batch_verdicts.push_back(v);
       if (v.verdict == AVerdictKind::Useful) {
         ++batch_useful;
       } else if (v.verdict == AVerdictKind::Reject) {
         ++batch_reject;
       }
     }
-    const bool multi = static_cast<int>(normalized.size()) >= 2;
+    const bool multi = static_cast<int>(batch_verdicts.size()) >= 2;
     if (batch_useful > 1) {
-      out.error =
-          "a_judge: máx 1 useful/interesting por vuelta (got " + std::to_string(batch_useful) +
-          "). Resto → reject|uncertain. useful = hipótesis (estado/busy/flag); el trail profundiza.";
+      std::vector<std::size_t> useful_idx;
+      for (std::size_t i = 0; i < batch_verdicts.size(); ++i) {
+        if (batch_verdicts[i].verdict == AVerdictKind::Useful) {
+          useful_idx.push_back(i);
+        }
+      }
+      std::stable_sort(useful_idx.begin(), useful_idx.end(), [&](std::size_t a, std::size_t b) {
+        return a_queue_item_score(ast, batch_verdicts[a].target) >
+               a_queue_item_score(ast, batch_verdicts[b].target);
+      });
+      for (std::size_t k = 1; k < useful_idx.size(); ++k) {
+        batch_verdicts[useful_idx[k]].verdict = AVerdictKind::Reject;
+        ++batch_reject;
+      }
+      batch_useful = 1;
     } else if (multi && batch_useful == 0 && batch_reject == 0) {
       out.error =
           "a_judge: todos uncertain no avanza — marca reject en traps claros "
           "o 1 useful si hay estado/API del síntoma (getter/flag OK).";
     }
-    // Contrast useful+reject ya no es obligatorio: uncertain basta; el trail falsifica.
     if (!out.error.empty()) {
       std::ostringstream obs;
       obs << "### a_judge rechazado — " << out.error << "\n"
@@ -4457,7 +4511,7 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
       ++primary_n;
     }
   }
-  for (AVerdict v : verdicts) {
+  for (AVerdict v : batch_verdicts) {
     a_normalize_verdict(&v);
     if (v.verdict == AVerdictKind::Interesting) {
       v.verdict = AVerdictKind::Useful;
@@ -4564,7 +4618,7 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
   std::ostringstream obs;
   obs << "### a_judge turn=" << ast.turns << " peeks_used=" << ast.peeks_used
       << " cursor=" << ast.cursor << "/" << ast.queue.size() << "\n";
-  for (const auto& v : verdicts) {
+  for (const auto& v : batch_verdicts) {
     AVerdict nv = v;
     a_normalize_verdict(&nv);
     obs << "- [" << a_verdict_kind_name(nv.verdict) << "] `" << nv.target << "`";
@@ -4603,7 +4657,7 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
   if (a1_confirm) {
     bool df_backtrack = false;
     if (ast.a_subphase == "a1_dataflow" && ast.trail.active && !ast.a1_trail_recap.empty()) {
-      for (const auto& v : verdicts) {
+      for (const auto& v : batch_verdicts) {
         AVerdict nv = v;
         a_normalize_verdict(&nv);
         if (nv.verdict == AVerdictKind::Reject) {
@@ -4704,7 +4758,7 @@ Level2TurnResult Level2Session::apply_a_done(const std::string& workspace_root,
       std::ostringstream obs;
       obs << "### a_done rechazado — " << gate_err << "\n"
           << "_nudge:_ useful = “editaría aquí para el bug de Instruction”. "
-             "Keyword/UI/spinner dibujo → reject. Máx "
+             "Glue/UI no causal / keyword irrelevante → reject. Máx "
           << kAMaxPrimaryLoci << " primary. Phase B trae complementarios.\n";
       append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
       write_response_json(workspace_root, false, "a_done", "", "", "", out.error, st.turn,
@@ -4885,17 +4939,18 @@ bool Level2Session::refresh_a_trail_stacks(const std::string& workspace_root, AS
     if (symbol.empty() || deps_.tools == nullptr || !deps_.tools->has("search")) {
       return {};
     }
-    // Prefer src/ to cut noise
-    const std::string arg = symbol + " path:src/";
-    const AiToolResult tr = deps_.tools->invoke("search", arg);
-    if (!tr.ok) {
-      const AiToolResult tr2 = deps_.tools->invoke("search", symbol);
-      if (!tr2.ok) {
+    auto hits_from = [&](const AiToolResult& tr) -> std::vector<ATrailSearchHit> {
+      if (!tr.ok || tr.text.find("(sin hits)") != std::string::npos) {
         return {};
       }
-      return parse_search_tool_hits(tr2.text, workspace_root);
+      return parse_search_tool_hits(tr.text, workspace_root);
+    };
+    // Prefer src/; treat empty/(sin hits) as miss and fall back (tool always returns ok).
+    auto hits = hits_from(deps_.tools->invoke("search", symbol + " path:src/"));
+    if (hits.empty()) {
+      hits = hits_from(deps_.tools->invoke("search", symbol));
     }
-    return parse_search_tool_hits(tr.text, workspace_root);
+    return hits;
   };
 
   ast->trail.pending_stacks =
@@ -4905,6 +4960,11 @@ bool Level2Session::refresh_a_trail_stacks(const std::string& workspace_root, AS
       a_trail_build_cond_branches(workspace_root, focus_sym, focus_path, ast->seeds, search_fn,
                                   ast->trail.pending_stacks);
   ast->trail.awaiting_judge = true;
+  append_trace(workspace_root,
+               std::string("{\"event\":\"a_trail_refresh\",\"sym\":\"") +
+                   json_escape(focus_sym) + "\",\"stacks\":" +
+                   std::to_string(ast->trail.pending_stacks.size()) + ",\"cond\":" +
+                   std::to_string(ast->trail.cond_branches.size()) + "}");
   return true;
 }
 
@@ -4936,17 +4996,21 @@ Level2TurnResult Level2Session::apply_a_trail_judge(const std::string& workspace
   }
 
   // A1 trail → suspect vars before dataflow (one pass).
+  // Only matched Interesting on stacks/cond branches counts (not raw symbol-name garbage).
   bool defer_trail_deepen = false;
   if (a_effect_summary_enabled() && prev_subphase == "a1_trail" && !ast.a1_suspect_done) {
-    int interesting = 0;
-    for (const auto& v : verdicts) {
-      AVerdict nv = v;
-      a_normalize_verdict(&nv);
-      if (nv.verdict == AVerdictKind::Interesting) {
-        ++interesting;
+    int matched_interesting = 0;
+    for (const auto& b : ast.trail.cond_branches) {
+      if (b.verdict == AVerdictKind::Interesting) {
+        ++matched_interesting;
       }
     }
-    if (interesting > 0) {
+    for (const auto& s : ast.trail.pending_stacks) {
+      if (s.verdict == AVerdictKind::Interesting) {
+        ++matched_interesting;
+      }
+    }
+    if (matched_interesting > 0) {
       a_fill_a1_trail_frame(&ast, verdicts);
       ast.a_subphase = "a1_suspect_vars";
       ast.a1_suspect_done = true;
@@ -5117,7 +5181,15 @@ Level2TurnResult Level2Session::apply_a_trail_judge(const std::string& workspace
     obs << "\n";
   }
   if (!ast.trail.active) {
-    obs << "_nudge:_ L0 invalidado o trail cerrada. Sigue `a_judge` sobre peeks de la cola.\n";
+    if (ast.a_subphase == "a1_suspect_vars") {
+      obs << "_nudge:_ trail cerrada → A1 suspect vars. Emite a_judge phase=a1_suspect_vars "
+             "(expand+dataflow) o verdicts:[] si ninguna var clara.\n";
+    } else if (!ast.a1_queue.empty() || ast.a1_active_set) {
+      obs << "_nudge:_ trail cerrada; continúa A1 (cola=" << ast.a1_queue.size()
+          << "). Emite a_judge / a_trail_judge según el prompt.\n";
+    } else {
+      obs << "_nudge:_ L0 invalidado o trail cerrada. Sigue `a_judge` sobre peeks de la cola.\n";
+    }
   } else if (ast.trail.awaiting_judge) {
     obs << "_nudge:_ stacks refrescados (depth=" << ast.trail.depth
         << "). Emite otro `a_trail_judge` o `a_done` si ya ves el edit site.\n";
@@ -5155,11 +5227,11 @@ std::string Level2Session::build_a_peek_tranche_markdown(const std::string& work
       out << "_(sin contexto de pilas)_\n";
     }
     out << "\n¿Qué variable/campo de estado controla el síntoma **en esa rama**?\n";
-    out << "Solo vars plausibles en el snippet; máx 2.\n";
+    out << "Solo vars plausibles en el snippet; máx 2. No copies ejemplos: usa el nombre C++ real.\n";
     out << "Responde {\"action\":\"a_judge\",\"phase\":\"a1_suspect_vars\",\"verdicts\":["
-           "{\"target\":\"src/ai/ai_controller.hpp:agent_busy_\",\"verdict\":\"expand\","
-           "\"expand_with\":\"dataflow\",\"suspect_var\":\"agent_busy_\","
-           "\"why\":\"flag en caller interesting\"}],\"done\":false}\n";
+           "{\"target\":\"path:Symbol\",\"verdict\":\"expand\","
+           "\"expand_with\":\"dataflow\",\"suspect_var\":\"campo_\","
+           "\"why\":\"estado en el snippet\"}],\"done\":false}\n";
     out << "Si ninguna clara → verdicts:[].\n";
     return out.str();
   }
@@ -5189,17 +5261,23 @@ std::string Level2Session::build_a_peek_tranche_markdown(const std::string& work
         if (symbol.empty() || deps_.tools == nullptr || !deps_.tools->has("search")) {
           return {};
         }
+        auto hits_from = [&](const AiToolResult& tr) -> std::vector<ATrailSearchHit> {
+          if (!tr.ok || tr.text.find("(sin hits)") != std::string::npos) {
+            return {};
+          }
+          return parse_search_tool_hits(tr.text, workspace_root);
+        };
         std::string q = symbol;
         if (!path_hint.empty()) {
           q += " path:" + path_hint;
         } else {
           q += " path:src/";
         }
-        const AiToolResult tr = deps_.tools->invoke("search", q);
-        if (!tr.ok) {
-          return {};
+        auto hits = hits_from(deps_.tools->invoke("search", q));
+        if (hits.empty()) {
+          hits = hits_from(deps_.tools->invoke("search", symbol));
         }
-        return parse_search_tool_hits(tr.text, workspace_root);
+        return hits;
       };
       const auto report =
           a_dataflow_build_with_search(workspace_root, var, path_hint, search_fn);
@@ -5212,21 +5290,88 @@ std::string Level2Session::build_a_peek_tranche_markdown(const std::string& work
     }
 
     if (item.modality == AExpandModality::Trail) {
-      if (!ast.trail.active) {
-        AVerdict seed;
-        seed.target = item.target;
-        seed.verdict = AVerdictKind::Useful;
-        seed.anchor = item.target;
-        const auto hash = seed.anchor.find('#');
-        if (hash != std::string::npos) {
-          seed.anchor = seed.anchor.substr(0, hash);
+      // Ensure diagram (stacks + cond branches) before asking a_trail_judge. Empty → skip L0.
+      for (int skip = 0; skip < 8; ++skip) {
+        if (!ast.a1_active_set || ast.a1_active.modality != AExpandModality::Trail) {
+          break;
         }
-        a_trail_begin(&ast, seed);
-        refresh_a_trail_stacks(workspace_root, &ast, nullptr);
+        if (!ast.trail.active) {
+          AVerdict seed;
+          seed.target = ast.a1_active.target;
+          seed.verdict = AVerdictKind::Useful;
+          seed.anchor = ast.a1_active.target;
+          const auto hash = seed.anchor.find('#');
+          if (hash != std::string::npos) {
+            seed.anchor = seed.anchor.substr(0, hash);
+          }
+          a_trail_begin(&ast, seed);
+          refresh_a_trail_stacks(workspace_root, &ast, nullptr);
+          save_a_state(workspace_root, ast, nullptr);
+        } else if (ast.trail.pending_stacks.empty() && ast.trail.cond_branches.empty()) {
+          refresh_a_trail_stacks(workspace_root, &ast, nullptr);
+          save_a_state(workspace_root, ast, nullptr);
+        }
+        const int n_items = static_cast<int>(ast.trail.pending_stacks.size()) +
+                            static_cast<int>(ast.trail.cond_branches.size());
+        if (n_items > 0) {
+          break;
+        }
+        // No diagram — do not ask the model to judge; advance A1 queue.
+        const std::string skipped = ast.a1_active.target;
+        ast.trail = ATrail{};
+        ast.a1_active_set = false;
+        ast.a1_active = {};
+        if (!ast.a1_queue.empty()) {
+          a_a1_begin_job(&ast, ast.a1_queue.front());
+          ast.a1_queue.erase(ast.a1_queue.begin());
+        } else {
+          a_a1_clear_trail_frame(&ast);
+          ast.a_subphase = "a0_sniff";
+        }
         save_a_state(workspace_root, ast, nullptr);
+        append_observation(workspace_root,
+                           "### A1 trail skip `" + skipped +
+                               "` — sin stacks ni ramas; L0 saltado\n",
+                           nullptr, nullptr);
+        if (!ast.a1_active_set) {
+          std::ostringstream skip_out;
+          skip_out << "### trail skip `" << skipped << "`\n";
+          skip_out << "_(sin stacks ni ramas condicionales — L0 no juzgable; cola A1)_\n";
+          skip_out << "Emite `a_judge` / `a_trail_judge` según el prompt de la siguiente "
+                      "modalidad.\n";
+          return skip_out.str();
+        }
+        // Reload item for next modality in loop.
       }
-      return a_trail_stacks_markdown(ast.trail) +
-             "\nResponde `a_trail_judge` o `a_judge` si el stack confirma edit site.\n";
+      if (!ast.a1_active_set || ast.a1_active.modality != AExpandModality::Trail ||
+          !ast.trail.active) {
+        // Fell through to another modality — rebuild prompt for current state.
+        return build_a_peek_tranche_markdown(workspace_root, max_peeks);
+      }
+      {
+        const int n_items = static_cast<int>(ast.trail.pending_stacks.size()) +
+                            static_cast<int>(ast.trail.cond_branches.size());
+        if (n_items == 0) {
+          std::ostringstream skip_out;
+          skip_out << "### trail skip `" << ast.a1_active.target << "`\n";
+          skip_out << "_(sin stacks ni ramas tras reintentos — no juzgar)_\n";
+          skip_out << "Emite `a_judge` o `a_done` según el resto de la cola.\n";
+          return skip_out.str();
+        }
+      }
+      std::ostringstream trail_out;
+      trail_out << a_trail_stacks_markdown(ast.trail);
+      trail_out << "\n### Targets válidos (copia literal en a_trail_judge)\n";
+      for (const auto& b : ast.trail.cond_branches) {
+        trail_out << "- `" << b.id << "`\n";
+      }
+      for (const auto& s : ast.trail.pending_stacks) {
+        trail_out << "- `" << s.id << "`\n";
+      }
+      trail_out << "\nResponde `a_trail_judge` con interesting|reject **solo** sobre esos "
+                   "targets (ON|CXL|OFF|LINK|S*). "
+                   "PROHIBIDO usar nombres de símbolo A0 como target.\n";
+      return trail_out.str();
     }
 
     // Default: peek

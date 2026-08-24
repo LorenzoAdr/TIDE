@@ -158,6 +158,27 @@ int main() {
     const auto a = parse_l2_action(R"({"action":"a_done","loci":[]})");
     expect(a.kind == L2ActionKind::Error, "a_done empty loci");
   }
+  {
+    // Coerce verdict-as-action (7B common in A1 dataflow).
+    const auto a = parse_l2_action(
+        R"({"action":"reject","target":"src/ui/busy_strip.cpp:spinner_busy_set","why":"no"})");
+    expect(a.kind == L2ActionKind::AJudge, "reject→a_judge");
+    expect(a.a_verdicts.size() == 1 && a.a_verdicts[0].verdict == tuide::AVerdictKind::Reject,
+           "reject verdict");
+  }
+  {
+    const auto a = parse_l2_action(
+        R"({"action":"interesting","target":"S1","why":"caller sets busy"})");
+    expect(a.kind == L2ActionKind::ATrailJudge, "interesting→a_trail_judge");
+    expect(a.a_verdicts.size() == 1 &&
+               a.a_verdicts[0].verdict == tuide::AVerdictKind::Interesting,
+           "interesting verdict");
+  }
+  {
+    const auto a = parse_l2_action(
+        R"({"verdicts":[{"target":"src/a.cpp:Foo","verdict":"expand","expand_with":"trail"}]})");
+    expect(a.kind == L2ActionKind::AJudge, "empty action+verdicts→a_judge");
+  }
 
   if (failures) {
     std::cerr << failures << " failure(s)\n";

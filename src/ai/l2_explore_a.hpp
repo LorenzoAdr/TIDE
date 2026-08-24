@@ -217,6 +217,7 @@ AExpandModality parse_a_expand_modality(const std::string& s);
 
 // L0 symptom APIs (busy/spinner/thinking) — A0 prefers trail over dataflow.
 std::string a_target_symbol_name(const std::string& target);
+std::string a_stem_from_path(const std::string& path_or_anchor);
 bool a_is_symptom_edge_name(const std::string& name);
 bool a_writes_suggest_trail_a0(const std::vector<std::string>& writes);
 bool a_target_prefers_trail_a0(const std::string& target,
@@ -230,8 +231,11 @@ bool a_in_a0_sniff(const AState& st);
 // Compact a_notes for A0 prompt budget (§3.4).
 std::string a_notes_markdown_compact(const AState& st, int max_chars = kA0MaxNotesChars);
 
-// Queue score for anti-false-reject (top-15 or hot∩seeds).
+// Queue score for anti-false-reject (top-15 or hot∩seeds). Matches ignoring #window.
 float a_queue_item_score(const AState& st, const std::string& target);
+
+// Split path:Symbol#window → path:Symbol (+ optional window_out).
+void a_strip_window(std::string* anchor, std::string* window_out);
 
 // Items actually shown in one A0 tranche (reorder + char budget), mirroring session markdown.
 struct A0TrancheShown {
@@ -420,6 +424,9 @@ void a_trail_begin(AState* st, const AVerdict& useful);
 
 // Invalidate L0 after all stacks rejected; clears trail and demotes useful→reject.
 void a_trail_invalidate_root(AState* st, const std::string& why);
+
+// True for trail-judge ids: ON|CXL|OFF|LINK|S1… (not path:Symbol anchors).
+bool a_is_trail_judge_target_id(const std::string& target);
 
 // Apply interesting/reject on pending stacks; returns true if trail still active.
 // On interesting: fills force_queue (runtime must deepen those before next queue peeks).

@@ -138,13 +138,41 @@ void register_read_tools(ToolRegistry* reg, const std::string& root) {
   });
 
   reg->register_tool("search", "rg", [root](const std::string& arg) {
-    const std::string cmd = "rg -n --no-heading -S -g '!build/**' -g '!.git/**' -g '!third_party/**' " +
-                            shell_quote(arg) + " " + shell_quote(root) + " | head -n 40";
+    std::string query = trim(arg);
+    std::string path_scope = root;
+    // Support "needle path:src/" / "needle path:src/foo.cpp" (probe + trail refresh).
+    const auto path_pos = query.rfind(" path:");
+    if (path_pos != std::string::npos) {
+      std::string path_arg = trim(query.substr(path_pos + 6));
+      query = trim(query.substr(0, path_pos));
+      if (!path_arg.empty()) {
+        fs::path p = path_arg;
+        if (!p.is_absolute()) {
+          p = fs::path(root) / path_arg;
+        }
+        p = p.lexically_normal();
+        if (fs::exists(p)) {
+          path_scope = p.string();
+        } else if (path_arg == "src" || path_arg.rfind("src/", 0) == 0 ||
+                   path_arg.rfind("src\\", 0) == 0) {
+          const fs::path src = (fs::path(root) / "src").lexically_normal();
+          if (fs::exists(src)) {
+            path_scope = src.string();
+          }
+        }
+      }
+    }
+    if (query.empty()) {
+      return AiToolResult{false, "search: query vacío"};
+    }
+    const std::string cmd =
+        "rg -n --no-heading -S -F -g '!build/**' -g '!.git/**' -g '!third_party/**' " +
+        shell_quote(query) + " " + shell_quote(path_scope) + " | head -n 80";
     std::string body = run_cmd(cmd);
     if (body.empty()) {
       body = "(sin hits)\n";
     }
-    return AiToolResult{true, "q=" + arg + "\n" + body};
+    return AiToolResult{true, "q=" + query + "\n" + body};
   });
 
   reg->register_tool("headers_of", "headers", [root](const std::string& arg) {
@@ -769,8 +797,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
           "(guards + async) y call-stacks de soporte.\n"
           "Tu trabajo AHORA: `a_trail_judge`. Marca **interesting** ramas condicionales "
           "(`ON`|`CXL`|`OFF`|`LINK`) y/o pilas `S1`… que expliquen el síntoma.\n"
-          "Stuck spinner → prioriza **CXL** + **LINK** (cancel sin OFF garantizado). "
-          "Reject reindex/outline y ramas ON solas si no explican el stuck.\n"
+          "Reject ruido (reindex/outline) si no explica Instruction.\n"
           "Si ves el edit site, `a_done` (≤2 primary).\n\n";
   user << trail_md;
 
@@ -780,16 +807,12 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
       "PROHIBIDO action=plan, tool, edit, done next=edit.\n"
       "Objetivo: encontrar el EDIT SITE del síntoma de ## Instruction.\n"
       "Tras useful el runtime muestra ramas ON/CXL/OFF/LINK y call-stacks. SOLO a_trail_judge.\n"
-      "Prioriza ramas condicionales: stuck spinner = falta enlace cancel→apagado.\n"
       "Ejemplo: {\"action\":\"a_trail_judge\",\"verdicts\":["
-      "{\"target\":\"LINK\",\"verdict\":\"interesting\",\"why\":\"cancel no garantiza OFF\"},"
-      "{\"target\":\"CXL\",\"verdict\":\"interesting\",\"why\":\"cancel_current sin clear sync\"},"
-      "{\"target\":\"S2\",\"verdict\":\"reject\",\"why\":\"download no es cancel stuck\"},"
-      "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"reindex no es síntoma IA\"}]}\n"
+      "{\"target\":\"ON\",\"verdict\":\"interesting\",\"why\":\"caller del L0\"},"
+      "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"no cuadra con el síntoma\"}]}\n"
       "target = `ON`|`CXL`|`OFF`|`LINK` y/o `S1`…`S3`. verdict EXACTAMENTE "
       "\"interesting\" o \"reject\".\n"
       "interesting ≤3. Si TODOS reject → L0 se invalida.\n"
-      "UI genérica / reindex / search → reject salvo que sea el control de carga de la IA.\n"
       "a_done solo cuando un hop es el edit site (≤2 primary).\n";
 
   std::cout << "======== trail-judge-shot ========\n";
@@ -1006,20 +1029,19 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   const std::string sys2 =
       "Eres el Nivel 2 (explore_a). JSON only. PROHIBIDO markdown fuera del JSON.\n"
       "Ya marcaste pilas interesting. Ahora: ¿hay una VARIABLE/CAMPO de estado "
-      "crítica para el síntoma (spinner/busy IA que no se limpia)?\n"
+      "crítica para el síntoma de Instruction?\n"
       "Responde EXACTAMENTE:\n"
-      "{\"action\":\"a_suspect_vars\",\"vars\":[{\"name\":\"agent_busy_\","
-      "\"why\":\"flag que queda true\",\"anchor\":\"src/ai/ai_controller.hpp:"
-      "agent_busy_\"}],\"none\":false}\n"
+      "{\"action\":\"a_suspect_vars\",\"vars\":[{\"name\":\"campo_\","
+      "\"why\":\"estado en el snippet\",\"anchor\":\"path:Symbol\"}],\"none\":false}\n"
       "o {\"action\":\"a_suspect_vars\",\"vars\":[],\"none\":true}\n"
-      "Reglas: máx 2 vars; nombre C++ real (p.ej. agent_busy_ no 'el spinner'); "
+      "Reglas: máx 2 vars; nombre C++ real del snippet; "
       "si no estás seguro → none:true. No inventes paths.\n";
 
   std::ostringstream user2;
   user2 << "## Instruction\n" << instruction << "\n\n";
   user2 << "## Pilas interesting (contexto)\n" << focus_md.str() << "\n";
-  user2 << "Pregunta: en ese código, ¿qué variable/campo controla el estado de carga "
-           "de la IA? Emite a_suspect_vars.\n";
+  user2 << "Pregunta: en ese código, ¿qué variable/campo controla el síntoma de Instruction? "
+           "Emite a_suspect_vars.\n";
 
   if (!out_dir.empty()) {
     std::ofstream o(fs::path(out_dir) / "suspect_user.md");
@@ -3460,9 +3482,12 @@ int main(int argc, char** argv) {
     opts.workspace_root = root;
     opts.settings = settings.level2;
     opts.stop_at_phase_a = true;
-    // Phase A budget: peeks/turns caps live in a_state; keep loop steps modest.
-    if (opts.settings.max_steps > 10) {
-      opts.settings.max_steps = 10;
+    // Phase A budget: peeks/turns caps live in a_state; allow room for soft-retries.
+    if (opts.settings.max_steps > 16) {
+      opts.settings.max_steps = 16;
+    }
+    if (opts.settings.max_steps < 16) {
+      opts.settings.max_steps = 16;
     }
     std::string pack_err;
     if (!load_prompt_pack_into_opts(&opts, &pack_err)) {

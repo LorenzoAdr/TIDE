@@ -401,6 +401,75 @@ L2Action parse_l2_action(const std::string& model_text) {
       }
       return out;
     }
+    // 7B often emits verdict names as top-level action (reject/interesting/expand…).
+    // Coerce into a_judge / a_trail_judge so explore_a does not burn invalid-action budget.
+    if (action == "reject" || action == "interesting" || action == "expand" ||
+        action == "uncertain" || action == "useful" || action == "keep" || action == "follow" ||
+        action == "deepen") {
+      const bool trailish =
+          action == "interesting" || action == "follow" || action == "deepen" ||
+          (j.contains("verdicts") && j["verdicts"].is_array() && !j["verdicts"].empty() &&
+           [&]() {
+             for (const auto& it : j["verdicts"]) {
+               if (!it.is_object()) {
+                 continue;
+               }
+               const std::string vv = it.value("verdict", it.value("v", ""));
+               if (vv == "interesting" || vv == "follow" || vv == "deepen") {
+                 return true;
+               }
+               const std::string t = it.value("target", "");
+               if (!t.empty() && (t[0] == 'S' || t == "ON" || t == "CXL" || t == "OFF" ||
+                                  t == "LINK")) {
+                 return true;
+               }
+             }
+             return false;
+           }());
+      out.kind = trailish ? L2ActionKind::ATrailJudge : L2ActionKind::AJudge;
+      out.summary = j.value("summary", j.value("why", ""));
+      out.a_turn_done = j.value("done", false);
+      std::string err;
+      if (j.contains("verdicts") && j["verdicts"].is_array()) {
+        if (!parse_a_verdicts_array(j, &out.a_verdicts, &err)) {
+          out.kind = L2ActionKind::Error;
+          out.error = err;
+          return out;
+        }
+      } else {
+        AVerdict v;
+        v.verdict = parse_a_verdict_kind(action);
+        v.target = j.value("target", j.value("anchor", ""));
+        v.anchor = j.value("anchor", "");
+        v.stem = j.value("stem", "");
+        v.why = j.value("why", j.value("reason", ""));
+        v.suspect_var = j.value("suspect_var", j.value("var", ""));
+        const std::string ew = j.value("expand_with", j.value("modality", ""));
+        v.expand_with = parse_a_expand_modality(ew);
+        if (v.verdict == AVerdictKind::Unknown) {
+          out.kind = L2ActionKind::Error;
+          out.error = "verdict desconocido: " + action;
+          return out;
+        }
+        if (v.target.empty() && !v.anchor.empty()) {
+          v.target = v.anchor;
+        }
+        out.a_verdicts.push_back(std::move(v));
+      }
+      return out;
+    }
+    // Empty/missing action but verdicts present → a_judge.
+    if (action.empty() && j.contains("verdicts") && j["verdicts"].is_array()) {
+      out.kind = L2ActionKind::AJudge;
+      out.summary = j.value("summary", "");
+      out.a_turn_done = j.value("done", false);
+      std::string err;
+      if (!parse_a_verdicts_array(j, &out.a_verdicts, &err)) {
+        out.kind = L2ActionKind::Error;
+        out.error = err;
+      }
+      return out;
+    }
     if (action == "tools") {
       out.kind = L2ActionKind::Tools;
       std::string err;

@@ -1198,9 +1198,6 @@ int score_on_hop(const ATrailHop& hop, const std::string& focus_symbol,
   if (!hop.control_cond.empty() || !hop.control_chain.empty()) {
     score += 20;
   }
-  if (hop.path.find("/ai/") != std::string::npos || seeds_match_token(seeds, "ai")) {
-    score += 45;
-  }
   if (seeds_match_token(seeds, hop.symbol) || seeds_match_token(seeds, hop.path)) {
     score += 35;
   }
@@ -1245,10 +1242,6 @@ std::vector<std::string> cxl_search_symbols(const std::vector<std::string>& seed
       out.push_back(s);
     }
   };
-  static const char* kDefault[] = {"cancel_current", "cancel_all", "agent_cancel_"};
-  for (const char* s : kDefault) {
-    add(s);
-  }
   for (const auto& seed : seeds) {
     const std::string ls = lower_ascii(seed);
     if (ls.find("cancel") != std::string::npos || ls.find("abort") != std::string::npos) {
@@ -1256,7 +1249,8 @@ std::vector<std::string> cxl_search_symbols(const std::vector<std::string>& seed
     }
   }
   if (busy_symptom) {
-    add("CancelAgent");
+    add("cancel_current");
+    add("cancel_all");
   }
   return out;
 }
@@ -1283,7 +1277,6 @@ std::vector<std::string> off_search_symbols(const std::vector<std::string>& seed
     add("end_thinking");
     add("clear_busy_if");
     add("clear_busy");
-    add("agent_busy_");
   }
   return out;
 }
@@ -1317,28 +1310,14 @@ int score_off_hop(const ATrailHop& hop, const std::string& /*query*/) {
   if (hop.snippet.find("clear_busy") != std::string::npos) {
     score += 45;
   }
-  if (hop.snippet.find("agent_busy_") != std::string::npos &&
-      hop.snippet.find("store(false)") != std::string::npos) {
-    score += 65;
+  if (hop.snippet.find("store(false)") != std::string::npos) {
+    score += 25;
   }
   if (hop.snippet.find("end_thinking()") != std::string::npos) {
     score += 35;
   }
   if (!hop.control_cond.empty()) {
     score += 20;
-  }
-  // Prefer normal async tail cleanup over early-error branches.
-  if (hop.control_cond.find("ensure_backend") != std::string::npos ||
-      hop.control_cond.find("root.empty") != std::string::npos) {
-    score -= 55;
-  }
-  if (hop.snippet.find("maybe_start_coding_stem") != std::string::npos ||
-      hop.snippet.find("agent.run(") != std::string::npos ||
-      hop.snippet.find("needs_level2") != std::string::npos) {
-    score += 45;
-  }
-  if (hop.call_line >= 1000) {
-    score += 15;
   }
   return score;
 }
@@ -1439,7 +1418,7 @@ std::vector<ATrailCondBranch> a_trail_build_cond_branches(
     }
     out.push_back(branch_from_hop(
         best_cxl, "CXL", when, then.str(),
-        "no llama end_thinking/clear_busy sync en este hilo"));
+        "rama de cancel/abort — ¿conecta con el apagado del síntoma?"));
   }
 
   ATrailHop best_off;
@@ -1462,13 +1441,14 @@ std::vector<ATrailCondBranch> a_trail_build_cond_branches(
     }
     std::ostringstream then;
     if (best_off.snippet.find("end_thinking()") != std::string::npos) {
-      then << "agent_busy_=false; end_thinking() → clear_busy_if";
+      then << (best_off.scope_chain.empty() ? best_off.symbol : best_off.scope_chain)
+           << " → end_thinking()";
     } else if (best_off.snippet.find("clear_busy") != std::string::npos) {
       then << (best_off.scope_chain.empty() ? best_off.symbol : best_off.scope_chain)
            << " → clear_busy*";
     } else {
       then << (best_off.scope_chain.empty() ? best_off.symbol : best_off.scope_chain)
-           << " → apaga busy/spinner";
+           << " → cleanup / off";
     }
     out.push_back(branch_from_hop(best_off, "OFF", when, then.str()));
   }
@@ -1479,9 +1459,8 @@ std::vector<ATrailCondBranch> a_trail_build_cond_branches(
     ATrailCondBranch link;
     link.id = "LINK";
     link.when_text = "CXL (UI) vs OFF (worker tail)";
-    link.then_text = "agent_cancel_ → … → end_thinking() → clear_busy_if";
-    link.note =
-        "edit site suele ser: cancel no garantiza OFF, o flag/agent_busy_ stuck antes del tail";
+    link.then_text = "CXL → … → OFF (¿el cancel garantiza el cleanup?)";
+    link.note = "edit site suele ser el hueco entre cancel y apagado, si aplica al síntoma";
     if (!best_cxl.path.empty()) {
       link.path = best_cxl.path;
       link.anchor = best_cxl.anchor;

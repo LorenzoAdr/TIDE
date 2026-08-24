@@ -1200,6 +1200,8 @@ add_executable(l1_intent_debug_cli
   tools/l1_intent_debug_cli.cpp
   tests/tool_registry_stub.cpp
   src/ai/level1_agent.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_effect_summary.cpp
   src/ai/level1_action.cpp
   src/ai/llama_backend.cpp
   src/ai/model_store.cpp
