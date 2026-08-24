@@ -106,6 +106,16 @@ void test_copy_selection() {
   check(tuide::editor_clipboard() == "hello", "full selection copied");
 }
 
+void test_rapid_copy_does_not_crash() {
+  auto buffer = make_buffer({"hello world"});
+  buffer.primary().anchor = {0, 0};
+  buffer.primary().head = {0, 5};
+  for (int i = 0; i < 80; ++i) {
+    check(tuide::copy_selection(&buffer), "rapid copy succeeds");
+  }
+  check(tuide::editor_clipboard() == "hello", "clipboard still hello after rapid copies");
+}
+
 void test_paste_at_end_of_line() {
   auto buffer = make_buffer({"hello"});
   buffer.reset_to_single_cursor(0, 5);
@@ -383,6 +393,7 @@ int main() {
   test_replace_selection_on_type();
   test_word_left();
   test_copy_selection();
+  test_rapid_copy_does_not_crash();
   test_paste_at_end_of_line();
   test_paste_replaces_selection();
   test_paste_multi_cursor();

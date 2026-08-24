@@ -4,10 +4,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <iostream>
 #include <mutex>
 #include <poll.h>
@@ -97,6 +100,8 @@ struct X11Api {
                          int) = nullptr;
   X11Status (*XSendEvent)(X11Display*, X11Window, X11Bool, long, X11Event*) = nullptr;
   int (*XSetErrorHandler)(int (*)(X11Display*, void*)) = nullptr;
+  int (*XSetIOErrorHandler)(int (*)(X11Display*)) = nullptr;
+  void (*XSetIOErrorExitHandler)(X11Display*, void (*)(X11Display*, void*), void*) = nullptr;
 };
 
 X11Api g_x11;
@@ -110,6 +115,7 @@ ClipboardBackend g_paste_backend = ClipboardBackend::kNone;
 
 std::mutex g_owner_mu;
 std::string g_owner_text;
+bool g_claim_pending = false;
 std::atomic<bool> g_owner_stop{false};
 X11Display* g_owner_dpy = nullptr;
 X11Window g_owner_win = kX11None;
@@ -117,6 +123,8 @@ X11Atom g_atom_clipboard = kX11None;
 X11Atom g_atom_utf8 = kX11None;
 X11Atom g_atom_targets = kX11None;
 X11Atom g_atom_text = kX11None;
+int g_wakeup_r = -1;
+int g_wakeup_w = -1;
 
 std::string base64_encode(const std::string& input) {
   static constexpr char kTable[] =
@@ -152,7 +160,7 @@ std::string base64_encode(const std::string& input) {
 }
 
 void copy_via_osc52(const std::string& text) {
-  if (text.empty()) {
+  if (text.empty() || !::isatty(STDOUT_FILENO)) {
     return;
   }
   std::cout << "\033]52;c;" << base64_encode(text) << "\033\\";
@@ -172,6 +180,73 @@ bool load_sym(void* handle, T& out, const char* name) {
 
 int x11_ignore_errors(X11Display*, void*) {
   return 0;
+}
+
+int x11_io_error(X11Display*) {
+  g_x11_ok.store(false);
+  g_owner_stop.store(true);
+  return 0;
+}
+
+void x11_io_error_exit(X11Display*, void*) {
+  g_x11_ok.store(false);
+  g_owner_stop.store(true);
+}
+
+void attach_display_io_exit(X11Display* dpy) {
+  if (dpy != nullptr && g_x11.XSetIOErrorExitHandler != nullptr) {
+    g_x11.XSetIOErrorExitHandler(dpy, x11_io_error_exit, nullptr);
+  }
+}
+
+void drain_wakeup() {
+  if (g_wakeup_r < 0) {
+    return;
+  }
+  char buf[32];
+  while (true) {
+    const ssize_t n = ::read(g_wakeup_r, buf, sizeof(buf));
+    if (n < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+    if (n == 0) {
+      break;
+    }
+  }
+}
+
+void wakeup_owner() {
+  if (g_wakeup_w < 0) {
+    return;
+  }
+  const char b = 1;
+  while (::write(g_wakeup_w, &b, 1) < 0 && errno == EINTR) {
+  }
+}
+
+void open_wakeup_pipe() {
+  if (g_wakeup_r >= 0) {
+    return;
+  }
+  int fds[2] = {-1, -1};
+  if (::pipe(fds) != 0) {
+    return;
+  }
+  for (int fd : fds) {
+    const int flags = ::fcntl(fd, F_GETFL);
+    if (flags >= 0) {
+      ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+    const int fdflags = ::fcntl(fd, F_GETFD);
+    if (fdflags >= 0) {
+      ::fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC);
+    }
+  }
+  g_wakeup_r = fds[0];
+  g_wakeup_w = fds[1];
 }
 
 bool load_x11_api() {
@@ -208,14 +283,17 @@ bool load_x11_api() {
       load_sym(handle, g_x11.XGetSelectionOwner, "XGetSelectionOwner") &&
       load_sym(handle, g_x11.XChangeProperty, "XChangeProperty") &&
       load_sym(handle, g_x11.XSendEvent, "XSendEvent") &&
-      load_sym(handle, g_x11.XSetErrorHandler, "XSetErrorHandler");
+      load_sym(handle, g_x11.XSetErrorHandler, "XSetErrorHandler") &&
+      load_sym(handle, g_x11.XSetIOErrorHandler, "XSetIOErrorHandler");
   if (!ok) {
     dlclose(handle);
     g_x11 = {};
     return false;
   }
+  load_sym(handle, g_x11.XSetIOErrorExitHandler, "XSetIOErrorExitHandler");
   g_x11.XInitThreads();
   g_x11.XSetErrorHandler(x11_ignore_errors);
+  g_x11.XSetIOErrorHandler(x11_io_error);
   g_x11_ok.store(true);
   return true;
 }
@@ -294,6 +372,7 @@ bool x11_get_clipboard_once(X11Atom target, std::string* out) {
   if (dpy == nullptr) {
     return false;
   }
+  attach_display_io_exit(dpy);
   const int screen = g_x11.XDefaultScreen(dpy);
   const X11Window root = g_x11.XRootWindow(dpy, screen);
   const X11Window win = g_x11.XCreateSimpleWindow(dpy, root, 0, 0, 1, 1, 0, 0, 0);
@@ -344,6 +423,7 @@ bool x11_get_clipboard(std::string* out) {
     g_x11_ok.store(false);
     return false;
   }
+  attach_display_io_exit(dpy);
   const X11Atom utf8 = g_x11.XInternAtom(dpy, "UTF8_STRING", 0);
   g_x11.XCloseDisplay(dpy);
 
@@ -382,9 +462,10 @@ void serve_selection_request(const X11SelectionRequestEvent& req, const std::str
              req.target == g_atom_text) {
     const X11Atom type =
         (req.target == static_cast<X11Atom>(kX11XaString)) ? kX11XaString : g_atom_utf8;
+    const int nbytes = static_cast<int>(
+        std::min(text.size(), static_cast<std::size_t>(INT_MAX)));
     g_x11.XChangeProperty(req.display, req.requestor, req.property, type, 8, kX11PropModeReplace,
-                          reinterpret_cast<const unsigned char*>(text.data()),
-                          static_cast<int>(text.size()));
+                          reinterpret_cast<const unsigned char*>(text.data()), nbytes);
   } else {
     notify->property = kX11None;
   }
@@ -393,31 +474,65 @@ void serve_selection_request(const X11SelectionRequestEvent& req, const std::str
   g_x11.XFlush(req.display);
 }
 
+bool wait_owner_wakeup_or_event(X11Display* dpy, int timeout_ms) {
+  if (g_x11.XPending(dpy) > 0) {
+    return true;
+  }
+  pollfd fds[2]{};
+  int nfds = 1;
+  fds[0].fd = g_x11.XConnectionNumber(dpy);
+  fds[0].events = POLLIN;
+  if (g_wakeup_r >= 0) {
+    fds[1].fd = g_wakeup_r;
+    fds[1].events = POLLIN;
+    nfds = 2;
+  }
+  poll(fds, static_cast<nfds_t>(nfds), timeout_ms);
+  if (nfds == 2 && (fds[1].revents & (POLLIN | POLLHUP))) {
+    drain_wakeup();
+  }
+  return g_x11.XPending(dpy) > 0;
+}
+
 void owner_thread_main() {
+  // All Xlib calls on g_owner_dpy stay on this thread. Sharing that Display with
+  // the UI thread (XSetSelectionOwner / XGetSelectionOwner vs XNextEvent) races
+  // on the X socket and Xlib aborts the process with an unexpected async reply.
   while (!g_owner_stop.load()) {
     X11Display* dpy = nullptr;
+    bool claim = false;
     {
       std::lock_guard<std::mutex> lock(g_owner_mu);
       dpy = g_owner_dpy;
+      claim = g_claim_pending;
+      if (claim) {
+        g_claim_pending = false;
+      }
     }
     if (dpy == nullptr) {
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       continue;
     }
-    if (!wait_x11_event(dpy, 50)) {
+    if (claim) {
+      g_x11.XSetSelectionOwner(dpy, g_atom_clipboard, g_owner_win, kX11CurrentTime);
+      g_x11.XFlush(dpy);
+    }
+    if (!wait_owner_wakeup_or_event(dpy, 50)) {
       continue;
     }
-    X11Event event{};
-    g_x11.XNextEvent(dpy, &event);
-    if (event.type == kX11SelectionRequest) {
-      std::string text;
-      {
-        std::lock_guard<std::mutex> lock(g_owner_mu);
-        text = g_owner_text;
+    while (g_x11.XPending(dpy) > 0) {
+      X11Event event{};
+      g_x11.XNextEvent(dpy, &event);
+      if (event.type == kX11SelectionRequest) {
+        std::string text;
+        {
+          std::lock_guard<std::mutex> lock(g_owner_mu);
+          text = g_owner_text;
+        }
+        serve_selection_request(*reinterpret_cast<X11SelectionRequestEvent*>(&event), text);
+      } else if (event.type == kX11SelectionClear) {
+        // Another client took CLIPBOARD; keep the thread for the next set.
       }
-      serve_selection_request(*reinterpret_cast<X11SelectionRequestEvent*>(&event), text);
-    } else if (event.type == kX11SelectionClear) {
-      // Another client took CLIPBOARD; keep the thread for the next set.
     }
   }
 }
@@ -429,13 +544,16 @@ bool x11_set_clipboard(const std::string& text) {
 
   std::lock_guard<std::mutex> lock(g_owner_mu);
   g_owner_text = text;
+  g_claim_pending = true;
 
   if (g_owner_dpy == nullptr) {
     g_owner_dpy = g_x11.XOpenDisplay(nullptr);
     if (g_owner_dpy == nullptr) {
       g_x11_ok.store(false);
+      g_claim_pending = false;
       return false;
     }
+    attach_display_io_exit(g_owner_dpy);
     const int screen = g_x11.XDefaultScreen(g_owner_dpy);
     const X11Window root = g_x11.XRootWindow(g_owner_dpy, screen);
     g_owner_win = g_x11.XCreateSimpleWindow(g_owner_dpy, root, 0, 0, 1, 1, 0, 0, 0);
@@ -443,15 +561,16 @@ bool x11_set_clipboard(const std::string& text) {
     g_atom_utf8 = g_x11.XInternAtom(g_owner_dpy, "UTF8_STRING", 0);
     g_atom_targets = g_x11.XInternAtom(g_owner_dpy, "TARGETS", 0);
     g_atom_text = g_x11.XInternAtom(g_owner_dpy, "TEXT", 0);
+    open_wakeup_pipe();
     g_owner_stop.store(false);
     // Detached: serves SelectionRequest until process exit. Avoid joining from
-    // atexit (Xlib + teardown races).
+    // atexit (Xlib + teardown races). After this point the UI thread must not
+    // call Xlib on g_owner_dpy.
     std::thread(owner_thread_main).detach();
   }
 
-  g_x11.XSetSelectionOwner(g_owner_dpy, g_atom_clipboard, g_owner_win, kX11CurrentTime);
-  g_x11.XFlush(g_owner_dpy);
-  return g_x11.XGetSelectionOwner(g_owner_dpy, g_atom_clipboard) == g_owner_win;
+  wakeup_owner();
+  return true;
 }
 
 ClipboardBackend detect_copy_backend_uncached() {
