@@ -108,14 +108,16 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  tuide::Level1Agent agent({.tools = nullptr,
-                            .tasks = nullptr,
-                            .workspace = nullptr,
-                            .symbol_indexer = &symbol_indexer,
-                            .backend = &backend,
-                            .embed = &embed_backend,
-                            .coding_stem_index = &stem_index,
-                            .settings = settings});
+  tuide::Level1AgentDeps deps;
+  deps.tools = nullptr;
+  deps.tasks = nullptr;
+  deps.workspace = nullptr;
+  deps.symbol_indexer = &symbol_indexer;
+  deps.backend = &backend;
+  deps.embed = &embed_backend;
+  deps.coding_stem_index = &stem_index;
+  deps.settings = settings;
+  tuide::Level1Agent agent(deps);
 
   std::cout << "=== L1 debug start ===\n";
   std::cout << "query: " << query << "\n";

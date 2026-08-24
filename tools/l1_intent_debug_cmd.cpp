@@ -227,15 +227,17 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
   WorkspaceModel workspace_model;
   workspace_model.root = workspace;
 
-  Level1Agent agent({.tools = nullptr,
-                     .tasks = nullptr,
-                     .workspace = &workspace_model,
-                     .symbol_indexer = &symbol_indexer,
-                     .backend = &backend,
-                     .l2_backend = l2_ready ? &l2_backend : nullptr,
-                     .embed = embed_backend.get(),
-                     .coding_stem_index = no_stem_embed ? nullptr : &stem_index,
-                     .settings = settings});
+  Level1AgentDeps deps;
+  deps.tools = nullptr;
+  deps.tasks = nullptr;
+  deps.workspace = &workspace_model;
+  deps.symbol_indexer = &symbol_indexer;
+  deps.backend = &backend;
+  deps.l2_backend = l2_ready ? &l2_backend : nullptr;
+  deps.embed = embed_backend.get();
+  deps.coding_stem_index = no_stem_embed ? nullptr : &stem_index;
+  deps.settings = settings;
+  Level1Agent agent(deps);
 
   std::cout << "=== L1 debug start ===\n";
   std::cout << "query: " << query << "\n";
