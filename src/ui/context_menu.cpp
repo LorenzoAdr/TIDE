@@ -99,8 +99,10 @@ void set_items(ContextMenuState* state, ContextMenuKind kind,
   state->labels.clear();
   state->action_ids.clear();
   state->row_boxes.clear();
+  state->explorer_section_start = -1;
   state->selected = 0;
   state->delete_confirm_open = false;
+  state->rename_targets_file = false;
   state->template_picker_open = false;
   for (const auto& item : items) {
     state->labels.push_back(item.first);
@@ -118,8 +120,10 @@ void set_items(ContextMenuState* state, ContextMenuKind kind,
   state->labels.clear();
   state->action_ids.clear();
   state->row_boxes.clear();
+  state->explorer_section_start = -1;
   state->selected = 0;
   state->delete_confirm_open = false;
+  state->rename_targets_file = false;
   state->template_picker_open = false;
   for (const auto& item : items) {
     state->labels.push_back(item.first);
@@ -220,6 +224,29 @@ void append_doc_comment_items(ContextMenuState* state, bool include_doc_comment)
   append_menu_item(state, i18n::tr("context_menu.add_separator"), "add_separator");
   append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
   append_menu_item(state, i18n::tr("context_menu.insert_template"), "insert_template");
+}
+
+void append_explorer_file_items(ContextMenuState* state, bool show_format,
+                                bool show_secondary_open, bool show_analyze_symbols,
+                                bool show_markdown_preview) {
+  if (show_analyze_symbols) {
+    append_menu_item(state, i18n::tr("context_menu.analyze_symbols"), "analyze_symbols");
+  }
+  if (show_secondary_open) {
+    append_menu_item(state, i18n::tr("context_menu.open_secondary"), "open_file_secondary");
+  }
+  append_menu_item(state, i18n::tr("context_menu.open_file"), "open_file");
+  append_menu_item(state, i18n::tr("context_menu.indexer_paths"), "show_indexer_paths");
+  if (show_format) {
+    append_menu_item(state, i18n::tr("context_menu.format_file"), "format_file");
+  }
+  append_menu_item(state, i18n::tr("context_menu.rename_file"), "rename_file");
+  append_menu_item(state, i18n::tr("context_menu.move_to"), "move_to");
+  append_menu_item(state, i18n::tr("context_menu.delete_file"), "delete_file");
+  append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
+  if (show_markdown_preview) {
+    append_menu_item(state, i18n::tr("context_menu.preview_markdown"), "preview_markdown");
+  }
 }
 
 int leading_indent_cols(const std::string& line) {
@@ -1220,6 +1247,7 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
   }
 
   if (action_id == "rename_file") {
+    state->rename_targets_file = true;
     open_rename_prompt(state, fs::path(state->absolute_path).filename().string());
     return true;
   }
@@ -1288,6 +1316,7 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
   }
 
   if (action_id == "rename_symbol") {
+    state->rename_targets_file = false;
     open_rename_prompt(state, state->symbol_name);
     return true;
   }
@@ -1522,7 +1551,7 @@ bool commit_rename(ContextMenuState* state, WorkspaceModel* workspace, DebugMode
     return false;
   }
 
-  if (state->kind == ContextMenuKind::EditorSymbol) {
+  if (state->kind == ContextMenuKind::EditorSymbol && !state->rename_targets_file) {
     const bool ok = rename_symbol_with_lsp(state, workspace, layout_state, symbols, model,
                                            symbol_indexer, new_name);
     if (ok && focus != nullptr) {
@@ -1679,9 +1708,11 @@ void context_menu_close(ContextMenuState* state, MainLayoutState* layout_state) 
   state->indexer_paths_scroll = 0;
   state->indexer_paths_lines.clear();
   state->rename_skip_return = false;
+  state->rename_targets_file = false;
   state->rename_input.clear();
   state->name_prompt_kind = NamePromptKind::Rename;
   state->batch_targets.clear();
+  state->explorer_section_start = -1;
   state->selected = 0;
   state->row_boxes.clear();
   if (layout_state != nullptr) {
@@ -1700,6 +1731,27 @@ void context_menu_append_item(ContextMenuState* state, const std::string& label,
   state->row_boxes.push_back(Box{});
 }
 
+void context_menu_append_explorer_file_section(
+    ContextMenuState* state, const std::string& workspace_root, bool show_format,
+    bool show_secondary_open, bool show_analyze_symbols, bool show_markdown_preview) {
+  if (state == nullptr || state->absolute_path.empty() || workspace_root.empty() ||
+      !path_is_same_or_descendant(workspace_root, state->absolute_path)) {
+    return;
+  }
+
+  std::error_code ec;
+  const fs::path relative =
+      fs::relative(fs::path(state->absolute_path), fs::path(workspace_root), ec);
+  if (ec || relative.empty()) {
+    return;
+  }
+
+  state->relative_path = relative.generic_string();
+  state->explorer_section_start = static_cast<int>(state->labels.size());
+  append_explorer_file_items(state, show_format, show_secondary_open, show_analyze_symbols,
+                             show_markdown_preview);
+}
+
 void context_menu_open_file(ContextMenuState* state, int x, int y,
                             const std::string& absolute_path, const std::string& relative_path,
                             bool show_format, bool show_secondary_open, bool show_analyze_symbols) {
@@ -1716,89 +1768,9 @@ void context_menu_open_file(ContextMenuState* state, int x, int y,
   state->anchor_y = y;
   state->absolute_path = absolute_path;
   state->relative_path = relative_path;
-  if (show_analyze_symbols) {
-    if (show_format) {
-      if (show_secondary_open) {
-        set_items(state, ContextMenuKind::File,
-                  {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
-                   {i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
-                   {i18n::tr("context_menu.open_file"), "open_file"},
-                   {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                   {i18n::tr("context_menu.format_file"), "format_file"},
-                   {i18n::tr("context_menu.rename_file"), "rename_file"},
-                   {i18n::tr("context_menu.move_to"), "move_to"},
-                   {i18n::tr("context_menu.delete_file"), "delete_file"}});
-      } else {
-        set_items(state, ContextMenuKind::File,
-                  {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
-                   {i18n::tr("context_menu.open_file"), "open_file"},
-                   {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                   {i18n::tr("context_menu.format_file"), "format_file"},
-                   {i18n::tr("context_menu.rename_file"), "rename_file"},
-                   {i18n::tr("context_menu.move_to"), "move_to"},
-                   {i18n::tr("context_menu.delete_file"), "delete_file"}});
-      }
-    } else if (show_secondary_open) {
-      set_items(state, ContextMenuKind::File,
-                {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
-                 {i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
-                 {i18n::tr("context_menu.open_file"), "open_file"},
-                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                 {i18n::tr("context_menu.rename_file"), "rename_file"},
-                 {i18n::tr("context_menu.move_to"), "move_to"},
-                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
-    } else {
-      set_items(state, ContextMenuKind::File,
-                {{i18n::tr("context_menu.analyze_symbols"), "analyze_symbols"},
-                 {i18n::tr("context_menu.open_file"), "open_file"},
-                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                 {i18n::tr("context_menu.rename_file"), "rename_file"},
-                 {i18n::tr("context_menu.move_to"), "move_to"},
-                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
-    }
-    append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
-    return;
-  }
-  if (show_format) {
-    if (show_secondary_open) {
-      set_items(state, ContextMenuKind::File,
-                {{i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
-                 {i18n::tr("context_menu.open_file"), "open_file"},
-                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                 {i18n::tr("context_menu.format_file"), "format_file"},
-                 {i18n::tr("context_menu.rename_file"), "rename_file"},
-                 {i18n::tr("context_menu.move_to"), "move_to"},
-                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
-    } else {
-      set_items(state, ContextMenuKind::File,
-                {{i18n::tr("context_menu.open_file"), "open_file"},
-                 {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-                 {i18n::tr("context_menu.format_file"), "format_file"},
-                 {i18n::tr("context_menu.rename_file"), "rename_file"},
-                 {i18n::tr("context_menu.move_to"), "move_to"},
-                 {i18n::tr("context_menu.delete_file"), "delete_file"}});
-    }
-    append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
-    return;
-  }
-  if (show_secondary_open) {
-    set_items(state, ContextMenuKind::File,
-              {{i18n::tr("context_menu.open_secondary"), "open_file_secondary"},
-               {i18n::tr("context_menu.open_file"), "open_file"},
-               {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-               {i18n::tr("context_menu.rename_file"), "rename_file"},
-               {i18n::tr("context_menu.move_to"), "move_to"},
-               {i18n::tr("context_menu.delete_file"), "delete_file"}});
-    append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
-    return;
-  }
-  set_items(state, ContextMenuKind::File,
-            {{i18n::tr("context_menu.open_file"), "open_file"},
-             {i18n::tr("context_menu.indexer_paths"), "show_indexer_paths"},
-             {i18n::tr("context_menu.rename_file"), "rename_file"},
-             {i18n::tr("context_menu.move_to"), "move_to"},
-             {i18n::tr("context_menu.delete_file"), "delete_file"}});
-  append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
+  set_items(state, ContextMenuKind::File, {});
+  append_explorer_file_items(state, show_format, show_secondary_open, show_analyze_symbols,
+                             false);
 }
 
 void context_menu_open_folder(ContextMenuState* state, int x, int y,
@@ -1861,6 +1833,8 @@ void context_menu_open_editor_symbol(ContextMenuState* state, int x, int y, int 
   state->anchor_x = x;
   state->anchor_y = y;
   state->absolute_path = absolute_path;
+  state->relative_path.clear();
+  state->batch_targets.clear();
   state->editor_line = line;
   state->editor_col = col;
   state->editor_sym_start = sym_start;
@@ -1933,6 +1907,7 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
   state->anchor_y = y;
   state->absolute_path = absolute_path;
   state->relative_path.clear();
+  state->batch_targets.clear();
   state->editor_line = line;
   state->editor_col = col;
   state->symbol_name.clear();
@@ -1943,7 +1918,9 @@ void context_menu_open_editor_background(ContextMenuState* state, int x, int y,
   if (has_selection) {
     items.push_back({i18n::tr("context_menu.format_selection"), "format_selection"});
   }
-  items.push_back({i18n::tr("context_menu.format_file"), "format_file"});
+  if (is_lsp_trackable_path(absolute_path)) {
+    items.push_back({i18n::tr("context_menu.format_file"), "format_file"});
+  }
   set_items(state, ContextMenuKind::EditorBackground, items);
   if (ai_actions_enabled) {
     append_menu_item(state, i18n::tr("context_menu.ai_insert"), "ai_insert");
@@ -2049,7 +2026,7 @@ Element render_rename_modal(ContextMenuState* state) {
           ? i18n::tr("context_menu.create.folder")
           : state->name_prompt_kind == NamePromptKind::CreateFile
                 ? i18n::tr("context_menu.create.file")
-          : state->kind == ContextMenuKind::EditorSymbol
+          : state->kind == ContextMenuKind::EditorSymbol && !state->rename_targets_file
                 ? i18n::tr("context_menu.rename.symbol")
           : state->kind == ContextMenuKind::Folder ? i18n::tr("context_menu.rename.folder")
                                                    : i18n::tr("context_menu.rename.file");
@@ -2232,6 +2209,9 @@ Element render_context_menu_overlay(ContextMenuState* state, MainLayoutState* la
   Elements rows;
   state->row_boxes.resize(state->labels.size());
   for (int i = 0; i < static_cast<int>(state->labels.size()); ++i) {
+    if (i == state->explorer_section_start && i > 0) {
+      rows.push_back(separator() | color(theme::AccentDim()));
+    }
     const std::string row_id = press_id::context_menu_row(i);
     const bool hovered =
         layout_state != nullptr && layout_state->clickable.is_hovered(row_id);

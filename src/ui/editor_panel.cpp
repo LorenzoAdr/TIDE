@@ -35,6 +35,8 @@
 #include "util/syntax_highlight.hpp"
 #include "parser/tree_sitter_service.hpp"
 #include "util/csv_viewer.hpp"
+#include "util/external_viewer.hpp"
+#include "util/nm_reader.hpp"
 #include "util/tabular_file.hpp"
 #include "util/virtual_text_file.hpp"
 #include "parser/tree_sitter_document.hpp"
@@ -4821,18 +4823,26 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
                                         debug_model, has_selection,
                                         layout_state->app_settings != nullptr &&
                                             layout_state->app_settings->development_options_enabled);
+        context_menu_append_explorer_file_section(
+            &layout_state->context_menu, workspace != nullptr ? workspace->root : std::string{},
+            is_lsp_trackable_path(buffer->path), true, is_nm_analyzable_path(buffer->path),
+            is_markdown_path(buffer->path));
         end_mouse_selection(panel);
         return true;
       }
-      if (layout_state != nullptr && !buffer->path.empty() &&
-          is_lsp_trackable_path(buffer->path)) {
+      if (layout_state != nullptr && !buffer->path.empty()) {
         const bool show_call_hierarchy =
-            symbols != nullptr && symbols->supports_call_hierarchy(buffer->path);
+            symbols != nullptr && symbols->supports_call_hierarchy(buffer->path) &&
+            is_lsp_trackable_path(buffer->path);
         context_menu_open_editor_background(&layout_state->context_menu, m.x, m.y, buffer->path,
                                             cursor.head.line, cursor.head.col,
                                             show_call_hierarchy, has_selection,
                                             layout_state->app_settings != nullptr &&
                                                 layout_state->app_settings->development_options_enabled);
+        context_menu_append_explorer_file_section(
+            &layout_state->context_menu, workspace != nullptr ? workspace->root : std::string{},
+            is_lsp_trackable_path(buffer->path), true, is_nm_analyzable_path(buffer->path),
+            is_markdown_path(buffer->path));
         end_mouse_selection(panel);
         return true;
       }
