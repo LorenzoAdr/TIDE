@@ -692,6 +692,13 @@ void test_query_constellations() {
       judge_ids);
   expect(compact.ok && compact.selected == std::vector<std::string>({"M1"}),
          "causal judge accepts compact indexed decision");
+  const auto scalar_compact = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","zones":{"M1":"select"},)"
+      R"("selected":["M1"],"next":"verify",)"
+      R"("why":"M1 contiene el punto de entrada causal solicitado"})",
+      {"M1"});
+  expect(scalar_compact.ok && scalar_compact.selected == std::vector<std::string>({"M1"}),
+         "causal judge accepts scalar compact verdict");
   const auto promoted = tuide::registry_parse_causal_judge_decision(
       R"({"action":"causal_zone_judge","zones":{"M1":{"verdict":"select",)"
       R"("role":"trigger","completeness":"complete","confidence":0.9,)"

@@ -3641,11 +3641,27 @@ RegistryCausalJudgeDecision registry_parse_causal_judge_decision(
   std::vector<nlohmann::json> zone_items;
   if (j["zones"].is_object()) {
     for (auto it = j["zones"].begin(); it != j["zones"].end(); ++it) {
-      if (!it.value().is_object()) {
+      nlohmann::json item;
+      if (it.value().is_string()) {
+        const std::string verdict = it.value().get<std::string>();
+        std::string why = j.value("why", "");
+        if (why.size() > 140) {
+          why.resize(140);
+        }
+        item = {{"verdict", verdict},
+                {"role", verdict == "select" ? "primary" : "none"},
+                {"completeness", verdict == "select" ? "complete" : "none"},
+                {"confidence", 0.8f},
+                {"why", why},
+                {"contribution", verdict == "select" ? why : ""},
+                {"missing_link", ""},
+                {"expand_from", nlohmann::json::array()}};
+      } else if (it.value().is_object()) {
+        item = it.value();
+      } else {
         out.error = "veredicto de zona no es objeto";
         return out;
       }
-      nlohmann::json item = it.value();
       item["id"] = it.key();
       zone_items.push_back(std::move(item));
     }

@@ -190,8 +190,10 @@ def main() -> int:
             continue
         try:
             triage = json.loads((case_dir / "triage.json").read_text(encoding="utf-8"))
+            triage_cards = (case_dir / "triage_cards.md").read_text(encoding="utf-8")
         except (OSError, json.JSONDecodeError):
             triage = {}
+            triage_cards = ""
         triage_shortlist = [str(value) for value in triage.get("shortlist") or []]
         selected = [str(value) for value in decision.get("selected") or []]
         repaired_primary = bool(selected) and decision.get("error") == (
@@ -210,7 +212,14 @@ def main() -> int:
             for stem in zone["stems_declared"]
         }
         expected_zones = layers["gold_declared_zone_ids"]
-        triage_gold = bool(set(triage_shortlist) & set(expected_zones))
+        triage_layers = (
+            score_judge_cards(triage_cards, expected, traps, [])
+            if triage_cards
+            else {"gold_declared_zone_ids": []}
+        )
+        triage_gold = bool(
+            set(triage_shortlist) & set(triage_layers["gold_declared_zone_ids"])
+        )
         any_hit = ok and any(stem in selected_stems for stem in expected)
         full_hit = ok and bool(expected) and all(stem in selected_stems for stem in expected)
         available_any = any(stem in available_stems for stem in expected)
@@ -225,6 +234,7 @@ def main() -> int:
                 "selected": selected,
                 "triage_shortlist": triage_shortlist,
                 "triage_gold": triage_gold,
+                "triage_gold_zone_ids": triage_layers["gold_declared_zone_ids"],
                 "selected_stems": sorted(selected_stems),
                 "expected_zones": expected_zones,
                 "any_hit": any_hit,
