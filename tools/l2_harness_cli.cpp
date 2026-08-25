@@ -1747,6 +1747,7 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
   std::string only_case;
   std::string model_id;
   bool two_pass = false;
+  bool legacy_triage = false;
   for (int i = 2; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--cards-root" && i + 1 < argc) {
@@ -1761,9 +1762,13 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
       model_id = argv[++i];
     } else if (a == "--two-pass") {
       two_pass = true;
+    } else if (a == "--legacy-triage") {
+      legacy_triage = true;
     } else if (a == "-h" || a == "--help") {
-      std::cerr << "zone-judge-battery --cards-root DIR --out DIR [--start-at ID] [--only ID] [--two-pass]\n"
-                   "  Un único L2Brain; --two-pass hace triage, expansión y juicio.\n";
+      std::cerr << "zone-judge-battery --cards-root DIR --out DIR [--start-at ID] [--only ID] "
+                   "[--two-pass] [--legacy-triage]\n"
+                   "  Un único L2Brain; --two-pass hace ancla→expansión→síntesis "
+                   "(opcional 1 reapertura). --legacy-triage usa triage inspect viejo.\n";
       return 2;
     }
   }
@@ -1802,7 +1807,9 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
     std::cerr << "zone-judge-battery: ensure_ready: " << err << "\n";
     return 1;
   }
-  const std::string system = tuide::registry_causal_judge_system_prompt();
+  const bool epistemic = two_pass && !legacy_triage;
+  const std::string system = epistemic ? tuide::registry_causal_synth_system_prompt()
+                                       : tuide::registry_causal_judge_system_prompt();
   tuide::EffectRegistry expansion_registry;
   if (two_pass && !tuide::registry_open(root, &expansion_registry, &err)) {
     std::cerr << "zone-judge-battery: registry: " << err << "\n";
@@ -1832,6 +1839,10 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
     const std::string instruction = item.value("prompt", "");
     std::string cards;
     std::vector<std::string> zone_ids;
+    std::string hypothesis;
+    std::string anchor_why;
+    int64_t triage_ms = 0;
+    bool reopened = false;
     if (two_pass) {
       const fs::path payload_path = cards_root / id / "judge_cards.json";
       nlohmann::json base_payload;
@@ -1848,36 +1859,98 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
         rows.push_back({{"id", id}, {"ok", false}, {"error", "empty_triage"}});
         continue;
       }
-      tuide::L2BrainRequest triage_request;
-      triage_request.system_prompt = tuide::registry_causal_triage_system_prompt();
-      triage_request.user_prompt =
-          "## Consulta\n" + instruction + "\n\n" +
-          tuide::registry_causal_triage_user_prompt(triage_cards);
-      triage_request.phase = "causal_zone_triage";
-      triage_request.max_tokens =
-          std::min(192, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 192);
-      triage_request.n_ctx =
-          std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
-      triage_request.temperature = 0.05f;
-      const auto triage_t0 = std::chrono::steady_clock::now();
-      const auto triage_response = brain.propose(triage_request, nullptr);
-      const int64_t triage_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                    std::chrono::steady_clock::now() - triage_t0)
-                                    .count();
-      std::ofstream(case_out / "triage_system.txt") << triage_request.system_prompt;
-      std::ofstream(case_out / "triage_user.md") << triage_request.user_prompt;
-      std::ofstream(case_out / "triage_cards.md") << triage_cards;
-      std::ofstream(case_out / "triage_raw.txt") << triage_response.text;
-      if (!triage_response.ok) {
+
+      auto run_anchor_or_triage =
+          [&](const std::string& reopen_need, const std::string& prefix)
+          -> tuide::RegistryCausalTriageDecision {
+        tuide::L2BrainRequest triage_request;
+        if (epistemic) {
+          triage_request.system_prompt = tuide::registry_causal_anchor_system_prompt();
+          triage_request.user_prompt =
+              "## Consulta\n" + instruction + "\n\n" +
+              tuide::registry_causal_anchor_user_prompt(triage_cards, reopen_need);
+          triage_request.phase = "causal_zone_anchor";
+          triage_request.max_tokens =
+              std::min(384, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 384);
+        } else {
+          triage_request.system_prompt = tuide::registry_causal_triage_system_prompt();
+          triage_request.user_prompt =
+              "## Consulta\n" + instruction + "\n\n" +
+              tuide::registry_causal_triage_user_prompt(triage_cards);
+          triage_request.phase = "causal_zone_triage";
+          triage_request.max_tokens =
+              std::min(192, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 192);
+        }
+        triage_request.n_ctx =
+            std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+        triage_request.temperature = 0.05f;
+        const auto triage_t0 = std::chrono::steady_clock::now();
+        const auto triage_response = brain.propose(triage_request, nullptr);
+        triage_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::steady_clock::now() - triage_t0)
+                         .count();
+        std::ofstream(case_out / (prefix + "_system.txt")) << triage_request.system_prompt;
+        std::ofstream(case_out / (prefix + "_user.md")) << triage_request.user_prompt;
+        std::ofstream(case_out / (prefix + "_cards.md")) << triage_cards;
+        std::ofstream(case_out / (prefix + "_raw.txt")) << triage_response.text;
+        tuide::RegistryCausalTriageDecision triage;
+        if (!triage_response.ok) {
+          triage.error = triage_response.error;
+          return triage;
+        }
+        if (epistemic) {
+          triage = tuide::registry_parse_causal_anchor_decision(
+              triage_response.text, triage_ids, allowed_targets);
+        } else {
+          triage = tuide::registry_parse_causal_triage_decision(
+              triage_response.text, triage_ids, allowed_targets);
+        }
+        std::ofstream(case_out / (prefix + ".json"))
+            << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
+        // Compat scoring: mirror first pass as triage.*
+        if (prefix == "anchor" || prefix == "triage") {
+          std::ofstream(case_out / "triage_system.txt") << triage_request.system_prompt;
+          std::ofstream(case_out / "triage_user.md") << triage_request.user_prompt;
+          std::ofstream(case_out / "triage_cards.md") << triage_cards;
+          std::ofstream(case_out / "triage_raw.txt") << triage_response.text;
+          std::ofstream(case_out / "triage.json")
+              << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
+        }
+        return triage;
+      };
+
+      auto expand_from_decision =
+          [&](const tuide::RegistryCausalTriageDecision& triage, nlohmann::json* expanded_payload)
+          -> bool {
+        tuide::RegistryCausalJudgeOpts expanded_opts;
+        expanded_opts.max_zones = 3;
+        expanded_opts.max_representatives = 10;
+        expanded_opts.max_edges = 24;
+        expanded_opts.max_trails = 2;
+        if (epistemic && !triage.critical_mass) {
+          expanded_opts.expand_hops = 1;
+          expanded_opts.max_representatives = 6;
+          expanded_opts.max_edges = 12;
+        } else {
+          expanded_opts.expand_hops = 2;
+        }
+        return tuide::registry_expand_causal_judge_payload(
+            &expansion_registry, base_payload, triage, expanded_opts, expanded_payload, &err);
+      };
+
+      const std::string first_prefix = epistemic ? "anchor" : "triage";
+      auto triage = run_anchor_or_triage("", first_prefix);
+      if (!triage.ok || triage.shortlist.empty()) {
         rows.push_back({{"id", id},
                         {"ok", false},
-                        {"error", triage_response.error},
-                        {"triage_ms", triage_ms}});
+                        {"error", triage.ok ? "retrieval_gap" : triage.error},
+                        {"retrieval_needed", triage.retrieval_needed},
+                        {"triage_ms", triage_ms},
+                        {"epistemic", epistemic}});
         continue;
       }
-      auto triage = tuide::registry_parse_causal_triage_decision(
-          triage_response.text, triage_ids, allowed_targets);
-      if (triage.ok && triage.shortlist.size() < 3) {
+      // Legacy padding a 3 zonas solo fuera del modo epistémico.
+      if (!epistemic && triage.ok && triage.shortlist.size() < 3) {
         std::unordered_set<std::string> selected(triage.shortlist.begin(),
                                                  triage.shortlist.end());
         std::unordered_set<std::string> selected_context;
@@ -1925,26 +1998,14 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
           triage.shortlist.push_back(candidate);
           selected.insert(candidate);
         }
+        std::ofstream(case_out / "triage.json")
+            << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
       }
-      std::ofstream(case_out / "triage.json")
-          << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
-      if (!triage.ok || triage.shortlist.empty()) {
-        rows.push_back({{"id", id},
-                        {"ok", false},
-                        {"error", triage.ok ? "retrieval_gap" : triage.error},
-                        {"retrieval_needed", triage.retrieval_needed},
-                        {"triage_ms", triage_ms}});
-        continue;
-      }
-      tuide::RegistryCausalJudgeOpts expanded_opts;
-      expanded_opts.max_zones = 3;
-      expanded_opts.max_representatives = 10;
-      expanded_opts.max_edges = 24;
-      expanded_opts.max_trails = 2;
-      expanded_opts.expand_hops = 2;
+
+      hypothesis = triage.hypothesis;
+      anchor_why = triage.why;
       nlohmann::json expanded_payload;
-      if (!tuide::registry_expand_causal_judge_payload(
-              &expansion_registry, base_payload, triage, expanded_opts, &expanded_payload, &err)) {
+      if (!expand_from_decision(triage, &expanded_payload)) {
         rows.push_back({{"id", id}, {"ok", false}, {"error", err}, {"triage_ms", triage_ms}});
         continue;
       }
@@ -1952,6 +2013,251 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
       cards = tuide::registry_causal_judge_markdown(expanded_payload);
       zone_ids = zone_ids_from_payload(expanded_payload);
       std::ofstream(case_out / "cards_expanded.md") << cards;
+
+      // Primera síntesis (o juicio legacy) ocurre abajo; si epistémico y reinvestigate, reabrimos.
+      auto run_synth = [&](const std::string& synth_cards,
+                           const std::vector<std::string>& synth_zone_ids,
+                           const std::string& hyp, const std::string& why_anchor,
+                           const std::string& artifact_prefix) -> tuide::RegistryCausalJudgeDecision {
+        const std::string user =
+            epistemic ? ("## Consulta\n" + instruction + "\n\n" +
+                         tuide::registry_causal_synth_user_prompt(synth_cards, hyp, why_anchor))
+                      : ("## Consulta\n" + instruction + "\n\n" +
+                         tuide::registry_causal_judge_user_prompt(synth_cards));
+        tuide::L2BrainRequest request;
+        request.system_prompt = system;
+        request.user_prompt = user;
+        request.phase = epistemic ? "causal_zone_synth" : "causal_zone_judge";
+        const int judge_token_cap = 384;
+        request.max_tokens = std::min(
+            judge_token_cap,
+            settings.level2.max_tokens > 0 ? settings.level2.max_tokens : judge_token_cap);
+        request.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+        request.temperature = 0.05f;
+        const auto t0 = std::chrono::steady_clock::now();
+        const auto response = brain.propose(request, nullptr);
+        const int64_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       std::chrono::steady_clock::now() - t0)
+                                       .count();
+        std::ofstream(case_out / (artifact_prefix + "system.txt")) << system;
+        std::ofstream(case_out / (artifact_prefix + "user.md")) << user;
+        std::ofstream(case_out / (artifact_prefix + "cards.md")) << synth_cards;
+        std::ofstream(case_out / (artifact_prefix + "model_raw.txt")) << response.text;
+        tuide::RegistryCausalJudgeDecision decision;
+        if (!response.ok) {
+          decision.error = response.error;
+          decision.raw = response.text;
+          std::ofstream(case_out / (artifact_prefix + "decision.json"))
+              << tuide::registry_causal_judge_decision_to_json(decision).dump(2) << "\n";
+          (void)elapsed_ms;
+          return decision;
+        }
+        decision = tuide::registry_parse_causal_judge_decision(response.text, synth_zone_ids);
+        if (decision.ok) {
+          for (const auto& verdict : decision.zones) {
+            for (const auto& symbol : verdict.expand_from) {
+              if (synth_cards.find(symbol) == std::string::npos) {
+                decision.ok = false;
+                decision.error =
+                    "expand_from no pertenece a la ficha " + verdict.id + ": " + symbol;
+                break;
+              }
+            }
+            if (!decision.ok) {
+              break;
+            }
+          }
+        }
+        std::ofstream(case_out / (artifact_prefix + "decision.json"))
+            << tuide::registry_causal_judge_decision_to_json(decision).dump(2) << "\n";
+        return decision;
+      };
+
+      auto decision = run_synth(cards, zone_ids, hypothesis.empty() ? instruction : hypothesis,
+                                anchor_why, "");
+      if (epistemic && decision.ok && decision.next == "reinvestigate" && !reopened) {
+        reopened = true;
+        auto reopen = run_anchor_or_triage(decision.reinvestigate_need, "reopen_anchor");
+        if (reopen.ok && !reopen.shortlist.empty()) {
+          hypothesis = reopen.hypothesis;
+          anchor_why = reopen.why;
+          nlohmann::json reopen_payload;
+          if (expand_from_decision(reopen, &reopen_payload)) {
+            std::ofstream(case_out / "cards_reopened.json") << reopen_payload.dump(2) << "\n";
+            cards = tuide::registry_causal_judge_markdown(reopen_payload);
+            zone_ids = zone_ids_from_payload(reopen_payload);
+            std::ofstream(case_out / "cards_reopened.md") << cards;
+            decision = run_synth(cards, zone_ids, hypothesis, anchor_why, "reopen_");
+          }
+        }
+      }
+      // Si tras anclar/falsar no queda select, conservar la apuesta expandida (mordida mínima).
+      if (epistemic && decision.selected.empty() && !zone_ids.empty()) {
+        const std::string keep = zone_ids.front();
+        bool touched = false;
+        for (auto& zone : decision.zones) {
+          if (zone.id != keep) {
+            continue;
+          }
+          zone.verdict = "select";
+          zone.role = "primary";
+          zone.completeness = "complete";
+          zone.confidence = std::max(0.55f, zone.confidence);
+          if (zone.why.size() < 12) {
+            zone.why = !hypothesis.empty() ? hypothesis : anchor_why;
+          }
+          if (zone.why.size() < 12) {
+            zone.why = "ancla expandida conservada tras síntesis vacía";
+          }
+          zone.contribution = zone.why.size() > 140 ? zone.why.substr(0, 140) : zone.why;
+          zone.missing_link.clear();
+          zone.expand_from.clear();
+          touched = true;
+        }
+        if (!touched) {
+          tuide::RegistryZoneVerdict zone;
+          zone.id = keep;
+          zone.verdict = "select";
+          zone.role = "primary";
+          zone.completeness = "complete";
+          zone.confidence = 0.55f;
+          zone.why = !hypothesis.empty() ? hypothesis : "ancla expandida conservada tras síntesis vacía";
+          if (zone.why.size() < 12) {
+            zone.why = "ancla expandida conservada tras síntesis vacía";
+          }
+          zone.contribution = zone.why.size() > 140 ? zone.why.substr(0, 140) : zone.why;
+          decision.zones.push_back(std::move(zone));
+        }
+        for (auto& zone : decision.zones) {
+          if (zone.id == keep) {
+            continue;
+          }
+          if (zone.verdict == "select") {
+            zone.verdict = "reject";
+            zone.role = "none";
+            zone.completeness = "none";
+            zone.contribution.clear();
+            zone.missing_link.clear();
+            zone.expand_from.clear();
+            if (zone.why.size() < 12) {
+              zone.why = "desplazada por ancla conservada";
+            }
+          }
+        }
+        decision.selected = {keep};
+        decision.next = "verify";
+        decision.hypothesis_status = "partial";
+        decision.reinvestigate_need.clear();
+        decision.error.clear();
+        decision.ok = true;
+        decision.why = !hypothesis.empty() ? hypothesis : ("conservar ancla " + keep);
+        if (decision.why.size() < 12) {
+          decision.why = "conservar ancla expandida como mordida mínima";
+        }
+      }
+      // Escribir decision final canónica y continuar al scoring del bucle (sin segundo propose).
+      std::ofstream(case_out / "system.txt") << system;
+      std::ofstream(case_out / "cards.md") << cards;
+      const nlohmann::json decision_json =
+          tuide::registry_causal_judge_decision_to_json(decision);
+      try {
+        std::ofstream(case_out / "decision.json") << decision_json.dump(2) << "\n";
+      } catch (const std::exception&) {
+        std::ofstream(case_out / "decision.json")
+            << nlohmann::json({{"ok", decision.ok},
+                               {"action", "causal_zone_judge"},
+                               {"selected", decision.selected},
+                               {"next", decision.next},
+                               {"hypothesis_status", decision.hypothesis_status},
+                               {"error", decision.error.empty() ? "utf8_sanitize" : decision.error},
+                               {"why", "decision serializada sin why UTF-8 inválido"}})
+                   .dump(2)
+            << "\n";
+      }
+      if (!decision.raw.empty()) {
+        std::ofstream(case_out / "model_raw.txt") << decision.raw;
+      }
+
+      std::unordered_map<std::string, std::unordered_set<std::string>> stems_by_zone;
+      std::istringstream cards_in(cards);
+      std::string line;
+      std::string current_zone;
+      while (std::getline(cards_in, line)) {
+        if (line.rfind("## M", 0) == 0) {
+          const auto end = line.find(' ', 3);
+          current_zone =
+              line.substr(3, end == std::string::npos ? std::string::npos : end - 3);
+        } else if (!current_zone.empty() && line.rfind("stems:", 0) == 0) {
+          std::istringstream stem_in(line.substr(6));
+          std::string stem;
+          while (stem_in >> stem) {
+            stems_by_zone[current_zone].insert(stem);
+          }
+        }
+      }
+      std::unordered_set<std::string> selected_stems;
+      for (const auto& selected : decision.selected) {
+        auto sit = stems_by_zone.find(selected);
+        if (sit != stems_by_zone.end()) {
+          selected_stems.insert(sit->second.begin(), sit->second.end());
+        }
+      }
+      auto fixture_stems = [](const nlohmann::json& values) {
+        std::vector<std::string> out;
+        if (values.is_array()) {
+          for (const auto& value : values) {
+            if (value.is_string()) {
+              out.push_back(value.get<std::string>());
+            }
+          }
+        }
+        return out;
+      };
+      const auto expected = fixture_stems(item.value("expected_stems", nlohmann::json::array()));
+      auto operational = expected;
+      if (id == "13_lsp_auto_restart") {
+        operational.push_back("lsp_symbol_provider");
+      } else if (id == "20_cancel_ai_generation") {
+        operational.push_back("busy_strip");
+      }
+      const auto traps = fixture_stems(item.value("trap_stems", nlohmann::json::array()));
+      auto any_stem = [&](const std::vector<std::string>& needles) {
+        return std::any_of(needles.begin(), needles.end(),
+                           [&](const std::string& stem) { return selected_stems.count(stem) > 0; });
+      };
+      const bool row_hit = decision.ok && any_stem(expected);
+      const bool row_op_hit = decision.ok && any_stem(operational);
+      const bool row_trap = decision.ok && any_stem(traps);
+      valid += decision.ok ? 1 : 0;
+      hit += row_hit ? 1 : 0;
+      operational_hit += row_op_hit ? 1 : 0;
+      trap += row_trap ? 1 : 0;
+      nlohmann::json selected_stems_json = nlohmann::json::array();
+      for (const auto& stem : selected_stems) {
+        selected_stems_json.push_back(stem);
+      }
+      rows.push_back({{"id", id},
+                      {"ok", decision.ok},
+                      {"error", decision.error},
+                      {"selected", decision.selected},
+                      {"selected_stems", selected_stems_json},
+                      {"hit", row_hit},
+                      {"operational_hit", row_op_hit},
+                      {"trap", row_trap},
+                      {"triage_ms", triage_ms},
+                      {"reopened", reopened},
+                      {"hypothesis_status", decision.hypothesis_status},
+                      {"next", decision.next},
+                      {"epistemic", epistemic}});
+      std::cout << "==== zone judge " << id << " (" << total << ") ====\n" << std::flush;
+      std::cout << "  " << (decision.ok ? "OK" : "INVALID") << " selected=";
+      for (const auto& selected : decision.selected) {
+        std::cout << selected << " ";
+      }
+      std::cout << "hit=" << row_hit << " op=" << row_op_hit << " trap=" << row_trap
+                << " reopen=" << reopened << "\n"
+                << std::flush;
+      continue;
     } else {
       const fs::path cards_path = cards_root / id / "judge_cards.md";
       cards = read_file(cards_path);

@@ -635,6 +635,43 @@ void test_query_constellations() {
         {"M1", "M2"}, {{"M1", {"src/left.cpp:reader"}}, {"M2", {"src/right.cpp:writer"}}});
     expect(rehomed.ok && rehomed.shortlist == std::vector<std::string>({"M2"}),
            "causal triage canonical targets repair a misplaced zone id");
+    const auto anchor = tuide::registry_parse_causal_anchor_decision(
+        R"({"action":"causal_zone_anchor_v1","anchors":[{"id":"M2","role_guess":"state_owner",)"
+        R"("explains":"posee el flag compartido","does_not_explain":"falta el trigger de escritura",)"
+        R"("expand_from":["src/right.cpp:writer"],"thread":"seguir writer hacia el latch"}],)"
+        R"("hypothesis":"el writer no limpia el flag al cancelar","critical_mass":true,)"
+        R"("retrieval_needed":false,"why":"M2 concentra estado y writer del síntoma"})",
+        {"M1", "M2"}, {{"M1", {"src/left.cpp:reader"}}, {"M2", {"src/right.cpp:writer"}}});
+    expect(anchor.ok && anchor.shortlist == std::vector<std::string>({"M2"}) &&
+               anchor.critical_mass && !anchor.hypothesis.empty(),
+           "causal anchor parses epistemic decision");
+    const auto too_many = tuide::registry_parse_causal_anchor_decision(
+        R"({"action":"causal_zone_anchor_v1","anchors":[)"
+        R"({"id":"M1","role_guess":"trigger","explains":"dispara el flujo A","does_not_explain":"no limpia",)"
+        R"("expand_from":["src/left.cpp:reader"],"thread":"seguir reader"},)"
+        R"({"id":"M2","role_guess":"cleanup","explains":"limpia el flag","does_not_explain":"no dispara",)"
+        R"("expand_from":["src/right.cpp:writer"],"thread":"seguir writer"},)"
+        R"({"id":"M3","role_guess":"consumer","explains":"consume el flag X","does_not_explain":"no escribe",)"
+        R"("expand_from":["src/left.cpp:reader"],"thread":"seguir consumer"}],)"
+        R"("hypothesis":"tres anclas no deben pasar","critical_mass":true,)"
+        R"("retrieval_needed":false,"why":"demasiadas anclas apiladas"})",
+        {"M1", "M2", "M3"},
+        {{"M1", {"src/left.cpp:reader"}},
+         {"M2", {"src/right.cpp:writer"}},
+         {"M3", {"src/left.cpp:reader"}}});
+    expect(!too_many.ok, "causal anchor rejects more than two anchors");
+    const auto truncated = tuide::registry_parse_causal_anchor_decision(
+        std::string("```json\n{\"action\":\"causal_zone_anchor_v1\",\"anchors\":[") +
+            "{\"id\":\"M2\",\"role_guess\":\"state_owner\","
+            "\"explains\":\"posee el flag compartido\","
+            "\"does_not_explain\":\"falta el trigger de escritura\","
+            "\"expand_from\":[\"src/right.cpp:writer\"],"
+            "\"thread\":\"seguir writer hacia el latch\"}],"
+            "\"hypothesis\":\"el writer no limpia el flag al cancelar\","
+            "\"critical_mass\":true,\"retrieval_needed\":false,\"why\":\"La M2 gestiona el esta",
+        {"M1", "M2"}, {{"M1", {"src/left.cpp:reader"}}, {"M2", {"src/right.cpp:writer"}}});
+    expect(truncated.ok && truncated.shortlist == std::vector<std::string>({"M2"}),
+           "causal anchor salvages truncated fenced JSON");
     tuide::RegistryCausalJudgeOpts expanded_opts;
     expanded_opts.max_representatives = 10;
     expanded_opts.max_edges = 24;
@@ -708,6 +745,56 @@ void test_query_constellations() {
       judge_ids);
   expect(promoted.ok && promoted.zones.front().role == "primary",
          "causal judge promotes sole selection to primary");
+  const auto falsified = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","hypothesis_status":"falsified",)"
+      R"("reinvestigate_need":"buscar el cleanup que cancela el flag stuck",)"
+      R"("zones":{"M1":{"verdict":"reject","confidence":0.8,"why":"otro flujo sin cleanup"},)"
+      R"("M2":{"verdict":"reject","confidence":0.7,"why":"solo infraestructura genérica"}},)"
+      R"("selected":[],"next":"reinvestigate","why":"la hipótesis del writer no explica el cancel"})",
+      judge_ids);
+  expect(falsified.ok && falsified.next == "reinvestigate" &&
+             falsified.hypothesis_status == "falsified",
+         "causal synth accepts falsified reinvestigate");
+  const auto sloppy = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","hypothesis_status":"confirmed",)"
+      R"("reinvestigate_need":"","zones":{"M1":{"select":"box::writer","role":"mutator",)"
+      R"("completeness":"complete","confidence":"high",)"
+      R"("why":"writer controla el flag stuck en el núcleo"},)"
+      R"("M2":{"verdict":"reject","confidence":0.7,"why":"otro flujo sin el flag"}},)"
+      R"("selected":["M1"],"next":"verify","why":"síntesis"})",
+      judge_ids);
+  expect(sloppy.ok && sloppy.selected == std::vector<std::string>({"M1"}) &&
+             sloppy.zones.front().role == "primary",
+         "causal synth tolerates sloppy 7B confidence/role/select fields");
+  const auto placeholder = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","hypothesis_status":"confirmed",)"
+      R"("zones":{"M1":{"verdict":"select","role":"primary","completeness":"complete",)"
+      R"("confidence":0.8,"why":"evidencia concreta","contribution":"aporte"},)"
+      R"("M2":{"verdict":"reject","confidence":0.7,"why":"otro flujo sin el flag"}},)"
+      R"("selected":["M1"],"next":"verify","why":"síntesis con evidencia"})",
+      judge_ids);
+  expect(!placeholder.ok, "causal synth rejects copied prompt placeholders");
+  const auto partial_no_expand = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","hypothesis_status":"partial",)"
+      R"("zones":{"M1":{"verdict":"select","role":"primary","completeness":"partial",)"
+      R"("confidence":0.75,"why":"M1 escribe el flag stuck vía writer","contribution":"control del flag"},)"
+      R"("M2":{"verdict":"reject","confidence":0.7,"why":"otro flujo sin el flag"}},)"
+      R"("selected":["M1"],"next":"verify","why":"M1 cubre el mecanismo pedido"})",
+      judge_ids);
+  expect(partial_no_expand.ok && partial_no_expand.zones.front().completeness == "complete" &&
+             partial_no_expand.next == "verify",
+         "causal synth coerces partial without expand_from to complete");
+  const auto veredict_typo = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","hypothesis_status":"partial",)"
+      R"("reinvestigate_need":"falta el builder del contenido de la pestaña about",)"
+      R"("zones":{"M1":{"veredict":"reject","confidence":0.9,)"
+      R"("why":"append_tabs solo crea el header sin contenido"},)"
+      R"("M2":{"verdict":"reject","confidence":0.7,"why":"otro flujo sin settings"}},)"
+      R"("selected":[],"next":"expand","why":"el header no cubre el contenido about"})",
+      judge_ids);
+  expect(veredict_typo.ok && veredict_typo.next == "reinvestigate" &&
+             veredict_typo.hypothesis_status == "falsified",
+         "causal synth maps veredict typo and empty partial to reinvestigate");
   tuide::registry_close(&r);
   fs::remove_all(tmp);
 }

@@ -262,15 +262,22 @@ struct RegistryCausalJudgeOpts {
 
 struct RegistryZoneTriage {
   std::string id;
-  std::string verdict;  // inspect | reject
+  std::string verdict;  // inspect | reject | anchor
   std::string need;
+  std::string explains;
+  std::string does_not_explain;
+  std::string thread;
+  std::string role_guess;
   std::vector<std::string> expand_from;
 };
 
 struct RegistryCausalTriageDecision {
   bool ok = false;
+  std::string action;  // causal_zone_anchor_v1 | causal_zone_triage_v1
   std::vector<RegistryZoneTriage> zones;
   std::vector<std::string> shortlist;
+  std::string hypothesis;
+  bool critical_mass = false;
   bool retrieval_needed = false;
   std::string why;
   std::string raw;
@@ -293,7 +300,9 @@ struct RegistryCausalJudgeDecision {
   bool ok = false;
   std::vector<RegistryZoneVerdict> zones;
   std::vector<std::string> selected;
-  std::string next;  // verify | expand | none
+  std::string next;  // verify | expand | none | reinvestigate
+  std::string hypothesis_status;  // confirmed | partial | falsified
+  std::string reinvestigate_need;
   std::string why;
   std::string raw;
   std::string error;
@@ -350,7 +359,13 @@ bool registry_expand_causal_judge_payload(EffectRegistry* r, const nlohmann::jso
 std::string registry_causal_triage_markdown(const nlohmann::json& payload);
 std::string registry_causal_triage_system_prompt();
 std::string registry_causal_triage_user_prompt(const std::string& cards_markdown);
+std::string registry_causal_anchor_system_prompt();
+std::string registry_causal_anchor_user_prompt(const std::string& cards_markdown,
+                                              const std::string& reopen_need = {});
 RegistryCausalTriageDecision registry_parse_causal_triage_decision(
+    const std::string& raw, const std::vector<std::string>& allowed_zone_ids,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
+RegistryCausalTriageDecision registry_parse_causal_anchor_decision(
     const std::string& raw, const std::vector<std::string>& allowed_zone_ids,
     const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
 nlohmann::json registry_causal_triage_decision_to_json(
@@ -358,6 +373,10 @@ nlohmann::json registry_causal_triage_decision_to_json(
 std::string registry_causal_judge_markdown(const nlohmann::json& payload);
 std::string registry_causal_judge_system_prompt();
 std::string registry_causal_judge_user_prompt(const std::string& cards_markdown);
+std::string registry_causal_synth_system_prompt();
+std::string registry_causal_synth_user_prompt(const std::string& cards_markdown,
+                                             const std::string& hypothesis,
+                                             const std::string& anchor_why = {});
 std::vector<std::string> registry_causal_judge_zone_ids(const std::string& cards_markdown);
 RegistryCausalJudgeDecision registry_parse_causal_judge_decision(
     const std::string& raw, const std::vector<std::string>& allowed_zone_ids);
