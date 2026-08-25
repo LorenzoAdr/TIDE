@@ -3875,7 +3875,8 @@ Component MakeConsolePanel(AppMode* app_mode, DebugModel* model, ShellSession* s
           call_hierarchy_panel->OnEvent(event)) {
         return true;
       }
-      if (git_tab_active_console(app_mode, layout_state) && git_panel->OnEvent(event)) {
+      if (git_tab_active_console(app_mode, layout_state) && layout_state != nullptr &&
+          layout_state->git_mouse_handler && layout_state->git_mouse_handler(event)) {
         return true;
       }
       if (core_analyzer_tab_active(app_mode, layout_state) &&
