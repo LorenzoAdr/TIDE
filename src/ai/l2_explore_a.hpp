@@ -88,10 +88,10 @@ struct ATrailHop {
   std::string path;
   std::string symbol;         // enclosing function/method (bare)
   std::string scope_chain;    // ns → type → fn (outer → inner)
-  std::string signature;      // e.g. void AiController::begin_thinking()
+  std::string signature;      // e.g. void Worker::begin_update()
   std::string control_kind;   // innermost if|switch|for|while|do|try|""
   std::string control_chain;  // nested controls call→…→fn, e.g. "if → switch"
-  std::string control_cond;   // condition text(s), e.g. if (activity == AiThinking)
+  std::string control_cond;   // condition text(s), e.g. if (state == Active)
   int call_line = 0;          // 1-based call site
   std::string snippet;        // control block(s) and/or ±N lines around call
   std::string summary;        // 1–2 lines when compacted as parent
@@ -202,7 +202,7 @@ inline constexpr int kA0MaxCardsTotal = 64;
 inline constexpr int kA0MaxTurns = 4;
 inline constexpr int kA0MaxCharsPerTurn = 8000;
 inline constexpr int kA0MaxNotesChars = 1500;
-inline constexpr int kA0MaxExpandPerTurn = 4;
+// No per-turn expand demote (gold has been the 5th expand). Hard cap is total A1 jobs.
 inline constexpr int kA0MaxExpandTotal = 12;
 inline constexpr int kA1MaxPeeks = 16;
 inline constexpr int kA1MaxTrails = 4;
@@ -215,7 +215,7 @@ inline bool a_effect_summary_enabled() {
 const char* a_expand_modality_name(AExpandModality m);
 AExpandModality parse_a_expand_modality(const std::string& s);
 
-// L0 symptom APIs (busy/spinner/thinking) — A0 prefers trail over dataflow.
+// L0 lifecycle APIs — A0 prefers trail over dataflow.
 std::string a_target_symbol_name(const std::string& target);
 std::string a_stem_from_path(const std::string& path_or_anchor);
 bool a_is_symptom_edge_name(const std::string& name);
@@ -440,6 +440,8 @@ bool a_state_from_json(const nlohmann::json& j, AState* out, std::string* err);
 
 std::string a_notes_markdown(const AState& st);
 std::string a_trail_stacks_markdown(const ATrail& tr);
+// First judge: stacks XOR cond (never both). Stacks win if nonempty.
+bool a_trail_judge_show_stacks(const ATrail& tr);
 
 // Enrich one call-site hop with TS scope chain + control + ±pad snippet.
 // abs_path = absolute file; rel_path for anchors; call_line 1-based.

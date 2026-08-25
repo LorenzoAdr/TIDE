@@ -1,0 +1,370 @@
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "ai/l2_effect_slice.hpp"
+
+struct sqlite3;
+
+namespace tuide {
+
+// ---------------------------------------------------------------------------
+// Contrato del registro persistente (norma; el CLI solo habla por esta API)
+//
+// Identidad — un hecho, un id:
+//   Fn canónica:  fn:{rel_cpp}:{bare_symbol}
+//     Gemelo .hpp/.cpp → un nodo (el .cpp si existe). El .hpp es alias.
+//   Latch:        latch:{stem}:{member}  (nunca latch:member global)
+//   Ctrl:         ctrl:{path}:{line}:{kind}  parent_fn canónico
+//   Handoff:      handoff:{path}:{line}
+//   Hecho:        UNIQUE(from_id, to_id, kind, member) — merge = no-op
+//   seed/prior_sem/mass NO se persisten. Sí: origin, seen_n, fichas.
+//
+// Admisión — qué puede entrar en una oleada:
+//   Solo src/ (tests/fixtures/ si allow_fixtures). Rechazar tests/tools/examples.
+//   Calls y latches ruido se tiran. File-level ≠ fn falsa: inventario.
+//   Hop solo desde anclas seed de la oleada (lo hace effect_slice_build).
+//   Tope kRegistryMaxNewFnPerWave. Inventario grande → files.pending_inventory;
+//   no se tiran todas las fns: se admiten seeds + fns ligadas (hechos / parent
+//   de ctrl) hasta el tope por archivo. Ctrl sin parent fn admitido no entra.
+//   Cosine hop0: items L1 (path+símbolo) primero; cosine rellena hasta top_k. Hops sí expanden a ctrl.
+//
+// Crecer (ingest): transacción. INSERT OR IGNORE + update ficha si card_hash
+//   cambió. Idempotente. Nadie es dueño de un nodo (no se borra “la query 3”).
+//
+// Borrar / invalidar:
+//   refresh --path: reparse; fns desaparecidas → tombstone + borrar hechos.
+//   Archivo ausente: tombstone de todos los nodos de ese path.
+//   gc: purga tombstones con edad; dry-run primero.
+//   Re-ingest del mismo id LEVANTA el tombstone.
+//   Rename: v1 el viejo queda tombstone (sin heurística).
+//
+// Consultar estructural: stats / get / neighbors / path / code (get_code_of).
+// Consultar semántico (v2): embed incremental de fichas (cache por card_hash) +
+//   1 embed de la query + cosine (puerta fn/latch/handoff) + hops.
+//   Trails: PPR (masa por aristas, damp 0.85) + beam de threads. La unidad de
+//   respuesta es el camino, no el nodo. T* de oleada siguen efímeros.
+// Persistencia: <workspace>/.tuide/effect/registry.sqlite  (WAL)
+// ---------------------------------------------------------------------------
+
+inline constexpr int kRegistrySchemaVersion = 2;
+inline constexpr const char* kRegistryEmbedModelDefault = "nomic-embed-text-v1.5-q4_k_m";
+inline constexpr int kRegistryQueryTopK = 16;
+inline constexpr int kRegistryQueryMapStems = 15;
+inline constexpr int kRegistryQueryAnchorMapStems = 8;
+inline constexpr int kRegistryQueryAnchorSeeds = 8;
+inline constexpr int kRegistryQueryHops = 2;
+inline constexpr int kRegistryQueryThreads = 5;
+inline constexpr int kRegistryMaxNewFnPerWave = 400;
+inline constexpr int kRegistryMaxInventoryPerFile = 64;
+inline constexpr int kRegistryPathMaxDepth = 8;
+inline constexpr int kRegistryGcMinAgeQueries = 3;
+
+struct EffectRegistry {
+  sqlite3* db = nullptr;
+  std::string workspace_root;
+  std::string db_path;
+};
+
+struct RegistryIngestMeta {
+  std::string query;
+  std::vector<std::string> seeds;
+  std::string map_path;
+  bool allow_fixtures = false;
+};
+
+struct RegistryGcOpts {
+  int min_age_queries = kRegistryGcMinAgeQueries;
+  bool dry_run = true;
+};
+
+struct RegistryGcReport {
+  int tombstones = 0;
+  int facts_dropped = 0;
+  int applied = 0;
+};
+
+struct RegistryStats {
+  int queries = 0;
+  int files = 0;
+  int pending_inventory = 0;
+  int nodes = 0;
+  int fns = 0;
+  int ctrls = 0;
+  int latches = 0;
+  int handoffs = 0;
+  int facts = 0;
+  int tombstones = 0;
+  int embeddings = 0;
+};
+
+struct RegistryNodeRow {
+  std::string id;
+  std::string kind;
+  std::string path;
+  std::string symbol;
+  std::string stem;
+  int line = 0;
+  std::string parent_fn;
+  std::string ctrl_kind;
+  std::string cond;
+  std::string origin;
+  bool cold = false;
+  std::string card_json;
+  std::string card_hash;
+  int seen_n = 0;
+  std::string tombstone_reason;
+};
+
+struct RegistryFactRow {
+  std::string from_id;
+  std::string to_id;
+  std::string kind;
+  std::string member;
+};
+
+struct RegistryNeighbor {
+  RegistryFactRow fact;
+  RegistryNodeRow node;
+  bool outbound = true;
+};
+
+// is_query=true → prefijo search_query; false → search_document (nomic).
+using RegistryEmbedFn =
+    std::function<bool(bool is_query, const std::string& text, std::vector<float>* out)>;
+using RegistryEmbedManyFn = std::function<bool(const std::vector<std::string>& texts,
+                                               std::vector<std::vector<float>>* out)>;
+
+struct RegistryEmbedOpts {
+  std::string model = kRegistryEmbedModelDefault;
+  bool force = false;
+  bool skip_glue = true;
+  int max_nodes = 4000;
+};
+
+struct RegistryEmbedReport {
+  int considered = 0;
+  int embedded = 0;
+  int skipped_cached = 0;
+  int skipped_glue = 0;
+  int skipped_ctrl = 0;
+  int failed = 0;
+};
+
+struct RegistryBoostFn {
+  std::string path;
+  std::string symbol;
+};
+
+struct RegistryQueryOpts {
+  std::string model = kRegistryEmbedModelDefault;
+  int top_k = kRegistryQueryTopK;
+  int hops = kRegistryQueryHops;
+  std::vector<std::string> hop_kinds;
+  // hop0 cosine. Vacío = fn,latch,handoff (los ctrl no son puerta).
+  std::vector<std::string> seed_kinds;
+  std::vector<std::string> boost_stems;  // fallback por stem si no hay boost_fns
+  std::vector<RegistryBoostFn> boost_fns;  // items L1 en orden
+  int max_per_stem = 2;
+  int threads = kRegistryQueryThreads;
+};
+
+struct RegistryQueryHit {
+  RegistryNodeRow node;
+  float cosine = 0.f;
+  int hop = 0;
+};
+
+struct RegistryQueryResult {
+  std::vector<RegistryQueryHit> hits;
+  std::vector<RegistryQueryHit> expanded;
+};
+
+struct RegistryTrailHop {
+  RegistryNodeRow node;
+  float mass = 0.f;
+  float cosine = 0.f;
+};
+
+struct RegistryTrail {
+  std::string id;
+  float score = 0.f;
+  std::string why;
+  std::vector<std::string> latches;
+  std::vector<RegistryTrailHop> hops;
+};
+
+struct RegistryConstellation {
+  std::string id;
+  std::string center_id;
+  std::string member;
+  float score = 0.f;
+  float mass_coverage = 0.f;
+  std::string why;
+  std::vector<std::string> core_stems;
+  std::vector<std::string> context_stems;
+  std::vector<std::string> primary_stems;
+  std::vector<std::string> peripheral_stems;
+  std::vector<std::string> writers;
+  std::vector<std::string> readers;
+  std::vector<std::string> controls;
+  std::vector<std::string> handoffs;
+  std::vector<RegistryTrailHop> nodes;
+};
+
+struct RegistryMacroConstellation {
+  std::string id;
+  float score = 0.f;
+  float mass_coverage = 0.f;
+  std::string why;
+  std::vector<std::string> nuclei;
+  std::vector<std::vector<std::string>> anchor_groups;
+  std::vector<std::string> primary_stems;
+  std::vector<std::string> merge_witnesses;
+  float merge_strength = 0.f;
+  std::vector<RegistryTrailHop> nodes;
+};
+
+struct RegistryTrailResult {
+  RegistryQueryResult query;
+  std::vector<RegistryTrailHop> seeds;
+  std::vector<RegistryTrail> trails;
+  std::vector<RegistryConstellation> constellations;
+  std::vector<RegistryMacroConstellation> macro_constellations;
+  std::vector<std::string> holes;
+  int subgraph_nodes = 0;
+  int subgraph_facts = 0;
+  float max_cosine = 0.f;
+  int map_boosted = 0;
+  bool weak_gate = false;  // cosine flojo y sin overlap con mapa → A0
+};
+
+struct RegistryCausalJudgeOpts {
+  int max_zones = 5;
+  int max_representatives = 5;
+  int max_edges = 12;
+  int max_trails = 1;
+  int max_uncovered_seeds = 5;
+  // Si no está vacío, emite únicamente estos ids de macrozona.
+  std::vector<std::string> zone_filter;
+  // Targets canónicos solicitados por el triage para expansión dirigida.
+  std::vector<std::string> expand_targets;
+  int expand_hops = 0;
+  bool outline_all_representatives = false;
+  bool promote_uncovered = false;
+};
+
+struct RegistryZoneTriage {
+  std::string id;
+  std::string verdict;  // inspect | reject
+  std::string need;
+  std::vector<std::string> expand_from;
+};
+
+struct RegistryCausalTriageDecision {
+  bool ok = false;
+  std::vector<RegistryZoneTriage> zones;
+  std::vector<std::string> shortlist;
+  bool retrieval_needed = false;
+  std::string why;
+  std::string raw;
+  std::string error;
+};
+
+struct RegistryZoneVerdict {
+  std::string id;
+  std::string verdict;       // select | reject
+  std::string role;          // primary | trigger | state_owner | cleanup | consumer | boundary | none
+  std::string completeness;  // complete | partial | none
+  float confidence = 0.f;
+  std::string why;
+  std::string contribution;
+  std::string missing_link;
+  std::vector<std::string> expand_from;
+};
+
+struct RegistryCausalJudgeDecision {
+  bool ok = false;
+  std::vector<RegistryZoneVerdict> zones;
+  std::vector<std::string> selected;
+  std::string next;  // verify | expand | none
+  std::string why;
+  std::string raw;
+  std::string error;
+};
+
+std::string registry_db_path(const std::string& workspace_root);
+
+bool registry_path_is_header(const std::string& path);
+std::string registry_path_to_cpp(const std::string& path);
+std::string registry_stem_of(const std::string& path);
+std::string registry_canonical_fn_id(const std::string& workspace_root, const std::string& path,
+                                     const std::string& symbol);
+std::string registry_canonical_latch_id(const std::string& stem, const std::string& member);
+std::string registry_canonical_node_id(const std::string& workspace_root, const EffectNode& n);
+
+bool registry_admit_path(const std::string& rel, bool allow_fixtures);
+
+bool registry_open(const std::string& workspace_root, EffectRegistry* out, std::string* err);
+void registry_close(EffectRegistry* r);
+
+bool registry_ingest_slice(EffectRegistry* r, const EffectSlice& slice, const RegistryIngestMeta& meta,
+                           std::string* err);
+bool registry_refresh_path(EffectRegistry* r, const std::string& rel, std::string* err);
+bool registry_gc(EffectRegistry* r, const RegistryGcOpts& opts, RegistryGcReport* report,
+                 std::string* err);
+
+bool registry_stats(EffectRegistry* r, RegistryStats* out, std::string* err);
+bool registry_get(EffectRegistry* r, const std::string& id, RegistryNodeRow* out, std::string* err);
+bool registry_neighbors(EffectRegistry* r, const std::string& id, const std::vector<std::string>& kinds,
+                        const std::string& dir, std::vector<RegistryNeighbor>* out, std::string* err);
+bool registry_path_between(EffectRegistry* r, const std::string& from, const std::string& to,
+                           std::vector<std::string>* node_ids, std::string* err);
+bool registry_pending_files(EffectRegistry* r, std::vector<std::string>* out, std::string* err);
+bool registry_list_files(EffectRegistry* r, std::vector<std::pair<std::string, bool>>* out,
+                         std::string* err);
+
+std::string registry_card_passage(const RegistryNodeRow& n);
+
+bool registry_embed_nodes(EffectRegistry* r, const RegistryEmbedFn& embed,
+                          const RegistryEmbedManyFn& embed_passages, const RegistryEmbedOpts& opts,
+                          RegistryEmbedReport* report, std::string* err);
+bool registry_query(EffectRegistry* r, const std::string& query, const RegistryEmbedFn& embed,
+                    const RegistryQueryOpts& opts, RegistryQueryResult* out, std::string* err);
+bool registry_query_trails(EffectRegistry* r, const std::string& query, const RegistryEmbedFn& embed,
+                           const RegistryQueryOpts& opts, RegistryTrailResult* out, std::string* err);
+bool registry_causal_judge_payload(EffectRegistry* r, const std::string& query,
+                                   const RegistryTrailResult& result,
+                                   const RegistryCausalJudgeOpts& opts, nlohmann::json* out,
+                                   std::string* err);
+bool registry_expand_causal_judge_payload(EffectRegistry* r, const nlohmann::json& base_payload,
+                                          const RegistryCausalTriageDecision& triage,
+                                          const RegistryCausalJudgeOpts& opts,
+                                          nlohmann::json* out, std::string* err);
+std::string registry_causal_triage_markdown(const nlohmann::json& payload);
+std::string registry_causal_triage_system_prompt();
+std::string registry_causal_triage_user_prompt(const std::string& cards_markdown);
+RegistryCausalTriageDecision registry_parse_causal_triage_decision(
+    const std::string& raw, const std::vector<std::string>& allowed_zone_ids,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
+nlohmann::json registry_causal_triage_decision_to_json(
+    const RegistryCausalTriageDecision& decision);
+std::string registry_causal_judge_markdown(const nlohmann::json& payload);
+std::string registry_causal_judge_system_prompt();
+std::string registry_causal_judge_user_prompt(const std::string& cards_markdown);
+std::vector<std::string> registry_causal_judge_zone_ids(const std::string& cards_markdown);
+RegistryCausalJudgeDecision registry_parse_causal_judge_decision(
+    const std::string& raw, const std::vector<std::string>& allowed_zone_ids);
+nlohmann::json registry_causal_judge_decision_to_json(
+    const RegistryCausalJudgeDecision& decision);
+
+nlohmann::json registry_node_to_json(const RegistryNodeRow& n);
+nlohmann::json registry_stats_to_json(const RegistryStats& s);
+
+}  // namespace tuide

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # A0 Effect Summary — batería sin LLM (fichas + veredictos heurísticos).
-# Uso: ./tools/l2_a0_sniff_run.sh [LABEL] [CASE_ID]
+# Uso: ./tools/l2_a0_sniff_run.sh [LABEL] CASE_ID
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 LABEL="${1:-a0_sniff_v1}"
-CASE_ID="${2:-17_ai_spinner_stuck}"
+CASE_ID="${2:?falta CASE_ID}"
 PROMPTS="$ROOT/tests/fixtures/stem_boost_battery/prompts_nl_human.json"
 OUT="$ROOT/.tuide/ai/l2_explore_battery/round_${LABEL}"
 TUIDE="$ROOT/build/tuide"
@@ -54,7 +54,7 @@ fi
 "$L2_CLI" bootstrap $SEEDS_ARG "$PROMPT" >"$CASE_DIR/bootstrap.txt" 2>&1
 
 echo "---- effect-summary-probe (map top-20) ----" | tee "$CASE_DIR/effect_summary_map.txt"
-"$L2_CLI" effect-summary-probe --from-map "$MAP_OUT" --top 20 --seeds spinner,cancel,busy,agent \
+"$L2_CLI" effect-summary-probe --from-map "$MAP_OUT" --top 20 \
   2>&1 | tee -a "$CASE_DIR/effect_summary_map.txt"
 
 A_STATE="$ROOT/.tuide/ai/l2/a_state.json"

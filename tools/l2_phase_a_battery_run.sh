@@ -5,7 +5,7 @@
 # Ejemplos:
 #   ./tools/l2_phase_a_battery_run.sh hybrid_a20_v1
 #   ./tools/l2_phase_a_battery_run.sh hybrid_a20_v1 10_performance_threads_panel
-#   ./tools/l2_phase_a_battery_run.sh smoke_a 17_ai_spinner_stuck only
+#   ./tools/l2_phase_a_battery_run.sh smoke_a CASE_ID only
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

@@ -199,6 +199,20 @@ bool is_markdown_path(const std::string& path) {
   return ext == ".md" || ext == ".markdown";
 }
 
+bool is_html_path(const std::string& path) {
+  if (path.empty()) {
+    return false;
+  }
+  std::string ext = fs::path(path).extension().string();
+  std::transform(ext.begin(), ext.end(), ext.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return ext == ".html" || ext == ".htm" || ext == ".xhtml";
+}
+
+bool is_browser_preview_path(const std::string& path) {
+  return is_markdown_path(path) || is_html_path(path);
+}
+
 
 namespace {
 
@@ -332,6 +346,56 @@ void launch_markdown_browser_async(const std::string& absolute_path,
     } else {
       result.message = launch.message;
       TUIDE_MON("markdown", "launch failed: " + launch.message + " path=" + html_path);
+    }
+    if (on_finished) {
+      on_finished(result);
+    }
+  }).detach();
+}
+
+void launch_html_browser_async(const std::string& absolute_path,
+                               HtmlViewerFinishedCallback on_finished) {
+  std::thread([absolute_path, on_finished = std::move(on_finished)]() {
+    set_current_thread_name("html-open");
+    HtmlLaunchResult result;
+    result.path = absolute_path;
+
+    std::error_code ec;
+    if (!fs::is_regular_file(absolute_path, ec)) {
+      result.message = i18n::tr("html.not_found");
+      if (on_finished) {
+        on_finished(result);
+      }
+      return;
+    }
+
+    if (!has_graphical_display()) {
+      result.message = i18n::tr("html.no_display");
+      TUIDE_MON("html", result.message + " path=" + absolute_path);
+      if (on_finished) {
+        on_finished(result);
+      }
+      return;
+    }
+
+    if (!command_exists("xdg-open")) {
+      result.message = i18n::tr("html.xdg_open_not_found");
+      TUIDE_MON("html", result.message + " path=" + absolute_path);
+      if (on_finished) {
+        on_finished(result);
+      }
+      return;
+    }
+
+    const LaunchAttempt launch = try_launch_xdg_open(absolute_path);
+    result.ok = launch.ok;
+    if (launch.ok) {
+      result.message =
+          i18n::tr_fmt("html.opened", {fs::path(absolute_path).filename().string()});
+      TUIDE_MON("html", "launched path=" + absolute_path);
+    } else {
+      result.message = launch.message;
+      TUIDE_MON("html", "launch failed: " + launch.message + " path=" + absolute_path);
     }
     if (on_finished) {
       on_finished(result);

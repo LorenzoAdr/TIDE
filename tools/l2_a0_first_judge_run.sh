@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Primer turno A0 only — tranche Effect Summary → 1× a_judge con cobertura completa.
-# Uso: ./tools/l2_a0_first_judge_run.sh [LABEL] [CASE_ID] [MAX_CARDS]
+# Uso: ./tools/l2_a0_first_judge_run.sh [LABEL] CASE_ID [MAX_CARDS]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 LABEL="${1:-a0_first_judge_v1}"
-CASE_ID="${2:-17_ai_spinner_stuck}"
+CASE_ID="${2:?falta CASE_ID}"
 MAX_CARDS="${3:-8}"
 PROMPTS="$ROOT/tests/fixtures/stem_boost_battery/prompts_nl_human.json"
 OUT="$ROOT/.tuide/ai/l2_explore_battery/round_${LABEL}"
@@ -74,7 +74,7 @@ cov_path = case_dir / "a0_first/llm/coverage.json"
 if cov_path.exists():
     c = json.loads(cov_path.read_text())
     print("---- coverage.json ----")
-    for k in ("shown", "covered", "verdicts", "full", "busy_strip_in_tranche", "apply_ok"):
+    for k in ("shown", "covered", "verdicts", "full", "expected_stem_in_tranche", "apply_ok"):
         if k in c:
             print(f"  {k}={c[k]}")
     missing = c.get("missing") or []

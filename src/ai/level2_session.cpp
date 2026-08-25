@@ -4313,32 +4313,6 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
       }
       normalized.push_back(v);
     }
-    // Fail-soft: too many expands → keep top-k by queue score (trail preferred), demote rest.
-    int demoted_expand = 0;
-    if (batch_expand > kA0MaxExpandPerTurn) {
-      std::vector<std::size_t> expand_idx;
-      for (std::size_t i = 0; i < normalized.size(); ++i) {
-        if (normalized[i].verdict == AVerdictKind::Expand) {
-          expand_idx.push_back(i);
-        }
-      }
-      std::stable_sort(expand_idx.begin(), expand_idx.end(), [&](std::size_t a, std::size_t b) {
-        const auto& va = normalized[a];
-        const auto& vb = normalized[b];
-        const float sa = a_queue_item_score(ast, va.target) +
-                         (va.expand_with == AExpandModality::Trail ? 1000.f : 0.f);
-        const float sb = a_queue_item_score(ast, vb.target) +
-                         (vb.expand_with == AExpandModality::Trail ? 1000.f : 0.f);
-        return sa > sb;
-      });
-      for (std::size_t k = static_cast<std::size_t>(kA0MaxExpandPerTurn); k < expand_idx.size();
-           ++k) {
-        normalized[expand_idx[k]].verdict = AVerdictKind::Uncertain;
-        normalized[expand_idx[k]].expand_with = AExpandModality::Peek;
-        ++demoted_expand;
-      }
-      batch_expand = kA0MaxExpandPerTurn;
-    }
     if (batch_expand == 0 && batch_reject == 0) {
       out.error = "a0: marca reject en glue o expand si hot/writes/calls cuadra con seeds";
       std::ostringstream obs;
@@ -4394,9 +4368,6 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
     out.phase = st.phase;
     out.summary = "a0 expand=" + std::to_string(batch_expand) + " reject=" +
                   std::to_string(batch_reject);
-    if (demoted_expand > 0) {
-      out.summary += " demoted_expand=" + std::to_string(demoted_expand);
-    }
     return out;
   }
 
@@ -5362,14 +5333,17 @@ std::string Level2Session::build_a_peek_tranche_markdown(const std::string& work
       std::ostringstream trail_out;
       trail_out << a_trail_stacks_markdown(ast.trail);
       trail_out << "\n### Targets válidos (copia literal en a_trail_judge)\n";
-      for (const auto& b : ast.trail.cond_branches) {
-        trail_out << "- `" << b.id << "`\n";
-      }
-      for (const auto& s : ast.trail.pending_stacks) {
-        trail_out << "- `" << s.id << "`\n";
+      if (a_trail_judge_show_stacks(ast.trail)) {
+        for (const auto& s : ast.trail.pending_stacks) {
+          trail_out << "- `" << s.id << "`\n";
+        }
+      } else {
+        for (const auto& b : ast.trail.cond_branches) {
+          trail_out << "- `" << b.id << "`\n";
+        }
       }
       trail_out << "\nResponde `a_trail_judge` con interesting|reject **solo** sobre esos "
-                   "targets (ON|CXL|OFF|LINK|S*). "
+                   "targets. Un juego: o S* o ON|CXL|OFF|LINK, no ambos. "
                    "PROHIBIDO usar nombres de símbolo A0 como target.\n";
       return trail_out.str();
     }
@@ -5420,9 +5394,8 @@ std::string Level2Session::build_a_peek_tranche_markdown(const std::string& work
     out << "## Checklist A0 (OBLIGATORIO — N=" << n_cards << ")\n";
     out << "- verdicts[]: EXACTAMENTE " << n_cards
         << " objetos; copia cada target literal de la lista.\n";
-    out << "- Máximo " << kA0MaxExpandPerTurn
-        << " verdict=expand; prioriza nudge expand:trail + seeds fuertes.\n";
-    out << "- likely_* / weak_seed / no_signal → reject salvo seeds claros.\n";
+    out << "- expand si nudge/hot/seeds cuadra; likely_* / weak_seed / no_signal → reject "
+           "salvo seeds claros.\n";
     out << "- Targets (uno por verdict):\n";
     for (std::size_t i = 0; i < n_cards; ++i) {
       out << "  " << (i + 1) << ". `" << shown.items[i].target << "`\n";
@@ -5745,7 +5718,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     return out;
   }
 
-  // API siblings (clear_busy / agent_busy / cancel_all / same-file map neighbors).
+  // API siblings: generic lifecycle complements and same-file map neighbors.
   {
     const std::string map_last =
         read_file((fs::path(workspace_root) / ".tuide" / "ai" / "map_last.md").string());
@@ -5754,7 +5727,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     if (!siblings.empty()) {
       std::vector<std::string> merged_sib;
       merged_sib.reserve(uniq_targets.size() + siblings.size());
-      // Keep plan order for must-tier head; inject clear/cancel siblings into must head.
+      // Keep plan order for must-tier head; inject lifecycle complements into must head.
       const std::size_t head_n =
           std::min(uniq_targets.size(), static_cast<std::size_t>(kL2MustPlanTargets));
       for (std::size_t i = 0; i < head_n; ++i) {
@@ -5787,8 +5760,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       for (const auto& s : siblings) {
         try_add(s, target_is_lifecycle_clear(s));
       }
-      // Lifecycle clears on .hpp are decls — ensure twin .cpp:Symbol is must-front so the
-      // definition body wins budget over `void cancel_all();`.
+      // Lifecycle clears on .hpp are decls — ensure twin .cpp:Symbol is must-front.
       {
         std::vector<std::string> cpp_defs;
         for (const auto& t : merged_sib) {
@@ -6375,8 +6347,8 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       frag_roles[i] = FragRole::Decl;
     }
     // Symbol-only helpers require a code-like needle hit on the symbol itself.
-    // Lifecycle clear/cancel (busy/agent teardown) are exempt — NL needles rarely
-    // contain the exact identifier, and demoting them to noise drops cancel_all.cpp.
+    // Lifecycle clear/cancel targets are exempt: NL needles rarely contain the
+    // exact complementary identifier.
     if ((frag_roles[i] == FragRole::ApiFn || frag_roles[i] == FragRole::Other) &&
         !target_is_lifecycle_clear(frags[i].target)) {
       const std::string sym = to_lower_copy(symbol_from_plan_target(frags[i].target));
@@ -6405,7 +6377,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
         frag_roles[i] = FragRole::ApiFn;
         frags[i].rank_boost = std::max(frags[i].rank_boost, 170);
       } else if (frag_roles[i] != FragRole::Decl) {
-        frag_roles[i] = FragRole::Decl;  // header cancel_all() stays cheap decl slot
+        frag_roles[i] = FragRole::Decl;
       }
     }
   }
@@ -6580,8 +6552,7 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     }
   }
 
-  // 7B plan order wins, but lifecycle .cpp defs (clear/cancel) beat large set windows
-  // so cancel_all bodies are not starved to empty TRUNCATED fences.
+  // Plan order wins, but lifecycle .cpp definitions beat large activation windows.
   std::stable_sort(pack_order.begin(), pack_order.end(), [&](std::size_t a, std::size_t b) {
     const auto& fa = frags[a];
     const auto& fb = frags[b];
@@ -6597,10 +6568,10 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       const std::string path = path_from_plan_target(f.target);
       const bool hdr = !path.empty() && path_looks_like_header(path);
       if (clear && !hdr) {
-        return 3;  // cancel_all.cpp / clear_busy.cpp
+        return 3;
       }
       if (set && !hdr) {
-        return 2;  // set_busy_spinner body
+        return 2;
       }
       if (clear || set) {
         return 1;  // header decls
@@ -6811,12 +6782,6 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
       if (sym.size() >= 4) {
         prefer.insert(prefer.begin(), sym);
       }
-      if (f.must_keep) {
-        for (const char* k :
-             {"set_busy_spinner", "clear_busy", "agent_busy", "cancel_all", "halted"}) {
-          prefer.insert(prefer.begin(), k);
-        }
-      }
     }
     if (role == FragRole::Layout) {
       prefer.insert(prefer.begin(),
@@ -6847,14 +6812,6 @@ Level2TurnResult Level2Session::apply_plan(const std::string& workspace_root,
     if (f.must_keep && pack_trunc) {
       const std::string sym = symbol_from_plan_target(f.target);
       std::string needle = sym.size() >= 4 ? sym : std::string{};
-      if (needle.empty()) {
-        for (const char* k : {"set_busy_spinner", "clear_busy", "agent_busy", "cancel_all"}) {
-          if (to_lower_copy(f.text).find(k) != std::string::npos) {
-            needle = k;
-            break;
-          }
-        }
-      }
       if (!needle.empty() && to_lower_copy(body).find(to_lower_copy(needle)) == std::string::npos) {
         body = truncate_center_budget(f.text, std::min(remaining, std::max(per, std::size_t{2400})),
                                       tip, {needle}, true);

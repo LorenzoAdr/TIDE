@@ -304,11 +304,7 @@ bool is_noise_write_path(const std::string& path) {
 }
 
 std::string normalize_write_path(const std::string& path, const std::string& rel_path) {
-  if (path.size() > 6 && path.compare(0, 6, "state.") == 0) {
-    if (rel_path.find("busy_strip") != std::string::npos) {
-      return "strip." + path.substr(6);
-    }
-  }
+  (void)rel_path;
   return path;
 }
 
@@ -582,13 +578,6 @@ void detect_hot_from_text(const std::string& body_lower, std::vector<std::string
   tag("subprocess", "popen");
   tag("wake", "wake");
   tag("ui_event", "ui_");
-  // Spinner UI: patrones concretos (no substring "busy"/"spinner" genérico).
-  tag("spinner", "spinner_frame");
-  tag("spinner", "strip.spinner");
-  tag("spinner", "busy_strip");
-  tag("spinner", "busyactivity::");
-  tag("spinner", "ensure_spinner");
-  tag("spinner", "agent_busy");
   // Solo globals reales (g_foo), no substring en pending_responses_.end
   if (body_lower.find(" g_") != std::string::npos ||
       body_lower.rfind("g_", 0) == 0) {
@@ -629,7 +618,7 @@ std::vector<std::string> derive_roles(const BodyScan& scan, const std::vector<st
     add("query");
   }
   for (const auto& h : hot) {
-    if (h == "wake" || h == "ui_event" || h == "spinner") {
+    if (h == "wake" || h == "ui_event") {
       add("ui");
     }
     if (h == "file_io" || h == "network" || h == "subprocess") {
@@ -927,11 +916,10 @@ std::string compute_a0_nudge(const EffectSummary& es, const EffectSummaryQuality
     }
     const std::string s = lower_copy(stem);
     return s.find("ai") != std::string::npos || s.find("ui") != std::string::npos ||
-           s.find("busy") != std::string::npos || s.find("spinner") != std::string::npos ||
            s.find("console") != std::string::npos || s.find("agent") != std::string::npos;
   };
   const bool ui_hot =
-      has_hot("spinner") || has_hot("wake") || has_hot("ui_event") || has_hot("symptom_edge");
+      has_hot("wake") || has_hot("ui_event") || has_hot("symptom_edge");
   const bool glue =
       es.roles.size() == 1 && es.roles[0] == "glue" && es.writes.empty() && !ui_hot;
   const bool mutator =
@@ -1432,9 +1420,6 @@ int effect_summary_lexical_rerank_score(const EffectSummary& es, const EffectSum
   };
   if (has_hot("symptom_edge")) {
     s += 100000;
-  }
-  if (has_hot("spinner")) {
-    s += 35000;
   }
   if (has_hot("ui_event") || has_hot("wake")) {
     s += 35000;

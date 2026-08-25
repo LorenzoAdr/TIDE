@@ -506,11 +506,28 @@ bool WorkspaceModel::open_file_impl(const std::string& absolute_path, bool force
   return true;
 }
 
-void WorkspaceModel::preview_markdown_in_browser(const std::string& absolute_path) {
+void WorkspaceModel::preview_in_browser(const std::string& absolute_path) {
   if (absolute_path.empty()) {
     return;
   }
   const std::string name = fs::path(absolute_path).filename().string();
+  if (is_html_path(absolute_path)) {
+    status_message = i18n::tr_fmt("workspace.html_opening", {name});
+    launch_html_browser_async(absolute_path, [this](const HtmlLaunchResult& result) {
+      if (!enqueue_ui_task) {
+        return;
+      }
+      enqueue_ui_task([this, result]() {
+        status_message =
+            result.ok ? result.message : i18n::tr_fmt("workspace.html_status", {result.message});
+      });
+    });
+    return;
+  }
+
+  if (!is_markdown_path(absolute_path)) {
+    return;
+  }
   status_message = i18n::tr_fmt("workspace.markdown_opening", {name});
 
   launch_markdown_browser_async(absolute_path, [this](const MarkdownLaunchResult& result) {

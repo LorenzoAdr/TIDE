@@ -25,6 +25,38 @@ endif()
 
 include(cmake/Dependencies.cmake)
 
+find_package(SQLite3 QUIET)
+if(SQLite3_FOUND)
+  set(TUIDE_SQLITE_LIB SQLite::SQLite3)
+else()
+  # FETCHCONTENT_FULLY_DISCONNECTED=ON en este árbol: no usar FetchContent.
+  set(_tuide_sqlite_dir "${CMAKE_BINARY_DIR}/_deps/sqlite_amalgamation-src")
+  if(NOT EXISTS "${_tuide_sqlite_dir}/sqlite3.c")
+    set(_tuide_sqlite_zip "${CMAKE_BINARY_DIR}/_deps/sqlite-amalgamation-3460100.zip")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
+    message(STATUS "Downloading SQLite amalgamation 3.46.1…")
+    file(DOWNLOAD
+      "https://www.sqlite.org/2024/sqlite-amalgamation-3460100.zip"
+      "${_tuide_sqlite_zip}"
+      SHOW_PROGRESS
+      TLS_VERIFY ON
+      STATUS _tuide_sqlite_dl)
+    list(GET _tuide_sqlite_dl 0 _tuide_sqlite_dl_code)
+    if(NOT _tuide_sqlite_dl_code EQUAL 0)
+      message(FATAL_ERROR "SQLite amalgamation download failed: ${_tuide_sqlite_dl}")
+    endif()
+    file(ARCHIVE_EXTRACT INPUT "${_tuide_sqlite_zip}" DESTINATION "${CMAKE_BINARY_DIR}/_deps")
+    file(RENAME "${CMAKE_BINARY_DIR}/_deps/sqlite-amalgamation-3460100" "${_tuide_sqlite_dir}")
+  endif()
+  add_library(tuide_sqlite3 STATIC "${_tuide_sqlite_dir}/sqlite3.c")
+  target_include_directories(tuide_sqlite3 PUBLIC "${_tuide_sqlite_dir}")
+  set_target_properties(tuide_sqlite3 PROPERTIES C_STANDARD 99)
+  if(UNIX)
+    target_link_libraries(tuide_sqlite3 PUBLIC m ${CMAKE_DL_LIBS})
+  endif()
+  set(TUIDE_SQLITE_LIB tuide_sqlite3)
+endif()
+
 set(TUIDE_TREE_SITTER_INCLUDE_DIRS
   ${tree_sitter_SOURCE_DIR}/lib/include
   ${tree_sitter_cpp_SOURCE_DIR}/bindings/c
@@ -342,6 +374,8 @@ add_executable(tuide
   src/ai/l2_explore_a_trail.cpp
   src/ai/l2_explore_a_dataflow.cpp
   src/ai/l2_effect_summary.cpp
+  src/ai/l2_effect_slice.cpp
+  src/ai/l2_effect_registry.cpp
   src/ai/l2_brain_local.cpp
   src/ai/l2_brain_remote.cpp
   src/ai/l2_context_budget.cpp
@@ -370,6 +404,7 @@ target_link_libraries(tuide PRIVATE
   ftxui::screen
   cppdap
   ${TUIDE_TREE_SITTER_GRAMMAR_LIBS}
+  ${TUIDE_SQLITE_LIB}
   Threads::Threads
   ${CMAKE_DL_LIBS}
 )
@@ -957,6 +992,57 @@ target_include_directories(l2_trail_build_test PRIVATE
 )
 target_link_libraries(l2_trail_build_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
 
+add_executable(l2_effect_slice_test
+  tests/l2_effect_slice_test.cpp
+  src/ai/l2_effect_slice.cpp
+  src/ai/l2_effect_summary.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_effect_slice_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_effect_slice_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+
+add_executable(l2_effect_registry_test
+  tests/l2_effect_registry_test.cpp
+  src/ai/l2_effect_registry.cpp
+  src/ai/l2_effect_slice.cpp
+  src/ai/l2_effect_summary.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_effect_registry_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_effect_registry_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS} ${TUIDE_SQLITE_LIB})
+target_compile_definitions(l2_effect_registry_test PRIVATE
+  "TUIDE_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
+
 add_executable(l2_pack_review_test
   tests/l2_pack_review_test.cpp
   src/ai/l2_pack_review.cpp
@@ -1016,6 +1102,8 @@ add_executable(l2_harness_cli
   src/ai/l2_explore_a_trail.cpp
   src/ai/l2_explore_a_dataflow.cpp
   src/ai/l2_effect_summary.cpp
+  src/ai/l2_effect_slice.cpp
+  src/ai/l2_effect_registry.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
@@ -1045,7 +1133,7 @@ target_include_directories(l2_harness_cli PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
   ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
 )
-target_link_libraries(l2_harness_cli PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS})
+target_link_libraries(l2_harness_cli PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS} ${TUIDE_SQLITE_LIB})
 tuide_link_pthread(l2_harness_cli)
 
 add_executable(repo_map_test
@@ -1394,6 +1482,8 @@ set(TUIDE_TEST_TARGETS
   l2_action_test
   l2_explore_a_test
   l2_trail_build_test
+  l2_effect_slice_test
+  l2_effect_registry_test
   l2_pack_review_test
   search_replace_test
   llama_backend_test

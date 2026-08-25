@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -13,6 +14,8 @@
 #include "ai/l2_action.hpp"
 #include "ai/l2_brain.hpp"
 #include "ai/l2_effect_summary.hpp"
+#include "ai/l2_effect_slice.hpp"
+#include "ai/l2_effect_registry.hpp"
 #include "ai/l2_explore_a.hpp"
 #include "ai/l2_feat.hpp"
 #include "ai/level2_autonomous_loop.hpp"
@@ -347,10 +350,19 @@ void print_ok_line(const tuide::Level2TurnResult& tr, tuide::Level2Session& sess
 }
 
 void usage() {
-  std::cerr << "Usage: l2_harness_cli bootstrap|tool|tools|plan|turn|done|edit|compile|status|run|run-explore|run-explore-a|trail-probe|trail-judge-shot|dataflow-probe|hunk-try …\n"
+  std::cerr << "Usage: l2_harness_cli bootstrap|tool|tools|plan|turn|done|edit|compile|status|run|run-explore|run-explore-a|trail-probe|slice-probe|registry-ingest|registry-stats|hunk-try …\n"
             << "  run-explore            // loop until pack completo → edit (no edit/compile)\n"
             << "  run-explore-a          // Phase A only: peeks → a_judge/a_done (no pack B)\n"
             << "  trail-probe SYM […]    // sin LLM: call-stacks TS de símbolos (search+scopes)\n"
+            << "  slice-probe SYM […]    // sin LLM: EffectSlice (mapa+fichas → registro + T*)\n"
+            << "  registry-ingest …      // oleada + MERGE en .tuide/effect/registry.sqlite\n"
+            << "  registry-refresh --path P\n"
+            << "  registry-gc [--dry-run|--apply]\n"
+            << "  registry-stats|get|neighbors|path|code|files\n"
+            << "  registry-embed [--force]   // nomic: fichas sucias → embeddings\n"
+            << "  registry-query TEXT [--trails] [--map map.md]  // cosine+hops, PPR threads + constellations\n"
+            << "  zone-judge-shot --cards FILE --case ID  // 1× LLM sobre causal_judge_v1\n"
+            << "  zone-judge-battery --cards-root DIR --out DIR  // un LLM secuencial\n"
             << "  trail-judge-shot [SYM] // 1× LLM: trail mapa L0 → a_trail_judge (caso 17)\n"
             << "  dataflow-probe VAR     // sin LLM: writes/reads/decls vía ripgrep (no LSP)\n"
             << "  effect-summary-probe   // sin LLM: fichas TS (SYM|--from-a-state|--from-map)\n"
@@ -504,6 +516,26 @@ std::vector<tuide::ATrailSearchHit> harness_search_symbol(ToolRegistry* tools,
   return hits;
 }
 
+std::vector<tuide::ATrailSearchHit> harness_rg_symbol(const std::string& root,
+                                                      const std::string& symbol) {
+  std::vector<tuide::ATrailSearchHit> hits;
+  if (symbol.empty()) {
+    return hits;
+  }
+  std::unordered_set<std::string> seen;
+  const fs::path src_dir = fs::path(root) / "src";
+  const std::string cmd = "rg -n --no-heading -F " + shell_quote(symbol) + " " +
+                          shell_quote(src_dir.lexically_normal().string()) +
+                          " 2>/dev/null | head -80";
+  for (auto& h : filter_src_trail_hits(parse_rg_hits(run_cmd(cmd), root))) {
+    const std::string key = h.path + ":" + std::to_string(h.line);
+    if (seen.insert(key).second) {
+      hits.push_back(std::move(h));
+    }
+  }
+  return hits;
+}
+
 int run_trail_probe(ToolRegistry* tools, const std::string& root, int argc, char** argv) {
   std::vector<std::string> symbols;
   std::string path_hint;
@@ -527,7 +559,7 @@ int run_trail_probe(ToolRegistry* tools, const std::string& root, int argc, char
     }
   }
   if (symbols.empty()) {
-    std::cerr << "trail-probe: falta SYM (ej. set_busy_spinner)\n";
+    std::cerr << "trail-probe: falta SYM\n";
     return 2;
   }
 
@@ -551,7 +583,7 @@ int run_trail_probe(ToolRegistry* tools, const std::string& root, int argc, char
     tr.root_stem = sym;
     tr.pending_stacks = stacks;
     tr.cond_branches = tuide::a_trail_build_cond_branches(
-        root, sym, path_hint, {"spinner", "busy", "cancel", "agent_busy"}, search_fn, stacks);
+        root, sym, path_hint, {sym}, search_fn, stacks);
     tuide::ATrailHop root_hop;
     root_hop.symbol = sym;
     root_hop.anchor = tr.root_anchor;
@@ -636,18 +668,1446 @@ int run_trail_probe(ToolRegistry* tools, const std::string& root, int argc, char
   return rc;
 }
 
-// One LLM turn: inject trail pack for a map L0 (e.g. set_busy_spinner) and ask a_trail_judge.
-// Success heuristic for case 17: interesting on a stack whose hops mention begin_thinking / AiController.
-int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc, char** argv) {
-  std::string sym = "set_busy_spinner";
-  std::string path_hint = "src/ui/busy_strip.cpp";
+std::vector<std::string> parse_seeds_csv(const std::string& csv);
+
+bool parse_slice_cli_args(int argc, char** argv, std::vector<std::string>* symbols, std::string* path_hint,
+                          std::string* map_path, std::string* seeds_csv, bool* json_out, bool* expand,
+                          bool* siblings, int* k, int* top_n, bool* commit, const char* help) {
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--path" && i + 1 < argc) {
+      *path_hint = argv[++i];
+    } else if (a == "--from-map" && i + 1 < argc) {
+      *map_path = argv[++i];
+    } else if (a == "--seeds" && i + 1 < argc) {
+      *seeds_csv = argv[++i];
+    } else if (a == "--top" && i + 1 < argc) {
+      *top_n = std::atoi(argv[++i]);
+    } else if (a == "--json") {
+      *json_out = true;
+    } else if (a == "--expand") {
+      *expand = true;
+    } else if (a == "--no-siblings") {
+      *siblings = false;
+    } else if (a == "--commit") {
+      if (commit) {
+        *commit = true;
+      }
+    } else if (a == "--k" && i + 1 < argc) {
+      *k = std::atoi(argv[++i]);
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << help;
+      return false;
+    } else if (!a.empty() && a[0] != '-') {
+      symbols->push_back(a);
+    }
+  }
+  return true;
+}
+
+bool build_slice_from_cli(const std::string& root, const std::vector<std::string>& symbols,
+                          const std::string& path_hint, const std::string& map_path,
+                          const std::string& seeds_csv, int top_n, bool siblings, bool expand,
+                          tuide::EffectSlice* sl, tuide::RegistryIngestMeta* meta, std::string* err) {
+  tuide::EffectSliceSeedIn in;
+  in.query = meta && !meta->query.empty() ? meta->query : "slice-probe";
+  in.add_siblings = siblings;
+  in.seeds = parse_seeds_csv(seeds_csv);
+  in.window_n = tuide::kEffectSliceMaxSeedFn;
+  if (!map_path.empty()) {
+    fs::path mp(map_path);
+    if (!mp.is_absolute()) {
+      mp = fs::path(root) / map_path;
+    }
+    const std::string md = read_file(mp);
+    if (md.empty()) {
+      if (err) {
+        *err = "no se pudo leer " + mp.string();
+      }
+      return false;
+    }
+    tuide::effect_slice_fill_seed_from_map(&in, md, top_n);
+  }
+  for (const auto& sym : symbols) {
+    tuide::EffectSliceSeedFn fn;
+    fn.symbol = sym;
+    fn.path = path_hint;
+    fn.prior_sem = 0.9f;
+    in.map_window.push_back(std::move(fn));
+  }
+  if (in.map_window.empty() && in.inventory_paths.empty()) {
+    if (err) {
+      *err = "falta SYM o --from-map";
+    }
+    return false;
+  }
+  if (!tuide::effect_slice_seed(sl, in, err)) {
+    return false;
+  }
+  tuide::EffectSliceDeps deps;
+  deps.workspace_root = root;
+  deps.search = [root](const std::string& symbol) { return harness_rg_symbol(root, symbol); };
+  if (!tuide::effect_slice_build(sl, deps, err)) {
+    return false;
+  }
+  if (expand) {
+    (void)tuide::effect_slice_expand(sl, deps, err);
+  }
+  if (meta) {
+    meta->query = in.query;
+    meta->seeds = in.seeds;
+    meta->map_path = map_path;
+  }
+  return true;
+}
+
+int commit_slice_to_registry(const std::string& root, const tuide::EffectSlice& sl,
+                             const tuide::RegistryIngestMeta& meta) {
+  tuide::EffectRegistry reg;
+  std::string err;
+  if (!tuide::registry_open(root, &reg, &err)) {
+    std::cerr << "registry-open: " << err << "\n";
+    return 1;
+  }
+  const bool ok = tuide::registry_ingest_slice(&reg, sl, meta, &err);
+  tuide::registry_close(&reg);
+  if (!ok) {
+    std::cerr << "registry-ingest: " << err << "\n";
+    return 1;
+  }
+  std::cout << "registry commit → " << tuide::registry_db_path(root) << "\n";
+  return 0;
+}
+
+int run_slice_probe(ToolRegistry* tools, const std::string& root, int argc, char** argv) {
+  (void)tools;
+  std::vector<std::string> symbols;
+  std::string path_hint;
+  std::string map_path;
+  std::string seeds_csv;
+  bool json_out = false;
+  bool expand = false;
+  bool siblings = true;
+  bool commit = false;
+  int k = tuide::kEffectSliceMaxThreads;
+  int top_n = tuide::kEffectSliceMapTopDefault;
+  if (!parse_slice_cli_args(argc, argv, &symbols, &path_hint, &map_path, &seeds_csv, &json_out,
+                            &expand, &siblings, &k, &top_n, &commit,
+                            "slice-probe SYM [SYM…] [--path hint] [--from-map map.md] [--top N]\n"
+                            "  [--seeds a,b,c] [--json] [--expand] [--no-siblings] [--k N] [--commit]\n"
+                            "  Sin LLM. Mapa rankeado + fichas A0 → registro conjunto + hilos T*.\n"
+                            "  --commit escribe .tuide/effect/registry.sqlite\n")) {
+    return 2;
+  }
+  tuide::EffectSlice sl;
+  tuide::RegistryIngestMeta meta;
+  meta.query = "slice-probe";
+  std::string err;
+  const auto t0 = std::chrono::steady_clock::now();
+  if (!build_slice_from_cli(root, symbols, path_hint, map_path, seeds_csv, top_n, siblings, expand,
+                            &sl, &meta, &err)) {
+    std::cerr << "slice-probe: " << err << "\n";
+    return err == "falta SYM o --from-map" ? 2 : 1;
+  }
+  const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - t0)
+                      .count();
+  (void)k;
+  if (json_out) {
+    auto j = tuide::effect_slice_to_json(sl);
+    j["build_ms"] = ms;
+    std::cout << j.dump(2) << "\n";
+  } else {
+    std::cout << "======== slice-probe ========\n";
+    std::cout << "build_ms=" << ms << "\n";
+    std::cout << tuide::effect_slice_view_markdown(sl);
+    std::cout << "\n### Nodos (resumen)\n";
+    int shown = 0;
+    for (const auto& n : sl.nodes) {
+      if (shown >= 80) {
+        std::cout << "…\n";
+        break;
+      }
+      std::cout << "  " << tuide::effect_node_kind_name(n.kind);
+      if (n.kind == tuide::EffectNodeKind::Ctrl) {
+        std::cout << "/" << tuide::effect_ctrl_kind_name(n.ctrl_kind);
+      }
+      std::cout << "  " << (n.symbol.empty() ? n.id : n.symbol);
+      if (!n.path.empty() && n.kind == tuide::EffectNodeKind::Fn) {
+        std::cout << "  [" << n.path << ":" << n.line << "]";
+      }
+      if (n.mass > 0.001f) {
+        std::cout << "  mass=" << n.mass;
+      }
+      std::cout << "\n";
+      ++shown;
+    }
+  }
+  if (commit) {
+    const int rc = commit_slice_to_registry(root, sl, meta);
+    if (rc != 0) {
+      return rc;
+    }
+  }
+  return sl.nodes.empty() ? 1 : 0;
+}
+
+bool open_registry_or_die(const std::string& root, tuide::EffectRegistry* r) {
+  std::string err;
+  if (!tuide::registry_open(root, r, &err)) {
+    std::cerr << "registry-open: " << err << "\n";
+    return false;
+  }
+  return true;
+}
+
+int run_registry_ingest(const std::string& root, int argc, char** argv) {
+  std::vector<std::string> symbols;
+  std::string path_hint;
+  std::string map_path;
+  std::string seeds_csv;
+  bool json_out = false;
+  bool expand = false;
+  bool siblings = true;
+  int k = tuide::kEffectSliceMaxThreads;
+  int top_n = tuide::kEffectSliceMapTopDefault;
+  if (!parse_slice_cli_args(argc, argv, &symbols, &path_hint, &map_path, &seeds_csv, &json_out,
+                            &expand, &siblings, &k, &top_n, nullptr,
+                            "registry-ingest --from-map map.md [--top N] [--seeds a,b] [SYM…]\n"
+                            "  [--path hint] [--no-siblings] [--json]\n"
+                            "  Oleada (effect_slice_build) + MERGE en .tuide/effect/registry.sqlite\n")) {
+    return 2;
+  }
+  tuide::EffectSlice sl;
+  tuide::RegistryIngestMeta meta;
+  meta.query = "registry-ingest";
+  std::string err;
+  if (!build_slice_from_cli(root, symbols, path_hint, map_path, seeds_csv, top_n, siblings, expand,
+                            &sl, &meta, &err)) {
+    std::cerr << "registry-ingest: " << err << "\n";
+    return err == "falta SYM o --from-map" ? 2 : 1;
+  }
+  const int rc = commit_slice_to_registry(root, sl, meta);
+  if (rc != 0) {
+    return rc;
+  }
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  tuide::RegistryStats st;
+  tuide::registry_stats(&reg, &st, &err);
+  if (json_out) {
+    std::cout << tuide::registry_stats_to_json(st).dump(2) << "\n";
+  } else {
+    std::cout << tuide::registry_stats_to_json(st).dump(2) << "\n";
+  }
+  tuide::registry_close(&reg);
+  return 0;
+}
+
+int run_registry_refresh(const std::string& root, int argc, char** argv) {
+  std::string path;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if ((a == "--path" && i + 1 < argc) || (a == "--path")) {
+      if (a == "--path" && i + 1 < argc) {
+        path = argv[++i];
+      }
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "registry-refresh --path src/foo.cpp\n";
+      return 2;
+    } else if (!a.empty() && a[0] != '-') {
+      path = a;
+    }
+  }
+  if (path.empty()) {
+    std::cerr << "registry-refresh: falta --path\n";
+    return 2;
+  }
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  std::string err;
+  const bool ok = tuide::registry_refresh_path(&reg, path, &err);
+  tuide::registry_close(&reg);
+  if (!ok) {
+    std::cerr << "registry-refresh: " << err << "\n";
+    return 1;
+  }
+  std::cout << "refreshed " << path << "\n";
+  return 0;
+}
+
+int run_registry_gc(const std::string& root, int argc, char** argv) {
+  tuide::RegistryGcOpts opts;
+  opts.dry_run = true;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--apply") {
+      opts.dry_run = false;
+    } else if (a == "--dry-run") {
+      opts.dry_run = true;
+    } else if (a == "--min-age" && i + 1 < argc) {
+      opts.min_age_queries = std::atoi(argv[++i]);
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "registry-gc [--dry-run] [--apply] [--min-age N]\n";
+      return 2;
+    }
+  }
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  tuide::RegistryGcReport report;
+  std::string err;
+  const bool ok = tuide::registry_gc(&reg, opts, &report, &err);
+  tuide::registry_close(&reg);
+  if (!ok) {
+    std::cerr << "registry-gc: " << err << "\n";
+    return 1;
+  }
+  nlohmann::json j = {{"dry_run", opts.dry_run},
+                      {"tombstones", report.tombstones},
+                      {"facts_dropped", report.facts_dropped},
+                      {"applied", report.applied}};
+  std::cout << j.dump(2) << "\n";
+  return 0;
+}
+
+int run_registry_stats(const std::string& root, int argc, char** argv) {
+  (void)argc;
+  (void)argv;
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  tuide::RegistryStats st;
+  std::string err;
+  const bool ok = tuide::registry_stats(&reg, &st, &err);
+  tuide::registry_close(&reg);
+  if (!ok) {
+    std::cerr << "registry-stats: " << err << "\n";
+    return 1;
+  }
+  std::cout << tuide::registry_stats_to_json(st).dump(2) << "\n";
+  return 0;
+}
+
+int run_registry_get(const std::string& root, int argc, char** argv) {
+  std::string id;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "-h" || a == "--help") {
+      std::cerr << "registry-get ID\n";
+      return 2;
+    }
+    if (!a.empty() && a[0] != '-') {
+      id = a;
+    }
+  }
+  if (id.empty()) {
+    std::cerr << "registry-get: falta ID\n";
+    return 2;
+  }
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  tuide::RegistryNodeRow row;
+  std::string err;
+  const bool ok = tuide::registry_get(&reg, id, &row, &err);
+  tuide::registry_close(&reg);
+  if (!ok) {
+    std::cerr << "registry-get: " << err << "\n";
+    return 1;
+  }
+  std::cout << tuide::registry_node_to_json(row).dump(2) << "\n";
+  return 0;
+}
+
+int run_registry_neighbors(const std::string& root, int argc, char** argv) {
+  std::string id;
+  std::string dir;
+  std::string kinds_csv;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--kind" && i + 1 < argc) {
+      kinds_csv = argv[++i];
+    } else if (a == "--dir" && i + 1 < argc) {
+      dir = argv[++i];
+    } else if (a == "--json") {
+      continue;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "registry-neighbors ID [--kind call,write,read,handoff] [--dir out|in]\n";
+      return 2;
+    } else if (!a.empty() && a[0] != '-') {
+      id = a;
+    }
+  }
+  if (id.empty()) {
+    std::cerr << "registry-neighbors: falta ID\n";
+    return 2;
+  }
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  std::vector<tuide::RegistryNeighbor> nbs;
+  std::string err;
+  const bool ok =
+      tuide::registry_neighbors(&reg, id, parse_seeds_csv(kinds_csv), dir, &nbs, &err);
+  tuide::registry_close(&reg);
+  if (!ok) {
+    std::cerr << "registry-neighbors: " << err << "\n";
+    return 1;
+  }
+  nlohmann::json arr = nlohmann::json::array();
+  for (const auto& nb : nbs) {
+    arr.push_back({{"from", nb.fact.from_id},
+                   {"to", nb.fact.to_id},
+                   {"kind", nb.fact.kind},
+                   {"member", nb.fact.member},
+                   {"dir", nb.outbound ? "out" : "in"},
+                   {"node", tuide::registry_node_to_json(nb.node)}});
+  }
+  std::cout << arr.dump(2) << "\n";
+  return 0;
+}
+
+int run_registry_path(const std::string& root, int argc, char** argv) {
+  std::vector<std::string> ids;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "-h" || a == "--help") {
+      std::cerr << "registry-path FROM TO\n";
+      return 2;
+    }
+    if (!a.empty() && a[0] != '-') {
+      ids.push_back(a);
+    }
+  }
+  if (ids.size() < 2) {
+    std::cerr << "registry-path: falta FROM TO\n";
+    return 2;
+  }
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  std::vector<std::string> path;
+  std::string err;
+  const bool ok = tuide::registry_path_between(&reg, ids[0], ids[1], &path, &err);
+  tuide::registry_close(&reg);
+  if (!ok) {
+    std::cerr << "registry-path: " << err << "\n";
+    return 1;
+  }
+  nlohmann::json j = {{"path", path}};
+  std::cout << j.dump(2) << "\n";
+  return 0;
+}
+
+int run_registry_code(const std::string& root, int argc, char** argv) {
+  std::string id;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "-h" || a == "--help") {
+      std::cerr << "registry-code ID\n";
+      return 2;
+    }
+    if (!a.empty() && a[0] != '-') {
+      id = a;
+    }
+  }
+  if (id.empty()) {
+    std::cerr << "registry-code: falta ID\n";
+    return 2;
+  }
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  tuide::RegistryNodeRow row;
+  std::string err;
+  const bool ok = tuide::registry_get(&reg, id, &row, &err);
+  tuide::registry_close(&reg);
+  if (!ok) {
+    std::cerr << "registry-code: " << err << "\n";
+    return 1;
+  }
+  tuide::GetCodeOfRequest req;
+  req.workspace_root = root;
+  req.file = row.path;
+  req.symbol = row.symbol;
+  req.line = row.line;
+  const auto got = tuide::get_code_of(req);
+  if (!got.ok) {
+    std::cerr << "registry-code: " << got.error << "\n";
+    return 1;
+  }
+  std::cout << tuide::format_get_code_of_result(got, row.path);
+  return 0;
+}
+
+int run_registry_files(const std::string& root, int argc, char** argv) {
+  bool pending_only = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--pending" || a == "pending-inventory") {
+      pending_only = true;
+    }
+  }
+  (void)argv;
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  std::string err;
+  nlohmann::json arr = nlohmann::json::array();
+  if (pending_only) {
+    std::vector<std::string> paths;
+    tuide::registry_pending_files(&reg, &paths, &err);
+    for (const auto& p : paths) {
+      arr.push_back({{"path", p}, {"pending_inventory", true}});
+    }
+  } else {
+    std::vector<std::pair<std::string, bool>> files;
+    tuide::registry_list_files(&reg, &files, &err);
+    for (const auto& f : files) {
+      arr.push_back({{"path", f.first}, {"pending_inventory", f.second}});
+    }
+  }
+  tuide::registry_close(&reg);
+  std::cout << arr.dump(2) << "\n";
+  return 0;
+}
+
+bool ensure_embed_backend(const std::string& root, tuide::EmbeddingBackend* backend,
+                           std::string* err) {
+  const AiSettings settings = load_ai_settings(root);
+  auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+  return backend->ensure_ready(settings, progress, err);
+}
+
+int run_registry_embed(const std::string& root, int argc, char** argv) {
+  tuide::RegistryEmbedOpts opts;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--force") {
+      opts.force = true;
+    } else if (a == "--all") {
+      opts.skip_glue = false;
+    } else if (a == "--model" && i + 1 < argc) {
+      opts.model = argv[++i];
+    } else if (a == "--max" && i + 1 < argc) {
+      opts.max_nodes = std::atoi(argv[++i]);
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "registry-embed [--force] [--all] [--max N] [--model id]\n"
+                   "  Embebe fichas cuyo card_hash cambió. --all incluye glue.\n";
+      return 2;
+    }
+  }
+  tuide::EmbeddingBackend backend;
+  std::string err;
+  if (!ensure_embed_backend(root, &backend, &err)) {
+    std::cerr << "registry-embed: " << err << "\n";
+    return 1;
+  }
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  auto one = [&](bool is_query, const std::string& text, std::vector<float>* out) {
+    return is_query ? backend.embed_query(text, out, &err) : backend.embed_passage(text, out, &err);
+  };
+  auto many = [&](const std::vector<std::string>& texts, std::vector<std::vector<float>>* out) {
+    return backend.embed_passages(texts, out, &err);
+  };
+  tuide::RegistryEmbedReport report;
+  const bool ok = tuide::registry_embed_nodes(&reg, one, many, opts, &report, &err);
+  tuide::registry_close(&reg);
+  if (!ok) {
+    std::cerr << "registry-embed: " << err << "\n";
+    return 1;
+  }
+  nlohmann::json j = {{"considered", report.considered},
+                      {"embedded", report.embedded},
+                      {"skipped_cached", report.skipped_cached},
+                      {"skipped_glue", report.skipped_glue},
+                      {"skipped_ctrl", report.skipped_ctrl},
+                      {"failed", report.failed},
+                      {"model", opts.model}};
+  std::cout << j.dump(2) << "\n";
+  return 0;
+}
+
+int run_registry_query(const std::string& root, int argc, char** argv) {
+  std::string query;
+  tuide::RegistryQueryOpts opts;
+  bool want_code = false;
+  bool want_trails = false;
+  bool want_judge_cards = false;
+  bool judge_cards_markdown = false;
+  std::string judge_cards_json_out;
+  std::string map_path;
+  int map_top = tuide::kRegistryQueryMapStems;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--top" && i + 1 < argc) {
+      opts.top_k = std::atoi(argv[++i]);
+    } else if (a == "--hops" && i + 1 < argc) {
+      opts.hops = std::atoi(argv[++i]);
+    } else if (a == "--kind" && i + 1 < argc) {
+      opts.hop_kinds = parse_seeds_csv(argv[++i]);
+    } else if (a == "--model" && i + 1 < argc) {
+      opts.model = argv[++i];
+    } else if (a == "--threads" && i + 1 < argc) {
+      opts.threads = std::atoi(argv[++i]);
+    } else if (a == "--map" && i + 1 < argc) {
+      map_path = argv[++i];
+    } else if (a == "--map-top" && i + 1 < argc) {
+      map_top = std::atoi(argv[++i]);
+    } else if (a == "--trails") {
+      want_trails = true;
+    } else if (a == "--judge-cards") {
+      want_trails = true;
+      want_judge_cards = true;
+    } else if (a == "--judge-cards-md") {
+      want_trails = true;
+      want_judge_cards = true;
+      judge_cards_markdown = true;
+    } else if (a == "--judge-cards-json-out" && i + 1 < argc) {
+      judge_cards_json_out = argv[++i];
+    } else if (a == "--code") {
+      want_code = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "registry-query TEXT [--top K] [--hops N] [--kind call,write] [--trails]\n"
+                   "  [--threads N] [--map map.md] [--map-top N] [--code]\n"
+                   "  [--judge-cards|--judge-cards-md] [--judge-cards-json-out FILE]\n"
+                   "  cosine + hops. --trails: PPR + beam + constelaciones. "
+                   "--map: items L1 (símbolo) ocupan hop0.\n";
+      return 2;
+    } else if (!a.empty() && a[0] != '-') {
+      if (!query.empty()) {
+        query += " ";
+      }
+      query += a;
+    }
+  }
+  if (query.empty()) {
+    std::cerr << "registry-query: falta TEXT\n";
+    return 2;
+  }
+  if (!map_path.empty()) {
+    fs::path mp(map_path);
+    if (!mp.is_absolute()) {
+      mp = fs::path(root) / map_path;
+    }
+    const std::string md = read_file(mp);
+    tuide::EffectSliceSeedIn in;
+    tuide::effect_slice_fill_seed_from_map(&in, md, map_top > 0 ? map_top : tuide::kRegistryQueryMapStems);
+    std::vector<std::string> stems;
+    std::unordered_set<std::string> seen_stems;
+    for (const auto& fn : in.map_window) {
+      if (fn.file_level || fn.symbol.empty() || fn.path.empty()) {
+        continue;
+      }
+      tuide::RegistryBoostFn bf;
+      bf.path = fn.path;
+      bf.symbol = fn.symbol;
+      opts.boost_fns.push_back(std::move(bf));
+      const std::string st = tuide::registry_stem_of(fn.path);
+      if (!st.empty()) {
+        seen_stems.insert(st);
+      }
+    }
+    for (const auto& p : in.inventory_paths) {
+      const std::string st = tuide::registry_stem_of(p);
+      if (st.empty() || !seen_stems.insert(st).second) {
+        continue;
+      }
+      stems.push_back(st);
+    }
+    opts.boost_stems = std::move(stems);
+  }
+  tuide::EmbeddingBackend backend;
+  std::string err;
+  if (!ensure_embed_backend(root, &backend, &err)) {
+    std::cerr << "registry-query: " << err << "\n";
+    return 1;
+  }
+  tuide::EffectRegistry reg;
+  if (!open_registry_or_die(root, &reg)) {
+    return 1;
+  }
+  auto one = [&](bool is_query, const std::string& text, std::vector<float>* out) {
+    return is_query ? backend.embed_query(text, out, &err) : backend.embed_passage(text, out, &err);
+  };
+  if (want_trails) {
+    tuide::RegistryTrailResult res;
+    const bool ok = tuide::registry_query_trails(&reg, query, one, opts, &res, &err);
+    nlohmann::json judge_payload;
+    bool judge_ok = true;
+    if (ok && want_judge_cards) {
+      tuide::RegistryCausalJudgeOpts judge_opts;
+      judge_opts.max_zones = 8;
+      judge_opts.promote_uncovered = true;
+      judge_ok =
+          tuide::registry_causal_judge_payload(&reg, query, res, judge_opts, &judge_payload, &err);
+    }
+    tuide::registry_close(&reg);
+    if (!ok) {
+      std::cerr << "registry-query: " << err << "\n";
+      return 1;
+    }
+    if (!judge_ok) {
+      std::cerr << "registry-query judge cards: " << err << "\n";
+      return 1;
+    }
+    if (want_judge_cards) {
+      if (!judge_cards_json_out.empty()) {
+        fs::path json_out(judge_cards_json_out);
+        if (!json_out.is_absolute()) {
+          json_out = fs::path(root) / json_out;
+        }
+        std::ofstream(json_out) << judge_payload.dump(2) << "\n";
+      }
+      if (judge_cards_markdown) {
+        std::cout << tuide::registry_causal_judge_markdown(judge_payload);
+      } else {
+        std::cout << judge_payload.dump(2) << "\n";
+      }
+      return 0;
+    }
+    nlohmann::json trails = nlohmann::json::array();
+    for (const auto& t : res.trails) {
+      nlohmann::json hops = nlohmann::json::array();
+      for (const auto& h : t.hops) {
+        hops.push_back({{"id", h.node.id},
+                        {"kind", h.node.kind},
+                        {"symbol", h.node.symbol},
+                        {"path", h.node.path},
+                        {"stem", h.node.stem},
+                        {"mass", h.mass},
+                        {"cosine", h.cosine},
+                        {"cond", h.node.cond}});
+      }
+      trails.push_back({{"id", t.id},
+                        {"score", t.score},
+                        {"why", t.why},
+                        {"latches", t.latches},
+                        {"hops", hops}});
+    }
+    nlohmann::json constellations = nlohmann::json::array();
+    for (const auto& c : res.constellations) {
+      nlohmann::json nodes = nlohmann::json::array();
+      for (const auto& h : c.nodes) {
+        nodes.push_back({{"id", h.node.id},
+                         {"kind", h.node.kind},
+                         {"symbol", h.node.symbol},
+                         {"path", h.node.path},
+                         {"stem", h.node.stem},
+                         {"mass", h.mass},
+                         {"cosine", h.cosine},
+                         {"cond", h.node.cond}});
+      }
+      constellations.push_back({{"id", c.id},
+                                {"center_id", c.center_id},
+                                {"member", c.member},
+                                {"score", c.score},
+                                {"mass_coverage", c.mass_coverage},
+                                {"why", c.why},
+                                {"core_stems", c.core_stems},
+                                {"context_stems", c.context_stems},
+                                {"primary_stems", c.primary_stems},
+                                {"peripheral_stems", c.peripheral_stems},
+                                {"writers", c.writers},
+                                {"readers", c.readers},
+                                {"controls", c.controls},
+                                {"handoffs", c.handoffs},
+                                {"nodes", nodes}});
+    }
+    nlohmann::json macro_constellations = nlohmann::json::array();
+    for (const auto& m : res.macro_constellations) {
+      nlohmann::json nodes = nlohmann::json::array();
+      for (const auto& h : m.nodes) {
+        nodes.push_back({{"id", h.node.id},
+                         {"kind", h.node.kind},
+                         {"symbol", h.node.symbol},
+                         {"path", h.node.path},
+                         {"stem", h.node.stem},
+                         {"mass", h.mass},
+                         {"cosine", h.cosine},
+                         {"cond", h.node.cond}});
+      }
+      macro_constellations.push_back({{"id", m.id},
+                                      {"score", m.score},
+                                      {"mass_coverage", m.mass_coverage},
+                                      {"why", m.why},
+                                      {"nuclei", m.nuclei},
+                                      {"anchor_groups", m.anchor_groups},
+                                      {"primary_stems", m.primary_stems},
+                                      {"merge_witnesses", m.merge_witnesses},
+                                      {"merge_strength", m.merge_strength},
+                                      {"nodes", nodes}});
+    }
+    nlohmann::json seeds = nlohmann::json::array();
+    for (const auto& h : res.seeds) {
+      seeds.push_back({{"id", h.node.id},
+                       {"kind", h.node.kind},
+                       {"symbol", h.node.symbol},
+                       {"path", h.node.path},
+                       {"stem", h.node.stem},
+                       {"mass", h.mass},
+                       {"cosine", h.cosine}});
+    }
+    nlohmann::json j = {{"query", query},
+                        {"seeds", seeds},
+                        {"trails", trails},
+                        {"constellations", constellations},
+                        {"macro_constellations", macro_constellations},
+                        {"holes", res.holes},
+                        {"subgraph_nodes", res.subgraph_nodes},
+                        {"subgraph_facts", res.subgraph_facts},
+                        {"max_cosine", res.max_cosine},
+                        {"map_boosted", res.map_boosted},
+                        {"weak_gate", res.weak_gate}};
+    std::cout << j.dump(2) << "\n";
+    return res.trails.empty() && res.constellations.empty() ? 1 : 0;
+  }
+  tuide::RegistryQueryResult res;
+  const bool ok = tuide::registry_query(&reg, query, one, opts, &res, &err);
+  if (!ok) {
+    tuide::registry_close(&reg);
+    std::cerr << "registry-query: " << err << "\n";
+    return 1;
+  }
+  nlohmann::json hits = nlohmann::json::array();
+  for (const auto& h : res.hits) {
+    nlohmann::json row = tuide::registry_node_to_json(h.node);
+    row["cosine"] = h.cosine;
+    row["hop"] = h.hop;
+    hits.push_back(std::move(row));
+  }
+  nlohmann::json expanded = nlohmann::json::array();
+  for (const auto& h : res.expanded) {
+    nlohmann::json row = tuide::registry_node_to_json(h.node);
+    row["cosine"] = h.cosine;
+    row["hop"] = h.hop;
+    expanded.push_back(std::move(row));
+  }
+  nlohmann::json j = {{"query", query}, {"hits", hits}, {"expanded", expanded}};
+  std::cout << j.dump(2) << "\n";
+  if (want_code) {
+    for (const auto& h : res.hits) {
+      if (h.node.kind != "fn" || h.node.path.empty()) {
+        continue;
+      }
+      tuide::GetCodeOfRequest req;
+      req.workspace_root = root;
+      req.file = h.node.path;
+      req.symbol = h.node.symbol;
+      req.line = h.node.line;
+      const auto got = tuide::get_code_of(req);
+      std::cout << "\n======== code " << h.node.id << " ========\n";
+      if (got.ok) {
+        std::cout << tuide::format_get_code_of_result(got, h.node.path);
+      } else {
+        std::cout << got.error << "\n";
+      }
+    }
+  }
+  tuide::registry_close(&reg);
+  return res.hits.empty() ? 1 : 0;
+}
+
+int run_zone_judge_shot(const std::string& root, int argc, char** argv) {
+  std::string cards_path;
   std::string instruction;
-  std::string gold_needle = "begin_thinking";
+  std::string case_id;
+  std::string out_dir;
+  std::string expect_zone;
+  std::string model_id;
+  bool dry = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--cards" && i + 1 < argc) {
+      cards_path = argv[++i];
+    } else if (a == "--instruction" && i + 1 < argc) {
+      instruction = argv[++i];
+    } else if (a == "--case" && i + 1 < argc) {
+      case_id = argv[++i];
+    } else if (a == "--out" && i + 1 < argc) {
+      out_dir = argv[++i];
+    } else if (a == "--expect" && i + 1 < argc) {
+      expect_zone = argv[++i];
+    } else if (a == "--model-id" && i + 1 < argc) {
+      model_id = argv[++i];
+    } else if (a == "--dry") {
+      dry = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "zone-judge-shot --cards FILE (--case ID|--instruction TEXT)\n"
+                   "                [--out DIR] [--expect M1] [--dry]\n"
+                   "  Una llamada LLM sobre fichas causal_judge_v1; conserva prompt y decisión.\n";
+      return 2;
+    }
+  }
+  if (!case_id.empty() && instruction.empty()) {
+    const fs::path prompts =
+        fs::path(root) / "tests/fixtures/stem_boost_battery/prompts_nl_human.json";
+    std::ifstream in(prompts);
+    nlohmann::json arr;
+    if (!in) {
+      std::cerr << "zone-judge-shot: no se pudo leer " << prompts << "\n";
+      return 2;
+    }
+    in >> arr;
+    for (const auto& item : arr) {
+      if (item.value("id", "") == case_id) {
+        instruction = item.value("prompt", "");
+        break;
+      }
+    }
+  }
+  if (cards_path.empty() || instruction.empty()) {
+    std::cerr << "zone-judge-shot: requiere --cards y --case/--instruction\n";
+    return 2;
+  }
+  fs::path cards_file(cards_path);
+  if (!cards_file.is_absolute()) {
+    cards_file = fs::path(root) / cards_file;
+  }
+  const std::string cards = read_file(cards_file);
+  const auto zone_ids = tuide::registry_causal_judge_zone_ids(cards);
+  if (cards.empty() || zone_ids.empty()) {
+    std::cerr << "zone-judge-shot: fichas vacías o sin ids M*: " << cards_file << "\n";
+    return 2;
+  }
+  const std::string system = tuide::registry_causal_judge_system_prompt();
+  const std::string user =
+      "## Consulta\n" + instruction + "\n\n" + tuide::registry_causal_judge_user_prompt(cards);
+  if (!out_dir.empty()) {
+    fs::path output(out_dir);
+    if (!output.is_absolute()) {
+      output = fs::path(root) / output;
+    }
+    fs::create_directories(output);
+    std::ofstream(output / "system.txt") << system;
+    std::ofstream(output / "user.md") << user;
+    std::ofstream(output / "cards.md") << cards;
+    out_dir = output.string();
+  }
+  std::cout << "======== zone-judge-shot ========\n"
+            << "case=" << (case_id.empty() ? "custom" : case_id) << " zones=";
+  for (std::size_t i = 0; i < zone_ids.size(); ++i) {
+    std::cout << (i ? "," : "") << zone_ids[i];
+  }
+  std::cout << " prompt_chars=" << system.size() + user.size() << "\n";
+  if (dry) {
+    std::cout << user << "\ndry: no LLM\n";
+    return 0;
+  }
+
+  AiSettings settings = load_ai_settings(root);
+  if (!model_id.empty()) {
+    settings.level2.model_id = model_id;
+    settings.level2.model_path.clear();
+  }
+  if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
+    std::cerr << "zone-judge-shot: ai.level2.mode debe ser local|remote (ahora="
+              << settings.level2_mode << ")\n";
+    return 2;
+  }
+  tuide::LocalL2Brain brain;
+  std::string err;
+  auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+  if (!brain.ensure_ready(settings, progress, &err)) {
+    std::cerr << "zone-judge-shot: ensure_ready: " << err << "\n";
+    return 1;
+  }
+  tuide::L2BrainRequest request;
+  request.system_prompt = system;
+  request.user_prompt = user;
+  request.phase = "causal_zone_judge";
+  request.max_tokens =
+      std::min(384, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 384);
+  request.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+  request.temperature = 0.05f;
+  std::cout << "L2 ▸ zone-judge-shot (" << brain.name() << ")…\n";
+  const auto response = brain.propose(request, nullptr);
+  if (!response.ok) {
+    std::cerr << "LLM FAIL: " << response.error << "\n";
+    return 1;
+  }
+  auto decision =
+      tuide::registry_parse_causal_judge_decision(response.text, zone_ids);
+  if (decision.ok) {
+    for (const auto& verdict : decision.zones) {
+      for (const auto& symbol : verdict.expand_from) {
+        if (cards.find(symbol) == std::string::npos) {
+          decision.ok = false;
+          decision.error = "expand_from no pertenece a la ficha " + verdict.id + ": " + symbol;
+          break;
+        }
+      }
+      if (!decision.ok) {
+        break;
+      }
+    }
+  }
+  const nlohmann::json decision_json =
+      tuide::registry_causal_judge_decision_to_json(decision);
+  if (!out_dir.empty()) {
+    std::ofstream(fs::path(out_dir) / "model_raw.txt") << response.text;
+    std::ofstream(fs::path(out_dir) / "decision.json") << decision_json.dump(2) << "\n";
+  }
+  std::cout << "\n--- model ---\n" << response.text << "\n--- decision ---\n"
+            << decision_json.dump(2) << "\n";
+  if (!decision.ok) {
+    return 1;
+  }
+  if (!expect_zone.empty()) {
+    const bool hit =
+        std::find(decision.selected.begin(), decision.selected.end(), expect_zone) !=
+        decision.selected.end();
+    std::cout << "EXPECT " << expect_zone << ": " << (hit ? "PASS" : "FAIL") << "\n";
+    return hit ? 0 : 1;
+  }
+  return 0;
+}
+
+std::unordered_map<std::string, std::vector<std::string>> triage_targets_by_zone(
+    const nlohmann::json& payload) {
+  std::unordered_map<std::string, std::vector<std::string>> out;
+  for (const auto& zone : payload.value("zones", nlohmann::json::array())) {
+    const std::string id = zone.value("id", "");
+    if (id.empty()) {
+      continue;
+    }
+    std::unordered_set<std::string> seen;
+    std::function<void(const nlohmann::json&)> visit = [&](const nlohmann::json& value) {
+      if (value.is_object()) {
+        if (value.contains("target") && value["target"].is_string()) {
+          const std::string target = value["target"].get<std::string>();
+          if (!target.empty() && seen.insert(target).second) {
+            out[id].push_back(target);
+          }
+        }
+        for (auto it = value.begin(); it != value.end(); ++it) {
+          visit(it.value());
+        }
+      } else if (value.is_array()) {
+        for (const auto& item : value) {
+          visit(item);
+        }
+      }
+    };
+    visit(zone);
+  }
+  return out;
+}
+
+std::vector<std::string> zone_ids_from_payload(const nlohmann::json& payload) {
+  std::vector<std::string> out;
+  for (const auto& zone : payload.value("zones", nlohmann::json::array())) {
+    const std::string id = zone.value("id", "");
+    if (!id.empty()) {
+      out.push_back(id);
+    }
+  }
+  return out;
+}
+
+bool target_matches_query(const std::string& target, const std::string& query) {
+  std::string lower_query = query;
+  std::transform(lower_query.begin(), lower_query.end(), lower_query.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  const auto colon = target.rfind(':');
+  std::string symbol = colon == std::string::npos ? target : target.substr(colon + 1);
+  std::string token;
+  for (char c : symbol + "_") {
+    if (std::isalnum(static_cast<unsigned char>(c))) {
+      token.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+      continue;
+    }
+    if (token.size() >= 4 && lower_query.find(token) != std::string::npos) {
+      return true;
+    }
+    token.clear();
+  }
+  return false;
+}
+
+int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
+  std::string cards_root_arg;
+  std::string out_arg;
+  std::string start_at;
+  std::string only_case;
+  std::string model_id;
+  bool two_pass = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--cards-root" && i + 1 < argc) {
+      cards_root_arg = argv[++i];
+    } else if (a == "--out" && i + 1 < argc) {
+      out_arg = argv[++i];
+    } else if (a == "--start-at" && i + 1 < argc) {
+      start_at = argv[++i];
+    } else if (a == "--only" && i + 1 < argc) {
+      only_case = argv[++i];
+    } else if (a == "--model-id" && i + 1 < argc) {
+      model_id = argv[++i];
+    } else if (a == "--two-pass") {
+      two_pass = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "zone-judge-battery --cards-root DIR --out DIR [--start-at ID] [--only ID] [--two-pass]\n"
+                   "  Un único L2Brain; --two-pass hace triage, expansión y juicio.\n";
+      return 2;
+    }
+  }
+  if (cards_root_arg.empty() || out_arg.empty()) {
+    std::cerr << "zone-judge-battery: requiere --cards-root y --out\n";
+    return 2;
+  }
+  fs::path cards_root(cards_root_arg);
+  fs::path output_root(out_arg);
+  if (!cards_root.is_absolute()) {
+    cards_root = fs::path(root) / cards_root;
+  }
+  if (!output_root.is_absolute()) {
+    output_root = fs::path(root) / output_root;
+  }
+  fs::create_directories(output_root);
+  const fs::path prompts_path =
+      fs::path(root) / "tests/fixtures/stem_boost_battery/prompts_nl_human.json";
+  std::ifstream prompts_in(prompts_path);
+  nlohmann::json cases;
+  if (!prompts_in) {
+    std::cerr << "zone-judge-battery: no se pudo leer " << prompts_path << "\n";
+    return 2;
+  }
+  prompts_in >> cases;
+
+  AiSettings settings = load_ai_settings(root);
+  if (!model_id.empty()) {
+    settings.level2.model_id = model_id;
+    settings.level2.model_path.clear();
+  }
+  tuide::LocalL2Brain brain;
+  std::string err;
+  auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+  if (!brain.ensure_ready(settings, progress, &err)) {
+    std::cerr << "zone-judge-battery: ensure_ready: " << err << "\n";
+    return 1;
+  }
+  const std::string system = tuide::registry_causal_judge_system_prompt();
+  tuide::EffectRegistry expansion_registry;
+  if (two_pass && !tuide::registry_open(root, &expansion_registry, &err)) {
+    std::cerr << "zone-judge-battery: registry: " << err << "\n";
+    return 1;
+  }
+  bool started = start_at.empty();
+  int total = 0;
+  int valid = 0;
+  int hit = 0;
+  int operational_hit = 0;
+  int trap = 0;
+  nlohmann::json rows = nlohmann::json::array();
+  for (const auto& item : cases) {
+    const std::string id = item.value("id", "");
+    if (!only_case.empty() && id != only_case) {
+      continue;
+    }
+    if (!started) {
+      started = id == start_at;
+    }
+    if (!started || id.empty()) {
+      continue;
+    }
+    ++total;
+    const fs::path case_out = output_root / id;
+    fs::create_directories(case_out);
+    const std::string instruction = item.value("prompt", "");
+    std::string cards;
+    std::vector<std::string> zone_ids;
+    if (two_pass) {
+      const fs::path payload_path = cards_root / id / "judge_cards.json";
+      nlohmann::json base_payload;
+      try {
+        base_payload = nlohmann::json::parse(read_file(payload_path));
+      } catch (...) {
+        rows.push_back({{"id", id}, {"ok", false}, {"error", "missing_payload"}});
+        continue;
+      }
+      const std::string triage_cards = tuide::registry_causal_triage_markdown(base_payload);
+      const auto triage_ids = zone_ids_from_payload(base_payload);
+      const auto allowed_targets = triage_targets_by_zone(base_payload);
+      if (triage_ids.empty()) {
+        rows.push_back({{"id", id}, {"ok", false}, {"error", "empty_triage"}});
+        continue;
+      }
+      tuide::L2BrainRequest triage_request;
+      triage_request.system_prompt = tuide::registry_causal_triage_system_prompt();
+      triage_request.user_prompt =
+          "## Consulta\n" + instruction + "\n\n" +
+          tuide::registry_causal_triage_user_prompt(triage_cards);
+      triage_request.phase = "causal_zone_triage";
+      triage_request.max_tokens =
+          std::min(192, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 192);
+      triage_request.n_ctx =
+          std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+      triage_request.temperature = 0.05f;
+      const auto triage_t0 = std::chrono::steady_clock::now();
+      const auto triage_response = brain.propose(triage_request, nullptr);
+      const int64_t triage_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - triage_t0)
+                                    .count();
+      std::ofstream(case_out / "triage_system.txt") << triage_request.system_prompt;
+      std::ofstream(case_out / "triage_user.md") << triage_request.user_prompt;
+      std::ofstream(case_out / "triage_cards.md") << triage_cards;
+      std::ofstream(case_out / "triage_raw.txt") << triage_response.text;
+      if (!triage_response.ok) {
+        rows.push_back({{"id", id},
+                        {"ok", false},
+                        {"error", triage_response.error},
+                        {"triage_ms", triage_ms}});
+        continue;
+      }
+      auto triage = tuide::registry_parse_causal_triage_decision(
+          triage_response.text, triage_ids, allowed_targets);
+      if (triage.ok && triage.shortlist.size() < 3) {
+        std::unordered_set<std::string> selected(triage.shortlist.begin(),
+                                                 triage.shortlist.end());
+        std::unordered_set<std::string> selected_context;
+        for (const auto& zone : base_payload["zones"]) {
+          if (!selected.count(zone.value("id", ""))) {
+            continue;
+          }
+          for (const auto& stem : zone.value("context_stems", nlohmann::json::array())) {
+            if (stem.is_string()) {
+              selected_context.insert(stem.get<std::string>());
+            }
+          }
+        }
+        for (const auto& zone : base_payload["zones"]) {
+          if (triage.shortlist.size() >= 3) {
+            break;
+          }
+          const std::string candidate = zone.value("id", "");
+          if (candidate.empty() || selected.count(candidate)) {
+            continue;
+          }
+          bool linked_context = false;
+          for (const auto& stem : zone.value("primary_stems", nlohmann::json::array())) {
+            linked_context =
+                linked_context ||
+                (stem.is_string() && selected_context.count(stem.get<std::string>()) > 0);
+          }
+          const auto targets_it = allowed_targets.find(candidate);
+          if (!linked_context || targets_it == allowed_targets.end()) {
+            continue;
+          }
+          auto target_it = std::find_if(targets_it->second.begin(), targets_it->second.end(),
+                                        [&](const std::string& target) {
+                                          return target_matches_query(target, instruction);
+                                        });
+          if (target_it == targets_it->second.end()) {
+            continue;
+          }
+          tuide::RegistryZoneTriage complement;
+          complement.id = candidate;
+          complement.verdict = "inspect";
+          complement.need = "comprobar brazo causal complementario enlazado por contexto";
+          complement.expand_from = {*target_it};
+          triage.zones.push_back(std::move(complement));
+          triage.shortlist.push_back(candidate);
+          selected.insert(candidate);
+        }
+      }
+      std::ofstream(case_out / "triage.json")
+          << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
+      if (!triage.ok || triage.shortlist.empty()) {
+        rows.push_back({{"id", id},
+                        {"ok", false},
+                        {"error", triage.ok ? "retrieval_gap" : triage.error},
+                        {"retrieval_needed", triage.retrieval_needed},
+                        {"triage_ms", triage_ms}});
+        continue;
+      }
+      tuide::RegistryCausalJudgeOpts expanded_opts;
+      expanded_opts.max_zones = 3;
+      expanded_opts.max_representatives = 10;
+      expanded_opts.max_edges = 24;
+      expanded_opts.max_trails = 2;
+      expanded_opts.expand_hops = 2;
+      nlohmann::json expanded_payload;
+      if (!tuide::registry_expand_causal_judge_payload(
+              &expansion_registry, base_payload, triage, expanded_opts, &expanded_payload, &err)) {
+        rows.push_back({{"id", id}, {"ok", false}, {"error", err}, {"triage_ms", triage_ms}});
+        continue;
+      }
+      std::ofstream(case_out / "cards_expanded.json") << expanded_payload.dump(2) << "\n";
+      cards = tuide::registry_causal_judge_markdown(expanded_payload);
+      zone_ids = zone_ids_from_payload(expanded_payload);
+      std::ofstream(case_out / "cards_expanded.md") << cards;
+    } else {
+      const fs::path cards_path = cards_root / id / "judge_cards.md";
+      cards = read_file(cards_path);
+      zone_ids = tuide::registry_causal_judge_zone_ids(cards);
+    }
+    if (cards.empty() || zone_ids.empty()) {
+      rows.push_back({{"id", id}, {"ok", false}, {"error", "missing_cards"}});
+      continue;
+    }
+    const std::string user =
+        "## Consulta\n" + instruction + "\n\n" + tuide::registry_causal_judge_user_prompt(cards);
+    tuide::L2BrainRequest request;
+    request.system_prompt = system;
+    request.user_prompt = user;
+    request.phase = "causal_zone_judge";
+    const int judge_token_cap = 384;
+    request.max_tokens = std::min(
+        judge_token_cap,
+        settings.level2.max_tokens > 0 ? settings.level2.max_tokens : judge_token_cap);
+    request.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+    request.temperature = 0.05f;
+    std::cout << "==== zone judge " << id << " (" << total << ") ====\n";
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto response = brain.propose(request, nullptr);
+    const int64_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - t0)
+                                   .count();
+    std::ofstream(case_out / "system.txt") << system;
+    std::ofstream(case_out / "user.md") << user;
+    std::ofstream(case_out / "cards.md") << cards;
+    std::ofstream(case_out / "model_raw.txt") << response.text;
+    if (!response.ok) {
+      rows.push_back(
+          {{"id", id}, {"ok", false}, {"error", response.error}, {"elapsed_ms", elapsed_ms}});
+      std::cout << "  FAIL backend: " << response.error << "\n";
+      continue;
+    }
+    auto decision = tuide::registry_parse_causal_judge_decision(response.text, zone_ids);
+    if (decision.ok) {
+      for (const auto& verdict : decision.zones) {
+        for (const auto& symbol : verdict.expand_from) {
+          if (cards.find(symbol) == std::string::npos) {
+            decision.ok = false;
+            decision.error =
+                "expand_from no pertenece a la ficha " + verdict.id + ": " + symbol;
+            break;
+          }
+        }
+        if (!decision.ok) {
+          break;
+        }
+      }
+    }
+    const nlohmann::json decision_json =
+        tuide::registry_causal_judge_decision_to_json(decision);
+    std::ofstream(case_out / "decision.json") << decision_json.dump(2) << "\n";
+
+    std::unordered_map<std::string, std::unordered_set<std::string>> stems_by_zone;
+    std::istringstream cards_in(cards);
+    std::string line;
+    std::string current_zone;
+    while (std::getline(cards_in, line)) {
+      if (line.rfind("## M", 0) == 0) {
+        const auto end = line.find(' ', 3);
+        current_zone =
+            line.substr(3, end == std::string::npos ? std::string::npos : end - 3);
+      } else if (!current_zone.empty() && line.rfind("stems:", 0) == 0) {
+        std::istringstream stem_in(line.substr(6));
+        std::string stem;
+        while (stem_in >> stem) {
+          stems_by_zone[current_zone].insert(stem);
+        }
+      }
+    }
+    std::unordered_set<std::string> selected_stems;
+    for (const auto& selected : decision.selected) {
+      auto sit = stems_by_zone.find(selected);
+      if (sit != stems_by_zone.end()) {
+        selected_stems.insert(sit->second.begin(), sit->second.end());
+      }
+    }
+    auto fixture_stems = [](const nlohmann::json& values) {
+      std::vector<std::string> out;
+      if (values.is_array()) {
+        for (const auto& value : values) {
+          if (value.is_string()) {
+            out.push_back(value.get<std::string>());
+          }
+        }
+      }
+      return out;
+    };
+    const auto expected = fixture_stems(item.value("expected_stems", nlohmann::json::array()));
+    auto operational = expected;
+    if (id == "13_lsp_auto_restart") {
+      operational.push_back("lsp_symbol_provider");
+    } else if (id == "20_cancel_ai_generation") {
+      operational.push_back("busy_strip");
+    }
+    const auto traps = fixture_stems(item.value("trap_stems", nlohmann::json::array()));
+    auto any_stem = [&](const std::vector<std::string>& needles) {
+      return std::any_of(needles.begin(), needles.end(),
+                         [&](const std::string& stem) { return selected_stems.count(stem) > 0; });
+    };
+    const bool row_hit = decision.ok && any_stem(expected);
+    const bool row_op_hit = decision.ok && any_stem(operational);
+    const bool row_trap = decision.ok && any_stem(traps);
+    valid += decision.ok ? 1 : 0;
+    hit += row_hit ? 1 : 0;
+    operational_hit += row_op_hit ? 1 : 0;
+    trap += row_trap ? 1 : 0;
+    nlohmann::json selected_stems_json = nlohmann::json::array();
+    for (const auto& stem : selected_stems) {
+      selected_stems_json.push_back(stem);
+    }
+    rows.push_back({{"id", id},
+                    {"ok", decision.ok},
+                    {"error", decision.error},
+                    {"selected", decision.selected},
+                    {"selected_stems", selected_stems_json},
+                    {"hit", row_hit},
+                    {"operational_hit", row_op_hit},
+                    {"trap", row_trap},
+                    {"elapsed_ms", elapsed_ms}});
+    std::cout << "  " << (decision.ok ? "OK" : "INVALID") << " selected=";
+    for (const auto& selected : decision.selected) {
+      std::cout << selected << " ";
+    }
+    std::cout << "hit=" << row_hit << " op=" << row_op_hit << " trap=" << row_trap
+              << " ms=" << elapsed_ms << "\n";
+  }
+  const nlohmann::json summary = {{"total", total},
+                                  {"valid", valid},
+                                  {"hit", hit},
+                                  {"operational_hit", operational_hit},
+                                  {"trap", trap}};
+  std::ofstream(output_root / "results.json") << rows.dump(2) << "\n";
+  std::ofstream(output_root / "summary.json") << summary.dump(2) << "\n";
+  std::cout << "==== summary ====\n" << summary.dump(2) << "\n";
+  if (two_pass) {
+    tuide::registry_close(&expansion_registry);
+  }
+  return valid == total ? 0 : 1;
+}
+
+// One LLM turn: inject a trail pack for a supplied L0 and ask a_trail_judge.
+int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc, char** argv) {
+  std::string sym;
+  std::string path_hint;
+  std::string instruction;
+  std::string gold_needle;
   std::string out_dir;
   bool dry = false;
   bool do_suspect = true;
-  bool require_gold = true;
-  std::string gold_var = "agent_busy_";
+  bool require_gold = false;
+  std::string gold_var;
   for (int i = 2; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--path" && i + 1 < argc) {
@@ -680,6 +2140,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
       }
     } else if (a == "--gold" && i + 1 < argc) {
       gold_needle = argv[++i];
+      require_gold = true;
     } else if (a == "--gold-var" && i + 1 < argc) {
       gold_var = argv[++i];
     } else if (a == "--out" && i + 1 < argc) {
@@ -695,7 +2156,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
     } else if (a == "-h" || a == "--help") {
       std::cerr
           << "trail-judge-shot [SYM] [--path hint] [--case ID|--instruction TEXT]\n"
-             "                 [--gold begin_thinking] [--gold-var agent_busy_]\n"
+             "                 [--gold NEEDLE] [--gold-var VARIABLE]\n"
              "                 [--out DIR] [--dry] [--suspect|--no-suspect]\n"
              "                 [--no-gold-abort]\n"
              "  1) trail → a_trail_judge  2) si interesting → ¿variable crítica?\n"
@@ -705,26 +2166,9 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
       sym = a;
     }
   }
-  if (instruction.empty()) {
-    // Default: case 17
-    const fs::path prompts =
-        fs::path(root) / "tests/fixtures/stem_boost_battery/prompts_nl_human.json";
-    std::ifstream in(prompts);
-    if (in) {
-      nlohmann::json arr;
-      in >> arr;
-      for (const auto& c : arr) {
-        if (c.value("id", "") == "17_ai_spinner_stuck") {
-          instruction = c.value("prompt", "");
-          break;
-        }
-      }
-    }
-  }
-  if (instruction.empty()) {
-    instruction =
-        "el spinner de la IA se queda infinito aunque el modelo ya terminó; "
-        "dónde se controla ese estado de carga";
+  if (sym.empty() || instruction.empty()) {
+    std::cerr << "trail-judge-shot: requiere SYM y --case ID o --instruction TEXT\n";
+    return 2;
   }
 
   auto search_fn = [&](const std::string& symbol) -> std::vector<tuide::ATrailSearchHit> {
@@ -739,13 +2183,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
     return 1;
   }
 
-  std::vector<std::string> seeds = {"spinner", "busy", "cancel", "agent_busy"};
-  for (const auto& tok : {"cancel", "abort", "busy", "spinner", "agent"}) {
-    if (instruction.find(tok) != std::string::npos &&
-        std::find(seeds.begin(), seeds.end(), tok) == seeds.end()) {
-      seeds.push_back(tok);
-    }
-  }
+  std::vector<std::string> seeds = {sym};
 
   tuide::ATrail tr;
   tr.active = true;
@@ -754,7 +2192,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   tr.focus_anchor = tr.root_anchor;
   tr.focus_symbol = sym;
   tr.root_stem = sym;
-  tr.root_why = "hipótesis useful del mapa (target UI / busy)";
+  tr.root_why = "hipótesis useful del mapa";
   tr.pending_stacks = stacks;
   tr.cond_branches = tuide::a_trail_build_cond_branches(root, sym, path_hint, seeds, search_fn,
                                                         stacks);
@@ -769,20 +2207,22 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
 
   // Which stack ids contain the gold needle (for scoring)?
   std::vector<std::string> gold_stack_ids;
-  for (const auto& s : stacks) {
-    bool hit = false;
-    for (const auto& h : s.hops) {
-      if (h.symbol.find(gold_needle) != std::string::npos ||
-          h.scope_chain.find(gold_needle) != std::string::npos ||
-          h.signature.find(gold_needle) != std::string::npos ||
-          h.anchor.find(gold_needle) != std::string::npos ||
-          h.snippet.find(gold_needle) != std::string::npos) {
-        hit = true;
-        break;
+  if (!gold_needle.empty()) {
+    for (const auto& s : stacks) {
+      bool hit = false;
+      for (const auto& h : s.hops) {
+        if (h.symbol.find(gold_needle) != std::string::npos ||
+            h.scope_chain.find(gold_needle) != std::string::npos ||
+            h.signature.find(gold_needle) != std::string::npos ||
+            h.anchor.find(gold_needle) != std::string::npos ||
+            h.snippet.find(gold_needle) != std::string::npos) {
+          hit = true;
+          break;
+        }
       }
-    }
-    if (hit) {
-      gold_stack_ids.push_back(s.id);
+      if (hit) {
+        gold_stack_ids.push_back(s.id);
+      }
     }
   }
 
@@ -792,12 +2232,9 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   user << "## Situación (inyección de prueba)\n"
           "El mapa señaló el target `"
        << sym << "` (`" << path_hint
-       << "`) como hipótesis **useful** (síntoma: spinner/busy).\n"
-          "Eso NO es aún el edit site: el runtime abrió **ramas condicionales ON/CXL/OFF** "
-          "(guards + async) y call-stacks de soporte.\n"
-          "Tu trabajo AHORA: `a_trail_judge`. Marca **interesting** ramas condicionales "
-          "(`ON`|`CXL`|`OFF`|`LINK`) y/o pilas `S1`… que expliquen el síntoma.\n"
-          "Reject ruido (reindex/outline) si no explica Instruction.\n"
+       << "`) como hipótesis **useful**.\n"
+          "El runtime muestra **un** juego de ids (S* o ON/CXL/OFF, no ambos). "
+          "`a_trail_judge` solo sobre esos ids. Reject ruido (reindex/outline).\n"
           "Si ves el edit site, `a_done` (≤2 primary).\n\n";
   user << trail_md;
 
@@ -806,34 +2243,33 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
       "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
       "PROHIBIDO action=plan, tool, edit, done next=edit.\n"
       "Objetivo: encontrar el EDIT SITE del síntoma de ## Instruction.\n"
-      "Tras useful el runtime muestra ramas ON/CXL/OFF/LINK y call-stacks. SOLO a_trail_judge.\n"
+      "Tras useful el runtime muestra call-stacks S* o ramas ON/CXL/OFF (un juego). "
+      "SOLO a_trail_judge sobre ids del prompt.\n"
       "Ejemplo: {\"action\":\"a_trail_judge\",\"verdicts\":["
-      "{\"target\":\"ON\",\"verdict\":\"interesting\",\"why\":\"caller del L0\"},"
-      "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"no cuadra con el síntoma\"}]}\n"
-      "target = `ON`|`CXL`|`OFF`|`LINK` y/o `S1`…`S3`. verdict EXACTAMENTE "
-      "\"interesting\" o \"reject\".\n"
-      "interesting ≤3. Si TODOS reject → L0 se invalida.\n"
+      "{\"target\":\"S1\",\"verdict\":\"interesting\",\"why\":\"caller del síntoma\"},"
+      "{\"target\":\"S2\",\"verdict\":\"reject\",\"why\":\"otro feature\"}]}\n"
+      "verdict EXACTAMENTE \"interesting\" o \"reject\". interesting ≤3. "
+      "Si TODOS reject → L0 se invalida.\n"
       "a_done solo cuando un hop es el edit site (≤2 primary).\n";
 
   std::cout << "======== trail-judge-shot ========\n";
-  std::cout << "L0=" << tr.root_anchor << " stacks=" << stacks.size()
-            << " gold_needle=`" << gold_needle << "` gold_in=";
-  if (gold_stack_ids.empty()) {
-    std::cout << "(ninguna pila — el pack no contiene `" << gold_needle << "`)";
-    if (require_gold) {
+  std::cout << "L0=" << tr.root_anchor << " stacks=" << stacks.size();
+  if (require_gold) {
+    std::cout << " gold_needle=`" << gold_needle << "` gold_in=";
+    if (gold_stack_ids.empty()) {
+      std::cout << "(ninguna pila — el pack no contiene `" << gold_needle << "`)";
       std::cout << " abort\n";
       return 1;
-    }
-    std::cout << " WARN — continúa (--no-gold-abort)\n";
-  } else {
-    for (std::size_t i = 0; i < gold_stack_ids.size(); ++i) {
-      if (i) {
-        std::cout << ",";
+    } else {
+      for (std::size_t i = 0; i < gold_stack_ids.size(); ++i) {
+        if (i) {
+          std::cout << ",";
+        }
+        std::cout << gold_stack_ids[i];
       }
-      std::cout << gold_stack_ids[i];
     }
-    std::cout << "\n";
   }
+  std::cout << "\n";
   std::cout << "prompt_chars system=" << system.size() << " user=" << user.str().size() << "\n";
 
   if (!out_dir.empty()) {
@@ -918,11 +2354,11 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
       }
     }
   } else if (action.kind == tuide::L2ActionKind::ADone || action.name == "a_done") {
-    // Bonus path: model jumps to a_done naming gold
+    // Bonus path: model jumps to a_done naming the supplied gold.
     for (const auto& loc : action.a_loci) {
-      if (loc.anchor.find(gold_needle) != std::string::npos ||
-          loc.stem.find("ai_controller") != std::string::npos ||
-          loc.anchor.find("AiController") != std::string::npos) {
+      if (!gold_needle.empty() &&
+          (loc.anchor.find(gold_needle) != std::string::npos ||
+           loc.stem.find(gold_needle) != std::string::npos)) {
         gold_interesting = true;
       }
     }
@@ -948,7 +2384,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   std::cout << "gold_stacks=[" << join(gold_stack_ids) << "] gold_stack="
             << (gold_interesting ? 1 : 0) << " gold_cond=" << (gold_cond_interesting ? 1 : 0)
             << "\n";
-  const bool gold_pass = gold_interesting || gold_cond_interesting;
+  const bool gold_pass = !require_gold || gold_interesting || gold_cond_interesting;
   if (!gold_pass) {
     if (!require_gold && !interesting_ids.empty()) {
       std::cout << "WARN: gold trail miss — continúa con interesting=[" << join(interesting_ids)
@@ -963,7 +2399,7 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
       std::cout << "PASS: rama condicional cancel/async (LINK/CXL)\n";
     }
     if (gold_interesting) {
-      std::cout << "PASS: pila con control IA (" << gold_needle << ")\n";
+      std::cout << "PASS: pila con gold suministrado (" << gold_needle << ")\n";
     }
   }
 
@@ -1166,15 +2602,16 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   }
 
   auto name_matches_gold = [&](const std::string& n) {
+    if (gold_var.empty()) {
+      return false;
+    }
     if (n == gold_var) {
       return true;
     }
     if (n.find(gold_var) != std::string::npos) {
       return true;
     }
-    // Soft gold family for case 17
-    return n.find("agent_busy") != std::string::npos || n.find("busy_") != std::string::npos ||
-           n == "download_busy_" || n.find("cancel_") != std::string::npos;
+    return false;
   };
 
   bool any_gold_var = false;
@@ -1203,14 +2640,20 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
     }
   }
 
-  std::cout << "gold_var=`" << gold_var << "` named_gold=" << (any_gold_var ? 1 : 0)
-            << " dataflow_hits=" << (any_df_hits ? 1 : 0) << "\n";
+  if (!gold_var.empty()) {
+    std::cout << "gold_var=`" << gold_var << "` named_gold=" << (any_gold_var ? 1 : 0) << " ";
+  }
+  std::cout << "dataflow_hits=" << (any_df_hits ? 1 : 0) << "\n";
   if (any_gold_var && any_df_hits) {
     std::cout << "PASS: pista de variable + data-flow rg extraído (reserva B)\n";
     return 0;
   }
   if (any_df_hits) {
-    std::cout << "PARTIAL: data-flow ok pero var ≠ familia gold (`" << gold_var << "`)\n";
+    std::cout << "PASS: data-flow extraído";
+    if (!gold_var.empty()) {
+      std::cout << " pero var ≠ gold (`" << gold_var << "`)";
+    }
+    std::cout << "\n";
     return 0;  // still useful for design feedback
   }
   std::cout << "FAIL: sospechosas sin sitios data-flow\n";
@@ -1229,15 +2672,14 @@ int run_dataflow_probe(ToolRegistry* tools, const std::string& root, int argc, c
       json_out = true;
     } else if (a == "-h" || a == "--help") {
       std::cerr << "dataflow-probe VAR [VAR…] [--path hint] [--json]\n"
-                   "  Sin LLM/LSP. ripgrep + heurística write/read/decl + snippet.\n"
-                   "  Ej.: dataflow-probe agent_busy_ --path src/ai/ai_controller.cpp\n";
+                   "  Sin LLM/LSP. ripgrep + heurística write/read/decl + snippet.\n";
       return 2;
     } else if (!a.empty() && a[0] != '-') {
       names.push_back(a);
     }
   }
   if (names.empty()) {
-    std::cerr << "dataflow-probe: falta VAR (ej. agent_busy_)\n";
+    std::cerr << "dataflow-probe: falta VAR\n";
     return 2;
   }
 
@@ -1622,23 +3064,13 @@ int run_card_embed_bench(const std::string& root, int argc, char** argv) {
     }
   }
   if (query.empty()) {
-    std::string case_id = "17_ai_spinner_stuck";
-    std::vector<std::string> expected;
-    std::vector<std::string> traps;
-    if (!load_case_prompt(root, case_id, &query, &expected, &traps)) {
-      std::cerr << "card-embed-bench: falta --query\n";
-      return 2;
-    }
+    std::cerr << "card-embed-bench: falta --query\n";
+    return 2;
   }
   if (intent.empty()) {
-    // Mimic a short distilled primary_goal (not the full NL paragraph).
-    intent = "Locate AI chat loading/busy state control and how cancel clears it";
+    intent = "Locate the relevant code and state transitions";
   }
   std::vector<std::string> semantic_tokens = parse_seeds_csv(tokens_csv);
-  if (semantic_tokens.empty()) {
-    semantic_tokens = {"spinner", "busy", "loading_state", "chat_state", "cancel",
-                       "agent_busy", "set_busy_spinner", "console_panel"};
-  }
   std::vector<std::string> modes = parse_seeds_csv(modes_csv);
   if (modes.empty()) {
     modes = {"hybrid"};
@@ -1650,15 +3082,13 @@ int run_card_embed_bench(const std::string& root, int argc, char** argv) {
     }
     return s;
   };
-  // Hybrid rescue: symptoms the user named in NL must not be dropped even if distill ignored them.
+  // Hybrid rescue: user-overlapping semantic tokens come first.
   auto user_symptom_tokens = [&]() {
-    static const char* kSym[] = {"spinner", "busy", "loading", "cancel", "thinking",
-                                 "agent_busy", "carga", "bloqueado"};
     const std::string ql = lower_copy(query);
     std::vector<std::string> out;
-    for (const char* s : kSym) {
-      if (ql.find(s) != std::string::npos) {
-        out.push_back(s);
+    for (const auto& token : semantic_tokens) {
+      if (ql.find(lower_copy(token)) != std::string::npos) {
+        out.push_back(token);
       }
     }
     return out;
@@ -1830,26 +3260,10 @@ int run_card_embed_bench(const std::string& root, int argc, char** argv) {
   struct ModeResult {
     std::string mode;
     std::string enriched;
-    int gold_card_rank = -1;
-    int gold_body_rank = -1;
-    float gold_card_cos = -1.f;
-    float gold_body_cos = -1.f;
     std::vector<std::pair<float, std::string>> top_card;
     std::vector<std::pair<float, std::string>> top_body;
   };
   std::vector<ModeResult> mode_results;
-
-  auto find_rank_cos = [](const std::vector<Row>& sorted, const std::string& needle, float* cos_out) {
-    for (std::size_t i = 0; i < sorted.size(); ++i) {
-      if (sorted[i].target.find(needle) != std::string::npos) {
-        if (cos_out) {
-          *cos_out = sorted[i].card_cos >= 0 ? sorted[i].card_cos : sorted[i].body_cos;
-        }
-        return static_cast<int>(i) + 1;
-      }
-    }
-    return -1;
-  };
 
   if (!skip_embed) {
     const AiSettings settings = load_ai_settings(root);
@@ -1932,25 +3346,6 @@ int run_card_embed_bench(const std::string& root, int argc, char** argv) {
       std::stable_sort(by_body.begin(), by_body.end(),
                        [](const Row& a, const Row& b) { return a.body_cos > b.body_cos; });
 
-      float gc = -1.f;
-      float gb = -1.f;
-      mr.gold_card_rank = find_rank_cos(by_card, "set_busy_spinner", &gc);
-      // find_rank_cos uses card_cos; for body rank read body_cos from matching row
-      for (std::size_t i = 0; i < by_body.size(); ++i) {
-        if (by_body[i].target.find("set_busy_spinner") != std::string::npos) {
-          mr.gold_body_rank = static_cast<int>(i) + 1;
-          gb = by_body[i].body_cos;
-          break;
-        }
-      }
-      for (std::size_t i = 0; i < by_card.size(); ++i) {
-        if (by_card[i].target.find("set_busy_spinner") != std::string::npos) {
-          gc = by_card[i].card_cos;
-          break;
-        }
-      }
-      mr.gold_card_cos = gc;
-      mr.gold_body_cos = gb;
       for (std::size_t i = 0; i < std::min<std::size_t>(5, by_card.size()); ++i) {
         mr.top_card.emplace_back(by_card[i].card_cos, by_card[i].target);
       }
@@ -1976,12 +3371,7 @@ int run_card_embed_bench(const std::string& root, int argc, char** argv) {
     j["intent"] = intent;
     nlohmann::json modes_j = nlohmann::json::array();
     for (const auto& mr : mode_results) {
-      modes_j.push_back({{"mode", mr.mode},
-                         {"enriched", mr.enriched},
-                         {"gold_card_rank", mr.gold_card_rank},
-                         {"gold_body_rank", mr.gold_body_rank},
-                         {"gold_card_cos", mr.gold_card_cos},
-                         {"gold_body_cos", mr.gold_body_cos}});
+      modes_j.push_back({{"mode", mr.mode}, {"enriched", mr.enriched}});
     }
     j["modes"] = std::move(modes_j);
     std::cout << j.dump(2) << '\n';
@@ -2011,13 +3401,6 @@ int run_card_embed_bench(const std::string& root, int argc, char** argv) {
     std::cout << "---- embed cost ----\n";
     std::cout << "query_embed_ms(sum)=" << query_embed_ms << " card_embed_ms=" << card_embed_ms
               << " body_embed_ms=" << body_embed_ms << "\n";
-    std::cout << "---- gold set_busy_spinner by query-mode ----\n";
-    std::cout << "mode         card_rank  body_rank  card_cos  body_cos  enriched_chars\n";
-    for (const auto& mr : mode_results) {
-      std::printf("%-12s %9d  %9d  %8.3f  %8.3f  %d\n", mr.mode.c_str(), mr.gold_card_rank,
-                  mr.gold_body_rank, static_cast<double>(mr.gold_card_cos),
-                  static_cast<double>(mr.gold_body_cos), static_cast<int>(mr.enriched.size()));
-    }
     for (const auto& mr : mode_results) {
       std::cout << "\n---- mode=" << mr.mode << " enriched ----\n";
       std::cout << mr.enriched.substr(0, 280);
@@ -2315,7 +3698,7 @@ int run_a0_sniff_judge_shot(Level2Session& session, const std::string& root, int
   }
   std::string summary_path;
   std::string out_dir;
-  std::string case_id = "17_ai_spinner_stuck";
+  std::string case_id;
   bool dry = false;
   bool json_out = false;
   for (int i = 2; i < argc; ++i) {
@@ -2337,6 +3720,10 @@ int run_a0_sniff_judge_shot(Level2Session& session, const std::string& root, int
                    "  Sin --from-summary usa build_a_peek_tranche_markdown (requiere a_state).\n";
       return 2;
     }
+  }
+  if (case_id.empty()) {
+    std::cerr << "a0-sniff-judge-shot: requiere --case CASE_ID\n";
+    return 2;
   }
 
   std::string instruction;
@@ -2645,7 +4032,7 @@ int run_a0_tranche_rank_shot(Level2Session& /*session*/, const std::string& root
     return 2;
   }
   std::string out_dir;
-  std::string case_id = "17_ai_spinner_stuck";
+  std::string case_id;
   int max_cards = 12;
   bool json_out = false;
   for (int i = 2; i < argc; ++i) {
@@ -2663,6 +4050,10 @@ int run_a0_tranche_rank_shot(Level2Session& /*session*/, const std::string& root
                    "  Sin LLM. Compara slice map-order vs rerank por ficha Effect Summary.\n";
       return 2;
     }
+  }
+  if (case_id.empty()) {
+    std::cerr << "a0-tranche-rank-shot: requiere --case CASE_ID\n";
+    return 2;
   }
 
   std::string query;
@@ -2777,7 +4168,7 @@ int run_a0_first_judge_shot(Level2Session& session, const std::string& root, int
     return 2;
   }
   std::string out_dir;
-  std::string case_id = "17_ai_spinner_stuck";
+  std::string case_id;
   int max_cards = 8;
   bool dry = false;
   bool json_out = false;
@@ -2806,6 +4197,10 @@ int run_a0_first_judge_shot(Level2Session& session, const std::string& root, int
                    "  Valida un veredicto por card mostrada. Default max-cards=8.\n";
       return 2;
     }
+  }
+  if (case_id.empty()) {
+    std::cerr << "a0-first-judge-shot: requiere --case CASE_ID\n";
+    return 2;
   }
 
   std::string instruction;
@@ -2836,12 +4231,12 @@ int run_a0_first_judge_shot(Level2Session& session, const std::string& root, int
   const std::string cards_md = session.build_a_peek_tranche_markdown(root, max_cards);
 
   nlohmann::json tranche_json = nlohmann::json::array();
-  bool has_busy_strip = false;
+  bool has_expected_stem = false;
   for (std::size_t i = 0; i < shown.items.size(); ++i) {
     const auto& item = shown.items[i];
-    if (item.path.find("busy_strip") != std::string::npos ||
-        item.symbol.find("set_busy") != std::string::npos) {
-      has_busy_strip = true;
+    if (std::find(expected_stems.begin(), expected_stems.end(), item.stem) !=
+        expected_stems.end()) {
+      has_expected_stem = true;
     }
     tranche_json.push_back({{"i", i + 1},
                             {"target", item.target},
@@ -2880,7 +4275,7 @@ int run_a0_first_judge_shot(Level2Session& session, const std::string& root, int
   std::cout << "======== a0-first-judge-shot ========\n";
   std::cout << "case=" << case_id << " max_cards=" << max_cards << " slice_n=" << shown.slice_n
             << " shown=" << shown.items.size() << " char_trunc=" << (shown.char_truncated ? 1 : 0)
-            << " busy_strip_in_tranche=" << (has_busy_strip ? 1 : 0) << "\n";
+            << " expected_stem_in_tranche=" << (has_expected_stem ? 1 : 0) << "\n";
   std::cout << "prompt_chars system=" << system.size() << " user=" << user.str().size() << "\n";
 
   if (!out_dir.empty()) {
@@ -3003,7 +4398,7 @@ int run_a0_first_judge_shot(Level2Session& session, const std::string& root, int
   coverage["missing"] = missing;
   coverage["extra"] = extra;
   coverage["full"] = (covered >= static_cast<int>(shown.items.size()));
-  coverage["busy_strip_in_tranche"] = has_busy_strip;
+  coverage["expected_stem_in_tranche"] = has_expected_stem;
 
   bool apply_ok = false;
   std::string apply_err;
@@ -3085,6 +4480,48 @@ int main(int argc, char** argv) {
   }
   if (cmd == "trail-probe") {
     return run_trail_probe(&tools, root, argc, argv);
+  }
+  if (cmd == "slice-probe") {
+    return run_slice_probe(&tools, root, argc, argv);
+  }
+  if (cmd == "registry-ingest") {
+    return run_registry_ingest(root, argc, argv);
+  }
+  if (cmd == "registry-refresh") {
+    return run_registry_refresh(root, argc, argv);
+  }
+  if (cmd == "registry-gc") {
+    return run_registry_gc(root, argc, argv);
+  }
+  if (cmd == "registry-stats") {
+    return run_registry_stats(root, argc, argv);
+  }
+  if (cmd == "registry-get") {
+    return run_registry_get(root, argc, argv);
+  }
+  if (cmd == "registry-neighbors") {
+    return run_registry_neighbors(root, argc, argv);
+  }
+  if (cmd == "registry-path") {
+    return run_registry_path(root, argc, argv);
+  }
+  if (cmd == "registry-code") {
+    return run_registry_code(root, argc, argv);
+  }
+  if (cmd == "registry-files" || cmd == "registry-pending-inventory") {
+    return run_registry_files(root, argc, argv);
+  }
+  if (cmd == "registry-embed") {
+    return run_registry_embed(root, argc, argv);
+  }
+  if (cmd == "registry-query") {
+    return run_registry_query(root, argc, argv);
+  }
+  if (cmd == "zone-judge-shot") {
+    return run_zone_judge_shot(root, argc, argv);
+  }
+  if (cmd == "zone-judge-battery") {
+    return run_zone_judge_battery(root, argc, argv);
   }
   if (cmd == "trail-judge-shot") {
     return run_trail_judge_shot(&tools, root, argc, argv);

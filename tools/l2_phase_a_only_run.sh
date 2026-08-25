@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Phase A only — L1 map + bootstrap + run-explore-a (para en a_done, sin pack B).
-# Uso: ./tools/l2_phase_a_only_run.sh [LABEL] [CASE_ID]
-# Default: case 17_ai_spinner_stuck (prompt del fallo explore mezclado).
+# Uso: ./tools/l2_phase_a_only_run.sh [LABEL] CASE_ID
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 LABEL="${1:-phase_a_only_v1}"
-CASE_ID="${2:-17_ai_spinner_stuck}"
+CASE_ID="${2:?falta CASE_ID}"
 PROMPTS="$ROOT/tests/fixtures/stem_boost_battery/prompts_nl_human.json"
 OUT="$ROOT/.tuide/ai/l2_explore_battery/round_${LABEL}"
 TUIDE="$ROOT/build/tuide"

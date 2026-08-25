@@ -697,8 +697,6 @@ std::vector<std::string> expand_nl_retrieval_tokens(const std::vector<std::strin
   if (folded_has_word("ia") || folded_has_word("ai") || folded_has_word("agente") ||
       folded_has_word("chat")) {
     push("chat_ia");
-    push("agent_busy");
-    push("set_busy_spinner");
   }
 
   if (out.size() > max_n) {

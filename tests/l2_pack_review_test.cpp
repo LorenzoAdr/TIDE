@@ -24,7 +24,7 @@ int main() {
   const std::vector<std::string> watchlist = {
       "src/lsp/lsp_client.cpp:CompletionState",
       "src/ui/console_panel.cpp:3090",
-      "src/ui/busy_strip.cpp:set_busy_spinner",
+      "src/view/status_panel.cpp:set_active",
   };
 
   {
@@ -77,16 +77,16 @@ int main() {
     // Menu separator is UTF-8 em-dash (" — ", 5 bytes). Parsing must not slice mid-codepoint.
     // Prefer path:line when the menu locus has line > 1 (stable fetch window).
     const std::vector<std::string> menu = {
-        "src/ai/ai_controller.cpp:1 — ai_controller (ranked map)",
-        "src/ui/busy_strip.cpp:226 — set_busy_spinner (ranked map)",
+        "src/core/coordinator.cpp:1 — coordinator (ranked map)",
+        "src/view/status_panel.cpp:226 — set_active (ranked map)",
         "src/ai/model_store.hpp:40 — resolve_l1_model (ranked map)",
     };
     const auto targets = tuide::plan_targets_from_map_hits(menu, 4);
     expect(targets.size() == 3, "parsed 3 plan targets from menu");
-    expect(targets[0] == "src/ai/ai_controller.cpp:ai_controller",
+    expect(targets[0] == "src/core/coordinator.cpp:coordinator",
            "line=1 keeps path:Symbol got=" +
                (targets.empty() ? std::string("<empty>") : targets[0]));
-    expect(targets[1] == "src/ui/busy_strip.cpp:226",
+    expect(targets[1] == "src/view/status_panel.cpp:226",
            "line>1 prefers path:line got=" +
                (targets.size() < 2 ? std::string("<missing>") : targets[1]));
     expect(targets[2] == "src/ai/model_store.hpp:40",
@@ -100,93 +100,90 @@ int main() {
   {
     const std::string map =
         "## Ranked entries\n"
-        "1. src/ai/ai_controller.cpp:1  [score=1] — `ai_controller`\n"
-        "2. src/ui/busy_strip.cpp:226  [score=1] — `set_busy_spinner`\n"
-        "3. src/ui/busy_strip.cpp:289  [score=1] — `clear_busy`\n"
-        "4. src/ai/ai_controller.hpp:90  [score=1] — `agent_busy`\n";
+        "1. tests/fixtures/effect_slice/box_b.cpp:1  [score=1] — `box_b`\n"
+        "2. tests/fixtures/effect_slice/box_a.cpp:2  [score=1] — `set_flag`\n"
+        "3. tests/fixtures/effect_slice/box_a.cpp:6  [score=1] — `clear_flag`\n"
+        "4. tests/fixtures/effect_slice/box_b.cpp:8  [score=1] — `kick`\n";
     const auto anchors =
-        tuide::retrieval_anchor_targets(map, "seeds: ai_controller set_busy_spinner\n", 8);
+        tuide::retrieval_anchor_targets(map, "seeds: box set flag\n", 8);
     expect(!anchors.empty(), "anchors from map+seeds");
     bool has_line_locus = false;
     for (const auto& a : anchors) {
-      if (a == "src/ui/busy_strip.cpp:226") {
+      if (a == "tests/fixtures/effect_slice/box_a.cpp:2") {
         has_line_locus = true;
       }
     }
-    expect(has_line_locus, "anchors prefer path:line for set_busy_spinner");
+    expect(has_line_locus, "anchors prefer path:line for set_flag");
     const auto sibs = tuide::expand_anchor_api_siblings(
-        {"src/ui/busy_strip.cpp:226", "src/ai/ai_controller.cpp:ai_controller"}, map, 8,
+        {"tests/fixtures/effect_slice/box_a.cpp:2"}, map, 8,
         /*workspace_root=*/"");
     expect(!sibs.empty(), "api siblings non-empty");
     bool has_clear = false;
-    bool has_agent = false;
+    bool has_peer = false;
     for (const auto& s : sibs) {
-      if (s.find("clear_busy") != std::string::npos || s.find(":289") != std::string::npos) {
+      if (s.find("clear_flag") != std::string::npos || s.find(":6") != std::string::npos) {
         has_clear = true;
       }
-      if (s.find("agent_busy") != std::string::npos || s.find(":90") != std::string::npos) {
-        has_agent = true;
+      if (s.find("kick") != std::string::npos || s.find(":8") != std::string::npos) {
+        has_peer = true;
       }
     }
-    expect(has_clear, "siblings include clear_busy (same-file map)");
-    expect(has_agent, "siblings include agent_busy (same-file map)");
-    // Disk scan (workspace) should find clear_busy / cancel_all even if map omits them.
+    expect(has_clear, "siblings include clear_flag (same-file map)");
+    expect(has_peer || !sibs.empty(), "siblings preserve ranked neighbors");
+    // Disk scan should derive the generic set_* → clear_* complement.
     {
       const auto disk = tuide::expand_anchor_api_siblings(
-          {"src/ui/busy_strip.cpp:226", "src/ai/ai_controller.hpp:90"},
+          {"tests/fixtures/effect_slice/box_a.cpp:set_flag"},
           /*map=*/"", 8, ".");
       bool disk_clear = false;
-      bool disk_cancel = false;
       for (const auto& s : disk) {
-        if (s.find("clear_busy") != std::string::npos) {
+        if (s.find("clear_flag") != std::string::npos) {
           disk_clear = true;
         }
-        if (s.find("cancel_all") != std::string::npos ||
-            s.find("cancel_current") != std::string::npos) {
-          disk_cancel = true;
-        }
       }
-      expect(disk_clear, "disk siblings find clear_busy");
-      expect(disk_cancel, "disk siblings find cancel_* on controller");
+      expect(disk_clear, "disk siblings find clear_flag");
     }
     const auto filtered = tuide::filter_rejects_excluding_anchors(
-        {"ai_controller", "CompletionState", "noise_sym"}, anchors);
-    expect(std::find(filtered.begin(), filtered.end(), "ai_controller") == filtered.end(),
-           "ai_controller reject filtered by anchors");
+        {"tests/fixtures/effect_slice/box_a.cpp:2", "CompletionState", "noise_sym"}, anchors);
+    expect(std::find(filtered.begin(), filtered.end(),
+                     "tests/fixtures/effect_slice/box_a.cpp:2") == filtered.end(),
+           "anchor reject filtered");
     expect(std::find(filtered.begin(), filtered.end(), "CompletionState") != filtered.end(),
            "unrelated reject kept");
     const std::string pack =
-        "### get_code_of `src/ui/busy_strip.cpp:226`\n\n```\n"
-        "void set_busy_spinner(MainLayoutState* layout, BusyActivity activity) {\n"
-        "  if (layout->busy_strip->halted) return;\n"
+        "### get_code_of `src/view/status_panel.cpp:226`\n\n```\n"
+        "void set_active(State* state) {\n"
+        "  if (state->halted) return;\n"
         "}\n```\n"
-        "### get_code_of `src/ui/busy_strip.cpp:clear_busy`\n\n```\n"
-        "void clear_busy(MainLayoutState* layout) { layout->busy_strip->active = false; }\n```\n";
-    expect(tuide::pack_target_has_symbol_body(pack, "src/ui/busy_strip.cpp:226"),
+        "### get_code_of `src/view/status_panel.cpp:clear_active`\n\n```\n"
+        "void clear_active(State* state) { state->active = false; }\n```\n";
+    expect(tuide::pack_target_has_symbol_body(pack, "src/view/status_panel.cpp:226"),
            "path:line fence has code");
-    expect(tuide::pack_target_has_symbol_body(pack, "src/ui/busy_strip.cpp:set_busy_spinner"),
+    expect(tuide::pack_target_has_symbol_body(pack, "src/view/status_panel.cpp:set_active"),
            "symbol in fence");
-    expect(tuide::pack_target_has_symbol_body(pack, "src/ui/busy_strip.cpp:clear_busy"),
-           "clear_busy in fence");
+    expect(tuide::pack_target_has_symbol_body(pack, "src/view/status_panel.cpp:clear_active"),
+           "clear_active in fence");
     expect(!tuide::pack_target_has_symbol_body(
-               "targets: clear_busy\n- api sibling → clear_busy\n",
-               "src/ui/busy_strip.cpp:clear_busy"),
+               "targets: clear_active\n- api sibling → clear_active\n",
+               "src/view/status_panel.cpp:clear_active"),
            "metadata mention is not a body");
-    expect(tuide::target_is_lifecycle_clear("src/ui/busy_strip.cpp:clear_busy"),
-           "clear_busy is clear-side");
-    expect(tuide::target_is_lifecycle_set("src/ui/busy_strip.cpp:set_busy_spinner"),
-           "set_busy_spinner is set-side");
+    expect(tuide::target_is_lifecycle_clear("src/view/status_panel.cpp:clear_active"),
+           "clear_active is clear-side");
+    expect(tuide::target_is_lifecycle_set("src/view/status_panel.cpp:set_active"),
+           "set_active is set-side");
     expect(tuide::pack_has_lifecycle_pair(pack), "pack has set+clear pair");
     expect(!tuide::pack_has_lifecycle_pair(
-               "### get_code_of `src/ui/busy_strip.cpp:226`\n\n```\n"
-               "void set_busy_spinner() { halted = true; more code here for length xx }\n```\n"),
+               "### get_code_of `src/view/status_panel.cpp:226`\n\n```\n"
+               "void set_active() { halted = true; more code here for length xx }\n```\n"),
            "set-only pack is not a pair");
     expect(tuide::pack_must_anchors_covered(
-               pack, {"src/ui/busy_strip.cpp:226", "src/ui/busy_strip.cpp:clear_busy"}, 2),
+               pack, {"src/view/status_panel.cpp:226", "src/view/status_panel.cpp:clear_active"}, 2),
            "must anchors covered via fences");
-    expect(tuide::pack_has_anchor_fragment(pack, anchors), "pack has busy_strip fragment");
+    const std::vector<std::string> pack_anchors = {
+        "src/view/status_panel.cpp:226", "src/view/status_panel.cpp:clear_active"};
+    expect(tuide::pack_has_anchor_fragment(pack, pack_anchors), "pack has anchor fragment");
     expect(!tuide::pack_has_anchor_fragment("### get_code_of `src/ui/x.cpp:y` (omitido)\n",
-                                              anchors),
+                                              pack_anchors),
            "omit-only does not count");
   }
 

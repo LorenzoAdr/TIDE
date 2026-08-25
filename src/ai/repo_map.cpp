@@ -1143,7 +1143,7 @@ std::vector<std::string> repo_map_query_tokens(const std::string& text, std::siz
   }
   flush();
 
-  // Compound consecutive NL tokens: "busy strip" → busy_strip (matches file/symbol stems).
+  // Compound consecutive NL tokens match snake_case file and symbol stems.
   {
     std::vector<std::string> words;
     std::string w;

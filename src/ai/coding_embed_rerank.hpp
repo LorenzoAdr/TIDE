@@ -82,8 +82,7 @@ std::string build_semantic_embed_query(const std::string& query,
                                        const std::vector<std::string>& semantic_tokens,
                                        std::size_t max_tokens = 12);
 
-// Hybrid L1 embed query: short intent + user-named symptoms (reserved) + L1 tokens.
-// Symptoms are matched as substrings in user_message (spinner, busy, cancel, …).
+// Hybrid L1 embed query: short intent + user-overlapping semantic tokens first.
 std::string build_hybrid_embed_query(const std::string& intent,
                                      const std::string& user_message,
                                      const std::vector<std::string>& semantic_tokens,

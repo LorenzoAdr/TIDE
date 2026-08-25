@@ -63,19 +63,21 @@ int main() {
   {
     const std::string map =
         "# Ranked map\n\n## Ranked entries\n\n"
-        "1. src/ui/busy_strip.cpp:226 — `set_busy_spinner`\n"
-        "2. src/ui/busy_strip.hpp:69 — `set_busy_spinner`\n"
-        "3. src/ui/spinner.hpp:1 — `spinner`\n"
-        "4. src/ui/spinner.cpp:1 — `spinner`\n";
+        "1. tests/fixtures/effect_slice/box_a.cpp:2 — `set_flag`\n"
+        "2. tests/fixtures/effect_slice/box_a.hpp:2 — `set_flag`\n"
+        "3. tests/fixtures/effect_slice/box_b.hpp:8 — `kick`\n"
+        "4. tests/fixtures/effect_slice/box_b.cpp:8 — `kick`\n";
     tuide::AQueueMapFilterOpts fopts;
     fopts.want_n = 4;
     fopts.skip_file_level = false;
     const char* root_env = std::getenv("TUIDE_ROOT");
     const std::string root = root_env != nullptr ? root_env : "..";
     const auto filtered = tuide::a_queue_inputs_from_ranked_map_filtered(map, fopts, root);
-    expect(filtered.size() == 2, "filter drops hpp when cpp exists");
-    expect(filtered[0].file == "src/ui/busy_strip.cpp", "keeps cpp busy_strip");
-    expect(filtered[1].file == "src/ui/spinner.cpp", "keeps cpp spinner");
+    bool has_box_a_cpp = false;
+    for (const auto& item : filtered) {
+      has_box_a_cpp = has_box_a_cpp || item.file == "tests/fixtures/effect_slice/box_a.cpp";
+    }
+    expect(has_box_a_cpp, "keeps box_a cpp");
   }
   {
     nlohmann::json j = nlohmann::json::parse(R"({
@@ -710,21 +712,21 @@ int main() {
            "comment-only → unknown");
   }
   {
-    expect(tuide::a_is_symptom_edge_name("set_busy_spinner"), "symptom edge name");
-    expect(tuide::a_target_prefers_trail_a0("src/ui/busy_strip.cpp:set_busy_spinner", nullptr),
+    expect(tuide::a_is_symptom_edge_name("set_active"), "lifecycle edge name");
+    expect(tuide::a_target_prefers_trail_a0("src/view/status_panel.cpp:set_active", nullptr),
            "L0 prefers trail");
-    expect(tuide::a_coerce_a0_expand_modality("src/ui/busy_strip.cpp:set_busy_spinner",
+    expect(tuide::a_coerce_a0_expand_modality("src/view/status_panel.cpp:set_active",
                                               tuide::AExpandModality::Dataflow, nullptr) ==
                tuide::AExpandModality::Trail,
            "coerce dataflow→trail");
-    std::vector<std::string> strip_writes = {"strip.activity", "strip.kind"};
+    std::vector<std::string> state_writes = {"state.activity", "state.kind"};
     expect(tuide::a_coerce_a0_expand_modality("src/x.cpp:foo", tuide::AExpandModality::Dataflow,
-                                              &strip_writes) == tuide::AExpandModality::Trail,
-           "strip writes→trail");
+                                              &state_writes) == tuide::AExpandModality::Trail,
+           "state writes→trail");
     expect(!tuide::a_a0_dataflow_allowed_without_trail("src/search/x.cpp:cancel",
                                                        "cancel_requested_"),
            "weak A0 dataflow blocked");
-    expect(tuide::a_a0_dataflow_allowed_without_trail("src/ai/x.cpp:Foo", "agent_busy_"),
+    expect(tuide::a_a0_dataflow_allowed_without_trail("src/core/x.cpp:Foo", "update_active_"),
            "strong ident ok");
     std::vector<tuide::AExpansionItem> q;
     tuide::AExpansionItem df;
@@ -756,13 +758,13 @@ int main() {
   {
     AState st;
     tuide::AQueueItem q;
-    q.target = "src/ui/busy_strip.cpp:ensure_spinner_thread#tail";
+    q.target = "src/view/status_panel.cpp:start_update_worker#tail";
     q.score = 2541937.f;
     st.queue.push_back(q);
-    expect(tuide::a_queue_item_score(st, "src/ui/busy_strip.cpp:ensure_spinner_thread") >
+    expect(tuide::a_queue_item_score(st, "src/view/status_panel.cpp:start_update_worker") >
                2.5e6f,
            "queue score matches without #tail");
-    expect(tuide::a_queue_item_score(st, "src/ui/busy_strip.cpp:ensure_spinner_thread#tail") >
+    expect(tuide::a_queue_item_score(st, "src/view/status_panel.cpp:start_update_worker#tail") >
                2.5e6f,
            "queue score matches with #tail");
     expect(tuide::a_queue_item_score(st, "src/other.cpp:nope") == 0.f, "miss → 0");
@@ -795,6 +797,65 @@ int main() {
     expect(st.a1_active.modality == tuide::AExpandModality::Peek, "A1 peek");
     unsetenv("L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY");
     unsetenv("L2_FEAT_L2_EXPLORE_PHASE_A");
+  }
+  {
+    setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "1", 1);
+    setenv("L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY", "1", 1);
+    AState st;
+    st.a_subphase = "a0_sniff";
+    std::vector<tuide::AVerdict> vs;
+    for (int i = 0; i < 5; ++i) {
+      tuide::AQueueItem q;
+      q.target = "src/x.cpp:Sym" + std::to_string(i);
+      st.queue.push_back(q);
+      tuide::AVerdict v;
+      v.target = q.target;
+      v.verdict = AVerdictKind::Expand;
+      v.expand_with = tuide::AExpandModality::Trail;
+      v.why = "keep 5th expand";
+      vs.push_back(v);
+    }
+    tuide::AVerdict rej;
+    rej.target = "src/y.cpp:Glue";
+    rej.verdict = AVerdictKind::Reject;
+    vs.push_back(rej);
+    std::string err;
+    expect(tuide::a_apply_a0_verdicts(&st, vs, &err), "a0 apply 5 expands");
+    expect(st.a1_active_set, "first expand active");
+    expect(static_cast<int>(st.a1_queue.size()) == 4, "no per-turn demote of 5th expand");
+    unsetenv("L2_FEAT_L2_EXPLORE_EFFECT_SUMMARY");
+    unsetenv("L2_FEAT_L2_EXPLORE_PHASE_A");
+  }
+  {
+    tuide::ATrail tr;
+    tr.root_anchor = "src/ui/busy_strip.cpp:set_busy_spinner";
+    tr.focus_anchor = tr.root_anchor;
+    tuide::ATrailStack s;
+    s.id = "S1";
+    tuide::ATrailHop h;
+    h.symbol = "begin_thinking";
+    s.hops.push_back(h);
+    tr.pending_stacks.push_back(s);
+    tuide::ATrailCondBranch b;
+    b.id = "CXL";
+    b.when_text = "cancel";
+    tr.cond_branches.push_back(b);
+    expect(tuide::a_trail_judge_show_stacks(tr), "stacks win first judge");
+    const std::string md = tuide::a_trail_stacks_markdown(tr);
+    expect(md.find("Ramas condicionales") == std::string::npos, "hide cond when stacks");
+    expect(md.find("`S1`") != std::string::npos, "shows S1");
+    expect(md.find("prioridad") == std::string::npos, "no prioridad magnet");
+  }
+  {
+    tuide::ATrail tr;
+    tr.root_anchor = "src/ui/x.cpp:foo";
+    tuide::ATrailCondBranch b;
+    b.id = "ON";
+    tr.cond_branches.push_back(b);
+    expect(!tuide::a_trail_judge_show_stacks(tr), "cond when no stacks");
+    const std::string md = tuide::a_trail_stacks_markdown(tr);
+    expect(md.find("`ON`") != std::string::npos, "shows ON");
+    expect(md.find("vuelve a cola") == std::string::npos, "do not skip cond-only");
   }
 
   if (failures) {

@@ -228,7 +228,7 @@ void append_doc_comment_items(ContextMenuState* state, bool include_doc_comment)
 
 void append_explorer_file_items(ContextMenuState* state, bool show_format,
                                 bool show_secondary_open, bool show_analyze_symbols,
-                                bool show_markdown_preview) {
+                                bool show_browser_preview) {
   if (show_analyze_symbols) {
     append_menu_item(state, i18n::tr("context_menu.analyze_symbols"), "analyze_symbols");
   }
@@ -244,8 +244,8 @@ void append_explorer_file_items(ContextMenuState* state, bool show_format,
   append_menu_item(state, i18n::tr("context_menu.move_to"), "move_to");
   append_menu_item(state, i18n::tr("context_menu.delete_file"), "delete_file");
   append_menu_item(state, i18n::tr("context_menu.add_file_header"), "add_file_header");
-  if (show_markdown_preview) {
-    append_menu_item(state, i18n::tr("context_menu.preview_markdown"), "preview_markdown");
+  if (show_browser_preview) {
+    append_menu_item(state, i18n::tr("context_menu.preview_browser"), "preview_in_browser");
   }
 }
 
@@ -1219,9 +1219,9 @@ bool execute_action(ContextMenuState* state, const std::string& action_id,
     return true;
   }
 
-  if (action_id == "preview_markdown") {
+  if (action_id == "preview_in_browser") {
     if (workspace != nullptr) {
-      workspace->preview_markdown_in_browser(state->absolute_path);
+      workspace->preview_in_browser(state->absolute_path);
     }
     return true;
   }
@@ -1733,7 +1733,7 @@ void context_menu_append_item(ContextMenuState* state, const std::string& label,
 
 void context_menu_append_explorer_file_section(
     ContextMenuState* state, const std::string& workspace_root, bool show_format,
-    bool show_secondary_open, bool show_analyze_symbols, bool show_markdown_preview) {
+    bool show_secondary_open, bool show_analyze_symbols, bool show_browser_preview) {
   if (state == nullptr || state->absolute_path.empty() || workspace_root.empty() ||
       !path_is_same_or_descendant(workspace_root, state->absolute_path)) {
     return;
@@ -1749,7 +1749,7 @@ void context_menu_append_explorer_file_section(
   state->relative_path = relative.generic_string();
   state->explorer_section_start = static_cast<int>(state->labels.size());
   append_explorer_file_items(state, show_format, show_secondary_open, show_analyze_symbols,
-                             show_markdown_preview);
+                             show_browser_preview);
 }
 
 void context_menu_open_file(ContextMenuState* state, int x, int y,

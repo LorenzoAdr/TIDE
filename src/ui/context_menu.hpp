@@ -113,7 +113,7 @@ void context_menu_append_item(ContextMenuState* state, const std::string& label,
 void context_menu_append_explorer_file_section(
     ContextMenuState* state, const std::string& workspace_root, bool show_format = false,
     bool show_secondary_open = true, bool show_analyze_symbols = false,
-    bool show_markdown_preview = false);
+    bool show_browser_preview = false);
 
 void context_menu_open_folder(ContextMenuState* state, int x, int y,
                               const std::string& absolute_path, const std::string& relative_path);

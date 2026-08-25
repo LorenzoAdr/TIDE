@@ -1200,7 +1200,7 @@ bool maybe_run_pack_review_after_plan(Level2Session& session, L2Brain& brain,
     reject_extra.insert(reject_extra.end(), invented.begin(), invented.end());
   }
   reject_extra = expand_review_rejects_for_watchlist(reject_extra, watchlist);
-  // Never denylist L1 map/seed anchors (ai_controller, set_busy_*, …) nor must-tier head.
+  // Never denylist L1 map/seed anchors nor must-tier head.
   {
     std::vector<std::string> protected_targets = anchors;
     if (!watchlist.empty()) {
@@ -1467,11 +1467,11 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
               "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
               "\n"
               "## Trail → a_trail_judge\n"
-              "interesting = rama cond (`ON`|`CXL`|`OFF`|`LINK`) y/o pila S* que "
-              "explique el síntoma de Instruction. reject = falso positivo / ruido.\n"
+              "interesting = id listado en el prompt que explique el síntoma. "
+              "reject = otro feature / ruido. Un juego por turno: o S* o ON|CXL|OFF|LINK.\n"
               "{\"action\":\"a_trail_judge\",\"verdicts\":["
-              "{\"target\":\"ON\",\"verdict\":\"interesting\",\"why\":\"caller del L0\"},"
-              "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"no cuadra con el síntoma\"}]}\n"
+              "{\"target\":\"S1\",\"verdict\":\"interesting\",\"why\":\"caller del síntoma\"},"
+              "{\"target\":\"S2\",\"verdict\":\"reject\",\"why\":\"otro feature\"}]}\n"
               "Tras interesting el runtime pedirá suspect vars → dataflow.\n";
         } else if (ast.a_subphase == "a1_suspect_vars") {
           breq.system_prompt =
@@ -1515,9 +1515,8 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
               "duda.\n"
               "COBERTURA: el user prompt lista N cards — verdicts[] debe tener EXACTAMENTE N "
               "objetos (un target por card, mismo string).\n"
-              "Máximo " +
-              std::to_string(tuide::kA0MaxExpandPerTurn) +
-              " expand/vuelta; resto reject|uncertain.\n"
+              "expand si nudge/hot/seeds cuadra; resto reject|uncertain. Sin tope de expand "
+              "por vuelta (la cola A1 capea el total).\n"
               "Respeta nudge/hot/seeds de cada ficha; likely_* → reject salvo seeds fuertes.\n"
               "expand_with según nudge (expand:trail|peek|dataflow). NO dataflow en A0 salvo "
               "nudge explícito.\n"
@@ -1554,8 +1553,8 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
             "\n"
             "## Trail (solo si el runtime mostró call-stacks) → a_trail_judge\n"
             "{\"action\":\"a_trail_judge\",\"verdicts\":["
-            "{\"target\":\"S2\",\"verdict\":\"interesting\",\"why\":\"caller pone AiThinking\"},"
-            "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"reindex no es síntoma IA\"}]}\n"
+            "{\"target\":\"S2\",\"verdict\":\"interesting\",\"why\":\"caller cambia el estado\"},"
+            "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"rama no relacionada\"}]}\n"
             "verdict EXACTAMENTE interesting|reject (una palabra). interesting ≤3.\n"
             "a_done cuando un hop del trail es el edit site (≤2 primary).\n"
             "{\"action\":\"a_done\",\"loci\":[{\"stem\":\"…\",\"anchor\":\"path:Symbol\","
@@ -2044,8 +2043,7 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
               rec << "Reemite phase=a0_sniff con EXACTAMENTE "
                   << ast_rec.a0_shown_targets.size()
                   << " veredictos (expand|reject|uncertain; PROHIBIDO useful).\n";
-              rec << "Máximo " << tuide::kA0MaxExpandPerTurn
-                  << " expand; resto reject|uncertain.\n";
+              rec << "expand si nudge/hot/seeds; resto reject|uncertain.\n";
               rec << "Targets que FALTAN en tu JSON anterior:\n";
               for (const auto& t : ast_rec.a0_shown_targets) {
                 bool hit = false;
@@ -2299,226 +2297,22 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
     result.steps = step;
     result.phase = tr.phase;
 
-    // Rescue: model never emits a_done after enough A0/A1 — crown best Expand/Useful.
-    // Generic: queue score (ignore #window), seed overlap, modality; a1_job_root = tie-break.
-    // loci_draft is a candidate only (same ranking) — never first-wins / auto-primary.
-    if (tr.ok && phase == "explore_a" && tuide::a_effect_summary_enabled() && step >= 8) {
-      tuide::AState ast_res = Level2Session::load_a_state(opts.workspace_root);
-      if (ast_res.a1_queue.empty() || step >= 12) {
-        struct RescueCand {
-          std::string anchor;
-          std::string stem;
-          std::string why;
-          float score = -1.f;
-        };
-        std::vector<RescueCand> cands;
-
-        // Exact seed match ranked by L1 order (earlier = stronger). Queue score is tie-break only.
-        auto seed_boost = [&](const std::string& stem, const std::string& target) {
-          float boost = 0.f;
-          int best_rank = -1;
-          for (size_t i = 0; i < ast_res.seeds.size(); ++i) {
-            const auto& s = ast_res.seeds[i];
-            if (s.empty()) {
-              continue;
-            }
-            const bool exact =
-                (!stem.empty() && stem == s) ||
-                (target.size() >= s.size() + 1 &&
-                 target.compare(target.size() - s.size(), s.size(), s) == 0 &&
-                 target[target.size() - s.size() - 1] == ':');
-            if (exact) {
-              if (best_rank < 0 || static_cast<int>(i) < best_rank) {
-                best_rank = static_cast<int>(i);
-              }
-              continue;
-            }
-            if ((!stem.empty() && (stem.find(s) != std::string::npos ||
-                                   s.find(stem) != std::string::npos)) ||
-                target.find(s) != std::string::npos) {
-              boost = std::max(boost, 1e5f);
-            }
-          }
-          if (best_rank >= 0) {
-            // Dominate typical queue gaps (~1e6–1e7); earlier seeds win.
-            const float rank_weight =
-                static_cast<float>(static_cast<int>(ast_res.seeds.size()) - best_rank);
-            boost = std::max(boost, 1e8f + rank_weight * 1e6f);
-          }
-          return boost;
-        };
-
-        std::string job_root = ast_res.a1_job_root;
-        tuide::a_strip_window(&job_root, nullptr);
-
-        for (const auto& n : ast_res.notes) {
-          if (n.verdict != tuide::AVerdictKind::Expand &&
-              n.verdict != tuide::AVerdictKind::Useful) {
-            continue;
-          }
-          std::string tgt = n.target.empty() ? n.anchor : n.target;
-          if (tgt.empty()) {
-            continue;
-          }
-          tuide::a_strip_window(&tgt, nullptr);
-          float sc = tuide::a_queue_item_score(ast_res, tgt);
-          if (n.expand_with == tuide::AExpandModality::Trail) {
-            sc += 200.f;
-          } else if (n.expand_with == tuide::AExpandModality::Dataflow) {
-            sc += 100.f;
-          }
-          sc += seed_boost(n.stem, tgt);
-          if (n.verdict == tuide::AVerdictKind::Useful) {
-            sc += 50.f;
-          }
-          // Current A1 job is a tiny tie-break — never dominates queue/seed ranking.
-          if (!job_root.empty() && tgt == job_root) {
-            sc += 1.f;
-          }
-          RescueCand c;
-          c.anchor = n.anchor.empty() ? n.target : n.anchor;
-          tuide::a_strip_window(&c.anchor, nullptr);
-          if (c.anchor.empty()) {
-            c.anchor = tgt;
-          }
-          c.stem = n.stem.empty() ? tuide::a_stem_from_path(c.anchor) : n.stem;
-          c.why = n.why.empty() ? "expand note (rescue a_done)" : n.why;
-          c.score = sc;
-          bool merged = false;
-          for (auto& existing : cands) {
-            if (existing.anchor == c.anchor) {
-              if (c.score > existing.score) {
-                existing = c;
-              }
-              merged = true;
-              break;
-            }
-          }
-          if (!merged) {
-            cands.push_back(std::move(c));
-          }
-        }
-
-        // loci_draft competes in the same ranking (never auto-primary).
-        for (const auto& loc : ast_res.loci_draft) {
-          std::string tgt = loc.anchor;
-          tuide::a_strip_window(&tgt, nullptr);
-          if (tgt.empty()) {
-            continue;
-          }
-          float sc = tuide::a_queue_item_score(ast_res, tgt);
-          sc += seed_boost(loc.stem, tgt);
-          RescueCand c;
-          c.anchor = tgt;
-          c.stem = loc.stem.empty() ? tuide::a_stem_from_path(tgt) : loc.stem;
-          c.why = loc.why.empty() ? "loci_draft (rescue cand)" : loc.why;
-          c.score = sc;
-          bool merged = false;
-          for (auto& existing : cands) {
-            if (existing.anchor == c.anchor) {
-              if (c.score > existing.score) {
-                existing.score = c.score;
-                if (existing.why.empty()) {
-                  existing.why = c.why;
-                }
-              }
-              merged = true;
-              break;
-            }
-          }
-          if (!merged) {
-            cands.push_back(std::move(c));
-          }
-        }
-
-        // Fallback: if notes empty but a1_job_root exists, still crown it.
-        if (cands.empty() && !job_root.empty()) {
-          RescueCand c;
-          c.anchor = job_root;
-          c.stem = tuide::a_stem_from_path(c.anchor);
-          c.why = "a1_job_root (rescue a_done)";
-          c.score = tuide::a_queue_item_score(ast_res, c.anchor) + seed_boost(c.stem, c.anchor);
-          cands.push_back(std::move(c));
-        }
-
-        std::stable_sort(cands.begin(), cands.end(),
-                         [](const RescueCand& a, const RescueCand& b) {
-                           return a.score > b.score;
-                         });
-
-        if (!cands.empty()) {
-          std::vector<tuide::ALocus> loci;
-          for (size_t i = 0; i < cands.size() && loci.size() < 1 + tuide::kAMaxSecondaryLoci;
-               ++i) {
-            tuide::ALocus loc;
-            loc.anchor = cands[i].anchor;
-            loc.stem = cands[i].stem;
-            loc.role = i == 0 ? tuide::ALocusRole::Primary : tuide::ALocusRole::Secondary;
-            loc.why = cands[i].why;
-            tuide::a_normalize_locus(&loc);
-            loci.push_back(std::move(loc));
-          }
-          {
-            bool has_reject = false;
-            for (const auto& n : ast_res.notes) {
-              if (n.verdict == tuide::AVerdictKind::Reject) {
-                has_reject = true;
-                break;
-              }
-            }
-            if (!has_reject) {
-              std::string primary = loci.front().anchor;
-              tuide::a_strip_window(&primary, nullptr);
-              auto demote_one = [&](tuide::AVerdictKind from) {
-                for (auto& n : ast_res.notes) {
-                  if (n.verdict != from) {
-                    continue;
-                  }
-                  std::string t = n.target.empty() ? n.anchor : n.target;
-                  tuide::a_strip_window(&t, nullptr);
-                  if (t.empty() || t == primary) {
-                    continue;
-                  }
-                  n.verdict = tuide::AVerdictKind::Reject;
-                  if (n.why.empty()) {
-                    n.why = "rescue: contraste vs locus";
-                  }
-                  return true;
-                }
-                return false;
-              };
-              if (demote_one(tuide::AVerdictKind::Uncertain) ||
-                  demote_one(tuide::AVerdictKind::Expand)) {
-                Level2Session::save_a_state(opts.workspace_root, ast_res, nullptr);
-                emit("L2 ▸ rescue contraste: demote competidor → reject");
-              }
-            }
-          }
-          emit("L2 ▸ rescue a_done from expand `" + loci.front().anchor + "`" +
-               (loci.size() > 1
-                    ? (" (+" + std::to_string(loci.size() - 1) + " secondary)")
-                    : ""));
-          const auto done_tr =
-              session.apply_a_done(opts.workspace_root, loci, "rescue: expand→locus");
-          emit(std::string("L2 ▸ rescue a_done ") + (done_tr.ok ? "OK" : "FAIL") + " — " +
-               (done_tr.ok ? done_tr.phase : done_tr.error).substr(0, 160));
-          if (done_tr.ok) {
-            tr = done_tr;
-            if (opts.stop_at_phase_a) {
-              result.ok = true;
-              result.phase = "explore_a_ok";
-              result.summary = tr.summary;
-              result.steps = step;
-              emit(phase_banner("explore_a", step, max_steps) +
-                   " — Phase A OK (rescue a_done; stop_at_phase_a)");
-              return result;
-            }
-          } else {
-            recover_note = "a_done rescue falló: " + done_tr.error +
-                           "\nEmite a_done con primary `" + loci.front().anchor + "` stem=`" +
-                           loci.front().stem + "`.\n";
-          }
-        }
+    // No lexical a_done: seed overlap can crown incidental identifiers.
+    // Si el modelo no cierra, Phase A queda incompleta.
+    if (tr.ok && phase == "explore_a" && tuide::a_effect_summary_enabled() &&
+        opts.stop_at_phase_a && step >= 12) {
+      const tuide::AState ast_res = Level2Session::load_a_state(opts.workspace_root);
+      const bool a1_idle = ast_res.a1_queue.empty() && !ast_res.a1_active_set &&
+                           !ast_res.trail.awaiting_judge;
+      if (a1_idle) {
+        emit("L2 ▸ Phase A sin a_done del modelo — no rescue léxico");
+        result.ok = false;
+        result.phase = "explore_a";
+        result.summary = "Phase A sin a_done (no rescue)";
+        result.steps = step;
+        emit(phase_banner("explore_a", step, max_steps) +
+             " — Phase A incompleta (sin a_done; no rescue)");
+        return result;
       }
     }
 

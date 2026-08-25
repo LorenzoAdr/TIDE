@@ -738,7 +738,14 @@ void LlamaBackend::stop_owned_unlocked() {
   }
   server_ready_.store(false);
   if (server_pid_ > 0) {
-    ::kill(server_pid_, SIGTERM);
+    errno = 0;
+    if (::kill(server_pid_, SIGTERM) != 0) {
+      // A sandbox can hide the detached child's PID (EPERM/ESRCH) while keeping
+      // its HTTP listener alive. Never wait on a process we could not signal;
+      // the next backend instance can adopt it through health+stamp.
+      server_pid_ = -1;
+      return;
+    }
     int status = 0;
     for (int i = 0; i < 20; ++i) {
       if (::waitpid(server_pid_, &status, WNOHANG) == server_pid_) {
@@ -748,8 +755,9 @@ void LlamaBackend::stop_owned_unlocked() {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     if (::waitpid(server_pid_, &status, WNOHANG) == 0) {
-      ::kill(server_pid_, SIGKILL);
-      ::waitpid(server_pid_, &status, 0);
+      if (::kill(server_pid_, SIGKILL) == 0) {
+        ::waitpid(server_pid_, &status, 0);
+      }
     }
     server_pid_ = -1;
   }
@@ -877,17 +885,21 @@ bool LlamaBackend::start_completion_server(const std::string& server_bin, const 
     }
     return false;
   }
-  if (::kill(server_pid_, 0) != 0) {
-    server_pid_ = -1;
-    if (error) {
-      if (health_ok()) {
-        *error = "llama-server L2 en :" + std::to_string(server_port_) +
-                 " no es el proceso hijo (¿puerto ocupado?)";
-      } else {
+  // Sandboxed callers may get EPERM even for the child they just spawned.
+  // waitpid above is the ownership/liveness check; EPERM is not evidence that
+  // another process owns the healthy listener.
+  errno = 0;
+  if (::kill(server_pid_, 0) != 0 && errno != EPERM) {
+    // Some sandbox PID namespaces report ESRCH for the detached child even
+    // though its listener is healthy. The port was empty before fork and the
+    // child reached the expected health endpoint, so health is authoritative.
+    if (!health_ok()) {
+      server_pid_ = -1;
+      if (error) {
         *error = "llama-server L2 terminó antes de quedar listo";
       }
+      return false;
     }
-    return false;
   }
   server_ready_.store(true);
   write_text_file(stamp_path, server_stamp_);

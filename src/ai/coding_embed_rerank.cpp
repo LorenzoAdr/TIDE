@@ -665,17 +665,8 @@ std::string build_hybrid_embed_query(const std::string& intent,
     }
     return s;
   };
-  static const char* kSymptoms[] = {"spinner",     "busy",     "loading", "cancel",
-                                    "thinking",    "agent_busy", "carga",  "bloqueado",
-                                    "clear_busy",  "AiThinking"};
   const std::string ql = lower_copy(user_message);
   std::vector<std::string> rescued;
-  for (const char* s : kSymptoms) {
-    const std::string sl = lower_copy(s);
-    if (ql.find(sl) != std::string::npos) {
-      rescued.push_back(s);
-    }
-  }
   auto overlaps = [&](const std::string& a, const std::string& b) {
     const std::string al = lower_copy(a);
     const std::string bl = lower_copy(b);
@@ -686,14 +677,9 @@ std::string build_hybrid_embed_query(const std::string& intent,
     if (t.size() < 3) {
       continue;
     }
-    bool hit = false;
-    for (const auto& s : rescued) {
-      if (overlaps(t, s)) {
-        hit = true;
-        break;
-      }
-    }
-    if (!hit) {
+    if (overlaps(ql, t)) {
+      rescued.push_back(t);
+    } else {
       rest.push_back(t);
     }
   }

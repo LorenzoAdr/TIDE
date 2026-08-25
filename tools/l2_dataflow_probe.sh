@@ -11,34 +11,18 @@ fi
 
 VARS=("$@")
 if [[ ${#VARS[@]} -eq 0 ]]; then
-  # Caso 17 / spinner: estado IA + strip
-  VARS=(
-    agent_busy_
-    download_busy_
-    task_busy_
-  )
+  echo "Uso: $0 VAR [VAR…]" >&2
+  exit 2
 fi
 
 export TUIDE_ROOT="$ROOT"
 cd "$ROOT"
 
-path_hint_for() {
-  case "$1" in
-    agent_busy_|download_busy_|task_busy_|symbol_embed_busy_active_)
-      echo "src/ai/ai_controller.cpp" ;;
-    *) echo "" ;;
-  esac
-}
-
 echo "==== l2 dataflow-probe (${#VARS[@]} vars) ===="
 fail=0
 for var in "${VARS[@]}"; do
   echo
-  hint="$(path_hint_for "$var")"
   args=(dataflow-probe "$var")
-  if [[ -n "$hint" ]]; then
-    args+=(--path "$hint")
-  fi
   if ! "$BIN" "${args[@]}"; then
     fail=$((fail + 1))
   fi

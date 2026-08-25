@@ -1277,19 +1277,10 @@ std::string a_target_symbol_name(const std::string& target) {
 }
 
 bool a_is_symptom_edge_name(const std::string& name) {
-  static const char* kEdges[] = {"set_busy_spinner",
-                                  "set_busy_percent",
-                                  "clear_busy_if",
-                                  "clear_busy",
-                                  "agent_busy",
-                                  "begin_thinking",
-                                  "end_thinking",
-                                  "cancel_inflight_completion",
-                                  "cancel_inflight",
-                                  "cancel_all",
-                                  "ensure_spinner_thread"};
-  for (const char* e : kEdges) {
-    if (name == e) {
+  static const char* kPrefixes[] = {"set_",    "clear_", "begin_",  "end_",   "start_",
+                                    "stop_",   "enable_", "disable_", "reset_", "cancel_"};
+  for (const char* prefix : kPrefixes) {
+    if (name.rfind(prefix, 0) == 0 && name.size() > std::strlen(prefix)) {
       return true;
     }
   }
@@ -1298,7 +1289,7 @@ bool a_is_symptom_edge_name(const std::string& name) {
 
 bool a_writes_suggest_trail_a0(const std::vector<std::string>& writes) {
   for (const std::string& w : writes) {
-    if (w.rfind("strip.", 0) == 0 || w.rfind("state.", 0) == 0) {
+    if (w.rfind("state.", 0) == 0) {
       return true;
     }
   }
@@ -1318,16 +1309,6 @@ bool a_target_prefers_trail_a0(const std::string& target,
   const auto colon = path.rfind(':');
   if (colon != std::string::npos) {
     path = path.substr(0, colon);
-  }
-  if (path.find("busy_strip") != std::string::npos) {
-    return true;
-  }
-  if (path.find("/ui/") != std::string::npos || path.find("ui/") == 0) {
-    const std::string sym = a_target_symbol_name(target);
-    if (sym.find("busy") != std::string::npos || sym.find("spinner") != std::string::npos ||
-        sym.find("strip") != std::string::npos) {
-      return true;
-    }
   }
   if (writes != nullptr && a_writes_suggest_trail_a0(*writes)) {
     return true;
@@ -2005,8 +1986,7 @@ bool a_apply_a0_verdicts(AState* st, const std::vector<AVerdict>& verdicts, std:
         v.suspect_var.clear();
       }
       if (v.verdict == AVerdictKind::Expand) {
-        if (expands > kA0MaxExpandPerTurn ||
-            static_cast<int>(st->a1_queue.size()) >= kA0MaxExpandTotal) {
+        if (static_cast<int>(st->a1_queue.size()) >= kA0MaxExpandTotal) {
           v.verdict = AVerdictKind::Uncertain;
         } else {
           AExpansionItem item;
@@ -2502,6 +2482,10 @@ bool a_trail_from_json(const nlohmann::json& j, ATrail* out) {
   return true;
 }
 
+bool a_trail_judge_show_stacks(const ATrail& tr) {
+  return !tr.pending_stacks.empty();
+}
+
 std::string a_trail_stacks_markdown(const ATrail& tr) {
   std::ostringstream out;
   out << "## Trail (fase A — rama acumulativa)\n";
@@ -2512,10 +2496,12 @@ std::string a_trail_stacks_markdown(const ATrail& tr) {
   out << " · focus=`" << tr.focus_anchor << "` depth=" << tr.depth << "/" << kATrailMaxDepth
       << "\n\n";
 
-  if (!tr.cond_branches.empty()) {
-    out << "### Ramas condicionales (prioridad — judge ON/CXL/OFF)\n";
-    out << "El síntoma suele ser un **guard/async**: ¿falta el enlace CXL→OFF?\n";
-    out << "Call-stacks abajo = soporte; el edit site suele estar en un **when/then**.\n\n";
+  const bool show_stacks = a_trail_judge_show_stacks(tr);
+  const bool show_cond = !tr.cond_branches.empty() && !show_stacks;
+
+  if (show_cond) {
+    out << "### Ramas condicionales (ON/CXL/OFF de este L0)\n";
+    out << "Juzga estas ids. No hay call-stacks en este turno.\n\n";
     for (const auto& b : tr.cond_branches) {
       out << "#### `" << b.id << "`";
       if (!b.symbol.empty()) {
@@ -2569,12 +2555,17 @@ std::string a_trail_stacks_markdown(const ATrail& tr) {
     out << "\n";
   }
   if (tr.pending_stacks.empty()) {
-    out << "_(sin stacks — sin callers indexados; no falsear L0; vuelve a cola o sibling)_\n";
+    if (!show_cond) {
+      out << "_(sin stacks — sin callers indexados; no falsear L0; vuelve a cola o sibling)_\n";
+    } else {
+      out << "Responde `a_trail_judge` solo sobre ON|CXL|OFF|LINK de este turno "
+             "(interesting|reject). PROHIBIDO S*.\n";
+    }
     return out.str();
   }
 
   // Compact chains first (7B-friendly) — supporting evidence
-  out << "### Call-stacks (soporte — elige ≤" << kATrailMaxInterestingPerLevel << " interesting)\n";
+  out << "### Call-stacks (elige ≤" << kATrailMaxInterestingPerLevel << " interesting)\n";
   out << "★ = caller distinto del L0. ctrl = if/switch/…; cond = condición.\n";
   for (const auto& s : tr.pending_stacks) {
     const bool distinct =
@@ -2669,17 +2660,14 @@ std::string a_trail_stacks_markdown(const ATrail& tr) {
     }
     out << "\n";
   }
-  out << "Responde con verdict exactamente \"interesting\" o \"reject\" (nunca el literal "
-         "interesting|reject):\n"
-         "{\"action\":\"a_trail_judge\",\"verdicts\":["
-         "{\"target\":\"LINK\",\"verdict\":\"interesting\",\"why\":\"cancel no garantiza OFF\"},"
-         "{\"target\":\"CXL\",\"verdict\":\"interesting\",\"why\":\"…\"},"
-         "{\"target\":\"S2\",\"verdict\":\"interesting\",\"why\":\"…\"},"
-         "{\"target\":\"S1\",\"verdict\":\"reject\",\"why\":\"…\"},"
-         "{\"target\":\"ON\",\"verdict\":\"reject\",\"why\":\"solo enciende\"}]}\n"
-         "target = ramas condicionales (`ON`|`CXL`|`OFF`|`LINK`) y/o pilas `S1`…`S3`. "
-         "interesting ≤3 total.\n"
-         "o `a_done` si ya ves el edit site.\n";
+  if (show_stacks) {
+    out << "Responde `a_trail_judge` solo sobre S* de este turno (interesting|reject).\n"
+           "{\"action\":\"a_trail_judge\",\"verdicts\":["
+           "{\"target\":\"S1\",\"verdict\":\"interesting\",\"why\":\"caller del síntoma\"},"
+           "{\"target\":\"S2\",\"verdict\":\"reject\",\"why\":\"otro feature\"}]}\n"
+           "Si **todos** reject → L0 se invalida. interesting ≤3. "
+           "PROHIBIDO ON|CXL|OFF en este turno.\n";
+  }
   return out.str();
 }
 
@@ -2941,6 +2929,10 @@ bool a_trail_apply_judge(AState* st, const std::vector<AVerdict>& verdicts, std:
     }
 
     if (ATrailCondBranch* branch = find_cond_branch(tr, nv.target); branch != nullptr) {
+      if (!tr.pending_stacks.empty()) {
+        // Stacks-first judge: ignore ON/CXL leaked from prompts / leftover cond.
+        continue;
+      }
       branch->verdict = nv.verdict;
       branch->why = nv.why;
       if (nv.verdict == AVerdictKind::Interesting) {
@@ -2979,7 +2971,7 @@ bool a_trail_apply_judge(AState* st, const std::vector<AVerdict>& verdicts, std:
 
   const int n_stacks = static_cast<int>(tr.pending_stacks.size());
   const int n_cond = static_cast<int>(tr.cond_branches.size());
-  const int n_items = n_stacks + n_cond;
+  const int n_items = n_stacks > 0 ? n_stacks : n_cond;
   if (interesting == 0 && reject == 0 && n_items > 0) {
     // Model emitted symbol names / garbage — keep trail open; do not soft-close or suspect.
     tr.awaiting_judge = true;

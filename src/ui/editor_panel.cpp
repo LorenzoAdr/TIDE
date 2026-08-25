@@ -4826,7 +4826,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
         context_menu_append_explorer_file_section(
             &layout_state->context_menu, workspace != nullptr ? workspace->root : std::string{},
             is_lsp_trackable_path(buffer->path), true, is_nm_analyzable_path(buffer->path),
-            is_markdown_path(buffer->path));
+            is_browser_preview_path(buffer->path));
         end_mouse_selection(panel);
         return true;
       }
@@ -4842,7 +4842,7 @@ bool handle_editor_mouse(WorkspaceModel* workspace, FocusManagerState* focus,
         context_menu_append_explorer_file_section(
             &layout_state->context_menu, workspace != nullptr ? workspace->root : std::string{},
             is_lsp_trackable_path(buffer->path), true, is_nm_analyzable_path(buffer->path),
-            is_markdown_path(buffer->path));
+            is_browser_preview_path(buffer->path));
         end_mouse_selection(panel);
         return true;
       }

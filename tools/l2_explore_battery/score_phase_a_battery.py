@@ -9,7 +9,6 @@ from pathlib import Path
 
 # Operational gold stems when fixture expected_stems miss the edit/control site.
 OPERATIONAL_EXTRA: dict[str, list[str]] = {
-    "17_ai_spinner_stuck": ["busy_strip"],
     "20_cancel_ai_generation": ["busy_strip"],
 }
 
