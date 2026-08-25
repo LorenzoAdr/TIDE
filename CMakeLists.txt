@@ -715,6 +715,22 @@ target_include_directories(external_viewer_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(markdown_html_test
+  tests/markdown_html_test.cpp
+  tests/markdown_highlight_stub.cpp
+  src/util/markdown_html.cpp
+)
+target_include_directories(markdown_html_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+  ${cppdap_SOURCE_DIR}/include
+  ${cppdap_SOURCE_DIR}/third_party/json/include
+)
+target_link_libraries(markdown_html_test PRIVATE
+  tree-sitter
+  ftxui::dom
+)
+
 add_executable(tabular_file_test
   tests/tabular_file_test.cpp
   src/util/tabular_file.cpp

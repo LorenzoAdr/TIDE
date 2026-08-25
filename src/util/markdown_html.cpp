@@ -276,10 +276,144 @@ bool is_blockquote(const std::string& line, std::string* item) {
   return false;
 }
 
+std::string trim_copy(const std::string& text) {
+  std::size_t begin = 0;
+  while (begin < text.size() &&
+         std::isspace(static_cast<unsigned char>(text[begin]))) {
+    ++begin;
+  }
+  std::size_t end = text.size();
+  while (end > begin &&
+         std::isspace(static_cast<unsigned char>(text[end - 1]))) {
+    --end;
+  }
+  return text.substr(begin, end - begin);
+}
+
+bool contains_table_pipe(const std::string& line) {
+  bool escaped = false;
+  bool in_code = false;
+  for (const char c : line) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (c == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (c == '`') {
+      in_code = !in_code;
+    } else if (c == '|' && !in_code) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<std::string> split_table_cells(const std::string& line) {
+  const std::string trimmed = trim_copy(line);
+  std::vector<std::string> cells;
+  std::string cell;
+  bool escaped = false;
+  bool in_code = false;
+  for (const char c : trimmed) {
+    if (escaped) {
+      if (c != '|') {
+        cell.push_back('\\');
+      }
+      cell.push_back(c);
+      escaped = false;
+      continue;
+    }
+    if (c == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (c == '`') {
+      in_code = !in_code;
+      cell.push_back(c);
+    } else if (c == '|' && !in_code) {
+      cells.push_back(trim_copy(cell));
+      cell.clear();
+    } else {
+      cell.push_back(c);
+    }
+  }
+  if (escaped) {
+    cell.push_back('\\');
+  }
+  cells.push_back(trim_copy(cell));
+
+  if (!trimmed.empty() && trimmed.front() == '|' && !cells.empty()) {
+    cells.erase(cells.begin());
+  }
+  if (!trimmed.empty() && trimmed.back() == '|' && !cells.empty() &&
+      cells.back().empty()) {
+    cells.pop_back();
+  }
+  return cells;
+}
+
+enum class TableAlignment {
+  kDefault,
+  kLeft,
+  kCenter,
+  kRight,
+};
+
+bool parse_table_delimiter(const std::string& line,
+                           std::vector<TableAlignment>* alignments) {
+  if (!contains_table_pipe(line)) {
+    return false;
+  }
+  const std::vector<std::string> cells = split_table_cells(line);
+  if (cells.empty()) {
+    return false;
+  }
+
+  std::vector<TableAlignment> parsed;
+  parsed.reserve(cells.size());
+  for (std::string cell : cells) {
+    cell = trim_copy(cell);
+    const bool left = !cell.empty() && cell.front() == ':';
+    const bool right = !cell.empty() && cell.back() == ':';
+    if (left) {
+      cell.erase(cell.begin());
+    }
+    if (right && !cell.empty()) {
+      cell.pop_back();
+    }
+    if (cell.size() < 3 ||
+        cell.find_first_not_of('-') != std::string::npos) {
+      return false;
+    }
+    parsed.push_back(left && right ? TableAlignment::kCenter
+                                  : right ? TableAlignment::kRight
+                                          : left ? TableAlignment::kLeft
+                                                 : TableAlignment::kDefault);
+  }
+  *alignments = std::move(parsed);
+  return true;
+}
+
+const char* table_alignment_class(TableAlignment alignment) {
+  switch (alignment) {
+    case TableAlignment::kLeft:
+      return " class=\"align-left\"";
+    case TableAlignment::kCenter:
+      return " class=\"align-center\"";
+    case TableAlignment::kRight:
+      return " class=\"align-right\"";
+    case TableAlignment::kDefault:
+      return "";
+  }
+  return "";
+}
+
 std::string markdown_to_html_impl(const std::string& md, const std::string& title) {
-  std::istringstream in(md);
+  const std::vector<std::string> lines = split_source_lines(md);
   std::ostringstream body;
-  std::string line;
   bool in_para = false;
   bool in_code = false;
   bool in_ul = false;
@@ -329,7 +463,8 @@ std::string markdown_to_html_impl(const std::string& md, const std::string& titl
     code_lang.clear();
   };
 
-  while (std::getline(in, line)) {
+  for (std::size_t line_index = 0; line_index < lines.size(); ++line_index) {
+    const std::string& line = lines[line_index];
     if (!in_code && (line.rfind("```", 0) == 0 || line.rfind("~~~", 0) == 0)) {
       close_flow();
       code_lang = line.substr(3);
@@ -348,6 +483,45 @@ std::string markdown_to_html_impl(const std::string& md, const std::string& titl
         code_body += line;
       }
       continue;
+    }
+
+    std::vector<TableAlignment> table_alignments;
+    if (line_index + 1 < lines.size() && contains_table_pipe(line) &&
+        parse_table_delimiter(lines[line_index + 1], &table_alignments)) {
+      const std::vector<std::string> header_cells = split_table_cells(line);
+      if (header_cells.size() == table_alignments.size()) {
+        close_flow();
+        body << "<div class=\"table-scroll\"><table>\n<thead><tr>\n";
+        for (std::size_t cell_index = 0; cell_index < header_cells.size();
+             ++cell_index) {
+          body << "<th scope=\"col\""
+               << table_alignment_class(table_alignments[cell_index]) << ">"
+               << apply_inline(escape_html(header_cells[cell_index]))
+               << "</th>\n";
+        }
+        body << "</tr></thead>\n<tbody>\n";
+
+        line_index += 2;
+        while (line_index < lines.size() &&
+               contains_table_pipe(lines[line_index])) {
+          std::vector<std::string> row_cells =
+              split_table_cells(lines[line_index]);
+          row_cells.resize(header_cells.size());
+          body << "<tr>\n";
+          for (std::size_t cell_index = 0; cell_index < header_cells.size();
+               ++cell_index) {
+            body << "<td"
+                 << table_alignment_class(table_alignments[cell_index]) << ">"
+                 << apply_inline(escape_html(row_cells[cell_index]))
+                 << "</td>\n";
+          }
+          body << "</tr>\n";
+          ++line_index;
+        }
+        body << "</tbody>\n</table></div>\n";
+        --line_index;
+        continue;
+      }
     }
 
     if (!line.empty() && line[0] == '#') {
@@ -521,6 +695,14 @@ std::string markdown_to_html_impl(const std::string& md, const std::string& titl
          "color:var(--muted);}\n"
          "ul,ol{padding-left:1.6em;}\n"
          "li{margin:.25em 0;}\n"
+         ".table-scroll{margin:1em 0;overflow-x:auto;}\n"
+         "table{width:100%;border-spacing:0;border-collapse:collapse;font-size:.92em;}\n"
+         "th,td{border:1px solid var(--border);padding:.5em .75em;text-align:left;"
+         "vertical-align:top;}\n"
+         "th{background:var(--code-bg);font-weight:650;}\n"
+         "tbody tr:nth-child(even){background:var(--code-bg);}\n"
+         "th.align-center,td.align-center{text-align:center;}\n"
+         "th.align-right,td.align-right{text-align:right;}\n"
          "hr{border:none;border-top:2px solid var(--hr);margin:1.8em 0;}\n"
          "</style>\n</head>\n<body>\n" + body.str() + mermaid_tail + "</body>\n</html>\n";
 }
