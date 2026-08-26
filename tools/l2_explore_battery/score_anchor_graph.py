@@ -27,16 +27,26 @@ def hop0_stems(data: dict) -> list[str]:
     for h in data.get("seeds") or []:
         if not isinstance(h, dict):
             continue
-        for key in ("stem", "symbol"):
-            v = str(h.get(key) or "").strip().lower()
-            if v and v not in out:
-                out.append(v)
-        path = str(h.get("path") or "")
-        if path:
-            st = Path(path.replace("\\", "/")).stem.lower()
-            if st and st not in out:
-                out.append(st)
+        _append_hop_stem(out, h)
+    for h in data.get("hits") or []:
+        if not isinstance(h, dict):
+            continue
+        if int(h.get("hop") or 0) != 0:
+            continue
+        _append_hop_stem(out, h)
     return out
+
+
+def _append_hop_stem(out: list[str], h: dict) -> None:
+    for key in ("stem", "symbol"):
+        v = str(h.get(key) or "").strip().lower()
+        if v and v not in out:
+            out.append(v)
+    path = str(h.get("path") or "")
+    if path:
+        st = Path(path.replace("\\", "/")).stem.lower()
+        if st and st not in out:
+            out.append(st)
 
 
 def score_case(case: dict, case_dir: Path) -> dict:
@@ -62,7 +72,11 @@ def score_case(case: dict, case_dir: Path) -> dict:
     hop0_hit = any(stem_hit(g, hop0) for g in gold) if gold else bool(hop0)
     terms_in_map_query = bool(terms)  # map was built with L1 pipeline
 
-    trap_top3 = any(stem_hit(t, map_stems[:3]) for t in traps)
+    trap_top3 = any(
+        t.lower() == stem.lower() or t.lower() == path.lower()
+        for t in traps
+        for _, path, stem in ranked[:3]
+    )
 
     row = {
         "id": case.get("id"),
@@ -76,11 +90,12 @@ def score_case(case: dict, case_dir: Path) -> dict:
         "hop0_entries": len(hop0),
         "query_terms": terms,
     }
+    trap_blocks = trap_top3 and (gold_rank is None or gold_rank > 3)
     row["pass"] = (
         row["pf_terms_n"] >= 1
         and row["gold_in_map_top15"]
         and row["hop0_gold_hit"]
-        and not row["trap_in_map_top3"]
+        and not trap_blocks
     )
     return row
 

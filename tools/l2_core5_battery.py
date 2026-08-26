@@ -251,9 +251,34 @@ def registry_query_hop0(query: str, out_json: Path, env: dict[str, str]) -> int:
 
 def parse_registry_json_from_log(log_path: Path) -> dict:
     text = log_path.read_text(errors="replace")
+    # Skip server startup lines before JSON.
     start = text.find("{")
-    end = text.rfind("}")
-    if start < 0 or end <= start:
+    if start < 0:
+        return {}
+    depth = 0
+    in_str = False
+    esc = False
+    end = -1
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    if end <= start:
         return {}
     try:
         return json.loads(text[start : end + 1])
@@ -277,7 +302,10 @@ def run_graph_case(case: dict, case_dir: Path, src_dir: Path, env: dict[str, str
     if data:
         write_json(case_dir / "registry_hop0.json", data)
 
-    return {"id": cid, "query": query, "hop0_n": len(data.get("seeds") or [])}
+    hop_n = 0
+    if data:
+        hop_n = len(data.get("hits") or data.get("seeds") or [])
+    return {"id": cid, "query": query, "hop0_n": hop_n}
 
 
 def run_graph_battery(label: str, cases_path: Path, from_round: Path, only: str) -> Path:
