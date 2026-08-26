@@ -370,6 +370,18 @@ RegistryCausalTriageDecision registry_parse_causal_anchor_decision(
     const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
 nlohmann::json registry_causal_triage_decision_to_json(
     const RegistryCausalTriageDecision& decision);
+
+void registry_apply_deterministic_co_shortlist(const nlohmann::json& base_payload,
+                                               RegistryCausalTriageDecision* triage);
+
+// Tras parsear synth: si hay ≥2 zonas en el thin slice y la selección tiene peor
+// overlap hypothesis↔primary_stems (o empate en 0 con menor mass_coverage),
+// preferir la zona shortlisteada con mejor overlap.
+void registry_apply_synth_hypothesis_tiebreak(const nlohmann::json& expanded_payload,
+                                              const std::string& hypothesis,
+                                              const std::string& anchor_why,
+                                              RegistryCausalJudgeDecision* decision);
+
 std::string registry_causal_judge_markdown(const nlohmann::json& payload);
 std::string registry_causal_judge_system_prompt();
 std::string registry_causal_judge_user_prompt(const std::string& cards_markdown);

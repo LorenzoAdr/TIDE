@@ -17,7 +17,12 @@ PROMPTS = ROOT / "tests/fixtures/stem_boost_battery/prompts_nl_human.json"
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--label", default="zone_judge_epistemic_v1")
+    parser.add_argument("--label", default="zone_judge_recall_v1")
+    parser.add_argument(
+        "--cards-label",
+        default="",
+        help="Cards directory label (default: same as --label)",
+    )
     parser.add_argument(
         "--maps-from",
         default=".tuide/ai/l2_explore_battery/round_registry_trails_v1",
@@ -31,8 +36,9 @@ def main() -> int:
     args = parser.parse_args()
 
     cases = json.loads(PROMPTS.read_text(encoding="utf-8"))
+    cards_label = args.cards_label or args.label
     cards_root = (
-        ROOT / ".tuide" / "ai" / "l2_explore_battery" / f"round_{args.label}_cards"
+        ROOT / ".tuide" / "ai" / "l2_explore_battery" / f"round_{cards_label}_cards"
     )
     judge_root = (
         ROOT / ".tuide" / "ai" / "l2_explore_battery" / f"round_{args.label}"

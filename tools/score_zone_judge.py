@@ -38,6 +38,8 @@ def parse_judge_cards(cards: str) -> dict[str, Any]:
                 "rank": len(zones) + 1,
                 "stems_declared": set(),
                 "stems_evidence": set(),
+                "stems_core": set(),
+                "stems_context": set(),
             }
             zones.append(current_zone)
             zones_by_id[zone_id] = current_zone
@@ -56,6 +58,14 @@ def parse_judge_cards(cards: str) -> dict[str, Any]:
             continue
         if line.startswith("stems:"):
             current_zone["stems_declared"].update(line[6:].split())
+        elif line.startswith("core stems:"):
+            current_zone.setdefault("stems_core", set()).update(line[11:].split())
+        elif line.startswith("context stems:"):
+            current_zone.setdefault("stems_context", set()).update(line[14:].split())
+        elif line.startswith("core:"):
+            current_zone.setdefault("stems_core", set()).update(line[5:].split())
+        elif line.startswith("context:"):
+            current_zone.setdefault("stems_context", set()).update(line[8:].split())
         else:
             current_zone["stems_evidence"].update(TARGET_STEM_RE.findall(line))
 
@@ -80,9 +90,15 @@ def score_judge_cards(
     gold_stems: list[str],
     trap_stems: list[str],
     selected: list[str],
+    *,
+    include_core_context: bool = False,
 ) -> dict[str, Any]:
     """Compute post-inference card/selection metrics by evidence layer."""
     parsed = parse_judge_cards(cards)
+    if include_core_context:
+        for zone in parsed["zones"]:
+            zone["stems_declared"] |= zone.get("stems_core", set())
+            zone["stems_declared"] |= zone.get("stems_context", set())
     gold = {stem.lower() for stem in gold_stems if stem}
     traps = {stem.lower() for stem in trap_stems if stem}
 

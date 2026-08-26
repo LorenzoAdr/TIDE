@@ -601,11 +601,128 @@ void test_query_constellations() {
   for (const auto& zone : candidate_payload["zones"]) {
     for (const auto& risk : zone.value("risks", nlohmann::json::array())) {
       promoted_uncovered =
-          promoted_uncovered || (risk.is_string() && risk.get<std::string>() ==
-                                                         "uncovered_candidate");
+          promoted_uncovered ||
+          (risk.is_string() &&
+           (risk.get<std::string>() == "uncovered_candidate" ||
+            risk.get<std::string>() == "promoted_from_uncovered"));
     }
   }
   expect(promoted_uncovered, "uncovered query seed becomes bounded candidate zone");
+  nlohmann::json bridge_payload = judge_payload;
+  bridge_payload["zone_bridges"] = nlohmann::json::array({
+      {{"trail", "T1"},
+       {"zones", nlohmann::json::array({"M1", "M2"})},
+       {"stems", nlohmann::json::array({"polar"})},
+       {"why", "synthetic bridge"}}});
+  tuide::RegistryCausalTriageDecision co_triage;
+  co_triage.ok = true;
+  co_triage.shortlist = {"M1"};
+  co_triage.critical_mass = true;
+  tuide::RegistryZoneTriage anchor_zone;
+  anchor_zone.id = "M1";
+  co_triage.zones.push_back(anchor_zone);
+  tuide::registry_apply_deterministic_co_shortlist(bridge_payload, &co_triage);
+  expect(co_triage.shortlist.size() >= 2, "co-shortlist adds bridge-linked zone");
+  expect(std::find(co_triage.shortlist.begin(), co_triage.shortlist.end(), "M2") !=
+             co_triage.shortlist.end(),
+         "co-shortlist includes bridge zone");
+
+  // Floor top-2: shortlist lleno sin M2 → eviction del último no-top2 (caso 02).
+  nlohmann::json floor_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M1"},
+             {"primary_stems", nlohmann::json::array({"scroll_bar"})},
+             {"context_stems", nlohmann::json::array()}},
+            {{"id", "M2"},
+             {"primary_stems", nlohmann::json::array({"main_layout"})},
+             {"context_stems", nlohmann::json::array()}},
+            {{"id", "M4"},
+             {"primary_stems", nlohmann::json::array({"csv_viewer"})},
+             {"context_stems", nlohmann::json::array()}},
+            {{"id", "M6"},
+             {"primary_stems", nlohmann::json::array({"csv_viewer"})},
+             {"context_stems", nlohmann::json::array()}}})}};
+  tuide::RegistryCausalTriageDecision floor_triage;
+  floor_triage.ok = true;
+  floor_triage.critical_mass = true;
+  floor_triage.shortlist = {"M1", "M4", "M6"};
+  for (const char* zid : {"M1", "M4", "M6"}) {
+    tuide::RegistryZoneTriage z;
+    z.id = zid;
+    floor_triage.zones.push_back(z);
+  }
+  tuide::registry_apply_deterministic_co_shortlist(floor_payload, &floor_triage);
+  expect(floor_triage.shortlist.size() == 3, "floor top-2 keeps cap 3");
+  expect(std::find(floor_triage.shortlist.begin(), floor_triage.shortlist.end(), "M2") !=
+             floor_triage.shortlist.end(),
+         "floor top-2 force-includes registry runner-up");
+  expect(std::find(floor_triage.shortlist.begin(), floor_triage.shortlist.end(), "M1") !=
+             floor_triage.shortlist.end(),
+         "floor top-2 keeps registry top");
+
+  // Context overlap: M1 context ai_controller → añade M7 primary (casos 07/20).
+  nlohmann::json ctx_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M1"},
+             {"primary_stems", nlohmann::json::array({"busy_strip"})},
+             {"context_stems", nlohmann::json::array({"ai_controller"})}},
+            {{"id", "M2"},
+             {"primary_stems", nlohmann::json::array({"level2_session"})},
+             {"context_stems", nlohmann::json::array()}},
+            {{"id", "M7"},
+             {"primary_stems", nlohmann::json::array({"ai_controller", "level2_autonomous_loop"})},
+             {"context_stems", nlohmann::json::array()}}})}};
+  tuide::RegistryCausalTriageDecision ctx_triage;
+  ctx_triage.ok = true;
+  ctx_triage.critical_mass = true;
+  ctx_triage.shortlist = {"M1"};
+  tuide::RegistryZoneTriage ctx_anchor;
+  ctx_anchor.id = "M1";
+  ctx_triage.zones.push_back(ctx_anchor);
+  tuide::registry_apply_deterministic_co_shortlist(ctx_payload, &ctx_triage);
+  expect(ctx_triage.shortlist.size() <= 3, "context complement respects cap 3");
+  expect(std::find(ctx_triage.shortlist.begin(), ctx_triage.shortlist.end(), "M2") !=
+             ctx_triage.shortlist.end(),
+         "top-2 floor adds M2 alongside single-zone anchor");
+  expect(std::find(ctx_triage.shortlist.begin(), ctx_triage.shortlist.end(), "M7") !=
+             ctx_triage.shortlist.end(),
+         "context overlap adds primary-owner of shortlist context stem");
+
+  // Synth tie-break: M1 sin overlap / baja mass → M2 con editor_panel en hypothesis.
+  nlohmann::json synth_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M1"},
+             {"primary_stems", nlohmann::json::array({"status_language_popover"})},
+             {"mass_coverage", 0.002f}},
+            {{"id", "M2"},
+             {"primary_stems", nlohmann::json::array({"editor_panel"})},
+             {"mass_coverage", 0.09f}}})}};
+  tuide::RegistryCausalJudgeDecision synth_decision;
+  synth_decision.ok = true;
+  synth_decision.selected = {"M1"};
+  tuide::RegistryZoneVerdict synth_m1;
+  synth_m1.id = "M1";
+  synth_m1.verdict = "select";
+  synth_m1.role = "primary";
+  synth_m1.completeness = "complete";
+  synth_m1.confidence = 0.8f;
+  synth_m1.why = "elige popover por error";
+  synth_decision.zones.push_back(synth_m1);
+  tuide::RegistryZoneVerdict synth_m2;
+  synth_m2.id = "M2";
+  synth_m2.verdict = "reject";
+  synth_m2.role = "none";
+  synth_m2.completeness = "none";
+  synth_m2.why = "descartada incorrectamente";
+  synth_decision.zones.push_back(synth_m2);
+  tuide::registry_apply_synth_hypothesis_tiebreak(
+      synth_payload, "El estado del editor maneja eventos de mouse", "", &synth_decision);
+  expect(synth_decision.selected == std::vector<std::string>({"M2"}),
+         "synth tie-break prefers hypothesis stem overlap");
+
   const std::string triage_md = tuide::registry_causal_triage_markdown(judge_payload);
   expect(triage_md.find("causal_zone_triage_v1") != std::string::npos,
          "causal triage markdown");

@@ -1949,6 +1949,13 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
                         {"epistemic", epistemic}});
         continue;
       }
+      if (epistemic) {
+        tuide::registry_apply_deterministic_co_shortlist(base_payload, &triage);
+        std::ofstream(case_out / "anchor.json")
+            << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
+        std::ofstream(case_out / "triage.json")
+            << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
+      }
       // Legacy padding a 3 zonas solo fuera del modo epistémico.
       if (!epistemic && triage.ok && triage.shortlist.size() < 3) {
         std::unordered_set<std::string> selected(triage.shortlist.begin(),
@@ -2013,6 +2020,7 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
       cards = tuide::registry_causal_judge_markdown(expanded_payload);
       zone_ids = zone_ids_from_payload(expanded_payload);
       std::ofstream(case_out / "cards_expanded.md") << cards;
+      nlohmann::json* active_payload = &expanded_payload;
 
       // Primera síntesis (o juicio legacy) ocurre abajo; si epistémico y reinvestigate, reabrimos.
       auto run_synth = [&](const std::string& synth_cards,
@@ -2079,6 +2087,9 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
         reopened = true;
         auto reopen = run_anchor_or_triage(decision.reinvestigate_need, "reopen_anchor");
         if (reopen.ok && !reopen.shortlist.empty()) {
+          tuide::registry_apply_deterministic_co_shortlist(base_payload, &reopen);
+          std::ofstream(case_out / "reopen_anchor.json")
+              << tuide::registry_causal_triage_decision_to_json(reopen).dump(2) << "\n";
           hypothesis = reopen.hypothesis;
           anchor_why = reopen.why;
           nlohmann::json reopen_payload;
@@ -2087,6 +2098,8 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
             cards = tuide::registry_causal_judge_markdown(reopen_payload);
             zone_ids = zone_ids_from_payload(reopen_payload);
             std::ofstream(case_out / "cards_reopened.md") << cards;
+            expanded_payload = std::move(reopen_payload);
+            active_payload = &expanded_payload;
             decision = run_synth(cards, zone_ids, hypothesis, anchor_why, "reopen_");
           }
         }
@@ -2154,6 +2167,11 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
         if (decision.why.size() < 12) {
           decision.why = "conservar ancla expandida como mordida mínima";
         }
+      }
+      if (epistemic && active_payload != nullptr) {
+        tuide::registry_apply_synth_hypothesis_tiebreak(
+            *active_payload, hypothesis.empty() ? instruction : hypothesis, anchor_why,
+            &decision);
       }
       // Escribir decision final canónica y continuar al scoring del bucle (sin segundo propose).
       std::ofstream(case_out / "system.txt") << system;

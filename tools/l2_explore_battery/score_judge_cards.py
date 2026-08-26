@@ -18,6 +18,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cards-root", required=True)
     parser.add_argument("--out", default="")
+    parser.add_argument(
+        "--include-core-context",
+        action="store_true",
+        help="count core/context stems as declared for extended recall metric",
+    )
     args = parser.parse_args()
     cards_root = Path(args.cards_root)
     if not cards_root.is_absolute():
@@ -35,20 +40,22 @@ def main() -> int:
             [str(value) for value in case.get("expected_stems") or []],
             [str(value) for value in case.get("trap_stems") or []],
             [],
+            include_core_context=args.include_core_context,
         )
-        rows.append(
-            {
-                "id": case_id,
-                "ok": True,
-                "declared": bool(layers["gold_declared_zone_ids"]),
-                "evidence": bool(layers["gold_evidence_zone_ids"]),
-                "uncovered": layers["gold_in_uncovered"],
-                "only_uncovered": layers["gold_only_uncovered"],
-                "first_rank": layers["first_gold_zone_rank"],
-                "gold_zones": layers["gold_zone_ids"],
-                "mixed": layers["mixed_zone_count"],
-            }
-        )
+        row = {
+            "id": case_id,
+            "ok": True,
+            "declared": bool(layers["gold_declared_zone_ids"]),
+            "evidence": bool(layers["gold_evidence_zone_ids"]),
+            "uncovered": layers["gold_in_uncovered"],
+            "only_uncovered": layers["gold_only_uncovered"],
+            "first_rank": layers["first_gold_zone_rank"],
+            "gold_zones": layers["gold_zone_ids"],
+            "mixed": layers["mixed_zone_count"],
+        }
+        if args.include_core_context:
+            row["declared_extended"] = bool(layers["gold_declared_zone_ids"])
+        rows.append(row)
     summary = {
         "total": len(rows),
         "valid": sum(bool(row.get("ok")) for row in rows),
@@ -59,6 +66,10 @@ def main() -> int:
         "mixed_zone_total": sum(int(row.get("mixed") or 0) for row in rows),
         "missing_declared": [row["id"] for row in rows if row.get("ok") and not row.get("declared")],
     }
+    if args.include_core_context:
+        summary["declared_recall_extended"] = sum(
+            bool(row.get("declared_extended")) for row in rows
+        )
     output = {"summary": summary, "rows": rows}
     text = json.dumps(output, ensure_ascii=False, indent=2) + "\n"
     if args.out:
