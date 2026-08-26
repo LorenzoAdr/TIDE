@@ -20,6 +20,7 @@
 #include "ai/repo_map.hpp"
 #include "ai/search_needles.hpp"
 #include "ai/l2_feat.hpp"
+#include "ai/l2_problem_frame.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 
 #include <filesystem>
@@ -563,28 +564,20 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
     {
       LlamaCompletionRequest req;
       req.system_prompt =
-          "Eres un analizador semántico para recuperación de código. Tu trabajo en esta primera "
-          "pasada es entender la intención real del prompt y separar señal de ruido. "
-          "NO elijas todavía archivos ni símbolos concretos. Responde SOLO JSON con este formato:\n"
-          "{\"intent\":\"...\",\"primary_goal\":\"...\",\"facets\":[\"...\"],"
-          "\"ignore\":[\"...\"],\"search_terms\":[\"...\"]}\n"
+          "Eres un analizador para caza de ancla primaria (problem_frame_v1). "
+          "NO elijas archivos concretos todavía. Responde SOLO JSON:\n"
+          "{\"schema\":\"problem_frame_v1\",\"problem_kind\":\"debug|locate|implement|explain\","
+          "\"problem_frame\":\"1-2 frases observables sin hipótesis causal\","
+          "\"primary_anchor\":{\"kind\":\"symptom_control|effect_surface|entrypoint|state_latch\","
+          "\"objective\":\"qué pieza entender primero\","
+          "\"search_terms\":[\"...\"],\"edge_hints\":[\"set_\",\"clear_\"]},"
+          "\"mechanism_gaps\":[{\"slot\":\"cleanup\",\"question\":\"...\"}],"
+          "\"reject_noise\":[\"...\"],\"anchor_confidence\":\"high|medium|low\"}\n"
           "Reglas:\n"
-          "- intent: una frase corta en inglés técnico.\n"
-          "- primary_goal: la meta principal, más abstracta que las palabras literales del prompt.\n"
-          "- Antes de escribir facets/search_terms, clasifica mentalmente la petición en una "
-          "familia de intención general, por ejemplo: persistencia/estado, navegación, "
-          "renderizado, ejecución runtime, integración externa, edición, búsqueda o UI.\n"
-          "- facets: 2..5 conceptos nucleares de IMPLEMENTACION, no palabras de superficie.\n"
-          "- ignore: 0..6 detalles superficiales que podrían desviar el retrieval.\n"
-          "- PROHIBIDO poner en ignore palabras que el usuario escribió.\n"
-          "- search_terms: 3..8 términos cortos de implementación.\n"
-          "- Si el prompt mezcla conceptos estructurales con detalles de presentación, "
-          "PRIORIZA lo estructural: estado, persistencia, modelo, coordinación, flujo, "
-          "almacenamiento, propietario del dato o ciclo de vida.\n"
-          "- Incluye en facets/search_terms los subsistemas que el usuario nombra "
-          "(p. ej. IA, chat, agente, terminal) aunque suenen a UI.\n"
-          "- NO inventes nombres de archivos o símbolos todavía.\n"
-          "- Si el prompt es largo, prioriza la semántica estable frente a detalles cosméticos.\n";
+          "- UNA sola primary_anchor.\n"
+          "- search_terms: 3..8 términos de código/implementación, no NL literal.\n"
+          "- mechanism_gaps: preguntas abiertas, NO afirmaciones.\n"
+          "- reject_noise: tokens NL a no grepear (no palabras que el usuario escribió).\n";
       std::ostringstream user;
       user << "Consulta del usuario:\n" << user_message << "\n";
       user << "\nJSON:";
@@ -613,6 +606,23 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
           log("L1 intent raw: " + completion.text);
         }
         distilled = parse_distilled_intent_json(completion.text);
+        if (!distilled) {
+          tuide::ProblemFrame pf;
+          std::string perr;
+          if (tuide::problem_frame_from_json_string(completion.text, &pf, &perr)) {
+            DistilledInvestigateIntent di;
+            di.intent = pf.problem_frame;
+            di.primary_goal = pf.primary_anchor.objective;
+            di.search_terms = pf.primary_anchor.search_terms;
+            di.ignore = pf.reject_noise;
+            for (const auto& g : pf.mechanism_gaps) {
+              if (!g.slot.empty()) {
+                di.facets.push_back(g.slot);
+              }
+            }
+            distilled = di;
+          }
+        }
         if (distilled) {
           filter_distilled_ignore(&*distilled, user_message);
         }

@@ -5,6 +5,7 @@
 
 #include "ai/l2_explore_a.hpp"
 #include "ai/l2_feat.hpp"
+#include "ai/l2_problem_frame.hpp"
 
 using tuide::ALocusRole;
 using tuide::AState;
@@ -856,6 +857,53 @@ int main() {
     const std::string md = tuide::a_trail_stacks_markdown(tr);
     expect(md.find("`ON`") != std::string::npos, "shows ON");
     expect(md.find("vuelve a cola") == std::string::npos, "do not skip cond-only");
+  }
+  {
+    setenv("L2_FEAT_L2_EXPLORE_PHASE_A", "1", 1);
+    setenv("L2_FEAT_L2_EXPLORE_ANCHOR_CAUSAL", "1", 1);
+    tuide::ProblemFrame pf;
+    pf.primary_anchor.objective = "control spinner busy";
+    pf.primary_anchor.search_terms = {"spinner", "busy", "set_busy"};
+    pf.primary_anchor.edge_hints = {"set_", "clear_"};
+    AState st;
+    st.explore_mode = "f1_anchor";
+    tuide::AQueueItem good;
+    good.target = "src/ai/ai_controller.cpp:set_agent_busy";
+    good.path = "src/ai/ai_controller.cpp";
+    good.symbol = "set_agent_busy";
+    good.stem = "ai_controller";
+    good.score = 1.f;
+    tuide::AQueueItem trap;
+    trap.target = "src/ui/console_panel.cpp:log_line";
+    trap.path = "src/ui/console_panel.cpp";
+    trap.symbol = "log_line";
+    trap.stem = "console_panel";
+    trap.score = 2.f;
+    st.queue = {trap, good};
+    tuide::a_apply_f1_anchor_queue_filter(&st, pf);
+    expect(st.queue.front().symbol == "set_agent_busy", "F1 rerank boosts anchor match");
+    expect(tuide::a_f1_coerce_expand_modality(tuide::AExpandModality::Trail) ==
+               tuide::AExpandModality::Peek,
+           "F1 coerce trail→peek");
+    st.peeks_used = 2;
+    st.cards_used = 4;
+    tuide::AVerdict note;
+    note.verdict = AVerdictKind::Useful;
+    note.target = good.target;
+    st.notes.push_back(note);
+    tuide::AVerdict rej;
+    rej.verdict = AVerdictKind::Reject;
+    rej.target = trap.target;
+    st.notes.push_back(rej);
+    tuide::ALocus loc;
+    loc.stem = "ai_controller";
+    loc.anchor = good.target;
+    loc.role = tuide::ALocusRole::Primary;
+    loc.why = "sets busy";
+    std::string gate_err;
+    expect(tuide::a_validate_f1_anchor_done(st, {loc}, &gate_err), "F1 validate ok");
+    unsetenv("L2_FEAT_L2_EXPLORE_ANCHOR_CAUSAL");
+    unsetenv("L2_FEAT_L2_EXPLORE_PHASE_A");
   }
 
   if (failures) {

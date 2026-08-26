@@ -20,7 +20,7 @@
 #include "ai/l2_explore_a.hpp"
 #include "ai/l2_effect_summary.hpp"
 #include "ai/l2_feat.hpp"
-#include "ai/l2_feat.hpp"
+#include "ai/l2_problem_frame.hpp"
 #include "ai/l2_pack_review.hpp"
 
 namespace fs = std::filesystem;
@@ -3568,6 +3568,27 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   const AiWorkflowKind workflow = parse_ai_workflow_kind(opts.workflow);
   const std::string workflow_name = ai_workflow_kind_name(workflow);
 
+  std::optional<ProblemFrame> bootstrap_pf;
+  if (a_explore_anchor_causal_enabled()) {
+    ProblemFrame pf;
+    std::string pferr;
+    if (!opts.problem_frame_json.empty() &&
+        problem_frame_from_json_string(opts.problem_frame_json, &pf, &pferr)) {
+      pf.provenance = "manual";
+    } else if (!opts.distilled_intent_json.empty() &&
+               problem_frame_from_json_string(opts.distilled_intent_json, &pf, &pferr)) {
+      pf.provenance = "l1_distill";
+    } else {
+      pf = problem_frame_fallback_from_query(opts.query);
+    }
+    if (pf.instruction.empty()) {
+      pf.instruction = opts.query;
+    }
+    std::string pfsave;
+    save_problem_frame(opts.workspace_root, pf, &pfsave);
+    bootstrap_pf = std::move(pf);
+  }
+
   std::ostringstream md;
   md << "# L2 session\n\n";
   // Tool guide lives only in the L2 system prompt (avoid duplicating ~1.3k chars into n_ctx).
@@ -3593,6 +3614,10 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
   if (!opts.distilled_intent_json.empty()) {
     md << "## Distilled intent\n\n```json\n" << trim_ws(opts.distilled_intent_json) << "\n```\n\n";
   }
+  if (bootstrap_pf) {
+    md << "## Problem frame\n\n```json\n" << problem_frame_to_json(*bootstrap_pf).dump(2)
+       << "\n```\n\n";
+  }
   if (map_stale) {
     md << "**map_stale=1**: el mapa rankeado parece de otra query (`" << map_query
        << "`; overlap=" << static_cast<int>(overlap * 100)
@@ -3616,9 +3641,14 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
           "`action=plan`/tools si necesitas código actual, o `action=synthesize` directo "
           "para resumir qué cambió. **PROHIBIDO** edit/compile.\n\n";
   } else if (l2_feat::enabled("L2_EXPLORE_PHASE_A")) {
-    md << "Fase inicial: **explore_a** (localización). PROHIBIDO `plan`/tools/pack. "
-          "Juzga peeks con `a_judge` → cierra con `a_done` (`loci[]`) → **explore_b** "
-          "materializa pack desde loci. Sin caza libre multi-stem.\n\n";
+    if (a_explore_anchor_causal_enabled()) {
+      md << "Fase inicial: **explore_a / F1 anchor hunt**. PROHIBIDO `plan`/trail/dataflow. "
+            "Juzga fichas (A0) → peek (A1) → `f1_done` (1 primary) o `anchor_miss_v1`.\n\n";
+    } else {
+      md << "Fase inicial: **explore_a** (localización). PROHIBIDO `plan`/tools/pack. "
+            "Juzga peeks con `a_judge` → cierra con `a_done` (`loci[]`) → **explore_b** "
+            "materializa pack desde loci. Sin caza libre multi-stem.\n\n";
+    }
   } else {
     md << "Fase inicial: **explore**. Preferir `action=plan` en el **primer** paso con "
           "4–8 targets `path:Symbol`/`path:line` (evitar path bare). Máx. ~8 tools sueltos "
@@ -3732,6 +3762,15 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
       if (ast.seeds.empty() && !opts.query.empty()) {
         ast.seeds.push_back(opts.query);
       }
+    }
+    if (a_explore_anchor_causal_enabled() && bootstrap_pf) {
+      const auto anchor_seeds = problem_frame_anchor_seeds(*bootstrap_pf);
+      if (!anchor_seeds.empty()) {
+        ast.seeds = anchor_seeds;
+      }
+      ast.explore_mode = "f1_anchor";
+      ast.a_subphase = "a0_sniff";
+      a_apply_f1_anchor_queue_filter(&ast, *bootstrap_pf);
     }
     std::string aerr;
     if (!save_a_state(opts.workspace_root, ast, &aerr)) {
@@ -4308,6 +4347,9 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
           v.expand_with = AExpandModality::Peek;
         }
         v.expand_with = a_coerce_a0_expand_modality(v.target, v.expand_with, nullptr);
+        if (a_in_f1_anchor_mode(ast)) {
+          v.expand_with = a_f1_coerce_expand_modality(v.expand_with);
+        }
       } else if (v.verdict == AVerdictKind::Reject) {
         ++batch_reject;
       }
@@ -4787,6 +4829,138 @@ Level2TurnResult Level2Session::apply_a_done(const std::string& workspace_root,
   return out;
 }
 
+Level2TurnResult Level2Session::apply_f1_done(const std::string& workspace_root,
+                                              const std::vector<ALocus>& loci,
+                                              const std::string& summary) {
+  Level2TurnResult out;
+  out.action = "f1_done";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  if (loci.empty()) {
+    out.error = "f1_done.loci vacío";
+    return out;
+  }
+
+  AState ast = load_a_state(workspace_root);
+  std::vector<ALocus> ordered;
+  ordered.reserve(loci.size());
+  for (ALocus loc : loci) {
+    a_normalize_locus(&loc);
+    if (!a_anchor_resolvable(loc.anchor)) {
+      continue;
+    }
+    if (loc.role == ALocusRole::Unknown) {
+      loc.role = ALocusRole::Primary;
+    }
+    ordered.push_back(std::move(loc));
+  }
+  a_cap_locus_roles(&ordered);
+
+  std::string gate_err;
+  if (!a_validate_f1_anchor_done(ast, ordered, &gate_err)) {
+    out.error = gate_err;
+    std::ostringstream obs;
+    obs << "### f1_done rechazado — " << gate_err << "\n"
+        << "_nudge:_ confirma ancla primaria con peek useful; 1 primary; ≥1 reject en "
+           "competidores.\n";
+    append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
+    write_response_json(workspace_root, false, "f1_done", "", "", "", out.error, st.turn,
+                        st.phase);
+    return out;
+  }
+
+  ast.loci_draft = ordered;
+  for (const auto& loc : ordered) {
+    if (loc.role == ALocusRole::Primary) {
+      ast.anchor_confirmed = loc.anchor;
+      break;
+    }
+  }
+  ast.anchor_understanding = summary;
+  ast.done = true;
+  std::string err;
+  if (!save_a_state(workspace_root, ast, &err)) {
+    out.error = err.empty() ? "no se pudo guardar a_state" : err;
+    return out;
+  }
+
+  st.watchlist.clear();
+  for (const auto& loc : ordered) {
+    if (!loc.anchor.empty()) {
+      st.watchlist.push_back(loc.anchor);
+    }
+  }
+  st.phase = "explore_f1_ok";
+  st.last_action = "f1_done";
+  ++st.turn;
+  if (!save_state(workspace_root, st, &err)) {
+    out.error = err.empty() ? "no se pudo guardar state" : err;
+    return out;
+  }
+
+  std::ostringstream obs;
+  obs << "### f1_done anchor=`" << ast.anchor_confirmed << "`\n";
+  if (!summary.empty()) {
+    obs << summary << "\n";
+  }
+  append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
+  out.ok = true;
+  out.phase = st.phase;
+  out.summary = summary.empty() ? ast.anchor_confirmed : summary;
+  return out;
+}
+
+Level2TurnResult Level2Session::apply_anchor_miss(const std::string& workspace_root,
+                                                  const std::string& reason,
+                                                  const std::vector<std::string>& candidates,
+                                                  bool retrieval_needed,
+                                                  const std::string& summary) {
+  Level2TurnResult out;
+  out.action = "anchor_miss_v1";
+  State st = load_state(workspace_root);
+  out.phase = st.phase;
+  if (workspace_root.empty()) {
+    out.error = "workspace_root vacío";
+    return out;
+  }
+  AState ast = load_a_state(workspace_root);
+  ast.f1_failure_reason = reason.empty() ? "anchor_miss" : reason;
+  ast.done = true;
+  std::string err;
+  if (!save_a_state(workspace_root, ast, &err)) {
+    out.error = err.empty() ? "no se pudo guardar a_state" : err;
+    return out;
+  }
+  st.phase = retrieval_needed ? "explore_f1_retrieval" : "explore_f1_miss";
+  st.last_action = "anchor_miss_v1";
+  ++st.turn;
+  if (!save_state(workspace_root, st, &err)) {
+    out.error = err.empty() ? "no se pudo guardar state" : err;
+    return out;
+  }
+  std::ostringstream obs;
+  obs << "### anchor_miss_v1 reason=" << ast.f1_failure_reason;
+  if (retrieval_needed) {
+    obs << " retrieval_needed=true";
+  }
+  obs << "\n";
+  if (!summary.empty()) {
+    obs << summary << "\n";
+  }
+  for (const auto& c : candidates) {
+    obs << "- candidate: `" << c << "`\n";
+  }
+  append_observation(workspace_root, obs.str(), &out.session_chars, nullptr);
+  out.ok = true;
+  out.phase = st.phase;
+  out.summary = summary.empty() ? ast.f1_failure_reason : summary;
+  return out;
+}
+
 Level2TurnResult Level2Session::allow_micro_a_paths(const std::string& workspace_root,
                                                     const std::vector<std::string>& paths) {
   Level2TurnResult out;
@@ -4943,6 +5117,11 @@ Level2TurnResult Level2Session::apply_a_trail_judge(const std::string& workspace
                                                     const std::vector<AVerdict>& verdicts) {
   Level2TurnResult out;
   out.action = "a_trail_judge";
+  AState ast = load_a_state(workspace_root);
+  if (a_in_f1_anchor_mode(ast)) {
+    out.error = "a_trail_judge prohibido en F1 anchor hunt";
+    return out;
+  }
   State st = load_state(workspace_root);
   out.phase = st.phase;
   if (workspace_root.empty()) {
@@ -4953,7 +5132,6 @@ Level2TurnResult Level2Session::apply_a_trail_judge(const std::string& workspace
     out.error = "a_trail_judge solo en explore_a";
     return out;
   }
-  AState ast = load_a_state(workspace_root);
   std::string err;
   const std::string prev_subphase = ast.a_subphase;
   if (!a_trail_apply_judge(&ast, verdicts, &err)) {

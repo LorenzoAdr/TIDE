@@ -30,6 +30,8 @@ struct Level2BootstrapOpts {
   std::string seed_pack_markdown;
   // Optional JSON from L1 semantic distillation (bridges ES query → EN search_terms).
   std::string distilled_intent_json;
+  // problem_frame_v1 JSON (primary anchor hunt). Falls back from query if empty.
+  std::string problem_frame_json;
   // Directory prefixes (empty = unrestricted). Used for session prompt hint.
   std::vector<std::string> path_scope;
 };
@@ -207,6 +209,14 @@ class Level2Session {
   Level2TurnResult apply_a_done(const std::string& workspace_root,
                                 const std::vector<ALocus>& loci,
                                 const std::string& summary = {});
+  Level2TurnResult apply_f1_done(const std::string& workspace_root,
+                                 const std::vector<ALocus>& loci,
+                                 const std::string& summary = {});
+  Level2TurnResult apply_anchor_miss(const std::string& workspace_root,
+                                     const std::string& reason,
+                                     const std::vector<std::string>& candidates,
+                                     bool retrieval_needed,
+                                     const std::string& summary = {});
   // Phase B miss → allow paths for a short micro-A / plan outside original loci (capa 4).
   Level2TurnResult allow_micro_a_paths(const std::string& workspace_root,
                                        const std::vector<std::string>& paths);

@@ -374,6 +374,8 @@ add_executable(tuide
   src/ai/l2_explore_a_trail.cpp
   src/ai/l2_explore_a_dataflow.cpp
   src/ai/l2_effect_summary.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_graph_query_profile.cpp
   src/ai/l2_effect_slice.cpp
   src/ai/l2_effect_registry.cpp
   src/ai/l2_brain_local.cpp
@@ -954,9 +956,21 @@ add_executable(l2_action_test
   tests/l2_explore_a_trail_stub.cpp
   src/ai/l2_action.cpp
   src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
   src/ai/search_replace.cpp
 )
 target_include_directories(l2_action_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_problem_frame_test
+  tests/l2_problem_frame_test.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_graph_query_profile.cpp
+)
+target_include_directories(l2_problem_frame_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
@@ -966,6 +980,7 @@ add_executable(l2_explore_a_test
   tests/l2_explore_a_trail_stub.cpp
   src/ai/l2_explore_a.cpp
   src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
 )
 target_include_directories(l2_explore_a_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -1480,6 +1495,7 @@ set(TUIDE_TEST_TARGETS
   level2_debrief_test
   l2_context_budget_test
   l2_action_test
+  l2_problem_frame_test
   l2_explore_a_test
   l2_trail_build_test
   l2_effect_slice_test

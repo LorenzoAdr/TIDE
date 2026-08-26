@@ -15,6 +15,8 @@ enum class L2ActionKind {
   AJudge, // phase A: verdicts over runtime-supplied peeks
   ATrailJudge, // phase A: interesting/reject over call-stacks
   ADone,  // phase A: stable loci[] → handoff to pack (B)
+  F1Done,       // F1 anchor hunt closure (1 primary locus)
+  AnchorMiss,   // F1 explicit failure (anchor_miss_v1)
   Done,
   Edit,
   Synthesize,  // ask/plan/git: natural-language answer / plan doc → done
@@ -39,6 +41,9 @@ struct L2Action {
   std::vector<AVerdict> a_verdicts;  // a_judge
   std::vector<ALocus> a_loci;        // a_done
   bool a_turn_done = false;          // a_judge.done hint (early-stop request)
+  std::string f1_failure_reason;
+  std::vector<std::string> f1_failure_candidates;
+  bool f1_retrieval_needed = false;
   std::string error;
   std::string raw;
 };

@@ -159,6 +159,21 @@ int main() {
     expect(a.kind == L2ActionKind::Error, "a_done empty loci");
   }
   {
+    const auto a = parse_l2_action(
+        R"({"action":"f1_done","loci":[{"stem":"ai_controller","anchor":"src/ai/ai_controller.cpp:set_busy",)"
+        R"("role":"primary","why":"control"}],"summary":"busy control"})");
+    expect(a.kind == L2ActionKind::F1Done, "f1_done kind");
+    expect(a.a_loci.size() == 1, "f1_done locus");
+  }
+  {
+    const auto a = parse_l2_action(
+        R"({"action":"anchor_miss_v1","reason":"no_symptom_edge","retrieval_needed":true,)"
+        R"("candidates":["src/x.cpp:foo"],"why":"exhausted"})");
+    expect(a.kind == L2ActionKind::AnchorMiss, "anchor_miss kind");
+    expect(a.f1_retrieval_needed, "anchor_miss retrieval");
+    expect(a.f1_failure_candidates.size() == 1, "anchor_miss candidates");
+  }
+  {
     // Coerce verdict-as-action (7B common in A1 dataflow).
     const auto a = parse_l2_action(
         R"({"action":"reject","target":"src/ui/busy_strip.cpp:spinner_busy_set","why":"no"})");

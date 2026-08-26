@@ -1496,11 +1496,35 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
               "reject si la var no cuadra o hits irrelevantes → runtime reabre trail.\n"
               "Máx 1 useful/vuelta.\n";
         } else if (ast.a_subphase.rfind("a1_", 0) == 0) {
+          if (tuide::a_in_f1_anchor_mode(ast)) {
+            breq.system_prompt =
+                "Eres el Nivel 2 en fase F1 anchor hunt — subfase A1 peek confirmación.\n"
+                "Responde SIEMPRE con UN solo objeto JSON.\n"
+                "a_judge: useful|reject|uncertain (máx 1 useful). Cierra con f1_done (1 primary) "
+                "o anchor_miss_v1 si no hay ancla.\n"
+                "PROHIBIDO trail/dataflow/plan/a_done.\n";
+          } else {
+            breq.system_prompt =
+                "Eres el Nivel 2 en fase explore_a — subfase A1 confirmación.\n"
+                "Responde SIEMPRE con UN solo objeto JSON.\n"
+                "a_judge: useful|reject|uncertain (máx 1 useful). a_done solo con loci "
+                "confirmados.\n";
+          }
+        } else if (tuide::a_in_f1_anchor_mode(ast)) {
           breq.system_prompt =
-              "Eres el Nivel 2 en fase explore_a — subfase A1 confirmación.\n"
-              "Responde SIEMPRE con UN solo objeto JSON.\n"
-              "a_judge: useful|reject|uncertain (máx 1 useful). a_done solo con loci "
-              "confirmados.\n";
+              "Eres el Nivel 2 en fase F1 anchor hunt (ancla primaria ONLY).\n"
+              "Responde SIEMPRE con UN solo objeto JSON. PROHIBIDO markdown/prosa fuera del JSON.\n"
+              "PROHIBIDO plan/tool/trail/dataflow/a_done.\n"
+              "\n"
+              "## Fichas → a_judge phase=a0_sniff\n"
+              "Objetivo: localizar UNA ancla (control del síntoma / entrypoint). "
+              "expand_with SOLO peek.\n"
+              "Cierra con f1_done cuando tengas 1 primary confirmado post-peek, "
+              "o anchor_miss_v1 si agotado.\n"
+              "{\"action\":\"f1_done\",\"loci\":[{\"stem\":\"…\",\"anchor\":\"path:Symbol\","
+              "\"role\":\"primary\",\"why\":\"…\"}],\"summary\":\"…\"}\n"
+              "{\"action\":\"anchor_miss_v1\",\"reason\":\"no_symptom_edge_in_hop0\","
+              "\"candidates\":[\"path:Sym\"],\"retrieval_needed\":true,\"why\":\"…\"}\n";
         } else {
           breq.system_prompt =
               "Eres el Nivel 2 en fase explore_a — subfase A0 (Effect Summary / olfateo).\n"
@@ -2131,6 +2155,42 @@ Level2AutonomousLoopResult run_level2_autonomous(Level2Session& session, L2Brain
             recover_note.clear();
           }
         }
+      }
+    } else if (action.kind == L2ActionKind::F1Done) {
+      emit("L2 ▸ f1_done loci=" + std::to_string(action.a_loci.size()) + " — " +
+           action.summary.substr(0, 100));
+      tr = session.apply_f1_done(opts.workspace_root, action.a_loci, action.summary);
+      emit(std::string("L2 ▸ f1_done ") + (tr.ok ? "OK → " : "FAIL — ") +
+           (tr.ok ? tr.phase : tr.error).substr(0, 160));
+      if (!tr.ok && !tr.error.empty()) {
+        recover_note = "f1_done rechazado: " + tr.error + "\n";
+      }
+      if (tr.ok && opts.stop_at_phase_a) {
+        result.ok = true;
+        result.phase = "explore_f1_ok";
+        result.summary = tr.summary.empty() ? action.summary : tr.summary;
+        result.steps = step;
+        ai_trace(AiTraceChannel::L2, "l2_run_end",
+                 std::string("{\"ok\":1,\"phase\":\"explore_f1_ok\",\"steps\":") +
+                     std::to_string(result.steps) +
+                     ",\"total_ms\":" + std::to_string(elapsed_ms(run_t0)) + "}");
+        emit(phase_banner("explore_a", step, max_steps) +
+             " — F1 anchor OK (stop_at_phase_a, sin pack B)");
+        return result;
+      }
+    } else if (action.kind == L2ActionKind::AnchorMiss) {
+      emit("L2 ▸ anchor_miss_v1 — " + action.f1_failure_reason.substr(0, 120));
+      tr = session.apply_anchor_miss(opts.workspace_root, action.f1_failure_reason,
+                                   action.f1_failure_candidates, action.f1_retrieval_needed,
+                                   action.summary);
+      emit(std::string("L2 ▸ anchor_miss_v1 ") + (tr.ok ? "OK → " : "FAIL — ") +
+           (tr.ok ? tr.phase : tr.error).substr(0, 160));
+      if (tr.ok && opts.stop_at_phase_a) {
+        result.ok = false;
+        result.phase = tr.phase;
+        result.summary = tr.summary;
+        result.steps = step;
+        return result;
       }
     } else if (action.kind == L2ActionKind::ADone) {
       emit("L2 ▸ a_done loci=" + std::to_string(action.a_loci.size()) + " — " +

@@ -1328,6 +1328,135 @@ AExpandModality a_coerce_a0_expand_modality(const std::string& target, AExpandMo
   return m;
 }
 
+namespace {
+
+bool f1_term_matches(const std::string& hay, const std::string& needle) {
+  if (hay.empty() || needle.empty()) {
+    return false;
+  }
+  std::string h = hay;
+  std::string n = needle;
+  for (char& c : h) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  for (char& c : n) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  if (n.size() < 2) {
+    return false;
+  }
+  return h.find(n) != std::string::npos;
+}
+
+}  // namespace
+
+float a_f1_anchor_match_score(const AQueueItem& item, const ProblemFrame& pf) {
+  float score = item.score;
+  const auto seeds = problem_frame_anchor_seeds(pf);
+  for (const auto& seed : seeds) {
+    if (f1_term_matches(item.symbol, seed) || f1_term_matches(item.path, seed) ||
+        f1_term_matches(item.stem, seed) || f1_term_matches(item.target, seed)) {
+      score += 2.5f;
+    }
+  }
+  if (a_is_symptom_edge_name(item.symbol)) {
+    score += 1.5f;
+  }
+  for (const auto& hint : pf.primary_anchor.edge_hints) {
+    if (!hint.empty() && item.symbol.rfind(hint, 0) == 0) {
+      score += 2.f;
+    }
+  }
+  for (const auto& noise : pf.reject_noise) {
+    if (f1_term_matches(item.stem, noise) && !f1_term_matches(item.symbol, noise)) {
+      score -= 1.f;
+    }
+  }
+  return score;
+}
+
+void a_apply_f1_anchor_queue_filter(AState* st, const ProblemFrame& pf) {
+  if (st == nullptr) {
+    return;
+  }
+  auto rerank = [&](std::vector<AQueueItem>* items) {
+    if (items == nullptr || items->empty()) {
+      return;
+    }
+    for (auto& it : *items) {
+      it.score = a_f1_anchor_match_score(it, pf);
+    }
+    std::stable_sort(items->begin(), items->end(),
+                     [](const AQueueItem& a, const AQueueItem& b) { return a.score > b.score; });
+  };
+  rerank(&st->queue);
+  rerank(&st->reserve);
+  st->seeds = problem_frame_anchor_seeds(pf);
+}
+
+AExpandModality a_f1_coerce_expand_modality(AExpandModality m) {
+  if (m == AExpandModality::Trail || m == AExpandModality::Dataflow) {
+    return AExpandModality::Peek;
+  }
+  if (m == AExpandModality::None) {
+    return AExpandModality::Peek;
+  }
+  return m;
+}
+
+bool a_validate_f1_anchor_done(const AState& st, const std::vector<ALocus>& loci, std::string* err) {
+  auto fail = [&](const std::string& msg) {
+    if (err) {
+      *err = msg;
+    }
+    return false;
+  };
+  if (!a_in_f1_anchor_mode(st)) {
+    return a_validate_a_done(st, loci, err);
+  }
+  if (loci.empty()) {
+    return fail("f1_done.loci vacío");
+  }
+  int primary = 0;
+  for (const auto& loc : loci) {
+    if (!a_anchor_resolvable(loc.anchor)) {
+      return fail("f1_done: ancla no resoluble `" + loc.anchor + "`");
+    }
+    if (loc.stem.empty()) {
+      return fail("f1_done: stem vacío");
+    }
+    if (loc.role == ALocusRole::Primary) {
+      ++primary;
+    }
+  }
+  if (primary != 1) {
+    return fail("f1_done: exactamente 1 primary (got " + std::to_string(primary) + ")");
+  }
+  if (st.peeks_used < 1 && st.cards_used < 1) {
+    return fail("f1_done: falta confirmación (≥1 peek o card juzgada)");
+  }
+  bool has_useful = false;
+  for (const auto& n : st.notes) {
+    if (n.verdict == AVerdictKind::Useful || n.verdict == AVerdictKind::Expand) {
+      has_useful = true;
+      break;
+    }
+  }
+  if (!has_useful && st.anchor_confirmed.empty()) {
+    return fail("f1_done: sin useful/expand en notes ni anchor_confirmed");
+  }
+  int rejects = 0;
+  for (const auto& n : st.notes) {
+    if (n.verdict == AVerdictKind::Reject) {
+      ++rejects;
+    }
+  }
+  if (rejects < 1 && static_cast<int>(st.notes.size()) >= 3) {
+    return fail("f1_done: marca ≥1 reject en competidores antes de cerrar");
+  }
+  return true;
+}
+
 std::string a_path_from_anchor(const std::string& anchor) {
   std::string p = anchor;
   const auto hash = p.find('#');
@@ -1773,6 +1902,18 @@ nlohmann::json a_state_to_json(const AState& st) {
   if (!st.a1_df_caller_anchor.empty()) {
     j["a1_df_caller_anchor"] = st.a1_df_caller_anchor;
   }
+  if (!st.explore_mode.empty()) {
+    j["explore_mode"] = st.explore_mode;
+  }
+  if (!st.anchor_confirmed.empty()) {
+    j["anchor_confirmed"] = st.anchor_confirmed;
+  }
+  if (!st.anchor_understanding.empty()) {
+    j["anchor_understanding"] = st.anchor_understanding;
+  }
+  if (!st.f1_failure_reason.empty()) {
+    j["f1_failure_reason"] = st.f1_failure_reason;
+  }
   if (st.a1_active_set) {
     j["a1_active"] = {{"target", st.a1_active.target},
                       {"modality", a_expand_modality_name(st.a1_active.modality)},
@@ -1829,6 +1970,10 @@ bool a_state_from_json(const nlohmann::json& j, AState* out, std::string* err) {
   st.a1_trail_recap = j.value("a1_trail_recap", "");
   st.a1_df_scope_path = j.value("a1_df_scope_path", "");
   st.a1_df_caller_anchor = j.value("a1_df_caller_anchor", "");
+  st.explore_mode = j.value("explore_mode", "");
+  st.anchor_confirmed = j.value("anchor_confirmed", "");
+  st.anchor_understanding = j.value("anchor_understanding", "");
+  st.f1_failure_reason = j.value("f1_failure_reason", "");
   if (j.contains("a1_active") && j["a1_active"].is_object()) {
     st.a1_active.target = j["a1_active"].value("target", "");
     st.a1_active.modality = parse_a_expand_modality(j["a1_active"].value("modality", "peek"));
@@ -1980,6 +2125,9 @@ bool a_apply_a0_verdicts(AState* st, const std::vector<AVerdict>& verdicts, std:
         v.expand_with = AExpandModality::Peek;
       }
       v.expand_with = a_coerce_a0_expand_modality(v.target, v.expand_with, nullptr);
+      if (st != nullptr && a_in_f1_anchor_mode(*st)) {
+        v.expand_with = a_f1_coerce_expand_modality(v.expand_with);
+      }
       if (v.expand_with == AExpandModality::Dataflow &&
           !a_a0_dataflow_allowed_without_trail(v.target, v.suspect_var)) {
         v.expand_with = AExpandModality::Trail;
