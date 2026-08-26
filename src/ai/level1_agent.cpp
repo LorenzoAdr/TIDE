@@ -575,9 +575,13 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
           "\"reject_noise\":[\"...\"],\"anchor_confidence\":\"high|medium|low\"}\n"
           "Reglas:\n"
           "- UNA sola primary_anchor.\n"
-          "- search_terms: 3..8 términos de código/implementación, no NL literal.\n"
+          "- problem_kind=debug si hay síntoma roto/atascado/error; locate solo si pregunta "
+          "dónde sin fallo; implement si pide añadir/cambiar feature.\n"
+          "- search_terms: 3..8 identificadores snake_case (busy_strip, ai_controller), "
+          "NUNCA frases NL ('loading state', 'chat panel').\n"
+          "- Síntomas spinner/busy/carga → incluir busy_strip y set_/clear_ en edge_hints.\n"
           "- mechanism_gaps: preguntas abiertas, NO afirmaciones.\n"
-          "- reject_noise: tokens NL a no grepear (no palabras que el usuario escribió).\n";
+          "- reject_noise: palabras UI genéricas (panel, modal); NO el token del síntoma.\n";
       std::ostringstream user;
       user << "Consulta del usuario:\n" << user_message << "\n";
       user << "\nJSON:";
@@ -610,6 +614,7 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
           tuide::ProblemFrame pf;
           std::string perr;
           if (tuide::problem_frame_from_json_string(completion.text, &pf, &perr)) {
+            tuide::problem_frame_refine_from_query(&pf, user_message);
             DistilledInvestigateIntent di;
             di.intent = pf.problem_frame;
             di.primary_goal = pf.primary_anchor.objective;

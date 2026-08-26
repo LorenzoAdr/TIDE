@@ -56,13 +56,36 @@ def extract_json_blob(text: str) -> dict[str, Any] | None:
     text = text.strip()
     if not text:
         return None
-    # Strip markdown fences if present.
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
     start = text.find("{")
-    end = text.rfind("}")
-    if start < 0 or end <= start:
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    end = -1
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    if end <= start:
         return None
     try:
         return json.loads(text[start : end + 1])
@@ -72,12 +95,13 @@ def extract_json_blob(text: str) -> dict[str, Any] | None:
 
 def extract_pf_from_l1_log(log_text: str) -> tuple[dict[str, Any], str]:
     """Return (problem_frame_dict, provenance)."""
-    for line in log_text.splitlines():
-        if "L1 intent raw:" in line:
-            raw = line.split("L1 intent raw:", 1)[1].strip()
-            blob = extract_json_blob(raw)
-            if blob:
-                return normalize_to_v1(blob), "l1_distill"
+    marker = "L1 intent raw:"
+    idx = log_text.find(marker)
+    if idx >= 0:
+        rest = log_text[idx + len(marker) :]
+        blob = extract_json_blob(rest)
+        if blob:
+            return normalize_to_v1(blob), "l1_distill"
     return {}, "missing"
 
 
@@ -109,6 +133,60 @@ def normalize_to_v1(blob: dict[str, Any]) -> dict[str, Any]:
         out.setdefault("schema", "problem_frame_v1")
         return out
     return legacy_to_v1(blob)
+
+
+def _push_term(terms: list[str], raw: str) -> None:
+    t = raw.strip()
+    if len(t) < 3:
+        return
+    tl = t.lower()
+    if any(x.lower() == tl for x in terms):
+        return
+    terms.append(t)
+
+
+def refine_pf_from_query(pf: dict[str, Any], query: str) -> dict[str, Any]:
+    """Mirror of problem_frame_refine_from_query (generic heuristics)."""
+    low = query.lower()
+    out = dict(pf)
+    pa = dict(out.get("primary_anchor") or {})
+    terms = [str(t) for t in pa.get("search_terms") or [] if " " not in str(t)]
+
+    if any(x in low for x in ("spinner", "busy", "carga", "bloquead")):
+        for t in ("busy_strip", "set_busy", "clear_busy", "agent_busy"):
+            _push_term(terms, t)
+    if any(x in low for x in ("ia", "ai", "asistente")):
+        for t in ("ai_controller", "level2_autonomous_loop"):
+            _push_term(terms, t)
+    if "compil" in low or "build" in low:
+        for t in ("task_runner", "ai_controller"):
+            _push_term(terms, t)
+    if any(x in low for x in ("cerrar", "salir", "quit")):
+        _push_term(terms, "quit_confirm")
+    if "configur" in low or "settings" in low:
+        for t in ("settings_modal", "app_settings"):
+            _push_term(terms, t)
+    if "barra" in low and "estado" in low:
+        _push_term(terms, "busy_strip")
+
+    pa["search_terms"] = terms[:8]
+    if any(x in low for x in ("spinner", "atascad", "bug", "error", "no funciona", "bloquead")):
+        out["problem_kind"] = "debug"
+    elif ("cancel" in low or "escape" in low) and any(
+        x in low for x in ("gener", "ia", "ai", "asistente")
+    ):
+        out["problem_kind"] = "debug"
+    elif any(x in low for x in ("dónde", "donde", "qué código", "que codigo", "muéstrame", "muestrame")):
+        out["problem_kind"] = "locate"
+    elif any(
+        x in low
+        for x in ("añadir", "anadir", "implement", "quiero que", "cambia el código", "cambia el codigo")
+    ):
+        out["problem_kind"] = "implement"
+    else:
+        out.setdefault("problem_kind", "explain")
+    out["primary_anchor"] = pa
+    return out
 
 
 def pf_search_terms(pf: dict[str, Any]) -> list[str]:

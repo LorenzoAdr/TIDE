@@ -27,6 +27,7 @@ from tools.l2_explore_battery.pf_battery_lib import (  # noqa: E402
     load_cases,
     normalize_to_v1,
     pf_search_terms,
+    refine_pf_from_query,
     write_json,
 )
 
@@ -125,10 +126,10 @@ def run_l1_case(case: dict, case_dir: Path, env: dict[str, str], timeout: int) -
 
     pf, prov = extract_pf_from_l1_log(l1_log.read_text(errors="replace"))
     if not pf:
-        # Deterministic fallback via small helper script invoking C++ would be ideal;
-        # for battery we mirror bootstrap fallback using query-only heuristics in Python.
         pf = fallback_pf_from_query(prompt)
         prov = "deterministic_fallback"
+
+    pf = refine_pf_from_query(pf, prompt)
 
     pf.setdefault("schema", "problem_frame_v1")
     pf["provenance"] = prov
@@ -226,11 +227,16 @@ def run_l1_battery(label: str, cases_path: Path, only: str, timeout: int) -> Pat
 def registry_ingest_map(map_path: Path, env: dict[str, str]) -> int:
     log = map_path.parent / "registry_ingest.log"
     return run_cmd(
-        [str(CLI), "registry-ingest", "--from-map", str(map_path)],
+        [str(CLI), "registry-ingest", "--from-map", str(map_path), "--top", "40", "--json"],
         log,
         env,
-        timeout=120,
+        timeout=300,
     )
+
+
+def registry_embed_once(out_dir: Path, env: dict[str, str]) -> int:
+    log = out_dir / "registry_embed.log"
+    return run_cmd([str(CLI), "registry-embed"], log, env, timeout=1800)
 
 
 def registry_query_hop0(query: str, out_json: Path, env: dict[str, str]) -> int:
@@ -265,10 +271,6 @@ def run_graph_case(case: dict, case_dir: Path, src_dir: Path, env: dict[str, str
     terms = pf_search_terms(pf)
     query = " ".join(terms[:6]) if terms else case["prompt"][:120]
 
-    if (case_dir / "map_last.md").exists():
-        copy_if_exists(case_dir / "map_last.md", ROOT / ".tuide/ai/map_last.md")
-        registry_ingest_map(case_dir / "map_last.md", env)
-
     qlog = case_dir / "registry_query.log"
     registry_query_hop0(query, case_dir / "registry_hop0.json", env)
     data = parse_registry_json_from_log(qlog)
@@ -289,7 +291,22 @@ def run_graph_battery(label: str, cases_path: Path, from_round: Path, only: str)
 
     rows = []
     for case in cases:
-        print(f"=== GRAPH {case['id']} ===", flush=True)
+        print(f"=== GRAPH prep {case['id']} ===", flush=True)
+        src = from_round / case["id"]
+        case_dir = out / case["id"]
+        case_dir.mkdir(parents=True, exist_ok=True)
+        copy_if_exists(src / "problem_frame.json", case_dir / "problem_frame.json")
+        copy_if_exists(src / "map_last.md", case_dir / "map_last.md")
+        if (case_dir / "map_last.md").exists():
+            registry_ingest_map(case_dir / "map_last.md", env)
+
+    print("=== GRAPH registry-embed ===", flush=True)
+    embed_rc = registry_embed_once(out, env)
+    if embed_rc != 0:
+        print("WARN registry-embed rc=", embed_rc)
+
+    for case in cases:
+        print(f"=== GRAPH query {case['id']} ===", flush=True)
         src = from_round / case["id"]
         rows.append(run_graph_case(case, out / case["id"], src, env))
 
@@ -398,9 +415,29 @@ def llm_probe() -> tuple[bool, str]:
     return rc == 0, "rc=" + str(rc)
 
 
+def rescore_l1_from_logs(round_dir: Path, cases_path: Path) -> None:
+    """Re-extract problem_frame from saved l1_gen.txt (no LLM)."""
+    cases = load_cases(cases_path)
+    for case in cases:
+        cid = case["id"]
+        case_dir = round_dir / cid
+        l1_log = case_dir / "l1_gen.txt"
+        if not l1_log.exists():
+            continue
+        pf, prov = extract_pf_from_l1_log(l1_log.read_text(errors="replace"))
+        if not pf:
+            pf = fallback_pf_from_query(case["prompt"])
+            prov = "deterministic_fallback"
+        pf = refine_pf_from_query(pf, case["prompt"])
+        pf.setdefault("schema", "problem_frame_v1")
+        pf["provenance"] = prov
+        write_json(case_dir / "problem_frame.json", pf)
+        write_json(case_dir / "problem_frame_meta.json", {"provenance": prov, "rescored": True})
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("phase", choices=("probe", "l1", "graph", "f1", "all"))
+    ap.add_argument("phase", choices=("probe", "l1", "graph", "f1", "all", "rescore-l1"))
     ap.add_argument("--label", default="core5_v1")
     ap.add_argument("--cases", type=Path, default=CASES_DEFAULT)
     ap.add_argument("--from-round", type=Path, default=None, help="prior round dir for graph/f1 inputs")
@@ -413,6 +450,21 @@ def main() -> int:
         ok, reason = llm_probe()
         print(json.dumps({"ok": ok, "reason": reason}, indent=2))
         return 0 if ok else 2
+
+    if args.phase == "rescore-l1":
+        out = BATTERY_ROOT / f"round_{args.label}"
+        rescore_l1_from_logs(out, args.cases)
+        return subprocess.call(
+            [
+                sys.executable,
+                str(ROOT / "tools/l2_explore_battery/score_problem_frame.py"),
+                "--round-dir",
+                str(out),
+                "--cases",
+                str(args.cases),
+                "--check-gate",
+            ]
+        )
 
     if args.phase == "l1":
         out = run_l1_battery(args.label, args.cases, args.only, args.timeout)

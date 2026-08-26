@@ -59,6 +59,9 @@ bool problem_frame_minimally_valid(const ProblemFrame& pf);
 // Best-effort frame when L1 distillation fails.
 ProblemFrame problem_frame_fallback_from_query(const std::string& user_message);
 
+// Generic post-distill cleanup: kind reinference, code-like terms, symptom augments.
+void problem_frame_refine_from_query(ProblemFrame* pf, const std::string& user_message);
+
 std::string problem_frame_path(const std::string& workspace_root);
 bool save_problem_frame(const std::string& workspace_root, const ProblemFrame& pf,
                         std::string* err = nullptr);

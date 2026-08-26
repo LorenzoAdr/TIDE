@@ -3584,6 +3584,7 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
     if (pf.instruction.empty()) {
       pf.instruction = opts.query;
     }
+    problem_frame_refine_from_query(&pf, opts.query);
     std::string pfsave;
     save_problem_frame(opts.workspace_root, pf, &pfsave);
     bootstrap_pf = std::move(pf);

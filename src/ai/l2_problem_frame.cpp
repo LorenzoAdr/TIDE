@@ -63,12 +63,19 @@ std::string infer_problem_kind(const std::string& msg) {
       m.find("no funciona") != std::string::npos || m.find("bloquead") != std::string::npos) {
     return "debug";
   }
+  if ((m.find("cancel") != std::string::npos || m.find("escape") != std::string::npos) &&
+      (m.find("gener") != std::string::npos || m.find("ia") != std::string::npos ||
+       m.find("asistente") != std::string::npos)) {
+    return "debug";
+  }
   if (m.find("dónde") != std::string::npos || m.find("donde") != std::string::npos ||
-      m.find("qué código") != std::string::npos || m.find("que codigo") != std::string::npos) {
+      m.find("qué código") != std::string::npos || m.find("que codigo") != std::string::npos ||
+      m.find("muéstrame") != std::string::npos || m.find("muestrame") != std::string::npos) {
     return "locate";
   }
   if (m.find("añadir") != std::string::npos || m.find("anadir") != std::string::npos ||
-      m.find("implement") != std::string::npos) {
+      m.find("implement") != std::string::npos || m.find("quiero que") != std::string::npos ||
+      m.find("cambia el código") != std::string::npos || m.find("cambia el codigo") != std::string::npos) {
     return "implement";
   }
   return "explain";
@@ -107,6 +114,74 @@ std::vector<std::string> tokenize_codeish(const std::string& msg) {
   }
   flush();
   return out;
+}
+
+void push_unique_term(std::vector<std::string>* terms, const std::string& raw) {
+  if (terms == nullptr) {
+    return;
+  }
+  const std::string t = trim_copy(raw);
+  if (t.size() < 3) {
+    return;
+  }
+  const std::string tl = ascii_lower(t);
+  for (const auto& x : *terms) {
+    if (ascii_lower(x) == tl) {
+      return;
+    }
+  }
+  terms->push_back(t);
+}
+
+void augment_search_terms_from_query(const std::string& msg, std::vector<std::string>* terms) {
+  if (terms == nullptr) {
+    return;
+  }
+  const std::string m = ascii_lower(msg);
+  if (m.find("spinner") != std::string::npos || m.find("busy") != std::string::npos ||
+      m.find("carga") != std::string::npos || m.find("bloquead") != std::string::npos) {
+    push_unique_term(terms, "busy_strip");
+    push_unique_term(terms, "set_busy");
+    push_unique_term(terms, "clear_busy");
+    push_unique_term(terms, "agent_busy");
+  }
+  if (m.find("ia") != std::string::npos || m.find("ai") != std::string::npos ||
+      m.find("asistente") != std::string::npos) {
+    push_unique_term(terms, "ai_controller");
+    push_unique_term(terms, "level2_autonomous_loop");
+  }
+  if (m.find("compil") != std::string::npos || m.find("build") != std::string::npos) {
+    push_unique_term(terms, "task_runner");
+    push_unique_term(terms, "ai_controller");
+  }
+  if (m.find("cerrar") != std::string::npos || m.find("salir") != std::string::npos ||
+      m.find("quit") != std::string::npos) {
+    push_unique_term(terms, "quit_confirm");
+  }
+  if (m.find("configur") != std::string::npos || m.find("settings") != std::string::npos ||
+      m.find("preferenc") != std::string::npos) {
+    push_unique_term(terms, "settings_modal");
+    push_unique_term(terms, "app_settings");
+  }
+  if (m.find("barra") != std::string::npos && m.find("estado") != std::string::npos) {
+    push_unique_term(terms, "busy_strip");
+  }
+}
+
+void sanitize_search_terms(std::vector<std::string>* terms) {
+  if (terms == nullptr) {
+    return;
+  }
+  std::vector<std::string> out;
+  for (const auto& t : *terms) {
+    if (t.find(' ') != std::string::npos) {
+      continue;
+    }
+    for (const auto& tok : tokenize_codeish(t)) {
+      push_unique_term(&out, tok);
+    }
+  }
+  *terms = std::move(out);
 }
 
 }  // namespace
@@ -303,6 +378,25 @@ ProblemFrame problem_frame_fallback_from_query(const std::string& user_message) 
   pf.anchor_confidence = "low";
   pf.provenance = "deterministic_fallback";
   return pf;
+}
+
+void problem_frame_refine_from_query(ProblemFrame* pf, const std::string& user_message) {
+  if (pf == nullptr || user_message.empty()) {
+    return;
+  }
+  const std::string inferred = infer_problem_kind(user_message);
+  pf->problem_kind = inferred;
+  sanitize_search_terms(&pf->primary_anchor.search_terms);
+  augment_search_terms_from_query(user_message, &pf->primary_anchor.search_terms);
+  if (pf->primary_anchor.search_terms.size() > 8) {
+    pf->primary_anchor.search_terms.resize(8);
+  }
+  if (pf->primary_anchor.kind.empty()) {
+    pf->primary_anchor.kind = infer_anchor_kind(user_message, pf->problem_kind);
+  }
+  if (pf->problem_kind == "debug" && pf->primary_anchor.edge_hints.empty()) {
+    pf->primary_anchor.edge_hints = {"set_", "clear_", "cancel_"};
+  }
 }
 
 std::string problem_frame_path(const std::string& workspace_root) {

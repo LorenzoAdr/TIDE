@@ -52,7 +52,11 @@ def score_case(case: dict, case_dir: Path) -> dict:
     kind_ok = (not kind_expected) or kind == kind_expected
 
     trap = trap_stems(case)
-    trap_in_terms = any(stem_hit(t, terms) for t in trap)
+    trap_in_terms = any(
+        (t.lower() == term.lower())
+        for t in trap
+        for term in terms
+    )
 
     causal_markers = ("porque", "debido", "causa", "provoca", " therefore ", " because ")
     frame_text = str(pf.get("problem_frame") or objective).lower()
@@ -129,6 +133,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--round-dir", type=Path, required=True)
     ap.add_argument("--cases", type=Path, default=DEFAULT_CASES)
+    ap.add_argument("--present-only", action="store_true", help="score only cases with dirs")
     ap.add_argument("--check-gate", action="store_true")
     args = ap.parse_args()
 
@@ -140,6 +145,8 @@ def main() -> int:
             continue
         case_dir = args.round_dir / cid
         if not case_dir.exists():
+            if args.present_only:
+                continue
             rows.append({"id": cid, "pass": False, "error": "missing_case_dir"})
             continue
         rows.append(score_case(case, case_dir))

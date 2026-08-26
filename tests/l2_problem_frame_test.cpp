@@ -53,6 +53,19 @@ int main() {
   expect(fb.provenance == "deterministic_fallback", "fallback provenance");
   expect(!fb.primary_anchor.search_terms.empty(), "fallback terms");
 
+  tuide::ProblemFrame raw_pf;
+  expect(tuide::problem_frame_from_json_string(raw, &raw_pf, &err), "raw for refine");
+  tuide::problem_frame_refine_from_query(
+      &raw_pf, "spinner infinito en chat IA aunque el modelo terminó");
+  expect(raw_pf.problem_kind == "debug", "refine kind debug");
+  bool has_busy = false;
+  for (const auto& t : raw_pf.primary_anchor.search_terms) {
+    if (t == "busy_strip") {
+      has_busy = true;
+    }
+  }
+  expect(has_busy, "refine augments busy_strip");
+
   tuide::RegistryQueryOpts opts;
   const auto profile = tuide::graph_query_profile_default(tuide::GraphQueryPhase::AnchorHunt);
   expect(profile.hops == 0, "anchor hunt hops");
