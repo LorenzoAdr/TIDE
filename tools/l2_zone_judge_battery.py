@@ -32,6 +32,16 @@ def main() -> int:
     parser.add_argument("--only", default="")
     parser.add_argument("--one-pass", action="store_true")
     parser.add_argument("--legacy-triage", action="store_true")
+    parser.add_argument(
+        "--primary-survey",
+        action="store_true",
+        help="Epistemic contrast+must-compete (top-2 incompatible threads)",
+    )
+    parser.add_argument(
+        "--slot-survey",
+        action="store_true",
+        help="Hypothesis-per-slot (1 card/pass) → retain 2–3 hyps; no rival contrast",
+    )
     parser.add_argument("--model-id", default="")
     args = parser.parse_args()
 
@@ -125,6 +135,10 @@ def main() -> int:
         command.append("--two-pass")
     if args.legacy_triage:
         command.append("--legacy-triage")
+    if args.primary_survey:
+        command.append("--primary-survey")
+    if args.slot_survey:
+        command.append("--slot-survey")
     if args.model_id:
         command += ["--model-id", args.model_id]
     print("==== sequential zone judge ====", flush=True)

@@ -258,7 +258,31 @@ struct RegistryCausalJudgeOpts {
   int expand_hops = 0;
   bool outline_all_representatives = false;
   bool promote_uncovered = false;
+
+  // Mechanism pack: skeleton slots + cupo ranking (genérico, sin hardcode por caso).
+  bool mechanism_pack = true;
+  int skel_trigger_cup = 1;
+  int skel_state_cup = 1;
+  int skel_effect_cup = 1;
+  int port_cup = 2;
+  float w_kind_write = 100.f;
+  float w_kind_read = 100.f;
+  float w_kind_handoff = 90.f;
+  float w_kind_ctrl = 80.f;  // then / else / case
+  float w_kind_call = 60.f;
+  float w_kind_enter_ctrl = 50.f;
+  float w_cos = 55.f;
+  float w_ppr = 45.f;
+  float w_anchor = 70.f;
+  float w_direct = 20.f;
+  float w_hub = 25.f;
+  float w_redundancy = 35.f;
+  float semantic_hard_floor = 45.f;
 };
+
+// Overlay knobs from JSON object (unknown keys ignored). Returns false on type errors.
+bool registry_causal_judge_opts_apply_json(RegistryCausalJudgeOpts* opts, const nlohmann::json& j,
+                                           std::string* err);
 
 struct RegistryZoneTriage {
   std::string id;
@@ -273,7 +297,7 @@ struct RegistryZoneTriage {
 
 struct RegistryCausalTriageDecision {
   bool ok = false;
-  std::string action;  // causal_zone_anchor_v1 | causal_zone_triage_v1
+  std::string action;  // causal_zone_anchor_v1 | causal_zone_triage_v1 | causal_zone_primary_survey_v1
   std::vector<RegistryZoneTriage> zones;
   std::vector<std::string> shortlist;
   std::string hypothesis;
@@ -282,6 +306,62 @@ struct RegistryCausalTriageDecision {
   std::string why;
   std::string raw;
   std::string error;
+};
+
+// Survey: cada zona como primary de una hipótesis global (o discard).
+struct RegistryPrimarySurveySupporting {
+  std::string id;
+  std::string role;  // trigger | state_owner | cleanup | consumer | boundary
+};
+
+struct RegistryPrimarySurveyEntry {
+  std::string id;
+  bool discard = false;
+  float confidence = 0.f;
+  std::string hypothesis;
+  std::string discard_reason;
+  std::vector<RegistryPrimarySurveySupporting> supporting;
+  std::vector<std::string> expand_from;
+};
+
+struct RegistryPrimarySurveyDecision {
+  bool ok = false;
+  std::string action;  // causal_zone_primary_survey_v1
+  std::vector<RegistryPrimarySurveyEntry> entries;
+  std::string raw;
+  std::string error;
+};
+
+// Contraste: hasta 2 hyp globales incompatibles (+ discards justificados).
+struct RegistryContrastThread {
+  std::string primary;
+  std::string hypothesis;
+  float confidence = 0.f;
+  std::vector<RegistryPrimarySurveySupporting> supporting;
+  std::vector<std::string> expand_from;
+  bool synthetic = false;
+};
+
+struct RegistryContrastDiscard {
+  std::string id;
+  std::string reason;
+  std::vector<std::string> expand_from;
+};
+
+struct RegistryContrastDecision {
+  bool ok = false;
+  std::string action;  // causal_zone_contrast_v1
+  std::vector<RegistryContrastThread> threads;
+  std::vector<RegistryContrastDiscard> discards;
+  bool single_viable = false;
+  bool injected = false;
+  std::string raw;
+  std::string error;
+};
+
+struct RegistryContrastValidation {
+  bool ok = false;
+  std::string error;  // incomplete_contrast | duplicate_hypothesis | empty_threads | ...
 };
 
 struct RegistryZoneVerdict {
@@ -370,6 +450,102 @@ RegistryCausalTriageDecision registry_parse_causal_anchor_decision(
     const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
 nlohmann::json registry_causal_triage_decision_to_json(
     const RegistryCausalTriageDecision& decision);
+
+std::string registry_causal_primary_survey_system_prompt();
+std::string registry_causal_primary_survey_user_prompt(
+    const std::string& cards_markdown,
+    const std::vector<std::string>& required_zone_ids = {});
+RegistryPrimarySurveyDecision registry_parse_causal_primary_survey(
+    const std::string& raw, const std::vector<std::string>& allowed_zone_ids,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
+nlohmann::json registry_primary_survey_to_json(const RegistryPrimarySurveyDecision& decision);
+// Top hilos no-discard por confidence (diversidad de primary), convertidos a triage.
+std::vector<RegistryCausalTriageDecision> registry_primary_survey_select_threads(
+    const RegistryPrimarySurveyDecision& survey, const nlohmann::json& base_payload,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets,
+    int max_threads = 2);
+
+// Must-compete: zonas rivales deterministas (context∩primary, bridges). Cap 2, excluye top-1.
+std::vector<std::string> registry_collect_must_compete_zone_ids(const nlohmann::json& base_payload,
+                                                               int max_n = 2);
+std::string registry_strip_zone_scores_markdown(const std::string& cards_markdown);
+
+std::string registry_causal_contrast_system_prompt();
+std::string registry_causal_contrast_user_prompt(
+    const std::string& cards_markdown, const std::vector<std::string>& must_compete,
+    const std::string& retry_need = {});
+RegistryContrastDecision registry_parse_causal_contrast(
+    const std::string& raw, const std::vector<std::string>& allowed_zone_ids,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
+nlohmann::json registry_contrast_to_json(const RegistryContrastDecision& decision);
+RegistryContrastValidation registry_validate_contrast_threads(
+    const RegistryContrastDecision& decision, const std::vector<std::string>& must_compete,
+    const nlohmann::json& base_payload,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
+void registry_inject_synthetic_contrast_threads(
+    RegistryContrastDecision* decision, const std::vector<std::string>& must_compete,
+    const nlohmann::json& base_payload,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
+std::vector<RegistryCausalTriageDecision> registry_contrast_select_threads(
+    const RegistryContrastDecision& contrast, const nlohmann::json& base_payload,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets,
+    int max_threads = 2);
+
+// Slot hyp-gen: 1 primary por pass (sin mazo), cola determinista, pool 2–3 hyps.
+struct RegistrySlotHypothesis {
+  std::string primary;
+  std::string hypothesis;
+  float confidence = 0.f;
+  std::vector<RegistryPrimarySurveySupporting> supporting;
+  std::vector<std::string> expand_from;
+  bool discard = false;
+  std::string discard_reason;
+  bool synthetic = false;
+  bool ok = false;
+  std::string error;
+  std::string raw;
+};
+
+struct RegistrySlotSurveyResult {
+  std::vector<std::string> queue;
+  std::vector<RegistrySlotHypothesis> slots;     // uno por pass (incl. discards)
+  std::vector<RegistrySlotHypothesis> retained;  // 2–3 hyps no-discard
+  bool gold_in_hypotheses = false;
+};
+
+std::vector<std::string> registry_collect_slot_queue_zone_ids(const nlohmann::json& base_payload,
+                                                             int max_n = 8);
+std::vector<std::string> registry_slot_supporting_zone_ids(const nlohmann::json& base_payload,
+                                                          const std::string& primary_id,
+                                                          int max_n = 2);
+std::string registry_causal_slot_cards_markdown(const nlohmann::json& base_payload,
+                                               const std::string& primary_id,
+                                               const std::vector<std::string>& supporting_ids);
+std::string registry_causal_slot_system_prompt();
+std::string registry_causal_slot_user_prompt(const std::string& cards_markdown,
+                                            const std::string& primary_id,
+                                            const std::string& retry_need = {});
+RegistrySlotHypothesis registry_parse_causal_slot_hypothesis(
+    const std::string& raw, const std::string& expected_primary,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
+bool registry_validate_slot_hypothesis(
+    const RegistrySlotHypothesis& hyp, const std::string& expected_primary,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets,
+    std::string* err);
+void registry_inject_synthetic_slot_hypothesis(
+    RegistrySlotHypothesis* hyp, const std::string& primary_id,
+    const nlohmann::json& base_payload,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
+std::vector<RegistrySlotHypothesis> registry_slot_retain_hypotheses(
+    const std::vector<RegistrySlotHypothesis>& slots, const nlohmann::json& base_payload,
+    int max_keep = 3);
+nlohmann::json registry_slot_survey_to_json(const RegistrySlotSurveyResult& result);
+bool registry_slot_gold_in_hypotheses(const std::vector<RegistrySlotHypothesis>& retained,
+                                     const nlohmann::json& base_payload,
+                                     const std::vector<std::string>& expected_stems);
+std::vector<RegistryCausalTriageDecision> registry_slot_hyps_to_threads(
+    const std::vector<RegistrySlotHypothesis>& retained, const nlohmann::json& base_payload,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
 
 void registry_apply_deterministic_co_shortlist(const nlohmann::json& base_payload,
                                                RegistryCausalTriageDecision* triage);

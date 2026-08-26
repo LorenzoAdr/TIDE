@@ -569,6 +569,19 @@ void test_query_constellations() {
     expect(zone.contains("core_stems") && zone.contains("context_stems") &&
                zone.contains("merge_witnesses"),
            "causal judge exposes core context and merge evidence");
+    expect(zone.contains("mechanism") && zone.contains("ports") &&
+               zone.contains("support_edges") && zone.contains("pack_meta"),
+           "causal judge mechanism pack fields");
+    expect(zone["pack_meta"].value("mechanism_pack", false),
+           "mechanism pack enabled by default");
+    // edges == concat(mechanism slots + ports + support)
+    std::size_t concat_n = zone["ports"].size() + zone["support_edges"].size();
+    for (const char* slot : {"trigger", "state", "effect"}) {
+      if (zone["mechanism"].contains(slot)) {
+        ++concat_n;
+      }
+    }
+    expect(zone["edges"].size() == concat_n, "edges equals mechanism∪ports∪support");
     expect(zone["edges"].size() <= static_cast<std::size_t>(judge_opts.max_edges),
            "causal judge edge budget");
     expect(zone["representatives"].size() <=
@@ -577,10 +590,47 @@ void test_query_constellations() {
     for (const auto& card : zone["representatives"]) {
       expect(!card.contains("nudge"), "causal judge excludes prior judgments");
     }
+    // Skeleton must not invent slots: missing listed or filled from real facts.
+    const auto missing = zone["pack_meta"].value("skeleton_missing", nlohmann::json::array());
+    for (const char* slot : {"trigger", "state", "effect"}) {
+      const bool filled = zone["mechanism"].contains(slot);
+      bool listed_missing = false;
+      for (const auto& m : missing) {
+        listed_missing = listed_missing || (m.is_string() && m.get<std::string>() == slot);
+      }
+      expect(filled || listed_missing, "skeleton slot filled or explicitly missing");
+    }
   }
   expect(tuide::registry_causal_judge_markdown(judge_payload).find("causal edges") !=
              std::string::npos,
          "causal judge markdown");
+  expect(tuide::registry_causal_judge_markdown(judge_payload).find("mechanism:") !=
+                 std::string::npos ||
+             judge_payload["zones"][0]["mechanism"].empty(),
+         "causal judge markdown mechanism section when filled");
+
+  // Pack-off path keeps edges without requiring skeleton slots.
+  tuide::RegistryCausalJudgeOpts pack_off = judge_opts;
+  pack_off.mechanism_pack = false;
+  nlohmann::json pack_off_payload;
+  expect(tuide::registry_causal_judge_payload(&r, "flag stuck", result, pack_off,
+                                              &pack_off_payload, &err),
+         "build pack-off judge payload");
+  if (pack_off_payload.contains("zones") && !pack_off_payload["zones"].empty()) {
+    const auto& z = pack_off_payload["zones"][0];
+    expect(z.contains("edges") && !z["edges"].empty(), "pack-off still emits edges");
+    expect(!z["pack_meta"].value("mechanism_pack", true), "pack-off meta flag");
+  }
+
+  tuide::RegistryCausalJudgeOpts knobs = judge_opts;
+  expect(tuide::registry_causal_judge_opts_apply_json(
+             &knobs, nlohmann::json{{"w_cos", 10.5}, {"port_cup", 1}, {"skel_state_cup", 1}},
+             &err),
+         "apply judge knobs json");
+  expect(knobs.w_cos == 10.5f && knobs.port_cup == 1, "knobs overlay applied");
+  expect(!tuide::registry_causal_judge_opts_apply_json(
+             &knobs, nlohmann::json{{"w_cos", "nope"}}, &err),
+         "reject bad knob type");
   auto result_with_uncovered = result;
   tuide::RegistryTrailHop uncovered_seed;
   uncovered_seed.node.id = "fn:src/polar.cpp:uncovered_probe";
@@ -810,6 +860,162 @@ void test_query_constellations() {
       &neg_decision);
   expect(neg_decision.selected == std::vector<std::string>({"M8"}),
          "tie-break v2 negation prefers specific gold over falsified symbol zone");
+
+  // Primary survey parse + thread selection (legacy path still used by tests).
+  {
+    const std::string survey_raw =
+        R"({"action":"causal_zone_primary_survey_v1","zones":[)"
+        R"({"id":"M1","discard":false,"confidence":0.8,"hypothesis":"run_compile lanza la compilacion desde level2_session","supporting":[{"id":"M7","role":"state_owner"}],"expand_from":["src/ai/level2_session.cpp:run_compile"]},)"
+        R"({"id":"M7","discard":false,"confidence":0.65,"hypothesis":"ai_controller posee el estado de tarea y dispara el compile","supporting":[{"id":"M1","role":"trigger"}],"expand_from":["src/app/application.cpp:fail_debug_launch"]},)"
+        R"({"id":"M2","discard":true,"discard_reason":"remap de compile commands no explica el sintoma","confidence":0.1}]})";
+    const std::unordered_map<std::string, std::vector<std::string>> survey_targets{
+        {"M1", {"src/ai/level2_session.cpp:run_compile"}},
+        {"M2", {"src/util/compile_commands_remap.cpp:list_running_docker_containers"}},
+        {"M7", {"src/app/application.cpp:fail_debug_launch"}},
+    };
+    const auto survey = tuide::registry_parse_causal_primary_survey(
+        survey_raw, {"M1", "M2", "M7"}, survey_targets);
+    expect(survey.ok && survey.entries.size() == 3, "primary survey parses three zones");
+    nlohmann::json survey_payload = {
+        {"zones", nlohmann::json::array({{{"id", "M1"}}, {{"id", "M2"}}, {{"id", "M7"}}})}};
+    auto threads =
+        tuide::registry_primary_survey_select_threads(survey, survey_payload, survey_targets, 2);
+    expect(threads.size() == 2, "primary survey selects top-2 threads");
+    expect(threads[0].shortlist.front() == "M1", "highest confidence primary first");
+    expect(threads[1].shortlist.front() == "M7", "second thread is competing primary");
+  }
+
+  // Must-compete + contrast validate/inject (caso 07).
+  {
+    nlohmann::json payload07 = {
+        {"zones",
+         nlohmann::json::array(
+             {{{"id", "M1"},
+               {"primary_stems", nlohmann::json::array({"level2_session"})},
+               {"context_stems", nlohmann::json::array({"raw_pty_screen", "ai_controller"})},
+               {"representatives",
+                nlohmann::json::array(
+                    {{{"target", "src/ai/level2_session.cpp:run_compile"}}})}},
+              {{"id", "M2"},
+               {"primary_stems", nlohmann::json::array({"compile_commands_remap"})},
+               {"context_stems", nlohmann::json::array()},
+               {"representatives", nlohmann::json::array()}},
+              {{"id", "M7"},
+               {"primary_stems",
+                nlohmann::json::array({"ui_panel_render_cache", "ai_controller", "application"})},
+               {"context_stems", nlohmann::json::array()},
+               {"representatives",
+                nlohmann::json::array(
+                    {{{"target", "src/app/application.cpp:fail_debug_launch"}}})}}})},
+        {"zone_bridges", nlohmann::json::array()}};
+    const auto must = tuide::registry_collect_must_compete_zone_ids(payload07, 2);
+    expect(std::find(must.begin(), must.end(), "M7") != must.end(),
+           "must-compete detects M7 via context∩primary ai_controller");
+    expect(std::find(must.begin(), must.end(), "M1") == must.end(),
+           "must-compete excludes top-1");
+
+    const auto queue = tuide::registry_collect_slot_queue_zone_ids(payload07, 8);
+    expect(!queue.empty() && queue.front() == "M1", "slot queue starts with top-1");
+    expect(std::find(queue.begin(), queue.end(), "M7") != queue.end(),
+           "slot queue includes must-compete M7");
+
+    tuide::RegistrySlotHypothesis slot_m7;
+    slot_m7.ok = true;
+    slot_m7.primary = "M7";
+    slot_m7.confidence = 0.7f;
+    slot_m7.hypothesis =
+        "ai_controller posee el estado de tarea y dispara la compilacion del proyecto";
+    slot_m7.expand_from = {"src/app/application.cpp:fail_debug_launch"};
+    tuide::RegistrySlotHypothesis slot_m1;
+    slot_m1.ok = true;
+    slot_m1.primary = "M1";
+    slot_m1.confidence = 0.8f;
+    slot_m1.hypothesis = "run_compile lanza la compilacion desde level2_session";
+    slot_m1.expand_from = {"src/ai/level2_session.cpp:run_compile"};
+    auto retained =
+        tuide::registry_slot_retain_hypotheses({slot_m1, slot_m7}, payload07, 3);
+    expect(retained.size() == 2, "slot retain keeps two diverse primaries");
+    expect(tuide::registry_slot_gold_in_hypotheses(retained, payload07, {"ai_controller"}),
+           "gold_in_hypotheses true when M7 retained with ai_controller stem");
+
+    const std::unordered_map<std::string, std::vector<std::string>> targets07{
+        {"M1", {"src/ai/level2_session.cpp:run_compile"}},
+        {"M2", {"src/util/x.cpp:y"}},
+        {"M7", {"src/app/application.cpp:fail_debug_launch"}},
+    };
+
+    // Incomplete: discard M7 without expand_from
+    tuide::RegistryContrastDecision bad;
+    bad.ok = true;
+    bad.threads.push_back(
+        {"M1", "La compilacion se lanza en run_compile de level2_session", 0.7f, {}, {}, false});
+    bad.discards.push_back({"M7", "no se relaciona", {}});
+    auto vbad = tuide::registry_validate_contrast_threads(bad, must, payload07, targets07);
+    expect(!vbad.ok && vbad.error == "incomplete_contrast",
+           "validate rejects must-compete discard without targets");
+
+    // Duplicate hyp
+    tuide::RegistryContrastDecision dup;
+    dup.ok = true;
+    dup.threads.push_back(
+        {"M1", "run_compile lanza la compilacion del proyecto", 0.7f, {}, {}, false});
+    dup.threads.push_back(
+        {"M7", "run_compile lanza la compilacion del proyecto otra vez", 0.6f, {}, {}, false});
+    auto vdup = tuide::registry_validate_contrast_threads(dup, must, payload07, targets07);
+    expect(!vdup.ok && vdup.error == "duplicate_hypothesis",
+           "validate rejects duplicated run_compile hypotheses");
+
+    // single_viable OK when must empty
+    tuide::RegistryContrastDecision single;
+    single.ok = true;
+    single.single_viable = true;
+    single.threads.push_back(
+        {"M1", "solo un mecanismo viable en este mazo pobre", 0.6f, {}, {}, false});
+    auto vsingle =
+        tuide::registry_validate_contrast_threads(single, {}, payload07, targets07);
+    expect(vsingle.ok, "validate accepts single_viable without must-compete");
+
+    // Inject synthetic M7 when only one thread
+    tuide::RegistryContrastDecision inject = bad;
+    tuide::registry_inject_synthetic_contrast_threads(&inject, must, payload07, targets07);
+    expect(inject.injected, "inject marks synthetic");
+    expect(std::any_of(inject.threads.begin(), inject.threads.end(),
+                       [](const tuide::RegistryContrastThread& th) {
+                         return th.primary == "M7" && th.synthetic;
+                       }),
+           "inject adds synthetic M7 thread");
+    auto threads =
+        tuide::registry_contrast_select_threads(inject, payload07, targets07, 2);
+    expect(threads.size() == 2, "contrast select_threads returns two after inject");
+    expect(std::any_of(threads.begin(), threads.end(),
+                       [](const tuide::RegistryCausalTriageDecision& t) {
+                         return !t.shortlist.empty() && t.shortlist.front() == "M7";
+                       }),
+           "select_threads includes M7 primary");
+
+    // Inject replaces weakest non-must when already 2 threads (M1+M5, no M7)
+    tuide::RegistryContrastDecision full;
+    full.ok = true;
+    full.threads.push_back(
+        {"M1", "La compilacion se lanza en run_compile de level2_session", 0.8f, {}, {}, false});
+    full.threads.push_back(
+        {"M5", "copia debil del ancla en otra zona sin mecanismo propio", 0.4f, {}, {}, false});
+    tuide::registry_inject_synthetic_contrast_threads(&full, must, payload07, targets07);
+    expect(full.injected && full.threads.size() == 2, "inject keeps cap 2");
+    expect(std::any_of(full.threads.begin(), full.threads.end(),
+                       [](const tuide::RegistryContrastThread& th) {
+                         return th.primary == "M7" && th.synthetic;
+                       }),
+           "inject replaces M5 with synthetic M7");
+    expect(std::any_of(full.threads.begin(), full.threads.end(),
+                       [](const tuide::RegistryContrastThread& th) { return th.primary == "M1"; }),
+           "inject keeps stronger M1 thread");
+
+    const std::string stripped = tuide::registry_strip_zone_scores_markdown(
+        "## M1 score=0.91 margin=0.1 coverage=0.1\nstems: level2_session\n");
+    expect(stripped.find("score=") == std::string::npos && stripped.find("## M1\n") != std::string::npos,
+           "strip_zone_scores removes score line noise");
+  }
 
   const std::string triage_md = tuide::registry_causal_triage_markdown(judge_payload);
   expect(triage_md.find("causal_zone_triage_v1") != std::string::npos,

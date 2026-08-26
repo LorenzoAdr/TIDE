@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <nlohmann/json.hpp>
 
@@ -37,6 +38,18 @@ namespace fs = std::filesystem;
 using tuide::AiSettings;
 using tuide::AiToolResult;
 using tuide::GetCodeOfRequest;
+
+namespace {
+
+std::string json_dump_safe(const nlohmann::json& j, int indent = 2) {
+  try {
+    return j.dump(indent, ' ', false, nlohmann::json::error_handler_t::replace);
+  } catch (const std::exception&) {
+    return nlohmann::json({{"error", "json_dump_failed"}}).dump(indent);
+  }
+}
+
+}  // namespace
 using tuide::Level2AutonomousLoopOpts;
 using tuide::Level2BootstrapOpts;
 using tuide::Level2Session;
@@ -1251,6 +1264,7 @@ int run_registry_query(const std::string& root, int argc, char** argv) {
   bool want_judge_cards = false;
   bool judge_cards_markdown = false;
   std::string judge_cards_json_out;
+  std::string judge_knobs_path;
   std::string map_path;
   int map_top = tuide::kRegistryQueryMapStems;
   for (int i = 2; i < argc; ++i) {
@@ -1280,12 +1294,15 @@ int run_registry_query(const std::string& root, int argc, char** argv) {
       judge_cards_markdown = true;
     } else if (a == "--judge-cards-json-out" && i + 1 < argc) {
       judge_cards_json_out = argv[++i];
+    } else if (a == "--judge-knobs" && i + 1 < argc) {
+      judge_knobs_path = argv[++i];
     } else if (a == "--code") {
       want_code = true;
     } else if (a == "-h" || a == "--help") {
       std::cerr << "registry-query TEXT [--top K] [--hops N] [--kind call,write] [--trails]\n"
                    "  [--threads N] [--map map.md] [--map-top N] [--code]\n"
                    "  [--judge-cards|--judge-cards-md] [--judge-cards-json-out FILE]\n"
+                   "  [--judge-knobs FILE.json]\n"
                    "  cosine + hops. --trails: PPR + beam + constelaciones. "
                    "--map: items L1 (símbolo) ocupan hop0.\n";
       return 2;
@@ -1354,6 +1371,28 @@ int run_registry_query(const std::string& root, int argc, char** argv) {
       tuide::RegistryCausalJudgeOpts judge_opts;
       judge_opts.max_zones = 8;
       judge_opts.promote_uncovered = true;
+      if (!judge_knobs_path.empty()) {
+        fs::path knobs_path(judge_knobs_path);
+        if (!knobs_path.is_absolute()) {
+          knobs_path = fs::path(root) / knobs_path;
+        }
+        std::ifstream knobs_in(knobs_path);
+        if (!knobs_in) {
+          std::cerr << "registry-query: no se pudo abrir --judge-knobs " << knobs_path << "\n";
+          return 1;
+        }
+        nlohmann::json knobs_json;
+        try {
+          knobs_in >> knobs_json;
+        } catch (const std::exception& ex) {
+          std::cerr << "registry-query: judge-knobs JSON inválido: " << ex.what() << "\n";
+          return 1;
+        }
+        if (!tuide::registry_causal_judge_opts_apply_json(&judge_opts, knobs_json, &err)) {
+          std::cerr << "registry-query: judge-knobs: " << err << "\n";
+          return 1;
+        }
+      }
       judge_ok =
           tuide::registry_causal_judge_payload(&reg, query, res, judge_opts, &judge_payload, &err);
     }
@@ -1748,6 +1787,8 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
   std::string model_id;
   bool two_pass = false;
   bool legacy_triage = false;
+  bool primary_survey = false;
+  bool slot_survey = false;
   for (int i = 2; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--cards-root" && i + 1 < argc) {
@@ -1764,11 +1805,17 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
       two_pass = true;
     } else if (a == "--legacy-triage") {
       legacy_triage = true;
+    } else if (a == "--primary-survey") {
+      primary_survey = true;
+    } else if (a == "--slot-survey") {
+      slot_survey = true;
     } else if (a == "-h" || a == "--help") {
       std::cerr << "zone-judge-battery --cards-root DIR --out DIR [--start-at ID] [--only ID] "
-                   "[--two-pass] [--legacy-triage]\n"
+                   "[--two-pass] [--legacy-triage] [--primary-survey] [--slot-survey]\n"
                    "  Un único L2Brain; --two-pass hace ancla→expansión→síntesis "
-                   "(opcional 1 reapertura). --legacy-triage usa triage inspect viejo.\n";
+                   "(opcional 1 reapertura). --legacy-triage usa triage inspect viejo.\n"
+                   "  --primary-survey (con --two-pass): contraste must-compete → top-2 hilos.\n"
+                   "  --slot-survey (con --two-pass): hyp por slot (1 ficha/pass) → pool 2–3.\n";
       return 2;
     }
   }
@@ -1808,6 +1855,8 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
     return 1;
   }
   const bool epistemic = two_pass && !legacy_triage;
+  const bool use_slot_survey = epistemic && slot_survey;
+  const bool use_primary_survey = epistemic && primary_survey && !use_slot_survey;
   const std::string system = epistemic ? tuide::registry_causal_synth_system_prompt()
                                        : tuide::registry_causal_judge_system_prompt();
   tuide::EffectRegistry expansion_registry;
@@ -1938,91 +1987,6 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
             &expansion_registry, base_payload, triage, expanded_opts, expanded_payload, &err);
       };
 
-      const std::string first_prefix = epistemic ? "anchor" : "triage";
-      auto triage = run_anchor_or_triage("", first_prefix);
-      if (!triage.ok || triage.shortlist.empty()) {
-        rows.push_back({{"id", id},
-                        {"ok", false},
-                        {"error", triage.ok ? "retrieval_gap" : triage.error},
-                        {"retrieval_needed", triage.retrieval_needed},
-                        {"triage_ms", triage_ms},
-                        {"epistemic", epistemic}});
-        continue;
-      }
-      if (epistemic) {
-        tuide::registry_apply_deterministic_co_shortlist(base_payload, &triage);
-        std::ofstream(case_out / "anchor.json")
-            << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
-        std::ofstream(case_out / "triage.json")
-            << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
-      }
-      // Legacy padding a 3 zonas solo fuera del modo epistémico.
-      if (!epistemic && triage.ok && triage.shortlist.size() < 3) {
-        std::unordered_set<std::string> selected(triage.shortlist.begin(),
-                                                 triage.shortlist.end());
-        std::unordered_set<std::string> selected_context;
-        for (const auto& zone : base_payload["zones"]) {
-          if (!selected.count(zone.value("id", ""))) {
-            continue;
-          }
-          for (const auto& stem : zone.value("context_stems", nlohmann::json::array())) {
-            if (stem.is_string()) {
-              selected_context.insert(stem.get<std::string>());
-            }
-          }
-        }
-        for (const auto& zone : base_payload["zones"]) {
-          if (triage.shortlist.size() >= 3) {
-            break;
-          }
-          const std::string candidate = zone.value("id", "");
-          if (candidate.empty() || selected.count(candidate)) {
-            continue;
-          }
-          bool linked_context = false;
-          for (const auto& stem : zone.value("primary_stems", nlohmann::json::array())) {
-            linked_context =
-                linked_context ||
-                (stem.is_string() && selected_context.count(stem.get<std::string>()) > 0);
-          }
-          const auto targets_it = allowed_targets.find(candidate);
-          if (!linked_context || targets_it == allowed_targets.end()) {
-            continue;
-          }
-          auto target_it = std::find_if(targets_it->second.begin(), targets_it->second.end(),
-                                        [&](const std::string& target) {
-                                          return target_matches_query(target, instruction);
-                                        });
-          if (target_it == targets_it->second.end()) {
-            continue;
-          }
-          tuide::RegistryZoneTriage complement;
-          complement.id = candidate;
-          complement.verdict = "inspect";
-          complement.need = "comprobar brazo causal complementario enlazado por contexto";
-          complement.expand_from = {*target_it};
-          triage.zones.push_back(std::move(complement));
-          triage.shortlist.push_back(candidate);
-          selected.insert(candidate);
-        }
-        std::ofstream(case_out / "triage.json")
-            << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
-      }
-
-      hypothesis = triage.hypothesis;
-      anchor_why = triage.why;
-      nlohmann::json expanded_payload;
-      if (!expand_from_decision(triage, &expanded_payload)) {
-        rows.push_back({{"id", id}, {"ok", false}, {"error", err}, {"triage_ms", triage_ms}});
-        continue;
-      }
-      std::ofstream(case_out / "cards_expanded.json") << expanded_payload.dump(2) << "\n";
-      cards = tuide::registry_causal_judge_markdown(expanded_payload);
-      zone_ids = zone_ids_from_payload(expanded_payload);
-      std::ofstream(case_out / "cards_expanded.md") << cards;
-      nlohmann::json* active_payload = &expanded_payload;
-
-      // Primera síntesis (o juicio legacy) ocurre abajo; si epistémico y reinvestigate, reabrimos.
       auto run_synth = [&](const std::string& synth_cards,
                            const std::vector<std::string>& synth_zone_ids,
                            const std::string& hyp, const std::string& why_anchor,
@@ -2051,62 +2015,617 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
         std::ofstream(case_out / (artifact_prefix + "user.md")) << user;
         std::ofstream(case_out / (artifact_prefix + "cards.md")) << synth_cards;
         std::ofstream(case_out / (artifact_prefix + "model_raw.txt")) << response.text;
-        tuide::RegistryCausalJudgeDecision decision;
+        tuide::RegistryCausalJudgeDecision synth_decision;
         if (!response.ok) {
-          decision.error = response.error;
-          decision.raw = response.text;
+          synth_decision.error = response.error;
+          synth_decision.raw = response.text;
           std::ofstream(case_out / (artifact_prefix + "decision.json"))
-              << tuide::registry_causal_judge_decision_to_json(decision).dump(2) << "\n";
+              << tuide::registry_causal_judge_decision_to_json(synth_decision).dump(2) << "\n";
           (void)elapsed_ms;
-          return decision;
+          return synth_decision;
         }
-        decision = tuide::registry_parse_causal_judge_decision(response.text, synth_zone_ids);
-        if (decision.ok) {
-          for (const auto& verdict : decision.zones) {
+        synth_decision = tuide::registry_parse_causal_judge_decision(response.text, synth_zone_ids);
+        if (synth_decision.ok) {
+          for (const auto& verdict : synth_decision.zones) {
             for (const auto& symbol : verdict.expand_from) {
               if (synth_cards.find(symbol) == std::string::npos) {
-                decision.ok = false;
-                decision.error =
+                synth_decision.ok = false;
+                synth_decision.error =
                     "expand_from no pertenece a la ficha " + verdict.id + ": " + symbol;
                 break;
               }
             }
-            if (!decision.ok) {
+            if (!synth_decision.ok) {
               break;
             }
           }
         }
         std::ofstream(case_out / (artifact_prefix + "decision.json"))
-            << tuide::registry_causal_judge_decision_to_json(decision).dump(2) << "\n";
-        return decision;
+            << tuide::registry_causal_judge_decision_to_json(synth_decision).dump(2) << "\n";
+        return synth_decision;
       };
 
-      auto decision = run_synth(cards, zone_ids, hypothesis.empty() ? instruction : hypothesis,
-                                anchor_why, "");
-      if (epistemic && decision.ok && decision.next == "reinvestigate" && !reopened) {
-        reopened = true;
-        auto reopen = run_anchor_or_triage(decision.reinvestigate_need, "reopen_anchor");
-        if (reopen.ok && !reopen.shortlist.empty()) {
-          tuide::registry_apply_deterministic_co_shortlist(base_payload, &reopen);
-          std::ofstream(case_out / "reopen_anchor.json")
-              << tuide::registry_causal_triage_decision_to_json(reopen).dump(2) << "\n";
-          hypothesis = reopen.hypothesis;
-          anchor_why = reopen.why;
-          nlohmann::json reopen_payload;
-          if (expand_from_decision(reopen, &reopen_payload)) {
-            std::ofstream(case_out / "cards_reopened.json") << reopen_payload.dump(2) << "\n";
-            cards = tuide::registry_causal_judge_markdown(reopen_payload);
-            zone_ids = zone_ids_from_payload(reopen_payload);
-            std::ofstream(case_out / "cards_reopened.md") << cards;
-            expanded_payload = std::move(reopen_payload);
-            active_payload = &expanded_payload;
-            decision = run_synth(cards, zone_ids, hypothesis, anchor_why, "reopen_");
+      const std::string first_prefix = epistemic ? "anchor" : "triage";
+      tuide::RegistryCausalTriageDecision triage;
+      nlohmann::json expanded_payload;
+      nlohmann::json* active_payload = nullptr;
+      tuide::RegistryCausalJudgeDecision decision;
+      bool survey_ran = false;
+      bool gold_in_hypotheses = false;
+      std::vector<std::string> must_compete;
+
+      if (use_slot_survey) {
+        survey_ran = true;
+        must_compete = tuide::registry_collect_must_compete_zone_ids(base_payload, 2);
+        tuide::RegistrySlotSurveyResult slot_result;
+        slot_result.queue = tuide::registry_collect_slot_queue_zone_ids(base_payload, 8);
+        std::ofstream(case_out / "must_compete.json")
+            << nlohmann::json(must_compete).dump(2) << "\n";
+        std::ofstream(case_out / "slot_queue.json")
+            << nlohmann::json(slot_result.queue).dump(2) << "\n";
+
+        auto expected_stems_vec = [&]() {
+          std::vector<std::string> out;
+          for (const auto& value : item.value("expected_stems", nlohmann::json::array())) {
+            if (value.is_string()) {
+              out.push_back(value.get<std::string>());
+            }
+          }
+          return out;
+        }();
+
+        for (size_t si = 0; si < slot_result.queue.size(); ++si) {
+          const std::string primary_id = slot_result.queue[si];
+          const auto supporting =
+              tuide::registry_slot_supporting_zone_ids(base_payload, primary_id, 2);
+          const std::string slot_cards =
+              tuide::registry_causal_slot_cards_markdown(base_payload, primary_id, supporting);
+          const std::string prefix = "slot" + std::to_string(si) + "_" + primary_id;
+          std::ofstream(case_out / (prefix + "_cards.md")) << slot_cards;
+
+          auto run_slot = [&](const std::string& retry_need,
+                              const std::string& art) -> tuide::RegistrySlotHypothesis {
+            tuide::L2BrainRequest req;
+            req.system_prompt = tuide::registry_causal_slot_system_prompt();
+            req.user_prompt = "## Consulta\n" + instruction + "\n\n" +
+                              tuide::registry_causal_slot_user_prompt(slot_cards, primary_id,
+                                                                     retry_need);
+            req.phase = "causal_zone_slot_hyp";
+            req.max_tokens =
+                std::min(256, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 256);
+            req.n_ctx = std::max(4096, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 4096);
+            req.temperature = 0.05f;
+            const auto t0 = std::chrono::steady_clock::now();
+            const auto response = brain.propose(req, nullptr);
+            triage_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - t0)
+                             .count();
+            std::ofstream(case_out / (art + "_system.txt")) << req.system_prompt;
+            std::ofstream(case_out / (art + "_user.md")) << req.user_prompt;
+            std::ofstream(case_out / (art + "_raw.txt")) << response.text;
+            tuide::RegistrySlotHypothesis hyp;
+            if (!response.ok) {
+              hyp.error = response.error;
+              hyp.raw = response.text;
+              hyp.primary = primary_id;
+              return hyp;
+            }
+            hyp = tuide::registry_parse_causal_slot_hypothesis(response.text, primary_id,
+                                                               allowed_targets);
+            hyp.raw = response.text;
+            return hyp;
+          };
+
+          auto hyp = run_slot("", prefix);
+          std::string verr;
+          bool vok = tuide::registry_validate_slot_hypothesis(hyp, primary_id, allowed_targets,
+                                                              &verr);
+          if (!vok) {
+            auto retry = run_slot("Slot inválido (" + verr +
+                                      "). Emite hyp centrada en " + primary_id +
+                                      " o discard con expand_from de esa ficha.",
+                                  prefix + "_retry");
+            hyp = std::move(retry);
+            vok = tuide::registry_validate_slot_hypothesis(hyp, primary_id, allowed_targets,
+                                                           &verr);
+          }
+          if (!vok) {
+            tuide::registry_inject_synthetic_slot_hypothesis(&hyp, primary_id, base_payload,
+                                                             allowed_targets);
+          }
+          std::ofstream(case_out / (prefix + ".json"))
+              << nlohmann::json({{"primary", hyp.primary},
+                                 {"hypothesis", hyp.hypothesis},
+                                 {"confidence", hyp.confidence},
+                                 {"discard", hyp.discard},
+                                 {"discard_reason", hyp.discard_reason},
+                                 {"expand_from", hyp.expand_from},
+                                 {"synthetic", hyp.synthetic},
+                                 {"ok", hyp.ok},
+                                 {"error", hyp.error},
+                                 {"validated", vok}})
+                     .dump(2)
+              << "\n";
+          slot_result.slots.push_back(std::move(hyp));
+        }
+
+        slot_result.retained =
+            tuide::registry_slot_retain_hypotheses(slot_result.slots, base_payload, 3);
+        slot_result.gold_in_hypotheses = tuide::registry_slot_gold_in_hypotheses(
+            slot_result.retained, base_payload, expected_stems_vec);
+        gold_in_hypotheses = slot_result.gold_in_hypotheses;
+        std::ofstream(case_out / "hyps.json")
+            << json_dump_safe(tuide::registry_slot_survey_to_json(slot_result)) << "\n";
+
+        if (slot_result.retained.empty()) {
+          rows.push_back({{"id", id},
+                          {"ok", false},
+                          {"error", "slot_survey_no_hyps"},
+                          {"triage_ms", triage_ms},
+                          {"slot_survey", true},
+                          {"gold_in_hypotheses", false}});
+          continue;
+        }
+
+        auto threads = tuide::registry_slot_hyps_to_threads(slot_result.retained, base_payload,
+                                                            allowed_targets);
+        // Fase hyp-gen: expand thin slices; selected = retained primaries (sin synth/falsify).
+        nlohmann::json merged_zones = nlohmann::json::array();
+        std::unordered_set<std::string> seen_zone;
+        std::vector<std::string> retained_primaries;
+        std::string combined_hyp;
+        for (size_t ti = 0; ti < threads.size(); ++ti) {
+          auto thread_triage = threads[ti];
+          tuide::registry_apply_deterministic_co_shortlist(base_payload, &thread_triage);
+          const std::string prefix = "thread" + std::to_string(ti) + "_";
+          std::ofstream(case_out / (prefix + "anchor.json"))
+              << json_dump_safe(tuide::registry_causal_triage_decision_to_json(thread_triage))
+              << "\n";
+          nlohmann::json th_payload;
+          if (!expand_from_decision(thread_triage, &th_payload)) {
+            continue;
+          }
+          std::ofstream(case_out / (prefix + "cards_expanded.json"))
+              << json_dump_safe(th_payload) << "\n";
+          const std::string th_cards = tuide::registry_causal_judge_markdown(th_payload);
+          std::ofstream(case_out / (prefix + "cards_expanded.md")) << th_cards;
+          if (!thread_triage.shortlist.empty()) {
+            retained_primaries.push_back(thread_triage.shortlist.front());
+          }
+          if (combined_hyp.empty()) {
+            combined_hyp = thread_triage.hypothesis;
+          } else {
+            combined_hyp += " || " + thread_triage.hypothesis;
+          }
+          for (const auto& z : th_payload.value("zones", nlohmann::json::array())) {
+            const std::string zid = z.value("id", "");
+            if (zid.empty() || !seen_zone.insert(zid).second) {
+              continue;
+            }
+            merged_zones.push_back(z);
+          }
+          if (ti == 0) {
+            triage = thread_triage;
+          }
+        }
+        if (retained_primaries.empty()) {
+          rows.push_back({{"id", id},
+                          {"ok", false},
+                          {"error", "slot_expand_failed"},
+                          {"triage_ms", triage_ms},
+                          {"slot_survey", true},
+                          {"gold_in_hypotheses", slot_result.gold_in_hypotheses}});
+          continue;
+        }
+        expanded_payload = base_payload;
+        expanded_payload["zones"] = merged_zones;
+        active_payload = &expanded_payload;
+        cards = tuide::registry_causal_judge_markdown(expanded_payload);
+        zone_ids = zone_ids_from_payload(expanded_payload);
+        hypothesis = combined_hyp;
+        anchor_why = "slot_survey retained=" + std::to_string(retained_primaries.size());
+        decision.ok = true;
+        decision.selected = retained_primaries;
+        decision.next = "verify";
+        decision.hypothesis_status = "partial";
+        decision.why = hypothesis;
+        if (decision.why.size() > 200) {
+          decision.why.resize(200);
+          while (!decision.why.empty()) {
+            const auto c = static_cast<unsigned char>(decision.why.back());
+            if ((c & 0xc0) != 0x80) {
+              if ((c & 0x80) != 0) {
+                decision.why.pop_back();
+              }
+              break;
+            }
+            decision.why.pop_back();
+          }
+        }
+        for (const auto& pid : retained_primaries) {
+          tuide::RegistryZoneVerdict zv;
+          zv.id = pid;
+          zv.verdict = "select";
+          zv.role = "primary";
+          zv.completeness = "partial";
+          zv.confidence = 0.55f;
+          zv.why = "hyp retenida en slot-survey";
+          zv.contribution = zv.why;
+          decision.zones.push_back(std::move(zv));
+        }
+        std::ofstream(case_out / "anchor.json")
+            << json_dump_safe(tuide::registry_causal_triage_decision_to_json(triage)) << "\n";
+        std::ofstream(case_out / "triage.json")
+            << json_dump_safe(tuide::registry_causal_triage_decision_to_json(triage)) << "\n";
+        std::ofstream(case_out / "cards_expanded.json") << json_dump_safe(expanded_payload)
+                                                         << "\n";
+        std::ofstream(case_out / "cards_expanded.md") << cards;
+        std::ofstream(case_out / "survey_winner.json")
+            << json_dump_safe(nlohmann::json({{"retained_primaries", retained_primaries},
+                                              {"gold_in_hypotheses", slot_result.gold_in_hypotheses},
+                                              {"must_compete", must_compete},
+                                              {"queue", slot_result.queue}}))
+            << "\n";
+      } else if (use_primary_survey) {
+        survey_ran = true;
+        must_compete = tuide::registry_collect_must_compete_zone_ids(base_payload, 2);
+        const std::string survey_cards =
+            tuide::registry_strip_zone_scores_markdown(triage_cards);
+        std::ofstream(case_out / "must_compete.json")
+            << nlohmann::json(must_compete).dump(2) << "\n";
+
+        auto run_contrast_llm =
+            [&](const std::string& retry_need,
+                const std::string& artifact_prefix) -> tuide::RegistryContrastDecision {
+          tuide::L2BrainRequest req;
+          req.system_prompt = tuide::registry_causal_contrast_system_prompt();
+          req.user_prompt = "## Consulta\n" + instruction + "\n\n" +
+                            tuide::registry_causal_contrast_user_prompt(survey_cards, must_compete,
+                                                                       retry_need);
+          req.phase = "causal_zone_contrast";
+          req.max_tokens =
+              std::min(512, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 512);
+          req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+          req.temperature = 0.05f;
+          const auto t0 = std::chrono::steady_clock::now();
+          const auto response = brain.propose(req, nullptr);
+          triage_ms += std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - t0)
+                           .count();
+          std::ofstream(case_out / (artifact_prefix + "_system.txt")) << req.system_prompt;
+          std::ofstream(case_out / (artifact_prefix + "_user.md")) << req.user_prompt;
+          std::ofstream(case_out / (artifact_prefix + "_raw.txt")) << response.text;
+          tuide::RegistryContrastDecision contrast;
+          if (!response.ok) {
+            contrast.error = response.error;
+            contrast.raw = response.text;
+            return contrast;
+          }
+          contrast = tuide::registry_parse_causal_contrast(response.text, triage_ids,
+                                                           allowed_targets);
+          std::ofstream(case_out / (artifact_prefix + ".json"))
+              << tuide::registry_contrast_to_json(contrast).dump(2) << "\n";
+          return contrast;
+        };
+
+        auto contrast = run_contrast_llm("", "contrast");
+        auto validation = tuide::registry_validate_contrast_threads(
+            contrast, must_compete, base_payload, allowed_targets);
+        if (!validation.ok &&
+            (validation.error == "incomplete_contrast" ||
+             validation.error == "duplicate_hypothesis" || validation.error == "empty_threads" ||
+             !contrast.ok)) {
+          std::ostringstream retry_need;
+          retry_need << "Contraste incompleto (" << validation.error << "). ";
+          if (!must_compete.empty()) {
+            retry_need << "Debes emitir thread primary=";
+            for (size_t i = 0; i < must_compete.size(); ++i) {
+              retry_need << (i ? "|" : "") << must_compete[i];
+            }
+            retry_need << " con mecanismo anclado a stems/targets de esa zona, "
+                          "o discard válido con expand_from de esa ficha.";
+          } else {
+            retry_need << "Emite 1–2 hyp incompatibles sin copiar la misma frase.";
+          }
+          auto retry = run_contrast_llm(retry_need.str(), "contrast_retry");
+          if (retry.ok) {
+            contrast = std::move(retry);
+          }
+          validation = tuide::registry_validate_contrast_threads(
+              contrast, must_compete, base_payload, allowed_targets);
+        }
+        if (!validation.ok && !must_compete.empty()) {
+          tuide::registry_inject_synthetic_contrast_threads(&contrast, must_compete, base_payload,
+                                                            allowed_targets);
+          validation = tuide::registry_validate_contrast_threads(
+              contrast, must_compete, base_payload, allowed_targets);
+        }
+        std::ofstream(case_out / "survey_cards.md") << survey_cards;
+        std::ofstream(case_out / "survey.json")
+            << tuide::registry_contrast_to_json(contrast).dump(2) << "\n";
+        std::ofstream(case_out / "contrast_validation.json")
+            << nlohmann::json({{"ok", validation.ok},
+                               {"error", validation.error},
+                               {"must_compete", must_compete},
+                               {"injected", contrast.injected}})
+                   .dump(2)
+            << "\n";
+        if (!contrast.ok || contrast.threads.empty()) {
+          rows.push_back({{"id", id},
+                          {"ok", false},
+                          {"error", contrast.error.empty() ? validation.error : contrast.error},
+                          {"triage_ms", triage_ms},
+                          {"primary_survey", true}});
+          continue;
+        }
+        auto threads = tuide::registry_contrast_select_threads(contrast, base_payload,
+                                                               allowed_targets, 2);
+        if (threads.empty()) {
+          rows.push_back({{"id", id},
+                          {"ok", false},
+                          {"error", "survey_no_threads"},
+                          {"triage_ms", triage_ms},
+                          {"primary_survey", true}});
+          continue;
+        }
+        struct ThreadResult {
+          tuide::RegistryCausalTriageDecision triage;
+          tuide::RegistryCausalJudgeDecision decision;
+          nlohmann::json payload;
+          std::string cards;
+          std::vector<std::string> zone_ids;
+          float survey_confidence = 0.f;
+          std::string primary_id;
+        };
+        std::vector<ThreadResult> thread_results;
+        for (size_t ti = 0; ti < threads.size(); ++ti) {
+          auto thread_triage = threads[ti];
+          tuide::registry_apply_deterministic_co_shortlist(base_payload, &thread_triage);
+          const std::string prefix = "thread" + std::to_string(ti) + "_";
+          std::ofstream(case_out / (prefix + "anchor.json"))
+              << tuide::registry_causal_triage_decision_to_json(thread_triage).dump(2) << "\n";
+          ThreadResult tr;
+          tr.triage = thread_triage;
+          tr.primary_id = thread_triage.shortlist.empty() ? "" : thread_triage.shortlist.front();
+          for (const auto& th : contrast.threads) {
+            if (th.primary == tr.primary_id) {
+              tr.survey_confidence = th.confidence;
+              break;
+            }
+          }
+          if (!expand_from_decision(thread_triage, &tr.payload)) {
+            continue;
+          }
+          std::ofstream(case_out / (prefix + "cards_expanded.json")) << tr.payload.dump(2) << "\n";
+          tr.cards = tuide::registry_causal_judge_markdown(tr.payload);
+          tr.zone_ids = zone_ids_from_payload(tr.payload);
+          std::ofstream(case_out / (prefix + "cards_expanded.md")) << tr.cards;
+          tr.decision =
+              run_synth(tr.cards, tr.zone_ids, thread_triage.hypothesis, thread_triage.why, prefix);
+          tuide::registry_apply_synth_hypothesis_tiebreak(tr.payload, thread_triage.hypothesis,
+                                                          thread_triage.why, &tr.decision);
+          thread_results.push_back(std::move(tr));
+        }
+        if (thread_results.empty()) {
+          rows.push_back({{"id", id},
+                          {"ok", false},
+                          {"error", "survey_threads_expand_failed"},
+                          {"triage_ms", triage_ms},
+                          {"primary_survey", true}});
+          continue;
+        }
+        auto synth_rank = [](const tuide::RegistryCausalJudgeDecision& d) -> int {
+          if (!d.ok) {
+            return -1;
+          }
+          if (d.hypothesis_status == "confirmed") {
+            return 3;
+          }
+          if (d.hypothesis_status == "partial") {
+            return 2;
+          }
+          if (d.hypothesis_status == "falsified") {
+            return 0;
+          }
+          return 1;
+        };
+        auto is_must_primary = [&](const std::string& pid) {
+          return std::find(must_compete.begin(), must_compete.end(), pid) != must_compete.end();
+        };
+        size_t best_i = 0;
+        for (size_t i = 1; i < thread_results.size(); ++i) {
+          const auto& a = thread_results[best_i];
+          const auto& b = thread_results[i];
+          const int ra = synth_rank(a.decision);
+          const int rb = synth_rank(b.decision);
+          const bool b_hits_primary =
+              !b.decision.selected.empty() && b.decision.selected.front() == b.primary_id;
+          const bool a_hits_primary =
+              !a.decision.selected.empty() && a.decision.selected.front() == a.primary_id;
+          const bool a_must = is_must_primary(a.primary_id);
+          const bool b_must = is_must_primary(b.primary_id);
+          if (rb > ra || (rb == ra && b_hits_primary && !a_hits_primary) ||
+              (rb == ra && b_hits_primary == a_hits_primary && b_must && !a_must) ||
+              (rb == ra && b_hits_primary == a_hits_primary && b_must == a_must &&
+               b.survey_confidence > a.survey_confidence + 1e-6f)) {
+            best_i = i;
+          }
+        }
+        // No coronar M1-confirmed sin haber evaluado un hilo must-compete si existe.
+        if (!must_compete.empty() && thread_results.size() >= 2) {
+          const auto& win = thread_results[best_i];
+          const bool win_is_must = is_must_primary(win.primary_id);
+          if (!win_is_must && win.decision.hypothesis_status == "confirmed") {
+            for (size_t i = 0; i < thread_results.size(); ++i) {
+              if (!is_must_primary(thread_results[i].primary_id)) {
+                continue;
+              }
+              if (thread_results[i].decision.ok &&
+                  (thread_results[i].decision.hypothesis_status == "partial" ||
+                   thread_results[i].decision.hypothesis_status == "confirmed")) {
+                // Prefer must-compete partial over unrelated confirmed only if must has evidence.
+                if (thread_results[i].decision.hypothesis_status == "confirmed" ||
+                    (!thread_results[i].decision.selected.empty() &&
+                     thread_results[i].decision.selected.front() ==
+                         thread_results[i].primary_id)) {
+                  best_i = i;
+                }
+              }
+            }
+          }
+        }
+        // Si el ganador falló parse y hay hilo must-compete evaluado, preferirlo (mordida/M7).
+        if (!must_compete.empty() && !thread_results[best_i].decision.ok) {
+          for (size_t i = 0; i < thread_results.size(); ++i) {
+            if (is_must_primary(thread_results[i].primary_id)) {
+              best_i = i;
+              break;
+            }
+          }
+        }
+        auto& winner = thread_results[best_i];
+        triage = winner.triage;
+        decision = winner.decision;
+        expanded_payload = std::move(winner.payload);
+        active_payload = &expanded_payload;
+        cards = winner.cards;
+        zone_ids = winner.zone_ids;
+        hypothesis = winner.triage.hypothesis;
+        anchor_why = winner.triage.why;
+        std::ofstream(case_out / "anchor.json")
+            << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
+        std::ofstream(case_out / "triage.json")
+            << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
+        std::ofstream(case_out / "cards_expanded.json") << expanded_payload.dump(2) << "\n";
+        std::ofstream(case_out / "cards_expanded.md") << cards;
+        std::ofstream(case_out / "survey_winner.json")
+            << nlohmann::json({{"thread_index", best_i},
+                               {"primary_id", winner.primary_id},
+                               {"survey_confidence", winner.survey_confidence},
+                               {"hypothesis_status", decision.hypothesis_status},
+                               {"selected", decision.selected},
+                               {"must_compete", must_compete},
+                               {"injected", contrast.injected}})
+                   .dump(2)
+            << "\n";
+      } else {
+        triage = run_anchor_or_triage("", first_prefix);
+        if (!triage.ok || triage.shortlist.empty()) {
+          rows.push_back({{"id", id},
+                          {"ok", false},
+                          {"error", triage.ok ? "retrieval_gap" : triage.error},
+                          {"retrieval_needed", triage.retrieval_needed},
+                          {"triage_ms", triage_ms},
+                          {"epistemic", epistemic}});
+          continue;
+        }
+        if (epistemic) {
+          tuide::registry_apply_deterministic_co_shortlist(base_payload, &triage);
+          std::ofstream(case_out / "anchor.json")
+              << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
+          std::ofstream(case_out / "triage.json")
+              << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
+        }
+        // Legacy padding a 3 zonas solo fuera del modo epistémico.
+        if (!epistemic && triage.ok && triage.shortlist.size() < 3) {
+          std::unordered_set<std::string> selected(triage.shortlist.begin(),
+                                                   triage.shortlist.end());
+          std::unordered_set<std::string> selected_context;
+          for (const auto& zone : base_payload["zones"]) {
+            if (!selected.count(zone.value("id", ""))) {
+              continue;
+            }
+            for (const auto& stem : zone.value("context_stems", nlohmann::json::array())) {
+              if (stem.is_string()) {
+                selected_context.insert(stem.get<std::string>());
+              }
+            }
+          }
+          for (const auto& zone : base_payload["zones"]) {
+            if (triage.shortlist.size() >= 3) {
+              break;
+            }
+            const std::string candidate = zone.value("id", "");
+            if (candidate.empty() || selected.count(candidate)) {
+              continue;
+            }
+            bool linked_context = false;
+            for (const auto& stem : zone.value("primary_stems", nlohmann::json::array())) {
+              linked_context =
+                  linked_context ||
+                  (stem.is_string() && selected_context.count(stem.get<std::string>()) > 0);
+            }
+            const auto targets_it = allowed_targets.find(candidate);
+            if (!linked_context || targets_it == allowed_targets.end()) {
+              continue;
+            }
+            auto target_it = std::find_if(targets_it->second.begin(), targets_it->second.end(),
+                                          [&](const std::string& target) {
+                                            return target_matches_query(target, instruction);
+                                          });
+            if (target_it == targets_it->second.end()) {
+              continue;
+            }
+            tuide::RegistryZoneTriage complement;
+            complement.id = candidate;
+            complement.verdict = "inspect";
+            complement.need = "comprobar brazo causal complementario enlazado por contexto";
+            complement.expand_from = {*target_it};
+            triage.zones.push_back(std::move(complement));
+            triage.shortlist.push_back(candidate);
+            selected.insert(candidate);
+          }
+          std::ofstream(case_out / "triage.json")
+              << tuide::registry_causal_triage_decision_to_json(triage).dump(2) << "\n";
+        }
+
+        hypothesis = triage.hypothesis;
+        anchor_why = triage.why;
+        if (!expand_from_decision(triage, &expanded_payload)) {
+          rows.push_back({{"id", id}, {"ok", false}, {"error", err}, {"triage_ms", triage_ms}});
+          continue;
+        }
+        std::ofstream(case_out / "cards_expanded.json") << expanded_payload.dump(2) << "\n";
+        cards = tuide::registry_causal_judge_markdown(expanded_payload);
+        zone_ids = zone_ids_from_payload(expanded_payload);
+        std::ofstream(case_out / "cards_expanded.md") << cards;
+        active_payload = &expanded_payload;
+
+        decision = run_synth(cards, zone_ids, hypothesis.empty() ? instruction : hypothesis,
+                             anchor_why, "");
+        if (epistemic && decision.ok && decision.next == "reinvestigate" && !reopened) {
+          reopened = true;
+          auto reopen = run_anchor_or_triage(decision.reinvestigate_need, "reopen_anchor");
+          if (reopen.ok && !reopen.shortlist.empty()) {
+            tuide::registry_apply_deterministic_co_shortlist(base_payload, &reopen);
+            std::ofstream(case_out / "reopen_anchor.json")
+                << tuide::registry_causal_triage_decision_to_json(reopen).dump(2) << "\n";
+            hypothesis = reopen.hypothesis;
+            anchor_why = reopen.why;
+            nlohmann::json reopen_payload;
+            if (expand_from_decision(reopen, &reopen_payload)) {
+              std::ofstream(case_out / "cards_reopened.json") << reopen_payload.dump(2) << "\n";
+              cards = tuide::registry_causal_judge_markdown(reopen_payload);
+              zone_ids = zone_ids_from_payload(reopen_payload);
+              std::ofstream(case_out / "cards_reopened.md") << cards;
+              expanded_payload = std::move(reopen_payload);
+              active_payload = &expanded_payload;
+              decision = run_synth(cards, zone_ids, hypothesis, anchor_why, "reopen_");
+            }
           }
         }
       }
+      (void)survey_ran;
       // Si tras anclar/falsar no queda select, conservar la apuesta expandida (mordida mínima).
       if (epistemic && decision.selected.empty() && !zone_ids.empty()) {
-        const std::string keep = zone_ids.front();
+        std::string keep = zone_ids.front();
+        // Tras contraste: preferir must-compete presente en el thin slice (p.ej. M7).
+        for (const auto& mid : must_compete) {
+          if (std::find(zone_ids.begin(), zone_ids.end(), mid) != zone_ids.end()) {
+            keep = mid;
+            break;
+          }
+        }
         bool touched = false;
         for (auto& zone : decision.zones) {
           if (zone.id != keep) {
@@ -2266,15 +2785,20 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
                       {"reopened", reopened},
                       {"hypothesis_status", decision.hypothesis_status},
                       {"next", decision.next},
-                      {"epistemic", epistemic}});
+                      {"epistemic", epistemic},
+                      {"slot_survey", use_slot_survey},
+                      {"gold_in_hypotheses", gold_in_hypotheses}});
       std::cout << "==== zone judge " << id << " (" << total << ") ====\n" << std::flush;
       std::cout << "  " << (decision.ok ? "OK" : "INVALID") << " selected=";
       for (const auto& selected : decision.selected) {
         std::cout << selected << " ";
       }
       std::cout << "hit=" << row_hit << " op=" << row_op_hit << " trap=" << row_trap
-                << " reopen=" << reopened << "\n"
-                << std::flush;
+                << " reopen=" << reopened;
+      if (use_slot_survey) {
+        std::cout << " gold_in_hyps=" << gold_in_hypotheses;
+      }
+      std::cout << "\n" << std::flush;
       continue;
     } else {
       const fs::path cards_path = cards_root / id / "judge_cards.md";
