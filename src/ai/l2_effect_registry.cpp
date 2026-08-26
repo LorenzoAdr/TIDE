@@ -3533,6 +3533,55 @@ void collect_stem_tokens(const std::string& stem, std::unordered_set<std::string
   push_token_min3(out, ascii_lower_copy(cur));
 }
 
+void collect_symbolish_tokens(const std::string& text, std::unordered_set<std::string>* out) {
+  if (out == nullptr || text.empty()) {
+    return;
+  }
+  std::string cur;
+  auto flush = [&]() {
+    const std::string tok = ascii_lower_copy(cur);
+    cur.clear();
+    if (tok.size() >= 6 && tok.find('_') != std::string::npos) {
+      out->insert(tok);
+    }
+  };
+  for (unsigned char ch : text) {
+    if (std::isalnum(ch) || ch == '_') {
+      cur.push_back(static_cast<char>(ch));
+    } else {
+      flush();
+    }
+  }
+  flush();
+}
+
+std::string representative_symbol(const std::string& target) {
+  if (target.empty()) {
+    return {};
+  }
+  const auto colon = target.rfind(':');
+  std::string sym = colon == std::string::npos ? target : target.substr(colon + 1);
+  const auto slash = sym.rfind('/');
+  if (slash != std::string::npos) {
+    sym = sym.substr(slash + 1);
+  }
+  return ascii_lower_copy(sym);
+}
+
+bool text_has_negation_cue(const std::string& text) {
+  const std::string lower = ascii_lower_copy(text);
+  static const char* kCues[] = {
+      "no maneja", "no gestiona", "no restaura", "no controla", "no es responsable",
+      "falta", "does not", "doesn't", "missing", "not handle", "not manage", "cannot",
+      "does_not_explain", "no cubre"};
+  for (const char* cue : kCues) {
+    if (lower.find(cue) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 int hypothesis_stem_overlap(const std::unordered_set<std::string>& hyp_tokens,
                             const nlohmann::json& primary_stems) {
   int score = 0;
@@ -3548,6 +3597,38 @@ int hypothesis_stem_overlap(const std::unordered_set<std::string>& hyp_tokens,
         break;
       }
     }
+  }
+  return score;
+}
+
+int hypothesis_representative_overlap(const std::unordered_set<std::string>& symbolish,
+                                      const nlohmann::json& representatives,
+                                      bool negate_matched) {
+  if (symbolish.empty()) {
+    return 0;
+  }
+  int score = 0;
+  for (const auto& rep : representatives) {
+    if (!rep.is_object()) {
+      continue;
+    }
+    const std::string sym = representative_symbol(rep.value("target", ""));
+    if (sym.size() < 6) {
+      continue;
+    }
+    bool hit = symbolish.count(sym) > 0;
+    if (!hit) {
+      for (const auto& tok : symbolish) {
+        if (sym.find(tok) != std::string::npos || tok.find(sym) != std::string::npos) {
+          hit = true;
+          break;
+        }
+      }
+    }
+    if (!hit) {
+      continue;
+    }
+    score += negate_matched ? -2 : 2;
   }
   return score;
 }
@@ -3576,9 +3657,12 @@ void registry_apply_synth_hypothesis_tiebreak(const nlohmann::json& expanded_pay
     return;
   }
 
+  const std::string probe = hypothesis + "\n" + anchor_why;
   std::unordered_set<std::string> hyp_tokens;
-  collect_text_tokens(hypothesis, &hyp_tokens);
-  collect_text_tokens(anchor_why, &hyp_tokens);
+  collect_text_tokens(probe, &hyp_tokens);
+  std::unordered_set<std::string> symbolish;
+  collect_symbolish_tokens(probe, &symbolish);
+  const bool negate = text_has_negation_cue(probe);
 
   struct ZoneScore {
     std::string id;
@@ -3590,15 +3674,19 @@ void registry_apply_synth_hypothesis_tiebreak(const nlohmann::json& expanded_pay
   for (const auto& [id, zone] : by_id) {
     ZoneScore row;
     row.id = id;
-    row.overlap = hypothesis_stem_overlap(hyp_tokens, (*zone).value("primary_stems", nlohmann::json::array()));
+    row.overlap =
+        hypothesis_stem_overlap(hyp_tokens, (*zone).value("primary_stems", nlohmann::json::array())) +
+        hypothesis_representative_overlap(
+            symbolish, (*zone).value("representatives", nlohmann::json::array()), negate);
     row.mass = (*zone).value("mass_coverage", 0.f);
     ranked.push_back(std::move(row));
   }
+  // Prefer higher overlap; on ties prefer lower mass (more specific zone).
   std::sort(ranked.begin(), ranked.end(), [](const ZoneScore& a, const ZoneScore& b) {
     if (a.overlap != b.overlap) {
       return a.overlap > b.overlap;
     }
-    return a.mass > b.mass;
+    return a.mass < b.mass;
   });
   const ZoneScore& best = ranked.front();
   const std::string current_id = decision->selected.front();
@@ -3608,9 +3696,9 @@ void registry_apply_synth_hypothesis_tiebreak(const nlohmann::json& expanded_pay
     return;
   }
   const bool worse_overlap = current_it->overlap < best.overlap;
-  const bool both_zero_prefer_mass =
-      current_it->overlap == 0 && best.overlap == 0 && current_it->mass + 1e-6f < best.mass;
-  if (!worse_overlap && !both_zero_prefer_mass) {
+  const bool same_overlap_prefer_specificity =
+      current_it->overlap == best.overlap && current_it->mass > best.mass + 1e-6f;
+  if (!worse_overlap && !same_overlap_prefer_specificity) {
     return;
   }
   if (best.id == current_id) {
@@ -3626,7 +3714,7 @@ void registry_apply_synth_hypothesis_tiebreak(const nlohmann::json& expanded_pay
                               : zone.completeness;
       zone.confidence = std::max(0.55f, zone.confidence);
       if (zone.why.size() < 12) {
-        zone.why = "tie-break: mejor overlap hypothesis↔primary_stems";
+        zone.why = "tie-break: mejor overlap hypothesis↔stems/reps";
       }
     } else if (zone.verdict == "select") {
       zone.verdict = "reject";
@@ -3651,13 +3739,13 @@ void registry_apply_synth_hypothesis_tiebreak(const nlohmann::json& expanded_pay
     zone.role = "primary";
     zone.completeness = "partial";
     zone.confidence = 0.55f;
-    zone.why = "tie-break: mejor overlap hypothesis↔primary_stems";
+    zone.why = "tie-break: mejor overlap hypothesis↔stems/reps";
     zone.contribution = zone.why;
     decision->zones.push_back(std::move(zone));
   }
   decision->selected = {best.id};
   if (decision->why.size() < 12) {
-    decision->why = "tie-break hypothesis↔stems → " + best.id;
+    decision->why = "tie-break hypothesis↔stems/reps → " + best.id;
   }
 }
 

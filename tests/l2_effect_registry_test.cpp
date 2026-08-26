@@ -723,6 +723,94 @@ void test_query_constellations() {
   expect(synth_decision.selected == std::vector<std::string>({"M2"}),
          "synth tie-break prefers hypothesis stem overlap");
 
+  // v2: symbolish token matches representative → prefer that zone over high-mass distractor.
+  nlohmann::json rep_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M1"},
+             {"primary_stems", nlohmann::json::array({"settings_modal"})},
+             {"mass_coverage", 0.16f},
+             {"representatives",
+              nlohmann::json::array(
+                  {{{"target", "src/ui/settings_modal.cpp:handle_shortcuts_settings_keys"}}})}},
+            {{"id", "M2"},
+             {"primary_stems", nlohmann::json::array({"level1_agent"})},
+             {"mass_coverage", 0.29f},
+             {"representatives",
+              nlohmann::json::array(
+                  {{{"target", "src/ai/level1_agent.cpp:propose_investigate_needles"}}})}}})}};
+  tuide::RegistryCausalJudgeDecision rep_decision;
+  rep_decision.ok = true;
+  rep_decision.selected = {"M2"};
+  tuide::RegistryZoneVerdict rep_m2;
+  rep_m2.id = "M2";
+  rep_m2.verdict = "select";
+  rep_m2.why = "distractora de mayor mass";
+  rep_decision.zones.push_back(rep_m2);
+  tuide::registry_apply_synth_hypothesis_tiebreak(
+      rep_payload, "La funcion handle_shortcuts_settings_keys maneja los atajos", "",
+      &rep_decision);
+  expect(rep_decision.selected == std::vector<std::string>({"M1"}),
+         "tie-break v2 prefers symbolish↔representative match");
+
+  // v2: equal overlap → prefer lower mass (specificity).
+  nlohmann::json mass_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M1"},
+             {"primary_stems", nlohmann::json::array({"quit_confirm"})},
+             {"mass_coverage", 0.003f},
+             {"representatives", nlohmann::json::array()}},
+            {{"id", "M4"},
+             {"primary_stems", nlohmann::json::array({"open_file_confirm"})},
+             {"mass_coverage", 0.05f},
+             {"representatives", nlohmann::json::array()}}})}};
+  tuide::RegistryCausalJudgeDecision mass_decision;
+  mass_decision.ok = true;
+  mass_decision.selected = {"M4"};
+  tuide::RegistryZoneVerdict mass_m4;
+  mass_m4.id = "M4";
+  mass_m4.verdict = "select";
+  mass_m4.why = "distractora abierta por mass";
+  mass_decision.zones.push_back(mass_m4);
+  tuide::registry_apply_synth_hypothesis_tiebreak(
+      mass_payload, "confirmar archivos sin guardar antes de salir", "", &mass_decision);
+  expect(mass_decision.selected == std::vector<std::string>({"M1"}),
+         "tie-break v2 prefers lower mass on equal overlap");
+
+  // v2: negation cue degrades matched representative (post-falsify).
+  nlohmann::json neg_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M4"},
+             {"primary_stems", nlohmann::json::array({"application"})},
+             {"mass_coverage", 0.002f},
+             {"representatives",
+              nlohmann::json::array(
+                  {{{"target", "src/app/application.cpp:restore_workspace_session"}}})}},
+            {{"id", "M8"},
+             {"primary_stems", nlohmann::json::array({"workspace_config", "app_settings"})},
+             {"mass_coverage", 0.0008f},
+             {"representatives", nlohmann::json::array()}},
+            {{"id", "M2"},
+             {"primary_stems", nlohmann::json::array({"level2_session"})},
+             {"mass_coverage", 0.12f},
+             {"representatives", nlohmann::json::array()}}})}};
+  tuide::RegistryCausalJudgeDecision neg_decision;
+  neg_decision.ok = true;
+  neg_decision.selected = {"M2"};
+  tuide::RegistryZoneVerdict neg_m2;
+  neg_m2.id = "M2";
+  neg_m2.verdict = "select";
+  neg_m2.why = "conservada tras reopen vacio";
+  neg_decision.zones.push_back(neg_m2);
+  tuide::registry_apply_synth_hypothesis_tiebreak(
+      neg_payload,
+      "La funcion restore_workspace_session no maneja el cursor y los paneles laterales", "",
+      &neg_decision);
+  expect(neg_decision.selected == std::vector<std::string>({"M8"}),
+         "tie-break v2 negation prefers specific gold over falsified symbol zone");
+
   const std::string triage_md = tuide::registry_causal_triage_markdown(judge_payload);
   expect(triage_md.find("causal_zone_triage_v1") != std::string::npos,
          "causal triage markdown");
