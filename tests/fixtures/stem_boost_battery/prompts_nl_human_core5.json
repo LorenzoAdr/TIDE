@@ -1,0 +1,47 @@
+[
+  {
+    "id": "17_ai_spinner_stuck",
+    "complexity": "media_alta",
+    "prompt": "a veces el panel del chat con la IA se queda bloqueado mostrando un spinner infinito aunque el modelo ya terminó de responder, quiero saber dónde se controla ese estado de carga y cómo se cancela",
+    "expected_stems": ["ai_controller", "level2_autonomous_loop"],
+    "anchor_gold": ["busy_strip", "set_busy", "clear_busy", "agent_busy", "ai_controller"],
+    "trap_stems": ["console_panel", "dap_backend"],
+    "problem_kind_expected": "debug"
+  },
+  {
+    "id": "20_cancel_ai_generation",
+    "complexity": "media",
+    "prompt": "cuando la IA está generando código y el usuario pulsa Escape o hace clic fuera, quiero que se cancele la generación limpiamente sin dejar el archivo a medias",
+    "expected_stems": ["level2_autonomous_loop", "ai_controller"],
+    "anchor_gold": ["busy_strip", "level2_autonomous_loop", "ai_controller"],
+    "trap_stems": ["editor_panel", "search_replace"],
+    "problem_kind_expected": "debug"
+  },
+  {
+    "id": "07_ai_compile_task",
+    "complexity": "media_baja",
+    "prompt": "¿dónde se lanza la compilación del proyecto cuando le pido al asistente que compile o que ejecute el build?",
+    "expected_stems": ["task_runner", "ai_controller"],
+    "anchor_gold": ["task_runner", "ai_controller"],
+    "trap_stems": ["compile", "launch", "build-release"],
+    "problem_kind_expected": "locate"
+  },
+  {
+    "id": "04_ai_thinking_status_bar",
+    "complexity": "media_alta",
+    "prompt": "quiero que cuando el asistente de IA esté pensando o generando respuesta se vea un indicador de progreso en la barra de estado inferior de la aplicación",
+    "expected_stems": ["busy_strip", "ai_controller"],
+    "anchor_gold": ["busy_strip", "ai_controller"],
+    "trap_stems": ["settings_modal", "status", "panel"],
+    "problem_kind_expected": "implement"
+  },
+  {
+    "id": "06_quit_unsaved_warning",
+    "complexity": "media",
+    "prompt": "en el diálogo de confirmación al cerrar la aplicación quiero que el mensaje avise claramente si hay archivos sin guardar antes de salir",
+    "expected_stems": ["quit_confirm"],
+    "anchor_gold": ["quit_confirm"],
+    "trap_stems": ["shutdown_overlay", "settings_modal", "application"],
+    "problem_kind_expected": "implement"
+  }
+]

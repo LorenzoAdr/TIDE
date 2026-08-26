@@ -5402,7 +5402,15 @@ int main(int argc, char** argv) {
     int positional = 2;
     for (int i = 2; i < argc; ++i) {
       const std::string a = argv[i];
-      if (a == "--seeds" && i + 1 < argc) {
+      if (a == "--problem-frame-json" && i + 1 < argc) {
+        ++i;
+        opts.problem_frame_json = read_file(argv[i]);
+        positional = i + 1;
+      } else if (a == "--distilled-intent-json" && i + 1 < argc) {
+        ++i;
+        opts.distilled_intent_json = read_file(argv[i]);
+        positional = i + 1;
+      } else if (a == "--seeds" && i + 1 < argc) {
         // Accept a JSON file path or a comma-separated list of stems.
         ++i;
         const std::string seeds_arg = argv[i];

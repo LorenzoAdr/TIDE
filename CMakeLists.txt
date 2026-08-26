@@ -1117,6 +1117,8 @@ add_executable(l2_harness_cli
   src/ai/l2_explore_a_trail.cpp
   src/ai/l2_explore_a_dataflow.cpp
   src/ai/l2_effect_summary.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_graph_query_profile.cpp
   src/ai/l2_effect_slice.cpp
   src/ai/l2_effect_registry.cpp
   src/ai/level2_autonomous_loop.cpp

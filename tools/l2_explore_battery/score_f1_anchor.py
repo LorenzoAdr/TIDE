@@ -4,31 +4,19 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
+import sys
 from pathlib import Path
 
-OPERATIONAL_EXTRA: dict[str, list[str]] = {
-    "17_ai_spinner_stuck": ["busy_strip", "set_busy", "clear_busy", "agent_busy"],
-    "20_cancel_ai_generation": ["busy_strip"],
-}
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 
-
-def load_json(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def stem_hit(needle: str, haystacks: list[str]) -> bool:
-    n = needle.lower()
-    for h in haystacks:
-        hl = h.lower()
-        if n == hl or n in hl or hl in n:
-            return True
-    return False
+from tools.l2_explore_battery.pf_battery_lib import (  # noqa: E402
+    DEFAULT_CASES,
+    gold_stems,
+    load_cases,
+    load_json,
+    stem_hit,
+)
 
 
 def score_case(case: dict, case_dir: Path) -> dict:
@@ -42,8 +30,7 @@ def score_case(case: dict, case_dir: Path) -> dict:
     loci = ast.get("loci_draft") or []
     explore_mode = ast.get("explore_mode") or ""
 
-    expected = list(case.get("expected_stems") or [])
-    expected += OPERATIONAL_EXTRA.get(case.get("id", ""), [])
+    expected = gold_stems(case)
 
     blobs = [anchor, explore_mode, json.dumps(loci), json.dumps(ast)]
     anchor_hit = any(stem_hit(e, blobs) for e in expected) if expected else bool(anchor)
@@ -52,9 +39,11 @@ def score_case(case: dict, case_dir: Path) -> dict:
     explicit_miss = phase in ("explore_f1_miss", "explore_f1_retrieval") or "anchor_miss_v1" in log
     schema_ok = pf.get("schema") == "problem_frame_v1" or bool(pf.get("primary_anchor"))
     no_trail = "a_trail_judge" not in log or explore_mode == "f1_anchor"
+    mandatory = case.get("id") in ("17_ai_spinner_stuck", "20_cancel_ai_generation")
 
-    return {
+    row = {
         "id": case.get("id"),
+        "mandatory": mandatory,
         "f1_ok": f1_ok,
         "anchor_confirmed": bool(anchor),
         "anchor_symbol_hit": anchor_hit,
@@ -63,16 +52,59 @@ def score_case(case: dict, case_dir: Path) -> dict:
         "explore_mode_f1": explore_mode == "f1_anchor",
         "no_trail_in_log": no_trail,
         "phase": phase,
+        "anchor": anchor,
     }
+    row["pass"] = (
+        f1_ok
+        and anchor_hit
+        and schema_ok
+        and row["explore_mode_f1"]
+        and no_trail
+    )
+    return row
+
+
+def summarize(rows: list[dict]) -> dict:
+    n = len(rows)
+    mandatory = [r for r in rows if r.get("mandatory")]
+    return {
+        "n": n,
+        "f1_ok": sum(bool(r.get("f1_ok")) for r in rows),
+        "anchor_hit": sum(bool(r.get("anchor_symbol_hit")) for r in rows),
+        "problem_frame_ok": sum(bool(r.get("problem_frame_ok")) for r in rows),
+        "pass": sum(bool(r.get("pass")) for r in rows),
+        "mandatory_pass": sum(bool(r.get("pass")) for r in mandatory),
+        "mandatory_n": len(mandatory),
+        "explicit_failures": sum(bool(r.get("explicit_failure")) for r in rows),
+        "trail_violations": [r["id"] for r in rows if not r.get("no_trail_in_log")],
+        "f1_miss": [r["id"] for r in rows if not r.get("f1_ok")],
+    }
+
+
+def gate_3b(summary: dict, rows: list[dict] | None = None) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    n = int(summary.get("n") or 0)
+    if n < 5:
+        reasons.append(f"incomplete battery n={n}/5")
+    if int(summary.get("pass") or 0) < max(3, n - 2):
+        reasons.append("pass count < 3")
+    if int(summary.get("mandatory_pass") or 0) < int(summary.get("mandatory_n") or 0):
+        reasons.append("mandatory 17/20 failed")
+    if rows:
+        for r in rows:
+            if not r.get("no_trail_in_log"):
+                reasons.append(f"trail in F1 log: {r.get('id')}")
+    return (not reasons, reasons)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--round-dir", type=Path, required=True)
-    ap.add_argument("--cases", type=Path, default=Path("tests/fixtures/stem_boost_battery/prompts_nl_human.json"))
+    ap.add_argument("--cases", type=Path, default=DEFAULT_CASES)
+    ap.add_argument("--check-gate", action="store_true")
     args = ap.parse_args()
 
-    cases = json.loads(args.cases.read_text(encoding="utf-8"))
+    cases = load_cases(args.cases)
     rows = []
     for case in cases:
         cid = case.get("id")
@@ -83,17 +115,15 @@ def main() -> int:
             continue
         rows.append(score_case(case, case_dir))
 
-    summary = {
-        "n": len(rows),
-        "f1_ok": sum(bool(r.get("f1_ok")) for r in rows),
-        "anchor_hit": sum(bool(r.get("anchor_symbol_hit")) for r in rows),
-        "problem_frame_ok": sum(bool(r.get("problem_frame_ok")) for r in rows),
-        "explicit_failures": sum(bool(r.get("explicit_failure")) for r in rows),
-    }
+    summary = summarize(rows)
     out = {"rows": rows, "summary": summary}
+    gate = gate_3b(summary, rows)
+    out["gate_3b"] = {"pass": gate[0], "reasons": gate[1]}
     out_path = args.round_dir / "f1_anchor_score.json"
     out_path.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(summary, indent=2))
+    print(json.dumps({"summary": summary, "gate_3b": out["gate_3b"]}, indent=2))
+    if args.check_gate and not gate[0]:
+        return 1
     return 0
 
 
