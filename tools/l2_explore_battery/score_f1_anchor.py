@@ -32,7 +32,11 @@ def score_case(case: dict, case_dir: Path) -> dict:
 
     expected = gold_stems(case)
 
-    blobs = [anchor, explore_mode, json.dumps(loci), json.dumps(ast)]
+    blobs = [anchor]
+    for loc in loci:
+        if isinstance(loc, dict):
+            blobs.append(str(loc.get("stem") or ""))
+            blobs.append(str(loc.get("anchor") or ""))
     anchor_hit = any(stem_hit(e, blobs) for e in expected) if expected else bool(anchor)
 
     f1_ok = phase == "explore_f1_ok" or st.get("last_action") == "f1_done"

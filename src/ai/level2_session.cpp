@@ -4547,6 +4547,22 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
       if (!a_anchor_resolvable(loc.anchor)) {
         continue;
       }
+      if (a_in_f1_anchor_mode(ast)) {
+        // F1: peek useful confirms anchor candidate — no call-stack trail.
+        loc.role = ALocusRole::Suspect;
+        bool dup = false;
+        for (auto& existing : ast.loci_draft) {
+          if (existing.anchor == loc.anchor ||
+              (!loc.stem.empty() && existing.stem == loc.stem)) {
+            dup = true;
+            break;
+          }
+        }
+        if (!dup) {
+          ast.loci_draft.push_back(std::move(loc));
+        }
+        continue;
+      }
       // Start (or replace) call-hierarchy trail — do not crown primary yet.
       if (!ast.trail.active) {
         a_trail_begin(&ast, v);
@@ -4644,6 +4660,17 @@ Level2TurnResult Level2Session::apply_a_judge(const std::string& workspace_root,
   if (exp.expanded) {
     obs << "_nudge:_ expansión capa " << exp.layer << " +" << exp.added
         << " candidatos (" << exp.reason << "). Sigue con a_judge sobre los peeks nuevos.\n";
+  } else if (a_in_f1_anchor_mode(ast) && useful >= 1) {
+    for (const auto& v : batch_verdicts) {
+      AVerdict nv = v;
+      a_normalize_verdict(&nv);
+      if (nv.verdict == AVerdictKind::Useful) {
+        obs << "_nudge F1:_ peek useful en `" << nv.target
+            << "`. Emite {\"action\":\"f1_done\",\"loci\":[{\"stem\":\"…\",\"anchor\":\""
+            << nv.target << "\",\"role\":\"primary\",\"why\":\"…\"}]}. PROHIBIDO trail/a_done.\n";
+        break;
+      }
+    }
   } else if (ast.expand_exhausted && useful == 0) {
     obs << "_nudge:_ expansión agotada sin useful. Emite "
            "{\"action\":\"done\",\"summary\":\"A sin locus; orphans="

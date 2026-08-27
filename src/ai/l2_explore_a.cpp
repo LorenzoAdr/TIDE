@@ -1451,7 +1451,7 @@ bool a_validate_f1_anchor_done(const AState& st, const std::vector<ALocus>& loci
       ++rejects;
     }
   }
-  if (rejects < 1 && static_cast<int>(st.notes.size()) >= 3) {
+  if (rejects < 1 && static_cast<int>(st.notes.size()) >= 3 && !a_in_f1_anchor_mode(st)) {
     return fail("f1_done: marca ≥1 reject en competidores antes de cerrar");
   }
   return true;

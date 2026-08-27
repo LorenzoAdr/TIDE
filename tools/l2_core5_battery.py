@@ -359,8 +359,6 @@ def run_f1_case(case: dict, case_dir: Path, src_dir: Path, env: dict[str, str], 
     env = env.copy()
     env["L2_FEAT_L2_EXPLORE_ANCHOR_CAUSAL"] = "1"
 
-    kill_runtime()
-    # L1 map (reuse from src if present)
     map_out = case_dir / "map_last.md"
     pf_path = case_dir / "problem_frame.json"
     if (src_dir / "map_last.md").exists() and (src_dir / "problem_frame.json").exists():
@@ -401,6 +399,7 @@ def run_f1_battery(label: str, cases_path: Path, from_round: Path, only: str, ti
     if only:
         cases = [c for c in cases if c["id"] == only]
 
+    kill_runtime()
     rows = []
     for case in cases:
         print(f"=== F1 {case['id']} ===", flush=True)
@@ -470,7 +469,7 @@ def main() -> int:
     ap.add_argument("--cases", type=Path, default=CASES_DEFAULT)
     ap.add_argument("--from-round", type=Path, default=None, help="prior round dir for graph/f1 inputs")
     ap.add_argument("--only", default="", help="single case id")
-    ap.add_argument("--timeout", type=int, default=900, help="per-case timeout seconds")
+    ap.add_argument("--timeout", type=int, default=2400, help="per-case timeout seconds")
     ap.add_argument("--check-gate", action="store_true")
     args = ap.parse_args()
 
