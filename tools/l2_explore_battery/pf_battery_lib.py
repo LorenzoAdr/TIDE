@@ -146,46 +146,24 @@ def _push_term(terms: list[str], raw: str) -> None:
 
 
 def refine_pf_from_query(pf: dict[str, Any], query: str) -> dict[str, Any]:
-    """Mirror of problem_frame_refine_from_query (generic heuristics)."""
-    low = query.lower()
+    """Structural cleanup only — never inject domain stems or override LLM kind."""
+    del query  # unused; kept for call-site compatibility
     out = dict(pf)
     pa = dict(out.get("primary_anchor") or {})
     terms = [str(t) for t in pa.get("search_terms") or [] if " " not in str(t)]
-
-    if any(x in low for x in ("spinner", "busy", "carga", "bloquead")):
-        for t in ("busy_strip", "set_busy", "clear_busy", "agent_busy"):
-            _push_term(terms, t)
-    if any(x in low for x in ("ia", "ai", "asistente")):
-        for t in ("ai_controller", "level2_autonomous_loop"):
-            _push_term(terms, t)
-    if "compil" in low or "build" in low:
-        for t in ("task_runner", "ai_controller"):
-            _push_term(terms, t)
-    if any(x in low for x in ("cerrar", "salir", "quit")):
-        _push_term(terms, "quit_confirm")
-    if "configur" in low or "settings" in low:
-        for t in ("settings_modal", "app_settings"):
-            _push_term(terms, t)
-    if "barra" in low and "estado" in low:
-        _push_term(terms, "busy_strip")
-
     pa["search_terms"] = terms[:8]
-    if any(x in low for x in ("spinner", "atascad", "bug", "error", "no funciona", "bloquead")):
-        out["problem_kind"] = "debug"
-    elif ("cancel" in low or "escape" in low) and any(
-        x in low for x in ("gener", "ia", "ai", "asistente")
-    ):
-        out["problem_kind"] = "debug"
-    elif any(x in low for x in ("dónde", "donde", "qué código", "que codigo", "muéstrame", "muestrame")):
-        out["problem_kind"] = "locate"
-    elif any(
-        x in low
-        for x in ("añadir", "anadir", "implement", "quiero que", "cambia el código", "cambia el codigo")
-    ):
-        out["problem_kind"] = "implement"
-    else:
-        out.setdefault("problem_kind", "explain")
     out["primary_anchor"] = pa
+    secs = []
+    for s in out.get("secondary_anchors") or []:
+        if not isinstance(s, dict):
+            continue
+        sd = dict(s)
+        st = [str(t) for t in sd.get("search_terms") or [] if " " not in str(t)]
+        sd["search_terms"] = st[:6]
+        secs.append(sd)
+    if secs:
+        out["secondary_anchors"] = secs
+    out.setdefault("schema", "problem_frame_v1")
     return out
 
 

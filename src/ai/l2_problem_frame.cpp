@@ -58,14 +58,10 @@ void read_primary_anchor(const nlohmann::json& j, PrimaryAnchor* out) {
 
 std::string infer_problem_kind(const std::string& msg) {
   const std::string m = ascii_lower(msg);
-  if (m.find("spinner") != std::string::npos || m.find("atascad") != std::string::npos ||
-      m.find("bug") != std::string::npos || m.find("error") != std::string::npos ||
-      m.find("no funciona") != std::string::npos || m.find("bloquead") != std::string::npos) {
-    return "debug";
-  }
-  if ((m.find("cancel") != std::string::npos || m.find("escape") != std::string::npos) &&
-      (m.find("gener") != std::string::npos || m.find("ia") != std::string::npos ||
-       m.find("asistente") != std::string::npos)) {
+  // Lightweight, domain-agnostic cues only (no product-specific stems).
+  if (m.find("bug") != std::string::npos || m.find("error") != std::string::npos ||
+      m.find("no funciona") != std::string::npos || m.find("atascad") != std::string::npos ||
+      m.find("bloquead") != std::string::npos || m.find("falla") != std::string::npos) {
     return "debug";
   }
   if (m.find("dónde") != std::string::npos || m.find("donde") != std::string::npos ||
@@ -74,26 +70,24 @@ std::string infer_problem_kind(const std::string& msg) {
     return "locate";
   }
   if (m.find("añadir") != std::string::npos || m.find("anadir") != std::string::npos ||
-      m.find("implement") != std::string::npos || m.find("quiero que") != std::string::npos ||
-      m.find("cambia el código") != std::string::npos || m.find("cambia el codigo") != std::string::npos) {
+      m.find("implement") != std::string::npos || m.find("cambia") != std::string::npos ||
+      m.find("quiero que") != std::string::npos) {
     return "implement";
   }
   return "explain";
 }
 
-std::string infer_anchor_kind(const std::string& msg, const std::string& problem_kind) {
-  const std::string m = ascii_lower(msg);
-  if (m.find("spinner") != std::string::npos || m.find("busy") != std::string::npos ||
-      m.find("carga") != std::string::npos || m.find("estado") != std::string::npos) {
-    return "symptom_control";
-  }
+std::string infer_anchor_kind(const std::string& /*msg*/, const std::string& problem_kind) {
   if (problem_kind == "locate") {
     return "entrypoint";
   }
-  if (m.find("primera vez") != std::string::npos || m.find("persist") != std::string::npos) {
-    return "state_latch";
+  if (problem_kind == "debug") {
+    return "control";
   }
-  return "effect_surface";
+  if (problem_kind == "implement") {
+    return "feature";
+  }
+  return "module";
 }
 
 std::vector<std::string> tokenize_codeish(const std::string& msg) {
@@ -133,41 +127,7 @@ void push_unique_term(std::vector<std::string>* terms, const std::string& raw) {
   terms->push_back(t);
 }
 
-void augment_search_terms_from_query(const std::string& msg, std::vector<std::string>* terms) {
-  if (terms == nullptr) {
-    return;
-  }
-  const std::string m = ascii_lower(msg);
-  if (m.find("spinner") != std::string::npos || m.find("busy") != std::string::npos ||
-      m.find("carga") != std::string::npos || m.find("bloquead") != std::string::npos) {
-    push_unique_term(terms, "busy_strip");
-    push_unique_term(terms, "set_busy");
-    push_unique_term(terms, "clear_busy");
-    push_unique_term(terms, "agent_busy");
-  }
-  if (m.find("ia") != std::string::npos || m.find("ai") != std::string::npos ||
-      m.find("asistente") != std::string::npos) {
-    push_unique_term(terms, "ai_controller");
-    push_unique_term(terms, "level2_autonomous_loop");
-  }
-  if (m.find("compil") != std::string::npos || m.find("build") != std::string::npos) {
-    push_unique_term(terms, "task_runner");
-    push_unique_term(terms, "ai_controller");
-  }
-  if (m.find("cerrar") != std::string::npos || m.find("salir") != std::string::npos ||
-      m.find("quit") != std::string::npos) {
-    push_unique_term(terms, "quit_confirm");
-  }
-  if (m.find("configur") != std::string::npos || m.find("settings") != std::string::npos ||
-      m.find("preferenc") != std::string::npos) {
-    push_unique_term(terms, "settings_modal");
-    push_unique_term(terms, "app_settings");
-  }
-  if (m.find("barra") != std::string::npos && m.find("estado") != std::string::npos) {
-    push_unique_term(terms, "busy_strip");
-  }
-}
-
+// Drop NL phrases; keep code-like tokens only. No domain stem injection.
 void sanitize_search_terms(std::vector<std::string>* terms) {
   if (terms == nullptr) {
     return;
@@ -234,7 +194,7 @@ bool problem_frame_from_json(const nlohmann::json& j, ProblemFrame* out, std::st
   pf.anchor_confidence = trim_copy(j.value("anchor_confidence", "medium"));
   pf.provenance = trim_copy(j.value("provenance", "l1_distill"));
   if (pf.problem_kind.empty()) {
-    pf.problem_kind = "debug";
+    pf.problem_kind = "explain";
   }
   if (pf.primary_anchor.objective.empty() && !pf.problem_frame.empty()) {
     pf.primary_anchor.objective = pf.problem_frame;
@@ -359,21 +319,14 @@ ProblemFrame problem_frame_fallback_from_query(const std::string& user_message) 
   pf.problem_kind = infer_problem_kind(user_message);
   pf.problem_frame = user_message.size() > 240 ? user_message.substr(0, 239) + "…" : user_message;
   pf.primary_anchor.kind = infer_anchor_kind(user_message, pf.problem_kind);
-  pf.primary_anchor.objective = pf.problem_frame;
+  pf.primary_anchor.objective = "localizar el módulo o pieza de código más cercana a la petición";
   for (const auto& tok : tokenize_codeish(user_message)) {
     if (tok.size() >= 4) {
       pf.primary_anchor.search_terms.push_back(tok);
     }
-    if (pf.primary_anchor.search_terms.size() >= 8) {
+    if (pf.primary_anchor.search_terms.size() >= 6) {
       break;
     }
-  }
-  if (pf.problem_kind == "debug") {
-    pf.primary_anchor.edge_hints = {"set_", "clear_", "cancel_"};
-    MechanismGap g;
-    g.slot = "cleanup";
-    g.question = "¿quién debería desactivar o limpiar el estado observable?";
-    pf.mechanism_gaps.push_back(std::move(g));
   }
   pf.anchor_confidence = "low";
   pf.provenance = "deterministic_fallback";
@@ -381,21 +334,26 @@ ProblemFrame problem_frame_fallback_from_query(const std::string& user_message) 
 }
 
 void problem_frame_refine_from_query(ProblemFrame* pf, const std::string& user_message) {
-  if (pf == nullptr || user_message.empty()) {
+  if (pf == nullptr) {
     return;
   }
-  const std::string inferred = infer_problem_kind(user_message);
-  pf->problem_kind = inferred;
+  (void)user_message;
+  // Structural cleanup only — never inject product/domain stems or override LLM kind.
   sanitize_search_terms(&pf->primary_anchor.search_terms);
-  augment_search_terms_from_query(user_message, &pf->primary_anchor.search_terms);
   if (pf->primary_anchor.search_terms.size() > 8) {
     pf->primary_anchor.search_terms.resize(8);
   }
-  if (pf->primary_anchor.kind.empty()) {
-    pf->primary_anchor.kind = infer_anchor_kind(user_message, pf->problem_kind);
+  for (auto& sec : pf->secondary_anchors) {
+    sanitize_search_terms(&sec.search_terms);
+    if (sec.search_terms.size() > 6) {
+      sec.search_terms.resize(6);
+    }
   }
-  if (pf->problem_kind == "debug" && pf->primary_anchor.edge_hints.empty()) {
-    pf->primary_anchor.edge_hints = {"set_", "clear_", "cancel_"};
+  if (pf->problem_kind.empty()) {
+    pf->problem_kind = "explain";
+  }
+  if (pf->primary_anchor.kind.empty()) {
+    pf->primary_anchor.kind = "module";
   }
 }
 

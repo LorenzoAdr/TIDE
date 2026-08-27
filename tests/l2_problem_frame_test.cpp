@@ -55,16 +55,21 @@ int main() {
 
   tuide::ProblemFrame raw_pf;
   expect(tuide::problem_frame_from_json_string(raw, &raw_pf, &err), "raw for refine");
+  raw_pf.primary_anchor.search_terms.push_back("loading state");  // NL — must drop
   tuide::problem_frame_refine_from_query(
       &raw_pf, "spinner infinito en chat IA aunque el modelo terminó");
-  expect(raw_pf.problem_kind == "debug", "refine kind debug");
-  bool has_busy = false;
+  bool has_nl = false;
+  bool injected_ai = false;
   for (const auto& t : raw_pf.primary_anchor.search_terms) {
-    if (t == "busy_strip") {
-      has_busy = true;
+    if (t.find(' ') != std::string::npos) {
+      has_nl = true;
+    }
+    if (t == "ai_controller" || t == "busy_strip" || t == "level2_autonomous_loop") {
+      injected_ai = true;
     }
   }
-  expect(has_busy, "refine augments busy_strip");
+  expect(!has_nl, "refine drops spaced NL terms");
+  expect(!injected_ai, "refine does not inject domain stems");
 
   tuide::RegistryQueryOpts opts;
   const auto profile = tuide::graph_query_profile_default(tuide::GraphQueryPhase::AnchorHunt);

@@ -11,7 +11,8 @@ namespace tuide {
 inline constexpr const char* kProblemFrameSchema = "problem_frame_v1";
 
 struct PrimaryAnchor {
-  std::string kind;       // symptom_control | effect_surface | entrypoint | state_latch
+  // feature | module | entrypoint | control | state (legacy kinds still accepted)
+  std::string kind;
   std::string objective;
   std::vector<std::string> search_terms;
   std::vector<std::string> edge_hints;
@@ -59,7 +60,7 @@ bool problem_frame_minimally_valid(const ProblemFrame& pf);
 // Best-effort frame when L1 distillation fails.
 ProblemFrame problem_frame_fallback_from_query(const std::string& user_message);
 
-// Generic post-distill cleanup: kind reinference, code-like terms, symptom augments.
+// Structural cleanup only (drop NL phrases). Never injects domain stems.
 void problem_frame_refine_from_query(ProblemFrame* pf, const std::string& user_message);
 
 std::string problem_frame_path(const std::string& workspace_root);

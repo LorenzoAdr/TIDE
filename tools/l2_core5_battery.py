@@ -143,39 +143,28 @@ def run_l1_case(case: dict, case_dir: Path, env: dict[str, str], timeout: int) -
 
 
 def fallback_pf_from_query(prompt: str) -> dict:
-    """Lightweight mirror of problem_frame_fallback_from_query for offline scoring."""
+    """Tokenize-only fallback — no domain stem injection."""
+    import re
+
     low = prompt.lower()
     kind = "explain"
-    if any(x in low for x in ("spinner", "atascad", "bug", "error", "no funciona", "bloquead")):
+    if any(x in low for x in ("bug", "error", "no funciona", "atascad", "bloquead", "falla")):
         kind = "debug"
-    elif any(x in low for x in ("dónde", "donde", "qué código", "que codigo")):
+    elif any(x in low for x in ("dónde", "donde", "qué código", "que codigo", "muéstrame")):
         kind = "locate"
-    elif any(x in low for x in ("añadir", "anadir", "implement")):
+    elif any(x in low for x in ("añadir", "anadir", "implement", "cambia", "quiero que")):
         kind = "implement"
 
     terms: list[str] = []
-    if "spinner" in low or "busy" in low or "carga" in low:
-        terms += ["busy_strip", "set_busy", "clear_busy", "agent_busy"]
-    if "ia" in low or "ai" in low or "asistente" in low:
-        terms += ["ai_controller", "level2_autonomous_loop"]
-    if "compil" in low or "build" in low:
-        terms += ["task_runner", "compile"]
-    if "cerrar" in low or "salir" in low or "quit" in low:
-        terms += ["quit_confirm"]
-    if "configuración" in low or "settings" in low or "preferencias" in low:
-        terms += ["settings_modal", "app_settings"]
-    # dedupe
-    out_terms: list[str] = []
-    for t in terms:
-        if t not in out_terms:
-            out_terms.append(t)
+    for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", prompt):
+        if tok not in terms:
+            terms.append(tok)
+        if len(terms) >= 6:
+            break
 
-    anchor_kind = "state_latch"
-    if kind == "locate":
-        anchor_kind = "entrypoint"
-    elif kind == "implement":
-        anchor_kind = "effect_surface"
-
+    anchor_kind = {"locate": "entrypoint", "debug": "control", "implement": "feature"}.get(
+        kind, "module"
+    )
     return normalize_to_v1(
         {
             "schema": "problem_frame_v1",
@@ -183,12 +172,13 @@ def fallback_pf_from_query(prompt: str) -> dict:
             "problem_frame": prompt[:200],
             "primary_anchor": {
                 "kind": anchor_kind,
-                "objective": "localizar pieza principal del síntoma o feature",
-                "search_terms": out_terms[:8],
+                "objective": "localizar el módulo o pieza de código más cercana a la petición",
+                "search_terms": terms,
                 "edge_hints": [],
             },
-            "mechanism_gaps": [{"slot": "state", "question": "¿dónde se actualiza el estado observable?"}],
-            "reject_noise": ["panel", "modal", "visible"],
+            "secondary_anchors": [],
+            "mechanism_gaps": [],
+            "reject_noise": [],
         }
     )
 

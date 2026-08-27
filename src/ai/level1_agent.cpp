@@ -564,29 +564,38 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
     {
       LlamaCompletionRequest req;
       req.system_prompt =
-          "Eres un analizador para caza de ancla primaria (problem_frame_v1). "
-          "NO elijas archivos concretos todavía. Responde SOLO JSON:\n"
-          "{\"schema\":\"problem_frame_v1\",\"problem_kind\":\"debug|locate|implement|explain\","
-          "\"problem_frame\":\"1-2 frases observables sin hipótesis causal\","
-          "\"primary_anchor\":{\"kind\":\"symptom_control|effect_surface|entrypoint|state_latch\","
-          "\"objective\":\"qué pieza entender primero\","
-          "\"search_terms\":[\"...\"],\"edge_hints\":[\"set_\",\"clear_\"]},"
-          "\"mechanism_gaps\":[{\"slot\":\"cleanup\",\"question\":\"...\"}],"
-          "\"reject_noise\":[\"...\"],\"anchor_confidence\":\"high|medium|low\"}\n"
+          "Eres un analizador de peticiones de código (problem_frame_v1). "
+          "NO elijas archivos concretos. Responde SOLO JSON válido:\n"
+          "{\"schema\":\"problem_frame_v1\","
+          "\"problem_kind\":\"debug|locate|implement|explain\","
+          "\"problem_frame\":\"1-2 frases que reformulan la petición\","
+          "\"primary_anchor\":{\"kind\":\"feature|module|entrypoint|control|state\","
+          "\"objective\":\"la pieza de código donde anclarse PRIMERO\","
+          "\"search_terms\":[\"term_snake_1\",\"term_snake_2\"],"
+          "\"edge_hints\":[]},"
+          "\"secondary_anchors\":[{\"kind\":\"module\",\"objective\":\"…\","
+          "\"search_terms\":[\"…\"],\"deferred\":true,"
+          "\"why_later\":\"se persigue después del ancla primaria\"}],"
+          "\"mechanism_gaps\":[{\"slot\":\"…\",\"question\":\"¿…?\"}],"
+          "\"reject_noise\":[\"…\"],\"anchor_confidence\":\"high|medium|low\"}\n"
           "Reglas:\n"
-          "- UNA sola primary_anchor.\n"
-          "- problem_kind=debug si hay síntoma roto/atascado/error; locate solo si pregunta "
-          "dónde sin fallo; implement si pide añadir/cambiar feature.\n"
-          "- search_terms: 3..8 identificadores snake_case (busy_strip, ai_controller), "
-          "NUNCA frases NL ('loading state', 'chat panel').\n"
-          "- Síntomas spinner/busy/carga → incluir busy_strip y set_/clear_ en edge_hints.\n"
-          "- mechanism_gaps: preguntas abiertas, NO afirmaciones.\n"
-          "- reject_noise: palabras UI genéricas (panel, modal); NO el token del síntoma.\n";
+          "- primary_anchor = ÚNICO punto de anclaje inicial (módulo/feature/control "
+          "más cercano a la petición). Puede ser un feature (gestor de archivos), "
+          "un entrypoint, o un control de estado — NO tiene por qué ser un 'síntoma'.\n"
+          "- secondary_anchors = piezas relacionadas a explorar DESPUÉS (orquestadores, "
+          "callers, UI alrededor). deferred=true. 0..3 entradas.\n"
+          "- search_terms: 2..6 identificadores snake_case/CamelCase de CÓDIGO, "
+          "derivados de la petición; NUNCA frases NL; NO inventes nombres de producto "
+          "que no sugiera el texto.\n"
+          "- PROHIBIDO meter en primary lo que claramente es contexto posterior "
+          "(orquestación, callers, paneles vecinos).\n"
+          "- mechanism_gaps: preguntas abiertas (¿…?), no afirmaciones.\n"
+          "- reject_noise: tokens genéricos a no grepear (p.ej. panel, visible).\n";
       std::ostringstream user;
       user << "Consulta del usuario:\n" << user_message << "\n";
       user << "\nJSON:";
       req.user_prompt = user.str();
-      req.max_tokens = std::min(320, std::max(160, deps_.settings.level1.max_tokens / 2));
+      req.max_tokens = std::min(480, std::max(220, deps_.settings.level1.max_tokens / 2));
       {
         const int prompt_tok_est =
             static_cast<int>((req.system_prompt.size() + req.user_prompt.size()) / 3 + 32);
@@ -609,11 +618,12 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
         if (log) {
           log("L1 intent raw: " + completion.text);
         }
-        distilled = parse_distilled_intent_json(completion.text);
-        if (!distilled) {
+        distilled = std::nullopt;
+        {
           tuide::ProblemFrame pf;
           std::string perr;
-          if (tuide::problem_frame_from_json_string(completion.text, &pf, &perr)) {
+          if (tuide::problem_frame_from_json_string(completion.text, &pf, &perr) &&
+              tuide::problem_frame_minimally_valid(pf)) {
             tuide::problem_frame_refine_from_query(&pf, user_message);
             DistilledInvestigateIntent di;
             di.intent = pf.problem_frame;
@@ -625,8 +635,18 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
                 di.facets.push_back(g.slot);
               }
             }
+            for (const auto& sec : pf.secondary_anchors) {
+              for (const auto& t : sec.search_terms) {
+                if (!t.empty()) {
+                  di.facets.push_back(t);
+                }
+              }
+            }
             distilled = di;
           }
+        }
+        if (!distilled) {
+          distilled = parse_distilled_intent_json(completion.text);
         }
         if (distilled) {
           filter_distilled_ignore(&*distilled, user_message);
