@@ -51,8 +51,12 @@ int main() {
   pf.primary_anchor.objective = "control spinner lifecycle";
   pf.primary_anchor.search_terms = {"spinner"};
   pf.secondary_anchors.push_back({"module", "chat ambient", {"chat_panel"}, true, "later"});
-  pf.anchor_hypotheses.push_back(
-      {"busy strip", {"busy_strip"}, "effect", "menu candidate for thinking indicator"});
+  pf.anchor_hypotheses.push_back({});
+  pf.anchor_hypotheses.back().claim = "busy strip stuck after model done";
+  pf.anchor_hypotheses.back().anchor_role = "affected";
+  pf.anchor_hypotheses.back().affected.stem = "busy_strip";
+  pf.anchor_hypotheses.back().search_terms = {"busy_strip"};
+  pf.anchor_hypotheses.back().why = "menu candidate for thinking indicator";
 
   tuide::EntitynessReport empty_rep;
   empty_rep.query = "x";

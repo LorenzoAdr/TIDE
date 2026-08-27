@@ -39,9 +39,11 @@ std::string read_file(const fs::path& p) {
 
 void usage() {
   std::cerr << "Usage: tuide l1-debug --query \"...\" [--workspace ROOT] [--no-stem-embed] "
-               "[--l2-distill] [--intent-decompose] [--map-out PATH] [--seeds-out PATH]\n"
+               "[--l2-distill] [--intent-decompose] [--map-out PATH] [--seeds-out PATH] "
+               "[--pf-out PATH]\n"
                "  --no-stem-embed     skip coding-stem index; still starts embed for map rerank\n"
-               "  --intent-decompose  probe: progressive intent units until meaning collapses\n";
+               "  --intent-decompose  probe: progressive intent units until meaning collapses\n"
+               "  --pf-out PATH       write problem_frame_v1 JSON (incl. anchor_hypotheses)\n";
 }
 
 void write_seeds_json(const fs::path& path, const std::vector<std::string>& seeds) {
@@ -72,6 +74,7 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
   std::string query;
   std::string map_out_path;
   std::string seeds_out_path;
+  std::string pf_out_path;
   bool no_stem_embed = false;
   bool l2_distill = false;
   bool intent_decompose = false;
@@ -98,6 +101,8 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
       map_out_path = need("--map-out");
     } else if (a == "--seeds-out") {
       seeds_out_path = need("--seeds-out");
+    } else if (a == "--pf-out") {
+      pf_out_path = need("--pf-out");
     } else if (a == "--entityness-json") {
       // Deprecated: entityness is post-PF on chain links, not injected into L1 distill.
       (void)need("--entityness-json");
@@ -324,6 +329,25 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
       return 1;
     }
     std::cout << "map_out=" << map_out_path << "\n";
+  }
+  if (!pf_out_path.empty()) {
+    if (result.problem_frame_json.empty()) {
+      std::cerr << "pf_out: problem_frame_json vacío (distill/hyps no disponibles)\n";
+    } else {
+      std::error_code ec;
+      fs::create_directories(fs::path(pf_out_path).parent_path(), ec);
+      std::ofstream out(pf_out_path);
+      if (!out) {
+        std::cerr << "pf_out write failed\n";
+        return 1;
+      }
+      out << result.problem_frame_json;
+      if (!result.problem_frame_json.empty() && result.problem_frame_json.back() != '\n') {
+        out << '\n';
+      }
+      std::cout << "pf_out=" << pf_out_path << " chars=" << result.problem_frame_json.size()
+                << "\n";
+    }
   }
   const std::string map = read_file(map_path);
   if (!map.empty() && map_out_path.empty()) {

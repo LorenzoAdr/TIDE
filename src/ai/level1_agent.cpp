@@ -597,13 +597,15 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
           "nombrados en el texto.\n"
           "- PROHIBIDO meter en primary.search_terms el ambiente contenedor "
           "(orquestación, callers, paneles vecinos); eso va en secondary o reject_noise.\n"
-          "- mechanism_gaps: preguntas abiertas (¿…?), no afirmaciones.\n"
-          "- reject_noise: tokens demasiado genéricos para grepear.\n";
+          "- mechanism_gaps: 0..2 preguntas abiertas cortas (¿…?), no afirmaciones.\n"
+          "- reject_noise: tokens demasiado genéricos para grepear.\n"
+          "- anchor_confidence: high solo si el texto nombra un locus grepeable claro; "
+          "si no, medium o low.\n";
       std::ostringstream user;
       user << "Consulta del usuario:\n" << user_message << "\n";
       user << "\nJSON:";
       req.user_prompt = user.str();
-      req.max_tokens = std::min(768, std::max(400, deps_.settings.level1.max_tokens / 2));
+      req.max_tokens = std::min(1024, std::max(512, deps_.settings.level1.max_tokens));
       {
         const int prompt_tok_est =
             static_cast<int>((req.system_prompt.size() + req.user_prompt.size()) / 3 + 32);
@@ -711,119 +713,7 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
       }
     }
 
-    // Pass B: menu-grounded anchor hypotheses when PF is diffuse (low/medium confidence).
-    if (kept_pf && tuide::problem_frame_wants_anchor_hypotheses(*kept_pf)) {
-      std::vector<std::string> menu_tokens;
-      std::unordered_set<std::string> menu_seen;
-      auto push_menu = [&](const std::string& s) {
-        if (s.size() < 3 || !menu_seen.insert(s).second) {
-          return;
-        }
-        menu_tokens.push_back(s);
-      };
-      const int cand_cap = 24;
-      for (int i = 0; i < cand_cap && i < static_cast<int>(semantic_index_candidates.size());
-           ++i) {
-        push_menu(semantic_index_candidates[static_cast<std::size_t>(i)]);
-      }
-      for (int i = 0; i < 16 && i < static_cast<int>(semantic_outline.size()); ++i) {
-        // outline line: "stem  file  symbol" — take stem and symbol.
-        const std::string& line = semantic_outline[static_cast<std::size_t>(i)];
-        std::string stem;
-        std::string sym;
-        {
-          std::istringstream iss(line);
-          iss >> stem;
-          std::string file_tok;
-          iss >> file_tok >> sym;
-        }
-        if (!stem.empty()) {
-          push_menu(stem);
-        }
-        if (!sym.empty()) {
-          push_menu(sym);
-        }
-      }
-      if (!menu_tokens.empty()) {
-        LlamaCompletionRequest hreq;
-        hreq.system_prompt =
-            "Eres un analista de anclas de código. El problem_frame grounded en el prompt "
-            "es demasiado difuso. Propón 2..4 hipótesis de ancla eligiendo términos del "
-            "MENÚ (stems/símbolos reales del repo). Responde SOLO JSON válido:\n"
-            "{\"anchor_hypotheses\":[{\"objective\":\"pieza a perseguir\","
-            "\"search_terms\":[\"StemOrSymbol\",\"other_term\"],"
-            "\"mechanism_slot\":\"effect|state|control|entrypoint\","
-            "\"why\":\"por qué encaja con la petición\"}]}\n"
-            "Reglas:\n"
-            "- Cada search_term DEBE coincidir o compartir raíz ≥4 letras con un ítem del MENÚ.\n"
-            "- 2..4 hipótesis; 2..4 search_terms por hipótesis; snake_case/CamelCase, sin NL.\n"
-            "- Ancla al efecto/control/estado focal, NO al ambient contenedor "
-            "(app/chat/panel genérico) salvo que el menú no ofrezca nada más concreto.\n"
-            "- PROHIBIDO inventar toolchains, APIs o stems que no estén en el MENÚ.\n";
-        std::ostringstream huser;
-        huser << "Consulta del usuario:\n" << user_message << "\n";
-        huser << "\nPROBLEM_FRAME (prompt-grounded, difuso):\n";
-        huser << tuide::problem_frame_to_json(*kept_pf).dump(2) << "\n";
-        huser << "\nMENÚ (elige search_terms de aquí):\n";
-        for (const auto& m : menu_tokens) {
-          huser << "- " << m << '\n';
-        }
-        huser << "\nJSON:";
-        hreq.user_prompt = huser.str();
-        hreq.max_tokens = 480;
-        {
-          const int prompt_tok_est =
-              static_cast<int>((hreq.system_prompt.size() + hreq.user_prompt.size()) / 3 + 32);
-          const int needed = prompt_tok_est + hreq.max_tokens + 256;
-          int ctx = 512;
-          while (ctx < needed) {
-            ctx *= 2;
-          }
-          hreq.n_ctx = std::min(ctx, 2048);
-        }
-        hreq.temperature = 0.1;
-        hreq.context_role = reasoning_backend == deps_.l2_backend ? "L2" : "L1";
-        hreq.n_ctx_setting_hint =
-            reasoning_backend == deps_.l2_backend ? "ai.level2.n_ctx" : "ai.level1.n_ctx";
-        if (log) {
-          log("L1 investigar → hipótesis de ancla (menú=" + std::to_string(menu_tokens.size()) +
-              ")…");
-        }
-        const auto hcomp = reasoning_backend->complete(hreq, cancel);
-        if (hcomp.ok) {
-          if (log) {
-            log("L1 hyp raw: " + hcomp.text);
-          }
-          try {
-            auto hj = nlohmann::json::parse(hcomp.text);
-            // Tolerate raw array or wrapper object.
-            if (hj.is_array()) {
-              hj = nlohmann::json{{"anchor_hypotheses", hj}};
-            }
-            if (hj.contains("anchor_hypotheses") && hj["anchor_hypotheses"].is_array()) {
-              nlohmann::json merge = tuide::problem_frame_to_json(*kept_pf);
-              merge["anchor_hypotheses"] = hj["anchor_hypotheses"];
-              tuide::ProblemFrame merged;
-              std::string herr;
-              if (tuide::problem_frame_from_json(merge, &merged, &herr)) {
-                kept_pf->anchor_hypotheses = std::move(merged.anchor_hypotheses);
-              }
-            }
-          } catch (...) {
-            // leave hyps empty
-          }
-          tuide::problem_frame_refine_hypotheses_to_menu(&*kept_pf, menu_tokens);
-          if (log) {
-            log("L1 hyps retained: " + std::to_string(kept_pf->anchor_hypotheses.size()) +
-                " (menu=" + std::to_string(menu_tokens.size()) + ")");
-          }
-        } else if (log) {
-          log("✗ L1 hyps: " + hcomp.error);
-        }
-      } else if (log) {
-        log("L1 hyps skipped: menú vacío");
-      }
-    }
+    // Hypothesis/anchor hunt uses registry zone cards (causal), not a second L1 map pass.
 
     LlamaCompletionRequest req;
     req.system_prompt =

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace tuide {
@@ -440,14 +441,49 @@ bool entityness_score_problem_frame(EffectRegistry* r, const ProblemFrame& pf,
   }
   for (std::size_t i = 0; i < pf.anchor_hypotheses.size(); ++i) {
     const auto& hyp = pf.anchor_hypotheses[i];
-    score_link("hyp_" + std::to_string(i), hyp.mechanism_slot, hyp.objective, hyp.search_terms);
+    const auto terms = hypothesis_anchor_terms(hyp);
+    score_link("hyp_" + std::to_string(i),
+               hyp.anchor_role.empty() ? hyp.mechanism_slot : hyp.anchor_role,
+               hyp.claim.empty() ? hyp.objective : hyp.claim, terms);
   }
 
+  // Prefer the best hyp; if several hyps share the same owner_stem, that cluster wins
+  // (ideal: one anchor, multiple claims to falsify).
   out->best_entityness = 0.f;
+  out->best_role.clear();
+  std::unordered_map<std::string, float> stem_best;
+  std::unordered_map<std::string, std::string> stem_role;
+  std::unordered_map<std::string, int> stem_count;
   for (const auto& L : out->links) {
-    if (L.entityness > out->best_entityness) {
-      out->best_entityness = L.entityness;
-      out->best_role = L.role;
+    if (L.role.size() >= 4 && L.role.compare(0, 4, "hyp_") == 0 && L.entityness >= out->threshold &&
+        !L.owner_stem.empty()) {
+      stem_count[L.owner_stem] += 1;
+      if (L.entityness > stem_best[L.owner_stem]) {
+        stem_best[L.owner_stem] = L.entityness;
+        stem_role[L.owner_stem] = L.role;
+      }
+    }
+  }
+  std::string cluster_stem;
+  int cluster_n = 0;
+  float cluster_ent = 0.f;
+  for (const auto& [stem, n] : stem_count) {
+    const float e = stem_best[stem];
+    if (n > cluster_n || (n == cluster_n && e > cluster_ent)) {
+      cluster_n = n;
+      cluster_ent = e;
+      cluster_stem = stem;
+    }
+  }
+  if (cluster_n >= 2 && !cluster_stem.empty()) {
+    out->best_entityness = cluster_ent;
+    out->best_role = stem_role[cluster_stem];
+  } else {
+    for (const auto& L : out->links) {
+      if (L.entityness > out->best_entityness) {
+        out->best_entityness = L.entityness;
+        out->best_role = L.role;
+      }
     }
   }
   out->explore_mode =

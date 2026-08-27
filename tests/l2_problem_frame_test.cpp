@@ -132,7 +132,7 @@ int main() {
   expect(compound_pf.secondary_anchors.empty(),
          "refine drops secondary anchors with only ungrounded terms");
 
-  // Anchor hypotheses: menu-grounded, not query-grounded; seeds follow active index.
+  // Failure hypotheses: slots + claim; seeds follow active index / anchor_role.
   {
     tuide::ProblemFrame hyp_pf;
     expect(tuide::problem_frame_from_json_string(
@@ -142,28 +142,36 @@ int main() {
                      "search_terms":["thinking","indicator"]},
                    "anchor_confidence":"low",
                    "anchor_hypotheses":[
-                     {"objective":"busy strip UI","search_terms":["busy_strip","BusyStrip"],
-                      "mechanism_slot":"effect","why":"matches status strip"},
-                     {"objective":"invented","search_terms":["gradle","npm"],
-                      "mechanism_slot":"control","why":"noise"}
+                     {"claim":"busy never cleared on model done",
+                      "slots":{"affected":{"from_map":1,"stem":"busy_strip"},
+                               "control":{"from_map":2,"stem":"ai_controller"},
+                               "trigger":null,"cleanup":null},
+                      "gap":"cleanup","anchor_role":"affected",
+                      "falsify_by":"if clear_busy runs on done → dead",
+                      "why":"status strip owns busy"},
+                     {"claim":"invented",
+                      "slots":{"affected":{"stem":"gradle"},"control":null,
+                               "trigger":null,"cleanup":null},
+                      "gap":"affected","anchor_role":"affected","why":"noise"}
                    ]})",
                &hyp_pf, &err),
-           "hyp parse");
+           "failure hyp parse");
     expect(hyp_pf.anchor_hypotheses.size() == 2, "two hyps parsed");
+    expect(hyp_pf.anchor_hypotheses[0].claim.find("busy") != std::string::npos, "claim set");
+    expect(hyp_pf.anchor_hypotheses[0].affected.stem == "busy_strip", "affected stem");
     expect(tuide::problem_frame_wants_anchor_hypotheses(hyp_pf), "wants hyps when low");
     tuide::problem_frame_refine_from_query(&hyp_pf, "thinking indicator stuck");
     expect(hyp_pf.anchor_hypotheses.size() == 2, "refine_from_query does not strip hyps");
-    const std::vector<std::string> menu = {"busy_strip", "BusyStrip", "status_bar", "chat_panel"};
-    tuide::problem_frame_refine_hypotheses_to_menu(&hyp_pf, menu);
-    expect(hyp_pf.anchor_hypotheses.size() == 1, "menu refine drops ungrounded hyp");
-    expect(!hyp_pf.anchor_hypotheses.empty() &&
-               hyp_pf.anchor_hypotheses[0].search_terms.size() >= 1,
-           "kept hyp has menu terms");
-    hyp_pf.active_hypothesis_index = 0;
-    const auto hyp_seeds = tuide::problem_frame_anchor_seeds(hyp_pf);
-    expect(!hyp_seeds.empty(), "active hyp seeds");
+    std::vector<std::vector<std::string>> cards = {{"busy_strip", "BusyStrip"},
+                                                   {"ai_controller", "AiController"},
+                                                   {"status_bar"},
+                                                   {"chat_panel"}};
+    tuide::problem_frame_refine_hypotheses_to_ranked_cards(&hyp_pf, cards);
+    expect(hyp_pf.anchor_hypotheses.size() == 1, "ranked refine drops ungrounded hyp");
+    const auto terms = tuide::hypothesis_anchor_terms(hyp_pf.anchor_hypotheses[0]);
+    expect(!terms.empty(), "anchor terms from affected");
     bool has_busy = false;
-    for (const auto& s : hyp_seeds) {
+    for (const auto& s : terms) {
       std::string tl = s;
       for (char& c : tl) {
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -172,9 +180,13 @@ int main() {
         has_busy = true;
       }
     }
-    expect(has_busy, "active hyp seeds prefer busy_strip");
+    expect(has_busy, "anchor terms prefer busy_strip");
+    hyp_pf.active_hypothesis_index = 0;
+    const auto hyp_seeds = tuide::problem_frame_anchor_seeds(hyp_pf);
+    expect(!hyp_seeds.empty(), "active hyp seeds");
     const auto roundtrip = tuide::problem_frame_to_json(hyp_pf);
     expect(roundtrip.contains("anchor_hypotheses"), "serialize hyps");
+    expect(roundtrip["anchor_hypotheses"][0].contains("slots"), "serialize slots");
     expect(roundtrip.value("active_hypothesis_index", -1) == 0, "serialize active index");
   }
 

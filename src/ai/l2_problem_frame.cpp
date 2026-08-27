@@ -397,11 +397,68 @@ bool problem_frame_from_json(const nlohmann::json& j, ProblemFrame* out, std::st
         continue;
       }
       AnchorHypothesis hyp;
+      hyp.claim = trim_copy(h.value("claim", ""));
       hyp.objective = trim_copy(h.value("objective", ""));
+      if (hyp.claim.empty() && !hyp.objective.empty()) {
+        hyp.claim = hyp.objective;
+      }
+      if (hyp.objective.empty() && !hyp.claim.empty()) {
+        hyp.objective = hyp.claim;
+      }
       read_string_array(h, "search_terms", &hyp.search_terms);
       hyp.mechanism_slot = trim_copy(h.value("mechanism_slot", ""));
       hyp.why = trim_copy(h.value("why", ""));
-      if (!hyp.search_terms.empty() || !hyp.objective.empty()) {
+      hyp.falsify_by = trim_copy(h.value("falsify_by", ""));
+      hyp.gap = trim_copy(h.value("gap", ""));
+      hyp.anchor_role = trim_copy(h.value("anchor_role", ""));
+      auto read_slot = [&](const char* key, HypSlotLocus* slot) {
+        if (slot == nullptr || !h.contains(key) || h[key].is_null()) {
+          return;
+        }
+        if (h[key].is_object()) {
+          const auto& o = h[key];
+          slot->path_symbol = trim_copy(o.value("path_symbol", o.value("symbol", "")));
+          slot->stem = trim_copy(o.value("stem", ""));
+          if (o.contains("from_map") && o["from_map"].is_number_integer()) {
+            slot->from_map = o["from_map"].get<int>();
+          }
+        } else if (h[key].is_string()) {
+          slot->path_symbol = trim_copy(h[key].get<std::string>());
+        }
+      };
+      if (h.contains("slots") && h["slots"].is_object()) {
+        const auto& slots = h["slots"];
+        auto read_nested = [&](const char* key, HypSlotLocus* slot) {
+          if (slot == nullptr || !slots.contains(key) || slots[key].is_null()) {
+            return;
+          }
+          if (slots[key].is_object()) {
+            const auto& o = slots[key];
+            slot->path_symbol = trim_copy(o.value("path_symbol", o.value("symbol", "")));
+            slot->stem = trim_copy(o.value("stem", ""));
+            if (o.contains("from_map") && o["from_map"].is_number_integer()) {
+              slot->from_map = o["from_map"].get<int>();
+            }
+          } else if (slots[key].is_string()) {
+            slot->path_symbol = trim_copy(slots[key].get<std::string>());
+          }
+        };
+        read_nested("affected", &hyp.affected);
+        read_nested("control", &hyp.control);
+        read_nested("trigger", &hyp.trigger);
+        read_nested("cleanup", &hyp.cleanup);
+      } else {
+        read_slot("affected", &hyp.affected);
+        read_slot("control", &hyp.control);
+        read_slot("trigger", &hyp.trigger);
+        read_slot("cleanup", &hyp.cleanup);
+      }
+      if (hyp.gap.empty() && !hyp.mechanism_slot.empty()) {
+        hyp.gap = hyp.mechanism_slot;
+      }
+      if (!hyp.search_terms.empty() || !hyp.claim.empty() || !hyp.objective.empty() ||
+          hyp.affected.from_map > 0 || !hyp.affected.stem.empty() ||
+          !hyp.affected.path_symbol.empty()) {
         pf.anchor_hypotheses.push_back(std::move(hyp));
       }
     }
@@ -427,7 +484,54 @@ bool problem_frame_from_json(const nlohmann::json& j, ProblemFrame* out, std::st
 
 bool problem_frame_from_json_string(const std::string& raw, ProblemFrame* out, std::string* err) {
   try {
-    const auto j = nlohmann::json::parse(raw);
+    // Tolerate markdown fences / prose / truncated closing braces from LLM.
+    std::string json_text;
+    const auto brace = raw.find('{');
+    if (brace == std::string::npos) {
+      if (err) {
+        *err = "problem_frame JSON: no object";
+      }
+      return false;
+    }
+    int depth = 0;
+    bool in_string = false;
+    bool escape = false;
+    std::size_t end = std::string::npos;
+    for (std::size_t i = brace; i < raw.size(); ++i) {
+      const char c = raw[i];
+      if (in_string) {
+        if (escape) {
+          escape = false;
+        } else if (c == '\\') {
+          escape = true;
+        } else if (c == '"') {
+          in_string = false;
+        }
+        continue;
+      }
+      if (c == '"') {
+        in_string = true;
+        continue;
+      }
+      if (c == '{') {
+        ++depth;
+      } else if (c == '}') {
+        --depth;
+        if (depth == 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end != std::string::npos) {
+      json_text = raw.substr(brace, end - brace + 1);
+    } else {
+      json_text = raw.substr(brace);
+      while (depth-- > 0) {
+        json_text.push_back('}');
+      }
+    }
+    const auto j = nlohmann::json::parse(json_text);
     return problem_frame_from_json(j, out, err);
   } catch (const std::exception& e) {
     if (err) {
@@ -489,8 +593,27 @@ nlohmann::json problem_frame_to_json(const ProblemFrame& pf) {
   }
   if (!pf.anchor_hypotheses.empty()) {
     nlohmann::json hyps = nlohmann::json::array();
+    auto slot_json = [](const HypSlotLocus& s) -> nlohmann::json {
+      if (s.from_map <= 0 && s.stem.empty() && s.path_symbol.empty()) {
+        return nullptr;
+      }
+      nlohmann::json o = nlohmann::json::object();
+      if (!s.path_symbol.empty()) {
+        o["path_symbol"] = s.path_symbol;
+      }
+      if (!s.stem.empty()) {
+        o["stem"] = s.stem;
+      }
+      if (s.from_map > 0) {
+        o["from_map"] = s.from_map;
+      }
+      return o;
+    };
     for (const auto& h : pf.anchor_hypotheses) {
       nlohmann::json o = nlohmann::json::object();
+      if (!h.claim.empty()) {
+        o["claim"] = h.claim;
+      }
       if (!h.objective.empty()) {
         o["objective"] = h.objective;
       }
@@ -503,6 +626,21 @@ nlohmann::json problem_frame_to_json(const ProblemFrame& pf) {
       if (!h.why.empty()) {
         o["why"] = h.why;
       }
+      if (!h.falsify_by.empty()) {
+        o["falsify_by"] = h.falsify_by;
+      }
+      if (!h.gap.empty()) {
+        o["gap"] = h.gap;
+      }
+      if (!h.anchor_role.empty()) {
+        o["anchor_role"] = h.anchor_role;
+      }
+      nlohmann::json slots = nlohmann::json::object();
+      slots["affected"] = slot_json(h.affected);
+      slots["control"] = slot_json(h.control);
+      slots["trigger"] = slot_json(h.trigger);
+      slots["cleanup"] = slot_json(h.cleanup);
+      o["slots"] = std::move(slots);
       hyps.push_back(std::move(o));
     }
     j["anchor_hypotheses"] = std::move(hyps);
@@ -522,6 +660,63 @@ nlohmann::json problem_frame_to_json(const ProblemFrame& pf) {
   return j;
 }
 
+std::vector<std::string> hypothesis_anchor_terms(const AnchorHypothesis& hyp) {
+  std::vector<std::string> out;
+  auto push = [&](const std::string& s) {
+    const std::string t = trim_copy(s);
+    if (t.size() < 2) {
+      return;
+    }
+    for (const auto& x : out) {
+      if (ascii_lower(x) == ascii_lower(t)) {
+        return;
+      }
+    }
+    out.push_back(t);
+  };
+  auto push_slot = [&](const HypSlotLocus& s) {
+    if (!s.stem.empty()) {
+      push(s.stem);
+    }
+    if (!s.path_symbol.empty()) {
+      push(s.path_symbol);
+      const auto slash = s.path_symbol.find_last_of("/\\:");
+      if (slash != std::string::npos && slash + 1 < s.path_symbol.size()) {
+        push(s.path_symbol.substr(slash + 1));
+      }
+    }
+  };
+  std::string role = ascii_lower(hyp.anchor_role);
+  if (role.empty()) {
+    role = ascii_lower(hyp.gap);
+  }
+  if (role.empty()) {
+    role = "affected";
+  }
+  if (role == "affected" || role == "effect" || role == "symptom") {
+    push_slot(hyp.affected);
+  } else if (role == "control" || role == "state" || role == "state_owner") {
+    push_slot(hyp.control);
+  } else if (role == "trigger") {
+    push_slot(hyp.trigger);
+  } else if (role == "cleanup") {
+    push_slot(hyp.cleanup);
+  }
+  if (out.empty()) {
+    // Prefer affected, then any filled slot, then legacy search_terms.
+    push_slot(hyp.affected);
+    push_slot(hyp.control);
+    push_slot(hyp.trigger);
+    push_slot(hyp.cleanup);
+  }
+  if (out.empty()) {
+    for (const auto& t : hyp.search_terms) {
+      push(t);
+    }
+  }
+  return out;
+}
+
 std::vector<std::string> problem_frame_anchor_seeds(const ProblemFrame& pf) {
   std::vector<std::string> seeds;
   auto push = [&](const std::string& s) {
@@ -539,7 +734,7 @@ std::vector<std::string> problem_frame_anchor_seeds(const ProblemFrame& pf) {
   if (pf.active_hypothesis_index >= 0 &&
       static_cast<std::size_t>(pf.active_hypothesis_index) < pf.anchor_hypotheses.size()) {
     const auto& hyp = pf.anchor_hypotheses[static_cast<std::size_t>(pf.active_hypothesis_index)];
-    for (const auto& t : hyp.search_terms) {
+    for (const auto& t : hypothesis_anchor_terms(hyp)) {
       push(t);
     }
     if (!seeds.empty()) {
@@ -649,9 +844,27 @@ void problem_frame_refine_hypotheses_to_menu(ProblemFrame* pf,
       }
     }
   }
+  auto ground_slot = [&](HypSlotLocus* slot) {
+    if (slot == nullptr) {
+      return;
+    }
+    if (!slot->stem.empty() && !term_grounded_in_menu(slot->stem, menu_folded)) {
+      slot->stem.clear();
+    }
+    if (!slot->path_symbol.empty() && !term_grounded_in_menu(slot->path_symbol, menu_folded)) {
+      slot->path_symbol.clear();
+    }
+    if (slot->stem.empty() && slot->path_symbol.empty()) {
+      slot->from_map = 0;
+    }
+  };
   std::vector<AnchorHypothesis> kept;
   kept.reserve(pf->anchor_hypotheses.size());
   for (auto& hyp : pf->anchor_hypotheses) {
+    ground_slot(&hyp.affected);
+    ground_slot(&hyp.control);
+    ground_slot(&hyp.trigger);
+    ground_slot(&hyp.cleanup);
     sanitize_search_terms(&hyp.search_terms);
     std::vector<std::string> grounded;
     for (const auto& t : hyp.search_terms) {
@@ -659,10 +872,28 @@ void problem_frame_refine_hypotheses_to_menu(ProblemFrame* pf,
         push_unique_term(&grounded, t);
       }
     }
+    // Prefer terms derived from anchor slot.
+    auto derived = hypothesis_anchor_terms(hyp);
+    if (!derived.empty()) {
+      grounded = std::move(derived);
+    }
     if (grounded.size() > 4) {
       grounded.resize(4);
     }
     hyp.search_terms = std::move(grounded);
+    if (hyp.claim.empty() && !hyp.objective.empty()) {
+      hyp.claim = hyp.objective;
+    }
+    if (hyp.anchor_role.empty()) {
+      if (!hyp.gap.empty()) {
+        hyp.anchor_role = hyp.gap;
+      } else if (hyp.affected.from_map > 0 || !hyp.affected.stem.empty() ||
+                 !hyp.affected.path_symbol.empty()) {
+        hyp.anchor_role = "affected";
+      } else if (!hyp.mechanism_slot.empty()) {
+        hyp.anchor_role = hyp.mechanism_slot;
+      }
+    }
     if (!hyp.search_terms.empty()) {
       kept.push_back(std::move(hyp));
     }
@@ -675,6 +906,45 @@ void problem_frame_refine_hypotheses_to_menu(ProblemFrame* pf,
       static_cast<std::size_t>(pf->active_hypothesis_index) >= pf->anchor_hypotheses.size()) {
     pf->active_hypothesis_index = -1;
   }
+}
+
+void problem_frame_refine_hypotheses_to_ranked_cards(
+    ProblemFrame* pf, const std::vector<std::vector<std::string>>& card_menu_tokens) {
+  if (pf == nullptr) {
+    return;
+  }
+  auto fill_from_card = [&](HypSlotLocus* slot) {
+    if (slot == nullptr || slot->from_map <= 0) {
+      return;
+    }
+    const std::size_t idx = static_cast<std::size_t>(slot->from_map - 1);
+    if (idx >= card_menu_tokens.size() || card_menu_tokens[idx].empty()) {
+      slot->from_map = 0;
+      return;
+    }
+    // Prefer first token as stem/name; keep path_symbol if already set and grounded later.
+    if (slot->stem.empty()) {
+      slot->stem = card_menu_tokens[idx].front();
+    }
+    if (slot->path_symbol.empty() && card_menu_tokens[idx].size() > 1) {
+      slot->path_symbol = card_menu_tokens[idx][1];
+    } else if (slot->path_symbol.empty()) {
+      slot->path_symbol = card_menu_tokens[idx].front();
+    }
+  };
+  for (auto& hyp : pf->anchor_hypotheses) {
+    fill_from_card(&hyp.affected);
+    fill_from_card(&hyp.control);
+    fill_from_card(&hyp.trigger);
+    fill_from_card(&hyp.cleanup);
+  }
+  std::vector<std::string> flat_menu;
+  for (const auto& card : card_menu_tokens) {
+    for (const auto& t : card) {
+      flat_menu.push_back(t);
+    }
+  }
+  problem_frame_refine_hypotheses_to_menu(pf, flat_menu);
 }
 
 std::string problem_frame_path(const std::string& workspace_root) {
