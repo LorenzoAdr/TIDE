@@ -206,13 +206,87 @@ def _push_term(terms: list[str], raw: str) -> None:
     terms.append(t)
 
 
+def _fold_ascii_alnum(s: str) -> str:
+    """Fold accents → ASCII alnum for lexical grounding (language-agnostic)."""
+    import unicodedata
+
+    nfkd = unicodedata.normalize("NFKD", s or "")
+    out = []
+    for ch in nfkd:
+        if unicodedata.category(ch) == "Mn":
+            continue
+        if ch.isalnum() or ch == "_":
+            out.append(ch.lower())
+    return "".join(out)
+
+
+def _term_parts(term: str) -> list[str]:
+    parts: list[str] = []
+    cur = ""
+    for ch in term.replace("-", "_").replace(".", "_"):
+        if ch == "_":
+            if len(cur) >= 3:
+                parts.append(cur.lower())
+            cur = ""
+        elif ch.isupper() and cur and not cur[-1].isupper():
+            if len(cur) >= 3:
+                parts.append(cur.lower())
+            cur = ch.lower()
+        else:
+            cur += ch.lower()
+    if len(cur) >= 3:
+        parts.append(cur.lower())
+    return parts
+
+
+def _part_grounded(part_folded: str, query_folded: str) -> bool:
+    if len(part_folded) < 4:
+        return True
+    if part_folded in query_folded:
+        return True
+    return part_folded[:4] in query_folded
+
+
+def _term_grounded(term: str, query_folded: str) -> bool:
+    """Compounds require EVERY part ≥4 to ground (blocks build.gradle from 'build')."""
+    if not query_folded:
+        return True
+    tf = _fold_ascii_alnum(term)
+    if len(tf) >= 4 and tf in query_folded:
+        return True
+    significant = 0
+    for part in _term_parts(term):
+        p = _fold_ascii_alnum(part)
+        if len(p) < 4:
+            continue
+        significant += 1
+        if not _part_grounded(p, query_folded):
+            return False
+    if significant > 0:
+        return True
+    return len(tf) >= 4 and _part_grounded(tf, query_folded)
+
+
+def _ground_terms(terms: list[str], query: str, *, fallback: bool = True) -> list[str]:
+    qf = _fold_ascii_alnum(query)
+    out: list[str] = []
+    for t in terms:
+        if _term_grounded(t, qf):
+            _push_term(out, t)
+    if not out and fallback:
+        for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", query or ""):
+            _push_term(out, tok)
+            if len(out) >= 6:
+                break
+    return out
+
+
 def refine_pf_from_query(pf: dict[str, Any], query: str) -> dict[str, Any]:
-    """Structural cleanup only — never inject domain stems or override LLM kind."""
-    del query  # unused; kept for call-site compatibility
+    """Sanitize + lexical grounding to query. Never inject domain stems."""
     out = dict(pf)
     pa = dict(out.get("primary_anchor") or {})
     terms = [str(t) for t in pa.get("search_terms") or [] if " " not in str(t)]
-    pa["search_terms"] = terms[:8]
+    pa["search_terms"] = _ground_terms(terms, query, fallback=True)[:8]
     out["primary_anchor"] = pa
     secs = []
     for s in out.get("secondary_anchors") or []:
@@ -220,10 +294,11 @@ def refine_pf_from_query(pf: dict[str, Any], query: str) -> dict[str, Any]:
             continue
         sd = dict(s)
         st = [str(t) for t in sd.get("search_terms") or [] if " " not in str(t)]
-        sd["search_terms"] = st[:6]
-        secs.append(sd)
-    if secs:
-        out["secondary_anchors"] = secs
+        sd["search_terms"] = _ground_terms(st, query, fallback=False)[:6]
+        # Drop secondaries whose terms were all invented/ungrounded.
+        if sd["search_terms"]:
+            secs.append(sd)
+    out["secondary_anchors"] = secs
     out.setdefault("schema", "problem_frame_v1")
     return out
 

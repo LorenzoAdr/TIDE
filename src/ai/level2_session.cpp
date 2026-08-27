@@ -21,6 +21,8 @@
 #include "ai/l2_effect_summary.hpp"
 #include "ai/l2_feat.hpp"
 #include "ai/l2_problem_frame.hpp"
+#include "ai/l2_entityness.hpp"
+#include "ai/l2_effect_registry.hpp"
 #include "ai/l2_pack_review.hpp"
 
 namespace fs = std::filesystem;
@@ -3765,13 +3767,55 @@ bool Level2Session::bootstrap(const Level2BootstrapOpts& opts, std::string* err_
       }
     }
     if (a_explore_anchor_causal_enabled() && bootstrap_pf) {
-      const auto anchor_seeds = problem_frame_anchor_seeds(*bootstrap_pf);
-      if (!anchor_seeds.empty()) {
-        ast.seeds = anchor_seeds;
+      // Score chain links (primary/secondary/hyps) for entityness; only F1-hunt when a
+      // link is concentrated enough. Diffuse → classic_scan (no F1 queue filter).
+      std::string explore_mode = "classic_scan";
+      EntitynessLinkReport link_rep;
+      EffectRegistry ereg;
+      std::string eopen_err;
+      if (registry_open(opts.workspace_root, &ereg, &eopen_err)) {
+        EntitynessOpts eopts;
+        std::string eerr;
+        if (entityness_score_problem_frame(&ereg, *bootstrap_pf, opts.query, {}, eopts, &link_rep,
+                                           &eerr)) {
+          explore_mode = link_rep.explore_mode;
+          // If a menu-grounded hypothesis wins, pin it for seeds / F1 filter.
+          if (link_rep.best_role.size() >= 4 && link_rep.best_role.compare(0, 4, "hyp_") == 0) {
+            try {
+              const int idx = std::stoi(link_rep.best_role.substr(4));
+              if (idx >= 0 &&
+                  static_cast<std::size_t>(idx) < bootstrap_pf->anchor_hypotheses.size()) {
+                bootstrap_pf->active_hypothesis_index = idx;
+                std::string pfsave2;
+                save_problem_frame(opts.workspace_root, *bootstrap_pf, &pfsave2);
+              }
+            } catch (...) {
+              // leave active_hypothesis_index unchanged
+            }
+          } else {
+            bootstrap_pf->active_hypothesis_index = -1;
+          }
+          const fs::path elink =
+              fs::path(opts.workspace_root) / ".tuide" / "ai" / "l2" / "entityness_links.json";
+          std::error_code ec;
+          fs::create_directories(elink.parent_path(), ec);
+          std::ofstream(elink.string()) << link_rep.to_json().dump(2) << '\n';
+        }
+        registry_close(&ereg);
       }
-      ast.explore_mode = "f1_anchor";
-      ast.a_subphase = "a0_sniff";
-      a_apply_f1_anchor_queue_filter(&ast, *bootstrap_pf);
+      if (explore_mode == "f1_anchor") {
+        const auto anchor_seeds = problem_frame_anchor_seeds(*bootstrap_pf);
+        if (!anchor_seeds.empty()) {
+          ast.seeds = anchor_seeds;
+        }
+        // If best link is a secondary/hyp, still hunt with active seeds; F2 expands.
+        ast.explore_mode = "f1_anchor";
+        ast.a_subphase = "a0_sniff";
+        a_apply_f1_anchor_queue_filter(&ast, *bootstrap_pf);
+      } else {
+        ast.explore_mode = "classic_scan";
+        // Keep effect-summary a0_sniff seeds if already set; do not F1-filter.
+      }
     }
     std::string aerr;
     if (!save_a_state(opts.workspace_root, ast, &aerr)) {

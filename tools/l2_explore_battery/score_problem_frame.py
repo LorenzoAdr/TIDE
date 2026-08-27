@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.l2_explore_battery.pf_battery_lib import (  # noqa: E402
     DEFAULT_CASES,
+    _ground_terms,
     load_cases,
     load_json,
     looks_like_question,
@@ -26,6 +27,8 @@ from tools.l2_explore_battery.pf_battery_lib import (  # noqa: E402
 def score_case(case: dict, case_dir: Path) -> dict:
     pf = load_json(case_dir / "problem_frame.json")
     meta = load_json(case_dir / "problem_frame_meta.json")
+    case_meta = load_json(case_dir / "meta.json")
+    query = str(case.get("prompt") or case_meta.get("prompt") or "")
 
     schema_ok = pf.get("schema") == "problem_frame_v1"
     pa = pf.get("primary_anchor") or {}
@@ -60,6 +63,12 @@ def score_case(case: dict, case_dir: Path) -> dict:
         if isinstance(g, dict) and g.get("question")
     ) if gaps else True
 
+    # Grounding: terms that survive re-grounding == already grounded (or empty query).
+    grounded = _ground_terms(terms, query) if query else list(terms)
+    grounded_set = {t.lower() for t in grounded}
+    ungrounded = [t for t in terms if t.lower() not in grounded_set]
+    grounded_ratio = (len(grounded) / len(terms)) if terms else 1.0
+
     row = {
         "id": case.get("id"),
         "schema_ok": schema_ok,
@@ -68,6 +77,8 @@ def score_case(case: dict, case_dir: Path) -> dict:
         "primary_kind": pa.get("kind"),
         "primary_objective": objective,
         "primary_search_terms": terms,
+        "ungrounded_terms": ungrounded,
+        "grounded_ratio": round(grounded_ratio, 3),
         "secondary_n": len(secondary_rows),
         "secondary_anchors": secondary_rows,
         "mechanism_gaps_n": len(gaps),
@@ -82,6 +93,7 @@ def score_case(case: dict, case_dir: Path) -> dict:
         and len(terms) >= 1
         and len(spaced_terms) == 0
         and gap_ok
+        and grounded_ratio >= 0.99
     )
     return row
 
@@ -98,6 +110,10 @@ def summarize(rows: list[dict]) -> dict:
         "mean_secondary": round(
             sum(int(r.get("secondary_n") or 0) for r in rows) / max(1, len(rows)), 2
         ),
+        "mean_grounded_ratio": round(
+            sum(float(r.get("grounded_ratio") or 0) for r in rows) / max(1, len(rows)), 3
+        ),
+        "ungrounded_cases": sum(1 for r in rows if r.get("ungrounded_terms")),
     }
 
 
@@ -147,6 +163,9 @@ def main() -> int:
         print(f"  frame: {r.get('problem_frame')}")
         print(f"  PRIMARY obj: {r.get('primary_objective')}")
         print(f"  PRIMARY terms: {r.get('primary_search_terms')}")
+        if r.get("ungrounded_terms"):
+            print(f"  UNGROUNDED: {r.get('ungrounded_terms')}  "
+                  f"grounded_ratio={r.get('grounded_ratio')}")
         secs = r.get("secondary_anchors") or []
         if not secs:
             print("  SECONDARY: (none)")

@@ -1476,7 +1476,71 @@ bool cached_hash(sqlite3* db, const std::string& id, const std::string& model, s
 
 }  // namespace
 
+// registry_match_surface_* implemented in l2_graph_query_profile.cpp (light TU).
+
 std::string registry_card_passage(const RegistryNodeRow& n) {
+  return registry_card_passage(n, RegistryMatchSurface::CardFull);
+}
+
+std::string registry_card_passage(const RegistryNodeRow& n, RegistryMatchSurface surface) {
+  if (surface == RegistryMatchSurface::Latch) {
+    std::string p = "latch";
+    if (!n.stem.empty()) {
+      p += " " + n.stem;
+    }
+    if (!n.symbol.empty()) {
+      p += " " + n.symbol;
+    } else if (!n.id.empty()) {
+      p += " " + n.id;
+    }
+    return p;
+  }
+  if (surface == RegistryMatchSurface::CardAttrs) {
+    std::ostringstream oss;
+    if (!n.symbol.empty()) {
+      oss << n.symbol << ' ';
+    }
+    if (!n.stem.empty()) {
+      oss << n.stem << ' ';
+    }
+    if (!n.card_json.empty()) {
+      try {
+        const auto j = nlohmann::json::parse(n.card_json);
+        auto dump_list = [&](const char* key) {
+          if (!j.contains(key) || !j[key].is_array()) {
+            return;
+          }
+          for (const auto& it : j[key]) {
+            if (it.is_string()) {
+              oss << it.get<std::string>() << ' ';
+            }
+          }
+        };
+        dump_list("writes");
+        dump_list("reads");
+        dump_list("hot");
+      } catch (...) {
+      }
+    }
+    std::string p = oss.str();
+    while (!p.empty() && p.back() == ' ') {
+      p.pop_back();
+    }
+    if (!p.empty()) {
+      return p;
+    }
+  }
+  if (surface == RegistryMatchSurface::NodeId) {
+    std::string p = n.kind + " " + n.id;
+    if (!n.symbol.empty()) {
+      p += " " + n.symbol;
+    }
+    if (!n.path.empty()) {
+      p += " " + n.path;
+    }
+    return p;
+  }
+  // CardFull
   if (!n.card_json.empty()) {
     try {
       const auto j = nlohmann::json::parse(n.card_json);
@@ -1539,15 +1603,27 @@ bool registry_embed_nodes(EffectRegistry* r, const RegistryEmbedFn& embed,
       ++report->skipped_ctrl;
       continue;
     }
-    const std::string passage = registry_card_passage(n);
+    if (opts.match_surface == RegistryMatchSurface::Latch && n.kind != "latch") {
+      continue;
+    }
+    if ((opts.match_surface == RegistryMatchSurface::CardAttrs ||
+         opts.match_surface == RegistryMatchSurface::CardFull) &&
+        n.kind != "fn" && n.kind != "latch" && n.kind != "handoff") {
+      continue;
+    }
+    const std::string passage = registry_card_passage(n, opts.match_surface);
     if (passage.empty()) {
       continue;
     }
     ++report->considered;
+    const std::string model_key = registry_embed_model_key(opts.model, opts.match_surface);
     if (!opts.force) {
       std::string cached;
-      if (cached_hash(r->db, n.id, opts.model, &cached) && cached == n.card_hash &&
-          !n.card_hash.empty()) {
+      // Effective hash includes surface so CardAttrs ≠ CardFull for same card_hash.
+      const std::string want_hash =
+          n.card_hash.empty() ? passage.substr(0, 64)
+                              : (n.card_hash + "#" + registry_match_surface_name(opts.match_surface));
+      if (cached_hash(r->db, n.id, model_key, &cached) && cached == want_hash && !want_hash.empty()) {
         ++report->skipped_cached;
         continue;
       }
@@ -1628,6 +1704,7 @@ bool registry_embed_nodes(EffectRegistry* r, const RegistryEmbedFn& embed,
     }
   }
 
+  const std::string model_key = registry_embed_model_key(opts.model, opts.match_surface);
   sqlite3_stmt* ins = nullptr;
   sqlite3_prepare_v2(r->db,
                      "INSERT INTO embeddings(node_id,model,dim,card_hash,blob) VALUES(?1,?2,?3,?4,?5) "
@@ -1642,11 +1719,15 @@ bool registry_embed_nodes(EffectRegistry* r, const RegistryEmbedFn& embed,
     if (i >= vecs.size() || vecs[i].empty()) {
       continue;
     }
+    const std::string store_hash =
+        jobs[i].n.card_hash.empty()
+            ? jobs[i].passage.substr(0, 64)
+            : (jobs[i].n.card_hash + "#" + registry_match_surface_name(opts.match_surface));
     sqlite3_reset(ins);
     sqlite3_bind_text(ins, 1, jobs[i].n.id.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(ins, 2, opts.model.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 2, model_key.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(ins, 3, static_cast<int>(vecs[i].size()));
-    sqlite3_bind_text(ins, 4, jobs[i].n.card_hash.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(ins, 4, store_hash.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_blob(ins, 5, vecs[i].data(), static_cast<int>(vecs[i].size() * sizeof(float)),
                       SQLITE_TRANSIENT);
     if (sqlite3_step(ins) != SQLITE_DONE) {
@@ -1669,62 +1750,124 @@ bool registry_query(EffectRegistry* r, const std::string& query, const RegistryE
     set_err(err, "query args");
     return false;
   }
-  if (!embed) {
-    set_err(err, "falta embedder");
-    return false;
-  }
   if (query.empty()) {
     set_err(err, "query vacía");
     return false;
   }
   *out = {};
-  std::vector<float> qvec;
-  if (!embed(true, query, &qvec) || qvec.empty()) {
-    set_err(err, "embed query falló");
-    return false;
-  }
+  std::vector<float> qvec;  // used for hop expansion cosine when available
 
-  sqlite3_stmt* st = nullptr;
-  sqlite3_prepare_v2(r->db,
-                     "SELECT e.node_id, e.blob, n.kind FROM embeddings e "
-                     "JOIN nodes n ON n.id=e.node_id WHERE e.model=?1 AND n.tombstone_reason=''",
-                     -1, &st, nullptr);
-  sqlite3_bind_text(st, 1, opts.model.c_str(), -1, SQLITE_TRANSIENT);
-  auto seed_kind_ok = [&](const std::string& kind) {
-    static const char* kDefault[] = {"fn", "latch", "handoff"};
-    if (opts.seed_kinds.empty()) {
-      for (const char* k : kDefault) {
-        if (kind == k) {
-          return true;
-        }
-      }
-      return false;
+  std::vector<std::string> seed_kinds = opts.seed_kinds;
+  if (seed_kinds.empty()) {
+    if (opts.match_surface == RegistryMatchSurface::Latch) {
+      seed_kinds = {"latch"};
+    } else if (opts.match_surface == RegistryMatchSurface::CardAttrs) {
+      seed_kinds = {"fn"};
+    } else if (opts.match_surface == RegistryMatchSurface::NodeId) {
+      seed_kinds = {"fn", "latch", "handoff"};
+    } else {
+      seed_kinds = {"fn", "latch", "handoff"};
     }
-    return std::find(opts.seed_kinds.begin(), opts.seed_kinds.end(), kind) != opts.seed_kinds.end();
+  }
+  auto seed_kind_ok = [&](const std::string& kind) {
+    return std::find(seed_kinds.begin(), seed_kinds.end(), kind) != seed_kinds.end();
   };
+  auto id_prefix_ok = [&](const std::string& id) {
+    if (opts.match_surface == RegistryMatchSurface::Latch) {
+      return id.rfind("latch:", 0) == 0;
+    }
+    if (opts.match_surface == RegistryMatchSurface::CardAttrs ||
+        opts.match_surface == RegistryMatchSurface::CardFull) {
+      return id.rfind("fn:", 0) == 0;
+    }
+    // NodeId: any seeded kind
+    return id.rfind("fn:", 0) == 0 || id.rfind("latch:", 0) == 0 || id.rfind("handoff:", 0) == 0;
+  };
+
   struct Scored {
     std::string id;
     float cos = 0.f;
   };
   std::vector<Scored> scored;
-  while (sqlite3_step(st) == SQLITE_ROW) {
-    const unsigned char* idp = sqlite3_column_text(st, 0);
-    if (!idp) {
-      continue;
+
+  if (opts.match_surface == RegistryMatchSurface::NodeId) {
+    auto lower = [](std::string s) {
+      for (char& c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      return s;
+    };
+    const std::string qlow = lower(query);
+    sqlite3_stmt* st = nullptr;
+    sqlite3_prepare_v2(r->db,
+                       "SELECT id,kind,path,symbol,stem FROM nodes WHERE tombstone_reason=''", -1,
+                       &st, nullptr);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+      const unsigned char* idp = sqlite3_column_text(st, 0);
+      const unsigned char* kp = sqlite3_column_text(st, 1);
+      if (!idp || !kp) {
+        continue;
+      }
+      const std::string kind = reinterpret_cast<const char*>(kp);
+      if (!seed_kind_ok(kind)) {
+        continue;
+      }
+      const std::string id = reinterpret_cast<const char*>(idp);
+      if (!id_prefix_ok(id)) {
+        continue;
+      }
+      auto col = [&](int i) -> std::string {
+        const unsigned char* p = sqlite3_column_text(st, i);
+        return p ? reinterpret_cast<const char*>(p) : "";
+      };
+      const std::string hay = lower(id + " " + col(2) + " " + col(3) + " " + col(4));
+      if (qlow.empty() || hay.find(qlow) == std::string::npos) {
+        continue;
+      }
+      Scored s;
+      s.id = id;
+      s.cos = 0.9f;
+      scored.push_back(std::move(s));
     }
-    const unsigned char* kp = sqlite3_column_text(st, 2);
-    const std::string kind = kp ? reinterpret_cast<const char*>(kp) : "";
-    if (!seed_kind_ok(kind)) {
-      continue;
+    sqlite3_finalize(st);
+  } else {
+    if (!embed) {
+      set_err(err, "falta embedder");
+      return false;
     }
-    const std::vector<float> v =
-        blob_to_vec(sqlite3_column_blob(st, 1), sqlite3_column_bytes(st, 1));
-    Scored s;
-    s.id = reinterpret_cast<const char*>(idp);
-    s.cos = cosine_similarity(qvec, v);
-    scored.push_back(std::move(s));
+    if (!embed(true, query, &qvec) || qvec.empty()) {
+      set_err(err, "embed query falló");
+      return false;
+    }
+    const std::string model_key = registry_embed_model_key(opts.model, opts.match_surface);
+    sqlite3_stmt* st = nullptr;
+    sqlite3_prepare_v2(r->db,
+                       "SELECT e.node_id, e.blob, n.kind FROM embeddings e "
+                       "JOIN nodes n ON n.id=e.node_id WHERE e.model=?1 AND n.tombstone_reason=''",
+                       -1, &st, nullptr);
+    sqlite3_bind_text(st, 1, model_key.c_str(), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+      const unsigned char* idp = sqlite3_column_text(st, 0);
+      if (!idp) {
+        continue;
+      }
+      const unsigned char* kp = sqlite3_column_text(st, 2);
+      const std::string kind = kp ? reinterpret_cast<const char*>(kp) : "";
+      if (!seed_kind_ok(kind)) {
+        continue;
+      }
+      const std::vector<float> v =
+          blob_to_vec(sqlite3_column_blob(st, 1), sqlite3_column_bytes(st, 1));
+      Scored s;
+      s.id = reinterpret_cast<const char*>(idp);
+      if (!id_prefix_ok(s.id)) {
+        continue;
+      }
+      s.cos = cosine_similarity(qvec, v);
+      scored.push_back(std::move(s));
+    }
+    sqlite3_finalize(st);
   }
-  sqlite3_finalize(st);
   std::sort(scored.begin(), scored.end(),
             [](const Scored& a, const Scored& b) { return a.cos > b.cos; });
   const int k = std::max(1, opts.top_k);
@@ -1737,7 +1880,7 @@ bool registry_query(EffectRegistry* r, const std::string& query, const RegistryE
     if (!ignore_k && static_cast<int>(picked.size()) >= k) {
       return;
     }
-    if (taken.count(s.id) || s.id.rfind("fn:", 0) != 0) {
+    if (taken.count(s.id) || !id_prefix_ok(s.id)) {
       return;
     }
     const std::string st = stem_of_node_id(s.id);
@@ -1797,7 +1940,7 @@ bool registry_query(EffectRegistry* r, const std::string& query, const RegistryE
         continue;
       }
       for (const auto& s : scored) {
-        if (s.id.rfind("fn:", 0) != 0 || stem_of_node_id(s.id) != st) {
+        if (!id_prefix_ok(s.id) || stem_of_node_id(s.id) != st) {
           continue;
         }
         consider(s, true, false);
@@ -1814,7 +1957,7 @@ bool registry_query(EffectRegistry* r, const std::string& query, const RegistryE
     }
     ++map_used;
     for (const auto& s : scored) {
-      if (s.id.rfind("fn:", 0) != 0 || stem_of_node_id(s.id) != stem) {
+      if (!id_prefix_ok(s.id) || stem_of_node_id(s.id) != stem) {
         continue;
       }
       consider(s, true, false);
@@ -1906,8 +2049,9 @@ bool registry_query(EffectRegistry* r, const std::string& query, const RegistryE
     sqlite3_prepare_v2(r->db, "SELECT blob FROM embeddings WHERE node_id=?1 AND model=?2", -1, &es,
                        nullptr);
     sqlite3_bind_text(es, 1, id.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(es, 2, opts.model.c_str(), -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(es) == SQLITE_ROW) {
+    const std::string model_key = registry_embed_model_key(opts.model, opts.match_surface);
+    sqlite3_bind_text(es, 2, model_key.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(es) == SQLITE_ROW && !qvec.empty()) {
       const std::vector<float> v =
           blob_to_vec(sqlite3_column_blob(es, 0), sqlite3_column_bytes(es, 0));
       h.cosine = cosine_similarity(qvec, v);

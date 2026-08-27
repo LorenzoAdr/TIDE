@@ -1,6 +1,7 @@
 #include "ai/l2_problem_frame.hpp"
 #include "ai/l2_graph_query_profile.hpp"
 
+#include <cctype>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -56,10 +57,15 @@ int main() {
   tuide::ProblemFrame raw_pf;
   expect(tuide::problem_frame_from_json_string(raw, &raw_pf, &err), "raw for refine");
   raw_pf.primary_anchor.search_terms.push_back("loading state");  // NL — must drop
+  raw_pf.primary_anchor.search_terms.push_back("gradle");         // ungrounded invent — drop
+  raw_pf.primary_anchor.search_terms.push_back("npm");
+  raw_pf.primary_anchor.search_terms.push_back("build.gradle");  // partial ground — drop
   tuide::problem_frame_refine_from_query(
       &raw_pf, "spinner infinito en chat IA aunque el modelo terminó");
   bool has_nl = false;
   bool injected_ai = false;
+  bool kept_spinner = false;
+  bool kept_gradle = false;
   for (const auto& t : raw_pf.primary_anchor.search_terms) {
     if (t.find(' ') != std::string::npos) {
       has_nl = true;
@@ -67,15 +73,135 @@ int main() {
     if (t == "ai_controller" || t == "busy_strip" || t == "level2_autonomous_loop") {
       injected_ai = true;
     }
+    std::string tl = t;
+    for (char& c : tl) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (tl == "spinner") {
+      kept_spinner = true;
+    }
+    if (tl == "gradle" || tl == "npm" || tl == "build.gradle") {
+      kept_gradle = true;
+    }
   }
   expect(!has_nl, "refine drops spaced NL terms");
   expect(!injected_ai, "refine does not inject domain stems");
+  expect(kept_spinner, "refine keeps query-grounded term");
+  expect(!kept_gradle, "refine drops ungrounded invented terms");
+
+  // Partial compound: "build" in query must not keep invented "build.gradle".
+  tuide::ProblemFrame compound_pf;
+  expect(tuide::problem_frame_from_json_string(
+             R"({"schema":"problem_frame_v1","problem_kind":"locate",
+                 "problem_frame":"where is build launched",
+                 "primary_anchor":{"kind":"control","objective":"build launch",
+                   "search_terms":["compile","build","build.gradle"]},
+                 "secondary_anchors":[{"kind":"module","objective":"config",
+                   "search_terms":["build.gradle","package.json"],"deferred":true}]})",
+             &compound_pf, &err),
+         "compound parse");
+  tuide::problem_frame_refine_from_query(
+      &compound_pf, "donde se lanza la compilacion o el build del proyecto");
+  bool kept_build = false;
+  bool kept_build_gradle = false;
+  for (const auto& t : compound_pf.primary_anchor.search_terms) {
+    std::string tl = t;
+    for (char& c : tl) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (tl == "build" || tl == "compile") {
+      kept_build = true;
+    }
+    if (tl.find("gradle") != std::string::npos || tl.find("package") != std::string::npos) {
+      kept_build_gradle = true;
+    }
+  }
+  for (const auto& sec : compound_pf.secondary_anchors) {
+    for (const auto& t : sec.search_terms) {
+      std::string tl = t;
+      for (char& c : tl) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      if (tl.find("gradle") != std::string::npos || tl.find("package") != std::string::npos) {
+        kept_build_gradle = true;
+      }
+    }
+  }
+  expect(kept_build, "refine keeps build/compile from query");
+  expect(!kept_build_gradle, "refine drops partially-grounded invented compounds");
+  expect(compound_pf.secondary_anchors.empty(),
+         "refine drops secondary anchors with only ungrounded terms");
+
+  // Anchor hypotheses: menu-grounded, not query-grounded; seeds follow active index.
+  {
+    tuide::ProblemFrame hyp_pf;
+    expect(tuide::problem_frame_from_json_string(
+               R"({"schema":"problem_frame_v1","problem_kind":"debug",
+                   "problem_frame":"thinking indicator stuck",
+                   "primary_anchor":{"kind":"control","objective":"find indicator",
+                     "search_terms":["thinking","indicator"]},
+                   "anchor_confidence":"low",
+                   "anchor_hypotheses":[
+                     {"objective":"busy strip UI","search_terms":["busy_strip","BusyStrip"],
+                      "mechanism_slot":"effect","why":"matches status strip"},
+                     {"objective":"invented","search_terms":["gradle","npm"],
+                      "mechanism_slot":"control","why":"noise"}
+                   ]})",
+               &hyp_pf, &err),
+           "hyp parse");
+    expect(hyp_pf.anchor_hypotheses.size() == 2, "two hyps parsed");
+    expect(tuide::problem_frame_wants_anchor_hypotheses(hyp_pf), "wants hyps when low");
+    tuide::problem_frame_refine_from_query(&hyp_pf, "thinking indicator stuck");
+    expect(hyp_pf.anchor_hypotheses.size() == 2, "refine_from_query does not strip hyps");
+    const std::vector<std::string> menu = {"busy_strip", "BusyStrip", "status_bar", "chat_panel"};
+    tuide::problem_frame_refine_hypotheses_to_menu(&hyp_pf, menu);
+    expect(hyp_pf.anchor_hypotheses.size() == 1, "menu refine drops ungrounded hyp");
+    expect(!hyp_pf.anchor_hypotheses.empty() &&
+               hyp_pf.anchor_hypotheses[0].search_terms.size() >= 1,
+           "kept hyp has menu terms");
+    hyp_pf.active_hypothesis_index = 0;
+    const auto hyp_seeds = tuide::problem_frame_anchor_seeds(hyp_pf);
+    expect(!hyp_seeds.empty(), "active hyp seeds");
+    bool has_busy = false;
+    for (const auto& s : hyp_seeds) {
+      std::string tl = s;
+      for (char& c : tl) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      if (tl.find("busy") != std::string::npos) {
+        has_busy = true;
+      }
+    }
+    expect(has_busy, "active hyp seeds prefer busy_strip");
+    const auto roundtrip = tuide::problem_frame_to_json(hyp_pf);
+    expect(roundtrip.contains("anchor_hypotheses"), "serialize hyps");
+    expect(roundtrip.value("active_hypothesis_index", -1) == 0, "serialize active index");
+  }
 
   tuide::RegistryQueryOpts opts;
   const auto profile = tuide::graph_query_profile_default(tuide::GraphQueryPhase::AnchorHunt);
   expect(profile.hops == 0, "anchor hunt hops");
   tuide::graph_query_profile_apply(profile, &opts);
   expect(opts.hops == 0 && opts.top_k == 12, "apply profile");
+  expect(opts.match_surface == tuide::RegistryMatchSurface::CardFull, "default match_surface");
+
+  tuide::GraphQueryProfile latch_prof = profile;
+  latch_prof.match_surface = tuide::RegistryMatchSurface::Latch;
+  tuide::RegistryQueryOpts opts2;
+  tuide::graph_query_profile_apply(latch_prof, &opts2);
+  expect(opts2.match_surface == tuide::RegistryMatchSurface::Latch, "apply latch surface");
+  expect(!opts2.seed_kinds.empty() && opts2.seed_kinds[0] == "latch", "latch seed_kinds");
+
+  expect(std::string(tuide::registry_match_surface_name(tuide::RegistryMatchSurface::CardAttrs)) ==
+             "card_attrs",
+         "surface name");
+  tuide::RegistryMatchSurface parsed = tuide::RegistryMatchSurface::CardFull;
+  expect(tuide::registry_match_surface_parse("node_id", &parsed) &&
+             parsed == tuide::RegistryMatchSurface::NodeId,
+         "parse node_id");
+  expect(tuide::registry_embed_model_key("m", tuide::RegistryMatchSurface::Latch).find("latch") !=
+             std::string::npos,
+         "embed model key tags surface");
 
   return failures == 0 ? 0 : 1;
 }

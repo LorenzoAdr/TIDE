@@ -552,6 +552,7 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
   }
 
   std::optional<DistilledInvestigateIntent> distilled;
+  std::optional<tuide::ProblemFrame> kept_pf;
   std::vector<std::string> semantic_outline = map_outline;
   std::vector<std::string> semantic_index_candidates = index_candidates;
   LlamaBackend* reasoning_backend = nullptr;
@@ -579,18 +580,25 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
           "\"mechanism_gaps\":[{\"slot\":\"…\",\"question\":\"¿…?\"}],"
           "\"reject_noise\":[\"…\"],\"anchor_confidence\":\"high|medium|low\"}\n"
           "Reglas:\n"
-          "- primary_anchor = ÚNICO punto de anclaje inicial (módulo/feature/control "
-          "más cercano a la petición). Puede ser un feature (gestor de archivos), "
-          "un entrypoint, o un control de estado — NO tiene por qué ser un 'síntoma'.\n"
-          "- secondary_anchors = piezas relacionadas a explorar DESPUÉS (orquestadores, "
-          "callers, UI alrededor). deferred=true. 0..3 entradas.\n"
-          "- search_terms: 2..6 identificadores snake_case/CamelCase de CÓDIGO, "
-          "derivados de la petición; NUNCA frases NL; NO inventes nombres de producto "
-          "que no sugiera el texto.\n"
-          "- PROHIBIDO meter en primary lo que claramente es contexto posterior "
-          "(orquestación, callers, paneles vecinos).\n"
+          "- primary_anchor = el objeto FOCAL más local de la petición (control, estado, "
+          "acción, entrypoint o feature que el usuario quiere encontrar/cambiar). "
+          "NO uses como primary el ambiente contenedor (app, chat, asistente, panel "
+          "alrededor) si el texto nombra algo más concreto.\n"
+          "- secondary_anchors = ambiente / orquestación / callers a explorar DESPUÉS. "
+          "deferred=true. 0..3 entradas.\n"
+          "- search_terms: 2..6 identificadores snake_case/CamelCase. Cada término DEBE "
+          "ser proyección léxica del texto del usuario (misma raíz ≥4 letras, permitiendo "
+          "variantes morfológicas ES/EN del MISMO vocablo). NUNCA frases NL.\n"
+          "- En compuestos (a_b / a.b), CADA segmento ≥4 letras debe salir del texto; "
+          "no añadas segmentos nuevos (archivos, extensiones o tools no dichos).\n"
+          "- Prefiere sustantivos/verbos de contenido del objeto focal; no uses como "
+          "search_terms palabras vacías o de relleno del enunciado.\n"
+          "- PROHIBIDO inventar ecosistemas, toolchains, archivos de config o APIs no "
+          "nombrados en el texto.\n"
+          "- PROHIBIDO meter en primary.search_terms el ambiente contenedor "
+          "(orquestación, callers, paneles vecinos); eso va en secondary o reject_noise.\n"
           "- mechanism_gaps: preguntas abiertas (¿…?), no afirmaciones.\n"
-          "- reject_noise: tokens genéricos a no grepear (p.ej. panel, visible).\n";
+          "- reject_noise: tokens demasiado genéricos para grepear.\n";
       std::ostringstream user;
       user << "Consulta del usuario:\n" << user_message << "\n";
       user << "\nJSON:";
@@ -625,6 +633,7 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
           if (tuide::problem_frame_from_json_string(completion.text, &pf, &perr) &&
               tuide::problem_frame_minimally_valid(pf)) {
             tuide::problem_frame_refine_from_query(&pf, user_message);
+            pf.provenance = "l1_distill";
             DistilledInvestigateIntent di;
             di.intent = pf.problem_frame;
             di.primary_goal = pf.primary_anchor.objective;
@@ -643,6 +652,7 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
               }
             }
             distilled = di;
+            kept_pf = std::move(pf);
           }
         }
         if (!distilled) {
@@ -698,6 +708,120 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
       if (log) {
         log("REPO_MAP semántico: " + std::to_string(semantic_map.entries.size()) +
             " símbolos (best_score=" + std::to_string(semantic_map.best_score) + ")");
+      }
+    }
+
+    // Pass B: menu-grounded anchor hypotheses when PF is diffuse (low/medium confidence).
+    if (kept_pf && tuide::problem_frame_wants_anchor_hypotheses(*kept_pf)) {
+      std::vector<std::string> menu_tokens;
+      std::unordered_set<std::string> menu_seen;
+      auto push_menu = [&](const std::string& s) {
+        if (s.size() < 3 || !menu_seen.insert(s).second) {
+          return;
+        }
+        menu_tokens.push_back(s);
+      };
+      const int cand_cap = 24;
+      for (int i = 0; i < cand_cap && i < static_cast<int>(semantic_index_candidates.size());
+           ++i) {
+        push_menu(semantic_index_candidates[static_cast<std::size_t>(i)]);
+      }
+      for (int i = 0; i < 16 && i < static_cast<int>(semantic_outline.size()); ++i) {
+        // outline line: "stem  file  symbol" — take stem and symbol.
+        const std::string& line = semantic_outline[static_cast<std::size_t>(i)];
+        std::string stem;
+        std::string sym;
+        {
+          std::istringstream iss(line);
+          iss >> stem;
+          std::string file_tok;
+          iss >> file_tok >> sym;
+        }
+        if (!stem.empty()) {
+          push_menu(stem);
+        }
+        if (!sym.empty()) {
+          push_menu(sym);
+        }
+      }
+      if (!menu_tokens.empty()) {
+        LlamaCompletionRequest hreq;
+        hreq.system_prompt =
+            "Eres un analista de anclas de código. El problem_frame grounded en el prompt "
+            "es demasiado difuso. Propón 2..4 hipótesis de ancla eligiendo términos del "
+            "MENÚ (stems/símbolos reales del repo). Responde SOLO JSON válido:\n"
+            "{\"anchor_hypotheses\":[{\"objective\":\"pieza a perseguir\","
+            "\"search_terms\":[\"StemOrSymbol\",\"other_term\"],"
+            "\"mechanism_slot\":\"effect|state|control|entrypoint\","
+            "\"why\":\"por qué encaja con la petición\"}]}\n"
+            "Reglas:\n"
+            "- Cada search_term DEBE coincidir o compartir raíz ≥4 letras con un ítem del MENÚ.\n"
+            "- 2..4 hipótesis; 2..4 search_terms por hipótesis; snake_case/CamelCase, sin NL.\n"
+            "- Ancla al efecto/control/estado focal, NO al ambient contenedor "
+            "(app/chat/panel genérico) salvo que el menú no ofrezca nada más concreto.\n"
+            "- PROHIBIDO inventar toolchains, APIs o stems que no estén en el MENÚ.\n";
+        std::ostringstream huser;
+        huser << "Consulta del usuario:\n" << user_message << "\n";
+        huser << "\nPROBLEM_FRAME (prompt-grounded, difuso):\n";
+        huser << tuide::problem_frame_to_json(*kept_pf).dump(2) << "\n";
+        huser << "\nMENÚ (elige search_terms de aquí):\n";
+        for (const auto& m : menu_tokens) {
+          huser << "- " << m << '\n';
+        }
+        huser << "\nJSON:";
+        hreq.user_prompt = huser.str();
+        hreq.max_tokens = 480;
+        {
+          const int prompt_tok_est =
+              static_cast<int>((hreq.system_prompt.size() + hreq.user_prompt.size()) / 3 + 32);
+          const int needed = prompt_tok_est + hreq.max_tokens + 256;
+          int ctx = 512;
+          while (ctx < needed) {
+            ctx *= 2;
+          }
+          hreq.n_ctx = std::min(ctx, 2048);
+        }
+        hreq.temperature = 0.1;
+        hreq.context_role = reasoning_backend == deps_.l2_backend ? "L2" : "L1";
+        hreq.n_ctx_setting_hint =
+            reasoning_backend == deps_.l2_backend ? "ai.level2.n_ctx" : "ai.level1.n_ctx";
+        if (log) {
+          log("L1 investigar → hipótesis de ancla (menú=" + std::to_string(menu_tokens.size()) +
+              ")…");
+        }
+        const auto hcomp = reasoning_backend->complete(hreq, cancel);
+        if (hcomp.ok) {
+          if (log) {
+            log("L1 hyp raw: " + hcomp.text);
+          }
+          try {
+            auto hj = nlohmann::json::parse(hcomp.text);
+            // Tolerate raw array or wrapper object.
+            if (hj.is_array()) {
+              hj = nlohmann::json{{"anchor_hypotheses", hj}};
+            }
+            if (hj.contains("anchor_hypotheses") && hj["anchor_hypotheses"].is_array()) {
+              nlohmann::json merge = tuide::problem_frame_to_json(*kept_pf);
+              merge["anchor_hypotheses"] = hj["anchor_hypotheses"];
+              tuide::ProblemFrame merged;
+              std::string herr;
+              if (tuide::problem_frame_from_json(merge, &merged, &herr)) {
+                kept_pf->anchor_hypotheses = std::move(merged.anchor_hypotheses);
+              }
+            }
+          } catch (...) {
+            // leave hyps empty
+          }
+          tuide::problem_frame_refine_hypotheses_to_menu(&*kept_pf, menu_tokens);
+          if (log) {
+            log("L1 hyps retained: " + std::to_string(kept_pf->anchor_hypotheses.size()) +
+                " (menu=" + std::to_string(menu_tokens.size()) + ")");
+          }
+        } else if (log) {
+          log("✗ L1 hyps: " + hcomp.error);
+        }
+      } else if (log) {
+        log("L1 hyps skipped: menú vacío");
       }
     }
 
@@ -876,6 +1000,12 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
       result.embed_intent = distilled->intent;
     }
   }
+  if (kept_pf) {
+    if (kept_pf->instruction.empty()) {
+      kept_pf->instruction = user_message;
+    }
+    result.problem_frame_json = tuide::problem_frame_to_json(*kept_pf).dump();
+  }
   if (log && !result.semantic_tokens.empty()) {
     std::ostringstream st;
     st << "semantic_tokens (" << result.semantic_tokens.size() << "):";
@@ -1036,6 +1166,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
     const std::vector<std::string>& semantic_tokens = investigate.semantic_tokens;
     out.seeds = needles;
     out.semantic_tokens = semantic_tokens;
+    out.problem_frame_json = investigate.problem_frame_json;
     if (log) {
       log("L1 needles propuestos:");
       if (needles.empty()) {

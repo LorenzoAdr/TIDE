@@ -19,6 +19,7 @@ struct GraphQueryProfile {
   int top_k = 12;
   std::vector<std::string> hop_kinds;
   bool allow_trails = false;
+  RegistryMatchSurface match_surface = RegistryMatchSurface::CardFull;
 };
 
 const char* graph_query_phase_name(GraphQueryPhase p);

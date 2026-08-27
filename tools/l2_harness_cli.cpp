@@ -16,6 +16,8 @@
 #include "ai/l2_effect_summary.hpp"
 #include "ai/l2_effect_slice.hpp"
 #include "ai/l2_effect_registry.hpp"
+#include "ai/l2_entityness.hpp"
+#include "ai/l2_problem_frame.hpp"
 #include "ai/l2_explore_a.hpp"
 #include "ai/l2_feat.hpp"
 #include "ai/level2_autonomous_loop.hpp"
@@ -373,7 +375,8 @@ void usage() {
             << "  registry-gc [--dry-run|--apply]\n"
             << "  registry-stats|get|neighbors|path|code|files\n"
             << "  registry-embed [--force]   // nomic: fichas sucias → embeddings\n"
-            << "  registry-query TEXT [--trails] [--map map.md]  // cosine+hops, PPR threads + constellations\n"
+            << "  registry-query TEXT [--match-surface …] [--trails] [--map map.md]\n"
+            << "  entityness-probe --query TEXT [--aliases-json F] [--out F]  // entityness table\n"
             << "  zone-judge-shot --cards FILE --case ID  // 1× LLM sobre causal_judge_v1\n"
             << "  zone-judge-battery --cards-root DIR --out DIR  // un LLM secuencial\n"
             << "  trail-judge-shot [SYM] // 1× LLM: trail mapa L0 → a_trail_judge (caso 17)\n"
@@ -1256,6 +1259,120 @@ int run_registry_embed(const std::string& root, int argc, char** argv) {
   return 0;
 }
 
+int run_entityness_probe(const std::string& root, int argc, char** argv) {
+  std::string query;
+  std::string aliases_path;
+  std::string out_path;
+  std::string pf_path;
+  bool use_attrs = false;
+  bool want_embed = false;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--query" && i + 1 < argc) {
+      query = argv[++i];
+    } else if (a == "--problem-frame-json" && i + 1 < argc) {
+      pf_path = argv[++i];
+    } else if (a == "--aliases-json" && i + 1 < argc) {
+      aliases_path = argv[++i];
+    } else if (a == "--out" && i + 1 < argc) {
+      out_path = argv[++i];
+    } else if (a == "--card-attrs") {
+      use_attrs = true;
+      want_embed = true;
+    } else if (a == "--embed") {
+      want_embed = true;
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "entityness-probe --problem-frame-json F [--query TEXT] [--out F]\n"
+                   "  | --query TEXT [--aliases-json F]   # legacy prompt-token probe\n"
+                   "  [--embed] [--card-attrs]\n"
+                   "  Scores PF chain links (primary/secondary) → explore_mode.\n";
+      return 2;
+    } else if (!a.empty() && a[0] != '-' && query.empty()) {
+      query = a;
+    }
+  }
+  if (pf_path.empty() && query.empty()) {
+    std::cerr << "entityness-probe: falta --problem-frame-json o --query\n";
+    return 2;
+  }
+  tuide::EffectRegistry reg;
+  std::string err;
+  if (!tuide::registry_open(root, &reg, &err)) {
+    std::cerr << "entityness-probe: registry_open: " << err << "\n";
+    return 1;
+  }
+  tuide::EntitynessOpts eopts;
+  eopts.use_card_attrs = use_attrs;
+  if (!aliases_path.empty()) {
+    try {
+      const auto j = nlohmann::json::parse(read_file(aliases_path));
+      if (j.is_object()) {
+        for (auto it = j.begin(); it != j.end(); ++it) {
+          std::vector<std::string> als;
+          if (it.value().is_array()) {
+            for (const auto& x : it.value()) {
+              if (x.is_string()) {
+                als.push_back(x.get<std::string>());
+              }
+            }
+          }
+          eopts.aliases_by_term[it.key()] = std::move(als);
+        }
+      }
+    } catch (const std::exception& ex) {
+      std::cerr << "entityness-probe: aliases-json: " << ex.what() << "\n";
+      tuide::registry_close(&reg);
+      return 1;
+    }
+  }
+  tuide::RegistryEmbedFn embed;
+  tuide::EmbeddingBackend backend;
+  if (want_embed) {
+    if (!ensure_embed_backend(root, &backend, &err)) {
+      std::cerr << "entityness-probe: embed backend: " << err << "\n";
+      tuide::registry_close(&reg);
+      return 1;
+    }
+    embed = [&](bool is_query, const std::string& text, std::vector<float>* out) {
+      std::string e2;
+      return is_query ? backend.embed_query(text, out, &e2) : backend.embed_passage(text, out, &e2);
+    };
+  }
+
+  nlohmann::json j;
+  if (!pf_path.empty()) {
+    tuide::ProblemFrame pf;
+    std::string perr;
+    if (!tuide::problem_frame_from_json_string(read_file(pf_path), &pf, &perr)) {
+      std::cerr << "entityness-probe: problem-frame: " << perr << "\n";
+      tuide::registry_close(&reg);
+      return 1;
+    }
+    tuide::EntitynessLinkReport report;
+    if (!tuide::entityness_score_problem_frame(&reg, pf, query, embed, eopts, &report, &err)) {
+      std::cerr << "entityness-probe: " << err << "\n";
+      tuide::registry_close(&reg);
+      return 1;
+    }
+    j = report.to_json();
+    std::cout << tuide::entityness_links_prompt_block(report);
+  } else {
+    tuide::EntitynessReport report;
+    if (!tuide::entityness_probe(&reg, query, embed, eopts, &report, &err)) {
+      std::cerr << "entityness-probe: " << err << "\n";
+      tuide::registry_close(&reg);
+      return 1;
+    }
+    j = report.to_json();
+  }
+  std::cout << j.dump(2) << "\n";
+  if (!out_path.empty()) {
+    std::ofstream(out_path) << j.dump(2) << "\n";
+  }
+  tuide::registry_close(&reg);
+  return 0;
+}
+
 int run_registry_query(const std::string& root, int argc, char** argv) {
   std::string query;
   tuide::RegistryQueryOpts opts;
@@ -1298,9 +1415,15 @@ int run_registry_query(const std::string& root, int argc, char** argv) {
       judge_knobs_path = argv[++i];
     } else if (a == "--code") {
       want_code = true;
+    } else if (a == "--match-surface" && i + 1 < argc) {
+      if (!tuide::registry_match_surface_parse(argv[++i], &opts.match_surface)) {
+        std::cerr << "registry-query: --match-surface inválido (card_full|latch|card_attrs|node_id)\n";
+        return 2;
+      }
     } else if (a == "-h" || a == "--help") {
       std::cerr << "registry-query TEXT [--top K] [--hops N] [--kind call,write] [--trails]\n"
                    "  [--threads N] [--map map.md] [--map-top N] [--code]\n"
+                   "  [--match-surface card_full|latch|card_attrs|node_id]\n"
                    "  [--judge-cards|--judge-cards-md] [--judge-cards-json-out FILE]\n"
                    "  [--judge-knobs FILE.json]\n"
                    "  cosine + hops. --trails: PPR + beam + constelaciones. "
@@ -5364,6 +5487,9 @@ int main(int argc, char** argv) {
   }
   if (cmd == "registry-query") {
     return run_registry_query(root, argc, argv);
+  }
+  if (cmd == "entityness-probe") {
+    return run_entityness_probe(root, argc, argv);
   }
   if (cmd == "zone-judge-shot") {
     return run_zone_judge_shot(root, argc, argv);

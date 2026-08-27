@@ -141,11 +141,25 @@ using RegistryEmbedFn =
 using RegistryEmbedManyFn = std::function<bool(const std::vector<std::string>& texts,
                                                std::vector<std::vector<float>>* out)>;
 
+// What text/kind hop0 cosine (or lexical) matches against.
+enum class RegistryMatchSurface {
+  CardFull,   // default: Effect Summary markdown card
+  Latch,      // latch nodes only; passage = latch stem/member
+  CardAttrs,  // fn cards: writes|reads|hot|symbol only
+  NodeId,     // lexical match on id/symbol/path (no cosine)
+};
+
+const char* registry_match_surface_name(RegistryMatchSurface s);
+bool registry_match_surface_parse(const std::string& s, RegistryMatchSurface* out);
+// Embeddings PK is (node_id, model); non-CardFull surfaces use model#surface:name.
+std::string registry_embed_model_key(const std::string& model, RegistryMatchSurface surface);
+
 struct RegistryEmbedOpts {
   std::string model = kRegistryEmbedModelDefault;
   bool force = false;
   bool skip_glue = true;
   int max_nodes = 4000;
+  RegistryMatchSurface match_surface = RegistryMatchSurface::CardFull;
 };
 
 struct RegistryEmbedReport {
@@ -167,12 +181,13 @@ struct RegistryQueryOpts {
   int top_k = kRegistryQueryTopK;
   int hops = kRegistryQueryHops;
   std::vector<std::string> hop_kinds;
-  // hop0 cosine. Vacío = fn,latch,handoff (los ctrl no son puerta).
+  // hop0 cosine. Vacío = defaults from match_surface (see registry_query).
   std::vector<std::string> seed_kinds;
   std::vector<std::string> boost_stems;  // fallback por stem si no hay boost_fns
   std::vector<RegistryBoostFn> boost_fns;  // items L1 en orden
   int max_per_stem = 2;
   int threads = kRegistryQueryThreads;
+  RegistryMatchSurface match_surface = RegistryMatchSurface::CardFull;
 };
 
 struct RegistryQueryHit {
@@ -420,6 +435,7 @@ bool registry_list_files(EffectRegistry* r, std::vector<std::pair<std::string, b
                          std::string* err);
 
 std::string registry_card_passage(const RegistryNodeRow& n);
+std::string registry_card_passage(const RegistryNodeRow& n, RegistryMatchSurface surface);
 
 bool registry_embed_nodes(EffectRegistry* r, const RegistryEmbedFn& embed,
                           const RegistryEmbedManyFn& embed_passages, const RegistryEmbedOpts& opts,

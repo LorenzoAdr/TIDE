@@ -3,6 +3,9 @@
 
 Usage:
   python3 tools/l2_core5_battery.py l1 --label baseline_l1
+  python3 tools/l2_core5_battery.py entityness --label entity_v1 --from-round DIR
+  python3 tools/l2_core5_battery.py decompose --label decomp_v1
+  python3 tools/l2_core5_battery.py l1-entity --label core5_l1_entity_v1 --from-round DIR
   python3 tools/l2_core5_battery.py graph --label baseline_graph --from-round DIR
   python3 tools/l2_core5_battery.py f1 --label baseline_f1 --from-round DIR
   python3 tools/l2_core5_battery.py all --label core5_v1
@@ -23,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.l2_explore_battery.pf_battery_lib import (  # noqa: E402
     DEFAULT_CASES,
+    extract_json_blob,
     extract_pf_from_l1_log,
     load_cases,
     normalize_to_v1,
@@ -276,6 +280,313 @@ def parse_registry_json_from_log(log_path: Path) -> dict:
         return {}
 
 
+def run_entityness_case(
+    case: dict, case_dir: Path, src_dir: Path, env: dict[str, str], aliases: Path | None
+) -> dict:
+    """Score entityness on ProblemFrame chain links (post-L1), not raw prompt tokens."""
+    case_dir.mkdir(parents=True, exist_ok=True)
+    cid = case["id"]
+    prompt = case["prompt"]
+    copy_if_exists(src_dir / "map_last.md", case_dir / "map_last.md")
+    copy_if_exists(src_dir / "problem_frame.json", case_dir / "problem_frame.json")
+
+    pf_path = case_dir / "problem_frame.json"
+    if not pf_path.exists():
+        return {"id": cid, "rc": 2, "error": "missing_problem_frame"}
+
+    map_path = case_dir / "map_last.md"
+    if map_path.exists():
+        registry_ingest_map(map_path, env)
+
+    out_json = case_dir / "entityness.json"
+    argv = [
+        str(CLI),
+        "entityness-probe",
+        "--problem-frame-json",
+        str(pf_path),
+        "--query",
+        prompt,
+        "--out",
+        str(out_json),
+    ]
+    if aliases and aliases.exists():
+        argv += ["--aliases-json", str(aliases)]
+    log = case_dir / "entityness_probe.log"
+    rc = run_cmd(argv, log, env, timeout=180)
+    ej = {}
+    if out_json.exists():
+        try:
+            ej = json.loads(out_json.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            ej = {}
+    links = ej.get("links") or []
+    best = {}
+    if links:
+        best = max(links, key=lambda x: float(x.get("entityness") or 0))
+    return {
+        "id": cid,
+        "rc": rc,
+        "explore_mode": ej.get("explore_mode"),
+        "best_role": ej.get("best_role"),
+        "best_entityness": ej.get("best_entityness"),
+        "top_link_terms": (best.get("search_terms") if isinstance(best, dict) else None),
+        "top_owner_stem": best.get("owner_stem") if isinstance(best, dict) else None,
+        "n_links": len(links),
+    }
+
+
+def _units_at_stop(decomp: dict) -> list[dict]:
+    levels = decomp.get("levels") or []
+    if not levels:
+        return []
+    stop = decomp.get("stop_level")
+    if stop is None:
+        stop = levels[-1].get("level", 0)
+    for lv in levels:
+        if int(lv.get("level", -1)) == int(stop):
+            return [u for u in (lv.get("units") or []) if isinstance(u, dict)]
+    return [u for u in (levels[-1].get("units") or []) if isinstance(u, dict)]
+
+
+def pf_from_decompose_units(decomp: dict, prompt: str) -> dict:
+    """Map stop-level units → ProblemFrame links (focal→primary, rest→secondary)."""
+    units = _units_at_stop(decomp)
+    focal = [u for u in units if str(u.get("role")) == "focal"]
+    rest = [u for u in units if str(u.get("role")) != "focal"]
+    if not focal and units:
+        focal, rest = units[:1], units[1:]
+    pri = focal[0] if focal else {"label": "", "search_terms": [], "role": "focal"}
+    pf = {
+        "schema": "problem_frame_v1",
+        "problem_kind": "locate",
+        "problem_frame": "from intent_decompose_v0",
+        "instruction": prompt,
+        "primary_anchor": {
+            "kind": "control",
+            "objective": pri.get("label") or "focal",
+            "search_terms": list(pri.get("search_terms") or []),
+        },
+        "secondary_anchors": [
+            {
+                "kind": str(u.get("role") or "module"),
+                "objective": u.get("label") or u.get("id") or "unit",
+                "search_terms": list(u.get("search_terms") or []),
+                "deferred": True,
+                "why_later": f"decompose {u.get('id')} role={u.get('role')}",
+            }
+            for u in (rest + focal[1:])
+        ],
+        "mechanism_gaps": [],
+        "reject_noise": [],
+        "anchor_confidence": "medium",
+        "provenance": "intent_decompose_v0",
+    }
+    return pf
+
+
+def run_decompose_case(case: dict, case_dir: Path, env: dict[str, str], timeout: int) -> dict:
+    """L1 --intent-decompose then entityness on stop-level units as chain links."""
+    case_dir.mkdir(parents=True, exist_ok=True)
+    cid = case["id"]
+    prompt = case["prompt"]
+    log = case_dir / "decompose_gen.txt"
+    argv = [
+        str(TUIDE),
+        "l1-debug",
+        "--no-stem-embed",
+        "--workspace",
+        str(ROOT),
+        "--intent-decompose",
+        "--query",
+        prompt,
+    ]
+    rc = run_cmd(argv, log, env, timeout=timeout)
+    text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
+    decomp = extract_json_blob(text) or {}
+    if decomp:
+        write_json(case_dir / "decompose.json", decomp)
+    else:
+        return {"id": cid, "rc": rc, "error": "no_decompose_json", "n_units": 0}
+
+    pf = pf_from_decompose_units(decomp, prompt)
+    write_json(case_dir / "problem_frame.json", pf)
+    out_json = case_dir / "entityness.json"
+    eargv = [
+        str(CLI),
+        "entityness-probe",
+        "--problem-frame-json",
+        str(case_dir / "problem_frame.json"),
+        "--query",
+        prompt,
+        "--out",
+        str(out_json),
+    ]
+    erc = run_cmd(eargv, case_dir / "entityness_probe.log", env, timeout=180)
+    ej = {}
+    if out_json.exists():
+        try:
+            ej = json.loads(out_json.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            ej = {}
+    units = _units_at_stop(decomp)
+    return {
+        "id": cid,
+        "rc": rc,
+        "entity_rc": erc,
+        "stop_level": decomp.get("stop_level"),
+        "stop_reason": decomp.get("stop_reason"),
+        "n_levels": len(decomp.get("levels") or []),
+        "n_units": len(units),
+        "roles": [u.get("role") for u in units],
+        "explore_mode": ej.get("explore_mode"),
+        "best_entityness": ej.get("best_entityness"),
+        "best_role": ej.get("best_role"),
+    }
+
+
+def run_decompose_battery(label: str, cases_path: Path, only: str, timeout: int) -> Path:
+    ensure_bins()
+    env = env_base()
+    out = BATTERY_ROOT / f"round_{label}"
+    out.mkdir(parents=True, exist_ok=True)
+    cases = load_cases(cases_path)
+    if only:
+        cases = [c for c in cases if c["id"] == only]
+    rows = []
+    for case in cases:
+        print(f"=== DECOMPOSE {case['id']} ===", flush=True)
+        kill_runtime()
+        time.sleep(0.5)
+        rows.append(run_decompose_case(case, out / case["id"], env, timeout))
+    (out / "decompose_results.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    subprocess.call(
+        [
+            sys.executable,
+            str(ROOT / "tools/l2_explore_battery/score_intent_decompose.py"),
+            "--round-dir",
+            str(out),
+            "--cases",
+            str(cases_path),
+        ]
+    )
+    return out
+
+
+def run_entityness_battery(
+    label: str, cases_path: Path, from_round: Path, only: str, aliases: Path | None
+) -> Path:
+    ensure_bins()
+    env = env_base()
+    out = BATTERY_ROOT / f"round_{label}"
+    out.mkdir(parents=True, exist_ok=True)
+    cases = load_cases(cases_path)
+    if only:
+        cases = [c for c in cases if c["id"] == only]
+
+    # Ingest all maps first so registry is warm.
+    for case in cases:
+        src = from_round / case["id"]
+        mp = src / "map_last.md"
+        if mp.exists():
+            print(f"=== ENTITY ingest {case['id']} ===", flush=True)
+            registry_ingest_map(mp, env)
+
+    rows = []
+    for case in cases:
+        print(f"=== ENTITYNESS {case['id']} ===", flush=True)
+        src = from_round / case["id"]
+        rows.append(run_entityness_case(case, out / case["id"], src, env, aliases))
+
+    (out / "entityness_results.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    subprocess.call(
+        [
+            sys.executable,
+            str(ROOT / "tools/l2_explore_battery/score_entityness.py"),
+            "--round-dir",
+            str(out),
+            "--cases",
+            str(cases_path),
+        ]
+    )
+    return out
+
+
+def run_l1_entity_case(
+    case: dict, case_dir: Path, entity_src: Path, env: dict[str, str], timeout: int
+) -> dict:
+    """L1 with --entityness-json from a prior entityness round."""
+    case_dir.mkdir(parents=True, exist_ok=True)
+    cid = case["id"]
+    prompt = case["prompt"]
+    ej = entity_src / "entityness.json"
+    copy_if_exists(ej, case_dir / "entityness.json")
+    copy_if_exists(entity_src / "map_last.md", case_dir / "map_last.md")
+
+    kill_runtime()
+    map_out = case_dir / "map_last.md"
+    seeds_out = case_dir / "seeds.json"
+    l1_log = case_dir / "l1_gen.txt"
+    argv = [
+        str(TUIDE),
+        "l1-debug",
+        "--no-stem-embed",
+        "--workspace",
+        str(ROOT),
+        "--query",
+        prompt,
+        "--map-out",
+        str(map_out),
+        "--seeds-out",
+        str(seeds_out),
+    ]
+    if (case_dir / "entityness.json").exists():
+        argv += ["--entityness-json", str(case_dir / "entityness.json")]
+    rc = run_cmd(argv, l1_log, env, timeout=timeout)
+
+    pf, prov = extract_pf_from_l1_log(l1_log.read_text(errors="replace"))
+    if not pf:
+        pf = fallback_pf_from_query(prompt)
+        prov = "deterministic_fallback"
+    pf = refine_pf_from_query(pf, prompt)
+    pf.setdefault("schema", "problem_frame_v1")
+    pf["provenance"] = prov
+    write_json(case_dir / "problem_frame.json", pf)
+    write_json(
+        case_dir / "problem_frame_meta.json",
+        {"provenance": prov, "l1_rc": rc, "entityness": True},
+    )
+    return {"id": cid, "l1_rc": rc, "provenance": prov, "terms": pf_search_terms(pf)}
+
+
+def run_l1_entity_battery(
+    label: str, cases_path: Path, from_entity: Path, only: str, timeout: int
+) -> Path:
+    ensure_bins()
+    env = env_base()
+    out = BATTERY_ROOT / f"round_{label}"
+    out.mkdir(parents=True, exist_ok=True)
+    cases = load_cases(cases_path)
+    if only:
+        cases = [c for c in cases if c["id"] == only]
+    rows = []
+    for case in cases:
+        print(f"=== L1+ENTITY {case['id']} ===", flush=True)
+        src = from_entity / case["id"]
+        rows.append(run_l1_entity_case(case, out / case["id"], src, env, timeout))
+    (out / "l1_results.json").write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    subprocess.call(
+        [
+            sys.executable,
+            str(ROOT / "tools/l2_explore_battery/score_problem_frame.py"),
+            "--round-dir",
+            str(out),
+            "--cases",
+            str(cases_path),
+        ]
+    )
+    return out
+
+
 def run_graph_case(case: dict, case_dir: Path, src_dir: Path, env: dict[str, str]) -> dict:
     case_dir.mkdir(parents=True, exist_ok=True)
     cid = case["id"]
@@ -454,10 +765,14 @@ def rescore_l1_from_logs(round_dir: Path, cases_path: Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("phase", choices=("probe", "l1", "graph", "f1", "all", "rescore-l1"))
+    ap.add_argument(
+        "phase",
+        choices=("probe", "l1", "graph", "f1", "all", "rescore-l1", "entityness", "l1-entity", "decompose"),
+    )
     ap.add_argument("--label", default="core5_v1")
     ap.add_argument("--cases", type=Path, default=CASES_DEFAULT)
-    ap.add_argument("--from-round", type=Path, default=None, help="prior round dir for graph/f1 inputs")
+    ap.add_argument("--from-round", type=Path, default=None, help="prior round dir for graph/f1/entity inputs")
+    ap.add_argument("--aliases-json", type=Path, default=None, help="optional aliases map for entityness")
     ap.add_argument("--only", default="", help="single case id")
     ap.add_argument("--timeout", type=int, default=2400, help="per-case timeout seconds")
     ap.add_argument("--check-gate", action="store_true")
@@ -467,6 +782,62 @@ def main() -> int:
         ok, reason = llm_probe()
         print(json.dumps({"ok": ok, "reason": reason}, indent=2))
         return 0 if ok else 2
+
+    if args.phase == "decompose":
+        out = run_decompose_battery(args.label, args.cases, args.only, args.timeout)
+        if args.check_gate:
+            return subprocess.call(
+                [
+                    sys.executable,
+                    str(ROOT / "tools/l2_explore_battery/score_intent_decompose.py"),
+                    "--round-dir",
+                    str(out),
+                    "--cases",
+                    str(args.cases),
+                    "--check-gate",
+                ]
+            )
+        return 0
+
+    if args.phase == "entityness":
+        fr = args.from_round
+        if fr is None:
+            raise SystemExit("--from-round required for entityness (L1 round with map_last.md)")
+        out = run_entityness_battery(args.label, args.cases, fr, args.only, args.aliases_json)
+        if args.check_gate:
+            return subprocess.call(
+                [
+                    sys.executable,
+                    str(ROOT / "tools/l2_explore_battery/score_entityness.py"),
+                    "--round-dir",
+                    str(out),
+                    "--cases",
+                    str(args.cases),
+                    "--check-gate",
+                ]
+            )
+        return 0
+
+    if args.phase == "l1-entity":
+        # Deprecated name: entityness is post-PF. Run link scoring on --from-round L1 outputs.
+        print("note: l1-entity → entityness on ProblemFrame links (no L1 re-inject)", flush=True)
+        fr = args.from_round
+        if fr is None:
+            raise SystemExit("--from-round required (L1 round with problem_frame.json)")
+        out = run_entityness_battery(args.label, args.cases, fr, args.only, args.aliases_json)
+        if args.check_gate:
+            return subprocess.call(
+                [
+                    sys.executable,
+                    str(ROOT / "tools/l2_explore_battery/score_entityness.py"),
+                    "--round-dir",
+                    str(out),
+                    "--cases",
+                    str(args.cases),
+                    "--check-gate",
+                ]
+            )
+        return 0
 
     if args.phase == "rescore-l1":
         out = BATTERY_ROOT / f"round_{args.label}"

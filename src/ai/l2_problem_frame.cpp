@@ -128,6 +128,8 @@ void push_unique_term(std::vector<std::string>* terms, const std::string& raw) {
 }
 
 // Drop NL phrases; keep code-like tokens only. No domain stem injection.
+// Preserve dotted/hyphen compounds (build.gradle) as one term so grounding can
+// reject partially invented compounds; do not explode them into grounded parts.
 void sanitize_search_terms(std::vector<std::string>* terms) {
   if (terms == nullptr) {
     return;
@@ -137,11 +139,211 @@ void sanitize_search_terms(std::vector<std::string>* terms) {
     if (t.find(' ') != std::string::npos) {
       continue;
     }
+    const std::string trimmed = trim_copy(t);
+    if (trimmed.empty()) {
+      continue;
+    }
+    // Already a single identifier-like token (may include . _ -): keep intact.
+    bool codeish = true;
+    for (unsigned char c : trimmed) {
+      if (!(std::isalnum(c) || c == '_' || c == '-' || c == '.')) {
+        codeish = false;
+        break;
+      }
+    }
+    if (codeish) {
+      push_unique_term(&out, trimmed);
+      continue;
+    }
     for (const auto& tok : tokenize_codeish(t)) {
       push_unique_term(&out, tok);
     }
   }
   *terms = std::move(out);
+}
+
+// Fold common Latin-1 accents → ASCII so "compilación"↔"compile" can share a stem.
+std::string fold_ascii_alnum(const std::string& s) {
+  std::string out;
+  out.reserve(s.size());
+  for (size_t i = 0; i < s.size();) {
+    const unsigned char c = static_cast<unsigned char>(s[i]);
+    if (c < 0x80) {
+      if (std::isalnum(c) || c == '_') {
+        out.push_back(static_cast<char>(std::tolower(c)));
+      }
+      ++i;
+      continue;
+    }
+    // UTF-8 2-byte Latin supplements used in ES/EN prompts (áéíóúñü…).
+    if ((c & 0xE0) == 0xC0 && i + 1 < s.size()) {
+      const unsigned char c1 = static_cast<unsigned char>(s[i + 1]);
+      const unsigned code = ((c & 0x1F) << 6) | (c1 & 0x3F);
+      char mapped = 0;
+      switch (code) {
+        case 0xE1: case 0xE0: case 0xE2: case 0xE4: mapped = 'a'; break;  // áàâä
+        case 0xE9: case 0xE8: case 0xEA: case 0xEB: mapped = 'e'; break;
+        case 0xED: case 0xEC: case 0xEE: case 0xEF: mapped = 'i'; break;
+        case 0xF3: case 0xF2: case 0xF4: case 0xF6: mapped = 'o'; break;
+        case 0xFA: case 0xF9: case 0xFB: case 0xFC: mapped = 'u'; break;
+        case 0xF1: mapped = 'n'; break;  // ñ
+        case 0xC1: case 0xC0: case 0xC2: case 0xC4: mapped = 'a'; break;
+        case 0xC9: case 0xC8: case 0xCA: case 0xCB: mapped = 'e'; break;
+        case 0xCD: case 0xCC: case 0xCE: case 0xCF: mapped = 'i'; break;
+        case 0xD3: case 0xD2: case 0xD4: case 0xD6: mapped = 'o'; break;
+        case 0xDA: case 0xD9: case 0xDB: case 0xDC: mapped = 'u'; break;
+        case 0xD1: mapped = 'n'; break;
+        default: break;
+      }
+      if (mapped) {
+        out.push_back(mapped);
+      }
+      i += 2;
+      continue;
+    }
+    // Skip other multi-byte sequences.
+    if ((c & 0xF0) == 0xE0) {
+      i += 3;
+    } else if ((c & 0xF8) == 0xF0) {
+      i += 4;
+    } else {
+      ++i;
+    }
+  }
+  return out;
+}
+
+std::vector<std::string> split_term_parts(const std::string& term) {
+  std::vector<std::string> parts;
+  std::string cur;
+  auto flush = [&]() {
+    if (cur.size() >= 3) {
+      parts.push_back(cur);
+    }
+    cur.clear();
+  };
+  for (unsigned char c : term) {
+    if (c == '_' || c == '-' || c == '.' || std::isspace(c)) {
+      flush();
+    } else if (std::isupper(c) && !cur.empty() && !std::isupper(static_cast<unsigned char>(cur.back()))) {
+      flush();
+      cur.push_back(static_cast<char>(std::tolower(c)));
+    } else {
+      cur.push_back(static_cast<char>(std::tolower(c)));
+    }
+  }
+  flush();
+  return parts;
+}
+
+// True if a single folded token is grounded in the query (exact or shared ≥4 prefix).
+bool part_grounded_in_query(const std::string& part_folded, const std::string& query_folded) {
+  if (part_folded.size() < 4) {
+    return true;  // too short to judge; ignored by callers that filter ≥4
+  }
+  if (query_folded.find(part_folded) != std::string::npos) {
+    return true;
+  }
+  // Morphological cousins: shared prefix of length ≥4 (compile↔compilacion).
+  return query_folded.find(part_folded.substr(0, 4)) != std::string::npos;
+}
+
+// True if term is a lexical projection of the query. Compounds require EVERY part
+// of length ≥4 to ground (so "build.gradle" fails when only "build" appears).
+// Language-agnostic; never injects replacement stems.
+bool term_grounded_in_query(const std::string& term, const std::string& query_folded) {
+  if (query_folded.empty()) {
+    return true;  // no query → do not strip
+  }
+  const std::string tf = fold_ascii_alnum(term);
+  if (tf.size() >= 4 && query_folded.find(tf) != std::string::npos) {
+    return true;
+  }
+  const auto parts = split_term_parts(term);
+  int significant = 0;
+  for (const auto& part : parts) {
+    const std::string p = fold_ascii_alnum(part);
+    if (p.size() < 4) {
+      continue;
+    }
+    ++significant;
+    if (!part_grounded_in_query(p, query_folded)) {
+      return false;
+    }
+  }
+  if (significant > 0) {
+    return true;
+  }
+  // Single opaque token with no split parts ≥4: require whole-term grounding.
+  return tf.size() >= 4 && part_grounded_in_query(tf, query_folded);
+}
+
+void ground_search_terms_to_query(std::vector<std::string>* terms, const std::string& user_message,
+                                  bool fallback_to_query_tokens) {
+  if (terms == nullptr) {
+    return;
+  }
+  const std::string qf = fold_ascii_alnum(user_message);
+  std::vector<std::string> out;
+  for (const auto& t : *terms) {
+    if (term_grounded_in_query(t, qf)) {
+      push_unique_term(&out, t);
+    }
+  }
+  // If LLM invented everything on primary, fall back to query tokens (still no domain inject).
+  if (out.empty() && fallback_to_query_tokens) {
+    for (const auto& tok : tokenize_codeish(user_message)) {
+      if (tok.size() >= 4) {
+        push_unique_term(&out, tok);
+      }
+      if (out.size() >= 6) {
+        break;
+      }
+    }
+  }
+  *terms = std::move(out);
+}
+
+// True if term shares a ≥4-char folded stem with any menu token (either direction / parts).
+bool term_grounded_in_menu(const std::string& term, const std::vector<std::string>& menu_folded) {
+  if (menu_folded.empty()) {
+    return false;
+  }
+  const std::string tf = fold_ascii_alnum(term);
+  if (tf.size() < 4) {
+    return false;
+  }
+  for (const auto& mf : menu_folded) {
+    if (mf.size() < 4) {
+      continue;
+    }
+    if (mf.find(tf) != std::string::npos || tf.find(mf) != std::string::npos) {
+      return true;
+    }
+    if (mf.find(tf.substr(0, 4)) != std::string::npos ||
+        tf.find(mf.substr(0, 4)) != std::string::npos) {
+      return true;
+    }
+  }
+  for (const auto& part : split_term_parts(term)) {
+    const std::string pf = fold_ascii_alnum(part);
+    if (pf.size() < 4) {
+      continue;
+    }
+    for (const auto& mf : menu_folded) {
+      if (mf.size() < 4) {
+        continue;
+      }
+      if (mf.find(pf) != std::string::npos || pf.find(mf.substr(0, std::min<std::size_t>(4, mf.size()))) !=
+                                                   std::string::npos) {
+        return true;
+      }
+      if (mf.find(pf.substr(0, 4)) != std::string::npos) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 }  // namespace
@@ -189,10 +391,30 @@ bool problem_frame_from_json(const nlohmann::json& j, ProblemFrame* out, std::st
       }
     }
   }
+  if (j.contains("anchor_hypotheses") && j["anchor_hypotheses"].is_array()) {
+    for (const auto& h : j["anchor_hypotheses"]) {
+      if (!h.is_object()) {
+        continue;
+      }
+      AnchorHypothesis hyp;
+      hyp.objective = trim_copy(h.value("objective", ""));
+      read_string_array(h, "search_terms", &hyp.search_terms);
+      hyp.mechanism_slot = trim_copy(h.value("mechanism_slot", ""));
+      hyp.why = trim_copy(h.value("why", ""));
+      if (!hyp.search_terms.empty() || !hyp.objective.empty()) {
+        pf.anchor_hypotheses.push_back(std::move(hyp));
+      }
+    }
+  }
   read_string_array(j, "reject_noise", &pf.reject_noise);
   read_string_array(j, "ignore", &pf.reject_noise);
   pf.anchor_confidence = trim_copy(j.value("anchor_confidence", "medium"));
   pf.provenance = trim_copy(j.value("provenance", "l1_distill"));
+  if (j.contains("active_hypothesis_index") && j["active_hypothesis_index"].is_number_integer()) {
+    pf.active_hypothesis_index = j["active_hypothesis_index"].get<int>();
+  } else {
+    pf.active_hypothesis_index = -1;
+  }
   if (pf.problem_kind.empty()) {
     pf.problem_kind = "explain";
   }
@@ -265,6 +487,26 @@ nlohmann::json problem_frame_to_json(const ProblemFrame& pf) {
     }
     j["secondary_anchors"] = std::move(secs);
   }
+  if (!pf.anchor_hypotheses.empty()) {
+    nlohmann::json hyps = nlohmann::json::array();
+    for (const auto& h : pf.anchor_hypotheses) {
+      nlohmann::json o = nlohmann::json::object();
+      if (!h.objective.empty()) {
+        o["objective"] = h.objective;
+      }
+      if (!h.search_terms.empty()) {
+        o["search_terms"] = h.search_terms;
+      }
+      if (!h.mechanism_slot.empty()) {
+        o["mechanism_slot"] = h.mechanism_slot;
+      }
+      if (!h.why.empty()) {
+        o["why"] = h.why;
+      }
+      hyps.push_back(std::move(o));
+    }
+    j["anchor_hypotheses"] = std::move(hyps);
+  }
   if (!pf.reject_noise.empty()) {
     j["reject_noise"] = pf.reject_noise;
   }
@@ -273,6 +515,9 @@ nlohmann::json problem_frame_to_json(const ProblemFrame& pf) {
   }
   if (!pf.provenance.empty()) {
     j["provenance"] = pf.provenance;
+  }
+  if (pf.active_hypothesis_index >= 0) {
+    j["active_hypothesis_index"] = pf.active_hypothesis_index;
   }
   return j;
 }
@@ -291,6 +536,16 @@ std::vector<std::string> problem_frame_anchor_seeds(const ProblemFrame& pf) {
     }
     seeds.push_back(t);
   };
+  if (pf.active_hypothesis_index >= 0 &&
+      static_cast<std::size_t>(pf.active_hypothesis_index) < pf.anchor_hypotheses.size()) {
+    const auto& hyp = pf.anchor_hypotheses[static_cast<std::size_t>(pf.active_hypothesis_index)];
+    for (const auto& t : hyp.search_terms) {
+      push(t);
+    }
+    if (!seeds.empty()) {
+      return seeds;
+    }
+  }
   for (const auto& t : pf.primary_anchor.search_terms) {
     push(t);
   }
@@ -310,6 +565,11 @@ bool problem_frame_minimally_valid(const ProblemFrame& pf) {
     return false;
   }
   return !problem_frame_anchor_seeds(pf).empty();
+}
+
+bool problem_frame_wants_anchor_hypotheses(const ProblemFrame& pf) {
+  const std::string c = ascii_lower(pf.anchor_confidence);
+  return c == "low" || c == "medium" || c.empty();
 }
 
 ProblemFrame problem_frame_fallback_from_query(const std::string& user_message) {
@@ -337,23 +597,83 @@ void problem_frame_refine_from_query(ProblemFrame* pf, const std::string& user_m
   if (pf == nullptr) {
     return;
   }
-  (void)user_message;
-  // Structural cleanup only — never inject product/domain stems or override LLM kind.
+  // Structural cleanup + lexical grounding to the query. Never inject product stems.
+  // anchor_hypotheses are NOT query-grounded here (see refine_hypotheses_to_menu).
   sanitize_search_terms(&pf->primary_anchor.search_terms);
+  ground_search_terms_to_query(&pf->primary_anchor.search_terms, user_message,
+                               /*fallback_to_query_tokens=*/true);
   if (pf->primary_anchor.search_terms.size() > 8) {
     pf->primary_anchor.search_terms.resize(8);
   }
-  for (auto& sec : pf->secondary_anchors) {
-    sanitize_search_terms(&sec.search_terms);
-    if (sec.search_terms.size() > 6) {
-      sec.search_terms.resize(6);
+  {
+    std::vector<SecondaryAnchor> kept_sec;
+    kept_sec.reserve(pf->secondary_anchors.size());
+    for (auto& sec : pf->secondary_anchors) {
+      sanitize_search_terms(&sec.search_terms);
+      // No fallback: empty after grounding → drop secondary (was invented).
+      ground_search_terms_to_query(&sec.search_terms, user_message,
+                                   /*fallback_to_query_tokens=*/false);
+      if (sec.search_terms.size() > 6) {
+        sec.search_terms.resize(6);
+      }
+      if (!sec.search_terms.empty()) {
+        kept_sec.push_back(std::move(sec));
+      }
     }
+    pf->secondary_anchors = std::move(kept_sec);
   }
   if (pf->problem_kind.empty()) {
     pf->problem_kind = "explain";
   }
   if (pf->primary_anchor.kind.empty()) {
     pf->primary_anchor.kind = "module";
+  }
+}
+
+void problem_frame_refine_hypotheses_to_menu(ProblemFrame* pf,
+                                            const std::vector<std::string>& menu_tokens) {
+  if (pf == nullptr) {
+    return;
+  }
+  std::vector<std::string> menu_folded;
+  menu_folded.reserve(menu_tokens.size() * 2);
+  for (const auto& m : menu_tokens) {
+    const std::string folded = fold_ascii_alnum(m);
+    if (folded.size() >= 4) {
+      menu_folded.push_back(folded);
+    }
+    for (const auto& part : split_term_parts(m)) {
+      const std::string pfld = fold_ascii_alnum(part);
+      if (pfld.size() >= 4) {
+        menu_folded.push_back(pfld);
+      }
+    }
+  }
+  std::vector<AnchorHypothesis> kept;
+  kept.reserve(pf->anchor_hypotheses.size());
+  for (auto& hyp : pf->anchor_hypotheses) {
+    sanitize_search_terms(&hyp.search_terms);
+    std::vector<std::string> grounded;
+    for (const auto& t : hyp.search_terms) {
+      if (term_grounded_in_menu(t, menu_folded)) {
+        push_unique_term(&grounded, t);
+      }
+    }
+    if (grounded.size() > 4) {
+      grounded.resize(4);
+    }
+    hyp.search_terms = std::move(grounded);
+    if (!hyp.search_terms.empty()) {
+      kept.push_back(std::move(hyp));
+    }
+  }
+  if (kept.size() > 4) {
+    kept.resize(4);
+  }
+  pf->anchor_hypotheses = std::move(kept);
+  if (pf->active_hypothesis_index >= 0 &&
+      static_cast<std::size_t>(pf->active_hypothesis_index) >= pf->anchor_hypotheses.size()) {
+    pf->active_hypothesis_index = -1;
   }
 }
 

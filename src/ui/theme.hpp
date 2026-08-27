@@ -113,6 +113,10 @@ Color BpDisabled();
 Color Error();
 Color Warning();
 Color Success();
+// Subtle line backgrounds for the side-by-side git diff view (not full status colors).
+Color DiffAddBg();
+Color DiffDeleteBg();
+Color DiffChangeBg();
 Color StackFrame();
 Color StatusBar();
 
