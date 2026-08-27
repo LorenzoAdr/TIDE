@@ -595,7 +595,7 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
       user << "Consulta del usuario:\n" << user_message << "\n";
       user << "\nJSON:";
       req.user_prompt = user.str();
-      req.max_tokens = std::min(480, std::max(220, deps_.settings.level1.max_tokens / 2));
+      req.max_tokens = std::min(768, std::max(400, deps_.settings.level1.max_tokens / 2));
       {
         const int prompt_tok_est =
             static_cast<int>((req.system_prompt.size() + req.user_prompt.size()) / 3 + 32);

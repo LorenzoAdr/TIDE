@@ -58,11 +58,12 @@ def extract_json_blob(text: str) -> dict[str, Any] | None:
         return None
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
+        text = re.sub(r"\s*```.*$", "", text, flags=re.S)
     start = text.find("{")
     if start < 0:
         return None
-    depth = 0
+    depth_obj = 0
+    depth_arr = 0
     in_str = False
     esc = False
     end = -1
@@ -79,18 +80,66 @@ def extract_json_blob(text: str) -> dict[str, Any] | None:
         if c == '"':
             in_str = True
         elif c == "{":
-            depth += 1
+            depth_obj += 1
         elif c == "}":
-            depth -= 1
-            if depth == 0:
+            depth_obj -= 1
+            if depth_obj == 0 and depth_arr == 0:
                 end = i
                 break
-    if end <= start:
-        return None
-    try:
-        return json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return None
+        elif c == "[":
+            depth_arr += 1
+        elif c == "]":
+            depth_arr -= 1
+    candidates: list[str] = []
+    if end > start:
+        candidates.append(text[start : end + 1])
+    else:
+        # Truncated model output — close open structures best-effort.
+        frag = text[start:].rstrip().rstrip(",")
+        close = ("]" * max(0, depth_arr)) + ("}" * max(0, depth_obj))
+        candidates.append(frag + close)
+        # Also try dropping trailing incomplete string/object lines.
+        lines = frag.splitlines()
+        while lines:
+            trial = "\n".join(lines).rstrip().rstrip(",")
+            # recompute depths for trial
+            d_o = d_a = 0
+            in_s = False
+            e = False
+            for ch in trial:
+                if in_s:
+                    if e:
+                        e = False
+                    elif ch == "\\":
+                        e = True
+                    elif ch == '"':
+                        in_s = False
+                    continue
+                if ch == '"':
+                    in_s = True
+                elif ch == "{":
+                    d_o += 1
+                elif ch == "}":
+                    d_o -= 1
+                elif ch == "[":
+                    d_a += 1
+                elif ch == "]":
+                    d_a -= 1
+            if in_s:
+                trial += '"'
+                # string may leave us inside object still
+            candidates.append(trial + ("]" * max(0, d_a)) + ("}" * max(0, d_o)))
+            lines.pop()
+            if len(candidates) > 8:
+                break
+    for cand in candidates:
+        try:
+            obj = json.loads(cand)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 def extract_pf_from_l1_log(log_text: str) -> tuple[dict[str, Any], str]:
@@ -99,6 +148,18 @@ def extract_pf_from_l1_log(log_text: str) -> tuple[dict[str, Any], str]:
     idx = log_text.find(marker)
     if idx >= 0:
         rest = log_text[idx + len(marker) :]
+        # Stop before next L1 stage so later JSON (needles) does not pollute parse.
+        for stop in (
+            "\nREPO_MAP semántico",
+            "\nL1 investigar →",
+            "\nL1 needles raw:",
+            "\nL1 intent:",
+            "\n=== L1 debug result",
+        ):
+            cut = rest.find(stop)
+            if cut >= 0:
+                rest = rest[:cut]
+                break
         blob = extract_json_blob(rest)
         if blob:
             return normalize_to_v1(blob), "l1_distill"
