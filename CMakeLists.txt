@@ -1066,6 +1066,8 @@ target_link_libraries(l2_effect_slice_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_L
 add_executable(l2_effect_registry_test
   tests/l2_effect_registry_test.cpp
   src/ai/l2_effect_registry.cpp
+  src/ai/l2_graph_query_profile.cpp
+  src/ai/l2_problem_frame.cpp
   src/ai/l2_effect_slice.cpp
   src/ai/l2_effect_summary.cpp
   src/ai/l2_explore_a.cpp
@@ -1170,6 +1172,7 @@ add_executable(l2_harness_cli
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
   src/ai/l2_brain_local.cpp
+  src/ai/l2_brain_remote.cpp
   src/ai/llama_backend.cpp
   src/ai/get_code_of.cpp
   src/ai/repo_map.cpp

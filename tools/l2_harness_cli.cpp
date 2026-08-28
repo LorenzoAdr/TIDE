@@ -7,6 +7,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -27,6 +28,7 @@
 #include "ai/ai_types.hpp"
 #include "ai/coding_embed_rerank.hpp"
 #include "ai/embedding_backend.hpp"
+#include "ai/llama_net.hpp"
 #include "ai/vector_math.hpp"
 
 #include <algorithm>
@@ -55,7 +57,6 @@ std::string json_dump_safe(const nlohmann::json& j, int indent = 2) {
 using tuide::Level2AutonomousLoopOpts;
 using tuide::Level2BootstrapOpts;
 using tuide::Level2Session;
-using tuide::LocalL2Brain;
 using tuide::ToolRegistry;
 using tuide::get_code_of;
 using tuide::parse_get_code_of_arg;
@@ -379,6 +380,7 @@ void usage() {
             << "  entityness-probe --query TEXT [--aliases-json F] [--out F]  // entityness table\n"
             << "  zone-judge-shot --cards FILE --case ID  // 1× LLM sobre causal_judge_v1\n"
             << "  zone-judge-battery --cards-root DIR --out DIR  // un LLM secuencial\n"
+            << "  atlas-survey --cards-root DIR --out DIR --only ID  // atlas → LLM inspect → ficha\n"
             << "  trail-judge-shot [SYM] // 1× LLM: trail mapa L0 → a_trail_judge (caso 17)\n"
             << "  dataflow-probe VAR     // sin LLM: writes/reads/decls vía ripgrep (no LSP)\n"
             << "  effect-summary-probe   // sin LLM: fichas TS (SYM|--from-a-state|--from-map)\n"
@@ -431,10 +433,47 @@ AiSettings load_ai_settings(const std::string& root) {
       s.level2.auto_download = l2.value("auto_download", s.level2.auto_download);
       s.level2.clarify_pushback_max =
           l2.value("clarify_pushback_max", s.level2.clarify_pushback_max);
+      s.level2.api_base = l2.value("api_base", s.level2.api_base);
+      s.level2.api_model = l2.value("api_model", s.level2.api_model);
+      s.level2.n_ctx_remote = l2.value("n_ctx_remote", s.level2.n_ctx_remote);
+    }
+    if (ai.contains("level0") && ai["level0"].is_object() &&
+        ai["level0"].contains("embeddings") && ai["level0"]["embeddings"].is_object()) {
+      const auto& emb = ai["level0"]["embeddings"];
+      s.level0.embeddings.server_host =
+          emb.value("server_host", s.level0.embeddings.server_host);
+      s.level0.embeddings.server_port =
+          emb.value("server_port", s.level0.embeddings.server_port);
     }
   } catch (...) {
   }
+  tuide::apply_ai_runtime_env(&s);
+  if (s.level2_mode == "remote" && s.level2.n_ctx_remote > 0) {
+    s.level2.n_ctx = s.level2.n_ctx_remote;
+  }
   return s;
+}
+
+std::unique_ptr<tuide::L2Brain> ready_l2_brain(
+    const AiSettings& settings, const std::function<void(const std::string&)>& progress,
+    std::string* err) {
+  if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
+    if (err) {
+      *err = "ai.level2.mode debe ser local|remote (ahora=" + settings.level2_mode + ")";
+    }
+    return nullptr;
+  }
+  auto brain = tuide::make_l2_brain(settings.level2_mode, nullptr);
+  if (brain == nullptr) {
+    if (err) {
+      *err = "no hay L2 brain para mode=" + settings.level2_mode;
+    }
+    return nullptr;
+  }
+  if (!brain->ensure_ready(settings, progress, err)) {
+    return nullptr;
+  }
+  return brain;
 }
 
 std::vector<tuide::ATrailSearchHit> parse_rg_hits(const std::string& body,
@@ -1384,6 +1423,8 @@ int run_registry_query(const std::string& root, int argc, char** argv) {
   std::string judge_knobs_path;
   std::string map_path;
   int map_top = tuide::kRegistryQueryMapStems;
+  bool view_set = false;
+  tuide::GraphViewLevel view_level = tuide::GraphViewLevel::Inspect;
   for (int i = 2; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--top" && i + 1 < argc) {
@@ -1413,6 +1454,12 @@ int run_registry_query(const std::string& root, int argc, char** argv) {
       judge_cards_json_out = argv[++i];
     } else if (a == "--judge-knobs" && i + 1 < argc) {
       judge_knobs_path = argv[++i];
+    } else if (a == "--view" && i + 1 < argc) {
+      if (!tuide::graph_view_level_parse(argv[++i], &view_level)) {
+        std::cerr << "registry-query: --view inválido (atlas|inspect|deep)\n";
+        return 2;
+      }
+      view_set = true;
     } else if (a == "--code") {
       want_code = true;
     } else if (a == "--match-surface" && i + 1 < argc) {
@@ -1425,9 +1472,9 @@ int run_registry_query(const std::string& root, int argc, char** argv) {
                    "  [--threads N] [--map map.md] [--map-top N] [--code]\n"
                    "  [--match-surface card_full|latch|card_attrs|node_id]\n"
                    "  [--judge-cards|--judge-cards-md] [--judge-cards-json-out FILE]\n"
-                   "  [--judge-knobs FILE.json]\n"
+                   "  [--judge-knobs FILE.json] [--view atlas|inspect|deep]\n"
                    "  cosine + hops. --trails: PPR + beam + constelaciones. "
-                   "--map: items L1 (símbolo) ocupan hop0.\n";
+                   "--map: items L1 (símbolo) ocupan hop0. --view recorta el pack (atlas=ancho).\n";
       return 2;
     } else if (!a.empty() && a[0] != '-') {
       if (!query.empty()) {
@@ -1494,6 +1541,10 @@ int run_registry_query(const std::string& root, int argc, char** argv) {
       tuide::RegistryCausalJudgeOpts judge_opts;
       judge_opts.max_zones = 8;
       judge_opts.promote_uncovered = true;
+      if (view_set) {
+        tuide::graph_view_profile_apply(tuide::graph_view_profile_default(view_level),
+                                        &judge_opts);
+      }
       if (!judge_knobs_path.empty()) {
         fs::path knobs_path(judge_knobs_path);
         if (!knobs_path.is_absolute()) {
@@ -1537,7 +1588,11 @@ int run_registry_query(const std::string& root, int argc, char** argv) {
         std::ofstream(json_out) << judge_payload.dump(2) << "\n";
       }
       if (judge_cards_markdown) {
-        std::cout << tuide::registry_causal_judge_markdown(judge_payload);
+        if (view_set) {
+          std::cout << tuide::registry_causal_pack_markdown(judge_payload, view_level);
+        } else {
+          std::cout << tuide::registry_causal_judge_markdown(judge_payload);
+        }
       } else {
         std::cout << judge_payload.dump(2) << "\n";
       }
@@ -1777,18 +1832,14 @@ int run_zone_judge_shot(const std::string& root, int argc, char** argv) {
     settings.level2.model_id = model_id;
     settings.level2.model_path.clear();
   }
-  if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
-    std::cerr << "zone-judge-shot: ai.level2.mode debe ser local|remote (ahora="
-              << settings.level2_mode << ")\n";
-    return 2;
-  }
-  tuide::LocalL2Brain brain;
   std::string err;
   auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
-  if (!brain.ensure_ready(settings, progress, &err)) {
-    std::cerr << "zone-judge-shot: ensure_ready: " << err << "\n";
-    return 1;
+  auto brain_ptr = ready_l2_brain(settings, progress, &err);
+  if (!brain_ptr) {
+    std::cerr << "zone-judge-shot: " << err << "\n";
+    return err.find("mode") != std::string::npos ? 2 : 1;
   }
+  tuide::L2Brain& brain = *brain_ptr;
   tuide::L2BrainRequest request;
   request.system_prompt = system;
   request.user_prompt = user;
@@ -1902,6 +1953,317 @@ bool target_matches_query(const std::string& target, const std::string& query) {
   return false;
 }
 
+int run_atlas_survey(const std::string& root, int argc, char** argv) {
+  std::string cards_root_arg;
+  std::string out_arg;
+  std::string only_case;
+  std::string model_id;
+  for (int i = 2; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--cards-root" && i + 1 < argc) {
+      cards_root_arg = argv[++i];
+    } else if (a == "--out" && i + 1 < argc) {
+      out_arg = argv[++i];
+    } else if (a == "--only" && i + 1 < argc) {
+      only_case = argv[++i];
+    } else if (a == "--model-id" && i + 1 < argc) {
+      model_id = argv[++i];
+    } else if (a == "-h" || a == "--help") {
+      std::cerr << "atlas-survey --cards-root DIR --out DIR --only ID\n"
+                   "  Pasada 0: atlas. LLM elige 1–3 ids por cobertura (no diversidad).\n"
+                   "  Pasada 1: inspect + review de cobertura (añade hasta 2 M*).\n"
+                   "  Pasada 2: hipótesis affected/control/trigger/cleanup sobre esas fichas.\n";
+      return 2;
+    }
+  }
+  if (cards_root_arg.empty() || out_arg.empty() || only_case.empty()) {
+    std::cerr << "atlas-survey: requiere --cards-root, --out y --only\n";
+    return 2;
+  }
+  fs::path cards_root(cards_root_arg);
+  fs::path output_root(out_arg);
+  if (!cards_root.is_absolute()) {
+    cards_root = fs::path(root) / cards_root;
+  }
+  if (!output_root.is_absolute()) {
+    output_root = fs::path(root) / output_root;
+  }
+  const fs::path prompts_path =
+      fs::path(root) / "tests/fixtures/stem_boost_battery/prompts_nl_human.json";
+  std::ifstream prompts_in(prompts_path);
+  if (!prompts_in) {
+    std::cerr << "atlas-survey: no se pudo leer " << prompts_path << "\n";
+    return 2;
+  }
+  nlohmann::json cases;
+  prompts_in >> cases;
+  std::string instruction;
+  for (const auto& item : cases) {
+    if (item.value("id", "") == only_case) {
+      instruction = item.value("prompt", "");
+      break;
+    }
+  }
+  if (instruction.empty()) {
+    std::cerr << "atlas-survey: caso desconocido " << only_case << "\n";
+    return 2;
+  }
+  const fs::path payload_path = cards_root / only_case / "judge_cards.json";
+  nlohmann::json base_payload;
+  try {
+    base_payload = nlohmann::json::parse(read_file(payload_path));
+  } catch (...) {
+    std::cerr << "atlas-survey: no se pudo leer " << payload_path << "\n";
+    return 1;
+  }
+  AiSettings settings = load_ai_settings(root);
+  if (!model_id.empty()) {
+    settings.level2.model_id = model_id;
+    settings.level2.model_path.clear();
+  }
+  std::string err;
+  auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
+  auto brain_ptr = ready_l2_brain(settings, progress, &err);
+  if (!brain_ptr) {
+    std::cerr << "atlas-survey: " << err << "\n";
+    return 1;
+  }
+  tuide::L2Brain& brain = *brain_ptr;
+  tuide::EffectRegistry expansion_registry;
+  if (!tuide::registry_open(root, &expansion_registry, &err)) {
+    std::cerr << "atlas-survey: registry: " << err << "\n";
+    return 1;
+  }
+  const fs::path case_out = output_root / only_case;
+  fs::create_directories(case_out);
+  const std::string atlas_md = tuide::registry_causal_atlas_markdown(base_payload, instruction);
+  const auto zone_ids = zone_ids_from_payload(base_payload);
+  const auto allowed_targets = triage_targets_by_zone(base_payload);
+  std::ofstream(case_out / "atlas.md") << atlas_md;
+  tuide::L2BrainRequest req;
+  req.system_prompt = tuide::registry_causal_atlas_survey_system_prompt();
+  req.user_prompt = "## Consulta\n" + instruction + "\n\n" +
+                    tuide::registry_causal_atlas_survey_user_prompt(atlas_md);
+  req.phase = "causal_atlas_survey";
+  req.max_tokens = std::min(256, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 256);
+  req.n_ctx = std::max(4096, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 4096);
+  req.temperature = 0.05f;
+  std::ofstream(case_out / "survey_system.txt") << req.system_prompt;
+  std::ofstream(case_out / "survey_user.md") << req.user_prompt;
+  const auto t0 = std::chrono::steady_clock::now();
+  const auto response = brain.propose(req, nullptr);
+  const int64_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - t0)
+                                 .count();
+  std::ofstream(case_out / "survey_raw.txt") << response.text;
+  tuide::RegistryCausalTriageDecision survey;
+  if (!response.ok) {
+    survey.error = response.error;
+    survey.raw = response.text;
+  } else {
+    survey = tuide::registry_parse_causal_atlas_survey(response.text, zone_ids, allowed_targets);
+  }
+  std::ofstream(case_out / "survey.json")
+      << tuide::registry_causal_triage_decision_to_json(survey).dump(2) << "\n";
+  nlohmann::json summary = {{"id", only_case},
+                            {"ok", survey.ok},
+                            {"elapsed_ms", elapsed_ms},
+                            {"atlas_chars", atlas_md.size()},
+                            {"shortlist", survey.shortlist},
+                            {"view", survey.view},
+                            {"why", survey.why},
+                            {"error", survey.error}};
+  if (!survey.ok && survey.shortlist.empty()) {
+    std::ofstream(case_out / "summary.json") << summary.dump(2) << "\n";
+    std::cout << summary.dump(2) << "\n";
+    tuide::registry_close(&expansion_registry);
+    return 1;
+  }
+  tuide::GraphViewLevel next_view = tuide::GraphViewLevel::Inspect;
+  tuide::graph_view_level_parse(survey.view, &next_view);
+  tuide::RegistryCausalJudgeOpts expanded_opts;
+  tuide::graph_view_profile_apply(tuide::graph_view_profile_default(next_view), &expanded_opts);
+
+  auto expand_survey = [&](tuide::RegistryCausalTriageDecision& surv, nlohmann::json* out_payload,
+                           std::string* expand_err) -> bool {
+    if (surv.shortlist.empty()) {
+      *expand_err = "shortlist vacío";
+      return false;
+    }
+    tuide::registry_atlas_fill_expand_from(base_payload, &surv);
+    if (tuide::registry_expand_causal_judge_payload(&expansion_registry, base_payload, surv,
+                                                    expanded_opts, out_payload, expand_err)) {
+      return true;
+    }
+    for (auto& zone : surv.zones) {
+      zone.expand_from.clear();
+    }
+    if (tuide::registry_expand_causal_judge_payload(&expansion_registry, base_payload, surv,
+                                                    expanded_opts, out_payload, expand_err)) {
+      summary["expand_fallback"] = "empty_expand_from";
+      return true;
+    }
+    return false;
+  };
+
+  nlohmann::json expanded_payload;
+  std::string inspect_md;
+  if (!survey.shortlist.empty()) {
+    if (!expand_survey(survey, &expanded_payload, &err)) {
+      summary["expand_error"] = err;
+      std::ofstream(case_out / "summary.json") << summary.dump(2) << "\n";
+      std::cout << summary.dump(2) << "\n";
+      tuide::registry_close(&expansion_registry);
+      return 1;
+    }
+    inspect_md = tuide::registry_causal_pack_markdown(expanded_payload, next_view);
+    std::ofstream(case_out / "inspect_r1.md") << inspect_md;
+  }
+  summary["inspect_r1_zones"] = survey.shortlist;
+
+  std::vector<std::string> remaining_ids;
+  for (const auto& zid : zone_ids) {
+    if (std::find(survey.shortlist.begin(), survey.shortlist.end(), zid) ==
+        survey.shortlist.end()) {
+      remaining_ids.push_back(zid);
+    }
+  }
+  tuide::L2BrainRequest cover_req;
+  cover_req.system_prompt = tuide::registry_causal_atlas_cover_system_prompt();
+  cover_req.user_prompt =
+      "## Consulta\n" + instruction + "\n\n" +
+      tuide::registry_causal_atlas_cover_user_prompt(atlas_md, survey.shortlist, remaining_ids,
+                                                    inspect_md);
+  cover_req.phase = "causal_atlas_cover";
+  cover_req.max_tokens =
+      std::min(256, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 256);
+  cover_req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+  cover_req.temperature = 0.05f;
+  std::ofstream(case_out / "cover_system.txt") << cover_req.system_prompt;
+  std::ofstream(case_out / "cover_user.md") << cover_req.user_prompt;
+  const auto cover_t0 = std::chrono::steady_clock::now();
+  const auto cover_response = brain.propose(cover_req, nullptr);
+  const int64_t cover_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - cover_t0)
+                               .count();
+  std::ofstream(case_out / "cover_raw.txt") << cover_response.text;
+  tuide::RegistryCausalAtlasCoverDecision cover;
+  if (!cover_response.ok) {
+    cover.error = cover_response.error;
+    cover.raw = cover_response.text;
+  } else {
+    cover = tuide::registry_parse_causal_atlas_cover(cover_response.text, zone_ids,
+                                                     survey.shortlist);
+  }
+  summary["cover_ok"] = cover.ok;
+  summary["cover_covers"] = cover.covers;
+  summary["cover_add"] = cover.add;
+  summary["cover_why"] = cover.why;
+  summary["cover_error"] = cover.error;
+  summary["cover_ms"] = cover_ms;
+  std::ofstream(case_out / "cover.json")
+      << nlohmann::json({{"ok", cover.ok},
+                         {"covers", cover.covers},
+                         {"add", cover.add},
+                         {"why", cover.why},
+                         {"error", cover.error}})
+             .dump(2)
+         << "\n";
+  constexpr int kAtlasInspectCap = 4;
+  if (cover.ok && !cover.add.empty()) {
+    const int nadd =
+        tuide::registry_atlas_merge_inspect_ids(&survey, cover.add, zone_ids, kAtlasInspectCap);
+    summary["cover_merged"] = nadd;
+    if (nadd > 0) {
+      if (!expand_survey(survey, &expanded_payload, &err)) {
+        summary["cover_expand_error"] = err;
+      } else {
+        inspect_md = tuide::registry_causal_pack_markdown(expanded_payload, next_view);
+      }
+    }
+  }
+  summary["ok"] = survey.ok && !survey.shortlist.empty();
+  summary["shortlist"] = survey.shortlist;
+  std::ofstream(case_out / "survey.json")
+      << tuide::registry_causal_triage_decision_to_json(survey).dump(2) << "\n";
+  if (survey.shortlist.empty()) {
+    summary["error"] = "sin zonas tras cover";
+    std::ofstream(case_out / "summary.json") << summary.dump(2) << "\n";
+    std::cout << summary.dump(2) << "\n";
+    tuide::registry_close(&expansion_registry);
+    return 1;
+  }
+  std::ofstream(case_out / "inspect.md") << inspect_md;
+  std::ofstream(case_out / "inspect.json") << expanded_payload.dump(2) << "\n";
+  summary["inspect_chars"] = inspect_md.size();
+  summary["inspect_zones"] = zone_ids_from_payload(expanded_payload);
+  summary["needs"] = nlohmann::json::array();
+  for (const auto& zone : survey.zones) {
+    summary["needs"].push_back({{"id", zone.id}, {"need", zone.need},
+                                {"expand_from", zone.expand_from}});
+  }
+
+  tuide::L2BrainRequest hyp_req;
+  hyp_req.system_prompt = tuide::registry_causal_zone_hyp_system_prompt();
+  hyp_req.user_prompt = "## Consulta\n" + instruction + "\n\n" +
+                        tuide::registry_causal_zone_hyp_user_prompt(inspect_md);
+  hyp_req.phase = "causal_zone_hyp";
+  hyp_req.max_tokens =
+      std::min(512, settings.level2.max_tokens > 0 ? settings.level2.max_tokens : 512);
+  hyp_req.n_ctx = std::max(8192, settings.level2.n_ctx > 0 ? settings.level2.n_ctx : 8192);
+  hyp_req.temperature = 0.05f;
+  std::ofstream(case_out / "hyp_system.txt") << hyp_req.system_prompt;
+  std::ofstream(case_out / "hyp_user.md") << hyp_req.user_prompt;
+  const auto hyp_t0 = std::chrono::steady_clock::now();
+  const auto hyp_response = brain.propose(hyp_req, nullptr);
+  const int64_t hyp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - hyp_t0)
+                             .count();
+  std::ofstream(case_out / "hyp_raw.txt") << hyp_response.text;
+  tuide::RegistryCausalHypDecision hyp;
+  if (!hyp_response.ok) {
+    hyp.error = hyp_response.error;
+    hyp.raw = hyp_response.text;
+  } else {
+    hyp = tuide::registry_parse_causal_zone_hyp(hyp_response.text, expanded_payload);
+  }
+  std::ofstream(case_out / "hyp.json")
+      << tuide::registry_causal_hyp_decision_to_json(hyp).dump(2) << "\n";
+  summary["hyp_ok"] = hyp.ok;
+  summary["hyp_ms"] = hyp_ms;
+  summary["hyp_error"] = hyp.error;
+  summary["hyp_why"] = hyp.why;
+  summary["hypotheses"] = tuide::registry_causal_hyp_decision_to_json(hyp)["hypotheses"];
+  if (hyp.ok) {
+    tuide::ProblemFrame pf;
+    pf.schema = tuide::kProblemFrameSchema;
+    pf.instruction = instruction;
+    pf.problem_kind = "debug";
+    pf.problem_frame = instruction;
+    pf.provenance = "causal_atlas_hyp";
+    pf.anchor_confidence = hyp.hypotheses.size() == 1 ? "medium" : "low";
+    pf.anchor_hypotheses = hyp.hypotheses;
+    if (!hyp.hypotheses.empty()) {
+      const auto& h0 = hyp.hypotheses.front();
+      pf.primary_anchor.kind = "state";
+      pf.primary_anchor.objective = h0.claim;
+      pf.primary_anchor.search_terms = h0.search_terms;
+      pf.active_hypothesis_index = 0;
+    }
+    std::ofstream(case_out / "problem_frame.json")
+        << tuide::problem_frame_to_json(pf).dump(2) << "\n";
+  }
+
+  std::ofstream(case_out / "summary.json") << summary.dump(2) << "\n";
+  std::cout << summary.dump(2) << "\n";
+  std::cout << "\n===== atlas =====\n" << atlas_md << "\n===== survey raw =====\n"
+            << response.text << "\n===== hyp raw =====\n" << hyp_response.text
+            << "\n===== hyp =====\n"
+            << tuide::registry_causal_hyp_decision_to_json(hyp).dump(2) << "\n";
+  tuide::registry_close(&expansion_registry);
+  return hyp.ok ? 0 : 1;
+}
+
 int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
   std::string cards_root_arg;
   std::string out_arg;
@@ -1970,13 +2332,14 @@ int run_zone_judge_battery(const std::string& root, int argc, char** argv) {
     settings.level2.model_id = model_id;
     settings.level2.model_path.clear();
   }
-  tuide::LocalL2Brain brain;
   std::string err;
   auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
-  if (!brain.ensure_ready(settings, progress, &err)) {
-    std::cerr << "zone-judge-battery: ensure_ready: " << err << "\n";
+  auto brain_ptr = ready_l2_brain(settings, progress, &err);
+  if (!brain_ptr) {
+    std::cerr << "zone-judge-battery: " << err << "\n";
     return 1;
   }
+  tuide::L2Brain& brain = *brain_ptr;
   const bool epistemic = two_pass && !legacy_triage;
   const bool use_slot_survey = epistemic && slot_survey;
   const bool use_primary_survey = epistemic && primary_survey && !use_slot_survey;
@@ -3266,20 +3629,14 @@ int run_trail_judge_shot(ToolRegistry* tools, const std::string& root, int argc,
   }
 
   const AiSettings settings = load_ai_settings(root);
-  if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
-    std::cerr << "trail-judge-shot: ai.level2.mode debe ser local|remote (ahora="
-              << settings.level2_mode << ")\n";
-    return 2;
-  }
-  // Same as run / run-explore-a: LocalL2Brain (covers local llama-server; remote
-  // path still goes through Local when mode mis-set — match existing harness).
-  tuide::LocalL2Brain brain;
   std::string err;
   auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
-  if (!brain.ensure_ready(settings, progress, &err)) {
-    std::cerr << "trail-judge-shot: ensure_ready: " << err << "\n";
-    return 1;
+  auto brain_ptr = ready_l2_brain(settings, progress, &err);
+  if (!brain_ptr) {
+    std::cerr << "trail-judge-shot: " << err << "\n";
+    return err.find("mode") != std::string::npos ? 2 : 1;
   }
+  tuide::L2Brain& brain = *brain_ptr;
 
   tuide::L2BrainRequest breq;
   breq.system_prompt = system;
@@ -4793,18 +5150,14 @@ int run_a0_sniff_judge_shot(Level2Session& session, const std::string& root, int
   }
 
   const AiSettings settings = load_ai_settings(root);
-  if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
-    std::cerr << "a0-sniff-judge-shot: ai.level2.mode debe ser local|remote (ahora="
-              << settings.level2_mode << ")\n";
-    return 2;
-  }
-  tuide::LocalL2Brain brain;
   std::string err;
   auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
-  if (!brain.ensure_ready(settings, progress, &err)) {
-    std::cerr << "a0-sniff-judge-shot: ensure_ready: " << err << "\n";
-    return 1;
+  auto brain_ptr = ready_l2_brain(settings, progress, &err);
+  if (!brain_ptr) {
+    std::cerr << "a0-sniff-judge-shot: " << err << "\n";
+    return err.find("mode") != std::string::npos ? 2 : 1;
   }
+  tuide::L2Brain& brain = *brain_ptr;
 
   tuide::L2BrainRequest breq;
   breq.system_prompt = system;
@@ -5290,18 +5643,14 @@ int run_a0_first_judge_shot(Level2Session& session, const std::string& root, int
   }
 
   const AiSettings settings = load_ai_settings(root);
-  if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
-    std::cerr << "a0-first-judge-shot: ai.level2.mode debe ser local|remote (ahora="
-              << settings.level2_mode << ")\n";
-    return 2;
-  }
-  tuide::LocalL2Brain brain;
   std::string err;
   auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
-  if (!brain.ensure_ready(settings, progress, &err)) {
-    std::cerr << "a0-first-judge-shot: ensure_ready: " << err << "\n";
-    return 1;
+  auto brain_ptr = ready_l2_brain(settings, progress, &err);
+  if (!brain_ptr) {
+    std::cerr << "a0-first-judge-shot: " << err << "\n";
+    return err.find("mode") != std::string::npos ? 2 : 1;
   }
+  tuide::L2Brain& brain = *brain_ptr;
 
   tuide::L2BrainRequest breq;
   breq.system_prompt = system;
@@ -5490,6 +5839,9 @@ int main(int argc, char** argv) {
   }
   if (cmd == "entityness-probe") {
     return run_entityness_probe(root, argc, argv);
+  }
+  if (cmd == "atlas-survey") {
+    return run_atlas_survey(root, argc, argv);
   }
   if (cmd == "zone-judge-shot") {
     return run_zone_judge_shot(root, argc, argv);
@@ -5812,18 +6164,14 @@ int main(int argc, char** argv) {
   }
   if (cmd == "run") {
     const AiSettings settings = load_ai_settings(root);
-    if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
-      std::cerr << "run: ai.level2.mode debe ser local|remote (ahora=" << settings.level2_mode
-                << ")\n";
-      return 2;
-    }
-    LocalL2Brain brain;
     std::string err;
     auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
-    if (!brain.ensure_ready(settings, progress, &err)) {
-      std::cerr << "L2 brain ensure_ready: " << err << '\n';
-      return 1;
+    auto brain_ptr = ready_l2_brain(settings, progress, &err);
+    if (!brain_ptr) {
+      std::cerr << "run: " << err << '\n';
+      return err.find("mode") != std::string::npos ? 2 : 1;
     }
+    tuide::L2Brain& brain = *brain_ptr;
     Level2AutonomousLoopOpts opts;
     opts.workspace_root = root;
     opts.settings = settings.level2;
@@ -5847,18 +6195,14 @@ int main(int argc, char** argv) {
   }
   if (cmd == "run-explore") {
     const AiSettings settings = load_ai_settings(root);
-    if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
-      std::cerr << "run-explore: ai.level2.mode debe ser local|remote (ahora="
-                << settings.level2_mode << ")\n";
-      return 2;
-    }
-    LocalL2Brain brain;
     std::string err;
     auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
-    if (!brain.ensure_ready(settings, progress, &err)) {
-      std::cerr << "L2 brain ensure_ready: " << err << '\n';
-      return 1;
+    auto brain_ptr = ready_l2_brain(settings, progress, &err);
+    if (!brain_ptr) {
+      std::cerr << "run-explore: " << err << '\n';
+      return err.find("mode") != std::string::npos ? 2 : 1;
     }
+    tuide::L2Brain& brain = *brain_ptr;
     Level2AutonomousLoopOpts opts;
     opts.workspace_root = root;
     opts.settings = settings.level2;
@@ -5885,18 +6229,14 @@ int main(int argc, char** argv) {
       return 2;
     }
     const AiSettings settings = load_ai_settings(root);
-    if (settings.level2_mode != "local" && settings.level2_mode != "remote") {
-      std::cerr << "run-explore-a: ai.level2.mode debe ser local|remote (ahora="
-                << settings.level2_mode << ")\n";
-      return 2;
-    }
-    LocalL2Brain brain;
     std::string err;
     auto progress = [](const std::string& line) { std::cerr << line << '\n'; };
-    if (!brain.ensure_ready(settings, progress, &err)) {
-      std::cerr << "L2 brain ensure_ready: " << err << '\n';
-      return 1;
+    auto brain_ptr = ready_l2_brain(settings, progress, &err);
+    if (!brain_ptr) {
+      std::cerr << "run-explore-a: " << err << '\n';
+      return err.find("mode") != std::string::npos ? 2 : 1;
     }
+    tuide::L2Brain& brain = *brain_ptr;
     Level2AutonomousLoopOpts opts;
     opts.workspace_root = root;
     opts.settings = settings.level2;

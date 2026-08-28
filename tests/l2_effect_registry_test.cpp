@@ -609,6 +609,209 @@ void test_query_constellations() {
              judge_payload["zones"][0]["mechanism"].empty(),
          "causal judge markdown mechanism section when filled");
 
+  {
+    nlohmann::json atlas_payload = {
+        {"query", "spinner busy"},
+        {"gate", {{"max_cosine", 0.6}, {"map_boosted", 1}, {"weak", false}}},
+        {"zones",
+         nlohmann::json::array(
+             {nlohmann::json{{"id", "M1"},
+                             {"primary_stems", {"console_panel", "clickable"}},
+                             {"risks", {"no_state_nucleus"}},
+                             {"pack_meta", {{"skeleton_missing", {"state", "effect"}}}},
+                             {"edges",
+                              nlohmann::json::array({nlohmann::json{
+                                  {"from", "src/ui/console_panel.cpp:handle_console_tab_hover"},
+                                  {"kind", "call"},
+                                  {"to", "src/ui/clickable.cpp:update_panel_hover"}}})},
+                             {"representatives",
+                              nlohmann::json::array({nlohmann::json{
+                                  {"target",
+                                   "src/ui/console_panel.cpp:handle_console_tab_hover"}}})}},
+              nlohmann::json{
+                  {"id", "M6"},
+                  {"primary_stems", {"busy_strip"}},
+                  {"nuclei", nlohmann::json::array({nlohmann::json{{"id", "C1"},
+                                                                  {"state", "spinner_frame"}}})},
+                  {"roles",
+                   {{"writers",
+                     nlohmann::json::array(
+                         {nlohmann::json{{"target", "src/ui/busy_strip.cpp:set_busy_spinner"}},
+                          nlohmann::json{{"target", "src/ui/busy_strip.cpp:clear_busy"}}})}}},
+                  {"ports",
+                   nlohmann::json::array({nlohmann::json{
+                       {"from_zone", "M5"},
+                       {"to_zone", "M6"},
+                       {"from", "src/ai/ai_controller.cpp:begin_thinking"},
+                       {"kind", "call"},
+                       {"to", "src/ui/busy_strip.cpp:set_busy_spinner"}}})}}})}};
+    const std::string atlas_md = tuide::registry_causal_atlas_markdown(atlas_payload);
+    expect(atlas_md.find("causal_atlas_v1") != std::string::npos, "atlas schema header");
+    expect(atlas_md.find("score=") == std::string::npos, "atlas omits scores");
+    expect(atlas_md.find("mini-cards") == std::string::npos, "atlas omits mini-cards");
+    expect(atlas_md.find("kind=chrome") != std::string::npos, "atlas chrome kind");
+    expect(atlas_md.find("kind=latch") != std::string::npos, "atlas latch kind");
+    expect(atlas_md.find("search:") != std::string::npos, "atlas labels retrieval as search");
+    expect(atlas_md.find("owns:") != std::string::npos, "atlas owns caption");
+    expect(atlas_md.size() < 1800, "atlas stays compact");
+    nlohmann::json settings_zone = nlohmann::json{
+        {"id", "M4"},
+        {"primary_stems", nlohmann::json::array({"settings_modal"})},
+        {"representatives",
+         nlohmann::json::array(
+             {nlohmann::json{{"target", "src/ui/settings_modal.cpp:cancel_shortcut_recording"}},
+              nlohmann::json{
+                  {"target", "src/ui/settings_modal.cpp:append_top_level_tabs_header"}}})},
+        {"roles",
+         {{"writers",
+           nlohmann::json::array({nlohmann::json{
+               {"target", "src/ui/settings_modal.cpp:cancel_shortcut_recording"}}})}}}};
+    expect(tuide::registry_causal_zone_kind(settings_zone) == "object",
+           "settings_modal is object not cancel");
+    nlohmann::json settings_payload = {{"zones", nlohmann::json::array({settings_zone})}};
+    const std::string settings_md = tuide::registry_causal_atlas_markdown(settings_payload);
+    expect(settings_md.find("kind=object") != std::string::npos, "atlas object kind");
+    expect(settings_md.find("no es solo cancel") != std::string::npos, "atlas not caption");
+    expect(settings_md.find("append_top_level_tabs_header") != std::string::npos,
+           "atlas prefers entry peek");
+    const std::string inspect_md = tuide::registry_causal_judge_markdown(atlas_payload);
+    expect(inspect_md.find("owns:") != std::string::npos, "inspect captions owns");
+    expect(inspect_md.find("kind=latch") != std::string::npos, "inspect captions kind");
+    tuide::RegistryCausalTriageDecision settings_survey;
+    tuide::RegistryZoneTriage z4;
+    z4.id = "M4";
+    settings_survey.zones.push_back(z4);
+    tuide::registry_atlas_fill_expand_from(settings_payload, &settings_survey);
+    expect(!settings_survey.zones.front().expand_from.empty() &&
+               settings_survey.zones.front().expand_from.front().find("append_top_level") !=
+                   std::string::npos,
+           "object expand_from prefers entry over cancel");
+    nlohmann::json hole_zone = nlohmann::json{
+        {"id", "M3"},
+        {"primary_stems", nlohmann::json::array({"editor_panel"})},
+        {"risks", nlohmann::json::array({"promoted_from_uncovered"})},
+        {"representatives",
+         nlohmann::json::array(
+             {nlohmann::json{{"target", "src/ui/editor_panel.cpp:set_primary"}}})},
+        {"edges",
+         nlohmann::json::array({nlohmann::json{
+             {"from", "src/ui/editor_panel.cpp:MakeEditorPanel"},
+             {"kind", "call"},
+             {"to", "src/ui/editor_panel.cpp:set_primary"}}})}};
+    tuide::RegistryCausalTriageDecision hole_survey;
+    tuide::RegistryZoneTriage z3;
+    z3.id = "M3";
+    hole_survey.zones.push_back(z3);
+    tuide::registry_atlas_fill_expand_from(
+        nlohmann::json{{"zones", nlohmann::json::array({hole_zone})}}, &hole_survey);
+    expect(!hole_survey.zones.front().expand_from.empty() &&
+               hole_survey.zones.front().expand_from.front().find("MakeEditorPanel") !=
+                   std::string::npos,
+           "hole expand_from prefers Make* from edges");
+    nlohmann::json twin_a = {{"id", "M1"},
+                             {"primary_stems", nlohmann::json::array({"visual_highlight"})},
+                             {"representatives", nlohmann::json::array({nlohmann::json{
+                                 {"target", "src/ui/visual_highlight.cpp:compute"}}})}};
+    nlohmann::json twin_b = {{"id", "M6"},
+                             {"primary_stems", nlohmann::json::array({"visual_highlight"})},
+                             {"representatives", nlohmann::json::array({nlohmann::json{
+                                 {"target", "src/ui/visual_highlight.cpp:drain"}}})}};
+    nlohmann::json twins = {{"zones", nlohmann::json::array({twin_a, twin_b})}};
+    expect(tuide::registry_causal_atlas_markdown(twins).find("same=M1") != std::string::npos,
+           "atlas collapses duplicate stems");
+    expect(tuide::registry_causal_pack_markdown(atlas_payload, tuide::GraphViewLevel::Atlas)
+                   .find("causal_atlas_v1") != std::string::npos,
+           "pack markdown atlas");
+    tuide::RegistryCausalTriageDecision survey = tuide::registry_parse_causal_atlas_survey(
+        R"({"action":"causal_atlas_survey_v1","inspect":["M6","M1"],"view":"inspect",)"
+        R"("why":"latch del spinner vs chrome de hover"})",
+        {"M1", "M6"},
+        {{"M6", {"src/ui/busy_strip.cpp:set_busy_spinner"}},
+         {"M1", {"src/ui/console_panel.cpp:handle_console_tab_hover"}}});
+    expect(survey.ok && survey.shortlist.size() == 2, "atlas survey parses id list");
+    expect(survey.view == "inspect", "atlas survey default view");
+    tuide::registry_atlas_fill_expand_from(atlas_payload, &survey);
+    expect(!survey.zones.empty() && !survey.zones.front().expand_from.empty(),
+           "atlas fill expand_from from representatives");
+    const auto cover = tuide::registry_parse_causal_atlas_cover(
+        R"({"action":"causal_atlas_cover_v1","covers":false,"add":["M6","M1"],)"
+        R"("why":"el pack es hover; el latch del spinner está en M6"})",
+        {"M1", "M6"}, {"M1"});
+    expect(cover.ok && !cover.covers && cover.add.size() == 1 && cover.add[0] == "M6",
+           "cover parse skips already-open ids");
+    tuide::RegistryCausalTriageDecision only_chrome = tuide::registry_parse_causal_atlas_survey(
+        R"({"action":"causal_atlas_survey_v1","inspect":["M1"],"view":"inspect",)"
+        R"("why":"chrome de hover para contrastar el síntoma"})",
+        {"M1", "M6"},
+        {{"M1", {"src/ui/console_panel.cpp:handle_console_tab_hover"}},
+         {"M6", {"src/ui/busy_strip.cpp:set_busy_spinner"}}});
+    expect(only_chrome.ok && only_chrome.shortlist.size() == 1, "survey single zone");
+    const int nadd =
+        tuide::registry_atlas_merge_inspect_ids(&only_chrome, cover.add, {"M1", "M6"}, 4);
+    expect(nadd == 1 && only_chrome.shortlist.size() == 2 && only_chrome.shortlist.back() == "M6",
+           "cover merge appends unused zone");
+    const auto cover_yes = tuide::registry_parse_causal_atlas_cover(
+        R"({"action":"causal_atlas_cover_v1","covers":true,"add":["M1"],)"
+        R"("why":"M6 ya tiene el latch del spinner y writers set/clear"})",
+        {"M1", "M6"}, {"M6"});
+    expect(cover_yes.ok && cover_yes.covers && cover_yes.add.empty(),
+           "cover true clears add list");
+    tuide::GraphViewLevel parsed = tuide::GraphViewLevel::Inspect;
+    expect(tuide::graph_view_level_parse("atlas", &parsed) &&
+               parsed == tuide::GraphViewLevel::Atlas,
+           "parse view atlas");
+    const auto vp = tuide::graph_view_profile_default(tuide::GraphViewLevel::Atlas);
+    expect(vp.max_zones >= 10 && vp.expand_hops == 0, "atlas view is wide and shallow");
+
+    const auto hyp = tuide::registry_parse_causal_zone_hyp(
+        R"({"action":"causal_zone_hyp_v1","hypotheses":[{)"
+        R"("claim":"el latch spinner no se limpia al terminar",)"
+        R"("slots":{"affected":{"stem":"busy_strip","path_symbol":"busy_strip::clear_busy"},)"
+        R"("control":{"stem":"ai_controller"},"trigger":null,)"
+        R"("cleanup":{"stem":"busy_strip","path_symbol":"busy_strip::clear_busy"}},)"
+        R"("gap":"cleanup","anchor_role":"affected",)"
+        R"("falsify_by":"si clear_busy corre al done, hyp muere",)"
+        R"("why":"M6 posee spinner_frame"}],"why":"latch y caller visibles en fichas"})",
+        atlas_payload);
+    expect(hyp.ok && hyp.hypotheses.size() == 1, "zone hyp parses slot schema");
+    expect(hyp.hypotheses[0].affected.stem == "busy_strip", "hyp affected stem");
+    expect(hyp.hypotheses[0].affected.path_symbol.find("clear_busy") != std::string::npos,
+           "hyp canonicalizes short path_symbol");
+    expect(hyp.hypotheses[0].gap == "cleanup", "hyp gap");
+    const auto with_null = tuide::registry_parse_causal_zone_hyp(
+        R"({"action":"causal_zone_hyp_v1","hypotheses":[{)"
+        R"("claim":"el latch spinner no se limpia al terminar",)"
+        R"("slots":{"affected":{"stem":"busy_strip","path_symbol":"busy_strip::clear_busy"},)"
+        R"("control":{"stem":"ai_controller","path_symbol":null},"trigger":null,)"
+        R"("cleanup":{"stem":"busy_strip"}},)"
+        R"("gap":"cleanup","anchor_role":"affected",)"
+        R"("falsify_by":"si clear_busy corre al done, hyp muere","why":"M6 latch"}],)"
+        R"("why":"null path_symbol debe aceptarse"})",
+        atlas_payload);
+    expect(with_null.ok && with_null.hypotheses.size() == 1, "hyp allows null path_symbol");
+    const auto invented = tuide::registry_parse_causal_zone_hyp(
+        R"({"action":"causal_zone_hyp_v1","hypotheses":[{)"
+        R"("claim":"inventa un toolchain que no está en las fichas",)"
+        R"("slots":{"affected":{"stem":"gradle"},"control":null,"trigger":null,"cleanup":null},)"
+        R"("gap":"affected","anchor_role":"affected","why":"ruido"}],)"
+        R"("why":"stem ajeno se anula, la hyp de ausencia vive"})",
+        atlas_payload);
+    expect(invented.ok && invented.hypotheses.size() == 1, "ungrounded stem does not drop hyp");
+    expect(invented.hypotheses[0].affected.stem.empty(), "ungrounded stem is nulled");
+    const auto mixed = tuide::registry_parse_causal_zone_hyp(
+        R"({"action":"causal_zone_hyp_v1","hypotheses":[{)"
+        R"("claim":"el latch spinner no se limpia al terminar",)"
+        R"("slots":{"affected":{"stem":"busy_strip"},"control":{"stem":"gradle"},)"
+        R"("trigger":null,"cleanup":null},)"
+        R"("gap":"cleanup","anchor_role":"affected",)"
+        R"("falsify_by":"si clear_busy corre al done, hyp muere","why":"M6 latch"}],)"
+        R"("why":"glosa en un slot no tira la hyp grounded"})",
+        atlas_payload);
+    expect(mixed.ok && mixed.hypotheses.size() == 1, "mixed hyp keeps grounded slot");
+    expect(mixed.hypotheses[0].affected.stem == "busy_strip", "mixed keeps busy_strip");
+    expect(mixed.hypotheses[0].control.stem.empty(), "mixed nulls ungrounded control");
+  }
+
   // Pack-off path keeps edges without requiring skeleton slots.
   tuide::RegistryCausalJudgeOpts pack_off = judge_opts;
   pack_off.mechanism_pack = false;

@@ -19,6 +19,7 @@ namespace tuide {
 
 class EmbeddingBackend;
 class CodingStemEmbedIndex;
+class L2Brain;
 
 struct Level1AgentDeps {
   ToolRegistry* tools = nullptr;
@@ -27,6 +28,7 @@ struct Level1AgentDeps {
   SymbolWorkspaceIndexer* symbol_indexer = nullptr;
   LlamaBackend* backend = nullptr;
   LlamaBackend* l2_backend = nullptr;   // optional; semantic two-pass retrieval
+  L2Brain* l2_brain = nullptr;          // optional; remote Mac / OpenAI-compatible distill
   EmbeddingBackend* embed = nullptr;  // optional; coding-pack semantic rerank
   CodingStemEmbedIndex* coding_stem_index = nullptr;
   CodingSymbolEmbedIndex* coding_symbol_index = nullptr;  // unused; kept for ABI/tests

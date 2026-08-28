@@ -15,6 +15,7 @@
 #include "ai/l2_brain.hpp"
 #include "ai/level1_agent.hpp"
 #include "ai/llama_backend.hpp"
+#include "ai/llama_net.hpp"
 #include "ai/model_store.hpp"
 #include "app/workspace_config.hpp"
 #include "app/workspace_model.hpp"
@@ -125,6 +126,7 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
   if (settings.models_cache_dir.empty()) {
     settings.models_cache_dir = ModelStore::default_cache_dir();
   }
+  apply_ai_runtime_env(&settings);
   settings.level2_workflow = "plan";
   settings.level1.max_steps = 1;
   settings.level1.temperature = 0.1f;
@@ -164,15 +166,28 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
   }
 
   LlamaBackend backend;
-  if (!backend.ensure_ready(settings, progress, &err)) {
-    std::cerr << "llama ensure_ready: " << err << '\n';
-    return 1;
-  }
-
+  RemoteL2Brain remote_brain;
   LlamaBackend l2_backend;
-  std::string l2_err;
   LocalL2Brain l2_warm(&l2_backend);
-  const bool l2_ready = l2_warm.ensure_ready(settings, progress, &l2_err);
+  std::string l2_err;
+  const bool remote_l2 = settings.level2_mode == "remote";
+  bool l2_ready = false;
+  L2Brain* l2_brain = nullptr;
+
+  if (remote_l2) {
+    if (!remote_brain.ensure_ready(settings, progress, &l2_err)) {
+      std::cerr << "l2 remote ensure_ready: " << l2_err << '\n';
+      return 1;
+    }
+    l2_ready = true;
+    l2_brain = &remote_brain;
+  } else {
+    if (!backend.ensure_ready(settings, progress, &err)) {
+      std::cerr << "llama ensure_ready: " << err << '\n';
+      return 1;
+    }
+    l2_ready = l2_warm.ensure_ready(settings, progress, &l2_err);
+  }
 
   // Modo --l2-distill / --intent-decompose: una sola llamada al 7B (sin pipeline L1 completo).
   if (l2_distill || intent_decompose) {
@@ -259,7 +274,21 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
     req.temperature = 0.1;
     req.context_role = "L2";
     const auto t0 = std::chrono::steady_clock::now();
-    const auto completion = l2_backend.complete(req, nullptr);
+    LlamaCompletionResult completion;
+    if (l2_brain != nullptr) {
+      L2BrainRequest breq;
+      breq.system_prompt = req.system_prompt;
+      breq.user_prompt = req.user_prompt;
+      breq.max_tokens = req.max_tokens;
+      breq.n_ctx = req.n_ctx;
+      breq.temperature = req.temperature;
+      const auto br = l2_brain->propose(breq, nullptr);
+      completion.ok = br.ok;
+      completion.text = br.text;
+      completion.error = br.error;
+    } else {
+      completion = l2_backend.complete(req, nullptr);
+    }
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - t0)
                         .count();
@@ -281,8 +310,9 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
   deps.tasks = nullptr;
   deps.workspace = &workspace_model;
   deps.symbol_indexer = &symbol_indexer;
-  deps.backend = &backend;
-  deps.l2_backend = l2_ready ? &l2_backend : nullptr;
+  deps.backend = remote_l2 ? nullptr : &backend;
+  deps.l2_backend = (!remote_l2 && l2_ready) ? &l2_backend : nullptr;
+  deps.l2_brain = l2_brain;
   deps.embed = embed_backend.get();
   deps.coding_stem_index = no_stem_embed ? nullptr : &stem_index;
   deps.settings = settings;

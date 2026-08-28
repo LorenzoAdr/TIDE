@@ -84,6 +84,85 @@ GraphQueryProfile graph_query_profile_default(GraphQueryPhase phase) {
   return p;
 }
 
+const char* graph_view_level_name(GraphViewLevel level) {
+  switch (level) {
+    case GraphViewLevel::Atlas:
+      return "atlas";
+    case GraphViewLevel::Inspect:
+      return "inspect";
+    case GraphViewLevel::Deep:
+      return "deep";
+  }
+  return "atlas";
+}
+
+bool graph_view_level_parse(const std::string& s, GraphViewLevel* out) {
+  if (out == nullptr) {
+    return false;
+  }
+  if (s == "atlas" || s == "simple" || s == "simplificada") {
+    *out = GraphViewLevel::Atlas;
+    return true;
+  }
+  if (s == "inspect" || s == "ficha" || s.empty()) {
+    *out = GraphViewLevel::Inspect;
+    return true;
+  }
+  if (s == "deep" || s == "profunda" || s == "source") {
+    *out = GraphViewLevel::Deep;
+    return true;
+  }
+  return false;
+}
+
+GraphViewProfile graph_view_profile_default(GraphViewLevel level) {
+  GraphViewProfile p;
+  p.level = level;
+  switch (level) {
+    case GraphViewLevel::Atlas:
+      p.max_zones = 12;
+      p.max_representatives = 3;
+      p.max_edges = 4;
+      p.max_trails = 0;
+      p.expand_hops = 0;
+      p.outline_all_representatives = false;
+      p.promote_uncovered = true;
+      break;
+    case GraphViewLevel::Inspect:
+      p.max_zones = 3;
+      p.max_representatives = 8;
+      p.max_edges = 16;
+      p.max_trails = 1;
+      p.expand_hops = 2;
+      p.outline_all_representatives = false;
+      p.promote_uncovered = false;
+      break;
+    case GraphViewLevel::Deep:
+      p.max_zones = 2;
+      p.max_representatives = 10;
+      p.max_edges = 24;
+      p.max_trails = 2;
+      p.expand_hops = 2;
+      p.outline_all_representatives = true;
+      p.promote_uncovered = false;
+      break;
+  }
+  return p;
+}
+
+void graph_view_profile_apply(const GraphViewProfile& profile, RegistryCausalJudgeOpts* opts) {
+  if (opts == nullptr) {
+    return;
+  }
+  opts->max_zones = profile.max_zones;
+  opts->max_representatives = profile.max_representatives;
+  opts->max_edges = profile.max_edges;
+  opts->max_trails = profile.max_trails;
+  opts->expand_hops = profile.expand_hops;
+  opts->outline_all_representatives = profile.outline_all_representatives;
+  opts->promote_uncovered = profile.promote_uncovered;
+}
+
 void graph_query_profile_apply(const GraphQueryProfile& profile, RegistryQueryOpts* opts) {
   if (opts == nullptr) {
     return;

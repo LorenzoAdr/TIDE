@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include "ai/l2_effect_slice.hpp"
+#include "ai/l2_problem_frame.hpp"
 
 struct sqlite3;
 
@@ -299,6 +300,30 @@ struct RegistryCausalJudgeOpts {
 bool registry_causal_judge_opts_apply_json(RegistryCausalJudgeOpts* opts, const nlohmann::json& j,
                                            std::string* err);
 
+// Niveles de presentación del pack causal. Ortogonal a GraphQueryPhase (hops).
+// atlas: muchas zonas, poco texto. inspect/deep: pocas zonas, más evidencia.
+enum class GraphViewLevel {
+  Atlas,
+  Inspect,
+  Deep,
+};
+
+struct GraphViewProfile {
+  GraphViewLevel level = GraphViewLevel::Atlas;
+  int max_zones = 12;
+  int max_representatives = 3;
+  int max_edges = 4;
+  int max_trails = 0;
+  int expand_hops = 0;
+  bool outline_all_representatives = false;
+  bool promote_uncovered = true;
+};
+
+const char* graph_view_level_name(GraphViewLevel level);
+bool graph_view_level_parse(const std::string& s, GraphViewLevel* out);
+GraphViewProfile graph_view_profile_default(GraphViewLevel level);
+void graph_view_profile_apply(const GraphViewProfile& profile, RegistryCausalJudgeOpts* opts);
+
 struct RegistryZoneTriage {
   std::string id;
   std::string verdict;  // inspect | reject | anchor
@@ -312,12 +337,13 @@ struct RegistryZoneTriage {
 
 struct RegistryCausalTriageDecision {
   bool ok = false;
-  std::string action;  // causal_zone_anchor_v1 | causal_zone_triage_v1 | causal_zone_primary_survey_v1
+  std::string action;  // causal_zone_anchor_v1 | causal_zone_triage_v1 | causal_zone_primary_survey_v1 | causal_atlas_survey_v1
   std::vector<RegistryZoneTriage> zones;
   std::vector<std::string> shortlist;
   std::string hypothesis;
   bool critical_mass = false;
   bool retrieval_needed = false;
+  std::string view;  // inspect | deep (siguiente pack; vacío = inspect)
   std::string why;
   std::string raw;
   std::string error;
@@ -575,6 +601,58 @@ void registry_apply_synth_hypothesis_tiebreak(const nlohmann::json& expanded_pay
                                               RegistryCausalJudgeDecision* decision);
 
 std::string registry_causal_judge_markdown(const nlohmann::json& payload);
+std::string registry_causal_atlas_markdown(const nlohmann::json& payload,
+                                          const std::string& consulta = {});
+std::string registry_causal_pack_markdown(const nlohmann::json& payload, GraphViewLevel level);
+std::string registry_causal_zone_kind(const nlohmann::json& zone);
+void registry_atlas_fill_expand_from(const nlohmann::json& payload,
+                                     RegistryCausalTriageDecision* decision);
+std::string registry_causal_atlas_survey_system_prompt();
+std::string registry_causal_atlas_survey_user_prompt(const std::string& atlas_markdown);
+RegistryCausalTriageDecision registry_parse_causal_atlas_survey(
+    const std::string& raw, const std::vector<std::string>& allowed_zone_ids,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets);
+
+// Segunda pasada: ¿el pack inspect cubre el objeto de la consulta? Si no, añadir M*.
+struct RegistryCausalAtlasCoverDecision {
+  bool ok = false;
+  bool covers = false;
+  std::vector<std::string> add;
+  std::string why;
+  std::string raw;
+  std::string error;
+};
+
+std::string registry_causal_atlas_cover_system_prompt();
+std::string registry_causal_atlas_cover_user_prompt(const std::string& atlas_markdown,
+                                                    const std::vector<std::string>& opened,
+                                                    const std::vector<std::string>& remaining,
+                                                    const std::string& inspect_markdown);
+RegistryCausalAtlasCoverDecision registry_parse_causal_atlas_cover(
+    const std::string& raw, const std::vector<std::string>& allowed_zone_ids,
+    const std::vector<std::string>& already_open);
+// Añade ids inspect al shortlist (sin duplicar). Devuelve cuántos se insertaron.
+int registry_atlas_merge_inspect_ids(RegistryCausalTriageDecision* decision,
+                                     const std::vector<std::string>& add_ids,
+                                     const std::vector<std::string>& allowed_zone_ids,
+                                     int max_total);
+
+// Hipótesis de fallo (slots affected/control/trigger/cleanup) sobre fichas inspect.
+struct RegistryCausalHypDecision {
+  bool ok = false;
+  std::string action;  // causal_zone_hyp_v1
+  std::vector<AnchorHypothesis> hypotheses;
+  std::string why;
+  std::string raw;
+  std::string error;
+};
+
+std::string registry_causal_zone_hyp_system_prompt();
+std::string registry_causal_zone_hyp_user_prompt(const std::string& inspect_markdown);
+RegistryCausalHypDecision registry_parse_causal_zone_hyp(const std::string& raw,
+                                                         const nlohmann::json& inspect_payload);
+nlohmann::json registry_causal_hyp_decision_to_json(const RegistryCausalHypDecision& decision);
+
 std::string registry_causal_judge_system_prompt();
 std::string registry_causal_judge_user_prompt(const std::string& cards_markdown);
 std::string registry_causal_synth_system_prompt();

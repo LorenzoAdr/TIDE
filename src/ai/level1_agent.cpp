@@ -19,6 +19,7 @@
 #include "ai/level1_action.hpp"
 #include "ai/repo_map.hpp"
 #include "ai/search_needles.hpp"
+#include "ai/l2_brain.hpp"
 #include "ai/l2_feat.hpp"
 #include "ai/l2_problem_frame.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
@@ -561,7 +562,29 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
   } else if (deps_.backend != nullptr && deps_.backend->ready()) {
     reasoning_backend = deps_.backend;
   }
-  if (reasoning_backend != nullptr) {
+  const bool via_l2_brain = reasoning_backend == nullptr && deps_.l2_brain != nullptr;
+  auto complete_reason = [&](const LlamaCompletionRequest& req) -> LlamaCompletionResult {
+    if (reasoning_backend != nullptr) {
+      return reasoning_backend->complete(req, cancel);
+    }
+    LlamaCompletionResult out;
+    if (deps_.l2_brain == nullptr) {
+      out.error = "sin backend de razonamiento";
+      return out;
+    }
+    L2BrainRequest breq;
+    breq.system_prompt = req.system_prompt;
+    breq.user_prompt = req.user_prompt;
+    breq.max_tokens = req.max_tokens;
+    breq.n_ctx = req.n_ctx;
+    breq.temperature = req.temperature;
+    const auto br = deps_.l2_brain->propose(breq, cancel);
+    out.ok = br.ok;
+    out.text = br.text;
+    out.error = br.error;
+    return out;
+  };
+  if (reasoning_backend != nullptr || via_l2_brain) {
     {
       LlamaCompletionRequest req;
       req.system_prompt =
@@ -615,15 +638,17 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
         req.n_ctx = std::min(ctx, 2048);
       }
       req.temperature = 0.1;
-      req.context_role = reasoning_backend == deps_.l2_backend ? "L2" : "L1";
+      req.context_role =
+          (reasoning_backend == deps_.l2_backend || via_l2_brain) ? "L2" : "L1";
       req.n_ctx_setting_hint =
-          reasoning_backend == deps_.l2_backend ? "ai.level2.n_ctx" : "ai.level1.n_ctx";
+          (reasoning_backend == deps_.l2_backend || via_l2_brain) ? "ai.level2.n_ctx"
+                                                                  : "ai.level1.n_ctx";
       if (log) {
-        log(reasoning_backend == deps_.l2_backend
+        log((reasoning_backend == deps_.l2_backend || via_l2_brain)
                 ? "L1 investigar → L2 pasada 1: destilación semántica…"
                 : "L1 investigar → destilando intención…");
       }
-      const auto completion = reasoning_backend->complete(req, cancel);
+      const auto completion = complete_reason(req);
       if (completion.ok) {
         if (log) {
           log("L1 intent raw: " + completion.text);
@@ -794,16 +819,17 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
       req.n_ctx = std::min(ctx, 2048);
     }
     req.temperature = 0.1;
-    req.context_role = reasoning_backend == deps_.l2_backend ? "L2" : "L1";
+    req.context_role = (reasoning_backend == deps_.l2_backend || via_l2_brain) ? "L2" : "L1";
     req.n_ctx_setting_hint =
-        reasoning_backend == deps_.l2_backend ? "ai.level2.n_ctx" : "ai.level1.n_ctx";
+        (reasoning_backend == deps_.l2_backend || via_l2_brain) ? "ai.level2.n_ctx"
+                                                                : "ai.level1.n_ctx";
     if (log) {
-      log(reasoning_backend == deps_.l2_backend
+      log((reasoning_backend == deps_.l2_backend || via_l2_brain)
               ? "L1 investigar → L2 pasada 2: elegir dónde buscar sobre mapa rankeado…"
               : "L1 investigar → proponiendo needles…");
     }
     const auto needles_t0 = std::chrono::steady_clock::now();
-    const auto completion = reasoning_backend->complete(req, cancel);
+    const auto completion = complete_reason(req);
     const auto needles_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                 std::chrono::steady_clock::now() - needles_t0)
                                 .count();
@@ -913,12 +939,10 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
 Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& log,
                                  std::atomic<bool>* cancel) {
   Level1RunResult out;
-  if (deps_.backend == nullptr) {
-    out.error = "sin LlamaBackend";
-    return out;
-  }
-  if (!deps_.backend->ready()) {
-    out.error = "backend L1 no listo";
+  const bool have_local_l1 = deps_.backend != nullptr && deps_.backend->ready();
+  const bool have_remote_l2 = deps_.l2_brain != nullptr;
+  if (!have_local_l1 && !have_remote_l2) {
+    out.error = "sin backend L1/L2";
     return out;
   }
 

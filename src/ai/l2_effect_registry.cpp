@@ -4435,6 +4435,44 @@ void truncate_utf8(std::string* text, std::size_t max_bytes) {
   }
 }
 
+std::string utf8_sanitize_clip(const std::string& s, std::size_t max_bytes) {
+  std::string out;
+  out.reserve(std::min(s.size(), max_bytes));
+  for (std::size_t i = 0; i < s.size() && out.size() < max_bytes;) {
+    const auto c = static_cast<unsigned char>(s[i]);
+    std::size_t need = 1;
+    if ((c & 0x80) == 0) {
+      need = 1;
+    } else if ((c & 0xe0) == 0xc0) {
+      need = 2;
+    } else if ((c & 0xf0) == 0xe0) {
+      need = 3;
+    } else if ((c & 0xf8) == 0xf0) {
+      need = 4;
+    } else {
+      ++i;
+      continue;
+    }
+    if (i + need > s.size() || out.size() + need > max_bytes) {
+      break;
+    }
+    bool ok = true;
+    for (std::size_t j = 1; j < need; ++j) {
+      if ((static_cast<unsigned char>(s[i + j]) & 0xc0) != 0x80) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) {
+      ++i;
+      continue;
+    }
+    out.append(s, i, need);
+    i += need;
+  }
+  return out;
+}
+
 bool fill_zone_expand_from(RegistryZoneTriage* zone, const nlohmann::json& item,
                            const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets,
                            const std::unordered_set<std::string>& allowed, std::string* error) {
@@ -4559,6 +4597,95 @@ RegistryCausalTriageDecision registry_parse_causal_triage_decision(
   if (out.why.size() < 8 || out.why.size() > 240 ||
       (out.shortlist.empty() && !out.retrieval_needed)) {
     out.error = "resultado de triage no accionable";
+    return out;
+  }
+  out.ok = true;
+  return out;
+}
+
+RegistryCausalTriageDecision registry_parse_causal_atlas_survey(
+    const std::string& raw, const std::vector<std::string>& allowed_zone_ids,
+    const std::unordered_map<std::string, std::vector<std::string>>& allowed_targets) {
+  RegistryCausalTriageDecision out;
+  out.raw = raw;
+  out.action = "causal_atlas_survey_v1";
+  out.view = "inspect";
+  const auto begin = raw.find('{');
+  const auto end = raw.rfind('}');
+  if (begin == std::string::npos || end == std::string::npos || end <= begin) {
+    out.error = "atlas survey sin objeto JSON";
+    return out;
+  }
+  nlohmann::json j;
+  try {
+    j = nlohmann::json::parse(raw.substr(begin, end - begin + 1));
+  } catch (const std::exception& e) {
+    out.error = std::string("JSON atlas survey inválido: ") + e.what();
+    return out;
+  }
+  const std::string action = j.value("action", "");
+  if (action != "causal_atlas_survey_v1" && action != "causal_zone_triage_v1") {
+    out.error = "contrato causal_atlas_survey_v1 inválido";
+    return out;
+  }
+  const std::string view = j.value("view", "inspect");
+  if (view == "deep" || view == "profunda") {
+    out.view = "deep";
+  } else {
+    out.view = "inspect";
+  }
+  const std::unordered_set<std::string> allowed(allowed_zone_ids.begin(), allowed_zone_ids.end());
+  std::unordered_set<std::string> inspected;
+  std::vector<std::pair<std::string, nlohmann::json>> items;
+  if (j.contains("inspect") && j["inspect"].is_array()) {
+    for (const auto& item : j["inspect"]) {
+      if (item.is_string()) {
+        items.push_back({item.get<std::string>(), nlohmann::json::object()});
+      } else if (item.is_object()) {
+        items.push_back({item.value("id", ""), item});
+      }
+    }
+  } else if (j.contains("zones") && j["zones"].is_object()) {
+    for (auto it = j["zones"].begin(); it != j["zones"].end(); ++it) {
+      if (it.value().is_object() && it.value().value("verdict", "") == "inspect") {
+        items.push_back({it.key(), it.value()});
+      }
+    }
+  }
+  if (items.size() > 3) {
+    items.resize(3);
+  }
+  for (const auto& [declared_id, item] : items) {
+    RegistryZoneTriage zone;
+    zone.id = declared_id;
+    zone.verdict = "inspect";
+    zone.need = item.value("need", "");
+    if (zone.need.empty()) {
+      zone.need = "ampliar mecanismo de esta zona";
+    }
+    std::string expand_error;
+    if (!fill_zone_expand_from(&zone, item, allowed_targets, allowed, &expand_error)) {
+      out.error = expand_error;
+      return out;
+    }
+    if (zone.need.size() > 160) {
+      out.error = "inspect inválido para " + zone.id;
+      return out;
+    }
+    if (!inspected.insert(zone.id).second) {
+      continue;
+    }
+    out.shortlist.push_back(zone.id);
+    out.zones.push_back(std::move(zone));
+  }
+  out.retrieval_needed = j.value("retrieval_needed", false);
+  out.why = j.value("why", "");
+  if (out.why.size() < 8 && !out.shortlist.empty()) {
+    out.why = "inspeccionar hilos del atlas";
+  }
+  if (out.why.size() < 8 || out.why.size() > 240 ||
+      (out.shortlist.empty() && !out.retrieval_needed)) {
+    out.error = "resultado de atlas survey no accionable";
     return out;
   }
   out.ok = true;
@@ -4834,6 +4961,7 @@ nlohmann::json registry_causal_triage_decision_to_json(
           {"hypothesis", decision.hypothesis},
           {"critical_mass", decision.critical_mass},
           {"retrieval_needed", decision.retrieval_needed},
+          {"view", decision.view},
           {"why", decision.why},
           {"error", decision.error}};
 }
@@ -6348,6 +6476,11 @@ std::vector<RegistryCausalTriageDecision> registry_slot_hyps_to_threads(
   return threads;
 }
 
+namespace {
+std::string atlas_owns_caption(const nlohmann::json& zone);
+std::string atlas_not_caption(const nlohmann::json& zone, const std::string& kind);
+}  // namespace
+
 std::string registry_causal_judge_markdown(const nlohmann::json& payload) {
   std::ostringstream out;
   auto short_target = [](const std::string& target) {
@@ -6380,6 +6513,16 @@ std::string registry_causal_judge_markdown(const nlohmann::json& payload) {
     out << "\n## " << zone.value("id", "?") << " score=" << zone.value("score", 0.f)
         << " margin=" << zone.value("score_margin", 0.f)
         << " coverage=" << zone.value("mass_coverage", 0.f) << "\n";
+    const std::string kind = registry_causal_zone_kind(zone);
+    out << "kind=" << kind << "\n";
+    const std::string owns = atlas_owns_caption(zone);
+    if (!owns.empty()) {
+      out << "owns: " << owns << "\n";
+    }
+    const std::string notc = atlas_not_caption(zone, kind);
+    if (!notc.empty()) {
+      out << "not: " << notc << "\n";
+    }
     out << "stems:";
     for (const auto& stem : zone.value("primary_stems", nlohmann::json::array())) {
       out << " " << stem.get<std::string>();
@@ -6582,6 +6725,972 @@ std::string registry_causal_judge_markdown(const nlohmann::json& payload) {
   out << "\n<!-- budget: chars=" << body.size() << " token_est_4c=" << token_estimate
       << " evidence_units=" << evidence_units << " -->\n";
   return out.str();
+}
+
+namespace {
+
+std::string causal_short_target(const std::string& target) {
+  const auto slash = target.rfind('/');
+  if (slash == std::string::npos) {
+    return target;
+  }
+  const auto colon = target.find(':', slash);
+  if (colon == std::string::npos) {
+    return target;
+  }
+  std::string file = target.substr(slash + 1, colon - slash - 1);
+  const auto dot = file.rfind('.');
+  if (dot != std::string::npos) {
+    file.resize(dot);
+  }
+  std::string suffix = target.substr(colon + 1);
+  if (target.rfind("ctrl:", 0) == 0) {
+    suffix = "L" + suffix;
+  }
+  return file + "::" + suffix;
+}
+
+std::string causal_lower(std::string s) {
+  for (char& c : s) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return s;
+}
+
+bool causal_hay_has(const std::string& hay, std::initializer_list<const char*> needles) {
+  for (const char* needle : needles) {
+    if (hay.find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string causal_symbol_of(const std::string& target) {
+  const auto colon = target.rfind(':');
+  return colon == std::string::npos ? target : target.substr(colon + 1);
+}
+
+}  // namespace
+
+namespace {
+
+std::string atlas_primary_stem(const nlohmann::json& zone) {
+  for (const char* key : {"primary_stems", "core_stems"}) {
+    for (const auto& stem : zone.value(key, nlohmann::json::array())) {
+      if (stem.is_string() && !stem.get<std::string>().empty()) {
+        return stem.get<std::string>();
+      }
+    }
+  }
+  return {};
+}
+
+bool atlas_stem_is_ui_object(const std::string& stem) {
+  return causal_hay_has(causal_lower(stem), {"modal", "overlay", "strip", "layout", "settings",
+                                            "file_tree", "quit_confirm", "editor_panel",
+                                            "editor_text", "busy_strip"});
+}
+
+std::vector<std::string> atlas_peek_pool(const nlohmann::json& zone) {
+  std::vector<std::string> out;
+  std::unordered_set<std::string> seen;
+  auto push = [&](const std::string& target) {
+    const std::string s = causal_short_target(target);
+    if (s.empty() || !seen.insert(causal_lower(s)).second) {
+      return;
+    }
+    out.push_back(s);
+  };
+  for (const auto& card : zone.value("representatives", nlohmann::json::array())) {
+    push(card.value("target", ""));
+  }
+  const auto roles = zone.value("roles", nlohmann::json::object());
+  for (const auto& writer : roles.value("writers", nlohmann::json::array())) {
+    push(writer.value("target", ""));
+  }
+  return out;
+}
+
+std::string atlas_sym_bucket(const std::string& short_t) {
+  std::string s = causal_lower(short_t);
+  const auto pos = s.rfind("::");
+  if (pos != std::string::npos) {
+    s = s.substr(pos + 2);
+  }
+  if (s.size() > 10) {
+    s.resize(10);
+  }
+  return s;
+}
+
+bool atlas_peek_is_entry(const std::string& short_t) {
+  return causal_hay_has(causal_lower(short_t), {"make", "append_", "open_", "overlay", "toolpack",
+                                               "switch_top", "render_top", "apply_", "save",
+                                               "load", "begin_"});
+}
+
+std::vector<std::string> atlas_diverse_peeks(const nlohmann::json& zone) {
+  const auto pool = atlas_peek_pool(zone);
+  std::vector<std::string> picked;
+  std::unordered_set<std::string> buckets;
+  auto try_add = [&](const std::string& s) {
+    if (picked.size() >= 2) {
+      return;
+    }
+    if (std::find(picked.begin(), picked.end(), s) != picked.end()) {
+      return;
+    }
+    const std::string b = atlas_sym_bucket(s);
+    if (buckets.count(b)) {
+      return;
+    }
+    picked.push_back(s);
+    buckets.insert(b);
+  };
+  for (const auto& s : pool) {
+    if (atlas_peek_is_entry(s)) {
+      try_add(s);
+    }
+  }
+  for (const auto& s : pool) {
+    try_add(s);
+  }
+  if (picked.empty() && !pool.empty()) {
+    picked.push_back(pool.front());
+  }
+  return picked;
+}
+
+std::string atlas_owns_caption(const nlohmann::json& zone) {
+  std::string owns = atlas_primary_stem(zone);
+  for (const auto& p : atlas_diverse_peeks(zone)) {
+    if (!atlas_peek_is_entry(p)) {
+      continue;
+    }
+    if (owns.empty()) {
+      owns = p;
+    } else if (causal_lower(p).find(causal_lower(owns)) == std::string::npos) {
+      owns += " / " + p;
+    }
+    break;
+  }
+  if (owns.size() > 88) {
+    owns.resize(88);
+  }
+  return owns;
+}
+
+std::string atlas_not_caption(const nlohmann::json& zone, const std::string& kind) {
+  if (kind == "chrome" || kind == "hole") {
+    return {};
+  }
+  std::string blob = causal_lower(atlas_primary_stem(zone));
+  for (const auto& p : atlas_peek_pool(zone)) {
+    blob += " ";
+    blob += causal_lower(p);
+  }
+  if (atlas_stem_is_ui_object(atlas_primary_stem(zone)) &&
+      causal_hay_has(blob, {"cancel", "recording", "clamp_"})) {
+    return "no es solo cancel/recording";
+  }
+  if (causal_hay_has(blob, {"hover", "clickable"})) {
+    return "no es hover/chrome";
+  }
+  return {};
+}
+
+}  // namespace
+
+std::string registry_causal_zone_kind(const nlohmann::json& zone) {
+  std::string hay;
+  auto add = [&](const std::string& s) {
+    if (!s.empty()) {
+      hay += " ";
+      hay += causal_lower(s);
+    }
+  };
+  for (const auto& risk : zone.value("risks", nlohmann::json::array())) {
+    if (risk.is_string() && (risk.get<std::string>() == "promoted_from_uncovered" ||
+                             risk.get<std::string>() == "uncovered_candidate")) {
+      return "hole";
+    }
+  }
+  for (const char* key : {"primary_stems", "core_stems", "context_stems"}) {
+    for (const auto& stem : zone.value(key, nlohmann::json::array())) {
+      if (stem.is_string()) {
+        add(stem.get<std::string>());
+      }
+    }
+  }
+  bool has_nucleus = false;
+  bool latch_nucleus = false;
+  for (const auto& nucleus : zone.value("nuclei", nlohmann::json::array())) {
+    has_nucleus = true;
+    add(nucleus.value("state", ""));
+    add(nucleus.value("id", ""));
+    const std::string st = causal_lower(nucleus.value("state", ""));
+    if (causal_hay_has(st, {"spinner", "busy", "latch", "flag", "pending", "frame"})) {
+      latch_nucleus = true;
+    }
+  }
+  const auto roles = zone.value("roles", nlohmann::json::object());
+  for (const auto& writer : roles.value("writers", nlohmann::json::array())) {
+    add(causal_symbol_of(writer.value("target", "")));
+  }
+  for (const auto& card : zone.value("representatives", nlohmann::json::array())) {
+    add(causal_symbol_of(card.value("target", "")));
+  }
+  const bool has_ports = !zone.value("ports", nlohmann::json::array()).empty();
+  if (latch_nucleus) {
+    return "latch";
+  }
+  if (causal_hay_has(hay, {"hover", "clickable", "gutter", "ui_wake"})) {
+    return "chrome";
+  }
+  if (atlas_stem_is_ui_object(atlas_primary_stem(zone))) {
+    return "object";
+  }
+  if (has_ports || (has_nucleus && !latch_nucleus)) {
+    return "caller";
+  }
+  if (causal_hay_has(hay, {"diagnostics", "tab_"})) {
+    return "chrome";
+  }
+  if (has_nucleus) {
+    return "latch";
+  }
+  return "other";
+}
+
+void registry_atlas_fill_expand_from(const nlohmann::json& payload,
+                                     RegistryCausalTriageDecision* decision) {
+  if (decision == nullptr) {
+    return;
+  }
+  for (auto& zone : decision->zones) {
+    if (!zone.expand_from.empty()) {
+      continue;
+    }
+    for (const auto& item : payload.value("zones", nlohmann::json::array())) {
+      if (item.value("id", "") != zone.id) {
+        continue;
+      }
+      auto push_target = [&](const std::string& target) {
+        if (target.empty() || zone.expand_from.size() >= 3) {
+          return;
+        }
+        if (std::find(zone.expand_from.begin(), zone.expand_from.end(), target) !=
+            zone.expand_from.end()) {
+          return;
+        }
+        zone.expand_from.push_back(target);
+      };
+      std::vector<std::string> pool;
+      auto add_pool = [&](const std::string& target) {
+        if (!target.empty()) {
+          pool.push_back(target);
+        }
+      };
+      for (const auto& card : item.value("representatives", nlohmann::json::array())) {
+        add_pool(card.value("target", ""));
+      }
+      const auto roles = item.value("roles", nlohmann::json::object());
+      for (const auto& writer : roles.value("writers", nlohmann::json::array())) {
+        add_pool(writer.value("target", ""));
+      }
+      for (const auto& edge : item.value("edges", nlohmann::json::array())) {
+        add_pool(edge.value("from", ""));
+        add_pool(edge.value("to", ""));
+      }
+      for (const auto& target : pool) {
+        if (atlas_peek_is_entry(causal_short_target(target))) {
+          push_target(target);
+        }
+      }
+      for (const auto& target : pool) {
+        push_target(target);
+      }
+      break;
+    }
+  }
+}
+
+std::string registry_causal_atlas_markdown(const nlohmann::json& payload,
+                                          const std::string& consulta) {
+  std::ostringstream out;
+  const auto zones = payload.value("zones", nlohmann::json::array());
+  out << "# causal_atlas_v1\n";
+  out << "view: atlas\n";
+  if (!consulta.empty()) {
+    out << "consulta: " << utf8_sanitize_clip(consulta, 160) << "\n";
+  }
+  out << "search: " << payload.value("query", "")
+      << "  (retrieval; no son módulos)\n";
+  out << "n=" << zones.size()
+      << "  (owns=objeto; same=M* clon; peek objeto+verbo; 1–2 ids)\n";
+  std::unordered_map<std::string, std::string> stem_first_id;
+  for (const auto& zone : zones) {
+    const std::string id = zone.value("id", "?");
+    const std::string kind = registry_causal_zone_kind(zone);
+    const std::string pstem = atlas_primary_stem(zone);
+    if (!pstem.empty()) {
+      auto it = stem_first_id.find(causal_lower(pstem));
+      if (it != stem_first_id.end()) {
+        out << "\n" << id << "  same=" << it->second << "  kind=" << kind << "  stems: " << pstem
+            << "\n";
+        const auto peeks = atlas_diverse_peeks(zone);
+        if (!peeks.empty()) {
+          out << "    peek: " << peeks.front() << "\n";
+        }
+        continue;
+      }
+      stem_first_id.emplace(causal_lower(pstem), id);
+    }
+    out << "\n" << id << "  kind=" << kind << "  stems:";
+    int stem_n = 0;
+    for (const char* key : {"primary_stems", "core_stems"}) {
+      for (const auto& stem : zone.value(key, nlohmann::json::array())) {
+        if (stem.is_string() && stem_n < 4) {
+          out << " " << stem.get<std::string>();
+          ++stem_n;
+        }
+      }
+    }
+    out << "\n";
+    const std::string owns = atlas_owns_caption(zone);
+    if (!owns.empty()) {
+      out << "    owns: " << owns << "\n";
+    }
+    const std::string not_cap = atlas_not_caption(zone, kind);
+    if (!not_cap.empty()) {
+      out << "    not: " << not_cap << "\n";
+    }
+    std::string nucleus;
+    for (const auto& item : zone.value("nuclei", nlohmann::json::array())) {
+      const std::string state = item.value("state", "");
+      if (!state.empty()) {
+        if (!nucleus.empty()) {
+          nucleus += ", ";
+        }
+        nucleus += state;
+      }
+      if (nucleus.size() > 60) {
+        break;
+      }
+    }
+    const auto missing = zone.value("pack_meta", nlohmann::json::object())
+                             .value("skeleton_missing", nlohmann::json::array());
+    std::string gap;
+    for (const auto& miss : missing) {
+      if (miss.is_string()) {
+        if (!gap.empty()) {
+          gap += ",";
+        }
+        gap += miss.get<std::string>();
+      }
+    }
+    for (const auto& risk : zone.value("risks", nlohmann::json::array())) {
+      if (risk.is_string() && risk.get<std::string>() == "no_state_nucleus" && gap.empty()) {
+        gap = "no_state";
+      }
+    }
+    if (!nucleus.empty()) {
+      out << "    nucleus: " << nucleus << "\n";
+    }
+    if (!gap.empty()) {
+      out << "    gap: " << gap << "\n";
+    }
+    const auto peeks = atlas_diverse_peeks(zone);
+    if (!peeks.empty()) {
+      out << "    peek:";
+      for (std::size_t i = 0; i < peeks.size(); ++i) {
+        if (i) {
+          out << ",";
+        }
+        out << " " << peeks[i];
+      }
+      out << "\n";
+    }
+    const auto ports = zone.value("ports", nlohmann::json::array());
+    if (!ports.empty()) {
+      const auto& edge = ports.front();
+      out << "    port: " << edge.value("from_zone", "?") << "=>" << edge.value("to_zone", "?")
+          << " " << causal_short_target(edge.value("from", "?")) << " -"
+          << edge.value("kind", "?") << "-> " << causal_short_target(edge.value("to", "?"))
+          << "\n";
+    } else {
+      const auto edges = zone.value("edges", nlohmann::json::array());
+      if (!edges.empty()) {
+        const auto& edge = edges.front();
+        out << "    peek-edge: " << causal_short_target(edge.value("from", "?")) << " -"
+            << edge.value("kind", "?") << "-> " << causal_short_target(edge.value("to", "?"))
+            << "\n";
+      }
+    }
+  }
+  const auto bridges = payload.value("zone_bridges", nlohmann::json::array());
+  if (!bridges.empty()) {
+    out << "\nbridges:";
+    int n = 0;
+    for (const auto& bridge : bridges) {
+      if (n++ >= 4) {
+        break;
+      }
+      out << " " << bridge.value("trail", "?") << "[";
+      bool first = true;
+      for (const auto& z : bridge.value("zones", nlohmann::json::array())) {
+        if (!first) {
+          out << ",";
+        }
+        first = false;
+        if (z.is_string()) {
+          out << z.get<std::string>();
+        }
+      }
+      out << "]";
+    }
+    out << "\n";
+  }
+  const auto uncovered = payload.value("uncovered_seeds", nlohmann::json::array());
+  if (!uncovered.empty()) {
+    out << "holes:";
+    int n = 0;
+    for (const auto& seed : uncovered) {
+      if (n++ >= 4) {
+        break;
+      }
+      out << " " << causal_short_target(seed.value("target", "?"));
+    }
+    out << "\n";
+  }
+  const std::string body = out.str();
+  out << "<!-- budget: chars=" << body.size() << " token_est_4c=" << (body.size() + 3) / 4
+      << " -->\n";
+  return out.str();
+}
+
+std::string registry_causal_pack_markdown(const nlohmann::json& payload, GraphViewLevel level) {
+  switch (level) {
+    case GraphViewLevel::Atlas:
+      return registry_causal_atlas_markdown(payload);
+    case GraphViewLevel::Inspect:
+      return registry_strip_zone_scores_markdown(registry_causal_judge_markdown(payload));
+    case GraphViewLevel::Deep:
+      return registry_causal_judge_markdown(payload);
+  }
+  return registry_causal_atlas_markdown(payload);
+}
+
+std::string registry_causal_atlas_survey_system_prompt() {
+  return R"(Eres un encuestador de un ATLAS de zonas de código, no un juez final.
+El atlas es un esquema: owns = objeto que posee la zona; not = lo que NO es; same=M* = clon.
+No corones ancla ni des f1_done. search: son términos de retrieval, NO módulos.
+
+Elige 1–2 M* cuyo owns cubra el OBJETO de la consulta (modal, panel, latch, entrypoint):
+- Prefiere kind=object o kind=latch. Si hay same=M1, inspecciona M1 no el clon.
+- No sustituyas el objeto por un vecino (download, hover, ai_trace, bindings path, recording).
+- Un 3º id solo si es hilo rival (latch vs caller). PROHIBIDO 3 hilos "por si acaso".
+- kind=chrome NO explica drag-drop, compile, settings ni LSP.
+- Si ningún owns cubre el objeto: inspect=[] y retrieval_needed=true.
+
+view=inspect o deep. Devuelve SOLO este JSON:
+{"action":"causal_atlas_survey_v1","inspect":["M1"],"view":"inspect","retrieval_needed":false,"why":"razón concreta de 8-240 chars"}
+También vale inspect como objetos {id,need}. Máximo 3 ids. Solo ids que aparecen en el atlas.)";
+}
+
+std::string registry_causal_atlas_survey_user_prompt(const std::string& atlas_markdown) {
+  std::ostringstream out;
+  out << "Cubre el objeto de la consulta usando owns/not (no search). "
+         "Si same=M*, elige el primero. No inventes ids.\n\n"
+      << atlas_markdown;
+  return out.str();
+}
+
+std::string registry_causal_atlas_cover_system_prompt() {
+  return R"(Eres un revisor de COBERTURA de un atlas, no un ranking ni un formulador de hyps.
+Decide si las zonas ya abiertas cubren el OBJETO (owns) de la consulta. Si no, add ids
+de la lista Ids restantes. PROHIBIDO inventar M13 u otros ids que no estén en esa lista.
+
+Reglas:
+- covers=true solo si owns de lo abierto es el modal/panel/latch/entrypoint pedido.
+- Hover no cubre drag-drop. SHA256 no cubre toolpacks. Recording/bindings.json no cubre
+  abrir settings. Highlight scheduler no cubre "animación al aplicar un edit" si hay editor_panel.
+- Resaltado que tarda: visual_highlight SÍ puede cubrir si no hay mejor owns de editor.
+- add: 1–2 ids de Ids restantes (3 si no hay ninguna abierta). Vacío si covers=true.
+- Si el objeto no está en el atlas: add=[] (no inventes ids).
+
+Devuelve SOLO este JSON:
+{"action":"causal_atlas_cover_v1","covers":false,"add":["M1"],"why":"razón concreta de 8-240 chars"})";
+}
+
+std::string registry_causal_atlas_cover_user_prompt(const std::string& atlas_markdown,
+                                                    const std::vector<std::string>& opened,
+                                                    const std::vector<std::string>& remaining,
+                                                    const std::string& inspect_markdown) {
+  std::ostringstream out;
+  out << "Zonas ya ampliadas: ";
+  if (opened.empty()) {
+    out << "(ninguna)\n";
+  } else {
+    for (std::size_t i = 0; i < opened.size(); ++i) {
+      if (i > 0) {
+        out << ", ";
+      }
+      out << opened[i];
+    }
+    out << "\n";
+  }
+  out << "Ids restantes (SOLO estos en add): ";
+  if (remaining.empty()) {
+    out << "(ninguno)\n";
+  } else {
+    for (std::size_t i = 0; i < remaining.size(); ++i) {
+      if (i > 0) {
+        out << ", ";
+      }
+      out << remaining[i];
+    }
+    out << "\n";
+  }
+  out << "¿Cubren el objeto (owns) de la consulta? Si no, add de Ids restantes. No inventes ids.\n\n"
+      << atlas_markdown;
+  if (!inspect_markdown.empty()) {
+    out << "\n\nFichas ya ampliadas:\n";
+    constexpr std::size_t kCap = 5000;
+    out << utf8_sanitize_clip(inspect_markdown, kCap);
+    if (inspect_markdown.size() > kCap) {
+      out << "\n…\n";
+    } else {
+      out << "\n";
+    }
+  }
+  return out.str();
+}
+
+namespace {
+
+bool hyp_json_bool(const nlohmann::json& o, const char* key, bool fallback) {
+  if (!o.contains(key) || o[key].is_null()) {
+    return fallback;
+  }
+  if (o[key].is_boolean()) {
+    return o[key].get<bool>();
+  }
+  if (o[key].is_number_integer()) {
+    return o[key].get<int>() != 0;
+  }
+  if (o[key].is_string()) {
+    const std::string s = causal_lower(o[key].get<std::string>());
+    return s == "true" || s == "yes" || s == "1";
+  }
+  return fallback;
+}
+
+}  // namespace
+
+RegistryCausalAtlasCoverDecision registry_parse_causal_atlas_cover(
+    const std::string& raw, const std::vector<std::string>& allowed_zone_ids,
+    const std::vector<std::string>& already_open) {
+  RegistryCausalAtlasCoverDecision out;
+  out.raw = raw;
+  const auto begin = raw.find('{');
+  const auto end = raw.rfind('}');
+  if (begin == std::string::npos || end == std::string::npos || end <= begin) {
+    out.error = "atlas cover sin objeto JSON";
+    return out;
+  }
+  nlohmann::json j;
+  try {
+    j = nlohmann::json::parse(raw.substr(begin, end - begin + 1));
+  } catch (const std::exception& e) {
+    out.error = std::string("JSON atlas cover inválido: ") + e.what();
+    return out;
+  }
+  if (j.value("action", "") != "causal_atlas_cover_v1") {
+    out.error = "contrato causal_atlas_cover_v1 inválido";
+    return out;
+  }
+  out.covers = hyp_json_bool(j, "covers", false);
+  out.why = j.value("why", "");
+  const std::unordered_set<std::string> allowed(allowed_zone_ids.begin(),
+                                                allowed_zone_ids.end());
+  const std::unordered_set<std::string> open(already_open.begin(), already_open.end());
+  const int max_add = already_open.empty() ? 3 : 2;
+  if (j.contains("add") && j["add"].is_array()) {
+    for (const auto& item : j["add"]) {
+      std::string id;
+      if (item.is_string()) {
+        id = item.get<std::string>();
+      } else if (item.is_object()) {
+        id = item.value("id", "");
+      }
+      if (id.empty() || !allowed.count(id) || open.count(id)) {
+        continue;
+      }
+      if (std::find(out.add.begin(), out.add.end(), id) != out.add.end()) {
+        continue;
+      }
+      out.add.push_back(id);
+      if (static_cast<int>(out.add.size()) >= max_add) {
+        break;
+      }
+    }
+  }
+  if (out.covers) {
+    out.add.clear();
+  }
+  if (out.why.size() < 8) {
+    out.why = out.covers ? "el pack cubre el objeto de la consulta"
+                         : "ampliar zona cuyo peek cubre el objeto";
+  }
+  if (out.why.size() > 240) {
+    out.error = "why de cover inválido";
+    return out;
+  }
+  out.ok = true;
+  return out;
+}
+
+int registry_atlas_merge_inspect_ids(RegistryCausalTriageDecision* decision,
+                                     const std::vector<std::string>& add_ids,
+                                     const std::vector<std::string>& allowed_zone_ids,
+                                     int max_total) {
+  if (decision == nullptr || max_total <= 0) {
+    return 0;
+  }
+  const std::unordered_set<std::string> allowed(allowed_zone_ids.begin(),
+                                                allowed_zone_ids.end());
+  std::unordered_set<std::string> have(decision->shortlist.begin(), decision->shortlist.end());
+  int added = 0;
+  for (const auto& id : add_ids) {
+    if (static_cast<int>(decision->shortlist.size()) >= max_total) {
+      break;
+    }
+    if (id.empty() || !allowed.count(id) || have.count(id)) {
+      continue;
+    }
+    RegistryZoneTriage zone;
+    zone.id = id;
+    zone.verdict = "inspect";
+    zone.need = "cobertura: peek cubre el objeto de la consulta";
+    decision->shortlist.push_back(id);
+    decision->zones.push_back(std::move(zone));
+    have.insert(id);
+    ++added;
+  }
+  if (!decision->shortlist.empty()) {
+    decision->ok = true;
+    if (decision->why.size() < 8) {
+      decision->why = "inspeccionar cobertura del atlas";
+    }
+  }
+  return added;
+}
+
+std::string registry_causal_zone_hyp_system_prompt() {
+  return R"(Eres un formulador de HIPÓTESIS DE FALLO sobre código, no un ranking ni un juez final.
+Recibes la consulta del usuario y fichas INSPECT (zonas ya ampliadas). Tu trabajo es escribir
+1–2 hipótesis en el schema de ancla: elemento afectado, control, trigger y cleanup.
+
+Reglas:
+- owns: de cada ficha es el objeto que posee. Si coincide con la consulta, ancla AHÍ (affected).
+  El vecino con más "mechanism" no gana: es 2ª hyp rival, no el affected de la 1ª.
+- Cada slot cita un stem o path_symbol VISIBLE en owns/stems/peeks. null si esa pieza no aparece.
+- path_symbol puede ser el peek corto (file::symbol) o el target path:symbol de la ficha.
+- Prohibido usar glosa de la consulta como stem (p.ej. "pestaña about") si no está en las fichas.
+- gap = el eslabón que FALTA o falla (trigger|control|cleanup|affected|consumer).
+- anchor_role = por dónde cazar primero (affected o el gap).
+- Chrome hover no explica un spinner stuck. Hueco real: slots null y gap=affected.
+- Si las fichas no cubren el objeto de la consulta, no inventes un fallo en un vecino
+  (hover ≠ drag-drop, highlight debounce ≠ editor hole, sha256 ≠ toolpacks).
+- La 2ª hyp SOLO si es un mecanismo rival distinto. No dupliques el vecino como affected.
+
+Devuelve SOLO este JSON:
+{"action":"causal_zone_hyp_v1","hypotheses":[{"claim":"el latch no se limpia al terminar el modelo","slots":{"affected":{"stem":"busy_strip","path_symbol":"busy_strip::clear_busy"},"control":{"stem":"ai_controller","path_symbol":null},"trigger":null,"cleanup":{"stem":"busy_strip","path_symbol":"busy_strip::clear_busy"}},"gap":"cleanup","anchor_role":"affected","falsify_by":"si clear_busy corre al terminar, hyp muere","why":"M6 posee spinner_frame y writers set/clear"}],"why":"razón concreta"}
+Máximo 2 hyps. claim/why/falsify_by: 12–160 caracteres.)";
+}
+
+std::string registry_causal_zone_hyp_user_prompt(const std::string& inspect_markdown) {
+  std::ostringstream out;
+  out << "Con estas fichas ampliadas, formula la hipótesis de fallo (elemento afectado, etc.).\n"
+         "owns gana si coincide con la consulta; un vecino 'más mecanismo' es 2ª hyp rival, no el ancla.\n"
+         "No uses glosa del prompt como stem. Si el pack no cubre el objeto: null + gap=affected.\n\n"
+      << inspect_markdown;
+  return out.str();
+}
+
+namespace {
+
+std::string hyp_stem_from_target(const std::string& target) {
+  const auto dbl = target.find("::");
+  if (dbl != std::string::npos) {
+    return target.substr(0, dbl);
+  }
+  const auto colon = target.rfind(':');
+  const std::string path = colon == std::string::npos ? target : target.substr(0, colon);
+  const std::string stem = registry_stem_of(path);
+  if (!stem.empty()) {
+    return stem;
+  }
+  return causal_symbol_of(target);
+}
+
+void hyp_collect_menu(const nlohmann::json& payload, std::unordered_set<std::string>* stems,
+                      std::unordered_set<std::string>* targets,
+                      std::unordered_map<std::string, std::string>* short_to_full) {
+  auto add_stem = [&](const std::string& s) {
+    if (!s.empty()) {
+      stems->insert(causal_lower(s));
+    }
+  };
+  auto add_target = [&](const std::string& t) {
+    if (t.empty()) {
+      return;
+    }
+    targets->insert(t);
+    const std::string shortened = causal_short_target(t);
+    targets->insert(shortened);
+    if (short_to_full != nullptr && short_to_full->find(shortened) == short_to_full->end()) {
+      (*short_to_full)[shortened] = t;
+    }
+    add_stem(hyp_stem_from_target(t));
+    add_stem(causal_symbol_of(t));
+  };
+  for (const auto& zone : payload.value("zones", nlohmann::json::array())) {
+    for (const char* key : {"primary_stems", "core_stems", "context_stems"}) {
+      for (const auto& stem : zone.value(key, nlohmann::json::array())) {
+        if (stem.is_string()) {
+          add_stem(stem.get<std::string>());
+        }
+      }
+    }
+    for (const auto& nucleus : zone.value("nuclei", nlohmann::json::array())) {
+      add_stem(nucleus.value("state", ""));
+    }
+    for (const auto& card : zone.value("representatives", nlohmann::json::array())) {
+      add_target(card.value("target", ""));
+    }
+    const auto roles = zone.value("roles", nlohmann::json::object());
+    for (const char* role : {"writers", "readers", "controls", "handoffs"}) {
+      for (const auto& item : roles.value(role, nlohmann::json::array())) {
+        add_target(item.value("target", ""));
+      }
+    }
+    for (const auto& edge : zone.value("edges", nlohmann::json::array())) {
+      add_target(edge.value("from", ""));
+      add_target(edge.value("to", ""));
+    }
+    for (const auto& edge : zone.value("ports", nlohmann::json::array())) {
+      add_target(edge.value("from", ""));
+      add_target(edge.value("to", ""));
+    }
+  }
+}
+
+std::string hyp_json_string(const nlohmann::json& o, const char* key) {
+  if (!o.contains(key) || o[key].is_null() || !o[key].is_string()) {
+    return "";
+  }
+  return o[key].get<std::string>();
+}
+
+bool hyp_fill_slot(HypSlotLocus* slot, const nlohmann::json& item, const std::string& declared_id,
+                   const std::unordered_set<std::string>& stems,
+                   const std::unordered_set<std::string>& targets,
+                   const std::unordered_map<std::string, std::string>& short_to_full,
+                   std::string* error) {
+  if (slot == nullptr) {
+    return false;
+  }
+  if (item.is_null() || item.empty()) {
+    return true;
+  }
+  if (!item.is_object()) {
+    *error = "slot inválido en " + declared_id;
+    return false;
+  }
+  slot->stem = hyp_json_string(item, "stem");
+  slot->path_symbol = hyp_json_string(item, "path_symbol");
+  if (item.contains("from_map") && item["from_map"].is_number_integer()) {
+    slot->from_map = item["from_map"].get<int>();
+  }
+  if (slot->stem.empty() && slot->path_symbol.empty()) {
+    return true;
+  }
+  if (!slot->path_symbol.empty()) {
+    auto it = short_to_full.find(slot->path_symbol);
+    if (it != short_to_full.end()) {
+      slot->path_symbol = it->second;
+    }
+    if (!targets.count(slot->path_symbol)) {
+      slot->path_symbol.clear();
+      slot->stem.clear();
+      return true;
+    }
+    if (slot->stem.empty() || !stems.count(causal_lower(slot->stem))) {
+      slot->stem = hyp_stem_from_target(slot->path_symbol);
+    }
+  }
+  if (!slot->stem.empty() && !stems.count(causal_lower(slot->stem))) {
+    slot->stem.clear();
+    slot->path_symbol.clear();
+  }
+  return true;
+}
+
+}  // namespace
+
+RegistryCausalHypDecision registry_parse_causal_zone_hyp(const std::string& raw,
+                                                         const nlohmann::json& inspect_payload) {
+  RegistryCausalHypDecision out;
+  out.raw = raw;
+  out.action = "causal_zone_hyp_v1";
+  const auto begin = raw.find('{');
+  const auto end = raw.rfind('}');
+  if (begin == std::string::npos || end == std::string::npos || end <= begin) {
+    out.error = "hyp sin objeto JSON";
+    return out;
+  }
+  nlohmann::json j;
+  try {
+    j = nlohmann::json::parse(raw.substr(begin, end - begin + 1));
+  } catch (const std::exception& e) {
+    out.error = std::string("JSON hyp inválido: ") + e.what();
+    return out;
+  }
+  if (j.value("action", "") != "causal_zone_hyp_v1") {
+    out.error = "contrato causal_zone_hyp_v1 inválido";
+    return out;
+  }
+  std::unordered_set<std::string> stems;
+  std::unordered_set<std::string> targets;
+  std::unordered_map<std::string, std::string> short_to_full;
+  hyp_collect_menu(inspect_payload, &stems, &targets, &short_to_full);
+  static const std::unordered_set<std::string> kRoles = {
+      "trigger", "control", "cleanup", "affected", "consumer", "state"};
+  nlohmann::json items = nlohmann::json::array();
+  if (j.contains("hypotheses") && j["hypotheses"].is_array()) {
+    items = j["hypotheses"];
+  } else if (j.contains("anchor_hypotheses") && j["anchor_hypotheses"].is_array()) {
+    items = j["anchor_hypotheses"];
+  }
+  if (items.size() > 2) {
+    items.erase(items.begin() + 2, items.end());
+  }
+  for (const auto& item : items) {
+    if (!item.is_object()) {
+      continue;
+    }
+    AnchorHypothesis hyp;
+    hyp.claim = hyp_json_string(item, "claim");
+    if (hyp.claim.empty()) {
+      hyp.claim = hyp_json_string(item, "objective");
+    }
+    hyp.objective = hyp.claim;
+    hyp.why = hyp_json_string(item, "why");
+    hyp.falsify_by = hyp_json_string(item, "falsify_by");
+    hyp.gap = causal_lower(hyp_json_string(item, "gap"));
+    hyp.anchor_role = causal_lower(hyp_json_string(item, "anchor_role"));
+    if (hyp.claim.size() < 12 || hyp.claim.size() > 160) {
+      continue;
+    }
+    if (hyp.why.size() > 160 || hyp.falsify_by.size() > 160) {
+      continue;
+    }
+    if (kRoles.count(hyp.gap) == 0) {
+      continue;
+    }
+    if (hyp.anchor_role.empty()) {
+      hyp.anchor_role = hyp.gap == "state" ? "affected" : hyp.gap;
+    }
+    if (hyp.anchor_role == "state") {
+      hyp.anchor_role = "control";
+    }
+    if (kRoles.count(hyp.anchor_role) == 0 && hyp.anchor_role != "affected") {
+      continue;
+    }
+    nlohmann::json slots = nlohmann::json::object();
+    if (item.contains("slots") && item["slots"].is_object()) {
+      slots = item["slots"];
+    }
+    std::string slot_err;
+    if (!hyp_fill_slot(&hyp.affected, slots.value("affected", nlohmann::json()), "affected", stems,
+                       targets, short_to_full, &slot_err) ||
+        !hyp_fill_slot(&hyp.control, slots.value("control", nlohmann::json()), "control", stems,
+                       targets, short_to_full, &slot_err) ||
+        !hyp_fill_slot(&hyp.trigger, slots.value("trigger", nlohmann::json()), "trigger", stems,
+                       targets, short_to_full, &slot_err) ||
+        !hyp_fill_slot(&hyp.cleanup, slots.value("cleanup", nlohmann::json()), "cleanup", stems,
+                       targets, short_to_full, &slot_err)) {
+      continue;
+    }
+    auto push_term = [&](const std::string& t) {
+      if (t.empty()) {
+        return;
+      }
+      if (std::find(hyp.search_terms.begin(), hyp.search_terms.end(), t) ==
+          hyp.search_terms.end()) {
+        hyp.search_terms.push_back(t);
+      }
+    };
+    push_term(hyp.affected.stem);
+    push_term(hyp.control.stem);
+    push_term(hyp.trigger.stem);
+    push_term(hyp.cleanup.stem);
+    if (hyp.search_terms.size() > 4) {
+      hyp.search_terms.resize(4);
+    }
+    out.hypotheses.push_back(std::move(hyp));
+  }
+  out.why = hyp_json_string(j, "why");
+  if (out.why.size() < 8 && !out.hypotheses.empty()) {
+    out.why = "hipótesis anclada a fichas inspect";
+  }
+  if (out.hypotheses.empty() || out.why.size() < 8 || out.why.size() > 240) {
+    out.error = "resultado de hyp no accionable";
+    return out;
+  }
+  out.ok = true;
+  return out;
+}
+
+nlohmann::json registry_causal_hyp_decision_to_json(const RegistryCausalHypDecision& decision) {
+  nlohmann::json hyps = nlohmann::json::array();
+  for (const auto& h : decision.hypotheses) {
+    auto slot = [](const HypSlotLocus& s) -> nlohmann::json {
+      if (s.stem.empty() && s.path_symbol.empty() && s.from_map <= 0) {
+        return nullptr;
+      }
+      nlohmann::json o = nlohmann::json::object();
+      if (!s.stem.empty()) {
+        o["stem"] = s.stem;
+      }
+      if (!s.path_symbol.empty()) {
+        o["path_symbol"] = s.path_symbol;
+      }
+      if (s.from_map > 0) {
+        o["from_map"] = s.from_map;
+      }
+      return o;
+    };
+    hyps.push_back({{"claim", h.claim},
+                    {"why", h.why},
+                    {"falsify_by", h.falsify_by},
+                    {"gap", h.gap},
+                    {"anchor_role", h.anchor_role},
+                    {"search_terms", h.search_terms},
+                    {"slots",
+                     {{"affected", slot(h.affected)},
+                      {"control", slot(h.control)},
+                      {"trigger", slot(h.trigger)},
+                      {"cleanup", slot(h.cleanup)}}}});
+  }
+  return {{"action", decision.action.empty() ? "causal_zone_hyp_v1" : decision.action},
+          {"ok", decision.ok},
+          {"hypotheses", hyps},
+          {"why", decision.why},
+          {"error", decision.error}};
 }
 
 std::string registry_causal_judge_system_prompt() {

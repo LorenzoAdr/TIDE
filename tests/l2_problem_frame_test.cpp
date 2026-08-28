@@ -215,5 +215,18 @@ int main() {
              std::string::npos,
          "embed model key tags surface");
 
+  {
+    tuide::GraphViewLevel view = tuide::GraphViewLevel::Inspect;
+    expect(tuide::graph_view_level_parse("simplificada", &view) &&
+               view == tuide::GraphViewLevel::Atlas,
+           "parse simplificada → atlas");
+    expect(std::string(tuide::graph_view_level_name(tuide::GraphViewLevel::Deep)) == "deep",
+           "deep view name");
+    tuide::RegistryCausalJudgeOpts jopts;
+    tuide::graph_view_profile_apply(
+        tuide::graph_view_profile_default(tuide::GraphViewLevel::Inspect), &jopts);
+    expect(jopts.max_zones == 3 && jopts.expand_hops == 2, "inspect view is narrow+expand");
+  }
+
   return failures == 0 ? 0 : 1;
 }
