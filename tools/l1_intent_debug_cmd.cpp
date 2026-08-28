@@ -39,8 +39,11 @@ std::string read_file(const fs::path& p) {
 
 void usage() {
   std::cerr << "Usage: tuide l1-debug --query \"...\" [--workspace ROOT] [--no-stem-embed] "
-               "[--l2-distill] [--map-out PATH] [--seeds-out PATH]\n"
-               "  --no-stem-embed  skip coding-stem index; still starts embed for map rerank\n";
+               "[--l2-distill] [--intent-decompose] [--map-out PATH] [--seeds-out PATH] "
+               "[--pf-out PATH]\n"
+               "  --no-stem-embed     skip coding-stem index; still starts embed for map rerank\n"
+               "  --intent-decompose  probe: progressive intent units until meaning collapses\n"
+               "  --pf-out PATH       write problem_frame_v1 JSON (incl. anchor_hypotheses)\n";
 }
 
 void write_seeds_json(const fs::path& path, const std::vector<std::string>& seeds) {
@@ -71,8 +74,10 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
   std::string query;
   std::string map_out_path;
   std::string seeds_out_path;
+  std::string pf_out_path;
   bool no_stem_embed = false;
   bool l2_distill = false;
+  bool intent_decompose = false;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     auto need = [&](const char* flag) -> std::string {
@@ -90,10 +95,18 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
       no_stem_embed = true;
     } else if (a == "--l2-distill") {
       l2_distill = true;
+    } else if (a == "--intent-decompose") {
+      intent_decompose = true;
     } else if (a == "--map-out") {
       map_out_path = need("--map-out");
     } else if (a == "--seeds-out") {
       seeds_out_path = need("--seeds-out");
+    } else if (a == "--pf-out") {
+      pf_out_path = need("--pf-out");
+    } else if (a == "--entityness-json") {
+      // Deprecated: entityness is post-PF on chain links, not injected into L1 distill.
+      (void)need("--entityness-json");
+      std::cerr << "warning: --entityness-json ignored (entityness is post-ProblemFrame)\n";
     } else if (a == "-h" || a == "--help") {
       usage();
       return 0;
@@ -161,51 +174,87 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
   LocalL2Brain l2_warm(&l2_backend);
   const bool l2_ready = l2_warm.ensure_ready(settings, progress, &l2_err);
 
-  // Modo --l2-distill: una sola llamada directa al 7B (sin pipeline L1 completo).
-  if (l2_distill) {
+  // Modo --l2-distill / --intent-decompose: una sola llamada al 7B (sin pipeline L1 completo).
+  if (l2_distill || intent_decompose) {
     if (!l2_ready) {
       std::cerr << "l2 ensure_ready: " << l2_err << '\n';
       return 1;
     }
-    std::cout << "=== L2-distill mode ===\n";
-    std::cout << "query: " << query << "\n";
     LlamaCompletionRequest req;
-    req.system_prompt =
-        "Eres un experto en recuperación de código. Dado un prompt de usuario en lenguaje "
-        "natural, analiza la intención real y genera seeds de búsqueda para localizar el "
-        "código relevante en la base de código.\n"
-        "Responde SOLO con JSON válido, sin markdown ni prosa. Formato exacto:\n"
-        "{\"intent\":\"<frase corta en inglés técnico>\","
-        "\"primary_goal\":\"<meta principal abstracta>\","
-        "\"facets\":[\"<concepto_impl_1>\",\"<concepto_impl_2>\"],"
-        "\"ignore\":[\"<término_ruido>\"],"
-        "\"search_terms\":[\"<term1>\",\"<term2>\",\"<term3>\"],"
-        "\"seeds\":[\"<SpecificIdentifier>\",\"<specific_function>\",\"<ClassName>\"]}\n"
-        "Reglas de intención:\n"
-        "- Clasifica en: persistencia/estado, navegación, renderizado, runtime, "
-        "integración externa, edición, búsqueda o UI.\n"
-        "- PRIORIZA lo estructural sobre lo cosmético: estado, modelo, coordinación, "
-        "flujo, ciclo de vida.\n"
-        "- facets/search_terms: conceptos de IMPLEMENTACION, no palabras de presentación "
-        "(visible/panel/ventana/pestaña) salvo que formen parte de un concepto más profundo.\n"
-        "Reglas de seeds:\n"
-        "- 8..16 identificadores específicos (archivo/clase/función), preferiblemente compuestos.\n"
-        "- Vocabulario típico de código en inglés (snake_case, CamelCase).\n"
-        "- Si la query combina palabras UI (modal/tab/panel/dialog), los seeds deben ser "
-        "compuestos (p. ej. SettingsModal, session_state, workspace_model).\n"
-        "- cierre/salir → quit/close/exit/shutdown. compilar → compile/build/cmake.\n"
-        "- PROHIBIDO seeds genéricos: Modal, panel, dialog, manager, file, tab (sin cualificador).\n"
-        "Ejemplo de respuesta correcta para 'restaurar los ficheros abiertos al reiniciar':\n"
-        "{\"intent\":\"session persistence on startup\","
-        "\"primary_goal\":\"restore open files and editor state from previous session\","
-        "\"facets\":[\"session_state\",\"workspace_persistence\",\"file_restore\"],"
-        "\"ignore\":[\"panel\",\"visible\"],"
-        "\"search_terms\":[\"session\",\"restore\",\"persist\",\"startup\",\"workspace\"],"
-        "\"seeds\":[\"SessionState\",\"workspace_model\",\"restore_session\","
-        "\"open_files_state\",\"EditorSessionStore\",\"session_manager\","
-        "\"persist_workspace\",\"load_session\"]}\n";
-    req.user_prompt = "Consulta:\n" + query + "\n\nJSON:";
-    req.max_tokens = 600;
+    if (intent_decompose) {
+      std::cout << "=== intent-decompose probe ===\n";
+      std::cout << "query: " << query << "\n";
+      // Experimental: progressive units until further split loses meaning (max 3 levels).
+      req.system_prompt =
+          "Eres un analizador de peticiones de código. Descompón la intención en unidades "
+          "que podrían estar encapsuladas en módulos/controles distintos del repo.\n"
+          "Responde SOLO JSON válido (sin markdown):\n"
+          "{\"schema\":\"intent_decompose_v0\","
+          "\"levels\":["
+          "{\"level\":0,\"units\":[{\"id\":\"u0\",\"label\":\"…\","
+          "\"search_terms\":[\"term_snake\"],\"role\":\"focal|ambient|action|gap\"}]},"
+          "{\"level\":1,\"units\":[…]},"
+          "{\"level\":2,\"units\":[…]}"
+          "],"
+          "\"stop_level\":0,"
+          "\"stop_reason\":\"atomic|meaningless_split|max_depth\","
+          "\"notes\":\"opcional\"}\n"
+          "Reglas:\n"
+          "- Descomposición PROGRESIVA: level 0 = lectura gruesa; cada nivel siguiente "
+          "parte unidades del anterior en piezas MÁS ATÓMICAS.\n"
+          "- Máximo 3 niveles (0..2). NO rellenes niveles vacíos ni inventes piezas.\n"
+          "- PARA cuando una unidad ya es atómica (un control/estado/acción concreta) o "
+          "cuando seguir partiendo pierde sentido (adjetivos, ruido, sinónimos del mismo "
+          "objeto). Pon stop_level = último nivel útil y stop_reason acorde.\n"
+          "- Si level 0 ya es atómico, omite levels 1 y 2 (array levels con 1 entrada).\n"
+          "- Cada unit: 1..2 search_terms snake_case/CamelCase, proyección léxica del "
+          "texto del usuario (raíz ≥4 letras compartida). PROHIBIDO inventar toolchains, "
+          "APIs o stems de producto no dichos.\n"
+          "- Separa focal (síntoma/objeto a localizar) de ambient (contenedor/panel/"
+          "orquestación) y de action/gap (cancelar, limpiar, etc.) en UNITS DISTINTAS.\n"
+          "- PROHIBIDO meter ambient y focal en la misma unit.\n";
+      req.user_prompt = "Consulta del usuario:\n" + query + "\n\nJSON:";
+      req.max_tokens = 900;
+    } else {
+      std::cout << "=== L2-distill mode ===\n";
+      std::cout << "query: " << query << "\n";
+      req.system_prompt =
+          "Eres un experto en recuperación de código. Dado un prompt de usuario en lenguaje "
+          "natural, analiza la intención real y genera seeds de búsqueda para localizar el "
+          "código relevante en la base de código.\n"
+          "Responde SOLO con JSON válido, sin markdown ni prosa. Formato exacto:\n"
+          "{\"intent\":\"<frase corta en inglés técnico>\","
+          "\"primary_goal\":\"<meta principal abstracta>\","
+          "\"facets\":[\"<concepto_impl_1>\",\"<concepto_impl_2>\"],"
+          "\"ignore\":[\"<término_ruido>\"],"
+          "\"search_terms\":[\"<term1>\",\"<term2>\",\"<term3>\"],"
+          "\"seeds\":[\"<SpecificIdentifier>\",\"<specific_function>\",\"<ClassName>\"]}\n"
+          "Reglas de intención:\n"
+          "- Clasifica en: persistencia/estado, navegación, renderizado, runtime, "
+          "integración externa, edición, búsqueda o UI.\n"
+          "- PRIORIZA lo estructural sobre lo cosmético: estado, modelo, coordinación, "
+          "flujo, ciclo de vida.\n"
+          "- facets/search_terms: conceptos de IMPLEMENTACION, no palabras de presentación "
+          "(visible/panel/ventana/pestaña) salvo que formen parte de un concepto más profundo.\n"
+          "Reglas de seeds:\n"
+          "- 8..16 identificadores específicos (archivo/clase/función), preferiblemente compuestos.\n"
+          "- Vocabulario típico de código en inglés (snake_case, CamelCase).\n"
+          "- Si la query combina palabras UI (modal/tab/panel/dialog), los seeds deben ser "
+          "compuestos (p. ej. SettingsModal, session_state, workspace_model).\n"
+          "- cierre/salir → quit/close/exit/shutdown. compilar → compile/build/cmake.\n"
+          "- PROHIBIDO seeds genéricos: Modal, panel, dialog, manager, file, tab (sin cualificador).\n"
+          "Ejemplo de respuesta correcta para 'restaurar los ficheros abiertos al reiniciar':\n"
+          "{\"intent\":\"session persistence on startup\","
+          "\"primary_goal\":\"restore open files and editor state from previous session\","
+          "\"facets\":[\"session_state\",\"workspace_persistence\",\"file_restore\"],"
+          "\"ignore\":[\"panel\",\"visible\"],"
+          "\"search_terms\":[\"session\",\"restore\",\"persist\",\"startup\",\"workspace\"],"
+          "\"seeds\":[\"SessionState\",\"workspace_model\",\"restore_session\","
+          "\"open_files_state\",\"EditorSessionStore\",\"session_manager\","
+          "\"persist_workspace\",\"load_session\"]}\n";
+      req.user_prompt = "Consulta:\n" + query + "\n\nJSON:";
+      req.max_tokens = 600;
+    }
     req.n_ctx = 2048;
     req.temperature = 0.1;
     req.context_role = "L2";
@@ -280,6 +329,25 @@ int run_l1_intent_debug_cli(int argc, char** argv) {
       return 1;
     }
     std::cout << "map_out=" << map_out_path << "\n";
+  }
+  if (!pf_out_path.empty()) {
+    if (result.problem_frame_json.empty()) {
+      std::cerr << "pf_out: problem_frame_json vacío (distill/hyps no disponibles)\n";
+    } else {
+      std::error_code ec;
+      fs::create_directories(fs::path(pf_out_path).parent_path(), ec);
+      std::ofstream out(pf_out_path);
+      if (!out) {
+        std::cerr << "pf_out write failed\n";
+        return 1;
+      }
+      out << result.problem_frame_json;
+      if (!result.problem_frame_json.empty() && result.problem_frame_json.back() != '\n') {
+        out << '\n';
+      }
+      std::cout << "pf_out=" << pf_out_path << " chars=" << result.problem_frame_json.size()
+                << "\n";
+    }
   }
   const std::string map = read_file(map_path);
   if (!map.empty() && map_out_path.empty()) {

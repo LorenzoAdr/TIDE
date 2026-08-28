@@ -20,6 +20,7 @@
 #include "ai/repo_map.hpp"
 #include "ai/search_needles.hpp"
 #include "ai/l2_feat.hpp"
+#include "ai/l2_problem_frame.hpp"
 #include "indexer/symbol_workspace_indexer.hpp"
 
 #include <filesystem>
@@ -551,6 +552,7 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
   }
 
   std::optional<DistilledInvestigateIntent> distilled;
+  std::optional<tuide::ProblemFrame> kept_pf;
   std::vector<std::string> semantic_outline = map_outline;
   std::vector<std::string> semantic_index_candidates = index_candidates;
   LlamaBackend* reasoning_backend = nullptr;
@@ -563,33 +565,47 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
     {
       LlamaCompletionRequest req;
       req.system_prompt =
-          "Eres un analizador semántico para recuperación de código. Tu trabajo en esta primera "
-          "pasada es entender la intención real del prompt y separar señal de ruido. "
-          "NO elijas todavía archivos ni símbolos concretos. Responde SOLO JSON con este formato:\n"
-          "{\"intent\":\"...\",\"primary_goal\":\"...\",\"facets\":[\"...\"],"
-          "\"ignore\":[\"...\"],\"search_terms\":[\"...\"]}\n"
+          "Eres un analizador de peticiones de código (problem_frame_v1). "
+          "NO elijas archivos concretos. Responde SOLO JSON válido:\n"
+          "{\"schema\":\"problem_frame_v1\","
+          "\"problem_kind\":\"debug|locate|implement|explain\","
+          "\"problem_frame\":\"1-2 frases que reformulan la petición\","
+          "\"primary_anchor\":{\"kind\":\"feature|module|entrypoint|control|state\","
+          "\"objective\":\"la pieza de código donde anclarse PRIMERO\","
+          "\"search_terms\":[\"term_snake_1\",\"term_snake_2\"],"
+          "\"edge_hints\":[]},"
+          "\"secondary_anchors\":[{\"kind\":\"module\",\"objective\":\"…\","
+          "\"search_terms\":[\"…\"],\"deferred\":true,"
+          "\"why_later\":\"se persigue después del ancla primaria\"}],"
+          "\"mechanism_gaps\":[{\"slot\":\"…\",\"question\":\"¿…?\"}],"
+          "\"reject_noise\":[\"…\"],\"anchor_confidence\":\"high|medium|low\"}\n"
           "Reglas:\n"
-          "- intent: una frase corta en inglés técnico.\n"
-          "- primary_goal: la meta principal, más abstracta que las palabras literales del prompt.\n"
-          "- Antes de escribir facets/search_terms, clasifica mentalmente la petición en una "
-          "familia de intención general, por ejemplo: persistencia/estado, navegación, "
-          "renderizado, ejecución runtime, integración externa, edición, búsqueda o UI.\n"
-          "- facets: 2..5 conceptos nucleares de IMPLEMENTACION, no palabras de superficie.\n"
-          "- ignore: 0..6 detalles superficiales que podrían desviar el retrieval.\n"
-          "- PROHIBIDO poner en ignore palabras que el usuario escribió.\n"
-          "- search_terms: 3..8 términos cortos de implementación.\n"
-          "- Si el prompt mezcla conceptos estructurales con detalles de presentación, "
-          "PRIORIZA lo estructural: estado, persistencia, modelo, coordinación, flujo, "
-          "almacenamiento, propietario del dato o ciclo de vida.\n"
-          "- Incluye en facets/search_terms los subsistemas que el usuario nombra "
-          "(p. ej. IA, chat, agente, terminal) aunque suenen a UI.\n"
-          "- NO inventes nombres de archivos o símbolos todavía.\n"
-          "- Si el prompt es largo, prioriza la semántica estable frente a detalles cosméticos.\n";
+          "- primary_anchor = el objeto FOCAL más local de la petición (control, estado, "
+          "acción, entrypoint o feature que el usuario quiere encontrar/cambiar). "
+          "NO uses como primary el ambiente contenedor (app, chat, asistente, panel "
+          "alrededor) si el texto nombra algo más concreto.\n"
+          "- secondary_anchors = ambiente / orquestación / callers a explorar DESPUÉS. "
+          "deferred=true. 0..3 entradas.\n"
+          "- search_terms: 2..6 identificadores snake_case/CamelCase. Cada término DEBE "
+          "ser proyección léxica del texto del usuario (misma raíz ≥4 letras, permitiendo "
+          "variantes morfológicas ES/EN del MISMO vocablo). NUNCA frases NL.\n"
+          "- En compuestos (a_b / a.b), CADA segmento ≥4 letras debe salir del texto; "
+          "no añadas segmentos nuevos (archivos, extensiones o tools no dichos).\n"
+          "- Prefiere sustantivos/verbos de contenido del objeto focal; no uses como "
+          "search_terms palabras vacías o de relleno del enunciado.\n"
+          "- PROHIBIDO inventar ecosistemas, toolchains, archivos de config o APIs no "
+          "nombrados en el texto.\n"
+          "- PROHIBIDO meter en primary.search_terms el ambiente contenedor "
+          "(orquestación, callers, paneles vecinos); eso va en secondary o reject_noise.\n"
+          "- mechanism_gaps: 0..2 preguntas abiertas cortas (¿…?), no afirmaciones.\n"
+          "- reject_noise: tokens demasiado genéricos para grepear.\n"
+          "- anchor_confidence: high solo si el texto nombra un locus grepeable claro; "
+          "si no, medium o low.\n";
       std::ostringstream user;
       user << "Consulta del usuario:\n" << user_message << "\n";
       user << "\nJSON:";
       req.user_prompt = user.str();
-      req.max_tokens = std::min(320, std::max(160, deps_.settings.level1.max_tokens / 2));
+      req.max_tokens = std::min(1024, std::max(512, deps_.settings.level1.max_tokens));
       {
         const int prompt_tok_est =
             static_cast<int>((req.system_prompt.size() + req.user_prompt.size()) / 3 + 32);
@@ -612,7 +628,38 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
         if (log) {
           log("L1 intent raw: " + completion.text);
         }
-        distilled = parse_distilled_intent_json(completion.text);
+        distilled = std::nullopt;
+        {
+          tuide::ProblemFrame pf;
+          std::string perr;
+          if (tuide::problem_frame_from_json_string(completion.text, &pf, &perr) &&
+              tuide::problem_frame_minimally_valid(pf)) {
+            tuide::problem_frame_refine_from_query(&pf, user_message);
+            pf.provenance = "l1_distill";
+            DistilledInvestigateIntent di;
+            di.intent = pf.problem_frame;
+            di.primary_goal = pf.primary_anchor.objective;
+            di.search_terms = pf.primary_anchor.search_terms;
+            di.ignore = pf.reject_noise;
+            for (const auto& g : pf.mechanism_gaps) {
+              if (!g.slot.empty()) {
+                di.facets.push_back(g.slot);
+              }
+            }
+            for (const auto& sec : pf.secondary_anchors) {
+              for (const auto& t : sec.search_terms) {
+                if (!t.empty()) {
+                  di.facets.push_back(t);
+                }
+              }
+            }
+            distilled = di;
+            kept_pf = std::move(pf);
+          }
+        }
+        if (!distilled) {
+          distilled = parse_distilled_intent_json(completion.text);
+        }
         if (distilled) {
           filter_distilled_ignore(&*distilled, user_message);
         }
@@ -665,6 +712,8 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
             " símbolos (best_score=" + std::to_string(semantic_map.best_score) + ")");
       }
     }
+
+    // Hypothesis/anchor hunt uses registry zone cards (causal), not a second L1 map pass.
 
     LlamaCompletionRequest req;
     req.system_prompt =
@@ -841,6 +890,12 @@ InvestigateNeedlesResult Level1Agent::propose_investigate_needles(
       result.embed_intent = distilled->intent;
     }
   }
+  if (kept_pf) {
+    if (kept_pf->instruction.empty()) {
+      kept_pf->instruction = user_message;
+    }
+    result.problem_frame_json = tuide::problem_frame_to_json(*kept_pf).dump();
+  }
   if (log && !result.semantic_tokens.empty()) {
     std::ostringstream st;
     st << "semantic_tokens (" << result.semantic_tokens.size() << "):";
@@ -1001,6 +1056,7 @@ Level1RunResult Level1Agent::run(const std::string& user_message, const LogFn& l
     const std::vector<std::string>& semantic_tokens = investigate.semantic_tokens;
     out.seeds = needles;
     out.semantic_tokens = semantic_tokens;
+    out.problem_frame_json = investigate.problem_frame_json;
     if (log) {
       log("L1 needles propuestos:");
       if (needles.empty()) {

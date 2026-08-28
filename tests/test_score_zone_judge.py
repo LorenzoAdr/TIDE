@@ -79,5 +79,29 @@ class JudgeCardsParserTest(unittest.TestCase):
         self.assertTrue(score["selected_gold_any"])
 
 
+    def test_core_context_layers_when_requested(self) -> None:
+        cards = """\
+# causal_judge_v1
+## M1 score=1
+stems: trap_stem
+core stems: gold_core
+context stems: gold_ctx
+mini-cards:
+- gold_core::writer | void writer()
+"""
+        primary_only = score_judge_cards(
+            cards, gold_stems=["gold_core"], trap_stems=[], selected=[]
+        )
+        extended = score_judge_cards(
+            cards,
+            gold_stems=["gold_core"],
+            trap_stems=[],
+            selected=[],
+            include_core_context=True,
+        )
+        self.assertFalse(primary_only["gold_declared_zone_ids"])
+        self.assertEqual(["M1"], extended["gold_declared_zone_ids"])
+
+
 if __name__ == "__main__":
     unittest.main()

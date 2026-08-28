@@ -44,6 +44,8 @@ struct Level1RunResult {
   std::vector<std::string> semantic_tokens;
   // agent|ask|plan|git — copied from settings at handoff (typed L1→L2).
   std::string workflow = "agent";
+  // Full problem_frame_v1 JSON (may include anchor_hypotheses) for L2 bootstrap.
+  std::string problem_frame_json;
   std::string error;
 };
 
@@ -52,6 +54,8 @@ struct InvestigateNeedlesResult {
   std::vector<std::string> semantic_tokens;
   // Short distilled primary_goal/intent for hybrid body-embed query (may be empty).
   std::string embed_intent;
+  // Full problem_frame_v1 JSON when distill succeeded (may include hyps).
+  std::string problem_frame_json;
 };
 
 class Level1Agent {

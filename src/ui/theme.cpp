@@ -788,6 +788,26 @@ Color BpDisabled() { return current_palette().bp_disabled; }
 Color Error() { return current_palette().error; }
 Color Warning() { return current_palette().warning; }
 Color Success() { return current_palette().success; }
+
+namespace {
+
+Color diff_line_bg(const ColorRgb& tint) {
+  // Keep a light wash over CodeBg so syntax remains readable.
+  const float t = g_mode == ThemeMode::kLight ? 0.12f : 0.15f;
+  return from_rgb(blend(effective_code_bg_rgb(), tint, t));
+}
+
+}  // namespace
+
+Color DiffAddBg() {
+  return diff_line_bg(g_mode == ThemeMode::kLight ? rgb(0, 140, 60) : rgb(80, 220, 120));
+}
+Color DiffDeleteBg() {
+  return diff_line_bg(g_mode == ThemeMode::kLight ? rgb(200, 40, 40) : rgb(255, 100, 100));
+}
+Color DiffChangeBg() {
+  return diff_line_bg(g_mode == ThemeMode::kLight ? rgb(180, 100, 0) : rgb(255, 200, 80));
+}
 Color StackFrame() { return current_palette().stack_frame; }
 
 Color StatusBar() {

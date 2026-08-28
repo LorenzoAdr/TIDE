@@ -374,6 +374,9 @@ add_executable(tuide
   src/ai/l2_explore_a_trail.cpp
   src/ai/l2_explore_a_dataflow.cpp
   src/ai/l2_effect_summary.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_entityness.cpp
+  src/ai/l2_graph_query_profile.cpp
   src/ai/l2_effect_slice.cpp
   src/ai/l2_effect_registry.cpp
   src/ai/l2_brain_local.cpp
@@ -956,6 +959,8 @@ add_executable(l2_action_test
   tests/l2_explore_a_trail_stub.cpp
   src/ai/l2_action.cpp
   src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
   src/ai/search_replace.cpp
 )
 target_include_directories(l2_action_test PRIVATE
@@ -963,11 +968,51 @@ target_include_directories(l2_action_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(l2_problem_frame_test
+  tests/l2_problem_frame_test.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_graph_query_profile.cpp
+)
+target_include_directories(l2_problem_frame_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
+add_executable(l2_entityness_test
+  tests/l2_entityness_test.cpp
+  src/ai/l2_entityness.cpp
+  src/ai/l2_graph_query_profile.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_effect_registry.cpp
+  src/ai/l2_effect_summary.cpp
+  src/ai/l2_effect_slice.cpp
+  src/ai/l2_explore_a.cpp
+  src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_explore_a_trail.cpp
+  src/parser/tree_sitter_language.cpp
+  src/parser/tree_sitter_symbols.cpp
+  src/symbols/symbol_utils.cpp
+  src/app/language_override.cpp
+  src/lsp/lsp_uri.cpp
+  src/i18n/locale.cpp
+  src/i18n/tr.cpp
+  src/i18n/strings_es.cpp
+  src/i18n/strings_en.cpp
+)
+target_include_directories(l2_entityness_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+  ${TUIDE_TREE_SITTER_INCLUDE_DIRS}
+)
+target_link_libraries(l2_entityness_test PRIVATE ${TUIDE_TREE_SITTER_GRAMMAR_LIBS} ${TUIDE_SQLITE_LIB})
+tuide_link_pthread(l2_entityness_test)
+
 add_executable(l2_explore_a_test
   tests/l2_explore_a_test.cpp
   tests/l2_explore_a_trail_stub.cpp
   src/ai/l2_explore_a.cpp
   src/ai/l2_explore_a_dataflow.cpp
+  src/ai/l2_problem_frame.cpp
 )
 target_include_directories(l2_explore_a_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -1116,8 +1161,11 @@ add_executable(l2_harness_cli
   src/ai/l2_explore_a_trail.cpp
   src/ai/l2_explore_a_dataflow.cpp
   src/ai/l2_effect_summary.cpp
+  src/ai/l2_problem_frame.cpp
+  src/ai/l2_graph_query_profile.cpp
   src/ai/l2_effect_slice.cpp
   src/ai/l2_effect_registry.cpp
+  src/ai/l2_entityness.cpp
   src/ai/level2_autonomous_loop.cpp
   src/ai/l2_pack_review.cpp
   src/ai/l2_grammar.cpp
@@ -1494,6 +1542,8 @@ set(TUIDE_TEST_TARGETS
   level2_debrief_test
   l2_context_budget_test
   l2_action_test
+  l2_problem_frame_test
+  l2_entityness_test
   l2_explore_a_test
   l2_trail_build_test
   l2_effect_slice_test

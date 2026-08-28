@@ -988,11 +988,13 @@ void AiController::run_level1_async(const std::string& message) {
         settings_.level2_workflow = ai_workflow_kind_name(parse_ai_workflow_kind(result.workflow));
       }
       if (settings_.level2_mode == "harness") {
-        bootstrap_level2_session(message, result.instruction, result.seeds, wf);
+        bootstrap_level2_session(message, result.instruction, result.seeds, wf, {},
+                                 result.problem_frame_json);
         append("L1 listo → L2 harness: `.tuide/ai/l2/session.md`");
         append("Escribe `request.json` y corre `/l2_turn` (ver /help).");
       } else if (level2_mode_is_autonomous()) {
-        bootstrap_level2_session(message, result.instruction, result.seeds, wf);
+        bootstrap_level2_session(message, result.instruction, result.seeds, wf, {},
+                                 result.problem_frame_json);
         append("L1 listo → L2 autónomo (" + effective_level2_mode() + " workflow=" +
                ai_workflow_kind_name(parse_ai_workflow_kind(wf)) + ")");
         run_level2_autonomous_inline("needs_level2");
@@ -1008,13 +1010,15 @@ void AiController::run_level1_async(const std::string& message) {
         bootstrap_level2_session(message, result.instruction.empty()
                                               ? "Elige del mapa y lee cuerpos con get_code_of."
                                               : result.instruction,
-                                 result.seeds, settings_.level2_workflow);
+                                 result.seeds, settings_.level2_workflow, {},
+                                 result.problem_frame_json);
         append("L2 harness: sesión sembrada en `.tuide/ai/l2/session.md`");
       } else if (level2_mode_is_autonomous()) {
         bootstrap_level2_session(message, result.instruction.empty()
                                               ? "Elige del mapa y lee cuerpos con get_code_of."
                                               : result.instruction,
-                                 result.seeds, settings_.level2_workflow);
+                                 result.seeds, settings_.level2_workflow, {},
+                                 result.problem_frame_json);
         append("L2 autónomo: sesión sembrada; arrancando loop…");
         run_level2_autonomous_inline("l1_final_seed");
       }
@@ -1752,7 +1756,8 @@ void AiController::bootstrap_level2_session(const std::string& query,
                                             const std::string& instruction,
                                             const std::vector<std::string>& seeds,
                                             const std::string& workflow,
-                                            const std::string& seed_pack_markdown) {
+                                            const std::string& seed_pack_markdown,
+                                            const std::string& problem_frame_json) {
   ensure_tools();
   const std::string root =
       deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
@@ -1768,6 +1773,7 @@ void AiController::bootstrap_level2_session(const std::string& query,
   opts.instruction = instruction;
   opts.seeds = seeds;
   opts.seed_pack_markdown = seed_pack_markdown;
+  opts.problem_frame_json = problem_frame_json;
   opts.workflow =
       ai_workflow_kind_name(parse_ai_workflow_kind(workflow.empty() ? settings_.level2_workflow
                                                                     : workflow));

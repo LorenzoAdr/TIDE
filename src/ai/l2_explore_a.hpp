@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "ai/l2_feat.hpp"
+#include "ai/l2_problem_frame.hpp"
 
 namespace tuide {
 
@@ -171,7 +172,20 @@ struct AState {
   std::string a1_trail_recap;      // trail frame kept through suspect+dataflow
   std::string a1_df_scope_path;    // rg scope: interesting caller file (not L0)
   std::string a1_df_caller_anchor; // interesting hop anchor for coherence check
+  // F1 anchor hunt (L2_EXPLORE_ANCHOR_CAUSAL).
+  std::string explore_mode;  // f1_anchor | f2_causal | classic
+  std::string anchor_confirmed;
+  std::string anchor_understanding;
+  std::string f1_failure_reason;  // set on anchor_miss_v1
 };
+
+inline bool a_explore_anchor_causal_enabled() {
+  return l2_feat::enabled("L2_EXPLORE_PHASE_A") && l2_feat::enabled("L2_EXPLORE_ANCHOR_CAUSAL");
+}
+
+inline bool a_in_f1_anchor_mode(const AState& st) {
+  return a_explore_anchor_causal_enabled() && st.explore_mode == "f1_anchor";
+}
 
 inline constexpr int kAMaxPeeksPerTurn = 5;
 inline constexpr int kAMaxPeeksTotal = 32;
@@ -207,6 +221,11 @@ inline constexpr int kA0MaxExpandTotal = 12;
 inline constexpr int kA1MaxPeeks = 16;
 inline constexpr int kA1MaxTrails = 4;
 inline constexpr int kA1MaxDataflows = 4;
+
+// F1 anchor hunt budgets (strict locate of primary prey).
+inline constexpr int kF1MaxCardsTotal = 24;
+inline constexpr int kF1MaxPeeksTotal = 8;
+inline constexpr int kF1MaxTurns = 6;
 
 inline bool a_effect_summary_enabled() {
   return l2_feat::enabled("L2_EXPLORE_PHASE_A") && l2_feat::enabled("L2_EXPLORE_EFFECT_SUMMARY");
@@ -374,6 +393,19 @@ bool a_enough_locate_breadth(const AState& st);
 
 // Validate a_done loci against notes/state. On failure writes err and returns false.
 bool a_validate_a_done(const AState& st, const std::vector<ALocus>& loci, std::string* err);
+
+// F1: rerank/filter queue toward primary_anchor seeds (symptom_edge boost).
+void a_apply_f1_anchor_queue_filter(AState* st, const ProblemFrame& pf);
+
+// F1: A0 expand modality — peek only (no trail/dataflow).
+AExpandModality a_f1_coerce_expand_modality(AExpandModality m);
+
+// F1: validate f1_done / anchor closure (relaxed breadth vs classic a_done).
+bool a_validate_f1_anchor_done(const AState& st, const std::vector<ALocus>& loci,
+                               std::string* err);
+
+// Score how well a queue item matches anchor hunt seeds.
+float a_f1_anchor_match_score(const AQueueItem& item, const ProblemFrame& pf);
 
 // Parse L1/L2 ranked-map markdown lines into queue inputs (best-effort).
 // Accepts: "1. src/foo.cpp:42 — `Sym`" / "1. src/foo.cpp:1  [score=…] — `name`"

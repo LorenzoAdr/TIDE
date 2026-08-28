@@ -123,7 +123,8 @@ class AiController {
   void bootstrap_level2_session(const std::string& query, const std::string& instruction,
                                 const std::vector<std::string>& seeds,
                                 const std::string& workflow = {},
-                                const std::string& seed_pack_markdown = {});
+                                const std::string& seed_pack_markdown = {},
+                                const std::string& problem_frame_json = {});
   // After bootstrap when mode=local|remote: run autonomous loop (same agent thread).
   void run_level2_autonomous_inline(const std::string& reason);
   void run_level2_followup_async(const std::string& message);

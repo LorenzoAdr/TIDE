@@ -17,7 +17,12 @@ PROMPTS = ROOT / "tests/fixtures/stem_boost_battery/prompts_nl_human.json"
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--label", default="zone_judge_two_pass_v2")
+    parser.add_argument("--label", default="zone_judge_recall_v1")
+    parser.add_argument(
+        "--cards-label",
+        default="",
+        help="Cards directory label (default: same as --label)",
+    )
     parser.add_argument(
         "--maps-from",
         default=".tuide/ai/l2_explore_battery/round_registry_trails_v1",
@@ -26,12 +31,24 @@ def main() -> int:
     parser.add_argument("--start-at", default="")
     parser.add_argument("--only", default="")
     parser.add_argument("--one-pass", action="store_true")
+    parser.add_argument("--legacy-triage", action="store_true")
+    parser.add_argument(
+        "--primary-survey",
+        action="store_true",
+        help="Epistemic contrast+must-compete (top-2 incompatible threads)",
+    )
+    parser.add_argument(
+        "--slot-survey",
+        action="store_true",
+        help="Hypothesis-per-slot (1 card/pass) → retain 2–3 hyps; no rival contrast",
+    )
     parser.add_argument("--model-id", default="")
     args = parser.parse_args()
 
     cases = json.loads(PROMPTS.read_text(encoding="utf-8"))
+    cards_label = args.cards_label or args.label
     cards_root = (
-        ROOT / ".tuide" / "ai" / "l2_explore_battery" / f"round_{args.label}_cards"
+        ROOT / ".tuide" / "ai" / "l2_explore_battery" / f"round_{cards_label}_cards"
     )
     judge_root = (
         ROOT / ".tuide" / "ai" / "l2_explore_battery" / f"round_{args.label}"
@@ -116,6 +133,12 @@ def main() -> int:
         command += ["--only", args.only]
     if not args.one_pass:
         command.append("--two-pass")
+    if args.legacy_triage:
+        command.append("--legacy-triage")
+    if args.primary_survey:
+        command.append("--primary-survey")
+    if args.slot_survey:
+        command.append("--slot-survey")
     if args.model_id:
         command += ["--model-id", args.model_id]
     print("==== sequential zone judge ====", flush=True)

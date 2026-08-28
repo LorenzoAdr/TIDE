@@ -569,6 +569,19 @@ void test_query_constellations() {
     expect(zone.contains("core_stems") && zone.contains("context_stems") &&
                zone.contains("merge_witnesses"),
            "causal judge exposes core context and merge evidence");
+    expect(zone.contains("mechanism") && zone.contains("ports") &&
+               zone.contains("support_edges") && zone.contains("pack_meta"),
+           "causal judge mechanism pack fields");
+    expect(zone["pack_meta"].value("mechanism_pack", false),
+           "mechanism pack enabled by default");
+    // edges == concat(mechanism slots + ports + support)
+    std::size_t concat_n = zone["ports"].size() + zone["support_edges"].size();
+    for (const char* slot : {"trigger", "state", "effect"}) {
+      if (zone["mechanism"].contains(slot)) {
+        ++concat_n;
+      }
+    }
+    expect(zone["edges"].size() == concat_n, "edges equals mechanism∪ports∪support");
     expect(zone["edges"].size() <= static_cast<std::size_t>(judge_opts.max_edges),
            "causal judge edge budget");
     expect(zone["representatives"].size() <=
@@ -577,10 +590,47 @@ void test_query_constellations() {
     for (const auto& card : zone["representatives"]) {
       expect(!card.contains("nudge"), "causal judge excludes prior judgments");
     }
+    // Skeleton must not invent slots: missing listed or filled from real facts.
+    const auto missing = zone["pack_meta"].value("skeleton_missing", nlohmann::json::array());
+    for (const char* slot : {"trigger", "state", "effect"}) {
+      const bool filled = zone["mechanism"].contains(slot);
+      bool listed_missing = false;
+      for (const auto& m : missing) {
+        listed_missing = listed_missing || (m.is_string() && m.get<std::string>() == slot);
+      }
+      expect(filled || listed_missing, "skeleton slot filled or explicitly missing");
+    }
   }
   expect(tuide::registry_causal_judge_markdown(judge_payload).find("causal edges") !=
              std::string::npos,
          "causal judge markdown");
+  expect(tuide::registry_causal_judge_markdown(judge_payload).find("mechanism:") !=
+                 std::string::npos ||
+             judge_payload["zones"][0]["mechanism"].empty(),
+         "causal judge markdown mechanism section when filled");
+
+  // Pack-off path keeps edges without requiring skeleton slots.
+  tuide::RegistryCausalJudgeOpts pack_off = judge_opts;
+  pack_off.mechanism_pack = false;
+  nlohmann::json pack_off_payload;
+  expect(tuide::registry_causal_judge_payload(&r, "flag stuck", result, pack_off,
+                                              &pack_off_payload, &err),
+         "build pack-off judge payload");
+  if (pack_off_payload.contains("zones") && !pack_off_payload["zones"].empty()) {
+    const auto& z = pack_off_payload["zones"][0];
+    expect(z.contains("edges") && !z["edges"].empty(), "pack-off still emits edges");
+    expect(!z["pack_meta"].value("mechanism_pack", true), "pack-off meta flag");
+  }
+
+  tuide::RegistryCausalJudgeOpts knobs = judge_opts;
+  expect(tuide::registry_causal_judge_opts_apply_json(
+             &knobs, nlohmann::json{{"w_cos", 10.5}, {"port_cup", 1}, {"skel_state_cup", 1}},
+             &err),
+         "apply judge knobs json");
+  expect(knobs.w_cos == 10.5f && knobs.port_cup == 1, "knobs overlay applied");
+  expect(!tuide::registry_causal_judge_opts_apply_json(
+             &knobs, nlohmann::json{{"w_cos", "nope"}}, &err),
+         "reject bad knob type");
   auto result_with_uncovered = result;
   tuide::RegistryTrailHop uncovered_seed;
   uncovered_seed.node.id = "fn:src/polar.cpp:uncovered_probe";
@@ -601,11 +651,372 @@ void test_query_constellations() {
   for (const auto& zone : candidate_payload["zones"]) {
     for (const auto& risk : zone.value("risks", nlohmann::json::array())) {
       promoted_uncovered =
-          promoted_uncovered || (risk.is_string() && risk.get<std::string>() ==
-                                                         "uncovered_candidate");
+          promoted_uncovered ||
+          (risk.is_string() &&
+           (risk.get<std::string>() == "uncovered_candidate" ||
+            risk.get<std::string>() == "promoted_from_uncovered"));
     }
   }
   expect(promoted_uncovered, "uncovered query seed becomes bounded candidate zone");
+  nlohmann::json bridge_payload = judge_payload;
+  bridge_payload["zone_bridges"] = nlohmann::json::array({
+      {{"trail", "T1"},
+       {"zones", nlohmann::json::array({"M1", "M2"})},
+       {"stems", nlohmann::json::array({"polar"})},
+       {"why", "synthetic bridge"}}});
+  tuide::RegistryCausalTriageDecision co_triage;
+  co_triage.ok = true;
+  co_triage.shortlist = {"M1"};
+  co_triage.critical_mass = true;
+  tuide::RegistryZoneTriage anchor_zone;
+  anchor_zone.id = "M1";
+  co_triage.zones.push_back(anchor_zone);
+  tuide::registry_apply_deterministic_co_shortlist(bridge_payload, &co_triage);
+  expect(co_triage.shortlist.size() >= 2, "co-shortlist adds bridge-linked zone");
+  expect(std::find(co_triage.shortlist.begin(), co_triage.shortlist.end(), "M2") !=
+             co_triage.shortlist.end(),
+         "co-shortlist includes bridge zone");
+
+  // Floor top-2: shortlist lleno sin M2 → eviction del último no-top2 (caso 02).
+  nlohmann::json floor_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M1"},
+             {"primary_stems", nlohmann::json::array({"scroll_bar"})},
+             {"context_stems", nlohmann::json::array()}},
+            {{"id", "M2"},
+             {"primary_stems", nlohmann::json::array({"main_layout"})},
+             {"context_stems", nlohmann::json::array()}},
+            {{"id", "M4"},
+             {"primary_stems", nlohmann::json::array({"csv_viewer"})},
+             {"context_stems", nlohmann::json::array()}},
+            {{"id", "M6"},
+             {"primary_stems", nlohmann::json::array({"csv_viewer"})},
+             {"context_stems", nlohmann::json::array()}}})}};
+  tuide::RegistryCausalTriageDecision floor_triage;
+  floor_triage.ok = true;
+  floor_triage.critical_mass = true;
+  floor_triage.shortlist = {"M1", "M4", "M6"};
+  for (const char* zid : {"M1", "M4", "M6"}) {
+    tuide::RegistryZoneTriage z;
+    z.id = zid;
+    floor_triage.zones.push_back(z);
+  }
+  tuide::registry_apply_deterministic_co_shortlist(floor_payload, &floor_triage);
+  expect(floor_triage.shortlist.size() == 3, "floor top-2 keeps cap 3");
+  expect(std::find(floor_triage.shortlist.begin(), floor_triage.shortlist.end(), "M2") !=
+             floor_triage.shortlist.end(),
+         "floor top-2 force-includes registry runner-up");
+  expect(std::find(floor_triage.shortlist.begin(), floor_triage.shortlist.end(), "M1") !=
+             floor_triage.shortlist.end(),
+         "floor top-2 keeps registry top");
+
+  // Context overlap: M1 context ai_controller → añade M7 primary (casos 07/20).
+  nlohmann::json ctx_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M1"},
+             {"primary_stems", nlohmann::json::array({"busy_strip"})},
+             {"context_stems", nlohmann::json::array({"ai_controller"})}},
+            {{"id", "M2"},
+             {"primary_stems", nlohmann::json::array({"level2_session"})},
+             {"context_stems", nlohmann::json::array()}},
+            {{"id", "M7"},
+             {"primary_stems", nlohmann::json::array({"ai_controller", "level2_autonomous_loop"})},
+             {"context_stems", nlohmann::json::array()}}})}};
+  tuide::RegistryCausalTriageDecision ctx_triage;
+  ctx_triage.ok = true;
+  ctx_triage.critical_mass = true;
+  ctx_triage.shortlist = {"M1"};
+  tuide::RegistryZoneTriage ctx_anchor;
+  ctx_anchor.id = "M1";
+  ctx_triage.zones.push_back(ctx_anchor);
+  tuide::registry_apply_deterministic_co_shortlist(ctx_payload, &ctx_triage);
+  expect(ctx_triage.shortlist.size() <= 3, "context complement respects cap 3");
+  expect(std::find(ctx_triage.shortlist.begin(), ctx_triage.shortlist.end(), "M2") !=
+             ctx_triage.shortlist.end(),
+         "top-2 floor adds M2 alongside single-zone anchor");
+  expect(std::find(ctx_triage.shortlist.begin(), ctx_triage.shortlist.end(), "M7") !=
+             ctx_triage.shortlist.end(),
+         "context overlap adds primary-owner of shortlist context stem");
+
+  // Synth tie-break: M1 sin overlap / baja mass → M2 con editor_panel en hypothesis.
+  nlohmann::json synth_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M1"},
+             {"primary_stems", nlohmann::json::array({"status_language_popover"})},
+             {"mass_coverage", 0.002f}},
+            {{"id", "M2"},
+             {"primary_stems", nlohmann::json::array({"editor_panel"})},
+             {"mass_coverage", 0.09f}}})}};
+  tuide::RegistryCausalJudgeDecision synth_decision;
+  synth_decision.ok = true;
+  synth_decision.selected = {"M1"};
+  tuide::RegistryZoneVerdict synth_m1;
+  synth_m1.id = "M1";
+  synth_m1.verdict = "select";
+  synth_m1.role = "primary";
+  synth_m1.completeness = "complete";
+  synth_m1.confidence = 0.8f;
+  synth_m1.why = "elige popover por error";
+  synth_decision.zones.push_back(synth_m1);
+  tuide::RegistryZoneVerdict synth_m2;
+  synth_m2.id = "M2";
+  synth_m2.verdict = "reject";
+  synth_m2.role = "none";
+  synth_m2.completeness = "none";
+  synth_m2.why = "descartada incorrectamente";
+  synth_decision.zones.push_back(synth_m2);
+  tuide::registry_apply_synth_hypothesis_tiebreak(
+      synth_payload, "El estado del editor maneja eventos de mouse", "", &synth_decision);
+  expect(synth_decision.selected == std::vector<std::string>({"M2"}),
+         "synth tie-break prefers hypothesis stem overlap");
+
+  // v2: symbolish token matches representative → prefer that zone over high-mass distractor.
+  nlohmann::json rep_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M1"},
+             {"primary_stems", nlohmann::json::array({"settings_modal"})},
+             {"mass_coverage", 0.16f},
+             {"representatives",
+              nlohmann::json::array(
+                  {{{"target", "src/ui/settings_modal.cpp:handle_shortcuts_settings_keys"}}})}},
+            {{"id", "M2"},
+             {"primary_stems", nlohmann::json::array({"level1_agent"})},
+             {"mass_coverage", 0.29f},
+             {"representatives",
+              nlohmann::json::array(
+                  {{{"target", "src/ai/level1_agent.cpp:propose_investigate_needles"}}})}}})}};
+  tuide::RegistryCausalJudgeDecision rep_decision;
+  rep_decision.ok = true;
+  rep_decision.selected = {"M2"};
+  tuide::RegistryZoneVerdict rep_m2;
+  rep_m2.id = "M2";
+  rep_m2.verdict = "select";
+  rep_m2.why = "distractora de mayor mass";
+  rep_decision.zones.push_back(rep_m2);
+  tuide::registry_apply_synth_hypothesis_tiebreak(
+      rep_payload, "La funcion handle_shortcuts_settings_keys maneja los atajos", "",
+      &rep_decision);
+  expect(rep_decision.selected == std::vector<std::string>({"M1"}),
+         "tie-break v2 prefers symbolish↔representative match");
+
+  // v2: equal overlap → prefer lower mass (specificity).
+  nlohmann::json mass_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M1"},
+             {"primary_stems", nlohmann::json::array({"quit_confirm"})},
+             {"mass_coverage", 0.003f},
+             {"representatives", nlohmann::json::array()}},
+            {{"id", "M4"},
+             {"primary_stems", nlohmann::json::array({"open_file_confirm"})},
+             {"mass_coverage", 0.05f},
+             {"representatives", nlohmann::json::array()}}})}};
+  tuide::RegistryCausalJudgeDecision mass_decision;
+  mass_decision.ok = true;
+  mass_decision.selected = {"M4"};
+  tuide::RegistryZoneVerdict mass_m4;
+  mass_m4.id = "M4";
+  mass_m4.verdict = "select";
+  mass_m4.why = "distractora abierta por mass";
+  mass_decision.zones.push_back(mass_m4);
+  tuide::registry_apply_synth_hypothesis_tiebreak(
+      mass_payload, "confirmar archivos sin guardar antes de salir", "", &mass_decision);
+  expect(mass_decision.selected == std::vector<std::string>({"M1"}),
+         "tie-break v2 prefers lower mass on equal overlap");
+
+  // v2: negation cue degrades matched representative (post-falsify).
+  nlohmann::json neg_payload = {
+      {"zones",
+       nlohmann::json::array(
+           {{{"id", "M4"},
+             {"primary_stems", nlohmann::json::array({"application"})},
+             {"mass_coverage", 0.002f},
+             {"representatives",
+              nlohmann::json::array(
+                  {{{"target", "src/app/application.cpp:restore_workspace_session"}}})}},
+            {{"id", "M8"},
+             {"primary_stems", nlohmann::json::array({"workspace_config", "app_settings"})},
+             {"mass_coverage", 0.0008f},
+             {"representatives", nlohmann::json::array()}},
+            {{"id", "M2"},
+             {"primary_stems", nlohmann::json::array({"level2_session"})},
+             {"mass_coverage", 0.12f},
+             {"representatives", nlohmann::json::array()}}})}};
+  tuide::RegistryCausalJudgeDecision neg_decision;
+  neg_decision.ok = true;
+  neg_decision.selected = {"M2"};
+  tuide::RegistryZoneVerdict neg_m2;
+  neg_m2.id = "M2";
+  neg_m2.verdict = "select";
+  neg_m2.why = "conservada tras reopen vacio";
+  neg_decision.zones.push_back(neg_m2);
+  tuide::registry_apply_synth_hypothesis_tiebreak(
+      neg_payload,
+      "La funcion restore_workspace_session no maneja el cursor y los paneles laterales", "",
+      &neg_decision);
+  expect(neg_decision.selected == std::vector<std::string>({"M8"}),
+         "tie-break v2 negation prefers specific gold over falsified symbol zone");
+
+  // Primary survey parse + thread selection (legacy path still used by tests).
+  {
+    const std::string survey_raw =
+        R"({"action":"causal_zone_primary_survey_v1","zones":[)"
+        R"({"id":"M1","discard":false,"confidence":0.8,"hypothesis":"run_compile lanza la compilacion desde level2_session","supporting":[{"id":"M7","role":"state_owner"}],"expand_from":["src/ai/level2_session.cpp:run_compile"]},)"
+        R"({"id":"M7","discard":false,"confidence":0.65,"hypothesis":"ai_controller posee el estado de tarea y dispara el compile","supporting":[{"id":"M1","role":"trigger"}],"expand_from":["src/app/application.cpp:fail_debug_launch"]},)"
+        R"({"id":"M2","discard":true,"discard_reason":"remap de compile commands no explica el sintoma","confidence":0.1}]})";
+    const std::unordered_map<std::string, std::vector<std::string>> survey_targets{
+        {"M1", {"src/ai/level2_session.cpp:run_compile"}},
+        {"M2", {"src/util/compile_commands_remap.cpp:list_running_docker_containers"}},
+        {"M7", {"src/app/application.cpp:fail_debug_launch"}},
+    };
+    const auto survey = tuide::registry_parse_causal_primary_survey(
+        survey_raw, {"M1", "M2", "M7"}, survey_targets);
+    expect(survey.ok && survey.entries.size() == 3, "primary survey parses three zones");
+    nlohmann::json survey_payload = {
+        {"zones", nlohmann::json::array({{{"id", "M1"}}, {{"id", "M2"}}, {{"id", "M7"}}})}};
+    auto threads =
+        tuide::registry_primary_survey_select_threads(survey, survey_payload, survey_targets, 2);
+    expect(threads.size() == 2, "primary survey selects top-2 threads");
+    expect(threads[0].shortlist.front() == "M1", "highest confidence primary first");
+    expect(threads[1].shortlist.front() == "M7", "second thread is competing primary");
+  }
+
+  // Must-compete + contrast validate/inject (caso 07).
+  {
+    nlohmann::json payload07 = {
+        {"zones",
+         nlohmann::json::array(
+             {{{"id", "M1"},
+               {"primary_stems", nlohmann::json::array({"level2_session"})},
+               {"context_stems", nlohmann::json::array({"raw_pty_screen", "ai_controller"})},
+               {"representatives",
+                nlohmann::json::array(
+                    {{{"target", "src/ai/level2_session.cpp:run_compile"}}})}},
+              {{"id", "M2"},
+               {"primary_stems", nlohmann::json::array({"compile_commands_remap"})},
+               {"context_stems", nlohmann::json::array()},
+               {"representatives", nlohmann::json::array()}},
+              {{"id", "M7"},
+               {"primary_stems",
+                nlohmann::json::array({"ui_panel_render_cache", "ai_controller", "application"})},
+               {"context_stems", nlohmann::json::array()},
+               {"representatives",
+                nlohmann::json::array(
+                    {{{"target", "src/app/application.cpp:fail_debug_launch"}}})}}})},
+        {"zone_bridges", nlohmann::json::array()}};
+    const auto must = tuide::registry_collect_must_compete_zone_ids(payload07, 2);
+    expect(std::find(must.begin(), must.end(), "M7") != must.end(),
+           "must-compete detects M7 via context∩primary ai_controller");
+    expect(std::find(must.begin(), must.end(), "M1") == must.end(),
+           "must-compete excludes top-1");
+
+    const auto queue = tuide::registry_collect_slot_queue_zone_ids(payload07, 8);
+    expect(!queue.empty() && queue.front() == "M1", "slot queue starts with top-1");
+    expect(std::find(queue.begin(), queue.end(), "M7") != queue.end(),
+           "slot queue includes must-compete M7");
+
+    tuide::RegistrySlotHypothesis slot_m7;
+    slot_m7.ok = true;
+    slot_m7.primary = "M7";
+    slot_m7.confidence = 0.7f;
+    slot_m7.hypothesis =
+        "ai_controller posee el estado de tarea y dispara la compilacion del proyecto";
+    slot_m7.expand_from = {"src/app/application.cpp:fail_debug_launch"};
+    tuide::RegistrySlotHypothesis slot_m1;
+    slot_m1.ok = true;
+    slot_m1.primary = "M1";
+    slot_m1.confidence = 0.8f;
+    slot_m1.hypothesis = "run_compile lanza la compilacion desde level2_session";
+    slot_m1.expand_from = {"src/ai/level2_session.cpp:run_compile"};
+    auto retained =
+        tuide::registry_slot_retain_hypotheses({slot_m1, slot_m7}, payload07, 3);
+    expect(retained.size() == 2, "slot retain keeps two diverse primaries");
+    expect(tuide::registry_slot_gold_in_hypotheses(retained, payload07, {"ai_controller"}),
+           "gold_in_hypotheses true when M7 retained with ai_controller stem");
+
+    const std::unordered_map<std::string, std::vector<std::string>> targets07{
+        {"M1", {"src/ai/level2_session.cpp:run_compile"}},
+        {"M2", {"src/util/x.cpp:y"}},
+        {"M7", {"src/app/application.cpp:fail_debug_launch"}},
+    };
+
+    // Incomplete: discard M7 without expand_from
+    tuide::RegistryContrastDecision bad;
+    bad.ok = true;
+    bad.threads.push_back(
+        {"M1", "La compilacion se lanza en run_compile de level2_session", 0.7f, {}, {}, false});
+    bad.discards.push_back({"M7", "no se relaciona", {}});
+    auto vbad = tuide::registry_validate_contrast_threads(bad, must, payload07, targets07);
+    expect(!vbad.ok && vbad.error == "incomplete_contrast",
+           "validate rejects must-compete discard without targets");
+
+    // Duplicate hyp
+    tuide::RegistryContrastDecision dup;
+    dup.ok = true;
+    dup.threads.push_back(
+        {"M1", "run_compile lanza la compilacion del proyecto", 0.7f, {}, {}, false});
+    dup.threads.push_back(
+        {"M7", "run_compile lanza la compilacion del proyecto otra vez", 0.6f, {}, {}, false});
+    auto vdup = tuide::registry_validate_contrast_threads(dup, must, payload07, targets07);
+    expect(!vdup.ok && vdup.error == "duplicate_hypothesis",
+           "validate rejects duplicated run_compile hypotheses");
+
+    // single_viable OK when must empty
+    tuide::RegistryContrastDecision single;
+    single.ok = true;
+    single.single_viable = true;
+    single.threads.push_back(
+        {"M1", "solo un mecanismo viable en este mazo pobre", 0.6f, {}, {}, false});
+    auto vsingle =
+        tuide::registry_validate_contrast_threads(single, {}, payload07, targets07);
+    expect(vsingle.ok, "validate accepts single_viable without must-compete");
+
+    // Inject synthetic M7 when only one thread
+    tuide::RegistryContrastDecision inject = bad;
+    tuide::registry_inject_synthetic_contrast_threads(&inject, must, payload07, targets07);
+    expect(inject.injected, "inject marks synthetic");
+    expect(std::any_of(inject.threads.begin(), inject.threads.end(),
+                       [](const tuide::RegistryContrastThread& th) {
+                         return th.primary == "M7" && th.synthetic;
+                       }),
+           "inject adds synthetic M7 thread");
+    auto threads =
+        tuide::registry_contrast_select_threads(inject, payload07, targets07, 2);
+    expect(threads.size() == 2, "contrast select_threads returns two after inject");
+    expect(std::any_of(threads.begin(), threads.end(),
+                       [](const tuide::RegistryCausalTriageDecision& t) {
+                         return !t.shortlist.empty() && t.shortlist.front() == "M7";
+                       }),
+           "select_threads includes M7 primary");
+
+    // Inject replaces weakest non-must when already 2 threads (M1+M5, no M7)
+    tuide::RegistryContrastDecision full;
+    full.ok = true;
+    full.threads.push_back(
+        {"M1", "La compilacion se lanza en run_compile de level2_session", 0.8f, {}, {}, false});
+    full.threads.push_back(
+        {"M5", "copia debil del ancla en otra zona sin mecanismo propio", 0.4f, {}, {}, false});
+    tuide::registry_inject_synthetic_contrast_threads(&full, must, payload07, targets07);
+    expect(full.injected && full.threads.size() == 2, "inject keeps cap 2");
+    expect(std::any_of(full.threads.begin(), full.threads.end(),
+                       [](const tuide::RegistryContrastThread& th) {
+                         return th.primary == "M7" && th.synthetic;
+                       }),
+           "inject replaces M5 with synthetic M7");
+    expect(std::any_of(full.threads.begin(), full.threads.end(),
+                       [](const tuide::RegistryContrastThread& th) { return th.primary == "M1"; }),
+           "inject keeps stronger M1 thread");
+
+    const std::string stripped = tuide::registry_strip_zone_scores_markdown(
+        "## M1 score=0.91 margin=0.1 coverage=0.1\nstems: level2_session\n");
+    expect(stripped.find("score=") == std::string::npos && stripped.find("## M1\n") != std::string::npos,
+           "strip_zone_scores removes score line noise");
+  }
+
   const std::string triage_md = tuide::registry_causal_triage_markdown(judge_payload);
   expect(triage_md.find("causal_zone_triage_v1") != std::string::npos,
          "causal triage markdown");
@@ -635,6 +1046,43 @@ void test_query_constellations() {
         {"M1", "M2"}, {{"M1", {"src/left.cpp:reader"}}, {"M2", {"src/right.cpp:writer"}}});
     expect(rehomed.ok && rehomed.shortlist == std::vector<std::string>({"M2"}),
            "causal triage canonical targets repair a misplaced zone id");
+    const auto anchor = tuide::registry_parse_causal_anchor_decision(
+        R"({"action":"causal_zone_anchor_v1","anchors":[{"id":"M2","role_guess":"state_owner",)"
+        R"("explains":"posee el flag compartido","does_not_explain":"falta el trigger de escritura",)"
+        R"("expand_from":["src/right.cpp:writer"],"thread":"seguir writer hacia el latch"}],)"
+        R"("hypothesis":"el writer no limpia el flag al cancelar","critical_mass":true,)"
+        R"("retrieval_needed":false,"why":"M2 concentra estado y writer del síntoma"})",
+        {"M1", "M2"}, {{"M1", {"src/left.cpp:reader"}}, {"M2", {"src/right.cpp:writer"}}});
+    expect(anchor.ok && anchor.shortlist == std::vector<std::string>({"M2"}) &&
+               anchor.critical_mass && !anchor.hypothesis.empty(),
+           "causal anchor parses epistemic decision");
+    const auto too_many = tuide::registry_parse_causal_anchor_decision(
+        R"({"action":"causal_zone_anchor_v1","anchors":[)"
+        R"({"id":"M1","role_guess":"trigger","explains":"dispara el flujo A","does_not_explain":"no limpia",)"
+        R"("expand_from":["src/left.cpp:reader"],"thread":"seguir reader"},)"
+        R"({"id":"M2","role_guess":"cleanup","explains":"limpia el flag","does_not_explain":"no dispara",)"
+        R"("expand_from":["src/right.cpp:writer"],"thread":"seguir writer"},)"
+        R"({"id":"M3","role_guess":"consumer","explains":"consume el flag X","does_not_explain":"no escribe",)"
+        R"("expand_from":["src/left.cpp:reader"],"thread":"seguir consumer"}],)"
+        R"("hypothesis":"tres anclas no deben pasar","critical_mass":true,)"
+        R"("retrieval_needed":false,"why":"demasiadas anclas apiladas"})",
+        {"M1", "M2", "M3"},
+        {{"M1", {"src/left.cpp:reader"}},
+         {"M2", {"src/right.cpp:writer"}},
+         {"M3", {"src/left.cpp:reader"}}});
+    expect(!too_many.ok, "causal anchor rejects more than two anchors");
+    const auto truncated = tuide::registry_parse_causal_anchor_decision(
+        std::string("```json\n{\"action\":\"causal_zone_anchor_v1\",\"anchors\":[") +
+            "{\"id\":\"M2\",\"role_guess\":\"state_owner\","
+            "\"explains\":\"posee el flag compartido\","
+            "\"does_not_explain\":\"falta el trigger de escritura\","
+            "\"expand_from\":[\"src/right.cpp:writer\"],"
+            "\"thread\":\"seguir writer hacia el latch\"}],"
+            "\"hypothesis\":\"el writer no limpia el flag al cancelar\","
+            "\"critical_mass\":true,\"retrieval_needed\":false,\"why\":\"La M2 gestiona el esta",
+        {"M1", "M2"}, {{"M1", {"src/left.cpp:reader"}}, {"M2", {"src/right.cpp:writer"}}});
+    expect(truncated.ok && truncated.shortlist == std::vector<std::string>({"M2"}),
+           "causal anchor salvages truncated fenced JSON");
     tuide::RegistryCausalJudgeOpts expanded_opts;
     expanded_opts.max_representatives = 10;
     expanded_opts.max_edges = 24;
@@ -692,6 +1140,13 @@ void test_query_constellations() {
       judge_ids);
   expect(compact.ok && compact.selected == std::vector<std::string>({"M1"}),
          "causal judge accepts compact indexed decision");
+  const auto scalar_compact = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","zones":{"M1":"select"},)"
+      R"("selected":["M1"],"next":"verify",)"
+      R"("why":"M1 contiene el punto de entrada causal solicitado"})",
+      {"M1"});
+  expect(scalar_compact.ok && scalar_compact.selected == std::vector<std::string>({"M1"}),
+         "causal judge accepts scalar compact verdict");
   const auto promoted = tuide::registry_parse_causal_judge_decision(
       R"({"action":"causal_zone_judge","zones":{"M1":{"verdict":"select",)"
       R"("role":"trigger","completeness":"complete","confidence":0.9,)"
@@ -701,6 +1156,56 @@ void test_query_constellations() {
       judge_ids);
   expect(promoted.ok && promoted.zones.front().role == "primary",
          "causal judge promotes sole selection to primary");
+  const auto falsified = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","hypothesis_status":"falsified",)"
+      R"("reinvestigate_need":"buscar el cleanup que cancela el flag stuck",)"
+      R"("zones":{"M1":{"verdict":"reject","confidence":0.8,"why":"otro flujo sin cleanup"},)"
+      R"("M2":{"verdict":"reject","confidence":0.7,"why":"solo infraestructura genérica"}},)"
+      R"("selected":[],"next":"reinvestigate","why":"la hipótesis del writer no explica el cancel"})",
+      judge_ids);
+  expect(falsified.ok && falsified.next == "reinvestigate" &&
+             falsified.hypothesis_status == "falsified",
+         "causal synth accepts falsified reinvestigate");
+  const auto sloppy = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","hypothesis_status":"confirmed",)"
+      R"("reinvestigate_need":"","zones":{"M1":{"select":"box::writer","role":"mutator",)"
+      R"("completeness":"complete","confidence":"high",)"
+      R"("why":"writer controla el flag stuck en el núcleo"},)"
+      R"("M2":{"verdict":"reject","confidence":0.7,"why":"otro flujo sin el flag"}},)"
+      R"("selected":["M1"],"next":"verify","why":"síntesis"})",
+      judge_ids);
+  expect(sloppy.ok && sloppy.selected == std::vector<std::string>({"M1"}) &&
+             sloppy.zones.front().role == "primary",
+         "causal synth tolerates sloppy 7B confidence/role/select fields");
+  const auto placeholder = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","hypothesis_status":"confirmed",)"
+      R"("zones":{"M1":{"verdict":"select","role":"primary","completeness":"complete",)"
+      R"("confidence":0.8,"why":"evidencia concreta","contribution":"aporte"},)"
+      R"("M2":{"verdict":"reject","confidence":0.7,"why":"otro flujo sin el flag"}},)"
+      R"("selected":["M1"],"next":"verify","why":"síntesis con evidencia"})",
+      judge_ids);
+  expect(!placeholder.ok, "causal synth rejects copied prompt placeholders");
+  const auto partial_no_expand = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","hypothesis_status":"partial",)"
+      R"("zones":{"M1":{"verdict":"select","role":"primary","completeness":"partial",)"
+      R"("confidence":0.75,"why":"M1 escribe el flag stuck vía writer","contribution":"control del flag"},)"
+      R"("M2":{"verdict":"reject","confidence":0.7,"why":"otro flujo sin el flag"}},)"
+      R"("selected":["M1"],"next":"verify","why":"M1 cubre el mecanismo pedido"})",
+      judge_ids);
+  expect(partial_no_expand.ok && partial_no_expand.zones.front().completeness == "complete" &&
+             partial_no_expand.next == "verify",
+         "causal synth coerces partial without expand_from to complete");
+  const auto veredict_typo = tuide::registry_parse_causal_judge_decision(
+      R"({"action":"causal_zone_judge","hypothesis_status":"partial",)"
+      R"("reinvestigate_need":"falta el builder del contenido de la pestaña about",)"
+      R"("zones":{"M1":{"veredict":"reject","confidence":0.9,)"
+      R"("why":"append_tabs solo crea el header sin contenido"},)"
+      R"("M2":{"verdict":"reject","confidence":0.7,"why":"otro flujo sin settings"}},)"
+      R"("selected":[],"next":"expand","why":"el header no cubre el contenido about"})",
+      judge_ids);
+  expect(veredict_typo.ok && veredict_typo.next == "reinvestigate" &&
+             veredict_typo.hypothesis_status == "falsified",
+         "causal synth maps veredict typo and empty partial to reinvestigate");
   tuide::registry_close(&r);
   fs::remove_all(tmp);
 }

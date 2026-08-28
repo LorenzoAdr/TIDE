@@ -36,6 +36,120 @@ bool is_product_path(const std::string& rel) {
   return rel.rfind("src/", 0) == 0 || rel.find('/') == std::string::npos;
 }
 
+bool symbol_has_morph_action_prefix(const std::string& symbol) {
+  static const char* const kPrefixes[] = {"set_", "clear_", "cancel", "begin_", "end_"};
+  for (const char* prefix : kPrefixes) {
+    if (symbol.rfind(prefix, 0) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string lower_ascii_copy(std::string value) {
+  for (char& ch : value) {
+    if (ch >= 'A' && ch <= 'Z') {
+      ch = static_cast<char>(ch - 'A' + 'a');
+    }
+  }
+  return value;
+}
+
+bool query_tokens_imply_action(const std::vector<std::string>& tokens) {
+  static const char* const kActions[] = {"cancel", "clear", "stop", "halt", "reset", "abort"};
+  for (const auto& token : tokens) {
+    for (const char* action : kActions) {
+      if (token == action) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+std::vector<std::string> query_tokens_from_text(const std::string& query, std::size_t max_n) {
+  std::vector<std::string> out;
+  std::string token;
+  auto flush = [&]() {
+    if (token.size() < 3) {
+      token.clear();
+      return;
+    }
+    for (char& ch : token) {
+      if (ch >= 'A' && ch <= 'Z') {
+        ch = static_cast<char>(ch - 'A' + 'a');
+      }
+    }
+    if (std::find(out.begin(), out.end(), token) == out.end()) {
+      out.push_back(token);
+    }
+    token.clear();
+  };
+  for (unsigned char ch : query) {
+    if (std::isalnum(ch) || ch == '_') {
+      token.push_back(static_cast<char>(ch));
+      continue;
+    }
+    flush();
+    if (out.size() >= max_n) {
+      break;
+    }
+  }
+  flush();
+  if (out.size() > max_n) {
+    out.resize(max_n);
+  }
+  return out;
+}
+
+float macro_facet_bonus(const EffectSlice* s, const std::unordered_set<std::string>& direct_ids,
+                        const std::unordered_map<std::string, const EffectNode*>& by_id) {
+  if (s == nullptr || s->query.empty()) {
+    return 0.f;
+  }
+  const auto tokens = query_tokens_from_text(s->query, 16);
+  if (tokens.empty()) {
+    return 0.f;
+  }
+  float bonus = 0.f;
+  bool zone_mutator = false;
+  for (const std::string& id : direct_ids) {
+    auto nit = by_id.find(id);
+    if (nit == by_id.end() || nit->second->kind != EffectNodeKind::Fn) {
+      continue;
+    }
+    const EffectNode& node = *nit->second;
+    const std::string sym_lower = lower_ascii_copy(node.symbol);
+    const std::string member_lower = lower_ascii_copy(node.id);
+    zone_mutator = zone_mutator || symbol_has_morph_action_prefix(sym_lower);
+    for (const auto& token : tokens) {
+      if (token.size() < 3) {
+        continue;
+      }
+      if (sym_lower.find(token) != std::string::npos ||
+          member_lower.find(token) != std::string::npos) {
+        bonus += 0.03f;
+      }
+    }
+  }
+  if (query_tokens_imply_action(tokens) && zone_mutator) {
+    bonus += 0.04f;
+  }
+  return std::min(0.12f, bonus);
+}
+
+bool node_is_direct_writer(const EffectSlice* s, const std::string& id) {
+  if (s == nullptr) {
+    return false;
+  }
+  for (const auto& fact : s->facts) {
+    if (fact.kind == EffectFactKind::Write && fact.from == id) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool is_slice_path(const std::string& rel) {
   if (rel.rfind("tests/fixtures/", 0) == 0) {
     return true;
@@ -2133,7 +2247,8 @@ void rank_macro_constellations(EffectSlice* s, int k) {
     const float nucleus_bonus = group.size() > 1 ? 0.02f : 0.f;
     const float causal_merge_bonus = 0.03f * macro.merge_strength;
     macro.score = std::min(1.f, base_score + nucleus_bonus + branch_bonus + rank_bonus +
-                                   causal_merge_bonus);
+                                   causal_merge_bonus +
+                                   macro_facet_bonus(s, direct_ids, by_id));
     std::ostringstream why;
     why << group.size() << " nuclei, " << macro.anchor_groups.size()
         << " witnessed query branches, " << macro.node_ids.size() << " unique nodes";
@@ -2193,8 +2308,23 @@ void rank_macro_constellations(EffectSlice* s, int k) {
       max_sem = std::max(max_sem, node.prior_sem);
       component_mass += std::max(0.f, node.mass);
     }
-    if (best_rank == std::numeric_limits<int>::max() ||
-        (component.size() < 2 && best_rank > 4)) {
+    if (best_rank == std::numeric_limits<int>::max()) {
+      continue;
+    }
+    bool strong_writer_seed = false;
+    for (const std::string& id : component) {
+      auto nit = by_id.find(id);
+      if (nit == by_id.end()) {
+        continue;
+      }
+      const EffectNode& node = *nit->second;
+      if (node.query_rank >= 0 && node.query_rank <= 2 &&
+          (node.prior_sem >= 0.6f || node.seed) && node_is_direct_writer(s, id)) {
+        strong_writer_seed = true;
+        break;
+      }
+    }
+    if (component.size() < 2 && best_rank > 4 && !strong_writer_seed) {
       continue;
     }
     std::vector<std::pair<std::string, int>> ranked_stems(stem_rank.begin(), stem_rank.end());

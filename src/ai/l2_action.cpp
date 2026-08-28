@@ -293,6 +293,10 @@ const char* l2_action_kind_name(L2ActionKind kind) {
       return "a_trail_judge";
     case L2ActionKind::ADone:
       return "a_done";
+    case L2ActionKind::F1Done:
+      return "f1_done";
+    case L2ActionKind::AnchorMiss:
+      return "anchor_miss_v1";
     case L2ActionKind::Done:
       return "done";
     case L2ActionKind::Edit:
@@ -398,6 +402,30 @@ L2Action parse_l2_action(const std::string& model_text) {
       if (!parse_a_loci_array(j, &out.a_loci, &err)) {
         out.kind = L2ActionKind::Error;
         out.error = err;
+      }
+      return out;
+    }
+    if (action == "f1_done" || action == "anchor_done_v1") {
+      out.kind = L2ActionKind::F1Done;
+      out.summary = j.value("summary", j.value("understanding", ""));
+      std::string err;
+      if (!parse_a_loci_array(j, &out.a_loci, &err)) {
+        out.kind = L2ActionKind::Error;
+        out.error = err;
+      }
+      return out;
+    }
+    if (action == "anchor_miss_v1" || action == "f1_miss") {
+      out.kind = L2ActionKind::AnchorMiss;
+      out.summary = j.value("summary", j.value("why", ""));
+      out.f1_failure_reason = j.value("reason", j.value("why", ""));
+      out.f1_retrieval_needed = j.value("retrieval_needed", false);
+      if (j.contains("candidates") && j["candidates"].is_array()) {
+        for (const auto& c : j["candidates"]) {
+          if (c.is_string()) {
+            out.f1_failure_candidates.push_back(c.get<std::string>());
+          }
+        }
       }
       return out;
     }

@@ -38,6 +38,8 @@ def parse_judge_cards(cards: str) -> dict[str, Any]:
                 "rank": len(zones) + 1,
                 "stems_declared": set(),
                 "stems_evidence": set(),
+                "stems_core": set(),
+                "stems_context": set(),
             }
             zones.append(current_zone)
             zones_by_id[zone_id] = current_zone
@@ -56,6 +58,14 @@ def parse_judge_cards(cards: str) -> dict[str, Any]:
             continue
         if line.startswith("stems:"):
             current_zone["stems_declared"].update(line[6:].split())
+        elif line.startswith("core stems:"):
+            current_zone.setdefault("stems_core", set()).update(line[11:].split())
+        elif line.startswith("context stems:"):
+            current_zone.setdefault("stems_context", set()).update(line[14:].split())
+        elif line.startswith("core:"):
+            current_zone.setdefault("stems_core", set()).update(line[5:].split())
+        elif line.startswith("context:"):
+            current_zone.setdefault("stems_context", set()).update(line[8:].split())
         else:
             current_zone["stems_evidence"].update(TARGET_STEM_RE.findall(line))
 
@@ -80,9 +90,15 @@ def score_judge_cards(
     gold_stems: list[str],
     trap_stems: list[str],
     selected: list[str],
+    *,
+    include_core_context: bool = False,
 ) -> dict[str, Any]:
     """Compute post-inference card/selection metrics by evidence layer."""
     parsed = parse_judge_cards(cards)
+    if include_core_context:
+        for zone in parsed["zones"]:
+            zone["stems_declared"] |= zone.get("stems_core", set())
+            zone["stems_declared"] |= zone.get("stems_context", set())
     gold = {stem.lower() for stem in gold_stems if stem}
     traps = {stem.lower() for stem in trap_stems if stem}
 
@@ -190,8 +206,10 @@ def main() -> int:
             continue
         try:
             triage = json.loads((case_dir / "triage.json").read_text(encoding="utf-8"))
+            triage_cards = (case_dir / "triage_cards.md").read_text(encoding="utf-8")
         except (OSError, json.JSONDecodeError):
             triage = {}
+            triage_cards = ""
         triage_shortlist = [str(value) for value in triage.get("shortlist") or []]
         selected = [str(value) for value in decision.get("selected") or []]
         repaired_primary = bool(selected) and decision.get("error") == (
@@ -210,13 +228,24 @@ def main() -> int:
             for stem in zone["stems_declared"]
         }
         expected_zones = layers["gold_declared_zone_ids"]
-        triage_gold = bool(set(triage_shortlist) & set(expected_zones))
+        triage_layers = (
+            score_judge_cards(triage_cards, expected, traps, [])
+            if triage_cards
+            else {"gold_declared_zone_ids": []}
+        )
+        triage_gold = bool(
+            set(triage_shortlist) & set(triage_layers["gold_declared_zone_ids"])
+        )
+        reopened = (case_dir / "reopen_anchor.json").exists() or (
+            case_dir / "cards_reopened.md"
+        ).exists()
         any_hit = ok and any(stem in selected_stems for stem in expected)
         full_hit = ok and bool(expected) and all(stem in selected_stems for stem in expected)
         available_any = any(stem in available_stems for stem in expected)
         available_full = bool(expected) and all(stem in available_stems for stem in expected)
         op_hit = ok and any(stem in selected_stems for stem in operational)
         trap = ok and any(stem in selected_stems for stem in traps)
+        falsify_recover = reopened and any_hit and not triage_gold
         rows.append(
             {
                 "id": case_id,
@@ -225,6 +254,11 @@ def main() -> int:
                 "selected": selected,
                 "triage_shortlist": triage_shortlist,
                 "triage_gold": triage_gold,
+                "triage_gold_zone_ids": triage_layers["gold_declared_zone_ids"],
+                "anchor_hit": triage_gold,
+                "reopened": reopened,
+                "falsify_then_recover": falsify_recover,
+                "hypothesis_status": decision.get("hypothesis_status", ""),
                 "selected_stems": sorted(selected_stems),
                 "expected_zones": expected_zones,
                 "any_hit": any_hit,
@@ -261,6 +295,9 @@ def main() -> int:
         "operational_hit": sum(bool(row.get("operational_hit")) for row in rows),
         "triage_cases": sum(bool(row.get("triage_shortlist")) for row in rows),
         "triage_recall": sum(bool(row.get("triage_gold")) for row in rows),
+        "anchor_hit": sum(bool(row.get("anchor_hit")) for row in rows),
+        "reopened": sum(bool(row.get("reopened")) for row in rows),
+        "falsify_then_recover": sum(bool(row.get("falsify_then_recover")) for row in rows),
         "trap": sum(bool(row.get("trap")) for row in rows),
         "empty": sum(bool(row.get("empty")) for row in rows),
         "gold_in_zones": sum(
