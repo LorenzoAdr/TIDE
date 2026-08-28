@@ -52,12 +52,12 @@ int64_t steady_now_ms() {
 }
 
 Component MakeCachedPanelRender(MainLayoutState* layout_state, UiPanelId panel, Component inner) {
-  return Renderer(std::move(inner), [=] {
+  return Renderer(inner, [layout_state, panel, inner] {
     if (layout_state == nullptr) {
       return inner->Render();
     }
     return layout_state->panel_render_cache.render(
-        panel, theme::colors_revision(), [=] { return inner->Render(); });
+        panel, theme::colors_revision(), [inner] { return inner->Render(); });
   });
 }
 
@@ -593,7 +593,7 @@ Component MakeHSplitTop(Component main, Component back, int* main_size,
 
 Component WrapClearInputFocus(Component child, MainLayoutState* layout_state) {
   return CatchEvent(
-      Renderer(std::move(child), [child = child] { return child->Render(); }),
+      Renderer(child, [child] { return child->Render(); }),
       [layout_state](Event event) {
         if (layout_state == nullptr) {
           return false;

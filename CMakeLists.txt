@@ -437,7 +437,9 @@ if(TUIDE_UTIL_LIBRARY)
   target_link_libraries(tuide PRIVATE ${TUIDE_UTIL_LIBRARY})
 endif()
 
-if(UNIX)
+if(APPLE)
+  target_link_options(tuide PRIVATE "-Wl,-export_dynamic")
+elseif(UNIX)
   target_link_options(tuide PRIVATE -rdynamic)
 endif()
 
@@ -1090,6 +1092,18 @@ target_include_directories(llama_backend_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
+add_executable(llama_host_comm_test
+  tests/llama_host_comm_test.cpp
+  src/ai/llama_backend.cpp
+  src/ai/embedding_backend.cpp
+  src/ai/model_store.cpp
+  src/ai/ai_trace.cpp
+)
+target_include_directories(llama_host_comm_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+
 add_executable(l2_harness_cli
   tools/l2_harness_cli.cpp
   tests/tool_registry_stub.cpp
@@ -1487,6 +1501,7 @@ set(TUIDE_TEST_TARGETS
   l2_pack_review_test
   search_replace_test
   llama_backend_test
+  llama_host_comm_test
   repo_map_test
   get_code_of_test
   stem_passage_test

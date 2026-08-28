@@ -33,14 +33,17 @@ Bundled (AppImage) root: `TUIDE_TOOLPACKS_BUNDLED` (read-only).
 ## Catalog (GitHub Releases)
 
 - Tags: `catalog-YYYY.MM.DD` + movable `catalog-latest`
-- Assets: `catalog.json`, one `*-linux-x86_64.tar.zst` per toolpack, `SHA256SUMS`
+- Assets: `catalog.json`, one `*-linux-x86_64.tar.zst` and/or `*-linux-aarch64.tar.zst` per toolpack, `SHA256SUMS`
 - Default: `https://github.com/LorenzoAdr/TIDE/releases/download/catalog-latest/catalog.json`
 - Override: `TUIDE_TOOLPACKS_CATALOG_URL` (HTTP, `file://`, or absolute path)
+- The AppImage/client picks the catalog entry whose `arch` matches the host (`x86_64` or `aarch64`)
 
 Publish locally (does not upload):
 
 ```bash
-./tools/publish_toolpack_catalog.sh
+./tools/publish_toolpack_catalog.sh                  # arch del host
+./tools/publish_toolpack_catalog.sh --arch aarch64
+./tools/publish_toolpack_catalog.sh --arch all        # ambas (clangd ARM baja ~1 GB de LLVM)
 ./tools/publish_toolpack_catalog.sh --only clangd,gdb,rust-analyzer
 ```
 
@@ -78,11 +81,11 @@ On Debian/Ubuntu: `sudo apt install curl tar zstd`.
 ## Export (AppImage)
 
 Portable export builds an **AppDir** (and optionally a Type‑2 **AppImage**), not an ELF blob.
-From F10 → Toolpacks, use **Exportar portable (AppImage)** (writes `~/tuide-x86_64.AppImage`,
+From F10 → Toolpacks, use **Exportar portable (AppImage)** (writes `~/tuide-<arch>.AppImage`,
 or `~/tuide.AppDir` if `appimagetool` is missing). CLI:
 
 ```bash
-tuide export-portable --all-installed -o dist/tuide-x86_64.AppImage
+tuide export-portable --all-installed -o dist/tuide-x86_64.AppImage   # o tuide-aarch64.AppImage
 tuide export-portable --format=appdir -o dist/tuide.AppDir
 tuide export-portable --core-only -o dist/tuide-core.AppImage
 ```
@@ -143,7 +146,7 @@ tuide export-portable --toolpacks clangd,gdb --binary ./build/tuide
 
 `--format=appimage` (default) requires `appimagetool` on `PATH` (or `APPIMAGETOOL`),
 plus host helpers `file` and `mksquashfs` (`squashfs-tools`).
-Export sets `ARCH=x86_64` and, if `mksquashfs` sits next to `appimagetool`, prepends that
+Export sets `ARCH` to the host catalog arch (`x86_64` or `aarch64`) and, if `mksquashfs` sits next to `appimagetool`, prepends that
 directory to `PATH` (typical when using the official appimagetool AppImage extract).
 `--format=appdir` always writes a runnable directory (no appimagetool).
 

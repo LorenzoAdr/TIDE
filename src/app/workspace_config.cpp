@@ -242,6 +242,9 @@ void parse_ai_settings(const nlohmann::json& doc, AiSettings* settings) {
       if (emb.contains("auto_download") && emb["auto_download"].is_boolean()) {
         settings->level0.embeddings.auto_download = emb["auto_download"].get<bool>();
       }
+      if (emb.contains("server_host") && emb["server_host"].is_string()) {
+        settings->level0.embeddings.server_host = emb["server_host"].get<std::string>();
+      }
       if (emb.contains("server_port") && emb["server_port"].is_number_integer()) {
         settings->level0.embeddings.server_port = emb["server_port"].get<int>();
       }
@@ -311,6 +314,7 @@ nlohmann::json serialize_ai_settings(const AiSettings& settings) {
          {{"model_id", settings.level0.embeddings.model_id},
           {"model_path", settings.level0.embeddings.model_path},
           {"auto_download", settings.level0.embeddings.auto_download},
+          {"server_host", settings.level0.embeddings.server_host},
           {"server_port", settings.level0.embeddings.server_port},
           {"n_ctx", settings.level0.embeddings.n_ctx},
           {"n_gpu_layers", settings.level0.embeddings.n_gpu_layers},

@@ -90,6 +90,7 @@
 #include "util/crash_handler.hpp"
 #include "util/docker_shell.hpp"
 #include "util/compile_commands_remap.hpp"
+#include "util/compile_commands_setup.hpp"
 #include "util/lsp_missing_prompt.hpp"
 #include "util/monitor_log.hpp"
 #include "util/nm_reader.hpp"
@@ -115,7 +116,6 @@ static int64_t steady_now_ms() {
 	return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
-
 bool is_significant_input_event(const Event &event) {
 	if (event == Event::Custom) {
 		return false;
@@ -136,7 +136,6 @@ bool is_significant_input_event(const Event &event) {
 	}
 	if (mouse.motion == Mouse::Moved && mouse.button != Mouse::None) {
 		return true;
-
 
 	}
 	return false;
@@ -165,41 +164,6 @@ bool should_block_inhibited_mouse_motion(const MainLayoutState *layout, const Ev
 	}
 	return false;
 }
-
-class BackgroundWorker {
-  public:
-	using MainThreadTask = std::function<void()>;
-
-	static constexpr int64_t kActiveIntervalMs = 50;
-
-	explicit BackgroundWorker(MainThreadTask on_main_thread)
-	    : on_main_thread_(std::move(on_main_thread)) {
-		thread_ = std::thread([this] {
-			set_current_thread_name("ui-poller");
-			while (running_.load(std::memory_order_acquire)) {
-				std::this_thread::sleep_for(std::chrono::milliseconds(kActiveIntervalMs));
-				if (on_main_thread_) {
-					on_main_thread_();
-				}
-			}
-		});
-	}
-
-	~BackgroundWorker() {
-		running_.store(false, std::memory_order_release);
-		if (thread_.joinable()) {
-			thread_.join();
-		}
-	}
-
-	BackgroundWorker(const BackgroundWorker &) = delete;
-	BackgroundWorker &operator=(const BackgroundWorker &) = delete;
-
-  private:
-	MainThreadTask on_main_thread_;
-	std::atomic<bool> running_{true};
-	std::thread thread_;
-};
 
 // Swallow pure mouse moves while interactive/inhibited so FTXUI keeps frame_valid_ and no child
 // handler can return handled=true (scrollbars, tabs, etc.).
@@ -463,6 +427,7 @@ void Application::stop_all_subprocesses() {
 	save_workspace_session();
 	build_artifact_watcher_.stop();
 	global_build_environment_service().shutdown();
+	shutdown_host_cmake_compile_commands();
 	shell_session_.stop();
 	if (symbol_provider_) {
 		symbol_provider_->on_workspace_closed();
@@ -1087,6 +1052,7 @@ void Application::run_input_sync_drain(int64_t now_ms) {
 
 void Application::run_custom_event_drain(int64_t now_ms, const UiEventDrainPlan &plan,
                                          uint64_t paint_before) {
+	process_pending_workspace_load();
 	layout_state_.activity_gate.tick(now_ms);
 	sync_activity_phase_effects();
 	refresh_editor_visible_paths();
@@ -1508,7 +1474,8 @@ void Application::set_workspace(const std::string &workspace_root,
 		if (setup.compile_dir.empty()) {
 			std::error_code cmake_ec;
 			if (fs::is_regular_file(fs::path(absolute) / "CMakeLists.txt", cmake_ec)) {
-				workspace_.status_message += i18n::tr("app.no_compile_commands");
+				workspace_.status_message += i18n::tr("app.generating_compile_commands");
+				maybe_generate_host_compile_commands(absolute);
 			} else if (detect_build_system_kind(absolute) == BuildSystemKind::kMakefile ||
 			           detect_build_system_kind(absolute) == BuildSystemKind::kHybrid) {
 				workspace_.status_message += " | generando entorno make";
@@ -1566,6 +1533,33 @@ void Application::on_workspace_complete(const std::string &workspace_root,
                                         ScreenInteractive * /*screen*/) {
 	workspace_wizard_state_.open = false;
 	pending_workspace_load_ = workspace_root;
+	UI_WAKE(&layout_state_, "app");
+	if (layout_state_.ui_events != nullptr) {
+		layout_state_.ui_events->request_animation_frame();
+	}
+}
+
+void Application::maybe_generate_host_compile_commands(const std::string &workspace_root) {
+	if (workspace_root.empty()) {
+		return;
+	}
+	request_host_cmake_compile_commands(
+	    workspace_root, [this, root = workspace_root](std::string compile_dir) {
+		    enqueue_ui_task([this, root, compile_dir]() {
+			    if (workspace_.root != root) {
+				    return;
+			    }
+			    if (compile_dir.empty()) {
+				    workspace_.status_message += i18n::tr("app.no_compile_commands");
+			    } else {
+				    restart_lsp_for_workspace();
+			    }
+			    UI_WAKE(&layout_state_, "app");
+		    });
+		    if (layout_state_.ui_events != nullptr) {
+			    UI_WAKE(&layout_state_, "app");
+		    }
+	    });
 }
 
 void Application::process_pending_workspace_load() {
@@ -2869,14 +2863,7 @@ int Application::run() {
 		warm_system_clipboard();
 	}
 
-	std::unique_ptr<BackgroundWorker> background_worker;
-	if (!ui_smoke) {
-		background_worker = std::make_unique<BackgroundWorker>([this]() {
-			if (pending_workspace_load_.has_value()) {
-				process_pending_workspace_load();
-			}
-		});
-	} else {
+	if (ui_smoke) {
 		auto exit_loop = screen.ExitLoopClosure();
 		std::thread([exit_loop] {
 			std::this_thread::sleep_for(std::chrono::milliseconds(150));

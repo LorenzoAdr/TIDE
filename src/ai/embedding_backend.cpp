@@ -1,6 +1,7 @@
 #include "ai/embedding_backend.hpp"
 
 #include "ai/ai_trace.hpp"
+#include "ai/llama_net.hpp"
 
 #include <array>
 #include <algorithm>
@@ -69,7 +70,8 @@ std::string make_server_stamp(const std::string& model_path, const AiLevel0Embed
   std::ostringstream oss;
   oss << "v4|" << model_path << "|c=" << emb.n_ctx << "|ngl=" << ngl << "|t=" << threads
       << "|b=" << emb.batch_size << "|ub=" << emb.ubatch_size << "|np=" << emb.n_parallel
-      << "|hb=" << emb.http_batch << "|port=" << emb.server_port << "|nou=";
+      << "|hb=" << emb.http_batch << "|port=" << emb.server_port
+      << "|host=" << llama_normalize_host(emb.server_host) << "|nou=";
   return oss.str();
 }
 
@@ -448,7 +450,7 @@ std::string EmbeddingBackend::status_text() const {
   if (!model_path_.empty()) {
     oss << " model=" << model_path_;
   }
-  oss << " port=" << port_;
+  oss << " host=" << host_ << " port=" << port_;
   if (server_pid_ > 0) {
     oss << " pid=" << server_pid_;
   }
@@ -476,16 +478,8 @@ bool EmbeddingBackend::http_ensure_connected_unlocked(std::string* error) const 
   int one = 1;
   ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
   set_sock_timeouts(fd, kEmbedHttpTimeoutMs);
-
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(static_cast<uint16_t>(port_));
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+  if (!llama_connect_ipv4(fd, host_, port_, error)) {
     ::close(fd);
-    if (error) {
-      *error = "connect 127.0.0.1:" + std::to_string(port_) + " falló";
-    }
     return false;
   }
   http_fd_ = fd;
@@ -505,7 +499,7 @@ bool EmbeddingBackend::http_exchange_unlocked(const std::string& method, const s
 
   std::ostringstream req;
   req << method << ' ' << path << " HTTP/1.1\r\n";
-  req << "Host: 127.0.0.1:" << port_ << "\r\n";
+  req << "Host: " << host_ << ":" << port_ << "\r\n";
   req << "Connection: keep-alive\r\n";
   if (method == "POST") {
     req << "Content-Type: application/json\r\n";
@@ -670,21 +664,14 @@ bool EmbeddingBackend::post_embeddings_json_ephemeral(const std::string& payload
   int one = 1;
   ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
   set_sock_timeouts(fd, kEmbedHttpTimeoutMs);
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(static_cast<uint16_t>(port_));
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+  if (!llama_connect_ipv4(fd, host_, port_, error)) {
     ::close(fd);
-    if (error) {
-      *error = "connect ephemeral 127.0.0.1:" + std::to_string(port_) + " falló";
-    }
     return false;
   }
 
   std::ostringstream req;
   req << "POST /v1/embeddings HTTP/1.1\r\n";
-  req << "Host: 127.0.0.1:" << port_ << "\r\n";
+  req << "Host: " << host_ << ":" << port_ << "\r\n";
   req << "Connection: close\r\n";
   req << "Content-Type: application/json\r\n";
   req << "Content-Length: " << payload.size() << "\r\n\r\n";
@@ -771,7 +758,7 @@ bool EmbeddingBackend::wait_until_healthy(int timeout_ms, std::string* error) co
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
   if (error) {
-    *error = "timeout esperando /health en puerto " + std::to_string(port_);
+    *error = "timeout esperando /health en " + host_ + ":" + std::to_string(port_);
   }
   return false;
 }
@@ -938,6 +925,7 @@ bool EmbeddingBackend::ensure_ready(const AiSettings& settings, const ProgressFn
   std::lock_guard lock(mu_);
   store_ = ModelStore(settings.models_cache_dir.empty() ? ModelStore::default_cache_dir()
                                                         : settings.models_cache_dir);
+  host_ = llama_normalize_host(settings.level0.embeddings.server_host);
   port_ = settings.level0.embeddings.server_port > 0 ? settings.level0.embeddings.server_port
                                                       : 18765;
   http_batch_ = settings.level0.embeddings.http_batch > 0 ? settings.level0.embeddings.http_batch
@@ -951,6 +939,44 @@ bool EmbeddingBackend::ensure_ready(const AiSettings& settings, const ProgressFn
     const int slot_tokens = std::max(32, n_ctx_ / slots);
     const int usable = std::max(24, slot_tokens - 16);
     max_embed_chars_ = static_cast<std::size_t>(usable) * 3u;
+  }
+
+  if (!llama_host_is_local(host_)) {
+    if (server_pid_ > 0) {
+      stop_owned_unlocked();
+    }
+    if (ready() && health_ok()) {
+      return true;
+    }
+    ready_.store(false);
+    {
+      std::lock_guard http_lock(http_mu_);
+      http_close_unlocked();
+    }
+    if (on_progress) {
+      on_progress("embed: attach remoto " + host_ + ":" + std::to_string(port_));
+    }
+    ai_trace(AiTraceChannel::Embed, "attach_remote",
+             "{\"host\":\"" + ai_trace_escape(host_) + "\",\"port\":" + std::to_string(port_) + "}");
+    if (!wait_until_healthy(8000, error)) {
+      if (error != nullptr) {
+        *error = "no hay llama-server --embedding en " + host_ + ":" + std::to_string(port_) +
+                 " (arráncalo en el host GPU con tools/run_host_llama.sh)";
+      }
+      ai_trace(AiTraceChannel::Embed, "attach_remote_fail",
+               "{\"host\":\"" + ai_trace_escape(host_) + "\",\"port\":" + std::to_string(port_) +
+                   "\"}");
+      return false;
+    }
+    ready_.store(true);
+    {
+      std::vector<std::vector<float>> warm;
+      std::string warm_err;
+      (void)embed_many_raw({"search_document: warmup"}, &warm, &warm_err);
+    }
+    ai_trace(AiTraceChannel::Embed, "attach_remote_ok",
+             "{\"host\":\"" + ai_trace_escape(host_) + "\",\"port\":" + std::to_string(port_) + "}");
+    return true;
   }
 
   // Resolve model path early so stamp matches reuse checks.

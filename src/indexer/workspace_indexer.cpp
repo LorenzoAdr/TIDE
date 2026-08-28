@@ -14,10 +14,12 @@
 #include "util/monitor_log.hpp"
 #include "util/thread_name.hpp"
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 #include <signal.h>
-#include <sys/inotify.h>
 #include <unistd.h>
+#endif
+#if defined(__linux__)
+#include <sys/inotify.h>
 #endif
 
 namespace fs = std::filesystem;

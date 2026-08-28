@@ -166,6 +166,7 @@ class Application {
   void enqueue_ui_task(std::function<void()> task);
   void drain_ui_tasks();
   void process_pending_workspace_load();
+  void maybe_generate_host_compile_commands(const std::string& workspace_root);
   void begin_shutdown(ftxui::ScreenInteractive* screen);
   void schedule_next_shutdown_step(ftxui::ScreenInteractive* screen);
   void tick_shutdown();

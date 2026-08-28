@@ -17,6 +17,20 @@
       "recommends_system": ["clangd"]
     },
     {
+      "id": "clangd",
+      "display_name": "clangd",
+      "kind": "lsp",
+      "languages": ["c", "cpp"],
+      "version": "19.1.2",
+      "arch": ["aarch64"],
+      "os": ["linux"],
+      "url": "https://github.com/LorenzoAdr/TIDE/releases/download/catalog-latest/clangd-19.1.2-linux-aarch64.tar.zst",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size_bytes": 0,
+      "license": "Apache-2.0 WITH LLVM-exception",
+      "recommends_system": ["clangd"]
+    },
+    {
       "id": "gdb",
       "display_name": "GDB",
       "kind": "dap",

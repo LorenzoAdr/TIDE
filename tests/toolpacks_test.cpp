@@ -48,6 +48,42 @@ int run_shell(const std::string& cmd) {
   return std::system(cmd.c_str());
 }
 
+std::string host_arch() { return tuide::toolpacks::host_catalog_arch(); }
+
+std::string linux_infix() { return tuide::toolpacks::linux_catalog_archive_infix(); }
+
+void test_catalog_selects_host_arch() {
+  const std::string host = host_arch();
+  const std::string other = (host == "aarch64") ? "x86_64" : "aarch64";
+  const std::string json = std::string("{\n") +
+      "  \"schema\": 1,\n"
+      "  \"toolpacks\": [\n"
+      "    {\"id\":\"clangd\",\"version\":\"19.1.2\",\"arch\":[\"" + other +
+      "\"],\"os\":[\"linux\"],"
+      "\"url\":\"file:///tmp/clangd-" + other +
+      ".tar.zst\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\n"
+      "    {\"id\":\"clangd\",\"version\":\"19.1.2\",\"arch\":[\"" + host +
+      "\"],\"os\":[\"linux\"],"
+      "\"url\":\"file:///tmp/clangd-" + host +
+      ".tar.zst\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}\n"
+      "  ]\n"
+      "}\n";
+  const auto catalog = tuide::toolpacks::parse_catalog_json(json);
+  expect(catalog.has_value(), "parse dual-arch catalog");
+  const auto found = tuide::toolpacks::find_catalog_toolpack(*catalog, "clangd");
+  expect(found.has_value(), "find clangd for host");
+  expect(found->sha256.find("bbbbbbbb") == 0, "picked host-arch sha");
+  expect(found->url.find(host) != std::string::npos, "picked host-arch url");
+
+  const auto other_only = tuide::toolpacks::parse_catalog_json(
+      std::string("{\"schema\":1,\"toolpacks\":[{\"id\":\"clangd\",\"version\":\"1\",") +
+      "\"arch\":[\"" + other +
+      "\"],\"url\":\"file:///x\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}");
+  expect(other_only.has_value(), "parse other-arch-only catalog");
+  expect(!tuide::toolpacks::find_catalog_toolpack(*other_only, "clangd").has_value(),
+         "other-arch only is not selected");
+}
+
 void test_manifest_roundtrip(const fs::path& root) {
   std::error_code ec;
   fs::create_directories(root, ec);
@@ -141,7 +177,7 @@ void test_install_from_local_catalog(const fs::path& root) {
   "entry": { "type": "executable", "path": "bin/clangd" }
 })");
 
-  const fs::path archive = fixture / "clangd-19.1.2-linux-x86_64.tar.zst";
+  const fs::path archive = fixture / ("clangd-19.1.2-" + linux_infix() + ".tar.zst");
   const std::string tar_cmd =
       "tar -C " + payload.string() + " -cf - . | zstd -q -o " + archive.string();
   expect(run_shell(tar_cmd.c_str()) == 0, "create tar.zst");
@@ -156,7 +192,7 @@ void test_install_from_local_catalog(const fs::path& root) {
                  "  \"toolpacks\": [{\n"
                  "    \"id\": \"clangd\",\n"
                  "    \"version\": \"19.1.2\",\n"
-                 "    \"arch\": [\"x86_64\"],\n"
+                 "    \"arch\": [\"" + host_arch() + "\"],\n"
                  "    \"os\": [\"linux\"],\n"
                  "    \"url\": \"file://" +
                  archive.string() +
@@ -201,7 +237,7 @@ void test_export_appdir(const fs::path& root) {
   "version": "19.1.2",
   "entry": { "type": "executable", "path": "bin/clangd" }
 })");
-  const fs::path archive = fixture / "clangd-19.1.2-linux-x86_64.tar.zst";
+  const fs::path archive = fixture / ("clangd-19.1.2-" + linux_infix() + ".tar.zst");
   expect(run_shell(("tar -C " + payload.string() + " -cf - . | zstd -q -o " + archive.string())
                        .c_str()) == 0,
          "archive");
@@ -209,7 +245,7 @@ void test_export_appdir(const fs::path& root) {
   const fs::path catalog_path = fixture / "catalog.json";
   write_file(catalog_path,
              std::string("{\"schema\":1,\"toolpacks\":[{\"id\":\"clangd\",\"version\":\"19.1.2\",") +
-                 "\"arch\":[\"x86_64\"],\"os\":[\"linux\"],\"url\":\"file://" + archive.string() +
+                 "\"arch\":[\"" + host_arch() + "\"],\"os\":[\"linux\"],\"url\":\"file://" + archive.string() +
                  "\",\"sha256\":\"" + sha + "\"}]}");
 
   setenv("TUIDE_TOOLPACKS_ROOT", store.string().c_str(), 1);
@@ -383,7 +419,7 @@ void test_install_make_ls_and_rust_pack(const fs::path& root) {
     write_file(payload / "toolpack.json",
                std::string("{\"schema\":1,\"id\":\"") + id + "\",\"version\":\"" + version +
                    "\",\"entry\":{\"type\":\"executable\",\"path\":\"bin/" + bin_name + "\"}}");
-    const fs::path archive = fixture / (id + "-" + version + "-linux-x86_64.tar.zst");
+    const fs::path archive = fixture / (id + "-" + version + "-" + linux_infix() + ".tar.zst");
     expect(run_shell(("tar -C " + payload.string() + " -cf - . | zstd -q -o " + archive.string())
                          .c_str()) == 0,
            "archive");
@@ -409,13 +445,16 @@ void test_install_make_ls_and_rust_pack(const fs::path& root) {
   const fs::path catalog_path = fixture / "catalog.json";
   write_file(catalog_path,
              std::string("{\"schema\":1,\"toolpacks\":[") +
-                 "{\"id\":\"make-ls\",\"version\":\"v0.1.16\",\"arch\":[\"x86_64\"],\"os\":[\"linux\"],"
+                 "{\"id\":\"make-ls\",\"version\":\"v0.1.16\",\"arch\":[\"" + host_arch() +
+                 "\"],\"os\":[\"linux\"],"
                  "\"url\":\"file://" +
                  make_ls.first.string() + "\",\"sha256\":\"" + make_ls.second + "\"}," +
-                 "{\"id\":\"rust-analyzer\",\"version\":\"2025-12-29\",\"arch\":[\"x86_64\"],"
+                 "{\"id\":\"rust-analyzer\",\"version\":\"2025-12-29\",\"arch\":[\"" + host_arch() +
+                 "\"],"
                  "\"os\":[\"linux\"],\"url\":\"file://" +
                  rust.first.string() + "\",\"sha256\":\"" + rust_sha + "\"}," +
-                 "{\"id\":\"gdb\",\"version\":\"16.3-static\",\"arch\":[\"x86_64\"],\"os\":[\"linux\"],"
+                 "{\"id\":\"gdb\",\"version\":\"16.3-static\",\"arch\":[\"" + host_arch() +
+                 "\"],\"os\":[\"linux\"],"
                  "\"url\":\"file://" +
                  gdb.first.string() + "\",\"sha256\":\"" + gdb.second + "\"}]}");
 
@@ -448,6 +487,7 @@ void test_install_make_ls_and_rust_pack(const fs::path& root) {
 
 int main() {
   const fs::path root = make_temp_root("tuide-toolpacks-test");
+  test_catalog_selects_host_arch();
   test_manifest_roundtrip(root / "manifest");
   test_resolve_clangd_toolpack(root / "resolve");
   test_install_from_local_catalog(root / "install");

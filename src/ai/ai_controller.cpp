@@ -20,6 +20,7 @@
 #include "ai/level2_autonomous_loop.hpp"
 #include "ai/level2_debrief.hpp"
 #include "ai/level2_session.hpp"
+#include "ai/llama_net.hpp"
 #include "ai/model_store.hpp"
 #include "ai/repo_map.hpp"
 #include "ai/search_replace.hpp"
@@ -406,6 +407,7 @@ void AiController::refresh_settings() {
   const std::string root = deps_.workspace != nullptr ? deps_.workspace->root : std::string{};
   ai_trace_configure(settings_.trace_enabled, root, settings_.trace_path);
   apply_llama_bundle_preference(settings_);
+  apply_ai_runtime_env(&settings_);
   sync_task_runner();
 }
 
@@ -1184,6 +1186,8 @@ void AiController::show_model_status() {
   append("llama-server resolved: " +
          (store.resolve_llama_server().empty() ? std::string("(none)")
                                               : store.resolve_llama_server()));
+  append("embed_host=" + settings_.level0.embeddings.server_host +
+         " embed_port=" + std::to_string(settings_.level0.embeddings.server_port));
   append("index: " + std::string(intent_index_.ready() ? "ready" : "not ready") +
          " catalog=" + intent_index_.catalog_path());
   append(embed_backend_.status_text());

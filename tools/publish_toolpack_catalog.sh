@@ -7,8 +7,14 @@
 #
 # Uso:
 #   ./tools/publish_toolpack_catalog.sh
+#   ./tools/publish_toolpack_catalog.sh --arch aarch64
+#   ./tools/publish_toolpack_catalog.sh --arch all
 #   ./tools/publish_toolpack_catalog.sh --out dist/catalog
 #   ./tools/publish_toolpack_catalog.sh --only clangd,gdb,rust-analyzer
+#
+# --arch x86_64|aarch64|all  (default: arquitectura del host).
+# Dos pasadas (--arch x86_64 y luego --arch aarch64) al mismo --out fusionan
+# catalog.json. --arch all genera ambas en una sola corrida.
 #
 # No sube el release. Imprime el comando gh sugerido.
 set -euo pipefail
@@ -18,8 +24,25 @@ OUT_DIR="${ROOT}/dist/catalog"
 CACHE_DIR="${ROOT}/third_party/bundled/cache"
 GEN_DIR=""  # set under WORK_DIR (/tmp) after mktemp — avoids filling $HOME
 ONLY=""
+ARCH_ARG=""
 WORK_DIR=""
 STUB_BIN=""
+# Set by set_arch_vars: canonical catalog arch + upstream filename pieces.
+ARCH=""
+UPSTREAM_RUST=""
+UPSTREAM_ZLS=""
+UPSTREAM_NEOCMAKE=""
+UPSTREAM_MAKE_LS=""
+UPSTREAM_LUA=""
+UPSTREAM_TEXLAB=""
+UPSTREAM_GDB=""
+UPSTREAM_LEMMINX=""
+UPSTREAM_LEMMINX_BIN=""
+UPSTREAM_PYTHON=""
+UPSTREAM_NODE=""
+UPSTREAM_GO_TARGET=""
+UPSTREAM_DEB=""
+UPSTREAM_SHELLCHECK=""
 
 # Versions aligned with cmake/BundleOptions.cmake defaults.
 CLANGD_VERSION="${TUIDE_CLANGD_VERSION:-19.1.2}"
@@ -65,9 +88,10 @@ die() { printf '[publish-catalog] error: %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<EOF
-Uso: $(basename "$0") [--out DIR] [--only id,id,...]
+Uso: $(basename "$0") [--out DIR] [--only id,id,...] [--arch x86_64|aarch64|all]
 
-Genera en DIR: catalog.json, SHA256SUMS y un .tar.zst por toolpack.
+Genera en DIR: catalog.json, SHA256SUMS y un .tar.zst por toolpack y arch.
+El cliente AppImage descarga el asset cuyo arch coincide con el host.
 
 Variables de versión: mismas que cmake/BundleOptions.cmake (TUIDE_*_VERSION).
 EOF
@@ -84,9 +108,68 @@ while [[ $# -gt 0 ]]; do
     -h|--help) usage; exit 0 ;;
     --out) OUT_DIR="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
+    --arch) ARCH_ARG="$2"; shift 2 ;;
     *) die "opcion desconocida: $1" ;;
   esac
 done
+
+canonical_arch() {
+  case "$1" in
+    x86_64|amd64|x64) printf 'x86_64\n' ;;
+    aarch64|arm64) printf 'aarch64\n' ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+host_catalog_arch() {
+  canonical_arch "$(uname -m)"
+}
+
+set_arch_vars() {
+  ARCH="$(canonical_arch "$1")"
+  case "${ARCH}" in
+    x86_64)
+      UPSTREAM_RUST="x86_64-unknown-linux-gnu"
+      UPSTREAM_ZLS="x86_64-linux"
+      UPSTREAM_NEOCMAKE="x86_64-unknown-linux-gnu"
+      UPSTREAM_MAKE_LS="linux_amd64"
+      UPSTREAM_LUA="linux-x64"
+      UPSTREAM_TEXLAB="x86_64-linux"
+      UPSTREAM_GDB="x86_64"
+      UPSTREAM_LEMMINX="linux-x86_64"
+      UPSTREAM_LEMMINX_BIN="lemminx-linux-x86_64"
+      UPSTREAM_PYTHON="x86_64-unknown-linux-gnu"
+      UPSTREAM_NODE="linux-x64"
+      UPSTREAM_GO_TARGET="amd64"
+      UPSTREAM_DEB="amd64"
+      UPSTREAM_SHELLCHECK="linux.x86_64"
+      ;;
+    aarch64)
+      UPSTREAM_RUST="aarch64-unknown-linux-gnu"
+      UPSTREAM_ZLS="aarch64-linux"
+      UPSTREAM_NEOCMAKE="aarch64-unknown-linux-gnu"
+      UPSTREAM_MAKE_LS="linux_arm64"
+      UPSTREAM_LUA="linux-arm64"
+      UPSTREAM_TEXLAB="aarch64-linux"
+      UPSTREAM_GDB="aarch64"
+      UPSTREAM_LEMMINX="linux-aarch_64"
+      UPSTREAM_LEMMINX_BIN="lemminx-linux-aarch_64"
+      UPSTREAM_PYTHON="aarch64-unknown-linux-gnu"
+      UPSTREAM_NODE="linux-arm64"
+      UPSTREAM_GO_TARGET="arm64"
+      UPSTREAM_DEB="arm64"
+      UPSTREAM_SHELLCHECK="linux.aarch64"
+      ;;
+    *)
+      die "arch no soportada: $1 (usa x86_64, aarch64 o all)"
+      ;;
+  esac
+  log "arquitectura de empaquetado: ${ARCH}"
+}
+
+if [[ -z "${ARCH_ARG}" ]]; then
+  ARCH_ARG="$(host_catalog_arch)"
+fi
 
 need() { command -v "$1" >/dev/null 2>&1 || die "falta $1"; }
 need curl; need tar; need zstd; need sha256sum
@@ -122,6 +205,20 @@ download() {
   mv -f "${dest}.partial" "${dest}"
 }
 
+# Strip only when the binary matches the host, or a matching cross-strip exists.
+maybe_strip() {
+  local bin="$1"
+  local host
+  host="$(host_catalog_arch)"
+  if [[ "${ARCH}" == "${host}" ]]; then
+    strip -s "${bin}" || true
+    return 0
+  fi
+  if [[ "${ARCH}" == "aarch64" ]] && command -v aarch64-linux-gnu-strip >/dev/null 2>&1; then
+    aarch64-linux-gnu-strip -s "${bin}" || true
+  fi
+}
+
 write_toolpack_json() {
   local payload="$1" id="$2" version="$3" entry_path="$4" license="$5"
   cat > "${payload}/toolpack.json" <<EOF
@@ -129,7 +226,7 @@ write_toolpack_json() {
   "schema": 1,
   "id": "${id}",
   "version": "${version}",
-  "arch": "x86_64",
+  "arch": "${ARCH}",
   "os": "linux",
   "license": "${license}",
   "entry": { "type": "executable", "path": "${entry_path}", "args": [] },
@@ -143,22 +240,21 @@ pack_payload() {
   local payload="$1" id="$2" version="$3" entry_path="$4" license="$5"
   local kind="$6" display="$7" languages_json="$8"
   local shared="${9:-false}"
-  local out sha size
+  local out sha size meta shared_json=""
 
   [[ -x "${payload}/${entry_path}" ]] || die "entry no ejecutable: ${payload}/${entry_path}"
   write_toolpack_json "${payload}" "${id}" "${version}" "${entry_path}" "${license}"
-  out="${OUT_DIR}/${id}-${version}-linux-x86_64.tar.zst"
+  out="${OUT_DIR}/${id}-${version}-linux-${ARCH}.tar.zst"
   # Sanitize filename: GitHub accepts +, but keep literal version in name.
   # Prefer faster compression for catalog packaging (override with ZSTD_LEVEL).
   tar -C "${payload}" -cf - . | zstd -f -"${ZSTD_LEVEL:-9}" -q -o "${out}"
   sha="$(sha256sum "${out}" | awk '{print $1}')"
   size="$(wc -c < "${out}" | tr -d ' ')"
-  log "${id} -> ${out}"
+  log "${id} ${ARCH} -> ${out}"
 
   ASSET_PATHS+=("${out}")
   SHA_LINES+=("${sha}  $(basename "${out}")")
 
-  local shared_json=""
   if [[ "${shared}" == "true" ]]; then
     shared_json=',
       "shared": true'
@@ -169,37 +265,63 @@ pack_payload() {
       \"kind\": \"${kind}\",
       \"languages\": ${languages_json},
       \"version\": \"${version}\",
-      \"arch\": [\"x86_64\"],
+      \"arch\": [\"${ARCH}\"],
       \"os\": [\"linux\"],
       \"url\": \"${BASE_URL}/$(basename "${out}")\",
       \"sha256\": \"${sha}\",
       \"size_bytes\": ${size},
       \"license\": \"${license}\"${shared_json}
     }")
+  meta="${out%.tar.zst}.entry.json"
+  cat > "${meta}" <<EOF
+{
+  "id": "${id}",
+  "display_name": "${display}",
+  "kind": "${kind}",
+  "languages": ${languages_json},
+  "version": "${version}",
+  "arch": ["${ARCH}"],
+  "os": ["linux"],
+  "license": "${license}",
+  "shared": ${shared}
+}
+EOF
 }
 
 # --- clangd ---
+# x86_64: zip oficial clangd/clangd. aarch64: recorte del tarball LLVM (no hay zip ARM).
 pack_clangd() {
   want_pack clangd || return 0
-  need unzip; need strip
-  local zip_name="clangd-linux-${CLANGD_VERSION}.zip"
-  local zip_path="${CACHE_DIR}/${zip_name}"
-  download "https://github.com/clangd/clangd/releases/download/${CLANGD_VERSION}/${zip_name}" "${zip_path}"
   local stage="${WORK_DIR}/clangd_stage" payload="${WORK_DIR}/clangd_payload"
   rm -rf "${stage}" "${payload}"
   mkdir -p "${stage}"
-  unzip -q "${zip_path}" -d "${stage}"
-  local clangd_bin
+  local clangd_bin clangd_root resource_glob resource_dir_rel
+  if [[ "${ARCH}" == "aarch64" ]]; then
+    local tar_name="clang+llvm-${CLANGD_VERSION}-aarch64-linux-gnu.tar.xz"
+    local tar_path="${CACHE_DIR}/${tar_name}"
+    download "https://github.com/llvm/llvm-project/releases/download/llvmorg-${CLANGD_VERSION}/${tar_name}" \
+      "${tar_path}"
+    log "extrayendo clangd + lib/clang del tarball LLVM (aarch64)..."
+    local members
+    mapfile -t members < <(tar -tJf "${tar_path}" | grep -E '(/bin/clangd$|/lib/clang/)')
+    [[ ${#members[@]} -gt 0 ]] || die "el tarball LLVM no contiene bin/clangd ni lib/clang"
+    tar -xJf "${tar_path}" -C "${stage}" "${members[@]}"
+  else
+    need unzip
+    local zip_name="clangd-linux-${CLANGD_VERSION}.zip"
+    local zip_path="${CACHE_DIR}/${zip_name}"
+    download "https://github.com/clangd/clangd/releases/download/${CLANGD_VERSION}/${zip_name}" "${zip_path}"
+    unzip -q "${zip_path}" -d "${stage}"
+  fi
   clangd_bin="$(find "${stage}" -mindepth 2 -type f -path '*/bin/clangd' | head -n1)"
   [[ -n "${clangd_bin}" ]] || die "no se encontro bin/clangd"
   chmod +x "${clangd_bin}"
-  local clangd_root resource_glob resource_dir_rel
   clangd_root="$(dirname "$(dirname "${clangd_bin}")")"
   resource_glob=( "${clangd_root}"/lib/clang/*/include )
   [[ -d "${resource_glob[0]}" ]] || die "falta lib/clang/*/include"
   resource_dir_rel="${resource_glob[0]#${clangd_root}/}"
   resource_dir_rel="${resource_dir_rel%/include}"
-  strip -s "${clangd_bin}" || true
+  maybe_strip "${clangd_bin}"
   mkdir -p "${payload}/bin" "${payload}/${resource_dir_rel}"
   cp "${clangd_bin}" "${payload}/bin/clangd"
   cp -a "${clangd_root}/${resource_dir_rel}/." "${payload}/${resource_dir_rel}/"
@@ -211,7 +333,7 @@ pack_clangd() {
 # --- gdb static ---
 pack_gdb() {
   want_pack gdb || return 0
-  local tar_name="gdb-static-full-x86_64.tar.gz"
+  local tar_name="gdb-static-full-${UPSTREAM_GDB}.tar.gz"
   local tar_path="${CACHE_DIR}/${GDB_VERSION_TAG}-${tar_name}"
   download "https://github.com/guyush1/gdb-static/releases/download/${GDB_VERSION_TAG}/${tar_name}" "${tar_path}"
   local stage="${WORK_DIR}/gdb_stage" payload="${WORK_DIR}/gdb_payload"
@@ -273,7 +395,7 @@ run_prepare_and_pack() {
 
 pack_rust_analyzer() {
   want_pack rust-analyzer || return 0
-  local name="rust-analyzer-x86_64-unknown-linux-gnu.gz"
+  local name="rust-analyzer-${UPSTREAM_RUST}.gz"
   local dl="${CACHE_DIR}/${RUST_ANALYZER_VERSION}-${name}"
   download "https://github.com/rust-lang/rust-analyzer/releases/download/${RUST_ANALYZER_VERSION}/${name}" "${dl}"
   local payload="${WORK_DIR}/rust_analyzer_payload"
@@ -288,7 +410,7 @@ pack_rust_analyzer() {
 
 pack_zls() {
   want_pack zls || return 0
-  local name="zls-x86_64-linux.tar.xz"
+  local name="zls-${UPSTREAM_ZLS}.tar.xz"
   local dl="${CACHE_DIR}/${ZLS_VERSION}-${name}"
   download "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/${name}" "${dl}"
   local stage="${WORK_DIR}/zls_stage" payload="${WORK_DIR}/zls_payload"
@@ -307,7 +429,7 @@ pack_zls() {
 
 pack_neocmakelsp() {
   want_pack neocmakelsp || return 0
-  local name="neocmakelsp-x86_64-unknown-linux-gnu.tar.gz"
+  local name="neocmakelsp-${UPSTREAM_NEOCMAKE}.tar.gz"
   local dl="${CACHE_DIR}/${NEOCMAKELSP_VERSION}-${name}"
   download "https://github.com/neocmakelsp/neocmakelsp/releases/download/${NEOCMAKELSP_VERSION}/${name}" "${dl}"
   local stage="${WORK_DIR}/neocmakelsp_stage" payload="${WORK_DIR}/neocmakelsp_payload"
@@ -326,7 +448,7 @@ pack_neocmakelsp() {
 
 pack_make_ls() {
   want_pack make-ls || return 0
-  local name="make-ls_linux_amd64.tar.gz"
+  local name="make-ls_${UPSTREAM_MAKE_LS}.tar.gz"
   local dl="${CACHE_DIR}/${MAKE_LS_VERSION}-${name}"
   download "https://github.com/owenrumney/make-ls/releases/download/${MAKE_LS_VERSION}/${name}" "${dl}"
   local stage="${WORK_DIR}/make_ls_stage" payload="${WORK_DIR}/make_ls_payload"
@@ -345,7 +467,7 @@ pack_make_ls() {
 
 pack_lua_ls() {
   want_pack lua-ls || return 0
-  local name="lua-language-server-${LUA_LS_VERSION}-linux-x64.tar.gz"
+  local name="lua-language-server-${LUA_LS_VERSION}-${UPSTREAM_LUA}.tar.gz"
   local dl="${CACHE_DIR}/${name}"
   download "https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LS_VERSION}/${name}" "${dl}"
   local payload="${WORK_DIR}/lua_ls_payload"
@@ -363,14 +485,14 @@ pack_texlab() {
   export TUIDE_TEXLAB_VERSION="${TEXLAB_VERSION}"
   export TUIDE_CHKTEX_VERSION="${CHKTEX_VERSION}"
   export TUIDE_PCRE2_VERSION="${PCRE2_VERSION}"
-  export TUIDE_TEXLAB_URL="https://github.com/latex-lsp/texlab/releases/download/v${TEXLAB_VERSION}/texlab-x86_64-linux.tar.gz"
-  export TUIDE_TEXLAB_TAR_PATH="${CACHE_DIR}/texlab-${TEXLAB_VERSION}-x86_64-linux.tar.gz"
-  export TUIDE_CHKTEX_DEB_URL="http://deb.debian.org/debian/pool/main/c/chktex/chktex_${CHKTEX_VERSION}_amd64.deb"
-  export TUIDE_CHKTEX_DEB_PATH="${CACHE_DIR}/chktex_${CHKTEX_VERSION}_amd64.deb"
-  export TUIDE_PCRE2_POSIX_DEB_URL="http://deb.debian.org/debian/pool/main/p/pcre2/libpcre2-posix3_${PCRE2_VERSION}_amd64.deb"
-  export TUIDE_PCRE2_POSIX_DEB_PATH="${CACHE_DIR}/libpcre2-posix3_${PCRE2_VERSION}_amd64.deb"
-  export TUIDE_PCRE2_8_DEB_URL="http://deb.debian.org/debian/pool/main/p/pcre2/libpcre2-8-0_${PCRE2_VERSION}_amd64.deb"
-  export TUIDE_PCRE2_8_DEB_PATH="${CACHE_DIR}/libpcre2-8-0_${PCRE2_VERSION}_amd64.deb"
+  export TUIDE_TEXLAB_URL="https://github.com/latex-lsp/texlab/releases/download/v${TEXLAB_VERSION}/texlab-${UPSTREAM_TEXLAB}.tar.gz"
+  export TUIDE_TEXLAB_TAR_PATH="${CACHE_DIR}/texlab-${TEXLAB_VERSION}-${UPSTREAM_TEXLAB}.tar.gz"
+  export TUIDE_CHKTEX_DEB_URL="http://deb.debian.org/debian/pool/main/c/chktex/chktex_${CHKTEX_VERSION}_${UPSTREAM_DEB}.deb"
+  export TUIDE_CHKTEX_DEB_PATH="${CACHE_DIR}/chktex_${CHKTEX_VERSION}_${UPSTREAM_DEB}.deb"
+  export TUIDE_PCRE2_POSIX_DEB_URL="http://deb.debian.org/debian/pool/main/p/pcre2/libpcre2-posix3_${PCRE2_VERSION}_${UPSTREAM_DEB}.deb"
+  export TUIDE_PCRE2_POSIX_DEB_PATH="${CACHE_DIR}/libpcre2-posix3_${PCRE2_VERSION}_${UPSTREAM_DEB}.deb"
+  export TUIDE_PCRE2_8_DEB_URL="http://deb.debian.org/debian/pool/main/p/pcre2/libpcre2-8-0_${PCRE2_VERSION}_${UPSTREAM_DEB}.deb"
+  export TUIDE_PCRE2_8_DEB_PATH="${CACHE_DIR}/libpcre2-8-0_${PCRE2_VERSION}_${UPSTREAM_DEB}.deb"
   export TUIDE_TEXLAB_STAGING_DIR="${GEN_DIR}/texlab_staging"
   export TUIDE_TEXLAB_PAYLOAD_DIR="${GEN_DIR}/texlab_payload"
   export TUIDE_TEXLAB_TAR_PATH_OUT="${GEN_DIR}/texlab_blob.tar"
@@ -385,10 +507,19 @@ pack_texlab() {
 
 pack_gopls() {
   want_pack gopls || return 0
+  local host_go
+  case "$(host_catalog_arch)" in
+    x86_64) host_go="amd64" ;;
+    aarch64) host_go="arm64" ;;
+    *) die "no hay toolchain Go oficial para el host $(uname -m)" ;;
+  esac
   export TUIDE_GOPLS_VERSION="${GOPLS_VERSION}"
   export TUIDE_GO_VERSION="${GO_VERSION}"
-  export TUIDE_GO_URL="https://dl.google.com/go/go${GO_VERSION}.linux-amd64.tar.gz"
-  export TUIDE_GO_TAR_PATH="${CACHE_DIR}/go${GO_VERSION}.linux-amd64.tar.gz"
+  export TUIDE_GO_URL="https://dl.google.com/go/go${GO_VERSION}.linux-${host_go}.tar.gz"
+  export TUIDE_GO_TAR_PATH="${CACHE_DIR}/go${GO_VERSION}.linux-${host_go}.tar.gz"
+  export GOOS=linux
+  export GOARCH="${UPSTREAM_GO_TARGET}"
+  export CGO_ENABLED=0
   export TUIDE_BUNDLED_CACHE_DIR="${CACHE_DIR}"
   export TUIDE_GOPLS_STAGING_DIR="${GEN_DIR}/gopls_staging"
   export TUIDE_GOPLS_PAYLOAD_DIR="${GEN_DIR}/gopls_payload"
@@ -421,8 +552,9 @@ pack_bash_ls() {
   need npm
   export TUIDE_BASH_LS_VERSION="${BASH_LS_VERSION}"
   export TUIDE_BASH_LS_NPM_VERSION="${BASH_LS_NPM_VERSION}"
-  export TUIDE_NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz"
-  export TUIDE_NODE_TAR_PATH="${CACHE_DIR}/node-v${NODE_VERSION}-linux-x64.tar.xz"
+  export TUIDE_NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${UPSTREAM_NODE}.tar.xz"
+  export TUIDE_NODE_TAR_PATH="${CACHE_DIR}/node-v${NODE_VERSION}-${UPSTREAM_NODE}.tar.xz"
+  export TUIDE_SHELLCHECK_TAR_NAME="shellcheck-v${TUIDE_SHELLCHECK_VERSION:-0.10.0}.${UPSTREAM_SHELLCHECK}.tar.xz"
   export TUIDE_BASH_LS_STAGING_DIR="${GEN_DIR}/bash_ls_staging"
   export TUIDE_BASH_LS_PAYLOAD_DIR="${GEN_DIR}/bash_ls_payload"
   export TUIDE_BASH_LS_TAR_PATH="${GEN_DIR}/bash_ls_blob.tar"
@@ -444,8 +576,8 @@ pack_bash_dap() {
   [[ -d "${src}/node_modules" ]] || (cd "${src}" && npm install)
   export TUIDE_BASH_DAP_VERSION="${BASH_DAP_VERSION}"
   export TUIDE_BASH_DEBUG_SRC="${src}"
-  export TUIDE_NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz"
-  export TUIDE_NODE_TAR_PATH="${CACHE_DIR}/node-v${NODE_VERSION}-linux-x64.tar.xz"
+  export TUIDE_NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${UPSTREAM_NODE}.tar.xz"
+  export TUIDE_NODE_TAR_PATH="${CACHE_DIR}/node-v${NODE_VERSION}-${UPSTREAM_NODE}.tar.xz"
   export TUIDE_BASH_DAP_INCLUDE_NODE=1
   export TUIDE_BASH_DAP_STAGING_DIR="${GEN_DIR}/bash_dap_staging"
   export TUIDE_BASH_DAP_PAYLOAD_DIR="${GEN_DIR}/bash_dap_payload"
@@ -465,8 +597,8 @@ pack_typescript_ls() {
   export TUIDE_TYPESCRIPT_LS_VERSION="${TYPESCRIPT_LS_VERSION}"
   export TUIDE_TYPESCRIPT_LS_NPM_VERSION="${TYPESCRIPT_LS_NPM_VERSION}"
   export TUIDE_TYPESCRIPT_VERSION="${TYPESCRIPT_VERSION}"
-  export TUIDE_NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz"
-  export TUIDE_NODE_TAR_PATH="${CACHE_DIR}/node-v${NODE_VERSION}-linux-x64.tar.xz"
+  export TUIDE_NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${UPSTREAM_NODE}.tar.xz"
+  export TUIDE_NODE_TAR_PATH="${CACHE_DIR}/node-v${NODE_VERSION}-${UPSTREAM_NODE}.tar.xz"
   export TUIDE_TYPESCRIPT_LS_STAGING_DIR="${GEN_DIR}/typescript_ls_staging"
   export TUIDE_TYPESCRIPT_LS_PAYLOAD_DIR="${GEN_DIR}/typescript_ls_payload"
   export TUIDE_TYPESCRIPT_LS_TAR_PATH="${GEN_DIR}/typescript_ls_blob.tar"
@@ -483,8 +615,8 @@ pack_yaml_ls() {
   need npm
   export TUIDE_YAML_LS_VERSION="${YAML_LS_VERSION}"
   export TUIDE_YAML_LS_NPM_VERSION="${YAML_LS_NPM_VERSION}"
-  export TUIDE_NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz"
-  export TUIDE_NODE_TAR_PATH="${CACHE_DIR}/node-v${NODE_VERSION}-linux-x64.tar.xz"
+  export TUIDE_NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${UPSTREAM_NODE}.tar.xz"
+  export TUIDE_NODE_TAR_PATH="${CACHE_DIR}/node-v${NODE_VERSION}-${UPSTREAM_NODE}.tar.xz"
   export TUIDE_YAML_LS_STAGING_DIR="${GEN_DIR}/yaml_ls_staging"
   export TUIDE_YAML_LS_PAYLOAD_DIR="${GEN_DIR}/yaml_ls_payload"
   export TUIDE_YAML_LS_TAR_PATH="${GEN_DIR}/yaml_ls_blob.tar"
@@ -499,7 +631,7 @@ pack_yaml_ls() {
 pack_lemminx() {
   want_pack lemminx || return 0
   need unzip
-  local name="lemminx-linux-x86_64.zip"
+  local name="lemminx-${UPSTREAM_LEMMINX}.zip"
   local dl="${CACHE_DIR}/${LEMMINX_VERSION}-${name}"
   download "https://github.com/redhat-developer/vscode-xml/releases/download/${LEMMINX_VERSION}/${name}" "${dl}"
   local stage="${WORK_DIR}/lemminx_stage" payload="${WORK_DIR}/lemminx_payload"
@@ -507,7 +639,7 @@ pack_lemminx() {
   mkdir -p "${stage}" "${payload}/bin"
   unzip -q "${dl}" -d "${stage}"
   local bin
-  bin="$(find "${stage}" -type f -name lemminx-linux-x86_64 | head -n1)"
+  bin="$(find "${stage}" -type f -name "${UPSTREAM_LEMMINX_BIN}" | head -n1)"
   if [[ -z "${bin}" ]]; then
     bin="$(find "${stage}" -type f -name 'lemminx*' | head -n1)"
   fi
@@ -528,8 +660,8 @@ pack_python_tools() {
   export TUIDE_PYTHON_STANDALONE_VERSION="${PYTHON_STANDALONE_VERSION}"
   export TUIDE_PYTHON_STANDALONE_TAG="${PYTHON_STANDALONE_TAG}"
   export TUIDE_PYTHON_TOOLS_VERSION="${PYTHON_TOOLS_VERSION}"
-  export TUIDE_PYTHON_STANDALONE_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_STANDALONE_TAG}/cpython-${PYTHON_STANDALONE_VERSION}+${PYTHON_STANDALONE_TAG}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
-  export TUIDE_PYTHON_STANDALONE_TAR_PATH="${CACHE_DIR}/cpython-${PYTHON_STANDALONE_VERSION}+${PYTHON_STANDALONE_TAG}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+  export TUIDE_PYTHON_STANDALONE_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_STANDALONE_TAG}/cpython-${PYTHON_STANDALONE_VERSION}+${PYTHON_STANDALONE_TAG}-${UPSTREAM_PYTHON}-install_only_stripped.tar.gz"
+  export TUIDE_PYTHON_STANDALONE_TAR_PATH="${CACHE_DIR}/cpython-${PYTHON_STANDALONE_VERSION}+${PYTHON_STANDALONE_TAG}-${UPSTREAM_PYTHON}-install_only_stripped.tar.gz"
   export TUIDE_PYTHON_TOOLS_STAGING_DIR="${GEN_DIR}/python_tools_staging"
   export TUIDE_PYTHON_TOOLS_PAYLOAD_DIR="${GEN_DIR}/python_tools_payload"
   export TUIDE_PYTHON_TOOLS_TAR_PATH="${GEN_DIR}/python_tools_blob.tar"
@@ -542,27 +674,37 @@ pack_python_tools() {
     "lsp" "python-tools" '["python"]' TUIDE_PYTHON_TOOLS_PAYLOAD_DIR python_tools
 }
 
-# --- build all ---
-pack_clangd
-pack_gdb
-pack_rust_analyzer
-pack_gopls
-pack_zls
-pack_lua_ls
-pack_fortls
-pack_neocmakelsp
-pack_make_ls
-pack_texlab
-pack_bash_ls
-pack_bash_dap
-pack_typescript_ls
-pack_yaml_ls
-pack_lemminx
-pack_python_tools
+pack_all_for_arch() {
+  set_arch_vars "$1"
+  pack_clangd
+  pack_gdb
+  pack_rust_analyzer
+  pack_gopls
+  pack_zls
+  pack_lua_ls
+  pack_fortls
+  pack_neocmakelsp
+  pack_make_ls
+  pack_texlab
+  pack_bash_ls
+  pack_bash_dap
+  pack_typescript_ls
+  pack_yaml_ls
+  pack_lemminx
+  pack_python_tools
+}
 
-# If --only was used, fold in already-built archives in OUT_DIR so a resumed
-# run still produces a complete catalog.json.
-if [[ -n "${ONLY}" ]]; then
+# --- build ---
+if [[ "${ARCH_ARG}" == "all" ]]; then
+  pack_all_for_arch x86_64
+  pack_all_for_arch aarch64
+else
+  pack_all_for_arch "${ARCH_ARG}"
+fi
+
+# Fold in archives already in OUT_DIR (other arch, or --only resume) so
+# catalog.json lists x86_64 + aarch64 after sequential runs.
+fold_existing_archives() {
   declare -A seen_assets=()
   if ((${#ASSET_PATHS[@]} > 0)); then
     for a in "${ASSET_PATHS[@]}"; do
@@ -570,10 +712,19 @@ if [[ -n "${ONLY}" ]]; then
     done
   fi
   shopt -s nullglob
-  for archive in "${OUT_DIR}"/*-linux-x86_64.tar.zst; do
+  local archive base local_stem local_id local_ver local_arch sha size meta shared_json
+  for archive in "${OUT_DIR}"/*-linux-x86_64.tar.zst "${OUT_DIR}"/*-linux-aarch64.tar.zst; do
+    [[ -f "${archive}" ]] || continue
     base="$(basename "${archive}")"
     [[ -n "${seen_assets[$base]:-}" ]] && continue
-    local_stem="${base%-linux-x86_64.tar.zst}"
+    local_arch="x86_64"
+    local_stem="${base}"
+    if [[ "${base}" == *-linux-aarch64.tar.zst ]]; then
+      local_arch="aarch64"
+      local_stem="${base%-linux-aarch64.tar.zst}"
+    else
+      local_stem="${base%-linux-x86_64.tar.zst}"
+    fi
     local_id=""
     local_ver=""
     for cand in python-tools typescript-ls rust-analyzer bash-dap bash-ls yaml-ls lemminx make-ls lua-ls neocmakelsp clangd gopls fortls texlab zls gdb; do
@@ -589,22 +740,40 @@ if [[ -n "${ONLY}" ]]; then
     log "reusando asset existente: ${base}"
     ASSET_PATHS+=("${archive}")
     SHA_LINES+=("${sha}  ${base}")
-    CATALOG_ENTRIES+=("    {
+    meta="${archive%.tar.zst}.entry.json"
+    if [[ -f "${meta}" ]] && command -v python3 >/dev/null 2>&1; then
+      CATALOG_ENTRIES+=("$(python3 - "${meta}" "${BASE_URL}" "${base}" "${sha}" "${size}" <<'PY'
+import json, sys
+meta_path, base_url, base, sha, size = sys.argv[1:6]
+doc = json.load(open(meta_path))
+doc["url"] = f"{base_url}/{base}"
+doc["sha256"] = sha
+doc["size_bytes"] = int(size)
+if not doc.get("shared"):
+    doc.pop("shared", None)
+print("    " + json.dumps(doc, ensure_ascii=False))
+PY
+)")
+    else
+      CATALOG_ENTRIES+=("    {
       \"id\": \"${local_id}\",
       \"display_name\": \"${local_id}\",
       \"kind\": \"lsp\",
       \"languages\": [],
       \"version\": \"${local_ver}\",
-      \"arch\": [\"x86_64\"],
+      \"arch\": [\"${local_arch}\"],
       \"os\": [\"linux\"],
       \"url\": \"${BASE_URL}/${base}\",
       \"sha256\": \"${sha}\",
       \"size_bytes\": ${size},
       \"license\": \"UNKNOWN\"
     }")
+    fi
   done
   shopt -u nullglob
-fi
+}
+
+fold_existing_archives
 
 [[ ${#CATALOG_ENTRIES[@]} -gt 0 ]] || die "no se genero ningun toolpack (revisa --only)"
 
@@ -638,7 +807,7 @@ log "Para publicar (requiere escritura en GitHub):"
   printf '  gh release create "$TAG" \\\n'
   printf '    --repo %s \\\n' "${REPO}"
   printf '    --title "Toolpack catalog $TAG" \\\n'
-  printf '    --notes "LSP/DAP toolpacks (x86_64)" \\\n'
+  printf '    --notes "LSP/DAP toolpacks (linux x86_64 + aarch64)" \\\n'
   n=${#ASSET_PATHS[@]}
   for i in "${!ASSET_PATHS[@]}"; do
     if [[ $i -lt $((n - 1)) ]]; then
@@ -651,7 +820,7 @@ log "Para publicar (requiere escritura en GitHub):"
   printf '  gh release create catalog-latest \\\n'
   printf '    --repo %s \\\n' "${REPO}"
   printf '    --title "Toolpack catalog (latest)" \\\n'
-  printf '    --notes "Puntero movible al catalogo actual" \\\n'
+  printf '    --notes "Puntero movible al catalogo actual (x86_64 + aarch64)" \\\n'
   for i in "${!ASSET_PATHS[@]}"; do
     if [[ $i -lt $((n - 1)) ]]; then
       printf '    "%s" \\\n' "${ASSET_PATHS[$i]}"

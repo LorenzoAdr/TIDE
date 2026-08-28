@@ -120,6 +120,8 @@ struct AiLevel0EmbedSettings {
   std::string model_path;
   // Downloads only via Toolpacks / AI missing toast (never automatic).
   bool auto_download = false;
+  // 127.0.0.1 → tuide forks llama-server. Any other host → attach-only (GPU on another machine).
+  std::string server_host = "127.0.0.1";
   int server_port = 18765;
   // Per-slot context. Short signature passages (~100 chars) fit in 128–256 tokens.
   // Total KV ≈ n_ctx with non-unified slots: each slot gets n_ctx / n_parallel.

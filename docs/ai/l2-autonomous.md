@@ -52,6 +52,59 @@ Clave: `ai.level2.api_key` o env `TUIDE_L2_API_KEY` / `OPENAI_API_KEY`.
 Sirve `llama-server`, vLLM, DeepSeek, OpenAI, etc. (`POST {api_base}/chat/completions`).
 `n_ctx_remote` (default **32768**) escala pack/prompt ambicioso; no se auto-detecta del proveedor.
 
+### Híbrido: tuide en Linux ARM + llama-server Metal en el Mac
+
+El IDE (gdb, inotify, PTY, L1 CPU) corre en una VM Linux. El GGUF grande y los
+embeddings van en el Mac con Metal. TIDE **no** descarga ni arranca `llama-server`
+si el host de embeddings no es loopback: solo hace attach HTTP.
+
+En el **Mac**:
+
+```bash
+# GGUF en ~/.cache/tuide/models/l2/ y embed/intent/
+# llama-server con Metal (PATH, TUIDE_LLAMA_SERVER, o cache runtime/llama-b10333)
+./tools/run_host_llama.sh
+```
+
+Levanta chat en `:8080` y embeddings en `:18765`, bound a `0.0.0.0`.
+
+En la **VM** (Settings F10 o `.tuide/config.json`):
+
+```json
+"ai": {
+  "level2": {
+    "mode": "remote",
+    "api_base": "http://192.168.64.1:8080/v1",
+    "api_model": "qwen2.5-coder-32b-instruct-q4_k_m",
+    "n_ctx_remote": 32768
+  },
+  "level0": {
+    "embeddings": {
+      "server_host": "192.168.64.1",
+      "server_port": 18765
+    }
+  }
+}
+```
+
+Host típico desde la VM: UTM `192.168.64.1`, OrbStack `host.orb.internal`.
+Overrides sin reescribir config: `TUIDE_L2_API_BASE`, `TUIDE_L2_API_MODEL`,
+`TUIDE_EMBED_HOST`, `TUIDE_EMBED_PORT`.
+
+Comprobar el attach HTTP desde la VM (TCP + `/health` + embed + un completion corto):
+
+```bash
+./build/llama_host_comm_test
+```
+
+Sin servidor en el host: `SKIP` (exit 0). Con `TUIDE_LLAMA_LIVE=1` o los env de arriba: falla si no hay respuesta. `TUIDE_LLAMA_SKIP_GENERATE=1` omite el completion y deja health + embeddings.
+
+Velocidad del GGUF del host (prefill + decode, tok/s; usa el `id` de `/v1/models`):
+
+```bash
+./build/llama_host_comm_test --speed
+```
+
 ## Uso en la app
 
 1. `ai.level2.mode = local|remote` (Settings) **o** override en el tab AI
