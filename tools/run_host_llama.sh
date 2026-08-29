@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
-# Arranca llama-server en el host (Metal en macOS) para que una VM Linux use TIDE
-# en mode=remote + embeddings attach-only.
-#
-# La GUI elige LLM y embeddings; los servidores salen en Terminal.app (Mac) o
-# xterm (Linux) y este script termina. Ctrl+C en esa ventana para pararlos.
+# Arranca el hub HTML (Lanzamiento + Inspección) y, desde ahí, llama-server
+# en el host (Metal en macOS) para que una VM Linux use TIDE en mode=remote.
 #
 # Uso:
-#   ./tools/run_host_llama.sh                 # GUI + Terminal.app (Mac)
-#   ./tools/run_host_llama.sh --llm 7b        # LLM por substring; embeddings se preguntan
+#   ./tools/run_host_llama.sh                 # hub HTML en el navegador
+#   ./tools/run_host_llama.sh --llm 7b        # hub; preselecciona chat 7B
 #   ./tools/run_host_llama.sh --llm 14b --no-embed
-#   ./tools/run_host_llama.sh --term xterm    # XQuartz
+#   ./tools/run_host_llama.sh --ui gui        # listas osascript/zenity (legado)
+#   ./tools/run_host_llama.sh --ui text       # menú TTY
+#   ./tools/run_host_llama.sh --term xterm    # XQuartz (legado / --ui gui)
 #   ./tools/run_host_llama.sh --term headless # nohup, sin ventana
-#   ./tools/run_host_llama.sh --foreground    # servidores en esta terminal
-#   ./tools/run_host_llama.sh --ui text       # menú TTY en vez de GUI
-#   ./tools/run_host_llama.sh -y              # sin menú (GGUF más grande + embed)
+#   ./tools/run_host_llama.sh --foreground    # hub en esta terminal
+#   ./tools/run_host_llama.sh -y              # autoelige GGUF y abre Inspección
 set -euo pipefail
 
 CHAT_PORT="${TUIDE_HOST_CHAT_PORT:-8080}"
@@ -52,17 +50,16 @@ Uso: $(basename "$0") [opciones]
   --embed [id|ruta]      GGUF de embeddings (sin valor = el primero / nomic)
   --no-llm               No levantar el servidor de chat
   --no-embed             No levantar el servidor de embeddings
-  --ui gui|text          GUI (osascript/zenity) o menú en terminal
+  --ui hub|gui|text      hub HTML (default), listas nativas, o menú TTY
   --term auto|terminal|xterm|headless
-                         Dónde corre llama-server (Mac: Terminal.app por defecto)
+                         Dónde corre el hub (Mac: Terminal.app por defecto)
   --no-spy               Sin proxy: no se ven tokens en la terminal
-  --no-web               Sin visor HTML (el historial JSONL sigue si hay spy)
-  --foreground           Servidores en esta terminal (no abre otra ventana)
-  -y, --yes              Sin menú; autoelige (LLM más grande + embeddings si hay)
+  --no-web               Sin hub HTML; picker legado y llama-server directo
+  --foreground           Hub/servidores en esta terminal (no abre otra ventana)
+  -y, --yes              Autoelege (LLM más grande + embeddings) y abre Inspección
   -h, --help             Esta ayuda
 
-Sin flags abre una GUI y lanza los procesos en Terminal.app (Mac, ya suele
-estar abierta) o xterm. --term headless = nohup, sin ventana.
+Sin flags abre el hub HTML (Lanzamiento | Inspección) en el navegador.
 GGUF en:
   LLM:  ${L2_DIR}  y  ${L1_DIR}
   Embed: ${EMBED_DIR}
@@ -699,6 +696,75 @@ print_vm_hint() {
   fi
 }
 
+write_hub_script() {
+  local dest="$1"
+  local py="$2"
+  shift 2
+  umask 077
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -euo pipefail\n'
+    printf 'cd %q\n' "${TOOLS_DIR}"
+    printf 'export TUIDE_HOST_CHAT_PORT=%q\n' "${CHAT_PORT}"
+    printf 'export TUIDE_HOST_EMBED_PORT=%q\n' "${EMBED_PORT}"
+    printf 'export TUIDE_HOST_WEB_PORT=%q\n' "${WEB_PORT}"
+    printf 'export TUIDE_HOST_NGL=%q\n' "${NGL}"
+    printf 'export TUIDE_HOST_CHAT_CTX=%q\n' "${CHAT_CTX}"
+    printf 'export TUIDE_HOST_EMBED_CTX=%q\n' "${EMBED_CTX}"
+    printf 'export TUIDE_HOST_EMBED_NP=%q\n' "${EMBED_NP}"
+    printf 'export TUIDE_HOST_SPY=%q\n' "${SPY_ON}"
+    printf 'exec %q %q' "${py}" "${TOOLS_DIR}/host_llama_hub.py"
+    local a
+    for a in "$@"; do
+      printf ' %q' "${a}"
+    done
+    printf '\n'
+  } >"${dest}"
+  chmod +x "${dest}"
+}
+
+run_hub() {
+  local py
+  py="$(command -v python3 || true)"
+  [[ -n "${py}" ]] || die "hace falta python3 para el hub HTML"
+  [[ -f "${TOOLS_DIR}/host_llama_hub.py" ]] || die "falta ${TOOLS_DIR}/host_llama_hub.py"
+  if [[ "${TUIDE_HOST_SPY:-1}" == "0" ]]; then
+    SPY_ON=0
+  fi
+  export TUIDE_HOST_SPY="${SPY_ON}"
+  local args=(--listen "127.0.0.1:${WEB_PORT}" --open-browser)
+  if [[ "${AUTO_YES}" -eq 1 ]]; then
+    args+=(--autostart --mode inspect)
+  else
+    args+=(--mode launch)
+  fi
+  if [[ "${LLM_SET}" -eq 1 ]]; then
+    args+=(--chat "${LLM_TOKEN:-none}")
+  fi
+  if [[ "${EMBED_SET}" -eq 1 ]]; then
+    args+=(--embed "${EMBED_TOKEN:-none}")
+  fi
+  WEB_URL="http://127.0.0.1:${WEB_PORT}"
+  export TUIDE_HOST_CHAT_PORT="${CHAT_PORT}"
+  export TUIDE_HOST_EMBED_PORT="${EMBED_PORT}"
+  export TUIDE_HOST_WEB_PORT="${WEB_PORT}"
+  export TUIDE_HOST_NGL="${NGL}"
+  export TUIDE_HOST_CHAT_CTX="${CHAT_CTX}"
+  export TUIDE_HOST_EMBED_CTX="${EMBED_CTX}"
+  export TUIDE_HOST_EMBED_NP="${EMBED_NP}"
+  export TUIDE_HOST_SPY="${SPY_ON}"
+  log "hub HTML: ${WEB_URL}  (Lanzamiento | Inspección)"
+  if [[ "${FOREGROUND}" -eq 1 ]]; then
+    exec "${py}" "${TOOLS_DIR}/host_llama_hub.py" "${args[@]}"
+  fi
+  local session="${LOG_DIR}/hub.command"
+  write_hub_script "${session}" "${py}" "${args[@]}"
+  open_background_terminal "${session}"
+  printf '\n[host-llama] hub en otra terminal.\n'
+  printf '  UI: %s\n' "${WEB_URL}"
+  printf 'Logs: %s\n' "${LOG_DIR}"
+}
+
 LLM_TOKEN=""
 EMBED_TOKEN=""
 LLM_SET=0
@@ -738,7 +804,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --ui)
-      [[ $# -ge 2 ]] || die "--ui requiere gui o text"
+      [[ $# -ge 2 ]] || die "--ui requiere hub, gui o text"
       UI_MODE="$2"
       shift 2
       ;;
@@ -775,8 +841,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${UI_MODE}" in
-  auto|gui|text) ;;
-  *) die "--ui debe ser auto, gui o text" ;;
+  auto|hub|gui|text) ;;
+  *) die "--ui debe ser auto, hub, gui o text" ;;
 esac
 case "${TERM_MODE}" in
   auto|terminal|iterm|xterm|headless|gnome) ;;
@@ -796,6 +862,19 @@ LLM_ROWS="$(list_llm_rows || true)"
 EMBED_ROWS="$(list_embed_rows || true)"
 LLM_N="$(row_count "${LLM_ROWS}")"
 EMBED_N="$(row_count "${EMBED_ROWS}")"
+
+USE_HUB=0
+if [[ "${WEB_ON}" -eq 1 && "${UI_MODE}" != "gui" && "${UI_MODE}" != "text" ]]; then
+  if command -v python3 >/dev/null 2>&1 && [[ -f "${TOOLS_DIR}/host_llama_hub.py" ]]; then
+    USE_HUB=1
+  elif [[ "${UI_MODE}" == "hub" ]]; then
+    die "hace falta python3 y tools/host_llama_hub.py"
+  fi
+fi
+if [[ "${USE_HUB}" -eq 1 ]]; then
+  run_hub
+  exit 0
+fi
 
 HAVE_GUI=0
 if have_osascript_gui || have_zenity_gui; then

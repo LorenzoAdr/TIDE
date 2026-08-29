@@ -1,0 +1,99 @@
+{
+  "runtime": {
+    "tag": "b10333",
+    "github_base": "https://github.com/ggml-org/llama.cpp/releases/download/b10333"
+  },
+  "models": [
+    {
+      "id": "qwen2.5-coder-7b-instruct-q4_k_m",
+      "role": "chat",
+      "tier": "tide-l2",
+      "label": "Qwen2.5-Coder 7B",
+      "filename": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+      "dir": "l2",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+      "license_note": "Apache-2.0 (Qwen2.5-Coder)",
+      "approx_bytes": 4680000000,
+      "pack": "ai-l2-7b"
+    },
+    {
+      "id": "qwen2.5-coder-14b-instruct-q4_k_m",
+      "role": "chat",
+      "tier": "tide-l2",
+      "label": "Qwen2.5-Coder 14B",
+      "filename": "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
+      "dir": "l2",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/main/qwen2.5-coder-14b-instruct-q4_k_m.gguf",
+      "license_note": "Apache-2.0 (Qwen2.5-Coder)",
+      "approx_bytes": 8988110272,
+      "pack": "ai-l2-14b"
+    },
+    {
+      "id": "qwen2.5-coder-32b-instruct-q4_k_m",
+      "role": "chat",
+      "tier": "tide-l2",
+      "label": "Qwen2.5-Coder 32B",
+      "filename": "qwen2.5-coder-32b-instruct-q4_k_m.gguf",
+      "dir": "l2",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct-GGUF/resolve/main/qwen2.5-coder-32b-instruct-q4_k_m.gguf",
+      "license_note": "Apache-2.0 (Qwen2.5-Coder)",
+      "approx_bytes": 19851335872,
+      "pack": "ai-l2-32b"
+    },
+    {
+      "id": "qwen2.5-1.5b-instruct-q4_k_m",
+      "role": "chat",
+      "tier": "chat",
+      "label": "Qwen2.5 Instruct 1.5B",
+      "filename": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+      "dir": "l1",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+      "license_note": "Apache-2.0 (Qwen2.5)",
+      "approx_bytes": 1100000000,
+      "pack": "ai-l1-1.5b"
+    },
+    {
+      "id": "qwen2.5-3b-instruct-q4_k_m",
+      "role": "chat",
+      "tier": "chat",
+      "label": "Qwen2.5 Instruct 3B",
+      "filename": "qwen2.5-3b-instruct-q4_k_m.gguf",
+      "dir": "l1",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+      "license_note": "Apache-2.0 (Qwen2.5)",
+      "approx_bytes": 2104932768,
+      "pack": "ai-l1-3b"
+    },
+    {
+      "id": "qwen2.5-7b-instruct-q4_k_m",
+      "role": "chat",
+      "tier": "chat",
+      "label": "Qwen2.5 Instruct 7B",
+      "filename": "qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+      "dir": "l1",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf",
+      "license_note": "Apache-2.0 (Qwen2.5)",
+      "approx_bytes": 4683073632,
+      "pack": "ai-l1-7b",
+      "extra_shards": [
+        {
+          "filename": "qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf",
+          "url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf",
+          "approx_bytes": 689872288
+        }
+      ]
+    },
+    {
+      "id": "nomic-embed-text-v1.5-q4_k_m",
+      "role": "embed",
+      "tier": "tide-embed",
+      "label": "nomic-embed-text v1.5",
+      "filename": "nomic-embed-text-v1.5.Q4_K_M.gguf",
+      "dir": "embed/intent",
+      "url": "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q4_K_M.gguf",
+      "license_note": "Apache-2.0 (nomic-embed-text-v1.5)",
+      "approx_bytes": 84106624,
+      "pack": "ai-embed"
+    }
+  ]
+}

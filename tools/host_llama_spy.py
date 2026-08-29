@@ -5,6 +5,8 @@ Chat completions are forced to stream on the backend so the host terminal can
 print tokens as they generate. The VM still receives a single JSON body
 (TIDE does not speak SSE yet). Embeddings are forwarded as-is; only a
 one-line tally is printed (no vectors).
+
+host_llama_hub.py serves DASHBOARD_HTML as Inspection mode at /spy.
 """
 from __future__ import annotations
 

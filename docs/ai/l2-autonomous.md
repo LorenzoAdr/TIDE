@@ -63,17 +63,22 @@ En el **Mac**:
 ```bash
 # GGUF en ~/.cache/tuide/models/l2/ (y l1/) y embed/intent/
 # llama-server con Metal (PATH, TUIDE_LLAMA_SERVER, o cache runtime/llama-b10333)
-./tools/run_host_llama.sh                 # GUI; llama-server en Terminal.app (Mac)
-./tools/run_host_llama.sh --llm 7b        # substring; embeddings se preguntan
+./tools/run_host_llama.sh                 # hub HTML: Lanzamiento | Inspección
+./tools/run_host_llama.sh --llm 7b        # hub; preselecciona chat 7B
 ./tools/run_host_llama.sh --llm 14b --no-embed
-./tools/run_host_llama.sh --term xterm    # XQuartz, si se prefiere
-./tools/run_host_llama.sh --term headless # nohup, sin ventana
-./tools/run_host_llama.sh --foreground    # servidores en esta terminal
-./tools/run_host_llama.sh -y              # sin menú (GGUF más grande + embed)
+./tools/run_host_llama.sh --foreground    # hub en esta terminal
+./tools/run_host_llama.sh -y              # autoelige GGUF y abre Inspección
+./tools/run_host_llama.sh --ui gui        # listas nativas (legado)
+./tools/run_host_llama.sh --ui text       # menú TTY
 ```
 
-La GUI elige los GGUF; en Mac **llama-server corre en Terminal.app** (`open -a Terminal`, ya suele estar abierta). En esa ventana un proxy imprime **tokens en vivo** (la VM sigue hablando HTTP). `--term xterm` usa XQuartz. `--no-spy` desactiva el visor.
-Puertos: chat `:8080`, embeddings `:18765`, bind `0.0.0.0`.
+El hub (`http://127.0.0.1:18767`) tiene dos modos:
+
+- **Lanzamiento** — catálogo (Qwen L1/L2 + nomic y GGUF ya en disco), descargar, importar URL de Hugging Face o ruta local, arrancar / parar / reiniciar chat y embed por separado.
+- **Inspección** — el visor spy (historial VM + prompts locales). No gestiona procesos.
+
+En Mac el hub corre en Terminal.app (`open -a Terminal`). El proxy imprime **tokens en vivo** en esa ventana (la VM sigue por HTTP). `--no-spy` desactiva el proxy. `--no-web` vuelve al picker legado.
+Puertos: UI `:18767` (loopback), chat `:8080`, embeddings `:18765` (bind `0.0.0.0` para la VM).
 
 En la **VM** (Settings F10 o `.tuide/config.json`):
 
