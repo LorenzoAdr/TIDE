@@ -7,7 +7,26 @@ BUILD_DIR="${ROOT}/build"
 WIZARD_BUILD_DIR="${ROOT}/build-wizard"
 WIZARD_SRC="${ROOT}/tools/bundle_wizard/main.cpp"
 CONFIG_FILE="${ROOT}/.bundle-config"
-JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
+# macOS: cmake/ninja/node de pip --user no están en PATH; Homebrew es opcional.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  PY_USER_BIN="$(python3 -c 'import site, os; print(os.path.join(site.USER_BASE, "bin"))' 2>/dev/null || true)"
+  if [[ -n "${PY_USER_BIN}" && -d "${PY_USER_BIN}" ]]; then
+    PATH="${PY_USER_BIN}:${PATH}"
+  fi
+  NODE_WHEEL_BIN="$(python3 -c 'import os, nodejs_wheel; print(os.path.join(os.path.dirname(nodejs_wheel.__file__), "bin"))' 2>/dev/null || true)"
+  if [[ -n "${NODE_WHEEL_BIN}" && -d "${NODE_WHEEL_BIN}" ]]; then
+    PATH="${NODE_WHEEL_BIN}:${PATH}"
+  fi
+  if [[ -x /opt/homebrew/bin/brew ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  if command -v ninja >/dev/null 2>&1; then
+    export CMAKE_GENERATOR="${CMAKE_GENERATOR:-Ninja}"
+  fi
+fi
+JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)}"
 WIZARD_BIN=""
 
 BUNDLE_CLANGD=0
@@ -508,7 +527,13 @@ cmake_extra_args() {
   if [[ "${STATIC_LIBSTDCXX}" == "1" ]]; then
     args+=(-DTUIDE_STATIC_LIBSTDCXX=ON)
   fi
-  printf '%s\n' "${args[@]}"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    # ripgrep bundle is Linux x86_64 only; use system rg on macOS.
+    args+=(-DTUIDE_BUNDLE_RG=OFF)
+  fi
+  if ((${#args[@]} > 0)); then
+    printf '%s\n' "${args[@]}"
+  fi
 }
 
 cmake_bundle_args() {
@@ -1074,7 +1099,12 @@ done
 log "proyecto: ${ROOT}"
 log "comprobando dependencias..."
 check_command cmake
-check_command g++
+if ! command -v g++ >/dev/null 2>&1 && ! command -v clang++ >/dev/null 2>&1; then
+  die "no se encontró g++ ni clang++ en PATH (en macOS: xcode-select --install)"
+fi
+if ! command -v g++ >/dev/null 2>&1; then
+  log "aviso: g++ no está en PATH; CMake usará clang++"
+fi
 
 if [[ "${SKIP_WIZARD}" == "0" ]] && { [[ ! -t 0 ]] || [[ ! -t 1 ]]; }; then
   # Sin TTY (p. ej. task AI con stdout pipeado): el wizard FTXUI se quedaría colgado.
@@ -1103,8 +1133,14 @@ sync_python_bundle_flags
 warn_gdb_dap
 ensure_gdb_ca_tarball
 
-mapfile -t CMAKE_BUNDLE_ARGS < <(cmake_bundle_args)
-mapfile -t CMAKE_EXTRA_ARGS < <(cmake_extra_args)
+CMAKE_BUNDLE_ARGS=()
+while IFS= read -r _line || [[ -n "${_line}" ]]; do
+  [[ -n "${_line}" ]] && CMAKE_BUNDLE_ARGS+=("${_line}")
+done < <(cmake_bundle_args)
+CMAKE_EXTRA_ARGS=()
+while IFS= read -r _line || [[ -n "${_line}" ]]; do
+  [[ -n "${_line}" ]] && CMAKE_EXTRA_ARGS+=("${_line}")
+done < <(cmake_extra_args)
 
 log "configurando CMake..."
 if [[ "${BUNDLE_GDB}" == "1" ]]; then
@@ -1119,7 +1155,9 @@ if [[ "${BUNDLE_GDB}" == "1" ]]; then
   fi
 fi
 # shellcheck disable=SC2068
-cmake -S "${ROOT}" -B "${BUILD_DIR}" ${CMAKE_BUNDLE_ARGS[@]} ${CMAKE_EXTRA_ARGS[@]}
+cmake -S "${ROOT}" -B "${BUILD_DIR}" \
+  ${CMAKE_BUNDLE_ARGS[@]+"${CMAKE_BUNDLE_ARGS[@]}"} \
+  ${CMAKE_EXTRA_ARGS[@]+"${CMAKE_EXTRA_ARGS[@]}"}
 
 log "compilando (${JOBS} hilos)..."
 if [[ ${#BUILD_TARGETS[@]} -gt 0 ]]; then

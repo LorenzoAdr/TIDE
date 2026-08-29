@@ -1,4 +1,5 @@
 #include "ai/l2_brain.hpp"
+#include "ai/llama_net.hpp"
 
 #include <array>
 #include <cstdio>
@@ -110,6 +111,12 @@ bool RemoteL2Brain::ensure_ready(const AiSettings& settings,
                                  const std::function<void(const std::string&)>& on_progress,
                                  std::string* error) {
   cfg_ = settings.level2;
+  {
+    AiSettings overlay;
+    overlay.level2 = cfg_;
+    apply_ai_runtime_env(&overlay);
+    cfg_ = overlay.level2;
+  }
   cfg_.api_base = trim_trailing_slash(cfg_.api_base);
   if (cfg_.api_base.empty()) {
     if (error) {

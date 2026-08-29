@@ -13,7 +13,8 @@
 
 namespace tuide {
 
-// Local llama-server (--embedding) for L0/L1 embeddings (127.0.0.1 only).
+// llama-server (--embedding) for L0/L1 embeddings.
+// Local (127.0.0.1): forks a server. Remote host: attach-only (e.g. Metal on a Mac host).
 // Uses a keep-alive HTTP/1.1 socket (no per-call curl) and supports batched input.
 class EmbeddingBackend {
  public:
@@ -76,6 +77,7 @@ class EmbeddingBackend {
   std::string server_bin_;
   std::string lib_dir_;
   std::string server_stamp_;
+  std::string host_ = "127.0.0.1";
   int port_ = 18765;
   int http_batch_ = 64;
   int n_parallel_ = 8;

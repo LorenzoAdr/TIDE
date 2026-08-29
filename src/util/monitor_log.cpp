@@ -18,7 +18,7 @@
 
 #include <unistd.h>
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 #include <pthread.h>
 #endif
 
@@ -79,7 +79,7 @@ std::string format_timestamp(std::chrono::system_clock::time_point tp) {
 }
 
 std::string current_thread_name() {
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
   char name[16] = {};
   if (pthread_getname_np(pthread_self(), name, sizeof(name)) == 0 && name[0] != '\0') {
     return name;

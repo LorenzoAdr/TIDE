@@ -437,7 +437,9 @@ if(TUIDE_UTIL_LIBRARY)
   target_link_libraries(tuide PRIVATE ${TUIDE_UTIL_LIBRARY})
 endif()
 
-if(UNIX)
+if(APPLE)
+  target_link_options(tuide PRIVATE "-Wl,-export_dynamic")
+elseif(UNIX)
   target_link_options(tuide PRIVATE -rdynamic)
 endif()
 

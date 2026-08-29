@@ -893,6 +893,7 @@ void PerformanceSampler::sampler_loop() {
     const auto sample_interval = dump_enabled ? kFileDumpInterval : kSampleInterval;
     if (last_sample.time_since_epoch().count() == 0) {
       last_sample = now;
+#ifdef __linux__
       {
         std::lock_guard<std::mutex> lock(snapshot_mutex_);
         read_process_cpu(&stats_state_->process);
@@ -908,12 +909,14 @@ void PerformanceSampler::sampler_loop() {
           last_ui_publish = now;
         }
       }
+#endif
       std::this_thread::sleep_for(sample_interval);
       continue;
     }
 
     const auto since_sample = now - last_sample;
     if (since_sample >= sample_interval) {
+#ifdef __linux__
       const double elapsed_sec = std::chrono::duration<double>(since_sample).count();
       PerformanceSnapshot sample;
       SamplerStatsState curr{};
@@ -934,6 +937,7 @@ void PerformanceSampler::sampler_loop() {
       if (sampled && dump_enabled && !dump_path_.empty()) {
         append_dump_line(sample, elapsed_sec);
       }
+#endif
       last_sample = now;
     }
 

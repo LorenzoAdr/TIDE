@@ -9,7 +9,12 @@ option(TUIDE_BUILD_GDB_CA "Build gdb+Core Analyzer during bundle step (slow)" OF
 option(TUIDE_FORCE_BUNDLED_GDB
        "At runtime, never fall back to gdb on PATH (requires TUIDE_BUNDLE_GDB)" OFF)
 
-option(TUIDE_BUNDLE_RG "Embed official ripgrep Linux x86_64 release" ON)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(_tuide_bundle_rg_default ON)
+else()
+  set(_tuide_bundle_rg_default OFF)
+endif()
+option(TUIDE_BUNDLE_RG "Embed official ripgrep Linux x86_64 release" ${_tuide_bundle_rg_default})
 option(TUIDE_FORCE_BUNDLED_RG
        "At runtime, never fall back to rg on PATH (requires TUIDE_BUNDLE_RG)" OFF)
 

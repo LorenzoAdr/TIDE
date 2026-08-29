@@ -161,7 +161,10 @@ struct SettingsModalState {
   std::string draft_l2_api_model;
   std::string draft_l2_api_key;
   std::string draft_l2_n_ctx_remote;
-  // -1 = not editing; 4=api_base, 5=api_model, 6=api_key, 7=n_ctx_remote
+  std::string draft_embed_host;
+  std::string draft_embed_port;
+  // -1 = not editing; 4=api_base, 5=api_model, 6=api_key, 7=n_ctx_remote,
+  // 8=embed host, 9=embed port
   int ai_editing_field = -1;
 
   // Shortcuts tab (non-Helix keybindings).

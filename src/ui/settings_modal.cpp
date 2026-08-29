@@ -14,6 +14,7 @@
 
 #include "ai/ai_controller.hpp"
 #include "ai/ai_packages.hpp"
+#include "ai/llama_net.hpp"
 #include "ai/model_store.hpp"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/event.hpp"
@@ -986,7 +987,7 @@ void clamp_top_level_selection(SettingsModalState* state) {
       break;
     }
     case SettingsPanel::kAi:
-      state->selected = std::max(0, std::min(state->selected, 6));
+      state->selected = std::max(0, std::min(state->selected, 9));
       break;
     default:
       break;
@@ -3043,6 +3044,10 @@ std::string* ai_editable_field_value(SettingsModalState* state, int field) {
       return &state->draft_l2_api_key;
     case 7:
       return &state->draft_l2_n_ctx_remote;
+    case 8:
+      return &state->draft_embed_host;
+    case 9:
+      return &state->draft_embed_port;
     default:
       return nullptr;
   }
@@ -3068,7 +3073,7 @@ void activate_ai_settings_option(SettingsModalState* state, int index) {
     cycle_draft_level2_workflow(state);
     return;
   }
-  if (index >= 4 && index <= 7) {
+  if (index >= 4 && index <= 9) {
     state->ai_editing_field = index;
   }
 }
@@ -3145,7 +3150,7 @@ SettingsBodyContent build_ai_settings(SettingsModalState* state) {
   }
 
   auto push_text_field = [&](int index, const char* label_key, const char* detail_key,
-                             const std::string& value, bool secret) {
+                             const std::string& value, bool secret, bool active) {
     const bool selected = state != nullptr && state->selected == index;
     const bool is_editing = state != nullptr && state->ai_editing_field == index;
     std::string shown = value;
@@ -3160,18 +3165,22 @@ SettingsBodyContent build_ai_settings(SettingsModalState* state) {
     }
     Element title =
         text(std::string(selected ? "▸ " : "  ") + i18n::tr(label_key) + ": " + shown) |
-        color(selected ? theme::Accent() : (remote ? theme::Header() : theme::Muted())) | bold;
+        color(selected ? theme::Accent() : (active ? theme::Header() : theme::Muted())) | bold;
     push_option(index, std::move(title), i18n::tr(detail_key));
   };
 
   push_text_field(4, "settings.ai.api_base", "settings.ai.api_base.detail",
-                  state != nullptr ? state->draft_l2_api_base : "", false);
+                  state != nullptr ? state->draft_l2_api_base : "", false, remote);
   push_text_field(5, "settings.ai.api_model", "settings.ai.api_model.detail",
-                  state != nullptr ? state->draft_l2_api_model : "", false);
+                  state != nullptr ? state->draft_l2_api_model : "", false, remote);
   push_text_field(6, "settings.ai.api_key", "settings.ai.api_key.detail",
-                  state != nullptr ? state->draft_l2_api_key : "", true);
+                  state != nullptr ? state->draft_l2_api_key : "", true, remote);
   push_text_field(7, "settings.ai.n_ctx_remote", "settings.ai.n_ctx_remote.detail",
-                  state != nullptr ? state->draft_l2_n_ctx_remote : "", false);
+                  state != nullptr ? state->draft_l2_n_ctx_remote : "", false, remote);
+  push_text_field(8, "settings.ai.embed_host", "settings.ai.embed_host.detail",
+                  state != nullptr ? state->draft_embed_host : "", false, true);
+  push_text_field(9, "settings.ai.embed_port", "settings.ai.embed_port.detail",
+                  state != nullptr ? state->draft_embed_port : "", false, true);
 
   if (editing) {
     content.rows.push_back(text(i18n::tr("settings.ai.edit_footer")) | color(theme::Muted()));
@@ -3222,7 +3231,7 @@ bool handle_ai_settings_keys(SettingsModalState* state, Event event) {
     return true;
   }
   if (event == Event::ArrowDown || event == Event::Character('j')) {
-    state->selected = std::min(7, state->selected + 1);
+    state->selected = std::min(9, state->selected + 1);
     return true;
   }
   if (event == Event::Return) {
@@ -3881,7 +3890,9 @@ bool workspace_config_eq(const WorkspaceConfig& a, const WorkspaceConfig& b) {
          a.ai.level2.api_base == b.ai.level2.api_base &&
          a.ai.level2.api_model == b.ai.level2.api_model &&
          a.ai.level2.api_key == b.ai.level2.api_key &&
-         a.ai.level2.n_ctx_remote == b.ai.level2.n_ctx_remote;
+         a.ai.level2.n_ctx_remote == b.ai.level2.n_ctx_remote &&
+         a.ai.level0.embeddings.server_host == b.ai.level0.embeddings.server_host &&
+         a.ai.level0.embeddings.server_port == b.ai.level0.embeddings.server_port;
 }
 
 bool clang_format_eq(const ClangFormatConfig& a, const ClangFormatConfig& b) {
@@ -3933,6 +3944,30 @@ WorkspaceConfig workspace_config_from_draft(const SettingsModalState& state) {
       n = 262144;
     }
     workspace.ai.level2.n_ctx_remote = n;
+  }
+  {
+    int port = 0;
+    workspace.ai.level0.embeddings.server_host =
+        llama_normalize_host(state.draft_embed_host, &port);
+    if (port > 0) {
+      workspace.ai.level0.embeddings.server_port = port;
+    } else {
+      int parsed = 18765;
+      try {
+        if (!state.draft_embed_port.empty()) {
+          parsed = std::stoi(state.draft_embed_port);
+        }
+      } catch (...) {
+        parsed = 18765;
+      }
+      if (parsed < 1) {
+        parsed = 18765;
+      }
+      if (parsed > 65535) {
+        parsed = 65535;
+      }
+      workspace.ai.level0.embeddings.server_port = parsed;
+    }
   }
   return workspace;
 }
@@ -4010,6 +4045,12 @@ void open_settings_modal(SettingsModalState* state, const AppSettings& settings,
   state->draft_l2_n_ctx_remote = std::to_string(workspace_config.ai.level2.n_ctx_remote > 0
                                                     ? workspace_config.ai.level2.n_ctx_remote
                                                     : 32768);
+  state->draft_embed_host = workspace_config.ai.level0.embeddings.server_host.empty()
+                                ? std::string("127.0.0.1")
+                                : workspace_config.ai.level0.embeddings.server_host;
+  state->draft_embed_port = std::to_string(workspace_config.ai.level0.embeddings.server_port > 0
+                                               ? workspace_config.ai.level0.embeddings.server_port
+                                               : 18765);
   state->ai_editing_field = -1;
   state->draft_key_overrides = keybind_registry().overrides();
   state->shortcuts_selected = 0;
